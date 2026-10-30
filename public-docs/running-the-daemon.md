@@ -2,7 +2,7 @@
 title: Run the daemon
 description: Keep the daemon running as a service, reach it from other devices, run it in Docker, and update it.
 summary: "This page explains how to keep the sMind by Spacing Mind daemon running as an operating-system service, reach it from other devices, run it in Docker and update it. It is for people who host smind on a machine or server."
-order: 13
+order: 14
 ---
 
 # Run the daemon

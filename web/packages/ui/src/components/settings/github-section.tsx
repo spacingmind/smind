@@ -3,6 +3,7 @@ import { useEffect, useId, useState, type FormEvent } from "react";
 import { describePrError, type PrErrorView } from "@/components/git/pr-error";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
+import { SettingsGroup } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -144,67 +145,69 @@ function GithubSection() {
             <Alert variant="warning" testId="github-insecure" description={INSECURE_SENTENCE} />
           )}
 
-          <form className="flex flex-col gap-3" onSubmit={(e) => void handleSubmit(e)} data-testid="github-token-form" autoComplete="off">
-            <div className="grid gap-1">
-              <label htmlFor={tokenId} className="text-ui-sm text-foreground-muted">
-                Personal access token
-              </label>
-              <Input
-                id={tokenId}
-                type="password"
-                name="smind-forge-credential"
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                data-1p-ignore
-                data-lpignore="true"
-                maxLength={255}
-                value={token}
-                disabled={fieldDisabled}
-                aria-describedby={noteId}
-                placeholder={secure ? "Paste a token" : "Unavailable on this connection"}
-                data-testid="github-token-input"
-                onChange={(e) => setTokenText(e.target.value)}
-              />
-              <p id={noteId} className="text-ui-sm text-muted-foreground">
-                smind sends it once, only on a secure connection, to <code className="font-mono">gh auth login</code>; it isn&apos;t stored by the app.
-                A classic token needs the <code className="font-mono">repo</code> and <code className="font-mono">read:org</code> scopes.
-              </p>
-            </div>
-            <div className="grid gap-1">
-              <label htmlFor={hostId} className="text-ui-sm text-foreground-muted">
-                Host (optional)
-              </label>
-              <Input
-                id={hostId}
-                value={host}
-                autoComplete="off"
-                spellCheck={false}
-                disabled={fieldDisabled}
-                aria-invalid={hostInvalid || undefined}
-                placeholder="the workspace's origin host, e.g. github.com"
-                data-testid="github-host-input"
-                onChange={(e) => setHost(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <Button type="submit" size="sm" disabled={fieldDisabled || token.trim() === "" || hostInvalid} data-testid="github-token-submit">
-                {setToken.isPending ? "Signing in…" : "Sign in"}
-              </Button>
-              {signedIn && !error && (
-                <p role="status" className="flex items-center gap-1 text-ui-sm text-success" data-testid="github-signed-in-note">
-                  <Icons.check aria-hidden className="size-3.5" />
-                  Signed in to GitHub.
+          <SettingsGroup title="Sign in with a token">
+            <form className="flex flex-col gap-3 px-4 py-3" onSubmit={(e) => void handleSubmit(e)} data-testid="github-token-form" autoComplete="off">
+              <div className="grid gap-1">
+                <label htmlFor={tokenId} className="text-ui-sm text-foreground-muted">
+                  Personal access token
+                </label>
+                <Input
+                  id={tokenId}
+                  type="password"
+                  name="smind-forge-credential"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-1p-ignore
+                  data-lpignore="true"
+                  maxLength={255}
+                  value={token}
+                  disabled={fieldDisabled}
+                  aria-describedby={noteId}
+                  placeholder={secure ? "Paste a token" : "Unavailable on this connection"}
+                  data-testid="github-token-input"
+                  onChange={(e) => setTokenText(e.target.value)}
+                />
+                <p id={noteId} className="text-ui-sm text-muted-foreground">
+                  smind sends it once, only on a secure connection, to <code className="font-mono">gh auth login</code>; it isn&apos;t stored by the app.
+                  A classic token needs the <code className="font-mono">repo</code> and <code className="font-mono">read:org</code> scopes.
+                </p>
+              </div>
+              <div className="grid gap-1">
+                <label htmlFor={hostId} className="text-ui-sm text-foreground-muted">
+                  Host (optional)
+                </label>
+                <Input
+                  id={hostId}
+                  value={host}
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={fieldDisabled}
+                  aria-invalid={hostInvalid || undefined}
+                  placeholder="the workspace's origin host, e.g. github.com"
+                  data-testid="github-host-input"
+                  onChange={(e) => setHost(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <Button type="submit" size="sm" disabled={fieldDisabled || token.trim() === "" || hostInvalid} data-testid="github-token-submit">
+                  {setToken.isPending ? "Signing in…" : "Sign in"}
+                </Button>
+                {signedIn && !error && (
+                  <p role="status" className="flex items-center gap-1 text-ui-sm text-success" data-testid="github-signed-in-note">
+                    <Icons.check aria-hidden className="size-3.5" />
+                    Signed in to GitHub.
+                  </p>
+                )}
+              </div>
+              {error && (
+                <p role="alert" className="text-ui-base text-destructive" data-testid="github-token-error">
+                  {error.message}
                 </p>
               )}
-            </div>
-            {error && (
-              <p role="alert" className="text-ui-base text-destructive" data-testid="github-token-error">
-                {error.message}
-              </p>
-            )}
-          </form>
+            </form>
+          </SettingsGroup>
 
           {isLocalDaemon() && installed && (
             <p className="text-ui-sm text-muted-foreground" data-testid="github-local-hint">
@@ -250,6 +253,7 @@ function GithubSection() {
 registerSettingsSection({
   id: FORGE_SETTINGS_SECTION_ID,
   label: "GitHub",
+  description: "Connection to GitHub for pull requests.",
   order: 130,
   icon: <Icons.forge aria-hidden className="size-3.5" />,
   render: () => <GithubSection />,

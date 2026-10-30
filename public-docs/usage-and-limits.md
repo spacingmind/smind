@@ -2,7 +2,7 @@
 title: Usage and limits
 description: Token usage, plan windows and what happens at a rate limit.
 summary: "This page explains how sMind by Spacing Mind records token usage, shows plan usage windows per account, and keeps work moving when a provider reports a rate limit. It is for users watching cost and quota."
-order: 8
+order: 9
 ---
 
 # Usage and limits
@@ -119,6 +119,8 @@ failed run's footer in the task shows what you can do.
   "Queued · starts after `<time>`". A time marked with ≈ is an estimate.
 - **Retry on `<agent>`**: appears when the run's agent profile names a fallback.
   It continues the work in a new chat on the fallback agent.
+- **I reset my quota, retry now**: appears while smind still holds a rate-limit
+  cooldown for the provider. See "I reset my quota" below.
 
 **Automatically.** An agent profile can say what to do on a rate limit. In
 **Settings → Agents**, the **On rate limit** field has three choices:
@@ -158,3 +160,23 @@ Some details:
   agent, for example from an orchestrating task, fails at once with a message
   naming the provider and the time it is limited until, so the agent can pick
   another provider.
+
+## I reset my quota
+
+smind keeps a provider on cooldown until the reset time the provider gave, even
+if you reset or top up the quota yourself in the meantime. To tell smind the
+limit is gone, use **I reset my quota, retry now**, on a rate-limited run's
+footer or in **Settings → Providers** (the provider shows "Rate limited until
+`<time>`"). On the command line:
+
+```sh
+smind cooldown ls
+smind cooldown clear glm
+```
+
+Clearing the cooldown lets agent sends to that provider start again, and wakes
+the retries that **Wait** queued for it: they start now instead of at the old
+reset time. Each retry starts once; clearing again does nothing. Only a person
+can do this: agents cannot clear a cooldown, and the action is not available to
+plugins or automations. Clearing does not check the provider: if the limit is
+still in force, the retried run fails and a new cooldown starts.

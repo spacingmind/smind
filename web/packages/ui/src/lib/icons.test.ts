@@ -70,6 +70,7 @@ describe("icon registry", () => {
         "merge": "GitMerge",
         "model": "Cpu",
         "more": "Ellipsis",
+        "newTask": "SquarePen",
         "notifications": "Bell",
         "openInEditor": "Code",
         "openToSide": "PanelRight",

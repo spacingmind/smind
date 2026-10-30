@@ -76,6 +76,7 @@ func buildSmind(t *testing.T) string {
 }
 
 func TestMain(m *testing.M) {
+	cleanupHome := isolateProcessHome()
 	code := m.Run()
 	if smindBinDir != "" {
 		_ = os.RemoveAll(smindBinDir)
@@ -83,6 +84,7 @@ func TestMain(m *testing.M) {
 	if fakeAgentDir != "" {
 		_ = os.RemoveAll(fakeAgentDir)
 	}
+	cleanupHome()
 	os.Exit(code)
 }
 
