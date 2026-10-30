@@ -1,18 +1,7 @@
 package workspace
 
-import "sync"
-
 // ScratchCleaner removes the scratch dir of a closed task; best effort.
 type ScratchCleaner func(taskID int64)
-
-// The cleaner is registered per Manager in a package-level table rather
-// than a Manager field: the Manager struct is declared in workspace.go,
-// which this change does not touch. Access is mutex-guarded, matching the
-// notifier's SetNotifier/getNotifier shape.
-var (
-	scratchCleanerMu sync.Mutex
-	scratchCleaners  = map[*Manager]ScratchCleaner{}
-)
 
 // SetScratchCleaner registers fn, called with a task's id once its row is
 // archived or deleted -- never before the store write, so a failed close
@@ -21,22 +10,22 @@ func (m *Manager) SetScratchCleaner(fn ScratchCleaner) {
 	if m == nil {
 		return
 	}
-	scratchCleanerMu.Lock()
-	defer scratchCleanerMu.Unlock()
+	m.scratchMu.Lock()
+	defer m.scratchMu.Unlock()
 	if fn == nil {
-		delete(scratchCleaners, m)
+		m.scratchCleaner = nil
 		return
 	}
-	scratchCleaners[m] = fn
+	m.scratchCleaner = fn
 }
 
 func (m *Manager) getScratchCleaner() ScratchCleaner {
 	if m == nil {
 		return nil
 	}
-	scratchCleanerMu.Lock()
-	defer scratchCleanerMu.Unlock()
-	return scratchCleaners[m]
+	m.scratchMu.Lock()
+	defer m.scratchMu.Unlock()
+	return m.scratchCleaner
 }
 
 // closedScratch calls the registered cleaner, if any, for each id.
