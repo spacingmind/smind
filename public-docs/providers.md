@@ -219,6 +219,8 @@ providers:
 - `disallowedTools` lists Claude Code tools the instance may not use (for
   example `WebSearch`); it is passed to the CLI as `--disallowedTools` and
   applies to instances of `claude-native` only.
+- `endpoint` points an instance of `codex-native` at an OpenAI Responses-compatible
+  API instead of the Codex login; see [Codex endpoint instances](#codex-endpoint-instances).
 - An instance may not set `modes`.
 
 A bad entry is rejected with the field named, for example
@@ -227,6 +229,47 @@ startup. After you edit the file by hand, choose **Reload providers** in the
 detail of any custom provider in **Settings** → **Providers** to apply it
 without a restart. To remove an instance, delete its entry and reload. The
 Settings screen has no remove button.
+
+### Codex endpoint instances
+
+An instance of `codex-native` can talk to any API that implements the OpenAI
+**Responses** API (a gateway such as LiteLLM, OpenRouter's Responses route, or a
+vendor's own `/v1/responses`):
+
+```yaml
+providers:
+  custom:
+    - id: gateway
+      label: Team gateway
+      extends: codex-native
+      endpoint:
+        kind: openai-responses
+        baseUrl: https://llm.example.com
+      models:
+        - id: gpt-5.1
+          default: true
+```
+
+- `baseUrl` gets `/v1` appended exactly once and trailing slashes are dropped:
+  `https://h`, `https://h/` and `https://h/v1/` all become `https://h/v1`.
+  It must be an `http(s)` URL with no userinfo, query or fragment. Put the key in
+  the instance environment (`OPENAI_API_KEY`), never in the URL.
+- `models` is required: smind does not discover the models of a custom endpoint.
+  `additionalModels` is not allowed together with `endpoint`.
+- smind tells Codex about the endpoint on every thread start and resume
+  (`model_providers.<id>` with `wire_api = "responses"`). `env_key` and
+  `requires_openai_auth = false` are sent only when a key is configured, so a
+  keyless local endpoint does not demand one.
+- The instance gets a private `CODEX_HOME` under `$SMIND_HOME/providers/<id>/codex`
+  (mode 0700) unless you set `CODEX_HOME` yourself, so it never shares sessions or
+  login state with your own `~/.codex`.
+- **Responses only.** Codex does not speak the Chat Completions API. An endpoint
+  of kind `openai-chat` (or `chat-completions`) is rejected at load time with
+  `endpoint.kind: ... unsupported by the Codex harness`, not with a 404 in the
+  middle of a run. For a chat-completions-only vendor use an Anthropic-compatible
+  route into Claude Code, a Responses gateway such as LiteLLM in front of it, or
+  OpenCode.
+- Not yet verified against a live endpoint: tested with a fake app-server only.
 
 ### Where an instance shows up
 
