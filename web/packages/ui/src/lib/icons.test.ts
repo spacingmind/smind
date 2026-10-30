@@ -30,6 +30,7 @@ describe("icon registry", () => {
         "chevronDown": "ChevronDown",
         "chevronRight": "ChevronRight",
         "chevronUp": "ChevronUp",
+        "clock": "Clock",
         "close": "X",
         "commit": "GitCommitHorizontal",
         "connections": "Network",
