@@ -11,3 +11,7 @@
   color: var(--vp-c-text-2);
   margin: 0 0 24px;
 }
+/* Lighthouse color-contrast: the default label colour is 2.87:1 on the code block background. */
+.vp-doc [class*='language-'] > span.lang {
+  color: var(--vp-c-text-2);
+}

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const siteDir = path.resolve(scriptDir, '..')
 const svgPath = path.join(siteDir, 'assets', 'og-card.svg')
-const outPath = path.join(siteDir, '.vitepress', 'public', 'og-card.png')
+const outPath = path.join(siteDir, 'assets', 'og-card.png')
 
 function findHeadlessShell() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH
@@ -33,8 +33,6 @@ if (!shell) {
   )
   process.exit(1)
 }
-
-fs.mkdirSync(path.dirname(outPath), { recursive: true })
 
 const htmlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'og-html-'))
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'og-profile-'))
