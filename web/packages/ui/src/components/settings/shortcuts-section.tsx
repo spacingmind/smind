@@ -19,15 +19,21 @@ export function ShortcutsSection() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-section-shortcuts">
-      <Input
-        type="search"
-        aria-label="Search shortcuts"
-        placeholder="Search shortcuts…"
-        data-testid="settings-shortcuts-search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        className="w-full max-w-sm"
-      />
+      <div className="relative">
+        <Icons.search
+          aria-hidden
+          className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-foreground-muted"
+        />
+        <Input
+          type="search"
+          aria-label="Search shortcuts"
+          placeholder="Search shortcuts…"
+          data-testid="settings-shortcuts-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-full pl-8"
+        />
+      </div>
       <ShortcutRows query={query} />
     </div>
   );
