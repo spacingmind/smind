@@ -49,7 +49,15 @@ Human 2026-10-31: "tu clean phan cache do khi close task". A full disk killed ru
 - No compat/migration: no installed base.
 
 ## Progress
-(see Validation)
+- 2026-10-31 internal/scratch, config knob, store lister, runner env, workspace hook, wsapi + serve wiring, CLI and public docs done (GLM peers, Lead-reviewed).
+- Settings -> General line (AC8) NOT done in this PR: GLM 5h window exhausted until ~10:42; follow-up PR.
 
 ## Validation
-(filled at the end)
+- AC1 TestLaunchEnv_ScratchTmpdir_{Claude,Codex,ACP,GLM}, TestLaunchEnv_PinnedTmpdirWins: pass (fake agents dump env-all).
+- AC2 TestSharedCaches_{On,Off,DoesNotOverrideExisting}, TestConfig_SharedCachesDefaultAndValidate, TestResolveSharedCaches_*: pass.
+- AC3 TestRemove_*, TestArchive_RemovesScratch, TestDelete_RemovesScratch: pass.
+- AC4 TestSweep_*: pass. AC5 TestRemove_BusyRefused, TestSweep_SkipsBusyThenRetries: pass.
+- AC6 TestScratchRPC_*: pass. AC7 TestUsage_Counts, TestScratchRPC_UsageAndClean: pass.
+- Mutations (each made the named test FAIL, restored): follow-symlink removal (TestRemove_SymlinkAtTaskDirRemovesLinkOnly), symlink-inside target removal (TestRemove_SymlinkEscapeNotFollowed), skip chmod (TestRemove_ReadOnlyFiles), ignore busy (TestRemove_BusyRefused, TestSweep_SkipsBusyThenRetries), sweep ignores keep (TestSweep_RemovesClosedKeepsLive), drop runScoped refusal (TestScratchRPC_RefusedForRunScoped), scratch env after provider env (TestLaunchEnv_PinnedTmpdirWins).
+- task lint: clean. task test: all packages pass except cmd/smind TestServe_DaemonLogAndManagedBy, which reads the machine's real service log (environment dependent, unrelated).
+- AC8 frames: pending.
