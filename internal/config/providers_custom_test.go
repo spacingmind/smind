@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/spacingmind/smind/internal/providers"
 )
 
@@ -243,5 +245,115 @@ func TestAddProviderInstance_WritesPreservingCommentsAndValidates(t *testing.T) 
 	}
 	if after, _ := os.ReadFile(Path()); string(after) != string(before) {
 		t.Fatalf("a rejected add changed config.yaml:\n%s", after)
+	}
+}
+
+// An endpoint points a codex-native instance at a Responses-compatible API:
+// nothing is discovered for it, so models must come from the config.
+func TestCodexEndpoint_ModelsRequired(t *testing.T) {
+	tests := []struct{ name, yaml, want string }{
+		{"no models", "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: openai-responses, baseUrl: 'https://gw.example'}}\n", "providers.custom[0].models: required for a codex-native instance with an endpoint"},
+		{"additionalModels instead", "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: openai-responses, baseUrl: 'https://gw.example'}, additionalModels: [{id: m1}]}\n", "providers.custom[0].additionalModels: not allowed with endpoint"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useHome(t, tt.yaml)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load() error = %v, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+	useHome(t, "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: openai-responses, baseUrl: 'https://gw.example'}, models: [{id: m1}]}\n")
+	if _, err := Load(); err != nil {
+		t.Fatalf("endpoint with models rejected: %v", err)
+	}
+}
+
+// Codex has no chat-completions wire protocol: the error says so and names a
+// way out, whatever chat-flavoured kind was given.
+func TestCodexEndpoint_ChatOnlyUnsupportedMessage(t *testing.T) {
+	for _, kind := range []string{"openai-chat", "chat-completions", "openai-chat-completions"} {
+		useHome(t, "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: "+kind+", baseUrl: 'https://gw.example'}}\n")
+		_, err := Load()
+		if err == nil {
+			t.Fatalf("%s: accepted", kind)
+		}
+		for _, want := range []string{"providers.custom[0].endpoint.kind", `"` + kind + `"`, "unsupported by the Codex harness", "Responses"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error %q lacks %q", kind, err, want)
+			}
+		}
+	}
+}
+
+// An endpoint is validated field by field and never echoes the URL (it may
+// carry a token in its userinfo).
+func TestCodexEndpoint_ConfigValidation(t *testing.T) {
+	tests := []struct{ name, yaml, want, notWant string }{
+		{"claude-native instance", "providers:\n  custom:\n    - {id: cl, extends: claude-native, endpoint: {kind: openai-responses, baseUrl: 'https://gw.example'}}\n", "providers.custom[0].endpoint: only applies to an instance of codex-native", ""},
+		{"missing kind", "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {baseUrl: 'https://gw.example'}, models: [{id: m1}]}\n", "providers.custom[0].endpoint.kind: required", ""},
+		{"missing baseUrl", "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: openai-responses}, models: [{id: m1}]}\n", "providers.custom[0].endpoint.baseUrl: required", ""},
+		{"unknown kind", "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: grpc, baseUrl: 'https://gw.example'}, models: [{id: m1}]}\n", `providers.custom[0].endpoint.kind: unknown kind "grpc"`, ""},
+		{"non-http scheme", "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: openai-responses, baseUrl: 'ftp://gw.example'}, models: [{id: m1}]}\n", "providers.custom[0].endpoint.baseUrl", ""},
+		{"no host", "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: openai-responses, baseUrl: 'https://'}, models: [{id: m1}]}\n", "providers.custom[0].endpoint.baseUrl", ""},
+		{"query string", "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: openai-responses, baseUrl: 'https://gw.example?k=v'}, models: [{id: m1}]}\n", "providers.custom[0].endpoint.baseUrl", ""},
+		{"userinfo", "providers:\n  custom:\n    - {id: cx, extends: codex-native, endpoint: {kind: openai-responses, baseUrl: 'https://user:pw@h/'}, models: [{id: m1}]}\n", "providers.custom[0].endpoint.baseUrl", "pw"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useHome(t, tt.yaml)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load() error = %v, want it to contain %q", err, tt.want)
+			}
+			if tt.notWant != "" && strings.Contains(err.Error(), tt.notWant) {
+				t.Fatalf("Load() error = %v, echoes %q", err, tt.notWant)
+			}
+		})
+	}
+}
+
+// A config.yaml endpoint survives the unmarshal → validate → ProviderSpecs
+// path and lands on the registry spec.
+func TestCodexEndpoint_YAMLRoundTrip(t *testing.T) {
+	src := `providers:
+  custom:
+    - id: codex-gw
+      extends: codex-native
+      endpoint:
+        kind: openai-responses
+        baseUrl: https://gw.example
+      models: [{id: gpt-x, label: GPT X, default: true}]
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(src), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	list := cfg.Providers.Custom
+	if len(list) != 1 {
+		t.Fatalf("providers.custom = %+v", list)
+	}
+	if err := ValidateCustomProviders(list); err != nil {
+		t.Fatal(err)
+	}
+	specs := ProviderSpecs(list)
+	if len(specs) != 1 {
+		t.Fatalf("specs = %+v", specs)
+	}
+	s := specs[0]
+	if !s.HasEndpoint() || s.Endpoint.Kind != providers.EndpointOpenAIResponses || s.Endpoint.BaseURL != "https://gw.example" {
+		t.Fatalf("spec endpoint = %+v", s.Endpoint)
+	}
+	if len(s.Models) != 1 || s.Models[0].ID != "gpt-x" || !s.Models[0].Default {
+		t.Fatalf("spec models = %+v", s.Models)
+	}
+	reg := providers.New()
+	if err := reg.SetCustom(specs); err != nil {
+		t.Fatal(err)
+	}
+	inst, ok := reg.Get("codex-gw")
+	if !ok || !inst.HasEndpoint() || inst.Endpoint.Kind != providers.EndpointOpenAIResponses {
+		t.Fatalf("registry instance = %+v", inst.Endpoint)
 	}
 }

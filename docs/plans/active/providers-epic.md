@@ -199,7 +199,7 @@ Running total: **USD 0.00** of 2.00.
 - [x] PR1 registry generalisation + Kimi fix (code merged-ready; see Validation)
 - [x] PR2 typed env + provider secrets (branch `smind/task-lead-providers-epic-pr2-secrets-typed-dmiaxo7isgtc`)
 - [ ] PR3 claude-code recipes + vendor rate-limit profiles
-- [ ] PR4 Codex endpoint instances
+- [x] PR4 Codex endpoint instances (code ready; see Validation. Recipe row 11 and the LiteLLM/OpenRouter variants land with PR3's catalog; the key comes from the instance env until PR2's secret refs plug into `codexEndpointLaunch`)
 - [ ] PR5 five ACP providers
 - [ ] PR6 web + mobile UX
 - 2026-10-30 (PR2 Lead): store provider_secrets + typed env config + secretdeny EnvRules + launch resolution landed in the PR2 branch; AC2.6 measured: scrub NOT enabled (permission-mode conflict), see ADR-0046 section 7.
@@ -247,3 +247,16 @@ PR2 (typed env + provider secret store), 2026-10-30:
 Mutations (each made the named test FAIL; file restored with `git checkout -- <file>`): drop the allowlist check (`TestProviderEnv_AllowlistPerHarness`); resolved value into argv via `WithExtraArgs` (`TestProviderEnv_NotInArgv`: "argv[15] carries the secret value"); run-scoped caller let through `provider.setSecret` (`TestProviderSecret_RefusesAgentCaller`); drop the provider values from the ACP redaction list and the scrub wrappers (`TestProviderSecret_RedactedInEventsAndLogs_ACP`); log the launch env map (`TestProviderSecret_NotInDaemonLog_Run`).
 
 Checks: `task lint`, `task test` green; `go test -race` on store, config, providers, secretdeny, wsapi, taskrunner, cmd/smind green. Not done in PR2: UI for setting a key (PR6), recipes (PR3), Codex endpoint config (PR4), web/mobile rendering of `secrets` in provider.list (types only).
+
+PR4 (Codex endpoint instances), 2026-10-30. Evidence is hermetic: fake app-server, sentinel strings, no network, no real Codex login (cost 0).
+
+| AC | Evidence |
+|---|---|
+| AC4.1 | `TestCodexEndpoint_BaseURLNormalization` (`https://h`, `h/`, `h/v1`, `h/v1/`, `h///`, `h/openai`) |
+| AC4.2 | `TestCodexEndpoint_NoKeyNoEnvKey`, `TestCodexEndpoint_RunWithoutKeyOmitsEnvKey` (and the keyed run sends only the env var name, never the value) |
+| AC4.3 | `TestCodexEndpoint_ChatOnlyUnsupportedMessage` (load-time `endpoint.kind` error), `TestCodexEndpoint_UnsupportedKindErrors` (run-time guard) |
+| AC4.4 | `TestCodexEndpoint_PrivateCodexHome` (`$SMIND_HOME/providers/<id>/codex`, 0700; a user-pinned `CODEX_HOME` wins) |
+| AC4.5 | `TestCodexEndpoint_ModelsRequired`, `TestCodexEndpoint_ConfigValidation` (field-named, URL never echoed), `TestCodexEndpoint_YAMLRoundTrip` |
+| wire | `TestCodexThreadStart_ModelProviderConfig`, `TestCodexThreadResume_ModelProviderConfig`, `TestCodexEndpoint_RunSendsModelProvider` |
+
+Mutations (each makes its test fail): drop the `/v1` append; always set `env_key`; drop `Config` from thread/start; drop it from thread/resume; skip the models-required check; drop the chat-only case; skip the private home; treat every run as keyed.

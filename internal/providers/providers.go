@@ -98,6 +98,17 @@ type Mode struct {
 	AutoApproves           bool
 }
 
+// EndpointKind is the wire protocol an instance's endpoint speaks.
+type EndpointKind string
+
+const EndpointOpenAIResponses EndpointKind = "openai-responses"
+
+// Endpoint points an instance at a compatible API (ADR-0046).
+type Endpoint struct {
+	Kind    EndpointKind
+	BaseURL string
+}
+
 // Spec is one provider. The zero values of the optional fields mean "none".
 type Spec struct {
 	ID    string
@@ -144,6 +155,9 @@ type Spec struct {
 	// (an instance's list is appended to its base's).
 	DisallowedTools []string
 
+	// Endpoint points an instance at a compatible API (ADR-0046).
+	Endpoint Endpoint
+
 	// Catalog flags served by provider.list.
 	Kind               string // "cli": authentication is managed outside smind
 	CredentialKind     string // "oauth" | "api-key"
@@ -177,6 +191,9 @@ func (s Spec) Base() string {
 
 // IsInstance reports whether s extends another provider.
 func (s Spec) IsInstance() bool { return s.Extends != "" }
+
+// HasEndpoint reports whether s points at its own API endpoint.
+func (s Spec) HasEndpoint() bool { return s.Endpoint.Kind != "" }
 
 func builtins() []Spec {
 	return []Spec{
@@ -366,6 +383,7 @@ func resolve(s Spec, table []Spec) (Spec, error) {
 			inst.Models = s.Models
 		}
 		inst.ModelAliases = s.ModelAliases
+		inst.Endpoint = s.Endpoint
 		inst.DisallowedTools = append(append([]string(nil), base.DisallowedTools...), s.DisallowedTools...)
 		inst.Reflect = false
 		inst.AccountProvider = ""
