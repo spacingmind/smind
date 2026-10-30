@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { LoadingRows } from "@/components/ui/loading-rows";
@@ -11,7 +12,6 @@ import { useLastDefined } from "@/hooks/use-last-defined";
 import { FormError } from "@/components/ui/form-error";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { McpServer } from "@/lib/types";
@@ -256,7 +256,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
         ) : (
           <>
             {servers.length === 0 && openCard !== "new" && (
-              <EmptyState
+              <SettingsEmptyCard
                 testId="mcp-empty-state"
                 title="No MCP servers yet"
                 description="Give agents tools like a browser (Playwright) — add one with New server"
@@ -660,6 +660,7 @@ registerSettingsSection({
   id: "mcp-servers",
   label: "MCP servers",
   groupLabel: "Agents & providers",
+  description: "MCP servers that give agents extra tools.",
   order: 177,
   icon: <Icons.mcp aria-hidden className="size-3.5" />,
   render: (ctx) => <McpServersSection {...ctx} />,

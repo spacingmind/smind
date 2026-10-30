@@ -28,6 +28,7 @@ agent is doing and what it costs.
 - [Git and pull requests](git-and-prs.md): branches, publishing, updating from base and opening pull requests.
 - [Mobile and relay pairing](mobile-and-relay.md): pair a phone, what end-to-end encryption protects, push notifications.
 - [Orchestration](orchestration.md): run a Lead that launches Peers, with budgets, alerts and permission rules.
+- [Inbox](inbox.md): one list of permissions, validator verdicts and stalled work that need you, on the web and on a phone.
 - [Scripting and permissions](scripting-and-permissions.md): drive agents from scripts, permission modes, the MCP server.
 - [Run the daemon](running-the-daemon.md): run it as a service, reach it from other devices, Docker, updates, backups.
 - [Usage and limits](usage-and-limits.md): what your accounts have used and what happens at a rate limit.

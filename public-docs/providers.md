@@ -410,6 +410,21 @@ prints its values in an error; secret-looking names must be references, see
 optional lists of `id`, `label`, `description` and, for a mode, `autoApproves`.
 A custom ACP provider shows the generic provider icon and the label you gave it.
 
+For an agent that cannot take MCP servers, set `acp.supportsMcpServers: false`.
+smind then sends it none. The same setting works on an instance of an ACP
+provider:
+
+```yaml
+providers:
+  custom:
+    - id: my-agent
+      label: My agent
+      command: /usr/local/bin/my-agent
+      args: ["--acp"]
+      acp:
+        supportsMcpServers: false
+```
+
 ## Launch env and secrets
 
 An instance's `env` does more than point at a config directory. Every value is
@@ -423,15 +438,6 @@ typed:
   at launch, for keys you export outside smind.
 
 A Claude Code instance pointed at Z.AI:
-
-`command` is required. `env` is free-form, and smind never prints its values in
-an error. `models` and `modes` are optional lists of `id`, `label`, `description`
-and, for a mode, `autoApproves`. A custom ACP provider shows the generic provider
-icon and the label you gave it.
-
-For an agent that cannot take MCP servers, set `acp.supportsMcpServers: false`.
-smind then sends it none. The same setting works on an instance of an ACP
-provider:
 
 ```yaml
 providers:
@@ -501,7 +507,7 @@ LiteLLM) in front, so the agent holds only a throwaway token.
 
 ### CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
 
-smind does not set this variable. Measured (2026-10-30, `claude` 2.1.310): with
+smind does not set this variable: it is off by default, on purpose. Measured (2026-10-30, `claude` 2.1.310): with
 it on, Claude Code forces the permission mode back to `default` — a run in
 `bypassPermissions` then refuses a Bash command that uses a shell variable —
 which conflicts with smind's permission modes. smind's own MCP stdio env (run
@@ -509,11 +515,3 @@ id, validator token) was unaffected. The variable does hide
 `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` and most `*_KEY`/`*_TOKEN` names
 from the Bash tool. If you accept `default` permissions, you may opt in per
 instance with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"` in the instance `env`.
-
-    - id: my-agent
-      label: My agent
-      command: /usr/local/bin/my-agent
-      args: ["--acp"]
-      acp:
-        supportsMcpServers: false
-```

@@ -278,6 +278,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["provider.setEnv"] = handleProviderSetEnv(runner, bus)
 	hs["provider.setSecret"] = handleProviderSetSecret(runner, db, bus)
 	hs["provider.clearSecret"] = handleProviderClearSecret(runner, db, bus)
+	hs["provider.clearCooldown"] = handleProviderClearCooldown(runner, reg, bus)
 	hs["provider.reload"] = handleProviderReload(runner, bus)
 	hs["provider.addInstance"] = handleProviderAddInstance(runner, bus)
 	hs["provider.recipes"] = handleProviderRecipes()

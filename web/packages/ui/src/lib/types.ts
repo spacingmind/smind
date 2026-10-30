@@ -281,6 +281,8 @@ export interface ProviderInfo {
   envEffective?: Record<string, ProviderEnvEffective>;
   /** ADR-0046 section 4: the instance's stored secrets ({secret: name} env refs), each with only a fingerprint of its value -- never the value. Absent when the instance has none. */
   secrets?: ProviderSecretInfo[];
+  /** RFC 3339 UTC reset time while the provider is rate limited (ADR-0041 F1); absent otherwise. */
+  cooldownUntil?: string;
 }
 
 /** One `secrets` entry: the secret's stored name, the env name it feeds, whether a value is stored, and the last 4 hex of its SHA-256 when one is. */
