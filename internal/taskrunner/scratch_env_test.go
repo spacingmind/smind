@@ -1,11 +1,13 @@
 package taskrunner
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/scratch"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // lastEnvEntry returns the last "NAME=" line of an environment dump the
@@ -104,4 +106,68 @@ func TestSharedCaches_DoesNotOverrideExisting(t *testing.T) {
 	if got := lastEnvEntry(t, readLaunchEnv(t, task), "GOCACHE"); got != "GOCACHE=/mine" {
 		t.Fatalf("GOCACHE = %q, want the pinned /mine (last wins)", got)
 	}
+}
+
+// runScratchTurn drives one provider-agnostic RunPrompt turn of provider
+// (no decider, no model) and fails the test on error.
+func runScratchTurn(t *testing.T, r *Runner, task store.Task, provider Provider) {
+	t.Helper()
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, provider, "hi", nil, PermissionSettings{}, "", "", events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+}
+
+// assertScratchTmpdir checks the env-all the agent dumped in the worktree
+// points TMPDIR at the task's scratch dir (FAKE_DUMP_ENV=1 makes the fake
+// agents write it at session creation).
+func assertScratchTmpdir(t *testing.T, r *Runner, task store.Task) {
+	t.Helper()
+	dir := r.scratch.Dir(task.ID)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("scratch dir %s missing or not a directory: %v", dir, err)
+	}
+	if got := lastEnvEntry(t, readLaunchEnv(t, task), "TMPDIR"); got != "TMPDIR="+dir {
+		t.Fatalf("TMPDIR = %q, want the scratch dir %q", got, dir)
+	}
+}
+
+// AC1, codex-native: thread/start's cwd dump shows the scratch TMPDIR.
+func TestLaunchEnv_ScratchTmpdir_Codex(t *testing.T) {
+	t.Setenv("FAKE_DUMP_ENV", "1")
+	wm, task := newTestTask(t, "")
+	r := codexRunner(wm)
+	WithScratch(scratch.New(t.TempDir()))(r)
+
+	runScratchTurn(t, r, task, ProviderCodexNative)
+	assertScratchTmpdir(t, r, task)
+}
+
+// AC1, ACP: the same launch env reaches any ACP-speaking provider
+// (ProviderKimi here; runACP is provider-agnostic past the command).
+func TestLaunchEnv_ScratchTmpdir_ACP(t *testing.T) {
+	t.Setenv("FAKE_DUMP_ENV", "1")
+	wm, task := newTestTask(t, "")
+	r := glmRunner(wm)
+	WithScratch(scratch.New(t.TempDir()))(r)
+
+	runScratchTurn(t, r, task, ProviderKimi)
+	assertScratchTmpdir(t, r, task)
+}
+
+// AC1, GLM: driven through the real acpCommands lookup (WithACPCommand,
+// not the newACPClient seam), so the command spawn itself carries the env.
+func TestLaunchEnv_ScratchTmpdir_GLM(t *testing.T) {
+	t.Setenv("FAKE_DUMP_ENV", "1")
+	wm, task := newTestTask(t, "")
+	r := New(wm, WithACPCommand(ProviderGLM, []string{fakeACPAgentPath}))
+	WithScratch(scratch.New(t.TempDir()))(r)
+
+	runScratchTurn(t, r, task, ProviderGLM)
+	assertScratchTmpdir(t, r, task)
 }
