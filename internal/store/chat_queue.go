@@ -217,6 +217,34 @@ func utcPtr(t *time.Time) *time.Time {
 	return &u
 }
 
+// ReleaseHeldRetries drops the hold of every queued orchestrator rate-limit
+// retry of provider (run_config provider matches, failoverOf set), making
+// it deliverable now. It returns the chat id of each released item -- one
+// entry per item, so a chat may repeat -- for the caller to wake.
+func (s *Store) ReleaseHeldRetries(provider string, now time.Time) ([]int64, error) {
+	rows, err := s.db.Query(
+		`UPDATE chat_queue SET not_before = NULL, updated_at = ?
+		 WHERE status = 'queued' AND not_before > ? AND source = ?
+		   AND json_extract(run_config,'$.provider') = ?
+		   AND COALESCE(json_extract(run_config,'$.failoverOf'),'') <> ''
+		 RETURNING chat_id`,
+		now.UTC(), now.UTC(), ChatQueueSourceOrchestrator, provider,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("release held retries for %s: %w", provider, err)
+	}
+	defer rows.Close()
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan released retry chat id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // MarkDelivered stamps item id as delivered, recording the run id its
 // delivery started. Only a queued item can be marked delivered; anything
 // else is a store bug and an error.

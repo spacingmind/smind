@@ -21,6 +21,10 @@ export interface RunFailover<T extends RunFooterRun = RunFooterRun> {
   waitUntil: (run: T, notBefore: string) => Promise<void>;
   /** Whether a held retry of this run's prompt is already in the chat's queue (survives a remount). */
   isHeld: (run: T) => boolean;
+  /** Whether the run's provider still holds a rate-limit cooldown (ADR-0041 F1) the user could clear by hand. */
+  cooldownActive: (provider: string) => boolean;
+  /** Clears that cooldown ("I reset my quota, retry now"): the daemon releases it and wakes held retries. */
+  clearCooldown: (provider: string) => Promise<void>;
   successor: (runId: string) => FailoverSuccessor | undefined;
   continues: (runId: string) => string | undefined;
   openChat: (chatId: number) => void;
@@ -34,16 +38,20 @@ function message(err: unknown): string {
 export function hasFailoverActions<T extends RunFooterRun>(run: T, failover: RunFailover<T>, now: Date): boolean {
   if (!isRateLimitedRun(run) || failover.successor(run.id)) return false;
   const fallback = run.fallbackProfileId ? failover.fallbackName(run.fallbackProfileId) !== undefined : false;
-  return fallback || waitUntilLabel(run.failureResetAt, now, run.failureResetInferred) !== null || failover.isHeld(run);
+  return (
+    fallback || waitUntilLabel(run.failureResetAt, now, run.failureResetInferred) !== null || failover.isHeld(run) || failover.cooldownActive(run.provider)
+  );
 }
 
-/** "Retry on <profile>" and "Wait until HH:MM" -- shown beside Retry on the latest rate-limited run. */
+/** "I reset my quota", "Retry on <profile>" and "Wait until HH:MM" -- shown beside Retry on the latest rate-limited run. */
 export function RunFailoverButtons<T extends RunFooterRun>({ run, failover, now }: { run: T; failover: RunFailover<T>; now: Date }) {
   const [fallbackBusy, setFallbackBusy] = useState(false);
   const [wait, setWait] = useState<"idle" | "pending" | "queued">("idle");
+  const [clearBusy, setClearBusy] = useState(false);
   // Synchronous guards: a double click lands before the state update re-renders.
   const fallbackInFlight = useRef(false);
   const waitInFlight = useRef(false);
+  const clearInFlight = useRef(false);
 
   if (!isRateLimitedRun(run) || failover.successor(run.id)) return null;
 
@@ -81,9 +89,34 @@ export function RunFailoverButtons<T extends RunFooterRun>({ run, failover, now 
       });
   };
 
+  const onClearCooldown = () => {
+    if (clearInFlight.current) return;
+    clearInFlight.current = true;
+    setClearBusy(true);
+    failover
+      .clearCooldown(run.provider)
+      .catch((err: unknown) => toast({ variant: "error", title: "Could not clear the cooldown", description: message(err) }))
+      .finally(() => {
+        clearInFlight.current = false;
+        setClearBusy(false);
+      });
+  };
+
   const reset = parseResetAt(run.failureResetAt);
   return (
     <>
+      {failover.cooldownActive(run.provider) && (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          data-testid="run-clear-cooldown"
+          disabled={clearBusy}
+          onClick={onClearCooldown}
+        >
+          I reset my quota, retry now
+        </Button>
+      )}
       {fallbackName !== undefined && (
         <Button
           type="button"

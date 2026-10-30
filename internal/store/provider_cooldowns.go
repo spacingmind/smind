@@ -70,6 +70,21 @@ func (s *Store) ListProviderCooldowns(now time.Time) (map[string]time.Time, erro
 	return out, rows.Err()
 }
 
+// ClearProviderCooldown deletes provider's cooldown row -- the human's "I
+// reset my quota, retry now" action. It reports whether a row was removed,
+// so a repeat call is a harmless no-op.
+func (s *Store) ClearProviderCooldown(provider string) (bool, error) {
+	res, err := s.db.Exec(`DELETE FROM provider_cooldowns WHERE provider = ?`, provider)
+	if err != nil {
+		return false, fmt.Errorf("clear provider cooldown for %s: %w", provider, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("clear provider cooldown for %s: %w", provider, err)
+	}
+	return n > 0, nil
+}
+
 // PurgeExpiredProviderCooldowns deletes rows whose reset has passed.
 func (s *Store) PurgeExpiredProviderCooldowns(now time.Time) error {
 	if _, err := s.db.Exec(`DELETE FROM provider_cooldowns WHERE reset_at <= ?`, now.UTC()); err != nil {
