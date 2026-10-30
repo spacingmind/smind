@@ -202,6 +202,7 @@ Running total: **USD 0.00** of 2.00.
 - [ ] PR4 Codex endpoint instances
 - [ ] PR5 five ACP providers
 - [ ] PR6 web + mobile UX
+- 2026-10-30 (PR2 Lead): store provider_secrets + typed env config + secretdeny EnvRules + launch resolution landed in the PR2 branch; AC2.6 measured: scrub NOT enabled (permission-mode conflict), see ADR-0046 section 7.
 
 ## Validation
 
