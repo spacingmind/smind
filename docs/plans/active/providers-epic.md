@@ -199,7 +199,7 @@ Running total: **USD 0.00** of 2.00.
 - [x] PR1 registry generalisation + Kimi fix (code merged-ready; see Validation)
 - [ ] PR2 typed env + provider secrets
 - [ ] PR3 claude-code recipes + vendor rate-limit profiles
-- [ ] PR4 Codex endpoint instances
+- [x] PR4 Codex endpoint instances (code ready; see Validation. Recipe row 11 and the LiteLLM/OpenRouter variants land with PR3's catalog; the key comes from the instance env until PR2's secret refs plug into `codexEndpointLaunch`)
 - [ ] PR5 five ACP providers
 - [ ] PR6 web + mobile UX
 
@@ -229,3 +229,16 @@ rename across the codebase; `models` and `additionalModels` are mutually exclusi
 instance `command` is the executable only (no `args`); an instance of an ACP provider keeps free-form env until PR2; an instance may not extend an instance; with `models` replace
 mode the instance does not use ACP/Codex discovery (models > discovery). `ModelAliases` is on `Spec` and inert until PR2. The `docs/decisions/0042` pointer to ADR-0046 is added; `docs/homelab.md` needs no rows (it has no
 `providers.custom` rows to extend).
+
+PR4 (Codex endpoint instances), 2026-10-30. Evidence is hermetic: fake app-server, sentinel strings, no network, no real Codex login (cost 0).
+
+| AC | Evidence |
+|---|---|
+| AC4.1 | `TestCodexEndpoint_BaseURLNormalization` (`https://h`, `h/`, `h/v1`, `h/v1/`, `h///`, `h/openai`) |
+| AC4.2 | `TestCodexEndpoint_NoKeyNoEnvKey`, `TestCodexEndpoint_RunWithoutKeyOmitsEnvKey` (and the keyed run sends only the env var name, never the value) |
+| AC4.3 | `TestCodexEndpoint_ChatOnlyUnsupportedMessage` (load-time `endpoint.kind` error), `TestCodexEndpoint_UnsupportedKindErrors` (run-time guard) |
+| AC4.4 | `TestCodexEndpoint_PrivateCodexHome` (`$SMIND_HOME/providers/<id>/codex`, 0700; a user-pinned `CODEX_HOME` wins) |
+| AC4.5 | `TestCodexEndpoint_ModelsRequired`, `TestCodexEndpoint_ConfigValidation` (field-named, URL never echoed), `TestCodexEndpoint_YAMLRoundTrip` |
+| wire | `TestCodexThreadStart_ModelProviderConfig`, `TestCodexThreadResume_ModelProviderConfig`, `TestCodexEndpoint_RunSendsModelProvider` |
+
+Mutations (each makes its test fail): drop the `/v1` append; always set `env_key`; drop `Config` from thread/start; drop it from thread/resume; skip the models-required check; drop the chat-only case; skip the private home; treat every run as keyed.
