@@ -124,17 +124,12 @@ describe("new ACP built-ins", () => {
 });
 
 describe("offline fallback catalog", () => {
-  it("is exactly the built-ins with their runners", () => {
+  it("is exactly the four built-ins with their runners", () => {
     expect(FALLBACK_PROVIDERS.map((p) => [p.id, p.runner])).toEqual([
       ["claude-native", "claude-native"],
       ["codex-native", "codex-native"],
       ["glm", "acp"],
       ["kimi", "acp"],
-      ["opencode", "acp"],
-      ["copilot", "acp"],
-      ["cline", "acp"],
-      ["goose", "acp"],
-      ["cursor", "acp"],
     ]);
   });
 });

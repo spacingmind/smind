@@ -115,7 +115,7 @@ describe('wireModelMode', () => {
   });
 });
 
-// ADR-0042 AC31: ids are strings, the daemon's list is the single source, the built-ins are only the offline fallback.
+// ADR-0042 AC31: ids are strings, the daemon's list is the single source, the four built-ins are only the offline fallback.
 describe('custom providers and the offline fallback', () => {
   const instance: ProviderInfo = { id: 'claude-work', label: 'Claude work', runner: 'claude-native', extends: 'claude-native', custom: true, defaultMode: 'default' };
   const acp: ProviderInfo = { id: 'my-acp', runner: 'acp', custom: true };
@@ -134,31 +134,10 @@ describe('custom providers and the offline fallback', () => {
     expect(catalogOrFallback(served).map((p) => p.id)).toEqual(['claude-work', 'my-acp']);
   });
 
-  it('falls back to the built-ins only when the fetch failed or listed nothing', () => {
-    const ids = ['claude-native', 'codex-native', 'glm', 'kimi', 'opencode', 'copilot', 'cline', 'goose', 'cursor'];
+  it('falls back to the four built-ins only when the fetch failed or listed nothing', () => {
+    const ids = ['claude-native', 'codex-native', 'glm', 'kimi'];
     expect(catalogOrFallback(null).map((p) => p.id)).toEqual(ids);
     expect(catalogOrFallback([]).map((p) => p.id)).toEqual(ids);
-    expect(FALLBACK_PROVIDERS.map((p) => providerLabel(p))).toEqual([
-      'Claude Code',
-      'Codex',
-      'GLM',
-      'Kimi',
-      'OpenCode',
-      'GitHub Copilot',
-      'Cline',
-      'Goose',
-      'Cursor',
-    ]);
-  });
-
-  it('fallback catalog lists the five new ACP providers', () => {
-    const five = FALLBACK_PROVIDERS.filter((p) => ['opencode', 'copilot', 'cline', 'goose', 'cursor'].includes(p.id));
-    expect(five.map((p) => ({ id: p.id, label: p.label, runner: p.runner }))).toEqual([
-      { id: 'opencode', label: 'OpenCode', runner: 'acp' },
-      { id: 'copilot', label: 'GitHub Copilot', runner: 'acp' },
-      { id: 'cline', label: 'Cline', runner: 'acp' },
-      { id: 'goose', label: 'Goose', runner: 'acp' },
-      { id: 'cursor', label: 'Cursor', runner: 'acp' },
-    ]);
+    expect(FALLBACK_PROVIDERS.map((p) => providerLabel(p))).toEqual(['Claude Code', 'Codex', 'GLM', 'Kimi']);
   });
 });
