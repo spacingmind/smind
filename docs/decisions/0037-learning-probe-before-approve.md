@@ -278,7 +278,7 @@ config env; the CLI's `$TMPDIR` counted as part of the arm.
 
 **Not covered / residual:** Linux and Windows (decision 2026-10-22: **probe-lite on macOS only**; Linux and Windows get no Probe button and a stated reason until measured); other keychain paths (see R3); real credential files (never read; proven only with a
 test-created file under the real `$HOME`); DNS-query exfiltration, UDP, ICMP, unix sockets; symlink races; `dontAsk`;
-`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` and `sandbox.credentials`; what `CLAUDE_CODE_MESSAGING_SOCKET`/`TOKEN` (visible to the arm) permit.
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` and `sandbox.credentials`; what `CLAUDE_CODE_MESSAGING_SOCKET`/`TOKEN` (visible to the arm) permit. Measured and handled for provider secrets in ADR-0046 section 7 and public-docs/providers.md (2026-10-30).
 `USER` was found on one machine, so the canary attestation also re-runs the scrubbed login.
 
 ## Addendum 2: implementation decisions of the arm PR (2026-10-22)

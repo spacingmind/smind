@@ -194,6 +194,19 @@ whether smind's permission modes still behave when the scrub forces `default`. B
    only ever holds a throwaway token.
 5. Re-run the spike when `claude` changes major behaviour: the recipe above is deterministic and costs nothing.
 
+**Measurement for PR2 (2026-10-30), decides AC2.6:** runs against `claude` 2.1.310 with the fake server and sentinel keys
+(`/tmp/steward4/pr2-spike`, not in the repo):
+
+| Configuration | Result |
+|---|---|
+| `bypassPermissions`, no scrub | Bash `echo ran-ok > ran.txt; echo rc=$?` ran (file created) |
+| `bypassPermissions` + `SCRUB=1` | refused ("A variable in this command can't be checked before it runs"), no file |
+| `acceptEdits` + `SCRUB=1` | refused the same way |
+| MCP stdio entry with explicit env `{SMIND_RUN_ID, SMIND_VERDICT_TOKEN}` | both delivered with and without the scrub (only `ANTHROPIC_AUTH_TOKEN` was removed from the MCP server's inherited env) |
+
+Conclusion: (a) the permission-mode conflict is real → the scrub is **not** enabled by default; mitigation 1 above becomes "left off; documented;
+per-instance opt-in"; (b) no conflict — smind's MCP stdio env is unaffected.
+
 ### 8. Rate-limit vendor profile
 
 `ratelimit.Classify` keeps taking the provider id but resolves a **vendor profile** from the spec (`zai`, `anthropic`, `openai`, `generic`) instead of switching on ids. The generic

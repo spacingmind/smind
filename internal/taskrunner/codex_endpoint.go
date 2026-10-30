@@ -22,8 +22,14 @@ func (r *Runner) codexEndpointLaunch(provider Provider) (opts []codex.Option, en
 		return nil, nil, fmt.Errorf("taskrunner: provider %q: endpoint kind %q is unsupported by the Codex harness (Codex only speaks the OpenAI Responses API)", spec.ID, spec.Endpoint.Kind)
 	}
 	envMap := r.ProviderEnv(provider)
-	// PR2's secret refs plug in here.
-	hasKey := envMap[codex.EndpointKeyEnv] != ""
+	// The key may be a literal, a stored secret or passed through from the
+	// daemon's own environment (ADR-0046 typed env); any of them sets env_key.
+	hasKey := envMap[codex.EndpointKeyEnv] != "" || spec.SecretEnv[codex.EndpointKeyEnv] != ""
+	for _, name := range spec.PassthroughEnv {
+		if name == codex.EndpointKeyEnv {
+			hasKey = true
+		}
+	}
 	ep := codex.Endpoint{ID: spec.ID, Name: spec.Label, BaseURL: spec.Endpoint.BaseURL, HasKey: hasKey}
 	mp, cfg, err := ep.ThreadConfig()
 	if err != nil {

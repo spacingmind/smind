@@ -61,6 +61,14 @@ func ValidateProviderEnv(provider, key, value string) (string, error) {
 	if err := checkProviderEnvKey(provider, key); err != nil {
 		return "", err
 	}
+	return cleanEnvPath(key, value)
+}
+
+// cleanEnvPath is the value half of ValidateProviderEnv: no NUL or control
+// characters, a leading "~/" expanded against the daemon user's home, and an
+// absolute, cleaned path. The directory need not exist (a drive may be
+// unmounted).
+func cleanEnvPath(key, value string) (string, error) {
 	for _, c := range value {
 		if c < 0x20 || c == 0x7f {
 			return "", fmt.Errorf("%s: the path must not contain NUL or control characters", key)

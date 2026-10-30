@@ -137,8 +137,9 @@ environment` or `CLI default`. It warns when the directory does not exist yet.
 
 The value applies to the next run. A run that already started keeps its old
 setting. smind adds the variable to every launch of that provider, and it wins
-over the daemon's own environment. These two variables are the only launch
-environment you can set, and only as directories.
+over the daemon's own environment. For the base providers, these two variables
+are the only launch environment you can set, and only as directories. An
+instance can set more: see [Launch env and secrets](#launch-env-and-secrets).
 
 The same setting lives in `config.yaml`:
 
@@ -203,10 +204,8 @@ providers:
 - `extends` is a built-in provider id (`claude-native`, `codex-native`, `glm`,
   `kimi`) or the id of an earlier ACP entry in the list. An instance cannot
   extend another instance.
-- `env` on an instance of `claude-native` or `codex-native` takes only that
-  provider's own variable, `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, as an absolute
-  path or one starting with `~/`. On an instance of an ACP provider it is the
-  agent command's free-form environment.
+- `env` takes typed values, and only the names the provider's harness allows;
+  see [Launch env and secrets](#launch-env-and-secrets).
 - `command` replaces the executable the instance runs (for an ACP provider,
   with `args`; for `claude-native` and `codex-native`, the executable only).
 - `models` replaces the model list of the provider; `additionalModels` adds to
@@ -303,7 +302,99 @@ providers:
           label: Default
 ```
 
-`command` is required. `env` is free-form, and smind never prints its values in
-an error. `models` and `modes` are optional lists of `id`, `label`, `description`
-and, for a mode, `autoApproves`. A custom ACP provider shows the generic provider
-icon and the label you gave it.
+`command` is required. `env` accepts any valid variable name, and smind never
+prints its values in an error; secret-looking names must be references, see
+[Launch env and secrets](#launch-env-and-secrets). `models` and `modes` are
+optional lists of `id`, `label`, `description` and, for a mode, `autoApproves`.
+A custom ACP provider shows the generic provider icon and the label you gave it.
+
+## Launch env and secrets
+
+An instance's `env` does more than point at a config directory. Every value is
+typed:
+
+- a plain string is a **literal**: a non-secret value, kept as written in
+  `config.yaml`;
+- `{secret: <name>}` is a **reference** to a key smind stores for you. The key
+  itself never goes in `config.yaml`.
+- `{passthrough: true}` copies the variable from the daemon's own environment
+  at launch, for keys you export outside smind.
+
+A Claude Code instance pointed at Z.AI:
+
+```yaml
+providers:
+  custom:
+    - id: zai
+      extends: claude-native
+      env:
+        ANTHROPIC_BASE_URL: https://api.z.ai/api/anthropic
+        ANTHROPIC_AUTH_TOKEN: {secret: zai-key}
+        API_TIMEOUT_MS: 3000000
+```
+
+Each harness allows only certain names:
+
+| Harness | Allowed names |
+| --- | --- |
+| `claude-code` | `ANTHROPIC_BASE_URL` (url); `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` (secret); `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, `ENABLE_TOOL_SEARCH`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` (plain); `API_TIMEOUT_MS` and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (int); `CLAUDE_CONFIG_DIR` (path) |
+| `codex-app-server` | `OPENAI_BASE_URL` (url), `OPENAI_API_KEY` (secret), `CODEX_HOME` (path) |
+| `acp` | any valid variable name; names ending `_KEY`, `_TOKEN`, `_SECRET` or `_PASSWORD` are secret-kind |
+
+A name outside the list is rejected with the field named, for example
+`providers.custom[1].env.PATH`. A secret-kind name with its value written
+inline is rejected too: a key is never written in `config.yaml`. The one
+exception is `ANTHROPIC_API_KEY`, which accepts an empty value where a vendor
+needs the variable set but empty.
+
+This is a breaking change from the earlier rule that an instance's `env` could
+only carry `CLAUDE_CONFIG_DIR` or `CODEX_HOME` as a path. An entry that put a
+key inline in `env` must move it to the secret store.
+
+### Setting a key
+
+Keys are stored by smind and referenced by name from `env`. Two write-only
+RPCs manage them: `provider.setSecret {instanceId, name, value}` stores a
+value, and `provider.clearSecret {instanceId, name}` removes one. Both are
+for Humans: calls from agents and plugins are refused. No method ever returns
+a stored value. `provider.list` shows, per secret, only `{name, env, set,
+fingerprint}`, where the fingerprint is the last 4 characters of a SHA-256 —
+enough to see that a key changed, not enough to use it.
+
+Values live in `smind.db`, with the same protection as account credentials. A
+secret is resolved only when a run launches, into the child process
+environment. Deleting an instance from `config.yaml` and reloading providers
+(or restarting smind) removes its stored secrets.
+
+### What is and is not protected
+
+**Protected.** A stored key never appears in `config.yaml`, in the launch
+argv, in logs, in events, in `provider.list`, in error text or in a relay
+response. The secret store is on secretdeny's deny list for the Claude CLI's
+tools.
+
+**Not protected (residual).** The agent's own shell can read its environment.
+By default Claude Code does **not** scrub the token from its Bash tool
+(measured 2026-10-30, `claude` 2.1.310, macOS: `printenv` shows
+`ANTHROPIC_AUTH_TOKEN`). For claude-code instances that hold a secret, smind
+adds best-effort deny rules: Bash `env`, `printenv`, `set`, `export -p`,
+`declare -x` and `echo $NAME`, plus Read of `/proc/*/environ` and
+`<SMIND_HOME>/providers/**`. These are pattern matches and are trivially
+bypassed (`python -c`, a script file, a command assembled in pieces). They
+raise the cost of a lazy prompt injection; they do not stop a determined one.
+Codex and ACP agents have no equivalent: their shell tools inherit the env.
+
+The recommendation that follows from this: use a narrowly scoped key with a
+spend limit, and for Codex/ACP vendors put a local gateway (for example
+LiteLLM) in front, so the agent holds only a throwaway token.
+
+### CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+
+smind does not set this variable. Measured (2026-10-30, `claude` 2.1.310): with
+it on, Claude Code forces the permission mode back to `default` — a run in
+`bypassPermissions` then refuses a Bash command that uses a shell variable —
+which conflicts with smind's permission modes. smind's own MCP stdio env (run
+id, validator token) was unaffected. The variable does hide
+`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` and most `*_KEY`/`*_TOKEN` names
+from the Bash tool. If you accept `default` permissions, you may opt in per
+instance with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"` in the instance `env`.

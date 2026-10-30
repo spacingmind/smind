@@ -181,3 +181,26 @@ func endpointRegistry(t *testing.T, specs ...providers.Spec) *providers.Registry
 	}
 	return reg
 }
+
+// A key that comes through ADR-0046 typed env (passthrough here; a stored
+// secret takes the same branch) still marks the endpoint as keyed, so the
+// thread config names env_key.
+func TestCodexEndpoint_TypedEnvKeySetsEnvKey(t *testing.T) {
+	t.Setenv("SMIND_HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "sentinel-not-a-key")
+	spec := gwSpec()
+	spec.PassthroughEnv = []string{"OPENAI_API_KEY"}
+	wm, task := newTestTask(t, "reply")
+	r := codexEndpointRunner(t, wm, spec, nil)
+	if err := runModelPrompt(t, r, task.ID, "gw", ""); err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	_, config, raw := readThreadConfig(t, *task.WorktreePath)
+	mp := threadConfigProvider(t, config, "gw")
+	if mp["env_key"] != "OPENAI_API_KEY" {
+		t.Fatalf("env_key = %v, want OPENAI_API_KEY (provider %v)", mp["env_key"], mp)
+	}
+	if strings.Contains(raw, "sentinel-not-a-key") {
+		t.Fatal("the key value reached the thread config")
+	}
+}
