@@ -9,6 +9,10 @@ export const SITE_NAME = 'sMind by Spacing Mind'
 export const SITE_SUMMARY =
   'sMind by Spacing Mind is a self-hosted platform for running coding agents: one Go binary with a web app, desktop app, command line and mobile access.'
 export const REPO_URL = 'https://github.com/spacingmind/smind'
+export const OG_IMAGE_URL = SITE_URL + '/og-card.png'
+export const OG_IMAGE_WIDTH = 1200
+export const OG_IMAGE_HEIGHT = 630
+export const OG_IMAGE_ALT = 'sMind by Spacing Mind: run coding agents from one place'
 
 export const AI_CRAWLERS = [
   'GPTBot',
@@ -133,6 +137,7 @@ export function jsonLd(p, { lastUpdated, v = version() } = {}) {
       description: SITE_SUMMARY,
       url: SITE_URL + '/',
       codeRepository: REPO_URL,
+      image: OG_IMAGE_URL,
       author: publisher,
     })
   }
@@ -145,6 +150,7 @@ export function jsonLd(p, { lastUpdated, v = version() } = {}) {
     url,
     mainEntityOfPage: url,
     inLanguage: 'en',
+    image: OG_IMAGE_URL,
     author: publisher,
     publisher,
     about: { '@type': 'SoftwareApplication', name: SITE_NAME, softwareVersion: v },

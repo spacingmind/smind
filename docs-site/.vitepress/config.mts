@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
 import {
   DOCS_DIR,
+  OG_IMAGE_ALT,
+  OG_IMAGE_HEIGHT,
+  OG_IMAGE_URL,
+  OG_IMAGE_WIDTH,
   REPO_URL,
   SITE_NAME,
   SITE_SUMMARY,
@@ -111,9 +115,15 @@ export default defineConfig({
       ['meta', { property: 'og:title', content: title }],
       ['meta', { property: 'og:description', content: p.fm.description }],
       ['meta', { property: 'og:url', content: url }],
-      ['meta', { name: 'twitter:card', content: 'summary' }],
+      ['meta', { property: 'og:image', content: OG_IMAGE_URL }],
+      ['meta', { property: 'og:image:width', content: String(OG_IMAGE_WIDTH) }],
+      ['meta', { property: 'og:image:height', content: String(OG_IMAGE_HEIGHT) }],
+      ['meta', { property: 'og:image:alt', content: OG_IMAGE_ALT }],
+      ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
       ['meta', { name: 'twitter:title', content: title }],
       ['meta', { name: 'twitter:description', content: p.fm.description }],
+      ['meta', { name: 'twitter:image', content: OG_IMAGE_URL }],
+      ['meta', { name: 'twitter:image:alt', content: OG_IMAGE_ALT }],
     ]
     for (const g of jsonLd(p, { lastUpdated: pageData.lastUpdated, v })) {
       tags.push(['script', { type: 'application/ld+json' }, JSON.stringify(g)])
