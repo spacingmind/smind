@@ -2,10 +2,14 @@ package taskrunner
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/providers"
@@ -163,5 +167,87 @@ func TestRecipe_ThinkingHiddenHidesOption(t *testing.T) {
 		if slices.Contains(hiddenExt, a) {
 			t.Fatalf("hidden instance passed the thinking flag %q: %q", a, hiddenExt)
 		}
+	}
+}
+
+// A zai recipe instance runs against its endpoint: the CLI POSTs
+// /v1/messages with the stored key as a Bearer header (never in argv), the
+// tools/model flags come from the spec, and the config dir is private.
+func TestRecipe_ZAI_RunAgainstFakeAnthropicServer(t *testing.T) {
+	var mu sync.Mutex
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	r, task, home := recipeRunner(t,
+		[]providers.Spec{{ID: "zai-t", Extends: providers.IDClaudeNative, Vendor: "zai",
+			DisallowedTools: []string{"WebSearch"},
+			Models:          []providers.Model{{ID: "glm-5.3", Default: true}},
+			SecretEnv:       map[string]string{"ANTHROPIC_AUTH_TOKEN": "api-key"}}},
+		map[string]string{"ANTHROPIC_BASE_URL": srv.URL, "API_TIMEOUT_MS": "3000000"})
+	WithProviderSecrets(&fakeSecretSource{secrets: map[string]string{"zai-t\x1fapi-key": zaiSentinel}})(r)
+
+	args := runRecipeTurn(t, r, task, task.ID, "zai-t", ThinkingLevelUnspecified, "glm-5.3")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotPath != "/v1/messages" {
+		t.Fatalf("endpoint saw path %q, want /v1/messages", gotPath)
+	}
+	if gotAuth != "Bearer "+zaiSentinel {
+		t.Fatalf("endpoint Authorization = %q, want Bearer %q", gotAuth, zaiSentinel)
+	}
+	if v, ok := flagValue(args, "--disallowedTools"); !ok || v != "WebSearch" {
+		t.Fatalf("--disallowedTools = %q (present %v), want WebSearch; args %q", v, ok, args)
+	}
+	if v, ok := flagValue(args, "--model"); !ok || v != "glm-5.3" {
+		t.Fatalf("--model = %q (present %v), want glm-5.3; args %q", v, ok, args)
+	}
+	if slices.Contains(args, zaiSentinel) {
+		t.Fatalf("the secret leaked into argv: %q", args)
+	}
+	if got := readEnvDump(t, *task.WorktreePath); got != filepath.Join(home, "providers", "zai-t", "claude") {
+		t.Fatalf("CLI CLAUDE_CONFIG_DIR = %q, want the private dir", got)
+	}
+	if envAll := readLaunchEnv(t, task); !strings.Contains(envAll, "ANTHROPIC_BASE_URL="+srv.URL) {
+		t.Fatalf("CLI env has no ANTHROPIC_BASE_URL=%s", srv.URL)
+	}
+	if hs, err := os.ReadFile(filepath.Join(*task.WorktreePath, "http-status")); err != nil || string(hs) != "200" {
+		t.Fatalf("http-status = %q (%v), want 200", hs, err)
+	}
+}
+
+// provider.list renders the recipe an instance was made from.
+func TestProviderList_RecipeFields(t *testing.T) {
+	t.Parallel()
+	r, _ := instanceRunner(t,
+		providers.Spec{ID: "zai-t", Extends: providers.IDClaudeNative, Vendor: "zai", Recipe: "zai-glm",
+			Env: map[string]string{"ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic"}},
+		providers.Spec{ID: "mm-t", Extends: providers.IDClaudeNative, Recipe: "minimax", Thinking: "hidden",
+			Env: map[string]string{"ANTHROPIC_BASE_URL": "https://api.minimax.io/anthropic"}})
+
+	zai, ok := r.ProviderCatalogFor("zai-t")
+	if !ok {
+		t.Fatal("no zai-t instance")
+	}
+	if zai.Recipe != "zai-glm" || zai.Vendor != "zai" || zai.Thinking != "supported" ||
+		zai.EndpointKind != "anthropic" || len(zai.Notes) == 0 || !zai.Unverified {
+		t.Fatalf("zai-t recipe fields = %+v", zai)
+	}
+	mm, _ := r.ProviderCatalogFor("mm-t")
+	if mm.Thinking != "hidden" {
+		t.Fatalf("mm-t Thinking = %q, want hidden", mm.Thinking)
+	}
+	base, _ := r.ProviderCatalogFor(ProviderClaudeNative)
+	if base.Recipe != "" || base.Vendor != "" || base.EndpointKind != "" || base.Notes != nil || base.Unverified {
+		t.Fatalf("claude-native recipe fields = %+v, want none set", base)
+	}
+	if base.Thinking != "supported" {
+		t.Fatalf("claude-native Thinking = %q, want supported", base.Thinking)
 	}
 }
