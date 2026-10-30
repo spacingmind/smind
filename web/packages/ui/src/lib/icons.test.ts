@@ -86,6 +86,7 @@ describe("icon registry", () => {
         "pullRequest": "GitPullRequest",
         "push": "Upload",
         "question": "CircleQuestionMark",
+        "recipe": "LayoutTemplate",
         "refresh": "RefreshCw",
         "reset": "Undo2",
         "retry": "RotateCcw",
