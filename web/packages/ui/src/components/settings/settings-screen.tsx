@@ -33,6 +33,18 @@ import { Icons } from "@/lib/icons";
 /** Tailwind `p-2`, which an inline `paddingLeft` replaces (see AppHeader). */
 const BASE_PADDING_PX = 8;
 
+/** Sections whose content is wide (tables, card grids) -- their page gets max-w-3xl instead of the narrow max-w-[510px] reading column. The ids of the usage/plugins/automations/profiles(=agents)/providers/mcp-servers/connections/shortcuts sections. */
+const WIDE_SECTION_IDS = new Set([
+  "usage",
+  "plugins",
+  "automations",
+  "agents",
+  "providers",
+  "mcp-servers",
+  "connections",
+  "shortcuts",
+]);
+
 /**
  * The scrolling grouped section nav, shared by both layouts: the desktop
  * sidebar (`variant="sidebar"`, compact h-8 rows with an active highlight)
@@ -69,7 +81,7 @@ function SettingsNav({
             {firstOfGroup && (
               <li
                 aria-hidden="true"
-                className={cn("pt-3 pb-1 text-ui-sm font-medium text-foreground-subtle", list ? "px-3" : "px-2")}
+                className={cn("text-ui-sm font-medium text-foreground-subtle", list ? "px-3 pt-3 pb-1" : "px-2.5 pt-4 pb-1")}
               >
                 {section.groupLabel}
               </li>
@@ -81,8 +93,8 @@ function SettingsNav({
                 data-testid={`settings-nav-${section.id}`}
                 onClick={() => onSelect(section.id)}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-md text-left text-ui-base text-foreground hover:bg-hover",
-                  list ? "h-11 px-3" : "h-8 px-2",
+                  "flex w-full items-center gap-2 rounded-lg text-left text-ui-base text-foreground hover:bg-hover",
+                  list ? "h-11 px-3" : "h-8 px-2.5",
                   !list && section.id === activeId && "bg-selected font-medium",
                 )}
               >
@@ -107,8 +119,9 @@ function SettingsNav({
  * The settings screen. Desktop (>=768px) is a full-viewport two-column
  * layout (Paseo's settings screen and ZCode's SettingsPage are the
  * references): a left sidebar with a back-to-app row above a scrolling
- * grouped section nav, and a framed content panel on the right with an
- * h-12 header (group / section title) and a scrolling body. Narrow
+ * grouped section nav, and a content panel on the right whose bare h-12
+ * header is just the window-chrome strip -- the section title is the H1
+ * at the top of the scrolling body. Narrow
  * (<768px) is a list-to-detail drill-down: the list page shows the grouped
  * nav as touch-sized rows, and tapping one pushes that section's detail
  * page with a back-arrow header.
@@ -276,7 +289,7 @@ export function SettingsScreen({
     <Button
       variant="ghost"
       aria-label="Back to app"
-      className="h-8 w-full justify-start gap-2 rounded-md px-2 text-ui-base"
+      className="h-8 w-full justify-start gap-2 rounded-lg bg-muted/60 px-2.5 text-ui-base hover:bg-muted"
       data-testid="settings-back-button"
       onClick={onNavigateBack}
     >
@@ -317,29 +330,39 @@ export function SettingsScreen({
       </aside>
       <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background p-1 pl-0">
         <div
-          className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-background"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
           data-testid="settings-content-frame"
         >
           <header
-            className="flex h-12 shrink-0 items-center gap-2 border-b p-2 pl-6"
+            className="flex h-12 shrink-0 items-center gap-2 p-2 pl-6"
             data-testid="settings-screen-header"
             data-tauri-drag-region={dragRegion}
           >
-            {active?.groupLabel && (
-              <>
-                <span className="text-ui-base text-foreground-subtle">{active.groupLabel}</span>
-                <span aria-hidden className="text-foreground-subtle">
-                  /
-                </span>
-              </>
-            )}
-            <h1 className="truncate text-ui-base font-medium">{active?.label}</h1>
             <div className="ml-auto" />
             <DesktopWindowControls />
           </header>
           <main className="min-h-0 flex-1 overflow-y-auto" data-testid="settings-content">
-            <div className="mx-auto w-full max-w-4xl px-8 py-6">
-              {activeContent}
+            <div
+              className={cn(
+                "mx-auto w-full px-6 pb-12 pt-4",
+                active?.id && WIDE_SECTION_IDS.has(active.id) ? "max-w-3xl" : "max-w-[510px]",
+              )}
+            >
+              <h1
+                data-testid="settings-page-title"
+                className="text-ui-settings-title font-semibold tracking-tight text-foreground"
+              >
+                {active?.label}
+              </h1>
+              {active?.description && (
+                <p
+                  data-testid="settings-page-description"
+                  className="mt-1 text-ui-base text-foreground-muted"
+                >
+                  {active.description}
+                </p>
+              )}
+              <div className="mt-6">{activeContent}</div>
             </div>
           </main>
         </div>
