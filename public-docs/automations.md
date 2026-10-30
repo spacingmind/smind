@@ -2,7 +2,7 @@
 title: Automations
 description: Start a task by itself on a schedule, or when a GitHub workflow fails, with caps, de-duplication, auto-pause and a record of every decision.
 summary: "This page explains automations in sMind by Spacing Mind: tasks that start by themselves on a schedule or when a GitHub workflow fails, with caps, de-duplication, auto-pause and a decision record. It is for people who want unattended agent runs under strict limits."
-order: 15
+order: 16
 ---
 
 # Automations
@@ -50,7 +50,8 @@ state and `smind automation show 1` shows the next fire times.
   otherwise records one "missed" entry and waits for the next time. It never
   catches up a backlog.
 - **github.workflow_run**: a run of a named workflow on a branch (default
-  `develop`) that ended in `failure` (also `cancelled`, `timed_out`). The
+  `develop`) that ended in `failure` (the conclusions can also list `cancelled`
+  and `timed_out`; `failure` is the default). The
   daemon asks GitHub through `gh`, by default every five minutes, so there is no
   public URL to set up. Enabling the automation never replays old runs.
 
@@ -113,6 +114,48 @@ of each automation are always kept.
 - `automations.allowRemoteManage: true` lets a direct network connection manage
   them too.
 
+## In the apps
+
+On the web, automations live under **Settings → Automations**. The page lists
+each automation with its signal, its state (active, paused or disabled), when
+it last fired and, for an enabled cron automation that is not paused, its next
+run in UTC. Each
+row has an enable/disable switch, **Fire now**, **History**, **Edit** and
+**Delete**; a paused row shows its reason with a **Resume** button. **New
+automation** opens the form: workspace, agent profile, model and mode, the
+signal (cron in UTC with a next-fire-times preview, or a GitHub workflow and
+branch), the title and prompt templates with the placeholder list, the rails
+with their defaults, and the memory switch. **History** is the audit table,
+filterable by decision, and each `fire` row links to the task it started. The
+page also says when `automations.enabled` or `automations.paused` is holding
+everything back, but it has no control for them: those are `config.yaml` edits.
+
+On a phone, the Connection sheet on the Tasks screen has an **Automations**
+entry. The list is read-only (state, signal, last fired), and an automation's
+screen shows its header and its run history, paged with **Load more**. The one
+action is **Pause**: a confirm, then the automation is disabled. Create and
+change automations on the computer.
+
+## When one pauses
+
+An automation pauses itself when its runs keep failing: after the configured
+number of failed runs in a row (default 3) it stops firing and records the
+reason, `paused after 3 consecutive failed runs; last: …`. The reason is shown
+by `smind automation show <id>`, on the web row and on the phone's automation
+screen. A run that reached its budget does not pause the automation; it blocks
+the next firing, which is recorded as capped with the reason (see the table
+above).
+
+An auto-pause sends a push notification to paired phones when push is set up
+(see [Mobile and relay pairing](mobile-and-relay.md#push-notifications)). A
+tap opens the failed task; when there is no task to open — the template is no
+longer valid, or the firing never started a task — the notification opens that
+automation's own screen.
+
+`smind automation resume <id>` clears the pause, the failure counter and the
+budget block. A paused automation is not an inbox item: the inbox lists
+permissions, validator verdicts and stalls only.
+
 ## Example: a failed nightly CI run starts a Lead
 
 This is the example smind ships and tests. It is never created or enabled for
@@ -147,4 +190,8 @@ What you will see in `smind automation audit <id>`:
 | `deduped` | The same commit failed again (for example a re-run). |
 | `capped` | A task from this automation is still running, or the hourly cap was reached. |
 | `paused` | The automation paused itself after three failed runs in a row; `smind automation resume` clears it. |
+
+## See also
+
+- [Inbox](inbox.md): the list of permissions, validator verdicts and stalled work that need you.
 

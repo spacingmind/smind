@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spacingmind/smind/internal/validation"
 	"github.com/spacingmind/smind/internal/version"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
@@ -132,16 +133,17 @@ func mcpValidatorContractGet(client *wsclient.Client, env validatorEnv) mcp.Tool
 }
 
 type verdictSubmitInput struct {
-	Verdict json.RawMessage `json:"verdict" jsonschema:"the verdict object"`
+	Verdict validation.Verdict `json:"verdict" jsonschema:"the verdict object: {v:1, contractId, contractSha256, commitSha (40-hex), status pass|fail|blocked, blockedReason (blocked only), summary, items:[{kind,id,status,...,evidence:[...]}], findings:[...]}"`
 }
 
 func mcpValidatorVerdictSubmit(client *wsclient.Client, env validatorEnv) mcp.ToolHandlerFor[verdictSubmitInput, map[string]any] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in verdictSubmitInput) (*mcp.CallToolResult, map[string]any, error) {
-		if len(in.Verdict) == 0 {
-			return nil, nil, fmt.Errorf("validation_verdict_submit: verdict is required")
+		raw, err := json.Marshal(in.Verdict)
+		if err != nil {
+			return nil, nil, fmt.Errorf("validation_verdict_submit: verdict: %w", err)
 		}
 		var out map[string]any
-		params := map[string]any{"validationId": env.ValidationID, "token": env.Token, "verdict": in.Verdict}
+		params := map[string]any{"validationId": env.ValidationID, "token": env.Token, "verdict": json.RawMessage(raw)}
 		if err := callWS(ctx, client, "validation_verdict_submit", "validation.verdict.submit", params, &out); err != nil {
 			return nil, nil, err
 		}

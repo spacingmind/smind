@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 
 
 import { SetupSection } from "@/components/first-run/setup-section";
-import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
+import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { managedByLabel } from "@/lib/daemon-version";
@@ -87,11 +87,12 @@ function DaemonSection() {
   if (status.platform === "unsupported") {
     return (
       <div className="flex flex-col gap-2" data-testid="settings-section-daemon">
-        <SettingsSectionTitle title="Daemon" />
-        <p data-testid="daemon-unsupported" className="text-ui-base text-muted-foreground">
-          This platform isn&apos;t supported for app-managed daemon install. The desktop app manages a
-          daemon on Windows and macOS only.
-        </p>
+        <SettingsGroup title="Daemon">
+          <p data-testid="daemon-unsupported" className="px-4 py-3 text-ui-base text-muted-foreground">
+            This platform isn&apos;t supported for app-managed daemon install. The desktop app manages a
+            daemon on Windows and macOS only.
+          </p>
+        </SettingsGroup>
       </div>
     );
   }
@@ -101,76 +102,86 @@ function DaemonSection() {
 
   return (
     <div className="flex flex-col gap-3" data-testid="settings-section-daemon">
-      <h3 className="text-ui-base font-medium text-foreground">Daemon</h3>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-ui-base">
-        <dt className="text-muted-foreground">Status</dt>
-        <dd data-testid="daemon-reachable">{status.reachable ? "Running" : "Not running"}</dd>
-        <dt className="text-muted-foreground">Version</dt>
-        <dd data-testid="daemon-version">{status.daemonVersion ?? "—"}</dd>
-        <dt className="text-muted-foreground">Managed</dt>
-        <dd data-testid="daemon-managed-state">
-          {status.managedBy
-            ? `Managed by ${managedByLabel(status.managedBy)}`
-            : status.managedState === "managed"
-              ? "Managed by this app"
-              : status.managedState === "unmanaged"
-                ? "Running, not managed by the app"
-                : "Not running"}
-        </dd>
-        <dt className="text-muted-foreground">Log file</dt>
-        <dd data-testid="daemon-log-path" className="truncate font-mono text-ui-sm">
-          {status.logPath ?? "—"}
-        </dd>
-      </dl>
+      <SettingsGroup title="Daemon">
+        <SettingsRow
+          label="Status"
+          control={<span data-testid="daemon-reachable">{status.reachable ? "Running" : "Not running"}</span>}
+        />
+        <SettingsRow label="Version" control={<span data-testid="daemon-version">{status.daemonVersion ?? "—"}</span>} />
+        <SettingsRow
+          label="Managed"
+          control={
+            <span data-testid="daemon-managed-state">
+              {status.managedBy
+                ? `Managed by ${managedByLabel(status.managedBy)}`
+                : status.managedState === "managed"
+                  ? "Managed by this app"
+                  : status.managedState === "unmanaged"
+                    ? "Running, not managed by the app"
+                    : "Not running"}
+            </span>
+          }
+        />
+        <SettingsRow
+          label="Log file"
+          control={
+            <span data-testid="daemon-log-path" className="block truncate font-mono text-ui-sm">
+              {status.logPath ?? "—"}
+            </span>
+          }
+        />
 
-      {error && <Alert variant="error" testId="daemon-error" description={error} />}
-      {status.prerequisiteMessage && (
-        <p role="alert" data-testid="daemon-prerequisite" className="text-ui-base text-muted-foreground">
-          {status.prerequisiteMessage}
-        </p>
-      )}
-      {status.managedBy === "docker" && (
-        <p data-testid="daemon-service-notice" className="text-ui-base text-muted-foreground">
-          This daemon runs in a Docker container (managed by Docker), so this app leaves it alone. Restart or update it with{" "}
-          <code className="font-mono text-ui-sm">docker</code> (pull the new image and recreate the container).
-        </p>
-      )}
-      {status.managedBy && status.managedBy !== "docker" && (
-        <p data-testid="daemon-service-notice" className="text-ui-base text-muted-foreground">
-          An OS service ({managedByLabel(status.managedBy)}) runs this daemon, so this app leaves it alone: restarting or
-          stopping it from here would only make the service start it again. Manage it with{" "}
-          <code className="font-mono text-ui-sm">smind service</code>, and update it with{" "}
-          <code className="font-mono text-ui-sm">smind update</code>.
-        </p>
-      )}
-      {status.wslDaemonSuspected && (
-        <p data-testid="daemon-wsl-notice" className="text-ui-base text-muted-foreground">
-          A daemon that this app did not start is answering on this port. If you run sMind inside
-          WSL, stop it there, then install the Windows daemon here. Data from a WSL install is not
-          migrated.
-        </p>
-      )}
-      {busy && stageMessage && (
-        <p data-testid="daemon-progress" className="text-ui-base text-muted-foreground">
-          {stageMessage}
-        </p>
-      )}
-
-      {manageOff && (
-        <div data-testid="daemon-manage-off" className="flex flex-col gap-2 rounded-xl border bg-card p-3">
-          <p className="text-ui-base text-muted-foreground">
-            This app is not managing a daemon on this computer, so installing, updating, restarting and taking over are turned off. The
-            status above is read-only.
-          </p>
-          <div>
-            <Button size="sm" data-testid="daemon-enable-managed" disabled={busy} onClick={() => void enableManaged()}>
-              Enable app-managed daemon
-            </Button>
+        {error && (
+          <div className="px-4 py-3">
+            <Alert variant="error" testId="daemon-error" description={error} />
           </div>
-        </div>
-      )}
+        )}
+        {status.prerequisiteMessage && (
+          <p role="alert" data-testid="daemon-prerequisite" className="px-4 py-3 text-ui-base text-muted-foreground">
+            {status.prerequisiteMessage}
+          </p>
+        )}
+        {status.managedBy === "docker" && (
+          <p data-testid="daemon-service-notice" className="px-4 py-3 text-ui-base text-muted-foreground">
+            This daemon runs in a Docker container (managed by Docker), so this app leaves it alone. Restart or update it with{" "}
+            <code className="font-mono text-ui-sm">docker</code> (pull the new image and recreate the container).
+          </p>
+        )}
+        {status.managedBy && status.managedBy !== "docker" && (
+          <p data-testid="daemon-service-notice" className="px-4 py-3 text-ui-base text-muted-foreground">
+            An OS service ({managedByLabel(status.managedBy)}) runs this daemon, so this app leaves it alone: restarting or
+            stopping it from here would only make the service start it again. Manage it with{" "}
+            <code className="font-mono text-ui-sm">smind service</code>, and update it with{" "}
+            <code className="font-mono text-ui-sm">smind update</code>.
+          </p>
+        )}
+        {status.wslDaemonSuspected && (
+          <p data-testid="daemon-wsl-notice" className="px-4 py-3 text-ui-base text-muted-foreground">
+            A daemon that this app did not start is answering on this port. If you run sMind inside
+            WSL, stop it there, then install the Windows daemon here. Data from a WSL install is not
+            migrated.
+          </p>
+        )}
+        {busy && stageMessage && (
+          <p data-testid="daemon-progress" className="px-4 py-3 text-ui-base text-muted-foreground">
+            {stageMessage}
+          </p>
+        )}
 
-      <div className="flex gap-2">
+        {manageOff && (
+          <SettingsRow
+            testId="daemon-manage-off"
+            label="App-managed daemon"
+            description="This app is not managing a daemon on this computer, so installing, updating, restarting and taking over are turned off. The status above is read-only."
+            control={
+              <Button size="sm" data-testid="daemon-enable-managed" disabled={busy} onClick={() => void enableManaged()}>
+                Enable app-managed daemon
+              </Button>
+            }
+          />
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3">
         {status.managedState === "notRunning" && (
           <Button size="sm" data-testid="daemon-install" onClick={() => run(() => desktop.daemonInstall())} disabled={locked}>
             Install
@@ -209,7 +220,8 @@ function DaemonSection() {
             </Button>
           </>
         )}
-      </div>
+        </div>
+      </SettingsGroup>
       <SetupSection />
     </div>
   );
@@ -220,6 +232,7 @@ if (isDesktop) {
     id: "daemon",
     label: "Daemon",
     groupLabel: "Connection",
+    description: "Local daemon status, version and app management.",
     order: 160,
     icon: <Icons.host aria-hidden className="size-3.5" />,
     render: () => <DaemonSection />,

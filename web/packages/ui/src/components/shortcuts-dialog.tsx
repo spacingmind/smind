@@ -28,7 +28,7 @@ function KeyCaps({ keys }: { keys: string }) {
       {parts.map((part, i) => (
         <kbd
           key={`${part}-${i}`}
-          className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground"
+          className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-ui-xs"
         >
           {part}
         </kbd>
@@ -104,21 +104,21 @@ function ShortcutRow({
   }, [capturing, onCancelCapture, onRebind]);
 
   return (
-    <div
-      className="flex items-center justify-between gap-3 py-1.5"
+    <tr
       data-testid="shortcut-row"
       data-binding-id={row.id}
+      className="border-t border-border max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-2"
     >
-      <div className="min-w-0">
-        <div className="truncate text-ui-base">{row.label}</div>
-        {row.note && <div className="truncate text-ui-sm text-foreground-muted">{row.note}</div>}
+      <td className="max-sm:col-start-1 max-sm:row-start-1 max-sm:pb-0 px-3 py-1.5">
+        <div className="max-sm:whitespace-normal sm:truncate text-ui-base">{row.label}</div>
+        {row.note && <div className="max-sm:whitespace-normal sm:truncate text-ui-sm text-foreground-muted">{row.note}</div>}
         {conflictLabel && (
           <div className="text-ui-sm text-warning" data-testid="shortcut-conflict">
             Also used by {conflictLabel}
           </div>
         )}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
+      </td>
+      <td className="max-sm:col-start-1 max-sm:row-start-2 max-sm:pt-1 whitespace-nowrap px-3 py-1.5">
         {capturing === "chord" ? (
           <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-capturing">
             Recording a chord… (Enter to save, Esc to cancel)
@@ -134,36 +134,44 @@ function ShortcutRow({
         ) : (
           <KeyCaps keys={row.keys} />
         )}
-        <Button
-          variant="ghost"
-          size="xs"
-          onClick={capturing ? onCancelCapture : onStartCapture}
-          aria-label={`${capturing ? "Cancel rebinding" : "Change shortcut for"} ${row.label}`}
-        >
-          {capturing ? "Cancel" : "Change"}
-        </Button>
-        {!capturing && (
+      </td>
+      <td className="hidden whitespace-nowrap px-3 py-1.5 text-ui-sm text-foreground-muted sm:table-cell">Global</td>
+      <td className="max-sm:col-start-2 max-sm:row-start-1 max-sm:row-span-2 max-sm:self-center px-3 py-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="ghost"
             size="xs"
-            onClick={onStartChordCapture}
-            aria-label={`Record a chord for ${row.label}`}
+            className="whitespace-nowrap"
+            onClick={capturing ? onCancelCapture : onStartCapture}
+            aria-label={`${capturing ? "Cancel rebinding" : "Change shortcut for"} ${row.label}`}
           >
-            Record chord…
+            {capturing ? "Cancel" : "Change"}
           </Button>
-        )}
-        {row.overridden && !capturing && (
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={onReset}
-            aria-label={`Reset shortcut for ${row.label}`}
-          >
-            Reset
-          </Button>
-        )}
-      </div>
-    </div>
+          {!capturing && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="whitespace-nowrap"
+              onClick={onStartChordCapture}
+              aria-label={`Record a chord for ${row.label}`}
+            >
+              Record chord…
+            </Button>
+          )}
+          {row.overridden && !capturing && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="whitespace-nowrap"
+              onClick={onReset}
+              aria-label={`Reset shortcut for ${row.label}`}
+            >
+              Reset
+            </Button>
+          )}
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -193,36 +201,66 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
           No shortcuts match "{query}".
         </p>
       ) : (
-        <div className="flex flex-col gap-4" data-testid="shortcut-sections">
-          {sections.map((section) => (
-            <section key={section.id} data-testid={`shortcut-section-${section.id}`}>
-              <h3 className="mb-1 text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">
-                {section.title}
-              </h3>
-              <div className="divide-y divide-border">
-                {section.rows.map((row) => {
-                  const effective = bindings.find((b) => b.id === row.id)?.effectiveCombo;
-                  const conflicts =
-                    effective === undefined || effective === null
-                      ? []
-                      : conflictingBindings(bindings, effective, row.id, isMac);
-                  return (
-                    <ShortcutRow
-                      key={row.id}
-                      row={row}
-                      capturing={capturing?.id === row.id ? capturing.mode : false}
-                      onStartCapture={() => setCapturing({ id: row.id, mode: "single" })}
-                      onStartChordCapture={() => setCapturing({ id: row.id, mode: "chord" })}
-                      onCancelCapture={() => setCapturing(null)}
-                      onRebind={(combo) => handleRebind(row.id, combo)}
-                      onReset={() => resetBinding(row.id)}
-                      conflictLabel={conflicts.length > 0 ? conflicts.map((c) => c.label).join(", ") : null}
-                    />
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+        <div
+          className="overflow-hidden rounded-xl border border-border bg-card"
+          data-testid="shortcut-sections"
+        >
+          <div className="overflow-x-auto">
+            <table className="max-sm:block w-full border-collapse text-left text-ui-base">
+              <thead className="max-sm:sr-only">
+                <tr className="border-b border-border">
+                  <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
+                    Command
+                  </th>
+                  <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
+                    Keybinding
+                  </th>
+                  <th
+                    scope="col"
+                    className="hidden whitespace-nowrap px-3 py-2 text-ui-sm font-medium text-foreground-muted sm:table-cell"
+                  >
+                    Scope
+                  </th>
+                  <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              {sections.map((section) => (
+                <tbody key={section.id} data-testid={`shortcut-section-${section.id}`} className="max-sm:block">
+                  <tr className="max-sm:block">
+                    <th
+                      colSpan={4}
+                      scope="colgroup"
+                      className="max-sm:block bg-muted/40 px-4 py-1.5 text-ui-sm font-medium uppercase tracking-wide text-foreground-muted"
+                    >
+                      {section.title}
+                    </th>
+                  </tr>
+                  {section.rows.map((row) => {
+                    const effective = bindings.find((b) => b.id === row.id)?.effectiveCombo;
+                    const conflicts =
+                      effective === undefined || effective === null
+                        ? []
+                        : conflictingBindings(bindings, effective, row.id, isMac);
+                    return (
+                      <ShortcutRow
+                        key={row.id}
+                        row={row}
+                        capturing={capturing?.id === row.id ? capturing.mode : false}
+                        onStartCapture={() => setCapturing({ id: row.id, mode: "single" })}
+                        onStartChordCapture={() => setCapturing({ id: row.id, mode: "chord" })}
+                        onCancelCapture={() => setCapturing(null)}
+                        onRebind={(combo) => handleRebind(row.id, combo)}
+                        onReset={() => resetBinding(row.id)}
+                        conflictLabel={conflicts.length > 0 ? conflicts.map((c) => c.label).join(", ") : null}
+                      />
+                    );
+                  })}
+                </tbody>
+              ))}
+            </table>
+          </div>
         </div>
       )}
       {Object.keys(overrides).length > 0 && (

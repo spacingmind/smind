@@ -328,7 +328,7 @@ func TestPluginSession_UndeclaredCapability_Forbidden(t *testing.T) {
 var humanOnly = []string{
 	"plugin.install", "plugin.link", "plugin.enable", "plugin.disable", "plugin.remove", "plugin.update", "plugin.reload",
 	"plugin.settings.get", "plugin.settings.set", "plugin.list", "plugin.logs",
-	"provider.setEnv", "provider.setSecret", "provider.clearSecret", "provider.addInstance", "provider.setDefaultModel", "provider.reload", "provider.list",
+	"provider.setEnv", "provider.setSecret", "provider.clearSecret", "provider.clearCooldown", "provider.addInstance", "provider.addFromRecipe", "provider.setDefaultModel", "provider.reload", "provider.list",
 	"account.add", "account.updateCredential", "account.list", "account.remove",
 	"automation.create", "automation.list", "automation.run",
 	"mcp.create", "mcp.update", "mcp.delete", "mcp.setEnabled",

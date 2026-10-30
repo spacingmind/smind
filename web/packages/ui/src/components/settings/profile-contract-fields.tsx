@@ -7,7 +7,7 @@ import { useSkillList } from "@/hooks/use-plugins";
 import type { AgentProfile } from "@/lib/types";
 
 const SELECT_CLASS =
-  "h-8 w-full rounded-lg border border-input-border bg-input px-2 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused disabled:cursor-not-allowed disabled:opacity-50";
+  "h-8 w-full rounded-lg border border-input-border bg-input px-2.5 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused disabled:cursor-not-allowed disabled:opacity-50";
 
 function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: string; hint?: ReactNode; children: ReactNode }) {
   return (
