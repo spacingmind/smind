@@ -238,7 +238,7 @@ buttons, sidebar toggle position), own PR. Prior art:
 - [x] Plan written (this PR).
 - [ ] Stage 1 tokens PR.
 - [x] Stage 2 audit handed over (table above).
-- [ ] Stage 3a settings (this PR: in progress).
+- [x] Stage 3a settings (this PR): shell, nav, row-card primitives, Switch, Shortcuts table, empty cards, usage tray applied to General, Appearance, Notifications, Shortcuts, GitHub, Agents, MCP, Skills, Plugins, Automations, Providers, Usage, Connection.
 - [ ] Stage 3 PRs.
 - [ ] Stage 4.
 - [ ] Stage 5.
@@ -246,3 +246,25 @@ buttons, sidebar toggle position), own PR. Prior art:
 ## Validation
 
 Filled per stage as PRs land.
+### Stage 3a validation (settings)
+
+- AC1/AC3: `settings-screen.tsx` — H1 + subtitle in a centred column (510px; 3xl for
+  table/card pages, 5xl for Shortcuts), nav items `rounded-lg`, back pill.
+  Tests: `shows the section label as the page H1`, `shows the registry description as a subtitle`.
+- AC2/AC5/AC6/AC7: `settings-layout.tsx` (`SettingsGroup` with `actions` slot,
+  `SettingsRow`, `SettingsEmptyCard`, `SettingsStatStrip`) and `ui/switch.tsx`, applied across all
+  sections. Notifications' sound toggle is now the shared Switch.
+- AC4: Shortcuts table (Command / Keybinding / Scope / Actions); rows stack below `sm`.
+  Scope shows "Global" (every binding is app-level today, no per-binding scope data).
+- AC8: sheets (L = ZCode raw frame, R = smind after) in
+  `/tmp/steward4/zcode-audit/after/settings/`:
+  `settings_{dark,light}_1280_{a,b,c}.png` (general+appearance, shortcuts+MCP, usage+skills) and
+  `settings_{dark,light}_390_a.png` (smind after only: ZCode's web build is not responsive, so
+  390 has no ZCode side). All looked at.
+- Not visually verified: the Connection and daemon pages (not in the nav of the isolated
+  daemon's browser build; covered by tests only), and the Plugins/Automations non-empty states.
+- Behaviour unchanged: every `data-testid`/aria-label kept; full `task test` green.
+- GLM ledger: 12 peer-glm runs (tasks 70, 71, 73, 74, 75, 76 x3, 77, 82 x3), 0 Sonnet; one
+  rate-limit stall (5h window) on task 76, resumed after the Human's quota reset. Failure
+  modes seen: wrong layout fix twice (shortcuts clipping), stray re-indent, button inside a title prop.
+
