@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Icons } from "@/lib/icons";
 import { providerLabel, providerRunner } from "@/lib/provider-catalog";
 
@@ -14,6 +15,7 @@ import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { useClearProviderCooldown, activeCooldownUntil } from "@/hooks/use-clear-provider-cooldown";
 import { useProfileList } from "@/hooks/use-profiles";
 import { detailLevelChangesView, useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
@@ -35,6 +37,8 @@ import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { canRetryWithHigherEffort, useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
 import { isRateLimitedRun } from "@/lib/rate-limit";
+import { limitedProvidersKey } from "@/lib/rate-limit-providers";
+import { queryKeys } from "@/lib/query-keys";
 import { runStartParams } from "@/lib/run-start";
 import type { RunFailover } from "@/components/timeline/run-failover-actions";
 import { useTaskGit } from "@/hooks/use-task-git";
@@ -139,6 +143,16 @@ export function TaskDetailPane({
   // The header run-config pill's agent-name lookup (run-config IA), from
   // the same shared profile.list cache the composer picker reads.
   const profiles = useProfileList();
+  // A run that failed rate limited needs provider.list re-read: the footer's
+  // "I reset my quota, retry now" shows only once that cache (staleTime
+  // Infinity) carries the provider's cooldownUntil. The key changes exactly
+  // when a provider enters or leaves the limited set, so the refetch fires
+  // then -- not on every render.
+  const limitedKey = limitedProvidersKey(runs, new Date());
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (limitedKey) void queryClient.invalidateQueries({ queryKey: queryKeys.providerList() });
+  }, [limitedKey, queryClient]);
   // Mirrors RunConfigToolbar's own shared state (run-config IA): the
   // header pill is "display-only, derived from the same state the toolbar
   // reads" -- this is that read, not a second source of truth. Null until
@@ -310,6 +324,7 @@ export function TaskDetailPane({
   const onJumpToChatRef = useRef(onJumpToChat);
   onJumpToChatRef.current = onJumpToChat;
   const queueItems = queue.items;
+  const { clear: clearProviderCooldown } = useClearProviderCooldown();
   const failover = useMemo<RunFailover<RunEntry>>(
     () => ({
       fallbackName: (profileId) => profiles.find((p) => p.ID === profileId)?.Name,
@@ -354,11 +369,13 @@ export function TaskDetailPane({
         queueRefreshRef.current();
       },
       isHeld: (run) => queueItems.some((i) => i.Status === "queued" && i.NotBefore && i.Prompt === run.prompt),
+      cooldownActive: (provider) => activeCooldownUntil(providers.find((p) => p.id === provider), new Date()) !== null,
+      clearCooldown: (provider) => clearProviderCooldown(provider),
       successor: (runId) => failoverIndex.successors.get(runId),
       continues: (runId) => failoverIndex.continues.get(runId),
       openChat: (chatId) => onJumpToChatRef.current?.(chatId),
     }),
-    [client, taskId, profiles, queueItems, failoverIndex],
+    [client, taskId, profiles, queueItems, failoverIndex, providers, clearProviderCooldown],
   );
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);

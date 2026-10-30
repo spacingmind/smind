@@ -27,6 +27,8 @@ export interface SettingsSection {
   icon?: ReactNode;
   /** An optional quiet indicator at the end of the nav row (e.g. a pending-count dot); it renders its own data. */
   badge?: ReactNode;
+  /** One-line subtitle shown under the page H1. */
+  description?: string;
   /** Lower renders first. Built-in sections use round numbers (100, 200, ...) leaving room for a section to insert itself between two others; ties break by registration order. */
   order: number;
   render: (ctx: SettingsSectionContext) => ReactNode;

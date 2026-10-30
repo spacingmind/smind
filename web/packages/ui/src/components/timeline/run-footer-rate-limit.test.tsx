@@ -53,6 +53,8 @@ function failoverStub(overrides: Partial<RunFailover> = {}): RunFailover {
     retryOnFallback: vi.fn().mockResolvedValue(undefined),
     waitUntil: vi.fn().mockResolvedValue(undefined),
     isHeld: () => false,
+    cooldownActive: () => false,
+    clearCooldown: vi.fn().mockResolvedValue(undefined),
     successor: () => undefined,
     continues: () => undefined,
     openChat: vi.fn(),
@@ -158,6 +160,48 @@ describe("RunFooter failover actions (ADR-0041 F2)", () => {
     rerender(<RunFooter run={limited({ failureResetAt: "2026-10-13T09:00:00Z" })} isLatest onRerun={() => {}} failover={failoverStub()} />);
     expect(screen.queryByTestId("run-wait")).toBeNull();
     expect(screen.getByTestId("run-retry")).toBeTruthy();
+  });
+
+  it("shows the reset action only while a cooldown is active", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const { rerender } = render(<RunFooter run={limited()} isLatest onRerun={() => {}} failover={failoverStub({ cooldownActive: () => true })} />);
+    const button = screen.getByTestId("run-clear-cooldown");
+    expect(button.textContent).toBe("I reset my quota, retry now");
+    rerender(<RunFooter run={limited()} isLatest onRerun={() => {}} failover={failoverStub()} />);
+    expect(screen.queryByTestId("run-clear-cooldown")).toBeNull();
+  });
+
+  it("hides the reset action without a cooldown even when other actions render the row", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    render(<RunFooter run={limited({ failureResetAt: "2026-10-13T12:00:00Z" })} isLatest onRerun={() => {}} failover={failoverStub()} />);
+    expect(screen.getByTestId("run-wait")).toBeTruthy();
+    expect(screen.queryByTestId("run-clear-cooldown")).toBeNull();
+  });
+
+  it("clicking calls clearCooldown with the run's provider once even on double click", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const failover = failoverStub({ cooldownActive: () => true });
+    render(<RunFooter run={limited()} isLatest onRerun={() => {}} failover={failover} />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("run-clear-cooldown"));
+      fireEvent.click(screen.getByTestId("run-clear-cooldown"));
+    });
+    expect(failover.clearCooldown).toHaveBeenCalledTimes(1);
+    expect(failover.clearCooldown).toHaveBeenCalledWith("glm");
+  });
+
+  it("a failed clear toasts and re-enables", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const failover = failoverStub({ cooldownActive: () => true, clearCooldown: vi.fn().mockRejectedValue(new Error("boom")) });
+    render(<RunFooter run={limited()} isLatest onRerun={() => {}} failover={failover} />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("run-clear-cooldown"));
+    });
+    expect(screen.getByTestId("run-clear-cooldown")).not.toBeDisabled();
   });
 
   it("offers neither action once a successor exists", () => {

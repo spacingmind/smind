@@ -1,15 +1,15 @@
 import { useCallback, useState } from "react";
 
 
-import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-error";
+import { Switch } from "@/components/ui/switch";
 
 import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { playNotificationSound } from "@/lib/notification-sound";
-import { cn } from "@/lib/utils";
 import { Icons } from "@/lib/icons";
 
 /** Mirrors General's former copy for this toggle -- moved here per the web-sidebar-attention plan (AC3), not duplicated: general-section.tsx no longer renders it. */
@@ -58,80 +58,70 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
 
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-notifications">
-      <section className="flex flex-col gap-2">
-        <SettingsSectionTitle title="Notifications" />
-        <div className="flex items-center justify-between gap-4">
-          <p className="max-w-sm text-ui-base text-muted-foreground">{PERMISSION_DESCRIPTION[permission]}</p>
-          <Button
-            variant="outline"
-            size="sm"
-            aria-label={PERMISSION_LABEL[permission]}
-            data-testid="settings-notifications-toggle"
-            disabled={permission !== "default"}
-            onClick={requestPermission}
-          >
-            {permission === "granted" ? "Enabled" : "Enable"}
-          </Button>
-        </div>
-      </section>
+      <SettingsGroup>
+        <SettingsRow
+          label="Notifications"
+          description={PERMISSION_DESCRIPTION[permission]}
+          control={
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label={PERMISSION_LABEL[permission]}
+              data-testid="settings-notifications-toggle"
+              disabled={permission !== "default"}
+              onClick={requestPermission}
+            >
+              {permission === "granted" ? "Enabled" : "Enable"}
+            </Button>
+          }
+        />
 
-      <section className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-0.5">
-          <h3 className="text-ui-base font-medium text-foreground">Play a sound</h3>
-          <p className="max-w-sm text-ui-base text-muted-foreground">
-            Play a short sound alongside a browser notification.
-          </p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={soundEnabled}
-          aria-label="Play a sound with notifications"
-          data-testid="settings-notifications-sound-toggle"
-          onClick={() => setSoundEnabled(!soundEnabled)}
-          className={cn(
-            "h-5 w-9 shrink-0 rounded-full border border-input-border transition-colors",
-            soundEnabled ? "bg-primary" : "bg-transparent",
-          )}
-        >
-          <span
-            className={cn(
-              "block size-3.5 rounded-full bg-background shadow transition-transform",
-              soundEnabled ? "translate-x-4" : "translate-x-0.5",
+        <SettingsRow
+          label="Play a sound"
+          description="Play a short sound alongside a browser notification."
+          control={
+            <Switch
+              checked={soundEnabled}
+              onCheckedChange={setSoundEnabled}
+              aria-label="Play a sound with notifications"
+              data-testid="settings-notifications-sound-toggle"
+            />
+          }
+        />
+
+        <SettingsRow
+          label="Test notification"
+          description={
+            permission === "granted"
+              ? "Send a test notification to confirm it works."
+              : "Enable notifications above first."
+          }
+          control={
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="settings-notifications-test-button"
+              disabled={permission !== "granted"}
+              onClick={sendTestNotification}
+            >
+              Send test
+            </Button>
+          }
+        />
+
+        {testState.status !== "idle" && (
+          <div className="px-4 pb-3">
+            {testState.status === "sent" && (
+              <p data-testid="settings-notifications-test-success" className="text-ui-base text-success">
+                Test notification sent.
+              </p>
             )}
-          />
-        </button>
-      </section>
-
-      <section className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-0.5">
-            <h3 className="text-ui-base font-medium text-foreground">Test notification</h3>
-            <p className="max-w-sm text-ui-base text-muted-foreground">
-              {permission === "granted"
-                ? "Send a test notification to confirm it works."
-                : "Enable notifications above first."}
-            </p>
+            {testState.status === "error" && (
+              <FormError message={testState.message} testId="settings-notifications-test-error" />
+            )}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            data-testid="settings-notifications-test-button"
-            disabled={permission !== "granted"}
-            onClick={sendTestNotification}
-          >
-            Send test
-          </Button>
-        </div>
-        {testState.status === "sent" && (
-          <p data-testid="settings-notifications-test-success" className="text-ui-base text-success">
-            Test notification sent.
-          </p>
         )}
-        {testState.status === "error" && (
-          <FormError message={testState.message} testId="settings-notifications-test-error" />
-        )}
-      </section>
+      </SettingsGroup>
     </div>
   );
 }
@@ -139,6 +129,7 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
 registerSettingsSection({
   id: "notifications",
   label: "Notifications",
+  description: "Browser notifications and sounds.",
   // Ungrouped, so it sorts with General/Appearance above every group heading.
   order: 110,
   icon: <Icons.notifications aria-hidden className="size-3.5" />,
