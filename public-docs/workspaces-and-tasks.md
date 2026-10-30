@@ -223,3 +223,25 @@ are never touched.
 If the task has sub-tasks, the web dialog offers **Archive parent only** and
 lists the children. To bring an archived task back, see
 [Archive and restore](git-and-prs.md#archive-and-restore).
+
+### Scratch directories
+
+Every agent run gets a private scratch directory,
+`$SMIND_HOME/scratch/<task id>/`, and smind points `TMPDIR` (and `TMP` and
+`TEMP` on Windows) at it. Anything the agent creates with `mktemp -d`, such as
+a temporary `HOME` for a hermetic test run, then lands there and belongs to
+that task. If you pin `TMPDIR` in a provider's env, your value wins.
+
+Archiving or deleting a task removes its scratch directory. smind never
+follows a symlink out of it, and a task with a running run is left alone. At
+startup, and every ten minutes after, smind also removes scratch directories
+of tasks that are archived, deleted or unknown.
+
+```sh
+smind scratch usage     # total size, and how much belongs to closed tasks
+smind scratch clean     # remove the scratch of archived tasks now
+```
+
+Settings -> General shows the same numbers with a **Clean archived scratch**
+button. See `agents.sharedCaches` in [Configuration](configuration.md) for the
+shared build caches.
