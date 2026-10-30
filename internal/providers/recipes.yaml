@@ -1,0 +1,365 @@
+# Recipe catalog for providers.custom instances: one row is a template for
+# one endpoint — harness, wire protocol, env overlay and model catalog.
+# Values are placeholders only; keys are never listed here (kind: secret
+# names the env var the user's key goes into). The loader validates every
+# row at startup (ValidateRecipe), so a bad row fails the load.
+recipes:
+  - id: zai-glm
+    label: "Z.AI GLM Coding Plan"
+    harness: claude-code
+    endpointKind: anthropic
+    vendor: zai
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: literal
+        value: "https://api.z.ai/api/anthropic"
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secret
+        value: ""
+      - name: API_TIMEOUT_MS
+        kind: literal
+        value: "3000000"
+      - name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+        kind: literal
+        value: "1"
+      - name: ANTHROPIC_DEFAULT_OPUS_MODEL
+        kind: literal
+        value: 'glm-5.3[1m]'
+      - name: ANTHROPIC_DEFAULT_SONNET_MODEL
+        kind: literal
+        value: 'glm-5.3[1m]'
+      - name: ANTHROPIC_DEFAULT_HAIKU_MODEL
+        kind: literal
+        value: 'glm-5.3-flash[1m]'
+      - name: CLAUDE_CODE_AUTO_COMPACT_WINDOW
+        kind: literal
+        value: "1000000"
+    models:
+      - id: glm-5.3
+        default: true
+      - id: glm-5.3-flash
+    thinking: supported
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "GLM 429s say 'usage limit reached for N hour' with a UTC+8 reset."
+      - "Uses ANTHROPIC_AUTH_TOKEN, not ANTHROPIC_API_KEY."
+      - "China endpoint open.bigmodel.cn is inferred and not offered."
+    docs: "https://docs.z.ai/devpack/tool/claude"
+    source: vendor-docs
+    verifiedAt: ""
+    unverified:
+      - "models list beyond glm-5.3 (Paseo docs also list glm-4.5-air, glm-5-turbo, glm-5.1, glm-4.7)"
+
+  - id: qwen-dashscope
+    label: "Qwen (Alibaba Coding Plan)"
+    harness: claude-code
+    endpointKind: anthropic
+    vendor: generic
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: literal
+        value: "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secret
+        value: ""
+    models:
+      - id: qwen3.5-plus
+        default: true
+      - id: qwen3-coder-next
+      - id: kimi-k2.5
+      - id: glm-5
+      - id: MiniMax-M3
+    thinking: hidden
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "Create the key in the Singapore region; keys look like sk-sp-..."
+      - "The coding plan is for personal interactive use only; pay-as-you-go uses https://dashscope-intl.aliyuncs.com/apps/anthropic with ANTHROPIC_API_KEY."
+    docs: "https://www.alibabacloud.com/help/en/model-studio/"
+    source: paseo-docs
+    verifiedAt: ""
+    unverified:
+      - "China region base URL"
+
+  - id: deepseek
+    label: "DeepSeek"
+    harness: claude-code
+    endpointKind: anthropic
+    vendor: generic
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: literal
+        value: "https://api.deepseek.com/anthropic"
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secret
+        value: ""
+      - name: ANTHROPIC_MODEL
+        kind: literal
+        value: 'deepseek-flash[1m]'
+      - name: ANTHROPIC_DEFAULT_OPUS_MODEL
+        kind: literal
+        value: 'deepseek-flash[1m]'
+      - name: ANTHROPIC_DEFAULT_SONNET_MODEL
+        kind: literal
+        value: 'deepseek-flash[1m]'
+      - name: ANTHROPIC_DEFAULT_HAIKU_MODEL
+        kind: literal
+        value: "deepseek-flash"
+      - name: CLAUDE_CODE_SUBAGENT_MODEL
+        kind: literal
+        value: "deepseek-flash"
+      - name: CLAUDE_CODE_EFFORT_LEVEL
+        kind: literal
+        value: "max"
+      - name: CLAUDE_CODE_AUTO_COMPACT_WINDOW
+        kind: literal
+        value: "786432"
+    models:
+      - id: deepseek-flash
+        default: true
+      - id: deepseek-v4-pro
+    thinking: hidden
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "Ignores cache_control, mcp_servers and budget_tokens."
+      - "An unknown claude-opus* name is billed as Pro; unknown non-claude names return 400."
+    docs: "https://api-docs.deepseek.com/"
+    source: vendor-docs
+    verifiedAt: ""
+
+  - id: kimi-moonshot
+    label: "Kimi (Moonshot)"
+    harness: claude-code
+    endpointKind: anthropic
+    vendor: generic
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: literal
+        value: "https://api.moonshot.ai/anthropic"
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secret
+        value: ""
+    models:
+      - id: kimi-k3.1-pro
+        default: true
+      - id: kimi-k3.1-pro-highspeed
+    thinking: hidden
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "Kimi Code membership uses https://api.kimi.com/coding/ instead."
+    docs: "https://platform.moonshot.ai/"
+    source: inferred
+    verifiedAt: ""
+    unverified:
+      - "base URL for Claude Code is inferred, not documented by the vendor"
+
+  - id: minimax
+    label: "MiniMax"
+    harness: claude-code
+    endpointKind: anthropic
+    vendor: generic
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: literal
+        value: "https://api.minimax.io/anthropic"
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secret
+        value: ""
+      - name: ANTHROPIC_MODEL
+        kind: literal
+        value: 'MiniMax-M3.1-Flash[1m]'
+      - name: ANTHROPIC_DEFAULT_SONNET_MODEL
+        kind: literal
+        value: 'MiniMax-M3.1-Flash[1m]'
+      - name: ANTHROPIC_DEFAULT_OPUS_MODEL
+        kind: literal
+        value: 'MiniMax-M3.1-Flash[1m]'
+      - name: ANTHROPIC_DEFAULT_HAIKU_MODEL
+        kind: literal
+        value: 'MiniMax-M3.1-Flash[1m]'
+      - name: CLAUDE_CODE_AUTO_COMPACT_WINDOW
+        kind: literal
+        value: "524288"
+      - name: CLAUDE_CODE_EFFORT_LEVEL
+        kind: literal
+        value: "max"
+    models:
+      - id: MiniMax-M3.1-Flash
+        default: true
+    thinking: hidden
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "China base URL api.minimaxi.com is inferred and not offered."
+    docs: "https://platform.minimax.io/"
+    source: vendor-docs
+    verifiedAt: ""
+
+  - id: openrouter
+    label: "OpenRouter"
+    harness: claude-code
+    endpointKind: anthropic
+    vendor: generic
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: literal
+        value: "https://openrouter.ai/api"
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secret
+        value: ""
+      - name: ANTHROPIC_API_KEY
+        kind: literal
+        value: ""
+      - name: CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY
+        kind: literal
+        value: "1"
+    models:
+      - id: '~anthropic/claude-sonnet-latest[1m]'
+        default: true
+      - id: qwen/qwen3-coder
+    modelsRequired: false
+    thinking: supported
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "Add [1m] to a model id for 1M context."
+      - "Only first-party Anthropic routing is guaranteed; spend is yours."
+    docs: "https://openrouter.ai/docs/guides/coding-agents/claude-code-integration"
+    source: vendor-docs
+    verifiedAt: ""
+
+  - id: ollama
+    label: "Ollama (local)"
+    harness: claude-code
+    endpointKind: local
+    vendor: generic
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: literal
+        value: "http://localhost:11434"
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secretDefault
+        value: "ollama"
+      - name: ANTHROPIC_API_KEY
+        kind: literal
+        value: ""
+    models: []
+    modelsRequired: true
+    thinking: hidden
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "Needs a 64k+ context model with tools."
+      - "Hosted WebSearch is not supported."
+      - "No key to store."
+    docs: "https://docs.ollama.com/integrations/claude-code"
+    source: vendor-docs
+    verifiedAt: ""
+
+  - id: lm-studio
+    label: "LM Studio (local)"
+    harness: claude-code
+    endpointKind: local
+    vendor: generic
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: literal
+        value: "http://localhost:1234"
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secretDefault
+        value: "lmstudio"
+    models: []
+    modelsRequired: true
+    thinking: hidden
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "Only POST /v1/messages is documented."
+      - "If 'Require Authentication' is on in LM Studio, set a real key after adding."
+    docs: "https://lmstudio.ai/docs"
+    source: vendor-docs
+    verifiedAt: ""
+
+  - id: litellm
+    label: "LiteLLM proxy"
+    harness: claude-code
+    endpointKind: anthropic
+    vendor: generic
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: userBaseURL
+        value: "http://localhost:4000"
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secret
+        value: ""
+    models: []
+    modelsRequired: true
+    thinking: hidden
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "Model names must match the LiteLLM config.yaml exactly, without [1m]."
+      - "MCP tool search is off on non-first-party hosts unless ENABLE_TOOL_SEARCH=true."
+      - "Bedrock routes need CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1."
+    docs: "https://docs.litellm.ai/docs/tutorials/claude_responses_api"
+    source: vendor-docs
+    verifiedAt: ""
+    unverified:
+      - "Codex route through LiteLLM"
+
+  - id: anthropic-compatible
+    label: "Anthropic-compatible URL"
+    harness: claude-code
+    endpointKind: anthropic
+    vendor: generic
+    env:
+      - name: ANTHROPIC_BASE_URL
+        kind: userBaseURL
+        value: ""
+      - name: ANTHROPIC_AUTH_TOKEN
+        kind: secret
+        value: ""
+    models: []
+    modelsRequired: true
+    thinking: hidden
+    disallowedTools: ["WebSearch"]
+    notes:
+      - "Any proxy that speaks the Anthropic Messages API; WebSearch is disallowed because third-party endpoints lack it."
+    docs: "https://docs.claude.com/en/docs/claude-code/llm-gateway"
+    source: paseo-docs
+    verifiedAt: ""
+
+  - id: openai-responses-compatible
+    label: "OpenAI Responses-compatible URL"
+    harness: codex-app-server
+    endpointKind: openai-responses
+    vendor: generic
+    env:
+      - name: OPENAI_BASE_URL
+        kind: userBaseURL
+        value: ""
+      - name: OPENAI_API_KEY
+        kind: secret
+        value: ""
+    models: []
+    modelsRequired: true
+    thinking: supported
+    disallowedTools: []
+    notes:
+      - "Codex only speaks the OpenAI Responses API; chat-completions-only vendors cannot use this."
+    docs: "https://developers.openai.com/codex/config-advanced"
+    source: paseo-docs
+    verifiedAt: ""
+
+  - id: chat-completions-via-opencode
+    label: "Chat-completions endpoint via OpenCode"
+    harness: acp
+    endpointKind: chat-completions
+    vendor: generic
+    env: []
+    models: []
+    modelsRequired: true
+    thinking: supported
+    disallowedTools: []
+    notes:
+      - "Runs through OpenCode's own provider config (opencode.json); the OpenCode provider exists, but adding this recipe is not supported yet."
+      - "Not usable with Codex."
+    docs: "https://opencode.ai/docs/providers/"
+    source: inferred
+    verifiedAt: ""
+    unverified:
+      - "whole recipe: nothing was run, and addFromRecipe cannot build an OpenCode instance yet"
