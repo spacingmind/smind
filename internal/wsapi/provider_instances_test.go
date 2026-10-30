@@ -274,7 +274,7 @@ func TestProviderInstanceRPCs_RefuseAgentCallers(t *testing.T) {
 			t.Errorf("%s: err = %v, want forbidden", method, err)
 		}
 	}
-	if h.file(t) != "" || len(h.listIDs(t)) != 4 || len(queued(sub)) != 0 {
+	if h.file(t) != "" || len(h.listIDs(t)) != 9 || len(queued(sub)) != 0 {
 		t.Fatalf("an agent caller changed state: %q %v", h.file(t), h.listIDs(t))
 	}
 	for _, m := range RunScopedMethods {
@@ -301,7 +301,7 @@ func TestProviderReload_AddsAndRemovesInstanceLive(t *testing.T) {
 	if _, err := h.call(t, "provider.reload", &requestContext{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(h.listIDs(t), ","); got != "claude-native,glm,kimi,codex-native,claude-a,my-agent" {
+	if got := strings.Join(h.listIDs(t), ","); got != "claude-native,glm,kimi,codex-native,opencode,copilot,cline,goose,cursor,claude-a,my-agent" {
 		t.Fatalf("after reload: %s", got)
 	}
 	e := h.listedEntry(t, "claude-a")
@@ -318,7 +318,7 @@ func TestProviderReload_AddsAndRemovesInstanceLive(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "providers.custom[1].command: required") {
 		t.Fatalf("err = %v", err)
 	}
-	if got := strings.Join(h.listIDs(t), ","); got != "claude-native,glm,kimi,codex-native,claude-a,my-agent" {
+	if got := strings.Join(h.listIDs(t), ","); got != "claude-native,glm,kimi,codex-native,opencode,copilot,cline,goose,cursor,claude-a,my-agent" {
 		t.Fatalf("a rejected reload changed the registry: %s", got)
 	}
 
@@ -327,7 +327,7 @@ func TestProviderReload_AddsAndRemovesInstanceLive(t *testing.T) {
 	if _, err := h.call(t, "provider.reload", &requestContext{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(h.listIDs(t), ","); got != "claude-native,glm,kimi,codex-native" {
+	if got := strings.Join(h.listIDs(t), ","); got != "claude-native,glm,kimi,codex-native,opencode,copilot,cline,goose,cursor" {
 		t.Fatalf("after removal: %s", got)
 	}
 }
