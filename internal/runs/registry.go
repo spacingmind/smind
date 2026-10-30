@@ -1528,7 +1528,7 @@ func (reg *Registry) finish(r *run, err error) {
 	// rule. Never alters status, stop reason, error text or disposition.
 	var fail ratelimit.Result
 	if status == StatusError {
-		fail = ratelimit.Classify(ratelimit.Input{Provider: string(r.provider), Err: errMsg, Signal: rateSignal}, time.Now())
+		fail = ratelimit.Classify(ratelimit.Input{Provider: string(r.provider), Err: errMsg, Signal: rateSignal, Vendor: providers.VendorOf(string(r.provider))}, time.Now())
 		// A CLI that died without a result is its own typed failure; a stderr
 		// that says it hit a usage limit is still a rate limit, the more
 		// actionable of the two.
