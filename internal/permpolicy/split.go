@@ -39,6 +39,10 @@ type Parsed struct {
 	Unparsed     []string
 }
 
+// maxNestDepth caps substitution, subshell and shell -c recursion; past it
+// the text is still consumed but reported instead of analysed.
+const maxNestDepth = 8
+
 // SplitCommand splits a shell command into simple commands. It never panics
 // and never returns an error: doubt goes into Unparsed and the caller asks.
 func SplitCommand(cmd string) Parsed {
@@ -49,13 +53,19 @@ func SplitCommand(cmd string) Parsed {
 	}
 	s := scanner{src: cmd, p: &p, segStart: -1}
 	s.run()
-	s.consumeHeredocBodies() // a heredoc on the last line owns the rest even without a newline
+	s.finish()
+	p.Segments = append(s.segs, s.inner...)
+	p.Normalized = s.normalized()
+	return p
+}
+
+// finish consumes any heredoc bodies left on the last line and re-renders
+// every segment's Raw now that all body sizes are known.
+func (s *scanner) finish() {
+	s.consumeHeredocBodies()
 	for i := range s.segs {
 		s.segs[i].Raw = s.elided(s.spans[i].start, s.spans[i].end)
 	}
-	p.Segments = s.segs
-	p.Normalized = s.normalized()
-	return p
 }
 
 // word accumulates one shell word. dynamic is set for an unquoted or
@@ -95,6 +105,8 @@ type scanner struct {
 	segStart int
 	pending  []*heredoc // heredoc operators on the line being scanned
 	heredocs []*heredoc // every heredoc, in operator order, once consumed
+	depth    int        // nesting level of substitutions and shells
+	inner    []Segment  // segments of substituted/nested text, appended after segs
 }
 
 // span is the source range a segment was built from; Raw is re-rendered from
@@ -136,6 +148,14 @@ func (s *scanner) run() {
 			} else {
 				s.i++
 			}
+		case c == '$' && s.peek(1) == '(':
+			s.substitution('$')
+		case c == '`':
+			s.substitution('`')
+		case c == '(' && !s.w.started && s.cur == nil:
+			s.subshellGroup()
+		case c == '{' && !s.w.started && s.cur == nil && isSpaceOrEOL(s.peek(1)):
+			s.braceGroup()
 		case c == '>' || c == '<' || (isDigit(c) && s.peek(1) == '>' && !s.w.started):
 			s.redirect()
 		default:
@@ -146,9 +166,8 @@ func (s *scanner) run() {
 }
 
 // wordChar consumes one character that begins or continues a word, so a
-// redirect target can reuse the same rules. A '(' in command position is a
-// subshell the splitter does not analyse (yet); quotes and escapes are
-// stripped from the value.
+// redirect target can reuse the same rules; quotes and escapes are stripped
+// from the value.
 func (s *scanner) wordChar() {
 	c := s.src[s.i]
 	if c == '\\' && s.peek(1) == '\n' { // line continuation joins lines
@@ -159,9 +178,6 @@ func (s *scanner) wordChar() {
 		s.w.started = true
 		if s.segStart < 0 {
 			s.segStart = s.i
-		}
-		if c == '(' && s.cur == nil {
-			s.unparsed("subshell not supported yet")
 		}
 	}
 	switch c {
@@ -220,7 +236,15 @@ func (s *scanner) scanDoubleQuoted() {
 				continue
 			}
 		}
-		if c == '$' || c == '`' {
+		if c == '$' && s.i+1 < len(s.src) && s.src[s.i+1] == '(' {
+			s.substitution('$')
+			continue
+		}
+		if c == '`' {
+			s.substitution('`')
+			continue
+		}
+		if c == '$' {
 			s.w.dynamic = true
 		}
 		s.w.val = append(s.w.val, c)
@@ -263,6 +287,7 @@ func (s *scanner) endWord() {
 func (s *scanner) closeSeg(pipe bool) {
 	s.endWord()
 	if s.cur != nil {
+		s.shellScript()
 		if pipe {
 			s.cur.PipeNext = true
 		}
@@ -301,9 +326,8 @@ func (s *scanner) peek(k int) byte {
 // redirect parses one redirection operator starting at s.i (>, <, >>, <<,
 // <<<, &>, fd-prefixed forms and the inline duplication of 2>&1) plus its
 // target word, recording it on the current segment instead of Argv. A
-// process substitution (<( or >() runs words in a subshell we do not analyse,
-// and heredoc bodies are not elided yet, so both are reported as Unparsed
-// until the later steps handle them.
+// process substitution (<( or >() runs a subshell we do not analyse, so it
+// is reported as Unparsed.
 func (s *scanner) redirect() {
 	start := s.i
 	op := ""
@@ -357,7 +381,7 @@ func (s *scanner) redirect() {
 		}
 	}
 	if strings.HasSuffix(op, "<") && s.peek(0) == '(' || strings.HasSuffix(op, ">") && s.peek(0) == '(' {
-		s.unparsed("process substitution cannot be analysed")
+		s.unparsed("process substitution")
 	}
 	// A heredoc's body starts after the line ends; its target is the
 	// delimiter word (quotes stripped, never expanded by the shell).
@@ -405,6 +429,216 @@ func (s *scanner) scanWord() {
 		}
 		s.wordChar()
 	}
+}
+
+// substitution consumes a $( ... ) command substitution (kind '$') or a
+// backtick substitution at s.i: the enclosing word becomes dynamic (its
+// value is whatever the inner commands print), the literal source text stays
+// in the word for display, and the inner commands are parsed so a floor
+// check still sees them.
+func (s *scanner) substitution(kind byte) {
+	if !s.w.started {
+		s.w.started = true
+		if s.segStart < 0 {
+			s.segStart = s.i
+		}
+	}
+	s.w.dynamic = true
+	start := s.i
+	var inner string
+	var after int
+	var ok bool
+	if kind == '$' {
+		inner, after, ok = s.captureGroup(2)
+	} else {
+		inner, after, ok = s.captureBacktick()
+	}
+	s.w.val = append(s.w.val, s.src[start:after]...)
+	s.i = after
+	if !ok {
+		if kind == '$' {
+			s.unparsed("unclosed $(")
+		} else {
+			s.unparsed("unclosed backtick")
+		}
+		return
+	}
+	s.recurse(inner)
+}
+
+// subshellGroup consumes a ( ... ) subshell at s.i: its commands run in a
+// child shell, so only the inner segments matter — the parens contribute no
+// segment of their own.
+func (s *scanner) subshellGroup() {
+	inner, after, ok := s.captureGroup(1)
+	s.i = after
+	if !ok {
+		s.unparsed("unclosed (")
+	}
+	s.recurse(strings.TrimSpace(inner))
+}
+
+// braceGroup consumes a { ...; } group at s.i like a subshell: braces and
+// parens nest, quotes are respected, and the group's commands are appended
+// after the outer list.
+func (s *scanner) braceGroup() {
+	i := s.i + 1
+	start := i
+	depth := 0
+	for i < len(s.src) {
+		switch s.src[i] {
+		case '\\':
+			i += 2
+		case '\'':
+			j := strings.IndexByte(s.src[i+1:], '\'')
+			if j < 0 {
+				s.unparsed("unclosed {")
+				s.recurse(strings.TrimSpace(s.src[start:]))
+				s.i = len(s.src)
+				return
+			}
+			i += j + 2
+		case '"':
+			i++
+			for i < len(s.src) && s.src[i] != '"' {
+				if s.src[i] == '\\' {
+					i++
+				}
+				i++
+			}
+			i++
+		case '{', '(':
+			depth++
+			i++
+		case '}', ')':
+			depth--
+			if depth < 0 {
+				s.recurse(s.src[start:i])
+				s.i = i + 1
+				return
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	s.unparsed("unclosed {")
+	s.recurse(strings.TrimSpace(s.src[start:]))
+	s.i = len(s.src)
+}
+
+// captureGroup returns the text of the balanced parenthesised group starting
+// at s.i (openLen 1 for '(', 2 for '$('), the offset just past the closing
+// ')', and whether the group closed. Quotes and escapes inside are honoured
+// so a quoted paren cannot close the group early.
+func (s *scanner) captureGroup(openLen int) (inner string, after int, ok bool) {
+	i := s.i + openLen
+	start := i
+	depth := 1
+	for i < len(s.src) {
+		switch s.src[i] {
+		case '\\':
+			i += 2
+		case '\'':
+			j := strings.IndexByte(s.src[i+1:], '\'')
+			if j < 0 {
+				return s.src[start:], len(s.src), false
+			}
+			i += j + 2
+		case '"':
+			i++
+			for i < len(s.src) && s.src[i] != '"' {
+				if s.src[i] == '\\' {
+					i++
+				}
+				i++
+			}
+			i++
+		case '(':
+			depth++
+			i++
+		case ')':
+			depth--
+			if depth == 0 {
+				return s.src[start:i], i + 1, true
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return s.src[start:], len(s.src), false
+}
+
+// captureBacktick returns the text of a backtick substitution starting at
+// s.i, the offset just past the closing backtick, and whether it closed.
+func (s *scanner) captureBacktick() (inner string, after int, ok bool) {
+	i := s.i + 1
+	start := i
+	for i < len(s.src) {
+		switch s.src[i] {
+		case '\\':
+			i += 2
+		case '`':
+			return s.src[start:i], i + 1, true
+		default:
+			i++
+		}
+	}
+	return s.src[start:], len(s.src), false
+}
+
+// recurse parses the text of a substitution, subshell, group or shell -c
+// script and defers its segments to appear after the outer command list, so
+// a rule or floor check sees commands the outer words merely mention. The
+// inner scanner shares Parsed, so its heredoc byte count and its own doubt
+// propagate to the parent.
+func (s *scanner) recurse(inner string) {
+	if s.depth >= maxNestDepth {
+		s.unparsed("nesting too deep")
+		return
+	}
+	in := scanner{src: inner, p: s.p, segStart: -1, depth: s.depth + 1}
+	in.run()
+	in.finish()
+	s.inner = append(s.inner, in.segs...)
+	s.inner = append(s.inner, in.inner...)
+}
+
+// shellScript recurses into the literal script word of bash|sh|zsh|dash|ksh
+// -c so the floor sees the inner commands; a missing or non-literal script
+// word cannot be known in advance, so it is reported instead.
+func (s *scanner) shellScript() {
+	argv := s.cur.Argv
+	if len(argv) == 0 || !isShell(argv[0]) {
+		return
+	}
+	for i := 1; i < len(argv); i++ {
+		if argv[i] != "-c" {
+			continue
+		}
+		if i+1 >= len(argv) || strings.ContainsAny(argv[i+1], "$`") {
+			s.unparsed("shell -c with non-literal command")
+			return
+		}
+		s.recurse(argv[i+1])
+		return
+	}
+}
+
+func isShell(name string) bool {
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		name = name[i+1:]
+	}
+	switch name {
+	case "bash", "sh", "zsh", "dash", "ksh":
+		return true
+	}
+	return false
+}
+
+func isSpaceOrEOL(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ';' || c == 0
 }
 
 // consumeHeredocBodies swallows the bodies of every heredoc operator on the

@@ -222,8 +222,8 @@ func TestSplitCommand_Dynamic(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			p := SplitCommand(tc.cmd)
-			if len(p.Segments) != 1 {
-				t.Fatalf("segments = %+v, want one", p.Segments)
+			if len(p.Segments) == 0 {
+				t.Fatalf("segments = %+v, want at least one", p.Segments)
 			}
 			if p.Segments[0].Dynamic != tc.dynamic {
 				t.Errorf("Dynamic = %v, want %v", p.Segments[0].Dynamic, tc.dynamic)
@@ -250,10 +250,14 @@ func TestSplitCommand_UnparsedTable(t *testing.T) {
 		{"unbalanced single quote", "echo 'unclosed", "quote", 1},
 		{"eval", "eval x", "eval", 1},
 		{"dollar command", "$CMD arg", "expansion", 1},
-		{"backtick command", "`cmd` x", "expansion", 1},
-		{"subshell", "(cd x && rm y)", "subshell", 2},
+		{"backtick command", "`cmd` x", "expansion", 2},
 		{"process substitution", "echo <(ls)", "process substitution", 1},
 		{"dangling redirect", "echo hi >", "target", 1},
+		{"shell -c non-literal", `sh -c "$x"`, "shell -c", 1},
+		{"shell -c without a script", "bash -c", "shell -c", 1},
+		{"unclosed command substitution", "echo $(id", "unclosed", 1},
+		{"unclosed subshell", "(a; b", "unclosed", 2},
+		{"nesting too deep", strings.Repeat("$(", 10) + "x" + strings.Repeat(")", 10), "nesting", 9},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -358,5 +362,79 @@ func TestSplitCommand_Heredoc(t *testing.T) {
 	}
 	if len(p.Segments) != 1 || strings.Contains(p.Normalized, "no end") {
 		t.Errorf("unterminated heredoc: %+v normalized %q", p.Segments, p.Normalized)
+	}
+}
+
+func TestSplitCommand_Substitution(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		cmd   string
+		outer []Segment
+		inner []Segment
+	}{
+		{
+			"command substitution",
+			"echo $(git push origin x)",
+			[]Segment{{Argv: []string{"echo", "$(git push origin x)"}, Dynamic: true}},
+			[]Segment{{Argv: []string{"git", "push", "origin", "x"}}},
+		},
+		{
+			"backticks",
+			"echo `git stash`",
+			[]Segment{{Argv: []string{"echo", "`git stash`"}, Dynamic: true}},
+			[]Segment{{Argv: []string{"git", "stash"}}},
+		},
+		{
+			"substitution inside double quotes",
+			`echo "$(git push)"`,
+			[]Segment{{Argv: []string{"echo", "$(git push)"}, Dynamic: true}},
+			[]Segment{{Argv: []string{"git", "push"}}},
+		},
+		{
+			"subshell",
+			"(cd x && git stash)",
+			nil,
+			[]Segment{{Argv: []string{"cd", "x"}}, {Argv: []string{"git", "stash"}}},
+		},
+		{
+			"brace group",
+			"{ a; b; }",
+			nil,
+			[]Segment{{Argv: []string{"a"}}, {Argv: []string{"b"}}},
+		},
+		{
+			"literal shell -c keeps the outer segment",
+			"bash -c 'git stash'",
+			[]Segment{{Argv: []string{"bash", "-c", "git stash"}}},
+			[]Segment{{Argv: []string{"git", "stash"}}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := SplitCommand(tc.cmd)
+			want := append(append([]Segment{}, tc.outer...), tc.inner...)
+			checkSegments(t, Parsed{Segments: p.Segments}, want)
+			if len(p.Unparsed) != 0 {
+				t.Errorf("Unparsed = %q, want none", p.Unparsed)
+			}
+		})
+	}
+
+	// Inner segments pipe among themselves but never across the boundary.
+	p := SplitCommand("bash -c 'curl x | sh'")
+	if len(p.Segments) != 3 || p.Segments[0].PipeNext {
+		t.Fatalf("segments = %+v", p.Segments)
+	}
+	if !p.Segments[1].PipeNext || p.Segments[2].PipeNext {
+		t.Errorf("inner pipe flags = [%v %v], want [true false]",
+			p.Segments[1].PipeNext, p.Segments[2].PipeNext)
+	}
+
+	// Doubt inside a substitution reaches the parent's Unparsed.
+	p = SplitCommand("echo $(eval x)")
+	if len(p.Unparsed) == 0 || !strings.Contains(strings.Join(p.Unparsed, "; "), "eval") {
+		t.Errorf("Unparsed = %q, want the inner eval reason to propagate", p.Unparsed)
 	}
 }
