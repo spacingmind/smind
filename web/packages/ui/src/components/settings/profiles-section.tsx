@@ -229,7 +229,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
               />
             )}
             {(profiles.length > 0 || openCard === "new") && (
-              <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3">
+              <ul className="overflow-hidden rounded-xl border border-border bg-card [&>*+*]:border-t [&>*+*]:border-border">
                 {openCard === "new" && (
                   <li data-testid="profile-new-form" className="rounded-lg px-2 py-1.5">
                     <ProfileForm
@@ -546,6 +546,7 @@ registerSettingsSection({
   id: "agents",
   label: "Agents",
   groupLabel: "Agents & providers",
+  description: "Named bundles of provider, mode and thinking level for new tasks.",
   order: 175,
   icon: <Icons.agent aria-hidden className="size-3.5" />,
   render: (ctx) => <ProfilesSection {...ctx} />,

@@ -4,6 +4,7 @@ import { UsageBody } from "@/components/account-usage/usage-body";
 import { UsageControls } from "@/components/account-usage/usage-controls";
 import { useUsageSurface } from "@/components/account-usage/use-usage-surface";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { SettingsStatStrip } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -102,6 +103,21 @@ const TOKEN_COLUMNS: { field: TokenField; label: string }[] = [
   { field: "outputTokens", label: "Output" },
   { field: "reasoningTokens", label: "Reasoning" },
 ];
+
+/**
+ * Sums one token column across rows for the stat strip: null when any row
+ * leaves the field unreported (named in `unreported`, or not a number) --
+ * the data rule that unreported never means 0.
+ */
+export function sumColumn(rows: UsageSummaryRow[], field: TokenField): number | null {
+  let total = 0;
+  for (const row of rows) {
+    const value = row[field];
+    if (row.unreported?.includes(field) || typeof value !== "number") return null;
+    total += value;
+  }
+  return total;
+}
 
 /**
  * A block heading inside the Usage section. Not SettingsSectionTitle: under
@@ -308,7 +324,7 @@ function UsageSection({ client }: SettingsSectionContext) {
             </Button>
           }
         />
-        <div className="flex flex-wrap items-end gap-4">
+        <div className="flex flex-wrap items-end gap-4 rounded-xl border border-border bg-card px-4 py-3">
           <div className="flex flex-col gap-1">
             <span className="text-ui-sm text-muted-foreground">Scope</span>
             <StepGroup groupLabel="usage-scope" options={SCOPE_OPTIONS} value={scope} onChange={changeScope} />
@@ -341,52 +357,64 @@ function UsageSection({ client }: SettingsSectionContext) {
           description="Runs report usage when their agent does; try a longer range."
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl border bg-card">
-          <table className="w-full text-ui-sm">
-            <thead>
-              <tr className="text-left text-muted-foreground">
-                <th className="px-3 py-2 font-normal">{GROUP_LABELS[groupBy]}</th>
-                {scope === "all" && <th className="px-3 py-2 font-normal">Scope</th>}
-                <th className="px-3 py-2 text-right font-normal">{countHeader}</th>
-                {TOKEN_COLUMNS.map((col) => (
-                  <th key={col.field} className="px-3 py-2 text-right font-normal">
-                    {col.label}
-                  </th>
-                ))}
-                <th className="px-3 py-2 text-right font-normal">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(rows ?? []).map((row) => (
-                <tr key={`${row.scope}-${row.key}`} data-testid={`usage-row-${row.scope}-${row.key}`} className="border-t">
-                  <td className="px-3 py-2 text-foreground">{labelFor(row)}</td>
-                  {scope === "all" && (
-                    <td className="px-3 py-2 text-muted-foreground">
-                      <span className="rounded-full border border-border px-1.5 text-ui-sm text-muted-foreground">
-                        {row.scope}
-                      </span>
-                    </td>
-                  )}
-                  <td data-testid="usage-cell-count" className="px-3 py-2 text-right tabular-nums text-foreground">
-                    {row.count.toLocaleString("en-US")}
-                  </td>
+        <>
+          <SettingsStatStrip
+            testId="usage-stat-strip"
+            stats={[
+              { label: countHeader, value: (rows ?? []).reduce((n, r) => n + r.count, 0).toLocaleString("en-US") },
+              ...TOKEN_COLUMNS.map((col) => ({
+                label: col.label,
+                value: formatTokens(sumColumn(rows ?? [], col.field), "full"),
+              })),
+            ]}
+          />
+          <div className="overflow-x-auto rounded-xl border bg-card">
+            <table className="w-full text-ui-sm">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="px-3 py-2 font-normal">{GROUP_LABELS[groupBy]}</th>
+                  {scope === "all" && <th className="px-3 py-2 font-normal">Scope</th>}
+                  <th className="px-3 py-2 text-right font-normal">{countHeader}</th>
                   {TOKEN_COLUMNS.map((col) => (
-                    <td
-                      key={col.field}
-                      data-testid={`usage-cell-${col.field}`}
-                      className="px-3 py-2 text-right tabular-nums text-foreground"
-                    >
-                      {cell(row, col.field)}
-                    </td>
+                    <th key={col.field} className="px-3 py-2 text-right font-normal">
+                      {col.label}
+                    </th>
                   ))}
-                  <td data-testid="usage-cell-costUsd" className="px-3 py-2 text-right tabular-nums text-foreground">
-                    {costCell(row)}
-                  </td>
+                  <th className="px-3 py-2 text-right font-normal">Cost</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {(rows ?? []).map((row) => (
+                  <tr key={`${row.scope}-${row.key}`} data-testid={`usage-row-${row.scope}-${row.key}`} className="border-t">
+                    <td className="px-3 py-2 text-foreground">{labelFor(row)}</td>
+                    {scope === "all" && (
+                      <td className="px-3 py-2 text-muted-foreground">
+                        <span className="rounded-full border border-border px-1.5 text-ui-sm text-muted-foreground">
+                          {row.scope}
+                        </span>
+                      </td>
+                    )}
+                    <td data-testid="usage-cell-count" className="px-3 py-2 text-right tabular-nums text-foreground">
+                      {row.count.toLocaleString("en-US")}
+                    </td>
+                    {TOKEN_COLUMNS.map((col) => (
+                      <td
+                        key={col.field}
+                        data-testid={`usage-cell-${col.field}`}
+                        className="px-3 py-2 text-right tabular-nums text-foreground"
+                      >
+                        {cell(row, col.field)}
+                      </td>
+                    ))}
+                    <td data-testid="usage-cell-costUsd" className="px-3 py-2 text-right tabular-nums text-foreground">
+                      {costCell(row)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
@@ -396,6 +424,7 @@ registerSettingsSection({
   id: "usage",
   label: "Usage",
   groupLabel: "Agents & providers",
+  description: "Plan windows and token usage.",
   order: 190,
   icon: <Icons.usage aria-hidden className="size-3.5" />,
   render: (ctx) => <UsageSection {...ctx} />,
