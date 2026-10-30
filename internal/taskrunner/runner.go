@@ -98,7 +98,7 @@ func WithClaudeCodePermissionPolicy(p claudecode.PermissionPolicy) Option {
 // newACPClient/newClaudeClient fields that satisfy them from within this
 // package's own tests are unexported, so a caller in another package (e.g.
 // internal/server's tests, which need to drive RunPrompt without a real
-// `npx`/GLM or `pip`/Kimi install) has no way to substitute a fake backend
+// `npx`/GLM or Kimi Code install) has no way to substitute a fake backend
 // directly. Overriding just the command -- letting it point at a compiled
 // fake-agent binary that still speaks real ACP over stdio -- covers that
 // need without exporting the backend interfaces themselves. Each provider's
@@ -875,6 +875,19 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	if cliPath != "" {
 		opts = append(opts, claudecode.WithCLIPath(cliPath))
 		env = append(env, launchEnv...)
+	}
+	spec, _ := r.providerRegistry().Get(string(provider))
+	if spec.IsInstance() && len(spec.Command) > 0 {
+		// An instance's command override: a different claude executable
+		// (a wrapper, a pinned install). It wins over the daemon's own.
+		path, err := r.lookPathFunc()(spec.Command[0])
+		if err != nil {
+			return fmt.Errorf("taskrunner: claude code cli for %s: %w", provider, err)
+		}
+		opts = append(opts, claudecode.WithCLIPath(path))
+	}
+	if len(spec.DisallowedTools) > 0 {
+		opts = append(opts, claudecode.WithDisallowedTools(spec.DisallowedTools...))
 	}
 
 	rows, err := r.mcpRowsFor(ctx, workspaceID)

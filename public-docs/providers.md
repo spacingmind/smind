@@ -103,9 +103,12 @@ To limit how many turns one prompt may use, set `agents.glm.maxTurns` in
 
 ## Kimi
 
-`kimi acp` expects an installed, already logged-in Kimi CLI. Install it with
-`pip install kimi-cli`, then run `kimi` once and log in with `/login`.
-smind does not do that login.
+`kimi acp` expects an installed, already logged-in Kimi Code CLI
+([`MoonshotAI/kimi-code`](https://github.com/MoonshotAI/kimi-code)). Install it
+with the vendor's script, `curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash`
+(Windows: `irm https://code.kimi.com/kimi-code/install.ps1 | iex`), then run
+`kimi` once and log in with `/login`. smind does not do that login. The older
+Python `kimi-cli` is archived and no longer supported by smind.
 
 You can also register a Kimi API key as an account. smind has no browser login
 for Kimi, so the credential comes in on stdin:
@@ -197,10 +200,26 @@ providers:
 - `id` is 1 to 64 characters of `a-z`, `0-9`, `.`, `_` and `-`, starting with a
   letter or digit. It may not be a built-in id (`claude-native`, `codex-native`,
   `glm`, `kimi`) and must be unique.
-- `extends` is `claude-native` or `codex-native`.
-- `env` takes only the extended provider's own variable, `CLAUDE_CONFIG_DIR` or
-  `CODEX_HOME`, as an absolute path or one starting with `~/`.
-- An instance may not set `command`, `args`, `models` or `modes`.
+- `extends` is a built-in provider id (`claude-native`, `codex-native`, `glm`,
+  `kimi`) or the id of an earlier ACP entry in the list. An instance cannot
+  extend another instance.
+- `env` on an instance of `claude-native` or `codex-native` takes only that
+  provider's own variable, `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, as an absolute
+  path or one starting with `~/`. On an instance of an ACP provider it is the
+  agent command's free-form environment.
+- `command` replaces the executable the instance runs (for an ACP provider,
+  with `args`; for `claude-native` and `codex-native`, the executable only).
+- `models` replaces the model list of the provider; `additionalModels` adds to
+  it (merged by id). Set one or the other. Each entry has an `id` and an
+  optional `label`, `description` and `default: true`. Without either, an
+  instance of `claude-native` lists the Claude catalog. The first model (or
+  the one marked `default`) is the instance's default, never the base's.
+  smind accepts any model id of a valid shape and shows an id it does not know
+  as it is.
+- `disallowedTools` lists Claude Code tools the instance may not use (for
+  example `WebSearch`); it is passed to the CLI as `--disallowedTools` and
+  applies to instances of `claude-native` only.
+- An instance may not set `modes`.
 
 A bad entry is rejected with the field named, for example
 `providers.custom[2].command: required`. smind reads `providers.custom` at

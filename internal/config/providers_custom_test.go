@@ -3,8 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/providers"
 )
 
 func TestCustomProvider_ConfigValidation_FieldNamed(t *testing.T) {
@@ -16,8 +19,8 @@ func TestCustomProvider_ConfigValidation_FieldNamed(t *testing.T) {
 		{"shadows glm", "providers:\n  custom:\n    - {id: glm, command: x}\n", "providers.custom[0].id: \"glm\" is reserved"},
 		{"shadows claude-native", "providers:\n  custom:\n    - {id: claude-native, extends: claude-native}\n", "providers.custom[0].id"},
 		{"reserved prefix", "providers:\n  custom:\n    - {id: smind-agent, command: x}\n", "providers.custom[0].id"},
-		{"extends glm", "providers:\n  custom:\n    - {id: g2, extends: glm}\n", "providers.custom[0].extends"},
-		{"instance with command", "providers:\n  custom:\n    - {id: c2, extends: claude-native, command: x}\n", "providers.custom[0].command: not allowed with extends"},
+		{"extends unknown", "providers:\n  custom:\n    - {id: g2, extends: nope}\n", "providers.custom[0].extends"},
+		{"instance args without command", "providers:\n  custom:\n    - {id: c2, extends: claude-native, args: [x]}\n", "providers.custom[0].args: needs command"},
 		{"bad env name", "providers:\n  custom:\n    - id: a\n      command: x\n      env: {\"BAD-NAME\": v}\n", "providers.custom[0].env.BAD-NAME"},
 		{"bad model id", "providers:\n  custom:\n    - id: a\n      command: x\n      models: [{id: \"-bad\"}]\n", "providers.custom[0].models[0].id"},
 		{"duplicate mode", "providers:\n  custom:\n    - id: a\n      command: x\n      modes: [{id: m}, {id: m}]\n", "providers.custom[0].modes[1].id: duplicate"},
@@ -107,6 +110,103 @@ func TestProviderInstance_EnvAllowlistOnly(t *testing.T) {
 		if !c.ok && (err == nil || !strings.Contains(err.Error(), "providers.custom[0].env."+c.key)) {
 			t.Errorf("%s %s: err = %v, want a config error naming the field", c.extends, c.key, err)
 		}
+	}
+}
+
+// An instance's overlay is validated field by field, like every other
+// providers.custom entry: the error names the offending field.
+func TestCustomProvider_InstanceOverlayValidation_FieldNamed(t *testing.T) {
+	tests := []struct{ name, yaml, want string }{
+		{"blank tool name", "providers:\n  custom:\n    - {id: a, extends: claude-native}\n    - {id: b, extends: claude-native, disallowedTools: [\"WebSearch\", \"\"]}\n", "providers.custom[1].disallowedTools[1]: required"},
+		{"first tool name blank", "providers:\n  custom:\n    - {id: a, extends: claude-native}\n    - {id: b, extends: claude-native, disallowedTools: [\"\"]}\n", "providers.custom[1].disallowedTools[0]: required"},
+		{"disallowedTools on codex", "providers:\n  custom:\n    - {id: a, extends: codex-native, disallowedTools: [WebSearch]}\n", "providers.custom[0].disallowedTools: only applies to an instance of claude-native"},
+		{"models with additionalModels", "providers:\n  custom:\n    - {id: a, extends: claude-native, models: [{id: m1}], additionalModels: [{id: m2}]}\n", "providers.custom[0].additionalModels: not allowed together with models"},
+		{"bad additionalModels id", "providers:\n  custom:\n    - {id: a, extends: claude-native, additionalModels: [{id: \"-bad\"}]}\n", "providers.custom[0].additionalModels[0].id"},
+		{"duplicate overlay model id", "providers:\n  custom:\n    - {id: a, extends: claude-native, models: [{id: m1}, {id: m1}]}\n", "providers.custom[0].models[1].id: duplicate model id"},
+		{"instance args without command", "providers:\n  custom:\n    - {id: a, extends: claude-native, args: [x]}\n", "providers.custom[0].args: needs command"},
+		{"args on a claude instance", "providers:\n  custom:\n    - {id: a, extends: claude-native, command: x, args: [y]}\n", "providers.custom[0].args: not allowed for an instance of claude-native"},
+		{"modes with extends", "providers:\n  custom:\n    - {id: a, extends: claude-native, modes: [{id: m}]}\n", "providers.custom[0].modes: not allowed with extends"},
+		{"extends an instance", "providers:\n  custom:\n    - {id: i1, extends: claude-native}\n    - {id: i2, extends: i1}\n", "providers.custom[1].extends"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useHome(t, tt.yaml)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load() error = %v, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// An instance's command override reaches the registry: an ACP base keeps
+// its args, a glm instance swaps the executable, a claude-native instance
+// takes only the executable plus its disallowedTools overlay.
+func TestCustomProvider_ACPInstanceCommandOverride(t *testing.T) {
+	useHome(t, `providers:
+  custom:
+    - id: my-agent
+      command: my-agent
+      args: ["--acp"]
+    - id: fast
+      extends: my-agent
+      command: other-agent
+      args: ["--acp", "--fast"]
+      env: {SOME_FLAG: "1"}
+      models: [{id: m1, label: M1, default: true}]
+    - id: glm-fast
+      extends: glm
+      command: my-glm
+      additionalModels: [{id: extra-1}]
+    - id: claude-wrapped
+      extends: claude-native
+      command: my-claude
+      disallowedTools: [WebSearch]
+`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	specs := ProviderSpecs(cfg.Providers.Custom)
+	reg := providers.New()
+	if err := reg.SetCustom(specs); err != nil {
+		t.Fatal(err)
+	}
+	fast, ok := reg.Get("fast")
+	if !ok {
+		t.Fatal("fast: not in the registry")
+	}
+	if fast.Runner != providers.RunnerACP || fast.Extends != "my-agent" {
+		t.Fatalf("fast = %+v", fast)
+	}
+	if !reflect.DeepEqual(fast.Command, []string{"other-agent", "--acp", "--fast"}) {
+		t.Fatalf("fast.Command = %q", fast.Command)
+	}
+	if fast.Env["SOME_FLAG"] != "1" {
+		t.Fatalf("fast.Env = %v", fast.Env)
+	}
+	if len(fast.Models) != 1 || fast.Models[0].ID != "m1" || !fast.Models[0].Default {
+		t.Fatalf("fast.Models = %+v", fast.Models)
+	}
+	glmFast, ok := reg.Get("glm-fast")
+	if !ok {
+		t.Fatal("glm-fast: not in the registry")
+	}
+	if glmFast.Runner != providers.RunnerACP || glmFast.Extends != "glm" || glmFast.Command[0] != "my-glm" {
+		t.Fatalf("glm-fast = %+v", glmFast)
+	}
+	if glmFast.ModelsMode != providers.ModelsAdd || len(glmFast.Models) != 1 || glmFast.Models[0].ID != "extra-1" {
+		t.Fatalf("glm-fast models = %s %+v", glmFast.ModelsMode, glmFast.Models)
+	}
+	wrapped, ok := reg.Get("claude-wrapped")
+	if !ok {
+		t.Fatal("claude-wrapped: not in the registry")
+	}
+	if wrapped.Runner != providers.RunnerClaude || !reflect.DeepEqual(wrapped.Command, []string{"my-claude"}) {
+		t.Fatalf("claude-wrapped = %+v", wrapped)
+	}
+	if !reflect.DeepEqual(wrapped.DisallowedTools, []string{"WebSearch"}) {
+		t.Fatalf("claude-wrapped.DisallowedTools = %q", wrapped.DisallowedTools)
 	}
 }
 
