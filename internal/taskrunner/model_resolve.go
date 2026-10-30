@@ -16,15 +16,15 @@ func (e *NoModelError) Error() string {
 }
 
 // ResolveModel is the model a run of provider launches with: the requested
-// one, else provider's configured default (an instance falls back to its base
-// provider's), else "" -- and for a claude-native run, "" is refused with a
+// one, else provider's configured default (an instance with its own models: that
+// list's default; an instance with none: its base provider's), else "" -- and for a claude-native run, "" is refused with a
 // *NoModelError instead of letting the CLI pick its own. Other providers keep
 // their own default when nothing resolves (ADR-0025).
 func (r *Runner) ResolveModel(provider Provider, requested string) (string, error) {
 	if requested != "" {
 		return requested, nil
 	}
-	if m := r.DefaultModel(provider); m != "" {
+	if m := r.configuredDefaultModel(provider); m != "" {
 		return m, nil
 	}
 	base := Provider(r.providerRegistry().BaseOf(string(provider)))

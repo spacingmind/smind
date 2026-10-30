@@ -62,7 +62,7 @@ func TestSetCustom_RejectsAndChangesNothing(t *testing.T) {
 		"reserved prefix":     {[]Spec{{ID: "smind-x", Command: []string{"a"}}}, "reserved"},
 		"duplicate":           {[]Spec{{ID: "d", Command: []string{"a"}}, {ID: "d", Command: []string{"b"}}}, "[1].id"},
 		"no command":          {[]Spec{{ID: "a", Command: []string{"a"}}, {ID: "b"}}, "[1].command: required"},
-		"extends unknown":     {[]Spec{{ID: "e", Extends: "glm"}}, "[0].extends"},
+		"extends unknown":     {[]Spec{{ID: "e", Extends: "nope"}}, "[0].extends"},
 		"extends an instance": {[]Spec{{ID: "i1", Extends: IDClaudeNative}, {ID: "i2", Extends: "i1"}}, "[1].extends"},
 	} {
 		if err := r.SetCustom(tc.specs); err == nil || !strings.Contains(err.Error(), tc.want) {
