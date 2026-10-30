@@ -285,7 +285,16 @@ func ValidateModelName(model string) error {
 // AgentsConfig holds per-agent tuning.
 type AgentsConfig struct {
 	GLM GLMAgentConfig `yaml:"glm"`
+	// SharedCaches, when true (the default), lets agent runs reuse the
+	// user's normal Go/npm/bun caches via GOMODCACHE, GOCACHE,
+	// npm_config_cache and BUN_INSTALL_CACHE_DIR, unless the agent's env
+	// already sets them. Nil (unset) means true.
+	SharedCaches *bool `yaml:"sharedCaches"`
 }
+
+// SharedCachesEnabled reports whether agent runs get the user's normal
+// caches; nil (unset) defaults to true.
+func (a AgentsConfig) SharedCachesEnabled() bool { return a.SharedCaches == nil || *a.SharedCaches }
 
 // GLMAgentConfig tunes the GLM ACP agent.
 type GLMAgentConfig struct {
