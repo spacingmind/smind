@@ -1,9 +1,11 @@
 package taskrunner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -144,4 +146,100 @@ func TestProviderSecret_ValuesHelper(t *testing.T) {
 	if got := bare.providerSecretValues("vals"); !reflect.DeepEqual(got, []string{"passthrough-value"}) {
 		t.Fatalf("providerSecretValues() without a secret source = %q, want only the passthrough value", got)
 	}
+}
+
+// captureDaemonLog redirects the stdlib log package's output (the daemon
+// log) into a buffer for the rest of the test, restoring the previous
+// writer and flags afterwards. Only for tests that do not run in
+// parallel: the log's output writer is process-global.
+func captureDaemonLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prevWriter, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&buf)
+	t.Cleanup(func() {
+		log.SetOutput(prevWriter)
+		log.SetFlags(prevFlags)
+	})
+	return &buf
+}
+
+// TestProviderSecret_NotInDaemonLog_Run: the claude-native and the ACP
+// runs of the redaction tests above must keep the stored secret value out
+// of the daemon log (stdlib log output) as well, not just out of the run's
+// events, notes and error. Not parallel: log output is process-global.
+func TestProviderSecret_NotInDaemonLog_Run(t *testing.T) {
+	t.Run("claude", func(t *testing.T) {
+		t.Setenv("FAKE_CLAUDE_STDERR_ECHO_ENV", "ANTHROPIC_AUTH_TOKEN")
+		wm, task := newTestTask(t, "cli-exit-nonzero")
+		r := claudeNativeRunner(t, wm)
+		reg := providers.New()
+		if err := reg.SetCustom([]providers.Spec{{
+			ID: "zai", Extends: providers.IDClaudeNative,
+			SecretEnv: map[string]string{"ANTHROPIC_AUTH_TOKEN": "zai-key"},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		WithProviderRegistry(reg)(r)
+		WithProviderSecrets(&fakeSecretSource{secrets: map[string]string{"zai\x1fzai-key": zaiSentinel}})(r)
+
+		logs := captureDaemonLog(t)
+		events, notes, err := collectRedactedRun(t, r, task, "zai", testClaudeModel)
+		if err == nil {
+			t.Fatal("RunPrompt() = nil error, want the CLI-exit failure")
+		}
+		assertNoSentinel(t, zaiSentinel, append(append([]string{logs.String(), err.Error()}, events...), notes...)...)
+	})
+
+	t.Run("acp", func(t *testing.T) {
+		wm, task := newTestTask(t, "")
+		reg := providers.New()
+		if err := reg.SetCustom([]providers.Spec{{
+			ID: "acme", Command: []string{fakeACPAgentPath},
+			SecretEnv: map[string]string{"ACME_API_KEY": "acme-key"},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		r := New(wm, WithProviderRegistry(reg),
+			WithProviderSecrets(&fakeSecretSource{secrets: map[string]string{"acme\x1facme-key": zaiSentinel}}))
+		r.newACPClient = func([]string, ...acp.Option) (acpBackend, error) {
+			return scrubStubACP{secret: zaiSentinel}, nil
+		}
+
+		logs := captureDaemonLog(t)
+		events, notes, err := collectRedactedRun(t, r, task, "acme", "")
+		if err == nil || !strings.Contains(err.Error(), "new failed with") {
+			t.Fatalf("RunPrompt() = %v, want the new-session failure", err)
+		}
+		assertNoSentinel(t, zaiSentinel, append(append([]string{logs.String(), err.Error()}, events...), notes...)...)
+	})
+}
+
+// TestProviderSecret_NotInDaemonLog_ModeProbe: the ACP mode probe spawns
+// the agent with the secret in its launch environment, so an agent error
+// echoing it back must reach neither the probe's returned error nor the
+// daemon log line the caller writes that error to.
+func TestProviderSecret_NotInDaemonLog_ModeProbe(t *testing.T) {
+	reg := providers.New()
+	if err := reg.SetCustom([]providers.Spec{{
+		ID: "acme", Command: []string{fakeACPAgentPath},
+		SecretEnv: map[string]string{"ACME_API_KEY": "acme-key"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	r := New(nil, WithProviderRegistry(reg),
+		WithProviderSecrets(&fakeSecretSource{secrets: map[string]string{"acme\x1facme-key": zaiSentinel}}))
+	r.newACPClient = func([]string, ...acp.Option) (acpBackend, error) {
+		return scrubStubACP{secret: zaiSentinel}, nil
+	}
+
+	logs := captureDaemonLog(t)
+	err := r.probeACPModes(context.Background(), "acme")
+	if err == nil || !strings.Contains(err.Error(), "session/new") {
+		t.Fatalf("probeACPModes() = %v, want the new-session failure", err)
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Fatalf("probeACPModes() = %v, want the [redacted] placeholder", err)
+	}
+	assertNoSentinel(t, zaiSentinel, err.Error(), logs.String())
 }
