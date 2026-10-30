@@ -2,6 +2,7 @@ package permpolicy
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -270,5 +271,92 @@ func TestSplitCommand_UnparsedTable(t *testing.T) {
 	p := SplitCommand(strings.Repeat("echo a ", 12*1024))
 	if len(p.Segments) != 0 || len(p.Unparsed) != 1 || !strings.Contains(p.Unparsed[0], "64 KiB") {
 		t.Errorf("oversize: %d segments, Unparsed %q", len(p.Segments), p.Unparsed)
+	}
+}
+
+func TestSplitCommand_Heredoc(t *testing.T) {
+	t.Parallel()
+	// The whole point: a body full of command-looking text stays a body.
+	body := "fix: thing\n$(rm -rf /)\n`git push --force`\n"
+	p := SplitCommand("git commit -F - <<'EOF'\n" + body + "EOF")
+	want := "git commit -F - <<EOF [heredoc " + strconv.Itoa(len(body)) + " bytes]"
+	checkSegments(t, p, []Segment{{
+		Argv:      []string{"git", "commit", "-F", "-"},
+		Redirects: []Redirect{{Op: "<<", Target: "EOF"}},
+		Raw:       want,
+	}})
+	if p.HeredocBytes != len(body) {
+		t.Errorf("HeredocBytes = %d, want %d", p.HeredocBytes, len(body))
+	}
+	if p.Normalized != want {
+		t.Errorf("Normalized = %q, want %q", p.Normalized, want)
+	}
+	for _, leak := range []string{"rm -rf", "git push --force", "fix: thing"} {
+		if strings.Contains(p.Normalized, leak) {
+			t.Errorf("Normalized leaks body text %q", leak)
+		}
+	}
+	if len(p.Unparsed) != 0 {
+		t.Errorf("Unparsed = %q, want none", p.Unparsed)
+	}
+
+	cases := []struct {
+		name       string
+		cmd        string
+		want       []Segment
+		bytes      int
+		normSubstr string
+	}{
+		{
+			"tabs stripped for <<-", "cat <<-EOF\n\tindented\n\tEOF\necho done",
+			[]Segment{
+				{Argv: []string{"cat"}, Redirects: []Redirect{{Op: "<<", Target: "EOF"}}},
+				{Argv: []string{"echo", "done"}},
+			},
+			len("\tindented\n"), "cat <<EOF [heredoc 10 bytes]",
+		},
+		{
+			"two heredocs on one line", "cat <<A <<B\nbodyA\nA\nbodyB\nB",
+			[]Segment{{Argv: []string{"cat"}, Redirects: []Redirect{
+				{Op: "<<", Target: "A"}, {Op: "<<", Target: "B"},
+			}}},
+			len("bodyA\n") + len("bodyB\n"), "[heredoc 6 bytes]",
+		},
+		{
+			"heredoc then pipe on the same line", "cat <<EOF | sh\nbody\nEOF",
+			[]Segment{
+				{Argv: []string{"cat"}, Redirects: []Redirect{{Op: "<<", Target: "EOF"}}, PipeNext: true, Raw: "cat <<EOF [heredoc 5 bytes]"},
+				{Argv: []string{"sh"}, Raw: "sh"},
+			},
+			len("body\n"), "cat <<EOF [heredoc 5 bytes] | sh",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := SplitCommand(tc.cmd)
+			checkSegments(t, p, tc.want)
+			if p.HeredocBytes != tc.bytes {
+				t.Errorf("HeredocBytes = %d, want %d", p.HeredocBytes, tc.bytes)
+			}
+			if !strings.Contains(p.Normalized, tc.normSubstr) {
+				t.Errorf("Normalized = %q, want it to contain %q", p.Normalized, tc.normSubstr)
+			}
+			if strings.Contains(p.Normalized, "body") && !strings.Contains(tc.normSubstr, "body") {
+				t.Errorf("Normalized leaks body text: %q", p.Normalized)
+			}
+			if len(p.Unparsed) != 0 {
+				t.Errorf("Unparsed = %q, want none", p.Unparsed)
+			}
+		})
+	}
+
+	// A missing terminator leaves the remainder consumed as body and a reason.
+	p = SplitCommand("cat <<EOF\nbody with no end")
+	if len(p.Unparsed) == 0 || !strings.Contains(p.Unparsed[0], "terminator") {
+		t.Errorf("Unparsed = %q, want heredoc terminator not found", p.Unparsed)
+	}
+	if len(p.Segments) != 1 || strings.Contains(p.Normalized, "no end") {
+		t.Errorf("unterminated heredoc: %+v normalized %q", p.Segments, p.Normalized)
 	}
 }
