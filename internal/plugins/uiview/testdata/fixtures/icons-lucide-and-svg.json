@@ -1,0 +1,46 @@
+{
+  "name": "icons-lucide-and-svg",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "list",
+      "items": [
+        {
+          "title": "Lucide icon",
+          "icon": "Zap"
+        },
+        {
+          "title": "Inline svg icon",
+          "icon": {
+            "svg": "\u003csvg viewBox=\"0 0 24 24\"\u003e\u003cpath d=\"M13 2 3 14h7l-1 8 10-12h-7l1-8z\"/\u003e\u003c/svg\u003e"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "items": [
+          {
+            "icon": "Zap",
+            "title": "Lucide icon"
+          },
+          {
+            "icon": {
+              "svg": "\u003csvg viewBox=\"0 0 24 24\"\u003e\u003cpath d=\"M13 2 3 14h7l-1 8 10-12h-7l1-8z\"/\u003e\u003c/svg\u003e"
+            },
+            "title": "Inline svg icon"
+          }
+        ],
+        "type": "list"
+      },
+      "ui": 1
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "unknown-node-type",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "card",
+      "text": "x"
+    }
+  },
+  "expect": {
+    "invalid": "$.root.type"
+  }
+}

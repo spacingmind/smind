@@ -1,0 +1,36 @@
+{
+  "name": "button",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "button",
+      "label": "Insert summary",
+      "action": {
+        "kind": "prompt",
+        "text": "Summarise the last run."
+      },
+      "icon": "Wand2",
+      "disabled": false
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "action": {
+          "kind": "prompt",
+          "text": "Summarise the last run."
+        },
+        "disabled": false,
+        "icon": "Wand2",
+        "label": "Insert summary",
+        "type": "button"
+      },
+      "ui": 1
+    }
+  }
+}

@@ -194,6 +194,7 @@ func TestViewSchema_EveryNodeTypeHasFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 		var fx struct {
+			Doc    json.RawMessage `json:"doc"`
 			Expect struct {
 				Valid *bool `json:"valid"`
 			} `json:"expect"`
@@ -201,9 +202,16 @@ func TestViewSchema_EveryNodeTypeHasFixture(t *testing.T) {
 		if err := json.Unmarshal(raw, &fx); err != nil {
 			t.Fatalf("%s: %v", f, err)
 		}
-		if fx.Expect.Valid != nil && *fx.Expect.Valid {
-			corpus = append(corpus, string(raw))
+		if fx.Expect.Valid == nil || !*fx.Expect.Valid {
+			continue
 		}
+		// The files are pretty-printed; compact the doc so the exact
+		// `"type":"x"` / `"kind":"x"` forms below are what is matched.
+		compact, err := json.Marshal(fx.Doc)
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		corpus = append(corpus, string(compact))
 	}
 	joined := strings.Join(corpus, "\n")
 	for _, typ := range NodeTypes {

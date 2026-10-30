@@ -1,0 +1,17 @@
+{
+  "name": "progress-out-of-range",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "progress",
+      "value": 1.5
+    }
+  },
+  "expect": {
+    "invalid": "$.root.value"
+  }
+}

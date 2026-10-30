@@ -1,0 +1,76 @@
+{
+  "name": "list",
+  "env": {
+    "rpcs": [
+      "refresh"
+    ],
+    "panels": [
+      "overview"
+    ]
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "list",
+      "items": [
+        {
+          "title": "Re-run suite",
+          "subtitle": "pytest -q",
+          "icon": "PlayCircle",
+          "tone": "success",
+          "badge": "fast",
+          "action": {
+            "kind": "rpc",
+            "rpc": "refresh",
+            "params": {
+              "mode": "quick"
+            }
+          }
+        },
+        {
+          "title": "Open logs",
+          "subtitle": "tail -f",
+          "icon": "FileText",
+          "action": {
+            "kind": "prompt",
+            "text": "Show the last test failures"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "items": [
+          {
+            "action": {
+              "kind": "rpc",
+              "params": {
+                "mode": "quick"
+              },
+              "rpc": "refresh"
+            },
+            "badge": "fast",
+            "icon": "PlayCircle",
+            "subtitle": "pytest -q",
+            "title": "Re-run suite",
+            "tone": "success"
+          },
+          {
+            "action": {
+              "kind": "prompt",
+              "text": "Show the last test failures"
+            },
+            "icon": "FileText",
+            "subtitle": "tail -f",
+            "title": "Open logs"
+          }
+        ],
+        "type": "list"
+      },
+      "ui": 1
+    }
+  }
+}
