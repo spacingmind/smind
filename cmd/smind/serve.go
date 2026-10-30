@@ -117,6 +117,13 @@ func cmdServe(args []string) int {
 	}
 	wm.SetWorktreesConfig(wtSettings)
 
+	// Per-task scratch dirs (docs/plans/active/task-scratch.md): every agent
+	// run gets scratch/<taskID>/ as TMPDIR, closed tasks' dirs are cleaned on
+	// archive/delete and swept periodically, and the shared build caches join
+	// the launch env. scratchW.start (below, once the server exists) attaches
+	// the human-only scratch.usage/scratch.clean RPCs.
+	scratchOpts, scratchW := wireScratch(cfg, db, wm)
+
 	// providers.custom (ACP entries and instances) joins the built-in providers
 	// before anything dispatches; config load already validated it.
 	if err := providers.Default().SetCustom(config.ProviderSpecs(cfg.Providers.Custom)); err != nil {
@@ -125,6 +132,7 @@ func cmdServe(args []string) int {
 
 	// A second Registry over the same db is fine: it only reads.
 	runnerOpts := []taskrunner.Option{taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db)), taskrunner.WithACPModeProbe(), taskrunner.WithMcpServers(mcpservers.New(db)), taskrunner.WithProviderSecrets(db)}
+	runnerOpts = append(runnerOpts, scratchOpts...)
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil {
 		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(taskrunner.ProviderGLM, acp.GLMCommand(acp.WithMaxTurns(*mt))))
 	}
@@ -207,6 +215,10 @@ func cmdServe(args []string) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Attach the scratch RPCs and start the sweep loop before any listener
+	// serves: the handler table is read when a connection starts.
+	scratchW.start(ctx, srv.API(), srv.API().Runs)
 
 	// ADR-0039 §4: the git state loop idles until a client subscribes to task.git.
 	stopGitState := srv.API().StartGitState(ctx)
