@@ -201,6 +201,24 @@ func builtins() []Spec {
 			LiveModeSwitch: true, Images: "unknown", Command: acp.KimiCommand(), ToolEvents: true, Delivery: DeliveryPreface},
 		{ID: IDCodexNative, Label: "Codex", Runner: RunnerCodex, CredentialKind: "oauth", AccountProvider: "openai", Images: "yes",
 			Command: codex.DefaultCommand(), HealthCommand: []string{"codex"}},
+		{ID: IDOpenCode, Label: "OpenCode", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "yes",
+			Command: []string{"opencode", "acp"}, HealthCommand: []string{"opencode"}, ToolEvents: true, Delivery: DeliveryPreface,
+			// OpenCode auto-allows tools by default; this makes it ask so smind's permission modes apply.
+			Env: map[string]string{"OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_PERMISSION": `{"bash":"ask","edit":"ask"}`},
+			Health: Health{Install: "npm i -g opencode-ai (or brew install sst/tap/opencode)", VersionArg: "--version"}},
+		{ID: IDCopilot, Label: "GitHub Copilot", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown",
+			Command: []string{"copilot", "--acp"}, HealthCommand: []string{"copilot"}, ToolEvents: true, Delivery: DeliveryPreface,
+			Health: Health{Install: "npm i -g @github/copilot", Login: "needs a paid GitHub Copilot plan: run `copilot` once and use /login (ACP is a public preview)", Unverified: true, VersionArg: "--version"}},
+		{ID: IDCline, Label: "Cline", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown",
+			Command: []string{"cline", "--acp"}, HealthCommand: []string{"cline"}, ToolEvents: true, Delivery: DeliveryPreface,
+			Health: Health{Install: "npm i -g cline", Login: "needs a provider key configured in Cline: run `cline auth` or set CLINE_API_KEY", Unverified: true, VersionArg: "--version"}},
+		{ID: IDGoose, Label: "Goose", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown",
+			Command: []string{"goose", "acp"}, HealthCommand: []string{"goose"}, ToolEvents: true, Delivery: DeliveryPreface,
+			Health: Health{Install: "brew install block-goose-cli, or the binary from block.github.io/goose", Login: "run `goose configure` to pick a provider and key", Unverified: true, VersionArg: "--version"}},
+		{ID: IDCursor, Label: "Cursor", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown",
+			Command: []string{"cursor-agent", "acp"}, HealthCommand: []string{"cursor-agent"}, ToolEvents: true, Delivery: DeliveryPreface,
+			// The 2025.09.18 build has no `acp` subcommand.
+			Health: Health{Install: "curl https://cursor.com/install -fsS | bash", Login: "needs a paid Cursor account: run `cursor-agent login` or set CURSOR_API_KEY", Unverified: true, MinVersion: "2026.01.01", VersionArg: "--version"}},
 	}
 }
 
