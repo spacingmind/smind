@@ -169,6 +169,21 @@ type Spec struct {
 	// (an instance's list is appended to its base's).
 	DisallowedTools []string
 
+	// Vendor is the rate-limit vendor profile: whose 429 wording the
+	// provider speaks ("zai" | "anthropic" | "openai" | "generic"; "" =
+	// generic).
+	Vendor string
+	// Thinking is whether the run may set a thinking level: "" or
+	// "supported" = it may; "hidden" = the endpoint cannot turn thinking
+	// off, clients hide the control.
+	Thinking string
+	// Recipe is the id of the recipe the instance was made from
+	// (informational).
+	Recipe string
+	// InheritClaudeConfig marks a claude-code instance that uses ~/.claude
+	// instead of a private CLAUDE_CONFIG_DIR.
+	InheritClaudeConfig bool
+
 	// Endpoint points an instance at a compatible API (ADR-0046).
 	Endpoint Endpoint
 
@@ -287,7 +302,7 @@ type Registry struct {
 }
 
 // New returns a registry holding the built-in providers.
-func New() *Registry { return &Registry{specs: builtins()} }
+func New() *Registry { return &Registry{specs: builtinsWithVendors()} }
 
 var (
 	defaultOnce sync.Once
@@ -374,6 +389,9 @@ func (r *Registry) BaseOf(id string) string {
 // resolve fills an entry's derived fields and checks it against the table
 // built so far (taken by value: the caller owns the slice).
 func resolve(s Spec, table []Spec) (Spec, error) {
+	if !ValidVendor(s.Vendor) {
+		return s, fmt.Errorf("vendor %q: must be zai, anthropic, openai or generic", s.Vendor)
+	}
 	s = cloneSpec(s)
 	if strings.TrimSpace(s.ID) == "" {
 		return s, fmt.Errorf("id: required")
@@ -424,6 +442,15 @@ func resolve(s Spec, table []Spec) (Spec, error) {
 		inst.NoMCPServers = base.NoMCPServers || s.NoMCPServers
 		inst.Endpoint = s.Endpoint
 		inst.DisallowedTools = append(append([]string(nil), base.DisallowedTools...), s.DisallowedTools...)
+		inst.Thinking, inst.Recipe, inst.InheritClaudeConfig = s.Thinking, s.Recipe, s.InheritClaudeConfig
+		switch {
+		case s.Vendor != "":
+			inst.Vendor = s.Vendor
+		case s.Env["ANTHROPIC_BASE_URL"] != "" || s.Env["OPENAI_BASE_URL"] != "" || s.Endpoint.Kind != "":
+			inst.Vendor = VendorGeneric
+		default:
+			// keep the base's vendor (inst is a copy of base)
+		}
 		inst.Reflect = false
 		inst.AccountProvider = ""
 		inst.CredentialKind = ""
@@ -486,7 +513,7 @@ func (r *Registry) Unregister(id string) bool {
 // field ("[2].command: required").
 func (r *Registry) SetCustom(specs []Spec) error {
 	var table []Spec
-	for _, s := range builtins() {
+	for _, s := range builtinsWithVendors() {
 		table = append(table, s)
 	}
 	for i, s := range specs {

@@ -328,4 +328,47 @@ describe("ProviderDetail", () => {
       expect(screen.queryByTestId("provider-default-resolves")).toBeNull();
     });
   });
+
+  describe("cooldown line (clear-provider-cooldown)", () => {
+    function cooldownDaemon(cooldownUntil?: string): FakeUsageDaemon {
+      const d = new FakeUsageDaemon([]);
+      d.providers = {
+        providers: PROVIDERS.map((p) => (p.id === "glm" ? { ...p, cooldownUntil } : p)),
+      } as unknown as ProviderListResult;
+      return d;
+    }
+    function glmItem(): ProviderNavItem {
+      return item({ id: "glm", label: "GLM", kind: "cli", accountIds: [], tone: "neutral", connected: false });
+    }
+    function clearCalls(d: FakeUsageDaemon): unknown[] {
+      return d.calls.filter((c) => c.method === "provider.clearCooldown").map((c) => c.params);
+    }
+
+    it("renders neither the line nor the button without a cooldown", async () => {
+      const d = cooldownDaemon();
+      renderWithDaemon(<ProviderDetail item={glmItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.queryByTestId("provider-cooldown-glm")).toBeNull();
+      expect(screen.queryByTestId("provider-clear-cooldown-glm")).toBeNull();
+    });
+
+    it("shows the line and the reset button while the provider cools down", async () => {
+      const d = cooldownDaemon("2099-01-01T00:00:00Z");
+      renderWithDaemon(<ProviderDetail item={glmItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-cooldown-glm")).toHaveTextContent(/^Rate limited until \d\d:\d\d/);
+      expect(screen.getByTestId("provider-clear-cooldown-glm")).toHaveTextContent("I reset my quota, retry now");
+    });
+
+    it("clicking the reset button sends provider.clearCooldown for that provider", async () => {
+      const d = cooldownDaemon("2099-01-01T00:00:00Z");
+      renderWithDaemon(<ProviderDetail item={glmItem()} client={d.client} />, d);
+      await flush();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("provider-clear-cooldown-glm"));
+      });
+      await flush();
+      expect(clearCalls(d)).toEqual([{ provider: "glm" }]);
+    });
+  });
 });

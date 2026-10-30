@@ -21,3 +21,10 @@ docs/research/local/
 
 # a stray `go build` of the interop harness (run it with `go run`)
 /internal/relay/bridge/harness/harness
+
+# Local secrets: never commit env files (templates stay tracked)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template

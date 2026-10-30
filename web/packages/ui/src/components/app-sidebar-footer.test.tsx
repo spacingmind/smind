@@ -12,7 +12,7 @@ const runAction = vi.fn();
 const openUsageModal = vi.fn();
 vi.mock("@/hooks/use-usage-modal", () => ({ openUsageModal: () => openUsageModal() }));
 vi.mock("@/keyboard/keyboard-provider", () => ({
-  useKeyboard: () => ({ runAction }),
+  useKeyboard: () => ({ runAction, bindings: [], isMac: false }),
 }));
 
 afterEach(() => {
