@@ -227,5 +227,5 @@ ignore the instance `Command` in `resolve` (override tests).
 Decisions taken in PR1: `Runner` stays the internal type and `Harness` is its ADR name (`Runner.Harness()`, wire `harness` additive, wire `runner` values unchanged) instead of a
 rename across the codebase; `models` and `additionalModels` are mutually exclusive on one instance; `disallowedTools` is claude-native only; a claude-native or codex-native
 instance `command` is the executable only (no `args`); an instance of an ACP provider keeps free-form env until PR2; an instance may not extend an instance; with `models` replace
-mode the instance does not use ACP/Codex discovery (models > discovery). `ModelAliases` is on `Spec` and inert until PR2. Not done here: `docs/decisions/0042` pointer to ADR-0046 and
-`docs/homelab.md` rows (homelab has no `providers.custom` rows to extend).
+mode the instance does not use ACP/Codex discovery (models > discovery). `ModelAliases` is on `Spec` and inert until PR2. The `docs/decisions/0042` pointer to ADR-0046 is added; `docs/homelab.md` needs no rows (it has no
+`providers.custom` rows to extend).
