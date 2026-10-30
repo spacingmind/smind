@@ -172,6 +172,14 @@ describe("RunFooter failover actions (ADR-0041 F2)", () => {
     expect(screen.queryByTestId("run-clear-cooldown")).toBeNull();
   });
 
+  it("hides the reset action without a cooldown even when other actions render the row", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    render(<RunFooter run={limited({ failureResetAt: "2026-10-13T12:00:00Z" })} isLatest onRerun={() => {}} failover={failoverStub()} />);
+    expect(screen.getByTestId("run-wait")).toBeTruthy();
+    expect(screen.queryByTestId("run-clear-cooldown")).toBeNull();
+  });
+
   it("clicking calls clearCooldown with the run's provider once even on double click", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
