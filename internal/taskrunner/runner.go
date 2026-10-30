@@ -20,6 +20,7 @@ import (
 	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/providers"
+	"github.com/spacingmind/smind/internal/scratch"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -276,6 +277,15 @@ type Runner struct {
 	// a secret (off: scrubSubprocessEnvDefault, ADR-0046 section 7).
 	scrubSubprocessEnv bool
 
+	// scratch, when set (WithScratch), gives every agent run a private
+	// scratch dir whose path lands first in the launch env as TMPDIR (see
+	// scratch_env.go).
+	scratch *scratch.Manager
+	// sharedCaches, when non-empty (WithSharedCaches), adds shared build
+	// cache dirs to every agent launch env, prepended so a pinned
+	// provider/task value wins.
+	sharedCaches scratch.SharedCaches
+
 	// registry is the provider table (nil: providers.Default).
 	registry *providers.Registry
 
@@ -457,6 +467,14 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 	}
 	worktreePath := *task.WorktreePath
 
+	// Computed before any provider branch so every harness launch reads
+	// the same per-task entries from ctx (scratch TMPDIR, shared caches).
+	entries, err := r.scratchLaunchEnv(taskID)
+	if err != nil {
+		return fmt.Errorf("taskrunner: %w", err)
+	}
+	ctx = withScratchEnv(ctx, entries)
+
 	if model != "" {
 		if catalog, ok := r.ProviderCatalogFor(provider); ok {
 			if err := ValidateModel(catalog, model); err != nil {
@@ -511,6 +529,9 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 			r.sendSessionNote(ctx, events, note)
 		}
 	}
+	// The scratch entries come first so any provider/task entry wins
+	// (WithEnv appends after the inherited environment; last entry wins).
+	env = append(append([]string(nil), scratchEnvFrom(ctx)...), env...)
 	if len(env) > 0 {
 		opts = append(opts, acp.WithEnv(env...))
 	}
@@ -882,7 +903,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	// decider added the dialog-timeout variable).
 	//
 	// ADR-0024: the task's SMIND_PORT (when a port range is configured).
-	env := append([]string(nil), taskEnv...)
+	// The scratch entries come first so the task's and provider's own env
+	// wins (one WithEnv at the end; last entry wins).
+	env := append(append([]string(nil), scratchEnvFrom(ctx)...), taskEnv...)
 	cliPath, launchEnv, err := r.claudeLaunchSpec()
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude code cli: %w", err)
@@ -1336,9 +1359,11 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 	if err != nil {
 		return fmt.Errorf("taskrunner: %w", err)
 	}
-	// The private-home entries come first so the provider's own env wins
-	// (WithEnv appends after the inherited environment; last entry wins).
-	env := append(epEnv, launchEnv...)
+	// The scratch entries come first, then the private-home entries, so
+	// the provider's own env wins (WithEnv appends after the inherited
+	// environment; last entry wins).
+	env := append(append([]string(nil), scratchEnvFrom(ctx)...), epEnv...)
+	env = append(env, launchEnv...)
 	if len(env) > 0 {
 		opts = append(opts, codex.WithEnv(env...))
 	}
