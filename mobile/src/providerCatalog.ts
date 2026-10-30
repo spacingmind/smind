@@ -57,7 +57,7 @@ export function selectProvider(providers: ProviderInfo[], providerId: string, re
 }
 
 /**
- * The offline catalog (ADR-0042 AC31): the four built-ins, used only while provider.list has not answered or failed,
+ * The offline catalog (ADR-0042 AC31): the built-ins, used only while provider.list has not answered or failed,
  * so the new-task form is never empty because one fetch was lost. The daemon's own list is the single source once it
  * answers (instances and providers.custom entries included) and is never merged with this one.
  */
@@ -66,6 +66,11 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
   { id: 'codex-native', label: 'Codex', runner: 'codex-native' },
   { id: 'glm', label: 'GLM', runner: 'acp' },
   { id: 'kimi', label: 'Kimi', runner: 'acp' },
+  { id: 'opencode', label: 'OpenCode', runner: 'acp' },
+  { id: 'copilot', label: 'GitHub Copilot', runner: 'acp' },
+  { id: 'cline', label: 'Cline', runner: 'acp' },
+  { id: 'goose', label: 'Goose', runner: 'acp' },
+  { id: 'cursor', label: 'Cursor', runner: 'acp' },
 ];
 
 /** The daemon's catalog when it gave one (null = the fetch failed, [] = it listed nothing), else the offline fallback. */
