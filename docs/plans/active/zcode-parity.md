@@ -215,6 +215,53 @@ change (all `data-testid`s, store wiring and RPCs untouched).
 
 None: reference-only reimplementation.
 
+## Stage 3b — Shell + sidebar (audit 4, 8; 16 is Stage 5)
+
+One PR, reference-only (no ZCode source copied; `refs/zcode` was not on this machine,
+so the shape comes from the audit's ZCode frames). No behaviour change: workspace
+tree, status/stage views, unread/attention dots, drag, context menus, shortcuts,
+collapsed rail and the mobile drawer are untouched.
+
+### References (ZCode files consulted, read-only)
+
+Audit frames `zc_{light,dark}_1280_home` only (sources: `WorkspaceSidebar.tsx`,
+`WorkspaceSidebarFooter.tsx`, `project-sidebar/` as named in the audit).
+
+### Acceptance criteria
+
+- **AC1** Light theme: the content panel is a framed rounded panel (gap to the
+  window edge, 1px border, soft shadow) over the grey shell; dark theme and the
+  mobile/lights-bar layouts keep today's flush inset. The frame class set is one
+  exported constant (`lib/shell-frame.ts`).
+- **AC2** Sidebar gets a quick-actions block under the brand row: `New task`
+  (icon + label), `Search` (opens the palette, shows the palette's live shortcut
+  as a kbd), `Automations` (opens Settings -> Automations). Hidden in the collapsed rail.
+  `New task` opens the new-task dialog for the selected task's workspace, or the
+  only workspace; with several and no selection it opens the palette (which
+  lists "New task in <workspace>"). Hidden while there are no workspaces.
+- **AC3** The tree header reads "Task list" (was "Workspaces") with the same
+  group-mode switch, search and add controls.
+- **AC4** New icon `newTask` goes through `lib/icons.ts` (drift test green).
+- **AC5** Frames: audit-format pair sheets (L = ZCode raw, R = smind after) for
+  home/empty, tree with tasks, status view, collapsed rail at 1280 light+dark,
+  390 smind-only, plus sidebar collapse/expand transition frames, in
+  `/tmp/steward4/zcode-audit/after/shell-sidebar/`.
+- **AC6** `task lint` + `task test` green; one mutation per load-bearing test.
+
+### Named tests
+
+- `lib/shell-frame.test.ts`: `light frame carries gap, border, rounded and shadow`,
+  `dark frame resets the gap and shadow`
+- `components/sidebar-quick-actions.test.tsx`: `renders New task, Search and Automations`,
+  `Search shows the palette shortcut`, `rows call their handlers`
+- `components/app-sidebar-quick-actions.test.tsx`: `New task opens the task dialog for the only workspace`,
+  `New task with several workspaces and no selection opens the palette`,
+  `quick actions are absent with no workspaces`, `tree header reads Task list`
+
+### Ported files and sources
+
+None: reference-only reimplementation.
+
 ## Stage 4 — mobile tokens
 
 Port the Stage 1 table into the Expo app's theme (`mobile/`), own PR, after 1.
