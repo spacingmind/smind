@@ -46,6 +46,7 @@ tests:
   - { name: TestScratchRPC_UsageAndClean, run: "go test ./internal/wsapi -run '^TestScratchRPC_UsageAndClean$' -count=1", timeoutSec: 300 }
 mutations:
   - { id: M1, file: internal/scratch/scratch.go, change: "remove with os.RemoveAll(filepath.EvalSymlinks(dir)) / follow symlinks instead of removing the link", expectFail: [TestRemove_SymlinkEscapeNotFollowed, TestRemove_SymlinkAtTaskDirRemovesLinkOnly] }
+  - { id: M1b, file: internal/scratch/scratch.go, change: "before RemoveAll, also remove the resolved target of every symlink found inside the task dir", expectFail: [TestRemove_SymlinkEscapeNotFollowed] }
   - { id: M2, file: internal/scratch/scratch.go, change: "skip the chmod step before removal", expectFail: [TestRemove_ReadOnlyFiles] }
   - { id: M3, file: internal/scratch/scratch.go, change: "ignore the busy hook in Remove", expectFail: [TestRemove_BusyRefused] }
   - { id: M4, file: internal/scratch/scratch.go, change: "Sweep also removes non-numeric entries or live tasks", expectFail: [TestSweep_IgnoresNonNumeric, TestSweep_RemovesClosedKeepsLive] }
@@ -53,11 +54,13 @@ mutations:
   - { id: M6, file: internal/taskrunner/runner.go, change: "append the scratch entries after providerEnv in runClaudeNative instead of first", expectFail: [TestLaunchEnv_PinnedTmpdirWins] }
 commands:
   - { id: C1, run: "task lint", timeoutSec: 900 }
-  - { id: C2, run: "task test", timeoutSec: 1500 }
+  - { id: C2, run: "go test ./... -skip '^TestServe_DaemonLogAndManagedBy$' -count=1", timeoutSec: 1500 }
 limits: { budgetUsd: 2, maxMinutes: 40 }
 ---
 
 # Scratch cleanup validation contract
+
+C2 skips `TestServe_DaemonLogAndManagedBy`: it runs `smind service logs`, which reads the machine's real service log, so it fails on a host whose daemon log tail lacks "smind listening on" (environment dependent, unrelated to scratch).
 
 Isolated temp dirs only; no model call. Key assertion: nothing outside `scratch/<taskId>` is ever removed.
 Spec: `docs/plans/active/task-scratch.md`.
