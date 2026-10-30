@@ -926,3 +926,36 @@ func TestMigrate_AccountsIdentity(t *testing.T) {
 		}
 	})
 }
+
+// TestMigration_ProviderSecretsTable checks the provider_secrets migration
+// (ADR-0046 section 4) against a database created before the table existed:
+// Open must create it, inserts must work, and a second Open must be a no-op.
+func TestMigration_ProviderSecretsTable(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE workspaces (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, title TEXT NOT NULL, routing_policy TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	for i := 0; i < 2; i++ {
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open #%d: %v", i, err)
+		}
+		var name string
+		if err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_secrets'`).Scan(&name); err != nil {
+			t.Fatalf("Open #%d: provider_secrets missing: %v", i, err)
+		}
+		if err := s.SetProviderSecret("inst-1", "api_key", "sentinel-first-0000"); err != nil {
+			t.Fatalf("Open #%d: insert into provider_secrets: %v", i, err)
+		}
+		if got := countRows(t, s, `SELECT COUNT(*) FROM provider_secrets`); got != 1 {
+			t.Fatalf("Open #%d: rows = %d, want 1 (second migrate must not duplicate)", i, got)
+		}
+		s.Close()
+	}
+}
