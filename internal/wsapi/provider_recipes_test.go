@@ -140,6 +140,33 @@ func TestAddFromRecipe_SecretWriteOnly(t *testing.T) {
 	if strings.Contains(string(raw), keySentinel) {
 		t.Fatalf("provider.list carries the key: %s", raw)
 	}
+	// A successful add never echoes the pasted key either.
+	res2, err := h.call(t, "provider.addFromRecipe", &requestContext{}, map[string]any{
+		"recipe":  "zai-glm",
+		"secrets": map[string]string{"api-key": keySentinel},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(res2)
+	if strings.Contains(string(raw), keySentinel) {
+		t.Fatalf("the success result carries the key: %s", raw)
+	}
+	res, err = h.call(t, "provider.list", &requestContext{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(res)
+	if strings.Contains(string(raw), keySentinel) {
+		t.Fatalf("provider.list carries the key: %s", raw)
+	}
+	text, err := os.ReadFile(h.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(text), keySentinel) {
+		t.Fatalf("config.yaml carries the key: %s", text)
+	}
 }
 
 func TestAddFromRecipe_MissingKeyWritesNothing(t *testing.T) {
