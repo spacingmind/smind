@@ -62,7 +62,21 @@ const (
 	IDCodexNative  = "codex-native"
 	IDGLM          = "glm"
 	IDKimi         = "kimi"
+	IDOpenCode     = "opencode"
+	IDCopilot      = "copilot"
+	IDCline        = "cline"
+	IDGoose        = "goose"
+	IDCursor       = "cursor"
 )
+
+// Health is what provider.test reports beyond "the binary is on PATH": no model call is ever made.
+type Health struct {
+	Install    string // how to install, said when the binary is missing
+	Login      string // what login/credential the agent needs, said when the binary is found ("" = none needed)
+	Unverified bool   // best effort: not verified against a real login
+	MinVersion string // "" = no gate; dotted/dated version the binary must be at least (compared by numeric segments)
+	VersionArg string // argument that makes the binary print its version, e.g. "--version"; "" = skip the version check
+}
 
 // Learning-delivery modes (Spec.Delivery): how learned skills reach a run.
 const (
@@ -148,6 +162,12 @@ type Spec struct {
 	// (argv; only [0] is looked up). Empty: a credential check against
 	// AccountProvider instead.
 	HealthCommand []string
+
+	// Health is what provider.test says beyond the PATH lookup.
+	Health Health
+	// NoMCPServers: an ACP agent that cannot take mcpServers in session/new;
+	// smind then sends none.
+	NoMCPServers bool
 
 	// Learning capabilities (ADR-0026).
 	ToolEvents bool   // the run streams tool-call events
