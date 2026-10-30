@@ -3,6 +3,7 @@ package providers
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -187,10 +188,20 @@ func TestSetCustom_InstanceInheritsNoMCPServers(t *testing.T) {
 func TestACPProvider_AllFive_RowsRegister(t *testing.T) {
 	t.Parallel()
 	r := New()
+	wantCommand := map[string][]string{
+		IDOpenCode: {"opencode", "acp"},
+		IDCopilot:  {"copilot", "--acp"},
+		IDCline:    {"cline", "--acp"},
+		IDGoose:    {"goose", "acp"},
+		IDCursor:   {"cursor-agent", "acp"},
+	}
 	for _, id := range []string{IDOpenCode, IDCopilot, IDCline, IDGoose, IDCursor} {
 		s, ok := r.Get(id)
 		if !ok {
 			t.Fatalf("%s: not registered", id)
+		}
+		if cmd, ok := wantCommand[id]; !ok || !reflect.DeepEqual(cmd, s.Command) {
+			t.Errorf("%s: command = %v, want %v", id, s.Command, cmd)
 		}
 		if s.Runner != RunnerACP || len(s.Command) < 1 || s.HealthCommand[0] != s.Command[0] {
 			t.Errorf("%s: acp spec = %+v", id, s)
@@ -201,12 +212,15 @@ func TestACPProvider_AllFive_RowsRegister(t *testing.T) {
 		if s.Health.Install == "" {
 			t.Errorf("%s: no Health.Install", id)
 		}
+		if s.Health.VersionArg != "--version" {
+			t.Errorf("%s: Health.VersionArg = %q, want --version", id, s.Health.VersionArg)
+		}
 		if !IsBuiltin(id) || !ReservedID(id) {
 			t.Errorf("%s: built-in but not reserved", id)
 		}
 	}
-	if s, _ := r.Get(IDCursor); s.Health.MinVersion == "" {
-		t.Error("cursor: no Health.MinVersion")
+	if s, _ := r.Get(IDCursor); s.Health.MinVersion != "2026.01.01" {
+		t.Errorf("cursor: Health.MinVersion = %q, want 2026.01.01", s.Health.MinVersion)
 	}
 	for _, id := range []string{IDCopilot, IDCline, IDGoose, IDCursor} {
 		if s, _ := r.Get(id); !s.Health.Unverified {
