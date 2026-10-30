@@ -77,8 +77,8 @@ func TestVerdictSubmit_RejectedPayloadsFromTheLog(t *testing.T) {
 		if !rejected {
 			t.Fatalf("%s: the call was accepted, want a rejection", name)
 		}
-		if !strings.Contains(msg, "verdict") {
-			t.Errorf("%s: error = %q, want it to name the verdict argument", name, msg)
+		if !strings.Contains(msg, "validating /properties/verdict") {
+			t.Errorf("%s: error = %q, want a schema rejection naming /properties/verdict", name, msg)
 		}
 		if strings.Contains(msg, "cannot unmarshal") {
 			t.Errorf("%s: error = %q: the payload reached the daemon's unmarshal, want a schema rejection", name, msg)
@@ -242,10 +242,19 @@ func TestToolSchemas_NoByteArrayInputs(t *testing.T) {
 			if err := json.Unmarshal(raw, &schema); err != nil {
 				t.Fatalf("%s %s: decode schema: %v", catalogue.name, tool.Name, err)
 			}
-			walkSchemaForIntegerArrays(t, catalogue.name+" "+tool.Name, schema, "")
+			props, _ := schema["properties"].(map[string]any)
+			for name, prop := range props {
+				if intentionalIntegerArrays[tool.Name+"."+name] {
+					continue
+				}
+				walkSchemaForIntegerArrays(t, catalogue.name+" "+tool.Name, prop, ".properties."+name)
+			}
 		}
 	}
 }
+
+// intentionalIntegerArrays are genuine []int64 inputs, not json.RawMessage.
+var intentionalIntegerArrays = map[string]bool{"account_usage.accountIds": true}
 
 // walkSchemaForIntegerArrays recurses through a decoded JSON schema and
 // fails on any integer-array node, naming the tool and the path to it.
@@ -255,7 +264,14 @@ func walkSchemaForIntegerArrays(t *testing.T, tool string, node any, path string
 	if !ok {
 		return
 	}
-	if obj["type"] == "array" {
+	// The SDK emits ["null","array"] for a nil-able slice, "array" otherwise.
+	isArray := obj["type"] == "array"
+	if types, ok := obj["type"].([]any); ok {
+		for _, ty := range types {
+			isArray = isArray || ty == "array"
+		}
+	}
+	if isArray {
 		if items, ok := obj["items"].(map[string]any); ok && items["type"] == "integer" {
 			t.Errorf("%s %s: integer-array property (the json.RawMessage inference); a JSON object cannot be sent", tool, strings.TrimPrefix(path, "."))
 		}
