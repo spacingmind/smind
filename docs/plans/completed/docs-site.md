@@ -65,4 +65,7 @@ Evidence is in the #683 body and CI; every criterion was checked there.
 - AC9, AC10: `node --test` (10 pass), `check-dist.mjs`, `task lint`, `task test`, CI `ci` and `windows-terminal` green. Seven mutations each made the intended check fail (listed in #683).
 - Visual: home, providers and cli-reference in light and dark at true 1280x800 and 390x844 viewports; `scrollWidth` equals the viewport width on all 12.
 
-Follow-ups, not done: Lighthouse SEO score (needs a tool install), an `og:image` for the docs site.
+Follow-ups (done 2026-10-31):
+
+- `og:image`: own-designed 1200x630 card (`docs-site/assets/og-card.svg`, rendered to `og-card.png`, 98 KB, by `docs-site/scripts/make-og-image.mjs` with the Playwright headless shell, no network) copied into `dist` in `buildEnd`. Every page carries `og:image` (+ width, height, alt), `twitter:image` (+ alt), `twitter:card summary_large_image` and a JSON-LD `image`; the drift test and `check-dist.mjs` assert all of it.
+- Lighthouse 13.6.0 on the built site served locally (`npx -y lighthouse@13.6.0`, headless shell, isolated HOME). First run: home 100/100/100 (SEO / accessibility / best practices), providers 100/96/100, cli-reference 100/95/100. Findings fixed (docs-site only): code-block language label contrast 2.87 (now `--vp-c-text-2`) and the light syntax theme's green tokens at 4.28 (now `github-light-high-contrast`). Second run: home, providers and cli-reference all 100/100/100.
