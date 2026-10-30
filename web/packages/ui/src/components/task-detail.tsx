@@ -14,6 +14,7 @@ import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { useClearProviderCooldown, activeCooldownUntil } from "@/hooks/use-clear-provider-cooldown";
 import { useProfileList } from "@/hooks/use-profiles";
 import { detailLevelChangesView, useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
@@ -310,6 +311,7 @@ export function TaskDetailPane({
   const onJumpToChatRef = useRef(onJumpToChat);
   onJumpToChatRef.current = onJumpToChat;
   const queueItems = queue.items;
+  const { clear: clearProviderCooldown } = useClearProviderCooldown();
   const failover = useMemo<RunFailover<RunEntry>>(
     () => ({
       fallbackName: (profileId) => profiles.find((p) => p.ID === profileId)?.Name,
@@ -354,11 +356,13 @@ export function TaskDetailPane({
         queueRefreshRef.current();
       },
       isHeld: (run) => queueItems.some((i) => i.Status === "queued" && i.NotBefore && i.Prompt === run.prompt),
+      cooldownActive: (provider) => activeCooldownUntil(providers.find((p) => p.id === provider), new Date()) !== null,
+      clearCooldown: (provider) => clearProviderCooldown(provider),
       successor: (runId) => failoverIndex.successors.get(runId),
       continues: (runId) => failoverIndex.continues.get(runId),
       openChat: (chatId) => onJumpToChatRef.current?.(chatId),
     }),
-    [client, taskId, profiles, queueItems, failoverIndex],
+    [client, taskId, profiles, queueItems, failoverIndex, providers, clearProviderCooldown],
   );
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
