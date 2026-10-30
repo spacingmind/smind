@@ -219,9 +219,16 @@ func ModeAutoApproves(catalog ProviderInfo, s PermissionSettings) bool {
 func (r *Runner) ProviderCatalog() []ProviderInfo {
 	infos := providerInfos(r.providerRegistry())
 	for i := range infos {
-		infos[i].DefaultModel = r.DefaultModel(infos[i].ID)
+		infos[i].DefaultModel = r.configuredDefaultModel(infos[i].ID)
 	}
+	reg := r.providerRegistry()
 	for i, p := range infos {
+		spec, _ := reg.Get(string(p.ID))
+		// An instance that sets models replaces the agent's own list
+		// (ADR-0046 precedence: models > discovery); additionalModels merge
+		// into the discovered one below.
+		pinned := spec.IsInstance() && len(spec.Models) > 0 && spec.ModelsMode != providers.ModelsAdd
+		add := spec.IsInstance() && len(spec.Models) > 0 && spec.ModelsMode == providers.ModelsAdd
 		switch providers.Runner(p.Runner) {
 		case providers.RunnerACP:
 			c, ok := r.acpCatalog(p.ID)
@@ -234,8 +241,8 @@ func (r *Runner) ProviderCatalog() []ProviderInfo {
 				infos[i].DefaultMode = c.defaultMode
 				infos[i].ModesDiscovered = true
 			}
-			if mok {
-				infos[i].Models = append([]ModelInfo(nil), m.models...)
+			if mok && !pinned {
+				infos[i].Models = discoveredWithExtras(m.models, spec, add)
 				infos[i].ModelsDiscovered = true
 			}
 		case providers.RunnerCodex:
@@ -244,11 +251,44 @@ func (r *Runner) ProviderCatalog() []ProviderInfo {
 				r.maybeProbe(p.ID, r.probeCodexModels)
 				continue
 			}
-			infos[i].Models = append([]ModelInfo(nil), m.models...)
-			infos[i].ModelsDiscovered = true
+			if !pinned {
+				infos[i].Models = discoveredWithExtras(m.models, spec, add)
+				infos[i].ModelsDiscovered = true
+			}
 		}
 	}
 	return infos
+}
+
+// discoveredWithExtras is a discovered catalog, plus (add) the instance's
+// additionalModels merged by id.
+func discoveredWithExtras(discovered []ModelInfo, spec providers.Spec, add bool) []ModelInfo {
+	out := append([]ModelInfo(nil), discovered...)
+	if add {
+		out = mergeModelInfos(out, configModels(spec.Models))
+	}
+	return out
+}
+
+// configuredDefaultModel is the model a run of provider resolves to when it
+// names none and nothing falls back to a base: providers.<id>.defaultModel,
+// else, for an instance that sets its own models (replace mode), that list's
+// default entry (the one marked default, else the first) -- never the base's
+// default, which names a model the instance's endpoint may not serve.
+func (r *Runner) configuredDefaultModel(provider Provider) string {
+	if m := r.DefaultModel(provider); m != "" {
+		return m
+	}
+	spec, ok := r.providerRegistry().Get(string(provider))
+	if !ok || !spec.IsInstance() || len(spec.Models) == 0 || spec.ModelsMode == providers.ModelsAdd {
+		return ""
+	}
+	for _, m := range spec.Models {
+		if m.Default {
+			return m.ID
+		}
+	}
+	return spec.Models[0].ID
 }
 
 // DefaultModel is the configured default model for provider

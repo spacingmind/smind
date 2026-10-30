@@ -1,8 +1,12 @@
 package providers
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/acp"
 )
 
 func TestBuiltinsAreRegistered(t *testing.T) {
@@ -62,7 +66,7 @@ func TestSetCustom_RejectsAndChangesNothing(t *testing.T) {
 		"reserved prefix":     {[]Spec{{ID: "smind-x", Command: []string{"a"}}}, "reserved"},
 		"duplicate":           {[]Spec{{ID: "d", Command: []string{"a"}}, {ID: "d", Command: []string{"b"}}}, "[1].id"},
 		"no command":          {[]Spec{{ID: "a", Command: []string{"a"}}, {ID: "b"}}, "[1].command: required"},
-		"extends unknown":     {[]Spec{{ID: "e", Extends: "glm"}}, "[0].extends"},
+		"extends unknown":     {[]Spec{{ID: "e", Extends: "nope"}}, "[0].extends"},
 		"extends an instance": {[]Spec{{ID: "i1", Extends: IDClaudeNative}, {ID: "i2", Extends: "i1"}}, "[1].extends"},
 	} {
 		if err := r.SetCustom(tc.specs); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -85,5 +89,68 @@ func TestRegisterUnregister(t *testing.T) {
 	}
 	if !r.Unregister("fake") || r.Unregister("fake") || r.Unregister("glm") {
 		t.Fatal("Unregister semantics")
+	}
+}
+
+func TestKimiCommand_KimiCode(t *testing.T) {
+	t.Parallel()
+	k, ok := New().Get(IDKimi)
+	if !ok || strings.Join(k.Command, " ") != "kimi acp" || k.Runner != RunnerACP {
+		t.Fatalf("kimi spec = %+v", k)
+	}
+	if got := strings.Join(acp.KimiCommand(), " "); got != "kimi acp" {
+		t.Fatalf("acp.KimiCommand() = %q", got)
+	}
+	// The docs name Kimi Code (MoonshotAI/kimi-code), not the archived kimi-cli install.
+	doc, err := os.ReadFile(filepath.Join("..", "..", "public-docs", "providers.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(doc)
+	if !strings.Contains(text, "MoonshotAI/kimi-code") || strings.Contains(text, "pip install kimi-cli") {
+		t.Fatal("public-docs/providers.md must name Kimi Code (MoonshotAI/kimi-code) and not `pip install kimi-cli`")
+	}
+	src, err := os.ReadFile(filepath.Join("..", "acp", "kimi.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "MoonshotAI/kimi-code") || strings.Contains(string(src), "pip install kimi-cli") {
+		t.Fatal("internal/acp/kimi.go comments must name Kimi Code")
+	}
+}
+
+func TestSetCustom_InstanceOverlays(t *testing.T) {
+	t.Parallel()
+	r := New()
+	err := r.SetCustom([]Spec{
+		{ID: "base-acp", Command: []string{"base-acp", "--acp"}, Models: []Model{{ID: "a"}, {ID: "b"}}},
+		{ID: "acp-fast", Extends: "base-acp", Command: []string{"other", "--acp"}, ModelsMode: ModelsAdd, Models: []Model{{ID: "b", Label: "B2"}, {ID: "c"}}},
+		{ID: "kimi-2", Extends: IDKimi, Command: []string{"kimi-beta", "acp"}},
+		{ID: "cl", Extends: IDClaudeNative, DisallowedTools: []string{"WebSearch"}, ModelAliases: map[string]string{"opus": "glm-5.3"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := r.Get("acp-fast")
+	if f.Runner != RunnerACP || f.Base() != "base-acp" || f.Command[0] != "other" || f.HealthCommand[0] != "other" {
+		t.Fatalf("acp instance = %+v", f)
+	}
+	if len(f.Models) != 3 || f.Models[1].Label != "B2" || f.Models[2].ID != "c" {
+		t.Fatalf("add mode models = %+v", f.Models)
+	}
+	k, _ := r.Get("kimi-2")
+	if k.Runner != RunnerACP || k.Command[0] != "kimi-beta" || k.Delivery != DeliveryPreface {
+		t.Fatalf("kimi instance = %+v", k)
+	}
+	if base, _ := r.Get("base-acp"); len(base.Models) != 2 || base.Command[0] != "base-acp" {
+		t.Fatalf("base changed: %+v", base)
+	}
+	c, _ := r.Get("cl")
+	if c.Harness() != HarnessClaudeCode || len(c.DisallowedTools) != 1 || c.ModelAliases["opus"] != "glm-5.3" {
+		t.Fatalf("claude instance = %+v", c)
+	}
+	// An instance of an unknown or instance provider is refused, naming the field.
+	if err := r.SetCustom([]Spec{{ID: "x", Extends: "nope"}}); err == nil || !strings.Contains(err.Error(), "[0].extends") {
+		t.Fatalf("err = %v", err)
 	}
 }

@@ -17,7 +17,19 @@ type ModelInfo struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
 	Default     bool   `json:"default,omitempty"`
+	// Source says where the entry came from (additive wire field):
+	// "catalog" (smind's static Claude list), "config" (an instance's or a
+	// custom provider's configured models) or "discovered" (the agent's own
+	// list, learned by a probe).
+	Source string `json:"source,omitempty"`
 }
+
+// Model sources (ModelInfo.Source).
+const (
+	ModelSourceCatalog    = "catalog"
+	ModelSourceConfig     = "config"
+	ModelSourceDiscovered = "discovered"
+)
 
 // acpModelConfigCategory is ACP's SessionConfigOption category for the
 // model selector.
@@ -36,7 +48,7 @@ const ClaudeModelDefault = "default"
 // resolves itself, plus the current full ids. A convenience, not an
 // allowlist -- see ValidateModel.
 func claudeModels() []ModelInfo {
-	return []ModelInfo{
+	return stampSource([]ModelInfo{
 		{ID: "sonnet", Label: "Sonnet (latest)", Description: "Alias for the latest Sonnet"},
 		{ID: "opus", Label: "Opus (latest)", Description: "Alias for the latest Opus"},
 		{ID: "haiku", Label: "Haiku (latest)", Description: "Alias for the latest Haiku"},
@@ -44,19 +56,55 @@ func claudeModels() []ModelInfo {
 		{ID: "claude-opus-5-5", Label: "Opus 5.5"},
 		{ID: "claude-sonnet-5-5", Label: "Sonnet 5.5"},
 		{ID: "claude-haiku-5-5", Label: "Haiku 5.5"},
-	}
+	}, ModelSourceCatalog)
 }
 
-// staticModels is s's built-in model catalog: Claude's static list, or a
-// custom ACP provider's configured one; ACP and Codex are otherwise
-// discovered at runtime (see Runner.ProviderCatalog).
+func stampSource(models []ModelInfo, source string) []ModelInfo {
+	for i := range models {
+		models[i].Source = source
+	}
+	return models
+}
+
+// staticModels is s's built-in model catalog. Claude's static list is the
+// default; an instance's models replace it, or (additionalModels) are merged
+// into it by id. A custom ACP provider's configured list is served as is;
+// ACP and Codex are otherwise discovered at runtime (Runner.ProviderCatalog).
 func staticModels(s providers.Spec) []ModelInfo {
 	if s.Runner == providers.RunnerClaude {
-		return claudeModels()
+		if len(s.Models) == 0 {
+			return claudeModels()
+		}
+		if s.ModelsMode == providers.ModelsAdd {
+			return mergeModelInfos(claudeModels(), configModels(s.Models))
+		}
 	}
+	return configModels(s.Models)
+}
+
+func configModels(models []providers.Model) []ModelInfo {
 	var out []ModelInfo
-	for _, m := range s.Models {
-		out = append(out, ModelInfo{ID: m.ID, Label: m.Label, Description: m.Description, Default: m.Default})
+	for _, m := range models {
+		out = append(out, ModelInfo{ID: m.ID, Label: m.Label, Description: m.Description, Default: m.Default, Source: ModelSourceConfig})
+	}
+	return out
+}
+
+// mergeModelInfos is base plus extra by id: an extra entry replaces a base
+// entry of the same id in place, new ids append.
+func mergeModelInfos(base, extra []ModelInfo) []ModelInfo {
+	out := append([]ModelInfo(nil), base...)
+	for _, m := range extra {
+		replaced := false
+		for i := range out {
+			if out[i].ID == m.ID {
+				out[i], replaced = m, true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, m)
+		}
 	}
 	return out
 }
@@ -126,7 +174,7 @@ func deriveACPModels(options []acp.ConfigOption) (modelCatalog, bool) {
 		}
 		c := modelCatalog{configID: o.ConfigID, current: configCurrentValue(o.CurrentValue)}
 		for _, so := range o.Options {
-			c.models = append(c.models, ModelInfo{ID: so.Value, Label: so.Name, Description: so.Description, Default: so.Value == c.current})
+			c.models = append(c.models, ModelInfo{ID: so.Value, Label: so.Name, Description: so.Description, Default: so.Value == c.current, Source: ModelSourceDiscovered})
 		}
 		return c, true
 	}
