@@ -9,10 +9,12 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -415,6 +417,25 @@ func Run() {
 				modes := fileMode + " " + dirMode
 				_ = os.WriteFile(filepath.Join(wd, "mcp-config-modes"), []byte(modes), 0o644)
 			}
+		}
+		// With an endpoint configured (a recipe instance), the real CLI
+		// would call its API: POST /v1/messages with the auth token as a
+		// Bearer header. The fake records the status so a test can prove
+		// the launch env reached the CLI whole -- a real key is never in
+		// play, tests use a sentinel.
+		if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
+			status := "error"
+			req, err := http.NewRequest(http.MethodPost, base+"/v1/messages",
+				strings.NewReader(`{"model":"fake","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`))
+			if err == nil {
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+os.Getenv("ANTHROPIC_AUTH_TOKEN"))
+				if resp, err := http.DefaultClient.Do(req); err == nil {
+					resp.Body.Close()
+					status = strconv.Itoa(resp.StatusCode)
+				}
+			}
+			_ = os.WriteFile(filepath.Join(wd, "http-status"), []byte(status), 0o644)
 		}
 		stdin.Scan() // consume the prompt line
 		// The raw stream-json user message, for tests asserting what the

@@ -32,18 +32,24 @@ type ProvidersConfig struct {
 // or a passthrough; a key never sits inline in config.yaml. It runs the
 // extended provider's code, side by side with it.
 type CustomProvider struct {
-	ID               string              `yaml:"id"`
-	Label            string              `yaml:"label"`
-	Extends          string              `yaml:"extends"`
-	Command          string              `yaml:"command"`
-	Args             []string            `yaml:"args"`
-	Env              map[string]EnvValue `yaml:"env"`
-	Models           []CustomModel       `yaml:"models"`
-	AdditionalModels []CustomModel       `yaml:"additionalModels"`
-	DisallowedTools  []string            `yaml:"disallowedTools"`
-	Endpoint         *CustomEndpoint     `yaml:"endpoint"`
-	Modes            []CustomMode        `yaml:"modes"`
-	ACP              *CustomACP          `yaml:"acp"`
+	ID       string `yaml:"id"`
+	Label    string `yaml:"label"`
+	Extends  string `yaml:"extends"`
+	Recipe   string `yaml:"recipe"`
+	Vendor   string `yaml:"vendor"`
+	Thinking string `yaml:"thinking"`
+	// InheritClaudeConfig marks a claude-code instance that uses ~/.claude
+	// instead of a private CLAUDE_CONFIG_DIR.
+	InheritClaudeConfig bool                `yaml:"inheritClaudeConfig"`
+	Command             string              `yaml:"command"`
+	Args                []string            `yaml:"args"`
+	Env                 map[string]EnvValue `yaml:"env"`
+	Models              []CustomModel       `yaml:"models"`
+	AdditionalModels    []CustomModel       `yaml:"additionalModels"`
+	DisallowedTools     []string            `yaml:"disallowedTools"`
+	Endpoint            *CustomEndpoint     `yaml:"endpoint"`
+	Modes               []CustomMode        `yaml:"modes"`
+	ACP                 *CustomACP          `yaml:"acp"`
 }
 
 // CustomACP carries an ACP-specific capability declaration for a custom
@@ -139,6 +145,20 @@ func validateInstance(p *CustomProvider, bases map[string]providers.Runner, fiel
 	}
 	if p.ACP != nil && runner != providers.RunnerACP {
 		return fmt.Errorf("%s: only applies to an ACP provider", field("acp"))
+	}
+	if p.Recipe != "" && !customIDRe.MatchString(p.Recipe) {
+		return fmt.Errorf("%s: %q must be 1-64 characters of a-z, 0-9, . _ - and start with a letter or digit", field("recipe"), p.Recipe)
+	}
+	if !providers.ValidVendor(p.Vendor) {
+		return fmt.Errorf("%s: must be zai, anthropic, openai or generic", field("vendor"))
+	}
+	switch p.Thinking {
+	case "", "supported", "hidden":
+	default:
+		return fmt.Errorf("%s: must be supported or hidden", field("thinking"))
+	}
+	if p.InheritClaudeConfig && runner != providers.RunnerClaude {
+		return fmt.Errorf("%s: only applies to an instance of %s", field("inheritClaudeConfig"), providers.IDClaudeNative)
 	}
 	if err := validateInstanceCommand(p, runner, field); err != nil {
 		return err
@@ -272,6 +292,18 @@ func validateModelList(models []CustomModel, field func(string) string, name str
 }
 
 func validateACPEntry(p *CustomProvider, field func(string) string) error {
+	if p.Recipe != "" {
+		return fmt.Errorf("%s: only applies to an instance", field("recipe"))
+	}
+	if p.Vendor != "" {
+		return fmt.Errorf("%s: only applies to an instance", field("vendor"))
+	}
+	if p.Thinking != "" {
+		return fmt.Errorf("%s: only applies to an instance", field("thinking"))
+	}
+	if p.InheritClaudeConfig {
+		return fmt.Errorf("%s: only applies to an instance", field("inheritClaudeConfig"))
+	}
 	if strings.TrimSpace(p.Command) == "" {
 		return fmt.Errorf("%s: required", field("command"))
 	}
@@ -352,6 +384,7 @@ func ProviderSpecs(list []CustomProvider) []providers.Spec {
 			if p.Command != "" {
 				s.Command = append([]string{p.Command}, p.Args...)
 			}
+			s.Vendor, s.Thinking, s.Recipe, s.InheritClaudeConfig = p.Vendor, p.Thinking, p.Recipe, p.InheritClaudeConfig
 			if p.Endpoint != nil {
 				s.Endpoint = providers.Endpoint{Kind: providers.EndpointKind(p.Endpoint.Kind), BaseURL: p.Endpoint.BaseURL}
 			}

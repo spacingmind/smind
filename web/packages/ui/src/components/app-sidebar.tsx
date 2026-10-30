@@ -12,9 +12,12 @@ import {
   type ReactNode,
 } from "react";
 
-import { useCommands } from "@/palette/palette-provider";
+import { useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 
+import { useKeyboard } from "@/keyboard/keyboard-provider";
+import { formatCombo } from "@/keyboard/shortcut-string";
+import { SidebarQuickActions } from "@/components/sidebar-quick-actions";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { useProfileList } from "@/hooks/use-profiles";
 import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
@@ -715,6 +718,18 @@ export function AppSidebar({
 
   const results = useMemo(() => searchTasks(workspaces ?? [], query), [workspaces, query]);
 
+  const { setOpen: setPaletteOpen } = usePalette();
+  const { bindings, isMac } = useKeyboard();
+  const paletteCombo = bindings.find((b) => b.action === "palette.open")?.effectiveCombo;
+  const searchShortcut = paletteCombo ? formatCombo(paletteCombo, isMac) : null;
+  const newTaskFromQuickAction = () => {
+    const list = workspaces ?? [];
+    const selected = selectedTaskId == null ? undefined : allTasks.find((t) => t.ID === selectedTaskId);
+    const target = (selected && list.find((w) => w.ID === selected.WorkspaceID)) || (list.length === 1 ? list[0] : undefined);
+    if (target) setCrud({ kind: "task", workspace: target, spaceId: null });
+    else setPaletteOpen(true);
+  };
+
   const empty = !error && workspaces !== null && workspaces.length === 0;
 
   return (
@@ -778,6 +793,14 @@ export function AppSidebar({
           />
         )}
       </SidebarHeader>
+      {!empty && workspaces !== null && (
+        <SidebarQuickActions
+          onNewTask={newTaskFromQuickAction}
+          onSearch={() => setPaletteOpen(true)}
+          onAutomations={() => onOpenSettings?.("automations")}
+          searchShortcut={searchShortcut}
+        />
+      )}
       {/*
        * Only the tree scrolls: SidebarContent stops being the scroller
        * (overflow-hidden) and the group/content chain is bounded
@@ -808,7 +831,7 @@ export function AppSidebar({
               />
             ) : (
               <>
-                <span>Workspaces</span>
+                <span>Task list</span>
                 <span className="flex items-center">
                   {!empty && (
                     <SegmentedControl
