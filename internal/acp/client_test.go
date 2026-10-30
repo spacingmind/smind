@@ -231,6 +231,47 @@ func TestClient_PromptCancelledWhileUpdateInFlight(t *testing.T) {
 	}
 }
 
+// TestACPClient_SupportsMcpServersOptOut proves WithoutMcpServers masks
+// the agent's own advertised mcp capabilities: against the same fake
+// agent advertising stdio+http+sse support, a default client reports all
+// three supported while a client constructed with WithoutMcpServers
+// reports none.
+func TestACPClient_SupportsMcpServersOptOut(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		opts []Option
+	}{
+		{"without option", nil},
+		{"with WithoutMcpServers", []Option{WithoutMcpServers()}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c, err := New([]string{fakeAgentPath, "mcp2=stdio,http,sse"}, tt.opts...)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			t.Cleanup(func() { _ = c.Close() })
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := c.Initialize(ctx); err != nil {
+				t.Fatalf("Initialize() error = %v", err)
+			}
+
+			want := tt.opts == nil
+			if got := c.SupportsMcpStdio(); got != want {
+				t.Errorf("SupportsMcpStdio() = %v, want %v", got, want)
+			}
+			if got := c.SupportsMcpHttp(); got != want {
+				t.Errorf("SupportsMcpHttp() = %v, want %v", got, want)
+			}
+			if got := c.SupportsMcpSSE(); got != want {
+				t.Errorf("SupportsMcpSSE() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestGLMCommand(t *testing.T) {
 	got := GLMCommand()
 	want := []string{"npx", "-y", "glm-acp-agent@1.14.0"}

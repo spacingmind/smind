@@ -2303,6 +2303,11 @@ const providerTestTimeout = 3 * time.Second
 type providerTestResult struct {
 	OK     bool   `json:"ok"`
 	Detail string `json:"detail"`
+
+	// path is the executable testProviderCLI resolved, set when OK; it is
+	// unexported so it never reaches the wire. testProviderSpec runs
+	// `<path> <Health.VersionArg>` for the version check.
+	path string
 }
 
 // handleProviderTest is a lightweight "test this provider now" diagnostic:
@@ -2326,12 +2331,14 @@ func handleProviderTest(acctReg *accounts.Registry, runner *taskrunner.Runner) h
 			return nil, fmt.Errorf("provider.test: provider is required")
 		}
 		// A registered provider with a health command is checked by looking that
-		// executable up on PATH (an instance additionally reports its own
-		// config directory); otherwise p.Provider names an internal/accounts
-		// provider and the credential check applies.
+		// executable up on PATH and reporting what its Health spec says beyond
+		// that (version, install/login hints -- see provider_health.go); an
+		// instance additionally reports its own config directory. Otherwise
+		// p.Provider names an internal/accounts provider and the credential
+		// check applies.
 		if runner != nil {
 			if spec, ok := runner.Providers().Get(p.Provider); ok && len(spec.HealthCommand) > 0 {
-				res := testProviderCLI(spec.HealthCommand)
+				res := testProviderSpec(spec)
 				if d := providerEnvDetail(runner, p.Provider); d != "" {
 					res.Detail += "; " + d
 				}
@@ -2370,7 +2377,7 @@ func testProviderCLI(cmd []string) providerTestResult {
 			}
 			return providerTestResult{Detail: detail}
 		}
-		return providerTestResult{OK: true, Detail: fmt.Sprintf("found %s", r.path)}
+		return providerTestResult{OK: true, Detail: fmt.Sprintf("found %s", r.path), path: r.path}
 	case <-time.After(providerTestTimeout):
 		return providerTestResult{Detail: fmt.Sprintf("timed out looking for %q on PATH", cmd[0])}
 	}

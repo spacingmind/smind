@@ -1,14 +1,15 @@
 ---
 title: Providers
-description: Log in to Claude Code, Codex, GLM and Kimi, and choose each provider's config directory.
-summary: "This page explains how to connect the four coding-agent providers sMind by Spacing Mind runs (Claude Code, Codex, GLM and Kimi), including login and each provider's config directory. It is for anyone setting up accounts."
+description: Log in to the coding-agent providers smind runs, and choose each provider's config directory.
+summary: "This page explains the coding-agent providers sMind by Spacing Mind runs (Claude Code, Codex, GLM, Kimi, OpenCode, GitHub Copilot, Cline, Goose and Cursor), including login and each provider's config directory. It is for anyone setting up accounts."
 order: 3
 ---
 
 # Providers
 
-smind runs four providers. Each one is a coding agent that smind starts for a
-task.
+smind runs the coding-agent providers listed below. Each one is a coding agent
+that smind starts for a task. Five of them are new: OpenCode, GitHub Copilot,
+Cline, Goose and Cursor. See [Native ACP providers](#native-acp-providers).
 
 | Provider id | Name in the UI | What smind starts |
 | --- | --- | --- |
@@ -16,6 +17,11 @@ task.
 | `codex-native` | Codex | `codex app-server` |
 | `glm` | GLM | `npx -y glm-acp-agent` (needs Node.js) |
 | `kimi` | Kimi | `kimi acp` |
+| `opencode` | OpenCode | `opencode acp` |
+| `copilot` | GitHub Copilot | `copilot --acp` |
+| `cline` | Cline | `cline --acp` |
+| `goose` | Goose | `goose acp` |
+| `cursor` | Cursor | `cursor-agent acp` |
 
 Install the agent's own command first. smind does not install it for you,
 except that GLM downloads through `npx`.
@@ -30,13 +36,19 @@ smind account test claude-native
 smind account test codex-native
 smind account test glm
 smind account test kimi
+smind account test opencode
+smind account test copilot
+smind account test cline
+smind account test goose
+smind account test cursor
 smind account ls
 ```
 
 `account test` prints `ok` and a detail line when the provider can start. For
 `claude-native`, `codex-native` and `glm` it checks that the command is on the
-daemon's `PATH`. For `kimi` it checks for a stored, unexpired credential. It
-never starts a run and never calls the network.
+daemon's `PATH`, and the five native ACP providers are checked the same way.
+For `kimi` it checks for a stored, unexpired credential. It never starts a run
+and never calls the network.
 
 In the UI, use the **Test** button on a provider's page or on an account row.
 
@@ -119,6 +131,41 @@ smind account add kimi work < kimi-key.txt
 
 `--base-url <url>` sets another API address.
 
+## Native ACP providers
+
+These five providers speak the Agent Client Protocol. smind starts each one
+with its own command and does not install it.
+
+| Provider id | Install | Login | Verified |
+| --- | --- | --- | --- |
+| `opencode` | `npm i -g opencode-ai` or `brew install sst/tap/opencode` | none for the built-in free models; `opencode providers login` or its config for your own provider key | yes, the real CLI (v1.18.33) against a local fake server |
+| `copilot` | `npm i -g @github/copilot` | paid GitHub Copilot plan; run `copilot` once and use `/login`. ACP support is a public preview | not verified against a real login |
+| `cline` | `npm i -g cline` | provider key from `cline auth` or the `CLINE_API_KEY` variable | not verified against a real login |
+| `goose` | `brew install block-goose-cli` or the binary from block.github.io/goose | `goose configure` to pick a provider and key | not verified against a real login |
+| `cursor` | `curl https://cursor.com/install -fsS \| bash` | paid Cursor account: `cursor-agent login` or `CURSOR_API_KEY` | not verified against a real login |
+
+For OpenCode, smind sets `OPENCODE_PERMISSION` so it asks before bash and edit.
+Without that, OpenCode would allow everything without asking. smind also sets
+`OPENCODE_DISABLE_AUTOUPDATE=1`. Keep the same `HOME` and XDG data dir between
+daemon restarts, or OpenCode sessions cannot resume.
+
+Cursor needs a 2026 build. The 2025.09.18 build has no `acp` command, and the
+check says it is too old.
+
+`smind account test <id>` and the **Test** button check that the command is on
+the daemon's `PATH`, run `<command> --version` once, and say what is missing:
+the install command when it is not found, the login it needs when it is found,
+whether the version is too old (Cursor), and "not verified against a real
+login" for the four unverified ones. No model call is made.
+
+Models and modes come from the agent itself, through its ACP config options,
+the first time smind probes the provider. The probe sets `NO_BROWSER=true`, so
+it never opens a browser.
+
+Breaking: the ids `opencode`, `copilot`, `cline`, `goose` and `cursor` are now
+reserved built-in ids. A `providers.custom` entry that used one of them must be
+renamed.
+
 ## Provider launch environment
 
 Claude Code and Codex keep their settings and login in a config directory.
@@ -200,7 +247,8 @@ providers:
 
 - `id` is 1 to 64 characters of `a-z`, `0-9`, `.`, `_` and `-`, starting with a
   letter or digit. It may not be a built-in id (`claude-native`, `codex-native`,
-  `glm`, `kimi`) and must be unique.
+  `glm`, `kimi`, `opencode`, `copilot`, `cline`, `goose`, `cursor`) and must be
+  unique.
 - `extends` is a built-in provider id (`claude-native`, `codex-native`, `glm`,
   `kimi`) or the id of an earlier ACP entry in the list. An instance cannot
   extend another instance.
@@ -322,6 +370,15 @@ typed:
 
 A Claude Code instance pointed at Z.AI:
 
+`command` is required. `env` is free-form, and smind never prints its values in
+an error. `models` and `modes` are optional lists of `id`, `label`, `description`
+and, for a mode, `autoApproves`. A custom ACP provider shows the generic provider
+icon and the label you gave it.
+
+For an agent that cannot take MCP servers, set `acp.supportsMcpServers: false`.
+smind then sends it none. The same setting works on an instance of an ACP
+provider:
+
 ```yaml
 providers:
   custom:
@@ -398,3 +455,11 @@ id, validator token) was unaffected. The variable does hide
 `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` and most `*_KEY`/`*_TOKEN` names
 from the Bash tool. If you accept `default` permissions, you may opt in per
 instance with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"` in the instance `env`.
+
+    - id: my-agent
+      label: My agent
+      command: /usr/local/bin/my-agent
+      args: ["--acp"]
+      acp:
+        supportsMcpServers: false
+```

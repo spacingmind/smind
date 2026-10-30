@@ -62,7 +62,21 @@ const (
 	IDCodexNative  = "codex-native"
 	IDGLM          = "glm"
 	IDKimi         = "kimi"
+	IDOpenCode     = "opencode"
+	IDCopilot      = "copilot"
+	IDCline        = "cline"
+	IDGoose        = "goose"
+	IDCursor       = "cursor"
 )
+
+// Health is what provider.test reports beyond "the binary is on PATH": no model call is ever made.
+type Health struct {
+	Install    string // how to install, said when the binary is missing
+	Login      string // what login/credential the agent needs, said when the binary is found ("" = none needed)
+	Unverified bool   // best effort: not verified against a real login
+	MinVersion string // "" = no gate; dotted/dated version the binary must be at least (compared by numeric segments)
+	VersionArg string // argument that makes the binary print its version, e.g. "--version"; "" = skip the version check
+}
 
 // Learning-delivery modes (Spec.Delivery): how learned skills reach a run.
 const (
@@ -171,6 +185,12 @@ type Spec struct {
 	// AccountProvider instead.
 	HealthCommand []string
 
+	// Health is what provider.test says beyond the PATH lookup.
+	Health Health
+	// NoMCPServers: an ACP agent that cannot take mcpServers in session/new;
+	// smind then sends none.
+	NoMCPServers bool
+
 	// Learning capabilities (ADR-0026).
 	ToolEvents bool   // the run streams tool-call events
 	Reflect    bool   // runs may feed the reflector
@@ -206,6 +226,24 @@ func builtins() []Spec {
 			LiveModeSwitch: true, Images: "unknown", Command: acp.KimiCommand(), ToolEvents: true, Delivery: DeliveryPreface},
 		{ID: IDCodexNative, Label: "Codex", Runner: RunnerCodex, CredentialKind: "oauth", AccountProvider: "openai", Images: "yes",
 			Command: codex.DefaultCommand(), HealthCommand: []string{"codex"}},
+		{ID: IDOpenCode, Label: "OpenCode", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "yes",
+			Command: []string{"opencode", "acp"}, HealthCommand: []string{"opencode"}, ToolEvents: true, Delivery: DeliveryPreface,
+			// OpenCode auto-allows tools by default; this makes it ask so smind's permission modes apply.
+			Env:    map[string]string{"OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_PERMISSION": `{"bash":"ask","edit":"ask"}`},
+			Health: Health{Install: "npm i -g opencode-ai (or brew install sst/tap/opencode)", VersionArg: "--version"}},
+		{ID: IDCopilot, Label: "GitHub Copilot", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown",
+			Command: []string{"copilot", "--acp"}, HealthCommand: []string{"copilot"}, ToolEvents: true, Delivery: DeliveryPreface,
+			Health: Health{Install: "npm i -g @github/copilot", Login: "needs a paid GitHub Copilot plan: run `copilot` once and use /login (ACP is a public preview)", Unverified: true, VersionArg: "--version"}},
+		{ID: IDCline, Label: "Cline", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown",
+			Command: []string{"cline", "--acp"}, HealthCommand: []string{"cline"}, ToolEvents: true, Delivery: DeliveryPreface,
+			Health: Health{Install: "npm i -g cline", Login: "needs a provider key configured in Cline: run `cline auth` or set CLINE_API_KEY", Unverified: true, VersionArg: "--version"}},
+		{ID: IDGoose, Label: "Goose", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown",
+			Command: []string{"goose", "acp"}, HealthCommand: []string{"goose"}, ToolEvents: true, Delivery: DeliveryPreface,
+			Health: Health{Install: "brew install block-goose-cli, or the binary from block.github.io/goose", Login: "run `goose configure` to pick a provider and key", Unverified: true, VersionArg: "--version"}},
+		{ID: IDCursor, Label: "Cursor", Runner: RunnerACP, Kind: "cli", SupportsAutoAccept: true, LiveModeSwitch: true, Images: "unknown",
+			Command: []string{"cursor-agent", "acp"}, HealthCommand: []string{"cursor-agent"}, ToolEvents: true, Delivery: DeliveryPreface,
+			// The 2025.09.18 build has no `acp` subcommand.
+			Health: Health{Install: "curl https://cursor.com/install -fsS | bash", Login: "needs a paid Cursor account: run `cursor-agent login` or set CURSOR_API_KEY", Unverified: true, MinVersion: "2026.01.01", VersionArg: "--version"}},
 	}
 }
 
@@ -383,6 +421,7 @@ func resolve(s Spec, table []Spec) (Spec, error) {
 			inst.Models = s.Models
 		}
 		inst.ModelAliases = s.ModelAliases
+		inst.NoMCPServers = base.NoMCPServers || s.NoMCPServers
 		inst.Endpoint = s.Endpoint
 		inst.DisallowedTools = append(append([]string(nil), base.DisallowedTools...), s.DisallowedTools...)
 		inst.Reflect = false
