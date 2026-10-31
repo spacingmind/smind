@@ -178,6 +178,7 @@ func pluginHandlers(mgr *plugins.Manager, ev *pluginEvents) map[string]handlerFu
 		return map[string]any{"panels": orEmpty(panels), "sidebar": orEmpty(sidebar)}, nil
 	}
 	hs["plugin.call"] = pluginCallHandler(mgr)
+	hs["plugin.view"] = pluginViewHandler(mgr)
 	hs["plugin.themes"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
 		return orEmpty(mgr.Themes()), nil
 	}
