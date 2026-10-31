@@ -56,7 +56,7 @@ function DialogContent({
       <SheetPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-2xl border bg-background p-6 shadow-md duration-(--duration-menu) sm:max-w-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border bg-background p-6 shadow-md duration-(--duration-menu) sm:max-w-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           className
         )}
         {...props}
@@ -65,7 +65,7 @@ function DialogContent({
         {showCloseButton && (
           <SheetPrimitive.Close
             data-slot="dialog-close"
-            className="absolute top-4 right-4 rounded-lg opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-hidden disabled:pointer-events-none [&>svg]:size-4 [&>svg]:shrink-0"
+            className="absolute top-3.5 right-3.5 flex size-7 items-center justify-center rounded-lg text-foreground-muted opacity-70 transition-opacity hover:bg-muted hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-hidden disabled:pointer-events-none [&>svg]:size-4 [&>svg]:shrink-0"
           >
             <Icons.close />
             <span className="sr-only">Close</span>
@@ -80,7 +80,17 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-left", className)}
+      className={cn("flex flex-col gap-2 text-center sm:text-left pr-6", className)}
+      {...props}
+    />
+  )
+}
+
+function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="dialog-body"
+      className={cn("grid gap-4", className)}
       {...props}
     />
   )
@@ -106,7 +116,7 @@ function DialogTitle({
   return (
     <SheetPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-ui-lg font-medium", className)}
+      className={cn("text-ui-lg font-semibold", className)}
       {...props}
     />
   )
@@ -127,6 +137,7 @@ function DialogDescription({
 
 export {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
