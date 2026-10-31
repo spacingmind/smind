@@ -24,7 +24,7 @@ import {
   singleFlight,
   submitNewTask,
 } from '../newTask';
-import { NewTaskSelection, catalogOrFallback, defaultSelection, modeOptions, modelOptions, providerLabel, selectProvider } from '../providerCatalog';
+import { NewTaskSelection, catalogOrFallback, defaultSelection, modeOptions, modelOptions, providerLabel, providerNote, selectProvider } from '../providerCatalog';
 import { recallSelection, rememberSelection } from '../newTaskPrefs';
 import { issueMessage, spacesFor } from '../newTaskForm';
 import { taskHref } from '../navigation/routes';
@@ -87,6 +87,7 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
   const ready = load.kind === 'ready' ? load : null;
   const spaces = useMemo(() => (ready && workspaceId !== null ? spacesFor(ready.spaces, workspaceId) : []), [ready, workspaceId]);
   const provider = useMemo(() => ready?.providers.find((p) => p.id === selection?.provider), [ready, selection]);
+  const note = providerNote(provider);
 
   const input = useMemo<NewTaskInput>(
     () => ({
@@ -269,6 +270,11 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
               </Picker>
             </UiHost>
           </FieldRow>
+          {note ? (
+            <Text style={styles.note} testID="provider-note">
+              {note}
+            </Text>
+          ) : null}
           <FieldRow label="Model">
             <UiHost style={styles.controlHost}>
               <Picker selectedValue={selection.model} onValueChange={(v) => setSelection({ ...selection, model: String(v) })}>

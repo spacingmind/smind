@@ -84,6 +84,16 @@ export function ProviderNav(props: {
                   <ProviderIcon provider={item.id} size={16} />
                 )}
                 <span className="truncate text-ui-base">{item.label}</span>
+                {item.recipe ? (
+                  <span className="text-ui-xs text-muted-foreground" data-testid={`provider-nav-recipe-${item.id}`}>
+                    recipe
+                  </span>
+                ) : null}
+                {item.unverified ? (
+                  <span className="text-ui-xs text-warning" data-testid={`provider-nav-unverified-${item.id}`}>
+                    unverified
+                  </span>
+                ) : null}
                 {item.accountIds.length > 0 && (
                   <span className="text-ui-xs text-muted-foreground">{item.accountIds.length}</span>
                 )}

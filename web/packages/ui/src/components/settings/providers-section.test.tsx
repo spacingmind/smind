@@ -499,4 +499,19 @@ describe("provider instances", () => {
     await openAddArea();
     expect(daemon.countCalls("provider.dirSuggestions")).toBe(1);
   });
+
+  it("Add from recipe opens its panel and closes the Add instance panel", async () => {
+    await renderWithInstances();
+    await openAddArea();
+    expect(screen.getByTestId("provider-add-instance")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-add-recipe")).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("providers-add-recipe-toggle"));
+    });
+    await flush();
+    expect(screen.getByTestId("provider-add-recipe")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-add-instance")).toBeNull();
+    expect(screen.getByTestId("providers-add-recipe-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("providers-add-instance-toggle")).toHaveAttribute("aria-expanded", "false");
+  });
 });

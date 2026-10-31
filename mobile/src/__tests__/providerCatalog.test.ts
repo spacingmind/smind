@@ -12,6 +12,7 @@ import {
   modeOptions,
   modelOptions,
   providerLabel,
+  providerNote,
   selectProvider,
   wireModelMode,
 } from '../providerCatalog';
@@ -139,5 +140,55 @@ describe('custom providers and the offline fallback', () => {
     expect(catalogOrFallback(null).map((p) => p.id)).toEqual(ids);
     expect(catalogOrFallback([]).map((p) => p.id)).toEqual(ids);
     expect(FALLBACK_PROVIDERS.map((p) => providerLabel(p))).toEqual(['Claude Code', 'Codex', 'GLM', 'Kimi']);
+  });
+});
+
+// The read-only note over provider.list's new fields: recipe / unverified / key state.
+describe('providerNote', () => {
+  it('is null for a plain built-in and for undefined', () => {
+    expect(providerNote(undefined)).toBeNull();
+    expect(providerNote(claude)).toBeNull();
+  });
+
+  it('names the recipe, unverified and key state', () => {
+    const p: ProviderInfo = {
+      id: 'claude-work',
+      recipe: 'zai-glm',
+      unverified: true,
+      secrets: [{ name: 'api-key', env: 'ANTHROPIC_AUTH_TOKEN', set: true, fingerprint: 'ab12' }],
+    };
+    expect(providerNote(p)).toBe('Recipe zai-glm · Unverified · Key set (…ab12)');
+  });
+
+  it('says key not set when any secret is unset', () => {
+    const single: ProviderInfo = { id: 'x', secrets: [{ name: 'api-key', env: 'ANTHROPIC_AUTH_TOKEN', set: false }] };
+    expect(providerNote(single)).toBe('Key not set');
+    const multi: ProviderInfo = {
+      id: 'y',
+      secrets: [
+        { name: 'api-key', env: 'A', set: true, fingerprint: 'ab12' },
+        { name: 'refresh', env: 'B', set: false },
+      ],
+    };
+    expect(providerNote(multi)).toBe('Key not set');
+  });
+
+  it('never includes anything but the fingerprint of a secret', () => {
+    const p = {
+      id: 'x',
+      secrets: [{ name: 'api-key', env: 'ANTHROPIC_AUTH_TOKEN', set: true, fingerprint: 'ab12', value: 'sk-test-SENTINEL-0001' }],
+    } as unknown as ProviderInfo;
+    const note = providerNote(p);
+    expect(note).toBe('Key set (…ab12)');
+    expect(note).not.toContain('SENTINEL');
+  });
+
+  it('leaves the offline fallback list unchanged', () => {
+    expect(FALLBACK_PROVIDERS.map((p) => p.id)).toEqual(['claude-native', 'codex-native', 'glm', 'kimi']);
+    for (const p of FALLBACK_PROVIDERS) {
+      expect(p.recipe).toBeUndefined();
+      expect(p.secrets).toBeUndefined();
+      expect(p.unverified).toBeUndefined();
+    }
   });
 });

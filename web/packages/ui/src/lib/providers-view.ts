@@ -16,6 +16,10 @@ export interface ProviderNavItem {
   /** Worst account tone; "neutral" when there are no accounts or the provider is CLI-managed. */
   tone: NavTone;
   connected: boolean;
+  /** An instance made from a catalog recipe. */
+  recipe?: boolean;
+  /** A recipe row never verified against a live endpoint. */
+  unverified?: boolean;
 }
 
 const TONE_ORDER: Record<NavTone, number> = { neutral: 2, ok: 3, warning: 1, danger: 0 };
@@ -39,6 +43,8 @@ export function buildProviderNav(input: {
       accountIds,
       tone: worstTone(accountIds.map((id) => input.toneOf(id) ?? "neutral")),
       connected: accountIds.length > 0,
+      ...(info.recipe ? { recipe: true } : {}),
+      ...(info.recipe && info.unverified ? { unverified: true } : {}),
     };
   });
   const mapped = new Set(input.providers.map((info) => info.accountProvider));

@@ -43,6 +43,23 @@ describe("buildProviderNav", () => {
     expect(items[2]).toMatchObject({ label: "GLM", kind: "other", accountProvider: undefined });
   });
 
+  it("marks recipe instances and unverified recipes", () => {
+    const items = buildProviderNav({
+      providers: [
+        provider({ id: "plain", custom: true }),
+        provider({ id: "zai", custom: true, recipe: "zai-coding", unverified: false }),
+        provider({ id: "odd", custom: true, recipe: "odd-endpoint", unverified: true }),
+      ],
+      accounts: [],
+      toneOf: () => undefined,
+    });
+    expect(items[0].recipe).toBeUndefined();
+    expect(items[0].unverified).toBeUndefined();
+    expect(items[1]).toMatchObject({ recipe: true });
+    expect(items[1].unverified).toBeUndefined();
+    expect(items[2]).toMatchObject({ recipe: true, unverified: true });
+  });
+
   it("nav item tone is the worst account tone", () => {
     const items = buildProviderNav({
       providers: [provider({ id: "glm", credentialKind: "oauth", accountProvider: "anthropic" })],
