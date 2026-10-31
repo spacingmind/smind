@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/spacingmind/smind/internal/fleet/hello"
 	"github.com/spacingmind/smind/internal/fleet/identity"
@@ -336,7 +337,9 @@ func TestHostPrincipalOnlyFleetMethods(t *testing.T) {
 	approved := newCallerKey(t)
 	e.pairApproved(t, approved, "approved")
 
-	// Approved principal: everything but link.state is forbidden.
+	// Approved principal: everything but link.state and the fleet methods
+	// is forbidden. Each write method must be reachable (its params fail
+	// validation long before any effect runs), never gated off.
 	cl := e.dial(t)
 	if _, err := e.doHello(t, cl, approved); err != nil {
 		t.Fatal(err)
@@ -346,10 +349,36 @@ func TestHostPrincipalOnlyFleetMethods(t *testing.T) {
 		methods = append(methods, k)
 	}
 	for _, m := range methods {
-		if m == hello.MethodLinkState || slices.Contains(wire.ReadMethods, m) {
+		if m == hello.MethodLinkState || slices.Contains(wire.ReadMethods, m) || slices.Contains(wire.WriteMethods, m) {
 			continue
 		}
 		wantFleetCode(t, cl.Call(callCtx(), m, map[string]any{}, nil), codeForbidden)
+	}
+	for _, m := range wire.WriteMethods {
+		// Empty params fail serve's provenance check before the method's
+		// own validation -- the point is that the call is served at all,
+		// not that it got as far as decode.
+		wantFleetCode(t, cl.Call(callCtx(), m, map[string]any{}, nil), wire.CodePrincipalMismatch)
+	}
+	// The write methods are host surface only: not run-scoped, not plugin
+	// capability table entries, and refused without a host principal (the
+	// read-path twin of these checks lives in fleet_read_test.go).
+	for _, m := range wire.WriteMethods {
+		if runScopedSet[m] {
+			t.Errorf("%s is run-scoped", m)
+		}
+		if _, ok := pluginMethodCap[m]; ok {
+			t.Errorf("%s is in the plugin capability table", m)
+		}
+		if _, ok := e.api.hs[m]; !ok {
+			t.Errorf("handler map lacks %s", m)
+			continue
+		}
+		_, err := e.api.hs[m](context.Background(), &requestContext{conn: &conn{}, local: true}, []byte(`{}`))
+		var ce *rpcCodeError
+		if !errors.As(err, &ce) || ce.code != codeForbidden {
+			t.Errorf("%s without a host principal: %v, want forbidden", m, err)
+		}
 	}
 	err := cl.Call(callCtx(), hello.MethodLinkState, fleetLinkStateParams{State: "bogus"}, nil)
 	wantFleetCode(t, err, codeInvalid)
@@ -442,6 +471,54 @@ func TestFleetParamsHaveNoGrantOrSecretFields(t *testing.T) {
 			}
 		}
 	}
+	// The write params carry their own, narrower ban list: workspace and
+	// cost are words the read grant legitimately owns, while a write param
+	// may name a workspace it targets (AC17 -- the shape stays closed: no
+	// permissionMode, profile, env, cwd, attachment or mcp field exists).
+	// Words match whole name tokens, not substrings: "model" is a required
+	// field and must not trip the "mode" ban.
+	writeBanned := []string{"grant", "secret", "password", "token", "env", "policy", "cwd", "mode", "profile", "attach", "mcp", "account", "path"}
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(wire.TaskCreateParams{}),
+		reflect.TypeOf(wire.TaskSendParams{}),
+		reflect.TypeOf(wire.TaskStopParams{}),
+		reflect.TypeOf(wire.RunWaitParams{}),
+	} {
+		for i := 0; i < typ.NumField(); i++ {
+			f := typ.Field(i)
+			if f.Name == "Prov" {
+				continue
+			}
+			for _, tok := range nameTokens(f.Name, f.Tag.Get("json")) {
+				for _, b := range writeBanned {
+					if tok == b {
+						t.Errorf("%s.%s (%q) contains banned word %q", typ.Name(), f.Name, tok, b)
+					}
+				}
+			}
+		}
+	}
+}
+
+// nameTokens splits a Go field name and its json tag into lower-cased
+// words (camelCase boundaries and any non-letter run), so a ban list can
+// match whole words rather than substrings.
+func nameTokens(names ...string) []string {
+	var toks []string
+	for _, name := range names {
+		start := 0
+		rs := []rune(name)
+		for i := 1; i < len(rs); i++ {
+			if unicode.IsUpper(rs[i]) && !unicode.IsUpper(rs[i-1]) {
+				toks = append(toks, strings.ToLower(string(rs[start:i])))
+				start = i
+			}
+		}
+		if t := strings.ToLower(string(rs[start:])); t != "" {
+			toks = append(toks, t)
+		}
+	}
+	return toks
 }
 
 func sortedHandlerKeys(a *API) []string {
@@ -496,6 +573,7 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test", "fleet.host.route",
 		}
 		want = append(want, wire.ReadMethods...)
+		want = append(want, wire.WriteMethods...)
 		slices.Sort(want)
 		if !slices.Equal(added, want) {
 			t.Fatalf("added = %v, want %v", added, want)
