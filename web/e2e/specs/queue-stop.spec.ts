@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test'
 import { openRpc } from '../fixtures/rpc'
-import { openTaskByLink } from '../fixtures/specs1'
+import { openTaskByLink } from '../fixtures/open-task'
 import { type App, expect, test } from '../fixtures/test'
 
 async function assertUat(page: Page): Promise<void> {

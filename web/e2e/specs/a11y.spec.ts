@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import type { Locator, Page } from '@playwright/test'
-import { pinColorsToRgb } from '../fixtures/peer-sonnet'
+import { pinColorsToRgb } from '../fixtures/browser-stubs'
 import { expect, test } from '../fixtures/test'
 
 // B-05 fixed --muted-foreground, --warning-text and the sidebar row time only (docs: contrast-table). Quiet text built on the

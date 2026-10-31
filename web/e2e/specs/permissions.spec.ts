@@ -1,5 +1,5 @@
 import { type Page } from '@playwright/test'
-import { openTaskByLink } from '../fixtures/specs1'
+import { openTaskByLink } from '../fixtures/open-task'
 import { expect, test } from '../fixtures/test'
 
 const PROMPT = 'Update src/app.go to use the new value'

@@ -1,4 +1,4 @@
-import { openTaskByLink } from '../fixtures/specs1'
+import { openTaskByLink } from '../fixtures/open-task'
 import { expect, test } from '../fixtures/test'
 
 test('J19/A-02 the header terminal button opens exactly one Terminal tab and the shell works', async ({ app }, testInfo) => {

@@ -1,4 +1,4 @@
-import { refuseWebSocket } from '../fixtures/peer-sonnet'
+import { refuseWebSocket } from '../fixtures/browser-stubs'
 import { expect, test } from '../fixtures/test'
 
 test('J47 unknown task id shows Task not found (warm), then back/forward re-select tasks (B-02)', async ({ app }) => {

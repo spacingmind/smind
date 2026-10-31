@@ -1,4 +1,4 @@
-import { INVITE, stubFleet } from '../fixtures/peer-sonnet'
+import { INVITE, stubFleet } from '../fixtures/browser-stubs'
 import { expect, test } from '../fixtures/test'
 
 // Measured min dimension (px) at 1280: the B-07 growth is narrow-only, so desktop must not change.
