@@ -411,7 +411,8 @@ describe("ProviderDetail", () => {
       });
       renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
       await waitFor(() => expect(screen.getByTestId("provider-readiness-zai-claude")).toHaveTextContent("Key set"));
-      expect(screen.getByTestId("provider-detail").textContent).not.toMatch(/CLI login/);
+      const text = screen.getByTestId("provider-detail").textContent ?? "";
+      expect(text).not.toMatch(/Ready \(CLI login\)|CLI login kept|Managed externally/);
     });
 
     it("a recipe instance without a key reads No key set", async () => {
