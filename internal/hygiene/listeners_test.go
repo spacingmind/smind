@@ -28,7 +28,7 @@ var wildcardForms = []struct {
 	{"host-less address literal", regexp.MustCompile(`["'](:\d+|:%d|:%s)["']`)},
 	{"--listen with no host", regexp.MustCompile(`--(grpc-web-)?listen[ =]+["']?:\d`)},
 	{"listen: with no host", regexp.MustCompile(`listen:\s*["']?:\d`)},
-	{"JS listen(port) with no host", regexp.MustCompile(`\.listen\(\s*[^,()]+\)`)},
+	{"JS listen() without a loopback host", regexp.MustCompile(`\.listen\(`)},
 	{"Rust unspecified address", regexp.MustCompile(`UNSPECIFIED|Ipv4Addr::new\(0,\s*0,\s*0,\s*0\)`)},
 	{"ListenAndServe without a loopback host", regexp.MustCompile(`ListenAndServe\w*\(`)},
 }
@@ -54,8 +54,8 @@ func scanLine(line string) []string {
 		if !f.re.MatchString(line) {
 			continue
 		}
-		// A call that names a loopback host on the same line is fine (ListenAndServe("127.0.0.1:0", ...)).
-		if strings.HasPrefix(f.name, "ListenAndServe") && loopbackHost.MatchString(line) {
+		// A call that names a loopback host on the same line is fine (ListenAndServe("127.0.0.1:0", ...), server.listen(PORT, '127.0.0.1', cb)).
+		if (strings.HasPrefix(f.name, "ListenAndServe") || strings.HasPrefix(f.name, "JS listen")) && loopbackHost.MatchString(line) {
 			continue
 		}
 		forms = append(forms, f.name)
@@ -251,6 +251,8 @@ func TestListenerScannerRecognisesTheForms(t *testing.T) {
 		`$Exe config set server.listen "0.0.0.0:$Port"`,
 		`server.listen(3000)`,
 		`app.listen(PORT);`,
+		`server.listen(PORT, r)`,
+		`await new Promise((r) => server.listen(PORT, r));`,
 		`let l = TcpListener::bind(("0.0.0.0", port));`,
 		`let a = Ipv4Addr::UNSPECIFIED;`,
 		`let a = Ipv4Addr::new(0, 0, 0, 0);`,
@@ -270,6 +272,7 @@ func TestListenerScannerRecognisesTheForms(t *testing.T) {
 		`addr := fmt.Sprintf("127.0.0.1:%d", port)`,
 		`addr := net.JoinHostPort("127.0.0.1", "0")`,
 		`server.listen(PORT, '127.0.0.1', r)`,
+		`await new Promise((r) => server.listen(0, "localhost", r));`,
 		`  listen: "127.0.0.1:5151"`,
 		`env["SMIND_LISTEN"] = "127.0.0.1:4648"`,
 		`$Exe config set server.listen "127.0.0.1:$Port"`,
