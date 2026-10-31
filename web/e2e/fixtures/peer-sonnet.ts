@@ -70,3 +70,38 @@ export async function stubFleet(page: Page): Promise<void> {
     server.onMessage((raw) => sock.send(raw))
   })
 }
+
+/**
+ * axe-core 4.10 cannot parse the app's `oklch()` token colors: color-contrast then reports neither a pass, a
+ * violation nor an incomplete (0 nodes judged), so a "zero violations" result would prove nothing. Before a scan,
+ * pin every element's computed color / background-color to an sRGB value (resolved through a canvas pixel) so axe can
+ * read it. Only the scanned page is touched; call it right before AxeBuilder.analyze().
+ */
+export async function pinColorsToRgb(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const cv = document.createElement('canvas')
+    cv.width = cv.height = 1
+    const cx = cv.getContext('2d', { willReadFrequently: true })!
+    const rgba = (c: string) => {
+      cx.clearRect(0, 0, 1, 1)
+      cx.fillStyle = '#000'
+      cx.fillStyle = c
+      cx.fillRect(0, 0, 1, 1)
+      const d = cx.getImageData(0, 0, 1, 1).data
+      return `rgba(${d[0]}, ${d[1]}, ${d[2]}, ${(d[3] / 255).toFixed(3)})`
+    }
+    const cache = new Map<string, string>()
+    const conv = (c: string) => {
+      let v = cache.get(c)
+      if (!v) cache.set(c, (v = /^rgba?\(/.test(c) ? c : rgba(c)))
+      return v
+    }
+    for (const e of document.querySelectorAll<HTMLElement>('body, body *')) {
+      const cs = getComputedStyle(e)
+      e.style.setProperty('color', conv(cs.color), 'important')
+      if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)') e.style.setProperty('background-color', conv(cs.backgroundColor), 'important')
+    }
+    const root = getComputedStyle(document.documentElement).backgroundColor
+    document.documentElement.style.setProperty('background-color', conv(root === 'rgba(0, 0, 0, 0)' ? getComputedStyle(document.body).backgroundColor : root), 'important')
+  })
+}
