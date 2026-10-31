@@ -1,0 +1,54 @@
+{
+  "name": "keyValue",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "keyValue",
+      "items": [
+        {
+          "key": "Branch",
+          "value": "main"
+        },
+        {
+          "key": "Coverage",
+          "value": "82%",
+          "tone": "success"
+        },
+        {
+          "key": "Flaky",
+          "value": "3",
+          "tone": "warning"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "items": [
+          {
+            "key": "Branch",
+            "value": "main"
+          },
+          {
+            "key": "Coverage",
+            "tone": "success",
+            "value": "82%"
+          },
+          {
+            "key": "Flaky",
+            "tone": "warning",
+            "value": "3"
+          }
+        ],
+        "type": "keyValue"
+      },
+      "ui": 1
+    }
+  }
+}

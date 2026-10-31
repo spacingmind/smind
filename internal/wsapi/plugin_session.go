@@ -182,6 +182,10 @@ type pluginRegistry struct {
 	conn *conn
 	// sender answers task.send (nil until bindSender).
 	sender *pluginSender
+	// panelDeclared, panelAny and uiRefresh answer ui.refresh (plugin_refresh.go).
+	panelDeclared func(plugin, panel string) bool
+	panelAny      func(plugin string) bool
+	uiRefresh     *refreshLimiter
 }
 
 // bindSender installs what task.send needs.
@@ -191,7 +195,7 @@ func (r *pluginRegistry) bindSender(s *pluginSender) {
 	r.mu.Unlock()
 }
 
-func newPluginRegistry() *pluginRegistry { return &pluginRegistry{} }
+func newPluginRegistry() *pluginRegistry { return &pluginRegistry{uiRefresh: newRefreshLimiter()} }
 
 // bind installs the handler map plugin sessions execute against (a private
 // copy: later changes to the daemon's map cannot widen the plugin API, and the
@@ -283,6 +287,9 @@ func rpcErr(code int, msg string, data any) *host.RPCError {
 func (s *pluginSession) Request(ctx context.Context, method string, params json.RawMessage) (any, *host.RPCError) {
 	if pluginNever(method) {
 		return nil, rpcErr(host.ErrCodeForbidden, "method "+clipMethod(method)+" is never available to plugins", nil)
+	}
+	if method == pluginRPCUIRefresh {
+		return s.refresh(params)
 	}
 	capName, ok := pluginMethodCap[method]
 	if !ok {

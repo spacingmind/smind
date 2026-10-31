@@ -1,0 +1,21 @@
+{
+  "name": "panel-undeclared",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "button",
+      "label": "Open",
+      "action": {
+        "kind": "openPanel",
+        "panel": "overview"
+      }
+    }
+  },
+  "expect": {
+    "invalid": "$.root.action.panel"
+  }
+}

@@ -440,7 +440,7 @@ describe("Composer", () => {
 
     fireEvent.click(screen.getByLabelText("Permission mode"));
     const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["Accept File Edits", "Always Ask", "Plan Mode", "Auto mode", "Bypass"]);
+    expect(options.map((o) => o.getAttribute("aria-label"))).toEqual(["Accept File Edits", "Always Ask", "Plan Mode", "Auto mode", "Bypass"]);
     const bypass = options[4];
     expect(bypass).toHaveAttribute("title", expect.stringContaining("Skip all permission prompts"));
 
@@ -458,7 +458,7 @@ describe("Composer", () => {
     renderComposer();
     fireEvent.click(screen.getByLabelText("Permission mode"));
     const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["Accept File Edits", "Always Ask", "Plan Mode", "Bypass"]);
+    expect(options.map((o) => o.getAttribute("aria-label"))).toEqual(["Accept File Edits", "Always Ask", "Plan Mode", "Bypass"]);
   });
 
   it("Shift+Tab in the composer cycles the provider's modes, wrapping, and submits the cycled-to value (W3)", async () => {

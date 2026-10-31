@@ -129,6 +129,7 @@ var knownTopics = map[string]bool{
 	TopicForgeStatus:          true,
 	TopicProviderUpdated:      true,
 	TopicPluginUpdated:        true,
+	TopicPluginEvent:          true,
 	TopicAutomationFired:      true,
 	TopicAutomationPaused:     true,
 	TopicAutomationUpdated:    true,

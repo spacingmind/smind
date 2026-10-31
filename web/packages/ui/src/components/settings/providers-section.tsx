@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { AddFromRecipe } from "@/components/providers/add-from-recipe";
 import { AddProviderInstance } from "@/components/providers/add-provider-instance";
 import { ProvidersScreen } from "@/components/providers/providers-screen";
 import {
@@ -26,6 +27,8 @@ function ProvidersSection({ client }: SettingsSectionContext) {
   const selectedProviderId = useProvidersViewStore((s) => s.selectedProviderId);
   const requestConnect = useProvidersViewStore((s) => s.requestConnect);
   const [addOpen, setAddOpen] = useState(false);
+  // The two Add-* panels are exclusive: opening one closes the other, so the title area never stacks two forms.
+  const [recipeOpen, setRecipeOpen] = useState(false);
   // Connect the selected provider when it can connect; the other bucket, a
   // CLI provider or no selection fall back to the first credential provider.
   const credentials = credentialProviders(providers);
@@ -35,16 +38,32 @@ function ProvidersSection({ client }: SettingsSectionContext) {
       <SettingsSectionTitle
         title="Providers"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               variant="outline"
               size="sm"
               data-testid="providers-add-instance-toggle"
               aria-expanded={addOpen}
-              onClick={() => setAddOpen((v) => !v)}
+              onClick={() => {
+                setRecipeOpen(false);
+                setAddOpen((v) => !v);
+              }}
             >
               <Icons.providerGeneric aria-hidden className="size-3.5" />
               Add instance
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="providers-add-recipe-toggle"
+              aria-expanded={recipeOpen}
+              onClick={() => {
+                setAddOpen(false);
+                setRecipeOpen((v) => !v);
+              }}
+            >
+              <Icons.recipe aria-hidden className="size-3.5" />
+              Add from recipe
             </Button>
             <Button
               variant="outline"
@@ -60,6 +79,7 @@ function ProvidersSection({ client }: SettingsSectionContext) {
         }
       />
       {addOpen ? <AddProviderInstance hasClient={client !== null} /> : null}
+      {recipeOpen ? <AddFromRecipe hasClient={client !== null} onClose={() => setRecipeOpen(false)} /> : null}
       <ProvidersScreen client={client} />
     </div>
   );

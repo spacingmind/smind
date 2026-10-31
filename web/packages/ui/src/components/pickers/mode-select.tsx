@@ -53,9 +53,20 @@ export function ModeSelect({
         {/* Radix shows the placeholder, not the item, for an empty value: name the "Provider default" entry here. */}
         <SelectValue placeholder={extraItems?.find((m) => m.id === "")?.label ?? (variant === "pill" ? "Select mode" : "Permission mode")} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className={variant === "pill" ? "min-w-[220px] rounded-xl" : undefined}>
         {items.map((m) => (
-          <SelectItem key={m.id} value={m.id} title={m.description} className={m.autoApproves ? "text-warning" : undefined}>
+          <SelectItem
+            key={m.id}
+            value={m.id}
+            title={m.description}
+            className={m.autoApproves ? "text-warning" : undefined}
+            icon={
+              variant === "pill" ? (
+                m.autoApproves ? <Icons.permissionDanger aria-hidden className="text-foreground-muted" /> : <Icons.permission aria-hidden className="text-foreground-muted" />
+              ) : undefined
+            }
+            description={variant === "pill" ? m.description : undefined}
+          >
             {m.label}
           </SelectItem>
         ))}

@@ -1,0 +1,26 @@
+{
+  "name": "code",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "code",
+      "text": "func main() {\n\tfmt.Println(\"hi\")\n}",
+      "language": "go"
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "language": "go",
+        "text": "func main() {\n\tfmt.Println(\"hi\")\n}",
+        "type": "code"
+      },
+      "ui": 1
+    }
+  }
+}

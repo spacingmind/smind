@@ -21,6 +21,21 @@ type pluginUpdatedPayload struct {
 	GlobalEnabled bool   `json:"globalEnabled"`
 }
 
+// TopicPluginEvent is published when a plugin process asks clients to
+// refetch a panel through its native ui.refresh (ADR-0042 section 5 / plan
+// D4). Payload {pluginId, kind, panelId?}; kind is "refresh" in v1. The
+// payload carries no view data: clients refetch through plugin.view. It is
+// a client topic only -- a plugin would hear nothing but its own asks, so
+// it is not in PluginEventTopics.
+const TopicPluginEvent = "plugin.event"
+
+// pluginEventPayload is the payload of plugin.event events.
+type pluginEventPayload struct {
+	PluginID string `json:"pluginId"`
+	Kind     string `json:"kind"`
+	PanelID  string `json:"panelId,omitempty"`
+}
+
 // pluginEvents turns a change in plugin state into the events clients already
 // understand: mcpServer.created/deleted and profile.created/deleted for each
 // owned row that appeared or vanished (so existing lists refetch), then one

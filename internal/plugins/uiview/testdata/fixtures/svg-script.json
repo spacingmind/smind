@@ -1,0 +1,20 @@
+{
+  "name": "svg-script",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "badge",
+      "text": "x",
+      "icon": {
+        "svg": "<svg><script>alert(1)</script></svg>"
+      }
+    }
+  },
+  "expect": {
+    "invalid": "$.root.icon.svg"
+  }
+}

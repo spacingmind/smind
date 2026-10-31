@@ -1,0 +1,21 @@
+{
+  "name": "openurl-javascript",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "button",
+      "label": "Open",
+      "action": {
+        "kind": "openUrl",
+        "url": "javascript:alert(1)"
+      }
+    }
+  },
+  "expect": {
+    "invalid": "$.root.action.url"
+  }
+}

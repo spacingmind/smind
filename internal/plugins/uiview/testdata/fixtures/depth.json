@@ -1,0 +1,77 @@
+{
+  "name": "depth",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "stack",
+      "children": [
+        {
+          "type": "stack",
+          "children": [
+            {
+              "type": "stack",
+              "children": [
+                {
+                  "type": "stack",
+                  "children": [
+                    {
+                      "type": "stack",
+                      "children": [
+                        {
+                          "type": "stack",
+                          "children": [
+                            {
+                              "type": "stack",
+                              "children": [
+                                {
+                                  "type": "stack",
+                                  "children": [
+                                    {
+                                      "type": "stack",
+                                      "children": [
+                                        {
+                                          "type": "stack",
+                                          "children": [
+                                            {
+                                              "type": "stack",
+                                              "children": [
+                                                {
+                                                  "type": "stack",
+                                                  "children": [
+                                                    {
+                                                      "type": "stack",
+                                                      "children": []
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expect": {
+    "invalid": "$.root.children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0].children[0]"
+  }
+}

@@ -10,6 +10,10 @@ A tiny process plugin for smind (ADR-0042). Python 3, standard library only, no 
 | `contributes.hooks` `run.finished` | an observe hook; the plugin logs each finished run (`smind plugin logs hello-process`) |
 | `settings` `greeting` | a typed setting, delivered in `plugin.initialize` |
 
+## Panels
+
+Two panels ship with the example: `hello` (a task panel whose view the plugin answers through the `helloView` rpc) and `about` (a sidebar panel read from `views/about.json`, reached from the `Hello` sidebar item). A view is data only, a `ui: 1` document: the host validates it and runs every action itself, so the plugin never ships UI code. See [public-docs/plugins-authoring.md](../../public-docs/plugins-authoring.md).
+
 Try it (plugins must be on: `plugins.enabled: true` in `config.yaml`):
 
 ```sh

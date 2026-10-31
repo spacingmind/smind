@@ -1,0 +1,28 @@
+{
+  "name": "badge",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "badge",
+      "text": "beta",
+      "tone": "warning",
+      "icon": "FlaskConical"
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "icon": "FlaskConical",
+        "text": "beta",
+        "tone": "warning",
+        "type": "badge"
+      },
+      "ui": 1
+    }
+  }
+}

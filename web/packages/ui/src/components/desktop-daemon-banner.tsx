@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { NoticeAction, NoticeBanner } from "@/components/ui/notice-banner";
 import { useCopyFeedback } from "@/components/timeline/message-actions";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -189,108 +190,101 @@ export function DesktopDaemonBanner({
   const commands = actionable ? [] : updateCommands(daemonVersion);
 
   return (
-    <div
-      data-testid="desktop-daemon-banner"
-      role="status"
-      className="flex flex-col gap-1.5 border-b border-warning/40 bg-warning/10 px-4 py-2 text-ui-base text-foreground"
-    >
-      {/* One title row for every variant, so the text and the buttons centre on each other. */}
-      <div className="flex min-h-7 items-center justify-between gap-3">
-        <span className="min-w-0">
-          {versionUnknown
-            ? `Daemon version unknown — it may be older than this app (v${info.appVersion})`
-            : `Daemon v${daemonVersion} is older than this app (v${info.appVersion})`}
-          {!actionable && managedBy ? ` · managed by ${managedByLabel(managedBy)}` : null}
-          {busy
-            ? ` — Updating daemon…${stageMessage ? ` — ${stageMessage}` : ""}`
-            : deferring && armed
-              ? ` · ${runningRuns} ${runningRuns === 1 ? "agent" : "agents"} running — will update when ${runningRuns === 1 ? "it" : "they"} finish`
-              : null}
-        </span>
-        <div className="flex shrink-0 items-center gap-2">
+    <NoticeBanner
+      tone="warning"
+      testId="desktop-daemon-banner"
+      onDismiss={() => {
+        dismissNotice(current.id, token);
+        setDismissedToken(token);
+      }}
+      dismissTitle="Dismiss until the daemon or app version changes"
+      dismissTestId="desktop-daemon-banner-dismiss"
+      dismissDisabled={busy}
+      actions={
+        <>
           {error && (
             <>
               <span role="alert" data-testid="desktop-daemon-banner-error" className="text-destructive">
                 {error}
               </span>
-              <Button size="sm" variant="outline" data-testid="desktop-daemon-banner-retry" onClick={() => void runUpdate()} disabled={busy}>
+              <NoticeAction variant="secondary" data-testid="desktop-daemon-banner-retry" onClick={() => void runUpdate()} disabled={busy}>
                 Retry
-              </Button>
+              </NoticeAction>
             </>
           )}
           {actionable && deferring && armed && (
-            <Button size="sm" variant="outline" data-testid="desktop-daemon-banner-update-now" onClick={() => setConfirmOpen(true)} disabled={busy}>
+            <NoticeAction variant="secondary" data-testid="desktop-daemon-banner-update-now" onClick={() => setConfirmOpen(true)} disabled={busy}>
               Update now
-            </Button>
+            </NoticeAction>
           )}
           {actionable && deferring && armed && !busy && !error && (
-            <Button size="sm" variant="ghost" data-testid="desktop-daemon-banner-not-now" onClick={() => setArmed(false)}>
+            <NoticeAction variant="secondary" data-testid="desktop-daemon-banner-not-now" onClick={() => setArmed(false)}>
               Not now
-            </Button>
+            </NoticeAction>
           )}
           {actionable && (!deferring || !armed) && (
-            <Button size="sm" data-testid="desktop-daemon-banner-update" onClick={handleManualUpdate} disabled={busy}>
+            <NoticeAction data-testid="desktop-daemon-banner-update" onClick={handleManualUpdate} disabled={busy}>
               {busy ? "Updating…" : "Update & restart"}
-            </Button>
+            </NoticeAction>
           )}
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Dismiss"
-            title="Dismiss until the daemon or app version changes"
-            data-testid="desktop-daemon-banner-dismiss"
-            disabled={busy}
-            onClick={() => {
-              dismissNotice(current.id, token);
-              setDismissedToken(token);
-            }}
-          >
-            <Icons.close aria-hidden />
-          </Button>
-        </div>
-      </div>
-      {commands.length > 0 && (
-        <div className="flex flex-col gap-1" data-testid="desktop-daemon-banner-commands">
-          <span className="text-ui-sm text-muted-foreground">{commands.length === 1 ? "Update it by running:" : "Update it by running, on that machine:"}</span>
-          {/* One grid, so the command chips share the width of the longest. */}
-          <div
-            className="grid items-center gap-x-3 gap-y-1"
-            style={{ gridTemplateColumns: commands.some((c) => c.label) ? "max-content max-content" : "max-content" }}
-          >
-            {commands.map((c) => (
-              <CommandRow key={c.command} command={c} />
-            ))}
-          </div>
-        </div>
-      )}
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent data-testid="desktop-daemon-banner-confirm">
-          <DialogHeader>
-            <DialogTitle>Update daemon now?</DialogTitle>
-            <DialogDescription>
-              {runsLoaded
-                ? `Running agent work will be interrupted — ${runningRuns} ${runningRuns === 1 ? "agent is" : "agents are"} currently running.`
-                : "Running agent work will be interrupted. Agent status is still loading, so some agents may be running."}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              data-testid="desktop-daemon-banner-confirm-update"
-              onClick={() => {
-                setConfirmOpen(false);
-                void runUpdate();
-              }}
-            >
-              Update & restart
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+        </>
+      }
+      footer={
+        <>
+          {commands.length > 0 && (
+            <div className="flex flex-col gap-1" data-testid="desktop-daemon-banner-commands">
+              <span className="text-ui-sm text-muted-foreground">{commands.length === 1 ? "Update it by running:" : "Update it by running, on that machine:"}</span>
+              {/* One grid, so the command chips share the width of the longest. */}
+              <div
+                className="grid items-center gap-x-3 gap-y-1"
+                style={{ gridTemplateColumns: commands.some((c) => c.label) ? "max-content max-content" : "max-content" }}
+              >
+                {commands.map((c) => (
+                  <CommandRow key={c.command} command={c} />
+                ))}
+              </div>
+            </div>
+          )}
+          <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <DialogContent data-testid="desktop-daemon-banner-confirm">
+              <DialogHeader>
+                <DialogTitle>Update daemon now?</DialogTitle>
+                <DialogDescription>
+                  {runsLoaded
+                    ? `Running agent work will be interrupted — ${runningRuns} ${runningRuns === 1 ? "agent is" : "agents are"} currently running.`
+                    : "Running agent work will be interrupted. Agent status is still loading, so some agents may be running."}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  data-testid="desktop-daemon-banner-confirm-update"
+                  onClick={() => {
+                    setConfirmOpen(false);
+                    void runUpdate();
+                  }}
+                >
+                  Update & restart
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      }
+    >
+      {versionUnknown
+        ? `Daemon version unknown — it may be older than this app (v${info.appVersion})`
+        : `Daemon v${daemonVersion} is older than this app (v${info.appVersion})`}
+      {!actionable && managedBy ? ` · managed by ${managedByLabel(managedBy)}` : null}
+      {busy
+        ? ` — Updating daemon…${stageMessage ? ` — ${stageMessage}` : ""}`
+        : deferring && armed
+          ? ` · ${runningRuns} ${runningRuns === 1 ? "agent" : "agents"} running — will update when ${runningRuns === 1 ? "it" : "they"} finish`
+          : null}
+    </NoticeBanner>
   );
 }
 

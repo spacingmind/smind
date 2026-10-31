@@ -56,6 +56,8 @@ export const queryKeys = {
   providerList: () => ["provider.list"] as const,
   /** `provider.dirSuggestions`: the directories Settings -> Providers offers as one-click instances. */
   providerDirSuggestions: () => ["provider.dirSuggestions"] as const,
+  /** `provider.recipes`: the catalog rows the add-provider flow offers as templates. */
+  providerRecipes: () => ["provider.recipes"] as const,
   profileList: () => ["profile.list"] as const,
   /** `plugin.list` (ADR-0042): the global switch and every plugin; live via the `plugin.updated` event. */
   pluginList: () => ["plugin.list"] as const,

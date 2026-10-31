@@ -31,6 +31,22 @@ describe("ProviderNav", () => {
     expect(screen.getByRole("button", { name: "Kimi, Not connected" })).toBeInTheDocument();
   });
 
+  it("shows recipe and unverified badges only for recipe instances", () => {
+    const base = { kind: "cli" as const, accountIds: [] as number[], tone: "neutral" as const, connected: false };
+    const list: ProviderNavItem[] = [
+      { ...base, id: "plain", label: "Plain" },
+      { ...base, id: "verified", label: "Verified", recipe: true },
+      { ...base, id: "odd", label: "Odd", recipe: true, unverified: true },
+    ];
+    render(<ProviderNav items={list} selectedId={null} onSelect={() => {}} mode="full" />);
+    expect(screen.queryByTestId("provider-nav-recipe-plain")).toBeNull();
+    expect(screen.queryByTestId("provider-nav-unverified-plain")).toBeNull();
+    expect(screen.getByTestId("provider-nav-recipe-verified")).toHaveTextContent("recipe");
+    expect(screen.queryByTestId("provider-nav-unverified-verified")).toBeNull();
+    expect(screen.getByTestId("provider-nav-recipe-odd")).toBeInTheDocument();
+    expect(screen.getByTestId("provider-nav-unverified-odd")).toHaveTextContent("unverified");
+  });
+
   it("nav marks the selected provider", () => {
     render(<ProviderNav items={items} selectedId="anthropic" onSelect={() => {}} mode="full" />);
     expect(screen.getByTestId("provider-nav-item-anthropic")).toHaveAttribute("aria-current", "true");

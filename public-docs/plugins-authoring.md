@@ -319,6 +319,58 @@ and the result must be `{"prompt": "<text>"}` (up to 16 KiB). The text goes into
 the message box as plain characters and is never sent. See
 [Plugin RPCs](plugins.md#plugin-rpcs) for the rest.
 
+## Panels (data only)
+
+A plugin can show a panel in the apps without any code reaching them. A panel is a
+**view document**: JSON at schema level `ui: 1` that the web and phone apps draw
+natively. The web and phone renderers arrive in the next releases; the daemon side
+below is already enforced, so you can write and validate panels now.
+
+```json
+"contributes": {
+  "rpc": [{ "name": "overview.view" }],
+  "panels": [
+    { "id": "overview", "title": "Review", "icon": "ListChecks", "where": "task", "view": { "rpc": "overview.view" } },
+    { "id": "about", "title": "About", "where": "sidebar", "view": { "file": "views/about.json" } }
+  ],
+  "sidebar": [{ "id": "about", "title": "Review", "opens": "about" }]
+}
+```
+
+- `where` is `task` (a tab in a task), `sidebar` or `palette`. `view` is a `file` (a
+  `.json` inside the plugin, checked at install) **or** an `rpc` (the process answers with
+  the document; it gets `{panelId, context}` and is called every time a client opens or
+  refreshes the panel). `icon` is a Lucide name. A sidebar item `opens` a declared panel.
+- A client states the schema level it understands with every request
+  (`plugin.panels {ui: 1}`, `plugin.view {pluginId, panelId, ui: 1, context}`); a client
+  that sends none sees no panels.
+- To refresh an open panel, the process sends the host `ui.refresh` with `{"panelId": "overview"}`
+  (at most 4 per second). Clients refetch the view; no view data travels in the event.
+
+The document is `{"ui": 1, "root": <node>}`. Node types: `stack`, `row`, `heading`,
+`text`, `markdown`, `keyValue`, `list`, `table`, `badge`, `progress`, `code`, `diff`,
+`form` (text, select, toggle, secret fields), `button`, `empty`, `error`. Colour is a
+`tone` (`success`, `warning`, `danger`, `muted`), never a raw value. An `icon` is a Lucide
+name or `{"svg": "<svg>..."}` (one `<svg>`, at most 64 KiB, no script, style, handlers,
+foreignObject or external references). Unknown fields are errors.
+
+Interactions are **actions** that the host performs, never your code:
+
+| `kind` | What it does |
+|---|---|
+| `rpc` | `plugin.call` to **your own** plugin; the rpc must be declared in `contributes.rpc` |
+| `prompt` | inserts text into the message box; the user presses send |
+| `command` | runs a palette command by name |
+| `openPanel` | opens another panel of your plugin (it must be declared) |
+| `openUrl` | opens an `http(s)` link in the OS browser after a confirm that shows the host; no credentials in the URL |
+
+There is no remote image, no HTML (raw HTML in `markdown` is removed, an image shows as
+its alt text, a link keeps only `http(s)` and `mailto`) and no script. Limits: 256 KiB per
+document, depth 12, 1000 nodes, 8 KiB per string, 500 list/table rows, 12 table columns,
+24 form fields. A document over any limit or breaking a rule is refused whole with a
+`view_invalid` error naming the JSON path (`$.root.children[2].tone`); nothing is trimmed.
+The `plugin-examples/hello-process` plugin has one panel of each kind.
+
 ## Settings and secrets
 
 Declare typed `settings` and read them from `plugin.initialize`. Secrets are
