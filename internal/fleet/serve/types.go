@@ -116,6 +116,8 @@ type Options struct {
 	Backend Backend
 	// Ledger is the store the budget check and the wall sweeper read.
 	Ledger Ledger
+	// Tasks is the owner and latest-run lookups of the write path.
+	Tasks TaskLookup
 	// PollInterval is how often a fleet.run.wait long poll re-checks the
 	// run; zero means 500 ms, applied by the wait handler.
 	PollInterval time.Duration
