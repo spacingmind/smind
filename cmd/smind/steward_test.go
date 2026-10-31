@@ -123,6 +123,20 @@ func TestCLI_StewardLineShowsStaleReason(t *testing.T) {
 	}
 }
 
+// steward.review's reply names the fields reviewId/commitSha, not a View's
+// id/headSha; the line reads both spellings.
+func TestCLI_StewardLineReadsStartResult(t *testing.T) {
+	m := map[string]any{"reviewId": 4, "taskId": 2, "commitSha": stewardSha, "status": "running"}
+	want := "#4 task 2 running head " + stewardSha[:7] + " fresh mergeReady=-"
+	if got := stewardLine(m); got != want {
+		t.Fatalf("line = %q, want %q", got, want)
+	}
+	m = map[string]any{"reviewId": 5, "taskId": 2, "status": "pending"}
+	if got := stewardLine(m); !strings.Contains(got, "head - ") {
+		t.Fatalf("line = %q, want - for both heads missing", got)
+	}
+}
+
 func TestCLI_StewardRejectsBadIds(t *testing.T) {
 	f := &fakeStewardCaller{}
 	for _, args := range [][]string{

@@ -198,7 +198,8 @@ func runSteward(args []string, env stewardIO) int {
 
 // stewardLine renders one review as `#<id> task <taskId> <verdict or status>
 // head <head7> <stale-or-fresh> mergeReady=<bool>`. A missing field prints as
-// `-`, so an older daemon's result shape does not crash the CLI.
+// `-`, so an older daemon's result shape does not crash the CLI. The start
+// result's `reviewId`/`commitSha` are read as id/headSha aliases.
 func stewardLine(m map[string]any) string {
 	f := func(k string) string {
 		v, ok := m[k]
@@ -209,18 +210,21 @@ func stewardLine(m map[string]any) string {
 		if isStr && s == "" {
 			return "-"
 		}
-		if k == "headSha" && len(s) > 7 {
+		if (k == "headSha" || k == "commitSha") && len(s) > 7 {
 			return s[:7]
 		}
 		return fmt.Sprintf("%v", v)
 	}
-	what := f("verdict")
-	if what == "-" {
-		what = f("status")
+	pick := func(k, alt string) string {
+		if s := f(k); s != "-" {
+			return s
+		}
+		return f(alt)
 	}
 	stale := "fresh"
 	if s, _ := m["stale"].(string); s != "" {
 		stale = "stale (" + s + ")"
 	}
-	return fmt.Sprintf("#%s task %s %s head %s %s mergeReady=%s", f("id"), f("taskId"), what, f("headSha"), stale, f("mergeReady"))
+	return fmt.Sprintf("#%s task %s %s head %s %s mergeReady=%s",
+		pick("id", "reviewId"), f("taskId"), pick("verdict", "status"), pick("headSha", "commitSha"), stale, f("mergeReady"))
 }
