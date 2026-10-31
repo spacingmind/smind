@@ -24,12 +24,12 @@ tests:
   - { name: TestRefresherUpdatesOnlyOwnerRowOnSuccess, run: "go test ./internal/fleet/mirror -run '^TestRefresherUpdatesOnlyOwnerRowOnSuccess$' -count=1", timeoutSec: 300 }
   - { name: TestRefresherErrorLeavesRowUntouched, run: "go test ./internal/fleet/mirror -run '^TestRefresherErrorLeavesRowUntouched$' -count=1", timeoutSec: 300 }
   - { name: TestTaskLineageRemoteNodeShowsHostChip, run: "cd web && bun run --cwd packages/ui vitest run src/components/task-lineage.test.tsx -t TestTaskLineageRemoteNodeShowsHostChip", timeoutSec: 600 }
-  - { name: TestInboxRowShowsHostChip, run: "cd web && bun run --cwd packages/ui vitest run src/components/inbox -t TestInboxRowShowsHostChip", timeoutSec: 600 }
-  - { name: TestRemoteTaskHeaderReadOnlyWithHostChip, run: "cd web && bun run --cwd packages/ui vitest run src/components/app-header-task.test.tsx -t TestRemoteTaskHeaderReadOnlyWithHostChip", timeoutSec: 600 }
+  - { name: TestInboxRowShowsHostChip, run: "cd web && bun run --cwd packages/ui vitest run src/components/inbox/inbox-screen.test.tsx -t TestInboxRowShowsHostChip", timeoutSec: 600 }
+  - { name: TestRemoteTaskHeaderReadOnlyWithHostChip, run: "cd web && bun run --cwd packages/ui vitest run src/components/task-lineage.test.tsx -t TestRemoteTaskHeaderReadOnlyWithHostChip", timeoutSec: 600 }
 mutations:
   - { id: M1, file: internal/tasktree/tree.go, change: "do not add remote cost to the ancestors' subtree usage", expectFail: [TestTaskTreeShowsRemoteChildrenAndRollups] }
   - { id: M2, file: internal/store/task_budget.go, change: "drop the remote mirror term from TreeKnownCost", expectFail: [TestTreeBudgetCountsRemoteSpend] }
-  - { id: M3, file: internal/fleet/mirror/refresh.go, change: "write the row of the host named in the response instead of the row's host id", expectFail: [TestRefresherUpdatesOnlyOwnerRowOnSuccess] }
+  - { id: M3, file: internal/fleet/mirror/refresh.go, change: "write the row of the task id named in the response instead of the row's own id", expectFail: [TestRefresherUpdatesOnlyOwnerRowOnSuccess] }
   - { id: M4, file: internal/tasktree/tree.go, change: "estimate a nil remote cost as 0", expectFail: [TestTaskTreeRemoteNilCostStaysNil] }
   - { id: M5, file: internal/wsapi/task_tree.go, change: "pass remotes into buildTaskTree (shared with stopTree)", expectFail: [TestMirrorRowsAreCacheOnly] }
 ---
