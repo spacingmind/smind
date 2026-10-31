@@ -220,6 +220,9 @@ func evaluateRules(d Decision, req Request, pol *Policy, segs []Segment, units [
 		case u.seg != nil && u.seg.Dynamic:
 			d.Reasons = []string{fmt.Sprintf("segment %d (%s) contains a dynamic word", i, u.seg.Raw)}
 			return d
+		case u.seg != nil && len(u.seg.Env) > 0:
+			d.Reasons = []string{fmt.Sprintf("segment %d (%s) has an environment assignment", i, u.seg.Raw)}
+			return d
 		case u.seg != nil && len(u.seg.Redirects) > 0:
 			d.Reasons = []string{fmt.Sprintf("segment %d (%s) has a redirect", i, u.seg.Raw)}
 			return d

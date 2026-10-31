@@ -89,6 +89,7 @@ func installRoots(req Request) []string {
 		filepath.Join(home, ".ssh"),
 		filepath.Join(home, ".gnupg"),
 		filepath.Join(home, "Library", "Keychains"),
+		filepath.Join(home, "Library", "LaunchAgents"),
 	}
 	if req.SmindHome != "" {
 		roots = append(roots, req.SmindHome)
@@ -150,6 +151,14 @@ func (fs *floorSeg) installRules(words []wordPath) (FloorHit, bool) {
 			if w := nonFlags(fs.argv[1:]); len(w) > 0 && w[0] == "service" {
 				return floorHit("no-install-state")
 			}
+		case "launchctl", "systemctl", "service":
+			if mentionsSmind(fs.argv[1:]) {
+				return floorHit("no-install-state")
+			}
+		case "brew":
+			if containsWord(fs.argv[1:], "services") && mentionsSmind(fs.argv[1:]) {
+				return floorHit("no-install-state")
+			}
 		}
 	}
 	for _, w := range fs.seg.Argv {
@@ -163,6 +172,17 @@ func (fs *floorSeg) installRules(words []wordPath) (FloorHit, bool) {
 		}
 	}
 	return FloorHit{}, false
+}
+
+// mentionsSmind reports whether any argument names the smind service (a
+// launchd label, a unit, a plist path), case-insensitively.
+func mentionsSmind(args []string) bool {
+	for _, a := range args {
+		if strings.Contains(strings.ToLower(a), "smind") {
+			return true
+		}
+	}
+	return false
 }
 
 var procEnviron = regexp.MustCompile(`^/proc/[^/]+/environ$`)
@@ -245,6 +265,7 @@ func (fs *floorSeg) secretRules(words []wordPath) (FloorHit, bool) {
 var mutators = map[string]bool{
 	"cp": true, "mv": true, "rm": true, "tee": true, "touch": true, "mkdir": true,
 	"ln": true, "chmod": true, "chown": true, "dd": true, "install": true, "truncate": true,
+	"rsync": true, "sed": true, "perl": true, "curl": true, "wget": true, "tar": true, "unzip": true,
 }
 
 func (fs *floorSeg) destructiveRules(words []wordPath) (FloorHit, bool) {
@@ -291,6 +312,21 @@ func (fs *floorSeg) destinations(name string, words []wordPath) []wordPath {
 			return plain[len(plain)-1:]
 		}
 		return nil
+	case "rsync":
+		if len(plain) > 0 {
+			return plain[len(plain)-1:]
+		}
+		return nil
+	case "sed", "perl":
+		return fs.inPlaceTargets(plain)
+	case "curl":
+		return fs.flagTargets([]string{"-o"}, []string{"--output"})
+	case "wget":
+		return fs.flagTargets([]string{"-O", "-P"}, []string{"--output-document", "--directory-prefix"})
+	case "tar":
+		return fs.flagTargets([]string{"-C"}, []string{"--directory"})
+	case "unzip":
+		return fs.flagTargets([]string{"-d"}, nil)
 	case "dd":
 		var out []wordPath
 		for _, a := range fs.argv[1:] {
@@ -302,6 +338,74 @@ func (fs *floorSeg) destinations(name string, words []wordPath) []wordPath {
 		return out
 	}
 	return plain
+}
+
+// inPlaceTargets are the files of `sed -i` / `perl -i`: every plain word
+// except the script. The script is the first plain word unless -e/-f gives
+// it as an option, whose value is skipped. Without -i nothing is written.
+func (fs *floorSeg) inPlaceTargets(plain []wordPath) []wordPath {
+	inPlace, scriptOpt := false, false
+	skip := map[string]bool{}
+	for i, a := range fs.argv[1:] {
+		switch {
+		case a == "--in-place" || strings.HasPrefix(a, "--in-place="):
+			inPlace = true
+		case a == "-e" || a == "-f" || a == "--expression" || a == "--file":
+			scriptOpt = true
+			if i+2 < len(fs.argv) {
+				skip[fs.argv[i+2]] = true
+			}
+		case shortCluster(a, "i"):
+			inPlace = true
+			if shortCluster(a, "e") || shortCluster(a, "f") {
+				scriptOpt = true
+			}
+		}
+	}
+	if !inPlace {
+		return nil
+	}
+	var out []wordPath
+	first := !scriptOpt
+	for _, w := range plain {
+		if skip[w.raw] {
+			continue
+		}
+		if first {
+			first = false
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// flagTargets collects the values of output-directing flags: `-o f`,
+// `-of`, `--output f` and `--output=f` all name the same file.
+func (fs *floorSeg) flagTargets(shorts, longs []string) []wordPath {
+	var out []wordPath
+	add := func(v string) {
+		r, ok := resolveFloor(fs.req, v, fs.cwd)
+		out = append(out, wordPath{raw: v, resolved: r, ok: ok})
+	}
+	args := fs.argv[1:]
+	for i, a := range args {
+		for _, f := range shorts {
+			if a == f && i+1 < len(args) {
+				add(args[i+1])
+			} else if len(a) > len(f) && strings.HasPrefix(a, f) && !strings.HasPrefix(a, "--") {
+				add(a[len(f):])
+			}
+		}
+		for _, f := range longs {
+			if a == f && i+1 < len(args) {
+				add(args[i+1])
+			} else if v, found := strings.CutPrefix(a, f+"="); found {
+				add(v)
+			}
+		}
+	}
+	return out
 }
 
 // destroysTree is a git command that discards the working tree.

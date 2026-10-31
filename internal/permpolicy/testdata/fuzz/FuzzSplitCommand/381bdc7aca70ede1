@@ -1,0 +1,2 @@
+go test fuzz v1
+string("\xae\n<<0\n\xae\n0")

@@ -394,29 +394,24 @@ func (fs *floorSeg) ghRules() (FloorHit, bool) {
 	if len(fs.argv) == 0 || path.Base(fs.argv[0]) != "gh" {
 		return FloorHit{}, false
 	}
+	// The value of a global flag (-R owner/repo) is a non-flag word, so the
+	// verbs are looked for among all words, not just the first.
 	words := nonFlags(fs.argv[1:])
-	if len(words) == 0 {
-		return FloorHit{}, false
-	}
-	switch words[0] {
-	case "pr":
-		if containsWord(words[1:], "merge") {
-			return floorHit("no-merge")
-		}
-	case "api":
+	switch {
+	case containsWord(words, "pr") && containsWord(words, "merge"):
+		return floorHit("no-merge")
+	case containsWord(words, "release"):
+		return floorHit("no-merge")
+	case containsWord(words, "api"):
 		for _, a := range fs.argv[1:] {
 			if strings.Contains(a, "/merge") {
 				return floorHit("no-merge")
 			}
 		}
-	case "release":
-		return floorHit("no-merge")
-	case "workflow":
-		if containsWord(words[1:], "run") {
-			for _, a := range fs.argv[1:] {
-				if strings.Contains(strings.ToLower(a), "release") {
-					return floorHit("no-merge")
-				}
+	case containsWord(words, "workflow") && containsWord(words, "run"):
+		for _, a := range fs.argv[1:] {
+			if strings.Contains(strings.ToLower(a), "release") {
+				return floorHit("no-merge")
 			}
 		}
 	}
