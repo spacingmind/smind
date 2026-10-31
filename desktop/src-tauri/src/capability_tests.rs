@@ -36,6 +36,7 @@ fn capability_allowlist_exact() {
         "allow-open-external",
         "allow-editors-list",
         "allow-open-in-editor",
+        "allow-open-path-default",
         "allow-daemon-status",
         "allow-daemon-install",
         "allow-daemon-update",

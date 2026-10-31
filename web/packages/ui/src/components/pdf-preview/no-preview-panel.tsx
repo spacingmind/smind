@@ -10,11 +10,14 @@ export function NoPreviewPanel({
   description,
   testId = "no-preview-panel",
   action,
+  extra,
 }: {
   title: string;
   description?: ReactNode;
   testId?: string;
   action?: { label: string; onClick: () => void };
+  /** More actions below the description (Open in app, Download, Reveal, Copy path). */
+  extra?: ReactNode;
 }) {
   return (
     <EmptyState
@@ -23,10 +26,15 @@ export function NoPreviewPanel({
       title={title}
       description={description}
       action={
-        action && (
-          <Button type="button" variant="outline" size="sm" onClick={action.onClick}>
-            {action.label}
-          </Button>
+        (action || extra) && (
+          <div className="flex flex-col items-center gap-2">
+            {action && (
+              <Button type="button" variant="outline" size="sm" onClick={action.onClick}>
+                {action.label}
+              </Button>
+            )}
+            {extra}
+          </div>
         )
       }
     />
