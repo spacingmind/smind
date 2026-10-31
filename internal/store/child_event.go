@@ -135,6 +135,21 @@ func (s *Store) EnqueueChildEvent(in ChildEventInput) (item ChatQueueItem, appen
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	id, appended, err := enqueueChildEventTx(tx, in)
+	if err != nil {
+		return ChatQueueItem{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ChatQueueItem{}, false, fmt.Errorf("enqueue child event: commit: %w", err)
+	}
+	item, err = s.GetChatQueueItem(id)
+	return item, appended, err
+}
+
+// enqueueChildEventTx is the in-transaction body of EnqueueChildEvent:
+// claim in.RunIDs, then append-or-insert the queue item. Callers own the
+// transaction, so any error they roll back on leaves nothing behind.
+func enqueueChildEventTx(tx *sql.Tx, in ChildEventInput) (id int64, appended bool, err error) {
 	now := in.Now.UTC()
 	// A message with no RunIDs (the tree budget notice) reports no run, so
 	// there is nothing to claim and the claim gate does not apply; its caller
@@ -142,10 +157,10 @@ func (s *Store) EnqueueChildEvent(in ChildEventInput) (item ChatQueueItem, appen
 	if len(in.RunIDs) > 0 {
 		claimed, err := claimRunsTx(tx, in.RunIDs, now)
 		if err != nil {
-			return ChatQueueItem{}, false, err
+			return 0, false, err
 		}
 		if claimed == 0 {
-			return ChatQueueItem{}, false, ErrChildEventAlreadyNotified
+			return 0, false, ErrChildEventAlreadyNotified
 		}
 	}
 
@@ -153,7 +168,6 @@ func (s *Store) EnqueueChildEvent(in ChildEventInput) (item ChatQueueItem, appen
 		`SELECT `+chatQueueColumns+` FROM chat_queue
 		 WHERE chat_id = ? AND status = 'queued' AND source = ?
 		 ORDER BY id LIMIT 1`, in.ChatID, ChatQueueSourceChildEvent))
-	var id int64
 	switch {
 	case err == nil:
 		notBefore := now.Add(in.Debounce)
@@ -167,16 +181,16 @@ func (s *Store) EnqueueChildEvent(in ChildEventInput) (item ChatQueueItem, appen
 			`UPDATE chat_queue SET prompt = prompt || ? || ?, not_before = ?, updated_at = ? WHERE id = ?`,
 			"\n\n", in.Block, notBefore.UTC(), now, existing.ID,
 		); err != nil {
-			return ChatQueueItem{}, false, fmt.Errorf("append child event to queue item %d: %w", existing.ID, err)
+			return 0, false, fmt.Errorf("append child event to queue item %d: %w", existing.ID, err)
 		}
 		id, appended = existing.ID, true
 	case errors.Is(err, sql.ErrNoRows):
 		var queued int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM chat_queue WHERE chat_id = ? AND status = 'queued'`, in.ChatID).Scan(&queued); err != nil {
-			return ChatQueueItem{}, false, fmt.Errorf("count queued prompts for chat %d: %w", in.ChatID, err)
+			return 0, false, fmt.Errorf("count queued prompts for chat %d: %w", in.ChatID, err)
 		}
 		if queued >= chatQueueBound {
-			return ChatQueueItem{}, false, fmt.Errorf("enqueue child event for chat %d: %w", in.ChatID, ErrQueueFull)
+			return 0, false, fmt.Errorf("enqueue child event for chat %d: %w", in.ChatID, ErrQueueFull)
 		}
 		res, err := tx.Exec(
 			`INSERT INTO chat_queue (chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, attachments, not_before, created_at, updated_at)
@@ -184,19 +198,15 @@ func (s *Store) EnqueueChildEvent(in ChildEventInput) (item ChatQueueItem, appen
 			in.ChatID, in.Block, in.RunConfig, ChatQueueSourceChildEvent, now.Add(in.Debounce), now, now,
 		)
 		if err != nil {
-			return ChatQueueItem{}, false, fmt.Errorf("insert child event for chat %d: %w", in.ChatID, err)
+			return 0, false, fmt.Errorf("insert child event for chat %d: %w", in.ChatID, err)
 		}
 		if id, err = res.LastInsertId(); err != nil {
-			return ChatQueueItem{}, false, fmt.Errorf("child event item id: %w", err)
+			return 0, false, fmt.Errorf("child event item id: %w", err)
 		}
 	default:
-		return ChatQueueItem{}, false, fmt.Errorf("find queued child event for chat %d: %w", in.ChatID, err)
+		return 0, false, fmt.Errorf("find queued child event for chat %d: %w", in.ChatID, err)
 	}
-	if err := tx.Commit(); err != nil {
-		return ChatQueueItem{}, false, fmt.Errorf("enqueue child event: commit: %w", err)
-	}
-	item, err = s.GetChatQueueItem(id)
-	return item, appended, err
+	return id, appended, nil
 }
 
 // LatestFinishedRun returns taskID's most recently started non-running run.
