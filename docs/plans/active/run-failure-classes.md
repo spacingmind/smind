@@ -296,28 +296,29 @@ Decided in the repo already: a typed `failureKind` column on `runs`, status stay
 `error` (ADR-0041 B1/D13); transient vs hard split exists in the passive quota
 observer (ADR-0028); the settings deep link `smind:open-settings` exists.
 
-DECISIONS FOR THE HUMAN (AGENTS.md rule d; each with my recommendation):
+DECIDED 2026-11-01 as Supervisor defaults (the Human is away and may veto
+later; recorded the same way in the ADR):
 
-- D1 Split `rate_limited` or keep it as the umbrella? Recommend **split**:
-  `plan_window_exhausted` and `transient_429` replace it; `rate_limited` stays
-  only as the residual for an unclassifiable limit (keeps today's behaviour, no
-  guessing). Old rows migrate by rule (AC9). Why: an umbrella with a sub-field
-  makes every consumer re-derive the class and keeps the "wait vs retry" bug
-  class alive; no installed base, so the break is cheap. Needs a short new ADR
-  plus amendment pointers in ADR-0041 B1 and ADR-0028.
-- D2 Wire shape: a typed `action {kind, target?, label}` object built by the
-  daemon, rather than clients mapping kind to text. Recommend **object**: one
-  vocabulary for web, mobile, MCP and CLI; additive and `omitempty`; clients
-  render `label` for an unknown kind.
-- D3 Automatic `transient_429` retry: smind retries by itself (2 tries, 30 s then
-  2 min, Retry-After honoured and clamped), for user runs only (`purpose == ""`),
-  on the same chat. It spends tokens without a human asking. Recommend **on for
-  orchestrator-sourced and profile runs, off for a plain human send** (a human
-  gets the `retry_now` button and the inbox item). Alternative: off everywhere.
-- D4 (smaller; I will take my default unless told otherwise) the inbox gets a new
-  kind `run_failed`; `task wait` gets exit code 7; `auth_expired` marking the
-  account "needs sign-in" in the Usage view is NOT done here (it would couple to
-  the quota poller's problem state; follow-up).
+- D1 **Split.** `plan_window_exhausted` and `transient_429` replace
+  `rate_limited`; `rate_limited` stays only as the residual for an
+  unclassifiable limit (today's behaviour, no guessing). Old rows migrate by
+  rule (AC9). Short new ADR plus amendment pointers in ADR-0041 B1 and ADR-0028.
+- D2 **Typed action object.** The daemon builds `action {kind, target?, label}`;
+  one vocabulary for web, mobile, MCP and CLI; additive and `omitempty`;
+  clients render `label` for an unknown kind.
+- D3 **Auto-retry `transient_429`**: twice (30 s, then 2 min; Retry-After wins,
+  clamped to [5 s, 5 min]), ON for orchestrator-sourced and profile runs, OFF
+  for a plain human send (a human gets `retry_now` and the inbox item). HARD
+  CAP: a retry never runs while the provider is in cooldown (it waits, or is
+  dropped to the actionable failure), and every retry is a counted run, so its
+  usage lands in the run usage and the per-tree guard like any other run.
+- D4 (my default) the inbox gets a new kind `run_failed`; `task wait` gets exit
+  code 7; `auth_expired` marking the account "needs sign-in" in Usage is NOT
+  done here (follow-up).
+
+Additional test for D3: `TestFinish_Transient429RetryHeldWhileProviderCooldown`
+(mutation: skip the cooldown check; the test must fail), and
+`TestFinish_Transient429RetryRunsAreCounted`.
 
 ## PR split (non-stacked; each from origin/develop; PR2 and PR3 start after PR1 merges)
 
@@ -340,8 +341,8 @@ Usage, changing the `rate_limited` window/zone parsing, any new run status.
 ## Progress
 
 - 2026-11-01 Phase 1: code read (classifier, finish/failover/cooldown, inbox,
-  MCP, CLI, web error box); this spec written. Waiting for the Steward to accept
-  it and for the Human's answers to D1-D3.
+  MCP, CLI, web error box); this spec written. Spec accepted by the Steward; D1-D3 recorded as Supervisor defaults.
+- 2026-11-01 PR1 started.
 
 ## Validation
 
