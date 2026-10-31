@@ -201,6 +201,47 @@ describe("TerminalPane", () => {
     expect(host.className).not.toMatch(/(^|\s)p[xytrbl]?-/);
   });
 
+  it("touch control row renders after the terminal", async () => {
+    const client = new FakeWsClient();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => new FakeTerminalHandle()} />);
+    await flush();
+    const host = screen.getByTestId("terminal-container");
+    const row = screen.getByTestId("terminal-touch-actions");
+    expect(host.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(host.closest('[class*="flex-col"]')?.lastElementChild).toBe(row);
+  });
+
+  it("lifts the touch row above the on-screen keyboard", async () => {
+    const listeners: Record<string, () => void> = {};
+    const vv = {
+      height: 500,
+      offsetTop: 0,
+      addEventListener: (type: string, fn: () => void) => {
+        listeners[type] = fn;
+      },
+      removeEventListener: () => {},
+    };
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: vv });
+    window.innerHeight = 800;
+    try {
+      const client = new FakeWsClient();
+      render(<TerminalPane client={client} task={TASK_A} createTerminal={() => new FakeTerminalHandle()} />);
+      await flush();
+      const row = screen.getByTestId("terminal-touch-actions");
+      expect(row.style.marginBottom).toBe("300px");
+
+      vv.height = 800;
+      act(() => listeners.resize());
+      expect(["0px", ""]).toContain(row.style.marginBottom);
+      // jsdom may drop env() values; only assert it when kept.
+      if (row.style.paddingBottom) expect(row.style.paddingBottom).toContain("safe-area-inset-bottom");
+    } finally {
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: undefined });
+      window.innerHeight = originalHeight;
+    }
+  });
+
   it("shows no header row while a terminal is running", async () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();

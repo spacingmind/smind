@@ -9,6 +9,7 @@ import { FindBar, type FindBarHandle } from "@/components/find/find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useTheme } from "@/hooks/use-theme";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
@@ -201,6 +202,7 @@ export function TerminalPane({
 }) {
   const key = tabKey ?? `${task.ID}:terminal`;
   const { resolved } = useTheme();
+  const keyboardInset = useKeyboardInset();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<TerminalHandle | null>(null);
   const terminalIdRef = useRef<string | null>(null);
@@ -589,42 +591,6 @@ export function TerminalPane({
           {endedStatus ? `session ${endedStatus}` : "starting terminal…"}
         </p>
       )}
-      {/*
-       * Touch has neither the copy/paste keyboard shortcuts nor
-       * right-click paste/copy, so those two affordances stay available as
-       * buttons -- hidden on pointer-fine devices (Tailwind 4's
-       * `pointer-coarse:` variant). While a terminal runs there is no
-       * header at all: the tab strip already shows the title.
-       */}
-      <div
-        data-testid="terminal-touch-actions"
-        className="hidden items-center gap-2 border-b px-3 py-1 pointer-coarse:flex"
-      >
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-ui-sm"
-          disabled={!terminalId || (selectionReportable && !hasSelection)}
-          onClick={() => void handleCopy()}
-          data-testid="terminal-copy"
-        >
-          <Icons.copy className="size-3" />
-          Copy
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-ui-sm"
-          disabled={!terminalId}
-          onClick={() => void handlePaste()}
-          data-testid="terminal-paste"
-        >
-          <Icons.paste className="size-3" />
-          Paste
-        </Button>
-      </div>
       {connectionStatus === "reconnecting" && (
         <Alert
           testId="connection-banner"
@@ -665,6 +631,47 @@ export function TerminalPane({
             />
           </div>
         )}
+      </div>
+      {/*
+       * Touch has neither the copy/paste keyboard shortcuts nor
+       * right-click paste/copy, so those two affordances stay available as
+       * buttons -- hidden on pointer-fine devices (Tailwind 4's
+       * `pointer-coarse:` variant). Pinned at the bottom, within thumb
+       * reach; the margin lifts it above the on-screen keyboard, and the
+       * safe-area padding applies only while the keyboard is closed.
+       */}
+      <div
+        data-testid="terminal-touch-actions"
+        className="hidden shrink-0 items-center gap-2 border-t bg-background px-3 py-1 pointer-coarse:flex"
+        style={{
+          marginBottom: keyboardInset,
+          paddingBottom: keyboardInset > 0 ? undefined : "env(safe-area-inset-bottom)",
+        }}
+      >
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-ui-sm"
+          disabled={!terminalId || (selectionReportable && !hasSelection)}
+          onClick={() => void handleCopy()}
+          data-testid="terminal-copy"
+        >
+          <Icons.copy className="size-3" />
+          Copy
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-ui-sm"
+          disabled={!terminalId}
+          onClick={() => void handlePaste()}
+          data-testid="terminal-paste"
+        >
+          <Icons.paste className="size-3" />
+          Paste
+        </Button>
       </div>
     </div>
   );
