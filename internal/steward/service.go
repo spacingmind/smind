@@ -278,6 +278,13 @@ func (s *Service) view(row store.StewardReview, latestReviewID int64) (View, err
 		if err := json.Unmarshal([]byte(row.GatesJSON), &v.Gates); err != nil {
 			return View{}, fmt.Errorf("steward review %d: gates: %w", row.ID, err)
 		}
+	} else if strings.TrimSpace(row.DigestJSON) != "" {
+		// A blocked review has no seat verdict, so no stored gates: the
+		// digest's gates are still the review's objective state.
+		var digest Digest
+		if json.Unmarshal([]byte(row.DigestJSON), &digest) == nil && len(digest.Gates) > 0 {
+			v.Gates = digest.Gates
+		}
 	}
 	headNow := ""
 	if s.Head != nil {

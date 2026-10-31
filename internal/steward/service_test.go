@@ -602,6 +602,49 @@ func TestView_StaleAndMergeReady(t *testing.T) {
 	}
 }
 
+func TestView_BlockedReviewShowsDigestGates(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	gates := make([]Gate, len(GateIDs))
+	for i, id := range GateIDs {
+		gates[i] = Gate{ID: id, State: GatePass}
+	}
+	row, _ := openReview(t, svc, digestWithGates(gates...))
+	if err := svc.WriteBlocked(row.ID, "crashed", "run ended without a verdict", 0.25); err != nil {
+		t.Fatalf("WriteBlocked() error = %v", err)
+	}
+	v, err := svc.View(row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Gates) != len(GateIDs) {
+		t.Fatalf("gates = %d (%v), want the digest's %d", len(v.Gates), v.Gates, len(GateIDs))
+	}
+	for i, g := range v.Gates {
+		if g.ID != GateIDs[i] || g.State != GatePass {
+			t.Fatalf("gate %d = %+v, want %s pass", i, g, GateIDs[i])
+		}
+	}
+	if len(v.Findings) != 0 {
+		t.Fatalf("findings = %+v, want none for a blocked review", v.Findings)
+	}
+
+	bare, err := svc.DB.InsertStewardReview(store.StewardReview{
+		TaskID: row.TaskID, TriggerKind: TriggerHuman, HeadSHA: "head2", Status: "pending",
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("InsertStewardReview(bare) error = %v", err)
+	}
+	v, err = svc.View(bare.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Gates == nil || len(v.Gates) != 0 || v.Findings == nil || len(v.Findings) != 0 {
+		t.Fatalf("bare view gates %#v findings %#v, want empty non-nil lists", v.Gates, v.Findings)
+	}
+}
+
 func TestView_HidesTokenAndDigest(t *testing.T) {
 	t.Parallel()
 
