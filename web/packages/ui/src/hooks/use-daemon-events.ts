@@ -85,6 +85,28 @@ const TOPICS = [
   ...FLEET_TOPICS,
 ];
 
+/**
+ * One events.subscribe for every topic. A daemon older than this UI answers `unknown topic "X"` for
+ * a topic it has not shipped yet and rejects the WHOLE call, which would leave the connection with no
+ * live events at all (a stale list, runs that never appear). So on that specific error the named topic
+ * is dropped and the subscribe retried: the happy path stays a single call (ADR 0005), and a newer UI
+ * against an older daemon keeps every event the daemon does know. Any other failure just means no live
+ * events this connection (the caller's re-read is the source of truth).
+ */
+export async function subscribeTolerant(client: WsClient, topics: string[]): Promise<void> {
+  let rest = topics;
+  while (rest.length > 0) {
+    try {
+      await client.call("events.subscribe", { topics: rest });
+      return;
+    } catch (err) {
+      const unknown = /unknown topic "([^"]+)"/.exec(err instanceof Error ? err.message : String(err))?.[1];
+      if (!unknown || !rest.includes(unknown)) return;
+      rest = rest.filter((t) => t !== unknown);
+    }
+  }
+}
+
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */
 export interface DaemonEvents {
   subscribe(topic: string, listener: (payload: unknown) => void): () => void;
@@ -118,17 +140,14 @@ export function useDaemonEvents(client: WsClient | null, queryClient?: QueryClie
     lastClient.current = client;
     // A failed subscribe just means no live events this connection; the invalidation still runs
     // (the re-read is the source of truth), and nothing here surfaces as an error state.
-    client
-      .call("events.subscribe", { topics: TOPICS })
-      .catch(() => {})
-      .then(() => {
-        if (reconnected && queryClient) {
-          // The daemon may have restarted with a fixed PATH or credential: its health answers are
-          // re-tested (the footer's ensure() notices the gap); everything else is re-read.
-          queryClient.removeQueries({ queryKey: queryKeys.providerTestAll() });
-          void queryClient.invalidateQueries();
-        }
-      });
+    subscribeTolerant(client, TOPICS).then(() => {
+      if (reconnected && queryClient) {
+        // The daemon may have restarted with a fixed PATH or credential: its health answers are
+        // re-tested (the footer's ensure() notices the gap); everything else is re-read.
+        queryClient.removeQueries({ queryKey: queryKeys.providerTestAll() });
+        void queryClient.invalidateQueries();
+      }
+    });
 
     const off = client.onNotification((n: DaemonNotification) => {
       // ADR-0032: this is the single event -> query-cache bridge; it runs before listeners so a

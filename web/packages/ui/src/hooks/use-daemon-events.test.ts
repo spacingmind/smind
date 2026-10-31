@@ -94,6 +94,64 @@ describe("useDaemonEvents", () => {
     expect(socket.sent.filter((e) => e.method === "events.subscribe")).toHaveLength(1);
   });
 
+  it("an older daemon rejecting one unknown topic does not cost the connection its other live events", async () => {
+    const socket = new FakeSocket();
+    const client = new WsClient(socket);
+    const { result } = renderHook(() => useDaemonEvents(client));
+    await flush();
+
+    const subs = () => socket.sent.filter((e) => e.method === "events.subscribe");
+    expect(subs()).toHaveLength(1);
+    const first = subs()[0]!;
+    const firstTopics = (first.params as { topics: string[] }).topics;
+    expect(firstTopics).toContain("fleet.hosts.changed");
+    // The daemon predates the fleet topic and rejects the whole call.
+    act(() => {
+      socket.emit({ id: first.id, error: { message: 'events.subscribe: unknown topic "fleet.hosts.changed"' } } as never);
+    });
+    await flush();
+
+    expect(subs()).toHaveLength(2);
+    const retried = (subs()[1]!.params as { topics: string[] }).topics;
+    expect(retried).toEqual(firstTopics.filter((t) => t !== "fleet.hosts.changed"));
+    act(() => {
+      socket.emit({ id: subs()[1]!.id, result: { topics: retried } } as never);
+    });
+    await flush();
+    expect(subs()).toHaveLength(2);
+
+    const runStatus = vi.fn();
+    result.current!.subscribe("run.status", runStatus);
+    notify(socket, "run.status", { runId: "r1", taskId: 1, status: "running" });
+    expect(runStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops several unknown topics one by one, and gives up (no loop) on any other subscribe error", async () => {
+    const socket = new FakeSocket();
+    const client = new WsClient(socket);
+    renderHook(() => useDaemonEvents(client));
+    await flush();
+    const subs = () => socket.sent.filter((e) => e.method === "events.subscribe");
+    act(() => {
+      socket.emit({ id: subs()[0]!.id, error: { message: 'events.subscribe: unknown topic "fleet.hosts.changed"' } } as never);
+    });
+    await flush();
+    act(() => {
+      socket.emit({ id: subs()[1]!.id, error: { message: 'events.subscribe: unknown topic "inbox.changed"' } } as never);
+    });
+    await flush();
+    expect(subs()).toHaveLength(3);
+    const topics = (subs()[2]!.params as { topics: string[] }).topics;
+    expect(topics).not.toContain("fleet.hosts.changed");
+    expect(topics).not.toContain("inbox.changed");
+    // Any other failure stops retrying.
+    act(() => {
+      socket.emit({ id: subs()[2]!.id, error: { message: "events.subscribe: internal error" } } as never);
+    });
+    await flush();
+    expect(subs()).toHaveLength(3);
+  });
+
   it("delivers topic-filtered notifications to registered listeners, and unregistration stops delivery", async () => {
     const socket = new FakeSocket();
     const client = new WsClient(socket);

@@ -174,6 +174,32 @@ providers:
 	}
 }
 
+// A hand-written env path that filepath.Clean would rewrite (a trailing "/sub/..")
+// must not trip the pre-write safety net: validation normalises the in-memory
+// entry, and the check compares the file's raw value against a pristine copy.
+func TestUpdateInstance_UncleanHandWrittenValuesAreNotAnEditorChange(t *testing.T) {
+	claudeDir := filepath.ToSlash(filepath.Join(t.TempDir(), "hand-claude"))
+	rawDir := claudeDir + "/sub/.."
+	original := `providers:
+  custom:
+    - id: hand
+      extends: claude-native
+      env:
+        CLAUDE_CONFIG_DIR: '` + rawDir + `'
+`
+	useInstanceHome(t, original)
+	if _, changed, err := UpdateProviderInstance("hand", InstanceUpdate{InheritClaudeConfig: boolPtr(true)}); err != nil || !changed {
+		t.Fatalf("UpdateProviderInstance = changed %v, err %v", changed, err)
+	}
+	after := instanceYAML(t)
+	if !strings.Contains(after, "CLAUDE_CONFIG_DIR: '"+rawDir+"'") {
+		t.Errorf("the hand-written env value was rewritten:\n%s", after)
+	}
+	if !strings.Contains(after, "inheritClaudeConfig: true") {
+		t.Errorf("the edit did not land:\n%s", after)
+	}
+}
+
 func TestUpdateInstance_InsertRemoveReplaceFields(t *testing.T) {
 	useInstanceHome(t, `providers:
   custom:
