@@ -46,6 +46,48 @@ export function stallItem(over: Partial<InboxItem> = {}): InboxItem {
   };
 }
 
+export function hostPairItem(over: Partial<InboxItem> = {}): InboxItem {
+  return {
+    key: "host_pair:h1",
+    kind: "host_pair",
+    title: "mac",
+    summary: "mac wants to pair with this daemon",
+    createdAt: new Date(Date.now() - 60_000).toISOString(),
+    state: "new",
+    attention: "high",
+    links: { hostId: "h1" },
+    ...over,
+  };
+}
+
+export function hostDownItem(over: Partial<InboxItem> = {}): InboxItem {
+  return {
+    key: "host_down:h2:1700000000",
+    kind: "host_down",
+    title: "linux",
+    summary: "linux has been unreachable",
+    createdAt: new Date(Date.now() - 600_000).toISOString(),
+    state: "new",
+    attention: "normal",
+    links: { hostId: "h2" },
+    ...over,
+  };
+}
+
+export function hostRefusedItem(over: Partial<InboxItem> = {}): InboxItem {
+  return {
+    key: "host_refused:h3:fleet_version_unsupported",
+    kind: "host_refused",
+    title: "win",
+    summary: "win refused the link: fleet version unsupported",
+    createdAt: new Date(Date.now() - 300_000).toISOString(),
+    state: "new",
+    attention: "high",
+    links: { hostId: "h3" },
+    ...over,
+  };
+}
+
 /**
  * A FakeUsageDaemon that answers the inbox surface: inbox.list / inbox.count from `items` (the daemon's rules: a
  * permission cannot be snoozed or resolved), the three setters (recorded; they change `items` like the daemon does),

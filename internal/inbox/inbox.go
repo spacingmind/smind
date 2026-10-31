@@ -23,9 +23,12 @@ import (
 
 // Item kinds.
 const (
-	KindPermission = "permission"
-	KindVerdict    = "verdict"
-	KindStall      = "stall"
+	KindPermission  = "permission"
+	KindVerdict     = "verdict"
+	KindStall       = "stall"
+	KindHostPair    = "host_pair"
+	KindHostDown    = "host_down"
+	KindHostRefused = "host_refused"
 )
 
 // Item states.
@@ -41,6 +44,11 @@ const MaxSnooze = 24 * time.Hour
 
 // MaxSummary caps an item's summary.
 const MaxSummary = 160
+
+// HostDownAfter is how long a host link must be down before it earns an
+// inbox row (ADR-0048 S9): a flap or a brief reconnect must not ping the
+// Human.
+const HostDownAfter = 5 * time.Minute
 
 // ErrNotAllowed marks an action the rules refuse (a permission cannot be
 // snoozed or resolved; a snooze is capped).
@@ -66,6 +74,7 @@ type Links struct {
 	RunID               string `json:"runId,omitempty"`
 	PermissionRequestID string `json:"permissionRequestId,omitempty"`
 	ValidationID        int64  `json:"validationId,omitempty"`
+	HostID              string `json:"hostId,omitempty"`
 }
 
 // Counts is what the badge reads.
@@ -82,6 +91,28 @@ type Filter struct {
 	Limit  int
 }
 
+// HostPair is a peer host whose pairing request awaits this human's
+// approval (ADR-0048 S9). Every string is peer-supplied.
+type HostPair struct {
+	HostID string
+	Alias  string
+	Label  string
+	Since  time.Time
+}
+
+// HostLinkIssue is a host link that is down or refused. Kind is "down" or
+// "refused"; Code is the typed refusal (e.g. "peer_identity_changed",
+// "fleet_version_unsupported") and Guidance the peer's update hint. Every
+// string is peer-supplied.
+type HostLinkIssue struct {
+	HostID   string
+	Alias    string
+	Kind     string
+	Code     string
+	Guidance string
+	Since    time.Time
+}
+
 // Service derives the inbox. Every source is injected.
 type Service struct {
 	DB *store.Store
@@ -91,6 +122,12 @@ type Service struct {
 	Validations func() ([]validation.View, error)
 	// Stalls returns the currently stalled seats (task id -> stalled since).
 	Stalls func() map[int64]time.Time
+	// HostPairs lists peer hosts awaiting this human's approval. Nil when
+	// fleet is off: nothing is derived.
+	HostPairs func() []HostPair
+	// HostLinkIssues lists host links that are down or refused. Nil when
+	// fleet is off: nothing is derived.
+	HostLinkIssues func() []HostLinkIssue
 	// TaskTitle names a task ("" when unknown).
 	TaskTitle func(taskID int64) string
 	Now       func() time.Time
@@ -168,6 +205,42 @@ func (s *Service) derive() ([]Item, error) {
 				Key: fmt.Sprintf("stall:%d:%d", taskID, since.Unix()), Kind: KindStall, TaskID: taskID, Title: s.title(taskID),
 				Summary: "This task tree has gone quiet", CreatedAt: since, Attention: "normal", Links: Links{TaskID: taskID},
 			})
+		}
+	}
+
+	if s.HostPairs != nil {
+		for _, p := range s.HostPairs() {
+			items = append(items, Item{
+				Key: KindHostPair + ":" + p.HostID, Kind: KindHostPair, Title: clip(p.Alias, MaxSummary),
+				Summary:   clip("Pairing request: confirm the code on both hosts and choose what it may do", MaxSummary),
+				CreatedAt: p.Since, Attention: "high", Links: Links{HostID: p.HostID},
+			})
+		}
+	}
+
+	if s.HostLinkIssues != nil {
+		for _, is := range s.HostLinkIssues() {
+			switch is.Kind {
+			case "down":
+				// Constant summary text: the fingerprint hashes summaries,
+				// so wording that tracked the clock would churn it every read.
+				if now.Sub(is.Since) <= HostDownAfter {
+					continue
+				}
+				items = append(items, Item{
+					Key: fmt.Sprintf("host_down:%s:%d", is.HostID, is.Since.Unix()), Kind: KindHostDown, Title: clip(is.Alias, MaxSummary),
+					Summary: "The link to this host is down", CreatedAt: is.Since, Attention: "normal", Links: Links{HostID: is.HostID},
+				})
+			case "refused":
+				summary := is.Guidance
+				if summary == "" {
+					summary = "The link was refused: " + is.Code
+				}
+				items = append(items, Item{
+					Key: KindHostRefused + ":" + is.HostID + ":" + is.Code, Kind: KindHostRefused, Title: clip(is.Alias, MaxSummary),
+					Summary: clip(summary, MaxSummary), CreatedAt: is.Since, Attention: "high", Links: Links{HostID: is.HostID},
+				})
+			}
 		}
 	}
 	return items, nil

@@ -16,7 +16,16 @@ import { TextButton } from '../ui/TextButton';
 import { InboxActionSheet } from './inbox/InboxActionSheet';
 import { InboxRow } from './inbox/InboxRow';
 
-export function InboxScreen({ conn, onOpenTask }: { conn: RelayConnection; onOpenTask: (taskId: number, title: string) => void }) {
+export function InboxScreen({
+  conn,
+  onOpenTask,
+  onOpenHosts,
+}: {
+  conn: RelayConnection;
+  onOpenTask: (taskId: number, title: string) => void;
+  /** Opens the Hosts screen; hostId names the host the row is about, if any. */
+  onOpenHosts: (hostId: string | null) => void;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const { list, reload } = useInbox(conn, true);
@@ -35,21 +44,25 @@ export function InboxScreen({ conn, onOpenTask }: { conn: RelayConnection; onOpe
 
   const open = useCallback(
     (row: InboxRowView) => {
-      if (row.taskId === null) return;
+      // A host row (pairing, link down or refused) opens the Hosts screen, not a task.
+      const host = row.actions.includes('hosts');
+      if (row.taskId === null && !host) return;
       if (row.unseen) markInboxSeen(conn, [row.key]).then(reload, () => {});
-      onOpenTask(row.taskId, row.title);
+      if (host) onOpenHosts(row.hostId);
+      else if (row.taskId !== null) onOpenTask(row.taskId, row.title);
     },
-    [conn, onOpenTask, reload],
+    [conn, onOpenTask, onOpenHosts, reload],
   );
 
   const handlers = useMemo(
     () => ({
       onOpen: open,
+      onOpenHosts: (row: InboxRowView) => onOpenHosts(row.hostId),
       onSeen: (row: InboxRowView) => run(() => markInboxSeen(conn, [row.key])),
       onSnooze: (row: InboxRowView, until: string) => run(() => snoozeInbox(conn, [row.key], until)),
       onResolve: (row: InboxRowView) => run(() => resolveInbox(conn, [row.key])),
     }),
-    [conn, open, run],
+    [conn, open, onOpenHosts, run],
   );
 
   if (list.kind === 'loading') {

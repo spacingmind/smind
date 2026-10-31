@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { useConnectionOrNull } from '../src/connection/ConnectionProvider';
-import { AUTOMATIONS_HREF, INBOX_HREF, NEW_TASK_HREF, PLUGINS_HREF, taskHref } from '../src/navigation/routes';
+import { AUTOMATIONS_HREF, INBOX_HREF, NEW_TASK_HREF, HOSTS_HREF, PLUGINS_HREF, taskHref } from '../src/navigation/routes';
 import { TasksScreen } from '../src/screens/TasksScreen';
 import { InboxEntry } from '../src/screens/tasks/InboxEntry';
 import { ConnectionSheet } from '../src/screens/tasks/ConnectionSheet';
@@ -37,7 +37,7 @@ export default function TasksRoute() {
         }}
       />
       <TasksScreen conn={conn} onOpenTask={(task) => router.push(taskHref(task))} />
-      <ConnectionSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onDisconnect={disconnect} onOpenPlugins={() => router.push(PLUGINS_HREF)} onOpenAutomations={() => router.push(AUTOMATIONS_HREF)} state={state} />
+      <ConnectionSheet open={sheetOpen} onClose={() => setSheetOpen(false)} onDisconnect={disconnect} onOpenPlugins={() => router.push(PLUGINS_HREF)} onOpenHosts={() => router.push(HOSTS_HREF)} onOpenAutomations={() => router.push(AUTOMATIONS_HREF)} state={state} />
     </>
   );
 }

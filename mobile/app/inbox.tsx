@@ -2,7 +2,7 @@
 
 import { Stack, useRouter } from 'expo-router';
 import { useConnectionOrNull } from '../src/connection/ConnectionProvider';
-import { taskHref } from '../src/navigation/routes';
+import { HOSTS_HREF, taskHref } from '../src/navigation/routes';
 import { InboxScreen } from '../src/screens/InboxScreen';
 
 export default function InboxRoute() {
@@ -12,7 +12,11 @@ export default function InboxRoute() {
   return (
     <>
       <Stack.Screen options={{ title: 'Inbox' }} />
-      <InboxScreen conn={ctx.conn} onOpenTask={(id, title) => router.push(taskHref({ ID: id, Title: title }))} />
+      <InboxScreen
+        conn={ctx.conn}
+        onOpenTask={(id, title) => router.push(taskHref({ ID: id, Title: title }))}
+        onOpenHosts={(hostId) => router.push({ pathname: HOSTS_HREF, params: hostId ? { focus: hostId } : {} })}
+      />
     </>
   );
 }

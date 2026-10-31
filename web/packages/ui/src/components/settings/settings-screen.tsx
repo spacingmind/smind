@@ -6,6 +6,7 @@ import "@/components/settings/connections-section";
 import "@/components/settings/daemon-section";
 import "@/components/settings/general-section";
 import "@/components/settings/github-section";
+import "@/components/settings/hosts-section";
 import "@/components/settings/learned-skills-section";
 import "@/components/settings/mcp-servers-section";
 import "@/components/settings/notifications-section";

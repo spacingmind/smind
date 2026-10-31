@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { instructionsBytes, INSTRUCTIONS_MAX_BYTES, type ChildPolicyChoice, type OnRateLimitChoice, type OrchestrationToolsChoice, type ProfileContractState } from "@/components/settings/profile-contract";
 import { OwnerBadge } from "@/components/plugins/owner-badge";
 import { Input } from "@/components/ui/input";
@@ -124,14 +125,13 @@ export function ProfileContractFields<S extends ProfileContractState>({
             <div className="flex max-h-40 flex-col gap-0.5 overflow-y-auto rounded-lg border border-input-border bg-input p-1.5">
               {otherProfiles.map((p) => (
                 <label key={p.ID} className="flex min-w-0 items-center gap-2 text-ui-sm text-foreground">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     data-testid={id(`child-profile-${p.ID}`)}
                     checked={form.childProfileIds.includes(p.ID)}
-                    onChange={(e) =>
+                    onCheckedChange={(on) =>
                       setForm((f) => ({
                         ...f,
-                        childProfileIds: e.target.checked ? [...f.childProfileIds, p.ID] : f.childProfileIds.filter((x) => x !== p.ID),
+                        childProfileIds: on === true ? [...f.childProfileIds, p.ID] : f.childProfileIds.filter((x) => x !== p.ID),
                       }))
                     }
                   />

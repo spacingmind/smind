@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-error";
@@ -321,11 +322,10 @@ function AutomationForm({
             <legend className="mb-1 text-ui-sm text-foreground-muted">Conclusions that fire</legend>
             {CONCLUSIONS.map((c) => (
               <label key={c} className="flex items-center gap-2 text-ui-base text-foreground">
-                <input
-                  type="checkbox"
+                <Checkbox
                   data-testid={`automation-conclusion-${c}`}
                   checked={form.conclusions.includes(c)}
-                  onChange={(e) => set("conclusions", e.target.checked ? [...form.conclusions, c] : form.conclusions.filter((x) => x !== c))}
+                  onCheckedChange={(on) => set("conclusions", on === true ? [...form.conclusions, c] : form.conclusions.filter((x) => x !== c))}
                 />
                 {c}
               </label>
@@ -369,7 +369,7 @@ function AutomationForm({
           <Input id="automation-max-minutes" data-testid="automation-max-minutes" inputMode="numeric" placeholder={String(RAIL_DEFAULTS.maxRunMinutes)} value={form.maxRunMinutes} onChange={(e) => set("maxRunMinutes", e.target.value)} />
         </Field>
         <label className="flex items-center gap-2 self-end pb-1.5 text-ui-base text-foreground">
-          <input type="checkbox" data-testid="automation-memory" checked={form.memoryEnabled} onChange={(e) => set("memoryEnabled", e.target.checked)} />
+          <Checkbox data-testid="automation-memory" checked={form.memoryEnabled} onCheckedChange={(on) => set("memoryEnabled", on === true)} />
           Memory <span className="text-ui-sm text-foreground-subtlest">(default on)</span>
         </label>
       </div>

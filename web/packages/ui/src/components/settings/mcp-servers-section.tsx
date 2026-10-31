@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { SettingsEmptyCard } from "@/components/settings/settings-layout";
@@ -306,13 +307,12 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                           className="flex shrink-0 cursor-pointer items-center gap-1.5 text-ui-sm text-foreground-muted"
                           title={m.owner ? ownedTooltip(m.owner) : m.enabled ? "Disable this server" : "Enable this server"}
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             data-testid={`mcp-enabled-${m.id}`}
                             checked={m.enabled}
                             disabled={owned}
                             aria-label={`${m.name} enabled`}
-                            onChange={(e) => void handleToggleEnabled(m, e.target.checked)}
+                            onCheckedChange={(on) => void handleToggleEnabled(m, on === true)}
                           />
                           {m.enabled ? "Enabled" : "Disabled"}
                         </label>

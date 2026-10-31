@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { Icons } from "@/lib/icons";
 import type { ArchivePreview } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -121,7 +122,7 @@ export function DeleteBranchOption({
   if (preview.canDeleteBranch) {
     return (
       <label className="flex items-center gap-2 text-ui-base" data-testid="archive-delete-branch-label">
-        <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} data-testid="archive-delete-branch" />
+        <Checkbox checked={checked} disabled={disabled} onCheckedChange={(on) => onChange(on === true)} data-testid="archive-delete-branch" />
         <span>
           Delete branch <Name>{name}</Name>
         </span>
@@ -132,7 +133,7 @@ export function DeleteBranchOption({
     return (
       <div className="flex flex-col gap-1" data-testid="archive-delete-branch-blocked">
         <label className="flex items-center gap-2 text-ui-base text-foreground-subtle">
-          <input type="checkbox" checked={false} disabled readOnly data-testid="archive-delete-branch" />
+          <Checkbox checked={false} disabled data-testid="archive-delete-branch" />
           <span>
             Delete branch <Name>{name}</Name>
           </span>
@@ -148,7 +149,7 @@ export function DeleteBranchOption({
   return (
     <div className="flex flex-col gap-1" data-testid="archive-delete-branch-blocked">
       <label className={cn("flex items-center gap-2 text-ui-base text-destructive")}>
-        <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} data-testid="archive-delete-branch-force" />
+        <Checkbox checked={checked} disabled={disabled} onCheckedChange={(on) => onChange(on === true)} data-testid="archive-delete-branch-force" />
         <span>Delete the branch anyway — {forceCost(preview)}</span>
       </label>
       {reason && preview.merged.state === "merged" && (

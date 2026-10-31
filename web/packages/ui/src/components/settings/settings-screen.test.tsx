@@ -68,7 +68,7 @@ describe("SettingsScreen shell", () => {
     expect(screen.queryByTestId("settings-nav-daemon")).not.toBeInTheDocument();
 
     // Order (Paseo-style): the ungrouped app sections first (General ·
-    // Appearance · Notifications · Shortcuts · GitHub), then groups -- Connection
+    // Appearance · Notifications · Shortcuts · GitHub · Hosts), then groups -- Connection
     // (desktop only), then Agents & providers.
     const ids = screen
       .getAllByRole("listitem")
@@ -80,6 +80,7 @@ describe("SettingsScreen shell", () => {
       "settings-nav-notifications",
       "settings-nav-shortcuts",
       "settings-nav-github",
+      "settings-nav-hosts",
       "settings-nav-agents",
       "settings-nav-mcp-servers",
       "settings-nav-learned-skills",

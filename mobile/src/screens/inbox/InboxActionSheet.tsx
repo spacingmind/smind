@@ -15,6 +15,7 @@ export interface InboxActionHandlers {
   onSnooze: (row: InboxRowView, until: string) => void;
   onResolve: (row: InboxRowView) => void;
   onOpen: (row: InboxRowView) => void;
+  onOpenHosts: (row: InboxRowView) => void;
 }
 
 export function InboxActionSheet({ row, onClose, handlers }: { row: InboxRowView | null; onClose: () => void; handlers: InboxActionHandlers }) {
@@ -43,6 +44,7 @@ export function InboxActionSheet({ row, onClose, handlers }: { row: InboxRowView
                 {row.title}
               </Text>
               {!choosingSnooze && row.actions.includes('open') && item('Open task', done(() => handlers.onOpen(row)))}
+              {!choosingSnooze && row.actions.includes('hosts') && item('Review hosts', done(() => handlers.onOpenHosts(row)))}
               {!choosingSnooze && row.actions.includes('seen') && item('Mark seen', done(() => handlers.onSeen(row)))}
               {!choosingSnooze && row.actions.includes('snooze') && item('Snooze…', () => setChoosingSnooze(true))}
               {!choosingSnooze && row.actions.includes('resolve') && item('Resolve', done(() => handlers.onResolve(row)))}
