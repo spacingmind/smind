@@ -1170,7 +1170,7 @@ describe("App routing", () => {
     expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
   });
 
-  it("a URL naming a task task.list doesn't return lands on the empty state without throwing", async () => {
+  it("a URL naming a task task.list doesn't return lands on the not-found state without throwing", async () => {
     window.location.hash = `#/workspace/${WORKSPACE.ID}/task/999/chat/1`;
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
@@ -1178,7 +1178,47 @@ describe("App routing", () => {
     await resolveSidebar(socket, [TASK_A]);
     await flush();
 
-    expect(screen.getByTestId("app-empty-state")).toBeInTheDocument();
+    expect(screen.getByTestId("task-not-found")).toBeInTheDocument();
+  });
+
+  it("mounting at a task URL that doesn't exist shows the not-found state and clears the stale hash (UAT B-02)", async () => {
+    window.location.hash = `#/workspace/${WORKSPACE.ID}/task/99999/chat/1`;
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    await flush();
+
+    const notFound = screen.getByTestId("task-not-found");
+    expect(notFound).toHaveTextContent("Task 99999 not found");
+    expect(window.location.hash).not.toContain("99999");
+    fireEvent.click(within(notFound).getByRole("button", { name: /back/i }));
+    await flush();
+    expect(screen.queryByTestId("task-not-found")).not.toBeInTheDocument();
+    expect(screen.getByTestId("home-landing")).toBeInTheDocument();
+  });
+
+  it("changing the hash to a nonexistent task while one is selected clears the selection (UAT B-02)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
+
+    await act(async () => {
+      navigateHash(`#/workspace/${WORKSPACE.ID}/task/99999/chat/1`);
+    });
+    await flush();
+
+    expect(screen.getByTestId("task-not-found")).toHaveTextContent("Task 99999 not found");
+    expect(screen.queryByText(TASK_A.Title, { selector: '[data-testid="app-header-title"]' })).not.toBeInTheDocument();
+    expect(window.location.hash).not.toContain("99999");
   });
 
   it("shows the landing when no task is selected", async () => {

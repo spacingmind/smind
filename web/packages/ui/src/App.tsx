@@ -1,5 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   DndContext,
   PointerSensor,
@@ -254,6 +256,9 @@ function AppShell({
   const [pendingRoute, setPendingRoute] = useState<Route | null>(() =>
     typeof window === "undefined" ? null : parseRoute(window.location.hash),
   );
+  // UAT B-02: the task id a route named that the tree doesn't hold. Drives the
+  // "Task not found" state in place of the previous task or the landing.
+  const [missingTaskId, setMissingTaskId] = useState<number | null>(null);
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   // Which full-pane surface the main area shows: the task pane or the
   // settings screen (dogfood Item 4). Plain view state, not a route --
@@ -453,6 +458,7 @@ function AppShell({
   // like clicking it in the sidebar.
   const selectTask = useCallback((task: Task) => {
     setSelectedTask(task);
+    setMissingTaskId(null);
     // Tab seeding happens once this task's chats load (the effect above) --
     // useTaskChats is keyed on selectedTask.ID, so setting it here is what
     // kicks that fetch off.
@@ -865,8 +871,13 @@ function AppShell({
       setPendingRoute(null);
     } else if (treeLoaded) {
       // The tree has answered and this task isn't in it (archived,
-      // deleted, or never existed) -- degrade to the empty state rather
-      // than waiting on a task that will never arrive.
+      // deleted, or never existed) -- show "Task not found" rather than
+      // waiting on a task that will never arrive, and drop the previous
+      // selection and the hash that names the missing task. replaceState
+      // (not `location.hash = ""`) so no hashchange re-enters this effect.
+      setMissingTaskId(pendingRoute.taskId);
+      setSelectedTask(null);
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
       setPendingRoute(null);
     }
   }, [pendingRoute, allTasks, treeLoaded, chats, selectTask, openTab, activate]);
@@ -1220,7 +1231,21 @@ function AppShell({
     </>
   );
 
-  const emptyStateElement = (
+  const emptyStateElement = missingTaskId !== null ? (
+    <div className="flex h-full bg-panel">
+      <EmptyState
+        testId="task-not-found"
+        icon={<Icons.warning className="size-5" />}
+        title={`Task ${missingTaskId} not found`}
+        description="It may have been archived or deleted."
+        action={
+          <Button size="sm" variant="outline" onClick={() => setMissingTaskId(null)}>
+            Back to home
+          </Button>
+        }
+      />
+    </div>
+  ) : (
     <div data-testid="app-empty-state" className="h-full bg-panel">
       <HomeLanding
         client={client}
