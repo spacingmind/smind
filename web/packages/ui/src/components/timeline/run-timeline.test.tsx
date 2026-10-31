@@ -264,7 +264,7 @@ describe("RunTimeline", () => {
     expect(details).not.toHaveAttribute("open");
   });
 
-  it("does not throw on an unrecognised event type and still renders the rows around it", () => {
+  it("does not throw on an unknown event type and still renders the rows around it", () => {
     expect(() =>
       render(
         <ul>

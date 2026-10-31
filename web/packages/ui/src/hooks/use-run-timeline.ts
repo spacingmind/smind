@@ -109,7 +109,7 @@ export interface TimelinePlanItem {
  * showing just `eventType` would always say "raw" -- the actually
  * informative value is the ACP session-update kind the normalizer didn't
  * recognize (e.g. "plan"), carried here so the fallback row can show that
- * instead. Absent for every other unrecognised event name, which has
+ * instead. Absent for every other unknown event name, which has
  * nothing more specific to show than `eventType` itself.
  */
 export interface TimelineUnknownItem {
