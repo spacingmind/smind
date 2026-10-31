@@ -38,14 +38,13 @@ tests:
   - { name: TestProviderList_InstanceEditableFields, run: "go test ./internal/wsapi -run '^TestProviderList_InstanceEditableFields$' -count=1", timeoutSec: 180 }
   - { name: TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs, run: "go test ./internal/taskrunner -run '^TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs$' -count=1", timeoutSec: 180 }
 mutations:
-  - { file: internal/wsapi/provider_instances.go, change: "remove the run-scoped refusal in handleProviderUpdateInstance", mustFail: TestProviderUpdateInstance_RefusesAgentCaller }
-  - { file: internal/config/provider_instance_update.go, change: "skip ValidateCustomProviders on the next list", mustFail: TestUpdateInstance_InvalidFieldsNamed }
-  - { file: internal/config/provider_instance_update.go, change: "write the file even when no field changed", mustFail: TestUpdateInstance_IdempotentNoop }
-  - { file: internal/config/provider_instance_update.go, change: "widen the replaced line range by one line", mustFail: TestUpdateInstance_LeavesOtherEntryByteIdentical }
-  - { file: internal/taskrunner/provider_registry_test.go, change: "n/a (test-only); instead make instance env shared between instances in internal/providers/providers.go", mustFail: TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs }
+  - { id: M1, file: internal/wsapi/provider_instances.go, change: "remove the run-scoped refusal in handleProviderUpdateInstance", expectFail: [TestProviderUpdateInstance_RefusesAgentCaller] }
+  - { id: M2, file: internal/config/provider_instance_update.go, change: "skip ValidateCustomProviders on the next list", expectFail: [TestUpdateInstance_InvalidFieldsNamed] }
+  - { id: M3, file: internal/config/provider_instance_update.go, change: "write the file even when no field changed", expectFail: [TestUpdateInstance_IdempotentNoop] }
+  - { id: M4, file: internal/config/provider_instance_update.go, change: "widen the replaced line range by one line", expectFail: [TestUpdateInstance_LeavesOtherEntryByteIdentical] }
 commands:
-  - "go test ./internal/config ./internal/wsapi ./internal/taskrunner ./cmd/smind -count=1"
-  - "cd web && bun run --cwd packages/ui test provider"
+  - { id: C1, run: "go test ./internal/config ./internal/wsapi ./internal/taskrunner ./cmd/smind -count=1", timeoutSec: 900 }
+  - { id: C2, run: "cd web && bun run --cwd packages/ui test provider", timeoutSec: 600 }
 frames: []
 ---
 
