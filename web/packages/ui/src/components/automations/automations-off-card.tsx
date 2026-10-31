@@ -29,7 +29,7 @@ export function AutomationsOffCard() {
       </div>
       <p className="text-ui-sm text-foreground">Turn them on from the computer running the daemon:</p>
       <div className="flex items-center gap-2 rounded-lg border border-border bg-muted px-2 py-1.5">
-        <code className="min-w-0 flex-1 truncate font-mono text-ui-sm text-foreground">smind config set automations.enabled true</code>
+        <code className="min-w-0 flex-1 break-all font-mono text-ui-sm text-foreground">smind config set automations.enabled true</code>
         <Button
           type="button"
           variant="ghost"
