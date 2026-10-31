@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 
+import { FileActionButtons, type FileActionTarget } from "@/components/file-actions";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { NoPreviewPanel, kindLabel } from "@/components/pdf-preview/no-preview-panel";
 import { PdfPreviewPane } from "@/components/pdf-preview/pdf-preview-pane";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import { useLocalPathActions } from "@/hooks/use-local-path-actions";
 import type { FileStatResult, Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
@@ -33,6 +35,7 @@ export default function FileTabRouter({
   onText: () => void;
 }) {
   const [route, setRoute] = useState<Route>({ kind: "checking" });
+  const pathActions = useLocalPathActions();
 
   useEffect(() => {
     if (!client) return;
@@ -89,6 +92,23 @@ export default function FileTabRouter({
             testId="no-preview-panel"
             title="No preview for this file type"
             description={`This is ${kindLabel(route.stat.kind)}. It can not be shown here.`}
+            extra={
+              <FileActionButtons
+                pathActions={pathActions}
+                target={
+                  {
+                    client,
+                    taskId: task.ID,
+                    worktreePath: task.WorktreePath ?? undefined,
+                    path,
+                    ext: route.stat.ext.replace(/^\./, "").toLowerCase(),
+                    size: route.stat.size,
+                    mtime: route.stat.mtime,
+                  } satisfies FileActionTarget
+                }
+                testId="no-preview-actions"
+              />
+            }
           />
         </div>
       );

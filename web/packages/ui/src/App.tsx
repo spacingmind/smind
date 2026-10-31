@@ -2247,6 +2247,7 @@ function PaneTabStrip({
               onOpenFile={onOpenFile}
               onOpenFileToSide={onOpenFileToSide}
               onRevealInDiff={onRevealInDiff}
+              onOpenFilesTab={() => onOpenBase("files", { pane: paneId })}
               events={events}
               chats={chats}
               runningChatsByTask={runningChatsByTask}
@@ -2563,6 +2564,7 @@ function TabContent({
   onOpenFile,
   onOpenFileToSide,
   onRevealInDiff,
+  onOpenFilesTab,
   events,
   chats,
   runningChatsByTask,
@@ -2578,6 +2580,8 @@ function TabContent({
   onOpenFile: (path: string) => void;
   onOpenFileToSide: (path: string) => void;
   onRevealInDiff: () => void;
+  /** Brings this pane's Files tab forward (the deliverable cards' "+ N more files"). */
+  onOpenFilesTab: () => void;
   events: ReturnType<typeof useDaemonEvents>;
   chats: Chat[] | null;
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
@@ -2610,6 +2614,7 @@ function TabContent({
         events={events}
         onOpenFile={onOpenFile}
         onOpenDiffTab={onRevealInDiff}
+        onOpenFilesTab={onOpenFilesTab}
         onJumpToTask={onJumpToTask}
       />
     ) : null,
