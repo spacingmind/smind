@@ -19,6 +19,18 @@ function toModelRows(models: NonNullable<ProviderInfo["models"]>): ModelRow[] {
   }));
 }
 
+/** The catalog's source: an instance shows where its own overlay's list comes from, not the extended one. */
+function sourceNote(provider: ProviderInfo): string {
+  if (provider.recipe) return "From the recipe";
+  if (provider.modelsDiscovered) return "Reported by the agent";
+  if (provider.custom && !provider.extends) return "Listed in config.yaml";
+  if (provider.extends) {
+    if ((provider.instance?.models ?? []).length > 0) return "Listed in config.yaml";
+    if ((provider.instance?.additionalModels ?? []).length > 0) return "Built-in catalog + config.yaml";
+  }
+  return "Built-in catalog";
+}
+
 /** Read-only model catalog for a provider: source note, search over long lists, no selection. */
 export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
   const { provider } = props;
@@ -50,15 +62,7 @@ export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
       <div className="flex items-center gap-2">
         <h4 className="text-ui-base font-medium">Models</h4>
         <span className="text-ui-sm text-muted-foreground">{models.length}</span>
-        <span className="text-ui-sm text-muted-foreground">
-          {provider.recipe
-            ? "From the recipe"
-            : provider.modelsDiscovered
-              ? "Reported by the agent"
-              : provider.custom && !provider.extends
-                ? "Listed in config.yaml"
-                : "Built-in catalog"}
-        </span>
+        <span className="text-ui-sm text-muted-foreground">{sourceNote(provider)}</span>
       </div>
       {models.length >= SEARCH_THRESHOLD ? (
         <Input

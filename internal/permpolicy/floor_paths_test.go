@@ -8,14 +8,13 @@ import (
 // checkFloorReq is checkFloorCases for a request the test prepared itself.
 func checkFloorReq(t *testing.T, req Request, id string) {
 	t.Helper()
-	hit, ok := CheckFloor(req, SplitCommand(req.Command))
+	hit, ok := CheckFloor(req, hostSplit(req.Command))
 	if ok != (id != "") || hit.ID != id {
 		t.Errorf("CheckFloor(%q) = %+v, %v; want id %q", req.Command, hit, ok, id)
 	}
 }
 
 func TestFloor_InstallStateDenied(t *testing.T) {
-	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	base := floorReq(t, "")
 	smindDir := filepath.Join(base.Home, ".smind")
@@ -103,7 +102,6 @@ func TestFloor_SecretsDenied(t *testing.T) {
 }
 
 func TestFloor_DestructiveOutsideWorktreeDenied(t *testing.T) {
-	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	checkFloorCases(t, []floorCase{
 		{"rm -rf /etc/x", "no-destructive-outside"},
@@ -155,7 +153,6 @@ func TestFloor_DestructiveOutsideWorktreeDenied(t *testing.T) {
 }
 
 func TestFloor_PathsToolEdit(t *testing.T) {
-	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	base := floorReq(t, "")
 	home := base.Home
@@ -180,6 +177,9 @@ func TestFloor_PathsToolEdit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			if hasPOSIXOnlyPath(tc.path) {
+				skipPOSIXPathsOnWindows(t)
+			}
 			req := base
 			req.Tool, req.Paths = tc.tool, []string{tc.path}
 			hit, ok := CheckFloorPaths(req)
@@ -215,7 +215,6 @@ func TestFloor_LaunchdServiceDenied(t *testing.T) {
 }
 
 func TestFloor_MoreWritersOutsideWorktreeDenied(t *testing.T) {
-	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	checkFloorCases(t, []floorCase{
 		{"rsync -a src/ /usr/local/dst", "no-destructive-outside"},

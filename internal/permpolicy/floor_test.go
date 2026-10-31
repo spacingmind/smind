@@ -1,12 +1,25 @@
 package permpolicy
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // floorReq is a Bash request with isolated home, daemon home and worktree.
 func floorReq(t *testing.T, cmd string) Request {
 	t.Helper()
 	wt := t.TempDir()
 	return Request{Tool: "Bash", Command: cmd, Home: t.TempDir(), SmindHome: t.TempDir(), Worktree: wt, Cwd: wt}
+}
+
+// hasPOSIXOnlyPath reports whether s names a POSIX-only temp or null path.
+func hasPOSIXOnlyPath(s string) bool {
+	for _, p := range []string{"/tmp/", "/var/tmp/", "/dev/null"} {
+		if strings.Contains(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 type floorCase struct{ cmd, id string }
@@ -18,8 +31,11 @@ func checkFloorCases(t *testing.T, cases []floorCase) {
 	for _, tc := range cases {
 		t.Run(tc.cmd, func(t *testing.T) {
 			t.Parallel()
+			if hasPOSIXOnlyPath(tc.cmd) {
+				skipPOSIXPathsOnWindows(t)
+			}
 			req := floorReq(t, tc.cmd)
-			hit, ok := CheckFloor(req, SplitCommand(tc.cmd))
+			hit, ok := CheckFloor(req, hostSplit(tc.cmd))
 			if ok != (tc.id != "") || hit.ID != tc.id {
 				t.Errorf("CheckFloor(%q) = %+v, %v; want id %q", tc.cmd, hit, ok, tc.id)
 			}
@@ -152,7 +168,7 @@ func TestFloor_CompoundSegmentDenied(t *testing.T) {
 func TestFloor_AppliesToUnparsedRemainder(t *testing.T) {
 	t.Parallel()
 	cmd := "git stash; eval x"
-	p := SplitCommand(cmd)
+	p := hostSplit(cmd)
 	if len(p.Unparsed) == 0 {
 		t.Fatalf("Unparsed empty for %q; the test needs a doubtful remainder", cmd)
 	}

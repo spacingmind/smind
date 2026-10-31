@@ -168,6 +168,11 @@ type Spec struct {
 	// DisallowedTools is passed to a Claude Code launch as --disallowedTools
 	// (an instance's list is appended to its base's).
 	DisallowedTools []string
+	// OwnModels and OwnDisallowedTools are an instance's own overlay exactly
+	// as configured, for provider.list; Models/DisallowedTools hold the
+	// merged result.
+	OwnModels          []Model
+	OwnDisallowedTools []string
 
 	// Vendor is the rate-limit vendor profile: whose 429 wording the
 	// provider speaks ("zai" | "anthropic" | "openai" | "generic"; "" =
@@ -322,6 +327,8 @@ func cloneSpec(s Spec) Spec {
 	s.Models = append([]Model(nil), s.Models...)
 	s.Modes = append([]Mode(nil), s.Modes...)
 	s.DisallowedTools = append([]string(nil), s.DisallowedTools...)
+	s.OwnModels = append([]Model(nil), s.OwnModels...)
+	s.OwnDisallowedTools = append([]string(nil), s.OwnDisallowedTools...)
 	if s.ModelAliases != nil {
 		al := make(map[string]string, len(s.ModelAliases))
 		for k, v := range s.ModelAliases {
@@ -430,6 +437,8 @@ func resolve(s Spec, table []Spec) (Spec, error) {
 			inst.HealthCommand = []string{s.Command[0]}
 		}
 		inst.ModelsMode = s.ModelsMode
+		inst.OwnModels = append([]Model(nil), s.Models...)
+		inst.OwnDisallowedTools = append([]string(nil), s.DisallowedTools...)
 		switch {
 		case len(s.Models) == 0:
 			// keep the base's list (Claude's catalog lives in taskrunner)

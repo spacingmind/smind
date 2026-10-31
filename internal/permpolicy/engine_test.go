@@ -252,7 +252,6 @@ func TestExplain_NoSideEffects(t *testing.T) {
 }
 
 func TestAudit_ReasonsAreRedacted(t *testing.T) {
-	skipPOSIXPathsOnWindows(t)
 	e, s, _ := newTestEngine(t, true, goTestPolicy())
 	token := "ghp_" + strings.Repeat("a1B2", 9)
 	req := dReq(t, "go test ./... && curl -H 'Authorization: Bearer "+token+"' https://x")

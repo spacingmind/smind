@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 import {
   DndContext,
@@ -32,8 +32,12 @@ import { requestNewWorkspace } from "@/lib/app-events";
 import { useAppUpdate } from "@/lib/app-update";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { PRTabAutoOpen } from "@/components/pr-panel/pr-tab-auto-open";
+import { PluginPanelPane } from "@/components/plugin-panel/plugin-panel-pane";
+import { PluginActionsProvider, type PluginActions } from "@/components/plugin-panel/plugin-actions-context";
+import { PluginPage } from "@/components/plugin-panel/plugin-page";
 import { useTaskGit } from "@/hooks/use-task-git";
 import { PRPanelPane } from "@/components/pr-panel/pr-panel-pane";
+import { PluginTabReaper } from "@/hooks/use-plugin-tab-reaper";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -58,6 +62,7 @@ import {
   filePathFromTabKey,
   NewTabButton,
   nextTerminalTab,
+  pluginTab,
   TabLabel,
   TabsEmptyState,
   type BaseTabKind,
@@ -68,6 +73,8 @@ import {
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { PluginThemeApplier } from "@/components/plugin-theme-applier";
 import { useSlashPaletteCommands } from "@/hooks/use-slash-palette-commands";
+import { findPanel, usePluginPanels } from "@/hooks/use-plugin-panels";
+import type { PluginPanel } from "@/lib/plugin-panel-types";
 import { DaemonQueryProvider, useDaemonQueryClient } from "@/lib/query/daemon-query-provider";
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
@@ -248,7 +255,7 @@ function AppShell({
   // the plan's "no router library introduction" decision; settings is not
   // deep-linkable and does not disturb the hash the task routing below
   // owns.
-  const [activeView, setActiveView] = useState<"workspace" | "settings" | "inbox">("workspace");
+  const [activeView, setActiveView] = useState<"workspace" | "settings" | "inbox" | "plugin">("workspace");
   // Bumped on every request to open Settings, and used as the screen's key:
   // asking for a section while Settings is already open (shortcuts.help,
   // a deep link) remounts it onto that section instead of being ignored.
@@ -271,6 +278,26 @@ function AppShell({
       setActiveView("inbox");
     }
   }, [isMobile]);
+  // A plugin panel as a full page (ADR-0042): the surface for `where:
+  // "sidebar"` panels and any panel opened with no task selected. Same
+  // mobile treatment as the inbox: the sidebar sheet closes first so its
+  // exit animation never ghosts over the page.
+  const [pluginPage, setPluginPage] = useState<{ pluginId: string; panelId: string } | null>(null);
+  const openPluginPage = useCallback(
+    (pluginId: string, panelId: string) => {
+      const show = () => {
+        setPluginPage({ pluginId, panelId });
+        setActiveView("plugin");
+      };
+      if (isMobile) {
+        closeMobileSidebarRef.current?.();
+        window.setTimeout(show, 220);
+      } else {
+        show();
+      }
+    },
+    [isMobile],
+  );
 
   const {
     tabsByTask,
@@ -485,6 +512,25 @@ function AppShell({
     if (!selectedTask) return;
     openTab(selectedTask.ID, baseTabForKind(selectedTask.ID, kind), placement ?? "prefer");
   }
+
+  /**
+   * The one open path for a plugin panel (ADR-0042), shared by the "+" menu, the
+   * command palette and the panel-actions provider: a sidebar panel -- or any
+   * panel with no task selected -- opens the full page; every other panel opens
+   * (or activates) its tab on the selected task. The same open-or-activate rule
+   * as the base kinds: openTab itself activates an already-open `pluginTabKey`
+   * instead of duplicating it, and `prefer` keeps the implicit-open placement.
+   */
+  const openPluginPanel = useCallback(
+    (panel: PluginPanel) => {
+      if (panel.where === "sidebar" || !selectedTask) {
+        openPluginPage(panel.plugin, panel.id);
+        return;
+      }
+      openTab(selectedTask.ID, pluginTab(selectedTask.ID, panel), "prefer");
+    },
+    [selectedTask, openTab, openPluginPage],
+  );
 
   /** Opens another terminal tab for the selected task (Item 20). The pane picks its own session -- see lib/terminal-sessions.ts. */
   function openTerminalTab() {
@@ -801,12 +847,16 @@ function AppShell({
     // permanently starving the task of its real default chat tab. Wait
     // for a real active tab instead; this effect re-fires once one exists.
     if (!activeEntry) return;
+    // Plugin tabs are not routable: a panel's identity lives in the tab
+    // entry, not the URL, so the previous hash stays until another tab is
+    // focused.
+    if (activeEntry.kind === "plugin") return;
     const tab: Route["tab"] =
       activeEntry.kind === "file"
         ? { kind: "file", path: filePathFromTabKey(activeEntry.key) }
         : activeEntry.kind === "chat" && activeEntry.chatId !== undefined
           ? { kind: "chat", chatId: activeEntry.chatId }
-          : { kind: activeEntry.kind as Exclude<TabKind, "file" | "chat"> };
+          : { kind: activeEntry.kind as Exclude<TabKind, "file" | "chat" | "plugin"> };
     const nextHash = formatRoute({ workspaceId: selectedTask.WorkspaceID, taskId: selectedTask.ID, tab });
     // Comparing against the live hash (not a ref of "what we last wrote")
     // is what keeps this idempotent under the hashchange listener above:
@@ -1039,6 +1089,7 @@ function AppShell({
       }}
       onOpenSettings={openSettings}
       onOpenInbox={openInbox}
+      onOpenPluginPanel={openPluginPage}
       connectionStatus={connectionStatus}
       connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
       headerActions={
@@ -1129,6 +1180,7 @@ function AppShell({
       onRevealInDiff={revealInDiff}
       onNewTerminal={openTerminalTab}
       onOpenBase={openBaseTab}
+      onOpenPluginPanel={openPluginPanel}
       chats={chats}
       openChatIds={openChatIds}
       runningChatsByTask={runningChatsByTask}
@@ -1205,6 +1257,7 @@ function AppShell({
                 onRevealInDiff={revealInDiff}
                 onNewTerminal={openTerminalTab}
                 onOpenBase={openBaseTab}
+                onOpenPluginPanel={openPluginPanel}
                 chats={chats}
                 openChatIds={openChatIds}
                 runningChatsByTask={runningChatsByTask}
@@ -1271,6 +1324,15 @@ function AppShell({
     },
     [closeSettings, activate],
   );
+  // A plugin panel chosen in the palette leaves whatever covered the shell
+  // first, then goes through the one shared open path (page vs task tab).
+  const openPluginPanelFromPalette = useCallback(
+    (panel: PluginPanel) => {
+      closeSettings();
+      openPluginPanel(panel);
+    },
+    [closeSettings, openPluginPanel],
+  );
   const shellElement = (
     <SidebarProvider
       className="h-svh"
@@ -1290,6 +1352,8 @@ function AppShell({
       <CommandPalette />
       {/* G9: a task with a PR gets its PR tab once, in the background (never again after a close). */}
       <PRTabAutoOpen taskId={selectedTask?.ID ?? null} tabs={taskState ? collectAllTabs(taskState.root) : null} openTab={openTab} />
+      {/* ADR-0042: a plugin tab whose panel left the daemon's list is closed, across every task's layout. */}
+      <PluginTabReaper tabsByTask={tabsByTask} closeTab={closeTab} />
       <ShellCommands
         client={client}
         tasks={allTasks}
@@ -1310,6 +1374,7 @@ function AppShell({
           closeSettings();
           openChatById(chatId, "prefer");
         }}
+        onOpenPluginPanel={openPluginPanelFromPalette}
       />
       {isMobile ? (
         // Item 21: below the breakpoint, the sidebar-vs-content split
@@ -1409,7 +1474,8 @@ function AppShell({
   // outside this wrapper and still render on top.
   return (
     <DaemonQueryProvider queryClient={queryClient} client={client} events={events}>
-      <div className="relative h-svh w-full">
+      <PluginActionsBridge openPanel={openPluginPanel}>
+        <div className="relative h-svh w-full">
         <PluginThemeApplier />
         <UsageModalRoot />
         <div
@@ -1431,6 +1497,17 @@ function AppShell({
             />
           </div>
         )}
+        {activeView === "plugin" && pluginPage && (
+          // ADR-0042: a plugin panel as a full page -- the surface for
+          // sidebar panels and any panel opened with no task selected.
+          <div className="absolute inset-0 z-40">
+            <PluginPage
+              pluginId={pluginPage.pluginId}
+              panelId={pluginPage.panelId}
+              onNavigateBack={closeSettings}
+            />
+          </div>
+        )}
         {settingsOpen && (
           // No background here: on macOS the settings sidebar is a vibrancy
           // surface and the screen paints its own opaque panes.
@@ -1444,9 +1521,33 @@ function AppShell({
             />
           </div>
         )}
-      </div>
+        </div>
+      </PluginActionsBridge>
     </DaemonQueryProvider>
   );
+}
+
+/**
+ * What a plugin panel's view may ask the shell to do (ADR-0042): open
+ * another panel, resolved through the same shared open path as every other
+ * surface. An id pair the daemon no longer lists (unknown or disabled) is a
+ * no-op, never an error surface. A separate component (not AppShell's own
+ * body) because the panels live in the query cache, which only exists below
+ * the DaemonQueryProvider AppShell itself renders.
+ */
+function PluginActionsBridge({ openPanel, children }: { openPanel: (panel: PluginPanel) => void; children: ReactNode }) {
+  const panels = usePluginPanels();
+  const actions = useMemo<PluginActions>(
+    () => ({
+      openPanel: (pluginId, panelId) => {
+        const panel = findPanel(panels.panels, pluginId, panelId);
+        if (!panel) return;
+        openPanel(panel);
+      },
+    }),
+    [panels.panels, openPanel],
+  );
+  return <PluginActionsProvider value={actions}>{children}</PluginActionsProvider>;
 }
 
 /**
@@ -1471,6 +1572,7 @@ function ShellCommands({
   onActivateTab,
   onNewChat,
   onOpenChat,
+  onOpenPluginPanel,
 }: {
   client: WsClient | null;
   tasks: Task[];
@@ -1484,6 +1586,8 @@ function ShellCommands({
   onActivateTab: (taskId: number, key: string) => void;
   onNewChat: () => void;
   onOpenChat: (chatId: number) => void;
+  /** "+" / palette -> one of the active plugins' panels (ADR-0042): the shell's one shared open path (page vs task tab). */
+  onOpenPluginPanel: (panel: PluginPanel) => void;
 }) {
   const { preference, setPreference } = useTheme();
   const pr = useTaskGit(selectedTask?.ID ?? null)?.pr;
@@ -1547,6 +1651,24 @@ function ShellCommands({
     }));
   }, [selectedTask, tabs, pr, onOpenTab, onActivateTab]);
   useCommands("shell:tabs", 2, tabCommands);
+
+  // ADR-0042: every panel of the active plugins, whatever its `where` -- the
+  // palette is a global opener, and the shell's shared open path decides
+  // page-vs-task-tab for each entry.
+  const pluginPanels = usePluginPanels().panels;
+  const pluginPanelCommands = useMemo<Command[]>(
+    () =>
+      pluginPanels.map((panel) => ({
+        id: `plugin-panel-${panel.plugin}-${panel.id}`,
+        group: "Plugins",
+        title: `Open ${panel.title}`,
+        subtitle: panel.plugin,
+        keywords: ["plugin", panel.id, "panel"],
+        run: () => onOpenPluginPanel(panel),
+      })),
+    [pluginPanels, onOpenPluginPanel],
+  );
+  useCommands("plugins:panels", 4, pluginPanelCommands);
 
   const chatCommands = useMemo<Command[]>(() => {
     if (!selectedTask) return [];
@@ -1717,6 +1839,8 @@ interface SplitPaneCallbacks {
   onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
+  /** "+" -> one of the active plugins' panels (ADR-0042): opens (or activates) its plugin tab. */
+  onOpenPluginPanel: (panel: PluginPanel) => void;
   /** The task's own chats (ADR-0016 P3), for the "+" menu's reopen-existing-chat section -- null while chat.list is still in flight. */
   chats: Chat[] | null;
   /** Which of `chats` already have a tab open somewhere in the task's split tree -- excluded from the "+" menu's reopen section. */
@@ -1798,6 +1922,7 @@ function SplitTreeView({
         onRevealInDiff={shared.onRevealInDiff}
         onNewTerminal={shared.onNewTerminal}
         onOpenBase={shared.onOpenBase}
+        onOpenPluginPanel={shared.onOpenPluginPanel}
         chats={shared.chats}
         openChatIds={shared.openChatIds}
         runningChatsByTask={shared.runningChatsByTask}
@@ -1887,6 +2012,7 @@ function PaneTabStrip({
   onRevealInDiff,
   onNewTerminal,
   onOpenBase,
+  onOpenPluginPanel,
   chats,
   openChatIds,
   runningChatsByTask,
@@ -1925,6 +2051,8 @@ function PaneTabStrip({
   onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
+  /** "+" -> one of the active plugins' panels (ADR-0042): opens (or activates) its plugin tab. */
+  onOpenPluginPanel: (panel: PluginPanel) => void;
   chats: Chat[] | null;
   openChatIds: ReadonlySet<number>;
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
@@ -1949,6 +2077,10 @@ function PaneTabStrip({
   // `data` carries just the pane id, which `App.tsx`'s onDragMove/onDragEnd
   // read back off `event.over`.
   const { setNodeRef: setDroppableRef } = useDroppable({ id: paneId, data: { paneId } });
+  // The "+" menu's plugin-panel section (ADR-0042): read under the daemon
+  // provider like every other panel-data consumer, here where the menu
+  // renders; only the task/palette surfaces belong in a task's strip.
+  const pluginPanels = usePluginPanels().panels.filter((p) => p.where === "task" || p.where === "palette");
   const showDropPreview = isDragActive && dragOverPaneId === paneId && dropPosition !== null;
   // (aria-selected, not data-state: ContextMenuTrigger asChild overwrites the trigger's data-state.)
   // Keeps the active tab visible when the strip overflows (TB-AC5).
@@ -2025,6 +2157,8 @@ function PaneTabStrip({
             chats={reopenableChats(chats, openChatIds)}
             onOpenChat={(chatId) => onOpenChat(chatId, { pane: paneId })}
             onNewChat={() => onNewChat({ pane: paneId })}
+            pluginPanels={pluginPanels}
+            onOpenPluginPanel={onOpenPluginPanel}
             open={newTabMenuOpen}
             onOpenChange={onNewTabMenuOpenChange}
           />
@@ -2444,6 +2578,7 @@ function TabContent({
     file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} chats={chats} />,
     pr: <PRPanelPane taskId={task.ID} focused={active} />,
+    plugin: <PluginPanelPane pluginId={entry.pluginId ?? ""} panelId={entry.panelId ?? ""} taskId={task.ID} focused={active} />,
     terminal: (
       <TerminalPane
         client={client}

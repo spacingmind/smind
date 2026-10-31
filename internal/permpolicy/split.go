@@ -45,13 +45,17 @@ const maxNestDepth = 8
 
 // SplitCommand splits a shell command into simple commands. It never panics
 // and never returns an error: doubt goes into Unparsed and the caller asks.
-func SplitCommand(cmd string) Parsed {
+func SplitCommand(cmd string) Parsed { return splitCommand(cmd, false) }
+
+// splitCommand is SplitCommand with an optional Windows mode, where an unquoted
+// backslash before an ordinary path character stays literal.
+func splitCommand(cmd string, win bool) Parsed {
 	p := Parsed{Normalized: strings.TrimSpace(cmd)}
 	if len(cmd) > maxCommandBytes {
 		p.Unparsed = append(p.Unparsed, "input exceeds 64 KiB")
 		return p
 	}
-	s := scanner{src: cmd, p: &p, segStart: -1}
+	s := scanner{src: cmd, p: &p, segStart: -1, win: win}
 	s.run()
 	s.finish()
 	if len(s.segs)+len(s.inner) == 0 && len(p.Unparsed) == 0 && strings.TrimSpace(cmd) != "" {
@@ -111,6 +115,7 @@ type scanner struct {
 	segStart int
 	pending  []*heredoc // heredoc operators on the line being scanned
 	heredocs []*heredoc // every heredoc, in operator order, once consumed
+	win      bool       // Windows mode: see winLiteralBackslashNext
 	depth    int        // nesting level of substitutions and shells
 	inner    []Segment  // segments of substituted/nested text, appended after segs
 }
@@ -204,6 +209,11 @@ func (s *scanner) wordChar() {
 		s.i++
 		s.scanDoubleQuoted()
 	case '\\':
+		if s.win && winLiteralBackslashNext(s.peek(1)) {
+			s.w.val = append(s.w.val, '\\')
+			s.i++
+			return
+		}
 		s.i++
 		if s.i < len(s.src) {
 			s.w.val = append(s.w.val, s.src[s.i])
@@ -354,6 +364,22 @@ func (s *scanner) unparsed(reason string) {
 	if len(s.p.Unparsed) < 8 {
 		s.p.Unparsed = append(s.p.Unparsed, reason)
 	}
+}
+
+// winLiteralBackslashNext reports whether an unquoted backslash before c stays a
+// literal backslash in Windows mode: only before an ordinary path character. Before
+// any shell metacharacter the POSIX escape applies, so a command can never hide
+// inside a quote or after an operator.
+func winLiteralBackslashNext(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	}
+	switch c {
+	case '.', '_', '-', ':', '%', '@', '+', ',', '=':
+		return true
+	}
+	return false
 }
 
 func (s *scanner) peek(k int) byte {
@@ -638,7 +664,7 @@ func (s *scanner) recurse(inner string) {
 		s.unparsed("nesting too deep")
 		return
 	}
-	in := scanner{src: inner, p: s.p, segStart: -1, depth: s.depth + 1}
+	in := scanner{src: inner, p: s.p, segStart: -1, depth: s.depth + 1, win: s.win}
 	in.run()
 	in.finish()
 	s.inner = append(s.inner, in.segs...)

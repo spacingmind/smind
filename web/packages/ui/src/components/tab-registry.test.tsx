@@ -18,10 +18,14 @@ import {
   filePathFromTabKey,
   isLegacyTaskTab,
   nextTerminalTab,
+  parsePluginTabKey,
+  pluginTab,
+  pluginTabKey,
   terminalTab,
   type BaseTabKind,
 } from "@/components/tab-registry";
 import { resetDirtyBuffers } from "@/lib/dirty-buffers";
+import type { PluginPanel } from "@/lib/plugin-panel-types";
 import { clearTerminalActivity, markTerminalActivity, resetTerminalSessions } from "@/lib/terminal-sessions";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { Task } from "@/lib/types";
@@ -251,6 +255,37 @@ describe("flexible tabs (Item 3)", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
     expect(opened).toEqual(["terminal"]);
   });
+
+  it("lists the offered plugin panels after the base kinds and opens one on click", async () => {
+    const openedPanel: PluginPanel[] = [];
+    const panels: PluginPanel[] = [
+      { plugin: "acme", id: "usage", title: "Acme usage", where: "task", ui: 1 },
+      { plugin: "zeta", id: "board", title: "Board", where: "palette", ui: 1 },
+    ];
+    render(
+      <NewTabButton onOpen={() => {}} pluginPanels={panels} onOpenPluginPanel={(panel) => openedPanel.push(panel)} />,
+    );
+
+    fireEvent.pointerDown(screen.getByTestId("tabs-new-tab"), { button: 0 });
+    const items = await screen.findAllByTestId("tabs-new-tab-plugin");
+    expect(items.map((i) => [i.dataset.plugin, i.dataset.panel])).toEqual([
+      ["acme", "usage"],
+      ["zeta", "board"],
+    ]);
+    // After the base kinds, per the menu's own section order.
+    const kinds = screen.getAllByTestId("tabs-new-tab-item");
+    expect(items[0]!.compareDocumentPosition(kinds[kinds.length - 1]!)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Acme usage/ }));
+    expect(openedPanel).toEqual([panels[0]]);
+  });
+
+  it("offers no plugin items without the panels prop", async () => {
+    render(<NewTabButton onOpen={() => {}} />);
+    fireEvent.pointerDown(screen.getByTestId("tabs-new-tab"), { button: 0 });
+    await screen.findAllByTestId("tabs-new-tab-item");
+    expect(screen.queryByTestId("tabs-new-tab-plugin")).not.toBeInTheDocument();
+  });
 });
 
 describe("chat tabs (ADR-0016 P3)", () => {
@@ -310,5 +345,49 @@ describe("chat tabs (ADR-0016 P3)", () => {
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     expect(newChatClicked).toBe(true);
     expect(screen.getAllByTestId("tabs-empty-open")).toHaveLength(BASE_TAB_KINDS.length);
+  });
+});
+
+describe("plugin tabs (ADR-0042)", () => {
+  const PANEL = { plugin: "acme", id: "usage", title: "Acme usage", where: "task", ui: 1 } as const;
+
+  it("pluginTab builds the plugin tab from a panel, and the key round-trips", () => {
+    const entry = pluginTab(TASK.ID, PANEL);
+    expect(entry).toMatchObject({
+      kind: "plugin",
+      key: `${TASK.ID}:plugin:acme:usage`,
+      taskId: TASK.ID,
+      title: "Acme usage",
+      closable: true,
+      pluginId: "acme",
+      panelId: "usage",
+    });
+    expect(pluginTabKey(TASK.ID, "acme", "usage")).toBe(entry.key);
+    expect(parsePluginTabKey(entry.key)).toEqual({ taskId: TASK.ID, pluginId: "acme", panelId: "usage" });
+  });
+
+  it("parsePluginTabKey returns null for non-plugin or malformed keys", () => {
+    expect(parsePluginTabKey("1:pr")).toBeNull();
+    expect(parsePluginTabKey("1:plugin:a")).toBeNull();
+    expect(parsePluginTabKey("x:plugin:a:b")).toBeNull();
+  });
+
+  it("TabLabel renders a plugin tab with the panel's title", () => {
+    render(<TabLabel entry={pluginTab(TASK.ID, PANEL)} />);
+    expect(screen.getByTestId("tab-icon")).toHaveAttribute("data-icon", "plugin");
+    expect(screen.getByText("Acme usage")).toBeInTheDocument();
+  });
+
+  it("plugin tab shows the panel's own icon", () => {
+    const { unmount } = render(
+      <TabLabel entry={pluginTab(TASK.ID, { plugin: "a", id: "p", title: "T", icon: "Hand" })} />,
+    );
+    const icon = screen.getByTestId("tab-icon");
+    expect(icon).toHaveAttribute("data-icon", "plugin");
+    expect(icon.getAttribute("class")).toContain("lucide-hand");
+    unmount();
+
+    render(<TabLabel entry={pluginTab(TASK.ID, { plugin: "a", id: "p", title: "T" })} />);
+    expect(screen.getByTestId("tab-icon").getAttribute("class")).toContain("lucide-puzzle");
   });
 });

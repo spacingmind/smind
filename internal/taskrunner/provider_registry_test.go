@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/providers"
@@ -177,5 +178,52 @@ func TestProviderInstance_SideBySideWithBase(t *testing.T) {
 	}
 	if got := strings.Join(ids, ","); got != "claude-native,glm,kimi,codex-native,opencode,copilot,cline,goose,cursor,claude-a,claude-b" {
 		t.Fatalf("catalog ids = %s", got)
+	}
+}
+
+func TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	_, wm, _ := newTestStoreAndManager(t)
+	r := claudeInstanceRunner(t, wm,
+		providers.Spec{ID: "claude-a", Extends: providers.IDClaudeNative, Env: map[string]string{"CLAUDE_CONFIG_DIR": "/inst/a"}},
+		providers.Spec{ID: "claude-b", Extends: providers.IDClaudeNative, Env: map[string]string{"CLAUDE_CONFIG_DIR": "/inst/b"}},
+	)
+	type run struct {
+		provider Provider
+		dir      string
+		task     store.Task
+	}
+	runs := []run{
+		{provider: "claude-a", dir: "/inst/a", task: newScenarioTask(t, wm)},
+		{provider: "claude-b", dir: "/inst/b", task: newScenarioTask(t, wm)},
+	}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, rn := range runs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			events := make(chan Event)
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- r.RunPrompt(context.Background(), rn.task.ID, rn.task.ID, rn.provider, "hi", denyAllDecider{}, PermissionSettings{}, "", testClaudeModel, events)
+			}()
+			drainEvents(events)
+			if err := <-errCh; err != nil {
+				t.Errorf("RunPrompt(%s) error = %v", rn.provider, err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for _, rn := range runs {
+		if got := readEnvDump(t, *rn.task.WorktreePath); got != rn.dir {
+			t.Errorf("%s: CLAUDE_CONFIG_DIR = %q, want %q", rn.provider, got, rn.dir)
+		}
+		if h, ok := r.sessionStore.Get(rn.task.ID); !ok || h.Provider != rn.provider {
+			t.Errorf("%s: session handle = %+v, %v", rn.provider, h, ok)
+		}
 	}
 }

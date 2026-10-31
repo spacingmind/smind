@@ -1,6 +1,9 @@
 package permpolicy
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 // SegmentPaths returns every path one simple command names, resolved the way
 // the engine judges them (ResolvePath: absolute, links followed), so a rule
@@ -11,6 +14,10 @@ import "strings"
 // that fails to resolve aborts the whole call with that error, so the caller
 // escalates instead of judging a subset of the paths.
 func SegmentPaths(seg Segment, cwd string) ([]string, error) {
+	return segmentPaths(hostPlatform(), seg, cwd)
+}
+
+func segmentPaths(pl *platform, seg Segment, cwd string) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
 	add := func(resolved string) {
@@ -30,11 +37,14 @@ func SegmentPaths(seg Segment, cwd string) ([]string, error) {
 			}
 			w = w[eq+1:]
 		}
-		if w == "" || dynamicWord(w) {
+		if w == "" || pl.dynamicWord(w) {
 			continue
 		}
-		resolved, err := ResolvePath(w, cwd)
+		resolved, err := pl.resolve(w, cwd)
 		if err != nil {
+			if pl.nonPathWord(w, err) {
+				continue
+			}
 			return nil, err
 		}
 		add(resolved)
@@ -46,10 +56,10 @@ func SegmentPaths(seg Segment, cwd string) ([]string, error) {
 		case "", "&1", "&2", "-", "/dev/null":
 			continue
 		}
-		if dynamicWord(rd.Target) {
+		if pl.isNullDevice(rd.Target) || pl.dynamicWord(rd.Target) {
 			continue
 		}
-		resolved, err := ResolvePath(rd.Target, cwd)
+		resolved, err := pl.resolve(rd.Target, cwd)
 		if err != nil {
 			return nil, err
 		}
@@ -63,4 +73,35 @@ func SegmentPaths(seg Segment, cwd string) ([]string, error) {
 // not the path the shell will act on.
 func dynamicWord(w string) bool {
 	return strings.ContainsAny(w, "$`*?[")
+}
+
+// dynamicWord is the flavour's view: on Windows a %VAR% expansion is dynamic too.
+func (pl *platform) dynamicWord(w string) bool {
+	return dynamicWord(w) || (pl.windows && hasPercentVar(w))
+}
+
+// hasPercentVar reports a '%' followed later by another '%' (%TEMP%).
+func hasPercentVar(w string) bool {
+	i := strings.IndexByte(w, '%')
+	return i >= 0 && strings.IndexByte(w[i+1:], '%') >= 0
+}
+
+// nonPathWord reports a Windows word that cannot name a path that escapes
+// anything: it failed with errUnrepresentable but is a refspec, key:value
+// word or URL (https://x, ssh://git@h/x: no backslash, a ':' at index >= 2
+// with no '/' before it; a single letter before ':' is a drive), or it has no separator and no drive prefix (a commit message "feat: x", "a|b",
+// a trailing-dot name). It is skipped rather than aborting the call.
+func (pl *platform) nonPathWord(w string, err error) bool {
+	if !pl.windows || !errors.Is(err, errUnrepresentable) {
+		return false
+	}
+	if !strings.Contains(w, `\`) {
+		if i := strings.IndexByte(w, ':'); i >= 2 && !strings.Contains(w[:i], "/") {
+			return true
+		}
+	}
+	if strings.ContainsAny(w, `/\`) {
+		return false
+	}
+	return !(len(w) >= 2 && isLetter(w[0]) && w[1] == ':')
 }

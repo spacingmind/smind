@@ -23,6 +23,11 @@ describe("palette categories", () => {
     expect(paletteCategory("zzz")).toBe("actions");
   });
 
+  it("the Plugins group has its own icon and is an action", () => {
+    expect(iconForGroup("Plugins")).toBe("plugin");
+    expect(paletteCategory("Plugins")).toBe("actions");
+  });
+
   it("iconForGroup returns a registry key for every known group", () => {
     const registryKeys = Object.keys(Icons);
     for (const name of Object.values(PALETTE_GROUP_ICON)) {
