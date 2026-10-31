@@ -135,7 +135,6 @@ export function TerminalKeyBar({
     if (id === "copy") {
       return (
         <button key={id} type="button" data-testid="terminal-copy" className={KEY_CLASS} disabled={copyDisabled} onClick={onCopy} {...keepFocus}>
-          <Icons.copy className="size-3" />
           Copy
         </button>
       );
@@ -143,7 +142,6 @@ export function TerminalKeyBar({
     if (id === "paste") {
       return (
         <button key={id} type="button" data-testid="terminal-paste" className={KEY_CLASS} disabled={pasteDisabled} onClick={onPaste} {...keepFocus}>
-          <Icons.paste className="size-3" />
           Paste
         </button>
       );
