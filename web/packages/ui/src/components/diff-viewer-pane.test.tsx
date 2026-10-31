@@ -477,6 +477,19 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     expect(stat).toHaveTextContent("2 files +2 −1");
   });
 
+  // jsdom has no layout: assert the classes that keep the counts on one line and stack the header below sm.
+  it("keeps the diff counts on one line and stacks the header on narrow widths", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    client.nth("task.diff", 0).resolve({ diff: WHOLE_DIFF });
+    await flush();
+
+    expect(screen.getByTestId("diff-stat")).toHaveClass("whitespace-nowrap");
+    const header = screen.getByTestId("diff-viewer-pane").querySelector('[data-slot="pane-header"]');
+    expect(header).toHaveClass("flex-col", "sm:flex-row");
+  });
+
   it("renders every changed file in the whole-diff view", async () => {
     const client = new FakeWsClient();
     render(<DiffViewerPane client={client} task={TASK} />);

@@ -8,9 +8,11 @@ import type { WsClientLike } from "@/lib/ws-client";
 interface DaemonInfoAttachments {
   attachments?: AttachmentLimits;
   forge?: DaemonForge;
+  /** 'launchd' | 'systemd' | 'docker' when an OS service or container runs the daemon; absent when unmanaged. */
+  managedBy?: string;
 }
 
-/** `daemon.info` per connection; only the attachment caps and the forge capability are read here (the desktop banner has its own reader). */
+/** `daemon.info` per connection; the attachment caps, the forge capability and who manages the daemon are read here (the desktop banner has its own reader). */
 export function daemonInfoQueryOptions(client: WsClientLike | null) {
   return queryOptions({
     queryKey: queryKeys.daemonInfo(),
@@ -39,4 +41,11 @@ export function useDaemonForge(): DaemonForge | null {
   const { client } = useDaemonConnection();
   const query = useQuery(daemonInfoQueryOptions(client));
   return query.data?.forge ?? null;
+}
+
+/** Who manages the daemon process (`launchd`, `systemd`, ...), "" when it is unmanaged, undefined while `daemon.info` is unknown (pending or failed). */
+export function useDaemonManagedBy(): string | undefined {
+  const { client } = useDaemonConnection();
+  const query = useQuery(daemonInfoQueryOptions(client));
+  return query.data ? (query.data.managedBy ?? "") : undefined;
 }

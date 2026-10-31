@@ -202,4 +202,25 @@ describe("FolderPickerDialog", () => {
     const second = await waitFor(() => client.nth("fs.listDir", 1));
     expect(second.params).toEqual({ path: "/home/user/code" });
   });
+
+  // jsdom has no layout, so this asserts the structural fix: DialogContent is a
+  // CSS grid whose items default to min-width:auto, so every child needs min-w-0
+  // for the truncating path / entry names to shrink instead of overflowing at 390px.
+  it("lets a very long path and entry name shrink inside the dialog grid (UAT A-09)", async () => {
+    const client = new FakeWsClient();
+    const longName = "a-very-long-directory-name-".repeat(8);
+    renderDialog(client);
+    const call = await waitFor(() => client.nth("fs.listDir"));
+    call.resolve({
+      path: `/home/dev/${longName}`,
+      parent: "/home/dev",
+      entries: [{ name: longName, path: `/home/dev/${longName}/x`, isGitRepo: false }],
+    });
+    await flush();
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.className).toContain("[&>*]:min-w-0");
+    // The ScrollArea and the path row are direct children, so [&>*]:min-w-0 covers them.
+    expect(dialog.querySelector('[data-slot="scroll-area"]')!.parentElement).toBe(dialog);
+  });
 });
