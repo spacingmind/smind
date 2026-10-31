@@ -793,3 +793,34 @@ CREATE TABLE IF NOT EXISTS fleet_remote_tasks (
     updated_at TIMESTAMP NOT NULL,
     PRIMARY KEY (host_id, remote_task_id)
 );
+
+-- steward_reviews: one Steward review of {task, head commit} (ADR-0047 §8); additive.
+CREATE TABLE IF NOT EXISTS steward_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    trigger_kind TEXT NOT NULL,              -- human | auto
+    head_sha TEXT NOT NULL,
+    contract_sha256 TEXT NOT NULL DEFAULT '',
+    validation_id INTEGER NOT NULL DEFAULT 0,
+    ci_state TEXT NOT NULL DEFAULT '',
+    digest_json TEXT NOT NULL DEFAULT '',
+    digest_sha256 TEXT NOT NULL DEFAULT '',
+    policy_sha TEXT NOT NULL DEFAULT '',
+    seat_verdict TEXT NOT NULL DEFAULT '',   -- '' | ACCEPTED | CHANGES | BLOCKED (what the seat submitted)
+    verdict TEXT NOT NULL DEFAULT '',        -- '' | ACCEPTED | CHANGES | BLOCKED (clamped, stored)
+    findings_json TEXT NOT NULL DEFAULT '',
+    gates_json TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    steward_task_id INTEGER NOT NULL DEFAULT 0,
+    scratch_dir TEXT NOT NULL DEFAULT '',
+    token_hash TEXT NOT NULL DEFAULT '',
+    token_used INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,                    -- pending | running | done | blocked
+    blocked_reason TEXT NOT NULL DEFAULT '', -- timeout | budget | crashed | scope_violation | cancelled
+    scope_violation INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_steward_reviews_task ON steward_reviews(task_id, id);

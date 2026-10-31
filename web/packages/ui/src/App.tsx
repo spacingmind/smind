@@ -63,7 +63,6 @@ import {
   fileTab,
   filePathFromTabKey,
   NewTabButton,
-  nextTerminalTab,
   pluginTab,
   TabLabel,
   TabsEmptyState,
@@ -487,6 +486,30 @@ function AppShell({
     [client, selectTask],
   );
 
+  // UAT B-01: archiving the selected task must move the selection off it.
+  // The tree drops the row on the same event, but selectedTask is App's own
+  // state -- left alone it keeps the pane, the URL hash and a live composer
+  // pointed at a task nothing else shows, so a prompt could still be sent
+  // into an archived task.
+  useEffect(() => {
+    if (!events || !selectedTask) return;
+    const off = events.subscribe("task.archived", (payload) => {
+      const id = (payload as { task?: { ID?: number } }).task?.ID;
+      if (id !== selectedTask.ID) return;
+      // The event bridge runs before listeners, so allTasks may already
+      // have dropped the row -- neighbours are searched in list order
+      // around whichever position it still occupies (whole list if none).
+      const idx = allTasks.findIndex((t) => t.ID === id);
+      const after = idx === -1 ? allTasks : allTasks.slice(idx + 1);
+      const before = idx === -1 ? [] : allTasks.slice(0, idx);
+      const candidate = (t: Task) => t.ArchivedAt === null && t.WorkspaceID === selectedTask.WorkspaceID;
+      const neighbour = after.find(candidate) ?? before.filter(candidate).pop();
+      if (neighbour) selectTask(neighbour);
+      else setSelectedTask(null);
+    });
+    return off;
+  }, [events, selectedTask, allTasks, selectTask]);
+
   function openFileTab(path: string) {
     if (!selectedTask) return;
     // Implicit open (file-tree click, a tool-call's click-through): prefer
@@ -515,7 +538,9 @@ function AppShell({
    */
   function revealInDiff() {
     if (!selectedTask) return;
-    activate(selectedTask.ID, `${selectedTask.ID}:diff`);
+    // Open (or activate) the base Diff tab: with the task's Diff tab
+    // closed, a bare activate() would be a no-op and the chip dead.
+    openBaseTab("diff");
   }
 
   /**
@@ -549,21 +574,17 @@ function AppShell({
     [selectedTask, openTab, openPluginPage],
   );
 
-  /** Opens another terminal tab for the selected task (Item 20). The pane picks its own session -- see lib/terminal-sessions.ts. */
-  function openTerminalTab() {
-    if (!selectedTask) return;
-    const state = tabsByTask.get(selectedTask.ID);
-    const tabs = state ? collectAllTabs(state.root) : [];
-    openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, tabs));
-  }
-
-  /** The header's terminal button: bring an existing terminal tab forward, else open the first one. (The "+" menu and the palette are what open further terminals.) */
+  /** The header's terminal button: bring an existing terminal tab forward, else open the base one. (The "+" menu and the palette are what open further terminals.) */
   function focusOrOpenTerminal() {
     if (!selectedTask) return;
     const state = tabsByTask.get(selectedTask.ID);
     const existing = (state ? collectAllTabs(state.root) : []).find((t) => t.kind === "terminal");
     if (existing) activate(selectedTask.ID, existing.key);
-    else openTerminalTab();
+    // The base `${taskId}:terminal` tab, not nextTerminalTab's index-2
+    // "Terminal 2": an indexed tab here also round-trips through the route
+    // restore (activating it writes #/…/terminal, whose restore openTab()s
+    // the base tab), landing a second Terminal tab in the strip.
+    else openBaseTab("terminal");
   }
 
   // --- Chats (ADR-0016 P3) -----------------------------------------------

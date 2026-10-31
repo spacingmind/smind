@@ -17,14 +17,14 @@ func TestProfileSeedRoles_CreatesAndReports(t *testing.T) {
 		t.Fatalf("run(profile seed roles) = %d; stdout %q", code, out)
 	}
 	list, err := profiles.New(s).List()
-	if err != nil || len(list) != 3 {
-		t.Fatalf("profiles = %+v, err %v; want 3", list, err)
+	if err != nil || len(list) != 4 {
+		t.Fatalf("profiles = %+v, err %v; want 4", list, err)
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("output = %q, want 3 lines", out)
+	if len(lines) != 4 {
+		t.Fatalf("output = %q, want 4 lines", out)
 	}
-	for i, name := range []string{"peer-sonnet", "lead", "validator"} {
+	for i, name := range []string{"peer-sonnet", "lead", "validator", "steward"} {
 		want := "created " + name + " (id "
 		if !strings.HasPrefix(lines[i], want) {
 			t.Errorf("line %d = %q, want prefix %q", i, lines[i], want)
@@ -42,11 +42,11 @@ func TestProfileSeedRoles_RerunKeeps(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("rerun = %d; stdout %q", code, out)
 	}
-	if strings.Contains(out, "created") || strings.Count(out, "kept ") != 3 || !strings.Contains(out, "kept lead (id 2)") {
-		t.Errorf("rerun output = %q, want three kept lines", out)
+	if strings.Contains(out, "created") || strings.Count(out, "kept ") != 4 || !strings.Contains(out, "kept lead (id 2)") {
+		t.Errorf("rerun output = %q, want four kept lines", out)
 	}
-	if list, _ := profiles.New(s).List(); len(list) != 3 {
-		t.Errorf("profiles = %d, want 3", len(list))
+	if list, _ := profiles.New(s).List(); len(list) != 4 {
+		t.Errorf("profiles = %d, want 4", len(list))
 	}
 }
 

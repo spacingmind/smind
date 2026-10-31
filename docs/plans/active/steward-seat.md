@@ -150,6 +150,12 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 - ADR-0047 binds everything; D1–D18 are Supervisor defaults 2026-10-31, vetoable.
 - The engine package is `internal/permpolicy`, the seat package `internal/steward`; the validator's scratch-worktree/token/post-check helpers are reused if exported, else the S2 Lead
   extracts a small shared package in its own first commit (decided in S2, recorded here).
+- S2 (Lead 2026-10-31): the validator's exported helpers (`validation.Take/Snapshot/IsAncestor/IsSHA/GitHead`, `ProbeState`) are imported as they are; no shared package is
+  extracted (the exported surface already covers the scratch-worktree/post-check mechanics, and a move would churn the S1-merged validator). The wall-clock/budget watcher is a
+  small `steward.Watch` of the same shape (it writes steward rows, not validation rows).
+- S2 (Lead 2026-10-31): two additive touches outside the listed write scope are unavoidable for AC16 and reported to the Steward: `taskrunner.RunContract.DisallowedTools`
+  (honoured by the claude adapter, so the seat has no Bash/Edit/Write at the provider) and a `runs.Registry.SetSeatFloor` hook in `decider_policy.go` (the seat's permission
+  requests resolve to the seat floor even when `steward.policy.enabled` is off). The floor logic itself lives in `internal/steward/floor.go`.
 - The Claude `permissions.ask`/`deny` provider rules (#596, #632) stay; the engine does not write provider settings.
 - Live LLM calls only with `claude-haiku-5-5` in an isolated `SMIND_HOME` and port; tests that choose a home use `HOME=$(mktemp -d)`.
 
@@ -157,13 +163,22 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 
 - S0 plan + ADR: this PR (docs only, Proposed).
 - S1: implemented 2026-10-31 on one branch (`internal/permpolicy`, audit store, `runs` hook, `policy.*` RPCs, `smind policy`, docs); PR and validator verdict below.
-- S2–S4: not started.
+- S2: seat, review loop, rails, trigger, seed and CLI implemented 2026-10-31 (PR link and validator verdict below once opened); S2b (steward_annotate) deferred to after S4 evidence.
+- S3–S4: not started.
 
 ## Validation
 
 Filled per PR: each AC → the test that confirms it, the mutation run and its failing test, commands (`task test`, `task lint`, `go test -race` on touched packages, `cd web && bunx
 tsc -b packages/ui`), screenshots for UI. For S1 the parser PR also needs a Windows dispatch (`windows-full-suite.yml --ref <branch> -f packages=internal/permpolicy,internal/runs`):
 path and quoting code is exactly what the nightly has caught before.
+
+### S2 (seat, review loop, rails, trigger, seed, CLI)
+
+Tests per AC are listed in `docs/plans/active/steward-seat-s2.contract.md` (AC13-AC23; AC24 is S2b, not in this PR). Commands: `task lint`, `task test` (green on the branch before the final `origin/develop` merge), `go test -race` on `internal/steward`, `internal/store`, `internal/config`, `internal/profiles`, `internal/runs`, `internal/taskrunner`, `internal/wsapi`, `cmd/smind`, `GOOS=windows go vet` on the same packages.
+Mutations M1-M10 (committed work, one at a time, restored with `git checkout -- <file>`): each made its named test fail, none was a build failure. M3 first survived (the frames test only used a third sha): the test was strengthened and the mutation then failed it. M2b removes two layers on purpose (the handler's seat-task binding and the service's run check), because a Lead's submit is refused by either.
+Isolated dogfood (`~/.smind/dogfood/steward-s2/`, fake ACP agent as the steward, no model call): `steward.review` created the scratch worktree at the exact sha, the seat ran, the daemon wrote `BLOCKED crashed` when it ended without a verdict; a bad sha, an unknown task and a cancel of a finished review were refused.
+Deviations from the ADR text (reported to the Steward): `steward.digest.get` and `steward.verdict.submit` ARE in `RunScopedMethods` (the identified seat run calls them; the handler binds them to the seat's own task and the token), `taskrunner.RunContract.DisallowedTools` and `runs.Registry.SetSeatSource` are two additive hooks, `mcp.go` and `admission.go` got a one-branch edit each, the seat floor also allows the seat's own two MCP tools (in default mode they ask). CI state `none` with no PR is `n/a` (so a repo with no forge is not held forever); with a PR it is `unknown`.
+Stated limits: a provider adapter that sends no detail for a Read/Grep/Glob request reaches the seat floor with no path and is denied (those tools do not ask inside the cwd in default mode); Peer handoffs are read from a child's last text block (best effort, empty when absent); the collector's PR body comes from the cached PR details (empty offline, which fails `pr_hygiene` honestly); a blocked review shows the digest's gates but no findings; frames evidence is read from the validator's evidence dir `report.json`; `steward_annotate` (S2b), the inbox row (S3) and the pilot (S4) are not in this PR.
 
 ### S1 (policy engine and audit)
 

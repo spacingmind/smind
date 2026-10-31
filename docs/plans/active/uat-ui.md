@@ -108,7 +108,8 @@ Surfaces: W = web at 1280, N = web at 390, D = desktop (see "not coverable").
 - [x] Full run on the web app, light and dark at 1280 and 390, screenshots reviewed (contact sheets for triage, full size for every suspicious one).
 - [x] Ranked bug list (below).
 - [ ] J44, J55, J56 and the two Steward entries S-01/S-02 verified on the merged builds.
-- [ ] Phase 2 (fixes) and phase 3 (CI suite): not started, by instruction.
+- [x] Phase 2 PR1: A-02, A-03, B-01 fixed with regression tests (App.test.tsx), before/after frames in `/tmp/steward4/zcode-audit/after/uat-pr1/`.
+- [ ] Phase 2 later PRs (A-01, B-03, the P2s) and phase 3 (CI suite): not started.
 
 ## Validation
 
@@ -129,9 +130,9 @@ No P0 found. Severity: P0 data loss/crash/blocked flow, P1 broken feature or wro
 | id | journey | sev | repro (short) | screenshot | suspected file |
 |---|---|---|---|---|---|
 | A-01 | J06 | P1 | 390px: Cmd+K, "New task in alpha", Enter does nothing; opening the drawer then shows a stale New-task dialog (crud dialogs live in the unmounted sidebar Sheet). Also likely "New workspace". 2/4 combos (both 390) | `j06-palette-noop-light-390.png`, `j06-stale-light-390.png` | `components/app-sidebar.tsx`, `ui/sidebar.tsx` |
-| B-01 | J39 | P1 | Archive the selected task: row leaves the list but hash and pane still show it, composer enabled (a prompt could be sent into an archived task). 4/4 | `j39-archived-light-1280.png` | `App.tsx` (task.archived selection), `app-sidebar.tsx` |
-| A-03 | J24 | P1 | Click the "+5 -0" diff chip above the composer: nothing opens. 4/4 | `j24-chip-noop-light-1280.png` | `composer.tsx` onOpenDiff -> `App.tsx` revealInDiff |
-| A-02 | J19 | P1 | One click on the header terminal button opens two tabs ("Terminal 2" with activity dot and "Terminal"). 4/4 | `j19-open-light-1280.png` | `App.tsx` focusOrOpenTerminal/openTerminalTab, `terminal-pane.tsx` |
+| B-01 (FIXED in phase-2 PR1: selection moves off an archived task; daemon already refused run.start on it, guard proven by mutation) | J39 | P1 | Archive the selected task: row leaves the list but hash and pane still show it, composer enabled (a prompt could be sent into an archived task). 4/4 | `j39-archived-light-1280.png` | `App.tsx` (task.archived selection), `app-sidebar.tsx` |
+| A-03 (FIXED in phase-2 PR1: the chip opens the Diff tab) | J24 | P1 | Click the "+5 -0" diff chip above the composer: nothing opens. 4/4 | `j24-chip-noop-light-1280.png` | `composer.tsx` onOpenDiff -> `App.tsx` revealInDiff |
+| A-02 (FIXED in phase-2 PR1: one Terminal tab) | J19 | P1 | One click on the header terminal button opens two tabs ("Terminal 2" with activity dot and "Terminal"). 4/4 | `j19-open-light-1280.png` | `App.tsx` focusOrOpenTerminal/openTerminalTab, `terminal-pane.tsx` |
 | B-03 | J51 | P2 | WS refused at load: sidebar "Loading workspaces..." forever, only a small "Connecting..." chip; no unreachable copy or retry (mid-session reconnect J45 is fine). 4/4 | `j51u-dark-1280.png` | `app-sidebar.tsx`, connection status |
 | A-07 | J17/J12 | P2 | A tree whose tasks are all done is flagged "stalled" and listed in the Inbox ~20 min after the runs ended. 2/4 (time dependent) | `j17-err-light-1280.png`, `j12-list-light-1280.png` | stalled-tree detection in `task.tree` / `task-lineage.tsx` |
 | A-06 | J17 | P2 | 390px: a Lead's child pills are hidden (strip shows only "2 done"), children reachable only via the sidebar. 2/4 | `j17-narrow-strip-light-390.png` | `task-lineage.tsx` |
@@ -168,3 +169,10 @@ Counts: 0 P0, 4 P1, 11 P2, 12 P3 (27 entries; B-02 and S-01/S-02 included in P2)
 - J40: there is no task-rename UI to test.
 - Contrast numbers (B-05) come from a script; the first scanner version was wrong and discarded.
 - Not every one of the 216 images was opened full size; the rest were judged on contact sheets and assertions. J50/J51 were re-run on 2 of 4 combos after script fixes.
+
+## Phase 2 PR1 validation (A-02, A-03, B-01)
+
+- Tests (`web/packages/ui/src/App.test.tsx`): `clicking the diff chip opens the Diff tab when it is not open (UAT A-03)`, `the header terminal button opens exactly one Terminal tab and a second click opens no more (UAT A-02)`, `archiving the selected task moves the selection off it (UAT B-01)`, `archiving the only task lands on the landing, not on the archived task (UAT B-01)`. App, App.responsive, tab-registry and app-header suites: 131 pass.
+- Mutations, each on committed work, test fails: revert `revealInDiff` to a bare `activate` (A-03 test fails); back to `nextTerminalTab` for the first terminal (A-02 test fails); early `return` in the `task.archived` handler (both B-01 tests fail); `if false && task.ArchivedAt != nil` in `prepareStart` (`TestRunStart_RefusesArchivedTask` fails: the daemon guard for a send into an archived task already existed and is covered).
+- A-02 root cause: the header button opened the index-2 tab ("Terminal 2"), and the route restore for the resulting `#/.../terminal` hash opened the base tab as well, so two tabs appeared; the first terminal is now the base `Terminal` tab.
+- UAT re-run on the real harness, light and dark at 1280 and 390: J19, J24, J39 failed 12/12 before and pass 12/12 after. Frames and sheets: `/tmp/steward4/zcode-audit/after/uat-pr1/`. Not seen: J39 at 390 shows the drawer open in its last frame, so the post-archive pane there rests on the journey's hash assertion.

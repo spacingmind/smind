@@ -130,6 +130,7 @@ var knownTopics = map[string]bool{
 	TopicTaskGit:              true,
 	TopicTaskStalled:          true,
 	TopicValidationUpdated:    true,
+	TopicStewardUpdated:       true,
 	TopicInboxChanged:         true,
 	TopicForgeStatus:          true,
 	TopicProviderUpdated:      true,
