@@ -140,6 +140,10 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       void queryClient.invalidateQueries({ queryKey: queryKeys.inboxAll() });
       return;
     }
+    case "fleet.hosts.changed": {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.fleetHosts() });
+      return;
+    }
     case "profile.created":
     case "profile.updated": {
       const profile = (payload as { profile?: AgentProfile } | null)?.profile;

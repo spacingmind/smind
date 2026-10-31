@@ -63,6 +63,9 @@ const STALL_TOPICS = ["task.stalled"];
 /** `inbox.changed` {} (ADR-0045): the inbox's visible set or state changed; the bridge re-reads the count and the list. */
 const INBOX_TOPICS = ["inbox.changed"];
 
+/** `fleet.hosts.changed` {} (ADR-0048): a host was added, approved, revoked or removed, or a link or grant changed; the bridge re-reads the host list. */
+const FLEET_TOPICS = ["fleet.hosts.changed"];
+
 const TOPICS = [
   "task.status",
   "run.status",
@@ -79,6 +82,7 @@ const TOPICS = [
   ...AUTOMATION_TOPICS,
   ...STALL_TOPICS,
   ...INBOX_TOPICS,
+  ...FLEET_TOPICS,
 ];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */
