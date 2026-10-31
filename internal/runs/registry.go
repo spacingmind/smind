@@ -971,6 +971,13 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 	// did not reach disk.
 	if r.originHost != "" {
 		if err := reg.st.SetRunOrigin(r.id, r.originHost); err != nil {
+			// The row CreateRun already wrote must not stay "running"
+			// forever (and count as a live agent in the per-origin
+			// budget, ADR-0048) just because its origin did not persist.
+			now := time.Now()
+			if _, uerr := reg.st.UpdateRunStatus(r.id, string(StatusError), &now, "", "persist run origin: "+err.Error()); uerr != nil {
+				log.Printf("runs: mark run %s errored after origin persist failure: %v", r.id, uerr)
+			}
 			reg.mu.Lock()
 			delete(reg.runs, r.id)
 			reg.mu.Unlock()
