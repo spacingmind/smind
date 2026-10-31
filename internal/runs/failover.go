@@ -124,7 +124,11 @@ func (reg *Registry) enqueueTransientRetry(r *run, fail failure.Result) {
 		delay = min(max(fail.RetryAfter, transientRetryAfterMin), transientRetryAfterMax)
 	}
 	notBefore := time.Now().Add(delay)
-	reg.enqueueRetry(r, transientRetryPreface, &notBefore, true)
+	if reg.enqueueRetry(r, transientRetryPreface, &notBefore, true) {
+		r.mu.Lock()
+		r.retryAttempt, r.retryNextAt = attempt+1, &notBefore
+		r.mu.Unlock()
+	}
 }
 
 // enqueueRateLimitRetry puts one held item on the failed run's own chat,
@@ -135,14 +139,14 @@ func (reg *Registry) enqueueRateLimitRetry(r *run, fail failure.Result) {
 		return
 	}
 	notBefore := fail.ResetAt.Add(reg.retryGrace)
-	reg.enqueueRetry(r, retryPreface, &notBefore, false)
+	_ = reg.enqueueRetry(r, retryPreface, &notBefore, false)
 }
 
 // enqueueRetry goes straight to the store: that deliberately bypasses the
 // non-human auto-approve check of StartWhenBusy, because it re-sends the SAME
 // run's own settings and never escalates them. Attachments are not
 // re-attached (out of scope).
-func (reg *Registry) enqueueRetry(r *run, preface string, notBefore *time.Time, transient bool) {
+func (reg *Registry) enqueueRetry(r *run, preface string, notBefore *time.Time, transient bool) bool {
 	perm := r.getPerm()
 	cfg, err := json.Marshal(chatQueueRunConfig{
 		Provider: string(r.provider), PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept,
@@ -150,20 +154,21 @@ func (reg *Registry) enqueueRetry(r *run, preface string, notBefore *time.Time, 
 		ProfileID: r.profileID, FailoverOf: r.id, RetryTransient: transient,
 	})
 	if err != nil {
-		return
+		return false
 	}
 	prompt := preface + stripProvenanceHeader(r.prompt)
 	_, err = reg.st.EnqueueChatPromptAt(r.chatID, prompt, string(cfg), store.ChatQueueSourceOrchestrator, 0, 0, 0, "", notBefore)
 	switch {
 	case errors.Is(err, store.ErrQueueFull):
 		log.Printf("runs: retry for run %s: chat %d queue full; giving up", r.id, r.chatID)
-		return
+		return false
 	case err != nil:
 		log.Printf("runs: retry for run %s: %v", r.id, err)
-		return
+		return false
 	}
 	reg.notifyQueueUpdated(r.chatID)
 	reg.armQueueWake()
+	return true
 }
 
 // stripProvenanceHeader removes a leading "[message from task #N, chat #M]"

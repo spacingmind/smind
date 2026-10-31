@@ -45,7 +45,7 @@ func TestFinish_ClaudeSessionLimitRefusalIsARateLimitedError(t *testing.T) {
 	e := claudeScenarioEnv(t, "session-limit")
 	id := startClaude(t, e)
 	st := waitForStatus(t, e.reg, id, StatusError, 10*time.Second)
-	if st.FailureKind != "rate_limited" || st.FailureWindow != "5h" || st.FailureResetAt == nil {
+	if st.FailureKind != "plan_window_exhausted" || st.FailureWindow != "5h" || st.FailureResetAt == nil {
 		t.Fatalf("failure = %q/%q/%v, want rate_limited/5h/non-nil", st.FailureKind, st.FailureWindow, st.FailureResetAt)
 	}
 	if st.Err != "You've hit your session limit · resets 1pm (Asia/Saigon)" {

@@ -45,7 +45,7 @@ func TestFinish_GLM429ClassifiedAsRateLimited(t *testing.T) {
 	if got.Status != StatusError || got.Disposition != DispositionNeedsContinue {
 		t.Fatalf("status = %q disposition = %q, want error and needs-continue", got.Status, got.Disposition)
 	}
-	if got.FailureKind != "rate_limited" || got.FailureWindow != "5h" {
+	if got.FailureKind != "plan_window_exhausted" || got.FailureWindow != "5h" {
 		t.Fatalf("failure = %q/%q, want rate_limited/5h", got.FailureKind, got.FailureWindow)
 	}
 	if want := time.Date(2026, 10, 22, 17, 35, 18, 0, time.FixedZone("CST", 8*3600)); got.FailureResetAt == nil || !got.FailureResetAt.Equal(want) {
@@ -53,7 +53,7 @@ func TestFinish_GLM429ClassifiedAsRateLimited(t *testing.T) {
 	}
 	// The wall-clock case (reset at HH:MM:SS) fills the reset instant.
 	reg, store2, st := finishDirect(t, "glm-clock", nil, errors.New(glmClockText))
-	if st.Status != StatusError || st.FailureKind != "rate_limited" || st.FailureWindow != "5h" || st.FailureResetAt == nil {
+	if st.Status != StatusError || st.FailureKind != "plan_window_exhausted" || st.FailureWindow != "5h" || st.FailureResetAt == nil {
 		t.Fatalf("clock case = %+v", st)
 	}
 	if !st.FailureResetInferred {
@@ -99,7 +99,7 @@ func TestFinish_ClaudeRejectedSignalClassified(t *testing.T) {
 	t.Parallel()
 	x := time.Unix(1790000000, 0)
 	reg, _, st := finishDirect(t, "sig", &taskrunner.RateLimitSignal{Status: "rejected", ResetsAt: x, Type: "five_hour"}, errors.New("claude code prompt: exit status 1"))
-	if st.FailureKind != "rate_limited" || st.FailureWindow != "5h" || st.FailureResetAt == nil || !st.FailureResetAt.Equal(x) {
+	if st.FailureKind != "plan_window_exhausted" || st.FailureWindow != "5h" || st.FailureResetAt == nil || !st.FailureResetAt.Equal(x) {
 		t.Fatalf("status = %+v", st)
 	}
 	hist, _, _ := reg.History("sig")
@@ -133,7 +133,7 @@ func TestFinish_FailurePersistedAndRehydrated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.FailureKind != "rate_limited" || row.FailureWindow != "5h" || row.FailureResetAt == nil || !row.FailureResetAt.Equal(*live.FailureResetAt) {
+	if row.FailureKind != "plan_window_exhausted" || row.FailureWindow != "5h" || row.FailureResetAt == nil || !row.FailureResetAt.Equal(*live.FailureResetAt) {
 		t.Fatalf("row = %q %q %v, live = %+v", row.FailureKind, row.FailureWindow, row.FailureResetAt, live)
 	}
 	reg2, err := New(st)
@@ -147,7 +147,7 @@ func TestFinish_FailurePersistedAndRehydrated(t *testing.T) {
 			continue
 		}
 		found = true
-		if s.FailureKind != "rate_limited" || s.FailureWindow != "5h" || s.FailureResetAt == nil || !s.FailureResetAt.Equal(*live.FailureResetAt) {
+		if s.FailureKind != "plan_window_exhausted" || s.FailureWindow != "5h" || s.FailureResetAt == nil || !s.FailureResetAt.Equal(*live.FailureResetAt) {
 			t.Fatalf("rehydrated = %+v", s)
 		}
 	}

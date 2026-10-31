@@ -26,7 +26,7 @@ func TestTaskRunFacts_FailureFromLatestFinishedRun(t *testing.T) {
 	waitForStatus(t, reg, id, StatusError, 10*time.Second)
 
 	f := reg.TaskRunFacts()[limited.ID]
-	if f.State != tasktree.StateError || f.FailureKind != "rate_limited" || f.FailureWindow != "5h" || f.FailureResetAt == nil {
+	if f.State != tasktree.StateError || f.FailureKind != "plan_window_exhausted" || f.FailureWindow != "5h" || f.FailureResetAt == nil {
 		t.Fatalf("limited fact = %+v, want error / rate_limited / 5h / reset set", f)
 	}
 	if !f.FailureResetInferred {

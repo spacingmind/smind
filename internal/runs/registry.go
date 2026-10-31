@@ -522,6 +522,10 @@ type run struct {
 	// by mu.
 	rateSignal     *failure.Signal
 	failureKind    string
+	// retryAttempt/retryNextAt: the transient_429 retry queued for this
+	// failure (1-based attempt, its not-before time); in memory only.
+	retryAttempt int
+	retryNextAt  *time.Time
 	failureWindow  string
 	failureResetAt *time.Time
 	// failureResetInferred: failureResetAt was read in an assumed zone.
@@ -675,6 +679,7 @@ func (r *run) statusLocked() RunStatus {
 	rs.FailureResetAt = cloneTimePtr(r.failureResetAt)
 	rs.FailureResetInferred = r.failureResetInferred
 	rs.FailureResetZone = r.failureResetZone
+	rs.FailureAction = r.failureAction()
 	rs.BaseSHA = cloneStrPtr(r.baseSHA)
 	rs.HeadSHA = cloneStrPtr(r.headSHA)
 	rs.Dirty = cloneBoolPtr(r.dirty)
