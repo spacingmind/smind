@@ -38,6 +38,7 @@ agent is doing and what it costs.
 - [Plugins](plugins.md): install MCP servers, skills, profiles, commands, themes and plugin processes, and see what they do first.
 - [Writing a plugin](plugins-authoring.md): the manifest reference, capabilities, hooks, RPCs and a worked example.
 - [Automations](automations.md): start a task on a schedule or when a workflow fails.
+- [Connected hosts](hosts.md): pair two daemons and choose which direction works.
 
 ## How the docs are organised
 
