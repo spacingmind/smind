@@ -2,13 +2,19 @@ package permpolicy
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
 // maxDecisionPaths caps Decision.Paths: the audit keeps a handful of
 // resolved paths, not every word of a long command.
 const maxDecisionPaths = 8
+
+// winWrapperInterpreters are the shells and script hosts reachable from a
+// Windows request that take a script as a word; no allow rule can judge it.
+var winWrapperInterpreters = map[string]bool{
+	"powershell": true, "pwsh": true, "cmd": true, "wscript": true, "cscript": true,
+	"mshta": true, "wsl": true, "bash": true, "sh": true,
+}
 
 // unit is one thing a rule is matched against: a Bash segment, or the whole
 // request of a non-Bash tool (seg == nil). cwd is the resolved directory the
@@ -42,7 +48,7 @@ func Decide(req Request, pol *Policy) Decision {
 	var units []unit
 	var segs []Segment
 	if bash {
-		p := SplitCommand(req.Command)
+		p := splitCommand(req.Command, req.pl().windows)
 		d.Normalized = p.Normalized
 		segs = p.Segments
 		if h, ok := CheckFloor(req, p); ok {
@@ -53,7 +59,8 @@ func Decide(req Request, pol *Policy) Decision {
 			return d
 		}
 		for _, s := range p.Segments {
-			if fs := newFloorSeg(req, s, cwd); len(fs.argv) > 0 && isShellEval(fs.argv[0]) {
+			fs := newFloorSeg(req, s, cwd)
+			if len(fs.argv) > 0 && (isShellEval(fs.argv[0]) || (req.pl().windows && winWrapperInterpreters[fs.name()])) {
 				d.Reasons = []string{fs.argv[0] + " runs text the engine cannot see"}
 				return d
 			}
@@ -71,7 +78,7 @@ func Decide(req Request, pol *Policy) Decision {
 		}
 		u := unit{}
 		for _, p := range req.Paths {
-			r, err := ResolvePath(p, cwd)
+			r, err := req.pl().resolve(p, cwd)
 			if err != nil {
 				d.Reasons = []string{"cannot resolve path " + p}
 				return d
@@ -120,14 +127,27 @@ func bashUnits(req Request, segs []Segment, cwd string, d *Decision) ([]unit, st
 	units := make([]unit, len(segs))
 	var all []string
 	for i := range segs {
+		// The splitter does not know %VAR%: a Windows word holding one is dynamic, which no allow covers.
+		if pl := req.pl(); pl.windows && !segs[i].Dynamic {
+			for _, w := range segs[i].Argv {
+				if hasPercentVar(w) {
+					segs[i].Dynamic = true
+				}
+			}
+			for _, rd := range segs[i].Redirects {
+				if hasPercentVar(rd.Target) {
+					segs[i].Dynamic = true
+				}
+			}
+		}
 		fs := newFloorSeg(req, segs[i], cwd)
-		paths, err := SegmentPaths(segs[i], cwd)
+		paths, err := segmentPaths(req.pl(), segs[i], cwd)
 		if err != nil {
 			return nil, "cannot resolve path: " + err.Error()
 		}
 		rc := ""
 		if cwd != "" {
-			if r, err := ResolvePath(cwd, ""); err == nil {
+			if r, err := req.pl().resolve(cwd, ""); err == nil {
 				rc = r
 			}
 		}
@@ -344,6 +364,7 @@ func expandPlaceholders(s string, req Request) (string, bool) {
 // without a known worktree matches nothing, and a file tool that names no
 // path cannot be shown to stay inside.
 func withinScope(within []string, req Request, seg *Segment, segPaths []string, cwd string) bool {
+	pl := req.pl()
 	roots := make([]string, 0, len(within))
 	for _, w := range within {
 		if w == "{worktree}" {
@@ -352,16 +373,23 @@ func withinScope(within []string, req Request, seg *Segment, segPaths []string, 
 			}
 			w = req.Worktree
 		}
-		roots = append(roots, filepath.Clean(w))
+		if pl.windows {
+			n, err := pl.normalize(w)
+			if err != nil {
+				continue
+			}
+			w = n
+		}
+		roots = append(roots, pl.clean(w))
 	}
 	if seg == nil && len(segPaths) == 0 {
 		return false
 	}
-	if seg != nil && (cwd == "" || !Within(cwd, roots)) {
+	if seg != nil && (cwd == "" || !pl.within(cwd, roots)) {
 		return false
 	}
 	for _, p := range segPaths {
-		if !Within(p, roots) {
+		if !pl.within(p, roots) {
 			return false
 		}
 	}
