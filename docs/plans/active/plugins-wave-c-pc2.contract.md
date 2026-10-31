@@ -30,7 +30,7 @@ tests:
   - { name: prompt-action-inserts-not-sends, run: "cd web/packages/ui && NODE_OPTIONS=--no-experimental-webstorage bunx vitest run src/components/plugin-panel/plugin-actions.test.tsx -t 'prompt-action-inserts-not-sends'", timeoutSec: 600 }
   - { name: openUrl-confirm-shows-host, run: "cd web/packages/ui && NODE_OPTIONS=--no-experimental-webstorage bunx vitest run src/components/plugin-panel/plugin-actions.test.tsx -t 'openUrl-confirm-shows-host'", timeoutSec: 600 }
   - { name: TestPanelClosesOnDisable_TabRestorable, run: "cd web/packages/ui && NODE_OPTIONS=--no-experimental-webstorage bunx vitest run src/hooks/use-plugin-tab-reaper.test.tsx -t 'TestPanelClosesOnDisable_TabRestorable'", timeoutSec: 600 }
-  - { name: TestSidebarAndPalette_ContributionsRegister, run: "cd web/packages/ui && NODE_OPTIONS=--no-experimental-webstorage bunx vitest run src/components -t 'TestSidebarAndPalette_ContributionsRegister'", timeoutSec: 600 }
+  - { name: TestSidebarAndPalette_ContributionsRegister, run: "cd web/packages/ui && NODE_OPTIONS=--no-experimental-webstorage bunx vitest run src/App.test.tsx -t 'TestSidebarAndPalette_ContributionsRegister'", timeoutSec: 600 }
   - { name: TestPlugin_Event_InvalidatesQuery_NoPerPluginStore, run: "cd web/packages/ui && NODE_OPTIONS=--no-experimental-webstorage bunx vitest run src/lib/query/event-bridge.test.ts -t 'TestPlugin_Event_InvalidatesQuery_NoPerPluginStore'", timeoutSec: 600 }
   - { name: TestPanelsQuery_ReportsUiLevel, run: "cd web/packages/ui && NODE_OPTIONS=--no-experimental-webstorage bunx vitest run src/hooks/use-plugin-panels.test.tsx -t 'TestPanelsQuery_ReportsUiLevel'", timeoutSec: 600 }
   - { name: prototype_member_names_fall_back_to_the_generic_icon, run: "cd web/packages/ui && NODE_OPTIONS=--no-experimental-webstorage bunx vitest run src/lib/plugin-icon.test.ts -t 'prototype member names fall back to the generic icon'", timeoutSec: 600 }
@@ -44,7 +44,7 @@ mutations:
   - { id: M7, file: web/packages/ui/src/components/plugin-view/safe-svg.tsx, change: "ALLOWED_ELEMENTS gains script and ALLOWED_ATTRS gains onload", expectFail: [svg_icon_is_rebuilt_from_an_allowlist] }
   - { id: M8, file: web/packages/ui/src/components/plugin-view/plugin-view.tsx, change: "the code node renders its text through dangerouslySetInnerHTML", expectFail: [no_raw_html_sinks_in_the_plugin_renderer_directories] }
   - { id: M9, file: web/packages/ui/src/lib/query/event-bridge.ts, change: "the plugin.event case invalidates nothing", expectFail: [TestPlugin_Event_InvalidatesQuery_NoPerPluginStore] }
-  - { id: M10, file: web/packages/ui/src/hooks/use-plugin-panel-commands.ts, change: "the hook returns an empty command list", expectFail: [TestSidebarAndPalette_ContributionsRegister] }
+  - { id: M10, file: web/packages/ui/src/App.tsx, change: "ShellCommands registers an empty list for plugins:panels (pluginPanelCommands is [])", expectFail: [TestSidebarAndPalette_ContributionsRegister] }
 commands:
   - { id: C1, run: "task lint", timeoutSec: 900 }
   - { id: C2, run: "task test", timeoutSec: 1500 }
