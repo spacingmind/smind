@@ -191,3 +191,22 @@ func TestFloor_PathsToolEdit(t *testing.T) {
 		t.Errorf("CheckFloorPaths(Bash) = %+v, want no hit (Bash is judged by CheckFloor)", hit)
 	}
 }
+
+func TestFloor_LaunchdServiceDenied(t *testing.T) {
+	t.Parallel()
+	checkFloorCases(t, []floorCase{
+		{"launchctl kickstart -k gui/501/com.smind.daemon", "no-install-state"},
+		{"launchctl unload ~/Library/LaunchAgents/com.smind.plist", "no-install-state"},
+		{"launchctl bootout gui/501/com.SMIND.daemon", "no-install-state"},
+		{"systemctl --user stop smind", "no-install-state"},
+		{"service smind restart", "no-install-state"},
+		{"brew services stop smind", "no-install-state"},
+		{"nohup systemctl restart smind.service", "no-install-state"},
+		{"cat ~/Library/LaunchAgents/com.x.plist", "no-install-state"},
+		{"launchctl list", ""},
+		{"systemctl status nginx", ""},
+		{"service nginx restart", ""},
+		{"brew services list", ""},
+		{"brew install smind", ""},
+	})
+}

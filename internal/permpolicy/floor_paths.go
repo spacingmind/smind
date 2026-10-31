@@ -89,6 +89,7 @@ func installRoots(req Request) []string {
 		filepath.Join(home, ".ssh"),
 		filepath.Join(home, ".gnupg"),
 		filepath.Join(home, "Library", "Keychains"),
+		filepath.Join(home, "Library", "LaunchAgents"),
 	}
 	if req.SmindHome != "" {
 		roots = append(roots, req.SmindHome)
@@ -150,6 +151,14 @@ func (fs *floorSeg) installRules(words []wordPath) (FloorHit, bool) {
 			if w := nonFlags(fs.argv[1:]); len(w) > 0 && w[0] == "service" {
 				return floorHit("no-install-state")
 			}
+		case "launchctl", "systemctl", "service":
+			if mentionsSmind(fs.argv[1:]) {
+				return floorHit("no-install-state")
+			}
+		case "brew":
+			if containsWord(fs.argv[1:], "services") && mentionsSmind(fs.argv[1:]) {
+				return floorHit("no-install-state")
+			}
 		}
 	}
 	for _, w := range fs.seg.Argv {
@@ -163,6 +172,17 @@ func (fs *floorSeg) installRules(words []wordPath) (FloorHit, bool) {
 		}
 	}
 	return FloorHit{}, false
+}
+
+// mentionsSmind reports whether any argument names the smind service (a
+// launchd label, a unit, a plist path), case-insensitively.
+func mentionsSmind(args []string) bool {
+	for _, a := range args {
+		if strings.Contains(strings.ToLower(a), "smind") {
+			return true
+		}
+	}
+	return false
 }
 
 var procEnviron = regexp.MustCompile(`^/proc/[^/]+/environ$`)
