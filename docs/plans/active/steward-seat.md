@@ -150,6 +150,12 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 - ADR-0047 binds everything; D1–D18 are Supervisor defaults 2026-10-31, vetoable.
 - The engine package is `internal/permpolicy`, the seat package `internal/steward`; the validator's scratch-worktree/token/post-check helpers are reused if exported, else the S2 Lead
   extracts a small shared package in its own first commit (decided in S2, recorded here).
+- S2 (Lead 2026-10-31): the validator's exported helpers (`validation.Take/Snapshot/IsAncestor/IsSHA/GitHead`, `ProbeState`) are imported as they are; no shared package is
+  extracted (the exported surface already covers the scratch-worktree/post-check mechanics, and a move would churn the S1-merged validator). The wall-clock/budget watcher is a
+  small `steward.Watch` of the same shape (it writes steward rows, not validation rows).
+- S2 (Lead 2026-10-31): two additive touches outside the listed write scope are unavoidable for AC16 and reported to the Steward: `taskrunner.RunContract.DisallowedTools`
+  (honoured by the claude adapter, so the seat has no Bash/Edit/Write at the provider) and a `runs.Registry.SetSeatFloor` hook in `decider_policy.go` (the seat's permission
+  requests resolve to the seat floor even when `steward.policy.enabled` is off). The floor logic itself lives in `internal/steward/floor.go`.
 - The Claude `permissions.ask`/`deny` provider rules (#596, #632) stay; the engine does not write provider settings.
 - Live LLM calls only with `claude-haiku-5-5` in an isolated `SMIND_HOME` and port; tests that choose a home use `HOME=$(mktemp -d)`.
 
@@ -157,7 +163,8 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 
 - S0 plan + ADR: this PR (docs only, Proposed).
 - S1: implemented 2026-10-31 on one branch (`internal/permpolicy`, audit store, `runs` hook, `policy.*` RPCs, `smind policy`, docs); PR and validator verdict below.
-- S2–S4: not started.
+- S2: in progress 2026-10-31 (Lead, GLM peers per the Human's GLM policy); contract `docs/plans/active/steward-seat-s2.contract.md`.
+- S3–S4: not started.
 
 ## Validation
 
