@@ -401,3 +401,16 @@ func TestFleetWriteOverWsapi(t *testing.T) {
 	}
 	wantFleetCode(t, ncl.Call(callCtx(), wire.MethodTaskCreate, np, nil), wire.CodeNotGranted)
 }
+
+func TestFleetBackendRefusesUnsafeRefNames(t *testing.T) {
+	for _, ref := range []string{"a:b", "a..b", "-x", "x.lock", "a b", "a^", "refs/heads/ok/..", "a/", "", "a\x7fb", "a~1", "a?", "a*", "a[", `a\b`, strings.Repeat("a", 201)} {
+		if safeRefName(ref) {
+			t.Errorf("safeRefName(%q) = true, want false", ref)
+		}
+	}
+	for _, ref := range []string{"feat/x", "main", "release-1.2"} {
+		if !safeRefName(ref) {
+			t.Errorf("safeRefName(%q) = false, want true", ref)
+		}
+	}
+}

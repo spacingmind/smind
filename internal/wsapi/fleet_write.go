@@ -57,8 +57,8 @@ func (b *fleetBackend) CreateTask(workspaceID int64, title, branch, baseRef stri
 	var opts []workspace.CreateTaskOption
 	if ref != "" {
 		// The wire layer validated the name already; this re-check is the
-		// last gate before the value lands in a git argv.
-		if strings.HasPrefix(ref, "-") || strings.ContainsFunc(ref, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
+		// last gate before the value lands in a git argv and a refspec.
+		if !safeRefName(ref) {
 			return serve.TaskInfo{}, serve.NewRefusal(wire.CodeInvalid, "branch is not a valid ref name")
 		}
 		if err := fetchOriginRef(ws.Path, ref); err != nil {
@@ -79,6 +79,25 @@ func (b *fleetBackend) CreateTask(workspaceID int64, title, branch, baseRef stri
 		ti.Branch = *task.Branch
 	}
 	return ti, nil
+}
+
+// safeRefName mirrors wire's ref validator. It is repeated here because the
+// ref is spliced into the refspec "+refs/heads/<ref>:refs/remotes/origin/<ref>":
+// a ':' or a ".." would change what the fetch writes, and a leading '-' would
+// read as a git option.
+func safeRefName(ref string) bool {
+	if ref == "" || len(ref) > 200 {
+		return false
+	}
+	if strings.HasPrefix(ref, "-") || strings.Contains(ref, "..") {
+		return false
+	}
+	if strings.HasSuffix(ref, "/") || strings.HasSuffix(ref, ".lock") {
+		return false
+	}
+	return !strings.ContainsFunc(ref, func(r rune) bool {
+		return r <= ' ' || r == 0x7f || strings.ContainsRune("~^:?*[\\", r)
+	})
 }
 
 // fetchOriginRef runs the one fetch a remote task's branch or base ref
