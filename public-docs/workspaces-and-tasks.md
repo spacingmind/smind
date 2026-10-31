@@ -38,7 +38,10 @@ To see whether a repository is set up for agents, run `smind workspace readiness
 only, and never runs any of its scripts or touches the network. It lists what is
 there (agent instructions, a test and a lint command, a setup script, a
 `.gitignore`, CI, docs, lockfiles) and what is missing, with a one-line hint for each
-gap. Warnings are advice; they never block a task.
+gap. In a monorepo it also looks one level into package folders (`apps/*`,
+`packages/*`, `workspaces` entries) for test scripts and lockfiles. Type checking
+alone does not count as a lint or format command. Warnings are advice; they never
+block a task.
 
 To remove a workspace, use **Delete workspace** in the same menu. This only
 removes it from smind. Files on disk stay, and uncommitted work in task
@@ -223,3 +226,25 @@ are never touched.
 If the task has sub-tasks, the web dialog offers **Archive parent only** and
 lists the children. To bring an archived task back, see
 [Archive and restore](git-and-prs.md#archive-and-restore).
+
+### Scratch directories
+
+Every agent run gets a private scratch directory,
+`$SMIND_HOME/scratch/<task id>/`, and smind points `TMPDIR` (and `TMP` and
+`TEMP` on Windows) at it. Anything the agent creates with `mktemp -d`, such as
+a temporary `HOME` for a hermetic test run, then lands there and belongs to
+that task. If you pin `TMPDIR` in a provider's env, your value wins.
+
+Archiving or deleting a task removes its scratch directory. smind never
+follows a symlink out of it, and a task with a running run is left alone. At
+startup, and every ten minutes after, smind also removes scratch directories
+of tasks that are archived, deleted or unknown.
+
+```sh
+smind scratch usage     # total size, and how much belongs to closed tasks
+smind scratch clean     # remove the scratch of archived tasks now
+```
+
+Settings -> General shows the same numbers with a **Clean archived scratch**
+button. See `agents.sharedCaches` in [Configuration](configuration.md) for the
+shared build caches.

@@ -84,6 +84,8 @@ Usage:
   smind usage [--since <RFC3339>] [--until <RFC3339>]     token usage per account, model, or day
       [--by account|model|day]
 
+  smind scratch usage|clean [--json]                      scratch disk usage (task temp dirs), or delete closed tasks' scratch
+
   smind plugin install <source>                           install a plugin DISABLED and show what it would run
                                                            (a directory, git+<url>@<40-hex sha>, or <archive>#sha256=<hash>)
   smind plugin link <dir>                                 use a directory in place (development; never copied or deleted)

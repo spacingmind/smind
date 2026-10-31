@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { SITE_URL, SITE_NAME, pageTitle, pageUrl, readPages } from '../lib/pages.mjs'
+import { OG_IMAGE_HEIGHT, OG_IMAGE_URL, OG_IMAGE_WIDTH, SITE_URL, SITE_NAME, pageTitle, pageUrl, readPages } from '../lib/pages.mjs'
 
 const dist = path.resolve(process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.vitepress', 'dist'))
 const problems = []
@@ -16,6 +16,14 @@ for (const p of readPages()) {
   need(html.includes(`<title>${pageTitle(p)}</title>`), `${w}: <title>`)
   need(html.includes(`rel="canonical" href="${pageUrl(w)}"`), `${w}: canonical`)
   need(html.includes('name="description"'), `${w}: meta description`)
+  need(html.includes(`property="og:image" content="${OG_IMAGE_URL}"`), `${w}: og:image`)
+  need(html.includes(`name="twitter:image" content="${OG_IMAGE_URL}"`), `${w}: twitter:image`)
+  need(
+    html.includes(`property="og:image:width" content="${OG_IMAGE_WIDTH}"`) && html.includes(`property="og:image:height" content="${OG_IMAGE_HEIGHT}"`),
+    `${w}: og:image dimensions`,
+  )
+  need(html.includes('name="twitter:card" content="summary_large_image"'), `${w}: twitter:card summary_large_image`)
+  need(html.includes(`"image":"${OG_IMAGE_URL}"`), `${w}: JSON-LD image`)
   need(html.includes('property="og:title"') && html.includes('name="twitter:card"'), `${w}: og/twitter`)
   need(html.includes('class="page-summary"'), `${w}: summary paragraph`)
   need(html.includes('"@type":"TechArticle"') && html.includes('"@type":"BreadcrumbList"'), `${w}: JSON-LD`)
@@ -25,6 +33,7 @@ for (const p of readPages()) {
   need(fs.existsSync(path.join(dist, `${w}.md`)), `${w}: raw .md copy`)
 }
 for (const f of ['llms.txt', 'llms-full.txt', 'robots.txt', 'sitemap.xml', 'CNAME']) need(fs.existsSync(path.join(dist, f)), `missing ${f}`)
+need(fs.existsSync(path.join(dist, 'og-card.png')), 'missing og-card.png')
 need(fs.readFileSync(path.join(dist, 'CNAME'), 'utf8').trim() === 'docs.spacingmind.com', 'CNAME content')
 need(fs.readFileSync(path.join(dist, 'sitemap.xml'), 'utf8').includes(`${SITE_URL}/getting-started`), 'sitemap lists pages')
 if (problems.length) {
