@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"slices"
 	"strconv"
 	"sync"
@@ -71,6 +72,13 @@ func (s *Server) Handle(ctx context.Context, principal, method string, raw json.
 	row.Summary = Summary(raw, s.opts.Redact)
 	if _, aerr := s.opts.Audit.AppendFleetAudit(row); aerr != nil {
 		return nil, aerr
+	}
+	if err != nil && rf == nil {
+		// A backend, ledger or store error can carry the callee's local
+		// paths or remote URLs; the peer gets a fixed refusal and the
+		// detail stays in this host's own log.
+		log.Printf("fleet: %s from %s failed: %v", method, principal, err)
+		return nil, refuse(wire.CodeInternal, "the host could not complete the request")
 	}
 	if err != nil {
 		return nil, err

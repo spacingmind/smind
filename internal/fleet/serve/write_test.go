@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -548,4 +550,52 @@ func TestFleetWriteDisabledWithoutBackend(t *testing.T) {
 			t.Fatalf("%s: rows %+v", name, rows)
 		}
 	}
+}
+
+// failingCreateBackend makes CreateTask fail like a git worktree add that
+// names the callee's local path.
+type failingCreateBackend struct {
+	*fakeBackend
+	err error
+}
+
+func (b failingCreateBackend) CreateTask(int64, string, string, string) (TaskInfo, error) {
+	return TaskInfo{}, b.err
+}
+
+func TestFleetBackendErrorNeverLeaksPaths(t *testing.T) {
+	logs := &strings.Builder{}
+	prev := log.Writer()
+	log.SetOutput(logs)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	st := openStore(t)
+	clk := newClock()
+	ws := fleetWorkspace(t, st)
+	au := &memAudit{}
+	build := func(err error) *Server {
+		return New(Options{
+			HostID: "A", Authorizer: grantAuthorizer{g: writeGrant(ws, 2)}, Audit: au, Reader: &fakeReader{},
+			Now: clk.now, Backend: failingCreateBackend{&fakeBackend{st: st}, err}, Ledger: st, Tasks: storeTasks{st},
+			PollInterval: time.Millisecond,
+		})
+	}
+
+	s := build(errors.New("git worktree add /Users/secret/home/worktrees/1/x: exit status 128"))
+	_, err := callWrite(t, s, clk, "B", wire.MethodTaskCreate, createParams("k1", ws))
+	wantRefusal(t, err, wire.CodeInternal, "")
+	if strings.Contains(err.Error(), "/Users/secret") {
+		t.Fatalf("peer-facing error leaks a path: %v", err)
+	}
+	row := wantRow(t, au, 0, "error", "", wire.MethodTaskCreate, "")
+	if row.Trace == "" {
+		t.Fatal("audit row has no trace")
+	}
+	if !strings.Contains(logs.String(), "/Users/secret") {
+		t.Fatalf("callee log lacks the detail: %q", logs.String())
+	}
+
+	s = build(refuse(wire.CodeBranchNotFound, "branch not found on origin"))
+	_, err = callWrite(t, s, clk, "B", wire.MethodTaskCreate, createParams("k2", ws))
+	wantRefusal(t, err, wire.CodeBranchNotFound, "branch not found on origin")
 }

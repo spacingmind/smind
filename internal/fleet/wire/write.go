@@ -29,6 +29,7 @@ const (
 	CodeProviderNotConfigured = "provider_not_configured"
 	CodeBranchNotFound        = "branch_not_found"
 	CodeNotOwner              = "not_owner"
+	CodeInternal              = "internal_error"
 )
 
 // The `which` of a budget_exceeded refusal: which limit the origin host hit.
