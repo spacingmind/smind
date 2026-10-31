@@ -65,7 +65,7 @@ func TestNewFleetOffTouchesNothing(t *testing.T) {
 	home := t.TempDir()
 	cfg := config.Default() // fleet.enabled is false
 	srv, db := fleetTestServer(t, cfg)
-	stop := newFleet(srv, cfg, home, "test", db)
+	stop := newFleet(srv, cfg, home, "test", db, nil)
 	stop()
 	entries, err := os.ReadDir(home)
 	if err != nil {
@@ -88,7 +88,7 @@ func TestNewFleetOnRegistersMethods(t *testing.T) {
 	cfg := config.Default()
 	cfg.Fleet.Enabled = true
 	srv, db := fleetTestServer(t, cfg)
-	stop := newFleet(srv, cfg, home, "test", db)
+	stop := newFleet(srv, cfg, home, "test", db, nil)
 	t.Cleanup(stop)
 	fi, err := os.Stat(filepath.Join(home, "fleet", "host-key"))
 	if err != nil {

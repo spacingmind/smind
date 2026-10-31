@@ -14,6 +14,7 @@ import (
 	"github.com/spacingmind/smind/internal/fleet/identity"
 	"github.com/spacingmind/smind/internal/fleet/pairing"
 	"github.com/spacingmind/smind/internal/fleet/registry"
+	relaypairing "github.com/spacingmind/smind/internal/relay/pairing"
 	"github.com/spacingmind/smind/internal/wsapi"
 )
 
@@ -34,6 +35,15 @@ type ServiceOptions struct {
 	// Dial opens the pairing connection; the default is DialDirect with the
 	// password the human gave.
 	Dial DialFunc
+	// RelayOffer is the daemon's current relay pairing offer (relay endpoint,
+	// relay host id, pinned fingerprint, host secret, daemon E2EE key); it
+	// errors when no relay is configured. Nil disables relay invites.
+	RelayOffer func() (relaypairing.Offer, error)
+	// OpenRelayWindow opens the relay hub's device pairing window so the first
+	// new device, the inviting peer, is admitted at relay level.
+	OpenRelayWindow func(d time.Duration, maxNew int) error
+	// RevokeRelayDevice revokes a relay device by id; best effort.
+	RevokeRelayDevice func(deviceID string)
 }
 
 // Service is the dial-side admin half of the fleet: it mints invites, pairs
@@ -79,18 +89,30 @@ func (s *Service) Start() {
 // Invite mints an invite deep link and opens the pairing window for it. The
 // invite carries no password: the human gives that to the invitee apart.
 func (s *Service) Invite(_ context.Context, p wsapi.FleetInviteParams) (wsapi.FleetInviteResult, error) {
-	if p.Via != "" && p.Via != "direct" {
-		if p.Via == "relay" {
-			return wsapi.FleetInviteResult{}, errors.New("relay invites are not available yet")
-		}
+	if p.Via != "" && p.Via != "direct" && p.Via != "relay" {
 		return wsapi.FleetInviteResult{}, fmt.Errorf("unknown invite route %q", p.Via)
 	}
+	viaRelay := p.Via == "relay"
+	var relayPayload string
 	addrs := p.Addresses
-	if len(addrs) == 0 && s.o.DefaultAddresses != nil {
-		addrs = s.o.DefaultAddresses()
-	}
-	if len(addrs) == 0 {
-		return wsapi.FleetInviteResult{}, errors.New("pass --addr: this daemon does not know its own reachable address")
+	if viaRelay {
+		if s.o.RelayOffer == nil {
+			return wsapi.FleetInviteResult{}, errNoRelay
+		}
+		offer, err := s.o.RelayOffer()
+		if err != nil {
+			return wsapi.FleetInviteResult{}, fmt.Errorf("%w (%v)", errNoRelay, err)
+		}
+		if relayPayload, err = offer.EncodePayload(); err != nil {
+			return wsapi.FleetInviteResult{}, err
+		}
+	} else {
+		if len(addrs) == 0 && s.o.DefaultAddresses != nil {
+			addrs = s.o.DefaultAddresses()
+		}
+		if len(addrs) == 0 {
+			return wsapi.FleetInviteResult{}, errors.New("pass --addr: this daemon does not know its own reachable address")
+		}
 	}
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
@@ -101,6 +123,7 @@ func (s *Service) Invite(_ context.Context, p wsapi.FleetInviteParams) (wsapi.Fl
 		HostID:    s.o.Key.HostID(),
 		Pub:       s.o.Key.Public(),
 		Addresses: addrs,
+		Relay:     relayPayload,
 		Nonce:     nonce,
 	}
 	// Validate before opening the window, so a bad address does not leave
@@ -112,6 +135,12 @@ func (s *Service) Invite(_ context.Context, p wsapi.FleetInviteParams) (wsapi.Fl
 	dur := time.Duration(p.WindowSeconds) * time.Second
 	_, expires := s.o.Window.Open(dur, 1)
 	inv.Expires = expires
+	if viaRelay && s.o.OpenRelayWindow != nil {
+		if err := s.o.OpenRelayWindow(expires.Sub(s.o.Now()), 1); err != nil {
+			s.o.Window.Close()
+			return wsapi.FleetInviteResult{}, fmt.Errorf("open the relay pairing window: %w", err)
+		}
+	}
 	link, err := inv.Encode()
 	if err != nil {
 		s.o.Window.Close()
@@ -119,6 +148,8 @@ func (s *Service) Invite(_ context.Context, p wsapi.FleetInviteParams) (wsapi.Fl
 	}
 	return wsapi.FleetInviteResult{Invite: link, ExpiresAt: expires, HostID: inv.HostID}, nil
 }
+
+var errNoRelay = errors.New("this daemon is not connected to a relay: run `smind relay connect` first")
 
 // pairResult is the callee's answer to fleet.pair.request.
 type pairResult struct {
@@ -156,12 +187,25 @@ func (s *Service) Add(ctx context.Context, p wsapi.FleetAddParams) (wsapi.FleetA
 	} else if !errors.Is(err, registry.ErrNotFound) {
 		return wsapi.FleetAddResult{}, err
 	}
-	addr, warning, err := chooseAddress(inv, p.AllowCleartext)
-	if err != nil {
-		return wsapi.FleetAddResult{}, err
+	var (
+		tr      Transport
+		warning string
+		entry   = Entry{Password: p.Password}
+	)
+	if addr, w, cerr := chooseAddress(inv, p.AllowCleartext); cerr == nil {
+		tr = Transport{Kind: KindDirect, URL: addr, AllowCleartext: p.AllowCleartext}
+		warning = w
+	} else if inv.Relay != "" {
+		offer, derr := relaypairing.DecodePayload(inv.Relay)
+		if derr != nil {
+			return wsapi.FleetAddResult{}, derr
+		}
+		tr = Transport{Kind: KindRelay, Relay: RelayRouteFromOffer(offer)}
+		entry.RelaySecret = RelaySecretHex(offer)
+	} else {
+		return wsapi.FleetAddResult{}, cerr
 	}
-	tr := Transport{Kind: KindDirect, URL: addr, AllowCleartext: p.AllowCleartext}
-	conn, err := s.dial(ctx, tr, inv.HostID, p.Password)
+	conn, err := s.dial(ctx, tr, inv.HostID, entry)
 	if err != nil {
 		return wsapi.FleetAddResult{}, err
 	}
@@ -194,9 +238,9 @@ func (s *Service) Add(ctx context.Context, p wsapi.FleetAddParams) (wsapi.FleetA
 	if err != nil {
 		return wsapi.FleetAddResult{}, err
 	}
-	if p.Password != "" {
-		if err := s.o.Secrets.Put(h.HostID, Entry{Password: p.Password}); err != nil {
-			return wsapi.FleetAddResult{}, fmt.Errorf("store the password: %w", err)
+	if entry != (Entry{}) {
+		if err := s.o.Secrets.Put(h.HostID, entry); err != nil {
+			return wsapi.FleetAddResult{}, fmt.Errorf("store the credentials: %w", err)
 		}
 	}
 	s.o.Manager.Ensure(h.HostID)
@@ -206,7 +250,7 @@ func (s *Service) Add(ctx context.Context, p wsapi.FleetAddParams) (wsapi.FleetA
 // chooseAddress picks the first invite address a direct link may use.
 func chooseAddress(inv pairing.Invite, allowCleartext bool) (addr, warning string, err error) {
 	if len(inv.Addresses) == 0 {
-		return "", "", errors.New("relay routes are not available yet")
+		return "", "", errors.New("the invite has no direct address")
 	}
 	for _, a := range inv.Addresses {
 		w, cerr := CheckDirectRoute(a, allowCleartext)
@@ -219,11 +263,14 @@ func chooseAddress(inv pairing.Invite, allowCleartext bool) (addr, warning strin
 	return "", "", err
 }
 
-func (s *Service) dial(ctx context.Context, tr Transport, hostID, password string) (Conn, error) {
+func (s *Service) dial(ctx context.Context, tr Transport, hostID string, entry Entry) (Conn, error) {
 	if s.o.Dial != nil {
 		return s.o.Dial(ctx, tr, hostID)
 	}
-	return DialDirect(ctx, tr, password)
+	if tr.Kind == KindRelay {
+		return DialRelay(ctx, tr, s.o.Key, entry, "fleet")
+	}
+	return DialDirect(ctx, tr, entry.Password)
 }
 
 // ownAlias derives the alias this host proposes for itself from its label.
@@ -297,6 +344,9 @@ func (s *Service) LinkState(hostID string) (state, detail string) {
 func (s *Service) Forget(hostID string) {
 	s.o.Manager.Drop(hostID)
 	_ = s.o.Secrets.Delete(hostID)
+	if s.o.RevokeRelayDevice != nil {
+		s.o.RevokeRelayDevice(hostID)
+	}
 }
 
 // SetRoute stores the direct route (and password) for hostID and restarts

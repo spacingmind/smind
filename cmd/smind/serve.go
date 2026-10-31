@@ -194,7 +194,7 @@ func cmdServe(args []string) int {
 	// connection is served (SetRelayDevices is not safe against concurrent
 	// requests).
 	hub := newRelayHub(srv, cfg.Relay)
-	defer newFleet(srv, cfg, config.Dir(), version.Version, db)()
+	defer newFleet(srv, cfg, config.Dir(), version.Version, db, hub)()
 	// Same startup-only rule for the push.* methods (ADR-0040).
 	pushRT := wirePush(srv.API(), hub, db, cfg.Push)
 	httpSrv := &http.Server{

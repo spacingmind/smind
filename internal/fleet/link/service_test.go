@@ -15,6 +15,7 @@ import (
 	"github.com/spacingmind/smind/internal/fleet/identity"
 	"github.com/spacingmind/smind/internal/fleet/pairing"
 	"github.com/spacingmind/smind/internal/fleet/registry"
+	relaypairing "github.com/spacingmind/smind/internal/relay/pairing"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/wsapi"
 )
@@ -60,6 +61,7 @@ type svcEnv struct {
 
 	mu        sync.Mutex
 	pairDials int
+	lastTr    Transport
 	pc        *pairCallee
 	wrong     bool
 }
@@ -89,10 +91,11 @@ func newSvcEnv(t *testing.T) *svcEnv {
 		Key: e.self, Registry: e.reg, Secrets: e.secrets, Manager: e.mgr, Window: e.window,
 		Version:  "test",
 		Hostname: func() string { return "My Laptop.local" },
-		Dial: func(context.Context, Transport, string) (Conn, error) {
+		Dial: func(_ context.Context, tr Transport, _ string) (Conn, error) {
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			e.pairDials++
+			e.lastTr = tr
 			f := newCallee(e.other)
 			f.state = "pairing"
 			e.pc = &pairCallee{fakeCallee: f, self: e.self, wrongSAS: e.wrong}
@@ -135,9 +138,9 @@ func TestServiceInviteFragmentOnlyNoPassword(t *testing.T) {
 	if open, exp, rem := e.window.Status(); !open || rem != 1 || !exp.Equal(res.ExpiresAt) {
 		t.Fatalf("window open=%v exp=%v rem=%d", open, exp, rem)
 	}
-	_, err = e.svc.Invite(context.Background(), wsapi.FleetInviteParams{Via: "relay", Addresses: []string{"wss://x:1"}})
-	if err == nil || !strings.Contains(err.Error(), "relay invites are not available yet") {
-		t.Fatalf("relay invite error = %v", err)
+	_, err = e.svc.Invite(context.Background(), wsapi.FleetInviteParams{Via: "bogus", Addresses: []string{"wss://x:1"}})
+	if err == nil || !strings.Contains(err.Error(), "unknown invite route") {
+		t.Fatalf("bogus invite error = %v", err)
 	}
 }
 
@@ -267,5 +270,149 @@ func TestServiceSetRouteStoresTransportAndSecret(t *testing.T) {
 	}
 	if e.mgr.Status(h.HostID).Detail != "not linked" {
 		t.Fatal("a disabled link was started")
+	}
+}
+
+func testRelayOffer() relaypairing.Offer {
+	pub := make([]byte, 32)
+	pub[0] = 9
+	return relaypairing.Offer{
+		DaemonID: "daemon-1", PublicKey: pub, Relay: "https://relay.example:7400",
+		WorkspaceID: "host-1", RelayFingerprint: strings.Repeat("ab", 32),
+		Secret: []byte("relay-secret-bytes-0123456789abc"),
+	}
+}
+
+func TestServiceInviteViaRelayNeedsRelay(t *testing.T) {
+	e := newSvcEnv(t)
+	want := "this daemon is not connected to a relay: run `smind relay connect` first"
+	_, err := e.svc.Invite(context.Background(), wsapi.FleetInviteParams{Via: "relay"})
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("no RelayOffer: err = %v", err)
+	}
+	e.svc.o.RelayOffer = func() (relaypairing.Offer, error) { return relaypairing.Offer{}, errors.New("no config") }
+	_, err = e.svc.Invite(context.Background(), wsapi.FleetInviteParams{Via: "relay"})
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("failing RelayOffer: err = %v", err)
+	}
+	if open, _, _ := e.window.Status(); open {
+		t.Fatal("a refused relay invite left the pairing window open")
+	}
+}
+
+func TestServiceInviteViaRelayOpensWindowAndCarriesOffer(t *testing.T) {
+	e := newSvcEnv(t)
+	offer := testRelayOffer()
+	var calls, maxNew int
+	var dur time.Duration
+	e.svc.o.RelayOffer = func() (relaypairing.Offer, error) { return offer, nil }
+	e.svc.o.OpenRelayWindow = func(d time.Duration, n int) error { calls++; dur, maxNew = d, n; return nil }
+	res, err := e.svc.Invite(context.Background(), wsapi.FleetInviteParams{Via: "relay", WindowSeconds: 120})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || maxNew != 1 || dur <= 0 || dur > 2*time.Minute {
+		t.Fatalf("OpenRelayWindow calls=%d maxNew=%d dur=%v", calls, maxNew, dur)
+	}
+	inv, err := pairing.Decode(res.Invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Addresses) != 0 || inv.Relay == "" {
+		t.Fatalf("invite addresses=%v relay=%q", inv.Addresses, inv.Relay)
+	}
+	got, err := relaypairing.DecodePayload(inv.Relay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Relay != offer.Relay || got.WorkspaceID != offer.WorkspaceID || got.DaemonID != offer.DaemonID ||
+		got.RelayFingerprint != offer.RelayFingerprint || string(got.Secret) != string(offer.Secret) {
+		t.Fatalf("offer did not round-trip: %+v", got)
+	}
+	if open, _, _ := e.window.Status(); !open {
+		t.Fatal("the fleet pairing window is not open")
+	}
+	raw, _ := json.Marshal(inv)
+	if strings.Contains(strings.ToLower(string(raw)), "password") {
+		t.Fatalf("invite carries a password: %s", raw)
+	}
+}
+
+func TestServiceAddPrefersDirectThenRelay(t *testing.T) {
+	e := newSvcEnv(t)
+	offer := testRelayOffer()
+	payload, err := offer.EncodePayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(addrs ...string) string {
+		inv := pairing.Invite{
+			V: pairing.InviteVersion, HostID: e.other.HostID(), Pub: e.other.Public(),
+			Addresses: addrs, Relay: payload, Expires: time.Now().Add(time.Minute), Nonce: make([]byte, 16),
+		}
+		s, err := inv.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	// A cleartext address off the overlay is unusable: relay wins.
+	res, err := e.svc.Add(context.Background(), wsapi.FleetAddParams{Invite: mk("ws://203.0.113.9:7777"), Alias: "relayed", Password: "pw-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	tr := e.lastTr
+	e.mu.Unlock()
+	if tr.Kind != KindRelay || tr.Relay == nil || tr.Relay.RelayHostID != "host-1" {
+		t.Fatalf("dialled %+v, want the relay route", tr)
+	}
+	out, _, err := e.reg.Links(res.HostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := ParseTransport(out.TransportJSON)
+	if err != nil || stored.Kind != KindRelay {
+		t.Fatalf("stored transport %q (%v)", out.TransportJSON, err)
+	}
+	if strings.Contains(out.TransportJSON, "pw-secret") || strings.Contains(out.TransportJSON, RelaySecretHex(offer)) {
+		t.Fatalf("registry transport holds a credential: %s", out.TransportJSON)
+	}
+	ent, ok, err := e.secrets.Get(res.HostID)
+	if err != nil || !ok || ent.RelaySecret != RelaySecretHex(offer) || ent.Password != "pw-secret" {
+		t.Fatalf("secrets entry ok=%v err=%v", ok, err)
+	}
+}
+
+func TestServiceAddUsesDirectWhenUsable(t *testing.T) {
+	e := newSvcEnv(t)
+	payload, _ := testRelayOffer().EncodePayload()
+	inv := pairing.Invite{
+		V: pairing.InviteVersion, HostID: e.other.HostID(), Pub: e.other.Public(),
+		Addresses: []string{"wss://box.example:7777"}, Relay: payload,
+		Expires: time.Now().Add(time.Minute), Nonce: make([]byte, 16),
+	}
+	s, err := inv.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Add(context.Background(), wsapi.FleetAddParams{Invite: s}); err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	kind := e.lastTr.Kind
+	e.mu.Unlock()
+	if kind != KindDirect {
+		t.Fatalf("dialled %q, want direct", kind)
+	}
+}
+
+func TestServiceForgetRevokesRelayDevice(t *testing.T) {
+	e := newSvcEnv(t)
+	var revoked string
+	e.svc.o.RevokeRelayDevice = func(id string) { revoked = id }
+	e.svc.Forget("host-x")
+	if revoked != "host-x" {
+		t.Fatalf("revoked %q", revoked)
 	}
 }
