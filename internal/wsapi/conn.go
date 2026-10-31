@@ -109,6 +109,13 @@ type conn struct {
 	ident     runIdentity
 	identMu   sync.Mutex
 
+	// fleetNonceC is the pending single-use fleet.challenge nonce and host
+	// the fleet host principal a verified fleet.hello established (ADR-0048
+	// F1b); onClose, set with host, deregisters it. All guarded by identMu.
+	fleetNonceC []byte
+	host        *hostPrincipal
+	onClose     func()
+
 	// runs answers the per-request "is my run still running" check for a
 	// run-scoped connection; nil disables it.
 	runs *runs.Registry
@@ -159,6 +166,14 @@ func newConn(tr Transport, handlers map[string]handlerFunc) *conn {
 func (c *conn) serve(ctx context.Context) {
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer func() {
+		c.identMu.Lock()
+		onClose := c.onClose
+		c.identMu.Unlock()
+		if onClose != nil {
+			onClose()
+		}
+	}()
 	if c.focus != nil {
 		defer c.focus.drop(c)
 	}
