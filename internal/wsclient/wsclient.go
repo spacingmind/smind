@@ -66,6 +66,12 @@ type RPCError struct {
 
 func (e *RPCError) Error() string { return e.Message }
 
+// RPCCode returns the server's machine-readable error code ("" when none).
+func (e *RPCError) RPCCode() string { return e.Code }
+
+// RPCMessage returns the server's error message.
+func (e *RPCError) RPCMessage() string { return e.Message }
+
 // EventFunc is invoked once per server-pushed event a streaming call
 // receives, in arrival order, before its terminal result/error. It must not
 // block for long: it runs on the connection's single read loop, so a slow

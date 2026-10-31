@@ -33,6 +33,7 @@ func registerMCPTools(srv *mcp.Server, client *wsclient.Client) {
 	registerMCPReviewTools(srv, client)
 	registerMCPAccountUsageTool(srv, client)
 	registerMCPValidationTools(srv, client)
+	registerMCPHostTools(srv, client)
 }
 
 // callWS is the one wsapi invocation every tool handler funnels through:
@@ -107,18 +108,27 @@ func mcpTaskNew(client *wsclient.Client) mcp.ToolHandlerFor[taskNewInput, taskNe
 type taskListInput struct {
 	WorkspaceID  int64  `json:"workspaceId" jsonschema:"id of the workspace whose tasks to list"`
 	ParentTaskID *int64 `json:"parentTaskId,omitempty" jsonschema:"optional: list only the direct children of this task id, instead of every task in the workspace"`
+	Host         string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	Cursor       int64  `json:"cursor,omitempty" jsonschema:"only with host: continue a peer listing from this cursor"`
+	Limit        int    `json:"limit,omitempty" jsonschema:"only with host: maximum rows from the peer"`
 }
 
 // taskListOutput is task_list's structured output: the workspace's tasks
 // under "tasks" (an object, not a bare array -- see the note above
 // taskNewOutput), empty rather than null when there are none.
 type taskListOutput struct {
-	Tasks []map[string]any `json:"tasks"`
+	Tasks      []map[string]any `json:"tasks"`
+	NextCursor int64            `json:"nextCursor,omitempty"`
+	Host       string           `json:"host,omitempty"`
 }
 
 // mcpTaskList wraps task.list: {workspaceId} -> the workspace's tasks.
 func mcpTaskList(client *wsclient.Client) mcp.ToolHandlerFor[taskListInput, taskListOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskListInput) (*mcp.CallToolResult, taskListOutput, error) {
+		if in.Host != "" {
+			out, err := remoteTaskList(ctx, client, in)
+			return nil, out, err
+		}
 		params := map[string]any{"workspaceId": in.WorkspaceID}
 		if in.ParentTaskID != nil {
 			params["parentTaskId"] = *in.ParentTaskID

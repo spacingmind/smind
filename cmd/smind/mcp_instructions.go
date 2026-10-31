@@ -63,6 +63,16 @@ If a task is busy with a running run, task_send queues the prompt on that
 chat by default -- you may keep sending and the daemon will deliver them
 in order.
 
+Host reads: list_hosts shows the connected peer hosts, and a host argument on
+workspace_list, task_list, task_get, task_status and task_logs reads that peer
+directly instead of this daemon. Results carry host and globalId (alias:id).
+Hop limit 1: a task created by a peer cannot call other hosts (hop_limit), and
+no tool here creates or sends on a peer yet. A failure starts with a typed
+code (not_granted, cycle, hop_limit, fleet_version_unsupported,
+host_unavailable, timeout, unknown_host): never retry it on another host or
+locally. status_unknown means the run could not be observed three times in a
+row and is NOT finished.
+
 Permissions are answered by humans ONLY. When task_wait/task_status/
 task_permissions report a pending permission request, surface it to the
 human (they respond via ` + "`smind task approve` / `smind task deny`" + ` or the

@@ -30,12 +30,22 @@ func registerMCPDiscoveryTools(srv *mcp.Server, client *wsclient.Client) {
 // workspace under "workspaces", empty rather than null when none.
 type workspaceListOutput struct {
 	Workspaces []map[string]any `json:"workspaces"`
+	Host       string           `json:"host,omitempty"`
+}
+
+// workspaceListInput is workspace_list's argument shape: only the optional host.
+type workspaceListInput struct {
+	Host string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
 }
 
 // mcpWorkspaceList wraps workspace.list (no params): every workspace the
 // daemon knows, id/title/path riding the store.Workspace wire shape.
-func mcpWorkspaceList(client *wsclient.Client) mcp.ToolHandlerFor[struct{}, workspaceListOutput] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, workspaceListOutput, error) {
+func mcpWorkspaceList(client *wsclient.Client) mcp.ToolHandlerFor[workspaceListInput, workspaceListOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in workspaceListInput) (*mcp.CallToolResult, workspaceListOutput, error) {
+		if in.Host != "" {
+			out, err := remoteWorkspaceList(ctx, client, in.Host)
+			return nil, out, err
+		}
 		var workspaces []map[string]any
 		if err := callWS(ctx, client, "workspace_list", "workspace.list", nil, &workspaces); err != nil {
 			return nil, workspaceListOutput{}, err
@@ -49,7 +59,8 @@ func mcpWorkspaceList(client *wsclient.Client) mcp.ToolHandlerFor[struct{}, work
 
 // taskGetInput is task_get's argument shape (wrapping task.get).
 type taskGetInput struct {
-	ID int64 `json:"id" jsonschema:"id of the task to fetch"`
+	ID   int64  `json:"id" jsonschema:"id of the task to fetch"`
+	Host string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
 }
 
 // taskGetOutput is task_get's structured output: the task under "task"
@@ -64,6 +75,10 @@ type taskGetOutput struct {
 // sees a clear tool error rather than an empty success.
 func mcpTaskGet(client *wsclient.Client) mcp.ToolHandlerFor[taskGetInput, taskGetOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskGetInput) (*mcp.CallToolResult, taskGetOutput, error) {
+		if in.Host != "" {
+			out, err := remoteTaskGet(ctx, client, in)
+			return nil, out, err
+		}
 		var task map[string]any
 		if err := callWS(ctx, client, "task_get", "task.get", map[string]any{"id": in.ID}, &task); err != nil {
 			return nil, taskGetOutput{}, err
