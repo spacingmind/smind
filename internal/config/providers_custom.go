@@ -201,8 +201,11 @@ func validateEndpoint(p *CustomProvider, runner providers.Runner, field func(str
 	if p.Endpoint == nil {
 		return nil
 	}
+	if runner == providers.RunnerACP && p.Extends == providers.IDOpenCode {
+		return validateOpenCodeEndpoint(p, field)
+	}
 	if runner != providers.RunnerCodex {
-		return fmt.Errorf("%s: only applies to an instance of %s", field("endpoint"), providers.IDCodexNative)
+		return fmt.Errorf("%s: only applies to an instance of %s or %s", field("endpoint"), providers.IDCodexNative, providers.IDOpenCode)
 	}
 	switch p.Endpoint.Kind {
 	case "openai-responses":
@@ -226,6 +229,47 @@ func validateEndpoint(p *CustomProvider, runner providers.Runner, field func(str
 	}
 	if len(p.Models) == 0 {
 		return fmt.Errorf("%s: required for a codex-native instance with an endpoint (models are not discovered for custom endpoints)", field("models"))
+	}
+	return nil
+}
+
+// validateOpenCodeEndpoint checks the endpoint of an opencode instance: an
+// OpenAI chat-completions API (the "chat-only vendor" route; ADR-0046). Like
+// the Codex endpoint it needs models (nothing is discovered for a custom
+// endpoint) and a clean URL; unlike it, it refuses plain http to a
+// non-loopback host (the key would cross the network in the clear) and the env
+// names smind sets itself.
+func validateOpenCodeEndpoint(p *CustomProvider, field func(string) string) error {
+	switch p.Endpoint.Kind {
+	case string(providers.EndpointChatCompletions):
+	case "openai-chat", "openai-chat-completions":
+		return fmt.Errorf("%s: %q is not the name; use %q", field("endpoint.kind"), p.Endpoint.Kind, providers.EndpointChatCompletions)
+	case "openai-responses":
+		return fmt.Errorf("%s: an opencode instance takes %q; a Responses API is served by an instance of %s", field("endpoint.kind"), providers.EndpointChatCompletions, providers.IDCodexNative)
+	case "":
+		return fmt.Errorf("%s: required", field("endpoint.kind"))
+	default:
+		return fmt.Errorf("%s: unknown kind %q (an opencode instance supports: %s)", field("endpoint.kind"), p.Endpoint.Kind, providers.EndpointChatCompletions)
+	}
+	p.Endpoint.BaseURL = strings.TrimSpace(p.Endpoint.BaseURL)
+	if p.Endpoint.BaseURL == "" {
+		return fmt.Errorf("%s: required", field("endpoint.baseUrl"))
+	}
+	if err := providers.ValidateOpenCodeEndpointURL(p.Endpoint.BaseURL); err != nil {
+		return fmt.Errorf("%s: %w", field("endpoint.baseUrl"), err)
+	}
+	if len(p.AdditionalModels) > 0 {
+		return fmt.Errorf("%s: not allowed with endpoint (use models)", field("additionalModels"))
+	}
+	if len(p.Models) == 0 {
+		return fmt.Errorf("%s: required for an opencode instance with an endpoint (models are not discovered for custom endpoints)", field("models"))
+	}
+	for name := range p.Env {
+		for _, managed := range providers.OpenCodeManagedEnv {
+			if strings.EqualFold(name, managed) { // env names are case-insensitive on Windows
+				return fmt.Errorf("%s: smind sets %s itself for an opencode endpoint instance; it cannot be overridden", field("env."+name), managed)
+			}
+		}
 	}
 	return nil
 }

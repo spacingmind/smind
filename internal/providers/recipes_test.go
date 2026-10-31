@@ -99,9 +99,35 @@ func TestRecipe_InferredRowsFlagged(t *testing.T) {
 			t.Errorf("%s: source inferred but verifiedAt is set", r.ID)
 		}
 	}
-	for _, id := range []string{"kimi-moonshot", "chat-completions-via-opencode"} {
+	for _, id := range []string{"kimi-moonshot"} {
 		if !inferred[id] {
 			t.Errorf("%s: expected source inferred", id)
+		}
+	}
+}
+
+// The chat-completions row is runnable (an OpenCode instance), takes a key and
+// a base URL, requires models, and still says plainly that no real vendor was
+// called.
+func TestRecipe_ChatCompletionsViaOpenCodeShape(t *testing.T) {
+	t.Parallel()
+	r, ok := RecipeByID("chat-completions-via-opencode")
+	if !ok {
+		t.Fatal("missing from the catalog")
+	}
+	if r.Harness != "acp" || r.EndpointKind != "chat-completions" || !r.ModelsRequired {
+		t.Fatalf("row = harness %q endpoint %q modelsRequired %v", r.Harness, r.EndpointKind, r.ModelsRequired)
+	}
+	key, ok := recipeEnvByName(r, OpenCodeKeyEnv)
+	if !ok || key.Kind != "secret" || key.Value != "" {
+		t.Fatalf("key env = %+v, ok = %v; want a secret with no value", key, ok)
+	}
+	if !r.IsUnverified() || len(r.Unverified) == 0 {
+		t.Errorf("no real vendor was called: the row must stay unverified with the reason listed (%+v)", r.Unverified)
+	}
+	for _, n := range r.Notes {
+		if strings.Contains(n, "not supported yet") {
+			t.Errorf("a stale note remains: %q", n)
 		}
 	}
 }
