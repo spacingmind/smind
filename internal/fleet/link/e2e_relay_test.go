@@ -64,14 +64,14 @@ func TestFleetPairRelayE2E(t *testing.T) {
 	}
 	poll(t, "A's link to B awaiting approval", func() bool {
 		v := a.hostView(t, b.key.HostID())
-		return v != nil && v.Link.State == string(StateAwaitingApproval)
+		return v != nil && v.Link == "connecting"
 	})
 
 	var approved json.RawMessage
-	b.call(t, "fleet.host.approve", map[string]any{"host": a.key.HostID(), "writeWorkspaces": []int64{1}}, &approved)
+	b.call(t, "fleet.host.approve", map[string]any{"hostId": a.key.HostID(), "sas": added.SAS, "writeWorkspaces": []int64{1}}, &approved)
 	poll(t, "A's link to B connected over the relay", func() bool {
 		v := a.hostView(t, b.key.HostID())
-		return v != nil && v.Alias == "bee" && v.State == registry.StateApproved && v.Link.State == string(StateConnected)
+		return v != nil && v.Alias == "bee" && v.State == registry.StateApproved && v.Link == "active"
 	})
 
 	// The stored route is a relay route and holds no credential.

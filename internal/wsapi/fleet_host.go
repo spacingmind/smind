@@ -3,6 +3,7 @@ package wsapi
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,8 +70,11 @@ type FleetLinks interface {
 	// PeerReverseChanged records that the peer enabled or disabled its
 	// direction to us.
 	PeerReverseChanged(hostID string, on bool)
-	// LinkState reports the live link's state and detail for a host view.
-	LinkState(hostID string) (state, detail string)
+	// LinkState reports the live outbound link's manager state ("connected",
+	// "connecting", "awaiting_approval", "refused", "peer_disabled", "down",
+	// or "none" when no link loop exists) with the refusal code and the
+	// human-safe detail, for a host view.
+	LinkState(hostID string) (state, code, detail string)
 	// SetRoute stores the direct route (and optional password) this daemon
 	// dials hostID on and restarts the link so the route takes effect.
 	SetRoute(ctx context.Context, p FleetRouteParams) error
@@ -131,26 +135,44 @@ type FleetTestResult struct {
 	Detail    string `json:"detail,omitempty"`
 }
 
-// FleetHostView is a host as the admin surface shows it. It names a host by
-// id, alias and label only -- never the public key, a password or any
-// secret -- next to its lifecycle state, both link directions, the live
-// link and, for a pending pairing, the SAS the human must still compare.
+// The link values of a host view (the F1c UI wire contract).
+const (
+	hostLinkActive       = "active"
+	hostLinkConnecting   = "connecting"
+	hostLinkDown         = "down"
+	hostLinkRefused      = "refused"
+	hostLinkPeerDisabled = "peer_disabled"
+	hostLinkDisabled     = "disabled"
+	hostLinkRevoked      = "revoked"
+)
+
+// Wire codes of the approve call's typed-SAS check.
+const (
+	codeSASMismatch    = "sas_mismatch"
+	codeSASUnavailable = "sas_unavailable"
+)
+
+// FleetHostView is a host as the admin surface shows it (the UI's HostView).
+// It names a host by id, alias and label only -- never the public key, a
+// password, an address or any secret -- next to its lifecycle state, the
+// live outbound link, the inbound direction with its grant and, for a
+// pending pairing, the SAS the human must still compare.
 type FleetHostView struct {
-	HostID   string `json:"hostId"`
-	Alias    string `json:"alias"`
-	Label    string `json:"label"`
-	State    string `json:"state"`
-	Outbound struct {
-		Enabled bool `json:"enabled"`
-	} `json:"outbound"`
-	Inbound struct {
-		Enabled bool            `json:"enabled"`
-		Grant   *registry.Grant `json:"grant,omitempty"`
+	HostID string `json:"hostId"`
+	Alias  string `json:"alias"`
+	Label  string `json:"label"`
+	State  string `json:"state"`
+	// PendingApproval is true only for a responder-side pending host whose
+	// SAS this daemon holds: the human here must approve it.
+	PendingApproval bool   `json:"pendingApproval"`
+	Link            string `json:"link"`
+	LinkCode        string `json:"linkCode,omitempty"`
+	LinkGuidance    string `json:"linkGuidance,omitempty"`
+	OutboundEnabled bool   `json:"outboundEnabled"`
+	Inbound         struct {
+		Enabled bool           `json:"enabled"`
+		Grant   registry.Grant `json:"grant"`
 	} `json:"inbound"`
-	Link struct {
-		State  string `json:"state"`
-		Detail string `json:"detail"`
-	} `json:"link"`
 	SAS       string    `json:"sas,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -179,30 +201,64 @@ type fleetLinkStateResult struct {
 	OK bool `json:"ok"`
 }
 
-type fleetHostParams struct {
-	Host string `json:"host"`
+// fleetHostRef is the host selector every admin method takes: hostId (the
+// UI) or host (the CLI); either is an alias, a host id or a host-id prefix.
+type fleetHostRef struct {
+	HostID string `json:"hostId"`
+	Host   string `json:"host"`
 }
 
+func (r fleetHostRef) ref() string {
+	if r.HostID != "" {
+		return r.HostID
+	}
+	return r.Host
+}
+
+type fleetHostParams = fleetHostRef
+
 type fleetHostApproveParams struct {
-	Host            string  `json:"host"`
-	WriteWorkspaces []int64 `json:"writeWorkspaces"`
+	fleetHostRef
+	SAS             string          `json:"sas"`
+	Grant           *registry.Grant `json:"grant"`
+	WriteWorkspaces []int64         `json:"writeWorkspaces"`
 }
 
 type fleetHostRenameParams struct {
-	Host  string `json:"host"`
+	fleetHostRef
 	Alias string `json:"alias"`
 }
 
 type fleetHostRouteParams struct {
-	Host           string `json:"host"`
+	fleetHostRef
 	Address        string `json:"address"`
 	Password       string `json:"password"`
 	AllowCleartext bool   `json:"allowCleartext"`
 }
 
 type fleetHostGrantParams struct {
-	Host  string         `json:"host"`
+	fleetHostRef
 	Grant registry.Grant `json:"grant"`
+}
+
+// fleetInviteParams is the invite ask on the wire: the window as a Go
+// duration string (the UI) or in seconds (the CLI), or neither.
+type fleetInviteParams struct {
+	Window        string   `json:"window"`
+	WindowSeconds int      `json:"windowSeconds"`
+	Via           string   `json:"via"`
+	Addresses     []string `json:"addresses"`
+}
+
+// fleetAddResult keeps the flat pairing fields (the CLI) next to the host
+// view (the UI).
+type fleetAddResult struct {
+	FleetAddResult
+	Host *FleetHostView `json:"host,omitempty"`
+}
+
+type fleetHostResult struct {
+	Host *FleetHostView `json:"host"`
 }
 
 type fleetWindowView struct {
@@ -293,6 +349,7 @@ func (a *API) SetFleet(o FleetOptions) {
 	a.hs["fleet.host.rename"] = fleetLocalOnly("fleet.host.rename", f.handleHostRename)
 	a.hs["fleet.host.grant"] = fleetLocalOnly("fleet.host.grant", f.handleHostGrant)
 	a.hs["fleet.host.rm"] = fleetLocalOnly("fleet.host.rm", f.handleHostRm)
+	a.hs["fleet.host.revoke"] = fleetLocalOnly("fleet.host.revoke", f.handleHostRevoke)
 	a.hs["fleet.host.enable_reverse"] = fleetLocalOnly("fleet.host.enable_reverse", f.handleHostEnableReverse)
 	a.hs["fleet.host.disable_reverse"] = fleetLocalOnly("fleet.host.disable_reverse", f.handleHostDisableReverse)
 	a.hs["fleet.host.test"] = fleetLocalOnly("fleet.host.test", f.handleHostTest)
@@ -543,11 +600,11 @@ func fleetHostError(method string, err error) error {
 // resolveParams decodes the {host} admin param and resolves it to a
 // registry host.
 func (f *fleetHost) resolveParams(method string, raw json.RawMessage) (registry.Host, error) {
-	var p fleetHostParams
+	var p fleetHostRef
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return registry.Host{}, &rpcCodeError{code: codeInvalid, msg: method + ": invalid params: " + err.Error(), err: err}
 	}
-	return f.resolveHost(method, p.Host)
+	return f.resolveHost(method, p.ref())
 }
 
 // resolveHost maps the `host` admin param to a registry host: an exact
@@ -586,26 +643,54 @@ func (f *fleetHost) resolveHost(method, host string) (registry.Host, error) {
 // for what deliberately is not in it.
 func (f *fleetHost) view(h registry.Host) (FleetHostView, error) {
 	v := FleetHostView{HostID: h.HostID, Alias: h.Alias, Label: h.Label, State: h.State, CreatedAt: h.CreatedAt}
+	v.Inbound.Grant = registry.DefaultForwardGrant()
+	v.Inbound.Grant.WorkspacesWrite = []int64{}
 	outbound, inbound, err := f.opts.Registry.Links(h.HostID)
 	switch {
 	case err == nil:
-		v.Outbound.Enabled = outbound.Enabled
+		v.OutboundEnabled = outbound.Enabled
 		v.Inbound.Enabled = inbound.Enabled
 		if g, err := registry.ParseGrant(inbound.GrantJSON); err == nil {
-			v.Inbound.Grant = &g
+			v.Inbound.Grant = g
 		}
 	case errors.Is(err, registry.ErrNotFound):
 		// A host without link rows reads as dark in both directions.
 	default:
 		return FleetHostView{}, fmt.Errorf("fleet.host: %w", err)
 	}
-	v.Link.State, v.Link.Detail = f.opts.Links.LinkState(h.HostID)
 	if h.State == registry.StatePending {
 		f.mu.Lock()
 		v.SAS = f.sas[h.HostID]
 		f.mu.Unlock()
+		v.PendingApproval = v.SAS != ""
 	}
+	v.Link, v.LinkCode, v.LinkGuidance = f.linkView(h, v.OutboundEnabled)
 	return v, nil
+}
+
+// linkView maps the link manager's state to the contract's link value; the
+// code and guidance accompany a refusal only.
+func (f *fleetHost) linkView(h registry.Host, outboundEnabled bool) (link, code, guidance string) {
+	if h.State == registry.StateRevoked {
+		return hostLinkRevoked, "", ""
+	}
+	if !outboundEnabled {
+		return hostLinkDisabled, "", ""
+	}
+	state, code, detail := f.opts.Links.LinkState(h.HostID)
+	switch state {
+	case "connected":
+		return hostLinkActive, "", ""
+	case "connecting", "awaiting_approval":
+		return hostLinkConnecting, "", ""
+	case "refused":
+		return hostLinkRefused, code, detail
+	case "peer_disabled":
+		return hostLinkPeerDisabled, "", ""
+	case "none":
+		return hostLinkDisabled, "", ""
+	}
+	return hostLinkDown, "", ""
 }
 
 // hostViewByID renders the current registry row of hostID.
@@ -637,14 +722,35 @@ func (f *fleetHost) handleHostList(context.Context, *requestContext, json.RawMes
 	return fleetHostListResult{Hosts: views, Window: w}, nil
 }
 
-func (f *fleetHost) handleHostInvite(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
-	var p FleetInviteParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("fleet.host.invite: invalid params: %w", err)
-	}
-	res, err := f.opts.Links.Invite(ctx, p)
+// hostResult is the {host} answer of a mutation: the host's current view.
+func (f *fleetHost) hostResult(hostID string) (any, error) {
+	v, err := f.hostViewByID(hostID)
 	if err != nil {
-		return nil, fmt.Errorf("fleet.host.invite: %w", err)
+		return nil, err
+	}
+	return fleetHostResult{Host: &v}, nil
+}
+
+func (f *fleetHost) handleHostInvite(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	const method = "fleet.host.invite"
+	var p fleetInviteParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": invalid params: " + err.Error(), err: err}
+	}
+	seconds := p.WindowSeconds
+	if p.Window != "" {
+		d, err := time.ParseDuration(p.Window)
+		if err != nil || d <= 0 {
+			return nil, &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("%s: window %q is not a positive duration", method, p.Window)}
+		}
+		seconds = int(d / time.Second)
+	}
+	if seconds < 0 {
+		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": window must not be negative"}
+	}
+	res, err := f.opts.Links.Invite(ctx, FleetInviteParams{WindowSeconds: seconds, Via: p.Via, Addresses: p.Addresses})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", method, err)
 	}
 	return res, nil
 }
@@ -658,31 +764,69 @@ func (f *fleetHost) handleHostAdd(ctx context.Context, _ *requestContext, raw js
 	if err != nil {
 		return nil, fmt.Errorf("fleet.host.add: %w", err)
 	}
-	return res, nil
+	out := fleetAddResult{FleetAddResult: res}
+	if v, err := f.hostViewByID(res.HostID); err == nil {
+		// The initiator's SAS is not held for approval: the other human
+		// approves, and this side only compares.
+		v.SAS = res.SAS
+		out.Host = &v
+	}
+	return out, nil
 }
 
-// handleHostApprove is the human act that makes a pending pairing live:
-// the default forward grant narrowed to the chosen write workspaces. The
-// SAS the human compared stops being shown.
+// normalizeSAS strips the spaces and dashes a human or a client adds when
+// grouping the six digits.
+func normalizeSAS(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '-' {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// handleHostApprove is the human act that makes a pending pairing live. The
+// typed SAS is required and must equal the one this daemon holds for the
+// host, so a client cannot confirm blindly; a daemon that no longer holds
+// it (restarted) refuses and the pairing must be redone. The grant is the
+// given one, else the default forward grant narrowed to the write
+// workspaces; the registry validates either.
 func (f *fleetHost) handleHostApprove(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 	const method = "fleet.host.approve"
 	var p fleetHostApproveParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": invalid params: " + err.Error(), err: err}
 	}
-	h, err := f.resolveHost(method, p.Host)
+	h, err := f.resolveHost(method, p.ref())
 	if err != nil {
 		return nil, err
 	}
-	grant := registry.DefaultForwardGrant()
-	grant.WorkspacesWrite = p.WriteWorkspaces
+	if h.State != registry.StatePending {
+		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": host is not pending approval"}
+	}
+	f.mu.Lock()
+	held := f.sas[h.HostID]
+	f.mu.Unlock()
+	if held == "" {
+		return nil, &rpcCodeError{code: codeSASUnavailable, msg: method + ": re-pair: the pairing code is no longer held"}
+	}
+	if subtle.ConstantTimeCompare([]byte(normalizeSAS(p.SAS)), []byte(held)) != 1 {
+		return nil, &rpcCodeError{code: codeSASMismatch, msg: method + ": the code does not match the one shown for this host"}
+	}
+	var grant registry.Grant
+	if p.Grant != nil {
+		grant = *p.Grant
+	} else {
+		grant = registry.DefaultForwardGrant()
+		grant.WorkspacesWrite = p.WriteWorkspaces
+	}
 	if err := f.opts.Registry.Approve(h.HostID, grant); err != nil {
 		return nil, fleetHostError(method, err)
 	}
 	f.mu.Lock()
 	delete(f.sas, h.HostID)
 	f.mu.Unlock()
-	return f.hostViewByID(h.HostID)
+	return f.hostResult(h.HostID)
 }
 
 func (f *fleetHost) handleHostReject(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
@@ -704,14 +848,14 @@ func (f *fleetHost) handleHostRename(_ context.Context, _ *requestContext, raw j
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": invalid params: " + err.Error(), err: err}
 	}
-	h, err := f.resolveHost(method, p.Host)
+	h, err := f.resolveHost(method, p.ref())
 	if err != nil {
 		return nil, err
 	}
 	if err := f.opts.Registry.Rename(h.HostID, p.Alias); err != nil {
 		return nil, fleetHostError(method, err)
 	}
-	return f.hostViewByID(h.HostID)
+	return f.hostResult(h.HostID)
 }
 
 func (f *fleetHost) handleHostGrant(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
@@ -720,14 +864,14 @@ func (f *fleetHost) handleHostGrant(_ context.Context, _ *requestContext, raw js
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": invalid params: " + err.Error(), err: err}
 	}
-	h, err := f.resolveHost(method, p.Host)
+	h, err := f.resolveHost(method, p.ref())
 	if err != nil {
 		return nil, err
 	}
 	if err := f.opts.Registry.SetGrant(h.HostID, p.Grant); err != nil {
 		return nil, fleetHostError(method, err)
 	}
-	return f.hostViewByID(h.HostID)
+	return f.hostResult(h.HostID)
 }
 
 // handleHostRm removes a host: an approved host is revoked first (the
@@ -759,6 +903,26 @@ func (f *fleetHost) handleHostRm(_ context.Context, _ *requestContext, raw json.
 	delete(f.sas, h.HostID)
 	f.mu.Unlock()
 	return fleetOKResult{OK: true}, nil
+}
+
+// handleHostRevoke ends an approved host's authority for good: both links go
+// dark, its live connections die and the link manager forgets it. The row
+// stays, marked revoked.
+func (f *fleetHost) handleHostRevoke(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	const method = "fleet.host.revoke"
+	h, err := f.resolveParams(method, raw)
+	if err != nil {
+		return nil, err
+	}
+	if h.State != registry.StateApproved {
+		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": only an approved host can be revoked"}
+	}
+	if err := f.opts.Registry.Revoke(h.HostID); err != nil {
+		return nil, fleetHostError(method, err)
+	}
+	f.closeHostConns(h.HostID)
+	f.opts.Links.Forget(h.HostID)
+	return f.hostResult(h.HostID)
 }
 
 // handleHostEnableReverse lights the inbound link and tells the peer. The
@@ -826,7 +990,7 @@ func (f *fleetHost) handleHostRoute(ctx context.Context, _ *requestContext, raw 
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": invalid params: " + err.Error(), err: err}
 	}
-	h, err := f.resolveHost(method, p.Host)
+	h, err := f.resolveHost(method, p.ref())
 	if err != nil {
 		return nil, err
 	}

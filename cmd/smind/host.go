@@ -30,7 +30,7 @@ var hostDial = func(ctx context.Context) (wsCaller, func(), error) {
 const hostUsage = `usage: smind host ls [--json]
        smind host invite [--window 10m] [--via direct|relay] [--addr <ws(s)://host:port>]...
        smind host add <invite> [--alias x] [--password-env VAR] [--allow-cleartext]
-       smind host approve <host> --write <workspaceId>...
+       smind host approve <host> --sas <6 digits> --write <workspaceId>...
        smind host reject <host>
        smind host rm <host>
        smind host enable-reverse <host>
@@ -123,13 +123,6 @@ func hostErrMessage(err error) string {
 	return err.Error()
 }
 
-// hostLink is one host's link column pair. It is its own struct so a nil
-// object still decodes to a zero value rather than failing.
-type hostLink struct {
-	State  string `json:"state"`
-	Detail string `json:"detail"`
-}
-
 // hostToggle is one direction of the host's dial-out policy.
 type hostToggle struct {
 	Enabled bool `json:"enabled"`
@@ -143,10 +136,15 @@ type hostEntry struct {
 	Alias     string     `json:"alias"`
 	Label     string     `json:"label"`
 	State     string     `json:"state"`
-	Outbound  hostToggle `json:"outbound"`
 	Inbound   hostToggle `json:"inbound"`
-	Link      hostLink   `json:"link"`
 	CreatedAt string     `json:"createdAt"`
+	// PendingApproval marks a pairing this human must approve here.
+	PendingApproval bool `json:"pendingApproval"`
+	OutboundEnabled bool `json:"outboundEnabled"`
+	// Link is the link value; LinkCode and LinkGuidance accompany a refusal.
+	Link         string `json:"link"`
+	LinkCode     string `json:"linkCode,omitempty"`
+	LinkGuidance string `json:"linkGuidance,omitempty"`
 	// SAS is the pairing code to compare with the other host; kept only for
 	// pending hosts.
 	SAS string `json:"sas,omitempty"`
@@ -241,18 +239,21 @@ func renderHosts(w io.Writer, hosts []hostEntry) {
 		if alias == "" {
 			alias = "-"
 		}
-		link := h.Link.State
+		link := h.Link
 		if link == "" {
 			link = "-"
 		}
-		if h.Link.Detail != "" {
-			link += fmt.Sprintf(" (%s)", h.Link.Detail)
+		if h.LinkCode != "" {
+			link += fmt.Sprintf(" (%s)", h.LinkCode)
+		}
+		if h.LinkGuidance != "" {
+			link += ": " + h.LinkGuidance
 		}
 		sas := h.SAS
 		if sas == "" {
 			sas = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alias, shortHostID(h.HostID), h.State, onOff(h.Outbound.Enabled), onOff(h.Inbound.Enabled), link, sas)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alias, shortHostID(h.HostID), h.State, onOff(h.OutboundEnabled), onOff(h.Inbound.Enabled), link, sas)
 	}
 	_ = tw.Flush()
 }
@@ -327,7 +328,7 @@ func runHostInvite(ctx context.Context, args []string, stdout, stderr io.Writer)
 	}
 	fmt.Fprintln(stdout, res.Invite)
 	fmt.Fprintf(stdout, "Run on the other host: smind host add '%s'\n", res.Invite)
-	fmt.Fprintf(stdout, "Then approve here with: smind host approve %s\n", shortHostID(res.HostID))
+	fmt.Fprintf(stdout, "Then compare the code with the other host and approve here with: smind host approve %s --sas <code> --write <workspaceId>\n", shortHostID(res.HostID))
 	return 0
 }
 
@@ -448,6 +449,7 @@ func runHostApprove(ctx context.Context, args []string, stdout, stderr io.Writer
 	fs.SetOutput(stderr)
 	var writes workspaceIDs
 	fs.Var(&writes, "write", "workspace id the host may create tasks in; repeatable")
+	sas := fs.String("sas", "", "the 6-digit code shown by `smind host ls`, as compared with the other host")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -456,6 +458,10 @@ func runHostApprove(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	if len(positional) != 1 || positional[0] == "" || fs.NArg() != 0 {
 		fmt.Fprint(stderr, hostUsage)
+		return 2
+	}
+	if strings.TrimSpace(*sas) == "" {
+		fmt.Fprintln(stderr, "smind host approve: approve needs --sas: compare the code shown by `smind host ls` with the other host and type it")
 		return 2
 	}
 	if len(writes) == 0 {
@@ -469,7 +475,7 @@ func runHostApprove(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	defer closeFn()
 
-	dev, err := hostAct(ctx, call, "fleet.host.approve", positional[0], map[string]any{"writeWorkspaces": []int(writes)})
+	dev, err := hostAct(ctx, call, "fleet.host.approve", positional[0], map[string]any{"sas": *sas, "writeWorkspaces": []int(writes)})
 	if err != nil {
 		fmt.Fprintf(stderr, "smind host approve: %s\n", hostErrMessage(err))
 		return 1

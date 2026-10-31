@@ -84,17 +84,17 @@ func TestHostLsNeverPrintsSecrets(t *testing.T) {
 	hostHome(t, true)
 	d := &fakeDaemon{results: map[string]any{"fleet.host.list": map[string]any{
 		"hosts": []map[string]any{{
-			"hostId":      "abcdef1234567890abcdef",
-			"alias":       "laptop",
-			"label":       "Laptop",
-			"state":       "approved",
-			"outbound":    map[string]any{"enabled": true},
-			"inbound":     map[string]any{"enabled": false},
-			"link":        map[string]any{"state": "connected", "detail": "direct wss"},
-			"createdAt":   "2026-10-31T00:00:00Z",
-			"password":    "CANARY-PW",
-			"relaySecret": "CANARY-RS",
-			"pub":         "CANARY-PUB",
+			"hostId":          "abcdef1234567890abcdef",
+			"alias":           "laptop",
+			"label":           "Laptop",
+			"state":           "approved",
+			"outboundEnabled": true,
+			"inbound":         map[string]any{"enabled": false},
+			"link":            "active",
+			"createdAt":       "2026-10-31T00:00:00Z",
+			"password":        "CANARY-PW",
+			"relaySecret":     "CANARY-RS",
+			"pub":             "CANARY-PUB",
 		}},
 		"window": nil,
 	}}}
@@ -137,7 +137,7 @@ func TestHostLsNeverPrintsSecrets(t *testing.T) {
 			}
 		} else {
 			if !strings.Contains(out, "laptop") || !strings.Contains(out, "abcdef12") ||
-				!strings.Contains(out, "approved") || !strings.Contains(out, "connected") ||
+				!strings.Contains(out, "approved") || !strings.Contains(out, "active") ||
 				!strings.Contains(out, "on") || !strings.Contains(out, "off") {
 				t.Fatalf("table row missing fields:\n%s", out)
 			}
@@ -193,7 +193,11 @@ func TestHostApproveNeedsWorkspace(t *testing.T) {
 	}}}
 	useHostDaemon(t, d)
 
-	code, out, errOut := runHostCmd("approve", "abcdef12")
+	code, out, errOut := runHostCmd("approve", "abcdef12", "--write", "3")
+	if code != 2 || !strings.Contains(errOut, "approve needs --sas: compare the code shown by `smind host ls` with the other host and type it") {
+		t.Fatalf("approve without --sas = %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	code, out, errOut = runHostCmd("approve", "abcdef12", "--sas", "123456")
 	if code != 2 || !strings.Contains(errOut, "approve needs at least one --write <workspaceId>: the host may only create tasks in workspaces you choose") {
 		t.Fatalf("approve without --write = %d, stdout %q, stderr %q", code, out, errOut)
 	}
@@ -201,16 +205,16 @@ func TestHostApproveNeedsWorkspace(t *testing.T) {
 		t.Fatalf("approve without --write reached the daemon: %v", d.calls)
 	}
 
-	code, out, errOut = runHostCmd("approve", "abcdef12", "--write", "3", "--write", "5")
+	code, out, errOut = runHostCmd("approve", "abcdef12", "--sas", "123456", "--write", "3", "--write", "5")
 	if code != 0 || !strings.Contains(out, "approved laptop") {
 		t.Fatalf("approve = %d %q %q", code, out, errOut)
 	}
-	want := map[string]any{"host": "abcdef12", "writeWorkspaces": []int{3, 5}}
+	want := map[string]any{"host": "abcdef12", "sas": "123456", "writeWorkspaces": []int{3, 5}}
 	if !reflect.DeepEqual(d.calls[0].params, want) {
 		t.Fatalf("params = %v, want %v", d.calls[0].params, want)
 	}
 
-	if code, _, _ = runHostCmd("approve", "abcdef12", "--write", "den"); code != 2 {
+	if code, _, _ = runHostCmd("approve", "abcdef12", "--sas", "123456", "--write", "den"); code != 2 {
 		t.Fatalf("approve with a non-numeric --write = %d, want 2", code)
 	}
 }
@@ -233,7 +237,7 @@ func TestHostInvitePrintsInviteAndHints(t *testing.T) {
 	if lines[1] != "Run on the other host: smind host add 'smind-host://abc'" {
 		t.Fatalf("hint line 1 = %q", lines[1])
 	}
-	if lines[2] != "Then approve here with: smind host approve abcdef12" {
+	if lines[2] != "Then compare the code with the other host and approve here with: smind host approve abcdef12 --sas <code> --write <workspaceId>" {
 		t.Fatalf("hint line 2 = %q", lines[2])
 	}
 	want := map[string]any{"windowSeconds": 600, "via": "direct", "addresses": []string{}}
@@ -305,7 +309,7 @@ func TestHostLsShowsSASForPendingOnly(t *testing.T) {
 	hostHome(t, true)
 	host := func(id, alias, state, sas string) map[string]any {
 		return map[string]any{"hostId": id, "alias": alias, "state": state, "sas": sas,
-			"outbound": map[string]any{"enabled": false}, "inbound": map[string]any{"enabled": false}, "link": map[string]any{"state": "down"}}
+			"outboundEnabled": false, "inbound": map[string]any{"enabled": false}, "link": "down"}
 	}
 	d := &fakeDaemon{results: map[string]any{"fleet.host.list": map[string]any{
 		"hosts": []map[string]any{

@@ -362,10 +362,14 @@ func (s *Service) PeerReverseChanged(hostID string, on bool) {
 	s.o.Manager.Drop(hostID)
 }
 
-// LinkState reports the live link's state and detail.
-func (s *Service) LinkState(hostID string) (state, detail string) {
+// LinkState reports the live link's state, refusal code and detail; "none"
+// when no loop exists for the host.
+func (s *Service) LinkState(hostID string) (state, code, detail string) {
 	st := s.o.Manager.Status(hostID)
-	return string(st.State), st.Detail
+	if st.State == StateDown && st.Detail == detailNotLinked {
+		return "none", "", ""
+	}
+	return string(st.State), st.Code, st.Detail
 }
 
 // Forget stops the link to a removed host and drops its secrets.

@@ -35,6 +35,9 @@ type Status struct {
 	Since  time.Time
 }
 
+// detailNotLinked is the Detail of the status of a host with no loop.
+const detailNotLinked = "not linked"
+
 // Defaults for ManagerOptions durations left zero.
 const (
 	defaultBackoffMin   = time.Second
@@ -178,7 +181,7 @@ func (m *Manager) Status(hostID string) Status {
 	if l, ok := m.loops[hostID]; ok {
 		return l.status
 	}
-	return Status{State: StateDown, Detail: "not linked", Since: m.o.Now()}
+	return Status{State: StateDown, Detail: detailNotLinked, Since: m.o.Now()}
 }
 
 // Conn returns the live connection to the host, only while it is connected.

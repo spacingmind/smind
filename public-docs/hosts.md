@@ -99,8 +99,10 @@ be *called*, the receiver; the host that dials is the initiator.
    may create work in. At least one is required:
 
    ```bash
-   smind host approve laptop --write 3
+   smind host approve laptop --sas 123456 --write 3
    ```
+
+   The code you type must match the one shown for that host.
 
 The window stays open for ten minutes by default, accepts one pairing, and only
 a host that first connected after you opened it can take the slot.

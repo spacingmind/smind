@@ -127,16 +127,13 @@ func (d *e2eDaemon) call(t *testing.T, method string, params, out any) {
 }
 
 type e2eHostView struct {
-	HostID   string `json:"hostId"`
-	Alias    string `json:"alias"`
-	State    string `json:"state"`
-	SAS      string `json:"sas"`
-	Outbound struct {
-		Enabled bool `json:"enabled"`
-	} `json:"outbound"`
-	Link struct {
-		State string `json:"state"`
-	} `json:"link"`
+	HostID          string `json:"hostId"`
+	Alias           string `json:"alias"`
+	State           string `json:"state"`
+	SAS             string `json:"sas"`
+	PendingApproval bool   `json:"pendingApproval"`
+	OutboundEnabled bool   `json:"outboundEnabled"`
+	Link            string `json:"link"`
 }
 
 // hostView returns d's view of hostID, or nil when d does not list it.
@@ -196,14 +193,14 @@ func pairE2E(t *testing.T) (a, b *e2eDaemon) {
 	}
 	poll(t, "A's link to B awaiting approval", func() bool {
 		v := a.hostView(t, b.key.HostID())
-		return v != nil && v.Link.State == string(StateAwaitingApproval)
+		return v != nil && v.Link == "connecting"
 	})
 
 	var approved json.RawMessage
-	b.call(t, "fleet.host.approve", map[string]any{"host": a.key.HostID(), "writeWorkspaces": []int64{1}}, &approved)
+	b.call(t, "fleet.host.approve", map[string]any{"hostId": a.key.HostID(), "sas": added.SAS, "writeWorkspaces": []int64{1}}, &approved)
 	poll(t, "A's link to B connected and approved", func() bool {
 		v := a.hostView(t, b.key.HostID())
-		return v != nil && v.Alias == "bee" && v.State == registry.StateApproved && v.Link.State == string(StateConnected)
+		return v != nil && v.Alias == "bee" && v.State == registry.StateApproved && v.Link == "active"
 	})
 	return a, b
 }
@@ -278,7 +275,7 @@ func TestFleetReverseDisabledByDefault(t *testing.T) {
 	a.call(t, "fleet.host.enable_reverse", map[string]any{"host": "bee"}, &json.RawMessage{})
 	poll(t, "B's link to A connected", func() bool {
 		v := b.hostView(t, aID)
-		return b.mgr.Status(aID).State == StateConnected && v != nil && v.Outbound.Enabled && v.Link.State == string(StateConnected)
+		return b.mgr.Status(aID).State == StateConnected && v != nil && v.OutboundEnabled && v.Link == "active"
 	})
 
 	// A host principal can only speak fleet: a human method is forbidden.
@@ -319,7 +316,7 @@ func TestFleetReverseNoticeSentOnReconnect(t *testing.T) {
 	if err := a.reg.EnableReverse(bID); err != nil {
 		t.Fatal(err)
 	}
-	if v := b.hostView(t, aID); v == nil || v.Outbound.Enabled {
+	if v := b.hostView(t, aID); v == nil || v.OutboundEnabled {
 		t.Fatalf("B's outbound to A = %+v before reconnect, want disabled", v)
 	}
 
@@ -327,6 +324,6 @@ func TestFleetReverseNoticeSentOnReconnect(t *testing.T) {
 	a.mgr.Ensure(bID)
 	poll(t, "B learned A enabled reverse", func() bool {
 		v := b.hostView(t, aID)
-		return v != nil && v.Outbound.Enabled
+		return v != nil && v.OutboundEnabled
 	})
 }

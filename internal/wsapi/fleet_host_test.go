@@ -2,6 +2,9 @@ package wsapi
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"os"
@@ -63,7 +66,7 @@ func (f *fakeFleetLinks) SetRoute(_ context.Context, p FleetRouteParams) error {
 	return nil
 }
 
-func (f *fakeFleetLinks) LinkState(string) (string, string) { return "down", "" }
+func (f *fakeFleetLinks) LinkState(string) (string, string, string) { return "down", "", "" }
 
 func (f *fakeFleetLinks) Forget(hostID string) {
 	f.mu.Lock()
@@ -297,19 +300,20 @@ func TestFleetPairingFlowPendingThenApprove(t *testing.T) {
 	if err := admin.Call(callCtx(), "fleet.host.list", nil, &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Hosts) != 1 || list.Hosts[0].SAS != want {
+	if len(list.Hosts) != 1 || list.Hosts[0].SAS != want || !list.Hosts[0].PendingApproval || list.Hosts[0].Link != hostLinkDisabled {
 		t.Fatalf("list = %+v, want one host showing the SAS", list)
 	}
 
-	err = admin.Call(callCtx(), "fleet.host.approve", fleetHostApproveParams{Host: "laptop", WriteWorkspaces: []int64{}}, &FleetHostView{})
+	err = admin.Call(callCtx(), "fleet.host.approve", map[string]any{"host": "laptop", "sas": want, "writeWorkspaces": []int64{}}, &fleetHostResult{})
 	if err == nil {
 		t.Fatal("approve with no write workspaces succeeded, want an error")
 	}
-	var view FleetHostView
-	if err := admin.Call(callCtx(), "fleet.host.approve", fleetHostApproveParams{Host: "laptop", WriteWorkspaces: []int64{1}}, &view); err != nil {
+	var res2 fleetHostResult
+	if err := admin.Call(callCtx(), "fleet.host.approve", map[string]any{"host": "laptop", "sas": want, "writeWorkspaces": []int64{1}}, &res2); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if view.State != registry.StateApproved || !view.Inbound.Enabled || view.SAS != "" {
+	view := res2.Host
+	if view == nil || view.State != registry.StateApproved || !view.Inbound.Enabled || view.SAS != "" || view.PendingApproval {
 		t.Fatalf("view = %+v, want approved, inbound enabled, no SAS", view)
 	}
 	res, err := e.doHello(t, e.dial(t), first)
@@ -372,8 +376,8 @@ func TestFleetAdminMethodsLocalOnlyNotRunScopedNotPlugin(t *testing.T) {
 			adminMethods = append(adminMethods, k)
 		}
 	}
-	if len(adminMethods) != 12 {
-		t.Fatalf("fleet.host.* methods = %v, want 12", adminMethods)
+	if len(adminMethods) != 13 {
+		t.Fatalf("fleet.host.* methods = %v, want 13", adminMethods)
 	}
 
 	// (1) not run-scoped, not in any plugin capability group.
@@ -479,7 +483,7 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 		want := []string{
 			"fleet.challenge", "fleet.hello", "fleet.pair.request", "fleet.link.state",
 			"fleet.host.list", "fleet.host.invite", "fleet.host.add", "fleet.host.approve",
-			"fleet.host.reject", "fleet.host.rename", "fleet.host.grant", "fleet.host.rm",
+			"fleet.host.reject", "fleet.host.rename", "fleet.host.grant", "fleet.host.rm", "fleet.host.revoke",
 			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test", "fleet.host.route",
 		}
 		slices.Sort(want)
@@ -535,7 +539,7 @@ func TestFleetEnableDisableReverseClosesConnection(t *testing.T) {
 	}
 	admin := e.dial(t)
 
-	if err := admin.Call(callCtx(), "fleet.host.disable_reverse", fleetHostParams{Host: "peer"}, &fleetHostActionResult{}); err != nil {
+	if err := admin.Call(callCtx(), "fleet.host.disable_reverse", fleetHostRef{Host: "peer"}, &fleetHostActionResult{}); err != nil {
 		t.Fatalf("disable_reverse: %v", err)
 	}
 	select {
@@ -547,7 +551,7 @@ func TestFleetEnableDisableReverseClosesConnection(t *testing.T) {
 	wantFleetCode(t, err, hello.CodeNotGranted)
 
 	var res fleetHostActionResult
-	if err := admin.Call(callCtx(), "fleet.host.enable_reverse", fleetHostParams{Host: "peer"}, &res); err != nil {
+	if err := admin.Call(callCtx(), "fleet.host.enable_reverse", fleetHostRef{Host: "peer"}, &res); err != nil {
 		t.Fatalf("enable_reverse: %v", err)
 	}
 	notified, _ := e.links.snapshot()
@@ -586,4 +590,149 @@ func TestFleetHostRouteIsLocalOnlyAndResolvesHost(t *testing.T) {
 	}
 	p["host"] = "nobody"
 	wantFleetCode(t, cl.Call(callCtx(), "fleet.host.route", p, &res), codeNotFound)
+}
+
+// pairPending files a responder-side pending host with a held SAS.
+func (e *fleetEnv) pairPending(t *testing.T, alias, sas string) *identity.Key {
+	t.Helper()
+	k := newCallerKey(t)
+	if _, err := e.reg.AcceptPairRequest(k.Public(), alias, "Label"); err != nil {
+		t.Fatal(err)
+	}
+	if sas != "" {
+		e.api.fleet.mu.Lock()
+		e.api.fleet.sas[k.HostID()] = sas
+		e.api.fleet.mu.Unlock()
+	}
+	return k
+}
+
+func TestFleetApproveRequiresMatchingSAS(t *testing.T) {
+	e := newFleetEnv(t)
+	k := e.pairPending(t, "laptop", "123456")
+	admin := e.dial(t)
+	approve := func(sas string) error {
+		return admin.Call(callCtx(), "fleet.host.approve", map[string]any{"hostId": k.HostID(), "sas": sas, "writeWorkspaces": []int64{1}}, &fleetHostResult{})
+	}
+	for _, bad := range []string{"", "654321", "12345", "1234567"} {
+		wantFleetCode(t, approve(bad), codeSASMismatch)
+		if h, _ := e.reg.Get(k.HostID()); h.State != registry.StatePending {
+			t.Fatalf("state after sas %q = %s, want pending", bad, h.State)
+		}
+	}
+	if err := approve("123-456"); err != nil {
+		t.Fatalf("approve with the grouped SAS: %v", err)
+	}
+	if h, _ := e.reg.Get(k.HostID()); h.State != registry.StateApproved {
+		t.Fatalf("state = %s, want approved", h.State)
+	}
+}
+
+func TestFleetApproveRefusesWhenSASNotHeld(t *testing.T) {
+	e := newFleetEnv(t)
+	k := e.pairPending(t, "laptop", "")
+	err := e.dial(t).Call(callCtx(), "fleet.host.approve", map[string]any{"hostId": k.HostID(), "sas": "123456", "writeWorkspaces": []int64{1}}, &fleetHostResult{})
+	wantFleetCode(t, err, codeSASUnavailable)
+	if !strings.Contains(err.Error(), "re-pair: the pairing code is no longer held") {
+		t.Fatalf("message = %q", err)
+	}
+	if h, _ := e.reg.Get(k.HostID()); h.State != registry.StatePending {
+		t.Fatalf("state = %s, want pending", h.State)
+	}
+}
+
+func TestFleetHostAcceptsHostIdAndHostParams(t *testing.T) {
+	e := newFleetEnv(t)
+	k := newCallerKey(t)
+	e.pairApproved(t, k, "peer")
+	admin := e.dial(t)
+	for _, key := range []string{"hostId", "host"} {
+		for _, ref := range []string{"peer", k.HostID(), k.HostID()[:6]} {
+			var res fleetHostResult
+			if err := admin.Call(callCtx(), "fleet.host.rename", map[string]any{key: ref, "alias": "peer"}, &res); err != nil {
+				t.Fatalf("%s=%q: %v", key, ref, err)
+			}
+			if res.Host == nil || res.Host.HostID != k.HostID() {
+				t.Fatalf("%s=%q: host = %+v", key, ref, res.Host)
+			}
+		}
+	}
+	var res fleetHostResult
+	if err := admin.Call(callCtx(), "fleet.host.revoke", map[string]any{"hostId": "peer"}, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Host.State != registry.StateRevoked || res.Host.Link != hostLinkRevoked {
+		t.Fatalf("revoked view = %+v", res.Host)
+	}
+	if got := e.links.forgottenIDs(); !slices.Equal(got, []string{k.HostID()}) {
+		t.Fatalf("Forget calls = %v", got)
+	}
+	wantFleetCode(t, admin.Call(callCtx(), "fleet.host.revoke", map[string]any{"hostId": "peer"}, &res), codeInvalid)
+}
+
+func (f *fakeFleetLinks) forgottenIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.forgotten)
+}
+
+func TestFleetHostViewShapeMatchesUIContract(t *testing.T) {
+	const addrCanary = "canary-addr.example"
+	e := newFleetEnv(t)
+	k := e.pairPending(t, "laptop", "123456")
+	if err := e.reg.SetOutboundTransport(k.HostID(), `{"kind":"direct","url":"ws://`+addrCanary+`:1"}`); err != nil {
+		t.Fatal(err)
+	}
+	h, err := e.reg.Get(k.HostID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.api.fleet.view(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.LinkCode, v.LinkGuidance = "fleet_version_unsupported", "update the peer"
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := func(m map[string]json.RawMessage) []string {
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		slices.Sort(out)
+		return out
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"alias", "createdAt", "hostId", "inbound", "label", "link", "linkCode", "linkGuidance", "outboundEnabled", "pendingApproval", "sas", "state"}
+	if got := keys(top); !slices.Equal(got, want) {
+		t.Fatalf("view keys = %v, want %v", got, want)
+	}
+	var inbound map[string]json.RawMessage
+	if err := json.Unmarshal(top["inbound"], &inbound); err != nil {
+		t.Fatal(err)
+	}
+	if got := keys(inbound); !slices.Equal(got, []string{"enabled", "grant"}) {
+		t.Fatalf("inbound keys = %v", got)
+	}
+	var grant map[string]json.RawMessage
+	if err := json.Unmarshal(inbound["grant"], &grant); err != nil {
+		t.Fatal(err)
+	}
+	wantGrant := []string{"maxCostUsd", "maxLiveAgents", "maxWallSeconds", "ops", "providers", "workspacesRead", "workspacesWrite"}
+	if got := keys(grant); !slices.Equal(got, wantGrant) {
+		t.Fatalf("grant keys = %v, want %v", got, wantGrant)
+	}
+	for _, canary := range []string{addrCanary, hex.EncodeToString(k.Public()), base64.StdEncoding.EncodeToString(k.Public()), "transport", "password"} {
+		if strings.Contains(string(raw), canary) {
+			t.Fatalf("view leaks %q: %s", canary, raw)
+		}
+	}
+	if v.Link != hostLinkDisabled || !v.PendingApproval || v.SAS != "123456" {
+		t.Fatalf("view = %+v", v)
+	}
 }
