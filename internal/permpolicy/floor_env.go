@@ -1,6 +1,9 @@
 package permpolicy
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // envRules runs the rule that keeps tests off the real home.
 func (fs *floorSeg) envRules() (FloorHit, bool) {
@@ -14,6 +17,8 @@ func isFetcher(fs *floorSeg) bool {
 	switch fs.pl.cmdName(fs.argv[0]) {
 	case "curl", "wget", "fetch":
 		return true
+	case "iwr", "irm", "invoke-webrequest", "invoke-restmethod", "bitsadmin":
+		return fs.pl.windows
 	}
 	return false
 }
@@ -25,6 +30,8 @@ func isInterpreter(fs *floorSeg) bool {
 	switch name := fs.pl.cmdName(fs.argv[0]); name {
 	case "sh", "bash", "zsh", "dash", "ksh", "node", "perl", "ruby", "source", ".":
 		return true
+	case "iex", "invoke-expression", "powershell", "pwsh", "cmd", "cscript", "wscript", "mshta":
+		return fs.pl.windows
 	default:
 		return strings.HasPrefix(name, "python")
 	}
@@ -36,6 +43,9 @@ func isInterpreter(fs *floorSeg) bool {
 // file and running it in a later step is not caught here; the file is
 // inspectable between the two.
 func curlShell(segs []*floorSeg) bool {
+	if len(segs) > 0 && segs[0].pl.windows && winFetchAndEval(segs) {
+		return true
+	}
 	fetches := false
 	for i, fs := range segs {
 		if !isFetcher(fs) {
@@ -62,7 +72,35 @@ func curlShell(segs []*floorSeg) bool {
 	return false
 }
 
+var (
+	winFetchWord = regexp.MustCompile(`\b(iwr|irm|invoke-webrequest|invoke-restmethod|curl|wget|downloadstring)\b`)
+	winEvalWord  = regexp.MustCompile(`\b(iex|invoke-expression)\b`)
+)
+
+// winFetchAndEval reports a fetch word and an iex word anywhere in the same
+// command line, including inside a quoted -Command string: download-and-run.
+func winFetchAndEval(segs []*floorSeg) bool {
+	fetch, eval := false, false
+	for _, fs := range segs {
+		for _, w := range fs.argv {
+			w = strings.ToLower(w)
+			fetch = fetch || winFetchWord.MatchString(w)
+			eval = eval || winEvalWord.MatchString(w)
+		}
+	}
+	return fetch && eval
+}
+
 var homeVars = map[string]bool{"HOME": true, "SMIND_HOME": true}
+
+// isHomeVar reports whether name is a variable that selects the home;
+// Windows variable names are case-insensitive and USERPROFILE is its home.
+func (fs *floorSeg) isHomeVar(name string) bool {
+	if fs.pl.windows {
+		return homeVars[strings.ToUpper(name)] || strings.EqualFold(name, "USERPROFILE")
+	}
+	return homeVars[name]
+}
 
 // realHomeRules denies pointing HOME or SMIND_HOME at the real home (or
 // leaving it empty or unset, which falls back to it) for a command, through
@@ -70,29 +108,33 @@ var homeVars = map[string]bool{"HOME": true, "SMIND_HOME": true}
 func (fs *floorSeg) realHomeRules() (FloorHit, bool) {
 	assigns := fs.assigns
 	if len(fs.argv) > 0 {
-		switch fs.pl.cmdName(fs.argv[0]) {
-		case "export":
+		name := fs.pl.cmdName(fs.argv[0])
+		if fs.pl.windows && len(fs.argv[0]) > len("$env:") && strings.EqualFold(fs.argv[0][:len("$env:")], "$env:") && strings.Contains(fs.argv[0], "=") {
+			assigns = append(assigns, fs.argv[0][len("$env:"):])
+		}
+		switch {
+		case name == "export" || fs.pl.windows && (name == "set" || name == "setx"):
 			for _, a := range fs.argv[1:] {
 				if isEnvAssign(a) {
 					assigns = append(assigns, a)
 				}
 			}
-		case "unset":
+		case name == "unset":
 			for _, a := range fs.argv[1:] {
-				if homeVars[a] {
+				if fs.isHomeVar(a) {
 					return floorHit("no-real-home-tests")
 				}
 			}
 		}
 	}
 	for _, u := range fs.unsets {
-		if homeVars[u] {
+		if fs.isHomeVar(u) {
 			return floorHit("no-real-home-tests")
 		}
 	}
 	for _, a := range assigns {
 		name, val, _ := strings.Cut(a, "=")
-		if homeVars[name] && fs.realHomeValue(val) {
+		if fs.isHomeVar(name) && fs.realHomeValue(val) {
 			return floorHit("no-real-home-tests")
 		}
 	}
