@@ -215,10 +215,24 @@ function goto(target: number | "first" | "last" | "next" | "prev"): void {
   holders[n - 1]?.scrollIntoView({ block: "start" });
 }
 
+/**
+ * The pdf.js worker, run from a blob as a CLASSIC worker: an opaque-origin page cannot start a module worker (its fetch is a CORS request
+ * that has no origin to satisfy), but it can start a classic blob worker. The worker file has no imports. Two edits make it classic: the
+ * trailing `export` statement is dropped (the file starts itself when it finds it is in a worker), and `import.meta.url` (used only by the
+ * wasm image decoders to find their .wasm files, which this viewer never loads) becomes a URL that fails to resolve, inside their own try.
+ */
+function classicWorker(): Worker {
+  const classic = workerSource
+    .replace(/export\s*\{\s*WorkerMessageHandler\s*\}\s*;?\s*$/, "")
+    .replace(/import\.meta\.url/g, '"about:blank"');
+  if (classic === workerSource || /import\.meta|^\s*export/m.test(classic)) throw new Error("pdf.js worker could not be made classic");
+  return new Worker(URL.createObjectURL(new Blob([classic], { type: "text/javascript" })));
+}
+
 async function load(bytes: ArrayBuffer): Promise<void> {
   teardown();
   renderToken++;
-  GlobalWorkerOptions.workerPort = new Worker(URL.createObjectURL(new Blob([workerSource], { type: "text/javascript" })), { type: "module" });
+  GlobalWorkerOptions.workerPort = classicWorker();
   try {
     const task = getDocument(buildDocumentOptions(new Uint8Array(bytes)) as Parameters<typeof getDocument>[0]);
     doc = await task.promise;

@@ -7,8 +7,9 @@
 <title>PDF viewer</title>
 <style>
   html, body { margin: 0; padding: 0; background: transparent; }
-  #pages { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px; box-sizing: border-box; }
-  .page { position: relative; flex: none; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
+  /* auto side margins centre a page that fits and let one that is wider than the window scroll from its left edge (align-items: center would clip it) */
+  #pages { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px; box-sizing: border-box; width: max-content; min-width: 100%; }
+  .page { position: relative; flex: none; margin-left: auto; margin-right: auto; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
   .page canvas { display: block; }
   .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; text-size-adjust: none; opacity: 1; }
   .textLayer span, .textLayer br { position: absolute; white-space: pre; transform-origin: 0 0; color: transparent; cursor: text; }
