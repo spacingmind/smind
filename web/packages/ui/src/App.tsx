@@ -1092,6 +1092,7 @@ function AppShell({
       }}
       onOpenSettings={openSettings}
       onOpenInbox={openInbox}
+      onOpenPluginPanel={openPluginPage}
       connectionStatus={connectionStatus}
       connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
       headerActions={
