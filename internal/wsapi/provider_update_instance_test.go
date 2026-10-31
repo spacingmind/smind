@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/config"
 )
 
 func (h *secretsHarness) file(t *testing.T) string {
@@ -313,5 +315,66 @@ func TestProviderList_InstanceEditableFields(t *testing.T) {
 		if _, has := e["instance"]; has {
 			t.Fatalf("%s has an instance key: %v", id, e["instance"])
 		}
+	}
+}
+
+func TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged(t *testing.T) {
+	h := newSecretsHarness(t)
+	hand := "providers:\n  custom:\n" +
+		"    # work account\n" +
+		"    - id: claude-work\n      label: Claude Work\n      extends: claude-native\n      env:\n        CLAUDE_CONFIG_DIR: /tmp/hand-work\n" +
+		"      models:\n        - id: work-model-a\n          label: Work A\n        - id: work-model-b\n\n" +
+		"    - id: claude-home\n      label: Claude Home\n      extends: claude-native\n      env:\n        CLAUDE_CONFIG_DIR: /tmp/hand-home # personal\n" +
+		"    - id: paseo-agent\n      label: Paseo Agent\n      command: \"" + fakeACPAgentPath + "\"\n" +
+		"      models:\n        - id: acp-model-a\n          label: ACP A\n" +
+		"      modes:\n        - id: plan\n          label: Plan\n"
+	if err := os.WriteFile(h.path, []byte(hand), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.call(t, "provider.reload", &requestContext{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.LoadFile(h.path); err != nil {
+		t.Fatalf("config.LoadFile: %v", err)
+	}
+	res, err := h.call(t, "provider.list", &requestContext{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, p := range res.(providerListResult).Providers {
+		ids = append(ids, string(p.ID))
+	}
+	if n := len(ids); n < 3 || !reflect.DeepEqual(ids[n-3:], []string{"claude-work", "claude-home", "paseo-agent"}) {
+		t.Fatalf("provider ids = %v, want the three entries last", ids)
+	}
+	modelIDs := func(e providerListEntry) []string {
+		var out []string
+		for _, m := range e.Models {
+			out = append(out, m.ID)
+		}
+		return out
+	}
+	for _, id := range []string{"claude-work", "claude-home"} {
+		e := h.listEntry(t, id)
+		if e.Extends != "claude-native" || !e.Custom || e.Runner != "claude-native" {
+			t.Fatalf("%s: extends=%q custom=%v runner=%q", id, e.Extends, e.Custom, e.Runner)
+		}
+	}
+	if got := modelIDs(h.listEntry(t, "claude-work")); !reflect.DeepEqual(got, []string{"work-model-a", "work-model-b"}) {
+		t.Fatalf("claude-work models = %v", got)
+	}
+	acp := h.listEntry(t, "paseo-agent")
+	if acp.Extends != "" || !acp.Custom || acp.Runner == "claude-native" {
+		t.Fatalf("paseo-agent: extends=%q custom=%v runner=%q", acp.Extends, acp.Custom, acp.Runner)
+	}
+	if got := modelIDs(acp); !reflect.DeepEqual(got, []string{"acp-model-a"}) {
+		t.Fatalf("paseo-agent models = %v", got)
+	}
+	if len(acp.Modes) == 0 || acp.Modes[0].ID != "plan" {
+		t.Fatalf("paseo-agent modes = %+v", acp.Modes)
+	}
+	if h.file(t) != hand {
+		t.Fatalf("reload changed config.yaml:\n%s", h.file(t))
 	}
 }
