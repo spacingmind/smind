@@ -19,6 +19,9 @@ const (
 	bmin = 10 * time.Millisecond
 	bmax = 30 * time.Millisecond
 	poll = 7 * time.Millisecond
+
+	remoteTask   = "42"
+	remoteTaskID = int64(42)
 )
 
 type step struct {
@@ -36,6 +39,8 @@ type fakeObserver struct {
 	once      sync.Once
 	status    wire.RunStatus
 	events    []wire.Event
+	t         *testing.T
+	taskIDs   []int64
 }
 
 func newObserver(script ...step) *fakeObserver {
@@ -57,11 +62,17 @@ func (f *fakeObserver) Wait(ctx context.Context, ref string, _ client.CallOpts, 
 	return client.Host{HostID: ref, Alias: "box"}, s.res, s.err
 }
 
-func (f *fakeObserver) RunStatus(context.Context, string, client.CallOpts, string, int64) (wire.RunStatus, error) {
+func (f *fakeObserver) RunStatus(_ context.Context, _ string, _ client.CallOpts, runID string, taskID int64) (wire.RunStatus, error) {
+	if runID != "" && taskID != 0 {
+		f.t.Errorf("RunStatus got both run id %q and task id %d", runID, taskID)
+	}
 	return f.status, nil
 }
 
-func (f *fakeObserver) Activity(context.Context, string, client.CallOpts, int64, string, int64, int) (wire.Activity, error) {
+func (f *fakeObserver) Activity(_ context.Context, _ string, _ client.CallOpts, taskID int64, _ string, _ int64, _ int) (wire.Activity, error) {
+	f.mu.Lock()
+	f.taskIDs = append(f.taskIDs, taskID)
+	f.mu.Unlock()
 	return wire.Activity{Events: f.events}, nil
 }
 
@@ -88,6 +99,10 @@ func (n *fakeNotifier) got() []runs.RemoteChildFacts {
 }
 
 type fakeHosts map[string]string
+
+type errHosts struct{}
+
+func (errHosts) Alias(string) (string, bool, error) { return "", false, errors.New("registry down") }
 
 func (h fakeHosts) Alias(id string) (string, bool, error) {
 	a, ok := h[id]
@@ -147,10 +162,11 @@ func openStore(t *testing.T) *store.Store {
 
 func newEnv(t *testing.T, notify bool, hosts Hosts, obs *fakeObserver) *env {
 	t.Helper()
+	obs.t = t
 	e := &env{st: &recStore{Store: openStore(t)}, obs: obs, not: &fakeNotifier{}, sl: &sleeps{}}
 	id, err := e.st.PutFleetRemoteTaskAndWatch(
-		store.FleetRemoteTask{HostID: "host-0001-xyz", RemoteTaskID: "rt-1", Title: "remote work", State: "running"},
-		&store.FleetWatch{HostID: "host-0001-xyz", RemoteTaskID: "rt-1", RemoteRunID: "rr-1", Notify: notify},
+		store.FleetRemoteTask{HostID: "host-0001-xyz", RemoteTaskID: remoteTask, Title: "remote work", State: "running"},
+		&store.FleetWatch{HostID: "host-0001-xyz", RemoteTaskID: remoteTask, RemoteRunID: "rr-1", Notify: notify},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -287,6 +303,17 @@ func TestFleetWatchThreeFailuresStatusUnknownNeverFinished(t *testing.T) {
 	})
 }
 
+func TestFleetWatchAliasErrorsFallBackToHostIDPrefix(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, true, errHosts{}, newObserver())
+	e.start(t)
+	e.settle(t)
+	got := e.not.got()
+	if len(got) != 1 || got[0].Kind != runs.RemoteStatusUnknown || got[0].Host != "host-000" {
+		t.Fatalf("notices = %+v, want one status_unknown from host-000", got)
+	}
+}
+
 func TestFleetWatchHostRemovedUnavailable(t *testing.T) {
 	t.Parallel()
 	t.Run("alias lookup", func(t *testing.T) {
@@ -353,6 +380,9 @@ func TestFleetWatchFinishDeliveredOnce(t *testing.T) {
 		got[0].LastText != "all good" || got[0].StopReason != "end_turn" {
 		t.Fatalf("notices = %+v", got)
 	}
+	if len(obs.taskIDs) != 1 || obs.taskIDs[0] != remoteTaskID {
+		t.Fatalf("activity task ids = %v, want [%d]", obs.taskIDs, remoteTaskID)
+	}
 
 	e.w.Add(e.watch)
 	if err := e.w.Start(context.Background()); err != nil {
@@ -374,6 +404,9 @@ func TestFleetWatchLastTextIsTrailingTextEvents(t *testing.T) {
 	if got := e.not.got(); len(got) != 1 || got[0].LastText != "bc" {
 		t.Fatalf("notices = %+v, want LastText bc", got)
 	}
+	if len(obs.taskIDs) != 1 || obs.taskIDs[0] != remoteTaskID {
+		t.Fatalf("activity task ids = %v, want [%d]", obs.taskIDs, remoteTaskID)
+	}
 }
 
 func TestFleetCallerRestartStillGetsFinishNotification(t *testing.T) {
@@ -392,8 +425,8 @@ func TestFleetCallerRestartStillGetsFinishNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 	watchID, err := st.PutFleetRemoteTaskAndWatch(
-		store.FleetRemoteTask{HostID: "h1", RemoteTaskID: "rt-1", LocalTaskID: task.ID, Title: "remote work"},
-		&store.FleetWatch{HostID: "h1", RemoteTaskID: "rt-1", RemoteRunID: "rr-1", LocalTaskID: task.ID, ChatID: chat.ID, Notify: true},
+		store.FleetRemoteTask{HostID: "h1", RemoteTaskID: remoteTask, LocalTaskID: task.ID, Title: "remote work"},
+		&store.FleetWatch{HostID: "h1", RemoteTaskID: remoteTask, RemoteRunID: "rr-1", LocalTaskID: task.ID, ChatID: chat.ID, Notify: true},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -470,7 +503,7 @@ func TestFleetCallerRestartStillGetsFinishNotification(t *testing.T) {
 			events = append(events, it)
 		}
 	}
-	if len(events) != 1 || !strings.Contains(events[0].Prompt, "box:rt-1") || !strings.Contains(events[0].Prompt, `untrusted="true"`) {
+	if len(events) != 1 || !strings.Contains(events[0].Prompt, "box:"+remoteTask) || !strings.Contains(events[0].Prompt, `untrusted="true"`) {
 		t.Fatalf("child events = %+v, want exactly one with the alias and untrusted text", events)
 	}
 }

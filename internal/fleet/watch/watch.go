@@ -294,6 +294,9 @@ func (w *Watcher) deliverUnavailable(ctx context.Context, fw store.FleetWatch) {
 // deliver fills the identity facts shared by every kind and hands them to
 // the notifier; a watch that does not notify is closed here instead.
 func (w *Watcher) deliver(ctx context.Context, fw store.FleetWatch, f runs.RemoteChildFacts, alias string) {
+	if alias == "" {
+		alias = fw.HostID[:min(8, len(fw.HostID))]
+	}
 	f.Host, f.RemoteTaskID, f.RunID = alias, fw.RemoteTaskID, fw.RemoteRunID
 	if f.Title == "" {
 		f.Title = w.mirrorTitle(fw)
@@ -336,10 +339,15 @@ func (w *Watcher) deliverFinished(ctx context.Context, fw store.FleetWatch, alia
 }
 
 func (w *Watcher) lastText(ctx context.Context, fw store.FleetWatch, o client.CallOpts) string {
+	// fleet.task.activity refuses a zero task id, unlike fleet.run.status.
+	taskID, err := strconv.ParseInt(fw.RemoteTaskID, 10, 64)
+	if err != nil || taskID == 0 {
+		return ""
+	}
 	var events []wire.Event
 	var cursor int64
 	for range activityPages {
-		act, err := w.o.Observer.Activity(ctx, fw.HostID, o, 0, fw.RemoteRunID, cursor, activityLimit)
+		act, err := w.o.Observer.Activity(ctx, fw.HostID, o, taskID, fw.RemoteRunID, cursor, activityLimit)
 		if err != nil {
 			break
 		}
