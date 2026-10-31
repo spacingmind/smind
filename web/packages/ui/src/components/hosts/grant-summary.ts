@@ -11,23 +11,6 @@ export function grantSummary(g: FleetGrant): string {
   return `${g.ops.join(", ")} · ${agents} · up to ${Math.round(g.maxWallSeconds / 60)} min per run · $${g.maxCostUsd.toFixed(2)} per 24 h`;
 }
 
-/**
- * The same facts as {@link grantSummary}, one chip per part, with every inner space turned into a
- * non-breaking one so a part never wraps.
- */
-export function grantParts(g: FleetGrant): string[] {
-  const parts =
-    g.ops.length === 1 && g.ops[0] === "read"
-      ? ["Read only"]
-      : [
-          g.ops.join(", "),
-          `${g.maxLiveAgents} live agent${g.maxLiveAgents === 1 ? "" : "s"}`,
-          `up to ${Math.round(g.maxWallSeconds / 60)} min per run`,
-          `$${g.maxCostUsd.toFixed(2)} per 24 h`,
-        ];
-  return parts.map((part) => part.replace(/ /g, "\u00a0"));
-}
-
 /** The six-digit SAS as the human compares it: two groups of three. */
 export function formatSas(s: string): string {
   const digits = normalizeSas(s);

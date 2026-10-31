@@ -141,8 +141,12 @@ and junctions are resolved before comparing. `%USERPROFILE%`, `~` and `$HOME`
 are all your home. The always-denied list also covers `C:\Windows`, `Program
 Files`, `ProgramData` and `AppData`, and the PowerShell and cmd equivalents of
 `rm`, `copy` and `move`, `Get-Content` of secrets, `Get-ChildItem Env:`, and
-`iwr … | iex`. A command string passed to `powershell -Command` or `cmd /c` is
-never looked into, so it is always asked. Anything the engine cannot place on
+`iwr … | iex`. A command string passed to `powershell -Command`, `pwsh -c` or `cmd /c` is
+read in its own syntax and the commands inside it are checked like any other, so
+the always-denied list and your deny and ask rules apply to them; the wrapper
+itself is never auto-approved. A string the engine cannot read with certainty
+(an encoded command, a script block, escape characters, a variable that builds
+the command) is asked. Anything the engine cannot place on
 Windows (`C:foo`, `\\.\pipe`, `file:stream`, trailing dots) is asked or denied,
 never allowed.
 

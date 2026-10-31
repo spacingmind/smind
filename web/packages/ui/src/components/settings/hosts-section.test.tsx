@@ -61,8 +61,7 @@ describe("settings-hosts section", () => {
     expect(screen.getByTestId("host-link-mac")).toHaveTextContent("Connected");
     expect(screen.getByTestId("host-link-linux")).toHaveTextContent("Unreachable");
     expect(screen.getByTestId("host-refused-win")).toHaveTextContent("update smind on win (has 0.16, needs >= 0.17)");
-    expect(screen.getByTestId("host-sas-nas")).toHaveTextContent("Confirm this code on nas");
-    expect(screen.getByTestId("host-sas-code-nas")).toHaveTextContent("123 456");
+    expect(screen.getByTestId("host-sas-nas")).toHaveTextContent("Confirm this code on nas: 123 456");
     expect(screen.getByTestId("host-pending-nas")).toHaveTextContent("Waiting for approval on nas");
     expect(screen.getByTestId("host-pending-box")).toHaveTextContent("Awaiting your approval");
     expect(screen.getByTestId("host-review-box")).toBeInTheDocument();
