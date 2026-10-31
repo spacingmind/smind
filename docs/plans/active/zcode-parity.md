@@ -262,6 +262,81 @@ Audit frames `zc_{light,dark}_1280_home` only (sources: `WorkspaceSidebar.tsx`,
 
 None: reference-only reimplementation.
 
+## Stage 3c — Composer + home landing (audit 3, 6, 7, 17)
+
+One PR, reference-only (no ZCode source copied, no "Ported from" headers; the shape comes
+from the audit frames `zc_{light,dark}_1280_{home,modemenu,projmenu}`). No behaviour change
+to the task composer: profiles, models, thinking, attachments, @file/PR/issue attach,
+drafts, Cmd+L focus, queue-vs-interrupt (`whenBusy`), Esc-stop and Shift+Tab mode cycle
+stay as they are. No daemon/wsapi change; the mobile app is untouched.
+
+### References (ZCode files consulted, read-only)
+
+Audit frames only (ZCode sources named by the audit: `WelcomeScreen.tsx`,
+`NewTaskButtonGroup.tsx`, `LexicalChatInput.tsx`, `composer-toolbar-layout/`,
+`ModelConfigSelect.tsx`, `ChatErrorBanner.tsx`).
+
+### Design decisions
+
+- The landing composer is **not** a second composer implementation of run logic: it shares
+  the card shell constants (`lib/composer-shell.ts`) and `PromptTextarea` with the task
+  composer, and creates the task through the same `task.create` RPC as the new-task dialog.
+  The first prompt is carried into the new task as the composer draft (the mechanism the
+  dialog already uses to carry a picked issue), so run config (profile/model/mode), the
+  `whenBusy` choice and sending stay in the task composer, which owns them. Consequence: a
+  landing submit creates the task and opens it with the prompt ready; one more Enter sends.
+  Recommendation to the Human: keep it (auto-send would need a pending-send hand-off into
+  the task composer's submit path); say so if you want it.
+- Model/mode chips are not on the landing: they are per-chat run config keyed by a chat id
+  that does not exist yet (inventing them would be a fake affordance).
+- The notices row on the landing is the existing global `DesktopDaemonBanner` (rendered above
+  every screen); the untrusted-source banner appears in the task view. Both adopt the new
+  `NoticeBanner` primitive.
+
+### Acceptance criteria
+
+- **AC1 (item 3)** With no task selected the main pane shows a landing: smind's own mark,
+  a short neutral greeting H1, a project chip (workspace picker, remembered in a preference
+  store) and a composer card (shared shell, `PromptTextarea`, circular send). Submitting
+  creates a task in the chosen project (title from the prompt's first line, max 60 chars)
+  via `task.create`, seeds the draft with the full prompt, and selects the task. Disabled
+  with a stated reason while disconnected, with no projects, or with an empty prompt.
+- **AC2 (item 7)** The task composer and the landing share `composer-shell.ts` (card,
+  send button classes); the send button is circular, and when disabled stays clearly a
+  button (dimmed, not invisible). Textarea min height unchanged behaviour (2 rows).
+- **AC3 (item 6)** The permission-mode menu items show icon + label + one-line description
+  + check, in a `rounded-xl` ~220px popover; the project menu has a search field (shown
+  from 6 projects up) and a footer action "Add project" that opens the existing
+  new-workspace dialog.
+- **AC4 (item 17)** `NoticeBanner` (info icon, text, up to two pill actions, dismiss `x`,
+  tones info/warning/error) is used by `DesktopDaemonBanner` and `UntrustedBanner`; all
+  existing test ids and behaviours stay.
+- **AC5** Frames: audit-format sheets (L = ZCode raw, R = smind after) for home/empty,
+  composer states (empty, with attachment, mode menu open, project menu open), notices;
+  1280 light + dark, 390 smind-only, plus menu open/close transition frames, in
+  `/tmp/steward4/zcode-audit/after/composer-home/`. All looked at.
+- **AC6** `task lint` + `task test` green on the final head; one mutation per
+  load-bearing test.
+
+### Named tests
+
+- `components/ui/notice-banner.test.tsx`: `renders icon, text and tone`,
+  `renders primary and secondary actions`, `dismiss calls onDismiss and is absent without it`
+- `components/pickers/pickers.test.tsx`: `mode items show description and check`
+- `lib/composer-shell.test.ts`: `card and send classes are shared constants` (pins
+  `rounded-2xl` card and `rounded-full` send)
+- `components/home/home-landing.test.tsx`: `renders mark, greeting, project chip and composer`,
+  `submit creates a task in the chosen project and selects it`, `submit seeds the composer draft with the prompt`,
+  `title is the first line truncated to 60 chars`, `send is disabled when empty, offline or without projects`,
+  `project menu filters by search and picks a project`, `project choice is remembered`,
+  `Add project calls the handler`
+- `stores/home-project-store.test.ts`: `persists the chosen workspace id`
+- `App.test.tsx`: `shows the landing when no task is selected` (replaces the old text assertion)
+
+### Ported files and sources
+
+None: reference-only reimplementation.
+
 ## Stage 4 — mobile tokens
 
 Port the Stage 1 table into the Expo app's theme (`mobile/`), own PR, after 1.
