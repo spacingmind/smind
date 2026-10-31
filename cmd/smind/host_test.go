@@ -256,3 +256,33 @@ func TestHostInvitePrintsInviteAndHints(t *testing.T) {
 		}
 	}
 }
+
+func TestHostRouteReadsPasswordFromEnvOnly(t *testing.T) {
+	hostHome(t, true)
+	t.Setenv("HOST_PW", "route-pw")
+	d := &fakeDaemon{results: map[string]any{"fleet.host.route": map[string]any{"ok": true}}}
+	useHostDaemon(t, d)
+
+	code, out, errOut := runHostCmd("route", "bee", "--addr", "ws://10.0.0.2:4648", "--password-env", "HOST_PW", "--allow-cleartext")
+	if code != 0 {
+		t.Fatalf("route = %d, stderr %q", code, errOut)
+	}
+	if !strings.Contains(out, "route set for bee") {
+		t.Fatalf("stdout = %q", out)
+	}
+	want := map[string]any{"host": "bee", "address": "ws://10.0.0.2:4648", "password": "route-pw", "allowCleartext": true}
+	if !reflect.DeepEqual(d.calls[0].params, want) {
+		t.Fatalf("params = %v, want %v", d.calls[0].params, want)
+	}
+
+	// --password does not exist; --addr is required.
+	d.calls = nil
+	for _, args := range [][]string{
+		{"route", "bee", "--addr", "ws://h:1", "--password", "x"},
+		{"route", "bee"},
+	} {
+		if code, _, _ := runHostCmd(args...); code != 2 || len(d.calls) != 0 {
+			t.Fatalf("%v = %d, calls %v; want a usage error and no call", args, code, d.calls)
+		}
+	}
+}

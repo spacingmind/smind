@@ -37,6 +37,7 @@ const hostUsage = `usage: smind host ls [--json]
        smind host disable-reverse <host>
        smind host rename <host> <alias>
        smind host test <host>
+       smind host route <host> --addr <ws(s)://host:port> [--password-env VAR] [--allow-cleartext]
 
 Pair and manage connected hosts. Needs fleet.enabled: true and the daemon
 running. <host> is a host id or its alias.
@@ -85,6 +86,8 @@ func runHost(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runHostVerb(ctx, verb, rest, stdout, stderr)
 	case "test":
 		return runHostTest(ctx, rest, stdout, stderr)
+	case "route":
+		return runHostRoute(ctx, rest, stdout, stderr)
 	case "rename":
 		return runHostRename(ctx, rest, stdout, stderr)
 	case "grant":
@@ -362,6 +365,48 @@ func runHostAdd(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if res.Warning != "" {
 		fmt.Fprintf(stderr, "warning: %s\n", res.Warning)
 	}
+	return 0
+}
+
+// runHostRoute sets the direct address this daemon dials a paired host on,
+// for example after that host enabled its reverse link to us.
+func runHostRoute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	positional, args := hostSplitArgs(args)
+	fs := flag.NewFlagSet("host route", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	addr := fs.String("addr", "", "direct address of the host (ws(s)://host:port)")
+	passwordEnv := fs.String("password-env", "", "environment variable holding the host password (never a flag value, so it stays out of shell history)")
+	allowCleartext := fs.Bool("allow-cleartext", false, "accept a cleartext ws:// route outside the encrypted overlay (prompts readable on the network)")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if len(positional) != 1 || positional[0] == "" || fs.NArg() != 0 || *addr == "" {
+		fmt.Fprint(stderr, hostUsage)
+		return 2
+	}
+	password := ""
+	if *passwordEnv != "" {
+		password = os.Getenv(*passwordEnv)
+	}
+
+	call, closeFn, ok := openHost(ctx, stderr)
+	if !ok {
+		return 1
+	}
+	defer closeFn()
+
+	params := map[string]any{"host": positional[0], "address": *addr, "password": password, "allowCleartext": *allowCleartext}
+	var res struct {
+		OK bool `json:"ok"`
+	}
+	if err := call(ctx, "fleet.host.route", params, &res); err != nil {
+		fmt.Fprintf(stderr, "smind host route: %s\n", hostErrMessage(err))
+		return 1
+	}
+	fmt.Fprintf(stdout, "route set for %s\n", positional[0])
 	return 0
 }
 
