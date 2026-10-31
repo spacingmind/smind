@@ -65,7 +65,11 @@ func handleTaskTree(db *store.Store, reg *runs.Registry, stalled *stalledSource)
 		}
 
 		root.IncludeArchived = p.IncludeArchived
-		nodes, truncated, err := buildTaskTree(db, reg, p.WorkspaceID, root)
+		remotes, err := treeRemoteTasks(db)
+		if err != nil {
+			return nil, fmt.Errorf("task.tree: %w", err)
+		}
+		nodes, truncated, err := buildTaskTreeWithRemote(db, reg, p.WorkspaceID, root, remotes)
 		if err != nil {
 			return nil, fmt.Errorf("task.tree: %w", err)
 		}
@@ -131,6 +135,49 @@ func (a *API) PublishTaskStalled(taskID int64, title string, minutes int, since 
 // with task.archiveFinished / task.stopTree so their selection is exactly
 // what task.tree shows.
 func buildTaskTree(db *store.Store, reg *runs.Registry, workspaceID int64, root tasktree.Root) ([]tasktree.Node, bool, error) {
+	return buildTaskTreeWithRemote(db, reg, workspaceID, root, nil)
+}
+
+// treeRemoteTasks loads the fleet mirrors task.tree shows as remote leaves
+// (ADR-0048 F4): none when fleet is off, and a mirror whose host row is gone
+// is skipped. Only the task.tree handler calls it; the bulk actions never
+// see a mirror.
+func treeRemoteTasks(db *store.Store) ([]tasktree.RemoteTask, error) {
+	if !configFleetEnabled() {
+		return nil, nil
+	}
+	mirrors, err := db.ListFleetRemoteTasks("")
+	if err != nil {
+		return nil, fmt.Errorf("list remote tasks: %w", err)
+	}
+	if len(mirrors) == 0 {
+		return nil, nil
+	}
+	hosts, err := db.ListFleetHosts()
+	if err != nil {
+		return nil, fmt.Errorf("list fleet hosts: %w", err)
+	}
+	alias := make(map[string]string, len(hosts))
+	for _, h := range hosts {
+		alias[h.HostID] = h.Alias
+	}
+	out := make([]tasktree.RemoteTask, 0, len(mirrors))
+	for _, m := range mirrors {
+		a, ok := alias[m.HostID]
+		if !ok {
+			continue
+		}
+		out = append(out, tasktree.RemoteTask{
+			HostID: m.HostID, Alias: a, RemoteTaskID: m.RemoteTaskID, ParentID: m.LocalTaskID,
+			Title: m.Title, State: m.State, CostUSD: m.CostUSD,
+		})
+	}
+	return out, nil
+}
+
+// buildTaskTreeWithRemote is buildTaskTree plus remote leaves under their
+// local parents (tasktree.BuildWithRemote); nil remotes is the local tree.
+func buildTaskTreeWithRemote(db *store.Store, reg *runs.Registry, workspaceID int64, root tasktree.Root, remotes []tasktree.RemoteTask) ([]tasktree.Node, bool, error) {
 	tasks, err := db.ListTasksByWorkspace(workspaceID)
 	if err != nil {
 		return nil, false, fmt.Errorf("list tasks: %w", err)
@@ -139,7 +186,7 @@ func buildTaskTree(db *store.Store, reg *runs.Registry, workspaceID int64, root 
 	if err != nil {
 		return nil, false, fmt.Errorf("sum usage: %w", err)
 	}
-	nodes, truncated := tasktree.Build(toTreeTasks(tasks), toTreeFacts(reg.TaskRunFacts()), toTreeUsage(usage), root)
+	nodes, truncated := tasktree.BuildWithRemote(toTreeTasks(tasks), toTreeFacts(reg.TaskRunFacts()), toTreeUsage(usage), remotes, root)
 	return nodes, truncated, nil
 }
 

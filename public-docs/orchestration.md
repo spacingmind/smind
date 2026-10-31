@@ -104,6 +104,26 @@ Each line shows the task, its tier, run state, pending permissions, `stalled`
 when it is stalled, and cost. The same tree is in the web app and, read-only,
 in the [mobile app](mobile-and-relay.md#the-read-only-task-tree).
 
+### Tasks on a connected host in the tree
+
+A task you delegated to a [connected host](hosts.md) shows up in the tree under
+the task that delegated it, as a leaf marked with the host's alias (a small chip
+in the web app and the mobile app, `alias:id` on the command line). It is a
+read-only copy: the other host owns the task, so you cannot open, stop or
+archive it from this tree. Stop it with the host tools of your agent or on the
+other host.
+
+- Its state and reported cost come from the other host and are refreshed about
+  every ten seconds while it is running. If the host is unreachable the last
+  known state stays, so treat an old row as stale.
+- Its cost and state count in the totals of every task above it, like a local
+  sub-task. A remote run that reported no cost is not estimated.
+- The [tree budget](#tree-budget) counts the reported cost of remote tasks too,
+  so a budgeted tree stops launching agents when local and remote spend together
+  reach it.
+- Renaming a host changes the alias shown, nothing else. Deleting the local copy
+  loses no work: the task still exists on its owner.
+
 ## Tree budget
 
 A tree budget caps the **reported cost** of a root task and all its

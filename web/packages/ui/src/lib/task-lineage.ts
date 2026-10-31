@@ -39,6 +39,14 @@ export interface TaskTreeNode {
   taskStatus: string;
   tier: "supervisor" | "leader" | "coder" | null;
   childCount: number;
+  /** F4: true for a node mirrored from another host; read-only, its `id` is negative and unique only within one response. */
+  remote?: boolean;
+  /** F4: alias of the owning host (remote nodes only). */
+  host?: string;
+  /** F4: id of the owning host (remote nodes only). */
+  hostId?: string;
+  /** F4: "alias:id" identity of a remote task. */
+  globalId?: string;
   /** ADR-0041 A5 tree budget: set on the ROOT node only (same fields as on Task). */
   budgetUsd?: number | null;
   budgetSpentUsd?: number | null;
