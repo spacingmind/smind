@@ -554,6 +554,59 @@ describe("App live events", () => {
     expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent("done");
   });
 
+  it("archiving the selected task moves the selection off it (UAT B-01)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
+    const composerA = screen.getByLabelText("Prompt");
+    fireEvent.change(composerA, { target: { value: "draft for A" } });
+
+    // {task: store.Task} -- internal/wsapi/events.go taskArchivedPayload,
+    // the same shape workspace-tree.ts's "task.archived" case consumes.
+    pushNotification(socket, "task.archived", { task: { ...TASK_A, ArchivedAt: "2024-01-02T00:00:00Z" } });
+    await flush();
+
+    // TASK_A's pane and composer must be gone: the header names TASK_B and
+    // no textarea still carries A's half-typed prompt (the landing's own
+    // composer also matches aria-label "Prompt", so the draft -- which
+    // only A's composer holds -- is the discriminator).
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
+    expect(screen.queryByDisplayValue("draft for A")).not.toBeInTheDocument();
+  });
+
+  it("archiving the only task lands on the landing, not on the archived task (UAT B-01)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "draft for A" } });
+
+    pushNotification(socket, "task.archived", { task: { ...TASK_A, ArchivedAt: "2024-01-02T00:00:00Z" } });
+    await flush();
+
+    // No other live task exists, so the landing shows and A's composer
+    // (matched by its draft -- the landing has a "Prompt" of its own) is
+    // gone.
+    expect(screen.getByTestId("home-landing")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("draft for A")).not.toBeInTheDocument();
+  });
+
   it("an empty daemon (every list RPC resolving null) renders the sidebar empty state without throwing", async () => {
     // Regression for the fresh-install crash: workspace.list answered
     // literal null and useWorkspaceTree called .map on it. Backend now
