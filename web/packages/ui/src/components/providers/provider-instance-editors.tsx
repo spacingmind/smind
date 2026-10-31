@@ -22,6 +22,9 @@ type EditorProps = {
   clearError: () => void;
 };
 
+/** A row whose body is a full-width editor: the label and description take the whole row, the editor sits under them. */
+const STACKED_ROW = "sm:flex-col sm:items-stretch sm:justify-start";
+
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i]);
 }
@@ -97,25 +100,7 @@ function ModelsEditor({ info, hasClient, pending, update, clearError }: EditorPr
       testId={`instance-models-${info.id}`}
       label="Models"
       description="Replace list swaps the provider's catalog; Add to list extends it."
-      control={
-        <div className="flex items-center gap-2">
-          {unchanged ? null : (
-            <Button type="button" variant="ghost" size="xs" disabled={disabled} data-testid="instance-models-reset" onClick={reset}>
-              Reset
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            disabled={disabled || unchanged}
-            data-testid="instance-models-save"
-            onClick={save}
-          >
-            Save models
-          </Button>
-        </div>
-      }
+      className={STACKED_ROW}
     >
       <div className="flex flex-col gap-2">
         <SegmentedControl<ModelsMode>
@@ -194,6 +179,23 @@ function ModelsEditor({ info, hasClient, pending, update, clearError }: EditorPr
             Add
           </Button>
         </div>
+        <div className="flex justify-end gap-2">
+          {unchanged ? null : (
+            <Button type="button" variant="ghost" size="xs" disabled={disabled} data-testid="instance-models-reset" onClick={reset}>
+              Reset
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={disabled || unchanged}
+            data-testid="instance-models-save"
+            onClick={save}
+          >
+            Save models
+          </Button>
+        </div>
       </div>
     </SettingsRow>
   );
@@ -217,29 +219,7 @@ function ToolsEditor({ info, hasClient, pending, update, clearError }: EditorPro
       testId={`instance-tools-${info.id}`}
       label="Disallowed tools"
       description="Claude Code tools this instance may not call."
-      control={
-        <div className="flex items-center gap-2">
-          {unchanged ? null : (
-            <Button type="button" variant="ghost" size="xs" disabled={disabled} data-testid="instance-tools-reset" onClick={() => {
-              clearError();
-              setTools(stored);
-              setTyped("");
-            }}>
-              Reset
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            disabled={disabled || unchanged}
-            data-testid="instance-tools-save"
-            onClick={() => update({ id: info.id, disallowedTools: tools })}
-          >
-            Save
-          </Button>
-        </div>
-      }
+      className={STACKED_ROW}
     >
       <div className="flex flex-col gap-2">
         {tools.length === 0 ? (
@@ -303,6 +283,34 @@ function ToolsEditor({ info, hasClient, pending, update, clearError }: EditorPro
           >
             <Icons.add aria-hidden />
             Add
+          </Button>
+        </div>
+        <div className="flex justify-end gap-2">
+          {unchanged ? null : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              disabled={disabled}
+              data-testid="instance-tools-reset"
+              onClick={() => {
+                clearError();
+                setTools(stored);
+                setTyped("");
+              }}
+            >
+              Reset
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={disabled || unchanged}
+            data-testid="instance-tools-save"
+            onClick={() => update({ id: info.id, disallowedTools: tools })}
+          >
+            Save
           </Button>
         </div>
       </div>
