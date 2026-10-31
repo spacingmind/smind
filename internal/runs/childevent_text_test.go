@@ -198,3 +198,25 @@ func TestBuildChildEventBlock_KeepsHandoffJSONBlock(t *testing.T) {
 		}
 	}
 }
+
+// TestChildEventText_NewClasses: a failed child's line names the class and,
+// when the run has one, the next step (a parent can route on the line alone).
+func TestChildEventText_NewClasses(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ kind, next, want string }{
+		{"auth_expired", "Sign in again to glm", `- task #1 "t" run r: error · auth_expired · next: Sign in again to glm · cost not reported`},
+		{"model_not_in_plan", "Pick another model", `- task #1 "t" run r: error · model_not_in_plan · next: Pick another model · cost not reported`},
+		{"transient_429", "Retrying automatically (1 of 2)", `- task #1 "t" run r: error · transient_429 · next: Retrying automatically (1 of 2) · cost not reported`},
+		{"auth_expired", "", `- task #1 "t" run r: error · auth_expired · cost not reported`},
+	} {
+		got := BuildChildEventBlock(ChildEventFacts{TaskID: 1, Title: "t", RunID: "r", Status: "error", FailureKind: tc.kind, FailureNext: tc.next})
+		if got != tc.want {
+			t.Errorf("%s/%q = %q, want %q", tc.kind, tc.next, got, tc.want)
+		}
+	}
+	reset := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	got := BuildChildEventBlock(ChildEventFacts{TaskID: 1, Title: "t", RunID: "r", Status: "error", FailureKind: "plan_window_exhausted", FailureWindow: "5h", FailureResetAt: &reset, FailureNext: "Wait: resets 12:00"})
+	if !strings.Contains(got, "plan_window_exhausted (5h window), resets 2026-11-01T12:00:00Z · next: Wait: resets 12:00") {
+		t.Errorf("plan window line = %q", got)
+	}
+}

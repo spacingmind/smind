@@ -25,11 +25,13 @@ type ChildEventFacts struct {
 	TaskID                                        int64
 	Title, RunID, Status, StopReason, Disposition string
 	FailureKind, FailureWindow                    string
-	FailureResetAt                                *time.Time
-	FailureResetInferred                          bool
-	CostUSD                                       *float64
-	BaseSHA, HeadSHA                              string
-	LastText                                      string
+	// FailureNext is the label of the failure's next action ("" = none).
+	FailureNext          string
+	FailureResetAt       *time.Time
+	FailureResetInferred bool
+	CostUSD              *float64
+	BaseSHA, HeadSHA     string
+	LastText             string
 }
 
 // BuildChildEventBlock renders the status line plus the untrusted
@@ -58,6 +60,9 @@ func BuildChildEventBlock(f ChildEventFacts) string {
 			fail += ", resets " + approx + f.FailureResetAt.Format(time.RFC3339)
 		case failure.IsPlanLimit(f.FailureKind):
 			fail += ", reset time unknown"
+		}
+		if f.FailureNext != "" {
+			fail += " · next: " + clipLine(f.FailureNext)
 		}
 		parts = append(parts, fail)
 	}
@@ -183,4 +188,13 @@ func escapeCut(s string, max int) (string, bool) {
 		b.WriteString(piece)
 	}
 	return b.String(), false
+}
+
+// clipLine keeps a label to one short line (it can carry peer-chosen words).
+func clipLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > 120 {
+		return string(r[:120]) + "…"
+	}
+	return s
 }

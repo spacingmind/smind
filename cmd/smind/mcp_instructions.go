@@ -24,9 +24,24 @@ The loop:
      A stopNote on any other done run says it may be incomplete too.
    - timed_out: still running -- a timeout is not a failure; re-issue
      task_wait. task_status is the non-blocking check.
-   A failed run with failureKind rate_limited hit a provider quota: resetAt
-   says when it resets; retry on another provider or after resetAt, do not
-   retry immediately.
+   A failed run carries failureKind, an action {kind, target, label} and a
+   failureNote; route on them (the note says what NOT to do):
+     auth_expired          a human must sign in again; do not retry, do not
+                           fall back (action sign_in).
+     model_not_in_plan     re-send with a different model; do not retry the
+                           same one, do not fall back (action pick_model).
+     plan_window_exhausted the plan window is used up: wait until resetAt or
+                           use fallbackProfileId; do not retry immediately
+                           (action wait_until / switch_profile).
+     transient_429         a short throttle, not a quota: a profile or
+                           orchestrator run is retried by the daemon twice by
+                           itself; otherwise retry shortly; do not switch
+                           profile (action auto_retry / retry_now).
+     rate_limited          a limit of unknown kind: retry after a short wait;
+                           do not assume the plan is exhausted.
+     cli_exited            the CLI died; its session is stored: send
+                           "continue".
+   task wait exits 6 for the limit classes and 7 when a human must fix setup.
 5. Review: task_logs for the transcript, or read the git state in the
    task's worktree path. task_list/task_get/chat_list/chat_new manage and
    inspect tasks and their conversation threads.

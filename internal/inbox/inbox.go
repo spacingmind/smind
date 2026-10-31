@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/validation"
@@ -29,6 +30,7 @@ const (
 	KindHostPair    = "host_pair"
 	KindHostDown    = "host_down"
 	KindHostRefused = "host_refused"
+	KindRunFailed   = "run_failed"
 )
 
 // Item states.
@@ -66,6 +68,9 @@ type Item struct {
 	SnoozedUntil *time.Time `json:"snoozedUntil,omitempty"`
 	Attention    string     `json:"attention"` // high | normal
 	Links        Links      `json:"links"`
+	// Action is the next step of a run_failed item (failure.Action), omitted
+	// for every other kind.
+	Action *failure.Action `json:"action,omitempty"`
 }
 
 // Links point at what the item is about.
@@ -113,6 +118,17 @@ type HostLinkIssue struct {
 	Since    time.Time
 }
 
+// FailedRun is a task's latest run when it ended in error with a typed
+// failure and no run has followed it (run failure classes plan, AC16). Kind is
+// the failureKind, Action the daemon-built next step.
+type FailedRun struct {
+	RunID      string
+	TaskID     int64
+	Kind       string
+	Action     *failure.Action
+	FinishedAt time.Time
+}
+
 // Service derives the inbox. Every source is injected.
 type Service struct {
 	DB *store.Store
@@ -128,6 +144,9 @@ type Service struct {
 	// HostLinkIssues lists host links that are down or refused. Nil when
 	// fleet is off: nothing is derived.
 	HostLinkIssues func() []HostLinkIssue
+	// FailedRuns lists tasks whose latest run failed with a typed class. Nil:
+	// nothing is derived.
+	FailedRuns func() []FailedRun
 	// TaskTitle names a task ("" when unknown).
 	TaskTitle func(taskID int64) string
 	Now       func() time.Time
@@ -208,6 +227,14 @@ func (s *Service) derive() ([]Item, error) {
 		}
 	}
 
+	if s.FailedRuns != nil {
+		for _, fr := range s.FailedRuns() {
+			if it, ok := runFailedItem(fr, s.title(fr.TaskID)); ok {
+				items = append(items, it)
+			}
+		}
+	}
+
 	if s.HostPairs != nil {
 		for _, p := range s.HostPairs() {
 			items = append(items, Item{
@@ -244,6 +271,34 @@ func (s *Service) derive() ([]Item, error) {
 		}
 	}
 	return items, nil
+}
+
+// runFailedItem is the inbox row of a failed run, or false when the class has
+// none: cli_exited keeps the footer's Continue, a transient_429 whose retry is
+// still queued is not yet a problem, and an unknown class is not guessed at.
+// A human-fix class (auth_expired, model_not_in_plan) is high: only a person
+// can fix it. The key and CreatedAt come from the run, so reads are stable.
+func runFailedItem(fr FailedRun, title string) (Item, bool) {
+	attention := "normal"
+	switch fr.Kind {
+	case failure.KindAuthExpired, failure.KindModelNotInPlan:
+		attention = "high"
+	case failure.KindPlanWindowExhausted, failure.KindRateLimited:
+	case failure.KindTransient429:
+		if fr.Action != nil && fr.Action.Kind == failure.ActionAutoRetry {
+			return Item{}, false
+		}
+	default:
+		return Item{}, false
+	}
+	summary := "The run failed: " + fr.Kind
+	if fr.Action != nil && fr.Action.Label != "" {
+		summary = fr.Action.Label
+	}
+	return Item{
+		Key: "runfail:" + fr.RunID, Kind: KindRunFailed, TaskID: fr.TaskID, Title: title, Summary: clip(summary, MaxSummary),
+		CreatedAt: fr.FinishedAt, Attention: attention, Links: Links{TaskID: fr.TaskID, RunID: fr.RunID}, Action: fr.Action,
+	}, true
 }
 
 // PermissionSummary builds the redacted line a permission item shows: the tool
