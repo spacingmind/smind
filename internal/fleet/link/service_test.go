@@ -574,24 +574,41 @@ func TestServiceLinkIssuesRefusedAndDownAfterFiveMinutes(t *testing.T) {
 		}
 		return out
 	}
-	got := byKind()
-	if len(got) != 1 || got["refused"].HostID != refusedID || got["refused"].Code != hello.CodeVersionUnsupported || got["refused"].Alias != "refuser" || got["refused"].Guidance == "" {
-		t.Fatalf("issues right away = %+v, want only the refusal", got)
+	// The refused and the down host are re-dialled every BackoffMax and pass
+	// through "connecting" on each lap, so one sample can miss either issue.
+	// Each check polls the derived issues until they satisfy it (bounded),
+	// never a fixed sleep.
+	await := func(what string, ok func(map[string]wsapi.FleetLinkIssue) bool) map[string]wsapi.FleetLinkIssue {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			got := byKind()
+			if ok(got) {
+				return got
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: issues = %+v", what, got)
+			}
+			time.Sleep(time.Millisecond)
+		}
 	}
+	onlyRefusal := func(got map[string]wsapi.FleetLinkIssue) bool {
+		r := got["refused"]
+		return len(got) == 1 && r.HostID == refusedID && r.Code == hello.CodeVersionUnsupported && r.Alias == "refuser" && r.Guidance != ""
+	}
+	await("right away, want only the refusal", onlyRefusal)
 	clk.advance(4 * time.Minute)
-	if got := byKind(); len(got) != 1 {
-		t.Fatalf("issues after 4 minutes = %+v, want only the refusal", got)
-	}
+	await("after 4 minutes, want only the refusal", onlyRefusal)
 	clk.advance(2 * time.Minute)
-	got = byKind()
-	if got["down"].HostID != downID || got["down"].Alias != "downer" || len(got) != 2 {
+	got := await("after 6 minutes, want refusal and down", func(got map[string]wsapi.FleetLinkIssue) bool {
+		return len(got) == 2 && got["refused"].HostID == refusedID && got["down"].HostID == downID
+	})
+	if got["down"].Alias != "downer" {
 		t.Fatalf("issues after 6 minutes = %+v, want refusal and down", got)
 	}
 	// An outbound link that is off is nobody's issue.
 	if err := reg.SetOutboundEnabled(downID, false); err != nil {
 		t.Fatal(err)
 	}
-	if got := byKind(); len(got) != 1 {
-		t.Fatalf("issues with outbound off = %+v", got)
-	}
+	await("with outbound off, want only the refusal", onlyRefusal)
 }

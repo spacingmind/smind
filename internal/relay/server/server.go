@@ -1076,6 +1076,23 @@ func (s *Server) DaemonAttached(workspaceID, sessionID, deviceID string) bool {
 	return r.mu.streams[sideDaemon] != nil
 }
 
+// PushedFrames returns how many frames have ever been queued for the route
+// (evicted ones included) -- test introspection only: unlike BufferedFrames it
+// keeps counting once a full buffer starts evicting.
+func (s *Server) PushedFrames(workspaceID, sessionID, deviceID string) int {
+	s.mu.Lock()
+	r, ok := s.mu.routes[routeKey(workspaceID, sessionID, deviceID)]
+	s.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	r.daemonQ.mu.Lock()
+	r.deviceQ.mu.Lock()
+	defer r.daemonQ.mu.Unlock()
+	defer r.deviceQ.mu.Unlock()
+	return r.daemonQ.pushed + r.deviceQ.pushed
+}
+
 // BufferedFrames returns the number of frames currently held in
 // reconnect buffers for the given route — test introspection only.
 func (s *Server) BufferedFrames(workspaceID, sessionID, deviceID string) int {
