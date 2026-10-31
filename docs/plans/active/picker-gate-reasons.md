@@ -480,14 +480,15 @@ rows/keyboard/chip per section 4, tests 13-18, frames by peer-sonnet. PR4:
   are not in PR1: the fallback profile is per profile, not per provider. UI PR can add it.
 
 ## Progress
-- 2026-11-01 PR3 (web picker): `lib/provider-gate.ts`, `GateSlot` in the shared rows, picker activation/keyboard/trigger chip, `GateActionBridge` (clear cooldown via window event, one handler in App), model-browser carries gate/modelGates. Mobile (PR4) not started.
+- 2026-11-01 PR3 (web picker): `lib/provider-gate.ts`, `GateSlot` in the shared rows, picker activation/keyboard/trigger chip, `GateActionBridge` (clear cooldown via window event, one handler in App), model-browser carries gate/modelGates (#774).
+- 2026-11-01 PR4 (mobile new-task picker, #778): `providerGate.ts` (pure view-model), label suffix in the native pickers, `selectProviderChecked`/`selectModelChecked`, `GateNotice` (existing `Badge` + `TextButton`; clear cooldown over the relay, sign-in hint), Create disabled while hard-gated.
 
 - 2026-11-01 Phase 1: read ADR-0025/0028/0041/0046, the usage-windows, cooldown,
   providers-epic and run-failure-classes plans, `internal/{accounts,quota,routing}`,
   the `provider.list` handler, the web picker and the mobile new-task picker; this
   spec written.
 - 2026-11-01 Spec accepted by the Steward (#767); D1-D5 recorded as Supervisor defaults; PR1 brief added; PR1 waits for #766 on develop.
-- 2026-11-01 PR1 (daemon + wire + typed refusal + MCP text): `internal/gate`, `routing.Exhaustion`, `provider.list` gate/modelGates, `provider.updated` edges, `runs.GatedError`, `SetGate`/`SetFailureHook`, TS types. UI (PR3) and mobile (PR4) not started.
+- 2026-11-01 PR1 (daemon + wire + typed refusal + MCP text): `internal/gate`, `routing.Exhaustion`, `provider.list` gate/modelGates, `provider.updated` edges, `runs.GatedError`, `SetGate`/`SetFailureHook`, TS types. UI (PR3) and mobile (PR4) followed (#774, #778).
 
 ## Validation
 
@@ -502,7 +503,7 @@ PR1 (daemon, wire, typed refusal, MCP text; branch gate-reasons-pr1):
 - AC9: `TestProviderUpdated_PublishedOnGateEdges` (coalesced), `TestProviderGate_AccountChangeClearsRecentFailures`.
 - AC10: not applicable in PR1 (F3).
 - AC11/AC12/AC13: `TestRunStart_GatedNonHumanRefusedTyped`, `TestRunStart_GatedErrorSaysWhatNotToDo`, `TestRunStart_AdvisoryGateNotRefused`, `TestRunStart_OutOfPlanNotRefused`, `TestRunStart_HumanNotRefusedByGate`, `TestProviderCooldownError_IsTypedGate`, `TestMCPInstructions_ListEveryGateReason`.
-- AC14-AC19 (UI, mobile, frames): PR3/PR4, not done. AC20: ADR-0050 amendment + pointers in ADR-0028/0041/0046 done; `docs/cli.md` unchanged (no CLI help text changed).
+- AC14-AC19 (UI, mobile, frames): see the PR3 and PR4 sections below. AC20: ADR-0050 amendment + pointers in ADR-0028/0041/0046 done; `docs/cli.md` unchanged (no CLI help text changed).
 - Mutations (each failed its named test, none a build failure): see the PR body.
 
 Each AC above is confirmed here with the test name and the
@@ -514,4 +515,24 @@ PR3 (web picker, branch gate-reasons-pr3): AC13-AC17 and AC19 evidence
 - Vitest `provider-model-picker-gate.test.tsx` (24), `provider-gate.test.ts`, `gate-action-bridge.test.tsx`; full web suite 427 files / 4496 tests green; `tsc --noEmit` clean.
 - Mutations (each failed its named test): click selects a hard-gated row (provider rows test); Enter no longer runs the action (keyboard test); `isHardGate` always false (helper test); past `until` still gates (helper test); gate no longer inherited by model rows (build test); `gatesBlock` ignored (settings test); bridge listener removed (bridge test); clear control shown without a handler (actions test); gated rows dropped from the arrow walk (keyboard tests).
 - Frames: see the PR body (`/tmp/steward4/zcode-audit/after/gate-reasons/`).
+
+PR4 (mobile new-task picker, #778): AC18 evidence
+
+- `mobile/src/__tests__/providerGate.test.ts` (11, written first) plus `providerCatalog.test.ts`: 33 pass, run with the repo's vitest on a stub `expo/tsconfig.base`; the new pure files typecheck on a file subset.
+- Mutations (each failed its named test): `isHardGate` always false; past `until` still gates; `selectProviderChecked` ignores the gate; `selectModelChecked` ignores it; `defaultSelection` ignores gates; `clear_cooldown` shown without `canClear`; provider option suffix removed.
+
+## Status and not verified
+
+Kept in `active/` (not moved to `completed/`): the web half is confirmed by tests, mutations and frames, but AC18 (mobile) is confirmed by tests only.
+
+Not verified / open:
+
+- Gate notice on a real device or simulator (backlog group E, waits for the Human): the notice layout, the label suffix in the native picker, the Clear tap and the reload after it.
+- Mobile screens have no render-tree test and the full mobile `tsc` was not run in the PR4 environment (no `node_modules`); CI is the check for those.
+- AC10 (fleet wire) has nothing to carry (F3).
+- F4/F5: the provider-instance window edge does not publish `provider.updated`; `gate.window` and the `switch_profile` fallback of `out_of_plan`/`cooling_down` are not built.
+- Web frames come from a standalone harness page, not a live `provider.list`; the light-theme focus-ring fix was not re-framed.
+- Web nits left: the fixed-height popover cuts the 6th provider row at 1280 (it scrolls), the keyboard-active highlight is the existing faint fill, the sheet height changes in one step on Back at 390.
+
+The plan moves to `docs/plans/completed/` when the device check is done and F4/F5 are either built or dropped by decision.
 
