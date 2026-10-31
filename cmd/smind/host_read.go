@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 
 	"github.com/spacingmind/smind/internal/wsclient"
 )
@@ -49,6 +50,21 @@ func hostReadErr(stderr io.Writer, verb string, err error) {
 		return
 	}
 	fmt.Fprintf(stderr, "smind host %s: %v\n", verb, err)
+}
+
+// hostSafeText makes text from a remote host safe to print on a terminal:
+// control runes (ESC, C1, newlines, tabs) become one space and bidi controls
+// are dropped, so the host cannot repaint the screen or forge extra lines.
+func hostSafeText(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsControl(r):
+			return ' '
+		case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // parseHostGlobalID splits "<alias>:<id>" at the first colon.
@@ -249,7 +265,7 @@ func renderHostRead(w io.Writer, verb string, res hostReadResult) error {
 			return err
 		}
 		fmt.Fprintf(w, "hostId: %s\nversion: %s\nfleetV: %d\ncaps: %s\nos: %s/%s\nops: %s\nmaxLiveAgents: %d\nmaxWallSeconds: %d\nmaxCostUsd: %g\n",
-			d.HostID, d.Ver, d.FleetV, strings.Join(d.Caps, ","), d.OS, d.Arch, strings.Join(d.Limits.Ops, ","),
+			hostSafeText(d.HostID), hostSafeText(d.Ver), d.FleetV, hostSafeText(strings.Join(d.Caps, ",")), hostSafeText(d.OS), hostSafeText(d.Arch), hostSafeText(strings.Join(d.Limits.Ops, ",")),
 			d.Limits.MaxLiveAgents, d.Limits.MaxWall, d.Limits.MaxCostUsd)
 	case "workspaces":
 		var d struct {
@@ -270,7 +286,7 @@ func renderHostRead(w io.Writer, verb string, res hostReadResult) error {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "ID\tTITLE\tREPO\tBRANCH")
 		for _, ws := range d.Workspaces {
-			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", ws.ID, ws.Title, ws.RepoURL, ws.DefaultBranch)
+			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", ws.ID, hostSafeText(ws.Title), hostSafeText(ws.RepoURL), hostSafeText(ws.DefaultBranch))
 		}
 		_ = tw.Flush()
 	case "tasks":
@@ -287,7 +303,7 @@ func renderHostRead(w io.Writer, verb string, res hostReadResult) error {
 			tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, "GLOBAL ID\tSTATE\tBRANCH\tTITLE")
 			for _, t := range d.Tasks {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.GlobalID, t.State, t.Branch, t.Title)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", hostSafeText(t.GlobalID), hostSafeText(t.State), hostSafeText(t.Branch), hostSafeText(t.Title))
 			}
 			_ = tw.Flush()
 		}
@@ -299,14 +315,14 @@ func renderHostRead(w io.Writer, verb string, res hostReadResult) error {
 		if err := json.Unmarshal(res.Data, &t); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "globalId: %s\nhost: %s\nid: %d\nworkspaceId: %d\ntitle: %s\nbranch: %s\nstate: %s\n", t.GlobalID, t.Host, t.ID, t.WorkspaceID, t.Title, t.Branch, t.State)
+		fmt.Fprintf(w, "globalId: %s\nhost: %s\nid: %d\nworkspaceId: %d\ntitle: %s\nbranch: %s\nstate: %s\n", hostSafeText(t.GlobalID), hostSafeText(t.Host), t.ID, t.WorkspaceID, hostSafeText(t.Title), hostSafeText(t.Branch), hostSafeText(t.State))
 		if t.ParentID != 0 {
 			fmt.Fprintf(w, "parentId: %d\n", t.ParentID)
 		}
 		if t.Origin != nil {
-			fmt.Fprintf(w, "origin: %s (%s)\n", t.Origin.Host, t.Origin.Trace)
+			fmt.Fprintf(w, "origin: %s (%s)\n", hostSafeText(t.Origin.Host), hostSafeText(t.Origin.Trace))
 		}
-		fmt.Fprintf(w, "createdAt: %s\nupdatedAt: %s\n", t.CreatedAt, t.UpdatedAt)
+		fmt.Fprintf(w, "createdAt: %s\nupdatedAt: %s\n", hostSafeText(t.CreatedAt), hostSafeText(t.UpdatedAt))
 	case "status":
 		var d struct {
 			RunID      string   `json:"runId"`
@@ -323,10 +339,10 @@ func renderHostRead(w io.Writer, verb string, res hostReadResult) error {
 		if err := json.Unmarshal(res.Data, &d); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "runId: %s\ntaskId: %d\nstate: %s\nprovider: %s\n", d.RunID, d.TaskID, d.State, d.Provider)
+		fmt.Fprintf(w, "runId: %s\ntaskId: %d\nstate: %s\nprovider: %s\n", hostSafeText(d.RunID), d.TaskID, hostSafeText(d.State), hostSafeText(d.Provider))
 		for _, kv := range [][2]string{{"model", d.Model}, {"startedAt", d.StartedAt}, {"finishedAt", d.FinishedAt}, {"stopReason", d.StopReason}, {"failureKind", d.Failure}} {
 			if kv[1] != "" {
-				fmt.Fprintf(w, "%s: %s\n", kv[0], kv[1])
+				fmt.Fprintf(w, "%s: %s\n", kv[0], hostSafeText(kv[1]))
 			}
 		}
 		cost := "unknown"
@@ -348,7 +364,7 @@ func renderHostRead(w io.Writer, verb string, res hostReadResult) error {
 			return err
 		}
 		for _, e := range d.Events {
-			fmt.Fprintf(w, "%d %s %s\n", e.Seq, e.Type, e.Text)
+			fmt.Fprintf(w, "%d %s %s\n", e.Seq, hostSafeText(e.Type), hostSafeText(e.Text))
 		}
 		if d.HasMore {
 			fmt.Fprintf(w, "more: --cursor %d\n", d.NextCursor)
