@@ -121,7 +121,7 @@ function HostsSection(_props: SettingsSectionContext) {
             description="Create an invite here, then run smind host add on the other host."
           />
         ) : (
-          <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3" data-testid="hosts-list">
+          <ul className="flex flex-col gap-3" data-testid="hosts-list">
             {data.hosts.map((host) => (
               <HostRow
                 key={host.hostId}
