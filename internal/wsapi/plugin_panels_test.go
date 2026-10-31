@@ -44,7 +44,7 @@ func newPanelsEnv(t *testing.T) *panelsEnv {
 		src := t.TempDir()
 		files := map[string]string{
 			"smind-plugin.json": manifest(id),
-			"views/notes.json":  "{}",
+			"views/notes.json":  `{"ui":1,"root":{"type":"text","text":"Notes"}}`,
 		}
 		for name, body := range files {
 			full := filepath.Join(src, name)

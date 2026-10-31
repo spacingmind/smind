@@ -12,6 +12,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/spacingmind/smind/internal/plugins/uiview"
 )
 
 // Caps on what a plugin's data contributions may weigh; they bound what a
@@ -67,6 +69,7 @@ func (m *Manifest) loadContributions(root string) error {
 	}
 	v := &manifestVal{}
 	m.skills, m.profiles, m.prompts, m.themes = nil, nil, nil, nil
+	m.panelViews = nil
 
 	seenSkill := map[string]bool{}
 	for i, p := range m.Contributes.Skills {
@@ -124,6 +127,7 @@ func (m *Manifest) loadContributions(root string) error {
 	}
 	m.loadPrompts(realRoot, v)
 	m.loadThemes(realRoot, v)
+	m.loadPanels(realRoot, v)
 	if len(v.errs) > 0 {
 		return &ManifestError{Errs: v.errs}
 	}
@@ -360,5 +364,44 @@ func (m *Manifest) loadThemes(realRoot string, v *manifestVal) {
 			continue
 		}
 		m.themes = append(m.themes, ThemeSpec{ID: t.ID, Label: label, Schemes: schemes})
+	}
+}
+
+// viewEnv is what the view sanitiser checks actions against: the rpc names and
+// panel ids the manifest declares.
+func viewEnv(m *Manifest) uiview.Env {
+	env := uiview.Env{RPCs: map[string]bool{}, Panels: map[string]bool{}}
+	for _, r := range m.Contributes.RPC {
+		env.RPCs[r.Name] = true
+	}
+	for _, p := range m.Contributes.Panels {
+		env.Panels[p.ID] = true
+	}
+	return env
+}
+
+// loadPanels reads and validates every file-backed panel view, so an invalid
+// document fails the install instead of the first time a client opens it.
+func (m *Manifest) loadPanels(realRoot string, v *manifestVal) {
+	env := viewEnv(m)
+	for i, p := range m.Contributes.Panels {
+		if p.View.File == "" {
+			continue
+		}
+		f := fmt.Sprintf("contributes.panels[%d].view.file", i)
+		raw, err := readConfinedFile(realRoot, p.View.File, uiview.MaxDocBytes)
+		if err != nil {
+			v.bad(f, err.Error(), "point it at a regular JSON file inside the plugin")
+			continue
+		}
+		out, err := uiview.Validate(raw, env)
+		if err != nil {
+			v.bad(f, err.Error(), "fix the view document (the error names the JSON path)")
+			continue
+		}
+		if m.panelViews == nil {
+			m.panelViews = map[string]json.RawMessage{}
+		}
+		m.panelViews[p.ID] = out
 	}
 }

@@ -161,14 +161,16 @@ func TestManifest_Panels_FileInDeclaredPaths(t *testing.T) {
 	}
 }
 
+const minimalView = `{"ui":1,"root":{"type":"text","text":"Notes"}}`
+
 // installPanelsPlugin installs and enables a plugin whose contributes is
 // given verbatim; the two view files it may point at exist, as install
 // requires of every declared path.
 func installPanelsPlugin(t *testing.T, e *env, id, contributes string) {
 	t.Helper()
 	in := mustInstall(t, e, writePluginDir(t, manifestWith(id, "1.0.0", `"contributes":`+contributes), map[string]string{
-		"views/main.json":   "{}",
-		"views/second.json": "{}",
+		"views/main.json":   minimalView,
+		"views/second.json": minimalView,
 	}))
 	if _, err := e.m.Enable(id, in.Consent.Fingerprint); err != nil {
 		t.Fatalf("enable %s: %v", id, err)

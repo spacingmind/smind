@@ -80,6 +80,8 @@ type Manifest struct {
 	profiles []ProfileSpec
 	prompts  map[string]string // command name -> prompt text
 	themes   []ThemeSpec
+
+	panelViews map[string]json.RawMessage // panel id -> validated file view
 }
 
 // Engines holds the version gates besides api.
