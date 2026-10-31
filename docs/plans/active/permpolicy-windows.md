@@ -69,4 +69,18 @@ Platform: `TestPlatform_WindowsClean`, `_WindowsIsAbs`, `_WindowsUnder`, `_Windo
 
 ## Decisions / Progress / Validation
 
-(filled as work lands)
+### Decisions
+
+- No on-Windows gate (Human, 2026-10-31): PR #717 (gate) is superseded. The path flavour is per request (`Request.plat`, unexported; nil = host), so the Windows rules run on macOS/Linux with a fake filesystem and on the Windows runner with the real one.
+- The splitter reads `\` as a literal backslash before a path character in Windows mode and keeps the POSIX escape before any shell metacharacter: the Windows reading of `D:\x` can only turn an allow into an ask and a floor miss into a deny, never hide a command in a quote.
+- A word the Windows flavour cannot place is a path error (ask / floor-deny) unless it cannot escape anything (no separator and no drive prefix, a URL, a refspec): those are not paths.
+- The temp zone is allowed for scratch writes; under Windows only the `AppData` install root is carved out of it (the OS temp dir lives there).
+- Known pre-existing gap (POSIX too): a quoted prefix assignment `HOME="x" cmd` is not read as an env assignment, so `no-real-home-tests` does not see it.
+
+### Progress
+
+Spec, platform layer, splitter mode, resolution through the platform, floor and Decide plumbing, Windows rules (system dirs, PowerShell/cmd, secrets, curl|iex, home vars), Windows-native tests for every floor id, real-filesystem Windows tests, docs. Delivered by peers (GLM was rate limited until 14:20, so peer-sonnet did the coding).
+
+### Validation
+
+Windows full suite green on the PR branch for `./internal/permpolicy/...` (run URLs in the PR body); macOS `task test` and `task lint`; one mutation per named test (list in the PR body).
