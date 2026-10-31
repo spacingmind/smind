@@ -13,6 +13,8 @@ export type Daemon = {
   url: string
   port: number
   home: string
+  /** Pid of the current child (undefined once stopped). */
+  pid(): number | undefined
   repos: Repos
   /** Filled by seedDaemon(). */
   ids: Record<string, any>
@@ -74,7 +76,7 @@ export async function startDaemon(): Promise<Daemon> {
     const exited = new Promise<void>((r) => c.once('exit', () => r()))
     c.kill('SIGTERM')
     const timer = setTimeout(() => c.kill('SIGKILL'), 5_000)
-    await exited
+    await exited // SIGKILL after 5 s still ends in an 'exit' event
     clearTimeout(timer)
   }
 
@@ -82,6 +84,7 @@ export async function startDaemon(): Promise<Daemon> {
     url,
     port,
     home,
+    pid: () => child?.pid,
     repos,
     ids: {},
     restart: async () => {
@@ -92,12 +95,17 @@ export async function startDaemon(): Promise<Daemon> {
       live.delete(d)
       await kill()
       const keep = process.env.E2E_LOG_DIR
-      if (keep) {
-        fs.mkdirSync(keep, { recursive: true })
-        fs.copyFileSync(logPath, path.join(keep, `daemon-${port}.log`))
+      try {
+        if (keep) {
+          fs.mkdirSync(keep, { recursive: true })
+          fs.copyFileSync(logPath, path.join(keep, `daemon-${port}.log`))
+        }
+        assertSafeHome(home)
+        // agent and worktree git children can still be writing for a moment after the daemon exits
+        await fs.promises.rm(home, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
+      } catch (e) {
+        console.error(`e2e: cleanup of ${home} failed: ${(e as Error).message}`)
       }
-      assertSafeHome(home)
-      fs.rmSync(home, { recursive: true, force: true })
     },
   }
   live.add(d)
