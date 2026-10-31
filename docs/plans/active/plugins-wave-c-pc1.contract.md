@@ -72,7 +72,7 @@ tests:
 mutations:
   - { id: M1, file: internal/plugins/uiview/validate.go, change: "drop the depth > MaxDepth check", expectFail: [TestViewSchema_Validate_CapsDepthNodesBytes] }
   - { id: M2, file: internal/plugins/uiview/sanitize.go, change: "accept any URL scheme in openUrl (remove the http/https check)", expectFail: [TestSanitize_OpenUrl_HttpHttpsOnly_AddsHost] }
-  - { id: M3, file: internal/plugins/uiview/sanitize.go, change: "add script to the allowed SVG elements", expectFail: [TestSanitize_SVG_64KiB_NoScript] }
+  - { id: M3, file: internal/plugins/uiview/schema.go, change: "add script to the allowed SVG elements", expectFail: [TestSanitize_SVG_64KiB_NoScript] }
   - { id: M4, file: internal/plugins/uiview/validate.go, change: "skip the env.RPCs declared check for rpc actions", expectFail: [TestSanitize_Rpc_MustBeDeclared] }
   - { id: M5, file: internal/plugins/uiview/sanitize.go, change: "SanitizeMarkdown returns its input unchanged", expectFail: [TestSanitize_Markdown_StripsRawHTML] }
   - { id: M6, file: internal/plugins/panels.go, change: "Panels ignores the level argument: both the level <= 0 return and the ui > level skip are removed", expectFail: [TestPanels_OnlyActive_OrderedByPluginID_GatedByLevel, TestPluginPanels_List_OnlyActive_GatedByUiLevel] }
