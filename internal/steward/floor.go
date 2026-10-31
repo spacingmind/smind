@@ -14,11 +14,19 @@ type SeatRequest struct {
 	ScratchDir string
 }
 
+// MCPToolPrefix is how the provider names the daemon's MCP tools.
+const MCPToolPrefix = "mcp__smind__"
+
 // SeatFloor decides one permission request of the seat (ADR-0047 §1):
 // allow ONLY Read, Grep or Glob whose every named path resolves INSIDE the
-// scratch tree; everything else is deny (a judge has no reason to ask).
-// Resolving first makes a symlink or `..` that escapes the tree visible.
+// scratch tree, plus the seat's own digest and verdict MCP tools; everything
+// else is deny (a judge has no reason to ask). Resolving first makes a
+// symlink or `..` that escapes the tree visible.
 func SeatFloor(req SeatRequest) (allow bool, reason string) {
+	switch req.Tool {
+	case MCPToolPrefix + ToolDigestGet, MCPToolPrefix + ToolVerdictSubmit:
+		return true, "the seat's own tool"
+	}
 	known := false
 	for _, t := range SeatBuiltinTools {
 		if req.Tool == t {

@@ -61,3 +61,34 @@ func TestStewardSeatFloor_ReadInScratchAllowedElseDeny(t *testing.T) {
 		t.Error("SeatFloor(symlink inside scratch pointing outside) = allow, want deny")
 	}
 }
+
+func TestStewardSeatFloor_OwnMCPToolsAllowed(t *testing.T) {
+	t.Parallel()
+
+	scratch := t.TempDir()
+	for _, tool := range []string{MCPToolPrefix + ToolDigestGet, MCPToolPrefix + ToolVerdictSubmit} {
+		for _, paths := range [][]string{nil, {"diff.txt"}, {scratch}} {
+			allow, reason := SeatFloor(SeatRequest{Tool: tool, Paths: paths, ScratchDir: scratch})
+			if !allow || reason != "the seat's own tool" {
+				t.Errorf("SeatFloor(%s, paths %v) = %v, %q; want allow, \"the seat's own tool\"", tool, paths, allow, reason)
+			}
+			allow, reason = SeatFloor(SeatRequest{Tool: tool, Paths: paths, ScratchDir: ""})
+			if !allow || reason != "the seat's own tool" {
+				t.Errorf("SeatFloor(%s, no scratch) = %v, %q; want allow, \"the seat's own tool\"", tool, allow, reason)
+			}
+		}
+	}
+
+	for _, tool := range []string{
+		MCPToolPrefix + "task_send",
+		MCPToolPrefix + ToolAnnotate,
+		"mcp__other__" + ToolDigestGet,
+		ToolDigestGet,
+	} {
+		for _, paths := range [][]string{nil, {"diff.txt"}} {
+			if allow, reason := SeatFloor(SeatRequest{Tool: tool, Paths: paths, ScratchDir: scratch}); allow {
+				t.Errorf("SeatFloor(%q, paths %v) = allow (%q), want deny", tool, paths, reason)
+			}
+		}
+	}
+}
