@@ -87,7 +87,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
 import { useTheme } from "@/hooks/use-theme";
 import type { ActionId } from "@/keyboard/actions";
-import { KeyboardProvider, useActionHandler, useActionRestriction } from "@/keyboard/keyboard-provider";
+import { KeyboardProvider, useActionHandler, useActionRestriction, useKeyboard } from "@/keyboard/keyboard-provider";
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
@@ -484,6 +484,32 @@ function AppShell({
     [selectTask],
   );
 
+  // UAT A-11: a task made through the New task dialog lands with the composer
+  // focused. The dialog restores focus to its trigger after it unmounts, so wait
+  // for it to be gone (plus a beat) and for the pane's composer to claim
+  // `composer.focus`, instead of focusing once and losing to the restore.
+  const { runAction } = useKeyboard();
+  const focusComposerWhenReady = useCallback(() => {
+    let dialogGone = false;
+    const attempt = (triesLeft: number) => {
+      if (triesLeft === 0) return;
+      window.setTimeout(() => {
+        if (document.querySelector('[role="dialog"]')) dialogGone = false;
+        else if (!dialogGone) dialogGone = true;
+        else if (runAction("composer.focus")) return;
+        attempt(triesLeft - 1);
+      }, 50);
+    };
+    attempt(60);
+  }, [runAction]);
+  const taskCreatedFromDialog = useCallback(
+    (task: Task) => {
+      selectTaskFromSidebar(task);
+      focusComposerWhenReady();
+    },
+    [selectTaskFromSidebar, focusComposerWhenReady],
+  );
+
   // The task header's lineage jump (PR-U2): fetch the target task fresh
   // (the sidebar's tree may not hold it) and reuse the normal selection
   // path so tabs/chat seeding behave exactly like a sidebar click.
@@ -877,6 +903,10 @@ function AppShell({
         openTab(match.ID, baseTabForKind(match.ID, pendingRoute.tab.kind));
       }
       setPendingRoute(null);
+    } else if (treeLoaded && selectedTask?.ID === pendingRoute.taskId) {
+      // Our own hash write for a task selected before the tree learned about it
+      // (just created): the selection is already right, nothing to resolve.
+      setPendingRoute(null);
     } else if (treeLoaded) {
       // The tree has answered and this task isn't in it (archived,
       // deleted, or never existed) -- show "Task not found" rather than
@@ -888,7 +918,7 @@ function AppShell({
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
       setPendingRoute(null);
     }
-  }, [pendingRoute, allTasks, treeLoaded, chats, selectTask, openTab, activate]);
+  }, [pendingRoute, allTasks, treeLoaded, chats, selectedTask, selectTask, openTab, activate]);
 
   useEffect(() => {
     if (!selectedTask) return;
@@ -1200,6 +1230,7 @@ function AppShell({
       connectionStatus={connectionStatus}
       connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
       onRetryConnect={retryConnect}
+      onTaskCreated={taskCreatedFromDialog}
       headerActions={
         toggleInSidebar ? (
           <>

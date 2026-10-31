@@ -347,6 +347,7 @@ export function AppSidebar({
   connectionStatus = "connected",
   connectionStatusText,
   onRetryConnect,
+  onTaskCreated,
   headerActions,
   windowToggle = false,
 }: {
@@ -402,6 +403,8 @@ export function AppSidebar({
   connectionStatusText?: string;
   /** Re-runs the daemon connection after the initial connect failed (App.tsx) -- the "Can't reach the daemon" row's Retry. */
   onRetryConnect?: () => void;
+  /** A task was created through the New task dialog; falls back to `onSelectTask` (App uses it to also focus the composer). */
+  onTaskCreated?: (task: Task) => void;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree();
   const statusOverrides = useStatusOverrides(client, events ?? null);
@@ -1153,7 +1156,7 @@ export function AppSidebar({
               open
               onOpenChange={(o) => !o && setCrud(null)}
               onCreated={(task) => {
-                onSelectTask?.(task);
+                (onTaskCreated ?? onSelectTask)?.(task);
                 refresh();
               }}
             />
@@ -1171,7 +1174,7 @@ export function AppSidebar({
                 open
                 onOpenChange={(o) => !o && setCrud(null)}
                 onCreated={(task) => {
-                  onSelectTask?.(task);
+                  (onTaskCreated ?? onSelectTask)?.(task);
                   refresh();
                 }}
               />

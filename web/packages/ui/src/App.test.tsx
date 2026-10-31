@@ -1314,6 +1314,56 @@ describe("App routing", () => {
   });
 });
 
+describe("App composer focus after creating a task (UAT A-11)", () => {
+  const CREATED: Task = { ...TASK, ID: 7, Title: "Brand new", Branch: "brand-new" };
+
+  async function createViaDialog(socket: FakeSocket): Promise<void> {
+    fireEvent.mouseEnter(screen.getByTestId("sidebar-workspace-row").parentElement!);
+    await flush();
+    fireEvent.pointerDown(screen.getByTestId("sidebar-workspace-actions-trigger"), { button: 0, ctrlKey: false });
+    await flush();
+    fireEvent.click(screen.getByText("Add task"));
+    await flush();
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Brand new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await flush();
+    respond(socket, "task.create", CREATED);
+    await flush();
+    respondAll(socket, "task.list", [TASK_A, CREATED]);
+    respondChatList(socket, CREATED);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+  }
+
+  it("focuses the Prompt textarea once the task pane mounts after the dialog closes", async () => {
+    const socket = new FakeSocket();
+    render(<App connect={vi.fn().mockResolvedValue(new WsClient(socket))} />);
+    await resolveSidebar(socket, [TASK_A]);
+    await createViaDialog(socket);
+
+    expect(screen.getByLabelText("Prompt")).toHaveFocus();
+  });
+
+  it("does not move focus to the composer when a sidebar task row is merely clicked", async () => {
+    const socket = new FakeSocket();
+    render(<App connect={vi.fn().mockResolvedValue(new WsClient(socket))} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(screen.getByLabelText("Prompt")).not.toHaveFocus();
+  });
+});
+
 describe("App sidebar resize", () => {
   afterEach(() => {
     window.localStorage.clear();
