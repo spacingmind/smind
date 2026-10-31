@@ -15,6 +15,7 @@ func checkFloorReq(t *testing.T, req Request, id string) {
 }
 
 func TestFloor_InstallStateDenied(t *testing.T) {
+	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	base := floorReq(t, "")
 	smindDir := filepath.Join(base.Home, ".smind")
@@ -102,6 +103,7 @@ func TestFloor_SecretsDenied(t *testing.T) {
 }
 
 func TestFloor_DestructiveOutsideWorktreeDenied(t *testing.T) {
+	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	checkFloorCases(t, []floorCase{
 		{"rm -rf /etc/x", "no-destructive-outside"},
@@ -153,6 +155,7 @@ func TestFloor_DestructiveOutsideWorktreeDenied(t *testing.T) {
 }
 
 func TestFloor_PathsToolEdit(t *testing.T) {
+	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	base := floorReq(t, "")
 	home := base.Home
@@ -215,6 +218,7 @@ func TestFloor_LaunchdServiceDenied(t *testing.T) {
 }
 
 func TestFloor_MoreWritersOutsideWorktreeDenied(t *testing.T) {
+	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	checkFloorCases(t, []floorCase{
 		{"rsync -a src/ /usr/local/dst", "no-destructive-outside"},

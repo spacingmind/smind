@@ -15,7 +15,17 @@ import (
 
 func policyPath(home string) string { return filepath.Join(home, "steward", "policy.yaml") }
 
+// policyHostGOOS pins the OS the policy CLI believes it runs on, so the CLI
+// tests keep exercising the subcommands on a Windows runner.
+func policyHostGOOS(t *testing.T, goos string) {
+	t.Helper()
+	old := permpolicy.HostGOOS
+	permpolicy.HostGOOS = goos
+	t.Cleanup(func() { permpolicy.HostGOOS = old })
+}
+
 func TestCLI_PolicyInitWritesTemplateWithZeroAllowRules(t *testing.T) {
+	policyHostGOOS(t, "linux")
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
 	var out, errb bytes.Buffer
@@ -55,6 +65,7 @@ func TestCLI_PolicyInitWritesTemplateWithZeroAllowRules(t *testing.T) {
 }
 
 func TestCLI_PolicyInitRefusesOverwrite(t *testing.T) {
+	policyHostGOOS(t, "linux")
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
 	path := policyPath(home)
@@ -79,6 +90,7 @@ func TestCLI_PolicyInitRefusesOverwrite(t *testing.T) {
 }
 
 func TestCLI_PolicyUsageErrors(t *testing.T) {
+	policyHostGOOS(t, "linux")
 	for _, args := range [][]string{nil, {"bogus"}, {"init", "x"}, {"test"}, {"test", "--task", "x", "ls"}, {"audit", "--limit", "0"}, {"show", "--nope"}} {
 		var out, errb bytes.Buffer
 		if code := runPolicy(context.Background(), args, &out, &errb); code != 2 {
@@ -105,6 +117,7 @@ func stubPolicyDaemon(t *testing.T, method, reply string, got *map[string]any) {
 }
 
 func TestCLI_PolicyShowTestAudit(t *testing.T) {
+	policyHostGOOS(t, "linux")
 	var params map[string]any
 	stubPolicyDaemon(t, "policy.get", `{"enabled":true,"valid":true,"exists":true,"path":"/p","sha":"abc","rules":[{"id":"r1","action":"allow","why":"because"}]}`, &params)
 	var out, errb bytes.Buffer
@@ -148,5 +161,45 @@ func TestCLI_PolicyShowTestAudit(t *testing.T) {
 	out.Reset()
 	if code := runPolicy(context.Background(), []string{"audit", "--json"}, &out, &errb); code != 0 || !json.Valid(out.Bytes()) {
 		t.Errorf("audit --json: exit %d, output %q", code, out.String())
+	}
+}
+
+func TestPolicyCLI_WindowsRefusesEverySubcommand(t *testing.T) {
+	policyHostGOOS(t, "windows")
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	prev := policyDial
+	t.Cleanup(func() { policyDial = prev })
+	policyDial = func(context.Context) (wsCaller, func(), error) {
+		t.Fatal("policyDial must not be reached when the OS is unsupported")
+		return nil, nil, nil
+	}
+	for _, args := range [][]string{{"init"}, {"show"}, {"test", "git status"}, {"audit"}} {
+		var out, errb bytes.Buffer
+		if code := runPolicy(context.Background(), args, &out, &errb); code != 1 {
+			t.Errorf("%q: exit %d, want 1 (stderr %q)", args, code, errb.String())
+		}
+		if !strings.Contains(errb.String(), "not supported on Windows yet") {
+			t.Errorf("%q: stderr = %q", args, errb.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("%q: stdout = %q, want empty", args, out.String())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, "steward")); !os.IsNotExist(err) {
+		t.Errorf("steward dir exists after refused init: %v", err)
+	}
+}
+
+func TestPolicyCLI_PosixStillWorks(t *testing.T) {
+	policyHostGOOS(t, "linux")
+	var params map[string]any
+	stubPolicyDaemon(t, "policy.test", `{"decision":{"action":"deny","floorId":"no-stash","why":"w","segments":[{"index":0,"text":"git status","action":"deny","floorId":"no-stash"}]},"status":{"enabled":true}}`, &params)
+	var out, errb bytes.Buffer
+	if code := runPolicy(context.Background(), []string{"test", "git status"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "deny (floor no-stash)") {
+		t.Errorf("output = %q", out.String())
 	}
 }

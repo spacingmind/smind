@@ -157,6 +157,7 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 
 - S0 plan + ADR: this PR (docs only, Proposed).
 - S1: implemented 2026-10-31 on one branch (`internal/permpolicy`, audit store, `runs` hook, `policy.*` RPCs, `smind policy`, docs); PR and validator verdict below.
+- S1 Windows gate (PR A, release blocker for 0.17): the engine refuses to turn on on Windows (`permpolicy.Supported`, warning once, `smind policy` and `policy.test` say "not supported on Windows yet"); POSIX-path tests skip there. PR B (real Windows path support, lifts the gate) starts after PR A merges.
 - S2–S4: not started.
 
 ## Validation
@@ -170,6 +171,10 @@ path and quoting code is exactly what the nightly has caught before.
 Tests per AC are listed in `docs/plans/active/steward-seat-s1.contract.md` (AC1-AC12 each cover named tests and mutations). Commands: `go test -race` on `internal/permpolicy`, `internal/store`, `internal/runs`, `internal/taskrunner`, `internal/wsapi`, `cmd/smind`; `task lint`; `task test` (one unrelated flake, `TestProxy_passive_zero_http_calls_proxy_path` in `internal/server`, passes alone x3; the package is untouched).
 Mutations M1-M11 (committed work, one at a time, restored with `git checkout -- <file>`): each made its named test fail, none was a build failure. Review findings fixed before the PR: dangling symlink followed by `ResolvePath`, `gh -R x pr merge` bypass of `no-merge`, launchd/systemd service, more writers outside the worktree (rsync, `sed -i`, `curl -o`, ...), an env-assignment prefix no longer covered by an allow, unredacted audit reasons, brace expansion marked dynamic, wrapped `eval`, daemon `SMIND_HOME` missing from the floor, template examples that allowed `go test -exec`.
 Stated limits: a provider adapter without detail (Codex, non-Bash Claude tools) reaches the engine with an unknown tool and is `ask`; a truncated command is `ask`; OS-temp writes are not floor-denied; an `allow` for which the provider offered no `allow_once` option falls to the human path (the audit row still says `allow`).
+
+### S1 Windows gate (PR A)
+
+Tests: `TestPlatform_WindowsKeepsEngineOff`, `TestPlatform_WindowsWarnsOnce`, `TestPlatform_NoWarningWhenConfigOff`, `TestPlatform_PosixEngineStillOn`, `TestPlatform_RealWindowsIsUnsupported` (windows-only file), `TestPolicyCLI_WindowsRefusesEverySubcommand`, `TestPolicyRPC_TestRefusedOnWindows`. Windows run: see the PR body.
 
 ### S0 (this PR)
 

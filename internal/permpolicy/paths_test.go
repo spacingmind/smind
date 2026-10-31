@@ -75,6 +75,7 @@ func TestResolvePath_RelativeNeedsCwd(t *testing.T) {
 }
 
 func TestResolvePath_HomeExpansion(t *testing.T) {
+	skipPOSIXPathsOnWindows(t)
 	home := t.TempDir()
 	setHome(t, home)
 	for _, p := range []string{"~/f.txt", "$HOME/f.txt", "${HOME}/f.txt"} {

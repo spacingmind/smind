@@ -1,0 +1,45 @@
+# Recipe instance detail page (providers epic PR6b)
+
+Size: S (3) — scope 1, PRs 1, risk 0, decisions 0, verify 1 (web only, no daemon change)
+
+## Problem
+The Providers detail of a recipe instance (provider.addFromRecipe: Z.AI, Qwen, DeepSeek, ...) reads like the
+Claude CLI login: "Ready (CLI login)" and "Managed externally via CLI ... CLI login kept in its own config
+directory". Such an instance authenticates with the key stored in smind and runs with a private config dir
+`SMIND_HOME/providers/<id>/claude` (unless inheritClaudeConfig). `provider.test` only checks the binary/health.
+
+## Facts (checked in code)
+- `provider.list` does NOT expose the private config dir, inheritClaudeConfig, or the endpoint URL/host
+  (only `endpointKind`, `recipe`, `secrets[]`). So the UI shows "private (managed by smind)"; exposing the dir,
+  the inherit flag and the host is a daemon follow-up (tiny additive fields), NOT done here.
+- ProviderEnvField (generic Config directory block, daemon's own CLAUDE_CONFIG_DIR) is already skipped for
+  `info.custom` since PR6; a test pins that it stays hidden for a recipe instance.
+
+## Acceptance criteria
+- AC1 Recipe instance (`info.recipe` set): readiness shows "Key set" / "No key set" from `secrets[]` (never
+  "Ready (CLI login)"); when the instance has no secret rows (keyless local) it shows "Ready"; a failed check still shows "Not ready — <detail>".
+- AC2 Recipe instance: the external block says it is managed by smind with the stored key, shows
+  "Config directory: private (managed by smind)", and describes Test as a binary/health check only (no network, key unused).
+- AC3 Recipe instance never renders the generic config-dir field or any daemon-env path.
+- AC4 Non-recipe Claude instance / claude-native / codex / ACP: text and behaviour unchanged.
+
+## Test scenarios (provider-detail.test.tsx, "recipe instances")
+- recipe instance with key set -> readiness "Key set", no "CLI login" text anywhere.
+- recipe instance with key not set -> "No key set".
+- recipe instance: external block has "private (managed by smind)" and no `provider-env-*` testid.
+- plain instance (no recipe) still "Ready (CLI login)" and old external text.
+- claude-native existing test (Ready (CLI login)) stays green.
+
+## Decisions
+- Not done (daemon follow-up, tiny additive provider.list fields): expose the private config dir path, inheritClaudeConfig and the endpoint host. The Reload-providers/providers.custom hint stays (still true for a recipe instance).
+- Recipe detection is `info.recipe !== undefined` (the only wire marker of a recipe-made instance).
+
+## Progress
+- [x] implement (GLM, 2 runs)  - [x] tests  - [x] mutations  - [x] frames  - [x] PR
+
+## Validation
+AC1-AC4 confirmed by provider-detail.test.tsx (recipe instances: key set / no key / private dir / daemon-env dir hidden / plain instance unchanged); each mutation fails a test (see PR body). Frames in /tmp/steward4/after/pr6b/ (light+dark, 1280+390, key set and unset). The first frame pass caught that ProviderCustomInfo still rendered the daemon-env Config directory for recipe instances (missed by the step-1 unit tests); fixed in a second step.
+
+## Add-on: Models list (Supervisor)
+- AC5 A recipe instance's Models card lists only `source: "config"` models, labelled "From the recipe"; with none it says "No models listed for this recipe — runs use the endpoint's default model." Non-recipe providers unchanged.
+- Finding: the daemon already replaces the Claude catalog with the instance's models (addFromRecipe writes the recipe models); an instance with no models falls back to the Claude catalog. The UI mislabelled config models "Built-in catalog" and showed the catalog for empty instances. Web-only fix in provider-models.tsx; tests in provider-models.test.tsx (3 cases; mutation: recipe filter off -> 2 fail). Frames: /tmp/steward4/after/pr6b/models-*.png.

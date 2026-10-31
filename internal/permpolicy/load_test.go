@@ -181,6 +181,7 @@ func TestPolicyLoad_RejectsWildcardSeatToolArgv(t *testing.T) {
 }
 
 func TestPolicyLoad_RejectsMutatingAllowWithoutPathScope(t *testing.T) {
+	skipPOSIXPathsOnWindows(t)
 	edit := "- id: edit-src\n  action: allow\n  why: w\n  match:\n    tool: Edit"
 	bash := "- id: run-tests\n  action: allow\n  why: w\n  match:\n    tool: Bash\n    command:\n      argv0: go\n      subcommand: test"
 
@@ -258,6 +259,7 @@ func TestPolicyLoad_RejectsRegexAndOverCaps(t *testing.T) {
 }
 
 func TestPolicyLoad_RejectsAllowThatFloorDenies(t *testing.T) {
+	skipPOSIXPathsOnWindows(t)
 	scope := "\n    paths:\n      within: [\"{worktree}\"]"
 	bash := func(id, argv0, sub, allowOnly string) string {
 		r := "- id: " + id + "\n  action: allow\n  why: w\n  match:\n    tool: Bash\n    command:\n      argv0: " + argv0 + "\n      subcommand: " + sub
