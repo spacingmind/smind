@@ -27,6 +27,9 @@ type HelloResult struct {
 	State   string
 	Version string
 	Caps    []string
+	// NonceC and NonceA are the challenge nonce and the caller's nonce this
+	// handshake used, so the caller can derive the pairing SAS itself.
+	NonceC, NonceA []byte
 }
 
 // RefusedError is a callee's refusal of the link, carrying its code
@@ -88,7 +91,7 @@ func Handshake(ctx context.Context, c Conn, self *identity.Key, peer Peer, versi
 	if err := hello.CheckVersion(peer.Alias, ok.FleetV, ok.Caps, ok.Version); err != nil {
 		return HelloResult{}, err
 	}
-	return HelloResult{State: ok.State, Version: ok.Version, Caps: ok.Caps}, nil
+	return HelloResult{State: ok.State, Version: ok.Version, Caps: ok.Caps, NonceC: ch.NonceC, NonceA: nonceA}, nil
 }
 
 func isMethodNotFound(err error) bool {

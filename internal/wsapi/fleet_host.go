@@ -71,6 +71,9 @@ type FleetLinks interface {
 	PeerReverseChanged(hostID string, on bool)
 	// LinkState reports the live link's state and detail for a host view.
 	LinkState(hostID string) (state, detail string)
+	// SetRoute stores the direct route (and optional password) this daemon
+	// dials hostID on and restarts the link so the route takes effect.
+	SetRoute(ctx context.Context, p FleetRouteParams) error
 	// Forget stops dialing and drops the secrets and relay device of a
 	// removed host.
 	Forget(hostID string)
@@ -108,6 +111,15 @@ type FleetAddResult struct {
 	State   string `json:"state"`
 	SAS     string `json:"sas"`
 	Warning string `json:"warning"`
+}
+
+// FleetRouteParams is the ask behind fleet.host.route: the direct address
+// to reach an already paired host on.
+type FleetRouteParams struct {
+	HostID         string `json:"hostId"`
+	Address        string `json:"address"`
+	Password       string `json:"password"`
+	AllowCleartext bool   `json:"allowCleartext"`
 }
 
 // FleetTestResult is one link probe.
@@ -178,6 +190,13 @@ type fleetHostApproveParams struct {
 type fleetHostRenameParams struct {
 	Host  string `json:"host"`
 	Alias string `json:"alias"`
+}
+
+type fleetHostRouteParams struct {
+	Host           string `json:"host"`
+	Address        string `json:"address"`
+	Password       string `json:"password"`
+	AllowCleartext bool   `json:"allowCleartext"`
 }
 
 type fleetHostGrantParams struct {
@@ -276,6 +295,7 @@ func (a *API) SetFleet(o FleetOptions) {
 	a.hs["fleet.host.enable_reverse"] = fleetLocalOnly("fleet.host.enable_reverse", f.handleHostEnableReverse)
 	a.hs["fleet.host.disable_reverse"] = fleetLocalOnly("fleet.host.disable_reverse", f.handleHostDisableReverse)
 	a.hs["fleet.host.test"] = fleetLocalOnly("fleet.host.test", f.handleHostTest)
+	a.hs["fleet.host.route"] = fleetLocalOnly("fleet.host.route", f.handleHostRoute)
 }
 
 // FleetCloseHost closes every live host-principal connection of hostID, so
@@ -795,4 +815,23 @@ func (f *fleetHost) handleHostTest(ctx context.Context, _ *requestContext, raw j
 		return nil, fmt.Errorf("%s: %w", method, err)
 	}
 	return res, nil
+}
+
+// handleHostRoute sets the direct route this daemon dials a paired host on;
+// a reverse link enabled by the peer has no route until a human gives one.
+func (f *fleetHost) handleHostRoute(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	const method = "fleet.host.route"
+	var p fleetHostRouteParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": invalid params: " + err.Error(), err: err}
+	}
+	h, err := f.resolveHost(method, p.Host)
+	if err != nil {
+		return nil, err
+	}
+	err = f.opts.Links.SetRoute(ctx, FleetRouteParams{HostID: h.HostID, Address: p.Address, Password: p.Password, AllowCleartext: p.AllowCleartext})
+	if err != nil {
+		return nil, fleetHostError(method, err)
+	}
+	return fleetOKResult{OK: true}, nil
 }

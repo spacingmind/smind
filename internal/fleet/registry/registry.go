@@ -276,6 +276,17 @@ func (r *Registry) SetOutboundEnabled(hostID string, on bool) error {
 	return r.st.PutFleetLink(l)
 }
 
+// SetOutboundTransport replaces the outbound link's transport config. The
+// link's enabled flag and grant are kept.
+func (r *Registry) SetOutboundTransport(hostID, transportJSON string) error {
+	l, err := r.st.GetFleetLink(hostID, store.FleetOutbound)
+	if err != nil {
+		return err
+	}
+	l.TransportJSON = transportJSON
+	return r.st.PutFleetLink(l)
+}
+
 // SetGrant replaces the inbound link's grant. A grant that keeps the link
 // enabled must satisfy the approval rules (a mutating op needs a write
 // workspace); a grant written while the link is dark only needs a valid

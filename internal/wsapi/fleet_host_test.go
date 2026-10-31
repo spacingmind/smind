@@ -28,6 +28,7 @@ type fakeFleetLinks struct {
 	peerChanged []string // "<host>:<on>"
 	forgotten   []string
 	notifyErr   error
+	routes      []FleetRouteParams
 }
 
 func (f *fakeFleetLinks) Invite(context.Context, FleetInviteParams) (FleetInviteResult, error) {
@@ -53,6 +54,13 @@ func (f *fakeFleetLinks) PeerReverseChanged(hostID string, on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.peerChanged = append(f.peerChanged, hostID+":"+boolStr(on))
+}
+
+func (f *fakeFleetLinks) SetRoute(_ context.Context, p FleetRouteParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routes = append(f.routes, p)
+	return nil
 }
 
 func (f *fakeFleetLinks) LinkState(string) (string, string) { return "down", "" }
@@ -364,8 +372,8 @@ func TestFleetAdminMethodsLocalOnlyNotRunScopedNotPlugin(t *testing.T) {
 			adminMethods = append(adminMethods, k)
 		}
 	}
-	if len(adminMethods) != 11 {
-		t.Fatalf("fleet.host.* methods = %v, want 11", adminMethods)
+	if len(adminMethods) != 12 {
+		t.Fatalf("fleet.host.* methods = %v, want 12", adminMethods)
 	}
 
 	// (1) not run-scoped, not in any plugin capability group.
@@ -472,7 +480,7 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 			"fleet.challenge", "fleet.hello", "fleet.pair.request", "fleet.link.state",
 			"fleet.host.list", "fleet.host.invite", "fleet.host.add", "fleet.host.approve",
 			"fleet.host.reject", "fleet.host.rename", "fleet.host.grant", "fleet.host.rm",
-			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test",
+			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test", "fleet.host.route",
 		}
 		slices.Sort(want)
 		if !slices.Equal(added, want) {
@@ -550,4 +558,32 @@ func TestFleetEnableDisableReverseClosesConnection(t *testing.T) {
 	if _, err := e.doHello(t, e.dial(t), caller); err != nil {
 		t.Fatalf("hello after enable_reverse: %v", err)
 	}
+}
+
+func TestFleetHostRouteIsLocalOnlyAndResolvesHost(t *testing.T) {
+	e := newFleetEnv(t)
+	peer := newCallerKey(t)
+	e.pairApproved(t, peer, "peer")
+
+	_, err := e.api.hs["fleet.host.route"](context.Background(), &requestContext{local: false}, []byte(`{}`))
+	var ce *rpcCodeError
+	if !errors.As(err, &ce) || ce.code != codeForbidden {
+		t.Fatalf("non-local route: error = %v, want code %s", err, codeForbidden)
+	}
+
+	cl := e.dial(t)
+	var res fleetOKResult
+	p := map[string]any{"host": "peer", "address": "ws://127.0.0.1:9", "password": "pw", "allowCleartext": true}
+	if err := cl.Call(callCtx(), "fleet.host.route", p, &res); err != nil || !res.OK {
+		t.Fatalf("route = %+v, %v", res, err)
+	}
+	e.links.mu.Lock()
+	got := slices.Clone(e.links.routes)
+	e.links.mu.Unlock()
+	want := FleetRouteParams{HostID: peer.HostID(), Address: "ws://127.0.0.1:9", Password: "pw", AllowCleartext: true}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("SetRoute calls = %+v, want [%+v]", got, want)
+	}
+	p["host"] = "nobody"
+	wantFleetCode(t, cl.Call(callCtx(), "fleet.host.route", p, &res), codeNotFound)
 }
