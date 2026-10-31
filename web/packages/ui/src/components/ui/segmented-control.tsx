@@ -15,6 +15,7 @@ export function SegmentedControl<T extends string>({
   onChange,
   label,
   className,
+  itemClassName,
   disabled,
   testId,
   instant = false,
@@ -27,6 +28,8 @@ export function SegmentedControl<T extends string>({
   /** Accessible name of the whole group. */
   label: string;
   className?: string;
+  /** Extra classes for every segment (e.g. a larger tap target below sm). */
+  itemClassName?: string;
   disabled?: boolean;
   testId?: string;
   /** Selection changes without the colour fade, so text derived from the same value never leads the highlight. */
@@ -59,6 +62,7 @@ export function SegmentedControl<T extends string>({
             "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
             "data-[state=on]:bg-selected data-[state=on]:text-foreground",
             opt.icon && "inline-flex items-center justify-center px-1.5",
+            itemClassName,
           )}
         >
           {opt.icon ??

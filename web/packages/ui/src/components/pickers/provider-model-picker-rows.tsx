@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { gateActionLabel, gateBadge, gateDetail, gateReasonText, isHardGate } from "@/lib/provider-gate";
 import { getProviderModelCount, type BrowserProvider, type ModelRow } from "@/lib/model-browser";
 import type { ProviderGate } from "@/lib/types";
+import { formatProviderReason } from "@/lib/provider-reason";
 import { cn } from "@/lib/utils";
 
 // Row chrome for the combined picker, ported from Paseo's model-browser rows:
@@ -230,7 +231,11 @@ export function ProviderRow({
   if (shell.gate && !provider.unavailableReason) {
     detail = null;
   } else if (provider.unavailableReason) {
-    detail = provider.unavailableReason;
+    detail = (
+      <span className="min-w-0 truncate" title={provider.unavailableReason}>
+        {formatProviderReason(provider.unavailableReason)}
+      </span>
+    );
   } else if (selection.kind === "loading") {
     detail = (
       <>

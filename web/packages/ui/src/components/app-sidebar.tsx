@@ -654,6 +654,15 @@ export function AppSidebar({
         run: () => onOpenSettings?.("providers"),
       },
       {
+        id: "open-settings",
+        group: "Settings",
+        title: "Open settings",
+        keywords: ["preferences", "options", "config"],
+        action: "settings.open",
+        icon: "settings",
+        run: () => onOpenSettings?.(),
+      },
+      {
         id: "settings-agents",
         group: "Settings",
         title: "Settings: Agents",
@@ -891,6 +900,7 @@ export function AppSidebar({
                       label="Group tasks"
                       testId="sidebar-group-mode-control"
                       className="mr-1 p-px"
+                      itemClassName="max-sm:min-h-9 max-sm:min-w-9"
                       value={groupMode}
                       onChange={setGroupMode}
                       options={[
@@ -2264,9 +2274,16 @@ const TaskRow = memo(function TaskRow({
   const reason = primaryAttentionReason(attention?.get(task.ID));
   const runState = runStatus.get(task.ID);
   // ADR-0041: a latest run that hit a provider quota is still "error" for every rollup, but its dot is warning and the row says why.
-  const limited = runState === "error" ? rateLimit.get(task.ID) : undefined;
-  const limitHint = limited ? `Rate limited · ${describeRateLimitReset(limited.resetAt, new Date(now), limited.resetInferred)}` : null;
-  const runDot = limited ? "warning" : runDotStatus(runState);
+  const signal = runState === "error" ? rateLimit.get(task.ID) : undefined;
+  // Run failure classes: auth_expired / model_not_in_plan / transient_429 carry a `kind` and the action label; only a plan limit is "limited".
+  const limited = signal && !signal.kind ? signal : undefined;
+  const transient = signal?.kind === "transient_429";
+  const limitHint = limited
+    ? `Rate limited · ${describeRateLimitReset(limited.resetAt, new Date(now), limited.resetInferred)}`
+    : signal?.kind && signal.label
+      ? signal.label
+      : null;
+  const runDot = limited || transient ? "warning" : runDotStatus(runState);
   const git = gitByTask.get(task.ID);
   const isUnread = unread.has(task.ID);
   const slotSignal = taskSlotSignal(reason, runState, isUnread);
@@ -2366,7 +2383,7 @@ const TaskRow = memo(function TaskRow({
               data-testid="task-collapse-toggle"
               onClick={() => onToggleCollapse?.(task.ID)}
               style={{ left: padLeft - ROW_GUTTER_PX }}
-              className="absolute inset-y-0 flex w-3 items-center justify-center rounded-sm text-muted-foreground outline-hidden"
+              className="absolute inset-y-0 flex w-3 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <Icons.chevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>
@@ -2410,10 +2427,10 @@ const TaskRow = memo(function TaskRow({
                   >
                     {slotSignal.kind === "attention" && (
                       <StatusDot
-                        status={limited && slotSignal.reason === "error" ? "warning" : attentionDotStatus(slotSignal.reason)}
+                        status={(limited || transient) && slotSignal.reason === "error" ? "warning" : attentionDotStatus(slotSignal.reason)}
                         data-testid="task-attention"
                         data-attention-reason={slotSignal.reason}
-                        aria-label={`task needs attention: ${ATTENTION_LABEL[slotSignal.reason]}${limited && slotSignal.reason === "error" ? `, ${limitHint}` : ""}`}
+                        aria-label={`task needs attention: ${ATTENTION_LABEL[slotSignal.reason]}${(limited || signal?.kind) && slotSignal.reason === "error" && limitHint ? `, ${limitHint}` : ""}`}
                       />
                     )}
                     {slotSignal.kind === "run" && runDot && (

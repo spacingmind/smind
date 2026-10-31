@@ -128,6 +128,9 @@ func (reg *Registry) enqueueTransientRetry(r *run, fail failure.Result) {
 		r.mu.Lock()
 		r.retryAttempt, r.retryNextAt = attempt+1, &notBefore
 		r.mu.Unlock()
+		// The terminal status went out before this retry was queued, with a
+		// Retry action: tell clients it is retrying automatically instead.
+		reg.notifyRunStatus(r)
 	}
 }
 
@@ -156,7 +159,7 @@ func (reg *Registry) enqueueRetry(r *run, preface string, notBefore *time.Time, 
 	if err != nil {
 		return false
 	}
-	prompt := preface + stripProvenanceHeader(r.prompt)
+	prompt := preface + stripRetryPreface(stripProvenanceHeader(r.prompt))
 	_, err = reg.st.EnqueueChatPromptAt(r.chatID, prompt, string(cfg), store.ChatQueueSourceOrchestrator, 0, 0, 0, "", notBefore)
 	switch {
 	case errors.Is(err, store.ErrQueueFull):
@@ -169,6 +172,21 @@ func (reg *Registry) enqueueRetry(r *run, preface string, notBefore *time.Time, 
 	reg.notifyQueueUpdated(r.chatID)
 	reg.armQueueWake()
 	return true
+}
+
+// stripRetryPreface removes a leading automatic-retry preface (either kind), so
+// a retry of a retry carries one preface and not the earlier ones inside it.
+func stripRetryPreface(prompt string) string {
+	for {
+		switch {
+		case strings.HasPrefix(prompt, transientRetryPreface):
+			prompt = strings.TrimPrefix(prompt, transientRetryPreface)
+		case strings.HasPrefix(prompt, retryPreface):
+			prompt = strings.TrimPrefix(prompt, retryPreface)
+		default:
+			return prompt
+		}
+	}
 }
 
 // stripProvenanceHeader removes a leading "[message from task #N, chat #M]"

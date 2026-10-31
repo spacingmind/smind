@@ -144,6 +144,16 @@ function before(a: Element, b: Element): boolean {
   return Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 }
 
+describe("AppHeader tap target (B-07)", () => {
+  it("the sidebar toggle grows to a 36px hit area below sm (structural, jsdom has no layout)", async () => {
+    mockPlatform({ desktop: false, os: null });
+    await mountHeader();
+    const toggle = screen.getByRole("button", { name: "Toggle Sidebar" });
+    expect(toggle.className).toContain("max-sm:min-h-9");
+    expect(toggle.className).toContain("max-sm:min-w-9");
+  });
+});
+
 describe("AppHeader task identity", () => {
   it("AH-AC2 shows icon, title and menu only with a task", async () => {
     mockPlatform({ desktop: false, os: null });

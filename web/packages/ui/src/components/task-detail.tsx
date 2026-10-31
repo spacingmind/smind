@@ -529,20 +529,6 @@ export function TaskDetailPane({
           />
         )}
 
-        {!follow.following && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="jump-to-latest"
-            onClick={follow.jumpToLatest}
-            className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border-border bg-background shadow-md dark:border-input-border dark:bg-background dark:hover:bg-muted"
-          >
-            <Icons.down className="size-3" />
-            Jump to latest
-          </Button>
-        )}
-
         {chatFind.open && (
           <div className="absolute top-2 right-3 z-10">
             <FindBar
@@ -558,6 +544,23 @@ export function TaskDetailPane({
           </div>
         )}
       </div>
+
+      {/* In flow, between the log and the composer: the log viewport shrinks by this row, so the pill never covers content. */}
+      {!follow.following && (
+        <div data-testid="jump-to-latest-slot" className="flex shrink-0 justify-center py-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="jump-to-latest"
+            onClick={follow.jumpToLatest}
+            className="rounded-full border-border bg-background shadow-md dark:border-input-border dark:bg-background dark:hover:bg-muted"
+          >
+            <Icons.down className="size-3" />
+            Jump to latest
+          </Button>
+        </div>
+      )}
 
       {/*
        * The pending-permission dock: a sibling of the scrolling log above,

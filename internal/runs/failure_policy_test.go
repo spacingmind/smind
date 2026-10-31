@@ -3,6 +3,8 @@ package runs
 import (
 	"encoding/json"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -195,5 +197,64 @@ func TestResumableKind_NewClasses(t *testing.T) {
 	}
 	if resumableKind("") || resumableKind("martian") {
 		t.Error("empty or unknown kind is resumable")
+	}
+}
+
+// statusRecorder is a Notifier that records the RunStatus of every NotifyRunStatus.
+type statusRecorder struct {
+	failoverRecorder
+	smu      sync.Mutex
+	statuses []RunStatus
+}
+
+func (n *statusRecorder) NotifyRunStatus(s RunStatus) {
+	n.smu.Lock()
+	n.statuses = append(n.statuses, s)
+	n.smu.Unlock()
+}
+
+func (n *statusRecorder) last(runID string) (RunStatus, bool) {
+	n.smu.Lock()
+	defer n.smu.Unlock()
+	for i := len(n.statuses) - 1; i >= 0; i-- {
+		if n.statuses[i].ID == runID {
+			return n.statuses[i], true
+		}
+	}
+	return RunStatus{}, false
+}
+
+// TestFinish_Transient429StatusEventCarriesRetryAction: the terminal run.status
+// a client sees last must already say "retrying automatically": the event is
+// republished once the retry is queued, so no client keeps a stale Retry button
+// or inbox item for a run the daemon is already retrying.
+func TestFinish_Transient429StatusEventCarriesRetryAction(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "")
+	rec := &statusRecorder{}
+	e.reg.SetNotifier(rec)
+	pid := profileWith(t, e.st, "none")
+	r := e.failedRun(t, "evt", failedOpts{profileID: pid})
+	e.reg.finish(r, errors.New(transientErrText))
+	st, ok := rec.last("evt")
+	if !ok || st.Status != StatusError || st.FailureAction == nil || st.FailureAction.Kind != failure.ActionAutoRetry || st.FailureAction.Attempt != 1 {
+		t.Fatalf("last status event = %+v (seen %v), want error with an auto_retry action", st, ok)
+	}
+}
+
+// TestEnqueueRetry_DoesNotStackThePreface: a retry of a retry carries one
+// preface, not the earlier one inside the new one.
+func TestEnqueueRetry_DoesNotStackThePreface(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "")
+	pid := profileWith(t, e.st, "none")
+	r := e.failedRun(t, "stack", failedOpts{profileID: pid, failoverOf: "first", prompt: transientRetryPreface + "build it"})
+	e.reg.finish(r, errors.New(transientErrText))
+	items := retryItems(t, e.st, r.chatID)
+	if len(items) != 1 {
+		t.Fatalf("retry items = %d, want 1", len(items))
+	}
+	if got := strings.Count(items[0].Prompt, "Retrying after"); got != 1 || !strings.HasSuffix(items[0].Prompt, "build it") {
+		t.Fatalf("prompt = %q, want exactly one preface and the original prompt", items[0].Prompt)
 	}
 }
