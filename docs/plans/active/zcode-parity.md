@@ -153,6 +153,31 @@ T = token/class usage):
 Suggested stage split: (1) settings: 1, 2, 9–12; (2) shell+sidebar: 4, 8, 16;
 (3) composer + home: 3, 6, 7, 17; (4) dialogs/menus: 5, 6; (5) timeline: 13–15.
 
+## Stage 2 audit: ranked diff list (handed over 2026-10-30)
+
+ZCode ran for real (empty state only: no model, so no task page, tool cards or dialogs on its side; those are read from DESIGN.md and component structure). Sheets L = ZCode, R = smind. 390 gives no ZCode parity target (its web build is not responsive).
+
+| # | Screen | What differs | Size | Stage |
+|---|---|---|---|---|
+| 1 | Settings (every page) | H1 + subtitle, centred ~510px column, rounded-xl row cards | L | 3a (done) |
+| 2 | Settings nav | grouped sections, rounded-lg selected pill, back pill | S | 3a (done) |
+| 3 | Home / new-task landing | brand mark, greeting, project chip, big composer card | L | 3c (done) |
+| 4 | Light shell frame | floating white rounded panel, gap, soft shadow | M | 3b (done) |
+| 5 | Command palette | icon search field, filter chips, grouped rows with leading icon and kbd hints, rounded-xl | M | 3d (this PR) |
+| 6 | Composer / generic menus | item = icon + title + description + check, rounded-xl popover | M | 3c + 3d |
+| 7 | Composer shell | card, bottom bar, circular send | M | 3c (done) |
+| 8 | Sidebar structure | quick actions, "Task list" header | L | 3b (done) |
+| 9 | Shortcuts page | table with kbd chips, scope, actions | M | 3a (done) |
+| 10-12 | Empty states, usage, form controls | cards, stat strip, switch/select | S-M | 3a (done) |
+| 13 | Timeline tool cards | bordered rounded-xl cards vs smind dense rows (needs a Human decision) | L | timeline stage |
+| 14 | Timeline plan update | "Unrecognised event: plan" (feature gap) | M | timeline stage |
+| 15 | Assistant markdown | heading/inline-code spacing | S | timeline stage |
+| 16 | Window controls | back/forward, overlay titlebar | M | Stage 5 |
+| 17 | Banners / notices | notice banner row | S | 3c (done) |
+| 18 | Task header | not captured | ? | timeline stage |
+
+Not captured by the audit: dialogs (new workspace, confirm, permission) on either side; transitions. Stage 3d captures them on the smind side.
+
 ## Stage 3 — component ports
 
 One PR per area, in audit-rank order: shell+sidebar, timeline, composer,
@@ -337,6 +362,46 @@ Audit frames only (ZCode sources named by the audit: `WelcomeScreen.tsx`,
 
 None: reference-only reimplementation.
 
+## Stage 3d — Dialogs + menus (audit 5 and the generic part of 6)
+
+One PR, reference-only (shape from the audit frames `zc_{light,dark}_1280_palette`; no ZCode source copied, no "Ported from" headers). No daemon/wsapi change, no new commands, no new shortcuts. Palette behaviour (Mod+K toggle with the modal keyboard lock, arrow/Enter/Escape, pointer-follows-highlight, focus restore, registry contributions) stays.
+
+### References (ZCode files consulted, read-only)
+
+Audit frames (`zc_{light,dark}_1280_{palette,modemenu,projmenu}`) and ZCode `DESIGN.md` (Dialogs, Menus and selection overlays radius rules); sources named by the audit: `command-center/CommandCenterDialog.tsx`, `components/ui/command.tsx`, `components/ui/dropdown-menu.tsx`.
+
+### Design decisions
+
+- Groups stay smind's own (Tasks, Workspaces, Open, Chats, Files, Actions, Commands, Settings, Agents). Chips are derived by a pure `paletteCategory(group)`: **All**, **Tasks** (Tasks, Workspaces, Chats), **Actions** (everything that is not Tasks/Files), **Files** (Files). A chip with no commands is not shown (so Files is absent without a task). No ZCode "Suggested/Panels/Configure" groups are invented.
+- Leading icon per row comes from an optional `Command.icon` (registry key) falling back to a per-group icon in `palette/categories.ts`; every glyph through `lib/icons.ts`.
+- Kbd hints stay `formatCombo` of the live binding, rendered by one shared `ui/kbd.tsx` (also used by the sidebar quick action and the shortcuts dialog).
+- Radii follow ZCode `DESIGN.md` (read for this stage): dialog shells stay `rounded-2xl`, menu shells `rounded-lg`, menu items `rounded-md`, 2px gap between menu items. The first pass used `rounded-xl` for dialogs and menus and was corrected in review (smind's existing radii were already right). The palette keeps `rounded-xl` as the one exception, because the audit frame shows that radius.
+- Dialog anatomy: `DialogContent` keeps its Radix focus trap/Escape/overlay; `ui/dialog.tsx` defines `DialogBody`, the header's close-button clearance, a 28px hover-filled close button and a semibold title once, and every dialog (`ConfirmDialog`, new workspace/task, archive, delete, rename) inherits it unchanged. The permission card is an inline card (not a modal) and already uses the dialog radius; it is left as is.
+- Menu anatomy: `DropdownMenuItem`/`ContextMenuItem` get optional `icon`, `description`, `shortcut` through `MenuItemBody` (children render unchanged when none is given). The sidebar tree menus already carry icons, so no call site needed a change.
+
+### Acceptance criteria
+
+- **AC1 (item 5)** The palette has a pill search field with the registry search icon, filter chips (All/Tasks/Actions/Files, only non-empty categories, `role="tab"`-style buttons with `aria-pressed`), groups with sentence-case headings, a leading icon on every row, a right-aligned kbd hint (live shortcut), and a `rounded-xl` dialog. Choosing a chip narrows the list (and the search composes with it); an empty result shows the existing empty message. Arrow wrap, Enter, Escape, Mod+K toggle and focus restore are unchanged.
+- **AC2** `ui/kbd.tsx` is the one kbd chip; palette, sidebar quick action and shortcuts dialog use it.
+- **AC3 (generic dialogs)** `ui/dialog.tsx` defines the anatomy once (`rounded-2xl` shell, `DialogBody`, header clearance, close button hit area and focus ring); `ConfirmDialog`, new workspace, new task, archive, delete dialogs inherit it with no per-dialog overrides; the permission card keeps its behaviour.
+- **AC4 (menus)** `DropdownMenuItem` and `ContextMenuItem` accept `icon`, `description`, `shortcut`; menu shells are `rounded-lg` with a 2px item gap and `rounded-md` items; no behaviour change.
+- **AC5 (evidence)** Audit-format sheets (L = ZCode raw frame, R = smind after) in `/tmp/steward4/zcode-audit/after/dialogs-menus/`: palette (empty query, query, chip-filtered, empty result), each dialog, menus; 1280 light and dark, dialogs at 390; transition frames. All looked at.
+- **AC6** `task lint` + `task test` green on the final head; one mutation per load-bearing test.
+
+### Named tests
+
+- `palette/categories.test.ts`: `paletteCategory maps groups to chips`, `unknown groups fall into Actions`, `iconForGroup returns a registry key for every known group`
+- `components/ui/kbd.test.tsx`: `renders each key as a cap`, `renders a mac combo as one cap`
+- `components/command-palette.test.tsx` (extended): `shows a leading icon on every row`, `chips filter by category`, `chips without commands are hidden`, `chip and query compose`, `kbd hint shows the live shortcut`
+- `components/ui/menu-item.test.tsx`: `renders icon, title, description and shortcut`, `plain children render unchanged`
+- `components/ui/dialog.test.tsx`: `content uses the shared anatomy classes`, `footer and body slots render`
+- `components/ui/menu-item.test.tsx` (more): `item stack is spaced and items are rounded-md`; `components/command-palette.test.tsx` (more): `all chip is pressed when the selected category disappears`
+- Existing dialog/menu suites (`confirm-dialog`, `crud-dialogs`, `tree-action-dialogs`, `archive-dialog`, `permission-card`) stay green unchanged.
+
+### Ported files and sources
+
+None: reference-only reimplementation.
+
 ## Stage 4 — mobile tokens
 
 Port the Stage 1 table into the Expo app's theme (`mobile/`), own PR, after 1.
@@ -363,7 +428,8 @@ buttons, sidebar toggle position), own PR. Prior art:
 - [x] Stage 3a settings (this PR): shell, nav, row-card primitives, Switch, Shortcuts table, empty cards, usage tray applied to General, Appearance, Notifications, Shortcuts, GitHub, Agents, MCP, Skills, Plugins, Automations, Providers, Usage, Connection.
 - [x] Stage 3b shell + sidebar (this PR): light framed content panel, sidebar quick actions, "Task list" header, `newTask` icon.
 - [x] Stage 3c composer + home landing (this PR): `NoticeBanner`, rich select items for the mode menu, shared composer shell, home landing with project chip.
-- [ ] Stage 3 PRs (timeline, dialogs/menus).
+- [x] Stage 3d dialogs + menus (this PR): palette (chips, icons, Kbd), `Kbd`, `MenuItemBody`, dialog/menu anatomy.
+- [ ] Stage 3 PR (timeline).
 - [ ] Stage 4.
 - [ ] Stage 5.
 
@@ -439,3 +505,13 @@ Filled per stage as PRs land.
 - Mutations (all failed the named test, files restored): `rounded-full`->`rounded-xl` (composer-shell), error role (notice-banner), drop select `aria-label` (2 composer tests), title cap 60->80, drop draft seed, search threshold off (home-landing), drop mode description (pickers).
 - Peer ledger: GLM 2 runs done (task 143 style strip, 142 model popover), 5 runs hit the 5h rate limit (07:23, resets 10:42, cancelled and resent), Sonnet 5 runs done (tasks 142 and 143, steps A1, A2, B1, B2, B3). Review found 3 regressions Sonnet left (composer/toolbar tests keyed on option text, a Workspace fixture type error that broke `bun run build`), fixed by the Lead.
 
+
+### Stage 3d validation (dialogs + menus)
+
+- AC1: `command-palette.tsx` (pill search with registry search icon, `command-palette-chips` with All/Actions/Tasks/Files only for non-empty categories, leading icon per row, `Kbd` hint from the live binding, sentence-case group headings, `rounded-xl`), `palette/categories.ts`, optional `Command.icon`; specific icons set on the shell and sidebar commands (`App.tsx`, `app-sidebar.tsx`: one `icon:` line each). Keyboard behaviour untouched (all existing palette tests green). Tests: `shows a leading icon on every row`, `chips filter by category`, `chips without commands are hidden`, `chip and query compose`, `kbd hint shows the live shortcut`, `all chip is pressed when the selected category disappears`, `categories.test.ts` (3).
+- AC2: `ui/kbd.tsx` used by the palette, `sidebar-quick-actions.tsx` and `shortcuts-dialog.tsx` (local `KeyCaps` removed). Tests: `renders each key as a cap`, `renders a mac combo as one cap`.
+- AC3/AC4: `ui/dialog.tsx` (`DialogBody`, close button, header clearance, semibold title; shell stays `rounded-2xl`), `ui/menu-item-body.tsx` + `DropdownMenuItem`/`ContextMenuItem` props, menu shells `rounded-lg` with `gap-0.5`, items `rounded-md`. Tests: `content uses the shared anatomy classes`, `footer and body slots render`, `renders icon, title, description and shortcut`, `plain children render unchanged`, `item stack is spaced and items are rounded-md`. Existing `confirm-dialog`, `crud-dialogs`, `tree-action-dialogs`, `archive-dialog`, `permission-card` suites unchanged and green.
+- AC5: sheets (L = ZCode raw frame, R = smind after; ZCode has no dialog or task page, so its palette frame is the left side of the palette/dialog rows and its mode/project menu frames of the menu rows) in `/tmp/steward4/zcode-audit/after/dialogs-menus/`: `dialogs-menus_{light,dark}_1280_a.png` (palette: empty, query, Actions chip, empty result), `..._b.png` (palette kbd hint, new workspace, new task, archive confirm), `..._c.png` (sidebar context menu, task "more" menu, permission request card), `dialogs-menus_390_after.png` (palette + chip at 390, smind only), `dialogs-menus_390_dialogs.png` (new workspace and archive at 390), `transitions_light_1280_palette.png` (palette open 4 frames, close 3, animations slowed 12x), `transitions_dark_1280_dialog.png` (new workspace open/close). All looked at. Open frames show the clean overlay fade plus zoom; the dialog close frames were captured after the exit animation finished (screenshot latency) so mid-close was not seen for the dialog; the animation classes are unchanged by this PR.
+- Not done / known: ZCode's "Suggested/Panels/Configure" groups and Open workspace/Toggle terminal entries are not invented (smind's own groups are kept); the palette's "New workspace" and "New task in ..." commands do nothing at 390 while the sidebar drawer is closed (the dialogs live in the sidebar component; pre-existing, not touched); the permission card (inline, not a modal) is unchanged.
+- AC6: `task lint` clean; `task test` green on `75d4e696` (web 365 files / 4033 tests, Go, desktop/docs-site node tests, install scripts), run with a temp HOME and shared caches. Mutations (all failed the named test, files restored): `kbd.tsx` drop the `+` split (`renders each key as a cap`), `categories.ts` drop Chats from tasks (`paletteCategory maps groups to chips`), `command-palette.tsx` ignore the category filter (`chips filter by category`, `chip and query compose`), drop the present filter (`chips without commands are hidden`), pressed uses the raw category (`all chip is pressed when the selected category disappears`), `menu-item-body.tsx` drop the description (`renders icon, title, description and shortcut`), `dialog.tsx` `rounded-2xl` to `rounded-xl` (`content uses the shared anatomy classes`), `dropdown-menu.tsx` drop `gap-0.5` (`item stack is spaced and items are rounded-md`).
+- Peer ledger: GLM 6 runs (task 165: steps 1-3, review fix, step 4 icons; task 166: menu item and dialog anatomy, radius correction), 0 Sonnet, no rate limit, no turn cap (`glm-acp-agent --max-turns 500` seen). Failures: the first radii (rounded-xl dialogs and menus) were my brief's mistake, corrected after reading ZCode `DESIGN.md`; GLM left the chip's pressed state on the raw category (caught in review, fixed by GLM first time).

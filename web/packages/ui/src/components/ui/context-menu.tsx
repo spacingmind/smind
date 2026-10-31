@@ -3,6 +3,7 @@ import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 import { Icons } from "@/lib/icons";
+import { MenuItemBody } from "@/components/ui/menu-item-body";
 
 /**
  * A shadcn-shaped wrapper over Radix's ContextMenu, added for the file
@@ -28,7 +29,7 @@ function ContextMenuContent({
       <ContextMenuPrimitive.Content
         data-slot="context-menu-content"
         className={cn(
-          "bg-menu data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50 min-w-[10rem] overflow-hidden rounded-lg border p-1 shadow-md",
+          "bg-menu data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50 flex min-w-[10rem] flex-col gap-0.5 overflow-hidden rounded-lg border p-1 shadow-md",
           className,
         )}
         {...props}
@@ -39,8 +40,16 @@ function ContextMenuContent({
 
 function ContextMenuItem({
   className,
+  icon,
+  description,
+  shortcut,
+  children,
   ...props
-}: React.ComponentProps<typeof ContextMenuPrimitive.Item>) {
+}: React.ComponentProps<typeof ContextMenuPrimitive.Item> & {
+  icon?: React.ReactNode;
+  description?: React.ReactNode;
+  shortcut?: string;
+}) {
   return (
     <ContextMenuPrimitive.Item
       data-slot="context-menu-item"
@@ -49,7 +58,11 @@ function ContextMenuItem({
         className,
       )}
       {...props}
-    />
+    >
+      <MenuItemBody icon={icon} description={description} shortcut={shortcut}>
+        {children}
+      </MenuItemBody>
+    </ContextMenuPrimitive.Item>
   );
 }
 
@@ -100,7 +113,7 @@ function ContextMenuSubContent({
       <ContextMenuPrimitive.SubContent
         data-slot="context-menu-sub-content"
         className={cn(
-          "bg-menu data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50 min-w-[8rem] overflow-hidden rounded-lg border p-1 shadow-md",
+          "bg-menu data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50 flex min-w-[8rem] flex-col gap-0.5 overflow-hidden rounded-lg border p-1 shadow-md",
           className,
         )}
         {...props}
