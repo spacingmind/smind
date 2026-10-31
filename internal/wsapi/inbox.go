@@ -53,7 +53,7 @@ type inboxHost struct {
 	last string
 }
 
-func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *validation.Service, stalled *stalledSource) *inboxHost {
+func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *validation.Service, stalled *stalledSource, hostPairs func() []inbox.HostPair) *inboxHost {
 	h := &inboxHost{bus: bus, poke: make(chan struct{}, 1), done: make(chan struct{})}
 	h.svc = &inbox.Service{
 		DB:          db,
@@ -72,6 +72,8 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 			return out, nil
 		},
 		Stalls: stalled.current,
+		// HostLinkIssues stays nil for now: F1b's link manager will feed it.
+		HostPairs: hostPairs,
 		TaskTitle: func(id int64) string {
 			if t, err := db.GetTask(id); err == nil {
 				return t.Title
