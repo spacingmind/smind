@@ -36,9 +36,9 @@ mutations:
   - { id: M1, file: internal/fleet/watch/watch.go, change: "Stop() closes every open watch row", expectFail: [TestFleetCallerRestartStillGetsFinishNotification] }
   - { id: M2, file: internal/fleet/watch/watch.go, change: "failure limit 3 becomes 4 (or the unknown notice says finished)", expectFail: [TestFleetWatchThreeFailuresStatusUnknownNeverFinished] }
   - { id: M3, file: internal/fleet/watch/watch.go, change: "a connecting attempt counts as a failure", expectFail: [TestFleetWatchObservationBackoffAndConnectingNotCounted] }
-  - { id: M4, file: internal/store/fleet_notify.go, change: "drop the open-only claim (UPDATE without state='open' check)", expectFail: [TestEnqueueChildEventClosingWatchOnce, TestFleetWatchFinishDeliveredOnce] }
+  - { id: M4, file: internal/store/fleet_notify.go, change: "drop the open-only claim (UPDATE without state='open' check)", expectFail: [TestEnqueueChildEventClosingWatchOnce] }
   - { id: M5, file: internal/wsapi/fleet_remote_write.go, change: "an unsent create still writes the watch", expectFail: [TestFleetWatchUnsentPromptNoWatch] }
-  - { id: M6, file: internal/wsapi/fleet_remote_write.go, change: "drop the seat check", expectFail: [TestRemoteWriteRefusedForPeerSeatAndRemoteOrigin] }
+  - { id: M6, file: internal/wsapi/fleet_remote.go, change: "drop the seat check in guard (if false && ...)", expectFail: [TestRemoteWriteRefusedForPeerSeatAndRemoteOrigin] }
 ---
 
 F3b caller write path: see the plan's "F3b design".
