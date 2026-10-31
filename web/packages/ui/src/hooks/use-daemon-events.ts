@@ -51,8 +51,8 @@ const GIT_TOPICS = ["task.git", "forge.status"];
 /** `provider.updated` {id, defaultModel}: a provider's configured default model changed (U15); the bridge re-reads provider.list. */
 const PROVIDER_TOPICS = ["provider.updated"];
 
-/** `plugin.updated` {id, globalEnabled}: a plugin was installed, enabled, disabled, removed, updated or reloaded, or `plugins.enabled` flipped; the bridge re-reads the plugin commands and themes. */
-const PLUGIN_TOPICS = ["plugin.updated"];
+/** `plugin.updated` {id, globalEnabled}: a plugin was installed, enabled, disabled, removed, updated or reloaded, or `plugins.enabled` flipped; the bridge re-reads the plugin commands and themes. `plugin.event` {pluginId, kind, panelId?}: a plugin-published change (a panel's "refresh"); the bridge re-reads that plugin's cached view documents. */
+const PLUGIN_TOPICS = ["plugin.updated", "plugin.event"];
 
 /** `automation.fired` {automationId, auditId, taskId?, decision}, `automation.paused` {automationId, reason}, `automation.updated` {automationId} (ADR-0044): the bridge re-reads the list and the audit pages. */
 const AUTOMATION_TOPICS = ["automation.fired", "automation.paused", "automation.updated"];

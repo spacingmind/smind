@@ -10,8 +10,9 @@ order: 13
 Plugins are a preview. A plugin is a directory with a `smind-plugin.json`
 file. Today a plugin can add five things: MCP servers, skills, agent profiles,
 prompt commands and themes, and it can declare a long-lived process that smind
-starts (see [Plugin processes](#plugin-processes)). Nothing else a manifest
-declares (providers, panels) has an effect yet.
+starts (see [Plugin processes](#plugin-processes)). A plugin can also show
+declarative panels in the web app (see [Panels](#panels)). Nothing else a
+manifest declares (providers) has an effect yet.
 
 A plugin is trusted code you chose to run. An MCP server it adds starts as
 you, with your files and credentials, exactly like an MCP server you add by
@@ -220,6 +221,43 @@ short name under `conflicts`. With no plugin commands the message box behaves
 as it always did. A command file is only text: it starts nothing and gets no
 access to anything. A command that asks a plugin process for its text is
 described under [Plugin RPCs](#plugin-rpcs).
+
+### Panels
+
+A plugin can declare panels: small pages made of a fixed set of building blocks
+(headings, text, markdown, lists, tables, forms, buttons, progress bars, code and
+diffs). The plugin sends data; the app draws it. A plugin never ships code that
+runs in the app.
+
+What the web app shows for an enabled plugin:
+
+- A panel with `where: "task"` appears in the **+** menu of a task's tab strip
+  and opens as a tab (`Hello` next to your chats and files). The tab comes back
+  after a reload, and closes by itself when the plugin is disabled or removed.
+- A sidebar item shows under **Plugins** above the footer and opens its panel
+  as a full page with a back button.
+- Every panel, whatever its `where`, has an **Open <title>** entry in the
+  command palette (Ctrl-K or Cmd-K). With a task selected it opens as a tab,
+  otherwise as the full page.
+- A panel refreshes when its plugin asks for it, when you press the refresh
+  button in its header, and after one of its buttons calls the plugin.
+
+Buttons do one of five things, and only those:
+
+| Button | What the app does |
+|---|---|
+| call the plugin | runs one of the plugin's own RPCs, then reloads the panel; a form adds the field values as `values` |
+| insert a prompt | puts the text in the message box of the chat you are in. It is never sent: you read it and press send. With no chat open it tells you so |
+| run a command | inserts a plugin prompt command the same way |
+| open a panel | opens another panel of the same plugin |
+| open a link | asks first: "Open `example.com` in your browser?" shows the host and the full address; nothing opens until you confirm |
+
+The app never loads a remote image, runs a script or shows raw HTML from a
+panel. Markdown images appear as their alt text, links open only through the
+confirm above, and colors are the app's own theme colors, so a panel follows
+your light or dark theme. An element this version of the app does not know shows
+a dashed "Unsupported in this app version" note instead of breaking the panel,
+and a panel that needs a newer app version is not listed at all.
 
 ### Themes
 
