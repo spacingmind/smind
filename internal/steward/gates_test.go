@@ -302,6 +302,24 @@ func TestDigest_FramesCapturedAtOtherShaFlagged(t *testing.T) {
 	if g := mustGate(t, noFrames, "frames_fresh"); g.State != GateFail || g.Detail != "no frames evidence" {
 		t.Errorf("frames_fresh = %q (%s), want fail no frames evidence", g.State, g.Detail)
 	}
+
+	atBase := base()
+	atBase.Numstat = "1\t1\tweb/packages/ui/src/x.tsx\n"
+	atBase.Frames = framesAt(atBase.Task.BaseSHA)
+	g = mustGate(t, atBase, "frames_fresh")
+	if g.State != GateFail {
+		t.Fatalf("frames_fresh = %q, want fail for frames captured at the base sha", g.State)
+	}
+	if !strings.Contains(g.Detail, "captured at") {
+		t.Errorf("detail %q does not name the capture sha", g.Detail)
+	}
+
+	atHead := base()
+	atHead.Numstat = "1\t1\tweb/packages/ui/src/x.tsx\n"
+	atHead.Frames = framesAt(atHead.Task.HeadSHA)
+	if g := mustGate(t, atHead, "frames_fresh"); g.State != GatePass {
+		t.Errorf("frames_fresh = %q (%s), want pass for frames captured at the head sha", g.State, g.Detail)
+	}
 }
 
 func TestDigest_FramesMatrixMissingCell(t *testing.T) {
