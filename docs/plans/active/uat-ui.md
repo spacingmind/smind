@@ -83,12 +83,15 @@ Surfaces: W = web at 1280, N = web at 390, D = desktop (see "not coverable").
 | J52 | Composer: attachments and @file | attach a small image, type `@` for the file picker | chip appears, picker lists files, send keeps both | W N | P2 |
 | J53 | Run configuration options | open the mode/model options, switch mode | options list, change applies and shows | W N | P2 |
 | J54 | Window resize across the 768 breakpoint | drag 1280 → 800 → 390 on a task | layout switches without losing state | W N | P1 |
+| J55 | Open a PDF in Preview (office mode O4) | open a task with a PDF in its files, open it in a Preview tab (sandboxed pdf.js classic worker, PR #752) | pages render, zoom and page controls work, no console or CSP errors, on the 390 layout too | W N D | P1 |
+| J56 | PDF viewer inside the desktop WKWebView | open the same PDF in the built macOS app's WKWebView (not Chromium) | same render as J55; proves the worker and sandbox work in WebKit | D | P1 |
 
-54 journeys. J44 is blocked until the Automations page merges.
+56 journeys. J44 is blocked until the Automations page merges; J55 and J56 are blocked until #752 merges (after #750 and #751), then run on the merged develop build.
 
 ## Not coverable here (fills in as the run proceeds)
 
 - Desktop shell: the Tauri app (`/Applications/sMind.app` is the Human's live install and is off limits; a dev build needs a Rust toolchain and a native window that Playwright cannot drive). The web UI built with `VITE_SMIND_DESKTOP=1` and a stubbed Tauri bridge covers desktop-mode layout only (earlier `p5` approach); native chrome, traffic lights, updater and the sidecar daemon are not covered.
+- J56 (PDF in the desktop app's WKWebView): cannot be driven headless here. Playwright in this harness has only Chromium (no WebKit build, and installing one is out of scope), `safaridriver` cannot attach to a Tauri webview, and `/Applications/sMind.app` is the Human's live install. A dev build is possible (cargo is installed) but it would start its own sidecar daemon and needs a native window, so it needs the Steward's go-ahead and an isolated `SMIND_HOME`. Until then WebKit rendering of the viewer is unverified; the fallback is a Safari (WebKit) check by hand on the isolated daemon URL.
 - Anything needing a real provider, `gh` or GitHub (PR panel with a real PR), push notifications, mobile app.
 
 ## Decisions
