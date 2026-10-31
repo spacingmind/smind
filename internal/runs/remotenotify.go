@@ -20,6 +20,9 @@ const (
 	RemoteFinished        RemoteChildKind = "finished"
 	RemoteStatusUnknown   RemoteChildKind = "status_unknown"
 	RemoteHostUnavailable RemoteChildKind = "host_unavailable"
+
+	// remoteTokenMax caps one sanitized remote status-line token.
+	remoteTokenMax = 48
 )
 
 // RemoteChildFacts is everything BuildRemoteChildEventBlock renders about
@@ -50,12 +53,15 @@ func BuildRemoteChildEventBlock(f RemoteChildFacts) string {
 			"the task's state is unknown. Do not treat it as finished.", global, title)
 	}
 
-	parts := []string{f.State}
+	// State, StopReason, FailureKind and RunID are remote-controlled and
+	// sit in the status line, outside the untrusted element: reduce them
+	// to opaque tokens so a hostile host cannot inject prompt text.
+	parts := []string{remoteToken(f.State)}
 	if f.StopReason != "" {
-		parts = append(parts, f.StopReason)
+		parts = append(parts, remoteToken(f.StopReason))
 	}
 	if f.FailureKind != "" {
-		parts = append(parts, f.FailureKind)
+		parts = append(parts, remoteToken(f.FailureKind))
 	}
 	if f.CostUSD != nil {
 		parts = append(parts, fmt.Sprintf("cost $%.2f", *f.CostUSD))
@@ -63,10 +69,32 @@ func BuildRemoteChildEventBlock(f RemoteChildFacts) string {
 		parts = append(parts, "cost not reported")
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "- remote task %s \"%s\" run %s: %s", global, title, f.RunID, strings.Join(parts, " · "))
+	fmt.Fprintf(&b, "- remote task %s \"%s\" run %s: %s", global, title, remoteToken(f.RunID), strings.Join(parts, " · "))
 	if text := strings.TrimSpace(f.LastText); text != "" {
 		fmt.Fprintf(&b, "\n<child-response host=\"%s\" task=\"%s\" untrusted=\"true\">%s</child-response>",
 			f.Host, global, escapeChildText(text))
+	}
+	return b.String()
+}
+
+// remoteToken reduces a remote-supplied status-line token to [A-Za-z0-9_.-],
+// cut at 48 runes, so it cannot carry newlines, markup or quoting into the
+// parent's prompt; a token emptied by the filter reads "unknown".
+func remoteToken(s string) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		if n == remoteTokenMax {
+			break
+		}
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '.', r == '-':
+			b.WriteRune(r)
+			n++
+		}
+	}
+	if n == 0 {
+		return "unknown"
 	}
 	return b.String()
 }
