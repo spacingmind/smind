@@ -33,8 +33,10 @@ the gate from PR #717 (engine refuses to enable on Windows).
 - AC9 PowerShell/cmd equivalents: `Remove-Item/ri/del/erase/rd/rmdir`, `Set-Content/Add-Content/Out-File/New-Item/
   Copy-Item/Move-Item/Rename-Item/Clear-Content`, `copy/xcopy/move/robocopy/ren/rename/mklink/attrib/icacls/takeown`
   with a destination outside the worktree or unresolvable: `no-destructive-outside`; `Get-Content/type` of a secret
-  name or `Get-ChildItem Env:`/`set` dump: `no-secrets`; `powershell|pwsh|cmd -c/-Command` wrapper strings are never
-  parsed: not allowed by any rule, `ask`. Documented in public-docs.
+  name or `Get-ChildItem Env:`/`set` dump: `no-secrets`; `powershell|pwsh|cmd -c/-Command` literal payloads are parsed in
+  their own dialect (PowerShell `;` `|` `&` call operator, cmd `&` `&&` `||`, nested wrappers), so the floor and the rules
+  judge the inner commands; the wrapper itself is never allowed by any rule (`ask` at best), and a payload that cannot be
+  parsed with certainty is `ask`. Documented in public-docs.
 - AC10 Everything unparseable on Windows is `ask`, never `allow`.
 - AC11 POSIX behaviour is byte-for-byte unchanged: the existing POSIX tests run unchanged on macOS/Linux (they skip on a
   Windows runner, where the Windows-native equivalents run instead).
