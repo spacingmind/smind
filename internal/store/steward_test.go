@@ -238,13 +238,23 @@ func TestStewardReviews_TokenSingleUse(t *testing.T) {
 	}
 }
 
-func TestStewardReviews_FindByKeyIgnoresCancelled(t *testing.T) {
+func TestStewardReviews_FindByKeyIgnoresBlocked(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	seedStewardTasks(t, s, 1)
+	seedStewardTasks(t, s, 1, 2)
 	now := time.Now().UTC().Truncate(time.Second)
 
+	crashed, err := s.InsertStewardReview(StewardReview{TaskID: 1, TriggerKind: "auto", HeadSHA: "h1", Status: "pending"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetStewardReviewDigest(crashed.ID, "{}", "d", "green", "p", "c1", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetStewardReviewBlocked(crashed.ID, "crashed", "seat died", 0, now); err != nil {
+		t.Fatal(err)
+	}
 	cancelled, err := s.InsertStewardReview(StewardReview{TaskID: 1, TriggerKind: "auto", HeadSHA: "h1", Status: "pending"}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -271,10 +281,26 @@ func TestStewardReviews_FindByKeyIgnoresCancelled(t *testing.T) {
 		t.Fatalf("FindStewardReviewByKey() error = %v", err)
 	}
 	if got.ID != kept.ID {
-		t.Fatalf("FindStewardReviewByKey() = id %d, want the non-cancelled row %d", got.ID, kept.ID)
+		t.Fatalf("FindStewardReviewByKey() = id %d, want the finished row %d (the blocked ones must not match)", got.ID, kept.ID)
 	}
 	if _, err := s.FindStewardReviewByKey(1, "h1", "c1", "red"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("FindStewardReviewByKey(no match) error = %v, want sql.ErrNoRows", err)
+	}
+
+	// A task whose only review of the key is blocked (crashed) must not
+	// block a retry of the same head: the lookup finds nothing.
+	onlyBlocked, err := s.InsertStewardReview(StewardReview{TaskID: 2, TriggerKind: "auto", HeadSHA: "h2", Status: "pending"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetStewardReviewDigest(onlyBlocked.ID, "{}", "d", "green", "p", "c1", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetStewardReviewBlocked(onlyBlocked.ID, "crashed", "seat died again", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FindStewardReviewByKey(2, "h2", "c1", "green"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("FindStewardReviewByKey(only blocked rows) error = %v, want sql.ErrNoRows", err)
 	}
 }
 

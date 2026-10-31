@@ -152,12 +152,14 @@ func (s *Store) LatestStewardReview(taskID int64) (StewardReview, error) {
 	return scanStewardReview(s.db.QueryRow(`SELECT `+stewardReviewCols+` FROM steward_reviews WHERE task_id = ? ORDER BY id DESC LIMIT 1`, taskID))
 }
 
-// FindStewardReviewByKey returns the newest non-cancelled review of
-// {task, head, contract, CI state}, or sql.ErrNoRows. Cancelled rows stay in
-// the table for audit but never satisfy a lookup.
+// FindStewardReviewByKey returns the newest review of
+// {task, head, contract, CI state}, or sql.ErrNoRows. It is the dedupe
+// lookup, and only an open or finished review counts; a blocked one
+// (timeout, budget, crashed, cancelled) never blocks a retry of the same
+// head.
 func (s *Store) FindStewardReviewByKey(taskID int64, headSHA, contractSha, ciState string) (StewardReview, error) {
 	return scanStewardReview(s.db.QueryRow(`SELECT `+stewardReviewCols+` FROM steward_reviews
-		WHERE task_id = ? AND head_sha = ? AND contract_sha256 = ? AND ci_state = ? AND blocked_reason != 'cancelled'
+		WHERE task_id = ? AND head_sha = ? AND contract_sha256 = ? AND ci_state = ? AND status IN ('pending','running','done')
 		ORDER BY id DESC LIMIT 1`, taskID, headSHA, contractSha, ciState))
 }
 
