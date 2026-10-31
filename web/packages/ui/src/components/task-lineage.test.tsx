@@ -475,4 +475,15 @@ describe("TaskLineage remote children (fleet F4)", () => {
     fireEvent.click(pill);
     expect(onJumpToTask).not.toHaveBeenCalled();
   });
+
+  it("TestRemoteChildPillsNotHiddenBelowSm", () => {
+    render(
+      <TaskLineageHeader
+        lineage={{ parent: null, node: node({ id: 2 }), children: [node({ id: 3, parentId: 2, title: "Local work" }), remote()] }}
+      />,
+    );
+    const [local, remotePill] = screen.getAllByTestId("task-child-pill");
+    expect(local.parentElement?.className).toContain("max-sm:hidden");
+    expect(remotePill.parentElement?.className).not.toContain("max-sm:hidden");
+  });
 });
