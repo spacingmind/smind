@@ -442,5 +442,26 @@ describe("ProviderDetail", () => {
       );
       expect(screen.queryByTestId("provider-config-dir-zai-claude")).toBeNull();
     });
+
+    it("a recipe instance hides the daemon-env config directory", async () => {
+      const d = recipeDaemon({
+        recipe: "zai-coding",
+        envEffective: { CLAUDE_CONFIG_DIR: { path: "/Users/someone/real-home/.claude-demo", source: "environment", exists: false } },
+      });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.queryByTestId("provider-custom-dir-zai-claude")).toBeNull();
+      expect(screen.getByTestId("provider-detail").textContent).not.toContain("/Users/someone/real-home");
+    });
+
+    it("a plain instance still shows its config directory", async () => {
+      const d = recipeDaemon({
+        envEffective: { CLAUDE_CONFIG_DIR: { path: "/Users/someone/real-home/.claude-demo", source: "environment", exists: false } },
+      });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-custom-dir-zai-claude")).toBeInTheDocument();
+      expect(screen.getByTestId("provider-custom-dir-zai-claude")).toHaveTextContent("/Users/someone/real-home/.claude-demo");
+    });
   });
 });
