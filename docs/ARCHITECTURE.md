@@ -45,6 +45,13 @@ row. The schema is created by migration either way, so enabling later never reop
   `fleet_watches` (durable finish watches; no foreign key, so a watch outlives its host), `fleet_idem` (idempotency keys),
   `fleet_remote_tasks` (caller-side mirrors, cache only), and the columns `tasks.origin_host`, `tasks.origin_trace`,
   `runs.origin_host` (empty for local work). No table models a mesh: a mesh is the reverse toggle on every pair.
+- **Write path** (`internal/fleet/serve`, `internal/wsapi/fleet_write.go`): `fleet.task.create|send|stop` and `fleet.run.wait`
+  run behind the same provenance, grant and audit as the reads, then ownership (`tasks.origin_host` must be the caller), an
+  idempotency lookup (`fleet_idem`, 24 h), the per-origin budget (live runs, 24 h reported cost and wall seconds, counted
+  per origin host across trace ids) and a `Backend` that creates the task from the callee's own `origin` and starts the
+  run with the `remote` source (never AutoAccept, floor and rules decide every request, the origin host is stamped on the
+  run row when it starts). A sweeper stops remote runs past the grant's wall limit and stamps `stop_reason=wall_limit`.
+  A non-refusal error never reaches the peer verbatim (it can carry a local path).
 - **Config** (`fleet.*`, `internal/config`): the switch and the limits (hosts, connections per peer, handshake, frame size,
   outstanding requests, observation backoff, idempotency and replay windows, audit retention). Only a human edit of
   `config.yaml` can change them; there is no environment override.

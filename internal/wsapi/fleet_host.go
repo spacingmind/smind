@@ -337,9 +337,9 @@ var fleetHostAllowed = map[string][]string{
 }
 
 // approvedHostMethods is the method set of an approved host: the link-state
-// notice and the fleet read methods.
+// notice, the fleet read methods and the fleet write methods.
 func approvedHostMethods() []string {
-	return append([]string{hello.MethodLinkState}, wire.ReadMethods...)
+	return append(append([]string{hello.MethodLinkState}, wire.ReadMethods...), wire.WriteMethods...)
 }
 
 // hostPrincipal returns the connection's fleet host principal, if any.
@@ -386,19 +386,38 @@ func (a *API) SetFleet(o FleetOptions) {
 	a.hs["fleet.host.test"] = fleetLocalOnly("fleet.host.test", f.handleHostTest)
 	a.hs["fleet.host.route"] = fleetLocalOnly("fleet.host.route", f.handleHostRoute)
 	if o.Store != nil && o.Workspaces != nil {
-		f.read = serve.New(serve.Options{
+		// One source serves the Reader and the write path's TaskLookup, so
+		// a send or a stop decides on the same task rows a read returns.
+		src := &fleetSource{db: o.Store, ws: o.Workspaces}
+		opts := serve.Options{
 			HostID:     o.Key.HostID(),
 			Authorizer: o.Registry,
 			Audit:      o.Store,
-			Reader: serve.NewReader(&fleetSource{db: o.Store, ws: o.Workspaces}, serve.ReaderOptions{
+			Reader: serve.NewReader(src, serve.ReaderOptions{
 				HostID: o.Key.HostID(), Version: o.Version, Caps: hello.Caps(), HomeDirs: o.HomeDirs,
 			}),
 			Now: o.Now,
-		})
+		}
+		// The write methods need the effects only this API can perform;
+		// serve leaves them "unknown method" until Backend, Ledger and
+		// Tasks are all wired, which is always the case outside odd tests.
+		var backend *fleetBackend
+		if a.wm != nil && a.runner != nil {
+			backend = &fleetBackend{a: a, db: o.Store}
+			opts.Backend, opts.Ledger, opts.Tasks = backend, o.Store, src
+		}
+		f.read = serve.New(opts)
 		for _, m := range wire.ReadMethods {
 			a.hs[m] = f.readHandler(m)
 		}
+		for _, m := range wire.WriteMethods {
+			a.hs[m] = f.readHandler(m)
+		}
 		a.fleetAuditSweep = serve.StartAuditSweeper(o.Store, store.FleetAuditRetention, time.Hour)
+		if backend != nil {
+			a.fleetWallSweep = serve.StartWallSweeper(o.Store, o.Registry, o.Store, backend.StopRun, 0, o.Now)
+		}
+		a.fleetIdemSweep = startFleetIdemSweeper(o.Store, o.Now)
 	}
 }
 
