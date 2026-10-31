@@ -303,3 +303,13 @@ Selector (`internal/fleet/selector`, pure): `Select(sel, candidates)` over `Cand
 Wire: one new local-only bridge method `remote.select {labels, any}` -> `{host, hostId}` (same guards as `remote.read`: local connection, hop limit); the MCP `host` argument (any JSON type in the schema, documented as alias string OR `{labels:{...}, any:true}`) and the CLI `--labels k:v,k:v [--any]` resolve through it to an alias first, then continue on the existing alias path. `Live` = the host's mirrored remote tasks in a non-terminal state. Admin: `fleet.host.labels {host, set?, remove?}` (local-only) behind `smind host label set|rm|ls`.
 
 Not in F5: a Hosts settings page labels editor (follow-up), any change to `internal/tasktree`, the mirror, web or mobile.
+
+## F5 progress and validation (2026-10-31)
+
+Contract `fleet-hosts-f5.contract.md`. Peer ledger F5: peer-glm 0 runs (GLM limited until about 23:28 +07, so all briefs went to peer-sonnet), peer-sonnet 4 tasks / 4 runs, each one pass, no failure mode (S1 selector package, S2 store+registry column, S3 wsapi `remote.select` + `fleet.host.labels`, S4 MCP union host, S5 CLI + docs; S4 and S5 ran in parallel with S3). Review: one real finding, a 45 MB `cmd/smind/smind` build binary committed by the MCP peer, removed before the commits landed (history rewritten locally, nothing pushed). Lead wrote no code beyond cherry-picks.
+
+- AC26 labels: `TestFleetLabelsValidate` (17 labels, bad keys/values, secret-looking key), `TestFleetLabelsSetAndList`, `TestFleetHostLabelsRoundTrip`, `TestFleetHostLabels_ValidationRefused`, `TestFleetHostLabels_NeverOnWire`.
+- AC26 selector: `TestFleetSelector_{ExactOne,Zero,Ambiguous,AnyTieByAlias,DisabledSkipped,DisconnectedSkipped,EmptyLabelsInvalid,NoMutation}`; daemon `TestFleetRemoteSelect_*`; MCP `TestFleetSelectorMCP_*` (candidates named in the error text, no retry, alias string makes no select call); CLI `TestHostLabel*`, `TestHostSelect*`, `TestHostReadWithLabelsSelectsFirst`.
+- Mutations (each fails its named test; build failures re-done): M1 eligible `Enabled || Connected` -> DisabledSkipped/DisconnectedSkipped; M2 tie-break larger alias -> AnyTieByAlias; M3 cap 17 -> LabelsValidate; M4 Connected always true -> `TestFleetRemoteSelect_DisconnectedAndDisabledSkipped`; M5 alias not written into remote.read params -> `TestFleetSelectorMCP_ResolvesToAliasThenReads`.
+- Commands: `task lint` ok; `go test -race` on cmd/smind, internal/fleet/..., internal/wsapi, internal/store ok; `GOOS=windows go vet` on the same ok.
+- Not done: a labels editor on the Hosts settings page (follow-up), web/mobile chip (F4).
