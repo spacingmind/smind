@@ -104,7 +104,7 @@ func repoSubdir(root string) string {
 	if exists(".agents/skills") {
 		return ".agents/skills"
 	}
-	if fi, err := os.Lstat(filepath.Join(root, ".claude")); err == nil && fi.Mode()&os.ModeSymlink != 0 || exists(".claude/skills") {
+	if fi, err := os.Lstat(filepath.Join(root, ".claude")); err == nil && skills.IsLinkMode(fi.Mode()) || exists(".claude/skills") {
 		return ".claude/skills"
 	}
 	return ".agents/skills"

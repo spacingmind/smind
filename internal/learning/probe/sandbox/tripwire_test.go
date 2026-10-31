@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func gitIn(t *testing.T, dir string, args ...string) {
@@ -47,9 +49,7 @@ func newTripFixture(t *testing.T) *tripFixture {
 	must(filepath.Join(f.repo, "a.txt"), "a")
 	must(filepath.Join(f.skills1, "SKILL.md"), "skill")
 	must(filepath.Join(f.skills1, "sub", "x.md"), "x")
-	if err := os.Symlink("SKILL.md", filepath.Join(f.skills1, "link")); err != nil {
-		t.Fatal(err)
-	}
+	testutil.SymlinkOrSkip(t, "SKILL.md", filepath.Join(f.skills1, "link"))
 	gitIn(t, f.repo, "init", "-q")
 	gitIn(t, f.repo, "add", ".")
 	gitIn(t, f.repo, "commit", "-q", "-m", "init")

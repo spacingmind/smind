@@ -15,6 +15,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/taskrunner/fakeclaude"
+	"github.com/spacingmind/smind/internal/testutil"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -292,7 +293,7 @@ func TestExecutor_CleansStrayCwdEntries(t *testing.T) {
 	must(os.MkdirAll(filepath.Join(cwd, ".claude", "nested"), 0o755))
 	must(os.WriteFile(filepath.Join(cwd, ".claude", "nested", "f"), []byte("x"), 0o600))
 	must(os.WriteFile(filepath.Join(cwd, "CLAUDE.md"), []byte("x"), 0o600))
-	must(os.Symlink(outside, filepath.Join(cwd, "link")))
+	testutil.Link(t, outside, filepath.Join(cwd, "link"))
 
 	if res, err := e.ex.Run(context.Background(), e.req()); err != nil || res.FinalText != "hello from claude" {
 		t.Fatalf("Run after stray entries = %+v, %v", res, err)
@@ -322,9 +323,7 @@ func TestExecutor_RefusesSymlinkedCwd(t *testing.T) {
 	if err := os.RemoveAll(cwd); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, cwd); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, outside, cwd)
 	if _, err := e.ex.Run(context.Background(), e.req()); err == nil {
 		t.Fatal("Run with a symlinked cwd succeeded")
 	}

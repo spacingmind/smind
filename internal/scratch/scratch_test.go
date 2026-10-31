@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func TestRemove_OnlyTaskDir(t *testing.T) {
@@ -41,9 +43,7 @@ func TestRemove_SymlinkEscapeNotFollowed(t *testing.T) {
 	if _, err := m.Ensure(1); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, filepath.Join(m.Dir(1), "escape")); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, outside, filepath.Join(m.Dir(1), "escape"))
 	if _, err := m.Remove(1); err != nil {
 		t.Fatalf("Remove(1) error = %v", err)
 	}
@@ -66,9 +66,7 @@ func TestRemove_SymlinkAtTaskDirRemovesLinkOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := New(root)
-	if err := os.Symlink(outside, m.Dir(1)); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, outside, m.Dir(1))
 	rem, err := m.Remove(1)
 	if err != nil {
 		t.Fatalf("Remove(1) error = %v", err)
@@ -254,9 +252,7 @@ func TestEnsure_CreatesPrivateDir(t *testing.T) {
 	if err := os.Remove(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, dir); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, outside, dir)
 	if _, err := m.Ensure(9); err == nil {
 		t.Fatal("Ensure(9) succeeded with a symlink in place, want error")
 	}
