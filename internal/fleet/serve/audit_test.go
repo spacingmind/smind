@@ -15,7 +15,7 @@ import (
 
 func TestFleetAuditBothEndsNoPromptBody(t *testing.T) {
 	const canary = "sk-CANARY-abcdefghijklmnopqrstuvwxyz0123456789"
-	body := canary + strings.Repeat("x", 2000-len(canary))
+	body := canary + " " + strings.Repeat("lorem ipsum ", 170)
 	clk := newClock()
 	s, au, _ := newTestServer("A", clk)
 
