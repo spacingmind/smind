@@ -3,6 +3,7 @@ package permpolicy
 import (
 	"errors"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -95,6 +96,9 @@ func TestResolveWindows_HomeExpansionForms(t *testing.T) {
 }
 
 func TestResolvePosix_FlavourUnchanged(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX flavour check; the Windows flavour has its own tests")
+	}
 	d := t.TempDir()
 	in := filepath.Join(d, "a", "..", "b", "c")
 	want, werr := ResolvePath(in, "")

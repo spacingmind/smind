@@ -57,6 +57,7 @@ func TestFloorWindows_InstallState(t *testing.T) {
 		{`sc stop smind`, id},
 		{`net stop Smind`, id},
 		{`smind service stop`, id},
+		{`cat ~/Library/LaunchAgents/com.x.plist`, id},
 		{`go test .\pkg`, ""},
 		{`dir C:\Temp\x`, ""},
 	})
@@ -87,6 +88,7 @@ func TestFloorWindows_Secrets(t *testing.T) {
 		{`cmdkey /list`, id},
 		{`Get-Credential`, id},
 		{`printenv`, id},
+		{`cat /proc/1/environ`, id},
 		{`set`, id},
 		{`type README.md`, ""},
 	})

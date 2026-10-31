@@ -117,17 +117,16 @@ func installRoots(req Request) []string {
 		pl.join(home, ".ssh"),
 		pl.join(home, ".gnupg"),
 	}
+	roots = append(roots,
+		pl.join(home, "Library", "Keychains"),
+		pl.join(home, "Library", "LaunchAgents"),
+	)
 	if pl.windows {
 		roots = append(roots, pl.join(home, "AppData"),
 			envOr(pl, `C:\Windows`, "SystemRoot", "windir"),
 			envOr(pl, `C:\Program Files`, "ProgramFiles"),
 			envOr(pl, `C:\Program Files (x86)`, "ProgramFiles(x86)"),
 			envOr(pl, `C:\ProgramData`, "ProgramData"),
-		)
-	} else {
-		roots = append(roots,
-			pl.join(home, "Library", "Keychains"),
-			pl.join(home, "Library", "LaunchAgents"),
 		)
 	}
 	if req.SmindHome != "" {
@@ -248,6 +247,9 @@ func secretName(w string) bool { return hostPlatform().secretName(w) }
 func (pl *platform) secretName(w string) bool {
 	var b string
 	if pl.windows {
+		if procEnviron.MatchString(path.Clean(strings.ReplaceAll(w, `\`, "/"))) {
+			return true
+		}
 		b = strings.ToLower(w[strings.LastIndexAny(w, `/\`)+1:])
 	} else {
 		if procEnviron.MatchString(path.Clean(w)) {
