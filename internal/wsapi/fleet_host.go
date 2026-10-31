@@ -390,7 +390,7 @@ func (a *API) SetFleet(o FleetOptions) {
 			HostID:     o.Key.HostID(),
 			Authorizer: o.Registry,
 			Audit:      o.Store,
-			Reader: serve.NewReader(&fleetSource{o.Store, o.Workspaces}, serve.ReaderOptions{
+			Reader: serve.NewReader(&fleetSource{db: o.Store, ws: o.Workspaces}, serve.ReaderOptions{
 				HostID: o.Key.HostID(), Version: o.Version, Caps: hello.Caps(), HomeDirs: o.HomeDirs,
 			}),
 			Now: o.Now,

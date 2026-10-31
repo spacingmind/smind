@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spacingmind/smind/internal/fleet/serve"
@@ -25,6 +26,50 @@ type FleetWorkspaces interface {
 type fleetSource struct {
 	db *store.Store
 	ws FleetWorkspaces
+
+	now   func() time.Time // nil -> time.Now; tests advance it
+	mu    sync.Mutex
+	cache map[int64]fleetWsMeta
+}
+
+// fleetWsMeta is a workspace's origin URL and default branch, cached
+// because resolving them shells out to git.
+type fleetWsMeta struct {
+	repoURL       string
+	defaultBranch string
+	at            time.Time
+}
+
+// fleetMetaTTL is how long a cached fleetWsMeta stays fresh.
+const fleetMetaTTL = 30 * time.Second
+
+func (s *fleetSource) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// meta returns the cached origin metadata of w, recomputing it once stale.
+func (s *fleetSource) meta(w store.Workspace) fleetWsMeta {
+	now := s.clock()
+	s.mu.Lock()
+	m, ok := s.cache[w.ID]
+	s.mu.Unlock()
+	if ok && now.Sub(m.at) < fleetMetaTTL {
+		return m
+	}
+	m = fleetWsMeta{repoURL: fleetOriginURL(w.Path), at: now}
+	if ref, _, err := s.ws.DefaultBase(w.ID); err == nil {
+		m.defaultBranch = strings.TrimPrefix(ref, "origin/")
+	}
+	s.mu.Lock()
+	if s.cache == nil {
+		s.cache = map[int64]fleetWsMeta{}
+	}
+	s.cache[w.ID] = m
+	s.mu.Unlock()
+	return m
 }
 
 // gitRemoteTimeout bounds the `git remote get-url` a workspace listing runs.
@@ -37,11 +82,8 @@ func (s *fleetSource) ListWorkspaces() ([]serve.WorkspaceInfo, error) {
 	}
 	out := make([]serve.WorkspaceInfo, 0, len(list))
 	for _, w := range list {
-		info := serve.WorkspaceInfo{ID: w.ID, Title: w.Title, RepoURL: fleetOriginURL(w.Path)}
-		if ref, _, err := s.ws.DefaultBase(w.ID); err == nil {
-			info.DefaultBranch = strings.TrimPrefix(ref, "origin/")
-		}
-		out = append(out, info)
+		m := s.meta(w)
+		out = append(out, serve.WorkspaceInfo{ID: w.ID, Title: w.Title, RepoURL: m.repoURL, DefaultBranch: m.defaultBranch})
 	}
 	return out, nil
 }
