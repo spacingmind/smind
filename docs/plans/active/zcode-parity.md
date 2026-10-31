@@ -362,7 +362,8 @@ buttons, sidebar toggle position), own PR. Prior art:
 - [x] Stage 2 audit handed over (table above).
 - [x] Stage 3a settings (this PR): shell, nav, row-card primitives, Switch, Shortcuts table, empty cards, usage tray applied to General, Appearance, Notifications, Shortcuts, GitHub, Agents, MCP, Skills, Plugins, Automations, Providers, Usage, Connection.
 - [x] Stage 3b shell + sidebar (this PR): light framed content panel, sidebar quick actions, "Task list" header, `newTask` icon.
-- [ ] Stage 3 PRs (timeline, composer, dialogs/menus).
+- [x] Stage 3c composer + home landing (this PR): `NoticeBanner`, rich select items for the mode menu, shared composer shell, home landing with project chip.
+- [ ] Stage 3 PRs (timeline, dialogs/menus).
 - [ ] Stage 4.
 - [ ] Stage 5.
 
@@ -423,3 +424,18 @@ Filled per stage as PRs land.
 - GLM ledger: 3 peer-glm runs (tasks 109 frame, 110 component + icon, 111 wiring + tests),
   0 Sonnet, no rate limit, no turn-cap or wrong-edit failures; `glm-acp-agent` ran with
   `--max-turns 500`.
+
+### Stage 3c validation (composer + home)
+
+- AC1: `components/home/home-landing.tsx` (+ `stores/home-project-store.ts`, wired in `App.tsx`; "Add project" via `lib/app-events.ts` -> sidebar dialog). Tests in `home-landing.test.tsx`, `home-project-store.test.ts`, `app-sidebar-crud.test.tsx`, `App.test.tsx`.
+- AC2: `lib/composer-shell.ts` shared by `composer.tsx` and the landing; send/stop/send-now are `rounded-full`. Disabled send keeps its muted fill (unchanged `execute` variant).
+- AC3: `SelectItem` gained optional `icon`/`description` (label stays the option's accessible name); `ModeSelect` pill uses them in a `rounded-xl` 220px menu; model popover `rounded-xl`. Project menu: search from 6 projects, "Add project" footer.
+- AC4: `ui/notice-banner.tsx` (`NoticeBanner`, `NoticeAction`) used by `DesktopDaemonBanner` and `UntrustedBanner` (frames show the untrusted one; the daemon banner is desktop-only and was not rendered).
+- AC5: sheets (L = ZCode raw, R = smind after) in `/tmp/steward4/zcode-audit/after/composer-home/`:
+  `composer-home_{light,dark}_1280_{a,b,c}.png` (home + project menu; mode menu + attachment; model popover + notice),
+  `composer-home_before-after_{light_1280,390}.png` (smind before | after), `transitions_light_1280_mode.png`,
+  `transitions_dark_1280_proj.png` (open 0/40/80/160 ms, close 0/40 ms: clean fade/zoom, no jump). All looked at; ZCode has no task page, so its home frame is the left side for task-composer rows.
+- Not done / differences kept: no model/mode chips on the landing (per-chat run config), no auto-send (the prompt arrives as the task's draft), project chip strip is subtle, the daemon update banner not visually verified, ZCode's "+" attach and "Manage models" entries are not on the landing.
+- Mutations (all failed the named test, files restored): `rounded-full`->`rounded-xl` (composer-shell), error role (notice-banner), drop select `aria-label` (2 composer tests), title cap 60->80, drop draft seed, search threshold off (home-landing), drop mode description (pickers).
+- Peer ledger: GLM 2 runs done (task 143 style strip, 142 model popover), 5 runs hit the 5h rate limit (07:23, resets 10:42, cancelled and resent), Sonnet 5 runs done (tasks 142 and 143, steps A1, A2, B1, B2, B3). Review found 3 regressions Sonnet left (composer/toolbar tests keyed on option text, a Workspace fixture type error that broke `bun run build`), fixed by the Lead.
+
