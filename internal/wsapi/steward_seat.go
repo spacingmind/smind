@@ -339,6 +339,9 @@ func (h *stewardHost) startSeat(id int64, lead store.Task, prof store.AgentProfi
 }
 
 // cancel ends an open review as cancelled by the Human, stopping its seat.
+// The blocked row is written BEFORE the seat's runs are stopped: the watch
+// must never see the run end first and record a crash, which would also
+// count toward the auto-pause.
 func (h *stewardHost) cancel(reviewID int64) error {
 	row, err := h.db.GetStewardReview(reviewID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -350,11 +353,17 @@ func (h *stewardHost) cancel(reviewID int64) error {
 	if row.Status != "pending" && row.Status != "running" {
 		return &rpcCodeError{code: codeInvalid, msg: "steward.review.cancel: review is not open"}
 	}
+	if err := h.svc.WriteBlocked(reviewID, "cancelled", "cancelled by the Human", row.CostUSD); err != nil {
+		if errors.Is(err, steward.ErrVerdictExists) {
+			return &rpcCodeError{code: codeInvalid, msg: "steward.review.cancel: review is not open"}
+		}
+		return err
+	}
 	if row.StewardTaskID != 0 {
 		h.stopTask(row.StewardTaskID)
 		h.forget(row.StewardTaskID)
 	}
-	return h.svc.WriteBlocked(reviewID, "cancelled", "cancelled by the Human", row.CostUSD)
+	return nil
 }
 
 // seatSource is the runs registry hook: the seat spec of a steward task,

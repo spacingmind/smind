@@ -444,6 +444,32 @@ func TestStewardCancel_StopsAndWritesCancelled(t *testing.T) {
 	wantErrCode(t, e.host.cancel(99999), codeNotFound)
 }
 
+func TestStewardCancel_NotRecordedAsCrash(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	r, err := e.start(t, e.head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.waitStatus(t, r.ReviewID, "running")
+	if err := e.host.cancel(r.ReviewID); err != nil {
+		t.Fatal(err)
+	}
+	waitRunEnd(t, e.api.Runs, r.RunID)
+	// Watcher ticks after the seat's run ended must leave the row cancelled:
+	// a crash written here would count toward the auto-pause.
+	for i := 0; i < 5; i++ {
+		time.Sleep(e.host.watchPeriod)
+	}
+	row := e.row(t, r.ReviewID)
+	if row.Status != "blocked" || row.BlockedReason != "cancelled" || !strings.Contains(row.Summary, "cancelled by the Human") {
+		t.Fatalf("row = %+v", row)
+	}
+	if n, err := e.db.ConsecutiveStewardFailures(); err != nil || n != 0 {
+		t.Fatalf("consecutive steward failures = %d (%v), want 0", n, err)
+	}
+}
+
 func TestStewardTokenNeverInPromptOrDigest(t *testing.T) {
 	t.Parallel()
 	e := newStewardHostEnv(t, "success")
