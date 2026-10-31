@@ -15,6 +15,7 @@ func TestFakeAgent_FailureScenarios(t *testing.T) {
 		"auth-error":      "auth_expired",
 		"model-error":     "model_not_in_plan",
 		"transient-error": "transient_429",
+		"residual-429":    "rate_limited",
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			wm, st := newTestWorkspaceManager(t)

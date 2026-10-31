@@ -528,6 +528,10 @@ func runPromptScript(promptMsg message, cwd string) {
 		sessionUpdate(`[error] API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`)
 		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
 		return
+	case "residual-429":
+		sessionUpdate("[error] API Error: 429 Too Many Requests")
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
+		return
 	case "plain-error":
 		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
 		return
