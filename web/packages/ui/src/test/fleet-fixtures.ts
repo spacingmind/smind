@@ -1,4 +1,4 @@
-import type { FleetGrant, FleetHost } from "@/lib/fleet-types";
+import type { FleetAuditEntry, FleetGrant, FleetHost } from "@/lib/fleet-types";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 const REVERSE_DEFAULT: FleetGrant = {
@@ -33,6 +33,9 @@ export function fleetHost(over: Partial<FleetHost> = {}): FleetHost {
 export class FleetDaemon extends FakeUsageDaemon {
   hosts: FleetHost[] = [];
   off = false;
+  /** Answers `fleet.host.audit` (filtered to the asked host, newest first as given). */
+  audit: FleetAuditEntry[] = [];
+  auditError: string | null = null;
   /** Answers `workspace.list` (the approve dialog's write-workspace picker); their spaces and tasks are empty. */
   workspaceRows: { ID: number; Title: string }[] = [];
 
@@ -56,6 +59,9 @@ export class FleetDaemon extends FakeUsageDaemon {
       switch (method) {
         case "fleet.host.list":
           return { hosts: this.hosts };
+        case "fleet.host.audit":
+          if (this.auditError) throw new Error(this.auditError);
+          return { rows: this.audit.filter((r) => !p.hostId || r.hostId === p.hostId).slice(0, (p.limit as number) || 50) };
         case "fleet.host.invite":
           return { invite: "smind-host://v1#payload", expiresAt: "2026-10-31T10:10:00Z" };
         case "fleet.host.add": {

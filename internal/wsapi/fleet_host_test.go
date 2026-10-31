@@ -105,6 +105,7 @@ type fleetEnv struct {
 	key    *identity.Key
 	window *pairing.Window
 	links  *fakeFleetLinks
+	st     *store.Store
 }
 
 func newFleetEnv(t *testing.T) *fleetEnv {
@@ -126,6 +127,7 @@ func newFleetEnv(t *testing.T) *fleetEnv {
 		key:    key,
 		window: pairing.NewWindow(nil),
 		links:  &fakeFleetLinks{},
+		st:     st,
 	}
 	api.SetFleet(FleetOptions{Key: key, Registry: e.reg, Window: e.window, Links: e.links, Version: "test", Store: st, Workspaces: fakeFleetWorkspaces{st}})
 	return e
@@ -415,8 +417,8 @@ func TestFleetAdminMethodsLocalOnlyNotRunScopedNotPlugin(t *testing.T) {
 			adminMethods = append(adminMethods, k)
 		}
 	}
-	if len(adminMethods) != 14 {
-		t.Fatalf("fleet.host.* methods = %v, want 14", adminMethods)
+	if len(adminMethods) != 15 {
+		t.Fatalf("fleet.host.* methods = %v, want 15", adminMethods)
 	}
 
 	// (1) not run-scoped, not in any plugin capability group.
@@ -575,7 +577,7 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 			"fleet.challenge", "fleet.hello", "fleet.pair.request", "fleet.link.state",
 			"fleet.host.list", "fleet.host.invite", "fleet.host.add", "fleet.host.approve",
 			"fleet.host.reject", "fleet.host.rename", "fleet.host.labels", "fleet.host.grant", "fleet.host.rm", "fleet.host.revoke",
-			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test", "fleet.host.route",
+			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test", "fleet.host.route", "fleet.host.audit",
 			"remote.hosts", "remote.read", "remote.select", "remote.write",
 		}
 		want = append(want, wire.ReadMethods...)

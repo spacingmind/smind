@@ -4,9 +4,19 @@
 import { act } from "react";
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { DesktopOS, WindowState } from "@/lib/platform";
+
+// The first scenario used to pay for the cold transform of the whole app graph inside its own 5 s test budget,
+// which a loaded machine exceeds. Pull the graph in once, up front: later scenarios reuse the transformed modules
+// (vi.resetModules only clears the registry), so every test body is now just its own work.
+// Only this one-off import gets a larger budget (a saturated box needs more than the 10 s hook default to
+// transform the app graph cold); every test body keeps the default 5 s.
+const WARMUP_TIMEOUT_MS = 120_000;
+beforeAll(async () => {
+  await import("@/App");
+}, WARMUP_TIMEOUT_MS);
 
 afterEach(() => {
   vi.resetModules();

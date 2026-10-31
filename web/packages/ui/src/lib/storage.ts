@@ -31,6 +31,8 @@ export const STORAGE_KEYS = {
   pinnedTasks: "smind:pinned-tasks",
   unreadTasks: "smind:unread-tasks",
   sidebarGroupMode: "smind:sidebar-group-mode",
+  /** Whether the sidebar lists only tasks an automation started. */
+  sidebarAutomationFilter: "smind:sidebar-automation-filter",
   collapsedTasks: "smind.sidebar.collapsedTasks",
   /** Collapsed workspace/space/Pinned/status-group ids (sidebar-polish S8); see lib/sidebar-preferences.ts. */
   collapsedSidebarNodes: "smind:sidebar-collapsed-nodes",
@@ -41,6 +43,8 @@ export const STORAGE_KEYS = {
   preferredEditor: "smind:preferred-editor",
   /** Per connection, the daemon/app version pair whose "daemon is older" notice was dismissed; see lib/daemon-version.ts. */
   dismissedDaemonNotices: "smind:dismissed-daemon-notices",
+  /** Interface mode (ADR-0049): the bare string "office", anything else reads as coding; see lib/interface-mode.ts. */
+  interfaceMode: "smind:interface-mode",
 } as const;
 
 /**

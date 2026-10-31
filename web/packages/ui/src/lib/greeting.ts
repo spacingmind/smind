@@ -31,7 +31,35 @@ export const GREETINGS: Record<GreetingBucket, readonly string[]> = {
   ],
 };
 
-export function pickGreeting(bucket: GreetingBucket, random: () => number = Math.random): string {
-  const lines = GREETINGS[bucket];
+/** Office mode's pool (ADR-0049 §1.6): the same four buckets, about documents and tasks. */
+export const OFFICE_GREETINGS: Record<GreetingBucket, readonly string[]> = {
+  "late-night": [
+    "Working late — what needs writing tonight",
+    "Quiet hours — what would you like to get done",
+    "Still at it? Let's finish one thing and call it a night",
+  ],
+  morning: [
+    "Good morning — what are we writing today",
+    "Fresh start — which task comes first",
+    "Morning — what should we get done today",
+  ],
+  afternoon: [
+    "Good afternoon — which document shall we pick up",
+    "Afternoon — what needs a closer look",
+    "Welcome back — what are we finishing today",
+  ],
+  evening: [
+    "Good evening — what is still open on your desk",
+    "Evening — which task can we close out",
+    "Winding down — which document needs a last pass",
+  ],
+};
+
+export function pickGreeting(
+  bucket: GreetingBucket,
+  random: () => number = Math.random,
+  pool: Record<GreetingBucket, readonly string[]> = GREETINGS,
+): string {
+  const lines = pool[bucket];
   return lines[Math.min(lines.length - 1, Math.floor(random() * lines.length))];
 }

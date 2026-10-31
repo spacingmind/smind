@@ -39,6 +39,7 @@ const hostUsage = `usage: smind host ls [--json]
        smind host label set <host> <k:v>...
        smind host label rm <host> <key>...
        smind host label ls [<host>] [--json]
+       smind host audit [--host <host>] [--limit N] [--json]
        smind host test <host>
        smind host route <host> --addr <ws(s)://host:port> [--password-env VAR] [--allow-cleartext]
        smind host select --labels k:v,k:v [--any]
@@ -104,6 +105,8 @@ func runHost(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runHostSelect(ctx, rest, stdout, stderr)
 	case "label":
 		return runHostLabel(ctx, rest, stdout, stderr)
+	case "audit":
+		return runHostAudit(ctx, rest, stdout, stderr)
 	case "info", "workspaces", "tasks", "task", "status", "activity":
 		return runHostRead(ctx, verb, rest, stdout, stderr)
 	case "grant":

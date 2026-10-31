@@ -311,33 +311,54 @@ func TestServeLoopbackDefaultUnchanged(t *testing.T) {
 //
 // Two ways to be "not the local user" without a second machine:
 //   - through this machine's LAN address, so the TCP peer is a non-loopback
-//     address (skipped when a host firewall swallows it);
+//     address. The daemon must listen beyond loopback for that, and a desktop
+//     firewall asks the person at the keyboard to allow it, so this subtest runs
+//     only on CI or when SMIND_TEST_LAN=1 (see lanBindAllowed); the same guard
+//     behaviour is covered in-process, with synthetic non-loopback peers, by
+//     internal/server/direct_test.go. It is also skipped when a host firewall
+//     swallows the traffic;
 //   - through 127.0.0.1 with an external Host name, exactly what a same-host
-//     reverse proxy sends (the TCP peer is loopback, the Host is not).
+//     reverse proxy sends (the TCP peer is loopback, the Host is not). The
+//     daemon listens on 127.0.0.1, as it does behind a real reverse proxy.
 func TestServeDirectConnectionEndToEnd(t *testing.T) {
 	bin := buildSmind(t)
 	t.Run("from the LAN address", func(t *testing.T) {
+		lanBindAllowed(t)
 		lan := lanIP()
 		if lan == "" {
 			t.Skip("no non-loopback IPv4 address to play the remote client")
 		}
-		runDirectFlow(t, bin, func(port int) (string, string) { return fmt.Sprintf("%s:%d", lan, port), "" }, true)
+		runDirectFlow(t, bin, "0.0.0.0", func(port int) (string, string) { return fmt.Sprintf("%s:%d", lan, port), "" }, true)
 	})
 	t.Run("same-host reverse proxy (loopback peer, external Host)", func(t *testing.T) {
-		runDirectFlow(t, bin, func(port int) (string, string) { return fmt.Sprintf("127.0.0.1:%d", port), "smind.example.com" }, false)
+		runDirectFlow(t, bin, "127.0.0.1", func(port int) (string, string) { return fmt.Sprintf("127.0.0.1:%d", port), "smind.example.com" }, false)
 	})
 }
 
-// runDirectFlow starts a daemon on 0.0.0.0 with a password and drives it from
-// the address target(port) returns, presenting hostHeader when non-empty.
-func runDirectFlow(t *testing.T, bin string, target func(port int) (addr, hostHeader string), skipIfUnreachable bool) {
+// lanBindAllowed skips the calling test unless it may start a daemon beyond
+// loopback. Such a daemon makes Windows Defender Firewall (and the macOS
+// application firewall) ask the person at the keyboard to allow it, and leaves a
+// rule behind, so it runs only where nobody is asked: on CI (GitHub sets CI=true)
+// or when the developer opts in with SMIND_TEST_LAN=1.
+func lanBindAllowed(t *testing.T) {
+	t.Helper()
+	if os.Getenv("SMIND_TEST_LAN") == "1" || os.Getenv("CI") != "" {
+		return
+	}
+	t.Skip("starts a daemon that listens beyond loopback, which a desktop firewall asks about; set SMIND_TEST_LAN=1 to run it here")
+}
+
+// runDirectFlow starts a daemon listening on bindHost (0.0.0.0, or 127.0.0.1
+// for a daemon behind a same-host reverse proxy) with a password and drives it
+// from the address target(port) returns, presenting hostHeader when non-empty.
+func runDirectFlow(t *testing.T, bin, bindHost string, target func(port int) (addr, hostHeader string), skipIfUnreachable bool) {
 	home := cliHome(t)
 	port := freePort(t)
 	var o, e bytes.Buffer
 	if code := runSetPassword([]string{"--password-stdin"}, strings.NewReader(goodPassword), &o, &e); code != 0 {
 		t.Fatal(e.String())
 	}
-	d := startServe(t, bin, home, fmt.Sprintf("%s=0.0.0.0:%d", config.EnvListen, port), config.EnvHostnames+"=smind.example.com")
+	d := startServe(t, bin, home, fmt.Sprintf("%s=%s:%d", config.EnvListen, bindHost, port), config.EnvHostnames+"=smind.example.com")
 	waitDaemonHealthy(t, port, 30*time.Second)
 	addr, hostHeader := target(port)
 	base := "http://" + addr
@@ -452,14 +473,18 @@ func runDirectFlow(t *testing.T, bin string, target func(port int) (addr, hostHe
 			t.Errorf("the daemon log contains a secret:\n%s", d.out)
 		}
 	}
-	if !strings.Contains(d.out.String(), "WARNING") {
+	beyondLoopback := bindHost != "127.0.0.1"
+	if beyondLoopback && !strings.Contains(d.out.String(), "WARNING") {
 		t.Errorf("a daemon beyond loopback should say so in its log:\n%s", d.out)
+	}
+	if !beyondLoopback && strings.Contains(d.out.String(), "WARNING") {
+		t.Errorf("a daemon on loopback must not claim to be beyond it:\n%s", d.out)
 	}
 	// Local CLI keeps working beside it (it dials 127.0.0.1 with the token file).
 	cmd := exec.Command(bin, "workspace", "ls")
-	cmd.Env = append(smindEnv(home), fmt.Sprintf("%s=0.0.0.0:%d", config.EnvListen, port))
+	cmd.Env = append(smindEnv(home), fmt.Sprintf("%s=%s:%d", config.EnvListen, bindHost, port))
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("smind workspace ls beside a daemon on 0.0.0.0: %v: %s", err, out)
+		t.Fatalf("smind workspace ls beside a daemon on %s: %v: %s", bindHost, err, out)
 	}
 }
 

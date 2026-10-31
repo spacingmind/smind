@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -361,6 +362,51 @@ func (s *Store) AutomationAuditForTask(taskID int64) (AutomationAudit, bool, err
 		return AutomationAudit{}, false, fmt.Errorf("audit for task %d: %w", taskID, err)
 	}
 	return r, true, nil
+}
+
+// AutomationLink is a task's link back to the automation that started it.
+type AutomationLink struct {
+	AutomationID int64
+	Name         string
+}
+
+// AutomationLinksForTasks returns, for each task an automation started (the
+// latest fire row wins), its link back to that automation, in one query per
+// batch; tasks without a fire row are simply absent from the map.
+func (s *Store) AutomationLinksForTasks(ids []int64) (map[int64]AutomationLink, error) {
+	out := make(map[int64]AutomationLink, len(ids))
+	// Stay well under SQLite's bound-variable limit.
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := min(start+batch, len(ids))
+		chunk := ids[start:end]
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		rows, err := s.db.Query(`SELECT a.task_id, a.automation_id, n.name FROM automation_audit a
+			JOIN automations n ON n.id = a.automation_id
+			WHERE a.decision = 'fire' AND a.task_id IN (`+
+			strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")+`) ORDER BY a.id ASC`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("automation links for tasks: %w", err)
+		}
+		for rows.Next() {
+			var taskID int64
+			var link AutomationLink
+			if err := rows.Scan(&taskID, &link.AutomationID, &link.Name); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("automation links for tasks: %w", err)
+			}
+			out[taskID] = link
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("automation links for tasks: %w", err)
+		}
+	}
+	return out, nil
 }
 
 // PruneAutomationAudit deletes audit rows older than before, but never the
