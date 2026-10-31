@@ -558,4 +558,14 @@ None: reference-only reimplementation.
 
 ### Progress / Validation
 
-(filled at the end of the stage)
+Status: shipped in this PR (stage 3e). Mobile plan card is a follow-up (separate line-based model).
+
+- AC1: `hooks/use-run-timeline.ts` (`TimelinePlanItem`, defensive `planEntries`, in-place replace), `components/timeline/plan-card.tsx`, `timeline-row.tsx` `case "plan"`; icons `circle`, `listChecks` in `lib/icons.ts`; copy-as-plain-text handles a plan item (`timeline-text.ts`). Overview keeps the plan (`detail-level.test.ts`).
+- AC2: unknown raw kinds and wire types read "Event: <kind>" in a collapsed row (no "Unrecognised" anywhere in the web source).
+- AC3: `tool-call-card.tsx` expanded frame (`rounded-lg border`), status check / x / spinner icon, `border-t` detail body; terminal/diff/payload wells share `rounded-md bg-surface`; collapsed row unchanged. The borderless-chrome allow-list in `run-timeline.test.tsx` names the open tool-call frame.
+- AC4: user bubble `rounded-lg bg-secondary`.
+- AC5: markdown inline-code chip `rounded-md px-1.5`, code well bordered `p-3`, table header fill, h1/h2 spacing, links `text-primary`.
+- AC6 sheets (L = ZCode raw `zc_*_1280_home`, since ZCode has no task page without a model; R = smind after) in `/tmp/steward4/zcode-audit/after/timeline/`: `timeline_{light,dark}_1280_a.png` (plan + collapsed rows, expanded cards, markdown), `timeline_{light,dark}_1280_overview.png` (Overview view; before vs after expanded), `timeline_{light,dark}_390.png` (before | after pairs: collapsed, markdown, expanded, Overview), `transitions_light_1280_toolcard.png` (open 0/60/260 ms, close 0/60 ms: the card swaps without animation, only the chevron rotates; no glitch frame). All looked at. Seeded from a scripted ACP stub (thought, plan, read/search/edit/execute with one failure, markdown with heading/code/table/link).
+- Known / not done: the edit card shows the raw ACP diff payload as JSON for this stub's `diff` content shape (pre-existing renderer behaviour, untouched); mobile plan card; ZCode's code-block copy bar not added (smind's copy buttons stay on tool output).
+- Mutations (all failed the named test, files restored): `findIndex` -> -1 (`a later plan update replaces the plan in place`), `initiallyOpen` negation dropped (`collapsed when all done and open otherwise`), `Event:` -> `Unrecognised event:` (3 timeline-row tests), drop the open border (`expanded card is bordered with a status icon`), chip `rounded-md` -> `rounded-sm` (`inline code is a chip`).
+- Peer ledger: GLM 3 runs done or started (task 198 plan card: done, 5 commits; task 199 tool cards + markdown: 2 runs died on `429 Rate limit reached for requests` before any edit, the third finished), 0 Sonnet. Plan-quota rate limit 12:50-14:20 cost a 1h30 wait. `glm-acp-agent` ran with `--max-turns 500`. Review: no findings needing a fix.
