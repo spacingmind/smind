@@ -46,3 +46,6 @@ mutations:
   - { id: M5, file: internal/fleet/serve/audit.go, change: "summary keeps the whole body", expectFail: [TestFleetAuditBothEndsNoPromptBody] }
   - { id: M6, file: internal/fleet/serve/read.go, change: "workspace view returns the local path as repoUrl fallback", expectFail: [TestFleetReadReturnsNoPathsNoCredentialURLs] }
   - { id: M7, file: internal/fleet/serve/read.go, change: "activity does not cap assistant text", expectFail: [TestFleetActivityCappedAndPaged] }
+---
+
+F2a callee read path: see the plan's "F2a design".
