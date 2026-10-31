@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
+import { SafeSvg } from "@/components/plugin-view/safe-svg";
 import { Icons, pluginIconByName, type IconComponent } from "@/lib/icons";
 import type { PluginActionExtra, PluginTone, PluginViewAction } from "@/lib/plugin-view-types";
 import { cn } from "@/lib/utils";
@@ -103,9 +104,7 @@ function PluginIconGlyph({
     return <Cmp aria-hidden className={className} />;
   }
   if (isRecord(icon) && typeof icon.svg === "string") {
-    // replaced in step 4
-    const Cmp = Icons.plugin;
-    return <Cmp aria-hidden className={className} />;
+    return <SafeSvg svg={icon.svg} className={className} />;
   }
   if (defaultIcon) {
     const Cmp = defaultIcon;
