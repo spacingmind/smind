@@ -108,6 +108,8 @@ Usage:
   smind policy init|show|test|audit                       permission policy engine: write the template, show rules, explain a command, list decisions
                                                            (humans only; the engine is off until steward.policy.enabled; run "smind policy" for flags)
 
+  smind steward review|list|show|cancel                    ask for a read-only review of a task's head commit; read reviews (humans only; run "smind steward" for flags)
+
   smind push test [<device id prefix>]                    send a test notification to phones registered for push
 
   smind cooldown ls                                       list providers cooling down after a rate limit
