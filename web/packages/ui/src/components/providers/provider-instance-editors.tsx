@@ -20,7 +20,12 @@ type EditorProps = {
   pending: boolean;
   update: (params: UpdateProviderInstanceParams) => void;
   clearError: () => void;
+  /** The refusal text, set only on the editor that raised it. */
+  error: JSX.Element | null;
 };
+
+/** Which editor's save raised the shown error. */
+type EditorName = "models" | "tools" | "inherit";
 
 /** A row whose body is a full-width editor: the label and description take the whole row, the editor sits under them. */
 const STACKED_ROW = "sm:flex-col sm:items-stretch sm:justify-start";
@@ -36,10 +41,27 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
  */
 export function ProviderInstanceEditors({ info, hasClient }: { info: ProviderInfo; hasClient: boolean }): JSX.Element | null {
   const { update, pending, error, clearError } = useUpdateProviderInstance();
+  const [failedIn, setFailedIn] = useState<EditorName | null>(null);
   if (!info.custom || !info.extends) return null;
-  const props: EditorProps = { info, hasClient, pending, update, clearError };
-  // A landed save re-reads provider.list, so the changed overlay re-initialises the drafts (remount via key).
-  const stored = JSON.stringify(info.instance ?? {});
+  // The refusal renders under the row whose save raised it, so it sits next to the button that was pressed.
+  const bind = (name: EditorName): EditorProps => ({
+    info,
+    hasClient,
+    pending,
+    update: (params) => {
+      setFailedIn(name);
+      update(params);
+    },
+    clearError: () => {
+      setFailedIn(null);
+      clearError();
+    },
+    error: failedIn === name ? <FormError message={error} testId="instance-editors-error" /> : null,
+  });
+  // A landed save re-reads provider.list, so a changed list re-initialises its own draft (remount via key);
+  // each editor keys only on its own stored value so another row's save keeps an unsaved draft.
+  const modelsKey = JSON.stringify([info.instance?.models ?? [], info.instance?.additionalModels ?? []]);
+  const toolsKey = JSON.stringify(info.instance?.disallowedTools ?? []);
   return (
     <>
       <SettingsGroup
@@ -47,20 +69,19 @@ export function ProviderInstanceEditors({ info, hasClient }: { info: ProviderInf
         title="Instance settings"
         description="Saved to config.yaml. Keys are edited under Keys."
       >
-        <ModelsEditor key={`models-${stored}`} {...props} />
+        <ModelsEditor key={modelsKey} {...bind("models")} />
         {info.harness === "claude-code" ? (
           <>
-            <ToolsEditor key={`tools-${stored}`} {...props} />
-            <InheritRow {...props} />
+            <ToolsEditor key={toolsKey} {...bind("tools")} />
+            <InheritRow {...bind("inherit")} />
           </>
         ) : null}
       </SettingsGroup>
-      <FormError message={error} testId="instance-editors-error" />
     </>
   );
 }
 
-function ModelsEditor({ info, hasClient, pending, update, clearError }: EditorProps): JSX.Element {
+function ModelsEditor({ info, hasClient, pending, update, clearError, error }: EditorProps): JSX.Element {
   const storedModels = info.instance?.models ?? [];
   const storedAdditional = info.instance?.additionalModels ?? [];
   const storedMode: ModelsMode = storedAdditional.length > 0 ? "add" : "replace";
@@ -196,12 +217,13 @@ function ModelsEditor({ info, hasClient, pending, update, clearError }: EditorPr
             Save models
           </Button>
         </div>
+        {error}
       </div>
     </SettingsRow>
   );
 }
 
-function ToolsEditor({ info, hasClient, pending, update, clearError }: EditorProps): JSX.Element {
+function ToolsEditor({ info, hasClient, pending, update, clearError, error }: EditorProps): JSX.Element {
   const stored = info.instance?.disallowedTools ?? [];
   const [tools, setTools] = useState<string[]>(stored);
   const [typed, setTyped] = useState("");
@@ -313,12 +335,13 @@ function ToolsEditor({ info, hasClient, pending, update, clearError }: EditorPro
             Save
           </Button>
         </div>
+        {error}
       </div>
     </SettingsRow>
   );
 }
 
-function InheritRow({ info, hasClient, pending, update, clearError }: EditorProps): JSX.Element {
+function InheritRow({ info, hasClient, pending, update, clearError, error }: EditorProps): JSX.Element {
   return (
     <SettingsRow
       testId={`instance-inherit-${info.id}`}
@@ -336,6 +359,9 @@ function InheritRow({ info, hasClient, pending, update, clearError }: EditorProp
           }}
         />
       }
-    />
+      className="sm:flex-wrap"
+    >
+      {error}
+    </SettingsRow>
   );
 }

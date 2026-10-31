@@ -140,6 +140,9 @@ describe("ProviderInstanceEditors", () => {
     expect(await screen.findByTestId("instance-editors-error")).toHaveTextContent(
       "provider.updateInstance: run-scoped callers may not edit providers",
     );
+    // The refusal sits inside the models row, next to Save, and is the only one in the DOM.
+    expect(screen.getAllByTestId("instance-editors-error")).toHaveLength(1);
+    expect(screen.getByTestId("instance-models-claude-work")).toContainElement(screen.getByTestId("instance-editors-error"));
     expect(screen.getByTestId("instance-model-row-m-a")).toBeInTheDocument();
     expect(screen.getByTestId("instance-model-row-m-c")).toBeInTheDocument();
     expect(screen.getByTestId("instance-models-save")).toBeEnabled();
