@@ -1,11 +1,21 @@
 package wsapi
 
 import (
+	"bytes"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"log"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -34,11 +44,23 @@ type fleetWriteEnv struct {
 	*fleetEnv
 	wm *workspace.Manager
 	st *store.Store
+	// dbPath is the callee database file, so a test can read it back.
+	dbPath string
 }
 
 func newFleetWriteEnv(t *testing.T) *fleetWriteEnv {
 	t.Helper()
-	wm, st := newTestWorkspaceManager(t)
+	dbPath := filepath.Join(t.TempDir(), "smind.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("store.Close() error = %v", err)
+		}
+	})
+	wm := workspace.New(st)
 	// The "models" argument makes the fake agent advertise its two model
 	// options, so the wire-required model field can name a real one and the
 	// started runs actually turn.
@@ -58,6 +80,7 @@ func newFleetWriteEnv(t *testing.T) *fleetWriteEnv {
 		fleetEnv: &fleetEnv{api: api, srv: srv, reg: registry.New(st, 8), key: key, window: pairing.NewWindow(nil), links: &fakeFleetLinks{}},
 		wm:       wm,
 		st:       st,
+		dbPath:   dbPath,
 	}
 	api.SetFleet(FleetOptions{Key: key, Registry: e.reg, Window: e.window, Links: e.links, Version: "test", Store: st, Workspaces: fakeFleetWorkspaces{st}})
 	return e
@@ -412,5 +435,285 @@ func TestFleetBackendRefusesUnsafeRefNames(t *testing.T) {
 		if !safeRefName(ref) {
 			t.Errorf("safeRefName(%q) = false, want true", ref)
 		}
+	}
+}
+
+// dumpCalleeDB renders every row of every table of the sqlite file at path.
+func dumpCalleeDB(t *testing.T, path string) string {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	names, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables []string
+	for names.Next() {
+		var n string
+		if err := names.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, n)
+	}
+	if err := names.Err(); err != nil {
+		t.Fatal(err)
+	}
+	names.Close()
+	var out strings.Builder
+	for _, tbl := range tables {
+		rows, err := db.Query(`SELECT * FROM "` + tbl + `"`)
+		if err != nil {
+			t.Fatalf("dump %s: %v", tbl, err)
+		}
+		cols, _ := rows.Columns()
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintf(&out, "%s %s\n", tbl, fmt.Sprint(vals...))
+			for _, v := range vals {
+				if b, ok := v.([]byte); ok {
+					fmt.Fprintf(&out, "%s %s\n", tbl, b)
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		rows.Close()
+	}
+	return out.String()
+}
+
+// filesContaining walks dirs and returns the files (read up to 1 MiB each,
+// git object stores skipped) that contain needle.
+func filesContaining(t *testing.T, needle string, dirs ...string) []string {
+	t.Helper()
+	var hits []string
+	for _, dir := range dirs {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if d.Name() == "objects" && filepath.Base(filepath.Dir(path)) == ".git" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return nil
+			}
+			defer f.Close()
+			buf := make([]byte, 1<<20)
+			n, _ := f.Read(buf)
+			if bytes.Contains(buf[:n], []byte(needle)) {
+				hits = append(hits, path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return hits
+}
+
+// canaryHits names every place the callee side recorded needle.
+func canaryHits(t *testing.T, needle string, frames []json.RawMessage, dbPath string, logs *lockedBuf, dirs []string) []string {
+	t.Helper()
+	var hits []string
+	for i, f := range frames {
+		if bytes.Contains(f, []byte(needle)) {
+			hits = append(hits, fmt.Sprintf("response frame %d", i))
+		}
+	}
+	if strings.Contains(dumpCalleeDB(t, dbPath), needle) {
+		hits = append(hits, "callee database")
+	}
+	if strings.Contains(logs.String(), needle) {
+		hits = append(hits, "log output")
+	}
+	for _, f := range filesContaining(t, needle, dirs...) {
+		hits = append(hits, "file "+f)
+	}
+	return hits
+}
+
+func TestFleetSecretNeverLeavesHost(t *testing.T) {
+	var rb [16]byte
+	if _, err := rand.Read(rb[:]); err != nil {
+		t.Fatal(err)
+	}
+	canary := "CANARY-" + hex.EncodeToString(rb[:])
+	control := "CONTROL-" + hex.EncodeToString(rb[:])
+
+	logs := &lockedBuf{}
+	prevLog := log.Writer()
+	log.SetOutput(logs)
+	t.Cleanup(func() { log.SetOutput(prevLog) })
+
+	e := newFleetWriteEnv(t)
+	repo := newTestRepo(t)
+	ws, err := e.wm.CreateWorkspace(repo, "W", "hard", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl, caller := approvedConn(t, e.fleetEnv)
+	e.grantWrite(t, caller, ws.ID)
+
+	// The caller's side: its stored password and relay secret for the
+	// callee, its provider env and config, and its process env. None of
+	// these is a wire field, so none may reach the callee.
+	callerHome := t.TempDir()
+	// fleet/link imports wsapi, so its secrets store cannot be opened from
+	// this package; the file is written in its on-disk layout instead.
+	type secretsEntry struct {
+		Password    string `json:"password"`
+		RelaySecret string `json:"relaySecret"`
+	}
+	secrets, err := json.Marshal(map[string]secretsEntry{e.key.HostID(): {Password: canary, RelaySecret: canary}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(callerHome, "fleet-secrets"), secrets, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	callerCfg := filepath.Join(callerHome, "config.yaml")
+	callerEnvFile := filepath.Join(callerHome, "provider.env")
+	if err := os.WriteFile(callerCfg, []byte("provider_token: "+canary+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(callerEnvFile, []byte("GLM_API_KEY="+canary+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEET_CANARY_ENV", canary)
+	if got := filesContaining(t, canary, callerHome); len(got) != 3 {
+		t.Fatalf("caller-side files holding the canary = %v, want the secrets, config and env files", got)
+	}
+
+	var frames []json.RawMessage
+	call := func(method string, params any) (json.RawMessage, error) {
+		var raw json.RawMessage
+		err := cl.Call(callCtx(), method, params, &raw)
+		if err != nil {
+			frames = append(frames, json.RawMessage(strconv.Quote(err.Error())))
+			return nil, err
+		}
+		frames = append(frames, raw)
+		return raw, nil
+	}
+	must := func(method string, params any, out any) {
+		t.Helper()
+		raw, err := call(method, params)
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		if out != nil {
+			if err := json.Unmarshal(raw, out); err != nil {
+				t.Fatalf("%s: decode: %v", method, err)
+			}
+		}
+	}
+
+	must(wire.MethodInfo, wire.InfoParams{Prov: okProv(caller)}, nil)
+	must(wire.MethodWorkspaceList, wire.WorkspaceListParams{Prov: okProv(caller)}, nil)
+	var res wire.TaskCreateResult
+	must(wire.MethodTaskCreate, wire.TaskCreateParams{
+		Prov: okProv(caller), IdempotencyKey: "sec1", WorkspaceID: ws.ID,
+		Provider: "glm", Model: fakeFleetModel, Prompt: "hello",
+	}, &res)
+
+	deadline := time.Now().Add(20 * time.Second)
+	wait := func(runID string) {
+		t.Helper()
+		cursor := int64(0)
+		for {
+			var w wire.RunWaitResult
+			must(wire.MethodRunWait, wire.RunWaitParams{Prov: okProv(caller), RunID: runID, Cursor: cursor, TimeoutSeconds: 3}, &w)
+			cursor = w.NextCursor
+			if w.Done {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("run %s never finished", runID)
+			}
+		}
+	}
+	wait(res.RunID)
+
+	var send wire.TaskSendResult
+	must(wire.MethodTaskSend, wire.TaskSendParams{Prov: okProv(caller), IdempotencyKey: "sec2", TaskID: res.TaskID, Prompt: "again"}, &send)
+	wait(send.RunID)
+	must(wire.MethodTaskStop, wire.TaskStopParams{Prov: okProv(caller), TaskID: res.TaskID}, nil)
+	must(wire.MethodTaskList, wire.TaskListParams{Prov: okProv(caller), WorkspaceID: ws.ID}, nil)
+	must(wire.MethodTaskGet, wire.TaskGetParams{Prov: okProv(caller), ID: res.TaskID}, nil)
+	must(wire.MethodRunStatus, wire.RunStatusParams{Prov: okProv(caller), RunID: res.RunID}, nil)
+	must(wire.MethodTaskActivity, wire.TaskActivityParams{Prov: okProv(caller), TaskID: res.TaskID}, nil)
+
+	// A refused call: another approved host may not drive this task.
+	other := newCallerKey(t)
+	e.pairApproved(t, other, "other")
+	e.grantWrite(t, other, ws.ID)
+	ocl := e.dial(t)
+	if _, err := e.doHello(t, ocl, other); err != nil {
+		t.Fatal(err)
+	}
+	var raw json.RawMessage
+	err = ocl.Call(callCtx(), wire.MethodTaskSend, wire.TaskSendParams{Prov: okProv(other), IdempotencyKey: "sec3", TaskID: res.TaskID, Prompt: "mine"}, &raw)
+	wantFleetCode(t, err, wire.CodeNotOwner)
+	frames = append(frames, json.RawMessage(strconv.Quote(err.Error())))
+
+	task, err := e.st.GetTask(res.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirs := []string{filepath.Dir(e.dbPath), repo}
+	if task.WorktreePath != nil {
+		dirs = append(dirs, *task.WorktreePath)
+	}
+
+	// Negative control: the scanners must see a sentinel planted in each
+	// place, so a broken scanner cannot make the real check pass.
+	if _, err := e.st.AppendFleetAudit(store.FleetAuditRow{Direction: "in", HostID: "ctl", Method: "ctl", Outcome: "ok", Summary: control}); err != nil {
+		t.Fatal(err)
+	}
+	log.Print(control)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(e.dbPath), "control.txt"), []byte(control), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctl := canaryHits(t, control, []json.RawMessage{json.RawMessage(`"` + control + `"`)}, e.dbPath, logs, dirs)
+	if len(ctl) != 4 {
+		t.Fatalf("negative control found in %v, want frame, database, log and file", ctl)
+	}
+
+	if hits := canaryHits(t, canary, frames, e.dbPath, logs, dirs); len(hits) != 0 {
+		t.Fatalf("caller secret reached the callee: %v", hits)
+	}
+}
+
+// TestFleetTaskCreateParamsCarryNoSecretField pins the wire shape of task
+// create: a new string field must be a deliberate, reviewed addition.
+func TestFleetTaskCreateParamsCarryNoSecretField(t *testing.T) {
+	var got []string
+	rt := reflect.TypeOf(wire.TaskCreateParams{})
+	for i := 0; i < rt.NumField(); i++ {
+		if f := rt.Field(i); f.Type.Kind() == reflect.String {
+			got = append(got, f.Name)
+		}
+	}
+	slices.Sort(got)
+	want := []string{"BaseRef", "Branch", "IdempotencyKey", "Model", "Prompt", "Provider", "Title"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("TaskCreateParams string fields = %v, want %v", got, want)
 	}
 }
