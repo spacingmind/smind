@@ -62,6 +62,19 @@ beforeEach(() => localStorage.clear());
 afterEach(() => cleanup());
 
 describe("New Task dialog: Start from", () => {
+  it("shows a short label below sm and keeps the full label as the accessible name (jsdom has no layout: asserts the sm:hidden element)", async () => {
+    await setup();
+    const full: Record<string, string> = { "Workspace HEAD": "HEAD", "Branch…": "Branch", "Pull request…": "PR", "Issue…": "Issue" };
+    for (const [name, short] of Object.entries(full)) {
+      const radio = screen.getByRole("radio", { name });
+      expect(radio).toHaveAttribute("title", name);
+      const shortEl = Array.from(radio.querySelectorAll("span")).find((el) => el.textContent === short);
+      expect(shortEl).toBeDefined();
+      expect(shortEl!.className).toContain("sm:hidden");
+      expect(radio.querySelector("span.hidden.sm\\:inline")).toHaveTextContent(name);
+    }
+  });
+
   it("it has four start modes", async () => {
     await setup();
     for (const name of ["Workspace HEAD", "Branch…", "Pull request…", "Issue…"]) expect(screen.getByRole("radio", { name })).toBeInTheDocument();

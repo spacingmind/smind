@@ -20,7 +20,8 @@ export function SegmentedControl<T extends string>({
   instant = false,
 }: {
   /** `icon` makes the segment icon-only: `label` becomes its aria-label (and tooltip). */
-  options: { value: T; label: string; icon?: ReactNode; testId?: string }[];
+  /** `shortLabel` replaces `label` below `sm`; `label` stays the accessible name and tooltip. */
+  options: { value: T; label: string; shortLabel?: string; icon?: ReactNode; testId?: string }[];
   value: T;
   onChange: (value: T) => void;
   /** Accessible name of the whole group. */
@@ -49,8 +50,8 @@ export function SegmentedControl<T extends string>({
         <ToggleGroup.Item
           key={opt.value}
           value={opt.value}
-          aria-label={opt.icon ? opt.label : undefined}
-          title={opt.icon ? opt.label : undefined}
+          aria-label={opt.icon || opt.shortLabel ? opt.label : undefined}
+          title={opt.icon || opt.shortLabel ? opt.label : undefined}
           data-testid={opt.testId}
           className={cn(
             "h-7 rounded-md px-3 text-ui-sm text-muted-foreground outline-none",
@@ -60,7 +61,15 @@ export function SegmentedControl<T extends string>({
             opt.icon && "inline-flex items-center justify-center px-1.5",
           )}
         >
-          {opt.icon ?? opt.label}
+          {opt.icon ??
+            (opt.shortLabel ? (
+              <>
+                <span className="sm:hidden">{opt.shortLabel}</span>
+                <span className="hidden sm:inline">{opt.label}</span>
+              </>
+            ) : (
+              opt.label
+            ))}
         </ToggleGroup.Item>
       ))}
     </ToggleGroup.Root>
