@@ -327,6 +327,42 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("command-palette-empty")).toBeInTheDocument();
   });
 
+  it("all chip is pressed when the selected category disappears", () => {
+    function Host() {
+      const [mounted, setMounted] = useState(true);
+      const files = useMemo<Command[]>(
+        () => [{ id: "f1", group: "Files", title: "app-sidebar.tsx", run: () => {} }],
+        [],
+      );
+      return (
+        <>
+          {mounted && <Source sourceId="files" groupRank={1} commands={files} />}
+          <button onClick={() => setMounted(false)}>unmount</button>
+        </>
+      );
+    }
+    render(
+      <KeyboardProvider>
+        <PaletteProvider>
+          <PaletteShortcut />
+          <Source sourceId="tasks" groupRank={0} commands={TASKS} />
+          <Host />
+          <CommandPalette />
+        </PaletteProvider>
+      </KeyboardProvider>,
+    );
+
+    open();
+    fireEvent.click(screen.getByTestId("command-palette-chip-files"));
+    expect(screen.getByTestId("command-palette-chip-files")).toHaveAttribute("aria-pressed", "true");
+
+    // The Files source unregisters while its chip is selected: the chip is
+    // gone, the selection falls back to "all", and "All" reads as pressed.
+    fireEvent.click(screen.getByText("unmount"));
+    expect(screen.queryByTestId("command-palette-chip-files")).not.toBeInTheDocument();
+    expect(screen.getByTestId("command-palette-chip-all")).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("kbd hint shows the live shortcut", () => {
     renderPalette({
       sourceId: "actions",

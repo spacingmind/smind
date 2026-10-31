@@ -202,7 +202,7 @@ export function CommandPalette() {
             .filter((key) => key === "all" || present.has(key))
             .map((key) => {
               const Icon = Icons[PALETTE_CATEGORY_ICON[key]];
-              const pressed = category === key;
+              const pressed = activeCategory === key;
               return (
                 <button
                   key={key}
