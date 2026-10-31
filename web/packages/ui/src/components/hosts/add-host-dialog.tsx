@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { formatSas } from "@/components/hosts/grant-summary";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-error";
 import { Input } from "@/components/ui/input";
@@ -120,13 +121,12 @@ export function AddHostDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               />
             </div>
             <label className="flex items-start gap-2 text-ui-sm text-foreground">
-              <input
-                type="checkbox"
+              <Checkbox
                 className="mt-0.5"
                 data-testid="add-cleartext"
                 checked={cleartext}
                 disabled={pending}
-                onChange={(e) => setCleartext(e.target.checked)}
+                onCheckedChange={(on) => setCleartext(on === true)}
               />
               <span className="flex flex-col">
                 <span>Allow cleartext</span>

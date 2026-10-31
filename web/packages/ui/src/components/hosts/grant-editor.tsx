@@ -1,3 +1,4 @@
+import { Checkbox } from "@/components/ui/checkbox";
 import { FormError } from "@/components/ui/form-error";
 import { Input } from "@/components/ui/input";
 import { grantNeedsWriteWorkspace, type FleetGrant } from "@/lib/fleet-types";
@@ -44,16 +45,15 @@ export function GrantEditor({
       <fieldset className="flex flex-col gap-1" disabled={disabled}>
         <legend className="mb-1 text-ui-sm font-medium text-foreground">Allowed actions</legend>
         <label className="flex items-center gap-2 text-ui-sm text-foreground">
-          <input type="checkbox" checked disabled data-testid="grant-op-read" readOnly />
+          <Checkbox checked disabled hint="Reading is always allowed" data-testid="grant-op-read" />
           <span>Read workspaces, tasks and run status</span>
         </label>
         {WRITE_OPS.map(({ op, label }) => (
           <label key={op} className="flex items-center gap-2 text-ui-sm text-foreground">
-            <input
-              type="checkbox"
+            <Checkbox
               data-testid={`grant-op-${op}`}
               checked={grant.ops.includes(op)}
-              onChange={(e) => toggleOp(op, e.target.checked)}
+              onCheckedChange={(on) => toggleOp(op, on === true)}
             />
             <span>{label}</span>
           </label>
@@ -67,11 +67,10 @@ export function GrantEditor({
         ) : (
           workspaces.map((ws) => (
             <label key={ws.id} className="flex items-center gap-2 text-ui-sm text-foreground">
-              <input
-                type="checkbox"
+              <Checkbox
                 data-testid={`grant-ws-${ws.id}`}
                 checked={grant.workspacesWrite.includes(ws.id)}
-                onChange={(e) => toggleWorkspace(ws.id, e.target.checked)}
+                onCheckedChange={(on) => toggleWorkspace(ws.id, on === true)}
               />
               <span className="truncate">{ws.title}</span>
             </label>
