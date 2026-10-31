@@ -170,7 +170,7 @@ minutes) is not designed here; the dogfood did not show a stall, only quota stop
 
 - **Status does not change.** A rate-limited run ends `error` (the five statuses are untouched, same discipline as D13/`disposition`: a new status ripples through `run.status`, the
   queue's "finished" trigger, the CLI and the UI).
-- **New nullable columns on `runs`:** `failure_kind TEXT NOT NULL DEFAULT ''` (`rate_limited` now; `auth` and `overloaded` are the next obvious values and are out of scope) and
+- **New nullable columns on `runs`:** `failure_kind TEXT NOT NULL DEFAULT ''` (`rate_limited` now; `auth` and `overloaded` are the next obvious values and are out of scope — **amended by [ADR-0050](0050-run-failure-classes.md): the kind is now split into `plan_window_exhausted`, `transient_429`, `auth_expired`, `model_not_in_plan` and a residual `rate_limited`**) and
   `failure_reset_at TIMESTAMP NULL`. They are **stored, not derived** (unlike `disposition`) because the reset time comes from free text with a local-time quirk (GLM prints `17:35:18` with no date or
   zone), and the text can be clipped later (`clipErrMsg`); freezing the interpretation at finish time, with the daemon's `now`, keeps `run.list` stable across restarts and parser changes.
 - **Classification** happens in `Registry.finish`, from, in this order: (1) a structured signal when the backend has one — claude-native's `rate_limit_event` with `status = rejected`

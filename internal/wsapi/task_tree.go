@@ -209,7 +209,7 @@ func toTreeFacts(facts map[int64]runs.TaskRunFact) map[int64]tasktree.RunFact {
 	for id, f := range facts {
 		rf := tasktree.RunFact{
 			State: f.State, RunningRunIDs: f.RunningRunIDs, PendingPermissions: f.PendingPermissions, Disposition: f.Disposition,
-			FailureKind: f.FailureKind, Window: f.FailureWindow, ResetInferred: f.FailureResetInferred,
+			FailureKind: f.FailureKind, Window: f.FailureWindow, ResetInferred: f.FailureResetInferred, Action: f.FailureAction,
 		}
 		if f.FailureResetAt != nil {
 			rf.ResetAt = f.FailureResetAt.UTC().Format(time.RFC3339)

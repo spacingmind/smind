@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
@@ -265,12 +266,13 @@ func remoteTaskStatus(ctx context.Context, client *wsclient.Client, in taskStatu
 		return out, nil
 	}
 	var d struct {
-		RunID      string   `json:"runId"`
-		TaskID     int64    `json:"taskId"`
-		State      string   `json:"state"`
-		StopReason string   `json:"stopReason"`
-		Failure    string   `json:"failureKind"`
-		CostUSD    *float64 `json:"costUsd"`
+		RunID      string          `json:"runId"`
+		TaskID     int64           `json:"taskId"`
+		State      string          `json:"state"`
+		StopReason string          `json:"stopReason"`
+		Failure    string          `json:"failureKind"`
+		Action     *failure.Action `json:"action"`
+		CostUSD    *float64        `json:"costUsd"`
 	}
 	if err := json.Unmarshal(env.Data, &d); err != nil {
 		return taskStatusOutput{}, fmt.Errorf("task_status: bad answer: %w", err)
@@ -282,6 +284,7 @@ func remoteTaskStatus(ctx context.Context, client *wsclient.Client, in taskStatu
 		out.GlobalID = env.Host + ":" + strconv.FormatInt(d.TaskID, 10)
 	}
 	out.Status, out.StopReason, out.FailureKind, out.CostUSD = d.State, d.StopReason, d.Failure, d.CostUSD
+	out.Action = d.Action
 	return out, nil
 }
 

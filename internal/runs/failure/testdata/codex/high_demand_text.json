@@ -1,0 +1,20 @@
+{
+  "name": "high_demand_text",
+  "source": "documented: refs/codex codex-rs/protocol/src/error.rs",
+  "input": {
+    "provider": "codex",
+    "vendor": "",
+    "err": "We're currently experiencing high demand, which may cause temporary errors.",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "transient_429",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

@@ -959,3 +959,49 @@ func TestMigration_ProviderSecretsTable(t *testing.T) {
 		s.Close()
 	}
 }
+
+// TestMigration_RateLimitedWithWindowBecomesPlanWindow: old rate_limited rows
+// with a window or a reset time become plan_window_exhausted; one with neither
+// stays the residual; a second Open changes nothing.
+func TestMigration_RateLimitedWithWindowBecomesPlanWindow(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "old-failure.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	task := newTestTaskForRuns(t, s)
+	reset := time.Now().UTC().Add(time.Hour)
+	for _, r := range []struct {
+		id, window string
+		reset      *time.Time
+	}{{"with-window", "5h", nil}, {"with-reset", "", &reset}, {"bare", "", nil}} {
+		if _, err := s.db.Exec(
+			`INSERT INTO runs (id, task_id, provider, prompt, status, started_at, failure_kind, failure_window, failure_reset_at) VALUES (?, ?, 'glm', 'hi', 'error', ?, 'rate_limited', ?, ?)`,
+			r.id, task.ID, time.Now().UTC(), r.window, r.reset,
+		); err != nil {
+			t.Fatalf("seed %s: %v", r.id, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	want := map[string]string{"with-window": "plan_window_exhausted", "with-reset": "plan_window_exhausted", "bare": "rate_limited"}
+	for i := 0; i < 2; i++ {
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		for id, kind := range want {
+			got, err := s.GetRun(id)
+			if err != nil {
+				t.Fatalf("GetRun(%s) error = %v", id, err)
+			}
+			if got.FailureKind != kind {
+				t.Fatalf("Open() #%d run %s kind = %q, want %q", i, id, got.FailureKind, kind)
+			}
+		}
+		s.Close()
+	}
+}

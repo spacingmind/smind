@@ -9,9 +9,17 @@ export const RATE_LIMITED = "rate_limited";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/** True for an errored run the daemon classified as a provider rate limit. */
+/** The plan-window class (run failure classes plan): the old rate_limited rows with a window or reset. */
+export const PLAN_WINDOW_EXHAUSTED = "plan_window_exhausted";
+
+/** True for a plan limit: the plan window, or the residual unclassifiable rate limit. */
+export function isPlanLimitKind(kind: string | undefined | null): boolean {
+  return kind === PLAN_WINDOW_EXHAUSTED || kind === RATE_LIMITED;
+}
+
+/** True for an errored run the daemon classified as a provider plan limit (plan window or residual rate limit). */
 export function isRateLimitedRun(run: { status: string; failureKind?: string }): boolean {
-  return run.status === "error" && run.failureKind === RATE_LIMITED;
+  return run.status === "error" && isPlanLimitKind(run.failureKind);
 }
 
 /** A valid reset instant, or null when absent/unparseable. */

@@ -46,7 +46,7 @@ func TestCooldown_UnknownResetSetsNone(t *testing.T) {
 	t.Parallel()
 	// A rate limit whose reset cannot be parsed keeps the kind, no reset.
 	_, st, status := finishDirect(t, "cd-unknown", nil, errors.New("429 Usage limit reached for 5 hour. Please try later"))
-	if status.FailureKind != "rate_limited" || status.FailureResetAt != nil {
+	if status.FailureKind != "plan_window_exhausted" || status.FailureResetAt != nil {
 		t.Fatalf("status = %+v, want rate_limited with unknown reset", status)
 	}
 	if _, ok, _ := st.GetProviderCooldown("glm", time.Now()); ok {
@@ -209,7 +209,7 @@ func TestCooldown_ModelScopedWindowSetsNone(t *testing.T) {
 		want bool
 	}{{"seven_day_opus", false}, {"seven_day_sonnet", false}, {"five_hour", true}, {"seven_day", true}} {
 		_, st, status := finishDirect(t, "cd-win-"+tc.typ, &taskrunner.RateLimitSignal{Status: "rejected", ResetsAt: x, Type: tc.typ}, errors.New("claude code prompt: exit status 1"))
-		if status.FailureKind != "rate_limited" || status.FailureResetAt == nil {
+		if status.FailureKind != "plan_window_exhausted" || status.FailureResetAt == nil {
 			t.Fatalf("%s: status = %+v, want a classified rate limit with a reset", tc.typ, status)
 		}
 		if _, ok, _ := st.GetProviderCooldown("glm", time.Now()); ok != tc.want {
@@ -243,7 +243,7 @@ func TestRateLimit_InstanceCooldownLeavesBaseRunning(t *testing.T) {
 	r.taskID, r.provider, r.prompt = task.ID, taskrunner.Provider("zai-t"), "p"
 	reg.finish(r, errors.New(text))
 
-	if _, status, _ := reg.History("cd-inst"); status.FailureKind != "rate_limited" || status.FailureWindow != "5h" || status.FailureResetAt == nil {
+	if _, status, _ := reg.History("cd-inst"); status.FailureKind != "plan_window_exhausted" || status.FailureWindow != "5h" || status.FailureResetAt == nil {
 		t.Fatalf("status = %+v, want a classified GLM 5h rate limit with a reset", status)
 	}
 	cool := reg.ProviderCooldowns()

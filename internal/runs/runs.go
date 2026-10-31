@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -87,8 +88,11 @@ type RunStatus struct {
 	// as approximate, "≈").
 	FailureResetInferred bool
 	// FailureResetZone names the zone the reset's text was read in (see
-	// ratelimit.Result.ResetZone); "" = none.
+	// failure.Result.ResetZone); "" = none.
 	FailureResetZone string
+	// FailureAction is the next step for the failure (failure.NextAction),
+	// derived on read, never stored; nil = none.
+	FailureAction *failure.Action
 
 	// ProfileID is the agent profile the run was launched with (0 = none)
 	// and FailoverOf the run it continues after a rate limit ("" = none);

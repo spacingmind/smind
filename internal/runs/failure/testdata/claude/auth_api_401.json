@@ -1,0 +1,20 @@
+{
+  "name": "auth_api_401",
+  "source": "documented: Anthropic API errors (authentication_error, not_found_error, overloaded_error, rate_limit_error)",
+  "input": {
+    "provider": "claude",
+    "vendor": "",
+    "err": "API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"}}",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "auth_expired",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

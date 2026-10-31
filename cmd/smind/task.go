@@ -16,6 +16,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/wsclient"
@@ -158,6 +159,8 @@ type runLogsResult struct {
 	ResetAt     string `json:"resetAt"`
 	// ResetInferred: ResetAt was read in an assumed zone (shown as "≈").
 	ResetInferred bool `json:"resetInferred,omitempty"`
+	// Action is the failure's next step (failure.Action); absent when none.
+	Action *failure.Action `json:"action,omitempty"`
 	// BaseSHA/HeadSHA/Dirty mirror the run's git provenance (O1), absent
 	// while unknown.
 	BaseSHA string `json:"baseSha,omitempty"`
@@ -1779,6 +1782,8 @@ type runSummaryRow struct {
 	FailureResetAt *time.Time
 	// FailureResetInferred: FailureResetAt was read in an assumed zone.
 	FailureResetInferred bool
+	// FailureAction is the failure's next step (run.list's untagged key).
+	FailureAction *failure.Action
 	// ProfileID is the agent profile the run was launched with (0 = none);
 	// ProfileName its name (null when none or the profile row is deleted);
 	// ParentTaskID the run's task's parent. The wire carries ProfileID bare
@@ -1818,7 +1823,7 @@ func runStatusCell(r runSummaryRow, now time.Time) string {
 
 func runStatusText(r runSummaryRow, now time.Time) string {
 	status, disposition, errText := r.Status, r.Disposition, r.Err
-	if status == "error" && r.FailureKind == "rate_limited" {
+	if status == "error" && failure.IsPlanLimit(r.FailureKind) {
 		return status + ": " + rateLimitedText(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred, now)
 	}
 	if status == "error" && r.FailureKind == "cli_exited" {

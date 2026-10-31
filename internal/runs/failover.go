@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/spacingmind/smind/internal/runs/ratelimit"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -38,59 +38,137 @@ func (reg *Registry) FallbackProfileFor(profileID int64) int64 {
 	return *p.FallbackProfileID
 }
 
-// applyRateLimitPolicy is ADR-0041 F2b: when a run launched with a profile
-// fails on a provider rate limit, do what the profile's onRateLimit says.
-// It acts at most once per chain (a retry is itself a run with failoverOf
-// set, and never triggers another action), only for user runs, and only
-// while the profile still exists.
-func (reg *Registry) applyRateLimitPolicy(r *run, fail ratelimit.Result) {
-	if fail.Kind != "rate_limited" || r.profileID == 0 || r.failoverOf != "" || r.purpose != "" {
+// transientRetryBackoffs is the delay before each automatic retry of a
+// transient_429 (the run-failure-classes plan, D3): 30 s, then 2 min.
+// len() is the retry cap.
+var transientRetryBackoffs = []time.Duration{30 * time.Second, 2 * time.Minute}
+
+const (
+	transientRetryAfterMin = 5 * time.Second
+	transientRetryAfterMax = 5 * time.Minute
+)
+
+// transientRetryPreface leads the prompt of an automatic transient retry.
+const transientRetryPreface = "(Retrying after a short provider throttle. Your earlier attempt may have made partial progress: check git status and git log, then continue.)\n\n"
+
+// applyRateLimitPolicy acts on a failed run by its failure class. A plan limit
+// (plan_window_exhausted, residual rate_limited) does what the launching
+// profile's onRateLimit says (ADR-0041 F2b), at most once per chain, only for
+// user runs launched with a profile. A transient_429 is retried on the same
+// chat with a bounded backoff (D3). auth_expired and model_not_in_plan do
+// nothing here, by design: no wait, no fallback, no retry; a person fixes
+// setup (AC12). Never for system runs (purpose != "").
+func (reg *Registry) applyRateLimitPolicy(r *run, fail failure.Result) {
+	if r.purpose != "" {
 		return
 	}
-	prof, err := reg.st.GetAgentProfile(r.profileID)
-	if err != nil {
+	switch {
+	case fail.Kind == failure.KindTransient429:
+		reg.enqueueTransientRetry(r, fail)
+	case failure.IsPlanLimit(fail.Kind):
+		if r.profileID == 0 || r.failoverOf != "" {
+			return
+		}
+		prof, err := reg.st.GetAgentProfile(r.profileID)
+		if err != nil {
+			return
+		}
+		switch prof.OnRateLimit {
+		case "wait":
+			reg.enqueueRateLimitRetry(r, fail)
+		case "fallback":
+			reg.startFallbackSuccessor(r, prof)
+		}
+	}
+}
+
+// transientRetryEligible: a plain human send is never auto-retried (it gets
+// the retry_now action and an inbox item); a profile run or an
+// orchestrator/agent-sourced run is.
+func transientRetryEligible(r *run) bool {
+	return r.profileID != 0 || (r.origin != "" && r.origin != store.ChatQueueSourceHuman)
+}
+
+// transientAttempts counts the transient_429 runs this run continues: its
+// failoverOf chain, only while each ancestor itself failed transient.
+func (reg *Registry) transientAttempts(r *run) int {
+	n := 0
+	for id := r.failoverOf; id != "" && n <= len(transientRetryBackoffs); n++ {
+		row, err := reg.st.GetRun(id)
+		if err != nil || row.FailureKind != failure.KindTransient429 {
+			break
+		}
+		id = row.FailoverOf
+	}
+	return n
+}
+
+// enqueueTransientRetry holds one retry on the failed run's chat for the next
+// backoff step (Retry-After wins, clamped). Hard cap: nothing is queued while
+// the provider is in cooldown (the failure then stays actionable), and the
+// retry is a real run, counted in usage and the per-tree guard like any other.
+func (reg *Registry) enqueueTransientRetry(r *run, fail failure.Result) {
+	if !transientRetryEligible(r) {
 		return
 	}
-	switch prof.OnRateLimit {
-	case "wait":
-		reg.enqueueRateLimitRetry(r, fail)
-	case "fallback":
-		reg.startFallbackSuccessor(r, prof)
+	attempt := reg.transientAttempts(r)
+	if attempt >= len(transientRetryBackoffs) {
+		return
+	}
+	if until, cooling := reg.activeProviderCooldown(string(r.provider)); cooling {
+		log.Printf("runs: transient retry for run %s: provider %s is cooling down until %s; not retrying", r.id, r.provider, until.Format(time.RFC3339))
+		return
+	}
+	delay := transientRetryBackoffs[attempt]
+	if fail.RetryAfter > 0 {
+		delay = min(max(fail.RetryAfter, transientRetryAfterMin), transientRetryAfterMax)
+	}
+	notBefore := time.Now().Add(delay)
+	if reg.enqueueRetry(r, transientRetryPreface, &notBefore, true) {
+		r.mu.Lock()
+		r.retryAttempt, r.retryNextAt = attempt+1, &notBefore
+		r.mu.Unlock()
 	}
 }
 
 // enqueueRateLimitRetry puts one held item on the failed run's own chat,
-// deliverable shortly after the limit resets. It goes straight to the store:
-// that deliberately bypasses the non-human auto-approve check of
-// StartWhenBusy, because it re-sends the SAME run's own settings and never
-// escalates them. Attachments are not re-attached (out of scope).
-func (reg *Registry) enqueueRateLimitRetry(r *run, fail ratelimit.Result) {
+// deliverable shortly after the limit resets.
+func (reg *Registry) enqueueRateLimitRetry(r *run, fail failure.Result) {
 	now := time.Now()
 	if fail.ResetAt == nil || !fail.ResetAt.After(now) {
 		return
 	}
 	notBefore := fail.ResetAt.Add(reg.retryGrace)
+	_ = reg.enqueueRetry(r, retryPreface, &notBefore, false)
+}
+
+// enqueueRetry goes straight to the store: that deliberately bypasses the
+// non-human auto-approve check of StartWhenBusy, because it re-sends the SAME
+// run's own settings and never escalates them. Attachments are not
+// re-attached (out of scope).
+func (reg *Registry) enqueueRetry(r *run, preface string, notBefore *time.Time, transient bool) bool {
 	perm := r.getPerm()
 	cfg, err := json.Marshal(chatQueueRunConfig{
 		Provider: string(r.provider), PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept,
 		ThinkingLevel: string(r.thinkingLevel), Model: r.model, ReplyChatID: r.replyChatID,
-		ProfileID: r.profileID, FailoverOf: r.id,
+		ProfileID: r.profileID, FailoverOf: r.id, RetryTransient: transient,
 	})
 	if err != nil {
-		return
+		return false
 	}
-	prompt := retryPreface + stripProvenanceHeader(r.prompt)
-	_, err = reg.st.EnqueueChatPromptAt(r.chatID, prompt, string(cfg), store.ChatQueueSourceOrchestrator, 0, 0, 0, "", &notBefore)
+	prompt := preface + stripProvenanceHeader(r.prompt)
+	_, err = reg.st.EnqueueChatPromptAt(r.chatID, prompt, string(cfg), store.ChatQueueSourceOrchestrator, 0, 0, 0, "", notBefore)
 	switch {
 	case errors.Is(err, store.ErrQueueFull):
-		log.Printf("runs: rate-limit retry for run %s: chat %d queue full; giving up", r.id, r.chatID)
-		return
+		log.Printf("runs: retry for run %s: chat %d queue full; giving up", r.id, r.chatID)
+		return false
 	case err != nil:
-		log.Printf("runs: rate-limit retry for run %s: %v", r.id, err)
-		return
+		log.Printf("runs: retry for run %s: %v", r.id, err)
+		return false
 	}
 	reg.notifyQueueUpdated(r.chatID)
 	reg.armQueueWake()
+	return true
 }
 
 // stripProvenanceHeader removes a leading "[message from task #N, chat #M]"

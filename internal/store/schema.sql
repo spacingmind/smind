@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS runs (
     interrupt INTEGER NOT NULL DEFAULT 0, -- 1 = delivered as a mid-run interrupt
     attachments TEXT NOT NULL DEFAULT '', -- attach.EncodeSet of the prompt's attachments (ADR-0038); '' = none
     -- ADR-0041 B1: typed terminal reason of an error run.
-    failure_kind TEXT NOT NULL DEFAULT '', -- 'rate_limited' | ''
+    failure_kind TEXT NOT NULL DEFAULT '', -- plan_window_exhausted | transient_429 | auth_expired | model_not_in_plan | rate_limited (residual) | cli_exited | ''
     failure_window TEXT NOT NULL DEFAULT '', -- e.g. '5h'; '' = unknown
     failure_reset_at TIMESTAMP, -- UTC reset instant; NULL = unknown
     -- ADR-0041 B3: the parent chat to notify when this child run finishes,

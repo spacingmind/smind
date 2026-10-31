@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icons } from "@/lib/icons";
+import { isPlanLimitKind } from "@/lib/rate-limit";
 import { describeRunError, resetZoneNote } from "@/lib/run-error";
 import type { RunEntry } from "@/hooks/use-run-timeline";
 
@@ -13,7 +14,7 @@ import type { RunEntry } from "@/hooks/use-run-timeline";
 export function RunErrorBox({ run, onRetry }: { run: RunEntry; onRetry?: (run: RunEntry) => void }) {
   const [open, setOpen] = useState(false);
   if (!run.err) return null;
-  const view = describeRunError(run.err, { rateLimited: run.failureKind === "rate_limited", hasReset: Boolean(run.failureResetAt) });
+  const view = describeRunError(run.err, { rateLimited: isPlanLimitKind(run.failureKind), hasReset: Boolean(run.failureResetAt) });
   const zoneNote = resetZoneNote(run.failureResetZone);
   return (
     <div className="flex flex-col gap-1 rounded-lg bg-destructive/10 px-3 py-2" data-testid="run-error-box">

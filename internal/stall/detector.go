@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -98,7 +99,7 @@ func Detect(rows []store.StallRow, now time.Time, n time.Duration) []Episode {
 			continue
 		}
 		a := memo[r.TaskID].activity
-		if r.LatestFailureKind == "rate_limited" && r.ProfileOnRateLimit == "wait" &&
+		if failure.IsPlanLimit(r.LatestFailureKind) && r.ProfileOnRateLimit == "wait" &&
 			r.LatestFailureResetAt != nil && r.LatestFailureResetAt.After(a) {
 			a = *r.LatestFailureResetAt
 		}

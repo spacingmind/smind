@@ -1,0 +1,20 @@
+{
+  "name": "bare_429_residual",
+  "source": "documented: generic HTTP 429",
+  "input": {
+    "provider": "glm",
+    "vendor": "zai",
+    "err": "429 Too Many Requests",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "rate_limited",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

@@ -228,6 +228,9 @@ func addFailureFields(row map[string]any) {
 		return
 	}
 	row["failureKind"] = kind
+	if a, ok := row["FailureAction"]; ok && a != nil {
+		row["action"] = a
+	}
 	if w, _ := row["FailureWindow"].(string); w != "" {
 		row["window"] = w
 	}

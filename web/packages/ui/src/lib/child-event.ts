@@ -42,5 +42,5 @@ export function parseChildEventPrompt(prompt: string): ChildEventPrompt {
 
 /** A status line the child's provider throttled: shown in the warning tone. */
 export function isRateLimitedLine(line: string): boolean {
-  return line.includes("rate_limited");
+  return line.includes("rate_limited") || line.includes("plan_window_exhausted");
 }

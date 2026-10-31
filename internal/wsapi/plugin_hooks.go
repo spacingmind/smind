@@ -33,6 +33,6 @@ func (h pluginHooks) OnRunFinished(f runs.RunFinished) {
 	}
 	h.m.NotifyRunFinished(plugins.RunFinishedInput{
 		RunID: f.RunID, TaskID: f.TaskID, ChatID: f.ChatID, Provider: f.Provider, Model: f.Model, Origin: f.Origin,
-		Status: f.Status, StopReason: f.StopReason, FailureKind: f.FailureKind, ToolCalls: f.ToolCalls,
+		Status: f.Status, StopReason: f.StopReason, FailureKind: f.FailureKind, Action: f.FailureAction, ToolCalls: f.ToolCalls,
 	})
 }

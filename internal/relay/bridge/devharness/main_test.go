@@ -563,8 +563,8 @@ func TestSeedTree_RateLimited(t *testing.T) {
 	if tierOf(c) != "coder" || c.ParentID == nil || *c.ParentID != by["supervisor"].ID {
 		t.Fatalf("child: %+v", c)
 	}
-	if c.Run.State != "error" || c.Run.FailureKind != "rate_limited" {
-		t.Fatalf("child run = %+v, want error / rate_limited", c.Run)
+	if c.Run.State != "error" || c.Run.FailureKind != "plan_window_exhausted" {
+		t.Fatalf("child run = %+v, want error / plan_window_exhausted", c.Run)
 	}
 	reset, err := time.Parse(time.RFC3339, c.Run.ResetAt)
 	if err != nil {

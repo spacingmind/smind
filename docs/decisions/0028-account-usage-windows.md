@@ -1060,6 +1060,8 @@ specific manual probe (see the plan's Validation).
 
 ## Cross-references
 
+- [ADR-0050](0050-run-failure-classes.md) reuses this ADR's bare-429 back-off versus hard-rejection split for run failure classes (`transient_429` versus `plan_window_exhausted`).
+
 - ADR-0005 / ADR-0009 (event subscription and topic style: `account.usage`).
 - ADR-0015 (account RPCs, secrets stay out of payloads), ADR-0020 (runs off
   the proxy; per-run usage; model-aware, fail-closed routing),
