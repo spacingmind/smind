@@ -48,7 +48,7 @@ type wordPath struct {
 func (fs *floorSeg) wordPaths() []wordPath {
 	var out []wordPath
 	add := func(w string) {
-		if w == "" || fs.pl.isNullDevice(w) {
+		if w == "" || fs.pl.isNullDevice(w) || fs.cmdSwitch(w) {
 			return
 		}
 		r, ok := resolveFloor(fs.req, w, fs.cwd)
@@ -78,6 +78,31 @@ func (fs *floorSeg) wordPaths() []wordPath {
 	return out
 }
 
+var cmdSwitchWord = regexp.MustCompile(`^/[A-Za-z?][A-Za-z0-9:]*$`)
+
+// cmdSwitchCmds are the cmd built-ins and tools whose /x words are switches.
+var cmdSwitchCmds = map[string]bool{
+	"del": true, "erase": true, "rd": true, "rmdir": true, "copy": true, "xcopy": true, "move": true,
+	"robocopy": true, "ren": true, "rename": true, "attrib": true, "icacls": true, "takeown": true,
+	"cacls": true, "mklink": true, "dir": true, "type": true,
+}
+
+// cmdSwitch reports a cmd switch (/s, /q, /MIR) of a Windows cmd built-in,
+// which is not a path.
+func (fs *floorSeg) cmdSwitch(w string) bool {
+	return fs.pl.windows && len(fs.argv) > 0 && cmdSwitchCmds[fs.pl.cmdName(fs.argv[0])] && cmdSwitchWord.MatchString(w)
+}
+
+// envOr is the first non-empty Windows environment variable of keys, or def.
+func envOr(pl *platform, def string, keys ...string) string {
+	for _, k := range keys {
+		if v := pl.getenv(k); v != "" {
+			return v
+		}
+	}
+	return def
+}
+
 // installRoots are the places no task may touch: the human's install state
 // and credentials, and the daemon home. The task worktree lives under
 // Home/.smind/worktrees, so it is carved out by the caller.
@@ -93,7 +118,12 @@ func installRoots(req Request) []string {
 		pl.join(home, ".gnupg"),
 	}
 	if pl.windows {
-		roots = append(roots, pl.join(home, "AppData"))
+		roots = append(roots, pl.join(home, "AppData"),
+			envOr(pl, `C:\Windows`, "SystemRoot", "windir"),
+			envOr(pl, `C:\Program Files`, "ProgramFiles"),
+			envOr(pl, `C:\Program Files (x86)`, "ProgramFiles(x86)"),
+			envOr(pl, `C:\ProgramData`, "ProgramData"),
+		)
 	} else {
 		roots = append(roots,
 			pl.join(home, "Library", "Keychains"),
@@ -113,6 +143,9 @@ func inInstallState(req Request, resolved string) bool {
 	pl := req.pl()
 	if req.Worktree != "" && pl.within(resolved, []string{req.Worktree}) {
 		return false
+	}
+	if pl.windows && pl.within(resolved, tempRoots(pl)) {
+		return false // the OS temp dir normally lives under AppData
 	}
 	if floorHome(req) == "" {
 		return false
@@ -158,12 +191,21 @@ func (fs *floorSeg) installRules(words []wordPath) (FloorHit, bool) {
 		switch fs.pl.cmdName(fs.argv[0]) {
 		case "pkill", "killall", "kill":
 			return floorHit("no-install-state")
+		case "taskkill", "stop-process", "spps":
+			if fs.pl.windows {
+				return floorHit("no-install-state")
+			}
 		case "smind":
 			if w := nonFlags(fs.argv[1:]); len(w) > 0 && w[0] == "service" {
 				return floorHit("no-install-state")
 			}
 		case "launchctl", "systemctl", "service":
 			if mentionsSmind(fs.argv[1:]) {
+				return floorHit("no-install-state")
+			}
+		case "sc", "net", "nssm", "schtasks", "start-service", "stop-service", "restart-service",
+			"set-service", "new-service", "remove-service":
+			if fs.pl.windows && mentionsSmind(fs.argv[1:]) {
 				return floorHit("no-install-state")
 			}
 		case "brew":
@@ -224,6 +266,13 @@ func (pl *platform) secretName(w string) bool {
 	return false
 }
 
+// winSecretReaders are the Windows commands that read or copy a file's content.
+var winSecretReaders = map[string]bool{
+	"type": true, "get-content": true, "gc": true, "select-string": true, "sls": true, "findstr": true,
+	"copy-item": true, "cpi": true, "copy": true, "xcopy": true, "robocopy": true, "more": true,
+	"get-item": true, "gi": true, "certutil": true,
+}
+
 var secretReaders = map[string]bool{
 	"cat": true, "less": true, "more": true, "head": true, "tail": true, "grep": true,
 	"sed": true, "awk": true, "cp": true, "base64": true, "xxd": true, "strings": true, "bat": true,
@@ -260,21 +309,59 @@ func (fs *floorSeg) secretRules(words []wordPath) (FloorHit, bool) {
 				return floorHit("no-secrets")
 			}
 		}
+	case "cmdkey", "get-credential", "vaultcmd", "get-childitem", "gci", "ls", "dir", "get-item", "gi":
+		if fs.winSecretCmd(name, args) {
+			return floorHit("no-secrets")
+		}
+		if fs.pl.windows && winSecretReaders[name] {
+			return fs.secretWords(words)
+		}
 	case "security":
 		if w := nonFlags(args); len(w) > 0 && (strings.HasPrefix(w[0], "find-") || w[0] == "dump-keychain") {
 			return floorHit("no-secrets")
 		}
 	default:
-		if !secretReaders[name] {
+		if !secretReaders[name] && !(fs.pl.windows && winSecretReaders[name]) {
 			return FloorHit{}, false
 		}
-		for _, w := range words {
-			if fs.pl.secretName(w.raw) || (w.ok && fs.pl.secretName(w.resolved)) {
-				return floorHit("no-secrets")
-			}
+		return fs.secretWords(words)
+	}
+	return FloorHit{}, false
+}
+
+// secretWords hits when any word names a credential file.
+func (fs *floorSeg) secretWords(words []wordPath) (FloorHit, bool) {
+	for _, w := range words {
+		if fs.pl.secretName(w.raw) || (w.ok && fs.pl.secretName(w.resolved)) {
+			return floorHit("no-secrets")
 		}
 	}
 	return FloorHit{}, false
+}
+
+// winSecretCmd is a Windows command that exposes credentials or the
+// environment: cmdkey /list, Get-Credential, vaultcmd and the env: drive.
+func (fs *floorSeg) winSecretCmd(name string, args []string) bool {
+	if !fs.pl.windows {
+		return false
+	}
+	switch name {
+	case "cmdkey":
+		for _, a := range args {
+			if strings.HasPrefix(strings.ToLower(a), "/l") {
+				return true
+			}
+		}
+	case "get-credential", "vaultcmd":
+		return true
+	case "get-childitem", "gci", "ls", "dir", "get-item", "gi":
+		for _, a := range args {
+			if strings.HasPrefix(strings.ToLower(a), "env:") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // mutators change or remove what their targets name; reads and the source of
@@ -286,6 +373,23 @@ var mutators = map[string]bool{
 	"rsync": true, "sed": true, "perl": true, "curl": true, "wget": true, "tar": true, "unzip": true,
 }
 
+// winMutators are the PowerShell and cmd commands that change or remove what
+// their targets name, on top of the POSIX names (PowerShell aliases them).
+var winMutators = map[string]bool{
+	"remove-item": true, "ri": true, "del": true, "erase": true, "rd": true, "rmdir": true,
+	"set-content": true, "add-content": true, "out-file": true, "new-item": true, "ni": true,
+	"copy-item": true, "cpi": true, "move-item": true, "mi": true, "rename-item": true, "rni": true,
+	"clear-content": true, "copy": true, "xcopy": true, "move": true, "robocopy": true, "ren": true,
+	"rename": true, "mklink": true, "attrib": true, "icacls": true, "takeown": true, "cacls": true,
+	"tee-object": true, "set-acl": true,
+}
+
+// winCopyMove are the Windows copy/move commands judged by their destination.
+var winCopyMove = map[string]bool{
+	"copy-item": true, "cpi": true, "copy": true, "xcopy": true, "move-item": true, "mi": true,
+	"move": true, "robocopy": true, "mklink": true,
+}
+
 func (fs *floorSeg) destructiveRules(words []wordPath) (FloorHit, bool) {
 	if len(fs.argv) == 0 {
 		return fs.redirectRules()
@@ -294,7 +398,7 @@ func (fs *floorSeg) destructiveRules(words []wordPath) (FloorHit, bool) {
 	if name == "sudo" || name == "doas" {
 		return floorHit("no-destructive-outside")
 	}
-	if mutators[name] {
+	if mutators[name] || (fs.pl.windows && winMutators[name]) {
 		for _, w := range fs.destinations(name, words) {
 			if !w.ok || outsideWorktree(fs.req, w.resolved) {
 				if !w.ok && fs.pl.dynamicWord(w.raw) && !strings.HasPrefix(w.raw, "$HOME") && !strings.HasPrefix(w.raw, "${HOME}") {
@@ -314,9 +418,12 @@ func (fs *floorSeg) destructiveRules(words []wordPath) (FloorHit, bool) {
 func (fs *floorSeg) destinations(name string, words []wordPath) []wordPath {
 	var plain []wordPath
 	for _, w := range words {
-		if !strings.HasPrefix(w.raw, "-") {
+		if !strings.HasPrefix(w.raw, "-") && !fs.cmdSwitch(w.raw) {
 			plain = append(plain, w)
 		}
+	}
+	if fs.pl.windows && winCopyMove[name] {
+		return fs.winCopyDest(plain)
 	}
 	switch name {
 	case "cp", "install", "ln":
@@ -356,6 +463,22 @@ func (fs *floorSeg) destinations(name string, words []wordPath) []wordPath {
 		return out
 	}
 	return plain
+}
+
+// winCopyDest is the destination of a Windows copy/move: the word after
+// -Destination (or -Dest/-Dst), else the last plain word.
+func (fs *floorSeg) winCopyDest(plain []wordPath) []wordPath {
+	for i, a := range fs.argv {
+		l := strings.ToLower(a)
+		if (strings.HasPrefix(l, "-destination") || l == "-dest" || l == "-dst") && i+1 < len(fs.argv) {
+			r, ok := resolveFloor(fs.req, fs.argv[i+1], fs.cwd)
+			return []wordPath{{raw: fs.argv[i+1], resolved: r, ok: ok}}
+		}
+	}
+	if len(plain) > 0 {
+		return plain[len(plain)-1:]
+	}
+	return nil
 }
 
 // inPlaceTargets are the files of `sed -i` / `perl -i`: every plain word
