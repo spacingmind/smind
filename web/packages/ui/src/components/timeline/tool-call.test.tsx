@@ -118,6 +118,31 @@ describe("intent card bodies", () => {
 });
 
 describe("tool call lifecycle", () => {
+  it("expanded card is bordered with a status icon", () => {
+    render(<ToolCall item={call({ toolName: "Bash", input: { command: "ls" }, result: "ok" })} />);
+    const root = screen.getByTestId("timeline-tool-call");
+    // Collapsed: a plain one-line row, no border of its own.
+    expect(root).not.toHaveClass("border");
+
+    expand();
+
+    // Expanded: the frame grows a border, and the header's status signal
+    // is the success glyph rather than a dot.
+    expect(root).toHaveClass("border", "border-border", "rounded-lg");
+    expect(root.querySelector("svg.text-success")).not.toBeNull();
+  });
+
+  it("failed call shows the failure icon", () => {
+    const { container } = render(
+      <ToolCall item={call({ toolName: "Bash", input: { command: "ls" }, result: "boom", status: "failure" })} />,
+    );
+    expect(screen.getByTestId("timeline-tool-call")).toHaveAttribute("data-status", "failure");
+    // Failure is the one status worth reading, so its text stays visible.
+    expect(screen.getByTestId("tool-call-status")).toHaveTextContent("failure");
+    expect(screen.getByTestId("tool-call-status")).not.toHaveClass("sr-only");
+    expect(container.querySelector(".text-destructive")).not.toBeNull();
+  });
+
   it("updates the same card in place across running -> success and running -> failure", () => {
     const { rerender } = render(
       <ul>

@@ -2,6 +2,7 @@ import { memo } from "react";
 import { Icons } from "@/lib/icons";
 
 import { permissionResolutionLabel } from "@/components/timeline/permission-reason";
+import { PlanCard } from "@/components/timeline/plan-card";
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
 import { ToolCall } from "@/components/timeline/tool-call";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -39,7 +40,7 @@ export const TimelineRow = memo(function TimelineRow({
         <li data-testid="timeline-user" data-item-kind="user" className="flex justify-end">
           <div
             data-chat-find-text="true"
-            className="max-w-[85%] rounded-2xl rounded-tr-sm bg-surface px-4 py-3 text-ui-base break-words whitespace-pre-wrap"
+            className="max-w-[85%] rounded-lg bg-secondary px-4 py-3 text-ui-base break-words whitespace-pre-wrap"
           >
             {item.text}
           </div>
@@ -87,6 +88,13 @@ export const TimelineRow = memo(function TimelineRow({
         </li>
       );
 
+    case "plan":
+      return (
+        <li data-testid="timeline-plan-row" data-item-kind="plan">
+          <PlanCard items={item.entries} />
+        </li>
+      );
+
     default:
       // An event type this build has never heard of. The daemon's enum is
       // append-only (ADR 0008), so this is a supported state: say what
@@ -105,7 +113,7 @@ export const TimelineRow = memo(function TimelineRow({
               <summary className="-mx-2 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted select-none hover:bg-hover [&::-webkit-details-marker]:hidden">
                 <Icons.chevronRight className="size-3 shrink-0 transition-transform group-open/details:rotate-90" />
                 <Icons.question className="size-3 shrink-0" />
-                Unrecognised event: {item.rawKind}
+                Event: {item.rawKind}
               </summary>
               <pre className="mt-1 ml-7 overflow-x-auto rounded-lg bg-surface px-2.5 py-1.5 text-ui-sm whitespace-pre-wrap text-foreground-muted">
                 {JSON.stringify(item.rawPayload, null, 2)}
@@ -114,7 +122,7 @@ export const TimelineRow = memo(function TimelineRow({
           ) : (
             <p className="flex items-center gap-2 py-1 text-ui-sm text-foreground-muted">
               <Icons.question className="size-3 shrink-0" />
-              Unrecognised event: {item.eventType}
+              Event: {item.eventType}
             </p>
           )}
         </li>

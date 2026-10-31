@@ -76,7 +76,7 @@ export function ToolCallDetail({ item, intent }: { item: TimelineToolCallItem; i
     const diff = inlineDiff(input);
     if (diff.length > 0) {
       return (
-        <div data-testid="tool-detail-diff" className="overflow-x-auto rounded-lg bg-surface p-2 font-mono text-ui-sm font-medium">
+        <div data-testid="tool-detail-diff" className="overflow-x-auto rounded-md bg-surface p-2 font-mono text-ui-sm font-medium">
           {diff.map((line, index) => (
             <div
               key={index}
@@ -132,14 +132,14 @@ export function ToolCallDetail({ item, intent }: { item: TimelineToolCallItem; i
   return <GenericBody item={item} />;
 }
 
-/** The command line of a terminal call, styled to match the terminal pane's own chrome (`lib/terminal-theme.ts`) rather than the generic embedded-well look every other payload uses. */
+/** The command line of a terminal call, in the same embedded well (`rounded-md bg-surface`) every other payload body uses. */
 function TerminalCommand({ body }: { body: string }) {
   return (
     <div className="mt-1 first:mt-0">
       <p className="text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">Command</p>
       <pre
         data-testid="tool-detail-command"
-        className="mt-0.5 overflow-x-auto rounded-lg bg-background p-2 font-mono text-foreground whitespace-pre-wrap"
+        className="mt-0.5 overflow-x-auto rounded-md bg-surface p-2 font-mono text-foreground whitespace-pre-wrap"
       >
         {body}
       </pre>
@@ -178,7 +178,7 @@ function TerminalOutput({ output, failed }: { output: string; failed: boolean })
         ref={preRef}
         data-testid="tool-detail-output"
         className={cn(
-          "mt-0.5 overflow-auto rounded-lg bg-background p-2 font-mono text-foreground whitespace-pre-wrap",
+          "mt-0.5 overflow-auto rounded-md bg-surface p-2 font-mono text-foreground whitespace-pre-wrap",
           failed ? "max-h-48" : "max-h-64",
         )}
       >

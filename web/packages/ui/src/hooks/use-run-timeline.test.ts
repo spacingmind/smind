@@ -1,10 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { useRunTimeline } from "@/hooks/use-run-timeline";
+import { useRunTimeline, buildTimeline } from "@/hooks/use-run-timeline";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import type { RunSummary } from "@/lib/types";
+import type { RunLogEvent, RunSummary } from "@/lib/types";
 
 /** Flushes pending microtasks, wrapped in `act` so React commits before assertions. */
 async function flush(): Promise<void> {
@@ -272,6 +272,59 @@ describe("useRunTimeline", () => {
 
     expect(result.current.runs?.map((r) => r.id)).toEqual(["run-e2"]);
     expect(client.calls.filter((c) => c.method === "run.attach").map((c) => c.params)).toEqual([{ runId: "run-e2" }]);
+  });
+});
+
+describe("buildTimeline plan items", () => {
+  const plan = (entries: unknown) => ({ type: "raw", kind: "plan", payload: { sessionUpdate: "plan", entries } }) as RunLogEvent;
+
+  it("plan raw event becomes a plan item", () => {
+    const items = buildTimeline([plan([{ content: "Read the code", status: "in_progress", priority: "high" }, { content: "Fix it" }])]);
+    expect(items).toEqual([
+      {
+        kind: "plan",
+        id: "plan-0",
+        entries: [
+          { content: "Read the code", status: "in_progress", priority: "high" },
+          { content: "Fix it", status: "pending", priority: "medium" },
+        ],
+      },
+    ]);
+  });
+
+  it("a later plan update replaces the plan in place", () => {
+    const v1 = [{ content: "Explore", status: "completed", priority: "high" }];
+    const v2 = [
+      { content: "Explore", status: "completed", priority: "high" },
+      { content: "Write tests", status: "in_progress", priority: "low" },
+    ];
+    const items = buildTimeline([
+      { type: "chunk", text: "on it" } as RunLogEvent,
+      plan(v1),
+      { type: "tool_call", toolCallId: "t1", toolName: "Bash", title: "ls", status: "success" } as RunLogEvent,
+      plan(v2),
+    ]);
+
+    expect(items.filter((i) => i.kind === "plan")).toHaveLength(1);
+    expect(items[1]).toEqual({ kind: "plan", id: "plan-1", entries: v2 });
+  });
+
+  it("invalid plan entries are dropped", () => {
+    const items = buildTimeline([plan([{ content: "", status: "pending", priority: "high" }, { content: 7 }, "nope", { content: "Only this one" }])]);
+    expect(items).toEqual([
+      { kind: "plan", id: "plan-0", entries: [{ content: "Only this one", status: "pending", priority: "medium" }] },
+    ]);
+  });
+
+  it("plan with no valid entries falls back to unknown", () => {
+    const items = buildTimeline([plan([]), plan([{ content: "" }]), { type: "raw", kind: "plan", payload: { sessionUpdate: "plan" } } as RunLogEvent]);
+    expect(items.map((i) => i.kind)).toEqual(["unknown", "unknown", "unknown"]);
+    expect(items[0]).toMatchObject({ eventType: "raw", rawKind: "plan", rawPayload: { sessionUpdate: "plan", entries: [] } });
+  });
+
+  it("other raw kinds stay unknown", () => {
+    const items = buildTimeline([{ type: "raw", kind: "some_future_kind", payload: { a: 1 } } as RunLogEvent]);
+    expect(items).toEqual([{ kind: "unknown", id: "unknown-0", eventType: "raw", rawKind: "some_future_kind", rawPayload: { a: 1 } }]);
   });
 });
 

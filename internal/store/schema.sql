@@ -700,3 +700,95 @@ CREATE TABLE IF NOT EXISTS permission_policy_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_permission_policy_audit_task ON permission_policy_audit(task_id, id);
 CREATE INDEX IF NOT EXISTS idx_permission_policy_audit_created_at ON permission_policy_audit(created_at);
+
+-- fleet: ADR-0048 F1a, connected hosts. A host is one remote smind,
+-- identified by its public key; a link is one direction of the pairing
+-- (outbound = we dial it, inbound = it dials us) with its grant and
+-- transport config as JSON. Additive.
+CREATE TABLE IF NOT EXISTS fleet_hosts (
+    host_id TEXT PRIMARY KEY,
+    alias TEXT NOT NULL UNIQUE,
+    pub BLOB NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fleet_links (
+    host_id TEXT NOT NULL REFERENCES fleet_hosts(host_id) ON DELETE CASCADE,
+    direction TEXT NOT NULL CHECK (direction IN ('outbound','inbound')),
+    enabled INTEGER NOT NULL DEFAULT 0,
+    grant_json TEXT NOT NULL DEFAULT '',
+    transport_json TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, direction)
+);
+
+-- fleet_audit: one row per fleet exchange (ADR-0048 F1a). Append-only: no
+-- update path; the only delete is the 30-day retention sweep. Additive.
+CREATE TABLE IF NOT EXISTS fleet_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TIMESTAMP NOT NULL,
+    direction TEXT NOT NULL,              -- 'out' | 'in'
+    host_id TEXT NOT NULL,
+    trace TEXT NOT NULL DEFAULT '',
+    req_id TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT ''      -- redacted, <= 512 runes
+);
+CREATE INDEX IF NOT EXISTS idx_fleet_audit_ts ON fleet_audit(ts);
+CREATE INDEX IF NOT EXISTS idx_fleet_audit_host ON fleet_audit(host_id, id);
+
+-- fleet_watches: a local subscription to a remote task's runs (ADR-0048
+-- F1a). No foreign key to fleet_hosts on purpose: a watch must survive
+-- host removal so it can still deliver "host unavailable". Additive.
+CREATE TABLE IF NOT EXISTS fleet_watches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_id TEXT NOT NULL,
+    remote_task_id TEXT NOT NULL,
+    remote_run_id TEXT NOT NULL DEFAULT '',
+    local_task_id INTEGER NOT NULL DEFAULT 0,
+    chat_id INTEGER NOT NULL DEFAULT 0,
+    cursor TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'open',   -- 'open' | 'closed'
+    failures INTEGER NOT NULL DEFAULT 0,
+    notify INTEGER NOT NULL DEFAULT 1,
+    closed_reason TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fleet_watches_run ON fleet_watches(host_id, remote_task_id, remote_run_id);
+
+-- fleet_idem: idempotent inbound request handling keyed by (host_id,
+-- idem_key); the stored response is replayed instead of re-executing.
+-- Additive.
+CREATE TABLE IF NOT EXISTS fleet_idem (
+    host_id TEXT NOT NULL,
+    idem_key TEXT NOT NULL,
+    method TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    response TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, idem_key)
+);
+
+-- fleet_remote_tasks: the local mirror of a remote host's task. cost_usd
+-- is NULL (unknown), never an estimate. Additive.
+CREATE TABLE IF NOT EXISTS fleet_remote_tasks (
+    host_id TEXT NOT NULL,
+    remote_task_id TEXT NOT NULL,
+    local_task_id INTEGER NOT NULL DEFAULT 0,
+    title TEXT NOT NULL DEFAULT '',
+    branch TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT '',
+    cost_usd REAL,
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (host_id, remote_task_id)
+);

@@ -21,6 +21,18 @@ describe("groupTimeline unknown rows", () => {
   });
 });
 
+describe("groupTimeline plan rows", () => {
+  it("overview keeps plan items", () => {
+    const items = buildTimeline([
+      { type: "tool_call", toolCallId: "t1", toolName: "Bash", title: "a", status: "success" } as RunLogEvent,
+      { type: "tool_call", toolCallId: "t2", toolName: "Bash", title: "b", status: "success" } as RunLogEvent,
+      { type: "raw", kind: "plan", payload: { entries: [{ content: "Ship it", status: "in_progress", priority: "high" }] } } as RunLogEvent,
+    ]);
+    // A plan breaks a tool-call run like any non-tool item, and Overview keeps it.
+    expect(groupTimeline(items, "overview").map((g) => (g.kind === "item" ? g.item.kind : g.kind))).toEqual(["tool-group", "plan"]);
+  });
+});
+
 describe("detailLevelChangesView", () => {
   const tool = (id: string) => ({ type: "tool_call", toolCallId: id, toolName: "Bash", title: id, status: "success" }) as RunLogEvent;
   const run = (events: RunLogEvent[]) => ({ items: buildTimeline(events) });

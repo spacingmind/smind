@@ -20,25 +20,66 @@ function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry
   };
 }
 
-describe("TimelineRow's unrecognised-event fallback", () => {
+describe("TimelineRow's unknown-event fallback", () => {
   it("shows the ACP kind, not the generic 'raw' wire type, for a raw event (ADR 0010)", () => {
-    render(<RunTimeline run={run([{ type: "raw", kind: "plan", payload: { sessionUpdate: "plan" } } as RunLogEvent])} />);
+    render(
+      <RunTimeline
+        run={run([{ type: "raw", kind: "some_future_kind", payload: { sessionUpdate: "some_future_kind" } } as RunLogEvent])}
+      />,
+    );
 
-    expect(screen.getByText("Unrecognised event: plan")).toBeInTheDocument();
-    expect(screen.queryByText("Unrecognised event: raw")).not.toBeInTheDocument();
+    expect(screen.getByText("Event: some_future_kind")).toBeInTheDocument();
+    expect(screen.queryByText("Event: raw")).not.toBeInTheDocument();
   });
 
   it("reveals the raw payload on expand", () => {
-    render(<RunTimeline run={run([{ type: "raw", kind: "plan", payload: { sessionUpdate: "plan" } } as RunLogEvent])} />);
+    render(
+      <RunTimeline
+        run={run([{ type: "raw", kind: "some_future_kind", payload: { sessionUpdate: "some_future_kind" } } as RunLogEvent])}
+      />,
+    );
 
-    fireEvent.click(screen.getByText("Unrecognised event: plan"));
-    expect(screen.getByText(/"sessionUpdate": "plan"/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Event: some_future_kind"));
+    expect(screen.getByText(/"sessionUpdate": "some_future_kind"/)).toBeInTheDocument();
   });
 
   it("falls back to the wire type when there is no ACP kind to show", () => {
     render(<RunTimeline run={run([{ type: "todo_list", text: "future event kind" } as RunLogEvent])} />);
 
-    expect(screen.getByText("Unrecognised event: todo_list")).toBeInTheDocument();
+    expect(screen.getByText("Event: todo_list")).toBeInTheDocument();
+  });
+
+  it("plan item renders a plan card", () => {
+    render(
+      <RunTimeline
+        run={run([
+          {
+            type: "raw",
+            kind: "plan",
+            payload: {
+              sessionUpdate: "plan",
+              entries: [
+                { content: "Read the code", status: "completed", priority: "high" },
+                { content: "Ship it", status: "pending", priority: "low" },
+              ],
+            },
+          } as RunLogEvent,
+        ])}
+      />,
+    );
+
+    expect(screen.getByTestId("timeline-plan")).toBeInTheDocument();
+    expect(screen.getByTestId("plan-progress")).toHaveTextContent("1 of 2 done");
+    expect(screen.queryByText("Event: plan")).not.toBeInTheDocument();
+  });
+
+  it("unknown raw kind renders a neutral row without Unrecognised", () => {
+    render(
+      <RunTimeline run={run([{ type: "raw", kind: "some_future_kind", payload: { a: 1 } } as RunLogEvent])} />,
+    );
+
+    expect(screen.getByTestId("timeline-unknown")).toBeInTheDocument();
+    expect(screen.queryByText(/Unrecognised/)).not.toBeInTheDocument();
   });
 });
 
