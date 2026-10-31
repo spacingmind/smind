@@ -5,10 +5,10 @@ base: origin/develop
 planRef: docs/plans/active/fleet-hosts.md
 acs:
   - id: AC-23
-    text: "task.tree shows remote children (from fleet_remote_tasks) under their local parent with remote=true, host alias, hostId, globalId and mirrored state; usage and live-count rollups include the remote reported cost and state (nil cost stays nil, never estimated); the tree budget at admission and in task.tree counts remote reported spend; deleting every mirror loses nothing local; bulk actions (archiveFinished, stopTree) never see a mirror."
+    text: "task.tree shows remote children under their local parent with remote, host alias, hostId, globalId and mirrored state; usage and live-count rollups include remote reported cost and state (nil stays nil); the tree budget counts remote spend; deleting every mirror loses nothing local; archiveFinished and stopTree never see a mirror."
     covers: { tests: [TestTaskTreeShowsRemoteChildrenAndRollups, TestTaskTreeRemoteNilCostStaysNil, TestTreeBudgetCountsRemoteSpend, TestMirrorRowsAreCacheOnly, TestTaskTreeHandlerRemoteOnlyWhenFleetOn] }
   - id: AC-24
-    text: "Exactly one owner per task: a mirror row is updated only from the owner host's own status answer (host id from the row, never from the response); ids are alias:id for humans and {hostId,id} stored; an alias rename changes no stored wire id; no local method accepts a mirror."
+    text: "Exactly one owner per task: a mirror row is updated only from the owner host's own answer (host id from the row, never the response); ids are alias:id for humans and {hostId,id} stored; an alias rename changes no stored wire id; no local method accepts a mirror."
     covers: { tests: [TestOwnerHostIsSingle, TestAliasRenameKeepsWireIds, TestRefresherUpdatesOnlyOwnerRowOnSuccess, TestRefresherErrorLeavesRowUntouched] }
   - id: AC-25
     text: "Web shows a host chip on remote nodes in the tree, inbox and task header; mobile shows the chip; light and dark, 1280 and 390, transition frames of the tree expanding with a remote child reviewed."
@@ -24,6 +24,8 @@ tests:
   - { name: TestRefresherUpdatesOnlyOwnerRowOnSuccess, run: "go test ./internal/fleet/mirror -run '^TestRefresherUpdatesOnlyOwnerRowOnSuccess$' -count=1", timeoutSec: 300 }
   - { name: TestRefresherErrorLeavesRowUntouched, run: "go test ./internal/fleet/mirror -run '^TestRefresherErrorLeavesRowUntouched$' -count=1", timeoutSec: 300 }
   - { name: TestTaskLineageRemoteNodeShowsHostChip, run: "cd web && bun run --cwd packages/ui vitest run src/components/task-lineage.test.tsx -t TestTaskLineageRemoteNodeShowsHostChip", timeoutSec: 600 }
+  - { name: TestInboxRowShowsHostChip, run: "cd web && bun run --cwd packages/ui vitest run src/components/inbox -t TestInboxRowShowsHostChip", timeoutSec: 600 }
+  - { name: TestRemoteTaskHeaderReadOnlyWithHostChip, run: "cd web && bun run --cwd packages/ui vitest run src/components/app-header-task.test.tsx -t TestRemoteTaskHeaderReadOnlyWithHostChip", timeoutSec: 600 }
 mutations:
   - { id: M1, file: internal/tasktree/tree.go, change: "do not add remote cost to the ancestors' subtree usage", expectFail: [TestTaskTreeShowsRemoteChildrenAndRollups] }
   - { id: M2, file: internal/store/task_budget.go, change: "drop the remote mirror term from TreeKnownCost", expectFail: [TestTreeBudgetCountsRemoteSpend] }
