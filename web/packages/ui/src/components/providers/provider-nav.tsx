@@ -90,7 +90,7 @@ export function ProviderNav(props: {
                   </span>
                 ) : null}
                 {item.unverified ? (
-                  <span className="text-ui-xs text-warning" data-testid={`provider-nav-unverified-${item.id}`}>
+                  <span className="text-ui-xs text-warning-text" data-testid={`provider-nav-unverified-${item.id}`}>
                     unverified
                   </span>
                 ) : null}

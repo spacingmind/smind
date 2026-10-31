@@ -8,8 +8,8 @@ export type StatusBadgeStatus = StatusDotStatus;
 const STATUS_BADGE_CLASSES: Record<StatusBadgeStatus, string> = {
   success: "border-success/30 bg-success/10 text-success",
   danger: "border-destructive/30 bg-destructive/10 text-destructive",
-  warning: "border-warning/30 bg-warning/10 text-warning",
-  running: "border-warning/30 bg-warning/10 text-warning",
+  warning: "border-warning/30 bg-warning/10 text-warning-text",
+  running: "border-warning/30 bg-warning/10 text-warning-text",
   neutral: "border-border bg-muted text-muted-foreground",
 };
 

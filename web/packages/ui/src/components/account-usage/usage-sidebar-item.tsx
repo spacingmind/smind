@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 const TEXT_TONE: Record<UsageTone, string> = {
   ok: "text-foreground",
   default: "text-foreground",
-  warning: "text-warning",
+  warning: "text-warning-text",
   danger: "text-destructive",
 };
 

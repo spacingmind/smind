@@ -566,9 +566,9 @@ describe("container rows (S5)", () => {
     expect(within(taskItem(ROOT.ID)).getByTestId("task-title").className).toContain("opacity-100");
   });
 
-  it("the relative time is the quietest element on the row", async () => {
+  it("the relative time uses the AA muted text colour", async () => {
     await mountSidebar([ROOT]);
-    expect(within(taskItem(ROOT.ID)).getByTestId("task-row-time").className).toContain("text-foreground-subtlest");
+    expect(within(taskItem(ROOT.ID)).getByTestId("task-row-time").className).toContain("text-muted-foreground");
   });
 
   it("workspace, space, Pinned and status-group headers all use the same chevron", async () => {

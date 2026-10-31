@@ -224,6 +224,7 @@
     --color-idle-task-surface: var(--idle-task-surface);
     --color-warning-surface: var(--warning-surface);
     --color-warning-surface-foreground: var(--warning-surface-foreground);
+    --color-warning-text: var(--warning-text);
     --color-destructive-surface: var(--destructive-surface);
     --color-destructive-surface-foreground: var(--destructive-surface-foreground);
 
@@ -305,7 +306,7 @@
     --secondary: #e6e6e6;
     --secondary-foreground: oklch(0.205 0 0);
     --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
+    --muted-foreground: oklch(0.5 0 0);
     --accent: #ebf4ff;
     --accent-foreground: oklch(0.205 0 0);
     --destructive: #e03131;
@@ -676,6 +677,7 @@
     --idle-task-surface: #f5f3ff;
     --warning-surface: color-mix(in srgb, var(--warning) 12%, transparent);
     --warning-surface-foreground: #914e00;
+    --warning-text: #a84a00;
     --destructive-surface: color-mix(in srgb, var(--destructive) 10%, transparent);
     --destructive-surface-foreground: #b42020;
 }
@@ -731,6 +733,7 @@
     --idle-task-surface: #160d38;
     --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
     --warning-surface-foreground: #ffa159;
+    --warning-text: var(--warning);
     --destructive-surface: color-mix(in srgb, var(--destructive) 16%, transparent);
     --destructive-surface-foreground: #ff8585;
 }

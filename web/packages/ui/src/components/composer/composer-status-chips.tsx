@@ -113,7 +113,7 @@ export function ComposerStatusChips({
   return (
     <div data-testid="composer-status-chips" className="flex flex-wrap items-center gap-2">
       {running && (
-        <span role="status" data-testid="composer-working-chip" data-waiting={waiting || undefined} className={`${CHIP_CLASS}${waiting ? " text-warning" : ""}`}>
+        <span role="status" data-testid="composer-working-chip" data-waiting={waiting || undefined} className={`${CHIP_CLASS}${waiting ? " text-warning-text" : ""}`}>
           {/* Static while waiting: nothing is progressing, so nothing pulses. */}
           <span aria-hidden className={`size-2 rounded-full ${waiting ? "bg-warning" : "animate-pulse bg-primary"}`} />
           {waiting ? "Waiting for you" : "Working"}

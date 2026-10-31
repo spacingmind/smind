@@ -79,7 +79,7 @@ export function AccountRow(props: {
   const informational = usage?.report?.status === "unavailable" && usage.report.problem?.kind === "no_quota";
   const rawDetail = badge.detail ?? status.reason;
   const detail = rawDetail && data.test && rawDetail === data.test.detail ? `Provider test: ${rawDetail}` : rawDetail;
-  const detailTone = badge.tone === "warning" ? "text-warning" : badge.tone === "danger" ? "text-destructive" : "";
+  const detailTone = badge.tone === "warning" ? "text-warning-text" : badge.tone === "danger" ? "text-destructive" : "";
 
   return (
     <li
