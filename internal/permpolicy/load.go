@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -109,7 +108,9 @@ type PathsMatch struct {
 // Load parses and validates a policy file. Every failure it returns is a
 // *LoadError naming the field; an invalid file is the caller's signal to
 // run floor + ask, never to fall back to some rule subset.
-func Load(data []byte) (*Policy, error) {
+func Load(data []byte) (*Policy, error) { return loadPolicy(data, hostPlatform()) }
+
+func loadPolicy(data []byte, pl *platform) (*Policy, error) {
 	if len(data) > MaxPolicyBytes {
 		return nil, le("policy", "oversize: %d bytes, the cap is %d", len(data), MaxPolicyBytes)
 	}
@@ -131,10 +132,10 @@ func Load(data []byte) (*Policy, error) {
 	if len(doc.Rules) > MaxRules {
 		return nil, le("rules", "has %d rules, the cap is %d", len(doc.Rules), MaxRules)
 	}
-	if err := validateRules(doc.Rules); err != nil {
+	if err := validateRules(doc.Rules, pl); err != nil {
 		return nil, err
 	}
-	if err := checkAllowsAgainstFloor(doc.Rules); err != nil {
+	if err := checkAllowsAgainstFloor(doc.Rules, pl); err != nil {
 		return nil, err
 	}
 	sum := sha256.Sum256(data)
@@ -147,21 +148,25 @@ func Load(data []byte) (*Policy, error) {
 // allow_only literals) or, for a file tool, with the paths it scopes to; the
 // probe request uses fixed fake roots so the check does not depend on the
 // machine the policy is loaded on.
-func checkAllowsAgainstFloor(rules []Rule) error {
+func checkAllowsAgainstFloor(rules []Rule, pl *platform) error {
+	wt, home, smindHome := "/wt", "/h", "/h/.smind"
+	if pl.windows {
+		wt, home, smindHome = `C:\wt`, `C:\h`, `C:\h\.smind`
+	}
 	for i, r := range rules {
 		if r.Action != ActionAllow {
 			continue
 		}
-		req := Request{Tool: r.Match.Tool, Worktree: "/wt", Cwd: "/wt", Home: "/h", SmindHome: "/h/.smind"}
+		req := Request{Tool: r.Match.Tool, Worktree: wt, Cwd: wt, Home: home, SmindHome: smindHome, plat: pl}
 		var hit FloorHit
 		var ok bool
 		if r.Match.Tool == "Bash" && r.Match.Command != nil {
-			req.Command = probeCommand(r.Match.Command)
-			hit, ok = CheckFloor(req, SplitCommand(req.Command))
+			req.Command = probeCommand(r.Match.Command, wt)
+			hit, ok = CheckFloor(req, splitCommand(req.Command, pl.windows))
 		} else if mutatingTools[r.Match.Tool] && r.Match.Paths != nil {
 			for _, w := range r.Match.Paths.Within {
 				if w == "{worktree}" {
-					w = "/wt"
+					w = wt
 				}
 				req.Paths = append(req.Paths, w)
 			}
@@ -176,10 +181,10 @@ func checkAllowsAgainstFloor(rules []Rule) error {
 
 // probeCommand is the most specific command line an allow's command match
 // can accept, with placeholders replaced by plausible values.
-func probeCommand(c *CommandMatch) string {
+func probeCommand(c *CommandMatch, worktree string) string {
 	words := []string{c.Argv0}
 	words = append(words, strings.Fields(c.Subcommand)...)
-	repl := strings.NewReplacer("{taskBranch}", "task-branch", "{worktree}", "/wt")
+	repl := strings.NewReplacer("{taskBranch}", "task-branch", "{worktree}", worktree)
 	for _, a := range c.Args.AllowOnly {
 		words = append(words, repl.Replace(a))
 	}
@@ -266,7 +271,7 @@ func printable(s string) bool {
 	return true
 }
 
-func validateRules(rules []Rule) error {
+func validateRules(rules []Rule, pl *platform) error {
 	ids := map[string]bool{}
 	for i, r := range rules {
 		p := fmt.Sprintf("rules[%d]", i)
@@ -345,13 +350,14 @@ func validateRules(rules []Rule) error {
 				if w == "{worktree}" {
 					continue
 				}
-				if !filepath.IsAbs(w) {
+				n, nerr := pl.normalize(w)
+				if nerr != nil || !pl.isAbs(n) {
 					return le(fmt.Sprintf("%s.match.paths.within[%d]", p, j), "%q must be {worktree} or an absolute path", w)
 				}
 				if strings.ContainsAny(w, "*?[") {
 					return le(fmt.Sprintf("%s.match.paths.within[%d]", p, j), "%q contains a wildcard", w)
 				}
-				for _, seg := range strings.Split(filepath.ToSlash(w), "/") {
+				for _, seg := range strings.Split(slashes(pl, w), "/") {
 					if seg == ".." {
 						return le(fmt.Sprintf("%s.match.paths.within[%d]", p, j), "%q must not contain ..", w)
 					}
@@ -396,4 +402,12 @@ func checkListCap(p string, list []string) error {
 		return le(p, "has %d entries, the cap is %d", len(list), maxListLen)
 	}
 	return nil
+}
+
+// slashes is w with the flavour's separators turned into '/', for the `..` check.
+func slashes(pl *platform, w string) string {
+	if pl.windows {
+		return strings.ReplaceAll(w, `\`, "/")
+	}
+	return w
 }

@@ -476,6 +476,7 @@ func CheckFloorPaths(req Request) (FloorHit, bool) {
 	if cwd == "" {
 		cwd = req.Worktree
 	}
+	pl := req.pl()
 	writes := false
 	switch req.Tool {
 	case "Edit", "Write", "MultiEdit", "NotebookEdit":
@@ -483,10 +484,13 @@ func CheckFloorPaths(req Request) (FloorHit, bool) {
 	}
 	for _, p := range req.Paths {
 		r, ok := resolveFloor(req, p, cwd)
-		if pl := req.pl(); pl.secretName(p) || (ok && pl.secretName(r)) {
+		if pl.secretName(p) || (ok && pl.secretName(r)) {
 			return floorHit("no-secrets")
 		}
 		if !ok {
+			if writes && pl.windows && !pl.dynamicWord(p) && !pl.isNullDevice(p) {
+				return floorHit("no-destructive-outside") // an unplaceable write destination is never judged against the cwd
+			}
 			continue // unresolvable: the engine asks
 		}
 		if inInstallState(req, r) {

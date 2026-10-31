@@ -2,7 +2,6 @@ package permpolicy
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -42,7 +41,7 @@ func Decide(req Request, pol *Policy) Decision {
 	var units []unit
 	var segs []Segment
 	if bash {
-		p := SplitCommand(req.Command)
+		p := splitCommand(req.Command, req.pl().windows)
 		d.Normalized = p.Normalized
 		segs = p.Segments
 		if h, ok := CheckFloor(req, p); ok {
@@ -71,7 +70,7 @@ func Decide(req Request, pol *Policy) Decision {
 		}
 		u := unit{}
 		for _, p := range req.Paths {
-			r, err := ResolvePath(p, cwd)
+			r, err := req.pl().resolve(p, cwd)
 			if err != nil {
 				d.Reasons = []string{"cannot resolve path " + p}
 				return d
@@ -121,13 +120,13 @@ func bashUnits(req Request, segs []Segment, cwd string, d *Decision) ([]unit, st
 	var all []string
 	for i := range segs {
 		fs := newFloorSeg(req, segs[i], cwd)
-		paths, err := SegmentPaths(segs[i], cwd)
+		paths, err := segmentPaths(req.pl(), segs[i], cwd)
 		if err != nil {
 			return nil, "cannot resolve path: " + err.Error()
 		}
 		rc := ""
 		if cwd != "" {
-			if r, err := ResolvePath(cwd, ""); err == nil {
+			if r, err := req.pl().resolve(cwd, ""); err == nil {
 				rc = r
 			}
 		}
@@ -344,6 +343,7 @@ func expandPlaceholders(s string, req Request) (string, bool) {
 // without a known worktree matches nothing, and a file tool that names no
 // path cannot be shown to stay inside.
 func withinScope(within []string, req Request, seg *Segment, segPaths []string, cwd string) bool {
+	pl := req.pl()
 	roots := make([]string, 0, len(within))
 	for _, w := range within {
 		if w == "{worktree}" {
@@ -352,16 +352,23 @@ func withinScope(within []string, req Request, seg *Segment, segPaths []string, 
 			}
 			w = req.Worktree
 		}
-		roots = append(roots, filepath.Clean(w))
+		if pl.windows {
+			n, err := pl.normalize(w)
+			if err != nil {
+				continue
+			}
+			w = n
+		}
+		roots = append(roots, pl.clean(w))
 	}
 	if seg == nil && len(segPaths) == 0 {
 		return false
 	}
-	if seg != nil && (cwd == "" || !Within(cwd, roots)) {
+	if seg != nil && (cwd == "" || !pl.within(cwd, roots)) {
 		return false
 	}
 	for _, p := range segPaths {
-		if !Within(p, roots) {
+		if !pl.within(p, roots) {
 			return false
 		}
 	}
