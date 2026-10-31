@@ -57,6 +57,22 @@ describe("FileExplorerPane", () => {
     expect(screen.getByTestId("file-row")).toHaveTextContent("README.md");
   });
 
+  it("lists folders first, then files case-insensitively, and hides .git", async () => {
+    const client = new FakeWsClient();
+    render(<FileExplorerPane client={client} task={TASK} />);
+
+    client.nth("file.list", 0).resolve([
+      { name: ".git", isDir: true, size: 0 },
+      { name: "README.md", isDir: false, size: 1 },
+      { name: "scenario", isDir: false, size: 1 },
+      { name: "src", isDir: true, size: 0 },
+    ] satisfies FileEntry[]);
+    await flush();
+
+    const rows = [...document.querySelectorAll('[data-testid="dir-row"], [data-testid="file-row"]')];
+    expect(rows.map((r) => r.textContent?.trim())).toEqual(["src", "README.md", "scenario"]);
+  });
+
   it("lazily expands a subdirectory, fetching file.list only on first expand", async () => {
     const client = new FakeWsClient();
     render(<FileExplorerPane client={client} task={TASK} />);

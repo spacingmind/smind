@@ -167,6 +167,44 @@ describe("TaskDetailPane", () => {
     }
   });
 
+  it("the Jump to latest pill sits in its own row after the log, not floating over it", async () => {
+    // jsdom has no layout: assert the structure (an in-flow slot that is a
+    // sibling after the scroll area) instead of measuring overlap.
+    const sizes: Record<string, number> = { scrollHeight: 3000, clientHeight: 600, clientWidth: 1200 };
+    for (const [key, value] of Object.entries(sizes)) {
+      Object.defineProperty(HTMLElement.prototype, key, { configurable: true, get: () => value });
+    }
+    try {
+      const client = new FakeWsClient();
+      render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+      client.nth("run.list", 0).resolve([doneRun()]);
+      await flush();
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", stopReason: "end_turn", events: [] });
+      await flush();
+
+      const log = screen.getByTestId("run-log-scroll");
+      Object.defineProperty(log, "scrollTop", { configurable: true, writable: true, value: 2400 });
+      fireEvent.scroll(log);
+      await flush();
+      expect(screen.queryByTestId("jump-to-latest-slot")).not.toBeInTheDocument();
+
+      log.scrollTop = 0;
+      fireEvent.scroll(log);
+      await flush();
+      const slot = screen.getByTestId("jump-to-latest-slot");
+      const pill = screen.getByTestId("jump-to-latest");
+      expect(slot).toContainElement(pill);
+      expect(log).not.toContainElement(slot);
+      expect(log.parentElement).not.toContainElement(slot);
+      expect(log.parentElement!.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(pill.className).not.toMatch(/\babsolute\b/);
+    } finally {
+      for (const key of Object.keys(sizes)) {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+      }
+    }
+  });
+
   it("the Jump to latest pill has an opaque surface, a border and a shadow", async () => {
     const sizes: Record<string, number> = { scrollHeight: 3000, clientHeight: 600, clientWidth: 1200 };
     for (const [key, value] of Object.entries(sizes)) {

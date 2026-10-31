@@ -4,7 +4,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Icons, type IconComponent } from "@/lib/icons";
 
 const ROW_CLASS =
-  "flex h-7 w-full items-center gap-2 rounded-lg px-2 text-left text-ui-base text-foreground hover:bg-hover focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none";
+  "flex h-7 w-full max-sm:min-h-9 items-center gap-2 rounded-lg px-2 text-left text-ui-base text-foreground hover:bg-hover focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none";
 
 function QuickActionRow({
   icon: Icon,

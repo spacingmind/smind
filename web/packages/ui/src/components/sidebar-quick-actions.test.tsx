@@ -19,6 +19,13 @@ describe("SidebarQuickActions", () => {
     expect(screen.getByRole("button", { name: "Automations" })).toBeInTheDocument();
   });
 
+  it("rows grow to a 36px hit area below sm (B-07; structural, jsdom has no layout)", () => {
+    renderQuickActions();
+    for (const id of ["sidebar-quick-new-task", "sidebar-quick-search", "sidebar-quick-automations"]) {
+      expect(screen.getByTestId(id).className).toContain("max-sm:min-h-9");
+    }
+  });
+
   it("Search shows the palette shortcut", () => {
     renderQuickActions({ searchShortcut: "⌘K" });
     expect(screen.getByText("⌘K")).toBeInTheDocument();

@@ -19,7 +19,7 @@ import { useLocalPathActions, type LocalPathActions } from "@/hooks/use-local-pa
 import { useTaskFileStatus } from "@/hooks/use-task-file-status";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
-import type { Task, TaskFile } from "@/lib/types";
+import type { FileEntry, Task, TaskFile } from "@/lib/types";
 
 /**
  * The tree half of the file explorer: a lazily expanding directory tree
@@ -37,6 +37,13 @@ import type { Task, TaskFile } from "@/lib/types";
  * decoration too, rolled up from its descendants, so a change several
  * levels down is visible without expanding to find it.
  */
+/** Folders first, then files, each case-insensitive alphabetical; `.git` is the worktree's internals, not user content. */
+function visibleEntries(entries: FileEntry[]): FileEntry[] {
+  return entries
+    .filter((entry) => entry.name !== ".git")
+    .sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
 export function FileExplorerPane({
   client,
   task,
@@ -181,7 +188,7 @@ function DirChildren({
 
   return (
     <>
-      {node.entries.map((entry) => {
+      {visibleEntries(node.entries).map((entry) => {
         const childPath = path ? `${path}/${entry.name}` : entry.name;
 
         if (!entry.isDir) {

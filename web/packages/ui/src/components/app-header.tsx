@@ -153,7 +153,7 @@ export function AppHeader({
         )}
         style={leftInset > 0 ? { paddingLeft: HEADER_BASE_PADDING_PX + leftInset } : undefined}
       >
-        {showSidebarToggle && <SidebarTrigger className={ICON_BUTTON} />}
+        {showSidebarToggle && <SidebarTrigger className={cn(ICON_BUTTON, "max-sm:min-h-9 max-sm:min-w-9")} />}
         {showUpdateBadge && onOpenUpdate && <UpdateBadge state={updateState} onOpen={onOpenUpdate} />}
         {task && <HeaderTask task={task} client={client} events={events} localPathActions={localPathActions} />}
         {/* Quiet while connected (sr-only keeps the live status for assistive tech); a pill only when something is wrong. */}
