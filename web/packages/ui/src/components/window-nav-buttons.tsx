@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import type { ActionId } from "@/keyboard/actions";
 import { useKeyboard } from "@/keyboard/keyboard-provider";
 import { formatChord } from "@/keyboard/shortcut-string";
 import { Icons } from "@/lib/icons";
@@ -24,10 +25,9 @@ export function WindowNavButtons({
   onForward: () => void;
 }) {
   const { bindings, isMac } = useKeyboard();
-  // `action` is a string until `nav.back`/`nav.forward` land in `ActionId`.
-  const chordFor = (action: string) =>
-    bindings.find((b) => (b.action as string) === action)?.effectiveCombo ?? null;
-  const labelFor = (label: string, action: string) => {
+  const chordFor = (action: ActionId) =>
+    bindings.find((b) => b.action === action)?.effectiveCombo ?? null;
+  const labelFor = (label: string, action: ActionId) => {
     const combo = chordFor(action);
     return combo === null ? label : `${label} (${formatChord(combo, isMac)})`;
   };
