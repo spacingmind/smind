@@ -104,3 +104,67 @@ func TestExamplePlugin_EndToEnd(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// TestExamples_HelloProcess_PanelValid installs the shipped example and reads
+// its panels the way a client does: both panels and the sidebar item are
+// listed at ui 1, the file view and the process-backed view both come back
+// validated, and a client that states no ui level is shown nothing.
+func TestExamples_HelloProcess_PanelValid(t *testing.T) {
+	examplePython(t)
+	e := newProcEnv(t)
+	src, err := filepath.Abs("../../plugin-examples/hello-process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.call("plugin.install", localRC(), map[string]any{"source": src})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := e.call("plugin.enable", localRC(), map[string]any{"id": "hello-process", "confirm": res.(plugins.Info).Consent.Fingerprint}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	e.waitRunning(t, "hello-process")
+
+	marshal := func(v any) string {
+		t.Helper()
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	got, err := e.call("plugin.panels", relayRC(), map[string]any{"ui": 1})
+	if err != nil {
+		t.Fatalf("plugin.panels: %v", err)
+	}
+	listed := marshal(got)
+	for _, want := range []string{`"plugin":"hello-process"`, `"id":"hello"`, `"id":"about"`, `"where":"task"`, `"where":"sidebar"`, `"opens":"about"`} {
+		if !strings.Contains(listed, want) {
+			t.Fatalf("plugin.panels lacks %s: %s", want, listed)
+		}
+	}
+
+	views := map[string]string{}
+	for _, panel := range []string{"about", "hello"} {
+		v, err := e.call("plugin.view", relayRC(), map[string]any{"pluginId": "hello-process", "panelId": panel, "ui": 1})
+		if err != nil {
+			t.Fatalf("plugin.view %s: %v", panel, err)
+		}
+		views[panel] = marshal(v)
+		if !strings.Contains(views[panel], `"view"`) || !strings.Contains(views[panel], `"type":"heading"`) {
+			t.Fatalf("plugin.view %s = %s", panel, views[panel])
+		}
+	}
+	if !strings.Contains(views["hello"], `"host":"example.com"`) {
+		t.Fatalf("the openUrl action carries no host: %s", views["hello"])
+	}
+
+	got, err = e.call("plugin.panels", relayRC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := marshal(got); b != `{"panels":[],"sidebar":[]}` {
+		t.Fatalf("plugin.panels without ui must list nothing: %s", b)
+	}
+}
