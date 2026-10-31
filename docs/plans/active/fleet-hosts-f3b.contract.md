@@ -5,10 +5,10 @@ base: origin/develop
 planRef: docs/plans/active/fleet-hosts.md
 acs:
   - id: AC-21
-    text: "Durable finish notification: create/send write the mirror and the fleet_watches row in one local commit; after a caller restart the watcher resumes from the row and a run that finished meanwhile is delivered exactly once as a child_event with host=<alias> and the remote text untrusted and <= 1 KiB; three consecutive failed observations (capped backoff, connecting not counted) deliver status unknown, never finished; a removed host delivers host unavailable at once; a definitely-unsent prompt creates no watch; a failed local write reports failure and a retry with the same idempotencyKey is safe."
+    text: "Durable finish notice: mirror and watch row in one commit; after a caller restart the watcher resumes and a run finished meanwhile is delivered exactly once, remote text untrusted <= 1 KiB; 3 failed observations = status unknown never finished (connecting not counted); removed host = host unavailable; unsent prompt = no watch; local write failure is retry-safe by idempotencyKey."
     covers: { tests: [TestFleetCallerRestartStillGetsFinishNotification, TestFleetWatchObservationBackoffAndConnectingNotCounted, TestFleetWatchThreeFailuresStatusUnknownNeverFinished, TestFleetWatchHostRemovedUnavailable, TestFleetWatchFinishDeliveredOnce, TestFleetWatchUnsentPromptNoWatch, TestFleetLocalWriteFailureReportsAndRetrySafe, TestEnqueueChildEventClosingWatchOnce] }
   - id: AC-22
-    text: "MCP task_new/task_send/task_stop/task_wait accept host and results carry host and globalId; a Peer seat and a remote-origin task get no fleet tools and a fleet call from them is refused locally with hop_limit."
+    text: "MCP task_new/task_send/task_stop/task_wait accept host; results carry host and globalId; a Peer seat and a remote-origin task get no fleet tools and a fleet call from them is refused locally with hop_limit."
     covers: { tests: [TestFleetPeerSeatGetsNoFleetTools, TestRemoteWriteRefusedForPeerSeatAndRemoteOrigin, TestMCPHostTaskNewRequiresProviderModelPrompt, TestMCPRemoteWriteTypedErrorsCodeFirst] }
   - id: AC-1
     text: "With fleet off, remote.write is not registered; the wsapi method map golden for fleet off is unchanged."
