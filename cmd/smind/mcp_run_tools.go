@@ -111,6 +111,7 @@ type taskStatusOutput struct {
 	ResetAt           string                `json:"resetAt,omitempty" jsonschema:"for rate_limited: when the quota resets, RFC 3339 UTC; absent when unknown"`
 	ResetInferred     bool                  `json:"resetInferred,omitempty" jsonschema:"true when resetAt was read in an assumed zone (approximate; show with ≈); absent for a stated reset"`
 	Action            *failure.Action       `json:"action,omitempty" jsonschema:"the concrete next step for a failed run: kind (sign_in, wait_until, switch_profile, pick_model, auto_retry, retry_now, continue), target and a one-line label; route on failureKind plus action.kind"`
+	FailureNote       string                `json:"failureNote,omitempty" jsonschema:"for a failed run with a typed failureKind: one line naming the class, the next step (action.label) and what NOT to do (for example do not retry or fall back for auth_expired); route on failureKind plus action.kind"`
 	BaseSHA           string                `json:"baseSha,omitempty" jsonschema:"full commit SHA of the run's worktree when it started; omitted when unknown"`
 	HeadSHA           string                `json:"headSha,omitempty" jsonschema:"full commit SHA of the run's worktree at its latest capture; omitted when unknown"`
 	Dirty             *bool                 `json:"dirty,omitempty" jsonschema:"whether the run's worktree had uncommitted changes at its latest capture; omitted when unknown"`
@@ -164,7 +165,7 @@ func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
 		FailureKind:   result.FailureKind,
 		Window:        result.Window,
 		ResetAt:       result.ResetAt,
-		ResetInferred: result.ResetInferred, Action: result.Action,
+		ResetInferred: result.ResetInferred, Action: result.Action, FailureNote: failureNote(result),
 		BaseSHA: result.BaseSHA,
 		HeadSHA: result.HeadSHA,
 		Dirty:   result.Dirty,
@@ -208,6 +209,7 @@ type taskLogsOutput struct {
 	ResetAt       string          `json:"resetAt,omitempty" jsonschema:"for rate_limited: when the quota resets, RFC 3339 UTC; absent when unknown"`
 	ResetInferred bool            `json:"resetInferred,omitempty" jsonschema:"true when resetAt was read in an assumed zone (approximate; show with ≈); absent for a stated reset"`
 	Action        *failure.Action `json:"action,omitempty" jsonschema:"the concrete next step for a failed run: kind (sign_in, wait_until, switch_profile, pick_model, auto_retry, retry_now, continue), target and a one-line label; route on failureKind plus action.kind"`
+	FailureNote   string          `json:"failureNote,omitempty" jsonschema:"for a failed run with a typed failureKind: one line naming the class, the next step (action.label) and what NOT to do (for example do not retry or fall back for auth_expired); route on failureKind plus action.kind"`
 	Events        []mcpRunEvent   `json:"events"`
 	// Host, NextCursor and HasMore are set for a host read only.
 	Host       string `json:"host,omitempty"`
@@ -234,7 +236,7 @@ func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, task
 		return nil, taskLogsOutput{
 			RunID: result.RunID, Status: result.Status,
 			StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Disposition: result.Disposition, Err: result.Err,
-			FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt, ResetInferred: result.ResetInferred, Action: result.Action, Events: toMCPRunEvents(result.Events),
+			FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt, ResetInferred: result.ResetInferred, Action: result.Action, FailureNote: failureNote(result), Events: toMCPRunEvents(result.Events),
 		}, nil
 	}
 }
@@ -364,6 +366,7 @@ type taskWaitOutput struct {
 	ResetAt           string                `json:"resetAt,omitempty" jsonschema:"for rate_limited: when the quota resets, RFC 3339 UTC; absent when unknown"`
 	ResetInferred     bool                  `json:"resetInferred,omitempty" jsonschema:"true when resetAt was read in an assumed zone (approximate; show with ≈); absent for a stated reset"`
 	Action            *failure.Action       `json:"action,omitempty" jsonschema:"the concrete next step for a failed run: kind (sign_in, wait_until, switch_profile, pick_model, auto_retry, retry_now, continue), target and a one-line label; route on failureKind plus action.kind"`
+	FailureNote       string                `json:"failureNote,omitempty" jsonschema:"for a failed run with a typed failureKind: one line naming the class, the next step (action.label) and what NOT to do (for example do not retry or fall back for auth_expired); route on failureKind plus action.kind"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 	TimedOut          bool                  `json:"timedOut"`
 	StopNote          string                `json:"stopNote,omitempty"`
@@ -396,7 +399,7 @@ type taskWaitOutput struct {
 // waiting); timedOut marks the deadline having passed with the run going.
 func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut bool) taskWaitOutput {
 	out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Disposition: result.Disposition, Err: result.Err,
-		FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt, ResetInferred: result.ResetInferred, Action: result.Action, FallbackProfileID: result.FallbackProfileID}
+		FailureKind: result.FailureKind, Window: result.Window, ResetAt: result.ResetAt, ResetInferred: result.ResetInferred, Action: result.Action, FailureNote: failureNote(result), FallbackProfileID: result.FallbackProfileID}
 	var fresh []pendingPermissionOut
 	for _, p := range pendingPermissionsFrom(result) {
 		if !ignore[p.RequestID] {
@@ -418,6 +421,8 @@ func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut 
 		}
 		if result.Disposition == "needs-continue" && result.Status == "error" {
 			out.Message = "Run " + result.RunID + " failed in a resumable way (" + result.FailureKind + "): the agent's session is stored. Send a follow-up prompt such as \"Continue from where you left off\" with task_send on the same task (and the run's chatId from run_list if it is not the default chat) to resume it."
+		} else if result.Status == "error" && failureNote(result) != "" {
+			out.Message = failureNote(result)
 		} else if result.Disposition == "needs-continue" {
 			out.Message = "Run " + result.RunID + " ended at a cap (" + result.StopReason + "): its status is done but the work is NOT finished. Send a follow-up prompt such as \"continue\" with task_send on the same task (and the run's chatId from run_list if it is not the default chat) to resume it; do not treat this as complete."
 		}

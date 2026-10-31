@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/validation"
@@ -21,6 +22,7 @@ type fx struct {
 	stall  map[int64]time.Time
 	pairs  []HostPair
 	issues []HostLinkIssue
+	failed []FailedRun
 	now    time.Time
 }
 
@@ -37,6 +39,7 @@ func newFx(t *testing.T) *fx {
 		Validations: func() ([]validation.View, error) { return f.views, nil },
 		Stalls:      func() map[int64]time.Time { return f.stall },
 		HostPairs:   func() []HostPair { return f.pairs },
+		FailedRuns:  func() []FailedRun { return f.failed },
 		HostLinkIssues: func() []HostLinkIssue {
 			return f.issues
 		},
@@ -342,5 +345,81 @@ func TestInboxFingerprint_ChangesWithVisibleState(t *testing.T) {
 	}
 	if d, _ := f.svc.Fingerprint(); d == "" {
 		t.Fatal("empty")
+	}
+}
+
+func failedRun(runID string, task int64, kind string, act *failure.Action) FailedRun {
+	return FailedRun{RunID: runID, TaskID: task, Kind: kind, Action: act, FinishedAt: time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)}
+}
+
+// TestDerive_RunFailedPerClass: each actionable failure class is an item with
+// its action label as the summary; cli_exited and a transient run whose retry
+// is queued are not.
+func TestDerive_RunFailedPerClass(t *testing.T) {
+	f := newFx(t)
+	f.failed = []FailedRun{
+		failedRun("r-auth", 1, failure.KindAuthExpired, &failure.Action{Kind: failure.ActionSignIn, Target: "settings:providers?provider=glm", Label: "Sign in again to glm"}),
+		failedRun("r-model", 2, failure.KindModelNotInPlan, &failure.Action{Kind: failure.ActionPickModel, Label: "Pick another model"}),
+		failedRun("r-plan", 3, failure.KindPlanWindowExhausted, &failure.Action{Kind: failure.ActionWaitUntil, Label: "Wait: 5h window resets 17:35"}),
+		failedRun("r-res", 4, failure.KindRateLimited, &failure.Action{Kind: failure.ActionRetryNow, Label: "Retry"}),
+		failedRun("r-t-spent", 5, failure.KindTransient429, &failure.Action{Kind: failure.ActionRetryNow, Label: "glm throttled briefly: retry"}),
+		failedRun("r-t-retrying", 6, failure.KindTransient429, &failure.Action{Kind: failure.ActionAutoRetry, Label: "Retrying automatically (1 of 2)"}),
+		failedRun("r-cli", 7, failure.KindCLIExited, &failure.Action{Kind: failure.ActionContinue, Label: "Continue the run"}),
+	}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Item{}
+	for _, it := range items {
+		if it.Kind == KindRunFailed {
+			got[it.Links.RunID] = it
+		}
+	}
+	if len(got) != 5 {
+		t.Fatalf("run_failed items = %v, want auth, model, plan, residual and spent-transient only", keysOf(items))
+	}
+	for run, att := range map[string]string{"r-auth": "high", "r-model": "high", "r-plan": "normal", "r-res": "normal", "r-t-spent": "normal"} {
+		it, ok := got[run]
+		if !ok || it.Attention != att || it.Key != "runfail:"+run || it.Links.TaskID == 0 || it.Summary == "" || it.Action == nil {
+			t.Fatalf("%s item = %+v (ok %v), want attention %s, key runfail:%s, a summary and an action", run, it, ok, att, run)
+		}
+	}
+	if got["r-auth"].Summary != "Sign in again to glm" || got["r-auth"].Action.Kind != failure.ActionSignIn {
+		t.Fatalf("auth item = %+v", got["r-auth"])
+	}
+	for _, skip := range []string{"r-t-retrying", "r-cli"} {
+		if _, ok := got[skip]; ok {
+			t.Fatalf("%s must not be an inbox item", skip)
+		}
+	}
+}
+
+// TestDerive_RunFailedResolvesOnLaterRun: the item is keyed by the failed run;
+// once the source reports another run (or none), the key is gone.
+func TestDerive_RunFailedResolvesOnLaterRun(t *testing.T) {
+	f := newFx(t)
+	f.failed = []FailedRun{failedRun("r1", 1, failure.KindAuthExpired, &failure.Action{Kind: failure.ActionSignIn, Label: "Sign in"})}
+	items, _ := f.svc.List(Filter{})
+	if keysOf(items) != "runfail:r1" {
+		t.Fatalf("keys = %q", keysOf(items))
+	}
+	f.failed = nil
+	items, _ = f.svc.List(Filter{})
+	if len(items) != 0 {
+		t.Fatalf("after a later run the item must vanish, got %q", keysOf(items))
+	}
+}
+
+// TestDerive_RunFailedKeyStable: the same failed run gives the same key and
+// created time on every read (the fingerprint must not churn).
+func TestDerive_RunFailedKeyStable(t *testing.T) {
+	f := newFx(t)
+	f.failed = []FailedRun{failedRun("r1", 1, failure.KindModelNotInPlan, &failure.Action{Kind: failure.ActionPickModel, Label: "Pick another model"})}
+	a, _ := f.svc.List(Filter{})
+	f.now = f.now.Add(time.Hour)
+	b, _ := f.svc.List(Filter{})
+	if len(a) != 1 || len(b) != 1 || a[0].Key != b[0].Key || !a[0].CreatedAt.Equal(b[0].CreatedAt) || !a[0].CreatedAt.Equal(f.failed[0].FinishedAt) {
+		t.Fatalf("a = %+v, b = %+v", a, b)
 	}
 }
