@@ -371,6 +371,25 @@ document, depth 12, 1000 nodes, 8 KiB per string, 500 list/table rows, 12 table 
 `view_invalid` error naming the JSON path (`$.root.children[2].tone`); nothing is trimmed.
 The `plugin-examples/hello-process` plugin has one panel of each kind.
 
+**What the apps render.** The web app draws every node type above and runs every
+action; the daemon has already checked the document, and the app renders it again
+defensively, so:
+
+- A node type the app does not know (a newer schema served to an older app)
+  renders as an "Unsupported in this app version" placeholder; the rest of the
+  panel still works. A panel whose `ui` is above the app's level is never listed.
+- An `rpc` action is a `plugin.call` to your plugin. A form submit sends the action's
+  `params` plus the field values as `params.values` (`{"values": {"title": "...",
+  "notify": true}}`); secret fields are sent like any other value and are never
+  stored by the app. After a successful `rpc` the panel is fetched again, so
+  return the new state from your view.
+- A `prompt` action only inserts text into the message box; it cannot send. A
+  `command` action runs one of your declared prompt commands the same way.
+- `openUrl` shows the host and asks the user before opening the browser.
+- Markdown images are shown as alt text and are never fetched; only `http(s)` links
+  are links. Icons are looked up in the app's Lucide set (a name it does not
+  have shows a generic plugin icon) or drawn from your sanitised `svg`.
+
 ## Settings and secrets
 
 Declare typed `settings` and read them from `plugin.initialize`. Secrets are
