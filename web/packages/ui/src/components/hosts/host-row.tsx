@@ -20,6 +20,7 @@ export function HostRow({
   busy,
   error,
   onReview,
+  onEditGrant,
   onRevoke,
   onRemove,
   onEnableReverse,
@@ -30,6 +31,7 @@ export function HostRow({
   busy: boolean;
   error: string | null;
   onReview: (host: FleetHost) => void;
+  onEditGrant: (host: FleetHost) => void;
   onRevoke: (host: FleetHost) => void;
   onRemove: (host: FleetHost) => void;
   /** Turn the reverse direction on: opens the narrower-grant confirmation in the parent. */
@@ -116,6 +118,11 @@ export function HostRow({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {host.state === "approved" && host.inbound.enabled && (
+                <DropdownMenuItem data-testid={`host-edit-grant-${alias}`} onSelect={() => onEditGrant(host)}>
+                  Edit access
+                </DropdownMenuItem>
+              )}
               {host.state === "approved" && (
                 <DropdownMenuItem data-testid={`host-revoke-${alias}`} onSelect={() => onRevoke(host)}>
                   Revoke

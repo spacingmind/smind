@@ -221,4 +221,54 @@ describe("settings-hosts section", () => {
     expect(approve).toBeEnabled();
     expect(screen.queryByTestId("grant-write-required")).toBeNull();
   });
+
+  it("TestHostsPage_InviteShowsFragmentInviteNoPassword", async () => {
+    const d = new FleetDaemon();
+    await renderSection(d);
+
+    await click(screen.getByTestId("hosts-invite"));
+    expect(screen.getByTestId("invite-host-dialog")).toHaveTextContent("no password");
+    await click(screen.getByTestId("invite-create"));
+
+    expect(screen.getByTestId("invite-value")).toHaveValue("smind-host://v1#abc");
+    expect(d.callsOf("fleet.host.invite")[0].params).toEqual({ window: "10m" });
+  });
+
+  it("TestHostsPage_AddShowsSasAndDoesNotApprove", async () => {
+    const d = new FleetDaemon();
+    await renderSection(d);
+
+    await click(screen.getByTestId("hosts-add"));
+    fireEvent.change(screen.getByTestId("add-invite"), { target: { value: "  smind-host://v1#abc  " } });
+    fireEvent.change(screen.getByTestId("add-alias"), { target: { value: "Bad Alias" } });
+    await flush();
+    expect(screen.getByTestId("add-submit")).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("add-alias"), { target: { value: "office" } });
+    await flush();
+    await click(screen.getByTestId("add-submit"));
+
+    expect(d.callsOf("fleet.host.add")[0].params).toEqual({ invite: "smind-host://v1#abc", alias: "office" });
+    expect(screen.getByTestId("add-sas")).toHaveTextContent("123 456");
+    expect(screen.getByTestId("add-host-dialog")).toHaveTextContent("cannot approve");
+    expect(d.callsOf("fleet.host.approve")).toHaveLength(0);
+  });
+
+  it("TestHostsPage_EditGrantSaves", async () => {
+    const d = new FleetDaemon();
+    d.hosts = [fleetHost({ inbound: { enabled: true, grant: { ...fleetHost().inbound.grant, maxLiveAgents: 3 } } })];
+    await renderSection(d);
+
+    await openMenuItem("host-menu-mac", "host-edit-grant-mac");
+    expect(screen.getByTestId("edit-grant-dialog")).toHaveTextContent("Access for mac");
+    fireEvent.change(screen.getByTestId("grant-max-agents"), { target: { value: "1" } });
+    await flush();
+    await click(screen.getByTestId("edit-grant-save"));
+
+    const calls = d.callsOf("fleet.host.grant");
+    expect(calls).toHaveLength(1);
+    const params = calls[0].params as { hostId: string; grant: { maxLiveAgents: number } };
+    expect(params.hostId).toBe("h1abc");
+    expect(params.grant.maxLiveAgents).toBe(1);
+  });
 });

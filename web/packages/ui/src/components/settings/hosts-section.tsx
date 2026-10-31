@@ -1,7 +1,10 @@
 import { useState } from "react";
 
+import { AddHostDialog } from "@/components/hosts/add-host-dialog";
 import { ApproveHostDialog } from "@/components/hosts/approve-host-dialog";
+import { EditGrantDialog } from "@/components/hosts/edit-grant-dialog";
 import { HostRow } from "@/components/hosts/host-row";
+import { InviteHostDialog } from "@/components/hosts/invite-host-dialog";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
@@ -42,6 +45,14 @@ function HostsSection(_props: SettingsSectionContext) {
   const { workspaces: tree } = useWorkspaceTree();
   const workspaces = (tree ?? []).map((w) => ({ id: w.ID, title: w.Title }));
 
+  // --- edit access: the grant of an approved, inbound-enabled host
+  const [editId, setEditId] = useState<string | null>(null);
+  const editTarget = useLastDefined(hosts?.find((h) => h.hostId === editId) ?? null);
+
+  // --- invite / add
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+
   // --- reverse: turned on only behind the narrower-grant confirmation
   const [reverseId, setReverseId] = useState<string | null>(null);
   const reverseAction = useConfirmAction(reverseId !== null);
@@ -69,10 +80,22 @@ function HostsSection(_props: SettingsSectionContext) {
     }
   }
 
+  const headerActions =
+    data && !data.off ? (
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" variant="outline" data-testid="hosts-add" onClick={() => setAddOpen(true)}>
+          Add a host
+        </Button>
+        <Button type="button" size="sm" data-testid="hosts-invite" onClick={() => setInviteOpen(true)}>
+          Invite a host
+        </Button>
+      </div>
+    ) : undefined;
+
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-hosts">
       <section className="flex flex-col gap-2">
-        <SettingsSectionTitle title="Hosts" />
+        <SettingsSectionTitle title="Hosts" actions={headerActions} />
 
         {!data ? (
           query.isError ? (
@@ -106,6 +129,7 @@ function HostsSection(_props: SettingsSectionContext) {
                 busy={busy === host.hostId}
                 error={rowError?.id === host.hostId ? rowError.message : null}
                 onReview={(h) => setReviewId(h.hostId)}
+                onEditGrant={(h) => setEditId(h.hostId)}
                 onRevoke={(h) => {
                   revokeAction.reset();
                   setRevokeId(h.hostId);
@@ -135,6 +159,20 @@ function HostsSection(_props: SettingsSectionContext) {
           }}
         />
       )}
+
+      {editTarget && (
+        <EditGrantDialog
+          host={editTarget}
+          workspaces={workspaces}
+          open={editId !== null}
+          onOpenChange={(open) => {
+            if (!open) setEditId(null);
+          }}
+        />
+      )}
+
+      <InviteHostDialog open={inviteOpen} onOpenChange={setInviteOpen} />
+      <AddHostDialog open={addOpen} onOpenChange={setAddOpen} />
 
       <ConfirmDialog
         open={reverseId !== null}
