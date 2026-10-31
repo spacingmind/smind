@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 
+import { AutomationChip } from "@/components/automations/automation-chip";
 import { DesktopWindowControls } from "@/components/desktop-window-controls";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +14,8 @@ import { useInboxActions, useInboxCount, useInboxList, useInboxRequest, useRespo
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useWindowState } from "@/hooks/use-window-state";
 import { Icons } from "@/lib/icons";
+import { queryKeys } from "@/lib/query-keys";
+import type { WorkspaceWithTree } from "@/lib/workspace-tree";
 import { canSnoozeOrResolve, groupInbox, inboxAnnouncement, SNOOZE_OPTIONS, type InboxItem } from "@/lib/inbox-types";
 import { desktopOS, isDesktop } from "@/lib/platform";
 import { formatRelativeTime } from "@/lib/relative-time";
@@ -73,6 +77,7 @@ export function InboxScreen({
   onOpenSettings?: (sectionId: string) => void;
 }) {
   const list = useInboxList();
+  const automationLinks = useAutomationLinks();
   const count = useInboxCount();
   const actions = useInboxActions();
   const narrow = useIsMobile();
@@ -213,6 +218,7 @@ export function InboxScreen({
                     <InboxRow
                       key={item.key}
                       item={item}
+                      automation={automationLinks.get(item.links.taskId ?? item.taskId ?? -1)}
                       narrow={narrow}
                       expanded={expanded === item.key}
                       onToggle={() => setExpanded((cur) => (cur === item.key ? null : item.key))}
@@ -233,8 +239,32 @@ export function InboxScreen({
   );
 }
 
+/**
+ * task id -> automation link, read from the shared workspace-tree cache the sidebar already keeps. Never
+ * fetches (`enabled: false`, no queryFn): an inbox opened before the tree loaded just shows no chips.
+ */
+function useAutomationLinks(): ReadonlyMap<number, { automationId: number; automationName?: string }> {
+  const { data } = useQuery<WorkspaceWithTree[], Error, ReadonlyMap<number, { automationId: number; automationName?: string }>>({
+    queryKey: queryKeys.workspaceTree(),
+    enabled: false,
+    select: (tree) => {
+      const links = new Map<number, { automationId: number; automationName?: string }>();
+      for (const ws of tree) {
+        for (const t of [...ws.spaces.flatMap((sp) => sp.tasks), ...ws.ungroupedTasks]) {
+          if (t.automationId !== undefined) links.set(t.ID, { automationId: t.automationId, automationName: t.automationName });
+        }
+      }
+      return links;
+    },
+  });
+  return data ?? EMPTY_LINKS;
+}
+
+const EMPTY_LINKS: ReadonlyMap<number, { automationId: number; automationName?: string }> = new Map();
+
 function InboxRow({
   item,
+  automation,
   narrow,
   expanded,
   onToggle,
@@ -245,6 +275,7 @@ function InboxRow({
   onResolve,
 }: {
   item: InboxItem;
+  automation?: { automationId: number; automationName?: string };
   narrow: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -285,6 +316,7 @@ function InboxRow({
             <StatusBadge status={tone(item)} data-testid={`inbox-kind-${item.key}`}>
               {kindLabel(item)}
             </StatusBadge>
+            {automation && <AutomationChip task={automation} />}
             {item.state === "new" && (
               <span className="text-ui-sm font-medium text-primary" data-testid={`inbox-new-${item.key}`}>
                 New

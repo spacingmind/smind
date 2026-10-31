@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Icons } from "@/lib/icons";
 
+import { AutomationChip } from "@/components/automations/automation-chip";
 import { ArchiveTaskDialog } from "@/components/crud-dialogs";
 import { ArchiveFinishedDialog, StopTreeDialog } from "@/components/tree-action-dialogs";
 import { GitBranchLine } from "@/components/git/git-branch-line";
@@ -80,6 +81,7 @@ export function HeaderTaskTitle({ task }: { task: Task }) {
           </div>
         </HoverCardContent>
       </HoverCard>
+      <AutomationChip task={task} />
       {git?.pr && <PrChip pr={git.pr} collapseInHeader />}
     </>
   );

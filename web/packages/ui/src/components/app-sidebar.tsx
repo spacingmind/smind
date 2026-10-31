@@ -1,3 +1,4 @@
+import { AutomationChip } from "@/components/automations/automation-chip";
 import {
   createContext,
   memo,
@@ -2398,6 +2399,7 @@ const TaskRow = memo(function TaskRow({
                       </span>
                     )}
                   </span>
+                  <AutomationChip task={task} className="@max-[14rem]/sb:hidden" />
                   {hasChildren && (
                     <span
                       data-testid="task-child-count"
