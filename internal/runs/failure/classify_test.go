@@ -384,3 +384,58 @@ func TestRateLimit_ClaudeTextOnlyForAnthropic(t *testing.T) {
 		t.Fatalf("zai: got %+v, want not classified", r)
 	}
 }
+
+func TestClassify_PlanWindowBeatsAuthAndModelText(t *testing.T) {
+	err := `Not logged in · Please run /login. There's an issue with the selected model (x). You've hit your weekly limit · resets 1pm (Asia/Saigon)`
+	r := Classify(Input{Vendor: "anthropic", Err: err}, at(2026, 11, 1, 3, 0, 0))
+	if r.Kind != KindPlanWindowExhausted || r.Window != "weekly" {
+		t.Fatalf("got %+v", r)
+	}
+}
+
+func TestClassify_BareRateLimitIsResidualNotTransient(t *testing.T) {
+	r := Classify(Input{Err: `API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`}, at(2026, 11, 1, 3, 0, 0))
+	if r.Kind != KindRateLimited || r.RetryAfter != 0 {
+		t.Fatalf("got %+v", r)
+	}
+}
+
+func TestClassify_TransientNeedsRetryAfterOrOverloadBody(t *testing.T) {
+	now := at(2026, 11, 1, 3, 0, 0)
+	rl := `API Error: 429 rate_limit_error`
+	if r := Classify(Input{Err: rl, RetryAfter: 12 * time.Second}, now); r.Kind != KindTransient429 || r.RetryAfter != 12*time.Second {
+		t.Fatalf("retry-after: got %+v", r)
+	}
+	if r := Classify(Input{Err: rl + ", try again in 2 minutes"}, now); r.Kind != KindTransient429 || r.RetryAfter != 2*time.Minute {
+		t.Fatalf("try again text: got %+v", r)
+	}
+	if r := Classify(Input{Err: `API Error: 529 {"error":{"type":"overloaded_error"}}`}, now); r.Kind != KindTransient429 {
+		t.Fatalf("overload body: got %+v", r)
+	}
+}
+
+func TestClassify_ModelErrorMentioningLimitStaysModel(t *testing.T) {
+	r := Classify(Input{Err: `The 'gpt-4o' model is not supported when using Codex with a ChatGPT account. See the rate limit docs.`}, at(2026, 11, 1, 3, 0, 0))
+	if r.Kind != KindModelNotInPlan {
+		t.Fatalf("got %+v", r)
+	}
+}
+
+func TestClassify_AuthErrorMentioning429StaysAuth(t *testing.T) {
+	r := Classify(Input{Err: `API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}} (earlier: 429 too many requests)`}, at(2026, 11, 1, 3, 0, 0))
+	if r.Kind != KindAuthExpired {
+		t.Fatalf("got %+v", r)
+	}
+}
+
+func TestClassify_StructuredCodeBeatsText(t *testing.T) {
+	now := at(2026, 11, 1, 3, 0, 0)
+	for code, want := range map[string]string{CodeUsageLimit: KindPlanWindowExhausted, CodeUnauthorized: KindAuthExpired, CodeOverloaded: KindTransient429, CodeRateLimit: KindTransient429} {
+		if r := Classify(Input{Code: code, Err: "something unrelated"}, now); r.Kind != want {
+			t.Fatalf("code %s: got %+v, want %s", code, r, want)
+		}
+	}
+	if r := Classify(Input{Err: "I fixed the login page and the rate limiter"}, now); r.Kind != "" {
+		t.Fatalf("plain text classified: %+v", r)
+	}
+}
