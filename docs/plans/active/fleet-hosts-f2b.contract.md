@@ -36,7 +36,7 @@ mutations:
   - { id: M1, file: internal/fleet/client/client.go, change: "Hops carries [] or two entries instead of exactly [Self]", expectFail: [TestClientAttachesProvenance] }
   - { id: M2, file: internal/fleet/client/observe.go, change: "failure limit off by one (count to 4) or connecting counted", expectFail: [TestObservationThreeFailuresIsStatusUnknownNeverFinished, TestObservationConnectingNotCounted] }
   - { id: M3, file: internal/wsapi/fleet_remote.go, change: "drop the remote-origin hop_limit refusal", expectFail: [TestRemoteReadRefusesRemoteOriginRunHopLimit] }
-  - { id: M4, file: cmd/smind/mcp_hosts.go, change: "an omitted host also routes through remote.read", expectFail: [TestMCPListHostsAndHostParamLocalUnchanged] }
+  - { id: M4, file: cmd/smind/mcp_discovery_tools.go, change: "workspace_list takes the remote branch even when host is omitted", expectFail: [TestMCPListHostsAndHostParamLocalUnchanged] }
 commands:
   - { id: C1, run: "task lint", timeoutSec: 900 }
   - { id: C2, run: "task test", timeoutSec: 1500 }
