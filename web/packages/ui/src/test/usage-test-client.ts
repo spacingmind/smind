@@ -8,10 +8,12 @@ import type {
   AddFromRecipeParams,
   AgentProfile,
   ProviderDirSuggestion,
+  ProviderInstanceOverlay,
   ProviderListResult,
   ProviderRecipesResult,
   ProviderTestResult,
   RunSummary,
+  UpdateProviderInstanceParams,
 } from "@/lib/types";
 
 /**
@@ -58,6 +60,8 @@ export class FakeUsageDaemon {
   dirSuggestions: ProviderDirSuggestion[] = [];
   /** When set, `provider.addInstance` rejects with it. */
   addInstanceError: Error | null = null;
+  /** When set, `provider.updateInstance` rejects with it. */
+  updateInstanceError: Error | null = null;
   /** Answers `provider.recipes`. */
   recipes: ProviderRecipesResult = { recipes: [] };
   /** When set, `provider.recipes` rejects with it. */
@@ -145,6 +149,38 @@ export class FakeUsageDaemon {
               ],
             };
             this.dirSuggestions = this.dirSuggestions.filter((s) => s.dir !== p.dir);
+            queueMicrotask(() => this.emit("provider.updated", { id: p.id }));
+            return { id: p.id };
+          }
+          case "provider.updateInstance": {
+            // The daemon's behaviour: apply the present fields to the entry's own overlay (an empty list /
+            // false removes the key, an absent field is left alone), publish provider.updated, answer {id}.
+            const p = params as UpdateProviderInstanceParams;
+            if (this.updateInstanceError) throw this.updateInstanceError;
+            this.providers = {
+              ...this.providers,
+              providers: this.providers.providers.map((info) => {
+                if (info.id !== p.id) return info;
+                const instance: ProviderInstanceOverlay = { ...(info.instance ?? {}) };
+                if (p.models !== undefined) {
+                  if (p.models.length) instance.models = p.models;
+                  else delete instance.models;
+                }
+                if (p.additionalModels !== undefined) {
+                  if (p.additionalModels.length) instance.additionalModels = p.additionalModels;
+                  else delete instance.additionalModels;
+                }
+                if (p.disallowedTools !== undefined) {
+                  if (p.disallowedTools.length) instance.disallowedTools = p.disallowedTools;
+                  else delete instance.disallowedTools;
+                }
+                if (p.inheritClaudeConfig !== undefined) {
+                  if (p.inheritClaudeConfig) instance.inheritClaudeConfig = true;
+                  else delete instance.inheritClaudeConfig;
+                }
+                return { ...info, instance };
+              }),
+            };
             queueMicrotask(() => this.emit("provider.updated", { id: p.id }));
             return { id: p.id };
           }
