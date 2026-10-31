@@ -1,0 +1,24 @@
+{
+  "name": "markdown",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "markdown",
+      "text": "Some **bold** and `code with \u003cb\u003e tags`.\n\n- one\n- two\n\n[docs](https://example.com/docs) and [x](javascript:alert(1)).\n\n\u003cimg src=x\u003e \u003cscript\u003ealert(1)\u003c/script\u003e"
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "text": "Some **bold** and `code with \u003cb\u003e tags`.\n\n- one\n- two\n\n[docs](https://example.com/docs) and x.\n\n alert(1)",
+        "type": "markdown"
+      },
+      "ui": 1
+    }
+  }
+}

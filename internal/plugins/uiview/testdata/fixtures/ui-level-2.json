@@ -1,0 +1,17 @@
+{
+  "name": "ui-level-2",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 2,
+    "root": {
+      "type": "text",
+      "text": "x"
+    }
+  },
+  "expect": {
+    "invalid": "$.ui"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "name": "table",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "table",
+      "columns": [
+        {
+          "key": "file",
+          "label": "File"
+        },
+        {
+          "key": "lines",
+          "label": "Lines",
+          "align": "end"
+        },
+        {
+          "key": "ok",
+          "label": "OK"
+        }
+      ],
+      "rows": [
+        {
+          "file": "a.go",
+          "lines": 120,
+          "ok": true
+        },
+        {
+          "file": "b.go",
+          "lines": 0,
+          "ok": false
+        },
+        {
+          "file": "c.go",
+          "lines": null,
+          "ok": null
+        }
+      ]
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "columns": [
+          {
+            "key": "file",
+            "label": "File"
+          },
+          {
+            "align": "end",
+            "key": "lines",
+            "label": "Lines"
+          },
+          {
+            "key": "ok",
+            "label": "OK"
+          }
+        ],
+        "rows": [
+          {
+            "file": "a.go",
+            "lines": 120,
+            "ok": true
+          },
+          {
+            "file": "b.go",
+            "lines": 0,
+            "ok": false
+          },
+          {
+            "file": "c.go",
+            "lines": null,
+            "ok": null
+          }
+        ],
+        "type": "table"
+      },
+      "ui": 1
+    }
+  }
+}

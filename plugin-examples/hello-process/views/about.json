@@ -1,0 +1,12 @@
+{
+  "ui": 1,
+  "root": {
+    "type": "stack",
+    "children": [
+      { "type": "heading", "text": "hello-process" },
+      { "type": "markdown", "text": "A tiny process plugin: one RPC, one slash command and two panels.\nSee the [plugin docs](https://example.com) for the authoring guide." },
+      { "type": "keyValue", "items": [{ "key": "Api", "value": "1" }, { "key": "Panels", "value": "2" }] },
+      { "type": "button", "label": "Open task panel", "action": { "kind": "openPanel", "panel": "hello" } }
+    ]
+  }
+}

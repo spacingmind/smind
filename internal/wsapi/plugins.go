@@ -160,7 +160,25 @@ func pluginHandlers(mgr *plugins.Manager, ev *pluginEvents) map[string]handlerFu
 	hs["plugin.commands"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
 		return orEmpty(mgr.Commands()), nil
 	}
+	// plugin.panels: the panels and sidebar items of the ACTIVE plugins,
+	// held back above the caller's reported ui level. Data only, readable
+	// like plugin.commands (relay sessions too), never by an agent; a nil
+	// request context fails closed.
+	hs["plugin.panels"] = func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		if rc == nil || rc.runScoped {
+			return nil, forbidden("plugin.panels is not available to agents")
+		}
+		var p struct {
+			UI int `json:"ui"`
+		}
+		if err := pluginParams("plugin.panels", raw, &p); err != nil {
+			return nil, err
+		}
+		panels, sidebar := mgr.Panels(p.UI)
+		return map[string]any{"panels": orEmpty(panels), "sidebar": orEmpty(sidebar)}, nil
+	}
 	hs["plugin.call"] = pluginCallHandler(mgr)
+	hs["plugin.view"] = pluginViewHandler(mgr)
 	hs["plugin.themes"] = func(context.Context, *requestContext, json.RawMessage) (any, error) {
 		return orEmpty(mgr.Themes()), nil
 	}

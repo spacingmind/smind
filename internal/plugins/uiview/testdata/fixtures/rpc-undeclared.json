@@ -1,0 +1,21 @@
+{
+  "name": "rpc-undeclared",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "action": {
+        "kind": "rpc",
+        "rpc": "refresh"
+      }
+    }
+  },
+  "expect": {
+    "invalid": "$.root.action.rpc"
+  }
+}

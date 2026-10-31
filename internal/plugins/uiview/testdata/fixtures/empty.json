@@ -1,0 +1,28 @@
+{
+  "name": "empty",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "empty",
+      "title": "Nothing to review",
+      "text": "Merge main to see changes.",
+      "icon": "Inbox"
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "icon": "Inbox",
+        "text": "Merge main to see changes.",
+        "title": "Nothing to review",
+        "type": "empty"
+      },
+      "ui": 1
+    }
+  }
+}

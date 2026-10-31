@@ -1,0 +1,21 @@
+{
+  "name": "openurl-userinfo",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "button",
+      "label": "Open",
+      "action": {
+        "kind": "openUrl",
+        "url": "https://user:pw@example.com/"
+      }
+    }
+  },
+  "expect": {
+    "invalid": "$.root.action.url"
+  }
+}

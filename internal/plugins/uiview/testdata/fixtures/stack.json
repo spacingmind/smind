@@ -1,0 +1,48 @@
+{
+  "name": "stack",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "title": "Stack",
+    "root": {
+      "type": "stack",
+      "gap": "md",
+      "children": [
+        {
+          "type": "heading",
+          "text": "Overview",
+          "level": 2
+        },
+        {
+          "type": "text",
+          "text": "Two nodes stacked vertically."
+        }
+      ]
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "children": [
+          {
+            "level": 2,
+            "text": "Overview",
+            "type": "heading"
+          },
+          {
+            "text": "Two nodes stacked vertically.",
+            "type": "text"
+          }
+        ],
+        "gap": "md",
+        "type": "stack"
+      },
+      "title": "Stack",
+      "ui": 1
+    }
+  }
+}

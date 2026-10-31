@@ -348,6 +348,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	pluginHS["profile.list"] = profileListRaw
 	pluginReg.bind(pluginHS, bus)
 	pluginReg.bindSender(&pluginSender{wm: wm, runner: runner, reg: reg, db: db, mgr: pluginMgr, lim: newSendLimiter()})
+	pluginReg.bindPanels(panelDeclarations(pluginMgr))
 	reg.SetLaunchHooks(pluginHooks{pluginMgr})
 	reg.AddObserver(pluginHooks{pluginMgr})
 	api := &API{inbox: inboxH, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}

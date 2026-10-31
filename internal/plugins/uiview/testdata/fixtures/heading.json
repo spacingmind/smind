@@ -1,0 +1,26 @@
+{
+  "name": "heading",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "heading",
+      "text": "Release 1.2",
+      "level": 3
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "level": 3,
+        "text": "Release 1.2",
+        "type": "heading"
+      },
+      "ui": 1
+    }
+  }
+}

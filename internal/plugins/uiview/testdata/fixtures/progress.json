@@ -1,0 +1,28 @@
+{
+  "name": "progress",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "progress",
+      "value": 0.42,
+      "label": "Coverage",
+      "tone": "success"
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "label": "Coverage",
+        "tone": "success",
+        "type": "progress",
+        "value": 0.42
+      },
+      "ui": 1
+    }
+  }
+}

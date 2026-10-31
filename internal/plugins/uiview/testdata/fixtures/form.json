@@ -1,0 +1,124 @@
+{
+  "name": "form",
+  "env": {
+    "rpcs": [
+      "refresh"
+    ],
+    "panels": [
+      "overview"
+    ]
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "form",
+      "id": "report",
+      "fields": [
+        {
+          "name": "title",
+          "type": "text",
+          "label": "Title",
+          "placeholder": "Repro title",
+          "required": true,
+          "default": "N/A"
+        },
+        {
+          "name": "severity",
+          "type": "select",
+          "label": "Severity",
+          "options": [
+            {
+              "value": "low",
+              "label": "Low"
+            },
+            {
+              "value": "high",
+              "label": "High"
+            }
+          ],
+          "default": "low"
+        },
+        {
+          "name": "notify",
+          "type": "toggle",
+          "label": "Notify",
+          "default": false
+        },
+        {
+          "name": "token",
+          "type": "secret",
+          "label": "API token",
+          "required": true
+        }
+      ],
+      "submit": {
+        "label": "File report",
+        "action": {
+          "kind": "rpc",
+          "rpc": "refresh",
+          "params": {
+            "form": "report"
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "fields": [
+          {
+            "default": "N/A",
+            "label": "Title",
+            "name": "title",
+            "placeholder": "Repro title",
+            "required": true,
+            "type": "text"
+          },
+          {
+            "default": "low",
+            "label": "Severity",
+            "name": "severity",
+            "options": [
+              {
+                "label": "Low",
+                "value": "low"
+              },
+              {
+                "label": "High",
+                "value": "high"
+              }
+            ],
+            "type": "select"
+          },
+          {
+            "default": false,
+            "label": "Notify",
+            "name": "notify",
+            "type": "toggle"
+          },
+          {
+            "label": "API token",
+            "name": "token",
+            "required": true,
+            "type": "secret"
+          }
+        ],
+        "id": "report",
+        "submit": {
+          "action": {
+            "kind": "rpc",
+            "params": {
+              "form": "report"
+            },
+            "rpc": "refresh"
+          },
+          "label": "File report"
+        },
+        "type": "form"
+      },
+      "ui": 1
+    }
+  }
+}

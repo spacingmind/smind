@@ -29,6 +29,9 @@ const (
 	CodeBadManifest     = "bad_manifest"
 	CodeBadSetting      = "bad_setting" // a settings patch that does not fit the declaration
 	CodeBusy            = "busy"
+	CodeUnknownPanel    = "unknown_panel"    // the panel is not declared by the plugin
+	CodeUILevelTooLow   = "ui_level_too_low" // the client's ui level is below the panel's
+	CodeViewInvalid     = "view_invalid"     // a view document failed validation
 )
 
 // Error is a typed plugin error.

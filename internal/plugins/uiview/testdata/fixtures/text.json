@@ -1,0 +1,28 @@
+{
+  "name": "text",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "text",
+      "text": "Small muted footnote.",
+      "tone": "muted",
+      "size": "sm"
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "size": "sm",
+        "text": "Small muted footnote.",
+        "tone": "muted",
+        "type": "text"
+      },
+      "ui": 1
+    }
+  }
+}

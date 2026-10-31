@@ -1,0 +1,24 @@
+{
+  "name": "diff",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "diff",
+      "text": "--- a/main.go\n+++ b/main.go\n@@ -1,2 +1,2 @@\n-old\n+new"
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "text": "--- a/main.go\n+++ b/main.go\n@@ -1,2 +1,2 @@\n-old\n+new",
+        "type": "diff"
+      },
+      "ui": 1
+    }
+  }
+}
