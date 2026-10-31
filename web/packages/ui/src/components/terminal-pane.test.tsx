@@ -66,6 +66,8 @@ class FakeTerminalHandle implements TerminalHandle {
   writes: (string | Uint8Array)[] = [];
   /** Unset by default (like a handle that can't report its size); a test assigns it to exercise the send-size-on-attach path. */
   size?: () => { cols: number; rows: number };
+  /** Test-only: flips to true to mimic the shell switching to application cursor mode. */
+  appCursor = false;
   private dataCallback: ((data: string) => void) | null = null;
   private resizeCallback: ((size: { cols: number; rows: number }) => void) | null = null;
   private selection = "";
@@ -73,6 +75,10 @@ class FakeTerminalHandle implements TerminalHandle {
 
   focus(): void {
     this.focusCalls++;
+  }
+
+  applicationCursorKeys(): boolean {
+    return this.appCursor;
   }
 
   getSelection(): string {
@@ -187,6 +193,59 @@ describe("TerminalPane", () => {
     expect(attachCall.params).toEqual({ terminalId: "term-1" });
     // Running terminal: no status line at all -- the tab strip shows the title.
     expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
+  });
+
+  it("insets the terminal from the pane edges without padding the fit host", async () => {
+    const client = new FakeWsClient();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => new FakeTerminalHandle()} />);
+    await flush();
+    const host = screen.getByTestId("terminal-container");
+    const wrapper = screen.getByTestId("terminal-inset");
+    expect(host.parentElement).toBe(wrapper);
+    expect(wrapper.className).toContain("p-2");
+    expect(wrapper.className).toContain("bg-terminal-bg");
+    expect(host.className).not.toMatch(/(^|\s)p[xytrbl]?-/);
+  });
+
+  it("touch control row renders after the terminal", async () => {
+    const client = new FakeWsClient();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => new FakeTerminalHandle()} />);
+    await flush();
+    const host = screen.getByTestId("terminal-container");
+    const row = screen.getByTestId("terminal-touch-actions");
+    expect(host.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(host.closest('[class*="flex-col"]')?.lastElementChild).toBe(row);
+  });
+
+  it("lifts the touch row above the on-screen keyboard", async () => {
+    const listeners: Record<string, () => void> = {};
+    const vv = {
+      height: 500,
+      offsetTop: 0,
+      addEventListener: (type: string, fn: () => void) => {
+        listeners[type] = fn;
+      },
+      removeEventListener: () => {},
+    };
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: vv });
+    window.innerHeight = 800;
+    try {
+      const client = new FakeWsClient();
+      render(<TerminalPane client={client} task={TASK_A} createTerminal={() => new FakeTerminalHandle()} />);
+      await flush();
+      const row = screen.getByTestId("terminal-touch-actions");
+      expect(row.style.marginBottom).toBe("300px");
+
+      vv.height = 800;
+      act(() => listeners.resize());
+      expect(["0px", ""]).toContain(row.style.marginBottom);
+      // jsdom may drop env() values; only assert it when kept.
+      if (row.style.paddingBottom) expect(row.style.paddingBottom).toContain("safe-area-inset-bottom");
+    } finally {
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: undefined });
+      window.innerHeight = originalHeight;
+    }
   });
 
   it("shows no header row while a terminal is running", async () => {
@@ -312,16 +371,17 @@ describe("TerminalPane", () => {
       const fake = new FakeTerminalHandle();
       render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
 
-      const observer = FakeResizeObserver.instances[0];
-      expect(observer).toBeDefined();
+      // The key bar observes its own width too; a tick reaches every observer, like in a browser.
+      expect(FakeResizeObserver.instances.length).toBeGreaterThan(0);
+      const observer = { trigger: () => FakeResizeObserver.instances.forEach((o) => o.trigger()) };
       const fitCallsAtMount = fake.fitCalls;
 
       // Three observation ticks in quick succession -- what a continuous
       // pane-resize drag looks like -- must settle into exactly one fit(),
       // not one per tick.
-      act(() => observer!.trigger());
-      act(() => observer!.trigger());
-      act(() => observer!.trigger());
+      act(() => observer.trigger());
+      act(() => observer.trigger());
+      act(() => observer.trigger());
       expect(fake.fitCalls).toBe(fitCallsAtMount);
 
       act(() => {
@@ -837,5 +897,98 @@ describe("useTerminalActivity (Item 20)", () => {
     await flush();
 
     expect(screen.getByTestId("marker")).toHaveTextContent("idle");
+  });
+});
+
+describe("TerminalPane touch key bar", () => {
+  async function mount(fake = new FakeTerminalHandle()) {
+    const client = new FakeWsClient();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
+    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+    await flush();
+    return { client, fake };
+  }
+
+  function writes(client: FakeWsClient): string[] {
+    return client.calls
+      .filter((c) => c.method === "terminal.write")
+      .map((c) => (c.params as { data: string }).data);
+  }
+
+  it("Esc key writes ESC", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-esc"));
+    expect(writes(client)).toEqual(["\x1b"]);
+  });
+
+  it("Tab key writes HT", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-tab"));
+    expect(writes(client)).toEqual(["\t"]);
+  });
+
+  it("Enter key writes CR", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-enter"));
+    expect(writes(client)).toEqual(["\r"]);
+  });
+
+  it("arrow keys write CSI A/B/C/D", async () => {
+    const { client } = await mount();
+    for (const id of ["up", "down", "right", "left"]) fireEvent.click(screen.getByTestId(`terminal-key-${id}`));
+    expect(writes(client)).toEqual(["\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D"]);
+  });
+
+  it("arrow keys write SS3 when the terminal is in application cursor mode", async () => {
+    const fake = new FakeTerminalHandle();
+    fake.appCursor = true;
+    const { client } = await mount(fake);
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    expect(writes(client)).toEqual(["\x1bOA"]);
+  });
+
+  it("sticky modifier applies to the next key", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    expect(screen.getByTestId("terminal-key-ctrl")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    expect(writes(client)).toEqual(["\x1b[1;5A"]);
+  });
+
+  it("sticky modifier clears after one key", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    expect(writes(client)).toEqual(["\x1b[1;5A", "\x1b[A"]);
+    expect(screen.getByTestId("terminal-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("tapping a modifier twice disarms it", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    expect(screen.getByTestId("terminal-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    expect(writes(client)).toEqual(["\x1b[A"]);
+  });
+
+  it("an armed Ctrl turns the next typed c into ETX", async () => {
+    const { client, fake } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    act(() => fake.emitData("c"));
+    act(() => fake.emitData("c"));
+    expect(writes(client)).toEqual(["\x03", "c"]);
+    expect(screen.getByTestId("terminal-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("a bar key refocuses the terminal", async () => {
+    const { fake } = await mount();
+    const before = fake.focusCalls;
+    fireEvent.click(screen.getByTestId("terminal-key-esc"));
+    expect(fake.focusCalls).toBeGreaterThan(before);
   });
 });
