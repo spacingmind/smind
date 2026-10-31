@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -112,6 +113,25 @@ func TestRunStatusEvent_CarriesFailureFields(t *testing.T) {
 	}
 	if event["resetInferred"] != true {
 		t.Fatalf("run.status resetInferred = %v, want true", event["resetInferred"])
+	}
+}
+
+// TestRunFinishedEvent_CarriesAction: the terminal run.status event carries
+// the registry-derived next action alongside the failure facts.
+func TestRunFinishedEvent_CarriesAction(t *testing.T) {
+	t.Parallel()
+	_, event := failureWire(t, "quota-error")
+	action, ok := event["action"].(map[string]any)
+	if !ok {
+		t.Fatalf("run.status action = %v, want an object", event["action"])
+	}
+	if action["kind"] != failure.ActionRetryNow {
+		t.Fatalf("run.status action.kind = %v, want %q (the fake's reset is past)", action["kind"], failure.ActionRetryNow)
+	}
+	// A run that did not fail carries no action at all.
+	_, event = failureWire(t, "stop end_turn")
+	if _, ok := event["action"]; ok {
+		t.Fatalf("done run carries action: %v", event["action"])
 	}
 }
 

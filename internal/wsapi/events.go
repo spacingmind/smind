@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -185,6 +186,8 @@ type runStatusPayload struct {
 	FailureKind string `json:"failureKind,omitempty"`
 	Window      string `json:"window,omitempty"`
 	ResetAt     string `json:"resetAt,omitempty"`
+	// Action is the failure's next step (failure.Action), omitted when none.
+	Action *failure.Action `json:"action,omitempty"`
 	// ResetInferred: ResetAt was read in an assumed zone (clients show "≈").
 	ResetInferred bool `json:"resetInferred,omitempty"`
 	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
