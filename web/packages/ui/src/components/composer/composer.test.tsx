@@ -432,6 +432,11 @@ describe("Composer", () => {
     expect(submissions).toEqual([{ provider: "glm", prompt: "do the thing", permissionMode: "", autoAccept: false }]);
   });
 
+  it("the permission-mode trigger shows a keyboard focus ring (B-08; structural, jsdom has no focus rendering)", () => {
+    renderComposer();
+    expect(screen.getByLabelText("Permission mode").className).toContain("focus-visible:ring-");
+  });
+
   it("the permission-mode dropdown lists the provider's own modes, in its own words, and submits the pick (W1)", async () => {
     const client = new FakeWsClient();
     const { submissions } = renderComposer({ client });

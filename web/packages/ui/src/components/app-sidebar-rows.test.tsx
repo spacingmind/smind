@@ -105,6 +105,13 @@ function toggleOf(taskId: number): HTMLElement {
   return within(taskItem(taskId)).getByTestId("task-collapse-toggle");
 }
 
+describe("task collapse toggle focus ring (B-08)", () => {
+  it("carries the focus-visible ring class (structural, jsdom has no focus rendering)", async () => {
+    await mountSidebar(TREE);
+    expect(toggleOf(LEADER.ID).className).toContain("focus-visible:ring-");
+  });
+});
+
 describe("task row actions (S1)", () => {
   it("keyboard focus within a row mounts its actions, and blur unmounts them", async () => {
     await mountSidebar(TREE);
