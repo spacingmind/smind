@@ -9,6 +9,7 @@ import { FindBar, type FindBarHandle } from "@/components/find/find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useTheme } from "@/hooks/use-theme";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
@@ -201,6 +202,7 @@ export function TerminalPane({
 }) {
   const key = tabKey ?? `${task.ID}:terminal`;
   const { resolved } = useTheme();
+  const keyboardInset = useKeyboardInset();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<TerminalHandle | null>(null);
   const terminalIdRef = useRef<string | null>(null);
@@ -589,16 +591,62 @@ export function TerminalPane({
           {endedStatus ? `session ${endedStatus}` : "starting terminal…"}
         </p>
       )}
+      {connectionStatus === "reconnecting" && (
+        <Alert
+          testId="connection-banner"
+          variant="warning"
+          className="rounded-none border-x-0 border-t-0"
+          description="Connection lost -- reconnecting to daemon…"
+        />
+      )}
+      {endedStatus === "interrupted" && (
+        <p className="px-3 py-1 text-ui-sm text-foreground-subtle" data-testid="terminal-ended">
+          session ended: daemon restarted
+        </p>
+      )}
+      {error && (
+        <p className="px-3 py-1 text-ui-sm text-destructive" data-testid="terminal-error">
+          {error}
+        </p>
+      )}
+      {pasteError && (
+        <p className="px-3 py-1 text-ui-sm text-destructive" data-testid="terminal-paste-error">
+          paste failed: {pasteError}
+        </p>
+      )}
+      <div data-testid="terminal-inset" className="relative min-h-0 flex-1 bg-terminal-bg p-2">
+        {/* Inset lives on this wrapper, never on the fit host: FitAddon ignores the host's own padding. */}
+        <div ref={containerRef} data-testid="terminal-container" className="terminal-xterm-shell h-full" />
+        {findOpen && (
+          <div className="absolute top-2 right-3 z-10">
+            <FindBar
+              ref={findBarRef}
+              query={findQuery}
+              status={findStatus}
+              canNavigate={findResult.resultCount > 0}
+              onQueryChange={(text) => searchFind(text)}
+              onNext={nextFind}
+              onPrevious={previousFind}
+              onClose={closeFind}
+            />
+          </div>
+        )}
+      </div>
       {/*
        * Touch has neither the copy/paste keyboard shortcuts nor
        * right-click paste/copy, so those two affordances stay available as
        * buttons -- hidden on pointer-fine devices (Tailwind 4's
-       * `pointer-coarse:` variant). While a terminal runs there is no
-       * header at all: the tab strip already shows the title.
+       * `pointer-coarse:` variant). Pinned at the bottom, within thumb
+       * reach; the margin lifts it above the on-screen keyboard, and the
+       * safe-area padding applies only while the keyboard is closed.
        */}
       <div
         data-testid="terminal-touch-actions"
-        className="hidden items-center gap-2 border-b px-3 py-1 pointer-coarse:flex"
+        className="hidden shrink-0 items-center gap-2 border-t bg-background px-3 py-1 pointer-coarse:flex"
+        style={{
+          marginBottom: keyboardInset,
+          paddingBottom: keyboardInset > 0 ? undefined : "env(safe-area-inset-bottom)",
+        }}
       >
         <Button
           type="button"
@@ -624,46 +672,6 @@ export function TerminalPane({
           <Icons.paste className="size-3" />
           Paste
         </Button>
-      </div>
-      {connectionStatus === "reconnecting" && (
-        <Alert
-          testId="connection-banner"
-          variant="warning"
-          className="rounded-none border-x-0 border-t-0"
-          description="Connection lost -- reconnecting to daemon…"
-        />
-      )}
-      {endedStatus === "interrupted" && (
-        <p className="px-3 py-1 text-ui-sm text-foreground-subtle" data-testid="terminal-ended">
-          session ended: daemon restarted
-        </p>
-      )}
-      {error && (
-        <p className="px-3 py-1 text-ui-sm text-destructive" data-testid="terminal-error">
-          {error}
-        </p>
-      )}
-      {pasteError && (
-        <p className="px-3 py-1 text-ui-sm text-destructive" data-testid="terminal-paste-error">
-          paste failed: {pasteError}
-        </p>
-      )}
-      <div className="relative min-h-0 flex-1">
-        <div ref={containerRef} data-testid="terminal-container" className="terminal-xterm-shell h-full" />
-        {findOpen && (
-          <div className="absolute top-2 right-3 z-10">
-            <FindBar
-              ref={findBarRef}
-              query={findQuery}
-              status={findStatus}
-              canNavigate={findResult.resultCount > 0}
-              onQueryChange={(text) => searchFind(text)}
-              onNext={nextFind}
-              onPrevious={previousFind}
-              onClose={closeFind}
-            />
-          </div>
-        )}
       </div>
     </div>
   );
