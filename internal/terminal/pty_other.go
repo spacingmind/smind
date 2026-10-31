@@ -4,6 +4,7 @@ package terminal
 
 import (
 	"os/exec"
+	"syscall"
 
 	"github.com/charmbracelet/x/xpty"
 )
@@ -19,6 +20,11 @@ func startPty(cmd *exec.Cmd) (*ptySession, error) {
 	if err != nil {
 		return nil, err
 	}
+	// xpty's Start is a plain exec.Cmd.Start and sets no session: without
+	// Setsid/Setctty the shell has no controlling tty, so ^C never becomes
+	// SIGINT and kill_other's process-group kill has no pgid == pid. The
+	// slave is the child's fd 0 (Stdin = slave).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 	if err := p.Start(cmd); err != nil {
 		_ = p.Close()
 		return nil, err

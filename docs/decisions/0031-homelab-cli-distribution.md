@@ -1389,3 +1389,4 @@ password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
   `docs/plans/completed/desktop-windows-native-daemon.md` and the `feat/windows-bundled-daemon` branch.
 - Paseo (`refs/paseo` @ `8d9e7d3a`): see the reference table above and each "Paseo reference" block.
 - Plan: [`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md).
+- Fleet (ADR-0048) reuses this ADR's pinned identity (D9) and the Ed25519 `device_hello` shape (D35) for host-to-host links: [`0048-fleet-connected-hosts.md`](0048-fleet-connected-hosts.md).

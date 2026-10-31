@@ -391,3 +391,27 @@ func TestRegistryNoPeerPathWritesGrant(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistrySetOutboundTransportKeepsEnabled(t *testing.T) {
+	r := openRegistry(t, 4)
+	pub := testKey(7)
+	h, err := r.PairAsInitiator(pub, "peer", "", `{"kind":"direct","url":"ws://127.0.0.1:1"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const next = `{"kind":"direct","url":"ws://127.0.0.1:2"}`
+	if err := r.SetOutboundTransport(h.HostID, next); err != nil {
+		t.Fatal(err)
+	}
+	out, in, err := r.Links(h.HostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Enabled || out.TransportJSON != next {
+		t.Fatalf("outbound = %+v, want enabled with the new transport", out)
+	}
+	if in.Enabled {
+		t.Fatalf("inbound enabled = true, want untouched (false)")
+	}
+	requireErrIs(t, r.SetOutboundTransport("nope", next), ErrNotFound, "unknown host")
+}
