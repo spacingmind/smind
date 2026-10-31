@@ -119,6 +119,19 @@ func bashUnits(req Request, segs []Segment, cwd string, d *Decision) ([]unit, st
 	units := make([]unit, len(segs))
 	var all []string
 	for i := range segs {
+		// The splitter does not know %VAR%: a Windows word holding one is dynamic, which no allow covers.
+		if pl := req.pl(); pl.windows && !segs[i].Dynamic {
+			for _, w := range segs[i].Argv {
+				if hasPercentVar(w) {
+					segs[i].Dynamic = true
+				}
+			}
+			for _, rd := range segs[i].Redirects {
+				if hasPercentVar(rd.Target) {
+					segs[i].Dynamic = true
+				}
+			}
+		}
 		fs := newFloorSeg(req, segs[i], cwd)
 		paths, err := segmentPaths(req.pl(), segs[i], cwd)
 		if err != nil {
