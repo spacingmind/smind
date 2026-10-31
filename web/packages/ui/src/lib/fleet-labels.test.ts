@@ -48,9 +48,16 @@ describe("fleet labels validation mirrors the daemon", () => {
     ]);
     expect(v.rows[0]).toEqual({ key: null, value: null });
     expect(v.rows[1].key).toBe("Duplicate key");
-    expect(v.rows[1].value).toMatch(/a-z/);
-    expect(v.rows[2].key).toMatch(/secret/);
-    expect(validateLabelRows(bad["17 labels"]).list).toBe("At most 16 labels");
+    expect(v.rows[1].value).toBe('labels: value for key "os" must match ^[a-z0-9][a-z0-9._+-]{0,31}$');
+    expect(v.rows[2].key).toBe('labels: key "my-token" looks like a secret');
+    expect(validateLabelRows(bad["17 labels"]).list).toBe("labels: too many labels (max 16)");
+  });
+
+  it("labels_messages_equal_daemon_text", () => {
+    expect(validateLabelRows([{ key: "OS", value: "linux" }]).rows[0].key).toBe('labels: key "OS" must match ^[a-z][a-z0-9._-]{0,31}$');
+    expect(validateLabelRows([{ key: "api-token", value: "x" }]).rows[0].key).toBe('labels: key "api-token" looks like a secret');
+    expect(validateLabelRows([{ key: "nope", value: "Bad" }]).rows[0].value).toBe('labels: value for key "nope" must match ^[a-z0-9][a-z0-9._+-]{0,31}$');
+    expect(validateLabelRows(bad["17 labels"]).list).toBe("labels: too many labels (max 16)");
   });
 });
 

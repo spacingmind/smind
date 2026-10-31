@@ -10,20 +10,18 @@ export const LABEL_KEY_RE = /^[a-z][a-z0-9._-]{0,31}$/;
 export const LABEL_VALUE_RE = /^[a-z0-9][a-z0-9._+-]{0,31}$/;
 const SECRET_WORDS = ["secret", "token", "passw", "apikey", "credential"];
 
-export const LABEL_KEY_HINT = "Start with a lowercase letter; up to 32 of a-z, 0-9, . _ -";
-export const LABEL_VALUE_HINT = "Up to 32 of a-z, 0-9, . _ + -";
-
+/** The daemon's refusal text (`internal/fleet/registry/labels.go`), minus the method prefix, so a client check reads the same as a server one. */
 export function labelKeyError(key: string): string | null {
   if (key === "") return "Enter a key";
-  if (!LABEL_KEY_RE.test(key)) return LABEL_KEY_HINT;
+  if (!LABEL_KEY_RE.test(key)) return `labels: key "${key}" must match ^[a-z][a-z0-9._-]{0,31}$`;
   const lower = key.toLowerCase();
-  if (SECRET_WORDS.some((w) => lower.includes(w))) return "A key that looks like a secret is not allowed";
+  if (SECRET_WORDS.some((w) => lower.includes(w))) return `labels: key "${key}" looks like a secret`;
   return null;
 }
 
-export function labelValueError(value: string): string | null {
+export function labelValueError(key: string, value: string): string | null {
   if (value === "") return "Enter a value";
-  if (!LABEL_VALUE_RE.test(value)) return LABEL_VALUE_HINT;
+  if (!LABEL_VALUE_RE.test(value)) return `labels: value for key "${key}" must match ^[a-z0-9][a-z0-9._+-]{0,31}$`;
   return null;
 }
 
@@ -44,9 +42,9 @@ export function validateLabelRows(rows: LabelRow[]): { rows: LabelRowErrors[]; l
     let key = labelKeyError(r.key);
     if (!key && seen.has(r.key)) key = "Duplicate key";
     seen.add(r.key);
-    return { key, value: labelValueError(r.value) };
+    return { key, value: labelValueError(r.key, r.value) };
   });
-  const list = rows.length > MAX_HOST_LABELS ? `At most ${MAX_HOST_LABELS} labels` : null;
+  const list = rows.length > MAX_HOST_LABELS ? `labels: too many labels (max ${MAX_HOST_LABELS})` : null;
   return { rows: out, list, ok: list === null && out.every((e) => e.key === null && e.value === null) };
 }
 

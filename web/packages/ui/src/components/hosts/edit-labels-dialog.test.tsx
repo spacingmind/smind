@@ -86,7 +86,7 @@ describe("host labels editor", () => {
     type("edit-labels-key-1", "api-token");
     type("edit-labels-value-1", "x");
     await flush();
-    expect(screen.getByTestId("edit-labels-row-error-1")).toHaveTextContent(/secret/);
+    expect(screen.getByTestId("edit-labels-row-error-1")).toHaveTextContent('labels: key "api-token" looks like a secret');
     expect(screen.getByTestId("edit-labels-save")).toBeDisabled();
 
     type("edit-labels-key-1", "os"); // duplicate of row 0
@@ -97,7 +97,7 @@ describe("host labels editor", () => {
     type("edit-labels-key-1", "zone");
     type("edit-labels-value-1", "Eu");
     await flush();
-    expect(screen.getByTestId("edit-labels-row-error-1")).toHaveTextContent(/a-z/);
+    expect(screen.getByTestId("edit-labels-row-error-1")).toHaveTextContent('labels: value for key "zone" must match ^[a-z0-9][a-z0-9._+-]{0,31}$');
     expect(screen.getByTestId("edit-labels-save")).toBeDisabled();
     expect(d.callsOf("fleet.host.labels")).toHaveLength(0);
   });
