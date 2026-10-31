@@ -1,6 +1,8 @@
 /** Wire shapes and pure helpers of the Human inbox (`inbox.*`, ADR-0045 section 5). */
 
-export type InboxKind = "permission" | "verdict" | "stall" | "host_pair" | "host_down" | "host_refused";
+import type { FailureAction } from "@/lib/failure-class";
+
+export type InboxKind = "permission" | "run_failed" | "verdict" | "stall" | "host_pair" | "host_down" | "host_refused";
 export type InboxState = "new" | "seen" | "snoozed" | "resolved";
 
 export interface InboxItem {
@@ -13,6 +15,8 @@ export interface InboxItem {
   state: InboxState;
   snoozedUntil?: string;
   attention: "high" | "normal";
+  /** A run_failed item's next action (the daemon-built failure action); absent for every other kind. */
+  action?: FailureAction;
   links: { taskId?: number; runId?: string; permissionRequestId?: string; validationId?: number; hostId?: string };
 }
 
@@ -25,6 +29,7 @@ export interface InboxCounts {
 /** The groups of the page, in display order. */
 export const INBOX_GROUPS: { kind: InboxKind; label: string }[] = [
   { kind: "permission", label: "Needs you now" },
+  { kind: "run_failed", label: "Runs that need you" },
   { kind: "host_pair", label: "Host pairing" },
   { kind: "host_refused", label: "Hosts refused" },
   { kind: "host_down", label: "Hosts unreachable" },
