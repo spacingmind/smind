@@ -3,7 +3,9 @@ package wsapi
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -62,7 +64,17 @@ func updateParams(id string, kv ...any) map[string]any {
 	return m
 }
 
-const handWrittenInstance = "    # hand written, keep me\n    - id: claude-hand\n      label: Claude Hand\n      extends: claude-native\n\n      env:\n          CLAUDE_CONFIG_DIR: /tmp/hand-dir # trailing comment\n"
+// handDir returns an absolute, YAML-safe (forward-slash) directory path. A
+// literal "/tmp/..." is not absolute on Windows, and a raw C:\ path is not
+// valid inside a double-quoted YAML scalar.
+func handDir(t *testing.T, name string) string {
+	t.Helper()
+	return filepath.ToSlash(filepath.Join(t.TempDir(), name))
+}
+
+func handWrittenInstance(dir string) string {
+	return "    # hand written, keep me\n    - id: claude-hand\n      label: Claude Hand\n      extends: claude-native\n\n      env:\n          CLAUDE_CONFIG_DIR: " + dir + " # trailing comment\n"
+}
 
 func TestProviderUpdateInstance_RefusesAgentCaller(t *testing.T) {
 	h := newSecretsHarness(t)
@@ -98,11 +110,12 @@ func TestProviderUpdateInstance_RecipeMadeUIMadeHandWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	work := t.TempDir()
+	hand := handDir(t, "hand-dir")
 	if _, err := h.call(t, "provider.addInstance", &requestContext{}, map[string]string{"extends": "claude-native", "id": "claude-ui", "label": "Claude UI", "dir": work}); err != nil {
 		t.Fatal(err)
 	}
 	// Append the hand-written entry and reload.
-	if err := os.WriteFile(h.path, []byte(h.file(t)+handWrittenInstance), 0o600); err != nil {
+	if err := os.WriteFile(h.path, []byte(h.file(t)+handWrittenInstance(hand)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.call(t, "provider.reload", &requestContext{}, nil); err != nil {
@@ -187,7 +200,7 @@ func TestProviderUpdateInstance_RecipeMadeUIMadeHandWritten(t *testing.T) {
 	if strings.Contains(text, keySentinel) {
 		t.Fatalf("the key is in config.yaml: %s", text)
 	}
-	for _, keep := range []string{"# hand written, keep me", "# trailing comment", "CLAUDE_CONFIG_DIR: /tmp/hand-dir"} {
+	for _, keep := range []string{"# hand written, keep me", "# trailing comment", "CLAUDE_CONFIG_DIR: " + hand} {
 		if !strings.Contains(text, keep) {
 			t.Fatalf("lost %q in %s", keep, text)
 		}
@@ -288,7 +301,7 @@ func TestProviderUpdateInstance_IdempotentNoop(t *testing.T) {
 
 func TestProviderList_InstanceEditableFields(t *testing.T) {
 	h := newSecretsHarness(t)
-	h.writeCustom(t, zaiInstance, "    - id: acp-x\n      label: ACP X\n      command: \""+fakeACPAgentPath+"\"\n")
+	h.writeCustom(t, zaiInstance, "    - id: acp-x\n      label: ACP X\n      command: "+strconv.Quote(fakeACPAgentPath)+"\n")
 	if _, err := h.call(t, "provider.updateInstance", &requestContext{}, updateParams("claude-zai",
 		"additionalModels", []map[string]any{{"id": "ed-a", "label": "Ed A", "description": "d"}},
 		"disallowedTools", []string{"WebSearch"}, "inheritClaudeConfig", true)); err != nil {
@@ -320,12 +333,13 @@ func TestProviderList_InstanceEditableFields(t *testing.T) {
 
 func TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged(t *testing.T) {
 	h := newSecretsHarness(t)
+	handWork, handHome := handDir(t, "hand-work"), handDir(t, "hand-home")
 	hand := "providers:\n  custom:\n" +
 		"    # work account\n" +
-		"    - id: claude-work\n      label: Claude Work\n      extends: claude-native\n      env:\n        CLAUDE_CONFIG_DIR: /tmp/hand-work\n" +
+		"    - id: claude-work\n      label: Claude Work\n      extends: claude-native\n      env:\n        CLAUDE_CONFIG_DIR: " + handWork + "\n" +
 		"      models:\n        - id: work-model-a\n          label: Work A\n        - id: work-model-b\n\n" +
-		"    - id: claude-home\n      label: Claude Home\n      extends: claude-native\n      env:\n        CLAUDE_CONFIG_DIR: /tmp/hand-home # personal\n" +
-		"    - id: paseo-agent\n      label: Paseo Agent\n      command: \"" + fakeACPAgentPath + "\"\n" +
+		"    - id: claude-home\n      label: Claude Home\n      extends: claude-native\n      env:\n        CLAUDE_CONFIG_DIR: " + handHome + " # personal\n" +
+		"    - id: paseo-agent\n      label: Paseo Agent\n      command: " + strconv.Quote(fakeACPAgentPath) + "\n" +
 		"      models:\n        - id: acp-model-a\n          label: ACP A\n" +
 		"      modes:\n        - id: plan\n          label: Plan\n"
 	if err := os.WriteFile(h.path, []byte(hand), 0o600); err != nil {

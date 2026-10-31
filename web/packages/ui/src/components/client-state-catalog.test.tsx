@@ -343,7 +343,7 @@ describe("shared catalog / profile / health cache", () => {
         const path = join(dir, name);
         if (statSync(path).isDirectory()) walk(path);
         else if (/\.tsx?$/.test(name) && !/\.test\./.test(name) && /const FALLBACK_PROVIDERS\b/.test(readFileSync(path, "utf8"))) {
-          declarations.push(path.slice(root.length + 1));
+          declarations.push(path.slice(root.length + 1).replaceAll("\\", "/"));
         }
       }
     };
@@ -356,7 +356,7 @@ describe("shared catalog / profile / health cache", () => {
         const path = join(dir, name);
         if (statSync(path).isDirectory()) walkInline(path);
         else if (/\.tsx?$/.test(name) && !/\.test\./.test(name) && /\{\s*id:\s*"claude-native"[^}]*\}\s*,\s*\{\s*id:\s*"codex-native"/.test(readFileSync(path, "utf8"))) {
-          inline.push(path.slice(root.length + 1));
+          inline.push(path.slice(root.length + 1).replaceAll("\\", "/"));
         }
       }
     };
