@@ -7,7 +7,10 @@
 // layer and tests can feed it small input structs.
 package tasktree
 
-import "sort"
+import (
+	"sort"
+	"strconv"
+)
 
 // MaxNodes is the cap on the returned node list; a tree larger than this
 // is truncated and Build's second return value reports true.
@@ -166,6 +169,23 @@ type Node struct {
 	// ArchivedAt marks an archived node (RFC 3339 UTC); only present when
 	// the tree was built with Root.IncludeArchived, omitted for live nodes.
 	ArchivedAt string `json:"archivedAt,omitempty"`
+
+	// Host/HostID/Remote/GlobalID mark a remote child (ADR-0048 F4): a leaf
+	// mirrored from another daemon. ID of such a node is negative and unique
+	// only within one response; GlobalID (alias:remoteTaskId) is the stable key.
+	Host     string `json:"host,omitempty"`
+	HostID   string `json:"hostId,omitempty"`
+	Remote   bool   `json:"remote,omitempty"`
+	GlobalID string `json:"globalId,omitempty"`
+}
+
+// RemoteTask is one mirrored remote task shown as a leaf under its local
+// parent. CostUSD nil means the owner reported none (never 0).
+type RemoteTask struct {
+	HostID, Alias, RemoteTaskID string
+	ParentID                    int64
+	Title, State                string
+	CostUSD                     *float64
 }
 
 // TierOf derives a task's tier from its position (plan §3.1): no parent +
@@ -200,6 +220,14 @@ type aggRec struct {
 // the bool reports truncation. Cycle-safe: corrupt parent_task_id cycles
 // terminate via visited sets, both in aggregation and in emission.
 func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, root Root) ([]Node, bool) {
+	return BuildWithRemote(tasks, facts, usage, nil, root)
+}
+
+// BuildWithRemote is Build plus remote children: each RemoteTask becomes a
+// leaf node after the local children of its parent and rolls its cost and
+// state into every ancestor. A remote whose parent is missing or not visible
+// is dropped (the mirror is never an orphan root).
+func BuildWithRemote(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, remotes []RemoteTask, root Root) ([]Node, bool) {
 	byID := make(map[int64]*Task, len(tasks))
 	children := make(map[int64][]*Task, len(tasks))
 	for i := range tasks {
@@ -213,6 +241,20 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 	// contract does not depend on input order.
 	for _, kids := range children {
 		sortTasks(kids)
+	}
+
+	// visible: whether a task is emitted as a node (and so counts as a
+	// parent, child and root); archived ones only in history mode.
+	visible := func(t *Task) bool { return root.IncludeArchived || !t.Archived }
+
+	remoteKids := make(map[int64][]RemoteTask)
+	for _, r := range remotes {
+		if p, ok := byID[r.ParentID]; ok && visible(p) {
+			remoteKids[r.ParentID] = append(remoteKids[r.ParentID], r)
+		}
+	}
+	for _, kids := range remoteKids {
+		sortRemotes(kids)
 	}
 
 	// Memoized post-order aggregation over the full forest.
@@ -250,6 +292,10 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 				rec.counts = addCounts(rec.counts, countOne(factState(facts, c.ID)))
 			}
 		}
+		for _, r := range remoteKids[t.ID] {
+			rec.usage = addUsage(rec.usage, remoteUsage(r))
+			rec.counts = addCounts(rec.counts, countOne(remoteState(r.State)))
+		}
 		color[t.ID] = black
 		memo[t.ID] = rec
 		return rec
@@ -257,10 +303,6 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 	for i := range tasks {
 		visit(&tasks[i])
 	}
-
-	// visible: whether a task is emitted as a node (and so counts as a
-	// parent, child and root); archived ones only in history mode.
-	visible := func(t *Task) bool { return root.IncludeArchived || !t.Archived }
 
 	emit := func(t *Task, depth int) Node {
 		rec := memo[t.ID]
@@ -270,7 +312,7 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 				hasParent = true
 			}
 		}
-		liveKids := 0
+		liveKids := len(remoteKids[t.ID])
 		for _, c := range children[t.ID] {
 			if visible(c) {
 				liveKids++
@@ -307,6 +349,7 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 	}
 
 	nodes := make([]Node, 0)
+	nextRemoteID := int64(0)
 	visited := make(map[int64]bool, len(tasks))
 	truncated := false
 	var walk func(t *Task, depth int)
@@ -324,6 +367,22 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 			if visible(c) {
 				walk(c, depth+1)
 			}
+		}
+		for _, r := range remoteKids[t.ID] {
+			if len(nodes) >= MaxNodes {
+				truncated = true
+				return
+			}
+			nextRemoteID--
+			u := remoteUsage(r)
+			nodes = append(nodes, Node{
+				ID: nextRemoteID, ParentID: ptrID(t.ID), WorkspaceID: t.WorkspaceID,
+				Title: r.Title, Depth: depth + 1, TaskStatus: "active",
+				Run:   NodeRun{State: remoteState(r.State), RunningRunIDs: []string{}},
+				Usage: NodeUsage{Own: u, Subtree: cloneUsage(u)},
+				Host:  r.Alias, HostID: r.HostID, Remote: true,
+				GlobalID: r.Alias + ":" + r.RemoteTaskID,
+			})
 		}
 	}
 
@@ -461,4 +520,40 @@ func addF64(a, b *float64) *float64 {
 
 func sortTasks(ts []*Task) {
 	sort.Slice(ts, func(i, j int) bool { return ts[i].ID < ts[j].ID })
+}
+
+func ptrID(id int64) *int64 { return &id }
+
+func remoteState(s string) State {
+	switch st := State(s); st {
+	case StateRunning, StateWaitingPermission, StateDone, StateError, StateStopped:
+		return st
+	}
+	return StateIdle
+}
+
+func remoteUsage(r RemoteTask) UsageTotals {
+	return UsageTotals{Runs: 1, CostUSD: cpF64(r.CostUSD)}
+}
+
+// sortRemotes orders by alias, then numeric remote id; non-numeric ids sort
+// after numeric ones, by string.
+func sortRemotes(rs []RemoteTask) {
+	sort.Slice(rs, func(i, j int) bool {
+		a, b := rs[i], rs[j]
+		if a.Alias != b.Alias {
+			return a.Alias < b.Alias
+		}
+		an, aerr := strconv.ParseInt(a.RemoteTaskID, 10, 64)
+		bn, berr := strconv.ParseInt(b.RemoteTaskID, 10, 64)
+		switch {
+		case aerr == nil && berr == nil && an != bn:
+			return an < bn
+		case aerr == nil && berr != nil:
+			return true
+		case aerr != nil && berr == nil:
+			return false
+		}
+		return a.RemoteTaskID < b.RemoteTaskID
+	})
 }
