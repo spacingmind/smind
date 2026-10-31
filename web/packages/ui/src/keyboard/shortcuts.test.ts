@@ -342,6 +342,23 @@ describe("conflictingBindings", () => {
   });
 });
 
+describe("nav back and forward", () => {
+  it("nav back and forward are desktop-only rows", () => {
+    const web = new Map(platformBindings(SHORTCUT_BINDINGS, false, false).map((b) => [b.id, b]));
+    expect(web.has("nav-back")).toBe(false);
+    expect(web.has("nav-forward")).toBe(false);
+    const desktop = new Map(platformBindings(SHORTCUT_BINDINGS, true, false).map((b) => [b.id, b]));
+    expect(desktop.get("nav-back")?.combo).toBe("Alt+ArrowLeft");
+    expect(desktop.get("nav-forward")?.combo).toBe("Alt+ArrowRight");
+  });
+
+  it("alt arrows do not collide with another binding", () => {
+    const resolved = resolveBindings(platformBindings(SHORTCUT_BINDINGS, true, false));
+    expect(conflictingBindings(resolved, "Alt+ArrowLeft", "nav-back", false)).toEqual([]);
+    expect(conflictingBindings(resolved, "Alt+ArrowRight", "nav-forward", false)).toEqual([]);
+  });
+});
+
 describe("resolveChordStep", () => {
   const chordBinding: ShortcutBinding = {
     id: "go-to-settings",

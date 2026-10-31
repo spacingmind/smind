@@ -192,6 +192,22 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     note: "Use this while a terminal has focus: Ctrl+] goes to the shell there",
   },
   {
+    id: "nav-back",
+    action: "nav.back",
+    combo: "Alt+ArrowLeft",
+    section: "navigation",
+    label: "Go back",
+    when: { desktop: true },
+  },
+  {
+    id: "nav-forward",
+    action: "nav.forward",
+    combo: "Alt+ArrowRight",
+    section: "navigation",
+    label: "Go forward",
+    when: { desktop: true },
+  },
+  {
     id: "tab-close",
     action: "tab.close",
     combo: "Mod+W",
