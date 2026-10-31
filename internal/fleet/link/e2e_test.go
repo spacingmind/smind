@@ -51,6 +51,14 @@ type e2eDaemon struct {
 
 func newE2EDaemon(t *testing.T, name, password string) *e2eDaemon {
 	t.Helper()
+	return newE2EDaemonWith(t, name, password, nil)
+}
+
+// newE2EDaemonWith is newE2EDaemon with a hook that may adjust the service
+// options (the relay e2e adds the relay offer functions there) once the
+// server exists.
+func newE2EDaemonWith(t *testing.T, name, password string, wire func(srv *server.Server, home string, so *ServiceOptions)) *e2eDaemon {
+	t.Helper()
 	home := t.TempDir()
 	db, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
@@ -89,10 +97,14 @@ func newE2EDaemon(t *testing.T, name, password string) *e2eDaemon {
 	})
 	t.Cleanup(d.mgr.Close)
 	window := pairing.NewWindow(nil)
-	d.svc = NewService(ServiceOptions{
+	so := ServiceOptions{
 		Key: d.key, Registry: d.reg, Secrets: d.secrets, Manager: d.mgr, Window: window,
 		Version: "e2e-" + name, Hostname: func() string { return "daemon-" + name },
-	})
+	}
+	if wire != nil {
+		wire(srv, home, &so)
+	}
+	d.svc = NewService(so)
 	srv.API().SetFleet(wsapi.FleetOptions{Key: d.key, Registry: d.reg, Window: window, Links: d.svc, Version: "e2e-" + name})
 	d.svc.Start()
 
