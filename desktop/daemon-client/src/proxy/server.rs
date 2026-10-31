@@ -265,6 +265,14 @@ async fn bind_preferring(preferred: Option<u16>) -> std::io::Result<TcpListener>
 // --- the secret gate (AC3) ---------------------------------------------
 
 async fn gate(State(state): State<Arc<ProxyState>>, req: Request<Body>, next: Next) -> Response {
+    // The sandboxed PDF viewer's two static files carry no cookie (opaque origin): serve exactly those,
+    // straight from the embedded assets. No SPA fallback here: a missing viewer file is a 404, not index.html.
+    if secret::is_public_asset(req.method().as_str(), req.uri().path()) {
+        return match state.assets.get(req.uri().path().trim_start_matches('/')) {
+            Some((bytes, content_type)) => asset_response(bytes, &content_type),
+            None => StatusCode::NOT_FOUND.into_response(),
+        };
+    }
     let cookie_header = req
         .headers()
         .get(header::COOKIE)
