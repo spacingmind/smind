@@ -50,11 +50,11 @@ describe("ProviderInstanceEditors", () => {
     const d = setup(claudeInstance({ models: [{ id: "m-a", label: "A", default: true }, { id: "m-b" }] }));
     expect(screen.getByTestId("instance-model-row-m-a")).toHaveTextContent("m-a");
     expect(screen.getByTestId("instance-model-row-m-b")).toHaveTextContent("m-b");
-    // Empty and duplicate ids are ignored.
     fireEvent.change(screen.getByTestId("instance-model-input"), { target: { value: "m-a" } });
     fireEvent.click(screen.getByTestId("instance-model-add"));
     fireEvent.change(screen.getByTestId("instance-model-input"), { target: { value: "   " } });
     fireEvent.click(screen.getByTestId("instance-model-add"));
+    expect(screen.queryByTestId("instance-model-duplicate")).toBeNull();
     expect(screen.queryByTestId("instance-model-row-m-c")).toBeNull();
     // Enter adds too.
     fireEvent.change(screen.getByTestId("instance-model-input"), { target: { value: "m-c" } });
@@ -70,6 +70,39 @@ describe("ProviderInstanceEditors", () => {
     expect(calls(d)).toEqual([
       { id: "claude-work", models: [{ id: "m-a", label: "A", default: true }, { id: "m-c" }], additionalModels: [] },
     ]);
+  });
+
+  it("a duplicate model id shows an inline message and adds nothing", () => {
+    const d = setup(claudeInstance({ models: [{ id: "m-a" }] }));
+    fireEvent.change(screen.getByTestId("instance-model-input"), { target: { value: "m-a" } });
+    fireEvent.click(screen.getByTestId("instance-model-add"));
+    expect(screen.getByTestId("instance-model-duplicate")).toHaveTextContent("m-a is already in the list");
+    expect(screen.getByTestId("instance-model-duplicate")).toHaveAttribute("role", "status");
+    // The typed id stays for correcting, and nothing was added, so save is still unchanged.
+    expect(screen.getByTestId("instance-model-input")).toHaveValue("m-a");
+    expect(screen.getByTestId("instance-models-save")).toBeDisabled();
+    expect(calls(d)).toEqual([]);
+  });
+
+  it("typing again clears the duplicate message", () => {
+    setup(claudeInstance({ models: [{ id: "m-a" }] }));
+    fireEvent.change(screen.getByTestId("instance-model-input"), { target: { value: "m-a" } });
+    fireEvent.click(screen.getByTestId("instance-model-add"));
+    expect(screen.getByTestId("instance-model-duplicate")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("instance-model-input"), { target: { value: "m-b" } });
+    expect(screen.queryByTestId("instance-model-duplicate")).toBeNull();
+    fireEvent.click(screen.getByTestId("instance-model-add"));
+    expect(screen.getByTestId("instance-model-row-m-b")).toBeInTheDocument();
+    expect(screen.queryByTestId("instance-model-duplicate")).toBeNull();
+  });
+
+  it("a duplicate tool name shows an inline message", () => {
+    setup(claudeInstance({ disallowedTools: ["WebSearch"] }));
+    fireEvent.change(screen.getByTestId("instance-tool-input"), { target: { value: "WebSearch" } });
+    fireEvent.click(screen.getByTestId("instance-tool-add"));
+    expect(screen.getByTestId("instance-tool-duplicate")).toHaveTextContent("WebSearch is already disallowed");
+    expect(screen.getByTestId("instance-tool-input")).toHaveValue("WebSearch");
+    expect(screen.getByTestId("instance-tools-save")).toBeDisabled();
   });
 
   it("switching Replace list to Add to list sends models: [] and additionalModels with the draft", async () => {

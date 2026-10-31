@@ -88,6 +88,8 @@ function ModelsEditor({ info, hasClient, pending, update, clearError, error }: E
   const [mode, setMode] = useState<ModelsMode>(storedMode);
   const [ids, setIds] = useState<string[]>((storedMode === "add" ? storedAdditional : storedModels).map((m) => m.id));
   const [typed, setTyped] = useState("");
+  // The id the last add refused as a duplicate, until the next input change.
+  const [dupe, setDupe] = useState<string | null>(null);
   // The daemon keeps an untouched id's label/description/default; only a newly typed id is sent bare.
   const stored = new Map([...storedModels, ...storedAdditional].map((m) => [m.id, m] as const));
   const disabled = !hasClient || pending;
@@ -97,8 +99,13 @@ function ModelsEditor({ info, hasClient, pending, update, clearError, error }: E
     sameIds(mode === "add" ? ids : [], storedAdditional.map((m) => m.id));
   const add = (): void => {
     const id = typed.trim();
-    if (!id || ids.includes(id)) return;
+    if (!id) return;
+    if (ids.includes(id)) {
+      setDupe(id);
+      return;
+    }
     clearError();
+    setDupe(null);
     setIds([...ids, id]);
     setTyped("");
   };
@@ -112,6 +119,7 @@ function ModelsEditor({ info, hasClient, pending, update, clearError, error }: E
   };
   const reset = (): void => {
     clearError();
+    setDupe(null);
     setMode(storedMode);
     setIds((storedMode === "add" ? storedAdditional : storedModels).map((m) => m.id));
     setTyped("");
@@ -160,6 +168,7 @@ function ModelsEditor({ info, hasClient, pending, update, clearError, error }: E
                   disabled={disabled}
                   onClick={() => {
                     clearError();
+                    setDupe(null);
                     setIds(ids.filter((x) => x !== id));
                   }}
                 >
@@ -179,6 +188,7 @@ function ModelsEditor({ info, hasClient, pending, update, clearError, error }: E
             placeholder="model id"
             onChange={(e) => {
               clearError();
+              setDupe(null);
               setTyped(e.target.value);
             }}
             onKeyDown={(e) => {
@@ -200,6 +210,11 @@ function ModelsEditor({ info, hasClient, pending, update, clearError, error }: E
             Add
           </Button>
         </div>
+        {dupe ? (
+          <p role="status" className="text-ui-sm text-destructive" data-testid="instance-model-duplicate">
+            {dupe} is already in the list
+          </p>
+        ) : null}
         <div className="flex justify-end gap-2">
           {unchanged ? null : (
             <Button type="button" variant="ghost" size="xs" disabled={disabled} data-testid="instance-models-reset" onClick={reset}>
@@ -227,12 +242,19 @@ function ToolsEditor({ info, hasClient, pending, update, clearError, error }: Ed
   const stored = info.instance?.disallowedTools ?? [];
   const [tools, setTools] = useState<string[]>(stored);
   const [typed, setTyped] = useState("");
+  // The name the last add refused as a duplicate, until the next input change.
+  const [dupe, setDupe] = useState<string | null>(null);
   const disabled = !hasClient || pending;
   const unchanged = sameIds(tools, stored);
   const add = (): void => {
     const name = typed.trim();
-    if (!name || tools.includes(name)) return;
+    if (!name) return;
+    if (tools.includes(name)) {
+      setDupe(name);
+      return;
+    }
     clearError();
+    setDupe(null);
     setTools([...tools, name]);
     setTyped("");
   };
@@ -267,6 +289,7 @@ function ToolsEditor({ info, hasClient, pending, update, clearError, error }: Ed
                   disabled={disabled}
                   onClick={() => {
                     clearError();
+                    setDupe(null);
                     setTools(tools.filter((t) => t !== name));
                   }}
                 >
@@ -286,6 +309,7 @@ function ToolsEditor({ info, hasClient, pending, update, clearError, error }: Ed
             placeholder="e.g. WebSearch"
             onChange={(e) => {
               clearError();
+              setDupe(null);
               setTyped(e.target.value);
             }}
             onKeyDown={(e) => {
@@ -307,6 +331,11 @@ function ToolsEditor({ info, hasClient, pending, update, clearError, error }: Ed
             Add
           </Button>
         </div>
+        {dupe ? (
+          <p role="status" className="text-ui-sm text-destructive" data-testid="instance-tool-duplicate">
+            {dupe} is already disallowed
+          </p>
+        ) : null}
         <div className="flex justify-end gap-2">
           {unchanged ? null : (
             <Button
@@ -317,6 +346,7 @@ function ToolsEditor({ info, hasClient, pending, update, clearError, error }: Ed
               data-testid="instance-tools-reset"
               onClick={() => {
                 clearError();
+                setDupe(null);
                 setTools(stored);
                 setTyped("");
               }}
