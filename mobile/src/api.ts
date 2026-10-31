@@ -261,6 +261,15 @@ export interface ModelInfo {
   default?: boolean;
 }
 
+/** The picker gate (see web lib/types.ts ProviderGate): a client renders an unknown reason as its action label. */
+export interface ProviderGate {
+  reason: string;
+  until?: string;
+  action?: { kind: string; target?: string; label: string; models?: string[] };
+  accountId?: number;
+  advisory?: boolean;
+}
+
 export interface ProviderInfo {
   /** A string, not a closed set: the four built-ins plus every providers.custom entry (ADR-0042). */
   id: string;
@@ -283,6 +292,10 @@ export interface ProviderInfo {
   thinking?: 'supported' | 'hidden';
   /** fingerprint only, never a value */
   secrets?: { name: string; env: string; set: boolean; fingerprint?: string }[];
+  /** Why the provider cannot run now and the way out (daemon-computed); absent when nothing blocks it. */
+  gate?: ProviderGate;
+  /** Per-model gates that differ from `gate`. */
+  modelGates?: Record<string, ProviderGate>;
 }
 
 /** provider.list: {providers: [...]} unwrapped. */
