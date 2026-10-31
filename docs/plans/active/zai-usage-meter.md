@@ -72,14 +72,30 @@ check of the endpoint above; **not done here**. Until a live call confirms the s
    `TestProviderUsage_FailureBackoff`, `TestProviderUsage_RetryAfter429`, `TestProviderUsage_FailureKeepsLastGood`,
    `TestProviderUsage_ExhaustedCacheOnly`.
 4. AC4 secret: `TestProviderUsageRPC_SentinelKeyNeverLeaks` (sentinel key absent from RPC result, events, log output, error text).
-5. AC5 wire: `TestProviderUsageRPC_Modes`, `TestProviderUsageRPC_RunScopedRefreshDowngraded`, `TestProviderUsageRPC_NoSecretIsUnavailable`,
+5. AC5 wire: `TestProviderUsageRPC_Modes`, `TestProviderUsageRPC_NoSecretIsUnavailable`,
    `TestProviderUsageRPC_DisabledMakesNoRequest`.
 6. AC6 routing: `TestProviderCooldown_WindowExhaustedBlocks`, `TestProviderCooldown_UsesCachedWindowOnly` (0 requests),
    `TestProviderCooldown_LaterOfRowAndWindow`, `TestProviderCooldown_RoutingOffIgnoresWindow`, `TestProviderCooldown_GLM429StillWorks`.
 7. AC7 web vitest + frames: usage lines in Settings → Usage and Providers detail, light+dark 1280/390.
 
+## Decisions made while building
+
+- `provider.usage` is human-only (refused for run-scoped callers), not downgraded like `account.usage`: it is an outbound call with a secret.
+- No `provider.usage` event yet: the web re-reads after its own touch/refresh. `cooldownUntil` on a usage row is reserved and always null; the cooldown line comes from `provider.list` (merged: later of the 429 row and the cached window reset).
+- `provider.clearCooldown` clears the 429 row only. A cached used-up window keeps blocking non-human sends until the next Refresh shows a reset (the daemon cannot know the Human reset the quota by hand). Follow-up if wanted: make clear also invalidate the cached window.
+- State is in memory only (`quota_snapshots` has an FK to `accounts`); a restart resets the ledger. No background polling exists, so nothing fetches on its own.
+- Mobile: the usage screen is account-only; follow-up.
+- Settings -> Usage shows "No accounts with plan usage yet" above a Z.AI card when no Anthropic/OpenAI account exists (visible in frames); cosmetic follow-up.
+
 ## Progress
 
-- [x] spec + endpoint notes
+- [x] spec + endpoint notes + contract (id 9)
+- [x] quota: zai.go (parse + fetch), providerusage.go (budget), zaiinstance.go (creds seam)
+- [x] runs: cached-window cooldown (ProviderQuota)
+- [x] wsapi: provider.usage; cmd/smind wiring + adapters
+- [x] web: useProviderUsage, ProviderUsageList, ProviderPlanUsage in Settings -> Usage and Providers detail
+- [x] frames light+dark 1280/390 on an isolated daemon with a fake Z.AI server (throwaway env seam, never committed)
+
 ## Validation
-(filled as work lands)
+
+See the PR body: per-AC test names, mutations run (all failed their test), `task lint`, `task test`, `-race` on quota/runs/wsapi/cmd, frames under /tmp/zai-frames/out. The endpoint shape stays `inferred` until a live call with a real key.
