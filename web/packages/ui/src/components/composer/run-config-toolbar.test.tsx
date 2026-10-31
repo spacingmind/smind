@@ -102,7 +102,7 @@ async function pickModel(providerId: string, modelId = ""): Promise<void> {
 async function pick(label: string, optionText: string): Promise<void> {
   fireEvent.click(screen.getByLabelText(label));
   const options = await screen.findAllByRole("option");
-  const target = options.find((o) => o.textContent === optionText);
+  const target = options.find((o) => (o.getAttribute("aria-label") ?? o.textContent) === optionText);
   expect(target).toBeTruthy();
   fireEvent.click(target!);
   await flush();

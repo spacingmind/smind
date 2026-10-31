@@ -1,0 +1,28 @@
+{
+  "name": "table-unknown-column",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "table",
+      "columns": [
+        {
+          "key": "a",
+          "label": "A"
+        }
+      ],
+      "rows": [
+        {
+          "a": "1",
+          "bonus": "x"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "invalid": "$.root.rows[0].bonus"
+  }
+}

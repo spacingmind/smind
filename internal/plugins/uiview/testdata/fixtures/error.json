@@ -1,0 +1,26 @@
+{
+  "name": "error",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "error",
+      "title": "Panel failed",
+      "text": "The plugin process is not running."
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "text": "The plugin process is not running.",
+        "title": "Panel failed",
+        "type": "error"
+      },
+      "ui": 1
+    }
+  }
+}

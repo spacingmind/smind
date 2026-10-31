@@ -262,6 +262,81 @@ Audit frames `zc_{light,dark}_1280_home` only (sources: `WorkspaceSidebar.tsx`,
 
 None: reference-only reimplementation.
 
+## Stage 3c — Composer + home landing (audit 3, 6, 7, 17)
+
+One PR, reference-only (no ZCode source copied, no "Ported from" headers; the shape comes
+from the audit frames `zc_{light,dark}_1280_{home,modemenu,projmenu}`). No behaviour change
+to the task composer: profiles, models, thinking, attachments, @file/PR/issue attach,
+drafts, Cmd+L focus, queue-vs-interrupt (`whenBusy`), Esc-stop and Shift+Tab mode cycle
+stay as they are. No daemon/wsapi change; the mobile app is untouched.
+
+### References (ZCode files consulted, read-only)
+
+Audit frames only (ZCode sources named by the audit: `WelcomeScreen.tsx`,
+`NewTaskButtonGroup.tsx`, `LexicalChatInput.tsx`, `composer-toolbar-layout/`,
+`ModelConfigSelect.tsx`, `ChatErrorBanner.tsx`).
+
+### Design decisions
+
+- The landing composer is **not** a second composer implementation of run logic: it shares
+  the card shell constants (`lib/composer-shell.ts`) and `PromptTextarea` with the task
+  composer, and creates the task through the same `task.create` RPC as the new-task dialog.
+  The first prompt is carried into the new task as the composer draft (the mechanism the
+  dialog already uses to carry a picked issue), so run config (profile/model/mode), the
+  `whenBusy` choice and sending stay in the task composer, which owns them. Consequence: a
+  landing submit creates the task and opens it with the prompt ready; one more Enter sends.
+  Recommendation to the Human: keep it (auto-send would need a pending-send hand-off into
+  the task composer's submit path); say so if you want it.
+- Model/mode chips are not on the landing: they are per-chat run config keyed by a chat id
+  that does not exist yet (inventing them would be a fake affordance).
+- The notices row on the landing is the existing global `DesktopDaemonBanner` (rendered above
+  every screen); the untrusted-source banner appears in the task view. Both adopt the new
+  `NoticeBanner` primitive.
+
+### Acceptance criteria
+
+- **AC1 (item 3)** With no task selected the main pane shows a landing: smind's own mark,
+  a short neutral greeting H1, a project chip (workspace picker, remembered in a preference
+  store) and a composer card (shared shell, `PromptTextarea`, circular send). Submitting
+  creates a task in the chosen project (title from the prompt's first line, max 60 chars)
+  via `task.create`, seeds the draft with the full prompt, and selects the task. Disabled
+  with a stated reason while disconnected, with no projects, or with an empty prompt.
+- **AC2 (item 7)** The task composer and the landing share `composer-shell.ts` (card,
+  send button classes); the send button is circular, and when disabled stays clearly a
+  button (dimmed, not invisible). Textarea min height unchanged behaviour (2 rows).
+- **AC3 (item 6)** The permission-mode menu items show icon + label + one-line description
+  + check, in a `rounded-xl` ~220px popover; the project menu has a search field (shown
+  from 6 projects up) and a footer action "Add project" that opens the existing
+  new-workspace dialog.
+- **AC4 (item 17)** `NoticeBanner` (info icon, text, up to two pill actions, dismiss `x`,
+  tones info/warning/error) is used by `DesktopDaemonBanner` and `UntrustedBanner`; all
+  existing test ids and behaviours stay.
+- **AC5** Frames: audit-format sheets (L = ZCode raw, R = smind after) for home/empty,
+  composer states (empty, with attachment, mode menu open, project menu open), notices;
+  1280 light + dark, 390 smind-only, plus menu open/close transition frames, in
+  `/tmp/steward4/zcode-audit/after/composer-home/`. All looked at.
+- **AC6** `task lint` + `task test` green on the final head; one mutation per
+  load-bearing test.
+
+### Named tests
+
+- `components/ui/notice-banner.test.tsx`: `renders icon, text and tone`,
+  `renders primary and secondary actions`, `dismiss calls onDismiss and is absent without it`
+- `components/pickers/pickers.test.tsx`: `mode items show description and check`
+- `lib/composer-shell.test.ts`: `card and send classes are shared constants` (pins
+  `rounded-2xl` card and `rounded-full` send)
+- `components/home/home-landing.test.tsx`: `renders mark, greeting, project chip and composer`,
+  `submit creates a task in the chosen project and selects it`, `submit seeds the composer draft with the prompt`,
+  `title is the first line truncated to 60 chars`, `send is disabled when empty, offline or without projects`,
+  `project menu filters by search and picks a project`, `project choice is remembered`,
+  `Add project calls the handler`
+- `stores/home-project-store.test.ts`: `persists the chosen workspace id`
+- `App.test.tsx`: `shows the landing when no task is selected` (replaces the old text assertion)
+
+### Ported files and sources
+
+None: reference-only reimplementation.
+
 ## Stage 4 — mobile tokens
 
 Port the Stage 1 table into the Expo app's theme (`mobile/`), own PR, after 1.
@@ -287,7 +362,8 @@ buttons, sidebar toggle position), own PR. Prior art:
 - [x] Stage 2 audit handed over (table above).
 - [x] Stage 3a settings (this PR): shell, nav, row-card primitives, Switch, Shortcuts table, empty cards, usage tray applied to General, Appearance, Notifications, Shortcuts, GitHub, Agents, MCP, Skills, Plugins, Automations, Providers, Usage, Connection.
 - [x] Stage 3b shell + sidebar (this PR): light framed content panel, sidebar quick actions, "Task list" header, `newTask` icon.
-- [ ] Stage 3 PRs (timeline, composer, dialogs/menus).
+- [x] Stage 3c composer + home landing (this PR): `NoticeBanner`, rich select items for the mode menu, shared composer shell, home landing with project chip.
+- [ ] Stage 3 PRs (timeline, dialogs/menus).
 - [ ] Stage 4.
 - [ ] Stage 5.
 
@@ -348,3 +424,18 @@ Filled per stage as PRs land.
 - GLM ledger: 3 peer-glm runs (tasks 109 frame, 110 component + icon, 111 wiring + tests),
   0 Sonnet, no rate limit, no turn-cap or wrong-edit failures; `glm-acp-agent` ran with
   `--max-turns 500`.
+
+### Stage 3c validation (composer + home)
+
+- AC1: `components/home/home-landing.tsx` (+ `stores/home-project-store.ts`, wired in `App.tsx`; "Add project" via `lib/app-events.ts` -> sidebar dialog). Tests in `home-landing.test.tsx`, `home-project-store.test.ts`, `app-sidebar-crud.test.tsx`, `App.test.tsx`.
+- AC2: `lib/composer-shell.ts` shared by `composer.tsx` and the landing; send/stop/send-now are `rounded-full`. Disabled send keeps its muted fill (unchanged `execute` variant).
+- AC3: `SelectItem` gained optional `icon`/`description` (label stays the option's accessible name); `ModeSelect` pill uses them in a `rounded-xl` 220px menu; model popover `rounded-xl`. Project menu: search from 6 projects, "Add project" footer.
+- AC4: `ui/notice-banner.tsx` (`NoticeBanner`, `NoticeAction`) used by `DesktopDaemonBanner` and `UntrustedBanner` (frames show the untrusted one; the daemon banner is desktop-only and was not rendered).
+- AC5: sheets (L = ZCode raw, R = smind after) in `/tmp/steward4/zcode-audit/after/composer-home/`:
+  `composer-home_{light,dark}_1280_{a,b,c}.png` (home + project menu; mode menu + attachment; model popover + notice),
+  `composer-home_before-after_{light_1280,390}.png` (smind before | after), `transitions_light_1280_mode.png`,
+  `transitions_dark_1280_proj.png` (open 0/40/80/160 ms, close 0/40 ms: clean fade/zoom, no jump). All looked at; ZCode has no task page, so its home frame is the left side for task-composer rows.
+- Not done / differences kept: no model/mode chips on the landing (per-chat run config), no auto-send (the prompt arrives as the task's draft), project chip strip is subtle, the daemon update banner not visually verified, ZCode's "+" attach and "Manage models" entries are not on the landing.
+- Mutations (all failed the named test, files restored): `rounded-full`->`rounded-xl` (composer-shell), error role (notice-banner), drop select `aria-label` (2 composer tests), title cap 60->80, drop draft seed, search threshold off (home-landing), drop mode description (pickers).
+- Peer ledger: GLM 2 runs done (task 143 style strip, 142 model popover), 5 runs hit the 5h rate limit (07:23, resets 10:42, cancelled and resent), Sonnet 5 runs done (tasks 142 and 143, steps A1, A2, B1, B2, B3). Review found 3 regressions Sonnet left (composer/toolbar tests keyed on option text, a Workspace fixture type error that broke `bun run build`), fixed by the Lead.
+

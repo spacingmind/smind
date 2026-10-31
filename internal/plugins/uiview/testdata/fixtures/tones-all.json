@@ -1,0 +1,66 @@
+{
+  "name": "tones-all",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "stack",
+      "children": [
+        {
+          "type": "badge",
+          "text": "success",
+          "tone": "success"
+        },
+        {
+          "type": "badge",
+          "text": "warning",
+          "tone": "warning"
+        },
+        {
+          "type": "badge",
+          "text": "danger",
+          "tone": "danger"
+        },
+        {
+          "type": "badge",
+          "text": "muted",
+          "tone": "muted"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "children": [
+          {
+            "text": "success",
+            "tone": "success",
+            "type": "badge"
+          },
+          {
+            "text": "warning",
+            "tone": "warning",
+            "type": "badge"
+          },
+          {
+            "text": "danger",
+            "tone": "danger",
+            "type": "badge"
+          },
+          {
+            "text": "muted",
+            "tone": "muted",
+            "type": "badge"
+          }
+        ],
+        "type": "stack"
+      },
+      "ui": 1
+    }
+  }
+}

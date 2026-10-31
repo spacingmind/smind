@@ -1043,6 +1043,18 @@ describe("App routing", () => {
     expect(screen.getByTestId("app-empty-state")).toBeInTheDocument();
   });
 
+  it("shows the landing when no task is selected", async () => {
+    window.location.hash = "";
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    await flush();
+
+    expect(screen.getByTestId("home-landing")).toBeInTheDocument();
+    expect(screen.getByText("What should we work on?")).toBeInTheDocument();
+  });
+
   it("opening two file tabs, remounting the app, restores both and the active one", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));

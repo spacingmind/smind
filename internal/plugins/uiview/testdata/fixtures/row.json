@@ -1,0 +1,56 @@
+{
+  "name": "row",
+  "env": {
+    "rpcs": [],
+    "panels": []
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "row",
+      "gap": "sm",
+      "wrap": true,
+      "children": [
+        {
+          "type": "badge",
+          "text": "beta",
+          "tone": "warning"
+        },
+        {
+          "type": "button",
+          "label": "Ask",
+          "action": {
+            "kind": "prompt",
+            "text": "Summarise."
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "children": [
+          {
+            "text": "beta",
+            "tone": "warning",
+            "type": "badge"
+          },
+          {
+            "action": {
+              "kind": "prompt",
+              "text": "Summarise."
+            },
+            "label": "Ask",
+            "type": "button"
+          }
+        ],
+        "gap": "sm",
+        "type": "row",
+        "wrap": true
+      },
+      "ui": 1
+    }
+  }
+}

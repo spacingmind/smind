@@ -46,6 +46,37 @@ def echo_prompt(params):
     return {"prompt": prompt}
 
 
+def hello_view(params):
+    # The panel calls this with {"panelId": ..., "context": ...} and renders the returned
+    # ui:1 document. It is data only: the host validates it and runs every action itself.
+    panel_id = (params or {}).get("panelId") or ""
+    greeting = settings.get("greeting") or "Hello"
+    return {
+        "ui": 1,
+        "root": {
+            "type": "stack",
+            "children": [
+                {"type": "heading", "text": "Hello"},
+                {"type": "text", "text": "Greeting: " + greeting},
+                {"type": "keyValue", "items": [
+                    {"key": "Greeting", "value": greeting},
+                    {"key": "Panel", "value": panel_id},
+                ]},
+                {"type": "button", "label": "Insert greeting", "action": {
+                    "kind": "rpc", "rpc": "echoPrompt",
+                    "params": {"command": "hello-process:hello", "args": ""},
+                }},
+                {"type": "button", "label": "Suggest a prompt", "action": {
+                    "kind": "prompt", "text": "Hello! Please summarize this task.",
+                }},
+                {"type": "button", "label": "Docs", "action": {
+                    "kind": "openUrl", "url": "https://example.com/docs",
+                }},
+            ],
+        },
+    }
+
+
 def main():
     global settings
     while True:
@@ -62,6 +93,8 @@ def main():
             return
         elif method == "rpc.echoPrompt":
             send({"jsonrpc": "2.0", "id": msg_id, "result": echo_prompt(msg.get("params"))})
+        elif method == "rpc.helloView":
+            send({"jsonrpc": "2.0", "id": msg_id, "result": hello_view(msg.get("params"))})
         elif method == "hook.run.finished":
             p = msg.get("params") or {}
             log("run finished: run=%s task=%s status=%s" % (p.get("runId"), p.get("taskId"), p.get("status")))

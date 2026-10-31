@@ -4,6 +4,7 @@ import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { requestNewWorkspace } from "@/lib/app-events";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { clearToasts, Toaster } from "@/components/ui/toast";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -235,6 +236,17 @@ describe("AppSidebar CRUD", () => {
 
     expect(await screen.findByText("Welcome to sMind")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New workspace" })).toBeInTheDocument();
+  });
+
+  it("new workspace event opens the create workspace dialog", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    client.nth("workspace.list").resolve([]);
+    await flush();
+
+    act(() => requestNewWorkspace());
+
+    expect(await screen.findByRole("button", { name: "Create workspace" })).toBeInTheDocument();
   });
 
   it("create-workspace dialog requires a path and shows a hint, without calling the RPC", async () => {

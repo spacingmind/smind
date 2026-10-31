@@ -1,0 +1,123 @@
+{
+  "name": "actions-all",
+  "env": {
+    "rpcs": [
+      "refresh"
+    ],
+    "panels": [
+      "overview"
+    ]
+  },
+  "doc": {
+    "ui": 1,
+    "root": {
+      "type": "stack",
+      "children": [
+        {
+          "type": "button",
+          "label": "Refresh",
+          "action": {
+            "kind": "rpc",
+            "rpc": "refresh",
+            "params": {
+              "depth": 2
+            }
+          }
+        },
+        {
+          "type": "button",
+          "label": "Ask",
+          "action": {
+            "kind": "prompt",
+            "text": "Why did the suite slow down?"
+          }
+        },
+        {
+          "type": "button",
+          "label": "Command",
+          "action": {
+            "kind": "command",
+            "name": "acme-review:refresh"
+          }
+        },
+        {
+          "type": "button",
+          "label": "Panel",
+          "action": {
+            "kind": "openPanel",
+            "panel": "overview",
+            "context": {
+              "task": "current"
+            }
+          }
+        },
+        {
+          "type": "button",
+          "label": "Open",
+          "action": {
+            "kind": "openUrl",
+            "url": "https://Example.com:8443/a?x=1"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "valid": true,
+    "normalized": {
+      "root": {
+        "children": [
+          {
+            "action": {
+              "kind": "rpc",
+              "params": {
+                "depth": 2
+              },
+              "rpc": "refresh"
+            },
+            "label": "Refresh",
+            "type": "button"
+          },
+          {
+            "action": {
+              "kind": "prompt",
+              "text": "Why did the suite slow down?"
+            },
+            "label": "Ask",
+            "type": "button"
+          },
+          {
+            "action": {
+              "kind": "command",
+              "name": "acme-review:refresh"
+            },
+            "label": "Command",
+            "type": "button"
+          },
+          {
+            "action": {
+              "context": {
+                "task": "current"
+              },
+              "kind": "openPanel",
+              "panel": "overview"
+            },
+            "label": "Panel",
+            "type": "button"
+          },
+          {
+            "action": {
+              "host": "example.com:8443",
+              "kind": "openUrl",
+              "url": "https://Example.com:8443/a?x=1"
+            },
+            "label": "Open",
+            "type": "button"
+          }
+        ],
+        "type": "stack"
+      },
+      "ui": 1
+    }
+  }
+}
