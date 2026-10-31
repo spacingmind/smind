@@ -2,6 +2,7 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { AccountUsage, AccountUsageParams } from "@/lib/account-usage/types";
 import { RpcError, type WsClient } from "@/lib/ws-client";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import type { ProviderUsageRow } from "@/lib/account-usage/provider-usage-types";
 import { usageResult } from "@/test/account-usage-fixtures";
 import type {
   Account,
@@ -70,6 +71,10 @@ export class FakeUsageDaemon {
   setEnvError: Error | null = null;
   /** When set, every `account.list` / `provider.list` / `provider.test` / account-mutation request rejects with it. */
   failNonUsageWith: Error | null = null;
+  /** Answers `provider.usage` (Z.AI instance plan windows). */
+  providerUsageRows: ProviderUsageRow[] = [];
+  /** When set, `provider.usage` rejects with it (e.g. "method not found" for an old daemon). */
+  providerUsageError: Error | null = null;
   /** Every non-`account.usage` request, as `{ method, params }`, in order. */
   calls: { method: string; params: unknown }[] = [];
   /** Optional shaper for an account mutation's result (the daemon's own answer, e.g. a credential swap that changes credentialType). */
@@ -104,6 +109,9 @@ export class FakeUsageDaemon {
         this.calls.push({ method, params });
         if (this.failNonUsageWith) throw this.failNonUsageWith;
         switch (method) {
+          case "provider.usage":
+            if (this.providerUsageError) throw this.providerUsageError;
+            return { enabled: this.enabled, ttlSeconds: this.ttlSeconds, reports: this.providerUsageRows };
           case "account.list":
             return this.accounts;
           case "provider.list":
