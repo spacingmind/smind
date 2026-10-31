@@ -23,7 +23,7 @@ import { useProfileList } from "@/hooks/use-profiles";
 import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import { NEW_WORKSPACE_EVENT } from "@/lib/app-events";
-import { Icons } from "@/lib/icons";
+import { Icons, pluginIconByName } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 import type {
@@ -997,20 +997,23 @@ export function AppSidebar({
             <SidebarGroupContent>
               <SidebarMenu>
                 <TooltipProvider>
-                  {pluginSidebarItems.map((item) => (
-                    <SidebarMenuItem key={`${item.plugin}:${item.id}`}>
-                      <SidebarMenuButton
-                        tooltip={item.title}
-                        data-testid="sidebar-plugin-item"
-                        data-plugin={item.plugin}
-                        data-panel={item.opens}
-                        onClick={() => onOpenPluginPanel?.(item.plugin, item.opens)}
-                      >
-                        <Icons.plugin aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
-                        <span className="truncate">{item.title}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {pluginSidebarItems.map((item) => {
+                    const ItemIcon = pluginIconByName(item.icon ?? "");
+                    return (
+                      <SidebarMenuItem key={`${item.plugin}:${item.id}`}>
+                        <SidebarMenuButton
+                          tooltip={item.title}
+                          data-testid="sidebar-plugin-item"
+                          data-plugin={item.plugin}
+                          data-panel={item.opens}
+                          onClick={() => onOpenPluginPanel?.(item.plugin, item.opens)}
+                        >
+                          <ItemIcon aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
+                          <span className="truncate">{item.title}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
                 </TooltipProvider>
               </SidebarMenu>
             </SidebarGroupContent>
