@@ -169,3 +169,42 @@ func TestFloorWindows_SegmentPathsSkipsNonPathWords(t *testing.T) {
 		t.Error("segmentPaths(go test C:foo) = nil error, want error")
 	}
 }
+
+func TestFloorWindows_TempHomeStillProtected(t *testing.T) {
+	t.Parallel()
+	dir := fakeEntry{kind: "dir"}
+	mk := func(home string, paths ...string) Request {
+		entries := map[string]fakeEntry{}
+		for _, p := range paths {
+			entries[p] = dir
+		}
+		temp := `C:\Temp`
+		if home == `C:\Users\bob` {
+			temp = `C:\Users\bob\AppData\Local\Temp`
+		}
+		return Request{
+			Tool: "Bash", Worktree: `C:\Temp\wt`, Cwd: `C:\Temp\wt`,
+			Home: home, SmindHome: home + `\.smind`,
+			plat: newWin(entries, map[string]string{"TEMP": temp, "TMP": temp}),
+		}
+	}
+	tempHome := mk(`C:\Temp\home`, `C:\Temp`, `C:\Temp\home`, `C:\Temp\home\.ssh`, `C:\Temp\home\.smind`, `C:\Temp\wt`)
+	realHome := mk(`C:\Users\bob`, `C:\Users\bob`, `C:\Users\bob\AppData\Local\Temp`, `C:\Users\bob\AppData\Local\Temp\x`,
+		`C:\Users\bob\AppData\Roaming`, `C:\Users\bob\AppData\Roaming\x`)
+	cases := []struct {
+		req Request
+		cmd string
+		id  string
+	}{
+		{tempHome, `type C:\Temp\home\.ssh\config`, "no-install-state"},
+		{tempHome, `dir C:\Temp\home\.smind`, "no-install-state"},
+		{realHome, `dir C:\Users\bob\AppData\Local\Temp\x`, ""},
+		{realHome, `dir C:\Users\bob\AppData\Roaming\x`, "no-install-state"},
+	}
+	for _, tc := range cases {
+		hit, ok := floorWin(t, tc.req, tc.cmd)
+		if ok != (tc.id != "") || hit.ID != tc.id {
+			t.Errorf("CheckFloor(%q) = %+v, %v; want id %q", tc.cmd, hit, ok, tc.id)
+		}
+	}
+}

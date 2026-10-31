@@ -143,13 +143,24 @@ func inInstallState(req Request, resolved string) bool {
 	if req.Worktree != "" && pl.within(resolved, []string{req.Worktree}) {
 		return false
 	}
-	if pl.windows && pl.within(resolved, tempRoots(pl)) {
-		return false // the OS temp dir normally lives under AppData
-	}
-	if floorHome(req) == "" {
+	home := floorHome(req)
+	if home == "" {
 		return false
 	}
-	return pl.within(resolved, installRoots(req))
+	roots := installRoots(req)
+	if pl.windows && pl.within(resolved, tempRoots(pl)) {
+		// The OS temp dir normally lives under AppData: carve out only that
+		// root, so a home under the temp zone keeps its other roots.
+		appData := pl.join(home, "AppData")
+		kept := roots[:0:0]
+		for _, r := range roots {
+			if !pl.eq(r, appData) {
+				kept = append(kept, r)
+			}
+		}
+		roots = kept
+	}
+	return pl.within(resolved, roots)
 }
 
 // tempRoots is the OS temp zone, where scratch writes are allowed.
