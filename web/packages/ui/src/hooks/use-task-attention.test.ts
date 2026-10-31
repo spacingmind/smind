@@ -302,3 +302,34 @@ describe("useTaskAttention rateLimit (ADR-0041 R3)", () => {
     expect(result.current.rateLimit.size).toBe(0);
   });
 });
+
+describe("useTaskAttention failure classes (run failure classes)", () => {
+  const failed = (id: string, kind: string, label: string): RunSummary => ({
+    ...run(id, 1, "error", "2024-01-01T00:05:00Z"),
+    FailureKind: kind,
+    FailureAction: { kind: "x", label },
+  });
+
+  it("exposes the class and the action label for auth, model and transient failures, keeping status error", async () => {
+    for (const [kind, label] of [["auth_expired", "Sign in again to GLM"], ["model_not_in_plan", "Pick another model"], ["transient_429", "Retry"]]) {
+      const client = new FakeWsClient();
+      const { result } = renderHook(() => useTaskAttention(client, null, null));
+      client.nth("run.list").resolve([failed("r", kind, label)]);
+      await flush();
+      expect(result.current.runStatus.get(1)).toBe("error");
+      expect(result.current.rateLimit.get(1)).toEqual({ kind, label });
+    }
+  });
+
+  it("a live terminal event sets it and a later status clears it", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    const { result } = renderHook(() => useTaskAttention(client, null, stub.events));
+    client.nth("run.list").resolve([]);
+    await flush();
+    stub.fire("run.status", { runId: "c", taskId: 1, chatId: 1, status: "error", failureKind: "auth_expired", action: { kind: "sign_in", label: "Sign in again" } });
+    expect(result.current.rateLimit.get(1)).toEqual({ kind: "auth_expired", label: "Sign in again" });
+    stub.fire("run.status", { runId: "c", taskId: 1, chatId: 1, status: "running" });
+    expect(result.current.rateLimit.has(1)).toBe(false);
+  });
+});

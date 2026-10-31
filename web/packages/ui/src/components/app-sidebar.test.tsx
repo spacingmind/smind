@@ -838,6 +838,29 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(dot.getAttribute("aria-label")).toContain("Rate limited · reset time unknown");
   });
 
+  it("an auth_expired task keeps the danger dot and says what to do; a transient 429 is a warning dot", async () => {
+    const client = renderSidebar({
+      runStatus: new Map([[TASK.ID, "error"]]),
+      rateLimit: new Map([[TASK.ID, { kind: "auth_expired", label: "Sign in again to GLM" }]]),
+    });
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    const dot = await screen.findByTestId("task-run-status");
+    expect(dot).toHaveAttribute("data-status", "danger");
+    expect(dot.getAttribute("aria-label")).toBe("latest run error, Sign in again to GLM");
+    expect(screen.getByTestId("sidebar-task-row").getAttribute("aria-label")).not.toContain("Rate limited");
+  });
+
+  it("a transient 429 task shows the warning dot and its label, never the rate-limit sentence", async () => {
+    const client = renderSidebar({
+      runStatus: new Map([[TASK.ID, "error"]]),
+      rateLimit: new Map([[TASK.ID, { kind: "transient_429", label: "Retrying automatically (1 of 2)" }]]),
+    });
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    const dot = await screen.findByTestId("task-run-status");
+    expect(dot).toHaveAttribute("data-status", "warning");
+    expect(dot.getAttribute("aria-label")).toBe("latest run error, Retrying automatically (1 of 2)");
+  });
+
   it("plain error task still shows the error dot", async () => {
     const client = renderSidebar({ runStatus: new Map([[TASK.ID, "error"]]) });
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
