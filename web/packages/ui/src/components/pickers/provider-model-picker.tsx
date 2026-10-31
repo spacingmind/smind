@@ -616,7 +616,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
       <PopoverContent
         side={variant === "field" ? "bottom" : "top"}
         align="start"
-        className="flex w-[22rem] flex-col p-0"
+        className="flex w-[22rem] flex-col rounded-xl bg-menu p-0 overflow-hidden"
         style={{ height: `min(${popoverHeight}px, var(--radix-popover-content-available-height))` }}
         data-testid="model-picker-popover"
         onOpenAutoFocus={focusInput}
