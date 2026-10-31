@@ -30,6 +30,7 @@ import { describeProfile } from "@/lib/describe-profile";
 import type { AgentProfile, ModeInfo, ProviderInfo } from "@/lib/types";
 import { Icons } from "@/lib/icons";
 import { OwnerBadge } from "@/components/plugins/owner-badge";
+import { requestClearCooldown } from "@/lib/gate-events";
 import { ProfileContractFields } from "@/components/settings/profile-contract-fields";
 import { contractFromProfile, contractParams, EMPTY_CONTRACT, instructionsBytes, INSTRUCTIONS_MAX_BYTES, type ProfileContractState } from "@/components/settings/profile-contract";
 
@@ -402,6 +403,8 @@ function ProfileForm({
             selectedModel={form.model}
             boundProvider={null}
             disabled={false}
+            gatesBlock={false}
+            onClearCooldown={requestClearCooldown}
             // Modes and models are provider-scoped: a new provider starts from its own defaults.
             onSelect={(provider, model) =>
               setForm((f) =>
