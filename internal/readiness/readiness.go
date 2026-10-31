@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -193,11 +194,11 @@ func checkAgentDoc(_ context.Context, r *repo, _ Options) Finding {
 
 var (
 	taskfileTest = regexp.MustCompile(`(?m)^\s+(test|tests|check)[\w:-]*:\s*(#.*)?$`)
-	taskfileLint = regexp.MustCompile(`(?m)^\s+(lint|check|vet)[\w:-]*:\s*(#.*)?$`)
+	taskfileName = regexp.MustCompile(`(?m)^\s+([\w:-]+):\s*(#.*)?$`)
 	makeTest     = regexp.MustCompile(`(?m)^(test|tests|check)[\w-]*\s*:`)
-	makeLint     = regexp.MustCompile(`(?m)^(lint|check|vet)[\w-]*\s*:`)
+	makeName     = regexp.MustCompile(`(?m)^([\w-]+)\s*:`)
 	jsonTest     = regexp.MustCompile(`"test[\w:-]*"\s*:`)
-	jsonLint     = regexp.MustCompile(`"(lint|check|typecheck)[\w:-]*"\s*:`)
+	jsonLint     = regexp.MustCompile(`"(lint|format|fmt|vet|eslint|prettier|biome|golangci)[\w:-]*"\s*:`)
 	npmNoTest    = "no test specified"
 )
 
@@ -225,6 +226,34 @@ func pkgScripts(r *repo, re *regexp.Regexp) (found bool, name string) {
 	return false, ""
 }
 
+// workspaceTest finds a real test script in a package dir's package.json.
+func workspaceTest(r *repo) (string, bool) {
+	for _, d := range r.packageDirs() {
+		txt, ok := r.read(d + "/package.json")
+		if !ok {
+			continue
+		}
+		var p struct {
+			Scripts map[string]string `json:"scripts"`
+		}
+		if json.Unmarshal([]byte(txt), &p) != nil {
+			continue
+		}
+		keys := make([]string, 0, len(p.Scripts))
+		for k := range p.Scripts {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			body := p.Scripts[k]
+			if (k == "test" || strings.HasPrefix(k, "test:")) && strings.TrimSpace(body) != "" && !strings.Contains(body, npmNoTest) {
+				return d + "/package.json script " + k, true
+			}
+		}
+	}
+	return "", false
+}
+
 func checkTest(_ context.Context, r *repo, _ Options) Finding {
 	const title = "Test command is discoverable"
 	const fix = "Define a test target in a Taskfile or Makefile, or a test script in package.json, so an agent can verify its changes."
@@ -241,6 +270,9 @@ func checkTest(_ context.Context, r *repo, _ Options) Finding {
 	if ok, what := pkgScripts(r, jsonTest); ok {
 		return fnd("test-command", title, true, what, "")
 	}
+	if what, ok := workspaceTest(r); ok {
+		return fnd("test-command", title, true, what, "")
+	}
 	if r.isFile("go.mod") {
 		return fnd("test-command", title, true, "go.mod (go test ./...)", "")
 	}
@@ -253,21 +285,113 @@ func checkTest(_ context.Context, r *repo, _ Options) Finding {
 	return fnd("test-command", title, false, "no Taskfile, Makefile, package.json test script, go.mod, Cargo.toml or pytest config found", fix)
 }
 
+// typeName reports a script/task name that only type checks.
+func typeName(name string) bool {
+	l := strings.ToLower(name)
+	return strings.Contains(l, "type") || strings.Contains(l, "tsc")
+}
+
+// lintName reports whether a script/task name denotes linting or formatting.
+// Type checking alone (check-types, tsc) does not count.
+func lintName(name string) bool {
+	l := strings.ToLower(name)
+	if typeName(l) {
+		return false
+	}
+	for _, w := range []string{"lint", "format", "fmt", "vet", "eslint", "prettier", "biome", "golangci"} {
+		if strings.Contains(l, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// lintBody reports whether a script or file body invokes a linter.
+func lintBody(body string) bool {
+	for _, w := range []string{"eslint", "prettier", "biome", "golangci", "oxlint", "ruff", "go vet"} {
+		if strings.Contains(body, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// pkgLintScript finds package.json's lint script (name is "" if none) and the
+// first type-only script it saw.
+func pkgLintScript(r *repo) (name, typeOnly string) {
+	txt, ok := r.read("package.json")
+	if !ok {
+		return "", ""
+	}
+	var p struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if json.Unmarshal([]byte(txt), &p) != nil {
+		if jsonLint.MatchString(txt) {
+			return "package.json", ""
+		}
+		return "", ""
+	}
+	keys := make([]string, 0, len(p.Scripts))
+	for k := range p.Scripts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if lintName(k) || (k == "check" && lintBody(p.Scripts[k])) {
+			return "package.json script " + k, typeOnly
+		}
+		if typeOnly == "" && typeName(k) {
+			typeOnly = k
+		}
+	}
+	return "", typeOnly
+}
+
+// scanLintNames returns the first lint-like task/target name in text and the
+// first type-only one.
+func scanLintNames(re *regexp.Regexp, text string) (lint, typeOnly string) {
+	for _, m := range re.FindAllStringSubmatch(text, -1) {
+		n := m[1]
+		if lintName(n) || n == "lint" || n == "vet" || (n == "check" && lintBody(text)) {
+			return n, typeOnly
+		}
+		l := strings.ToLower(n)
+		if typeOnly == "" && typeName(n) && (strings.HasPrefix(l, "check") || strings.HasPrefix(l, "typecheck") || strings.HasPrefix(l, "tsc")) {
+			typeOnly = n
+		}
+	}
+	return "", typeOnly
+}
+
 func checkLint(_ context.Context, r *repo, _ Options) Finding {
 	const title = "Lint or format command is discoverable"
 	const fix = "Define a lint target or script, or add a linter config, so an agent can check style before finishing."
+	var typeOnly string
 	if n := r.firstFile(taskfileNames...); n != "" {
-		if t, _ := r.read(n); taskfileLint.MatchString(t) {
+		t, _ := r.read(n)
+		lint, to := scanLintNames(taskfileName, t)
+		if lint != "" {
 			return fnd("lint-command", title, true, n+" has a lint task", "")
 		}
+		typeOnly = to
 	}
 	if n := r.firstFile(makefileNames...); n != "" {
-		if t, _ := r.read(n); makeLint.MatchString(t) {
+		t, _ := r.read(n)
+		lint, to := scanLintNames(makeName, t)
+		if lint != "" {
 			return fnd("lint-command", title, true, n+" has a lint target", "")
 		}
+		if typeOnly == "" {
+			typeOnly = to
+		}
 	}
-	if ok, what := pkgScripts(r, jsonLint); ok {
+	what, to := pkgLintScript(r)
+	if what != "" {
 		return fnd("lint-command", title, true, what, "")
+	}
+	if typeOnly == "" {
+		typeOnly = to
 	}
 	for _, n := range []string{
 		".golangci.yml", ".golangci.yaml", ".golangci.toml", ".eslintrc", ".eslintrc.json", ".eslintrc.js", ".eslintrc.cjs",
@@ -281,7 +405,11 @@ func checkLint(_ context.Context, r *repo, _ Options) Finding {
 	if t, ok := r.read("pyproject.toml"); ok && strings.Contains(t, "[tool.ruff") {
 		return fnd("lint-command", title, true, "pyproject.toml ([tool.ruff])", "")
 	}
-	return fnd("lint-command", title, false, "no lint task, script or linter config found", fix)
+	ev := "no lint task, script or linter config found"
+	if typeOnly != "" {
+		ev += " (type checking alone is not lint or format: " + typeOnly + ")"
+	}
+	return fnd("lint-command", title, false, ev, fix)
 }
 
 func checkSetup(_ context.Context, _ *repo, o Options) Finding {
@@ -293,18 +421,101 @@ func checkSetup(_ context.Context, _ *repo, o Options) Finding {
 	return fnd("setup-script", title, false, "no setup script on the workspace", fix)
 }
 
-// ignores reports whether a .gitignore line list covers the name.
-func ignores(lines []string, name string) bool {
-	for _, l := range lines {
-		l = strings.Trim(strings.TrimSpace(l), "/")
-		if l == "" || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "!") {
-			continue
-		}
-		if ok, _ := path.Match(l, name); ok {
-			return true
+type ignoreRule struct {
+	re      *regexp.Regexp
+	neg     bool
+	dirOnly bool
+}
+
+// globRegexp turns a gitignore glob (leading "/" already stripped) into an
+// anchored regexp; nil if it does not compile.
+func globRegexp(p string, anchored bool) *regexp.Regexp {
+	var b strings.Builder
+	b.WriteString("^")
+	i := 0
+	if strings.HasPrefix(p, "**/") {
+		b.WriteString("(?:.*/)?")
+		i = 3
+	} else if !anchored {
+		b.WriteString("(?:.*/)?")
+	}
+	for i < len(p) {
+		switch {
+		case strings.HasPrefix(p[i:], "/**/"):
+			b.WriteString("/(?:.*/)?")
+			i += 4
+		case p[i:] == "/**":
+			b.WriteString("/.*")
+			i += 3
+		case p[i] == '*':
+			b.WriteString("[^/]*")
+			i++
+		case p[i] == '?':
+			b.WriteString("[^/]")
+			i++
+		default:
+			b.WriteString(regexp.QuoteMeta(p[i : i+1]))
+			i++
 		}
 	}
-	return false
+	b.WriteString("$")
+	re, err := regexp.Compile(b.String())
+	if err != nil {
+		return nil
+	}
+	return re
+}
+
+func parseIgnore(lines []string) []ignoreRule {
+	var rules []ignoreRule
+	for _, l := range lines {
+		l = strings.TrimRight(strings.TrimSuffix(l, "\r"), " ")
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		var r ignoreRule
+		if r.neg = strings.HasPrefix(l, "!"); r.neg {
+			l = l[1:]
+		}
+		if r.dirOnly = strings.HasSuffix(l, "/"); r.dirOnly {
+			l = strings.TrimRight(l, "/")
+		}
+		anchored := strings.HasPrefix(l, "/") || strings.Contains(strings.TrimPrefix(l, "**/"), "/")
+		l = strings.TrimPrefix(l, "/")
+		if l == "" {
+			continue
+		}
+		if r.re = globRegexp(l, anchored); r.re != nil {
+			rules = append(rules, r)
+		}
+	}
+	return rules
+}
+
+// ignoreEval reports whether candidate p is ignored; the last matching rule wins.
+func ignoreEval(rules []ignoreRule, p string, isDir bool) bool {
+	ignored := false
+	for _, r := range rules {
+		if r.dirOnly && !isDir {
+			continue
+		}
+		if r.re.MatchString(p) {
+			ignored = !r.neg
+		}
+	}
+	return ignored
+}
+
+// ignores reports whether .gitignore lines cover the root-level directory
+// name, directly or by ignoring everything inside it (dist/*, dist/**).
+func ignores(lines []string, name string) bool {
+	rules := parseIgnore(lines)
+	return ignoreEval(rules, name, true) || ignoreEval(rules, name+"/x", false)
+}
+
+// ignoresFile reports whether the lines cover the root-level file name.
+func ignoresFile(lines []string, name string) bool {
+	return ignoreEval(parseIgnore(lines), name, false)
 }
 
 func checkGitignore(_ context.Context, r *repo, _ Options) Finding {
@@ -316,7 +527,7 @@ func checkGitignore(_ context.Context, r *repo, _ Options) Finding {
 	}
 	lines := strings.Split(txt, "\n")
 	var missing []string
-	if !ignores(lines, ".env") {
+	if !ignoresFile(lines, ".env") {
 		missing = append(missing, ".env")
 	}
 	if r.isFile("package.json") && !ignores(lines, "node_modules") {
@@ -398,6 +609,95 @@ func checkDocs(_ context.Context, r *repo, _ Options) Finding {
 	return fnd("docs", title, false, "no README or docs/ folder", fix)
 }
 
+const maxPackageDirs = 40
+
+var nodeLocks = []string{"package-lock.json", "npm-shrinkwrap.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock"}
+
+// packageDirs returns up to maxPackageDirs sorted, de-duplicated repo-relative
+// dirs that hold their own package.json: root workspaces entries, the subdirs
+// of apps/ and packages/, and top-level subdirs.
+func (r *repo) packageDirs() []string {
+	seen := map[string]bool{}
+	add := func(dir string) {
+		dir = path.Clean(dir)
+		if dir == "." || dir == ".." || strings.HasPrefix(dir, "../") || strings.HasPrefix(dir, "/") ||
+			strings.Contains(dir, "*") || seen[dir] || len(seen) >= maxPackageDirs {
+			return
+		}
+		if base := path.Base(dir); base == "node_modules" || strings.HasPrefix(base, ".") {
+			return
+		}
+		if r.isFile(dir + "/package.json") {
+			seen[dir] = true
+		}
+	}
+	addChildren := func(base string) {
+		for _, n := range r.list(base) {
+			add(base + "/" + n)
+		}
+	}
+	if txt, ok := r.read("package.json"); ok {
+		var p struct {
+			Workspaces json.RawMessage `json:"workspaces"`
+		}
+		var entries []string
+		if json.Unmarshal([]byte(txt), &p) == nil && len(p.Workspaces) > 0 {
+			if json.Unmarshal(p.Workspaces, &entries) != nil {
+				var obj struct {
+					Packages []string `json:"packages"`
+				}
+				if json.Unmarshal(p.Workspaces, &obj) == nil {
+					entries = obj.Packages
+				}
+			}
+		}
+		for _, e := range entries {
+			if e == "" || strings.HasPrefix(e, "!") || strings.HasPrefix(e, "/") || strings.Contains(e, "..") {
+				continue
+			}
+			e = strings.TrimSuffix(e, "/")
+			if base, ok := strings.CutSuffix(e, "/*"); ok {
+				if !strings.Contains(base, "*") {
+					addChildren(path.Clean(base))
+				}
+			} else if !strings.Contains(e, "*") {
+				add(e)
+			}
+		}
+	}
+	addChildren("apps")
+	addChildren("packages")
+	for _, n := range r.list(".") {
+		add(n)
+	}
+	out := make([]string, 0, len(seen))
+	for d := range seen {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// hasDeps reports whether dir's package.json declares dependencies or
+// workspaces; true when it cannot be read or parsed.
+func (r *repo) hasDeps(dir string) bool {
+	txt, ok := r.read(dir + "/package.json")
+	if !ok {
+		return true
+	}
+	var p struct {
+		Dependencies         map[string]string
+		DevDependencies      map[string]string
+		OptionalDependencies map[string]string
+		PeerDependencies     map[string]string
+		Workspaces           json.RawMessage
+	}
+	if json.Unmarshal([]byte(txt), &p) != nil {
+		return true
+	}
+	return len(p.Dependencies)+len(p.DevDependencies)+len(p.OptionalDependencies)+len(p.PeerDependencies) > 0 || len(p.Workspaces) > 0
+}
+
 func checkLockfiles(_ context.Context, r *repo, _ Options) Finding {
 	const title = "Lockfiles for the detected ecosystems"
 	const fix = "Commit the lockfile so installs are reproducible."
@@ -406,7 +706,7 @@ func checkLockfiles(_ context.Context, r *repo, _ Options) Finding {
 		locks    []string
 	}
 	ecos := []eco{
-		{"package.json", []string{"package-lock.json", "npm-shrinkwrap.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock"}},
+		{"package.json", nodeLocks},
 		{"go.mod", []string{"go.sum"}},
 		{"Cargo.toml", []string{"Cargo.lock"}},
 		{"pyproject.toml", []string{"poetry.lock", "uv.lock", "pdm.lock", "Pipfile.lock"}},
@@ -417,10 +717,34 @@ func checkLockfiles(_ context.Context, r *repo, _ Options) Finding {
 		if !r.isFile(e.manifest) {
 			continue
 		}
+		if e.manifest == "go.mod" && r.firstFile("go.sum") == "" {
+			if t, _ := r.read("go.mod"); !strings.Contains(t, "require") {
+				continue
+			}
+		}
 		if l := r.firstFile(e.locks...); l != "" {
 			found = append(found, l)
 		} else {
 			missing = append(missing, e.manifest+" has no lockfile")
+		}
+	}
+	if !r.isFile("package.json") {
+		for _, d := range r.packageDirs() {
+			if !r.hasDeps(d) {
+				continue
+			}
+			var l string
+			for _, n := range nodeLocks {
+				if r.isFile(d + "/" + n) {
+					l = d + "/" + n
+					break
+				}
+			}
+			if l != "" {
+				found = append(found, l)
+			} else {
+				missing = append(missing, d+"/package.json has no lockfile")
+			}
 		}
 	}
 	switch {

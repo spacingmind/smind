@@ -77,3 +77,31 @@ Ran `smind workspace readiness` on the smind repo itself: 7 pass, 2 warn, 1 info
 - `setup-script` still warns: it is a workspace setting (the record's setup script), not repo content. Human action, no repo change.
 
 Follow-ups noticed in the check itself (not fixed here): `lint-command` accepts a `check-types` script as lint (type-checking is not linting); `lockfiles` only looks at the repo root, so nested `web/bun.lock` is not seen; `ignores` skips negations and nested-path globs.
+
+## Checker follow-ups (FU1-FU5)
+
+Fixes to the checker found by the dogfood pass above and by reading it against the smind repo (Go + `web/` bun + `mobile/` npm) and the landing repo (bun + turbo, root `workspaces: [apps/*, packages/config]`). Pass/warn/info semantics and message text stay as they are unless a bullet says otherwise.
+
+### Acceptance criteria
+
+- **FU1 lint is not typecheck.** A `check-types`/`typecheck`/`tsc` script (package.json, Taskfile or Makefile target) alone does not satisfy `lint-command`. Names that count: containing `lint`, `format`, `fmt`, `vet`, `eslint`, `prettier`, `biome`, `golangci`; a bare `check` counts only when its body names a lint tool. When a type-check-only script is the only candidate, the warn evidence says so ("type checking alone is not lint or format").
+- **FU2 nested lockfiles.** A `package.json` one level into a candidate package dir (the root `workspaces` globs of the form `dir/*` or `dir`, plus `apps/*`, `packages/*`, and any top-level dir holding a `package.json`) counts when a lockfile sits in its own dir or at the repo root. Lock missing in both: warn `web/package.json has no lockfile`. The root manifest rule is unchanged (root lockfile required). A `go.mod` with no `require` does not need a `go.sum`.
+- **FU3 workspace tests.** `test-command` also passes when a candidate package dir's `package.json` has a real `test` script (evidence `apps/web/package.json script test`). A root `test` script (including `turbo test`) keeps passing as before.
+- **FU4 .gitignore matcher.** Last matching line wins; `!pattern` re-includes; `dir/**`, `**/dir`, leading `/`, trailing `/`, `*`, `?` handled. Checked names: `.env`, `node_modules`, build dirs (`dist build target out bin`).
+- **FU5 other.** Whatever else the review finds, listed in Progress.
+
+### Named tests (internal/readiness/readiness_followups_test.go, table-driven)
+
+- `TestLint_TypecheckAloneIsNotLint` (package.json, Taskfile, Makefile rows; lint+typecheck passes; warn evidence note)
+- `TestLockfiles_NestedPackages` (landing layout, smind layout, nested missing lock, root lock covers workspace, go.mod without require)
+- `TestTestCommand_WorkspacePackages` (landing before/after #33 layouts, apps/web test script, no test anywhere warns, npm "no test specified" ignored)
+- `TestIgnores_Gitignore` (negation, `.env*` + `!.env.example`, `.env` then `!.env`, `dist/**`, `/dist`, `dist/`, `**/node_modules`, comments, trailing spaces)
+- Existing tests in readiness_test.go keep passing unchanged.
+
+Mutations (one per fix, test must fail): FU1 put `check-types` back in the lint name match; FU2 skip the nested scan; FU3 skip workspace scripts; FU4 ignore `!` lines again.
+
+### Follow-ups: Progress and Validation
+
+- [x] FU1 lint vs typecheck, FU2 nested lockfiles, FU3 workspace test scripts, FU4 gitignore matcher, FU5 (found while running on the smind repo: `npm-stub/package.json` has no dependencies and must not need a lockfile; `go.mod` without `require` needs no `go.sum`).
+- Tests: `TestLint_TypecheckAloneIsNotLint`, `TestLockfiles_NestedPackages`, `TestTestCommand_WorkspacePackages`, `TestIgnores_Gitignore`, `TestCheckGitignore_Layouts`; `-race` passes. One mutation per fix, each failed its test: typeName guard removed (FU1), nested scan disabled (FU2), workspaceTest disabled (FU3), `!` ignored (FU4), hasDeps disabled (FU5).
+- Real check (library, read-only, before = origin/develop checker, after = this branch): smind `lockfiles` pass go.sum -> pass go.sum, desktop/, docs-site/, mobile/, web/bun.lock; landing without root test script: `test-command` warn -> pass `apps/web/package.json script test`; landing `lint-command` pass (check-types) -> warn with the typecheck note.
