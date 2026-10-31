@@ -189,6 +189,18 @@ describe("TerminalPane", () => {
     expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
   });
 
+  it("insets the terminal from the pane edges without padding the fit host", async () => {
+    const client = new FakeWsClient();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => new FakeTerminalHandle()} />);
+    await flush();
+    const host = screen.getByTestId("terminal-container");
+    const wrapper = screen.getByTestId("terminal-inset");
+    expect(host.parentElement).toBe(wrapper);
+    expect(wrapper.className).toContain("p-2");
+    expect(wrapper.className).toContain("bg-terminal-bg");
+    expect(host.className).not.toMatch(/(^|\s)p[xytrbl]?-/);
+  });
+
   it("shows no header row while a terminal is running", async () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();

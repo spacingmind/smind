@@ -648,7 +648,8 @@ export function TerminalPane({
           paste failed: {pasteError}
         </p>
       )}
-      <div className="relative min-h-0 flex-1">
+      <div data-testid="terminal-inset" className="relative min-h-0 flex-1 bg-terminal-bg p-2">
+        {/* Inset lives on this wrapper, never on the fit host: FitAddon ignores the host's own padding. */}
         <div ref={containerRef} data-testid="terminal-container" className="terminal-xterm-shell h-full" />
         {findOpen && (
           <div className="absolute top-2 right-3 z-10">
