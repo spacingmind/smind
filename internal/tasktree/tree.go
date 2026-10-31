@@ -10,6 +10,8 @@ package tasktree
 import (
 	"sort"
 	"strconv"
+
+	"github.com/spacingmind/smind/internal/runs/failure"
 )
 
 // MaxNodes is the cap on the returned node list; a tree larger than this
@@ -57,6 +59,8 @@ type RunFact struct {
 	ResetAt     string
 	// ResetInferred: ResetAt was read in an assumed zone.
 	ResetInferred bool
+	// Action is the failure's next step (failure.Action); nil when none.
+	Action *failure.Action
 }
 
 // Run state constants for RunFact.State / Node.Run.State.
@@ -122,6 +126,8 @@ type NodeRun struct {
 	ResetAt     string `json:"resetAt,omitempty"`
 	// ResetInferred: ResetAt was read in an assumed zone (clients show "≈").
 	ResetInferred bool `json:"resetInferred,omitempty"`
+	// Action is the failure's next step (failure.Action), omitted when none.
+	Action *failure.Action `json:"action,omitempty"`
 }
 
 // NodeUsage bundles a node's own usage, its subtree rollup (every
@@ -336,7 +342,7 @@ func BuildWithRemote(tasks []Task, facts map[int64]RunFact, usage map[int64]Usag
 			Run: NodeRun{
 				State: factState(facts, t.ID), RunningRunIDs: runIDs,
 				PendingPermissions: f.PendingPermissions, Disposition: f.Disposition,
-				FailureKind: f.FailureKind, Window: f.Window, ResetAt: f.ResetAt, ResetInferred: f.ResetInferred,
+				FailureKind: f.FailureKind, Window: f.Window, ResetAt: f.ResetAt, ResetInferred: f.ResetInferred, Action: f.Action,
 			},
 			Counts: rec.counts,
 			Usage:  NodeUsage{Own: usage[t.ID], Subtree: rec.usage, ArchivedDescendants: rec.archived},

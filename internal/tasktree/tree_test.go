@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/runs/failure"
 )
 
 func task(id int64, parent *int64, archived bool) Task {
@@ -524,5 +526,26 @@ func TestBuildEqualsBuildWithRemoteNil(t *testing.T) {
 	jb, _ := json.Marshal(b)
 	if ta != tb || string(ja) != string(jb) {
 		t.Fatalf("Build != BuildWithRemote(nil)\n%s\n%s", ja, jb)
+	}
+}
+
+// TestTreeNode_FailureActionSerialises: the latest run's next action rides on
+// the node as `action`; a node without a failure omits the key.
+func TestTreeNode_FailureActionSerialises(t *testing.T) {
+	tasks := []Task{task(1, nil, false), task(2, pid(1), false)}
+	facts := map[int64]RunFact{
+		2: {State: StateError, FailureKind: "auth_expired", Action: &failure.Action{Kind: failure.ActionSignIn, Target: "settings:providers?provider=glm", Label: "Sign in again to glm"}},
+	}
+	nodes, _ := Build(tasks, facts, nil, Root{WorkspaceID: 1})
+	b, err := json.Marshal(find(t, nodes, 2).Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"action":{"kind":"sign_in","target":"settings:providers?provider=glm","label":"Sign in again to glm"}`) {
+		t.Fatalf("failed node json = %s", b)
+	}
+	b, _ = json.Marshal(find(t, nodes, 1).Run)
+	if strings.Contains(string(b), "action") {
+		t.Fatalf("a node without a failure must omit action: %s", b)
 	}
 }

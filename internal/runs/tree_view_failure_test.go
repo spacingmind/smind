@@ -32,4 +32,7 @@ func TestTaskRunFacts_FailureFromLatestFinishedRun(t *testing.T) {
 	if !f.FailureResetInferred {
 		t.Fatalf("limited fact = %+v, want the GLM reset marked inferred", f)
 	}
+	if f.FailureAction == nil || f.FailureAction.Kind == "" {
+		t.Fatalf("limited fact = %+v, want a derived next action", f)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/tasktree"
 )
 
@@ -25,6 +26,8 @@ type TaskRunFact struct {
 	FailureResetAt *time.Time
 	// FailureResetInferred: FailureResetAt was read in an assumed zone.
 	FailureResetInferred bool
+	// FailureAction is the latest finished run's next action, derived.
+	FailureAction *failure.Action
 }
 
 // taskRunFactSnapshot is one run's contribution to TaskRunFacts, read
@@ -42,6 +45,9 @@ type taskRunFactSnapshot struct {
 	failureWindow        string
 	failureResetAt       *time.Time
 	failureResetInferred bool
+	provider             string
+	model                string
+	action               *failure.Action
 }
 
 // TaskRunFacts summarizes the registry's in-memory runs per task id in
@@ -70,6 +76,9 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			failureWindow:        r.failureWindow,
 			failureResetAt:       cloneTimePtr(r.failureResetAt),
 			failureResetInferred: r.failureResetInferred,
+			provider:             string(r.provider),
+			model:                r.model,
+			action:               r.failureAction(),
 		})
 		r.mu.Unlock()
 	}
@@ -127,6 +136,7 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			f.FailureWindow = a.latest.failureWindow
 			f.FailureResetAt = a.latest.failureResetAt
 			f.FailureResetInferred = a.latest.failureResetInferred
+			f.FailureAction = a.latest.action
 		} else {
 			f.State = tasktree.StateIdle
 		}
