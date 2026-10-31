@@ -140,13 +140,13 @@ describe("RunConfigToolbar pills", () => {
     // acceptEdits is Claude's default -- not auto-approving, so plain.
     const plain = screen.getByLabelText("Permission mode");
     expect(plain).not.toHaveAttribute("data-danger");
-    expect(plain.className).not.toContain("text-warning");
+    expect(plain.className).not.toContain("text-warning-text");
 
     await pick("Permission mode", "Bypass");
 
     const bypass = screen.getByLabelText("Permission mode");
     expect(bypass).toHaveAttribute("data-danger", "true");
-    expect(bypass.className).toContain("text-warning");
+    expect(bypass.className).toContain("text-warning-text");
   });
 
   it("permission pill is warning-tinted while Auto-accept is on", async () => {
@@ -158,7 +158,7 @@ describe("RunConfigToolbar pills", () => {
 
     const mode = screen.getByLabelText("Permission mode");
     expect(mode).toHaveAttribute("data-danger", "true");
-    expect(mode.className).toContain("text-warning");
+    expect(mode.className).toContain("text-warning-text");
   });
 
   it("pill labels and chevrons carry the below-sm hide classes and 44px touch size", () => {

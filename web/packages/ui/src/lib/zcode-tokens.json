@@ -106,6 +106,7 @@
 { "zcode": "--color-warning-foreground", "smind": "--warning-foreground", "light": "#ffffff", "dark": "#000000", "status": "ported", "theme": "--color-warning-foreground" },
 { "zcode": "--color-warning-surface", "smind": "--warning-surface", "light": "color-mix(in srgb, var(--warning) 12%, transparent)", "dark": "color-mix(in srgb, var(--warning) 16%, transparent)", "status": "added", "theme": "--color-warning-surface" },
 { "zcode": "--color-warning-surface-foreground", "smind": "--warning-surface-foreground", "light": "#914e00", "dark": "#ffa159", "status": "added", "theme": "--color-warning-surface-foreground" },
+{ "zcode": "--color-warning-text", "smind": "--warning-text", "light": "#a84a00", "dark": "var(--warning)", "status": "added", "theme": "--color-warning-text" },
 { "zcode": "--color-destructive-surface", "smind": "--destructive-surface", "light": "color-mix(in srgb, var(--destructive) 10%, transparent)", "dark": "color-mix(in srgb, var(--destructive) 16%, transparent)", "status": "added", "theme": "--color-destructive-surface" },
 { "zcode": "--color-destructive-surface-foreground", "smind": "--destructive-surface-foreground", "light": "#b42020", "dark": "#ff8585", "status": "added", "theme": "--color-destructive-surface-foreground" },
 { "zcode": "--color-diff-added", "smind": "--diff-added", "light": "#1e8a3e", "dark": "#46bf72", "status": "ported", "theme": "--color-diff-added" },

@@ -4,6 +4,7 @@ import { Icons } from "@/lib/icons";
 
 import { useObservedModel } from "@/hooks/use-observed-model";
 import { ProviderModelPicker, type PickerProfileRow } from "@/components/pickers/provider-model-picker";
+import { requestClearCooldown } from "@/lib/gate-events";
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { setSettingsIntent } from "@/lib/settings-intent";
 import { buildBrowserProviders, type ProviderHealth } from "@/lib/model-browser";
@@ -416,6 +417,7 @@ function RunConfigToolbarModelPicker() {
           selectProvider(providerId);
           openSettings("providers");
         }}
+        onClearCooldown={requestClearCooldown}
         onOpen={meta.onPickerOpen}
       />
       {state.custom && (

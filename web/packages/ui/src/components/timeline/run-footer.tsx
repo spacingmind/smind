@@ -90,7 +90,7 @@ export function RunFooter<T extends RunFooterRun>({
         data-failure-kind={run.failureKind}
       >
         {running ? (
-          <span className={cn(SEGMENT, "gap-1.5", (waitingOnUser || reconnecting) && "text-warning")}>
+          <span className={cn(SEGMENT, "gap-1.5", (waitingOnUser || reconnecting) && "text-warning-text")}>
             {waitingOnUser || reconnecting ? (
               <StatusDot status="warning" />
             ) : (
@@ -107,7 +107,7 @@ export function RunFooter<T extends RunFooterRun>({
         ) : (
           view.sentence !== undefined && (
             <span
-              className={cn(SEGMENT, "gap-1.5", view.tone === "warning" && "text-warning", view.tone === "danger" && "text-destructive")}
+              className={cn(SEGMENT, "gap-1.5", view.tone === "warning" && "text-warning-text", view.tone === "danger" && "text-destructive")}
             >
               {view.tone !== "neutral" && <StatusDot status={view.tone === "danger" ? "danger" : "warning"} />}
               <span data-testid="run-stop-reason" data-tone={view.tone}>

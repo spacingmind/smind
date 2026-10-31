@@ -2,7 +2,7 @@
 // (model-browser-view.ts + provider-selection.ts), adapted to smind's
 // ProviderInfo/ModelInfo wire types for the combined provider+model picker.
 
-import type { ProviderInfo } from "@/lib/types";
+import type { ProviderGate, ProviderInfo } from "@/lib/types";
 import { providerLabel } from "@/lib/provider-catalog";
 import { compareMatchScores, scoreTextFields } from "./text-match";
 
@@ -18,6 +18,8 @@ export interface ModelRow {
   isDefault?: boolean;
   /** Synthetic default row only: the label of the configured default model (config providers.<id>.defaultModel) a run resolves to. */
   resolvedDefaultLabel?: string;
+  /** The gate of this row: the model's own gate, else the provider's (the default row inherits it too). */
+  gate?: ProviderGate;
   /** Synthetic default row only: set when the owner named the row itself (`defaultRowLabel`), so the trigger shows that label. */
   customLabel?: boolean;
 }
@@ -33,6 +35,8 @@ export interface BrowserProvider {
   modelSelection: ProviderModelSelection;
   /** Set when health says the provider cannot start a run; the reason shown next to the disabled row. */
   unavailableReason?: string;
+  /** The daemon's gate for this provider (internal/gate): hard blocks selection, advisory warns. */
+  gate?: ProviderGate;
 }
 
 export type ProviderHealth = { ok: boolean; detail: string };
@@ -60,7 +64,7 @@ function buildModelRowKey(provider: string, modelId: string): string {
   return `${provider}:${modelId}`;
 }
 
-function buildSyntheticDefaultRow(provider: string, providerLabel: string, resolved?: string, label?: string): ModelRow {
+function buildSyntheticDefaultRow(provider: string, providerLabel: string, resolved?: string, label?: string, gate?: ProviderGate): ModelRow {
   const row: ModelRow = {
     key: buildModelRowKey(provider, ""),
     provider,
@@ -70,6 +74,7 @@ function buildSyntheticDefaultRow(provider: string, providerLabel: string, resol
     isDefault: true,
   };
   if (label !== undefined) row.customLabel = true;
+  if (gate) row.gate = gate;
   if (resolved) {
     row.resolvedDefaultLabel = resolved;
     row.description = `Currently ${resolved}`;
@@ -81,6 +86,12 @@ function buildSyntheticDefaultRow(provider: string, providerLabel: string, resol
 function resolveConfiguredDefault(info: ProviderInfo): string | undefined {
   if (!info.defaultModel) return undefined;
   return info.models?.find((m) => m.id === info.defaultModel)?.label ?? info.defaultModel;
+}
+
+/** `{gate}` for a model row: the model's own gate, else the provider's; `{}` when neither (no undefined key). */
+function gateOf(info: ProviderInfo, modelId: string): { gate?: ProviderGate } {
+  const gate = info.modelGates?.[modelId] ?? info.gate;
+  return gate ? { gate } : {};
 }
 
 export function buildBrowserProviders(
@@ -96,11 +107,12 @@ export function buildBrowserProviders(
     const label = providerLabel(info.id, [info]);
     if (options?.loading) {
       const h = health[info.id];
+      const gate = info.gate ? { gate: info.gate } : {};
       return h && h.ok === false
-        ? { id: info.id, label, modelSelection: { kind: "loading" as const }, unavailableReason: h.detail || "Unavailable" }
-        : { id: info.id, label, modelSelection: { kind: "loading" as const } };
+        ? { id: info.id, label, modelSelection: { kind: "loading" as const }, unavailableReason: h.detail || "Unavailable", ...gate }
+        : { id: info.id, label, modelSelection: { kind: "loading" as const }, ...gate };
     }
-    const rows: ModelRow[] = [buildSyntheticDefaultRow(info.id, label, resolveConfiguredDefault(info), options?.defaultRowLabel)];
+    const rows: ModelRow[] = [buildSyntheticDefaultRow(info.id, label, resolveConfiguredDefault(info), options?.defaultRowLabel, info.gate)];
     for (const model of info.models ?? []) {
       rows.push({
         key: buildModelRowKey(info.id, model.id),
@@ -110,12 +122,14 @@ export function buildBrowserProviders(
         modelLabel: model.label,
         description: model.description ?? model.id,
         isDefault: model.default,
+        ...gateOf(info, model.id),
       });
     }
     const h = health[info.id];
+    const gate = info.gate ? { gate: info.gate } : {};
     return h && h.ok === false
-      ? { id: info.id, label, modelSelection: { kind: "models", rows }, unavailableReason: h.detail || "Unavailable" }
-      : { id: info.id, label, modelSelection: { kind: "models", rows } };
+      ? { id: info.id, label, modelSelection: { kind: "models", rows }, unavailableReason: h.detail || "Unavailable", ...gate }
+      : { id: info.id, label, modelSelection: { kind: "models", rows }, ...gate };
   });
 }
 

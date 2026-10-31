@@ -29,7 +29,7 @@ function StackedContrast({ metrics, noiseFloor }: { metrics: ProbeMetricRow[]; n
             <dt className="text-foreground-subtle">With this skill</dt>
             <dd className="text-right text-foreground-muted">{formatMetric(m.key, m.b)}</dd>
             <dt className="text-foreground-subtle">Δ</dt>
-            <dd className={cn("text-right text-foreground-muted", m.worse && "text-warning")}>
+            <dd className={cn("text-right text-foreground-muted", m.worse && "text-warning-text")}>
               {formatDelta(m.key, m.deltaAB)}
               {m.worse && <WorseMark />}
             </dd>
@@ -103,7 +103,7 @@ function WideContrast({ metrics, noiseFloor }: { metrics: ProbeMetricRow[]; nois
               <td className={cell}>{formatMetric(m.key, m.a)}</td>
               {noiseFloor && <td className={cell}>{m.a2 === null ? "–" : formatMetric(m.key, m.a2)}</td>}
               <td className={cell}>{formatMetric(m.key, m.b)}</td>
-              <td className={cn(cell, m.worse && "text-warning")}>
+              <td className={cn(cell, m.worse && "text-warning-text")}>
                 {formatDelta(m.key, m.deltaAB)}
                 {m.worse && <WorseMark />}
               </td>

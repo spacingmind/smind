@@ -2167,7 +2167,7 @@ function TaskHoverCardBody({
         {status}
       </p>
       {limitHint && (
-        <p data-testid="sidebar-task-rate-limit" className="text-ui-sm text-warning">
+        <p data-testid="sidebar-task-rate-limit" className="text-ui-sm text-warning-text">
           {limitHint}
         </p>
       )}
@@ -2525,7 +2525,7 @@ const TaskRow = memo(function TaskRow({
                   <span
                     data-testid="task-row-time"
                     className={cn(
-                      "w-6 shrink-0 text-right text-ui-xs tabular-nums text-foreground-subtlest @max-[14rem]/sb:hidden",
+                      "w-6 shrink-0 text-right text-ui-xs tabular-nums text-muted-foreground @max-[14rem]/sb:hidden",
                       active && "invisible",
                     )}
                   >
