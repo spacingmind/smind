@@ -14,6 +14,10 @@ type RunContract struct {
 	// Mcp is the seat's MCP policy (ADR-0041 S2b). Nil keeps the legacy
 	// behaviour exactly: the workspace's registered servers, untouched.
 	Mcp *McpPolicy
+
+	// DisallowedTools is the provider-level deny list for this run (claude
+	// only); policy, not content.
+	DisallowedTools []string
 }
 
 // McpPolicy makes a run's MCP server set managed by the daemon: the name

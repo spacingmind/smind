@@ -61,6 +61,10 @@ Permission requests: surface them to the human, never answer them.
 
 One PR per coherent item, against the integration branch. Pushing your branch and opening the PR is authorised; never merge unless the human said to. Put what the PR verified in its description, and be explicit about what was not verified.
 
+### Steward review
+
+After the PR is open and CI is running, the Human may run `smind steward review` on the task: a read-only steward seat re-reads the exact head commit and returns an advisory verdict clamped to the daemon's gates. You never request a review, read one as authority, or act on one by yourself; findings reach you only when the Human sends them. A new commit makes any review stale.
+
 ### 5. Report
 
 Final message: the plan path, what shipped (PR links), what each verified, what was not done, and the decisions that need the human with your recommendation.

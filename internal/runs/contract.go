@@ -126,29 +126,41 @@ func (reg *Registry) withRunContract(ctx context.Context, r *run) context.Contex
 		// ADR-0045: a validator run gets the built-in smind entry whatever
 		// its profile says; the entry's env switches `smind mcp serve` to
 		// the validator-only catalogue and carries the one-time token.
-		c.Mcp = &taskrunner.McpPolicy{Orchestration: true, Env: map[string]string{
-			"SMIND_HOME":    reg.smindHomeDir(),
-			"SMIND_RUN_ID":  r.id,
-			"SMIND_TASK_ID": strconv.FormatInt(r.taskID, 10),
-			"SMIND_CHAT_ID": strconv.FormatInt(r.chatID, 10),
-		}}
+		c.Mcp = &taskrunner.McpPolicy{Orchestration: true, Env: reg.mcpBaseEnv(r)}
 		for k, v := range extra {
 			c.Mcp.Env[k] = v
 		}
 		return taskrunner.WithRunContract(ctx, c)
 	}
+	if spec, ok := reg.seatSpec(r.taskID); ok {
+		// A daemon-owned seat (ADR-0047) gets the built-in entry plus its
+		// own env, and the provider-level deny list. Policy, never logged.
+		c.Mcp = &taskrunner.McpPolicy{Orchestration: true, Env: reg.mcpBaseEnv(r)}
+		for k, v := range spec.Env {
+			c.Mcp.Env[k] = v
+		}
+		c.DisallowedTools = append([]string(nil), spec.DisallowedTools...)
+		return taskrunner.WithRunContract(ctx, c)
+	}
 	if p.OrchestrationTools != nil {
 		c.Mcp = &taskrunner.McpPolicy{Orchestration: *p.OrchestrationTools}
 		if *p.OrchestrationTools {
-			c.Mcp.Env = map[string]string{
-				"SMIND_HOME":    reg.smindHomeDir(),
-				"SMIND_RUN_ID":  r.id,
-				"SMIND_TASK_ID": strconv.FormatInt(r.taskID, 10),
-				"SMIND_CHAT_ID": strconv.FormatInt(r.chatID, 10),
-			}
+			c.Mcp.Env = reg.mcpBaseEnv(r)
 		}
 	}
 	return taskrunner.WithRunContract(ctx, c)
+}
+
+// mcpBaseEnv is the built-in MCP entry's base env: run identity plus the
+// daemon home. Shared by the branches of withRunContract that force the
+// built-in entry on (validator, seat, orchestration profile).
+func (reg *Registry) mcpBaseEnv(r *run) map[string]string {
+	return map[string]string{
+		"SMIND_HOME":    reg.smindHomeDir(),
+		"SMIND_RUN_ID":  r.id,
+		"SMIND_TASK_ID": strconv.FormatInt(r.taskID, 10),
+		"SMIND_CHAT_ID": strconv.FormatInt(r.chatID, 10),
+	}
 }
 
 // SetRunEnvSource installs the hook that supplies extra MCP environment for a

@@ -129,6 +129,12 @@ space.create
 space.delete
 space.get
 space.list
+steward.cancel
+steward.digest.get
+steward.get
+steward.list
+steward.review
+steward.verdict.submit
 task.archive
 task.archiveFinished
 task.archivePreview

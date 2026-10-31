@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/version"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
@@ -90,14 +91,10 @@ func cmdMcpServe(args []string) int {
 	// lets the MCP host notice and respawn us against the new daemon
 	// (ADR-0017 resolved decision 5's "daemon must already be running"
 	// read the same way at runtime, not just at startup).
-	srv := newMCPServer(client)
-	if venv, isValidator, err := validatorEnvFromOS(); isValidator {
-		// ADR-0045: a validator run serves its two tools and nothing else.
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mcp serve: %v\n", err)
-			return 1
-		}
-		srv = newValidatorMCPServer(client, venv)
+	srv, err := seatServerFor(client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp serve: %v\n", err)
+		return 1
 	}
 	srvDone := make(chan error, 1)
 	go func() { srvDone <- srv.Run(ctx, &mcp.StdioTransport{}) }()
@@ -115,6 +112,32 @@ func cmdMcpServe(args []string) int {
 		fmt.Fprintln(os.Stderr, "mcp serve: lost connection to the smind daemon (was it restarted?); exiting -- the MCP host should restart this server")
 		return 1
 	}
+}
+
+// seatServerFor is `mcp serve`'s catalogue decision, split out so a test
+// can drive it without a daemon: the Lead's tools by default, or exactly
+// one seat's catalogue (ADR-0045's validator, ADR-0047 §6's steward). An
+// invalid seat env fails closed, and both seat envs set is refused
+// outright -- a seat serves one catalogue, never a blend.
+func seatServerFor(client *wsclient.Client) (*mcp.Server, error) {
+	senv, isSteward, serr := stewardEnvFromOS()
+	venv, isValidator, verr := validatorEnvFromOS()
+	if isValidator && isSteward {
+		return nil, fmt.Errorf("both a validator seat env and %s are set: a seat serves exactly one catalogue, never both", steward.EnvReviewID)
+	}
+	if isValidator {
+		if verr != nil {
+			return nil, verr
+		}
+		return newValidatorMCPServer(client, venv), nil
+	}
+	if isSteward {
+		if serr != nil {
+			return nil, serr
+		}
+		return newStewardMCPServer(client, senv), nil
+	}
+	return newMCPServer(client), nil
 }
 
 // newMCPServer builds the MCP server and registers its tool catalog: the
