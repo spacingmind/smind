@@ -1,7 +1,7 @@
 ---
 title: Inbox
-description: One list of permissions, validator verdicts and stalled work that need you, on the web and on a phone.
-summary: "This page explains the inbox in sMind by Spacing Mind: one list of permission requests, validator verdicts and stalled task trees that need a person, on the web and on a phone. It is for anyone who runs agents and wants one place to look instead of watching each task."
+description: One list of permissions, host pairings, validator verdicts and stalled work that need you, on the web and on a phone.
+summary: "This page explains the inbox in sMind by Spacing Mind: one list of permission requests, host pairing requests and host link problems, validator verdicts and stalled task trees that need a person, on the web and on a phone. It is for anyone who runs agents and wants one place to look instead of watching each task."
 order: 8
 ---
 
@@ -10,23 +10,32 @@ order: 8
 The inbox is one list of what needs a person. It is derived live from the real
 state of the daemon on every read: the permissions a run is waiting on, the
 validator verdicts waiting for your decision, the task trees that have gone
-quiet. Nothing is stored except what you did to an item: seen, snoozed or
+quiet, and, when connected hosts are on, the pairing requests and host links that
+need a look. Nothing is stored except what you did to an item: seen, snoozed or
 resolved. An item that no longer derives (a permission answered, a verdict
 superseded, a stall cleared) leaves the list on its own, and a restart cannot
 lose or duplicate anything because there is no stored list to drift.
 
 ## What appears here
 
-Three kinds of item:
+Six kinds of item:
 
 | Kind | What it is | When it leaves |
 |---|---|---|
 | **permission** | A tool a run wants to use and is waiting for you to allow. The row shows a redacted line (the tool and, for a file, its path); the full request stays in the card. | When you answer it, or the run ends and retires it. It cannot be snoozed, resolved or hidden: it blocks a run. |
 | **verdict** | The newest validator verdict of a task that needs you: a fail, a blocked verdict or a scope violation, or a pass at the current commit that is ready for your merge decision. The validator itself is described in [Orchestration](orchestration.md). | By itself when it is superseded: a push makes its commit stale, a newer validation replaces it. Or when you resolve it. |
 | **stall** | A task tree with unfinished work but no run and no queued prompt for a while. | When the tree runs again, or when you resolve it. |
+| **host_pair** | Another host asked to pair with this one and waits for you to approve it. Compare the code both hosts show, then approve or reject on the Hosts page (see [Hosts](hosts.md)). | When you approve or reject it. |
+| **host_refused** | A link to a paired host was refused: the host's key changed, or its smind version does not support what this link needs. The row carries the update guidance. | When the cause is fixed and the link comes up, or when you resolve it. |
+| **host_down** | A link to a paired host has been down for more than five minutes. A brief reconnect never shows here. | When the link comes back, or when you resolve it. |
 
-On the web the list is grouped **Needs you now** (permissions), **Validator
-verdicts** and **Stalled**. The phone uses the same three groups.
+Host rows only exist when connected hosts are turned on. A remote host's
+permission request is not a host row: it is an ordinary **permission** row,
+shown on the host that runs the agent.
+
+On the web the list is grouped **Needs you now** (permissions), **Host
+pairing**, **Hosts refused**, **Hosts unreachable**, **Validator verdicts** and
+**Stalled**. The phone uses the same groups.
 
 ## Open it
 
@@ -43,14 +52,16 @@ page shows, with the full request, path and diff, and you answer it there. On a
 phone the row opens the task and you answer on the task screen. There is no
 approve-all, and no snooze, resolve or hide for a permission.
 
-A **verdict** or a **stall** can be:
+A **verdict**, a **stall** or a **host** row can be:
 
 - marked **seen**;
 - **snoozed** — on the web for 1 hour, 4 hours or Tomorrow (24 hours); on a
   phone for 1 hour, 4 hours or until tomorrow. Every snooze is under 24 hours,
   and when the time has passed the item is new again;
 - **resolved**, which takes it out of the list;
-- opened: **Open task** goes to the task the item is about.
+- opened: **Open task** goes to the task the item is about; a host row has
+  **Review hosts** instead, which opens the Hosts page (Settings → Hosts on the
+  web, the Hosts screen on a phone).
 
 ## Keyboard (web)
 

@@ -1,3 +1,4 @@
+import { Checkbox } from "@/components/ui/checkbox";
 import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL } from "@/lib/permission-modes";
 import { Icons } from "@/lib/icons";
 import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
@@ -23,12 +24,11 @@ export function AutoAcceptToggle({
   if (variant === "field") {
     return (
       <label className="flex items-center gap-2 text-ui-sm text-foreground-muted" title={AUTO_ACCEPT_HELP}>
-        <input
-          type="checkbox"
+        <Checkbox
           data-testid={testId}
           checked={checked}
           disabled={disabled}
-          onChange={(e) => onChange(e.target.checked)}
+          onCheckedChange={(on) => onChange(on === true)}
         />
         {AUTO_ACCEPT_LABEL} every permission prompt
       </label>

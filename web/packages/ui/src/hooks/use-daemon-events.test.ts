@@ -78,6 +78,7 @@ describe("useDaemonEvents", () => {
         "automation.updated",
         "task.stalled",
         "inbox.changed",
+        "fleet.hosts.changed",
       ],
     });
 

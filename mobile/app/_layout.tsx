@@ -41,6 +41,7 @@ function RootStack() {
           <Stack.Screen name="new-task" options={{ title: 'New task', presentation: 'modal' }} />
           <Stack.Screen name="plugins" options={{ title: 'Plugins' }} />
           <Stack.Screen name="plugin/[id]" options={{ title: 'Plugin' }} />
+          <Stack.Screen name="hosts" options={{ title: 'Hosts' }} />
           <Stack.Screen name="inbox" options={{ title: 'Inbox' }} />
           <Stack.Screen name="automations" options={{ title: 'Automations' }} />
           <Stack.Screen name="automation/[id]" options={{ title: 'Automation' }} />

@@ -9,6 +9,9 @@ const NOW = Date.parse('2026-10-27T10:30:00Z');
 const perm = inboxItem({ key: 'perm:r1:q1', kind: 'permission', attention: 'high', title: 'Allow write?', links: { taskId: 7, permissionRequestId: 'q1', runId: 'r1' } });
 const verdict = inboxItem();
 const stall = inboxItem({ key: 'stall:9', kind: 'stall', state: 'seen', title: 'Stuck' });
+const hostPair = inboxItem({ key: 'host_pair:mac', kind: 'host_pair', taskId: undefined, title: 'Approve mac?', links: { hostId: 'h1' } });
+const hostRefused = inboxItem({ key: 'host_refused:mac', kind: 'host_refused', taskId: undefined, title: 'mac refused the link', links: {} });
+const hostDown = inboxItem({ key: 'host_down:mac', kind: 'host_down', taskId: undefined, state: 'seen', title: 'mac unreachable', links: { hostId: 'h1' } });
 
 describe('inbox grouping', () => {
   it('groups in the fixed order and names the sections', () => {
@@ -28,6 +31,16 @@ describe('inbox grouping', () => {
     expect(inboxView([], NOW)).toMatchObject({ kind: 'empty', title: 'Nothing needs you' });
   });
 
+  it('groups host kinds in order', () => {
+    const v = inboxView([perm, hostPair, hostRefused, hostDown, verdict], NOW);
+    expect(v.kind).toBe('list');
+    if (v.kind !== 'list') return;
+    expect(v.sections.map((s) => s.title)).toEqual(['Needs you now', 'Host pairing', 'Hosts refused', 'Hosts unreachable', 'Validator verdicts']);
+    expect(v.sections[1].rows[0]).toMatchObject({ hostId: 'h1', icon: 'devices', label: 'Pairing', tone: 'waiting' });
+    expect(v.sections[2].rows[0]).toMatchObject({ hostId: null, label: 'Refused', tone: 'warning' });
+    expect(v.sections[3].rows[0]).toMatchObject({ hostId: 'h1', label: 'Unreachable', tone: 'neutral' });
+  });
+
   it('uses registry icons', () => {
     const v = inboxView([perm, verdict, stall], NOW);
     const names = v.kind === 'list' ? v.sections.map((s) => s.rows[0].icon) : [];
@@ -44,6 +57,12 @@ describe('inbox actions', () => {
   it('offers snooze and resolve for verdict and stall; seen only while new', () => {
     expect(inboxActions(verdict)).toEqual(['seen', 'snooze', 'resolve', 'open']);
     expect(inboxActions(stall)).toEqual(['snooze', 'resolve', 'open']);
+  });
+  it('host rows have the hosts action and snooze/resolve but never open (they have no task)', () => {
+    expect(inboxActions(hostPair)).toEqual(['seen', 'snooze', 'resolve', 'hosts']);
+    expect(inboxActions(hostRefused)).toEqual(['seen', 'snooze', 'resolve', 'hosts']);
+    expect(inboxActions(hostDown)).toEqual(['snooze', 'resolve', 'hosts']);
+    for (const item of [hostPair, hostRefused, hostDown]) expect(inboxActions(item)).not.toContain('open');
   });
 });
 

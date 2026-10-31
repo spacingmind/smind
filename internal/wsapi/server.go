@@ -327,7 +327,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	hs["validation.request"] = newValidationSeat(valSvc, wm, db, reg, runner, profReg).request
 	hs["session.identify"] = handleSessionIdentify(reg)
-	inboxH := newInboxHost(db, bus, reg, newValidationService(db, bus), stalled)
+	inboxH := newInboxHost(db, bus, reg, newValidationService(db, bus), stalled, fleetInboxPairs(db, configFleetEnabled))
 	for method, h := range inboxHandlers(inboxH) {
 		hs[method] = h
 	}
