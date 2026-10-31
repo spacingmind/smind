@@ -40,8 +40,8 @@ mutations:
   - { id: M1, file: internal/inbox/inbox.go, change: "host_down emitted without the 5 minute age check", expectFail: [TestInboxHostDownOnlyAfterFiveMinutes] }
   - { id: M2, file: internal/inbox/inbox.go, change: "host_refused attention set to normal", expectFail: [TestInboxHostRefusedHigh] }
   - { id: M3, file: web/packages/ui/src/components/hosts/approve-host-dialog.tsx, change: "Approve enabled without the typed SAS matching", expectFail: [TestHostsPage_SASNeverAutoConfirmed] }
-  - { id: M4, file: web/packages/ui/src/components/hosts/grant-editor.tsx, change: "the write-workspace requirement removed", expectFail: [TestHostsPage_GrantRequiresWriteWorkspace] }
-  - { id: M5, file: web/packages/ui/src/components/hosts/host-row.tsx, change: "the reverse toggle copy drops the narrower-grant sentence", expectFail: [TestHostsPage_ReverseToggleShowsNarrowerGrant] }
+  - { id: M4, file: web/packages/ui/src/components/hosts/approve-host-dialog.tsx, change: "canApprove drops the !grantNeedsWriteWorkspace(grant) term", expectFail: [TestHostsPage_GrantRequiresWriteWorkspace] }
+  - { id: M5, file: web/packages/ui/src/lib/fleet-types.ts, change: "REVERSE_GRANT_COPY reworded without read only and 0 live agents", expectFail: [TestHostsPage_ReverseToggleShowsNarrowerGrant] }
   - { id: M6, file: mobile/src/hosts/api.ts, change: "approve sends no sas", expectFail: [mobile-hosts] }
 commands:
   - { id: C1, run: "task lint", timeoutSec: 900 }
