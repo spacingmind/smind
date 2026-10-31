@@ -7,7 +7,7 @@ import type { WsClientLike } from "@/lib/ws-client";
 import { useHomeProjectStore } from "@/stores/home-project-store";
 
 function ws(ID: number, Title: string): Workspace {
-  return { ID, Title, Path: `/repos/${Title.toLowerCase()}`, RoutingPolicy: "" };
+  return { ID, Title, Path: `/repos/${Title.toLowerCase()}`, RoutingPolicy: "", CreatedAt: "", UpdatedAt: "" };
 }
 
 const THREE = [ws(1, "Alpha"), ws(2, "Beta"), ws(3, "Gamma")];
