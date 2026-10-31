@@ -155,6 +155,32 @@ that is stale or a replay, and callers that ask too fast. Every call, served or
 refused, is recorded in an audit log on this host with a hash and at most 120
 redacted characters of the request, never its text; rows are kept for 30 days.
 
+### What a paired host can start
+
+A grant that allows create, send and stop lets the peer start work on this host,
+inside the workspaces you chose for it and nowhere else. The peer names the
+workspace, a branch that already exists on this workspace's own `origin` (or a
+base to branch from), a provider and a model, and a text prompt. This host
+fetches the branch itself into a new task and runs the agent with its own
+accounts and settings; nothing of the peer's credentials, environment or files
+travels, and no file or diff can be uploaded. A provider this host has not
+configured, or a branch that is not on `origin`, is refused. The peer can send
+more prompts to, and stop, only the tasks it created.
+
+The run always asks as usual: it never starts in an auto-approving mode, your
+standing rules and the built-in safety floor decide every request, and a request
+nothing decides waits in this host's inbox for you. The peer can see that a run
+is waiting for a permission and cannot answer it. Each remote task shows which
+host it came from.
+
+Limits are counted per peer host, across everything that host starts: how many
+runs may be live at once, how long one run may take, and how much cost the runs
+of the last 24 hours reported. A call over the live-agent or cost limit is
+refused with the limit named; a run over the time limit is stopped here and
+reported as stopped by the wall limit. A run that reports no cost counts as
+nothing, never as an estimate. A retry of a create or send that carries the same
+idempotency key returns the same task and run instead of starting another.
+
 ### Routes and cleartext
 
 A direct route must be `wss://`, or `ws://` to this machine or to an address

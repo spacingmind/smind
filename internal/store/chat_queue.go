@@ -18,6 +18,9 @@ const (
 	ChatQueueSourceHuman        = "human"
 	ChatQueueSourceOrchestrator = "orchestrator"
 	ChatQueueSourceAgent        = "agent"
+	// ChatQueueSourceRemote is a prompt from a paired fleet host
+	// (ADR-0048); only the fleet adapter passes it.
+	ChatQueueSourceRemote = "remote"
 	// ChatQueueSourceChildEvent is a daemon-authored message about a child
 	// run finishing (ADR-0041 B3). Never accepted on the wire: only the
 	// daemon enqueues it.

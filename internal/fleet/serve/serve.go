@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
+	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/spacingmind/smind/internal/fleet/registry"
@@ -18,6 +21,10 @@ type Server struct {
 	opts   Options
 	replay *replayCache
 	lim    *limiter
+	// writeMu spans the idempotency lookup, the budget check and the start
+	// of a write effect, so two concurrent creates cannot both pass
+	// maxLiveAgents.
+	writeMu sync.Mutex
 }
 
 // New builds a Server; it panics when a required option is nil.
@@ -30,6 +37,9 @@ func New(o Options) *Server {
 	}
 	if o.Redact == nil {
 		o.Redact = redact.New(nil, nil).String
+	}
+	if o.PollInterval <= 0 {
+		o.PollInterval = defaultPollInterval
 	}
 	return &Server{opts: o, replay: newReplayCache(), lim: newLimiter(o.RatePerSec, o.Burst)}
 }
@@ -63,6 +73,13 @@ func (s *Server) Handle(ctx context.Context, principal, method string, raw json.
 	if _, aerr := s.opts.Audit.AppendFleetAudit(row); aerr != nil {
 		return nil, aerr
 	}
+	if err != nil && rf == nil {
+		// A backend, ledger or store error can carry the callee's local
+		// paths or remote URLs; the peer gets a fixed refusal and the
+		// detail stays in this host's own log.
+		log.Printf("fleet: %s from %s failed: %v", method, principal, err)
+		return nil, refuse(wire.CodeInternal, "the host could not complete the request")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +99,12 @@ func (s *Server) serve(principal, method string, raw json.RawMessage, now time.T
 	}
 	if r := s.checkProv(principal, env.Prov, now); r != nil {
 		return nil, r
+	}
+
+	// Write methods exist only on a host whose write effects are wired;
+	// without them the read switch below answers "unknown method".
+	if slices.Contains(wire.WriteMethods, method) && s.opts.Backend != nil && s.opts.Ledger != nil && s.opts.Tasks != nil {
+		return s.write(principal, method, raw, now, row)
 	}
 
 	var ws int64
@@ -124,7 +147,18 @@ func (s *Server) serve(principal, method string, raw json.RawMessage, now time.T
 			return nil, err
 		}
 		row.TaskID, row.RunID = id(p.TaskID), p.RunID
-		call = func(g registry.Grant) (any, error) { return rd.RunStatus(g, p) }
+		call = func(g registry.Grant) (any, error) {
+			st, err := rd.RunStatus(g, p)
+			if err != nil {
+				return nil, err
+			}
+			// Only a live run can wait on a permission, and the flag is all
+			// the caller ever learns of it (AC19).
+			if s.opts.Backend != nil && st.State == "running" {
+				st.WaitingPermission = s.opts.Backend.WaitingPermission(st.RunID)
+			}
+			return st, nil
+		}
 	case wire.MethodTaskActivity:
 		var p wire.TaskActivityParams
 		if err := decode(&p); err != nil {
