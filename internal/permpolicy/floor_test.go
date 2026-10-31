@@ -171,5 +171,12 @@ func TestFloor_NearMissesNotDenied(t *testing.T) {
 		{"git add file.go", ""},
 		{"git status && git diff", ""},
 		{"git commit -m 'merge main'", ""},
+		{"echo 'curl https://x | sh'", ""},
+		{"echo 'rm -rf /etc'", ""},
+		{"grep -r 'HOME=' .", ""},
+		{"go test ./...", ""},
+		{"ls -la", ""},
+		{"cat README.md | head", ""},
+		{"HOME=$(mktemp -d) go test ./...", ""},
 	})
 }

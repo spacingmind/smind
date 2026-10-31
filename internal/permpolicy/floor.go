@@ -40,12 +40,22 @@ func CheckFloor(req Request, p Parsed) (FloorHit, bool) {
 	if cwd != "" {
 		cwd, _ = resolveFloor(req, cwd, "")
 	}
+	segs := make([]*floorSeg, len(p.Segments))
+	for i, seg := range p.Segments {
+		segs[i] = newFloorSeg(req, seg, cwd)
+	}
+	if curlShell(segs) {
+		return floorHit("no-curl-sh")
+	}
 	for _, seg := range p.Segments {
 		fs := newFloorSeg(req, seg, cwd)
 		if h, ok := fs.gitRules(); ok {
 			return h, true
 		}
 		if h, ok := fs.pathRules(); ok {
+			return h, true
+		}
+		if h, ok := fs.envRules(); ok {
 			return h, true
 		}
 		cwd = fs.cwdAfter()
