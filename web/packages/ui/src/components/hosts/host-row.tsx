@@ -43,50 +43,70 @@ export function HostRow({
   return (
     <li data-testid={`host-row-${alias}`} className="flex flex-col gap-2 rounded-lg px-2 py-1.5 hover:bg-hover">
       <div className="flex items-start gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="truncate text-ui-base font-medium text-foreground">{alias}</span>
-            {host.label && <span className="shrink-0 truncate text-ui-sm text-muted-foreground">{host.label}</span>}
-            {host.state === "pending" ? (
-              <StatusBadge status="neutral" data-testid={`host-pending-${alias}`}>
-                {host.pendingApproval ? "Awaiting your approval" : `Waiting for approval on ${alias}`}
-              </StatusBadge>
-            ) : host.state === "revoked" ? (
-              <StatusBadge status="neutral" data-testid={`host-link-${alias}`}>
-                Revoked
-              </StatusBadge>
-            ) : (
-              <StatusBadge status={linkTone(host.link)} data-testid={`host-link-${alias}`}>
-                {linkLabel(host.link)}
-              </StatusBadge>
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="truncate text-ui-base font-medium text-foreground">{alias}</span>
+          {host.label && <span className="shrink-0 truncate text-ui-sm text-muted-foreground">{host.label}</span>}
+          {host.state === "pending" ? (
+            <StatusBadge status="neutral" data-testid={`host-pending-${alias}`}>
+              {host.pendingApproval ? "Awaiting your approval" : `Waiting for approval on ${alias}`}
+            </StatusBadge>
+          ) : host.state === "revoked" ? (
+            <StatusBadge status="neutral" data-testid={`host-link-${alias}`}>
+              Revoked
+            </StatusBadge>
+          ) : (
+            <StatusBadge status={linkTone(host.link)} data-testid={`host-link-${alias}`}>
+              {linkLabel(host.link)}
+            </StatusBadge>
+          )}
+        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`Actions for ${alias}`}
+              data-testid={`host-menu-${alias}`}
+              className="shrink-0"
+            >
+              <Icons.more aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {host.state === "approved" && host.inbound.enabled && (
+              <DropdownMenuItem data-testid={`host-edit-grant-${alias}`} onSelect={() => onEditGrant(host)}>
+                Edit access
+              </DropdownMenuItem>
             )}
-          </span>
-          <p className="text-ui-sm text-muted-foreground">
-            You can use {alias}: {host.outboundEnabled ? "on" : "off"}
-          </p>
-          <p className="text-ui-sm text-muted-foreground">
-            {alias} can use this host: {host.inbound.enabled ? "on" : "off"}
-          </p>
-          {host.inbound.enabled && (
-            <p className="text-ui-sm text-muted-foreground" data-testid={`host-grant-${alias}`}>
-              {grantSummary(host.inbound.grant)}
-            </p>
-          )}
-          {host.state === "pending" && host.sas && !host.pendingApproval && (
-            <p className="text-ui-sm text-foreground" data-testid={`host-sas-${alias}`}>
-              Confirm this code on {alias}: <span className="font-medium tabular-nums">{formatSas(host.sas)}</span>
-            </p>
-          )}
-          {host.link === "refused" && (
-            <Alert
-              variant="error"
-              testId={`host-refused-${alias}`}
-              description={host.linkGuidance || host.linkCode || "The link was refused"}
-            />
-          )}
-          {error && <FormError message={error} size="sm" testId={`host-row-error-${alias}`} />}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
+            {host.state === "approved" && (
+              <DropdownMenuItem data-testid={`host-revoke-${alias}`} onSelect={() => onRevoke(host)}>
+                Revoke
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem data-testid={`host-remove-${alias}`} onSelect={() => onRemove(host)}>
+              Remove
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <p className="text-ui-sm text-muted-foreground">
+        You can use {alias}: {host.outboundEnabled ? "on" : "off"}
+      </p>
+      {host.state !== "approved" && (
+        <p className="text-ui-sm text-muted-foreground">
+          {alias} can use this host: {host.inbound.enabled ? "on" : "off"}
+        </p>
+      )}
+      {host.link === "refused" && (
+        <Alert
+          variant="error"
+          testId={`host-refused-${alias}`}
+          description={host.linkGuidance || host.linkCode || "The link was refused"}
+        />
+      )}
+      {(host.pendingApproval || host.state === "approved") && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {host.pendingApproval && (
             <Button type="button" size="sm" data-testid={`host-review-${alias}`} onClick={() => onReview(host)}>
               Review pairing
@@ -104,37 +124,19 @@ export function HostRow({
               <span>Let {alias} use this host</span>
             </label>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`Actions for ${alias}`}
-                data-testid={`host-menu-${alias}`}
-                className="shrink-0"
-              >
-                <Icons.more aria-hidden />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {host.state === "approved" && host.inbound.enabled && (
-                <DropdownMenuItem data-testid={`host-edit-grant-${alias}`} onSelect={() => onEditGrant(host)}>
-                  Edit access
-                </DropdownMenuItem>
-              )}
-              {host.state === "approved" && (
-                <DropdownMenuItem data-testid={`host-revoke-${alias}`} onSelect={() => onRevoke(host)}>
-                  Revoke
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem data-testid={`host-remove-${alias}`} onSelect={() => onRemove(host)}>
-                Remove
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
-      </div>
+      )}
+      {host.inbound.enabled && (
+        <p className="text-ui-sm text-muted-foreground" data-testid={`host-grant-${alias}`}>
+          {grantSummary(host.inbound.grant)}
+        </p>
+      )}
+      {host.state === "pending" && host.sas && !host.pendingApproval && (
+        <p className="text-ui-sm text-foreground" data-testid={`host-sas-${alias}`}>
+          Confirm this code on {alias}: <span className="font-medium tabular-nums">{formatSas(host.sas)}</span>
+        </p>
+      )}
+      {error && <FormError message={error} size="sm" testId={`host-row-error-${alias}`} />}
     </li>
   );
 }

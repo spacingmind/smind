@@ -89,7 +89,7 @@ export function GrantEditor({
         />
       </fieldset>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 items-end gap-2">
         <label className="flex flex-col gap-1 text-ui-sm text-foreground-muted">
           Live agents
           <Input
@@ -115,7 +115,7 @@ export function GrantEditor({
           />
         </label>
         <label className="flex flex-col gap-1 text-ui-sm text-foreground-muted">
-          Cost per 24 h (USD)
+          USD per 24 h
           <Input
             type="number"
             min={0}
