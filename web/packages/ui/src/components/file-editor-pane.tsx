@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "@/lib/icons";
 import type { EditorView } from "@codemirror/view";
 
@@ -15,7 +15,9 @@ import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import { RpcError } from "@/lib/ws-client";
+import { hasBinaryExtension } from "@/lib/binary-extensions";
 import type { FileReadResult, FileWriteResult, RunStatusEventPayload, Task } from "@/lib/types";
+
 
 /**
  * The editor half of the old combined file-explorer pane, now mounted per
@@ -41,17 +43,20 @@ import type { FileReadResult, FileWriteResult, RunStatusEventPayload, Task } fro
  * toggle. Ported from the combined-pane editor view when the explorer
  * became tree-only (see the tab-registry plan's Decisions).
  */
-export function FileEditorPane({
+export function TextEditorPane({
   client,
   task,
   path,
   events,
+  onNotText,
 }: {
   client: WsClientLike | null;
   task: Task;
   path: string;
   /** The app's single-subscription event stream; optional so existing tests/mounts render unchanged. A terminal run.status for this task re-probes a dirty buffer. */
   events?: DaemonEvents | null;
+  /** Called when file.read refuses the file as not UTF-8: the router then asks file.stat what it is. */
+  onNotText?: () => void;
 }) {
   const [content, setContentState] = useState("");
   const [savedContent, setSavedContent] = useState("");
@@ -139,7 +144,9 @@ export function FileEditorPane({
       .catch((err: unknown) => {
         if (cancelled) return;
         setLoading(false);
-        setError(err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        if (message.includes("not valid UTF-8")) onNotText?.();
       });
 
     return () => {
@@ -370,4 +377,27 @@ export function FileEditorPane({
       )}
     </div>
   );
+}
+
+type Mode = "auto" | "binary" | "text";
+
+// The binary half (stat routing, the PDF pane, the panels) is one lazy chunk: the entry gains this import() call, not that code (ADR-0049 AC21).
+const FileTabRouter = lazy(() => import("@/components/file-tab-router"));
+
+/**
+ * The file tab. A file whose extension says binary (or whose text read is refused as not UTF-8) is handed to the lazy FileTabRouter, which
+ * asks `file.stat` what it really is and shows the PDF preview or a "no preview" panel; everything else opens in the editor exactly as it
+ * always did, with no extra call. The router hands plain text, and any stat failure (an older daemon has no `file.stat`), back here.
+ */
+export function FileEditorPane(props: { client: WsClientLike | null; task: Task; path: string; events?: DaemonEvents | null }) {
+  const [mode, setMode] = useState<Mode>(() => (hasBinaryExtension(props.path) ? "binary" : "auto"));
+  if (mode === "binary") {
+    return (
+      <Suspense fallback={<InlineSpinner label="Loading…" />}>
+        <FileTabRouter {...props} onText={() => setMode("text")} />
+      </Suspense>
+    );
+  }
+  // "text" ignores a not-UTF-8 refusal: it is what the router decided, and routing back would loop.
+  return <TextEditorPane {...props} onNotText={mode === "auto" ? () => setMode("binary") : undefined} />;
 }
