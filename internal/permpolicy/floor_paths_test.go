@@ -8,7 +8,7 @@ import (
 // checkFloorReq is checkFloorCases for a request the test prepared itself.
 func checkFloorReq(t *testing.T, req Request, id string) {
 	t.Helper()
-	hit, ok := CheckFloor(req, SplitCommand(req.Command))
+	hit, ok := CheckFloor(req, hostSplit(req.Command))
 	if ok != (id != "") || hit.ID != id {
 		t.Errorf("CheckFloor(%q) = %+v, %v; want id %q", req.Command, hit, ok, id)
 	}
@@ -177,6 +177,9 @@ func TestFloor_PathsToolEdit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			if hasPOSIXOnlyPath(tc.path) {
+				skipPOSIXPathsOnWindows(t)
+			}
 			req := base
 			req.Tool, req.Paths = tc.tool, []string{tc.path}
 			hit, ok := CheckFloorPaths(req)
