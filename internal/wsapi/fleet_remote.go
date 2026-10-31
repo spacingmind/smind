@@ -24,8 +24,9 @@ type FleetRemoteOptions struct {
 	// Conn returns the live connection to a host and the link state; the
 	// Caller is nil unless connected.
 	Conn func(hostID string) (client.Caller, client.LinkState)
-	// RunOrigin returns the host a run arrived from ("" = a local run).
-	RunOrigin func(runID string) string
+	// RunOrigin returns the host a run or its task arrived from ("" = local).
+	// An error means the origin cannot be verified and the call is refused.
+	RunOrigin func(runID string, taskID int64) (string, error)
 	Now       func() time.Time // tests; default time.Now
 	Timeout   time.Duration    // tests; 0 = client default
 }
@@ -121,8 +122,14 @@ func (r *fleetRemote) guard(method string, h handlerFunc) handlerFunc {
 		if !rc.local {
 			return nil, &rpcCodeError{code: codeForbidden, msg: "remote.* is not available over the relay"}
 		}
-		if rc.runScoped && r.o.RunOrigin(rc.ident.runID) != "" {
-			return nil, &rpcCodeError{code: wire.CodeHopLimit, msg: "a task created by a peer host cannot call other hosts (hop limit 1)"}
+		if rc.runScoped {
+			origin, err := r.o.RunOrigin(rc.ident.runID, rc.ident.taskID)
+			if err != nil {
+				return nil, &rpcCodeError{code: wire.CodeHopLimit, msg: "cannot verify the origin of this run (hop limit 1 fails closed)", err: err}
+			}
+			if origin != "" {
+				return nil, &rpcCodeError{code: wire.CodeHopLimit, msg: "a task created by a peer host cannot call other hosts (hop limit 1)"}
+			}
 		}
 		return h(ctx, rc, raw)
 	}

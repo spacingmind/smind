@@ -481,7 +481,7 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 		e := newFleetEnv(t)
 		e.api.SetFleetRemote(FleetRemoteOptions{
 			Conn:      func(string) (client.Caller, client.LinkState) { return nil, client.LinkOther },
-			RunOrigin: func(string) string { return "" },
+			RunOrigin: func(string, int64) (string, error) { return "", nil },
 		})
 		have := map[string]bool{}
 		for _, k := range before {

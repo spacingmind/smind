@@ -51,6 +51,8 @@ type remoteEnv struct {
 	peerID string
 	caller *fakeRemoteCaller
 	origin string
+	// originFn, when set, replaces the origin lookup.
+	originFn func(runID string, taskID int64) (string, error)
 }
 
 func newRemoteEnv(t *testing.T) *remoteEnv {
@@ -60,8 +62,13 @@ func newRemoteEnv(t *testing.T) *remoteEnv {
 	e.pairApproved(t, peer, "peer")
 	e.peerID = peer.HostID()
 	e.api.SetFleetRemote(FleetRemoteOptions{
-		Conn:      func(string) (client.Caller, client.LinkState) { return e.caller, client.LinkConnected },
-		RunOrigin: func(string) string { return e.origin },
+		Conn: func(string) (client.Caller, client.LinkState) { return e.caller, client.LinkConnected },
+		RunOrigin: func(runID string, taskID int64) (string, error) {
+			if e.originFn != nil {
+				return e.originFn(runID, taskID)
+			}
+			return e.origin, nil
+		},
 	})
 	return e
 }
@@ -120,6 +127,33 @@ func TestRemoteReadRefusesRemoteOriginRunHopLimit(t *testing.T) {
 	}
 	if err := json.Unmarshal(e.caller.params[0], &sent); err != nil || sent.Prov.OriginTask != "7" {
 		t.Fatalf("originTask = %q (%v), want 7", sent.Prov.OriginTask, err)
+	}
+}
+
+func TestRemoteReadRefusesWhenRunOriginUnreadable(t *testing.T) {
+	e := newRemoteEnv(t)
+	e.originFn = func(string, int64) (string, error) { return "", errors.New("db closed") }
+	rc := &requestContext{local: true, runScoped: true, ident: runIdentity{runID: "r1", taskID: 7}}
+	_, err := e.call(t, rc, "remote.read", RemoteReadParams{Host: "peer", Op: "info"})
+	wantRemoteCode(t, err, wire.CodeHopLimit)
+	if n := e.caller.calls(); n != 0 {
+		t.Fatalf("caller called %d times with an unreadable origin", n)
+	}
+}
+
+func TestRemoteReadRefusesWhenTaskOriginRemote(t *testing.T) {
+	e := newRemoteEnv(t)
+	e.originFn = func(runID string, taskID int64) (string, error) {
+		if runID == "r1" && taskID != 0 {
+			return "peerX", nil
+		}
+		return "", nil
+	}
+	rc := &requestContext{local: true, runScoped: true, ident: runIdentity{runID: "r1", taskID: 7}}
+	_, err := e.call(t, rc, "remote.read", RemoteReadParams{Host: "peer", Op: "info"})
+	wantRemoteCode(t, err, wire.CodeHopLimit)
+	if n := e.caller.calls(); n != 0 {
+		t.Fatalf("caller called %d times for a remote-origin task", n)
 	}
 }
 

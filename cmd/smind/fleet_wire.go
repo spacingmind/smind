@@ -77,9 +77,22 @@ func newFleet(srv *server.Server, cfg config.Config, home, version string, db *s
 				return nil, client.LinkOther
 			}
 		},
-		RunOrigin: func(runID string) string {
-			h, _ := db.RunOrigin(runID)
-			return h
+		RunOrigin: func(runID string, taskID int64) (string, error) {
+			origin, err := db.RunOrigin(runID)
+			if err != nil {
+				return "", err
+			}
+			if origin != "" {
+				return origin, nil
+			}
+			if taskID != 0 {
+				th, _, err := db.TaskOrigin(taskID)
+				if err != nil {
+					return "", err
+				}
+				return th, nil
+			}
+			return "", nil
 		},
 	})
 	svc.Start()
