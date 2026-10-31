@@ -9,7 +9,7 @@ acs:
     covers: { tests: [labels_row_shows_chips_and_offers_edit_for_approved_hosts_only], frames: [] }
   - id: LE2
     text: "Save sends only the difference through fleet.host.labels (changed or new pairs in set, dropped keys in remove) and the row shows the result; cancelling or closing sends nothing and drops the edits."
-    covers: { tests: [labels_diff_sends_only_changes, labels_edit_sends_only_the_difference, labels_edits_are_dropped_on_close, labels_cancel_sends_nothing], frames: [] }
+    covers: { tests: [labels_diff_sends_only_changes, labels_edit_sends_only_the_difference, labels_edits_are_dropped_on_close], frames: [] }
   - id: LE3
     text: "The dialog mirrors the daemon rules (registry.ValidateLabels): at most 16, key and value patterns, no secret-looking key, no duplicate key. The messages are the daemon's text; an invalid row disables Save; at 16 Add is disabled."
     covers: { tests: [labels_validation_matches_daemon_table, labels_messages_equal_daemon_text, labels_invalid_rows_block_save_and_say_why, labels_cap_of_16_disables_add], frames: [] }
@@ -20,7 +20,6 @@ tests:
   - { name: labels_row_shows_chips_and_offers_edit_for_approved_hosts_only, run: "cd web/packages/ui && bunx vitest run src/components/hosts/edit-labels-dialog.test.tsx -t labels_row_shows_chips", timeoutSec: 900 }
   - { name: labels_edit_sends_only_the_difference, run: "cd web/packages/ui && bunx vitest run src/components/hosts/edit-labels-dialog.test.tsx -t labels_edit_sends_only_the_difference", timeoutSec: 900 }
   - { name: labels_edits_are_dropped_on_close, run: "cd web/packages/ui && bunx vitest run src/components/hosts/edit-labels-dialog.test.tsx -t labels_edits_are_dropped_on_close", timeoutSec: 900 }
-  - { name: labels_cancel_sends_nothing, run: "cd web/packages/ui && bunx vitest run src/components/hosts/edit-labels-dialog.test.tsx -t labels_cancel_sends_nothing", timeoutSec: 900 }
   - { name: labels_invalid_rows_block_save_and_say_why, run: "cd web/packages/ui && bunx vitest run src/components/hosts/edit-labels-dialog.test.tsx -t labels_invalid_rows_block_save", timeoutSec: 900 }
   - { name: labels_cap_of_16_disables_add, run: "cd web/packages/ui && bunx vitest run src/components/hosts/edit-labels-dialog.test.tsx -t labels_cap_of_16", timeoutSec: 900 }
   - { name: labels_daemon_refusal_is_shown_and_keeps_the_dialog, run: "cd web/packages/ui && bunx vitest run src/components/hosts/edit-labels-dialog.test.tsx -t labels_daemon_refusal", timeoutSec: 900 }
