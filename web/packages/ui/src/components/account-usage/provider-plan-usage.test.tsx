@@ -100,4 +100,15 @@ describe("TestPlanUsage", () => {
     expect(screen.queryByTestId("provider-plan-usage")).toBeNull();
     expect(d.countCalls("provider.usage")).toBe(0);
   });
+
+  it("Provider detail of a custom non-zai instance sends no provider.usage call", async () => {
+    const d = detailDaemon(
+      [{ id: "claude-work", label: "Claude work", kind: "cli", vendor: "anthropic", extends: "claude-native", custom: true }],
+      [zaiRow("claude-work")],
+    );
+    renderWithDaemon(<ProviderDetail item={{ ...NAV, id: "claude-work", label: "Claude work" }} client={d.client} />, d);
+    await flush();
+    expect(screen.queryByTestId("provider-plan-usage")).toBeNull();
+    expect(d.countCalls("provider.usage")).toBe(0);
+  });
 });
