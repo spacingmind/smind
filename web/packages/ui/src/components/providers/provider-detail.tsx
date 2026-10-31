@@ -11,6 +11,7 @@ import { AccountsCard } from "@/components/providers/accounts-card";
 import { ProviderDefaultModel } from "@/components/providers/provider-default-model";
 import { ProviderCustomInfo } from "@/components/providers/provider-custom-info";
 import { ProviderRecipeInfo } from "@/components/providers/provider-recipe-info";
+import { ProviderInstanceEditors } from "@/components/providers/provider-instance-editors";
 import { ProviderSecrets } from "@/components/providers/provider-secrets";
 import { ProviderEnvField } from "@/components/providers/provider-env";
 import { ProviderModels } from "@/components/providers/provider-models";
@@ -220,6 +221,8 @@ export function ProviderDetail({
       {info?.custom ? <ProviderCustomInfo info={info} hasClient={client !== null} /> : null}
 
       {info?.custom ? <ProviderRecipeInfo info={info} /> : null}
+
+      {info?.custom ? <ProviderInstanceEditors info={info} hasClient={client !== null} /> : null}
 
       {info?.custom ? <ProviderSecrets info={info} hasClient={client !== null} /> : null}
 
