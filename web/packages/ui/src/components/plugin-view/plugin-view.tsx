@@ -134,9 +134,10 @@ function diffLineClass(line: string): string {
 }
 
 function MarkdownNode({ text, onAction }: { text: string; onAction: OnAction }) {
-  // No rehype-raw: react-markdown keeps raw HTML as inert text by default.
-  // Images never render (the alt text stands in for them) and http(s) links
-  // go through onAction as openUrl so the caller can confirm the host.
+  // Raw HTML stays inert (no remark plugin is enabled to turn document
+  // markup into elements). Images never render (the alt text stands in for
+  // them) and http(s) links go through onAction as openUrl so the caller
+  // can confirm the host.
   const components: Components = {
     img: ({ alt }) => <span>{typeof alt === "string" ? alt : ""}</span>,
     a: ({ href, children }) => {
