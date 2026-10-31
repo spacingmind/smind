@@ -1179,7 +1179,6 @@ function AppShell({
       onRenameTab={renameTabForTask}
       onSplit={() => {}}
       onRevealInDiff={revealInDiff}
-      onNewTerminal={openTerminalTab}
       onOpenBase={openBaseTab}
       onOpenPluginPanel={openPluginPanel}
       chats={chats}
@@ -1256,7 +1255,6 @@ function AppShell({
                 onSplitTab={splitPaneTab}
                 onResizeGroup={resizePaneGroup}
                 onRevealInDiff={revealInDiff}
-                onNewTerminal={openTerminalTab}
                 onOpenBase={openBaseTab}
                 onOpenPluginPanel={openPluginPanel}
                 chats={chats}
@@ -1839,7 +1837,6 @@ interface SplitPaneCallbacks {
   /** Persists a resize handle drag's new sizes for the group with `groupId`. */
   onResizeGroup: (groupId: string, sizes: number[]) => void;
   onRevealInDiff: () => void;
-  onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
   /** "+" -> one of the active plugins' panels (ADR-0042): opens (or activates) its plugin tab. */
@@ -1923,7 +1920,6 @@ function SplitTreeView({
         onRenameTab={shared.onRenameTab}
         onSplit={(key, direction) => shared.onSplitTab(node.pane.id, key, direction)}
         onRevealInDiff={shared.onRevealInDiff}
-        onNewTerminal={shared.onNewTerminal}
         onOpenBase={shared.onOpenBase}
         onOpenPluginPanel={shared.onOpenPluginPanel}
         chats={shared.chats}
@@ -2013,7 +2009,6 @@ function PaneTabStrip({
   onRenameTab,
   onSplit,
   onRevealInDiff,
-  onNewTerminal,
   onOpenBase,
   onOpenPluginPanel,
   chats,
@@ -2051,7 +2046,6 @@ function PaneTabStrip({
   onRenameTab: (key: string, title: string) => void;
   onSplit: (key: string, direction: SplitDirection) => void;
   onRevealInDiff: () => void;
-  onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
   /** "+" -> one of the active plugins' panels (ADR-0042): opens (or activates) its plugin tab. */
@@ -2199,7 +2193,6 @@ function PaneTabStrip({
               onOpenFile={onOpenFile}
               onOpenFileToSide={onOpenFileToSide}
               onRevealInDiff={onRevealInDiff}
-              onNewTerminal={onNewTerminal}
               events={events}
               chats={chats}
               runningChatsByTask={runningChatsByTask}
@@ -2516,7 +2509,6 @@ function TabContent({
   onOpenFile,
   onOpenFileToSide,
   onRevealInDiff,
-  onNewTerminal,
   events,
   chats,
   runningChatsByTask,
@@ -2532,7 +2524,6 @@ function TabContent({
   onOpenFile: (path: string) => void;
   onOpenFileToSide: (path: string) => void;
   onRevealInDiff: () => void;
-  onNewTerminal: () => void;
   events: ReturnType<typeof useDaemonEvents>;
   chats: Chat[] | null;
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
@@ -2587,10 +2578,8 @@ function TabContent({
         client={client}
         task={task}
         tabKey={entry.key}
-        title={entry.title}
         active={active}
         connectionStatus={connectionStatus}
-        onNewTerminal={onNewTerminal}
       />
     ),
   };

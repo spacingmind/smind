@@ -9,7 +9,6 @@ import { FindBar, type FindBarHandle } from "@/components/find/find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { PaneHeader } from "@/components/ui/pane-header";
 import { useTheme } from "@/hooks/use-theme";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
@@ -20,7 +19,6 @@ import {
   clearTerminalActivity,
   markTerminalActivity,
   terminalIdsBoundElsewhere,
-  unbindTerminal,
 } from "@/lib/terminal-sessions";
 import { resolveSearchDecorations, resolveTerminalTheme } from "@/lib/terminal-theme";
 import type { WsClientLike } from "@/lib/ws-client";
@@ -163,7 +161,8 @@ function base64ToBytes(b64: string): Uint8Array {
  * "data" events written straight into the terminal handle. Unmounting/
  * switching tasks aborts the attach's AbortSignal, which only detaches --
  * the shell keeps running server-side -- never calling terminal.close
- * itself; only the explicit "Close terminal" button does that, mirroring
+ * itself; closing the terminal's *tab* is what ends the session (App.tsx's
+ * TerminalTabReaper), mirroring
  * TaskDetailPane's Stop button going through run.stop rather than an
  * abort.
  *
@@ -181,39 +180,26 @@ function base64ToBytes(b64: string): Uint8Array {
  * decisions for why that is the right reading of the detach-not-close
  * contract.
  */
-/** `${taskId}:terminal` -> "Terminal"; `${taskId}:terminal:N` -> "Terminal N" (mirrors tab-registry's terminalTab titles). */
-export function terminalTitleFromKey(key: string): string {
-  const m = /:terminal:(\d+)$/.exec(key);
-  return m ? `Terminal ${m[1]}` : "Terminal";
-}
-
 export function TerminalPane({
   client,
   task,
   tabKey,
-  title,
   active = true,
   connectionStatus = "connected",
-  onNewTerminal,
   createTerminal = createRealTerminal,
 }: {
   client: WsClientLike | null;
   task: Task;
   /** This pane's tab key -- what its session binding and activity flag are recorded against. Defaults to the base terminal tab's key, so an existing single-terminal caller behaves exactly as before. */
   tabKey?: string;
-  /** The tab's current (possibly user-renamed) title, shown in the header. Absent: derived from `tabKey` ("Terminal" / "Terminal N"). */
-  title?: string;
   /** Whether this pane's tab is the one in front. Output arriving while false marks the tab; flipping to true clears the mark. Defaults true for a caller that has no tab strip. */
   active?: boolean;
   /** Real-time connection status from App.tsx -- see TaskDetailPane's identical prop for why. Defaults to "connected" so every existing caller/test keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
-  /** Opens another terminal tab for this task (Item 20). Absent means the caller has no tab strip to open one in, and the control isn't rendered at all -- never as a dead button. */
-  onNewTerminal?: () => void;
   /** Overridable for tests -- see TerminalHandle's doc comment. Defaults to a real xterm.js + FitAddon instance. */
   createTerminal?: (options: { scrollback: number }) => TerminalHandle;
 }) {
   const key = tabKey ?? `${task.ID}:terminal`;
-  const headerTitle = title || terminalTitleFromKey(key);
   const { resolved } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<TerminalHandle | null>(null);
@@ -222,7 +208,6 @@ export function TerminalPane({
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [endedStatus, setEndedStatus] = useState<"interrupted" | "closed" | null>(null);
-  const [closing, setClosing] = useState(false);
   // Copy is disabled only when the handle can actually report "nothing is
   // selected" -- a handle without onSelectionChange leaves it enabled, so
   // the button is never permanently dead (see TerminalHandle).
@@ -593,94 +578,53 @@ export function TerminalPane({
     }
   }
 
-  async function handleClose() {
-    const id = terminalIdRef.current;
-    if (!client || !id) return;
-    setClosing(true);
-    try {
-      await client.call("terminal.close", { terminalId: id });
-      // Reset every trace of this session, including the tab's binding --
-      // otherwise a *later* reconnect's list-then-attach effect above
-      // would still find previousId pointing at this now-closed session,
-      // see it as no longer running, and get permanently stuck showing
-      // "session closed" instead of ever calling terminal.create again.
-      // Clearing it here makes the next effect run treat this exactly
-      // like a fresh attach, same as if the task had just been selected.
-      terminalIdRef.current = null;
-      unbindTerminal(key);
-      setTerminalId(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setClosing(false);
-    }
-  }
-
   return (
     <div className="flex h-full flex-col" onFocus={onFindFocus} onBlur={onFindBlur}>
-      <PaneHeader
-        title={
-          <span
-            data-testid="terminal-status"
-            className="font-normal text-foreground-muted"
-            title={terminalId ?? undefined}
-          >
-            {endedStatus ? `session ${endedStatus}` : terminalId ? headerTitle : "starting terminal…"}
-          </span>
-        }
-        actions={
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-ui-sm"
-              disabled={!terminalId || (selectionReportable && !hasSelection)}
-              onClick={() => void handleCopy()}
-              data-testid="terminal-copy"
-            >
-              <Icons.copy className="size-3" />
-              Copy
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-ui-sm"
-              disabled={!terminalId}
-              onClick={() => void handlePaste()}
-              data-testid="terminal-paste"
-            >
-              <Icons.paste className="size-3" />
-              Paste
-            </Button>
-            {onNewTerminal && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-6 px-2 text-ui-sm"
-                onClick={onNewTerminal}
-                data-testid="terminal-new"
-              >
-                <Icons.add className="size-3" />
-                New
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-ui-sm"
-              disabled={!terminalId || closing}
-              onClick={handleClose}
-              data-testid="terminal-close"
-            >
-              Close terminal
-            </Button>
-          </>
-        }
-      />
+      {(endedStatus || !terminalId) && (
+        <p
+          data-testid="terminal-status"
+          className="border-b px-3 py-1 text-ui-sm text-foreground-subtle"
+          title={terminalId ?? undefined}
+        >
+          {endedStatus ? `session ${endedStatus}` : "starting terminal…"}
+        </p>
+      )}
+      {/*
+       * Touch has neither the copy/paste keyboard shortcuts nor
+       * right-click paste/copy, so those two affordances stay available as
+       * buttons -- hidden on pointer-fine devices (Tailwind 4's
+       * `pointer-coarse:` variant). While a terminal runs there is no
+       * header at all: the tab strip already shows the title.
+       */}
+      <div
+        data-testid="terminal-touch-actions"
+        className="hidden items-center gap-2 border-b px-3 py-1 pointer-coarse:flex"
+      >
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-ui-sm"
+          disabled={!terminalId || (selectionReportable && !hasSelection)}
+          onClick={() => void handleCopy()}
+          data-testid="terminal-copy"
+        >
+          <Icons.copy className="size-3" />
+          Copy
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-ui-sm"
+          disabled={!terminalId}
+          onClick={() => void handlePaste()}
+          data-testid="terminal-paste"
+        >
+          <Icons.paste className="size-3" />
+          Paste
+        </Button>
+      </div>
       {connectionStatus === "reconnecting" && (
         <Alert
           testId="connection-banner"
