@@ -163,6 +163,9 @@ func policyHandlers(engine *permpolicy.Engine, db *store.Store) map[string]handl
 		if err := refuseAgent(m, rc); err != nil {
 			return nil, err
 		}
+		if !permpolicy.Supported() {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": " + permpolicy.UnsupportedMessage}
+		}
 		var p struct {
 			Tool       string   `json:"tool"`
 			Command    string   `json:"command"`
