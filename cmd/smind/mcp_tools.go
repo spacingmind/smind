@@ -57,6 +57,12 @@ type taskNewInput struct {
 	BaseRef string `json:"baseRef,omitempty" jsonschema:"optional git ref (e.g. origin/develop) to branch the new task branch from at that ref's commit; mutually exclusive with branch and prNumber"`
 	Branch  string `json:"branch,omitempty" jsonschema:"optional name of an EXISTING branch (local, or origin/<name>) to check out into the new worktree without creating a new branch; mutually exclusive with baseRef and prNumber"`
 	PRNum   *int64 `json:"prNumber,omitempty" jsonschema:"optional GitHub pull request number to build the task from (GitHub-hosted origin only); mutually exclusive with baseRef and branch"`
+	// Host fields: a remote task_new creates the task AND starts its first run.
+	Host           string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): act on that host instead of this daemon. Direct only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon. With host, workspaceId is the REMOTE workspace id (workspace_list with host) and provider, model and prompt are required"`
+	Provider       string `json:"provider,omitempty" jsonschema:"only with host: provider id for the first run (required with host)"`
+	Model          string `json:"model,omitempty" jsonschema:"only with host: model id for the first run (required with host)"`
+	Prompt         string `json:"prompt,omitempty" jsonschema:"only with host: the first prompt (required with host)"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty" jsonschema:"only with host: key from an earlier ambiguous or local_write_failed answer; reuse it to retry without creating twice"`
 }
 
 // Output-shape note: the outputs below deliberately wrap daemon results
@@ -74,12 +80,26 @@ type taskNewInput struct {
 // as-is under "task".
 type taskNewOutput struct {
 	Task map[string]any `json:"task"`
+	// The rest is set for a host create only; Task then carries just id,
+	// globalId and host.
+	Host           string `json:"host,omitempty"`
+	GlobalID       string `json:"globalId,omitempty"`
+	TaskID         int64  `json:"taskId,omitempty"`
+	RunID          string `json:"runId,omitempty"`
+	Branch         string `json:"branch,omitempty"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	Replayed       bool   `json:"replayed,omitempty"`
+	Note           string `json:"note,omitempty"`
 }
 
 // mcpTaskNew wraps task.create: {workspaceId, title, spaceId?} -> the
 // created task.
 func mcpTaskNew(client *wsclient.Client) mcp.ToolHandlerFor[taskNewInput, taskNewOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskNewInput) (*mcp.CallToolResult, taskNewOutput, error) {
+		if in.Host != "" {
+			out, err := remoteTaskNew(ctx, client, in)
+			return nil, out, err
+		}
 		params := map[string]any{"workspaceId": in.WorkspaceID, "title": in.Title}
 		if in.SpaceID != nil {
 			params["spaceId"] = *in.SpaceID
