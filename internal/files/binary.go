@@ -168,11 +168,12 @@ func ReadRange(root, path string, offset, length int64, lim Limits, ifMtime *tim
 // open descriptor is a regular file that is the very file the resolved path
 // named (a symlink swapped in after resolution fails SameFile).
 func openRegular(root, path string) (*os.File, os.FileInfo, error) {
-	if err := refuseUnsafeForm(path); err != nil {
-		return nil, nil, err
-	}
 	target, err := resolveInRoot(root, path)
 	if err != nil {
+		var ip *InvalidParamsError
+		if errors.As(err, &ip) {
+			return nil, nil, err // an unsafe path form, refused by resolveInRoot
+		}
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, &MissingError{Path: errName(path)}
 		}
@@ -248,7 +249,9 @@ func isSharingViolation(err error) bool {
 	return runtime.GOOS == "windows" && errors.Is(err, errorSharingViolation)
 }
 
-// refuseUnsafeForm rejects path forms that must not reach the filesystem:
+// refuseUnsafeForm rejects path forms that must not reach the filesystem. It
+// is the first step of resolveInRoot, so every files entry point (List, Read,
+// Write, Resolve, Stat, ReadRange) refuses them:
 // on Windows a UNC or device path (resolving it would start SMB
 // authentication before the containment check) and a drive-relative form
 // such as "C:foo". A local verbatim path (\\?\C:\...) is fine.
@@ -257,11 +260,11 @@ func refuseUnsafeForm(path string) error {
 		return nil
 	}
 	if isUNCOrDevicePath(path) {
-		return &InvalidParamsError{Msg: fmt.Sprintf("read: network and device paths are not allowed")}
+		return &InvalidParamsError{Msg: "network and device paths are not allowed"}
 	}
 	n := normalizeSeparators(path)
 	if vol := filepath.VolumeName(n); vol != "" && !filepath.IsAbs(n) {
-		return &InvalidParamsError{Msg: fmt.Sprintf("read: drive-relative paths are not allowed")}
+		return &InvalidParamsError{Msg: "drive-relative paths are not allowed"}
 	}
 	return nil
 }
