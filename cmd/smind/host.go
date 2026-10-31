@@ -424,13 +424,22 @@ func runHostApprove(ctx context.Context, args []string, stdout, stderr io.Writer
 // hostAction is the common result of the one-host verbs that report the
 // host back.
 type hostAction struct {
-	HostID string `json:"hostId"`
-	Alias  string `json:"alias"`
-	State  string `json:"state"`
+	HostID  string `json:"hostId"`
+	Alias   string `json:"alias"`
+	State   string `json:"state"`
+	Warning string `json:"warning"`
+	// Host is the nested view the reverse verbs answer with.
+	Host *struct {
+		HostID string `json:"hostId"`
+		Alias  string `json:"alias"`
+	} `json:"host"`
 }
 
 // hostDisplayName picks what to call a host in a confirmation line.
 func hostDisplayName(a hostAction) string {
+	if a.Alias == "" && a.HostID == "" && a.Host != nil {
+		a.Alias, a.HostID = a.Host.Alias, a.Host.HostID
+	}
 	if a.Alias != "" {
 		return a.Alias
 	}
@@ -473,6 +482,12 @@ func runHostVerb(ctx context.Context, verb string, args []string, stdout, stderr
 		return 1
 	}
 	name := hostDisplayName(dev)
+	if name == "" {
+		name = args[0] // reject and rm answer {ok:true}: name what the human typed
+	}
+	if dev.Warning != "" {
+		fmt.Fprintf(stderr, "warning: %s\n", dev.Warning)
+	}
 	switch verb {
 	case "reject":
 		fmt.Fprintf(stdout, "rejected %s\n", name)
