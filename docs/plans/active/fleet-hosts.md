@@ -366,7 +366,7 @@ Merged PRs on develop: ADR and plan #718; F1a identity/registry/store #723 (+ Wi
 | AC11 | #727, #729 | web/inbox/mobile tests listed under "F1c validation"; frames used injected RPCs, the real RPCs are covered by the F1b e2e tests. Mobile was not run on a device. |
 | AC12 | #739 | `TestFleetReadReturnsNoPathsNoCredentialURLs`, `TestFleetActivityCappedAndPaged`, `TestFleetReadGrantFiltersWorkspaces` |
 | AC13 | #739, #740, #748 | `TestFleetProvenanceOrderOfChecks`, `TestFleetCycleRefused_AtoBtoA`, `TestFleetHopTwoRefused`, `TestFleetReplayAndStaleRefused`, `TestRemoteWriteRefusedForPeerSeatAndRemoteOrigin` |
-| AC14 | #739 (callee half), #740 | `TestFleetAuditBothEndsNoPromptBody`, `TestFleetAuditRetention`. **Gap:** no `smind host audit` command and no audit view on the Hosts page exist; only the rows and retention do. |
+| AC14 | #739 (callee half), #740 | `TestFleetAuditBothEndsNoPromptBody`, `TestFleetAuditRetention`. Follow-up (host audit view): `smind host audit`, the human-only `fleet.host.audit` method and the Activity row on the Hosts page; `TestFleetHostAudit_*`, `TestHostAudit*`, `TestFleetSummaryNeverHoldsPromptText`, `host-activity.test.tsx`. Nothing writes an `out` row yet (the view shows them when something does). |
 | AC15 | #740 | `TestHostReadVerbsSendRemoteReadParams`, `TestMCPListHostsAndHostParamLocalUnchanged` |
 | AC16 | #729, #739, #740 | `TestFleetVersionSkewRefused`, `TestHelloVersionSkewRefusedWithGuidance`, `TestHandshakeVersionSkewOnReconnect` |
 | AC17 | #747 | `TestFleetCreateRequiresExplicitProviderModel`, `TestFleetCreateBranchFromOwnOrigin`, `TestFleetCreateTypeHasNoModeEnvCwdFields` |
@@ -382,14 +382,20 @@ Merged PRs on develop: ADR and plan #718; F1a identity/registry/store #723 (+ Wi
 
 Name drift, stated: the plan's early list names `TestLabelsValidation`, `TestSelectorExactlyOneOrError`, `TestSelectorAnyLeastLoadedTieByAlias` and `TestSelectorNoSilentRetryOnOtherHost`; they shipped as `TestFleetLabelsValidate`, `TestFleetSelector_*` and `TestFleetSelectorMCP_NoRetryOnWriteFailure`. The web test names above are vitest titles in `web/packages/ui`, not Go tests.
 
-**Not every AC is fully confirmed** (AC14 audit CLI/page, AC25 mobile device frames and the two chips), so this plan stays in `active/`.
+**Not every AC is fully confirmed** (AC14 `out` rows, AC25 mobile device frames and the two chips), so this plan stays in `active/`.
 
 Open follow-ups:
 - Hosts settings page: a labels editor (F5 is CLI and MCP only).
-- `smind host audit` and an audit view on the Hosts page (AC14).
+- ~~`smind host audit` and an audit view on the Hosts page (AC14).~~ Done in the host audit view follow-up (`fleet-hosts-audit-view.contract.md`); the caller half of the audit (`out` rows) is still not written by anything.
 - Mobile chip device or simulator frames (blocked on the native verification blocker); `TaskTreeRow` is not type-checked or run natively.
 - Task header chip for a task created by another host, and a chip on remote-origin permission rows (needs `origin_host` in the task payload and the inbox item).
 - Re-run the validators for F1 to F5 once 0.17 is installed: every fleet validator ran report-only on the pre-#706 daemon (verdicts stored as `blocked`/crashed).
 - Tree guard does not count remote runs (the callee's per-origin `maxLiveAgents` bounds it).
 - A real two-daemon run of the F4 mirror refresher and of label selection (unit and fake-bridge tests only); the "Try it on one machine" recipe in `public-docs/hosts.md` is the starting point.
 - Channel binding of the hello to the E2EE transcript (F1b stated it as not done).
+
+### Host audit view (AC14 follow-up), 2026-11-01
+
+- `smind host audit [--host alias] [--limit N] [--json]` over the new human-only, read-only `fleet.host.audit` (`internal/wsapi/fleet_host_audit.go`): direction, peer alias, method, decision, redacted summary, time; limit 50 by default, clamped to 200; refused over the relay, to agents, plugins and peer hosts. An Activity row per approved or revoked host in Settings -> Hosts (closed by default, fetched when opened).
+- **Gap closed in the writer:** `serve.Summary` kept the first 120 characters of the request JSON, so a `prompt` at the start of a `fleet.task.create` / `send` body was stored (up to about 100 characters of it). Free-text fields (`prompt`, `text`, `message`, `body`, `content`, `input`) are now reduced to `<N chars>` before the prefix is taken; the hash still covers the real body. The view masks the same fields again for rows written before this. `title` is left readable (it is a label shown across the UI).
+- Contract `fleet-hosts-audit-view.contract.md`; Peer ledger: peer-glm 0 runs, peer-sonnet 0 runs.

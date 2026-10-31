@@ -68,6 +68,42 @@ func TestFleetSummaryDropsProvAndCutsOnRuneBoundary(t *testing.T) {
 	}
 }
 
+// TestFleetSummaryNeverHoldsPromptText: a prompt, a message or any other free-text
+// field is replaced by its length before the prefix is taken, at any depth and for
+// any position in the JSON; the hash still covers the real body.
+func TestFleetSummaryNeverHoldsPromptText(t *testing.T) {
+	id := func(s string) string { return s }
+	const secretish = "Please migrate the billing tables and then email the CEO"
+	for _, body := range []string{
+		`{"prompt":"` + secretish + `","workspaceId":3}`,
+		`{"workspaceId":3,"prompt":"` + secretish + `"}`,
+		`{"prov":{"reqId":"1"},"a":{"b":[{"message":"` + secretish + `"}]},"text":"` + secretish + `"}`,
+		`{"content":"` + secretish + ` \"quoted\" tail","title":"short"}`,
+	} {
+		got := Summary(json.RawMessage(body), id)
+		for _, leak := range []string{"migrate", "billing", "CEO", "quoted", "tail"} {
+			if strings.Contains(got, leak) {
+				t.Errorf("summary of %s leaks %q: %s", body, leak, got)
+			}
+		}
+		if !strings.Contains(got, " chars>") {
+			t.Errorf("summary of %s shows no length marker: %s", body, got)
+		}
+	}
+	// Non-text fields stay readable, numbers keep their digits, and the hash differs per prompt.
+	a := Summary(json.RawMessage(`{"workspaceId":123456789012345678,"prompt":"one"}`), id)
+	b := Summary(json.RawMessage(`{"workspaceId":123456789012345678,"prompt":"two"}`), id)
+	if !strings.Contains(a, `"workspaceId":123456789012345678`) {
+		t.Errorf("number mangled: %s", a)
+	}
+	if a[:71] == b[:71] {
+		t.Errorf("hash ignores the prompt: %s / %s", a, b)
+	}
+	if strings.Contains(a, `\u003c`) {
+		t.Errorf("marker is HTML-escaped: %s", a)
+	}
+}
+
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))

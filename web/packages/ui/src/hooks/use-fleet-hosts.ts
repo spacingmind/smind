@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { isFleetOff, normalizeSas, type FleetGrant, type FleetHost, type FleetHostList } from "@/lib/fleet-types";
+import { isFleetOff, normalizeSas, type FleetAuditEntry, type FleetGrant, type FleetHost, type FleetHostList } from "@/lib/fleet-types";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -25,6 +25,28 @@ export function useFleetHosts() {
         if (isFleetOff(err)) return { off: true, hosts: [] };
         throw err;
       }
+    },
+  });
+}
+
+/** How many audit rows a host's Activity row shows. */
+export const HOST_ACTIVITY_LIMIT = 20;
+
+/**
+ * One host's latest fleet exchanges (`fleet.host.audit`, human-only and read-only). Off until `enabled` (the Activity
+ * row is opened); always refetched on open so it is current, and refetchable by hand.
+ */
+export function useFleetHostAudit(hostId: string, enabled: boolean) {
+  const { client } = useDaemonConnection();
+  return useQuery({
+    queryKey: queryKeys.fleetHostAudit(hostId),
+    enabled: enabled && client !== null,
+    staleTime: 0,
+    retry: false,
+    queryFn: async (): Promise<FleetAuditEntry[]> => {
+      if (!client) throw new Error("no daemon connection");
+      const res = await client.call<{ rows?: FleetAuditEntry[] }>("fleet.host.audit", { hostId, limit: HOST_ACTIVITY_LIMIT });
+      return res?.rows ?? [];
     },
   });
 }

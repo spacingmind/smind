@@ -34,6 +34,21 @@ export interface FleetHost {
   arch?: string;
 }
 
+/** One fleet exchange from `fleet.host.audit`: a hash and a masked, redacted prefix of the request, never its text. */
+export interface FleetAuditEntry {
+  id: number;
+  time: string;
+  direction: "in" | "out";
+  hostId: string;
+  peer: string;
+  method: string;
+  /** "ok", "refused" or "error" (the wall limit stamps "wall_limit"). */
+  decision: string;
+  code?: string;
+  summary: string;
+  latencyMs: number;
+}
+
 /** `off` is true when the daemon has fleet disabled (its `fleet.host.*` methods are not registered). */
 export interface FleetHostList {
   off: boolean;
