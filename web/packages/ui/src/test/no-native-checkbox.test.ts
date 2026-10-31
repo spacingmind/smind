@@ -10,17 +10,7 @@ const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const NATIVE_CHECKBOX = /type=["']checkbox["']/;
 
 /** Files still on a native checkbox. This list may only shrink: migrate a file, then delete its entry. */
-const ALLOWED_LEGACY: string[] = [
-  "components/archive-preview.tsx",
-  "components/diff-viewer-pane.tsx",
-  "components/git/sync-dialog.tsx",
-  "components/learning/skill-export-dialog.tsx",
-  "components/pickers/auto-accept-toggle.tsx",
-  "components/settings/automation-form.tsx",
-  "components/settings/mcp-servers-section.tsx",
-  "components/settings/plugins-section.tsx",
-  "components/settings/profile-contract-fields.tsx",
-];
+const ALLOWED_LEGACY: string[] = [];
 
 function listFiles(dir: string): string[] {
   const out: string[] = [];

@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -102,12 +103,11 @@ function ExportForm({ skill, onClose }: { skill: LearnedSkillView; onClose: () =
         {result && <ExportOutcome result={result} />}
         {canReplace && (
           <label className="flex items-center gap-2 text-ui-sm text-foreground-muted">
-            <input
-              type="checkbox"
+            <Checkbox
               data-testid="skill-export-force"
               checked={force}
               disabled={pending}
-              onChange={(e) => setForce(e.target.checked)}
+              onCheckedChange={(on) => setForce(on === true)}
             />
             Replace an edited copy
           </label>

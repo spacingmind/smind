@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Checkbox } from "@/components/ui/checkbox";
 import { providerListQueryOptions } from "@/hooks/use-provider-catalog";
 import { Icons } from "@/lib/icons";
 
@@ -686,11 +687,10 @@ function FileRow({
           !collapsed && "bg-surface-hover",
         )}
       >
-        <input
-          type="checkbox"
+        <Checkbox
           checked={file.staged}
           disabled={disabled}
-          onChange={(e) => onStage(e.target.checked)}
+          onCheckedChange={(on) => onStage(on === true)}
           aria-label={`Stage ${file.path}`}
           data-testid={`stage-${file.path}`}
         />
@@ -717,10 +717,9 @@ function FileRow({
           />
         )}
         <label className="flex shrink-0 items-center gap-1 text-ui-sm text-foreground-subtle">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={state?.viewed ?? false}
-            onChange={onMarkViewed}
+            onCheckedChange={onMarkViewed}
             data-testid={`viewed-${file.path}`}
           />
           viewed
