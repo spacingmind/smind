@@ -26,6 +26,14 @@ func FuzzSplitCommand(f *testing.F) {
 		"git commit -F - <<'EOF'\n$(rm -rf /)\nEOF",
 		"cat <<EOF | sh\nrm -rf /\nEOF",
 		"echo \"unclosed",
+		`powershell -Command "Get-Date; Remove-Item D:\outside"`,
+		`pwsh -c 'a && b || c'`,
+		`cmd /c "dir & del x"`,
+		`cmd /c powershell -c "x; y"`,
+		"powershell -c 'Remove-Item `x'",
+		`powershell -c "ls | ForEach-Object { ls }"`,
+		`powershell -EncodedCommand AAAA`,
+		`cmd /v:on /c "echo !x!"`,
 	} {
 		f.Add(seed)
 	}
@@ -33,7 +41,12 @@ func FuzzSplitCommand(f *testing.F) {
 		if len(cmd) > maxCommandBytes {
 			return // over the cap the splitter refuses by design
 		}
-		p := SplitCommand(cmd) // must not panic
+		p := SplitCommand(cmd)                                  // must not panic
+		if w := splitCommand(cmd, true); len(w.Segments) == 0 { // Windows mode: same invariant
+			if trimmed := strings.TrimSpace(cmd); trimmed != "" && len(w.Unparsed) == 0 {
+				t.Fatalf("windows mode: no segments and no reason for %q", cmd)
+			}
+		}
 		if len(p.Segments) == 0 {
 			if trimmed := strings.TrimSpace(cmd); trimmed != "" && len(p.Unparsed) == 0 {
 				t.Fatalf("no segments and no reason for %q", cmd)

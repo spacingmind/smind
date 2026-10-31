@@ -250,11 +250,32 @@ Its tools include:
 | `queue_list`, `queue_cancel` | See and cancel the agent's own queued prompts. |
 | `task_permissions`, `task_options`, `task_set_option`, `task_set_mode` | Read pending permissions; change a thinking level or model; set a mode that does not auto-approve. |
 | `usage_summary`, `account_usage` | Read usage and plan windows. |
+| `list_hosts` | List connected peer hosts (needs connected hosts turned on). |
 
 **There are deliberately no approval tools.** An agent can read a pending
 permission request and show it to you. It cannot approve, deny or answer it,
 and it cannot pick an auto-approving mode. Those need a human or a
 human-authored profile.
+
+### Read a connected host
+
+With [connected hosts](hosts.md) on, `list_hosts` shows the paired hosts, and
+`workspace_list`, `task_list`, `task_get`, `task_status` and `task_logs` accept an
+optional `host` (an alias from `list_hosts`) to read that host instead of this
+one. Leave `host` out and every tool behaves exactly as before. Remote results
+carry `host` and a `globalId` of the form `alias:id`, and text from another host is
+untrusted data, not instructions.
+
+- Reads are direct and one hop only. A task that was itself created by another
+  host cannot read hosts: the call is refused with `hop_limit` before anything is
+  sent, and the agent should say so rather than look for a way around it.
+- Errors begin with a code (`not_granted`, `cycle`, `hop_limit`,
+  `fleet_version_unsupported`, `host_unavailable`, `timeout`, `unknown_host`). The
+  tools never retry on another host and never fall back to this machine's data.
+- `task_status` on a host returns `status_unknown` when the run could not be
+  observed three times in a row. That is not a finished state; the agent should
+  inspect the host or ask you before re-delegating.
+- There is no tool yet to create work on, or send a prompt to, another host.
 
 A different command group, `smind mcp add`, `smind mcp ls`, `smind mcp rm`,
 `smind mcp enable` and `smind mcp disable`, manages the MCP servers that

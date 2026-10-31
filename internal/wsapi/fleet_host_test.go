@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/spacingmind/smind/internal/fleet/client"
 	"github.com/spacingmind/smind/internal/fleet/hello"
 	"github.com/spacingmind/smind/internal/fleet/identity"
 	"github.com/spacingmind/smind/internal/fleet/pairing"
@@ -556,6 +557,10 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 
 	t.Run("fleet on adds exactly the fleet methods", func(t *testing.T) {
 		e := newFleetEnv(t)
+		e.api.SetFleetRemote(FleetRemoteOptions{
+			Conn:      func(string) (client.Caller, client.LinkState) { return nil, client.LinkOther },
+			RunOrigin: func(string, int64) (string, error) { return "", nil },
+		})
 		have := map[string]bool{}
 		for _, k := range before {
 			have[k] = true
@@ -571,6 +576,7 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 			"fleet.host.list", "fleet.host.invite", "fleet.host.add", "fleet.host.approve",
 			"fleet.host.reject", "fleet.host.rename", "fleet.host.grant", "fleet.host.rm", "fleet.host.revoke",
 			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test", "fleet.host.route",
+			"remote.hosts", "remote.read",
 		}
 		want = append(want, wire.ReadMethods...)
 		want = append(want, wire.WriteMethods...)

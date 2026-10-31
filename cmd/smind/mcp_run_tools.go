@@ -115,14 +115,31 @@ type taskStatusOutput struct {
 	FallbackProfileID int64                 `json:"fallbackProfileId,omitempty" jsonschema:"for a rate_limited run: the profile its author named as the fallback; start the work again with task_send profileId set to it on a NEW chat (chat_new), because a chat is bound to its provider"`
 	Events            []mcpRunEvent         `json:"events"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
+	Host              string                `json:"host,omitempty" jsonschema:"set for a host read: the peer host's alias"`
+	GlobalID          string                `json:"globalId,omitempty" jsonschema:"set for a host read when the task is known: <alias>:<taskId>"`
+	CostUSD           *float64              `json:"costUsd,omitempty" jsonschema:"set for a host read: the run's cost in USD when the peer reports one"`
+	StatusUnknown     bool                  `json:"statusUnknown,omitempty" jsonschema:"set for a host read that could not observe the run: the run is NOT finished, its status is unknown"`
+	Note              string                `json:"note,omitempty" jsonschema:"set for a host read with status_unknown: what to do next"`
+}
+
+// taskStatusInput is task_status's argument shape: runId, plus the optional
+// host-read fields.
+type taskStatusInput struct {
+	RunID  string `json:"runId" jsonschema:"id of the run (returned by task_send)"`
+	Host   string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	TaskID int64  `json:"taskId,omitempty" jsonschema:"only with host: the peer's task id (the run id may be omitted to read the task's latest run)"`
 }
 
 // mcpTaskStatus wraps run.logs as a non-blocking snapshot: status, the
 // last few transcript entries, and any still-pending permission request.
 // For an orchestrator that wants to poll cheaply rather than block (the
 // blocking shape, task_wait, is a later step of the plan).
-func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskStatusOutput] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in runIDInput) (*mcp.CallToolResult, taskStatusOutput, error) {
+func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[taskStatusInput, taskStatusOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskStatusInput) (*mcp.CallToolResult, taskStatusOutput, error) {
+		if in.Host != "" {
+			out, err := remoteTaskStatus(ctx, client, in)
+			return nil, out, err
+		}
 		result, err := mcpRunLogs(ctx, client, "task_status", in.RunID, 0)
 		if err != nil {
 			return nil, taskStatusOutput{}, err
@@ -167,6 +184,10 @@ func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
 type taskLogsInput struct {
 	RunID string `json:"runId" jsonschema:"id of the run whose transcript to read"`
 	Tail  int    `json:"tail,omitempty" jsonschema:"return only the last N entries (default: all)"`
+	Host  string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	// TaskID and Cursor apply to host reads only.
+	TaskID int64 `json:"taskId,omitempty" jsonschema:"REQUIRED with host: the peer's task id (the peer lists activity per task)"`
+	Cursor int64 `json:"cursor,omitempty" jsonschema:"only with host: continue the peer's activity from this cursor"`
 }
 
 // taskLogsOutput is task_logs's structured output: the run's current
@@ -185,6 +206,10 @@ type taskLogsOutput struct {
 	ResetAt       string        `json:"resetAt,omitempty" jsonschema:"for rate_limited: when the quota resets, RFC 3339 UTC; absent when unknown"`
 	ResetInferred bool          `json:"resetInferred,omitempty" jsonschema:"true when resetAt was read in an assumed zone (approximate; show with ≈); absent for a stated reset"`
 	Events        []mcpRunEvent `json:"events"`
+	// Host, NextCursor and HasMore are set for a host read only.
+	Host       string `json:"host,omitempty"`
+	NextCursor int64  `json:"nextCursor,omitempty"`
+	HasMore    bool   `json:"hasMore,omitempty"`
 }
 
 // mcpTaskLogs wraps run.logs: full or tailed transcript plus the run's
@@ -192,6 +217,10 @@ type taskLogsOutput struct {
 // has no request/response MCP shape).
 func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, taskLogsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskLogsInput) (*mcp.CallToolResult, taskLogsOutput, error) {
+		if in.Host != "" {
+			out, err := remoteTaskLogs(ctx, client, in)
+			return nil, out, err
+		}
 		result, err := mcpRunLogs(ctx, client, "task_logs", in.RunID, in.Tail)
 		if err != nil {
 			return nil, taskLogsOutput{}, err

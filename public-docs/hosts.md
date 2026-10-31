@@ -190,6 +190,51 @@ the network. Override it for one host with `--allow-cleartext`; the command
 prints a warning. A host can also be reached through your self-hosted relay: run
 `smind host invite --via relay` on a daemon that is connected to a relay.
 
+## Read another host
+
+Once a host is paired and connected, you can look at its work without leaving
+your own terminal. These commands only read; they never create, send or stop
+anything on the other host.
+
+```bash
+smind host info studio
+smind host workspaces studio
+smind host tasks studio --workspace 3
+smind host task studio:42
+smind host status studio:42
+smind host status studio <runId>
+smind host activity studio:42 --cursor 120
+```
+
+A task on another host is written `alias:id` (for example `studio:42`); the
+alias is resolved on this machine only. Every command also takes `--json`. List
+commands are paged: when more rows exist, the last line is `more: --cursor N`.
+
+What you get back is whatever the other host chose to share. You see its
+workspaces by title, repository address (without any credentials) and default
+branch, never a local path; its tasks by title, branch and state; and the text of
+a run's activity, cut to 1 KiB per event. Text that came from another host is
+printed with control characters removed so it cannot repaint your terminal.
+
+Errors name a code first:
+
+| Code | Meaning |
+|---|---|
+| `not_granted` | The other host has not allowed this read. Ask its owner to widen access. |
+| `host_unavailable` | The link is down, still connecting, or the other host is not paired for this direction. |
+| `fleet_version_unsupported` | The other host runs an older smind. The message says which host to update; nothing falls back to your local data. |
+| `hop_limit`, `cycle` | The call would pass through a third host or back to you. Reads are direct only. |
+| `timeout` | The other host did not answer in 15 seconds. |
+| `unknown_host` | No paired host has that alias. |
+
+### Status unknown
+
+`smind host status` asks the other host for a run's state. If three asks in a row
+fail (a link that is merely still connecting does not count), it prints
+**status unknown** and exits with an error. That does not mean the run
+finished: it may still be running. Look at the host before you hand the work to
+someone else. A host you have removed is reported as unavailable at once.
+
 ### Other commands
 
 ```bash
