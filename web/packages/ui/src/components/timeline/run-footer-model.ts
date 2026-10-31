@@ -1,5 +1,6 @@
 import { formatCost } from "@/lib/usage-format";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { AUTH_EXPIRED, MODEL_NOT_IN_PLAN, TRANSIENT_429, type FailureAction } from "@/lib/failure-class";
 import { describeRateLimit, isRateLimitedRun } from "@/lib/rate-limit";
 import type { RunStatusValue, RunUsage } from "@/lib/types";
 
@@ -44,6 +45,8 @@ export interface RunFooterRun {
   disposition?: string;
   /** ADR-0041: "rate_limited" when an errored run failed on a provider quota. */
   failureKind?: string;
+  /** The daemon-built next action for the failure (run failure classes). */
+  failureAction?: FailureAction;
   /** The quota window that was hit ("5h", "weekly", ...). */
   failureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC). */
@@ -247,6 +250,31 @@ export function describeRunFooter(
       action: resumable ? "continue" : "retry",
       duration,
       durationTitle: proseDuration(ms),
+      model: opts.modelLabel,
+      age,
+    });
+  }
+
+  // The failure classes with their own sentence (run failure classes plan): a person-fix class never offers Retry on the same setup;
+  // a transient 429 says it is retrying, or offers Retry once the daemon's retries are spent.
+  if (run.status === "error" && (run.failureKind === AUTH_EXPIRED || run.failureKind === MODEL_NOT_IN_PLAN || run.failureKind === TRANSIENT_429)) {
+    const a = run.failureAction;
+    const retrying = run.failureKind === TRANSIENT_429 && a?.kind === "auto_retry";
+    const sentence =
+      run.failureKind === AUTH_EXPIRED
+        ? "Signed out"
+        : run.failureKind === MODEL_NOT_IN_PLAN
+          ? "Model not in your plan"
+          : retrying
+            ? `Provider busy · retrying${a.attempt && a.max ? ` (${a.attempt} of ${a.max})` : ""}`
+            : "Provider busy for a moment";
+    return detail({
+      kind: "abnormal",
+      sentence,
+      tone: run.failureKind === TRANSIENT_429 ? "warning" : "danger",
+      action: run.failureKind === TRANSIENT_429 && !retrying ? "retry" : null,
+      duration: null,
+      durationTitle: null,
       model: opts.modelLabel,
       age,
     });

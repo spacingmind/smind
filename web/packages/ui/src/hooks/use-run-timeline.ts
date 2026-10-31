@@ -1,3 +1,4 @@
+import type { FailureAction } from "@/lib/failure-class";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
@@ -334,6 +335,8 @@ export interface RunEntry {
   disposition?: string;
   /** ADR-0041: "rate_limited" when the run failed on a provider quota (status stays "error"). */
   failureKind?: string;
+  /** The daemon-built next action for the failure (run failure classes). */
+  failureAction?: FailureAction;
   /** The quota window that was hit ("5h", "weekly", ...). */
   failureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC). */
@@ -694,8 +697,8 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
  * (ADR-0041): always all three keys, with an empty value as undefined, so a
  * terminal answer replaces whatever a list-seeded entry carried.
  */
-function failureOf(src: { failureKind?: string; window?: string; resetAt?: string; resetInferred?: boolean }): Pick<RunEntry, "failureKind" | "failureWindow" | "failureResetAt" | "failureResetInferred"> {
-  return { failureKind: src.failureKind || undefined, failureWindow: src.window || undefined, failureResetAt: src.resetAt || undefined, failureResetInferred: src.resetInferred || undefined };
+function failureOf(src: { failureKind?: string; window?: string; resetAt?: string; resetInferred?: boolean; action?: FailureAction | null }): Pick<RunEntry, "failureKind" | "failureAction" | "failureWindow" | "failureResetAt" | "failureResetInferred"> {
+  return { failureKind: src.failureKind || undefined, failureAction: src.action ?? undefined, failureWindow: src.window || undefined, failureResetAt: src.resetAt || undefined, failureResetInferred: src.resetInferred || undefined };
 }
 
 /** The profile/failover keys a run.logs result carries -- only those, so a missing one never overwrites a list-seeded value. */
@@ -734,6 +737,7 @@ function toRunEntry(r: RunSummary): RunEntry {
     stopReason: r.StopReason || undefined,
     disposition: r.Disposition || undefined,
     failureKind: r.FailureKind || undefined,
+    failureAction: r.FailureAction ?? undefined,
     failureWindow: r.FailureWindow || undefined,
     failureResetAt: r.FailureResetAt || undefined,
     failureResetInferred: r.FailureResetInferred || undefined,

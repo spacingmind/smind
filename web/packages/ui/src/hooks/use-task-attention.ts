@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
+import { AUTH_EXPIRED, MODEL_NOT_IN_PLAN, TRANSIENT_429 } from "@/lib/failure-class";
 import { isPlanLimitKind } from "@/lib/rate-limit";
 import type { RunLogEvent, RunLogsResult, RunStatusValue, RunSummary } from "@/lib/types";
 
@@ -38,7 +39,7 @@ export type TaskRunStatus = ReadonlyMap<number, RunStatusValue>;
  * attention rollups, status groups) is unchanged; only the row's tone and
  * wording read this.
  */
-export type TaskRateLimit = ReadonlyMap<number, { window?: string; resetAt?: string; resetInferred?: boolean }>;
+export type TaskRateLimit = ReadonlyMap<number, { window?: string; resetAt?: string; resetInferred?: boolean; kind?: string; label?: string }>;
 
 /** Both per-task signals this hook derives from the one run bookkeeping it keeps, plus ADR-0016 P3's per-task running-chats set (the concurrency banner's data source). */
 export interface TaskSignal {
@@ -70,7 +71,28 @@ interface RunLike extends Pick<RunSummary, "ID" | "TaskID" | "ChatID" | "Status"
   /** Epoch-ms finish time; null when unknown, which a terminal run treats as recent (conservative). */
   finishedAtMs: number | null;
   /** ADR-0041: the rate-limit failure of an errored run, when the daemon classified one. */
-  rateLimit?: { window?: string; resetAt?: string; resetInferred?: boolean };
+  rateLimit?: { window?: string; resetAt?: string; resetInferred?: boolean; kind?: string; label?: string };
+}
+
+/**
+ * The row signal of a failed run: a plan limit keeps its window/reset; auth_expired, model_not_in_plan and transient_429 (run failure classes)
+ * carry their class and the daemon's action label instead, so a row says what to do. undefined for every other run.
+ */
+function failureSignal(
+  kind: string | undefined | null,
+  label: string | undefined,
+  window: string | undefined,
+  resetAt: string | null | undefined,
+  resetInferred?: boolean | null,
+): RunLike["rateLimit"] | undefined {
+  if (isPlanLimitKind(kind)) return failureDetail(window, resetAt, resetInferred);
+  if (kind === AUTH_EXPIRED || kind === MODEL_NOT_IN_PLAN || kind === TRANSIENT_429) return { kind, ...(label ? { label } : {}) };
+  return undefined;
+}
+
+/** `{ rateLimit }` for a defined signal, `{}` otherwise (a spread-friendly optional key). */
+function rateLimitOf(sig: RunLike["rateLimit"] | undefined): { rateLimit?: NonNullable<RunLike["rateLimit"]> } {
+  return sig ? { rateLimit: sig } : {};
 }
 
 /** The window/reset of a rate-limit failure, with empty values dropped. */
@@ -203,7 +225,7 @@ export function useTaskAttention(
               Status: r.Status,
               order: -index,
               finishedAtMs: Number.isNaN(parsed) ? null : parsed,
-              ...(isPlanLimitKind(r.FailureKind) ? { rateLimit: failureDetail(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred) } : {}),
+              ...rateLimitOf(failureSignal(r.FailureKind, r.FailureAction?.label, r.FailureWindow, r.FailureResetAt, r.FailureResetInferred)),
             };
           });
           runsRef.current = runs;
@@ -279,7 +301,7 @@ export function useTaskAttention(
 
     const offRunStatus = events.subscribe("run.status", (payload) => {
       if (typeof payload !== "object" || payload === null) return;
-      const p = payload as { runId?: unknown; taskId?: unknown; chatId?: unknown; status?: unknown; failureKind?: unknown; window?: unknown; resetAt?: unknown; resetInferred?: unknown };
+      const p = payload as { runId?: unknown; taskId?: unknown; chatId?: unknown; status?: unknown; failureKind?: unknown; window?: unknown; resetAt?: unknown; resetInferred?: unknown; action?: { label?: string } };
       if (typeof p.runId !== "string" || typeof p.taskId !== "number" || typeof p.status !== "string") return;
       // chatId is ADR-0016 P1.4 -- absent only for a payload from a daemon
       // that predates it, which the concurrency banner then just can't
@@ -293,10 +315,13 @@ export function useTaskAttention(
       // "just now" by construction, which keeps it inside the window.
       const finishedAtMs = p.status === "running" ? null : Date.now();
       // A run.status carries the failure fields (ADR-0041) on its terminal event; any later status for the run replaces them.
-      const rateLimit =
-        isPlanLimitKind(typeof p.failureKind === "string" ? p.failureKind : undefined)
-          ? failureDetail(typeof p.window === "string" ? p.window : undefined, typeof p.resetAt === "string" ? p.resetAt : undefined, p.resetInferred === true)
-          : undefined;
+      const rateLimit = failureSignal(
+        typeof p.failureKind === "string" ? p.failureKind : undefined,
+        p.action?.label,
+        typeof p.window === "string" ? p.window : undefined,
+        typeof p.resetAt === "string" ? p.resetAt : undefined,
+        p.resetInferred === true,
+      );
       if (idx >= 0) {
         const next: RunLike = { ...runs[idx], TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order, finishedAtMs };
         if (rateLimit) next.rateLimit = rateLimit;
