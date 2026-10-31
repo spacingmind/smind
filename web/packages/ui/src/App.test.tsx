@@ -2988,4 +2988,16 @@ describe("App tab affordances (UAT PR1)", () => {
     const diffTab = within(screen.getByTestId("primary-pane")).getByRole("tab", { name: "Diff" });
     expect(diffTab).toHaveAttribute("aria-selected", "true");
   });
+
+  it("the header terminal button opens exactly one Terminal tab and a second click opens no more (UAT A-02)", async () => {
+    await setupSelectedTask();
+
+    fireEvent.click(screen.getByTestId("app-header-terminal"));
+    await flush();
+    expect(tabTitlesStartingWith("Terminal")).toEqual(["Terminal"]);
+
+    fireEvent.click(screen.getByTestId("app-header-terminal"));
+    await flush();
+    expect(tabTitlesStartingWith("Terminal")).toEqual(["Terminal"]);
+  });
 });

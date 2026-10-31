@@ -63,7 +63,6 @@ import {
   fileTab,
   filePathFromTabKey,
   NewTabButton,
-  nextTerminalTab,
   pluginTab,
   TabLabel,
   TabsEmptyState,
@@ -551,21 +550,17 @@ function AppShell({
     [selectedTask, openTab, openPluginPage],
   );
 
-  /** Opens another terminal tab for the selected task (Item 20). The pane picks its own session -- see lib/terminal-sessions.ts. */
-  function openTerminalTab() {
-    if (!selectedTask) return;
-    const state = tabsByTask.get(selectedTask.ID);
-    const tabs = state ? collectAllTabs(state.root) : [];
-    openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, tabs));
-  }
-
-  /** The header's terminal button: bring an existing terminal tab forward, else open the first one. (The "+" menu and the palette are what open further terminals.) */
+  /** The header's terminal button: bring an existing terminal tab forward, else open the base one. (The "+" menu and the palette are what open further terminals.) */
   function focusOrOpenTerminal() {
     if (!selectedTask) return;
     const state = tabsByTask.get(selectedTask.ID);
     const existing = (state ? collectAllTabs(state.root) : []).find((t) => t.kind === "terminal");
     if (existing) activate(selectedTask.ID, existing.key);
-    else openTerminalTab();
+    // The base `${taskId}:terminal` tab, not nextTerminalTab's index-2
+    // "Terminal 2": an indexed tab here also round-trips through the route
+    // restore (activating it writes #/…/terminal, whose restore openTab()s
+    // the base tab), landing a second Terminal tab in the strip.
+    else openBaseTab("terminal");
   }
 
   // --- Chats (ADR-0016 P3) -----------------------------------------------
