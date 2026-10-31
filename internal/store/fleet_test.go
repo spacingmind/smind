@@ -417,3 +417,62 @@ func TestFleetHost_NoSchemaForMesh(t *testing.T) {
 		t.Fatalf("fleet tables = %v, want exactly %v", fleet, want)
 	}
 }
+
+func TestFleetHostLabelsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	s := openFleetStore(t)
+	h, links := fleetPair("h1", "alice")
+	h.Labels = `{"os":"linux"}`
+	if err := s.CreateFleetPair(h, links); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFleetHost("h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Labels != `{"os":"linux"}` {
+		t.Fatalf("Labels = %q", got.Labels)
+	}
+	if err := s.SetFleetHostLabels("h1", `{"os":"windows"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateFleetHost("h1", "alice2", "desk", "paired"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.GetFleetHost("h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Labels != `{"os":"windows"}` {
+		t.Fatalf("Labels after update = %q, want kept", got.Labels)
+	}
+	if err := s.SetFleetHostLabels("nope", "{}"); !errors.Is(err, ErrFleetNotFound) {
+		t.Fatalf("unknown host error = %v, want ErrFleetNotFound", err)
+	}
+}
+
+func TestFleetHostLabelsMigration(t *testing.T) {
+	t.Parallel()
+
+	s := openFleetStore(t)
+	if !columnExists(t, s, "fleet_hosts", "labels") {
+		t.Fatal("fleet_hosts.labels missing")
+	}
+	var applied bool
+	for _, m := range migrations {
+		if m.name != "fleet_host_labels" {
+			continue
+		}
+		applied = true
+		if err := m.apply(s.db); err != nil {
+			t.Fatalf("second apply: %v", err)
+		}
+	}
+	if !applied {
+		t.Fatal("migration fleet_host_labels not registered")
+	}
+	if !columnExists(t, s, "fleet_hosts", "labels") {
+		t.Fatal("fleet_hosts.labels missing after re-apply")
+	}
+}

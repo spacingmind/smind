@@ -415,8 +415,8 @@ func TestFleetAdminMethodsLocalOnlyNotRunScopedNotPlugin(t *testing.T) {
 			adminMethods = append(adminMethods, k)
 		}
 	}
-	if len(adminMethods) != 13 {
-		t.Fatalf("fleet.host.* methods = %v, want 13", adminMethods)
+	if len(adminMethods) != 14 {
+		t.Fatalf("fleet.host.* methods = %v, want 14", adminMethods)
 	}
 
 	// (1) not run-scoped, not in any plugin capability group.
@@ -574,9 +574,9 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 		want := []string{
 			"fleet.challenge", "fleet.hello", "fleet.pair.request", "fleet.link.state",
 			"fleet.host.list", "fleet.host.invite", "fleet.host.add", "fleet.host.approve",
-			"fleet.host.reject", "fleet.host.rename", "fleet.host.grant", "fleet.host.rm", "fleet.host.revoke",
+			"fleet.host.reject", "fleet.host.rename", "fleet.host.labels", "fleet.host.grant", "fleet.host.rm", "fleet.host.revoke",
 			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test", "fleet.host.route",
-			"remote.hosts", "remote.read", "remote.write",
+			"remote.hosts", "remote.read", "remote.select", "remote.write",
 		}
 		want = append(want, wire.ReadMethods...)
 		want = append(want, wire.WriteMethods...)
@@ -802,7 +802,7 @@ func TestFleetHostViewShapeMatchesUIContract(t *testing.T) {
 	if err := json.Unmarshal(raw, &top); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"alias", "createdAt", "hostId", "inbound", "label", "link", "linkCode", "linkGuidance", "outboundEnabled", "pendingApproval", "sas", "state"}
+	want := []string{"alias", "createdAt", "hostId", "inbound", "label", "labels", "link", "linkCode", "linkGuidance", "outboundEnabled", "pendingApproval", "sas", "state"}
 	if got := keys(top); !slices.Equal(got, want) {
 		t.Fatalf("view keys = %v, want %v", got, want)
 	}

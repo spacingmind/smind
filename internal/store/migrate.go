@@ -629,6 +629,14 @@ var migrations = []migration{
 			return addColumnIfMissing(db, "runs", "origin_host", "TEXT NOT NULL DEFAULT ''")
 		},
 	},
+	{
+		// ADR-0048 F5: operator labels on a fleet host. Caller-local, a
+		// JSON object, never sent to a peer. '' means no labels.
+		name: "fleet_host_labels",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "fleet_hosts", "labels", "TEXT NOT NULL DEFAULT ''")
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and
