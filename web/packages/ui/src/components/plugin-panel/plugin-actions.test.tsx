@@ -54,7 +54,7 @@ function renderPane({
   queryClient = createQueryClient(),
 }: { doc?: unknown; actions?: PluginActions; queryClient?: QueryClient } = {}) {
   const client = new FakeWsClient();
-  const provided: PluginActions = actions ?? { openPanel: vi.fn(), runCommand: () => false };
+  const provided: PluginActions = actions ?? { openPanel: vi.fn() };
   render(
     <DaemonQueryProvider queryClient={queryClient} client={client as never} events={null}>
       <PluginActionsContext.Provider value={provided}>
@@ -187,7 +187,7 @@ describe("plugin panel actions", () => {
 
   it("openPanel hands the plugin, panel and context to the app's actions", async () => {
     const openPanel = vi.fn();
-    renderPane({ actions: { openPanel, runCommand: () => false } });
+    renderPane({ actions: { openPanel } });
     await flush();
 
     await click(screen.getByRole("button", { name: "Panel" }));
