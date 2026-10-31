@@ -72,7 +72,7 @@ function shortDuration(ms: number): string {
 }
 
 /** Applies what a settings deep link names beyond the section: on Providers, the provider to select. */
-export function focusSettingsTarget(target: { sectionId?: string; provider?: string } | undefined): void {
+export function focusSettingsTarget(target: Partial<SettingsTarget> | undefined): void {
   if (target?.sectionId === "providers" && target.provider) selectProvider(target.provider);
 }
 
