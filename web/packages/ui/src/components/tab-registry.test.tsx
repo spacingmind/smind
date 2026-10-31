@@ -25,6 +25,7 @@ import {
   type BaseTabKind,
 } from "@/components/tab-registry";
 import { resetDirtyBuffers } from "@/lib/dirty-buffers";
+import type { PluginPanel } from "@/lib/plugin-panel-types";
 import { clearTerminalActivity, markTerminalActivity, resetTerminalSessions } from "@/lib/terminal-sessions";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { Task } from "@/lib/types";
@@ -253,6 +254,37 @@ describe("flexible tabs (Item 3)", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
     expect(opened).toEqual(["terminal"]);
+  });
+
+  it("lists the offered plugin panels after the base kinds and opens one on click", async () => {
+    const openedPanel: PluginPanel[] = [];
+    const panels: PluginPanel[] = [
+      { plugin: "acme", id: "usage", title: "Acme usage", where: "task", ui: 1 },
+      { plugin: "zeta", id: "board", title: "Board", where: "palette", ui: 1 },
+    ];
+    render(
+      <NewTabButton onOpen={() => {}} pluginPanels={panels} onOpenPluginPanel={(panel) => openedPanel.push(panel)} />,
+    );
+
+    fireEvent.pointerDown(screen.getByTestId("tabs-new-tab"), { button: 0 });
+    const items = await screen.findAllByTestId("tabs-new-tab-plugin");
+    expect(items.map((i) => [i.dataset.plugin, i.dataset.panel])).toEqual([
+      ["acme", "usage"],
+      ["zeta", "board"],
+    ]);
+    // After the base kinds, per the menu's own section order.
+    const kinds = screen.getAllByTestId("tabs-new-tab-item");
+    expect(items[0]!.compareDocumentPosition(kinds[kinds.length - 1]!)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Acme usage/ }));
+    expect(openedPanel).toEqual([panels[0]]);
+  });
+
+  it("offers no plugin items without the panels prop", async () => {
+    render(<NewTabButton onOpen={() => {}} />);
+    fireEvent.pointerDown(screen.getByTestId("tabs-new-tab"), { button: 0 });
+    await screen.findAllByTestId("tabs-new-tab-item");
+    expect(screen.queryByTestId("tabs-new-tab-plugin")).not.toBeInTheDocument();
   });
 });
 

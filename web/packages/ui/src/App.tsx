@@ -60,6 +60,7 @@ import {
   filePathFromTabKey,
   NewTabButton,
   nextTerminalTab,
+  pluginTab,
   TabLabel,
   TabsEmptyState,
   type BaseTabKind,
@@ -70,6 +71,8 @@ import {
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { PluginThemeApplier } from "@/components/plugin-theme-applier";
 import { useSlashPaletteCommands } from "@/hooks/use-slash-palette-commands";
+import { usePluginPanels } from "@/hooks/use-plugin-panels";
+import type { PluginPanel } from "@/lib/plugin-panel-types";
 import { DaemonQueryProvider, useDaemonQueryClient } from "@/lib/query/daemon-query-provider";
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
@@ -486,6 +489,17 @@ function AppShell({
   function openBaseTab(kind: BaseTabKind, placement?: TabPlacement) {
     if (!selectedTask) return;
     openTab(selectedTask.ID, baseTabForKind(selectedTask.ID, kind), placement ?? "prefer");
+  }
+
+  /**
+   * Opens (or activates) one of the active plugins' panel tabs (ADR-0042) -- the "+" menu's plugin
+   * section. The same open-or-activate rule as the base kinds: openTab itself activates an
+   * already-open `pluginTabKey` instead of duplicating it, and `prefer` keeps the implicit-open
+   * placement rule.
+   */
+  function openPluginPanelTab(panel: PluginPanel) {
+    if (!selectedTask) return;
+    openTab(selectedTask.ID, pluginTab(selectedTask.ID, panel), "prefer");
   }
 
   /** Opens another terminal tab for the selected task (Item 20). The pane picks its own session -- see lib/terminal-sessions.ts. */
@@ -1135,6 +1149,7 @@ function AppShell({
       onRevealInDiff={revealInDiff}
       onNewTerminal={openTerminalTab}
       onOpenBase={openBaseTab}
+      onOpenPluginPanel={openPluginPanelTab}
       chats={chats}
       openChatIds={openChatIds}
       runningChatsByTask={runningChatsByTask}
@@ -1211,6 +1226,7 @@ function AppShell({
                 onRevealInDiff={revealInDiff}
                 onNewTerminal={openTerminalTab}
                 onOpenBase={openBaseTab}
+                onOpenPluginPanel={openPluginPanelTab}
                 chats={chats}
                 openChatIds={openChatIds}
                 runningChatsByTask={runningChatsByTask}
@@ -1723,6 +1739,8 @@ interface SplitPaneCallbacks {
   onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
+  /** "+" -> one of the active plugins' panels (ADR-0042): opens (or activates) its plugin tab. */
+  onOpenPluginPanel: (panel: PluginPanel) => void;
   /** The task's own chats (ADR-0016 P3), for the "+" menu's reopen-existing-chat section -- null while chat.list is still in flight. */
   chats: Chat[] | null;
   /** Which of `chats` already have a tab open somewhere in the task's split tree -- excluded from the "+" menu's reopen section. */
@@ -1804,6 +1822,7 @@ function SplitTreeView({
         onRevealInDiff={shared.onRevealInDiff}
         onNewTerminal={shared.onNewTerminal}
         onOpenBase={shared.onOpenBase}
+        onOpenPluginPanel={shared.onOpenPluginPanel}
         chats={shared.chats}
         openChatIds={shared.openChatIds}
         runningChatsByTask={shared.runningChatsByTask}
@@ -1893,6 +1912,7 @@ function PaneTabStrip({
   onRevealInDiff,
   onNewTerminal,
   onOpenBase,
+  onOpenPluginPanel,
   chats,
   openChatIds,
   runningChatsByTask,
@@ -1931,6 +1951,8 @@ function PaneTabStrip({
   onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
+  /** "+" -> one of the active plugins' panels (ADR-0042): opens (or activates) its plugin tab. */
+  onOpenPluginPanel: (panel: PluginPanel) => void;
   chats: Chat[] | null;
   openChatIds: ReadonlySet<number>;
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
@@ -1955,6 +1977,10 @@ function PaneTabStrip({
   // `data` carries just the pane id, which `App.tsx`'s onDragMove/onDragEnd
   // read back off `event.over`.
   const { setNodeRef: setDroppableRef } = useDroppable({ id: paneId, data: { paneId } });
+  // The "+" menu's plugin-panel section (ADR-0042): read under the daemon
+  // provider like every other panel-data consumer, here where the menu
+  // renders; only the task/palette surfaces belong in a task's strip.
+  const pluginPanels = usePluginPanels().panels.filter((p) => p.where === "task" || p.where === "palette");
   const showDropPreview = isDragActive && dragOverPaneId === paneId && dropPosition !== null;
   // (aria-selected, not data-state: ContextMenuTrigger asChild overwrites the trigger's data-state.)
   // Keeps the active tab visible when the strip overflows (TB-AC5).
@@ -2031,6 +2057,8 @@ function PaneTabStrip({
             chats={reopenableChats(chats, openChatIds)}
             onOpenChat={(chatId) => onOpenChat(chatId, { pane: paneId })}
             onNewChat={() => onNewChat({ pane: paneId })}
+            pluginPanels={pluginPanels}
+            onOpenPluginPanel={onOpenPluginPanel}
             open={newTabMenuOpen}
             onOpenChange={onNewTabMenuOpenChange}
           />

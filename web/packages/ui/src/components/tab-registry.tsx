@@ -356,6 +356,8 @@ export function NewTabButton({
   chats,
   onOpenChat,
   onNewChat,
+  pluginPanels,
+  onOpenPluginPanel,
   open,
   onOpenChange,
 }: {
@@ -364,6 +366,9 @@ export function NewTabButton({
   chats?: ChatMenuEntry[];
   onOpenChat?: (chatId: number) => void;
   onNewChat?: () => void;
+  /** The plugin panels the "+" menu may open (ADR-0042) -- omitted (or empty) when the daemon offers none, so no section renders. */
+  pluginPanels?: PluginPanel[];
+  onOpenPluginPanel?: (panel: PluginPanel) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -416,6 +421,24 @@ export function NewTabButton({
             </DropdownMenuItem>
           );
         })}
+        {(pluginPanels?.length ?? 0) > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            {pluginPanels!.map((panel) => (
+              <DropdownMenuItem
+                key={`${panel.plugin}:${panel.id}`}
+                data-testid="tabs-new-tab-plugin"
+                data-plugin={panel.plugin}
+                data-panel={panel.id}
+                onClick={() => onOpenPluginPanel?.(panel)}
+              >
+                <Icons.plugin aria-hidden className="size-3.5 opacity-70" />
+                {panel.title}
+                <span className="ml-auto pl-4 text-ui-sm text-muted-foreground">{panel.plugin}</span>
+              </DropdownMenuItem>
+            ))}
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
