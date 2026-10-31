@@ -516,7 +516,17 @@ None (reference-only; own code, copy and illustration).
 
 ### Progress / Validation
 
-- [ ] Peer ledger, mutations, sheets: filled below as the PR lands.
+- [x] Stage 6 implemented (this PR): greeting + illustration, pending-send hand-off, landing chips, empty sidebar.
+
+**Validation (2026-10-31)**
+
+- `task test` 394 files / 4251 tests pass, `task lint` clean, `bunx tsc -b` clean on the final head.
+- One mutation per load-bearing test (each failed the named test, file restored with `git checkout --`): `greeting.ts` `hour < 12` to `<= 12` (bucket edges 11:59/12:00); `use-greeting.ts` bucket compare removed (stable across re-render); `pending-send-store.ts` clear removed (take is atomic, expires after the ttl); `composer.tsx` hand-off `submit()` removed (pending send applies the config then submits once, no double send under StrictMode, send failure keeps the draft); `home-landing.tsx` pending-send `set` removed (landing submit creates and sends once, chips apply, chips default to last used); `app-sidebar.tsx` "No tasks yet" text changed (empty sidebar test).
+- Found in review: the landing chips added a second `run.list` on connect and broke four App.test attention tests that index run.list requests; fixed by not reading the observed model without a chat id.
+- Frames (isolated daemons, stub agent only, fake clock; L = ZCode raw, R = smind), `/tmp/steward4/zcode-audit/after/welcome/`: `welcome_light_1280.png`, `welcome_dark_1280.png` (four greeting buckets), `welcome_390.png`, `welcome_390_extra.png`, `welcome_chips_1280.png` (model picker + mode menu), `welcome_empty_sidebar.png`; singles `welcome_bucket-{before,after}_light_1280.png` (11:59 to 12:00 swap), `welcome_send-{0ms,600ms}_{light,dark}_1280.png` (send in flight: exactly one user prompt in the timeline, no second Enter).
+- Looked at: buckets, chips, empty sidebar and send frames in light and dark. Observed, not changed: at 0 ms after Enter the landing still shows while task.create is in flight (send button busy); at 390 the chips are icon-only; the disabled empty-sidebar composer is low contrast by design; a Codex row hint is clipped in the (pre-existing) model picker.
+- Not done: the landing does not show a "draft only" mode; mobile untouched (the landing is web only).
+- Peer ledger: GLM 0 runs (2 sends refused, rate limited until 18:28, Steward switched to Sonnet); peer-sonnet 5 runs (A greeting/illustration/sidebar $0.23, B hand-off $0.46, C landing + fix run, frames), no failures; no wrong edits, one review finding (run.list ordering) fixed by Sonnet.
 
 ## Decisions
 
