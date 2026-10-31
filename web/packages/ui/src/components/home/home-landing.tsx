@@ -98,10 +98,10 @@ export function HomeLanding({
 
   return (
     <div data-testid="home-landing" className="flex h-full flex-col items-center justify-center gap-6 overflow-y-auto bg-panel px-4 py-10">
-      <img src="/logo.png" alt="" aria-hidden className="size-12 opacity-80 dark:size-14" data-testid="home-mark" />
+      <img src="/logo.png" alt="" aria-hidden className="size-16 opacity-70 dark:size-[4.5rem]" data-testid="home-mark" />
       <h1 className="text-ui-xl font-semibold text-foreground">What should we work on?</h1>
       <div className="w-full max-w-2xl">
-        <div className="mb-2">
+        <div className="-mb-3 rounded-t-2xl bg-muted/60 px-1.5 pb-4 pt-1.5">
           <Popover
             open={menuOpen}
             onOpenChange={(open) => {
@@ -174,7 +174,7 @@ export function HomeLanding({
             </PopoverContent>
           </Popover>
         </div>
-        <form data-testid="home-composer" onSubmit={onSubmit}>
+        <form data-testid="home-composer" onSubmit={onSubmit} className="relative">
           <div data-testid="home-composer-card" className={cn(COMPOSER_CARD_CLASS)}>
             <PromptTextarea
               ref={textareaRef}
