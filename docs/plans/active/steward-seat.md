@@ -163,7 +163,7 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 
 - S0 plan + ADR: this PR (docs only, Proposed).
 - S1: implemented 2026-10-31 on one branch (`internal/permpolicy`, audit store, `runs` hook, `policy.*` RPCs, `smind policy`, docs); PR and validator verdict below.
-- S2: in progress 2026-10-31 (Lead, GLM peers per the Human's GLM policy); contract `docs/plans/active/steward-seat-s2.contract.md`.
+- S2: seat, review loop, rails, trigger, seed and CLI implemented 2026-10-31 (PR link and validator verdict below once opened); S2b (steward_annotate) deferred to after S4 evidence.
 - S3–S4: not started.
 
 ## Validation
