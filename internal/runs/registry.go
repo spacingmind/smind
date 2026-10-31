@@ -487,6 +487,12 @@ type run struct {
 	origin    string
 	interrupt bool
 
+	// originHost is the paired fleet host a remote-origin run arrived
+	// from ("" = local), persisted to runs.origin_host (ADR-0048) so the
+	// per-origin budget and audit attribute the run from its first
+	// running moment. Set at start, immutable.
+	originHost string
+
 	// replyChatID is the parent chat to notify when this run finishes
 	// (ADR-0041 B3); 0 = none. Set at start, immutable, persisted on the row.
 	replyChatID int64
@@ -958,6 +964,27 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 		return fmt.Errorf("runs: start: persist run: %w", err)
 	}
 
+	// ADR-0048: a remote run records which host it arrived from, so the
+	// per-origin budget and audit can count it from the row's first
+	// running moment. Failure rolls the registration back exactly like
+	// the CreateRun branch above: no subprocess drives a run whose origin
+	// did not reach disk.
+	if r.originHost != "" {
+		if err := reg.st.SetRunOrigin(r.id, r.originHost); err != nil {
+			// The row CreateRun already wrote must not stay "running"
+			// forever (and count as a live agent in the per-origin
+			// budget, ADR-0048) just because its origin did not persist.
+			now := time.Now()
+			if _, uerr := reg.st.UpdateRunStatus(r.id, string(StatusError), &now, "", "persist run origin: "+err.Error()); uerr != nil {
+				log.Printf("runs: mark run %s errored after origin persist failure: %v", r.id, uerr)
+			}
+			reg.mu.Lock()
+			delete(reg.runs, r.id)
+			reg.mu.Unlock()
+			return fmt.Errorf("runs: start: persist run origin: %w", err)
+		}
+	}
+
 	reg.notifyRunStatus(r)
 	if r.failoverOf != "" {
 		if n := reg.getNotifier(); n != nil {
@@ -1235,7 +1262,10 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 	// resolution, tagged PermissionResolvedByAutoAccept so the timeline can
 	// tell it apart from a real human answer. This is the only auto-allow
 	// smind performs, and it's the human's own per-run choice (ADR-0019).
-	if d.r.getPerm().AutoAccept {
+	// A remote run (ADR-0048) never takes this shortcut: the callee's
+	// policy floor and standing rules must see every request, defence in
+	// depth on top of StartWhenBusy forcing AutoAccept off.
+	if d.r.getPerm().AutoAccept && d.r.origin != store.ChatQueueSourceRemote {
 		if optionID, ok := firstOptionByKind(options, "allow_once", "allow_always"); ok {
 			d.reg.record(d.r, taskrunner.Event{
 				Type:                taskrunner.EventTypePermissionRequest,
