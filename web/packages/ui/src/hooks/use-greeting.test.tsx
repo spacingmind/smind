@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GREETINGS } from "@/lib/greeting";
+import { GREETINGS, OFFICE_GREETINGS } from "@/lib/greeting";
+import { useInterfaceModeStore } from "@/stores/interface-mode-store";
 import { useGreeting } from "./use-greeting";
 
 const set = (h: number, m: number, s = 0) => vi.setSystemTime(new Date(2026, 9, 31, h, m, s));
@@ -48,5 +49,26 @@ describe("useGreeting", () => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
     expect(GREETINGS.evening).toContain(result.current);
+  });
+
+  it("office mode picks from the office pool; the line changes on a mode flip, not on a re-render", () => {
+    set(10, 0);
+    useInterfaceModeStore.getState().set("office");
+    const { result, rerender } = renderHook(() => useGreeting(() => 0));
+    expect(OFFICE_GREETINGS.morning).toContain(result.current);
+    const first = result.current;
+    rerender();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(result.current).toBe(first);
+    act(() => {
+      useInterfaceModeStore.getState().set("coding");
+    });
+    expect(GREETINGS.morning).toContain(result.current);
+    act(() => {
+      useInterfaceModeStore.getState().set("office");
+    });
+    expect(OFFICE_GREETINGS.morning).toContain(result.current);
   });
 });

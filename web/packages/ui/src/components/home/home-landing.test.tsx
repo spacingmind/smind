@@ -8,6 +8,8 @@ import type { ProviderInfo, Task, Workspace } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 import { useHomeProjectStore } from "@/stores/home-project-store";
 import { useHomeRunConfigStore } from "@/stores/home-run-config-store";
+import { OFFICE_SUGGESTED_PROMPTS } from "@/lib/suggested-prompts";
+import { useInterfaceModeStore } from "@/stores/interface-mode-store";
 import { usePendingSendStore } from "@/stores/pending-send-store";
 
 function ws(ID: number, Title: string): Workspace {
@@ -246,5 +248,39 @@ describe("HomeLanding", () => {
     fireEvent.click(screen.getByTestId("home-send-button"));
     await waitFor(() => expect(onCreated).toHaveBeenCalled());
     expect(usePendingSendStore.getState().entry?.config).toMatchObject({ provider: "claude-native", permissionMode: "plan" });
+  });
+});
+
+describe("HomeLanding office suggestions", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useInterfaceModeStore.getState().reload();
+    useHomeProjectStore.getState().reload();
+    useHomeRunConfigStore.getState().reload();
+    usePendingSendStore.setState({ entry: null });
+  });
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    useInterfaceModeStore.getState().reload();
+  });
+
+  it("coding mode shows no suggestion chips", () => {
+    renderHome();
+    expect(screen.queryByTestId("home-suggestions")).toBeNull();
+  });
+
+  it("four_chips_fill_never_send", async () => {
+    useInterfaceModeStore.getState().set("office");
+    const { call } = renderHome();
+    await flush();
+    const chips = screen.getAllByTestId("home-suggestion");
+    expect(chips.map((c) => c.textContent)).toEqual([...OFFICE_SUGGESTED_PROMPTS]);
+    expect(chips).toHaveLength(4);
+    fireEvent.click(chips[1]);
+    await flush();
+    expect((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value).toBe(OFFICE_SUGGESTED_PROMPTS[1]);
+    expect(createCalls(call)).toHaveLength(0);
+    expect(call.mock.calls.map(([m]) => m)).not.toContain("run.start");
   });
 });
