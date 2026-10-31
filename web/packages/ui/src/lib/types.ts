@@ -3,6 +3,8 @@
 // (PascalCase) JSON keys -- those types carry no `json:` tags, so
 // encoding/json marshals them using the Go field names verbatim.
 
+import type { FailureAction } from "@/lib/failure-class";
+
 export interface Workspace {
   ID: number;
   Path: string;
@@ -490,6 +492,8 @@ export interface RunSummary {
   Disposition?: string;
   /** ADR-0041: "rate_limited" when the run failed on a provider quota (status stays "error"); absent/empty otherwise. */
   FailureKind?: string;
+  /** The next action for the failure (run failure classes); absent/null when none. */
+  FailureAction?: FailureAction | null;
   /** The quota window that was hit ("5h", "weekly", ...); absent/empty when unknown. */
   FailureWindow?: string;
   /** When the limit lifts (RFC 3339 UTC); null/absent when unknown. */
@@ -828,6 +832,8 @@ export interface RunLogsResult {
   disposition?: string;
   /** ADR-0041: "rate_limited" when the run failed on a provider quota; omitted otherwise. */
   failureKind?: string;
+  /** The next action for the failure (run failure classes); omitted when none. */
+  action?: FailureAction;
   /** The quota window that was hit ("5h", "weekly", ...); omitted when unknown. */
   window?: string;
   /** When the limit lifts (RFC 3339 UTC); omitted when unknown. */
@@ -1109,6 +1115,8 @@ export interface RunStatusEventPayload {
   disposition?: string;
   /** ADR-0041: "rate_limited" when the run failed on a provider quota; omitted otherwise. */
   failureKind?: string;
+  /** The next action for the failure (run failure classes); omitted when none. */
+  action?: FailureAction;
   /** The quota window that was hit ("5h", "weekly", ...); omitted when unknown. */
   window?: string;
   /** When the limit lifts (RFC 3339 UTC); omitted when unknown. */

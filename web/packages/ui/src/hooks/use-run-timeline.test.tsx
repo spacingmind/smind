@@ -242,6 +242,33 @@ describe("useRunTimeline rate-limit failure (ADR-0041)", () => {
   });
 });
 
+describe("useRunTimeline failure action (run failure classes)", () => {
+  const sign = { kind: "sign_in", target: "settings:providers?provider=glm", label: "Sign in again to GLM" };
+
+  it("maps the next action from run.list (FailureAction), run.logs and run.status, and replaces it on a terminal answer", async () => {
+    const client = new FakeWsClient();
+    const ev = fakeEvents();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10, ev.events));
+    client.nth("run.list", 0).resolve([
+      summary({ ID: "run-1", Status: "error", FailureKind: "auth_expired", FailureAction: sign }),
+      summary({ ID: "run-2", Status: "error", FailureKind: "transient_429", FailureAction: null }),
+    ]);
+    await flush();
+    expect(result.current.runs?.[0]?.failureAction).toEqual(sign);
+    expect(result.current.runs?.[1]?.failureAction).toBeUndefined();
+
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "error", failureKind: "auth_expired", action: { ...sign, label: "Sign in again" }, events: [] } satisfies RunLogsResult);
+      client.nth("run.logs", 1).resolve({ runId: "run-2", status: "error", failureKind: "transient_429", events: [] } satisfies RunLogsResult);
+    });
+    await waitFor(() => expect(result.current.runs?.[0]?.failureAction?.label).toBe("Sign in again"));
+
+    const retry = { kind: "auto_retry", label: "Retrying automatically (1 of 2)", attempt: 1, max: 2, nextAt: "2030-01-01T00:00:30Z" };
+    await ev.fire("run.status", { runId: "run-2", taskId: 1, chatId: 10, status: "error", failureKind: "transient_429", action: retry });
+    expect(result.current.runs?.[1]?.failureAction).toEqual(retry);
+  });
+});
+
 describe("useRunTimeline failover lineage (ADR-0041 F2)", () => {
   it("maps profileId/failoverOf from run.list and run.logs, and fallbackProfileId from run.logs", async () => {
     const client = new FakeWsClient();
