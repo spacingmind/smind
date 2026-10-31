@@ -154,7 +154,7 @@ export function AutomationsPage({ onNavigateBack, closeSettings }: { onNavigateB
           )}
           {notice && <Alert variant="success" testId="automations-notice" description={notice} />}
 
-          {listing?.enabled &&
+          {(!listing || listing.enabled) &&
             (automations === null ? (
               query.isError ? (
                 <div className="flex items-center gap-2">
