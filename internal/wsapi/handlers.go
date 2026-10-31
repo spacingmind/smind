@@ -1894,6 +1894,10 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 		return runLogEvent{Type: "mcp_servers", McpServers: e.McpServers}
 	case taskrunner.EventTypeDone:
 		return runLogEvent{Type: "done", StopReason: e.StopReason}
+	case taskrunner.EventTypeSessionNote:
+		// Clients concatenate adjacent chunks: keep the note its own
+		// blockquote paragraph so the next assistant text is not glued on.
+		return runLogEvent{Type: "chunk", Text: "\n\n> " + e.Text + "\n\n"}
 	case taskrunner.EventTypePermissionRequest:
 		return runLogEvent{
 			Type:      "permission_request",
