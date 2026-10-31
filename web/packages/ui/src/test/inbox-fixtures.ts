@@ -158,3 +158,20 @@ export const REQUEST_EVENTS = [
     detail: { kind: "write", path: "src/widget.ts", newBytes: 120, newLines: 6 },
   },
 ];
+
+/** A run_failed inbox item (run failure classes): the failed run's class and its next action. */
+export function runFailedItem(over: Partial<InboxItem> = {}): InboxItem {
+  return {
+    key: "runfail:run-9",
+    kind: "run_failed",
+    taskId: 5,
+    title: "Fix the login bug",
+    summary: "Sign in again to GLM",
+    createdAt: "2026-11-01T09:00:00Z",
+    state: "new",
+    attention: "high",
+    links: { taskId: 5, runId: "run-9" },
+    action: { kind: "sign_in", target: "settings:providers?provider=glm", label: "Sign in again to GLM" },
+    ...over,
+  } as InboxItem;
+}

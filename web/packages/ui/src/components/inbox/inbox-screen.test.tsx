@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { InboxBadge } from "@/components/inbox/inbox-badge";
 import { InboxScreen } from "@/components/inbox/inbox-screen";
-import { hostDownItem, hostPairItem, hostRefusedItem, InboxDaemon, permissionItem, REQUEST_EVENTS, stallItem, verdictItem } from "@/test/inbox-fixtures";
+import { hostDownItem, hostPairItem, hostRefusedItem, InboxDaemon, permissionItem, REQUEST_EVENTS, runFailedItem, stallItem, verdictItem } from "@/test/inbox-fixtures";
 import { createQueryClient } from "@/lib/query/query-client";
 import { queryKeys } from "@/lib/query-keys";
 import { fleetHost } from "@/test/fleet-fixtures";
@@ -233,6 +233,44 @@ describe("InboxScreen", () => {
     await renderInbox(daemonWith(), { onNavigateBack });
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onNavigateBack).toHaveBeenCalled();
+  });
+});
+
+describe("InboxScreen run_failed (run failure classes)", () => {
+  it("groups failed runs right after permissions, with the class action as the summary", async () => {
+    await renderInbox(daemonWith(stallItem(), runFailedItem(), permissionItem()));
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual(["Needs you now", "Runs that need you", "Stalled"]);
+    expect(screen.getByTestId("inbox-row-runfail:run-9")).toHaveAttribute("data-kind", "run_failed");
+    expect(screen.getByTestId("inbox-kind-runfail:run-9")).toHaveTextContent("Run failed");
+    expect(screen.getByTestId("inbox-summary-runfail:run-9")).toHaveTextContent("Sign in again to GLM");
+  });
+
+  it("a sign_in item offers Sign in, which opens Settings through the deep-link event, and Open task", async () => {
+    const seen: CustomEvent[] = [];
+    const on = (e: Event) => seen.push(e as CustomEvent);
+    window.addEventListener("smind:open-settings", on);
+    const onOpenTask = vi.fn();
+    await renderInbox(daemonWith(runFailedItem()), { onOpenTask });
+    await click(screen.getByTestId("inbox-signin-runfail:run-9"));
+    window.removeEventListener("smind:open-settings", on);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].detail).toEqual({ sectionId: "providers", provider: "glm" });
+    await click(screen.getByTestId("inbox-open-runfail:run-9"));
+    expect(onOpenTask).toHaveBeenCalledWith(5);
+  });
+
+  it("other classes show their label and no Sign in; a plan window is a calm pill", async () => {
+    await renderInbox(
+      daemonWith(
+        runFailedItem({ key: "runfail:m", summary: "Pick another model", attention: "high", action: { kind: "pick_model", label: "Pick another model" } }),
+        runFailedItem({ key: "runfail:p", summary: "Wait: 5h window resets 17:35", attention: "normal", action: { kind: "wait_until", label: "Wait: 5h window resets 17:35" } }),
+      ),
+    );
+    expect(screen.queryByTestId("inbox-signin-runfail:m")).toBeNull();
+    expect(screen.queryByTestId("inbox-signin-runfail:p")).toBeNull();
+    expect(screen.getByTestId("inbox-summary-runfail:m")).toHaveTextContent("Pick another model");
+    expect(screen.getByTestId("inbox-summary-runfail:p")).toHaveTextContent("Wait: 5h window");
   });
 });
 

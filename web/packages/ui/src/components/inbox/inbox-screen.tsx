@@ -22,6 +22,7 @@ import { canSnoozeOrResolve, groupInbox, inboxAnnouncement, SNOOZE_OPTIONS, type
 import { desktopOS, isDesktop } from "@/lib/platform";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
+import { openFailureSettings } from "@/lib/failure-class";
 import { headerLeftInsetPx } from "@/lib/window-chrome";
 
 const BASE_PADDING_PX = 8;
@@ -31,6 +32,7 @@ function tone(item: InboxItem): StatusBadgeStatus {
   if (item.kind === "permission" || item.kind === "host_pair") return "warning";
   if (item.kind === "stall" || item.kind === "host_down") return "neutral";
   if (item.kind === "host_refused") return "danger";
+  if (item.kind === "run_failed") return item.attention === "high" ? "danger" : "warning";
   return item.attention === "high" ? "danger" : "success";
 }
 
@@ -40,6 +42,7 @@ function kindLabel(item: InboxItem): string {
   if (item.kind === "host_pair") return "Pairing";
   if (item.kind === "host_refused") return "Refused";
   if (item.kind === "host_down") return "Unreachable";
+  if (item.kind === "run_failed") return "Run failed";
   return item.attention === "high" ? "Needs a decision" : "Passed";
 }
 
@@ -57,7 +60,9 @@ function KindIcon({ item }: { item: InboxItem }) {
           ? Icons.host
           : item.kind === "host_refused"
             ? Icons.permissionDanger
-            : Icons.verdict;
+            : item.kind === "run_failed"
+              ? Icons.permissionDanger
+              : Icons.verdict;
   return <Icon aria-hidden className="size-4" />;
 }
 
@@ -352,6 +357,11 @@ function InboxRow({
             onClick={onToggle}
           >
             {expanded ? "Hide request" : "Review request"}
+          </Button>
+        )}
+        {item.kind === "run_failed" && item.action?.kind === "sign_in" && (
+          <Button type="button" variant="outline" size="sm" className={btn} data-testid={`inbox-signin-${item.key}`} onClick={() => openFailureSettings(item.action)}>
+            Sign in
           </Button>
         )}
         {isHostKind(item.kind)

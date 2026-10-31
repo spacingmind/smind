@@ -515,6 +515,23 @@ func runPromptScript(promptMsg message, cwd string) {
 		sessionUpdate("[error] 429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18")
 		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error", Data: map[string]any{"details": "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18"}}})
 		return
+	case "auth-error":
+		// Run failure classes: the Anthropic authentication_error the way the daemon stores it.
+		sessionUpdate(`[error] API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`)
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
+		return
+	case "model-error":
+		sessionUpdate("[error] There's an issue with the selected model (claude-opus-9). It may not exist or you may not have access to it.")
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
+		return
+	case "transient-error":
+		sessionUpdate(`[error] API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`)
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
+		return
+	case "residual-429":
+		sessionUpdate("[error] API Error: 429 Too Many Requests")
+		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
+		return
 	case "plain-error":
 		writeMessage(message{JSONRPC: "2.0", ID: promptMsg.ID, Error: &rpcError{Code: -32603, Message: "Internal error"}})
 		return
