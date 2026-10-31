@@ -71,7 +71,14 @@ func UpdateProviderInstance(id string, u InstanceUpdate) (CustomProvider, bool, 
 	if cur.Extends == "" {
 		return CustomProvider{}, false, fmt.Errorf("provider %q is not an instance (only an entry with extends can be updated)", id)
 	}
-	next := cur
+	// next is decoded independently rather than copied from cur: a copy would
+	// share cur's Env map and Endpoint pointer, which ValidateCustomProviders
+	// normalises in place (~/ expansion, filepath.Clean, trimmed URLs), and
+	// verifyInstancePatch compares the raw YAML against a pristine cur.
+	var next CustomProvider
+	if err := entry.Decode(&next); err != nil {
+		return CustomProvider{}, false, fmt.Errorf("provider %q: %w", id, err)
+	}
 	applyInstanceUpdate(&next, u)
 	var all []CustomProvider
 	if err := seq.Decode(&all); err != nil {

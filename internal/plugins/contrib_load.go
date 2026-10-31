@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/spacingmind/smind/internal/fsutil"
 	"github.com/spacingmind/smind/internal/plugins/uiview"
 )
 
@@ -208,7 +209,7 @@ func noSymlinkUnder(realRoot, full string) error {
 		if err != nil {
 			return nil // missing is reported by the caller
 		}
-		if st.Mode()&fs.ModeSymlink != 0 {
+		if fsutil.IsLink(st.Mode()) {
 			return fmt.Errorf("%s is a symbolic link", filepath.ToSlash(rel))
 		}
 	}
