@@ -346,3 +346,50 @@ Contract `fleet-hosts-f5.contract.md`. Peer ledger F5: peer-glm 0 runs (GLM limi
 - Mutations (each fails its named test; build failures re-done): M1 eligible `Enabled || Connected` -> DisabledSkipped/DisconnectedSkipped; M2 tie-break larger alias -> AnyTieByAlias; M3 cap 17 -> LabelsValidate; M4 Connected always true -> `TestFleetRemoteSelect_DisconnectedAndDisabledSkipped`; M5 alias not written into remote.read params -> `TestFleetSelectorMCP_ResolvesToAliasThenReads`.
 - Commands: `task lint` ok; `go test -race` on cmd/smind, internal/fleet/..., internal/wsapi, internal/store ok; `GOOS=windows go vet` on the same ok.
 - Not done: a labels editor on the Hosts settings page (follow-up), web/mobile chip (F4).
+
+## Fleet closeout (2026-10-31, Lead)
+
+Merged PRs on develop: ADR and plan #718; F1a identity/registry/store #723 (+ Windows fixture follow-up #732); F1c Hosts page, inbox, mobile approval #727; F1b hello, transports, pairing, CLI #729; F2a callee read #739; F2b caller client/CLI/MCP read #740; F3a callee write and budgets #747; F3b caller watches and MCP write #748; F4 tree and chip #749; F5 label routing #751; related web fix #735 (unknown event topic). The test names below are the ones in the per-PR Validation sections above; this table is the index.
+
+| AC | Merged proof | Named tests (all in develop) |
+|---|---|---|
+| AC1 | #723, #729, #740 | `TestFleetOffIsByteForByte`, `TestWsapiMethodMapGoldenFleetOff`, `TestHostCommandsSayFleetOffWhenDisabled`, `TestRemoteMethodsAbsentWhenFleetOff` |
+| AC2 | #723 | `TestHostIDMatchesDeviceIDVector`, `TestHostKeyFileModeAndCorruption` |
+| AC3 | #729 | `TestInvitePayloadFragmentOnlyNoSecrets`, `TestPairingWindowOneSlotFirstSeenAfterOpen` |
+| AC4 | #729 | `TestHelloMutualPinnedIdentity`, `TestPairingSASMatchesBothSides`, `TestFleetPairDirectE2E` |
+| AC5 | #723, #729, #739 | `TestRegistryPairingDirectedLinksReverseOff`, `TestFleetReverseDisabledByDefault`, `TestFleetReadTwoDaemonsE2E`. The plan's name `TestPairingCreatesTwoDirectedLinksOneEnabled` does not exist; `TestRegistryPairingDirectedLinksReverseOff` and `TestFleetPair_*` (store) carry that proof. |
+| AC6 | #723, #729 | `TestRegistryEnableDisableReverse`, `TestFleetEnableDisableReverseClosesConnection`, `TestFleetReverseNoticeSentOnReconnect`, `TestFleetHost_NoSchemaForMesh` |
+| AC7 | #729 | `TestHelloUnapprovedRefused`, `TestHelloReplayOnNewConnectionRefused`, `TestHandshakeRefusesChangedIdentity` |
+| AC8 | #729 | `TestDirectCleartextRefusedOutsideOverlay`, `TestRelayFingerprintMismatchFailsClosed` |
+| AC9 | #729, #739, #740, #748 | `TestHostPrincipalOnlyFleetMethods`, `TestFleetAdminMethodsLocalOnlyNotRunScopedNotPlugin`, `TestFleetParamsHaveNoGrantOrSecretFields` |
+| AC10 | #729 | `TestHostLsNeverPrintsSecrets`, `TestFleetSecretsFile0600AndRedacted`, `TestFleetSecretNeverLeavesHost` (#747) |
+| AC11 | #727, #729 | web/inbox/mobile tests listed under "F1c validation"; frames used injected RPCs, the real RPCs are covered by the F1b e2e tests. Mobile was not run on a device. |
+| AC12 | #739 | `TestFleetReadReturnsNoPathsNoCredentialURLs`, `TestFleetActivityCappedAndPaged`, `TestFleetReadGrantFiltersWorkspaces` |
+| AC13 | #739, #740, #748 | `TestFleetProvenanceOrderOfChecks`, `TestFleetCycleRefused_AtoBtoA`, `TestFleetHopTwoRefused`, `TestFleetReplayAndStaleRefused`, `TestRemoteWriteRefusedForPeerSeatAndRemoteOrigin` |
+| AC14 | #739 (callee half), #740 | `TestFleetAuditBothEndsNoPromptBody`, `TestFleetAuditRetention`. **Gap:** no `smind host audit` command and no audit view on the Hosts page exist; only the rows and retention do. |
+| AC15 | #740 | `TestHostReadVerbsSendRemoteReadParams`, `TestMCPListHostsAndHostParamLocalUnchanged` |
+| AC16 | #729, #739, #740 | `TestFleetVersionSkewRefused`, `TestHelloVersionSkewRefusedWithGuidance`, `TestHandshakeVersionSkewOnReconnect` |
+| AC17 | #747 | `TestFleetCreateRequiresExplicitProviderModel`, `TestFleetCreateBranchFromOwnOrigin`, `TestFleetCreateTypeHasNoModeEnvCwdFields` |
+| AC18 | #747 | `TestFleetSendOnlyOwnTasks`, `TestFleetIdempotencyKeyRetryReturnsSame` |
+| AC19 | #747 | `TestFleetRemoteTaskUnderCalleeFloorAndMode`, `TestFleetRemotePermissionGoesToCalleeInbox` |
+| AC20 | #747 | `TestFleetBudgetPerOriginAcrossTraces`, `TestFleetWallLimitStopsRun` |
+| AC21 | #740, #748 | `TestFleetCallerRestartStillGetsFinishNotification`, `TestFleetWatchThreeFailuresStatusUnknownNeverFinished` |
+| AC22 | #748 | `TestFleetPeerSeatGetsNoFleetTools`, `TestRemoteWriteRefusedForPeerSeatAndRemoteOrigin` |
+| AC23 | #749 | `TestTaskTreeShowsRemoteChildrenAndRollups`, `TestTreeBudgetCountsRemoteSpend`, `TestMirrorRowsAreCacheOnly` |
+| AC24 | #749 | `TestOwnerHostIsSingle`, `TestAliasRenameKeepsWireIds` |
+| AC25 | #749 | web: `TestTaskLineageRemoteNodeShowsHostChip`, `TestInboxRowShowsHostChip`, frames at 1280/390 light+dark. **Gaps:** mobile chip has logic tests only (no device frames); a header chip for a task another host created and a chip on remote-origin permission rows are not done. |
+| AC26 | #751 | `TestFleetSelector_*`, `TestFleetRemoteSelect_*`, `TestFleetSelectorMCP_*`, `TestFleetLabelsValidate` |
+
+Name drift, stated: the plan's early list names `TestLabelsValidation`, `TestSelectorExactlyOneOrError`, `TestSelectorAnyLeastLoadedTieByAlias` and `TestSelectorNoSilentRetryOnOtherHost`; they shipped as `TestFleetLabelsValidate`, `TestFleetSelector_*` and `TestFleetSelectorMCP_NoRetryOnWriteFailure`. The web test names above are vitest titles in `web/packages/ui`, not Go tests.
+
+**Not every AC is fully confirmed** (AC14 audit CLI/page, AC25 mobile device frames and the two chips), so this plan stays in `active/`.
+
+Open follow-ups:
+- Hosts settings page: a labels editor (F5 is CLI and MCP only).
+- `smind host audit` and an audit view on the Hosts page (AC14).
+- Mobile chip device or simulator frames (blocked on the native verification blocker); `TaskTreeRow` is not type-checked or run natively.
+- Task header chip for a task created by another host, and a chip on remote-origin permission rows (needs `origin_host` in the task payload and the inbox item).
+- Re-run the validators for F1 to F5 once 0.17 is installed: every fleet validator ran report-only on the pre-#706 daemon (verdicts stored as `blocked`/crashed).
+- Tree guard does not count remote runs (the callee's per-origin `maxLiveAgents` bounds it).
+- A real two-daemon run of the F4 mirror refresher and of label selection (unit and fake-bridge tests only); the "Try it on one machine" recipe in `public-docs/hosts.md` is the starting point.
+- Channel binding of the hello to the E2EE transcript (F1b stated it as not done).
