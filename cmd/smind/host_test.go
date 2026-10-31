@@ -286,3 +286,17 @@ func TestHostRouteReadsPasswordFromEnvOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestHostTestPrintsDetail(t *testing.T) {
+	hostHome(t, true)
+	d := &fakeDaemon{results: map[string]any{"fleet.host.test": map[string]any{"ok": false, "latencyMs": 3, "state": "down", "code": "x", "detail": "dial refused"}}}
+	useHostDaemon(t, d)
+
+	code, out, errOut := runHostCmd("test", "bee")
+	if code != 0 {
+		t.Fatalf("test = %d, stderr %q", code, errOut)
+	}
+	if !strings.Contains(out, "(down, 3 ms, x, dial refused)") {
+		t.Fatalf("stdout = %q", out)
+	}
+}

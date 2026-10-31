@@ -209,3 +209,41 @@ func TestManagerTestIsOneShot(t *testing.T) {
 		t.Fatalf("dials = %d, want 1", n)
 	}
 }
+
+func TestManagerTestDoesNotEvictLiveLink(t *testing.T) {
+	e := newMgrEnv(t)
+	m := e.manager(t)
+
+	// No loop: Test dials once and closes its connection.
+	if s, _, err := m.Test(context.Background(), e.hostID); err != nil || s.State != StateConnected {
+		t.Fatalf("status %+v err %v", s, err)
+	}
+	if n := e.dialCount(); n != 1 {
+		t.Fatalf("dials = %d, want 1", n)
+	}
+	select {
+	case <-e.callee(0).Done():
+	default:
+		t.Fatal("test connection left open")
+	}
+
+	// A live loop: Test answers from it and dials nothing.
+	m.Ensure(e.hostID)
+	waitStatus(t, m, e.hostID, StateConnected)
+	dials := e.dialCount()
+	s, d, err := m.Test(context.Background(), e.hostID)
+	if err != nil || s.State != StateConnected || d != 0 {
+		t.Fatalf("live Test = %+v, %v, %v", s, d, err)
+	}
+	if n := e.dialCount(); n != dials {
+		t.Fatalf("dials = %d, want %d", n, dials)
+	}
+	select {
+	case <-e.callee(dials - 1).Done():
+		t.Fatal("Test closed the live connection")
+	default:
+	}
+	if _, ok := m.Conn(e.hostID); !ok {
+		t.Fatal("live conn gone after Test")
+	}
+}

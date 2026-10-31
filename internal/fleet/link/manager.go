@@ -173,10 +173,20 @@ func (m *Manager) Conn(hostID string) (Conn, bool) {
 	return l.conn, true
 }
 
-// Test makes one synchronous handshake attempt on a fresh connection and
-// closes it again. It leaves the link loop's state alone. The error is for
-// setup problems; a refusal by the peer is reported in the Status.
+// Test reports whether the host is reachable. A live, handshaken link is the
+// answer by itself: dialing again would make the callee, which keeps one
+// connection per peer, close the live one. Without a live link it makes one
+// synchronous handshake attempt on a fresh connection and closes it again,
+// leaving the loop's state alone. The error is for setup problems; a refusal
+// by the peer is reported in the Status.
 func (m *Manager) Test(ctx context.Context, hostID string) (Status, time.Duration, error) {
+	m.mu.Lock()
+	if l, ok := m.loops[hostID]; ok && l.status.State == StateConnected && l.conn != nil {
+		st := l.status
+		m.mu.Unlock()
+		return st, 0, nil
+	}
+	m.mu.Unlock()
 	start := time.Now()
 	a := m.attempt(ctx, hostID, nil)
 	if a.conn != nil {

@@ -306,7 +306,7 @@ func (s *Service) Test(ctx context.Context, hostID string) (wsapi.FleetTestResul
 	if err != nil {
 		return wsapi.FleetTestResult{}, err
 	}
-	return wsapi.FleetTestResult{OK: st.State == StateConnected, LatencyMs: d.Milliseconds(), State: string(st.State), Code: st.Code}, nil
+	return wsapi.FleetTestResult{OK: st.State == StateConnected, LatencyMs: d.Milliseconds(), State: string(st.State), Code: st.Code, Detail: st.Detail}, nil
 }
 
 // NotifyReverse tells the peer over the live link that its direction to us

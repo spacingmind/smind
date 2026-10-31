@@ -128,6 +128,7 @@ type FleetTestResult struct {
 	LatencyMs int64  `json:"latencyMs"`
 	State     string `json:"state"`
 	Code      string `json:"code"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 // FleetHostView is a host as the admin surface shows it. It names a host by

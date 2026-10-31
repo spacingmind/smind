@@ -563,6 +563,7 @@ func runHostTest(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		LatencyMs int    `json:"latencyMs"`
 		State     string `json:"state"`
 		Code      string `json:"code"`
+		Detail    string `json:"detail"`
 	}
 	if err := call(ctx, "fleet.host.test", map[string]any{"host": args[0]}, &res); err != nil {
 		fmt.Fprintf(stderr, "smind host test: %s\n", hostErrMessage(err))
@@ -572,7 +573,11 @@ func runHostTest(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	if res.OK {
 		verdict = "ok"
 	}
-	fmt.Fprintf(stdout, "host %s: %s (%s, %d ms, %s)\n", args[0], verdict, res.State, res.LatencyMs, res.Code)
+	detail := ""
+	if res.Detail != "" {
+		detail = ", " + res.Detail
+	}
+	fmt.Fprintf(stdout, "host %s: %s (%s, %d ms, %s%s)\n", args[0], verdict, res.State, res.LatencyMs, res.Code, detail)
 	return 0
 }
 
