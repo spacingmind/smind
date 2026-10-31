@@ -333,10 +333,15 @@ func patchInstanceEntry(raw []byte, doc, entry *yaml.Node, cur, next CustomProvi
 		}
 	}
 
-	// Bottom to top, so earlier line numbers stay valid.
-	sort.SliceStable(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+	// In file order; at the same start a replacement goes before a pure insert.
+	sort.SliceStable(edits, func(i, j int) bool {
+		if edits[i].start != edits[j].start {
+			return edits[i].start < edits[j].start
+		}
+		return edits[i].start < edits[i].end && edits[j].start == edits[j].end
+	})
 	for i := 1; i < len(edits); i++ {
-		if edits[i-1].start < edits[i].end {
+		if edits[i].start < edits[i-1].end {
 			return nil, fmt.Errorf("provider %q: internal edit check failed: overlapping edits", id)
 		}
 	}

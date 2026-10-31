@@ -460,3 +460,127 @@ func TestUpdateInstance_FlowStyleRefused(t *testing.T) {
 		t.Errorf("file changed:\n%s", after)
 	}
 }
+
+// instanceFields is the four editable fields of one entry, for step checks.
+type instanceFields struct {
+	models, additional []string
+	tools              []string
+	inherit            bool
+}
+
+func modelIDs(ms []CustomModel) []string {
+	var out []string
+	for _, m := range ms {
+		out = append(out, m.ID)
+	}
+	return out
+}
+
+func checkInstanceStep(t *testing.T, step string, id string, want instanceFields) string {
+	t.Helper()
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("%s: Load: %v", step, err)
+	}
+	var got *CustomProvider
+	for i := range cfg.Providers.Custom {
+		if cfg.Providers.Custom[i].ID == id {
+			got = &cfg.Providers.Custom[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("%s: %q missing", step, id)
+	}
+	if g, w := strings.Join(modelIDs(got.Models), ","), strings.Join(want.models, ","); g != w {
+		t.Errorf("%s: models = %q, want %q", step, g, w)
+	}
+	if g, w := strings.Join(modelIDs(got.AdditionalModels), ","), strings.Join(want.additional, ","); g != w {
+		t.Errorf("%s: additionalModels = %q, want %q", step, g, w)
+	}
+	if g, w := strings.Join(got.DisallowedTools, ","), strings.Join(want.tools, ","); g != w {
+		t.Errorf("%s: disallowedTools = %q, want %q", step, g, w)
+	}
+	if got.InheritClaudeConfig != want.inherit {
+		t.Errorf("%s: inheritClaudeConfig = %v, want %v", step, got.InheritClaudeConfig, want.inherit)
+	}
+	file := instanceYAML(t)
+	// Count only the edited entry: a following entry has keys of its own.
+	own, _, _ := strings.Cut(file, "    # the second entry")
+	for _, key := range []string{"models", "additionalModels", "disallowedTools", "inheritClaudeConfig"} {
+		if n := strings.Count(own, "\n      "+key+":"); n > 1 {
+			t.Errorf("%s: key %q appears %d times:\n%s", step, key, n, file)
+		}
+	}
+	return file
+}
+
+func runSeveralEditSteps(t *testing.T, id string) {
+	t.Helper()
+	steps := []struct {
+		name string
+		u    InstanceUpdate
+		want instanceFields
+	}{
+		{"add two lists", InstanceUpdate{
+			AdditionalModels: modelsPtr(CustomModel{ID: "glm-5.1"}, CustomModel{ID: "x"}),
+			DisallowedTools:  toolsPtr("WebSearch", "Bash(rm:*)"),
+		}, instanceFields{additional: []string{"glm-5.1", "x"}, tools: []string{"WebSearch", "Bash(rm:*)"}}},
+		{"remove a middle key, add another", InstanceUpdate{
+			Models:           modelsPtr(CustomModel{ID: "m"}),
+			AdditionalModels: modelsPtr(),
+		}, instanceFields{models: []string{"m"}, tools: []string{"WebSearch", "Bash(rm:*)"}}},
+		{"replace tools and set inherit", InstanceUpdate{
+			DisallowedTools:     toolsPtr("A"),
+			InheritClaudeConfig: boolPtr(true),
+		}, instanceFields{models: []string{"m"}, tools: []string{"A"}, inherit: true}},
+		{"remove everything", InstanceUpdate{
+			Models:              modelsPtr(),
+			DisallowedTools:     toolsPtr(),
+			InheritClaudeConfig: boolPtr(false),
+		}, instanceFields{}},
+	}
+	for _, s := range steps {
+		_, changed, err := UpdateProviderInstance(id, s.u)
+		if err != nil || !changed {
+			t.Fatalf("%s: changed %v, err %v", s.name, changed, err)
+		}
+		checkInstanceStep(t, s.name, id, s.want)
+	}
+}
+
+func TestUpdateInstance_SeveralEditsInOneCall(t *testing.T) {
+	t.Run("generated entry", func(t *testing.T) {
+		useInstanceHome(t, "")
+		if _, err := AddProviderInstance("claude-native", "claude-work", "Claude Work", t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
+		runSeveralEditSteps(t, "claude-work")
+	})
+	t.Run("hand-written entry with comments and a following entry", func(t *testing.T) {
+		dirA := filepath.Join(t.TempDir(), "hw-a")
+		dirB := filepath.Join(t.TempDir(), "hw-b")
+		second := `    # the second entry
+    - id: other
+      extends: claude-native
+      env:
+        CLAUDE_CONFIG_DIR: ` + dirB + `
+      disallowedTools:
+        - Keep # me
+`
+		useInstanceHome(t, `providers:
+  custom:
+    # first, hand-written
+    - id: first
+      # which harness
+      extends: claude-native
+      # where its login lives
+      env:
+        CLAUDE_CONFIG_DIR: `+dirA+`
+      label: 'First'
+`+second)
+		runSeveralEditSteps(t, "first")
+		if after := instanceYAML(t); !strings.HasSuffix(after, second) {
+			t.Errorf("the second entry changed:\n%s", after)
+		}
+	})
+}
