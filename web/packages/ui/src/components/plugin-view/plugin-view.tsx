@@ -14,12 +14,11 @@ import { Switch } from "@/components/ui/switch";
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
 import { SafeSvg } from "@/components/plugin-view/safe-svg";
 import { Icons, pluginIconByName, type IconComponent } from "@/lib/icons";
+import { PLUGIN_UI_LEVEL } from "@/lib/plugin-panel-types";
 import type { PluginActionExtra, PluginTone, PluginViewAction } from "@/lib/plugin-view-types";
 import { cn } from "@/lib/utils";
 
 type OnAction = (action: PluginViewAction, extra?: PluginActionExtra) => void;
-
-const SUPPORTED_UI_LEVEL = 1;
 const MAX_RENDER_DEPTH = 16;
 
 const NODE_TYPES = new Set([
@@ -491,7 +490,7 @@ function renderNode(node: unknown, depth: number, path: string, onAction: OnActi
 export function PluginView({ doc, onAction }: { doc: unknown; onAction: OnAction }) {
   const record = isRecord(doc) ? doc : null;
   const level = record && typeof record.ui === "number" ? record.ui : null;
-  const supported = record !== null && level !== null && level <= SUPPORTED_UI_LEVEL && "root" in record;
+  const supported = record !== null && level !== null && level <= PLUGIN_UI_LEVEL && "root" in record;
   return (
     <div data-testid="plugin-view">
       {supported ? renderNode(record.root, 0, "root", onAction) : <UnsupportedNode />}
