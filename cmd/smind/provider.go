@@ -27,7 +27,7 @@ func cmdProvider(args []string) int {
 // runProvider is cmdProvider with its environment injected. Exit codes:
 // 0 the update succeeded, 1 a daemon or call error, 2 usage.
 func runProvider(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 || args[0] != "update" {
+	if len(args) == 0 || args[0] != "update" {
 		fmt.Fprint(stderr, providerUsage)
 		return 2
 	}
