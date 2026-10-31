@@ -16,6 +16,10 @@ const (
 	ActionAutoRetry     = "auto_retry"
 	ActionRetryNow      = "retry_now"
 	ActionContinue      = "continue"
+	// The picker gate's kinds (ADR-0050 twin, internal/gate): clear a
+	// provider cooldown the human has reset, or pick another provider.
+	ActionClearCooldown = "clear_cooldown"
+	ActionPickProvider  = "pick_provider"
 )
 
 // Action is the concrete next step for a failed run (additive, omitempty on
