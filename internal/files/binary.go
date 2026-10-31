@@ -135,10 +135,10 @@ func ReadRange(root, path string, offset, length int64, lim Limits, ifMtime *tim
 	defer f.Close()
 
 	if fi.Size() > lim.MaxReadBytes {
-		return Range{}, &TooLargeError{Path: path, Max: lim.MaxReadBytes}
+		return Range{}, &TooLargeError{Path: errName(path), Max: lim.MaxReadBytes}
 	}
 	if ifMtime != nil && !fi.ModTime().Equal(*ifMtime) {
-		return Range{}, &ConflictError{Path: path}
+		return Range{}, &ConflictError{Path: errName(path)}
 	}
 
 	// The end of what may be served: the descriptor's size, and never past
@@ -174,12 +174,12 @@ func openRegular(root, path string) (*os.File, os.FileInfo, error) {
 	target, err := resolveInRoot(root, path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, &MissingError{Path: path}
+			return nil, nil, &MissingError{Path: errName(path)}
 		}
 		if strings.Contains(err.Error(), "escapes the worktree root") {
-			return nil, nil, fmt.Errorf("read %q: path escapes the worktree root", path)
+			return nil, nil, fmt.Errorf("read: path escapes the worktree root")
 		}
-		return nil, nil, fmt.Errorf("read %q: cannot resolve path", path)
+		return nil, nil, fmt.Errorf("read %q: cannot resolve path", errName(path))
 	}
 
 	// Stat before Open: opening a FIFO or device can block, so a
@@ -189,7 +189,7 @@ func openRegular(root, path string) (*os.File, os.FileInfo, error) {
 		return nil, nil, openError(path, err)
 	}
 	if !pre.Mode().IsRegular() {
-		return nil, nil, &InvalidParamsError{Msg: fmt.Sprintf("read %q: not a regular file", path)}
+		return nil, nil, &InvalidParamsError{Msg: fmt.Sprintf("read %q: not a regular file", errName(path))}
 	}
 
 	f, err := os.Open(target)
@@ -203,9 +203,28 @@ func openRegular(root, path string) (*os.File, os.FileInfo, error) {
 	}
 	if !fi.Mode().IsRegular() || !os.SameFile(pre, fi) {
 		f.Close()
-		return nil, nil, &InvalidParamsError{Msg: fmt.Sprintf("read %q: not a regular file", path)}
+		return nil, nil, &InvalidParamsError{Msg: fmt.Sprintf("read %q: not a regular file", errName(path))}
 	}
 	return f, fi, nil
+}
+
+// errName is the form of a caller-supplied path that may appear in an error:
+// the path itself when it is a plain relative name inside the worktree, and
+// "<path>" otherwise (absolute, drive or UNC, or with a ".." element), so an
+// error never echoes a location outside the root or on the daemon host. It
+// treats both separators and both absolute forms alike on every OS.
+func errName(path string) string {
+	p := strings.ReplaceAll(path, "\\", "/")
+	if p == "" || strings.HasPrefix(p, "/") || filepath.IsAbs(path) || filepath.VolumeName(path) != "" ||
+		(len(p) >= 2 && p[1] == ':') {
+		return "<path>"
+	}
+	for _, el := range strings.Split(p, "/") {
+		if el == ".." {
+			return "<path>"
+		}
+	}
+	return path
 }
 
 // openError maps an OS error to a typed or fixed-vocabulary one, so no
@@ -213,13 +232,13 @@ func openRegular(root, path string) (*os.File, os.FileInfo, error) {
 func openError(path string, err error) error {
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return &MissingError{Path: path}
+		return &MissingError{Path: errName(path)}
 	case errors.Is(err, fs.ErrPermission):
-		return fmt.Errorf("read %q: permission denied", path)
+		return fmt.Errorf("read %q: permission denied", errName(path))
 	case isSharingViolation(err):
-		return fmt.Errorf("read %q: file is in use by another program", path)
+		return fmt.Errorf("read %q: file is in use by another program", errName(path))
 	}
-	return fmt.Errorf("read %q: cannot read file", path)
+	return fmt.Errorf("read %q: cannot read file", errName(path))
 }
 
 // errorSharingViolation is Windows ERROR_SHARING_VIOLATION.
@@ -238,11 +257,11 @@ func refuseUnsafeForm(path string) error {
 		return nil
 	}
 	if isUNCOrDevicePath(path) {
-		return &InvalidParamsError{Msg: fmt.Sprintf("read %q: network and device paths are not allowed", path)}
+		return &InvalidParamsError{Msg: fmt.Sprintf("read: network and device paths are not allowed")}
 	}
 	n := normalizeSeparators(path)
 	if vol := filepath.VolumeName(n); vol != "" && !filepath.IsAbs(n) {
-		return &InvalidParamsError{Msg: fmt.Sprintf("read %q: drive-relative paths are not allowed", path)}
+		return &InvalidParamsError{Msg: fmt.Sprintf("read: drive-relative paths are not allowed")}
 	}
 	return nil
 }

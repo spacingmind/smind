@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,42 @@ func writeFile(t *testing.T, root, name string, data []byte) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(root, name), data, 0o644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+// leaksPath reports whether err's text contains any of dirs, raw or as a
+// quoted string (%q doubles Windows backslashes, which hides a raw match).
+func leaksPath(err error, dirs ...string) bool {
+	msg := err.Error()
+	for _, d := range dirs {
+		q := strconv.Quote(d)
+		if strings.Contains(msg, d) || strings.Contains(msg, q[1:len(q)-1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestErrName pins the error-display form of a caller path with POSIX and
+// Windows spellings alike, on every OS.
+func TestErrName(t *testing.T) {
+	for in, want := range map[string]string{
+		"doc.pdf":               "doc.pdf",
+		"sub/doc.pdf":           "sub/doc.pdf",
+		`sub\doc.pdf`:           `sub\doc.pdf`,
+		"/tmp/x/secret.bin":     "<path>",
+		`C:\Users\x\secret.bin`: "<path>",
+		"C:secret.bin":          "<path>",
+		`\\server\share\x.pdf`:  "<path>",
+		`\\?\C:\x\y.pdf`:        "<path>",
+		"../secret.bin":         "<path>",
+		"a/../../b":             "<path>",
+		`a\..\..\b`:             "<path>",
+		"":                      "<path>",
+	} {
+		if got := errName(in); got != want {
+			t.Errorf("errName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -186,7 +223,7 @@ func TestFileReadRange_ContainmentAndTOCTOU(t *testing.T) {
 		if err == nil || len(r.Data) != 0 {
 			t.Errorf("%q: want refusal, got %d bytes err=%v", p, len(r.Data), err)
 		}
-		if err != nil && (strings.Contains(err.Error(), outsideDir) || strings.Contains(err.Error(), root)) {
+		if err != nil && leaksPath(err, outsideDir, root) {
 			t.Errorf("%q: error leaks an absolute path: %v", p, err)
 		}
 	}
@@ -237,7 +274,7 @@ func TestFileReadRange_ErrorsNameNoContentOrAbsolutePath(t *testing.T) {
 	if _, ok := err.(*MissingError); !ok {
 		t.Fatalf("missing: err = %T %v", err, err)
 	}
-	if strings.Contains(err.Error(), root) {
+	if leaksPath(err, root) {
 		t.Errorf("missing error leaks root: %v", err)
 	}
 	_, err = ReadRange(root, filepath.Join("no", "such", "dir", "x.bin"), 0, 1, testLimits, nil)
