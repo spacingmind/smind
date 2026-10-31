@@ -24,6 +24,11 @@ tests:
   - { name: registry-store, run: "go test ./internal/fleet/registry ./internal/store -count=1", timeoutSec: 600 }
   - { name: wsapi-fleet, run: "go test ./internal/wsapi -count=1 -run 'FleetRemoteSelect|FleetHostLabels|FleetAdmin|MethodMapGolden|HostViewShape'", timeoutSec: 900 }
   - { name: mcp-cli, run: "go test ./cmd/smind -count=1 -run 'FleetSelectorMCP|HostLabel|HostSelect|HostRead|Drift'", timeoutSec: 900 }
+  - { name: TestFleetSelector_DisabledSkipped, run: "go test ./internal/fleet/selector -count=1 -run '^TestFleetSelector_DisabledSkipped$'", timeoutSec: 600 }
+  - { name: TestFleetSelector_AnyTieByAlias, run: "go test ./internal/fleet/selector -count=1 -run '^TestFleetSelector_AnyTieByAlias$'", timeoutSec: 600 }
+  - { name: TestFleetLabelsValidate, run: "go test ./internal/fleet/registry -count=1 -run '^TestFleetLabelsValidate$'", timeoutSec: 600 }
+  - { name: TestFleetRemoteSelect_DisconnectedAndDisabledSkipped, run: "go test ./internal/wsapi -count=1 -run '^TestFleetRemoteSelect_DisconnectedAndDisabledSkipped$'", timeoutSec: 600 }
+  - { name: TestFleetSelectorMCP_ResolvesToAliasThenReads, run: "go test ./cmd/smind -count=1 -run '^TestFleetSelectorMCP_ResolvesToAliasThenReads$'", timeoutSec: 600 }
 mutations:
   - { id: M1, file: internal/fleet/selector/selector.go, change: "eligible if Enabled || Connected instead of &&", expectFail: [TestFleetSelector_DisabledSkipped] }
   - { id: M2, file: internal/fleet/selector/selector.go, change: "tie-break picks the larger alias", expectFail: [TestFleetSelector_AnyTieByAlias] }
