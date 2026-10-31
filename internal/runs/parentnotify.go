@@ -184,6 +184,9 @@ func (reg *Registry) childEventFacts(task store.Task, run store.Run) ChildEventF
 		}),
 		FailureKind: run.FailureKind, FailureWindow: run.FailureWindow, FailureResetAt: run.FailureResetAt, FailureResetInferred: run.FailureResetInferred,
 	}
+	if a := failureActionOf(run.FailureKind, run.Provider, run.Model, run.FailureWindow, run.FailureResetAt, nil, 0); a != nil {
+		f.FailureNext = a.Label
+	}
 	if run.BaseSHA != nil {
 		f.BaseSHA = *run.BaseSHA
 	}
