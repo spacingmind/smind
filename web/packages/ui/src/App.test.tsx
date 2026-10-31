@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "@/App";
 import { platformBindings, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
+import { GREETINGS, greetingBucket } from "@/lib/greeting";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
 import "@/test/query-scheduler";
@@ -1136,7 +1137,7 @@ describe("App routing", () => {
     await flush();
 
     expect(screen.getByTestId("home-landing")).toBeInTheDocument();
-    expect(screen.getByText("What should we work on?")).toBeInTheDocument();
+    expect(GREETINGS[greetingBucket(new Date().getHours())]).toContain(screen.getByRole("heading", { level: 1 }).textContent);
   });
 
   it("opening two file tabs, remounting the app, restores both and the active one", async () => {
