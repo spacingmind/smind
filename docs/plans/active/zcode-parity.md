@@ -47,7 +47,8 @@ starts by diffing what is there against ZCode and changes only what differs.
 | 2 | Side-by-side audit → ranked diff list | separate Lead | in flight |
 | 3 | Component ports, one PR per area (shell+sidebar, timeline, composer, settings, dialogs/menus) | ≥5 PRs | blocked on 2 |
 | 4 | Mobile tokens | own PR | after 1 |
-| 5 | Desktop titlebar chrome, ZCode style (back/forward) | own PR | this PR |
+| 5 | Desktop titlebar chrome, ZCode style (back/forward) | own PR | done |
+| 6 | Welcome / empty (landing greeting, illustration, send on Enter, chips; empty sidebar) | own PR | this PR |
 
 ## Stage 1 — tokens
 
@@ -471,6 +472,61 @@ desktop-chrome plan's findings.)
 ### Ported files and sources
 
 None: reference-only reimplementation.
+
+## Stage 6 — Welcome / empty (home landing + empty sidebar)
+
+Size: M (scope 2: web only; risk 2: the landing now sends; verification 3: light+dark frames at 1280 and 390, every greeting bucket, chips open, send in flight). Human decisions 2026-10-31; UI lane, after P5. One PR.
+
+### References (ZCode files consulted, read-only)
+
+- `refs/zcode/packages/web` and `packages/ui` empty-state / welcome screen (greeting, mark, composer card, project chip): structure, spacing and radii only. Copy, illustration and logic are our own.
+
+### Design decisions
+
+- **Greeting** (`lib/greeting.ts`, `hooks/use-greeting.ts`): bucket from the LOCAL clock (`new Date().getHours()`, never the daemon): late night 00-05, morning 05-12, afternoon 12-18, evening 18-24; 3 own lines per bucket. One line is picked per mount and held (stable across re-renders); a 60 s tick and `visibilitychange` re-read the bucket, and only a bucket change re-picks.
+- **Illustration** (`components/home/home-illustration.tsx`): own inline SVG line drawing, `currentColor` + theme tokens, `aria-hidden`, replaces the logo image above the greeting.
+- **Send on Enter from the landing**: the landing creates the task, writes the prompt as the task draft (as before) and records a *pending send* (`stores/pending-send-store.ts`: taskId + run config + timestamp, in memory, 30 s TTL). The task `Composer` of the new task's default chat takes it once (`take` is atomic, so StrictMode/re-render cannot send twice), applies the run config through the toolbar's new `applyState` action, and then calls its own existing `submit()` — same run config, `whenBusy: "queue"`, attachments path; there is no second send implementation. A failed send leaves the prompt in the draft with the composer's error; the task exists.
+- **Chips on the landing**: the same `RunConfigToolbar` (`ModelPicker`, `Mode`) with `taskId`/`chatId` null (persists nothing, no chat id invented). The state is the pending run config; on send it is also saved to `stores/home-run-config-store.ts` (persisted preference, next landing's initial state via the toolbar's new `initialState` prop).
+- **Empty sidebar**: with no workspace the tree shows a "Projects" section (add action, "No projects yet") and a "Tasks" section ("No tasks yet") instead of the welcome paragraph; header add button and group control stay as stage 3b built them.
+
+### Acceptance criteria
+
+1. Greeting H1 follows the local-time bucket; edges 04:59/05:00, 11:59/12:00, 17:59/18:00, 23:59/00:00.
+2. The greeting does not change on re-render; it changes when the bucket changes while mounted.
+3. The illustration renders above the greeting, aria-hidden, no external asset, light and dark.
+4. Submitting on the landing creates the task and sends the first prompt once, no second Enter.
+5. A failed first send keeps the prompt in the task draft with the error shown; the task exists. No double send on re-render or StrictMode.
+6. The landing shows the same model and mode pickers; the choice is applied to the new task's first chat before the first send and remembered as the next default; no chat id is created early.
+7. With no workspace the sidebar shows Projects / Tasks sections with the add action and "No tasks yet".
+8. No backend change; mobile untouched.
+
+### Named tests
+
+- `lib/greeting.test.ts`: `bucket edges 04:59/05:00`, `bucket edges 11:59/12:00`, `bucket edges 17:59/18:00`, `bucket edges 23:59/00:00`, `every bucket has 3 lines`.
+- `hooks/use-greeting.test.tsx`: `stable across re-render`, `updates on bucket change`, `updates on visibilitychange`.
+- `stores/pending-send-store.test.ts`: `take is atomic`, `expires after the ttl`, `other task does not take`.
+- `components/composer/composer-pending-send.test.tsx`: `pending send applies the config then submits once`, `no double send under StrictMode`, `send failure keeps the draft`, `non-default chat does not take it`.
+- `components/composer/run-config-toolbar.test.tsx`: `applyState replaces the state and blocks the default-agent seed`, `initialState seeds a toolbar with no persisted state`.
+- `components/home/home-landing.test.tsx`: `landing submit creates and sends once`, `send failure keeps the draft`, `landing chips apply to the created chat`, `chips default to the last used`, greeting and illustration render.
+- `components/app-sidebar.test.tsx` / `app-sidebar-crud.test.tsx`: `empty sidebar shows Projects and Tasks sections`.
+
+### Ported files and sources
+
+None (reference-only; own code, copy and illustration).
+
+### Progress / Validation
+
+- [x] Stage 6 implemented (this PR): greeting + illustration, pending-send hand-off, landing chips, empty sidebar.
+
+**Validation (2026-10-31)**
+
+- `task test` 394 files / 4251 tests pass, `task lint` clean, `bunx tsc -b` clean on the final head.
+- One mutation per load-bearing test (each failed the named test, file restored with `git checkout --`): `greeting.ts` `hour < 12` to `<= 12` (bucket edges 11:59/12:00); `use-greeting.ts` bucket compare removed (stable across re-render); `pending-send-store.ts` clear removed (take is atomic, expires after the ttl); `composer.tsx` hand-off `submit()` removed (pending send applies the config then submits once, no double send under StrictMode, send failure keeps the draft); `home-landing.tsx` pending-send `set` removed (landing submit creates and sends once, chips apply, chips default to last used); `app-sidebar.tsx` "No tasks yet" text changed (empty sidebar test).
+- Found in review: the landing chips added a second `run.list` on connect and broke four App.test attention tests that index run.list requests; fixed by not reading the observed model without a chat id.
+- Frames (isolated daemons, stub agent only, fake clock; L = ZCode raw, R = smind), `/tmp/steward4/zcode-audit/after/welcome/`: `welcome_light_1280.png`, `welcome_dark_1280.png` (four greeting buckets), `welcome_390.png`, `welcome_390_extra.png`, `welcome_chips_1280.png` (model picker + mode menu), `welcome_empty_sidebar.png`; singles `welcome_bucket-{before,after}_light_1280.png` (11:59 to 12:00 swap), `welcome_send-{0ms,600ms}_{light,dark}_1280.png` (send in flight: exactly one user prompt in the timeline, no second Enter).
+- Looked at: buckets, chips, empty sidebar and send frames in light and dark. Observed, not changed: at 0 ms after Enter the landing still shows while task.create is in flight (send button busy); at 390 the chips are icon-only; the disabled empty-sidebar composer is low contrast by design; a Codex row hint is clipped in the (pre-existing) model picker.
+- Not done: the landing does not show a "draft only" mode; mobile untouched (the landing is web only).
+- Peer ledger: GLM 0 runs (2 sends refused, rate limited until 18:28, Steward switched to Sonnet); peer-sonnet 5 runs (A greeting/illustration/sidebar $0.23, B hand-off $0.46, C landing + fix run, frames), no failures; no wrong edits, one review finding (run.list ordering) fixed by Sonnet.
 
 ## Decisions
 

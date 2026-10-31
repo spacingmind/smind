@@ -21,7 +21,7 @@ const THINKING_LEVEL_VALUES: readonly ThinkingLevel[] = ["", "off", "standard", 
  * back to asking a human, never widen (W2). Any other invalid field still
  * rejects the whole value.
  */
-function toRunConfigState(value: unknown): RunConfigState | null {
+export function parseRunConfigState(value: unknown): RunConfigState | null {
   if (typeof value !== "object" || value === null) return null;
   const v = value as Record<string, unknown>;
   const legacy = "approvalPolicy" in v;
@@ -50,7 +50,7 @@ function readKey(key: string): RunConfigState | null {
     const raw = window.localStorage.getItem(key);
     if (raw === null) return null;
     const parsed: unknown = JSON.parse(raw);
-    return toRunConfigState(parsed);
+    return parseRunConfigState(parsed);
   } catch {
     return null;
   }

@@ -234,8 +234,25 @@ describe("AppSidebar CRUD", () => {
     client.nth("workspace.list").resolve([]);
     await flush();
 
-    expect(await screen.findByText("Welcome to sMind")).toBeInTheDocument();
+    expect(await screen.findByText("Projects")).toBeInTheDocument();
+    expect(screen.getByText("Tasks")).toBeInTheDocument();
+    expect(screen.getByText("No tasks yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New workspace" })).toBeInTheDocument();
+  });
+
+  it("empty sidebar shows Projects and Tasks sections", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    client.nth("workspace.list").resolve([]);
+    await flush();
+
+    expect(await screen.findByText("Projects")).toBeInTheDocument();
+    expect(screen.getByText("Tasks")).toBeInTheDocument();
+    expect(screen.getByText("No projects yet")).toBeInTheDocument();
+    expect(screen.getByText("No tasks yet")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-empty-new-workspace-button"));
+    expect(await screen.findByRole("button", { name: "Create workspace" })).toBeInTheDocument();
   });
 
   it("new workspace event opens the create workspace dialog", async () => {

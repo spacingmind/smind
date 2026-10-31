@@ -906,26 +906,38 @@ export function AppSidebar({
                     <StatusRow icon={<Icons.spinner className="size-3.5 animate-spin" />} text="Loading workspaces…" />
                   )}
                   {empty && !searching && (
-                    <SidebarMenuItem>
-                      <div className="flex flex-col gap-3 px-2 py-4">
-                        <div className="text-ui-sm text-muted-foreground">
-                          <p className="font-medium text-foreground">Welcome to sMind</p>
-                          <p className="mt-1">
-                            A workspace is an existing git repo. Tasks are its isolated
-                            worktrees; group them into spaces if you want. Create a
-                            workspace to start.
-                          </p>
+                    <>
+                      <SidebarMenuItem>
+                        <div className="flex items-center justify-between px-2 pt-2 text-ui-xs font-medium text-muted-foreground">
+                          <span>Projects</span>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label="New workspace"
+                            data-testid="sidebar-empty-add-workspace"
+                            onClick={() => setCrud({ kind: "workspace" })}
+                          >
+                            <Icons.add />
+                          </Button>
                         </div>
-                        <Button
-                          size="sm"
-                          className="w-fit"
-                          data-testid="sidebar-empty-new-workspace-button"
-                          onClick={() => setCrud({ kind: "workspace" })}
-                        >
-                          <Icons.add /> New workspace
-                        </Button>
-                      </div>
-                    </SidebarMenuItem>
+                        <div className="flex flex-col gap-2 px-2 pb-2">
+                          <p className="text-ui-sm text-muted-foreground">No projects yet</p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-fit"
+                            data-testid="sidebar-empty-new-workspace-button"
+                            onClick={() => setCrud({ kind: "workspace" })}
+                          >
+                            <Icons.add /> Add project
+                          </Button>
+                        </div>
+                      </SidebarMenuItem>
+                      <SidebarMenuItem>
+                        <div className="px-2 pt-2 text-ui-xs font-medium text-muted-foreground">Tasks</div>
+                        <p className="px-2 pb-2 text-ui-sm text-muted-foreground">No tasks yet</p>
+                      </SidebarMenuItem>
+                    </>
                   )}
                   {searching && (
                     <SearchResults
