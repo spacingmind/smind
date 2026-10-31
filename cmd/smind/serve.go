@@ -32,6 +32,7 @@ import (
 	"github.com/spacingmind/smind/internal/service"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/version"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -193,6 +194,7 @@ func cmdServe(args []string) int {
 	// connection is served (SetRelayDevices is not safe against concurrent
 	// requests).
 	hub := newRelayHub(srv, cfg.Relay)
+	defer newFleet(srv, cfg, config.Dir(), version.Version, db)()
 	// Same startup-only rule for the push.* methods (ADR-0040).
 	pushRT := wirePush(srv.API(), hub, db, cfg.Push)
 	httpSrv := &http.Server{
