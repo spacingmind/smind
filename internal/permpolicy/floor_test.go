@@ -180,3 +180,16 @@ func TestFloor_NearMissesNotDenied(t *testing.T) {
 		{"HOME=$(mktemp -d) go test ./...", ""},
 	})
 }
+
+func TestFloor_GhGlobalFlagValueDoesNotHideMerge(t *testing.T) {
+	t.Parallel()
+	checkFloorCases(t, []floorCase{
+		{"gh -R o/r pr merge 5", "no-merge"},
+		{"gh --repo o/r release create v1", "no-merge"},
+		{"gh -R o/r workflow run release.yml", "no-merge"},
+		{"gh -R o/r api repos/o/r/pulls/5/merge", "no-merge"},
+		{"gh -R o/r pr view 5", ""},
+		{"gh pr checks", ""},
+		{"gh -R o/r workflow run ci.yml", ""},
+	})
+}
