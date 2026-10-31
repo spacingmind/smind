@@ -554,6 +554,59 @@ describe("App live events", () => {
     expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent("done");
   });
 
+  it("archiving the selected task moves the selection off it (UAT B-01)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
+    const composerA = screen.getByLabelText("Prompt");
+    fireEvent.change(composerA, { target: { value: "draft for A" } });
+
+    // {task: store.Task} -- internal/wsapi/events.go taskArchivedPayload,
+    // the same shape workspace-tree.ts's "task.archived" case consumes.
+    pushNotification(socket, "task.archived", { task: { ...TASK_A, ArchivedAt: "2024-01-02T00:00:00Z" } });
+    await flush();
+
+    // TASK_A's pane and composer must be gone: the header names TASK_B and
+    // no textarea still carries A's half-typed prompt (the landing's own
+    // composer also matches aria-label "Prompt", so the draft -- which
+    // only A's composer holds -- is the discriminator).
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
+    expect(screen.queryByDisplayValue("draft for A")).not.toBeInTheDocument();
+  });
+
+  it("archiving the only task lands on the landing, not on the archived task (UAT B-01)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "draft for A" } });
+
+    pushNotification(socket, "task.archived", { task: { ...TASK_A, ArchivedAt: "2024-01-02T00:00:00Z" } });
+    await flush();
+
+    // No other live task exists, so the landing shows and A's composer
+    // (matched by its draft -- the landing has a "Prompt" of its own) is
+    // gone.
+    expect(screen.getByTestId("home-landing")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("draft for A")).not.toBeInTheDocument();
+  });
+
   it("an empty daemon (every list RPC resolving null) renders the sidebar empty state without throwing", async () => {
     // Regression for the fresh-install crash: workspace.list answered
     // literal null and useWorkspaceTree called .map on it. Backend now
@@ -2943,5 +2996,61 @@ describe("App header shell (app-header-and-tabs AH)", () => {
     const status = within(screen.getByTestId("app-header")).getByRole("status");
     expect(status).toHaveClass("sr-only");
     expect(status).toHaveTextContent("Connected to daemon");
+  });
+});
+
+describe("App tab affordances (UAT PR1)", () => {
+  /** Selects TASK_A with its chat resolved -- the shared setup of the two UAT fixes below. */
+  async function setupSelectedTask(): Promise<FakeSocket> {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    return socket;
+  }
+
+  /** The titles of every open tab in the primary pane whose text starts with prefix. */
+  function tabTitlesStartingWith(prefix: string): string[] {
+    return within(screen.getByTestId("primary-pane"))
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent ?? "")
+      .filter((text) => text.startsWith(prefix));
+  }
+
+  it("clicking the diff chip opens the Diff tab when it is not open (UAT A-03)", async () => {
+    const socket = await setupSelectedTask();
+    // The chip's numbers come from the task's shared git state (useTaskGit's task.git read).
+    respondAll(socket, "task.git", {
+      taskId: TASK_A.ID,
+      untrusted: false,
+      computedAt: "2026-10-31T00:00:00Z",
+      diff: { files: 2, insertions: 10, deletions: 3 },
+    });
+    await flush();
+
+    expect(screen.queryByRole("tab", { name: "Diff" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Open diff/ }));
+    await flush();
+
+    const diffTab = within(screen.getByTestId("primary-pane")).getByRole("tab", { name: "Diff" });
+    expect(diffTab).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("the header terminal button opens exactly one Terminal tab and a second click opens no more (UAT A-02)", async () => {
+    await setupSelectedTask();
+
+    fireEvent.click(screen.getByTestId("app-header-terminal"));
+    await flush();
+    expect(tabTitlesStartingWith("Terminal")).toEqual(["Terminal"]);
+
+    fireEvent.click(screen.getByTestId("app-header-terminal"));
+    await flush();
+    expect(tabTitlesStartingWith("Terminal")).toEqual(["Terminal"]);
   });
 });
