@@ -167,6 +167,9 @@ type RunStatus struct {
 	StopReason  string     `json:"stopReason,omitempty"`
 	FailureKind string     `json:"failureKind,omitempty"`
 	CostUSD     *float64   `json:"costUsd"`
+	// WaitingPermission is true while a permission request sits in the
+	// callee's inbox; the caller sees the flag but can never answer it (AC19).
+	WaitingPermission bool `json:"waitingPermission,omitempty"`
 }
 
 // Event is one activity event of a run.
