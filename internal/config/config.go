@@ -640,6 +640,9 @@ func LoadFile(path string) (Config, error) {
 	if err := cfg.Learning.Validate(); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", path, err)
 	}
+	if err := cfg.Steward.Validate(); err != nil {
+		return cfg, fmt.Errorf("config %s: %w", path, err)
+	}
 	if err := cfg.Validation.Validate(); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", path, err)
 	}
