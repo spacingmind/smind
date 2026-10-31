@@ -6,7 +6,7 @@ import { IconName } from '../ui/icons';
 import { InboxItem, InboxKind } from './types';
 
 export const INBOX_EMPTY_TITLE = 'Nothing needs you';
-export const INBOX_EMPTY_TEXT = 'Permission requests, validator verdicts and stalled tasks, pairing requests and host links show up here.';
+export const INBOX_EMPTY_TEXT = 'Permission requests, pairing requests, host links, validator verdicts and stalled tasks show up here.';
 
 /** waiting: a permission asks for you; warning: a verdict that needs a decision (never a success tint); neutral: the rest. */
 export type InboxTone = 'waiting' | 'warning' | 'neutral';

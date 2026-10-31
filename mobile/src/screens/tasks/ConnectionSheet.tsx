@@ -27,6 +27,8 @@ interface Props {
   onDisconnect: () => void;
   /** Opens the read-only Plugins list (ADR-0042 PA.5). */
   onOpenPlugins: () => void;
+  /** Opens the Hosts screen (ADR-0048 F1c). */
+  onOpenHosts: () => void;
   /** Opens the read-only Automations list (ADR-0044 section 10). */
   onOpenAutomations: () => void;
   state: ConnectionState;
@@ -40,7 +42,7 @@ function statusText(state: ConnectionState): string {
   return 'Reconnecting…';
 }
 
-export function ConnectionSheet({ open, onClose, onDisconnect, onOpenPlugins, onOpenAutomations, state }: Props) {
+export function ConnectionSheet({ open, onClose, onDisconnect, onOpenPlugins, onOpenHosts, onOpenAutomations, state }: Props) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   // defaultDeviceLabel is sync today but may go async (it reads the
@@ -83,6 +85,18 @@ export function ConnectionSheet({ open, onClose, onDisconnect, onOpenPlugins, on
                   // iOS cannot push a screen while the sheet is still dismissing.
                   if (Platform.OS === 'ios') setTimeout(onOpenPlugins, 400);
                   else onOpenPlugins();
+                }}
+              />
+            </View>
+            <View style={[styles.row, styles.rowDivider]}>
+              <Text style={styles.rowLabel}>Hosts</Text>
+              <TextButton
+                label="Open"
+                onPress={() => {
+                  onClose();
+                  // iOS cannot push a screen while the sheet is still dismissing.
+                  if (Platform.OS === 'ios') setTimeout(onOpenHosts, 400);
+                  else onOpenHosts();
                 }}
               />
             </View>
