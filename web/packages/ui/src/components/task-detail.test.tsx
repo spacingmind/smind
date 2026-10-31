@@ -5,12 +5,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { agentChipLabel, TaskDetailPane } from "@/components/task-detail";
-import {
-  FOLLOW_THRESHOLD_PX,
-  LOG_END_CLEARANCE_PX,
-  PILL_BOTTOM_OFFSET_PX,
-  PILL_HEIGHT_PX,
-} from "@/components/timeline/use-auto-follow";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import type { AgentProfile, Chat, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
 
@@ -173,9 +167,9 @@ describe("TaskDetailPane", () => {
     }
   });
 
-  it("the log end reserves clearance so the Jump to latest pill never covers the last line", async () => {
-    // jsdom has no layout: assert the structural contract (a constant bottom
-    // padding on the log column) instead of measuring overlap.
+  it("the Jump to latest pill sits in its own row after the log, not floating over it", async () => {
+    // jsdom has no layout: assert the structure (an in-flow slot that is a
+    // sibling after the scroll area) instead of measuring overlap.
     const sizes: Record<string, number> = { scrollHeight: 3000, clientHeight: 600, clientWidth: 1200 };
     for (const [key, value] of Object.entries(sizes)) {
       Object.defineProperty(HTMLElement.prototype, key, { configurable: true, get: () => value });
@@ -189,23 +183,21 @@ describe("TaskDetailPane", () => {
       await flush();
 
       const log = screen.getByTestId("run-log-scroll");
-      const column = screen.getByTestId("run-log-column");
-      const padding = () => parseFloat(column.style.paddingBottom);
-      expect(LOG_END_CLEARANCE_PX).toBeGreaterThanOrEqual(PILL_BOTTOM_OFFSET_PX + PILL_HEIGHT_PX + FOLLOW_THRESHOLD_PX);
-
-      // Following (at the tail): no pill, and the padding is already there.
       Object.defineProperty(log, "scrollTop", { configurable: true, writable: true, value: 2400 });
       fireEvent.scroll(log);
       await flush();
-      expect(screen.queryByTestId("jump-to-latest")).not.toBeInTheDocument();
-      expect(padding()).toBeGreaterThanOrEqual(LOG_END_CLEARANCE_PX);
+      expect(screen.queryByTestId("jump-to-latest-slot")).not.toBeInTheDocument();
 
-      // Pill visible: the same padding, so nothing shifts when it appears.
       log.scrollTop = 0;
       fireEvent.scroll(log);
       await flush();
-      expect(screen.getByTestId("jump-to-latest")).toBeInTheDocument();
-      expect(padding()).toBeGreaterThanOrEqual(LOG_END_CLEARANCE_PX);
+      const slot = screen.getByTestId("jump-to-latest-slot");
+      const pill = screen.getByTestId("jump-to-latest");
+      expect(slot).toContainElement(pill);
+      expect(log).not.toContainElement(slot);
+      expect(log.parentElement).not.toContainElement(slot);
+      expect(log.parentElement!.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(pill.className).not.toMatch(/\babsolute\b/);
     } finally {
       for (const key of Object.keys(sizes)) {
         delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];

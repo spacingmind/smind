@@ -7,18 +7,6 @@ import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "
  */
 export const FOLLOW_THRESHOLD_PX = 32;
 
-/** The "Jump to latest" pill: ~32px high, `bottom-4` (16px) over the log. */
-export const PILL_HEIGHT_PX = 32;
-export const PILL_BOTTOM_OFFSET_PX = 16;
-
-/**
- * Permanent padding at the end of the log content. The pill shows once the
- * view is more than FOLLOW_THRESHOLD_PX from the tail, so the last line must
- * sit at least pill height + offset + threshold above the content end to never
- * be under it. Constant (not toggled with the pill) so nothing jumps.
- */
-export const LOG_END_CLEARANCE_PX = PILL_HEIGHT_PX + PILL_BOTTOM_OFFSET_PX + FOLLOW_THRESHOLD_PX;
-
 export interface AutoFollow<T extends HTMLElement> {
   ref: RefObject<T | null>;
   /** True while the view is pinned to the tail; false once the user scrolls up. */

@@ -23,7 +23,7 @@ import type { DeliverableContext } from "@/components/timeline/deliverable-card"
 import { useLocalPathActions } from "@/hooks/use-local-path-actions";
 import { continuePrompt } from "@/components/timeline/run-footer-model";
 import { ChatOutlineRail } from "@/components/timeline/chat-outline-rail";
-import { LOG_END_CLEARANCE_PX, useAutoFollow } from "@/components/timeline/use-auto-follow";
+import { useAutoFollow } from "@/components/timeline/use-auto-follow";
 import { useChatOutline } from "@/components/timeline/use-chat-outline";
 import { useChatFind } from "@/components/timeline/use-chat-find";
 import { Alert } from "@/components/ui/alert";
@@ -486,7 +486,7 @@ export function TaskDetailPane({
            * and only the chat tab gets it: files/diff/terminal render
            * their own full-width roots.
            */}
-          <div data-testid="run-log-column" className="mx-auto max-w-3xl" style={{ paddingBottom: LOG_END_CLEARANCE_PX }}>
+          <div data-testid="run-log-column" className="mx-auto max-w-3xl">
             {error && <Alert variant="error" description={error} />}
             {!error && runs === null && <InlineSpinner label="Loading runs…" />}
             {!error && runs !== null && runs.length === 0 && (
@@ -529,20 +529,6 @@ export function TaskDetailPane({
           />
         )}
 
-        {!follow.following && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid="jump-to-latest"
-            onClick={follow.jumpToLatest}
-            className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border-border bg-background shadow-md dark:border-input-border dark:bg-background dark:hover:bg-muted"
-          >
-            <Icons.down className="size-3" />
-            Jump to latest
-          </Button>
-        )}
-
         {chatFind.open && (
           <div className="absolute top-2 right-3 z-10">
             <FindBar
@@ -558,6 +544,23 @@ export function TaskDetailPane({
           </div>
         )}
       </div>
+
+      {/* In flow, between the log and the composer: the log viewport shrinks by this row, so the pill never covers content. */}
+      {!follow.following && (
+        <div data-testid="jump-to-latest-slot" className="flex shrink-0 justify-center py-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="jump-to-latest"
+            onClick={follow.jumpToLatest}
+            className="rounded-full border-border bg-background shadow-md dark:border-input-border dark:bg-background dark:hover:bg-muted"
+          >
+            <Icons.down className="size-3" />
+            Jump to latest
+          </Button>
+        </div>
+      )}
 
       {/*
        * The pending-permission dock: a sibling of the scrolling log above,
