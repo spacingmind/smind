@@ -365,3 +365,29 @@ func TestBudgetNotify_RearmedAfterRaise(t *testing.T) {
 		t.Fatal("budgetNotified still set after an admission found the tree under the cap")
 	}
 }
+
+func TestTreeBudgetCountsRemoteSpend(t *testing.T) {
+	t.Parallel()
+	e := newTreeGuardEnv(t, 1, false)
+	e.setBudget(t, budgetPtr(1))
+	e.spend(t, e.root.ID, "r1", 0.4)
+	if _, err := e.st.PutFleetRemoteTaskAndWatch(store.FleetRemoteTask{HostID: "h1", RemoteTaskID: "7", LocalTaskID: e.tasks[0].ID, State: "running", CostUSD: budgetPtr(0.7)}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	err := e.reg.CheckTreeBudget(e.root.ID, store.ChatQueueSourceAgent)
+	be, ok := asBudgetExceeded(err)
+	if !ok {
+		t.Fatalf("CheckTreeBudget with a remote mirror error = %v, want *BudgetExceededError", err)
+	}
+	if be.SpentUSD < 1.0999 || be.SpentUSD > 1.1001 {
+		t.Fatalf("SpentUSD = %v, want 1.1", be.SpentUSD)
+	}
+
+	if err := e.st.DeleteFleetRemoteTask("h1", "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.reg.CheckTreeBudget(e.root.ID, store.ChatQueueSourceAgent); err != nil {
+		t.Fatalf("CheckTreeBudget without the mirror error = %v, want nil", err)
+	}
+}
