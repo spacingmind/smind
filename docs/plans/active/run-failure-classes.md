@@ -340,12 +340,22 @@ Usage, changing the `rate_limited` window/zone parsing, any new run status.
 
 ## Progress
 
-- 2026-11-01 Phase 1: code read (classifier, finish/failover/cooldown, inbox,
-  MCP, CLI, web error box); this spec written. Spec accepted by the Steward; D1-D3 recorded as Supervisor defaults.
-- 2026-11-01 PR1 started.
+- 2026-11-01 Phase 1: code read; spec written and accepted (#762); D1-D3 recorded as Supervisor defaults.
+- 2026-11-01 PR1 (detection + wire + classifier + migration + fixtures + policy), branch `run-failure-classes-pr1`:
+  - `internal/runs/ratelimit` renamed `internal/runs/failure`; new kinds, `IsPlanLimit` / `IsLimitKind` / `IsHumanFix` / `IsKnown`; precedence plan window > typed code > auth > model > generic 429 words.
+  - Sourced patterns only. Claude: "Not logged in · Please run /login", "Invalid API key", `authentication_error`, the "issue with the selected model" text (refs/claude-code CHANGELOG); codex: typed `CodexErrorInfo` now decoded from the app-server's turn error (`codex.TurnError`, `taskrunner.FailureHint`), plus "Selected model is at capacity", "rate limit exceeded:", "Quota exceeded. Check your plan and billing details.", "Model not found", "The 'x' model is not supported when using Codex with a ChatGPT account" (refs/codex). **Dropped as unsourced: every GLM error code** (1001-1003, 1211, 1220, 1302, 1305); GLM keeps the text patterns it had.
+  - Deviations from the spec text: (1) a bare "usage limit reached" (no window) is `plan_window_exhausted`, not residual: the provider said usage limit; only 429/rate words without a hint are residual. (2) `needs-continue` disposition is not added for the new kinds (the action carries the step; Continue stays for cli_exited and plan windows past their reset); `resumableKind` is true for all known kinds so the footer's Continue works. (3) A minimal web shim keeps the plan-limit UI working for `plan_window_exhausted` (one helper, tests); the real UI is PR3. (4) The fleet watcher's child-event text does not carry the action yet (PR2 owns text). (5) `AllowedModels` for `pick_model` is not filled yet (no per-account allowed-model source exists in the daemon): the label is the generic one until a source exists; named gap for PR2/PR3.
+  - The two GLM peers hit the 5-hour GLM limit (reset 21:29Z) after one commit; their queued retries were cancelled and the Lead did the wire plumbing and fixtures directly.
 
 ## Validation
 
-Pending (phase 2). Each AC above is confirmed here with the test name and the
-mutation result when its PR lands; the plan moves to `docs/plans/completed/`
-when all of AC1-AC18 are confirmed.
+PR1 (confirmed by the named tests, each with one mutation that made the test fail; see the PR body):
+
+- AC1-AC6 `TestClassify_*` (precedence, ambiguity, structured code, `TestClassify_Fixtures` over 31 payloads in `internal/runs/failure/testdata/`).
+- AC7/AC8 `TestNextAction_PerClass`, `TestRunFinishedEvent_CarriesAction`, `TestRunLogs_FallbackProfileIdForRateLimitedRun` (action = switch_profile), `TestRunLogs_ActionAuthExpiredIsSignIn`, `TestTreeNode_FailureActionSerialises`, `TestFleetWire_ActionRoundTrip_UnknownKindTolerated`, `TestPluginHook_RedactsActionLabel`, `TestMCPTaskStatus_CarriesAction`.
+- AC9 `TestMigration_RateLimitedWithWindowBecomesPlanWindow`.
+- AC12 `TestFinish_AuthExpiredSetsNoCooldownNoFallbackNoWait`, `TestFinish_ModelNotInPlanNeverRetriesSameAccount`.
+- AC13 `TestFinish_Transient429RetriesTwiceThenSurfaces`, `...PlainHumanSendIsNotRetried`, `...RetryHeldWhileProviderCooldown`, `...RetryRunsAreCounted`.
+- AC14 `TestFinish_PlanWindowStillSetsCooldownAndWait` plus the existing F1/F2b tests.
+- AC15 consumers use the helpers (no literal `== "rate_limited"` left outside `failure/` and the tests); a source-scan test is not added (PR2 adds the MCP table check).
+- AC10, AC11, AC16-AC18: PR2 / PR3.
