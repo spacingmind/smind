@@ -21,4 +21,6 @@ Sources: `src/terminal/runtime/terminal-virtual-keyboard.ts`, `terminal-key-disp
 - Reuse Paseo semantics exactly (toggle, no lock). Not a new ADR: UI port, no architecture change.
 
 ## Progress / Validation
-(filled as work proceeds)
+- Encoder `lib/terminal-keys.ts`, bar `components/terminal-key-bar.tsx`, pane wiring (sticky modifiers, OS-keyboard consumption, application-cursor via `term.modes.applicationCursorKeysMode`) done by peer-sonnet (GLM rate-limited until 18:28), reviewed line by line.
+- Validation: 156 tests pass (terminal-keys, key-bar, pane, find, keyboard-inset, App); tsc clean. Mutations, each FAILED its test: sticky clear removed -> `sticky modifier clears after one key`; onData consumption disabled -> `an armed Ctrl turns the next typed c into ETX`; application-cursor branch off -> 2 SS3 tests; Ctrl code-64 -> 65 -> `Ctrl+c sends ETX`; width 660 -> 760 -> `resolveKeyBarRows picks the layout by width`; Escape returns "" -> `Escape sends ESC`.
+- Frames: /tmp/steward4/after/terminal-touch/ (see PR). No Paseo screenshots exist locally; the Paseo bar is described above from source.
