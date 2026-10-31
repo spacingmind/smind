@@ -206,7 +206,7 @@ Usage:
                                                            manage learned skills and proposals (humans only; run "smind learn" for flags)
 
   smind policy init|show|test|audit                       permission policy engine: write the template, show rules, explain a command, list decisions
-                                                           (humans only; the engine is off until steward.policy.enabled; not supported on Windows yet; run "smind policy" for flags)
+                                                           (humans only; the engine is off until steward.policy.enabled; run "smind policy" for flags)
 
   smind push test [<device id prefix>]                    send a test notification to phones registered for push
 

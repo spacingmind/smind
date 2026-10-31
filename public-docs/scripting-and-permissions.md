@@ -92,8 +92,6 @@ shell commands as you is the provider's own permission mode or sandbox.
 
 ## A standing permission policy (optional)
 
-> **Windows is not supported yet.** The policy engine's path rules assume POSIX paths. On Windows, `steward.policy.enabled: true` is ignored: the daemon logs one warning and keeps the engine off, so permission requests behave exactly as without a policy, and `smind policy` commands exit with "not supported on Windows yet". Use macOS or Linux for the policy engine; Windows support is planned.
-
 Off by default. If you turn it on, smind can answer the routine permission
 requests of your agents from a file you write, so you only read the requests
 that need a person. No model is involved: the daemon compares each request with
