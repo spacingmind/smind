@@ -2,7 +2,7 @@ package permpolicy
 
 import "testing"
 
-func floorWin(t *testing.T, cmd string) (FloorHit, bool) {
+func floorWinCmd(t *testing.T, cmd string) (FloorHit, bool) {
 	t.Helper()
 	_, req := winEnv(t)
 	req.Command = cmd
@@ -14,7 +14,7 @@ func runFloorWin(t *testing.T, id string, deny, allow []string) {
 	for _, cmd := range deny {
 		t.Run(cmd, func(t *testing.T) {
 			t.Parallel()
-			hit, ok := floorWin(t, cmd)
+			hit, ok := floorWinCmd(t, cmd)
 			if !ok || hit.ID != id {
 				t.Fatalf("floor(%q) = %+v, %v; want %s", cmd, hit, ok, id)
 			}
@@ -23,7 +23,7 @@ func runFloorWin(t *testing.T, id string, deny, allow []string) {
 	for _, cmd := range allow {
 		t.Run("allow "+cmd, func(t *testing.T) {
 			t.Parallel()
-			if hit, ok := floorWin(t, cmd); ok {
+			if hit, ok := floorWinCmd(t, cmd); ok {
 				t.Fatalf("floor(%q) = %+v; want no hit", cmd, hit)
 			}
 		})
