@@ -253,9 +253,9 @@ On a recipe instance's detail page, the **Keys** card lists each key as *Set ·
 ••••abcd* (the last four characters of a fingerprint, not of the key) or *Not
 set*. **Replace key** opens a password dialog; **Clear key** asks for
 confirmation. A recipe whose endpoint cannot turn thinking off says so under
-**Recipe**, and the thinking picker is hidden for that provider. Editing an
-existing instance's models, disallowed tools or the inherit-`~/.claude` setting
-is not in the UI yet: edit `config.yaml` and run `provider.reload`.
+**Recipe**, and the thinking picker is hidden for that provider. To change an
+existing instance's models, disallowed tools or the inherit-`~/.claude`
+setting, see [Edit an instance](#edit-an-instance).
 
 On the phone, the new-task form shows a read-only note under the provider
 picker ("Recipe zai-glm · Unverified · Key set (…ab12)"); keys are never entered
@@ -364,6 +364,38 @@ startup. After you edit the file by hand, choose **Reload providers** in the
 detail of any custom provider in **Settings** → **Providers** to apply it
 without a restart. To remove an instance, delete its entry and reload. The
 Settings screen has no remove button.
+
+### Edit an instance
+
+Open **Settings** → **Providers** and choose the instance. Four things can be
+changed there:
+
+- **Models**: **Replace list** makes your list the whole model list;
+  **Add to list** merges your models into the provider's own list by id.
+- **Disallowed tools**: a chip list of Claude Code tools the instance may not
+  use (instances of `claude-native` only).
+- **Use ~/.claude**: a toggle that makes the instance use `~/.claude` instead of
+  a private config directory (instances of `claude-native` only).
+
+The same edit from the command line:
+
+```
+smind provider update <id> --models a,b --add-models a,b \
+  --disallow T,U --inherit-claude-config=true|false
+```
+
+`--models` replaces the list, `--add-models` adds to it, `--disallow` sets the
+disallowed tools. An empty value (for example `--models ""`) removes that field
+from the entry.
+
+The edit changes only those four fields of that one entry in `config.yaml`.
+Everything else is left byte for byte as it was: the other entries, comments
+and blank lines. Keys stay under **Keys** (or `provider.setSecret`); this edit
+never touches them. An entry written in flow style (`- {id: x, ...}`) is
+refused with a message to edit it by hand.
+
+Only a person can edit an instance: agents and plugins cannot. The change
+applies live, with no restart and no **Reload providers**.
 
 ### Codex endpoint instances
 
