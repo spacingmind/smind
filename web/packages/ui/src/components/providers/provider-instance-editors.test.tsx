@@ -125,6 +125,20 @@ describe("ProviderInstanceEditors", () => {
     expect(d.providers.providers[0].instance?.inheritClaudeConfig).toBe(true);
   });
 
+  it("toggling inherit keeps an unsaved models draft", async () => {
+    setup(claudeInstance({ models: [{ id: "m-a" }] }));
+    fireEvent.click(screen.getByTestId("instance-mode-add"));
+    fireEvent.change(screen.getByTestId("instance-model-input"), { target: { value: "m-c" } });
+    fireEvent.click(screen.getByTestId("instance-model-add"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("instance-inherit-switch"));
+    });
+    await flush();
+    expect(screen.getByTestId("instance-model-row-m-c")).toBeInTheDocument();
+    expect(screen.getByTestId("instance-models-save")).toBeEnabled();
+    expect(screen.getByTestId("instance-mode-add")).toHaveAttribute("aria-checked", "true");
+  });
+
   it("a daemon refusal shows its text and keeps the draft", async () => {
     const d = new FakeUsageDaemon([]);
     d.updateInstanceError = new Error("provider.updateInstance: run-scoped callers may not edit providers");
