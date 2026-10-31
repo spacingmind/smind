@@ -1,0 +1,170 @@
+# UAT UI — user-journey sweep of the web and desktop apps
+
+Epic (Human, via Supervisor, 2026-10-31): find the bugs a user really hits by running full user journeys, fix them, and lock them with a Playwright regression suite.
+Size: L (7) — scope 2 (web, desktop, harness), PRs 2 (three phases), risk 0 (phase 1 changes no product code), decisions 1 (CI suite placement), verification 2 (screenshots in two themes and two widths, real daemon).
+
+Phase 1 (this file): prep, catalogue, harness, first ranked bug list. Phases 2 (fixes) and 3 (CI Playwright suite) are separate PRs after the Steward reviews the phase-1 report. Nothing in phase 1 touches product code.
+
+## Acceptance criteria (phase 1)
+
+- AC1 This catalogue lists 40–60 journeys, one row each with id, steps, expected result, surfaces and priority, covering every area in the brief (see the table).
+- AC2 An isolated harness under `~/.smind/dogfood/uat/` (own `SMIND_HOME`, own port, fake agents only, no provider secret, no model call) with a README of exact commands. Every script refuses to run unless `SMIND_HOME` is under `~/.smind/dogfood/uat/` and the port is not 4648/4870.
+- AC3 A seed creates workspaces, tasks (finished, busy, waiting a permission, errored, long, archived), queue items, a second permission request and a Lead tree, from the fake agents.
+- AC4 Every journey runs on the web app in light and dark at 1280 and 390; a screenshot per journey × theme × width lands in `/tmp/steward4/uat/<journey-id>-<theme>-<width>.png`; console errors and failed requests are logged beside it.
+- AC5 Every screenshot is looked at; each defect is recorded below with id, journey, severity, repro, screenshot path and suspected file.
+- AC6 The report says plainly what could not be covered (desktop shell, blocked journeys, anything stubbed).
+
+## Test scenarios (named)
+
+The harness scripts are the scenarios; the names are the journey ids in the table (`J01`..). A scenario passes when its steps complete and its expected result is visible; a failure or a visual defect becomes a bug row. These scripts become the phase-3 Playwright suite.
+
+- `harness_guard_refuses_foreign_home`: running any harness script with `SMIND_HOME=/tmp/x` exits non-zero with a message (checked once, evidence in Validation).
+- `harness_seed_idempotent`: `uat-reset.sh` twice gives the same seed ids.
+- `journeys_capture_all`: every J row yields its screenshots in the four theme × width combinations.
+
+Priority: P0 = the product is unusable without it, P1 = a core flow, P2 = secondary, P3 = edge.
+Surfaces: W = web at 1280, N = web at 390, D = desktop (see "not coverable").
+
+## Journey catalogue
+
+| id | journey | steps | expected | surfaces | pri |
+|---|---|---|---|---|---|
+| J01 | First run: welcome with no workspaces | open app on an empty home | welcome/home landing shows, a clear first action, no console errors | W N D | P0 |
+| J02 | First-run connect methods | open connect screen, switch local / URL / SSH forms, submit an empty and a bad URL | validation message per form, no crash | W N D | P1 |
+| J03 | Login screen with password set | daemon with a password, open app, wrong then right password | wrong shows an error, right lands on the home | W N | P1 |
+| J04 | Add a workspace | sidebar add, folder picker, choose a repo, name it | workspace appears in the sidebar, selected | W N | P0 |
+| J05 | Add a workspace: bad path | give a path that is not a git repo | readable error, dialog stays usable | W | P1 |
+| J06 | Create a task | new task dialog, title, provider `uat`, create | task opens, setup state resolves, composer focused | W N | P0 |
+| J07 | Send a prompt and read the timeline | send a prompt to the rich fake agent | thought, plan, tool calls, markdown table and code render, run ends done | W N | P0 |
+| J08 | Long timeline scroll | open the 400-line finished task, scroll, jump to the end | scroll is smooth, composer stays pinned, no layout jump | W N | P1 |
+| J09 | Tool call details | expand each tool call, including the failed one | details readable, failed call marked, diff block renders | W N | P1 |
+| J10 | Permission request: approve | task waits on a permission, open it, approve | card shows the path/diff, run continues and finishes | W N | P0 |
+| J11 | Permission request: deny | second request, deny | run reflects the denial, no stuck spinner | W N | P0 |
+| J12 | Inbox | open the inbox with two pending requests | items listed, badge count right, click opens the task, count drops after answering | W N | P0 |
+| J13 | Queue a prompt while busy | busy task, send two prompts | queue chips show order, they run in order when the first ends | W N | P0 |
+| J14 | Cancel a queued prompt | cancel one queue chip | it disappears, the other still runs | W | P1 |
+| J15 | Stop a run | stop the hanging run | state becomes stopped, composer usable, no ghost "running" | W N | P0 |
+| J16 | Errored run | task whose agent returns an error | error shown with details, retry or resend possible | W N | P1 |
+| J17 | Task tree: Lead with Peers | open the Lead task, view tree and lineage | children listed with tier and status, navigating to a child works | W N | P1 |
+| J18 | Task lineage breadcrumbs | open a child, use the lineage link back | parent reached, selection consistent | W N | P2 |
+| J19 | Terminal: open and type | open a terminal tab, run `echo hi` | output appears, prompt returns | W N | P0 |
+| J20 | Terminal: Ctrl+C | run `sleep 100`, press Ctrl+C | process interrupted, prompt back | W | P1 |
+| J21 | Terminal: resize | resize the viewport 1280→390→1280 while a terminal is open | no clipped columns, content reflows, no blank pane | W N | P1 |
+| J22 | Files: explorer and open | open the files pane, open `README.md` and a source file | tree lists files, editor shows content with highlighting | W N | P1 |
+| J23 | Files: edit and save | change a file, save | dirty marker, saved state, the git panel shows it changed | W | P1 |
+| J24 | Diff view | open the diff pane on the task with uncommitted changes | files listed, unified diff renders, untracked file shown | W N | P0 |
+| J25 | Git panel states | task with dirty tree, clean tree (beta), empty repo (gamma) | branch line and counts correct in each state | W N | P1 |
+| J26 | PR panel: no forge | open the PR panel where `gh` is absent | a clear "not connected" state with the way to fix it, no raw error | W N | P1 |
+| J27 | Create PR dialog | open the create-PR dialog with no remote | dialog explains the blocker, does not crash | W | P2 |
+| J28 | Sync menu | open the sync menu on a repo without a remote | disabled or explained actions | W | P2 |
+| J29 | Settings: general and appearance | open settings, switch theme light/dark/system | theme applies instantly, persists on reload | W N | P0 |
+| J30 | Settings: providers | list providers, open one, the custom `uat` row | rows readable, status per provider, no secret shown | W N | P1 |
+| J31 | Settings: accounts | open the accounts dialog, add-account form, cancel | form validates, nothing saved on cancel | W N | P1 |
+| J32 | Settings: usage | open usage and the sidebar usage summary with no accounts | empty state not a broken chart | W N | P2 |
+| J33 | Settings: profiles | open profiles | list and form fit the width, no overflow | W N | P2 |
+| J34 | Settings: shortcuts | open shortcuts, search "new" | filtered list, the dialog opens from the keyboard too | W | P2 |
+| J35 | Settings: notifications, MCP servers, plugins, daemon | visit each section | each renders, none blank or errored | W N | P2 |
+| J36 | Command palette | open with the shortcut, type, run a command, Esc | results filter, command runs, focus returns | W N | P0 |
+| J37 | Quick open | open quick-open, type a file name, Enter | file opens | W | P2 |
+| J38 | Sidebar search and filter | type a task title, clear, filter by status | list narrows and restores, empty result state | W N | P1 |
+| J39 | Sidebar archive and restore | archive a task, open archived tasks, restore | task leaves and returns, selection moves sanely | W N | P1 |
+| J40 | Rename and delete a workspace or task | rename a task inline, delete a workspace dialog (cancel) | rename persists, delete asks and cancel keeps it | W | P2 |
+| J41 | Hosts page | open Settings → Hosts (fleet stubbed via the WS injector, isolated) | list with link states, empty state, no crash with fleet off | W N | P1 |
+| J42 | Pairing dialog | invite and add-host dialogs, approve dialog | invite code shown, SAS readable, dialogs fit 390 | W N | P1 |
+| J43 | Automations page (off state) | open Settings → Automations with the feature off | the off-state card explains how to enable it | W N | P1 |
+| J44 | Automations page (full) | list, create form, history | BLOCKED until Lead 283's page merges; re-run then | W N | P1 |
+| J45 | Reconnect after daemon restart | restart the isolated daemon with the app open | banner/indicator shows, app reconnects, timeline and queue intact, no manual reload | W N | P0 |
+| J46 | Reload mid-run | reload the browser during a hanging run | run state restored, same task selected via the hash | W N | P0 |
+| J47 | Deep links and back/forward | open `#/` task URLs, browser back and forward | selection follows the hash, no loop | W | P1 |
+| J48 | 390px layout sweep | at 390 open the sidebar, a task, settings, the palette, dialogs | nothing clipped or overflowing horizontally, tap targets reachable, sidebar opens and closes | N | P0 |
+| J49 | Keyboard-only main flow | Tab/Shift+Tab/Enter/Esc: add task, send, answer permission, open palette | visible focus ring at every step, no trap, Esc closes layers in order | W | P0 |
+| J50 | Light/dark contrast pass | every J screenshot in both themes | no unreadable text, no stuck light panels in dark | W N | P1 |
+| J51 | Empty and error states | task with no runs, a workspace with no tasks, an unreachable daemon | each state has copy and an action | W N | P1 |
+| J52 | Composer: attachments and @file | attach a small image, type `@` for the file picker | chip appears, picker lists files, send keeps both | W N | P2 |
+| J53 | Run configuration options | open the mode/model options, switch mode | options list, change applies and shows | W N | P2 |
+| J54 | Window resize across the 768 breakpoint | drag 1280 → 800 → 390 on a task | layout switches without losing state | W N | P1 |
+| J55 | Open a PDF in Preview (office mode O4) | open a task with a PDF in its files, open it in a Preview tab (sandboxed pdf.js classic worker, PR #752) | pages render, zoom and page controls work, no console or CSP errors, on the 390 layout too | W N D | P1 |
+| J56 | PDF viewer inside the desktop WKWebView | open the same PDF in the built macOS app's WKWebView (not Chromium) | same render as J55; proves the worker and sandbox work in WebKit | D | P1 |
+
+56 journeys. J44 is blocked until the Automations page merges; J55 and J56 are blocked until #755 is on develop (after #752 and #753; #755 exempts GET /pdf-viewer.html and /pdf-viewer.js from the desktop proxy cookie gate, without which the viewer never started in the native app). J56 is then run by building the macOS app from develop into the dogfood dir, with no Human daemon, then run on the merged develop build.
+
+## Not coverable here (fills in as the run proceeds)
+
+- Desktop shell: the Tauri app (`/Applications/sMind.app` is the Human's live install and is off limits; a dev build needs a Rust toolchain and a native window that Playwright cannot drive). The web UI built with `VITE_SMIND_DESKTOP=1` and a stubbed Tauri bridge covers desktop-mode layout only (earlier `p5` approach); native chrome, traffic lights, updater and the sidecar daemon are not covered.
+- J56 (PDF in the desktop app's WKWebView): cannot be driven headless here. Playwright in this harness has only Chromium (no WebKit build, and installing one is out of scope), `safaridriver` cannot attach to a Tauri webview, and `/Applications/sMind.app` is the Human's live install. A dev build is possible (cargo is installed) but it would start its own sidecar daemon and needs a native window, so it needs the Steward's go-ahead and an isolated `SMIND_HOME`. Until then WebKit rendering of the viewer is unverified; the fallback is a Safari (WebKit) check by hand on the isolated daemon URL.
+- Anything needing a real provider, `gh` or GitHub (PR panel with a real PR), push notifications, mobile app.
+
+## Decisions
+
+- Fake agent only: a node ACP stub with scenario files (`hang`, `permission`, `error`, `long`, `slow`) so no model call or secret is ever involved.
+- One isolated daemon on port 4961 serving the embedded UI; the Hosts and Automations pages use the Playwright WebSocket injector, since fleet and automations are off in the isolated daemon.
+- Screenshots are viewport captures at 1280×800 and 390×844 named `<id>-<theme>-<width>.png`.
+
+## Progress
+
+- [x] Catalogue (56 journeys; J44 blocked on the Automations page, J55/J56 blocked on #755).
+- [x] Harness built and smoke-tested (`~/.smind/dogfood/uat/`, README there).
+- [x] Journey scripts J01-J54 written (`~/.smind/dogfood/uat/journeys/`).
+- [x] Full run on the web app, light and dark at 1280 and 390, screenshots reviewed (contact sheets for triage, full size for every suspicious one).
+- [x] Ranked bug list (below).
+- [ ] J44, J55, J56 and the two Steward entries S-01/S-02 verified on the merged builds.
+- [ ] Phase 2 (fixes) and phase 3 (CI suite): not started, by instruction.
+
+## Validation
+
+- AC1: 56 journeys in the table (target 40-60).
+- AC2: harness under `~/.smind/dogfood/uat/` with `lib/guard.sh` and `lib/guard.cjs`. Guard proven: `SMIND_HOME=/tmp/x bin/uat-up.sh` and `node lib/guard.cjs` exit 1 ("REFUSING: SMIND_HOME=/tmp/x resolves to /private/tmp/x, not under ~/.smind/dogfood/uat/"); `UAT_PORT=4648` and an unset `SMIND_HOME` are refused too. No model call: agent is `agent/uat-agent.cjs`; every send script asserts the provider chip is the fake agent first.
+- AC3: seed gives 3 workspaces and 11 tasks (idle, busy with 2 queued, 2 permission requests, errored, long, archived, a Lead with 2 Peers).
+- AC4: 54 scripted journeys x 4 combos = 216 runs; 27 in group A and 27 in group B. Screenshots in `/tmp/steward4/uat/<id>-<theme>-<width>.png` (plus `-b`, `-open` style extra states), console logs beside them (only J03's expected 403/401, J45's restart and J53 narrow were non-empty).
+- AC5: all shots reviewed; I opened the top findings myself at full size (A-01, A-02, B-01, B-03 confirmed in the PNGs).
+- AC6: see "Not coverable".
+- Results: group A 21/27 journeys pass in all four combos (J06, J12, J17, J19, J22, J24 fail on app findings); group B passes everywhere except J39 and J51 (app findings), J49/J52/J53 failed only on script issues and pass after fixes.
+- Peers: 3 peer-sonnet (harness; group A; group B, B restarted 5 times: early run end x2, session limit, CLI killed reading an oversized image). 0 peer-glm: GLM was rate limited until about 23:28 and the work was exploratory UI driving, so it went to Sonnet. Not verifiable: whether a GLM run carries `--max-turns 500` (no GLM run happened).
+- Sources: `/tmp/steward4/uat/bugs-A.md`, `bugs-B.md`, `bugs-S.md` hold the full repro text.
+
+## Ranked bug list
+
+No P0 found. Severity: P0 data loss/crash/blocked flow, P1 broken feature or wrong state, P2 visual/UX, P3 nit. Screenshot paths are under `/tmp/steward4/uat/`.
+
+| id | journey | sev | repro (short) | screenshot | suspected file |
+|---|---|---|---|---|---|
+| A-01 | J06 | P1 | 390px: Cmd+K, "New task in alpha", Enter does nothing; opening the drawer then shows a stale New-task dialog (crud dialogs live in the unmounted sidebar Sheet). Also likely "New workspace". 2/4 combos (both 390) | `j06-palette-noop-light-390.png`, `j06-stale-light-390.png` | `components/app-sidebar.tsx`, `ui/sidebar.tsx` |
+| B-01 | J39 | P1 | Archive the selected task: row leaves the list but hash and pane still show it, composer enabled (a prompt could be sent into an archived task). 4/4 | `j39-archived-light-1280.png` | `App.tsx` (task.archived selection), `app-sidebar.tsx` |
+| A-03 | J24 | P1 | Click the "+5 -0" diff chip above the composer: nothing opens. 4/4 | `j24-chip-noop-light-1280.png` | `composer.tsx` onOpenDiff -> `App.tsx` revealInDiff |
+| A-02 | J19 | P1 | One click on the header terminal button opens two tabs ("Terminal 2" with activity dot and "Terminal"). 4/4 | `j19-open-light-1280.png` | `App.tsx` focusOrOpenTerminal/openTerminalTab, `terminal-pane.tsx` |
+| B-03 | J51 | P2 | WS refused at load: sidebar "Loading workspaces..." forever, only a small "Connecting..." chip; no unreachable copy or retry (mid-session reconnect J45 is fine). 4/4 | `j51u-dark-1280.png` | `app-sidebar.tsx`, connection status |
+| A-07 | J17/J12 | P2 | A tree whose tasks are all done is flagged "stalled" and listed in the Inbox ~20 min after the runs ended. 2/4 (time dependent) | `j17-err-light-1280.png`, `j12-list-light-1280.png` | stalled-tree detection in `task.tree` / `task-lineage.tsx` |
+| A-06 | J17 | P2 | 390px: a Lead's child pills are hidden (strip shows only "2 done"), children reachable only via the sidebar. 2/4 | `j17-narrow-strip-light-390.png` | `task-lineage.tsx` |
+| A-08 | J12 | P2 | Inbox permission rows offer only "Review request"/"Mark seen", no "Open task". 4/4 | `j12-list-light-1280.png` | `inbox/inbox-screen.tsx` |
+| A-09 | J04 | P2 | 390px folder picker: path, list and buttons run past the dialog edge. 2/4 | `j04-picker-light-390.png` | `folder-picker-dialog.tsx` |
+| A-10 | J09 | P2 | Edit tool call with ACP diff content renders as raw JSON, not a diff (renderer reads tool input only). 4/4 | `j09-failed-light-1280.png` | `timeline/tool-call-detail.tsx` |
+| A-04 | J22 | P2 | Go file opens with no syntax highlighting. 4/4 | `j22-light-1280.png` | `code-mirror-editor.tsx` |
+| B-02 | J47 | P2 | Hash with an unknown task id: warm = previous task stays shown while URL says 99999; cold = landing page with stale hash; no "not found". | `probe-x-light-1280.png` | `App.tsx` route handling |
+| S-01 | sidebar | P2 | (Steward, PR #759) Automation chip squeezes task titles to "Nightly d..."; go icon-only at narrow widths or give the title priority. Not yet reproduced here | - | `app-sidebar.tsx` |
+| S-02 | J43 | P2 | (Steward, PR #759) off-state card says "smind stop && smind serve"; a service-managed daemon needs "smind service restart" (use daemon.info or list both). Not yet reproduced here | - | `settings/automations-section.tsx` |
+| A-11 | J06 | P2 | Composer not focused after creating a task (maybe intentional). 4/4 | `j06-light-1280.png` | `composer.tsx` |
+| B-05 | J50 | P3 | Low contrast: sidebar timestamps ~2.2:1; orange status text on light ("Unreachable", "Automations are off", "Timed out") 2.7-3.0:1. 2/4 measured | `j50-*` | tokens / `index.css` |
+| B-06 | J30/J52 | P3 | Provider picker shows raw errors (`exec: "codex": executable file not found ... codex home ...`), clipped text at 1280 | `probe-b-light-1280.png` | `components/pickers` |
+| A-13 | J24 | P3 | 390px diff header wraps "-0" and floats the Create-PR reason. 2/4 | `j24-light-390.png` | `diff-viewer-pane.tsx` |
+| A-12 | J16 | P3 | Resume-fallback notice glued into the assistant text. 3/4 | `j16-dark-1280.png` | daemon resume notice |
+| B-04 | J36 | P3 | Palette: "open settings" matches nothing though shortcuts list it; odd grouping and branch-path subsequence matches. 4/4 | `j36-typed-light-1280.png` | `command-palette.tsx` |
+| B-09 | J31 | P3 | "Connect account" starts the browser login at once and disables the method radios until Cancel. 4/4 | - | `accounts-dialog.tsx` |
+| B-07 | J48 | P3 | 390px tap targets under 32px (sidebar toggle 28, quick actions 28, usage controls 28). | `j48-*` | sidebar, usage |
+| B-08 | J49 | P3 | No focus ring on the "Permission mode" button and `task-collapse-toggle`. | `j49-*` | `ui` button focus styles |
+| B-10 | J42 | P3 | 390px invite code clipped without an ellipsis. | `j42-invite-dark-390.png` | `hosts/invite-host-dialog.tsx` |
+| A-05 | J22 | P3 | File explorer lists `.git` and puts folders after files. 4/4 | `j22-tree-light-1280.png` | `file-explorer-pane.tsx` / `files.list` |
+| A-14 | J06 | P3 | "New task" with nothing selected opens the generic palette. | - | `app-sidebar.tsx` |
+| A-15 | J05 | P3 | Bad-path error shows raw server wording. | `j05-b-light-1280.png` | daemon error text |
+
+Counts: 0 P0, 4 P1, 11 P2, 12 P3 (27 entries; B-02 and S-01/S-02 included in P2).
+
+## Not coverable (final)
+
+- Desktop shell (native chrome, WKWebView, updater, sidecar). J56 stays blocked until #755 is on develop; it then needs a dev build in the dogfood dir.
+- J02 connect forms (local/URL/SSH): desktop-only, not in the web build; only asserted the web settings have no Connections section.
+- J44 (Automations page) and J55 (PDF preview): blocked until the pages merge. S-01/S-02 likewise.
+- J26/J27 PR panel and create-PR: no forge in the isolated harness; only the disabled/explained states were asserted.
+- J53: the fake agent has one mode, so switching among several modes was not driven; no real provider was ever driven.
+- J40: there is no task-rename UI to test.
+- Contrast numbers (B-05) come from a script; the first scanner version was wrong and discarded.
+- Not every one of the 216 images was opened full size; the rest were judged on contact sheets and assertions. J50/J51 were re-run on 2 of 4 combos after script fixes.
