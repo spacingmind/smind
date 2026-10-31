@@ -11,6 +11,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/fleet"
+	"github.com/spacingmind/smind/internal/fleet/client"
 	"github.com/spacingmind/smind/internal/fleet/link"
 	"github.com/spacingmind/smind/internal/fleet/pairing"
 	"github.com/spacingmind/smind/internal/relay/bridge"
@@ -64,6 +65,23 @@ func newFleet(srv *server.Server, cfg config.Config, home, version string, db *s
 	}
 	svc := link.NewService(so)
 	srv.API().SetFleet(wsapi.FleetOptions{Key: key, Registry: reg, Window: window, Links: svc, Version: version})
+	srv.API().SetFleetRemote(wsapi.FleetRemoteOptions{
+		Conn: func(hostID string) (client.Caller, client.LinkState) {
+			if c, ok := mgr.Conn(hostID); ok {
+				return c, client.LinkConnected
+			}
+			switch mgr.Status(hostID).State {
+			case link.StateConnecting:
+				return nil, client.LinkConnecting
+			default:
+				return nil, client.LinkOther
+			}
+		},
+		RunOrigin: func(runID string) string {
+			h, _ := db.RunOrigin(runID)
+			return h
+		},
+	})
 	svc.Start()
 	return mgr.Close
 }
