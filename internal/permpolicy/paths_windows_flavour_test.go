@@ -42,6 +42,7 @@ func TestResolveWindows_LinkJunctionDanglingEscape(t *testing.T) {
 		`D:\outside`:  {kind: "dir"},
 		`C:\Wt\jn`:    {kind: "junction", target: `D:\outside`},
 		`C:\Wt\dl`:    {kind: "link", target: `C:\Nope\new`},
+		`C:\Wt\djn`:   {kind: "junction", target: `C:\Nope\j`},
 		`C:\Wt\loop1`: {kind: "link", target: `C:\Wt\loop2`},
 		`C:\Wt\loop2`: {kind: "link", target: `C:\Wt\loop1`},
 	}, nil)
@@ -61,6 +62,13 @@ func TestResolveWindows_LinkJunctionDanglingEscape(t *testing.T) {
 	}
 	if pl.within(got, roots) {
 		t.Errorf("dangling link target judged inside %v", roots)
+	}
+	got, err = pl.resolve(`C:\Wt\djn\f`, "")
+	if err != nil || got != `C:\Nope\j\f` {
+		t.Fatalf("dangling junction: %q, %v", got, err)
+	}
+	if pl.within(got, roots) {
+		t.Errorf("dangling junction target judged inside %v", roots)
 	}
 	if got, err := pl.resolve(`C:\Wt\a\..\..\x`, ""); err != nil || got != `C:\x` {
 		t.Errorf("dotdot: %q, %v", got, err)
