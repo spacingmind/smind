@@ -535,6 +535,100 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		// ADR-0048 F1a: the fleet tables are new (also in schema.sql); this
+		// entry re-creates them should a database lack them.
+		name: "fleet_tables",
+		apply: func(db *sql.DB) error {
+			for _, q := range []string{
+				`CREATE TABLE IF NOT EXISTS fleet_hosts (
+					host_id TEXT PRIMARY KEY,
+					alias TEXT NOT NULL UNIQUE,
+					pub BLOB NOT NULL,
+					label TEXT NOT NULL DEFAULT '',
+					state TEXT NOT NULL,
+					created_at TIMESTAMP NOT NULL)`,
+				`CREATE TABLE IF NOT EXISTS fleet_links (
+					host_id TEXT NOT NULL REFERENCES fleet_hosts(host_id) ON DELETE CASCADE,
+					direction TEXT NOT NULL CHECK (direction IN ('outbound','inbound')),
+					enabled INTEGER NOT NULL DEFAULT 0,
+					grant_json TEXT NOT NULL DEFAULT '',
+					transport_json TEXT NOT NULL DEFAULT '',
+					updated_at TIMESTAMP NOT NULL,
+					PRIMARY KEY (host_id, direction))`,
+				`CREATE TABLE IF NOT EXISTS fleet_audit (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					ts TIMESTAMP NOT NULL,
+					direction TEXT NOT NULL,
+					host_id TEXT NOT NULL,
+					trace TEXT NOT NULL DEFAULT '',
+					req_id TEXT NOT NULL DEFAULT '',
+					method TEXT NOT NULL,
+					task_id TEXT NOT NULL DEFAULT '',
+					run_id TEXT NOT NULL DEFAULT '',
+					outcome TEXT NOT NULL,
+					code TEXT NOT NULL DEFAULT '',
+					latency_ms INTEGER NOT NULL DEFAULT 0,
+					bytes INTEGER NOT NULL DEFAULT 0,
+					summary TEXT NOT NULL DEFAULT '')`,
+				`CREATE INDEX IF NOT EXISTS idx_fleet_audit_ts ON fleet_audit(ts)`,
+				`CREATE INDEX IF NOT EXISTS idx_fleet_audit_host ON fleet_audit(host_id, id)`,
+				`CREATE TABLE IF NOT EXISTS fleet_watches (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					host_id TEXT NOT NULL,
+					remote_task_id TEXT NOT NULL,
+					remote_run_id TEXT NOT NULL DEFAULT '',
+					local_task_id INTEGER NOT NULL DEFAULT 0,
+					chat_id INTEGER NOT NULL DEFAULT 0,
+					cursor TEXT NOT NULL DEFAULT '',
+					state TEXT NOT NULL DEFAULT 'open',
+					failures INTEGER NOT NULL DEFAULT 0,
+					notify INTEGER NOT NULL DEFAULT 1,
+					closed_reason TEXT NOT NULL DEFAULT '',
+					created_at TIMESTAMP NOT NULL,
+					updated_at TIMESTAMP NOT NULL)`,
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_fleet_watches_run ON fleet_watches(host_id, remote_task_id, remote_run_id)`,
+				`CREATE TABLE IF NOT EXISTS fleet_idem (
+					host_id TEXT NOT NULL,
+					idem_key TEXT NOT NULL,
+					method TEXT NOT NULL,
+					task_id TEXT NOT NULL DEFAULT '',
+					run_id TEXT NOT NULL DEFAULT '',
+					response TEXT NOT NULL DEFAULT '',
+					created_at TIMESTAMP NOT NULL,
+					PRIMARY KEY (host_id, idem_key))`,
+				`CREATE TABLE IF NOT EXISTS fleet_remote_tasks (
+					host_id TEXT NOT NULL,
+					remote_task_id TEXT NOT NULL,
+					local_task_id INTEGER NOT NULL DEFAULT 0,
+					title TEXT NOT NULL DEFAULT '',
+					branch TEXT NOT NULL DEFAULT '',
+					state TEXT NOT NULL DEFAULT '',
+					cost_usd REAL,
+					updated_at TIMESTAMP NOT NULL,
+					PRIMARY KEY (host_id, remote_task_id))`,
+			} {
+				if _, err := db.Exec(q); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
+		// ADR-0048 F1a: fleet provenance on existing rows -- which host a
+		// task/run came from. Pre-existing rows keep '' (local origin).
+		name: "fleet_origin_columns",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "tasks", "origin_host", "TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+			if err := addColumnIfMissing(db, "tasks", "origin_trace", "TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(db, "runs", "origin_host", "TEXT NOT NULL DEFAULT ''")
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

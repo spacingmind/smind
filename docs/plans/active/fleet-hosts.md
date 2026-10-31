@@ -105,7 +105,17 @@ Settled: ADR-0048 D1–D7 (Human) and S1–S18 (Supervisor defaults, Human may v
 ## Progress
 
 - 2026-10-31: ADR-0048 and this plan written (docs-only PR). No code started. Peer ledger for this item: peer-glm 0 runs, peer-sonnet 0 runs (design and docs written by the Lead).
+- 2026-10-31 F1a (identity and store), contract `fleet-hosts-f1a.contract.md`. peer-glm runs 1-2 (store; identity+config) failed at once with `429 Usage limit reached for 5 hour`, reset 14:20:58 +07; peer-glm waits (no Sonnet fallback). After the 14:21 reset the daemon's rate-limit failover re-ran the store run and it finished; identity+config, registry and two review-fix runs followed. Peer ledger F1a: peer-glm 5 runs ok (store 1 [+1 duplicate run I stopped], identity+config 1, registry 1, two fixes 2), 1 run lost to the 429 (resets 14:20:58 +07), peer-sonnet 0. Review fixes GLM made in one pass: revoke ordering, rollback test, foreign link host.
 
 ## Validation
 
 Docs-only PR: markdown links and the ADR/plan cross-references checked by hand; `task lint` run. Implementation PRs fill this section per AC with evidence (test names, mutation results, frames) as they land; the plan moves to `docs/plans/completed/` only when every AC is confirmed here.
+
+### F1a (identity and store) validation, 2026-10-31
+
+- AC1 (off): `TestFleetOffIsByteForByte`, `TestFleet_DisabledByDefaultAndDefaults`, `TestFleet_EnvCannotEnable`, `TestFleetMigration_ExistingRowsKeepEmptyOrigin`. The wsapi golden over the method map and the `smind host` CLI half are F1b (no wsapi/CLI change here).
+- AC2: `TestHostIDMatchesDeviceIDVector` (shared device_hello vector), `TestHostKeyFileModeAndCorruption`, `TestHostKeyConcurrentCreateOneIdentity`.
+- Schema: `TestFleetMigration_TablesAndColumns`, `TestFleetPair_*`, `TestFleetHost_NoSchemaForMesh`, audit/watch/idem/mirror/origin tests in `internal/store/fleet*_test.go`.
+- Grants/registry (AC5 data model half): `TestGrantValidate_Table`, `TestGrantValidateForApproval_RequiresWriteWorkspace`, `TestDefaultForwardGrant_S5`, `TestDefaultReverseGrant_S5`, `TestRegistryPairingDirectedLinksReverseOff`, `TestRegistryResponderAcceptApprove`, `TestRegistryEnableDisableReverse`, `TestRegistryAuthorize`, `TestRegistryMaxHosts`. The wire-level `TestFleetReverseDisabledByDefault` is F1b.
+- Mutations (all fail the named test): M1 hostId 25 chars; M2 regenerate on corrupt; M3 skip IsPrivate; M4 reverse grant gains create; M5 initiator inbound enabled; M6 Authorize ignores enabled; M7 LoadIdentity ignores Enabled; M8 commit on link failure (`TestFleetPair_RollsBackOnMidInsertFailure`); M9 no summary truncation; M10 no maxHosts range check. Not mutation-proven: revoke ordering (needs fault injection; `TestRegistryRevokeStateFirst` pins the invariant that a revoked state refuses even with an enabled link).
+- Commands: `go test ./...` ok; `go test -race` on fleet/store/config ok; `GOOS=windows go vet` on the touched packages ok; `task lint` ok; `task test` Go part ok, one unrelated web test (`desktop-chrome.test.tsx` macOS toggle) timed out at 5 s under load and passes alone.
