@@ -19,6 +19,8 @@ export interface FleetHost {
   hostId: string;
   alias: string;
   label: string;
+  /** Operator routing labels (caller-local, at most 16); absent on a daemon that predates them. */
+  labels?: Record<string, string>;
   state: FleetHostState;
   pendingApproval: boolean;
   link: FleetLinkState;

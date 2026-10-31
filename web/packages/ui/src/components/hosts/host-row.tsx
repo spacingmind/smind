@@ -7,6 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { FormError } from "@/components/ui/form-error";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
+import { rowsFromLabels } from "@/lib/fleet-labels";
 import { linkLabel, linkTone, type FleetHost } from "@/lib/fleet-types";
 import { Icons } from "@/lib/icons";
 
@@ -24,6 +25,7 @@ export function HostRow({
   error,
   onReview,
   onEditGrant,
+  onEditLabels,
   onRevoke,
   onRemove,
   onEnableReverse,
@@ -35,6 +37,8 @@ export function HostRow({
   error: string | null;
   onReview: (host: FleetHost) => void;
   onEditGrant: (host: FleetHost) => void;
+  /** Open the labels editor (approved hosts). */
+  onEditLabels: (host: FleetHost) => void;
   onRevoke: (host: FleetHost) => void;
   onRemove: (host: FleetHost) => void;
   /** Turn the reverse direction on: opens the narrower-grant confirmation in the parent. */
@@ -142,6 +146,31 @@ export function HostRow({
             )
           }
         />
+        {host.state === "approved" && (
+          <SettingsRow
+            testId={`host-labels-row-${alias}`}
+            className="flex-row items-center justify-between gap-3"
+            label="Labels"
+            description={
+              Object.keys(host.labels ?? {}).length > 0 ? (
+                <span data-testid={`host-labels-${alias}`} className="mt-1 flex flex-wrap gap-1">
+                  {rowsFromLabels(host.labels).map((l) => (
+                    <span key={l.key} className="whitespace-nowrap rounded-md bg-muted px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted">
+                      {l.key}:{l.value}
+                    </span>
+                  ))}
+                </span>
+              ) : (
+                <span data-testid={`host-labels-none-${alias}`}>Pick this host by tag, for example os:windows</span>
+              )
+            }
+            control={
+              <Button type="button" size="sm" variant="outline" data-testid={`host-edit-labels-${alias}`} onClick={() => onEditLabels(host)}>
+                Edit labels
+              </Button>
+            }
+          />
+        )}
         {host.pendingApproval && (
           <SettingsRow
             testId={`host-review-row-${alias}`}

@@ -33,6 +33,8 @@ export function fleetHost(over: Partial<FleetHost> = {}): FleetHost {
 export class FleetDaemon extends FakeUsageDaemon {
   hosts: FleetHost[] = [];
   off = false;
+  /** Makes `fleet.host.labels` refuse with this message, like the daemon's validation. */
+  labelsError: string | null = null;
   /** Answers `workspace.list` (the approve dialog's write-workspace picker); their spaces and tasks are empty. */
   workspaceRows: { ID: number; Title: string }[] = [];
 
@@ -78,6 +80,14 @@ export class FleetDaemon extends FakeUsageDaemon {
           return patch((h) => ({ ...h, inbound: { ...h.inbound, enabled: true } }));
         case "fleet.host.disable_reverse":
           return patch((h) => ({ ...h, inbound: { ...h.inbound, enabled: false } }));
+        case "fleet.host.labels": {
+          if (this.labelsError) throw new Error(this.labelsError);
+          const host = this.hosts.find((h) => h.hostId === p.hostId);
+          const next = { ...(host?.labels ?? {}), ...((p.set as Record<string, string>) ?? {}) };
+          for (const k of (p.remove as string[]) ?? []) delete next[k];
+          this.hosts = this.hosts.map((h) => (h.hostId === p.hostId ? { ...h, labels: next } : h));
+          return { host: host?.alias, hostId: p.hostId, labels: next };
+        }
         case "fleet.host.rename":
           return patch((h) => ({ ...h, alias: p.alias as string }));
         case "fleet.host.grant":
