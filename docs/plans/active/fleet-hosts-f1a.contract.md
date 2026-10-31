@@ -38,6 +38,7 @@ tests:
   - { name: TestFleetPair_AliasAndHostConflicts, run: "go test ./internal/store -run '^TestFleetPair_AliasAndHostConflicts$' -count=1", timeoutSec: 300 }
   - { name: TestFleetPair_RollsBackOnBadLink, run: "go test ./internal/store -run '^TestFleetPair_RollsBackOnBadLink$' -count=1", timeoutSec: 300 }
   - { name: TestFleetPair_RollsBackOnMidInsertFailure, run: "go test ./internal/store -run '^TestFleetPair_RollsBackOnMidInsertFailure$' -count=1", timeoutSec: 300 }
+  - { name: TestFleetPair_RejectsLinkForOtherHost, run: "go test ./internal/store -run '^TestFleetPair_RejectsLinkForOtherHost$' -count=1", timeoutSec: 300 }
   - { name: TestFleetHost_NoSchemaForMesh, run: "go test ./internal/store -run '^TestFleetHost_NoSchemaForMesh$' -count=1", timeoutSec: 300 }
   - { name: TestFleetAudit_TruncatesSummary, run: "go test ./internal/store -run '^TestFleetAudit_TruncatesSummary$' -count=1", timeoutSec: 300 }
   - { name: TestFleetAudit_SweepOnlyOld, run: "go test ./internal/store -run '^TestFleetAudit_SweepOnlyOld$' -count=1", timeoutSec: 300 }
