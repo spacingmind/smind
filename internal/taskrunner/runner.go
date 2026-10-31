@@ -924,8 +924,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		}
 		opts = append(opts, claudecode.WithCLIPath(path))
 	}
-	if len(spec.DisallowedTools) > 0 {
-		opts = append(opts, claudecode.WithDisallowedTools(spec.DisallowedTools...))
+	tools := append(append([]string(nil), spec.DisallowedTools...), RunContractFrom(ctx).DisallowedTools...)
+	if len(tools) > 0 {
+		opts = append(opts, claudecode.WithDisallowedTools(tools...))
 	}
 
 	rows, err := r.mcpRowsFor(ctx, workspaceID)

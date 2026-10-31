@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/providers"
 )
 
 const testRoleText = "You are the REVIEWER seat. Never merge."
@@ -53,6 +55,48 @@ func TestRunClaude_AppendsInstructions(t *testing.T) {
 	}
 	if v, ok := flagValue(args, "--append-system-prompt"); !ok || v != testRoleText {
 		t.Fatalf("resumed --append-system-prompt = %q (present %v)", v, ok)
+	}
+}
+
+func TestRunContract_DisallowedToolsReachClaudeOptions(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "echo-args")
+	r := claudeNativeRunner(t, wm)
+	ctx := WithRunContract(context.Background(), RunContract{DisallowedTools: []string{"Bash", "Edit"}})
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", testClaudeModel, events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if v, ok := flagValue(readArgs(t, task), "--disallowedTools"); !ok || v != "Bash,Edit" {
+		t.Fatalf("--disallowedTools = %q (present %v), want Bash,Edit", v, ok)
+	}
+}
+
+func TestRunContract_DisallowedToolsMergedWithProviderSpec(t *testing.T) {
+	t.Parallel()
+	r, _, task := newClaudeMcpEnv(t)
+	reg := providers.New()
+	if err := reg.SetCustom([]providers.Spec{{ID: "zai", Extends: providers.IDClaudeNative, DisallowedTools: []string{"WebSearch"}}}); err != nil {
+		t.Fatal(err)
+	}
+	WithProviderRegistry(reg)(r)
+	ctx := WithRunContract(context.Background(), RunContract{DisallowedTools: []string{"Bash", "Edit"}})
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, "zai", "hi", denyAllDecider{}, PermissionSettings{}, "", testClaudeModel, events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if v, ok := flagValue(readArgs(t, task), "--disallowedTools"); !ok || v != "WebSearch,Bash,Edit" {
+		t.Fatalf("--disallowedTools = %q (present %v), want the union WebSearch,Bash,Edit", v, ok)
 	}
 }
 
