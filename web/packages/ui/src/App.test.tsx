@@ -568,7 +568,9 @@ describe("App live events", () => {
     respond(socket, "run.list", null);
     await flush();
 
-    expect(screen.getByText("Welcome to sMind")).toBeInTheDocument();
+    expect(screen.getByText("Projects")).toBeInTheDocument();
+    expect(screen.getByText("Tasks")).toBeInTheDocument();
+    expect(screen.getByText("No tasks yet")).toBeInTheDocument();
   });
 });
 
