@@ -1,5 +1,5 @@
 import { type Page } from '@playwright/test'
-import { parkMouse } from '../fixtures/specs1'
+import { openTaskByLink } from '../fixtures/specs1'
 import { expect, test } from '../fixtures/test'
 
 const PROMPT = 'Update src/app.go to use the new value'
@@ -13,10 +13,8 @@ async function unseen(page: Page): Promise<number> {
 test('J10 approving a permission request lets the run continue and finish', async ({ app }, testInfo) => {
   const { page } = app
   const title = `j10-${testInfo.project.name}-${testInfo.repeatEachIndex}`
-  await app.createTask(title, { scenario: 'permission', prompt: PROMPT })
-  await app.openApp()
-  await app.openTask(title)
-  await parkMouse(page)
+  const t = await app.createTask(title, { scenario: 'permission', prompt: PROMPT })
+  await openTaskByLink(app, t, title)
   const card = page.getByTestId('permission-card')
   await expect(card).toBeVisible()
   await expect(page.getByTestId('app-main-content')).toContainText('src/app.go')
@@ -32,10 +30,8 @@ test('J10 approving a permission request lets the run continue and finish', asyn
 test('J11 denying a permission request ends the run without a stuck spinner', async ({ app }, testInfo) => {
   const { page } = app
   const title = `j11-${testInfo.project.name}-${testInfo.repeatEachIndex}`
-  await app.createTask(title, { scenario: 'permission', prompt: PROMPT })
-  await app.openApp()
-  await app.openTask(title)
-  await parkMouse(page)
+  const t = await app.createTask(title, { scenario: 'permission', prompt: PROMPT })
+  await openTaskByLink(app, t, title)
   await expect(page.getByTestId('permission-card')).toBeVisible()
   await page.getByTestId('chat-permission-option-2').click()
   await expect(page.getByTestId('app-main-content')).toContainText('Permission answer: reject_once')
