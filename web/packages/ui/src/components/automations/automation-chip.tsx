@@ -5,7 +5,8 @@ import type { Task } from "@/lib/types";
 /**
  * The pill that marks a task an automation started (ADR-0044): the automation
  * glyph plus the word "Automation", with the automation's name on hover (the
- * row itself stays one line). Renders nothing for a task with no link, so a
+ * row itself stays one line). Below 18rem of sidebar width the label hides and
+ * only the glyph stays, so the task title is never the thing that shrinks first. Renders nothing for a task with no link, so a
  * caller can drop it in unconditionally.
  */
 export function AutomationChip({
@@ -28,7 +29,7 @@ export function AutomationChip({
       )}
     >
       <Icons.automation aria-hidden className="size-3" />
-      Automation
+      <span className="@max-[18rem]/sb:hidden">Automation</span>
     </span>
   );
 }

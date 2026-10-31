@@ -39,7 +39,7 @@ export function PrAction({ taskId, workspaceId = null, title = "" }: { taskId: n
   const error = update.error ? describePrError(update.error, "update") : null;
 
   return (
-    <div className="relative flex flex-col items-end gap-1" data-testid="pr-action">
+    <div className="relative flex flex-col items-start gap-1 sm:items-end" data-testid="pr-action">
       <div className="flex items-center gap-2" title={reason}>
         {merged ? (
           <>
@@ -99,7 +99,7 @@ export function PrAction({ taskId, workspaceId = null, title = "" }: { taskId: n
         )}
       </div>
       {reason && (
-        <p id={reasonId} className="max-w-64 text-right text-ui-sm text-foreground-muted md:sr-only" data-testid="pr-action-reason">
+        <p id={reasonId} className="text-ui-sm text-foreground-muted sm:max-w-64 sm:text-right md:sr-only" data-testid="pr-action-reason">
           {reason}
         </p>
       )}

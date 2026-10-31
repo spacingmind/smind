@@ -1,6 +1,10 @@
 import { useCopyFeedback } from "@/components/timeline/message-actions";
 import { Button } from "@/components/ui/button";
+import { useDaemonManagedBy } from "@/hooks/use-attachment-limits";
 import { Icons } from "@/lib/icons";
+
+const RESTART_SERVICE = "smind service restart";
+const RESTART_MANUAL = "smind stop && smind serve";
 
 const RAILS = ["Each run has a budget cap", "An automation pauses itself after repeated failures", "Automations never merge or release"];
 
@@ -11,6 +15,8 @@ const RAILS = ["Each run has a budget cap", "An automation pauses itself after r
  */
 export function AutomationsOffCard() {
   const { copied, copy } = useCopyFeedback();
+  const managedBy = useDaemonManagedBy();
+  const service = managedBy === "launchd" || managedBy === "systemd";
   return (
     <div data-testid="automations-off-card" className="flex flex-col gap-3 rounded-xl border bg-card p-4">
       <p className="text-ui-base font-medium text-foreground">Automations are off</p>
@@ -43,8 +49,21 @@ export function AutomationsOffCard() {
         </Button>
       </div>
       <p className="text-ui-sm text-foreground">Then restart the daemon:</p>
-      <code className="rounded-lg border border-border bg-muted px-2 py-1.5 font-mono text-ui-sm text-foreground">smind stop && smind serve</code>
+      {managedBy === undefined ? (
+        <>
+          <p className="text-ui-sm text-foreground-muted">If you run it as a service:</p>
+          <RestartCommand>{RESTART_SERVICE}</RestartCommand>
+          <p className="text-ui-sm text-foreground-muted">Otherwise:</p>
+          <RestartCommand>{RESTART_MANUAL}</RestartCommand>
+        </>
+      ) : (
+        <RestartCommand>{service ? RESTART_SERVICE : RESTART_MANUAL}</RestartCommand>
+      )}
       <p className="text-ui-sm text-foreground-muted">This switch lives in config.yaml on purpose; it can't be changed from here.</p>
     </div>
   );
+}
+
+function RestartCommand({ children }: { children: string }) {
+  return <code className="rounded-lg border border-border bg-muted px-2 py-1.5 font-mono text-ui-sm text-foreground">{children}</code>;
 }

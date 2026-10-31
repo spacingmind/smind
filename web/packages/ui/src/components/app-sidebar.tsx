@@ -779,6 +779,7 @@ export function AppSidebar({
   const automationEmpty = !empty && automationOnly && viewTasks.length === 0;
 
   return (
+    <>
     <Sidebar collapsible="icon">
       {/*
        * Item 1 (collapsed dead space): the header renders two variants.
@@ -1101,7 +1102,9 @@ export function AppSidebar({
           onOpenInbox={onOpenInbox}
         />
       </SidebarFooter>
+    </Sidebar>
 
+      {/* Outside <Sidebar>: on mobile it is a Sheet that unmounts while closed. */}
       {client && (
         <>
           <CreateWorkspaceDialog
@@ -1220,7 +1223,7 @@ export function AppSidebar({
           )}
         </>
       )}
-    </Sidebar>
+    </>
   );
 }
 
