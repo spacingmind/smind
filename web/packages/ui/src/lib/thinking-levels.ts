@@ -38,5 +38,6 @@ export function thinkingLevelLabel(level: ThinkingLevel): string {
  * no thinking option, so the control is omitted rather than disabled.
  */
 export function supportsThinking(provider: string, providers?: readonly ServedProvider[]): boolean {
+  if (providers?.find((p) => p.id === provider)?.thinking === "hidden") return false;
   return providerRunner(provider, providers) === "claude-native";
 }
