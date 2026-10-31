@@ -372,6 +372,47 @@ func (s *Service) LinkState(hostID string) (state, code, detail string) {
 	return string(st.State), st.Code, st.Detail
 }
 
+// linkDownAfter is how long a link may be down before it is worth a human's
+// attention; shorter outages are ordinary reconnects.
+const linkDownAfter = 5 * time.Minute
+
+// LinkIssues lists the approved hosts whose outbound link is refused, or has
+// been down (or disabled by the peer) for more than five minutes.
+func (s *Service) LinkIssues() []wsapi.FleetLinkIssue {
+	hosts, err := s.o.Registry.List()
+	if err != nil {
+		return nil
+	}
+	now := s.o.Now()
+	var out []wsapi.FleetLinkIssue
+	for _, h := range hosts {
+		if h.State != registry.StateApproved {
+			continue
+		}
+		if o, _, err := s.o.Registry.Links(h.HostID); err != nil || !o.Enabled {
+			continue
+		}
+		st, since := s.o.Manager.Health(h.HostID)
+		if since.IsZero() {
+			since = st.Since
+		}
+		issue := wsapi.FleetLinkIssue{HostID: h.HostID, Alias: h.Alias, Since: since}
+		switch st.State {
+		case StateRefused:
+			issue.Kind, issue.Code, issue.Guidance = "refused", st.Code, st.Detail
+		case StateDown, StatePeerDisabled:
+			if st.Detail == detailNotLinked || now.Sub(since) <= linkDownAfter {
+				continue
+			}
+			issue.Kind = "down"
+		default:
+			continue
+		}
+		out = append(out, issue)
+	}
+	return out
+}
+
 // Forget stops the link to a removed host and drops its secrets.
 func (s *Service) Forget(hostID string) {
 	s.o.Manager.Drop(hostID)

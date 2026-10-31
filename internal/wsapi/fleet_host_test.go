@@ -20,6 +20,7 @@ import (
 	"github.com/spacingmind/smind/internal/fleet/identity"
 	"github.com/spacingmind/smind/internal/fleet/pairing"
 	"github.com/spacingmind/smind/internal/fleet/registry"
+	"github.com/spacingmind/smind/internal/inbox"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
@@ -32,6 +33,7 @@ type fakeFleetLinks struct {
 	forgotten   []string
 	notifyErr   error
 	routes      []FleetRouteParams
+	issues      []FleetLinkIssue
 }
 
 func (f *fakeFleetLinks) Invite(context.Context, FleetInviteParams) (FleetInviteResult, error) {
@@ -67,6 +69,12 @@ func (f *fakeFleetLinks) SetRoute(_ context.Context, p FleetRouteParams) error {
 }
 
 func (f *fakeFleetLinks) LinkState(string) (string, string, string) { return "down", "", "" }
+
+func (f *fakeFleetLinks) LinkIssues() []FleetLinkIssue {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.issues)
+}
 
 func (f *fakeFleetLinks) Forget(hostID string) {
 	f.mu.Lock()
@@ -734,5 +742,80 @@ func TestFleetHostViewShapeMatchesUIContract(t *testing.T) {
 	}
 	if v.Link != hostLinkDisabled || !v.PendingApproval || v.SAS != "123456" {
 		t.Fatalf("view = %+v", v)
+	}
+}
+
+func TestFleetHostsChangedPublishesOnMutation(t *testing.T) {
+	e := newFleetEnv(t)
+	sub := subscribeTopics(e.api, TopicFleetHostsChanged)
+	changed := func() int {
+		n := 0
+		for _, ev := range queued(sub) {
+			if ev.Topic == TopicFleetHostsChanged && ev.Payload == nil {
+				n++
+			}
+		}
+		return n
+	}
+	k := e.pairPending(t, "laptop", "123456")
+	admin := e.dial(t)
+
+	var list fleetHostListResult
+	if err := admin.Call(callCtx(), "fleet.host.list", nil, &list); err != nil || changed() != 0 {
+		t.Fatalf("list: err %v, %d events; a read must publish nothing", err, changed())
+	}
+	err := admin.Call(callCtx(), "fleet.host.approve", map[string]any{"hostId": k.HostID(), "sas": "123456", "writeWorkspaces": []int64{1}}, &fleetHostResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed() == 0 {
+		t.Fatal("approve published no fleet.hosts.changed")
+	}
+	n := changed()
+	if err := admin.Call(callCtx(), "fleet.host.rename", map[string]any{"hostId": k.HostID(), "alias": "mac"}, &fleetHostResult{}); err != nil {
+		t.Fatal(err)
+	}
+	if changed() <= n {
+		t.Fatal("rename published no fleet.hosts.changed")
+	}
+	// A host connection coming up is a change too.
+	n = changed()
+	if _, err := e.doHello(t, e.dial(t), k); err != nil {
+		t.Fatal(err)
+	}
+	if changed() <= n {
+		t.Fatal("a host connecting published no fleet.hosts.changed")
+	}
+	// Before SetFleet the method is a no-op.
+	(&API{}).FleetHostsChanged()
+}
+
+func TestInboxHostLinkIssuesWiredWhenFleetOn(t *testing.T) {
+	e := newFleetEnv(t)
+	e.links.mu.Lock()
+	e.links.issues = []FleetLinkIssue{{HostID: "h1", Alias: "mac", Kind: "refused", Code: "peer_identity_changed", Guidance: "re-pair", Since: time.Now().Add(-time.Minute)}}
+	e.links.mu.Unlock()
+
+	kinds := func() []string {
+		items, err := e.api.inbox.svc.List(inbox.Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, it := range items {
+			out = append(out, it.Kind)
+		}
+		return out
+	}
+	old := configFleetEnabled
+	t.Cleanup(func() { configFleetEnabled = old })
+
+	configFleetEnabled = func() bool { return true }
+	if got := kinds(); !slices.Contains(got, inbox.KindHostRefused) {
+		t.Fatalf("inbox kinds with fleet on = %v, want %s", got, inbox.KindHostRefused)
+	}
+	configFleetEnabled = func() bool { return false }
+	if got := kinds(); slices.Contains(got, inbox.KindHostRefused) {
+		t.Fatalf("inbox kinds with fleet off = %v, want no host rows", got)
 	}
 }

@@ -507,3 +507,91 @@ func TestServiceSendsReverseStateOnConnect(t *testing.T) {
 		})
 	}
 }
+
+// fakeClock is a settable clock shared by a manager and a service.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+func TestServiceLinkIssuesRefusedAndDownAfterFiveMinutes(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	reg := registry.New(st, 10)
+	self, down, refused := newKey(t), newKey(t), newKey(t)
+	clk := &fakeClock{t: time.Date(2026, 10, 31, 10, 0, 0, 0, time.UTC)}
+	hostID := func(k *identity.Key, alias string) string {
+		tr := Transport{Kind: KindDirect, URL: "ws://127.0.0.1:1"}
+		h, err := reg.PairAsInitiator(k.Public(), alias, "", tr.JSON())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.MarkApproved(h.HostID); err != nil {
+			t.Fatal(err)
+		}
+		return h.HostID
+	}
+	downID, refusedID := hostID(down, "downer"), hostID(refused, "refuser")
+	mgr := NewManager(ManagerOptions{
+		Key: self, Registry: reg, Version: "test", Now: clk.now,
+		BackoffMin: time.Millisecond, BackoffMax: tinyMax, ApprovalPoll: time.Hour,
+		Dial: func(_ context.Context, _ Transport, id string) (Conn, error) {
+			if id == downID {
+				return nil, errors.New("connection refused")
+			}
+			f := newCallee(refused)
+			f.fleetV = 2
+			return f, nil
+		},
+	})
+	t.Cleanup(mgr.Close)
+	svc := NewService(ServiceOptions{Key: self, Registry: reg, Manager: mgr, Window: pairing.NewWindow(nil), Version: "test", Now: clk.now})
+
+	mgr.Ensure(downID)
+	mgr.Ensure(refusedID)
+	waitStatus(t, mgr, downID, StateDown)
+	waitStatus(t, mgr, refusedID, StateRefused)
+
+	byKind := func() map[string]wsapi.FleetLinkIssue {
+		out := map[string]wsapi.FleetLinkIssue{}
+		for _, is := range svc.LinkIssues() {
+			out[is.Kind] = is
+		}
+		return out
+	}
+	got := byKind()
+	if len(got) != 1 || got["refused"].HostID != refusedID || got["refused"].Code != hello.CodeVersionUnsupported || got["refused"].Alias != "refuser" || got["refused"].Guidance == "" {
+		t.Fatalf("issues right away = %+v, want only the refusal", got)
+	}
+	clk.advance(4 * time.Minute)
+	if got := byKind(); len(got) != 1 {
+		t.Fatalf("issues after 4 minutes = %+v, want only the refusal", got)
+	}
+	clk.advance(2 * time.Minute)
+	got = byKind()
+	if got["down"].HostID != downID || got["down"].Alias != "downer" || len(got) != 2 {
+		t.Fatalf("issues after 6 minutes = %+v, want refusal and down", got)
+	}
+	// An outbound link that is off is nobody's issue.
+	if err := reg.SetOutboundEnabled(downID, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := byKind(); len(got) != 1 {
+		t.Fatalf("issues with outbound off = %+v", got)
+	}
+}

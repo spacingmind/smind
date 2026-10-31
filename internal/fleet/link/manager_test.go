@@ -247,3 +247,45 @@ func TestManagerTestDoesNotEvictLiveLink(t *testing.T) {
 		t.Fatal("live conn gone after Test")
 	}
 }
+
+func TestManagerOnChangeFiresOnStatusChange(t *testing.T) {
+	e := newMgrEnv(t)
+	var (
+		mu      sync.Mutex
+		changes int
+		m       *Manager
+	)
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return changes
+	}
+	m = NewManager(ManagerOptions{
+		Key: e.self, Registry: e.reg, Dial: e.dial, Version: "test",
+		BackoffMin: time.Millisecond, BackoffMax: tinyMax, ApprovalPoll: 5 * time.Millisecond,
+		OnChange: func() {
+			// Reading the status here would deadlock if the hook ran under
+			// the manager's lock.
+			_ = m.Status(e.hostID)
+			mu.Lock()
+			changes++
+			mu.Unlock()
+		},
+	})
+	t.Cleanup(m.Close)
+
+	m.Ensure(e.hostID)
+	waitStatus(t, m, e.hostID, StateConnected)
+	if count() == 0 {
+		t.Fatal("OnChange did not fire when the link connected")
+	}
+	before := count()
+	m.Drop(e.hostID)
+	if count() <= before {
+		t.Fatal("OnChange did not fire on Drop")
+	}
+	// A nil hook is fine.
+	m2 := e.manager(t)
+	m2.Ensure(e.hostID)
+	waitStatus(t, m2, e.hostID, StateConnected)
+}

@@ -50,6 +50,8 @@ func newFleet(srv *server.Server, cfg config.Config, home, version string, db *s
 		Key: key, Registry: reg, Secrets: secrets, Version: version,
 		BackoffMin: time.Duration(cfg.Fleet.ObservationBackoffMinSeconds) * time.Second,
 		BackoffMax: time.Duration(cfg.Fleet.ObservationBackoffMaxSeconds) * time.Second,
+		// FleetHostsChanged is a no-op until SetFleet below has run.
+		OnChange: srv.API().FleetHostsChanged,
 	})
 	so := link.ServiceOptions{
 		Key: key, Registry: reg, Secrets: secrets, Manager: mgr, Window: window, Version: version,

@@ -81,6 +81,16 @@ type FleetLinks interface {
 	// Forget stops dialing and drops the secrets and relay device of a
 	// removed host.
 	Forget(hostID string)
+	// LinkIssues lists the outbound links a human should look at: refused
+	// ones, and ones down for long enough.
+	LinkIssues() []FleetLinkIssue
+}
+
+// FleetLinkIssue is one outbound link that needs attention. Kind is
+// "refused" or "down"; Code and Guidance describe a refusal.
+type FleetLinkIssue struct {
+	HostID, Alias, Kind, Code, Guidance string
+	Since                               time.Time
 }
 
 // FleetInviteParams is the ask behind fleet.host.invite: how long the
@@ -285,6 +295,7 @@ type fleetOKResult struct {
 // still compare for a pending pairing.
 type fleetHost struct {
 	opts FleetOptions
+	bus  *eventBus
 
 	mu    sync.Mutex
 	conns map[string]map[*conn]struct{}
@@ -335,8 +346,11 @@ func (a *API) SetFleet(o FleetOptions) {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	f := &fleetHost{opts: o, conns: map[string]map[*conn]struct{}{}, sas: map[string]string{}}
+	f := &fleetHost{opts: o, bus: a.bus, conns: map[string]map[*conn]struct{}{}, sas: map[string]string{}}
 	a.fleet = f
+	if a.inbox != nil {
+		a.inbox.setLinkIssues(fleetInboxLinkIssues(o.Links, func() bool { return configFleetEnabled() }))
+	}
 	a.hs[hello.MethodChallenge] = f.handleChallenge
 	a.hs[hello.MethodHello] = f.handleHello
 	a.hs[hello.MethodPairRequest] = f.handlePairRequest
@@ -354,6 +368,22 @@ func (a *API) SetFleet(o FleetOptions) {
 	a.hs["fleet.host.disable_reverse"] = fleetLocalOnly("fleet.host.disable_reverse", f.handleHostDisableReverse)
 	a.hs["fleet.host.test"] = fleetLocalOnly("fleet.host.test", f.handleHostTest)
 	a.hs["fleet.host.route"] = fleetLocalOnly("fleet.host.route", f.handleHostRoute)
+}
+
+// FleetHostsChanged tells subscribers that the host list or a link changed
+// (event topic fleet.hosts.changed, empty payload). It is a no-op until
+// SetFleet ran, and safe to call from any goroutine afterwards.
+func (a *API) FleetHostsChanged() {
+	if a.fleet == nil {
+		return
+	}
+	a.fleet.changed()
+}
+
+func (f *fleetHost) changed() {
+	if f.bus != nil {
+		f.bus.Publish(Event{Topic: TopicFleetHostsChanged})
+	}
 }
 
 // FleetCloseHost closes every live host-principal connection of hostID, so
@@ -378,18 +408,20 @@ func (f *fleetHost) registerConn(hostID string, c *conn) {
 	for pc := range prev {
 		_ = pc.tr.Close()
 	}
+	f.changed()
 }
 
 // dropConn removes c from hostID's live connections (idempotent).
 func (f *fleetHost) dropConn(hostID string, c *conn) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if set := f.conns[hostID]; set != nil {
 		delete(set, c)
 		if len(set) == 0 {
 			delete(f.conns, hostID)
 		}
 	}
+	f.mu.Unlock()
+	f.changed()
 }
 
 // closeHostConns closes every live connection of hostID.
@@ -541,6 +573,7 @@ func (f *fleetHost) handlePairRequest(_ context.Context, rc *requestContext, raw
 	pr.kind = "pending"
 	pr.sas = sas
 	rc.conn.identMu.Unlock()
+	f.changed()
 	return fleetPairRequestResult{HostID: h.HostID, Alias: h.Alias, State: registry.StatePending, SAS: sas}, nil
 }
 
@@ -570,6 +603,7 @@ func (f *fleetHost) handleLinkState(_ context.Context, rc *requestContext, raw j
 		return nil, fmt.Errorf("%s: %w", method, err)
 	}
 	f.opts.Links.PeerReverseChanged(pr.hostID, on)
+	f.changed()
 	return fleetLinkStateResult{OK: true}, nil
 }
 
@@ -752,6 +786,7 @@ func (f *fleetHost) handleHostInvite(ctx context.Context, _ *requestContext, raw
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", method, err)
 	}
+	f.changed()
 	return res, nil
 }
 
@@ -771,6 +806,7 @@ func (f *fleetHost) handleHostAdd(ctx context.Context, _ *requestContext, raw js
 		v.SAS = res.SAS
 		out.Host = &v
 	}
+	f.changed()
 	return out, nil
 }
 
@@ -826,7 +862,9 @@ func (f *fleetHost) handleHostApprove(_ context.Context, _ *requestContext, raw 
 	f.mu.Lock()
 	delete(f.sas, h.HostID)
 	f.mu.Unlock()
-	return f.hostResult(h.HostID)
+	res, err := f.hostResult(h.HostID)
+	f.changed()
+	return res, err
 }
 
 func (f *fleetHost) handleHostReject(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
@@ -839,6 +877,7 @@ func (f *fleetHost) handleHostReject(_ context.Context, _ *requestContext, raw j
 		return nil, fleetHostError(method, err)
 	}
 	f.closeHostConns(h.HostID)
+	f.changed()
 	return fleetOKResult{OK: true}, nil
 }
 
@@ -855,7 +894,9 @@ func (f *fleetHost) handleHostRename(_ context.Context, _ *requestContext, raw j
 	if err := f.opts.Registry.Rename(h.HostID, p.Alias); err != nil {
 		return nil, fleetHostError(method, err)
 	}
-	return f.hostResult(h.HostID)
+	res, err := f.hostResult(h.HostID)
+	f.changed()
+	return res, err
 }
 
 func (f *fleetHost) handleHostGrant(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
@@ -871,7 +912,9 @@ func (f *fleetHost) handleHostGrant(_ context.Context, _ *requestContext, raw js
 	if err := f.opts.Registry.SetGrant(h.HostID, p.Grant); err != nil {
 		return nil, fleetHostError(method, err)
 	}
-	return f.hostResult(h.HostID)
+	res, err := f.hostResult(h.HostID)
+	f.changed()
+	return res, err
 }
 
 // handleHostRm removes a host: an approved host is revoked first (the
@@ -902,6 +945,7 @@ func (f *fleetHost) handleHostRm(_ context.Context, _ *requestContext, raw json.
 	f.mu.Lock()
 	delete(f.sas, h.HostID)
 	f.mu.Unlock()
+	f.changed()
 	return fleetOKResult{OK: true}, nil
 }
 
@@ -922,7 +966,9 @@ func (f *fleetHost) handleHostRevoke(_ context.Context, _ *requestContext, raw j
 	}
 	f.closeHostConns(h.HostID)
 	f.opts.Links.Forget(h.HostID)
-	return f.hostResult(h.HostID)
+	res, err := f.hostResult(h.HostID)
+	f.changed()
+	return res, err
 }
 
 // handleHostEnableReverse lights the inbound link and tells the peer. The
@@ -945,6 +991,7 @@ func (f *fleetHost) handleHostEnableReverse(ctx context.Context, _ *requestConte
 	if err != nil {
 		return nil, err
 	}
+	f.changed()
 	return fleetHostActionResult{Host: &v, Warning: warning}, nil
 }
 
@@ -966,6 +1013,7 @@ func (f *fleetHost) handleHostDisableReverse(ctx context.Context, _ *requestCont
 	if err != nil {
 		return nil, err
 	}
+	f.changed()
 	return fleetHostActionResult{Host: &v}, nil
 }
 
@@ -998,5 +1046,6 @@ func (f *fleetHost) handleHostRoute(ctx context.Context, _ *requestContext, raw 
 	if err != nil {
 		return nil, fleetHostError(method, err)
 	}
+	f.changed()
 	return fleetOKResult{OK: true}, nil
 }

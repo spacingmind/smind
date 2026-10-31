@@ -62,6 +62,10 @@ type ManagerOptions struct {
 	// OnConnected, if set, is called in the host's loop goroutine right after
 	// a successful handshake with an active peer; it must not block.
 	OnConnected func(hostID string, c Conn)
+	// OnChange, if set, is called whenever a host's Status changes (state,
+	// code or detail) and when a host is dropped. It never runs under the
+	// manager's lock and must not block.
+	OnChange func()
 }
 
 // Manager keeps one outbound link per host alive: it dials, runs the
@@ -82,6 +86,11 @@ type hostLoop struct {
 	running bool
 	status  Status
 	conn    Conn
+	// unhealthySince is when the link last stopped being connected: set
+	// when the loop starts, cleared on connect, kept across the
+	// connecting/down flicker of retries. It is what "down for N minutes"
+	// counts from.
+	unhealthySince time.Time
 }
 
 // NewManager returns a manager; no link is dialed until Ensure.
@@ -151,7 +160,8 @@ func (m *Manager) Ensure(hostID string) {
 		return
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
-	l := &hostLoop{cancel: cancel, running: true, status: Status{State: StateConnecting, Since: m.o.Now()}}
+	now := m.o.Now()
+	l := &hostLoop{cancel: cancel, running: true, status: Status{State: StateConnecting, Since: now}, unhealthySince: now}
 	m.loops[hostID] = l
 	m.wg.Add(1)
 	go m.run(ctx, hostID, l)
@@ -172,6 +182,27 @@ func (m *Manager) Drop(hostID string) {
 	if c != nil {
 		_ = c.Close()
 	}
+	if l != nil {
+		m.changed()
+	}
+}
+
+// changed runs the OnChange hook, if any; call it without holding m.mu.
+func (m *Manager) changed() {
+	if m.o.OnChange != nil {
+		m.o.OnChange()
+	}
+}
+
+// Health returns the host's status and since when its link has not been
+// connected (the zero time when it is connected or has no loop).
+func (m *Manager) Health(hostID string) (Status, time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if l, ok := m.loops[hostID]; ok {
+		return l.status, l.unhealthySince
+	}
+	return Status{State: StateDown, Detail: detailNotLinked, Since: m.o.Now()}, time.Time{}
 }
 
 // Status returns the host's current link status.
@@ -238,8 +269,19 @@ func (m *Manager) Close() {
 func (m *Manager) setStatus(l *hostLoop, s Status) {
 	s.Since = m.o.Now()
 	m.mu.Lock()
+	prev := l.status
 	l.status = s
+	switch {
+	case s.State == StateConnected:
+		l.unhealthySince = time.Time{}
+	case l.unhealthySince.IsZero():
+		l.unhealthySince = s.Since
+	}
+	changed := prev.State != s.State || prev.Code != s.Code || prev.Detail != s.Detail
 	m.mu.Unlock()
+	if changed {
+		m.changed()
+	}
 }
 
 // attemptResult is the outcome of one dial plus handshake.
