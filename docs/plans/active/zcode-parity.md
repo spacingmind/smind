@@ -153,6 +153,31 @@ T = token/class usage):
 Suggested stage split: (1) settings: 1, 2, 9–12; (2) shell+sidebar: 4, 8, 16;
 (3) composer + home: 3, 6, 7, 17; (4) dialogs/menus: 5, 6; (5) timeline: 13–15.
 
+## Stage 2 audit: ranked diff list (handed over 2026-10-30)
+
+ZCode ran for real (empty state only: no model, so no task page, tool cards or dialogs on its side; those are read from DESIGN.md and component structure). Sheets L = ZCode, R = smind. 390 gives no ZCode parity target (its web build is not responsive).
+
+| # | Screen | What differs | Size | Stage |
+|---|---|---|---|---|
+| 1 | Settings (every page) | H1 + subtitle, centred ~510px column, rounded-xl row cards | L | 3a (done) |
+| 2 | Settings nav | grouped sections, rounded-lg selected pill, back pill | S | 3a (done) |
+| 3 | Home / new-task landing | brand mark, greeting, project chip, big composer card | L | 3c (done) |
+| 4 | Light shell frame | floating white rounded panel, gap, soft shadow | M | 3b (done) |
+| 5 | Command palette | icon search field, filter chips, grouped rows with leading icon and kbd hints, rounded-xl | M | 3d (this PR) |
+| 6 | Composer / generic menus | item = icon + title + description + check, rounded-xl popover | M | 3c + 3d |
+| 7 | Composer shell | card, bottom bar, circular send | M | 3c (done) |
+| 8 | Sidebar structure | quick actions, "Task list" header | L | 3b (done) |
+| 9 | Shortcuts page | table with kbd chips, scope, actions | M | 3a (done) |
+| 10-12 | Empty states, usage, form controls | cards, stat strip, switch/select | S-M | 3a (done) |
+| 13 | Timeline tool cards | bordered rounded-xl cards vs smind dense rows (needs a Human decision) | L | timeline stage |
+| 14 | Timeline plan update | "Unrecognised event: plan" (feature gap) | M | timeline stage |
+| 15 | Assistant markdown | heading/inline-code spacing | S | timeline stage |
+| 16 | Window controls | back/forward, overlay titlebar | M | Stage 5 |
+| 17 | Banners / notices | notice banner row | S | 3c (done) |
+| 18 | Task header | not captured | ? | timeline stage |
+
+Not captured by the audit: dialogs (new workspace, confirm, permission) on either side; transitions. Stage 3d captures them on the smind side.
+
 ## Stage 3 — component ports
 
 One PR per area, in audit-rank order: shell+sidebar, timeline, composer,
@@ -337,6 +362,43 @@ Audit frames only (ZCode sources named by the audit: `WelcomeScreen.tsx`,
 
 None: reference-only reimplementation.
 
+## Stage 3d — Dialogs + menus (audit 5 and the generic part of 6)
+
+One PR, reference-only (shape from the audit frames `zc_{light,dark}_1280_palette`; no ZCode source copied, no "Ported from" headers). No daemon/wsapi change, no new commands, no new shortcuts. Palette behaviour (Mod+K toggle with the modal keyboard lock, arrow/Enter/Escape, pointer-follows-highlight, focus restore, registry contributions) stays.
+
+### References (ZCode files consulted, read-only)
+
+Audit frames only; ZCode sources named by the audit: `command-center/CommandCenterDialog.tsx`, `components/ui/command.tsx`, `components/ui/dropdown-menu.tsx`.
+
+### Design decisions
+
+- Groups stay smind's own (Tasks, Workspaces, Open, Chats, Files, Actions, Commands, Settings, Agents). Chips are derived by a pure `paletteCategory(group)`: **All**, **Tasks** (Tasks, Workspaces, Chats), **Actions** (everything that is not Tasks/Files), **Files** (Files). A chip with no commands is not shown (so Files is absent without a task). No ZCode "Suggested/Panels/Configure" groups are invented.
+- Leading icon per row comes from an optional `Command.icon` (registry key) falling back to a per-group icon in `palette/categories.ts`; every glyph through `lib/icons.ts`.
+- Kbd hints stay `formatCombo` of the live binding, rendered by one shared `ui/kbd.tsx` (also used by the sidebar quick action and the shortcuts dialog).
+- Dialog anatomy: `DialogContent` keeps its Radix focus trap/Escape/overlay; header, `DialogBody`, footer spacing and close affordance are defined once in `ui/dialog.tsx` and `confirm-dialog.tsx` follows. Menu anatomy: `DropdownMenuItem`/`ContextMenuItem` get optional `icon`, `description`, `shortcut` (children unchanged when absent) and `rounded-lg`; content `rounded-xl`.
+
+### Acceptance criteria
+
+- **AC1 (item 5)** The palette has a pill search field with the registry search icon, filter chips (All/Tasks/Actions/Files, only non-empty categories, `role="tab"`-style buttons with `aria-pressed`), groups with sentence-case headings, a leading icon on every row, a right-aligned kbd hint (live shortcut), and a `rounded-xl` dialog. Choosing a chip narrows the list (and the search composes with it); an empty result shows the existing empty message. Arrow wrap, Enter, Escape, Mod+K toggle and focus restore are unchanged.
+- **AC2** `ui/kbd.tsx` is the one kbd chip; palette, sidebar quick action and shortcuts dialog use it.
+- **AC3 (generic dialogs)** `ui/dialog.tsx` defines the anatomy once (`rounded-xl`, header/body/footer padding, close button hit area and focus ring); `ConfirmDialog`, new workspace, new task, archive, rename dialogs inherit it with no per-dialog padding overrides; permission request card keeps its behaviour and adopts the same radius and spacing tokens.
+- **AC4 (menus)** `DropdownMenuItem` and `ContextMenuItem` accept `icon`, `description`, `shortcut`; the sidebar tree context menu and the task/workspace "more" menus use icons; no behaviour change.
+- **AC5 (evidence)** Audit-format sheets (L = ZCode raw frame, R = smind after) in `/tmp/steward4/zcode-audit/after/dialogs-menus/`: palette (empty query, query, chip-filtered, empty result), each dialog, menus; 1280 light and dark, dialogs at 390; transition frames. All looked at.
+- **AC6** `task lint` + `task test` green on the final head; one mutation per load-bearing test.
+
+### Named tests
+
+- `palette/categories.test.ts`: `paletteCategory maps groups to chips`, `unknown groups fall into Actions`, `iconForGroup returns a registry key for every known group`
+- `components/ui/kbd.test.tsx`: `renders each key as a cap`, `renders a mac combo as one cap`
+- `components/command-palette.test.tsx` (extended): `shows a leading icon on every row`, `chips filter by category`, `chips without commands are hidden`, `chip and query compose`, `kbd hint shows the live shortcut`
+- `components/ui/menu-item.test.tsx`: `renders icon, title, description and shortcut`, `plain children render unchanged`
+- `components/ui/dialog.test.tsx`: `content uses the shared anatomy classes`, `footer and body slots render`
+- Existing dialog/menu suites (`confirm-dialog`, `crud-dialogs`, `tree-action-dialogs`, `archive-dialog`, `permission-card`) stay green unchanged.
+
+### Ported files and sources
+
+None: reference-only reimplementation.
+
 ## Stage 4 — mobile tokens
 
 Port the Stage 1 table into the Expo app's theme (`mobile/`), own PR, after 1.
@@ -363,7 +425,8 @@ buttons, sidebar toggle position), own PR. Prior art:
 - [x] Stage 3a settings (this PR): shell, nav, row-card primitives, Switch, Shortcuts table, empty cards, usage tray applied to General, Appearance, Notifications, Shortcuts, GitHub, Agents, MCP, Skills, Plugins, Automations, Providers, Usage, Connection.
 - [x] Stage 3b shell + sidebar (this PR): light framed content panel, sidebar quick actions, "Task list" header, `newTask` icon.
 - [x] Stage 3c composer + home landing (this PR): `NoticeBanner`, rich select items for the mode menu, shared composer shell, home landing with project chip.
-- [ ] Stage 3 PRs (timeline, dialogs/menus).
+- [~] Stage 3d dialogs + menus (this PR): in progress.
+- [ ] Stage 3 PR (timeline).
 - [ ] Stage 4.
 - [ ] Stage 5.
 
