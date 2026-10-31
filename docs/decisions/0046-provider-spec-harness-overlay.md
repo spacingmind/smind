@@ -266,3 +266,23 @@ All ten decisions above are taken as defaults; the three where a veto would cost
 2. **Scrub on by default for claude-code instances that hold a key** (section 7). It forces permission mode `default` per the CLI's own text, which may fight smind's auto modes;
    PR2 measures it. Recommendation: enable only if PR2's validation passes; otherwise ship without it and document the exposure.
 3. **Private `CLAUDE_CONFIG_DIR` by default** (Decision 6). Costs the user's `~/.claude` skills/CLAUDE.md/MCP in compatible instances until they flip the toggle.
+
+## Amendment 2026-10-31: provider.updateInstance
+
+Human-approved 2026-10-31 (the follow-up PR6 left open). An existing `providers.custom` instance, whether made from a recipe, from Settings or by hand, can now have its
+**models**, **additionalModels**, **disallowedTools** and **inheritClaudeConfig** changed without editing `config.yaml` by hand.
+
+- **RPC** `provider.updateInstance {id, models?, additionalModels?, disallowedTools?, inheritClaudeConfig?}`. A present field is applied, an empty list or `false` removes the
+  key, an absent field is untouched; nothing present is an error. The resulting entry is validated with the config-load rules (`ValidateCustomProviders`), so the errors name the
+  field (`providers.custom[1].additionalModels: ...`) and `models` + `additionalModels` stay exclusive (a client switching mode sends the new list and `[]` for the other).
+  Applied live like `provider.reload` (atomic: an invalid file changes nothing), then `provider.updated` is published. Keys stay on `provider.setSecret`/`clearSecret`; `env`,
+  `command`, `endpoint` and `label` are not editable here.
+- **Authority**: human-only, like `provider.addInstance`: refused for run-scoped (agent) callers, on the plugin never-list, unreachable from automation. It writes config and
+  changes what runs launch with (a tool list that gates what an agent may do), so an agent must never edit it.
+- **Minimal config edit**: `mutate` (used by `addInstance`) decodes and re-encodes the whole file, which keeps comments but drops blank lines and re-indents. For this RPC the
+  writer instead patches the bytes of the changed `key: value` blocks of the one entry; every other byte is identical. The patched file is parsed again and must decode to the
+  expected entry and still load before the atomic write. Entries it cannot locate exactly (flow style `- {id: x}`, a key on the `- ` line, a block scalar in a changed field) are
+  refused with a message to edit by hand: we do not guess.
+- **`provider.list`** serves `instance: {models, additionalModels, disallowedTools, inheritClaudeConfig}` for an instance (its own overlay as configured, not the merged catalog),
+  additive.
+- **Break**: none (additive RPC and wire field). No installed base to migrate.
