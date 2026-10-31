@@ -52,12 +52,17 @@ func fleetDirectionOK(d string) bool {
 }
 
 // CreateFleetPair inserts a host and all of its links in one transaction:
-// either the whole pair lands or nothing does. Duplicate host ids and
-// aliases are detected by looking for the row before inserting (inside the
-// transaction, so a concurrent writer cannot slip between check and
-// insert) rather than by parsing the driver's constraint error.
+// either the whole pair lands or nothing does. A link naming another host
+// is refused before the transaction opens -- a pair attaches links to its
+// own host only. Duplicate host ids and aliases are detected by looking
+// for the row before inserting (inside the transaction, so a concurrent
+// writer cannot slip between check and insert) rather than by parsing the
+// driver's constraint error.
 func (s *Store) CreateFleetPair(h FleetHost, links []FleetLink) error {
 	for _, l := range links {
+		if l.HostID != h.HostID {
+			return fmt.Errorf("create fleet pair %s: link host %q is not this pair's host", h.HostID, l.HostID)
+		}
 		if !fleetDirectionOK(l.Direction) {
 			return fmt.Errorf("create fleet pair %s: link direction %q", h.HostID, l.Direction)
 		}

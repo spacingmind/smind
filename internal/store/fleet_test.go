@@ -267,6 +267,50 @@ func TestFleetPair_RollsBackOnBadLink(t *testing.T) {
 	}
 }
 
+func TestFleetPair_RollsBackOnMidInsertFailure(t *testing.T) {
+	t.Parallel()
+
+	s := openFleetStore(t)
+	h, _ := fleetPair("h1", "alice")
+	// The second link trips PRIMARY KEY(host_id, direction) only after the
+	// host row and the first link were inserted inside the transaction, so
+	// what is under test is the rollback itself, not a pre-check.
+	links := []FleetLink{
+		{HostID: "h1", Direction: FleetOutbound, Enabled: true},
+		{HostID: "h1", Direction: FleetOutbound, Enabled: false},
+	}
+	if err := s.CreateFleetPair(h, links); err == nil {
+		t.Fatal("CreateFleetPair() with a duplicated direction succeeded, want error")
+	}
+	if _, err := s.GetFleetHost("h1"); !errors.Is(err, ErrFleetNotFound) {
+		t.Fatalf("host h1 = %v, want not found", err)
+	}
+	if rows, err := s.ListFleetLinks("h1"); err != nil || len(rows) != 0 {
+		t.Fatalf("links = %d rows, %v; want 0", len(rows), err)
+	}
+	if n, err := s.CountFleetHosts(); err != nil || n != 0 {
+		t.Fatalf("CountFleetHosts() = %d, %v; want 0", n, err)
+	}
+}
+
+func TestFleetPair_RejectsLinkForOtherHost(t *testing.T) {
+	t.Parallel()
+
+	s := openFleetStore(t)
+	h, _ := fleetPair("h1", "alice")
+	links := []FleetLink{{HostID: "h2", Direction: FleetOutbound, Enabled: true}}
+	err := s.CreateFleetPair(h, links)
+	if err == nil || !strings.Contains(err.Error(), "link host") {
+		t.Fatalf("CreateFleetPair() with a foreign link = %v, want an error naming the link host", err)
+	}
+	if _, err := s.GetFleetHost("h1"); !errors.Is(err, ErrFleetNotFound) {
+		t.Fatalf("host h1 = %v, want not found", err)
+	}
+	if n, err := s.CountFleetHosts(); err != nil || n != 0 {
+		t.Fatalf("CountFleetHosts() = %d, %v; want 0", n, err)
+	}
+}
+
 func TestFleetLink_PutUpsertAndUnknownHost(t *testing.T) {
 	t.Parallel()
 
