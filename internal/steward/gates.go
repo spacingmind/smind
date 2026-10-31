@@ -315,19 +315,38 @@ func gatePRHygiene(in Inputs) Gate {
 	if !conventionalTitle.MatchString(in.PR.Title) {
 		return Gate{State: GateFail, Detail: "title is not Conventional Commits"}
 	}
-	body := strings.ToLower(in.PR.Body)
-	hasValidated := strings.Contains(body, "validat")
-	hasNotDone := strings.Contains(body, "not done") || strings.Contains(body, "not verified")
-	if !hasValidated || !hasNotDone {
+	if !bodyHasValidated(in.PR.Body) || !bodyHasNotDone(in.PR.Body) {
 		return Gate{State: GateFail, Detail: "body lacks validated / not done sections"}
 	}
 	return Gate{State: GatePass}
+}
+
+// bodyHasValidated reports whether the PR body claims a validation section.
+func bodyHasValidated(body string) bool {
+	return strings.Contains(strings.ToLower(body), "validat")
+}
+
+// bodyHasNotDone reports whether the PR body admits a not-done or
+// not-verified section.
+func bodyHasNotDone(body string) bool {
+	b := strings.ToLower(body)
+	return strings.Contains(b, "not done") || strings.Contains(b, "not verified")
 }
 
 func gateScope(in Inputs, paths []string) Gate {
 	if !in.HasContract {
 		return Gate{State: GateNA}
 	}
+	outside := outsideScope(in, paths)
+	if len(outside) == 0 {
+		return Gate{State: GatePass}
+	}
+	return Gate{State: GateFail, Detail: strings.Join(firstN(outside, 5), ", ")}
+}
+
+// outsideScope lists the changed paths the write scope (plus the plan file)
+// does not cover; anything under docs/plans/ is always allowed.
+func outsideScope(in Inputs, paths []string) []string {
 	allowed := append([]string{}, in.WriteScope...)
 	if in.PlanFile != "" {
 		allowed = append(allowed, in.PlanFile)
@@ -338,10 +357,7 @@ func gateScope(in Inputs, paths []string) Gate {
 			outside = append(outside, p)
 		}
 	}
-	if len(outside) == 0 {
-		return Gate{State: GatePass}
-	}
-	return Gate{State: GateFail, Detail: strings.Join(firstN(outside, 5), ", ")}
+	return outside
 }
 
 // scopeMatched says whether any writeScope entry covers path: exact, a
@@ -443,7 +459,7 @@ func capDetail(s string) string {
 		return s
 	}
 	trunc := s[:detailMax]
-	for len(trunc) > 0 && !utf8.RuneStart(trunc[len(trunc)-1]) {
+	for len(trunc) > 0 && !utf8.ValidString(trunc) {
 		trunc = trunc[:len(trunc)-1]
 	}
 	return trunc
