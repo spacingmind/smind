@@ -56,6 +56,38 @@ row. The schema is created by migration either way, so enabling later never reop
   outstanding requests, observation backoff, idempotency and replay windows, audit retention). Only a human edit of
   `config.yaml` can change them; there is no environment override.
 
+## Office mode: documents as deliverables (ADR-0049)
+
+Agents' files are first-class results, on every transport. None of this changes a prompt, tool, permission or store schema.
+
+- **Binary-safe reads** (`internal/files/binary.go`, `internal/wsapi/files_binary.go`): `file.stat` classifies a file from its
+  first bytes (never its extension) and flags a mismatch; `file.readRange` returns one base64 chunk of at most the transport's
+  ceiling (`daemon.info.files`: 4 MiB direct, 512 KiB over the relay, 50 MiB per file). The file is opened once and checked on
+  the open descriptor; every chunk can be pinned to the stat'd `mtime`; UNC, device and drive-relative paths are refused before
+  any filesystem access; errors never carry an absolute path.
+- **PDF preview** (`web/packages/ui/src/components/pdf-preview/`, `file-tab-router.tsx`): a binary-looking file in a file tab
+  asks `file.stat` first. A PDF is read in chunks and handed by `postMessage` to `pdf-viewer.html`, a separate page in an
+  `<iframe sandbox="allow-scripts">` (opaque origin, its own CSP with `connect-src 'none'`, no network, annotation layer and
+  scripting off, pdf.js pinned in `package.json`). The viewer is a classic script with the pdf.js worker inlined as a classic
+  blob worker; the desktop proxy serves exactly its two static files without the cookie gate (an opaque origin cannot send
+  the cookie). The router, panels and pane are one lazy chunk.
+- **Interface mode and concise cards** (`lib/interface-mode.ts`, `stores/interface-mode-store.ts`,
+  `components/timeline/concise-tool-card.tsx`): the mode is a client-only preference (`smind:interface-mode`, the bare string
+  `office`; anything else reads `coding`) and is never sent to the daemon. In office mode a `terminal`- or `edit`-intent tool
+  card is one plain line ("Ran a command", "Edited report.md") plus a status, with the one-line error summary when it failed;
+  every other card, permission row and error box is unchanged. The home screen takes its greeting from `OFFICE_GREETINGS` and
+  shows four suggestion chips (`lib/suggested-prompts.ts`) that fill the composer and never send.
+- **Deliverable cards** (`components/timeline/deliverables.ts`, `deliverable-card.tsx`): after a run, candidates are the
+  `path` of successful write-intent tool calls plus workspace-relative paths in the final assistant message (markdown links,
+  inline code; shell text is never parsed). Each candidate gets one `file.stat` per run, and a card only if the file exists,
+  has an allow-listed extension, is not a mismatch and was written at or after the run started. At most 6 cards and 20 checks
+  per run. A card never opens anything by itself.
+- **Open in app, Download, Reveal, Copy path** (`file-actions.tsx`, `lib/download-file.ts`,
+  `desktop/src-tauri/src/open_path.rs`): the desktop's `open_path_default(root, rel_path)` canonicalises, requires a regular
+  file inside the canonical root with an allow-listed extension, refuses UNC paths and any daemon that is not the local one,
+  and opens through the opener plugin (no shell); its errors never carry a path. The web build's Download assembles chunks
+  into a Blob (pinned to the stat'd `mtime`, 50 MiB cap, sanitised basename, object URL revoked at once).
+
 ## Surfaces roadmap
 
 1. **Web** — the initial surface, served by the Go daemon (`web/packages/ui`).

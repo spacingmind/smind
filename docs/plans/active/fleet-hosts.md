@@ -325,3 +325,77 @@ Evidence (per AC):
 - Frames (isolated daemon `~/.smind/dogfood/fleet/f4`, port 4947, fake hosts and three seeded mirror rows, no model calls, real daemon data, no injection): `/tmp/steward4/zcode-audit/after/fleet-f4/` (lineage 1280/390 light+dark, inbox, sidebar, bursts for page load and 1280 to 390 resize, contact sheets). Real data showed `Task $1.92` = 0.42 + 1.50 (nil cost of the done mirror not counted) and the refresher left rows untouched against unreachable hosts.
 - Not done in F4, stated: the tree-guard live count of remote runs, a chip on permission rows of remote-origin tasks and on a task header of a remote-created task, mobile device/simulator frames, a two-real-daemon run of the refresher (unit tests use a fake owner; the owner answer path is F2a's `fleet.run.status`, already exercised by F2/F3 e2e).
 - Validator (one run, validation 20 on commit 565f0684, report-only: the daemon's verdict tool is pre-#706 and rejected every verdict format, so the daemon shows `blocked/crashed`): its written report says all 12 contract tests pass (the web ones after its own `bun install`), M1-M5 each fail their named test and were restored, the diff has nothing outside the contract, and one P3: the contract has no `frames` items, so the chip visuals were not checked by it (they are in the frames above, looked at by the Lead). Cost of the peers and the validator: about USD 3.4 (peer-sonnet 12 runs about 2.4, validator about 0.6, frames about 1.0 of that).
+
+
+### F5 design (2026-10-31, Lead)
+
+Labels are local operator config on the CALLER's `fleet_hosts` row (new column `labels TEXT NOT NULL DEFAULT ''`, a JSON object; the migration `fleet_host_labels` lives in this PR only). They are never sent to the peer (the wire params and `fleet.info` do not carry them) and never leave the host except as a name in a selector error. Validation (`registry.ValidateLabels`): at most 16 pairs; key `^[a-z][a-z0-9._-]{0,31}$` and not containing `secret`, `token`, `passw`, `apikey`, `credential`; value `^[a-z0-9][a-z0-9._+-]{0,31}$`.
+
+Selector (`internal/fleet/selector`, pure): `Select(sel, candidates)` over `Candidate{Alias, HostID, Labels, Enabled, Connected, Live}`. A host that is disabled (outbound link off), not approved or not connected never matches. Exactly one match resolves; zero matches (`selector_no_match`) and several matches without `any` (`selector_ambiguous`) are errors whose text lists the candidate aliases; with `any:true` the least `Live` wins, ties by alias. An empty label set is refused (a selector must name at least one label). There is no retry on another host.
+
+Wire: one new local-only bridge method `remote.select {labels, any}` -> `{host, hostId}` (same guards as `remote.read`: local connection, hop limit); the MCP `host` argument (any JSON type in the schema, documented as alias string OR `{labels:{...}, any:true}`) and the CLI `--labels k:v,k:v [--any]` resolve through it to an alias first, then continue on the existing alias path. `Live` = the host's mirrored remote tasks in a non-terminal state. Admin: `fleet.host.labels {host, set?, remove?}` (local-only) behind `smind host label set|rm|ls`.
+
+Not in F5: a Hosts settings page labels editor (follow-up), any change to `internal/tasktree`, the mirror, web or mobile.
+
+## F5 progress and validation (2026-10-31)
+
+Contract `fleet-hosts-f5.contract.md`. Peer ledger F5: peer-glm 0 runs (GLM limited until about 23:28 +07, so all briefs went to peer-sonnet), peer-sonnet 4 tasks / 4 runs, each one pass, no failure mode (S1 selector package, S2 store+registry column, S3 wsapi `remote.select` + `fleet.host.labels`, S4 MCP union host, S5 CLI + docs; S4 and S5 ran in parallel with S3). Review: one real finding, a 45 MB `cmd/smind/smind` build binary committed by the MCP peer, removed before the commits landed (history rewritten locally, nothing pushed). Lead wrote no code beyond cherry-picks.
+
+- AC26 labels: `TestFleetLabelsValidate` (17 labels, bad keys/values, secret-looking key), `TestFleetLabelsSetAndList`, `TestFleetHostLabelsRoundTrip`, `TestFleetHostLabels_ValidationRefused`, `TestFleetHostLabels_NeverOnWire`.
+- AC26 selector: `TestFleetSelector_{ExactOne,Zero,Ambiguous,AnyTieByAlias,DisabledSkipped,DisconnectedSkipped,EmptyLabelsInvalid,NoMutation}`; daemon `TestFleetRemoteSelect_*`; MCP `TestFleetSelectorMCP_*` (candidates named in the error text, no retry, alias string makes no select call); CLI `TestHostLabel*`, `TestHostSelect*`, `TestHostReadWithLabelsSelectsFirst`.
+- Mutations (each fails its named test; build failures re-done): M1 eligible `Enabled || Connected` -> DisabledSkipped/DisconnectedSkipped; M2 tie-break larger alias -> AnyTieByAlias; M3 cap 17 -> LabelsValidate; M4 Connected always true -> `TestFleetRemoteSelect_DisconnectedAndDisabledSkipped`; M5 alias not written into remote.read params -> `TestFleetSelectorMCP_ResolvesToAliasThenReads`.
+- Commands: `task lint` ok; `go test -race` on cmd/smind, internal/fleet/..., internal/wsapi, internal/store ok; `GOOS=windows go vet` on the same ok.
+- Not done: a labels editor on the Hosts settings page (follow-up), web/mobile chip (F4).
+
+## Fleet closeout (2026-10-31, Lead)
+
+Merged PRs on develop: ADR and plan #718; F1a identity/registry/store #723 (+ Windows fixture follow-up #732); F1c Hosts page, inbox, mobile approval #727; F1b hello, transports, pairing, CLI #729; F2a callee read #739; F2b caller client/CLI/MCP read #740; F3a callee write and budgets #747; F3b caller watches and MCP write #748; F4 tree and chip #749; F5 label routing #751; related web fix #735 (unknown event topic). The test names below are the ones in the per-PR Validation sections above; this table is the index.
+
+| AC | Merged proof | Named tests (all in develop) |
+|---|---|---|
+| AC1 | #723, #729, #740 | `TestFleetOffIsByteForByte`, `TestWsapiMethodMapGoldenFleetOff`, `TestHostCommandsSayFleetOffWhenDisabled`, `TestRemoteMethodsAbsentWhenFleetOff` |
+| AC2 | #723 | `TestHostIDMatchesDeviceIDVector`, `TestHostKeyFileModeAndCorruption` |
+| AC3 | #729 | `TestInvitePayloadFragmentOnlyNoSecrets`, `TestPairingWindowOneSlotFirstSeenAfterOpen` |
+| AC4 | #729 | `TestHelloMutualPinnedIdentity`, `TestPairingSASMatchesBothSides`, `TestFleetPairDirectE2E` |
+| AC5 | #723, #729, #739 | `TestRegistryPairingDirectedLinksReverseOff`, `TestFleetReverseDisabledByDefault`, `TestFleetReadTwoDaemonsE2E`. The plan's name `TestPairingCreatesTwoDirectedLinksOneEnabled` does not exist; `TestRegistryPairingDirectedLinksReverseOff` and `TestFleetPair_*` (store) carry that proof. |
+| AC6 | #723, #729 | `TestRegistryEnableDisableReverse`, `TestFleetEnableDisableReverseClosesConnection`, `TestFleetReverseNoticeSentOnReconnect`, `TestFleetHost_NoSchemaForMesh` |
+| AC7 | #729 | `TestHelloUnapprovedRefused`, `TestHelloReplayOnNewConnectionRefused`, `TestHandshakeRefusesChangedIdentity` |
+| AC8 | #729 | `TestDirectCleartextRefusedOutsideOverlay`, `TestRelayFingerprintMismatchFailsClosed` |
+| AC9 | #729, #739, #740, #748 | `TestHostPrincipalOnlyFleetMethods`, `TestFleetAdminMethodsLocalOnlyNotRunScopedNotPlugin`, `TestFleetParamsHaveNoGrantOrSecretFields` |
+| AC10 | #729 | `TestHostLsNeverPrintsSecrets`, `TestFleetSecretsFile0600AndRedacted`, `TestFleetSecretNeverLeavesHost` (#747) |
+| AC11 | #727, #729 | web/inbox/mobile tests listed under "F1c validation"; frames used injected RPCs, the real RPCs are covered by the F1b e2e tests. Mobile was not run on a device. |
+| AC12 | #739 | `TestFleetReadReturnsNoPathsNoCredentialURLs`, `TestFleetActivityCappedAndPaged`, `TestFleetReadGrantFiltersWorkspaces` |
+| AC13 | #739, #740, #748 | `TestFleetProvenanceOrderOfChecks`, `TestFleetCycleRefused_AtoBtoA`, `TestFleetHopTwoRefused`, `TestFleetReplayAndStaleRefused`, `TestRemoteWriteRefusedForPeerSeatAndRemoteOrigin` |
+| AC14 | #739 (callee half), #740 | `TestFleetAuditBothEndsNoPromptBody`, `TestFleetAuditRetention`. Follow-up (host audit view): `smind host audit`, the human-only `fleet.host.audit` method and the Activity row on the Hosts page; `TestFleetHostAudit_*`, `TestHostAudit*`, `TestFleetSummaryNeverHoldsPromptText`, `host-activity.test.tsx`. Nothing writes an `out` row yet (the view shows them when something does). |
+| AC15 | #740 | `TestHostReadVerbsSendRemoteReadParams`, `TestMCPListHostsAndHostParamLocalUnchanged` |
+| AC16 | #729, #739, #740 | `TestFleetVersionSkewRefused`, `TestHelloVersionSkewRefusedWithGuidance`, `TestHandshakeVersionSkewOnReconnect` |
+| AC17 | #747 | `TestFleetCreateRequiresExplicitProviderModel`, `TestFleetCreateBranchFromOwnOrigin`, `TestFleetCreateTypeHasNoModeEnvCwdFields` |
+| AC18 | #747 | `TestFleetSendOnlyOwnTasks`, `TestFleetIdempotencyKeyRetryReturnsSame` |
+| AC19 | #747 | `TestFleetRemoteTaskUnderCalleeFloorAndMode`, `TestFleetRemotePermissionGoesToCalleeInbox` |
+| AC20 | #747 | `TestFleetBudgetPerOriginAcrossTraces`, `TestFleetWallLimitStopsRun` |
+| AC21 | #740, #748 | `TestFleetCallerRestartStillGetsFinishNotification`, `TestFleetWatchThreeFailuresStatusUnknownNeverFinished` |
+| AC22 | #748 | `TestFleetPeerSeatGetsNoFleetTools`, `TestRemoteWriteRefusedForPeerSeatAndRemoteOrigin` |
+| AC23 | #749 | `TestTaskTreeShowsRemoteChildrenAndRollups`, `TestTreeBudgetCountsRemoteSpend`, `TestMirrorRowsAreCacheOnly` |
+| AC24 | #749 | `TestOwnerHostIsSingle`, `TestAliasRenameKeepsWireIds` |
+| AC25 | #749 | web: `TestTaskLineageRemoteNodeShowsHostChip`, `TestInboxRowShowsHostChip`, frames at 1280/390 light+dark. **Gaps:** mobile chip has logic tests only (no device frames); a header chip for a task another host created and a chip on remote-origin permission rows are not done. |
+| AC26 | #751 | `TestFleetSelector_*`, `TestFleetRemoteSelect_*`, `TestFleetSelectorMCP_*`, `TestFleetLabelsValidate` |
+
+Name drift, stated: the plan's early list names `TestLabelsValidation`, `TestSelectorExactlyOneOrError`, `TestSelectorAnyLeastLoadedTieByAlias` and `TestSelectorNoSilentRetryOnOtherHost`; they shipped as `TestFleetLabelsValidate`, `TestFleetSelector_*` and `TestFleetSelectorMCP_NoRetryOnWriteFailure`. The web test names above are vitest titles in `web/packages/ui`, not Go tests.
+
+**Not every AC is fully confirmed** (AC14 `out` rows, AC25 mobile device frames and the two chips), so this plan stays in `active/`.
+
+Open follow-ups:
+- Hosts settings page: a labels editor (F5 is CLI and MCP only).
+- ~~`smind host audit` and an audit view on the Hosts page (AC14).~~ Done in the host audit view follow-up (`fleet-hosts-audit-view.contract.md`); the caller half of the audit (`out` rows) is still not written by anything.
+- Mobile chip device or simulator frames (blocked on the native verification blocker); `TaskTreeRow` is not type-checked or run natively.
+- Task header chip for a task created by another host, and a chip on remote-origin permission rows (needs `origin_host` in the task payload and the inbox item).
+- Re-run the validators for F1 to F5 once 0.17 is installed: every fleet validator ran report-only on the pre-#706 daemon (verdicts stored as `blocked`/crashed).
+- Tree guard does not count remote runs (the callee's per-origin `maxLiveAgents` bounds it).
+- A real two-daemon run of the F4 mirror refresher and of label selection (unit and fake-bridge tests only); the "Try it on one machine" recipe in `public-docs/hosts.md` is the starting point.
+- Channel binding of the hello to the E2EE transcript (F1b stated it as not done).
+
+### Host audit view (AC14 follow-up), 2026-11-01
+
+- `smind host audit [--host alias] [--limit N] [--json]` over the new human-only, read-only `fleet.host.audit` (`internal/wsapi/fleet_host_audit.go`): direction, peer alias, method, decision, redacted summary, time; limit 50 by default, clamped to 200; refused over the relay, to agents, plugins and peer hosts. An Activity row per approved or revoked host in Settings -> Hosts (closed by default, fetched when opened).
+- **Gap closed in the writer:** `serve.Summary` kept the first 120 characters of the request JSON, so a `prompt` at the start of a `fleet.task.create` / `send` body was stored (up to about 100 characters of it). Free-text fields (`prompt`, `text`, `message`, `body`, `content`, `input`) are now reduced to `<N chars>` before the prefix is taken; the hash still covers the real body. The view masks the same fields again for rows written before this. `title` is left readable (it is a label shown across the UI).
+- Contract `fleet-hosts-audit-view.contract.md`; Peer ledger: peer-glm 0 runs, peer-sonnet 0 runs.

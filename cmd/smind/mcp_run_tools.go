@@ -126,7 +126,7 @@ type taskStatusOutput struct {
 // host-read fields.
 type taskStatusInput struct {
 	RunID  string `json:"runId" jsonschema:"id of the run (returned by task_send)"`
-	Host   string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	Host   any    `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
 	TaskID int64  `json:"taskId,omitempty" jsonschema:"only with host: the peer's task id (the run id may be omitted to read the task's latest run)"`
 }
 
@@ -136,7 +136,7 @@ type taskStatusInput struct {
 // blocking shape, task_wait, is a later step of the plan).
 func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[taskStatusInput, taskStatusOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskStatusInput) (*mcp.CallToolResult, taskStatusOutput, error) {
-		if in.Host != "" {
+		if mcpHostSet(in.Host) {
 			out, err := remoteTaskStatus(ctx, client, in)
 			return nil, out, err
 		}
@@ -184,7 +184,7 @@ func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
 type taskLogsInput struct {
 	RunID string `json:"runId" jsonschema:"id of the run whose transcript to read"`
 	Tail  int    `json:"tail,omitempty" jsonschema:"return only the last N entries (default: all)"`
-	Host  string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	Host  any    `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
 	// TaskID and Cursor apply to host reads only.
 	TaskID int64 `json:"taskId,omitempty" jsonschema:"REQUIRED with host: the peer's task id (the peer lists activity per task)"`
 	Cursor int64 `json:"cursor,omitempty" jsonschema:"only with host: continue the peer's activity from this cursor"`
@@ -217,7 +217,7 @@ type taskLogsOutput struct {
 // has no request/response MCP shape).
 func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, taskLogsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskLogsInput) (*mcp.CallToolResult, taskLogsOutput, error) {
-		if in.Host != "" {
+		if mcpHostSet(in.Host) {
 			out, err := remoteTaskLogs(ctx, client, in)
 			return nil, out, err
 		}
@@ -343,7 +343,7 @@ type taskWaitInput struct {
 	RunIDs              []string `json:"runIds,omitempty" jsonschema:"wait-any: 2-16 distinct run ids; returns as soon as any one of them is terminal or has a pending permission request, naming it in runId. Use this or runId, not both"`
 	IgnorePermissionIDs []string `json:"ignorePermissionIds,omitempty" jsonschema:"permission request ids you have already surfaced to the human; a pending request with one of these ids does not end the wait, so it continues until a NEW pending request, a terminal status, or the timeout"`
 	TimeoutSeconds      int      `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning timedOut: true (default 120s, always caller-overridable; with host default and cap 25s); a timeout is not a failure -- re-issue task_wait with the same runId/runIds to keep waiting"`
-	Host                string   `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): act on that host instead of this daemon. Direct only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon. With host, runId is required, timeoutSeconds defaults to and is capped at 25, and runIds, childrenOf and ignorePermissionIds are not supported"`
+	Host                any      `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Act on that host instead of this daemon. Direct only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon. With host, runId is required, timeoutSeconds defaults to and is capped at 25, and runIds, childrenOf and ignorePermissionIds are not supported"`
 	Cursor              int64    `json:"cursor,omitempty" jsonschema:"only with host: continue the remote run's events from this cursor (the nextCursor of the previous wait)"`
 }
 
@@ -434,7 +434,7 @@ func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut 
 // run.wait RPC). With runIds it waits for the first of several runs.
 func mcpTaskWait(client *wsclient.Client) mcp.ToolHandlerFor[taskWaitInput, taskWaitOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskWaitInput) (*mcp.CallToolResult, taskWaitOutput, error) {
-		if in.Host != "" {
+		if mcpHostSet(in.Host) {
 			out, err := remoteTaskWait(ctx, client, in)
 			return nil, out, err
 		}
@@ -559,7 +559,7 @@ func mcpWaitOneRun(ctx context.Context, client *wsclient.Client, runID string, d
 // fields. runId is checked in the handler because host mode may omit it.
 type taskStopInput struct {
 	RunID  string `json:"runId,omitempty" jsonschema:"id of the run (returned by task_send); required without host"`
-	Host   string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): act on that host instead of this daemon. Direct only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	Host   any    `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Act on that host instead of this daemon. Direct only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
 	TaskID int64  `json:"taskId,omitempty" jsonschema:"only with host: the peer's task id (required with host; runId may be omitted to stop the task's running run)"`
 }
 
@@ -576,7 +576,7 @@ type taskStopOutput struct {
 // daemon has accepted the stop request.
 func mcpTaskStop(client *wsclient.Client) mcp.ToolHandlerFor[taskStopInput, taskStopOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskStopInput) (*mcp.CallToolResult, taskStopOutput, error) {
-		if in.Host != "" {
+		if mcpHostSet(in.Host) {
 			out, err := remoteTaskStop(ctx, client, in)
 			return nil, out, err
 		}

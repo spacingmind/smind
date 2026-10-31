@@ -166,3 +166,66 @@ async fn proxies_token_ws_and_reroutes_with_no_origin_leaked() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["token"], "tok-b");
 }
+
+/// Serves a fixed set of embedded files, standing in for the bundled UI.
+struct FixedAssets(&'static [(&'static str, &'static str, &'static str)]);
+impl AssetSource for FixedAssets {
+    fn get(&self, path: &str) -> Option<(Vec<u8>, String)> {
+        self.0.iter().find(|(p, _, _)| *p == path).map(|(_, body, ct)| (body.as_bytes().to_vec(), (*ct).to_string()))
+    }
+}
+
+/// The sandboxed PDF viewer (office mode) loads its `<script src>` from an opaque origin, which never
+/// carries the gate's SameSite=Strict cookie; its two static files must therefore be served without it,
+/// and nothing else may be.
+#[tokio::test]
+async fn viewer_static_files_skip_the_cookie_gate_and_nothing_else_does() {
+    let stub = spawn_stub("tok").await;
+    let local_url = Url::parse(&format!("http://{}", stub.addr)).unwrap();
+    let assets = FixedAssets(&[
+        ("index.html", "<html>app shell</html>", "text/html"),
+        ("pdf-viewer.html", "<html>viewer</html>", "text/html"),
+        ("pdf-viewer.js", "console.log('viewer')", "text/javascript"),
+        ("assets/app.js", "app()", "text/javascript"),
+    ]);
+    let state = ProxyState::new("test-secret-1234567890".to_string(), Registry::new(&local_url), Box::new(assets));
+    state.set_local_token_source(|| None);
+    let (port, server_fut) = smind_daemon_client::proxy::serve(state.clone()).await.unwrap();
+    tokio::spawn(server_fut);
+    let base = format!("http://127.0.0.1:{port}");
+    let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+
+    // No cookie, no k: the two viewer files are served with their own content types ...
+    let js = http.get(format!("{base}/pdf-viewer.js")).send().await.unwrap();
+    assert_eq!(js.status(), 200);
+    assert_eq!(js.headers()[axum::http::header::CONTENT_TYPE], "text/javascript");
+    assert_eq!(js.text().await.unwrap(), "console.log('viewer')");
+    let html = http.get(format!("{base}/pdf-viewer.html")).send().await.unwrap();
+    assert_eq!(html.status(), 200);
+    assert_eq!(html.text().await.unwrap(), "<html>viewer</html>");
+
+    // ... and everything else, including look-alikes, other methods and other static files, still needs the cookie.
+    for path in ["/", "/index.html", "/assets/app.js", "/pdf-viewer.js/", "/pdf-viewer.js.map", "/PDF-VIEWER.JS", "/assets/pdf-viewer.js", "/api/token", "/ws"] {
+        assert_eq!(http.get(format!("{base}{path}")).send().await.unwrap().status(), 403, "{path} must stay behind the gate");
+    }
+    assert_eq!(http.post(format!("{base}/pdf-viewer.js")).send().await.unwrap().status(), 403);
+    assert_eq!(http.head(format!("{base}/pdf-viewer.js")).send().await.unwrap().status(), 403);
+}
+
+/// A build without the viewer files must not answer the exempt paths with the SPA shell.
+#[tokio::test]
+async fn a_missing_viewer_file_is_a_404_not_the_app_shell() {
+    let stub = spawn_stub("tok").await;
+    let local_url = Url::parse(&format!("http://{}", stub.addr)).unwrap();
+    let assets = FixedAssets(&[("index.html", "<html>app shell</html>", "text/html")]);
+    let state = ProxyState::new("test-secret-1234567890".to_string(), Registry::new(&local_url), Box::new(assets));
+    state.set_local_token_source(|| None);
+    let (port, server_fut) = smind_daemon_client::proxy::serve(state.clone()).await.unwrap();
+    tokio::spawn(server_fut);
+    let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    for path in ["/pdf-viewer.js", "/pdf-viewer.html"] {
+        let r = http.get(format!("http://127.0.0.1:{port}{path}")).send().await.unwrap();
+        assert_eq!(r.status(), 404, "{path}");
+        assert!(!r.text().await.unwrap().contains("app shell"), "{path} must not fall back to index.html");
+    }
+}

@@ -71,9 +71,10 @@ func recipeNeedsKey(rec providers.Recipe) bool {
 }
 
 // recipeNeedsBaseURL reports whether the row needs a URL from the user: a
-// userBaseURL env, or the codex harness whose endpoint.baseUrl carries it.
+// userBaseURL env, or an endpoint recipe (codex, opencode chat-completions)
+// whose endpoint.baseUrl carries it.
 func recipeNeedsBaseURL(rec providers.Recipe) bool {
-	if rec.Harness == "codex-app-server" {
+	if rec.Harness == "codex-app-server" || rec.EndpointKind == string(providers.EndpointChatCompletions) {
 		return true
 	}
 	for _, e := range rec.Env {

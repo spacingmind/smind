@@ -232,6 +232,22 @@ func (s Spec) Base() string {
 // IsInstance reports whether s extends another provider.
 func (s Spec) IsInstance() bool { return s.Extends != "" }
 
+// overlayEnv returns base with over applied on top (over wins); nil when both
+// are empty. Neither input is modified.
+func overlayEnv(base, over map[string]string) map[string]string {
+	if len(base) == 0 && len(over) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(base)+len(over))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range over {
+		out[k] = v
+	}
+	return out
+}
+
 // HasEndpoint reports whether s points at its own API endpoint.
 func (s Spec) HasEndpoint() bool { return s.Endpoint.Kind != "" }
 
@@ -429,7 +445,10 @@ func resolve(s Spec, table []Spec) (Spec, error) {
 		// base's.
 		inst := *base
 		inst.ID, inst.Label, inst.Extends, inst.Custom = s.ID, s.Label, base.ID, true
-		inst.Env = s.Env // the instance's own launch env (config providers.custom[].env)
+		// The instance's own launch env (config providers.custom[].env) is an
+		// overlay on its base's, not a replacement: an opencode instance must
+		// keep the base's OPENCODE_PERMISSION ask policy for bash and edit.
+		inst.Env = overlayEnv(base.Env, s.Env)
 		inst.SecretEnv = s.SecretEnv
 		inst.PassthroughEnv = s.PassthroughEnv
 		if len(s.Command) > 0 {

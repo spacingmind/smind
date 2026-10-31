@@ -1,4 +1,5 @@
 import { formatSas, grantParts } from "@/components/hosts/grant-summary";
+import { HostActivity } from "@/components/hosts/host-activity";
 import { SasCode } from "@/components/hosts/sas-code";
 import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
@@ -169,6 +170,7 @@ export function HostRow({
             }
           />
         )}
+        {(host.state === "approved" || host.state === "revoked") && <HostActivity host={host} />}
         {host.link === "refused" && (
           <div className="px-4 py-3">
             <Alert

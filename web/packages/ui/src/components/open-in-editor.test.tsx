@@ -3,7 +3,7 @@
 // components are imported fresh, like desktop-daemon-banner.test.tsx.
 import { act } from "react";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { revealWorkspaceActions } from "@/test/sidebar-helpers";
@@ -41,6 +41,22 @@ const TASK: Task = {
   UpdatedAt: "2024-01-01T00:00:00Z",
   ArchivedAt: null,
 };
+
+// The first scenario used to pay for the cold transform of the sidebar and explorer graphs inside its own 5 s test
+// budget, which a loaded machine exceeds. Pull them in once, up front: later scenarios reuse the transformed modules
+// (vi.resetModules only clears the registry), so every test body is just its own work.
+// Only this one-off import gets a larger budget (a saturated box needs more than the 10 s hook default to
+// transform the app graph cold); every test body keeps the default 5 s.
+const WARMUP_TIMEOUT_MS = 120_000;
+beforeAll(async () => {
+  await Promise.all([
+    import("@/components/app-sidebar"),
+    import("@/components/file-explorer-pane"),
+    import("@/components/ui/sidebar"),
+    import("@/components/ui/toast"),
+    import("@/test/render-with-daemon"),
+  ]);
+}, WARMUP_TIMEOUT_MS);
 
 afterEach(async () => {
   const { clearToasts } = await import("@/components/ui/toast");

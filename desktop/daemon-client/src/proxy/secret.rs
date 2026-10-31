@@ -68,6 +68,22 @@ pub enum GateOutcome {
     Pass,
 }
 
+/// PUBLIC_ASSET_PATHS are the two static files of the sandboxed PDF viewer
+/// (office mode): the app embeds `/pdf-viewer.html` in an
+/// `<iframe sandbox="allow-scripts">`, whose origin is opaque, so the
+/// browser treats everything it loads as cross-site and never sends this
+/// proxy's `SameSite=Strict` cookie with the viewer's `<script src>`. Both
+/// files are embedded, public, secret-free build output (the same bytes the
+/// daemon serves without any gate); nothing else is exempt.
+pub const PUBLIC_ASSET_PATHS: [&str; 2] = ["/pdf-viewer.html", "/pdf-viewer.js"];
+
+/// is_public_asset reports whether a request may skip the cookie gate: a GET
+/// whose path is exactly one of PUBLIC_ASSET_PATHS (no prefix or case
+/// matching, no `..` or trailing-slash variants, no other method).
+pub fn is_public_asset(method: &str, path: &str) -> bool {
+    method == "GET" && PUBLIC_ASSET_PATHS.contains(&path)
+}
+
 /// evaluate is the gate's whole decision, factored out of any HTTP
 /// framework so it's directly unit-testable.
 pub fn evaluate(secret: &str, cookie_header: Option<&str>, query_k: Option<&str>) -> GateOutcome {
@@ -156,6 +172,33 @@ mod tests {
     #[test]
     fn gate_rejects_wrong_k() {
         assert_eq!(evaluate("secret", None, Some("wrong")), GateOutcome::Forbidden);
+    }
+
+    #[test]
+    fn public_assets_are_exactly_the_two_viewer_files_over_get() {
+        assert!(is_public_asset("GET", "/pdf-viewer.html"));
+        assert!(is_public_asset("GET", "/pdf-viewer.js"));
+        for (method, path) in [
+            ("POST", "/pdf-viewer.js"),
+            ("PUT", "/pdf-viewer.html"),
+            ("HEAD", "/pdf-viewer.js"),
+            ("GET", "/pdf-viewer.js/"),
+            ("GET", "/pdf-viewer.js.map"),
+            ("GET", "/pdf-viewer.json"),
+            ("GET", "//pdf-viewer.js"),
+            ("GET", "/x/../pdf-viewer.js"),
+            ("GET", "/PDF-VIEWER.JS"),
+            ("GET", "pdf-viewer.js"),
+            ("GET", "/assets/pdf-viewer.js"),
+            ("GET", "/"),
+            ("GET", "/index.html"),
+            ("GET", "/api/token"),
+            ("GET", "/ws"),
+            ("GET", ""),
+        ] {
+            assert!(!is_public_asset(method, path), "{method} {path} must still need the cookie");
+        }
+        assert_eq!(PUBLIC_ASSET_PATHS.len(), 2);
     }
 
     #[test]

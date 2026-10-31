@@ -85,6 +85,9 @@ export interface Task {
   budgetUsd?: number | null;
   /** Known (reported) cost of the whole tree so far. */
   budgetSpentUsd?: number | null;
+  /** The automation that started this task (camelCase on the wire), when one did; absent when a person started it. */
+  automationId?: number;
+  automationName?: string;
   /** True when some finished run reported no cost, so the cap bounds reported cost only. */
   budgetPartial?: boolean;
   budgetUnknownRuns?: number;
@@ -908,6 +911,35 @@ export interface FileReadResult {
 // written file's mtime, chained into the next conditional save.
 export interface FileWriteResult {
   mtime: string;
+}
+
+// Result of file.stat (internal/wsapi/files_binary.go's fileStatResult): the
+// file classified from its first bytes, never from its extension.
+export interface FileStatResult {
+  size: number;
+  mtime: string;
+  kind: "pdf" | "text" | "image" | "office" | "other";
+  mime: string;
+  ext: string;
+  /** The extension promises one type and the content is another. */
+  mismatch: boolean;
+  previewable: boolean;
+}
+
+// Result of file.readRange: up to the transport's chunk ceiling of bytes, base64 on the wire.
+export interface FileReadRangeResult {
+  offset: number;
+  length: number;
+  eof: boolean;
+  data: string;
+  mtime: string;
+}
+
+/** `daemon.info.files` (ADR-0049 section 2.4): this connection's binary-read limits. Absent on an older daemon. */
+export interface DaemonFilesInfo {
+  maxReadBytes: number;
+  maxChunkBytes: number;
+  previewKinds: string[];
 }
 
 // Result of task.diff (internal/wsapi/handlers.go's taskDiffResult): the

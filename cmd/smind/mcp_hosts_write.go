@@ -43,6 +43,11 @@ type remoteWriteAnswer struct {
 // mcpRemoteWrite sends one remote.write for tool and returns its answer.
 func mcpRemoteWrite(ctx context.Context, c mcpCaller, tool string, params map[string]any) (remoteWriteAnswer, error) {
 	var ans remoteWriteAnswer
+	alias, err := mcpResolveHost(ctx, c, tool, params["host"])
+	if err != nil {
+		return ans, err
+	}
+	params["host"] = alias
 	if err := c.Call(ctx, "remote.write", params, &ans); err != nil {
 		return ans, mcpRemoteErr(tool, err)
 	}
@@ -106,9 +111,9 @@ func remoteTaskNew(ctx context.Context, client *wsclient.Client, in taskNewInput
 	}
 	host := ans.Host
 	if host == "" {
-		host = in.Host
+		host = mcpHostText(in.Host)
 	}
-	gid := remoteGlobalID(ans, in.Host)
+	gid := remoteGlobalID(ans, mcpHostText(in.Host))
 	return taskNewOutput{
 		// Task stays required in the schema, so a host result carries the
 		// identifying fields under it too.
@@ -168,10 +173,10 @@ func remoteTaskSend(ctx context.Context, client *wsclient.Client, in taskSendInp
 	}
 	host := ans.Host
 	if host == "" {
-		host = in.Host
+		host = mcpHostText(in.Host)
 	}
 	return taskSendOutput{
-		RunID: ans.RunID, Host: host, GlobalID: remoteGlobalID(ans, in.Host), TaskID: in.TaskID,
+		RunID: ans.RunID, Host: host, GlobalID: remoteGlobalID(ans, mcpHostText(in.Host)), TaskID: in.TaskID,
 		IdempotencyKey: ans.IdempotencyKey, Replayed: ans.Replayed,
 	}, nil
 }
@@ -191,13 +196,13 @@ func remoteTaskStop(ctx context.Context, client *wsclient.Client, in taskStopInp
 	}
 	host := ans.Host
 	if host == "" {
-		host = in.Host
+		host = mcpHostText(in.Host)
 	}
 	runID := ans.RunID
 	if runID == "" {
 		runID = in.RunID
 	}
-	return taskStopOutput{RunID: runID, Stopped: ans.Stopped, Host: host, GlobalID: remoteGlobalID(ans, in.Host)}, nil
+	return taskStopOutput{RunID: runID, Stopped: ans.Stopped, Host: host, GlobalID: remoteGlobalID(ans, mcpHostText(in.Host))}, nil
 }
 
 // remoteTaskWait is task_wait's host branch: one bounded long poll the model
@@ -223,7 +228,7 @@ func remoteTaskWait(ctx context.Context, client *wsclient.Client, in taskWaitInp
 	}
 	host := ans.Host
 	if host == "" {
-		host = in.Host
+		host = mcpHostText(in.Host)
 	}
 	state := ans.State
 	switch {

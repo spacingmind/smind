@@ -710,6 +710,7 @@ CREATE TABLE IF NOT EXISTS fleet_hosts (
     alias TEXT NOT NULL UNIQUE,
     pub BLOB NOT NULL,
     label TEXT NOT NULL DEFAULT '',
+    labels TEXT NOT NULL DEFAULT '',
     state TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL
 );

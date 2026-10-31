@@ -40,3 +40,21 @@ Derived material, by file:
 
 This section is updated as later phases of the zcode-visual-parity plan
 port additional ZCode-derived component structure or CSS.
+
+---
+
+The PDF preview (office mode) bundles pdf.js, unmodified, in
+`pdf-viewer.js` (built from `web/packages/ui/src/components/pdf-preview/`):
+
+    pdf.js (pdfjs-dist 6.4.299)
+    Copyright Mozilla Foundation and contributors
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    The License text is in `web/node_modules/pdfjs-dist/LICENSE` and at
+    http://www.apache.org/licenses/LICENSE-2.0
+
+The only change made when it is run is textual and happens at run time in the
+viewer: its worker is started as a classic script, so its trailing `export`
+statement is dropped and `import.meta.url` is replaced (see the comment on
+`classicWorker` in `viewer/main.ts`). The pdf.js version is pinned exactly in
+`web/packages/ui/package.json`.

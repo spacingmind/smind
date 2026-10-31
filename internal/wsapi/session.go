@@ -34,7 +34,7 @@ var RunScopedMethods = []string{
 	"chat.create", "chat.list", "chat.queueCancel", "chat.queueList",
 	"profile.get", "profile.list",
 	"provider.list",
-	"remote.hosts", "remote.read", "remote.write",
+	"remote.hosts", "remote.read", "remote.select", "remote.write",
 	"run.list", "run.listConfigOptions", "run.logs", "run.setConfigOption",
 	"run.setPermissionMode", "run.start", "run.stop",
 	"session.identify",

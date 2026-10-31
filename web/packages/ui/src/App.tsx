@@ -13,6 +13,7 @@ import {
 } from "@dnd-kit/core";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { AutomationsPage } from "@/components/automations/automations-page";
 import { TabRenameInput } from "@/components/tab-rename-input";
 import { ArchiveChatDialog } from "@/components/crud-dialogs";
 import { UsageModalRoot } from "@/components/account-usage/usage-modal";
@@ -260,7 +261,7 @@ function AppShell({
   // the plan's "no router library introduction" decision; settings is not
   // deep-linkable and does not disturb the hash the task routing below
   // owns.
-  const [activeView, setActiveView] = useState<"workspace" | "settings" | "inbox" | "plugin">("workspace");
+  const [activeView, setActiveView] = useState<"workspace" | "settings" | "inbox" | "automations" | "plugin">("workspace");
   // Bumped on every request to open Settings, and used as the screen's key:
   // asking for a section while Settings is already open (shortcuts.help,
   // a deep link) remounts it onto that section instead of being ignored.
@@ -281,6 +282,17 @@ function AppShell({
       window.setTimeout(() => setActiveView("inbox"), 220);
     } else {
       setActiveView("inbox");
+    }
+  }, [isMobile]);
+  // The Automations page: a full-screen view like the inbox, reached from the sidebar quick action, the palette
+  // and Settings' link section. Same mobile treatment: the sidebar sheet closes first so its exit animation
+  // never ghosts over the page.
+  const openAutomations = useCallback(() => {
+    if (isMobile) {
+      closeMobileSidebarRef.current?.();
+      window.setTimeout(() => setActiveView("automations"), 220);
+    } else {
+      setActiveView("automations");
     }
   }, [isMobile]);
   // A plugin panel as a full page (ADR-0042): the surface for `where:
@@ -900,6 +912,14 @@ function AppShell({
     return () => window.removeEventListener("smind:open-settings", onOpenSettings);
   }, [openSettings]);
 
+  // Settings' Automations link section: the page is not a settings section any more, so the section closes
+  // Settings first and dispatches this event, same pattern as `smind:open-settings`.
+  useEffect(() => {
+    const onOpenAutomations = () => openAutomations();
+    window.addEventListener("smind:open-automations", onOpenAutomations);
+    return () => window.removeEventListener("smind:open-automations", onOpenAutomations);
+  }, [openAutomations]);
+
   const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
   useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
 
@@ -1087,10 +1107,11 @@ function AppShell({
       }
       if (entry.view === "workspace") setActiveView("workspace");
       else if (entry.view === "settings") openSettings();
+      else if (entry.view === "automations") openAutomations();
       else setActiveView("inbox");
       return true;
     },
-    [allTasks, client, selectTask, openSettings],
+    [allTasks, client, selectTask, openSettings, openAutomations],
   );
   const nav = useNavHistory(navEntry, applyNavEntry);
   useActionHandler("nav.back", () => void nav.back(), { enabled: nav.canBack });
@@ -1134,6 +1155,7 @@ function AppShell({
       }}
       onOpenSettings={openSettings}
       onOpenInbox={openInbox}
+      onOpenAutomations={openAutomations}
       onOpenPluginPanel={openPluginPage}
       connectionStatus={connectionStatus}
       connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
@@ -1550,6 +1572,11 @@ function AppShell({
                 void jumpToTask(taskId);
               }}
             />
+          </div>
+        )}
+        {activeView === "automations" && (
+          <div className="absolute inset-0 z-40">
+            <AutomationsPage onNavigateBack={closeSettings} closeSettings={closeSettings} />
           </div>
         )}
         {activeView === "plugin" && pluginPage && (
@@ -2247,6 +2274,7 @@ function PaneTabStrip({
               onOpenFile={onOpenFile}
               onOpenFileToSide={onOpenFileToSide}
               onRevealInDiff={onRevealInDiff}
+              onOpenFilesTab={() => onOpenBase("files", { pane: paneId })}
               events={events}
               chats={chats}
               runningChatsByTask={runningChatsByTask}
@@ -2563,6 +2591,7 @@ function TabContent({
   onOpenFile,
   onOpenFileToSide,
   onRevealInDiff,
+  onOpenFilesTab,
   events,
   chats,
   runningChatsByTask,
@@ -2578,6 +2607,8 @@ function TabContent({
   onOpenFile: (path: string) => void;
   onOpenFileToSide: (path: string) => void;
   onRevealInDiff: () => void;
+  /** Brings this pane's Files tab forward (the deliverable cards' "+ N more files"). */
+  onOpenFilesTab: () => void;
   events: ReturnType<typeof useDaemonEvents>;
   chats: Chat[] | null;
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
@@ -2610,6 +2641,7 @@ function TabContent({
         events={events}
         onOpenFile={onOpenFile}
         onOpenDiffTab={onRevealInDiff}
+        onOpenFilesTab={onOpenFilesTab}
         onJumpToTask={onJumpToTask}
       />
     ) : null,

@@ -138,6 +138,19 @@ func TestFleetIdemSweeperRemovesExpired(t *testing.T) {
 	}
 }
 
+// normNL maps CRLF to LF: a Windows checkout with core.autocrlf rewrites the
+// line endings of the files a worktree materialises.
+func normNL(s string) string { return strings.ReplaceAll(s, "\r\n", "\n") }
+
+func TestFleetNormNLMapsCRLF(t *testing.T) {
+	if got := normNL("from origin\r\n"); got != "from origin\n" {
+		t.Fatalf("normNL(CRLF) = %q, want LF", got)
+	}
+	if got := normNL("a\nb\n"); got != "a\nb\n" {
+		t.Fatalf("normNL(LF) = %q, want unchanged", got)
+	}
+}
+
 func TestFleetCreateBranchFromOwnOrigin(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not found")
@@ -221,7 +234,7 @@ func TestFleetCreateBranchFromOwnOrigin(t *testing.T) {
 	if task.WorktreePath == nil {
 		t.Fatal("task has no worktree")
 	}
-	if b, err := os.ReadFile(filepath.Join(*task.WorktreePath, unique)); err != nil || string(b) != "from origin\n" {
+	if b, err := os.ReadFile(filepath.Join(*task.WorktreePath, unique)); err != nil || normNL(string(b)) != "from origin\n" {
 		t.Fatalf("worktree file = %q, %v; want the branch's own content", b, err)
 	}
 	host, trace, err := e.st.TaskOrigin(res.TaskID)
