@@ -15,6 +15,9 @@ import (
 	"github.com/spacingmind/smind/internal/fleet/identity"
 	"github.com/spacingmind/smind/internal/fleet/pairing"
 	"github.com/spacingmind/smind/internal/fleet/registry"
+	"github.com/spacingmind/smind/internal/fleet/serve"
+	"github.com/spacingmind/smind/internal/fleet/wire"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // The callee side of the fleet wire (ADR-0048 F1b): the host handshake
@@ -53,6 +56,12 @@ type FleetOptions struct {
 	Links    FleetLinks
 	Version  string
 	Now      func() time.Time
+
+	// Store, Workspaces and HomeDirs enable the fleet read methods; they
+	// stay unregistered while Store or Workspaces is nil.
+	Store      *store.Store
+	Workspaces FleetWorkspaces
+	HomeDirs   []string
 }
 
 // FleetLinks is the dial-side half of the fleet: the operations the
@@ -300,6 +309,8 @@ type fleetHost struct {
 	mu    sync.Mutex
 	conns map[string]map[*conn]struct{}
 	sas   map[string]string
+
+	read *serve.Server
 }
 
 // hostPrincipal is what a connection proved about itself with a verified
@@ -322,7 +333,13 @@ type hostPrincipal struct {
 var fleetHostAllowed = map[string][]string{
 	"pairing":  {hello.MethodPairRequest},
 	"pending":  {},
-	"approved": {hello.MethodLinkState},
+	"approved": approvedHostMethods(),
+}
+
+// approvedHostMethods is the method set of an approved host: the link-state
+// notice and the fleet read methods.
+func approvedHostMethods() []string {
+	return append([]string{hello.MethodLinkState}, wire.ReadMethods...)
 }
 
 // hostPrincipal returns the connection's fleet host principal, if any.
@@ -368,6 +385,21 @@ func (a *API) SetFleet(o FleetOptions) {
 	a.hs["fleet.host.disable_reverse"] = fleetLocalOnly("fleet.host.disable_reverse", f.handleHostDisableReverse)
 	a.hs["fleet.host.test"] = fleetLocalOnly("fleet.host.test", f.handleHostTest)
 	a.hs["fleet.host.route"] = fleetLocalOnly("fleet.host.route", f.handleHostRoute)
+	if o.Store != nil && o.Workspaces != nil {
+		f.read = serve.New(serve.Options{
+			HostID:     o.Key.HostID(),
+			Authorizer: o.Registry,
+			Audit:      o.Store,
+			Reader: serve.NewReader(&fleetSource{o.Store, o.Workspaces}, serve.ReaderOptions{
+				HostID: o.Key.HostID(), Version: o.Version, Caps: hello.Caps(), HomeDirs: o.HomeDirs,
+			}),
+			Now: o.Now,
+		})
+		for _, m := range wire.ReadMethods {
+			a.hs[m] = f.readHandler(m)
+		}
+		a.fleetAuditSweep = serve.StartAuditSweeper(o.Store, store.FleetAuditRetention, time.Hour)
+	}
 }
 
 // FleetHostsChanged tells subscribers that the host list or a link changed
