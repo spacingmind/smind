@@ -26,6 +26,8 @@ is one row:
   live agents, minutes per run and the cost cap per 24 hours;
 - for a refused link, the reason and what to do about it (for example "update
   smind on the other host");
+- an **Activity** line that opens the latest exchanges with that host, read-only (see
+  below);
 - a menu with **Edit access**, **Revoke** and **Remove**.
 
 The page never shows a key, a secret or an address of another host.
@@ -154,6 +156,19 @@ one that has been relayed through another host (there is exactly one hop), one
 that is stale or a replay, and callers that ask too fast. Every call, served or
 refused, is recorded in an audit log on this host with a hash and at most 120
 redacted characters of the request, never its text; rows are kept for 30 days.
+
+Read that log with `smind host audit`, or on a host's row under **Activity** on the
+Hosts page. Both are read-only, work only for you on this machine (not over the
+relay, and not for an agent, a plugin or another host), and show when, which way
+(`in` or `out`), which host, which method, the decision (`ok`, `refused` with its
+code, or `error`) and the hash with the redacted start of the request. Free-text
+fields such as a prompt or a message appear only as their length.
+
+```bash
+smind host audit                      # the latest 50 exchanges, newest first
+smind host audit --host winbox --limit 20
+smind host audit --json
+```
 
 ### What a paired host can start
 

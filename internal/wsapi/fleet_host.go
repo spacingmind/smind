@@ -401,6 +401,9 @@ func (a *API) SetFleet(o FleetOptions) {
 	a.hs["fleet.host.disable_reverse"] = fleetLocalOnly("fleet.host.disable_reverse", f.handleHostDisableReverse)
 	a.hs["fleet.host.test"] = fleetLocalOnly("fleet.host.test", f.handleHostTest)
 	a.hs["fleet.host.route"] = fleetLocalOnly("fleet.host.route", f.handleHostRoute)
+	if o.Store != nil {
+		a.hs["fleet.host.audit"] = fleetLocalOnly("fleet.host.audit", f.handleHostAudit)
+	}
 	if o.Store != nil && o.Workspaces != nil {
 		// One source serves the Reader and the write path's TaskLookup, so
 		// a send or a stop decides on the same task rows a read returns.
