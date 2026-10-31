@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { TerminalPane, type TerminalHandle } from "@/components/terminal-pane";
-import { resetTerminalSessions, useTerminalActivity } from "@/lib/terminal-sessions";
+import {
+  boundTerminalId,
+  resetTerminalSessions,
+  unbindTerminal,
+  useTerminalActivity,
+} from "@/lib/terminal-sessions";
 import { DEFAULT_TERMINAL_SCROLLBACK, TERMINAL_SCROLLBACK_STORAGE_KEY } from "@/lib/terminal-prefs";
 import type { Task, TerminalSessionStatus } from "@/lib/types";
 
@@ -180,22 +185,22 @@ describe("TerminalPane", () => {
 
     const attachCall = client.nth("terminal.attach", 0);
     expect(attachCall.params).toEqual({ terminalId: "term-1" });
-    expect(screen.getByTestId("terminal-status")).toHaveTextContent("Terminal");
-    expect(screen.getByTestId("terminal-status")).not.toHaveTextContent("term-1");
-    expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
+    // Running terminal: no status line at all -- the tab strip shows the title.
+    expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
   });
 
-  it("shows the tab title prop (a renamed tab) in the header", async () => {
+  it("shows no header row while a terminal is running", async () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();
-    render(<TerminalPane client={client} task={TASK_A} title="Build logs" createTerminal={() => fake} />);
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
     await flush();
     client.nth("terminal.list", 0).resolve([]);
     await flush();
     client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
     await flush();
-    expect(screen.getByTestId("terminal-status")).toHaveTextContent("Build logs");
-    expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
+
+    expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="pane-header"]')).toBeNull();
   });
 
   it("focuses the terminal when its tab is in front, and again when it is re-activated; not while behind", async () => {
@@ -354,37 +359,6 @@ describe("TerminalPane", () => {
     expect(fake.disposed).toBe(true);
   });
 
-  it("clicking 'Close terminal' calls terminal.close with the current session's id", async () => {
-    const client = new FakeWsClient();
-    const fake = new FakeTerminalHandle();
-    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
-    await flush();
-    client.nth("terminal.list", 0).resolve([]);
-    await flush();
-    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
-    await flush();
-
-    const closeButton = screen.getByRole("button", { name: "Close terminal" });
-    expect(closeButton).not.toBeDisabled();
-    fireEvent.click(closeButton);
-    await flush();
-
-    const closeCall = client.nth("terminal.close", 0);
-    expect(closeCall.params).toEqual({ terminalId: "term-1" });
-    // Closing must go through terminal.close, never by aborting the
-    // active terminal.attach subscription (that would only detach).
-    expect(client.nth("terminal.attach", 0).options?.signal?.aborted).toBeFalsy();
-  });
-
-  it("the 'Close terminal' button is disabled until a session id exists", async () => {
-    const client = new FakeWsClient();
-    const fake = new FakeTerminalHandle();
-    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
-    await flush();
-
-    expect(screen.getByRole("button", { name: "Close terminal" })).toBeDisabled();
-  });
-
   it("surfaces a terminal.list failure as an error message", async () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();
@@ -481,7 +455,7 @@ describe("TerminalPane", () => {
       expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
       const reattach = client2.nth("terminal.attach", 0);
       expect(reattach.params).toEqual({ terminalId: "term-1" });
-      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
+      expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
     });
 
     it("given a session that comes back status: interrupted post-reconnect, renders the distinct 'session ended: daemon restarted' state, not a generic error", async () => {
@@ -559,10 +533,10 @@ describe("TerminalPane", () => {
       expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
       const reattach = client2.nth("terminal.attach", 0);
       expect(reattach.params).toEqual({ terminalId: "term-1" });
-      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
+      expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
     });
 
-    it("explicitly closing the terminal, then a later reconnect, creates a fresh terminal instead of getting stuck showing 'session closed'", async () => {
+    it("a session closed with its tab (binding cleared), then a later reconnect, creates a fresh terminal instead of getting stuck showing 'session closed'", async () => {
       const client1 = new FakeWsClient();
       const fake = new FakeTerminalHandle();
       const stableFactory = () => fake;
@@ -572,18 +546,11 @@ describe("TerminalPane", () => {
       await flush();
       client1.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
       await flush();
-      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
 
-      fireEvent.click(screen.getByRole("button", { name: "Close terminal" }));
-      await flush();
-      client1.nth("terminal.close", 0).resolve(undefined);
-      await flush();
-
-      // The closed session's id must not linger in state -- otherwise a
-      // later reconnect's list-then-attach effect would still treat this
-      // exact (now-closed) id as "the session to resume".
-      expect(screen.getByTestId("terminal-status")).toHaveTextContent("starting terminal");
-      expect(screen.getByRole("button", { name: "Close terminal" })).toBeDisabled();
+      // Closing the terminal's *tab* is what ends a session now: the
+      // reaper calls terminal.close and clears the tab's binding, leaving
+      // exactly this state behind for the next mount/reconnect.
+      unbindTerminal(`${TASK_A.ID}:terminal`);
 
       const client2 = new FakeWsClient();
       rerender(<TerminalPane client={client2} task={TASK_A} createTerminal={stableFactory} />);
@@ -605,7 +572,7 @@ describe("TerminalPane", () => {
       createCall.resolve({ terminalId: "term-2" });
       await flush();
       expect(client2.nth("terminal.attach", 0).params).toEqual({ terminalId: "term-2" });
-      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-2");
+      expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
     });
   });
 });
@@ -776,10 +743,10 @@ describe("TerminalPane multiple terminals per task (Item 20)", () => {
     createCall.resolve({ terminalId: "term-2" });
     await flush();
 
-    expect(screen.getAllByTestId("terminal-status").map((el) => el.textContent)).toEqual([
-      "Terminal",
-      "Terminal 2",
-    ]);
+    // Both panes are running sessions: no status lines, no cross-binding.
+    expect(boundTerminalId(`${TASK_A.ID}:terminal`)).toBe("term-1");
+    expect(boundTerminalId(`${TASK_A.ID}:terminal:2`)).toBe("term-2");
+    expect(screen.queryAllByTestId("terminal-status")).toHaveLength(0);
   });
 
   it("switching between two terminal tabs detaches rather than closes either session", async () => {
@@ -870,18 +837,5 @@ describe("useTerminalActivity (Item 20)", () => {
     await flush();
 
     expect(screen.getByTestId("marker")).toHaveTextContent("idle");
-  });
-
-  it("New terminal control is absent without onNewTerminal, and calls it when present", async () => {
-    const client = new FakeWsClient();
-    const fake = new FakeTerminalHandle();
-    const onNewTerminal = vi.fn();
-    const { rerender } = render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
-    await flush();
-    expect(screen.queryByTestId("terminal-new")).not.toBeInTheDocument();
-
-    rerender(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} onNewTerminal={onNewTerminal} />);
-    fireEvent.click(screen.getByTestId("terminal-new"));
-    expect(onNewTerminal).toHaveBeenCalledTimes(1);
   });
 });
