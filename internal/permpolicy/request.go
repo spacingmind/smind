@@ -40,6 +40,17 @@ type Request struct {
 
 	TaskID      int64
 	WorkspaceID int64
+
+	// path flavour; nil = the host's. Tests set it so the Windows rules run on any OS.
+	plat *platform
+}
+
+// pl is the path flavour this request is judged under.
+func (r Request) pl() *platform {
+	if r.plat != nil {
+		return r.plat
+	}
+	return hostPlatform()
 }
 
 // SegmentDecision is the per-simple-command explanation `policy.test` shows

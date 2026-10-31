@@ -623,6 +623,7 @@ export function AppSidebar({
         group: "Actions",
         title: "New workspace",
         keywords: ["create", "add", "project", "repo"],
+        icon: "folderAdd",
         run: () => setCrud({ kind: "workspace" }),
       },
       {
@@ -630,6 +631,7 @@ export function AppSidebar({
         group: "Actions",
         title: "Settings: Providers",
         keywords: ["providers", "accounts", "credentials", "login", "oauth"],
+        icon: "credentials",
         run: () => onOpenSettings?.("providers"),
       },
       {
@@ -638,6 +640,7 @@ export function AppSidebar({
         title: "Settings: Agents",
         keywords: ["profiles", "agents"],
         action: "settings.open",
+        icon: "settings",
         run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
       },
       {
@@ -645,6 +648,7 @@ export function AppSidebar({
         group: "Settings",
         title: "New agent…",
         keywords: ["create", "profile", "agent"],
+        icon: "agent",
         run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
       },
     ];
@@ -659,6 +663,7 @@ export function AppSidebar({
           group: "Settings",
           title: "Settings: Daemon server",
           keywords: ["daemon", "server", "connection", "connections", "host", "remote", "relay", "url"],
+          icon: "host",
           run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "connections" } })),
         },
         {
@@ -666,6 +671,7 @@ export function AppSidebar({
           group: "Settings",
           title: "Settings: Daemon",
           keywords: ["daemon", "install", "update", "restart", "version", "managed", "take over"],
+          icon: "settings",
           run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "daemon" } })),
         },
       );
@@ -697,6 +703,7 @@ export function AppSidebar({
             ? "New task"
             : `New task in ${ws.Title || ws.Path}`,
         keywords: ["create", "add", ws.Title, ws.Path],
+        icon: "newTask",
         run: () => setCrud({ kind: "task", workspace: ws, spaceId: null }),
       });
     }

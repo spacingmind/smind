@@ -12,6 +12,7 @@
  */
 
 import type { ActionId } from "@/keyboard/actions";
+import type { IconName } from "@/lib/icons";
 
 export interface Command {
   /** Unique within its source; the registry namespaces it with the source id. */
@@ -32,6 +33,8 @@ export interface Command {
    * rebound shortcut shows its new keys with no work here.
    */
   action?: ActionId;
+  /** Registry icon for the row; defaults to the group's icon. */
+  icon?: IconName;
   run: () => void;
 }
 

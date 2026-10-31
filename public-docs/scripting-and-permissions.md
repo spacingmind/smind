@@ -133,6 +133,19 @@ smind policy test "git push origin my-branch"   # explain a decision, no side ef
 smind policy audit           # recent decisions (--json for scripts)
 ```
 
+### On Windows
+
+The engine works on Windows with the same rules. Paths may use drive letters
+(any case), UNC names, and `\` or `/`; comparison is case-insensitive, and links
+and junctions are resolved before comparing. `%USERPROFILE%`, `~` and `$HOME`
+are all your home. The always-denied list also covers `C:\Windows`, `Program
+Files`, `ProgramData` and `AppData`, and the PowerShell and cmd equivalents of
+`rm`, `copy` and `move`, `Get-Content` of secrets, `Get-ChildItem Env:`, and
+`iwr … | iex`. A command string passed to `powershell -Command` or `cmd /c` is
+never looked into, so it is always asked. Anything the engine cannot place on
+Windows (`C:foo`, `\\.\pipe`, `file:stream`, trailing dots) is asked or denied,
+never allowed.
+
 This does not narrow a provider mode that already approves everything
 (`bypassPermissions`, `--auto-accept`): those requests never reach smind. It is
 a convenience for your own routine commands, not a sandbox.

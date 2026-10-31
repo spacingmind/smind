@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -29,12 +30,14 @@ func TestCLI_PolicyInitWritesTemplateWithZeroAllowRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("file mode = %v, want 0600", info.Mode().Perm())
-	}
-	dir, err := os.Stat(filepath.Dir(path))
-	if err != nil || dir.Mode().Perm() != 0o700 {
-		t.Errorf("dir = %v, %v; want 0700", dir, err)
+	if runtime.GOOS != "windows" {
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("file mode = %v, want 0600", info.Mode().Perm())
+		}
+		dir, err := os.Stat(filepath.Dir(path))
+		if err != nil || dir.Mode().Perm() != 0o700 {
+			t.Errorf("dir = %v, %v; want 0700", dir, err)
+		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

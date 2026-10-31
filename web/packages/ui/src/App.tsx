@@ -1719,6 +1719,7 @@ function ShellCommands({
         subtitle: "Plan windows for each account",
         keywords: ["quota", "limits", "plan", "5h", "weekly", "rate limit"],
         action: "usage.open",
+        icon: "usage",
         run: openUsageModal,
       },
       {
@@ -1728,6 +1729,7 @@ function ShellCommands({
         subtitle: `Currently ${preference}`,
         keywords: ["dark mode", "light mode", "appearance"],
         action: "theme.cycle",
+        icon: "appearance",
         run: () => {
           const order: ThemePreference[] = ["light", "dark", "system"];
           setPreference(order[(order.indexOf(preference) + 1) % order.length]!);

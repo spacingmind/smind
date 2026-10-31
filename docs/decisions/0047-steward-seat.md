@@ -142,6 +142,13 @@ These are the checks the Steward made by hand, hard-coded:
 The floor is the **only** place `deny` is non-negotiable; `deny` rules a human adds are in the same bucket for precedence but removable by editing the file. A floor `deny`
 resolves the request to a deny option immediately and the agent sees an ordinary "denied" with the floor id in the message, so it can adapt (use `git add <file>`).
 
+#### 2.1.1 Windows
+
+The engine runs on every OS (follow-up of release 0.17). The path flavour is chosen per request (`platform`), not by the daemon's build: a Windows request uses
+drive/UNC, case-insensitive and junction-aware path handling. The command splitter treats backslashes as Windows-literal path separators; a `\` before a shell
+metacharacter (`"`, `\`, `$`, a backtick) keeps the POSIX escape meaning. Paths the engine cannot place (`C:foo`, device paths, alternate streams, trailing dots) escalate or
+deny, never allow, and `powershell -Command` / `cmd /c` strings are never parsed, so they always escalate. See `docs/plans/active/permpolicy-windows.md`.
+
 #### 2.2 What it auto-approves and what it escalates
 
 Auto-approves **only** what the human's file says, restricted by the loader to narrow, path-scoped, per-seat rules. Ships with `smind policy init`, a **commented template that
