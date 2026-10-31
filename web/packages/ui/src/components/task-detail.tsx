@@ -23,7 +23,7 @@ import type { DeliverableContext } from "@/components/timeline/deliverable-card"
 import { useLocalPathActions } from "@/hooks/use-local-path-actions";
 import { continuePrompt } from "@/components/timeline/run-footer-model";
 import { ChatOutlineRail } from "@/components/timeline/chat-outline-rail";
-import { useAutoFollow } from "@/components/timeline/use-auto-follow";
+import { LOG_END_CLEARANCE_PX, useAutoFollow } from "@/components/timeline/use-auto-follow";
 import { useChatOutline } from "@/components/timeline/use-chat-outline";
 import { useChatFind } from "@/components/timeline/use-chat-find";
 import { Alert } from "@/components/ui/alert";
@@ -486,7 +486,7 @@ export function TaskDetailPane({
            * and only the chat tab gets it: files/diff/terminal render
            * their own full-width roots.
            */}
-          <div data-testid="run-log-column" className="mx-auto max-w-3xl">
+          <div data-testid="run-log-column" className="mx-auto max-w-3xl" style={{ paddingBottom: LOG_END_CLEARANCE_PX }}>
             {error && <Alert variant="error" description={error} />}
             {!error && runs === null && <InlineSpinner label="Loading runs…" />}
             {!error && runs !== null && runs.length === 0 && (
