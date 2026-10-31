@@ -133,7 +133,7 @@ export function GateSlot({
             e.stopPropagation();
             onAction?.();
           }}
-          className="h-6 shrink-0 rounded px-2 text-ui-sm font-medium text-foreground hover:bg-muted max-md:h-10 max-md:px-3"
+          className="h-6 shrink-0 rounded border border-transparent px-2 text-ui-sm font-medium text-foreground outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 max-md:h-10 max-md:px-3"
         >
           {actionLabel}
         </button>
