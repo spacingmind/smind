@@ -99,3 +99,9 @@ Fixes to the checker found by the dogfood pass above and by reading it against t
 - Existing tests in readiness_test.go keep passing unchanged.
 
 Mutations (one per fix, test must fail): FU1 put `check-types` back in the lint name match; FU2 skip the nested scan; FU3 skip workspace scripts; FU4 ignore `!` lines again.
+
+### Follow-ups: Progress and Validation
+
+- [x] FU1 lint vs typecheck, FU2 nested lockfiles, FU3 workspace test scripts, FU4 gitignore matcher, FU5 (found while running on the smind repo: `npm-stub/package.json` has no dependencies and must not need a lockfile; `go.mod` without `require` needs no `go.sum`).
+- Tests: `TestLint_TypecheckAloneIsNotLint`, `TestLockfiles_NestedPackages`, `TestTestCommand_WorkspacePackages`, `TestIgnores_Gitignore`, `TestCheckGitignore_Layouts`; `-race` passes. One mutation per fix, each failed its test: typeName guard removed (FU1), nested scan disabled (FU2), workspaceTest disabled (FU3), `!` ignored (FU4), hasDeps disabled (FU5).
+- Real check (library, read-only, before = origin/develop checker, after = this branch): smind `lockfiles` pass go.sum -> pass go.sum, desktop/, docs-site/, mobile/, web/bun.lock; landing without root test script: `test-command` warn -> pass `apps/web/package.json script test`; landing `lint-command` pass (check-types) -> warn with the typecheck note.
