@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { ApproveHostDialog } from "@/components/hosts/approve-host-dialog";
 import { HostRow } from "@/components/hosts/host-row";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { SettingsEmptyCard } from "@/components/settings/settings-layout";
@@ -11,6 +12,7 @@ import { LoadingRows } from "@/components/ui/loading-rows";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { useFleetHostActions, useFleetHosts } from "@/hooks/use-fleet-hosts";
 import { useLastDefined } from "@/hooks/use-last-defined";
+import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { REVERSE_GRANT_COPY } from "@/lib/fleet-types";
 import { Icons } from "@/lib/icons";
 
@@ -34,9 +36,11 @@ function HostsSection(_props: SettingsSectionContext) {
   const [busy, setBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
 
-  // WEB-2b renders the pairing review (SAS + grant) for this host; until then only the id is recorded.
+  // --- pairing review: typed SAS + grant, kept mounted while it closes
   const [reviewId, setReviewId] = useState<string | null>(null);
-  void reviewId;
+  const reviewTarget = useLastDefined(hosts?.find((h) => h.hostId === reviewId) ?? null);
+  const { workspaces: tree } = useWorkspaceTree();
+  const workspaces = (tree ?? []).map((w) => ({ id: w.ID, title: w.Title }));
 
   // --- reverse: turned on only behind the narrower-grant confirmation
   const [reverseId, setReverseId] = useState<string | null>(null);
@@ -120,6 +124,17 @@ function HostsSection(_props: SettingsSectionContext) {
           </ul>
         )}
       </section>
+
+      {reviewTarget && (
+        <ApproveHostDialog
+          host={reviewTarget}
+          workspaces={workspaces}
+          open={reviewId !== null}
+          onOpenChange={(open) => {
+            if (!open) setReviewId(null);
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={reverseId !== null}

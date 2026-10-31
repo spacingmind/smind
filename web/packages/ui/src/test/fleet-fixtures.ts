@@ -33,12 +33,18 @@ export function fleetHost(over: Partial<FleetHost> = {}): FleetHost {
 export class FleetDaemon extends FakeUsageDaemon {
   hosts: FleetHost[] = [];
   off = false;
+  /** Answers `workspace.list` (the approve dialog's write-workspace picker); their spaces and tasks are empty. */
+  workspaceRows: { ID: number; Title: string }[] = [];
 
   constructor() {
     super([]);
     const holder = this.client as unknown as { call: (m: string, p?: unknown) => Promise<unknown> };
     const inner = holder.call;
     holder.call = async (method, params) => {
+      if (method === "workspace.list") {
+        this.calls.push({ method, params });
+        return this.workspaceRows;
+      }
       if (!method.startsWith("fleet.host.")) return inner.call(this.client, method, params);
       this.calls.push({ method, params });
       if (this.off) throw new Error("method not found: " + method);

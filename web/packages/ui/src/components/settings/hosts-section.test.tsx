@@ -138,4 +138,87 @@ describe("settings-hosts section", () => {
     expect(removals).toHaveLength(1);
     expect(removals[0]!.params).toEqual({ hostId: "h1abc" });
   });
+
+  const FORWARD_GRANT = {
+    ops: ["read", "create", "send", "stop"],
+    workspacesRead: { all: true },
+    workspacesWrite: [7],
+    providers: [],
+    maxLiveAgents: 2,
+    maxWallSeconds: 7200,
+    maxCostUsd: 5,
+  };
+
+  function pendingBox(grant = FORWARD_GRANT): FleetDaemon {
+    const d = new FleetDaemon();
+    d.workspaceRows = [{ ID: 7, Title: "api" }];
+    d.hosts = [
+      fleetHost({
+        hostId: "h5box",
+        alias: "box",
+        label: "Box",
+        state: "pending",
+        pendingApproval: true,
+        link: "connecting",
+        sas: "123456",
+        inbound: { enabled: false, grant },
+      }),
+    ];
+    return d;
+  }
+
+  function type(value: string) {
+    fireEvent.change(screen.getByTestId("approve-sas-input"), { target: { value } });
+  }
+
+  it("TestHostsPage_SASNeverAutoConfirmed", async () => {
+    const d = pendingBox();
+    await renderSection(d);
+
+    await click(screen.getByTestId("host-review-box"));
+    expect(screen.getByTestId("approve-host-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("approve-sas")).toHaveTextContent("123 456");
+    expect(screen.getByTestId("approve-sas-input")).toHaveValue("");
+
+    const approve = screen.getByTestId("approve-confirm");
+    expect(approve).toBeDisabled();
+    await click(approve);
+    expect(d.callsOf("fleet.host.approve")).toHaveLength(0);
+
+    type("123 457");
+    await flush();
+    expect(approve).toBeDisabled();
+
+    type("123 456");
+    await flush();
+    expect(approve).toBeEnabled();
+
+    await click(approve);
+    const calls = d.callsOf("fleet.host.approve");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].params).toEqual({ hostId: "h5box", sas: "123456", grant: FORWARD_GRANT });
+    await waitFor(() => expect(screen.queryByTestId("approve-host-dialog")).toBeNull());
+  });
+
+  it("TestHostsPage_GrantRequiresWriteWorkspace", async () => {
+    const d = pendingBox({ ...FORWARD_GRANT, workspacesWrite: [] });
+    await renderSection(d);
+
+    await click(screen.getByTestId("host-review-box"));
+    type("123456");
+    await flush();
+    const approve = screen.getByTestId("approve-confirm");
+    expect(approve).toBeDisabled();
+    expect(screen.getByTestId("grant-write-required")).toBeInTheDocument();
+
+    await click(screen.getByTestId("grant-ws-7"));
+    expect(approve).toBeEnabled();
+    expect(screen.queryByTestId("grant-write-required")).toBeNull();
+
+    await click(screen.getByTestId("grant-ws-7"));
+    expect(approve).toBeDisabled();
+    for (const op of ["create", "send", "stop"]) await click(screen.getByTestId(`grant-op-${op}`));
+    expect(approve).toBeEnabled();
+    expect(screen.queryByTestId("grant-write-required")).toBeNull();
+  });
 });
