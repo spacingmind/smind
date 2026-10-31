@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func newPrivDir(t *testing.T, mode os.FileMode) string {
@@ -254,9 +256,7 @@ func TestSandboxEnv_LauncherRefusesSymlinkOrWorldWritableDir(t *testing.T) {
 	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(victim, filepath.Join(d, "claude-launcher.sh")); err != nil {
-		t.Fatal(err)
-	}
+	testutil.SymlinkOrSkip(t, victim, filepath.Join(d, "claude-launcher.sh"))
 	if _, err := WriteLauncher(d, "/bin/true", nil, filepath.Join(d, "p")); err == nil {
 		t.Error("a pre-planted symlink was followed")
 	}
@@ -271,9 +271,7 @@ func TestSandboxEnv_LauncherRefusesSymlinkOrWorldWritableDir(t *testing.T) {
 	}
 	real := newPrivDir(t, 0o700)
 	linkDir := filepath.Join(t.TempDir(), "linkdir")
-	if err := os.Symlink(real, linkDir); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, real, linkDir)
 	if _, err := WriteLauncher(linkDir, "/bin/true", nil, filepath.Join(linkDir, "p")); err == nil {
 		t.Error("a symlinked launcher dir was accepted")
 	}

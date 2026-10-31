@@ -14,6 +14,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/fleet/identity"
+	"github.com/spacingmind/smind/internal/securefile"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -120,12 +121,14 @@ func TestFleetOffIsByteForByte(t *testing.T) {
 	}
 
 	// (d) A corrupt host key is an incident, not a regenerated identity.
+	// securefile.WriteFile, not os.WriteFile: on Windows only a restricted DACL
+	// passes the private-file check that runs before the corrupt-seed check.
 	corruptHome := filepath.Join(t.TempDir(), "fleet")
 	if err := os.MkdirAll(corruptHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	corruptPath := filepath.Join(corruptHome, identity.KeyFile)
-	if err := os.WriteFile(corruptPath, []byte("garbage\n"), 0o600); err != nil {
+	if err := securefile.WriteFile(corruptPath, []byte("garbage\n")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadIdentity(corruptHome, on); !errors.Is(err, identity.ErrCorrupt) {

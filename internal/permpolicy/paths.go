@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/fsutil"
 )
 
 // ResolvePath makes p absolute and resolves every symlink in it, so a `..`
@@ -71,7 +73,7 @@ func (pl *platform) resolve(p, cwd string) (string, error) {
 			return "", fmt.Errorf("resolve path %q: %w", p, err)
 		}
 		// Go reports a Windows junction as irregular, not as a symlink.
-		if info, lerr := pl.fs.Lstat(cur); lerr == nil && info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+		if info, lerr := pl.fs.Lstat(cur); lerr == nil && fsutil.IsLink(info.Mode()) {
 			if hops >= maxLinkHops {
 				return "", fmt.Errorf("resolve path %q: more than %d link hops", p, maxLinkHops)
 			}

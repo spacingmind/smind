@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 const secretSentinel = "SENTINEL-s3cr3t-token-91f2"
@@ -418,6 +419,17 @@ func TestContributions_SymlinkInSkillRejected(t *testing.T) {
 	}
 	if _, err := e.m.Install(bg, src); err == nil {
 		t.Fatal("a symlink anywhere in the plugin must be rejected")
+	}
+}
+
+// A directory junction inside a plugin's skill (Windows; ModeIrregular, not
+// ModeSymlink) is rejected like a symlink.
+func TestContributions_JunctionInSkillRejected(t *testing.T) {
+	e := newContribEnv(t, nil)
+	src := writePluginDir(t, manifestWith("demo", "1.0.0", `"contributes":{"skills":["skills/x"]}`), map[string]string{"skills/x/SKILL.md": "ok"})
+	testutil.Link(t, t.TempDir(), filepath.Join(src, "skills/x/leak"))
+	if _, err := e.m.Install(bg, src); err == nil {
+		t.Fatal("a junction anywhere in the plugin must be rejected")
 	}
 }
 

@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/fsutil"
 )
 
 const truncatedMarker = "\n[truncated]\n"
@@ -115,7 +117,7 @@ func copySanitized(src, dst string, top bool, total *int64) error {
 			continue // vanished: the arm is over, not running
 		}
 		switch {
-		case fi.Mode()&os.ModeSymlink != 0:
+		case fsutil.IsLink(fi.Mode()):
 			continue
 		case fi.IsDir():
 			if err := os.Mkdir(to, 0o700); err != nil {

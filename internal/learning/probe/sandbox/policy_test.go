@@ -8,6 +8,8 @@ import (
 	"time"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 type policyFixture struct {
@@ -30,9 +32,7 @@ func newPolicyFixture(t *testing.T) policyFixture {
 	if err := os.WriteFile(filepath.Join(f.sibling, "REAL.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(f.sibling, filepath.Join(f.arm, "link")); err != nil {
-		t.Fatal(err)
-	}
+	testutil.SymlinkOrSkip(t, f.sibling, filepath.Join(f.arm, "link"))
 	f.p = &Policy{ArmDir: f.arm, ReadOnlyDirs: []string{f.proj}, AllowBash: func(c string) bool { return c == "allowed-cmd" }}
 	return f
 }
