@@ -87,17 +87,13 @@ func hasPercentVar(w string) bool {
 }
 
 // nonPathWord reports a Windows word that cannot name a path that escapes
-// anything: it failed with errUnrepresentable but is a URL (https://x,
-// ssh://git@h/x; a single letter before "://" is a drive), a refspec or
-// key:value word (no backslash, a ':' at index >= 2 with no '/' before it), or
-// it has no separator and no drive prefix (a commit message "feat: x", "a|b",
+// anything: it failed with errUnrepresentable but is a refspec, key:value
+// word or URL (https://x, ssh://git@h/x: no backslash, a ':' at index >= 2
+// with no '/' before it; a single letter before ':' is a drive), or it has no separator and no drive prefix (a commit message "feat: x", "a|b",
 // a trailing-dot name). It is skipped rather than aborting the call.
 func (pl *platform) nonPathWord(w string, err error) bool {
 	if !pl.windows || !errors.Is(err, errUnrepresentable) {
 		return false
-	}
-	if isURLWord(w) {
-		return true
 	}
 	if !strings.Contains(w, `\`) {
 		if i := strings.IndexByte(w, ':'); i >= 2 && !strings.Contains(w[:i], "/") {
@@ -108,20 +104,4 @@ func (pl *platform) nonPathWord(w string, err error) bool {
 		return false
 	}
 	return !(len(w) >= 2 && isLetter(w[0]) && w[1] == ':')
-}
-
-// isURLWord matches ^[A-Za-z][A-Za-z0-9+.-]*:// with a scheme of two or more
-// characters.
-func isURLWord(w string) bool {
-	i := strings.Index(w, "://")
-	if i < 2 || !isLetter(w[0]) {
-		return false
-	}
-	for j := 1; j < i; j++ {
-		c := w[j]
-		if !isLetter(c) && !(c >= '0' && c <= '9') && !strings.ContainsRune("+.-", rune(c)) {
-			return false
-		}
-	}
-	return true
 }
