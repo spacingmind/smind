@@ -107,6 +107,11 @@ var skipDirs = map[string]bool{
 	"gen": true, "Pods": true, "ios": true, "android": true,
 }
 
+// skipPaths are generated build output (the embedded web UI bundles), never source.
+var skipPaths = map[string]bool{
+	"desktop/ui/app": true, "internal/server/dist": true, "web/packages/ui/dist": true,
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -157,7 +162,11 @@ func scanTree(t *testing.T, root string) []finding {
 			return err
 		}
 		if d.IsDir() {
-			if skipDirs[d.Name()] && path != root {
+			if path == root {
+				return nil
+			}
+			rel, _ := filepath.Rel(root, path)
+			if skipDirs[d.Name()] || skipPaths[filepath.ToSlash(rel)] {
 				return filepath.SkipDir
 			}
 			return nil
