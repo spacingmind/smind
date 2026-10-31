@@ -388,3 +388,34 @@ describe("continuePrompt", () => {
     expect(continuePrompt({ status: "error" })).toContain("an unexpected error");
   });
 });
+
+describe("describeRunFooter failure classes", () => {
+  const act = (kind: string, extra: Record<string, unknown> = {}) => ({ kind, label: "x", ...extra });
+
+  it("auth_expired: a danger sentence and no Retry (retrying cannot work until sign-in)", () => {
+    const v = describeRunFooter(freshRun({ status: "error", failureKind: "auth_expired", failureAction: act("sign_in") }), { now: NOW, modelLabel: "" });
+    expect(v).toMatchObject({ kind: "abnormal", sentence: "Signed out", tone: "danger", action: null });
+  });
+
+  it("model_not_in_plan: a danger sentence and no Retry on the same model", () => {
+    const v = describeRunFooter(freshRun({ status: "error", failureKind: "model_not_in_plan", failureAction: act("pick_model") }), { now: NOW, modelLabel: "" });
+    expect(v).toMatchObject({ sentence: "Model not in your plan", tone: "danger", action: null });
+  });
+
+  it("transient_429 retrying: a warning sentence naming the attempt, no Retry yet; spent: Retry", () => {
+    const retrying = describeRunFooter(freshRun({ status: "error", failureKind: "transient_429", failureAction: act("auto_retry", { attempt: 1, max: 2, nextAt: "2026-10-13T12:00:30Z" }) }), { now: NOW, modelLabel: "" });
+    expect(retrying).toMatchObject({ sentence: "Provider busy · retrying (1 of 2)", tone: "warning", action: null });
+    const spent = describeRunFooter(freshRun({ status: "error", failureKind: "transient_429", failureAction: act("retry_now") }), { now: NOW, modelLabel: "" });
+    expect(spent).toMatchObject({ sentence: "Provider busy for a moment", tone: "warning", action: "retry" });
+  });
+
+  it("plan_window_exhausted keeps the rate-limit sentence with its reset", () => {
+    const v = describeRunFooter(freshRun({ status: "error", failureKind: "plan_window_exhausted", failureWindow: "5h", failureResetAt: "2026-10-13T14:00:00Z" }), { now: NOW, modelLabel: "" });
+    expect(v.sentence).toMatch(/^Rate limited \(5h window\) · resets/);
+    expect(v.tone).toBe("warning");
+  });
+
+  it("an old daemon (no action) still reads sensibly for the new kinds", () => {
+    expect(describeRunFooter(freshRun({ status: "error", failureKind: "auth_expired" }), { now: NOW, modelLabel: "" }).sentence).toBe("Signed out");
+  });
+});
