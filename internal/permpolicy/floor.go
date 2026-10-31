@@ -36,9 +36,16 @@ func CheckFloor(req Request, p Parsed) (FloorHit, bool) {
 	if cwd == "" {
 		cwd = req.Worktree
 	}
+	// Compared with resolved roots later, so the start must be resolved too.
+	if cwd != "" {
+		cwd, _ = resolveFloor(req, cwd, "")
+	}
 	for _, seg := range p.Segments {
 		fs := newFloorSeg(req, seg, cwd)
 		if h, ok := fs.gitRules(); ok {
+			return h, true
+		}
+		if h, ok := fs.pathRules(); ok {
 			return h, true
 		}
 		cwd = fs.cwdAfter()
@@ -171,14 +178,7 @@ func (fs *floorSeg) cwdAfter() string {
 	if len(args) == 0 {
 		return floorHome(fs.req)
 	}
-	if dynamicWord(args[0]) && !strings.HasPrefix(args[0], "$HOME") && !strings.HasPrefix(args[0], "${HOME}") {
-		return ""
-	}
-	dir, err := ResolvePath(args[0], fs.cwd)
-	if err != nil {
-		return ""
-	}
-	return dir
+	return fs.chdir(fs.cwd, args[0])
 }
 
 // floorHome is the human's real home: the request's, else the process's.
@@ -246,11 +246,8 @@ func (fs *floorSeg) parseGit() (gitCall, bool) {
 
 // chdir applies a -C style directory word to cwd; "" is unknown.
 func (fs *floorSeg) chdir(cwd, dir string) string {
-	if dynamicWord(dir) && !strings.HasPrefix(dir, "$HOME") && !strings.HasPrefix(dir, "${HOME}") {
-		return ""
-	}
-	resolved, err := ResolvePath(dir, cwd)
-	if err != nil {
+	resolved, ok := resolveFloor(fs.req, dir, cwd)
+	if !ok {
 		return ""
 	}
 	return resolved
