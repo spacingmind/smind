@@ -93,6 +93,7 @@ import { WindowSidebarToggle } from "@/components/window-sidebar-toggle";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
 import { formatTabTitle } from "@/lib/tab-title";
+import { SHELL_FRAME_INSET_CLASS, SHELL_FRAME_PANEL_CLASS } from "@/lib/shell-frame";
 import { resolveSplitDropPosition, type SplitDropZonePosition } from "@/lib/split-drop-zone";
 import { cn } from "@/lib/utils";
 import {
@@ -1229,7 +1230,7 @@ function AppShell({
       className={cn(
         "flex min-h-0 flex-1 flex-col overflow-hidden bg-panel",
         // Under the lights the corner and the left border would cut through them: the bar and the rail seam draw the separation below the bar instead (the transparent top border keeps the header on the same line as when expanded).
-        !isMobile && (lightsBar ? "border-t border-t-transparent" : "rounded-tl-xl border-t border-l"),
+        !isMobile && (lightsBar ? "border-t border-t-transparent" : SHELL_FRAME_PANEL_CLASS),
       )}
     >
       {headerElement}
@@ -1365,7 +1366,9 @@ function AppShell({
               {...sidebarResize}
             />
           )}
-          <SidebarInset className="h-full min-w-0 flex-1 bg-sidebar">{contentPanelElement}</SidebarInset>
+          <SidebarInset className={cn("h-full min-w-0 flex-1 bg-sidebar", !isMobile && !lightsBar && SHELL_FRAME_INSET_CLASS)}>
+            {contentPanelElement}
+          </SidebarInset>
         </div>
       )}
       <QuickOpen

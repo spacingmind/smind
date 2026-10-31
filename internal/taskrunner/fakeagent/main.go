@@ -255,6 +255,7 @@ func handle(msg message, sessionCwd *string) {
 		dumpMcpServers(params.McpServers)
 		*sessionCwd = params.Cwd
 		recordSessionInitMethod(params.Cwd, "session/new")
+		dumpEnvOnce(params.Cwd)
 		result := map[string]any{
 			"sessionId":     sessionID,
 			"configOptions": defaultConfigOptions(),
@@ -303,6 +304,23 @@ func handle(msg message, sessionCwd *string) {
 			}
 		}
 	}
+}
+
+// dumpEnvOnce writes the agent's whole environment (os.Environ(), one
+// KEY=value per line) to an "env-all" file in the session's cwd, so tests
+// can assert what the daemon's launch env gave the agent. Opt-in
+// (FAKE_DUMP_ENV=1, inherited from the test process) and once-only, so an
+// ordinary run leaves its worktree clean and a later resume of the same
+// session keeps the file its first launch wrote.
+func dumpEnvOnce(cwd string) {
+	if os.Getenv("FAKE_DUMP_ENV") != "1" || cwd == "" {
+		return
+	}
+	p := filepath.Join(cwd, "env-all")
+	if _, err := os.Stat(p); err == nil {
+		return
+	}
+	_ = os.WriteFile(p, []byte(strings.Join(os.Environ(), "\n")), 0o644)
 }
 
 // liveOpts, set by a "live-opts" os.Args entry, adds an uncategorized

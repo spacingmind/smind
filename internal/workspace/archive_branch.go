@@ -258,6 +258,7 @@ func (m *Manager) ArchiveTaskWith(id int64, opt ArchiveOptions) (store.Task, err
 	if err != nil {
 		return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)
 	}
+	m.closedScratch(id)
 	if deleted {
 		if t, err = m.store.SetTaskBranchDeleted(id); err != nil {
 			return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)

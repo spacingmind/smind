@@ -111,6 +111,7 @@ An unknown provider id under `providers.<id>` is an error. See
 | Key | Default | Notes |
 | --- | --- | --- |
 | `agents.glm.maxTurns` | unset | Turn limit passed to the GLM agent. From 1 to 10000. Unset keeps the agent's own default. |
+| `agents.sharedCaches` | `true` | Agent runs reuse your normal Go, npm and bun caches (`GOMODCACHE`, `GOCACHE`, `npm_config_cache`, `BUN_INSTALL_CACHE_DIR`), so a temporary `HOME` does not re-download or rebuild. A value the agent's own env already sets is never overridden. |
 
 ### accountUsage
 

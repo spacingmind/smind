@@ -320,7 +320,7 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     const toggle = await screen.findByRole("button", { name: "Toggle Sidebar" });
     expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
     expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
-    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("dark:rounded-tl-xl", "dark:border-l");
     toggle.focus();
     fireEvent.click(toggle);
     expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })[0]).toBe(toggle);
@@ -335,7 +335,7 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     // Fullscreen: no lights, the normal panel (and no bar) is back.
     act(() => win.emit({ maximized: false, fullscreen: true }));
     expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
-    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("dark:rounded-tl-xl", "dark:border-l");
     expect(screen.getByTestId("app-main-content")).not.toHaveClass("border-l");
     // ... and the strip/header reclaim the lights' zone: the toggle moves to the rail, strip pads 46, header needs no inset.
     expect(screen.getByTestId("window-sidebar-toggle").style.left).toBe("10px");
@@ -383,7 +383,7 @@ describe("window-level sidebar toggle (desktop shell)", () => {
       screen.getByTestId("sidebar-content").parentElement!.dispatchEvent(e);
     });
     expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
-    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("dark:rounded-tl-xl", "dark:border-l");
     expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
   });
 
@@ -396,7 +396,7 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
     expect(screen.getByTestId("sidebar-rail-inset")).toBeInTheDocument();
     expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
-    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("dark:rounded-tl-xl", "dark:border-l");
   });
 
   it("compact layout: no window-level toggle; the header hosts the single toggle past the lights", async () => {
