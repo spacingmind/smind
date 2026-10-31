@@ -11,6 +11,7 @@ import (
 	"github.com/spacingmind/smind/internal/inbox"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/tasktree"
 	"github.com/spacingmind/smind/internal/validation"
 )
 
@@ -74,6 +75,23 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 				}
 			}
 			return out, nil
+		},
+		FailedRuns: func() []inbox.FailedRun {
+			var out []inbox.FailedRun
+			for taskID, f := range reg.TaskRunFacts() {
+				if f.State != tasktree.StateError || f.FailureKind == "" || f.FailureRunID == "" {
+					continue
+				}
+				if t, err := db.GetTask(taskID); err != nil || t.ArchivedAt != nil {
+					continue
+				}
+				fr := inbox.FailedRun{RunID: f.FailureRunID, TaskID: taskID, Kind: f.FailureKind, Action: f.FailureAction}
+				if f.FailureFinishedAt != nil {
+					fr.FinishedAt = f.FailureFinishedAt.UTC()
+				}
+				out = append(out, fr)
+			}
+			return out
 		},
 		Stalls:    stalled.current,
 		HostPairs: hostPairs,

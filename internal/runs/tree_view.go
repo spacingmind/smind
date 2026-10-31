@@ -28,6 +28,10 @@ type TaskRunFact struct {
 	FailureResetInferred bool
 	// FailureAction is the latest finished run's next action, derived.
 	FailureAction *failure.Action
+	// FailureRunID/FailureFinishedAt identify that run (set with FailureKind);
+	// the inbox keys its run_failed item on them.
+	FailureRunID      string
+	FailureFinishedAt *time.Time
 }
 
 // taskRunFactSnapshot is one run's contribution to TaskRunFacts, read
@@ -48,6 +52,7 @@ type taskRunFactSnapshot struct {
 	provider             string
 	model                string
 	action               *failure.Action
+	finishedAt           *time.Time
 }
 
 // TaskRunFacts summarizes the registry's in-memory runs per task id in
@@ -79,6 +84,7 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			provider:             string(r.provider),
 			model:                r.model,
 			action:               r.failureAction(),
+			finishedAt:           cloneTimePtr(r.finishedAt),
 		})
 		r.mu.Unlock()
 	}
@@ -137,6 +143,8 @@ func (reg *Registry) TaskRunFacts() map[int64]TaskRunFact {
 			f.FailureResetAt = a.latest.failureResetAt
 			f.FailureResetInferred = a.latest.failureResetInferred
 			f.FailureAction = a.latest.action
+			f.FailureRunID = a.latest.id
+			f.FailureFinishedAt = a.latest.finishedAt
 		} else {
 			f.State = tasktree.StateIdle
 		}
