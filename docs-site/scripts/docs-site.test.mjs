@@ -4,6 +4,9 @@ import path from 'node:path'
 import test from 'node:test'
 import {
   AI_CRAWLERS,
+  OG_IMAGE_HEIGHT,
+  OG_IMAGE_URL,
+  OG_IMAGE_WIDTH,
   REPO_ROOT,
   buildLlmsFullTxt,
   buildLlmsTxt,
@@ -79,6 +82,40 @@ test('jsonld', () => {
   const faq = { slug: 'x', fm: { title: 'X', description: 'd', summary: 's' }, body: '# X\n\n## Does it work?\n\nYes, it does.\n\n## Other\n\ntext\n' }
   assert.deepEqual(extractFaq(faq.body), [{ q: 'Does it work?', a: 'Yes, it does.' }])
   assert.ok(jsonLd(faq).some((g) => g['@type'] === 'FAQPage'))
+})
+
+test('og card', () => {
+  const png = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', 'assets', 'og-card.png'))
+  assert.ok(png.length < 200000, `og-card.png too large: ${png.length} bytes`)
+  assert.ok(png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), 'og-card.png is not a PNG')
+  assert.equal(png.readUInt32BE(16), OG_IMAGE_WIDTH, 'PNG IHDR width')
+  assert.equal(png.readUInt32BE(20), OG_IMAGE_HEIGHT, 'PNG IHDR height')
+  assert.equal(OG_IMAGE_WIDTH, 1200)
+  assert.equal(OG_IMAGE_HEIGHT, 630)
+  assert.ok(OG_IMAGE_URL.startsWith('https://docs.spacingmind.com/'), OG_IMAGE_URL)
+  assert.ok(OG_IMAGE_URL.endsWith('/og-card.png'), OG_IMAGE_URL)
+  for (const p of pages) {
+    const graph = jsonLd(p)
+    const article = graph.find((g) => g['@type'] === 'TechArticle')
+    assert.equal(article.image, OG_IMAGE_URL, `${p.file}: TechArticle image`)
+    const app = graph.find((g) => g['@type'] === 'SoftwareApplication')
+    if (app) assert.equal(app.image, OG_IMAGE_URL, `${p.file}: SoftwareApplication image`)
+  }
+  const config = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', '.vitepress', 'config.mts'), 'utf8')
+  assert.ok(config.includes("'summary_large_image'"), 'config: summary_large_image')
+  assert.ok(config.includes("'og:image'"), 'config: og:image')
+  assert.ok(config.includes("'twitter:image'"), 'config: twitter:image')
+  assert.ok(config.includes('og-card.png'), 'config: og-card.png copy')
+})
+
+test('code block language label is readable', () => {
+  const css = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', '.vitepress', 'theme', 'custom.css'), 'utf8')
+  assert.match(css, /span\.lang\s*\{[^}]*--vp-c-text-2/)
+})
+
+test('syntax theme is high contrast', () => {
+  const config = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', '.vitepress', 'config.mts'), 'utf8')
+  assert.ok(config.includes('github-light-high-contrast'), 'config: github-light-high-contrast')
 })
 
 test('version line from manifest', () => {
