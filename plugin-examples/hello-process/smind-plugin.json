@@ -12,11 +12,17 @@
   ],
   "contributes": {
     "rpc": [
-      { "name": "echoPrompt", "description": "Returns {prompt} built from the greeting setting and the command's text.", "timeoutMs": 5000 }
+      { "name": "echoPrompt", "description": "Returns {prompt} built from the greeting setting and the command's text.", "timeoutMs": 5000 },
+      { "name": "helloView", "description": "Returns the ui:1 document of the Hello task panel.", "timeoutMs": 5000 }
     ],
     "commands": [
       { "name": "hello", "description": "Insert a greeting prompt (answered by the plugin process)", "rpc": "echoPrompt" }
     ],
-    "hooks": [{ "event": "run.finished" }]
+    "hooks": [{ "event": "run.finished" }],
+    "panels": [
+      { "id": "hello", "title": "Hello", "icon": "Hand", "where": "task", "view": { "rpc": "helloView" } },
+      { "id": "about", "title": "About hello-process", "icon": "Info", "where": "sidebar", "view": { "file": "views/about.json" } }
+    ],
+    "sidebar": [{ "id": "about", "title": "Hello", "icon": "Hand", "opens": "about" }]
   }
 }
