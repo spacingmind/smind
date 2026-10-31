@@ -107,6 +107,23 @@ describe("intent card bodies", () => {
     expect(within(diff).getByText("+after")).toBeInTheDocument();
   });
 
+  it("edit with ACP diff content renders a diff, not raw JSON", () => {
+    render(
+      <ToolCall
+        item={call({
+          toolName: "Edit",
+          input: { file_path: "/wt/a.go" },
+          result: [{ type: "diff", path: "/wt/a.go", oldText: "before", newText: "after" }],
+        })}
+      />,
+    );
+    expand();
+    const diff = screen.getByTestId("tool-detail-diff");
+    expect(within(diff).getByText("-before")).toBeInTheDocument();
+    expect(within(diff).getByText("+after")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('"type": "diff"');
+  });
+
   it("search shows the query and the hit count", () => {
     render(
       <ToolCall item={call({ toolName: "Grep", input: { pattern: "TODO", path: "internal" }, result: "a.go\nb.go\nc.go" })} />,
