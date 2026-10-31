@@ -46,6 +46,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -100,6 +101,11 @@ func (a *seatAdmission) callerSeat(rc *requestContext) (p store.AgentProfile, ok
 // managed profile with an empty policy (not reachable through the profile
 // registry, which normalises it to "none") is treated as "none".
 func mayLaunch(seat, target store.AgentProfile) bool {
+	// Only the daemon starts the steward seat (ADR-0047 §1): a Lead can
+	// never launch it, whatever its childPolicy allows.
+	if target.Name == steward.SeatProfileName {
+		return false
+	}
 	switch seat.ChildPolicy {
 	case "leaf":
 		return target.OrchestrationTools != nil && !*target.OrchestrationTools

@@ -200,6 +200,9 @@ type Registry struct {
 	// runEnvSource supplies a run's extra MCP environment by task (ADR-0045:
 	// the validator seat's verdict entry). Nil = none.
 	runEnvSource func(taskID int64) (map[string]string, bool)
+	// seatSource supplies a daemon-owned seat's spec by task (ADR-0047: the
+	// Steward review seat). Nil = none.
+	seatSource func(taskID int64) (SeatSpec, bool)
 
 	// archiving holds the task ids currently mid-archive (TryBeginArchive
 	// adds, its release func removes). While a task id is in it, every
@@ -1254,6 +1257,16 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 			PermissionResolution: PermissionResolvedBySystem,
 		})
 		return optionID, "", nil
+	}
+
+	// A daemon-owned seat's floor (ADR-0047) judges every request before
+	// AutoAccept and the policy engine: it is always on, never parks a
+	// request and never notifies, and allow=false resolves to a deny.
+	if optionID, denyReason, handled := d.applySeatFloor(requestID, summary, detail, options); handled {
+		if optionID == "" {
+			return "", "", fmt.Errorf("runs: seat floor: no reject option offered for request %q: %+v", requestID, options)
+		}
+		return optionID, denyReason, nil
 	}
 
 	// AutoAccept (ACP only, validated at Start): the human chose to approve

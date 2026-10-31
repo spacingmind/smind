@@ -42,6 +42,12 @@ func TestMCPCatalog_HasNoPolicyTool(t *testing.T) {
 	}
 	fset := token.NewFileSet()
 	scanned := 0
+	// ADR-0047 §6's one exception: the steward seat's own entry file may
+	// name exactly its two steward.* daemon methods; every other literal,
+	// there and elsewhere, still fails.
+	seatMethodExceptions := map[string]map[string]bool{
+		"mcp_steward_seat.go": {"steward.digest.get": true, "steward.verdict.submit": true},
+	}
 	for _, name := range files {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
@@ -57,6 +63,9 @@ func TestMCPCatalog_HasNoPolicyTool(t *testing.T) {
 				return true
 			}
 			if s, _ := strconv.Unquote(lit.Value); strings.HasPrefix(s, "policy.") || strings.HasPrefix(s, "steward.") {
+				if seatMethodExceptions[name][s] {
+					return true
+				}
 				t.Errorf("%s: MCP code references daemon method %q", fset.Position(lit.Pos()), s)
 			}
 			return true

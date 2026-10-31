@@ -23,6 +23,7 @@ import (
 	"github.com/spacingmind/smind/internal/plugins/skilldelivery"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
@@ -350,6 +351,12 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		hs[method] = h
 	}
 	hs["validation.request"] = newValidationSeat(valSvc, wm, db, reg, runner, profReg).request
+	stewardSvc := newStewardService(db, bus, valSvc)
+	stewardH := newStewardHost(stewardHostOptions{Svc: stewardSvc, Rails: &steward.Rails{Store: db, Config: configSteward}, Collect: newStewardCollector(db, valSvc, gitSvc).collect, WM: wm, DB: db, Reg: reg, Runner: runner, ProfReg: profReg})
+	for method, h := range stewardHandlers(stewardH) {
+		hs[method] = h
+	}
+	reg.AddObserver(newStewardObserver(stewardH, db))
 	hs["session.identify"] = handleSessionIdentify(reg)
 	inboxH := newInboxHost(db, bus, reg, newValidationService(db, bus), stalled, fleetInboxPairs(db, configFleetEnabled))
 	for method, h := range inboxHandlers(inboxH) {

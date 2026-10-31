@@ -225,6 +225,29 @@ tree heals itself instead of stalling.
 - After accepting a Peer's candidate (its commits are on the branch the Lead
   will push), the Lead archives the Peer's task.
 
+## Steward review (ADR-0047)
+
+A **steward review** is a second, read-only judgement of one finished work item: the
+`steward` seat (a fourth role-pack profile) reads the exact head commit in a detached
+scratch worktree — never the Lead's worktree — against a digest of objective gates the
+daemon computes itself (CI at head, validator verdict at head, frame freshness,
+binaries, churn, secrets, stacking, PR hygiene, scope, committed mutations, Peer
+claims). The seat has only Read/Grep/Glob plus `steward_digest_get` and
+`steward_verdict_submit`. Its verdict is `ACCEPTED`, `CHANGES` or `BLOCKED`, clamped by
+the daemon to the gates: the seat can lower a verdict, never raise one. A review goes
+**stale** when the head moves, a newer contract version appears, or a newer review does.
+
+A Lead does not ask for one. The Human runs `smind steward review <task>` (optionally
+`--sha <40 hex>`), or opts a workspace into `steward.autoReview` (then a finished root
+Lead run with a pushed branch gets one review). A Lead never requests a review, reads
+one as authority, or acts on one by itself: findings reach the Lead only when the Human
+sends them — and any new commit makes the review stale anyway.
+
+Rails, enforced by the daemon: `steward.enabled` is off by default; one open review per
+task; at most 6 reviews per hour and 5 per task; USD 1.5 / 20 minutes per review;
+auto-pause after 3 consecutive crashed or timed-out reviews until a Human-run review
+completes. Nothing here merges: a review is advice for the Human, who reads it and merges.
+
 ## Process safety
 
 - Run sandbox daemons with an isolated `SMIND_HOME` and port. Never touch
