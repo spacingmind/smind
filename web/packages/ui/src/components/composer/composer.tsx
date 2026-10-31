@@ -11,6 +11,7 @@ import { FileMentionPopover } from "@/components/composer/file-mention-popover";
 import { SlashCommandPopover } from "@/components/composer/slash-command-popover";
 import { useFileMention } from "@/components/composer/use-file-mention";
 import { useSlashCommand } from "@/components/composer/use-slash-command";
+import { usePendingSendStore } from "@/stores/pending-send-store";
 import { useComposerInsertStore } from "@/stores/composer-insert-store";
 import { formatMentionToken, mentionedRefs } from "@/lib/file-mention";
 import { supportsKind } from "@/lib/attachments/kinds";
@@ -354,6 +355,37 @@ export function Composer({
       }
     });
   }, [draft, canSend, submitting, attachHasError, send]);
+
+  // The home landing hands a first prompt to this new task's composer (pending-send-store): the
+  // landing's run config is applied to the toolbar first, then the ordinary submit() sends the
+  // restored draft once the toolbar state has caught up -- no separate send path.
+  const handoff = useRef<RunConfigState | null>(null);
+  useEffect(() => {
+    if (handoff.current !== null || taskId === null || chatId === null || !isDefaultChat || !canSend || !runConfig || draft.value.trim() === "") return;
+    if (!usePendingSendStore.getState().peek(taskId)) return;
+    const cfg = usePendingSendStore.getState().take(taskId);
+    if (cfg) {
+      handoff.current = cfg;
+      runConfig.actions.applyState(cfg);
+    }
+  }, [taskId, chatId, isDefaultChat, canSend, runConfig, draft.value]);
+  useEffect(() => {
+    const want = handoff.current;
+    if (!want || !runConfig) return;
+    const s = runConfig.state;
+    if (
+      s.provider !== want.provider ||
+      s.permissionMode !== want.permissionMode ||
+      s.autoAccept !== want.autoAccept ||
+      s.thinkingLevel !== want.thinkingLevel ||
+      s.model !== want.model ||
+      s.baseAgentId !== want.baseAgentId ||
+      s.custom !== want.custom
+    )
+      return;
+    handoff.current = null;
+    submit();
+  }, [runConfig, submit]);
 
   // Paseo's alternate-send shortcut: while a run is live, Cmd/Ctrl+Enter
   // interrupts it rather than queueing behind it.
