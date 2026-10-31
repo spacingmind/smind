@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -14,6 +15,45 @@ import (
 type ProviderCooldownError struct {
 	Provider string
 	Until    time.Time
+	// Gate is the typed picker gate of the same state (nil when no gate is wired).
+	Gate *gate.Gate
+}
+
+// RPCCode makes the fast-fail the same typed "gated" error as GatedError.
+func (e *ProviderCooldownError) RPCCode() string { return gatedCode }
+
+// RPCData is the gate, when known.
+func (e *ProviderCooldownError) RPCData() any {
+	if e.Gate == nil {
+		return nil
+	}
+	return *e.Gate
+}
+
+// gatedCode is the wire code of a send refused by a gate.
+const gatedCode = "gated"
+
+// GatedError refuses a non-human send to a provider whose gate is hard
+// (docs/plans/active/picker-gate-reasons.md): not signed in, unsupported by the
+// harness. No run row is created and nothing is queued; there is no silent
+// fallback to another provider.
+type GatedError struct {
+	Provider string
+	Gate     gate.Gate
+}
+
+// RPCCode is the wire code.
+func (e *GatedError) RPCCode() string { return gatedCode }
+
+// RPCData is the typed gate.
+func (e *GatedError) RPCData() any { return e.Gate }
+
+func (e *GatedError) Error() string {
+	next := ""
+	if e.Gate.Action != nil && e.Gate.Action.Label != "" {
+		next = " Next: " + e.Gate.Action.Label + "."
+	}
+	return fmt.Sprintf("runs: start: provider %s is gated: %s.%s A human must fix this (provider_list shows the gate): do not retry and do not fall back to another provider on your own.", e.Provider, e.Gate.Reason, next)
 }
 
 func (e *ProviderCooldownError) Error() string {

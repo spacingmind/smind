@@ -49,3 +49,18 @@ B1 named `auth` and `overloaded` as "the next obvious values".
 - The inbox kind, MCP routing text, CLI text and the UI cards follow in later PRs of the plan; until then the new kinds show their raw
   text with the plan-limit UI only for plan windows.
 - Not decided here: marking an account "needs sign-in" in the Usage view (follow-up), mobile UI.
+
+## Amendment 2026-11-01: the picker twin (gate reasons)
+
+A picker row carries the preventive twin of a class (`internal/gate`,
+`docs/plans/active/picker-gate-reasons.md`): `not_signed_in` <-> `auth_expired`,
+`out_of_plan` and `cooling_down` <-> `plan_window_exhausted`, `model_not_in_plan`
+<-> `model_not_in_plan`; `unsupported_by_harness` has no run twin and
+`transient_429`, the residual `rate_limited` and `cli_exited` never gate a row.
+The gate reuses `failure.Action` (kinds `clear_cooldown` and `pick_provider` are
+added to the shared vocabulary), and `gate.TwinOf` / `gate.ReasonFor` are the only
+mapping, enforced by a test. Runs use the CLI's own login (ADR-0020), so a gate
+resting on smind accounts' cached windows or on a recent failed run is `advisory`
+(warns, stays selectable, never refuses a send); only facts the daemon enforces
+(unset required provider secret, harness mismatch, cooldown) are hard.
+

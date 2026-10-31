@@ -22,7 +22,8 @@ const cmdTaskWaitUsage = "usage: smind task wait <runId|item:ID> [--timeout <dur
 // cmdTaskWait blocks until a run is terminal and reports the outcome in its
 // exit code: 0 done, 1 error, 3 stopped, 4 done at a cap (needs-continue),
 // 5 --timeout expired (run left running), 6 error from a provider rate limit
-// (the output says when it resets).
+// (plan window, transient 429 or unclassified; the output says when it resets
+// or what to do), 7 error a human must fix (auth_expired, model_not_in_plan).
 func cmdTaskWait(args []string) int {
 	return runTaskWait(args, os.Stdout, os.Stderr)
 }
@@ -233,10 +234,7 @@ func waitExitCode(row runSummaryRow) int {
 	case "stopped":
 		return 3
 	case "error":
-		if failure.IsLimitKind(row.FailureKind) {
-			return 6
-		}
-		return 1
+		return failure.ExitCode(row.FailureKind)
 	default:
 		return 1
 	}
@@ -333,8 +331,11 @@ func renderWaitSummary(row runSummaryRow, finalText string, now time.Time) strin
 		who = fmt.Sprintf("%s (task #%d)", row.ID, row.TaskID)
 	}
 	out := fmt.Sprintf("run %s %s%s after %s; model %s; %s; %s.", who, outcome, stop, dur, model, usage, git)
-	if row.Status == "error" && failure.IsPlanLimit(row.FailureKind) {
-		out += "\n" + rateLimitedText(row.FailureWindow, row.FailureResetAt, row.FailureResetInferred, now)
+	if row.Status == "error" && failure.IsKnown(row.FailureKind) && row.FailureKind != failure.KindCLIExited {
+		out += "\n" + failureText(row.FailureKind, row.FailureWindow, row.FailureResetAt, row.FailureResetInferred, row.FailureAction, now)
+		if g := failure.Guidance(row.FailureKind); g != "" {
+			out += "\n" + g
+		}
 	}
 	if text := trimFinalText(finalText); text != "" {
 		out += "\n\n" + text

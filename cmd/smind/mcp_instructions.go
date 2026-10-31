@@ -24,9 +24,24 @@ The loop:
      A stopNote on any other done run says it may be incomplete too.
    - timed_out: still running -- a timeout is not a failure; re-issue
      task_wait. task_status is the non-blocking check.
-   A failed run with failureKind rate_limited hit a provider quota: resetAt
-   says when it resets; retry on another provider or after resetAt, do not
-   retry immediately.
+   A failed run carries failureKind, an action {kind, target, label} and a
+   failureNote; route on them (the note says what NOT to do):
+     auth_expired          a human must sign in again; do not retry, do not
+                           fall back (action sign_in).
+     model_not_in_plan     re-send with a different model; do not retry the
+                           same one, do not fall back (action pick_model).
+     plan_window_exhausted the plan window is used up: wait until resetAt or
+                           use fallbackProfileId; do not retry immediately
+                           (action wait_until / switch_profile).
+     transient_429         a short throttle, not a quota: a profile or
+                           orchestrator run is retried by the daemon twice by
+                           itself; otherwise retry shortly; do not switch
+                           profile (action auto_retry / retry_now).
+     rate_limited          a limit of unknown kind: retry after a short wait;
+                           do not assume the plan is exhausted.
+     cli_exited            the CLI died; its session is stored: send
+                           "continue".
+   task wait exits 6 for the limit classes and 7 when a human must fix setup.
 5. Review: task_logs for the transcript, or read the git state in the
    task's worktree path. task_list/task_get/chat_list/chat_new manage and
    inspect tasks and their conversation threads.
@@ -102,6 +117,22 @@ picked by you: they require a human-authored profile -- see profile_list.
 
 A provider shown with cooldownUntil in provider_list is rate limited until
 that time: task_send to it fails fast, so start the work on another provider.
+
+provider_list entries (and their models, under modelGates) may carry a gate:
+{reason, until?, action, advisory?}. Route on reason plus action.kind:
+  not_signed_in          a human must sign in or add the key (action sign_in);
+                         task_new/task_send to it is refused: do not retry
+                         and do not fall back on your own
+  unsupported_by_harness the provider cannot run this way (pick_provider):
+                         choose another provider; sends are refused
+  cooling_down           rate limited until "until"; sends fail fast; only a
+                         human can clear it (clear_cooldown)
+  out_of_plan            the plan window is spent until "until": choose
+                         another provider or wait; never refused on its own
+  model_not_in_plan      the model is outside the plan (pick_model): pick
+                         another model
+A gate with advisory true rests on cached or inferred evidence: it warns, it
+does not refuse. A refused send is an error that names the reason.
 
 If you lose a run id (e.g. after a crash), run_list {taskId} (or
 {status: "running"}) recovers it, newest first.

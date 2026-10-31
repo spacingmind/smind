@@ -16,6 +16,10 @@ const (
 	ActionAutoRetry     = "auto_retry"
 	ActionRetryNow      = "retry_now"
 	ActionContinue      = "continue"
+	// The picker gate's kinds (ADR-0050 twin, internal/gate): clear a
+	// provider cooldown the human has reset, or pick another provider.
+	ActionClearCooldown = "clear_cooldown"
+	ActionPickProvider  = "pick_provider"
 )
 
 // Action is the concrete next step for a failed run (additive, omitempty on
@@ -123,4 +127,38 @@ func planAction(kind string, c ActionContext) *Action {
 		return &Action{Kind: ActionRetryNow, Label: "Retry"}
 	}
 	return &Action{Kind: ActionRetryNow, Label: "Reset time unknown: retry later"}
+}
+
+// Guidance is the one-line routing rule for a failed run of kind, written for
+// a Lead reading MCP or CLI output: what to do next and what NOT to do. ""
+// for an empty or unknown kind.
+func Guidance(kind string) string {
+	switch kind {
+	case KindAuthExpired:
+		return "A human must sign in again (the action names where). Do not retry and do not fall back: neither can work until the login is fixed."
+	case KindModelNotInPlan:
+		return "The account's plan does not include the model. Re-send with a different model (the action may list the allowed ones). Do not retry the same model and do not fall back to another account."
+	case KindPlanWindowExhausted:
+		return "The plan's usage window is used up. Wait until resetAt, or start the work on the fallbackProfileId profile if there is one. Do not retry immediately."
+	case KindTransient429:
+		return "A short throttle, not a plan limit. A profile or orchestrator run is retried by the daemon on its own (twice, 30 s then 2 min); otherwise retry after a short wait. Do not switch profile and do not treat it as exhausted quota."
+	case KindRateLimited:
+		return "A rate limit of unknown kind (no window, no reset time). Retry after a short wait. Do not assume the plan is exhausted."
+	case KindCLIExited:
+		return "The agent CLI ended without a result; its session is stored. Send a follow-up prompt such as \"continue\"."
+	}
+	return ""
+}
+
+// ExitCode is `smind task wait`'s exit code for an error run of kind: 6 for a
+// rate limit (wait or retry later), 7 when a human must fix setup (sign in, or
+// choose another model), 1 otherwise.
+func ExitCode(kind string) int {
+	switch {
+	case IsLimitKind(kind):
+		return 6
+	case IsHumanFix(kind):
+		return 7
+	}
+	return 1
 }

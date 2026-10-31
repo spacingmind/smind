@@ -288,6 +288,36 @@ export interface ProviderInfo {
   instance?: ProviderInstanceOverlay;
   /** RFC 3339 UTC reset time while the provider is rate limited (ADR-0041 F1); absent otherwise. */
   cooldownUntil?: string;
+  /** Why the provider cannot run now and the way out (daemon-computed, internal/gate); absent when nothing blocks it. */
+  gate?: ProviderGate;
+  /** Per-model gates that differ from `gate`; a model of a gated provider inherits `gate`. Absent when none. */
+  modelGates?: Record<string, ProviderGate>;
+}
+
+/** The picker gate reasons (ADR-0050 twin of the run failure classes). A client renders an unknown reason as its action label and does not select it. */
+export type ProviderGateReason =
+  | "not_signed_in"
+  | "out_of_plan"
+  | "cooling_down"
+  | "unsupported_by_harness"
+  | "model_not_in_plan";
+
+/** The run failure `action` shape, shared by the picker gate: an unknown `kind` renders as its `label`. */
+export interface GateAction {
+  kind: string;
+  target?: string;
+  label: string;
+  models?: string[];
+}
+
+export interface ProviderGate {
+  reason: ProviderGateReason | (string & {});
+  /** RFC 3339 UTC end of the block, when known. */
+  until?: string;
+  action?: GateAction;
+  accountId?: number;
+  /** Inferred or cached evidence: warn, but the row stays selectable (smind runs on the CLI's own login). */
+  advisory?: boolean;
 }
 
 /** One `secrets` entry: the secret's stored name, the env name it feeds, whether a value is stored, and the last 4 hex of its SHA-256 when one is. */

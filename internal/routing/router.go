@@ -208,6 +208,25 @@ func (r *Router) selectAccount(policy string, candidateAccountIDs []int64, model
 	}
 }
 
+// Verdict is Exhaustion's answer: the cache-only exhaustion state of one
+// account for one model.
+type Verdict struct {
+	Exhausted bool
+	// TransientOnly: exhausted solely by a short bare-429 back-off (never a
+	// plan problem; surfaces must not present it as a rate limit).
+	TransientOnly bool
+	// Until is when the account is usable again (zero when not exhausted).
+	Until time.Time
+}
+
+// Exhaustion is the read-only verdict the routing path itself uses, for
+// callers that must not re-implement the threshold, overage and TTL rules
+// (the picker gate, internal/gate). Memory only; it never fetches.
+func (r *Router) Exhaustion(accountID int64, model string, now time.Time) Verdict {
+	exhausted, transientOnly, until := r.exhaustionDetail(accountID, model, now)
+	return Verdict{Exhausted: exhausted, TransientOnly: transientOnly, Until: until}
+}
+
 // exhaustion reports whether accountID cannot serve model right now, and if so
 // the time it becomes usable again. Two independent sources are combined:
 //

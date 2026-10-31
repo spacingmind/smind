@@ -220,3 +220,60 @@ func TestRunLogs_ActionAuthExpiredIsSignIn(t *testing.T) {
 		t.Fatal("a run without a failure has no action")
 	}
 }
+
+// TestInboxList_RunFailedFromLatestRun: a task whose latest run failed on a
+// plan window appears in inbox.list as a run_failed item carrying the action;
+// a clean task has none.
+func TestInboxList_RunFailedFromLatestRun(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		scenario string
+		want     bool
+	}{{"quota-error", true}, {"stop end_turn", false}} {
+		wm, db := newTestWorkspaceManager(t)
+		task := newTestTask(t, wm, tc.scenario)
+		srv := newTestWSServer(t, wm, newTestRunner(wm), db, "tok")
+		ec := newEventConn(t, dialWS(t, srv, "tok"))
+		ec.subscribe("sub", TopicRunStatus)
+		sendRequest(t, ec.ws, "start", "run.start", map[string]any{"taskId": task.ID, "provider": "glm", "prompt": "hi"})
+		resp := ec.nextResponse("start", 15*time.Second)
+		var started runStartResult
+		if err := json.Unmarshal(resp.Result, &started); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			ev := ec.nextEvent(15 * time.Second)
+			var p runStatusPayload
+			decodePayload(t, ev, &p)
+			if p.RunID == started.RunID && p.Status != "running" {
+				break
+			}
+		}
+		sendRequest(t, ec.ws, "inbox", "inbox.list", map[string]any{})
+		resp = ec.nextResponse("inbox", 5*time.Second)
+		var out struct {
+			Items []struct {
+				Key    string `json:"key"`
+				Kind   string `json:"kind"`
+				Action *struct {
+					Kind string `json:"kind"`
+				} `json:"action"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(resp.Result, &out); err != nil {
+			t.Fatalf("%s: %v (%s)", tc.scenario, err, resp.Result)
+		}
+		found := false
+		for _, it := range out.Items {
+			if it.Kind == "run_failed" {
+				found = true
+				if it.Key != "runfail:"+started.RunID || it.Action == nil || it.Action.Kind == "" {
+					t.Fatalf("%s: item = %+v", tc.scenario, it)
+				}
+			}
+		}
+		if found != tc.want {
+			t.Fatalf("%s: run_failed present = %v, want %v (items %+v)", tc.scenario, found, tc.want, out.Items)
+		}
+	}
+}

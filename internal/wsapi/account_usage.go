@@ -96,6 +96,7 @@ func (a *API) AttachUsage(p *quota.Poller, reg *accounts.Registry, passive Passi
 			return // removed meanwhile; account.removed covers it
 		}
 		a.bus.Publish(Event{Topic: TopicAccountUsage, Payload: accountUsagePayload{Usage: usageRow(acc, res, passive, p.TTL(), time.Now())}})
+		a.gate.notifyIfChanged()
 	})
 	if passive != nil {
 		n := &usageNotifier{}
@@ -111,6 +112,7 @@ func (a *API) AttachUsage(p *quota.Poller, reg *accounts.Registry, passive Passi
 					return // removed meanwhile
 				}
 				a.bus.Publish(Event{Topic: TopicAccountUsage, Payload: accountUsagePayload{Usage: usageRow(acc, p.Peek(id), passive, p.TTL(), time.Now())}})
+				a.gate.notifyIfChanged()
 			})
 		})
 	}

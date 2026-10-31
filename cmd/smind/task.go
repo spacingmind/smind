@@ -1823,8 +1823,8 @@ func runStatusCell(r runSummaryRow, now time.Time) string {
 
 func runStatusText(r runSummaryRow, now time.Time) string {
 	status, disposition, errText := r.Status, r.Disposition, r.Err
-	if status == "error" && failure.IsPlanLimit(r.FailureKind) {
-		return status + ": " + rateLimitedText(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred, now)
+	if status == "error" && failure.IsKnown(r.FailureKind) && r.FailureKind != failure.KindCLIExited {
+		return status + ": " + failureText(r.FailureKind, r.FailureWindow, r.FailureResetAt, r.FailureResetInferred, r.FailureAction, now)
 	}
 	if status == "error" && r.FailureKind == "cli_exited" {
 		// The first 80 runes of the text are the wrapper prefix; the exit

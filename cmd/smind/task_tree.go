@@ -101,12 +101,12 @@ func treeTitle(title string) string {
 
 func treeStateText(run taskTreeNodeRun, now time.Time) string {
 	switch {
-	case run.State == "error" && failure.IsPlanLimit(run.FailureKind):
+	case run.State == "error" && failure.IsKnown(run.FailureKind) && run.FailureKind != failure.KindCLIExited:
 		var resetAt *time.Time
 		if t, err := time.Parse(time.RFC3339, run.ResetAt); err == nil {
 			resetAt = &t
 		}
-		return "error: " + rateLimitedText(run.Window, resetAt, run.ResetInferred, now)
+		return "error: " + failureText(run.FailureKind, run.Window, resetAt, run.ResetInferred, run.Action, now)
 	case run.State == "error" && run.FailureKind != "":
 		return "error: " + run.FailureKind
 	case run.State == "done" && run.Disposition == "needs-continue":
