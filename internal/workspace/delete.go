@@ -79,6 +79,7 @@ func (m *Manager) DeleteTask(id int64) (DeleteSummary, error) {
 	if err := m.store.DeleteTask(id); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete task %d: %w", id, err)
 	}
+	m.closedScratch(id)
 	m.releaseAttachments(sets)
 	if n := m.getNotifier(); n != nil {
 		n.NotifyTaskDeleted(t.ID, t.WorkspaceID, t.SpaceID)
@@ -110,6 +111,9 @@ func (m *Manager) DeleteSpace(id int64) (DeleteSummary, error) {
 	sets := m.attachmentSetsOf(tasks)
 	if err := m.store.DeleteSpace(id); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete space %d: %w", id, err)
+	}
+	for _, t := range tasks {
+		m.closedScratch(t.ID)
 	}
 	m.releaseAttachments(sets)
 	// Only the root space.deleted event is published, not one per cascaded
@@ -161,6 +165,9 @@ func (m *Manager) DeleteWorkspace(id int64) (DeleteSummary, error) {
 	sets := m.attachmentSetsOf(tasks)
 	if err := m.store.DeleteWorkspace(id); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete workspace %d: %w", id, err)
+	}
+	for _, t := range tasks {
+		m.closedScratch(t.ID)
 	}
 	m.releaseAttachments(sets)
 	// Only the root workspace.deleted event is published, not one per

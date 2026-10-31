@@ -200,6 +200,7 @@ func handle(msg message, threadCwd *string) {
 		loadedThreads[threadID] = true
 		threadStateMu.Unlock()
 		recordThreadInitMethod(params.Cwd, "thread/start")
+		dumpEnvOnce(params.Cwd)
 		recordThreadPolicy(params.Cwd, params.ApprovalPolicy, params.Sandbox)
 		recordThreadModel(params.Cwd, params.Model)
 		recordThreadConfig(params.Cwd, "thread/start", params.ModelProvider, params.Config)
@@ -486,6 +487,24 @@ func modelCall(last map[string]int) {
 			"modelContextWindow": 200000,
 		},
 	})
+}
+
+// dumpEnvOnce writes the agent's whole environment (os.Environ(), one
+// KEY=value per line) to an "env-all" file in the thread's cwd, so tests
+// can assert what the daemon's launch env gave the agent. Opt-in
+// (FAKE_DUMP_ENV=1, inherited from the test process) and once-only, so an
+// ordinary run leaves its worktree clean and a resumed thread keeps the
+// file its first launch wrote. Mirrors internal/taskrunner/fakeagent's
+// dumpEnvOnce.
+func dumpEnvOnce(cwd string) {
+	if os.Getenv("FAKE_DUMP_ENV") != "1" || cwd == "" {
+		return
+	}
+	p := filepath.Join(cwd, "env-all")
+	if _, err := os.Stat(p); err == nil {
+		return
+	}
+	_ = os.WriteFile(p, []byte(strings.Join(os.Environ(), "\n")), 0o644)
 }
 
 // recordThreadPolicy writes the approvalPolicy/sandbox a thread/start or

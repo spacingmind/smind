@@ -42,6 +42,11 @@ type Manager struct {
 	// attachment set ids of deleted tasks once their rows are gone.
 	attachmentCleanup func(setIDs []string)
 
+	// scratchCleaner, if set via SetScratchCleaner (scratch_hook.go), is
+	// called with a task's id once its row is archived or deleted.
+	scratchMu      sync.Mutex
+	scratchCleaner ScratchCleaner
+
 	// wt holds the worktrees: config (ADR-0024); portMu serialises port
 	// allocation.
 	wtMu   sync.Mutex

@@ -439,6 +439,7 @@ func (m *Manager) ArchiveTask(id int64) (store.Task, error) {
 	if err != nil {
 		return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)
 	}
+	m.closedScratch(id)
 	if n := m.getNotifier(); n != nil {
 		n.NotifyTaskArchived(t)
 	}
