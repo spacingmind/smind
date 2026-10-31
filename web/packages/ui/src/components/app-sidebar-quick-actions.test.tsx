@@ -73,11 +73,17 @@ function PaletteOpenProbe() {
   return <span data-testid="palette-open">{String(open)}</span>;
 }
 
-function mount(client: FakeWsClient, onOpenSettings = vi.fn(), paletteProbe = false) {
+function mount(client: FakeWsClient, onOpenSettings = vi.fn(), paletteProbe = false, onOpenAutomations = vi.fn()) {
   return render(
     <PaletteProvider>
       <SidebarProvider>
-        <AppSidebar client={client as never} selectedTaskId={null} onSelectTask={vi.fn()} onOpenSettings={onOpenSettings} />
+        <AppSidebar
+          client={client as never}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onOpenSettings={onOpenSettings}
+          onOpenAutomations={onOpenAutomations}
+        />
         {paletteProbe && <PaletteOpenProbe />}
       </SidebarProvider>
     </PaletteProvider>,
@@ -88,7 +94,8 @@ describe("AppSidebar quick actions", () => {
   it("New task opens the task dialog for the only workspace", async () => {
     const client = new FakeWsClient();
     const onOpenSettings = vi.fn();
-    mount(client, onOpenSettings);
+    const onOpenAutomations = vi.fn();
+    mount(client, onOpenSettings, false, onOpenAutomations);
     await resolveWorkspaceTree(client, WORKSPACE);
 
     fireEvent.click(screen.getByTestId("sidebar-quick-new-task"));
@@ -96,7 +103,8 @@ describe("AppSidebar quick actions", () => {
     expect(dialog).toHaveTextContent("New task");
 
     fireEvent.click(screen.getByTestId("sidebar-quick-automations"));
-    expect(onOpenSettings).toHaveBeenCalledWith("automations");
+    expect(onOpenAutomations).toHaveBeenCalledTimes(1);
+    expect(onOpenSettings).not.toHaveBeenCalled();
   });
 
   it("New task with several workspaces and no selection opens the palette", async () => {

@@ -340,6 +340,7 @@ export function AppSidebar({
   onWorkspacesChange,
   onOpenSettings,
   onOpenInbox,
+  onOpenAutomations,
   onOpenPluginPanel,
   connectionStatus = "connected",
   connectionStatusText,
@@ -389,6 +390,8 @@ export function AppSidebar({
   onOpenSettings?: (sectionId?: string) => void;
   /** Opens the Human inbox (ADR-0045); the footer shows its unseen count. */
   onOpenInbox?: () => void;
+  /** Opens the Automations page (ADR-0044) -- what the quick action and the palette entry do. */
+  onOpenAutomations?: () => void;
   /** Opens one of the active plugins' panels as a full page (ADR-0042) -- what a "Plugins" sidebar row opens. */
   onOpenPluginPanel?: (pluginId: string, panelId: string) => void;
   /** The daemon connection state and its human text (App.tsx's STATUS_LABEL / connect error) -- the footer's Host popover shows it. */
@@ -644,6 +647,14 @@ export function AppSidebar({
         run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
       },
       {
+        id: "open-automations",
+        group: "Actions",
+        title: "Open Automations",
+        keywords: ["automation", "cron", "schedule", "ci", "rules"],
+        icon: "automation",
+        run: () => onOpenAutomations?.(),
+      },
+      {
         id: "new-agent",
         group: "Settings",
         title: "New agent…",
@@ -708,7 +719,7 @@ export function AppSidebar({
       });
     }
     return commands;
-  }, [workspaces, profiles, onOpenSettings]);
+  }, [workspaces, profiles, onOpenSettings, onOpenAutomations]);
   useCommands("sidebar:actions", 5, paletteCommands);
   // Collapsed search (audit-deepseek-harness.md §3): a header action that
   // expands into a field. An outside click collapses it only while the
@@ -818,7 +829,7 @@ export function AppSidebar({
         <SidebarQuickActions
           onNewTask={newTaskFromQuickAction}
           onSearch={() => setPaletteOpen(true)}
-          onAutomations={() => onOpenSettings?.("automations")}
+          onAutomations={() => onOpenAutomations?.()}
           searchShortcut={searchShortcut}
         />
       )}
