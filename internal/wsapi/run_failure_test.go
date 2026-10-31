@@ -2,6 +2,7 @@ package wsapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -65,7 +66,7 @@ func failureWireProfile(t *testing.T, scenario string, mkProfile func(db *store.
 func TestRunLogs_CarriesFailureFields(t *testing.T) {
 	t.Parallel()
 	logs, _ := failureWire(t, "quota-error")
-	if logs["status"] != "error" || logs["failureKind"] != "rate_limited" || logs["window"] != "5h" {
+	if logs["status"] != "error" || logs["failureKind"] != "plan_window_exhausted" || logs["window"] != "5h" {
 		t.Fatalf("run.logs = %v", logs)
 	}
 	// The fake's text is Z.ai's zone-less wall clock: the reset is inferred.
@@ -108,7 +109,7 @@ func TestRunLogs_FailureFieldsOmittedWhenEmpty(t *testing.T) {
 func TestRunStatusEvent_CarriesFailureFields(t *testing.T) {
 	t.Parallel()
 	_, event := failureWire(t, "quota-error")
-	if event["status"] != "error" || event["failureKind"] != "rate_limited" || event["window"] != "5h" {
+	if event["status"] != "error" || event["failureKind"] != "plan_window_exhausted" || event["window"] != "5h" {
 		t.Fatalf("run.status = %v", event)
 	}
 	if event["resetInferred"] != true {
@@ -169,7 +170,7 @@ func profileWithFallback(db *store.Store) int64 {
 func TestRunLogs_FallbackProfileIdForRateLimitedRun(t *testing.T) {
 	t.Parallel()
 	logs, event := failureWireProfile(t, "quota-error", profileWithFallback)
-	if logs["failureKind"] != "rate_limited" {
+	if logs["failureKind"] != "plan_window_exhausted" {
 		t.Fatalf("run.logs = %v", logs)
 	}
 	fb, ok := logs["fallbackProfileId"].(float64)
@@ -178,6 +179,10 @@ func TestRunLogs_FallbackProfileIdForRateLimitedRun(t *testing.T) {
 	}
 	if logs["profileId"] == nil || event["profileId"] != logs["profileId"] {
 		t.Fatalf("profileId logs = %v, event = %v", logs["profileId"], event["profileId"])
+	}
+	act, _ := logs["action"].(map[string]any)
+	if act["kind"] != failure.ActionSwitchProfile || act["target"] != fmt.Sprintf("profile:%d", int64(fb)) {
+		t.Fatalf("run.logs action = %v, want switch_profile to the fallback", logs["action"])
 	}
 	if _, ok := event["fallbackProfileId"]; ok {
 		t.Errorf("run.status event must not carry fallbackProfileId: %v", event)
@@ -197,5 +202,21 @@ func TestRunLogs_NoFallbackWhenNotRateLimited(t *testing.T) {
 	logs, _ = failureWire(t, "quota-error")
 	if _, ok := logs["fallbackProfileId"]; ok {
 		t.Fatalf("profile-less run carries fallbackProfileId: %v", logs)
+	}
+}
+
+// TestRunLogs_ActionAuthExpiredIsSignIn: withFallbackAction leaves a human-fix
+// action alone even when the profile names a fallback (a fallback never
+// covers a broken login).
+func TestRunLogs_ActionAuthExpiredIsSignIn(t *testing.T) {
+	t.Parallel()
+	status := runs.RunStatus{Provider: "glm", FailureKind: failure.KindAuthExpired,
+		FailureAction: failure.NextAction(failure.KindAuthExpired, failure.ActionContext{Provider: "glm"})}
+	got := withFallbackAction(status, 9)
+	if got == nil || got.Kind != failure.ActionSignIn || got.Target != "settings:providers?provider=glm" {
+		t.Fatalf("action = %+v, want sign_in to the provider's settings", got)
+	}
+	if withFallbackAction(runs.RunStatus{}, 9) != nil {
+		t.Fatal("a run without a failure has no action")
 	}
 }

@@ -1929,6 +1929,8 @@ type runLogsResult struct {
 	ResetAt     string `json:"resetAt,omitempty"`
 	// ResetInferred: ResetAt was read in an assumed zone (clients show "≈").
 	ResetInferred bool `json:"resetInferred,omitempty"`
+	// Action is the failure's next step (failure.Action), omitted when none.
+	Action *failure.Action `json:"action,omitempty"`
 	// BaseSHA/HeadSHA/Dirty are the run's git provenance (O1), omitted
 	// while unknown.
 	BaseSHA string `json:"baseSha,omitempty"`
@@ -1987,6 +1989,7 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			Disposition:       status.Disposition,
 			Err:               status.Err,
 			FailureKind:       status.FailureKind,
+			Action:            withFallbackAction(status, fallbackID),
 			Window:            status.FailureWindow,
 			ResetAt:           runs.FailureResetRFC3339(status),
 			ResetInferred:     status.FailureResetInferred,
@@ -2598,4 +2601,17 @@ func runStartOptions(model string, set attach.Set, reg *runs.Registry, notify *b
 		opts = append(opts, runs.WithNotifyOnFinish(*notify))
 	}
 	return opts
+}
+
+// withFallbackAction is the run's derived next action, rebuilt to offer the
+// launching profile's fallback when there is one (the runs layer does not know
+// it). Only a plan limit with a fallback changes.
+func withFallbackAction(status runs.RunStatus, fallbackID int64) *failure.Action {
+	if fallbackID == 0 || !failure.IsPlanLimit(status.FailureKind) {
+		return status.FailureAction
+	}
+	return failure.NextAction(status.FailureKind, failure.ActionContext{
+		Provider: string(status.Provider), Model: status.Model, Window: status.FailureWindow,
+		ResetAt: status.FailureResetAt, FallbackProfileID: fallbackID, Now: time.Now(),
+	})
 }
