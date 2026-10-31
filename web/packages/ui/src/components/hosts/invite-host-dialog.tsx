@@ -75,11 +75,12 @@ export function InviteHostDialog({ open, onOpenChange }: { open: boolean; onOpen
                 readOnly
                 aria-label="Invite"
                 data-testid="invite-value"
-                className="font-mono"
+                className="min-w-0 flex-1 text-ellipsis font-mono"
+                title={invite.invite}
                 value={invite.invite}
                 onFocus={(e) => e.currentTarget.select()}
               />
-              <Button type="button" variant="outline" data-testid="invite-copy" onClick={() => void copy()}>
+              <Button type="button" variant="outline" className="shrink-0" data-testid="invite-copy" onClick={() => void copy()}>
                 Copy
               </Button>
             </div>
