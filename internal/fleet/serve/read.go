@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"runtime"
 	"slices"
+	"time"
 	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/fleet/hello"
 	"github.com/spacingmind/smind/internal/fleet/registry"
 	"github.com/spacingmind/smind/internal/fleet/wire"
 	"github.com/spacingmind/smind/internal/learning/redact"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -247,6 +249,9 @@ func (r *reader) RunStatus(g registry.Grant, p wire.RunStatusParams) (wire.RunSt
 		StopReason:  run.StopReason,
 		FailureKind: run.FailureKind,
 	}
+	out.Action = failure.NextAction(run.FailureKind, failure.ActionContext{
+		Provider: run.Provider, Model: run.Model, Window: run.FailureWindow, ResetAt: run.FailureResetAt, Now: time.Now(),
+	})
 	if run.FinishedAt != nil {
 		f := run.FinishedAt.UTC()
 		out.FinishedAt = &f

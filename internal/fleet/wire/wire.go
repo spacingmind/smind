@@ -4,7 +4,11 @@
 // account or credential field.
 package wire
 
-import "time"
+import (
+	"time"
+
+	"github.com/spacingmind/smind/internal/runs/failure"
+)
 
 // Method names of the fleet read methods.
 const (
@@ -166,7 +170,10 @@ type RunStatus struct {
 	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
 	StopReason  string     `json:"stopReason,omitempty"`
 	FailureKind string     `json:"failureKind,omitempty"`
-	CostUSD     *float64   `json:"costUsd"`
+	// Action is the failure\'s next step; a newer peer may send a kind this daemon
+	// does not know, which round-trips untouched.
+	Action  *failure.Action `json:"action,omitempty"`
+	CostUSD *float64        `json:"costUsd"`
 	// WaitingPermission is true while a permission request sits in the
 	// callee's inbox; the caller sees the flag but can never answer it (AC19).
 	WaitingPermission bool `json:"waitingPermission,omitempty"`

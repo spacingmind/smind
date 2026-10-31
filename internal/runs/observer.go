@@ -3,6 +3,7 @@ package runs
 import (
 	"log/slog"
 
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/taskrunner"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -27,6 +28,8 @@ type RunFinished struct {
 	Model       string
 	Origin      string
 	FailureKind string
+	// FailureAction is the failure's next step, derived; nil when none.
+	FailureAction *failure.Action
 	// ToolCalls is the number of distinct non-empty ToolCallIDs the run
 	// emitted, including runs that finished with error or cancel.
 	ToolCalls int

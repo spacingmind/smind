@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/plugins/host"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -138,7 +139,9 @@ type RunFinishedInput struct {
 	Status      string `json:"status"`
 	StopReason  string `json:"stopReason,omitempty"`
 	FailureKind string `json:"failureKind,omitempty"`
-	ToolCalls   int    `json:"toolCalls"`
+	// Action is the failure's next step; its label and target are redacted.
+	Action    *failure.Action `json:"action,omitempty"`
+	ToolCalls int             `json:"toolCalls"`
 }
 
 // hookState is the Manager's hook bookkeeping: the last problem per plugin and
@@ -605,6 +608,11 @@ func (m *Manager) NotifyRunFinished(in RunFinishedInput) {
 	}
 	in.Provider, in.Model, in.Origin = m.redactStr(in.Provider), m.redactStr(in.Model), m.redactStr(in.Origin)
 	in.Status, in.StopReason, in.FailureKind = m.redactStr(in.Status), m.redactStr(in.StopReason), m.redactStr(in.FailureKind)
+	if in.Action != nil {
+		a := *in.Action
+		a.Label, a.Target = m.redactStr(a.Label), m.redactStr(a.Target)
+		in.Action = &a
+	}
 	seen := map[string]bool{}
 	for _, reg := range regs {
 		if seen[reg.plugin] {

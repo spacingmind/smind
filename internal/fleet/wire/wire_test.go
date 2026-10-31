@@ -65,3 +65,25 @@ func TestWireProvRoundTrip(t *testing.T) {
 		t.Errorf("round trip: got %+v want %+v", out, in)
 	}
 }
+
+// TestFleetWire_ActionRoundTrip_UnknownKindTolerated: a run status carries the
+// failure action, and an action kind this daemon does not know survives a
+// decode/encode untouched (a newer peer).
+func TestFleetWire_ActionRoundTrip_UnknownKindTolerated(t *testing.T) {
+	in := `{"runId":"r","taskId":1,"state":"error","provider":"glm","startedAt":"2026-11-01T00:00:00Z","failureKind":"martian_kind","action":{"kind":"martian","label":"Do the thing"},"costUsd":null}`
+	var st RunStatus
+	if err := json.Unmarshal([]byte(in), &st); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if st.Action == nil || st.Action.Kind != "martian" || st.Action.Label != "Do the thing" {
+		t.Fatalf("action = %+v", st.Action)
+	}
+	out, err := json.Marshal(st)
+	if err != nil || !strings.Contains(string(out), `"action":{"kind":"martian","label":"Do the thing"}`) {
+		t.Fatalf("re-encoded = %s (%v)", out, err)
+	}
+	b, _ := json.Marshal(RunStatus{RunID: "r"})
+	if strings.Contains(string(b), "action") {
+		t.Fatalf("no failure, no action key: %s", b)
+	}
+}

@@ -1645,7 +1645,7 @@ func (reg *Registry) finish(r *run, err error) {
 
 	reg.notifyObservers(RunFinished{
 		RunID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider),
-		Purpose: observerPurpose(r.purpose), Status: string(status), StopReason: stopReason, Model: r.model, Origin: r.origin, FailureKind: fail.Kind, ToolCalls: toolCalls,
+		Purpose: observerPurpose(r.purpose), Status: string(status), StopReason: stopReason, Model: r.model, Origin: r.origin, FailureKind: fail.Kind, FailureAction: failureActionOf(fail.Kind, string(r.provider), r.model, fail.Window, fail.ResetAt, nil, 0), ToolCalls: toolCalls,
 		OfferedSkillIDs: offered.SkillIDs, OfferedMeasured: offered.Measured,
 	})
 

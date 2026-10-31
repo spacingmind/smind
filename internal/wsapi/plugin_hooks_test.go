@@ -12,6 +12,7 @@ import (
 	"github.com/spacingmind/smind/internal/plugins"
 	"github.com/spacingmind/smind/internal/plugins/host"
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -740,5 +741,24 @@ func TestBeforeStartEditsReachTheLaunch(t *testing.T) {
 	// The decisions stay the host's: provider, mode and model are what the run asked for.
 	if st.Provider != taskrunner.ProviderGLM {
 		t.Errorf("provider = %s", st.Provider)
+	}
+}
+
+// TestPluginHook_RedactsActionLabel: the failure action rides on the
+// run.finished payload with its label and target redacted like every string.
+func TestPluginHook_RedactsActionLabel(t *testing.T) {
+	p := procPlugin{id: "obs2", caps: `["tasks.read"]`, mode: "report", contributes: `{"hooks":[{"event":"run.finished"}]}`}
+	e := newHookEnv(t, p)
+	e.api.plugins.NotifyRunFinished(plugins.RunFinishedInput{
+		RunID: "x", Status: "error", FailureKind: "auth_expired",
+		Action: &failure.Action{Kind: failure.ActionSignIn, Target: "settings:providers", Label: "Sign in again with sk-abcdefghijklmnopqrstuvwxyz0123456789"},
+	})
+	got := e.waitPushed(t, "obs2", "hook.run.finished", 1)
+	raw := string(got[0].Params)
+	if !strings.Contains(raw, `"kind":"sign_in"`) {
+		t.Fatalf("payload lacks the action: %s", raw)
+	}
+	if strings.Contains(raw, "abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("action label not redacted: %s", raw)
 	}
 }
