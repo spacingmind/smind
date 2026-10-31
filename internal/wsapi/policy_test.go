@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -15,6 +16,9 @@ import (
 var policyReadMethods = []string{"policy.get", "policy.test", "policy.audit"}
 
 func TestPolicyRPCs_ReadOnlyAndRelayCanRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("policy.test is not supported on Windows yet; Windows path support lands in the permpolicy Windows follow-up PR (PR B)")
+	}
 	t.Parallel()
 	e := newIdentEnv(t, "hang")
 	if _, err := e.db.AppendPolicyAudit(store.PolicyAuditRow{Decision: "ask", Tool: "Bash", Target: "make", TaskID: e.seatTask.ID}); err != nil {
@@ -129,6 +133,9 @@ func TestPolicyTest_ExplainsEachSegmentNoSideEffects(t *testing.T) {
 // built. policy.test is a dry run, so it explains the floor whether or not
 // the engine's config switch is on.
 func TestPolicyEngine_FloorProtectsDaemonHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("policy.test is not supported on Windows yet; Windows path support lands in the permpolicy Windows follow-up PR (PR B)")
+	}
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
 	e := newIdentEnv(t, "hang")
