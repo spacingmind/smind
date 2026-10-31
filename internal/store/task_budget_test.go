@@ -148,3 +148,47 @@ func TestTreeKnownCost_UnknownRunsPartialNotCounted(t *testing.T) {
 		t.Fatalf("TreeKnownCost = %v, %d, want 51, 2", known, unknown)
 	}
 }
+
+func TestTreeBudgetCountsRemoteSpend(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ws, _ := s.CreateWorkspace(Workspace{Path: "/r", Title: "r", RoutingPolicy: "hard"})
+	mk := func(parent *int64) Task {
+		task, err := s.CreateTask(Task{WorkspaceID: ws.ID, ParentTaskID: parent, Title: "t", Status: "created"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return task
+	}
+	root := mk(nil)
+	child := mk(&root.ID)
+	other := mk(nil)
+	f := func(v float64) *float64 { return &v }
+	budgetRun(t, s, root.ID, "r1", "done", f(1.0), true)
+	put := func(remoteID string, local int64, state string, cost *float64) {
+		t.Helper()
+		if _, err := s.PutFleetRemoteTaskAndWatch(FleetRemoteTask{HostID: "h1", RemoteTaskID: remoteID, LocalTaskID: local, State: state, CostUSD: cost}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(wantKnown float64, wantUnknown int) {
+		t.Helper()
+		known, unknown, err := s.TreeKnownCost(root.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if known != wantKnown || unknown != wantUnknown {
+			t.Fatalf("TreeKnownCost = %v, %d, want %v, %d", known, unknown, wantKnown, wantUnknown)
+		}
+	}
+
+	check(1.0, 0)
+	put("7", child.ID, "running", f(0.5))
+	check(1.5, 0)
+	put("8", child.ID, "done", nil)
+	check(1.5, 1)
+	put("9", child.ID, "running", nil) // not finished: not unknown
+	check(1.5, 1)
+	put("10", other.ID, "done", f(100)) // outside the tree
+	check(1.5, 1)
+}

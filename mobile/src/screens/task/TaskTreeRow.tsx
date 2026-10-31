@@ -27,6 +27,8 @@ interface Props {
   unread: boolean;
   cost: string;
   isRoot: boolean;
+  host?: string | null;
+  remote?: boolean;
   onPress: (id: number, title: string) => void;
 }
 
@@ -51,6 +53,8 @@ export const TaskTreeRow = memo(function TaskTreeRow({
   unread,
   cost,
   isRoot,
+  host,
+  remote,
   onPress,
 }: Props) {
   const theme = useAppTheme();
@@ -69,6 +73,7 @@ export const TaskTreeRow = memo(function TaskTreeRow({
             {shownTitle}
           </Text>
           {tierLabel ? <Badge>{tierLabel}</Badge> : null}
+          {remote && host ? <Badge>{host}</Badge> : null}
         </View>
         <Text style={[styles.meta, { color: toneColor }]} numberOfLines={1}>
           {detail}
@@ -81,9 +86,9 @@ export const TaskTreeRow = memo(function TaskTreeRow({
       </Text>
     </>
   );
-  if (isRoot) {
+  if (isRoot || remote) {
     return (
-      <View accessible accessibilityLabel={`${shownTitle}, this task, ${state}`} style={styles.row}>
+      <View accessible accessibilityLabel={isRoot ? `${shownTitle}, this task, ${state}` : `${shownTitle}, owned by ${host ?? 'another host'}, ${state}`} style={styles.row}>
         {body}
       </View>
     );

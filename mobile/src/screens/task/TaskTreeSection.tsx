@@ -116,6 +116,8 @@ export function TaskTreeSection({ conn, taskId, pendingTaskIds, onOpenTask }: Pr
                   unread={row.unread}
                   cost={row.cost}
                   isRoot={row.isRoot}
+                  host={row.host}
+                  remote={row.remote}
                   onPress={onOpenTask}
                 />
               ),

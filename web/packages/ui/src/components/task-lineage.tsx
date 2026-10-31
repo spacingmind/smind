@@ -1,3 +1,4 @@
+import { HostChip } from "@/components/host-chip";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Icons, ICON_SIZE } from "@/lib/icons";
 import { pillStatusWithSubtree, rateLimitHint, stalledHint, statusSummary, usageChipParts, usageChipText } from "@/lib/task-lineage";
@@ -20,6 +21,8 @@ export function TaskLineageChips({
   onJumpToTask?: (taskId: number) => void;
 }) {
   const { parent, node, children, nodes } = lineage;
+  const localChildren = children.filter((c) => !c.remote);
+  const remoteChildren = children.filter((c) => c.remote);
   const summary = node ? statusSummary(node.counts) : "";
   const usage = node ? usageChipText(node.usage.subtree) : null;
   const usageParts = node ? usageChipParts(node.usage.subtree) : null;
@@ -77,33 +80,54 @@ export function TaskLineageChips({
           stalled
         </span>
       )}
-      {/* Below sm the children are one tap away in the sidebar tree; keeping their pills would turn the meta row into a column. */}
-      {children.length > 0 && (
+      {/* Below sm the local children are one tap away in the sidebar tree; keeping their pills would turn the meta row into a column. */}
+      {localChildren.length > 0 && (
         <span className="flex min-w-0 flex-wrap items-center gap-1 max-sm:hidden">
-          {children.map((child) => {
+          {localChildren.map((child) => {
             const childHint = rateLimitHint(child, new Date());
             const childStalled = stalledHint(child, new Date());
             return (
-            <button
-              key={child.id}
-              type="button"
+              <button
+                key={child.id}
+                type="button"
+                data-testid="task-child-pill"
+                data-child-id={child.id}
+                data-child-state={child.run.state}
+                data-child-urgency={pillStatusWithSubtree(child, nodes)}
+                data-child-rate-limited={childHint ? "true" : undefined}
+                data-child-stalled={childStalled ? "true" : undefined}
+                title={childHint ?? childStalled ?? undefined}
+                onClick={() => onJumpToTask?.(child.id)}
+                className="flex max-w-[12rem] items-center gap-1.5 truncate rounded-full border px-2 py-0.5 transition-colors hover:bg-hover hover:text-foreground"
+              >
+                <StatusDot status={pillStatusWithSubtree(child, nodes)} />
+                <span className="truncate">{child.title}</span>
+                {child.tier && <span className="shrink-0">{child.tier}</span>}
+                {childStalled && <Icons.stalled className={`${ICON_SIZE.xs} shrink-0 text-warning`} aria-label="stalled" />}
+              </button>
+            );
+          })}
+        </span>
+      )}
+      {/* Remote children have no sidebar entry to fall back on, so their pills (with the host chip) stay visible at every width. */}
+      {remoteChildren.length > 0 && (
+        <span className="flex min-w-0 flex-wrap items-center gap-1">
+          {remoteChildren.map((child) => (
+            // A node mirrored from another host: read-only, never navigated by id (its id is negative and not a real task).
+            <span
+              key={child.globalId ?? `remote-${child.id}`}
               data-testid="task-child-pill"
-              data-child-id={child.id}
+              data-remote="true"
               data-child-state={child.run.state}
               data-child-urgency={pillStatusWithSubtree(child, nodes)}
-              data-child-rate-limited={childHint ? "true" : undefined}
-              data-child-stalled={childStalled ? "true" : undefined}
-              title={childHint ?? childStalled ?? undefined}
-              onClick={() => onJumpToTask?.(child.id)}
-              className="flex max-w-[12rem] items-center gap-1.5 truncate rounded-full border px-2 py-0.5 transition-colors hover:bg-hover hover:text-foreground"
+              title={`${child.globalId} (read only: owned by ${child.host})`}
+              className="flex max-w-[12rem] items-center gap-1.5 truncate rounded-full border px-2 py-0.5"
             >
               <StatusDot status={pillStatusWithSubtree(child, nodes)} />
               <span className="truncate">{child.title}</span>
-              {child.tier && <span className="shrink-0">{child.tier}</span>}
-              {childStalled && <Icons.stalled className={`${ICON_SIZE.xs} shrink-0 text-warning`} aria-label="stalled" />}
-            </button>
-            );
-          })}
+              <HostChip alias={child.host ?? ""} testId="task-child-host-chip" />
+            </span>
+          ))}
         </span>
       )}
     </>
