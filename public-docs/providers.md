@@ -367,7 +367,7 @@ Settings screen has no remove button.
 
 ### Edit an instance
 
-Open **Settings** → **Providers** and choose the instance. Four things can be
+Open **Settings** → **Providers** and choose the instance. Three things can be
 changed there:
 
 - **Models**: **Replace list** makes your list the whole model list;
@@ -388,7 +388,7 @@ smind provider update <id> --models a,b --add-models a,b \
 disallowed tools. An empty value (for example `--models ""`) removes that field
 from the entry.
 
-The edit changes only those four fields of that one entry in `config.yaml`.
+The edit changes only those fields of that one entry in `config.yaml`.
 Everything else is left byte for byte as it was: the other entries, comments
 and blank lines. Keys stay under **Keys** (or `provider.setSecret`); this edit
 never touches them. An entry written in flow style (`- {id: x, ...}`) is
