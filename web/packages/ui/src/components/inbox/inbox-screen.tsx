@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { DesktopWindowControls } from "@/components/desktop-window-controls";
+import { HostChip } from "@/components/host-chip";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -8,6 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { FormError } from "@/components/ui/form-error";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/status-badge";
+import { useFleetHosts } from "@/hooks/use-fleet-hosts";
 import { useInboxActions, useInboxCount, useInboxList, useInboxRequest, useRespondPermission } from "@/hooks/use-inbox";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useWindowState } from "@/hooks/use-window-state";
@@ -75,6 +77,8 @@ export function InboxScreen({
   const list = useInboxList();
   const count = useInboxCount();
   const actions = useInboxActions();
+  const fleetHosts = useFleetHosts();
+  const hostAlias = (hostId: string) => fleetHosts.data?.hosts.find((h) => h.hostId === hostId)?.alias;
   const narrow = useIsMobile();
   const { fullscreen } = useWindowState();
   const [error, setError] = useState<string | null>(null);
@@ -214,6 +218,7 @@ export function InboxScreen({
                       key={item.key}
                       item={item}
                       narrow={narrow}
+                      hostAlias={hostAlias}
                       expanded={expanded === item.key}
                       onToggle={() => setExpanded((cur) => (cur === item.key ? null : item.key))}
                       onOpen={() => open(item)}
@@ -236,6 +241,7 @@ export function InboxScreen({
 function InboxRow({
   item,
   narrow,
+  hostAlias,
   expanded,
   onToggle,
   onOpen,
@@ -246,6 +252,8 @@ function InboxRow({
 }: {
   item: InboxItem;
   narrow: boolean;
+  /** Resolves a fleet host id to its alias; undefined when the host is unknown. */
+  hostAlias?: (hostId: string) => string | undefined;
   expanded: boolean;
   onToggle: () => void;
   onOpen: () => void;
@@ -257,6 +265,7 @@ function InboxRow({
   const permission = item.kind === "permission";
   const btn = narrow ? "h-11" : undefined;
   const hasTask = (item.links.taskId ?? item.taskId) !== undefined;
+  const alias = isHostKind(item.kind) && item.links.hostId ? hostAlias?.(item.links.hostId) : undefined;
   return (
     <li
       tabIndex={0}
@@ -285,6 +294,7 @@ function InboxRow({
             <StatusBadge status={tone(item)} data-testid={`inbox-kind-${item.key}`}>
               {kindLabel(item)}
             </StatusBadge>
+            {alias && <HostChip alias={alias} testId={`inbox-host-chip-${item.key}`} />}
             {item.state === "new" && (
               <span className="text-ui-sm font-medium text-primary" data-testid={`inbox-new-${item.key}`}>
                 New
