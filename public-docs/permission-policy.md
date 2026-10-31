@@ -115,10 +115,22 @@ junctions are resolved before comparing. `%USERPROFILE%`, `~` and `$HOME` all
 mean your home. The floor also covers `C:\Windows`, `Program Files`,
 `ProgramData` and `AppData`, and the PowerShell and cmd equivalents of `rm`,
 `copy` and `move`, `Get-Content` of secrets, `Get-ChildItem Env:`, and
-`iwr … | iex`. A command string passed to `powershell -Command` or `cmd /c` is
-not looked into, so it is always asked. Anything the engine cannot place on
-Windows (`C:foo`, `\\.\pipe`, `file:stream`, trailing dots) is asked or denied,
-never allowed.
+`iwr … | iex`.
+
+A command passed to `powershell -Command`, `pwsh -c` or `cmd /c` is read in
+its own syntax and split like `sh -c`, and each inner command is checked like
+any other:
+
+- the floor and your `deny` and `ask` rules apply to the inner commands, so a
+  destructive inner command is denied;
+- the wrapper itself is never allowed, whatever your rules say about the inner
+  commands, so the best outcome is an ask;
+- what the engine cannot read with certainty is asked: `-EncodedCommand`,
+  script blocks, escape characters, a command built from a variable, and the
+  cmd keywords `if`, `for`, `call` and `start`.
+
+Anything the engine cannot place on Windows (`C:foo`, `\\.\pipe`,
+`file:stream`, trailing dots) is asked or denied, never allowed.
 
 ## What it does not change
 
