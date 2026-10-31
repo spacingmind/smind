@@ -48,15 +48,70 @@ func mcpRemoteErr(tool string, err error) error {
 			return fmt.Errorf("%s: %s", tool, mcpFleetOffText)
 		}
 		if rpc.Code != "" {
+			if strings.HasPrefix(rpc.Message, rpc.Code+":") {
+				return fmt.Errorf("%s: %s", tool, rpc.Message)
+			}
 			return fmt.Errorf("%s: %s: %s", tool, rpc.Code, rpc.Message)
 		}
 	}
 	return fmt.Errorf("%s: %w", tool, err)
 }
 
+// mcpHostSet reports whether a host argument was given (nil and "" mean local).
+func mcpHostSet(v any) bool { return v != nil && v != "" }
+
+// mcpHostText is the host argument as an alias string, "" for a selector.
+func mcpHostText(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// mcpResolveHost turns the host argument into an alias: a string is returned
+// as is, a label selector costs one remote.select (never retried).
+func mcpResolveHost(ctx context.Context, c mcpCaller, tool string, host any) (string, error) {
+	switch h := host.(type) {
+	case string:
+		return h, nil
+	case map[string]any:
+		bad := fmt.Errorf("%s: host selector must be {\"labels\":{...}} with optional \"any\":true", tool)
+		labels, ok := h["labels"].(map[string]any)
+		if !ok || len(labels) == 0 {
+			return "", bad
+		}
+		for _, v := range labels {
+			if _, ok := v.(string); !ok {
+				return "", bad
+			}
+		}
+		for k, v := range h {
+			if k == "labels" {
+				continue
+			}
+			if _, isBool := v.(bool); k != "any" || !isBool {
+				return "", bad
+			}
+		}
+		params := map[string]any{"labels": labels, "any": h["any"] == true}
+		var res struct {
+			Host   string `json:"host"`
+			HostID string `json:"hostId"`
+		}
+		if err := c.Call(ctx, "remote.select", params, &res); err != nil {
+			return "", mcpRemoteErr(tool, err)
+		}
+		return res.Host, nil
+	}
+	return "", fmt.Errorf("%s: host selector must be {\"labels\":{...}} with optional \"any\":true", tool)
+}
+
 // mcpRemoteRead sends one remote.read for tool and returns its envelope.
 func mcpRemoteRead(ctx context.Context, c mcpCaller, tool string, params map[string]any) (remoteEnvelope, error) {
 	var env remoteEnvelope
+	alias, err := mcpResolveHost(ctx, c, tool, params["host"])
+	if err != nil {
+		return env, err
+	}
+	params["host"] = alias
 	if err := c.Call(ctx, "remote.read", params, &env); err != nil {
 		return env, mcpRemoteErr(tool, err)
 	}
@@ -112,7 +167,7 @@ func mcpListHosts(client *wsclient.Client) mcp.ToolHandlerFor[listHostsInput, li
 }
 
 // remoteWorkspaceList is workspace_list's host branch.
-func remoteWorkspaceList(ctx context.Context, client *wsclient.Client, host string) (workspaceListOutput, error) {
+func remoteWorkspaceList(ctx context.Context, client *wsclient.Client, host any) (workspaceListOutput, error) {
 	env, err := mcpRemoteRead(ctx, mcpRemoteCaller(client), "workspace_list", map[string]any{"op": "workspaces", "host": host})
 	if err != nil {
 		return workspaceListOutput{}, err

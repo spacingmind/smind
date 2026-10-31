@@ -35,14 +35,14 @@ type workspaceListOutput struct {
 
 // workspaceListInput is workspace_list's argument shape: only the optional host.
 type workspaceListInput struct {
-	Host string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	Host any `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
 }
 
 // mcpWorkspaceList wraps workspace.list (no params): every workspace the
 // daemon knows, id/title/path riding the store.Workspace wire shape.
 func mcpWorkspaceList(client *wsclient.Client) mcp.ToolHandlerFor[workspaceListInput, workspaceListOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in workspaceListInput) (*mcp.CallToolResult, workspaceListOutput, error) {
-		if in.Host != "" {
+		if mcpHostSet(in.Host) {
 			out, err := remoteWorkspaceList(ctx, client, in.Host)
 			return nil, out, err
 		}
@@ -59,8 +59,8 @@ func mcpWorkspaceList(client *wsclient.Client) mcp.ToolHandlerFor[workspaceListI
 
 // taskGetInput is task_get's argument shape (wrapping task.get).
 type taskGetInput struct {
-	ID   int64  `json:"id" jsonschema:"id of the task to fetch"`
-	Host string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	ID   int64 `json:"id" jsonschema:"id of the task to fetch"`
+	Host any   `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
 }
 
 // taskGetOutput is task_get's structured output: the task under "task"
@@ -75,7 +75,7 @@ type taskGetOutput struct {
 // sees a clear tool error rather than an empty success.
 func mcpTaskGet(client *wsclient.Client) mcp.ToolHandlerFor[taskGetInput, taskGetOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskGetInput) (*mcp.CallToolResult, taskGetOutput, error) {
-		if in.Host != "" {
+		if mcpHostSet(in.Host) {
 			out, err := remoteTaskGet(ctx, client, in)
 			return nil, out, err
 		}

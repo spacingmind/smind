@@ -274,14 +274,16 @@ or shown on mobile.
 | `litellm` | Claude Code | URL, key, model ids | vendor docs | no |
 | `anthropic-compatible` | Claude Code | URL, key, model ids | Paseo docs | no |
 | `openai-responses-compatible` | Codex | URL, key, model ids | Paseo docs | no |
-| `chat-completions-via-opencode` | OpenCode | not addable yet | **inferred** | **no** |
+| `chat-completions-via-opencode` | OpenCode | URL, key, model ids | vendor docs | no |
 
 "Verified: no" means no row has been run against a live endpoint yet; the
 catalog records `source` and `verifiedAt` per row, and `provider.recipes` returns
 `unverified: true` for each. Treat the base URLs and model ids as the vendor's
-documentation said on 2026-10-30. The Kimi and OpenCode rows are inferred and
-should be tried with care. The `openai-responses-compatible` row speaks only the
-OpenAI Responses API (Codex has no chat-completions mode).
+documentation said on 2026-10-30. The Kimi row is inferred and should be tried
+with care. The `openai-responses-compatible` row speaks only the OpenAI Responses
+API (Codex has no chat-completions mode); a vendor with only a chat-completions
+endpoint uses the OpenCode row, described under
+[Chat-completions endpoints](#chat-completions-endpoints-through-opencode).
 
 For GLM, the default way to add a new login is now the `zai-glm` recipe (Claude
 Code against the Z.AI endpoint). The built-in `glm` provider (the
@@ -437,6 +439,56 @@ providers:
   route into Claude Code, a Responses gateway such as LiteLLM in front of it, or
   OpenCode.
 - Not yet verified against a live endpoint: tested with a fake app-server only.
+
+### Chat-completions endpoints through OpenCode
+
+A vendor that offers only an OpenAI chat-completions endpoint (no Responses API,
+no Anthropic API) runs through an instance of the `opencode` provider. Add it
+with the `chat-completions-via-opencode` recipe, or by hand:
+
+```yaml
+providers:
+  custom:
+    - id: vendor-x
+      extends: opencode
+      endpoint:
+        kind: chat-completions
+        baseUrl: https://api.vendor.example/v1
+      models:
+        - id: chat-1
+        - id: qwen/qwen3-coder
+      env:
+        SMIND_OPENCODE_API_KEY: { secret: api-key }
+```
+
+- `baseUrl` is the vendor's chat-completions root (OpenCode adds
+  `/chat/completions`). `models` is required: nothing is discovered for a custom
+  endpoint, and the first model is the default. Leave the key out for a local
+  server that needs none.
+- **The key stays out of every file.** It is stored write-only like any provider
+  secret and handed to OpenCode through its environment; the generated OpenCode
+  configuration holds only a reference to it. It never appears on a command line,
+  in a log, or in OpenCode's own files.
+- **A private OpenCode home.** The instance runs OpenCode with its own
+  configuration, data, state and cache under `$SMIND_HOME/providers/<id>/opencode`,
+  readable by you only (mode 0700; on Windows an access list granting only your
+  account and the system), so it never reads your own OpenCode login or
+  settings and its conversations are not readable by other accounts.
+- **The repository's own `opencode.json` is ignored**, along with auto-update,
+  sharing and model-catalog downloads. A repository could otherwise define a
+  provider of its own that reads the key and send it to a server of its choosing.
+- **Permissions are unchanged.** OpenCode still asks before running a shell
+  command or editing a file, and those questions reach you like any other
+  provider's.
+- **Refused when you add it:** plain `http` to any host but a loopback address
+  (the key would cross the network in the clear: use `https`, or tunnel it);
+  a URL with a user name, password, query or fragment; an endpoint kind other
+  than `chat-completions`; no `models`; `additionalModels`; and setting the
+  environment names smind manages itself (`OPENCODE_CONFIG`,
+  `OPENCODE_CONFIG_CONTENT`, `OPENCODE_DISABLE_PROJECT_CONFIG`, the `XDG_*`
+  directories and a few more).
+- Checked against OpenCode itself and a local fake endpoint only, never a real
+  vendor. OpenCode needs a model that supports tool calls.
 
 ### Where an instance shows up
 

@@ -47,8 +47,16 @@ func BuildRecipeEntry(rec providers.Recipe, in RecipeInput) (CustomProvider, map
 		if strings.TrimSpace(in.BaseURL) == "" {
 			return CustomProvider{}, nil, fmt.Errorf("recipe %q: baseUrl: required", rec.ID)
 		}
-	default: // acp, or a row the catalog loader would have rejected
-		return CustomProvider{}, nil, fmt.Errorf("recipe %q: needs the OpenCode provider, not available yet", rec.ID)
+	case "acp":
+		// Only the chat-completions-via-OpenCode row is an ACP recipe.
+		if rec.EndpointKind != string(providers.EndpointChatCompletions) {
+			return CustomProvider{}, nil, fmt.Errorf("recipe %q: an acp recipe must be a chat-completions endpoint", rec.ID)
+		}
+		if strings.TrimSpace(in.BaseURL) == "" {
+			return CustomProvider{}, nil, fmt.Errorf("recipe %q: baseUrl: required", rec.ID)
+		}
+	default: // a row the catalog loader would have rejected
+		return CustomProvider{}, nil, fmt.Errorf("recipe %q: unsupported harness", rec.ID)
 	}
 	entry := CustomProvider{
 		ID:              strings.TrimSpace(in.ID),
@@ -64,10 +72,14 @@ func BuildRecipeEntry(rec providers.Recipe, in RecipeInput) (CustomProvider, map
 	if entry.Label == "" {
 		entry.Label = rec.Label
 	}
-	if rec.Harness == "codex-app-server" {
+	switch rec.Harness {
+	case "codex-app-server":
 		entry.Extends = providers.IDCodexNative
 		entry.Endpoint = &CustomEndpoint{Kind: "openai-responses", BaseURL: strings.TrimSpace(in.BaseURL)}
-	} else {
+	case "acp":
+		entry.Extends = providers.IDOpenCode
+		entry.Endpoint = &CustomEndpoint{Kind: string(providers.EndpointChatCompletions), BaseURL: strings.TrimSpace(in.BaseURL)}
+	default:
 		entry.Extends = providers.IDClaudeNative
 	}
 	var placeholders map[string]string
@@ -87,8 +99,8 @@ func BuildRecipeEntry(rec providers.Recipe, in RecipeInput) (CustomProvider, map
 			if strings.TrimSpace(in.BaseURL) == "" {
 				return CustomProvider{}, nil, fmt.Errorf("recipe %q: baseUrl: required", rec.ID)
 			}
-			// A codex recipe's URL rides on endpoint.baseUrl instead.
-			if rec.Harness != "codex-app-server" {
+			// A codex or opencode recipe's URL rides on endpoint.baseUrl instead.
+			if rec.Harness != "codex-app-server" && rec.Harness != "acp" {
 				setRecipeEnv(&entry, e.Name, EnvValue{Literal: strings.TrimSpace(in.BaseURL)})
 			}
 		}

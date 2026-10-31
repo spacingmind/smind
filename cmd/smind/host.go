@@ -36,11 +36,15 @@ const hostUsage = `usage: smind host ls [--json]
        smind host enable-reverse <host>
        smind host disable-reverse <host>
        smind host rename <host> <alias>
+       smind host label set <host> <k:v>...
+       smind host label rm <host> <key>...
+       smind host label ls [<host>] [--json]
        smind host test <host>
        smind host route <host> --addr <ws(s)://host:port> [--password-env VAR] [--allow-cleartext]
-       smind host info <host> [--json]
-       smind host workspaces <host> [--json]
-       smind host tasks <host> [--workspace N] [--cursor N] [--limit N] [--json]
+       smind host select --labels k:v,k:v [--any]
+       smind host info <host> | --labels k:v,k:v [--any] [--json]
+       smind host workspaces <host> | --labels k:v,k:v [--any] [--json]
+       smind host tasks <host> | --labels k:v,k:v [--any] [--workspace N] [--cursor N] [--limit N] [--json]
        smind host task <host:id> [--json]
        smind host status <host> <runId> | <host:taskId> [--json]
        smind host activity <host:taskId> [--run RUNID] [--cursor N] [--limit N] [--json]
@@ -96,6 +100,10 @@ func runHost(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runHostRoute(ctx, rest, stdout, stderr)
 	case "rename":
 		return runHostRename(ctx, rest, stdout, stderr)
+	case "select":
+		return runHostSelect(ctx, rest, stdout, stderr)
+	case "label":
+		return runHostLabel(ctx, rest, stdout, stderr)
 	case "info", "workspaces", "tasks", "task", "status", "activity":
 		return runHostRead(ctx, verb, rest, stdout, stderr)
 	case "grant":

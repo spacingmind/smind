@@ -30,6 +30,7 @@ type FleetHost struct {
 	Alias     string
 	Pub       []byte
 	Label     string
+	Labels    string // operator labels: JSON object text, "" = none
 	State     string
 	CreatedAt time.Time
 }
@@ -95,8 +96,8 @@ func (s *Store) CreateFleetPair(h FleetHost, links []FleetLink) error {
 		h.CreatedAt = now
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO fleet_hosts (host_id, alias, pub, label, state, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		h.HostID, h.Alias, h.Pub, h.Label, h.State, h.CreatedAt,
+		`INSERT INTO fleet_hosts (host_id, alias, pub, label, labels, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		h.HostID, h.Alias, h.Pub, h.Label, h.Labels, h.State, h.CreatedAt,
 	); err != nil {
 		return fmt.Errorf("create fleet pair %s: insert host: %w", h.HostID, err)
 	}
@@ -119,11 +120,11 @@ func (s *Store) CreateFleetPair(h FleetHost, links []FleetLink) error {
 	return nil
 }
 
-const fleetHostColumns = `host_id, alias, pub, label, state, created_at`
+const fleetHostColumns = `host_id, alias, pub, label, labels, state, created_at`
 
 func scanFleetHost(sc rowScanner) (FleetHost, error) {
 	var h FleetHost
-	if err := sc.Scan(&h.HostID, &h.Alias, &h.Pub, &h.Label, &h.State, &h.CreatedAt); err != nil {
+	if err := sc.Scan(&h.HostID, &h.Alias, &h.Pub, &h.Label, &h.Labels, &h.State, &h.CreatedAt); err != nil {
 		return FleetHost{}, err
 	}
 	h.CreatedAt = h.CreatedAt.UTC()
@@ -321,4 +322,21 @@ func (s *Store) ListFleetLinks(hostID string) ([]FleetLink, error) {
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+// SetFleetHostLabels replaces a host's operator labels (a JSON object, ""
+// to clear). The host must exist.
+func (s *Store) SetFleetHostLabels(hostID, labelsJSON string) error {
+	res, err := s.db.Exec(`UPDATE fleet_hosts SET labels = ? WHERE host_id = ?`, labelsJSON, hostID)
+	if err != nil {
+		return fmt.Errorf("set fleet host labels %s: %w", hostID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set fleet host labels %s: rows: %w", hostID, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("set fleet host labels %s: %w", hostID, ErrFleetNotFound)
+	}
+	return nil
 }
