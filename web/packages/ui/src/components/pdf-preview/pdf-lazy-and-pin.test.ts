@@ -37,7 +37,7 @@ describe("pdf.js is pinned and lazy (AC21)", () => {
       const rel = path.relative(srcDir, f).replaceAll("\\", "/");
       // only the viewer's own script may import pdf.js, and it is not part of the app entry (a separate IIFE build)
       if (!f.startsWith(viewerDir) && !rel.endsWith("pdf-preview/test-fixtures.ts")) {
-        expect(text, `${rel} imports pdfjs-dist`).not.toMatch(/from\s+["']pdfjs-dist|import\(\s*["']pdfjs-dist/);
+        expect(text, `${rel} imports pdfjs-dist`).not.toMatch(/from\s+["']pdfjs-dist|import\s*\(?\s*["']pdfjs-dist/); // named, default, side-effect and dynamic imports alike
       }
       // the pane is reached through React.lazy / import() only
       if (rel !== "components/pdf-preview/pdf-preview-pane.tsx") {
