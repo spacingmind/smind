@@ -227,6 +227,40 @@ Rate limits follow the vendor: an instance has a vendor profile (`zai`,
 `claude-native` running. Any other vendor's 429 is classified by the generic
 patterns, without a reset time.
 
+### Add from recipe in Settings
+
+In **Settings → Providers**, **Add from recipe** opens the catalog as a list. Each
+row shows the recipe's name, a one-line description, the wire protocol it
+speaks, and an **Unverified** badge when the row was never run against a live
+endpoint. Pick a row to open its form:
+
+1. Read the caveats and open the vendor's docs link if you need to.
+2. Set an id and label (both optional; the id defaults to the recipe id).
+3. For a recipe that needs one, type the endpoint URL.
+4. Edit the model list: it starts with the recipe's models; remove one with its
+   ✕ or add an id and press Enter. A recipe that needs a model id (Ollama, LM
+   Studio, LiteLLM) will not submit with an empty list.
+5. Paste the key in the password field and press **Add provider**.
+
+The key leaves the field as soon as you submit, whether or not the daemon
+accepts it, and is never shown again. If the daemon refuses (for example the id
+is used by another entry), its message appears under the form and you re-enter
+the key. The new instance shows up in the provider list with a **recipe** badge,
+plus **unverified** when the row is unverified, and wears the icon of the
+provider it extends.
+
+On a recipe instance's detail page, the **Keys** card lists each key as *Set ·
+••••abcd* (the last four characters of a fingerprint, not of the key) or *Not
+set*. **Replace key** opens a password dialog; **Clear key** asks for
+confirmation. A recipe whose endpoint cannot turn thinking off says so under
+**Recipe**, and the thinking picker is hidden for that provider. Editing an
+existing instance's models, disallowed tools or the inherit-`~/.claude` setting
+is not in the UI yet: edit `config.yaml` and run `provider.reload`.
+
+On the phone, the new-task form shows a read-only note under the provider
+picker ("Recipe zai-glm · Unverified · Key set (…ab12)"); keys are never entered
+or shown on mobile.
+
 | Recipe id | Harness | Needs | Source | Verified |
 | --- | --- | --- | --- | --- |
 | `zai-glm` | Claude Code | key | vendor docs | no |

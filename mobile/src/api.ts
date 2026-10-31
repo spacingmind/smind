@@ -275,6 +275,14 @@ export interface ProviderInfo {
   defaultMode?: string;
   models?: ModelInfo[];
   modelsDiscovered?: boolean;
+  /** id of the recipe an instance was made from */
+  recipe?: string;
+  vendor?: 'zai' | 'anthropic' | 'openai' | 'generic';
+  /** the recipe row was never verified against a live endpoint */
+  unverified?: boolean;
+  thinking?: 'supported' | 'hidden';
+  /** fingerprint only, never a value */
+  secrets?: { name: string; env: string; set: boolean; fingerprint?: string }[];
 }
 
 /** provider.list: {providers: [...]} unwrapped. */
