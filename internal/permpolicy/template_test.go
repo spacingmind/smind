@@ -45,3 +45,39 @@ func TestTemplate_ExamplesAreValidWhenUncommented(t *testing.T) {
 		t.Fatalf("rules = %d (allow %d), want >= 7 and >= 5", len(p.Rules), allows)
 	}
 }
+
+func TestTemplate_GoTestExampleDeniesExecFlags(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("version: 1\nrules:\n")
+	for _, line := range strings.Split(Template, "\n") {
+		if rest, ok := strings.CutPrefix(line, "#> "); ok {
+			b.WriteString(rest + "\n")
+		}
+	}
+	p, err := Load([]byte(b.String()))
+	if err != nil {
+		t.Fatalf("Load(uncommented examples): %v", err)
+	}
+	for _, id := range []string{"go-test", "task-test", "task-lint", "bunx-tsc"} {
+		found := false
+		for _, r := range p.Rules {
+			if r.ID != id {
+				continue
+			}
+			found = true
+			got := r.Match.Command.Args.DenyFlags
+			for _, want := range []string{"-exec", "-toolexec"} {
+				has := false
+				for _, f := range got {
+					has = has || f == want
+				}
+				if !has {
+					t.Errorf("%s deny_flags = %v, missing %s", id, got, want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("rule %s not found", id)
+		}
+	}
+}

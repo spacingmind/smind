@@ -32,28 +32,40 @@ rules: []
 #>   why: "Run Go tests inside the task worktree"
 #>   match:
 #>     tool: Bash
-#>     command: {argv0: go, subcommand: test}
+#>     command:
+#>       argv0: go
+#>       subcommand: test
+#>       args: {deny_flags: ["-exec", "-toolexec", "-overlay", "-modfile", "-C"]}
 #>     paths: {within: ["{worktree}"]}
 #> - id: task-test
 #>   action: allow
 #>   why: "Run task test inside the task worktree"
 #>   match:
 #>     tool: Bash
-#>     command: {argv0: task, subcommand: test}
+#>     command:
+#>       argv0: task
+#>       subcommand: test
+#>       args: {deny_flags: ["-exec", "-toolexec", "-overlay", "-modfile", "-C"]}
 #>     paths: {within: ["{worktree}"]}
 #> - id: task-lint
 #>   action: allow
 #>   why: "Run task lint inside the task worktree"
 #>   match:
 #>     tool: Bash
-#>     command: {argv0: task, subcommand: lint}
+#>     command:
+#>       argv0: task
+#>       subcommand: lint
+#>       args: {deny_flags: ["-exec", "-toolexec", "-overlay", "-modfile", "-C"]}
 #>     paths: {within: ["{worktree}"]}
 #> - id: bunx-tsc
 #>   action: allow
 #>   why: "Type-check the web UI inside the task worktree"
 #>   match:
 #>     tool: Bash
-#>     command: {argv0: bunx, subcommand: tsc}
+#>     command:
+#>       argv0: bunx
+#>       subcommand: tsc
+#>       args: {deny_flags: ["-exec", "-toolexec", "-overlay", "-modfile", "-C"]}
 #>     paths: {within: ["{worktree}"]}
 #> - id: gh-pr-view
 #>   action: allow
