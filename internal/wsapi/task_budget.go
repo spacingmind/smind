@@ -27,6 +27,11 @@ type taskView struct {
 	// when the profile row is gone).
 	LatestRunProfileID   *int64  `json:"latestRunProfileId,omitempty"`
 	LatestRunProfileName *string `json:"latestRunProfileName,omitempty"`
+
+	// AutomationID/Name: the automation that started the task, omitted when
+	// none did.
+	AutomationID   *int64 `json:"automationId,omitempty"`
+	AutomationName string `json:"automationName,omitempty"`
 }
 
 // annotateLatestRun fills LatestRunProfile* on views from two queries.
@@ -75,27 +80,39 @@ func rootBudgetSpend(db *store.Store, id int64, parent *int64, budget *float64) 
 	return &budgetSpend{spent: known, unknown: unknown, over: known >= *budget}, nil
 }
 
-// viewTask wraps t with its budget spend fields.
+// viewTask wraps t with its budget spend fields and its automation link.
 func viewTask(db *store.Store, t store.Task) (taskView, error) {
-	v := taskView{Task: t}
-	sp, err := rootBudgetSpend(db, t.ID, t.ParentTaskID, t.BudgetUSD)
+	views, err := viewTasks(db, []store.Task{t})
 	if err != nil {
 		return taskView{}, err
 	}
-	if sp != nil {
-		v.BudgetSpentUSD, v.BudgetPartial, v.BudgetUnknownRuns, v.OverBudget = &sp.spent, sp.unknown > 0, sp.unknown, sp.over
-	}
-	return v, nil
+	return views[0], nil
 }
 
 func viewTasks(db *store.Store, tasks []store.Task) ([]taskView, error) {
 	out := make([]taskView, len(tasks))
+	ids := make([]int64, len(tasks))
 	for i, t := range tasks {
-		v, err := viewTask(db, t)
+		ids[i] = t.ID
+		v := taskView{Task: t}
+		sp, err := rootBudgetSpend(db, t.ID, t.ParentTaskID, t.BudgetUSD)
 		if err != nil {
 			return nil, err
 		}
+		if sp != nil {
+			v.BudgetSpentUSD, v.BudgetPartial, v.BudgetUnknownRuns, v.OverBudget = &sp.spent, sp.unknown > 0, sp.unknown, sp.over
+		}
 		out[i] = v
+	}
+	links, err := db.AutomationLinksForTasks(ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if l, ok := links[out[i].ID]; ok {
+			id := l.AutomationID
+			out[i].AutomationID, out[i].AutomationName = &id, l.Name
+		}
 	}
 	return out, nil
 }
