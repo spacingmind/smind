@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spacingmind/smind/internal/wsclient"
@@ -62,7 +64,18 @@ func mcpRemoteRead(ctx context.Context, c mcpCaller, tool string, params map[str
 }
 
 func registerMCPHostTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "list_hosts", Description: "List the connected peer hosts (alias, hostId, pairing state, link state). A host argument on workspace_list, task_list, task_get, task_status and task_logs reads that host instead of this daemon. Reads are direct only (hop limit 1): a task that was itself created by a peer host cannot read hosts and gets hop_limit. Never put the secrets of one host in a prompt for another."}, mcpListHosts(client))
+	// A peer seat (a run on this daemon) that the daemon refuses host calls
+	// for must not even see the tool. Any other probe error keeps it.
+	if os.Getenv("SMIND_RUN_ID") != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := mcpRemoteCaller(client).Call(ctx, "remote.hosts", nil, &struct{}{})
+		cancel()
+		var rpc *wsclient.RPCError
+		if errors.As(err, &rpc) && rpc.Code == "hop_limit" {
+			return
+		}
+	}
+	mcp.AddTool(srv, &mcp.Tool{Name: "list_hosts", Description: "List the connected peer hosts (alias, hostId, pairing state, link state). A host argument on workspace_list, task_list, task_get, task_status and task_logs reads that host instead of this daemon; on task_new, task_send, task_stop and task_wait it acts on that host. Direct only (hop limit 1): a task that was itself created by a peer host cannot use hosts and gets hop_limit. Peer seats and tasks created by a peer host get no host tools: the daemon refuses their host calls with hop_limit. Never put the secrets of one host in a prompt for another."}, mcpListHosts(client))
 }
 
 type listHostsInput struct{}
