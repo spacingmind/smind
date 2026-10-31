@@ -346,6 +346,7 @@ export function AppSidebar({
   onOpenPluginPanel,
   connectionStatus = "connected",
   connectionStatusText,
+  onRetryConnect,
   headerActions,
   windowToggle = false,
 }: {
@@ -399,6 +400,8 @@ export function AppSidebar({
   /** The daemon connection state and its human text (App.tsx's STATUS_LABEL / connect error) -- the footer's Host popover shows it. */
   connectionStatus?: ConnectionStatus;
   connectionStatusText?: string;
+  /** Re-runs the daemon connection after the initial connect failed (App.tsx) -- the "Can't reach the daemon" row's Retry. */
+  onRetryConnect?: () => void;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree();
   const statusOverrides = useStatusOverrides(client, events ?? null);
@@ -942,7 +945,20 @@ export function AppSidebar({
                 <CollapsedNodesContext.Provider value={nodes}>
                 <SidebarMenu className="@container/sb">
                   {error && <StatusRow icon={<Icons.error className="size-3.5" />} className="text-destructive" text={error} />}
-                  {!error && workspaces === null && (
+                  {!error && workspaces === null && connectionStatus === "disconnected" && (
+                    <StatusRow
+                      icon={<Icons.error className="size-3.5" />}
+                      text="Can't reach the daemon"
+                      action={
+                        onRetryConnect && (
+                          <Button variant="outline" size="xs" className="ml-auto" onClick={onRetryConnect}>
+                            Retry
+                          </Button>
+                        )
+                      }
+                    />
+                  )}
+                  {!error && workspaces === null && connectionStatus !== "disconnected" && (
                     <StatusRow icon={<Icons.spinner className="size-3.5 animate-spin" />} text="Loading workspaces…" />
                   )}
                   {empty && !searching && (
@@ -1510,12 +1526,13 @@ function StageGroupItem({
   );
 }
 
-function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; className?: string }) {
+function StatusRow({ icon, text, className, action }: { icon?: ReactNode; text: string; className?: string; action?: ReactNode }) {
   return (
     <SidebarMenuItem>
       <div className={cn("flex items-center gap-2 px-2 py-1.5 text-ui-sm text-muted-foreground", className)}>
         {icon}
         <span>{text}</span>
+        {action}
       </div>
     </SidebarMenuItem>
   );

@@ -1907,3 +1907,23 @@ describe("AppSidebar stage view", () => {
     expect(stage).toEqual(tree);
   });
 });
+
+describe("AppSidebar unreachable daemon (UAT B-03)", () => {
+  it("shows 'Can't reach the daemon' with a Retry instead of loading forever, and Retry calls the handler", () => {
+    const onRetryConnect = vi.fn();
+    render(
+      <SidebarProvider>
+        <AppSidebar
+          client={null}
+          selectedTaskId={null}
+          connectionStatus="disconnected"
+          onRetryConnect={onRetryConnect}
+        />
+      </SidebarProvider>,
+    );
+    expect(screen.queryByText("Loading workspaces…")).not.toBeInTheDocument();
+    expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetryConnect).toHaveBeenCalledTimes(1);
+  });
+});

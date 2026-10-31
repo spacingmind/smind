@@ -271,6 +271,23 @@ describe("App", () => {
     expect(connect).toHaveBeenCalledTimes(1);
   });
 
+  it("the sidebar's Retry re-runs connect after an initial failure and recovers (UAT B-03)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("no daemon listening"))
+      .mockResolvedValueOnce(new WsClient(socket));
+    render(<App connect={connect} />);
+    await flush();
+    expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await flush();
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
+    expect(screen.queryByText("Can't reach the daemon")).not.toBeInTheDocument();
+  });
+
   it("an unexpected disconnect updates the header away from 'Connected to daemon', and a successful reconnect brings it back", async () => {
     const socket1 = new FakeSocket();
     const socket2 = new FakeSocket();

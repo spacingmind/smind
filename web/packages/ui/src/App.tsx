@@ -234,6 +234,14 @@ function AppShell({
   const [client, setClient] = useState<WsClient | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  // Bumped by the sidebar's Retry: re-runs the connect effect below, so a failed
+  // first connect can be retried (and its reconnect loop armed) without a reload.
+  const [connectAttempt, setConnectAttempt] = useState(0);
+  const retryConnect = useCallback(() => {
+    setConnectError(null);
+    setConnectionStatus("connecting");
+    setConnectAttempt((n) => n + 1);
+  }, []);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   // Which settings section a fresh mount of SettingsScreen should land on --
   // `shortcuts.help` deep-links to "shortcuts" (AC5: the old Shift+? dialog
@@ -450,7 +458,7 @@ function AppShell({
       cancelled = true;
       reconnectHandle?.close();
     };
-  }, [connect, onLoginRequired]);
+  }, [connect, onLoginRequired, connectAttempt]);
 
   // The task header's lineage jump (PR-U2): fetch the target task fresh
   // (the sidebar's tree may not hold an archived-then-reshown task) and
@@ -1191,6 +1199,7 @@ function AppShell({
       onOpenPluginPanel={openPluginPage}
       connectionStatus={connectionStatus}
       connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+      onRetryConnect={retryConnect}
       headerActions={
         toggleInSidebar ? (
           <>
