@@ -170,7 +170,7 @@ See [Plugins](plugins.md).
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `steward.policy.enabled` | `false` | Turn on the standing permission policy in `~/.smind/steward/policy.yaml` (see [Scripting and permissions](scripting-and-permissions.md#a-standing-permission-policy-optional)). Read on every decision. |
+| `steward.policy.enabled` | `false` | Turn on the standing permission policy in `~/.smind/steward/policy.yaml` (see [Scripting and permissions](scripting-and-permissions.md#a-standing-permission-policy-optional)). Read on every decision. Ignored on Windows (not supported yet). |
 
 ### learning
 

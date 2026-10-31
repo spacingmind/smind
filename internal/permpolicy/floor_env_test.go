@@ -29,6 +29,7 @@ func TestFloor_CurlPipeShellDenied(t *testing.T) {
 }
 
 func TestFloor_RealHomeTestsDenied(t *testing.T) {
+	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	base := floorReq(t, "")
 	home := base.Home
