@@ -33,7 +33,7 @@ export interface PendingPermission {
  * item at its original object identity, so React re-renders exactly one
  * row instead of the whole transcript.
  */
-export type TimelineItem = TimelineTextItem | TimelineToolCallItem | TimelinePermissionItem | TimelineUnknownItem;
+export type TimelineItem = TimelineTextItem | TimelineToolCallItem | TimelinePermissionItem | TimelinePlanItem | TimelineUnknownItem;
 
 /** Assistant output, the human's own turn, or the model's reasoning -- three roles, one shape. */
 export interface TimelineTextItem {
@@ -77,6 +77,25 @@ export interface TimelinePermissionItem {
   optionKind?: string;
   /** Absent for an older server payload with no reason field -- renders with no reason badge, not a crash. */
   reason?: PermissionResolutionReason;
+}
+
+/** One step of an ACP plan, as the plan card renders it. */
+export interface PlanEntry {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  priority: "high" | "medium" | "low";
+}
+
+/**
+ * The run's plan, from the latest ACP plan session-update. One per run at
+ * most: a later update replaces the earlier item *in place* (same id, same
+ * position) rather than appending, so the plan stays where it first
+ * appeared in the transcript while its entries track the agent's progress.
+ */
+export interface TimelinePlanItem {
+  kind: "plan";
+  id: string;
+  entries: PlanEntry[];
 }
 
 /**
@@ -220,6 +239,19 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
 
   if (type === "raw") {
     if (event.kind && BENIGN_RAW_KINDS.has(event.kind)) return items;
+    if (event.kind === "plan") {
+      const entries = planEntries(event.payload);
+      if (entries) {
+        const index = items.findIndex((item) => item.kind === "plan");
+        if (index === -1) {
+          return [...items, { kind: "plan", id: `plan-${items.length}`, entries }];
+        }
+        const existing = items[index] as TimelinePlanItem;
+        const next = items.slice();
+        next[index] = { kind: "plan", id: existing.id, entries };
+        return next;
+      }
+    }
     return [
       ...items,
       { kind: "unknown", id: `unknown-${items.length}`, eventType: type, rawKind: event.kind, rawPayload: event.payload },
@@ -227,6 +259,32 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
   }
 
   return [...items, { kind: "unknown", id: `unknown-${items.length}`, eventType: type }];
+}
+
+/**
+ * Parses a raw plan payload's entries, defensively: the payload is forwarded
+ * JSON and may be anything. An entry counts only when its `content` is a
+ * non-empty string; an unknown status reads as "pending" and an unknown
+ * priority as "medium". Returns undefined when no valid entry remains, so the
+ * event falls through to the unknown-item fallback.
+ */
+function planEntries(payload: unknown): PlanEntry[] | undefined {
+  const rawEntries = (payload as { entries?: unknown } | null | undefined)?.entries;
+  if (!Array.isArray(rawEntries)) return undefined;
+  const entries: PlanEntry[] = [];
+  for (const raw of rawEntries) {
+    if (!raw || typeof raw !== "object") continue;
+    const content = (raw as { content?: unknown }).content;
+    if (typeof content !== "string" || content === "") continue;
+    const status = (raw as { status?: unknown }).status;
+    const priority = (raw as { priority?: unknown }).priority;
+    entries.push({
+      content,
+      status: status === "in_progress" || status === "completed" ? status : "pending",
+      priority: priority === "high" || priority === "low" ? priority : "medium",
+    });
+  }
+  return entries.length > 0 ? entries : undefined;
 }
 
 /** Folds a whole backfilled event batch (run.logs) into the same item list the live stream builds. */
