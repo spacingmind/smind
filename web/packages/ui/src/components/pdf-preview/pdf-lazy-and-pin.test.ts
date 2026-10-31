@@ -39,13 +39,15 @@ describe("pdf.js is pinned and lazy (AC21)", () => {
       if (!f.startsWith(viewerDir) && !rel.endsWith("pdf-preview/test-fixtures.ts")) {
         expect(text, `${rel} imports pdfjs-dist`).not.toMatch(/from\s+["']pdfjs-dist|\bimport\s*\(?\s*["']pdfjs-dist/); // named, default, side-effect and dynamic imports alike
       }
-      // the pane is reached through React.lazy / import() only
-      if (rel !== "components/pdf-preview/pdf-preview-pane.tsx") {
-        expect(text, `${rel} statically imports the pane`).not.toMatch(/^import\s[^;]*from\s+["'](@\/components\/pdf-preview\/pdf-preview-pane|\.\/pdf-preview-pane)["']/m);
+      // the router (and with it the pane and the panels) is reached through React.lazy / import() only
+      expect(text, `${rel} statically imports the router`).not.toMatch(/^import\s[^;]*from\s+["']@\/components\/file-tab-router["']/m);
+      // the pane is imported by the router alone
+      if (rel !== "components/file-tab-router.tsx" && rel !== "components/pdf-preview/pdf-preview-pane.tsx") {
+        expect(text, `${rel} imports the pane`).not.toMatch(/from\s+["'](@\/components\/pdf-preview\/pdf-preview-pane|\.\/pdf-preview-pane)["']/);
       }
     }
     const editor = read(path.join(srcDir, "components", "file-editor-pane.tsx"));
-    expect(editor).toMatch(/lazy\(\(\)\s*=>\s*import\("@\/components\/pdf-preview\/pdf-preview-pane"\)/);
+    expect(editor).toMatch(/lazy\(\(\)\s*=>\s*import\("@\/components\/file-tab-router"\)/);
   });
 
   it("the_viewer_is_built_separately_not_into_the_app_entry", () => {

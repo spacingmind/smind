@@ -17,7 +17,7 @@ acs:
     text: "The host accepts exactly four typed viewer messages, only from its own iframe window, and ignores everything else; the viewer is given bytes only."
     covers: { tests: [accepts_exactly_the_four_viewer_shapes, ignores_malformed_and_foreign_messages, drops_extra_fields_it_does_not_trust, only_the_hosts_own_frame_is_listened_to, host_messages_carry_bytes_and_view_commands_only, messages_from_other_windows_or_with_bad_shapes_change_nothing], frames: [] }
   - id: AC21
-    text: "The preview is lazy: the pane is a React.lazy chunk and the viewer is a separate page fetched only when a PDF opens; pdf.js is pinned exactly at 6.4.299 (fix for CVE-2024-4367 landed in 4.2.67) with its attribution in NOTICE."
+    text: "The preview is lazy: the stat router, its panels and the pane are one React.lazy chunk (file-tab-router) and the viewer is a separate page, both fetched only when a binary-looking file opens; pdf.js is pinned exactly at 6.4.299 (fix for CVE-2024-4367 landed in 4.2.67) with its attribution in NOTICE."
     covers: { tests: [pdfjs_is_pinned_exactly_at_a_fixed_version, entry_code_never_imports_pdfjs_or_the_pane_statically, the_viewer_is_built_separately_not_into_the_app_entry], frames: [] }
   - id: AC22
     text: "Oversize, password-protected, corrupt, truncated, timed-out and changed-while-reading files each show a distinct calm panel, tear the iframe down, and leave the app usable; a conflict offers Reload."
@@ -56,7 +56,7 @@ mutations:
   - { id: M2, file: web/packages/ui/src/components/pdf-preview/viewer-options.ts, change: "enableScripting: true", expectFail: [getDocument_options_are_hardened] }
   - { id: M3, file: web/packages/ui/src/components/pdf-preview/viewer-options.ts, change: "RENDER_OPTIONS annotationMode 1 (ENABLE)", expectFail: [annotation_layer_is_off_on_every_render] }
   - { id: M4, file: web/packages/ui/src/components/pdf-preview/host-protocol.ts, change: "acceptViewerEvent ignores event.source", expectFail: [only_the_hosts_own_frame_is_listened_to, messages_from_other_windows_or_with_bad_shapes_change_nothing] }
-  - { id: M5, file: web/packages/ui/src/components/file-editor-pane.tsx, change: "route a mismatched PDF to the viewer (drop the stat.mismatch branch)", expectFail: [mismatch_never_reaches_viewer] }
+  - { id: M5, file: web/packages/ui/src/components/file-tab-router.tsx, change: "route a mismatched PDF to the viewer (drop the stat.mismatch branch)", expectFail: [mismatch_never_reaches_viewer] }
   - { id: M6, file: web/packages/ui/src/components/pdf-preview/pdf-preview-pane.tsx, change: "drop the oversize check in the pane and in readFileBytes (file-bytes.ts too: either alone is caught by the other)", expectFail: [states_oversize_password_corrupt_conflict, refuses_over_cap_before_asking_for_a_byte] }
   - { id: M7, file: web/packages/ui/src/lib/file-bytes.ts, change: "do not send ifMtime with each chunk", expectFail: [assembles_sequential_chunks_pinned_to_ifMtime] }
   - { id: M8, file: web/packages/ui/src/components/pdf-preview/pdf-preview-pane.tsx, change: "never start the parse timeout", expectFail: [a_parse_that_never_finishes_times_out_and_tears_the_viewer_down] }
