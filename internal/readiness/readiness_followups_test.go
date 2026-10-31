@@ -95,3 +95,59 @@ func TestLockfiles_NestedPackages(t *testing.T) {
 		}
 	})
 }
+
+func TestTestCommand_WorkspacePackages(t *testing.T) {
+	tests := []struct {
+		name            string
+		files           map[string]string
+		wantStatus      string
+		wantEvidenceSub string
+	}{
+		{"landing before", map[string]string{
+			"package.json":          `{"workspaces":["apps/*"],"scripts":{"check-types":"turbo check-types"}}`,
+			"apps/web/package.json": `{"scripts":{"test":"bun test"}}`,
+		}, StatusPass, "apps/web/package.json script test"},
+		{"landing after", map[string]string{
+			"package.json":          `{"workspaces":["apps/*"],"scripts":{"test":"turbo test"}}`,
+			"apps/web/package.json": `{"scripts":{"test":"bun test"}}`,
+		}, StatusPass, "package.json script test"},
+		{"no test anywhere", map[string]string{
+			"package.json":          `{"scripts":{"build":"x"}}`,
+			"apps/web/package.json": `{"scripts":{"build":"y"}}`,
+		}, StatusWarn, ""},
+		{"npm placeholder", map[string]string{
+			"package.json":          `{"workspaces":["apps/*"]}`,
+			"apps/web/package.json": `{"scripts":{"test":"echo \"Error: no test specified\" && exit 1"}}`,
+		}, StatusWarn, ""},
+		{"top-level web package", map[string]string{
+			"web/package.json": `{"scripts":{"test":"vitest"}}`,
+		}, StatusPass, "web/package.json script test"},
+		{"test:unit key", map[string]string{
+			"packages/x/package.json": `{"scripts":{"test:unit":"bun test"}}`,
+		}, StatusPass, ""},
+		{"nested too deep", map[string]string{
+			"web/packages/ui/package.json": `{"scripts":{"test":"vitest"}}`,
+		}, StatusWarn, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for rel, body := range tc.files {
+				put(t, dir, rel, body)
+			}
+			f := byID(Check(context.Background(), dir, Options{}))["test-command"]
+			if f.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q (evidence %q)", f.Status, tc.wantStatus, f.Evidence)
+			}
+			if tc.name == "landing after" {
+				if f.Evidence != tc.wantEvidenceSub {
+					t.Fatalf("evidence = %q, want exactly %q", f.Evidence, tc.wantEvidenceSub)
+				}
+				return
+			}
+			if !strings.Contains(f.Evidence, tc.wantEvidenceSub) {
+				t.Fatalf("evidence = %q, want substring %q", f.Evidence, tc.wantEvidenceSub)
+			}
+		})
+	}
+}

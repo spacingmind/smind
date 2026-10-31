@@ -226,6 +226,34 @@ func pkgScripts(r *repo, re *regexp.Regexp) (found bool, name string) {
 	return false, ""
 }
 
+// workspaceTest finds a real test script in a package dir's package.json.
+func workspaceTest(r *repo) (string, bool) {
+	for _, d := range r.packageDirs() {
+		txt, ok := r.read(d + "/package.json")
+		if !ok {
+			continue
+		}
+		var p struct {
+			Scripts map[string]string `json:"scripts"`
+		}
+		if json.Unmarshal([]byte(txt), &p) != nil {
+			continue
+		}
+		keys := make([]string, 0, len(p.Scripts))
+		for k := range p.Scripts {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			body := p.Scripts[k]
+			if (k == "test" || strings.HasPrefix(k, "test:")) && strings.TrimSpace(body) != "" && !strings.Contains(body, npmNoTest) {
+				return d + "/package.json script " + k, true
+			}
+		}
+	}
+	return "", false
+}
+
 func checkTest(_ context.Context, r *repo, _ Options) Finding {
 	const title = "Test command is discoverable"
 	const fix = "Define a test target in a Taskfile or Makefile, or a test script in package.json, so an agent can verify its changes."
@@ -240,6 +268,9 @@ func checkTest(_ context.Context, r *repo, _ Options) Finding {
 		}
 	}
 	if ok, what := pkgScripts(r, jsonTest); ok {
+		return fnd("test-command", title, true, what, "")
+	}
+	if what, ok := workspaceTest(r); ok {
 		return fnd("test-command", title, true, what, "")
 	}
 	if r.isFile("go.mod") {
