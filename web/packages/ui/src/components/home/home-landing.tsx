@@ -4,9 +4,11 @@ import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { HomeIllustration } from "@/components/home/home-illustration";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { COMPOSER_ACTION_BUTTON_CLASS, COMPOSER_CARD_CLASS } from "@/lib/composer-shell";
+import { useGreeting } from "@/hooks/use-greeting";
 import { Icons } from "@/lib/icons";
 import type { Task, Workspace } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -48,6 +50,7 @@ export function HomeLanding({
   onCreated: (task: Task) => void;
   onAddProject?: () => void;
 }) {
+  const greeting = useGreeting();
   const storedId = useHomeProjectStore((s) => s.value);
   const setStoredId = useHomeProjectStore((s) => s.set);
   const chosen = workspaces.find((w) => w.ID === storedId) ?? workspaces[0] ?? null;
@@ -98,8 +101,8 @@ export function HomeLanding({
 
   return (
     <div data-testid="home-landing" className="flex h-full flex-col items-center justify-center gap-6 overflow-y-auto bg-panel px-4 py-10">
-      <img src="/logo.png" alt="" aria-hidden className="size-16 opacity-70 dark:size-[4.5rem]" data-testid="home-mark" />
-      <h1 className="text-ui-xl font-semibold text-foreground">What should we work on?</h1>
+      <HomeIllustration />
+      <h1 className="text-ui-xl font-semibold text-foreground">{greeting}</h1>
       <div className="w-full max-w-2xl">
         <div className="-mb-3 rounded-t-2xl bg-muted/60 px-1.5 pb-4 pt-1.5">
           <Popover

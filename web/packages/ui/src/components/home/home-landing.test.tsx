@@ -1,7 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HomeLanding } from "@/components/home/home-landing";
+import { GREETINGS, greetingBucket } from "@/lib/greeting";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import type { Task, Workspace } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 import { useHomeProjectStore } from "@/stores/home-project-store";
@@ -48,8 +50,8 @@ describe("HomeLanding", () => {
 
   it("renders mark, greeting, project chip and composer", () => {
     renderHome();
-    expect(screen.getByTestId("home-mark")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "What should we work on?" })).toBeInTheDocument();
+    expect(screen.getByTestId("home-illustration")).toBeInTheDocument();
+    expect(GREETINGS[greetingBucket(new Date().getHours())]).toContain(screen.getByRole("heading", { level: 1 }).textContent);
     expect(screen.getByTestId("home-project-chip")).toHaveTextContent("Alpha");
     expect(screen.getByTestId("home-composer-card")).toContainElement(screen.getByLabelText("Prompt"));
   });
