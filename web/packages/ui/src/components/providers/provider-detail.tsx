@@ -7,6 +7,7 @@ import { providerLabel } from "@/lib/provider-catalog";
 import type { ProviderInfo } from "@/lib/types";
 import { buildProviderDiagnostic } from "@/lib/provider-diagnostic";
 import { ProviderIcon } from "@/components/provider-icon";
+import { ProviderPlanUsage } from "@/components/account-usage/provider-plan-usage";
 import { AccountsCard } from "@/components/providers/accounts-card";
 import { ProviderDefaultModel } from "@/components/providers/provider-default-model";
 import { ProviderCustomInfo } from "@/components/providers/provider-custom-info";
@@ -49,11 +50,13 @@ function ReadinessLine({
   result,
   failed,
   usesCliLogin,
+  keyStatus,
 }: {
   id: string;
   result: { ok: boolean; detail: string } | undefined;
   failed: boolean;
   usesCliLogin: boolean;
+  keyStatus: "set" | "unset" | "none" | null;
 }): JSX.Element {
   let status: "success" | "danger" | "neutral" = "neutral";
   let text = "Checking…";
@@ -61,7 +64,18 @@ function ReadinessLine({
     text = "Couldn't check";
   } else if (result) {
     status = result.ok ? "success" : "danger";
-    text = result.ok ? (usesCliLogin ? "Ready (CLI login)" : "Ready") : `Not ready — ${result.detail}`;
+    if (!result.ok) {
+      text = `Not ready — ${result.detail}`;
+    } else if (keyStatus === "set") {
+      text = "Key set";
+    } else if (keyStatus === "unset") {
+      text = "No key set";
+      status = "neutral";
+    } else if (keyStatus === "none") {
+      text = "Ready";
+    } else {
+      text = usesCliLogin ? "Ready (CLI login)" : "Ready";
+    }
   }
   return (
     <p className="flex items-center gap-1.5 text-ui-sm text-muted-foreground" data-testid={`provider-readiness-${id}`}>
@@ -126,7 +140,16 @@ export function ProviderDetail({
   const reloginAccount = canConnect ? itemRows.find((r) => r.account.id === reloginAccountId)?.account ?? null : null;
   const proxyConsumer = item.accountProvider !== undefined && providerConsumer(item.accountProvider) === "proxy";
   // Runs on these providers use the CLI's own login, not an smind account.
-  const usesCliLogin = info !== null && (info.kind === "cli" || info.extends !== undefined || proxyConsumer);
+  const isRecipe = info !== null && info.recipe !== undefined;
+  const usesCliLogin = !isRecipe && info !== null && (info.kind === "cli" || info.extends !== undefined || proxyConsumer);
+  // Recipe instances authenticate with a key stored in smind; "none" = keyless local recipe.
+  const keyStatus = !isRecipe
+    ? null
+    : !info.secrets?.length
+      ? "none"
+      : info.secrets.every((s) => s.set)
+        ? "set"
+        : "unset";
   const onConnected = () => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() });
   // The cooldown line re-evaluates every render; provider.updated (published when a cooldown clears or lapses) re-reads provider.list.
   const now = new Date();
@@ -166,6 +189,7 @@ export function ProviderDetail({
             result={health[item.id]}
             failed={rpcFailed.has(item.id)}
             usesCliLogin={usesCliLogin}
+            keyStatus={keyStatus}
           />
         ) : null}
         {cooldownUntil ? (
@@ -185,6 +209,7 @@ export function ProviderDetail({
             </Button>
           </p>
         ) : null}
+        {info?.vendor === "zai" && info.extends !== undefined ? <ProviderPlanUsage instanceId={item.id} touch /> : null}
       </div>
 
       {/* The body is keyed by provider: per-provider UI state (models search,
@@ -231,16 +256,28 @@ export function ProviderDetail({
           className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
           data-testid={`provider-external-${item.id}`}
         >
-          <span className="flex flex-col gap-0.5">
-            <span className="text-ui-base text-muted-foreground">Managed externally via CLI</span>
-            <span className="text-ui-xs text-muted-foreground">
-              {info?.extends
-                ? "Uses the CLI login kept in its own config directory — accounts added here aren't read by it."
-                : info?.custom
-                  ? "The agent handles its own sign-in — accounts added here aren't read by it."
-                  : "Authenticates itself via its own CLI login — accounts added here aren't read by it."}
+          {isRecipe ? (
+            <span className="flex flex-col gap-0.5">
+              <span className="text-ui-base text-muted-foreground">Managed by smind</span>
+              <span className="text-ui-xs text-muted-foreground">
+                Authenticates with the key stored in smind, not a CLI login. Test only checks the CLI binary and health — no network call, the key is not used.
+              </span>
+              <span className="text-ui-xs text-muted-foreground" data-testid={`provider-config-dir-${item.id}`}>
+                Config directory: private (managed by smind)
+              </span>
             </span>
-          </span>
+          ) : (
+            <span className="flex flex-col gap-0.5">
+              <span className="text-ui-base text-muted-foreground">Managed externally via CLI</span>
+              <span className="text-ui-xs text-muted-foreground">
+                {info?.extends
+                  ? "Uses the CLI login kept in its own config directory — accounts added here aren't read by it."
+                  : info?.custom
+                    ? "The agent handles its own sign-in — accounts added here aren't read by it."
+                    : "Authenticates itself via its own CLI login — accounts added here aren't read by it."}
+              </span>
+            </span>
+          )}
           <TestButton providerId={item.id} testing={isTesting(item.id)} onTest={runTest} />
         </div>
       ) : itemRows.length === 0 ? (

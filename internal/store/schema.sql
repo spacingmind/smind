@@ -676,3 +676,27 @@ CREATE TABLE IF NOT EXISTS provider_secrets (
     updated_at TIMESTAMP NOT NULL,
     PRIMARY KEY (instance_id, name)
 );
+
+-- permission_policy_audit: one row per policy-engine evaluation (ADR-0047
+-- 2.3): every evaluation appends a row (ask included) and the later human
+-- or timeout outcome appends a second row linked by request_id. Append-only:
+-- no update path; the only delete is the 90-day retention sweep. Additive.
+CREATE TABLE IF NOT EXISTS permission_policy_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TIMESTAMP NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    task_id INTEGER NOT NULL DEFAULT 0,
+    request_id TEXT NOT NULL DEFAULT '',
+    seat TEXT NOT NULL DEFAULT '',
+    workspace_id INTEGER NOT NULL DEFAULT 0,
+    tool TEXT NOT NULL DEFAULT '',
+    target TEXT NOT NULL DEFAULT '',   -- redacted, heredocs elided, <= 512 chars
+    paths TEXT NOT NULL DEFAULT '[]',  -- resolved, first 8, JSON
+    decision TEXT NOT NULL,            -- allow | deny | ask | ask_human_allow | ask_human_deny | ask_timeout_deny
+    rule_id TEXT NOT NULL DEFAULT '',
+    policy_sha TEXT NOT NULL DEFAULT '',
+    reasons TEXT NOT NULL DEFAULT '',
+    latency_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_permission_policy_audit_task ON permission_policy_audit(task_id, id);
+CREATE INDEX IF NOT EXISTS idx_permission_policy_audit_created_at ON permission_policy_audit(created_at);

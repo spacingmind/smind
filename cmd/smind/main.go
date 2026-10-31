@@ -92,6 +92,8 @@ func run(args []string) int {
 		return cmdSkill(args[1:])
 	case "learn":
 		return cmdLearn(args[1:])
+	case "policy":
+		return cmdPolicy(args[1:])
 	case "push":
 		return cmdPush(args[1:])
 	case "cooldown":
@@ -204,6 +206,9 @@ Usage:
 
   smind learn status|ls|show|approve|reject|pin|unpin|disable|enable|archive|restore|delete|undo|reflect|curate|mode|forget
                                                            manage learned skills and proposals (humans only; run "smind learn" for flags)
+
+  smind policy init|show|test|audit                       permission policy engine: write the template, show rules, explain a command, list decisions
+                                                           (humans only; the engine is off until steward.policy.enabled; run "smind policy" for flags)
 
   smind push test [<device id prefix>]                    send a test notification to phones registered for push
 

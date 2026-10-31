@@ -21,6 +21,7 @@ function toModelRows(models: NonNullable<ProviderInfo["models"]>): ModelRow[] {
 
 /** The catalog's source: an instance shows where its own overlay's list comes from, not the extended one. */
 function sourceNote(provider: ProviderInfo): string {
+  if (provider.recipe) return "From the recipe";
   if (provider.modelsDiscovered) return "Reported by the agent";
   if (provider.custom && !provider.extends) return "Listed in config.yaml";
   if (provider.extends) {
@@ -34,7 +35,11 @@ function sourceNote(provider: ProviderInfo): string {
 export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
   const { provider } = props;
   const [query, setQuery] = useState("");
-  const models = provider.models ?? [];
+  const models = useMemo(() => {
+    const all = provider.models ?? [];
+    // A recipe instance lists only its own configured models; the catalog entries come from the runner it extends.
+    return provider.recipe ? all.filter((m) => m.source === "config") : all;
+  }, [provider.models, provider.recipe]);
   const rows = useMemo(
     () => filterAndRankModelRows(toModelRows(models), query.trim().toLowerCase()),
     [models, query],
@@ -44,7 +49,9 @@ export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
     return (
       <div className="rounded-lg border bg-card p-3" data-testid="provider-models">
         <p className="text-ui-sm text-muted-foreground" data-testid="provider-models-empty">
-          No models reported yet — the agent hasn't been probed.
+          {provider.recipe
+            ? "No models listed for this recipe — runs use the endpoint's default model."
+            : "No models reported yet — the agent hasn't been probed."}
         </p>
       </div>
     );

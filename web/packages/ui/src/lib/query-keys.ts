@@ -14,6 +14,8 @@ export const queryKeys = {
    * Reading it never makes the daemon call a provider; see `usageQueryOptions`.
    */
   accountUsage: () => ["account.usage", { cached: true }] as const,
+  /** The daemon's cached per-instance plan usage (`provider.usage`); same call discipline as `accountUsage`. */
+  providerUsage: () => ["provider.usage", { cached: true }] as const,
   /** The daemon's run registry (`run.list`, all runs): resolves a cited run id to its task and chat. */
   runList: () => ["run.list"] as const,
   /** The workspace -> spaces -> tasks tree the sidebar draws and Settings -> Usage names rows from: one fetch, live via the lifecycle events. */

@@ -44,23 +44,54 @@ func providerCooldownNote(provider string, until time.Time) string {
 	return fmt.Sprintf("provider %s was rate-limited until %s by an earlier run; this run may fail the same way", provider, until.In(time.Now().Location()).Format("15:04"))
 }
 
-// activeProviderCooldown reports provider's cooldown, if any. A store error
-// counts as no cooldown: the cooldown is an optimisation, never a gate that
-// can wedge sends.
+// activeProviderCooldown reports provider's cooldown, if any: the later of
+// the stored 429 cooldown and the reset of a used-up plan window from the
+// cache-only ProviderQuota (capped at store.MaxProviderCooldown). A store
+// error counts as no stored cooldown: the cooldown is an optimisation, never
+// a gate that can wedge sends.
 func (reg *Registry) activeProviderCooldown(provider string) (time.Time, bool) {
-	until, ok, err := reg.st.GetProviderCooldown(provider, time.Now())
+	now := time.Now()
+	until, ok, err := reg.st.GetProviderCooldown(provider, now)
 	if err != nil || !ok {
-		return time.Time{}, false
+		until, ok = time.Time{}, false
 	}
-	return until, true
+	if q := reg.providerQuotaSource(); q != nil {
+		if w, wok := q.ExhaustedUntil(provider, now); wok && w.After(now) {
+			if w = capCooldown(w, now); !ok || w.After(until) {
+				until, ok = w, true
+			}
+		}
+	}
+	return until, ok
+}
+
+// capCooldown caps a window reset at now+store.MaxProviderCooldown.
+func capCooldown(until, now time.Time) time.Time {
+	if limit := now.Add(store.MaxProviderCooldown); until.After(limit) {
+		return limit
+	}
+	return until
 }
 
 // ProviderCooldowns returns the providers currently cooling down with their
-// reset times (UTC), for provider.list and provider_list.
+// reset times (UTC), for provider.list and provider_list: the stored 429
+// cooldowns merged with the cached used-up plan windows, the later reset
+// per provider.
 func (reg *Registry) ProviderCooldowns() map[string]time.Time {
-	m, err := reg.st.ListProviderCooldowns(time.Now())
-	if err != nil {
-		return map[string]time.Time{}
+	now := time.Now()
+	m, err := reg.st.ListProviderCooldowns(now)
+	if err != nil || m == nil {
+		m = map[string]time.Time{}
+	}
+	if q := reg.providerQuotaSource(); q != nil {
+		for provider, w := range q.ExhaustedProviders(now) {
+			if !w.After(now) {
+				continue
+			}
+			if w = capCooldown(w, now); w.After(m[provider]) {
+				m[provider] = w
+			}
+		}
 	}
 	return m
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { ProviderPlanUsage } from "@/components/account-usage/provider-plan-usage";
 import { UsageBody } from "@/components/account-usage/usage-body";
 import { UsageControls } from "@/components/account-usage/usage-controls";
 import { useUsageSurface } from "@/components/account-usage/use-usage-surface";
@@ -166,6 +167,7 @@ function PlanUsageBlock() {
         onRetry={surface.retry}
         pinning={surface.pinning}
       />
+      <ProviderPlanUsage touch />
     </section>
   );
 }

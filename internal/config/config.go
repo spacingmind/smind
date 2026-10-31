@@ -27,6 +27,7 @@ type Config struct {
 	Plugins       PluginsConfig       `yaml:"plugins"`
 	Automations   AutomationsConfig   `yaml:"automations"`
 	Validation    ValidationConfig    `yaml:"validation"`
+	Steward       StewardConfig       `yaml:"steward"`
 	Log           LogConfig           `yaml:"log"`
 }
 

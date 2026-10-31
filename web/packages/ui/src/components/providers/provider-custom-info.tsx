@@ -14,7 +14,8 @@ import type { ProviderInfo } from "@/lib/types";
  */
 export function ProviderCustomInfo({ info, hasClient }: { info: ProviderInfo; hasClient: boolean }): JSX.Element {
   const { reload, pending, error } = useReloadProviders();
-  const dirs = Object.entries(info.envEffective ?? {});
+  // A recipe instance runs in a private dir smind manages; envEffective only echoes the daemon's own env, which is irrelevant.
+  const dirs = info.recipe ? [] : Object.entries(info.envEffective ?? {});
   return (
     <div className="flex flex-col gap-2" data-testid={`provider-custom-${info.id}`}>
       {dirs.map(([key, effective]) => (
