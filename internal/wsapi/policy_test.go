@@ -121,3 +121,39 @@ func TestPolicyTest_ExplainsEachSegmentNoSideEffects(t *testing.T) {
 		t.Fatalf("audit rows = %d, %v; want 0", len(rows), err)
 	}
 }
+
+// Not parallel: SMIND_HOME must be set before the API (and so its engine) is
+// built. policy.test is a dry run, so it explains the floor whether or not
+// the engine's config switch is on.
+func TestPolicyEngine_FloorProtectsDaemonHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	e := newIdentEnv(t, "hang")
+	local := &requestContext{local: true}
+
+	floor := func(dir string) string {
+		raw, err := budgetCall(t, e.api, local, "policy.test", map[string]any{"tool": "Bash", "command": "cat " + filepath.Join(dir, "token")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Decision struct {
+				Action  string `json:"action"`
+				FloorID string `json:"floorId"`
+			} `json:"decision"`
+		}
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Decision.FloorID != "" && got.Decision.Action != "deny" {
+			t.Fatalf("floor hit %q with action %q", got.Decision.FloorID, got.Decision.Action)
+		}
+		return got.Decision.FloorID
+	}
+	if id := floor(home); id != "no-install-state" {
+		t.Fatalf("floor for the daemon home = %q, want no-install-state", id)
+	}
+	if id := floor(t.TempDir()); id == "no-install-state" {
+		t.Fatalf("a path outside the daemon home hit %q", id)
+	}
+}

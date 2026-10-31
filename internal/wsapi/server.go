@@ -332,6 +332,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	policyEngine := permpolicy.NewEngine(permpolicy.Options{
 		Path: filepath.Join(config.Dir(), "steward", "policy.yaml"), Enabled: configStewardPolicyEnabled, Audit: db,
+		SmindHome: config.Dir(),
 	})
 	reg.SetPolicyEngine(policyEngine)
 	for method, h := range policyHandlers(policyEngine, db) {
