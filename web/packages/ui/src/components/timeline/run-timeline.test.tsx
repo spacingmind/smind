@@ -528,16 +528,18 @@ describe("RunTimeline", () => {
 describe("RunTimeline borderless chrome", () => {
   /**
    * Allow-list: semantic borders that legitimately stay inside a message --
-   * markdown tables/blockquotes (rendered under `.markdown`, timeline-markdown.tsx) and
-   * the shared Button primitive (`border-transparent` is invisible; the retry
-   * button's outline variant is an actionable control, not message chrome).
+   * markdown tables/blockquotes (rendered under `.markdown`, timeline-markdown.tsx),
+   * the expanded tool-call frame (tool-call-card.tsx: the border exists only while
+   * the card is open, framing its detail body), and the shared Button primitive
+   * (`border-transparent` is invisible; the retry button's outline variant is an
+   * actionable control, not message chrome).
    */
   function borderOffenders(root: HTMLElement): string[] {
     const offenders: string[] = [];
     for (const el of root.querySelectorAll("*")) {
       // Radix `asChild` triggers overwrite data-slot, so the action-bar buttons (the same Button primitive) read as these.
       if (el.closest("[data-slot='button'], [data-slot='tooltip-trigger'], [data-slot='dropdown-menu-trigger']")) continue;
-      if (el.closest(".markdown, [data-testid='timeline-assistant']")) continue;
+      if (el.closest(".markdown, [data-testid='timeline-assistant'], [data-testid='timeline-tool-call']")) continue;
       const tokens = (el.getAttribute("class") ?? "").split(/\s+/);
       if (tokens.some((t) => /^(border|divide)(-|$)/.test(t))) offenders.push(`${el.tagName} ${el.getAttribute("class")}`);
     }
