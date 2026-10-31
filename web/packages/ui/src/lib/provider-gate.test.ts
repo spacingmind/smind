@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { formatCooldownUntil, formatResetLabel } from "@/lib/account-usage/format";
 import { buildBrowserProviders } from "@/lib/model-browser";
-import { gateActionLabel, gateBadge, gateReasonText, isHardGate, liveGate } from "@/lib/provider-gate";
+import { gateActionLabel, gateBadge, gateDetail, gateReasonText, isHardGate, liveGate } from "@/lib/provider-gate";
 import type { ProviderGate, ProviderInfo } from "@/lib/types";
 
 const NOW = Date.parse("2026-11-01T10:00:00Z");
@@ -32,6 +32,21 @@ describe("provider gate helpers", () => {
     expect(gateReasonText({ reason: "out_of_plan", until: future }, NOW)).toBe(`Plan used up · ${formatResetLabel(future, NOW)}`);
     expect(gateReasonText({ reason: "cooling_down", until: future }, NOW)).toBe(`Cooling down until ${formatCooldownUntil(Date.parse(future), NOW)}`);
     expect(gateReasonText({ reason: "out_of_plan" }, NOW)).toBe("Plan used up");
+  });
+
+  it("the row detail adds only what the badge does not say", () => {
+    expect(gateDetail({ reason: "not_signed_in" }, NOW)).toBe("");
+    expect(gateDetail({ reason: "unsupported_by_harness" }, NOW)).toBe("");
+    expect(gateDetail({ reason: "model_not_in_plan" }, NOW)).toBe("");
+    expect(gateDetail({ reason: "out_of_plan", until: future }, NOW)).toBe(formatResetLabel(future, NOW));
+    expect(gateDetail({ reason: "out_of_plan" }, NOW)).toBe("");
+    expect(gateDetail({ reason: "cooling_down", until: future }, NOW)).toBe(`until ${formatCooldownUntil(Date.parse(future), NOW)}`);
+    expect(gateDetail({ reason: "fresh", action: { kind: "x", label: "Do the thing" } }, NOW)).toBe("Do the thing");
+  });
+
+  it("badge labels are the short reasons", () => {
+    expect(gateBadge({ reason: "out_of_plan" }).label).toBe("Plan used up");
+    expect(gateBadge({ reason: "unsupported_by_harness" }).label).toBe("Unsupported");
   });
 
   it("an unknown reason shows its action label, else the reason", () => {

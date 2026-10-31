@@ -104,21 +104,21 @@ const REASONS: Array<[ProviderGate, string]> = [
       until: FUTURE,
       action: { kind: "clear_cooldown", target: "glm", label: "Clear" },
     }),
-    "Cooling down until",
+    "Cooling down",
   ],
   [
     gate({
       reason: "unsupported_by_harness",
       action: { kind: "pick_provider", label: "Pick another provider" },
     }),
-    "Not supported by this harness",
+    "Unsupported",
   ],
   [
     gate({
       reason: "model_not_in_plan",
       action: { kind: "pick_model", label: "Pick another model" },
     }),
-    "Not in your plan",
+    "Not in plan",
   ],
 ];
 
@@ -157,6 +157,14 @@ describe("picker gates: provider rows", () => {
     );
     fireEvent.click(row);
     expect(screen.getByTestId("model-row-glm:glm-5")).toBeInTheDocument();
+  });
+
+  it("a hard gate dims the row's name, an advisory one does not (the two read differently)", () => {
+    const g = { reason: "out_of_plan", until: FUTURE } as const;
+    renderPicker(infos({ glm: { gate: g }, kimi: { gate: { ...g, advisory: true } } }));
+    toRoot();
+    expect(within(screen.getByTestId("model-provider-glm")).getByText("GLM")).toHaveClass("opacity-60");
+    expect(within(screen.getByTestId("model-provider-kimi")).getByText("Kimi")).not.toHaveClass("opacity-60");
   });
 
   it("a time gate whose until has passed shows nothing", () => {
@@ -223,7 +231,7 @@ describe("picker gates: model rows", () => {
     expect(opus).toHaveAttribute("aria-disabled", "true");
     expect(
       within(opus).getByTestId("model-gate-claude-native:opus"),
-    ).toHaveTextContent("Not in your plan");
+    ).toHaveTextContent("Not in plan");
     fireEvent.click(opus);
     expect(spies.onSelect).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("model-row-claude-native:sonnet"));

@@ -56,6 +56,27 @@ export function gateReasonText(
   }
 }
 
+/**
+ * What the badge does not already say, for the row's one line: the reset or end time of a time gate, the action's
+ * own label for a reason this client does not know. Empty when the badge is the whole story.
+ */
+export function gateDetail(g: ProviderGate, now: number = Date.now()): string {
+  switch (g.reason) {
+    case "out_of_plan":
+      return formatResetLabel(g.until, now) ?? "";
+    case "cooling_down": {
+      const at = g.until ? Date.parse(g.until) : NaN;
+      return Number.isNaN(at) ? "" : `until ${formatCooldownUntil(at, now)}`;
+    }
+    case "not_signed_in":
+    case "unsupported_by_harness":
+    case "model_not_in_plan":
+      return "";
+    default:
+      return g.action?.label ?? "";
+  }
+}
+
 /** The short badge: advisory and time gates warn, setup gates (sign in, harness) read as problems. */
 export function gateBadge(g: ProviderGate): {
   label: string;
@@ -63,7 +84,7 @@ export function gateBadge(g: ProviderGate): {
 } {
   const labels: Record<string, string> = {
     not_signed_in: "Signed out",
-    out_of_plan: "Out of plan",
+    out_of_plan: "Plan used up",
     cooling_down: "Cooling down",
     unsupported_by_harness: "Unsupported",
     model_not_in_plan: "Not in plan",

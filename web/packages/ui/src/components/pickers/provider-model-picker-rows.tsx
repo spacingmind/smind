@@ -6,7 +6,7 @@ import { OwnerBadge } from "@/components/plugins/owner-badge";
 import { ProfileIcon, ProviderIcon } from "@/components/provider-icon";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { gateActionLabel, gateBadge, gateReasonText, isHardGate } from "@/lib/provider-gate";
+import { gateActionLabel, gateBadge, gateDetail, gateReasonText, isHardGate } from "@/lib/provider-gate";
 import { getProviderModelCount, type BrowserProvider, type ModelRow } from "@/lib/model-browser";
 import type { ProviderGate } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -110,6 +110,7 @@ export function GateSlot({
 }) {
   const badge = gateBadge(gate);
   const text = gateReasonText(gate, now);
+  const detail = gateDetail(gate, now);
   const actionLabel = onAction ? gateActionLabel(gate) : undefined;
   return (
     <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
@@ -117,7 +118,7 @@ export function GateSlot({
         <StatusBadge status={badge.status} className="shrink-0">
           {badge.label}
         </StatusBadge>
-        <span className="min-w-0 truncate text-ui-sm text-foreground-muted max-md:whitespace-normal">{text}</span>
+        {detail && <span className="min-w-0 truncate text-ui-sm text-foreground-muted">{detail}</span>}
       </span>
       {actionLabel && (
         <button
@@ -250,8 +251,8 @@ export function ProviderRow({
   }
   return (
     <RowShell {...shell} testId={`model-provider-${provider.id}`} className={cn(separator && "border-t border-border rounded-t-none")}>
-      <ProviderIcon provider={provider.id} className="shrink-0 text-foreground-muted" />
-      <span className="min-w-0 shrink-0 truncate text-ui-base text-foreground">{provider.label}</span>
+      <ProviderIcon provider={provider.id} className={cn("shrink-0 text-foreground-muted", isHardGate(shell.gate) && "opacity-60")} />
+      <span className={cn("min-w-0 shrink-0 truncate text-ui-base text-foreground", isHardGate(shell.gate) && "opacity-60")}>{provider.label}</span>
       {shell.gate && !provider.unavailableReason ? (
         <GateSlot gate={shell.gate} rowId={shell.id} gateKey={shell.gateKey ?? provider.id} active={shell.active} now={shell.now ?? Date.now()} onAction={shell.onGateAction} />
       ) : (
@@ -339,8 +340,8 @@ export function ModelRowItem({
     : row.description;
   return (
     <RowShell {...shell} testId={`model-row-${row.key}`} selected={selected}>
-      <ProviderIcon provider={row.provider} className="shrink-0 text-foreground-muted" />
-      <span className="max-w-[55%] shrink-0 truncate text-ui-base text-foreground">{row.modelLabel}</span>
+      <ProviderIcon provider={row.provider} className={cn("shrink-0 text-foreground-muted", isHardGate(shell.gate) && "opacity-60")} />
+      <span className={cn("max-w-[55%] shrink-0 truncate text-ui-base text-foreground", isHardGate(shell.gate) && "opacity-60")}>{row.modelLabel}</span>
       {shell.gate ? (
         <GateSlot gate={shell.gate} rowId={shell.id} gateKey={shell.gateKey ?? row.key} active={shell.active} now={shell.now ?? Date.now()} onAction={shell.onGateAction} />
       ) : (
