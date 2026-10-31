@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spacingmind/smind/internal/inbox"
@@ -43,11 +44,14 @@ var (
 )
 
 type inboxHost struct {
-	svc  *inbox.Service
-	bus  *eventBus
-	poke chan struct{}
-	done chan struct{}
-	once sync.Once
+	svc *inbox.Service
+	// linkIssues is the fleet link-issue source SetFleet installs after the
+	// inbox loop is already running, hence atomic.
+	linkIssues atomic.Pointer[func() []inbox.HostLinkIssue]
+	bus        *eventBus
+	poke       chan struct{}
+	done       chan struct{}
+	once       sync.Once
 
 	mu   sync.Mutex
 	last string
@@ -71,9 +75,14 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 			}
 			return out, nil
 		},
-		Stalls: stalled.current,
-		// HostLinkIssues stays nil for now: F1b's link manager will feed it.
+		Stalls:    stalled.current,
 		HostPairs: hostPairs,
+		HostLinkIssues: func() []inbox.HostLinkIssue {
+			if f := h.linkIssues.Load(); f != nil {
+				return (*f)()
+			}
+			return nil
+		},
 		TaskTitle: func(id int64) string {
 			if t, err := db.GetTask(id); err == nil {
 				return t.Title
@@ -83,6 +92,11 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 	}
 	go h.loop()
 	return h
+}
+
+// setLinkIssues installs the source of host link issues.
+func (h *inboxHost) setLinkIssues(f func() []inbox.HostLinkIssue) {
+	h.linkIssues.Store(&f)
 }
 
 func (h *inboxHost) stop() {

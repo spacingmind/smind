@@ -144,6 +144,16 @@ An unknown provider id under `providers.<id>` is an error. See
 | `log.maxSizeMB` | `10` | Size at which `daemon.log` rotates. Must be 1 or more. |
 | `log.maxFiles` | `5` | Log files kept, including the active one. Must be 1 or more. |
 
+### fleet
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fleet.enabled` | `false` | Turns on [connected hosts](hosts.md). Only a hand edit of this file turns it on, and it needs a restart. With it off no key is created and nothing dials out. |
+| `fleet.maxHosts` | `16` | The most hosts one daemon may be paired with. |
+| `fleet.handshakeSeconds` | `10` | How long a peer handshake may take. |
+| `fleet.replayWindowMinutes` | `10` | How long a request id is remembered to refuse a replay. |
+| `fleet.auditRetentionDays` | `30` | How long the fleet audit trail is kept. |
+
 ### automations
 
 | Key | Default | Meaning |

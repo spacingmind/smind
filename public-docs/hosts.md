@@ -67,3 +67,93 @@ A pending pairing can be approved from its [Inbox](inbox.md) row: type the six
 digits shown on the other host, and the phone approves **read-only access**
 only. Pairing, invites, editing access and the reverse switch are done on a
 computer.
+
+## From the command line
+
+Everything on the Hosts page has a command. Pairing starts on the host that will
+be *called*, the receiver; the host that dials is the initiator.
+
+1. On the receiver, open a pairing window and print an invite:
+
+   ```bash
+   smind host invite --addr wss://receiver.example:4648
+   ```
+
+   The invite is a `smind-host://` link. Everything in it sits after the `#`, so
+   no server ever sees it. It names the receiver's host id and public key and
+   where to reach it, never a password.
+
+2. On the initiator, add the receiver. If the receiver has a password, put it in
+   an environment variable and name the variable, so it stays out of your shell
+   history:
+
+   ```bash
+   RECEIVER_PASSWORD='...' smind host add 'smind-host://v1#...' --alias studio --password-env RECEIVER_PASSWORD
+   ```
+
+3. Both hosts show the same six-digit code (`smind host ls` shows it on the
+   receiver while the pairing is pending). If the codes differ, someone is in
+   the middle: stop and run `smind host rm studio`.
+
+4. On the receiver, approve the pairing and choose the workspaces the initiator
+   may create work in. At least one is required:
+
+   ```bash
+   smind host approve laptop --sas 123456 --write 3
+   ```
+
+   The code you type must match the one shown for that host.
+
+The window stays open for ten minutes by default, accepts one pairing, and only
+a host that first connected after you opened it can take the slot.
+
+To let the receiver also reach the initiator, run this **on the initiator**,
+because the host that will be called decides:
+
+```bash
+smind host enable-reverse studio
+```
+
+The receiver also needs a route to dial, which only you can set on that machine
+(a peer can never tell your daemon where to connect):
+
+```bash
+smind host route laptop --addr wss://initiator.example:4648 --password-env INITIATOR_PASSWORD
+```
+
+`smind host disable-reverse studio` turns the direction off and closes the live
+connection at once.
+
+### What a link carries
+
+Each connection starts with a mutual proof of identity: both hosts sign a fresh
+challenge and each checks the other against the key it pinned at pairing. A host
+whose key changed is refused, never accepted silently, and a recorded handshake
+is useless on another connection. The hosts also compare protocol versions on
+every connect; an older peer gets a clear "update smind on that host" message
+and the link stays refused. Your local work is never affected.
+
+A paired host can call only the fleet methods and nothing else: it cannot read
+or change your grants, settings or secrets, and provider accounts and passwords
+never cross a link.
+
+### Routes and cleartext
+
+A direct route must be `wss://`, or `ws://` to this machine or to an address
+inside an encrypted overlay network such as Tailscale. A plain `ws://` route to
+any other address is refused, because prompts and results would be readable on
+the network. Override it for one host with `--allow-cleartext`; the command
+prints a warning. A host can also be reached through your self-hosted relay: run
+`smind host invite --via relay` on a daemon that is connected to a relay.
+
+### Other commands
+
+```bash
+smind host ls
+smind host ls --json
+smind host test studio
+smind host rename studio workshop
+smind host rm studio
+```
+
+`smind host ls` never prints a key, a password or a secret.

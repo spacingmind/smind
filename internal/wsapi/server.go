@@ -109,6 +109,9 @@ type API struct {
 	// learning backs the human-only learning.* RPCs (SetLearning).
 	learning *learningHost
 
+	// fleet is the ADR-0048 callee side; nil until SetFleet.
+	fleet *fleetHost
+
 	// authorize decides whether a /ws upgrade may proceed. New installs the
 	// legacy rule (the daemon token in the "token" query parameter);
 	// SetAuthorizer replaces it. Set before the first request is served.
