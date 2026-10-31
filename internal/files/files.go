@@ -208,6 +208,11 @@ func Resolve(root, reqPath string) (string, error) { return resolveInRoot(root, 
 // and are symlink-resolved; a missing leaf is appended verbatim onto the
 // resolved ancestor, since a path that doesn't exist can't be a symlink.
 func resolveInRoot(root, reqPath string) (string, error) {
+	// Before any filesystem access: a UNC or device path must not start SMB
+	// authentication (or open a device) on its way to being refused.
+	if err := refuseUnsafeForm(reqPath); err != nil {
+		return "", err
+	}
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return "", fmt.Errorf("resolve worktree root %q: %w", root, err)
