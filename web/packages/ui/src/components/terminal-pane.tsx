@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Icons } from "@/lib/icons";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -8,11 +7,12 @@ import "@xterm/xterm/css/xterm.css";
 import { FindBar, type FindBarHandle } from "@/components/find/find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { TerminalKeyBar, type TerminalModifier } from "@/components/terminal-key-bar";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useTheme } from "@/hooks/use-theme";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
+import { encodeTerminalKey, hasPendingModifiers, resolvePendingModifierData, terminalKeyInput } from "@/lib/terminal-keys";
 import { loadTerminalScrollback } from "@/lib/terminal-prefs";
 import {
   bindTerminal,
@@ -67,6 +67,8 @@ export interface TerminalHandle {
   onSelectionChange?(callback: () => void): { dispose(): void };
   /** Find over the scrollback (AC3, `@xterm/addon-search`). Optional so FakeTerminalHandle (this file's own test suite) doesn't need it -- a handle without `find` never shows the Find affordance at all, never a dead shortcut. */
   find?: TerminalFindHandle;
+  /** Whether the shell switched the cursor keys to application mode (SS3 arrows). Optional for the same reason setTheme is; absent means normal mode. */
+  applicationCursorKeys?(): boolean;
   dispose(): void;
 }
 
@@ -115,6 +117,7 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
       term.options.theme = theme;
     },
     getSelection: () => term.getSelection(),
+    applicationCursorKeys: () => term.modes.applicationCursorKeysMode,
     onSelectionChange: (callback) => term.onSelectionChange(callback),
     find: {
       search: (query, direction) => {
@@ -216,6 +219,10 @@ export function TerminalPane({
   const [hasSelection, setHasSelection] = useState(false);
   const [selectionReportable, setSelectionReportable] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
+  // Sticky Ctrl/Shift/Alt of the touch key bar; the ref mirrors state for the onData closure.
+  const [modifiers, setModifiers] = useState({ ctrl: false, shift: false, alt: false });
+  const modifiersRef = useRef(modifiers);
+  modifiersRef.current = modifiers;
 
   // Find (AC3): open/query/result live here (not a child component) so
   // every hook that touches termRef stays inside this component's own
@@ -464,9 +471,21 @@ export function TerminalPane({
   useEffect(() => {
     const term = termRef.current;
     if (!term || !client) return;
-    const disposable = term.onData((data) => {
+    const disposable = term.onData((raw) => {
+      let data = raw;
+      const pending = modifiersRef.current;
+      if (hasPendingModifiers(pending)) {
+        const resolved = resolvePendingModifierData({ data: raw, pending });
+        if (resolved.mode === "key") {
+          data = encodeTerminalKey(terminalKeyInput(resolved.key, pending), {
+            applicationCursorKeys: term.applicationCursorKeys?.() ?? false,
+          });
+        }
+        modifiersRef.current = { ctrl: false, shift: false, alt: false };
+        setModifiers(modifiersRef.current);
+      }
       const id = terminalIdRef.current;
-      if (!id) return;
+      if (!id || !data) return;
       client.call("terminal.write", { terminalId: id, data }).catch(() => {
         // Best-effort: a write failing (e.g. the session just closed)
         // doesn't need its own UI treatment beyond what attach ending
@@ -580,6 +599,37 @@ export function TerminalPane({
     }
   }
 
+  function clearModifiers() {
+    modifiersRef.current = { ctrl: false, shift: false, alt: false };
+    setModifiers(modifiersRef.current);
+  }
+
+  function toggleModifier(modifier: TerminalModifier) {
+    modifiersRef.current = { ...modifiersRef.current, [modifier]: !modifiersRef.current[modifier] };
+    setModifiers(modifiersRef.current);
+    termRef.current?.focus?.();
+  }
+
+  function sendKey(domKey: string) {
+    const id = terminalIdRef.current;
+    const data = encodeTerminalKey(terminalKeyInput(domKey, modifiersRef.current), {
+      applicationCursorKeys: termRef.current?.applicationCursorKeys?.() ?? false,
+    });
+    if (client && id && data) {
+      client.call("terminal.write", { terminalId: id, data }).catch(() => {
+        // Best-effort, same reasoning as the onData wiring above.
+      });
+    }
+    clearModifiers();
+    termRef.current?.focus?.();
+  }
+
+  function toggleKeyboard() {
+    const textarea = containerRef.current?.querySelector("textarea");
+    if (textarea && textarea === document.activeElement) textarea.blur();
+    else termRef.current?.focus?.();
+  }
+
   return (
     <div className="flex h-full flex-col" onFocus={onFindFocus} onBlur={onFindBlur}>
       {(endedStatus || !terminalId) && (
@@ -633,46 +683,25 @@ export function TerminalPane({
         )}
       </div>
       {/*
-       * Touch has neither the copy/paste keyboard shortcuts nor
-       * right-click paste/copy, so those two affordances stay available as
-       * buttons -- hidden on pointer-fine devices (Tailwind 4's
-       * `pointer-coarse:` variant). Pinned at the bottom, within thumb
-       * reach; the margin lifts it above the on-screen keyboard, and the
-       * safe-area padding applies only while the keyboard is closed.
+       * Touch has neither the copy/paste keyboard shortcuts nor a hardware keyboard's Esc/Tab/Ctrl/arrows,
+       * so a port of Paseo's mobile key bar sits pinned at the bottom -- hidden on pointer-fine devices
+       * (Tailwind 4's `pointer-coarse:` variant). The margin lifts it above the on-screen keyboard, and
+       * the safe-area padding applies only while the keyboard is closed.
        */}
-      <div
-        data-testid="terminal-touch-actions"
-        className="hidden shrink-0 items-center gap-2 border-t bg-background px-3 py-1 pointer-coarse:flex"
+      <TerminalKeyBar
+        modifiers={modifiers}
+        onToggleModifier={toggleModifier}
+        onKey={sendKey}
+        onCopy={() => void handleCopy()}
+        onPaste={() => void handlePaste()}
+        onToggleKeyboard={toggleKeyboard}
+        copyDisabled={!terminalId || (selectionReportable && !hasSelection)}
+        pasteDisabled={!terminalId}
         style={{
           marginBottom: keyboardInset,
           paddingBottom: keyboardInset > 0 ? undefined : "env(safe-area-inset-bottom)",
         }}
-      >
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-ui-sm"
-          disabled={!terminalId || (selectionReportable && !hasSelection)}
-          onClick={() => void handleCopy()}
-          data-testid="terminal-copy"
-        >
-          <Icons.copy className="size-3" />
-          Copy
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-ui-sm"
-          disabled={!terminalId}
-          onClick={() => void handlePaste()}
-          data-testid="terminal-paste"
-        >
-          <Icons.paste className="size-3" />
-          Paste
-        </Button>
-      </div>
+      />
     </div>
   );
 }
