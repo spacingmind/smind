@@ -393,8 +393,10 @@ export function DiffViewerPane({
     <div className="flex h-full flex-col" data-testid="diff-viewer-pane">
       <PaneHeader
         title="Diff"
+        className="flex-col items-stretch sm:flex-row sm:items-center"
         subtitle={
           <span
+            className="whitespace-nowrap"
             data-testid="diff-stat"
             data-files={wholeDiff.stat.files}
             data-additions={wholeDiff.stat.additions}
