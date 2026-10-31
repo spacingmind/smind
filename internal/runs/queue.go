@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -145,9 +146,18 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	// A human is never blocked; the immediate-start path notes it below.
 	var cooldownUntil time.Time
 	cooling := false
+	// A hard gate that is not a time (not signed in, unsupported by the
+	// harness) refuses a non-human send the same way, typed. out_of_plan and
+	// cooling_down are the cooldown path below (routing and the profile
+	// wait/fallback policy own them); an advisory gate never refuses.
+	if nonHumanSend(source, fromTaskID) {
+		if g := reg.gateFor(string(provider), time.Now()); g.Hard() && g.Reason != gate.ReasonOutOfPlan && g.Reason != gate.ReasonCoolingDown {
+			return StartOutcome{}, &GatedError{Provider: string(provider), Gate: *g}
+		}
+	}
 	if until, ok := reg.activeProviderCooldown(string(provider)); ok {
 		if nonHumanSend(source, fromTaskID) {
-			return StartOutcome{}, &ProviderCooldownError{Provider: string(provider), Until: until}
+			return StartOutcome{}, &ProviderCooldownError{Provider: string(provider), Until: until, Gate: reg.gateFor(string(provider), time.Now())}
 		}
 		cooldownUntil, cooling = until, true
 	}

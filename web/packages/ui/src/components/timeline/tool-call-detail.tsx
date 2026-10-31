@@ -73,7 +73,8 @@ export function ToolCallDetail({ item, intent }: { item: TimelineToolCallItem; i
   }
 
   if (intent === "edit") {
-    const diff = inlineDiff(input);
+    const fromInput = inlineDiff(input);
+    const diff = fromInput.length > 0 ? fromInput : diffFromContent(item.result);
     if (diff.length > 0) {
       return (
         <div data-testid="tool-detail-diff" className="overflow-x-auto rounded-md bg-surface p-2 font-mono text-ui-sm font-medium">
@@ -273,8 +274,26 @@ export function inlineDiff(input: Record<string, unknown>): DiffLine[] {
   if (before === undefined && after === undefined) return [];
 
   const lines: DiffLine[] = [];
-  if (before !== undefined) for (const text of before.split("\n")) lines.push({ sign: "-", text });
-  if (after !== undefined) for (const text of after.split("\n")) lines.push({ sign: "+", text });
+  if (before !== undefined) for (const text of splitLines(before)) lines.push({ sign: "-", text });
+  if (after !== undefined) for (const text of splitLines(after)) lines.push({ sign: "+", text });
+  return lines;
+}
+
+/** The diff of ACP `{type: "diff", oldText, newText}` content blocks, which the daemon forwards as the tool call's result instead of in its input. */
+export function diffFromContent(content: unknown): DiffLine[] {
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((block) => {
+    if (!block || typeof block !== "object") return [];
+    const b = block as Record<string, unknown>;
+    if (b.type !== "diff") return [];
+    return inlineDiff({ old_string: b.oldText, new_string: b.newText });
+  });
+}
+
+/** Splits on newlines, dropping the one empty element a trailing newline leaves behind. */
+function splitLines(text: string): string[] {
+  const lines = text.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
 

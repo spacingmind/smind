@@ -118,6 +118,22 @@ picked by you: they require a human-authored profile -- see profile_list.
 A provider shown with cooldownUntil in provider_list is rate limited until
 that time: task_send to it fails fast, so start the work on another provider.
 
+provider_list entries (and their models, under modelGates) may carry a gate:
+{reason, until?, action, advisory?}. Route on reason plus action.kind:
+  not_signed_in          a human must sign in or add the key (action sign_in);
+                         task_new/task_send to it is refused: do not retry
+                         and do not fall back on your own
+  unsupported_by_harness the provider cannot run this way (pick_provider):
+                         choose another provider; sends are refused
+  cooling_down           rate limited until "until"; sends fail fast; only a
+                         human can clear it (clear_cooldown)
+  out_of_plan            the plan window is spent until "until": choose
+                         another provider or wait; never refused on its own
+  model_not_in_plan      the model is outside the plan (pick_model): pick
+                         another model
+A gate with advisory true rests on cached or inferred evidence: it warns, it
+does not refuse. A refused send is an error that names the reason.
+
 If you lose a run id (e.g. after a crash), run_list {taskId} (or
 {status: "running"}) recovers it, newest first.
 `

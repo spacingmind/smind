@@ -1,5 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   DndContext,
   PointerSensor,
@@ -85,7 +87,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
 import { useTheme } from "@/hooks/use-theme";
 import type { ActionId } from "@/keyboard/actions";
-import { KeyboardProvider, useActionHandler, useActionRestriction } from "@/keyboard/keyboard-provider";
+import { KeyboardProvider, useActionHandler, useActionRestriction, useKeyboard } from "@/keyboard/keyboard-provider";
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
@@ -233,6 +235,14 @@ function AppShell({
   const [client, setClient] = useState<WsClient | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  // Bumped by the sidebar's Retry: re-runs the connect effect below, so a failed
+  // first connect can be retried (and its reconnect loop armed) without a reload.
+  const [connectAttempt, setConnectAttempt] = useState(0);
+  const retryConnect = useCallback(() => {
+    setConnectError(null);
+    setConnectionStatus("connecting");
+    setConnectAttempt((n) => n + 1);
+  }, []);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   // Which settings section a fresh mount of SettingsScreen should land on --
   // `shortcuts.help` deep-links to "shortcuts" (AC5: the old Shift+? dialog
@@ -255,6 +265,9 @@ function AppShell({
   const [pendingRoute, setPendingRoute] = useState<Route | null>(() =>
     typeof window === "undefined" ? null : parseRoute(window.location.hash),
   );
+  // UAT B-02: the task id a route named that the tree doesn't hold. Drives the
+  // "Task not found" state in place of the previous task or the landing.
+  const [missingTaskId, setMissingTaskId] = useState<number | null>(null);
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   // Which full-pane surface the main area shows: the task pane or the
   // settings screen (dogfood Item 4). Plain view state, not a route --
@@ -446,7 +459,7 @@ function AppShell({
       cancelled = true;
       reconnectHandle?.close();
     };
-  }, [connect, onLoginRequired]);
+  }, [connect, onLoginRequired, connectAttempt]);
 
   // The task header's lineage jump (PR-U2): fetch the target task fresh
   // (the sidebar's tree may not hold an archived-then-reshown task) and
@@ -454,6 +467,7 @@ function AppShell({
   // like clicking it in the sidebar.
   const selectTask = useCallback((task: Task) => {
     setSelectedTask(task);
+    setMissingTaskId(null);
     // Tab seeding happens once this task's chats load (the effect above) --
     // useTaskChats is keyed on selectedTask.ID, so setting it here is what
     // kicks that fetch off.
@@ -469,6 +483,32 @@ function AppShell({
       closeMobileSidebarRef.current?.();
     },
     [selectTask],
+  );
+
+  // UAT A-11: a task made through the New task dialog lands with the composer
+  // focused. The dialog restores focus to its trigger after it unmounts, so wait
+  // for it to be gone (plus a beat) and for the pane's composer to claim
+  // `composer.focus`, instead of focusing once and losing to the restore.
+  const { runAction } = useKeyboard();
+  const focusComposerWhenReady = useCallback(() => {
+    let dialogGone = false;
+    const attempt = (triesLeft: number) => {
+      if (triesLeft === 0) return;
+      window.setTimeout(() => {
+        if (document.querySelector('[role="dialog"]')) dialogGone = false;
+        else if (!dialogGone) dialogGone = true;
+        else if (runAction("composer.focus")) return;
+        attempt(triesLeft - 1);
+      }, 50);
+    };
+    attempt(60);
+  }, [runAction]);
+  const taskCreatedFromDialog = useCallback(
+    (task: Task) => {
+      selectTaskFromSidebar(task);
+      focusComposerWhenReady();
+    },
+    [selectTaskFromSidebar, focusComposerWhenReady],
   );
 
   // The task header's lineage jump (PR-U2): fetch the target task fresh
@@ -864,13 +904,22 @@ function AppShell({
         openTab(match.ID, baseTabForKind(match.ID, pendingRoute.tab.kind));
       }
       setPendingRoute(null);
+    } else if (treeLoaded && selectedTask?.ID === pendingRoute.taskId) {
+      // Our own hash write for a task selected before the tree learned about it
+      // (just created): the selection is already right, nothing to resolve.
+      setPendingRoute(null);
     } else if (treeLoaded) {
       // The tree has answered and this task isn't in it (archived,
-      // deleted, or never existed) -- degrade to the empty state rather
-      // than waiting on a task that will never arrive.
+      // deleted, or never existed) -- show "Task not found" rather than
+      // waiting on a task that will never arrive, and drop the previous
+      // selection and the hash that names the missing task. replaceState
+      // (not `location.hash = ""`) so no hashchange re-enters this effect.
+      setMissingTaskId(pendingRoute.taskId);
+      setSelectedTask(null);
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
       setPendingRoute(null);
     }
-  }, [pendingRoute, allTasks, treeLoaded, chats, selectTask, openTab, activate]);
+  }, [pendingRoute, allTasks, treeLoaded, chats, selectedTask, selectTask, openTab, activate]);
 
   useEffect(() => {
     if (!selectedTask) return;
@@ -1183,6 +1232,8 @@ function AppShell({
       onOpenPluginPanel={openPluginPage}
       connectionStatus={connectionStatus}
       connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+      onRetryConnect={retryConnect}
+      onTaskCreated={taskCreatedFromDialog}
       headerActions={
         toggleInSidebar ? (
           <>
@@ -1223,7 +1274,21 @@ function AppShell({
     </>
   );
 
-  const emptyStateElement = (
+  const emptyStateElement = missingTaskId !== null ? (
+    <div className="flex h-full bg-panel">
+      <EmptyState
+        testId="task-not-found"
+        icon={<Icons.warning className="size-5" />}
+        title={`Task ${missingTaskId} not found`}
+        description="It may have been archived or deleted."
+        action={
+          <Button size="sm" variant="outline" onClick={() => setMissingTaskId(null)}>
+            Back to home
+          </Button>
+        }
+      />
+    </div>
+  ) : (
     <div data-testid="app-empty-state" className="h-full bg-panel">
       <HomeLanding
         client={client}

@@ -192,7 +192,7 @@ export class WsClient implements WsClientLike {
       };
       const onError = () => {
         ws.removeEventListener("open", onOpen);
-        reject(new ConnectionClosedError(`wsclient: failed to connect to ${url}`));
+        reject(new ConnectionClosedError(`wsclient: failed to connect to ${redactToken(url)}`));
       };
       ws.addEventListener("open", onOpen, { once: true });
       ws.addEventListener("error", onError, { once: true });
@@ -457,6 +457,11 @@ function decodeTerminal<TResult>(env: WireEnvelope): TResult {
     throw new RpcError(env.error.message, env.error.code, env.error.data);
   }
   return env.result as TResult;
+}
+
+/** Replaces any `token=` query value, so a URL can be shown or logged without leaking the daemon access token. */
+export function redactToken(url: string): string {
+  return url.replace(/([?&]token=)[^&#]*/g, "$1REDACTED");
 }
 
 /**

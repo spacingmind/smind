@@ -8,11 +8,11 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useWorkspaceBranches } from "@/hooks/use-workspace-branches";
 import { Icons } from "@/lib/icons";
 
-const MODES: { value: StartMode; label: string }[] = [
-  { value: "head", label: "Workspace HEAD" },
-  { value: "branch", label: "Branch…" },
-  { value: "pr", label: "Pull request…" },
-  { value: "issue", label: "Issue…" },
+const MODES: { value: StartMode; label: string; shortLabel: string }[] = [
+  { value: "head", label: "Workspace HEAD", shortLabel: "HEAD" },
+  { value: "branch", label: "Branch…", shortLabel: "Branch" },
+  { value: "pr", label: "Pull request…", shortLabel: "PR" },
+  { value: "issue", label: "Issue…", shortLabel: "Issue" },
 ];
 
 export const FORK_BADGE_TEXT = "From fork — setup scripts blocked until you run them";

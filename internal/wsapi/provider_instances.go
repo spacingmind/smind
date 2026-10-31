@@ -218,7 +218,7 @@ func handleProviderReload(runner *taskrunner.Runner, bus *eventBus) handlerFunc 
 			return nil, fmt.Errorf("provider.reload: %w", err)
 		}
 		publishProvidersChanged(bus, runner, "")
-		return providerListResultFor(runner, nil), nil
+		return providerListResultFor(runner, nil, nil), nil
 	}
 }
 

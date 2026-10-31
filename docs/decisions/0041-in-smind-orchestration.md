@@ -374,3 +374,5 @@ skipped the paid eval (step 1) by choice; the changes were applied directly. Eve
 negative node id that is only unique within one response). Their reported cost and state roll into every ancestor, and A5's tree budget at admission counts the
 mirror's reported cost (`store.TreeKnownCost`). The B-series notification and the per-tree concurrency guard are unchanged (the guard does not count remote runs; the
 callee's per-origin `maxLiveAgents` bounds them). Details: `docs/plans/active/fleet-hosts.md` "F4 design".
+
+> Amendment 2026-11-01 (F1): the provider cooldown is also a picker gate (`cooling_down`, action `clear_cooldown`) and the non-human fast-fail is now the typed `gated` error. See ADR-0050 amendment.

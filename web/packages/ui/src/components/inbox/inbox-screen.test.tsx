@@ -96,7 +96,17 @@ describe("InboxScreen", () => {
     expect(within(row).getByTestId("inbox-review-perm:q1")).toBeInTheDocument();
     expect(within(row).queryByText("Snooze")).toBeNull();
     expect(within(row).queryByText("Resolve")).toBeNull();
-    expect(within(row).queryByTestId("inbox-open-perm:q1")).toBeNull();
+  });
+
+  it("PermissionRowOpenTask: a permission row offers Open task, a host_pair row does not", async () => {
+    const d = daemonWith(permissionItem(), hostPairItem());
+    const onOpenTask = vi.fn();
+    await renderInbox(d, { onOpenTask });
+    const row = screen.getByTestId("inbox-row-perm:q1");
+    expect(within(row).getByText("Open task")).toBeInTheDocument();
+    expect(within(screen.getByTestId("inbox-row-host_pair:h1")).queryByText("Open task")).toBeNull();
+    await click(within(row).getByTestId("inbox-open-perm:q1"));
+    expect(onOpenTask).toHaveBeenCalledWith(5);
   });
 
   it("NoApproveAllOrMergeControl: nothing on the page approves everything, merges or always-allows", async () => {

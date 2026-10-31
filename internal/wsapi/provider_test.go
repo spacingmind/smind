@@ -353,6 +353,7 @@ func TestProviderList_CooldownUntil(t *testing.T) {
 	for i := range after.Providers {
 		a, b := after.Providers[i], before.Providers[i]
 		a.CooldownUntil = ""
+		a.Gate = nil // the cooldown also gates the row (internal/gate), additive
 		if !reflect.DeepEqual(a, b) {
 			t.Fatalf("provider %s changed besides cooldownUntil:\n%+v\n%+v", a.ID, a, b)
 		}

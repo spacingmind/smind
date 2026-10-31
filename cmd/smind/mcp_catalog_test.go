@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/spacingmind/smind/internal/gate"
 	"strings"
 	"testing"
 
@@ -210,6 +211,16 @@ func TestValidationRPCs_MCPCatalogueHasNoVerdictToolForLead(t *testing.T) {
 	for _, name := range mcpToolNames(t, env.cs) {
 		if strings.Contains(name, "verdict") || strings.Contains(name, "waive") || strings.Contains(name, "merge") {
 			t.Fatalf("tools/list contains %q", name)
+		}
+	}
+}
+
+// TestMCPInstructions_ListEveryGateReason keeps the orchestrator's guide in
+// step with the picker gate vocabulary (internal/gate).
+func TestMCPInstructions_ListEveryGateReason(t *testing.T) {
+	for _, reason := range []string{gate.ReasonNotSignedIn, gate.ReasonOutOfPlan, gate.ReasonCoolingDown, gate.ReasonUnsupportedByHarness, gate.ReasonModelNotInPlan} {
+		if !strings.Contains(mcpInstructions, reason) {
+			t.Fatalf("mcpInstructions does not mention gate reason %q", reason)
 		}
 	}
 }

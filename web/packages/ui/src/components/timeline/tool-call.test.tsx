@@ -107,6 +107,39 @@ describe("intent card bodies", () => {
     expect(within(diff).getByText("+after")).toBeInTheDocument();
   });
 
+  it("edit with ACP diff content renders a diff, not raw JSON", () => {
+    render(
+      <ToolCall
+        item={call({
+          toolName: "Edit",
+          input: { file_path: "/wt/a.go" },
+          result: [{ type: "diff", path: "/wt/a.go", oldText: "before", newText: "after" }],
+        })}
+      />,
+    );
+    expand();
+    const diff = screen.getByTestId("tool-detail-diff");
+    expect(within(diff).getByText("-before")).toBeInTheDocument();
+    expect(within(diff).getByText("+after")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('"type": "diff"');
+  });
+
+  it("edit diff with trailing newlines renders one - row and one + row", () => {
+    render(
+      <ToolCall
+        item={call({
+          toolName: "Edit",
+          input: { file_path: "/wt/a.go" },
+          result: [{ type: "diff", path: "/wt/a.go", oldText: "x := 1\n", newText: "x := 2\n" }],
+        })}
+      />,
+    );
+    expand();
+    const diff = screen.getByTestId("tool-detail-diff");
+    expect(diff.querySelectorAll('[data-diff-sign="-"]')).toHaveLength(1);
+    expect(diff.querySelectorAll('[data-diff-sign="+"]')).toHaveLength(1);
+  });
+
   it("search shows the query and the hit count", () => {
     render(
       <ToolCall item={call({ toolName: "Grep", input: { pattern: "TODO", path: "internal" }, result: "a.go\nb.go\nc.go" })} />,
@@ -290,6 +323,11 @@ describe("result and diff helpers", () => {
       { sign: "+", text: "line two" },
     ]);
     expect(inlineDiff({ whatsit: 1 })).toEqual([]);
+    const minus = (...t: string[]) => t.map((text) => ({ sign: "-", text }));
+    expect(inlineDiff({ old_string: "a\n" })).toEqual(minus("a"));
+    expect(inlineDiff({ old_string: "a" })).toEqual(minus("a"));
+    expect(inlineDiff({ old_string: "" })).toEqual(minus(""));
+    expect(inlineDiff({ old_string: "a\n\n" })).toEqual(minus("a", ""));
   });
 });
 
