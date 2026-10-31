@@ -167,6 +167,15 @@ describe("PluginView", () => {
     expect(onAction).toHaveBeenCalledWith({ kind: "openUrl", url: "https://example.com/x", host: "example.com" });
   });
 
+  it("a badge naming a prototype member renders the generic icon without the placeholder", () => {
+    const { container } = render(
+      <PluginView doc={{ ui: 1, root: { type: "badge", text: "x", icon: "constructor" } }} onAction={vi.fn()} />,
+    );
+    expect(container.querySelector('[data-testid="plugin-unsupported-node"]')).toBeNull();
+    expect(container.textContent).toContain("x");
+    expect(container.querySelector("svg")).not.toBeNull();
+  });
+
   it("svg icon is rebuilt from an allowlist", () => {
     const { container } = render(
       <PluginView

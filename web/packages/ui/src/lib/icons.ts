@@ -362,7 +362,9 @@ const PLUGIN_ICONS: Record<string, IconComponent> = {
 
 /** Resolve a plugin-supplied lucide name to a component; unknown names get the generic plugin glyph. */
 export function pluginIconByName(name: string): IconComponent {
-  return PLUGIN_ICONS[name] ?? Icons.plugin;
+  // hasOwn, not [name] ?? fallback: a prototype member name ("constructor",
+  // "toString", "__proto__") would otherwise resolve to a non-icon function.
+  return Object.hasOwn(PLUGIN_ICONS, name) ? PLUGIN_ICONS[name]! : Icons.plugin;
 }
 
 /**
