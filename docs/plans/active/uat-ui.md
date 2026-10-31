@@ -144,7 +144,7 @@ No P0 found. Severity: P0 data loss/crash/blocked flow, P1 broken feature or wro
 | S-01 (FIXED in phase-2 PR2: automation chip is icon-only below 18rem; long titles still ellipsise) | sidebar | P2 | (Steward, PR #759) Automation chip squeezes task titles to "Nightly d..."; go icon-only at narrow widths or give the title priority. Not yet reproduced here | - | `app-sidebar.tsx` |
 | S-02 (FIXED in phase-2 PR2: off card names `smind service restart` for launchd/systemd (daemon.info managedBy), both while unknown) | J43 | P2 | (Steward, PR #759) off-state card says "smind stop && smind serve"; a service-managed daemon needs "smind service restart" (use daemon.info or list both). Not yet reproduced here | - | `settings/automations-section.tsx` |
 | A-11 (FIXED in phase-2 PR3: composer focused after create from the dialog) | J06 | P2 | Composer not focused after creating a task (maybe intentional). 4/4 | `j06-light-1280.png` | `composer.tsx` |
-| B-05 (NOT started: design-system-wide, stop and report) | J50 | P3 | Low contrast: sidebar timestamps ~2.2:1; orange status text on light ("Unreachable", "Automations are off", "Timed out") 2.7-3.0:1. 2/4 measured | `j50-*` | tokens / `index.css` |
+| B-05 (FIXED in phase-2 PR5: tokens, see below) | J50 | P3 | Low contrast: sidebar timestamps ~2.2:1; orange status text on light ("Unreachable", "Automations are off", "Timed out") 2.7-3.0:1. 2/4 measured | `j50-*` | tokens / `index.css` |
 | B-06 (FIXED in phase-2 PR4: short reasons Not installed / No account / Update needed, raw text in the title) | J30/J52 | P3 | Provider picker shows raw errors (`exec: "codex": executable file not found ... codex home ...`), clipped text at 1280 | `probe-b-light-1280.png` | `components/pickers` |
 | A-13 (FIXED in phase-2 PR2: diff counts stay on one line, PR action stacks below sm) | J24 | P3 | 390px diff header wraps "-0" and floats the Create-PR reason. 2/4 | `j24-light-390.png` | `diff-viewer-pane.tsx` |
 | A-12 (FIXED in phase-2 PR4: the replayed resume note is its own paragraph (daemon run.logs)) | J16 | P3 | Resume-fallback notice glued into the assistant text. 3/4 | `j16-dark-1280.png` | daemon resume notice |
@@ -202,3 +202,32 @@ Counts: 0 P0, 4 P1, 11 P2, 12 P3 (27 entries; B-02 and S-01/S-02 included in P2)
 - Frames: `/tmp/steward4/zcode-audit/after/uat-pr4/` (REPORT.md, sheets, 12-frame bursts of the pill appearing while the timeline streams and disappearing after the click).
 - Dropped from this PR: B-09 (see the table), A-14 and A-15 (design questions: the sidebar "New task" fallback, raw server wording of a bad workspace path), B-05 (stop and report: contrast tokens).
 - Not verified: 390 keyboard focus on the collapse toggle (the harness could not land focus inside the drawer); pixel-level overlap at every scroll position (geometry says the slot never intersects the log).
+
+## Phase 2 PR5 validation (B-05 contrast tokens)
+
+Single source of truth changed (`index.css`, `zcode-tokens.json`, `docs/design.md`), no per-component colour overrides: light `--muted-foreground` oklch(0.556 0 0) to oklch(0.5 0 0) (4.15 to 5.26 on the sidebar); new role token `--warning-text` (light `#a84a00`, dark = `--warning`) for orange TEXT (2.63 to 5.06 on the sidebar, 2.35 to 4.52 on the warning chip over the sidebar); `--warning` stays ZCode's orange for dots, fills and glyphs; the sidebar row time uses `text-muted-foreground` instead of `text-foreground-subtlest` (2.2:1). Text usages of `text-warning` switched to `text-warning-text`. First try `#914e00` read brown on the orange chips; `#a84a00` is the warmest value that still holds 4.5:1 on the tightest surface.
+
+Before/after ratios (script: `web/packages/ui/scripts/contrast-table.ts`):
+
+| pair | surface | light before | light after | dark before | dark after |
+|---|---|---|---|---|---|
+| --muted-foreground | --background | 4.46 | 5.65 | 6.98 | 6.98 |
+| --muted-foreground | --sidebar | 4.15 | 5.26 | 6.98 | 6.98 |
+| --muted-foreground | --card | 4.73 | 6.00 | 5.46 | 5.46 |
+| --muted-foreground | --panel | 4.73 | 6.00 | 6.28 | 6.28 |
+| --muted-foreground | --input-bg | 4.73 | 6.00 | 5.46 | 5.46 |
+| --muted-foreground | --surface over --background | 4.19 | 5.31 | 6.16 | 6.16 |
+| --muted-foreground | --surface over --sidebar | 3.90 | 4.95 | 6.16 | 6.16 |
+| --muted-foreground | --hover over --background | 4.01 | 5.09 | 6.16 | 6.16 |
+| --muted-foreground | --hover over --sidebar | 3.74 | 4.75 | 6.16 | 6.16 |
+| --muted-foreground | --selected over --background | 4.01 | 5.09 | 5.29 | 5.29 |
+| --muted-foreground | --selected over --sidebar | 3.74 | 4.75 | 5.29 | 5.29 |
+| --warning-text (was --warning) | --background | 2.82 | 5.43 | 7.70 | 7.70 |
+| --warning-text (was --warning) | --sidebar | 2.63 | 5.06 | 7.70 | 7.70 |
+| --warning-text (was --warning) | --card | 3.00 | 5.76 | 6.02 | 6.02 |
+| --warning-text (was --warning) | --panel | 3.00 | 5.76 | 6.93 | 6.93 |
+| --warning-text (was --warning) | --warning-surface over --background | 2.51 | 4.82 | 5.90 | 5.90 |
+| --warning-text (was --warning) | --warning-surface over --sidebar | 2.35 | 4.52 | 5.90 | 5.90 |
+
+Regression test: `lib/contrast-tokens.test.ts` (>= 4.5 for muted and warning text on background, sidebar, card, panel, input, and the translucent surfaces over background and sidebar, both themes) with `lib/contrast.test.ts` for the maths. Mutations: light muted back to 0.556 (4 pairs fail), `--warning-text` back to `var(--warning)` (fails), `#b45309` (fails on sidebar and both warning-surface pairs). Full web suite 428 files / 4562 tests pass.
+Frames and in-page scans: `/tmp/steward4/zcode-audit/after/uat-pr5/` (REPORT.md, swatches.png): failing text elements summed over the frames, light 1280 195 to 72, light 390 68 to 29, dark 1280 114 to 35, dark 390 34 to 15. Remaining offenders are non-orange (green Connected/On chips ~3.9:1 in light, disabled composer chips, `--foreground-subtle(st)` placeholders by design): candidates for a next round.
