@@ -64,3 +64,6 @@ export function parseAutomationParams(params: { id?: Param }): { ok: true; id: n
 
 // The Human inbox (ADR-0045 section 5).
 export const INBOX_HREF = '/inbox' as const;
+
+// The read-only Hosts screen (ADR-0048 F1c); `focus` (a hostId) opens that pending host's approval panel.
+export const HOSTS_HREF = '/hosts' as const;

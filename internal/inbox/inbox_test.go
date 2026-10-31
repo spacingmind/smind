@@ -15,11 +15,13 @@ import (
 )
 
 type fx struct {
-	svc   *Service
-	perms []runs.PendingPermission
-	views []validation.View
-	stall map[int64]time.Time
-	now   time.Time
+	svc    *Service
+	perms  []runs.PendingPermission
+	views  []validation.View
+	stall  map[int64]time.Time
+	pairs  []HostPair
+	issues []HostLinkIssue
+	now    time.Time
 }
 
 func newFx(t *testing.T) *fx {
@@ -34,8 +36,12 @@ func newFx(t *testing.T) *fx {
 		Permissions: func() []runs.PendingPermission { return f.perms },
 		Validations: func() ([]validation.View, error) { return f.views, nil },
 		Stalls:      func() map[int64]time.Time { return f.stall },
-		TaskTitle:   func(id int64) string { return "task " + string(rune('A'+id)) },
-		Now:         func() time.Time { return f.now }}
+		HostPairs:   func() []HostPair { return f.pairs },
+		HostLinkIssues: func() []HostLinkIssue {
+			return f.issues
+		},
+		TaskTitle: func(id int64) string { return "task " + string(rune('A'+id)) },
+		Now:       func() time.Time { return f.now }}
 	return f
 }
 
@@ -236,6 +242,87 @@ func TestInboxState_UnknownKeyNotStored(t *testing.T) {
 	}
 	if st, _ := f.svc.DB.ListInboxStates(); len(st) != 0 {
 		t.Fatalf("stored states = %v", st)
+	}
+}
+
+func TestInboxHostPairDerived(t *testing.T) {
+	f := newFx(t)
+	f.pairs = []HostPair{{HostID: "H1", Alias: "mac", Label: "Mac", Since: f.now.Add(-time.Minute)}}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Kind != KindHostPair || items[0].Key != "host_pair:H1" || items[0].Attention != "high" {
+		t.Fatalf("items = %+v", items)
+	}
+	if items[0].Title != "mac" || items[0].Links.HostID != "H1" || items[0].TaskID != 0 {
+		t.Fatalf("item = %+v", items[0])
+	}
+	if err := f.svc.Resolve([]string{"host_pair:H1"}, "t"); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := f.svc.List(Filter{}); len(items) != 0 {
+		t.Fatalf("a resolved pair must leave the list: %s", keysOf(items))
+	}
+}
+
+func TestInboxHostDownOnlyAfterFiveMinutes(t *testing.T) {
+	f := newFx(t)
+	f.issues = []HostLinkIssue{{HostID: "H1", Alias: "mac", Kind: "down", Since: f.now.Add(-4*time.Minute - 59*time.Second)}}
+	if items, _ := f.svc.List(Filter{}); len(items) != 0 {
+		t.Fatalf("a link down under five minutes is not an inbox item: %s", keysOf(items))
+	}
+	f.issues[0].Since = f.now.Add(-5*time.Minute - time.Second)
+	items, _ := f.svc.List(Filter{})
+	if len(items) != 1 || items[0].Kind != KindHostDown || items[0].Attention != "normal" || items[0].Key != "host_down:H1:"+itoa(f.issues[0].Since.Unix()) {
+		t.Fatalf("items = %+v", items)
+	}
+	before, _ := f.svc.Fingerprint()
+	f.now = f.now.Add(time.Minute) // the outage ages; nothing a client renders may change
+	after, _ := f.svc.Fingerprint()
+	items, _ = f.svc.List(Filter{})
+	if len(items) != 1 || items[0].Summary != "The link to this host is down" {
+		t.Fatalf("items = %+v", items)
+	}
+	if before != after {
+		t.Fatalf("fingerprint moved with the clock: %s != %s", before, after)
+	}
+}
+
+func TestInboxHostRefusedHigh(t *testing.T) {
+	f := newFx(t)
+	f.issues = []HostLinkIssue{{HostID: "H1", Alias: "mac", Kind: "refused", Code: "fleet_version_unsupported",
+		Guidance: "update smind on mac", Since: f.now.Add(-time.Minute)}}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Kind != KindHostRefused || items[0].Attention != "high" || items[0].Key != "host_refused:H1:fleet_version_unsupported" {
+		t.Fatalf("items = %+v", items)
+	}
+	if items[0].Summary != "update smind on mac" {
+		t.Fatalf("summary = %q", items[0].Summary)
+	}
+	f.issues[0].Guidance = ""
+	items, _ = f.svc.List(Filter{})
+	if len(items) != 1 || items[0].Summary != "The link was refused: fleet_version_unsupported" {
+		t.Fatalf("summary without guidance = %+v", items)
+	}
+}
+
+func TestInboxHostKindsAbsentWithoutSource(t *testing.T) {
+	f := newFx(t)
+	f.svc.HostPairs = nil
+	f.svc.HostLinkIssues = nil
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("items = %s", keysOf(items))
+	}
+	if c, _ := f.svc.Count(); c.Total != 0 {
+		t.Fatalf("count = %+v", c)
 	}
 }
 

@@ -63,6 +63,8 @@ export const queryKeys = {
   profileList: () => ["profile.list"] as const,
   /** `plugin.list` (ADR-0042): the global switch and every plugin; live via the `plugin.updated` event. */
   pluginList: () => ["plugin.list"] as const,
+  /** `fleet.host.list` (ADR-0048): every connected host and its link state; live via the `fleet.hosts.changed` event. */
+  fleetHosts: () => ["fleet.host.list"] as const,
   /** `automation.list` (ADR-0044): the daemon switches and every automation; live via `automation.fired/paused/updated`. */
   automationList: () => ["automation.list"] as const,
   /** Every cached audit page / memory read of every automation (a prefix, for the event bridge). */

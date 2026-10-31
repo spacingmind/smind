@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { describePrError } from "@/components/git/pr-error";
 import { PrErrorLine } from "@/components/git/pr-error-line";
 import {
@@ -202,7 +203,7 @@ function SyncForm({ taskId, mode, onClose, onPending }: { taskId: number; mode: 
       {mode === "update" && !done && !conflict && (
         <div className="grid gap-1.5">
           <label htmlFor={rebaseId} className="flex items-center gap-2 text-ui-base">
-            <input id={rebaseId} type="checkbox" checked={rebase} disabled={inFlight} onChange={(e) => setRebase(e.target.checked)} data-testid="sync-rebase" />
+            <Checkbox id={rebaseId} checked={rebase} disabled={inFlight} onCheckedChange={(on) => setRebase(on === true)} data-testid="sync-rebase" />
             <span>Rebase instead of merge</span>
           </label>
           {showRebaseWarning && (

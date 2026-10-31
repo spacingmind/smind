@@ -98,8 +98,8 @@ describe("export a learned skill", () => {
     const warning = within(dialog()).getByTestId("skill-export-modified");
     expect(warning.textContent).toContain("A different SKILL.md is already there and was left alone");
     expect(warning.textContent).toContain(MODIFIED.skipped[0]);
-    const force = within(dialog()).getByTestId("skill-export-force") as HTMLInputElement;
-    expect(force.checked).toBe(false);
+    const force = within(dialog()).getByTestId("skill-export-force");
+    expect(force).toHaveAttribute("aria-checked", "false");
     fireEvent.click(force);
     fireEvent.click(submit());
     await flush();

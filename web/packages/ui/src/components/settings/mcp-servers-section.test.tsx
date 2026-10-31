@@ -217,7 +217,7 @@ describe("mcp-servers-section", () => {
     await flush();
 
     const row = screen.getByTestId("mcp-row-1");
-    expect((within(row).getByTestId("mcp-enabled-1") as HTMLInputElement).checked).toBe(false);
+    expect(within(row).getByTestId("mcp-enabled-1")).toHaveAttribute("aria-checked", "false");
   });
 
   it("delete asks for confirmation then calls mcp.delete", async () => {

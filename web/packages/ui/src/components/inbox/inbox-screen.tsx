@@ -22,19 +22,36 @@ const BASE_PADDING_PX = 8;
 
 /** The tone of an item's pill: a failed or blocked verdict and a permission ask for attention, a ready pass and a stall are calmer. */
 function tone(item: InboxItem): StatusBadgeStatus {
-  if (item.kind === "permission") return "warning";
-  if (item.kind === "stall") return "neutral";
+  if (item.kind === "permission" || item.kind === "host_pair") return "warning";
+  if (item.kind === "stall" || item.kind === "host_down") return "neutral";
+  if (item.kind === "host_refused") return "danger";
   return item.attention === "high" ? "danger" : "success";
 }
 
 function kindLabel(item: InboxItem): string {
   if (item.kind === "permission") return "Permission";
   if (item.kind === "stall") return "Stalled";
+  if (item.kind === "host_pair") return "Pairing";
+  if (item.kind === "host_refused") return "Refused";
+  if (item.kind === "host_down") return "Unreachable";
   return item.attention === "high" ? "Needs a decision" : "Passed";
 }
 
+function isHostKind(kind: InboxItem["kind"]): boolean {
+  return kind === "host_pair" || kind === "host_down" || kind === "host_refused";
+}
+
 function KindIcon({ item }: { item: InboxItem }) {
-  const Icon = item.kind === "permission" ? Icons.permission : item.kind === "stall" ? Icons.stalled : Icons.verdict;
+  const Icon =
+    item.kind === "permission"
+      ? Icons.permission
+      : item.kind === "stall"
+        ? Icons.stalled
+        : item.kind === "host_pair" || item.kind === "host_down"
+          ? Icons.host
+          : item.kind === "host_refused"
+            ? Icons.permissionDanger
+            : Icons.verdict;
   return <Icon aria-hidden className="size-4" />;
 }
 
@@ -45,7 +62,16 @@ function KindIcon({ item }: { item: InboxItem }) {
  * itself has no approve-all, no merge button and no "always allow". `e` (resolve) and `s` (snooze) never act on a
  * permission, which can only be answered.
  */
-export function InboxScreen({ onNavigateBack, onOpenTask }: { onNavigateBack: () => void; onOpenTask: (taskId: number) => void }) {
+export function InboxScreen({
+  onNavigateBack,
+  onOpenTask,
+  onOpenSettings,
+}: {
+  onNavigateBack: () => void;
+  onOpenTask: (taskId: number) => void;
+  /** Host rows have no task: they lead to a Settings section (the Hosts list). */
+  onOpenSettings?: (sectionId: string) => void;
+}) {
   const list = useInboxList();
   const count = useInboxCount();
   const actions = useInboxActions();
@@ -97,6 +123,13 @@ export function InboxScreen({ onNavigateBack, onOpenTask }: { onNavigateBack: ()
     onOpenTask(taskId);
   };
 
+  const openHosts = (item: InboxItem) => {
+    void run(async () => {
+      await actions.seen([item.key]);
+    });
+    onOpenSettings?.("hosts");
+  };
+
   // j/k/arrows move between rows; Enter, s and e act on the focused ROW itself (never on a control inside it).
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -116,7 +149,9 @@ export function InboxScreen({ onNavigateBack, onOpenTask }: { onNavigateBack: ()
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (item.kind === "permission") setExpanded((cur) => (cur === item.key ? null : item.key));
-      else open(item);
+      else if (isHostKind(item.kind)) {
+        if (onOpenSettings) openHosts(item);
+      } else open(item);
     } else if (e.key === "s" && canSnoozeOrResolve(item)) {
       e.preventDefault();
       void run(() => actions.snooze([item], SNOOZE_OPTIONS[0].ms));
@@ -165,7 +200,7 @@ export function InboxScreen({ onNavigateBack, onOpenTask }: { onNavigateBack: ()
               testId="inbox-empty"
               icon={<Icons.inbox aria-hidden className="size-6" />}
               title="Nothing needs you"
-              description="Permission requests, validator verdicts waiting for your decision and stalled task trees show up here."
+              description="Permission requests, validator verdicts waiting for your decision, stalled task trees, pairing requests and host links that need you show up here."
             />
           ) : (
             groups.map((g) => (
@@ -182,6 +217,7 @@ export function InboxScreen({ onNavigateBack, onOpenTask }: { onNavigateBack: ()
                       expanded={expanded === item.key}
                       onToggle={() => setExpanded((cur) => (cur === item.key ? null : item.key))}
                       onOpen={() => open(item)}
+                      onOpenHosts={onOpenSettings ? () => openHosts(item) : undefined}
                       onSeen={() => void run(() => actions.seen([item.key]))}
                       onSnooze={(ms) => void run(() => actions.snooze([item], ms))}
                       onResolve={() => void run(() => actions.resolve([item]))}
@@ -203,6 +239,7 @@ function InboxRow({
   expanded,
   onToggle,
   onOpen,
+  onOpenHosts,
   onSeen,
   onSnooze,
   onResolve,
@@ -212,6 +249,7 @@ function InboxRow({
   expanded: boolean;
   onToggle: () => void;
   onOpen: () => void;
+  onOpenHosts?: () => void;
   onSeen: () => void;
   onSnooze: (ms: number) => void;
   onResolve: () => void;
@@ -273,6 +311,12 @@ function InboxRow({
           >
             {expanded ? "Hide request" : "Review request"}
           </Button>
+        ) : isHostKind(item.kind) ? (
+          onOpenHosts && (
+            <Button type="button" variant="outline" size="sm" className={btn} data-testid={`inbox-hosts-${item.key}`} onClick={onOpenHosts}>
+              Review hosts
+            </Button>
+          )
         ) : (
           hasTask && (
             <Button type="button" variant="outline" size="sm" className={btn} data-testid={`inbox-open-${item.key}`} onClick={onOpen}>

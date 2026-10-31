@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { InboxBadge } from "@/components/inbox/inbox-badge";
 import { InboxScreen } from "@/components/inbox/inbox-screen";
-import { InboxDaemon, permissionItem, REQUEST_EVENTS, stallItem, verdictItem } from "@/test/inbox-fixtures";
+import { hostDownItem, hostPairItem, hostRefusedItem, InboxDaemon, permissionItem, REQUEST_EVENTS, stallItem, verdictItem } from "@/test/inbox-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 
 async function flush(): Promise<void> {
@@ -23,8 +23,8 @@ async function key(el: HTMLElement, k: string): Promise<void> {
   await flush();
 }
 
-async function renderInbox(daemon: InboxDaemon, props: { onOpenTask?: (id: number) => void; onNavigateBack?: () => void } = {}) {
-  const view = renderWithDaemon(<InboxScreen onNavigateBack={props.onNavigateBack ?? (() => {})} onOpenTask={props.onOpenTask ?? (() => {})} />, daemon);
+async function renderInbox(daemon: InboxDaemon, props: { onOpenTask?: (id: number) => void; onNavigateBack?: () => void; onOpenSettings?: (id: string) => void } = {}) {
+  const view = renderWithDaemon(<InboxScreen onNavigateBack={props.onNavigateBack ?? (() => {})} onOpenTask={props.onOpenTask ?? (() => {})} onOpenSettings={props.onOpenSettings} />, daemon);
   await flush();
   return view;
 }
@@ -44,6 +44,31 @@ describe("InboxScreen", () => {
     expect(screen.getByTestId("inbox-row-perm:q1")).toHaveAttribute("data-kind", "permission");
     expect(screen.getByTestId("inbox-summary-verdict:7")).toHaveTextContent("ready for your merge decision");
     expect(screen.getByTestId("inbox-kind-verdict:7")).toHaveTextContent("Passed");
+  });
+
+  it("TestInboxScreen_HostKinds", async () => {
+    const d = daemonWith(permissionItem(), hostPairItem(), hostRefusedItem(), hostDownItem(), verdictItem());
+    const onOpenSettings = vi.fn();
+    await renderInbox(d, { onOpenSettings });
+    const order = ["permission", "host_pair", "host_refused", "host_down", "verdict"].map((k) => screen.getByTestId(`inbox-group-${k}`));
+    for (let i = 1; i < order.length; i++) {
+      expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(screen.getByTestId("inbox-kind-host_pair:h1")).toHaveTextContent("Pairing");
+    expect(screen.getByTestId("inbox-kind-host_refused:h3:fleet_version_unsupported")).toHaveTextContent("Refused");
+    expect(screen.getByTestId("inbox-kind-host_down:h2:1700000000")).toHaveTextContent("Unreachable");
+
+    await click(screen.getByTestId("inbox-hosts-host_pair:h1"));
+    expect(onOpenSettings).toHaveBeenCalledWith("hosts");
+
+    for (const k of ["host_pair:h1", "host_refused:h3:fleet_version_unsupported", "host_down:h2:1700000000"]) {
+      const row = screen.getByTestId(`inbox-row-${k}`);
+      expect(within(row).queryByText("Open task")).toBeNull();
+      expect(within(row).getByText("Snooze")).toBeInTheDocument();
+      expect(within(row).getByText("Resolve")).toBeInTheDocument();
+    }
+    await click(screen.getByTestId("inbox-resolve-host_down:h2:1700000000"));
+    expect(d.callsOf("inbox.resolve")[0].params).toEqual({ keys: ["host_down:h2:1700000000"] });
   });
 
   it("InboxPage_EmptyState", async () => {

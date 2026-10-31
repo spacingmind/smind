@@ -1,6 +1,6 @@
 /** Wire shapes and pure helpers of the Human inbox (`inbox.*`, ADR-0045 section 5). */
 
-export type InboxKind = "permission" | "verdict" | "stall";
+export type InboxKind = "permission" | "verdict" | "stall" | "host_pair" | "host_down" | "host_refused";
 export type InboxState = "new" | "seen" | "snoozed" | "resolved";
 
 export interface InboxItem {
@@ -13,7 +13,7 @@ export interface InboxItem {
   state: InboxState;
   snoozedUntil?: string;
   attention: "high" | "normal";
-  links: { taskId?: number; runId?: string; permissionRequestId?: string; validationId?: number };
+  links: { taskId?: number; runId?: string; permissionRequestId?: string; validationId?: number; hostId?: string };
 }
 
 export interface InboxCounts {
@@ -22,9 +22,12 @@ export interface InboxCounts {
   byKind: Partial<Record<InboxKind, number>>;
 }
 
-/** The three groups of the page, in display order. */
+/** The groups of the page, in display order. */
 export const INBOX_GROUPS: { kind: InboxKind; label: string }[] = [
   { kind: "permission", label: "Needs you now" },
+  { kind: "host_pair", label: "Host pairing" },
+  { kind: "host_refused", label: "Hosts refused" },
+  { kind: "host_down", label: "Hosts unreachable" },
   { kind: "verdict", label: "Validator verdicts" },
   { kind: "stall", label: "Stalled" },
 ];

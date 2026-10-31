@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { ChangeList, ConsentSummary, linkWarningText } from "@/components/plugins/consent-summary";
 import { OwnerBadge } from "@/components/plugins/owner-badge";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
@@ -336,7 +337,7 @@ function PluginsSection(_props: SettingsSectionContext) {
         }}
       >
         <label className="flex items-center gap-2 text-ui-sm text-foreground">
-          <input type="checkbox" data-testid="plugin-remove-keep-data" checked={keepData} onChange={(e) => setKeepData(e.target.checked)} />
+          <Checkbox data-testid="plugin-remove-keep-data" checked={keepData} onCheckedChange={(on) => setKeepData(on === true)} />
           Keep plugin data
         </label>
       </ConfirmDialog>
