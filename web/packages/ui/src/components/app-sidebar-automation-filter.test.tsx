@@ -103,5 +103,7 @@ describe("sidebar automation filter", () => {
     await mountSidebar([makeTask(1, "By hand")]);
     fireEvent.click(screen.getByTestId("sidebar-automation-filter"));
     expect(screen.getByText("No automation tasks")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-workspace-row")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("task-title")).not.toBeInTheDocument();
   });
 });

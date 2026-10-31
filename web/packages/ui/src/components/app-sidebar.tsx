@@ -773,6 +773,10 @@ export function AppSidebar({
   };
 
   const empty = !error && workspaces !== null && workspaces.length === 0;
+  // The "Started by automation" filter matching nothing replaces the lists
+  // with one quiet line, exactly as a no-match search does (empty containers
+  // under it would read as tasks hiding).
+  const automationEmpty = !empty && automationOnly && viewTasks.length === 0;
 
   return (
     <Sidebar collapsible="icon">
@@ -991,12 +995,12 @@ export function AppSidebar({
                       onArchiveTask={archiveTask}
                     />
                   )}
-                  {!searching && !empty && automationOnly && viewTasks.length === 0 && (
+                  {!searching && automationEmpty && (
                     <p data-testid="sidebar-automation-filter-empty" className="px-2 py-2 text-ui-sm text-muted-foreground">
                       No automation tasks
                     </p>
                   )}
-                  {!searching && groupMode === "status" && (
+                  {!searching && !automationEmpty && groupMode === "status" && (
                     <StatusGroupedList
                       groups={statusGroups}
                       selectedTaskId={selectedTaskId}
@@ -1004,7 +1008,7 @@ export function AppSidebar({
                       onArchiveTask={archiveTask}
                     />
                   )}
-                  {!searching && groupMode === "stage" && (
+                  {!searching && !automationEmpty && groupMode === "stage" && (
                     <StageGroupedList
                       groups={stageGroups}
                       workspaceNames={workspaceNames}
@@ -1014,6 +1018,7 @@ export function AppSidebar({
                     />
                   )}
                   {!searching &&
+                    !automationEmpty &&
                     groupMode === "tree" &&
                     workspaces?.map((ws) => (
                     <WorkspaceItem
