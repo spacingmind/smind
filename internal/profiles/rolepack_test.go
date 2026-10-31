@@ -35,11 +35,11 @@ func byName(t *testing.T, r *Registry, name string) store.AgentProfile {
 	return store.AgentProfile{}
 }
 
-func TestSeedRoles_CreatesThreeSeatsInOrder(t *testing.T) {
+func TestSeedRoles_StewardFourthAndIdempotent(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	res := seed(t, r)
-	want := []string{"peer-sonnet", "lead", "validator"}
+	want := []string{"peer-sonnet", "lead", "validator", "steward"}
 	if len(res) != len(want) {
 		t.Fatalf("results = %+v, want %d", res, len(want))
 	}
@@ -61,10 +61,24 @@ func TestSeedRoles_CreatesThreeSeatsInOrder(t *testing.T) {
 		!strings.Contains(v.Instructions, "validation_verdict_submit") {
 		t.Errorf("validator = %+v", v)
 	}
+	s := byName(t, r, "steward")
+	if s.PermissionMode != "default" || s.OrchestrationTools == nil || *s.OrchestrationTools || s.ChildPolicy != "none" || s.Model != "claude-sonnet-5-5" ||
+		s.OnRateLimit != "wait" || len(s.Skills) != 0 || s.Instructions == "" || !strings.Contains(s.Instructions, "steward_verdict_submit") {
+		t.Errorf("steward = %+v", s)
+	}
 	all, _ := r.List()
 	for _, p := range all {
 		if p.Name == "reviewer" {
 			t.Errorf("the pack must no longer seed a reviewer: %+v", p)
+		}
+	}
+	second := seed(t, r)
+	if len(second) != len(want) {
+		t.Fatalf("second = %+v", second)
+	}
+	for i, x := range second {
+		if x.Action != SeedKept || x.ID != res[i].ID || x.Name != want[i] {
+			t.Errorf("second[%d] = %+v, want kept %+v", i, x, res[i])
 		}
 	}
 }
@@ -83,8 +97,8 @@ func TestSeedRoles_IdempotentAndKeepsExisting(t *testing.T) {
 		}
 	}
 	all, _ := r.List()
-	if len(all) != 3 {
-		t.Errorf("profiles = %d, want 3", len(all))
+	if len(all) != 4 {
+		t.Errorf("profiles = %d, want 4", len(all))
 	}
 }
 
@@ -138,6 +152,26 @@ func TestSeedRoles_ExistingSeatKeptUntouched(t *testing.T) {
 	}
 }
 
+// TestSeedRoles_ExistingStewardKept: a Human-made "steward" is kept
+// untouched (the pack never rewrites an existing profile).
+func TestSeedRoles_ExistingStewardKept(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	pre := mustCreate(t, r, store.AgentProfile{Name: "steward", Provider: "glm", Notes: "mine"})
+	res := seed(t, r)
+	if res[3].Name != "steward" || res[3].Action != SeedKept || res[3].ID != pre.ID {
+		t.Fatalf("steward result = %+v, want kept %d", res[3], pre.ID)
+	}
+	if got := byName(t, r, "steward"); got.Provider != "glm" || got.Notes != "mine" || got.Instructions != "" {
+		t.Errorf("pre-existing steward was modified: %+v", got)
+	}
+	for _, s := range seed(t, r) {
+		if s.Action != SeedKept {
+			t.Errorf("rerun %+v, want kept", s)
+		}
+	}
+}
+
 // TestSeedRoles_SeatsExactly: the single-agent-loop audit folded the
 // Supervisor seats and peer-glm out of the pack (ADR-0041 amendment
 // 2026-10-25): the Human or a Steward briefs a Lead directly.
@@ -153,13 +187,13 @@ func TestSeedRoles_SeatsExactly(t *testing.T) {
 			t.Errorf("pack seeds %q (provider %q, childPolicy %q)", p.Name, p.Provider, p.ChildPolicy)
 		}
 	}
-	for _, n := range []string{"lead", "peer-sonnet", "validator"} {
+	for _, n := range []string{"lead", "peer-sonnet", "validator", "steward"} {
 		if !got[n] {
 			t.Errorf("pack lacks %s", n)
 		}
 	}
-	if len(all) != 3 {
-		t.Errorf("profiles = %d, want exactly lead, peer-sonnet, validator", len(all))
+	if len(all) != 4 {
+		t.Errorf("profiles = %d, want exactly lead, peer-sonnet, validator, steward", len(all))
 	}
 }
 
