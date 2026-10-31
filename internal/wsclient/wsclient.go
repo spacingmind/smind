@@ -14,12 +14,14 @@ package wsclient
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -115,13 +117,39 @@ func Dial(ctx context.Context, addr, token string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("wsclient: dial %s: %w", u.Host, err)
 	}
+	return newClient(ws), nil
+}
+
+// DialURL connects to the full WebSocket URL rawURL with the given request
+// header and TLS config (nil for the default), and starts serving it like
+// Dial. It is the dialer for routes that are not a plain local daemon: a
+// remote host, wss, or a bearer token carried in a header.
+func DialURL(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls.Config) (*Client, error) {
+	d := websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		TLSClientConfig:  tlsConfig,
+		HandshakeTimeout: 10 * time.Second,
+	}
+	ws, _, err := d.DialContext(ctx, rawURL, header)
+	if err != nil {
+		host := rawURL
+		if u, perr := url.Parse(rawURL); perr == nil {
+			host = u.Host
+		}
+		return nil, fmt.Errorf("wsclient: dial %s: %w", host, err)
+	}
+	return newClient(ws), nil
+}
+
+// newClient wraps an established connection and starts its read loop.
+func newClient(ws *websocket.Conn) *Client {
 	c := &Client{
 		ws:       ws,
 		inflight: make(map[string]*inflightRequest),
 		done:     make(chan struct{}),
 	}
 	go c.readLoop()
-	return c, nil
+	return c
 }
 
 // Close closes the underlying connection. Any request still in flight on it
