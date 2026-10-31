@@ -1,10 +1,13 @@
 package permpolicy
 
 import (
+	"context"
+	"os/exec"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // checkSegments compares the parsed segments field by field; a want Raw of ""
@@ -436,5 +439,150 @@ func TestSplitCommand_Substitution(t *testing.T) {
 	p = SplitCommand("echo $(eval x)")
 	if len(p.Unparsed) == 0 || !strings.Contains(strings.Join(p.Unparsed, "; "), "eval") {
 		t.Errorf("Unparsed = %q, want the inner eval reason to propagate", p.Unparsed)
+	}
+}
+
+// TestSplitCommand_DifferentialAgainstBashN compares the splitter's verdict
+// against bash's own parser (`bash -n`, which only parses). Every sample is
+// something bash -n never executes; when bash rejects one of the
+// unterminated-quote/paren/heredoc cases the splitter must report doubt too.
+func TestSplitCommand_DifferentialAgainstBashN(t *testing.T) {
+	t.Parallel()
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	valid := []string{
+		"true",
+		"echo hello",
+		`echo 'a b'`,
+		`echo "a b c"`,
+		`echo \$HOME`,
+		"A=1 B=2 env",
+		"a; b",
+		"a && b",
+		"a || b",
+		"a | b",
+		"a & b",
+		"echo hi > f",
+		"echo hi >> f",
+		"sort < f",
+		"cmd 2> err",
+		"cmd 2>&1",
+		"cmd &> all",
+		`grep x <<< "hi"`,
+		"a\nb",
+		"cat <<EOF\nbody\nEOF",
+		"echo $(id)",
+		"(a; b)",
+		"{ a; b; }",
+		"bash -c 'true'",
+	}
+	for _, cmd := range valid {
+		if !bashAccepts(t, bash, cmd) {
+			t.Errorf("sample %q should be valid for bash -n", cmd)
+			continue
+		}
+		SplitCommand(cmd) // must not panic
+	}
+	invalid := []struct {
+		cmd        string
+		assertable bool // unterminated quote/paren/heredoc: splitter must doubt
+	}{
+		{`echo "unclosed`, true},
+		{"echo 'unclosed", true},
+		{"echo $(id", true},
+		{"(a; b", true},
+		{"echo `id", true},
+		{"((a", true},
+		{"echo (a b)", false},
+		{"if a; then", false},
+	}
+	for _, tc := range invalid {
+		if bashAccepts(t, bash, tc.cmd) {
+			t.Errorf("sample %q should be invalid for bash -n", tc.cmd)
+			continue
+		}
+		p := SplitCommand(tc.cmd)
+		if tc.assertable && len(p.Unparsed) == 0 {
+			t.Errorf("bash rejects %q but SplitCommand reports no doubt: %+v", tc.cmd, p)
+		}
+	}
+}
+
+// bashAccepts parses cmd with `bash -n -c` (no stdin, short timeout).
+func bashAccepts(t *testing.T, bash, cmd string) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, bash, "-n", "-c", cmd)
+	return c.Run() == nil
+}
+
+func TestSplitCommand_BraceExpansionIsDynamic(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		cmd     string
+		dynamic bool
+	}{
+		{"builds a flag", "git push --forc{e,} origin x", true},
+		{"quoted braces are literal", `echo "{a,b}"`, false},
+		{"single-quoted braces are literal", `echo '{a,b}'`, false},
+		{"env assignment unaffected", "a=1 b", false},
+		{"find placeholder is inert", "find . -exec rm {} ;", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := SplitCommand(tc.cmd)
+			if len(p.Segments) == 0 {
+				t.Fatalf("segments = %+v, want at least one", p.Segments)
+			}
+			if p.Segments[0].Dynamic != tc.dynamic {
+				t.Errorf("Dynamic = %v, want %v", p.Segments[0].Dynamic, tc.dynamic)
+			}
+		})
+	}
+}
+
+func TestSplitCommand_WrappedEvalIsUnparsed(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		cmd      string
+		unparsed bool
+	}{
+		{"command eval", "command eval x", true},
+		{"nohup source", "nohup source f", true},
+		{"env dot", "env A=1 . ./f", true},
+		{"bare source", "source f", true},
+		{"bare dot", ". ./f", true},
+		{"echo eval", "echo eval", false},
+		{"wrapper only", "command ls eval", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := SplitCommand(tc.cmd)
+			if got := len(p.Unparsed) > 0; got != tc.unparsed {
+				t.Errorf("Unparsed = %q, want unparsed=%v", p.Unparsed, tc.unparsed)
+			}
+		})
+	}
+}
+
+func TestSplitCommand_ShellFlagClusterC(t *testing.T) {
+	t.Parallel()
+	for _, flag := range []string{"-c", "-lc", "-xc", "-ec", "-ic"} {
+		p := SplitCommand("bash " + flag + " 'git stash'")
+		if len(p.Segments) != 2 || !reflect.DeepEqual(p.Segments[0].Argv, []string{"bash", flag, "git stash"}) ||
+			!reflect.DeepEqual(p.Segments[1].Argv, []string{"git", "stash"}) {
+			t.Errorf("%s: segments = %+v, want bash then the inner git stash", flag, p.Segments)
+		}
+	}
+	p := SplitCommand(`sh -xc "$x"`)
+	if len(p.Unparsed) == 0 {
+		t.Errorf("sh -xc \"$x\": Unparsed empty, want non-literal script reported")
 	}
 }

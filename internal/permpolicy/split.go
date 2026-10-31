@@ -54,6 +54,11 @@ func SplitCommand(cmd string) Parsed {
 	s := scanner{src: cmd, p: &p, segStart: -1}
 	s.run()
 	s.finish()
+	if len(s.segs)+len(s.inner) == 0 && len(p.Unparsed) == 0 && strings.TrimSpace(cmd) != "" {
+		// Nothing parseable came out (operator-only input such as ";;" or
+		// "&"): bash would reject it, and the caller must ask, not allow.
+		p.Unparsed = append(p.Unparsed, "no command found")
+	}
 	p.Segments = append(s.segs, s.inner...)
 	p.Normalized = s.normalized()
 	return p
@@ -77,6 +82,7 @@ type word struct {
 	started bool
 	quoted  bool
 	dynamic bool
+	brace   bool // unquoted { seen
 }
 
 // heredoc records one <<TAG operator and, once its body has been consumed,
@@ -209,6 +215,9 @@ func (s *scanner) wordChar() {
 		if c == '$' || c == '`' || c == '*' || c == '?' || c == '[' {
 			s.w.dynamic = true
 		}
+		if c == '{' {
+			s.w.brace = true
+		}
 		s.w.val = append(s.w.val, c)
 		s.i++
 	}
@@ -271,16 +280,47 @@ func (s *scanner) endWord() {
 			switch {
 			case val == "eval":
 				s.unparsed("eval re-parses its argument as a command")
+			case val == "source" || val == ".":
+				s.unparsed(val + " runs text the splitter cannot see")
 			case strings.HasPrefix(val, "$"), strings.HasPrefix(val, "`"):
 				s.unparsed("command name " + val + " is an expansion")
 			}
 		}
 		cur.Argv = append(cur.Argv, val)
+		if len(cur.Argv) > 1 && effectiveIndex(cur.Argv) == len(cur.Argv)-1 && isShellEval(val) {
+			s.unparsed(val + " runs text the splitter cannot see")
+		}
 	}
-	if w.dynamic {
+	// An unquoted { can open a brace expansion (--forc{e,}) that builds a word
+	// the rules never see; only the group keywords { and } and the find
+	// placeholder {} are inert.
+	if w.dynamic || (w.brace && val != "{" && val != "}" && val != "{}") {
 		cur.Dynamic = true
 	}
 }
+
+// effectiveIndex is the index of the word that actually names the command:
+// leading wrappers (command, builtin, nohup, time, exec, env), their flags and
+// env's NAME=val words are skipped. It returns len(argv) when only wrappers
+// are present.
+func effectiveIndex(argv []string) int {
+	i := 0
+	for i < len(argv) {
+		w := argv[i]
+		switch w {
+		case "command", "builtin", "nohup", "time", "exec", "env":
+			i++
+			for i < len(argv) && (strings.HasPrefix(argv[i], "-") || (w == "env" && isEnvAssign(argv[i]))) {
+				i++
+			}
+			continue
+		}
+		break
+	}
+	return i
+}
+
+func isShellEval(w string) bool { return w == "eval" || w == "source" || w == "." }
 
 // closeSeg finishes the current segment; pipe marks that the next segment
 // receives this one's output through | or |&.
@@ -614,16 +654,26 @@ func (s *scanner) shellScript() {
 		return
 	}
 	for i := 1; i < len(argv); i++ {
-		if argv[i] != "-c" {
+		if !isCFlag(argv[i]) {
 			continue
 		}
-		if i+1 >= len(argv) || strings.ContainsAny(argv[i+1], "$`") {
+		j := i + 1
+		for j < len(argv) && strings.HasPrefix(argv[j], "-") {
+			j++
+		}
+		if j >= len(argv) || strings.ContainsAny(argv[j], "$`") {
 			s.unparsed("shell -c with non-literal command")
 			return
 		}
-		s.recurse(argv[i+1])
+		s.recurse(argv[j])
 		return
 	}
+}
+
+// isCFlag reports whether a shell option word carries -c: a lone -c or a
+// cluster such as -lc, -xc or -ic, where the script is the next non-flag word.
+func isCFlag(w string) bool {
+	return len(w) > 1 && w[0] == '-' && w[1] != '-' && strings.ContainsRune(w, 'c')
 }
 
 func isShell(name string) bool {
