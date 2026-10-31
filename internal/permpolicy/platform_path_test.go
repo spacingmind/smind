@@ -55,13 +55,13 @@ func TestPlatform_WindowsUnrepresentable(t *testing.T) {
 	pl := windowsPlatform(nil, nil)
 	for _, p := range []string{
 		`C:foo`, `C:`, `\rooted`, `\\.\COM1`, `\\srv`, `\\srv\`, `C:\a:stream`, `C:\a*b`, `C:\a?`, `C:\a|b`,
-		`C:\x.`, `C:\x `, `C:\dir\NUL`, `C:\dir\nul.txt`, `C:\CON`, `/etc/x`,
+		`C:\x.`, `C:\x `, `C:\dir\NUL`, `C:\dir\nul.txt`, `C:\CON`, `/etc/x`, `\\?\GLOBALROOT\x`, `\\?\Volume{1234}\x`,
 	} {
 		if _, err := pl.normalize(p); !errors.Is(err, errUnrepresentable) {
 			t.Errorf("normalize(%q) err = %v, want errUnrepresentable", p, err)
 		}
 	}
-	for _, p := range []string{`C:\x`, `x\y`, `..\x`, `C:\a..b`, `C:\.hidden`} {
+	for _, p := range []string{`C:\x`, `x\y`, `..\x`, `C:\a..b`, `C:\.hidden`, `./...`, `a\...`, `...`} {
 		if _, err := pl.normalize(p); err != nil {
 			t.Errorf("normalize(%q) err = %v, want nil", p, err)
 		}

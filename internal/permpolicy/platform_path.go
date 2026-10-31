@@ -101,6 +101,9 @@ func winComponentOK(c string) bool {
 	if strings.ContainsAny(c, `<>|"*?:`) {
 		return false
 	}
+	if strings.Trim(c, ".") == "" {
+		return true
+	}
 	if strings.HasSuffix(c, ".") || strings.HasSuffix(c, " ") {
 		return false
 	}
@@ -131,8 +134,11 @@ func (pl *platform) normalize(p string) (string, error) {
 		p = `\\` + p[8:]
 	case strings.HasPrefix(p, `\\?\`):
 		p = p[4:]
+		if len(p) < 3 || !isLetter(p[0]) || p[1] != ':' || p[2] != '\\' {
+			return "", errUnrepresentable
+		}
 	}
-	if strings.HasPrefix(p, `\\.\`) || strings.HasPrefix(p, "//./") || strings.HasPrefix(p, "//?/") || strings.HasPrefix(p, `\\?\`) {
+	if strings.HasPrefix(p, `\\.\`) || strings.HasPrefix(p, "//./") || strings.HasPrefix(p, "//?/") {
 		return "", errUnrepresentable
 	}
 	if lower := strings.ToLower(p); strings.HasPrefix(lower, "/cygdrive/") && len(p) >= 11 && isLetter(p[10]) && (len(p) == 11 || p[11] == '/') {
