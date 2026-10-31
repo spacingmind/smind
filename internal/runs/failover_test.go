@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spacingmind/smind/internal/runs/ratelimit"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -92,9 +92,9 @@ func retryItems(t *testing.T, st *store.Store, chatID int64) []store.ChatQueueIt
 	return out
 }
 
-func futureFail(d time.Duration) ratelimit.Result {
+func futureFail(d time.Duration) failure.Result {
 	at := time.Now().Add(d).UTC()
-	return ratelimit.Result{Kind: "rate_limited", Window: "5h", ResetAt: &at}
+	return failure.Result{Kind: "rate_limited", Window: "5h", ResetAt: &at}
 }
 
 func TestPolicy_WaitEnqueuesSameChatAtResetPlus30s(t *testing.T) {
@@ -136,7 +136,7 @@ func TestPolicy_WaitNeedsKnownFutureReset(t *testing.T) {
 	pid := profileWith(t, e.st, "wait")
 	r := e.failedRun(t, "failed-1", failedOpts{profileID: pid})
 	past := time.Now().Add(-time.Minute)
-	for _, fail := range []ratelimit.Result{
+	for _, fail := range []failure.Result{
 		{Kind: "rate_limited"},
 		{Kind: "rate_limited", ResetAt: &past},
 	} {
@@ -146,7 +146,7 @@ func TestPolicy_WaitNeedsKnownFutureReset(t *testing.T) {
 		t.Fatalf("retry items = %d, want 0", n)
 	}
 	// Not rate limited at all: nothing either.
-	e.reg.applyRateLimitPolicy(r, ratelimit.Result{})
+	e.reg.applyRateLimitPolicy(r, failure.Result{})
 	if n := len(retryItems(t, e.st, r.chatID)); n != 0 {
 		t.Fatalf("retry items for unclassified failure = %d, want 0", n)
 	}

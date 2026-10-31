@@ -1,6 +1,6 @@
-// Package ratelimit classifies a failed run as rate limited, from a structured
+// Package failure classifies a failed run (plan window, transient 429, auth, model), from a structured
 // backend signal and/or the run's final error text. It is pure (stdlib only).
-package ratelimit
+package failure
 
 import (
 	"regexp"

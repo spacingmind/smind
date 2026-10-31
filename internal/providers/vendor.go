@@ -1,7 +1,7 @@
 package providers
 
 // Vendor profiles: which backend's rate-limit wording a provider speaks
-// (consumed by internal/runs/ratelimit via Input.Vendor).
+// (consumed by internal/runs/failure via Input.Vendor).
 const (
 	VendorZAI       = "zai"
 	VendorAnthropic = "anthropic"

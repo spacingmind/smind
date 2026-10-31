@@ -18,7 +18,7 @@ import (
 	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/providers"
-	"github.com/spacingmind/smind/internal/runs/ratelimit"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -520,7 +520,7 @@ type run struct {
 	// reported during the run (nil = none); failureKind/Window/ResetAt are
 	// the classified terminal reason of an error run (ADR-0041 B1). Guarded
 	// by mu.
-	rateSignal     *ratelimit.Signal
+	rateSignal     *failure.Signal
 	failureKind    string
 	failureWindow  string
 	failureResetAt *time.Time
@@ -1517,7 +1517,7 @@ func (reg *Registry) applyRateLimit(r *run, sig *taskrunner.RateLimitSignal) {
 		return
 	}
 	r.mu.Lock()
-	r.rateSignal = &ratelimit.Signal{Status: sig.Status, ResetsAt: sig.ResetsAt, Type: sig.Type}
+	r.rateSignal = &failure.Signal{Status: sig.Status, ResetsAt: sig.ResetsAt, Type: sig.Type}
 	r.mu.Unlock()
 }
 
@@ -1596,9 +1596,9 @@ func (reg *Registry) finish(r *run, err error) {
 
 	// ADR-0041 B1: classify only error runs, stored with the same ordering
 	// rule. Never alters status, stop reason, error text or disposition.
-	var fail ratelimit.Result
+	var fail failure.Result
 	if status == StatusError {
-		fail = ratelimit.Classify(ratelimit.Input{Provider: string(r.provider), Err: errMsg, Signal: rateSignal, Vendor: providers.VendorOf(string(r.provider))}, time.Now())
+		fail = failure.Classify(failure.Input{Provider: string(r.provider), Err: errMsg, Signal: rateSignal, Vendor: providers.VendorOf(string(r.provider))}, time.Now())
 		// A CLI that died without a result is its own typed failure; a stderr
 		// that says it hit a usage limit is still a rate limit, the more
 		// actionable of the two.
@@ -1614,7 +1614,7 @@ func (reg *Registry) finish(r *run, err error) {
 		// time); system runs (probe/reflect/curate) and model-scoped windows
 		// never do.
 		now := time.Now()
-		if fail.Kind == ratelimit.KindRateLimited && fail.ResetAt != nil && fail.ResetAt.After(now) && r.purpose == "" && windowBlocksProvider(fail.Window) {
+		if fail.Kind == failure.KindRateLimited && fail.ResetAt != nil && fail.ResetAt.After(now) && r.purpose == "" && windowBlocksProvider(fail.Window) {
 			_ = reg.st.SetProviderCooldown(string(r.provider), *fail.ResetAt, r.id, now)
 		}
 	}
@@ -2214,7 +2214,7 @@ func clipErrMsg(s string) string {
 // limitRefusal returns the refusal text when a run that ended "done" did no
 // work and its whole answer is Claude Code's usage-limit refusal: claude-native
 // only, no tool calls, no tokens reported, a short trailing text that
-// ratelimit.IsLimitRefusal accepts. Otherwise "".
+// failure.IsLimitRefusal accepts. Otherwise "".
 func (reg *Registry) limitRefusal(r *run, usage *taskrunner.Usage, toolCalls int) string {
 	if !providers.IsClaude(string(r.provider)) || toolCalls > 0 {
 		return ""
@@ -2227,7 +2227,7 @@ func (reg *Registry) limitRefusal(r *run, usage *taskrunner.Usage, toolCalls int
 	r.mu.Lock()
 	text := strings.TrimSpace(trailingAgentText(r.history))
 	r.mu.Unlock()
-	if !ratelimit.IsLimitRefusal(text) {
+	if !failure.IsLimitRefusal(text) {
 		return ""
 	}
 	return text

@@ -87,7 +87,7 @@ type RunStatus struct {
 	// as approximate, "≈").
 	FailureResetInferred bool
 	// FailureResetZone names the zone the reset's text was read in (see
-	// ratelimit.Result.ResetZone); "" = none.
+	// failure.Result.ResetZone); "" = none.
 	FailureResetZone string
 
 	// ProfileID is the agent profile the run was launched with (0 = none)

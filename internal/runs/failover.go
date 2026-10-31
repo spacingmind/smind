@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/spacingmind/smind/internal/runs/ratelimit"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -43,7 +43,7 @@ func (reg *Registry) FallbackProfileFor(profileID int64) int64 {
 // It acts at most once per chain (a retry is itself a run with failoverOf
 // set, and never triggers another action), only for user runs, and only
 // while the profile still exists.
-func (reg *Registry) applyRateLimitPolicy(r *run, fail ratelimit.Result) {
+func (reg *Registry) applyRateLimitPolicy(r *run, fail failure.Result) {
 	if fail.Kind != "rate_limited" || r.profileID == 0 || r.failoverOf != "" || r.purpose != "" {
 		return
 	}
@@ -64,7 +64,7 @@ func (reg *Registry) applyRateLimitPolicy(r *run, fail ratelimit.Result) {
 // that deliberately bypasses the non-human auto-approve check of
 // StartWhenBusy, because it re-sends the SAME run's own settings and never
 // escalates them. Attachments are not re-attached (out of scope).
-func (reg *Registry) enqueueRateLimitRetry(r *run, fail ratelimit.Result) {
+func (reg *Registry) enqueueRateLimitRetry(r *run, fail failure.Result) {
 	now := time.Now()
 	if fail.ResetAt == nil || !fail.ResetAt.After(now) {
 		return
