@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -193,11 +194,11 @@ func checkAgentDoc(_ context.Context, r *repo, _ Options) Finding {
 
 var (
 	taskfileTest = regexp.MustCompile(`(?m)^\s+(test|tests|check)[\w:-]*:\s*(#.*)?$`)
-	taskfileLint = regexp.MustCompile(`(?m)^\s+(lint|check|vet)[\w:-]*:\s*(#.*)?$`)
+	taskfileName = regexp.MustCompile(`(?m)^\s+([\w:-]+):\s*(#.*)?$`)
 	makeTest     = regexp.MustCompile(`(?m)^(test|tests|check)[\w-]*\s*:`)
-	makeLint     = regexp.MustCompile(`(?m)^(lint|check|vet)[\w-]*\s*:`)
+	makeName     = regexp.MustCompile(`(?m)^([\w-]+)\s*:`)
 	jsonTest     = regexp.MustCompile(`"test[\w:-]*"\s*:`)
-	jsonLint     = regexp.MustCompile(`"(lint|check|typecheck)[\w:-]*"\s*:`)
+	jsonLint     = regexp.MustCompile(`"(lint|format|fmt|vet|eslint|prettier|biome|golangci)[\w:-]*"\s*:`)
 	npmNoTest    = "no test specified"
 )
 
@@ -253,21 +254,113 @@ func checkTest(_ context.Context, r *repo, _ Options) Finding {
 	return fnd("test-command", title, false, "no Taskfile, Makefile, package.json test script, go.mod, Cargo.toml or pytest config found", fix)
 }
 
+// typeName reports a script/task name that only type checks.
+func typeName(name string) bool {
+	l := strings.ToLower(name)
+	return strings.Contains(l, "type") || strings.Contains(l, "tsc")
+}
+
+// lintName reports whether a script/task name denotes linting or formatting.
+// Type checking alone (check-types, tsc) does not count.
+func lintName(name string) bool {
+	l := strings.ToLower(name)
+	if typeName(l) {
+		return false
+	}
+	for _, w := range []string{"lint", "format", "fmt", "vet", "eslint", "prettier", "biome", "golangci"} {
+		if strings.Contains(l, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// lintBody reports whether a script or file body invokes a linter.
+func lintBody(body string) bool {
+	for _, w := range []string{"eslint", "prettier", "biome", "golangci", "oxlint", "ruff", "go vet"} {
+		if strings.Contains(body, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// pkgLintScript finds package.json's lint script (name is "" if none) and the
+// first type-only script it saw.
+func pkgLintScript(r *repo) (name, typeOnly string) {
+	txt, ok := r.read("package.json")
+	if !ok {
+		return "", ""
+	}
+	var p struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if json.Unmarshal([]byte(txt), &p) != nil {
+		if jsonLint.MatchString(txt) {
+			return "package.json", ""
+		}
+		return "", ""
+	}
+	keys := make([]string, 0, len(p.Scripts))
+	for k := range p.Scripts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if lintName(k) || (k == "check" && lintBody(p.Scripts[k])) {
+			return "package.json script " + k, typeOnly
+		}
+		if typeOnly == "" && typeName(k) {
+			typeOnly = k
+		}
+	}
+	return "", typeOnly
+}
+
+// scanLintNames returns the first lint-like task/target name in text and the
+// first type-only one.
+func scanLintNames(re *regexp.Regexp, text string) (lint, typeOnly string) {
+	for _, m := range re.FindAllStringSubmatch(text, -1) {
+		n := m[1]
+		if lintName(n) || n == "lint" || n == "vet" || (n == "check" && lintBody(text)) {
+			return n, typeOnly
+		}
+		l := strings.ToLower(n)
+		if typeOnly == "" && typeName(n) && (strings.HasPrefix(l, "check") || strings.HasPrefix(l, "typecheck") || strings.HasPrefix(l, "tsc")) {
+			typeOnly = n
+		}
+	}
+	return "", typeOnly
+}
+
 func checkLint(_ context.Context, r *repo, _ Options) Finding {
 	const title = "Lint or format command is discoverable"
 	const fix = "Define a lint target or script, or add a linter config, so an agent can check style before finishing."
+	var typeOnly string
 	if n := r.firstFile(taskfileNames...); n != "" {
-		if t, _ := r.read(n); taskfileLint.MatchString(t) {
+		t, _ := r.read(n)
+		lint, to := scanLintNames(taskfileName, t)
+		if lint != "" {
 			return fnd("lint-command", title, true, n+" has a lint task", "")
 		}
+		typeOnly = to
 	}
 	if n := r.firstFile(makefileNames...); n != "" {
-		if t, _ := r.read(n); makeLint.MatchString(t) {
+		t, _ := r.read(n)
+		lint, to := scanLintNames(makeName, t)
+		if lint != "" {
 			return fnd("lint-command", title, true, n+" has a lint target", "")
 		}
+		if typeOnly == "" {
+			typeOnly = to
+		}
 	}
-	if ok, what := pkgScripts(r, jsonLint); ok {
+	what, to := pkgLintScript(r)
+	if what != "" {
 		return fnd("lint-command", title, true, what, "")
+	}
+	if typeOnly == "" {
+		typeOnly = to
 	}
 	for _, n := range []string{
 		".golangci.yml", ".golangci.yaml", ".golangci.toml", ".eslintrc", ".eslintrc.json", ".eslintrc.js", ".eslintrc.cjs",
@@ -281,7 +374,11 @@ func checkLint(_ context.Context, r *repo, _ Options) Finding {
 	if t, ok := r.read("pyproject.toml"); ok && strings.Contains(t, "[tool.ruff") {
 		return fnd("lint-command", title, true, "pyproject.toml ([tool.ruff])", "")
 	}
-	return fnd("lint-command", title, false, "no lint task, script or linter config found", fix)
+	ev := "no lint task, script or linter config found"
+	if typeOnly != "" {
+		ev += " (type checking alone is not lint or format: " + typeOnly + ")"
+	}
+	return fnd("lint-command", title, false, ev, fix)
 }
 
 func checkSetup(_ context.Context, _ *repo, o Options) Finding {
