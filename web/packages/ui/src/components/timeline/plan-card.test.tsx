@@ -2,7 +2,6 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { PlanCard } from "@/components/timeline/plan-card";
-import type { PlanEntry } from "@/hooks/use-run-timeline";
 
 describe("PlanCard", () => {
   it("shows n of m done", () => {

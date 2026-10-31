@@ -25,6 +25,11 @@ export function timelineToText(prompt: string, items: TimelineItem[]): string {
       lines.push(`[unrecognised event: ${item.eventType}]`);
       continue;
     }
+    if (item.kind === "plan") {
+      const done = item.entries.filter((entry) => entry.status === "completed").length;
+      lines.push(`[plan] ${done} of ${item.entries.length} done`);
+      continue;
+    }
     if (item.kind === "permission") {
       const resolution = permissionResolutionLabel(item);
       lines.push(`[permission resolved]${resolution ? ` (${resolution.label})` : ""}`);
