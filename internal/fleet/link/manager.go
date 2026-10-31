@@ -101,18 +101,21 @@ func NewManager(o ManagerOptions) *Manager {
 }
 
 func (m *Manager) defaultDial(ctx context.Context, t Transport, hostID string) (Conn, error) {
-	if t.Kind != KindDirect {
-		return nil, fmt.Errorf("link: %s transport is not supported yet", t.Kind)
-	}
-	var password string
+	var entry Entry
 	if m.o.Secrets != nil {
 		e, _, err := m.o.Secrets.Get(hostID)
 		if err != nil {
 			return nil, err
 		}
-		password = e.Password
+		entry = e
 	}
-	return DialDirect(ctx, t, password)
+	if t.Kind == KindRelay {
+		return DialRelay(ctx, t, m.o.Key, entry, "fleet")
+	}
+	if t.Kind != KindDirect {
+		return nil, fmt.Errorf("link: %s transport is not supported yet", t.Kind)
+	}
+	return DialDirect(ctx, t, entry.Password)
 }
 
 // Ensure starts the host's link loop unless one is already running.
