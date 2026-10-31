@@ -276,6 +276,7 @@ less; it is the one place an LLM text touches a permission card, which is why it
 - **Config (`config.yaml`, human-only):** `steward.enabled` (false), `steward.policy.enabled` (false), `steward.autoReview` (workspace list, empty), `steward.annotate` (false),
   `steward.maxBudgetUsd`, `steward.maxReviewsPerHour`.
 - **Inbox model:** kind `review`; `links.reviewId`; the dedupe with `verdict` is in derivation, not stored.
+- Amendment 2026-11-01 (Supervisor, Human may veto): steward.digest.get and steward.verdict.submit are run-scoped, bound to the seat's own task and run, token-checked; no other method added.
 
 ### 9. CLI and UI
 
