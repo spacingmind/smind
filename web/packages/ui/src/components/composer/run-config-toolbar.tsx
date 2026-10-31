@@ -63,6 +63,8 @@ export interface RunConfigContextValue {
     clearAgent: () => void;
     /** The ↺ control: re-applies baseAgentId's own stored config, discarding any hand-edits. No-op when no agent is applied. */
     resetToAgent: () => void;
+    /** Replaces the whole state (the home landing's hand-off); blocks the default-agent seed from overwriting it. */
+    applyState: (next: RunConfigState) => void;
   };
   meta: {
     profiles: AgentProfile[];
@@ -134,8 +136,8 @@ function applyProfileFields(prev: RunConfigState, p: AgentProfile): RunConfigSta
 }
 
 /** The initial state for chatId: its own persisted run-config if there is one (falling back to the task's legacy pre-ADR-0016 key for its default chat), else EMPTY_STATE -- the ★ default agent (if any) is seeded separately, once profiles have loaded (see the effect below), since it can't be looked up before profile.list answers. */
-function initialStateFor(taskId: number | null, chatId: number | null, isDefaultChat: boolean): RunConfigState {
-  return readRunConfigPreference(taskId, chatId, isDefaultChat) ?? EMPTY_STATE;
+function initialStateFor(taskId: number | null, chatId: number | null, isDefaultChat: boolean, initialState: RunConfigState | null = null): RunConfigState {
+  return readRunConfigPreference(taskId, chatId, isDefaultChat) ?? initialState ?? EMPTY_STATE;
 }
 
 /**
@@ -165,6 +167,7 @@ export function RunConfigToolbar({
   profiles,
   providers,
   providersLoading = false,
+  initialState = null,
   disabled = false,
   providerHealth = EMPTY_HEALTH,
   onPickerOpen,
@@ -178,6 +181,8 @@ export function RunConfigToolbar({
   chatId: number | null;
   /** Whether chatId is taskId's default (oldest) chat -- the only one that migrates the pre-ADR-0016 per-task-only persisted key (see readRunConfigPreference). */
   isDefaultChat?: boolean;
+  /** Used only when nothing is persisted for chatId (before EMPTY_STATE); also stops the ★ default agent from overriding it. */
+  initialState?: RunConfigState | null;
   /** The chat's own bound provider (chats.Provider), once its first run has set one -- forces state.provider to match and makes the Provider select read-only (ADR-0016 P3). null (not yet bound) leaves the provider freely selectable, as today. */
   boundProvider?: string | null;
   profiles: AgentProfile[];
@@ -201,7 +206,7 @@ export function RunConfigToolbar({
   /** The row's parts in layout order, plus any live ACP option controls. */
   children?: ReactNode;
 }) {
-  const [state, setState] = useState<RunConfigState>(() => initialStateFor(taskId, chatId, isDefaultChat));
+  const [state, setState] = useState<RunConfigState>(() => initialStateFor(taskId, chatId, isDefaultChat, initialState));
 
   // Render-phase "adjust state when a prop changes" (same pattern as
   // use-composer-draft.ts's taskId handling): reads the new chat's
@@ -215,12 +220,12 @@ export function RunConfigToolbar({
   // rerender depend on this being right too).
   const lastSelection = useRef<{ taskId: number | null; chatId: number | null }>({ taskId, chatId });
   const hadPersisted = useRef<boolean>(readRunConfigPreference(taskId, chatId, isDefaultChat) !== null);
-  const seededFromDefault = useRef(false);
+  const seededFromDefault = useRef(initialState !== null && !hadPersisted.current);
   if (lastSelection.current.taskId !== taskId || lastSelection.current.chatId !== chatId) {
     lastSelection.current = { taskId, chatId };
     hadPersisted.current = readRunConfigPreference(taskId, chatId, isDefaultChat) !== null;
     seededFromDefault.current = false;
-    setState(initialStateFor(taskId, chatId, isDefaultChat));
+    setState(initialStateFor(taskId, chatId, isDefaultChat, initialState));
   }
 
   // A bound provider overrides whatever the persisted/hand-picked state
@@ -262,6 +267,11 @@ export function RunConfigToolbar({
   const clearAgent = useCallback(() => {
     seededFromDefault.current = true;
     setState((prev) => ({ ...prev, baseAgentId: null, custom: false }));
+  }, []);
+
+  const applyState = useCallback((next: RunConfigState) => {
+    seededFromDefault.current = true;
+    setState(next);
   }, []);
 
   const resetToAgent = useCallback(() => {
@@ -315,7 +325,7 @@ export function RunConfigToolbar({
   const value = useMemo<RunConfigContextValue>(() => {
     return {
       state,
-      actions: { setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent },
+      actions: { setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, applyState },
       meta: {
         profiles,
         providers,
@@ -331,7 +341,7 @@ export function RunConfigToolbar({
         liveRun,
       },
     };
-  }, [chatId, state, setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, providersLoading, disabled, boundProvider, providerHealth, onPickerOpen, liveRun]);
+  }, [chatId, state, setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, applyState, profiles, providers, providersLoading, disabled, boundProvider, providerHealth, onPickerOpen, liveRun]);
 
   useEffect(() => {
     onChange?.(value);

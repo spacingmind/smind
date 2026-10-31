@@ -2,11 +2,12 @@ import { act, type ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RunConfigToolbar, type LiveRunControls } from "@/components/composer/run-config-toolbar";
+import { RunConfigToolbar, useRunConfig, type LiveRunControls, type RunConfigState } from "@/components/composer/run-config-toolbar";
 import { DaemonQueryProvider } from "@/lib/query/daemon-query-provider";
 import { createQueryClient } from "@/lib/query/query-client";
 import { queryKeys } from "@/lib/query-keys";
 import type { AgentProfile, ProviderInfo, RunSummary } from "@/lib/types";
+import { useDefaultAgentStore } from "@/stores/default-agent-store";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
 
 /** The same served catalog shape composer.test.tsx stubs provider.list with: Claude's mode list is static, GLM's ACP auto-accept is on. */
@@ -317,5 +318,70 @@ describe("RunConfigToolbar with a provider instance", () => {
     renderToolbar({ providers: [...SERVED_PROVIDERS, WORK, CUSTOM_ACP] });
     await pickModel("my-acp");
     expect(screen.queryByLabelText("Thinking level")).toBeNull();
+  });
+});
+
+describe("RunConfigToolbar hand-off state", () => {
+  const GLM_PROFILE: AgentProfile = { ...PROFILE, ID: 9, Name: "Agent 9", Provider: "glm", PermissionMode: "accept_edits" };
+  const HANDED: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "plan", autoAccept: false, thinkingLevel: "", model: "" };
+
+  function Probe({ apply }: { apply?: RunConfigState }) {
+    const { state, actions } = useRunConfig();
+    return (
+      <>
+        <output data-testid="probe">{`${state.provider}/${state.permissionMode}`}</output>
+        {apply ? <button onClick={() => actions.applyState(apply)}>apply</button> : null}
+      </>
+    );
+  }
+
+  function wrap(children: ReactNode) {
+    return (
+      <DaemonQueryProvider queryClient={createQueryClient()} client={null} events={null}>
+        {children}
+      </DaemonQueryProvider>
+    );
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    useDefaultAgentStore.getState().set("9");
+  });
+
+  it("applyState replaces the state and blocks the default-agent seed", async () => {
+    const { rerender } = render(
+      wrap(
+        <RunConfigToolbar {...toolbarProps({ profiles: [] })}>
+          <Probe apply={HANDED} />
+        </RunConfigToolbar>,
+      ),
+    );
+    fireEvent.click(screen.getByText("apply"));
+    await flush();
+    expect(screen.getByTestId("probe").textContent).toBe("claude-native/plan");
+    // The default agent's profile loads afterwards: it must not overwrite the applied state.
+    rerender(
+      wrap(
+        <RunConfigToolbar {...toolbarProps({ profiles: [GLM_PROFILE] })}>
+          <Probe apply={HANDED} />
+        </RunConfigToolbar>,
+      ),
+    );
+    await flush();
+    expect(screen.getByTestId("probe").textContent).toBe("claude-native/plan");
+    useDefaultAgentStore.getState().set(null);
+  });
+
+  it("initialState seeds a toolbar with no persisted state", async () => {
+    render(
+      wrap(
+        <RunConfigToolbar {...toolbarProps({ profiles: [GLM_PROFILE], initialState: HANDED })}>
+          <Probe />
+        </RunConfigToolbar>,
+      ),
+    );
+    await flush();
+    expect(screen.getByTestId("probe").textContent).toBe("claude-native/plan");
+    useDefaultAgentStore.getState().set(null);
   });
 });
