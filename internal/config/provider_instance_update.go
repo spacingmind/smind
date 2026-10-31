@@ -56,7 +56,7 @@ func UpdateProviderInstance(id string, u InstanceUpdate) (CustomProvider, bool, 
 		if item.Kind != yaml.MappingNode {
 			continue
 		}
-		if k, _ := mapGet(item, "id"); k != nil && k.Value == id {
+		if _, v := mapGet(item, "id"); v != nil && v.Value == id {
 			entry = item
 			break
 		}
