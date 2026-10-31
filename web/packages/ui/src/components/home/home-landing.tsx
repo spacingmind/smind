@@ -14,11 +14,13 @@ import { useProfileList } from "@/hooks/use-profiles";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import { Icons } from "@/lib/icons";
+import { OFFICE_SUGGESTED_PROMPTS } from "@/lib/suggested-prompts";
 import type { Task, Workspace } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { WsClientLike } from "@/lib/ws-client";
 import { useHomeProjectStore } from "@/stores/home-project-store";
 import { useHomeRunConfigStore } from "@/stores/home-run-config-store";
+import { useInterfaceModeStore } from "@/stores/interface-mode-store";
 import { usePendingSendStore } from "@/stores/pending-send-store";
 
 /** Workspaces needed before the project menu shows its search box. */
@@ -57,6 +59,7 @@ export function HomeLanding({
   onAddProject?: () => void;
 }) {
   const greeting = useGreeting();
+  const officeMode = useInterfaceModeStore((s) => s.value) === "office";
   const storedId = useHomeProjectStore((s) => s.value);
   const setStoredId = useHomeProjectStore((s) => s.set);
   const chosen = workspaces.find((w) => w.ID === storedId) ?? workspaces[0] ?? null;
@@ -244,6 +247,27 @@ export function HomeLanding({
             </div>
           </div>
         </form>
+        {officeMode && (
+          <div data-testid="home-suggestions" className="mt-4 flex flex-wrap justify-center gap-2">
+            {OFFICE_SUGGESTED_PROMPTS.map((text) => (
+              <Button
+                key={text}
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={disabled}
+                data-testid="home-suggestion"
+                onClick={() => {
+                  // Fills the composer only; sending stays the person's own action.
+                  setPrompt(text);
+                  textareaRef.current?.focus();
+                }}
+              >
+                {text}
+              </Button>
+            ))}
+          </div>
+        )}
         {error && (
           <p role="alert" className="mt-2 text-ui-sm text-destructive">
             {error}

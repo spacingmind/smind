@@ -43,6 +43,8 @@ export const STORAGE_KEYS = {
   preferredEditor: "smind:preferred-editor",
   /** Per connection, the daemon/app version pair whose "daemon is older" notice was dismissed; see lib/daemon-version.ts. */
   dismissedDaemonNotices: "smind:dismissed-daemon-notices",
+  /** Interface mode (ADR-0049): the bare string "office", anything else reads as coding; see lib/interface-mode.ts. */
+  interfaceMode: "smind:interface-mode",
 } as const;
 
 /**
