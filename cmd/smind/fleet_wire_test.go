@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,5 +109,10 @@ func TestNewFleetOnRegistersMethods(t *testing.T) {
 	}
 	if len(out.Hosts) != 0 {
 		t.Fatalf("hosts = %v", out.Hosts)
+	}
+	// An unregistered method answers "method not found"; remote.write must
+	// fail on its params or caller instead.
+	if err := cl.Call(ctx, "remote.write", nil, nil); err == nil || strings.Contains(err.Error(), "method not found") {
+		t.Fatalf("remote.write not registered: %v", err)
 	}
 }

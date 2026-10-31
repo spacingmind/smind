@@ -117,10 +117,60 @@ func TestRecipeEntry_CodexEndpoint(t *testing.T) {
 	}
 }
 
-func TestRecipeEntry_ACPNotYet(t *testing.T) {
-	_, _, err := BuildRecipeEntry(recipeFor(t, "chat-completions-via-opencode"), RecipeInput{Models: []string{"m1"}})
-	if err == nil || !strings.Contains(err.Error(), "not available yet") {
-		t.Fatalf("acp recipe: err = %v", err)
+// The chat-completions recipe builds an opencode instance: the URL rides on
+// endpoint.baseUrl (no env), the key is a secret reference and never a value,
+// and models are required.
+func TestRecipeEntry_ChatCompletionsViaOpenCode(t *testing.T) {
+	rec := recipeFor(t, "chat-completions-via-opencode")
+	if _, _, err := BuildRecipeEntry(rec, RecipeInput{Models: []string{"m1"}}); err == nil || !strings.Contains(err.Error(), "baseUrl: required") {
+		t.Fatalf("no base URL: err = %v", err)
+	}
+	if _, _, err := BuildRecipeEntry(rec, RecipeInput{BaseURL: "https://api.vendor.test/v1"}); err == nil || !strings.Contains(err.Error(), "models: required") {
+		t.Fatalf("no models: err = %v", err)
+	}
+	entry, placeholders, err := BuildRecipeEntry(rec, RecipeInput{ID: "vendor-x", BaseURL: "https://api.vendor.test/v1", Models: []string{"chat-1", "chat-2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Extends != providers.IDOpenCode || entry.Endpoint == nil || entry.Endpoint.Kind != "chat-completions" || entry.Endpoint.BaseURL != "https://api.vendor.test/v1" {
+		t.Fatalf("entry = %+v (endpoint %+v)", entry, entry.Endpoint)
+	}
+	if v := entry.Env[providers.OpenCodeKeyEnv]; v.Secret != RecipeSecretName || v.Literal != "" {
+		t.Fatalf("key env = %+v; want a reference to the stored secret and no literal", v)
+	}
+	if len(placeholders) != 0 {
+		t.Fatalf("placeholders = %v; a keyed recipe stores none", placeholders)
+	}
+	if len(entry.Models) != 2 || entry.Models[0].ID != "chat-1" || !entry.Models[0].Default {
+		t.Fatalf("models = %+v", entry.Models)
+	}
+	if err := ValidateCustomProviders([]CustomProvider{entry}); err != nil {
+		t.Fatalf("ValidateCustomProviders: %v", err)
+	}
+}
+
+// Written to config.yaml, the instance carries the reference and not a key.
+func TestAddRecipeInstance_ChatCompletionsViaOpenCode_WritesNoKey(t *testing.T) {
+	path := useHome(t, "")
+	res, err := AddRecipeInstance(recipeFor(t, "chat-completions-via-opencode"), RecipeInput{ID: "vendor-x", BaseURL: "https://api.vendor.test/v1", Models: []string{"chat-1"}})
+	if err != nil || !res.Created {
+		t.Fatalf("AddRecipeInstance = %+v, %v", res, err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"extends: opencode", "kind: chat-completions", "baseUrl: https://api.vendor.test/v1", "SMIND_OPENCODE_API_KEY:", "secret: api-key"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("config.yaml lacks %q:\n%s", want, b)
+		}
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("the written file does not load: %v", err)
+	}
+	if len(cfg.Providers.Custom) != 1 || cfg.Providers.Custom[0].Extends != providers.IDOpenCode {
+		t.Fatalf("custom = %+v", cfg.Providers.Custom)
 	}
 }
 

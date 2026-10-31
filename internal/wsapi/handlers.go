@@ -94,6 +94,8 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"terminal.list":            handleTerminalList(treg),
 		"file.list":                handleFileList(wm),
 		"file.read":                handleFileRead(wm),
+		"file.stat":                handleFileStat(wm),
+		"file.readRange":           handleFileReadRange(wm),
 		"file.write":               handleFileWrite(wm),
 		"fs.listDir":               handleFsListDir(),
 		"profile.create":           handleProfileCreate(profReg),

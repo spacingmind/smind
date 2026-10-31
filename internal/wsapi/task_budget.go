@@ -122,6 +122,9 @@ func viewTasks(db *store.Store, tasks []store.Task) ([]taskView, error) {
 func annotateTreeBudgets(db *store.Store, nodes []tasktree.Node) error {
 	for i := range nodes {
 		n := &nodes[i]
+		if n.Remote {
+			continue
+		}
 		sp, err := rootBudgetSpend(db, n.ID, n.ParentID, n.BudgetUSD)
 		if err != nil {
 			return err

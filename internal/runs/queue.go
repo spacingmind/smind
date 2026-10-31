@@ -114,6 +114,15 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		return StartOutcome{}, fmt.Errorf("runs: start: invalid whenBusy %q", whenBusy)
 	}
 
+	// ADR-0048: a paired host's prompt never auto-approves on the callee.
+	// Forced off before validation so the run is admitted with AutoAccept
+	// false (the run row, and a queued item's run config, carry false too)
+	// instead of dying at the ADR-0019 guard below, which every non-human
+	// source otherwise answers with a rejection; the mode half of that
+	// guard still applies unchanged to whatever mode the caller names.
+	if source == store.ChatQueueSourceRemote {
+		perm.AutoAccept = false
+	}
 	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, model)
 	if err != nil {
 		return StartOutcome{}, err
@@ -245,6 +254,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		model:              model,
 		purpose:            startPurpose(opts),
 		origin:             source,
+		originHost:         resolveStartOptions(opts).originHost,
 		replyChatID:        replyChatID,
 		profileID:          profileID,
 		interrupt:          resolveStartOptions(opts).interrupt,
@@ -703,6 +713,9 @@ type startOptions struct {
 	purpose   string
 	origin    string
 	interrupt bool
+	// originHost is the paired fleet host a remote run arrived from
+	// (ADR-0048); "" = a local run.
+	originHost string
 	// replyChatID/notify: see WithReplyChat / WithNotifyOnFinish.
 	replyChatID int64
 	profileID   int64
@@ -727,6 +740,14 @@ type startOptions struct {
 // immediate start, so callers only need this on a direct Start.
 func WithOrigin(source string) StartOption {
 	return func(o *startOptions) { o.origin = source }
+}
+
+// WithOriginHost records the paired fleet host a remote run arrived from
+// (ADR-0048), so the run row carries runs.origin_host from its first
+// running moment and the per-origin budget can count it. "" = a local
+// run; only the fleet adapter passes it.
+func WithOriginHost(host string) StartOption {
+	return func(o *startOptions) { o.originHost = host }
 }
 
 // WithReplyChat records the parent chat to tell when the run finishes

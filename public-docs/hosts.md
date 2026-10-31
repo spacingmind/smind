@@ -155,6 +155,32 @@ that is stale or a replay, and callers that ask too fast. Every call, served or
 refused, is recorded in an audit log on this host with a hash and at most 120
 redacted characters of the request, never its text; rows are kept for 30 days.
 
+### What a paired host can start
+
+A grant that allows create, send and stop lets the peer start work on this host,
+inside the workspaces you chose for it and nowhere else. The peer names the
+workspace, a branch that already exists on this workspace's own `origin` (or a
+base to branch from), a provider and a model, and a text prompt. This host
+fetches the branch itself into a new task and runs the agent with its own
+accounts and settings; nothing of the peer's credentials, environment or files
+travels, and no file or diff can be uploaded. A provider this host has not
+configured, or a branch that is not on `origin`, is refused. The peer can send
+more prompts to, and stop, only the tasks it created.
+
+The run always asks as usual: it never starts in an auto-approving mode, your
+standing rules and the built-in safety floor decide every request, and a request
+nothing decides waits in this host's inbox for you. The peer can see that a run
+is waiting for a permission and cannot answer it. Each remote task shows which
+host it came from.
+
+Limits are counted per peer host, across everything that host starts: how many
+runs may be live at once, how long one run may take, and how much cost the runs
+of the last 24 hours reported. A call over the live-agent or cost limit is
+refused with the limit named; a run over the time limit is stopped here and
+reported as stopped by the wall limit. A run that reports no cost counts as
+nothing, never as an estimate. A retry of a create or send that carries the same
+idempotency key returns the same task and run instead of starting another.
+
 ### Routes and cleartext
 
 A direct route must be `wss://`, or `ws://` to this machine or to an address
@@ -216,7 +242,87 @@ smind host ls
 smind host ls --json
 smind host test studio
 smind host rename studio workshop
+smind host label set studio os:linux
+smind host select --labels os:linux
 smind host rm studio
 ```
 
 `smind host ls` never prints a key, a password or a secret.
+
+## Try it on one machine
+
+You can pair two daemons on one computer with two home directories and two
+ports. Nothing here touches your real `~/.smind`.
+
+```bash
+export A=$(mktemp -d) B=$(mktemp -d)
+printf 'fleet:\n  enabled: true\n' > $A/config.yaml
+printf 'fleet:\n  enabled: true\n' > $B/config.yaml
+SMIND_HOME=$A smind config set server.port 4701
+SMIND_HOME=$B smind config set server.port 4702
+SMIND_HOME=$A smind serve &        # the receiver
+SMIND_HOME=$B smind serve &        # the initiator
+```
+
+Pair them. A loopback address needs no `--allow-cleartext`:
+
+```bash
+SMIND_HOME=$A smind host invite --addr ws://127.0.0.1:4701
+SMIND_HOME=$B smind host add 'smind-host://v1#...' --alias recv
+SMIND_HOME=$A smind host ls                       # shows the six-digit code
+SMIND_HOME=$A smind host approve <initiator> --sas <code> --write <workspaceId>
+```
+
+Read through the link from the initiator:
+
+```bash
+SMIND_HOME=$B smind host ls
+SMIND_HOME=$B smind host workspaces recv
+SMIND_HOME=$B smind host tasks recv
+```
+
+Create, prompt and stop have no command: they are the `task_new`, `task_send`
+and `task_stop` tools of the [MCP server](orchestration.md), each with
+`host: "recv"`. Run `SMIND_HOME=$B smind mcp serve` from an MCP client, create a
+task in the receiver's workspace with a provider and model the receiver has
+configured, send it a prompt, then stop the run. `smind host tasks recv` shows
+the task, and a run that needs a permission waits in the receiver's inbox.
+
+When you are done, stop both daemons by their process ids and delete `$A` and
+`$B`.
+
+## Route by labels
+
+Instead of naming a host you can tag your paired hosts and pick one by tag. You
+set labels yourself, on this host's own row for each peer; they are never sent to
+the other host.
+
+```bash
+smind host label set winbox os:windows arch:arm64
+smind host label rm winbox arch
+smind host label ls
+smind host label ls winbox
+```
+
+A host has at most 16 labels. A key starts with a lowercase letter and is up to 32
+characters of `a-z`, `0-9`, `.`, `_` and `-`. A value is up to 32 characters of
+`a-z`, `0-9`, `.`, `_`, `+` and `-`. Keys that look like secrets, such as `token`
+or `password`, are refused.
+
+Select a host by its labels:
+
+```bash
+smind host select --labels os:windows
+smind host tasks --labels gpu:cuda --any
+```
+
+`smind host select` prints only the alias, so `$(smind host select --labels os:windows)`
+works in scripts. `info`, `workspaces` and `tasks` take `--labels` in place of the
+host name (giving both is an error). Agents use the same selector: the MCP `host`
+argument may be `{"labels":{"os":"windows"},"any":true}`.
+
+The rule: exactly one enabled, connected host must match all the labels,
+otherwise you get an error that lists the candidates. With `--any` (or
+`any:true`) the host with the fewest live remote agents is picked, ties broken by
+alias. A disabled or disconnected host never matches. There is no automatic retry
+on another host: if the chosen host fails, the command fails.

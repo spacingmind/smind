@@ -41,6 +41,17 @@ real daemon with `SMIND_REAL_DAEMON_BIN=<built smind> cargo test --lib daemon_su
 The updater's signing key is the repository secret `TAURI_SIGNING_PRIVATE_KEY`,
 used only by the release build.
 
+Tests and harnesses never listen beyond loopback: any listener a test, test
+helper or harness script opens names its host (`127.0.0.1` or `[::1]`), never
+`:0`, `:port` or `0.0.0.0`. A process listening on every interface makes Windows
+Defender Firewall (and the macOS application firewall) ask the person at the
+keyboard to allow it, and leaves a rule behind for each freshly built test
+binary. `internal/hygiene` fails the build on a wildcard or host-less listen
+address outside a reviewed allow-list. The one test that needs a daemon beyond
+loopback (`TestServeDirectConnectionEndToEnd`, "from the LAN address") runs only
+on CI or with `SMIND_TEST_LAN=1`; the guard behaviour it exercises is also
+covered in-process in `internal/server/direct_test.go`.
+
 Run `task build && task test && task lint` — the same sequence CI runs —
 before opening a PR.
 

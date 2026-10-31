@@ -913,6 +913,35 @@ export interface FileWriteResult {
   mtime: string;
 }
 
+// Result of file.stat (internal/wsapi/files_binary.go's fileStatResult): the
+// file classified from its first bytes, never from its extension.
+export interface FileStatResult {
+  size: number;
+  mtime: string;
+  kind: "pdf" | "text" | "image" | "office" | "other";
+  mime: string;
+  ext: string;
+  /** The extension promises one type and the content is another. */
+  mismatch: boolean;
+  previewable: boolean;
+}
+
+// Result of file.readRange: up to the transport's chunk ceiling of bytes, base64 on the wire.
+export interface FileReadRangeResult {
+  offset: number;
+  length: number;
+  eof: boolean;
+  data: string;
+  mtime: string;
+}
+
+/** `daemon.info.files` (ADR-0049 section 2.4): this connection's binary-read limits. Absent on an older daemon. */
+export interface DaemonFilesInfo {
+  maxReadBytes: number;
+  maxChunkBytes: number;
+  previewKinds: string[];
+}
+
 // Result of task.diff (internal/wsapi/handlers.go's taskDiffResult): the
 // task's full unified diff text, or an empty string for a task with no
 // changes.

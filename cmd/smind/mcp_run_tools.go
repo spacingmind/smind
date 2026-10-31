@@ -24,8 +24,8 @@ func registerMCPRunTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request. A pending permission means the run is NOT finished: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended. A done run whose `disposition` is \"needs-continue\" hit a turn/token/budget cap and is NOT finished: send \"continue\". Includes the run's git provenance (baseSha, headSha, dirty) when known. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpTaskStatus(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_logs", Description: "Read a run's full (or tailed) transcript and current status."}, mcpTaskLogs(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the sMind web UI; there is no tool for that here. Each request carries a `detail` for writes (path, size change, replacesExisting, largeShrink, diff or preview): surface it to the human as is. loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended."}, mcpTaskPermissions(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). Check `state`: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended; a done run with `disposition` \"needs-continue\" hit a turn/token/budget cap and is NOT finished (send \"continue\"). A human approves or denies a pending permission out of band (sMind web UI or `smind task approve`); to keep waiting after surfacing it, re-issue task_wait with ignorePermissionIds listing the request ids you have already surfaced -- the wait then ends only on a NEW pending request, a terminal status, or the timeout. Pass runIds (2-16 distinct runs, instead of runId) to wait for the first of several: it returns as soon as any one is done/error/stopped or has a pending permission, and runId in the result names which. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpTaskWait(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_stop", Description: "Stop a running run."}, mcpTaskStop(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "With host, one bounded long poll (max 25s) on a run of a peer host: re-issue it with the returned nextCursor until done; waiting_permission there means a HUMAN on that host approves, you cannot. Otherwise: block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). Check `state`: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended; a done run with `disposition` \"needs-continue\" hit a turn/token/budget cap and is NOT finished (send \"continue\"). A human approves or denies a pending permission out of band (sMind web UI or `smind task approve`); to keep waiting after surfacing it, re-issue task_wait with ignorePermissionIds listing the request ids you have already surfaced -- the wait then ends only on a NEW pending request, a terminal status, or the timeout. Pass runIds (2-16 distinct runs, instead of runId) to wait for the first of several: it returns as soon as any one is done/error/stopped or has a pending permission, and runId in the result names which. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpTaskWait(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_stop", Description: "Stop a running run. With host (and the remote taskId) it stops a run on a peer host."}, mcpTaskStop(client))
 }
 
 // runIDInput is the shared argument shape of the run-reading tools.
@@ -126,7 +126,7 @@ type taskStatusOutput struct {
 // host-read fields.
 type taskStatusInput struct {
 	RunID  string `json:"runId" jsonschema:"id of the run (returned by task_send)"`
-	Host   string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	Host   any    `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
 	TaskID int64  `json:"taskId,omitempty" jsonschema:"only with host: the peer's task id (the run id may be omitted to read the task's latest run)"`
 }
 
@@ -136,7 +136,7 @@ type taskStatusInput struct {
 // blocking shape, task_wait, is a later step of the plan).
 func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[taskStatusInput, taskStatusOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskStatusInput) (*mcp.CallToolResult, taskStatusOutput, error) {
-		if in.Host != "" {
+		if mcpHostSet(in.Host) {
 			out, err := remoteTaskStatus(ctx, client, in)
 			return nil, out, err
 		}
@@ -184,7 +184,7 @@ func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
 type taskLogsInput struct {
 	RunID string `json:"runId" jsonschema:"id of the run whose transcript to read"`
 	Tail  int    `json:"tail,omitempty" jsonschema:"return only the last N entries (default: all)"`
-	Host  string `json:"host,omitempty" jsonschema:"optional alias or id of a connected host (see list_hosts): read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	Host  any    `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Read that host instead of this daemon. Direct reads only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
 	// TaskID and Cursor apply to host reads only.
 	TaskID int64 `json:"taskId,omitempty" jsonschema:"REQUIRED with host: the peer's task id (the peer lists activity per task)"`
 	Cursor int64 `json:"cursor,omitempty" jsonschema:"only with host: continue the peer's activity from this cursor"`
@@ -217,7 +217,7 @@ type taskLogsOutput struct {
 // has no request/response MCP shape).
 func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, taskLogsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskLogsInput) (*mcp.CallToolResult, taskLogsOutput, error) {
-		if in.Host != "" {
+		if mcpHostSet(in.Host) {
 			out, err := remoteTaskLogs(ctx, client, in)
 			return nil, out, err
 		}
@@ -342,7 +342,9 @@ type taskWaitInput struct {
 	ChildrenOf          int64    `json:"childrenOf,omitempty" jsonschema:"taskId whose direct live children's running runs to wait for (resolved via the task tree); use this instead of runId/runIds"`
 	RunIDs              []string `json:"runIds,omitempty" jsonschema:"wait-any: 2-16 distinct run ids; returns as soon as any one of them is terminal or has a pending permission request, naming it in runId. Use this or runId, not both"`
 	IgnorePermissionIDs []string `json:"ignorePermissionIds,omitempty" jsonschema:"permission request ids you have already surfaced to the human; a pending request with one of these ids does not end the wait, so it continues until a NEW pending request, a terminal status, or the timeout"`
-	TimeoutSeconds      int      `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning timedOut: true (default 120s, always caller-overridable); a timeout is not a failure -- re-issue task_wait with the same runId/runIds to keep waiting"`
+	TimeoutSeconds      int      `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning timedOut: true (default 120s, always caller-overridable; with host default and cap 25s); a timeout is not a failure -- re-issue task_wait with the same runId/runIds to keep waiting"`
+	Host                any      `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Act on that host instead of this daemon. Direct only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon. With host, runId is required, timeoutSeconds defaults to and is capped at 25, and runIds, childrenOf and ignorePermissionIds are not supported"`
+	Cursor              int64    `json:"cursor,omitempty" jsonschema:"only with host: continue the remote run's events from this cursor (the nextCursor of the previous wait)"`
 }
 
 // taskWaitOutput is task_wait's structured output: the run's status once it
@@ -377,6 +379,12 @@ type taskWaitOutput struct {
 	PendingPermissions []pendingPermissionOut `json:"pendingPermissions,omitempty"`
 	Message            string                 `json:"message,omitempty"`
 	FallbackProfileID  int64                  `json:"fallbackProfileId,omitempty" jsonschema:"for a rate_limited run: the profile its author named as the fallback; start the work again with task_send profileId set to it on a NEW chat (chat_new), because a chat is bound to its provider"`
+	// Set for a host wait only; Events/NextCursor let the next wait resume.
+	Host              string        `json:"host,omitempty"`
+	NextCursor        int64         `json:"nextCursor,omitempty"`
+	Done              bool          `json:"done,omitempty"`
+	WaitingPermission bool          `json:"waitingPermission,omitempty"`
+	Events            []mcpRunEvent `json:"events,omitempty"`
 }
 
 // buildTaskWaitOutput derives task_wait's output from one run.logs snapshot.
@@ -426,6 +434,10 @@ func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut 
 // run.wait RPC). With runIds it waits for the first of several runs.
 func mcpTaskWait(client *wsclient.Client) mcp.ToolHandlerFor[taskWaitInput, taskWaitOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskWaitInput) (*mcp.CallToolResult, taskWaitOutput, error) {
+		if mcpHostSet(in.Host) {
+			out, err := remoteTaskWait(ctx, client, in)
+			return nil, out, err
+		}
 		if in.ChildrenOf != 0 {
 			if in.RunID != "" || len(in.RunIDs) > 0 {
 				return nil, taskWaitOutput{}, fmt.Errorf("task_wait: childrenOf is exclusive: do not pass runId or runIds with it")
@@ -543,16 +555,34 @@ func mcpWaitOneRun(ctx context.Context, client *wsclient.Client, runID string, d
 	}
 }
 
+// taskStopInput is task_stop's argument shape: runId, plus the optional host
+// fields. runId is checked in the handler because host mode may omit it.
+type taskStopInput struct {
+	RunID  string `json:"runId,omitempty" jsonschema:"id of the run (returned by task_send); required without host"`
+	Host   any    `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Act on that host instead of this daemon. Direct only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon"`
+	TaskID int64  `json:"taskId,omitempty" jsonschema:"only with host: the peer's task id (required with host; runId may be omitted to stop the task's running run)"`
+}
+
 // taskStopOutput is task_stop's structured output.
 type taskStopOutput struct {
 	RunID   string `json:"runId"`
 	Stopped bool   `json:"stopped"`
+	// Set for a host stop only.
+	Host     string `json:"host,omitempty"`
+	GlobalID string `json:"globalId,omitempty"`
 }
 
 // mcpTaskStop wraps run.stop: {runId} -> {runId, stopped: true} once the
 // daemon has accepted the stop request.
-func mcpTaskStop(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskStopOutput] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in runIDInput) (*mcp.CallToolResult, taskStopOutput, error) {
+func mcpTaskStop(client *wsclient.Client) mcp.ToolHandlerFor[taskStopInput, taskStopOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskStopInput) (*mcp.CallToolResult, taskStopOutput, error) {
+		if mcpHostSet(in.Host) {
+			out, err := remoteTaskStop(ctx, client, in)
+			return nil, out, err
+		}
+		if in.RunID == "" {
+			return nil, taskStopOutput{}, fmt.Errorf("task_stop: runId is required")
+		}
 		if err := callWS(ctx, client, "task_stop", "run.stop", map[string]any{"runId": in.RunID}, nil); err != nil {
 			return nil, taskStopOutput{}, err
 		}

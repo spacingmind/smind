@@ -84,11 +84,20 @@ type API struct {
 	automations *automationHost
 	inbox       *inboxHost
 	policySweep *policySweeper
-	// fleetAuditSweep stops the fleet audit sweeper; nil until SetFleet
-	// enables the read methods.
+	// fleetAuditSweep stops the fleet audit sweeper, fleetWallSweep the
+	// wall-limit sweeper and fleetIdemSweep the idempotency sweeper; all
+	// nil until SetFleet enables their layer.
 	fleetAuditSweep func()
-	hs              map[string]handlerFunc
-	plugins         *plugins.Manager
+	fleetWallSweep  func()
+	fleetIdemSweep  func()
+	// wm and runner are the workspace manager and task runner newAPI was
+	// built with; the fleet write backend (fleet_write.go) drives the
+	// callee's own tasks and runs through them, which is why they stay
+	// reachable here after SetFleet.
+	wm      *workspace.Manager
+	runner  *taskrunner.Runner
+	hs      map[string]handlerFunc
+	plugins *plugins.Manager
 	// pluginEvents publishes plugin.updated and the owned-row diffs.
 	pluginEvents *pluginEvents
 	admit        *seatAdmission
@@ -145,6 +154,12 @@ func (a *API) Close() {
 	a.policySweep.stop()
 	if a.fleetAuditSweep != nil {
 		a.fleetAuditSweep()
+	}
+	if a.fleetWallSweep != nil {
+		a.fleetWallSweep()
+	}
+	if a.fleetIdemSweep != nil {
+		a.fleetIdemSweep()
 	}
 	a.StopPlugins()
 	a.git.Stop()
@@ -373,7 +388,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	pluginReg.bindPanels(panelDeclarations(pluginMgr))
 	reg.SetLaunchHooks(pluginHooks{pluginMgr})
 	reg.AddObserver(pluginHooks{pluginMgr})
-	api := &API{inbox: inboxH, policySweep: policySweep, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{inbox: inboxH, policySweep: policySweep, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}, wm: wm, runner: runner}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}

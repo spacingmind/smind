@@ -239,3 +239,16 @@ describe('tree budget line', () => {
     expect(budgetLine(node(1, { budgetUsd: 5, budgetSpentUsd: 6, overBudget: true, budgetPartial: true }))?.text).toBe('Over budget · $6.00+ / $5.00 · partial');
   });
 });
+
+describe('buildTreeRows remote nodes (F4)', () => {
+  it('carries the host on a remote node and none on a local one', () => {
+    const { rows } = buildTreeRows(
+      { nodes: [node(1), node(2), node(-7, { remote: true, host: 'box', hostId: 'h1', globalId: 'box:7' })], truncated: false },
+      NOW,
+      none,
+    );
+    const [, local, remote] = rows;
+    expect(local).toMatchObject({ remote: false, host: null });
+    expect(remote).toMatchObject({ remote: true, host: 'box', id: -7 });
+  });
+});

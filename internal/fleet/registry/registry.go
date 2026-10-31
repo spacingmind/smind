@@ -41,6 +41,7 @@ type Host struct {
 	Alias     string
 	Pub       []byte
 	Label     string
+	Labels    map[string]string // operator labels, caller-local
 	State     string
 	CreatedAt time.Time
 }
@@ -51,6 +52,7 @@ func toStoreHost(h Host) store.FleetHost {
 		Alias:     h.Alias,
 		Pub:       h.Pub,
 		Label:     h.Label,
+		Labels:    encodeLabels(h.Labels),
 		State:     h.State,
 		CreatedAt: h.CreatedAt,
 	}
@@ -62,6 +64,7 @@ func fromStoreHost(h store.FleetHost) Host {
 		Alias:     h.Alias,
 		Pub:       h.Pub,
 		Label:     h.Label,
+		Labels:    decodeLabels(h.Labels),
 		State:     h.State,
 		CreatedAt: h.CreatedAt,
 	}
@@ -354,6 +357,15 @@ func (r *Registry) Rename(hostID, alias string) error {
 	}
 	h.Alias = alias
 	return r.setState(h, h.State)
+}
+
+// SetLabels replaces a host's operator labels after validating them; nil
+// or empty clears them. A missing host is ErrNotFound.
+func (r *Registry) SetLabels(hostID string, m map[string]string) error {
+	if err := ValidateLabels(m); err != nil {
+		return err
+	}
+	return r.st.SetFleetHostLabels(hostID, encodeLabels(m))
 }
 
 func (r *Registry) setState(h Host, state string) error {

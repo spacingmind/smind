@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // maxCommandBytes caps what the splitter will scan at all; a larger request
@@ -28,6 +29,11 @@ type Segment struct {
 	Dynamic   bool
 	PipeNext  bool
 	Raw       string
+	// Inspected marks a PowerShell or cmd wrapper (powershell -Command, pwsh -c,
+	// cmd /c) whose literal payload the splitter parsed completely; its inner
+	// commands are separate segments. A wrapper without it still takes the
+	// "runs text the engine cannot see" ask on Windows.
+	Inspected bool
 }
 
 // Parsed is the split of one command string. A non-empty Unparsed means the
@@ -74,8 +80,16 @@ func (s *scanner) finish() {
 	s.consumeHeredocBodies()
 	for i := range s.segs {
 		s.segs[i].Raw = s.elided(s.spans[i].start, s.spans[i].end)
+		if s.redacted && s.spans[i].start >= s.redactAt {
+			// Where the heredoc body ends is not knowable here, so a segment
+			// after the operator may really be body text: never show it.
+			s.segs[i].Raw = redactedText
+		}
 	}
 }
+
+// redactedText replaces text the splitter cannot vouch for as body-free.
+const redactedText = "[redacted: the command has a heredoc whose tag is not valid UTF-8]"
 
 // word accumulates one shell word. dynamic is set for an unquoted or
 // double-quoted $ or backtick and for an unquoted * ? [ — single quotes are
@@ -104,6 +118,27 @@ func (h *heredoc) marker() string {
 	return "<<" + h.tag + " [heredoc " + strconv.Itoa(h.n) + " bytes]"
 }
 
+// dialect is the shell syntax a nested script is written in. The zero value
+// is POSIX sh; PowerShell and cmd differ in exactly the places that could hide
+// a command from a bash-flavoured scan (see the scanner cases that test it).
+type dialect uint8
+
+const (
+	dialectNone dialect = iota
+	dialectPS
+	dialectCmd
+)
+
+func (d dialect) String() string {
+	switch d {
+	case dialectPS:
+		return "PowerShell"
+	case dialectCmd:
+		return "cmd"
+	}
+	return "sh"
+}
+
 type scanner struct {
 	src      string
 	i        int
@@ -116,7 +151,10 @@ type scanner struct {
 	pending  []*heredoc // heredoc operators on the line being scanned
 	heredocs []*heredoc // every heredoc, in operator order, once consumed
 	win      bool       // Windows mode: see winLiteralBackslashNext
+	dialect  dialect    // syntax of this script: sh, PowerShell or cmd
 	depth    int        // nesting level of substitutions and shells
+	redacted bool       // a heredoc tag was not valid UTF-8: see redactedText
+	redactAt int        // source offset of that heredoc operator
 	inner    []Segment  // segments of substituted/nested text, appended after segs
 }
 
@@ -146,6 +184,11 @@ func (s *scanner) run() {
 			case s.peek(1) == '>':
 				s.redirect()
 			default:
+				if s.dialect == dialectPS && (s.w.started || (s.cur != nil && len(s.cur.Argv) > 0)) {
+					// A leading & is the call operator; after a command it
+					// starts a background job (PowerShell 7), which is not modelled.
+					s.unparsed("PowerShell background operator")
+				}
 				s.closeSeg(false)
 				s.i++
 			}
@@ -161,10 +204,33 @@ func (s *scanner) run() {
 			}
 		case c == '$' && s.peek(1) == '(':
 			s.substitution('$')
+		case c == '`' && s.dialect == dialectPS:
+			// A PowerShell escape (`n, `", `$), not a substitution: it can spell a
+			// character the rules never see, so the script is not analysable.
+			s.unparsed("PowerShell backtick escape")
+			s.wordChar()
 		case c == '`':
 			s.substitution('`')
+		case s.dialect == dialectPS && !s.w.started && (c == '#' || c == '@'):
+			// A comment (<# #> and # hide text from PowerShell but not from this
+			// scan) or a splat/hashtable (@args, @{}): not modelled.
+			s.unparsed("PowerShell comment or splat")
+			s.wordChar()
+		case s.dialect == dialectPS && c == '<':
+			s.unparsed("PowerShell has no < redirection (or this is a <# comment)")
+			s.wordChar()
+		case s.dialect == dialectPS && (c == '{' || c == '}'):
+			// A script block (ForEach-Object { ... }) holds commands that are
+			// arguments of another command here.
+			s.unparsed("PowerShell script block")
+			s.wordChar()
 		case c == '(' && !s.w.started && s.cur == nil:
 			s.subshellGroup()
+		case (c == '(' || c == ')') && s.dialect != dialectNone:
+			// (Remove-Item x) and if exist x (del y) run a command inside an
+			// argument list; only a leading group is parsed.
+			s.unparsed(s.dialect.String() + " parenthesised expression")
+			s.wordChar()
 		case c == '{' && !s.w.started && s.cur == nil && isSpaceOrEOL(s.peek(1)):
 			s.braceGroup()
 		case c == '>' || c == '<' || (isDigit(c) && s.peek(1) == '>' && !s.w.started):
@@ -181,7 +247,7 @@ func (s *scanner) run() {
 // from the value.
 func (s *scanner) wordChar() {
 	c := s.src[s.i]
-	if c == '\\' && s.peek(1) == '\n' { // line continuation joins lines
+	if c == '\\' && s.peek(1) == '\n' && s.dialect == dialectNone { // line continuation joins lines
 		s.i += 2
 		return
 	}
@@ -193,9 +259,22 @@ func (s *scanner) wordChar() {
 	}
 	switch c {
 	case '\'': // literal until the next single quote
+		if s.dialect == dialectCmd { // cmd has no single quotes: ' & del x' still splits at &
+			s.w.val = append(s.w.val, c)
+			s.i++
+			return
+		}
 		s.w.quoted = true
 		s.i++
-		for s.i < len(s.src) && s.src[s.i] != '\'' {
+		for s.i < len(s.src) {
+			if s.src[s.i] == '\'' {
+				if s.dialect == dialectPS && s.peek(1) == '\'' { // 'it''s' is it's
+					s.w.val = append(s.w.val, '\'')
+					s.i += 2
+					continue
+				}
+				break
+			}
 			s.w.val = append(s.w.val, s.src[s.i])
 			s.i++
 		}
@@ -209,7 +288,7 @@ func (s *scanner) wordChar() {
 		s.i++
 		s.scanDoubleQuoted()
 	case '\\':
-		if s.win && winLiteralBackslashNext(s.peek(1)) {
+		if s.dialect != dialectNone || (s.win && winLiteralBackslashNext(s.peek(1))) {
 			s.w.val = append(s.w.val, '\\')
 			s.i++
 			return
@@ -224,6 +303,14 @@ func (s *scanner) wordChar() {
 	default:
 		if c == '$' || c == '`' || c == '*' || c == '?' || c == '[' {
 			s.w.dynamic = true
+		}
+		if s.dialect == dialectCmd {
+			switch c {
+			case '%', '!': // %VAR% and delayed !VAR! expand before cmd parses the line
+				s.w.dynamic = true
+			case '^':
+				s.unparsed("cmd caret escape")
+			}
 		}
 		if c == '{' {
 			s.w.brace = true
@@ -241,10 +328,15 @@ func (s *scanner) scanDoubleQuoted() {
 	for s.i < len(s.src) {
 		c := s.src[s.i]
 		if c == '"' {
+			if s.dialect == dialectPS && s.peek(1) == '"' { // "a""b" is a"b
+				s.w.val = append(s.w.val, '"')
+				s.i += 2
+				continue
+			}
 			s.i++
 			return
 		}
-		if c == '\\' && s.i+1 < len(s.src) {
+		if c == '\\' && s.i+1 < len(s.src) && s.dialect == dialectNone {
 			switch s.src[s.i+1] {
 			case '"', '\\', '$', '`':
 				s.w.val = append(s.w.val, s.src[s.i+1])
@@ -259,11 +351,18 @@ func (s *scanner) scanDoubleQuoted() {
 			s.substitution('$')
 			continue
 		}
+		if c == '`' && s.dialect == dialectPS {
+			s.unparsed("PowerShell backtick escape")
+			s.w.dynamic = true
+			s.w.val = append(s.w.val, c)
+			s.i++
+			continue
+		}
 		if c == '`' {
 			s.substitution('`')
 			continue
 		}
-		if c == '$' {
+		if c == '$' || (s.dialect == dialectCmd && (c == '%' || c == '!')) {
 			s.w.dynamic = true
 		}
 		s.w.val = append(s.w.val, c)
@@ -294,6 +393,12 @@ func (s *scanner) endWord() {
 				s.unparsed(val + " runs text the splitter cannot see")
 			case strings.HasPrefix(val, "$"), strings.HasPrefix(val, "`"):
 				s.unparsed("command name " + val + " is an expansion")
+			case s.dialect == dialectPS && psRunsText[strings.ToLower(val)]:
+				s.unparsed("PowerShell " + val + " runs text the splitter cannot see")
+			case s.dialect == dialectCmd && (strings.HasPrefix(val, "%") || strings.HasPrefix(val, "!")):
+				s.unparsed("cmd command name " + val + " is an expansion")
+			case s.dialect == dialectCmd && cmdRunsText[strings.ToLower(val)]:
+				s.unparsed("cmd " + val + " runs a nested command the splitter cannot see")
 			}
 		}
 		cur.Argv = append(cur.Argv, val)
@@ -467,6 +572,15 @@ func (s *scanner) redirect() {
 			tok.Target = string(s.w.val)
 			if s.w.dynamic && !isHere {
 				s.seg().Dynamic = true
+			}
+			if isHere && !utf8.ValidString(tok.Target) {
+				// bash matches the terminator by bytes, but nothing downstream (card,
+				// audit, the body-elision oracle) can agree on where such a body ends,
+				// so the body could leak into the rendered command. Escalate and redact.
+				s.unparsed("heredoc tag is not valid UTF-8")
+				if !s.redacted {
+					s.redacted, s.redactAt = true, start
+				}
 			}
 			if isHere {
 				s.pending = append(s.pending, &heredoc{
@@ -664,11 +778,27 @@ func (s *scanner) recurse(inner string) {
 		s.unparsed("nesting too deep")
 		return
 	}
-	in := scanner{src: inner, p: s.p, segStart: -1, depth: s.depth + 1, win: s.win}
+	s.recurseAs(inner, s.dialect)
+}
+
+// recurseAs is recurse for a script written in dialect d. It returns how many
+// segments the script contributed (0 also when nesting was too deep, which is
+// reported as Unparsed).
+func (s *scanner) recurseAs(inner string, d dialect) int {
+	if s.depth >= maxNestDepth {
+		s.unparsed("nesting too deep")
+		return 0
+	}
+	in := scanner{src: inner, p: s.p, segStart: -1, depth: s.depth + 1, win: s.win, dialect: d}
 	in.run()
 	in.finish()
+	if in.redacted && !s.redacted {
+		// The inner text sits inside this command's own text: redact all of it.
+		s.redacted, s.redactAt = true, 0
+	}
 	s.inner = append(s.inner, in.segs...)
 	s.inner = append(s.inner, in.inner...)
+	return len(in.segs) + len(in.inner)
 }
 
 // shellScript recurses into the literal script word of bash|sh|zsh|dash|ksh
@@ -676,6 +806,12 @@ func (s *scanner) recurse(inner string) {
 // word cannot be known in advance, so it is reported instead.
 func (s *scanner) shellScript() {
 	argv := s.cur.Argv
+	if len(argv) > 0 {
+		if d := winShellDialect(argv[0]); d != dialectNone {
+			s.winShellScript(argv, d)
+			return
+		}
+	}
 	if len(argv) == 0 || !isShell(argv[0]) {
 		return
 	}
@@ -790,6 +926,9 @@ func (s *scanner) elided(base, end int) string {
 // The operator spans and body spans of several heredocs on one line
 // interleave, so the edits are spliced in start order.
 func (s *scanner) normalized() string {
+	if s.redacted {
+		return redactedText
+	}
 	if len(s.heredocs) == 0 {
 		return strings.TrimSpace(s.src)
 	}

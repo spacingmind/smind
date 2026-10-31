@@ -35,6 +35,9 @@ type DaemonInfo struct {
 	// Attachments are the prompt-attachment limits of this connection;
 	// absent on a daemon without an attachment store (ADR-0038).
 	Attachments *AttachmentsInfo `json:"attachments,omitempty"`
+	// Files are the binary file-read limits of this connection (ADR-0049 §2.4);
+	// absent on a daemon that predates file.stat / file.readRange.
+	Files *FilesInfo `json:"files,omitempty"`
 }
 
 // ForgeInfo is daemon.info's `forge` field.
@@ -72,6 +75,7 @@ func handleDaemonInfo(info *DaemonInfo, reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, rc *requestContext, _ json.RawMessage) (any, error) {
 		out := *info
 		out.Forge = &ForgeInfo{Provider: "github", CLI: forgeCLIInstalled()}
+		out.Files = filesInfo(connMaxMessage(rc))
 		if reg != nil && reg.AttachmentStore() != nil {
 			out.Attachments = attachmentsInfo(connMaxMessage(rc))
 		}

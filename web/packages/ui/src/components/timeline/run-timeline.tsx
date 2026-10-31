@@ -1,4 +1,5 @@
 import { RunAttachments } from "@/components/timeline/run-attachments";
+import { DeliverableCards, type DeliverableContext } from "@/components/timeline/deliverable-card";
 import { memo } from "react";
 import { Icons } from "@/lib/icons";
 
@@ -52,6 +53,7 @@ export const RunTimeline = memo(function RunTimeline({
   modelLabels,
   isLatest = false,
   disconnected = false,
+  deliverables,
 }: {
   run: RunEntry;
   detailLevel?: DetailLevel;
@@ -72,6 +74,8 @@ export const RunTimeline = memo(function RunTimeline({
   isLatest?: boolean;
   /** The daemon connection is down: the run footer freezes its live state. */
   disconnected?: boolean;
+  /** What the deliverable cards under the answer need (client, task, local-path actions); omitted renders no cards. */
+  deliverables?: DeliverableContext;
 } & TimelineRowContext) {
   const items = run.status === "error" ? withoutErrorEcho(run.items, run.err) : run.items;
   const groups = groupTimeline(items, detailLevel);
@@ -116,6 +120,8 @@ export const RunTimeline = memo(function RunTimeline({
             )}
           </ol>
         )}
+
+        <DeliverableCards run={run} ctx={deliverables} worktreePath={worktreePath} onOpenFile={onOpenFile} />
 
         <RunErrorBox run={run} onRetry={onRetry} />
 

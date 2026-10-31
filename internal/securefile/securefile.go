@@ -31,3 +31,20 @@ func Restrict(path string) error {
 func IsPrivate(path string) (bool, error) {
 	return isPrivate(path)
 }
+
+// RestrictDir makes an existing directory private to the current user and
+// keeps what is created inside it private too: mode 0700 on Unix; on Windows
+// a protected DACL whose two entries (current user, SYSTEM) are inheritable,
+// so files a launched program writes under it inherit exactly those and not
+// the broader ACL of the parent.
+func RestrictDir(path string) error {
+	return restrictDir(path)
+}
+
+// IsPrivateTree reports whether root was restricted by RestrictDir and
+// nothing under it is readable by anyone else: on Unix root's mode is 0700;
+// on Windows root has the protected DACL RestrictDir leaves and every
+// descendant grants the current user and SYSTEM only.
+func IsPrivateTree(root string) (bool, error) {
+	return isPrivateTree(root)
+}

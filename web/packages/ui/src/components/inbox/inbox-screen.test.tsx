@@ -7,6 +7,7 @@ import { InboxScreen } from "@/components/inbox/inbox-screen";
 import { hostDownItem, hostPairItem, hostRefusedItem, InboxDaemon, permissionItem, REQUEST_EVENTS, stallItem, verdictItem } from "@/test/inbox-fixtures";
 import { createQueryClient } from "@/lib/query/query-client";
 import { queryKeys } from "@/lib/query-keys";
+import { fleetHost } from "@/test/fleet-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 import type { WorkspaceWithTree } from "@/lib/workspace-tree";
 
@@ -47,6 +48,16 @@ describe("InboxScreen", () => {
     expect(screen.getByTestId("inbox-row-perm:q1")).toHaveAttribute("data-kind", "permission");
     expect(screen.getByTestId("inbox-summary-verdict:7")).toHaveTextContent("ready for your merge decision");
     expect(screen.getByTestId("inbox-kind-verdict:7")).toHaveTextContent("Passed");
+  });
+
+  it("TestInboxRowShowsHostChip", async () => {
+    const d = daemonWith(hostPairItem(), permissionItem());
+    const holder = d.client as unknown as { call: (m: string, p?: unknown) => Promise<unknown> };
+    const inner = holder.call;
+    holder.call = async (method, params) => (method === "fleet.host.list" ? { hosts: [fleetHost({ hostId: "h1", alias: "mac" })] } : inner.call(d.client, method, params));
+    await renderInbox(d);
+    expect(screen.getByTestId("inbox-host-chip-host_pair:h1")).toHaveTextContent("mac");
+    expect(screen.getAllByTestId(/^inbox-host-chip-/)).toHaveLength(1);
   });
 
   it("TestInboxScreen_HostKinds", async () => {

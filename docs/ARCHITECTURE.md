@@ -45,9 +45,42 @@ row. The schema is created by migration either way, so enabling later never reop
   `fleet_watches` (durable finish watches; no foreign key, so a watch outlives its host), `fleet_idem` (idempotency keys),
   `fleet_remote_tasks` (caller-side mirrors, cache only), and the columns `tasks.origin_host`, `tasks.origin_trace`,
   `runs.origin_host` (empty for local work). No table models a mesh: a mesh is the reverse toggle on every pair.
+- **Write path** (`internal/fleet/serve`, `internal/wsapi/fleet_write.go`): `fleet.task.create|send|stop` and `fleet.run.wait`
+  run behind the same provenance, grant and audit as the reads, then ownership (`tasks.origin_host` must be the caller), an
+  idempotency lookup (`fleet_idem`, 24 h), the per-origin budget (live runs, 24 h reported cost and wall seconds, counted
+  per origin host across trace ids) and a `Backend` that creates the task from the callee's own `origin` and starts the
+  run with the `remote` source (never AutoAccept, floor and rules decide every request, the origin host is stamped on the
+  run row when it starts). A sweeper stops remote runs past the grant's wall limit and stamps `stop_reason=wall_limit`.
+  A non-refusal error never reaches the peer verbatim (it can carry a local path).
 - **Config** (`fleet.*`, `internal/config`): the switch and the limits (hosts, connections per peer, handshake, frame size,
   outstanding requests, observation backoff, idempotency and replay windows, audit retention). Only a human edit of
   `config.yaml` can change them; there is no environment override.
+
+## Office mode: documents as deliverables (ADR-0049)
+
+Agents' files are first-class results, on every transport. None of this changes a prompt, tool, permission or store schema.
+
+- **Binary-safe reads** (`internal/files/binary.go`, `internal/wsapi/files_binary.go`): `file.stat` classifies a file from its
+  first bytes (never its extension) and flags a mismatch; `file.readRange` returns one base64 chunk of at most the transport's
+  ceiling (`daemon.info.files`: 4 MiB direct, 512 KiB over the relay, 50 MiB per file). The file is opened once and checked on
+  the open descriptor; every chunk can be pinned to the stat'd `mtime`; UNC, device and drive-relative paths are refused before
+  any filesystem access; errors never carry an absolute path.
+- **PDF preview** (`web/packages/ui/src/components/pdf-preview/`, `file-tab-router.tsx`): a binary-looking file in a file tab
+  asks `file.stat` first. A PDF is read in chunks and handed by `postMessage` to `pdf-viewer.html`, a separate page in an
+  `<iframe sandbox="allow-scripts">` (opaque origin, its own CSP with `connect-src 'none'`, no network, annotation layer and
+  scripting off, pdf.js pinned in `package.json`). The viewer is a classic script with the pdf.js worker inlined as a classic
+  blob worker; the desktop proxy serves exactly its two static files without the cookie gate (an opaque origin cannot send
+  the cookie). The router, panels and pane are one lazy chunk.
+- **Deliverable cards** (`components/timeline/deliverables.ts`, `deliverable-card.tsx`): after a run, candidates are the
+  `path` of successful write-intent tool calls plus workspace-relative paths in the final assistant message (markdown links,
+  inline code; shell text is never parsed). Each candidate gets one `file.stat` per run, and a card only if the file exists,
+  has an allow-listed extension, is not a mismatch and was written at or after the run started. At most 6 cards and 20 checks
+  per run. A card never opens anything by itself.
+- **Open in app, Download, Reveal, Copy path** (`file-actions.tsx`, `lib/download-file.ts`,
+  `desktop/src-tauri/src/open_path.rs`): the desktop's `open_path_default(root, rel_path)` canonicalises, requires a regular
+  file inside the canonical root with an allow-listed extension, refuses UNC paths and any daemon that is not the local one,
+  and opens through the opener plugin (no shell); its errors never carry a path. The web build's Download assembles chunks
+  into a Blob (pinned to the stat'd `mtime`, 50 MiB cap, sanitised basename, object URL revoked at once).
 
 ## Surfaces roadmap
 

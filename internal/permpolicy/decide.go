@@ -60,7 +60,7 @@ func Decide(req Request, pol *Policy) Decision {
 		}
 		for _, s := range p.Segments {
 			fs := newFloorSeg(req, s, cwd)
-			if len(fs.argv) > 0 && (isShellEval(fs.argv[0]) || (req.pl().windows && winWrapperInterpreters[fs.name()])) {
+			if len(fs.argv) > 0 && (isShellEval(fs.argv[0]) || (req.pl().windows && winWrapperInterpreters[fs.name()] && !s.Inspected)) {
 				d.Reasons = []string{fs.argv[0] + " runs text the engine cannot see"}
 				return d
 			}
@@ -93,7 +93,23 @@ func Decide(req Request, pol *Policy) Decision {
 		d.Reasons = []string{"no policy loaded"}
 		return d
 	}
-	return evaluateRules(d, req, pol, segs, units)
+	out := evaluateRules(d, req, pol, segs, units)
+	if out.Action == ActionAllow {
+		// A parsed PowerShell/cmd wrapper adds denies and asks on its inner
+		// commands but never an allow: no rule vouches for the host that runs
+		// them, whatever the rules say about the inner commands.
+		for i, s := range segs {
+			if s.Inspected {
+				out.Action, out.RuleID, out.Why = ActionAsk, "", ""
+				out.Reasons = []string{s.Argv[0] + " runs text the engine cannot see"}
+				if i < len(out.Segments) {
+					out.Segments[i].Action, out.Segments[i].RuleID = ActionAsk, ""
+				}
+				break
+			}
+		}
+	}
+	return out
 }
 
 // floorDecision is a floor deny. Which segment tripped it is best effort

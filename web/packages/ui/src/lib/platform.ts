@@ -251,6 +251,12 @@ export interface DesktopApi {
    * message, so it can be shown in a toast as-is.
    */
   openInEditor(editorId: string, path: string): Promise<void>;
+  /**
+   * Office mode (ADR-0049 section 5.1): opens the file at `relPath` below the task worktree `root` in the OS default application.
+   * Rust canonicalises, requires a regular file inside the root with an allow-listed extension, refuses UNC paths and any
+   * daemon that is not the local one, and rejects with a short fixed message that never carries a path.
+   */
+  openPathDefault(root: string, relPath: string): Promise<void>;
   /** ADR-0023: asks Rust to check for an update (it holds any result for `appUpdateInstall`). */
   appUpdateCheck(): Promise<AppUpdateCheck>;
   /** Installs the update held by the last successful check; rejects with an Error carrying Rust's string. */
@@ -338,6 +344,7 @@ function unavailable(): DesktopApi {
     onMenuAction: () => () => {},
     editorsList: () => reject(),
     openInEditor: () => reject(),
+    openPathDefault: () => reject(),
     appUpdateCheck: () => reject(),
     appUpdateInstall: () => reject(),
     onAppUpdateProgress: () => () => {},
@@ -562,6 +569,14 @@ function realDesktopApi(): DesktopApi {
       const invoke = await loadInvoke();
       try {
         await invoke("open_in_editor", { editorId, path });
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    async openPathDefault(root, relPath) {
+      const invoke = await loadInvoke();
+      try {
+        await invoke("open_path_default", { root, relPath });
       } catch (err) {
         throw asError(err);
       }

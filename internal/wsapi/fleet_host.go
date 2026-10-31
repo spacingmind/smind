@@ -181,6 +181,9 @@ type FleetHostView struct {
 	Alias  string `json:"alias"`
 	Label  string `json:"label"`
 	State  string `json:"state"`
+	// Labels are the operator's routing labels, caller-local; they appear
+	// only on this local admin view, never on the wire.
+	Labels map[string]string `json:"labels"`
 	// PendingApproval is true only for a responder-side pending host whose
 	// SAS this daemon holds: the human here must approve it.
 	PendingApproval bool   `json:"pendingApproval"`
@@ -246,6 +249,18 @@ type fleetHostApproveParams struct {
 type fleetHostRenameParams struct {
 	fleetHostRef
 	Alias string `json:"alias"`
+}
+
+type fleetHostLabelsParams struct {
+	fleetHostRef
+	Set    map[string]string `json:"set"`
+	Remove []string          `json:"remove"`
+}
+
+type fleetHostLabelsResult struct {
+	Host   string            `json:"host"`
+	HostID string            `json:"hostId"`
+	Labels map[string]string `json:"labels"`
 }
 
 type fleetHostRouteParams struct {
@@ -337,9 +352,9 @@ var fleetHostAllowed = map[string][]string{
 }
 
 // approvedHostMethods is the method set of an approved host: the link-state
-// notice and the fleet read methods.
+// notice, the fleet read methods and the fleet write methods.
 func approvedHostMethods() []string {
-	return append([]string{hello.MethodLinkState}, wire.ReadMethods...)
+	return append(append([]string{hello.MethodLinkState}, wire.ReadMethods...), wire.WriteMethods...)
 }
 
 // hostPrincipal returns the connection's fleet host principal, if any.
@@ -378,6 +393,7 @@ func (a *API) SetFleet(o FleetOptions) {
 	a.hs["fleet.host.approve"] = fleetLocalOnly("fleet.host.approve", f.handleHostApprove)
 	a.hs["fleet.host.reject"] = fleetLocalOnly("fleet.host.reject", f.handleHostReject)
 	a.hs["fleet.host.rename"] = fleetLocalOnly("fleet.host.rename", f.handleHostRename)
+	a.hs["fleet.host.labels"] = fleetLocalOnly("fleet.host.labels", f.handleHostLabels)
 	a.hs["fleet.host.grant"] = fleetLocalOnly("fleet.host.grant", f.handleHostGrant)
 	a.hs["fleet.host.rm"] = fleetLocalOnly("fleet.host.rm", f.handleHostRm)
 	a.hs["fleet.host.revoke"] = fleetLocalOnly("fleet.host.revoke", f.handleHostRevoke)
@@ -386,19 +402,38 @@ func (a *API) SetFleet(o FleetOptions) {
 	a.hs["fleet.host.test"] = fleetLocalOnly("fleet.host.test", f.handleHostTest)
 	a.hs["fleet.host.route"] = fleetLocalOnly("fleet.host.route", f.handleHostRoute)
 	if o.Store != nil && o.Workspaces != nil {
-		f.read = serve.New(serve.Options{
+		// One source serves the Reader and the write path's TaskLookup, so
+		// a send or a stop decides on the same task rows a read returns.
+		src := &fleetSource{db: o.Store, ws: o.Workspaces}
+		opts := serve.Options{
 			HostID:     o.Key.HostID(),
 			Authorizer: o.Registry,
 			Audit:      o.Store,
-			Reader: serve.NewReader(&fleetSource{db: o.Store, ws: o.Workspaces}, serve.ReaderOptions{
+			Reader: serve.NewReader(src, serve.ReaderOptions{
 				HostID: o.Key.HostID(), Version: o.Version, Caps: hello.Caps(), HomeDirs: o.HomeDirs,
 			}),
 			Now: o.Now,
-		})
+		}
+		// The write methods need the effects only this API can perform;
+		// serve leaves them "unknown method" until Backend, Ledger and
+		// Tasks are all wired, which is always the case outside odd tests.
+		var backend *fleetBackend
+		if a.wm != nil && a.runner != nil {
+			backend = &fleetBackend{a: a, db: o.Store}
+			opts.Backend, opts.Ledger, opts.Tasks = backend, o.Store, src
+		}
+		f.read = serve.New(opts)
 		for _, m := range wire.ReadMethods {
 			a.hs[m] = f.readHandler(m)
 		}
+		for _, m := range wire.WriteMethods {
+			a.hs[m] = f.readHandler(m)
+		}
 		a.fleetAuditSweep = serve.StartAuditSweeper(o.Store, store.FleetAuditRetention, time.Hour)
+		if backend != nil {
+			a.fleetWallSweep = serve.StartWallSweeper(o.Store, o.Registry, o.Store, backend.StopRun, 0, o.Now)
+		}
+		a.fleetIdemSweep = startFleetIdemSweeper(o.Store, o.Now)
 	}
 }
 
@@ -708,7 +743,7 @@ func (f *fleetHost) resolveHost(method, host string) (registry.Host, error) {
 // view renders a registry host for the admin surface; see FleetHostView
 // for what deliberately is not in it.
 func (f *fleetHost) view(h registry.Host) (FleetHostView, error) {
-	v := FleetHostView{HostID: h.HostID, Alias: h.Alias, Label: h.Label, State: h.State, CreatedAt: h.CreatedAt}
+	v := FleetHostView{HostID: h.HostID, Alias: h.Alias, Label: h.Label, State: h.State, CreatedAt: h.CreatedAt, Labels: labelsOrEmpty(h.Labels)}
 	v.Inbound.Grant = registry.DefaultForwardGrant()
 	v.Inbound.Grant.WorkspacesWrite = []int64{}
 	outbound, inbound, err := f.opts.Registry.Links(h.HostID)
@@ -929,6 +964,45 @@ func (f *fleetHost) handleHostRename(_ context.Context, _ *requestContext, raw j
 	res, err := f.hostResult(h.HostID)
 	f.changed()
 	return res, err
+}
+
+func labelsOrEmpty(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// handleHostLabels merges set pairs into and removes keys from the host's
+// operator labels; with neither it only reads them.
+func (f *fleetHost) handleHostLabels(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	const method = "fleet.host.labels"
+	var p fleetHostLabelsParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &rpcCodeError{code: codeInvalid, msg: method + ": invalid params: " + err.Error(), err: err}
+	}
+	h, err := f.resolveHost(method, p.ref())
+	if err != nil {
+		return nil, err
+	}
+	labels := labelsOrEmpty(h.Labels)
+	if len(p.Set) > 0 || len(p.Remove) > 0 {
+		for k, v := range p.Set {
+			labels[k] = v
+		}
+		for _, k := range p.Remove {
+			delete(labels, k)
+		}
+		if err := registry.ValidateLabels(labels); err != nil {
+			return nil, &rpcCodeError{code: codeInvalid, msg: method + ": " + err.Error(), err: err}
+		}
+		if err := f.opts.Registry.SetLabels(h.HostID, labels); err != nil {
+			return nil, fleetHostError(method, err)
+		}
+		f.changed()
+	}
+	return fleetHostLabelsResult{Host: h.Alias, HostID: h.HostID, Labels: labels}, nil
 }
 
 func (f *fleetHost) handleHostGrant(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {

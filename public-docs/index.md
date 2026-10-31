@@ -24,14 +24,19 @@ agent is doing and what it costs.
 
 - [Getting started](getting-started.md): install smind, start the daemon, create your first workspace and task.
 - [Providers](providers.md): connect Claude, Codex, GLM and Kimi accounts.
+- [Provider recipes](provider-recipes.md): add a login for Z.AI, DeepSeek, OpenRouter or a local model server from a built-in template.
+- [Write-only secrets](write-only-secrets.md): how provider keys are stored, what you can see afterwards and what is not protected.
 - [Workspaces and tasks](workspaces-and-tasks.md): the daily workflow, chats, attachments and the queue.
 - [Git and pull requests](git-and-prs.md): branches, publishing, updating from base and opening pull requests.
 - [Mobile and relay pairing](mobile-and-relay.md): pair a phone, what end-to-end encryption protects, push notifications.
 - [Orchestration](orchestration.md): run a Lead that launches Peers, with budgets, alerts and permission rules.
+- [The validator seat and review rows](validator-and-review.md): a fresh-context check of a commit against a contract, and its verdicts in the inbox.
 - [Inbox](inbox.md): one list of permissions, validator verdicts and stalled work that need you, on the web and on a phone.
 - [Scripting and permissions](scripting-and-permissions.md): drive agents from scripts, permission modes, the MCP server.
+- [Permission policy](permission-policy.md): answer routine permission requests from a file, with a fixed floor of always-denied commands.
 - [Run the daemon](running-the-daemon.md): run it as a service, reach it from other devices, Docker, updates, backups.
 - [Usage and limits](usage-and-limits.md): what your accounts have used and what happens at a rate limit.
+- [Z.AI usage meter](zai-usage-meter.md): the 5-hour and weekly windows of a Z.AI coding plan.
 - [CLI reference](cli-reference.md): every `smind` command.
 - [Troubleshooting](troubleshooting.md): fix a daemon that will not start, login problems and reconnects.
 - [Configuration reference](configuration.md): the keys in `config.yaml` and their defaults.

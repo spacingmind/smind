@@ -180,7 +180,7 @@ try {
 
     Step 'a password-protected daemon (P4) still runs under the task, with no secret on any command line'
     $secret = 'correct-horse-battery-staple'
-    & $Exe config set server.listen "0.0.0.0:$Port"
+    & $Exe config set server.listen "127.0.0.1:$Port"
     Check ($LASTEXITCODE -eq 0) 'smind config set server.listen failed'
     $secret | & $Exe set-password --password-stdin
     Check ($LASTEXITCODE -eq 0) 'smind set-password failed'
