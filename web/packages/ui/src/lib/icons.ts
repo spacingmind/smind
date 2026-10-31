@@ -40,7 +40,6 @@ import {
   CircleMinus,
   CirclePlay,
   CircleQuestionMark,
-  ClipboardCheck,
   ClipboardPaste,
   Clock,
   Code,
