@@ -87,7 +87,7 @@ type inflightRequest struct {
 // by its own request id) the same way internal/wsapi/conn.go's conn does
 // server-side. Safe for concurrent use.
 type Client struct {
-	ws      *websocket.Conn
+	conn    msgConn
 	writeMu sync.Mutex
 
 	mu       sync.Mutex
@@ -101,6 +101,40 @@ type Client struct {
 	done chan struct{}
 
 	nextID atomic.Uint64
+}
+
+// Transport is any message-oriented connection a Client can run over; it has
+// the shape of wsapi.Transport and the relay's data connection.
+type Transport interface {
+	Receive() ([]byte, error)
+	Send([]byte) error
+	Close() error
+}
+
+// msgConn is the Client's view of its connection: whole messages in, whole
+// messages out. wsConn adapts a gorilla websocket, trConn a Transport.
+type msgConn interface {
+	read() ([]byte, error)
+	write([]byte) error
+	close() error
+}
+
+type wsConn struct{ ws *websocket.Conn }
+
+func (w wsConn) read() ([]byte, error) { _, d, err := w.ws.ReadMessage(); return d, err }
+func (w wsConn) write(d []byte) error  { return w.ws.WriteMessage(websocket.TextMessage, d) }
+func (w wsConn) close() error          { return w.ws.Close() }
+
+type trConn struct{ tr Transport }
+
+func (t trConn) read() ([]byte, error) { return t.tr.Receive() }
+func (t trConn) write(d []byte) error  { return t.tr.Send(d) }
+func (t trConn) close() error          { return t.tr.Close() }
+
+// NewFromTransport serves the wsapi protocol over tr and starts the read
+// loop, like Dial does for a websocket. Closing the Client closes tr.
+func NewFromTransport(tr Transport) *Client {
+	return start(trConn{tr})
 }
 
 // Dial connects to ws://addr/ws?token=token and starts serving it. The
@@ -142,9 +176,11 @@ func DialURL(ctx context.Context, rawURL string, header http.Header, tlsConfig *
 }
 
 // newClient wraps an established connection and starts its read loop.
-func newClient(ws *websocket.Conn) *Client {
+func newClient(ws *websocket.Conn) *Client { return start(wsConn{ws}) }
+
+func start(conn msgConn) *Client {
 	c := &Client{
-		ws:       ws,
+		conn:     conn,
 		inflight: make(map[string]*inflightRequest),
 		done:     make(chan struct{}),
 	}
@@ -156,7 +192,7 @@ func newClient(ws *websocket.Conn) *Client {
 // fails with a transport error; a request that already received its
 // terminal response is unaffected.
 func (c *Client) Close() error {
-	return c.ws.Close()
+	return c.conn.close()
 }
 
 // Done returns a channel that is closed once the connection has died
@@ -267,7 +303,7 @@ func decodeTerminal(env envelope, out any) error {
 
 func (c *Client) readLoop() {
 	for {
-		_, data, err := c.ws.ReadMessage()
+		data, err := c.conn.read()
 		if err != nil {
 			c.failAll(err)
 			return
@@ -325,7 +361,7 @@ func (c *Client) send(env envelope) error {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	return c.ws.WriteMessage(websocket.TextMessage, data)
+	return c.conn.write(data)
 }
 
 func marshalOrNull(v any) json.RawMessage {
