@@ -33,6 +33,7 @@ export const PALETTE_GROUP_ICON: Record<string, IconName> = {
   Commands: "terminal",
   Settings: "settings",
   Agents: "agent",
+  Plugins: "plugin",
 };
 
 export function iconForGroup(group: string): IconName {
