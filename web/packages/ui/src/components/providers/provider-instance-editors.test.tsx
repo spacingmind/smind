@@ -126,7 +126,11 @@ describe("ProviderInstanceEditors", () => {
   });
 
   it("toggling inherit keeps an unsaved models draft", async () => {
-    setup(claudeInstance({ models: [{ id: "m-a" }] }));
+    const instance = { models: [{ id: "m-a" }] };
+    const info = claudeInstance(instance);
+    const d = new FakeUsageDaemon([]);
+    d.providers = { providers: [info] };
+    const view = renderWithDaemon(<ProviderInstanceEditors info={info} hasClient />, d);
     fireEvent.click(screen.getByTestId("instance-mode-add"));
     fireEvent.change(screen.getByTestId("instance-model-input"), { target: { value: "m-c" } });
     fireEvent.click(screen.getByTestId("instance-model-add"));
@@ -134,6 +138,10 @@ describe("ProviderInstanceEditors", () => {
       fireEvent.click(screen.getByTestId("instance-inherit-switch"));
     });
     await flush();
+    // The landed save re-reads provider.list: the same instance with the flag added.
+    const refreshed = claudeInstance({ ...instance, inheritClaudeConfig: true });
+    view.rerenderWith(d, <ProviderInstanceEditors info={refreshed} hasClient />);
+    expect(screen.getByTestId("instance-inherit-switch")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("instance-model-row-m-c")).toBeInTheDocument();
     expect(screen.getByTestId("instance-models-save")).toBeEnabled();
     expect(screen.getByTestId("instance-mode-add")).toHaveAttribute("aria-checked", "true");
