@@ -421,18 +421,101 @@ func checkSetup(_ context.Context, _ *repo, o Options) Finding {
 	return fnd("setup-script", title, false, "no setup script on the workspace", fix)
 }
 
-// ignores reports whether a .gitignore line list covers the name.
-func ignores(lines []string, name string) bool {
-	for _, l := range lines {
-		l = strings.Trim(strings.TrimSpace(l), "/")
-		if l == "" || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "!") {
-			continue
-		}
-		if ok, _ := path.Match(l, name); ok {
-			return true
+type ignoreRule struct {
+	re      *regexp.Regexp
+	neg     bool
+	dirOnly bool
+}
+
+// globRegexp turns a gitignore glob (leading "/" already stripped) into an
+// anchored regexp; nil if it does not compile.
+func globRegexp(p string, anchored bool) *regexp.Regexp {
+	var b strings.Builder
+	b.WriteString("^")
+	i := 0
+	if strings.HasPrefix(p, "**/") {
+		b.WriteString("(?:.*/)?")
+		i = 3
+	} else if !anchored {
+		b.WriteString("(?:.*/)?")
+	}
+	for i < len(p) {
+		switch {
+		case strings.HasPrefix(p[i:], "/**/"):
+			b.WriteString("/(?:.*/)?")
+			i += 4
+		case p[i:] == "/**":
+			b.WriteString("/.*")
+			i += 3
+		case p[i] == '*':
+			b.WriteString("[^/]*")
+			i++
+		case p[i] == '?':
+			b.WriteString("[^/]")
+			i++
+		default:
+			b.WriteString(regexp.QuoteMeta(p[i : i+1]))
+			i++
 		}
 	}
-	return false
+	b.WriteString("$")
+	re, err := regexp.Compile(b.String())
+	if err != nil {
+		return nil
+	}
+	return re
+}
+
+func parseIgnore(lines []string) []ignoreRule {
+	var rules []ignoreRule
+	for _, l := range lines {
+		l = strings.TrimRight(strings.TrimSuffix(l, "\r"), " ")
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		var r ignoreRule
+		if r.neg = strings.HasPrefix(l, "!"); r.neg {
+			l = l[1:]
+		}
+		if r.dirOnly = strings.HasSuffix(l, "/"); r.dirOnly {
+			l = strings.TrimRight(l, "/")
+		}
+		anchored := strings.HasPrefix(l, "/") || strings.Contains(strings.TrimPrefix(l, "**/"), "/")
+		l = strings.TrimPrefix(l, "/")
+		if l == "" {
+			continue
+		}
+		if r.re = globRegexp(l, anchored); r.re != nil {
+			rules = append(rules, r)
+		}
+	}
+	return rules
+}
+
+// ignoreEval reports whether candidate p is ignored; the last matching rule wins.
+func ignoreEval(rules []ignoreRule, p string, isDir bool) bool {
+	ignored := false
+	for _, r := range rules {
+		if r.dirOnly && !isDir {
+			continue
+		}
+		if r.re.MatchString(p) {
+			ignored = !r.neg
+		}
+	}
+	return ignored
+}
+
+// ignores reports whether .gitignore lines cover the root-level directory
+// name, directly or by ignoring everything inside it (dist/*, dist/**).
+func ignores(lines []string, name string) bool {
+	rules := parseIgnore(lines)
+	return ignoreEval(rules, name, true) || ignoreEval(rules, name+"/x", false)
+}
+
+// ignoresFile reports whether the lines cover the root-level file name.
+func ignoresFile(lines []string, name string) bool {
+	return ignoreEval(parseIgnore(lines), name, false)
 }
 
 func checkGitignore(_ context.Context, r *repo, _ Options) Finding {
@@ -444,7 +527,7 @@ func checkGitignore(_ context.Context, r *repo, _ Options) Finding {
 	}
 	lines := strings.Split(txt, "\n")
 	var missing []string
-	if !ignores(lines, ".env") {
+	if !ignoresFile(lines, ".env") {
 		missing = append(missing, ".env")
 	}
 	if r.isFile("package.json") && !ignores(lines, "node_modules") {

@@ -151,3 +151,73 @@ func TestTestCommand_WorkspacePackages(t *testing.T) {
 		})
 	}
 }
+
+func TestIgnores_Gitignore(t *testing.T) {
+	tests := []struct {
+		lines string
+		name  string
+		file  bool
+		want  bool
+	}{
+		{".env", ".env", true, true},
+		{".env*\n!.env.example", ".env", true, true},
+		{".env\n!.env", ".env", true, false},
+		{".env.*\n!.env.example", ".env", true, false},
+		{"*.env", ".env", true, true},
+		{"# .env", ".env", true, false},
+		{"node_modules", "node_modules", false, true},
+		{"node_modules/", "node_modules", false, true},
+		{"/node_modules", "node_modules", false, true},
+		{"**/node_modules", "node_modules", false, true},
+		{"web/node_modules/", "node_modules", false, false},
+		{"dist/**", "dist", false, true},
+		{"dist/*", "dist", false, true},
+		{"/dist", "dist", false, true},
+		{"dist/", "dist", false, true},
+		{"dist\n!dist", "dist", false, false},
+		{"build/**\n!build/keep", "build", false, true},
+		{"out ", "out", false, true},
+		{"*.log", "dist", false, false},
+		{"target\r\n", "target", false, true},
+	}
+	for _, tc := range tests {
+		t.Run(strings.ReplaceAll(tc.lines, "\n", "|")+"/"+tc.name, func(t *testing.T) {
+			lines := strings.Split(tc.lines, "\n")
+			got := ignores(lines, tc.name)
+			if tc.file {
+				got = ignoresFile(lines, tc.name)
+			}
+			if got != tc.want {
+				t.Fatalf("ignores(%q, %q) = %v, want %v", tc.lines, tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCheckGitignore_Layouts(t *testing.T) {
+	tests := []struct {
+		name            string
+		files           map[string]string
+		wantStatus      string
+		wantEvidenceSub string
+	}{
+		{"landing", map[string]string{"package.json": "{}", ".gitignore": "node_modules\n.pnp\n\ndist\nbuild\n*.tsbuildinfo\n\n.env\n.env*.local\n"}, StatusPass, ""},
+		{"smind", map[string]string{"go.mod": "module x\n", ".gitignore": "bin/\n/fakeagent\nweb/node_modules/\ninternal/server/dist/*\n!internal/server/dist/.gitkeep\n.env\n.env.*\n!.env.example\n"}, StatusPass, ""},
+		{"missing env", map[string]string{"package.json": "{}", ".gitignore": "*.log\n"}, StatusWarn, ".env"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for rel, body := range tc.files {
+				put(t, dir, rel, body)
+			}
+			f := byID(Check(context.Background(), dir, Options{}))["gitignore"]
+			if f.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q (evidence %q)", f.Status, tc.wantStatus, f.Evidence)
+			}
+			if !strings.Contains(f.Evidence, tc.wantEvidenceSub) {
+				t.Fatalf("evidence = %q, want substring %q", f.Evidence, tc.wantEvidenceSub)
+			}
+		})
+	}
+}
