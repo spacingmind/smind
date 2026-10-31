@@ -105,11 +105,24 @@ export function usePluginActionRunner({ pluginId, panelId }: { pluginId: string;
           if (typeof action.panel !== "string" || action.panel === "") return;
           openPanel(pluginId, action.panel, action.context);
           return;
-        case "openUrl":
-          // Never opened directly: the caller confirms the host first.
-          if (typeof action.url !== "string" || typeof action.host !== "string" || action.url === "") return;
-          setPendingUrl({ url: action.url, host: action.host });
+        case "openUrl": {
+          // Never opened directly: the caller confirms the host first. The
+          // document's `host` field is untrusted -- the host shown (and
+          // confirmed) is derived from the url itself, and only a clean
+          // http(s) url with no embedded credentials may ask at all.
+          if (typeof action.url !== "string" || action.url === "") return;
+          let parsed: URL;
+          try {
+            parsed = new URL(action.url);
+          } catch {
+            return;
+          }
+          if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || parsed.username !== "" || parsed.password !== "") {
+            return;
+          }
+          setPendingUrl({ url: action.url, host: parsed.host });
           return;
+        }
         default:
           return;
       }

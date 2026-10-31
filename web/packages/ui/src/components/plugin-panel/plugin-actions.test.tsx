@@ -128,6 +128,38 @@ describe("plugin panel actions", () => {
     expect(screen.queryByTestId("plugin-openurl-confirm")).toBeNull();
   });
 
+  it("openUrl-ignores-non-http-schemes", async () => {
+    renderPane({
+      doc: docWith([
+        { type: "button", label: "Js", action: { kind: "openUrl", url: "javascript:alert(1)", host: "example.com" } },
+        { type: "button", label: "File", action: { kind: "openUrl", url: "file:///etc/passwd", host: "example.com" } },
+        { type: "button", label: "Creds", action: { kind: "openUrl", url: "https://user:pw@example.com/", host: "example.com" } },
+      ]),
+    });
+    await flush();
+
+    for (const label of ["Js", "File", "Creds"]) {
+      await click(screen.getByRole("button", { name: label }));
+      expect(screen.queryByTestId("plugin-openurl-confirm")).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    }
+    expect(openExternalUrl).not.toHaveBeenCalled();
+  });
+
+  it("openUrl-host-comes-from-the-url", async () => {
+    renderPane({
+      doc: docWith([
+        { type: "button", label: "Open", action: { kind: "openUrl", url: "https://real.example/x", host: "fake.example" } },
+      ]),
+    });
+    await flush();
+
+    await click(screen.getByRole("button", { name: "Open" }));
+    const dialog = screen.getByTestId("plugin-openurl-confirm");
+    expect(dialog.textContent).toContain("real.example");
+    expect(dialog.textContent).not.toContain("fake.example");
+  });
+
   it("rpc action calls plugin.call and refreshes the panel", async () => {
     const { client } = renderPane();
     await flush();
