@@ -2,7 +2,7 @@
 title: CLI reference
 description: Every smind command, with the usage text the binary prints.
 summary: "This page lists every command of the smind binary, the daemon and command line of sMind by Spacing Mind, with the usage text the binary prints. It is for people who script or operate smind from a terminal."
-order: 9
+order: 10
 ---
 
 # CLI reference
@@ -104,6 +104,9 @@ Usage:
 
   smind push test [<device id prefix>]                    send a test notification to phones registered for push
 
+  smind cooldown ls                                       list providers cooling down after a rate limit
+  smind cooldown clear <provider>                         I reset my quota: clear a provider cooldown, retry held runs now (humans only)
+
   smind update [--check] [--version <v>] [--force]        update this binary to the latest release (SHA-256 verified)
       [--dry-run] [--json]                                 --check only reports; refuses while runs are active unless --force
 
@@ -112,6 +115,14 @@ WebSocket API, authenticating with the token the daemon itself wrote to
 ~/.smind/token (override the home directory with $SMIND_HOME).
 ```
 <!-- END GENERATED: smind --help -->
+
+### cooldown
+
+After a rate limit the daemon holds a provider cooldown until the parsed
+reset time and keeps `--on-rate-limit=wait` retries waiting until then.
+`smind cooldown ls` shows which providers are still cooling down and when
+they reset. When you reset your quota by hand, `smind cooldown clear
+<provider>` clears the cooldown and retries the held runs now (humans only).
 
 ## Relay
 

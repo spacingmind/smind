@@ -2,7 +2,7 @@
 title: Scripting and permissions
 description: Drive agents from the command line, choose permission modes, and connect other tools over MCP.
 summary: "This page explains how to script sMind by Spacing Mind from the command line, choose permission modes for agents, and use the built-in MCP server. It is for developers automating agent work."
-order: 14
+order: 15
 ---
 
 # Scripting and permissions
@@ -89,6 +89,53 @@ Turning on auto-approval needs a person at a terminal: the command asks you
 to type `yes`. This is a speed bump, not a lock. Every client of the daemon
 holds the same token, so the real boundary against an agent that can run
 shell commands as you is the provider's own permission mode or sandbox.
+
+## A standing permission policy (optional)
+
+Off by default. If you turn it on, smind can answer the routine permission
+requests of your agents from a file you write, so you only read the requests
+that need a person. No model is involved: the daemon compares each request with
+your rules.
+
+1. Create the file: `smind policy init` writes `~/.smind/steward/policy.yaml`
+   with every example commented out and no active allow rule. It refuses to
+   overwrite an existing file.
+2. Add the rules you want. Edit the file by hand; nothing in smind, no agent and
+   no relay session can write it.
+3. Turn the engine on with `steward.policy.enabled: true` in `config.yaml`. The
+   daemon reads the file again whenever it changes, with no restart.
+
+How a request is decided:
+
+- A request nothing allows is **asked**, exactly as without the policy. If
+  nobody answers within 5 minutes it is denied.
+- `deny` beats `ask`, and `ask` beats `allow`, whatever the order in the file.
+- A command is split into its simple commands. An `allow` needs a rule for every
+  one of them; anything smind cannot parse with certainty (an unbalanced quote,
+  `eval`, `bash -c "$x"`, process substitution) is asked.
+- Paths are resolved through symlinks before they are compared with a rule's
+  `paths.within`.
+- A short list of commands is always denied, whatever your file says: `git
+  stash`, force pushes, merging or releasing, anything that touches your smind
+  home or the daemon's port, killing processes, secret dumps, writes outside the
+  task worktree, `curl | sh`, pointing a test's `HOME` at your real home, and
+  `git add -A`. The denial names the rule.
+- If the file is invalid, smind applies only that fixed list and asks about
+  everything else.
+
+Every decision is recorded in an audit log that you can read and that smind
+keeps for 90 days. Commands are shown with secrets masked and heredoc bodies
+left out.
+
+```sh
+smind policy show            # validity and the rules in force
+smind policy test "git push origin my-branch"   # explain a decision, no side effects
+smind policy audit           # recent decisions (--json for scripts)
+```
+
+This does not narrow a provider mode that already approves everything
+(`bypassPermissions`, `--auto-accept`): those requests never reach smind. It is
+a convenience for your own routine commands, not a sandbox.
 
 ## Connect other tools over MCP
 

@@ -19,8 +19,10 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { useRunProviderTest } from "@/hooks/use-accounts";
 import { useAccountRows } from "@/hooks/use-account-rows";
+import { useClearProviderCooldown, activeCooldownUntil } from "@/hooks/use-clear-provider-cooldown";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProviderHealth } from "@/hooks/use-provider-health";
+import { Icons } from "@/lib/icons";
 import { useProvidersViewStore } from "@/stores/providers-view-store";
 import { queryKeys } from "@/lib/query-keys";
 import type { WsClient } from "@/lib/ws-client";
@@ -76,6 +78,7 @@ export function ProviderDetail({
   const { providersOrFallback: providers } = useProviderCatalog();
   const { rows } = useAccountRows();
   const { runTest, isTesting } = useRunProviderTest();
+  const { clear: clearCooldown, pendingId: clearCooldownPending } = useClearProviderCooldown();
   const queryClient = useQueryClient();
   const { health, ensure, rpcFailed } = useProviderHealth();
   // Run readiness is provider-id based; ensure() is single-flight and cached, so asking on mount is safe.
@@ -122,6 +125,9 @@ export function ProviderDetail({
   // Runs on these providers use the CLI's own login, not an smind account.
   const usesCliLogin = info !== null && (info.kind === "cli" || info.extends !== undefined || proxyConsumer);
   const onConnected = () => void queryClient.invalidateQueries({ queryKey: queryKeys.accountList() });
+  // The cooldown line re-evaluates every render; provider.updated (published when a cooldown clears or lapses) re-reads provider.list.
+  const now = new Date();
+  const cooldownUntil = activeCooldownUntil(providers.find((p) => p.id === item.id), now);
 
   return (
     <div data-testid="provider-detail" className="flex flex-col gap-3 p-4">
@@ -158,6 +164,23 @@ export function ProviderDetail({
             failed={rpcFailed.has(item.id)}
             usesCliLogin={usesCliLogin}
           />
+        ) : null}
+        {cooldownUntil ? (
+          <p data-testid={`provider-cooldown-${item.id}`} className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
+            <Icons.time aria-hidden className="size-3.5 text-foreground-muted" />
+            {`Rate limited until ${cooldownUntil.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="ml-1"
+              data-testid={`provider-clear-cooldown-${item.id}`}
+              disabled={clearCooldownPending === item.id}
+              onClick={() => void clearCooldown(item.id)}
+            >
+              I reset my quota, retry now
+            </Button>
+          </p>
         ) : null}
       </div>
 

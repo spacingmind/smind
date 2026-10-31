@@ -54,6 +54,20 @@ type PermissionDetail struct {
 	// GitRule is set when an execute command contains a non-read-only
 	// git/gh operation (see ClassifyGitCommand).
 	GitRule *GitRuleInfo `json:"gitRule,omitempty"`
+	// Policy is set by internal/runs when the permission policy engine
+	// decided or escalated the request (ADR-0047 §2): the matched rule
+	// (or floor) id, its why, and the normalised, heredoc-elided command,
+	// so the card can show what matched instead of a bare command line.
+	Policy *PolicyInfo `json:"policy,omitempty"`
+}
+
+// PolicyInfo is the policy engine's footprint on a permission request
+// (ADR-0047 §2): what matched and the normalised target it judged.
+type PolicyInfo struct {
+	RuleID     string `json:"ruleId,omitempty"`
+	Why        string `json:"why,omitempty"`
+	Normalized string `json:"normalized,omitempty"`
+	Action     string `json:"action,omitempty"`
 }
 
 // BuildPermissionDetail derives a PermissionDetail from an ACP permission

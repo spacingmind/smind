@@ -68,3 +68,12 @@ Web: `readiness-panel.test.tsx` (loading, findings, error, Re-check re-calls the
 - `task lint`, `tsc -b`, `go test -race` on readiness, wsapi, workspace, cmd/smind pass. Full vitest: 3898 pass; `open-in-editor.test.tsx` failed 3 tests once under load and passes alone (8/8).
 
 Not done: mobile; any web mutation run; no live LLM calls were made.
+
+## Dogfood pass (workspace 4 "smind (Mac)", 2026-10-31)
+
+Ran `smind workspace readiness` on the smind repo itself: 7 pass, 2 warn, 1 info.
+
+- `gitignore` warned (".gitignore does not ignore: .env"). Fixed in this repo: `.env`, `.env.*` ignored, `.env.example|sample|template` kept. Re-run against the branch (temporary `Check` call on the worktree path, `Options{}`): `gitignore` flips from warn to pass; with the old `.gitignore` restored it warns again (the mutation).
+- `setup-script` still warns: it is a workspace setting (the record's setup script), not repo content. Human action, no repo change.
+
+Follow-ups noticed in the check itself (not fixed here): `lint-command` accepts a `check-types` script as lint (type-checking is not linting); `lockfiles` only looks at the repo root, so nested `web/bun.lock` is not seen; `ignores` skips negations and nested-path globs.

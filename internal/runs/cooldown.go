@@ -65,6 +65,34 @@ func (reg *Registry) ProviderCooldowns() map[string]time.Time {
 	return m
 }
 
+// ClearProviderCooldown is the human's "I reset my quota, retry now"
+// action: drop provider's cooldown row and release every held rate-limit
+// retry of that provider, delivering them at once. cleared reports whether
+// a cooldown row was removed, woken the number of released retries. Safe to
+// call twice: the second call clears nothing and wakes nobody. Holds no
+// locks, so DeliverQueued can be called at the end.
+func (reg *Registry) ClearProviderCooldown(provider string) (cleared bool, woken int, err error) {
+	cleared, err = reg.st.ClearProviderCooldown(provider)
+	if err != nil {
+		return false, 0, fmt.Errorf("runs: clear provider cooldown for %s: %w", provider, err)
+	}
+	chats, err := reg.st.ReleaseHeldRetries(provider, time.Now())
+	if err != nil {
+		return false, 0, fmt.Errorf("runs: release held retries for %s: %w", provider, err)
+	}
+	seen := map[int64]bool{}
+	for _, chatID := range chats {
+		if !seen[chatID] {
+			seen[chatID] = true
+			reg.notifyQueueUpdated(chatID)
+		}
+	}
+	if len(chats) > 0 {
+		reg.DeliverQueued()
+	}
+	return cleared, len(chats), nil
+}
+
 // nonHumanSend reports whether a StartWhenBusy caller is not a human at the
 // keyboard: a non-human source, or any task/chat provenance (a profile send
 // carries from ids even when its source is human).

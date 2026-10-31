@@ -938,6 +938,11 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		}
 	}
 
+	if spec.Thinking == "hidden" {
+		// The endpoint cannot turn thinking off, so no thinking Option at
+		// all: preserve the SDK's default argv exactly.
+		thinkingLevel = ThinkingLevelUnspecified
+	}
 	switch thinkingLevel {
 	case ThinkingLevelOff:
 		opts = append(opts, claudecode.WithDisabledThinking())
@@ -1012,6 +1017,13 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 			claudecode.WithPermissionPolicy(r.claudePermissionPolicy),
 			claudecode.WithPermissionPromptTool(claudePermissionPromptTool))
 	}
+	// The private CLAUDE_CONFIG_DIR of a compatible-endpoint instance goes
+	// before the launch env so a pinned value there still wins.
+	configDirEnv, err := r.claudeConfigDirEntries(spec, provider)
+	if err != nil {
+		return fmt.Errorf("taskrunner: %w", err)
+	}
+	env = append(env, configDirEnv...)
 	// The configured launch env goes last so it wins over the daemon's own
 	// environment and everything above.
 	providerEnv, err := r.launchEnvEntries(provider)

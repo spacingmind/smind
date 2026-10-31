@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -214,5 +215,42 @@ func TestCooldown_ModelScopedWindowSetsNone(t *testing.T) {
 		if _, ok, _ := st.GetProviderCooldown("glm", time.Now()); ok != tc.want {
 			t.Fatalf("%s: cooldown set = %v, want %v", tc.typ, ok, tc.want)
 		}
+	}
+}
+
+// TestRateLimit_InstanceCooldownLeavesBaseRunning: a claude-native instance
+// profiled as vendor zai classifies a GLM-worded 429 by its vendor profile,
+// so the cooldown lands on the instance id only -- the base login keeps
+// running. Mutates providers.Default(), so no t.Parallel.
+func TestRateLimit_InstanceCooldownLeavesBaseRunning(t *testing.T) {
+	if err := providers.Default().Register(providers.Spec{ID: "zai-t", Extends: providers.IDClaudeNative, Vendor: providers.VendorZAI}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { providers.Default().Unregister("zai-t") })
+
+	// GLM-worded 429 with a dated reset ~2h out, printed on the UTC+8 clock.
+	text := "429 Usage limit reached for 5 hour. Your limit will reset at " +
+		time.Now().Add(2*time.Hour).In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05")
+
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	reg := newTestRegistry(t, st)
+	now := time.Now().UTC()
+	if _, err := st.CreateRun(store.Run{ID: "cd-inst", TaskID: task.ID, Provider: "zai-t", Prompt: "p", Status: "running", StartedAt: now}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	r := registerTestRun(reg, "cd-inst")
+	r.taskID, r.provider, r.prompt = task.ID, taskrunner.Provider("zai-t"), "p"
+	reg.finish(r, errors.New(text))
+
+	if _, status, _ := reg.History("cd-inst"); status.FailureKind != "rate_limited" || status.FailureWindow != "5h" || status.FailureResetAt == nil {
+		t.Fatalf("status = %+v, want a classified GLM 5h rate limit with a reset", status)
+	}
+	cool := reg.ProviderCooldowns()
+	if _, ok := cool["zai-t"]; !ok {
+		t.Fatalf("ProviderCooldowns = %v, want an entry for zai-t", cool)
+	}
+	if _, ok := cool[providers.IDClaudeNative]; ok {
+		t.Fatalf("ProviderCooldowns = %v, want no entry for %s", cool, providers.IDClaudeNative)
 	}
 }

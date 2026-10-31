@@ -25,6 +25,7 @@ type persistedEvent struct {
 	PermissionOptions    []taskrunner.PermissionOption   `json:"permissionOptions,omitempty"`
 	PermissionOptionID   string                          `json:"permissionOptionId,omitempty"`
 	PermissionResolution taskrunner.PermissionResolution `json:"permissionResolution,omitempty"`
+	PermissionRuleID     string                          `json:"permissionRuleId,omitempty"`
 	PermissionDetail     *taskrunner.PermissionDetail    `json:"permissionDetail,omitempty"`
 	ToolCallID           string                          `json:"toolCallId,omitempty"`
 	ToolName             string                          `json:"toolName,omitempty"`
@@ -48,6 +49,7 @@ func encodeEvent(e Event) (string, error) {
 		PermissionOptions:    e.PermissionOptions,
 		PermissionOptionID:   e.PermissionOptionID,
 		PermissionResolution: e.PermissionResolution,
+		PermissionRuleID:     e.PermissionRuleID,
 		PermissionDetail:     e.PermissionDetail,
 		ToolCallID:           e.ToolCallID,
 		ToolName:             e.ToolName,
@@ -84,6 +86,7 @@ func decodeEvent(data string) (Event, error) {
 		PermissionOptions:    p.PermissionOptions,
 		PermissionOptionID:   p.PermissionOptionID,
 		PermissionResolution: p.PermissionResolution,
+		PermissionRuleID:     p.PermissionRuleID,
 		PermissionDetail:     p.PermissionDetail,
 		ToolCallID:           p.ToolCallID,
 		ToolName:             p.ToolName,

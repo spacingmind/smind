@@ -135,6 +135,21 @@ type ProviderInfo struct {
 	// Harness is the engine kind (ADR-0046): "claude-code",
 	// "codex-app-server" or "acp"; Runner's value under its ADR name (additive).
 	Harness string `json:"harness,omitempty"`
+
+	// Recipe names the catalog recipe an instance was made from, and the
+	// fields below it describe that recipe (internal/providers): Vendor is
+	// the rate-limit profile, Thinking whether the endpoint can turn
+	// thinking off ("supported" | "hidden"; claude-code only), EndpointKind
+	// the wire protocol it speaks ("anthropic", ...), Notes the recipe's
+	// caveats and Unverified whether its row was never re-verified. All are
+	// additive wire fields, empty for an entry with no Recipe (except
+	// Thinking, set for every claude-code provider).
+	Recipe       string   `json:"recipe,omitempty"`
+	EndpointKind string   `json:"endpointKind,omitempty"`
+	Thinking     string   `json:"thinking,omitempty"`
+	Notes        []string `json:"notes,omitempty"`
+	Unverified   bool     `json:"unverified,omitempty"`
+	Vendor       string   `json:"vendor,omitempty"`
 }
 
 // SupportedProviders lists the registered providers (internal/providers,
@@ -168,7 +183,37 @@ func infoFromSpec(s providers.Spec) ProviderInfo {
 	}
 	info.Modes, info.DefaultMode = staticModes(s)
 	info.Models = staticModels(s)
+	applyRecipeFields(&info, s)
 	return info
+}
+
+// applyRecipeFields fills info's recipe-derived additive fields from spec
+// and the recipe catalog: Thinking for every claude-code provider (clients
+// hide the control on "hidden"), and Recipe/Vendor/EndpointKind/Notes/
+// Unverified only for an instance that names a Recipe. The endpoint-kind
+// fallback reads the instance's own launch env (spec.Env) -- the value a
+// recipe instance is registered with.
+func applyRecipeFields(info *ProviderInfo, spec providers.Spec) {
+	if spec.Harness() == providers.HarnessClaudeCode {
+		info.Thinking = "supported"
+		if spec.Thinking == "hidden" {
+			info.Thinking = "hidden"
+		}
+	}
+	if spec.Recipe == "" {
+		return
+	}
+	info.Recipe = spec.Recipe
+	info.Vendor = spec.Vendor
+	if spec.Endpoint.Kind != "" {
+		info.EndpointKind = string(spec.Endpoint.Kind)
+	} else if spec.Harness() == providers.HarnessClaudeCode && spec.Env["ANTHROPIC_BASE_URL"] != "" {
+		info.EndpointKind = "anthropic"
+	}
+	if recipe, ok := providers.RecipeByID(spec.Recipe); ok {
+		info.Notes = recipe.Notes
+		info.Unverified = recipe.IsUnverified()
+	}
 }
 
 // ProviderInfoFor returns the registered entry for provider, and false for

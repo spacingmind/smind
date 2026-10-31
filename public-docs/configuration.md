@@ -2,7 +2,7 @@
 title: Configuration reference
 description: The user-facing keys of config.yaml and their defaults.
 summary: "This page documents the user-facing keys of config.yaml for sMind by Spacing Mind, where the file lives and the default of each key. It is for people who tune or operate the daemon."
-order: 11
+order: 12
 ---
 
 # Configuration reference
@@ -164,6 +164,12 @@ With `plugins.allowRemoteManage` off, those actions need a loopback connection.
 A same-host reverse proxy that terminates TLS counts as loopback. Paired
 phones (the relay) and agents cannot manage plugins whatever this is set to.
 See [Plugins](plugins.md).
+
+### steward
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `steward.policy.enabled` | `false` | Turn on the standing permission policy in `~/.smind/steward/policy.yaml` (see [Scripting and permissions](scripting-and-permissions.md#a-standing-permission-policy-optional)). Read on every decision. |
 
 ### learning
 

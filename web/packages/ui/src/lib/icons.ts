@@ -102,6 +102,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Square,
+  SquarePen,
   Sparkles,
   Star,
   Sun,
@@ -124,6 +125,8 @@ export type IconComponent = LucideIcon;
 export const Icons = {
   // --- actions
   add: Plus,
+  /** New task quick action (sidebar). */
+  newTask: SquarePen,
   close: X,
   check: Check,
   checkAll: CheckCheck,

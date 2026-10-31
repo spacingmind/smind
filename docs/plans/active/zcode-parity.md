@@ -123,9 +123,35 @@ one `--color-*` line from `@theme inline` (test 3); duplicate a row in the table
 
 ## Stage 2 — audit
 
-Run by a separate Lead. Its ranked diff list is pasted here when handed over.
+Audit run 2026-10-30 (ZCode web build ran for real, no model/account so no task
+page; smind from an isolated daemon with a scripted ACP stub). ZCode is only
+reachable at ≥1024px (its web build is not responsive), so 390 gives no parity
+targets. Ranked, most visible first (Size S/M/L; Kind C = component structure,
+T = token/class usage):
 
-<!-- ranked audit list: pending -->
+| # | Screen | What differs | Size | Area | Kind |
+|---|---|---|---|---|---|
+| 1 | Settings (every page) | ZCode: big H1 + subtitle, centred ~510px column on the shell background, rows are rounded-xl cards grouped with hairlines (label+desc left, control right). smind: tiny title in a header bar, flat rows, left-aligned in a wide bordered panel | L | settings | C |
+| 2 | Settings nav | ZCode: "Back to workspace" pill, grouped labels, selected = rounded-lg pill. smind: close, density/radius differ | S | settings | C/T |
+| 3 | Home / new-task landing | ZCode: greeting, project picker, big composer card. smind: blank "Select a task" | L | shell/composer | C |
+| 4 | Light shell frame | ZCode: grey shell, main pane a floating white rounded panel with soft shadow. smind: flush | M | shell+sidebar | T+C |
+| 5 | Command palette | ZCode: icon search, filter chips, groups, kbd hints. smind: flat lists | M | dialogs/menus | C |
+| 6 | Composer menus | ZCode: icon+title+description+check items. smind: dense, no descriptions | M | composer/menus | C |
+| 7 | Composer shell | similar card; toolbar IA differs | M | composer | C |
+| 8 | Sidebar structure | different IA by design; density and bottom bar deltas | L | shell+sidebar | C |
+| 9 | Shortcuts page | ZCode: table (Command / Keybinding chips / Scope / Actions), search with icon, Reset all. smind: list with text buttons | M | settings | C |
+| 10 | Empty states (MCP etc.) | ZCode: scope selector + search, dashed card with two buttons. smind: centred text + one button | S | settings | C |
+| 11 | Usage page | ZCode: stat strip in a rounded tray. smind: richer but flat | M | settings | C |
+| 12 | Settings form controls | ZCode: select with icon+chevron, number with suffix, switch, segmented only for small sets | S | settings | T/C |
+| 13 | Timeline tool cards | ZCode: bordered tool cards; smind: dense unbordered rows (needs a decision) | L | timeline | C |
+| 14 | Timeline plan update | smind shows "Unrecognised event: plan" (functional gap) | M | timeline | feature |
+| 15 | Assistant markdown | heading/inline-code spacing | S | timeline | T |
+| 16 | Window controls | P5 desktop chrome | M | other | C |
+| 17 | Banners / notices | different style | S | dialogs/menus | C |
+| 18 | Task header | not captured | ? | shell | ? |
+
+Suggested stage split: (1) settings: 1, 2, 9–12; (2) shell+sidebar: 4, 8, 16;
+(3) composer + home: 3, 6, 7, 17; (4) dialogs/menus: 5, 6; (5) timeline: 13–15.
 
 ## Stage 3 — component ports
 
@@ -133,6 +159,108 @@ One PR per area, in audit-rank order: shell+sidebar, timeline, composer,
 settings, dialogs/menus. Each: ACs + named tests per PR, light/dark frames at
 1280 and 390 including transition frames, shared stores/pickers and the icon
 registry reused. Filled once Stage 2 lands.
+
+## Stage 3a — Settings (audit 1, 2, 9–12)
+
+One PR. Reference-only (no ZCode source copied): a shared settings page shell
+and row-card primitives, applied to every settings page with no behaviour
+change (all `data-testid`s, store wiring and RPCs untouched).
+
+### References (ZCode files consulted, read-only)
+
+`refs/zcode/packages/ui/src/SettingsPage.tsx`, `settingsPageHelpers.tsx`,
+`settings/ShortcutSettingsSection.tsx`, `settings/McpSettingsSection.tsx`,
+`settings/UsageStatsSection.tsx`, `components/ui/{select,switch,input-group,kbd}.tsx`.
+
+### Acceptance criteria
+
+- **AC1** Settings content shows a large H1 (section label) with an optional
+  subtitle (registry `description`), in a centred column (`max-w-[510px]`
+  default, a `wide` opt-in for table-like pages), directly on the shell background (no
+  inner bordered frame). The header strip keeps the window drag region and
+  caption controls.
+- **AC2** `SettingsGroup` (rounded-xl bordered card, hairline between rows) and
+  `SettingsRow` (label + description left, control right; stacks below `sm`)
+  primitives exist and every settings page uses them for its controls.
+- **AC3** Nav: back-to-app pill, grouped labels, selected row = rounded-lg
+  pill; behaviour (aria-current, testids, narrow list/detail) unchanged.
+- **AC4** Shortcuts renders a table: Command / Keybinding (kbd chips) / Scope /
+  Actions, search with icon, "Reset all to defaults" when overrides exist; Change,
+  Record chord, Reset, conflict and capture behaviour unchanged.
+- **AC5** Empty states (MCP servers, plugins, skills, automations) use a dashed
+  `SettingsEmptyCard` with the existing actions.
+- **AC6** Usage stat tiles sit in a rounded tray; plan usage and token table stay
+  as is but card-wrapped.
+- **AC7** Controls: `Switch` primitive (36×20 pill) replaces bare checkboxes where
+  a boolean is toggled; select = 32px bordered with chevron; segmented
+  control kept for ≤3-option sets (Theme, font size).
+- **AC8** Light + dark frames at 1280 (and 390 where relevant), after-sheets in
+  the audit's pair format at `/tmp/steward4/zcode-audit/after/settings/`.
+- **AC9** `task lint` and `task test` green; one mutation per load-bearing test.
+
+### Named tests
+
+- `settings-layout.test.tsx`: `SettingsGroup renders rows with hairlines`,
+  `SettingsRow shows label, description and control`, `SettingsEmptyCard shows
+  actions`, `SettingsStatStrip renders every tile`
+- `switch.test.tsx`: `Switch toggles and reports checked state`, `Switch is
+  keyboard operable and disabled when asked`
+- `settings-screen.test.tsx`: `shows the section label as the page H1`,
+  `shows the registry description as a subtitle`
+- `shortcuts-section.test.tsx`: `renders Command, Keybinding, Scope and Actions
+  column headers`, `filters rows by search`, `Reset all appears only with
+  overrides`
+
+### Ported files and sources
+
+None: reference-only reimplementation.
+
+## Stage 3b — Shell + sidebar (audit 4, 8; 16 is Stage 5)
+
+One PR, reference-only (no ZCode source copied; `refs/zcode` was not on this machine,
+so the shape comes from the audit's ZCode frames). No behaviour change: workspace
+tree, status/stage views, unread/attention dots, drag, context menus, shortcuts,
+collapsed rail and the mobile drawer are untouched.
+
+### References (ZCode files consulted, read-only)
+
+Audit frames `zc_{light,dark}_1280_home` only (sources: `WorkspaceSidebar.tsx`,
+`WorkspaceSidebarFooter.tsx`, `project-sidebar/` as named in the audit).
+
+### Acceptance criteria
+
+- **AC1** Light theme: the content panel is a framed rounded panel (gap to the
+  window edge, 1px border, soft shadow) over the grey shell; dark theme and the
+  mobile/lights-bar layouts keep today's flush inset. The frame class set is one
+  exported constant (`lib/shell-frame.ts`).
+- **AC2** Sidebar gets a quick-actions block under the brand row: `New task`
+  (icon + label), `Search` (opens the palette, shows the palette's live shortcut
+  as a kbd), `Automations` (opens Settings -> Automations). Hidden in the collapsed rail.
+  `New task` opens the new-task dialog for the selected task's workspace, or the
+  only workspace; with several and no selection it opens the palette (which
+  lists "New task in <workspace>"). Hidden while there are no workspaces.
+- **AC3** The tree header reads "Task list" (was "Workspaces") with the same
+  group-mode switch, search and add controls.
+- **AC4** New icon `newTask` goes through `lib/icons.ts` (drift test green).
+- **AC5** Frames: audit-format pair sheets (L = ZCode raw, R = smind after) for
+  home/empty, tree with tasks, status view, collapsed rail at 1280 light+dark,
+  390 smind-only, plus sidebar collapse/expand transition frames, in
+  `/tmp/steward4/zcode-audit/after/shell-sidebar/`.
+- **AC6** `task lint` + `task test` green; one mutation per load-bearing test.
+
+### Named tests
+
+- `lib/shell-frame.test.ts`: `light frame carries gap, border, rounded and shadow`,
+  `dark frame resets the gap and shadow`
+- `components/sidebar-quick-actions.test.tsx`: `renders New task, Search and Automations`,
+  `Search shows the palette shortcut`, `rows call their handlers`
+- `components/app-sidebar-quick-actions.test.tsx`: `New task opens the task dialog for the only workspace`,
+  `New task with several workspaces and no selection opens the palette`,
+  `quick actions are absent with no workspaces`, `tree header reads Task list`
+
+### Ported files and sources
+
+None: reference-only reimplementation.
 
 ## Stage 4 — mobile tokens
 
@@ -156,11 +284,67 @@ buttons, sidebar toggle position), own PR. Prior art:
 - [x] Inventory of what is already ported (2026-10-30).
 - [x] Plan written (this PR).
 - [ ] Stage 1 tokens PR.
-- [ ] Stage 2 audit handed over.
-- [ ] Stage 3 PRs.
+- [x] Stage 2 audit handed over (table above).
+- [x] Stage 3a settings (this PR): shell, nav, row-card primitives, Switch, Shortcuts table, empty cards, usage tray applied to General, Appearance, Notifications, Shortcuts, GitHub, Agents, MCP, Skills, Plugins, Automations, Providers, Usage, Connection.
+- [x] Stage 3b shell + sidebar (this PR): light framed content panel, sidebar quick actions, "Task list" header, `newTask` icon.
+- [ ] Stage 3 PRs (timeline, composer, dialogs/menus).
 - [ ] Stage 4.
 - [ ] Stage 5.
 
 ## Validation
 
 Filled per stage as PRs land.
+### Stage 3a validation (settings)
+
+- AC1/AC3: `settings-screen.tsx` — H1 + subtitle in a centred column (510px; 3xl for
+  table/card pages, 5xl for Shortcuts), nav items `rounded-lg`, back pill.
+  Tests: `shows the section label as the page H1`, `shows the registry description as a subtitle`.
+- AC2/AC5/AC6/AC7: `settings-layout.tsx` (`SettingsGroup` with `actions` slot,
+  `SettingsRow`, `SettingsEmptyCard`, `SettingsStatStrip`) and `ui/switch.tsx`, applied across all
+  sections. Notifications' sound toggle is now the shared Switch.
+- AC4: Shortcuts table (Command / Keybinding / Scope / Actions); rows stack below `sm`.
+  Scope shows "Global" (every binding is app-level today, no per-binding scope data).
+- AC8: sheets (L = ZCode raw frame, R = smind after) in
+  `/tmp/steward4/zcode-audit/after/settings/`:
+  `settings_{dark,light}_1280_{a,b,c}.png` (general+appearance, shortcuts+MCP, usage+skills) and
+  `settings_{dark,light}_390_a.png` (smind after only: ZCode's web build is not responsive, so
+  390 has no ZCode side). All looked at.
+- Not visually verified: the Connection and daemon pages (not in the nav of the isolated
+  daemon's browser build; covered by tests only), and the Plugins/Automations non-empty states.
+- Behaviour unchanged: every `data-testid`/aria-label kept; full `task test` green.
+- GLM ledger: 12 peer-glm runs (tasks 70, 71, 73, 74, 75, 76 x3, 77, 82 x3), 0 Sonnet; one
+  rate-limit stall (5h window) on task 76, resumed after the Human's quota reset. Failure
+  modes seen: wrong layout fix twice (shortcuts clipping), stray re-indent, button inside a title prop.
+
+
+### Stage 3b validation (shell + sidebar)
+
+- AC1: `lib/shell-frame.ts` (`SHELL_FRAME_INSET_CLASS`, `SHELL_FRAME_PANEL_CLASS`) used in
+  `App.tsx` for the inset and content panel when not mobile and not under the
+  traffic-lights bar. Light shows the gap, border, rounded-xl and soft shadow; dark keeps the
+  flush inset (`dark:` resets). Tests: `light frame carries gap, border, rounded and shadow`,
+  `dark frame resets the gap and shadow`; `desktop-chrome.test.tsx` now asserts the dark classes.
+- AC2/AC3: `sidebar-quick-actions.tsx` wired in `app-sidebar.tsx`; tests in
+  `sidebar-quick-actions.test.tsx` and `app-sidebar-quick-actions.test.tsx`.
+  No new keyboard binding was invented: New task shows no kbd (ZCode's would need a new
+  shortcut), Search shows the live palette binding.
+- AC4: `Icons.newTask` (SquarePen); icon drift test updated.
+- AC5: sheets (L = ZCode raw home frame, R = smind after; ZCode has no tasks, so its home
+  frame is the left side of every row) in `/tmp/steward4/zcode-audit/after/shell-sidebar/`:
+  `shell-sidebar_{light,dark}_1280_a.png` (home, tree), `..._b.png` (status view, collapsed
+  rail), `transitions_light_1280.png` (collapse/expand frames), `sheet390.png` (390 home and
+  drawer, light+dark, smind only). All looked at. The screenshot latency (> 200 ms animation)
+  caught only settled collapse frames, not mid-width ones; the width/opacity animation code is
+  unchanged by this PR.
+- Not changed: footer (usage, inbox, host, help, theme, settings stay), row density, the
+  workspace tree, Projects/Tasks sections, back/forward arrows (Stage 5).
+- AC6: `task lint` clean; web vitest 3968 tests (2 `App.responsive` timeouts under load,
+  7/7 green alone); Go `cmd/smind` daemon-log tests only pass with a temp HOME (they read the
+  real daemon log), 95 s green that way. Mutations (all failed the named test, files restored):
+  drop the shadow token (`shell-frame.test.ts`), disable the kbd
+  (`Search shows the palette shortcut`), `list.length === 1` -> `7` (`New task opens the task
+  dialog for the only workspace`), drop the `!empty` guard (`quick actions are absent with no
+  workspaces`), rename the label back (`tree header reads Task list`).
+- GLM ledger: 3 peer-glm runs (tasks 109 frame, 110 component + icon, 111 wiring + tests),
+  0 Sonnet, no rate limit, no turn-cap or wrong-edit failures; `glm-acp-agent` ran with
+  `--max-turns 500`.

@@ -3,12 +3,12 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ChangeList, ConsentSummary, linkWarningText } from "@/components/plugins/consent-summary";
 import { OwnerBadge } from "@/components/plugins/owner-badge";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { EmptyState } from "@/components/ui/empty-state";
 import { FormError } from "@/components/ui/form-error";
 import { Input } from "@/components/ui/input";
 import { LoadingRows } from "@/components/ui/loading-rows";
@@ -212,7 +212,7 @@ function PluginsSection(_props: SettingsSectionContext) {
             <LoadingRows />
           )
         ) : plugins.length === 0 ? (
-          <EmptyState
+          <SettingsEmptyCard
             testId="plugins-empty-state"
             title="No plugins installed"
             description={
@@ -701,6 +701,7 @@ registerSettingsSection({
   id: PLUGINS_SECTION_ID,
   label: "Plugins",
   groupLabel: "Agents & providers",
+  description: "Installed plugins and what they add.",
   order: 179,
   icon: <Icons.plugin aria-hidden className="size-3.5" />,
   render: (ctx) => <PluginsSection {...ctx} />,

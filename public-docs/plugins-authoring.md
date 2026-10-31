@@ -2,7 +2,7 @@
 title: Writing a plugin
 description: The manifest reference, what a plugin may call, hooks, RPCs, settings, how a plugin process runs, and a verified walkthrough of the hello-process example.
 summary: "This page is the reference for writing a plugin for sMind by Spacing Mind: the manifest, what a plugin may call, hooks, RPCs, settings and how a plugin process runs, with a verified walkthrough. It is for plugin authors."
-order: 16
+order: 17
 ---
 
 # Writing a plugin

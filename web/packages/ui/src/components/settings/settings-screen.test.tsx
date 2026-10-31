@@ -509,7 +509,31 @@ describe("SettingsScreen layout", () => {
     expect(screen.getByTestId("settings-nav-general")).toHaveAttribute("aria-current", "false");
     expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
     expect(screen.queryByTestId("settings-section-general")).not.toBeInTheDocument();
-    expect(screen.getByTestId("settings-screen-header")).toHaveTextContent("Appearance");
+    expect(screen.getByTestId("settings-page-title")).toHaveTextContent("Appearance");
+  });
+
+  it("shows the section label as the page H1", () => {
+    renderScreen();
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("General");
+  });
+
+  it("shows the registry description as a subtitle", () => {
+    const unregister = registerSettingsSection({
+      id: "zz-desc",
+      label: "ZZ",
+      order: 9999,
+      description: "Hello subtitle",
+      render: () => null,
+    });
+    try {
+      renderScreen();
+      fireEvent.click(screen.getByTestId("settings-nav-zz-desc"));
+      expect(screen.getByTestId("settings-page-title")).toHaveTextContent("ZZ");
+      expect(screen.getByTestId("settings-page-description")).toHaveTextContent("Hello subtitle");
+    } finally {
+      unregister();
+    }
   });
 
   it("Back button calls onNavigateBack", () => {
