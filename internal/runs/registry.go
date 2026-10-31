@@ -487,6 +487,12 @@ type run struct {
 	origin    string
 	interrupt bool
 
+	// originHost is the paired fleet host a remote-origin run arrived
+	// from ("" = local), persisted to runs.origin_host (ADR-0048) so the
+	// per-origin budget and audit attribute the run from its first
+	// running moment. Set at start, immutable.
+	originHost string
+
 	// replyChatID is the parent chat to notify when this run finishes
 	// (ADR-0041 B3); 0 = none. Set at start, immutable, persisted on the row.
 	replyChatID int64
