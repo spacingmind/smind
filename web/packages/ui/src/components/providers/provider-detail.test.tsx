@@ -371,4 +371,37 @@ describe("ProviderDetail", () => {
       expect(clearCalls(d)).toEqual([{ provider: "glm" }]);
     });
   });
+
+  describe("recipe instances", () => {
+    function recipeDaemon(extra: object): FakeUsageDaemon {
+      const d = new FakeUsageDaemon([]);
+      d.providers = {
+        providers: [{ id: "zai-claude", label: "Z.ai", kind: "cli", custom: true, runner: "claude-native", extends: "claude-native", ...extra }],
+      } as unknown as ProviderListResult;
+      return d;
+    }
+    const zaiItem = (): ProviderNavItem => item({ id: "zai-claude", label: "Z.ai", kind: "cli", accountProvider: undefined });
+
+    it("a recipe instance shows its recipe, unverified flag and key rows", async () => {
+      const d = recipeDaemon({
+        recipe: "zai-coding",
+        unverified: true,
+        secrets: [{ name: "api-key", env: "ANTHROPIC_AUTH_TOKEN", set: true, fingerprint: "ab12" }],
+      });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-recipe-zai-claude")).toHaveTextContent("zai-coding");
+      expect(screen.getByTestId("provider-recipe-unverified")).toBeInTheDocument();
+      expect(screen.getByTestId("provider-secret-zai-claude-api-key")).toHaveTextContent("Set · ••••ab12");
+    });
+
+    it("a plain instance shows no recipe or key rows", async () => {
+      const d = recipeDaemon({});
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-detail")).toBeInTheDocument();
+      expect(screen.queryByTestId("provider-recipe-zai-claude")).toBeNull();
+      expect(screen.queryByTestId("provider-secrets-zai-claude")).toBeNull();
+    });
+  });
 });

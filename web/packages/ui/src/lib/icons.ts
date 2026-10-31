@@ -72,6 +72,7 @@ import {
   Kanban,
   Keyboard,
   Layers,
+  LayoutTemplate,
   ListChecks,
   LoaderCircle,
   Menu,
@@ -227,6 +228,8 @@ export const Icons = {
   agent: Bot,
   /** A provider with no brand mark of its own (a providers.custom ACP agent, an id the catalog has not described). */
   providerGeneric: Blocks,
+  /** A provider recipe (the Add-from-recipe catalog row). */
+  recipe: LayoutTemplate,
   model: Cpu,
   thinking: Brain,
   /** The default-agent marker. */

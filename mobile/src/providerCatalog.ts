@@ -78,6 +78,30 @@ export function providerLabel(p: ProviderInfo): string {
   return p.label ?? p.id;
 }
 
+/**
+ * The read-only provider note (recipe / unverified / key state) for the
+ * new-task form: null when there is nothing to say. Reads only recipe,
+ * unverified and the secrets' set/fingerprint -- a secret's value never
+ * reaches the UI (the daemon only sends a fingerprint anyway).
+ */
+export function providerNote(p: ProviderInfo | undefined): string | null {
+  if (!p) return null;
+  const secrets = p.secrets ?? [];
+  if (!p.recipe && !p.unverified && secrets.length === 0) return null;
+  const parts: string[] = [];
+  if (p.recipe) parts.push(`Recipe ${p.recipe}`);
+  if (p.unverified) parts.push('Unverified');
+  if (secrets.length > 0) {
+    if (secrets.every((s) => s.set)) {
+      const single = secrets.length === 1 ? secrets[0] : undefined;
+      parts.push(single?.fingerprint ? `Key set (…${single.fingerprint})` : 'Key set');
+    } else {
+      parts.push('Key not set');
+    }
+  }
+  return parts.join(' · ');
+}
+
 /** First option is the synthetic Default ('' = daemon default), then the catalog's models. */
 export function modelOptions(p: ProviderInfo | undefined): Array<{ value: string; label: string }> {
   return [{ value: '', label: 'Default' }, ...(p?.models ?? []).map((m: ModelInfo) => ({ value: m.id, label: m.label }))];

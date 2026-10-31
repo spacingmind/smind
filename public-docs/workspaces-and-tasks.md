@@ -38,7 +38,10 @@ To see whether a repository is set up for agents, run `smind workspace readiness
 only, and never runs any of its scripts or touches the network. It lists what is
 there (agent instructions, a test and a lint command, a setup script, a
 `.gitignore`, CI, docs, lockfiles) and what is missing, with a one-line hint for each
-gap. Warnings are advice; they never block a task.
+gap. In a monorepo it also looks one level into package folders (`apps/*`,
+`packages/*`, `workspaces` entries) for test scripts and lockfiles. Type checking
+alone does not count as a lint or format command. Warnings are advice; they never
+block a task.
 
 To remove a workspace, use **Delete workspace** in the same menu. This only
 removes it from smind. Files on disk stay, and uncommitted work in task

@@ -173,6 +173,7 @@ Scope: web Settings → Providers shows recipe cards, "Add from recipe" (pick, p
 - AC6.4 Shared stores and pickers are reused; no new ad-hoc fetch layer.
 - Tests: `providers-view.test.ts` extensions, `provider-recipes.test.ts`, `add-from-recipe.test.tsx` (key field is a password input, cleared after submit), icon drift test, mobile `providerCatalog` test, Playwright screenshot script pinned to a fake daemon (no live sends).
 - Mutations: render the secret value in the field (never-shown test fails); drop an icon id from the registry (drift test fails).
+- PR6 as built (2026-10-31 refinement): the daemon has **no RPC to edit an existing instance's `models`, `disallowedTools` or `inheritClaudeConfig`** and `provider.list` does not serve the last two, so the post-creation model/tool/inherit editors cannot ship in this PR. This PR ships: Add from recipe (picker, form with a prefilled models editor, write-only password key field), secret rows with set/not-set, fingerprint and replace/clear dialogs, recipe + unverified rows and nav badges, thinking hidden respected by `supportsThinking`, the `recipe` icon, and a read-only mobile note in the new-task provider picker. Follow-up (needs the Human/Steward's go as it is a new RPC): `provider.updateInstance {id, models?, additionalModels?, disallowedTools?, inheritClaudeConfig?}` + the detail editors.
 - Wire/schema changes: none (consumes PR3 RPCs).
 - Docs to update: `public-docs/providers.md` screenshots/steps, `docs-site` provider page if it mirrors it.
 
@@ -299,3 +300,18 @@ Mutations (each made the named test FAIL; file restored with `git checkout -- <f
 Decisions taken in PR3: a local keyless recipe (Ollama, LM Studio) stores its non-secret placeholder token through the secret store (kind `secretDefault`), so the typed-env rule "no literal on a secret-kind name" stays unrelaxed. The vendor profile is a Spec field (`zai|anthropic|openai|generic`) set by the recipe or by hand in `providers.custom[].vendor`; built-ins carry it from a table in `internal/providers/vendor.go`, an instance of a compatible endpoint is `generic` unless set. A private `CLAUDE_CONFIG_DIR` is applied to a claude-code instance that sets `ANTHROPIC_BASE_URL` and no `CLAUDE_CONFIG_DIR`, unless `inheritClaudeConfig`.
 
 Not done in PR3 (deliberate): making the built-in `glm` provider itself Claude Code + Z.AI and deleting `agents.glm.maxTurns` (it would change what every `peer-glm` run executes on the live daemon: needs the Human's go; today the default path for a new GLM login is the `zai-glm` recipe and `glm-acp-agent` stays); `addFromRecipe` for the OpenCode row 12 (acp harness; refused with a clear message); UI (PR6); no live probe, so every `verifiedAt` is empty; the web types for the two RPCs are additive only.
+
+### PR6 validation (2026-10-31)
+
+| AC | Evidence |
+|---|---|
+| AC6.1 key never shown | `add-from-recipe.test.tsx` ('the key field is a password input…', 'submits the key once, clears the field and never renders it back', 'clears the key field when the daemon refuses…'), `provider-secrets.test.tsx` ('shows set with the fingerprint and never a value', 'saving sends … the value is not in the document afterwards'); real-app run: body text never contained the sentinel, key field empty after a refused add |
+| AC6.2 frames | isolated daemon (own `SMIND_HOME`, port 48711, no model call, no Send): provider list with a recipe instance, picker, form, key typed, after add, id-collision error, instance detail (Recipe + Keys cards), replace-key dialog open/close, light + dark at 1280 and 390, including 120-150 ms transition frames; two fixes came out of the frames (header actions overflow at 390, truncated labels in the picker) |
+| AC6.3 marks | an instance wears its base's mark (`ProviderIcon` via `extendsById`, unchanged); recipes use the registry's own `recipe` glyph (`icons.test.ts` snapshot) |
+| AC6.4 shared layers | react-query hooks (`use-provider-recipes.ts`, query key `providerRecipes`), `SettingsGroup`/`SettingsRow`, `Dialog`/`ConfirmDialog`, `StatusBadge`; no ad-hoc fetch |
+| thinking hidden | `supportsThinking` honours `thinking: "hidden"` (`thinking-levels.test.ts`) |
+| mobile | `providerNote` (`providerCatalog.test.ts`, 5 tests), read-only note under the new-task provider picker; offline fallback list asserted unchanged |
+
+Mutations (each made the named test FAIL, file restored): keep the typed key after submit (add-from-recipe 'clears the key field when the daemon refuses'); `type="text"` for the key (`the key field is a password input`); always show Unverified (`lists the recipes with an Unverified badge only…`); keep the typed value after Save (provider-secrets 'a daemon refusal shows its text and leaves the field empty'); drop the hidden check (`supportsThinking is false when the daemon says thinking is hidden`); drop `recipe` from the icon registry (`icons.test.ts`); mobile: drop the fingerprint (`providerNote` names + sentinel tests).
+
+Not done in PR6: editors for an existing instance's models, disallowedTools and inherit-`~/.claude` (no daemon RPC and `provider.list` does not serve those fields: needs a `provider.updateInstance` follow-up, a new public RPC, Human's call); the picker's per-recipe vendor mark (the neutral `recipe` glyph is used for all); mobile has no provider screen, only the new-task note.

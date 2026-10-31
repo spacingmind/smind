@@ -95,11 +95,19 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
+  icon,
+  description,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+}: React.ComponentProps<typeof SelectPrimitive.Item> & {
+  icon?: React.ReactNode
+  description?: React.ReactNode
+}) {
+  const rich = icon !== undefined || description !== undefined
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
+      // The description is a second line, not part of the option's name.
+      aria-label={rich && typeof children === "string" ? children : undefined}
       className={cn(
         "relative flex w-full cursor-default items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-ui-base outline-hidden select-none focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
         className
@@ -111,7 +119,18 @@ function SelectItem({
           <Icons.check className="size-4" />
         </SelectPrimitive.ItemIndicator>
       </span>
-      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      {rich ? (
+        <>
+          {icon}
+          {/* The description stays outside ItemText: Radix copies ItemText into the trigger. */}
+          <span className="flex min-w-0 flex-col">
+            <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+            {description && <span className="text-ui-sm text-foreground-muted">{description}</span>}
+          </span>
+        </>
+      ) : (
+        <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      )}
     </SelectPrimitive.Item>
   )
 }

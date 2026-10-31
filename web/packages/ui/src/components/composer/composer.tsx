@@ -35,12 +35,10 @@ import { RunConfigOptions } from "@/components/run-config-options";
 import { Button } from "@/components/ui/button";
 import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
 import { formatCombo } from "@/keyboard/shortcut-string";
+import { COMPOSER_ACTION_BUTTON_CLASS, COMPOSER_CARD_CLASS } from "@/lib/composer-shell";
 import { supportsThinking } from "@/lib/thinking-levels";
 import type { AttachmentMeta, AttachmentRequest, ChatQueueItem, ConfigOptionParams, PermissionSettings, TaskGit, ThinkingLevel } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
-
-/** Icon-only send cluster: 44px touch targets below md (Item 21), ZCode's 32px rounded squares from md up. */
-const ICON_ACTION_BUTTON_CLASS = "size-11 rounded-xl md:size-8";
 
 /** The metadata the optimistic run entry shows for a draft item, thumbnail URL included so no fetch is needed. */
 function draftPreview(item: DraftAttachment, index: number): AttachmentMeta {
@@ -554,7 +552,7 @@ export function Composer({
       <div
         data-testid="composer-card"
         className={cn(
-          "relative flex flex-col rounded-2xl border border-input-border bg-input transition-colors hover:border-input-border-hover focus-within:border-input-border-focused focus-within:bg-input-focused",
+          COMPOSER_CARD_CLASS,
           dropActive && "border-input-border-focused",
         )}
       >
@@ -717,7 +715,7 @@ export function Composer({
                 <Button
                   type="button"
                   variant="outline"
-                  className={ICON_ACTION_BUTTON_CLASS}
+                  className={COMPOSER_ACTION_BUTTON_CLASS}
                   disabled={inactive}
                   aria-label="Send now"
                   data-testid="chat-send-now-button"
@@ -731,7 +729,7 @@ export function Composer({
                 <Button
                   type="button"
                   variant="execute"
-                  className={ICON_ACTION_BUTTON_CLASS}
+                  className={COMPOSER_ACTION_BUTTON_CLASS}
                   disabled={stopping || !connected}
                   aria-label={stopping ? "Stopping…" : "Stop"}
                   title="Stop the running turn (Esc)"
@@ -744,7 +742,7 @@ export function Composer({
               <Button
                 type="submit"
                 variant={running ? "default" : "execute"}
-                className={ICON_ACTION_BUTTON_CLASS}
+                className={COMPOSER_ACTION_BUTTON_CLASS}
                 disabled={inactive || !hasText || attachHasError}
                 aria-label={running ? "Queue" : "Send"}
                 title={running ? "Queue this prompt — it sends when the run finishes (Enter)" : "Send (Enter)"}

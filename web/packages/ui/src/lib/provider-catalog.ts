@@ -7,6 +7,8 @@ export interface ServedProvider {
   accountProvider?: string;
   runner?: ProviderRunner;
   extends?: string;
+  /** "hidden": the endpoint cannot turn thinking off, so the thinking control is omitted. */
+  thinking?: "supported" | "hidden";
 }
 
 /** The four built-ins' runners: the offline answer for `providerRunner` until/unless `provider.list` describes them. */
