@@ -94,6 +94,60 @@ worktrees:
 	}
 }
 
+func TestConfigSetAutomationsEnabled(t *testing.T) {
+	path := useHome(t, `# keep me
+server:
+  port: 5000
+`)
+	if err := Set("automations.enabled", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := Get("automations.enabled"); v != "true" {
+		t.Errorf("Get = %q, want \"true\"", v)
+	}
+	got := readFile(t, path)
+	if !strings.Contains(got, "# keep me") {
+		t.Errorf("edit lost the comment:\n%s", got)
+	}
+	if !strings.Contains(got, "enabled: true") {
+		t.Errorf("edit did not write enabled:\n%s", got)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("the edited file must load: %v", err)
+	}
+	if !cfg.Automations.Enabled {
+		t.Errorf("Automations.Enabled = false, want true")
+	}
+	if err := Set("automations.enabled", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := Get("automations.enabled"); v != "false" {
+		t.Errorf("Get after set false = %q", v)
+	}
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("the edited file must load: %v", err)
+	}
+	if cfg.Automations.Enabled {
+		t.Errorf("Automations.Enabled = true, want false")
+	}
+}
+
+func TestConfigSetAutomationsEnabledRejectsNonBool(t *testing.T) {
+	path := useHome(t, "# keep me\nserver:\n  port: 4648\n")
+	before := readFile(t, path)
+	for _, v := range []string{"yes", "1", ""} {
+		err := Set("automations.enabled", v)
+		if err == nil || !strings.Contains(err.Error(), "automations.enabled") {
+			t.Errorf("Set(%q) = %v, want an error naming the key", v, err)
+		}
+	}
+	if readFile(t, path) != before {
+		t.Fatal("a rejected edit changed the file")
+	}
+}
+
 func TestConfigSetCreatesFileOwnerOnly(t *testing.T) {
 	path := useHome(t, "")
 	if err := Set("server.port", "4700"); err != nil {

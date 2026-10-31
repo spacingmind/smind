@@ -28,6 +28,7 @@ const (
 	kindList
 	kindSecret // passwordHash: never printed, only removable here
 	kindModel  // a model id, validated by ValidateModelName
+	kindBool
 )
 
 type keyInfo struct {
@@ -40,6 +41,7 @@ var knownKeys = map[string]keyInfo{
 	"server.listen":       {kindString, "host:port to bind; a non-loopback host needs a password (smind set-password)"},
 	"server.hostnames":    {kindList, "extra Host header names, comma separated; a leading . matches subdomains"},
 	"server.passwordHash": {kindSecret, "set with `smind set-password`; shown only as <set>"},
+	"automations.enabled": {kindBool, "turn the automations engine on (cron schedules, CI failure signals); default false"},
 }
 
 func init() {
@@ -156,6 +158,12 @@ func Set(path, value string) error {
 		if len(node.Content) == 0 {
 			return fmt.Errorf("%s: no hostnames given (use `smind config unset %s` to clear)", path, path)
 		}
+	case kindBool:
+		v := strings.ToLower(strings.TrimSpace(value))
+		if v != "true" && v != "false" {
+			return fmt.Errorf("%s: %q is not true or false", path, value)
+		}
+		node = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: v}
 	}
 	return mutate(func(root *yaml.Node) error {
 		setNode(root, strings.Split(path, "."), node)

@@ -31,6 +31,8 @@ export const STORAGE_KEYS = {
   pinnedTasks: "smind:pinned-tasks",
   unreadTasks: "smind:unread-tasks",
   sidebarGroupMode: "smind:sidebar-group-mode",
+  /** Whether the sidebar lists only tasks an automation started. */
+  sidebarAutomationFilter: "smind:sidebar-automation-filter",
   collapsedTasks: "smind.sidebar.collapsedTasks",
   /** Collapsed workspace/space/Pinned/status-group ids (sidebar-polish S8); see lib/sidebar-preferences.ts. */
   collapsedSidebarNodes: "smind:sidebar-collapsed-nodes",

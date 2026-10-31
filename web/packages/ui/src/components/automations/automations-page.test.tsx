@@ -2,8 +2,7 @@ import { act } from "react";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { listSettingsSections } from "@/components/settings/settings-registry";
-import "@/components/settings/automations-section";
+import { AutomationsPage } from "@/components/automations/automations-page";
 import { AUTOMATION_PAGE_SIZE } from "@/lib/automation-types";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 import { auditRow, automation, AutomationDaemon, ciAutomation, forbidden } from "@/test/automation-fixtures";
@@ -25,10 +24,11 @@ async function type(el: HTMLElement, value: string): Promise<void> {
   await flush();
 }
 
-async function renderSection(daemon: AutomationDaemon) {
-  const section = listSettingsSections().find((s) => s.id === "automations");
-  if (!section) throw new Error("automations section did not register");
-  const view = renderWithDaemon(<>{section.render({ client: daemon.client, events: daemon.events })}</>, daemon);
+async function renderPage(daemon: AutomationDaemon) {
+  const view = renderWithDaemon(
+    <AutomationsPage onNavigateBack={() => {}} closeSettings={() => {}} />,
+    daemon,
+  );
   await flush();
   return view;
 }
@@ -52,29 +52,24 @@ async function fillForm(): Promise<void> {
   await type(screen.getByTestId("automation-prompt"), "Sweep the repo.");
 }
 
-describe("settings-automations section", () => {
-  it("registers as Settings -> Automations", () => {
-    expect(listSettingsSections().find((s) => s.id === "automations")?.label).toBe("Automations");
-  });
-
-  it("OffBanner_NoSwitchControl: says automations are off, how to turn them on, and has no control for the switch", async () => {
-    await renderSection(daemonWith([automation()], { enabled: false }));
-    const off = screen.getByTestId("automations-off");
-    expect(off).toHaveTextContent("Automations are off. Set automations.enabled: true in config.yaml on the computer.");
-    // The only switch on the page is the row's own enable/disable; nothing flips the daemon switch.
-    const switches = screen.getAllByRole("switch");
-    expect(switches).toHaveLength(1);
-    expect(switches[0]).toHaveAttribute("aria-label", "Disable Nightly triage");
-    expect(screen.queryByRole("button", { name: /turn on|enable automations/i })).toBeNull();
-    // Everything that would start or change something is read-only.
+describe("AutomationsPage", () => {
+  it("off state shows the card, not the list", async () => {
+    await renderPage(daemonWith([automation()], { enabled: false }));
+    const off = screen.getByTestId("automations-off-card");
+    expect(off).toHaveTextContent("Automations are off");
+    expect(off).toHaveTextContent("smind config set automations.enabled true");
+    expect(screen.queryByTestId("automations-list")).toBeNull();
+    // No row, no switch, and nothing that would flip the daemon's own switch from here.
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByTestId("automation-fire-1")).toBeNull();
+    expect(screen.queryByRole("button", { name: /turn on|enable the daemon|enable automations/i })).toBeNull();
+    // Everything that would start or change something stays read-only.
     expect(screen.getByTestId("automation-new-button")).toBeDisabled();
-    expect(screen.getByTestId("automation-fire-1")).toBeDisabled();
-    expect(screen.getByTestId("automation-edit-1")).toBeDisabled();
   });
 
   it("ListRowsAndStatus: name, status badge, signal summary, last fired and next run", async () => {
     const fired = new Date(Date.now() - 3 * 3_600_000).toISOString();
-    await renderSection(
+    await renderPage(
       daemonWith([
         automation({ lastFiredAt: fired }),
         ciAutomation({ enabled: false }),
@@ -94,15 +89,30 @@ describe("settings-automations section", () => {
     expect(screen.queryByTestId("automation-capped-1")).toBeNull();
   });
 
+  it("lists rows with the switch, UTC and local next run", async () => {
+    await renderPage(daemonWith([automation({ nextRunAt: "2026-11-01T09:00:00Z", nextRuns: ["2026-11-01T09:00:00Z"] })]));
+    const times = screen.getByTestId("automation-times-1");
+    expect(times).toHaveTextContent("next run Nov 1 09:00 UTC");
+    expect(times).toHaveTextContent("your time");
+    expect(screen.getByTestId("automation-switch-1")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("new automation opens the form", async () => {
+    await renderPage(daemonWith([]));
+    await click(screen.getByTestId("automation-new-button"));
+    expect(await screen.findByTestId("automation-form")).toBeInTheDocument();
+    expect(screen.getByTestId("automation-cron")).toBeInTheDocument();
+  });
+
   it("ListRowsAndStatus: a budget-blocked row says the last run reached its budget; a globally paused daemon says so", async () => {
-    await renderSection(daemonWith([automation({ budgetBlocked: true })], { paused: true }));
+    await renderPage(daemonWith([automation({ budgetBlocked: true })], { paused: true }));
     expect(screen.getByTestId("automation-capped-1")).toHaveTextContent("capped: last run reached its budget");
     expect(screen.getByTestId("automations-paused")).toHaveTextContent("automations.paused");
   });
 
   it("PausedRowShowsReasonAndResume: the reason is visible with a Resume button that calls automation.resume", async () => {
     const d = daemonWith([automation({ status: "paused", pausedReason: "paused after 3 failed runs in a row" }), automation({ id: 2, name: "Calm" })]);
-    await renderSection(d);
+    await renderPage(d);
     const alert = screen.getByTestId("automation-paused-1");
     expect(alert).toHaveTextContent("paused after 3 failed runs in a row");
     expect(screen.queryByTestId("automation-resume-2")).toBeNull();
@@ -115,7 +125,7 @@ describe("settings-automations section", () => {
     const d = daemonWith([ciAutomation({ enabled: false }), automation()]);
     d.refuse = forbidden("automation.enable is only available on a direct connection, not over the relay");
     d.refuseOnly = ["automation.enable", "automation.fire", "automation.create"];
-    await renderSection(d);
+    await renderPage(d);
     await click(screen.getByTestId("automation-switch-2"));
     expect(screen.getByTestId("automations-read-only")).toHaveTextContent("only available on a direct connection, not over the relay");
     expect(screen.getByTestId("automation-new-button")).toBeDisabled();
@@ -133,7 +143,7 @@ describe("settings-automations section", () => {
 
   it("CreateStartsDisabledNotice: creating sends the definition and says it was created disabled", async () => {
     const d = daemonWith([]);
-    await renderSection(d);
+    await renderPage(d);
     await fillForm();
     expect(screen.getByTestId("automation-cron-preview")).toBeInTheDocument();
     await click(screen.getByTestId("automation-form-submit"));
@@ -148,7 +158,7 @@ describe("settings-automations section", () => {
   });
 
   it("the form shows the placeholders, the defaults and the signal-is-data note", async () => {
-    await renderSection(daemonWith([]));
+    await renderPage(daemonWith([]));
     await click(screen.getByTestId("automation-new-button"));
     const ph = await screen.findByTestId("automation-placeholders");
     for (const p of ["repo", "workflow", "branch", "headSha", "runId", "runUrl", "conclusion", "event", "scheduledAt", "firedAt", "catchup"]) {
@@ -169,7 +179,7 @@ describe("settings-automations section", () => {
 
   it("FormRejectsCronUnderFiveMinutes: inline error, nothing is sent", async () => {
     const d = daemonWith([]);
-    await renderSection(d);
+    await renderPage(d);
     await fillForm();
     await type(screen.getByTestId("automation-cron"), "*/4 * * * *");
     expect(screen.getByTestId("automation-cron-error")).toHaveTextContent("minimum cadence is 5 min");
@@ -188,7 +198,7 @@ describe("settings-automations section", () => {
     d.onMutation["automation.create"] = () => {
       throw new RpcError('automation.create: template.mode "full-access" / autoAccept is an unattended mode: set automations.allowUnattendedModes: true in config.yaml to allow it', "invalid");
     };
-    await renderSection(d);
+    await renderPage(d);
     await fillForm();
     await click(screen.getByTestId("automation-form-submit"));
     expect(screen.getByTestId("automation-form-error")).toHaveTextContent("automations.allowUnattendedModes");
@@ -198,7 +208,7 @@ describe("settings-automations section", () => {
 
   it("DeleteNeedsConfirm: nothing is deleted until the dialog is confirmed", async () => {
     const d = daemonWith([automation(), ciAutomation()]);
-    await renderSection(d);
+    await renderPage(d);
     await click(screen.getByTestId("automation-delete-1"));
     expect(screen.getByTestId("automation-delete-dialog")).toHaveTextContent("Delete Nightly triage?");
     expect(callsOf(d, "automation.delete")).toHaveLength(0);
@@ -224,7 +234,7 @@ describe("settings-automations section", () => {
         taskId: i % 5 === 0 ? null : 40 + i,
       }),
     );
-    await renderSection(d);
+    await renderPage(d);
     await click(screen.getByTestId("automation-history-1"));
     const list = await screen.findByTestId("automation-audit-list");
     expect(within(list).getAllByRole("listitem")).toHaveLength(AUTOMATION_PAGE_SIZE);
@@ -250,7 +260,7 @@ describe("settings-automations section", () => {
   it("MemoryClearNeedsConfirm: shows the memory, and clears only after the dialog is confirmed; absent when memory is off", async () => {
     const d = daemonWith([automation(), ciAutomation()]);
     d.memory = "Flaky test: TestRelay; retry once.";
-    await renderSection(d);
+    await renderPage(d);
     await click(screen.getByTestId("automation-history-1"));
     expect(await screen.findByTestId("automation-memory-text")).toHaveTextContent("Flaky test: TestRelay; retry once.");
     await click(screen.getByTestId("automation-memory-clear"));
@@ -264,7 +274,7 @@ describe("settings-automations section", () => {
   });
 
   it("MemoryClearNeedsConfirm: no memory panel for an automation with memory off", async () => {
-    await renderSection(daemonWith([ciAutomation()]));
+    await renderPage(daemonWith([ciAutomation()]));
     await click(screen.getByTestId("automation-history-2"));
     await screen.findByTestId("automation-audit-empty");
     expect(screen.queryByTestId("automation-memory-panel")).toBeNull();
@@ -273,7 +283,7 @@ describe("settings-automations section", () => {
   it("FireNowShowsDecision: a capped answer is text, not success; a fire names the task", async () => {
     const d = daemonWith([automation()]);
     d.onMutation["automation.fire"] = () => auditRow({ id: 5, manual: true, decision: "capped", reason: "2 runs in the last hour" });
-    await renderSection(d);
+    await renderPage(d);
     await click(screen.getByTestId("automation-fire-1"));
     const result = screen.getByTestId("automation-fire-result-1");
     expect(result).toHaveTextContent("Not started: capped (2 runs in the last hour).");

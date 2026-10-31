@@ -5,8 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { InboxBadge } from "@/components/inbox/inbox-badge";
 import { InboxScreen } from "@/components/inbox/inbox-screen";
 import { hostDownItem, hostPairItem, hostRefusedItem, InboxDaemon, permissionItem, REQUEST_EVENTS, stallItem, verdictItem } from "@/test/inbox-fixtures";
+import { createQueryClient } from "@/lib/query/query-client";
+import { queryKeys } from "@/lib/query-keys";
 import { fleetHost } from "@/test/fleet-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
+import type { WorkspaceWithTree } from "@/lib/workspace-tree";
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -241,5 +244,20 @@ describe("InboxBadge", () => {
     renderWithDaemon(<InboxBadge />, d);
     await flush();
     expect(screen.getByTestId("inbox-badge")).toHaveTextContent("1");
+  });
+});
+
+describe("InboxScreen automation chip", () => {
+  it("marks a row whose task an automation started, from the cached tree, without a fetch", async () => {
+    const queryClient = createQueryClient();
+    const task = (ID: number, extra: object = {}) => ({ ID, WorkspaceID: 1, SpaceID: null, Title: "t", Status: "active", WorktreePath: null, Branch: null, CreatedAt: "", UpdatedAt: "", ArchivedAt: null, ...extra });
+    queryClient.setQueryData(queryKeys.workspaceTree(), [
+      { ID: 1, spaces: [], ungroupedTasks: [task(8, { automationId: 2, automationName: "Nightly" })] },
+    ] as unknown as WorkspaceWithTree[]);
+    const d = daemonWith(stallItem(), permissionItem());
+    const view = renderWithDaemon(<InboxScreen onNavigateBack={() => {}} onOpenTask={() => {}} />, d, { queryClient });
+    await flush();
+    expect(within(view.getByTestId("inbox-row-stall:8:1000")).getByTestId("automation-chip")).toBeInTheDocument();
+    expect(within(view.getByTestId("inbox-row-perm:q1")).queryByTestId("automation-chip")).not.toBeInTheDocument();
   });
 });

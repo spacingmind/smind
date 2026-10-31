@@ -25,6 +25,13 @@ const TASK: Task = {
 };
 
 describe("HeaderTaskTitle", () => {
+  it("shows the automation chip only for an automation task", () => {
+    const { rerender } = render(<HeaderTaskTitle task={TASK} />);
+    expect(screen.queryByTestId("automation-chip")).not.toBeInTheDocument();
+    rerender(<HeaderTaskTitle task={{ ...TASK, automationId: 4, automationName: "Nightly" }} />);
+    expect(screen.getByTestId("automation-chip")).toHaveAttribute("title", "Started by automation: Nightly");
+  });
+
   it("AH-AC3 hover card shows branch, status, last activity", async () => {
     render(<HeaderTaskTitle task={TASK} />);
     expect(screen.queryByTestId("app-header-task-card")).not.toBeInTheDocument();
