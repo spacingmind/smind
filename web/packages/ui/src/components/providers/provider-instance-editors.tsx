@@ -176,7 +176,7 @@ function ModelsEditor({ info, hasClient, pending, update, clearError, error }: E
             value={typed}
             disabled={disabled}
             spellCheck={false}
-            placeholder="e.g. claude-sonnet-4-5"
+            placeholder="model id"
             onChange={(e) => {
               clearError();
               setTyped(e.target.value);
@@ -283,7 +283,7 @@ function ToolsEditor({ info, hasClient, pending, update, clearError, error }: Ed
             value={typed}
             disabled={disabled}
             spellCheck={false}
-            placeholder="e.g. WebSearch or Bash(rm:*)"
+            placeholder="e.g. WebSearch"
             onChange={(e) => {
               clearError();
               setTyped(e.target.value);
