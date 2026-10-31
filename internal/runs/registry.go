@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/runs/ratelimit"
 	"github.com/spacingmind/smind/internal/store"
@@ -211,6 +212,10 @@ type Registry struct {
 	// (ErrTaskSyncing) so a run cannot start between the handler's
 	// precondition check and its git operation. Guarded by mu.
 	syncing map[int64]bool
+
+	// policy is the permission policy engine consulted before a request is
+	// parked for a human (ADR-0047); nil = none. Guarded by mu.
+	policy *permpolicy.Engine
 }
 
 // SetPermissionTimeout overrides how long a pending permission request
