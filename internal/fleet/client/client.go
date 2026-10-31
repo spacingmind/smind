@@ -90,7 +90,8 @@ func IsTransport(err error) bool {
 
 // Client makes typed fleet read calls to peers.
 type Client struct {
-	o Options
+	o  Options
+	ob observer
 }
 
 // New returns a Client with defaults applied.
