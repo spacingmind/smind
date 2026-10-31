@@ -1,4 +1,4 @@
-import { Icons, type IconComponent } from "@/lib/icons";
+import { Icons, pluginIconByName, type IconComponent } from "@/lib/icons";
 
 import type { PluginPanel } from "@/lib/plugin-panel-types";
 import { FileIcon } from "@/lib/file-icons";
@@ -57,6 +57,8 @@ export interface TabEntry {
   pluginId?: string;
   /** The plugin-local panel id, for `kind: "plugin"` only -- see `pluginId`. */
   panelId?: string;
+  /** The panel's Lucide name, for `kind: "plugin"` only -- resolved by `pluginIconByName`, falling back to the generic plugin glyph. */
+  icon?: string;
 }
 
 /**
@@ -117,7 +119,10 @@ export function parsePluginTabKey(key: string): { taskId: number; pluginId: stri
 }
 
 /** The tab for one plugin panel, titled by the panel's own contribution title (ADR-0042). */
-export function pluginTab(taskId: number, panel: Pick<PluginPanel, "plugin" | "id" | "title">): TabEntry {
+export function pluginTab(
+  taskId: number,
+  panel: Pick<PluginPanel, "plugin" | "id" | "title" | "icon">,
+): TabEntry {
   return {
     kind: "plugin",
     key: pluginTabKey(taskId, panel.plugin, panel.id),
@@ -126,6 +131,7 @@ export function pluginTab(taskId: number, panel: Pick<PluginPanel, "plugin" | "i
     closable: TAB_KINDS.plugin.closable,
     pluginId: panel.plugin,
     panelId: panel.id,
+    icon: panel.icon,
   };
 }
 
@@ -230,7 +236,10 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
   // meaningful for terminal tabs; the store is keyed by tab key, so
   // asking for any other kind is a cheap constant false.
   const busy = useTerminalActivity(entry.key);
-  const KindIcon = TAB_KINDS[entry.kind].icon;
+  // A plugin tab shows the panel's own icon (`pluginIconByName` falls back to
+  // the generic plugin glyph for an absent or unknown name); every other kind
+  // shows its kind icon.
+  const KindIcon = entry.kind === "plugin" ? pluginIconByName(entry.icon ?? "") : TAB_KINDS[entry.kind].icon;
 
   return (
     <>
@@ -424,19 +433,22 @@ export function NewTabButton({
         {(pluginPanels?.length ?? 0) > 0 && (
           <>
             <DropdownMenuSeparator />
-            {pluginPanels!.map((panel) => (
-              <DropdownMenuItem
-                key={`${panel.plugin}:${panel.id}`}
-                data-testid="tabs-new-tab-plugin"
-                data-plugin={panel.plugin}
-                data-panel={panel.id}
-                onClick={() => onOpenPluginPanel?.(panel)}
-              >
-                <Icons.plugin aria-hidden className="size-3.5 opacity-70" />
-                {panel.title}
-                <span className="ml-auto pl-4 text-ui-sm text-muted-foreground">{panel.plugin}</span>
-              </DropdownMenuItem>
-            ))}
+            {pluginPanels!.map((panel) => {
+              const PanelIcon = pluginIconByName(panel.icon ?? "");
+              return (
+                <DropdownMenuItem
+                  key={`${panel.plugin}:${panel.id}`}
+                  data-testid="tabs-new-tab-plugin"
+                  data-plugin={panel.plugin}
+                  data-panel={panel.id}
+                  onClick={() => onOpenPluginPanel?.(panel)}
+                >
+                  <PanelIcon aria-hidden className="size-3.5 opacity-70" />
+                  {panel.title}
+                  <span className="ml-auto pl-4 text-ui-sm text-muted-foreground">{panel.plugin}</span>
+                </DropdownMenuItem>
+              );
+            })}
           </>
         )}
       </DropdownMenuContent>
