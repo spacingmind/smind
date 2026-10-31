@@ -18,4 +18,10 @@ Size: S, web only (`components/hosts/*`, `settings/hosts-section*.tsx`). No daem
 - Test ids kept; new: `host-header-`, `host-dir-out-`, `host-dir-in-`, `host-out-state-`, `host-in-state-`, `host-sas-code-`, `host-sas-copy-` (+alias).
 
 ## Progress / Validation
-(filled as work lands)
+Progress: components, tests and frames landed (peer-glm x4 runs: 3 steps + 2 small 390 fixes; no peer-sonnet).
+
+Validation (2026-10-31):
+- AC1-4,6: frames light+dark at 1280 and 390 (list with every state, pending SAS, skew alert, fleet-off, empty, approve open/typed, reverse confirm, loading->content burst) in /tmp/steward4/after/fleet-ui/ (before-*.png vs after-*.png). At 390 header menu, On/Off pills and Switch stay right of their labels; SAS block and Review button stack.
+- AC5: grant editor and add dialog already used Checkbox; approve dialog uses it via GrantEditor; rows use Switch. No raw inputs of those kinds on the page.
+- Mutations (each fails exactly its test): SettingsGroup->div (RowCards), "This host" label (DirectionLabels), NBSP->space (GrantChipsNoWrap), copy digits->code (SasCopy).
+- vitest full ui suite 4276 passed; task lint ok; task test ok on rerun (one Go flake on the first run).
