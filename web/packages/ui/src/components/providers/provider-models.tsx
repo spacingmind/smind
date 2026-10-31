@@ -23,7 +23,11 @@ function toModelRows(models: NonNullable<ProviderInfo["models"]>): ModelRow[] {
 export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
   const { provider } = props;
   const [query, setQuery] = useState("");
-  const models = provider.models ?? [];
+  const models = useMemo(() => {
+    const all = provider.models ?? [];
+    // A recipe instance lists only its own configured models; the catalog entries come from the runner it extends.
+    return provider.recipe ? all.filter((m) => m.source === "config") : all;
+  }, [provider.models, provider.recipe]);
   const rows = useMemo(
     () => filterAndRankModelRows(toModelRows(models), query.trim().toLowerCase()),
     [models, query],
@@ -33,7 +37,9 @@ export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
     return (
       <div className="rounded-lg border bg-card p-3" data-testid="provider-models">
         <p className="text-ui-sm text-muted-foreground" data-testid="provider-models-empty">
-          No models reported yet — the agent hasn't been probed.
+          {provider.recipe
+            ? "No models listed for this recipe — runs use the endpoint's default model."
+            : "No models reported yet — the agent hasn't been probed."}
         </p>
       </div>
     );
@@ -45,7 +51,13 @@ export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
         <h4 className="text-ui-base font-medium">Models</h4>
         <span className="text-ui-sm text-muted-foreground">{models.length}</span>
         <span className="text-ui-sm text-muted-foreground">
-          {provider.modelsDiscovered ? "Reported by the agent" : provider.custom && !provider.extends ? "Listed in config.yaml" : "Built-in catalog"}
+          {provider.recipe
+            ? "From the recipe"
+            : provider.modelsDiscovered
+              ? "Reported by the agent"
+              : provider.custom && !provider.extends
+                ? "Listed in config.yaml"
+                : "Built-in catalog"}
         </span>
       </div>
       {models.length >= SEARCH_THRESHOLD ? (

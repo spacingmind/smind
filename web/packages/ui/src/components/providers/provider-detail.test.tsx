@@ -403,5 +403,65 @@ describe("ProviderDetail", () => {
       expect(screen.queryByTestId("provider-recipe-zai-claude")).toBeNull();
       expect(screen.queryByTestId("provider-secrets-zai-claude")).toBeNull();
     });
+
+    it("a recipe instance with a key set reads Key set, not CLI login", async () => {
+      const d = recipeDaemon({
+        recipe: "zai-coding",
+        secrets: [{ name: "api-key", env: "ANTHROPIC_AUTH_TOKEN", set: true, fingerprint: "ab12" }],
+      });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await waitFor(() => expect(screen.getByTestId("provider-readiness-zai-claude")).toHaveTextContent("Key set"));
+      const text = screen.getByTestId("provider-detail").textContent ?? "";
+      expect(text).not.toMatch(/Ready \(CLI login\)|CLI login kept|Managed externally/);
+    });
+
+    it("a recipe instance without a key reads No key set", async () => {
+      const d = recipeDaemon({
+        recipe: "zai-coding",
+        secrets: [{ name: "api-key", env: "ANTHROPIC_AUTH_TOKEN", set: false }],
+      });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await waitFor(() => expect(screen.getByTestId("provider-readiness-zai-claude")).toHaveTextContent("No key set"));
+    });
+
+    it("a recipe instance shows its private config dir and no env field", async () => {
+      const d = recipeDaemon({ recipe: "zai-coding" });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-config-dir-zai-claude")).toHaveTextContent("private (managed by smind)");
+      expect(screen.queryByTestId("provider-env-zai-claude")).toBeNull();
+      expect(screen.getByTestId("provider-external-zai-claude")).toHaveTextContent("Managed by smind");
+    });
+
+    it("a plain instance keeps the CLI-login wording", async () => {
+      const d = recipeDaemon({});
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await waitFor(() => expect(screen.getByTestId("provider-readiness-zai-claude")).toHaveTextContent("Ready (CLI login)"));
+      expect(screen.getByTestId("provider-external-zai-claude")).toHaveTextContent(
+        "CLI login kept in its own config directory",
+      );
+      expect(screen.queryByTestId("provider-config-dir-zai-claude")).toBeNull();
+    });
+
+    it("a recipe instance hides the daemon-env config directory", async () => {
+      const d = recipeDaemon({
+        recipe: "zai-coding",
+        envEffective: { CLAUDE_CONFIG_DIR: { path: "/Users/someone/real-home/.claude-demo", source: "environment", exists: false } },
+      });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.queryByTestId("provider-custom-dir-zai-claude")).toBeNull();
+      expect(screen.getByTestId("provider-detail").textContent).not.toContain("/Users/someone/real-home");
+    });
+
+    it("a plain instance still shows its config directory", async () => {
+      const d = recipeDaemon({
+        envEffective: { CLAUDE_CONFIG_DIR: { path: "/Users/someone/real-home/.claude-demo", source: "environment", exists: false } },
+      });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-custom-dir-zai-claude")).toBeInTheDocument();
+      expect(screen.getByTestId("provider-custom-dir-zai-claude")).toHaveTextContent("/Users/someone/real-home/.claude-demo");
+    });
   });
 });
