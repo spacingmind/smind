@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 import {
   DndContext,
@@ -512,9 +512,6 @@ function AppShell({
     if (!selectedTask) return;
     openTab(selectedTask.ID, baseTabForKind(selectedTask.ID, kind), placement ?? "prefer");
   }
-
-  /** The active plugins' panels (ADR-0042), for the shared open path and the panel-actions provider below. */
-  const pluginPanels = usePluginPanels();
 
   /**
    * The one open path for a plugin panel (ADR-0042), shared by the "+" menu, the
@@ -1327,6 +1324,15 @@ function AppShell({
     },
     [closeSettings, activate],
   );
+  // A plugin panel chosen in the palette leaves whatever covered the shell
+  // first, then goes through the one shared open path (page vs task tab).
+  const openPluginPanelFromPalette = useCallback(
+    (panel: PluginPanel) => {
+      closeSettings();
+      openPluginPanel(panel);
+    },
+    [closeSettings, openPluginPanel],
+  );
   const shellElement = (
     <SidebarProvider
       className="h-svh"
@@ -1368,6 +1374,7 @@ function AppShell({
           closeSettings();
           openChatById(chatId, "prefer");
         }}
+        onOpenPluginPanel={openPluginPanelFromPalette}
       />
       {isMobile ? (
         // Item 21: below the breakpoint, the sidebar-vs-content split
@@ -1457,21 +1464,6 @@ function AppShell({
     </SidebarProvider>
   );
 
-  // What a plugin panel's view may ask the shell to do (ADR-0042): open
-  // another panel, resolved through the same shared open path as every other
-  // surface. An id pair the daemon no longer lists (unknown or disabled) is a
-  // no-op, never an error surface -- the caller's own panel is the context.
-  const pluginActions = useMemo<PluginActions>(
-    () => ({
-      openPanel: (pluginId, panelId) => {
-        const panel = findPanel(pluginPanels.panels, pluginId, panelId);
-        if (!panel) return;
-        openPluginPanel(panel);
-      },
-    }),
-    [pluginPanels.panels, openPluginPanel],
-  );
-
   // Settings is a full-screen screen with its own layout, not a pane: while
   // it is open it covers the whole shell. The shell is hidden, never
   // unmounted -- the task pane keeps its live chat stream, terminals, scroll
@@ -1482,7 +1474,7 @@ function AppShell({
   // outside this wrapper and still render on top.
   return (
     <DaemonQueryProvider queryClient={queryClient} client={client} events={events}>
-      <PluginActionsProvider value={pluginActions}>
+      <PluginActionsBridge openPanel={openPluginPanel}>
         <div className="relative h-svh w-full">
         <PluginThemeApplier />
         <UsageModalRoot />
@@ -1530,9 +1522,32 @@ function AppShell({
           </div>
         )}
         </div>
-      </PluginActionsProvider>
+      </PluginActionsBridge>
     </DaemonQueryProvider>
   );
+}
+
+/**
+ * What a plugin panel's view may ask the shell to do (ADR-0042): open
+ * another panel, resolved through the same shared open path as every other
+ * surface. An id pair the daemon no longer lists (unknown or disabled) is a
+ * no-op, never an error surface. A separate component (not AppShell's own
+ * body) because the panels live in the query cache, which only exists below
+ * the DaemonQueryProvider AppShell itself renders.
+ */
+function PluginActionsBridge({ openPanel, children }: { openPanel: (panel: PluginPanel) => void; children: ReactNode }) {
+  const panels = usePluginPanels();
+  const actions = useMemo<PluginActions>(
+    () => ({
+      openPanel: (pluginId, panelId) => {
+        const panel = findPanel(panels.panels, pluginId, panelId);
+        if (!panel) return;
+        openPanel(panel);
+      },
+    }),
+    [panels.panels, openPanel],
+  );
+  return <PluginActionsProvider value={actions}>{children}</PluginActionsProvider>;
 }
 
 /**
@@ -1557,6 +1572,7 @@ function ShellCommands({
   onActivateTab,
   onNewChat,
   onOpenChat,
+  onOpenPluginPanel,
 }: {
   client: WsClient | null;
   tasks: Task[];
@@ -1570,6 +1586,8 @@ function ShellCommands({
   onActivateTab: (taskId: number, key: string) => void;
   onNewChat: () => void;
   onOpenChat: (chatId: number) => void;
+  /** "+" / palette -> one of the active plugins' panels (ADR-0042): the shell's one shared open path (page vs task tab). */
+  onOpenPluginPanel: (panel: PluginPanel) => void;
 }) {
   const { preference, setPreference } = useTheme();
   const pr = useTaskGit(selectedTask?.ID ?? null)?.pr;
@@ -1633,6 +1651,24 @@ function ShellCommands({
     }));
   }, [selectedTask, tabs, pr, onOpenTab, onActivateTab]);
   useCommands("shell:tabs", 2, tabCommands);
+
+  // ADR-0042: every panel of the active plugins, whatever its `where` -- the
+  // palette is a global opener, and the shell's shared open path decides
+  // page-vs-task-tab for each entry.
+  const pluginPanels = usePluginPanels().panels;
+  const pluginPanelCommands = useMemo<Command[]>(
+    () =>
+      pluginPanels.map((panel) => ({
+        id: `plugin-panel-${panel.plugin}-${panel.id}`,
+        group: "Plugins",
+        title: `Open ${panel.title}`,
+        subtitle: panel.plugin,
+        keywords: ["plugin", panel.id, "panel"],
+        run: () => onOpenPluginPanel(panel),
+      })),
+    [pluginPanels, onOpenPluginPanel],
+  );
+  useCommands("plugins:panels", 4, pluginPanelCommands);
 
   const chatCommands = useMemo<Command[]>(() => {
     if (!selectedTask) return [];
