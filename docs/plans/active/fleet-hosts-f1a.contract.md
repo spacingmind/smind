@@ -12,7 +12,7 @@ acs:
     covers: { tests: [TestHostIDMatchesDeviceIDVector, TestHostKeyFileModeAndCorruption, TestHostKeyConcurrentCreateOneIdentity] }
   - id: AC-3
     text: "All fleet tables and origin columns exist after migration (idempotent): fleet_hosts, fleet_links, fleet_audit, fleet_watches, fleet_idem, fleet_remote_tasks, tasks.origin_host, tasks.origin_trace, runs.origin_host; no mesh/cluster table; pair creation is atomic."
-    covers: { tests: [TestFleetMigration_TablesAndColumns, TestFleetPair_CreateGetListDelete, TestFleetPair_AliasAndHostConflicts, TestFleetPair_RollsBackOnBadLink, TestFleetHost_NoSchemaForMesh] }
+    covers: { tests: [TestFleetMigration_TablesAndColumns, TestFleetPair_CreateGetListDelete, TestFleetPair_AliasAndHostConflicts, TestFleetPair_RollsBackOnBadLink, TestFleetPair_RollsBackOnMidInsertFailure, TestFleetPair_RejectsLinkForOtherHost, TestFleetHost_NoSchemaForMesh] }
   - id: AC-4
     text: "Audit, watch, idempotency and mirror queries: summary truncation, only-old sweep, watch survives host removal, mirror+watch one transaction, nil cost stays nil, second idempotency put returns the first."
     covers: { tests: [TestFleetAudit_TruncatesSummary, TestFleetAudit_SweepOnlyOld, TestFleetWatch_MirrorAndWatchOneTransaction, TestFleetWatch_SurvivesHostDelete, TestFleetRemoteTask_NilCostStaysNil, TestFleetIdem_SecondPutReturnsFirst] }
@@ -37,6 +37,7 @@ tests:
   - { name: TestFleetPair_CreateGetListDelete, run: "go test ./internal/store -run '^TestFleetPair_CreateGetListDelete$' -count=1", timeoutSec: 300 }
   - { name: TestFleetPair_AliasAndHostConflicts, run: "go test ./internal/store -run '^TestFleetPair_AliasAndHostConflicts$' -count=1", timeoutSec: 300 }
   - { name: TestFleetPair_RollsBackOnBadLink, run: "go test ./internal/store -run '^TestFleetPair_RollsBackOnBadLink$' -count=1", timeoutSec: 300 }
+  - { name: TestFleetPair_RollsBackOnMidInsertFailure, run: "go test ./internal/store -run '^TestFleetPair_RollsBackOnMidInsertFailure$' -count=1", timeoutSec: 300 }
   - { name: TestFleetHost_NoSchemaForMesh, run: "go test ./internal/store -run '^TestFleetHost_NoSchemaForMesh$' -count=1", timeoutSec: 300 }
   - { name: TestFleetAudit_TruncatesSummary, run: "go test ./internal/store -run '^TestFleetAudit_TruncatesSummary$' -count=1", timeoutSec: 300 }
   - { name: TestFleetAudit_SweepOnlyOld, run: "go test ./internal/store -run '^TestFleetAudit_SweepOnlyOld$' -count=1", timeoutSec: 300 }
@@ -64,7 +65,7 @@ mutations:
   - { id: M5, file: internal/fleet/registry/registry.go, change: "initiator's inbound link is created enabled", expectFail: [TestRegistryPairingDirectedLinksReverseOff] }
   - { id: M6, file: internal/fleet/registry/registry.go, change: "Authorize ignores the inbound enabled flag", expectFail: [TestRegistryAuthorize] }
   - { id: M7, file: internal/fleet/fleet.go, change: "LoadIdentity ignores cfg.Enabled and creates the key", expectFail: [TestFleetOffIsByteForByte] }
-  - { id: M8, file: internal/store/fleet.go, change: "CreateFleetPair writes the host outside the transaction", expectFail: [TestFleetPair_RollsBackOnBadLink] }
+  - { id: M8, file: internal/store/fleet.go, change: "CreateFleetPair commits the transaction when a link insert fails instead of rolling back", expectFail: [TestFleetPair_RollsBackOnMidInsertFailure] }
   - { id: M9, file: internal/store/fleet_audit.go, change: "AppendFleetAudit stops truncating the summary", expectFail: [TestFleetAudit_TruncatesSummary] }
   - { id: M10, file: internal/config/fleet.go, change: "drop the maxHosts range check", expectFail: [TestFleet_ValidationNamesField] }
 commands:
