@@ -120,6 +120,9 @@ func (s *Service) SubmitVerdict(reviewID int64, token, runID string, raw []byte)
 		return View{}, err
 	}
 	summary := v.Summary
+	if v.Verdict == VerdictBlocked {
+		summary += " [blocked: " + v.BlockedReason + "]"
+	}
 	if res.Capped {
 		summary += " [clamped to " + res.Verdict + ": " + strings.Join(res.Reasons, "; ") + "]"
 	}

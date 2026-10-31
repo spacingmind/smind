@@ -270,6 +270,41 @@ func TestVerdictSubmit_HoldWhenGateUnknown(t *testing.T) {
 	mustBeOpen(t, svc, row.ID, "while a gate is unknown")
 }
 
+func TestVerdictSubmit_BlockedKeepsReasonInSummary(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	row, token := openReview(t, svc, digestWithGates(Gate{ID: "ci", State: GatePass}))
+	raw, err := json.Marshal(SeatVerdict{V: 1, ReviewID: row.ID, Verdict: VerdictBlocked,
+		Summary: "cannot judge this diff", BlockedReason: "the scratch worktree is unreadable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := svc.SubmitVerdict(row.ID, token, row.RunID, raw)
+	if err != nil {
+		t.Fatalf("SubmitVerdict() error = %v", err)
+	}
+	if v.Status != "done" || v.Verdict != VerdictBlocked || v.SeatVerdict != VerdictBlocked {
+		t.Fatalf("view = %+v, want a done BLOCKED review", v)
+	}
+	// The row has no blocked_reason column for a seat verdict, so the reason
+	// survives only inside the stored summary; only the daemon writes
+	// blocked_reason.
+	if v.BlockedReason != "" {
+		t.Fatalf("view blockedReason = %q, want empty", v.BlockedReason)
+	}
+	if !strings.Contains(v.Summary, "cannot judge this diff") || !strings.Contains(v.Summary, "[blocked: the scratch worktree is unreadable]") {
+		t.Fatalf("summary = %q, want the seat's blocked reason kept", v.Summary)
+	}
+	stored, err := svc.DB.GetStewardReview(row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.BlockedReason != "" || !strings.Contains(stored.Summary, "[blocked: the scratch worktree is unreadable]") {
+		t.Fatalf("stored row = %+v, want an empty blocked reason and the reason in the summary", stored)
+	}
+}
+
 func TestVerdictSubmit_ReviewIDMismatch(t *testing.T) {
 	t.Parallel()
 
