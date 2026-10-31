@@ -19,6 +19,8 @@ import { useClearProviderCooldown, activeCooldownUntil } from "@/hooks/use-clear
 import { useProfileList } from "@/hooks/use-profiles";
 import { detailLevelChangesView, useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
+import type { DeliverableContext } from "@/components/timeline/deliverable-card";
+import { useLocalPathActions } from "@/hooks/use-local-path-actions";
 import { continuePrompt } from "@/components/timeline/run-footer-model";
 import { ChatOutlineRail } from "@/components/timeline/chat-outline-rail";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
@@ -81,6 +83,7 @@ export function TaskDetailPane({
   events,
   onOpenFile,
   onOpenDiffTab,
+  onOpenFilesTab,
   onJumpToTask,
 }: {
   client: WsClientLike | null;
@@ -101,6 +104,8 @@ export function TaskDetailPane({
   onOpenFile?: (path: string) => void;
   /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
   onOpenDiffTab?: () => void;
+  /** Brings the task's Files tab forward -- the deliverable cards' "+ N more files" target. Optional: without it the summary is plain text. */
+  onOpenFilesTab?: () => void;
   /** Selects another task (the lineage strip's parent/child jump targets). Optional: without it the strip renders but isn't click-through. */
   onJumpToTask?: (taskId: number) => void;
 }) {
@@ -259,6 +264,17 @@ export function TaskDetailPane({
   const openFileRef = useRef(onOpenFile);
   openFileRef.current = onOpenFile;
   const openFile = useCallback((path: string) => openFileRef.current?.(path), []);
+
+  // The deliverable cards under each answer (ADR-0049 section 4). One object per pane, stable across renders so the memoised
+  // RunTimeline rows are not re-rendered by it; local-path actions are read once here, not once per card.
+  const pathActions = useLocalPathActions();
+  const openFilesTabRef = useRef(onOpenFilesTab);
+  openFilesTabRef.current = onOpenFilesTab;
+  const showFiles = useCallback(() => openFilesTabRef.current?.(), []);
+  const deliverableCtx = useMemo<DeliverableContext>(
+    () => ({ client, taskId: task.ID, pathActions, onShowFiles: onOpenFilesTab ? showFiles : undefined }),
+    [client, task.ID, pathActions, showFiles, onOpenFilesTab !== undefined],
+  );
 
   // Message hover actions. Pinned behind refs so RunTimeline's memo keeps
   // bailing out while these always call the latest submitPrompt.
@@ -494,6 +510,7 @@ export function TaskDetailPane({
                     modelLabels={modelLabels}
                     isLatest={run.id === runs[runs.length - 1]?.id}
                     disconnected={connectionStatus !== "connected"}
+                    deliverables={deliverableCtx}
                   />
                 ))}
               </ul>

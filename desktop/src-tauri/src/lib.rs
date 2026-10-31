@@ -27,6 +27,7 @@ mod editors;
 mod lifecycle;
 mod menu;
 mod notify;
+mod open_path;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod overlay_icon;
 mod probe;
@@ -154,6 +155,7 @@ pub fn run() {
             menu::app_menu_action,
             editors::editors_list,
             editors::open_in_editor,
+            open_path::open_path_default,
             daemon_manager::daemon_status,
             daemon_manager::daemon_install,
             daemon_manager::daemon_update,

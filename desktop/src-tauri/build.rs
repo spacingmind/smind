@@ -79,6 +79,7 @@ fn main() {
             "app_menu_action",
             "editors_list",
             "open_in_editor",
+            "open_path_default",
             "daemon_status",
             "daemon_install",
             "daemon_update",
