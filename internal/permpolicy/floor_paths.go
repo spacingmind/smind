@@ -1,9 +1,7 @@
 package permpolicy
 
 import (
-	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -17,9 +15,10 @@ func resolveFloor(req Request, w, cwd string) (string, bool) {
 	if w == "" {
 		return "", false
 	}
+	pl := req.pl()
 	home := floorHome(req)
-	for _, prefix := range []string{"~", "$HOME", "${HOME}"} {
-		if w == prefix || strings.HasPrefix(w, prefix+"/") {
+	for _, prefix := range pl.homeForms() {
+		if w == prefix || (strings.HasPrefix(w, prefix) && (w[len(prefix)] == '/' || (pl.windows && w[len(prefix)] == '\\'))) {
 			if home == "" {
 				return "", false
 			}
@@ -27,10 +26,10 @@ func resolveFloor(req Request, w, cwd string) (string, bool) {
 			break
 		}
 	}
-	if dynamicWord(w) {
+	if pl.dynamicWord(w) {
 		return "", false
 	}
-	resolved, err := ResolvePath(w, cwd)
+	resolved, err := pl.resolve(w, cwd)
 	if err != nil {
 		return "", false
 	}
@@ -49,7 +48,7 @@ type wordPath struct {
 func (fs *floorSeg) wordPaths() []wordPath {
 	var out []wordPath
 	add := func(w string) {
-		if w == "" {
+		if w == "" || fs.pl.isNullDevice(w) {
 			return
 		}
 		r, ok := resolveFloor(fs.req, w, fs.cwd)
@@ -71,6 +70,9 @@ func (fs *floorSeg) wordPaths() []wordPath {
 		case "", "&1", "&2", "-":
 			continue
 		}
+		if fs.pl.isNullDevice(rd.Target) {
+			continue
+		}
 		add(rd.Target)
 	}
 	return out
@@ -80,16 +82,23 @@ func (fs *floorSeg) wordPaths() []wordPath {
 // and credentials, and the daemon home. The task worktree lives under
 // Home/.smind/worktrees, so it is carved out by the caller.
 func installRoots(req Request) []string {
+	pl := req.pl()
 	home := floorHome(req)
 	roots := []string{
-		filepath.Join(home, ".smind"),
-		filepath.Join(home, ".claude"),
-		filepath.Join(home, ".claude.json"),
-		filepath.Join(home, ".config"),
-		filepath.Join(home, ".ssh"),
-		filepath.Join(home, ".gnupg"),
-		filepath.Join(home, "Library", "Keychains"),
-		filepath.Join(home, "Library", "LaunchAgents"),
+		pl.join(home, ".smind"),
+		pl.join(home, ".claude"),
+		pl.join(home, ".claude.json"),
+		pl.join(home, ".config"),
+		pl.join(home, ".ssh"),
+		pl.join(home, ".gnupg"),
+	}
+	if pl.windows {
+		roots = append(roots, pl.join(home, "AppData"))
+	} else {
+		roots = append(roots,
+			pl.join(home, "Library", "Keychains"),
+			pl.join(home, "Library", "LaunchAgents"),
+		)
 	}
 	if req.SmindHome != "" {
 		roots = append(roots, req.SmindHome)
@@ -101,31 +110,33 @@ func installRoots(req Request) []string {
 // An empty home would make every root relative and meaningless, so without
 // one nothing is claimed here.
 func inInstallState(req Request, resolved string) bool {
-	if req.Worktree != "" && Within(resolved, []string{req.Worktree}) {
+	pl := req.pl()
+	if req.Worktree != "" && pl.within(resolved, []string{req.Worktree}) {
 		return false
 	}
 	if floorHome(req) == "" {
 		return false
 	}
-	return Within(resolved, installRoots(req))
+	return pl.within(resolved, installRoots(req))
 }
 
 // tempRoots is the OS temp zone, where scratch writes are allowed.
-func tempRoots() []string {
-	return []string{os.TempDir(), "/tmp", "/private/tmp", "/var/tmp"}
-}
+func tempRoots(pl *platform) []string { return pl.tempDirs() }
 
 // outsideWorktree is true for a resolved path that is neither inside the
 // task worktree nor in the OS temp zone nor a harmless device.
 func outsideWorktree(req Request, resolved string) bool {
-	switch resolved {
-	case "/dev/null", "/dev/stdout", "/dev/stderr":
+	pl := req.pl()
+	if !pl.windows {
+		switch resolved {
+		case "/dev/null", "/dev/stdout", "/dev/stderr":
+			return false
+		}
+	}
+	if req.Worktree != "" && pl.within(resolved, []string{req.Worktree}) {
 		return false
 	}
-	if req.Worktree != "" && Within(resolved, []string{req.Worktree}) {
-		return false
-	}
-	return !Within(resolved, tempRoots())
+	return !pl.within(resolved, tempRoots(pl))
 }
 
 var daemonPort = regexp.MustCompile(`(^|[:/])(4648|4870)($|[/?])`)
@@ -144,7 +155,7 @@ func (fs *floorSeg) pathRules() (FloorHit, bool) {
 
 func (fs *floorSeg) installRules(words []wordPath) (FloorHit, bool) {
 	if len(fs.argv) > 0 {
-		switch path.Base(fs.argv[0]) {
+		switch fs.pl.cmdName(fs.argv[0]) {
 		case "pkill", "killall", "kill":
 			return floorHit("no-install-state")
 		case "smind":
@@ -190,11 +201,18 @@ var procEnviron = regexp.MustCompile(`^/proc/[^/]+/environ$`)
 // secretName matches the file names that hold credentials, compared on the
 // last path element so `./.env` and `/home/u/.ssh/id_rsa` both match while
 // `env` and `.environment` do not.
-func secretName(w string) bool {
-	if procEnviron.MatchString(path.Clean(w)) {
-		return true
+func secretName(w string) bool { return hostPlatform().secretName(w) }
+
+func (pl *platform) secretName(w string) bool {
+	var b string
+	if pl.windows {
+		b = strings.ToLower(w[strings.LastIndexAny(w, `/\`)+1:])
+	} else {
+		if procEnviron.MatchString(path.Clean(w)) {
+			return true
+		}
+		b = path.Base(path.Clean(w))
 	}
-	b := path.Base(path.Clean(w))
 	switch {
 	case b == ".env", b == ".netrc", b == "credentials":
 		return true
@@ -219,7 +237,7 @@ func (fs *floorSeg) secretRules(words []wordPath) (FloorHit, bool) {
 		return FloorHit{}, false
 	}
 	args := fs.argv[1:]
-	switch name := path.Base(fs.argv[0]); name {
+	switch name := fs.pl.cmdName(fs.argv[0]); name {
 	case "printenv":
 		return floorHit("no-secrets")
 	case "set", "export":
@@ -251,7 +269,7 @@ func (fs *floorSeg) secretRules(words []wordPath) (FloorHit, bool) {
 			return FloorHit{}, false
 		}
 		for _, w := range words {
-			if secretName(w.raw) || (w.ok && secretName(w.resolved)) {
+			if fs.pl.secretName(w.raw) || (w.ok && fs.pl.secretName(w.resolved)) {
 				return floorHit("no-secrets")
 			}
 		}
@@ -272,14 +290,14 @@ func (fs *floorSeg) destructiveRules(words []wordPath) (FloorHit, bool) {
 	if len(fs.argv) == 0 {
 		return fs.redirectRules()
 	}
-	name := path.Base(fs.argv[0])
+	name := fs.pl.cmdName(fs.argv[0])
 	if name == "sudo" || name == "doas" {
 		return floorHit("no-destructive-outside")
 	}
 	if mutators[name] {
 		for _, w := range fs.destinations(name, words) {
 			if !w.ok || outsideWorktree(fs.req, w.resolved) {
-				if !w.ok && dynamicWord(w.raw) && !strings.HasPrefix(w.raw, "$HOME") && !strings.HasPrefix(w.raw, "${HOME}") {
+				if !w.ok && fs.pl.dynamicWord(w.raw) && !strings.HasPrefix(w.raw, "$HOME") && !strings.HasPrefix(w.raw, "${HOME}") {
 					continue // dynamic: the engine asks
 				}
 				return floorHit("no-destructive-outside")
@@ -430,9 +448,12 @@ func (fs *floorSeg) redirectRules() (FloorHit, bool) {
 		case "", "&1", "&2", "-":
 			continue
 		}
+		if fs.pl.isNullDevice(rd.Target) {
+			continue
+		}
 		r, ok := resolveFloor(fs.req, rd.Target, fs.cwd)
 		if !ok {
-			if dynamicWord(rd.Target) && !strings.HasPrefix(rd.Target, "$HOME") && !strings.HasPrefix(rd.Target, "${HOME}") {
+			if fs.pl.dynamicWord(rd.Target) && !strings.HasPrefix(rd.Target, "$HOME") && !strings.HasPrefix(rd.Target, "${HOME}") {
 				continue
 			}
 			return floorHit("no-destructive-outside")
@@ -462,7 +483,7 @@ func CheckFloorPaths(req Request) (FloorHit, bool) {
 	}
 	for _, p := range req.Paths {
 		r, ok := resolveFloor(req, p, cwd)
-		if secretName(p) || (ok && secretName(r)) {
+		if pl := req.pl(); pl.secretName(p) || (ok && pl.secretName(r)) {
 			return floorHit("no-secrets")
 		}
 		if !ok {

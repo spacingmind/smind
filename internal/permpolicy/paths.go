@@ -164,3 +164,11 @@ func (pl *platform) within(resolved string, roots []string) bool {
 	}
 	return false
 }
+
+// homeForms are the leading words that expand to the home directory under this flavour.
+func (pl *platform) homeForms() []string {
+	if pl.windows {
+		return winHomeForms
+	}
+	return posixHomeForms
+}

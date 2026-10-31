@@ -1,9 +1,6 @@
 package permpolicy
 
-import (
-	"path"
-	"strings"
-)
+import "strings"
 
 // envRules runs the rule that keeps tests off the real home.
 func (fs *floorSeg) envRules() (FloorHit, bool) {
@@ -14,7 +11,7 @@ func isFetcher(fs *floorSeg) bool {
 	if len(fs.argv) == 0 {
 		return false
 	}
-	switch path.Base(fs.argv[0]) {
+	switch fs.pl.cmdName(fs.argv[0]) {
 	case "curl", "wget", "fetch":
 		return true
 	}
@@ -25,7 +22,7 @@ func isInterpreter(fs *floorSeg) bool {
 	if len(fs.argv) == 0 {
 		return false
 	}
-	switch name := path.Base(fs.argv[0]); name {
+	switch name := fs.pl.cmdName(fs.argv[0]); name {
 	case "sh", "bash", "zsh", "dash", "ksh", "node", "perl", "ruby", "source", ".":
 		return true
 	default:
@@ -73,7 +70,7 @@ var homeVars = map[string]bool{"HOME": true, "SMIND_HOME": true}
 func (fs *floorSeg) realHomeRules() (FloorHit, bool) {
 	assigns := fs.assigns
 	if len(fs.argv) > 0 {
-		switch path.Base(fs.argv[0]) {
+		switch fs.pl.cmdName(fs.argv[0]) {
 		case "export":
 			for _, a := range fs.argv[1:] {
 				if isEnvAssign(a) {
@@ -109,8 +106,8 @@ func (fs *floorSeg) realHomeValue(val string) bool {
 	if val == "" {
 		return true
 	}
-	for _, p := range []string{"~", "$HOME", "${HOME}"} {
-		if val == p || strings.HasPrefix(val, p+"/") {
+	for _, p := range fs.pl.homeForms() {
+		if val == p || (strings.HasPrefix(val, p) && (val[len(p)] == '/' || (fs.pl.windows && val[len(p)] == '\\'))) {
 			return true
 		}
 	}
@@ -122,12 +119,12 @@ func (fs *floorSeg) realHomeValue(val string) bool {
 	if home == "" {
 		return false
 	}
-	if h, ok := resolveFloor(fs.req, home, ""); ok && resolved == h {
+	if h, ok := resolveFloor(fs.req, home, ""); ok && fs.pl.eq(resolved, h) {
 		return true
 	}
 	roots := installRoots(fs.req)[:1] // Home/.smind
 	if fs.req.SmindHome != "" {
 		roots = append(roots, fs.req.SmindHome)
 	}
-	return Within(resolved, roots)
+	return fs.pl.within(resolved, roots)
 }
