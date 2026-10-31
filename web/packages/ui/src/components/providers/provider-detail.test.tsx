@@ -403,5 +403,43 @@ describe("ProviderDetail", () => {
       expect(screen.queryByTestId("provider-recipe-zai-claude")).toBeNull();
       expect(screen.queryByTestId("provider-secrets-zai-claude")).toBeNull();
     });
+
+    it("a recipe instance with a key set reads Key set, not CLI login", async () => {
+      const d = recipeDaemon({
+        recipe: "zai-coding",
+        secrets: [{ name: "api-key", env: "ANTHROPIC_AUTH_TOKEN", set: true, fingerprint: "ab12" }],
+      });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await waitFor(() => expect(screen.getByTestId("provider-readiness-zai-claude")).toHaveTextContent("Key set"));
+      expect(screen.getByTestId("provider-detail").textContent).not.toMatch(/CLI login/);
+    });
+
+    it("a recipe instance without a key reads No key set", async () => {
+      const d = recipeDaemon({
+        recipe: "zai-coding",
+        secrets: [{ name: "api-key", env: "ANTHROPIC_AUTH_TOKEN", set: false }],
+      });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await waitFor(() => expect(screen.getByTestId("provider-readiness-zai-claude")).toHaveTextContent("No key set"));
+    });
+
+    it("a recipe instance shows its private config dir and no env field", async () => {
+      const d = recipeDaemon({ recipe: "zai-coding" });
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await flush();
+      expect(screen.getByTestId("provider-config-dir-zai-claude")).toHaveTextContent("private (managed by smind)");
+      expect(screen.queryByTestId("provider-env-zai-claude")).toBeNull();
+      expect(screen.getByTestId("provider-external-zai-claude")).toHaveTextContent("Managed by smind");
+    });
+
+    it("a plain instance keeps the CLI-login wording", async () => {
+      const d = recipeDaemon({});
+      renderWithDaemon(<ProviderDetail item={zaiItem()} client={d.client} />, d);
+      await waitFor(() => expect(screen.getByTestId("provider-readiness-zai-claude")).toHaveTextContent("Ready (CLI login)"));
+      expect(screen.getByTestId("provider-external-zai-claude")).toHaveTextContent(
+        "CLI login kept in its own config directory",
+      );
+      expect(screen.queryByTestId("provider-config-dir-zai-claude")).toBeNull();
+    });
   });
 });
