@@ -38,6 +38,7 @@ Usage:
 
   smind relay [--listen <addr>] [--data-dir <dir>]        start the self-hostable E2EE relay
   smind relay host new|ls|rm|rotate [<id>]                manage relay hosts (secret printed once)
+  smind host add|ls|rm|invite|approve|reject|enable-reverse|disable-reverse|rename|test   pair and manage connected hosts (needs fleet.enabled)
 
   smind workspace create <repoPath> <name> <policy>       register a workspace
   smind workspace ls                                      list workspaces
