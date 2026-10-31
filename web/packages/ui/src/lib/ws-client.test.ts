@@ -310,3 +310,27 @@ describe("notifications", () => {
     expect(note).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("WsClient.connect failure", () => {
+  it("never puts the access token in the error message", async () => {
+    class FailingWebSocket {
+      private listeners = new Map<string, Array<() => void>>();
+      constructor(readonly url: string) {
+        queueMicrotask(() => this.listeners.get("error")?.forEach((fn) => fn()));
+      }
+      addEventListener(type: string, fn: () => void) {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+      }
+      removeEventListener() {}
+    }
+    vi.stubGlobal("WebSocket", FailingWebSocket);
+    try {
+      const err = await WsClient.connect("ws://h/ws?token=SECRET123").catch((e: Error) => e);
+      expect((err as Error).message).toContain("failed to connect");
+      expect((err as Error).message).toContain("ws://h/ws");
+      expect((err as Error).message).not.toContain("SECRET123");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

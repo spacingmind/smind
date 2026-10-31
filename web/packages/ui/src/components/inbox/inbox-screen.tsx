@@ -341,7 +341,7 @@ function InboxRow({
       </div>
 
       <div className="flex flex-wrap items-center gap-1">
-        {permission ? (
+        {permission && (
           <Button
             type="button"
             variant="outline"
@@ -353,19 +353,18 @@ function InboxRow({
           >
             {expanded ? "Hide request" : "Review request"}
           </Button>
-        ) : isHostKind(item.kind) ? (
-          onOpenHosts && (
-            <Button type="button" variant="outline" size="sm" className={btn} data-testid={`inbox-hosts-${item.key}`} onClick={onOpenHosts}>
-              Review hosts
-            </Button>
-          )
-        ) : (
-          hasTask && (
-            <Button type="button" variant="outline" size="sm" className={btn} data-testid={`inbox-open-${item.key}`} onClick={onOpen}>
-              Open task
-            </Button>
-          )
         )}
+        {isHostKind(item.kind)
+          ? onOpenHosts && (
+              <Button type="button" variant="outline" size="sm" className={btn} data-testid={`inbox-hosts-${item.key}`} onClick={onOpenHosts}>
+                Review hosts
+              </Button>
+            )
+          : hasTask && (
+              <Button type="button" variant="outline" size="sm" className={btn} data-testid={`inbox-open-${item.key}`} onClick={onOpen}>
+                Open task
+              </Button>
+            )}
         {/* Always rendered (disabled once seen) so the buttons beside it do not jump when the row is marked. */}
         <Button
           type="button"

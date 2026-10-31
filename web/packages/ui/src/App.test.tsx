@@ -271,6 +271,23 @@ describe("App", () => {
     expect(connect).toHaveBeenCalledTimes(1);
   });
 
+  it("the sidebar's Retry re-runs connect after an initial failure and recovers (UAT B-03)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("no daemon listening"))
+      .mockResolvedValueOnce(new WsClient(socket));
+    render(<App connect={connect} />);
+    await flush();
+    expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await flush();
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
+    expect(screen.queryByText("Can't reach the daemon")).not.toBeInTheDocument();
+  });
+
   it("an unexpected disconnect updates the header away from 'Connected to daemon', and a successful reconnect brings it back", async () => {
     const socket1 = new FakeSocket();
     const socket2 = new FakeSocket();
@@ -1170,7 +1187,7 @@ describe("App routing", () => {
     expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
   });
 
-  it("a URL naming a task task.list doesn't return lands on the empty state without throwing", async () => {
+  it("a URL naming a task task.list doesn't return lands on the not-found state without throwing", async () => {
     window.location.hash = `#/workspace/${WORKSPACE.ID}/task/999/chat/1`;
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
@@ -1178,7 +1195,47 @@ describe("App routing", () => {
     await resolveSidebar(socket, [TASK_A]);
     await flush();
 
-    expect(screen.getByTestId("app-empty-state")).toBeInTheDocument();
+    expect(screen.getByTestId("task-not-found")).toBeInTheDocument();
+  });
+
+  it("mounting at a task URL that doesn't exist shows the not-found state and clears the stale hash (UAT B-02)", async () => {
+    window.location.hash = `#/workspace/${WORKSPACE.ID}/task/99999/chat/1`;
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    await flush();
+
+    const notFound = screen.getByTestId("task-not-found");
+    expect(notFound).toHaveTextContent("Task 99999 not found");
+    expect(window.location.hash).not.toContain("99999");
+    fireEvent.click(within(notFound).getByRole("button", { name: /back/i }));
+    await flush();
+    expect(screen.queryByTestId("task-not-found")).not.toBeInTheDocument();
+    expect(screen.getByTestId("home-landing")).toBeInTheDocument();
+  });
+
+  it("changing the hash to a nonexistent task while one is selected clears the selection (UAT B-02)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
+
+    await act(async () => {
+      navigateHash(`#/workspace/${WORKSPACE.ID}/task/99999/chat/1`);
+    });
+    await flush();
+
+    expect(screen.getByTestId("task-not-found")).toHaveTextContent("Task 99999 not found");
+    expect(screen.queryByText(TASK_A.Title, { selector: '[data-testid="app-header-title"]' })).not.toBeInTheDocument();
+    expect(window.location.hash).not.toContain("99999");
   });
 
   it("shows the landing when no task is selected", async () => {
@@ -1254,6 +1311,56 @@ describe("App routing", () => {
 
     expect(screen.getByRole("tab", { name: /a\.md/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /b\.md/ })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("App composer focus after creating a task (UAT A-11)", () => {
+  const CREATED: Task = { ...TASK, ID: 7, Title: "Brand new", Branch: "brand-new" };
+
+  async function createViaDialog(socket: FakeSocket): Promise<void> {
+    fireEvent.mouseEnter(screen.getByTestId("sidebar-workspace-row").parentElement!);
+    await flush();
+    fireEvent.pointerDown(screen.getByTestId("sidebar-workspace-actions-trigger"), { button: 0, ctrlKey: false });
+    await flush();
+    fireEvent.click(screen.getByText("Add task"));
+    await flush();
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Brand new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await flush();
+    respond(socket, "task.create", CREATED);
+    await flush();
+    respondAll(socket, "task.list", [TASK_A, CREATED]);
+    respondChatList(socket, CREATED);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+  }
+
+  it("focuses the Prompt textarea once the task pane mounts after the dialog closes", async () => {
+    const socket = new FakeSocket();
+    render(<App connect={vi.fn().mockResolvedValue(new WsClient(socket))} />);
+    await resolveSidebar(socket, [TASK_A]);
+    await createViaDialog(socket);
+
+    expect(screen.getByLabelText("Prompt")).toHaveFocus();
+  });
+
+  it("does not move focus to the composer when a sidebar task row is merely clicked", async () => {
+    const socket = new FakeSocket();
+    render(<App connect={vi.fn().mockResolvedValue(new WsClient(socket))} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(screen.getByLabelText("Prompt")).not.toHaveFocus();
   });
 });
 
