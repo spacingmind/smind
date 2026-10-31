@@ -62,7 +62,7 @@ export function PluginPage({
         <DesktopWindowControls />
       </header>
       <main className="min-h-0 flex-1" data-testid="plugin-page-content">
-        <PluginPanelPane pluginId={pluginId} panelId={panelId} />
+        <PluginPanelPane pluginId={pluginId} panelId={panelId} bare />
       </main>
     </div>
   );

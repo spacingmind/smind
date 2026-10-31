@@ -44,11 +44,14 @@ export function PluginPanelPane({
   panelId,
   taskId,
   focused,
+  bare,
 }: {
   pluginId: string;
   panelId: string;
   taskId?: number;
   focused?: boolean;
+  /** The host already shows the title; show only the plugin id. */
+  bare?: boolean;
 }) {
   void focused;
   const queryClient = useQueryClient();
@@ -96,10 +99,14 @@ export function PluginPanelPane({
       <PaneHeader
         testId="plugin-panel-header"
         title={
-          <>
-            <span className="truncate">{title}</span>
+          bare ? (
             <span className="shrink-0 text-ui-sm font-normal text-foreground-muted">{pluginId}</span>
-          </>
+          ) : (
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate">{title}</span>
+              <span className="shrink-0 text-ui-sm font-normal text-foreground-muted">{pluginId}</span>
+            </span>
+          )
         }
         actions={
           <Button
