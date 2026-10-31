@@ -249,6 +249,48 @@ smind host rm studio
 
 `smind host ls` never prints a key, a password or a secret.
 
+## Try it on one machine
+
+You can pair two daemons on one computer with two home directories and two
+ports. Nothing here touches your real `~/.smind`.
+
+```bash
+export A=$(mktemp -d) B=$(mktemp -d)
+printf 'fleet:\n  enabled: true\n' > $A/config.yaml
+printf 'fleet:\n  enabled: true\n' > $B/config.yaml
+SMIND_HOME=$A smind config set server.port 4701
+SMIND_HOME=$B smind config set server.port 4702
+SMIND_HOME=$A smind serve &        # the receiver
+SMIND_HOME=$B smind serve &        # the initiator
+```
+
+Pair them. A loopback address needs no `--allow-cleartext`:
+
+```bash
+SMIND_HOME=$A smind host invite --addr ws://127.0.0.1:4701
+SMIND_HOME=$B smind host add 'smind-host://v1#...' --alias recv
+SMIND_HOME=$A smind host ls                       # shows the six-digit code
+SMIND_HOME=$A smind host approve <initiator> --sas <code> --write <workspaceId>
+```
+
+Read through the link from the initiator:
+
+```bash
+SMIND_HOME=$B smind host ls
+SMIND_HOME=$B smind host workspaces recv
+SMIND_HOME=$B smind host tasks recv
+```
+
+Create, prompt and stop have no command: they are the `task_new`, `task_send`
+and `task_stop` tools of the [MCP server](orchestration.md), each with
+`host: "recv"`. Run `SMIND_HOME=$B smind mcp serve` from an MCP client, create a
+task in the receiver's workspace with a provider and model the receiver has
+configured, send it a prompt, then stop the run. `smind host tasks recv` shows
+the task, and a run that needs a permission waits in the receiver's inbox.
+
+When you are done, stop both daemons by their process ids and delete `$A` and
+`$B`.
+
 ## Route by labels
 
 Instead of naming a host you can tag your paired hosts and pick one by tag. You
