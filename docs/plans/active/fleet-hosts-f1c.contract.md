@@ -21,7 +21,7 @@ acs:
     covers: { tests: [TestInboxScreen_HostKinds] }
   - id: AC-6
     text: "Mobile lists hosts read-only and approves a pending host from its inbox row with the SAS typed; there is no pairing, invite, grant or reverse call on mobile."
-    covers: { tests: [hostsList, hostsApprove, hostsSafety, inboxView host kinds] }
+    covers: { tests: [mobile-hosts] }
 tests:
   - { name: TestInboxHostPairDerived, run: "go test ./internal/inbox -run '^TestInboxHostPairDerived$' -count=1", timeoutSec: 300 }
   - { name: TestInboxHostDownOnlyAfterFiveMinutes, run: "go test ./internal/inbox -run '^TestInboxHostDownOnlyAfterFiveMinutes$' -count=1", timeoutSec: 300 }
@@ -42,7 +42,7 @@ mutations:
   - { id: M3, file: web/packages/ui/src/components/hosts/approve-host-dialog.tsx, change: "Approve enabled without the typed SAS matching", expectFail: [TestHostsPage_SASNeverAutoConfirmed] }
   - { id: M4, file: web/packages/ui/src/components/hosts/grant-editor.tsx, change: "the write-workspace requirement removed", expectFail: [TestHostsPage_GrantRequiresWriteWorkspace] }
   - { id: M5, file: web/packages/ui/src/components/hosts/host-row.tsx, change: "the reverse toggle copy drops the narrower-grant sentence", expectFail: [TestHostsPage_ReverseToggleShowsNarrowerGrant] }
-  - { id: M6, file: mobile/src/hosts/api.ts, change: "approve sends no sas", expectFail: [hostsApprove] }
+  - { id: M6, file: mobile/src/hosts/api.ts, change: "approve sends no sas", expectFail: [mobile-hosts] }
 commands:
   - { id: C1, run: "task lint", timeoutSec: 900 }
   - { id: C2, run: "task test", timeoutSec: 1500 }
