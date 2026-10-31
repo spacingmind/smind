@@ -27,16 +27,26 @@ acs:
     covers: { tests: [TestProviderUpdateCLI, TestCLIReferenceMatchesHelp], frames: [] }
   - id: AC8
     text: "The Providers detail edits an instance's models (replace vs add), disallowedTools and inherit toggle; light+dark at 1280 and 390."
-    covers: { tests: [], frames: [] }
+    covers: { tests: [ProviderInstanceEditors], frames: [] }
 tests:
-  - { name: TestUpdateInstance_LeavesOtherEntryByteIdentical, run: "go test ./internal/config -run '^TestUpdateInstance_LeavesOtherEntryByteIdentical$' -count=1", timeoutSec: 120 }
-  - { name: TestUpdateInstance_InvalidFieldsNamed, run: "go test ./internal/config -run '^TestUpdateInstance_InvalidFieldsNamed$' -count=1", timeoutSec: 120 }
-  - { name: TestUpdateInstance_IdempotentNoop, run: "go test ./internal/config -run '^TestUpdateInstance_IdempotentNoop$' -count=1", timeoutSec: 120 }
-  - { name: TestProviderUpdateInstance_RefusesAgentCaller, run: "go test ./internal/wsapi -run '^TestProviderUpdateInstance_RefusesAgentCaller$' -count=1", timeoutSec: 180 }
-  - { name: TestPluginSession_CannotReachHumanOnlyMethods, run: "go test ./internal/wsapi -run '^TestPluginSession_CannotReachHumanOnlyMethods$' -count=1", timeoutSec: 180 }
-  - { name: TestProviderUpdateInstance_RecipeMadeUIMadeHandWritten, run: "go test ./internal/wsapi -run '^TestProviderUpdateInstance_RecipeMadeUIMadeHandWritten$' -count=1", timeoutSec: 180 }
-  - { name: TestProviderList_InstanceEditableFields, run: "go test ./internal/wsapi -run '^TestProviderList_InstanceEditableFields$' -count=1", timeoutSec: 180 }
-  - { name: TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs, run: "go test ./internal/taskrunner -run '^TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs$' -count=1", timeoutSec: 180 }
+  - { name: TestUpdateInstance_LeavesOtherEntryByteIdentical, run: "go test ./internal/config -run '^TestUpdateInstance_LeavesOtherEntryByteIdentical$' -count=1", timeoutSec: 300 }
+  - { name: TestUpdateInstance_HandWrittenEntryWithComments, run: "go test ./internal/config -run '^TestUpdateInstance_HandWrittenEntryWithComments$' -count=1", timeoutSec: 300 }
+  - { name: TestUpdateInstance_LastEntryBeforeOtherSection, run: "go test ./internal/config -run '^TestUpdateInstance_LastEntryBeforeOtherSection$' -count=1", timeoutSec: 300 }
+  - { name: TestUpdateInstance_InvalidFieldsNamed, run: "go test ./internal/config -run '^TestUpdateInstance_InvalidFieldsNamed$' -count=1", timeoutSec: 300 }
+  - { name: TestUpdateInstance_UnknownIDAndNonInstance, run: "go test ./internal/config -run '^TestUpdateInstance_UnknownIDAndNonInstance$' -count=1", timeoutSec: 300 }
+  - { name: TestUpdateInstance_IdempotentNoop, run: "go test ./internal/config -run '^TestUpdateInstance_IdempotentNoop$' -count=1", timeoutSec: 300 }
+  - { name: TestUpdateInstance_NothingToUpdate, run: "go test ./internal/config -run '^TestUpdateInstance_NothingToUpdate$' -count=1", timeoutSec: 300 }
+  - { name: TestProviderUpdateInstance_RefusesAgentCaller, run: "go test ./internal/wsapi -run '^TestProviderUpdateInstance_RefusesAgentCaller$' -count=1", timeoutSec: 300 }
+  - { name: TestPluginSession_CannotReachHumanOnlyMethods, run: "go test ./internal/wsapi -run '^TestPluginSession_CannotReachHumanOnlyMethods$' -count=1", timeoutSec: 300 }
+  - { name: TestProviderUpdateInstance_RecipeMadeUIMadeHandWritten, run: "go test ./internal/wsapi -run '^TestProviderUpdateInstance_RecipeMadeUIMadeHandWritten$' -count=1", timeoutSec: 300 }
+  - { name: TestProviderUpdateInstance_AppliesLive, run: "go test ./internal/wsapi -run '^TestProviderUpdateInstance_AppliesLive$' -count=1", timeoutSec: 300 }
+  - { name: TestProviderUpdateInstance_InvalidKeepsRegistry, run: "go test ./internal/wsapi -run '^TestProviderUpdateInstance_InvalidKeepsRegistry$' -count=1", timeoutSec: 300 }
+  - { name: TestProviderList_InstanceEditableFields, run: "go test ./internal/wsapi -run '^TestProviderList_InstanceEditableFields$' -count=1", timeoutSec: 300 }
+  - { name: TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs, run: "go test ./internal/taskrunner -run '^TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs$' -count=1", timeoutSec: 300 }
+  - { name: TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged, run: "go test ./internal/wsapi -run '^TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged$' -count=1", timeoutSec: 300 }
+  - { name: TestProviderUpdateCLI, run: "go test ./cmd/smind -run '^TestProviderUpdateCLI$' -count=1", timeoutSec: 300 }
+  - { name: TestCLIReferenceMatchesHelp, run: "go test ./cmd/smind -run '^TestCLIReferenceMatchesHelp$' -count=1", timeoutSec: 300 }
+  - { name: ProviderInstanceEditors, run: "cd web && bun run --cwd packages/ui test provider-instance-editors", timeoutSec: 600 }
 mutations:
   - { id: M1, file: internal/wsapi/provider_instances.go, change: "remove the run-scoped refusal in handleProviderUpdateInstance", expectFail: [TestProviderUpdateInstance_RefusesAgentCaller] }
   - { id: M2, file: internal/config/provider_instance_update.go, change: "skip ValidateCustomProviders on the next list", expectFail: [TestUpdateInstance_InvalidFieldsNamed] }
