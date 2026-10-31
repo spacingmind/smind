@@ -177,7 +177,6 @@ func TestDecide_UnparseableIsAsk(t *testing.T) {
 }
 
 func TestDecide_SymlinkAndDotDotEscapeNotWithin(t *testing.T) {
-	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	pol := mustLoad(t, bashRule(goTestAllow, ActionAllow, "go", "test"))
 	req := dReq(t, "")
@@ -262,7 +261,6 @@ func TestDecide_WorkspaceScopedRule(t *testing.T) {
 }
 
 func TestFloor_BeatsAllowRule(t *testing.T) {
-	skipPOSIXPathsOnWindows(t)
 	t.Parallel()
 	pol := &Policy{Version: 1, Sha: "abc", Rules: []Rule{{
 		ID: "stash-ok", Action: ActionAllow, Why: "w",
