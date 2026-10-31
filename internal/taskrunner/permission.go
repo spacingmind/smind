@@ -105,6 +105,14 @@ type DetailedPermissionDecider interface {
 	DecideDetailed(ctx context.Context, summary string, detail *PermissionDetail, options []PermissionOption) (string, error)
 }
 
+// DenyReasonDecider is an optional extension of DetailedPermissionDecider:
+// it also returns why it denied. denyReason is non-empty only when the decider
+// itself denied for a stated reason (the policy floor id, ADR-0047); the
+// Claude adapter appends it to the deny message the model sees.
+type DenyReasonDecider interface {
+	DecideDetailedWithReason(ctx context.Context, summary string, detail *PermissionDetail, options []PermissionOption) (optionID, denyReason string, err error)
+}
+
 // summarizeACPToolCall builds a human-readable summary of the tool call a
 // session/request_permission is asking about, from ACP's raw ToolCallUpdate
 // JSON. It prefers Title (the field agents populate for exactly this
@@ -198,9 +206,11 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 		summary = fmt.Sprintf("run Write %s (%s)", path, describeWrite(a.cwd, path, content, false, ""))
 	}
 
-	var optionID string
+	var optionID, denyReason string
 	var err error
-	if detail := claudeBashDetail(a.cwd, req); detail != nil {
+	if rd, ok := a.decider.(DenyReasonDecider); ok {
+		optionID, denyReason, err = rd.DecideDetailedWithReason(ctx, summary, claudeBashDetail(a.cwd, req), opts)
+	} else if detail := claudeBashDetail(a.cwd, req); detail != nil {
 		// The command is what a human approving a Bash call must see; the
 		// summary alone says only "run Bash".
 		if dd, ok := a.decider.(DetailedPermissionDecider); ok {
@@ -216,6 +226,9 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 	}
 	if optionID == claudeOptionAllow {
 		return true, req.Input, "", nil, false, nil
+	}
+	if optionID == claudeOptionDeny && denyReason != "" {
+		return false, nil, claudeFixedDenyMessage + ": " + denyReason, nil, false, nil
 	}
 	return false, nil, claudeFixedDenyMessage, nil, false, nil
 }
