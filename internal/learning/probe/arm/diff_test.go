@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 // diffFx is a pristine base export plus an arm materialised from the same
@@ -107,6 +109,29 @@ func TestDiff_SymlinksSkippedAndNeverRead(t *testing.T) {
 	}
 	if !strings.Contains(d, "deleted file mode") {
 		t.Fatalf("symlink-replaced file should read as deleted:\n%s", d)
+	}
+}
+
+// A directory junction (Windows; ModeIrregular) is skipped and never read,
+// like a symlinked directory.
+func TestDiff_JunctionsSkippedAndNeverRead(t *testing.T) {
+	// A plain fixture (no file symlink, unlike diffFx), so this runs without
+	// symlink privilege.
+	root := t.TempDir()
+	base, armDir := filepath.Join(root, "base"), filepath.Join(root, "arm")
+	for _, d := range []string{base, armDir} {
+		write(t, filepath.Join(d, "README.md"), "hello\n", 0o644)
+	}
+	git(t, armDir, "init", "-q", "-b", "probe")
+	outside := t.TempDir()
+	write(t, filepath.Join(outside, "secret.txt"), "TOP-SECRET-VALUE\n", 0o644)
+	testutil.Link(t, outside, filepath.Join(armDir, "linkdir"))
+	d, _, err := Diff(context.Background(), base, armDir, 64<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(d, "TOP-SECRET-VALUE") || strings.Contains(d, "linkdir") || strings.Contains(d, "secret.txt") {
+		t.Fatalf("a junction target was read or listed:\n%s", d)
 	}
 }
 

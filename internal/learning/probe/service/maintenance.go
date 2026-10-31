@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/spacingmind/smind/internal/fsutil"
 	"github.com/spacingmind/smind/internal/learning/probe/arm"
 	"github.com/spacingmind/smind/internal/learning/projection"
 )
@@ -70,7 +71,7 @@ func (s *Service) killStaleLaunches(ctx context.Context) {
 	}
 	for _, e := range ents {
 		dir := filepath.Join(s.launchRoot(), e.Name())
-		if fi, err := os.Lstat(dir); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		if fi, err := os.Lstat(dir); err != nil || fsutil.IsLink(fi.Mode()) || !fi.IsDir() {
 			continue
 		}
 		pidFile, armDir := filepath.Join(dir, "claude.pid"), filepath.Join(s.armsRoot(), arm.DirPrefix+e.Name())
@@ -132,7 +133,7 @@ func sweepChildren(root string, minAge time.Duration, now time.Time) {
 	for _, e := range ents {
 		p := filepath.Join(root, e.Name())
 		fi, err := os.Lstat(p)
-		if err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() || now.Sub(fi.ModTime()) < minAge {
+		if err != nil || fsutil.IsLink(fi.Mode()) || !fi.IsDir() || now.Sub(fi.ModTime()) < minAge {
 			continue
 		}
 		removeAll(p)

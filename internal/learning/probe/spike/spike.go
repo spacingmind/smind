@@ -22,6 +22,8 @@ import (
 	"time"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
+
+	"github.com/spacingmind/smind/internal/fsutil"
 )
 
 // ErrBadPath is returned by SettingsJSON for a path that cannot be put into
@@ -272,7 +274,7 @@ func WriteLauncher(dir, realCLI string, env []string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("spike: launcher dir: %w", err)
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() || fsutil.IsLink(info.Mode()) {
 		return "", errors.New("spike: launcher dir is not a real directory")
 	}
 	if info.Mode().Perm()&0o022 != 0 {

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/fsutil"
 )
 
 // DirPrefix names every directory this package's callers create under the
@@ -36,7 +38,7 @@ func SweepOrphans(root string, minAge time.Duration, now time.Time) (int, error)
 		}
 		p := filepath.Join(root, e.Name())
 		fi, err := os.Lstat(p)
-		if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+		if err != nil || !fi.IsDir() || fsutil.IsLink(fi.Mode()) {
 			continue
 		}
 		if now.Sub(fi.ModTime()) < minAge {

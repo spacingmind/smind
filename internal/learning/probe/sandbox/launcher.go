@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/fsutil"
 )
 
 var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -95,7 +97,7 @@ func checkLauncherDir(dir string) error {
 	if err != nil {
 		return fmt.Errorf("sandbox: launcher dir: %w", err)
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() || fsutil.IsLink(info.Mode()) {
 		return errors.New("sandbox: launcher dir is not a real directory")
 	}
 	if info.Mode().Perm()&0o022 != 0 {

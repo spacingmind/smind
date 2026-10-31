@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/fsutil"
 )
 
 // Finding kinds. "arm_escape" is raised by the caller (the arm's own
@@ -197,7 +199,7 @@ func hashTree(dir string) (string, error) {
 		rel, _ := filepath.Rel(dir, path)
 		fmt.Fprintf(h, "%q %o\n", rel, uint32(info.Mode()))
 		switch {
-		case info.Mode()&fs.ModeSymlink != 0:
+		case fsutil.IsLink(info.Mode()):
 			target, err := os.Readlink(path)
 			if err != nil {
 				return err
