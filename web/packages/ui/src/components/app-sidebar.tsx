@@ -654,6 +654,15 @@ export function AppSidebar({
         run: () => onOpenSettings?.("providers"),
       },
       {
+        id: "open-settings",
+        group: "Settings",
+        title: "Open settings",
+        keywords: ["preferences", "options", "config"],
+        action: "settings.open",
+        icon: "settings",
+        run: () => onOpenSettings?.(),
+      },
+      {
         id: "settings-agents",
         group: "Settings",
         title: "Settings: Agents",

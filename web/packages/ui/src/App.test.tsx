@@ -877,6 +877,30 @@ describe("App command palette", () => {
     expect(titles).toContain("Cycle theme");
   });
 
+  it("typing 'open settings' finds the Open settings command first and running it opens Settings (B-04)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "open settings" } });
+    await flush();
+    expect(rowTitles()[0]).toBe("Open settings");
+
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+  });
+
   it("running a task entry selects that task", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
