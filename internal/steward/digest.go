@@ -409,7 +409,7 @@ func matrixMissing(frames []FrameInfo) []string {
 	for _, f := range frames {
 		seen[fmt.Sprintf("%d/%s", f.Viewport, f.Theme)] = true
 	}
-	var missing []string
+	missing := []string{} // never nil: full coverage marshals as [], not null
 	for _, cell := range frameMatrix {
 		key := fmt.Sprintf("%d/%s", cell.Viewport, cell.Theme)
 		if !seen[key] {

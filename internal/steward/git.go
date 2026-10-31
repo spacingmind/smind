@@ -47,7 +47,7 @@ func CollectGit(ctx context.Context, dir, diffBase, baseSHA, head string) (GitFa
 		return GitFacts{}, fmt.Errorf("diffBase %q is not a ref or sha", diffBase)
 	}
 	rng := diffBase + "..." + head
-	numstat, err := gitOut(ctx, dir, "diff", "--numstat", "-M", rng)
+	numstat, err := gitOut(ctx, dir, "diff", "--numstat", "--no-ext-diff", "--no-textconv", "-M", rng)
 	if err != nil {
 		return GitFacts{}, err
 	}
@@ -179,7 +179,7 @@ func gitForeignCommits(ctx context.Context, dir, baseSHA, head string) ([]string
 // gitAddedLines maps each diffed file path to its added lines, from a
 // zero-context diff. Test fixtures (*_test.go, testdata/) are skipped.
 func gitAddedLines(ctx context.Context, dir, rng string) (map[string][]string, error) {
-	out, err := gitOut(ctx, dir, "diff", "-U0", "--no-color", rng)
+	out, err := gitOut(ctx, dir, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", rng)
 	if err != nil {
 		return nil, err
 	}
