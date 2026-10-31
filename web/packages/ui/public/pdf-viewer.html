@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src blob: 'self'; img-src blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'none'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PDF viewer</title>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; }
+  /* auto side margins centre a page that fits and let one that is wider than the window scroll from its left edge (align-items: center would clip it) */
+  #pages { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px; box-sizing: border-box; width: max-content; min-width: 100%; }
+  .page { position: relative; flex: none; margin-left: auto; margin-right: auto; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
+  .page canvas { display: block; }
+  .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; text-size-adjust: none; opacity: 1; }
+  .textLayer span, .textLayer br { position: absolute; white-space: pre; transform-origin: 0 0; color: transparent; cursor: text; }
+  .textLayer ::selection { background: rgba(0, 90, 220, 0.3); }
+</style>
+</head>
+<body>
+<div id="pages"></div>
+<script src="./pdf-viewer.js"></script>
+</body>
+</html>
