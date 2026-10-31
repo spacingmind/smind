@@ -274,10 +274,10 @@ describe("AppSidebar window chrome", () => {
 
 describe("window-level sidebar toggle (desktop shell)", () => {
   it.each([
-    ["macos", false, 84, 120],
-    ["macos", true, 10, 46],
-    ["windows", false, 10, 46],
-    ["linux", false, 10, 46],
+    ["macos", false, 84, 184],
+    ["macos", true, 10, 110],
+    ["windows", false, 10, 110],
+    ["linux", false, 10, 110],
   ] as const)("%s (fullscreen %s): one toggle at x=%i; the strip pads to %ipx and stays a drag strip", async (os, fullscreen, left, zoneEnd) => {
     const win = mockPlatform({ desktop: true, os });
     const { SidebarProvider } = await import("@/components/ui/sidebar");
@@ -313,6 +313,44 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     expect(screen.getByRole("button", { name: "Toggle Sidebar" })).toHaveClass("pointer-events-auto");
   });
 
+  it("window nav buttons render in the desktop shell only", async () => {
+    mockPlatform({ desktop: true, os: "macos" });
+    const { SidebarProvider } = await import("@/components/ui/sidebar");
+    const { WindowSidebarToggle } = await import("@/components/window-sidebar-toggle");
+    const nav = { canBack: true, canForward: false, onBack: () => {}, onForward: () => {} };
+    const withNav = render(
+      <SidebarProvider>
+        <WindowSidebarToggle nav={nav} />
+      </SidebarProvider>,
+    );
+    expect(screen.getByTestId("window-nav-back")).toBeInTheDocument();
+    expect(screen.getByTestId("window-nav-forward")).toBeInTheDocument();
+    withNav.unmount();
+    render(
+      <SidebarProvider>
+        <WindowSidebarToggle />
+      </SidebarProvider>,
+    );
+    // Without the nav history there is no pair: no fake chrome in the web shell.
+    expect(screen.queryByTestId("window-nav-back")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("window-nav-forward")).not.toBeInTheDocument();
+  });
+
+  it("overlay wrapper stays click-through", async () => {
+    mockPlatform({ desktop: true, os: "macos" });
+    const { SidebarProvider } = await import("@/components/ui/sidebar");
+    const { WindowSidebarToggle } = await import("@/components/window-sidebar-toggle");
+    render(
+      <SidebarProvider>
+        <WindowSidebarToggle
+          nav={{ canBack: true, canForward: true, onBack: () => {}, onForward: () => {} }}
+        />
+      </SidebarProvider>,
+    );
+    expect(screen.getByTestId("window-sidebar-toggle")).toHaveClass("pointer-events-none");
+    expect(screen.getByTestId("window-nav-buttons").parentElement).toHaveClass("pointer-events-auto");
+  });
+
   it("App on macOS: collapsing keeps the very same toggle node (focus survives) and puts the rail under a panel-coloured bar", async () => {
     const win = mockPlatform({ desktop: true, os: "macos" });
     const { App } = await import("@/App");
@@ -337,10 +375,10 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
     expect(screen.getByTestId("app-content-panel")).toHaveClass("dark:rounded-tl-xl", "dark:border-l");
     expect(screen.getByTestId("app-main-content")).not.toHaveClass("border-l");
-    // ... and the strip/header reclaim the lights' zone: the toggle moves to the rail, strip pads 46, header needs no inset.
+    // ... and the strip/header reclaim the lights' zone: the toggle moves to the rail, strip pads to the cluster's end, header pads past the rail.
     expect(screen.getByTestId("window-sidebar-toggle").style.left).toBe("10px");
-    expect(screen.getByTestId("sidebar-expanded-header").style.paddingLeft).toBe("46px");
-    expect(screen.getByTestId("app-header").style.paddingLeft).toBe("");
+    expect(screen.getByTestId("sidebar-expanded-header").style.paddingLeft).toBe("110px");
+    expect(screen.getByTestId("app-header").style.paddingLeft).toBe("62px");
   });
 
   it("App on macOS mid-transition: the sidebar content is hidden and inert, the bar stays and the layout flips only once the width has settled", async () => {
@@ -416,10 +454,10 @@ describe("window-level sidebar toggle (desktop shell)", () => {
   });
 
   it.each([
-    ["macos", false, 48, 64],
+    ["macos", false, 48, 128],
     ["macos", false, 256, 0],
-    ["macos", true, 48, 0],
-    ["windows", false, 48, 0],
+    ["macos", true, 48, 54],
+    ["windows", false, 48, 54],
   ] as const)("header: %s (fullscreen %s) beside a %ipx sidebar pads %ipx past the base", async (os, fullscreen, sidebarPx, extra) => {
     const win = mockPlatform({ desktop: true, os });
     const { SidebarProvider } = await import("@/components/ui/sidebar");

@@ -1,16 +1,15 @@
 import { useState, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 
-import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import type { TimelineToolCallItem } from "@/hooks/use-run-timeline";
 import type { ToolCallStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/** Tool-call status -> the StatusDot signal for it. */
-const STATUS_DOT: Record<ToolCallStatus, StatusDotStatus> = {
-  running: "running",
-  success: "success",
-  failure: "danger",
+/** Tool-call status -> the glyph that signals it in the header. */
+const STATUS_ICON: Record<ToolCallStatus, { icon: React.ComponentType<{ className?: string }>; className: string }> = {
+  success: { icon: Icons.check, className: "text-success" },
+  failure: { icon: Icons.close, className: "text-destructive" },
+  running: { icon: Icons.spinner, className: "animate-spin text-warning" },
 };
 
 /** A tool's arguments/result as readable text, whatever shape the provider used. */
@@ -30,7 +29,9 @@ export function stringifyToolPayload(value: unknown): string {
  * The tool-call card frame: icon, display name, one-line summary,
  * lifecycle status, and a disclosure for the detail body. Identical
  * chrome for every intent — only the body differs — so a transcript of
- * mixed tools reads as one list rather than five.
+ * mixed tools reads as one list rather than five. Collapsed it is a
+ * one-line row; expanding it grows a bordered, rounded frame around the
+ * detail body.
  *
  * The card knows nothing about any specific tool: which icon, summary and
  * body it gets comes from the registry (`tool-renderers.tsx`), which is
@@ -57,6 +58,7 @@ export function ToolCallCard({
   const [open, setOpen] = useState(false);
   const name = label || item.toolName || item.toolCallId;
   const line = summary || item.title || "";
+  const { icon: StatusIcon, className: statusIconClass } = STATUS_ICON[item.status];
 
   return (
     <div
@@ -64,7 +66,7 @@ export function ToolCallCard({
       data-tool-call-id={item.toolCallId}
       data-tool-name={item.toolName ?? ""}
       data-status={item.status}
-      className="-mx-2"
+      className={cn("-mx-2", open && "rounded-lg border border-border bg-surface/30")}
     >
       <div className="flex items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted hover:bg-hover">
         <button
@@ -110,7 +112,9 @@ export function ToolCallCard({
         )}
 
         <span className="flex shrink-0 items-center gap-1 text-foreground-muted">
-          <StatusDot status={STATUS_DOT[item.status]} />
+          <span aria-hidden="true">
+            <StatusIcon className={cn("size-3.5", statusIconClass)} />
+          </span>
           <span data-testid="tool-call-status" className={cn(item.status === "success" && "sr-only")}>
             {item.status}
           </span>
@@ -118,7 +122,7 @@ export function ToolCallCard({
       </div>
 
       {open && (
-        <div className="py-1 pr-2 pb-2 pl-7 text-ui-sm" data-testid="tool-call-detail">
+        <div className="border-t border-border px-3 py-2 text-ui-sm" data-testid="tool-call-detail">
           {children}
         </div>
       )}
@@ -130,7 +134,7 @@ export function ToolPayload({ label, body, testId }: { label: string; body: stri
   return (
     <div className="mt-1 first:mt-0">
       <p className="text-ui-sm font-medium tracking-wide uppercase text-foreground-muted">{label}</p>
-      <pre data-testid={testId} className="mt-0.5 overflow-x-auto rounded-lg bg-surface p-2 font-mono whitespace-pre-wrap">
+      <pre data-testid={testId} className="mt-0.5 overflow-x-auto rounded-md bg-surface p-2 font-mono whitespace-pre-wrap">
         {body}
       </pre>
     </div>

@@ -38,6 +38,7 @@ import { PluginPage } from "@/components/plugin-panel/plugin-page";
 import { useTaskGit } from "@/hooks/use-task-git";
 import { PRPanelPane } from "@/components/pr-panel/pr-panel-pane";
 import { PluginTabReaper } from "@/hooks/use-plugin-tab-reaper";
+import { TerminalTabReaper } from "@/hooks/use-terminal-tab-reaper";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -71,6 +72,8 @@ import {
   type TabKind,
 } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
+import { useNavHistory } from "@/hooks/use-nav-history";
+import type { NavEntry } from "@/lib/nav-history";
 import { PluginThemeApplier } from "@/components/plugin-theme-applier";
 import { useSlashPaletteCommands } from "@/hooks/use-slash-palette-commands";
 import { findPanel, usePluginPanels } from "@/hooks/use-plugin-panels";
@@ -207,6 +210,8 @@ const SETTINGS_SAFE_ACTIONS: readonly ActionId[] = [
   "settings.open",
   "usage.open",
   "theme.cycle",
+  "nav.back",
+  "nav.forward",
   "app.quit",
 ];
 
@@ -1051,6 +1056,46 @@ function AppShell({
   useActionHandler("task.next", () => stepTask(1), { enabled: allTasks.length > 0 });
   useActionHandler("quick-open.open", () => setQuickOpenOpen(true), { enabled: selectedTask !== null });
 
+  // Stage 5: the in-app back/forward history walks navigation entries
+  // (view + selected task), not the browser history. Plugin pages are not
+  // recorded -- they have no NavView of their own, so they read as the
+  // workspace underneath.
+  const navEntry = useMemo<NavEntry>(
+    () => ({
+      view: activeView === "plugin" ? "workspace" : activeView,
+      taskId: selectedTask?.ID ?? null,
+    }),
+    [activeView, selectedTask?.ID],
+  );
+  const applyNavEntry = useCallback(
+    async (entry: NavEntry): Promise<boolean> => {
+      if (entry.taskId !== null) {
+        let task = allTasks.find((t) => t.ID === entry.taskId);
+        if (!task && client) {
+          try {
+            task = await client.call<Task>("task.get", { id: entry.taskId });
+          } catch {
+            return false;
+          }
+        }
+        // Archived counts as gone too: stepping there would resurrect a
+        // task the tree no longer shows, so the history drops it.
+        if (!task || task.ArchivedAt !== null) return false;
+        selectTask(task);
+      } else {
+        setSelectedTask(null);
+      }
+      if (entry.view === "workspace") setActiveView("workspace");
+      else if (entry.view === "settings") openSettings();
+      else setActiveView("inbox");
+      return true;
+    },
+    [allTasks, client, selectTask, openSettings],
+  );
+  const nav = useNavHistory(navEntry, applyNavEntry);
+  useActionHandler("nav.back", () => void nav.back(), { enabled: nav.canBack });
+  useActionHandler("nav.forward", () => void nav.forward(), { enabled: nav.canForward });
+
   // Item 21: shared across both the compact and desktop branches below so
   // the two layouts don't hand-duplicate AppSidebar/header/content JSX --
   // only one of them is ever mounted at a time (isMobile flips which),
@@ -1178,7 +1223,6 @@ function AppShell({
       onRenameTab={renameTabForTask}
       onSplit={() => {}}
       onRevealInDiff={revealInDiff}
-      onNewTerminal={openTerminalTab}
       onOpenBase={openBaseTab}
       onOpenPluginPanel={openPluginPanel}
       chats={chats}
@@ -1255,7 +1299,6 @@ function AppShell({
                 onSplitTab={splitPaneTab}
                 onResizeGroup={resizePaneGroup}
                 onRevealInDiff={revealInDiff}
-                onNewTerminal={openTerminalTab}
                 onOpenBase={openBaseTab}
                 onOpenPluginPanel={openPluginPanel}
                 chats={chats}
@@ -1354,6 +1397,8 @@ function AppShell({
       <PRTabAutoOpen taskId={selectedTask?.ID ?? null} tabs={taskState ? collectAllTabs(taskState.root) : null} openTab={openTab} />
       {/* ADR-0042: a plugin tab whose panel left the daemon's list is closed, across every task's layout. */}
       <PluginTabReaper tabsByTask={tabsByTask} closeTab={closeTab} />
+      {/* A terminal tab going away ends its PTY session (the pane itself only ever detaches). */}
+      <TerminalTabReaper client={client} tabsByTask={tabsByTask} />
       <ShellCommands
         client={client}
         tasks={allTasks}
@@ -1392,7 +1437,16 @@ function AppShell({
         </div>
       ) : (
         <div className="relative flex h-svh w-full">
-          {windowToggle && <WindowSidebarToggle />}
+          {windowToggle && (
+            <WindowSidebarToggle
+              nav={{
+                canBack: nav.canBack,
+                canForward: nav.canForward,
+                onBack: () => void nav.back(),
+                onForward: () => void nav.forward(),
+              }}
+            />
+          )}
           {/*
            * The sidebar-vs-content split: a plain flex row (ZCode's model),
            * not react-resizable-panels. The panel clips the shadcn Sidebar
@@ -1837,7 +1891,6 @@ interface SplitPaneCallbacks {
   /** Persists a resize handle drag's new sizes for the group with `groupId`. */
   onResizeGroup: (groupId: string, sizes: number[]) => void;
   onRevealInDiff: () => void;
-  onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
   /** "+" -> one of the active plugins' panels (ADR-0042): opens (or activates) its plugin tab. */
@@ -1921,7 +1974,6 @@ function SplitTreeView({
         onRenameTab={shared.onRenameTab}
         onSplit={(key, direction) => shared.onSplitTab(node.pane.id, key, direction)}
         onRevealInDiff={shared.onRevealInDiff}
-        onNewTerminal={shared.onNewTerminal}
         onOpenBase={shared.onOpenBase}
         onOpenPluginPanel={shared.onOpenPluginPanel}
         chats={shared.chats}
@@ -2011,7 +2063,6 @@ function PaneTabStrip({
   onRenameTab,
   onSplit,
   onRevealInDiff,
-  onNewTerminal,
   onOpenBase,
   onOpenPluginPanel,
   chats,
@@ -2049,7 +2100,6 @@ function PaneTabStrip({
   onRenameTab: (key: string, title: string) => void;
   onSplit: (key: string, direction: SplitDirection) => void;
   onRevealInDiff: () => void;
-  onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
   /** "+" -> one of the active plugins' panels (ADR-0042): opens (or activates) its plugin tab. */
@@ -2197,7 +2247,6 @@ function PaneTabStrip({
               onOpenFile={onOpenFile}
               onOpenFileToSide={onOpenFileToSide}
               onRevealInDiff={onRevealInDiff}
-              onNewTerminal={onNewTerminal}
               events={events}
               chats={chats}
               runningChatsByTask={runningChatsByTask}
@@ -2514,7 +2563,6 @@ function TabContent({
   onOpenFile,
   onOpenFileToSide,
   onRevealInDiff,
-  onNewTerminal,
   events,
   chats,
   runningChatsByTask,
@@ -2530,7 +2578,6 @@ function TabContent({
   onOpenFile: (path: string) => void;
   onOpenFileToSide: (path: string) => void;
   onRevealInDiff: () => void;
-  onNewTerminal: () => void;
   events: ReturnType<typeof useDaemonEvents>;
   chats: Chat[] | null;
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
@@ -2585,10 +2632,8 @@ function TabContent({
         client={client}
         task={task}
         tabKey={entry.key}
-        title={entry.title}
         active={active}
         connectionStatus={connectionStatus}
-        onNewTerminal={onNewTerminal}
       />
     ),
   };

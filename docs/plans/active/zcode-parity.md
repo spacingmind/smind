@@ -47,7 +47,7 @@ starts by diffing what is there against ZCode and changes only what differs.
 | 2 | Side-by-side audit → ranked diff list | separate Lead | in flight |
 | 3 | Component ports, one PR per area (shell+sidebar, timeline, composer, settings, dialogs/menus) | ≥5 PRs | blocked on 2 |
 | 4 | Mobile tokens | own PR | after 1 |
-| 5 | Desktop titlebar chrome, ZCode style | own PR | never started |
+| 5 | Desktop titlebar chrome, ZCode style (back/forward) | own PR | this PR |
 
 ## Stage 1 — tokens
 
@@ -406,11 +406,71 @@ None: reference-only reimplementation.
 
 Port the Stage 1 table into the Expo app's theme (`mobile/`), own PR, after 1.
 
-## Stage 5 — desktop titlebar chrome
+## Stage 5 — desktop titlebar chrome (audit 16)
 
-ZCode-style top overlay in the Tauri shell (traffic-light inset, caption
-buttons, sidebar toggle position), own PR. Prior art:
-[completed/desktop-chrome-sidebar-toggle.md](../completed/desktop-chrome-sidebar-toggle.md).
+One PR, reference-only (no ZCode source copied, no "Ported from" headers), web
+only: no Rust, daemon or wsapi change. Prior art:
+[completed/desktop-chrome-sidebar-toggle.md](../completed/desktop-chrome-sidebar-toggle.md)
+already gives the desktop shell the overlay title bar (macOS traffic-light inset,
+fullscreen shrink, drawn Windows/Linux caption buttons, `data-tauri-drag-region`
+header, double-click maximize, one window-level sidebar toggle). What ZCode has
+and smind lacks is the **back / forward arrow pair** in the top-left cluster. This
+stage adds it, with real history behaviour.
+
+### References (ZCode files consulted, read-only)
+
+`DesktopTopOverlay.tsx` (cluster anatomy: toggle, back/forward, new task, at a fixed x
+after the lights), `DesktopWindowFrame.tsx`; audit frames `zc_{light,dark}_1280_home`
+(back/forward at the top-left of the sidebar). (The `refs/zcode` clone is not
+checked out in this worktree; anatomy taken from the audit frames and the earlier
+desktop-chrome plan's findings.)
+
+### Design decisions (Supervisor default, Human may veto)
+
+- **History model.** Back/forward walk an in-app history of *navigation
+  entries*, not the browser history (the app uses no router; the hash only carries
+  the selected task). An entry is `{ view: "workspace" | "settings" | "inbox", taskId }`
+  (plugin pages are not recorded). A new entry is pushed when the selected task or
+  the full-pane view changes, unless the change was itself a back/forward step; pushing
+  truncates the forward tail; an entry equal to the current one is not duplicated;
+  capped at 50. A step to a task that no longer exists (archived/deleted) is dropped
+  and the step continues in the same direction.
+- **Where.** Desktop build only, in the window-level top-left overlay next to the
+  sidebar toggle (the web build keeps its header: no fake window chrome). The sidebar's
+  top strip and the header pad around the widened zone through `toggleZoneEndPx`.
+- **Shortcuts.** `Mod+[` / `Mod+]` already mean previous / next task in the list
+  (Paseo's workspace-prev/next) and stay. New actions `nav.back` / `nav.forward`,
+  desktop-only, `Alt+ArrowLeft` / `Alt+ArrowRight` (default focus rule: blocked while
+  typing in a text field or a terminal, where Alt+Arrow is word movement). No clash
+  with the existing table (checked by the table's conflict test). Tooltips show the chord.
+- Disabled state: the button is `disabled` (muted, not focusable) when there is nothing
+  in that direction.
+- Windows/Linux keep the drawn caption buttons (already there); macOS keeps native
+  lights. Not changed here.
+
+### Acceptance criteria
+
+- **AC1** `lib/nav-history.ts` pure model: push, dedupe, truncate-forward, cap 50, back, forward, can-back/can-forward.
+- **AC2** `WindowNavButtons` render in the desktop shell's top-left overlay (all desktop OSes), not in the web build; aria labels "Back"/"Forward", tooltips with the chord, `disabled` when empty, click steps the history.
+- **AC3** The overlay cluster's right edge feeds `toggleZoneEndPx`, so the sidebar strip and header never sit under the arrows (macOS lights + toggle + arrows; fullscreen shrinks; Windows rail).
+- **AC4** `nav.back` / `nav.forward` registered in the shortcut registry (desktop-only rows), handled in the shell, listed in the shortcuts help; no combo conflicts.
+- **AC5** The shell records task/view changes and steps through them without re-recording; stepping to a gone task skips it.
+- **AC6** Drag regions: the cluster wrapper stays click-through (`pointer-events-none`), only buttons take events; fullscreen/double-click behaviour unchanged.
+- **AC7** After sheets in `/tmp/steward4/zcode-audit/after/p5-titlebar/` (L = ZCode raw home frame, R = smind desktop-mode after), 1280 light+dark, narrow width, sidebar toggle transition frames; all looked at. State plainly whether native chrome was captured.
+- **AC8** `task lint` + `task test` green; one mutation per load-bearing test.
+
+### Named tests
+
+- `lib/nav-history.test.ts`: `push appends and moves the cursor`, `push after back truncates the forward tail`, `equal consecutive entry is not duplicated`, `history is capped at 50 entries`, `back and forward clamp at the ends`, `can-back and can-forward reflect the cursor`
+- `lib/window-chrome.test.ts` (extended): `toggle zone end includes the nav buttons`
+- `components/window-nav-buttons.test.tsx`: `renders back and forward with labels`, `both disabled when history is empty`, `click calls the handlers`, `tooltip shows the chord`
+- `components/desktop-chrome.test.tsx` (extended): `window nav buttons render in the desktop shell only`, `overlay wrapper stays click-through`
+- `keyboard/shortcuts.test.ts` (extended): `nav back and forward are desktop-only rows`, no-conflict test keeps passing
+- `hooks/use-nav-history.test.tsx`: `records a selection change`, `stepping does not re-record`, `skips a gone task`
+
+### Ported files and sources
+
+None: reference-only reimplementation.
 
 ## Decisions
 
@@ -431,7 +491,7 @@ buttons, sidebar toggle position), own PR. Prior art:
 - [x] Stage 3d dialogs + menus (this PR): palette (chips, icons, Kbd), `Kbd`, `MenuItemBody`, dialog/menu anatomy.
 - [ ] Stage 3 PR (timeline).
 - [ ] Stage 4.
-- [ ] Stage 5.
+- [ ] Stage 5 (this PR): back/forward history in the desktop top-left overlay.
 
 ## Validation
 
@@ -515,3 +575,69 @@ Filled per stage as PRs land.
 - Not done / known: ZCode's "Suggested/Panels/Configure" groups and Open workspace/Toggle terminal entries are not invented (smind's own groups are kept); the palette's "New workspace" and "New task in ..." commands do nothing at 390 while the sidebar drawer is closed (the dialogs live in the sidebar component; pre-existing, not touched); the permission card (inline, not a modal) is unchanged.
 - AC6: `task lint` clean; `task test` green on `75d4e696` (web 365 files / 4033 tests, Go, desktop/docs-site node tests, install scripts), run with a temp HOME and shared caches. Mutations (all failed the named test, files restored): `kbd.tsx` drop the `+` split (`renders each key as a cap`), `categories.ts` drop Chats from tasks (`paletteCategory maps groups to chips`), `command-palette.tsx` ignore the category filter (`chips filter by category`, `chip and query compose`), drop the present filter (`chips without commands are hidden`), pressed uses the raw category (`all chip is pressed when the selected category disappears`), `menu-item-body.tsx` drop the description (`renders icon, title, description and shortcut`), `dialog.tsx` `rounded-2xl` to `rounded-xl` (`content uses the shared anatomy classes`), `dropdown-menu.tsx` drop `gap-0.5` (`item stack is spaced and items are rounded-md`).
 - Peer ledger: GLM 6 runs (task 165: steps 1-3, review fix, step 4 icons; task 166: menu item and dialog anatomy, radius correction), 0 Sonnet, no rate limit, no turn cap (`glm-acp-agent --max-turns 500` seen). Failures: the first radii (rounded-xl dialogs and menus) were my brief's mistake, corrected after reading ZCode `DESIGN.md`; GLM left the chip's pressed state on the raw category (caught in review, fixed by GLM first time).
+
+
+## Stage 3e — Timeline (audit 13, 14, 15)
+
+One PR, reference-only (no ZCode source copied, no "Ported from" headers). Web only: no daemon/wsapi change, because the daemon already forwards an ACP `plan` update as a `raw` run event (`rawKind: "plan"`, `rawPayload` = the ACP update JSON; ADR-0010). The gap is only in the web timeline model.
+
+### References (ZCode files consulted, read-only)
+
+`refs/zcode/DESIGN.md` ("Chat, Tooling" and the Markdown type scale); audit frames `zc_{light,dark}_1280_home` (ZCode has no task page without a model, so tool cards and the plan card are read from DESIGN.md).
+
+### Design decisions
+
+- Supervisor default 2026-10-31, Human may veto: expanded tool calls get the bordered, rounded card look (`rounded-lg` card, monospace output wells `bg-muted/50`-style via tokens); collapsed tool rows stay compact one-liners. Grouped runs, Detailed/Overview, copy buttons, diff/file chips, run footer, whenBusy markers and the error box are untouched.
+- Plan updates: a new timeline item kind `plan` built from `raw` events with `rawKind === "plan"`. Each ACP plan update carries the whole plan, so a new update replaces the earlier plan item **in place** (same id, same position) within a run. Malformed entries are dropped; a plan with no valid entries falls back to the neutral row. Shown in Detailed and Overview.
+- Every other unknown event kind degrades to a neutral collapsed row ("Event: <kind>", details closed, payload inside) instead of "Unrecognised event"; Detailed only, as today.
+- Mobile: its timeline is a separate line-based model (`mobile/src/runTimeline.ts`) that already drops `raw`; a plan card there is a **follow-up** (not in this PR).
+- Markdown: inline-code chip, heading rhythm, code block, table and list spacing adjusted by token classes where the zoomed pass shows a visible difference.
+
+### Acceptance criteria
+
+- **AC1 (item 14)** An ACP `plan` raw event renders a plan card: header "Plan" with "n of m done", entries with a status icon (pending / in progress / completed) and a priority marker, collapsed by default when every entry is done and open otherwise, `aria` labelled; a later update replaces it in place.
+- **AC2** Unknown raw kinds and unknown wire types render a neutral collapsed row, never the text "Unrecognised event".
+- **AC3 (item 13)** Expanded tool calls render as a bordered rounded card with a status icon in the header (check / x / spinner), monospace wells for input/output; collapsed rows unchanged in shape; all existing tool-call tests keep passing.
+- **AC4** User bubble `rounded-lg bg-secondary`-style per DESIGN.md using tokens.
+- **AC5 (item 15)** Assistant markdown: inline-code chip, heading and block spacing, code block, table, list, link differences fixed.
+- **AC6** After sheets (L = ZCode raw, R = smind after) in `/tmp/steward4/zcode-audit/after/timeline/`: seeded run (thinking, plan, read/search/edit/execute with one failure, markdown with headings/code/table), 1280 light+dark, 390, expanded and collapsed, Detailed vs Overview, expand/collapse transition frames. All looked at.
+- **AC7** `task lint` + `task test` green on the final head; one mutation per load-bearing test.
+
+### Named tests
+
+- `hooks/use-run-timeline.test.ts`: `plan raw event becomes a plan item`, `a later plan update replaces the plan in place`, `invalid plan entries are dropped`, `plan with no valid entries falls back to unknown`, `other raw kinds stay unknown`
+- `components/timeline/plan-card.test.tsx`: `shows n of m done`, `renders status and priority per entry`, `collapsed when all done and open otherwise`
+- `components/timeline/timeline-row.test.tsx`: `plan item renders a plan card`, `unknown raw kind renders a neutral row without "Unrecognised"`
+- `components/timeline/detail-level.test.ts`: `overview keeps plan items`
+- `components/timeline/tool-call.test.tsx` (extended): `expanded card is bordered with a status icon`, `failed call shows the failure icon`
+- `components/timeline/timeline-markdown.test.tsx`: `inline code is a chip`, `headings keep the type scale`
+
+### Ported files and sources
+
+None: reference-only reimplementation.
+
+### Progress / Validation
+
+Status: shipped in this PR (stage 3e). Mobile plan card is a follow-up (separate line-based model).
+
+- AC1: `hooks/use-run-timeline.ts` (`TimelinePlanItem`, defensive `planEntries`, in-place replace), `components/timeline/plan-card.tsx`, `timeline-row.tsx` `case "plan"`; icons `circle`, `listChecks` in `lib/icons.ts`; copy-as-plain-text handles a plan item (`timeline-text.ts`). Overview keeps the plan (`detail-level.test.ts`).
+- AC2: unknown raw kinds and wire types read "Event: <kind>" in a collapsed row (no "Unrecognised" anywhere in the web source).
+- AC3: `tool-call-card.tsx` expanded frame (`rounded-lg border`), status check / x / spinner icon, `border-t` detail body; terminal/diff/payload wells share `rounded-md bg-surface`; collapsed row unchanged. The borderless-chrome allow-list in `run-timeline.test.tsx` names the open tool-call frame.
+- AC4: user bubble `rounded-lg bg-secondary`.
+- AC5: markdown inline-code chip `rounded-md px-1.5`, code well bordered `p-3`, table header fill, h1/h2 spacing, links `text-primary`.
+- AC6 sheets (L = ZCode raw `zc_*_1280_home`, since ZCode has no task page without a model; R = smind after) in `/tmp/steward4/zcode-audit/after/timeline/`: `timeline_{light,dark}_1280_a.png` (plan + collapsed rows, expanded cards, markdown), `timeline_{light,dark}_1280_overview.png` (Overview view; before vs after expanded), `timeline_{light,dark}_390.png` (before | after pairs: collapsed, markdown, expanded, Overview), `transitions_light_1280_toolcard.png` (open 0/60/260 ms, close 0/60 ms: the card swaps without animation, only the chevron rotates; no glitch frame). All looked at. Seeded from a scripted ACP stub (thought, plan, read/search/edit/execute with one failure, markdown with heading/code/table/link).
+- Known / not done: the edit card shows the raw ACP diff payload as JSON for this stub's `diff` content shape (pre-existing renderer behaviour, untouched); mobile plan card; ZCode's code-block copy bar not added (smind's copy buttons stay on tool output).
+- Mutations (all failed the named test, files restored): `findIndex` -> -1 (`a later plan update replaces the plan in place`), `initiallyOpen` negation dropped (`collapsed when all done and open otherwise`), `Event:` -> `Unrecognised event:` (3 timeline-row tests), drop the open border (`expanded card is bordered with a status icon`), chip `rounded-md` -> `rounded-sm` (`inline code is a chip`).
+- Peer ledger: GLM 3 runs done or started (task 198 plan card: done, 5 commits; task 199 tool cards + markdown: 2 runs died on `429 Rate limit reached for requests` before any edit, the third finished), 0 Sonnet. Plan-quota rate limit 12:50-14:20 cost a 1h30 wait. `glm-acp-agent` ran with `--max-turns 500`. Review: no findings needing a fix.
+
+### Stage 5 progress / validation
+
+Status: shipped in this PR (stage 5, web only; no Rust/daemon change, so no cargo run).
+
+- AC1: `lib/nav-history.ts` (+ test), AC2: `components/window-nav-buttons.tsx` hosted by `window-sidebar-toggle.tsx` (`nav` prop), AC3: `lib/window-chrome.ts` (`NAV_*` constants, `navLeftPx`, `toggleZoneEndPx` now spans toggle + arrows, which the sidebar strip and header already pad by), AC4: `nav.back`/`nav.forward` rows (`Alt+ArrowLeft`/`Alt+ArrowRight`, desktop-only), handled in `App.tsx` and allowed while Settings/Inbox cover the shell, AC5: `hooks/use-nav-history.ts` wired in `App.tsx` (`applyNavEntry` drops a gone or archived task and keeps walking), AC6: overlay wrapper stays `pointer-events-none`, only the buttons take events.
+- Not covered by a vitest: the `App.tsx` wiring itself (`applyNavEntry`, handler enablement); covered by the hook tests plus a scripted Playwright run on the desktop-mode build (`~/.smind/dogfood/p5/nav.cjs`: click back/forward and Alt+Arrow step through task selections, buttons disable at the ends).
+- AC7 evidence: native chrome (real traffic lights) was **not** captured; the desktop-mode web bundle (`VITE_SMIND_DESKTOP=1`) ran in Chromium with a stubbed Tauri bridge and a macOS/Windows user agent, against an isolated daemon seeded through a scripted ACP stub. The macOS inset (x < 84) is blank space in the frames. Sheets (L = ZCode raw `zc_*_1280_home`, R = smind after) in `/tmp/steward4/zcode-audit/after/p5-titlebar/`: `p5_light_1280_macos.png`, `p5_dark_1280_macos.png` (home + collapsed), `p5_1280_windows.png`, `p5_800_narrow.png` (before | after), `p5_transition_light_1280.png` (sidebar-toggle strip; the cluster keeps one x in every frame), `p5_before_after_macos_light.png`. All looked at. Measured rects: toggle x 84..112, back 116..144, forward 148..176 on macOS.
+- Scripted Playwright run: task1 -> task2 -> task3, Back click -> task2, Alt+Left -> task1, Alt+Right -> task2, Forward click -> task3 (Forward disabled at the end), tooltip `Back (⌥←)`. The history also keeps the initial no-task home entry, so Back from the first task lands on the empty home.
+- Decisions: `Mod+[`/`Mod+]` keep meaning previous/next task; history chords are `Alt+Arrow` (Supervisor default, Human may veto). On a collapsed Windows rail the header now starts after the arrows. The wordmark in the expanded strip is dropped at the minimum sidebar width on macOS (existing container-query behaviour).
+- Mutations (all failed the named test; files restored): slice(0, index+1)->slice(0) (`push after back truncates the forward tail`), cap 50->500 (`history is capped at 50 entries`), drop `NAV_BUTTONS_WIDTH_PX` from the zone (`toggle zone end includes the nav buttons` + 2 more), remove `desktop: true` (`nav back and forward are desktop-only rows`), `disabled={false}` (`both disabled when history is empty`), drop `pointer-events-auto` (`overlay wrapper stays click-through`), `dropEntry` -> no-op (infinite loop, worker OOM: the run fails, not a clean assertion). `pending && sameEntry` guard in `useNavHistory`: first survived (test changed `current` only after the cursor moved); its test ("stepping does not re-record") must make `apply` change `current` before resolving; that rewrite was handed to GLM but hit the GLM plan rate limit (reset 2026-10-31 11:28Z), so it lands as a follow-up commit on this PR.
+- References consulted: `DesktopTopOverlay.tsx`, `DesktopWindowFrame.tsx` (anatomy only, via the earlier desktop-chrome plan and audit frames).

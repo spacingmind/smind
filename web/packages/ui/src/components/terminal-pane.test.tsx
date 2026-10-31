@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { TerminalPane, type TerminalHandle } from "@/components/terminal-pane";
-import { resetTerminalSessions, useTerminalActivity } from "@/lib/terminal-sessions";
+import {
+  boundTerminalId,
+  resetTerminalSessions,
+  unbindTerminal,
+  useTerminalActivity,
+} from "@/lib/terminal-sessions";
 import { DEFAULT_TERMINAL_SCROLLBACK, TERMINAL_SCROLLBACK_STORAGE_KEY } from "@/lib/terminal-prefs";
 import type { Task, TerminalSessionStatus } from "@/lib/types";
 
@@ -61,6 +66,8 @@ class FakeTerminalHandle implements TerminalHandle {
   writes: (string | Uint8Array)[] = [];
   /** Unset by default (like a handle that can't report its size); a test assigns it to exercise the send-size-on-attach path. */
   size?: () => { cols: number; rows: number };
+  /** Test-only: flips to true to mimic the shell switching to application cursor mode. */
+  appCursor = false;
   private dataCallback: ((data: string) => void) | null = null;
   private resizeCallback: ((size: { cols: number; rows: number }) => void) | null = null;
   private selection = "";
@@ -68,6 +75,10 @@ class FakeTerminalHandle implements TerminalHandle {
 
   focus(): void {
     this.focusCalls++;
+  }
+
+  applicationCursorKeys(): boolean {
+    return this.appCursor;
   }
 
   getSelection(): string {
@@ -180,22 +191,75 @@ describe("TerminalPane", () => {
 
     const attachCall = client.nth("terminal.attach", 0);
     expect(attachCall.params).toEqual({ terminalId: "term-1" });
-    expect(screen.getByTestId("terminal-status")).toHaveTextContent("Terminal");
-    expect(screen.getByTestId("terminal-status")).not.toHaveTextContent("term-1");
-    expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
+    // Running terminal: no status line at all -- the tab strip shows the title.
+    expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
   });
 
-  it("shows the tab title prop (a renamed tab) in the header", async () => {
+  it("insets the terminal from the pane edges without padding the fit host", async () => {
+    const client = new FakeWsClient();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => new FakeTerminalHandle()} />);
+    await flush();
+    const host = screen.getByTestId("terminal-container");
+    const wrapper = screen.getByTestId("terminal-inset");
+    expect(host.parentElement).toBe(wrapper);
+    expect(wrapper.className).toContain("p-2");
+    expect(wrapper.className).toContain("bg-terminal-bg");
+    expect(host.className).not.toMatch(/(^|\s)p[xytrbl]?-/);
+  });
+
+  it("touch control row renders after the terminal", async () => {
+    const client = new FakeWsClient();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => new FakeTerminalHandle()} />);
+    await flush();
+    const host = screen.getByTestId("terminal-container");
+    const row = screen.getByTestId("terminal-touch-actions");
+    expect(host.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(host.closest('[class*="flex-col"]')?.lastElementChild).toBe(row);
+  });
+
+  it("lifts the touch row above the on-screen keyboard", async () => {
+    const listeners: Record<string, () => void> = {};
+    const vv = {
+      height: 500,
+      offsetTop: 0,
+      addEventListener: (type: string, fn: () => void) => {
+        listeners[type] = fn;
+      },
+      removeEventListener: () => {},
+    };
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: vv });
+    window.innerHeight = 800;
+    try {
+      const client = new FakeWsClient();
+      render(<TerminalPane client={client} task={TASK_A} createTerminal={() => new FakeTerminalHandle()} />);
+      await flush();
+      const row = screen.getByTestId("terminal-touch-actions");
+      expect(row.style.marginBottom).toBe("300px");
+
+      vv.height = 800;
+      act(() => listeners.resize());
+      expect(["0px", ""]).toContain(row.style.marginBottom);
+      // jsdom may drop env() values; only assert it when kept.
+      if (row.style.paddingBottom) expect(row.style.paddingBottom).toContain("safe-area-inset-bottom");
+    } finally {
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: undefined });
+      window.innerHeight = originalHeight;
+    }
+  });
+
+  it("shows no header row while a terminal is running", async () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();
-    render(<TerminalPane client={client} task={TASK_A} title="Build logs" createTerminal={() => fake} />);
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
     await flush();
     client.nth("terminal.list", 0).resolve([]);
     await flush();
     client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
     await flush();
-    expect(screen.getByTestId("terminal-status")).toHaveTextContent("Build logs");
-    expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
+
+    expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="pane-header"]')).toBeNull();
   });
 
   it("focuses the terminal when its tab is in front, and again when it is re-activated; not while behind", async () => {
@@ -307,16 +371,17 @@ describe("TerminalPane", () => {
       const fake = new FakeTerminalHandle();
       render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
 
-      const observer = FakeResizeObserver.instances[0];
-      expect(observer).toBeDefined();
+      // The key bar observes its own width too; a tick reaches every observer, like in a browser.
+      expect(FakeResizeObserver.instances.length).toBeGreaterThan(0);
+      const observer = { trigger: () => FakeResizeObserver.instances.forEach((o) => o.trigger()) };
       const fitCallsAtMount = fake.fitCalls;
 
       // Three observation ticks in quick succession -- what a continuous
       // pane-resize drag looks like -- must settle into exactly one fit(),
       // not one per tick.
-      act(() => observer!.trigger());
-      act(() => observer!.trigger());
-      act(() => observer!.trigger());
+      act(() => observer.trigger());
+      act(() => observer.trigger());
+      act(() => observer.trigger());
       expect(fake.fitCalls).toBe(fitCallsAtMount);
 
       act(() => {
@@ -352,37 +417,6 @@ describe("TerminalPane", () => {
     expect(attachCall.options?.signal?.aborted).toBe(true);
     expect(client.calls.some((c) => c.method === "terminal.close")).toBe(false);
     expect(fake.disposed).toBe(true);
-  });
-
-  it("clicking 'Close terminal' calls terminal.close with the current session's id", async () => {
-    const client = new FakeWsClient();
-    const fake = new FakeTerminalHandle();
-    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
-    await flush();
-    client.nth("terminal.list", 0).resolve([]);
-    await flush();
-    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
-    await flush();
-
-    const closeButton = screen.getByRole("button", { name: "Close terminal" });
-    expect(closeButton).not.toBeDisabled();
-    fireEvent.click(closeButton);
-    await flush();
-
-    const closeCall = client.nth("terminal.close", 0);
-    expect(closeCall.params).toEqual({ terminalId: "term-1" });
-    // Closing must go through terminal.close, never by aborting the
-    // active terminal.attach subscription (that would only detach).
-    expect(client.nth("terminal.attach", 0).options?.signal?.aborted).toBeFalsy();
-  });
-
-  it("the 'Close terminal' button is disabled until a session id exists", async () => {
-    const client = new FakeWsClient();
-    const fake = new FakeTerminalHandle();
-    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
-    await flush();
-
-    expect(screen.getByRole("button", { name: "Close terminal" })).toBeDisabled();
   });
 
   it("surfaces a terminal.list failure as an error message", async () => {
@@ -481,7 +515,7 @@ describe("TerminalPane", () => {
       expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
       const reattach = client2.nth("terminal.attach", 0);
       expect(reattach.params).toEqual({ terminalId: "term-1" });
-      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
+      expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
     });
 
     it("given a session that comes back status: interrupted post-reconnect, renders the distinct 'session ended: daemon restarted' state, not a generic error", async () => {
@@ -559,10 +593,10 @@ describe("TerminalPane", () => {
       expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
       const reattach = client2.nth("terminal.attach", 0);
       expect(reattach.params).toEqual({ terminalId: "term-1" });
-      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
+      expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
     });
 
-    it("explicitly closing the terminal, then a later reconnect, creates a fresh terminal instead of getting stuck showing 'session closed'", async () => {
+    it("a session closed with its tab (binding cleared), then a later reconnect, creates a fresh terminal instead of getting stuck showing 'session closed'", async () => {
       const client1 = new FakeWsClient();
       const fake = new FakeTerminalHandle();
       const stableFactory = () => fake;
@@ -572,18 +606,11 @@ describe("TerminalPane", () => {
       await flush();
       client1.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
       await flush();
-      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-1");
 
-      fireEvent.click(screen.getByRole("button", { name: "Close terminal" }));
-      await flush();
-      client1.nth("terminal.close", 0).resolve(undefined);
-      await flush();
-
-      // The closed session's id must not linger in state -- otherwise a
-      // later reconnect's list-then-attach effect would still treat this
-      // exact (now-closed) id as "the session to resume".
-      expect(screen.getByTestId("terminal-status")).toHaveTextContent("starting terminal");
-      expect(screen.getByRole("button", { name: "Close terminal" })).toBeDisabled();
+      // Closing the terminal's *tab* is what ends a session now: the
+      // reaper calls terminal.close and clears the tab's binding, leaving
+      // exactly this state behind for the next mount/reconnect.
+      unbindTerminal(`${TASK_A.ID}:terminal`);
 
       const client2 = new FakeWsClient();
       rerender(<TerminalPane client={client2} task={TASK_A} createTerminal={stableFactory} />);
@@ -605,7 +632,7 @@ describe("TerminalPane", () => {
       createCall.resolve({ terminalId: "term-2" });
       await flush();
       expect(client2.nth("terminal.attach", 0).params).toEqual({ terminalId: "term-2" });
-      expect(screen.getByTestId("terminal-status")).toHaveAttribute("title", "term-2");
+      expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
     });
   });
 });
@@ -776,10 +803,10 @@ describe("TerminalPane multiple terminals per task (Item 20)", () => {
     createCall.resolve({ terminalId: "term-2" });
     await flush();
 
-    expect(screen.getAllByTestId("terminal-status").map((el) => el.textContent)).toEqual([
-      "Terminal",
-      "Terminal 2",
-    ]);
+    // Both panes are running sessions: no status lines, no cross-binding.
+    expect(boundTerminalId(`${TASK_A.ID}:terminal`)).toBe("term-1");
+    expect(boundTerminalId(`${TASK_A.ID}:terminal:2`)).toBe("term-2");
+    expect(screen.queryAllByTestId("terminal-status")).toHaveLength(0);
   });
 
   it("switching between two terminal tabs detaches rather than closes either session", async () => {
@@ -871,17 +898,97 @@ describe("useTerminalActivity (Item 20)", () => {
 
     expect(screen.getByTestId("marker")).toHaveTextContent("idle");
   });
+});
 
-  it("New terminal control is absent without onNewTerminal, and calls it when present", async () => {
+describe("TerminalPane touch key bar", () => {
+  async function mount(fake = new FakeTerminalHandle()) {
     const client = new FakeWsClient();
-    const fake = new FakeTerminalHandle();
-    const onNewTerminal = vi.fn();
-    const { rerender } = render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
     await flush();
-    expect(screen.queryByTestId("terminal-new")).not.toBeInTheDocument();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
+    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+    await flush();
+    return { client, fake };
+  }
 
-    rerender(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} onNewTerminal={onNewTerminal} />);
-    fireEvent.click(screen.getByTestId("terminal-new"));
-    expect(onNewTerminal).toHaveBeenCalledTimes(1);
+  function writes(client: FakeWsClient): string[] {
+    return client.calls
+      .filter((c) => c.method === "terminal.write")
+      .map((c) => (c.params as { data: string }).data);
+  }
+
+  it("Esc key writes ESC", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-esc"));
+    expect(writes(client)).toEqual(["\x1b"]);
+  });
+
+  it("Tab key writes HT", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-tab"));
+    expect(writes(client)).toEqual(["\t"]);
+  });
+
+  it("Enter key writes CR", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-enter"));
+    expect(writes(client)).toEqual(["\r"]);
+  });
+
+  it("arrow keys write CSI A/B/C/D", async () => {
+    const { client } = await mount();
+    for (const id of ["up", "down", "right", "left"]) fireEvent.click(screen.getByTestId(`terminal-key-${id}`));
+    expect(writes(client)).toEqual(["\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D"]);
+  });
+
+  it("arrow keys write SS3 when the terminal is in application cursor mode", async () => {
+    const fake = new FakeTerminalHandle();
+    fake.appCursor = true;
+    const { client } = await mount(fake);
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    expect(writes(client)).toEqual(["\x1bOA"]);
+  });
+
+  it("sticky modifier applies to the next key", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    expect(screen.getByTestId("terminal-key-ctrl")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    expect(writes(client)).toEqual(["\x1b[1;5A"]);
+  });
+
+  it("sticky modifier clears after one key", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    expect(writes(client)).toEqual(["\x1b[1;5A", "\x1b[A"]);
+    expect(screen.getByTestId("terminal-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("tapping a modifier twice disarms it", async () => {
+    const { client } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    expect(screen.getByTestId("terminal-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByTestId("terminal-key-up"));
+    expect(writes(client)).toEqual(["\x1b[A"]);
+  });
+
+  it("an armed Ctrl turns the next typed c into ETX", async () => {
+    const { client, fake } = await mount();
+    fireEvent.click(screen.getByTestId("terminal-key-ctrl"));
+    act(() => fake.emitData("c"));
+    act(() => fake.emitData("c"));
+    expect(writes(client)).toEqual(["\x03", "c"]);
+    expect(screen.getByTestId("terminal-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("a bar key refocuses the terminal", async () => {
+    const { fake } = await mount();
+    const before = fake.focusCalls;
+    fireEvent.click(screen.getByTestId("terminal-key-esc"));
+    expect(fake.focusCalls).toBeGreaterThan(before);
   });
 });

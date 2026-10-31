@@ -167,6 +167,43 @@ describe("TaskDetailPane", () => {
     }
   });
 
+  it("the Jump to latest pill has an opaque surface, a border and a shadow", async () => {
+    const sizes: Record<string, number> = { scrollHeight: 3000, clientHeight: 600, clientWidth: 1200 };
+    for (const [key, value] of Object.entries(sizes)) {
+      Object.defineProperty(HTMLElement.prototype, key, { configurable: true, get: () => value });
+    }
+    try {
+      const client = new FakeWsClient();
+      render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+      client.nth("run.list", 0).resolve([doneRun()]);
+      await flush();
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", stopReason: "end_turn", events: [] });
+      await flush();
+
+      // Scrolling away from the tail (3000 - 0 - 600 px from the bottom) flips
+      // auto-follow off, which is what renders the pill.
+      const log = screen.getByTestId("run-log-scroll");
+      Object.defineProperty(log, "scrollTop", { configurable: true, writable: true, value: 0 });
+      fireEvent.scroll(log);
+      await flush();
+
+      const pill = screen.getByTestId("jump-to-latest");
+      expect(pill.className).toContain("bg-background");
+      expect(pill.className).toContain("dark:bg-background");
+      expect(pill.className).toContain("border-border");
+      expect(pill.className).toContain("shadow-md");
+      expect(pill.className).not.toContain("shadow-sm");
+
+      fireEvent.click(pill);
+      await flush();
+      expect(screen.queryByTestId("jump-to-latest")).not.toBeInTheDocument();
+    } finally {
+      for (const key of Object.keys(sizes)) {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+      }
+    }
+  });
+
   it("switching to a different task and back doesn't duplicate entries or leak the live subscription", async () => {
     const client = new FakeWsClient();
     const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);

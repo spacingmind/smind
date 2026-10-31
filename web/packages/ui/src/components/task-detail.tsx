@@ -519,7 +519,7 @@ export function TaskDetailPane({
             size="sm"
             data-testid="jump-to-latest"
             onClick={follow.jumpToLatest}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-sm"
+            className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border-border bg-background shadow-md dark:border-input-border dark:bg-background dark:hover:bg-muted"
           >
             <Icons.down className="size-3" />
             Jump to latest
