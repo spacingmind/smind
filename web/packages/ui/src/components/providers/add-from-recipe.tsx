@@ -76,7 +76,9 @@ export function AddFromRecipe({ hasClient, onClose }: { hasClient: boolean; onCl
                 <span className="block truncate text-ui-base text-foreground">{r.label}</span>
                 <span className="block truncate text-ui-sm text-foreground-muted">{r.description}</span>
               </span>
-              <StatusBadge status="neutral">{r.endpointKind}</StatusBadge>
+              <StatusBadge status="neutral" className="hidden sm:inline-flex">
+                {r.endpointKind}
+              </StatusBadge>
               {r.unverified ? (
                 <StatusBadge status="warning" data-testid={`recipe-unverified-${r.id}`}>
                   Unverified
