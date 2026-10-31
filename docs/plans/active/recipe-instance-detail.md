@@ -31,10 +31,11 @@ directory". Such an instance authenticates with the key stored in smind and runs
 - claude-native existing test (Ready (CLI login)) stays green.
 
 ## Decisions
+- Not done (daemon follow-up, tiny additive provider.list fields): expose the private config dir path, inheritClaudeConfig and the endpoint host. The Reload-providers/providers.custom hint stays (still true for a recipe instance).
 - Recipe detection is `info.recipe !== undefined` (the only wire marker of a recipe-made instance).
 
 ## Progress
-- [ ] implement  - [ ] tests  - [ ] mutations  - [ ] frames  - [ ] PR
+- [x] implement (GLM, 2 runs)  - [x] tests  - [x] mutations  - [x] frames  - [x] PR
 
 ## Validation
-(filled at the end)
+AC1-AC4 confirmed by provider-detail.test.tsx (recipe instances: key set / no key / private dir / daemon-env dir hidden / plain instance unchanged); each mutation fails a test (see PR body). Frames in /tmp/steward4/after/pr6b/ (light+dark, 1280+390, key set and unset). The first frame pass caught that ProviderCustomInfo still rendered the daemon-env Config directory for recipe instances (missed by the step-1 unit tests); fixed in a second step.
