@@ -8,7 +8,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/tasktree"
 )
 
 // remoteTreeNode is a partial decode of a task.tree node with the F4 remote
@@ -175,6 +177,26 @@ func TestMirrorRowsAreCacheOnly(t *testing.T) {
 	withMirror := rootCost(before)
 	if withMirror != remoteMirrorCost {
 		t.Fatalf("lead subtree cost = %v, want %v", withMirror, remoteMirrorCost)
+	}
+
+	// The builder shared with the bulk actions never includes a mirror, even
+	// with fleet on and the mirror seeded.
+	reg, err := runs.New(f.db)
+	if err != nil {
+		t.Fatalf("runs.New() error = %v", err)
+	}
+	t.Cleanup(reg.CloseAll)
+	bulk, _, err := buildTaskTree(f.db, reg, f.w.ID, tasktree.Root{TaskID: f.w.Lead})
+	if err != nil {
+		t.Fatalf("buildTaskTree() error = %v", err)
+	}
+	if len(bulk) != 2 {
+		t.Fatalf("buildTaskTree nodes = %d, want the 2 local nodes", len(bulk))
+	}
+	for _, n := range bulk {
+		if n.Remote || n.ID < 0 {
+			t.Fatalf("buildTaskTree returned a mirror node: %+v", n)
+		}
 	}
 
 	for i, method := range []string{"task.stopTree", "task.archiveFinished"} {
