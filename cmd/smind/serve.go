@@ -176,6 +176,11 @@ func cmdServe(args []string) int {
 		log.Fatalf("server: %v", err)
 	}
 	srv.API().AttachUsage(poller, registry, passive)
+	zsrc := &zaiInstanceSource{reg: providers.Default(), secrets: db}
+	pu := quota.NewProviderUsage(quota.NewZaiInstanceFetcher(zsrc, nil), quota.WithProviderUsageEnabled(uc.Enabled))
+	defer pu.Close()
+	srv.API().AttachProviderUsage(pu, zsrc)
+	srv.API().Runs.SetProviderQuota(&providerQuotaAdapter{pu: pu, inst: zsrc, routing: uc.Routing, thresholdPct: float64(uc.ExhaustThresholdPct)})
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
 	srv.API().Runs.SetSmindHome(config.Dir())
 	srv.API().Runs.SetNotifyParent(cfg.Orchestration.NotifyParent)
