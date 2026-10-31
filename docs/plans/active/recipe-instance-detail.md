@@ -39,3 +39,7 @@ directory". Such an instance authenticates with the key stored in smind and runs
 
 ## Validation
 AC1-AC4 confirmed by provider-detail.test.tsx (recipe instances: key set / no key / private dir / daemon-env dir hidden / plain instance unchanged); each mutation fails a test (see PR body). Frames in /tmp/steward4/after/pr6b/ (light+dark, 1280+390, key set and unset). The first frame pass caught that ProviderCustomInfo still rendered the daemon-env Config directory for recipe instances (missed by the step-1 unit tests); fixed in a second step.
+
+## Add-on: Models list (Supervisor)
+- AC5 A recipe instance's Models card lists only `source: "config"` models, labelled "From the recipe"; with none it says "No models listed for this recipe — runs use the endpoint's default model." Non-recipe providers unchanged.
+- Finding: the daemon already replaces the Claude catalog with the instance's models (addFromRecipe writes the recipe models); an instance with no models falls back to the Claude catalog. The UI mislabelled config models "Built-in catalog" and showed the catalog for empty instances. Web-only fix in provider-models.tsx; tests in provider-models.test.tsx (3 cases; mutation: recipe filter off -> 2 fail). Frames: /tmp/steward4/after/pr6b/models-*.png.
