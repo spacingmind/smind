@@ -85,6 +85,9 @@ export interface Task {
   budgetUsd?: number | null;
   /** Known (reported) cost of the whole tree so far. */
   budgetSpentUsd?: number | null;
+  /** The automation that started this task (camelCase on the wire), when one did; absent when a person started it. */
+  automationId?: number;
+  automationName?: string;
   /** True when some finished run reported no cost, so the cap bounds reported cost only. */
   budgetPartial?: boolean;
   budgetUnknownRuns?: number;

@@ -1,3 +1,5 @@
+import { useSidebarAutomationFilterStore } from "@/stores/sidebar-automation-filter-store";
+import { AutomationChip } from "@/components/automations/automation-chip";
 import {
   createContext,
   memo,
@@ -340,6 +342,7 @@ export function AppSidebar({
   onWorkspacesChange,
   onOpenSettings,
   onOpenInbox,
+  onOpenAutomations,
   onOpenPluginPanel,
   connectionStatus = "connected",
   connectionStatusText,
@@ -389,6 +392,8 @@ export function AppSidebar({
   onOpenSettings?: (sectionId?: string) => void;
   /** Opens the Human inbox (ADR-0045); the footer shows its unseen count. */
   onOpenInbox?: () => void;
+  /** Opens the Automations page (ADR-0044) -- what the quick action and the palette entry do. */
+  onOpenAutomations?: () => void;
   /** Opens one of the active plugins' panels as a full page (ADR-0042) -- what a "Plugins" sidebar row opens. */
   onOpenPluginPanel?: (pluginId: string, panelId: string) => void;
   /** The daemon connection state and its human text (App.tsx's STATUS_LABEL / connect error) -- the footer's Host popover shows it. */
@@ -428,7 +433,15 @@ export function AppSidebar({
   // grouping (plan Decision 2) -- a child nests under its parent even when
   // its own SpaceID differs, so per-space nesting would be wrong. Each
   // space bucket filters these roots back down to its own afterwards.
-  const taskForest = useMemo(() => nestTasks(allTasks), [allTasks]);
+  // The "Started by automation" filter narrows everything the lists derive from; `allTasks` stays whole for pin pruning,
+  // notifications and selection. A child whose parent was filtered out is an orphan, which nestTasks makes a root.
+  const automationOnly = useSidebarAutomationFilterStore((s) => s.value);
+  const setAutomationOnly = useSidebarAutomationFilterStore((s) => s.set);
+  const viewTasks = useMemo(
+    () => (automationOnly ? allTasks.filter((t) => t.automationId !== undefined) : allTasks),
+    [allTasks, automationOnly],
+  );
+  const taskForest = useMemo(() => nestTasks(viewTasks), [viewTasks]);
   const treeActionAvailability = useMemo(
     () => sidebarTreeActions(allTasks, runStatus ?? EMPTY_RUN_STATUS),
     [allTasks, runStatus],
@@ -487,7 +500,7 @@ export function AppSidebar({
     [now, attention, statusOverrides, runStatus, rateLimit, gitByTask, unread, onMarkUnread, pinned, togglePin],
   );
 
-  const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
+  const pinnedTasks = useMemo(() => viewTasks.filter((t) => pinned.has(t.ID)), [viewTasks, pinned]);
   const { groupMode, setGroupMode } = useSidebarGroupMode();
   // The active plugins' sidebar entries (ADR-0042): one stable empty list
   // until they load or the daemon has none, so the group below simply
@@ -495,24 +508,24 @@ export function AppSidebar({
   const pluginSidebarItems = usePluginPanels().sidebar;
   const stageGroups = useMemo(
     () =>
-      groupTasksByStage(allTasks, {
+      groupTasksByStage(viewTasks, {
         attention: attention ?? EMPTY_ATTENTION,
         runStatus: runStatus ?? EMPTY_RUN_STATUS,
         gitByTask,
       }),
-    [allTasks, attention, runStatus, gitByTask],
+    [viewTasks, attention, runStatus, gitByTask],
   );
   // The name only says something when the view mixes workspaces.
   const workspaceNames = useMemo(
     () =>
-      new Set(allTasks.map((t) => t.WorkspaceID)).size > 1
+      new Set(viewTasks.map((t) => t.WorkspaceID)).size > 1
         ? new Map((workspaces ?? []).map((ws) => [ws.ID, ws.Title || ws.Path]))
         : new Map<number, string>(),
-    [workspaces, allTasks],
+    [workspaces, viewTasks],
   );
   const statusGroups = useMemo(
-    () => groupTasksByStatus(allTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
-    [allTasks, attention, runStatus],
+    () => groupTasksByStatus(viewTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
+    [viewTasks, attention, runStatus],
   );
   const { permission: notificationPermission } = useNotificationPermission();
   const { enabled: notificationSoundEnabled } = useNotificationSoundPreference();
@@ -644,6 +657,14 @@ export function AppSidebar({
         run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
       },
       {
+        id: "open-automations",
+        group: "Actions",
+        title: "Open Automations",
+        keywords: ["automation", "cron", "schedule", "ci", "rules"],
+        icon: "automation",
+        run: () => onOpenAutomations?.(),
+      },
+      {
         id: "new-agent",
         group: "Settings",
         title: "New agent…",
@@ -708,7 +729,7 @@ export function AppSidebar({
       });
     }
     return commands;
-  }, [workspaces, profiles, onOpenSettings]);
+  }, [workspaces, profiles, onOpenSettings, onOpenAutomations]);
   useCommands("sidebar:actions", 5, paletteCommands);
   // Collapsed search (audit-deepseek-harness.md §3): a header action that
   // expands into a field. An outside click collapses it only while the
@@ -752,6 +773,10 @@ export function AppSidebar({
   };
 
   const empty = !error && workspaces !== null && workspaces.length === 0;
+  // The "Started by automation" filter matching nothing replaces the lists
+  // with one quiet line, exactly as a no-match search does (empty containers
+  // under it would read as tasks hiding).
+  const automationEmpty = !empty && automationOnly && viewTasks.length === 0;
 
   return (
     <Sidebar collapsible="icon">
@@ -818,7 +843,7 @@ export function AppSidebar({
         <SidebarQuickActions
           onNewTask={newTaskFromQuickAction}
           onSearch={() => setPaletteOpen(true)}
-          onAutomations={() => onOpenSettings?.("automations")}
+          onAutomations={() => onOpenAutomations?.()}
           searchShortcut={searchShortcut}
         />
       )}
@@ -867,6 +892,20 @@ export function AppSidebar({
                         { value: "stage", label: "Group by stage", icon: <Icons.groupByStage className="size-3.5" />, testId: "sidebar-group-mode-stage" },
                       ]}
                     />
+                  )}
+                  {!empty && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Started by automation"
+                      title="Started by automation"
+                      aria-pressed={automationOnly}
+                      data-testid="sidebar-automation-filter"
+                      className={cn(automationOnly && "bg-selected")}
+                      onClick={() => setAutomationOnly(!automationOnly)}
+                    >
+                      <Icons.automation />
+                    </Button>
                   )}
                   <Button
                     variant="ghost"
@@ -956,7 +995,12 @@ export function AppSidebar({
                       onArchiveTask={archiveTask}
                     />
                   )}
-                  {!searching && groupMode === "status" && (
+                  {!searching && automationEmpty && (
+                    <p data-testid="sidebar-automation-filter-empty" className="px-2 py-2 text-ui-sm text-muted-foreground">
+                      No automation tasks
+                    </p>
+                  )}
+                  {!searching && !automationEmpty && groupMode === "status" && (
                     <StatusGroupedList
                       groups={statusGroups}
                       selectedTaskId={selectedTaskId}
@@ -964,7 +1008,7 @@ export function AppSidebar({
                       onArchiveTask={archiveTask}
                     />
                   )}
-                  {!searching && groupMode === "stage" && (
+                  {!searching && !automationEmpty && groupMode === "stage" && (
                     <StageGroupedList
                       groups={stageGroups}
                       workspaceNames={workspaceNames}
@@ -974,6 +1018,7 @@ export function AppSidebar({
                     />
                   )}
                   {!searching &&
+                    !automationEmpty &&
                     groupMode === "tree" &&
                     workspaces?.map((ws) => (
                     <WorkspaceItem
@@ -2387,6 +2432,7 @@ const TaskRow = memo(function TaskRow({
                       </span>
                     )}
                   </span>
+                  <AutomationChip task={task} className="@max-[14rem]/sb:hidden" />
                   {hasChildren && (
                     <span
                       data-testid="task-child-count"

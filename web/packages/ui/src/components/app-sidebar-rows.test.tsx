@@ -965,3 +965,11 @@ describe("task hover card status label (U28)", () => {
     expect(within(await openHoverCard(2)).getByTestId("sidebar-task-status")).toHaveTextContent(/^created$/i);
   });
 });
+
+describe("automation chip", () => {
+  it("row shows the automation chip only for automation tasks", async () => {
+    await mountSidebar([makeTask(1, "By hand"), makeTask(2, "By cron", { automationId: 9, automationName: "Nightly" })]);
+    expect(within(rowButton(1)).queryByTestId("automation-chip")).not.toBeInTheDocument();
+    expect(within(rowButton(2)).getByTestId("automation-chip")).toHaveAttribute("title", "Started by automation: Nightly");
+  });
+});

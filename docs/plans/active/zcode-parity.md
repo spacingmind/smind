@@ -529,6 +529,52 @@ None (reference-only; own code, copy and illustration).
 - Not done: the landing does not show a "draft only" mode; mobile untouched (the landing is web only).
 - Peer ledger: GLM 0 runs (2 sends refused, rate limited until 18:28, Steward switched to Sonnet); peer-sonnet 5 runs (A greeting/illustration/sidebar $0.23, B hand-off $0.46, C landing + fix run, frames), no failures; no wrong edits, one review finding (run.list ordering) fixed by Sonnet.
 
+## Stage 7 — Automations page (own page, off-state explainer, task chip)
+
+Size: L (6) — scope 2 (store + wsapi + config + web), PRs 1, risk 1, decisions 0 (ADR-0044 already keeps the daemon switch file/CLI-only), verify 2 (light+dark frames at 1280/390). Human-approved UI-lane task, after Welcome/empty, before UAT. One PR. Contract: `docs/plans/active/zcode-parity-automations.contract.md`.
+
+### References (ZCode files consulted, read-only)
+
+- `refs/zcode` sidebar quick actions ("Automations" row) and settings row-card anatomy: structure and spacing only. ZCode has no screen for this page: frames have no ZCode left side (the audit raw set has no Automations frame); the sheets pair smind before/after instead.
+
+### Design decisions
+
+- **Own page**: `activeView === "automations"` in `App.tsx`, exactly like the inbox (a full-pane view, back arrow, sidebar sheet closes first on mobile). Opened by the sidebar quick action (`onOpenAutomations`) and a palette command `open-automations`. Settings keeps only a link row (`Automations` section shows the daemon state read-only and an "Open Automations" button) and the settings-section id stays registered so deep links work.
+- **No second implementation**: the list, switch, row, dialogs, history dialog (with memory panel) and form are the existing components, moved from `components/settings/automations-section.tsx` into `components/automations/automations-page.tsx` (+ `automation-list.tsx`); the form/history files keep their code. New: `formatLocal` next to `formatUtc` in `lib/automation-format.ts`; the next-run line reads `next run 2026-11-01 09:00 UTC (16:00 your time)`.
+- **Off card** (`components/automations/automations-off-card.tsx`): what automations do (cron in UTC, CI failure -> task), the rails (budget cap, auto-pause on failures, never merges or releases), the exact command `smind config set automations.enabled true` with a copy button, then the line `smind stop && smind serve`. No UI switch for the daemon flag.
+- **`smind config set automations.enabled true`**: a new `kindBool` key in `internal/config/edit.go` (`true|false` only, field-named error, comments kept); `automations.enabled` is the only bool key added. Docs via `task docs:cli`.
+- **Task chip**: no field on `tasks`; the link is `automation_audit.task_id` (decision `fire`). `task.list`/`task.get` gain read-only `automationId` and `automationName` (omitempty) on `taskView`, filled by one batched store query (`AutomationLinksForTasks`). Web: `AutomationChip` in the sidebar task row, the task header and the inbox row; filter "Started by automation" in the sidebar task-list header (persisted preference store like the group mode).
+
+### Acceptance criteria
+
+1. Automations is a top-level page opened from the sidebar quick action and the palette; Settings no longer renders the list.
+2. The page lists automations with on/off switches, the next run in UTC with the local time alongside, per-automation history (audit + memory when enabled) and a "New automation" button opening the existing form.
+3. With automations off the page shows the explainer card with the exact CLI, a copy button and the restart line; nothing in the UI flips the daemon flag.
+4. `smind config set automations.enabled true|false` works, rejects other values naming the key, keeps comments; `smind config get automations.enabled` reads it.
+5. `task.list` and `task.get` expose `automationId`/`automationName` for a task an automation fired, and nothing for any other task.
+6. A task started by an automation shows an Automation chip (name on hover) in the sidebar row, the task header and inbox rows; the sidebar filter "Started by automation" shows only those.
+7. Light+dark frames at 1280 and 390 (off, empty-on, list, history, chip + filter); transitions reviewed. Mobile app untouched (follow-up: mobile shares `automation.list`, no chip there yet).
+
+### Named tests
+
+- Go: `TestConfigSetAutomationsEnabled`, `TestConfigSetAutomationsEnabledRejectsNonBool`, `TestAutomationLinksForTasks`, `TestTaskListExposesAutomationLink`.
+- Web: `automations-off-card.test.tsx` (`shows the exact command and copies it`, `shows the restart line and the rails`), `automations-page.test.tsx` (`lists rows with the switch, UTC and local next run`, `off state shows the card, not the list`, `new automation opens the form`), `app-automations-page.test.tsx` (`sidebar quick action opens the page`, `palette command opens the page`, `settings section only links to the page`), `automation-chip.test.tsx` (`renders the name on hover`, `absent without a link`), `app-sidebar-automation-filter.test.tsx` (`filter shows only automation tasks`), `automation-format.test.ts` (`formatLocal`).
+
+### Ported files and sources
+
+None (reference-only).
+
+### Progress / Validation
+
+- [x] Stage 7 implemented (this PR): Automations page (`activeView "automations"`), off-state explainer card, `smind config set automations.enabled`, `automationId`/`automationName` on task.list/task.get, Automation chip (sidebar row, task header, inbox row) and the sidebar filter "Started by automation".
+
+**Validation (2026-10-31)**
+
+- Mutations (each failed the named test, file restored with `git checkout --`): Go `edit.go` bool check removed (`TestConfigSetAutomationsEnabledRejectsNonBool`); `automations.go` `decision = 'fire'` dropped (`TestAutomationLinksForTasks`); `task_budget.go` link not filled (`TestTaskListExposesAutomationLink`); web `automations-off-card.tsx` command text changed (`shows the exact command and copies it`); `automations-page.tsx` off card removed (`off state shows the card, not the list`) and "your time" removed (`lists rows with the switch, UTC and local next run`); `app-sidebar.tsx` quick action back to Settings (`sidebar quick action opens the page`), palette `run` no-op (`palette command opens the page`), filter predicate `true` (`filter shows only automation tasks` + 3 more); `automation-chip.tsx` guard removed (`absent without a link`).
+- Frames (isolated daemon at `~/.smind/dogfood/automations`, seeded with `smind automation create` + sqlite audit rows, no model calls), sheets in `/tmp/steward4/zcode-audit/after/automations/`: `auto_off_empty_1280.png`, `auto_list_1280.png`, `auto_history_form_1280.png`, `auto_chip_filter_1280.png`, `auto_390.png`, `auto_transition_390.png`. ZCode has no automations screen, so the L side is the ZCode home frame (its sidebar has the Automations row).
+- Found in frames: at 390 the off-card command was truncated (now wraps); the page body was blank while the list loaded (now loading rows).
+- Not done: mobile app untouched (follow-up: it shares `automation.list`, no chip there); the memory panel stays inside the existing History dialog (reused, not a page section).
+
 ## Decisions
 
 - Aliased-vs-resolved: where ZCode aliases (`var(--color-border)`) and smind

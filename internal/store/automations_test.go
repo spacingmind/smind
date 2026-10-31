@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -86,6 +87,85 @@ func TestAutomationAudit_Queries(t *testing.T) {
 	older, _ := st.ListAutomationAudit(a.ID, 10, rows[1].ID)
 	if len(older) != 1 {
 		t.Fatalf("paging = %d", len(older))
+	}
+}
+
+func TestAutomationLinksForTasks(t *testing.T) {
+	st, ws := openAutomationStore(t)
+	a, _ := st.InsertAutomation(Automation{Name: "nightly-build", WorkspaceID: ws.ID, SignalKind: "cron"})
+	mkTask := func(title string) int64 {
+		task, err := st.CreateTask(Task{WorkspaceID: ws.ID, Title: title, Status: "running"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return task.ID
+	}
+	fired, denied, untouched := mkTask("fired"), mkTask("denied"), mkTask("untouched")
+	link := func(taskID int64, decision string) AutomationAudit {
+		r, err := st.InsertAutomationAudit(AutomationAudit{AutomationID: a.ID, SignalKind: "cron", Fingerprint: fmt.Sprint(taskID), Decision: decision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetAutomationAuditTask(r.ID, taskID, "run"); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	link(fired, AuditFire)
+	link(denied, AuditDeduped)
+
+	got, err := st.AutomationLinksForTasks([]int64{fired, denied, untouched})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("links = %+v, want only the fired task", got)
+	}
+	if l, ok := got[fired]; !ok || l.AutomationID != a.ID || l.Name != "nightly-build" {
+		t.Fatalf("link for task %d = %+v ok=%v", fired, l, ok)
+	}
+	if _, ok := got[denied]; ok {
+		t.Fatal("a non-fire decision produced a link")
+	}
+	if _, ok := got[untouched]; ok {
+		t.Fatal("an unaudited task produced a link")
+	}
+
+	// A later fire row on the same task wins.
+	b, _ := st.InsertAutomation(Automation{Name: "ci-break", WorkspaceID: ws.ID, SignalKind: "github.workflow_run"})
+	r, err := st.InsertAutomationAudit(AutomationAudit{AutomationID: b.ID, SignalKind: "github.workflow_run", Fingerprint: "late", Decision: AuditFire})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetAutomationAuditTask(r.ID, fired, "run-late"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.AutomationLinksForTasks([]int64{fired})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := got[fired]; l.AutomationID != b.ID || l.Name != "ci-break" {
+		t.Fatalf("latest fire row must win: %+v", l)
+	}
+
+	if got, err = st.AutomationLinksForTasks(nil); err != nil || len(got) != 0 {
+		t.Fatalf("no ids = %+v, %v; want an empty map", got, err)
+	}
+	ids := make([]int64, 0, 600)
+	ids = append(ids, fired)
+	for i := int64(0); i < 599; i++ {
+		task, err := st.CreateTask(Task{WorkspaceID: ws.ID, Title: "filler", Status: "running"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, task.ID)
+	}
+	got, err = st.AutomationLinksForTasks(ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[fired].Name != "ci-break" {
+		t.Fatalf("600 ids = %+v, want only task %d", got, fired)
 	}
 }
 

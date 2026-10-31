@@ -76,6 +76,15 @@ export function writeSidebarGroupMode(mode: SidebarGroupMode): void {
   writeStored(STORAGE_KEYS.sidebarGroupMode, mode);
 }
 
+/** Whether the sidebar lists only tasks an automation started -- off by default. */
+export function readSidebarAutomationFilter(): boolean {
+  return readStored<boolean>(STORAGE_KEYS.sidebarAutomationFilter, false, (v): v is boolean => typeof v === "boolean");
+}
+
+export function writeSidebarAutomationFilter(on: boolean): void {
+  writeStored(STORAGE_KEYS.sidebarAutomationFilter, on);
+}
+
 /** Whether the Notifications settings section's sound toggle is on -- off by default (plan's Decisions). */
 export function readNotificationSoundEnabled(): boolean {
   return readStored<boolean>(STORAGE_KEYS.notificationSound, false, (v): v is boolean => typeof v === "boolean");

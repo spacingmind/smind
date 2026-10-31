@@ -6,7 +6,7 @@
  * mutate the history they are given.
  */
 
-export type NavView = "workspace" | "settings" | "inbox";
+export type NavView = "workspace" | "settings" | "inbox" | "automations";
 
 export interface NavEntry {
   view: NavView;
