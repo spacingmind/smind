@@ -3,7 +3,7 @@ package runs
 import (
 	"time"
 
-	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/runs/failure"
 )
 
 // disposition.go -- the derived "what should happen next" of a finished run
@@ -89,9 +89,9 @@ func DispositionOf(f DispositionFacts) string {
 		return ""
 	}
 	switch f.FailureKind {
-	case taskrunner.FailureKindCLIExited:
+	case failure.KindCLIExited:
 		return DispositionNeedsContinue
-	case "rate_limited":
+	case failure.KindPlanWindowExhausted, failure.KindRateLimited:
 		if f.FailureResetAt != nil && !f.Now.Before(*f.FailureResetAt) {
 			return DispositionNeedsContinue
 		}

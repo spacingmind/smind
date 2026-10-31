@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
@@ -232,7 +233,7 @@ func waitExitCode(row runSummaryRow) int {
 	case "stopped":
 		return 3
 	case "error":
-		if row.FailureKind == "rate_limited" {
+		if failure.IsLimitKind(row.FailureKind) {
 			return 6
 		}
 		return 1
@@ -332,7 +333,7 @@ func renderWaitSummary(row runSummaryRow, finalText string, now time.Time) strin
 		who = fmt.Sprintf("%s (task #%d)", row.ID, row.TaskID)
 	}
 	out := fmt.Sprintf("run %s %s%s after %s; model %s; %s; %s.", who, outcome, stop, dur, model, usage, git)
-	if row.Status == "error" && row.FailureKind == "rate_limited" {
+	if row.Status == "error" && failure.IsPlanLimit(row.FailureKind) {
 		out += "\n" + rateLimitedText(row.FailureWindow, row.FailureResetAt, row.FailureResetInferred, now)
 	}
 	if text := trimFinalText(finalText); text != "" {

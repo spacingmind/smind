@@ -16,6 +16,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/wsclient"
@@ -1818,7 +1819,7 @@ func runStatusCell(r runSummaryRow, now time.Time) string {
 
 func runStatusText(r runSummaryRow, now time.Time) string {
 	status, disposition, errText := r.Status, r.Disposition, r.Err
-	if status == "error" && r.FailureKind == "rate_limited" {
+	if status == "error" && failure.IsPlanLimit(r.FailureKind) {
 		return status + ": " + rateLimitedText(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred, now)
 	}
 	if status == "error" && r.FailureKind == "cli_exited" {

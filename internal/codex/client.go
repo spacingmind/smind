@@ -100,6 +100,40 @@ type turnStartParams struct {
 
 type turnError struct {
 	Message string `json:"message"`
+	// CodexErrorInfo is the app-server's typed error class: a bare string
+	// ("usageLimitExceeded", "unauthorized", "serverOverloaded", ...) or an
+	// object with one key ({"httpConnectionFailed": {"httpStatusCode": 503}}).
+	CodexErrorInfo json.RawMessage `json:"codexErrorInfo"`
+}
+
+// TurnError is a turn that completed with an error. Its text is unchanged
+// ("codex: turn failed: <message>"); Info carries the app-server's typed
+// class name (codex-rs CodexErrorInfo, camelCase; "" = none) so a caller can
+// classify without parsing the message.
+type TurnError struct {
+	Message string
+	Info    string
+}
+
+func (e *TurnError) Error() string { return "codex: turn failed: " + e.Message }
+
+// errorInfoName reads the class name of a codexErrorInfo value: the string
+// itself, or the single key of the object form; "" for null/absent/other.
+func errorInfoName(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) == nil && len(m) == 1 {
+		for k := range m {
+			return k
+		}
+	}
+	return ""
 }
 
 type turn struct {
@@ -152,8 +186,9 @@ type threadTokenUsageUpdatedNotification struct {
 // turnResult is what a completed (or failed/interrupted) turn resolves to,
 // decoded from a turn/completed notification's Turn.Status/Error.
 type turnResult struct {
-	status string
-	errMsg string
+	status  string
+	errMsg  string
+	errInfo string
 }
 
 // Client is a codex app-server client: it spawns `codex app-server` (or an
@@ -512,7 +547,7 @@ func (c *Client) Prompt(ctx context.Context, threadID, text string, updates chan
 	select {
 	case result := <-waiter:
 		if result.status == "failed" {
-			return result.status, fmt.Errorf("codex: turn failed: %s", result.errMsg)
+			return result.status, &TurnError{Message: result.errMsg, Info: result.errInfo}
 		}
 		return result.status, nil
 	case <-ctx.Done():
@@ -582,6 +617,7 @@ func (c *Client) handleTurnCompleted(raw json.RawMessage) {
 	result := turnResult{status: n.Turn.Status}
 	if n.Turn.Error != nil {
 		result.errMsg = n.Turn.Error.Message
+		result.errInfo = errorInfoName(n.Turn.Error.CodexErrorInfo)
 	}
 	// Buffered(1): Prompt may not have reached its select yet (still
 	// blocked inside the turn/start call above), so this send must never

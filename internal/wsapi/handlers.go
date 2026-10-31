@@ -16,6 +16,7 @@ import (
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
@@ -1973,7 +1974,7 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			events[i] = toRunLogEvent(e)
 		}
 		var fallbackID int64
-		if status.FailureKind == "rate_limited" {
+		if failure.IsPlanLimit(status.FailureKind) {
 			fallbackID = reg.FallbackProfileFor(status.ProfileID)
 		}
 		return runLogsResult{

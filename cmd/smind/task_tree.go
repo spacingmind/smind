@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/runs/failure"
 )
 
 // treeTitleMax is the longest title (in runes) renderTaskTree prints.
@@ -99,7 +101,7 @@ func treeTitle(title string) string {
 
 func treeStateText(run taskTreeNodeRun, now time.Time) string {
 	switch {
-	case run.State == "error" && run.FailureKind == "rate_limited":
+	case run.State == "error" && failure.IsPlanLimit(run.FailureKind):
 		var resetAt *time.Time
 		if t, err := time.Parse(time.RFC3339, run.ResetAt); err == nil {
 			resetAt = &t

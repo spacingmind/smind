@@ -65,6 +65,10 @@ type chatQueueRunConfig struct {
 	// FailoverOf is the failed run an automatic rate-limit retry continues
 	// (ADR-0041 F2b); "" = none.
 	FailoverOf string `json:"failoverOf,omitempty"`
+	// RetryTransient marks an automatic transient_429 retry: at delivery it is
+	// cancelled, not started, while its provider is in cooldown (the hard cap
+	// of the run-failure-classes plan, D3).
+	RetryTransient bool `json:"retryTransient,omitempty"`
 }
 
 // SetStarter wires the dependencies delivery needs to start runs itself
@@ -529,6 +533,13 @@ func (reg *Registry) deliverOne(chatID int64) {
 		if err != nil {
 			reg.cancelQueuedItem(item.ID, store.ChatQueueCancelAuto, fmt.Sprintf("delivery failed: %v", err))
 			continue
+		}
+
+		if cfg.RetryTransient {
+			if until, cooling := reg.activeProviderCooldown(cfg.Provider); cooling {
+				reg.cancelQueuedItem(item.ID, store.ChatQueueCancelAuto, "provider "+cfg.Provider+" is cooling down until "+until.Format(time.RFC3339)+"; transient retry dropped")
+				continue
+			}
 		}
 
 		startOpts := []StartOption{WithModel(cfg.Model), WithOrigin(item.Source)}

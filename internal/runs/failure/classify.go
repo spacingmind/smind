@@ -9,8 +9,34 @@ import (
 	"time"
 )
 
-// KindRateLimited is the Result.Kind for a rate-limited run.
-const KindRateLimited = "rate_limited"
+// The Result.Kind values (the wire's failureKind). Kind == "" means the run
+// failed for none of these reasons.
+const (
+	// KindPlanWindowExhausted: the plan's usage window is spent (a window, a
+	// reset time, or the provider's own "usage limit reached").
+	KindPlanWindowExhausted = "plan_window_exhausted"
+	// KindTransient429: a short-lived throttle (429 / overloaded with a
+	// Retry-After or an overload body) that is not a plan window.
+	KindTransient429 = "transient_429"
+	// KindAuthExpired: the provider refused the credential.
+	KindAuthExpired = "auth_expired"
+	// KindModelNotInPlan: the account's plan does not include the model.
+	KindModelNotInPlan = "model_not_in_plan"
+	// KindRateLimited is the residual: a rate limit that cannot be told apart
+	// (a bare 429 / rate words, no window, no reset, no Retry-After).
+	KindRateLimited = "rate_limited"
+	// KindCLIExited: the CLI ended its stream without a result.
+	KindCLIExited = "cli_exited"
+)
+
+// Typed class hints a runner passes in Input.Code when its backend reported a
+// structured error (a codex CodexErrorInfo, an HTTP status). They beat text.
+const (
+	CodeUsageLimit   = "usage_limit"
+	CodeUnauthorized = "unauthorized"
+	CodeOverloaded   = "overloaded"
+	CodeRateLimit    = "rate_limit"
+)
 
 // Signal is a structured rate-limit report from a backend (claude-native's rate_limit_event).
 type Signal struct {
@@ -27,6 +53,13 @@ type Input struct {
 	// Vendor is the resolved vendor profile of the provider
 	// (zai|anthropic|openai|generic); "" = generic.
 	Vendor string
+	// Model is the model the run asked for ("" = the harness default).
+	Model string
+	// Code is a typed class hint from the runner's backend (Code* constants);
+	// "" = none. RetryAfter is the provider's Retry-After when the backend saw
+	// it (0 = absent). Both are optional.
+	Code       string
+	RetryAfter time.Duration
 }
 
 // Result is the classification. Kind == "" means not rate limited.
@@ -43,6 +76,9 @@ type Result struct {
 	// DaemonLocalPrefix + the daemon's zone when assumed. "" = none (no
 	// reset parsed, an epoch or a backend signal).
 	ResetZone string
+	// RetryAfter is the provider's own wait hint for a transient_429 (from the
+	// backend or "try again in Ns" text); 0 = none.
+	RetryAfter time.Duration
 }
 
 // DaemonLocalPrefix starts a ResetZone read in the daemon's own zone.
@@ -60,19 +96,38 @@ var (
 	// printed, is an IANA name.
 	reClaudeHit     = regexp.MustCompile(`(?i)you'?ve hit your (session |weekly |usage |opus |sonnet )?limit`)
 	reClaudeResetTZ = regexp.MustCompile(`(?i)resets (\d{1,2})(?::(\d{2}))?\s*(am|pm)(?:\s*\(([A-Za-z_]+/[A-Za-z_+\-0-9]+)\))?`)
+	reCodexQuota    = regexp.MustCompile(`(?i)quota exceeded\. check your plan and billing`) // refs/codex error.rs QuotaExceeded
 	reGenericUL     = regexp.MustCompile(`(?i)usage limit reached`)
 	reGenericRLE    = regexp.MustCompile(`(?i)rate_limit_error`)
 	reRateWords     = regexp.MustCompile(`(?i)rate limit|rate-limit|ratelimit|too many requests`)
+	// Sources: claude-code CHANGELOG ("Not logged in · Please run /login",
+	// the CLI's "Invalid API key"), the Anthropic API error type
+	// authentication_error (also what internal/server/proxy.go speaks), HTTP 401.
+	reAuth = regexp.MustCompile(`(?i)not logged in|please run /login|invalid api key|invalid x-api-key|oauth token has expired|authentication_error|\b401\b[^\n]{0,40}unauthorized|unauthorized[^\n]{0,40}\b401\b`)
+	// Sources: claude-code CHANGELOG ("There's an issue with the selected
+	// model ... may not exist or you may not have access to it"), refs/codex
+	// core tests ("Model not found <m>", "The '<m>' model is not supported when
+	// using Codex with a ChatGPT account"), proxy.go model_not_found.
+	reModel = regexp.MustCompile(`(?i)issue with the selected model|may not exist or you may not have access|model not found|model_not_found|model is not supported when using codex|not_found_error[^\n]{0,80}\bmodel\b`)
+	// Sources: refs/codex protocol error.rs ("Selected model is at capacity",
+	// "We're currently experiencing high demand", "rate limit exceeded: ..."),
+	// Anthropic overloaded_error (529).
+	reTransient = regexp.MustCompile(`(?i)overloaded_error|selected model is at capacity|experiencing high demand|rate limit exceeded:|\boverloaded\b`)
+	reTryAgain  = regexp.MustCompile(`(?i)try again in (\d+)\s*(seconds?|secs?|s|minutes?|mins?|m)\b`)
 )
 
-// Classify reports whether a failed run was rate limited. Unknown never
-// classifies and no time is ever guessed.
+// Classify classifies a failed run. Unknown never classifies and no time is
+// ever guessed. Precedence: a rejected signal or an explicit plan-usage text
+// (plan_window_exhausted) beats a typed backend code, which beats auth text,
+// which beats model text, which beats the generic 429 words (transient_429
+// when there is a Retry-After or an overload body, else the residual
+// rate_limited).
 func Classify(in Input, now time.Time) Result {
 	var res Result
 	sigHit := false
 	if s := in.Signal; s != nil && s.Status == "rejected" && s.Type != "overage" {
 		sigHit = true
-		res.Kind = KindRateLimited
+		res.Kind = KindPlanWindowExhausted
 		res.Window = signalWindow(s.Type)
 		if !s.ResetsAt.IsZero() {
 			t := s.ResetsAt.UTC()
@@ -81,19 +136,63 @@ func Classify(in Input, now time.Time) Result {
 		}
 	}
 	txt := classifyText(in.Err, now, in.Vendor)
-	if txt.Kind == "" {
+	if sigHit {
+		if txt.Kind == KindPlanWindowExhausted {
+			if res.Window == "" {
+				res.Window = txt.Window
+			}
+			if res.ResetAt == nil {
+				res.ResetAt, res.ResetInferred, res.ResetZone = txt.ResetAt, txt.ResetInferred, txt.ResetZone
+			}
+		}
 		return res
 	}
-	if !sigHit {
+	if txt.Kind == KindPlanWindowExhausted {
 		return txt
 	}
-	if res.Window == "" {
-		res.Window = txt.Window
+	switch in.Code {
+	case CodeUsageLimit:
+		return Result{Kind: KindPlanWindowExhausted}
+	case CodeUnauthorized:
+		return Result{Kind: KindAuthExpired}
+	case CodeOverloaded, CodeRateLimit:
+		return Result{Kind: KindTransient429, RetryAfter: retryHint(in, now)}
 	}
-	if res.ResetAt == nil {
-		res.ResetAt, res.ResetInferred, res.ResetZone = txt.ResetAt, txt.ResetInferred, txt.ResetZone
+	if reAuth.MatchString(in.Err) {
+		return Result{Kind: KindAuthExpired}
 	}
-	return res
+	if reModel.MatchString(in.Err) {
+		return Result{Kind: KindModelNotInPlan}
+	}
+	if reTransient.MatchString(in.Err) {
+		return Result{Kind: KindTransient429, RetryAfter: retryHint(in, now)}
+	}
+	if txt.Kind == KindRateLimited {
+		if d := retryHint(in, now); d > 0 {
+			return Result{Kind: KindTransient429, RetryAfter: d}
+		}
+		return txt
+	}
+	return Result{}
+}
+
+// retryHint is the provider's wait hint: the backend's Retry-After, else a
+// "try again in N seconds/minutes" in the text; 0 = none.
+func retryHint(in Input, _ time.Time) time.Duration {
+	if in.RetryAfter > 0 {
+		return in.RetryAfter
+	}
+	if m := reTryAgain.FindStringSubmatch(in.Err); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil || n <= 0 {
+			return 0
+		}
+		if strings.HasPrefix(strings.ToLower(m[2]), "m") {
+			return time.Duration(n) * time.Minute
+		}
+		return time.Duration(n) * time.Second
+	}
+	return 0
 }
 
 func signalWindow(t string) string {
@@ -132,7 +231,7 @@ func classifyText(s string, now time.Time, vendor string) Result {
 	tryGLM, tryClaude, tryCodex := profile(vendor)
 	if tryGLM {
 		if m := reGLM.FindStringSubmatch(s); m != nil {
-			r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
+			r := Result{Kind: KindPlanWindowExhausted, Window: m[1] + "h"}
 			if rm := reGLMReset.FindStringSubmatch(s); rm != nil {
 				// Z.ai prints its reset as wall-clock time with no zone, and its
 				// backend runs on UTC+8 (Asia/Shanghai): the dogfood 429 of
@@ -150,7 +249,7 @@ func classifyText(s string, now time.Time, vendor string) Result {
 	}
 	if tryClaude {
 		if m := reClaudeOld.FindStringSubmatch(s); m != nil {
-			r := Result{Kind: KindRateLimited}
+			r := Result{Kind: KindPlanWindowExhausted}
 			if sec, err := strconv.ParseInt(m[1], 10, 64); err == nil {
 				t := time.Unix(sec, 0).UTC()
 				r.ResetAt = &t
@@ -158,7 +257,7 @@ func classifyText(s string, now time.Time, vendor string) Result {
 			return r
 		}
 		if m := reClaudeNew.FindStringSubmatch(s); m != nil {
-			r := Result{Kind: KindRateLimited, Window: m[1] + "h"}
+			r := Result{Kind: KindPlanWindowExhausted, Window: m[1] + "h"}
 			if rm := reClaudeRst.FindStringSubmatch(s); rm != nil {
 				r.ResetAt = nextAmPm(rm[1], rm[2], rm[3], now)
 				r.ResetInferred = r.ResetAt != nil
@@ -167,7 +266,7 @@ func classifyText(s string, now time.Time, vendor string) Result {
 			return r
 		}
 		if m := reClaudeHit.FindStringSubmatch(s); m != nil {
-			r := Result{Kind: KindRateLimited, Window: claudeHitWindow(m[1])}
+			r := Result{Kind: KindPlanWindowExhausted, Window: claudeHitWindow(m[1])}
 			if rm := reClaudeResetTZ.FindStringSubmatch(s); rm != nil {
 				r.ResetAt = nextAmPmIn(rm[1], rm[2], rm[3], rm[4], now)
 				r.ResetInferred = r.ResetAt != nil && !knownZone(rm[4])
@@ -183,12 +282,14 @@ func classifyText(s string, now time.Time, vendor string) Result {
 		}
 	}
 	if tryCodex {
-		if reCodex.MatchString(s) {
-			return Result{Kind: KindRateLimited}
+		if reCodex.MatchString(s) || reCodexQuota.MatchString(s) {
+			return Result{Kind: KindPlanWindowExhausted}
 		}
 	}
-	if reGenericUL.MatchString(s) || reGenericRLE.MatchString(s) ||
-		(strings.Contains(s, "429") && reRateWords.MatchString(s)) {
+	if reGenericUL.MatchString(s) {
+		return Result{Kind: KindPlanWindowExhausted}
+	}
+	if reGenericRLE.MatchString(s) || (strings.Contains(s, "429") && reRateWords.MatchString(s)) {
 		return Result{Kind: KindRateLimited}
 	}
 	return Result{}

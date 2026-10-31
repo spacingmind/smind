@@ -350,7 +350,7 @@ func chatHasSession(st *store.Store, chatID int64) bool {
 // resumableKind is a failure kind DispositionOf may offer a continue for;
 // only those runs pay the chat lookup.
 func resumableKind(kind string) bool {
-	return kind == taskrunner.FailureKindCLIExited || kind == "rate_limited"
+	return failure.IsKnown(kind)
 }
 
 // restartStopReason is the stop reason for a run the daemon's going down cut
@@ -1598,13 +1598,14 @@ func (reg *Registry) finish(r *run, err error) {
 	// rule. Never alters status, stop reason, error text or disposition.
 	var fail failure.Result
 	if status == StatusError {
-		fail = failure.Classify(failure.Input{Provider: string(r.provider), Err: errMsg, Signal: rateSignal, Vendor: providers.VendorOf(string(r.provider))}, time.Now())
+		code, retryAfter := taskrunner.FailureHint(err)
+		fail = failure.Classify(failure.Input{Provider: string(r.provider), Err: errMsg, Signal: rateSignal, Vendor: providers.VendorOf(string(r.provider)), Model: r.model, Code: code, RetryAfter: retryAfter}, time.Now())
 		// A CLI that died without a result is its own typed failure; a stderr
 		// that says it hit a usage limit is still a rate limit, the more
 		// actionable of the two.
 		var cliExit *taskrunner.CLIExitError
 		if fail.Kind == "" && errors.As(err, &cliExit) {
-			fail.Kind = taskrunner.FailureKindCLIExited
+			fail.Kind = failure.KindCLIExited
 		}
 		if fail.Kind != "" {
 			_ = reg.st.UpdateRunFailure(r.id, fail.Kind, fail.Window, fail.ResetAt, fail.ResetInferred, fail.ResetZone)
@@ -1614,7 +1615,7 @@ func (reg *Registry) finish(r *run, err error) {
 		// time); system runs (probe/reflect/curate) and model-scoped windows
 		// never do.
 		now := time.Now()
-		if fail.Kind == failure.KindRateLimited && fail.ResetAt != nil && fail.ResetAt.After(now) && r.purpose == "" && windowBlocksProvider(fail.Window) {
+		if failure.IsPlanLimit(fail.Kind) && fail.ResetAt != nil && fail.ResetAt.After(now) && r.purpose == "" && windowBlocksProvider(fail.Window) {
 			_ = reg.st.SetProviderCooldown(string(r.provider), *fail.ResetAt, r.id, now)
 		}
 	}

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/spacingmind/smind/internal/runs/failure"
 )
 
 const (
@@ -54,7 +56,7 @@ func BuildChildEventBlock(f ChildEventFacts) string {
 				approx = "≈"
 			}
 			fail += ", resets " + approx + f.FailureResetAt.Format(time.RFC3339)
-		case f.FailureKind == "rate_limited":
+		case failure.IsPlanLimit(f.FailureKind):
 			fail += ", reset time unknown"
 		}
 		parts = append(parts, fail)
