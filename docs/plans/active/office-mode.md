@@ -256,9 +256,17 @@ workspaces, C generation skills, docx/xlsx/pptx preview (needs section 7 answere
 
 - 2026-10-31: ADR-0049 and this plan written (docs-only PR). No code started. Peer ledger for this item: peer-glm 0 runs, peer-sonnet 0 runs
   (ADR and plan written by the Lead, a Sonnet seat; no Peer was needed for docs).
+- 2026-10-31: O3 (daemon) implemented on `smind/win-b-office-o3`: `internal/files/binary.go` (Stat, ReadRange), `internal/wsapi/files_binary.go`, handler-map entries, `daemon.info.files`, method golden, contract `office-mode-o3.contract.md`. Peer ledger for O3: peer-glm 0 runs, peer-sonnet 0 runs (the Windows Lead, a Sonnet seat, wrote the descriptor-level code and tests directly; the diff is small and the part that matters is security).
 
 ## Validation
 
 Docs-only PR: ADR/plan cross-references (S-numbers, AC-numbers, PR names, anchors, file paths named in the ADR) checked by hand against the
 tree; markdown sanity (fences balanced, tables well-formed) checked; `task lint` run. Implementation PRs fill this section per AC with
 evidence (test names, mutation results, frames) as they land; the plan moves to `docs/plans/completed/` only when every AC is confirmed here.
+
+### O3 validation (AC12-AC16), Windows 11 host, 2026-10-31
+
+- AC12-AC16: named tests in `office-mode-o3.contract.md`; `go test ./internal/files ./internal/wsapi -count=1` green on Windows (wsapi 120 s); `GOOS=linux` and `GOOS=darwin` `go vet` clean (FIFO test is `!windows`).
+- Mutations (applied to committed code, `git checkout --` after): M1 classify by `.pdf` extension -> `TestFileStat_SniffsContentNotExtension`; M2 drop the size cap -> `TestFileReadRange_ContainmentAndTOCTOU`; M3 no chunk clamp -> `TestFileReadRange_ClampsAndBounds`, `TestFileReadRange_ChunkCeilingPerTransport`; M4 ignore `ifMtime` -> `TestFileReadRange_IfMtimeConflict`; M5 path-form guard off -> `TestFileReadRange_WindowsPathForms` (a first version of that test did *not* kill M5 because a UNC path fails later anyway; it now asserts the guard's `invalid_params`); M6 relay limit = direct -> `TestDaemonInfoFilesCapability`, `TestFileReadRange_ChunkCeilingPerTransport`, `TestFileRangeRelayChunkFitsFrame`.
+- Not run here: the symlink subtests skip on a Windows host without symlink privilege, so symlink containment ran on no host in this session; the FIFO test is `!windows`. `TestFileMethods_...NoContentInLogs` checks the slog default and error text only; `request_log` is the proxy meter and file RPCs never write to it.
+- Known gap, not in the write scope: `file.read` / `file.write` still pass a UNC absolute path to `realpath` before the containment check (the O3 methods refuse it first). Follow-up: move `refuseUnsafeForm` into `resolveInRoot`.
