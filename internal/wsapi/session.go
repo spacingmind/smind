@@ -38,6 +38,7 @@ var RunScopedMethods = []string{
 	"run.list", "run.listConfigOptions", "run.logs", "run.setConfigOption",
 	"run.setPermissionMode", "run.start", "run.stop",
 	"session.identify",
+	"steward.digest.get", "steward.verdict.submit",
 	"task.archive", "task.create", "task.diff", "task.get", "task.list", "task.tree",
 	"usage.summary",
 	"validation.contract.get", "validation.contract.submit", "validation.get", "validation.list", "validation.request", "validation.verdict.submit",
