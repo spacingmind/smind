@@ -225,7 +225,7 @@ function classicWorker(): Worker {
   const classic = workerSource
     .replace(/export\s*\{\s*WorkerMessageHandler\s*\}\s*;?\s*$/, "")
     .replace(/import\.meta\.url/g, '"about:blank"');
-  if (classic === workerSource || /import\.meta|^\s*export/m.test(classic)) throw new Error("pdf.js worker could not be made classic");
+  if (classic === workerSource || /\bimport\.meta\b|^\s*export\b/m.test(classic)) throw new Error("pdf.js worker could not be made classic");
   return new Worker(URL.createObjectURL(new Blob([classic], { type: "text/javascript" })));
 }
 
