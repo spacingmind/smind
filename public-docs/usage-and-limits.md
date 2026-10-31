@@ -161,6 +161,26 @@ Some details:
   naming the provider and the time it is limited until, so the agent can pick
   another provider.
 
+## Why a run failed, and what to do
+
+A failed run says why in one of a few classes, with a next step. The task
+footer, the inbox, `smind task runs`, `smind task wait` and the MCP tools all
+show the same class and step.
+
+| Class | Meaning | Next step |
+|---|---|---|
+| `auth_expired` | The provider refused the login. | Sign in again to that account in **Settings → Providers**. Never retried and never failed over: it cannot work until you sign in. |
+| `plan_window_exhausted` | The plan's usage window (5 hours, weekly) is used up. | Wait until it resets, or continue on the profile's fallback agent. |
+| `model_not_in_plan` | The account's plan does not include the model you chose. | Pick another model. Never retried on the same account. |
+| `transient_429` | A short throttle from the provider, not a quota. | A run from an agent profile or an orchestrating task is retried twice by itself (after 30 seconds, then 2 minutes; the provider's own wait hint wins, between 5 seconds and 5 minutes). A plain send of yours gets a **Retry** step instead. No retry starts while the provider is on cooldown. |
+| `rate_limited` | A limit smind cannot tell apart (no window, no reset time). | Retry after a short wait. |
+| `cli_exited` | The agent program ended without a result. | Continue the run. |
+
+Failures that need you (`auth_expired`, `model_not_in_plan`) appear in the
+inbox as **run failed** items until a later run replaces them. On the command
+line, `smind task wait` exits 6 for the limit classes and 7 when you must fix
+setup.
+
 ## I reset my quota
 
 smind keeps a provider on cooldown until the reset time the provider gave, even

@@ -22,7 +22,8 @@ const cmdTaskWaitUsage = "usage: smind task wait <runId|item:ID> [--timeout <dur
 // cmdTaskWait blocks until a run is terminal and reports the outcome in its
 // exit code: 0 done, 1 error, 3 stopped, 4 done at a cap (needs-continue),
 // 5 --timeout expired (run left running), 6 error from a provider rate limit
-// (the output says when it resets).
+// (plan window, transient 429 or unclassified; the output says when it resets
+// or what to do), 7 error a human must fix (auth_expired, model_not_in_plan).
 func cmdTaskWait(args []string) int {
 	return runTaskWait(args, os.Stdout, os.Stderr)
 }
