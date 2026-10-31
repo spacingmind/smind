@@ -385,7 +385,7 @@ Name drift, stated: the plan's early list names `TestLabelsValidation`, `TestSel
 **Not every AC is fully confirmed** (AC14 `out` rows, AC25 mobile device frames and the two chips), so this plan stays in `active/`.
 
 Open follow-ups:
-- Hosts settings page: a labels editor (F5 is CLI and MCP only).
+- ~~Hosts settings page: a labels editor (F5 is CLI and MCP only).~~ Done in the host labels editor follow-up (`hosts-labels-editor.contract.md`): a Labels row with chips and an Edit labels dialog.
 - ~~`smind host audit` and an audit view on the Hosts page (AC14).~~ Done in the host audit view follow-up (`fleet-hosts-audit-view.contract.md`); the caller half of the audit (`out` rows) is still not written by anything.
 - Mobile chip device or simulator frames (blocked on the native verification blocker); `TaskTreeRow` is not type-checked or run natively.
 - Task header chip for a task created by another host, and a chip on remote-origin permission rows (needs `origin_host` in the task payload and the inbox item).
