@@ -416,3 +416,94 @@ func TestServiceForgetRevokesRelayDevice(t *testing.T) {
 		t.Fatalf("revoked %q", revoked)
 	}
 }
+
+// stateCallee records the fleet.link.state notices sent over it.
+type stateCallee struct {
+	*fakeCallee
+	mu     sync.Mutex
+	states []string
+}
+
+func (c *stateCallee) Call(ctx context.Context, method string, params, out any) error {
+	if method == hello.MethodLinkState {
+		c.mu.Lock()
+		c.states = append(c.states, params.(map[string]string)["state"])
+		c.mu.Unlock()
+		return nil
+	}
+	return c.fakeCallee.Call(ctx, method, params, out)
+}
+
+func (c *stateCallee) got() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.states...)
+}
+
+func TestServiceSendsReverseStateOnConnect(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		enable bool
+		want   string
+	}{{"enabled", true, "reverse_enabled"}, {"disabled", false, "reverse_disabled"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newSvcEnv(t)
+			h, err := e.reg.AcceptPairRequest(e.other.Public(), "bee", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			g := registry.DefaultReverseGrant()
+			g.WorkspacesWrite = []int64{1}
+			if err := e.reg.Approve(h.HostID, g); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.enable {
+				if err := e.reg.DisableReverse(h.HostID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := e.reg.SetOutboundEnabled(h.HostID, true); err != nil {
+				t.Fatal(err)
+			}
+			tr := Transport{Kind: KindDirect, URL: "ws://127.0.0.1:1"}
+			if err := e.reg.SetOutboundTransport(h.HostID, tr.JSON()); err != nil {
+				t.Fatal(err)
+			}
+			var (
+				mu      sync.Mutex
+				callees []*stateCallee
+			)
+			m := NewManager(ManagerOptions{
+				Key: e.self, Registry: e.reg, Version: "test",
+				BackoffMin: time.Millisecond, BackoffMax: tinyMax, ApprovalPoll: time.Hour,
+				Dial: func(context.Context, Transport, string) (Conn, error) {
+					c := &stateCallee{fakeCallee: newCallee(e.other)}
+					mu.Lock()
+					callees = append(callees, c)
+					mu.Unlock()
+					return c, nil
+				},
+			})
+			t.Cleanup(m.Close)
+			NewService(ServiceOptions{Key: e.self, Registry: e.reg, Manager: m, Version: "test"})
+			m.Ensure(h.HostID)
+			waitStatus(t, m, h.HostID, StateConnected)
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) {
+				mu.Lock()
+				c := callees[0]
+				mu.Unlock()
+				if len(c.got()) > 0 {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			mu.Lock()
+			c := callees[0]
+			mu.Unlock()
+			if got := c.got(); len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("notices = %v, want [%s]", got, tc.want)
+			}
+		})
+	}
+}

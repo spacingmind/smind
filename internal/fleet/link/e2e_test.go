@@ -309,3 +309,24 @@ func TestFleetReverseDisabledByDefault(t *testing.T) {
 		t.Fatalf("B->A test after disable_reverse = %+v, want peer_disabled/not_granted", res)
 	}
 }
+
+// A reverse notice missed while the link was down is re-sent when it comes up.
+func TestFleetReverseNoticeSentOnReconnect(t *testing.T) {
+	a, b := pairE2E(t)
+	aID, bID := a.key.HostID(), b.key.HostID()
+
+	// Simulate a missed notice: A enables its direction to B without telling B.
+	if err := a.reg.EnableReverse(bID); err != nil {
+		t.Fatal(err)
+	}
+	if v := b.hostView(t, aID); v == nil || v.Outbound.Enabled {
+		t.Fatalf("B's outbound to A = %+v before reconnect, want disabled", v)
+	}
+
+	a.mgr.Drop(bID)
+	a.mgr.Ensure(bID)
+	poll(t, "B learned A enabled reverse", func() bool {
+		v := b.hostView(t, aID)
+		return v != nil && v.Outbound.Enabled
+	})
+}

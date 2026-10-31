@@ -66,7 +66,35 @@ func NewService(o ServiceOptions) *Service {
 	if o.Hostname == nil {
 		o.Hostname = func() string { h, _ := os.Hostname(); return h }
 	}
-	return &Service{o: o}
+	s := &Service{o: o}
+	if o.Manager != nil {
+		o.Manager.setOnConnected(s.sendReverseState)
+	}
+	return s
+}
+
+// onConnectedTimeout bounds the state notice sent when a link comes up.
+const onConnectedTimeout = 10 * time.Second
+
+// sendReverseState tells a freshly connected peer the current state of our
+// direction to it. It is idempotent, so a peer that missed an earlier notice
+// is healed; errors are ignored.
+func (s *Service) sendReverseState(hostID string, c Conn) {
+	h, err := s.o.Registry.Get(hostID)
+	if err != nil || h.State != registry.StateApproved {
+		return
+	}
+	_, in, err := s.o.Registry.Links(hostID)
+	if err != nil {
+		return
+	}
+	state := "reverse_disabled"
+	if in.Enabled {
+		state = "reverse_enabled"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), onConnectedTimeout)
+	defer cancel()
+	_ = c.Call(ctx, hello.MethodLinkState, map[string]string{"state": state}, nil)
 }
 
 // Start resumes the links of every host whose outbound direction is enabled

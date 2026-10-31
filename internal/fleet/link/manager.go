@@ -56,6 +56,9 @@ type ManagerOptions struct {
 	// ApprovalPoll is how often to ask a peer that has not approved yet.
 	BackoffMin, BackoffMax, ApprovalPoll time.Duration
 	Now                                  func() time.Time
+	// OnConnected, if set, is called in the host's loop goroutine right after
+	// a successful handshake with an active peer; it must not block.
+	OnConnected func(hostID string, c Conn)
 }
 
 // Manager keeps one outbound link per host alive: it dials, runs the
@@ -98,6 +101,22 @@ func NewManager(o ManagerOptions) *Manager {
 		m.o.Dial = m.defaultDial
 	}
 	return m
+}
+
+// setOnConnected installs the connected hook unless ManagerOptions already
+// carries one.
+func (m *Manager) setOnConnected(f func(hostID string, c Conn)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.o.OnConnected == nil {
+		m.o.OnConnected = f
+	}
+}
+
+func (m *Manager) onConnected() func(hostID string, c Conn) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.o.OnConnected
 }
 
 func (m *Manager) defaultDial(ctx context.Context, t Transport, hostID string) (Conn, error) {
@@ -346,6 +365,11 @@ func (m *Manager) run(ctx context.Context, hostID string, l *hostLoop) {
 			if a.host.State == registry.StatePending && a.active {
 				if err := m.o.Registry.MarkApproved(hostID); err != nil && !errors.Is(err, registry.ErrBadState) {
 					m.setStatus(l, Status{State: StateDown, Detail: "record approval: " + err.Error()})
+				}
+			}
+			if a.active {
+				if f := m.onConnected(); f != nil {
+					f(hostID, a.conn)
 				}
 			}
 			select {
