@@ -44,3 +44,21 @@ func Link(t testing.TB, oldname, newname string) string {
 	}
 	return "junction"
 }
+
+// SymlinkOrSkip creates a real symlink for tests that need a link to a FILE
+// (or a relative target), which Link's junction fallback can't represent.
+// Where the OS refuses it for lack of privilege (Windows without Developer
+// Mode or elevation) the test is skipped with that reason, never silently
+// passed; any other error fails the test.
+func SymlinkOrSkip(t testing.TB, oldname, newname string) {
+	t.Helper()
+	err := os.Symlink(oldname, newname)
+	if err == nil {
+		return
+	}
+	var errno syscall.Errno
+	if runtime.GOOS == "windows" && errors.As(err, &errno) && errno == errorPrivilegeNotHeld {
+		t.Skipf("creating a symlink needs SeCreateSymbolicLinkPrivilege on Windows (enable Developer Mode or run elevated): %v", err)
+	}
+	t.Fatalf("symlink %s -> %s: %v", newname, oldname, err)
+}

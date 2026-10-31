@@ -45,6 +45,8 @@ type e2eDaemon struct {
 	mgr     *Manager
 	svc     *Service
 	wsURL   string
+	db      *store.Store
+	wm      *workspace.Manager
 	admin   *wsclient.Client
 	raw     [][]byte // every fleet.host.list result, for the leak check
 }
@@ -85,7 +87,7 @@ func newE2EDaemonWith(t *testing.T, name, password string, wire func(srv *server
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	d := &e2eDaemon{name: name, wsURL: "ws://" + ts.Listener.Addr().String()}
+	d := &e2eDaemon{name: name, db: db, wm: wm, wsURL: "ws://" + ts.Listener.Addr().String()}
 	if d.key, err = identity.LoadOrCreate(home); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +107,7 @@ func newE2EDaemonWith(t *testing.T, name, password string, wire func(srv *server
 		wire(srv, home, &so)
 	}
 	d.svc = NewService(so)
-	srv.API().SetFleet(wsapi.FleetOptions{Key: d.key, Registry: d.reg, Window: window, Links: d.svc, Version: "e2e-" + name})
+	srv.API().SetFleet(wsapi.FleetOptions{Key: d.key, Registry: d.reg, Window: window, Links: d.svc, Store: db, Workspaces: wm, Version: "e2e-" + name})
 	d.svc.Start()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

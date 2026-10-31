@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/spacingmind/smind/internal/fsutil"
 	"github.com/spacingmind/smind/internal/realpath"
 )
 
@@ -327,8 +328,8 @@ func (e *env) checkNoSymlinks(p string) error {
 		if err != nil {
 			return err
 		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: %s is a symlink; use a real directory", ErrSymlinkedTarget, cur)
+		if fsutil.IsLink(fi.Mode()) {
+			return fmt.Errorf("%w: %s is a symlink or junction; use a real directory", ErrSymlinkedTarget, cur)
 		}
 	}
 	return nil

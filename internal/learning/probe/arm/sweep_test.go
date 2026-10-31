@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func TestArmEnd_ArmDirRemoved(t *testing.T) {
@@ -38,9 +40,7 @@ func TestStartupSweep_RemovesOrphanArmDirs(t *testing.T) {
 	write(t, filepath.Join(fresh, "f"), "x", 0o644)
 	write(t, filepath.Join(other, "f"), "x", 0o644)
 	write(t, filepath.Join(outside, "precious"), "x", 0o644)
-	if err := os.Symlink(outside, filepath.Join(root, DirPrefix+"link")); err != nil {
-		t.Skip("symlinks unavailable")
-	}
+	testutil.Link(t, outside, filepath.Join(root, DirPrefix+"link"))
 	_ = os.Chtimes(old, now.Add(-2*time.Hour), now.Add(-2*time.Hour))
 	_ = os.Chtimes(other, now.Add(-2*time.Hour), now.Add(-2*time.Hour))
 	n, err := SweepOrphans(root, time.Hour, now)

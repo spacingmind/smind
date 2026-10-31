@@ -84,8 +84,11 @@ type API struct {
 	automations *automationHost
 	inbox       *inboxHost
 	policySweep *policySweeper
-	hs          map[string]handlerFunc
-	plugins     *plugins.Manager
+	// fleetAuditSweep stops the fleet audit sweeper; nil until SetFleet
+	// enables the read methods.
+	fleetAuditSweep func()
+	hs              map[string]handlerFunc
+	plugins         *plugins.Manager
 	// pluginEvents publishes plugin.updated and the owned-row diffs.
 	pluginEvents *pluginEvents
 	admit        *seatAdmission
@@ -140,6 +143,9 @@ func (a *API) StartGitState(ctx context.Context) (stop func()) {
 func (a *API) Close() {
 	a.inbox.stop()
 	a.policySweep.stop()
+	if a.fleetAuditSweep != nil {
+		a.fleetAuditSweep()
+	}
 	a.StopPlugins()
 	a.git.Stop()
 	a.Runs.CloseAll()

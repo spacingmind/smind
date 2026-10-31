@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -19,6 +20,7 @@ import (
 	relaypairing "github.com/spacingmind/smind/internal/relay/pairing"
 	"github.com/spacingmind/smind/internal/server"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/workspace"
 	"github.com/spacingmind/smind/internal/wsapi"
 )
 
@@ -64,7 +66,14 @@ func newFleet(srv *server.Server, cfg config.Config, home, version string, db *s
 		so.RevokeRelayDevice = func(id string) { _, _ = hub.RevokeDevice(id) }
 	}
 	svc := link.NewService(so)
-	srv.API().SetFleet(wsapi.FleetOptions{Key: key, Registry: reg, Window: window, Links: svc, Version: version})
+	fo := wsapi.FleetOptions{
+		Key: key, Registry: reg, Window: window, Links: svc, Version: version,
+		Store: db, Workspaces: workspace.New(db),
+	}
+	if h, err := os.UserHomeDir(); err == nil {
+		fo.HomeDirs = []string{h}
+	}
+	srv.API().SetFleet(fo)
 	srv.API().SetFleetRemote(wsapi.FleetRemoteOptions{
 		Conn: func(hostID string) (client.Caller, client.LinkState) {
 			if c, ok := mgr.Conn(hostID); ok {

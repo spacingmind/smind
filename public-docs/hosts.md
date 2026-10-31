@@ -137,6 +137,24 @@ A paired host can call only the fleet methods and nothing else: it cannot read
 or change your grants, settings or secrets, and provider accounts and passwords
 never cross a link.
 
+### What a paired host can read
+
+Once a link is approved and its direction is on, the peer can read, and only
+read: this host's workspaces (title, repository URL and default branch, never a
+local path), its tasks and their state, the status of a run, and a bounded feed
+of what a run did (assistant text is capped at 1 KiB per event; tool inputs,
+tool results and permission details never leave this host). Anything that looks
+like a credential is removed from what is returned, and a repository URL never
+carries a user name or token. A grant that lists specific workspaces limits every
+read to those workspaces.
+
+Each request names where it came from. This host refuses a request that does
+not match the link it arrived on, one that has already passed through this host,
+one that has been relayed through another host (there is exactly one hop), one
+that is stale or a replay, and callers that ask too fast. Every call, served or
+refused, is recorded in an audit log on this host with a hash and at most 120
+redacted characters of the request, never its text; rows are kept for 30 days.
+
 ### Routes and cleartext
 
 A direct route must be `wss://`, or `ws://` to this machine or to an address

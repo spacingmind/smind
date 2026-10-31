@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/learning/gate"
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func sk(name, body string) Skill {
@@ -205,9 +206,7 @@ func TestProjection_RefusesSymlinkRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(base, "link")
-	if err := os.Symlink(real, link); err != nil {
-		t.Skip("symlinks unavailable")
-	}
+	testutil.Link(t, real, link)
 	if _, err := Project(link, 1, []Skill{sk("learned-a", "b")}); err == nil {
 		t.Fatal("symlink root accepted")
 	}
@@ -225,9 +224,7 @@ func TestProjection_RefusesSymlinkWorkspaceDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	victim := t.TempDir()
-	if err := os.Symlink(victim, filepath.Join(root, "1")); err != nil {
-		t.Skip("symlinks unavailable")
-	}
+	testutil.Link(t, victim, filepath.Join(root, "1"))
 	if _, err := Project(root, 1, []Skill{sk("learned-a", "b")}); err == nil {
 		t.Fatal("symlinked workspace dir accepted")
 	}
@@ -436,9 +433,7 @@ func TestNeverTouchesHumanSkills(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Symlink(".agents", filepath.Join(repo, ".claude")); err != nil {
-		t.Skip("symlinks unavailable")
-	}
+	testutil.Link(t, ".agents", filepath.Join(repo, ".claude"))
 	before := snapshot(t, repo, home)
 	root := filepath.Join(base, "projections")
 	t.Cleanup(func() { makeWritable(root) })

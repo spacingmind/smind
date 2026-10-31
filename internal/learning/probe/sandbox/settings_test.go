@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func decode(t *testing.T, raw string) map[string]any {
@@ -37,9 +39,7 @@ func TestSandboxSettings_Table(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(root, "link-arm")
-	if err := os.Symlink(realArm, link); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, realArm, link)
 	const proj = "/nonexistent-p0/proj"
 
 	cases := []struct {

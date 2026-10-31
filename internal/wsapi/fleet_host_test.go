@@ -21,6 +21,7 @@ import (
 	"github.com/spacingmind/smind/internal/fleet/identity"
 	"github.com/spacingmind/smind/internal/fleet/pairing"
 	"github.com/spacingmind/smind/internal/fleet/registry"
+	"github.com/spacingmind/smind/internal/fleet/wire"
 	"github.com/spacingmind/smind/internal/inbox"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/wsclient"
@@ -125,7 +126,7 @@ func newFleetEnv(t *testing.T) *fleetEnv {
 		window: pairing.NewWindow(nil),
 		links:  &fakeFleetLinks{},
 	}
-	api.SetFleet(FleetOptions{Key: key, Registry: e.reg, Window: e.window, Links: e.links, Version: "test"})
+	api.SetFleet(FleetOptions{Key: key, Registry: e.reg, Window: e.window, Links: e.links, Version: "test", Store: st, Workspaces: fakeFleetWorkspaces{st}})
 	return e
 }
 
@@ -346,7 +347,7 @@ func TestHostPrincipalOnlyFleetMethods(t *testing.T) {
 		methods = append(methods, k)
 	}
 	for _, m := range methods {
-		if m == hello.MethodLinkState {
+		if m == hello.MethodLinkState || slices.Contains(wire.ReadMethods, m) {
 			continue
 		}
 		wantFleetCode(t, cl.Call(callCtx(), m, map[string]any{}, nil), codeForbidden)
@@ -500,6 +501,7 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test", "fleet.host.route",
 			"remote.hosts", "remote.read",
 		}
+		want = append(want, wire.ReadMethods...)
 		slices.Sort(want)
 		if !slices.Equal(added, want) {
 			t.Fatalf("added = %v, want %v", added, want)
