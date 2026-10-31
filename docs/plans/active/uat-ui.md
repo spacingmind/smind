@@ -86,7 +86,7 @@ Surfaces: W = web at 1280, N = web at 390, D = desktop (see "not coverable").
 | J55 | Open a PDF in Preview (office mode O4) | open a task with a PDF in its files, open it in a Preview tab (sandboxed pdf.js classic worker, PR #752) | pages render, zoom and page controls work, no console or CSP errors, on the 390 layout too | W N D | P1 |
 | J56 | PDF viewer inside the desktop WKWebView | open the same PDF in the built macOS app's WKWebView (not Chromium) | same render as J55; proves the worker and sandbox work in WebKit | D | P1 |
 
-56 journeys. J44 is blocked until the Automations page merges; J55 and J56 are blocked until #752 merges (after #750 and #751), then run on the merged develop build.
+56 journeys. J44 is blocked until the Automations page merges; J55 and J56 are blocked until #755 is on develop (after #752 and #753; #755 exempts GET /pdf-viewer.html and /pdf-viewer.js from the desktop proxy cookie gate, without which the viewer never started in the native app). J56 is then run by building the macOS app from develop into the dogfood dir, with no Human daemon, then run on the merged develop build.
 
 ## Not coverable here (fills in as the run proceeds)
 
