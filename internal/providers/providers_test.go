@@ -289,3 +289,25 @@ func TestInstance_EndpointCarried(t *testing.T) {
 		t.Fatalf("base spec endpoint = %+v", base.Endpoint)
 	}
 }
+
+func TestInstanceSpec_KeepsOwnOverlay(t *testing.T) {
+	t.Parallel()
+	r := New()
+	own := Model{ID: "glm-x", Label: "GLM X"}
+	err := r.SetCustom([]Spec{
+		{ID: "claude-o", Extends: IDClaudeNative, ModelsMode: ModelsAdd, Models: []Model{own}, DisallowedTools: []string{"WebSearch"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, ok := r.Get("claude-o")
+	if !ok {
+		t.Fatal("claude-o: not in the registry")
+	}
+	if len(inst.OwnModels) != 1 || inst.OwnModels[0].ID != "glm-x" {
+		t.Fatalf("OwnModels = %+v, want only the instance's own model", inst.OwnModels)
+	}
+	if len(inst.OwnDisallowedTools) != 1 || inst.OwnDisallowedTools[0] != "WebSearch" {
+		t.Fatalf("OwnDisallowedTools = %v", inst.OwnDisallowedTools)
+	}
+}
