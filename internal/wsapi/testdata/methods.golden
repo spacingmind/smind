@@ -29,6 +29,8 @@ chat.rename
 daemon.info
 file.list
 file.read
+file.readRange
+file.stat
 file.write
 forge.logout
 forge.search

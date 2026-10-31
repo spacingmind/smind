@@ -100,8 +100,8 @@ func TestDaemonInfoReturnsVersionCommitAndPlatform(t *testing.T) {
 	if _, isBool := forge["cli"].(bool); forge["provider"] != "github" || !isBool || len(forge) != 2 {
 		t.Errorf("forge = %v, want {provider: github, cli: <bool>}", got["forge"])
 	}
-	// No secrets: the result is exactly these fields (plus startedAt and forge) and nothing else.
-	if len(got) != len(want)+2 {
+	// No secrets: the result is exactly these fields (plus startedAt, forge and the files limits) and nothing else.
+	if len(got) != len(want)+3 {
 		t.Errorf("daemon.info returned unexpected fields: %v", got)
 	}
 }
