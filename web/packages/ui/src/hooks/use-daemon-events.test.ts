@@ -72,6 +72,7 @@ describe("useDaemonEvents", () => {
         "forge.status",
         "provider.updated",
         "plugin.updated",
+        "plugin.event",
         "automation.fired",
         "automation.paused",
         "automation.updated",

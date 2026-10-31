@@ -219,4 +219,44 @@ describe("applyDaemonEvent", () => {
       ]);
     });
   });
+
+  describe("plugin panels (ADR-0042)", () => {
+    it("TestPlugin_Event_InvalidatesQuery_NoPerPluginStore", () => {
+      const qc = createQueryClient();
+      for (const key of [
+        queryKeys.pluginView("a", "p1", null),
+        queryKeys.pluginView("a", "p1", { task: 1 }),
+        queryKeys.pluginView("a", "p2", null),
+        queryKeys.pluginView("b", "p1", null),
+      ]) {
+        qc.setQueryData(key, { view: {} });
+      }
+
+      // A refresh naming one panel invalidates every cached context of that panel only.
+      applyDaemonEvent(qc, "plugin.event", { pluginId: "a", kind: "refresh", panelId: "p1" });
+      expect(qc.getQueryState(queryKeys.pluginView("a", "p1", null))?.isInvalidated).toBe(true);
+      expect(qc.getQueryState(queryKeys.pluginView("a", "p1", { task: 1 }))?.isInvalidated).toBe(true);
+      expect(qc.getQueryState(queryKeys.pluginView("a", "p2", null))?.isInvalidated).toBe(false);
+      expect(qc.getQueryState(queryKeys.pluginView("b", "p1", null))?.isInvalidated).toBe(false);
+
+      // A refresh naming no panel invalidates every view of that plugin, and only that plugin's.
+      applyDaemonEvent(qc, "plugin.event", { pluginId: "a", kind: "refresh" });
+      expect(qc.getQueryState(queryKeys.pluginView("a", "p1", null))?.isInvalidated).toBe(true);
+      expect(qc.getQueryState(queryKeys.pluginView("a", "p2", null))?.isInvalidated).toBe(true);
+      expect(qc.getQueryState(queryKeys.pluginView("b", "p1", null))?.isInvalidated).toBe(false);
+
+      // A malformed payload neither throws nor invalidates anything.
+      expect(() => applyDaemonEvent(qc, "plugin.event", null)).not.toThrow();
+      expect(() => applyDaemonEvent(qc, "plugin.event", 5)).not.toThrow();
+      expect(() => applyDaemonEvent(qc, "plugin.event", {})).not.toThrow();
+      expect(qc.getQueryState(queryKeys.pluginView("b", "p1", null))?.isInvalidated).toBe(false);
+    });
+
+    it("plugin.updated invalidates the panels list", () => {
+      const qc = createQueryClient();
+      const invalidate = vi.spyOn(qc, "invalidateQueries");
+      applyDaemonEvent(qc, "plugin.updated", { id: "acme", globalEnabled: true });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.pluginPanels() });
+    });
+  });
 });

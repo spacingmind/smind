@@ -87,6 +87,13 @@ export const queryKeys = {
   pluginCommands: () => ["plugin.commands"] as const,
   /** `plugin.themes`: the themes of the active plugins; refetched on `plugin.updated`. */
   pluginThemes: () => ["plugin.themes"] as const,
+  /** `plugin.panels`: the panels and sidebar items of the active plugins; refetched on `plugin.updated`. */
+  pluginPanels: () => ["plugin.panels"] as const,
+  /** One `plugin.view` answer for a plugin's panel (context null when the caller had none). */
+  pluginView: (pluginId: string, panelId: string, context?: unknown) =>
+    ["plugin.view", pluginId, panelId, context ?? null] as const,
+  /** Every cached `plugin.view` answer (a prefix, for the event bridge). */
+  pluginViewAll: () => ["plugin.view"] as const,
   /** One `provider.test` answer per key: a provider's own id for run readiness (use-provider-health), an account id for an account's credential (accounts). */
   /** Every cached `provider.test` answer (a prefix, for removal after a reconnect or an account change). */
   providerTestAll: () => ["provider.test"] as const,

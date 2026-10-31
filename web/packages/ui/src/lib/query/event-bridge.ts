@@ -106,6 +106,24 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       // {id, globalEnabled}: an install, enable, disable, remove, update, reload or a flip of plugins.enabled.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pluginCommands() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.pluginThemes() });
+      // Panels appear and vanish with their plugin's enabled state too, and so does every held view
+      // document (its plugin may have been updated to a newer view).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pluginPanels() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pluginViewAll() });
+      return;
+    }
+    case "plugin.event": {
+      // {pluginId, kind, panelId?}: a plugin-published change. A refresh names one panel or the whole
+      // plugin: the panel's views are invalidated as a PREFIX key, so every cached context of that
+      // panel re-reads. A malformed payload (not an object, or no pluginId) is ignored, never thrown.
+      const p = payload as Partial<{ pluginId: unknown; panelId: unknown }> | null;
+      if (typeof p !== "object" || p === null) return;
+      if (typeof p.pluginId !== "string") return;
+      if (typeof p.panelId === "string") {
+        void queryClient.invalidateQueries({ queryKey: ["plugin.view", p.pluginId, p.panelId] });
+      } else {
+        void queryClient.invalidateQueries({ queryKey: ["plugin.view", p.pluginId] });
+      }
       return;
     }
     case "automation.fired":
