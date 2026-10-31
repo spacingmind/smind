@@ -114,6 +114,12 @@ func TestManagerReconnectsAndChecksVersionEachTime(t *testing.T) {
 	waitStatus(t, m, e.hostID, StateConnected)
 }
 
+// TestManagerAwaitingApprovalThenApproved: a peer that has not approved yet is
+// "awaiting approval" until it does, and the moment the link reads "connected"
+// the host is already approved in the registry. Both are checked on the
+// transitions themselves (OnChange runs synchronously on the loop goroutine,
+// the only writer), never by polling for a short-lived state: awaiting_approval
+// lasts one ApprovalPoll, so a poller can sleep straight through it.
 func TestManagerAwaitingApprovalThenApproved(t *testing.T) {
 	e := newMgrEnv(t)
 	e.script = func(n int, f *fakeCallee) {
@@ -121,12 +127,62 @@ func TestManagerAwaitingApprovalThenApproved(t *testing.T) {
 			f.helloErr = &wsclient.RPCError{Message: "pending", Code: hello.CodeAwaitingApproval}
 		}
 	}
-	m := e.manager(t)
+	type seen struct {
+		state State
+		host  string
+	}
+	var (
+		mu        sync.Mutex
+		log       []seen
+		m         *Manager
+		connected = make(chan struct{})
+		once      sync.Once
+	)
+	m = NewManager(ManagerOptions{
+		Key: e.self, Registry: e.reg, Dial: e.dial, Version: "test",
+		BackoffMin: time.Millisecond, BackoffMax: tinyMax, ApprovalPoll: 5 * time.Millisecond,
+		OnChange: func() {
+			h, err := e.reg.Get(e.hostID)
+			if err != nil {
+				return
+			}
+			s := m.Status(e.hostID).State
+			mu.Lock()
+			log = append(log, seen{s, h.State})
+			mu.Unlock()
+			if s == StateConnected {
+				once.Do(func() { close(connected) })
+			}
+		},
+	})
+	t.Cleanup(m.Close)
 	m.Ensure(e.hostID)
-	waitStatus(t, m, e.hostID, StateAwaitingApproval)
-	waitStatus(t, m, e.hostID, StateConnected)
-	h, err := e.reg.Get(e.hostID)
-	if err != nil || h.State != registry.StateApproved {
+	// Wait for the connected TRANSITION to have been recorded: Status reads
+	// connected a moment before OnChange for it has run.
+	select {
+	case <-connected:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("link never connected, last %+v", m.Status(e.hostID))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	awaiting, connectedAt := -1, -1
+	for i, s := range log {
+		if s.state == StateAwaitingApproval && awaiting < 0 {
+			awaiting = i
+		}
+		if s.state == StateConnected && connectedAt < 0 {
+			connectedAt = i
+		}
+	}
+	if awaiting < 0 || connectedAt < 0 || awaiting > connectedAt {
+		t.Fatalf("transitions %+v: want awaiting_approval before connected", log)
+	}
+	if log[connectedAt].host != registry.StateApproved {
+		t.Fatalf("host was %s when the link first read connected, want approved; transitions %+v", log[connectedAt].host, log)
+	}
+	if h, err := e.reg.Get(e.hostID); err != nil || h.State != registry.StateApproved {
 		t.Fatalf("host %+v err %v", h, err)
 	}
 }

@@ -402,16 +402,19 @@ func (m *Manager) run(ctx context.Context, hostID string, l *hostLoop) {
 		if a.conn == nil {
 			m.clearConn(l, nil)
 		}
+		// Record the approval BEFORE publishing the connected status: a reader
+		// that sees "connected" (the web UI, a test) must find the host already
+		// approved in the registry, never still pending.
+		if a.conn != nil && a.host.State == registry.StatePending && a.active {
+			if err := m.o.Registry.MarkApproved(hostID); err != nil && !errors.Is(err, registry.ErrBadState) {
+				a.status = Status{State: StateDown, Detail: "record approval: " + err.Error()}
+			}
+		}
 		m.setStatus(l, a.status)
 		if a.stop {
 			return
 		}
 		if a.conn != nil {
-			if a.host.State == registry.StatePending && a.active {
-				if err := m.o.Registry.MarkApproved(hostID); err != nil && !errors.Is(err, registry.ErrBadState) {
-					m.setStatus(l, Status{State: StateDown, Detail: "record approval: " + err.Error()})
-				}
-			}
 			if a.active {
 				if f := m.onConnected(); f != nil {
 					f(hostID, a.conn)
