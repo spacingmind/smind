@@ -6,6 +6,7 @@ import { OwnerBadge } from "@/components/plugins/owner-badge";
 import { ProfileIcon, ProviderIcon } from "@/components/provider-icon";
 import { Button } from "@/components/ui/button";
 import { getProviderModelCount, type BrowserProvider, type ModelRow } from "@/lib/model-browser";
+import { formatProviderReason } from "@/lib/provider-reason";
 import { cn } from "@/lib/utils";
 
 // Row chrome for the combined picker, ported from Paseo's model-browser rows:
@@ -154,7 +155,11 @@ export function ProviderRow({
   const selection = provider.modelSelection;
   let detail: ReactNode;
   if (provider.unavailableReason) {
-    detail = provider.unavailableReason;
+    detail = (
+      <span className="min-w-0 truncate" title={provider.unavailableReason}>
+        {formatProviderReason(provider.unavailableReason)}
+      </span>
+    );
   } else if (selection.kind === "loading") {
     detail = (
       <>
