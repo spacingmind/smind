@@ -19,6 +19,9 @@ import (
 const (
 	auditMaxTarget = 512
 	auditMaxPaths  = 8
+	// auditMaxReasons bounds the joined reasons; they can quote a segment's
+	// raw text, so they are redacted like the target.
+	auditMaxReasons = 1024
 )
 
 // Audit outcomes an escalated ask can resolve to (ADR-0047 §2.3).
@@ -264,7 +267,7 @@ func (e *Engine) auditRow(req Request, d Decision, latency int64) store.PolicyAu
 		CreatedAt: e.o.Now().UTC(), RunID: req.RunID, TaskID: req.TaskID, RequestID: req.RequestID,
 		Seat: req.Seat, WorkspaceID: req.WorkspaceID, Tool: req.Tool, Target: target, Paths: rp,
 		Decision: string(d.Action), RuleID: rule, PolicySha: d.PolicySha,
-		Reasons: strings.Join(d.Reasons, "; "), LatencyMs: latency,
+		Reasons: capRunes(rd.String(strings.Join(d.Reasons, "; ")), auditMaxReasons), LatencyMs: latency,
 	}
 }
 
