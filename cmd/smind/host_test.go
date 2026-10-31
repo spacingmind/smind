@@ -300,3 +300,36 @@ func TestHostTestPrintsDetail(t *testing.T) {
 		t.Fatalf("stdout = %q", out)
 	}
 }
+
+func TestHostLsShowsSASForPendingOnly(t *testing.T) {
+	hostHome(t, true)
+	host := func(id, alias, state, sas string) map[string]any {
+		return map[string]any{"hostId": id, "alias": alias, "state": state, "sas": sas,
+			"outbound": map[string]any{"enabled": false}, "inbound": map[string]any{"enabled": false}, "link": map[string]any{"state": "down"}}
+	}
+	d := &fakeDaemon{results: map[string]any{"fleet.host.list": map[string]any{
+		"hosts": []map[string]any{
+			host("aaaaaaaa11111111", "pend", "pending", "123456"),
+			host("bbbbbbbb22222222", "appr", "approved", "654321"),
+		},
+	}}}
+	useHostDaemon(t, d)
+
+	code, out, errOut := runHostCmd("ls")
+	if code != 0 || errOut != "" {
+		t.Fatalf("ls = %d, stderr %q", code, errOut)
+	}
+	if !strings.Contains(out, "SAS") || !strings.Contains(out, "123456") || strings.Contains(out, "654321") {
+		t.Fatalf("table:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "appr") && !strings.HasSuffix(strings.TrimSpace(line), "-") {
+			t.Errorf("approved row should end with '-': %q", line)
+		}
+	}
+
+	_, out, _ = runHostCmd("ls", "--json")
+	if !strings.Contains(out, `"sas":"123456"`) || strings.Contains(out, "654321") {
+		t.Fatalf("json: %s", out)
+	}
+}

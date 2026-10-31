@@ -147,6 +147,9 @@ type hostEntry struct {
 	Inbound   hostToggle `json:"inbound"`
 	Link      hostLink   `json:"link"`
 	CreatedAt string     `json:"createdAt"`
+	// SAS is the pairing code to compare with the other host; kept only for
+	// pending hosts.
+	SAS string `json:"sas,omitempty"`
 }
 
 // hostWindow is the pairing window the daemon reports alongside the list.
@@ -203,6 +206,11 @@ func runHostLs(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "smind host ls: %s\n", hostErrMessage(err))
 		return 1
 	}
+	for i := range res.Hosts {
+		if res.Hosts[i].State != "pending" {
+			res.Hosts[i].SAS = ""
+		}
+	}
 	if jsonOut {
 		out := struct {
 			Hosts []hostEntry `json:"hosts"`
@@ -227,7 +235,7 @@ func renderHosts(w io.Writer, hosts []hostEntry) {
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ALIAS\tID\tSTATE\tOUT\tIN\tLINK")
+	fmt.Fprintln(tw, "ALIAS\tID\tSTATE\tOUT\tIN\tLINK\tSAS")
 	for _, h := range hosts {
 		alias := h.Alias
 		if alias == "" {
@@ -240,7 +248,11 @@ func renderHosts(w io.Writer, hosts []hostEntry) {
 		if h.Link.Detail != "" {
 			link += fmt.Sprintf(" (%s)", h.Link.Detail)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", alias, shortHostID(h.HostID), h.State, onOff(h.Outbound.Enabled), onOff(h.Inbound.Enabled), link)
+		sas := h.SAS
+		if sas == "" {
+			sas = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", alias, shortHostID(h.HostID), h.State, onOff(h.Outbound.Enabled), onOff(h.Inbound.Enabled), link, sas)
 	}
 	_ = tw.Flush()
 }
