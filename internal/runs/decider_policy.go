@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/spacingmind/smind/internal/permpolicy"
@@ -66,4 +67,90 @@ func (d runPermissionDecider) policyRequest(requestID, summary string, detail *t
 		}
 	}
 	return req
+}
+
+// optionByID returns the offered option with the given id.
+func optionByID(options []taskrunner.PermissionOption, id string) (taskrunner.PermissionOption, bool) {
+	for _, o := range options {
+		if o.ID == id {
+			return o, true
+		}
+	}
+	return taskrunner.PermissionOption{}, false
+}
+
+// withPolicy copies detail (a fresh "other" detail when nil) and sets its
+// policy footprint; the provider's own detail is never mutated.
+func withPolicy(detail *taskrunner.PermissionDetail, info taskrunner.PolicyInfo) *taskrunner.PermissionDetail {
+	out := &taskrunner.PermissionDetail{Kind: "other"}
+	if detail != nil {
+		c := *detail
+		out = &c
+	}
+	out.Policy = &info
+	return out
+}
+
+// applyPolicy consults the policy engine for a request that no earlier
+// branch (system run, AutoAccept) answered. handled means the engine
+// resolved it: the request and its resolution are recorded back to back like
+// the AutoAccept branch, no pending channel is registered and no
+// notification goes out, because no human is involved. An empty optionID
+// with handled set means a deny the provider offered no reject option for.
+// Otherwise (engine absent or off, or an `ask`) the request continues to the
+// human path with detailOut, which carries the policy footprint when the
+// engine was on. An allow the provider gave no allow_once option for is an
+// ask: the engine never picks an "always" option.
+func (d runPermissionDecider) applyPolicy(requestID, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (optionID, denyReason string, handled bool, detailOut *taskrunner.PermissionDetail) {
+	engine := d.reg.getPolicyEngine()
+	if engine == nil {
+		return "", "", false, detail
+	}
+	dec, on := engine.Evaluate(d.policyRequest(requestID, summary, detail))
+	if !on {
+		return "", "", false, detail
+	}
+	info := taskrunner.PolicyInfo{RuleID: dec.RuleID, Why: dec.Why, Normalized: dec.Normalized, Action: string(dec.Action)}
+	if dec.RuleID == "" {
+		info.RuleID = dec.FloorID
+	}
+	switch dec.Action {
+	case permpolicy.ActionAllow:
+		if id, ok := firstOptionByKind(options, "allow_once"); ok {
+			d.recordPolicyResolved(requestID, summary, withPolicy(detail, info), options, id, taskrunner.PermissionResolvedByPolicyAllow, dec.RuleID)
+			return id, "", true, detail
+		}
+	case permpolicy.ActionDeny:
+		ruleID := dec.FloorID
+		reason := fmt.Sprintf("floor %s: %s", dec.FloorID, dec.Why)
+		if ruleID == "" {
+			ruleID = dec.RuleID
+			reason = fmt.Sprintf("policy rule %s: %s", dec.RuleID, dec.Why)
+		}
+		id, _ := firstOptionByKind(options, "reject_once", "reject_always")
+		if id == "" {
+			return "", "", true, detail
+		}
+		d.recordPolicyResolved(requestID, summary, withPolicy(detail, info), options, id, taskrunner.PermissionResolvedByPolicyDeny, ruleID)
+		return id, reason, true, detail
+	}
+	info.Action = string(permpolicy.ActionAsk)
+	return "", "", false, withPolicy(detail, info)
+}
+
+func (d runPermissionDecider) recordPolicyResolved(requestID, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption, optionID string, resolution taskrunner.PermissionResolution, ruleID string) {
+	d.reg.record(d.r, taskrunner.Event{
+		Type:                taskrunner.EventTypePermissionRequest,
+		PermissionRequestID: requestID,
+		PermissionSummary:   summary,
+		PermissionOptions:   options,
+		PermissionDetail:    detail,
+	})
+	d.reg.record(d.r, taskrunner.Event{
+		Type:                 taskrunner.EventTypePermissionResolved,
+		PermissionRequestID:  requestID,
+		PermissionOptionID:   optionID,
+		PermissionResolution: resolution,
+		PermissionRuleID:     ruleID,
+	})
 }

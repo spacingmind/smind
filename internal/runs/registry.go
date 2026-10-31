@@ -1188,9 +1188,20 @@ func (d runPermissionDecider) notifyResolved(requestID, optionID, reason string)
 // DecideDetailed implements taskrunner.DetailedPermissionDecider: detail
 // (possibly nil) is recorded on the permission_request event.
 func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (string, error) {
+	optionID, _, err := d.decide(ctx, summary, detail, options)
+	return optionID, err
+}
+
+// DecideDetailedWithReason implements taskrunner.DenyReasonDecider: like
+// DecideDetailed, plus why the policy engine denied ("" otherwise).
+func (d runPermissionDecider) DecideDetailedWithReason(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (string, string, error) {
+	return d.decide(ctx, summary, detail, options)
+}
+
+func (d runPermissionDecider) decide(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (string, string, error) {
 	requestID, err := newRunID()
 	if err != nil {
-		return "", fmt.Errorf("runs: permission request id: %w", err)
+		return "", "", fmt.Errorf("runs: permission request id: %w", err)
 	}
 
 	// System runs (ADR-0026) never wait on a human: reject immediately,
@@ -1198,7 +1209,7 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 	if d.r.purpose != "" {
 		optionID, ok := firstOptionByKind(options, "reject_once", "reject_always")
 		if !ok {
-			return "", fmt.Errorf("runs: system run permission request %q: no reject option offered: %+v", requestID, options)
+			return "", "", fmt.Errorf("runs: system run permission request %q: no reject option offered: %+v", requestID, options)
 		}
 		d.reg.record(d.r, taskrunner.Event{
 			Type:                taskrunner.EventTypePermissionRequest,
@@ -1213,7 +1224,7 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 			PermissionOptionID:   optionID,
 			PermissionResolution: PermissionResolvedBySystem,
 		})
-		return optionID, nil
+		return optionID, "", nil
 	}
 
 	// AutoAccept (ACP only, validated at Start): the human chose to approve
@@ -1237,9 +1248,21 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 				PermissionOptionID:   optionID,
 				PermissionResolution: taskrunner.PermissionResolvedByAutoAccept,
 			})
-			return optionID, nil
+			return optionID, "", nil
 		}
 	}
+
+	// The policy engine (ADR-0047) answers what a standing rule or the
+	// floor decides; only an `ask` (or an engine that is off) parks the
+	// request for a human, with the policy footprint on its detail.
+	optionID, denyReason, handled, detail := d.applyPolicy(requestID, summary, detail, options)
+	if handled {
+		if optionID == "" {
+			return "", "", fmt.Errorf("runs: policy denied permission request %q: no reject option offered: %+v", requestID, options)
+		}
+		return optionID, denyReason, nil
+	}
+	policyOn := detail != nil && detail.Policy != nil
 
 	ch := make(chan string, 1)
 	d.r.mu.Lock()
@@ -1275,7 +1298,14 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 			PermissionResolution: taskrunner.PermissionResolvedByHuman,
 		})
 		d.notifyResolved(requestID, optionID, "human")
-		return optionID, nil
+		if policyOn {
+			outcome := permpolicy.OutcomeHumanDeny
+			if o, ok := optionByID(options, optionID); ok && strings.HasPrefix(o.Kind, "allow") {
+				outcome = permpolicy.OutcomeHumanAllow
+			}
+			d.reg.getPolicyEngine().RecordOutcome(d.policyRequest(requestID, summary, detail), outcome)
+		}
+		return optionID, "", nil
 
 	case <-timer.C:
 		// Nobody answered within the timeout: auto-resolve to deny (never
@@ -1289,7 +1319,7 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 		d.abandon(requestID)
 		optionID, ok := firstOptionByKind(options, "reject_once", "reject_always")
 		if !ok {
-			return "", fmt.Errorf("runs: permission request %q timed out with no reject option offered: %+v", requestID, options)
+			return "", "", fmt.Errorf("runs: permission request %q timed out with no reject option offered: %+v", requestID, options)
 		}
 		d.reg.record(d.r, taskrunner.Event{
 			Type:                 taskrunner.EventTypePermissionResolved,
@@ -1298,7 +1328,10 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 			PermissionResolution: taskrunner.PermissionResolvedByTimeout,
 		})
 		d.notifyResolved(requestID, optionID, "timeout")
-		return optionID, nil
+		if policyOn {
+			d.reg.getPolicyEngine().RecordOutcome(d.policyRequest(requestID, summary, detail), permpolicy.OutcomeTimeoutDeny)
+		}
+		return optionID, "", nil
 
 	case <-ctx.Done():
 		// The provider's own per-request ctx was cancelled out from under
@@ -1318,7 +1351,7 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 			PermissionResolution: taskrunner.PermissionResolvedByProviderCancellation,
 		})
 		d.notifyResolved(requestID, "", "providerCancelled")
-		return "", ctx.Err()
+		return "", "", ctx.Err()
 
 	case <-d.r.ctx.Done():
 		// The run itself was stopped. ctx above is the provider's own
@@ -1329,7 +1362,7 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 		// once a pending permission request's run is stopped.
 		d.abandon(requestID)
 		d.notifyResolved(requestID, "", "runEnded")
-		return "", d.r.ctx.Err()
+		return "", "", d.r.ctx.Err()
 	}
 }
 
