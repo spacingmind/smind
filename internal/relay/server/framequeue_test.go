@@ -84,3 +84,19 @@ func TestFrameQueuePushFrontEvictsNewestOnOverflow(t *testing.T) {
 		t.Fatalf("got order %d, %d; want 9, 10", first.GetSequence(), second.GetSequence())
 	}
 }
+
+// TestFrameQueuePushedCountsEvictedFrames: the buffer length stops at cap once
+// it evicts, so "len == cap" cannot tell that all frames were processed; the
+// pushed counter keeps counting (what the eviction test waits on).
+func TestFrameQueuePushedCountsEvictedFrames(t *testing.T) {
+	q := newFrameQueue(5)
+	for i := 0; i < 8; i++ {
+		q.push(&relaypb.Frame{Sequence: uint64(i + 1)})
+		if i == 4 && (len(q.items) != 5 || q.pushed != 5) {
+			t.Fatalf("after 5 pushes: len %d pushed %d, want 5/5", len(q.items), q.pushed)
+		}
+	}
+	if len(q.items) != 5 || q.pushed != 8 || q.items[0].GetSequence() != 4 {
+		t.Fatalf("after 8 pushes: len %d pushed %d first seq %d, want 5/8/4", len(q.items), q.pushed, q.items[0].GetSequence())
+	}
+}
