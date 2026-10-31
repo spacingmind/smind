@@ -24,6 +24,13 @@ tests:
   - { name: TestConfigSetAutomationsEnabledRejectsNonBool, run: "go test ./internal/config -run '^TestConfigSetAutomationsEnabledRejectsNonBool$' -count=1", timeoutSec: 300 }
   - { name: TestAutomationLinksForTasks, run: "go test ./internal/store -run '^TestAutomationLinksForTasks$' -count=1", timeoutSec: 300 }
   - { name: TestTaskListExposesAutomationLink, run: "go test ./internal/wsapi -run '^TestTaskListExposesAutomationLink$' -count=1", timeoutSec: 300 }
+  - { name: "shows the exact command and copies it", run: "cd web/packages/ui && bunx vitest run automations-off-card -t 'shows the exact command and copies it'", timeoutSec: 300 }
+  - { name: "off state shows the card, not the list", run: "cd web/packages/ui && bunx vitest run automations-page -t 'off state shows the card, not the list'", timeoutSec: 300 }
+  - { name: "sidebar quick action opens the page", run: "cd web/packages/ui && bunx vitest run app-automations-page -t 'sidebar quick action opens the page'", timeoutSec: 300 }
+  - { name: "palette command opens the page", run: "cd web/packages/ui && bunx vitest run app-automations-page -t 'palette command opens the page'", timeoutSec: 300 }
+  - { name: "settings section only links to the page", run: "cd web/packages/ui && bunx vitest run app-automations-page -t 'settings section only links to the page'", timeoutSec: 300 }
+  - { name: "renders the name on hover", run: "cd web/packages/ui && bunx vitest run automation-chip -t 'renders the name on hover'", timeoutSec: 300 }
+  - { name: "filter shows only automation tasks", run: "cd web/packages/ui && bunx vitest run app-sidebar-automation-filter -t 'filter shows only automation tasks'", timeoutSec: 300 }
 mutations:
   - { id: M1, file: internal/config/edit.go, change: "accept any string for the bool key", expectFail: [TestConfigSetAutomationsEnabledRejectsNonBool] }
   - { id: M2, file: internal/store/automations.go, change: "drop the decision = 'fire' condition in AutomationLinksForTasks", expectFail: [TestAutomationLinksForTasks] }
