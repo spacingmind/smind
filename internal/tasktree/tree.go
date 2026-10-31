@@ -247,9 +247,11 @@ func BuildWithRemote(tasks []Task, facts map[int64]RunFact, usage map[int64]Usag
 	// parent, child and root); archived ones only in history mode.
 	visible := func(t *Task) bool { return root.IncludeArchived || !t.Archived }
 
+	// Remotes under an archived parent still roll up (like archived local
+	// descendants); they are never emitted because walk only reaches visible tasks.
 	remoteKids := make(map[int64][]RemoteTask)
 	for _, r := range remotes {
-		if p, ok := byID[r.ParentID]; ok && visible(p) {
+		if _, ok := byID[r.ParentID]; ok {
 			remoteKids[r.ParentID] = append(remoteKids[r.ParentID], r)
 		}
 	}

@@ -497,17 +497,22 @@ func TestTaskTreeRemoteNilCostStaysNil(t *testing.T) {
 }
 
 func TestTaskTreeRemoteIgnoredWithoutVisibleParent(t *testing.T) {
-	tasks := []Task{task(1, nil, false), task(2, nil, true)}
+	tasks := []Task{task(1, nil, false), task(2, pid(1), true)}
 	remotes := []RemoteTask{
-		{HostID: "h1", Alias: "box", RemoteTaskID: "1", ParentID: 2, State: "running"},
-		{HostID: "h1", Alias: "box", RemoteTaskID: "2", ParentID: 99, State: "running"},
+		{HostID: "h1", Alias: "box", RemoteTaskID: "1", ParentID: 2, State: "running", CostUSD: costPtr(0.7)},
+		{HostID: "h1", Alias: "box", RemoteTaskID: "2", ParentID: 99, State: "running", CostUSD: costPtr(5)},
 	}
 	nodes, _ := BuildWithRemote(tasks, nil, nil, remotes, Root{WorkspaceID: 1})
 	if got := ids(nodes); !equalIDs(got, []int64{1}) {
 		t.Fatalf("nodes = %v, want [1]", got)
 	}
-	if nodes[0].Counts.Running != 0 || nodes[0].ChildCount != 0 {
-		t.Fatalf("root = %+v", nodes[0])
+	root := nodes[0]
+	if root.ChildCount != 0 || root.Usage.Subtree.Runs != 1 {
+		t.Fatalf("root = %+v", root)
+	}
+	// The archived parent's remote still rolls up; the unknown parent's does not.
+	if c := root.Usage.Subtree.CostUSD; c == nil || *c != 0.7 {
+		t.Fatalf("subtree cost = %v, want 0.7", c)
 	}
 }
 
