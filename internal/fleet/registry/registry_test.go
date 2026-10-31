@@ -263,6 +263,66 @@ func TestRegistryAuthorize(t *testing.T) {
 	}
 }
 
+// TestRegistryRevokeStateFirst pins the failure order of Revoke: the state
+// flips before any link is touched, and a revoked host is refused even if
+// a link write never happened and the inbound link is still enabled.
+func TestRegistryRevokeStateFirst(t *testing.T) {
+	r := openRegistry(t, 16)
+	pub := testKey(6)
+	hostID := identity.HostID(pub)
+	if _, err := r.PairAsInitiator(pub, "victim", "victim", `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.MarkApproved(hostID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.EnableReverse(hostID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.Revoke(hostID); err != nil {
+		t.Fatal(err)
+	}
+	h, err := r.Get(hostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.State != StateRevoked {
+		t.Fatalf("state = %s, want revoked", h.State)
+	}
+	out, in, err := r.Links(hostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Enabled || in.Enabled {
+		t.Fatalf("both links must be disabled, got outbound=%v inbound=%v", out.Enabled, in.Enabled)
+	}
+
+	// A host whose state was forced to revoked while the inbound link
+	// stayed enabled (the midway state of a failed revoke) is still
+	// refused: state, not link plumbing, carries the authority.
+	pub2 := testKey(7)
+	hostID2 := identity.HostID(pub2)
+	if _, err := r.PairAsInitiator(pub2, "stuck", "stuck", `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.MarkApproved(hostID2); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.EnableReverse(hostID2); err != nil {
+		t.Fatal(err)
+	}
+	if _, in2, err := r.Links(hostID2); err != nil || !in2.Enabled {
+		t.Fatalf("inbound link must be enabled before forcing the state, link=%+v err=%v", in2, err)
+	}
+	if err := r.st.UpdateFleetHost(hostID2, "stuck", "stuck", StateRevoked); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Authorize(hostID2, OpRead, 0); !errors.Is(err, ErrNotGranted) {
+		t.Fatalf("authorize read on a revoked host with a live inbound link: got %v, want ErrNotGranted", err)
+	}
+}
+
 func TestRegistryMaxHosts(t *testing.T) {
 	r := openRegistry(t, 2)
 	if _, err := r.PairAsInitiator(testKey(10), "a", "a", `{}`); err != nil {

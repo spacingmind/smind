@@ -298,23 +298,33 @@ func (r *Registry) SetGrant(hostID string, g Grant) error {
 
 // Revoke is terminal: the host stays in the registry, marked revoked, with
 // both links dark. Revoking keeps the alias and history queryable instead
-// of freeing the alias for an impostor.
+// of freeing the alias for an impostor. The state flips first and both
+// links are then attempted, so a failure midway leaves the host revoked
+// with a live link -- refused everywhere, since no revoked host is
+// authorized -- never approved with authority intact.
 func (r *Registry) Revoke(hostID string) error {
 	h, err := r.Get(hostID)
 	if err != nil {
 		return err
 	}
+	if err := r.setState(h, StateRevoked); err != nil {
+		return err
+	}
+	var firstErr error
 	for _, direction := range []string{store.FleetOutbound, store.FleetInbound} {
 		l, err := r.st.GetFleetLink(hostID, direction)
 		if err != nil {
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		l.Enabled = false
-		if err := r.st.PutFleetLink(l); err != nil {
-			return err
+		if err := r.st.PutFleetLink(l); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return r.setState(h, StateRevoked)
+	return firstErr
 }
 
 // Remove deletes the host and its links entirely.
