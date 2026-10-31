@@ -124,6 +124,7 @@ func (a *API) SetFleetRemote(o FleetRemoteOptions) {
 	a.hs["remote.hosts"] = r.guard("remote.hosts", r.handleHosts)
 	a.hs["remote.read"] = r.guard("remote.read", r.handleRead)
 	a.hs["remote.write"] = r.guard("remote.write", r.handleWrite)
+	a.hs["remote.select"] = r.guard("remote.select", r.handleSelect)
 }
 
 // guard keeps remote.* on the local connection and away from any run a peer
