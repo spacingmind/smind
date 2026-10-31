@@ -57,6 +57,8 @@ A task agent can orchestrate too if it has this MCP server. Add it once as an ag
 Discovery: `workspace_list`, `provider_list`, `profile_list`, `task_list`, `task_get`, `run_list`, `chat_list`.
 Lifecycle: `task_new`, `chat_new`, `task_send`, `task_wait`, `task_stop`, `task_archive`.
 Inspection: `task_status` and `task_wait` (also `failureKind`, `window`, `resetAt` for a rate-limited run; `run_list` and `task_tree` carry them too), `task_logs`, `task_permissions`, `task_diff`, `usage_summary` (tokens), `account_usage` (plan windows and any active rate-limit cooldown, read-only; CLI: `smind account usage`).
+
+Other hosts (only when connected hosts are on): `list_hosts`, and an optional `host` argument on `workspace_list`, `task_list`, `task_get`, `task_status` and `task_logs` reads a paired host directly (read-only, one hop: a task a peer created gets `hop_limit`). Errors start with a code; never retry on another host. `status_unknown` is not finished.
 Queue: `queue_list`, `queue_cancel`.
 Validation (a Lead, before coding and per milestone): `validation_contract_submit`, `validation_request`, `validation_get`. You cannot write or waive a verdict.
 Live settings: `task_set_mode`, `task_options`, `task_set_option`.
