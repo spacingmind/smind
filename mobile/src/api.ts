@@ -356,6 +356,11 @@ export interface TaskTreeNode {
   taskStatus: string;
   tier: 'supervisor' | 'leader' | 'coder' | null;
   childCount: number;
+  /** F4: a node owned by another host; id is negative and never a real task. */
+  host?: string;
+  hostId?: string;
+  remote?: boolean;
+  globalId?: string;
   /** ADR-0041 A5 tree budget, on a ROOT node only; omitted for an unbudgeted tree. */
   budgetUsd?: number | null;
   budgetSpentUsd?: number | null;

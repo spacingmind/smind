@@ -367,3 +367,10 @@ skipped the paid eval (step 1) by choice; the changes were applied directly. Eve
   `supervisor-sonnet` and `peer-glm` profiles and its old `lead` / `peer-sonnet` text, because seeding never rewrites an existing profile. Delete the first
   three and delete or `profile edit` the other two, then re-run `smind profile seed roles`. A `smind-supervisor` entry in a profile's `skills` list no longer
   resolves (the skill is gone), so edit it out before the profile can be saved again.
+
+## Amendment 2026-10-31: the tree across hosts (ADR-0048 F4)
+
+`task.tree` also lists the remote tasks a Lead delegated to a connected host, as read-only leaves under their local parent (`remote`, `host`, `hostId`, `globalId`; a
+negative node id that is only unique within one response). Their reported cost and state roll into every ancestor, and A5's tree budget at admission counts the
+mirror's reported cost (`store.TreeKnownCost`). The B-series notification and the per-tree concurrency guard are unchanged (the guard does not count remote runs; the
+callee's per-origin `maxLiveAgents` bounds them). Details: `docs/plans/active/fleet-hosts.md` "F4 design".

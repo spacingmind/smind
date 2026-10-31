@@ -108,7 +108,13 @@ func (r *Runner) launchEnvEntries(provider Provider) ([]string, error) {
 			entries = append(entries, name+"="+value)
 		}
 	}
-	return entries, nil
+	// Last, so nothing above can override them: an OpenCode chat-completions
+	// instance's private home and generated config (opencode_endpoint.go).
+	managed, err := r.openCodeEndpointEntries(spec, provider)
+	if err != nil {
+		return nil, err
+	}
+	return append(entries, managed...), nil
 }
 
 // providerSecretValues resolves the VALUES a launch of provider puts in

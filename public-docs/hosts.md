@@ -242,7 +242,45 @@ smind host ls
 smind host ls --json
 smind host test studio
 smind host rename studio workshop
+smind host label set studio os:linux
+smind host select --labels os:linux
 smind host rm studio
 ```
 
 `smind host ls` never prints a key, a password or a secret.
+
+## Route by labels
+
+Instead of naming a host you can tag your paired hosts and pick one by tag. You
+set labels yourself, on this host's own row for each peer; they are never sent to
+the other host.
+
+```bash
+smind host label set winbox os:windows arch:arm64
+smind host label rm winbox arch
+smind host label ls
+smind host label ls winbox
+```
+
+A host has at most 16 labels. A key starts with a lowercase letter and is up to 32
+characters of `a-z`, `0-9`, `.`, `_` and `-`. A value is up to 32 characters of
+`a-z`, `0-9`, `.`, `_`, `+` and `-`. Keys that look like secrets, such as `token`
+or `password`, are refused.
+
+Select a host by its labels:
+
+```bash
+smind host select --labels os:windows
+smind host tasks --labels gpu:cuda --any
+```
+
+`smind host select` prints only the alias, so `$(smind host select --labels os:windows)`
+works in scripts. `info`, `workspaces` and `tasks` take `--labels` in place of the
+host name (giving both is an error). Agents use the same selector: the MCP `host`
+argument may be `{"labels":{"os":"windows"},"any":true}`.
+
+The rule: exactly one enabled, connected host must match all the labels,
+otherwise you get an error that lists the candidates. With `--any` (or
+`any:true`) the host with the fewest live remote agents is picked, ties broken by
+alias. A disabled or disconnected host never matches. There is no automatic retry
+on another host: if the chosen host fails, the command fails.

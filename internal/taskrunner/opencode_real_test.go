@@ -59,6 +59,7 @@ func openCodeRealCtx(t *testing.T) (context.Context, context.CancelFunc) {
 // history the agent sent already contained a tool result or an assistant
 // reply (the resume test's proof that session/load carried context over).
 type fakeChatCompletion struct {
+	model        string
 	lastUser     string
 	hasToolMsg   bool
 	hasAssistant bool
@@ -131,6 +132,7 @@ func fakeOpenAIServer(t *testing.T) *fakeOpenAI {
 			return
 		}
 		var payload struct {
+			Model    string `json:"model"`
 			Messages []struct {
 				Role    string          `json:"role"`
 				Content json.RawMessage `json:"content"`
@@ -145,7 +147,7 @@ func fakeOpenAIServer(t *testing.T) *fakeOpenAI {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		call := fakeChatCompletion{}
+		call := fakeChatCompletion{model: payload.Model}
 		for _, m := range payload.Messages {
 			switch m.Role {
 			case "tool":

@@ -104,6 +104,26 @@ Each line shows the task, its tier, run state, pending permissions, `stalled`
 when it is stalled, and cost. The same tree is in the web app and, read-only,
 in the [mobile app](mobile-and-relay.md#the-read-only-task-tree).
 
+### Tasks on a connected host in the tree
+
+A task you delegated to a [connected host](hosts.md) shows up in the tree under
+the task that delegated it, as a leaf marked with the host's alias (a small chip
+in the web app and the mobile app, `alias:id` on the command line). It is a
+read-only copy: the other host owns the task, so you cannot open, stop or
+archive it from this tree. Stop it with the host tools of your agent or on the
+other host.
+
+- Its state and reported cost come from the other host and are refreshed about
+  every ten seconds while it is running. If the host is unreachable the last
+  known state stays, so treat an old row as stale.
+- Its cost and state count in the totals of every task above it, like a local
+  sub-task. A remote run that reported no cost is not estimated.
+- The [tree budget](#tree-budget) counts the reported cost of remote tasks too,
+  so a budgeted tree stops launching agents when local and remote spend together
+  reach it.
+- Renaming a host changes the alias shown, nothing else. Deleting the local copy
+  loses no work: the task still exists on its owner.
+
 ## Tree budget
 
 A tree budget caps the **reported cost** of a root task and all its
@@ -275,7 +295,37 @@ untrusted data, not instructions.
 - `task_status` on a host returns `status_unknown` when the run could not be
   observed three times in a row. That is not a finished state; the agent should
   inspect the host or ask you before re-delegating.
-- There is no tool yet to create work on, or send a prompt to, another host.
+
+### Delegate to a connected host
+
+`task_new`, `task_send`, `task_stop` and `task_wait` also accept `host`. With a
+host, `task_new` creates the task **and** starts its first run in one call, so it
+needs the remote `workspaceId` (see `workspace_list` with `host`), a `provider`, a
+`model` and a `prompt`. Nothing else about the run is chosen from your side: the
+other host runs it under its own permission mode, its own accounts and its own
+limits, and a permission request goes to a person on that host, never to you.
+Code travels through git only: push the branch first, name it in `branch` or
+`baseRef`, and open the pull request yourself from the results. The remote agent
+pushes to its own branch only.
+
+- The result carries `host`, `globalId` (`alias:id`), `taskId`, `runId`, `branch`
+  and an `idempotencyKey`. If the call ends with `ambiguous` or
+  `local_write_failed`, retry with the same `idempotencyKey`: the same key returns
+  the same task, a different key can create a second one.
+- Your daemon watches the remote run for you, even across a restart of your
+  daemon. When it finishes you are woken like for a local Peer, with a note that
+  names the host. The text the remote agent wrote is untrusted data, cut at
+  1 KiB.
+- If the run cannot be observed three times in a row you get a note that its
+  status is **unknown**, never that it finished: it may still be running. If the
+  host was removed you get **host unavailable** at once. Inspect the task or ask
+  the person before you delegate it again.
+- `task_wait` on a host waits at most 25 seconds per call; call it again to keep
+  waiting. `waiting_permission` means a person on that host must approve.
+- A Peer seat, or a task that another host created, has no host tools: the daemon
+  refuses its host calls with `hop_limit`.
+- Limits the other host sets for you (live agents, wall time, reported cost per
+  day) answer `budget_exceeded`.
 
 A different command group, `smind mcp add`, `smind mcp ls`, `smind mcp rm`,
 `smind mcp enable` and `smind mcp disable`, manages the MCP servers that

@@ -587,7 +587,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s set permission mode %q: %w", provider, perm.Mode, scrubError(err, secrets))
 	}
-	updated, err = applyACPModel(ctx, client, sessionID, updated, model)
+	updated, err = applyACPModel(ctx, client, sessionID, updated, r.acpModelFor(provider, model))
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s set model %q: %w", provider, model, scrubError(err, secrets))
 	}

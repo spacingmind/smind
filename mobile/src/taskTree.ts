@@ -30,6 +30,9 @@ export type TreeRow =
       stalledNote: string | null;
       cost: string;
       isRoot: boolean;
+      /** F4: owning host alias of a remote node (read-only, negative id), else null. */
+      host: string | null;
+      remote: boolean;
     }
   | { kind: 'more'; hiddenCount: number; truncated: boolean; label: string };
 
@@ -219,6 +222,8 @@ export function buildTreeRows(
       stalledNote: stalledNote(n, now),
       cost: costLabel(n),
       isRoot: i === 0,
+      host: n.remote ? n.host ?? null : null,
+      remote: n.remote === true,
     };
     const note = runStateNote(n.run);
     if (note) row.stateNote = note;

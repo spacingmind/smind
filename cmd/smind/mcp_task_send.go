@@ -48,6 +48,8 @@ type taskSendInput struct {
 	WhenBusy       string `json:"whenBusy,omitempty" jsonschema:"what to do when the chat already has a running run: reject (error), queue (append, delivered at the next turn boundary -- the default), or interrupt (stop the running run and deliver first)"`
 	FromTaskID     *int64 `json:"fromTaskId,omitempty" jsonschema:"optional: your own task id, for the [message from task #T, chat #C] provenance header on the delivered prompt"`
 	FromChatID     *int64 `json:"fromChatId,omitempty" jsonschema:"optional: your own chat id, paired with fromTaskId"`
+	Host           any    `json:"host,omitempty" jsonschema:"optional connected host: an alias or id string (see list_hosts), OR a label selector {'labels':{'os':'windows'},'any':false}: it must match exactly one enabled, connected host (zero or several matches are an error naming the candidates) unless any is true, which picks the host with the fewest live remote agents (ties by alias). There is no automatic retry on another host. Act on that host instead of this daemon. Direct only (hop limit 1): a task created by a peer cannot use it. Omit for this daemon. With host, taskId is the remote task id and only taskId and prompt (plus optional provider, model, idempotencyKey) apply"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty" jsonschema:"only with host: key from an earlier ambiguous or local_write_failed answer; reuse it to retry without sending twice"`
 }
 
 // taskSendOutput is task_send's structured output: either the started
@@ -60,12 +62,22 @@ type taskSendOutput struct {
 	// queued (ADR-0021 §2).
 	Queued      bool  `json:"queued,omitempty"`
 	QueueItemID int64 `json:"queueItemId,omitempty"`
+	// Set for a host send only.
+	Host           string `json:"host,omitempty"`
+	GlobalID       string `json:"globalId,omitempty"`
+	TaskID         int64  `json:"taskId,omitempty"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	Replayed       bool   `json:"replayed,omitempty"`
 }
 
 // mcpTaskSend wraps run.start (the non-blocking half of task.prompt, the
 // same RPC cmdTaskSend calls) behind the ADR-0019 permission guard.
 func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, taskSendOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskSendInput) (*mcp.CallToolResult, taskSendOutput, error) {
+		if mcpHostSet(in.Host) {
+			out, err := remoteTaskSend(ctx, client, in)
+			return nil, out, err
+		}
 		if in.TaskID <= 0 {
 			return nil, taskSendOutput{}, fmt.Errorf("task_send: taskId is required")
 		}

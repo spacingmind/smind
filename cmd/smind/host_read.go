@@ -99,6 +99,73 @@ func hostReadCall(ctx context.Context, verb string, params map[string]any, stder
 	return res, raw, 0
 }
 
+// parseLabelSelector parses `k:v,k:v` for --labels.
+func parseLabelSelector(s string) (map[string]string, bool) {
+	labels := map[string]string{}
+	for _, p := range strings.Split(s, ",") {
+		k, v, ok := parseLabelPair(strings.TrimSpace(p))
+		if !ok {
+			return nil, false
+		}
+		labels[k] = v
+	}
+	return labels, true
+}
+
+// hostSelectCall sends exactly one remote.select and returns the alias it
+// resolved. code is 0 on success, else the exit code after printing.
+func hostSelectCall(ctx context.Context, verb string, labels map[string]string, anyHost bool, stderr io.Writer) (alias string, code int) {
+	call, closeFn, ok := openHost(ctx, stderr)
+	if !ok {
+		return "", 1
+	}
+	defer closeFn()
+	var res struct {
+		Host   string `json:"host"`
+		HostID string `json:"hostId"`
+	}
+	if err := call(ctx, "remote.select", map[string]any{"labels": labels, "any": anyHost}, &res); err != nil {
+		hostReadErr(stderr, verb, err)
+		return "", 1
+	}
+	if res.Host == "" {
+		fmt.Fprintf(stderr, "smind host %s: bad answer: no host\n", verb)
+		return "", 1
+	}
+	return res.Host, 0
+}
+
+// runHostSelect prints only the alias the selector resolves to, so
+// $(smind host select --labels os:windows) works in scripts.
+func runHostSelect(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	positional, rest := hostSplitArgs(args)
+	fs := flag.NewFlagSet("host select", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	labelsFlag := fs.String("labels", "", "labels to match (k:v,k:v)")
+	anyHost := fs.Bool("any", false, "several matches are fine, take the least loaded")
+	if err := fs.Parse(rest); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 0 || len(positional) != 0 || *labelsFlag == "" {
+		fmt.Fprint(stderr, hostUsage)
+		return 2
+	}
+	labels, ok := parseLabelSelector(*labelsFlag)
+	if !ok {
+		fmt.Fprintf(stderr, "smind host select: --labels %q is not k:v,k:v\n", *labelsFlag)
+		return 2
+	}
+	alias, rc := hostSelectCall(ctx, "select", labels, *anyHost, stderr)
+	if rc != 0 {
+		return rc
+	}
+	fmt.Fprintln(stdout, hostSafeText(alias))
+	return 0
+}
+
 // hostReadFlags parses `<positional>... [flags]` for a read verb.
 type hostReadFlags struct {
 	positional []string
@@ -107,9 +174,11 @@ type hostReadFlags struct {
 	cursor     int
 	limit      int
 	run        string
+	labels     string
+	any        bool
 }
 
-func parseHostReadFlags(verb string, args []string, stderr io.Writer, withWorkspace, withPage, withRun bool) (hostReadFlags, int, bool) {
+func parseHostReadFlags(verb string, args []string, stderr io.Writer, withWorkspace, withPage, withRun, withSelect bool) (hostReadFlags, int, bool) {
 	var f hostReadFlags
 	positional, rest := hostSplitArgs(args)
 	f.positional = positional
@@ -125,6 +194,10 @@ func parseHostReadFlags(verb string, args []string, stderr io.Writer, withWorksp
 	}
 	if withRun {
 		fs.StringVar(&f.run, "run", "", "run id (default: the task's latest run)")
+	}
+	if withSelect {
+		fs.StringVar(&f.labels, "labels", "", "pick the host by labels (k:v,k:v) instead of naming it")
+		fs.BoolVar(&f.any, "any", false, "with --labels: several matches are fine, take the least loaded")
 	}
 	if err := fs.Parse(rest); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -147,15 +220,15 @@ func runHostRead(ctx context.Context, verb string, args []string, stdout, stderr
 	)
 	switch verb {
 	case "info", "workspaces":
-		f, code, ok = parseHostReadFlags(verb, args, stderr, false, false, false)
+		f, code, ok = parseHostReadFlags(verb, args, stderr, false, false, false, true)
 	case "tasks":
-		f, code, ok = parseHostReadFlags(verb, args, stderr, true, true, false)
+		f, code, ok = parseHostReadFlags(verb, args, stderr, true, true, false, true)
 	case "task":
-		f, code, ok = parseHostReadFlags(verb, args, stderr, false, false, false)
+		f, code, ok = parseHostReadFlags(verb, args, stderr, false, false, false, false)
 	case "status":
-		f, code, ok = parseHostReadFlags(verb, args, stderr, false, false, false)
+		f, code, ok = parseHostReadFlags(verb, args, stderr, false, false, false, false)
 	case "activity":
-		f, code, ok = parseHostReadFlags(verb, args, stderr, false, true, true)
+		f, code, ok = parseHostReadFlags(verb, args, stderr, false, true, true, false)
 	}
 	if !ok {
 		return code
@@ -169,10 +242,31 @@ func runHostRead(ctx context.Context, verb string, args []string, stdout, stderr
 	pos := f.positional
 	switch verb {
 	case "info", "workspaces", "tasks":
-		if len(pos) != 1 || pos[0] == "" {
-			return usage()
+		if f.any && f.labels == "" {
+			fmt.Fprintf(stderr, "smind host %s: --any needs --labels\n", verb)
+			return 2
 		}
-		params["host"] = pos[0]
+		if f.labels != "" {
+			if len(pos) != 0 {
+				fmt.Fprintf(stderr, "smind host %s: give a host or --labels, not both\n", verb)
+				return 2
+			}
+			labels, valid := parseLabelSelector(f.labels)
+			if !valid {
+				fmt.Fprintf(stderr, "smind host %s: --labels %q is not k:v,k:v\n", verb, f.labels)
+				return 2
+			}
+			alias, rc := hostSelectCall(ctx, verb, labels, f.any, stderr)
+			if rc != 0 {
+				return rc
+			}
+			params["host"] = alias
+		} else {
+			if len(pos) != 1 || pos[0] == "" {
+				return usage()
+			}
+			params["host"] = pos[0]
+		}
 		if f.workspace != 0 {
 			params["workspaceId"] = f.workspace
 		}

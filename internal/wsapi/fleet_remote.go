@@ -11,6 +11,7 @@ import (
 	"github.com/spacingmind/smind/internal/fleet/client"
 	"github.com/spacingmind/smind/internal/fleet/registry"
 	"github.com/spacingmind/smind/internal/fleet/wire"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // The local read bridge (ADR-0048 F2b): remote.hosts and remote.read let the
@@ -27,8 +28,17 @@ type FleetRemoteOptions struct {
 	// RunOrigin returns the host a run or its task arrived from ("" = local).
 	// An error means the origin cannot be verified and the call is refused.
 	RunOrigin func(runID string, taskID int64) (string, error)
-	Now       func() time.Time // tests; default time.Now
-	Timeout   time.Duration    // tests; 0 = client default
+	// SeatMayDelegate reports whether the seat that owns a run may act
+	// through other hosts (nil = every local seat may). An error means the
+	// seat cannot be verified and the call is refused.
+	SeatMayDelegate func(runID string) (bool, error)
+	// PutWatch persists a remote-task mirror and its watch (tests; nil uses
+	// the fleet store).
+	PutWatch func(t store.FleetRemoteTask, w *store.FleetWatch) (int64, error)
+	// Watch hands a newly opened watch id to the watcher; nil in tests.
+	Watch   interface{ Add(id int64) }
+	Now     func() time.Time // tests; default time.Now
+	Timeout time.Duration    // tests; 0 = client default
 }
 
 // RemoteReadParams is the remote.read ask.
@@ -113,6 +123,8 @@ func (a *API) SetFleetRemote(o FleetRemoteOptions) {
 	})
 	a.hs["remote.hosts"] = r.guard("remote.hosts", r.handleHosts)
 	a.hs["remote.read"] = r.guard("remote.read", r.handleRead)
+	a.hs["remote.write"] = r.guard("remote.write", r.handleWrite)
+	a.hs["remote.select"] = r.guard("remote.select", r.handleSelect)
 }
 
 // guard keeps remote.* on the local connection and away from any run a peer
@@ -129,6 +141,15 @@ func (r *fleetRemote) guard(method string, h handlerFunc) handlerFunc {
 			}
 			if origin != "" {
 				return nil, &rpcCodeError{code: wire.CodeHopLimit, msg: "a task created by a peer host cannot call other hosts (hop limit 1)"}
+			}
+		}
+		if rc.runScoped && r.o.SeatMayDelegate != nil {
+			may, err := r.o.SeatMayDelegate(rc.ident.runID)
+			if err != nil {
+				return nil, &rpcCodeError{code: wire.CodeHopLimit, msg: "cannot verify the seat of this run (fails closed)", err: err}
+			}
+			if !may {
+				return nil, &rpcCodeError{code: wire.CodeHopLimit, msg: "this seat cannot use other hosts (hop limit 1)"}
 			}
 		}
 		return h(ctx, rc, raw)

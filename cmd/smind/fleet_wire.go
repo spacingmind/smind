@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -14,7 +17,10 @@ import (
 	"github.com/spacingmind/smind/internal/fleet"
 	"github.com/spacingmind/smind/internal/fleet/client"
 	"github.com/spacingmind/smind/internal/fleet/link"
+	"github.com/spacingmind/smind/internal/fleet/mirror"
 	"github.com/spacingmind/smind/internal/fleet/pairing"
+	"github.com/spacingmind/smind/internal/fleet/registry"
+	"github.com/spacingmind/smind/internal/fleet/watch"
 	"github.com/spacingmind/smind/internal/relay/bridge"
 	"github.com/spacingmind/smind/internal/relay/e2ee"
 	relaypairing "github.com/spacingmind/smind/internal/relay/pairing"
@@ -74,17 +80,61 @@ func newFleet(srv *server.Server, cfg config.Config, home, version string, db *s
 		fo.HomeDirs = []string{h}
 	}
 	srv.API().SetFleet(fo)
+	connFn := func(hostID string) (client.Caller, client.LinkState) {
+		if c, ok := mgr.Conn(hostID); ok {
+			return c, client.LinkConnected
+		}
+		switch mgr.Status(hostID).State {
+		case link.StateConnecting:
+			return nil, client.LinkConnecting
+		default:
+			return nil, client.LinkOther
+		}
+	}
+	// The watcher gets its own client: it outlives any one request and must
+	// resolve by host id. client.call wraps every Resolve error as
+	// unknown_host, so a transient registry error also reads as unknown.
+	wc := client.New(client.Options{
+		Self: key.HostID(),
+		Resolve: func(ref string) (client.Host, error) {
+			h, err := reg.Get(ref)
+			if errors.Is(err, registry.ErrNotFound) || (err == nil && h.State == registry.StateRevoked) {
+				return client.Host{}, fmt.Errorf("%w: %s", client.ErrUnknownHost, ref)
+			}
+			if err != nil {
+				return client.Host{}, err
+			}
+			return client.Host{HostID: h.HostID, Alias: h.Alias}, nil
+		},
+		Conn: connFn,
+	})
+	w := watch.New(watch.Options{
+		Store: db, Observer: wc, Notifier: srv.API().Runs, Hosts: hostsAdapter{reg},
+		BackoffMin: time.Duration(cfg.Fleet.ObservationBackoffMinSeconds) * time.Second,
+		BackoffMax: time.Duration(cfg.Fleet.ObservationBackoffMaxSeconds) * time.Second,
+	})
 	srv.API().SetFleetRemote(wsapi.FleetRemoteOptions{
-		Conn: func(hostID string) (client.Caller, client.LinkState) {
-			if c, ok := mgr.Conn(hostID); ok {
-				return c, client.LinkConnected
+		Conn:  connFn,
+		Watch: w,
+		// A Peer (managed seat, childPolicy none, orchestration tools set)
+		// may not launch children, so it may not delegate to a remote host
+		// either; mirrors the admission rules in wsapi/admission.go.
+		SeatMayDelegate: func(runID string) (bool, error) {
+			st, err := srv.API().Runs.State(runID)
+			if err != nil {
+				return false, err
 			}
-			switch mgr.Status(hostID).State {
-			case link.StateConnecting:
-				return nil, client.LinkConnecting
-			default:
-				return nil, client.LinkOther
+			if st.ProfileID == 0 {
+				return true, nil
 			}
+			p, err := db.GetAgentProfile(st.ProfileID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return true, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			return !(p.ChildPolicy == "none" && p.OrchestrationTools != nil), nil
 		},
 		RunOrigin: func(runID string, taskID int64) (string, error) {
 			origin, err := db.RunOrigin(runID)
@@ -105,7 +155,33 @@ func newFleet(srv *server.Server, cfg config.Config, home, version string, db *s
 		},
 	})
 	svc.Start()
-	return mgr.Close
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := w.Start(ctx); err != nil {
+		log.Printf("fleet: remote-run watcher not started: %v", err)
+	}
+	mr := mirror.New(mirror.Options{Store: db, Observer: wc})
+	stopMirror := mr.Start(ctx)
+	return func() {
+		cancel()
+		stopMirror()
+		w.Stop()
+		mgr.Close()
+	}
+}
+
+// hostsAdapter lets the watcher resolve a host id to its alias.
+type hostsAdapter struct{ reg *registry.Registry }
+
+func (h hostsAdapter) Alias(hostID string) (string, bool, error) {
+	host, err := h.reg.Get(hostID)
+	if errors.Is(err, registry.ErrNotFound) || (err == nil && host.State == registry.StateRevoked) {
+		return "", false, nil
+	}
+	if err != nil {
+		// ok=true with an error: the watcher treats it as transient.
+		return "", true, err
+	}
+	return host.Alias, true, nil
 }
 
 // fleetRelayOffer is the pairing offer for the relay `smind relay connect`
