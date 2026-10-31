@@ -2,6 +2,7 @@ import { useMemo, type JSX } from "react";
 
 import { ProviderModelPicker } from "@/components/pickers/provider-model-picker";
 import { useSetProviderDefaultModel } from "@/hooks/use-set-provider-default-model";
+import { requestClearCooldown } from "@/lib/gate-events";
 import { buildBrowserProviders } from "@/lib/model-browser";
 import type { ProviderInfo } from "@/lib/types";
 
@@ -35,6 +36,8 @@ export function ProviderDefaultModel({ info, hasClient }: { info: ProviderInfo; 
         boundProvider={info.id}
         boundNotice={null}
         disabled={!hasClient || pendingId !== null}
+        gatesBlock={false}
+        onClearCooldown={requestClearCooldown}
         onSelect={(_provider, model) => setDefaultModel(info.id, model)}
       />
       <p className="text-ui-xs text-muted-foreground" data-testid="provider-default-resolves">

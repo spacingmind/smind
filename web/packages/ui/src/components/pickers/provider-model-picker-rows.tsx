@@ -5,7 +5,10 @@ import { OwnerBadge } from "@/components/plugins/owner-badge";
 
 import { ProfileIcon, ProviderIcon } from "@/components/provider-icon";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { gateActionLabel, gateBadge, gateReasonText, isHardGate } from "@/lib/provider-gate";
 import { getProviderModelCount, type BrowserProvider, type ModelRow } from "@/lib/model-browser";
+import type { ProviderGate } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // Row chrome for the combined picker, ported from Paseo's model-browser rows:
@@ -29,6 +32,14 @@ export interface RowShellProps {
   disabled: boolean;
   onActivate: () => void;
   onHover: () => void;
+  /** The row's live gate (hard or advisory); a hard one blocks selection but keeps the row in the keyboard walk. */
+  gate?: ProviderGate;
+  /** Runs the gate's action (Enter on a blocked row, or its control); undefined hides the control. */
+  onGateAction?: () => void;
+  /** Test id suffix of the gate slot (`model-gate-<suffix>`). */
+  gateKey?: string;
+  /** The picker's clock, so every row of one render agrees on "until". */
+  now?: number;
 }
 
 /** Keeps focus in the search input so tapping a row cannot blur it (and re-render) before the click lands. */
@@ -43,20 +54,25 @@ export function RowShell({
   disabled,
   onActivate,
   onHover,
+  gate,
   testId,
   selected,
   className,
   children,
 }: RowShellProps & { testId: string; selected?: boolean; className?: string; children: ReactNode }) {
+  // A hard gate blocks selection like `disabled`, but the row stays hoverable and in the arrow walk so its action is reachable.
+  const blocked = isHardGate(gate);
   return (
     <div
       id={id}
       role="option"
       aria-selected={selected ?? false}
-      aria-disabled={disabled || undefined}
+      aria-disabled={disabled || blocked || undefined}
+      aria-describedby={gate ? `${id}-gate` : undefined}
       data-testid={testId}
       data-active={active ? "true" : undefined}
-      onClick={disabled ? undefined : onActivate}
+      data-gate={gate?.reason}
+      onClick={disabled || blocked ? undefined : onActivate}
       onMouseDown={keepInputFocus}
       onPointerDown={keepInputFocus}
       onMouseMove={disabled || active ? undefined : onHover}
@@ -64,11 +80,64 @@ export function RowShell({
         "group/row flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 py-1 max-md:min-h-11",
         active && "bg-hover",
         disabled && "cursor-not-allowed opacity-50",
+        blocked && !disabled && "cursor-default",
         className,
       )}
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * The gate's reason (a Badge plus one line) and its one control, in the row's detail slot. The text carries the
+ * full sentence in `title`; the control is a tab stop only while its row is the active one.
+ */
+export function GateSlot({
+  gate,
+  rowId,
+  gateKey,
+  active,
+  now,
+  onAction,
+}: {
+  gate: ProviderGate;
+  rowId: string;
+  gateKey: string;
+  active: boolean;
+  now: number;
+  onAction?: () => void;
+}) {
+  const badge = gateBadge(gate);
+  const text = gateReasonText(gate, now);
+  const actionLabel = onAction ? gateActionLabel(gate) : undefined;
+  return (
+    <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+      <span id={`${rowId}-gate`} data-testid={`model-gate-${gateKey}`} title={text} className="flex min-w-0 items-center gap-1.5">
+        <StatusBadge status={badge.status} className="shrink-0">
+          {badge.label}
+        </StatusBadge>
+        <span className="min-w-0 truncate text-ui-sm text-foreground-muted max-md:whitespace-normal">{text}</span>
+      </span>
+      {actionLabel && (
+        <button
+          type="button"
+          tabIndex={active ? 0 : -1}
+          data-testid={`model-gate-action-${gateKey}`}
+          aria-label={`${actionLabel}: ${gate.action?.label ?? text}`}
+          title={gate.action?.label}
+          onMouseDown={keepInputFocus}
+          onPointerDown={keepInputFocus}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAction?.();
+          }}
+          className="h-6 shrink-0 rounded px-2 text-ui-sm font-medium text-foreground hover:bg-muted max-md:h-10 max-md:px-3"
+        >
+          {actionLabel}
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -140,7 +209,11 @@ export function ProfileRow({
       {checked && custom && (
         <span className="shrink-0 rounded bg-muted px-1 text-ui-xs text-foreground-muted">custom</span>
       )}
-      <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground-muted">{profile.summary}</span>
+      {shell.gate ? (
+        <GateSlot gate={shell.gate} rowId={shell.id} gateKey={shell.gateKey ?? `profile-${profile.id}`} active={shell.active} now={shell.now ?? Date.now()} onAction={shell.onGateAction} />
+      ) : (
+        <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground-muted">{profile.summary}</span>
+      )}
       <CheckSlot show={checked} />
     </RowShell>
   );
@@ -153,7 +226,9 @@ export function ProviderRow({
 }: RowShellProps & { provider: BrowserProvider; separator: boolean }) {
   const selection = provider.modelSelection;
   let detail: ReactNode;
-  if (provider.unavailableReason) {
+  if (shell.gate && !provider.unavailableReason) {
+    detail = null;
+  } else if (provider.unavailableReason) {
     detail = provider.unavailableReason;
   } else if (selection.kind === "loading") {
     detail = (
@@ -177,10 +252,14 @@ export function ProviderRow({
     <RowShell {...shell} testId={`model-provider-${provider.id}`} className={cn(separator && "border-t border-border rounded-t-none")}>
       <ProviderIcon provider={provider.id} className="shrink-0 text-foreground-muted" />
       <span className="min-w-0 shrink-0 truncate text-ui-base text-foreground">{provider.label}</span>
-      <span className="flex min-w-0 flex-1 items-center justify-end gap-1 truncate text-ui-sm text-foreground-muted">
-        {detail}
-      </span>
-      {!shell.disabled && <Icons.chevronRight aria-hidden className="size-4 shrink-0 text-foreground-subtle" />}
+      {shell.gate && !provider.unavailableReason ? (
+        <GateSlot gate={shell.gate} rowId={shell.id} gateKey={shell.gateKey ?? provider.id} active={shell.active} now={shell.now ?? Date.now()} onAction={shell.onGateAction} />
+      ) : (
+        <span className="flex min-w-0 flex-1 items-center justify-end gap-1 truncate text-ui-sm text-foreground-muted">
+          {detail}
+        </span>
+      )}
+      {!shell.disabled && !isHardGate(shell.gate) && <Icons.chevronRight aria-hidden className="size-4 shrink-0 text-foreground-subtle" />}
     </RowShell>
   );
 }
@@ -262,8 +341,12 @@ export function ModelRowItem({
     <RowShell {...shell} testId={`model-row-${row.key}`} selected={selected}>
       <ProviderIcon provider={row.provider} className="shrink-0 text-foreground-muted" />
       <span className="max-w-[55%] shrink-0 truncate text-ui-base text-foreground">{row.modelLabel}</span>
-      <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground-muted">{description}</span>
-      {action && <ModelRowProfileButton row={row} action={action} onAct={onAction} />}
+      {shell.gate ? (
+        <GateSlot gate={shell.gate} rowId={shell.id} gateKey={shell.gateKey ?? row.key} active={shell.active} now={shell.now ?? Date.now()} onAction={shell.onGateAction} />
+      ) : (
+        <span className="min-w-0 flex-1 truncate text-ui-sm text-foreground-muted">{description}</span>
+      )}
+      {action && !isHardGate(shell.gate) && <ModelRowProfileButton row={row} action={action} onAct={onAction} />}
       <CheckSlot show={selected} />
     </RowShell>
   );

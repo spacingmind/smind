@@ -81,6 +81,7 @@ import { useSlashPaletteCommands } from "@/hooks/use-slash-palette-commands";
 import { findPanel, usePluginPanels } from "@/hooks/use-plugin-panels";
 import type { PluginPanel } from "@/lib/plugin-panel-types";
 import { DaemonQueryProvider, useDaemonQueryClient } from "@/lib/query/daemon-query-provider";
+import { GateActionBridge } from "@/components/gate-action-bridge";
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -1639,6 +1640,7 @@ function AppShell({
       <PluginActionsBridge openPanel={openPluginPanel}>
         <div className="relative h-svh w-full">
         <PluginThemeApplier />
+        <GateActionBridge />
         <UsageModalRoot />
         <div
           data-testid="app-shell"
