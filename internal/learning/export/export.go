@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/spacingmind/smind/internal/fsutil"
 	"github.com/spacingmind/smind/internal/learning/gate"
 	"github.com/spacingmind/smind/internal/skills"
 	"github.com/spacingmind/smind/internal/store"
@@ -104,7 +105,7 @@ func repoSubdir(root string) string {
 	if exists(".agents/skills") {
 		return ".agents/skills"
 	}
-	if fi, err := os.Lstat(filepath.Join(root, ".claude")); err == nil && skills.IsLinkMode(fi.Mode()) || exists(".claude/skills") {
+	if fi, err := os.Lstat(filepath.Join(root, ".claude")); err == nil && fsutil.IsLink(fi.Mode()) || exists(".claude/skills") {
 		return ".claude/skills"
 	}
 	return ".agents/skills"

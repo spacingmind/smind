@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func put(t *testing.T, dir, rel, body string) {
@@ -158,6 +160,32 @@ func TestReadiness_SymlinkOutOfRepoNotFollowed(t *testing.T) {
 		t.Error("a path through a symlinked directory was followed")
 	}
 	for _, f := range fs {
+		if strings.Contains(f.Evidence+f.Title+f.Fix, "TOPSECRET") {
+			t.Fatalf("outside content leaked: %+v", f)
+		}
+	}
+}
+
+// A directory junction (Windows; reported as ModeIrregular, not ModeSymlink)
+// standing in for a directory is not followed either. testutil.Link makes a
+// junction where symlinks need a privilege this account lacks.
+func TestReadiness_JunctionOutOfRepoNotFollowed(t *testing.T) {
+	outside := t.TempDir()
+	put(t, outside, "workflows/ci.yml", "on: push\n")
+	put(t, outside, "config.yml", "version: 2\n")
+	put(t, outside, "guide.md", "TOPSECRETMARKER "+strings.Repeat("x", 400))
+	dir := t.TempDir()
+	for _, name := range []string{".github", ".circleci", "docs"} {
+		testutil.Link(t, outside, filepath.Join(dir, name))
+	}
+	r := &repo{root: dir}
+	if r.isDir(".github/workflows") || len(r.list(".github/workflows")) != 0 || r.isFile(".circleci/config.yml") {
+		t.Error("a path through a junctioned directory was followed")
+	}
+	if r.isDir("docs") || len(r.list("docs")) != 0 {
+		t.Error("a junctioned docs directory was listed")
+	}
+	for _, f := range Check(context.Background(), dir, Options{}) {
 		if strings.Contains(f.Evidence+f.Title+f.Fix, "TOPSECRET") {
 			t.Fatalf("outside content leaked: %+v", f)
 		}

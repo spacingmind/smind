@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/spacingmind/smind/internal/fsutil"
 	"github.com/spacingmind/smind/internal/realpath"
 )
 
@@ -55,14 +56,6 @@ var RepoTargetDirs = []string{".agents/skills", ".claude/skills"}
 
 // RepoTarget is the target name used in Results when Options.Root is set.
 const RepoTarget = "repo"
-
-// IsLinkMode reports whether mode (from os.Lstat) is a symlink or, on
-// Windows, a junction: since Go 1.23 an NTFS mount point is reported as
-// os.ModeIrregular rather than os.ModeSymlink, and a junction redirects a
-// path exactly as a symlink does, without needing any privilege to create.
-func IsLinkMode(mode os.FileMode) bool {
-	return mode&(os.ModeSymlink|os.ModeIrregular) != 0
-}
 
 // ErrSymlinkedTarget is returned (wrapped) when a root-based install would
 // have to traverse a symlink inside the root; nothing is ever written through
@@ -335,7 +328,7 @@ func (e *env) checkNoSymlinks(p string) error {
 		if err != nil {
 			return err
 		}
-		if IsLinkMode(fi.Mode()) {
+		if fsutil.IsLink(fi.Mode()) {
 			return fmt.Errorf("%w: %s is a symlink or junction; use a real directory", ErrSymlinkedTarget, cur)
 		}
 	}
