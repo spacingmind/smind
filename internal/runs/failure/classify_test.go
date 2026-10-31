@@ -439,3 +439,12 @@ func TestClassify_StructuredCodeBeatsText(t *testing.T) {
 		t.Fatalf("plain text classified: %+v", r)
 	}
 }
+
+// An expired login can surface as "issue with the selected model" (claude-code
+// CHANGELOG), so auth text wins over model text.
+func TestClassify_AuthBeatsModelText(t *testing.T) {
+	r := Classify(Input{Err: `Not logged in · Please run /login (There's an issue with the selected model (x). It may not exist or you may not have access to it.)`}, at(2026, 11, 1, 3, 0, 0))
+	if r.Kind != KindAuthExpired {
+		t.Fatalf("got %+v", r)
+	}
+}
