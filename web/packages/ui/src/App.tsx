@@ -32,6 +32,7 @@ import { requestNewWorkspace } from "@/lib/app-events";
 import { useAppUpdate } from "@/lib/app-update";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { PRTabAutoOpen } from "@/components/pr-panel/pr-tab-auto-open";
+import { PluginPanelPane } from "@/components/plugin-panel/plugin-panel-pane";
 import { useTaskGit } from "@/hooks/use-task-git";
 import { PRPanelPane } from "@/components/pr-panel/pr-panel-pane";
 import { TerminalPane } from "@/components/terminal-pane";
@@ -801,12 +802,16 @@ function AppShell({
     // permanently starving the task of its real default chat tab. Wait
     // for a real active tab instead; this effect re-fires once one exists.
     if (!activeEntry) return;
+    // Plugin tabs are not routable: a panel's identity lives in the tab
+    // entry, not the URL, so the previous hash stays until another tab is
+    // focused.
+    if (activeEntry.kind === "plugin") return;
     const tab: Route["tab"] =
       activeEntry.kind === "file"
         ? { kind: "file", path: filePathFromTabKey(activeEntry.key) }
         : activeEntry.kind === "chat" && activeEntry.chatId !== undefined
           ? { kind: "chat", chatId: activeEntry.chatId }
-          : { kind: activeEntry.kind as Exclude<TabKind, "file" | "chat"> };
+          : { kind: activeEntry.kind as Exclude<TabKind, "file" | "chat" | "plugin"> };
     const nextHash = formatRoute({ workspaceId: selectedTask.WorkspaceID, taskId: selectedTask.ID, tab });
     // Comparing against the live hash (not a ref of "what we last wrote")
     // is what keeps this idempotent under the hashchange listener above:
@@ -2442,6 +2447,7 @@ function TabContent({
     file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} chats={chats} />,
     pr: <PRPanelPane taskId={task.ID} focused={active} />,
+    plugin: <PluginPanelPane pluginId={entry.pluginId ?? ""} panelId={entry.panelId ?? ""} taskId={task.ID} focused={active} />,
     terminal: (
       <TerminalPane
         client={client}

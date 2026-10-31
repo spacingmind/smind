@@ -13,17 +13,19 @@ import type { TabKind } from "@/components/tab-registry";
  *
  * ADR-0016 replaced the bare `task` tab kind with per-chat tabs -- a
  * `chat` route segment carries the chat's own id (`.../chat/<chatId>`),
- * mirroring `file`'s own "kind carries an id" shape.
+ * mirroring `file`'s own "kind carries an id" shape. ADR-0042's plugin
+ * panels are deliberately not routable: a panel tab's identity lives in
+ * the tab entry, not the URL.
  */
 export interface Route {
   workspaceId: number;
   taskId: number;
-  tab: { kind: Exclude<TabKind, "file" | "chat"> } | { kind: "file"; path: string } | { kind: "chat"; chatId: number };
+  tab: { kind: Exclude<TabKind, "file" | "chat" | "plugin"> } | { kind: "file"; path: string } | { kind: "chat"; chatId: number };
 }
 
-const BASE_KINDS: readonly Exclude<TabKind, "file" | "chat">[] = ["files", "diff", "terminal", "pr"];
+const BASE_KINDS: readonly Exclude<TabKind, "file" | "chat" | "plugin">[] = ["files", "diff", "terminal", "pr"];
 
-function isBaseKind(value: string): value is Exclude<TabKind, "file" | "chat"> {
+function isBaseKind(value: string): value is Exclude<TabKind, "file" | "chat" | "plugin"> {
   return (BASE_KINDS as readonly string[]).includes(value);
 }
 

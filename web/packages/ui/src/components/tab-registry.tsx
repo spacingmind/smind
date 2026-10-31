@@ -1,5 +1,6 @@
 import { Icons, type IconComponent } from "@/lib/icons";
 
+import type { PluginPanel } from "@/lib/plugin-panel-types";
 import { FileIcon } from "@/lib/file-icons";
 import { useBufferDirty } from "@/lib/dirty-buffers";
 import { useTerminalActivity } from "@/lib/terminal-sessions";
@@ -32,10 +33,10 @@ import type { Chat } from "@/lib/types";
  * number of these open at once, unlike files/diff/terminal has-at-most-one
  * bare `BASE_TAB_KINDS` entry.
  */
-export type TabKind = "chat" | "files" | "file" | "diff" | "terminal" | "pr";
+export type TabKind = "chat" | "files" | "file" | "diff" | "terminal" | "pr" | "plugin";
 
-/** The non-file, non-chat kinds: the ones a task's strip is seeded with (Files/Diff/Terminal) and the empty state / "+" menu's base section can (re)open on demand. Chat tabs are opened via `chatTab`/the "+" menu's own chat section instead -- there can be any number of them, so they don't fit a single fixed-kind slot. */
-export type BaseTabKind = Exclude<TabKind, "file" | "chat" | "pr">;
+/** The non-file, non-chat kinds: the ones a task's strip is seeded with (Files/Diff/Terminal) and the empty state / "+" menu's base section can (re)open on demand. Chat tabs are opened via `chatTab`/the "+" menu's own chat section instead -- there can be any number of them, so they don't fit a single fixed-kind slot. Plugin tabs (`pluginTab`) are per-panel instances, not a fixed slot either. */
+export type BaseTabKind = Exclude<TabKind, "file" | "chat" | "pr" | "plugin">;
 
 export const BASE_TAB_KINDS: readonly BaseTabKind[] = ["files", "diff", "terminal"];
 
@@ -52,6 +53,10 @@ export interface TabEntry {
   path?: string;
   /** The chat's id, for `kind: "chat"` only -- recoverable from `key` too, but carried directly for the same reason `path` is. */
   chatId?: number;
+  /** The panel's owning plugin id, for `kind: "plugin"` only -- the pair identifies which panel the tab renders. */
+  pluginId?: string;
+  /** The plugin-local panel id, for `kind: "plugin"` only -- see `pluginId`. */
+  panelId?: string;
 }
 
 /**
@@ -75,6 +80,7 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
   terminal: { closable: true, defaultTitle: "Terminal", icon: Icons.terminal },
   file: { closable: true, defaultTitle: "File", icon: Icons.file },
   pr: { closable: true, defaultTitle: "Pull request", icon: Icons.pullRequest },
+  plugin: { closable: true, defaultTitle: "Plugin", icon: Icons.plugin },
 };
 
 /** The tab entry for one base kind -- the one constructor behind both the seed set and every "reopen Files/Diff/Terminal" affordance. */
@@ -91,6 +97,36 @@ export function prTabKey(taskId: number): string {
 /** The task's PR tab; `number` (when known) titles it "PR #7", else "Pull request". */
 export function prTab(taskId: number, number?: number): TabEntry {
   return { kind: "pr", key: prTabKey(taskId), taskId, title: number ? `PR #${number}` : TAB_KINDS.pr.defaultTitle, closable: TAB_KINDS.pr.closable };
+}
+
+/**
+ * The tab key of one plugin panel instance (ADR-0042) -- `${taskId}:plugin:${pluginId}:${panelId}`:
+ * one tab per panel per task, so reopening a panel activates its tab rather than duplicating it.
+ */
+export function pluginTabKey(taskId: number, pluginId: string, panelId: string): string {
+  return `${taskId}:plugin:${pluginId}:${panelId}`;
+}
+
+const PLUGIN_TAB_KEY_RE = /^(\d+):plugin:([^:]+):([^:]+)$/;
+
+/** The inverse of {@link pluginTabKey}: `{taskId, pluginId, panelId}` from a tab key, or null for any other key. */
+export function parsePluginTabKey(key: string): { taskId: number; pluginId: string; panelId: string } | null {
+  const match = PLUGIN_TAB_KEY_RE.exec(key);
+  if (!match) return null;
+  return { taskId: Number(match[1]), pluginId: match[2]!, panelId: match[3]! };
+}
+
+/** The tab for one plugin panel, titled by the panel's own contribution title (ADR-0042). */
+export function pluginTab(taskId: number, panel: Pick<PluginPanel, "plugin" | "id" | "title">): TabEntry {
+  return {
+    kind: "plugin",
+    key: pluginTabKey(taskId, panel.plugin, panel.id),
+    taskId,
+    title: panel.title || TAB_KINDS.plugin.defaultTitle,
+    closable: TAB_KINDS.plugin.closable,
+    pluginId: panel.plugin,
+    panelId: panel.id,
+  };
 }
 
 /** The base tabs a task's strip can reopen on demand (ADR 0004's per-task tab set minus Chat, which ADR-0016 replaced with per-chat tabs -- see `chatTab`), in strip order. */

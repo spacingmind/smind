@@ -18,6 +18,9 @@ import {
   filePathFromTabKey,
   isLegacyTaskTab,
   nextTerminalTab,
+  parsePluginTabKey,
+  pluginTab,
+  pluginTabKey,
   terminalTab,
   type BaseTabKind,
 } from "@/components/tab-registry";
@@ -310,5 +313,36 @@ describe("chat tabs (ADR-0016 P3)", () => {
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     expect(newChatClicked).toBe(true);
     expect(screen.getAllByTestId("tabs-empty-open")).toHaveLength(BASE_TAB_KINDS.length);
+  });
+});
+
+describe("plugin tabs (ADR-0042)", () => {
+  const PANEL = { plugin: "acme", id: "usage", title: "Acme usage", where: "task", ui: 1 } as const;
+
+  it("pluginTab builds the plugin tab from a panel, and the key round-trips", () => {
+    const entry = pluginTab(TASK.ID, PANEL);
+    expect(entry).toMatchObject({
+      kind: "plugin",
+      key: `${TASK.ID}:plugin:acme:usage`,
+      taskId: TASK.ID,
+      title: "Acme usage",
+      closable: true,
+      pluginId: "acme",
+      panelId: "usage",
+    });
+    expect(pluginTabKey(TASK.ID, "acme", "usage")).toBe(entry.key);
+    expect(parsePluginTabKey(entry.key)).toEqual({ taskId: TASK.ID, pluginId: "acme", panelId: "usage" });
+  });
+
+  it("parsePluginTabKey returns null for non-plugin or malformed keys", () => {
+    expect(parsePluginTabKey("1:pr")).toBeNull();
+    expect(parsePluginTabKey("1:plugin:a")).toBeNull();
+    expect(parsePluginTabKey("x:plugin:a:b")).toBeNull();
+  });
+
+  it("TabLabel renders a plugin tab with the panel's title", () => {
+    render(<TabLabel entry={pluginTab(TASK.ID, PANEL)} />);
+    expect(screen.getByTestId("tab-icon")).toHaveAttribute("data-icon", "plugin");
+    expect(screen.getByText("Acme usage")).toBeInTheDocument();
   });
 });
