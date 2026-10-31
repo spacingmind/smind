@@ -7,6 +7,7 @@ import { providerLabel } from "@/lib/provider-catalog";
 import type { ProviderInfo } from "@/lib/types";
 import { buildProviderDiagnostic } from "@/lib/provider-diagnostic";
 import { ProviderIcon } from "@/components/provider-icon";
+import { ProviderPlanUsage } from "@/components/account-usage/provider-plan-usage";
 import { AccountsCard } from "@/components/providers/accounts-card";
 import { ProviderDefaultModel } from "@/components/providers/provider-default-model";
 import { ProviderCustomInfo } from "@/components/providers/provider-custom-info";
@@ -184,6 +185,7 @@ export function ProviderDetail({
             </Button>
           </p>
         ) : null}
+        {info?.vendor === "zai" && info.extends !== undefined ? <ProviderPlanUsage instanceId={item.id} touch /> : null}
       </div>
 
       {/* The body is keyed by provider: per-provider UI state (models search,

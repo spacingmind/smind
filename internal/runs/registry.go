@@ -75,6 +75,8 @@ type Registry struct {
 	mu   sync.Mutex
 	runs map[string]*run
 
+	providerQuota ProviderQuota // guarded by mu
+
 	// attachStore holds queued prompts' attachment sets (ADR-0038); nil
 	// when the feature is off. Guarded by mu.
 	attachStore *attach.Store
