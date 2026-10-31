@@ -281,6 +281,8 @@ export interface ProviderInfo {
   envEffective?: Record<string, ProviderEnvEffective>;
   /** ADR-0046 section 4: the instance's stored secrets ({secret: name} env refs), each with only a fingerprint of its value -- never the value. Absent when the instance has none. */
   secrets?: ProviderSecretInfo[];
+  /** Instances only: the entry's own editable overlay as configured in config.yaml (not the merged catalog). */
+  instance?: ProviderInstanceOverlay;
   /** RFC 3339 UTC reset time while the provider is rate limited (ADR-0041 F1); absent otherwise. */
   cooldownUntil?: string;
 }
@@ -329,6 +331,34 @@ export interface AddProviderInstanceParams {
   id: string;
   label: string;
   dir: string;
+}
+
+/** One `models` / `additionalModels` entry of an instance overlay (`provider.list` `instance` and `provider.updateInstance`). */
+export interface ProviderInstanceModel {
+  id: string;
+  label?: string;
+  description?: string;
+  default?: boolean;
+}
+
+/** The `instance` field of a `provider.list` entry: the entry's own overlay as configured in config.yaml (not the merged catalog). */
+export interface ProviderInstanceOverlay {
+  models?: ProviderInstanceModel[];
+  additionalModels?: ProviderInstanceModel[];
+  disallowedTools?: string[];
+  inheritClaudeConfig?: boolean;
+}
+
+/**
+ * `provider.updateInstance` params: a present field is applied, an empty list (or `false` for the toggle)
+ * removes the key from the entry, and an absent field is left alone.
+ */
+export interface UpdateProviderInstanceParams {
+  id: string;
+  models?: ProviderInstanceModel[];
+  additionalModels?: ProviderInstanceModel[];
+  disallowedTools?: string[];
+  inheritClaudeConfig?: boolean;
 }
 
 /** One `env` entry of a provider.recipes row: where the env var's value comes from. */

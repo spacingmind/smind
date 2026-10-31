@@ -3,6 +3,7 @@ package wsapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -249,5 +250,68 @@ func handleProviderAddInstance(runner *taskrunner.Runner, bus *eventBus) handler
 			return nil, fmt.Errorf("provider.addInstance: saved, but applying it failed: %w", err)
 		}
 		return publishProvidersChanged(bus, runner, entry.ID), nil
+	}
+}
+
+// modelParam is one model of a provider.updateInstance models list.
+type modelParam struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Default     bool   `json:"default"`
+}
+
+func customModels(in *[]modelParam) *[]config.CustomModel {
+	if in == nil {
+		return nil
+	}
+	out := make([]config.CustomModel, len(*in))
+	for i, m := range *in {
+		out[i] = config.CustomModel{ID: m.ID, Label: m.Label, Description: m.Description, Default: m.Default}
+	}
+	return &out
+}
+
+// handleProviderUpdateInstance is provider.updateInstance: patch an
+// instance's models, additionalModels, disallowedTools and
+// inheritClaudeConfig in config.yaml (a byte-level patch of that entry only),
+// then apply it live. An absent field is left alone, an empty one removes
+// the key. Humans only: a run-scoped (agent) caller is refused.
+func handleProviderUpdateInstance(runner *taskrunner.Runner, bus *eventBus) handlerFunc {
+	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		if rc != nil && rc.runScoped {
+			return nil, &rpcCodeError{code: codeForbidden, msg: "provider.updateInstance is not available to agents"}
+		}
+		var p struct {
+			ID                  string        `json:"id"`
+			Models              *[]modelParam `json:"models"`
+			AdditionalModels    *[]modelParam `json:"additionalModels"`
+			DisallowedTools     *[]string     `json:"disallowedTools"`
+			InheritClaudeConfig *bool         `json:"inheritClaudeConfig"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("provider.updateInstance: invalid params: %w", err)
+		}
+		if p.ID == "" {
+			return nil, errors.New("provider.updateInstance: id is required")
+		}
+		providerSetDefaultModelMu.Lock()
+		defer providerSetDefaultModelMu.Unlock()
+		_, changed, err := config.UpdateProviderInstance(p.ID, config.InstanceUpdate{
+			Models:              customModels(p.Models),
+			AdditionalModels:    customModels(p.AdditionalModels),
+			DisallowedTools:     p.DisallowedTools,
+			InheritClaudeConfig: p.InheritClaudeConfig,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("provider.updateInstance: %w", err)
+		}
+		if !changed {
+			return newProviderUpdatedPayload(runner, p.ID), nil
+		}
+		if err := reloadProviders(runner); err != nil {
+			return nil, fmt.Errorf("provider.updateInstance: saved, but applying it failed: %w", err)
+		}
+		return publishProvidersChanged(bus, runner, p.ID), nil
 	}
 }

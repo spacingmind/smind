@@ -8,6 +8,7 @@ import type {
   ProviderDirSuggestionsResult,
   ProviderInfo,
   ProviderListResult,
+  UpdateProviderInstanceParams,
 } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
@@ -60,6 +61,38 @@ export function useAddProviderInstance(): {
   const { mutate, reset } = mutation;
   return {
     add: (params, onAdded) => mutate(params, { onSuccess: onAdded }),
+    pending: mutation.isPending,
+    error: mutation.isError ? mutation.error.message : null,
+    clearError: reset,
+  };
+}
+
+/**
+ * `provider.updateInstance`: edits one instance's own overlay (models, disallowedTools, inheritClaudeConfig) in
+ * config.yaml. Same event shape as `provider.addInstance`: the daemon publishes `provider.updated` (the event
+ * bridge re-reads provider.list), with the mutation's own invalidation as the fallback; the daemon's refusal
+ * text is returned as `error` for an inline message.
+ */
+export function useUpdateProviderInstance(): {
+  update: (params: UpdateProviderInstanceParams, onDone?: () => void) => void;
+  pending: boolean;
+  error: string | null;
+  clearError: () => void;
+} {
+  const { client } = useDaemonConnection();
+  const queryClient = useQueryClient();
+  const mutation = useMutation<unknown, Error, UpdateProviderInstanceParams>({
+    mutationFn: async (params) => {
+      if (!client) throw new Error("no daemon connection");
+      return client.call("provider.updateInstance", params);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providerList() });
+    },
+  });
+  const { mutate, reset } = mutation;
+  return {
+    update: (params, onDone) => mutate(params, { onSuccess: () => onDone?.() }),
     pending: mutation.isPending,
     error: mutation.isError ? mutation.error.message : null,
     clearError: reset,
