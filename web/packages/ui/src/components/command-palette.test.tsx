@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommandPalette } from "@/components/command-palette";
@@ -265,8 +265,81 @@ describe("CommandPalette", () => {
       ],
     });
     open();
-    // Non-mac in jsdom.
-    expect(screen.getByText("Ctrl+Alt+T")).toBeInTheDocument();
+    // Non-mac in jsdom, and Kbd splits "Ctrl+Alt+T" into one cap per key.
+    const row = screen.getAllByTestId("command-palette-row")[2]!;
+    expect(within(row).getByText("Ctrl")).toBeInTheDocument();
+    expect(within(row).getByText("Alt")).toBeInTheDocument();
+    expect(within(row).getByText("T")).toBeInTheDocument();
+  });
+
+  it("shows a leading icon on every row", () => {
+    renderPalette({
+      sourceId: "actions",
+      groupRank: 1,
+      commands: [{ id: "a1", group: "Actions", title: "Cycle theme", run: () => {} }],
+    });
+    open();
+    const rows = screen.getAllByTestId("command-palette-row");
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row.querySelector("svg")).not.toBeNull();
+    }
+  });
+
+  it("chips filter by category", () => {
+    renderPalette({
+      sourceId: "extra",
+      groupRank: 1,
+      commands: [
+        { id: "a1", group: "Actions", title: "Cycle theme", run: () => {} },
+        { id: "f1", group: "Files", title: "app-sidebar.tsx", run: () => {} },
+      ],
+    });
+    open();
+    expect(rowTitles()).toEqual(["Fix the bug", "Add telemetry", "Cycle theme", "app-sidebar.tsx"]);
+
+    fireEvent.click(screen.getByTestId("command-palette-chip-files"));
+    expect(rowTitles()).toEqual(["app-sidebar.tsx"]);
+
+    fireEvent.click(screen.getByTestId("command-palette-chip-all"));
+    expect(rowTitles()).toEqual(["Fix the bug", "Add telemetry", "Cycle theme", "app-sidebar.tsx"]);
+  });
+
+  it("chips without commands are hidden", () => {
+    renderPalette();
+    open();
+    expect(screen.getByTestId("command-palette-chip-all")).toBeInTheDocument();
+    expect(screen.getByTestId("command-palette-chip-tasks")).toBeInTheDocument();
+    expect(screen.queryByTestId("command-palette-chip-actions")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("command-palette-chip-files")).not.toBeInTheDocument();
+  });
+
+  it("chip and query compose", () => {
+    renderPalette({
+      sourceId: "actions",
+      groupRank: 1,
+      commands: [{ id: "a1", group: "Actions", title: "Cycle theme", run: () => {} }],
+    });
+    open();
+    fireEvent.click(screen.getByTestId("command-palette-chip-tasks"));
+    fireEvent.change(screen.getByTestId("command-palette-input"), { target: { value: "cycle" } });
+    expect(screen.queryAllByTestId("command-palette-row")).toEqual([]);
+    expect(screen.getByTestId("command-palette-empty")).toBeInTheDocument();
+  });
+
+  it("kbd hint shows the live shortcut", () => {
+    renderPalette({
+      sourceId: "actions",
+      groupRank: 1,
+      commands: [
+        { id: "a1", group: "Actions", title: "Cycle theme", action: "theme.cycle", run: () => {} },
+      ],
+    });
+    open();
+    const row = screen
+      .getAllByTestId("command-palette-row")
+      .find((r) => r.dataset.commandId === "actions:a1")!;
+    expect(row.querySelector("kbd")).not.toBeNull();
   });
 
   it("resets its query each time it opens", () => {

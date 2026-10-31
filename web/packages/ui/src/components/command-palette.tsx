@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Kbd } from "@/components/ui/kbd";
 import { useKeyboard, useModalKeyboardLock } from "@/keyboard/keyboard-provider";
 import { formatCombo, matchCombo } from "@/keyboard/shortcut-string";
+import { Icons } from "@/lib/icons";
+import {
+  iconForGroup,
+  PALETTE_CATEGORY_ICON,
+  PALETTE_CATEGORY_LABEL,
+  paletteCategory,
+  type PaletteCategory,
+} from "@/palette/categories";
 import { filterCommands, toRows } from "@/palette/commands";
 import { usePalette, useRegisteredCommands } from "@/palette/palette-provider";
 
@@ -36,6 +45,7 @@ export function CommandPalette() {
   useModalKeyboardLock(open);
 
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<PaletteCategory>("all");
   const [highlight, setHighlight] = useState(0);
 
   // The element focus returns to on close. Captured when the palette
@@ -44,13 +54,37 @@ export function CommandPalette() {
   // built around having had a trigger.
   const restoreFocusTo = useRef<HTMLElement | null>(null);
 
-  const rows = useMemo(() => toRows(filterCommands(commands, query)), [commands, query]);
+  // The chips only offer categories that actually have commands right now;
+  // a category whose last command unregistered disappears, and a selection
+  // that disappeared with it reads as "all".
+  const present = useMemo(() => {
+    const set = new Set<Exclude<PaletteCategory, "all">>();
+    for (const command of commands) set.add(paletteCategory(command.group));
+    return set;
+  }, [commands]);
+
+  const activeCategory: PaletteCategory =
+    category === "all" || present.has(category) ? category : "all";
+
+  const rows = useMemo(
+    () =>
+      toRows(
+        filterCommands(
+          activeCategory === "all"
+            ? commands
+            : commands.filter((c) => paletteCategory(c.group) === activeCategory),
+          query,
+        ),
+      ),
+    [commands, activeCategory, query],
+  );
 
   useEffect(() => {
     if (!open) return;
     restoreFocusTo.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setQuery("");
+    setCategory("all");
     setHighlight(0);
     return () => {
       restoreFocusTo.current?.focus();
@@ -125,7 +159,7 @@ export function CommandPalette() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
-        className="top-[15%] max-h-[70svh] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl"
+        className="top-[15%] max-h-[70svh] translate-y-0 gap-0 overflow-hidden rounded-xl p-0 sm:max-w-xl"
         showCloseButton={false}
         data-testid="command-palette"
       >
@@ -135,25 +169,70 @@ export function CommandPalette() {
           Search tasks, files and actions. Arrow keys to move, Enter to run, Escape to close.
         </DialogDescription>
 
-        <input
-          autoFocus
-          aria-label="Command palette search"
-          aria-controls="command-palette-list"
-          aria-activedescendant={rows[highlight] ? `palette-row-${rows[highlight].command.key}` : undefined}
-          role="combobox"
-          aria-expanded
-          data-testid="command-palette-input"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={onInputKeyDown}
-          placeholder="Search tasks, files and actions…"
-          className="w-full border-b border-border bg-transparent px-4 py-3 text-ui-base outline-none placeholder:text-foreground-muted"
-        />
+        <div className="px-3 pt-3">
+          <div className="relative">
+            <Icons.search
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground-muted"
+            />
+            <input
+              autoFocus
+              aria-label="Command palette search"
+              aria-controls="command-palette-list"
+              aria-activedescendant={rows[highlight] ? `palette-row-${rows[highlight].command.key}` : undefined}
+              role="combobox"
+              aria-expanded
+              data-testid="command-palette-input"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onInputKeyDown}
+              placeholder="Search tasks, files and actions…"
+              className="w-full rounded-full border border-border bg-transparent py-2 pr-4 pl-9 text-ui-base outline-none placeholder:text-foreground-muted focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
+          </div>
+        </div>
+
+        <div
+          role="group"
+          aria-label="Filter results"
+          data-testid="command-palette-chips"
+          className="flex gap-1.5 border-b border-border px-3 pt-2 pb-2"
+        >
+          {(["all", "actions", "tasks", "files"] as const)
+            .filter((key) => key === "all" || present.has(key))
+            .map((key) => {
+              const Icon = Icons[PALETTE_CATEGORY_ICON[key]];
+              const pressed = category === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  data-testid={`command-palette-chip-${key}`}
+                  aria-pressed={pressed}
+                  tabIndex={-1}
+                  // Keeping focus on the search input: a chip click is a
+                  // filter change, not a focus change, and the palette's
+                  // keyboard handling all lives on the input.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setCategory(key);
+                    setHighlight(0);
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-ui-sm text-foreground-muted hover:bg-muted ${
+                    pressed ? "bg-muted font-medium text-foreground" : ""
+                  }`}
+                >
+                  <Icon aria-hidden className="size-3.5" />
+                  {PALETTE_CATEGORY_LABEL[key]}
+                </button>
+              );
+            })}
+        </div>
 
         <div
           id="command-palette-list"
           role="listbox"
-          className="max-h-96 overflow-y-auto p-1"
+          className="max-h-96 overflow-y-auto p-2"
           data-testid="command-palette-list"
         >
           {rows.length === 0 ? (
@@ -163,11 +242,12 @@ export function CommandPalette() {
           ) : (
             rows.map((row, index) => {
               const keys = shortcutLabel(row.command.action);
+              const Icon = Icons[row.command.icon ?? iconForGroup(row.command.group)];
               return (
                 <div key={row.command.key}>
                   {row.groupStart !== null && (
                     <div
-                      className="px-3 pt-3 pb-1 text-ui-sm font-medium tracking-wide text-foreground-muted uppercase"
+                      className="px-3 pt-3 pb-1 text-ui-sm text-foreground-muted"
                       data-testid="command-palette-group"
                     >
                       {row.groupStart}
@@ -188,11 +268,12 @@ export function CommandPalette() {
                       setOpen(false);
                       row.command.run();
                     }}
-                    className={`flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-ui-base ${
+                    className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-ui-base ${
                       index === highlight ? "bg-selected text-foreground" : "text-foreground"
                     }`}
                   >
-                    <span className="min-w-0">
+                    <Icon aria-hidden className="size-4 shrink-0 text-foreground-muted" />
+                    <span className="min-w-0 flex-1">
                       <span className="block truncate">{row.command.title}</span>
                       {row.command.subtitle && (
                         <span className="block truncate text-ui-sm text-foreground-muted">
@@ -200,11 +281,7 @@ export function CommandPalette() {
                         </span>
                       )}
                     </span>
-                    {keys && (
-                      <kbd className="shrink-0 rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted">
-                        {keys}
-                      </kbd>
-                    )}
+                    {keys && <Kbd keys={keys} className="shrink-0" />}
                   </div>
                 </div>
               );
