@@ -24,7 +24,30 @@ func webUI() http.Handler {
 	if _, err := fs.Stat(sub, "index.html"); err != nil {
 		return http.HandlerFunc(placeholder)
 	}
-	return http.FileServer(http.FS(sub))
+	return withViewerCSP(http.FileServer(http.FS(sub)))
+}
+
+// pdfViewerPath is the sandboxed PDF viewer's document (office mode, ADR-0049
+// section 3.3). The app embeds it in an <iframe sandbox="allow-scripts">, so it
+// runs in an opaque origin; its own policy forbids every connection and every
+// script that is not its own file, and only the app itself may frame it.
+const pdfViewerPath = "/pdf-viewer.html"
+
+// pdfViewerCSP is the Content-Security-Policy header of pdfViewerPath.
+const pdfViewerCSP = "default-src 'none'; script-src 'self'; worker-src blob: 'self'; img-src blob: data:; " +
+	"style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'none'; frame-ancestors 'self'"
+
+// withViewerCSP adds the viewer's policy to the response for pdfViewerPath and
+// leaves every other path untouched.
+func withViewerCSP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == pdfViewerPath {
+			h := w.Header()
+			h.Set("Content-Security-Policy", pdfViewerCSP)
+			h.Set("X-Content-Type-Options", "nosniff")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func placeholder(w http.ResponseWriter, r *http.Request) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "@/lib/icons";
 import type { EditorView } from "@codemirror/view";
 
@@ -6,6 +6,7 @@ import { CodeMirrorEditor } from "@/components/code-mirror-editor";
 import { FileEditorFindBar, FileFindModel } from "@/components/file-editor-find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { FilePreview, previewKind } from "@/components/file-preview";
+import { NoPreviewPanel, kindLabel } from "@/components/pdf-preview/no-preview-panel";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
@@ -15,7 +16,11 @@ import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import { RpcError } from "@/lib/ws-client";
-import type { FileReadResult, FileWriteResult, RunStatusEventPayload, Task } from "@/lib/types";
+import { hasBinaryExtension } from "@/lib/binary-extensions";
+import type { FileReadResult, FileStatResult, FileWriteResult, RunStatusEventPayload, Task } from "@/lib/types";
+
+// The PDF pane and everything it pulls in load only when a PDF tab opens (ADR-0049 AC21): the entry chunk gains this import() call, not pdf code.
+const PdfPreviewPane = lazy(() => import("@/components/pdf-preview/pdf-preview-pane").then((m) => ({ default: m.PdfPreviewPane })));
 
 /**
  * The editor half of the old combined file-explorer pane, now mounted per
@@ -41,17 +46,20 @@ import type { FileReadResult, FileWriteResult, RunStatusEventPayload, Task } fro
  * toggle. Ported from the combined-pane editor view when the explorer
  * became tree-only (see the tab-registry plan's Decisions).
  */
-export function FileEditorPane({
+export function TextEditorPane({
   client,
   task,
   path,
   events,
+  onNotText,
 }: {
   client: WsClientLike | null;
   task: Task;
   path: string;
   /** The app's single-subscription event stream; optional so existing tests/mounts render unchanged. A terminal run.status for this task re-probes a dirty buffer. */
   events?: DaemonEvents | null;
+  /** Called when file.read refuses the file as not UTF-8: the router then asks file.stat what it is. */
+  onNotText?: () => void;
 }) {
   const [content, setContentState] = useState("");
   const [savedContent, setSavedContent] = useState("");
@@ -139,7 +147,9 @@ export function FileEditorPane({
       .catch((err: unknown) => {
         if (cancelled) return;
         setLoading(false);
-        setError(err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        if (message.includes("not valid UTF-8")) onNotText?.();
       });
 
     return () => {
@@ -370,4 +380,104 @@ export function FileEditorPane({
       )}
     </div>
   );
+}
+
+type Route =
+  | { kind: "text" }
+  | { kind: "checking" }
+  | { kind: "pdf"; stat: FileStatResult }
+  | { kind: "other"; stat: FileStatResult }
+  | { kind: "mismatch"; stat: FileStatResult };
+
+/**
+ * The file tab: asks `file.stat` what a file really is when its extension says binary (or when a text read is refused as not UTF-8), then
+ * shows the PDF preview, a "no preview" panel, or the editor. Ordinary text files skip the stat entirely, so the editor opens exactly as it
+ * always did; an older daemon without `file.stat` (or any stat failure) falls back to the editor too. No new TabKind: the tab key is
+ * still `${taskId}:file:${path}`.
+ */
+export function FileEditorPane(props: {
+  client: WsClientLike | null;
+  task: Task;
+  path: string;
+  events?: DaemonEvents | null;
+}) {
+  const { client, task, path } = props;
+  const [route, setRoute] = useState<Route>(() => (hasBinaryExtension(path) ? { kind: "checking" } : { kind: "text" }));
+
+  useEffect(() => {
+    if (route.kind !== "checking") return;
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<FileStatResult>("file.stat", { taskId: task.ID, path })
+      .then((stat) => {
+        if (cancelled) return;
+        if (stat.mismatch) setRoute({ kind: "mismatch", stat });
+        else if (stat.kind === "pdf" && stat.previewable) setRoute({ kind: "pdf", stat });
+        else if (stat.kind === "text") setRoute({ kind: "text" });
+        else setRoute({ kind: "other", stat });
+      })
+      .catch(() => {
+        // method_not_found on an older daemon, or the stat failed: the editor shows its own, honest error.
+        if (!cancelled) setRoute({ kind: "text" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [route.kind, client, task.ID, path]);
+
+  const header = (
+    <PaneHeader testId="file-editor-header" title={<span data-testid="file-editor-path">{path}</span>} />
+  );
+  switch (route.kind) {
+    case "text":
+      return <TextEditorPane {...props} onNotText={() => setRoute((r) => (r.kind === "text" ? { kind: "checking" } : r))} />;
+    case "checking":
+      return (
+        <div className="flex h-full min-h-0 flex-col" data-testid="file-editor-pane">
+          {header}
+          <div className="flex flex-1 items-center justify-center">
+            <InlineSpinner label="Loading…" />
+          </div>
+        </div>
+      );
+    case "pdf":
+      return (
+        <Suspense
+          fallback={
+            <div className="flex h-full min-h-0 flex-col" data-testid="file-editor-pane">
+              {header}
+              <div className="flex flex-1 items-center justify-center">
+                <InlineSpinner label="Loading…" />
+              </div>
+            </div>
+          }
+        >
+          <PdfPreviewPane client={client} task={task} path={path} stat={route.stat} />
+        </Suspense>
+      );
+    case "mismatch":
+      return (
+        <div className="flex h-full min-h-0 flex-col" data-testid="file-editor-pane">
+          {header}
+          <NoPreviewPanel
+            testId="file-mismatch-panel"
+            title="This file is not what its name says"
+            description={`It is named ${route.stat.ext || "(no extension)"} but looks like ${kindLabel(route.stat.kind)}, so it is not previewed.`}
+            action={route.stat.kind === "text" ? { label: "Open as text", onClick: () => setRoute({ kind: "text" }) } : undefined}
+          />
+        </div>
+      );
+    case "other":
+      return (
+        <div className="flex h-full min-h-0 flex-col" data-testid="file-editor-pane">
+          {header}
+          <NoPreviewPanel
+            testId="no-preview-panel"
+            title="No preview for this file type"
+            description={`This is ${kindLabel(route.stat.kind)}. It can not be shown here.`}
+          />
+        </div>
+      );
+  }
 }
