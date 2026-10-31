@@ -12,4 +12,6 @@ const UnsupportedMessage = "the permission policy engine is not supported on Win
 // Supported reports whether the engine can run on this OS. The floor and the
 // path checks assume POSIX paths; until the Windows follow-up lands they can
 // fail open there, so on Windows the engine stays off.
-func Supported() bool { return HostGOOS != "windows" }
+func Supported() bool { return supportedOn(HostGOOS) }
+
+func supportedOn(goos string) bool { return goos != "windows" }

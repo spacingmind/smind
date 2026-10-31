@@ -9,6 +9,16 @@ import (
 	"testing"
 )
 
+// realHostGOOS is the OS the tests really run on; every other test in the
+// package runs as if on a POSIX host so the engine-on tests keep exercising
+// the engine even on a Windows runner. The platform tests set HostGOOS themselves.
+var realHostGOOS = HostGOOS
+
+func TestMain(m *testing.M) {
+	HostGOOS = "linux"
+	os.Exit(m.Run())
+}
+
 func TestPlatform_WindowsKeepsEngineOff(t *testing.T) {
 	old := HostGOOS
 	HostGOOS = "windows"

@@ -5,10 +5,10 @@ package permpolicy
 import "testing"
 
 func TestPlatform_RealWindowsIsUnsupported(t *testing.T) {
-	if Supported() {
-		t.Fatal("Supported() = true on windows; want false")
+	if realHostGOOS != "windows" {
+		t.Fatalf("realHostGOOS = %q; want windows", realHostGOOS)
 	}
-	if HostGOOS != "windows" {
-		t.Fatalf("HostGOOS = %q; want windows", HostGOOS)
+	if supportedOn(realHostGOOS) {
+		t.Fatal("supportedOn(windows) = true; want false")
 	}
 }
