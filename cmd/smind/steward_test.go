@@ -36,7 +36,7 @@ func runStewardCLI(t *testing.T, f *fakeStewardCaller, args ...string) (int, str
 const stewardSha = "0123456789abcdef0123456789abcdef01234567"
 
 func TestCLI_StewardReviewSendsParams(t *testing.T) {
-	f := &fakeStewardCaller{result: map[string]any{"id": 11, "taskId": 7, "status": "pending", "headSha": stewardSha, "stale": false, "mergeReady": false}}
+	f := &fakeStewardCaller{result: map[string]any{"id": 11, "taskId": 7, "status": "pending", "headSha": stewardSha, "stale": "", "mergeReady": false}}
 	code, out, errOut := runStewardCLI(t, f, "review", "7", "--sha", stewardSha)
 	if code != 0 || !strings.Contains(out, "#11 task 7 pending") || !strings.Contains(out, "head 0123456") {
 		t.Fatalf("exit %d out %q err %q", code, out, errOut)
@@ -45,9 +45,9 @@ func TestCLI_StewardReviewSendsParams(t *testing.T) {
 		t.Fatalf("call = %s %v", f.method, f.params)
 	}
 
-	f = &fakeStewardCaller{result: map[string]any{"id": 12, "taskId": 8, "verdict": "CHANGES", "status": "finished", "headSha": strings.Repeat("b", 40), "stale": true, "mergeReady": false}}
+	f = &fakeStewardCaller{result: map[string]any{"id": 12, "taskId": 8, "verdict": "CHANGES", "status": "finished", "headSha": strings.Repeat("b", 40), "stale": "head moved", "mergeReady": false}}
 	code, out, errOut = runStewardCLI(t, f, "review", "8")
-	if code != 0 || !strings.Contains(out, "#12 task 8 CHANGES") || !strings.Contains(out, "stale") {
+	if code != 0 || !strings.Contains(out, "#12 task 8 CHANGES") || !strings.Contains(out, "stale (head moved)") {
 		t.Fatalf("exit %d out %q err %q", code, out, errOut)
 	}
 	if f.method != "steward.review" || f.params["taskId"] != int64(8) {
@@ -60,8 +60,8 @@ func TestCLI_StewardReviewSendsParams(t *testing.T) {
 
 func TestCLI_StewardListShowCancelCallMethods(t *testing.T) {
 	f := &fakeStewardCaller{result: map[string]any{"items": []any{
-		map[string]any{"id": 3, "taskId": 7, "verdict": "ACCEPTED", "headSha": stewardSha, "stale": false, "mergeReady": true},
-		map[string]any{"id": 2, "taskId": 7, "verdict": "CHANGES", "headSha": strings.Repeat("c", 40), "stale": true, "mergeReady": false},
+		map[string]any{"id": 3, "taskId": 7, "verdict": "ACCEPTED", "headSha": stewardSha, "stale": "", "mergeReady": true},
+		map[string]any{"id": 2, "taskId": 7, "verdict": "CHANGES", "headSha": strings.Repeat("c", 40), "stale": "head moved", "mergeReady": false},
 	}}}
 	code, out, errOut := runStewardCLI(t, f, "list", "7", "--limit", "3")
 	if code != 0 || errOut != "" {
@@ -81,7 +81,7 @@ func TestCLI_StewardListShowCancelCallMethods(t *testing.T) {
 		t.Fatalf("exit %d out %q params %v", code, out, f.params)
 	}
 
-	f = &fakeStewardCaller{result: map[string]any{"id": 5, "taskId": 7, "verdict": "CHANGES", "headSha": stewardSha, "stale": false, "mergeReady": false,
+	f = &fakeStewardCaller{result: map[string]any{"id": 5, "taskId": 7, "verdict": "CHANGES", "headSha": stewardSha, "stale": "", "mergeReady": false,
 		"summary": "two findings", "gates": []any{map[string]any{"id": "ci", "state": "pass"}, map[string]any{"id": "scope", "state": "fail"}}}}
 	code, out, errOut = runStewardCLI(t, f, "show", "5")
 	if code != 0 || !strings.Contains(out, "summary: two findings") || !strings.Contains(out, "ci:pass") || !strings.Contains(out, "scope:fail") {
@@ -91,13 +91,35 @@ func TestCLI_StewardListShowCancelCallMethods(t *testing.T) {
 		t.Fatalf("call = %s %v", f.method, f.params)
 	}
 
-	f = &fakeStewardCaller{result: map[string]any{"id": 5, "taskId": 7, "status": "running", "headSha": stewardSha, "stale": false, "mergeReady": false}}
+	f = &fakeStewardCaller{result: map[string]any{"id": 5, "taskId": 7, "status": "running", "headSha": stewardSha, "stale": "", "mergeReady": false}}
 	code, out, errOut = runStewardCLI(t, f, "cancel", "5")
 	if code != 0 || !strings.Contains(out, "#5 task 7 running") {
 		t.Fatalf("cancel exit %d out %q err %q", code, out, errOut)
 	}
 	if f.method != "steward.cancel" || f.params["reviewId"] != int64(5) {
 		t.Fatalf("call = %s %v", f.method, f.params)
+	}
+}
+
+func TestCLI_StewardLineShowsStaleReason(t *testing.T) {
+	// The daemon's View sends `stale` as a string reason ("" = fresh); the
+	// line shows the reason, and a missing or empty field reads as fresh.
+	for _, tc := range []struct {
+		name  string
+		stale any
+		want  string
+	}{
+		{"reason", "head moved", "stale (head moved)"},
+		{"empty reason", "", "fresh"},
+		{"missing field", nil, "fresh"},
+	} {
+		m := map[string]any{"id": 3, "taskId": 7, "verdict": "ACCEPTED", "headSha": stewardSha, "mergeReady": true}
+		if tc.stale != nil {
+			m["stale"] = tc.stale
+		}
+		if got := stewardLine(m); !strings.Contains(got, " "+tc.want+" ") {
+			t.Fatalf("%s: line = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -150,7 +172,7 @@ func TestCLI_StewardHasNoApproveOrMerge(t *testing.T) {
 }
 
 func TestCLI_StewardJSONFlagPassesThrough(t *testing.T) {
-	f := &fakeStewardCaller{result: map[string]any{"id": 9, "taskId": 7, "verdict": "ACCEPTED", "headSha": stewardSha, "stale": false, "mergeReady": true,
+	f := &fakeStewardCaller{result: map[string]any{"id": 9, "taskId": 7, "verdict": "ACCEPTED", "headSha": stewardSha, "stale": "", "mergeReady": true,
 		"gates": []any{map[string]any{"id": "ci", "state": "pass"}}}}
 	code, out, errOut := runStewardCLI(t, f, "show", "9", "--json")
 	if code != 0 || errOut != "" {

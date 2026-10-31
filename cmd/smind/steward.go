@@ -219,8 +219,8 @@ func stewardLine(m map[string]any) string {
 		what = f("status")
 	}
 	stale := "fresh"
-	if s, _ := m["stale"].(bool); s {
-		stale = "stale"
+	if s, _ := m["stale"].(string); s != "" {
+		stale = "stale (" + s + ")"
 	}
 	return fmt.Sprintf("#%s task %s %s head %s %s mergeReady=%s", f("id"), f("taskId"), what, f("headSha"), stale, f("mergeReady"))
 }
