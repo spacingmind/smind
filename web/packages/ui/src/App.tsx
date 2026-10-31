@@ -1490,6 +1490,7 @@ function AppShell({
           <div className="absolute inset-0 z-40">
             <InboxScreen
               onNavigateBack={closeSettings}
+              onOpenSettings={(id) => openSettings(id)}
               onOpenTask={(taskId) => {
                 closeSettings();
                 void jumpToTask(taskId);
