@@ -20,7 +20,8 @@ starts by diffing what is there against ZCode and changes only what differs.
 - No backend / daemon / wsapi / auth changes. Web UI (and later mobile tokens,
   desktop titlebar chrome) only.
 - Not cloned: workflows, Goal Mode, plugin store, bots, Office mode, doc/PDF
-  previews. No ZCode/Zai logos, product names or branding.
+  previews. (Office mode and doc/PDF previews are a separate Human-approved
+  epic, ADR-0049 / `office-mode.md`; this rule only scopes the visual-parity work.) No ZCode/Zai logos, product names or branding.
 - **ZCode is a visual spec, not a source.** Reimplement in smind's own code
   (our components, stores, icon registry `lib/icons.ts`, Tailwind tokens) from
   `DESIGN.md`, the token values and the screens. No "Ported from ZCode" headers,
