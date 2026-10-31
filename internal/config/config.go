@@ -28,6 +28,7 @@ type Config struct {
 	Automations   AutomationsConfig   `yaml:"automations"`
 	Validation    ValidationConfig    `yaml:"validation"`
 	Steward       StewardConfig       `yaml:"steward"`
+	Fleet         FleetConfig         `yaml:"fleet"`
 	Log           LogConfig           `yaml:"log"`
 }
 
@@ -557,6 +558,7 @@ func Default() Config {
 		Learning:    DefaultLearning(),
 		Automations: AutomationsConfig{MaxBudgetUSD: DefaultMaxAutomationBudgetUSD},
 		Validation:  ValidationConfig{MaxBudgetUsd: 5, DefaultBudgetUsd: 1.5},
+		Fleet:       DefaultFleet(),
 		Log:         LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
 	}
 }
@@ -639,6 +641,9 @@ func LoadFile(path string) (Config, error) {
 		return cfg, fmt.Errorf("config %s: %w", path, err)
 	}
 	if err := cfg.Validation.Validate(); err != nil {
+		return cfg, fmt.Errorf("config %s: %w", path, err)
+	}
+	if err := cfg.Fleet.Validate(); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", path, err)
 	}
 	return cfg, nil
