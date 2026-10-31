@@ -1,0 +1,20 @@
+{
+  "name": "auth_mentions_429",
+  "source": "documented: Anthropic API errors (authentication_error, not_found_error, overloaded_error, rate_limit_error)",
+  "input": {
+    "provider": "claude",
+    "vendor": "",
+    "err": "401 Unauthorized: invalid x-api-key (an earlier 429 too many requests was retried)",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "auth_expired",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

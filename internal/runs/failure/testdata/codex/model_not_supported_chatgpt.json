@@ -1,0 +1,20 @@
+{
+  "name": "model_not_supported_chatgpt",
+  "source": "documented: refs/codex codex-rs/core/tests/suite/compact.rs",
+  "input": {
+    "provider": "codex",
+    "vendor": "",
+    "err": "The 'gpt-4o' model is not supported when using Codex with a ChatGPT account.",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "gpt-4o",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "model_not_in_plan",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

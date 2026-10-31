@@ -1,0 +1,20 @@
+{
+  "name": "acp_wrapped_internal_error",
+  "source": "recorded: dogfood ACP chain shape",
+  "input": {
+    "provider": "glm",
+    "vendor": "zai",
+    "err": "taskrunner: glm prompt: acp: session/prompt: acp: rpc error -32603: Internal error",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

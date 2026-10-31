@@ -1,0 +1,20 @@
+{
+  "name": "plan_beats_auth",
+  "source": "documented: refs/claude-code CHANGELOG",
+  "input": {
+    "provider": "claude",
+    "vendor": "anthropic",
+    "err": "Not logged in · Please run /login. You've hit your weekly limit",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "plan_window_exhausted",
+    "window": "weekly",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "auth_not_logged_in",
+  "source": "documented: refs/claude-code CHANGELOG",
+  "input": {
+    "provider": "claude",
+    "vendor": "",
+    "err": "Not logged in · Please run /login",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "auth_expired",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

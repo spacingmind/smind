@@ -1,0 +1,24 @@
+{
+  "name": "plan_signal_rejected",
+  "source": "documented: refs/claude-code CHANGELOG",
+  "input": {
+    "provider": "claude",
+    "vendor": "",
+    "err": "",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": {
+      "status": "rejected",
+      "type": "five_hour",
+      "resetsAt": "2026-11-01T09:35:00Z"
+    }
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "plan_window_exhausted",
+    "window": "5h",
+    "resetsAt": "2026-11-01T09:35:00Z",
+    "retryAfterSeconds": 0
+  }
+}

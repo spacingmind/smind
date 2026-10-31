@@ -1,0 +1,20 @@
+{
+  "name": "plain_text_with_words_not_an_error",
+  "source": "documented: negative case",
+  "input": {
+    "provider": "generic",
+    "vendor": "",
+    "err": "I updated the rate limiter config and the login page",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

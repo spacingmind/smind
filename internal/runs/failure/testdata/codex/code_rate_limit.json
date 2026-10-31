@@ -1,0 +1,20 @@
+{
+  "name": "code_rate_limit",
+  "source": "documented: refs/codex codex-rs/protocol/src/error.rs",
+  "input": {
+    "provider": "codex",
+    "vendor": "",
+    "err": "rate limit exceeded: try again in 20 seconds",
+    "code": "rate_limit",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "transient_429",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 20
+  }
+}

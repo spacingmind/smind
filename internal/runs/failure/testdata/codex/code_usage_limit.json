@@ -1,0 +1,20 @@
+{
+  "name": "code_usage_limit",
+  "source": "documented: refs/codex codex-rs/protocol/src/error.rs",
+  "input": {
+    "provider": "codex",
+    "vendor": "openai",
+    "err": "You've hit your usage limit",
+    "code": "usage_limit",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "plan_window_exhausted",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

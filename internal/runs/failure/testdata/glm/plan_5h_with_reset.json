@@ -1,0 +1,20 @@
+{
+  "name": "plan_5h_with_reset",
+  "source": "recorded: dogfood 429 of 2026-10-22",
+  "input": {
+    "provider": "glm",
+    "vendor": "zai",
+    "err": "429 Usage limit reached for 5 hour. Your limit will reset at 2026-10-22 17:35:18 (taskrunner: glm prompt: acp: session/prompt: acp: rpc error -32603: Internal error)",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-10-22T09:00:00Z",
+  "want": {
+    "kind": "plan_window_exhausted",
+    "window": "5h",
+    "resetsAt": "2026-10-22T09:35:18Z",
+    "retryAfterSeconds": 0
+  }
+}

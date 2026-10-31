@@ -1,0 +1,20 @@
+{
+  "name": "usage_limit_reached_no_window",
+  "source": "documented: generic provider text",
+  "input": {
+    "provider": "generic",
+    "vendor": "",
+    "err": "usage limit reached",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "plan_window_exhausted",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}

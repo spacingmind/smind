@@ -1,0 +1,20 @@
+{
+  "name": "overloaded_503",
+  "source": "documented: Anthropic API errors (authentication_error, not_found_error, overloaded_error, rate_limit_error)",
+  "input": {
+    "provider": "compatible",
+    "vendor": "",
+    "err": "503 overloaded_error: upstream busy",
+    "code": "",
+    "retryAfterSeconds": 0,
+    "model": "",
+    "signal": null
+  },
+  "now": "2026-11-01T03:00:00Z",
+  "want": {
+    "kind": "transient_429",
+    "window": "",
+    "resetsAt": "",
+    "retryAfterSeconds": 0
+  }
+}
