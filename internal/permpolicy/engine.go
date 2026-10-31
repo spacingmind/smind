@@ -70,9 +70,10 @@ type Explanation struct {
 type Engine struct {
 	o Options
 
-	mu    sync.Mutex
-	state fileState
-	have  bool
+	mu       sync.Mutex
+	warnOnce sync.Once
+	state    fileState
+	have     bool
 }
 
 // fileState is the cached result of reading the policy file, keyed by what
@@ -94,7 +95,16 @@ func NewEngine(o Options) *Engine {
 }
 
 func (e *Engine) enabled() bool {
-	return e.o.Enabled != nil && e.o.Enabled()
+	if e.o.Enabled == nil || !e.o.Enabled() {
+		return false
+	}
+	if !Supported() {
+		e.warnOnce.Do(func() {
+			log.Printf("permpolicy: steward.policy.enabled is set but %s; the engine stays off", UnsupportedMessage)
+		})
+		return false
+	}
+	return true
 }
 
 // current stats the policy file and reloads it when it changed. A stat or
