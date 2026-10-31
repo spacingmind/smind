@@ -49,12 +49,40 @@ from the list entry; share the env between the two instances; hide the toggle fo
 
 ## Progress
 
-- 2026-10-31: spec + amendment written.
+- 2026-10-31: spec + amendment + contract written; config patcher, RPC, list field, CLI, web editors, docs, tests done; frames looked at (two rounds); validator run recorded below.
 
 ## Peer ledger
 
-(filled as work proceeds)
+| Peer / run | Step | Result | Failure mode |
+|---|---|---|---|
+| GLM 163 #1 | config patcher + tests (one brief) | no file written | output budget (max_tokens) before the first write: brief too large |
+| GLM 163 #2 | `provider_instance_update.go` only | done, committed; reviewed; one lookup bug (compared the key node) found by the tests | none |
+| GLM 163 #3 | tests in 3 commits | 6 tests + 2 debug tests left uncommitted | **rate limited** (5h window, reset 15:20 UTC+8 = 14:20 local); continued on Sonnet |
+| GLM 172 #1 | web types, hook, editors, tests | done, 3 clean commits; could not run tests (no node_modules in the Peer worktree), they passed when the Lead ran them | none |
+| GLM 172 #2 | CLI `smind provider update` + docs | done, 3 clean commits | none |
+| Sonnet 163 x3 | fix lookup + finish tests; tighten two surviving mutations; fix multi-edit ordering bug found by the frames | done | none |
+| Sonnet 179 x2 | wsapi RPC, Spec overlay, list field, tests; concurrency + Paseo tests + docs | done | none |
+| Sonnet 183, 188 | frame loops (round 1 found the daemon bug and 4 UI defects; round 2 clean) | done | round 1 CLI killed once (memory pressure), resumed |
+| Sonnet 172 x2 | UI fixes (layout, error placement, keys, placeholders); a test fix | first done; second stopped on a permission prompt (Bash it could not run unattended) | the Lead wrote that one test fix |
+
+Counts: GLM 5 runs (3 ok, 1 output budget, 1 rate limit), Sonnet 11 runs (10 ok, 1 stopped on a permission prompt); the Lead wrote one test (`toggling inherit keeps an unsaved models draft`). `glm-acp-agent` ran with `--max-turns 500` (seen with `ps`).
 
 ## Validation
 
-(filled at the end)
+| AC | Evidence |
+|---|---|
+| AC1 | `TestUpdateInstance_LeavesOtherEntryByteIdentical` (exact expected file), `_HandWrittenEntryWithComments`, `_LastEntryBeforeOtherSection`, `_NoTrailingNewline`, `_InsertRemoveReplaceFields`, `_SeveralEditsInOneCall` |
+| AC2 | `_InvalidFieldsNamed` (first validation, not the safety net), `_UnknownIDAndNonInstance`, `_FlowStyleRefused` |
+| AC3 | `_IdempotentNoop` (bytes and mtime), `_NothingToUpdate`, wsapi `_IdempotentNoop` |
+| AC4 | wsapi `TestProviderUpdateInstance_RefusesAgentCaller`, `_RecipeMadeUIMadeHandWritten`, `_AppliesLive`, `_InvalidKeepsRegistry`; `provider.updateInstance` is in `humanOnly` of `TestPluginSession_CannotReachHumanOnlyMethods` and not in `RunScopedMethods` (automation and agents use that allowlist) |
+| AC5 | `TestProviderList_InstanceEditableFields`, `TestProviderInfo_InstanceOverlay`, `TestInstanceSpec_KeepsOwnOverlay` |
+| AC6 | `TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs` (start barrier; fakeclaude has no short-hold scenario, so overlap in time is not proven, the run paths share one Runner), `TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged` |
+| AC7 | `TestProviderUpdateCLI`, `TestCLIReferenceMatchesHelp` |
+| AC8 | `provider-instance-editors.test.tsx` (9 tests); frames on an isolated daemon (no model call, no Send), light + dark at 1280 and 390, with Save and inherit-toggle transition frames, looked at by the Lead (Models + Disallowed tools + toggle at 1280 light, refusal text under Save at 390 dark) |
+| AC12 | `public-docs/providers.md` "Edit an instance", ADR-0046 amendment, docs drift test |
+
+Mutations (each made the named test FAIL, file restored with `git checkout --`): drop the run-scoped refusal (`TestProviderUpdateInstance_RefusesAgentCaller`); skip the first `ValidateCustomProviders` (`_InvalidFieldsNamed`, after tightening: it first survived because the post-patch safety net validates again); write on a no-op (`_IdempotentNoop`); replaced range one line too long (`_LeavesOtherEntryByteIdentical`, after tightening: first survived because the blank line was inside the compared region); drop `Instance` from the list entry (`TestProviderList_InstanceEditableFields`); edits assembled in descending order (`_SeveralEditsInOneCall`); instance env taken from claude-a for both (`TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs`); web: drop `additionalModels: []` from the replace save, show the tool editor for every harness, key the Models editor on the whole instance.
+
+Real bug found by the frames, not by tests: with two or more edits in one call the assembler wrote duplicates (the safety net refused the write, so no corruption, but every models switch failed). Fixed and covered by `_SeveralEditsInOneCall`.
+
+Not done: no `smind provider update` support for `label`, `env`, `command`, `endpoint`; a flow-style entry or a key on the `- ` line is refused rather than patched; a duplicate model id typed in the UI is ignored silently; the Models card header still says "Built-in catalog" after a replace.
