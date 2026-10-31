@@ -85,6 +85,24 @@ describe("ModeSelect", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
+  it("mode items show description and check", async () => {
+    render(
+      <ModeSelect
+        modes={[{ id: "default", label: "Always Ask", description: "Asks before running tools" }, { id: "plan", label: "Plan" }]}
+        value="default"
+        onChange={() => {}}
+        variant="pill"
+      />,
+    );
+    const trigger = screen.getByLabelText("Permission mode");
+    fireEvent.click(trigger);
+    expect(await screen.findByText("Asks before running tools")).toBeVisible();
+    expect(screen.getByRole("option", { name: "Always Ask" })).toHaveAttribute("data-state", "checked");
+    expect(screen.getByRole("option", { name: "Plan" })).toHaveAttribute("data-state", "unchecked");
+    expect(trigger).toHaveTextContent("Always Ask");
+    expect(trigger).not.toHaveTextContent("Asks before running tools");
+  });
+
   it("items carry their description as title", async () => {
     render(<ModeSelect modes={MODES} value="acceptEdits" onChange={() => {}} variant="pill" />);
     expect(screen.getByLabelText("Permission mode")).toHaveAttribute("title", MODES[0].description);
