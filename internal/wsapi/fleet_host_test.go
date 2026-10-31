@@ -499,7 +499,7 @@ func TestWsapiMethodMapGoldenFleetOff(t *testing.T) {
 			"fleet.host.list", "fleet.host.invite", "fleet.host.add", "fleet.host.approve",
 			"fleet.host.reject", "fleet.host.rename", "fleet.host.grant", "fleet.host.rm", "fleet.host.revoke",
 			"fleet.host.enable_reverse", "fleet.host.disable_reverse", "fleet.host.test", "fleet.host.route",
-			"remote.hosts", "remote.read",
+			"remote.hosts", "remote.read", "remote.write",
 		}
 		want = append(want, wire.ReadMethods...)
 		slices.Sort(want)
