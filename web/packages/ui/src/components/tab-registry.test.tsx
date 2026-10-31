@@ -377,4 +377,17 @@ describe("plugin tabs (ADR-0042)", () => {
     expect(screen.getByTestId("tab-icon")).toHaveAttribute("data-icon", "plugin");
     expect(screen.getByText("Acme usage")).toBeInTheDocument();
   });
+
+  it("plugin tab shows the panel's own icon", () => {
+    const { unmount } = render(
+      <TabLabel entry={pluginTab(TASK.ID, { plugin: "a", id: "p", title: "T", icon: "Hand" })} />,
+    );
+    const icon = screen.getByTestId("tab-icon");
+    expect(icon).toHaveAttribute("data-icon", "plugin");
+    expect(icon.getAttribute("class")).toContain("lucide-hand");
+    unmount();
+
+    render(<TabLabel entry={pluginTab(TASK.ID, { plugin: "a", id: "p", title: "T" })} />);
+    expect(screen.getByTestId("tab-icon").getAttribute("class")).toContain("lucide-puzzle");
+  });
 });

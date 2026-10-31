@@ -72,4 +72,25 @@ describe("AppSidebar plugins group", () => {
     fireEvent.click(row);
     expect(onOpenPluginPanel).toHaveBeenCalledWith("acme", "about");
   });
+
+  it("sidebar row uses the item's icon", async () => {
+    const withIcon = mountPanels({
+      panels: [{ plugin: "acme", id: "about", title: "About", where: "sidebar", ui: 1 }],
+      sidebar: [{ plugin: "acme", id: "about", title: "About", opens: "about", icon: "Hand" }],
+    });
+    await flush();
+
+    const svg = withIcon.view.container.querySelector('[data-testid="sidebar-plugin-item"] svg');
+    expect(svg?.getAttribute("class")).toContain("lucide-hand");
+    withIcon.view.unmount();
+
+    mountPanels({
+      panels: [{ plugin: "acme", id: "about", title: "About", where: "sidebar", ui: 1 }],
+      sidebar: [{ plugin: "acme", id: "about", title: "About", opens: "about" }],
+    });
+    await flush();
+
+    const fallback = screen.getByTestId("sidebar-plugin-item").querySelector("svg");
+    expect(fallback?.getAttribute("class")).toContain("lucide-puzzle");
+  });
 });
