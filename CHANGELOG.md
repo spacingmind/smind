@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.17.0](https://github.com/spacingmind/smind/compare/v0.16.0...v0.17.0) (2026-10-31)
+
+
+### Features
+
+* **docs-site:** og:image social card and Lighthouse fixes ([#707](https://github.com/spacingmind/smind/issues/707)) ([41bfbf8](https://github.com/spacingmind/smind/commit/41bfbf8068c96143aacdf53202806c72b736016c))
+* **docs:** publish public-docs as a static site with SEO and GEO ([#683](https://github.com/spacingmind/smind/issues/683)) ([7f967d4](https://github.com/spacingmind/smind/commit/7f967d4c50055b66e31c5a100d679fcb374de892))
+* **files:** binary-safe file.stat / file.readRange and daemon.info.files (office mode O3) ([#742](https://github.com/spacingmind/smind/issues/742)) ([6f0c931](https://github.com/spacingmind/smind/commit/6f0c93174d6afa148944887e30a28adb3b09a5d5))
+* **fleet:** callee read handlers, provenance and audit (ADR-0048 F2a) ([#739](https://github.com/spacingmind/smind/issues/739)) ([c5ab020](https://github.com/spacingmind/smind/commit/c5ab020a42e38d28f7bf200b75041b5018521de3))
+* **fleet:** callee write path, per-origin budgets and wall limit (ADR-0048 F3a) ([#747](https://github.com/spacingmind/smind/issues/747)) ([b11fb55](https://github.com/spacingmind/smind/commit/b11fb55bd01944b5a89d8377478463b8ba5702ca))
+* **fleet:** caller client, CLI and MCP read of connected hosts (ADR-0048 F2b) ([#740](https://github.com/spacingmind/smind/issues/740)) ([fa23370](https://github.com/spacingmind/smind/commit/fa23370f6397315a9845c5024e37cc040c79e631))
+* **fleet:** caller watches and MCP write tools (ADR-0048 F3b) ([#748](https://github.com/spacingmind/smind/issues/748)) ([2b2b2a1](https://github.com/spacingmind/smind/commit/2b2b2a1e9fee8e5f00b868d1776397e0036c88ed))
+* **fleet:** hello, transports, pairing and smind host CLI (ADR-0048 F1b) ([#729](https://github.com/spacingmind/smind/issues/729)) ([635b749](https://github.com/spacingmind/smind/commit/635b749a3fb637561f6b864fc1aeccc7708e03c7))
+* **fleet:** host identity, registry, store tables and config (ADR-0048 F1a) ([#723](https://github.com/spacingmind/smind/issues/723)) ([bfb53c5](https://github.com/spacingmind/smind/commit/bfb53c5bfddcdd46427a8e1ec0d8733a08cbcf11))
+* **fleet:** Hosts settings page, host inbox rows and mobile approval (ADR-0048 F1c) ([#727](https://github.com/spacingmind/smind/issues/727)) ([d898513](https://github.com/spacingmind/smind/commit/d8985130204c771fc9e8700c1f9bf878dac30614))
+* **permpolicy:** parse powershell/pwsh -Command and cmd /c payloads like sh -c ([#743](https://github.com/spacingmind/smind/issues/743)) ([cfbe754](https://github.com/spacingmind/smind/commit/cfbe75496ded8c686e0b1d269353aecf24aeaa5f))
+* **permpolicy:** real Windows path support, no on-Windows gate ([#720](https://github.com/spacingmind/smind/issues/720)) ([9ba7063](https://github.com/spacingmind/smind/commit/9ba7063cadc6bffbb6fe5de63ffe2b4251c81e90))
+* **permpolicy:** steward seat S1 - permission policy engine, floor and audit (ADR-0047) ([#713](https://github.com/spacingmind/smind/issues/713)) ([114a0e4](https://github.com/spacingmind/smind/commit/114a0e43ce1fc7ff0b3fd5dc16dd33312e804cef))
+* **plugins:** declarative UI view schema ui:1, panel contributions and plugin.view (Wave C PC1) ([#712](https://github.com/spacingmind/smind/issues/712)) ([5fc5a34](https://github.com/spacingmind/smind/commit/5fc5a34a9acf8486a5c97a6513dbba98fabdeb05))
+* **providers:** claude-code recipe catalog, addFromRecipe and vendor rate-limit profiles ([#699](https://github.com/spacingmind/smind/issues/699)) ([9a9d57b](https://github.com/spacingmind/smind/commit/9a9d57bf1ef775f6f5e4dfe664a82fbe096fd8a4))
+* **providers:** Codex endpoint instances (OpenAI Responses-compatible) ([#694](https://github.com/spacingmind/smind/issues/694)) ([dad23d2](https://github.com/spacingmind/smind/commit/dad23d2f31a440c56e63fe216bf159beb3d00f7c))
+* **providers:** generalise the provider registry (instance overlay, any-harness extends) and point Kimi at Kimi Code ([#691](https://github.com/spacingmind/smind/issues/691)) ([e0dbf13](https://github.com/spacingmind/smind/commit/e0dbf13edb6f541439a67a172f382004d917cf19))
+* **providers:** native ACP providers OpenCode, Copilot, Cline, Goose and Cursor as registry data ([#696](https://github.com/spacingmind/smind/issues/696)) ([3823067](https://github.com/spacingmind/smind/commit/3823067aa08c83e8587a4410df26beb6548d5b6a))
+* **providers:** provider.updateInstance, edit an instance's models, tools and inherit toggle (PR7) ([#719](https://github.com/spacingmind/smind/issues/719)) ([24dd399](https://github.com/spacingmind/smind/commit/24dd399f71001b032f13460351f99a2558556126))
+* **providers:** typed provider env and write-only provider secret store ([#695](https://github.com/spacingmind/smind/issues/695)) ([600e45d](https://github.com/spacingmind/smind/commit/600e45d05a17265795d4bca8c306bd3aef4b1c17))
+* **quota:** Z.AI GLM plan-usage meter for provider instances ([#714](https://github.com/spacingmind/smind/issues/714)) ([f0729e5](https://github.com/spacingmind/smind/commit/f0729e5901743d826f9fd3f11fa524800eac0213))
+* **runs:** I reset my quota - clear a provider cooldown (RPC, CLI, web) ([#700](https://github.com/spacingmind/smind/issues/700)) ([be14c52](https://github.com/spacingmind/smind/commit/be14c5273f2586d4a3fa0c043d4aa5750942603e))
+* **scratch:** per-task scratch dir, shared caches and cleanup on archive/delete ([#708](https://github.com/spacingmind/smind/issues/708)) ([9f5f6bf](https://github.com/spacingmind/smind/commit/9f5f6bfeb9e33e5d39169afba54cd82553a65e2e))
+* **web:** declarative plugin UI renderer, plugin tab, sidebar and palette (Wave C PC2) ([#721](https://github.com/spacingmind/smind/issues/721)) ([4147f7c](https://github.com/spacingmind/smind/commit/4147f7c5446318812b8567616b31837c71b57bf2))
+* **web:** Hosts page polish, row cards and direction rows (ADR-0048 F1c follow-up) ([#741](https://github.com/spacingmind/smind/issues/741)) ([06791d1](https://github.com/spacingmind/smind/commit/06791d1e2bd0753b8c45d069a3476985377eccf8))
+* **web:** provider UI, add from recipe, key rows, recipe badges (providers epic PR6) ([#710](https://github.com/spacingmind/smind/issues/710)) ([1a045ed](https://github.com/spacingmind/smind/commit/1a045ed7658e17eed4a6a4af43748e76f8146e80))
+* **web:** remove the terminal toolbar, tab close ends the session ([#724](https://github.com/spacingmind/smind/issues/724)) ([08b17af](https://github.com/spacingmind/smind/commit/08b17afa34f2678f609931aa7de1ff994ff0f913))
+* **web:** terminal inset and a bottom touch Copy/Paste row above the keyboard ([#726](https://github.com/spacingmind/smind/issues/726)) ([7458bc6](https://github.com/spacingmind/smind/commit/7458bc620cc4c1ae94518c5a9f1e154db071f5db))
+* **web:** ZCode parity stage 3a, settings page shell and row cards ([#698](https://github.com/spacingmind/smind/issues/698)) ([06ce66e](https://github.com/spacingmind/smind/commit/06ce66ea3e6b682b58a4a9027b47f32cbe27e16a))
+* **web:** ZCode parity stage 3b, light shell frame and sidebar quick actions ([#703](https://github.com/spacingmind/smind/issues/703)) ([43aa283](https://github.com/spacingmind/smind/commit/43aa28321c3c06d8555ce6ca7d1317bf290b9762))
+* **web:** ZCode parity stage 3c, composer and home landing ([#711](https://github.com/spacingmind/smind/issues/711)) ([5c1f9b7](https://github.com/spacingmind/smind/commit/5c1f9b730c2395db8e5d7d538ed19dadf16e3d2c))
+* **web:** ZCode parity stage 3d, command palette and dialog/menu anatomy ([#716](https://github.com/spacingmind/smind/issues/716)) ([beaf283](https://github.com/spacingmind/smind/commit/beaf2835036eab7d86db6a8c8f6266735974dc99))
+* **web:** ZCode parity stage 3e, timeline plan card and tool cards ([#722](https://github.com/spacingmind/smind/issues/722)) ([546b9e9](https://github.com/spacingmind/smind/commit/546b9e9b5cde61c835a5cabb8962e79dd1512ab6))
+* **web:** ZCode parity stage 5, desktop back/forward chrome ([#725](https://github.com/spacingmind/smind/issues/725)) ([50e3554](https://github.com/spacingmind/smind/commit/50e3554775bc26ba8315d204510f045c983a04f1))
+* **web:** ZCode parity stage 6, welcome greeting, send on Enter, landing chips, empty sidebar ([#728](https://github.com/spacingmind/smind/issues/728)) ([d631df2](https://github.com/spacingmind/smind/commit/d631df210e70b78f3fd9949b5ff51e001523a7ed))
+* **web:** ZCode Stage 1 tokens, typed name map and drift test ([#693](https://github.com/spacingmind/smind/issues/693)) ([cafd8a3](https://github.com/spacingmind/smind/commit/cafd8a3bec70fbd7e7b82b60ea71e41bc02bfc3f))
+
+
+### Bug Fixes
+
+* **config:** updateInstance no longer rejects hand-written env values that need cleaning ([#733](https://github.com/spacingmind/smind/issues/733)) ([1f483f9](https://github.com/spacingmind/smind/commit/1f483f9dad0f103f97047514297186f22fd07c3a))
+* **files:** refuse UNC, device and drive-relative paths in resolveInRoot ([#746](https://github.com/spacingmind/smind/issues/746)) ([29a97ae](https://github.com/spacingmind/smind/commit/29a97ae9fd87899e56f28bbc8802a2c67de33478))
+* **mcp:** validation_verdict_submit accepts a normal verdict object ([#706](https://github.com/spacingmind/smind/issues/706)) ([b744739](https://github.com/spacingmind/smind/commit/b7447399e7b095f8093fc747d7f4281d1cfa0439))
+* **mobile:** show a failed run's error once, plainly, behind a Details toggle ([#687](https://github.com/spacingmind/smind/issues/687)) ([2014011](https://github.com/spacingmind/smind/commit/20140119a263a818219f9903ffc5e0763987a2cc))
+* **permpolicy:** a heredoc with an invalid-UTF-8 tag escalates and is redacted, never leaked ([#745](https://github.com/spacingmind/smind/issues/745)) ([4a4ff3c](https://github.com/spacingmind/smind/commit/4a4ff3c54904d2c8deb2431c20f1cfe801648f21))
+* **permpolicy:** keep the policy engine off on Windows until path support lands ([#717](https://github.com/spacingmind/smind/issues/717)) ([24c8621](https://github.com/spacingmind/smind/commit/24c8621e041b2f59bf5eeb4075cfa355748cd7e3))
+* **readiness:** checker false positives and negatives from dogfooding ([#709](https://github.com/spacingmind/smind/issues/709)) ([a0e6986](https://github.com/spacingmind/smind/commit/a0e6986a5d6f5f4f9569026d2aa8e387a789d107))
+* shared fsutil.IsLink so Windows junctions are refused at every link check ([#738](https://github.com/spacingmind/smind/issues/738)) ([cd2cb6e](https://github.com/spacingmind/smind/commit/cd2cb6e9d3a5e5fb5e9546e54f1c0196e44b6a72))
+* **skills:** refuse Windows junctions like symlinks; symlink-dependent tests skip loudly without privilege ([#736](https://github.com/spacingmind/smind/issues/736)) ([1c5e7e9](https://github.com/spacingmind/smind/commit/1c5e7e9a5ea51a94a960683891d877f5d960acd0))
+* **terminal:** give the PTY shell a session and controlling tty so Ctrl+C works ([#731](https://github.com/spacingmind/smind/issues/731)) ([e47d3ea](https://github.com/spacingmind/smind/commit/e47d3ea9e0db9478bfdb52c3812f9f9f4b045ef5))
+* **web,mobile:** hide the Detailed toggle with nothing to reveal; name the zone of a parsed reset time ([#688](https://github.com/spacingmind/smind/issues/688)) ([bd95120](https://github.com/spacingmind/smind/commit/bd95120e5cd1f492dc9a732534ba8666c381b091))
+* **web:** one unknown event topic no longer costs the browser every live event ([#735](https://github.com/spacingmind/smind/issues/735)) ([e05c989](https://github.com/spacingmind/smind/commit/e05c9894b9ee162548a65ed23d89d3f6d15a7d59))
+* **web:** recipe instance detail shows key status, not a CLI login ([#715](https://github.com/spacingmind/smind/issues/715)) ([be65f2b](https://github.com/spacingmind/smind/commit/be65f2b2878137087022f383636b53df2c23b0bb))
+* **web:** show a failed run's error once, plainly, with one local reset time ([#686](https://github.com/spacingmind/smind/issues/686)) ([5de3b6c](https://github.com/spacingmind/smind/commit/5de3b6ca7a5a1f20c84e05e09b4f4e6cd6a7f308))
+
 ## [0.16.0](https://github.com/spacingmind/smind/compare/v0.15.0...v0.16.0) (2026-10-27)
 
 ### Upgrade notes
