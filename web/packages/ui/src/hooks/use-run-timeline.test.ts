@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useRunTimeline, buildTimeline } from "@/hooks/use-run-timeline";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import type { RunSummary } from "@/lib/types";
+import type { RunLogEvent, RunSummary } from "@/lib/types";
 
 /** Flushes pending microtasks, wrapped in `act` so React commits before assertions. */
 async function flush(): Promise<void> {
