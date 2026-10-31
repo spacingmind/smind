@@ -75,7 +75,7 @@ export function TaskLineageChips({
         </span>
       )}
       {stalled && (
-        <span data-testid="task-stalled" title={stalled} className="flex shrink-0 items-center gap-1 text-warning">
+        <span data-testid="task-stalled" title={stalled} className="flex shrink-0 items-center gap-1 text-warning-text">
           <Icons.stalled className={ICON_SIZE.xs} aria-hidden />
           stalled
         </span>

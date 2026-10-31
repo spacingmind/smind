@@ -166,7 +166,7 @@ export function AppHeader({
               ? "sr-only"
               : cn(
                   "shrink-0 rounded-full px-2 py-0.5 text-ui-sm",
-                  connectionStatus === "disconnected" ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning",
+                  connectionStatus === "disconnected" ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning-text",
                 ),
           )}
         >

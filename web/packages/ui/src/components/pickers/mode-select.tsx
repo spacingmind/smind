@@ -46,7 +46,7 @@ export function ModeSelect({
         title={current?.description}
         data-testid={testId}
         data-danger={dangerous ? "true" : undefined}
-        className={variant === "pill" ? cn(PILL_TRIGGER_CLASS, "focus-visible:ring-3 focus-visible:ring-ring/50", dangerous && "text-warning hover:text-warning") : cn("w-full", dangerous && "text-warning")}
+        className={variant === "pill" ? cn(PILL_TRIGGER_CLASS, "focus-visible:ring-3 focus-visible:ring-ring/50", dangerous && "text-warning-text hover:text-warning-text") : cn("w-full", dangerous && "text-warning-text")}
       >
         {variant === "pill" &&
           (dangerous ? <Icons.permissionDanger aria-hidden className="shrink-0" /> : <Icons.permission aria-hidden className="shrink-0" />)}
@@ -59,7 +59,7 @@ export function ModeSelect({
             key={m.id}
             value={m.id}
             title={m.description}
-            className={m.autoApproves ? "text-warning" : undefined}
+            className={m.autoApproves ? "text-warning-text" : undefined}
             icon={
               variant === "pill" ? (
                 m.autoApproves ? <Icons.permissionDanger aria-hidden className="text-foreground-muted" /> : <Icons.permission aria-hidden className="text-foreground-muted" />

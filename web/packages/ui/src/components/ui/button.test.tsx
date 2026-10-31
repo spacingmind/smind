@@ -17,7 +17,7 @@ describe("buttonVariants", () => {
   it("execute uses the warning color family", () => {
     const classes = buttonVariants({ variant: "execute" });
     expect(classes).toContain("bg-warning/10");
-    expect(classes).toContain("text-warning");
+    expect(classes).toContain("text-warning-text");
   });
 
   it("approval uses the success color family", () => {

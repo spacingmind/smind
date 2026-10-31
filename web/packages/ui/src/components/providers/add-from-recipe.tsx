@@ -129,7 +129,7 @@ export function AddFromRecipe({ hasClient, onClose }: { hasClient: boolean; onCl
             </ul>
           ) : null}
           {selected.unverified ? (
-            <p data-testid="recipe-unverified-note" className="text-ui-sm text-warning">
+            <p data-testid="recipe-unverified-note" className="text-ui-sm text-warning-text">
               Not verified against a live endpoint yet{selected.unverifiedAspects.length > 0 ? ` (${selected.unverifiedAspects.join(", ")})` : ""}.
             </p>
           ) : null}

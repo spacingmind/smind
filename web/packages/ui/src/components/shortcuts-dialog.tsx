@@ -91,7 +91,7 @@ function ShortcutRow({
         <div className="max-sm:whitespace-normal sm:truncate text-ui-base">{row.label}</div>
         {row.note && <div className="max-sm:whitespace-normal sm:truncate text-ui-sm text-foreground-muted">{row.note}</div>}
         {conflictLabel && (
-          <div className="text-ui-sm text-warning" data-testid="shortcut-conflict">
+          <div className="text-ui-sm text-warning-text" data-testid="shortcut-conflict">
             Also used by {conflictLabel}
           </div>
         )}

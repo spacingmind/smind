@@ -31,7 +31,7 @@ const buttonVariants = cva(
         // apply at once -- the disabled Send button rendered the warning tint (translucent
         // orange, reading brown) in dark mode despite this same-looking rule.
         execute:
-          "bg-warning/10 text-warning hover:bg-warning/20 focus-visible:border-warning/40 focus-visible:ring-warning/20 disabled:bg-muted disabled:text-muted-foreground dark:bg-warning/20 dark:hover:bg-warning/30 dark:focus-visible:ring-warning/40 dark:disabled:bg-muted dark:disabled:text-muted-foreground",
+          "bg-warning/10 text-warning-text hover:bg-warning/20 focus-visible:border-warning/40 focus-visible:ring-warning/20 disabled:bg-muted disabled:text-muted-foreground dark:bg-warning/20 dark:hover:bg-warning/30 dark:focus-visible:ring-warning/40 dark:disabled:bg-muted dark:disabled:text-muted-foreground",
         approval:
           "bg-success/10 text-success hover:bg-success/20 focus-visible:border-success/40 focus-visible:ring-success/20 dark:bg-success/20 dark:hover:bg-success/30 dark:focus-visible:ring-success/40",
         quiet:

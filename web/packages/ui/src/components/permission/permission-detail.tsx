@@ -31,7 +31,7 @@ function Badge({ children, testId, danger }: { children: string; testId: string;
       data-testid={testId}
       className={cn(
         "rounded border px-1.5 py-0.5 text-ui-xs font-medium",
-        danger ? "border-destructive/40 text-destructive" : "border-warning/40 text-warning",
+        danger ? "border-destructive/40 text-destructive" : "border-warning/40 text-warning-text",
       )}
     >
       {children}

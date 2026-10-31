@@ -106,7 +106,7 @@ export function TaskBudgetControl({ task, client }: { task: Task; client: WsClie
           "flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-ui-sm transition-colors hover:bg-hover hover:text-foreground",
           state.kind === "none" ? "border-dashed text-foreground-subtle" : "text-foreground-muted",
           state.kind === "near" && "text-foreground",
-          state.kind === "over" && "border-warning/50 text-warning",
+          state.kind === "over" && "border-warning/50 text-warning-text",
         )}
       >
         <Icons.usage aria-hidden className="size-3 shrink-0" />
@@ -128,7 +128,7 @@ export function TaskBudgetControl({ task, client }: { task: Task; client: WsClie
             <p data-testid="task-budget-summary" className="text-ui-base text-foreground">
               {formatUsd(shown.current.budgetSpentUsd ?? 0)}
               {shown.state.partialLabel ? "+" : ""} <span className="text-foreground-muted">of {formatUsd(shown.current.budgetUsd!)}</span>
-              {shown.state.kind === "over" && <span className="ml-2 text-ui-sm text-warning">Over budget</span>}
+              {shown.state.kind === "over" && <span className="ml-2 text-ui-sm text-warning-text">Over budget</span>}
             </p>
             <BudgetMeter kind={shown.state.kind} ratio={shown.state.ratio} />
             {shown.state.partialLabel && (

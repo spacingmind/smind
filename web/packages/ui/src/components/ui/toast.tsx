@@ -34,9 +34,9 @@ const VARIANT_ICON: Record<AlertVariant, typeof Icons.info> = {
 
 const VARIANT_CLASSES: Record<AlertVariant, string> = {
   default: "border-border text-foreground",
-  info: "border-warning/40 text-warning",
+  info: "border-warning/40 text-warning-text",
   success: "border-success/40 text-success",
-  warning: "border-warning/40 text-warning",
+  warning: "border-warning/40 text-warning-text",
   error: "border-destructive/40 text-destructive",
 };
 

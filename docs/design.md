@@ -61,6 +61,15 @@ predates this plan — `zcode-visual-parity` changes what these things
    explicit alias of `muted-foreground`) is the one pre-existing semantic
    token that survived unrelated to ZCode's vocabulary.
 
+   **Text contrast (WCAG AA).** Text tokens must reach 4.5:1 on every
+   surface they sit on, in both themes (`lib/contrast-tokens.test.ts`
+   guards it). Light `--muted-foreground` is `oklch(0.5 0 0)` (ZCode's
+   lighter grey fell to 4.15:1 on the sidebar). `--warning` stays ZCode's
+   orange for fills, dots and glyphs; orange **text** uses the added role
+   token `--warning-text` (`text-warning-text`: light = the
+   warning-surface foreground, dark = `--warning`). Light `--warning` is
+   2.82:1 on `--background`, a known sub-3:1 exception for non-text use.
+
 **The input token exception.** smind's pre-existing `border-input`
 (shadcn's `--input`, used as a border color) and ZCode's `--color-input`
 (a field *background*) are different concepts that happen to share a

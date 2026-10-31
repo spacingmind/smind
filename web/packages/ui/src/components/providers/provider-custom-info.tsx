@@ -25,7 +25,7 @@ export function ProviderCustomInfo({ info, hasClient }: { info: ProviderInfo; ha
             Using <span className="font-mono">{effective.path}</span> · {SOURCE_TEXT[effective.source]}
           </p>
           {!effective.exists ? (
-            <p className="text-ui-xs text-warning" data-testid={`provider-custom-missing-${info.id}`}>
+            <p className="text-ui-xs text-warning-text" data-testid={`provider-custom-missing-${info.id}`}>
               This directory does not exist yet.
             </p>
           ) : null}
