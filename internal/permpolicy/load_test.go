@@ -256,3 +256,34 @@ func TestPolicyLoad_RejectsRegexAndOverCaps(t *testing.T) {
 			"allow_only[0]", "{foo}")
 	})
 }
+
+func TestPolicyLoad_RejectsAllowThatFloorDenies(t *testing.T) {
+	scope := "\n    paths:\n      within: [\"{worktree}\"]"
+	bash := func(id, argv0, sub, allowOnly string) string {
+		r := "- id: " + id + "\n  action: allow\n  why: w\n  match:\n    tool: Bash\n    command:\n      argv0: " + argv0 + "\n      subcommand: " + sub
+		if allowOnly != "" {
+			r += "\n      args:\n        allow_only: " + allowOnly
+		}
+		return r + scope
+	}
+	wantLoadErr(t, policyDoc(bash("stash", "git", "stash", "")), "rules[0]", "allow is denied by floor rule no-stash")
+	wantLoadErr(t, policyDoc(bash("push", "git", "push", `["origin", "--force"]`)), "rules[0]", "no-force-push")
+	wantLoadErr(t, policyDoc(bash("push-main", "git", "push", `["origin", "main"]`)), "rules[0]", "no-merge")
+	wantLoadErr(t, policyDoc(bash("ok", "go", "test", ""), bash("add-all", "git", "add", `["-A"]`)), "rules[1]", "no-add-all")
+	wantLoadErr(t, policyDoc("- id: edit-ssh\n  action: allow\n  why: w\n  match:\n    tool: Edit\n    paths:\n      within: [\"/h/.ssh\"]"),
+		"rules[0]", "no-install-state")
+	wantLoadErr(t, policyDoc("- id: edit-etc\n  action: allow\n  why: w\n  match:\n    tool: Write\n    paths:\n      within: [\"/etc/app\"]"),
+		"rules[0]", "no-destructive-outside")
+
+	// Near misses load: the branch push, a worktree edit, and a deny rule
+	// naming a floor-denied command (a deny the floor already implies).
+	for _, r := range []string{
+		bash("push-own", "git", "push", `["origin", "{taskBranch}"]`),
+		"- id: edit-wt\n  action: allow\n  why: w\n  match:\n    tool: Edit\n    paths:\n      within: [\"{worktree}\"]",
+		"- id: no-stash\n  action: deny\n  why: w\n  match:\n    command:\n      argv0: git\n      subcommand: stash",
+	} {
+		if _, err := Load([]byte(policyDoc(r))); err != nil {
+			t.Fatalf("rule rejected: %v\n%s", err, r)
+		}
+	}
+}

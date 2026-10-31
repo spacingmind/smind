@@ -134,8 +134,56 @@ func Load(data []byte) (*Policy, error) {
 	if err := validateRules(doc.Rules); err != nil {
 		return nil, err
 	}
+	if err := checkAllowsAgainstFloor(doc.Rules); err != nil {
+		return nil, err
+	}
 	sum := sha256.Sum256(data)
 	return &Policy{Version: doc.Version, Rules: doc.Rules, Sha: hex.EncodeToString(sum[:])}, nil
+}
+
+// checkAllowsAgainstFloor rejects an allow rule the floor would deny, so a
+// human-written rule never pretends to cover what the floor forbids. Each
+// allow is probed with the command it could match (argv0, subcommand and its
+// allow_only literals) or, for a file tool, with the paths it scopes to; the
+// probe request uses fixed fake roots so the check does not depend on the
+// machine the policy is loaded on.
+func checkAllowsAgainstFloor(rules []Rule) error {
+	for i, r := range rules {
+		if r.Action != ActionAllow {
+			continue
+		}
+		req := Request{Tool: r.Match.Tool, Worktree: "/wt", Cwd: "/wt", Home: "/h", SmindHome: "/h/.smind"}
+		var hit FloorHit
+		var ok bool
+		if r.Match.Tool == "Bash" && r.Match.Command != nil {
+			req.Command = probeCommand(r.Match.Command)
+			hit, ok = CheckFloor(req, SplitCommand(req.Command))
+		} else if mutatingTools[r.Match.Tool] && r.Match.Paths != nil {
+			for _, w := range r.Match.Paths.Within {
+				if w == "{worktree}" {
+					w = "/wt"
+				}
+				req.Paths = append(req.Paths, w)
+			}
+			hit, ok = CheckFloorPaths(req)
+		}
+		if ok {
+			return le(fmt.Sprintf("rules[%d]", i), "allow is denied by floor rule %s", hit.ID)
+		}
+	}
+	return nil
+}
+
+// probeCommand is the most specific command line an allow's command match
+// can accept, with placeholders replaced by plausible values.
+func probeCommand(c *CommandMatch) string {
+	words := []string{c.Argv0}
+	words = append(words, strings.Fields(c.Subcommand)...)
+	repl := strings.NewReplacer("{taskBranch}", "task-branch", "{worktree}", "/wt")
+	for _, a := range c.Args.AllowOnly {
+		words = append(words, repl.Replace(a))
+	}
+	return strings.Join(words, " ")
 }
 
 // strictPolicyYAML rejects the YAML features a policy does not use: anchors,
