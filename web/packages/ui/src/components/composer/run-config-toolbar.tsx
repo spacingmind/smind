@@ -382,7 +382,8 @@ function RunConfigToolbarModelPicker() {
       })),
     [meta.profiles, meta.providers],
   );
-  const observedModel = useObservedModel(meta.chatId, state.provider, state.model === "");
+  // No chat yet (the home landing): nothing to resolve, and no extra run.list.
+  const observedModel = useObservedModel(meta.chatId, state.provider, state.model === "" && meta.chatId !== null);
   const baseAgent = state.baseAgentId ? meta.profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
   const openSettings = (sectionId: string) => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId } }));
 
