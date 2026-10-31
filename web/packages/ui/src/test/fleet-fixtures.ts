@@ -57,7 +57,7 @@ export class FleetDaemon extends FakeUsageDaemon {
         case "fleet.host.list":
           return { hosts: this.hosts };
         case "fleet.host.invite":
-          return { invite: "smind-host://v1#abc", expiresAt: "2026-10-31T10:10:00Z" };
+          return { invite: "smind-host://v1#payload", expiresAt: "2026-10-31T10:10:00Z" };
         case "fleet.host.add": {
           const host = fleetHost({ hostId: "hnew", alias: (p.alias as string) ?? "new", state: "pending", pendingApproval: false, link: "connecting", sas: "123456" });
           this.hosts = [...this.hosts, host];

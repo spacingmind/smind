@@ -230,7 +230,7 @@ describe("settings-hosts section", () => {
     expect(screen.getByTestId("invite-host-dialog")).toHaveTextContent("no password");
     await click(screen.getByTestId("invite-create"));
 
-    expect(screen.getByTestId("invite-value")).toHaveValue("smind-host://v1#abc");
+    expect(screen.getByTestId("invite-value")).toHaveValue("smind-host://v1#payload");
     expect(d.callsOf("fleet.host.invite")[0].params).toEqual({ window: "10m" });
   });
 
@@ -239,7 +239,7 @@ describe("settings-hosts section", () => {
     await renderSection(d);
 
     await click(screen.getByTestId("hosts-add"));
-    fireEvent.change(screen.getByTestId("add-invite"), { target: { value: "  smind-host://v1#abc  " } });
+    fireEvent.change(screen.getByTestId("add-invite"), { target: { value: "  smind-host://v1#payload  " } });
     fireEvent.change(screen.getByTestId("add-alias"), { target: { value: "Bad Alias" } });
     await flush();
     expect(screen.getByTestId("add-submit")).toBeDisabled();
@@ -248,7 +248,7 @@ describe("settings-hosts section", () => {
     await flush();
     await click(screen.getByTestId("add-submit"));
 
-    expect(d.callsOf("fleet.host.add")[0].params).toEqual({ invite: "smind-host://v1#abc", alias: "office" });
+    expect(d.callsOf("fleet.host.add")[0].params).toEqual({ invite: "smind-host://v1#payload", alias: "office" });
     expect(screen.getByTestId("add-sas")).toHaveTextContent("123 456");
     expect(screen.getByTestId("add-host-dialog")).toHaveTextContent("cannot approve");
     expect(d.callsOf("fleet.host.approve")).toHaveLength(0);
