@@ -121,7 +121,8 @@ func TestFloorRealWindows_Deny(t *testing.T) {
 		{`type ` + q(e.home+`\.ssh\id_rsa`), []string{"no-install-state", "no-secrets"}},
 		{`rd /s /q ` + q(e.home+`\.smind`), []string{"no-install-state"}},
 		{`copy a.go C:\Windows\System32\a.go`, []string{"no-install-state", "no-destructive-outside"}},
-		{`HOME=` + q(e.home) + ` go test ./...`, []string{"no-real-home-tests"}},
+		// Unquoted: the splitter does not read a quoted prefix assignment as an env assignment.
+		{`HOME=` + e.home + ` go test ./...`, []string{"no-real-home-tests"}},
 	}
 	for _, c := range cases {
 		req := e.req
