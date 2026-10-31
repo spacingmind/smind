@@ -94,7 +94,7 @@ func retryItems(t *testing.T, st *store.Store, chatID int64) []store.ChatQueueIt
 
 func futureFail(d time.Duration) failure.Result {
 	at := time.Now().Add(d).UTC()
-	return failure.Result{Kind: "rate_limited", Window: "5h", ResetAt: &at}
+	return failure.Result{Kind: failure.KindPlanWindowExhausted, Window: "5h", ResetAt: &at}
 }
 
 func TestPolicy_WaitEnqueuesSameChatAtResetPlus30s(t *testing.T) {
