@@ -17,6 +17,7 @@ import (
 	"github.com/spacingmind/smind/internal/ghctx"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/mcpservers"
+	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/plugins"
 	"github.com/spacingmind/smind/internal/plugins/host"
 	"github.com/spacingmind/smind/internal/plugins/skilldelivery"
@@ -82,6 +83,7 @@ type API struct {
 
 	automations *automationHost
 	inbox       *inboxHost
+	policySweep *policySweeper
 	hs          map[string]handlerFunc
 	plugins     *plugins.Manager
 	// pluginEvents publishes plugin.updated and the owned-row diffs.
@@ -134,6 +136,7 @@ func (a *API) StartGitState(ctx context.Context) (stop func()) {
 // writer is left touching the database or a worktree directory.
 func (a *API) Close() {
 	a.inbox.stop()
+	a.policySweep.stop()
 	a.StopPlugins()
 	a.git.Stop()
 	a.Runs.CloseAll()
@@ -327,6 +330,14 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	for method, h := range inboxHandlers(inboxH) {
 		hs[method] = h
 	}
+	policyEngine := permpolicy.NewEngine(permpolicy.Options{
+		Path: filepath.Join(config.Dir(), "steward", "policy.yaml"), Enabled: configStewardPolicyEnabled, Audit: db,
+	})
+	reg.SetPolicyEngine(policyEngine)
+	for method, h := range policyHandlers(policyEngine, db) {
+		hs[method] = h
+	}
+	policySweep := startPolicySweeper(db)
 	admit := newSeatAdmission(reg, profReg, db)
 	profileListRaw := hs["profile.list"] // the plugin session must not get the seat-filtered form
 	hs["profile.list"] = admit.wrapProfileList(hs["profile.list"])
@@ -350,7 +361,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	pluginReg.bindSender(&pluginSender{wm: wm, runner: runner, reg: reg, db: db, mgr: pluginMgr, lim: newSendLimiter()})
 	reg.SetLaunchHooks(pluginHooks{pluginMgr})
 	reg.AddObserver(pluginHooks{pluginMgr})
-	api := &API{inbox: inboxH, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
+	api := &API{inbox: inboxH, policySweep: policySweep, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}
