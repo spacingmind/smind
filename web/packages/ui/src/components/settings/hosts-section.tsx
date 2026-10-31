@@ -179,6 +179,7 @@ function HostsSection(_props: SettingsSectionContext) {
 
       {labelsTarget && (
         <EditLabelsDialog
+          key={labelsTarget.hostId}
           host={labelsTarget}
           open={labelsId !== null}
           onOpenChange={(open) => {

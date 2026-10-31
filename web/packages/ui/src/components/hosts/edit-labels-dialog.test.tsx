@@ -144,4 +144,17 @@ describe("host labels editor", () => {
     expect((screen.getByTestId("edit-labels-value-0") as HTMLInputElement).value).toBe("linux");
     expect(d.callsOf("fleet.host.labels")).toHaveLength(0);
   });
+
+  it("labels_reopen_on_another_host_starts_from_its_labels", async () => {
+    const d = new FleetDaemon();
+    d.hosts = [fleetHost({ labels: { os: "linux" } }), fleetHost({ hostId: "h2", alias: "bare" })];
+    await renderSection(d);
+    await openEditor("mac");
+    fireEvent.keyDown(screen.getByTestId("edit-labels-dialog"), { key: "Escape" });
+    await flush();
+    expect(screen.queryByTestId("edit-labels-dialog")).toBeNull();
+    await openEditor("bare");
+    expect(screen.getByTestId("edit-labels-empty")).toBeInTheDocument();
+    expect(screen.queryByTestId("edit-labels-key-0")).toBeNull();
+  });
 });

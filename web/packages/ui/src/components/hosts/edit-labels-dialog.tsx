@@ -75,7 +75,7 @@ export function EditLabelsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-2" data-testid="edit-labels-rows">
+        <div className="flex max-h-[min(50vh,28rem)] flex-col gap-2 overflow-y-auto pr-1" data-testid="edit-labels-rows">
           {rows.length === 0 && (
             <p className="text-ui-sm text-foreground-muted" data-testid="edit-labels-empty">
               No labels yet.
