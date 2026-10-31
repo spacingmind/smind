@@ -25,6 +25,18 @@ export const SIDEBAR_TOGGLE_SIZE_PX = 28;
 /** Clear space between the toggle and whatever follows it. */
 export const SIDEBAR_TOGGLE_GAP_PX = 8;
 
+/** One back/forward arrow button (an `icon-sm` button, same size as the toggle). */
+export const NAV_BUTTON_SIZE_PX = 28;
+
+/** Gap between the back and forward buttons. */
+export const NAV_BUTTONS_GAP_PX = 4;
+
+/** Space between the sidebar toggle and the first nav button. */
+export const NAV_TOGGLE_GAP_PX = 4;
+
+/** The back/forward pair's total width. */
+export const NAV_BUTTONS_WIDTH_PX = 2 * NAV_BUTTON_SIZE_PX + NAV_BUTTONS_GAP_PX;
+
 /** Native traffic lights are on screen: macOS and not in fullscreen (where macOS hides them). */
 export function hasTrafficLights(os: DesktopOS | null, fullscreen: boolean): boolean {
   return os === "macos" && !fullscreen;
@@ -47,9 +59,17 @@ export function toggleLeftPx(os: DesktopOS | null, fullscreen: boolean): number 
   return (SIDEBAR_ICON_WIDTH - SIDEBAR_TOGGLE_SIZE_PX) / 2;
 }
 
-/** The x the first thing after the window-level toggle may start at. */
+/** Where the back/forward nav buttons' left edge sits: right after the window-level toggle. */
+export function navLeftPx(os: DesktopOS | null, fullscreen: boolean): number {
+  return toggleLeftPx(os, fullscreen) + SIDEBAR_TOGGLE_SIZE_PX + NAV_TOGGLE_GAP_PX;
+}
+
+/**
+ * The x the first thing after the window-level cluster (toggle + nav
+ * buttons) may start at.
+ */
 export function toggleZoneEndPx(os: DesktopOS | null, fullscreen: boolean): number {
-  return toggleLeftPx(os, fullscreen) + SIDEBAR_TOGGLE_SIZE_PX + SIDEBAR_TOGGLE_GAP_PX;
+  return navLeftPx(os, fullscreen) + NAV_BUTTONS_WIDTH_PX + SIDEBAR_TOGGLE_GAP_PX;
 }
 
 /**

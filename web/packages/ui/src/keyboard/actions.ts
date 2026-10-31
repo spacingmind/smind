@@ -33,6 +33,8 @@ export type ActionId =
   | "tab.prev"
   | "task.prev"
   | "task.next"
+  | "nav.back"
+  | "nav.forward"
   | "quick-open.open"
   | "pane.find"
   | "settings.open"

@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   HEADER_BASE_PADDING_PX,
+  NAV_BUTTONS_WIDTH_PX,
+  NAV_TOGGLE_GAP_PX,
+  SIDEBAR_TOGGLE_GAP_PX,
   SIDEBAR_TOGGLE_SIZE_PX,
   TRAFFIC_LIGHT_CLUSTER_PX,
   hasCaptionButtons,
   hasTrafficLights,
   headerLeftInsetPx,
+  navLeftPx,
   toggleLeftPx,
   toggleZoneEndPx,
 } from "@/lib/window-chrome";
@@ -47,8 +51,24 @@ describe("window chrome layout maths", () => {
     expect(toggleLeftPx("windows", false)).toBe(10);
     expect(toggleLeftPx("linux", false)).toBe(10);
     expect(toggleLeftPx("macos", true)).toBe(10);
-    expect(toggleZoneEndPx("macos", false)).toBe(TRAFFIC_LIGHT_CLUSTER_PX + SIDEBAR_TOGGLE_SIZE_PX + 8);
-    expect(toggleZoneEndPx("windows", false)).toBe(46);
+    expect(toggleZoneEndPx("macos", false)).toBe(navLeftPx("macos", false) + NAV_BUTTONS_WIDTH_PX + SIDEBAR_TOGGLE_GAP_PX);
+    expect(toggleZoneEndPx("windows", false)).toBe(navLeftPx("windows", false) + NAV_BUTTONS_WIDTH_PX + SIDEBAR_TOGGLE_GAP_PX);
+  });
+
+  it("toggle zone end includes the nav buttons", () => {
+    for (const [os, fullscreen] of [
+      ["macos", false],
+      ["windows", false],
+      ["macos", true],
+    ] as const) {
+      expect(toggleZoneEndPx(os, fullscreen)).toBe(
+        toggleLeftPx(os, fullscreen) +
+          SIDEBAR_TOGGLE_SIZE_PX +
+          NAV_TOGGLE_GAP_PX +
+          NAV_BUTTONS_WIDTH_PX +
+          SIDEBAR_TOGGLE_GAP_PX,
+      );
+    }
   });
 
   it("with the window toggle the header clears the toggle zone and never pads when the sidebar already does", () => {
@@ -57,8 +77,13 @@ describe("window chrome layout maths", () => {
     expect(48 + HEADER_BASE_PADDING_PX + headerLeftInsetPx("macos", false, 48, true)).toBe(zone);
     // Expanded: the sidebar's strip holds the toggle.
     expect(headerLeftInsetPx("macos", false, 192, true)).toBe(0);
-    // No lights: the toggle fits in the rail, the header needs nothing.
-    expect(headerLeftInsetPx("windows", false, 48, true)).toBe(0);
-    expect(headerLeftInsetPx("macos", true, 48, true)).toBe(0);
+    // No lights: the cluster no longer fits in the 48px rail once the nav
+    // buttons join the toggle, so the header pads to the zone end too.
+    expect(48 + HEADER_BASE_PADDING_PX + headerLeftInsetPx("windows", false, 48, true)).toBe(
+      toggleZoneEndPx("windows", false),
+    );
+    expect(48 + HEADER_BASE_PADDING_PX + headerLeftInsetPx("macos", true, 48, true)).toBe(
+      toggleZoneEndPx("macos", true),
+    );
   });
 });
