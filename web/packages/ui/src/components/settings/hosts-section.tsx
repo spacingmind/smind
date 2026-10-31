@@ -203,9 +203,8 @@ function HostsSection(_props: SettingsSectionContext) {
 registerSettingsSection({
   id: "hosts",
   label: "Hosts",
-  groupLabel: "Connection",
   description: "Other smind hosts paired with this one.",
-  order: 155,
+  order: 140,
   icon: <Icons.host aria-hidden className="size-3.5" />,
   render: (ctx) => <HostsSection {...ctx} />,
 });
