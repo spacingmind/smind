@@ -47,13 +47,12 @@ describe("RunErrorBox failure classes", () => {
     expect(screen.queryByTestId("run-failure-retry")).toBeNull();
   });
 
-  it("transient_429 spent: a Retry button that re-runs the prompt", () => {
-    const onRetryNow = vi.fn();
+  it("transient_429 spent: no countdown and no second Retry (the footer owns it)", () => {
     const run = entry({ failureKind: "transient_429", failureAction: { kind: "retry_now", label: "Retry" } });
-    render(<RunErrorBox run={run} onRetryNow={onRetryNow} />);
+    render(<RunErrorBox run={run} />);
     expect(screen.queryByTestId("run-failure-countdown")).toBeNull();
-    fireEvent.click(screen.getByTestId("run-failure-retry"));
-    expect(onRetryNow).toHaveBeenCalledWith(run);
+    expect(screen.queryByTestId("run-failure-retry")).toBeNull();
+    expect(screen.getByTestId("run-failure-hint").textContent).toContain("short throttle");
   });
 
   it("plan_window_exhausted keeps the old error box (no class control)", () => {

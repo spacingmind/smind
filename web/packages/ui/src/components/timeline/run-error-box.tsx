@@ -12,7 +12,7 @@ import type { RunEntry } from "@/hooks/use-run-timeline";
  * the stored raw text (transport chain, the provider's own wording and its
  * reset time in its own zone), and the optional "Retry with higher effort".
  */
-export function RunErrorBox({ run, onRetry, onRetryNow }: { run: RunEntry; onRetry?: (run: RunEntry) => void; onRetryNow?: (run: RunEntry) => void }) {
+export function RunErrorBox({ run, onRetry }: { run: RunEntry; onRetry?: (run: RunEntry) => void }) {
   const [open, setOpen] = useState(false);
   // A queued automatic retry shows a live countdown: re-render once a second only while one is pending.
   const [, tick] = useState(0);
@@ -38,11 +38,6 @@ export function RunErrorBox({ run, onRetry, onRetryNow }: { run: RunEntry; onRet
         </p>
         {card?.control === "sign_in" && (
           <Button type="button" variant="outline" size="xs" data-testid="run-failure-signin" onClick={() => openFailureSettings(run.failureAction)}>
-            {card.controlLabel}
-          </Button>
-        )}
-        {card?.control === "retry" && onRetryNow && (
-          <Button type="button" variant="outline" size="xs" data-testid="run-failure-retry" onClick={() => onRetryNow(run)}>
             {card.controlLabel}
           </Button>
         )}

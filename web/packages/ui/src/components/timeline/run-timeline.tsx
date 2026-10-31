@@ -123,7 +123,7 @@ export const RunTimeline = memo(function RunTimeline({
 
         <DeliverableCards run={run} ctx={deliverables} worktreePath={worktreePath} onOpenFile={onOpenFile} />
 
-        <RunErrorBox run={run} onRetry={onRetry} onRetryNow={onRerun} />
+        <RunErrorBox run={run} onRetry={onRetry} />
 
         <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} waiting={Boolean(run.pendingPermission)} disconnected={disconnected} onContinue={onContinue} onRerun={onRerun} failover={failover}>
           <MessageActions group="run" className="ml-auto" data-testid="run-actions">

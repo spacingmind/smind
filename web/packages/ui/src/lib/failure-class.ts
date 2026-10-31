@@ -87,8 +87,8 @@ export interface FailureCardView {
   hint: string | null;
   /** The live countdown of a queued retry, or null. */
   countdown: string | null;
-  /** The control the card offers: Sign in (settings deep link), Retry, or none. */
-  control: "sign_in" | "retry" | null;
+  /** The control the card offers: Sign in (settings deep link) or none. */
+  control: "sign_in" | null;
   controlLabel: string | null;
 }
 
@@ -117,8 +117,9 @@ export function describeFailureCard(
         message: "The provider is busy for a moment.",
         hint: "A short throttle, not a usage limit.",
         countdown,
-        control: countdown ? null : "retry",
-        controlLabel: countdown ? null : "Retry",
+        // Retry lives in the footer (latest run only); the card never carries a second one.
+        control: null,
+        controlLabel: null,
       };
     }
   }

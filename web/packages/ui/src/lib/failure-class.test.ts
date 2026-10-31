@@ -75,11 +75,12 @@ describe("describeFailureCard", () => {
     expect(v?.message).toContain("not in your plan");
     expect(v?.hint).toContain("sonnet, haiku");
   });
-  it("transient_429 retrying shows the countdown, spent offers Retry; both are warning, never a quota sentence", () => {
+  it("transient_429 retrying shows the countdown, spent has no card control; both are warning, never a quota sentence", () => {
     const retrying = describeFailureCard({ ...base, failureKind: "transient_429", failureAction: { kind: "auto_retry", label: "x", attempt: 1, max: 2, nextAt: "2026-11-01T10:00:30Z" } }, NOW);
     expect(retrying).toMatchObject({ tone: "warning", control: null, countdown: "Retrying in 30s (1 of 2)" });
+    // Spent: the footer owns Retry (latest run only), so the card carries no second one.
     const spent = describeFailureCard({ ...base, failureKind: "transient_429", failureAction: { kind: "retry_now", label: "Retry" } }, NOW);
-    expect(spent).toMatchObject({ tone: "warning", control: "retry", controlLabel: "Retry" });
+    expect(spent).toMatchObject({ tone: "warning", control: null, controlLabel: null, countdown: null });
     expect(retrying?.message).not.toMatch(/quota|plan/i);
   });
   it("plan_window_exhausted and the residual are the existing rate-limit view (no card of their own)", () => {
