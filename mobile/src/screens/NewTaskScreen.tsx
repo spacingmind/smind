@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Button, Picker, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
-import { ProviderInfo, Space, Task, Workspace, listProviders, listWorkspaces } from '../api';
+import { ProviderInfo, Space, Task, Workspace, clearProviderCooldown, listProviders, listWorkspaces } from '../api';
 import { RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -24,7 +24,8 @@ import {
   singleFlight,
   submitNewTask,
 } from '../newTask';
-import { NewTaskSelection, catalogOrFallback, defaultSelection, modeOptions, modelOptions, providerLabel, providerNote, selectProvider } from '../providerCatalog';
+import { NewTaskSelection, catalogOrFallback, defaultSelection, modeOptions, modelOptions, providerNote, providerOptions, selectModelChecked, selectProviderChecked } from '../providerCatalog';
+import { gateNotice, isHardGate, selectionGate } from '../providerGate';
 import { recallSelection, rememberSelection } from '../newTaskPrefs';
 import { issueMessage, spacesFor } from '../newTaskForm';
 import { taskHref } from '../navigation/routes';
@@ -33,6 +34,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { TextButton } from '../ui/TextButton';
 import { UiHost } from '../ui/UiHost';
 import { FieldRow } from './newtask/FieldRow';
+import { GateNotice } from './newtask/GateNotice';
 import { StartModeField } from './newtask/StartModeField';
 
 type Load =
@@ -88,6 +90,20 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
   const spaces = useMemo(() => (ready && workspaceId !== null ? spacesFor(ready.spaces, workspaceId) : []), [ready, workspaceId]);
   const provider = useMemo(() => ready?.providers.find((p) => p.id === selection?.provider), [ready, selection]);
   const note = providerNote(provider);
+  // The daemon's gate for the chosen provider/model (hard blocks Create, advisory warns), recomputed each render so an
+  // expired time gate disappears.
+  const gate = selectionGate(provider, selection?.model ?? '', Date.now());
+  const [clearing, setClearing] = useState(false);
+  const clearCooldown = useCallback(
+    (providerId: string) => {
+      setClearing(true);
+      clearProviderCooldown(conn, providerId)
+        .then(() => setReload((n) => n + 1))
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not clear the cooldown'))
+        .finally(() => setClearing(false));
+    },
+    [conn],
+  );
 
   const input = useMemo<NewTaskInput>(
     () => ({
@@ -103,7 +119,7 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
     [workspaceId, spaceId, title, prompt, selection, start],
   );
 
-  const disabled = busy || title.trim().length === 0 || created !== null;
+  const disabled = busy || title.trim().length === 0 || created !== null || isHardGate(gate);
 
   const openTask = useCallback(
     (task: { ID: number; Title: string }) => {
@@ -262,14 +278,15 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
             <UiHost style={styles.controlHost}>
               <Picker
                 selectedValue={selection.provider}
-                onValueChange={(v) => setSelection(selectProvider(providers, String(v), recallSelection()))}
+                onValueChange={(v) => setSelection(selectProviderChecked(providers, String(v), selection, recallSelection()))}
               >
-                {providers.map((p) => (
-                  <Picker.Item key={p.id} label={providerLabel(p)} value={p.id} />
+                {providerOptions(providers).map((o) => (
+                  <Picker.Item key={o.value} label={o.label} value={o.value} />
                 ))}
               </Picker>
             </UiHost>
           </FieldRow>
+          {gate ? <GateNotice notice={gateNotice(gate, Date.now(), true)} busy={clearing} onClear={clearCooldown} /> : null}
           {note ? (
             <Text style={styles.note} testID="provider-note">
               {note}
@@ -277,7 +294,7 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
           ) : null}
           <FieldRow label="Model">
             <UiHost style={styles.controlHost}>
-              <Picker selectedValue={selection.model} onValueChange={(v) => setSelection({ ...selection, model: String(v) })}>
+              <Picker selectedValue={selection.model} onValueChange={(v) => setSelection(selectModelChecked(provider, selection, String(v)))}>
                 {modelOptions(provider).map((o) => (
                   <Picker.Item key={o.value} label={o.label} value={o.value} />
                 ))}
