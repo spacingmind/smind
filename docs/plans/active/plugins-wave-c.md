@@ -82,11 +82,16 @@ with the field values; the plugin stores them), per-plugin client caches.
 
 ## Progress
 
-- [ ] plan PR
-- [ ] PC1 (validation contract `plugins-wave-c-pc1.contract.md`, added with PC1)
+- [x] plan PR (#704, merged)
+- [x] PC1 implemented (validation contract [plugins-wave-c-pc1.contract.md](plugins-wave-c-pc1.contract.md)); PR and validator verdict in its body
 - [ ] PC2
 - [ ] PC3
 
 ## Validation
 
-(filled per PR)
+**PC1 (2026-10-31).** Package `internal/plugins/uiview` (schema, caps, sanitisers, 40+ shared fixtures in `testdata/fixtures`),
+manifest `panels`/`sidebar`, `Manager.Panels`/`Manager.View`, wsapi `plugin.panels`, `plugin.view`, native plugin call `ui.refresh` and topic `plugin.event`,
+the hello-process panels, authoring-guide section. Decisions refined while building: the rpc panel view is called with `{panelId, context}`; the
+sanitiser rejects (never trims) and also drops markdown reference definitions with a non-http(s) target and treats an unclosed backtick as plain text;
+`ui.refresh` is answered natively by the plugin session (no capability, only for a declared panel). Nine mutations are in the contract; each named test fails
+under its mutation. Not done in PC1: any client renderer (PC2/PC3), the relay frame-cap test (PC3), palette/sidebar registration in the apps (PC2).
