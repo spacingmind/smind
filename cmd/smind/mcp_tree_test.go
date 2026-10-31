@@ -420,7 +420,7 @@ func TestMCPTaskTree_FailureFieldOnNode(t *testing.T) {
 	if err := json.Unmarshal(raw, &run); err != nil {
 		t.Fatal(err)
 	}
-	if run.State != "error" || run.FailureKind != "rate_limited" || run.Window != "5h" || run.ResetAt == "" {
+	if run.State != "error" || run.FailureKind != "plan_window_exhausted" || run.Window != "5h" || run.ResetAt == "" {
 		t.Fatalf("node run = %s, want error / rate_limited / 5h / resetAt", raw)
 	}
 	if _, err := time.Parse(time.RFC3339, run.ResetAt); err != nil || !strings.HasSuffix(run.ResetAt, "Z") {

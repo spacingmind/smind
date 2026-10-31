@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
@@ -74,6 +75,8 @@ type taskTreeNodeRun struct {
 	ResetAt     string `json:"resetAt,omitempty"`
 	// ResetInferred: ResetAt was read in an assumed zone (show with ≈).
 	ResetInferred bool `json:"resetInferred,omitempty"`
+	// Action is the latest failure's next step; omitted when none.
+	Action *failure.Action `json:"action,omitempty"`
 }
 
 type taskTreeCounts struct {

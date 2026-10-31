@@ -3,13 +3,15 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/runs/failure"
 )
 
 // checkRateLimited asserts the typed failure fields of a rate-limited run.
 func checkRateLimited(t *testing.T, tool, kind, window, resetAt string) {
 	t.Helper()
-	if kind != "rate_limited" || window != "5h" || resetAt == "" {
-		t.Fatalf("%s failure = %q/%q/%q, want rate_limited/5h/resetAt set", tool, kind, window, resetAt)
+	if kind != "plan_window_exhausted" || window != "5h" || resetAt == "" {
+		t.Fatalf("%s failure = %q/%q/%q, want plan_window_exhausted/5h/resetAt set", tool, kind, window, resetAt)
 	}
 	ts, err := time.Parse(time.RFC3339, resetAt)
 	if err != nil || ts.Location() != time.UTC {
@@ -90,5 +92,30 @@ func TestMCPRunList_FailureFields(t *testing.T) {
 	}
 	if seen != 2 {
 		t.Fatalf("run_list rows matched = %d, want 2: %v", seen, list.Runs)
+	}
+}
+
+// TestMCPTaskStatus_CarriesAction: a failed run's task_status, task_wait and
+// task_logs carry the daemon-built next action, and a clean run carries none.
+func TestMCPTaskStatus_CarriesAction(t *testing.T) {
+	env := newMCPSession(t)
+	runID := startTestRun(t, env.srvURL, "glm", "quota-error")
+	var wait taskWaitOutput
+	callMCPTool(t, env.cs, "task_wait", map[string]any{"runId": runID, "timeoutSeconds": 30}, &wait)
+	var status taskStatusOutput
+	callMCPTool(t, env.cs, "task_status", map[string]any{"runId": runID}, &status)
+	var logs taskLogsOutput
+	callMCPTool(t, env.cs, "task_logs", map[string]any{"runId": runID}, &logs)
+	for tool, a := range map[string]*failure.Action{"task_wait": wait.Action, "task_status": status.Action, "task_logs": logs.Action} {
+		if a == nil || a.Kind == "" || a.Label == "" {
+			t.Fatalf("%s action = %+v, want a kind and a label", tool, a)
+		}
+	}
+	okID := startTestRun(t, env.srvURL, "glm", "stop end_turn")
+	var ok taskStatusOutput
+	callMCPTool(t, env.cs, "task_wait", map[string]any{"runId": okID, "timeoutSeconds": 30}, &taskWaitOutput{})
+	callMCPTool(t, env.cs, "task_status", map[string]any{"runId": okID}, &ok)
+	if ok.Action != nil {
+		t.Fatalf("a clean run carries action %+v", ok.Action)
 	}
 }
