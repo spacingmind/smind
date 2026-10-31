@@ -38,16 +38,19 @@ func TestFileReadRange_WindowsPathForms(t *testing.T) {
 		t.Errorf("upper-case .PDF: %+v err=%v, want ext .pdf kind pdf no mismatch", st, err)
 	}
 
-	refused := []struct{ name, path string }{
-		{"UNC", `\\server\share\x.pdf`},
-		{"UNC forward slashes", `//server/share/x.pdf`},
-		{"verbatim UNC", `\\?\UNC\server\share\x.pdf`},
-		{"device namespace", `\\.\C:\Windows\win.ini`},
-		{"drive-relative", `C:x.pdf`},
-		{"escape with backslashes", `..\outside.pdf`},
-		{"escape verbatim other path", `\\?\C:\Windows\win.ini`},
-		{"reserved device name", `NUL`},
-		{"reserved device name in subdir", `sub\CON`},
+	refused := []struct {
+		name, path string
+		guard      bool // refused by the path-form guard (invalid_params), before any filesystem access
+	}{
+		{"UNC", `\\server\share\x.pdf`, true},
+		{"UNC forward slashes", `//server/share/x.pdf`, true},
+		{"verbatim UNC", `\\?\UNC\server\share\x.pdf`, true},
+		{"device namespace", `\\.\C:\Windows\win.ini`, true},
+		{"drive-relative", `C:x.pdf`, true},
+		{"escape with backslashes", `..\outside.pdf`, false},
+		{"escape verbatim other path", `\\?\C:\Windows\win.ini`, false},
+		{"reserved device name", `NUL`, false},
+		{"reserved device name in subdir", `sub\CON`, false},
 	}
 	for _, c := range refused {
 		done := make(chan error, 1)
@@ -56,6 +59,8 @@ func TestFileReadRange_WindowsPathForms(t *testing.T) {
 		case err := <-done:
 			if err == nil {
 				t.Errorf("%s (%q): want refusal", c.name, c.path)
+			} else if c.guard && !asInvalid(err) {
+				t.Errorf("%s (%q): err = %v, want the path-form guard's InvalidParamsError", c.name, c.path, err)
 			} else if strings.Contains(err.Error(), root) {
 				t.Errorf("%s: error leaks an absolute path: %v", c.name, err)
 			}
