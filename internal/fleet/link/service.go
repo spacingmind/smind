@@ -1,0 +1,326 @@
+package link
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/spacingmind/smind/internal/fleet/hello"
+	"github.com/spacingmind/smind/internal/fleet/identity"
+	"github.com/spacingmind/smind/internal/fleet/pairing"
+	"github.com/spacingmind/smind/internal/fleet/registry"
+	"github.com/spacingmind/smind/internal/wsapi"
+)
+
+// ServiceOptions configures NewService.
+type ServiceOptions struct {
+	Key      *identity.Key
+	Registry *registry.Registry
+	Secrets  *Secrets
+	Manager  *Manager
+	Window   *pairing.Window
+	Version  string
+	// DefaultAddresses are the direct addresses this daemon is reachable
+	// on, from config; nil when it does not know them.
+	DefaultAddresses func() []string
+	// Hostname names this host to a peer; os.Hostname when nil.
+	Hostname func() string
+	Now      func() time.Time
+	// Dial opens the pairing connection; the default is DialDirect with the
+	// password the human gave.
+	Dial DialFunc
+}
+
+// Service is the dial-side admin half of the fleet: it mints invites, pairs
+// to a pasted invite, probes links and sets routes. It implements
+// wsapi.FleetLinks over the registry and the link manager.
+type Service struct {
+	o ServiceOptions
+}
+
+var _ wsapi.FleetLinks = (*Service)(nil)
+
+// maxLabelBytes caps the label this host announces to a peer.
+const maxLabelBytes = 64
+
+// NewService returns a service over o.
+func NewService(o ServiceOptions) *Service {
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	if o.Hostname == nil {
+		o.Hostname = func() string { h, _ := os.Hostname(); return h }
+	}
+	return &Service{o: o}
+}
+
+// Start resumes the links of every host whose outbound direction is enabled
+// and whose pairing is pending or approved, after a daemon restart.
+func (s *Service) Start() {
+	hosts, err := s.o.Registry.List()
+	if err != nil {
+		return
+	}
+	for _, h := range hosts {
+		if h.State != registry.StatePending && h.State != registry.StateApproved {
+			continue
+		}
+		if out, _, err := s.o.Registry.Links(h.HostID); err == nil && out.Enabled {
+			s.o.Manager.Ensure(h.HostID)
+		}
+	}
+}
+
+// Invite mints an invite deep link and opens the pairing window for it. The
+// invite carries no password: the human gives that to the invitee apart.
+func (s *Service) Invite(_ context.Context, p wsapi.FleetInviteParams) (wsapi.FleetInviteResult, error) {
+	if p.Via != "" && p.Via != "direct" {
+		if p.Via == "relay" {
+			return wsapi.FleetInviteResult{}, errors.New("relay invites are not available yet")
+		}
+		return wsapi.FleetInviteResult{}, fmt.Errorf("unknown invite route %q", p.Via)
+	}
+	addrs := p.Addresses
+	if len(addrs) == 0 && s.o.DefaultAddresses != nil {
+		addrs = s.o.DefaultAddresses()
+	}
+	if len(addrs) == 0 {
+		return wsapi.FleetInviteResult{}, errors.New("pass --addr: this daemon does not know its own reachable address")
+	}
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return wsapi.FleetInviteResult{}, err
+	}
+	inv := pairing.Invite{
+		V:         pairing.InviteVersion,
+		HostID:    s.o.Key.HostID(),
+		Pub:       s.o.Key.Public(),
+		Addresses: addrs,
+		Nonce:     nonce,
+	}
+	// Validate before opening the window, so a bad address does not leave
+	// a window open for nothing.
+	inv.Expires = s.o.Now().Add(pairing.DefaultWindow)
+	if err := inv.Validate(); err != nil {
+		return wsapi.FleetInviteResult{}, err
+	}
+	dur := time.Duration(p.WindowSeconds) * time.Second
+	_, expires := s.o.Window.Open(dur, 1)
+	inv.Expires = expires
+	link, err := inv.Encode()
+	if err != nil {
+		s.o.Window.Close()
+		return wsapi.FleetInviteResult{}, err
+	}
+	return wsapi.FleetInviteResult{Invite: link, ExpiresAt: expires, HostID: inv.HostID}, nil
+}
+
+// pairResult is the callee's answer to fleet.pair.request.
+type pairResult struct {
+	HostID string `json:"hostId"`
+	Alias  string `json:"alias"`
+	State  string `json:"state"`
+	SAS    string `json:"sas"`
+}
+
+// Add pairs to the inviter behind p.Invite: it dials the invite's address,
+// runs the handshake, asks to pair and compares the SAS before recording
+// anything. The password goes only to the dialer.
+func (s *Service) Add(ctx context.Context, p wsapi.FleetAddParams) (wsapi.FleetAddResult, error) {
+	inv, err := pairing.Decode(p.Invite)
+	if err != nil {
+		return wsapi.FleetAddResult{}, err
+	}
+	if s.o.Now().After(inv.Expires) {
+		return wsapi.FleetAddResult{}, errors.New("invite expired")
+	}
+	alias := p.Alias
+	if alias == "" {
+		alias = "host-" + inv.HostID[:6]
+	}
+	if err := registry.ValidateAlias(alias); err != nil {
+		return wsapi.FleetAddResult{}, err
+	}
+	if _, err := s.o.Registry.ByAlias(alias); err == nil {
+		return wsapi.FleetAddResult{}, fmt.Errorf("alias %q is already used by a paired host", alias)
+	} else if !errors.Is(err, registry.ErrNotFound) {
+		return wsapi.FleetAddResult{}, err
+	}
+	if _, err := s.o.Registry.Get(inv.HostID); err == nil {
+		return wsapi.FleetAddResult{}, errors.New("already paired")
+	} else if !errors.Is(err, registry.ErrNotFound) {
+		return wsapi.FleetAddResult{}, err
+	}
+	addr, warning, err := chooseAddress(inv, p.AllowCleartext)
+	if err != nil {
+		return wsapi.FleetAddResult{}, err
+	}
+	tr := Transport{Kind: KindDirect, URL: addr, AllowCleartext: p.AllowCleartext}
+	conn, err := s.dial(ctx, tr, inv.HostID, p.Password)
+	if err != nil {
+		return wsapi.FleetAddResult{}, err
+	}
+	defer conn.Close()
+	peer := Peer{HostID: inv.HostID, Pub: ed25519.PublicKey(inv.Pub), Alias: alias}
+	res, err := Handshake(ctx, conn, s.o.Key, peer, s.o.Version, s.o.Now)
+	if err != nil {
+		return wsapi.FleetAddResult{}, err
+	}
+	if res.State != "pairing" {
+		return wsapi.FleetAddResult{}, errors.New("the host is not accepting a new pairing; open a window with `smind host invite` on it")
+	}
+	label := s.o.Hostname()
+	if len(label) > maxLabelBytes {
+		label = label[:maxLabelBytes]
+	}
+	if registry.ValidateLabel(label) != nil {
+		label = ""
+	}
+	var pr pairResult
+	req := map[string]string{"alias": s.ownAlias(label), "label": label}
+	if err := conn.Call(ctx, hello.MethodPairRequest, req, &pr); err != nil {
+		return wsapi.FleetAddResult{}, fmt.Errorf("pairing request: %w", err)
+	}
+	localSAS := pairing.SAS(s.o.Key.Public(), inv.Pub, res.NonceC, res.NonceA)
+	if pr.SAS != localSAS {
+		return wsapi.FleetAddResult{}, errors.New("the SAS differs: possible interception, aborting")
+	}
+	h, err := s.o.Registry.PairAsInitiator(ed25519.PublicKey(inv.Pub), alias, "", tr.JSON())
+	if err != nil {
+		return wsapi.FleetAddResult{}, err
+	}
+	if p.Password != "" {
+		if err := s.o.Secrets.Put(h.HostID, Entry{Password: p.Password}); err != nil {
+			return wsapi.FleetAddResult{}, fmt.Errorf("store the password: %w", err)
+		}
+	}
+	s.o.Manager.Ensure(h.HostID)
+	return wsapi.FleetAddResult{HostID: h.HostID, Alias: alias, State: registry.StatePending, SAS: localSAS, Warning: warning}, nil
+}
+
+// chooseAddress picks the first invite address a direct link may use.
+func chooseAddress(inv pairing.Invite, allowCleartext bool) (addr, warning string, err error) {
+	if len(inv.Addresses) == 0 {
+		return "", "", errors.New("relay routes are not available yet")
+	}
+	for _, a := range inv.Addresses {
+		w, cerr := CheckDirectRoute(a, allowCleartext)
+		if cerr != nil {
+			err = cerr
+			continue
+		}
+		return a, w, nil
+	}
+	return "", "", err
+}
+
+func (s *Service) dial(ctx context.Context, tr Transport, hostID, password string) (Conn, error) {
+	if s.o.Dial != nil {
+		return s.o.Dial(ctx, tr, hostID)
+	}
+	return DialDirect(ctx, tr, password)
+}
+
+// ownAlias derives the alias this host proposes for itself from its label.
+func (s *Service) ownAlias(label string) string {
+	fallback := "host-" + s.o.Key.HostID()[:6]
+	var b strings.Builder
+	for _, r := range strings.ToLower(label) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	a := b.String()
+	if a == "" {
+		return fallback
+	}
+	if a[0] < 'a' || a[0] > 'z' {
+		a = "h" + a
+	}
+	if len(a) > 32 {
+		a = a[:32]
+	}
+	if registry.ValidateAlias(a) != nil {
+		return fallback
+	}
+	return a
+}
+
+// Test probes the link to hostID with one fresh handshake.
+func (s *Service) Test(ctx context.Context, hostID string) (wsapi.FleetTestResult, error) {
+	st, d, err := s.o.Manager.Test(ctx, hostID)
+	if err != nil {
+		return wsapi.FleetTestResult{}, err
+	}
+	return wsapi.FleetTestResult{OK: st.State == StateConnected, LatencyMs: d.Milliseconds(), State: string(st.State), Code: st.Code}, nil
+}
+
+// NotifyReverse tells the peer over the live link that its direction to us
+// flipped.
+func (s *Service) NotifyReverse(ctx context.Context, hostID string, on bool) error {
+	c, ok := s.o.Manager.Conn(hostID)
+	if !ok {
+		return errors.New("no live link to the host; it will learn the new state when the link comes up")
+	}
+	state := "reverse_disabled"
+	if on {
+		state = "reverse_enabled"
+	}
+	return c.Call(ctx, hello.MethodLinkState, map[string]string{"state": state}, nil)
+}
+
+// PeerReverseChanged starts our link to a peer that enabled its direction,
+// or stops it when the peer disabled it. Without a route the loop reports
+// "no route" until a human runs `smind host route`.
+func (s *Service) PeerReverseChanged(hostID string, on bool) {
+	if on {
+		s.o.Manager.Ensure(hostID)
+		return
+	}
+	s.o.Manager.Drop(hostID)
+}
+
+// LinkState reports the live link's state and detail.
+func (s *Service) LinkState(hostID string) (state, detail string) {
+	st := s.o.Manager.Status(hostID)
+	return string(st.State), st.Detail
+}
+
+// Forget stops the link to a removed host and drops its secrets.
+func (s *Service) Forget(hostID string) {
+	s.o.Manager.Drop(hostID)
+	_ = s.o.Secrets.Delete(hostID)
+}
+
+// SetRoute stores the direct route (and password) for hostID and restarts
+// its link so the new route takes effect.
+func (s *Service) SetRoute(_ context.Context, p wsapi.FleetRouteParams) error {
+	if _, err := CheckDirectRoute(p.Address, p.AllowCleartext); err != nil {
+		return err
+	}
+	tr := Transport{Kind: KindDirect, URL: p.Address, AllowCleartext: p.AllowCleartext}
+	if err := s.o.Registry.SetOutboundTransport(p.HostID, tr.JSON()); err != nil {
+		return err
+	}
+	if p.Password != "" {
+		if err := s.o.Secrets.Put(p.HostID, Entry{Password: p.Password}); err != nil {
+			return fmt.Errorf("store the password: %w", err)
+		}
+	}
+	out, _, err := s.o.Registry.Links(p.HostID)
+	if err != nil {
+		return err
+	}
+	if out.Enabled {
+		s.o.Manager.Drop(p.HostID)
+		s.o.Manager.Ensure(p.HostID)
+	}
+	return nil
+}
