@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // maxCommandBytes caps what the splitter will scan at all; a larger request
@@ -74,8 +75,16 @@ func (s *scanner) finish() {
 	s.consumeHeredocBodies()
 	for i := range s.segs {
 		s.segs[i].Raw = s.elided(s.spans[i].start, s.spans[i].end)
+		if s.redacted && s.spans[i].start >= s.redactAt {
+			// Where the heredoc body ends is not knowable here, so a segment
+			// after the operator may really be body text: never show it.
+			s.segs[i].Raw = redactedText
+		}
 	}
 }
+
+// redactedText replaces text the splitter cannot vouch for as body-free.
+const redactedText = "[redacted: the command has a heredoc whose tag is not valid UTF-8]"
 
 // word accumulates one shell word. dynamic is set for an unquoted or
 // double-quoted $ or backtick and for an unquoted * ? [ — single quotes are
@@ -117,6 +126,8 @@ type scanner struct {
 	heredocs []*heredoc // every heredoc, in operator order, once consumed
 	win      bool       // Windows mode: see winLiteralBackslashNext
 	depth    int        // nesting level of substitutions and shells
+	redacted bool       // a heredoc tag was not valid UTF-8: see redactedText
+	redactAt int        // source offset of that heredoc operator
 	inner    []Segment  // segments of substituted/nested text, appended after segs
 }
 
@@ -468,6 +479,15 @@ func (s *scanner) redirect() {
 			if s.w.dynamic && !isHere {
 				s.seg().Dynamic = true
 			}
+			if isHere && !utf8.ValidString(tok.Target) {
+				// bash matches the terminator by bytes, but nothing downstream (card,
+				// audit, the body-elision oracle) can agree on where such a body ends,
+				// so the body could leak into the rendered command. Escalate and redact.
+				s.unparsed("heredoc tag is not valid UTF-8")
+				if !s.redacted {
+					s.redacted, s.redactAt = true, start
+				}
+			}
 			if isHere {
 				s.pending = append(s.pending, &heredoc{
 					opStart:   start,
@@ -667,6 +687,10 @@ func (s *scanner) recurse(inner string) {
 	in := scanner{src: inner, p: s.p, segStart: -1, depth: s.depth + 1, win: s.win}
 	in.run()
 	in.finish()
+	if in.redacted && !s.redacted {
+		// The inner text sits inside this command's own text: redact all of it.
+		s.redacted, s.redactAt = true, 0
+	}
 	s.inner = append(s.inner, in.segs...)
 	s.inner = append(s.inner, in.inner...)
 }
@@ -790,6 +814,9 @@ func (s *scanner) elided(base, end int) string {
 // The operator spans and body spans of several heredocs on one line
 // interleave, so the edits are spliced in start order.
 func (s *scanner) normalized() string {
+	if s.redacted {
+		return redactedText
+	}
 	if len(s.heredocs) == 0 {
 		return strings.TrimSpace(s.src)
 	}
