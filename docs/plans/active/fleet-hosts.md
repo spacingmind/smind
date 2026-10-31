@@ -105,6 +105,7 @@ Settled: ADR-0048 D1–D7 (Human) and S1–S18 (Supervisor defaults, Human may v
 ## Progress
 
 - 2026-10-31: ADR-0048 and this plan written (docs-only PR). No code started. Peer ledger for this item: peer-glm 0 runs, peer-sonnet 0 runs (design and docs written by the Lead).
+- 2026-10-31 F1a (identity and store), contract `fleet-hosts-f1a.contract.md`. peer-glm runs 1-2 (store; identity+config) failed at once with `429 Usage limit reached for 5 hour`, reset 14:20:58 +07; peer-glm waits (no Sonnet fallback).
 
 ## Validation
 
