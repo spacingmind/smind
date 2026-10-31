@@ -49,6 +49,14 @@ describe("PluginPage", () => {
     expect(pane).toHaveAttribute("data-panel", "about");
   });
 
+  it("page does not repeat the title in the pane header", async () => {
+    mount(seedPanels({ panels: [ABOUT], sidebar: [] }));
+    await flush();
+
+    // The page header owns the title; the pane header shows only the plugin id.
+    expect(screen.getAllByText("About Acme")).toHaveLength(1);
+  });
+
   it("falls back to the panel id while the list has not loaded, and the back button navigates back", async () => {
     const onNavigateBack = vi.fn();
     // No seeded cache entry: the query is pending, so the title is the panel id.
