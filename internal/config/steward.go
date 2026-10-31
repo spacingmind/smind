@@ -17,7 +17,7 @@ type StewardConfig struct {
 	// AutoReview lists workspace titles whose tasks are reviewed without a
 	// human asking (exact match, like learning_mode's workspaces).
 	AutoReview []string `yaml:"autoReview"`
-	// Annotate writes the review's verdict on the task.
+	// Annotate turns on steward_annotate: an advisory recommendation on an escalated permission request (ADR-0047 §6, S2b). Off by default.
 	Annotate bool `yaml:"annotate"`
 	// MaxBudgetUsd is the hard ceiling BudgetUsd may not exceed. 0 = 5.
 	MaxBudgetUsd float64 `yaml:"maxBudgetUsd"`
