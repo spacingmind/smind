@@ -566,7 +566,14 @@ None (reference-only).
 
 ### Progress / Validation
 
-- [ ] Stage 7 in progress (this PR).
+- [x] Stage 7 implemented (this PR): Automations page (`activeView "automations"`), off-state explainer card, `smind config set automations.enabled`, `automationId`/`automationName` on task.list/task.get, Automation chip (sidebar row, task header, inbox row) and the sidebar filter "Started by automation".
+
+**Validation (2026-10-31)**
+
+- Mutations (each failed the named test, file restored with `git checkout --`): Go `edit.go` bool check removed (`TestConfigSetAutomationsEnabledRejectsNonBool`); `automations.go` `decision = 'fire'` dropped (`TestAutomationLinksForTasks`); `task_budget.go` link not filled (`TestTaskListExposesAutomationLink`); web `automations-off-card.tsx` command text changed (`shows the exact command and copies it`); `automations-page.tsx` off card removed (`off state shows the card, not the list`) and "your time" removed (`lists rows with the switch, UTC and local next run`); `app-sidebar.tsx` quick action back to Settings (`sidebar quick action opens the page`), palette `run` no-op (`palette command opens the page`), filter predicate `true` (`filter shows only automation tasks` + 3 more); `automation-chip.tsx` guard removed (`absent without a link`).
+- Frames (isolated daemon at `~/.smind/dogfood/automations`, seeded with `smind automation create` + sqlite audit rows, no model calls), sheets in `/tmp/steward4/zcode-audit/after/automations/`: `auto_off_empty_1280.png`, `auto_list_1280.png`, `auto_history_form_1280.png`, `auto_chip_filter_1280.png`, `auto_390.png`, `auto_transition_390.png`. ZCode has no automations screen, so the L side is the ZCode home frame (its sidebar has the Automations row).
+- Found in frames: at 390 the off-card command was truncated (now wraps); the page body was blank while the list loaded (now loading rows).
+- Not done: mobile app untouched (follow-up: it shares `automation.list`, no chip there); the memory panel stays inside the existing History dialog (reused, not a page section).
 
 ## Decisions
 
