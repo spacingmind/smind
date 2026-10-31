@@ -699,7 +699,7 @@ export function TerminalPane({
         pasteDisabled={!terminalId}
         style={{
           marginBottom: keyboardInset,
-          paddingBottom: keyboardInset > 0 ? undefined : "env(safe-area-inset-bottom)",
+          paddingBottom: keyboardInset > 0 ? undefined : "calc(0.5rem + env(safe-area-inset-bottom))",
         }}
       />
     </div>
