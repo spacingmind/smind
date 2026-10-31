@@ -246,8 +246,9 @@ func TestMCPHostParamHasHopLimitText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seen := 0
 	for _, tool := range res.Tools {
-		if tool.Name != "task_status" {
+		if tool.Name != "task_status" && tool.Name != "task_new" && tool.Name != "task_send" && tool.Name != "task_stop" && tool.Name != "task_wait" {
 			continue
 		}
 		raw, _ := json.Marshal(tool.InputSchema)
@@ -260,9 +261,11 @@ func TestMCPHostParamHasHopLimitText(t *testing.T) {
 			t.Fatal(err)
 		}
 		if d := s.Properties["host"].Description; !strings.Contains(d, "hop limit") {
-			t.Fatalf("host description = %q", d)
+			t.Fatalf("%s host description = %q", tool.Name, d)
 		}
-		return
+		seen++
 	}
-	t.Fatal("task_status not listed")
+	if seen != 5 {
+		t.Fatalf("checked %d host-taking tools, want 5", seen)
+	}
 }

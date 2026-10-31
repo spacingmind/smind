@@ -55,7 +55,12 @@ type Options struct {
 }
 
 // CallOpts are the per-call provenance inputs. An empty Trace mints a new id.
-type CallOpts struct{ Trace, OriginTask string }
+type CallOpts struct {
+	Trace, OriginTask string
+
+	// Timeout overrides Options.Timeout for this call when > 0.
+	Timeout time.Duration
+}
 
 // Error is a typed refusal or client-side failure.
 type Error struct {
@@ -85,6 +90,34 @@ func IsTransport(err error) bool {
 	}
 	var e *Error
 	return !errors.As(err, &e)
+}
+
+// IsConnecting reports whether err is a host_unavailable because the link is
+// still connecting: nothing was sent, so the peer is not at fault.
+func IsConnecting(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Code == CodeHostUnavailable && e.connecting
+}
+
+// CountsAsFailure reports whether err says the peer failed to answer:
+// transport errors, timeouts and a host that is down do; typed refusals and
+// a link still connecting do not.
+func CountsAsFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if IsTransport(err) || IsCode(err, CodeTimeout) {
+		return true
+	}
+	return IsCode(err, CodeHostUnavailable) && !IsConnecting(err)
+}
+
+// Ambiguous reports whether the callee may have acted before the error, so a
+// blind retry is unsafe. Only transport errors and timeouts are ambiguous;
+// host_unavailable, unknown_host and every typed refusal mean the call was
+// definitely not carried out.
+func Ambiguous(err error) bool {
+	return IsTransport(err) || IsCode(err, CodeTimeout)
 }
 
 // Client makes typed fleet read calls to peers.
@@ -196,7 +229,11 @@ func (c *Client) call(ctx context.Context, ref string, o CallOpts, method string
 		ReqID:      c.o.NewID(),
 		TS:         c.o.Now().Unix(),
 	}
-	cctx, cancel := context.WithTimeout(ctx, c.o.Timeout)
+	timeout := c.o.Timeout
+	if o.Timeout > 0 {
+		timeout = o.Timeout
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	err = conn.Call(cctx, method, build(prov), out)
 	if err == nil {
