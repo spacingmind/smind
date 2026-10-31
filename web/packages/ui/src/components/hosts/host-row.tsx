@@ -48,6 +48,7 @@ export function HostRow({
       <SettingsGroup>
         <SettingsRow
           testId={`host-header-${alias}`}
+          className="flex-row items-center gap-3"
           label={
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="truncate text-ui-base font-medium text-foreground">{alias}</span>
@@ -101,6 +102,7 @@ export function HostRow({
         />
         <SettingsRow
           testId={`host-dir-out-${alias}`}
+          className="flex-row items-center gap-3"
           label={`This host → ${alias}`}
           description="Use its workspaces and agents from here"
           control={
@@ -111,6 +113,7 @@ export function HostRow({
         />
         <SettingsRow
           testId={`host-dir-in-${alias}`}
+          className="flex-row items-center gap-3"
           label={`${alias} → this host`}
           description={
             host.inbound.enabled ? (
