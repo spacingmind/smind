@@ -32,6 +32,8 @@ func TestSanitize_Markdown_StripsRawHTML(t *testing.T) {
 		{"<scr<script>ipt>x", "ipt>x"},
 		{"code span `<script>` stays", "code span `<script>` stays"},
 		{"```\n<img src=x>\n```\nafter <img>", "```\n<img src=x>\n```\nafter "},
+		{"`<script>x</script>", "`x"},
+		{"a `ok` then `<img src=x onerror=y>", "a `ok` then `"},
 	}
 	for _, tc := range cases {
 		if got := SanitizeMarkdown(tc.in); got != tc.want {

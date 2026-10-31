@@ -83,11 +83,9 @@ func writeSanitizedLine(b *strings.Builder, line string) {
 			inCode = true
 		}
 	}
-	if inCode {
-		b.WriteString(line[start:])
-	} else {
-		b.WriteString(sanitizeSegment(line[start:]))
-	}
+	// An unclosed backtick opens no code span (CommonMark), so the tail from
+	// that backtick on is ordinary text.
+	b.WriteString(sanitizeSegment(line[start:]))
 }
 
 // sanitizeSegment strips tags and rewrites images and links outside code.
