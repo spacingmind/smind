@@ -66,8 +66,9 @@ predates this plan — `zcode-visual-parity` changes what these things
    guards it). Light `--muted-foreground` is `oklch(0.5 0 0)` (ZCode's
    lighter grey fell to 4.15:1 on the sidebar). `--warning` stays ZCode's
    orange for fills, dots and glyphs; orange **text** uses the added role
-   token `--warning-text` (`text-warning-text`: light = the
-   warning-surface foreground, dark = `--warning`). Light `--warning` is
+   token `--warning-text` (`text-warning-text`: light = `#a84a00`, a
+   warmer orange that still clears 4.5:1 on the tinted surfaces, dark =
+   `--warning`). Light `--warning` is
    2.82:1 on `--background`, a known sub-3:1 exception for non-text use.
 
 **The input token exception.** smind's pre-existing `border-input`

@@ -29,8 +29,8 @@ describe("contrast AA regression", () => {
     it.each(OPAQUE_SURFACES)("--warning-text on %s >= 4.5", (surface) => {
       expect(tokenContrast(vars, "--warning-text", surface)).toBeGreaterThanOrEqual(4.5);
     });
-    it("--warning-text on --warning-surface over --background >= 4.5", () => {
-      expect(tokenContrast(vars, "--warning-text", "--warning-surface", "--background")).toBeGreaterThanOrEqual(4.5);
+    it.each(TRANSLUCENT_BASES)("--warning-text on --warning-surface over %s >= 4.5", (base) => {
+      expect(tokenContrast(vars, "--warning-text", "--warning-surface", base)).toBeGreaterThanOrEqual(4.5);
     });
 
     // Fill/glyph (dots, icons, borders; never the only carrier of meaning). Light `--warning` is

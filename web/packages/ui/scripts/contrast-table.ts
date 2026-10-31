@@ -27,6 +27,7 @@ const pairs: Pair[] = [
   ),
   ...["--background", "--sidebar", "--card", "--panel"].map((s) => ({ name: "--warning-text (was --warning)", fgBefore: "--warning", fgAfter: "--warning-text", surface: s })),
   { name: "--warning-text (was --warning)", fgBefore: "--warning", fgAfter: "--warning-text", surface: "--warning-surface", base: "--background" },
+  { name: "--warning-text (was --warning)", fgBefore: "--warning", fgAfter: "--warning-text", surface: "--warning-surface", base: "--sidebar" },
 ];
 
 const r = (n: number) => n.toFixed(2);

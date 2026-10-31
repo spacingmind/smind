@@ -677,7 +677,7 @@
     --idle-task-surface: #f5f3ff;
     --warning-surface: color-mix(in srgb, var(--warning) 12%, transparent);
     --warning-surface-foreground: #914e00;
-    --warning-text: var(--warning-surface-foreground);
+    --warning-text: #a84a00;
     --destructive-surface: color-mix(in srgb, var(--destructive) 10%, transparent);
     --destructive-surface-foreground: #b42020;
 }
