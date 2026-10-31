@@ -637,6 +637,20 @@ var migrations = []migration{
 			return addColumnIfMissing(db, "fleet_hosts", "labels", "TEXT NOT NULL DEFAULT ''")
 		},
 	},
+	{
+		// Run failure classes (docs/plans/active/run-failure-classes.md, D1):
+		// a rate_limited row with a window or a reset time is a plan window
+		// (plan_window_exhausted); the rest stay the residual rate_limited.
+		// Idempotent (every Open runs it): the residual never carries a window
+		// or a reset, so it never matches again. No installed base: the break
+		// is stated in the ADR.
+		name: "failure_kind_plan_window",
+		apply: func(db *sql.DB) error {
+			_, err := db.Exec(`UPDATE runs SET failure_kind = 'plan_window_exhausted'
+				WHERE failure_kind = 'rate_limited' AND (failure_window <> '' OR failure_reset_at IS NOT NULL)`)
+			return err
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and
