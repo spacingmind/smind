@@ -89,6 +89,7 @@ import { KeyboardProvider, useActionHandler, useActionRestriction } from "@/keyb
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
+import { focusSettingsTarget } from "@/lib/failure-class";
 import { useTaskChats } from "@/hooks/use-task-chats";
 import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
@@ -926,8 +927,10 @@ function AppShell({
   // the Settings screen's Providers stub via `smind:open-accounts`.
   useEffect(() => {
     const onOpenSettings = (e: Event) => {
-      const sectionId = (e as CustomEvent<{ sectionId?: string }>).detail?.sectionId;
-      openSettings(sectionId);
+      const detail = (e as CustomEvent<{ sectionId?: string; provider?: string }>).detail;
+      openSettings(detail?.sectionId);
+      // A run-failure deep link also names the provider whose login is broken (lib/failure-class.ts).
+      focusSettingsTarget(detail);
     };
     window.addEventListener("smind:open-settings", onOpenSettings);
     return () => window.removeEventListener("smind:open-settings", onOpenSettings);

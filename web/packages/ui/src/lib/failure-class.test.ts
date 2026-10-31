@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { useProvidersViewStore } from "@/stores/providers-view-store";
 import {
   describeFailureCard,
   failureCountdown,
   isActionableFailure,
+  focusSettingsTarget,
   openFailureSettings,
   parseSettingsTarget,
   type FailureAction,
@@ -90,3 +92,17 @@ describe("describeFailureCard", () => {
   });
 });
 
+
+describe("focusSettingsTarget", () => {
+  afterEach(() => useProvidersViewStore.getState().reset());
+  it("selects the provider on the Providers page so the deep link lands on the broken login", () => {
+    focusSettingsTarget({ sectionId: "providers", provider: "glm" });
+    expect(useProvidersViewStore.getState().selectedProviderId).toBe("glm");
+  });
+  it("leaves the page alone for another section, or when no provider is named", () => {
+    focusSettingsTarget({ sectionId: "agents", provider: "glm" });
+    focusSettingsTarget({ sectionId: "providers", accountId: 7 });
+    focusSettingsTarget(undefined);
+    expect(useProvidersViewStore.getState().selectedProviderId).toBeNull();
+  });
+});

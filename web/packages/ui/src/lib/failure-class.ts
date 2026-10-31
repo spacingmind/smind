@@ -1,3 +1,5 @@
+import { selectProvider } from "@/stores/providers-view-store";
+
 /**
  * The run failure classes (docs/plans/active/run-failure-classes.md, ADR-0050)
  * as the UI reads them: the daemon sends `failureKind` and a derived `action`.
@@ -67,6 +69,11 @@ function shortDuration(ms: number): string {
   if (m < 60) return sec === 0 ? `${m}m` : `${m}m ${sec}s`;
   const h = Math.floor(m / 60);
   return m % 60 === 0 ? `${h}h` : `${h}h ${m % 60}m`;
+}
+
+/** Applies what a settings deep link names beyond the section: on Providers, the provider to select. */
+export function focusSettingsTarget(target: { sectionId?: string; provider?: string } | undefined): void {
+  if (target?.sectionId === "providers" && target.provider) selectProvider(target.provider);
 }
 
 /** "Retrying in 28s (1 of 2)" for a queued automatic retry; null for any other action. */
