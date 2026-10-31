@@ -120,9 +120,9 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       if (typeof p !== "object" || p === null) return;
       if (typeof p.pluginId !== "string") return;
       if (typeof p.panelId === "string") {
-        void queryClient.invalidateQueries({ queryKey: ["plugin.view", p.pluginId, p.panelId] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.pluginViewOfPanel(p.pluginId, p.panelId) });
       } else {
-        void queryClient.invalidateQueries({ queryKey: ["plugin.view", p.pluginId] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.pluginViewOfPlugin(p.pluginId) });
       }
       return;
     }

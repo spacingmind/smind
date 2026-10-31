@@ -92,6 +92,10 @@ export const queryKeys = {
   /** One `plugin.view` answer for a plugin's panel (context null when the caller had none). */
   pluginView: (pluginId: string, panelId: string, context?: unknown) =>
     ["plugin.view", pluginId, panelId, context ?? null] as const,
+  /** Partial key: every cached view of one panel, across every context (a prefix, for `plugin.event`). */
+  pluginViewOfPanel: (pluginId: string, panelId: string) => ["plugin.view", pluginId, panelId] as const,
+  /** Partial key: every cached view of one plugin's panels (a prefix, for `plugin.event`). */
+  pluginViewOfPlugin: (pluginId: string) => ["plugin.view", pluginId] as const,
   /** Every cached `plugin.view` answer (a prefix, for the event bridge). */
   pluginViewAll: () => ["plugin.view"] as const,
   /** One `provider.test` answer per key: a provider's own id for run readiness (use-provider-health), an account id for an account's credential (accounts). */
