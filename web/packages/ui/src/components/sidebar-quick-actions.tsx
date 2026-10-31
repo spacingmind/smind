@@ -1,5 +1,6 @@
 import type { JSX, ReactNode } from "react";
 
+import { Kbd } from "@/components/ui/kbd";
 import { Icons, type IconComponent } from "@/lib/icons";
 
 const ROW_CLASS =
@@ -55,11 +56,7 @@ export function SidebarQuickActions(props: {
         label="Search"
         testId="sidebar-quick-search"
         onClick={props.onSearch}
-        trailing={
-          props.searchShortcut ? (
-            <kbd className="shrink-0 text-ui-sm text-foreground-subtle">{props.searchShortcut}</kbd>
-          ) : undefined
-        }
+        trailing={props.searchShortcut ? <Kbd keys={props.searchShortcut} /> : undefined}
       />
       <QuickActionRow
         icon={Icons.automation}
