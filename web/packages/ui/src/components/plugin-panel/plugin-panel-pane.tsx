@@ -4,13 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { PluginView } from "@/components/plugin-view/plugin-view";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { usePluginActionRunner } from "@/hooks/use-plugin-action-runner";
 import { findPanel, usePluginPanels, usePluginViewQuery } from "@/hooks/use-plugin-panels";
 import { Icons } from "@/lib/icons";
 import { queryKeys } from "@/lib/query-keys";
-import type { PluginViewAction, PluginActionExtra } from "@/lib/plugin-view-types";
 
 /**
  * One plugin panel's tab content (ADR-0042): the `plugin` tab kind's body.
@@ -58,6 +59,7 @@ export function PluginPanelPane({
     panelId,
     context: taskId === undefined ? undefined : { taskId },
   });
+  const { run, pendingUrl, confirmUrl, cancelUrl } = usePluginActionRunner({ pluginId, panelId });
 
   const refresh = () => {
     // The panel-scoped prefix, so a task panel's context-specific view refreshes too.
@@ -81,8 +83,7 @@ export function PluginPanelPane({
       </Alert>
     );
   } else {
-    const run = (_action: PluginViewAction, _extra?: PluginActionExtra) => {};
-    body = <PluginView doc={view.data} onAction={run} />;
+    body = <PluginView doc={view.data} onAction={(action, extra) => void run(action, extra)} />;
   }
 
   return (
@@ -116,6 +117,31 @@ export function PluginPanelPane({
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto w-full max-w-3xl p-4">{body}</div>
       </ScrollArea>
+      <ConfirmDialog
+        open={pendingUrl !== null}
+        onOpenChange={(open) => {
+          if (!open) cancelUrl();
+        }}
+        title="Open link in your browser?"
+        description={
+          pendingUrl && (
+            <div className="flex flex-col gap-2">
+              <p>
+                This will open <span className="font-medium text-foreground">{pendingUrl.host}</span> in your browser.
+                Plugin {pluginId} asked for it.
+              </p>
+              <code className="block max-w-full overflow-x-auto rounded-md bg-muted px-2 py-1 font-mono text-ui-sm text-foreground-muted">
+                {pendingUrl.url}
+              </code>
+            </div>
+          )
+        }
+        confirmLabel="Open"
+        pending={false}
+        destructive={false}
+        testId="plugin-openurl-confirm"
+        onConfirm={confirmUrl}
+      />
     </div>
   );
 }
