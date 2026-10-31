@@ -292,3 +292,20 @@ func TestSanitize_NoRemoteImageFields(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitize_Markdown_DropsUnsafeReferenceDefinitions(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"[x]: javascript:alert(1)", ""},
+		{"a\n[x]: data:text/html,hi\nb", "a\n\nb"},
+		{"[x]: <javascript:alert(1)>", ""},
+		{"  [x]:   VBScript:msgbox(1) \"title\"", ""},
+		{"[x]: https://example.com", "[x]: https://example.com"},
+		{"[x]: mailto:a@b.example", "[x]: mailto:a@b.example"},
+		{"```\n[x]: javascript:alert(1)\n```", "```\n[x]: javascript:alert(1)\n```"},
+	}
+	for _, tc := range cases {
+		if got := SanitizeMarkdown(tc.in); got != tc.want {
+			t.Errorf("SanitizeMarkdown(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

@@ -20,6 +20,7 @@ var (
 	openTagRe  = regexp.MustCompile(`<[!/?A-Za-z][^>\n]*$`)
 	mdImageRe  = regexp.MustCompile(`!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)`)
 	mdImageRef = regexp.MustCompile(`!\[([^\]]*)\]\[[^\]]*\]`)
+	mdRefDefRe = regexp.MustCompile(`^\s{0,3}\[[^\]]+\]:\s*(\S+).*$`)
 	mdLinkRe   = regexp.MustCompile(`\[([^\]]*)\]\(((?:[^()]|\([^()]*\))*)\)`)
 
 	lucideNameRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9]{0,39}$`)
@@ -50,7 +51,7 @@ func SanitizeMarkdown(s string) string {
 		} else if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			inFence = true
 			b.WriteString(line)
-		} else {
+		} else if !unsafeReferenceDefinition(line) {
 			writeSanitizedLine(&b, line)
 		}
 		b.WriteByte('\n')
@@ -62,6 +63,18 @@ func SanitizeMarkdown(s string) string {
 		out = strings.TrimSuffix(out, "\n")
 	}
 	return out
+}
+
+// unsafeReferenceDefinition reports a "[label]: target" definition whose
+// target is not http(s) or mailto; "[text][label]" could otherwise turn it
+// into a javascript: or data: link. Such a line is dropped whole.
+func unsafeReferenceDefinition(line string) bool {
+	m := mdRefDefRe.FindStringSubmatch(line)
+	if m == nil {
+		return false
+	}
+	target := strings.ToLower(strings.TrimPrefix(m[1], "<"))
+	return !(strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "mailto:"))
 }
 
 // writeSanitizedLine sanitises one non-fence line, leaving backtick code
