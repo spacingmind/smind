@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -62,6 +63,15 @@ func (s *Server) write(principal, method string, raw json.RawMessage, now time.T
 			return nil, refuse(wire.CodeInvalid, err.Error())
 		}
 		return s.stopTask(principal, p, row)
+	case wire.MethodRunWait:
+		var p wire.RunWaitParams
+		if err := decodeWrite(raw, &p); err != nil {
+			return nil, err
+		}
+		if err := p.Validate(); err != nil {
+			return nil, refuse(wire.CodeInvalid, err.Error())
+		}
+		return s.runWait(principal, p, row)
 	default:
 		return nil, refuse(wire.CodeInvalid, "unknown method")
 	}
@@ -232,6 +242,70 @@ func (s *Server) stopTask(principal string, p wire.TaskStopParams, row *store.Fl
 	return wire.TaskStopResult{Stopped: true}, nil
 }
 
+// runWait is fleet.run.wait: a bounded long poll the caller resumes by
+// cursor (ADR-0048 F3a). A permission request is never answered or described
+// here -- the caller learns only that one waits (AC19).
+func (s *Server) runWait(principal string, p wire.RunWaitParams, row *store.FleetAuditRow) (any, error) {
+	g, err := s.opts.Authorizer.Authorize(principal, registry.OpRead, 0)
+	if err != nil {
+		return nil, refuse(wire.CodeNotGranted, "not granted")
+	}
+	row.RunID = p.RunID
+	timeout := time.Duration(p.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = time.Second
+	}
+	timeout = min(timeout, wire.MaxRunWait)
+	poll := s.opts.PollInterval
+	if poll <= 0 {
+		poll = defaultPollInterval
+	}
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	for {
+		st, err := s.opts.Reader.RunStatus(g, wire.RunStatusParams{RunID: p.RunID})
+		if err != nil {
+			return nil, mapReadErr(err)
+		}
+		row.TaskID = strconv.FormatInt(st.TaskID, 10)
+		act, _ := s.opts.Reader.Activity(g, wire.TaskActivityParams{
+			TaskID: st.TaskID, RunID: p.RunID, Cursor: p.Cursor, Limit: wire.MaxPageSize,
+		})
+		done := st.State != "running"
+		// Events are returned the moment they exist; Done waits until the
+		// last page holding them is drained, so Done never cuts a tail off.
+		if len(act.Events) > 0 || (done && !act.HasMore) {
+			return s.waitResult(p, st, act, done && !act.HasMore), nil
+		}
+		if !time.Now().Before(deadline) {
+			return s.waitResult(p, st, wire.Activity{}, false), nil
+		}
+		<-ticker.C
+	}
+}
+
+// waitResult shapes one poll answer. Empty events keep the caller's cursor,
+// so a timeout is a no-op the caller can repeat unchanged.
+func (s *Server) waitResult(p wire.RunWaitParams, st wire.RunStatus, act wire.Activity, done bool) wire.RunWaitResult {
+	events := act.Events
+	if events == nil {
+		events = []wire.Event{}
+	}
+	next := act.NextCursor
+	if len(events) == 0 {
+		next = p.Cursor
+	}
+	out := wire.RunWaitResult{
+		RunID: p.RunID, State: st.State,
+		Events: events, NextCursor: next, Done: done, StopReason: st.StopReason,
+	}
+	if st.State == "running" {
+		out.WaitingPermission = s.opts.Backend.WaitingPermission(p.RunID)
+	}
+	return out
+}
+
 // idemReplay returns the stored response of a previous create or send for
 // the same key, with the caller's audit row pointed at the stored ids. A key
 // past the window is a miss, so the request re-executes; the bool says the
@@ -267,5 +341,18 @@ func (s *Server) storeIdem(principal, method, key, taskID, runID string, res any
 		HostID: principal, Key: key, Method: method, TaskID: taskID, RunID: runID,
 		Response: string(b), CreatedAt: now,
 	})
+	return err
+}
+
+// mapReadErr gives a Reader error the same wire shape the read path answers
+// with, so run.wait refuses exactly like run.status.
+func mapReadErr(err error) error {
+	var rf *Refusal
+	if errors.As(err, &rf) {
+		return rf
+	}
+	if errors.Is(err, ErrNotFound) {
+		return refuse(wire.CodeNotFound, "not found")
+	}
 	return err
 }

@@ -139,7 +139,18 @@ func (s *Server) serve(principal, method string, raw json.RawMessage, now time.T
 			return nil, err
 		}
 		row.TaskID, row.RunID = id(p.TaskID), p.RunID
-		call = func(g registry.Grant) (any, error) { return rd.RunStatus(g, p) }
+		call = func(g registry.Grant) (any, error) {
+			st, err := rd.RunStatus(g, p)
+			if err != nil {
+				return nil, err
+			}
+			// Only a live run can wait on a permission, and the flag is all
+			// the caller ever learns of it (AC19).
+			if s.opts.Backend != nil && st.State == "running" {
+				st.WaitingPermission = s.opts.Backend.WaitingPermission(st.RunID)
+			}
+			return st, nil
+		}
 	case wire.MethodTaskActivity:
 		var p wire.TaskActivityParams
 		if err := decode(&p); err != nil {

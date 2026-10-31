@@ -12,6 +12,7 @@ import (
 	"github.com/spacingmind/smind/internal/fleet/registry"
 	"github.com/spacingmind/smind/internal/fleet/wire"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // storeTasks adapts *store.Store to TaskLookup the way the wsapi source
@@ -441,6 +442,90 @@ func TestFleetCreateBudgetRefusedBeforeEffect(t *testing.T) {
 	}
 	wantRow(t, au, 0, "ok", "", wire.MethodTaskCreate, fmt.Sprint(first.TaskID))
 	wantRow(t, au, 1, "refused", wire.CodeBudgetExceeded, wire.MethodTaskCreate, "")
+}
+
+// waitFixture is a reader over one task and run, for the run.wait and
+// run.status tests.
+func waitFixture(t *testing.T, status string) (Reader, *memSource) {
+	t.Helper()
+	m := newMemSource()
+	m.workspaces = []WorkspaceInfo{{ID: 1, Title: "w", DefaultBranch: "main"}}
+	at := time.Unix(1_800_000_000, 0)
+	m.tasks[1] = store.Task{ID: 1, WorkspaceID: 1, Title: "t", Status: "idle", CreatedAt: at, UpdatedAt: at}
+	m.runs["r1"] = store.Run{ID: "r1", TaskID: 1, Provider: "glm", Model: "glm-4.7", Status: status, StartedAt: at, StopReason: "stop_requested"}
+	for _, text := range []string{"one", "two", "three"} {
+		m.addEvent("r1", map[string]any{"type": int(taskrunner.EventTypeText), "text": text})
+	}
+	return NewReader(m, ReaderOptions{}), m
+}
+
+func TestFleetRunWaitCursor(t *testing.T) {
+	st := openStore(t)
+	clk := newClock()
+	rd, m := waitFixture(t, "running")
+	be := &fakeBackend{st: st, waiting: map[string]bool{"r1": true}}
+	s, au := writeServer(clk, st, writeGrant(1, 2), be, rd)
+
+	wait := func(extra map[string]any) wire.RunWaitResult {
+		return callResult[wire.RunWaitResult](t, s, clk, "B", wire.MethodRunWait, extra)
+	}
+	// A live run with events answers at once, permission waiting included.
+	w := wait(map[string]any{"runId": "r1"})
+	if len(w.Events) != 3 || w.NextCursor != 3 || w.Done || w.State != "running" || !w.WaitingPermission {
+		t.Fatalf("first page %+v", w)
+	}
+	// Nothing new and still running: the poll times out with the caller's
+	// own cursor back and empty (never nil) events.
+	w = wait(map[string]any{"runId": "r1", "cursor": 3})
+	if w.Events == nil || len(w.Events) != 0 || w.NextCursor != 3 || w.Done || !w.WaitingPermission {
+		t.Fatalf("timeout page %+v", w)
+	}
+	// A done run drains the remaining page and only then reports done.
+	doneRun := m.runs["r1"]
+	doneRun.Status = "done"
+	m.runs["r1"] = doneRun
+	w = wait(map[string]any{"runId": "r1", "cursor": 3})
+	if len(w.Events) != 0 || !w.Done || w.State != "done" || w.StopReason != "stop_requested" || w.WaitingPermission {
+		t.Fatalf("done tail %+v", w)
+	}
+	w = wait(map[string]any{"runId": "r1"})
+	if len(w.Events) != 3 || !w.Done || w.NextCursor != 3 {
+		t.Fatalf("full drain %+v", w)
+	}
+	for i := 0; i < 4; i++ {
+		if r := wantRow(t, au, i, "ok", "", wire.MethodRunWait, "1"); r.RunID != "r1" {
+			t.Fatalf("row %d runId %q", i, r.RunID)
+		}
+	}
+}
+
+func TestFleetRunStatusReportsWaitingPermission(t *testing.T) {
+	st := openStore(t)
+	clk := newClock()
+	rd, m := waitFixture(t, "running")
+	m.runs["r2"] = store.Run{ID: "r2", TaskID: 1, Provider: "glm", Status: "done", StartedAt: time.Unix(1_800_000_000, 0)}
+	be := &fakeBackend{st: st, waiting: map[string]bool{"r1": true}}
+	s, au := writeServer(clk, st, writeGrant(1, 2), be, rd)
+	live := callResult[wire.RunStatus](t, s, clk, "B", wire.MethodRunStatus, map[string]any{"runId": "r1"})
+	if !live.WaitingPermission || live.State != "running" {
+		t.Fatalf("live run %+v", live)
+	}
+	done := callResult[wire.RunStatus](t, s, clk, "B", wire.MethodRunStatus, map[string]any{"runId": "r2"})
+	if done.WaitingPermission {
+		t.Fatalf("done run %+v", done)
+	}
+	// Without a backend there is nobody to ask, so the flag stays false.
+	au2 := &memAudit{}
+	s2 := New(Options{HostID: "A", Authorizer: grantAuthorizer{g: writeGrant(1, 2)}, Audit: au2, Reader: rd, Now: clk.now})
+	bare := callResult[wire.RunStatus](t, s2, clk, "B", wire.MethodRunStatus, map[string]any{"runId": "r1"})
+	if bare.WaitingPermission {
+		t.Fatalf("backend-less server reports waiting: %+v", bare)
+	}
+	// A read row records only the ids the request named, so a run.status
+	// by runId has no taskId on the row.
+	wantRow(t, au, 0, "ok", "", wire.MethodRunStatus, "")
+	wantRow(t, au, 1, "ok", "", wire.MethodRunStatus, "")
+	wantRow(t, au2, 0, "ok", "", wire.MethodRunStatus, "")
 }
 
 func TestFleetWriteDisabledWithoutBackend(t *testing.T) {
