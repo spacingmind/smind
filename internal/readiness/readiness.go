@@ -678,6 +678,26 @@ func (r *repo) packageDirs() []string {
 	return out
 }
 
+// hasDeps reports whether dir's package.json declares dependencies or
+// workspaces; true when it cannot be read or parsed.
+func (r *repo) hasDeps(dir string) bool {
+	txt, ok := r.read(dir + "/package.json")
+	if !ok {
+		return true
+	}
+	var p struct {
+		Dependencies         map[string]string
+		DevDependencies      map[string]string
+		OptionalDependencies map[string]string
+		PeerDependencies     map[string]string
+		Workspaces           json.RawMessage
+	}
+	if json.Unmarshal([]byte(txt), &p) != nil {
+		return true
+	}
+	return len(p.Dependencies)+len(p.DevDependencies)+len(p.OptionalDependencies)+len(p.PeerDependencies) > 0 || len(p.Workspaces) > 0
+}
+
 func checkLockfiles(_ context.Context, r *repo, _ Options) Finding {
 	const title = "Lockfiles for the detected ecosystems"
 	const fix = "Commit the lockfile so installs are reproducible."
@@ -710,6 +730,9 @@ func checkLockfiles(_ context.Context, r *repo, _ Options) Finding {
 	}
 	if !r.isFile("package.json") {
 		for _, d := range r.packageDirs() {
+			if !r.hasDeps(d) {
+				continue
+			}
 			var l string
 			for _, n := range nodeLocks {
 				if r.isFile(d + "/" + n) {

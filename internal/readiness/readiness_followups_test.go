@@ -64,8 +64,10 @@ func TestLockfiles_NestedPackages(t *testing.T) {
 		{"landing layout", map[string]string{"package.json": ws, "bun.lock": "", "apps/web/package.json": "{}"}, StatusPass, "bun.lock"},
 		{"landing root lock missing", map[string]string{"package.json": ws, "apps/web/package.json": "{}"}, StatusWarn, "package.json has no lockfile"},
 		{"smind layout", with(map[string]string{"web/package.json": `{"workspaces":["packages/*"]}`, "web/bun.lock": "", "web/packages/ui/package.json": "{}"}), StatusPass, "go.sum"},
-		{"smind web without lock", with(map[string]string{"web/package.json": "{}"}), StatusWarn, "web/package.json has no lockfile"},
-		{"mobile package-lock", with(map[string]string{"mobile/package.json": "{}", "mobile/package-lock.json": ""}), StatusPass, "mobile/package-lock.json"},
+		{"smind web without lock", with(map[string]string{"web/package.json": `{"dependencies":{"x":"1"}}`}), StatusWarn, "web/package.json has no lockfile"},
+		{"mobile package-lock", with(map[string]string{"mobile/package.json": `{"dependencies":{"x":"1"}}`, "mobile/package-lock.json": ""}), StatusPass, "mobile/package-lock.json"},
+		{"npm-stub without deps", with(map[string]string{"npm-stub/package.json": `{"name":"smind","version":"0.0.1"}`}), StatusPass, "go.sum"},
+		{"web devDependencies without lock", with(map[string]string{"web/package.json": `{"devDependencies":{"x":"1"}}`}), StatusWarn, "web/package.json has no lockfile"},
 		{"go.mod without require", map[string]string{"go.mod": "module x\n"}, StatusInfo, "no package manifest"},
 	}
 	for _, tc := range tests {
