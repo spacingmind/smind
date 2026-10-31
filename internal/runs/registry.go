@@ -520,12 +520,12 @@ type run struct {
 	// reported during the run (nil = none); failureKind/Window/ResetAt are
 	// the classified terminal reason of an error run (ADR-0041 B1). Guarded
 	// by mu.
-	rateSignal     *failure.Signal
-	failureKind    string
+	rateSignal  *failure.Signal
+	failureKind string
 	// retryAttempt/retryNextAt: the transient_429 retry queued for this
 	// failure (1-based attempt, its not-before time); in memory only.
-	retryAttempt int
-	retryNextAt  *time.Time
+	retryAttempt   int
+	retryNextAt    *time.Time
 	failureWindow  string
 	failureResetAt *time.Time
 	// failureResetInferred: failureResetAt was read in an assumed zone.
