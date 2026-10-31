@@ -495,6 +495,75 @@ func checkDocs(_ context.Context, r *repo, _ Options) Finding {
 	return fnd("docs", title, false, "no README or docs/ folder", fix)
 }
 
+const maxPackageDirs = 40
+
+var nodeLocks = []string{"package-lock.json", "npm-shrinkwrap.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock"}
+
+// packageDirs returns up to maxPackageDirs sorted, de-duplicated repo-relative
+// dirs that hold their own package.json: root workspaces entries, the subdirs
+// of apps/ and packages/, and top-level subdirs.
+func (r *repo) packageDirs() []string {
+	seen := map[string]bool{}
+	add := func(dir string) {
+		dir = path.Clean(dir)
+		if dir == "." || dir == ".." || strings.HasPrefix(dir, "../") || strings.HasPrefix(dir, "/") ||
+			strings.Contains(dir, "*") || seen[dir] || len(seen) >= maxPackageDirs {
+			return
+		}
+		if base := path.Base(dir); base == "node_modules" || strings.HasPrefix(base, ".") {
+			return
+		}
+		if r.isFile(dir + "/package.json") {
+			seen[dir] = true
+		}
+	}
+	addChildren := func(base string) {
+		for _, n := range r.list(base) {
+			add(base + "/" + n)
+		}
+	}
+	if txt, ok := r.read("package.json"); ok {
+		var p struct {
+			Workspaces json.RawMessage `json:"workspaces"`
+		}
+		var entries []string
+		if json.Unmarshal([]byte(txt), &p) == nil && len(p.Workspaces) > 0 {
+			if json.Unmarshal(p.Workspaces, &entries) != nil {
+				var obj struct {
+					Packages []string `json:"packages"`
+				}
+				if json.Unmarshal(p.Workspaces, &obj) == nil {
+					entries = obj.Packages
+				}
+			}
+		}
+		for _, e := range entries {
+			if e == "" || strings.HasPrefix(e, "!") || strings.HasPrefix(e, "/") || strings.Contains(e, "..") {
+				continue
+			}
+			e = strings.TrimSuffix(e, "/")
+			if base, ok := strings.CutSuffix(e, "/*"); ok {
+				if !strings.Contains(base, "*") {
+					addChildren(path.Clean(base))
+				}
+			} else if !strings.Contains(e, "*") {
+				add(e)
+			}
+		}
+	}
+	addChildren("apps")
+	addChildren("packages")
+	for _, n := range r.list(".") {
+		add(n)
+	}
+	out := make([]string, 0, len(seen))
+	for d := range seen {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func checkLockfiles(_ context.Context, r *repo, _ Options) Finding {
 	const title = "Lockfiles for the detected ecosystems"
 	const fix = "Commit the lockfile so installs are reproducible."
@@ -503,7 +572,7 @@ func checkLockfiles(_ context.Context, r *repo, _ Options) Finding {
 		locks    []string
 	}
 	ecos := []eco{
-		{"package.json", []string{"package-lock.json", "npm-shrinkwrap.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock"}},
+		{"package.json", nodeLocks},
 		{"go.mod", []string{"go.sum"}},
 		{"Cargo.toml", []string{"Cargo.lock"}},
 		{"pyproject.toml", []string{"poetry.lock", "uv.lock", "pdm.lock", "Pipfile.lock"}},
@@ -514,10 +583,31 @@ func checkLockfiles(_ context.Context, r *repo, _ Options) Finding {
 		if !r.isFile(e.manifest) {
 			continue
 		}
+		if e.manifest == "go.mod" && r.firstFile("go.sum") == "" {
+			if t, _ := r.read("go.mod"); !strings.Contains(t, "require") {
+				continue
+			}
+		}
 		if l := r.firstFile(e.locks...); l != "" {
 			found = append(found, l)
 		} else {
 			missing = append(missing, e.manifest+" has no lockfile")
+		}
+	}
+	if !r.isFile("package.json") {
+		for _, d := range r.packageDirs() {
+			var l string
+			for _, n := range nodeLocks {
+				if r.isFile(d + "/" + n) {
+					l = d + "/" + n
+					break
+				}
+			}
+			if l != "" {
+				found = append(found, l)
+			} else {
+				missing = append(missing, d+"/package.json has no lockfile")
+			}
 		}
 	}
 	switch {
