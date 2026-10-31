@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/fleet/wire"
-	"github.com/spacingmind/smind/internal/wsclient"
 )
 
 // Caller is one live connection to a peer (satisfied by link.Conn).
@@ -203,12 +202,20 @@ func (c *Client) call(ctx context.Context, ref string, o CallOpts, method string
 	if err == nil {
 		return h, nil
 	}
-	var rpc *wsclient.RPCError
+	var re rpcError
 	switch {
-	case errors.As(err, &rpc) && rpc.Code != "":
-		return h, &Error{Code: rpc.Code, Message: rpc.Message, Host: h.Alias}
+	case errors.As(err, &re) && re.RPCCode() != "":
+		return h, &Error{Code: re.RPCCode(), Message: re.RPCMessage(), Host: h.Alias}
 	case errors.Is(err, context.DeadlineExceeded):
 		return h, &Error{Code: CodeTimeout, Message: fmt.Sprintf("call to %s timed out", h.Alias), Host: h.Alias}
 	}
 	return h, fmt.Errorf("fleet client: %s: %w", h.Alias, err)
+}
+
+// rpcError is a coded error from the wire (wsclient.RPCError); matched by
+// interface so this package does not import wsclient.
+type rpcError interface {
+	error
+	RPCCode() string
+	RPCMessage() string
 }
