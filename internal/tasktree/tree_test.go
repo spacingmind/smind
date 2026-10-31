@@ -424,3 +424,100 @@ func TestTaskTree_NodeCarriesLatestRunFailure(t *testing.T) {
 		t.Fatalf("failed node json = %s", b)
 	}
 }
+
+func TestTaskTreeShowsRemoteChildrenAndRollups(t *testing.T) {
+	tasks := []Task{task(1, nil, false), task(2, pid(1), false)}
+	usage := map[int64]UsageTotals{
+		1: {Runs: 1, CostUSD: costPtr(1.0)},
+		2: {Runs: 1, CostUSD: costPtr(2.0)},
+	}
+	remotes := []RemoteTask{
+		{HostID: "h2", Alias: "win", RemoteTaskID: "7", ParentID: 1, Title: "w", State: "done", CostUSD: costPtr(0.25)},
+		{HostID: "h1", Alias: "box", RemoteTaskID: "7", ParentID: 1, Title: "b", State: "running", CostUSD: costPtr(0.5)},
+	}
+	nodes, trunc := BuildWithRemote(tasks, nil, usage, remotes, Root{WorkspaceID: 1})
+	if trunc {
+		t.Fatal("truncated")
+	}
+	if got := ids(nodes); !equalIDs(got, []int64{1, 2, -1, -2}) {
+		t.Fatalf("order = %v, want [1 2 -1 -2]", got)
+	}
+	box, win := nodes[2], nodes[3]
+	for _, tc := range []struct {
+		n      Node
+		host   string
+		hostID string
+		gid    string
+		state  State
+	}{
+		{box, "box", "h1", "box:7", StateRunning},
+		{win, "win", "h2", "win:7", StateDone},
+	} {
+		n := tc.n
+		if !n.Remote || n.Host != tc.host || n.HostID != tc.hostID || n.GlobalID != tc.gid {
+			t.Errorf("remote node = %+v", n)
+		}
+		if n.ID >= 0 || n.ParentID == nil || *n.ParentID != 1 || n.Depth != 1 || n.Run.State != tc.state {
+			t.Errorf("remote node shape = %+v", n)
+		}
+		if n.Tier != nil || n.ChildCount != 0 {
+			t.Errorf("remote node tier/childCount = %v/%d", n.Tier, n.ChildCount)
+		}
+	}
+	root := nodes[0]
+	if root.Usage.Subtree.CostUSD == nil || *root.Usage.Subtree.CostUSD != 3.75 {
+		t.Fatalf("subtree cost = %v, want 3.75", root.Usage.Subtree.CostUSD)
+	}
+	if root.Usage.Subtree.Runs != 4 {
+		t.Fatalf("subtree runs = %d, want 4", root.Usage.Subtree.Runs)
+	}
+	if root.Counts.Running != 1 || root.Counts.Done != 1 {
+		t.Fatalf("counts = %+v", root.Counts)
+	}
+	if root.Tier == nil || *root.Tier != "supervisor" || root.ChildCount != 3 {
+		t.Fatalf("root tier/childCount = %v/%d", root.Tier, root.ChildCount)
+	}
+}
+
+func TestTaskTreeRemoteNilCostStaysNil(t *testing.T) {
+	tasks := []Task{task(1, nil, false)}
+	r1 := RemoteTask{HostID: "h1", Alias: "box", RemoteTaskID: "1", ParentID: 1, State: "running"}
+	nodes, _ := BuildWithRemote(tasks, nil, nil, []RemoteTask{r1}, Root{TaskID: 1})
+	if nodes[0].Usage.Subtree.CostUSD != nil || nodes[1].Usage.Own.CostUSD != nil {
+		t.Fatalf("nil cost became %v / %v", nodes[0].Usage.Subtree.CostUSD, nodes[1].Usage.Own.CostUSD)
+	}
+	r2 := RemoteTask{HostID: "h1", Alias: "box", RemoteTaskID: "2", ParentID: 1, State: "done", CostUSD: costPtr(0.4)}
+	nodes, _ = BuildWithRemote(tasks, nil, nil, []RemoteTask{r1, r2}, Root{TaskID: 1})
+	if c := nodes[0].Usage.Subtree.CostUSD; c == nil || *c != 0.4 {
+		t.Fatalf("subtree cost = %v, want 0.4", c)
+	}
+	if nodes[1].Usage.Own.CostUSD != nil {
+		t.Fatalf("first remote own cost = %v, want nil", nodes[1].Usage.Own.CostUSD)
+	}
+}
+
+func TestTaskTreeRemoteIgnoredWithoutVisibleParent(t *testing.T) {
+	tasks := []Task{task(1, nil, false), task(2, nil, true)}
+	remotes := []RemoteTask{
+		{HostID: "h1", Alias: "box", RemoteTaskID: "1", ParentID: 2, State: "running"},
+		{HostID: "h1", Alias: "box", RemoteTaskID: "2", ParentID: 99, State: "running"},
+	}
+	nodes, _ := BuildWithRemote(tasks, nil, nil, remotes, Root{WorkspaceID: 1})
+	if got := ids(nodes); !equalIDs(got, []int64{1}) {
+		t.Fatalf("nodes = %v, want [1]", got)
+	}
+	if nodes[0].Counts.Running != 0 || nodes[0].ChildCount != 0 {
+		t.Fatalf("root = %+v", nodes[0])
+	}
+}
+
+func TestBuildEqualsBuildWithRemoteNil(t *testing.T) {
+	tasks := []Task{task(1, nil, false), task(2, pid(1), false), task(3, pid(2), true)}
+	a, ta := Build(tasks, nil, nil, Root{WorkspaceID: 1})
+	b, tb := BuildWithRemote(tasks, nil, nil, nil, Root{WorkspaceID: 1})
+	ja, _ := json.Marshal(a)
+	jb, _ := json.Marshal(b)
+	if ta != tb || string(ja) != string(jb) {
+		t.Fatalf("Build != BuildWithRemote(nil)\n%s\n%s", ja, jb)
+	}
+}
