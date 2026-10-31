@@ -91,6 +91,15 @@ providers:
 	if !strings.HasSuffix(after, original[tail:]) {
 		t.Errorf("bytes from claude-b's head comment to EOF changed:\n%s", after)
 	}
+	if !strings.Contains(after, "\n\n    # claude-b: the personal one") {
+		t.Errorf("the blank line before claude-b's head comment is gone:\n%s", after)
+	}
+	const claudeALastKey = "      label: 'Claude A'\n"
+	expectedExact := strings.Replace(original, claudeALastKey,
+		claudeALastKey+"      additionalModels:\n        - id: glm-5.1\n      disallowedTools:\n        - WebSearch\n", 1)
+	if after != expectedExact {
+		t.Errorf("file differs from the expected exact output:\n%s\nwant:\n%s", after, expectedExact)
+	}
 	block := after[len(original[:head]) : len(after)-len(original[tail:])]
 	for _, want := range []string{"additionalModels:", "disallowedTools:"} {
 		if !strings.Contains(block, want) {
@@ -355,6 +364,9 @@ func TestUpdateInstance_InvalidFieldsNamed(t *testing.T) {
 			_, changed, err := UpdateProviderInstance(tc.id, tc.u)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want it to mention %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "internal edit check failed") {
+				t.Errorf("refused by the post-patch safety net, not the first validation: %v", err)
 			}
 			if changed {
 				t.Error("changed = true on error")
