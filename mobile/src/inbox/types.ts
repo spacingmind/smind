@@ -1,7 +1,7 @@
 // Wire shapes of the inbox.* RPCs (ADR-0045 section 5): the daemon's derived Human inbox. Every string is
 // daemon-provided and only ever drawn as plain <Text>.
 
-export type InboxKind = 'permission' | 'verdict' | 'stall';
+export type InboxKind = 'permission' | 'host_pair' | 'host_down' | 'host_refused' | 'verdict' | 'stall';
 export type InboxState = 'new' | 'seen' | 'snoozed' | 'resolved';
 export type InboxAttention = 'high' | 'normal';
 
@@ -10,6 +10,8 @@ export interface InboxLinks {
   runId?: string;
   permissionRequestId?: string;
   validationId?: number;
+  /** The host a host_* row is about (fleet links, ADR-0048 S9). */
+  hostId?: string;
 }
 
 export interface InboxItem {
