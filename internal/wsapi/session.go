@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/spacingmind/smind/internal/runs"
 )
@@ -63,6 +64,19 @@ func (c *conn) identity() (runIdentity, bool) {
 // run must still be running, and the method must be allowlisted. It returns
 // nil for an unidentified connection.
 func (c *conn) gate(method string) error {
+	if err := c.gateRun(method); err != nil {
+		return err
+	}
+	if p := c.hostPrincipal(); p != nil {
+		if !slices.Contains(fleetHostAllowed[p.kind], method) {
+			return forbidden("not available to hosts")
+		}
+	}
+	return nil
+}
+
+// gateRun is the run-scoped half of gate: nil for an unscoped connection.
+func (c *conn) gateRun(method string) error {
 	id, scoped := c.identity()
 	if !scoped {
 		return nil

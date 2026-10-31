@@ -70,6 +70,10 @@ const (
 	// provider.setEnv, provider.setSecret, provider.clearSecret or
 	// provider.updateInstance changed a provider's setting, so other clients refresh provider.list.
 	TopicProviderUpdated = "provider.updated"
+	// TopicFleetHostsChanged has an empty payload: the paired-host list, a
+	// host's link state or its connection changed (ADR-0048), so clients
+	// refetch fleet.host.list. Never published while fleet is off.
+	TopicFleetHostsChanged = "fleet.hosts.changed"
 )
 
 // providerUpdatedPayload is the payload of TopicProviderUpdated.
@@ -128,6 +132,7 @@ var knownTopics = map[string]bool{
 	TopicInboxChanged:         true,
 	TopicForgeStatus:          true,
 	TopicProviderUpdated:      true,
+	TopicFleetHostsChanged:    true,
 	TopicPluginUpdated:        true,
 	TopicPluginEvent:          true,
 	TopicAutomationFired:      true,
