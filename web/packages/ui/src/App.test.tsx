@@ -2945,3 +2945,47 @@ describe("App header shell (app-header-and-tabs AH)", () => {
     expect(status).toHaveTextContent("Connected to daemon");
   });
 });
+
+describe("App tab affordances (UAT PR1)", () => {
+  /** Selects TASK_A with its chat resolved -- the shared setup of the two UAT fixes below. */
+  async function setupSelectedTask(): Promise<FakeSocket> {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    return socket;
+  }
+
+  /** The titles of every open tab in the primary pane whose text starts with prefix. */
+  function tabTitlesStartingWith(prefix: string): string[] {
+    return within(screen.getByTestId("primary-pane"))
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent ?? "")
+      .filter((text) => text.startsWith(prefix));
+  }
+
+  it("clicking the diff chip opens the Diff tab when it is not open (UAT A-03)", async () => {
+    const socket = await setupSelectedTask();
+    // The chip's numbers come from the task's shared git state (useTaskGit's task.git read).
+    respondAll(socket, "task.git", {
+      taskId: TASK_A.ID,
+      untrusted: false,
+      computedAt: "2026-10-31T00:00:00Z",
+      diff: { files: 2, insertions: 10, deletions: 3 },
+    });
+    await flush();
+
+    expect(screen.queryByRole("tab", { name: "Diff" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Open diff/ }));
+    await flush();
+
+    const diffTab = within(screen.getByTestId("primary-pane")).getByRole("tab", { name: "Diff" });
+    expect(diffTab).toHaveAttribute("aria-selected", "true");
+  });
+});

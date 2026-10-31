@@ -515,7 +515,9 @@ function AppShell({
    */
   function revealInDiff() {
     if (!selectedTask) return;
-    activate(selectedTask.ID, `${selectedTask.ID}:diff`);
+    // Open (or activate) the base Diff tab: with the task's Diff tab
+    // closed, a bare activate() would be a no-op and the chip dead.
+    openBaseTab("diff");
   }
 
   /**
