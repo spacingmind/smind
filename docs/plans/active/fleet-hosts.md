@@ -119,3 +119,24 @@ Docs-only PR: markdown links and the ADR/plan cross-references checked by hand; 
 - Grants/registry (AC5 data model half): `TestGrantValidate_Table`, `TestGrantValidateForApproval_RequiresWriteWorkspace`, `TestDefaultForwardGrant_S5`, `TestDefaultReverseGrant_S5`, `TestRegistryPairingDirectedLinksReverseOff`, `TestRegistryResponderAcceptApprove`, `TestRegistryEnableDisableReverse`, `TestRegistryAuthorize`, `TestRegistryMaxHosts`. The wire-level `TestFleetReverseDisabledByDefault` is F1b.
 - Mutations (all fail the named test): M1 hostId 25 chars; M2 regenerate on corrupt; M3 skip IsPrivate; M4 reverse grant gains create; M5 initiator inbound enabled; M6 Authorize ignores enabled; M7 LoadIdentity ignores Enabled; M8 commit on link failure (`TestFleetPair_RollsBackOnMidInsertFailure`); M9 no summary truncation; M10 no maxHosts range check. Not mutation-proven: revoke ordering (needs fault injection; `TestRegistryRevokeStateFirst` pins the invariant that a revoked state refuses even with an enabled link).
 - Commands: `go test ./...` ok; `go test -race` on fleet/store/config ok; `GOOS=windows go vet` on the touched packages ok; `task lint` ok; `task test` Go part ok, one unrelated web test (`desktop-chrome.test.tsx` macOS toggle) timed out at 5 s under load and passes alone.
+
+### F1c UI wire contract (what the UI codes against; F1b implements it in `internal/wsapi/fleet_host.go`)
+
+F1b had no code when F1c started, so F1c fixes the UI-facing shapes here and tests against fixtures; F1b adapts or says what differs. All
+methods are the local-only admin set of ADR-0048 section 8 (`fleet.host.list` may also work for an approved device). With fleet off every
+method answers `method_not_found`; the UI reads that as "Fleet is off".
+
+- `fleet.host.list {}` -> `{hosts: HostView[]}`.
+  `HostView = {hostId, alias, label, state: "pending"|"approved"|"revoked", pendingApproval: bool (responder side: this human must approve),
+  link: "active"|"connecting"|"down"|"refused"|"peer_disabled"|"disabled"|"revoked", linkCode?: string (refusal code, e.g. peer_identity_changed,
+  fleet_version_unsupported), linkGuidance?: string, outboundEnabled: bool, inbound: {enabled: bool, grant: Grant}, sas?: string (6 digits, only
+  while pending), createdAt, lastSeenAt?, version?, os?, arch?}`. No key, secret, address or relay field exists in it.
+  `Grant = {ops, workspacesRead:{all?,ids?}, workspacesWrite:number[], providers:string[], maxLiveAgents, maxWallSeconds, maxCostUsd, permissionMode?}` (the `registry.Grant` JSON).
+- `fleet.host.invite {window?: "10m"} -> {invite: "smind-host://v1#...", expiresAt}`; `fleet.host.add {invite, alias?, allowCleartext?} -> {host: HostView}` (the SAS is in `host.sas`).
+- `fleet.host.approve {hostId, sas, grant}` -> `{host}`: the typed six digits travel with the call so a client cannot confirm blindly. `fleet.host.reject {hostId}`, `fleet.host.rm {hostId}`, `fleet.host.rename {hostId, alias}`, `fleet.host.grant {hostId, grant}`, `fleet.host.enable_reverse {hostId}` / `disable_reverse {hostId}` (all `-> {host}` or `{}`), `fleet.host.revoke {hostId}`.
+- Event topic `fleet.hosts.changed` (empty payload): the client refetches `fleet.host.list`.
+- Inbox: `inbox.list` items gain kinds `host_pair`, `host_down`, `host_refused` and `links.hostId`. `internal/inbox` derives them from two injected sources (`HostPairs`, `HostLinkIssues`); F1c wires the pairs from the registry and leaves link issues nil until F1b's link manager exists.
+
+## F1c progress (2026-10-31)
+
+- Contract `fleet-hosts-f1c.contract.md` written before code. Peer ledger is in the PR body.
