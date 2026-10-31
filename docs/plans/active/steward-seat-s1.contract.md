@@ -99,17 +99,17 @@ tests:
   - { name: FuzzSplitCommand, run: "go test ./internal/permpolicy -run '^FuzzSplitCommand$' -count=1", timeoutSec: 300 }
   - { name: TestSplitCommand_Suite, run: "go test ./internal/permpolicy -run '^TestSplitCommand_' -count=1 -race", timeoutSec: 300 }
 mutations:
-  - { id: M1, file: internal/permpolicy/decide.go, change: "new-file: let an allow rule win over a deny rule when both match", expectFail: [TestDecide_PrecedenceDenyAskAllowIgnoresOrder] }
-  - { id: M2, file: internal/permpolicy/floor.go, change: "new-file: drop --force-with-lease from the force-push flag set", expectFail: [TestFloor_ForcePushVariantsDenied] }
-  - { id: M3, file: internal/permpolicy/split.go, change: "new-file: return no Unparsed reason for an unbalanced quote or eval so the request can be allowed", expectFail: [TestDecide_UnparseableIsAsk] }
-  - { id: M4, file: internal/permpolicy/paths.go, change: "new-file: compare Within on the unresolved path (skip realpath)", expectFail: [TestDecide_SymlinkAndDotDotEscapeNotWithin] }
-  - { id: M5, file: internal/runs/decider_policy.go, change: "new-file: resolve the 5 minute timeout to the first option instead of the reject option", expectFail: [TestDecider_AskTimeoutDeniesAndAudits] }
-  - { id: M6, file: internal/permpolicy/load.go, change: "new-file: accept an allow rule with no paths.within", expectFail: [TestPolicyLoad_RejectsMutatingAllowWithoutPathScope] }
-  - { id: M7, file: internal/permpolicy/engine.go, change: "new-file: write the audit target without redaction", expectFail: [TestAudit_RedactsAndElides] }
-  - { id: M8, file: internal/permpolicy/engine.go, change: "new-file: evaluate even when Enabled() is false", expectFail: [TestDecide_DisabledIsNoop] }
-  - { id: M9, file: internal/permpolicy/floor.go, change: "new-file: skip the floor when the policy has an allow rule for the segment", expectFail: [TestFloor_BeatsAllowRule] }
-  - { id: M10, file: internal/permpolicy/engine.go, change: "new-file: treat an invalid policy file as an empty allow-all policy", expectFail: [TestPolicyLoad_InvalidFileMeansFloorPlusAsk] }
-  - { id: M11, file: internal/wsapi/policy.go, change: "new-file: register a policy.set handler", expectFail: [TestNoPolicyWriteRPCOrMCPTool] }
+  - { id: M1, file: internal/permpolicy/decide.go, change: "let an allow rule win over a deny rule when both match", expectFail: [TestDecide_PrecedenceDenyAskAllowIgnoresOrder] }
+  - { id: M2, file: internal/permpolicy/floor.go, change: "drop --force-with-lease from the force-push flag set", expectFail: [TestFloor_ForcePushVariantsDenied] }
+  - { id: M3, file: internal/permpolicy/split.go, change: "return no Unparsed reason for an unbalanced quote or eval so the request can be allowed", expectFail: [TestDecide_UnparseableIsAsk] }
+  - { id: M4, file: internal/permpolicy/paths.go, change: "compare Within on the unresolved path (skip realpath)", expectFail: [TestDecide_SymlinkAndDotDotEscapeNotWithin] }
+  - { id: M5, file: internal/runs/registry.go, change: "resolve the 5 minute timeout to the first option instead of the reject option", expectFail: [TestDecider_AskTimeoutDeniesAndAudits] }
+  - { id: M6, file: internal/permpolicy/load.go, change: "accept an allow rule with no paths.within", expectFail: [TestPolicyLoad_RejectsMutatingAllowWithoutPathScope] }
+  - { id: M7, file: internal/permpolicy/engine.go, change: "write the audit target without redaction", expectFail: [TestAudit_RedactsAndElides] }
+  - { id: M8, file: internal/permpolicy/engine.go, change: "evaluate even when Enabled() is false", expectFail: [TestDecide_DisabledIsNoop] }
+  - { id: M9, file: internal/permpolicy/decide.go, change: "skip the floor whenever a policy is loaded (floor only for an invalid file)", expectFail: [TestFloor_BeatsAllowRule] }
+  - { id: M10, file: internal/permpolicy/engine.go, change: "treat an invalid policy file as an empty allow-all policy", expectFail: [TestPolicyLoad_InvalidFileMeansFloorPlusAsk] }
+  - { id: M11, file: internal/wsapi/policy.go, change: "register a policy.set handler", expectFail: [TestNoPolicyWriteRPCOrMCPTool] }
 commands:
   - { id: C1, run: "task lint", timeoutSec: 900 }
   - { id: C2, run: "task test", timeoutSec: 1500 }
