@@ -9,6 +9,13 @@ import (
 // resolved paths, not every word of a long command.
 const maxDecisionPaths = 8
 
+// winWrapperInterpreters are the shells and script hosts reachable from a
+// Windows request that take a script as a word; no allow rule can judge it.
+var winWrapperInterpreters = map[string]bool{
+	"powershell": true, "pwsh": true, "cmd": true, "wscript": true, "cscript": true,
+	"mshta": true, "wsl": true, "bash": true, "sh": true,
+}
+
 // unit is one thing a rule is matched against: a Bash segment, or the whole
 // request of a non-Bash tool (seg == nil). cwd is the resolved directory the
 // segment runs in, "" when it cannot be resolved.
@@ -52,7 +59,8 @@ func Decide(req Request, pol *Policy) Decision {
 			return d
 		}
 		for _, s := range p.Segments {
-			if fs := newFloorSeg(req, s, cwd); len(fs.argv) > 0 && isShellEval(fs.argv[0]) {
+			fs := newFloorSeg(req, s, cwd)
+			if len(fs.argv) > 0 && (isShellEval(fs.argv[0]) || (req.pl().windows && winWrapperInterpreters[fs.name()])) {
 				d.Reasons = []string{fs.argv[0] + " runs text the engine cannot see"}
 				return d
 			}

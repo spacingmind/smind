@@ -214,3 +214,26 @@ func TestFloorWindows_TempHomeStillProtected(t *testing.T) {
 		}
 	}
 }
+
+func TestFloorWindows_NoRuleAllowsWrapper(t *testing.T) {
+	t.Parallel()
+	pol := &Policy{Version: 1, Rules: []Rule{{
+		ID: "ps", Action: ActionAllow, Why: "w",
+		Match: Match{Tool: "Bash", Command: &CommandMatch{Argv0: "powershell"}, Paths: &PathsMatch{Within: []string{"{worktree}"}}},
+	}}}
+	for _, cmd := range []string{
+		`powershell -Command "Get-Date"`,
+		`pwsh -c Get-Date`,
+		`cmd /c "dir"`,
+		`powershell.exe -NoProfile -File .\x.ps1`,
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			t.Parallel()
+			req := winFloorEnv(t)
+			req.Command = cmd
+			if d := Decide(req, pol); d.Action != ActionAsk {
+				t.Errorf("Decide(%q) = %s (%v); want ask", cmd, d.Action, d.Reasons)
+			}
+		})
+	}
+}
