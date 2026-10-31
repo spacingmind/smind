@@ -45,7 +45,7 @@ export function AutoAcceptToggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       aria-label="Auto-accept"
-      className={cn(PILL_TRIGGER_CLASS, checked ? "text-warning hover:text-warning" : "text-foreground-muted")}
+      className={cn(PILL_TRIGGER_CLASS, checked ? "text-warning-text hover:text-warning-text" : "text-foreground-muted")}
     >
       <Icons.checkAll aria-hidden className="shrink-0" />
       <span className="max-sm:hidden">{AUTO_ACCEPT_LABEL}</span>

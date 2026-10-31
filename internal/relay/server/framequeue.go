@@ -23,6 +23,9 @@ type frameQueue struct {
 	cap      int
 	maxBytes int
 	bytes    int
+	// pushed counts every frame ever pushed (never reduced by eviction), so a
+	// test can tell "all my frames were processed" from "the buffer is full".
+	pushed int
 }
 
 func newFrameQueue(capacity int) *frameQueue { return newByteBoundedFrameQueue(capacity, 0) }
@@ -50,6 +53,7 @@ func (q *frameQueue) shrinkLocked() {
 func (q *frameQueue) push(f *relaypb.Frame) {
 	q.mu.Lock()
 	q.items = append(q.items, f)
+	q.pushed++
 	q.bytes += frameBytes(f)
 	q.shrinkLocked()
 	q.mu.Unlock()

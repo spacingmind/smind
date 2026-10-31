@@ -130,8 +130,12 @@ func TestReconnectBufferEvictsOldestPastCap(t *testing.T) {
 	for i := 0; i < n; i++ {
 		daemon.sendFrame(daemon.frame(uint64(i+1), []byte{byte(i)}))
 	}
+	// Wait until the relay has PROCESSED all n frames, not merely until the
+	// buffer is full: it reads cap after the 5th frame already, long before the
+	// 6th..8th have evicted the oldest ones.
 	waitFor(t, 5*time.Second, func() bool {
-		return h.srv.BufferedFrames(testWorkspace, "sess-1", "dev-1") == cap
+		return h.srv.PushedFrames(testWorkspace, "sess-1", "dev-1") == n &&
+			h.srv.BufferedFrames(testWorkspace, "sess-1", "dev-1") == cap
 	})
 
 	device := h.openData(dctx, deviceRoute())

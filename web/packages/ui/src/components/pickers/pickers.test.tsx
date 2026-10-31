@@ -50,7 +50,7 @@ describe("ModeSelect", () => {
     const trigger = screen.getByLabelText("Permission mode");
     expect(trigger).toHaveAttribute("data-danger", "true");
     // Both variants warn in the warning colour (the pill also swaps its icon).
-    expect(trigger).toHaveClass("text-warning");
+    expect(trigger).toHaveClass("text-warning-text");
   });
 
   it("field variant can lead with a Provider default item", async () => {
@@ -163,7 +163,7 @@ describe("AutoAcceptToggle", () => {
     const button = screen.getByTestId("composer-auto-accept");
     expect(button).toHaveAttribute("aria-pressed", "true");
     expect(button).toHaveAttribute("aria-busy", "true");
-    expect(button).toHaveClass("text-warning");
+    expect(button).toHaveClass("text-warning-text");
   });
 
   it("pill variant disabled blocks the change", () => {

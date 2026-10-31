@@ -257,7 +257,7 @@ export function RemoveAccountDialog({
             <span>Checking running tasks…</span>
           ) : warning.runningCount > 0 ? (
             warning.lastAccount ? (
-              <span className="text-warning" data-testid={`provider-remove-warning-${account.id}`}>
+              <span className="text-warning-text" data-testid={`provider-remove-warning-${account.id}`}>
                 {warning.runningCount} running {warning.runningCount === 1 ? "task" : "tasks"} will
                 fail: this is the last {warning.providerLabel} account
               </span>
