@@ -27,6 +27,8 @@ import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import { AppHeader } from "@/components/app-header";
 import { UpdateBadge } from "@/components/update-badge";
+import { HomeLanding } from "@/components/home/home-landing";
+import { requestNewWorkspace } from "@/lib/app-events";
 import { useAppUpdate } from "@/lib/app-update";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { PRTabAutoOpen } from "@/components/pr-panel/pr-tab-auto-open";
@@ -1080,8 +1082,14 @@ function AppShell({
   );
 
   const emptyStateElement = (
-    <div data-testid="app-empty-state" className="flex h-full items-center justify-center bg-panel text-ui-base text-muted-foreground">
-      Select a task to get started.
+    <div data-testid="app-empty-state" className="h-full bg-panel">
+      <HomeLanding
+        client={client}
+        connected={client !== null && connectionStatus === "connected"}
+        workspaces={allWorkspaces}
+        onCreated={selectTaskFromSidebar}
+        onAddProject={requestNewWorkspace}
+      />
     </div>
   );
 

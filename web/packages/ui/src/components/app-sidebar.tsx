@@ -22,6 +22,7 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { useProfileList } from "@/hooks/use-profiles";
 import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { useProviderHealth } from "@/hooks/use-provider-health";
+import { NEW_WORKSPACE_EVENT } from "@/lib/app-events";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
@@ -533,6 +534,11 @@ export function AppSidebar({
 
   const { inSidebar: showUsageSummary } = useUsagePreferences();
   const [crud, setCrud] = useState<CrudTarget | null>(null);
+  useEffect(() => {
+    const open = () => setCrud({ kind: "workspace" });
+    window.addEventListener(NEW_WORKSPACE_EVENT, open);
+    return () => window.removeEventListener(NEW_WORKSPACE_EVENT, open);
+  }, []);
   // The context value must be referentially stable: every task row reads
   // TreeActionsContext, so a fresh object (or fresh handlers) on each AppSidebar
   // render would re-render every row, defeating TaskRow's memo (see

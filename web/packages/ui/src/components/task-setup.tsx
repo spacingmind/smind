@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Icons } from "@/lib/icons";
 
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { NoticeBanner } from "@/components/ui/notice-banner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useRetrySetup } from "@/hooks/use-retry-setup";
 import { cn } from "@/lib/utils";
@@ -198,30 +198,32 @@ export function UntrustedBanner({ task, onTask }: { task: Task; onTask: (task: T
   const retry = useRetrySetup();
   if (!task.UntrustedSource) return null;
   return (
-    <div data-testid="task-untrusted-banner" className="border-b px-4 py-2">
-      <Alert
-        variant="warning"
-        title="From a fork — setup scripts are blocked until you run them."
-        description="Review the code first."
-        className="items-center"
-      >
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          data-testid="task-untrusted-run-setup"
-          disabled={retry.isPending}
-          onClick={() => retry.mutate(task.ID, { onSuccess: onTask })}
-        >
-          <Icons.play className="size-3" />
-          Run setup
-        </Button>
-        {retry.isError && (
-          <span role="alert" className="text-ui-sm text-destructive">
-            {retry.error.message}
-          </span>
-        )}
-      </Alert>
-    </div>
+    <NoticeBanner
+      tone="warning"
+      testId="task-untrusted-banner"
+      actions={
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            data-testid="task-untrusted-run-setup"
+            disabled={retry.isPending}
+            onClick={() => retry.mutate(task.ID, { onSuccess: onTask })}
+          >
+            <Icons.play className="size-3" />
+            Run setup
+          </Button>
+          {retry.isError && (
+            <span role="alert" className="text-ui-sm text-destructive">
+              {retry.error.message}
+            </span>
+          )}
+        </>
+      }
+    >
+      <span className="font-medium">From a fork — setup scripts are blocked until you run them.</span>{" "}
+      <span className="text-foreground-muted">Review the code first.</span>
+    </NoticeBanner>
   );
 }
