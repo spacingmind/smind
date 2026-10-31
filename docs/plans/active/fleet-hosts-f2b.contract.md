@@ -27,6 +27,11 @@ tests:
   - { name: TestMCPListHostsAndHostParamLocalUnchanged, run: "go test ./cmd/smind -run '^TestMCPListHostsAndHostParamLocalUnchanged$' -count=1", timeoutSec: 300 }
   - { name: TestHostReadStatusUnknownNeverFinished, run: "go test ./cmd/smind -run '^TestHostReadStatusUnknownNeverFinished$' -count=1", timeoutSec: 300 }
   - { name: TestWsapiMethodMapGoldenFleetOff, run: "go test ./internal/wsapi -run '^TestWsapiMethodMapGoldenFleetOff$' -count=1", timeoutSec: 300 }
+  - { name: TestHostReadVerbsSendRemoteReadParams, run: "go test ./cmd/smind -run '^TestHostReadVerbsSendRemoteReadParams$' -count=1", timeoutSec: 300 }
+  - { name: TestHostReadFleetOffSaysSo, run: "go test ./cmd/smind -run '^TestHostReadFleetOffSaysSo$' -count=1", timeoutSec: 300 }
+  - { name: TestClientRefusalCodesTyped, run: "go test ./internal/fleet/client -run '^TestClientRefusalCodesTyped$' -count=1", timeoutSec: 300 }
+  - { name: TestRemoteReadTypedErrorsPassThrough, run: "go test ./internal/wsapi -run '^TestRemoteReadTypedErrorsPassThrough$' -count=1", timeoutSec: 300 }
+  - { name: TestObservationRemovedHostUnavailableAtOnce, run: "go test ./internal/fleet/client -run '^TestObservationRemovedHostUnavailableAtOnce$' -count=1", timeoutSec: 300 }
 mutations:
   - { id: M1, file: internal/fleet/client/client.go, change: "Hops carries [] or two entries instead of exactly [Self]", expectFail: [TestClientAttachesProvenance] }
   - { id: M2, file: internal/fleet/client/observe.go, change: "failure limit off by one (count to 4) or connecting counted", expectFail: [TestObservationThreeFailuresIsStatusUnknownNeverFinished, TestObservationConnectingNotCounted] }
