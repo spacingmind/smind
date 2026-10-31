@@ -71,6 +71,12 @@ Agents' files are first-class results, on every transport. None of this changes 
   scripting off, pdf.js pinned in `package.json`). The viewer is a classic script with the pdf.js worker inlined as a classic
   blob worker; the desktop proxy serves exactly its two static files without the cookie gate (an opaque origin cannot send
   the cookie). The router, panels and pane are one lazy chunk.
+- **Interface mode and concise cards** (`lib/interface-mode.ts`, `stores/interface-mode-store.ts`,
+  `components/timeline/concise-tool-card.tsx`): the mode is a client-only preference (`smind:interface-mode`, the bare string
+  `office`; anything else reads `coding`) and is never sent to the daemon. In office mode a `terminal`- or `edit`-intent tool
+  card is one plain line ("Ran a command", "Edited report.md") plus a status, with the one-line error summary when it failed;
+  every other card, permission row and error box is unchanged. The home screen takes its greeting from `OFFICE_GREETINGS` and
+  shows four suggestion chips (`lib/suggested-prompts.ts`) that fill the composer and never send.
 - **Deliverable cards** (`components/timeline/deliverables.ts`, `deliverable-card.tsx`): after a run, candidates are the
   `path` of successful write-intent tool calls plus workspace-relative paths in the final assistant message (markdown links,
   inline code; shell text is never parsed). Each candidate gets one `file.stat` per run, and a card only if the file exists,

@@ -1,7 +1,9 @@
+import { ConciseToolCard, isConciseIntent } from "@/components/timeline/concise-tool-card";
 import { ToolCallCard } from "@/components/timeline/tool-call-card";
 import { countHits, toolResultText, ToolCallDetail } from "@/components/timeline/tool-call-detail";
 import { resolveToolRenderer, toolInput } from "@/components/timeline/tool-renderers";
 import type { TimelineToolCallItem } from "@/hooks/use-run-timeline";
+import { useInterfaceModeStore } from "@/stores/interface-mode-store";
 
 /** Turns an absolute tool-call path into the worktree-relative wire path the file tab wants, or null when it points outside. */
 export function worktreeRelativePath(absolute: string, worktreePath: string): string | null {
@@ -37,6 +39,7 @@ export function ToolCall({
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 }) {
+  const mode = useInterfaceModeStore((s) => s.value);
   const renderer = resolveToolRenderer(item);
   const input = toolInput(item);
   let summary = renderer.summary?.(input) || undefined;
@@ -51,6 +54,10 @@ export function ToolCall({
   const absolute = renderer.filePath?.(input);
   const relative = absolute && worktreePath ? worktreeRelativePath(absolute, worktreePath) : null;
   const onOpenPath = relative && onOpenFile ? () => onOpenFile(relative) : undefined;
+
+  if (mode === "office" && isConciseIntent(renderer.intent)) {
+    return <ConciseToolCard item={item} icon={renderer.icon} intent={renderer.intent} filePath={absolute} onOpenPath={onOpenPath} />;
+  }
 
   return (
     <ToolCallCard
