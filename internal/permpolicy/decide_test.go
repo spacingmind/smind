@@ -360,3 +360,16 @@ func TestPushOwnBranch_OtherRefsAsk(t *testing.T) {
 		}
 	}
 }
+
+func TestDecide_EnvAssignmentSegmentIsNotAllowed(t *testing.T) {
+	t.Parallel()
+	pol := mustLoad(t, bashRule(goTestAllow, ActionAllow, "go", "test"))
+	wantAction(t, Decide(dReq(t, "go test ./..."), pol), ActionAllow)
+	for _, cmd := range []string{"FOO=1 go test ./...", "GOFLAGS=-toolexec=evil go test ./...", "LD_PRELOAD=x go test ./..."} {
+		d := Decide(dReq(t, cmd), pol)
+		wantAction(t, d, ActionAsk)
+		if len(d.Reasons) != 1 || !strings.Contains(d.Reasons[0], "environment assignment") {
+			t.Errorf("%q: Reasons = %q", cmd, d.Reasons)
+		}
+	}
+}
