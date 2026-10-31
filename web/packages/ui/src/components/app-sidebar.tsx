@@ -654,6 +654,15 @@ export function AppSidebar({
         run: () => onOpenSettings?.("providers"),
       },
       {
+        id: "open-settings",
+        group: "Settings",
+        title: "Open settings",
+        keywords: ["preferences", "options", "config"],
+        action: "settings.open",
+        icon: "settings",
+        run: () => onOpenSettings?.(),
+      },
+      {
         id: "settings-agents",
         group: "Settings",
         title: "Settings: Agents",
@@ -891,6 +900,7 @@ export function AppSidebar({
                       label="Group tasks"
                       testId="sidebar-group-mode-control"
                       className="mr-1 p-px"
+                      itemClassName="max-sm:min-h-9 max-sm:min-w-9"
                       value={groupMode}
                       onChange={setGroupMode}
                       options={[
@@ -2373,7 +2383,7 @@ const TaskRow = memo(function TaskRow({
               data-testid="task-collapse-toggle"
               onClick={() => onToggleCollapse?.(task.ID)}
               style={{ left: padLeft - ROW_GUTTER_PX }}
-              className="absolute inset-y-0 flex w-3 items-center justify-center rounded-sm text-muted-foreground outline-hidden"
+              className="absolute inset-y-0 flex w-3 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               <Icons.chevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>

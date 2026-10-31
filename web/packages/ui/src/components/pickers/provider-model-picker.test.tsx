@@ -179,6 +179,21 @@ describe("model picker", () => {
     expect(screen.queryByTestId("model-row-glm:glm-5.3")).not.toBeInTheDocument();
   });
 
+  it("shows a short reason for a raw Go error and keeps the raw text in title", () => {
+    const raw =
+      'exec: "codex": executable file not found in $PATH; codex home: /Users/x/.codex [directory does not exist]';
+    renderPicker({ health: { glm: { ok: false, detail: raw } } });
+    open();
+    fireEvent.click(screen.getByTestId("model-picker-back"));
+    const row = screen.getByTestId("model-provider-glm");
+    expect(row).toHaveTextContent("Not installed");
+    expect(row).not.toHaveTextContent("exec:");
+    const reason = within(row).getByText("Not installed");
+    expect(reason).toHaveAttribute("title", raw);
+    expect(reason.className).toContain("min-w-0");
+    expect(reason.className).toContain("truncate");
+  });
+
   it("a bound chat shows only its provider and no back button", () => {
     renderPicker({ boundProvider: "glm", selectedProvider: "glm", selectedModel: "" });
     open();
