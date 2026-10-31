@@ -39,6 +39,13 @@ func (p *pendingCounter) NotifyPermissionPending(string, int64, int64, string, s
 	p.pending.Add(1)
 }
 
+// The decider tests build engines with the switch on; the engine stays off
+// on Windows until its path checks learn Windows semantics. Run this test
+// binary as a POSIX host, the way permpolicy's TestMain does for its own
+// package. Set at init, before any parallel test goroutine starts, so the
+// engine's concurrent reads of HostGOOS stay race-free.
+var _ = func() bool { permpolicy.HostGOOS = "linux"; return true }()
+
 // policyRun starts a run and installs a policy engine (nil when policy is
 // "-"; otherwise the file content, "" = no file) with the given switch.
 func policyRun(t *testing.T, perm taskrunner.PermissionSettings, policy string, enabled bool) (*Registry, *run, string, *pendingCounter) {

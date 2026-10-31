@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -15,6 +16,9 @@ import (
 var policyReadMethods = []string{"policy.get", "policy.test", "policy.audit"}
 
 func TestPolicyRPCs_ReadOnlyAndRelayCanRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("policy.test is not supported on Windows yet; Windows path support lands in the permpolicy Windows follow-up PR (PR B)")
+	}
 	t.Parallel()
 	e := newIdentEnv(t, "hang")
 	if _, err := e.db.AppendPolicyAudit(store.PolicyAuditRow{Decision: "ask", Tool: "Bash", Target: "make", TaskID: e.seatTask.ID}); err != nil {
@@ -86,6 +90,9 @@ func TestAudit_AppendOnlyNoMutatingRPC(t *testing.T) {
 func TestPolicyTest_ExplainsEachSegmentNoSideEffects(t *testing.T) {
 	t.Parallel()
 	_, db := newTestWorkspaceManager(t)
+	old := permpolicy.HostGOOS
+	permpolicy.HostGOOS = "linux"
+	t.Cleanup(func() { permpolicy.HostGOOS = old })
 	engine := permpolicy.NewEngine(permpolicy.Options{
 		Path: filepath.Join(t.TempDir(), "policy.yaml"), Enabled: func() bool { return true }, Audit: db,
 		Home: t.TempDir(), SmindHome: t.TempDir(),
@@ -126,6 +133,9 @@ func TestPolicyTest_ExplainsEachSegmentNoSideEffects(t *testing.T) {
 // built. policy.test is a dry run, so it explains the floor whether or not
 // the engine's config switch is on.
 func TestPolicyEngine_FloorProtectsDaemonHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("policy.test is not supported on Windows yet; Windows path support lands in the permpolicy Windows follow-up PR (PR B)")
+	}
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
 	e := newIdentEnv(t, "hang")
@@ -155,5 +165,34 @@ func TestPolicyEngine_FloorProtectsDaemonHome(t *testing.T) {
 	}
 	if id := floor(t.TempDir()); id == "no-install-state" {
 		t.Fatalf("a path outside the daemon home hit %q", id)
+	}
+}
+
+// Not parallel: HostGOOS is a global the harness engine reads. The gate is
+// set after the harness is built, mirroring a daemon that starts on POSIX and
+// keeps its engine off on Windows.
+func TestPolicyRPC_TestRefusedOnWindows(t *testing.T) {
+	e := newIdentEnv(t, "hang")
+	old := permpolicy.HostGOOS
+	permpolicy.HostGOOS = "windows"
+	t.Cleanup(func() { permpolicy.HostGOOS = old })
+	local := &requestContext{local: true}
+	_, err := budgetCall(t, e.api, local, "policy.test", map[string]any{"command": "git status"})
+	r := wantErrCode(t, err, codeInvalid)
+	if !strings.Contains(r.Message, "not supported on Windows yet") {
+		t.Fatalf("policy.test error = %q", r.Message)
+	}
+	raw, err := budgetCall(t, e.api, local, "policy.get", map[string]any{})
+	if err != nil {
+		t.Fatalf("policy.get error = %v", err)
+	}
+	var got struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled {
+		t.Fatalf("policy.get enabled = true, want false when the engine cannot run")
 	}
 }
