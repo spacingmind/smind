@@ -175,7 +175,7 @@ func TestHostKeyFileModeAndCorruption(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				dir := t.TempDir()
-				if err := os.WriteFile(keyPath(dir), []byte(tc.data), 0o600); err != nil {
+				if err := securefile.WriteFile(keyPath(dir), []byte(tc.data)); err != nil {
 					t.Fatal(err)
 				}
 				before, err := os.ReadFile(keyPath(dir))
