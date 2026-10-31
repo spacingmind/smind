@@ -17,6 +17,7 @@ import (
 	"github.com/spacingmind/smind/internal/fleet"
 	"github.com/spacingmind/smind/internal/fleet/client"
 	"github.com/spacingmind/smind/internal/fleet/link"
+	"github.com/spacingmind/smind/internal/fleet/mirror"
 	"github.com/spacingmind/smind/internal/fleet/pairing"
 	"github.com/spacingmind/smind/internal/fleet/registry"
 	"github.com/spacingmind/smind/internal/fleet/watch"
@@ -158,8 +159,11 @@ func newFleet(srv *server.Server, cfg config.Config, home, version string, db *s
 	if err := w.Start(ctx); err != nil {
 		log.Printf("fleet: remote-run watcher not started: %v", err)
 	}
+	mr := mirror.New(mirror.Options{Store: db, Observer: wc})
+	stopMirror := mr.Start(ctx)
 	return func() {
 		cancel()
+		stopMirror()
 		w.Stop()
 		mgr.Close()
 	}
