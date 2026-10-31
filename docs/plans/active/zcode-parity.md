@@ -515,3 +515,47 @@ Filled per stage as PRs land.
 - Not done / known: ZCode's "Suggested/Panels/Configure" groups and Open workspace/Toggle terminal entries are not invented (smind's own groups are kept); the palette's "New workspace" and "New task in ..." commands do nothing at 390 while the sidebar drawer is closed (the dialogs live in the sidebar component; pre-existing, not touched); the permission card (inline, not a modal) is unchanged.
 - AC6: `task lint` clean; `task test` green on `75d4e696` (web 365 files / 4033 tests, Go, desktop/docs-site node tests, install scripts), run with a temp HOME and shared caches. Mutations (all failed the named test, files restored): `kbd.tsx` drop the `+` split (`renders each key as a cap`), `categories.ts` drop Chats from tasks (`paletteCategory maps groups to chips`), `command-palette.tsx` ignore the category filter (`chips filter by category`, `chip and query compose`), drop the present filter (`chips without commands are hidden`), pressed uses the raw category (`all chip is pressed when the selected category disappears`), `menu-item-body.tsx` drop the description (`renders icon, title, description and shortcut`), `dialog.tsx` `rounded-2xl` to `rounded-xl` (`content uses the shared anatomy classes`), `dropdown-menu.tsx` drop `gap-0.5` (`item stack is spaced and items are rounded-md`).
 - Peer ledger: GLM 6 runs (task 165: steps 1-3, review fix, step 4 icons; task 166: menu item and dialog anatomy, radius correction), 0 Sonnet, no rate limit, no turn cap (`glm-acp-agent --max-turns 500` seen). Failures: the first radii (rounded-xl dialogs and menus) were my brief's mistake, corrected after reading ZCode `DESIGN.md`; GLM left the chip's pressed state on the raw category (caught in review, fixed by GLM first time).
+
+
+## Stage 3e — Timeline (audit 13, 14, 15)
+
+One PR, reference-only (no ZCode source copied, no "Ported from" headers). Web only: no daemon/wsapi change, because the daemon already forwards an ACP `plan` update as a `raw` run event (`rawKind: "plan"`, `rawPayload` = the ACP update JSON; ADR-0010). The gap is only in the web timeline model.
+
+### References (ZCode files consulted, read-only)
+
+`refs/zcode/DESIGN.md` ("Chat, Tooling" and the Markdown type scale); audit frames `zc_{light,dark}_1280_home` (ZCode has no task page without a model, so tool cards and the plan card are read from DESIGN.md).
+
+### Design decisions
+
+- Supervisor default 2026-10-31, Human may veto: expanded tool calls get the bordered, rounded card look (`rounded-lg` card, monospace output wells `bg-muted/50`-style via tokens); collapsed tool rows stay compact one-liners. Grouped runs, Detailed/Overview, copy buttons, diff/file chips, run footer, whenBusy markers and the error box are untouched.
+- Plan updates: a new timeline item kind `plan` built from `raw` events with `rawKind === "plan"`. Each ACP plan update carries the whole plan, so a new update replaces the earlier plan item **in place** (same id, same position) within a run. Malformed entries are dropped; a plan with no valid entries falls back to the neutral row. Shown in Detailed and Overview.
+- Every other unknown event kind degrades to a neutral collapsed row ("Event: <kind>", details closed, payload inside) instead of "Unrecognised event"; Detailed only, as today.
+- Mobile: its timeline is a separate line-based model (`mobile/src/runTimeline.ts`) that already drops `raw`; a plan card there is a **follow-up** (not in this PR).
+- Markdown: inline-code chip, heading rhythm, code block, table and list spacing adjusted by token classes where the zoomed pass shows a visible difference.
+
+### Acceptance criteria
+
+- **AC1 (item 14)** An ACP `plan` raw event renders a plan card: header "Plan" with "n of m done", entries with a status icon (pending / in progress / completed) and a priority marker, collapsed by default when every entry is done and open otherwise, `aria` labelled; a later update replaces it in place.
+- **AC2** Unknown raw kinds and unknown wire types render a neutral collapsed row, never the text "Unrecognised event".
+- **AC3 (item 13)** Expanded tool calls render as a bordered rounded card with a status icon in the header (check / x / spinner), monospace wells for input/output; collapsed rows unchanged in shape; all existing tool-call tests keep passing.
+- **AC4** User bubble `rounded-lg bg-secondary`-style per DESIGN.md using tokens.
+- **AC5 (item 15)** Assistant markdown: inline-code chip, heading and block spacing, code block, table, list, link differences fixed.
+- **AC6** After sheets (L = ZCode raw, R = smind after) in `/tmp/steward4/zcode-audit/after/timeline/`: seeded run (thinking, plan, read/search/edit/execute with one failure, markdown with headings/code/table), 1280 light+dark, 390, expanded and collapsed, Detailed vs Overview, expand/collapse transition frames. All looked at.
+- **AC7** `task lint` + `task test` green on the final head; one mutation per load-bearing test.
+
+### Named tests
+
+- `hooks/use-run-timeline.test.ts`: `plan raw event becomes a plan item`, `a later plan update replaces the plan in place`, `invalid plan entries are dropped`, `plan with no valid entries falls back to unknown`, `other raw kinds stay unknown`
+- `components/timeline/plan-card.test.tsx`: `shows n of m done`, `renders status and priority per entry`, `collapsed when all done and open otherwise`
+- `components/timeline/timeline-row.test.tsx`: `plan item renders a plan card`, `unknown raw kind renders a neutral row without "Unrecognised"`
+- `components/timeline/detail-level.test.ts`: `overview keeps plan items`
+- `components/timeline/tool-call.test.tsx` (extended): `expanded card is bordered with a status icon`, `failed call shows the failure icon`
+- `components/timeline/timeline-markdown.test.tsx`: `inline code is a chip`, `headings keep the type scale`
+
+### Ported files and sources
+
+None: reference-only reimplementation.
+
+### Progress / Validation
+
+(filled at the end of the stage)
