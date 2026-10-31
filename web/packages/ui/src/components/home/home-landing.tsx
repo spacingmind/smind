@@ -1,17 +1,25 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
+import { RunConfigToolbar, type RunConfigState } from "@/components/composer/run-config-toolbar";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { HomeIllustration } from "@/components/home/home-illustration";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { COMPOSER_ACTION_BUTTON_CLASS, COMPOSER_CARD_CLASS } from "@/lib/composer-shell";
+import { useGreeting } from "@/hooks/use-greeting";
+import { useProfileList } from "@/hooks/use-profiles";
+import { useProviderCatalog } from "@/hooks/use-provider-catalog";
+import { useProviderHealth } from "@/hooks/use-provider-health";
 import { Icons } from "@/lib/icons";
 import type { Task, Workspace } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { WsClientLike } from "@/lib/ws-client";
 import { useHomeProjectStore } from "@/stores/home-project-store";
+import { useHomeRunConfigStore } from "@/stores/home-run-config-store";
+import { usePendingSendStore } from "@/stores/pending-send-store";
 
 /** Workspaces needed before the project menu shows its search box. */
 const SEARCH_THRESHOLD = 6;
@@ -48,6 +56,7 @@ export function HomeLanding({
   onCreated: (task: Task) => void;
   onAddProject?: () => void;
 }) {
+  const greeting = useGreeting();
   const storedId = useHomeProjectStore((s) => s.value);
   const setStoredId = useHomeProjectStore((s) => s.set);
   const chosen = workspaces.find((w) => w.ID === storedId) ?? workspaces[0] ?? null;
@@ -57,6 +66,13 @@ export function HomeLanding({
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const { providersOrFallback: providers, settled: providersSettled } = useProviderCatalog();
+  const profiles = useProfileList();
+  const providerHealth = useProviderHealth();
+  const lastRunConfig = useHomeRunConfigStore((s) => s.value);
+  const configRef = useRef<RunConfigState | null>(null);
+  const sendingRef = useRef(false);
 
   const disabled = !connected || chosen === null || client === null;
 
@@ -72,7 +88,8 @@ export function HomeLanding({
     : workspaces;
 
   async function submit() {
-    if (disabled || busy || prompt.trim() === "") return;
+    if (disabled || busy || sendingRef.current || prompt.trim() === "") return;
+    sendingRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -82,11 +99,17 @@ export function HomeLanding({
       } catch {
         // The draft is a convenience; the task exists either way.
       }
+      // The task's composer takes this and sends through its own submit path; the landing never starts a run.
+      if (configRef.current !== null) {
+        usePendingSendStore.getState().set(task.ID, configRef.current);
+        useHomeRunConfigStore.getState().set(configRef.current);
+      }
       setPrompt("");
       onCreated(task);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      sendingRef.current = false;
       setBusy(false);
     }
   }
@@ -98,8 +121,8 @@ export function HomeLanding({
 
   return (
     <div data-testid="home-landing" className="flex h-full flex-col items-center justify-center gap-6 overflow-y-auto bg-panel px-4 py-10">
-      <img src="/logo.png" alt="" aria-hidden className="size-16 opacity-70 dark:size-[4.5rem]" data-testid="home-mark" />
-      <h1 className="text-ui-xl font-semibold text-foreground">What should we work on?</h1>
+      <HomeIllustration />
+      <h1 className="text-ui-xl font-semibold text-foreground">{greeting}</h1>
       <div className="w-full max-w-2xl">
         <div className="-mb-3 rounded-t-2xl bg-muted/60 px-1.5 pb-4 pt-1.5">
           <Popover
@@ -187,7 +210,26 @@ export function HomeLanding({
               disabled={disabled}
               className="rounded-none border-0 bg-transparent px-4 pb-1 pt-3.5 focus-visible:border-transparent focus-visible:ring-0"
             />
-            <div className="flex items-center justify-end px-2 pb-2 pt-1">
+            <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
+              <RunConfigToolbar
+                taskId={null}
+                chatId={null}
+                profiles={profiles}
+                providers={providers}
+                providersLoading={!!client && !providersSettled}
+                disabled={disabled || busy}
+                providerHealth={providerHealth.health}
+                onPickerOpen={providerHealth.ensure}
+                initialState={lastRunConfig}
+                onChange={(v) => {
+                  configRef.current = v.state;
+                }}
+              >
+                <div data-testid="home-run-chips" className="flex flex-wrap items-center">
+                  <RunConfigToolbar.ModelPicker />
+                  <RunConfigToolbar.Mode />
+                </div>
+              </RunConfigToolbar>
               <Button
                 type="submit"
                 variant="execute"
