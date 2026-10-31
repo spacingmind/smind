@@ -10,21 +10,35 @@ import (
 	"testing"
 )
 
+// realWinEnv is a task on the real filesystem of a Windows runner, where
+// TEMP holds root, wt and home. The temp zone is allowed for scratch writes
+// by design, so outside is a directory NAMED under the system drive, outside
+// both TEMP and home, and never created. tmpOutside is a real directory
+// (inside TEMP) for tests that need an existing target.
 type realWinEnv struct {
-	req     Request
-	root    string
-	wt      string
-	outside string
-	home    string
+	req        Request
+	root       string
+	wt         string
+	outside    string
+	tmpOutside string
+	home       string
 }
 
 func realWinReq(t *testing.T, cmd string) realWinEnv {
 	t.Helper()
 	root := t.TempDir()
 	wt := filepath.Join(root, "wt")
-	outside := filepath.Join(root, "outside")
+	tmpOutside := filepath.Join(root, "outside")
 	home := filepath.Join(root, "home")
-	for _, d := range []string{wt, outside, home, filepath.Join(home, ".smind"), filepath.Join(home, ".ssh")} {
+	drive := os.Getenv("SystemDrive")
+	if drive == "" {
+		drive = "C:"
+	}
+	outside := drive + `\permpolicy-outside-` + strings.ReplaceAll(t.Name(), "/", "_")
+	if inTempZone(outside) {
+		t.Skipf("%s is inside the temp zone on this runner", outside)
+	}
+	for _, d := range []string{wt, tmpOutside, home, filepath.Join(home, ".smind"), filepath.Join(home, ".ssh")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -34,8 +48,13 @@ func realWinReq(t *testing.T, cmd string) realWinEnv {
 			Tool: "Bash", Command: cmd, Worktree: wt, Cwd: wt,
 			Home: home, SmindHome: filepath.Join(home, ".smind"),
 		},
-		root: root, wt: wt, outside: outside, home: home,
+		root: root, wt: wt, outside: outside, tmpOutside: tmpOutside, home: home,
 	}
+}
+
+func inTempZone(p string) bool {
+	pl := hostPlatform()
+	return pl.within(p, tempRoots(pl))
 }
 
 func q(p string) string { return `"` + p + `"` }
@@ -73,7 +92,7 @@ func TestDecideRealWindows_JunctionEscapeIsAsk(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(e.wt, "jn")
-	if err := exec.Command("cmd", "/c", "mklink", "/J", link, e.outside).Run(); err != nil {
+	if err := exec.Command("cmd", "/c", "mklink", "/J", link, e.tmpOutside).Run(); err != nil {
 		t.Skipf("mklink /J: %v", err)
 	}
 	pol := mustLoad(t, bashRule(goTestAllow, ActionAllow, "go", "test"))
