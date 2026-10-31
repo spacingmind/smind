@@ -36,6 +36,9 @@ const hostUsage = `usage: smind host ls [--json]
        smind host enable-reverse <host>
        smind host disable-reverse <host>
        smind host rename <host> <alias>
+       smind host label set <host> <k:v>...
+       smind host label rm <host> <key>...
+       smind host label ls [<host>] [--json]
        smind host test <host>
        smind host route <host> --addr <ws(s)://host:port> [--password-env VAR] [--allow-cleartext]
        smind host info <host> [--json]
@@ -96,6 +99,8 @@ func runHost(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runHostRoute(ctx, rest, stdout, stderr)
 	case "rename":
 		return runHostRename(ctx, rest, stdout, stderr)
+	case "label":
+		return runHostLabel(ctx, rest, stdout, stderr)
 	case "info", "workspaces", "tasks", "task", "status", "activity":
 		return runHostRead(ctx, verb, rest, stdout, stderr)
 	case "grant":
