@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { baseTabForKind, chatTab, fileTab } from "@/components/tab-registry";
+import { baseTabForKind, chatTab, fileTab, pluginTab, pluginTabKey } from "@/components/tab-registry";
 import { useTaskTabs } from "@/hooks/use-task-tabs";
 import { collectAllPanes, DEFAULT_PANE_ID, findPaneById, findPaneContainingTab, type SplitNode } from "@/lib/split-tree";
 import { STORAGE_KEYS } from "@/lib/storage";
@@ -70,6 +70,23 @@ describe("useTaskTabs persistence", () => {
     expect(findPaneById(second.result.current.tabsByTask.get(2)!.root, DEFAULT_PANE_ID)?.activeKey).toBe(
       "2:file:b.ts",
     );
+  });
+
+  it("a plugin tab round-trips through the persisted layout", () => {
+    const panel = { plugin: "acme", id: "usage", title: "Acme usage" };
+    const first = renderHook(() => useTaskTabs());
+    act(() => {
+      first.result.current.openTab(1, pluginTab(1, panel));
+    });
+
+    const second = renderHook(() => useTaskTabs());
+    const primary = findPaneById(second.result.current.tabsByTask.get(1)!.root, DEFAULT_PANE_ID)!;
+    const restored = primary.tabs.find((t) => t.kind === "plugin")!;
+    expect(restored).toBeDefined();
+    expect(restored.key).toBe(pluginTabKey(1, "acme", "usage"));
+    expect(restored.pluginId).toBe("acme");
+    expect(restored.panelId).toBe("usage");
+    expect(primary.activeKey).toBe(restored.key);
   });
 
   it("persists a moved-to-a-second-pane tab and its pane", () => {

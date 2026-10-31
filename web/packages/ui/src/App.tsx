@@ -35,6 +35,7 @@ import { PRTabAutoOpen } from "@/components/pr-panel/pr-tab-auto-open";
 import { PluginPanelPane } from "@/components/plugin-panel/plugin-panel-pane";
 import { useTaskGit } from "@/hooks/use-task-git";
 import { PRPanelPane } from "@/components/pr-panel/pr-panel-pane";
+import { PluginTabReaper } from "@/hooks/use-plugin-tab-reaper";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -1295,6 +1296,8 @@ function AppShell({
       <CommandPalette />
       {/* G9: a task with a PR gets its PR tab once, in the background (never again after a close). */}
       <PRTabAutoOpen taskId={selectedTask?.ID ?? null} tabs={taskState ? collectAllTabs(taskState.root) : null} openTab={openTab} />
+      {/* ADR-0042: a plugin tab whose panel left the daemon's list is closed, across every task's layout. */}
+      <PluginTabReaper tabsByTask={tabsByTask} closeTab={closeTab} />
       <ShellCommands
         client={client}
         tasks={allTasks}
