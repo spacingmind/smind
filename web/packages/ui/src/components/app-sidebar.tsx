@@ -1,3 +1,4 @@
+import { useSidebarAutomationFilterStore } from "@/stores/sidebar-automation-filter-store";
 import { AutomationChip } from "@/components/automations/automation-chip";
 import {
   createContext,
@@ -432,7 +433,15 @@ export function AppSidebar({
   // grouping (plan Decision 2) -- a child nests under its parent even when
   // its own SpaceID differs, so per-space nesting would be wrong. Each
   // space bucket filters these roots back down to its own afterwards.
-  const taskForest = useMemo(() => nestTasks(allTasks), [allTasks]);
+  // The "Started by automation" filter narrows everything the lists derive from; `allTasks` stays whole for pin pruning,
+  // notifications and selection. A child whose parent was filtered out is an orphan, which nestTasks makes a root.
+  const automationOnly = useSidebarAutomationFilterStore((s) => s.value);
+  const setAutomationOnly = useSidebarAutomationFilterStore((s) => s.set);
+  const viewTasks = useMemo(
+    () => (automationOnly ? allTasks.filter((t) => t.automationId !== undefined) : allTasks),
+    [allTasks, automationOnly],
+  );
+  const taskForest = useMemo(() => nestTasks(viewTasks), [viewTasks]);
   const treeActionAvailability = useMemo(
     () => sidebarTreeActions(allTasks, runStatus ?? EMPTY_RUN_STATUS),
     [allTasks, runStatus],
@@ -491,7 +500,7 @@ export function AppSidebar({
     [now, attention, statusOverrides, runStatus, rateLimit, gitByTask, unread, onMarkUnread, pinned, togglePin],
   );
 
-  const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
+  const pinnedTasks = useMemo(() => viewTasks.filter((t) => pinned.has(t.ID)), [viewTasks, pinned]);
   const { groupMode, setGroupMode } = useSidebarGroupMode();
   // The active plugins' sidebar entries (ADR-0042): one stable empty list
   // until they load or the daemon has none, so the group below simply
@@ -499,24 +508,24 @@ export function AppSidebar({
   const pluginSidebarItems = usePluginPanels().sidebar;
   const stageGroups = useMemo(
     () =>
-      groupTasksByStage(allTasks, {
+      groupTasksByStage(viewTasks, {
         attention: attention ?? EMPTY_ATTENTION,
         runStatus: runStatus ?? EMPTY_RUN_STATUS,
         gitByTask,
       }),
-    [allTasks, attention, runStatus, gitByTask],
+    [viewTasks, attention, runStatus, gitByTask],
   );
   // The name only says something when the view mixes workspaces.
   const workspaceNames = useMemo(
     () =>
-      new Set(allTasks.map((t) => t.WorkspaceID)).size > 1
+      new Set(viewTasks.map((t) => t.WorkspaceID)).size > 1
         ? new Map((workspaces ?? []).map((ws) => [ws.ID, ws.Title || ws.Path]))
         : new Map<number, string>(),
-    [workspaces, allTasks],
+    [workspaces, viewTasks],
   );
   const statusGroups = useMemo(
-    () => groupTasksByStatus(allTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
-    [allTasks, attention, runStatus],
+    () => groupTasksByStatus(viewTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
+    [viewTasks, attention, runStatus],
   );
   const { permission: notificationPermission } = useNotificationPermission();
   const { enabled: notificationSoundEnabled } = useNotificationSoundPreference();
@@ -880,6 +889,20 @@ export function AppSidebar({
                       ]}
                     />
                   )}
+                  {!empty && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Started by automation"
+                      title="Started by automation"
+                      aria-pressed={automationOnly}
+                      data-testid="sidebar-automation-filter"
+                      className={cn(automationOnly && "bg-selected")}
+                      onClick={() => setAutomationOnly(!automationOnly)}
+                    >
+                      <Icons.automation />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -967,6 +990,11 @@ export function AppSidebar({
                       onSelectTask={onSelectTask}
                       onArchiveTask={archiveTask}
                     />
+                  )}
+                  {!searching && !empty && automationOnly && viewTasks.length === 0 && (
+                    <p data-testid="sidebar-automation-filter-empty" className="px-2 py-2 text-ui-sm text-muted-foreground">
+                      No automation tasks
+                    </p>
                   )}
                   {!searching && groupMode === "status" && (
                     <StatusGroupedList
