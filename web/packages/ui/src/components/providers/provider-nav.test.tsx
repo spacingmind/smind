@@ -32,7 +32,7 @@ describe("ProviderNav", () => {
   });
 
   it("shows recipe and unverified badges only for recipe instances", () => {
-    const base = { kind: "cli", accountIds: [], tone: "neutral", connected: false } as const;
+    const base = { kind: "cli" as const, accountIds: [] as number[], tone: "neutral" as const, connected: false };
     const list: ProviderNavItem[] = [
       { ...base, id: "plain", label: "Plain" },
       { ...base, id: "verified", label: "Verified", recipe: true },
