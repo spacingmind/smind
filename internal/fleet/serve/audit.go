@@ -4,14 +4,47 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const summaryRunes = 120
 
+// bodyKeys are the request fields that carry free text a person or an agent
+// wrote (a prompt, a message). The audit keeps a hash of the request and a short
+// redacted prefix of it, and never any of these values: Summary replaces each with
+// its length before it takes the prefix, so a prompt cannot reach the table by
+// being the first thing in the JSON.
+var bodyKeys = map[string]bool{"prompt": true, "text": true, "message": true, "body": true, "content": true, "input": true}
+
+// maskBodies returns v with every string under a bodyKeys key replaced by
+// "<N chars>", at any depth.
+func maskBodies(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			if str, ok := val.(string); ok && bodyKeys[k] {
+				t[k] = "<" + strconv.Itoa(utf8.RuneCountInString(str)) + " chars>"
+				continue
+			}
+			t[k] = maskBodies(val)
+		}
+		return t
+	case []any:
+		for i := range t {
+			t[i] = maskBodies(t[i])
+		}
+		return t
+	}
+	return v
+}
+
 // Summary describes a request body for the audit row without keeping it: the
-// hash of the body minus "prov" and a short redacted prefix.
+// hash of the body minus "prov", and a short redacted prefix of the body with
+// its free-text fields (bodyKeys) reduced to their length.
 func Summary(body json.RawMessage, redact func(string) string) string {
 	text := string(body)
 	var m map[string]json.RawMessage
@@ -21,8 +54,21 @@ func Summary(body json.RawMessage, redact func(string) string) string {
 			text = string(b)
 		}
 	}
+	// The hash covers the real body (prov aside); only what is shown is masked.
+	shown := text
+	dec := json.NewDecoder(strings.NewReader(text))
+	dec.UseNumber()
+	var v map[string]any
+	if dec.Decode(&v) == nil && v != nil {
+		var out strings.Builder
+		enc := json.NewEncoder(&out)
+		enc.SetEscapeHTML(false)
+		if enc.Encode(maskBodies(v)) == nil {
+			shown = strings.TrimSuffix(out.String(), "\n")
+		}
+	}
 	sum := sha256.Sum256([]byte(text))
-	head := []rune(text)
+	head := []rune(shown)
 	if len(head) > summaryRunes {
 		head = head[:summaryRunes]
 	}

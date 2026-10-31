@@ -59,6 +59,7 @@ func TestHostCommandsSayFleetOffWhenDisabled(t *testing.T) {
 		{"disable-reverse", "abcdef12"},
 		{"rename", "abcdef12", "den"},
 		{"test", "abcdef12"},
+		{"audit"},
 		{"grant"},
 		{"bogus"},
 	} {
