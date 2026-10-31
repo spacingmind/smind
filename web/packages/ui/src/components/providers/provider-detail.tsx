@@ -251,16 +251,28 @@ export function ProviderDetail({
           className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
           data-testid={`provider-external-${item.id}`}
         >
-          <span className="flex flex-col gap-0.5">
-            <span className="text-ui-base text-muted-foreground">Managed externally via CLI</span>
-            <span className="text-ui-xs text-muted-foreground">
-              {info?.extends
-                ? "Uses the CLI login kept in its own config directory — accounts added here aren't read by it."
-                : info?.custom
-                  ? "The agent handles its own sign-in — accounts added here aren't read by it."
-                  : "Authenticates itself via its own CLI login — accounts added here aren't read by it."}
+          {isRecipe ? (
+            <span className="flex flex-col gap-0.5">
+              <span className="text-ui-base text-muted-foreground">Managed by smind</span>
+              <span className="text-ui-xs text-muted-foreground">
+                Authenticates with the key stored in smind, not a CLI login. Test only checks the CLI binary and health — no network call, the key is not used.
+              </span>
+              <span className="text-ui-xs text-muted-foreground" data-testid={`provider-config-dir-${item.id}`}>
+                Config directory: private (managed by smind)
+              </span>
             </span>
-          </span>
+          ) : (
+            <span className="flex flex-col gap-0.5">
+              <span className="text-ui-base text-muted-foreground">Managed externally via CLI</span>
+              <span className="text-ui-xs text-muted-foreground">
+                {info?.extends
+                  ? "Uses the CLI login kept in its own config directory — accounts added here aren't read by it."
+                  : info?.custom
+                    ? "The agent handles its own sign-in — accounts added here aren't read by it."
+                    : "Authenticates itself via its own CLI login — accounts added here aren't read by it."}
+              </span>
+            </span>
+          )}
           <TestButton providerId={item.id} testing={isTesting(item.id)} onTest={runTest} />
         </div>
       ) : itemRows.length === 0 ? (
