@@ -106,6 +106,8 @@ function SelectItem({
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
+      // The description is a second line, not part of the option's name.
+      aria-label={rich && typeof children === "string" ? children : undefined}
       className={cn(
         "relative flex w-full cursor-default items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-ui-base outline-hidden select-none focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
         className
