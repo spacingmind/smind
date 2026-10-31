@@ -195,6 +195,20 @@ describe("picker gates: provider rows", () => {
   });
 });
 
+describe("picker gates: settings forms", () => {
+  it("gatesBlock=false turns a hard gate into a warning: the row shows its reason and can be chosen", () => {
+    const spies = renderPicker(infos({ glm: { gate: REASONS[0]![0] } }), { gatesBlock: false });
+    toRoot();
+    const row = screen.getByTestId("model-provider-glm");
+    expect(row).not.toHaveAttribute("aria-disabled");
+    expect(within(row).getByTestId("model-gate-glm")).toHaveTextContent("Signed out");
+    fireEvent.click(row);
+    expect(screen.getByTestId("model-row-glm:glm-5")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("model-row-glm:glm-5"));
+    expect(spies.onSelect).toHaveBeenCalledWith("glm", "glm-5");
+  });
+});
+
 describe("picker gates: model rows", () => {
   it("a hard model gate blocks that model only; click does not select, the action runs", () => {
     const g = gate({
