@@ -227,6 +227,43 @@ func TestDigest_CIStatesMapped(t *testing.T) {
 	if g := mustGate(t, failing, "ci"); g.Detail != "unit, lint" {
 		t.Errorf("detail %q, want the failing check names", g.Detail)
 	}
+
+	noPR := []struct {
+		state string
+		want  string
+	}{
+		{"none", GateNA},
+		{"", GateNA},
+		{"success", GatePass},
+		{"failure", GateFail},
+		{"pending", GateUnknown},
+	}
+	for _, tc := range noPR {
+		in := base()
+		in.PR = nil
+		in.CI = CIInfo{State: tc.state}
+		g := mustGate(t, in, "ci")
+		if g.State != tc.want {
+			t.Errorf("ci state %q without a PR: gate = %q (%s), want %s", tc.state, g.State, g.Detail, tc.want)
+		}
+	}
+
+	noPRNoCI := base()
+	noPRNoCI.PR = nil
+	noPRNoCI.CI = CIInfo{State: "none"}
+	if g := mustGate(t, noPRNoCI, "ci"); !strings.Contains(g.Detail, "no PR and no CI result") {
+		t.Errorf("detail %q, want the no-PR no-CI reason", g.Detail)
+	}
+}
+
+func TestGates_NoPRNoCIDoesNotHoldClamp(t *testing.T) {
+	in := base()
+	in.PR = nil
+	in.CI = CIInfo{State: "none"}
+	res := Clamp(VerdictChanges, ComputeGates(in))
+	if res.Hold {
+		t.Fatalf("Hold = true, want false when the CI gate is n/a")
+	}
 }
 
 func TestDigest_ValidatorStaleShaNotPass(t *testing.T) {

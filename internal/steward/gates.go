@@ -125,6 +125,9 @@ func gateCI(in Inputs) Gate {
 	case "pending":
 		return Gate{State: GateUnknown}
 	case "none", "":
+		if in.PR == nil {
+			return Gate{State: GateNA, Detail: "no PR and no CI result"}
+		}
 		return Gate{State: GateUnknown, Detail: "no CI result yet"}
 	default:
 		return Gate{State: GateUnknown}
