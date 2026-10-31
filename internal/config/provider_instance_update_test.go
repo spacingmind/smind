@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // useInstanceHome points SMIND_HOME at a fresh temp dir with config.yaml
@@ -283,5 +284,167 @@ server:
 	}
 	if cfg.Server.Port != 4700 {
 		t.Errorf("server.port = %d", cfg.Server.Port)
+	}
+}
+
+func TestUpdateInstance_NoTrailingNewline(t *testing.T) {
+	claudeDir := filepath.Join(t.TempDir(), "nn-claude")
+	original := "providers:\n  custom:\n    - id: nn\n      extends: claude-native\n      env:\n        CLAUDE_CONFIG_DIR: " + claudeDir
+	useInstanceHome(t, original)
+	_, changed, err := UpdateProviderInstance("nn", InstanceUpdate{DisallowedTools: toolsPtr("WebSearch")})
+	if err != nil || !changed {
+		t.Fatalf("UpdateProviderInstance = changed %v, err %v", changed, err)
+	}
+	after := instanceYAML(t)
+	if !strings.HasPrefix(after, original+"\n") {
+		t.Errorf("original bytes not preserved:\n%s", after)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Providers.Custom[0].DisallowedTools; len(got) != 1 || got[0] != "WebSearch" {
+		t.Errorf("disallowedTools = %v", got)
+	}
+}
+
+func TestUpdateInstance_InvalidFieldsNamed(t *testing.T) {
+	claudeDir := filepath.Join(t.TempDir(), "iv-claude")
+	codexDir := filepath.Join(t.TempDir(), "iv-codex")
+	content := `providers:
+  custom:
+    - id: cl
+      extends: claude-native
+      env:
+        CLAUDE_CONFIG_DIR: ` + claudeDir + `
+    - id: cx
+      extends: codex-native
+      endpoint:
+        kind: openai-responses
+        baseUrl: http://127.0.0.1:1
+      models:
+        - id: gpt-x
+      env:
+        CODEX_HOME: ` + codexDir + `
+    - id: cx2
+      extends: codex-native
+      env:
+        CODEX_HOME: ` + codexDir + `2
+`
+	cases := []struct {
+		name string
+		id   string
+		u    InstanceUpdate
+		want string
+	}{
+		{"models and additionalModels", "cl", InstanceUpdate{
+			Models:           modelsPtr(CustomModel{ID: "a"}),
+			AdditionalModels: modelsPtr(CustomModel{ID: "b"}),
+		}, "additionalModels"},
+		{"disallowedTools on codex", "cx2", InstanceUpdate{DisallowedTools: toolsPtr("WebSearch")}, "disallowedTools"},
+		{"empty tool name", "cl", InstanceUpdate{DisallowedTools: toolsPtr("")}, "disallowedTools[0]"},
+		{"bad model id", "cl", InstanceUpdate{Models: modelsPtr(CustomModel{ID: "-bad"})}, "models[0].id"},
+		{"duplicate model ids", "cl", InstanceUpdate{Models: modelsPtr(CustomModel{ID: "a"}, CustomModel{ID: "a"})}, "duplicate model id"},
+		{"inherit on codex", "cx2", InstanceUpdate{InheritClaudeConfig: boolPtr(true)}, "inheritClaudeConfig"},
+		{"endpoint instance without models", "cx", InstanceUpdate{Models: modelsPtr()}, "models"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			useInstanceHome(t, content)
+			before := instanceYAML(t)
+			_, changed, err := UpdateProviderInstance(tc.id, tc.u)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to mention %q", err, tc.want)
+			}
+			if changed {
+				t.Error("changed = true on error")
+			}
+			if after := instanceYAML(t); after != before {
+				t.Errorf("file changed on error:\n%s", after)
+			}
+		})
+	}
+}
+
+func TestUpdateInstance_UnknownIDAndNonInstance(t *testing.T) {
+	useInstanceHome(t, `providers:
+  custom:
+    - id: acp
+      command: /bin/true
+    - id: inst
+      extends: claude-native
+`)
+	before := instanceYAML(t)
+	u := InstanceUpdate{DisallowedTools: toolsPtr("WebSearch")}
+	if _, _, err := UpdateProviderInstance("nope", u); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("unknown id: err = %v", err)
+	}
+	if _, _, err := UpdateProviderInstance("acp", u); err == nil || !strings.Contains(err.Error(), "not an instance") {
+		t.Errorf("non-instance: err = %v", err)
+	}
+	if after := instanceYAML(t); after != before {
+		t.Errorf("file changed:\n%s", after)
+	}
+}
+
+func TestUpdateInstance_IdempotentNoop(t *testing.T) {
+	claudeDir := filepath.Join(t.TempDir(), "id-claude")
+	path := useInstanceHome(t, `providers:
+  custom:
+    - id: same
+      extends: claude-native
+      env:
+        CLAUDE_CONFIG_DIR: `+claudeDir+`
+      disallowedTools:
+        - WebSearch
+`)
+	old := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	before := instanceYAML(t)
+	_, changed, err := UpdateProviderInstance("same", InstanceUpdate{
+		DisallowedTools:     toolsPtr("WebSearch"),
+		InheritClaudeConfig: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Error("changed = true for an identical update")
+	}
+	if after := instanceYAML(t); after != before {
+		t.Errorf("bytes changed:\n%s", after)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.ModTime().Equal(old) {
+		t.Errorf("mtime = %v, want %v", st.ModTime(), old)
+	}
+}
+
+func TestUpdateInstance_NothingToUpdate(t *testing.T) {
+	useInstanceHome(t, "providers:\n  custom:\n    - id: n\n      extends: claude-native\n")
+	before := instanceYAML(t)
+	_, changed, err := UpdateProviderInstance("n", InstanceUpdate{})
+	if err == nil || !strings.Contains(err.Error(), "nothing to update") || changed {
+		t.Fatalf("changed %v, err %v", changed, err)
+	}
+	if after := instanceYAML(t); after != before {
+		t.Errorf("file changed:\n%s", after)
+	}
+}
+
+func TestUpdateInstance_FlowStyleRefused(t *testing.T) {
+	useInstanceHome(t, "providers:\n  custom:\n    - {id: x, extends: claude-native}\n")
+	before := instanceYAML(t)
+	_, changed, err := UpdateProviderInstance("x", InstanceUpdate{DisallowedTools: toolsPtr("WebSearch")})
+	if err == nil || !strings.Contains(err.Error(), "edit config.yaml by hand") || changed {
+		t.Fatalf("changed %v, err %v", changed, err)
+	}
+	if after := instanceYAML(t); after != before {
+		t.Errorf("file changed:\n%s", after)
 	}
 }
