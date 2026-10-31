@@ -2,7 +2,7 @@ import { act, fireEvent, screen } from "@testing-library/react";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TaskLineageHeader } from "@/components/task-lineage";
+import { TaskLineageChips, TaskLineageHeader } from "@/components/task-lineage";
 import { usageChipText } from "@/lib/task-lineage";
 import { TaskDetailPane } from "@/components/task-detail";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
@@ -429,5 +429,50 @@ describe("TaskLineageHeader stalled marker (stalled-tree alert AC7)", () => {
     render(<TaskLineageHeader lineage={{ parent: null, node: node({ id: 2, usage: { ...node({ id: 2 }).usage, subtree: usage(1, { costUsd: 0.1 }) } }), children: [node({ id: 3, parentId: 2 })] }} />);
     expect(screen.queryByTestId("task-stalled")).toBeNull();
     expect(screen.getByTestId("task-child-pill").dataset.childStalled).toBeUndefined();
+  });
+});
+
+describe("TaskLineage remote children (fleet F4)", () => {
+  const remote = () => node({ id: -1, parentId: 2, title: "Remote work", remote: true, host: "box", hostId: "h1", globalId: "box:7" });
+
+  it("TestTaskLineageRemoteNodeShowsHostChip", () => {
+    const onJumpToTask = vi.fn();
+    render(
+      <TaskLineageHeader
+        lineage={{ parent: null, node: node({ id: 2 }), children: [node({ id: 3, parentId: 2, title: "Local work" }), remote()] }}
+        onJumpToTask={onJumpToTask}
+      />,
+    );
+    const pills = screen.getAllByTestId("task-child-pill");
+    expect(pills).toHaveLength(2);
+    const remotePill = pills[1];
+    expect(remotePill.dataset.remote).toBe("true");
+    expect(screen.getByTestId("task-child-host-chip").textContent).toBe("box");
+    expect(remotePill.title).toBe("box:7 (read only: owned by box)");
+    fireEvent.click(remotePill);
+    expect(onJumpToTask).not.toHaveBeenCalled();
+    fireEvent.click(pills[0]);
+    expect(onJumpToTask).toHaveBeenCalledWith(3);
+  });
+
+  it("TestRemoteTaskHeaderReadOnlyWithHostChip", () => {
+    const onJumpToTask = vi.fn();
+    const parent = node({
+      id: 2,
+      counts: { running: 1, waitingPermission: 0, failed: 0, done: 0, idle: 0 },
+    });
+    render(
+      <div>
+        <TaskLineageChips lineage={{ parent: null, node: parent, children: [remote()] }} onJumpToTask={onJumpToTask} />
+      </div>,
+    );
+    expect(screen.getByTestId("task-tree-summary").textContent).toBe("1 running");
+    const pill = screen.getByTestId("task-child-pill");
+    expect(pill.tagName).toBe("SPAN");
+    expect(pill.getAttribute("role")).toBeNull();
+    expect(pill.dataset.remote).toBe("true");
+    expect(screen.queryByRole("button")).toBeNull();
+    fireEvent.click(pill);
+    expect(onJumpToTask).not.toHaveBeenCalled();
   });
 });

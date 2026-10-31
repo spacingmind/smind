@@ -1,3 +1,4 @@
+import { HostChip } from "@/components/host-chip";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Icons, ICON_SIZE } from "@/lib/icons";
 import { pillStatusWithSubtree, rateLimitHint, stalledHint, statusSummary, usageChipParts, usageChipText } from "@/lib/task-lineage";
@@ -83,6 +84,24 @@ export function TaskLineageChips({
           {children.map((child) => {
             const childHint = rateLimitHint(child, new Date());
             const childStalled = stalledHint(child, new Date());
+            if (child.remote) {
+              // A node mirrored from another host: read-only, never navigated by id (its id is negative and not a real task).
+              return (
+                <span
+                  key={child.globalId ?? `remote-${child.id}`}
+                  data-testid="task-child-pill"
+                  data-remote="true"
+                  data-child-state={child.run.state}
+                  data-child-urgency={pillStatusWithSubtree(child, nodes)}
+                  title={`${child.globalId} (read only: owned by ${child.host})`}
+                  className="flex max-w-[12rem] items-center gap-1.5 truncate rounded-full border px-2 py-0.5"
+                >
+                  <StatusDot status={pillStatusWithSubtree(child, nodes)} />
+                  <span className="truncate">{child.title}</span>
+                  <HostChip alias={child.host ?? ""} testId="task-child-host-chip" />
+                </span>
+              );
+            }
             return (
             <button
               key={child.id}
