@@ -35,12 +35,7 @@ commands:
   - { id: C2, run: "GOOS=windows go vet ./cmd/smind ./internal/fleet/... ./internal/wsapi ./internal/store", timeoutSec: 600 }
 limits: { budgetUsd: 2, maxMinutes: 40 }
 writeScope:
-  - internal/fleet/selector
-  - internal/fleet/registry
-  - internal/store
-  - internal/wsapi
-  - cmd/smind
-  - public-docs/hosts.md
+  paths: [internal/fleet/selector, internal/fleet/registry, internal/store, internal/wsapi, cmd/smind, public-docs/hosts.md, docs/plans/active]
 ---
 
 Judge the branch head against the ACs. Labels are local operator config and must never be sent to the peer; selection never retries on another host.
