@@ -13,7 +13,7 @@ acs:
   - id: AC-16
     text: "A refused link (version skew) surfaces as fleet_version_unsupported with guidance; the client never falls back to local."
     covers: { tests: [TestClientRefusalCodesTyped, TestRemoteReadTypedErrorsPassThrough] }
-  - id: AC-21a
+  - id: AC-21-OBS
     text: "Observation: three consecutive failed observations give status unknown, never finished; connecting attempts do not count; a removed host is unavailable at once."
     covers: { tests: [TestObservationThreeFailuresIsStatusUnknownNeverFinished, TestObservationConnectingNotCounted, TestObservationRemovedHostUnavailableAtOnce, TestHostReadStatusUnknownNeverFinished] }
   - id: AC-1
