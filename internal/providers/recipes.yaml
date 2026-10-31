@@ -347,19 +347,26 @@ recipes:
 
   - id: chat-completions-via-opencode
     label: "Chat-completions endpoint via OpenCode"
+    description: "For a vendor that only offers an OpenAI chat-completions endpoint (no Responses API, no Anthropic API): an OpenCode instance configured for that endpoint."
     harness: acp
     endpointKind: chat-completions
     vendor: generic
-    env: []
+    env:
+      - name: SMIND_OPENCODE_API_KEY
+        kind: secret
     models: []
     modelsRequired: true
-    thinking: supported
+    thinking: hidden
     disallowedTools: []
     notes:
-      - "Runs through OpenCode's own provider config (opencode.json); the OpenCode provider exists, but adding this recipe is not supported yet."
-      - "Not usable with Codex."
+      - "Base URL: the vendor's chat-completions root, usually ending in /v1 (smind adds /chat/completions through OpenCode). It must be https, or a loopback address for a local server."
+      - "Models: the vendor's model ids, as the vendor spells them. Nothing is discovered for a custom endpoint."
+      - "The key is stored write-only and handed to OpenCode through its environment only; it is never written into OpenCode's config, a command line or a log."
+      - "The instance runs OpenCode in a private home under the smind directory and ignores the repository's own opencode.json and your own OpenCode login."
+      - "Not usable with Codex (Codex speaks only the Responses API)."
     docs: "https://opencode.ai/docs/providers/"
-    source: inferred
+    source: vendor-docs
     verifiedAt: ""
     unverified:
-      - "whole recipe: nothing was run, and addFromRecipe cannot build an OpenCode instance yet"
+      - "no real vendor was called: the config format and the request were checked against the real OpenCode 1.18.34 binary and a local fake chat-completions server only"
+      - "tool calling and streaming quality depend on the vendor's model; OpenCode needs a model that supports tool calls"

@@ -52,12 +52,17 @@ refused.
 | `litellm` | Claude Code | URL, key, model ids | vendor docs | no |
 | `anthropic-compatible` | Claude Code | URL, key, model ids | Paseo docs | no |
 | `openai-responses-compatible` | Codex | URL, key, model ids | Paseo docs | no |
-| `chat-completions-via-opencode` | OpenCode | not addable yet | inferred | no |
+| `chat-completions-via-opencode` | OpenCode | URL, key, model ids | vendor docs | no |
 
 "Verified: no" means no row has been run against a live endpoint yet. Treat
 base URLs and model ids as what the vendor's documentation said on 2026-10-30,
 and try the inferred rows with care. The `openai-responses-compatible` row
-speaks only the OpenAI Responses API; Codex has no chat-completions mode.
+speaks only the OpenAI Responses API; Codex has no chat-completions mode. For a
+vendor that offers only a chat-completions endpoint, use
+`chat-completions-via-opencode`: it runs an OpenCode instance configured for
+that endpoint (checked against OpenCode itself and a local fake endpoint, never
+a real vendor). The base URL must be `https`, or a loopback address for a local
+server.
 
 ## What a recipe instance does differently
 

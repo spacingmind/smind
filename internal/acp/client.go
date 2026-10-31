@@ -329,6 +329,28 @@ type ConfigOption struct {
 	Options      []ConfigSelectOption `json:"options,omitempty"`
 }
 
+// UnmarshalJSON accepts the option's identifier under either spelling: the
+// ACP schema calls it "id" (OpenCode, and the agents that follow the stable
+// schema), earlier drafts "configId" (Claude's and Codex's adapters, our fake
+// agent). Without this an agent using "id" advertises options smind could
+// list but never set (session/set_config_option went out with an empty
+// configId). The wire shape smind sends is unchanged.
+func (o *ConfigOption) UnmarshalJSON(b []byte) error {
+	type plain ConfigOption
+	aux := struct {
+		plain
+		ID string `json:"id"`
+	}{}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	*o = ConfigOption(aux.plain)
+	if o.ConfigID == "" {
+		o.ConfigID = aux.ID
+	}
+	return nil
+}
+
 // ConfigSelectOption is one selectable choice of a "select"-kind
 // ConfigOption -- ACP's SessionConfigSelectOption (value/name/optional
 // description).
