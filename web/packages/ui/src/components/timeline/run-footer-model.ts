@@ -81,6 +81,7 @@ export const CONTINUE_PROMPT = "Continue";
 const FAILURE_LABELS: Record<string, string> = {
   cli_exited: "the agent CLI exited without a result",
   rate_limited: "a provider rate limit, which has since reset",
+  plan_window_exhausted: "the plan's usage window, which has since reset",
 };
 
 /**

@@ -51,3 +51,10 @@ describe("parseChildEventPrompt", () => {
     expect(parseChildEventPrompt(undefined as unknown as string)).toEqual({ blocks: [] });
   });
 });
+
+describe("isRateLimitedLine with the failure classes", () => {
+  it("warns on the plan window class and stays quiet for a transient 429", () => {
+    expect(isRateLimitedLine('- task #1 "t" run r-1: error · plan_window_exhausted (5h window)')).toBe(true);
+    expect(isRateLimitedLine('- task #1 "t" run r-1: error · transient_429')).toBe(false);
+  });
+});

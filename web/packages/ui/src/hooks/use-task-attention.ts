@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
-import { RATE_LIMITED } from "@/lib/rate-limit";
+import { isPlanLimitKind } from "@/lib/rate-limit";
 import type { RunLogEvent, RunLogsResult, RunStatusValue, RunSummary } from "@/lib/types";
 
 /** Why a task currently has the sidebar's attention marker. */
@@ -203,7 +203,7 @@ export function useTaskAttention(
               Status: r.Status,
               order: -index,
               finishedAtMs: Number.isNaN(parsed) ? null : parsed,
-              ...(r.FailureKind === RATE_LIMITED ? { rateLimit: failureDetail(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred) } : {}),
+              ...(isPlanLimitKind(r.FailureKind) ? { rateLimit: failureDetail(r.FailureWindow, r.FailureResetAt, r.FailureResetInferred) } : {}),
             };
           });
           runsRef.current = runs;
@@ -294,7 +294,7 @@ export function useTaskAttention(
       const finishedAtMs = p.status === "running" ? null : Date.now();
       // A run.status carries the failure fields (ADR-0041) on its terminal event; any later status for the run replaces them.
       const rateLimit =
-        p.failureKind === RATE_LIMITED
+        isPlanLimitKind(typeof p.failureKind === "string" ? p.failureKind : undefined)
           ? failureDetail(typeof p.window === "string" ? p.window : undefined, typeof p.resetAt === "string" ? p.resetAt : undefined, p.resetInferred === true)
           : undefined;
       if (idx >= 0) {

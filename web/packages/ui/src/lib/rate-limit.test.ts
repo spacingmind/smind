@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeRateLimit, describeRateLimitReset, formatResetClock, retryNotBefore, waitUntilLabel } from "@/lib/rate-limit";
+import { describeRateLimit, describeRateLimitReset, formatResetClock, isRateLimitedRun, retryNotBefore, waitUntilLabel } from "@/lib/rate-limit";
 
 describe("waitUntilLabel", () => {
   const now = new Date(2026, 9, 23, 12, 0, 0);
@@ -55,5 +55,18 @@ describe("inferred reset marker", () => {
   it("weekday prefix with ≈", () => {
     expect(formatResetClock(next, now, true)).toBe("Sat ≈09:05");
     expect(waitUntilLabel(next.toISOString(), now, true)).toBe("Wait until Sat ≈09:05");
+  });
+});
+
+describe("plan limit kinds (run failure classes)", () => {
+  it("treats plan_window_exhausted and the residual rate_limited as a rate-limited error run", () => {
+    expect(isRateLimitedRun({ status: "error", failureKind: "plan_window_exhausted" })).toBe(true);
+    expect(isRateLimitedRun({ status: "error", failureKind: "rate_limited" })).toBe(true);
+  });
+  it("does not treat a transient 429, auth, model or cli_exited failure as a plan limit", () => {
+    for (const failureKind of ["transient_429", "auth_expired", "model_not_in_plan", "cli_exited", ""]) {
+      expect(isRateLimitedRun({ status: "error", failureKind })).toBe(false);
+    }
+    expect(isRateLimitedRun({ status: "done", failureKind: "plan_window_exhausted" })).toBe(false);
   });
 });
