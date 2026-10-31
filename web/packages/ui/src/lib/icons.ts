@@ -219,6 +219,8 @@ export const Icons = {
   /** O1 provenance: a run's worktree commit. */
   commit: GitCommitHorizontal,
   groupByStatus: ListChecks,
+  /** The plan card's header. */
+  listChecks: ListChecks,
   groupByWorkspace: FolderGit2,
   groupByStage: Kanban,
   web: Globe,
@@ -273,6 +275,8 @@ export const Icons = {
   draft: Sparkles,
   /** A neutral / unfilled status marker. */
   statusIdle: Circle,
+  /** A pending plan entry. */
+  circle: Circle,
   /** A skipped / neutral / cancelled check: nothing ran, nothing failed. */
   statusSkipped: CircleMinus,
   /** A task tree that has sat idle past the stall alert threshold (no run, nothing queued). */
