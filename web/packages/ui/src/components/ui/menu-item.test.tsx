@@ -37,4 +37,11 @@ describe("MenuItemBody via DropdownMenuItem", () => {
     expect(item.textContent).toBe("Plain");
     expect(item.querySelector('[data-slot="menu-item-shortcut"]')).toBeNull();
   });
+
+  it("item stack is spaced and items are rounded-md", () => {
+    renderOpenMenu(<DropdownMenuItem>Spaced</DropdownMenuItem>);
+    const content = document.querySelector('[data-slot="dropdown-menu-content"]');
+    expect(content).toHaveClass("gap-0.5");
+    expect(screen.getByRole("menuitem")).toHaveClass("rounded-md");
+  });
 });

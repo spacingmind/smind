@@ -23,8 +23,8 @@ describe("dialog anatomy", () => {
     );
     const content = document.querySelector('[data-slot="dialog-content"]');
     expect(content).not.toBeNull();
-    expect(content).toHaveClass("rounded-xl");
-    expect(content).not.toHaveClass("rounded-2xl");
+    expect(content).toHaveClass("rounded-2xl");
+    expect(content).not.toHaveClass("rounded-xl");
     expect(screen.getByRole("button", { name: "Close" })).toHaveClass("size-7");
   });
 
