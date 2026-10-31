@@ -1,10 +1,6 @@
 package permpolicy
 
-import (
-	"os"
-	"path"
-	"strings"
-)
+import "strings"
 
 // FloorHit names the compiled-in floor rule that denied a request. The floor
 // is not configurable (ADR-0047 §2.1): no policy file can allow what it
@@ -76,10 +72,14 @@ type floorSeg struct {
 	unsets   []string
 	wrappers []string
 	cwd      string
+	pl       *platform
 }
 
+// name is the command name of the effective argv0 under the request's flavour; argv must be non-empty.
+func (fs *floorSeg) name() string { return fs.pl.cmdName(fs.argv[0]) }
+
 func newFloorSeg(req Request, seg Segment, cwd string) *floorSeg {
-	fs := &floorSeg{req: req, seg: seg, cwd: cwd, argv: seg.Argv}
+	fs := &floorSeg{req: req, seg: seg, cwd: cwd, argv: seg.Argv, pl: req.pl()}
 	fs.assigns = append(fs.assigns, seg.Env...)
 	fs.unwrap()
 	return fs
@@ -90,7 +90,7 @@ func newFloorSeg(req Request, seg Segment, cwd string) *floorSeg {
 // word, which is re-split and unwrapped again.
 func (fs *floorSeg) unwrap() {
 	for n := 0; n < 16 && len(fs.argv) > 0; n++ {
-		name := path.Base(fs.argv[0])
+		name := fs.name()
 		rest := fs.argv[1:]
 		switch name {
 		case "env":
@@ -181,14 +181,30 @@ func skipFlags(rest []string, withValue map[string]bool) []string {
 // to "" (unknown) when X is dynamic or unresolvable, because a later
 // destructive check then cannot prove it stays inside the worktree.
 func (fs *floorSeg) cwdAfter() string {
-	if len(fs.argv) == 0 || fs.argv[0] != "cd" {
+	if len(fs.argv) == 0 || !fs.isCd() {
 		return fs.cwd
 	}
-	args := nonFlags(fs.argv[1:])
+	argv := fs.argv[1:]
+	if fs.pl.windows && len(argv) > 0 && strings.EqualFold(argv[0], "/d") {
+		argv = argv[1:]
+	}
+	args := nonFlags(argv)
 	if len(args) == 0 {
 		return floorHome(fs.req)
 	}
 	return fs.chdir(fs.cwd, args[0])
+}
+
+// isCd reports whether the effective command changes directory: `cd` on POSIX, the cmd and PowerShell family on Windows.
+func (fs *floorSeg) isCd() bool {
+	if !fs.pl.windows {
+		return fs.argv[0] == "cd"
+	}
+	switch fs.name() {
+	case "cd", "chdir", "pushd", "set-location", "sl":
+		return true
+	}
+	return false
 }
 
 // floorHome is the human's real home: the request's, else the process's.
@@ -196,7 +212,7 @@ func floorHome(req Request) string {
 	if req.Home != "" {
 		return req.Home
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := req.pl().homeDir()
 	return home
 }
 
@@ -229,7 +245,7 @@ type gitCall struct {
 // parseGit finds the subcommand after git's global options, which may carry
 // a value in the next word (-C, -c, --git-dir X, ...).
 func (fs *floorSeg) parseGit() (gitCall, bool) {
-	if len(fs.argv) == 0 || path.Base(fs.argv[0]) != "git" {
+	if len(fs.argv) == 0 || fs.name() != "git" {
 		return gitCall{}, false
 	}
 	g := gitCall{cwd: fs.cwd}
@@ -391,7 +407,7 @@ func addsAll(args []string) bool {
 // after dropping options, so `gh pr merge --squash 5` and `gh -R x pr merge`
 // are both seen.
 func (fs *floorSeg) ghRules() (FloorHit, bool) {
-	if len(fs.argv) == 0 || path.Base(fs.argv[0]) != "gh" {
+	if len(fs.argv) == 0 || fs.name() != "gh" {
 		return FloorHit{}, false
 	}
 	// The value of a global flag (-R owner/repo) is a non-flag word, so the
@@ -424,7 +440,7 @@ func (fs *floorSeg) publishRules() (FloorHit, bool) {
 	if len(fs.argv) == 0 {
 		return FloorHit{}, false
 	}
-	switch path.Base(fs.argv[0]) {
+	switch fs.name() {
 	case "npm", "yarn", "pnpm", "bun", "cargo":
 		words := nonFlags(fs.argv[1:])
 		if containsWord(words[:min(2, len(words))], "publish") {

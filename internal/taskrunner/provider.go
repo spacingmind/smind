@@ -150,6 +150,26 @@ type ProviderInfo struct {
 	Notes        []string `json:"notes,omitempty"`
 	Unverified   bool     `json:"unverified,omitempty"`
 	Vendor       string   `json:"vendor,omitempty"`
+
+	// Instance is an instance's own overlay as configured (not the merged
+	// catalog), for editing; nil for a non-instance provider. Additive.
+	Instance *InstanceOverlay `json:"instance,omitempty"`
+}
+
+// InstanceOverlay is an instance's own editable overlay (provider.updateInstance).
+type InstanceOverlay struct {
+	Models              []InstanceModel `json:"models,omitempty"`
+	AdditionalModels    []InstanceModel `json:"additionalModels,omitempty"`
+	DisallowedTools     []string        `json:"disallowedTools,omitempty"`
+	InheritClaudeConfig bool            `json:"inheritClaudeConfig,omitempty"`
+}
+
+// InstanceModel is one model of an InstanceOverlay.
+type InstanceModel struct {
+	ID          string `json:"id"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Default     bool   `json:"default,omitempty"`
 }
 
 // SupportedProviders lists the registered providers (internal/providers,
@@ -184,7 +204,37 @@ func infoFromSpec(s providers.Spec) ProviderInfo {
 	info.Modes, info.DefaultMode = staticModes(s)
 	info.Models = staticModels(s)
 	applyRecipeFields(&info, s)
+	if s.IsInstance() {
+		info.Instance = instanceOverlay(s)
+	}
 	return info
+}
+
+// instanceOverlay is s's own overlay exactly as configured. The loader fills a
+// missing label with the id, so a label equal to its id is omitted.
+func instanceOverlay(s providers.Spec) *InstanceOverlay {
+	o := &InstanceOverlay{
+		DisallowedTools:     append([]string(nil), s.OwnDisallowedTools...),
+		InheritClaudeConfig: s.InheritClaudeConfig,
+	}
+	if len(o.DisallowedTools) == 0 {
+		o.DisallowedTools = nil
+	}
+	var models []InstanceModel
+	for _, m := range s.OwnModels {
+		im := InstanceModel{ID: m.ID, Label: m.Label, Description: m.Description, Default: m.Default}
+		if im.Label == im.ID {
+			im.Label = ""
+		}
+		models = append(models, im)
+	}
+	switch s.ModelsMode {
+	case providers.ModelsAdd:
+		o.AdditionalModels = models
+	default:
+		o.Models = models
+	}
+	return o
 }
 
 // applyRecipeFields fills info's recipe-derived additive fields from spec

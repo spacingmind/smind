@@ -105,12 +105,15 @@ Usage:
                                                            manage learned skills and proposals (humans only; run "smind learn" for flags)
 
   smind policy init|show|test|audit                       permission policy engine: write the template, show rules, explain a command, list decisions
-                                                           (humans only; the engine is off until steward.policy.enabled; not supported on Windows yet; run "smind policy" for flags)
+                                                           (humans only; the engine is off until steward.policy.enabled; run "smind policy" for flags)
 
   smind push test [<device id prefix>]                    send a test notification to phones registered for push
 
   smind cooldown ls                                       list providers cooling down after a rate limit
   smind cooldown clear <provider>                         I reset my quota: clear a provider cooldown, retry held runs now (humans only)
+
+  smind provider update <id> [--models a,b] [--add-models a,b]   edit an instance in config.yaml: its model list, extra models, disallowed tools
+      [--disallow T,U] [--inherit-claude-config=true|false]     (humans only; applied live; keys stay on the Providers settings)
 
   smind update [--check] [--version <v>] [--force]        update this binary to the latest release (SHA-256 verified)
       [--dry-run] [--json]                                 --check only reports; refuses while runs are active unless --force
@@ -128,6 +131,16 @@ reset time and keeps `--on-rate-limit=wait` retries waiting until then.
 `smind cooldown ls` shows which providers are still cooling down and when
 they reset. When you reset your quota by hand, `smind cooldown clear
 <provider>` clears the cooldown and retries the held runs now (humans only).
+
+### provider update
+
+`smind provider update <id>` edits one custom instance in config.yaml:
+`--models a,b` replaces its model list, `--add-models a,b` adds models to the
+provider's own catalog, `--disallow T,U` names tools the instance may not
+call, and `--inherit-claude-config=true|false` shares ~/.claude instead of a
+private config directory. An explicitly empty value (`--models ""`) removes
+the field; a flag left out leaves it alone (humans only; the daemon applies
+the change live, and keys are edited on the Providers settings page).
 
 ## Relay
 

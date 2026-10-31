@@ -44,20 +44,13 @@ func cmdPolicy(args []string) int {
 }
 
 // runPolicy is cmdPolicy with its environment injected. Exit codes: 0 ok,
-// 1 a daemon, call or file error or an unsupported OS, 2 usage.
+// 1 a daemon, call or file error, 2 usage.
 func runPolicy(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, cmdPolicyUsage)
 		return 2
 	}
 	sub, rest := args[0], args[1:]
-	switch sub {
-	case "init", "show", "test", "audit":
-		if !permpolicy.Supported() {
-			fmt.Fprintf(stderr, "smind policy %s: %s\n", sub, permpolicy.UnsupportedMessage)
-			return 1
-		}
-	}
 	switch sub {
 	case "init":
 		return policyInit(rest, stdout, stderr)

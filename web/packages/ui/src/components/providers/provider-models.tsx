@@ -19,11 +19,27 @@ function toModelRows(models: NonNullable<ProviderInfo["models"]>): ModelRow[] {
   }));
 }
 
+/** The catalog's source: an instance shows where its own overlay's list comes from, not the extended one. */
+function sourceNote(provider: ProviderInfo): string {
+  if (provider.recipe) return "From the recipe";
+  if (provider.modelsDiscovered) return "Reported by the agent";
+  if (provider.custom && !provider.extends) return "Listed in config.yaml";
+  if (provider.extends) {
+    if ((provider.instance?.models ?? []).length > 0) return "Listed in config.yaml";
+    if ((provider.instance?.additionalModels ?? []).length > 0) return "Built-in catalog + config.yaml";
+  }
+  return "Built-in catalog";
+}
+
 /** Read-only model catalog for a provider: source note, search over long lists, no selection. */
 export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
   const { provider } = props;
   const [query, setQuery] = useState("");
-  const models = provider.models ?? [];
+  const models = useMemo(() => {
+    const all = provider.models ?? [];
+    // A recipe instance lists only its own configured models; the catalog entries come from the runner it extends.
+    return provider.recipe ? all.filter((m) => m.source === "config") : all;
+  }, [provider.models, provider.recipe]);
   const rows = useMemo(
     () => filterAndRankModelRows(toModelRows(models), query.trim().toLowerCase()),
     [models, query],
@@ -33,7 +49,9 @@ export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
     return (
       <div className="rounded-lg border bg-card p-3" data-testid="provider-models">
         <p className="text-ui-sm text-muted-foreground" data-testid="provider-models-empty">
-          No models reported yet — the agent hasn't been probed.
+          {provider.recipe
+            ? "No models listed for this recipe — runs use the endpoint's default model."
+            : "No models reported yet — the agent hasn't been probed."}
         </p>
       </div>
     );
@@ -44,9 +62,7 @@ export function ProviderModels(props: { provider: ProviderInfo }): JSX.Element {
       <div className="flex items-center gap-2">
         <h4 className="text-ui-base font-medium">Models</h4>
         <span className="text-ui-sm text-muted-foreground">{models.length}</span>
-        <span className="text-ui-sm text-muted-foreground">
-          {provider.modelsDiscovered ? "Reported by the agent" : provider.custom && !provider.extends ? "Listed in config.yaml" : "Built-in catalog"}
-        </span>
+        <span className="text-ui-sm text-muted-foreground">{sourceNote(provider)}</span>
       </div>
       {models.length >= SEARCH_THRESHOLD ? (
         <Input

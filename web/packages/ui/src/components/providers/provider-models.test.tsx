@@ -35,6 +35,41 @@ describe("ProviderModels", () => {
     expect(screen.getByTestId("provider-models")).toHaveTextContent("Built-in catalog");
   });
 
+  it("an instance that replaces the list says Listed in config.yaml", () => {
+    render(
+      <ProviderModels
+        provider={provider({
+          models: models(2),
+          custom: true,
+          extends: "claude-native",
+          instance: { models: [{ id: "my-model" }] },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("provider-models")).toHaveTextContent("Listed in config.yaml");
+  });
+
+  it("an instance that adds models says Built-in catalog + config.yaml", () => {
+    render(
+      <ProviderModels
+        provider={provider({
+          models: models(2),
+          custom: true,
+          extends: "claude-native",
+          instance: { additionalModels: [{ id: "my-model" }] },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("provider-models")).toHaveTextContent("Built-in catalog + config.yaml");
+  });
+
+  it("an instance with no overlay still says Built-in catalog", () => {
+    render(
+      <ProviderModels provider={provider({ models: models(2), custom: true, extends: "claude-native" })} />,
+    );
+    expect(screen.getByTestId("provider-models")).toHaveTextContent("Built-in catalog");
+  });
+
   it("models search appears only with eight or more models and filters", () => {
     const { rerender } = render(<ProviderModels provider={provider({ models: models(7) })} />);
     expect(screen.queryByTestId("models-search")).toBeNull();
@@ -50,5 +85,50 @@ describe("ProviderModels", () => {
     expect(screen.getByTestId("provider-models-empty")).toHaveTextContent(
       "No models reported yet — the agent hasn't been probed.",
     );
+  });
+
+  it("a recipe instance lists its configured models, never the built-in catalog", () => {
+    render(
+      <ProviderModels
+        provider={provider({
+          recipe: "zai-glm",
+          extends: "claude-native",
+          custom: true,
+          models: [
+            { id: "glm-5.3", label: "glm-5.3", default: true, source: "config" },
+            { id: "glm-5.3-flash", label: "glm-5.3-flash", source: "config" },
+            { id: "sonnet", label: "Sonnet (latest)", source: "catalog" },
+          ],
+        })}
+      />,
+    );
+    const root = screen.getByTestId("provider-models");
+    expect(root).toHaveTextContent("glm-5.3-flash");
+    expect(root).toHaveTextContent("From the recipe");
+    expect(root.textContent).not.toContain("Sonnet (latest)");
+    expect(root.textContent).not.toContain("Built-in catalog");
+  });
+
+  it("a recipe instance with only catalog models shows the recipe empty note", () => {
+    render(
+      <ProviderModels
+        provider={provider({
+          recipe: "zai-glm",
+          models: [{ id: "sonnet", label: "Sonnet (latest)", source: "catalog" }],
+        })}
+      />,
+    );
+    expect(screen.getByTestId("provider-models-empty")).toHaveTextContent("No models listed for this recipe");
+  });
+
+  it("catalog models without a recipe still render with Built-in catalog", () => {
+    render(
+      <ProviderModels
+        provider={provider({ models: [{ id: "sonnet", label: "Sonnet (latest)", source: "catalog" }] })}
+      />,
+    );
+    const root = screen.getByTestId("provider-models");
+    expect(root).toHaveTextContent("Sonnet (latest)");
+    expect(root).toHaveTextContent("Built-in catalog");
   });
 });

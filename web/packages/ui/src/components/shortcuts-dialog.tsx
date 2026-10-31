@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { useKeyboard } from "@/keyboard/keyboard-provider";
 import { filterShortcutHelpSections } from "@/keyboard/shortcut-help-search";
 import { comboStringFromEvent } from "@/keyboard/shortcut-string";
@@ -15,30 +16,7 @@ import { conflictingBindings, helpSections, UNASSIGNED } from "@/keyboard/shortc
  * what this file exports.
  */
 
-/** Renders a formatted combo as individual key caps, split on the platform's own separator. */
-function KeyCaps({ keys }: { keys: string }) {
-  // On mac `formatCombo` returns "⌘⌥T" (no separator, matching Apple's own
-  // rendering); elsewhere "Ctrl+Alt+T". Splitting the mac form back into
-  // caps would mean re-parsing glyphs, so mac gets one cap and the rest get
-  // one per key -- which is what each platform's conventions look like
-  // anyway.
-  const parts = keys.includes("+") ? keys.split("+") : [keys];
-  return (
-    <span className="flex items-center gap-1">
-      {parts.map((part, i) => (
-        <kbd
-          key={`${part}-${i}`}
-          className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-ui-xs"
-        >
-          {part}
-        </kbd>
-      ))}
-    </span>
-  );
-}
-
-/**
- * One binding's row.
+/** One binding's row.
  *
  * "Change" captures a single key press and commits immediately -- the
  * overwhelming common case, and unchanged from before chords existed.
@@ -132,7 +110,7 @@ function ShortcutRow({
             Unassigned
           </span>
         ) : (
-          <KeyCaps keys={row.keys} />
+          <Kbd keys={row.keys} />
         )}
       </td>
       <td className="hidden whitespace-nowrap px-3 py-1.5 text-ui-sm text-foreground-muted sm:table-cell">Global</td>

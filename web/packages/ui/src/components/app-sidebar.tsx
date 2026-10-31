@@ -23,7 +23,7 @@ import { useProfileList } from "@/hooks/use-profiles";
 import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import { NEW_WORKSPACE_EVENT } from "@/lib/app-events";
-import { Icons } from "@/lib/icons";
+import { Icons, pluginIconByName } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 import type {
@@ -61,6 +61,7 @@ import { useCollapsedTasks } from "@/hooks/use-collapsed-tasks";
 import { useCollapsedNodes, type CollapsedNodes } from "@/hooks/use-collapsed-nodes";
 import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
+import { usePluginPanels } from "@/hooks/use-plugin-panels";
 import { describeTaskStatus } from "@/lib/task-status-label";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
 import { groupTasksByStage, type StageGroup } from "@/lib/sidebar-stage-groups";
@@ -339,6 +340,7 @@ export function AppSidebar({
   onWorkspacesChange,
   onOpenSettings,
   onOpenInbox,
+  onOpenPluginPanel,
   connectionStatus = "connected",
   connectionStatusText,
   headerActions,
@@ -387,6 +389,8 @@ export function AppSidebar({
   onOpenSettings?: (sectionId?: string) => void;
   /** Opens the Human inbox (ADR-0045); the footer shows its unseen count. */
   onOpenInbox?: () => void;
+  /** Opens one of the active plugins' panels as a full page (ADR-0042) -- what a "Plugins" sidebar row opens. */
+  onOpenPluginPanel?: (pluginId: string, panelId: string) => void;
   /** The daemon connection state and its human text (App.tsx's STATUS_LABEL / connect error) -- the footer's Host popover shows it. */
   connectionStatus?: ConnectionStatus;
   connectionStatusText?: string;
@@ -485,6 +489,10 @@ export function AppSidebar({
 
   const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
   const { groupMode, setGroupMode } = useSidebarGroupMode();
+  // The active plugins' sidebar entries (ADR-0042): one stable empty list
+  // until they load or the daemon has none, so the group below simply
+  // doesn't render.
+  const pluginSidebarItems = usePluginPanels().sidebar;
   const stageGroups = useMemo(
     () =>
       groupTasksByStage(allTasks, {
@@ -615,6 +623,7 @@ export function AppSidebar({
         group: "Actions",
         title: "New workspace",
         keywords: ["create", "add", "project", "repo"],
+        icon: "folderAdd",
         run: () => setCrud({ kind: "workspace" }),
       },
       {
@@ -622,6 +631,7 @@ export function AppSidebar({
         group: "Actions",
         title: "Settings: Providers",
         keywords: ["providers", "accounts", "credentials", "login", "oauth"],
+        icon: "credentials",
         run: () => onOpenSettings?.("providers"),
       },
       {
@@ -630,6 +640,7 @@ export function AppSidebar({
         title: "Settings: Agents",
         keywords: ["profiles", "agents"],
         action: "settings.open",
+        icon: "settings",
         run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
       },
       {
@@ -637,6 +648,7 @@ export function AppSidebar({
         group: "Settings",
         title: "New agent…",
         keywords: ["create", "profile", "agent"],
+        icon: "agent",
         run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
       },
     ];
@@ -651,6 +663,7 @@ export function AppSidebar({
           group: "Settings",
           title: "Settings: Daemon server",
           keywords: ["daemon", "server", "connection", "connections", "host", "remote", "relay", "url"],
+          icon: "host",
           run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "connections" } })),
         },
         {
@@ -658,6 +671,7 @@ export function AppSidebar({
           group: "Settings",
           title: "Settings: Daemon",
           keywords: ["daemon", "install", "update", "restart", "version", "managed", "take over"],
+          icon: "settings",
           run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "daemon" } })),
         },
       );
@@ -689,6 +703,7 @@ export function AppSidebar({
             ? "New task"
             : `New task in ${ws.Title || ws.Path}`,
         keywords: ["create", "add", ws.Title, ws.Path],
+        icon: "newTask",
         run: () => setCrud({ kind: "task", workspace: ws, spaceId: null }),
       });
     }
@@ -977,6 +992,40 @@ export function AppSidebar({
             </TooltipProvider>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {/*
+         * Plugins (ADR-0042): one row per sidebar entry an active plugin
+         * contributes, right above the footer. Hidden entirely (no label,
+         * no empty padding) when the daemon offers none.
+         */}
+        {pluginSidebarItems.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Plugins</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <TooltipProvider>
+                  {pluginSidebarItems.map((item) => {
+                    const ItemIcon = pluginIconByName(item.icon ?? "");
+                    return (
+                      <SidebarMenuItem key={`${item.plugin}:${item.id}`}>
+                        <SidebarMenuButton
+                          tooltip={item.title}
+                          data-testid="sidebar-plugin-item"
+                          data-plugin={item.plugin}
+                          data-panel={item.opens}
+                          onClick={() => onOpenPluginPanel?.(item.plugin, item.opens)}
+                        >
+                          <ItemIcon aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
+                          <span className="truncate">{item.title}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </TooltipProvider>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       {/*
