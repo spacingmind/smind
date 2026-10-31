@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/spacingmind/smind/internal/fsutil"
 )
 
 const (
@@ -56,7 +58,7 @@ func (m Memory) ensureDir(id int64) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("memory dir: %w", err)
 		}
-		if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		if fsutil.IsLink(fi.Mode()) || !fi.IsDir() {
 			return "", fmt.Errorf("memory dir %s is not a plain directory", p)
 		}
 	}
@@ -68,7 +70,7 @@ func (m Memory) ensureDir(id int64) (string, error) {
 func (m Memory) Read(id int64, max int) (string, error) {
 	path := filepath.Join(m.Dir(id), memoryFile)
 	for _, p := range []string{filepath.Join(m.Home, "automations"), m.Dir(id)} {
-		if fi, err := os.Lstat(p); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if fi, err := os.Lstat(p); err == nil && fsutil.IsLink(fi.Mode()) {
 			return "", fmt.Errorf("memory path %s is a symlink", p)
 		}
 	}

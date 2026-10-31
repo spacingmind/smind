@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -51,9 +53,8 @@ func realRepo(t *testing.T) (repo, base string) {
 	write(t, filepath.Join(repo, "README.md"), "hello\n", 0o644)
 	write(t, filepath.Join(repo, "cmd", "run.sh"), "#!/bin/sh\n", 0o755)
 	write(t, filepath.Join(repo, ".gitignore"), "ignored.txt\n", 0o644)
-	if err := os.Symlink("/etc/passwd", filepath.Join(repo, "escape")); err != nil {
-		t.Skip("symlinks unavailable")
-	}
+	// A file link (can't be a junction): skips loudly without symlink privilege.
+	testutil.SymlinkOrSkip(t, "/etc/passwd", filepath.Join(repo, "escape"))
 	git(t, repo, "add", "-A")
 	git(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "one")
 	base = git(t, repo, "rev-parse", "HEAD")

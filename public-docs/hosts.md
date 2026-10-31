@@ -137,6 +137,24 @@ A paired host can call only the fleet methods and nothing else: it cannot read
 or change your grants, settings or secrets, and provider accounts and passwords
 never cross a link.
 
+### What a paired host can read
+
+Once a link is approved and its direction is on, the peer can read, and only
+read: this host's workspaces (title, repository URL and default branch, never a
+local path), its tasks and their state, the status of a run, and a bounded feed
+of what a run did (assistant text is capped at 1 KiB per event; tool inputs,
+tool results and permission details never leave this host). Anything that looks
+like a credential is removed from what is returned, and a repository URL never
+carries a user name or token. A grant that lists specific workspaces limits every
+read to those workspaces.
+
+Each request names where it came from. This host refuses a request that does
+not match the link it arrived on, one that has already passed through this host,
+one that has been relayed through another host (there is exactly one hop), one
+that is stale or a replay, and callers that ask too fast. Every call, served or
+refused, is recorded in an audit log on this host with a hash and at most 120
+redacted characters of the request, never its text; rows are kept for 30 days.
+
 ### Routes and cleartext
 
 A direct route must be `wss://`, or `ws://` to this machine or to an address
@@ -145,6 +163,51 @@ any other address is refused, because prompts and results would be readable on
 the network. Override it for one host with `--allow-cleartext`; the command
 prints a warning. A host can also be reached through your self-hosted relay: run
 `smind host invite --via relay` on a daemon that is connected to a relay.
+
+## Read another host
+
+Once a host is paired and connected, you can look at its work without leaving
+your own terminal. These commands only read; they never create, send or stop
+anything on the other host.
+
+```bash
+smind host info studio
+smind host workspaces studio
+smind host tasks studio --workspace 3
+smind host task studio:42
+smind host status studio:42
+smind host status studio <runId>
+smind host activity studio:42 --cursor 120
+```
+
+A task on another host is written `alias:id` (for example `studio:42`); the
+alias is resolved on this machine only. Every command also takes `--json`. List
+commands are paged: when more rows exist, the last line is `more: --cursor N`.
+
+What you get back is whatever the other host chose to share. You see its
+workspaces by title, repository address (without any credentials) and default
+branch, never a local path; its tasks by title, branch and state; and the text of
+a run's activity, cut to 1 KiB per event. Text that came from another host is
+printed with control characters removed so it cannot repaint your terminal.
+
+Errors name a code first:
+
+| Code | Meaning |
+|---|---|
+| `not_granted` | The other host has not allowed this read. Ask its owner to widen access. |
+| `host_unavailable` | The link is down, still connecting, or the other host is not paired for this direction. |
+| `fleet_version_unsupported` | The other host runs an older smind. The message says which host to update; nothing falls back to your local data. |
+| `hop_limit`, `cycle` | The call would pass through a third host or back to you. Reads are direct only. |
+| `timeout` | The other host did not answer in 15 seconds. |
+| `unknown_host` | No paired host has that alias. |
+
+### Status unknown
+
+`smind host status` asks the other host for a run's state. If three asks in a row
+fail (a link that is merely still connecting does not count), it prints
+**status unknown** and exits with an error. That does not mean the run
+finished: it may still be running. Look at the host before you hand the work to
+someone else. A host you have removed is reported as unavailable at once.
 
 ### Other commands
 

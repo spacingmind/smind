@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/spacingmind/smind/internal/fsutil"
 )
 
 // Status of one finding. Info never counts as a problem.
@@ -85,7 +87,7 @@ func (r *repo) stat(rel string) (os.FileInfo, bool) {
 		cur = filepath.Join(cur, part)
 		var err error
 		fi, err = os.Lstat(cur)
-		if err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		if err != nil || fsutil.IsLink(fi.Mode()) {
 			return nil, false
 		}
 	}
@@ -136,7 +138,7 @@ func (r *repo) list(rel string) []string {
 	ents, _ := d.ReadDir(maxDirEntries)
 	names := make([]string, 0, len(ents))
 	for _, e := range ents {
-		if e.Type()&os.ModeSymlink == 0 {
+		if !fsutil.IsLink(e.Type()) {
 			names = append(names, e.Name())
 		}
 	}

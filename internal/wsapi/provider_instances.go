@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/fsutil"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -99,7 +100,7 @@ func suggestDirs(runner *taskrunner.Runner, lister dirLister, home string) ([]di
 	}
 	var out []dirSuggestion
 	for _, e := range entries {
-		if !e.IsDir() || e.Type()&fs.ModeSymlink != 0 {
+		if !e.IsDir() || fsutil.IsLink(e.Type()) {
 			continue
 		}
 		for _, p := range suggestPrefixes {

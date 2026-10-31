@@ -2,6 +2,7 @@ package automation
 
 import (
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/testutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -273,38 +274,57 @@ func TestMemory_PathEscapeRejected(t *testing.T) {
 	}
 }
 
-func TestMemory_SymlinkRefused(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlinks need privileges on Windows")
-	}
+// A symlinked (or, on Windows, junctioned) automation directory is refused.
+// testutil.Link makes a junction where symlinks need a privilege this
+// account lacks, so the escape vector stays covered on Windows.
+func TestMemory_LinkedDirectoryRefused(t *testing.T) {
 	home := t.TempDir()
 	outside := t.TempDir()
 	m := Memory{Home: home}
 	if err := os.MkdirAll(filepath.Join(home, "automations"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// A symlinked automation directory pointing outside.
-	if err := os.Symlink(outside, m.Dir(7)); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, outside, m.Dir(7))
 	if err := m.Write(7, "x", 100); err == nil {
-		t.Fatal("write through a symlinked directory accepted")
+		t.Fatal("write through a linked directory accepted")
 	}
 	if _, err := m.Read(7, 100); err == nil {
-		t.Fatal("read through a symlinked directory accepted")
+		t.Fatal("read through a linked directory accepted")
 	}
 	if ents, _ := os.ReadDir(outside); len(ents) != 0 {
 		t.Fatalf("wrote outside the memory directory: %v", ents)
 	}
-	// A symlinked MEMORY.md.
+}
+
+// The "automations" directory itself being a link is refused too (it is the
+// first component Read walks).
+func TestMemory_LinkedAutomationsRootRefused(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	m := Memory{Home: home}
+	if err := os.MkdirAll(filepath.Join(outside, "7"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "7", memoryFile), []byte("s3cret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Link(t, outside, filepath.Join(home, "automations"))
+	if got, err := m.Read(7, 100); err == nil || got != "" {
+		t.Fatalf("read through a linked automations root: %q %v", got, err)
+	}
+}
+
+func TestMemory_SymlinkedFileRefused(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	m := Memory{Home: home}
 	if err := os.MkdirAll(m.Dir(8), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(outside, "secret")
 	_ = os.WriteFile(target, []byte("s3cret"), 0o600)
-	if err := os.Symlink(target, filepath.Join(m.Dir(8), memoryFile)); err != nil {
-		t.Fatal(err)
-	}
+	// A file link can't be a junction: skips loudly without symlink privilege.
+	testutil.SymlinkOrSkip(t, target, filepath.Join(m.Dir(8), memoryFile))
 	if got, err := m.Read(8, 100); err == nil || got != "" {
 		t.Fatalf("read a symlinked file: %q %v", got, err)
 	}

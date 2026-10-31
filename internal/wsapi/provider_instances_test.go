@@ -12,6 +12,7 @@ import (
 	"github.com/spacingmind/smind/internal/learning"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 // These tests mutate the process-wide providers.Default (the table learning,
@@ -183,9 +184,9 @@ func newSuggestHome(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("/", filepath.Join(home, ".claude-link")); err != nil && !os.IsExist(err) {
-		t.Logf("symlink unavailable: %v", err)
-	}
+	// A linked directory under a suggestible name (a symlink, or a junction on
+	// Windows without symlink privilege) must never be suggested.
+	testutil.Link(t, t.TempDir(), filepath.Join(home, ".claude-link"))
 	makeFIFO(t, filepath.Join(home, ".claude-work", "fifo")) // opening it would block forever
 	return home
 }

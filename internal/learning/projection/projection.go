@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/spacingmind/smind/internal/fsutil"
 	"github.com/spacingmind/smind/internal/learning/gate"
 )
 
@@ -145,7 +146,7 @@ func Remove(root string, workspaceID int64) error {
 	if err != nil {
 		return err
 	}
-	if rootInfo.Mode()&fs.ModeSymlink != 0 || !rootInfo.IsDir() {
+	if fsutil.IsLink(rootInfo.Mode()) || !rootInfo.IsDir() {
 		return fmt.Errorf("projection: root %q is not a plain directory", root)
 	}
 	info, err := os.Lstat(wsDir)
@@ -155,7 +156,7 @@ func Remove(root string, workspaceID int64) error {
 	if err != nil {
 		return err
 	}
-	if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
+	if fsutil.IsLink(info.Mode()) || !info.IsDir() {
 		return fmt.Errorf("projection: %q is not a plain directory", wsDir)
 	}
 	return removeTree(wsDir)
@@ -213,7 +214,7 @@ func ensureDirs(root, wsDir string) error {
 		if err != nil {
 			return err
 		}
-		if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
+		if fsutil.IsLink(info.Mode()) || !info.IsDir() {
 			return fmt.Errorf("projection: %q is not a plain directory", d)
 		}
 	}
@@ -280,7 +281,7 @@ func verify(dir string, files map[string][]byte) error {
 	if err != nil {
 		return err
 	}
-	if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
+	if fsutil.IsLink(info.Mode()) || !info.IsDir() {
 		return errors.New("not a plain directory")
 	}
 	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -344,7 +345,7 @@ func gc(wsDir, current string) {
 	}
 	var others []cand
 	for _, e := range ents {
-		if e.Name() == current || e.Type()&fs.ModeSymlink != 0 {
+		if e.Name() == current || fsutil.IsLink(e.Type()) {
 			continue
 		}
 		info, err := e.Info()
