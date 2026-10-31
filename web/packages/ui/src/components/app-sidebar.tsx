@@ -891,6 +891,7 @@ export function AppSidebar({
                       label="Group tasks"
                       testId="sidebar-group-mode-control"
                       className="mr-1 p-px"
+                      itemClassName="max-sm:min-h-9 max-sm:min-w-9"
                       value={groupMode}
                       onChange={setGroupMode}
                       options={[

@@ -105,6 +105,17 @@ function toggleOf(taskId: number): HTMLElement {
   return within(taskItem(taskId)).getByTestId("task-collapse-toggle");
 }
 
+describe("sidebar group-mode radios tap target (B-07)", () => {
+  it("each radio grows to a 36px hit area below sm (structural, jsdom has no layout)", async () => {
+    await mountSidebar(TREE);
+    for (const id of ["tree", "status", "stage"]) {
+      const radio = screen.getByTestId(`sidebar-group-mode-${id}`);
+      expect(radio.className).toContain("max-sm:min-h-9");
+      expect(radio.className).toContain("max-sm:min-w-9");
+    }
+  });
+});
+
 describe("task collapse toggle focus ring (B-08)", () => {
   it("carries the focus-visible ring class (structural, jsdom has no focus rendering)", async () => {
     await mountSidebar(TREE);
