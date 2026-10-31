@@ -1,6 +1,9 @@
 package permpolicy
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 // SegmentPaths returns every path one simple command names, resolved the way
 // the engine judges them (ResolvePath: absolute, links followed), so a rule
@@ -39,6 +42,9 @@ func segmentPaths(pl *platform, seg Segment, cwd string) ([]string, error) {
 		}
 		resolved, err := pl.resolve(w, cwd)
 		if err != nil {
+			if pl.nonPathWord(w, err) {
+				continue
+			}
 			return nil, err
 		}
 		add(resolved)
@@ -78,4 +84,15 @@ func (pl *platform) dynamicWord(w string) bool {
 func hasPercentVar(w string) bool {
 	i := strings.IndexByte(w, '%')
 	return i >= 0 && strings.IndexByte(w[i+1:], '%') >= 0
+}
+
+// nonPathWord reports a Windows word that cannot be a path: it failed with
+// errUnrepresentable but has no separator and no drive prefix (a commit
+// message "feat: x", "a|b", a trailing-dot name), so it is skipped rather than
+// aborting the call.
+func (pl *platform) nonPathWord(w string, err error) bool {
+	if !pl.windows || !errors.Is(err, errUnrepresentable) || strings.ContainsAny(w, `/\`) {
+		return false
+	}
+	return !(len(w) >= 2 && isLetter(w[0]) && w[1] == ':')
 }
