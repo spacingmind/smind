@@ -286,3 +286,5 @@ Human-approved 2026-10-31 (the follow-up PR6 left open). An existing `providers.
 - **`provider.list`** serves `instance: {models, additionalModels, disallowedTools, inheritClaudeConfig}` for an instance (its own overlay as configured, not the merged catalog),
   additive.
 - **Break**: none (additive RPC and wire field). No installed base to migrate.
+
+> Amendment 2026-11-01: an unset required provider secret and a Codex harness with a non-Responses endpoint are hard picker gates (`not_signed_in`, `unsupported_by_harness`, `internal/gate`). See ADR-0050 amendment.

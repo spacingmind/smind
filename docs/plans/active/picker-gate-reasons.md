@@ -446,6 +446,31 @@ guard calling `gate.Derive` for non-human callers, typed `gated` error,
 rows/keyboard/chip per section 4, tests 13-18, frames by peer-sonnet. PR4:
 `mobile/src/providerCatalog.ts`, `NewTaskScreen.tsx`, test 19.
 
+## Findings during PR1 (corrections to the spec above)
+
+- **F1 smind accounts are not a launch prerequisite.** Runs use the CLI's own login
+  (ADR-0020 decision 1; `launchEnvEntries` reads only provider secrets), so "no smind
+  account" or an expired account OAuth token does NOT mean the row cannot run, and the
+  account model globs (ADR-0020 §5) only matter to the proxy. Consequences: the
+  account-based `not_signed_in` and glob-based `model_not_in_plan` of section 1 are NOT
+  derived. `not_signed_in` is hard only for an unset required provider secret (a launch
+  fails on it) and advisory after a recent `auth_expired` run; `model_not_in_plan` is
+  advisory, from a recent failed run (D2's flag).
+- **F2 `advisory` gates.** `Gate.advisory` marks a gate resting on cached or inferred
+  evidence (account windows, recent failures): the UI warns but keeps the row
+  selectable (stranding a Human out of Claude because an unrelated smind account is
+  spent would be worse than the warning). Only hard gates refuse non-human sends,
+  which refines D3 ("not selectable for all five"): the UI PR makes hard gates not
+  selectable and advisory gates selectable with a warning.
+- **F3** `provider_list` over the fleet wire does not exist, so AC10's fleet round trip
+  has nothing to carry in PR1; the gate rides `provider.list` (wsapi/relay) only.
+- **F4** The provider-instance window edge (`quota.ProviderUsage` fetches) does not publish
+  `provider.updated` yet; account usage events, failures, credential changes and
+  cooldown changes do (coalesced by a gate signature). A `until` in the past is treated as
+  ungated by clients (UI PR).
+- **F5** `Gate.window` and the `switch_profile` fallback of `out_of_plan`/`cooling_down`
+  are not in PR1: the fallback profile is per profile, not per provider. UI PR can add it.
+
 ## Progress
 
 - 2026-11-01 Phase 1: read ADR-0025/0028/0041/0046, the usage-windows, cooldown,
@@ -453,9 +478,24 @@ rows/keyboard/chip per section 4, tests 13-18, frames by peer-sonnet. PR4:
   the `provider.list` handler, the web picker and the mobile new-task picker; this
   spec written.
 - 2026-11-01 Spec accepted by the Steward (#767); D1-D5 recorded as Supervisor defaults; PR1 brief added; PR1 waits for #766 on develop.
+- 2026-11-01 PR1 (daemon + wire + typed refusal + MCP text): `internal/gate`, `routing.Exhaustion`, `provider.list` gate/modelGates, `provider.updated` edges, `runs.GatedError`, `SetGate`/`SetFailureHook`, TS types. UI (PR3) and mobile (PR4) not started.
 
 ## Validation
 
-Pending (phase 2). Each AC above is confirmed here with the test name and the
+PR1 (daemon, wire, typed refusal, MCP text; branch gate-reasons-pr1):
+
+- AC1/AC2/AC3: `TestTwinTable_CoversEveryHumanFixAndLimitClass`, `TestGate_NoSecondDerivation` (internal/gate).
+- AC4: gate uses `failure.Action` and `failure.NextAction`; kinds `clear_cooldown`, `pick_provider` added.
+- AC5: `TestDerive_PrecedenceMatrix` (all 32 combinations).
+- AC6: `TestDerive_OutOfPlan_OneHealthyAccountUngates`, `..._AllAccountsExhaustedIsAdvisoryWithReset` (earliest end). Account-based `not_signed_in` dropped, see F1.
+- AC7: `TestGate_PackageImportsNoFetcher` (no `internal/quota`/`accounts` import: no fetch path), `TestProviderList_Gates_OutOfPlanFromCachedWindowsIsAdvisory`.
+- AC8: `TestProviderList_CarriesGateAndModelGates` (absent when nothing gated).
+- AC9: `TestProviderUpdated_PublishedOnGateEdges` (coalesced), `TestProviderGate_AccountChangeClearsRecentFailures`.
+- AC10: not applicable in PR1 (F3).
+- AC11/AC12/AC13: `TestRunStart_GatedNonHumanRefusedTyped`, `TestRunStart_GatedErrorSaysWhatNotToDo`, `TestRunStart_AdvisoryGateNotRefused`, `TestRunStart_OutOfPlanNotRefused`, `TestRunStart_HumanNotRefusedByGate`, `TestProviderCooldownError_IsTypedGate`, `TestMCPInstructions_ListEveryGateReason`.
+- AC14-AC19 (UI, mobile, frames): PR3/PR4, not done. AC20: ADR-0050 amendment + pointers in ADR-0028/0041/0046 done; `docs/cli.md` unchanged (no CLI help text changed).
+- Mutations (each failed its named test, none a build failure): see the PR body.
+
+Each AC above is confirmed here with the test name and the
 mutation result when its PR lands; the plan moves to `docs/plans/completed/`
 when all of AC1-AC20 are confirmed.

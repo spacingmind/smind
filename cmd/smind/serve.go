@@ -177,6 +177,7 @@ func cmdServe(args []string) int {
 		log.Fatalf("server: %v", err)
 	}
 	srv.API().AttachUsage(poller, registry, passive)
+	srv.API().AttachGateWindows(router)
 	zsrc := &zaiInstanceSource{reg: providers.Default(), secrets: db}
 	pu := quota.NewProviderUsage(quota.NewZaiInstanceFetcher(zsrc, nil), quota.WithProviderUsageEnabled(uc.Enabled))
 	defer pu.Close()

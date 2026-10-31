@@ -1079,3 +1079,5 @@ specific manual probe (see the plan's Validation).
 - `docs/ROADMAP.md` ("Quota prediction", quota `Fetcher` stub) and
   `docs/plans/active/orchestration-and-metering.md` (the "feed the router's
   `TokensUsed`" backlog item, superseded by this ADR).
+
+> Amendment 2026-11-01: `routing.Router.Exhaustion` exports the cache-only exhaustion verdict; the picker gate (`internal/gate`, `out_of_plan`, advisory) reads it and never fetches. See ADR-0050 amendment.

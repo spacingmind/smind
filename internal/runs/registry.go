@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/runs/failure"
@@ -76,6 +77,9 @@ type Registry struct {
 	runs map[string]*run
 
 	providerQuota ProviderQuota // guarded by mu
+	// gateFn and failureHook: the picker gate wiring (cooldown_window.go), guarded by mu.
+	gateFn      func(provider string, now time.Time) *gate.Gate
+	failureHook func(provider, model, kind string)
 
 	// attachStore holds queued prompts' attachment sets (ADR-0038); nil
 	// when the feature is off. Guarded by mu.
@@ -1635,6 +1639,11 @@ func (reg *Registry) finish(r *run, err error) {
 		now := time.Now()
 		if failure.IsPlanLimit(fail.Kind) && fail.ResetAt != nil && fail.ResetAt.After(now) && r.purpose == "" && windowBlocksProvider(fail.Window) {
 			_ = reg.st.SetProviderCooldown(string(r.provider), *fail.ResetAt, r.id, now)
+		}
+		// The picker gate may have changed (a stored cooldown, a signed-out
+		// provider, a model outside the plan): tell its owner.
+		if fail.Kind != "" && (failure.IsHumanFix(fail.Kind) || failure.IsPlanLimit(fail.Kind)) {
+			reg.notifyFailureHook(string(r.provider), r.model, fail.Kind)
 		}
 	}
 
