@@ -64,3 +64,13 @@ func (r *Recent) get(provider, model, reason string, now time.Time) (recentEntry
 	}
 	return e, true
 }
+
+// ClearAll drops every mark (a credential changed somewhere).
+func (r *Recent) ClearAll() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.m = map[recentKey]recentEntry{}
+	r.mu.Unlock()
+}

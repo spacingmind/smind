@@ -14,6 +14,7 @@ import (
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/ghctx"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/mcpservers"
@@ -78,6 +79,9 @@ func (t wsTransport) Close() error { return t.ws.Close() }
 // connection uses. Every other caller (existing tests, wsclient) only needs
 // the http.Handler and should keep using Handler below.
 type API struct {
+	// gate derives the picker gates (provider_gate.go).
+	gate *gateSource
+
 	Handler   http.Handler
 	Runs      *runs.Registry
 	Terminals *terminal.Registry
@@ -272,9 +276,13 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	// delivered when setup finishes (ok or failed).
 	wm.SetSetupFinishedHook(func(int64) { reg.DeliverQueued() })
 
-	acctReg.SetNotifier(busAccountNotifier{bus: bus})
+	gs := newGateSource(acctReg, runner, reg, bus)
+	reg.SetGate(gs.deriveFn)
+	reg.SetFailureHook(gs.onFailure)
+	acctReg.SetNotifier(busAccountNotifier{bus: bus, onChange: gs.credentialChanged})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db, gh)
+	hs["provider.list"] = handleProviderList(runner, reg, gs)
 	info := newDaemonInfo(time.Now())
 	for method, h := range gitHandlers(gitSvc, focus, prFocus) {
 		hs[method] = h
@@ -395,7 +403,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	pluginReg.bindPanels(panelDeclarations(pluginMgr))
 	reg.SetLaunchHooks(pluginHooks{pluginMgr})
 	reg.AddObserver(pluginHooks{pluginMgr})
-	api := &API{inbox: inboxH, policySweep: policySweep, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}, wm: wm, runner: runner}
+	api := &API{gate: gs, inbox: inboxH, policySweep: policySweep, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}, wm: wm, runner: runner}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}
@@ -557,6 +565,9 @@ func (b busWorkspaceNotifier) NotifyChatArchived(c store.Chat) {
 // account.removed.
 type busAccountNotifier struct {
 	bus *eventBus
+	// onChange, when set, runs after each account change (the picker gate's
+	// recent-failure marks and gates depend on credentials).
+	onChange func()
 }
 
 func (b busAccountNotifier) NotifyAccountUpdated(a store.Account) {
@@ -566,10 +577,16 @@ func (b busAccountNotifier) NotifyAccountUpdated(a store.Account) {
 		CreatedAt:   a.CreatedAt.Format(time.RFC3339), UpdatedAt: a.UpdatedAt.Format(time.RFC3339),
 	}
 	b.bus.Publish(Event{Topic: TopicAccountUpdated, Payload: accountUpdatedPayload{Account: result}})
+	if b.onChange != nil {
+		b.onChange()
+	}
 }
 
 func (b busAccountNotifier) NotifyAccountRemoved(id int64) {
 	b.bus.Publish(Event{Topic: TopicAccountRemoved, Payload: accountRemovedPayload{ID: id}})
+	if b.onChange != nil {
+		b.onChange()
+	}
 }
 
 // busProfileNotifier adapts the shared event bus to profiles.Notifier,
@@ -698,4 +715,12 @@ func Handler(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunn
 		return nil, err
 	}
 	return api.Handler, nil
+}
+
+// AttachGateWindows gives the picker gate the router's cache-only account
+// window verdict. Call it before the API serves any connection.
+func (a *API) AttachGateWindows(w gate.WindowReader) {
+	if a.gate != nil {
+		a.gate.SetWindows(w)
+	}
 }

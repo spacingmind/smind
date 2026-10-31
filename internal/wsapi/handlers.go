@@ -13,6 +13,7 @@ import (
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
@@ -30,7 +31,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"account.add":              handleAccountAdd(acctReg),
 		"account.oauthStart":       handleAccountOAuthStart(coord),
 		"account.oauthComplete":    handleAccountOAuthComplete(coord),
-		"provider.list":            handleProviderList(runner, reg),
+		"provider.list":            handleProviderList(runner, reg, nil),
 		"provider.test":            handleProviderTest(acctReg, runner),
 		"account.list":             handleAccountList(acctReg),
 		"account.rename":           handleAccountRename(acctReg),
@@ -2275,27 +2276,40 @@ type providerListEntry struct {
 	taskrunner.ProviderInfo
 	providerEnvView
 	CooldownUntil string `json:"cooldownUntil,omitempty"`
+	// Gate is why the provider cannot run now and the way out; ModelGates the
+	// per-model gates that differ from it (internal/gate, additive). Both are
+	// daemon-computed from cache-only state and absent when nothing is gated.
+	Gate       *gate.Gate           `json:"gate,omitempty"`
+	ModelGates map[string]gate.Gate `json:"modelGates,omitempty"`
 }
 
 // handleProviderList returns the daemon's supported providers, each with
 // its permission mode catalog (Runner.ProviderCatalog -- never blocks on
 // ACP mode discovery). No params.
-func handleProviderList(runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
+func handleProviderList(runner *taskrunner.Runner, reg *runs.Registry, gs *gateSource) handlerFunc {
 	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
-		return providerListResultFor(runner, reg), nil
+		return providerListResultFor(runner, reg, gs), nil
 	}
 }
 
 // providerListResultFor builds the provider.list result from the live registry.
-func providerListResultFor(runner *taskrunner.Runner, reg *runs.Registry) providerListResult {
+func providerListResultFor(runner *taskrunner.Runner, reg *runs.Registry, gs *gateSource) providerListResult {
 	var cooling map[string]time.Time
 	if reg != nil {
 		cooling = reg.ProviderCooldowns()
 	}
 	catalog := runner.ProviderCatalog()
 	entries := make([]providerListEntry, 0, len(catalog))
+	var gin gate.Inputs
+	now := time.Now()
+	if gs != nil {
+		gin = gs.inputs()
+	}
 	for _, info := range catalog {
 		e := providerListEntry{ProviderInfo: info, providerEnvView: providerEnvViewFor(runner, string(info.ID))}
+		if gs != nil {
+			gs.fill(gin, &e, now)
+		}
 		if until, ok := cooling[string(info.ID)]; ok {
 			e.CooldownUntil = until.UTC().Format(time.RFC3339)
 		}
