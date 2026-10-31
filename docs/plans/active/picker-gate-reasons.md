@@ -366,8 +366,10 @@ clear-provider-cooldown), cache-only routing reads (ADR-0028), harness kinds and
 Codex chat-only constraint (ADR-0046), `smind:open-settings` deep link, `whenBusy`
 (ADR-0024), the shared `Action` type and twin classes (run-failure-classes spec).
 
-DECISIONS FOR THE HUMAN (recommendation first; none is implemented before an answer
-or a Steward default):
+DECIDED 2026-11-01: D1-D5 below are all **Supervisor default 2026-11-01, Human may
+veto** (the recommendation of each). Spec #767 accepted by the Steward.
+
+DECISIONS (recommendation first, as recorded):
 
 - **D1 Reason names.** Recommend: keep the five picker names above and map to the
   failure classes through one enforced twin table. Alternative: reuse the class
@@ -405,12 +407,52 @@ lands. Out of scope: live provider calls, new usage fetches, a persisted
 "needs sign-in" account state (the failure spec defers it), a Human queued send,
 mobile Settings → Providers, changing routing or failover behaviour.
 
+## PR1 brief (ready to start once failure-classes PR1, #766, is on develop)
+
+Start: `task_new baseRef origin/develop`; first `git ls-tree origin/develop
+internal/runs/failure/` must list the package, and read its `Action` type and
+`NextAction` before writing code (the field names here are assumed from the spec).
+Peers: peer-sonnet only while GLM is rate limited. Briefs forbid `git push`,
+`gh pr create`, `git stash`; commit per step; the Lead pushes.
+
+Steps, one commit each (Lead does 1-3, a Peer may do 4-5 from the exact case list):
+
+1. `internal/routing/router.go`: export `Exhaustion(accountID int64, model string,
+   now time.Time) Verdict{Exhausted, TransientOnly bool; Until time.Time; Window
+   string}` by moving `exhaustionDetail` + `windowExhaustion`; `selectAccount`
+   calls it. No behaviour change: existing `router_*_test.go` stay green.
+2. `internal/runs/failure`: add action kinds `clear_cooldown`, `pick_provider`
+   (additive consts only).
+3. `internal/gate/{gate.go,derive.go,inputs.go,twin.go}`: `Gate`, `Inputs`
+   (interfaces: accounts lister, `quota.Reader`, cooldown reader, provider spec
+   lookup, fallback profile lookup), `Derive`, `TwinOf`.
+4. `internal/gate/derive_test.go`, `twin_test.go`, `import_test.go`: test
+   scenarios 1-7 above by name.
+5. `internal/wsapi/provider_gate.go` (new) + `handlers.go` `providerListEntry`
+   (`Gate`, `ModelGates`), `providerListResultFor` fills them; wire `Inputs` in
+   `cmd/smind` next to the router; `provider.updated` on gate edges (account
+   notifier, cooldown set/clear in `internal/runs/cooldown.go`, usage `onFetch`
+   edge, coalesced); `internal/fleet/wire` field; TS types in
+   `web/packages/ui/src/lib` provider types and `mobile/src/api.ts`.
+   Tests: scenarios 8, 9, 12.
+6. Contract `docs/plans/active/picker-gate-reasons-pr1.contract.md`, stored with
+   `validation_contract_submit`; then `validation_request`.
+
+Checks: `task test`, `task lint`, one mutation per row of the PR1 mutation
+table, `HOME=$(mktemp -d)` with shared GOMODCACHE/GOCACHE exported first and the
+temp HOME removed after. PR2 brief (after PR1 merges): `internal/runs` start path
+guard calling `gate.Derive` for non-human callers, typed `gated` error,
+`cmd/smind/mcp_*.go` text + instructions table, tests 10-11. PR3 brief: picker
+rows/keyboard/chip per section 4, tests 13-18, frames by peer-sonnet. PR4:
+`mobile/src/providerCatalog.ts`, `NewTaskScreen.tsx`, test 19.
+
 ## Progress
 
 - 2026-11-01 Phase 1: read ADR-0025/0028/0041/0046, the usage-windows, cooldown,
   providers-epic and run-failure-classes plans, `internal/{accounts,quota,routing}`,
   the `provider.list` handler, the web picker and the mobile new-task picker; this
-  spec written. Awaiting Steward acceptance (D1-D5).
+  spec written.
+- 2026-11-01 Spec accepted by the Steward (#767); D1-D5 recorded as Supervisor defaults; PR1 brief added; PR1 waits for #766 on develop.
 
 ## Validation
 
