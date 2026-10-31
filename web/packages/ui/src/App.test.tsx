@@ -916,6 +916,88 @@ describe("App command palette", () => {
     expect(screen.getByTestId("command-palette")).toBeInTheDocument();
     expect(rowTitles()).toContain(TASK_A.Title);
   });
+
+  // ADR-0042 fixtures: one task panel and one sidebar panel from the same plugin.
+  const PLUGIN_PANELS = {
+    panels: [
+      { plugin: "acme", id: "hello", title: "Hello", where: "task", ui: 1 },
+      { plugin: "acme", id: "about", title: "About", where: "sidebar", ui: 1 },
+    ],
+    sidebar: [{ plugin: "acme", id: "about", title: "About", opens: "about" }],
+  };
+
+  it("TestSidebarAndPalette_ContributionsRegister: panels land as a sidebar row and palette entries; opening one with a task opens its tab", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    respondAll(socket, "plugin.panels", PLUGIN_PANELS);
+    await flush();
+
+    // The sidebar entry (where: "sidebar") is its own row, opening the panel id it names.
+    const row = screen.getByTestId("sidebar-plugin-item");
+    expect(row).toHaveTextContent("About");
+    expect(row).toHaveAttribute("data-plugin", "acme");
+    expect(row).toHaveAttribute("data-panel", "about");
+
+    // Every panel, any `where`, is a palette entry under the Plugins group.
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+    expect(screen.getAllByTestId("command-palette-group").map((g) => g.textContent)).toContain("Plugins");
+    expect(rowTitles()).toContain("Open Hello");
+    expect(rowTitles()).toContain("Open About");
+
+    // With a task selected, "Open Hello" opens (and activates) its plugin tab.
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "Open Hello" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+
+    expect(screen.getByRole("tab", { name: "Hello" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByTestId("plugin-page")).not.toBeInTheDocument();
+  });
+
+  it("TestPluginPanel_NoTask_OpensPage: with no task selected, a palette panel entry opens the full page, and back returns to the shell", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    respondAll(socket, "plugin.panels", PLUGIN_PANELS);
+    await flush();
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "Open Hello" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+
+    expect(screen.getByTestId("plugin-page")).toBeInTheDocument();
+    expect(screen.getByTestId("plugin-page-title")).toHaveTextContent("Hello");
+    const pane = screen.getByTestId("plugin-panel-pane");
+    expect(pane).toHaveAttribute("data-plugin", "acme");
+    expect(pane).toHaveAttribute("data-panel", "hello");
+
+    fireEvent.click(screen.getByTestId("plugin-page-back"));
+    await flush();
+    expect(screen.queryByTestId("plugin-page")).not.toBeInTheDocument();
+  });
 });
 
 describe("App routing", () => {
