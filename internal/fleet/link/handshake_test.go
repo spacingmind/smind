@@ -33,12 +33,11 @@ type fakeCallee struct {
 	helloErr error
 	noMethod bool
 
-	nonceC    []byte
-	verified  error
-	gotHello  bool
-	calls     []string
-	done      chan struct{}
-	closeOnce bool
+	nonceC   []byte
+	verified error
+	gotHello bool
+	calls    []string
+	done     chan struct{}
 }
 
 func newCallee(k *identity.Key) *fakeCallee {
