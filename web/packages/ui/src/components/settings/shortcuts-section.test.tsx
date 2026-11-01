@@ -5,18 +5,19 @@ import { SettingsScreen } from "@/components/settings/settings-screen";
 import { KeyboardProvider } from "@/keyboard/keyboard-provider";
 import { SHORTCUT_OVERRIDES_STORAGE_KEY } from "@/keyboard/overrides";
 import { SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
+import { renderWithClientProp } from "@/test/render-with-daemon";
 
 afterEach(() => {
   window.localStorage.clear();
 });
 
 function openShortcuts() {
-  render(<SettingsScreen client={null} onNavigateBack={() => {}} initialSectionId="shortcuts" />);
+  renderWithClientProp(<SettingsScreen client={null} onNavigateBack={() => {}} initialSectionId="shortcuts" />);
 }
 
 describe("Settings Shortcuts section", () => {
   it("is registered and reachable from the section nav", () => {
-    render(<SettingsScreen client={null} onNavigateBack={() => {}} />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={() => {}} />);
     expect(screen.getByTestId("settings-nav-shortcuts")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("settings-nav-shortcuts"));
