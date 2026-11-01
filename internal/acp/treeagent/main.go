@@ -18,9 +18,19 @@ func main() {
 	}
 	if out := os.Getenv("SMIND_TREEAGENT_OUT"); out != "" {
 		b, _ := json.Marshal(map[string]int{"pid": os.Getpid(), "child": child.Process.Pid})
-		if err := os.WriteFile(out, b, 0o666); err != nil {
+		if err := writeFileAtomic(out, b); err != nil {
 			os.Exit(1)
 		}
 	}
 	_ = child.Wait()
+}
+
+// writeFileAtomic publishes b at path in one step (write a temp file, then
+// rename it), so a test polling for path never reads it empty or half written.
+func writeFileAtomic(path string, b []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o666); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
