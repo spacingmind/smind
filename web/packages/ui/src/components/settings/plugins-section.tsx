@@ -550,7 +550,7 @@ function PluginRow({
             </span>
           )}
           {linkWarning && (
-            <span className="flex items-start gap-1 text-ui-sm text-warning" data-testid={`plugin-link-warning-${p.id}`}>
+            <span className="flex items-start gap-1 text-ui-sm text-warning-text" data-testid={`plugin-link-warning-${p.id}`}>
               <Icons.warning aria-hidden className="mt-0.5 size-3.5 shrink-0" />
               <span>{linkWarning}</span>
             </span>
@@ -616,7 +616,7 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
 
       {p.pending && (
         <section className="flex flex-col gap-1.5 rounded-lg border border-warning/40 p-2" data-testid={`plugin-pending-card-${p.id}`}>
-          <h4 className="text-ui-sm font-medium text-warning">
+          <h4 className="text-ui-sm font-medium text-warning-text">
             Update available: {consent.version} → {p.pending.consent.version}
           </h4>
           <ChangeList changes={changes} testId={`plugin-pending-changes-${p.id}`} />
@@ -674,7 +674,7 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
           <h4 className="text-ui-sm font-medium text-foreground">Not applied</h4>
           <ul className="flex flex-col gap-0.5">
             {(p.conflicts ?? []).map((c) => (
-              <li key={`${c.kind}-${c.name}`} className="text-ui-sm text-warning">
+              <li key={`${c.kind}-${c.name}`} className="text-ui-sm text-warning-text">
                 {c.kind} <span className="font-medium">{c.name}</span>: {c.reason}
               </li>
             ))}

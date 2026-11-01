@@ -38,7 +38,10 @@ import {
   type ModelBrowserView,
   type ModelRow,
 } from "@/lib/model-browser";
+import { gateReasonText, isHardGate, liveGate } from "@/lib/provider-gate";
 import type { ProfileSeed } from "@/lib/settings-intent";
+import type { ProviderGate } from "@/lib/types";
+import { StatusDot } from "@/components/ui/status-dot";
 
 // Combined provider + model picker (docs/plans/completed/model-picker-paseo-parity.md),
 // a port of Paseo's combined-model-selector / model-browser: opens on the
@@ -84,6 +87,17 @@ export interface ProviderModelPickerProps {
   onCreateProfile?: (seed: ProfileSeed) => void;
   onEditProfile?: (profileId: string) => void;
   onOpenProviderSettings?: (providerId: string) => void;
+  /**
+   * Clears a provider's cooldown (provider.clearCooldown, human only). Without it a `clear_cooldown` gate shows its
+   * reason but no control (a session without the right, a test).
+   */
+  onClearCooldown?: (providerId: string) => void;
+  /**
+   * Whether a hard gate blocks selection (default true: the composer). Settings forms that configure a provider or
+   * profile (Agents, Providers' default model) pass false: setting up a signed-out provider is legitimate there, so a
+   * gate only warns.
+   */
+  gatesBlock?: boolean;
   /** Fired each time the picker opens (the owner lazily fetches provider health). */
   onOpen?: () => void;
 }
@@ -113,6 +127,38 @@ type BodyState =
 
 function isDisabledRow(row: PickerRow): boolean {
   return row.kind === "provider" && !!row.provider.unavailableReason;
+}
+
+/** The row's live gate: a provider row's own, a model row's own or inherited, a profile row's from its provider/model. */
+function gateOfRow(
+  row: PickerRow,
+  providers: BrowserProvider[],
+  live: (g: ProviderGate | undefined) => ProviderGate | undefined,
+): ProviderGate | undefined {
+  switch (row.kind) {
+    case "provider":
+      return live(row.provider.gate);
+    case "model":
+      return live(row.row.gate);
+    case "profile": {
+      const provider = providers.find((p) => p.id === row.profile.provider);
+      const modelGate =
+        provider?.modelSelection.kind === "models"
+          ? provider.modelSelection.rows.find((r) => r.modelId === row.profile.model)?.gate
+          : undefined;
+      return live(modelGate ?? provider?.gate);
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** The provider id a gate-bearing row talks about. */
+function providerOfRow(row: PickerRow): string | undefined {
+  if (row.kind === "provider") return row.provider.id;
+  if (row.kind === "model") return row.row.provider;
+  if (row.kind === "profile") return row.profile.provider;
+  return undefined;
 }
 
 function bandEntries(profiles: PickerProfileRow[], baseAgentId: string | null): PickerEntry[] {
@@ -162,6 +208,8 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
     onCreateProfile,
     onEditProfile,
     onOpenProviderSettings,
+    onClearCooldown,
+    gatesBlock = true,
     onOpen,
   } = props;
   const isMobile = useIsMobile();
@@ -179,7 +227,20 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
   );
   const triggerArgs = { providers, selectedProvider, selectedModel, observedModel };
   const label = resolveTriggerLabel(triggerArgs);
-  const title = resolveTriggerTitle(triggerArgs);
+  // One clock per render so every row agrees on whether a time gate has ended.
+  const now = Date.now();
+  const gated = (g: ProviderGate | undefined): ProviderGate | undefined => {
+    const live = liveGate(g, now);
+    return live && !gatesBlock ? { ...live, advisory: true } : live;
+  };
+  const selectedProviderEntry = providers.find((x) => x.id === selectedProvider);
+  const selectedRow =
+    selectedProviderEntry?.modelSelection.kind === "models"
+      ? selectedProviderEntry.modelSelection.rows.find((r) => r.modelId === selectedModel)
+      : undefined;
+  const selectedGate = gated(selectedRow?.gate ?? selectedProviderEntry?.gate);
+  const baseTitle = resolveTriggerTitle(triggerArgs);
+  const title = selectedGate ? `${baseTitle} — ${gateReasonText(selectedGate, now)}` : baseTitle;
   const canGoBack = view.kind === "provider" && visibleProviders.length > 1;
   const hasProfiles = onApplyProfile !== undefined;
   const normalizedQuery = query.trim().toLowerCase();
@@ -266,7 +327,8 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
   }, [view, profileRows, baseAgentId, boundProvider, hasProfiles]);
   const popoverHeight = resolveDesktopFixedHeight(view, visibleProviders, extraRows);
 
-  // Arrow keys walk only the rows that can be activated; headings, disabled providers and row action buttons are skipped.
+  // Arrow keys walk the rows that can be activated; headings, health-disabled providers and row action buttons are skipped.
+  // A hard-gated row stays in the walk: Enter runs its action, so the way out is reachable from the keyboard.
   const actionable = useMemo<PickerRow[]>(
     () =>
       body.kind === "entries"
@@ -301,7 +363,52 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
     document.getElementById(`${listId}-${activeKey}`)?.scrollIntoView?.({ block: "nearest" });
   }, [open, activeKey, listId]);
 
+  const runGateAction = (gate: ProviderGate, providerId: string | undefined) => {
+    if (!providerId) {
+      return;
+    }
+    switch (gate.action?.kind) {
+      case "sign_in":
+        changeOpen(false);
+        onOpenProviderSettings?.(providerId);
+        return;
+      case "clear_cooldown":
+        onClearCooldown?.(providerId);
+        return;
+      case "pick_provider":
+        setView({ kind: "all" });
+        setQuery("");
+        setActiveIndex(0);
+        return;
+      case "pick_model": {
+        const p = visibleProviders.find((x) => x.id === providerId);
+        if (p) {
+          setView({ kind: "provider", providerId, providerLabel: p.label });
+          setQuery("");
+          setActiveIndex(0);
+        }
+        return;
+      }
+      case "switch_profile": {
+        const id = gate.action.target?.replace(/^profile:/, "");
+        if (id) {
+          changeOpen(false);
+          onApplyProfile?.(id);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  };
+
   const activate = (row: PickerRow) => {
+    // A hard gate never selects: Enter on its row runs the gate's action instead.
+    const gate = gateOfRow(row, visibleProviders, gated);
+    if (isHardGate(gate)) {
+      runGateAction(gate!, providerOfRow(row));
+      return;
+    }
     switch (row.kind) {
       case "model":
         changeOpen(false);
@@ -417,18 +524,27 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
   const viewProvider = view.kind === "provider" ? visibleProviders.find((p) => p.id === view.providerId) : undefined;
   const boundLabel = boundProvider ? providerLabel(boundProvider, providers.filter((p) => p.id === boundProvider)) : null;
 
-  const shellFor = (entry: PickerRow): RowShellProps => ({
-    id: rowDomId(entry.key),
-    active: entry.key === activeKey,
-    disabled: isDisabledRow(entry),
-    onActivate: () => activate(entry),
-    onHover: () => {
-      const idx = actionable.findIndex((r) => r.key === entry.key);
-      if (idx >= 0) {
-        setActiveIndex(idx);
-      }
-    },
-  });
+  const shellFor = (entry: PickerRow): RowShellProps => {
+    const gate = gateOfRow(entry, visibleProviders, gated);
+    const providerId = providerOfRow(entry);
+    // clear_cooldown is offered only where the owner can clear (human sessions).
+    const canRun = gate !== undefined && !(gate.action?.kind === "clear_cooldown" && !onClearCooldown);
+    return {
+      id: rowDomId(entry.key),
+      active: entry.key === activeKey,
+      disabled: isDisabledRow(entry),
+      gate,
+      now,
+      onGateAction: canRun ? () => runGateAction(gate, providerId) : undefined,
+      onActivate: () => activate(entry),
+      onHover: () => {
+        const idx = actionable.findIndex((r) => r.key === entry.key);
+        if (idx >= 0) {
+          setActiveIndex(idx);
+        }
+      },
+    };
+  };
 
   const renderEntry = (entry: PickerEntry, index: number) => {
     switch (entry.kind) {
@@ -552,11 +668,13 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         data-testid={testId}
         aria-label={`Model: ${title}`}
         title={title}
+        data-gated={selectedGate?.reason}
         disabled={disabled}
         className={PILL_TRIGGER_CLASS}
         onClick={isMobile ? () => changeOpen(!open) : undefined}
       >
         <ProviderIcon provider={selectedProvider} className="shrink-0" />
+        {selectedGate && <StatusDot status="warning" aria-hidden data-testid="model-trigger-gate-dot" className="size-1.5 shrink-0" />}
         <span className="max-w-[12rem] min-w-0 truncate max-sm:hidden">{label}</span>
         <Icons.chevronDown aria-hidden className="shrink-0" />
       </Button>
@@ -567,6 +685,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         data-testid={testId}
         aria-label={`Model: ${title}`}
         title={title}
+        data-gated={selectedGate?.reason}
         disabled={disabled}
         className="flex h-8 w-full items-center justify-between gap-2 rounded-lg border border-input-border bg-input px-2.5 py-1 text-ui-lg whitespace-nowrap transition-colors outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused disabled:cursor-not-allowed disabled:opacity-50 md:text-ui-base"
         onClick={isMobile ? () => changeOpen(!open) : undefined}

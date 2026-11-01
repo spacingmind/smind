@@ -30,7 +30,7 @@ export function ChildUpdateRow({ prompt }: { prompt: string }) {
               <p
                 data-testid="child-update-line"
                 data-tone={isRateLimitedLine(block.line) ? "warning" : "neutral"}
-                className={`break-words ${isRateLimitedLine(block.line) ? "text-warning" : ""}`}
+                className={`break-words ${isRateLimitedLine(block.line) ? "text-warning-text" : ""}`}
               >
                 {block.line}
               </p>

@@ -419,7 +419,7 @@ describe("TaskLineageHeader stalled marker (stalled-tree alert AC7)", () => {
     const marker = screen.getByTestId("task-stalled");
     expect(marker.textContent).toBe("stalled");
     expect(marker.title).toBe("No run for 20 min");
-    expect(marker.className).toContain("text-warning");
+    expect(marker.className).toContain("text-warning-text");
     const pill = screen.getByTestId("task-child-pill");
     expect(pill.dataset.childStalled).toBe("true");
     expect(pill.title).toBe("No run for 20 min");

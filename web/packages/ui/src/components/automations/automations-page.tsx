@@ -351,7 +351,7 @@ function AutomationRow({
             {isCron && a.enabled && state === "active" && a.nextRunAt && ` · next run ${formatUtc(a.nextRunAt)} (${formatLocal(a.nextRunAt)} your time)`}
           </span>
           {a.budgetBlocked && (
-            <span className="text-ui-sm text-warning" data-testid={`automation-capped-${a.id}`}>
+            <span className="text-ui-sm text-warning-text" data-testid={`automation-capped-${a.id}`}>
               capped: last run reached its budget
             </span>
           )}

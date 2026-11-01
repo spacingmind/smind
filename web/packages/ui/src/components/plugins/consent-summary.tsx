@@ -114,7 +114,7 @@ export function ConsentSummary({ consent, testId = "plugin-consent" }: { consent
                       </StatusBadge>
                     )}
                     {flags.map((f) => (
-                      <p key={f} className="text-ui-xs text-warning">
+                      <p key={f} className="text-ui-xs text-warning-text">
                         {f}
                       </p>
                     ))}
@@ -142,7 +142,7 @@ export function ChangeList({ changes, testId = "plugin-changes" }: { changes: Pl
           </span>
           <span className="min-w-0 break-words">
             <span className="text-foreground-muted">{c.what}: </span>
-            <span className={c.runs ? "text-warning" : "text-foreground"}>{c.text}</span>
+            <span className={c.runs ? "text-warning-text" : "text-foreground"}>{c.text}</span>
           </span>
         </li>
       ))}

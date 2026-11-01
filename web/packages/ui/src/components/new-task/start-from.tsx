@@ -20,7 +20,7 @@ export const FORK_BADGE_TEXT = "From fork — setup scripts blocked until you ru
 /** The fork warning chip: a PR from another repository runs no setup script until the user does (ADR-0039 §7). */
 export function ForkBadge() {
   return (
-    <span data-testid="fork-badge" className="mt-0.5 inline-flex items-center gap-1 text-ui-xs text-warning">
+    <span data-testid="fork-badge" className="mt-0.5 inline-flex items-center gap-1 text-ui-xs text-warning-text">
       <Icons.warning aria-hidden className="size-3 shrink-0" />
       {FORK_BADGE_TEXT}
     </span>

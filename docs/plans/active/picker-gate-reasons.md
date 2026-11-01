@@ -402,6 +402,14 @@ DECISIONS (recommendation first, as recorded):
   put `Derive` in `internal/runs/failure` beside `NextAction`, one package for
   both twins, at the cost of widening that package's imports.
 
+- **D3 refinement (advisory gates)** — Supervisor default 2026-11-01, Human may veto.
+  `Gate.advisory` marks a gate resting on cached or inferred evidence (account windows,
+  a recent failed run). Hard gates are not selectable; advisory gates warn and stay
+  selectable; only hard gates refuse non-human sends (PR1, #770). Settings forms that
+  configure a provider or profile (Settings > Agents, Providers' default model) show
+  gates as warnings only (`gatesBlock={false}`): setting up a signed-out provider is
+  legitimate there.
+
 Mutation checks, evidence and frames are recorded under Validation as each PR
 lands. Out of scope: live provider calls, new usage fetches, a persisted
 "needs sign-in" account state (the failure spec defers it), a Human queued send,
@@ -472,6 +480,7 @@ rows/keyboard/chip per section 4, tests 13-18, frames by peer-sonnet. PR4:
   are not in PR1: the fallback profile is per profile, not per provider. UI PR can add it.
 
 ## Progress
+- 2026-11-01 PR3 (web picker): `lib/provider-gate.ts`, `GateSlot` in the shared rows, picker activation/keyboard/trigger chip, `GateActionBridge` (clear cooldown via window event, one handler in App), model-browser carries gate/modelGates. Mobile (PR4) not started.
 
 - 2026-11-01 Phase 1: read ADR-0025/0028/0041/0046, the usage-windows, cooldown,
   providers-epic and run-failure-classes plans, `internal/{accounts,quota,routing}`,
@@ -499,3 +508,10 @@ PR1 (daemon, wire, typed refusal, MCP text; branch gate-reasons-pr1):
 Each AC above is confirmed here with the test name and the
 mutation result when its PR lands; the plan moves to `docs/plans/completed/`
 when all of AC1-AC20 are confirmed.
+
+PR3 (web picker, branch gate-reasons-pr3): AC13-AC17 and AC19 evidence
+
+- Vitest `provider-model-picker-gate.test.tsx` (24), `provider-gate.test.ts`, `gate-action-bridge.test.tsx`; full web suite 427 files / 4496 tests green; `tsc --noEmit` clean.
+- Mutations (each failed its named test): click selects a hard-gated row (provider rows test); Enter no longer runs the action (keyboard test); `isHardGate` always false (helper test); past `until` still gates (helper test); gate no longer inherited by model rows (build test); `gatesBlock` ignored (settings test); bridge listener removed (bridge test); clear control shown without a handler (actions test); gated rows dropped from the arrow walk (keyboard tests).
+- Frames: see the PR body (`/tmp/steward4/zcode-audit/after/gate-reasons/`).
+

@@ -47,7 +47,7 @@ export function McpServersIndicator({ servers }: { servers: McpServerState[] | u
                 <span className="truncate text-ui-sm font-medium text-foreground">{server.name}</span>
                 <span className="shrink-0 rounded border px-1 text-ui-sm text-foreground-muted">{server.transport}</span>
               </span>
-              <span className={`text-ui-sm ${server.status === "active" ? "text-foreground-muted" : "text-warning"}`}>
+              <span className={`text-ui-sm ${server.status === "active" ? "text-foreground-muted" : "text-warning-text"}`}>
                 {server.status === "active"
                   ? "Active"
                   : `Not active — ${NOT_ACTIVE_REASONS[server.reason!] ?? "not active"}`}

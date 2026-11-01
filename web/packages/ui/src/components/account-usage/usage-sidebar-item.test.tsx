@@ -143,7 +143,7 @@ describe("UsageSidebarItem", () => {
     const [ok, danger, warning] = within(row()).getAllByTestId("sidebar-usage-pinned-window");
     expect(ok).toHaveClass("text-foreground");
     expect(danger).toHaveClass("text-destructive");
-    expect(warning).toHaveClass("text-warning");
+    expect(warning).toHaveClass("text-warning-text");
     const fills = Array.from(row().querySelectorAll<HTMLElement>("[data-testid=sidebar-usage-meter] [data-slot=usage-meter-fill]"));
     expect(fills.map((f) => f.className.match(/bg-[\w/-]+/)?.[0])).toEqual(["bg-foreground/25", "bg-destructive", "bg-warning"]);
   });

@@ -28,7 +28,7 @@ const NODE_TYPES = new Set([
 
 const TONE_TEXT: Record<PluginTone, string> = {
   success: "text-success",
-  warning: "text-warning",
+  warning: "text-warning-text",
   danger: "text-destructive",
   muted: "text-foreground-muted",
 };
