@@ -98,14 +98,19 @@ func TestSpawnShim_UnsafeArgRejected_Windows(t *testing.T) {
 func readJSONFileWithDeadline(t testFatal, path string, v any) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
+	var partial error
 	for time.Now().Before(deadline) {
 		if data, err := os.ReadFile(path); err == nil {
-			if err := json.Unmarshal(data, v); err != nil {
-				t.Fatalf("unmarshal %s: %v", path, err)
+			// The file exists before its writer has finished: an empty or
+			// half-written document is not final, so keep polling until it parses.
+			if partial = json.Unmarshal(data, v); partial == nil {
+				return
 			}
-			return
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	if partial != nil {
+		t.Fatalf("%s never held a complete JSON document: %v", path, partial)
 	}
 	t.Fatalf("timed out waiting for %s", path)
 }
@@ -114,4 +119,24 @@ func readJSONFileWithDeadline(t testFatal, path string, v any) {
 type testFatal interface {
 	Fatalf(format string, args ...any)
 	Helper()
+}
+
+// TestReadJSONFileWithDeadline_WaitsForCompleteDocument_Windows: a file that
+// exists but is still empty or half written (its writer created it and has not
+// finished) is waited out, not reported as a JSON error. Before the fix this
+// failed with "unexpected end of JSON input", the load flake seen in a full run.
+func TestReadJSONFileWithDeadline_WaitsForCompleteDocument_Windows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc.json")
+	if err := os.WriteFile(path, []byte(`{"pid":`), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_ = os.WriteFile(path, []byte(`{"pid":7,"child":8}`), 0o666)
+	}()
+	var got map[string]int
+	readJSONFileWithDeadline(t, path, &got)
+	if got["pid"] != 7 || got["child"] != 8 {
+		t.Fatalf("got %v, want pid 7 and child 8", got)
+	}
 }
