@@ -51,7 +51,7 @@ describe("App against the demo daemon", () => {
     for (const w of tour.workspaces) expect(screen.getAllByText(w.Title).length).toBeGreaterThan(0);
     const rows = screen.getAllByTestId("sidebar-task-row");
     expect(rows.length).toBe(tour.tasks.length);
-    expect(within(rows[0]).getByTestId("task-title")).toHaveTextContent("Add rate limiting to the public API");
+    expect(within(rows[0]).getByTestId("task-title")).toHaveTextContent("Rate-limit the webhook handler");
   });
 
   it("the production label is unchanged when the flag is off", async () => {

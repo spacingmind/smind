@@ -12,17 +12,25 @@ function row(key: string, count: number, input: number, output: number, cacheRea
 
 /** `usage.summary` grouped as the wire groups it: the key is the task/workspace id, the provider id or the model. */
 const SUMMARY: Record<UsageGroupBy, UsageSummaryRow[]> = {
+  // keys are task ids; the costs are the landing hero's run footers ($0.03, $0.02, $0.05, $0.04, $0.09, $0.01, $0.31 and the two Peers)
   task: [
-    row("1", 4, 182_400, 21_300, 940_000, 3.42, ["claude-code"]),
-    row("2", 3, 96_100, 11_800, 512_000, 1.87, ["claude-code"]),
-    row("3", 2, 41_000, 4_900, 120_000, 0.74, ["claude-code"]),
-    row("4", 3, 120_500, 15_200, 633_000, 2.31, ["claude-code"]),
-    row("5", 2, 58_200, 7_100, 301_000, 1.12, ["claude-code"]),
-    row("6", 1, 22_000, 3_400, 88_000, 0.38, ["claude-code"]),
+    row("1", 1, 48_200, 5_100, 190_000, 0.05, ["claude-code"]),
+    row("2", 1, 30_000, 2_600, 120_000, 0.03, ["claude-code"]),
+    row("3", 1, 22_000, 1_900, 88_000, 0.02, ["claude-code"]),
+    row("4", 1, 38_000, 3_200, 152_000, 0.04, ["claude-code"]),
+    row("5", 1, 70_000, 6_100, 280_000, 0.09, ["claude-code"]),
+    row("6", 1, 9_000, 900, 36_000, 0.01, ["claude-code"]),
+    row("12", 1, 120_000, 9_800, 480_000, 0.31, ["claude-code"]),
+    row("13", 1, 18_000, 1_500, 72_000, 0.05, ["claude-code"]),
+    row("14", 1, 20_000, 1_700, 80_000, 0.06, ["claude-code"]),
   ],
-  workspace: [row("1", 9, 319_500, 38_000, 1_572_000, 6.03, ["claude-code"]), row("2", 5, 178_700, 22_300, 934_000, 3.43, ["claude-code"]), row("3", 1, 22_000, 3_400, 88_000, 0.38, ["claude-code"])],
-  provider: [row("claude-code", 15, 520_200, 63_700, 2_594_000, 9.84, ["claude-code"])],
-  model: [row("claude-sonnet-5-5", 12, 410_000, 50_100, 2_050_000, 6.1, ["claude-code"]), row("claude-haiku-5-5", 3, 110_200, 13_600, 544_000, 3.74, ["claude-code"])],
+  workspace: [
+    row("1", 5, 208_200, 18_900, 830_000, 0.23, ["claude-code"]),
+    row("2", 1, 9_000, 900, 36_000, 0.01, ["claude-code"]),
+    row("3", 3, 158_000, 13_000, 632_000, 0.42, ["claude-code"]),
+  ],
+  provider: [row("claude-code", 9, 375_200, 32_800, 1_500_000, 0.66, ["claude-code"])],
+  model: [row("claude-sonnet-5-5", 9, 375_200, 32_800, 1_500_000, 0.66, ["claude-code"])],
 };
 
 function account(now: number): AccountUsage {

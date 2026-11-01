@@ -9,7 +9,7 @@ export function toBase64(text: string): string {
   return btoa(bin);
 }
 
-export const DEMO_PROMPT = "\x1b[32mdemo@smind\x1b[0m:\x1b[34m~/acme-api\x1b[0m$ ";
+export const DEMO_PROMPT = "\x1b[32mdemo@smind\x1b[0m:\x1b[34m~\x1b[0m$ ";
 const DEMO_NOTE = "\x1b[2mdemo: this terminal replays canned output; nothing runs here\x1b[0m\r\n";
 
 type Listener = (item: { data: string } | { end: true }) => void;
