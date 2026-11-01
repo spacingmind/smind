@@ -14,12 +14,13 @@ function nonEmptyString(x: unknown): x is string {
 
 // React Native's URL is incomplete, so the parse is manual: an http(s) scheme
 // (case-insensitive), then the authority runs to the first / ? or #. userinfo
-// (@), control characters and an empty authority are rejected outright.
+// (@), control characters, whitespace or backslash in the authority and an
+// empty authority are rejected outright.
 export function openUrlHost(url: string): string | null {
   const m = /^https?:\/\/([^/?#]*)/i.exec(url);
   if (!m) return null;
   const authority = m[1];
-  if (authority === '') return null;
+  if (authority === '' || /[\s\\]/.test(authority)) return null;
   for (let i = 0; i < authority.length; i++) {
     const c = authority.charCodeAt(i);
     if (authority[i] === '@' || c < 0x20 || c === 0x7f) return null;

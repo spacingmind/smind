@@ -202,6 +202,10 @@ describe('plugin view model', () => {
     expect(openUrlHost('https://exa\u0001mple.com/')).toBeNull();
     expect(openUrlHost('https://exa\u007fmple.com/')).toBeNull();
     expect(openUrlHost('https:///no-authority')).toBeNull();
+    expect(openUrlHost('https://good.example /x')).toBeNull();
+    expect(openUrlHost('https://good .example/x')).toBeNull();
+    expect(openUrlHost('https://good.example\\@evil.com/')).toBeNull();
+    expect(openUrlHost('https://good.example/a b')).toBe('good.example');
     expect(openUrlHost('HTTPS://Example.COM:80/x')).toBe('example.com:80');
   });
 
