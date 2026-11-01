@@ -1,0 +1,22 @@
+{
+  // docs.spacingmind.com as a static-assets-only Cloudflare Worker (it used to be GitHub Pages; ADR-0051 addendum 2026-11-01).
+  // Deployed by .github/workflows/docs-deploy.yml from `.vitepress/dist` (`npm run build`). There is no Worker script: Cloudflare
+  // serves the files and applies dist/_headers (CSP, nosniff, Referrer-Policy, immutable caching of /assets/*) to every response.
+  "name": "smind-docs",
+  "compatibility_date": "2026-10-01",
+  // Reachable only on its own domain, never on <name>.<account>.workers.dev or a preview URL.
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./.vitepress/dist",
+    // VitePress is built with cleanUrls: the pages are foo.html, linked, canonical and listed in the sitemap as /foo (no extension,
+    // no trailing slash), the home page as /. "auto-trailing-slash" (the setting the live Worker already runs) serves foo.html at
+    // /foo with no redirect, redirects /foo/ and /foo.html to /foo, and serves index.html at /: exactly that URL set (checked with
+    // a local crawl of the sitemap and every internal link; "drop-trailing-slash" behaves the same for these flat pages).
+    "html_handling": "auto-trailing-slash",
+    // VitePress emits 404.html.
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "docs.spacingmind.com", "custom_domain": true }],
+  "observability": { "enabled": false }
+}

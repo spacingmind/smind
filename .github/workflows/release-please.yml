@@ -586,3 +586,32 @@ jobs:
           gh api -X POST repos/spacingmind/spacing-mind-landing-page/dispatches \
             -f event_type=smind-release -F "client_payload[tag]=$TAG"
           echo "dispatched smind-release ($TAG) to spacingmind/spacing-mind-landing-page"
+
+  # Production follows the release (ADR-0051): the demo (app.spacingmind.com) and the docs (docs.spacingmind.com) are deployed to
+  # Cloudflare from the new tag, and only from a release (or by hand with their workflow_dispatch). They are called here because
+  # a `release: published` trigger never fires for a release this workflow publishes with the default GITHUB_TOKEN.
+  # Both are leaves: nothing needs them, so a failed deploy leaves the published release as it is (a rerun of the job, or the
+  # workflow's own workflow_dispatch, retries it). Without the Cloudflare secrets each one prints a notice and passes.
+  deploy-demo:
+    needs: [release-please, publish]
+    if: needs.release-please.outputs.release_created == 'true' && needs.publish.result == 'success'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/demo-deploy.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag_name }}
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  deploy-docs:
+    needs: [release-please, publish]
+    if: needs.release-please.outputs.release_created == 'true' && needs.publish.result == 'success'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/docs-deploy.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag_name }}
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

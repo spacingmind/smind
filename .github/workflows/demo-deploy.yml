@@ -3,20 +3,32 @@ name: demo-deploy
 # ADR-0051 option (a): deploys the web demo (web/packages/ui `build:demo` -> dist-demo) to Cloudflare as the static-assets
 # Worker `smind-demo` on app.spacingmind.com (web/packages/ui/wrangler.demo.jsonc).
 #
-#   - A published release deploys that release's tag.
-#   - A manual run deploys any ref (default develop), so the demo can go live between releases:
+# It runs only when a release is cut, so production always matches the released version:
+#   - release-please.yml calls it (workflow_call) with ref = the new tag, once the release is published. (A `release: published`
+#     trigger would never fire: release-please publishes with the default GITHUB_TOKEN, and events made with it start no workflows.)
+#   - By hand, for any ref, to redeploy a release or to put develop's demo live:
+#         gh workflow run demo-deploy.yml -f ref=v0.18.0
 #         gh workflow run demo-deploy.yml -f ref=develop
 #
 # The two repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are the Human's (docs/decisions/0051, section 9).
 # Without either of them the run prints a notice and ends green without building or deploying anything.
 # The demo build is checked before it is uploaded: forbidden strings, the CSP and the size budget (check-demo-build.mjs).
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      ref:
+        description: "Tag, branch or commit to deploy"
+        type: string
+        required: true
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: false
+      CLOUDFLARE_ACCOUNT_ID:
+        required: false
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch, tag or commit to deploy"
+        description: "Tag, branch or commit to deploy"
         type: string
         default: develop
 
@@ -52,7 +64,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         if: steps.secrets.outputs.present == 'true'
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref }}
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2

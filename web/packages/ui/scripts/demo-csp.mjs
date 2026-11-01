@@ -49,7 +49,18 @@ export function cspMetaTag(scriptHashes) {
   return `<meta http-equiv="Content-Security-Policy" content="${cspString(scriptHashes, { frameAncestors: false })}" />`;
 }
 
-/** The Cloudflare Workers static-assets / Pages `_headers` file. */
+/**
+ * The Cloudflare Workers static-assets / Pages `_headers` file.
+ *
+ * `Cache-Control: public, no-transform` is on every response that is not a build asset, i.e. the HTML (`/`, `/index.html` and the
+ * single-page-application fallback, which answers any unknown path with index.html and can only be matched by `/*`). Cloudflare Web
+ * Analytics' automatic setup (enabled zone-wide on spacingmind.com) injects a beacon <script> into proxied HTML, which this page's
+ * CSP blocks (two console errors); its docs say the beacon is not injected when the response has `Cache-Control: public,
+ * no-transform` ("Cloudflare proxy will not be able to modify the original payload of the website. Therefore, the Beacon script will
+ * not be automatically injected", developers.cloudflare.com/web-analytics/get-started/, "Sites proxied through Cloudflare"). The value
+ * has no max-age, so the HTML has no freshness lifetime and is revalidated by its ETag on every load. `/assets/*` drops that value
+ * (`! Cache-Control`) and keeps a year of immutable caching.
+ */
 export function headersFile(scriptHashes) {
   return `/*
   Content-Security-Policy: ${cspString(scriptHashes, { frameAncestors: true })}
@@ -57,11 +68,10 @@ export function headersFile(scriptHashes) {
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=(), clipboard-read=()
   Cross-Origin-Opener-Policy: same-origin
-
-/index.html
-  Cache-Control: no-cache
+  Cache-Control: public, no-transform
 
 /assets/*
+  ! Cache-Control
   Cache-Control: public, max-age=31536000, immutable
 `;
 }
