@@ -15,13 +15,22 @@ const EXCLUDE: string[] = [
 ]
 
 async function contrast(page: Page, label: string, include?: string[]) {
-  await pinColorsToRgb(page)
-  let b = new AxeBuilder({ page }).withRules(['color-contrast'])
-  for (const sel of include ?? []) b = b.include(sel)
-  for (const sel of EXCLUDE) b = b.exclude(sel)
-  const res = await b.analyze()
+  const scan = async () => {
+    await pinColorsToRgb(page)
+    let b = new AxeBuilder({ page }).withRules(['color-contrast'])
+    for (const sel of include ?? []) b = b.include(sel)
+    for (const sel of EXCLUDE) b = b.exclude(sel)
+    const r = await b.analyze()
+    return { res: r, judged: r.passes.concat(r.violations).filter((x) => x.id === 'color-contrast').reduce((n, x) => n + x.nodes.length, 0) }
+  }
+  // A scan right after a screen opens can run while it is still painting and judge no node at all (seen on the first
+  // test of a fresh worker); retry that vacuous result a few times instead of failing on timing.
+  let { res, judged } = await scan()
+  for (let i = 0; i < 5 && judged === 0; i++) {
+    await page.waitForTimeout(500)
+    ;({ res, judged } = await scan())
+  }
   // the rule must have actually judged text, or a zero-violation result proves nothing
-  const judged = res.passes.concat(res.violations).filter((r) => r.id === 'color-contrast').reduce((n, r) => n + r.nodes.length, 0)
   expect(judged, `${label}: color-contrast checked nodes`).toBeGreaterThan(0)
   const found = res.violations.flatMap((v) => v.nodes.map((n) => `${n.target.join(' ')} :: ${(n.any[0]?.message ?? '').slice(0, 200)}`))
   expect(found, `${label}: color-contrast violations`).toEqual([])
