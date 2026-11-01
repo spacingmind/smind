@@ -22,3 +22,23 @@ export function useStewardReview(reviewId: number | undefined, enabled = true) {
     },
   });
 }
+
+/**
+ * One evidence frame's bytes (`steward.frame`, ADR-0047 §9): immutable, cached forever, fetched
+ * only when its thumb scrolls into the review card. The key sits under the steward prefix, so a
+ * `steward.updated` event refreshes it with everything else.
+ */
+export function useStewardFrame(reviewId: number, name: string) {
+  const { client } = useDaemonConnection();
+  return useQuery({
+    queryKey: queryKeys.stewardFrame(reviewId, name),
+    enabled: client !== null,
+    staleTime: Infinity,
+    retry: false,
+    retryOnMount: false,
+    queryFn: async (): Promise<{ contentType: string; data: string }> => {
+      if (!client) throw new Error("no daemon connection");
+      return client.call<{ contentType: string; data: string }>("steward.frame", { reviewId, name });
+    },
+  });
+}
