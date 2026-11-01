@@ -847,7 +847,7 @@ func (s *scanner) mapEdits(in *scanner, at int) {
 			s.edits = append(s.edits, edit{e.start + at, e.end + at, e.text})
 			continue
 		}
-		if e.text != "" {
+		if e.text != "\n" {
 			continue // an operator marker; its quoted spelling is not locatable
 		}
 		i := strings.Index(s.src, in.src[e.start:e.end])
@@ -855,7 +855,7 @@ func (s *scanner) mapEdits(in *scanner, at int) {
 			s.redacted, s.redactAt, s.redactMsg = true, 0, redactedScriptText
 			return
 		}
-		s.edits = append(s.edits, edit{i, i + e.end - e.start, ""})
+		s.edits = append(s.edits, edit{i, i + e.end - e.start, "\n"})
 	}
 }
 
@@ -927,7 +927,10 @@ func (s *scanner) consumeHeredocBodies() {
 		}
 		s.edits = append(s.edits, edit{h.opStart, h.opEnd, h.marker()})
 		if h.bodyStart > h.opEnd && h.bodyStart <= len(s.src) {
-			s.edits = append(s.edits, edit{h.bodyStart - 1, h.bodyEnd, ""}) // the newline that opened the body
+			// The deletion spans the newline that opened the body through the
+			// terminator's own newline, so one newline is put back: without it
+			// the next line's text would glue onto the operator's target.
+			s.edits = append(s.edits, edit{h.bodyStart - 1, h.bodyEnd, "\n"})
 		}
 	}
 	s.pending = nil
@@ -1005,10 +1008,10 @@ func (s *scanner) normalized() string {
 		if e.start < pos {
 			// Two bodies on one line make the deletions overlap; a deletion
 			// clamps into the union, an insertion never overlaps in practice.
-			if e.text != "" || e.end <= pos {
+			if e.end <= pos || e.text != "\n" {
 				continue
 			}
-			e.start = pos
+			e.start, e.text = pos, ""
 		}
 		if e.end > len(s.src) {
 			continue
