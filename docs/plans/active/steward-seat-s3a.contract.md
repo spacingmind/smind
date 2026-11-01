@@ -1,6 +1,6 @@
 ---
 v: 1
-milestone: "Steward seat S3a: inbox review kind, steward.frame read, web review card, permission policy line, read-only Permission policy page (ADR-0047 section 5, 9)"
+milestone: "Steward seat S3a: inbox review kind, review card, policy page"
 base: origin/develop
 planRef: docs/plans/active/steward-seat.md
 acs:
