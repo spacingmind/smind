@@ -172,6 +172,10 @@ Filled per PR: each AC → the test that confirms it, the mutation run and its f
 tsc -b packages/ui`), screenshots for UI. For S1 the parser PR also needs a Windows dispatch (`windows-full-suite.yml --ref <branch> -f packages=internal/permpolicy,internal/runs`):
 path and quoting code is exactly what the nightly has caught before.
 
+### S3b (mobile review loop)
+
+Plan: `docs/plans/active/steward-seat-s3b.contract.md` holds the ACs and named tests (AC28). Decisions (no ADR needed, all mirror S3a): mobile decodes `review` inbox rows (key `review:<id>`, `links.reviewId`), reads `steward.get` / `steward.frame` / `policy.get` / `policy.audit` only, pushes two screens (`/review/[id]`, `/policy`) with the stock stack header and back arrow, shows the permission `detail.policy` rule line and the full normalised command wrapped. Mobile sources never contain merge, approve or always-allow (extends the inbox safety scan). Progress and Validation below are filled as steps land.
+
 ### S3a (inbox review kind, web review card, policy line, policy page)
 
 Tests per AC are in `docs/plans/active/steward-seat-s3a.contract.md` (AC25-AC27). Daemon: `internal/inbox` derives `review:<id>` (replaces the task's verdict row, stale/open drop out, summary = verdict, PR, head7, failing gate ids), `wsapi` installs the review source and pokes the inbox from the steward service's publish (no `events.go` edit was needed), `steward.get` now carries `prNumber` and `frames` (base names only) and one new read-only method `steward.frame {reviewId,name}` serves a digest frame (png, inside the digest's frames dir after symlink resolution, regular file, <= 4 MiB, human-only). `methods.golden` lists it. Web: `StewardReviewCard`, `VerdictChip`, permission card `PolicyLine` (matched rule + why or "No rule matched", normalised command instead of the raw one), `policy_allow`/`policy_deny` resolution labels with unknown resolutions as raw text, Settings > Permission policy (read-only: banner, rules, audit, path, no control), `steward.updated` bridged in `event-bridge.ts`.
