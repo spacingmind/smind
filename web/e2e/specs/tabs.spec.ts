@@ -1,5 +1,6 @@
 import { openTaskByLink } from '../fixtures/open-task'
-import { expect, test } from '../fixtures/test'
+import { openRpc } from '../fixtures/rpc'
+import { expect, test, waitForRpc } from '../fixtures/test'
 
 test('J19/A-02 the header terminal button opens exactly one Terminal tab and the shell works', async ({ app }, testInfo) => {
   const { page } = app
@@ -72,6 +73,18 @@ test('J39/B-01 archiving the selected task moves the selection off it', async ({
   await openTaskByLink(app, t, title)
   await expect(page.getByTestId('chat-stop-button')).toHaveCount(0)
   await expect(page.getByTestId('app-main-content')).toContainText(marker)
+  // the daemon refuses to archive a task with a running run: wait for its own view of the run, not just the UI's
+  await expect
+    .poll(async () => {
+      const rpc = await openRpc(app.daemon.url)
+      try {
+        const r = (await rpc.call('run.list', { taskId: t.id }))[0] ?? {}
+        return String(r.status ?? r.Status ?? '')
+      } finally {
+        rpc.close()
+      }
+    })
+    .toBe('done')
   const hash = await page.evaluate(() => location.hash)
 
   await app.openDrawer()
@@ -79,7 +92,9 @@ test('J39/B-01 archiving the selected task moves the selection off it', async ({
   await item.hover()
   await item.getByTestId('sidebar-task-actions-trigger').click()
   await page.getByTestId('sidebar-task-archive-action').click()
+  const archived = waitForRpc(page, 'task.archive')
   await page.getByTestId('dialog-archive-task-confirm').click()
+  expect((await archived).error).toBeUndefined()
 
   await expect(item).toHaveCount(0)
   await expect.poll(() => page.evaluate(() => location.hash)).not.toBe(hash)
