@@ -55,7 +55,9 @@ export function FrameThumb({ conn, reviewId, frame }: { conn: RelayConnection; r
         style={styles.press}
         onPress={() => setExpanded((e) => !e)}
       >
-        <Image source={{ uri: state.uri }} resizeMode="contain" style={expanded ? styles.imageExpanded : styles.image} />
+        <View style={styles.frame}>
+          <Image source={{ uri: state.uri }} resizeMode="contain" style={expanded ? styles.imageExpanded : styles.image} />
+        </View>
       </Pressable>
       <Text style={styles.caption} selectable>{`${frame.name} · ${frame.viewport}px, ${frame.theme}`}</Text>
     </View>
@@ -74,6 +76,15 @@ function makeStyles(theme: AppTheme) {
       justifyContent: 'center',
     },
     press: { minHeight: 44 },
+    // A light frame on the light theme is invisible without an edge.
+    frame: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: theme.radius.xl,
+      borderCurve: 'continuous',
+      overflow: 'hidden',
+      backgroundColor: theme.surfaceSubtle,
+    },
     image: { width: '100%', height: 140 },
     imageExpanded: { width: '100%', height: 420 },
     caption: { ...theme.type.small, color: theme.foregroundSubtle },
