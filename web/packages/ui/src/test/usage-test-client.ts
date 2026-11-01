@@ -88,8 +88,9 @@ export class FakeUsageDaemon {
   /** When set, `scratch.usage` / `scratch.clean` reject with it. */
   scratchUsageError: Error | null = null;
   scratchCleanError: Error | null = null;
-  /** When set, `scratch.clean` answers only after it settles (holds the clean in flight). */
+  /** When set, `scratch.clean` / `scratch.usage` answer only after it settles (holds the call in flight). */
   scratchCleanGate: Promise<void> | null = null;
+  scratchUsageGate: Promise<void> | null = null;
   /** Every non-`account.usage` request, as `{ method, params }`, in order. */
   calls: { method: string; params: unknown }[] = [];
   /** Optional shaper for an account mutation's result (the daemon's own answer, e.g. a credential swap that changes credentialType). */
@@ -128,6 +129,7 @@ export class FakeUsageDaemon {
             if (this.providerUsageError) throw this.providerUsageError;
             return { enabled: this.enabled, ttlSeconds: this.ttlSeconds, reports: this.providerUsageRows };
           case "scratch.usage":
+            if (this.scratchUsageGate) await this.scratchUsageGate;
             if (this.scratchUsageError) throw this.scratchUsageError;
             return this.scratchUsage;
           case "scratch.clean":

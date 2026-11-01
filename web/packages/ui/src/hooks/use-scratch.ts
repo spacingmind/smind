@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
@@ -75,19 +76,27 @@ export function useScratchClean(): {
 } {
   const { client } = useDaemonConnection();
   const queryClient = useQueryClient();
+  // Set synchronously on the first call: `mutation.isPending` only turns true after a render, so two clicks in
+  // the same tick would otherwise both send scratch.clean.
+  const inFlight = useRef(false);
   const mutation = useMutation<ScratchCleanResult, Error, void>({
     mutationFn: async () => {
       if (!client) throw new Error("no daemon connection");
       return client.call<ScratchCleanResult>("scratch.clean");
     },
     onSettled: () => {
+      inFlight.current = false;
       // Success or refusal: the folders may have changed either way.
       void queryClient.invalidateQueries({ queryKey: scratchUsageKey });
     },
   });
   const { mutate, reset } = mutation;
   return {
-    clean: () => mutate(),
+    clean: () => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      mutate();
+    },
     pending: mutation.isPending,
     result: mutation.data ?? null,
     error: mutation.isError ? mutation.error.message : null,

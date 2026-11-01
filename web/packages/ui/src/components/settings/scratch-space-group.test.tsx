@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import { ScratchSpaceGroup, formatScratchBytes } from "@/components/settings/scratch-space-group";
 import { SettingsScreen } from "@/components/settings/settings-screen";
-import { renderWithDaemon } from "@/test/render-with-daemon";
+import { useScratchClean } from "@/hooks/use-scratch";
+import { renderHookWithDaemon, renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 const LOADED = { totalBytes: 5 * 1024 * 1024, totalFiles: 42, dirs: 3, reclaimableDirs: 2, reclaimableBytes: 3 * 1024 * 1024 };
@@ -32,6 +33,26 @@ describe("ScratchSpaceGroup", () => {
     expect(screen.queryByTestId("scratch-space-clean")).not.toBeInTheDocument();
   });
 
+  it("loading: skeleton rows inside the card (no inner box), announced once, then the numbers", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    setup({ scratchUsage: LOADED, scratchUsageGate: gate });
+    const loading = await screen.findByTestId("scratch-space-loading");
+    expect(loading).toHaveTextContent("Loading scratch usage…");
+    expect(loading.querySelector("[data-slot='loading-rows']")).toBeNull();
+    expect(loading.querySelectorAll("[data-slot='settings-row']").length).toBe(2);
+    await act(async () => release());
+    expect(await screen.findByTestId("scratch-space-total")).toHaveTextContent("5.0 MiB");
+    expect(screen.queryByTestId("scratch-space-loading")).not.toBeInTheDocument();
+  });
+
+  it("empty is a settings row like the loaded ones, not a nested card", async () => {
+    setup();
+    const empty = await screen.findByTestId("scratch-space-empty");
+    expect(empty.getAttribute("data-slot")).toBe("settings-row");
+    expect(empty.querySelector("[data-slot='settings-empty-card']")).toBeNull();
+  });
+
   it("loaded: total, folders, files, reclaimable and a Clean up button", async () => {
     setup({ scratchUsage: LOADED });
     expect(await screen.findByTestId("scratch-space-total")).toHaveTextContent("5.0 MiB");
@@ -55,6 +76,49 @@ describe("ScratchSpaceGroup", () => {
     await waitFor(() => expect(calls(d, "scratch.usage")).toBe(2));
     await waitFor(() => expect(screen.getByTestId("scratch-space-total")).toHaveTextContent("2.0 MiB"));
     expect(screen.getByTestId("scratch-space-result")).not.toHaveTextContent("kept");
+  });
+
+  it("two quick clicks on Clean up send ONE scratch.clean (the pending state is set at once)", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const d = setup({ scratchUsage: LOADED, scratchCleanGate: gate });
+    const button = await screen.findByTestId("scratch-space-clean");
+    // Both clicks land before React re-renders the disabled button.
+    await act(async () => {
+      button.click();
+      button.click();
+    });
+    expect(calls(d, "scratch.clean")).toBe(1);
+    await act(async () => release());
+  });
+
+  it("the hook itself ignores a second clean() while one is in flight", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const d = new FakeUsageDaemon([]);
+    d.scratchCleanGate = gate;
+    const view = renderHookWithDaemon(() => useScratchClean(), d, { initialProps: undefined });
+    await act(async () => {
+      view.result.current.clean();
+      view.result.current.clean();
+    });
+    expect(calls(d, "scratch.clean")).toBe(1);
+    await act(async () => release());
+    await act(async () => {
+      view.result.current.clean(); // after it settled a new clean is allowed
+    });
+    expect(calls(d, "scratch.clean")).toBe(2);
+  });
+
+  it("clean in flight shows a spinner next to Cleaning…", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    setup({ scratchUsage: LOADED, scratchCleanGate: gate });
+    fireEvent.click(await screen.findByTestId("scratch-space-clean"));
+    await flush();
+    expect(screen.getByTestId("scratch-space-clean").querySelector("[data-testid='scratch-space-spinner']")).not.toBeNull();
+    await act(async () => release());
+    await waitFor(() => expect(screen.getByTestId("scratch-space-clean").querySelector("[data-testid='scratch-space-spinner']")).toBeNull());
   });
 
   it("clean in flight: the button says Cleaning… and is disabled", async () => {

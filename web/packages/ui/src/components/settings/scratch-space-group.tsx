@@ -1,7 +1,8 @@
-import { SettingsEmptyCard, SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
+import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-error";
-import { LoadingRows } from "@/components/ui/loading-rows";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Icons } from "@/lib/icons";
 import { useScratchClean, useScratchUsage } from "@/hooks/use-scratch";
 
 const UNITS = ["KiB", "MiB", "GiB", "TiB"] as const;
@@ -42,8 +43,20 @@ export function ScratchSpaceGroup() {
       testId="scratch-space"
     >
       {loading && !usage ? (
-        <div className="px-4 py-3" data-testid="scratch-space-loading">
-          <LoadingRows rows={2} label="Loading scratch usage…" />
+        // Two skeleton rows with the loaded rows' own layout (label, one or two description lines, a control), so the
+        // card keeps its height when the numbers land. Visible against the card in both themes (foreground tint).
+        <div role="status" data-testid="scratch-space-loading">
+          <span className="sr-only">Loading scratch usage…</span>
+          <SettingsRow
+            label={<Skeleton aria-hidden className="h-4 w-24 bg-foreground/10" />}
+            description={<Skeleton aria-hidden className="mt-1.5 h-3 w-44 bg-foreground/10" />}
+            control={<Skeleton aria-hidden className="h-4 w-14 bg-foreground/10" />}
+          />
+          <SettingsRow
+            label={<Skeleton aria-hidden className="h-4 w-24 bg-foreground/10" />}
+            description={<Skeleton aria-hidden className="mt-1.5 h-3 w-56 bg-foreground/10" />}
+            control={<Skeleton aria-hidden className="h-7 w-24 bg-foreground/10" />}
+          />
         </div>
       ) : error && !usage ? (
         <SettingsRow
@@ -56,12 +69,12 @@ export function ScratchSpaceGroup() {
           }
         />
       ) : usage && usage.dirs === 0 ? (
-        <div className="p-3" data-testid="scratch-space-empty">
-          <SettingsEmptyCard
-            title="No scratch files"
-            description="Nothing is stored for any task. Files agents write here will be listed when they do."
-          />
-        </div>
+        <SettingsRow
+          testId="scratch-space-empty"
+          label="No scratch files"
+          description="Nothing is stored for any task. Files agents write here will be listed when they do."
+          control={<span className="text-ui-base font-medium tabular-nums text-foreground-muted">0 B</span>}
+        />
       ) : usage ? (
         <>
           <SettingsRow
@@ -86,9 +99,17 @@ export function ScratchSpaceGroup() {
                   size="sm"
                   onClick={clean}
                   disabled={pending || usage.reclaimableDirs === 0}
+                  className={pending ? "disabled:opacity-80" : undefined}
                   data-testid="scratch-space-clean"
                 >
-                  {pending ? "Cleaning…" : "Clean up"}
+                  {pending ? (
+                    <>
+                      <Icons.spinner aria-hidden data-testid="scratch-space-spinner" className="size-3.5 animate-spin" />
+                      Cleaning…
+                    </>
+                  ) : (
+                    "Clean up"
+                  )}
                 </Button>
               </div>
             }
