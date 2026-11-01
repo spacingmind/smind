@@ -5,7 +5,8 @@
   "scripts": {
     "test": "playwright test",
     "typecheck": "tsc --noEmit",
-    "lint": "node scripts/no-sleep.mjs"
+    "lint": "node scripts/no-sleep.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.1",

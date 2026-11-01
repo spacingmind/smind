@@ -1,0 +1,48 @@
+name: e2e-weekly-report
+
+# Flake rate and p95 per spec over the last 20 e2e runs (the e2e-timing artifacts).
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  issues: write
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Node version
+        run: node --version
+
+      - name: Download the timing artifacts of the last 20 runs
+        run: |
+          mkdir -p reports
+          for id in $(gh run list --workflow e2e.yml --limit 20 --json databaseId,conclusion --status completed --jq '.[].databaseId'); do
+            gh run download "$id" -n "e2e-timing-$id" -D "reports/$id" || true
+          done
+
+      - name: Report
+        run: node web/e2e/scripts/flake-report.mjs --weekly reports | tee weekly.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update the flaky issue
+        run: |
+          if ! awk '/^### Quarantine candidates/{f=1;next} f&&/^\| /{n++} END{exit !(n>1)}' weekly.md; then
+            echo "no quarantine candidates"
+            exit 0
+          fi
+          gh label create e2e-flaky --color FBCA04 --description "e2e specs that need quarantine" || true
+          number=$(gh issue list --label e2e-flaky --state open --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file weekly.md
+          else
+            gh issue create --label e2e-flaky --title "e2e quarantine candidates" --body-file weekly.md
+          fi
