@@ -128,6 +128,13 @@ describe("applyDaemonEvent", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.providerList() });
   });
 
+  it("steward.updated invalidates steward and inbox reads", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    applyDaemonEvent(qc, "steward.updated", { taskId: 4, reviewId: 7, status: "done" });
+    expect(invalidate.mock.calls.map((c) => c[0]?.queryKey)).toEqual([queryKeys.stewardAll(), queryKeys.inboxAll()]);
+  });
+
   it("does not create cache entries nobody asked for", () => {
     const qc = createQueryClient();
     applyDaemonEvent(qc, "account.usage", { usage: usage(2, "Fresh") });

@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process'
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -22,6 +22,7 @@ export type Daemon = {
   stop(): Promise<void>
 }
 
+const WIN = process.platform === 'win32'
 const live = new Set<Daemon>()
 let exitHooked = false
 
@@ -64,20 +65,34 @@ export async function startDaemon(): Promise<Daemon> {
     assertSafeHome(home)
     assertSafePort(port)
     const fd = fs.openSync(logPath, 'a')
-    const c = spawn(bin, ['serve'], { env: { ...process.env, SMIND_HOME: home, HOME: home }, stdio: ['ignore', fd, fd], detached: true })
+    // Windows: `detached` becomes DETACHED_PROCESS, which leaves the daemon without a console, so every console child it
+    // spawns (git, go, node agents) allocates its own and Windows Terminal shows a window for each. windowsHide gives
+    // the daemon a hidden console that the children inherit, like the desktop app's CREATE_NO_WINDOW launch.
+    const c = spawn(bin, ['serve'], {
+      env: { ...process.env, SMIND_HOME: home, HOME: home },
+      stdio: ['ignore', fd, fd],
+      detached: !WIN,
+      windowsHide: true,
+    })
     fs.closeSync(fd)
     child = c
     await waitHealthy(url, c, logPath)
   }
   const groupAlive = (pgid: number) => {
     try {
-      process.kill(-pgid, 0)
+      // Windows has no process groups: probe the daemon pid itself (taskkill /T below takes its tree down with it).
+      process.kill(WIN ? pgid : -pgid, 0)
       return true
     } catch (e) {
       return (e as NodeJS.ErrnoException).code !== 'ESRCH'
     }
   }
   const signalGroup = (pgid: number, sig: NodeJS.Signals) => {
+    if (WIN) {
+      // process.kill(-pid) does nothing useful on Windows; kill the daemon and every descendant by pid.
+      spawnSync('taskkill', ['/PID', String(pgid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+      return
+    }
     try {
       process.kill(-pgid, sig)
     } catch {
