@@ -1,12 +1,15 @@
 import { act } from "react";
 import { screen, within } from "@testing-library/react";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/policy-section";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { PolicyAuditRow, PolicyStatus, PolicyRule } from "@/lib/policy-types";
+
+const mobile = vi.hoisted(() => ({ value: false }));
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile.value }));
 
 function policyStatus(overrides: Partial<PolicyStatus> = {}): PolicyStatus {
   return {
@@ -143,5 +146,46 @@ describe("policy-section", () => {
     const banner = screen.getByTestId("policy-validity");
     expect(banner).toHaveTextContent("No policy file yet");
     expect(banner).toHaveTextContent("Every request that is not floor-denied asks you.");
+  });
+
+  it("policy page stacks rules and decisions when narrow", async () => {
+    mobile.value = true;
+    const longTarget = "git push origin smind/task-super-long-branch-name-with-hyphens ".repeat(9).trimEnd();
+    const client = renderSection();
+    client.nth("policy.get").resolve(
+      policyStatus({
+        rules: [
+          rule({ id: "allow-git-status", tool: "Bash", argv0: "git", subcommand: "status" }),
+          rule({ id: "deny-git-push-own", action: "deny", why: "Never push unattended", seats: ["lou"] }),
+        ],
+      }),
+    );
+    client.nth("policy.audit").resolve({ rows: [decision({ target: longTarget })], next: 0 });
+    await flush();
+
+    expect(document.querySelector("table")).toBeNull();
+
+    for (const id of ["allow-git-status", "deny-git-push-own"]) {
+      const idEl = within(screen.getByTestId(`policy-rule-${id}`)).getByText(id);
+      expect(idEl.className).toContain("whitespace-nowrap");
+    }
+
+    const row = screen.getByTestId("policy-decision-1");
+    const target = within(row).getByText(`Bash ${longTarget}`);
+    expect(target.className).toContain("break-all");
+    expect(target.className).not.toContain("truncate");
+    expect(within(row).getByText("Seat: lou")).toBeTruthy();
+  });
+
+  it("policy page keeps tables when wide", async () => {
+    mobile.value = false;
+    const client = renderSection();
+    client.nth("policy.get").resolve(policyStatus({ rules: [rule()] }));
+    client.nth("policy.audit").resolve({ rows: [decision()], next: 0 });
+    await flush();
+
+    expect(document.querySelector("table")).not.toBeNull();
+    const rules = screen.getByTestId("policy-rules");
+    expect(within(rules).getByText("allow-git-status").className).toContain("whitespace-nowrap");
   });
 });

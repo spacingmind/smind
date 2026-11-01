@@ -7,6 +7,7 @@ import { FormError } from "@/components/ui/form-error";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/status-badge";
 import { usePolicyAudit, usePolicyStatus } from "@/hooks/use-policy";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Icons } from "@/lib/icons";
 import type { PolicyAuditRow, PolicyRule, PolicyStatus } from "@/lib/policy-types";
 import { formatRelativeTime } from "@/lib/relative-time";
@@ -48,6 +49,7 @@ function auditTarget(row: PolicyAuditRow): { text: string; full: string } {
 function PolicySection(_ctx: SettingsSectionContext) {
   const status = usePolicyStatus();
   const audit = usePolicyAudit(50);
+  const narrow = useIsMobile();
   const [announcement, setAnnouncement] = useState("");
 
   // The polite live region: a spoken line only when validity flips to false
@@ -61,7 +63,7 @@ function PolicySection(_ctx: SettingsSectionContext) {
   }, [valid]);
 
   return (
-    <div className="flex flex-col gap-6" data-testid="settings-section-permission-policy">
+    <div className="flex min-w-0 flex-col gap-6" data-testid="settings-section-permission-policy">
       <div role="status" aria-live="polite" className="sr-only" data-testid="policy-live">
         {announcement}
       </div>
@@ -85,12 +87,25 @@ function PolicySection(_ctx: SettingsSectionContext) {
             <SettingsRow label="Edit it on disk; this page never writes it." />
           </SettingsGroup>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex min-w-0 flex-col gap-3">
             <h3 className="text-ui-base font-medium text-foreground">Rules</h3>
             {(status.data?.rules ?? []).length === 0 ? (
               <p className="text-ui-sm text-foreground-muted" data-testid="policy-rules">
                 No rules.
               </p>
+            ) : narrow ? (
+              <div className="flex min-w-0 flex-col rounded-xl border bg-card [&>*+*]:border-t" data-testid="policy-rules">
+                {(status.data?.rules ?? []).map((rule) => (
+                  <div key={rule.id} data-testid={`policy-rule-${rule.id}`} className="flex min-w-0 flex-col gap-1 px-3 py-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="font-mono whitespace-nowrap break-normal text-foreground">{rule.id}</span>
+                      <ActionBadge value={rule.action} />
+                    </div>
+                    <div className="min-w-0 text-foreground-muted">{rule.why}</div>
+                    <div className="min-w-0 text-foreground-muted">Scope: {ruleScope(rule)}</div>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border bg-card" data-testid="policy-rules">
                 <table className="w-full text-ui-sm">
@@ -106,7 +121,7 @@ function PolicySection(_ctx: SettingsSectionContext) {
                   <tbody>
                     {(status.data?.rules ?? []).map((rule) => (
                       <tr key={rule.id} data-testid={`policy-rule-${rule.id}`} className="border-t">
-                        <td className="px-3 py-2 font-mono text-foreground">{rule.id}</td>
+                        <td className="px-3 py-2 font-mono whitespace-nowrap text-foreground">{rule.id}</td>
                         <td className="px-3 py-2">
                           <ActionBadge value={rule.action} />
                         </td>
@@ -122,7 +137,7 @@ function PolicySection(_ctx: SettingsSectionContext) {
         </>
       )}
 
-      <div className="flex flex-col gap-3">
+      <div className="flex min-w-0 flex-col gap-3">
         <h3 className="text-ui-base font-medium text-foreground">Recent decisions</h3>
         {audit.isPending ? (
           <LoadingRows />
@@ -132,6 +147,23 @@ function PolicySection(_ctx: SettingsSectionContext) {
           <p className="text-ui-sm text-foreground-muted" data-testid="policy-audit-empty">
             No decisions recorded yet.
           </p>
+        ) : narrow ? (
+          <div className="flex min-w-0 flex-col rounded-xl border bg-card [&>*+*]:border-t" data-testid="policy-audit">
+            {(audit.data?.rows ?? []).map((row) => {
+              const target = auditTarget(row);
+              return (
+                <div key={row.id} data-testid={`policy-decision-${row.id}`} className="flex min-w-0 flex-col gap-1 px-3 py-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <ActionBadge value={row.decision} />
+                    <span className="font-mono whitespace-nowrap break-normal text-foreground-muted">{row.ruleId || EM_DASH}</span>
+                    <span className="text-foreground-muted">{formatRelativeTime(row.createdAt)}</span>
+                  </div>
+                  <div className="min-w-0 break-all text-foreground-muted">{target.text}</div>
+                  <div className="min-w-0 text-foreground-muted">Seat: {row.seat}</div>
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <div className="overflow-x-auto rounded-xl border bg-card" data-testid="policy-audit">
             <table className="w-full text-ui-sm">
@@ -156,7 +188,7 @@ function PolicySection(_ctx: SettingsSectionContext) {
                       <td className="px-3 py-2">
                         <ActionBadge value={row.decision} />
                       </td>
-                      <td className="px-3 py-2 font-mono text-foreground-muted">{row.ruleId || EM_DASH}</td>
+                      <td className="px-3 py-2 font-mono whitespace-nowrap text-foreground-muted">{row.ruleId || EM_DASH}</td>
                       <td className="px-3 py-2 text-foreground-muted">
                         <span className="block max-w-xs truncate" title={target.full}>
                           {target.text}
