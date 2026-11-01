@@ -157,11 +157,9 @@ export function StewardReviewCard({ item, onOpenTask }: { item: InboxItem; onOpe
                 {g.findings.map((f, i) => (
                   <li key={`${f.line}-${i}`} className="flex flex-col gap-0.5">
                     <span className="flex flex-wrap items-center gap-1.5">
-                      {f.severity && (
-                        <StatusBadge status="neutral" className="px-1.5 py-0">
-                          {f.severity}
-                        </StatusBadge>
-                      )}
+                      <StatusBadge status="neutral" className="px-1.5 py-0" data-testid="steward-finding-severity">
+                        {f.severity || "unrated"}
+                      </StatusBadge>
                       <span>
                         line {f.line}: {f.why}
                       </span>

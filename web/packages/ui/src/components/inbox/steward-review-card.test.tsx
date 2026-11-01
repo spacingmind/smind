@@ -154,6 +154,17 @@ describe("StewardReviewCard", () => {
     expect(aGo.map((li) => li.textContent)).toEqual([expect.stringContaining("line 4:"), expect.stringContaining("line 12:")]);
   });
 
+  it("review card shows an unrated chip for a finding without severity", async () => {
+    await openCard({
+      findings: [
+        { file: "a.go", line: 3, why: "unquoted input reaches a shell", check: "run the mutation check", severity: "high" },
+        { file: "a.go", line: 4, why: "missing error check", check: "task test" },
+      ],
+    });
+    const chips = screen.getAllByTestId("steward-finding-severity");
+    expect(chips.map((c) => c.textContent)).toEqual(["high", "unrated"]);
+  });
+
   it("unknown review verdict renders as text", async () => {
     await openCard({ verdict: "FROBNICATED", gates: [{ id: "ci", state: "sideways" }] });
     // The row's chip carries the same verdict; assert the card's own chip.
