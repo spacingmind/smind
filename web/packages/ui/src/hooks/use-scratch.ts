@@ -13,7 +13,12 @@ export interface ScratchUsage {
   reclaimableBytes: number;
 }
 
-/** `scratch.clean` (human-only, no params): what the sweep of closed tasks' folders removed. */
+/**
+ * `scratch.clean` (human-only, no params): what the sweep of closed tasks' folders removed. `dirs` is the
+ * reclaimable-folder count measured BEFORE the sweep, so it can overstate when the sweep skipped a folder whose
+ * task still has a run (the sweep skips busy tasks silently, it does not refuse): show `bytes` and `files`, and
+ * learn what was kept from the usage re-read after the clean.
+ */
 export interface ScratchCleanResult {
   files: number;
   bytes: number;
@@ -30,6 +35,8 @@ const scratchUsageKey = ["scratch.usage"] as const;
 export function useScratchUsage(): {
   usage: ScratchUsage | null;
   loading: boolean;
+  /** A (re)read is in flight: the numbers may be about to change (the card holds back "kept" until it settles). */
+  refreshing: boolean;
   error: string | null;
   refresh: () => void;
 } {
@@ -48,6 +55,7 @@ export function useScratchUsage(): {
   return {
     usage: query.data ?? null,
     loading: query.isPending && query.fetchStatus !== "idle",
+    refreshing: query.isFetching,
     error: query.isError ? query.error.message : null,
     refresh: () => void query.refetch(),
   };

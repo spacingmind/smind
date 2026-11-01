@@ -26,11 +26,13 @@ function plural(n: number, one: string, many: string): string {
 /**
  * Settings -> General -> "Scratch space": how much disk the per-task scratch folders use and how much of
  * it a clean-up would free. The folders of closed or unknown tasks are reclaimable; a running task's folder
- * never is, and the daemon refuses to touch it, so a refusal is shown exactly as the daemon worded it.
+ * never is. The daemon's sweep skips a busy task's folder without an error (only removing one task's folder
+ * answers "scratch: task has a running run"), so a skip shows as "kept" after the re-read, and any error the
+ * daemon does answer is shown exactly as worded.
  * The numbers are read when the card opens and again after every clean.
  */
 export function ScratchSpaceGroup() {
-  const { usage, loading, error, refresh } = useScratchUsage();
+  const { usage, loading, refreshing, error, refresh } = useScratchUsage();
   const { clean, pending, result, error: cleanError } = useScratchClean();
 
   return (
@@ -99,7 +101,9 @@ export function ScratchSpaceGroup() {
                 <p role="status" className="text-ui-sm text-foreground-muted" data-testid="scratch-space-result">
                   {result.bytes === 0 && result.files === 0
                     ? "Nothing to clean up."
-                    : `Freed ${formatScratchBytes(result.bytes)} from ${plural(result.dirs, "task folder", "task folders")}.`}
+                    : `Freed ${formatScratchBytes(result.bytes)} (${plural(result.files, "file", "files")}).`}
+                  {!refreshing && usage.reclaimableDirs > 0 &&
+                    ` ${plural(usage.reclaimableDirs, "task folder was", "task folders were")} kept because a run is still using ${usage.reclaimableDirs === 1 ? "it" : "them"}; clean up again when it ends.`}
                 </p>
               ) : null}
             </div>

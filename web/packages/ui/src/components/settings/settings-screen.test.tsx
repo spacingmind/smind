@@ -176,7 +176,7 @@ describe("SettingsScreen shell", () => {
 
   it("Escape and the Back button both navigate back to the previous view", () => {
     const onNavigateBack = vi.fn();
-    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
 
     fireEvent.click(screen.getByTestId("settings-back-button"));
     expect(onNavigateBack).toHaveBeenCalledTimes(1);
@@ -186,14 +186,14 @@ describe("SettingsScreen shell", () => {
   });
 
   it("initialSectionId opens on that section instead of the first registered one", () => {
-    render(<SettingsScreen client={null} onNavigateBack={() => {}} initialSectionId="shortcuts" />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={() => {}} initialSectionId="shortcuts" />);
 
     expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
     expect(screen.queryByTestId("settings-section-appearance")).not.toBeInTheDocument();
   });
 
   it("an unknown initialSectionId falls back to the first registered section instead of blanking the screen", () => {
-    render(<SettingsScreen client={null} onNavigateBack={() => {}} initialSectionId="does-not-exist" />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={() => {}} initialSectionId="does-not-exist" />);
 
     expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
   });
@@ -539,7 +539,7 @@ describe("SettingsScreen layout", () => {
 
   it("Back button calls onNavigateBack", () => {
     const onNavigateBack = vi.fn();
-    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
 
     fireEvent.click(screen.getByTestId("settings-back-button"));
     expect(onNavigateBack).toHaveBeenCalledTimes(1);
@@ -547,7 +547,7 @@ describe("SettingsScreen layout", () => {
 
   it("Escape calls onNavigateBack when no dialog is open", () => {
     const onNavigateBack = vi.fn();
-    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onNavigateBack).toHaveBeenCalledTimes(1);
@@ -555,7 +555,7 @@ describe("SettingsScreen layout", () => {
 
   it("Escape does not call onNavigateBack when a dialog is open", () => {
     const onNavigateBack = vi.fn();
-    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
 
     const dialog = document.createElement("div");
     dialog.setAttribute("role", "dialog");
@@ -570,7 +570,7 @@ describe("SettingsScreen layout", () => {
 
   it("Escape does not call onNavigateBack when the event was default-prevented", () => {
     const onNavigateBack = vi.fn();
-    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
 
     const event = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
     event.preventDefault();
@@ -580,7 +580,7 @@ describe("SettingsScreen layout", () => {
 
   it("Escape ignores an open dialog that sits inside an inert subtree", () => {
     const onNavigateBack = vi.fn();
-    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+    renderWithClientProp(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
 
     const inert = document.createElement("div");
     inert.setAttribute("inert", "");

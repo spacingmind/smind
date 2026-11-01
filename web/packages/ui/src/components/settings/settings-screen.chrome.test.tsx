@@ -7,6 +7,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DesktopOS, WindowState } from "@/lib/platform";
+import { renderWithClientProp } from "@/test/render-with-daemon";
 
 afterEach(() => {
   vi.resetModules();
@@ -48,7 +49,7 @@ function mockPlatform(opts: { desktop: boolean; os: DesktopOS | null }) {
 
 async function renderScreen() {
   const { SettingsScreen } = await import("@/components/settings/settings-screen");
-  return render(<SettingsScreen client={null} events={null} onNavigateBack={() => {}} />);
+  return renderWithClientProp(<SettingsScreen client={null} events={null} onNavigateBack={() => {}} />);
 }
 
 describe("SettingsScreen desktop chrome", () => {
