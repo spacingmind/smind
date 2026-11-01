@@ -8,7 +8,7 @@
 
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { Button, Picker, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
+import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { MarkdownBlocks } from '../../screens/task/Markdown';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -352,15 +352,13 @@ function FormFieldRow({
     );
   } else if (field.type === 'select') {
     control = (
-      <UiHost style={styles.controlHost}>
-        <View style={styles.selectBox}>
-          <Picker selectedValue={typeof value === 'string' ? value : ''} onValueChange={(v) => onValue(field.name, String(v))}>
-            {field.options.map((option) => (
-              <Picker.Item key={option.value} label={option.label} value={option.value} />
-            ))}
-          </Picker>
-        </View>
-      </UiHost>
+      <SelectField
+        label={field.label}
+        placeholder={field.placeholder}
+        options={field.options}
+        value={typeof value === 'string' ? value : ''}
+        onChange={(v) => onValue(field.name, v)}
+      />
     );
   } else {
     control = (
@@ -387,6 +385,67 @@ function FormFieldRow({
         {field.required ? ' *' : null}
       </Text>
       {control}
+    </View>
+  );
+}
+
+/** The form select: a plain-RN combobox in the text input's own tokens -- @expo/ui's Picker paints its own
+ * double border and near-black fill on web, which no other control in the form matches. */
+function SelectField({
+  label,
+  placeholder,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value) ?? null;
+  return (
+    <View style={styles.selectCol}>
+      <Pressable
+        style={[styles.inputBox, styles.selectTrigger]}
+        accessibilityRole="combobox"
+        accessibilityLabel={label}
+        onPress={() => setOpen((o) => !o)}
+      >
+        <Text style={selected === null ? styles.selectPlaceholder : styles.selectLabel} numberOfLines={1}>
+          {selected === null ? placeholder : selected.label}
+        </Text>
+        <AppIcon name="chevronRight" color={theme.foregroundSubtle} />
+      </Pressable>
+      {open ? (
+        <View style={styles.selectMenu}>
+          {options.map((option, i) => {
+            const on = option.value === value;
+            return (
+              <Pressable
+                key={option.value}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={option.label}
+                style={[styles.selectRow, i > 0 && styles.selectDivider]}
+                onPress={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                <Text style={styles.selectLabel} numberOfLines={1}>
+                  {option.label}
+                </Text>
+                {on ? <AppIcon name="check" color={theme.foreground} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -442,13 +501,6 @@ function makeStyles(theme: AppTheme) {
     fieldCol: { gap: theme.spacing[1] },
     fieldLabel: { ...theme.type.small, color: theme.foregroundSubtle },
     controlHost: { alignSelf: 'stretch' },
-    selectBox: {
-      borderWidth: 1,
-      borderColor: theme.input.border,
-      backgroundColor: theme.input.background,
-      borderRadius: theme.radius.lg,
-      overflow: 'hidden',
-    },
     reason: { ...theme.type.caption, color: theme.foregroundSubtle },
     inputBox: {
       backgroundColor: theme.input.background,
@@ -463,6 +515,20 @@ function makeStyles(theme: AppTheme) {
       fontSize: process.env.EXPO_OS === 'web' ? 16 : theme.type.body.fontSize,
       color: theme.foreground,
     },
+    selectCol: { gap: theme.spacing[2] },
+    selectTrigger: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
+    selectLabel: { ...theme.type.body, color: theme.foreground, flexShrink: 1 },
+    selectPlaceholder: { ...theme.type.body, color: theme.foregroundSubtlest, flexShrink: 1 },
+    selectMenu: {
+      backgroundColor: theme.input.background,
+      borderWidth: 1,
+      borderColor: theme.input.border,
+      borderRadius: theme.radius.lg,
+      borderCurve: 'continuous',
+      overflow: 'hidden',
+    },
+    selectRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], minHeight: 44, paddingHorizontal: theme.spacing[3], paddingVertical: theme.spacing[2] },
+    selectDivider: { borderTopWidth: 1, borderTopColor: theme.border },
     emptyCol: { alignItems: 'center', gap: theme.spacing[2], paddingVertical: theme.spacing[6] },
     emptyTitle: { ...theme.type.label, color: theme.foreground, textAlign: 'center' },
     emptyText: { ...theme.type.caption, color: theme.foregroundSubtle, textAlign: 'center' },
