@@ -148,7 +148,7 @@ func TestInboxList_DerivesReviewKind(t *testing.T) {
 	if got["review:11"].Attention != "normal" || got["review:12"].Attention != "normal" || got["review:13"].Attention != "high" {
 		t.Fatalf("only BLOCKED is high: %+v", got)
 	}
-	if got["review:11"].Summary != "ACCEPTED at abc1234" {
+	if got["review:11"].Summary != "At abc1234" {
 		t.Fatalf("summary = %q", got["review:11"].Summary)
 	}
 	if got["review:11"].TaskID != 2 || got["review:11"].Links.TaskID != 2 || got["review:11"].Links.ReviewID != 11 {
@@ -199,7 +199,7 @@ func TestInboxList_StaleReviewDropsOut(t *testing.T) {
 	}
 }
 
-// TestInboxList_ReviewSummaryRedacted: the summary is only the verdict, the
+// TestInboxList_ReviewSummaryRedacted: the summary is only the PR, the
 // first seven head chars and the failing gate ids, clipped to MaxSummary.
 func TestInboxList_ReviewSummaryRedacted(t *testing.T) {
 	f := newFx(t)
@@ -210,8 +210,8 @@ func TestInboxList_ReviewSummaryRedacted(t *testing.T) {
 		t.Fatalf("items = %s", keysOf(items))
 	}
 	s := items[0].Summary
-	if rest := strings.TrimPrefix(s, "CHANGES at abc: failing "); strings.Trim(rest, "x…") != "" {
-		t.Fatalf("summary carries more than verdict, head and gate ids: %q", s)
+	if rest := strings.TrimPrefix(s, "At abc: failing "); strings.Trim(rest, "x…") != "" {
+		t.Fatalf("summary carries more than the head and gate ids: %q", s)
 	}
 	if len([]rune(s)) > MaxSummary {
 		t.Fatalf("summary = %d runes, at most %d", len([]rune(s)), MaxSummary)
@@ -230,13 +230,43 @@ func TestInboxList_ReviewSummaryCarriesPRNumber(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items = %s", keysOf(items))
 	}
-	if want := "ACCEPTED PR #12 at abc1234: failing ci"; items[0].Summary != want {
+	if want := "PR #12 at abc1234: failing ci"; items[0].Summary != want {
 		t.Fatalf("summary = %q, want %q", items[0].Summary, want)
 	}
 	f.reviews = []Review{review(32, 2, "ACCEPTED")}
 	items, _ = f.svc.List(Filter{})
-	if items[0].Summary != "ACCEPTED at abc1234" {
-		t.Fatalf("summary = %q, want the old shape without a PR", items[0].Summary)
+	if items[0].Summary != "At abc1234" {
+		t.Fatalf("summary = %q, want the shape without a PR", items[0].Summary)
+	}
+}
+
+// TestInboxList_ReviewSummaryHasNoVerdictPrefix: the row's chip already shows
+// the verdict, so the summary carries only the PR, the head and the failing
+// gates — and "Review finished" when it carries none of them.
+func TestInboxList_ReviewSummaryHasNoVerdictPrefix(t *testing.T) {
+	f := newFx(t)
+	r := review(41, 2, "ACCEPTED")
+	r.PRNumber = 812
+	f.reviews = []Review{r}
+	items, _ := f.svc.List(Filter{})
+	if want := "PR #812 at abc1234"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q", items[0].Summary, want)
+	}
+	r.FailingGates = []string{"scope", "ci"}
+	f.reviews = []Review{r}
+	items, _ = f.svc.List(Filter{})
+	if want := "PR #812 at abc1234: failing scope, ci"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q", items[0].Summary, want)
+	}
+	f.reviews = []Review{review(42, 2, "CHANGES")}
+	items, _ = f.svc.List(Filter{})
+	if want := "At abc1234"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q (a leading head is capitalised)", items[0].Summary, want)
+	}
+	f.reviews = []Review{{ID: 43, TaskID: 2, Verdict: "ACCEPTED", Status: "done", CreatedAt: f.now}}
+	items, _ = f.svc.List(Filter{})
+	if want := "Review finished"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q", items[0].Summary, want)
 	}
 }
 

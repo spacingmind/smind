@@ -344,8 +344,8 @@ func runFailedItem(fr FailedRun, title string) (Item, bool) {
 // reviewItem turns a Steward review into an inbox item, or reports that it is
 // not one: an open review has no verdict yet, and a stale one (the head moved,
 // the contract changed, a newer review superseded it) has dropped out. The
-// summary carries only the verdict, the head and the failing gate ids: the
-// seat's own text stays in the review card.
+// summary carries only the PR, the head and the failing gate ids: the verdict
+// is the chip's, and the seat's own text stays in the review card.
 func reviewItem(r Review, title string) (Item, bool) {
 	if r.Stale != "" {
 		return Item{}, false
@@ -359,15 +359,28 @@ func reviewItem(r Review, title string) (Item, bool) {
 	if len(head) > 7 {
 		head = head[:7]
 	}
-	summary := r.Verdict
+	var parts []string
 	if r.PRNumber > 0 {
-		summary += fmt.Sprintf(" PR #%d", r.PRNumber)
+		parts = append(parts, fmt.Sprintf("PR #%d", r.PRNumber))
 	}
 	if head != "" {
-		summary += " at " + head
+		if len(parts) == 0 {
+			parts = append(parts, "At "+head)
+		} else {
+			parts = append(parts, "at "+head)
+		}
 	}
+	summary := strings.Join(parts, " ")
 	if len(r.FailingGates) > 0 {
-		summary += ": failing " + strings.Join(r.FailingGates, ", ")
+		gates := "failing " + strings.Join(r.FailingGates, ", ")
+		if summary == "" {
+			summary = gates
+		} else {
+			summary += ": " + gates
+		}
+	}
+	if summary == "" {
+		summary = "Review finished"
 	}
 	attention := "normal"
 	if r.Verdict == "BLOCKED" {
