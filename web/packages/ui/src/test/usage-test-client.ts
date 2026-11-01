@@ -4,6 +4,7 @@ import { RpcError, type WsClient } from "@/lib/ws-client";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { ProviderUsageRow } from "@/lib/account-usage/provider-usage-types";
 import { usageResult } from "@/test/account-usage-fixtures";
+import type { ScratchCleanResult, ScratchUsage } from "@/hooks/use-scratch";
 import type {
   Account,
   AddFromRecipeParams,
@@ -79,6 +80,17 @@ export class FakeUsageDaemon {
   providerUsageRows: ProviderUsageRow[] = [];
   /** When set, `provider.usage` rejects with it (e.g. "method not found" for an old daemon). */
   providerUsageError: Error | null = null;
+  /** Answers `scratch.usage` (the Settings > General scratch card); zeros (no task folders) by default. */
+  scratchUsage: ScratchUsage = { totalBytes: 0, totalFiles: 0, dirs: 0, reclaimableDirs: 0, reclaimableBytes: 0 };
+  /** Answers `scratch.clean`; after it answers, `scratchAfterClean` (when set) becomes the new `scratchUsage`. */
+  scratchCleanResult: ScratchCleanResult = { files: 0, bytes: 0, dirs: 0 };
+  scratchAfterClean: ScratchUsage | null = null;
+  /** When set, `scratch.usage` / `scratch.clean` reject with it. */
+  scratchUsageError: Error | null = null;
+  scratchCleanError: Error | null = null;
+  /** When set, `scratch.clean` / `scratch.usage` answer only after it settles (holds the call in flight). */
+  scratchCleanGate: Promise<void> | null = null;
+  scratchUsageGate: Promise<void> | null = null;
   /** Every non-`account.usage` request, as `{ method, params }`, in order. */
   calls: { method: string; params: unknown }[] = [];
   /** Optional shaper for an account mutation's result (the daemon's own answer, e.g. a credential swap that changes credentialType). */
@@ -116,6 +128,15 @@ export class FakeUsageDaemon {
           case "provider.usage":
             if (this.providerUsageError) throw this.providerUsageError;
             return { enabled: this.enabled, ttlSeconds: this.ttlSeconds, reports: this.providerUsageRows };
+          case "scratch.usage":
+            if (this.scratchUsageGate) await this.scratchUsageGate;
+            if (this.scratchUsageError) throw this.scratchUsageError;
+            return this.scratchUsage;
+          case "scratch.clean":
+            if (this.scratchCleanGate) await this.scratchCleanGate;
+            if (this.scratchCleanError) throw this.scratchCleanError;
+            if (this.scratchAfterClean) this.scratchUsage = this.scratchAfterClean;
+            return this.scratchCleanResult;
           case "account.list":
             return this.accounts;
           case "provider.list":

@@ -3,10 +3,11 @@
 // desktop-chrome.test.tsx, these tests `vi.doMock` @/lib/platform, and the
 // platform constants are module-load values shared by everything in a file,
 // so the mock stays local to this file.
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DesktopOS, WindowState } from "@/lib/platform";
+import { renderWithClientProp } from "@/test/render-with-daemon";
 
 afterEach(() => {
   vi.resetModules();
@@ -48,7 +49,7 @@ function mockPlatform(opts: { desktop: boolean; os: DesktopOS | null }) {
 
 async function renderScreen() {
   const { SettingsScreen } = await import("@/components/settings/settings-screen");
-  return render(<SettingsScreen client={null} events={null} onNavigateBack={() => {}} />);
+  return renderWithClientProp(<SettingsScreen client={null} events={null} onNavigateBack={() => {}} />);
 }
 
 describe("SettingsScreen desktop chrome", () => {

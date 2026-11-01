@@ -245,6 +245,10 @@ smind scratch usage     # total size, and how much belongs to closed tasks
 smind scratch clean     # remove the scratch of archived tasks now
 ```
 
-Settings -> General shows the same numbers with a **Clean archived scratch**
-button. See `agents.sharedCaches` in [Configuration](configuration.md) for the
+Settings -> General has a **Scratch space** card with the same numbers: disk
+used, how many task folders and files that is, and how much of it belongs to
+archived, deleted or unknown tasks. **Clean up** removes those. It frees what
+it can and tells you how much; a folder whose task still has a run is skipped
+and the card says how many were kept, so clean up again once that run ends.
+See `agents.sharedCaches` in [Configuration](configuration.md) for the
 shared build caches.

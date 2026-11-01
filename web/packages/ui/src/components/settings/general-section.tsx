@@ -1,5 +1,6 @@
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { ScratchSpaceGroup } from "@/components/settings/scratch-space-group";
 import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { Icons } from "@/lib/icons";
 
@@ -31,6 +32,7 @@ export function GeneralSection(_ctx: SettingsSectionContext) {
           }
         />
       </SettingsGroup>
+      <ScratchSpaceGroup />
     </div>
   );
 }
