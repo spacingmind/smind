@@ -77,7 +77,7 @@ export function PluginPanelScreen({ conn, pluginId, panelId }: { conn: RelayConn
         openUrl: openExternal,
         refresh: reload,
       };
-      void runViewAction(action, deps, extra).then((outcome) => {
+      return runViewAction(action, deps, extra).then((outcome) => {
         if (outcome.kind === 'refused') setActionError(outcome.reason);
         else if (outcome.kind === 'error') setActionError(outcome.message);
         else setActionError(null);

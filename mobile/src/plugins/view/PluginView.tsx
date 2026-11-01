@@ -6,9 +6,9 @@
 // URL. renderNode wraps EVERY node in a NodeBoundary so one bad node
 // degrades to the placeholder instead of blanking the panel.
 
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { Picker, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
+import { Button, Picker, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { MarkdownBlocks } from '../../screens/task/Markdown';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -19,10 +19,14 @@ import { TextButton } from '../../ui/TextButton';
 import { UiHost } from '../../ui/UiHost';
 import { buildView } from './model';
 import { mdLinkAction } from './markdown';
+import { formSubmitState } from './formState';
 import { NodeBoundary, UnsupportedNode } from './NodeBoundary';
 import type { FormField, IconRef, Tone, ViewAction, ViewNode } from './types';
 
-export type OnAction = (action: ViewAction, extra?: { formValues?: Record<string, string | boolean> }) => void;
+export type OnAction = (
+  action: ViewAction,
+  extra?: { formValues?: Record<string, string | boolean> },
+) => void | Promise<unknown>;
 
 function renderNode(node: ViewNode, onAction: OnAction): ReactNode {
   return (
@@ -281,20 +285,43 @@ function FormNode({ node, onAction }: { node: Extract<ViewNode, { kind: 'form' }
     for (const field of node.fields) init[field.name] = field.default;
     return init;
   });
+  const [submitting, setSubmitting] = useState(false);
+  // The submit promise may settle after the panel swapped the view out; only a live node state-sets.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const setValue = (name: string, value: string | boolean) => setValues((prev) => ({ ...prev, [name]: value }));
-  // A required field blocks submit until it has a value; a toggle never blocks.
-  const blocked = node.fields.some((field) => field.required && field.type !== 'toggle' && !values[field.name]);
   const action = node.action;
+  const state = formSubmitState({
+    fields: node.fields,
+    values,
+    hasAction: action !== null,
+    submitting,
+    label: node.submitLabel,
+  });
   const submit = () => {
-    if (action === null || blocked) return;
-    onAction(action, { formValues: values });
+    if (action === null || state.disabled) return;
+    const r = onAction(action, { formValues: values });
+    if (r && typeof (r as Promise<unknown>).then === 'function') {
+      setSubmitting(true);
+      (r as Promise<unknown>).finally(() => {
+        if (alive.current) setSubmitting(false);
+      });
+    }
   };
   return (
     <View style={styles.formCol}>
       {node.fields.map((field) => (
         <FormFieldRow key={field.name} field={field} value={values[field.name]} onValue={setValue} />
       ))}
-      <TextButton label={node.submitLabel} onPress={submit} disabled={blocked || action === null} />
+      <UiHost style={styles.controlHost}>
+        <Button variant="filled" label={state.label} onPress={submit} disabled={state.disabled} style={{ height: 44 }} />
+      </UiHost>
+      {state.reason !== null ? <Text style={styles.reason}>{state.reason}</Text> : null}
     </View>
   );
 }
@@ -326,11 +353,13 @@ function FormFieldRow({
   } else if (field.type === 'select') {
     control = (
       <UiHost style={styles.controlHost}>
-        <Picker selectedValue={typeof value === 'string' ? value : ''} onValueChange={(v) => onValue(field.name, String(v))}>
-          {field.options.map((option) => (
-            <Picker.Item key={option.value} label={option.label} value={option.value} />
-          ))}
-        </Picker>
+        <View style={styles.selectBox}>
+          <Picker selectedValue={typeof value === 'string' ? value : ''} onValueChange={(v) => onValue(field.name, String(v))}>
+            {field.options.map((option) => (
+              <Picker.Item key={option.value} label={option.label} value={option.value} />
+            ))}
+          </Picker>
+        </View>
       </UiHost>
     );
   } else {
@@ -413,6 +442,14 @@ function makeStyles(theme: AppTheme) {
     fieldCol: { gap: theme.spacing[1] },
     fieldLabel: { ...theme.type.small, color: theme.foregroundSubtle },
     controlHost: { alignSelf: 'stretch' },
+    selectBox: {
+      borderWidth: 1,
+      borderColor: theme.input.border,
+      backgroundColor: theme.input.background,
+      borderRadius: theme.radius.lg,
+      overflow: 'hidden',
+    },
+    reason: { ...theme.type.caption, color: theme.foregroundSubtle },
     inputBox: {
       backgroundColor: theme.input.background,
       borderWidth: 1,
