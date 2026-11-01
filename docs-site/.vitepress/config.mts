@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
+import { allInlineScriptHashes, docsHeadersFile } from '../lib/headers.mjs'
 import {
   DOCS_DIR,
   OG_IMAGE_ALT,
@@ -154,13 +155,18 @@ export default defineConfig({
   },
   buildEnd(config) {
     const out = config.outDir
-    fs.writeFileSync(path.join(out, 'CNAME'), 'docs.spacingmind.com\n')
-    fs.writeFileSync(path.join(out, '.nojekyll'), '')
     fs.writeFileSync(path.join(out, 'robots.txt'), buildRobotsTxt())
     fs.copyFileSync(path.join(__dirname, '../assets/og-card.png'), path.join(out, 'og-card.png'))
     fs.copyFileSync(path.join(__dirname, '../assets/icon-192.png'), path.join(out, 'icon-192.png'))
     fs.writeFileSync(path.join(out, 'llms.txt'), buildLlmsTxt(pages))
     fs.writeFileSync(path.join(out, 'llms-full.txt'), buildLlmsFullTxt(pages))
     for (const p of pages) fs.writeFileSync(path.join(out, `${p.slug}.md`), rawMarkdown(p, v))
+    // Cloudflare Workers static assets apply this file to every response (docs-site/wrangler.docs.jsonc); the CSP lists the hash of
+    // every inline script of the built pages.
+    const html = fs
+      .readdirSync(out)
+      .filter((f) => f.endsWith('.html'))
+      .map((f) => fs.readFileSync(path.join(out, f), 'utf8'))
+    fs.writeFileSync(path.join(out, '_headers'), docsHeadersFile(allInlineScriptHashes(html)))
   },
 })

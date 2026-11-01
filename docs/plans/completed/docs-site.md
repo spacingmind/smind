@@ -1,5 +1,7 @@
 # Docs site: `public-docs/` on GitHub Pages at docs.spacingmind.com
 
+> **Superseded hosting (2026-11-01):** this plan describes the GitHub Pages deployment it shipped with. The site is now a Cloudflare Worker (`smind-docs`), deployed by `.github/workflows/docs-deploy.yml` when a release is cut; `CNAME`, `.nojekyll` and the Pages workflow are gone. See ADR-0051, addendum 2026-11-01. The acceptance criteria and validation below are the record of the original Pages work.
+
 Status: completed (2026-10-27; #682 plan, #683 site, deployed and live). Human-approved scope: SEO + GEO (generative-engine optimisation).
 
 Size: M (4) — scope 1 (new `docs-site/` dir, one workflow, one node test), PRs 2, risk 1 (publishing; Pages and DNS stay a Human step), decisions 0, verification 2 (built site served locally, visual check, curl of generated files).

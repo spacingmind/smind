@@ -21,6 +21,7 @@ import {
   sidebarGroups,
   version,
 } from '../lib/pages.mjs'
+import { allInlineScriptHashes, docsCsp, docsHeadersFile, inlineScriptHashes } from '../lib/headers.mjs'
 
 const pages = readPages()
 
@@ -134,16 +135,88 @@ test('robots.txt allows the AI crawlers', () => {
   assert.match(robots, /Sitemap: https:\/\/docs\.spacingmind\.com\/sitemap\.xml/)
 })
 
-test('workflow shape', () => {
-  const wf = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'docs-pages.yml'), 'utf8')
-  assert.match(wf, /pages: write/)
-  assert.match(wf, /id-token: write/)
-  assert.match(wf, /actions\/upload-pages-artifact@/)
-  assert.match(wf, /actions\/deploy-pages@/)
+test('workflow shape: Cloudflare Worker deploy, no GitHub Pages', () => {
+  const dir = path.join(REPO_ROOT, '.github', 'workflows')
+  assert.ok(!fs.existsSync(path.join(dir, 'docs-pages.yml')), 'docs-pages.yml was replaced by docs-deploy.yml')
+  const wf = fs.readFileSync(path.join(dir, 'docs-deploy.yml'), 'utf8')
+  // no GitHub Pages leftovers
+  assert.doesNotMatch(wf, /pages: write|id-token|configure-pages|upload-pages-artifact|deploy-pages|github-pages/)
+  assert.match(wf, /permissions:\n\s+contents: read/)
+  assert.doesNotMatch(wf, /permissions:[^]*\n\s+(write|read)-all/)
+  assert.match(wf, /timeout-minutes: 15/)
+  assert.match(wf, /concurrency:\n\s+group: docs-deploy\n\s+cancel-in-progress: false/)
+  // every action pinned by a full commit SHA
+  const uses = [...wf.matchAll(/uses: (\S+)/g)].map((m) => m[1])
+  assert.ok(uses.length >= 2)
+  for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, `${u} is not pinned by SHA`)
+  // triggers
   assert.match(wf, /public-docs\/\*\*/)
-  assert.match(wf, /release:\n\s+types: \[published\]/)
-  // deploy never runs for a pull request
-  assert.match(wf, /if: github\.event_name != 'pull_request'/)
+  assert.match(wf, /\.release-please-manifest\.json/)
+  // A release deploys through release-please.yml (workflow_call): a `release: published` trigger would never fire for a release it
+  // publishes with the default GITHUB_TOKEN. A push to develop and a pull request only build and check.
+  assert.doesNotMatch(wf, /\n {2}release:/)
+  assert.match(wf, /workflow_call:\n\s+inputs:\n\s+ref:[^]*?required: true/)
+  assert.match(wf, /workflow_dispatch:\n\s+inputs:\n\s+ref:/)
+  assert.match(wf, /pull_request:\n\s+paths:/)
+  assert.match(wf, /push:\n\s+branches: \[develop\]/)
+  // only a run that was given a ref (workflow_call, workflow_dispatch) deploys
+  assert.match(wf, /id: mode[^]*?if \[ -n "\$REF_INPUT" \]/)
+  // pinned wrangler, the Worker config
+  assert.match(wf, /wrangler@\d+\.\d+\.\d+ deploy --config wrangler\.docs\.jsonc/)
+  const deploy = wf.slice(wf.indexOf('- name: Deploy to Cloudflare'))
+  assert.match(deploy, /if: steps\.mode\.outputs\.deploy == 'true' && steps\.secrets\.outputs\.present == 'true'/)
+  // a called workflow sees its caller's event name, so the deploy decision must not depend on it
+  assert.doesNotMatch(wf.replace(/^\s*#.*$/gm, ''), /github\.event_name/)
+  // the secrets are mapped into the check step and the deploy step only, never the job or the build steps
+  const withSecrets = wf.split('\n').filter((l) => /secrets\.CLOUDFLARE_/.test(l))
+  assert.equal(withSecrets.length, 4, 'two secrets in two steps')
+  assert.ok(wf.indexOf('secrets.CLOUDFLARE_API_TOKEN') > wf.indexOf('- name: Check built pages'), 'secrets appear only after the build and check steps')
+  assert.match(wf, /::notice title=docs-deploy skipped the deploy::/)
+})
+
+test('Worker config: static assets only, the live Worker settings', () => {
+  const raw = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', 'wrangler.docs.jsonc'), 'utf8')
+  const cfg = JSON.parse(raw.replace(/^\s*\/\/.*$/gm, ''))
+  assert.equal(cfg.name, 'smind-docs')
+  assert.equal(cfg.workers_dev, false)
+  assert.equal(cfg.preview_urls, false)
+  assert.equal(cfg.main, undefined, 'no Worker script')
+  assert.deepEqual(cfg.routes, [{ pattern: 'docs.spacingmind.com', custom_domain: true }])
+  assert.equal(cfg.assets.directory, './.vitepress/dist')
+  assert.equal(cfg.assets.html_handling, 'auto-trailing-slash')
+  assert.equal(cfg.assets.not_found_handling, '404-page')
+})
+
+test('the CSP lists the hash of every executable inline script, and only those', () => {
+  const page = '<html><head><script>window.a=1</script><script type="module">import "/x"</script><script type="application/ld+json">{"@type":"X"}</script><script src="/app.js" type="module"></script></head></html>'
+  const hashes = inlineScriptHashes(page)
+  assert.equal(hashes.length, 2, 'the classic and the module inline script; not ld+json, not a script with src')
+  for (const h of hashes) assert.match(h, /^'sha256-[A-Za-z0-9+/]{43}='$/)
+  // the same script on two pages is one hash; output is sorted and stable
+  const all = allInlineScriptHashes([page, page, '<script>window.b=2</script>'])
+  assert.equal(all.length, 3)
+  assert.deepEqual(all, [...all].sort())
+  const csp = docsCsp(all)
+  for (const h of all) assert.ok(csp.includes(h))
+  const scriptSrc = /script-src ([^;]*)/.exec(csp)[1]
+  assert.doesNotMatch(scriptSrc, /unsafe-eval|unsafe-inline/)
+  for (const d of ["default-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'", "form-action 'none'"]) assert.ok(csp.includes(d), d)
+})
+
+test('_headers: security headers everywhere, immutable caching only for the hashed assets', () => {
+  const file = docsHeadersFile(["'sha256-AAAA'"])
+  const [everything, assets] = file.trim().split('\n\n')
+  assert.ok(everything.startsWith('/*\n'))
+  for (const h of ['Content-Security-Policy:', 'X-Content-Type-Options: nosniff', 'Referrer-Policy: strict-origin-when-cross-origin', 'X-Frame-Options: DENY', 'Permissions-Policy:']) assert.ok(everything.includes(h), h)
+  assert.ok(!everything.includes('Cache-Control'))
+  assert.equal(assets, '/assets/*\n  Cache-Control: public, max-age=31536000, immutable')
+  assert.ok(!file.includes('interest-cohort'), 'no obsolete Permissions-Policy feature (Chrome logs a warning)')
+})
+
+test('the built pages carry no GitHub Pages files', () => {
+  const config = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', '.vitepress', 'config.mts'), 'utf8')
+  assert.doesNotMatch(config, /CNAME|\.nojekyll/)
+  assert.match(config, /_headers/)
 })
 
 test('parseFrontMatter handles quotes', () => {
