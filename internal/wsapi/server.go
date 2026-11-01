@@ -347,8 +347,10 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	reg.SetPluginSkills(skilldelivery.New(pluginMgr, filepath.Join(config.Dir(), "plugin-projection")))
 	pluginEv := newPluginEvents(bus, pluginMgr)
 	hs["provider.list"] = handleProviderList(runner, reg, gs, pluginMgr.InactiveProviders)
-	pluginEv.providers = runner.Providers()
-	pluginEv.syncProviders()                // plugin providers join the registry once, after config.providers.custom
+	if runner != nil {
+		pluginEv.providers = runner.Providers()
+		pluginEv.syncProviders() // plugin providers join the registry once, after config.providers.custom
+	}
 	pluginMgr.SetOnChange(pluginEv.changed) // a crash, restart or failed breaker reaches clients as plugin.updated
 	for method, h := range pluginHandlers(pluginMgr, pluginEv) {
 		hs[method] = h

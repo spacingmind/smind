@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/spacingmind/smind/internal/fsutil"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -204,7 +205,7 @@ func confinedExecutable(root, rel string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("not found in the plugin")
 		}
-		if fi.Mode()&os.ModeSymlink != 0 {
+		if fsutil.IsLink(fi.Mode()) {
 			return "", fmt.Errorf("a symlink in the path is refused")
 		}
 	}
