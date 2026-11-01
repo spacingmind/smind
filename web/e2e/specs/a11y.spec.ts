@@ -24,12 +24,18 @@ async function contrast(page: Page, label: string, include?: string[]) {
     return { res: r, judged: r.passes.concat(r.violations).filter((x) => x.id === 'color-contrast').reduce((n, x) => n + x.nodes.length, 0) }
   }
   // A scan right after a screen opens can run while it is still painting and judge no node at all (seen on the first
-  // test of a fresh worker); retry that vacuous result a few times instead of failing on timing.
-  let { res, judged } = await scan()
-  for (let i = 0; i < 5 && judged === 0; i++) {
-    await page.waitForTimeout(500)
-    ;({ res, judged } = await scan())
-  }
+  // test of a fresh worker); poll that vacuous result until it judges something.
+  let res!: Awaited<ReturnType<typeof scan>>['res']
+  let judged = 0
+  await expect
+    .poll(
+      async () => {
+        ;({ res, judged } = await scan())
+        return judged
+      },
+      { timeout: 7000, intervals: [100, 250, 500] },
+    )
+    .toBeGreaterThan(0)
   // the rule must have actually judged text, or a zero-violation result proves nothing
   expect(judged, `${label}: color-contrast checked nodes`).toBeGreaterThan(0)
   const found = res.violations.flatMap((v) => v.nodes.map((n) => `${n.target.join(' ')} :: ${(n.any[0]?.message ?? '').slice(0, 200)}`))
