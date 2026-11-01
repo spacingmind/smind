@@ -288,3 +288,24 @@ func nonSpaceChars(s string) int {
 	}
 	return n
 }
+
+// SchemaCaps are the verdict field caps in bytes, keyed by the field's JSON
+// path ("findings[].why"), so the seat's tool schema can show them to the
+// model before it submits. The daemon still enforces them on bytes.
+func SchemaCaps() map[string]int {
+	return map[string]int{
+		"summary":              verdictSummaryMax,
+		"blockedReason":        verdictBlockedReasonMax,
+		"findings[].file":      findingFileMax,
+		"findings[].why":       findingWhyMax,
+		"findings[].check":     findingCheckMax,
+		"gates[].note":         gateAckNoteMax,
+		"frames[].path":        observationPathMax,
+		"frames[].observation": observationTextMax,
+	}
+}
+
+// ArrayCaps are the item-count caps of the verdict's arrays.
+func ArrayCaps() map[string]int {
+	return map[string]int{"findings": verdictFindingsMax, "gates": verdictGateAcksMax, "frames": verdictObservationsMax}
+}

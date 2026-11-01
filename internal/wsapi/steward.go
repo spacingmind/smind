@@ -231,15 +231,20 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 			return nil, forbidden(m + " is only available to the steward seat's own run")
 		}
 		var p struct {
-			ReviewID int64           `json:"reviewId"`
-			Token    string          `json:"token"`
-			Verdict  json.RawMessage `json:"verdict"`
+			ReviewID   int64           `json:"reviewId"`
+			Token      string          `json:"token"`
+			Submission json.RawMessage `json:"submission"`
+			// Verdict is the old name of Submission: refused with a hint.
+			Verdict json.RawMessage `json:"verdict"`
 		}
 		if err := pluginParams(m, raw, &p); err != nil {
 			return nil, err
 		}
-		if p.ReviewID <= 0 || len(p.Verdict) == 0 {
-			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": reviewId and verdict are required"}
+		if len(p.Verdict) > 0 && len(p.Submission) == 0 {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": the verdict document goes in the `submission` parameter, not `verdict`"}
+		}
+		if p.ReviewID <= 0 || len(p.Submission) == 0 {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": reviewId and submission are required"}
 		}
 		// Defence in depth: a Lead's run is refused here, before its token
 		// is even compared.
@@ -247,7 +252,7 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 		if err != nil || row.StewardTaskID != rc.ident.taskID {
 			return nil, forbidden(m + " is only available to the steward seat's own run")
 		}
-		v, err := h.svc.SubmitVerdict(p.ReviewID, p.Token, rc.ident.runID, p.Verdict)
+		v, err := h.svc.SubmitVerdict(p.ReviewID, p.Token, rc.ident.runID, p.Submission)
 		return v, stewardErr(m, err)
 	}
 

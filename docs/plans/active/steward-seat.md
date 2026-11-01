@@ -167,6 +167,8 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 - S3a: daemon inbox `review` kind, `steward.frame`, web review card, permission policy line, read-only Permission policy page implemented 2026-11-01 (PR and validator verdict below once opened). S3b (mobile): implemented 2026-11-01 (PR and validator verdict below once opened). S4, S2b: not started.
 - S4: fake-LLM end-to-end tests and the one live haiku run done 2026-11-01 (PR below); pilot note `docs/steward-seat-pilot.md`. The Human's own pilot (policy enabled for one workspace, AC30) is not done by an agent.
 
+- Pilot follow-ups (2026-11-01, `docs/steward-seat-pilot.md`): (a) the review row's `costUsd` stayed 0 because the verdict closes the row mid-run and the run's usage was never rolled in afterwards: `Watch.Tick` now raises `cost_usd` (monotonic, `RaiseStewardReviewCost`) in any status until the run ends; unknown cost is never estimated. (b) `steward_verdict_submit`'s outer parameter is `submission` (was `verdict`, which collided with the document's own `verdict` string); the old name is refused naming `submission`; the tool schema carries `maxLength`/`maxItems` for every field cap (bytes, said in the descriptions).
+
 ## Validation
 
 Filled per PR: each AC → the test that confirms it, the mutation run and its failing test, commands (`task test`, `task lint`, `go test -race` on touched packages, `cd web && bunx
@@ -191,6 +193,10 @@ Mutations (committed work, restored with `git checkout -- <file>`; each FAIL is 
 AC30: one live review, `claude-haiku-5-5` only, isolated daemon (`~/.smind/dogfood/steward-s4/`, port 4963, guarded script, caps USD 0.30 / 8 min). Result in `docs/steward-seat-pilot.md`: 4 correct findings incl. both planted flaws, BLOCKED (the throwaway repo has no `origin/develop`, so `not_stacked` failed), 20 s, USD 0.0126, digest 1.5 KB; findings: the review row's `costUsd` stays 0 (budget rail is wall-clock only today), tool schema trap (`verdict` object inside `verdict`), 200-byte `blockedReason` cap only visible in the error. Logs: `~/.smind/dogfood/steward-s4/pilot/`, `/tmp/steward-seat-pilot/`.
 Commands: `task lint`, `task test`, `go test -race ./internal/steward ./internal/wsapi ./internal/runs`, `GOOS=windows go vet` on `internal/wsapi internal/runs`.
 Stated limits: the verdict class of the live run is gate-driven (BLOCKED), not the CHANGES a clean gate set would give; autoReview's trigger and the per-task cap are covered by the S2 tests, not re-run here; the Human's pilot (AC30 second half) is not done.
+
+### Pilot follow-ups (cost rollup, `submission` rename)
+
+Tests: `TestWatch_CostRollsIntoRowAfterVerdict`, `TestWatch_BudgetRailFiresOnRealCost` (AC19/AC21: over budget -> BLOCKED/`budget` at the real cost, under budget -> verdict stands), `TestStewardVerdictSchema_NamesSubmissionAndCaps`, `TestVerdictSubmit_OldVerdictParamRefusedNamingSubmission`; the MCP happy-path test now sends `submission`. No live model call (a later pilot confirms). Mutations: see the PR body.
 
 ### S3a (inbox review kind, web review card, policy line, policy page)
 
