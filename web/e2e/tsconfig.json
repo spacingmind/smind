@@ -9,7 +9,7 @@
     "esModuleInterop": true,
     "allowImportingTsExtensions": true,
     "types": ["node"],
-    "lib": ["ES2022", "DOM"]
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "test-results", "playwright-report"]
