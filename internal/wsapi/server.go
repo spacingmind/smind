@@ -396,7 +396,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 				}
 			}
 			out = append(out, inbox.Review{ID: v.ID, TaskID: v.TaskID, Verdict: v.Verdict, Status: v.Status, Stale: v.Stale,
-				ValidationID: v.ValidationID, HeadSHA: v.HeadSHA, FailingGates: failing, CreatedAt: v.CreatedAt})
+				ValidationID: v.ValidationID, HeadSHA: v.HeadSHA, PRNumber: v.PRNumber, FailingGates: failing, CreatedAt: v.CreatedAt})
 		}
 		return out, nil
 	})

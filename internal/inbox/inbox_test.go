@@ -218,6 +218,28 @@ func TestInboxList_ReviewSummaryRedacted(t *testing.T) {
 	}
 }
 
+// TestInboxList_ReviewSummaryCarriesPRNumber: the summary names the PR when
+// the review has one, between the verdict and the head.
+func TestInboxList_ReviewSummaryCarriesPRNumber(t *testing.T) {
+	f := newFx(t)
+	r := review(31, 2, "ACCEPTED")
+	r.PRNumber = 12
+	r.FailingGates = []string{"ci"}
+	f.reviews = []Review{r}
+	items, _ := f.svc.List(Filter{})
+	if len(items) != 1 {
+		t.Fatalf("items = %s", keysOf(items))
+	}
+	if want := "ACCEPTED PR #12 at abc1234: failing ci"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q", items[0].Summary, want)
+	}
+	f.reviews = []Review{review(32, 2, "ACCEPTED")}
+	items, _ = f.svc.List(Filter{})
+	if items[0].Summary != "ACCEPTED at abc1234" {
+		t.Fatalf("summary = %q, want the old shape without a PR", items[0].Summary)
+	}
+}
+
 // TestInboxList_PolicyAllowedDeniedNotListed documents that only pending
 // permissions derive: a request the policy already resolved (allowed or
 // denied) is no longer pending, so it never reaches the source and never

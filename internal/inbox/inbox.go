@@ -142,6 +142,7 @@ type Review struct {
 	Stale        string
 	ValidationID int64
 	HeadSHA      string
+	PRNumber     int
 	FailingGates []string
 	CreatedAt    time.Time
 }
@@ -359,6 +360,9 @@ func reviewItem(r Review, title string) (Item, bool) {
 		head = head[:7]
 	}
 	summary := r.Verdict
+	if r.PRNumber > 0 {
+		summary += fmt.Sprintf(" PR #%d", r.PRNumber)
+	}
 	if head != "" {
 		summary += " at " + head
 	}
