@@ -135,17 +135,27 @@ async function scrollInfo(page) {
     for (const el of document.querySelectorAll('*')) {
       const o = getComputedStyle(el).overflowY;
       if ((o === 'auto' || o === 'scroll') && el.scrollHeight > el.clientHeight + 4 && el.clientHeight > 200) {
+        // Only the screen on top: a stack keeps earlier screens mounted, and their scrollers must not win.
+        const r = el.getBoundingClientRect();
+        const top = document.elementFromPoint(r.left + r.width / 2, Math.min(r.top + r.height / 2, innerHeight - 5));
+        if (!top || !el.contains(top)) continue;
         if (!best || el.scrollHeight > best.scrollHeight) best = el;
       }
     }
     if (!best) return null;
     best.setAttribute('data-smoke-scroller', '1');
-    return { total: best.scrollHeight, view: best.clientHeight };
+    return { total: best.scrollHeight, view: best.clientHeight, top: best.scrollTop, tag: `${best.tagName} ${best.className.toString().slice(0, 60)}` };
   });
 }
 
 async function scrollTo(page, y) {
-  await page.evaluate((top) => document.querySelector('[data-smoke-scroller]')?.scrollTo(0, top), y);
+  await page.evaluate((top) => {
+    const el = document.querySelector('[data-smoke-scroller]');
+    if (el) {
+      el.style.scrollBehavior = 'auto';
+      el.scrollTop = top;
+    }
+  }, y);
   await page.waitForTimeout(150);
 }
 
