@@ -166,11 +166,17 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 - S2: seat, review loop, rails, trigger, seed and CLI implemented 2026-10-31 (PR link and validator verdict below once opened); S2b (steward_annotate) deferred to after S4 evidence.
 - S3a: daemon inbox `review` kind, `steward.frame`, web review card, permission policy line, read-only Permission policy page implemented 2026-11-01 (PR and validator verdict below once opened). S3b (mobile), S4, S2b: not started.
 
+- Pilot follow-ups (2026-11-01, `docs/steward-seat-pilot.md`): (a) the review row's `costUsd` stayed 0 because the verdict closes the row mid-run and the run's usage was never rolled in afterwards: `Watch.Tick` now raises `cost_usd` (monotonic, `RaiseStewardReviewCost`) in any status until the run ends; unknown cost is never estimated. (b) `steward_verdict_submit`'s outer parameter is `submission` (was `verdict`, which collided with the document's own `verdict` string); the old name is refused naming `submission`; the tool schema carries `maxLength`/`maxItems` for every field cap (bytes, said in the descriptions).
+
 ## Validation
 
 Filled per PR: each AC → the test that confirms it, the mutation run and its failing test, commands (`task test`, `task lint`, `go test -race` on touched packages, `cd web && bunx
 tsc -b packages/ui`), screenshots for UI. For S1 the parser PR also needs a Windows dispatch (`windows-full-suite.yml --ref <branch> -f packages=internal/permpolicy,internal/runs`):
 path and quoting code is exactly what the nightly has caught before.
+
+### Pilot follow-ups (cost rollup, `submission` rename)
+
+Tests: `TestWatch_CostRollsIntoRowAfterVerdict`, `TestWatch_BudgetRailFiresOnRealCost` (AC19/AC21: over budget -> BLOCKED/`budget` at the real cost, under budget -> verdict stands), `TestStewardVerdictSchema_NamesSubmissionAndCaps`, `TestVerdictSubmit_OldVerdictParamRefusedNamingSubmission`; the MCP happy-path test now sends `submission`. No live model call (a later pilot confirms). Mutations: see the PR body.
 
 ### S3a (inbox review kind, web review card, policy line, policy page)
 
