@@ -24,6 +24,9 @@ describe('panelErrorView', () => {
   it('other errors fall back', () => {
     const err = new DaemonError('relay: not connected', 'call_timeout');
     expect(panelErrorView(err)).toEqual({ title: "Couldn't load this panel", body: 'relay: not connected' });
+    expect(
+      panelErrorView(new DaemonError('plugin.view: plugin x: it is not installed and enabled', 'not_installed')),
+    ).toEqual({ title: "Couldn't load this panel", body: 'plugin x: it is not installed and enabled' });
     expect(panelErrorView(new Error('boom'))).toEqual({ title: "Couldn't load this panel", body: 'boom' });
     expect(panelErrorView('nope')).toEqual({ title: "Couldn't load this panel", body: 'nope' });
   });

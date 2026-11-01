@@ -15,7 +15,7 @@ export function panelErrorView(err: unknown): { title: string; body: string } {
     return { title: 'This panel is too large or invalid', body: message.replace(/^plugin\.view: /, '') };
   }
   if (code === 'ui_level_too_low') return { title: 'This panel needs a newer app', body: 'Update the app to open it.' };
-  return { title: "Couldn't load this panel", body: message };
+  return { title: "Couldn't load this panel", body: message.replace(/^plugin\.view: /, '') };
 }
 
 /** True iff a plugin.event touches this panel: its own plugin and panel, or the plugin as a whole (no panelId). */
