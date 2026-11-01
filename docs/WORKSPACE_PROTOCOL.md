@@ -161,8 +161,8 @@ cites the `validationId`, or says "no contract: <reason>".
 
 ## Verification checklist
 
-- `task test`, `task lint`, and `cd web && bunx tsc -b packages/ui`.
-  `task lint` misses TypeScript errors in tests.
+- `task test` and `task lint` (`task lint` includes the web `tsc -b`
+  typecheck, which catches TypeScript errors such as unused imports in tests).
 - Desktop changes: in `desktop/src-tauri` and `desktop/daemon-client`, run
   `cargo test` and `cargo clippy --all-targets -- -D warnings`. Revert
   `gen/schemas` noise with `git checkout`.
