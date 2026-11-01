@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — 2026-11-01.** The *direction* is the Human's (2026-11-01): the landing page gets a **hybrid demo** — the hero stays a light
+**Proposed — 2026-11-01** (implemented, unmerged, in PR #797). The *direction* is the Human's (2026-11-01): the landing page gets a **hybrid demo** — the hero stays a light
 coded mock (landing PR #34, another Lead), plus a "Try it live" entry that opens the **real** smind web UI (`web/packages/ui`) in **demo
 mode**, hosted at `app.spacingmind.com`, **demo only for now**. This ADR is the design the Human reviews; the demo is built as
 *Proposed* in parallel (`docs/plans/active/web-demo-mode.md`), so a change requested in review is a change to unmerged code.
@@ -73,7 +73,7 @@ State is **in memory, per page load**: a reload resets the demo, nothing is writ
 no token or session is ever stored. A cancel (`task.cancel`) stops the matching script, like the daemon.
 
 **Coverage guard (a test, not a convention):** a unit test statically collects every method string the UI passes to `call`/`callStream`
-(a regex over `src/**` excluding tests, plus an explicit allow-list for dynamically built names) and fails if any has no rule. A new RPC in the UI
+(a regex over `src/**` excluding tests) and fails if any is in neither the rule table nor `REFUSED_METHODS`, the explicit list of writes the demo refuses (by name, not guessed from a verb). A new RPC in the UI
 cannot ship without someone deciding what the demo does with it.
 
 ### 2. Scenario format
@@ -85,7 +85,7 @@ chunk. A recorded stream *can* be pasted in as a typed constant when that is fas
 ```ts
 interface DemoScenario {
   version: 1;
-  clock: { now: string };                     // a fixed "now"; all timestamps are written relative to it, so the demo never says "3 years ago"
+  now: number;                                // epoch ms every timestamp is written relative to: Date.now() in the browser (the UI formats "2h ago" against the real clock), fixed in tests
   daemon: DaemonInfo;                         // daemon.info: version string "demo", capabilities, relay/auth off
   workspaces: Workspace[];                    // 3 (two with spaces)
   spaces: Space[];
@@ -95,9 +95,9 @@ interface DemoScenario {
   scripts: Record<ScriptId, Script>;          // live behaviour (below)
   diffs: Record<TaskId, TaskDiffFixture>;     // task.diff / task.fileDiff / task.git*: a few files, a real unified diff
   terminals: Record<TaskId, TerminalReplay>;  // canned terminal output
-  inbox: InboxItem[];                         // inbox.list: a pending permission (links to the live run), a validator verdict, a failed run, a review
+  inbox: InboxItem[];                         // inbox.list: a pending permission (links to the live run), a validator verdict, a failed run, a stalled-task notice
   usage: UsageFixture;                        // usage.summary, provider.usage, account.usage: believable numbers, one account at 62% of a 5h window
-  rules: Record<Method, Rule>;                // the dispatcher table above; unlisted reads default to the fixtures, unlisted writes to "refused"
+  // the dispatcher table above lives in code (rules.ts): every method the UI calls is in it (read / scripted / local) or in REFUSED_METHODS; nothing is guessed
 }
 type Step =
   | { at: number; event: RunLogEvent }                       // a run event: chunk, thinking, tool_call, usage, done, ...
@@ -113,13 +113,13 @@ type Script = { steps: Step[]; speed?: number };
 
 | Moment | How it plays |
 |---|---|
-| **A run streaming tool calls** | The landing task ("Add rate limiting to the public API") opens on a run already in progress: thinking, assistant text chunks, then `tool_call` cards (Read, Edit, a Bash `go test`), a `usage` event. It starts when the page loads, so the visitor sees motion without doing anything. |
+| **A run streaming tool calls** | The landing task ("Add rate limiting to the public API") opens on a run already in progress: thinking, assistant text chunks, then `tool_call` cards (Read, Edit, a Bash `go test`), a `usage` event. It starts when the page loads and the demo opens on it (`#/workspace/1/task/1/chat/1`), so the visitor sees motion without doing anything. |
 | **A permission request** | The script reaches an `ask` step: `permission_request` with a `write`/`edit` detail and a diff preview (the real permission card). **Allow** → the script's `allow` branch finishes the edit, runs the tests, `done`. **Deny** → the `deny` branch has the agent acknowledge and propose a plan, `done`. `run.respondPermission` is the *only* thing that advances an `ask` (ADR-0019: no auto-answer). The decision is also reflected in the inbox row. |
 | **A diff tab** | `task.diff`/`task.fileDiff` return a small, real-looking unified diff (3 files); the diff viewer renders it exactly as production. Allowing the permission adds the file the request was about. |
 | **A terminal tab** | `terminal.create`/`terminal.list`/`terminal.attach` replay a canned session as base64 `data` events with recorded inter-frame delays (a `go test ./...` run, then a prompt). `terminal.write` is accepted and echoed locally; Enter answers one dim line, "demo: this terminal replays canned output; nothing runs here". `terminal.resize` is a no-op. |
 | **The inbox** | `inbox.list` returns the fixtures; `inbox.seen`, `inbox.snooze`, `inbox.resolve` are `local` rules (the badge count in the sidebar updates through the same notification the daemon pushes). |
 | **Usage** | `usage.summary`, `provider.usage`, `account.usage` return fixtures: a Pro-style account with a 5h and a weekly window, a month of spend by day and by model. Read-only. |
-| **Sending a prompt** | `run.start`/`task.prompt` on any task echoes the visitor's text as a `user_message` and plays the **canned reply script** for that task (a short, honest answer that says it is a demo and points at the install command). The visitor's text is shown, never parsed, never sent anywhere. |
+| **Sending a prompt** | `run.start`/`task.prompt` on any task makes the visitor's text the run's prompt (the timeline shows it as the user's message) and plays the **canned reply script** for that task (a short, honest answer that says it is a demo and points at the install command). The visitor's text is shown, never parsed, never sent anywhere. |
 
 ### 3. What is disabled or faked
 
@@ -137,8 +137,7 @@ type Script = { steps: Step[]; speed?: number };
 **Banner.** One component, `DemoBanner`, rendered by `main.tsx` above `<App>` in demo mode only: a full-width strip, `role="status"`, uses the
 existing semantic tokens (no new colours, no visual fork of any component), text **"Demo — not connected to a daemon. Scripted data; nothing you
 type leaves your browser."** with one link, "Install smind" (`https://spacingmind.com`). It is **not dismissible** and stays visible at 390 px (it wraps to
-two lines at most; the layout below it is offset by its measured height through one CSS variable, not by editing the shell). The document
-title is `sMind — demo`. The connection label the sidebar shows ("Connected to daemon") reads **"Demo (scripted)"** — the one conditional in
+two lines at most; the layout below it is offset by its measured height through one CSS variable, not by editing the shell). The connection label the sidebar shows ("Connected to daemon") reads **"Demo (scripted)"** — the one conditional in
 `App.tsx`, on a constant, for a string.
 
 The UI is otherwise **used as is**. No demo-only component, no demo-only styling, no forked layout; the diff to existing `src/` files outside `src/demo/`
@@ -160,8 +159,9 @@ never under `internal/server/dist`, never in the desktop bundle).
 
 ### 5. Entry from the landing page
 
-The landing's "Try it live" is a plain link to `https://app.spacingmind.com/` (new tab). A deep link may pick a moment (`/#/task/42` is already
-a route the UI handles; the scenario's task ids are stable, documented in the scenario file). No cross-origin messaging, no iframe (the demo
+The landing's "Try it live" is a plain link to `https://app.spacingmind.com/` (new tab). The demo opens on the live task when the URL names
+nothing (`#/workspace/1/task/1/chat/1`); a deep link may pick another (`/#/workspace/2/task/4/chat/4` is a route the UI already handles; the scenario's ids are
+stable, documented in the scenario file). No cross-origin messaging, no iframe (the demo
 sets `frame-ancestors 'none'`, [section 10](#10-security)).
 
 ### 6. No daemon or WebSocket code is reachable in the demo build
@@ -173,15 +173,19 @@ A banner is a promise; the build makes it checkable.
   the rest of each function and the strings `/api/token`, `/ws?token=`, `/api/login`, `new WebSocket(` do not appear in `dist-demo`.
 - Other `fetch(` callers in the UI (downloads, attachments, healthz, update checks) are reached only after a connect; they are listed once by
   `check-demo-build.mjs`, and `connect-src 'none'` in the CSP (section 10) makes any survivor fail closed in the browser, not silently succeed.
-- `scripts/check-demo-build.mjs` (run by `check:demo` and CI) fails the build if `dist-demo` contains any of: `/api/token`, `/api/login`, `new WebSocket(`,
-  `ws://`, `wss://`, `localhost`, `127.0.0.1`, `relay.spacingmind`, `smind.bearer`, `grpc` (the list is the script's data, reviewed in the PR; a dependency string
-  that genuinely needs an exception is allow-listed by file with a comment).
+- `scripts/check-demo-build.mjs` (run by `build:demo` and CI) fails the build if `dist-demo` contains any of: `/api/token`, `/api/login`, `new WebSocket(`, a `ws://` or `wss://` URL,
+  a `http(s)://` URL to `localhost`/`127.0.0.1`/`[::1]`, `relay.spacingmind`, `smind.bearer`, `grpc`, `/healthz`, `new EventSource(`, `sendBeacon(` (the list is the script's data, reviewed in the PR). The bare words `localhost` and
+  `127.0.0.1` are not forbidden: the UI compares `window.location.hostname` with them and two settings forms show `http://localhost:8080` / `http://localhost:54545/callback` as placeholder text for flows the demo refuses; those two
+  placeholders are the script's only allow-list. It also fails on a missing or weak CSP (`connect-src 'none'`, `default-src 'none'`, no unsafe script sources, the script hash), a missing `_headers`, a `pdf-viewer.html` (the PDF page from `public/`
+  is removed from the demo output), the scripted daemon sitting in the entry chunk, and any budget overrun. `check-demo-build.mjs --production <dist>` asserts a normal build contains no demo code; CI runs both.
 
 ### 7. Bundle size budget and lazy loading
 
 **Measured baseline (2026-11-01, `vite build` on `origin/develop` at `5e09caf1`):** the production UI is **one JS chunk**, `index-*.js` = 3,539,994 B raw,
 **1,067,437 B gzip**, plus 166,378 B CSS (27,171 B gzip), five Geist font files (~76 kB) and a 9 kB `file-tab-router` chunk. There is no meaningful code
 splitting today (xterm, CodeMirror, diff2html, react-markdown, pdf.js shell are all in the entry chunk).
+
+**Measured on the implementation (PR #797):** `dist-demo` initial JS **1,071,795 B gzip** (+4,358 B over the baseline: the banner, the flag guards and the entry glue), initial CSS 27,353 B gzip, the scripted daemon (dispatcher, scenario, fixtures) **13,761 B gzip** in its own lazily imported chunk; the production build grows by 33 B. The budgets below stay as set, with large headroom.
 
 Budget for `dist-demo` (the numbers live in `scripts/check-demo-build.mjs`, so changing one is a visible diff):
 

@@ -15,8 +15,8 @@ wrangler config, DNS, and the landing link (landing PR #34 belongs to another Le
    `dist-demo` is gitignored and is not under `internal/server/dist` or `desktop/ui/app`.
 2. `bun run --filter @smind/ui preview:demo` serves `dist-demo` on `127.0.0.1:4173` only (`--strictPort`), and nothing else listens.
 3. The default production build (`build`) and the desktop build (`build:desktop`) contain **no** demo code: the string `Demo — not connected` and the `src/demo` chunk names are absent from their output.
-4. `dist-demo` contains none of the forbidden strings: `/api/token`, `/api/login`, `new WebSocket(`, `ws://`, `wss://`, `localhost`, `127.0.0.1`, `relay.spacingmind`, `smind.bearer`, `grpc`
-   (a documented per-file allow-list covers any dependency string that is not a code path). `scripts/check-demo-build.mjs` enforces this and exits non-zero otherwise.
+4. `dist-demo` contains none of the forbidden strings: `/api/token`, `/api/login`, `new WebSocket(`, a `ws://` or `wss://` URL, a `http(s)://` URL to `localhost`/`127.0.0.1`/`[::1]`, `relay.spacingmind`, `smind.bearer`, `grpc`, `/healthz`
+   (the two form placeholders `http://localhost:8080` and `http://localhost:54545/callback` are the only allow-list). `scripts/check-demo-build.mjs` enforces this and exits non-zero otherwise.
 5. `dist-demo/index.html` carries a CSP `<meta>` with `connect-src 'none'`, `default-src 'none'`, no `'unsafe-eval'`, no `'unsafe-inline'` in `script-src`, and a `_headers` file carries the same policy plus `frame-ancestors 'none'`,
    `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`. The sha256 in `script-src` equals the hash of the inline theme-bootstrap script actually in `index.html`.
 
@@ -34,7 +34,7 @@ wrangler config, DNS, and the landing link (landing PR #34 belongs to another Le
     **Deny** makes the agent acknowledge, propose a plan and finish. Both branches update the inbox row.
 11. **A diff tab:** the task's Diff tab renders a real-looking unified diff of at least three files through the production diff viewer; allowing the permission adds the file the request was about.
 12. **A terminal tab:** the Terminal tab replays canned `go test` output with recorded delays, ends at a prompt, echoes typed characters locally and answers Enter with one dim line saying nothing runs here; no input is executed or sent anywhere.
-13. **The inbox:** `inbox.list` shows at least four items (a pending permission linked to the live run, a validator verdict, a failed run, a review); `seen`, `snooze` and `resolve` update the list and the sidebar badge.
+13. **The inbox:** `inbox.list` shows at least four items (a pending permission linked to the live run, a validator verdict, a failed run, a stalled-task notice); `seen`, `snooze` and `resolve` update the list and the sidebar badge.
 14. **Usage:** the usage views render fixtures (an account with 5h and weekly windows, a month of spend by day and by model).
 15. **Sending a prompt:** a typed prompt appears as the user's message and the canned reply streams; it works repeatedly; the text goes nowhere else.
 16. Scenario data is synthetic: no real username, home path, email, token-shaped string or the repo owner's paths (a test scans it); every timestamp is relative to `clock.now`.
@@ -43,7 +43,7 @@ wrangler config, DNS, and the landing link (landing PR #34 belongs to another Le
 
 17. Settings pages render fixtures read-only; every write shows "Read-only in the demo."; there is no login screen and no way to enter a daemon address.
 18. `DemoBanner` reads "Demo — not connected to a daemon. Scripted data; nothing you type leaves your browser." with an "Install smind" link to `https://spacingmind.com`; it has `role="status"`, is **not dismissible**, is visible at 1280 and 390 px in light and dark without overlapping the shell,
-    and the sidebar connection label reads "Demo (scripted)". `document.title` is `sMind — demo`.
+    and the sidebar connection label reads "Demo (scripted)".
 19. No visual fork: no demo-only component other than the banner, no demo-only styling beyond layout offset by the banner's height; the existing `no-hardcoded-colors` and token tests pass unchanged.
 
 **Size and network**
@@ -65,13 +65,13 @@ Named up front. Vitest unless stated; files under `web/packages/ui/src/demo/` un
 
 - `D-01 connectDemo resolves a real WsClient and daemon.info answers the demo daemon`
 - `D-02 an unlisted method answers RpcError demo_unsupported; a write answers demo_read_only with the read-only message`
-- `D-03 coverage guard: every method string the UI passes to call/callStream has a rule` (static scan of `src/**` excluding tests; explicit allow-list for dynamic names)
+- `D-03 coverage guard: every method string the UI passes to call/callStream has a rule` (static scan of `src/**` excluding tests; the writes the demo refuses are listed by name in `REFUSED_METHODS`)
 - `D-04 a script plays its steps in order on an injected clock: events reach callStream's onEvent, then the terminal result`
 - `D-05 an ask step pauses until run.respondPermission; allow runs the allow branch, deny the deny branch; an unknown requestId is an error; an unanswered ask stays paused`
 - `D-06 task.cancel and run.stop abort the matching script; nothing is emitted afterwards`
 - `D-07 prefers-reduced-motion collapses step delays`
 - `D-08 notifications carry a per-connection monotonic seq and respect events.subscribe topics`
-- `D-09 sending a prompt echoes a user_message and streams the canned reply; twice in a row works; the text is only ever held in session state`
+- `D-09 sending a prompt streams the canned reply and lists the run with the chat's runs; twice in a row works; the text is only ever held in session state`
 - `D-10 terminal replay: attach emits base64 data events in order, resize is a no-op, write echoes locally, Enter prints the dim demo line, nothing is executed`
 - `D-11 inbox seen/snooze/resolve mutate the in-memory list and push the inbox notification`
 - `D-12 a second connectDemo (reconnect) shares the page-load session state`
