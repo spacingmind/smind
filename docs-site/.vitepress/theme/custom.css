@@ -1,17 +1,834 @@
+/*
+ * Docs theme = the product site's theme.
+ *
+ * Source of truth: spacingmind/spacing-mind-landing-page, apps/web/src/index.css
+ * (tokens), components/layout (header, footer, mobile nav), components/brand/logo.tsx,
+ * components/ui/button.tsx and the blog-prose rules. The token blocks below are
+ * copied value for value; change them there first, then here.
+ * Calm technical console: neutral surfaces, black/white primary, and the logo
+ * teal as the single brand accent. Dark is the default, as on the product site.
+ */
+
+/* ---- tokens (landing index.css, verbatim) ---- */
+:root {
+  --radius: 0.5rem;
+  --background: #f8f8f8;
+  --foreground: oklch(0.205 0 0);
+  --card: #ffffff;
+  --card-foreground: oklch(0.205 0 0);
+  --popover: #ffffff;
+  --popover-foreground: oklch(0.205 0 0);
+  --primary: #0d0d0d;
+  --primary-foreground: #ffffff;
+  --secondary: rgba(13, 13, 13, 0.05);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: rgba(13, 13, 13, 0.04);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: rgba(13, 13, 13, 0.06);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: #e03131;
+  --border: rgba(13, 13, 13, 0.1);
+  --input: rgba(13, 13, 13, 0.14);
+  --ring: oklch(0.6 0 0);
+  --brand: oklch(0.489 0.08 194.8);
+  --success: #1e8a3e;
+  --warning: #e07b00;
+  --diff-added: #1e8a3e;
+  --diff-removed: #e03131;
+  --confirm: #eaf7ee;
+  --confirm-foreground: #166b32;
+  --terminal: #161616;
+  --terminal-foreground: #d4d4d4;
+  --terminal-muted: #8f8f8f;
+  --terminal-prompt: #46bf72;
+}
+
+.dark {
+  --background: #111111;
+  --foreground: oklch(0.87 0 0);
+  --card: #1a1a1a;
+  --card-foreground: oklch(0.87 0 0);
+  --popover: #1f1f1f;
+  --popover-foreground: oklch(0.87 0 0);
+  --primary: #ffffff;
+  --primary-foreground: #0d0d0d;
+  --secondary: rgba(255, 255, 255, 0.06);
+  --secondary-foreground: oklch(0.87 0 0);
+  --muted: rgba(255, 255, 255, 0.04);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: rgba(255, 255, 255, 0.07);
+  --accent-foreground: oklch(0.95 0 0);
+  --destructive: #ff5c5c;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: oklch(0.55 0 0);
+  --brand: oklch(0.904 0.136 196.2);
+  --success: #46bf72;
+  --warning: #ff8a30;
+  --diff-added: #46bf72;
+  --diff-removed: #ff5c5c;
+  --confirm: rgba(70, 191, 114, 0.16);
+  --confirm-foreground: #87d9a4;
+  --terminal: #0b0b0b;
+  --terminal-foreground: #d4d4d4;
+  --terminal-muted: #8f8f8f;
+  --terminal-prompt: #46bf72;
+}
+
+/* ---- typography: Geist, as on the product site ---- */
+:root {
+  --vp-font-family-base: 'Geist Variable', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+    'Segoe UI Symbol', 'Noto Color Emoji';
+  --vp-font-family-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ---- map the tokens onto the VitePress variables ---- */
+:root,
+.dark {
+  --vp-c-bg: var(--background);
+  --vp-c-bg-alt: var(--background);
+  --vp-c-bg-elv: var(--popover);
+  --vp-c-bg-soft: var(--card);
+
+  --vp-c-border: var(--input);
+  --vp-c-divider: var(--border);
+  --vp-c-gutter: var(--border);
+
+  --vp-c-text-1: var(--foreground);
+  --vp-c-text-2: var(--muted-foreground);
+  --vp-c-text-3: var(--muted-foreground);
+
+  --vp-c-brand-1: var(--brand);
+  --vp-c-brand-2: var(--brand);
+  --vp-c-brand-3: var(--brand);
+  --vp-c-brand-soft: color-mix(in oklab, var(--brand) 12%, transparent);
+
+  --vp-c-default-1: var(--input);
+  --vp-c-default-2: var(--accent);
+  --vp-c-default-3: var(--secondary);
+  --vp-c-default-soft: var(--accent);
+
+  --vp-c-green-1: var(--success);
+  --vp-c-green-2: var(--success);
+  --vp-c-green-3: var(--success);
+  --vp-c-green-soft: color-mix(in oklab, var(--success) 14%, transparent);
+  --vp-c-yellow-1: var(--warning);
+  --vp-c-yellow-2: var(--warning);
+  --vp-c-yellow-3: var(--warning);
+  --vp-c-yellow-soft: color-mix(in oklab, var(--warning) 14%, transparent);
+  --vp-c-red-1: var(--destructive);
+  --vp-c-red-2: var(--destructive);
+  --vp-c-red-3: var(--destructive);
+  --vp-c-red-soft: color-mix(in oklab, var(--destructive) 14%, transparent);
+  --vp-c-purple-1: var(--brand);
+  --vp-c-purple-2: var(--brand);
+  --vp-c-purple-3: var(--brand);
+  --vp-c-purple-soft: var(--vp-c-brand-soft);
+
+  --vp-layout-max-width: 1280px;
+  --vp-nav-height: 64px;
+  --vp-nav-logo-height: 32px;
+  --vp-sidebar-width: 272px;
+  --vp-nav-bg-color: color-mix(in oklab, var(--background) 85%, transparent);
+  --vp-nav-screen-bg-color: var(--background);
+  --vp-local-nav-bg-color: color-mix(in oklab, var(--background) 85%, transparent);
+  --vp-sidebar-bg-color: var(--background);
+  --vp-backdrop-bg-color: color-mix(in oklab, var(--background) 80%, transparent);
+
+  /* Inline code: foreground on the accent wash (landing renderInlineCode). */
+  --vp-code-font-size: 0.875em;
+  --vp-code-line-height: 1.6;
+  --vp-code-color: var(--foreground);
+  --vp-code-bg: var(--accent);
+  --vp-code-block-bg: var(--card);
+  --vp-code-block-color: var(--foreground);
+  --vp-code-block-divider-color: var(--border);
+  --vp-code-lang-color: var(--muted-foreground);
+  --vp-code-line-number-color: var(--muted-foreground);
+  --vp-code-line-highlight-color: var(--accent);
+  --vp-code-line-diff-add-color: color-mix(in oklab, var(--diff-added) 16%, transparent);
+  --vp-code-line-diff-add-symbol-color: var(--diff-added);
+  --vp-code-line-diff-remove-color: color-mix(in oklab, var(--diff-removed) 16%, transparent);
+  --vp-code-line-diff-remove-symbol-color: var(--diff-removed);
+  --vp-code-copy-code-border-color: var(--border);
+  --vp-code-copy-code-bg: var(--card);
+  --vp-code-copy-code-hover-border-color: var(--input);
+  --vp-code-copy-code-hover-bg: var(--accent);
+  --vp-code-tab-bg: var(--card);
+  --vp-code-tab-active-bar-color: var(--brand);
+
+  /* Buttons: the landing default variant, black on light and white on dark. */
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: var(--primary-foreground);
+  --vp-button-brand-bg: var(--primary);
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-hover-text: var(--primary-foreground);
+  --vp-button-brand-hover-bg: color-mix(in oklab, var(--primary) 90%, transparent);
+  --vp-button-brand-active-border: transparent;
+  --vp-button-brand-active-text: var(--primary-foreground);
+  --vp-button-brand-active-bg: color-mix(in oklab, var(--primary) 90%, transparent);
+  --vp-button-alt-bg: var(--secondary);
+  --vp-button-alt-hover-bg: color-mix(in oklab, var(--secondary) 80%, transparent);
+  --vp-button-alt-active-bg: color-mix(in oklab, var(--secondary) 80%, transparent);
+
+  --vp-input-border-color: var(--input);
+  --vp-input-bg-color: var(--card);
+  --vp-local-search-bg: var(--popover);
+  --vp-local-search-result-bg: var(--popover);
+  --vp-local-search-result-border: var(--border);
+  --vp-local-search-result-selected-bg: var(--accent);
+  --vp-local-search-result-selected-border: var(--brand);
+  --vp-local-search-highlight-bg: var(--brand);
+  --vp-local-search-highlight-text: var(--background);
+
+  /* Custom blocks: a card with a tinted rule. */
+  --vp-custom-block-info-bg: var(--card);
+  --vp-custom-block-tip-bg: var(--card);
+  --vp-custom-block-warning-bg: var(--card);
+  --vp-custom-block-danger-bg: var(--card);
+  --vp-custom-block-caution-bg: var(--card);
+  --vp-custom-block-important-bg: var(--card);
+  --vp-custom-block-details-bg: var(--card);
+  --vp-custom-block-info-border: var(--border);
+  --vp-custom-block-tip-border: var(--border);
+  --vp-custom-block-warning-border: var(--border);
+  --vp-custom-block-danger-border: var(--border);
+  --vp-custom-block-caution-border: var(--border);
+  --vp-custom-block-important-border: var(--border);
+  --vp-custom-block-details-border: var(--border);
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ---- header (landing components/layout/header.tsx) ---- */
+.VPNav .VPNavBar,
+.VPNavBar .divider-line {
+  background-color: var(--vp-nav-bg-color);
+}
+.VPNavBar {
+  border-bottom: 1px solid var(--border);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+.VPNavBar .divider,
+.VPNavBar .divider-line {
+  display: none;
+}
+.VPNavBar:not(.home.top) .content-body,
+.VPNavBar .content-body {
+  background-color: transparent;
+}
+.VPNavBar.has-sidebar .content,
+.VPNavBar .content {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.VPNavBarTitle .title {
+  gap: 0.625rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--brand);
+  border-bottom: 0;
+}
+.VPNavBar.has-sidebar .title {
+  border-bottom: 0;
+  background-color: transparent;
+}
+.lp-logo-img {
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+}
+.lp-logo-dark {
+  display: none;
+}
+.dark .lp-logo-light {
+  display: none;
+}
+.dark .lp-logo-dark {
+  display: inline-block;
+}
+
+.VPNavBar .VPNavBarMenuLink,
+.VPNavBar .VPNavBarMenuGroup .button {
+  padding: 0.5rem 0.75rem;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  transition: color 0.15s;
+}
+.VPNavBar .VPNavBarMenuLink:hover,
+.VPNavBar .VPNavBarMenuLink.active {
+  color: var(--foreground);
+}
+.VPNavBar .content-body {
+  gap: 0.25rem;
+}
+.VPNavBarSearch {
+  order: 0;
+}
+.VPNavBarMenu {
+  order: 1;
+}
+.VPNavBarSocialLinks {
+  order: 2;
+}
+.VPNavBarAppearance {
+  order: 3;
+}
+.VPNavBarExtra {
+  order: 4;
+}
+.lp-download {
+  order: 5;
+}
+.VPNavBarAppearance {
+  display: flex;
+  align-items: center;
+}
+.VPSocialLink,
+.VPNavBarAppearance .VPSwitch {
+  color: var(--muted-foreground);
+}
+.VPSocialLink:hover {
+  color: var(--foreground);
+}
+/* Download button = landing Button size="sm", variant default. */
+.lp-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2rem;
+  margin-left: 0.5rem;
+  padding: 0 0.75rem;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--primary);
+  color: var(--primary-foreground) !important;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  transition: background-color 0.15s;
+}
+.lp-download:hover {
+  background: color-mix(in oklab, var(--primary) 90%, transparent);
+}
+.VPNavBar .lp-download {
+  display: none;
+}
+@media (min-width: 768px) {
+  .VPNavBar .lp-download {
+    display: inline-flex;
+  }
+}
+/* Mobile nav (landing mobile-nav.tsx): rows px-2 py-3 text-base, Download as a block button. */
+.VPNavScreen {
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+.VPNavScreenMenuLink,
+.VPNavScreenMenuGroup .button,
+.VPNavScreenSocialLinks {
+  font-size: 1rem;
+  font-weight: 400;
+  color: var(--foreground);
+}
+.VPNavScreenMenuLink {
+  padding: 0.75rem 0.5rem;
+  border-radius: calc(var(--radius) - 2px);
+}
+.VPNavScreenMenuLink:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.VPNavScreen .divider {
+  background-color: var(--border);
+}
+.VPNavScreen .VPNavScreenMenu,
+.VPNavScreen .VPNavScreenMenuLink,
+.VPNavScreen .VPNavScreenMenuGroup {
+  border-bottom: 0 !important;
+  font-weight: 400 !important;
+}
+.VPNavScreenAppearance {
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.lp-download-block {
+  display: flex;
+  width: 100%;
+  height: 2.75rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.875rem;
+}
+.VPNavBarHamburger .container .top,
+.VPNavBarHamburger .container .middle,
+.VPNavBarHamburger .container .bottom {
+  background-color: var(--foreground);
+}
+
+/* ---- sidebar ---- */
+.VPSidebar {
+  border-right: 1px solid var(--border);
+}
+.VPSidebar .group + .group {
+  border-top: 1px solid var(--border);
+}
+.VPSidebarItem.level-0 > .item > .text,
+.VPSidebarItem .text {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.VPSidebarItem.level-0.collapsible > .item > .text,
+.VPSidebarItem.level-0:not(.collapsible) > .item:not(:has(a)) > .text {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.VPSidebarItem .item .link {
+  border-radius: calc(var(--radius) - 2px);
+}
+.VPSidebarItem .link:hover > .text {
+  color: var(--foreground);
+}
+.VPSidebarItem.is-active > .item .link,
+.VPSidebarItem.is-active > .item > .link {
+  background: var(--accent);
+}
+.VPSidebarItem.is-active > .item > .link > .text {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.VPSidebarItem .indicator {
+  display: none;
+}
+
+/* ---- doc body (landing blog-prose) ---- */
+.vp-doc {
+  font-size: 1.0625rem;
+  line-height: 1.75;
+}
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.vp-doc h4 {
+  font-family: var(--vp-font-family-base);
+  letter-spacing: -0.025em;
+  color: var(--foreground);
+  text-wrap: balance;
+}
+.vp-doc h1 {
+  font-size: 1.875rem;
+  font-weight: 600;
+  line-height: 1.15;
+}
+@media (min-width: 640px) {
+  .vp-doc h1 {
+    font-size: 2.25rem;
+    line-height: 1.1;
+  }
+}
+.vp-doc h2 {
+  margin: 2.5rem 0 1rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.vp-doc h3 {
+  margin: 2rem 0 0.5rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.vp-doc h4 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.vp-doc p,
+.vp-doc ul,
+.vp-doc ol {
+  margin: 1.25rem 0;
+}
+.vp-doc li + li {
+  margin-top: 0.4rem;
+}
+.vp-doc ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+}
+.vp-doc ol {
+  list-style: decimal;
+  padding-left: 1.5rem;
+}
+.vp-doc a {
+  color: var(--brand);
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.vp-doc a:hover {
+  color: var(--brand);
+  text-decoration-thickness: 2px;
+}
+.vp-doc a > code {
+  color: inherit;
+}
+.vp-doc .header-anchor {
+  text-decoration: none;
+}
+.vp-doc strong {
+  font-weight: 600;
+}
+.vp-doc blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1rem;
+  color: var(--muted-foreground);
+}
+.vp-doc blockquote > p {
+  color: inherit;
+}
+.vp-doc hr {
+  border-top: 1px solid var(--border);
+}
+/* Summary and version line under the H1. */
 .vp-doc .page-summary {
-  font-size: 1.05rem;
+  margin: 1rem 0 0.5rem;
+  padding-left: 0;
+  border-left: 0;
+  font-size: 1.125rem;
   line-height: 1.6;
-  color: var(--vp-c-text-1);
-  border-left: 3px solid var(--vp-c-brand-1);
-  padding-left: 14px;
-  margin: 16px 0 8px;
+  color: var(--muted-foreground);
+  text-wrap: balance;
 }
 .vp-doc .page-version {
-  font-size: 0.85rem;
-  color: var(--vp-c-text-2);
-  margin: 0 0 24px;
+  margin: 0 0 1.5rem;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+/* Eyebrow above the H1 (landing section-heading.tsx). */
+.lp-eyebrow {
+  margin: 0 0 0.75rem;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+/* Inline code (landing: rounded px-1.5 py-0.5 font-mono text-[0.85em]). */
+.vp-doc :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.875em;
+  background: var(--accent);
+  color: var(--foreground);
+}
+.vp-doc a:hover > code {
+  color: inherit;
+}
+
+/* Code blocks (landing blog-prose pre and CopyCommand: card, 1px border, radius). */
+.vp-doc div[class*='language-'] {
+  margin: 1.25rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--card);
+}
+.vp-doc [class*='language-'] pre,
+.vp-doc [class*='language-'] code {
+  font-family: var(--vp-font-family-mono);
+}
+.vp-doc [class*='language-'] pre {
+  margin: 0;
+  padding: 0;
+  background-color: transparent !important;
+}
+.vp-doc [class*='language-'] code {
+  padding: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.vp-doc [class*='language-'] > button.copy {
+  top: 0.5rem;
+  right: 0.5rem;
+  border-radius: calc(var(--radius) - 2px);
 }
 /* Lighthouse color-contrast: the default label colour is 2.87:1 on the code block background. */
 .vp-doc [class*='language-'] > span.lang {
   color: var(--vp-c-text-2);
+  font-family: var(--vp-font-family-mono);
+}
+/* Shiki's dark theme paints its own background; the card colour wins. */
+.dark .vp-doc [class*='language-'] pre.shiki {
+  background-color: transparent !important;
+}
+
+/* Tables (landing blog-prose table). */
+.vp-doc table {
+  display: block;
+  overflow-x: auto;
+  margin: 1.25rem 0;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+.vp-doc tr,
+.vp-doc tr:nth-child(2n) {
+  background-color: transparent;
+  border-top: 0;
+}
+.vp-doc th,
+.vp-doc td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.75rem;
+  text-align: left;
+}
+.vp-doc th {
+  background: var(--card);
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+/* Custom blocks. */
+.vp-doc .custom-block {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+}
+.vp-doc .custom-block.tip {
+  border-left-color: var(--brand);
+}
+.vp-doc .custom-block.warning,
+.vp-doc .custom-block.caution {
+  border-left-color: var(--warning);
+}
+.vp-doc .custom-block.danger {
+  border-left-color: var(--destructive);
+}
+
+/* Outline (right column): mono eyebrow title, no marker bar. */
+.VPDocAsideOutline .outline-title {
+  margin-bottom: 0.75rem;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.VPDocAsideOutline .outline-link {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.VPDocAsideOutline .outline-link:hover,
+.VPDocAsideOutline .outline-link.active {
+  color: var(--foreground);
+}
+.VPDocAsideOutline .outline-marker {
+  background: var(--brand);
+}
+.VPDocAsideOutline .content {
+  border-left-color: var(--border);
+}
+
+/* Prev/next, edit link, last updated. */
+.VPDocFooter .edit-link-button,
+.VPLastUpdated {
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+}
+.VPDocFooter .edit-link-button {
+  color: var(--brand);
+}
+.VPDocFooter .pager-link {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.VPDocFooter .pager-link:hover {
+  border-color: var(--input);
+}
+.VPDocFooter .pager-link .title {
+  color: var(--brand);
+}
+.VPDocFooter .pager-link .desc {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.VPDocFooter .prev-next {
+  border-top: 1px solid var(--border);
+}
+.VPDoc .edit-info {
+  margin-bottom: 1rem;
+}
+
+/* Search box. */
+.VPNavBarSearchButton {
+  border-radius: calc(var(--radius) - 2px);
+}
+.VPLocalSearchBox .search-bar,
+.VPLocalSearchBox .result > div {
+  border-radius: var(--radius);
+}
+
+/* ---- footer (landing components/layout/footer.tsx) ---- */
+.lp-footer {
+  position: relative;
+  z-index: var(--vp-z-index-footer);
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+.lp-footer-inner {
+  box-sizing: border-box;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 3rem 1rem;
+}
+@media (min-width: 640px) {
+  .lp-footer-inner {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+@media (min-width: 1024px) {
+  .lp-footer-inner {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
+/* The fixed sidebar owns the left edge of pages that have one. */
+@media (min-width: 960px) {
+  .lp-footer.has-sidebar {
+    padding-left: var(--vp-sidebar-width);
+  }
+}
+@media (min-width: 1440px) {
+  .lp-footer.has-sidebar {
+    padding-left: calc((100vw - 1440px) / 2 + var(--vp-sidebar-width));
+  }
+}
+.lp-footer-grid {
+  display: grid;
+  gap: 2.5rem;
+}
+@media (min-width: 768px) {
+  .lp-footer-grid {
+    grid-template-columns: 1.5fr repeat(3, 1fr);
+  }
+}
+.lp-footer-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.lp-footer .lp-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-shrink: 0;
+  text-decoration: none;
+}
+.lp-logo-text {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--brand);
+}
+.lp-footer-brand p {
+  max-width: 20rem;
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+}
+.lp-footer h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  letter-spacing: normal;
+  color: var(--foreground);
+}
+.lp-footer ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lp-footer a {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.lp-footer a:hover {
+  color: var(--foreground);
+}
+.lp-footer-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: var(--muted-foreground);
+}
+.lp-footer-bottom p {
+  margin: 0;
+}
+.lp-footer-bottom a {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+@media (min-width: 640px) {
+  .lp-footer-bottom {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

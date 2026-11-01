@@ -1,7 +1,8 @@
 // pluginSafety.test.ts: AM5 / AC30 note. No eval or `new Function` anywhere in mobile/src or app/, the plugin screens
 // draw plugin text only through <Text>, and nothing fetches a remote image or URL from plugin data.
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { pluginDetailView, pluginsListView } from '../plugins/listView';
@@ -22,24 +23,50 @@ function files(dir: string): string[] {
 }
 
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+/** What neither the app nor the plugin renderer may ever do: execute a string as code. */
+const BANNED = /\beval\s*\(|\bnew\s+Function\b|\bFunction\s*\(\s*['"`]/;
+
+/** The files whose comment-stripped source still matches BANNED. */
+const scan = (paths: string[]) => paths.filter((f) => BANNED.test(strip(readFileSync(f, 'utf8'))));
+
 const SOURCES = ['src', 'app'].flatMap((d) => files(join(ROOT, d)));
 
 describe('lint: no eval / new Function in mobile source', () => {
   it('scans every mobile/src and mobile/app file', () => {
     expect(SOURCES.length).toBeGreaterThan(50);
-    const hits = SOURCES.filter((f) => /\beval\s*\(|\bnew\s+Function\b|\bFunction\s*\(\s*['"`]/.test(strip(readFileSync(f, 'utf8'))));
-    expect(hits).toEqual([]);
+    expect(scan(SOURCES)).toEqual([]);
   });
 
   it('the scanner itself catches the patterns it bans', () => {
-    const banned = /\beval\s*\(|\bnew\s+Function\b|\bFunction\s*\(\s*['"`]/;
-    for (const bad of ['eval("1")', 'x = eval ( y )', 'new Function("a", "return a")', 'new  Function(code)', 'Function("return 1")()']) expect(banned.test(bad), bad).toBe(true);
-    for (const ok of ['evaluate(x)', 'retrieval(x)', 'const f: Function = g']) expect(banned.test(ok), ok).toBe(false);
+    for (const bad of ['eval("1")', 'x = eval ( y )', 'new Function("a", "return a")', 'new  Function(code)', 'Function("return 1")()']) expect(BANNED.test(bad), bad).toBe(true);
+    for (const ok of ['evaluate(x)', 'retrieval(x)', 'const f: Function = g']) expect(BANNED.test(ok), ok).toBe(false);
+  });
+
+  it('the scanner catches a planted violation in a temp file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'plugin-safety-'));
+    try {
+      const planted = join(dir, 'planted.ts');
+      writeFileSync(planted, 'const f = new Function("return 1")\n');
+      const clean = join(dir, 'clean.ts');
+      writeFileSync(clean, 'const one = 1\n');
+      expect(scan([planted, clean])).toEqual([planted]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('no eval / new Function in the web plugin renderer', () => {
+  it('scans web/packages/ui/src/components/plugin-view (the renderer mobile shares the view schema with)', () => {
+    const renderer = files(join(ROOT, '..', 'web', 'packages', 'ui', 'src', 'components', 'plugin-view'));
+    expect(renderer.length).toBeGreaterThan(0);
+    expect(scan(renderer)).toEqual([]);
   });
 });
 
 describe('plugin screens render plugin text as plain text', () => {
-  const screens = ['src/screens/PluginsScreen.tsx', 'src/screens/PluginDetailScreen.tsx', 'src/screens/plugins/PluginRow.tsx', 'src/screens/plugins/ThemePicker.tsx', 'src/screens/task/SlashSuggestions.tsx'];
+  const screens = ['src/screens/PluginsScreen.tsx', 'src/screens/PluginDetailScreen.tsx', 'src/screens/PluginPanelScreen.tsx', 'src/screens/plugins/PluginRow.tsx', 'src/screens/plugins/ThemePicker.tsx', 'src/screens/task/SlashSuggestions.tsx'];
 
   it('no HTML sinks, no markdown renderer, no image, no URL fetch, no dynamic import in the plugin screens', () => {
     for (const rel of screens) {

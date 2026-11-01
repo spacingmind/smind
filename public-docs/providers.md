@@ -339,9 +339,8 @@ providers:
   letter or digit. It may not be a built-in id (`claude-native`, `codex-native`,
   `glm`, `kimi`, `opencode`, `copilot`, `cline`, `goose`, `cursor`) and must be
   unique.
-- `extends` is a built-in provider id (`claude-native`, `codex-native`, `glm`,
-  `kimi`) or the id of an earlier ACP entry in the list. An instance cannot
-  extend another instance.
+- `extends` is a built-in provider id or the id of an earlier ACP entry in
+  the list. An instance cannot extend another instance.
 - `env` takes typed values, and only the names the provider's harness allows;
   see [Launch env and secrets](#launch-env-and-secrets).
 - `command` replaces the executable the instance runs (for an ACP provider,

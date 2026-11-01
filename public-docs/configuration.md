@@ -181,6 +181,14 @@ See [Plugins](plugins.md).
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `steward.policy.enabled` | `false` | Turn on the standing permission policy in `~/.smind/steward/policy.yaml` (see [Scripting and permissions](scripting-and-permissions.md#a-standing-permission-policy-optional)). Read on every decision. |
+| `steward.enabled` | `false` | Turn on the [Steward review](steward-review.md) engine. Read on every decision. |
+| `steward.autoReview` | `[]` | Workspace titles (exact match) whose finished root Lead runs with a pushed branch are reviewed without being asked. |
+| `steward.annotate` | `false` | Let the review seat attach an advisory recommendation to an escalated permission request. |
+| `steward.budgetUsd` | `1.5` | Cost cap of one review. `0` means the default. |
+| `steward.maxBudgetUsd` | `5` | Ceiling for `budgetUsd`; at most 5. |
+| `steward.maxMinutes` | `20` | Time cap of one review, at most 60. |
+| `steward.maxReviewsPerHour` | `6` | Reviews across all tasks per hour, at most 24. |
+| `steward.maxReviewsPerTask` | `5` | Reviews per task. |
 
 ### learning
 
