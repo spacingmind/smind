@@ -5,6 +5,9 @@
 // and a url only opens after a confirm. The runner never throws: a
 // failure is a typed outcome.
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { DaemonError } from '../relay/RelayConnection';
@@ -123,5 +126,15 @@ describe('plugin view action runner', () => {
     for (const raw of [null, { kind: 'eval', code: 'process.exit(1)' }, { kind: 'rpc' }]) {
       expect(await runViewAction(raw, deps), JSON.stringify(raw)).toEqual({ kind: 'refused', reason: 'Unrecognised action' });
     }
+  });
+
+  it('TaskDetailScreen only inserts the inbox text as a draft', () => {
+    const source = readFileSync(join(__dirname, '..', 'screens', 'TaskDetailScreen.tsx'), 'utf8');
+    expect(source).toContain("import { takePendingInsert } from '../plugins/composerInbox';");
+    const at = source.indexOf('takePendingInsert()');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const effect = source.slice(at).split('\n').slice(0, 9).join('\n'); // the call's line and the next 8
+    expect(effect.includes('onSend')).toBe(false); // the inbox lands as a draft only: nothing near it sends
+    expect(effect.includes('sendPrompt')).toBe(false);
   });
 });
