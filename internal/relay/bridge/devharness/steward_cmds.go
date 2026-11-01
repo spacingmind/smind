@@ -106,6 +106,11 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 			CapturedSHA: head, Viewport: 390, Theme: f.theme})
 	}
 
+	// An ACCEPTED review cannot carry a failing gate (the daemon clamps it to CHANGES), so no_secrets passes there.
+	secretsGate := steward.Gate{ID: "no_secrets", State: steward.GateFail, Detail: "1 possible token in mobile/src/api.ts"}
+	if verdict == steward.VerdictAccepted {
+		secretsGate = steward.Gate{ID: "no_secrets", State: steward.GatePass, Detail: "no token-shaped strings"}
+	}
 	// Passing gates first, the failing one after them: the screen is the one
 	// that must show failing gates first.
 	gates := []steward.Gate{
@@ -113,7 +118,7 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 		{ID: "validator", State: steward.GatePass, Detail: "contract v2 satisfied"},
 		{ID: "frames_fresh", State: steward.GateUnknown, Detail: "no frame matrix declared"},
 		{ID: "no_binaries", State: steward.GatePass},
-		{ID: "no_secrets", State: steward.GateFail, Detail: "1 possible token in mobile/src/api.ts"},
+		secretsGate,
 		{ID: "not_stacked", State: steward.GateNA},
 		{ID: "pr_hygiene", State: steward.GatePass, Detail: "title conventional, Validated section present"},
 	}
