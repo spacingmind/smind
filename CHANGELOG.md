@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.18.0](https://github.com/spacingmind/smind/compare/v0.17.0...v0.18.0) (2026-11-01)
+
+
+### Features
+
+* **mobile:** plugin panel renderer for ui:1 views (plugins wave C, PC3) ([#790](https://github.com/spacingmind/smind/issues/790)) ([9f58b44](https://github.com/spacingmind/smind/commit/9f58b446aacede578a1a9a5f135b6a64bdd5833b))
+* **mobile:** steward review rows, review screen, permission rule line and read-only policy screen (S3b) ([#801](https://github.com/spacingmind/smind/issues/801)) ([53313b9](https://github.com/spacingmind/smind/commit/53313b90e51911f26f91c11d8c2eee6d1e5942ee))
+* **permissions:** elide heredoc bodies from permission details and tool_call events (reveal step 2) ([#810](https://github.com/spacingmind/smind/issues/810)) ([5c60c67](https://github.com/spacingmind/smind/commit/5c60c67ef9a1baf2ef6395b16f88a956290dc662))
+* **web:** demo mode, the real UI against a scripted in-browser daemon (ADR-0051) ([#797](https://github.com/spacingmind/smind/issues/797)) ([2e26909](https://github.com/spacingmind/smind/commit/2e269093825f4fe6e4d98dde786403ab5b07a847))
+* **web:** the demo tells the landing hero's nine tasks (scenario v2) ([#799](https://github.com/spacingmind/smind/issues/799)) ([aff5166](https://github.com/spacingmind/smind/commit/aff5166984a7593afa9953e7b53949ea6ee05ad7))
+
+
+### Bug Fixes
+
+* **permpolicy:** elide heredoc bodies inside nested scans from Normalized and Raw ([#804](https://github.com/spacingmind/smind/issues/804)) ([e24d260](https://github.com/spacingmind/smind/commit/e24d26057c3540f96611301d058f347a8306cf83))
+* **permpolicy:** heredoc elision keeps a newline so the card never glues tokens ([#803](https://github.com/spacingmind/smind/issues/803)) ([bce96c8](https://github.com/spacingmind/smind/commit/bce96c8d3ba1e557a8a8ce20b12c1301ae4eedd8))
+* **qaframes:** the scratch daemon never downloads a Go toolchain into its temp HOME ([#811](https://github.com/spacingmind/smind/issues/811)) ([373c4a3](https://github.com/spacingmind/smind/commit/373c4a3a4f4f73a25228a2107395a5d8d0e0b886))
+* **steward:** real seat cost in the review row, verdict param renamed to submission with caps in the schema ([#807](https://github.com/spacingmind/smind/issues/807)) ([2178979](https://github.com/spacingmind/smind/commit/217897974accaea9f03d105a50f265854a6aae7f))
+
 ## [0.17.0](https://github.com/spacingmind/smind/compare/v0.16.0...v0.17.0) (2026-11-01)
 
 
