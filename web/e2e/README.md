@@ -30,6 +30,17 @@ Environment:
 - Mutating specs create their own task; never consume or archive the seeded ones.
 - A spec that passes only on retry is reported in `test-results/flaky.json` (CI retries once).
 
+## CI
+
+- `.github/workflows/e2e.yml` (job `e2e`, non-required, not on the merge queue): on PRs touching `web/**` or the daemon paths it runs the PR subset (`light-1280`, `dark-390`) with `--grep-invert @flaky`, 12-minute cap. The nightly (03:17 UTC) and a manual dispatch with `full` run all four projects and the `@flaky` specs, 35-minute cap. A red nightly opens or comments on the `e2e-nightly` issue.
+- Every run writes a job summary (totals, slowest 5 specs, flaky table, the first failing spec's `bunx playwright show-trace` command) via `scripts/flake-report.mjs --summary`. A failing run uploads `web/e2e/test-results/` as `e2e-failures-<run>` (7 days); every run uploads `results.json` and `flaky.json` as `e2e-timing-<run>` (30 days).
+- `.github/workflows/e2e-weekly-report.yml` (Mondays 04:23 UTC) downloads the timing artifacts of the last 20 runs and runs `flake-report.mjs --weekly`: flake rate and p50/p95 per spec, plus `Quarantine candidates` (more than 2 flaky runs in 20). With at least one candidate it opens or updates one `e2e-flaky` issue.
+- The report script has its own tests: `bun run test:scripts` (or `node --test web/e2e/scripts/*.test.mjs`).
+
+### Quarantine
+
+Put `@flaky` in a spec's title (`test('J19 tabs @flaky', ...)`). PRs run with `--grep-invert @flaky`, so it stops blocking them; the nightly passes no grep-invert and still runs it. Fix or delete it within 14 days; remove the tag when the weekly report no longer lists it.
+
 ## Seeded-regression check
 
 To prove a spec is load-bearing, reintroduce the bug in `web/packages/ui/src`, rebuild (`bun run --filter @smind/ui build && go build -o <bin> ./cmd/smind`), and run the spec against that binary: it must fail. The PR that added the suite records this for A-02, B-01, A-01 and the Jump-to-latest overlap.
