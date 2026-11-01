@@ -99,4 +99,10 @@ describe("query keys", () => {
     expect(qc.getQueryState(queryKeys.stewardReview(8))?.isInvalidated).toBe(true);
     expect(qc.getQueryState(queryKeys.policyStatus())?.isInvalidated).toBe(false);
   });
+
+  it("steward frame key is outside the steward prefix", () => {
+    // A frame is immutable per review: a steward.updated invalidation of stewardAll() must not re-read its bytes.
+    expect(queryKeys.stewardFrame(1, "a.png")).toEqual(["steward.frame", 1, "a.png"]);
+    expect(queryKeys.stewardFrame(1, "a.png")[0]).not.toBe(queryKeys.stewardAll()[0]);
+  });
 });

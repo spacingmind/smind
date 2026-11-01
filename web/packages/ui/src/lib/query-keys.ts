@@ -87,8 +87,12 @@ export const queryKeys = {
   inboxRequest: (runId: string, requestId: string) => ["inbox.request", runId, requestId] as const,
   /** One steward review (`steward.get`, ADR-0047 §5): commit-bound, re-read by the `steward.updated` event. */
   stewardReview: (reviewId: number) => ["steward", "review", reviewId] as const,
-  /** One evidence frame's bytes (`steward.frame`); under the steward prefix, so `steward.updated` refreshes it too. */
-  stewardFrame: (reviewId: number, name: string) => ["steward", "frame", reviewId, name] as const,
+  /**
+   * One evidence frame's bytes (`steward.frame`). Deliberately NOT under the "steward" prefix (the
+   * `inboxRequest` precedent): a frame is immutable per review, and `steward.updated` invalidating
+   * `stewardAll()` would otherwise re-read every multi-megabyte frame on each event.
+   */
+  stewardFrame: (reviewId: number, name: string) => ["steward.frame", reviewId, name] as const,
   /** Partial key: every cached steward read (a prefix, for the event bridge). */
   stewardAll: () => ["steward"] as const,
   /** `policy.get` (ADR-0047 §2): the human-edited policy file's status and rules; nothing invalidates it live. */
