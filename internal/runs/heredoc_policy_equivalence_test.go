@@ -137,3 +137,26 @@ func TestDecider_ElisionEquivalenceOverFloorCorpus(t *testing.T) {
 		}
 	}
 }
+
+// A detail that lists elided heredocs but carries no raw policy command (an
+// adapter that forgot it) must not reach the engine as its elided text: the
+// engine asks, with a reason, whatever follows the heredoc.
+func TestDecider_ElidedDetailWithoutPolicyCommandAsks(t *testing.T) {
+	t.Parallel()
+	reg, r, _, _ := policyRun(t, taskrunner.PermissionSettings{}, denyAfterHeredocPolicy, true)
+	d := runPermissionDecider{reg: reg, r: r}
+	detail := &taskrunner.PermissionDetail{
+		Kind:     "execute",
+		Command:  "cat <<EOF [heredoc 9 bytes]\n; rm -rf build",
+		Heredocs: []taskrunner.HeredocRef{{Index: 0, Bytes: 9}},
+	}
+	dec := evalPolicy(t, d, detail)
+	if dec.Action != permpolicy.ActionAsk || len(dec.Reasons) != 1 || !strings.Contains(dec.Reasons[0], "elided heredocs but no policy command") {
+		t.Fatalf("decision = %s %v, want ask with the fail-closed reason", dec.Action, dec.Reasons)
+	}
+	// With the raw command set, the same detail is judged normally (deny-rm).
+	detail.PolicyCommand = "cat <<EOF\nbody\nEOF\n; rm -rf build"
+	if dec := evalPolicy(t, d, detail); dec.Action != permpolicy.ActionDeny || dec.RuleID != "deny-rm" {
+		t.Fatalf("decision = %s %q, want deny deny-rm", dec.Action, dec.RuleID)
+	}
+}
