@@ -128,7 +128,7 @@ describe('steward review rows', () => {
     const item = inboxItem({ key: 'review:21', kind: 'review', links: { taskId: 7, reviewId: 21 }, summary: 'PR #812 at 3fa9c1e', attention: 'high' });
     const row = inboxRow(item, NOW);
     expect(row.label).toBe('Review');
-    expect(row.icon).toBe('info');
+    expect(row.icon).toBe('file');
     expect(row.reviewId).toBe(21);
     expect(row.taskId).toBe(7);
     expect(row.tone).toBe('warning');

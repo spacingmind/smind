@@ -51,7 +51,7 @@ const KIND_META: Record<InboxKind, { icon: IconName; label: string; section: str
   host_pair: { icon: 'devices', label: 'Pairing', section: 'Host pairing' },
   host_refused: { icon: 'warning', label: 'Refused', section: 'Hosts refused' },
   host_down: { icon: 'link', label: 'Unreachable', section: 'Hosts unreachable' },
-  review: { icon: 'info', label: 'Review', section: 'Steward reviews' },
+  review: { icon: 'file', label: 'Review', section: 'Steward reviews' },
   verdict: { icon: 'check', label: 'Verdict', section: 'Validator verdicts' },
   stall: { icon: 'warning', label: 'Stalled', section: 'Stalled' },
 };
