@@ -66,7 +66,7 @@ func (s *scanner) winShellScript(argv []string, d dialect) {
 		return
 	}
 	before := len(s.p.Unparsed)
-	if n := s.recurseAs(payload, d); n == 0 && len(s.p.Unparsed) == before {
+	if n := s.recurseAs(payload, d, -1); n == 0 && len(s.p.Unparsed) == before {
 		// Operator-only text (&&, ;;) would be an error in the script host:
 		// the caller must ask, not allow.
 		s.unparsed("no command found in the " + d.String() + " script")

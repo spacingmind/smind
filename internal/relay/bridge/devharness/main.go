@@ -19,6 +19,8 @@
 // under the seeded workspace; replies {rootId, nodes:{<name>:<taskId>}, ...}) |
 // plugin-install <dir> | plugin-link <dir> | plugin-enable <id> | plugin-disable <id> | plugin-reload <id> | plugin-update <id> <dir>
 // (TEST ONLY: plugin_cmds.go; needs SMIND_HOME with plugins.enabled: true) |
+// seed-review <taskId> <ACCEPTED|CHANGES|BLOCKED> [stale] | seed-audit <taskId> <n>
+// (TEST ONLY: steward_cmds.go; fake reviews and policy audit rows, replies carry "review-id") |
 // peer-rpc <label> <method> [json params] (raw result of one daemon RPC). Diagnostics go to stderr, prefixed "devharness: ".
 package main
 
@@ -539,6 +541,10 @@ func (h *harness) dispatch(cmd string, args []string) (map[string]any, error) {
 		return h.runStatus(args)
 	case "plugin-install", "plugin-link", "plugin-enable", "plugin-disable", "plugin-reload", "plugin-update":
 		return h.pluginCmd(cmd, args)
+	case "seed-review":
+		return h.seedReview(args)
+	case "seed-audit":
+		return h.seedAudit(args)
 	case "daemon-restart":
 		// A new Hub loses every E2EE counter; waiting clients must re-handshake
 		// on a fresh session id. Registry and daemon key are kept.

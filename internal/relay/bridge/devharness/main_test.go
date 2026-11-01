@@ -607,3 +607,107 @@ func TestSeedTree_Big(t *testing.T) {
 		t.Fatalf("reply ids %v do not match first %d / last %d", ids, first.ID, last.ID)
 	}
 }
+
+// TestSeedReviewAndAudit proves the steward fakes reach a phone: a seeded
+// review is an inbox `review:<id>` row, steward.get and steward.frame answer
+// it over the relay, `stale` makes the daemon compute a stale reason, and
+// seed-audit rows come back from policy.audit.
+func TestSeedReviewAndAudit(t *testing.T) {
+	p := startFake(t)
+	p.mustOK("window 1")
+	if m := p.mustOK("peer-add a"); m["state"] != "approved" {
+		t.Fatalf("peer-add: %v", m)
+	}
+	rpc := func(method, params string) map[string]any {
+		return p.mustOK("peer-rpc a " + method + " " + params)["result"].(map[string]any)
+	}
+	taskID := int64(p.mustOK("seed-run end_turn Review task")["taskId"].(float64))
+	tid := fmtInt(taskID)
+
+	m := p.mustOK("seed-review " + tid + " CHANGES")
+	id := int64(m["review-id"].(float64))
+	inbox := rpc("inbox.list", "{}")["items"].([]any)
+	var row map[string]any
+	for _, it := range inbox {
+		if im := it.(map[string]any); im["key"] == "review:"+fmtInt(id) {
+			row = im
+		}
+	}
+	if row == nil {
+		t.Fatalf("inbox.list has no review:%d row: %v", id, inbox)
+	}
+	for _, it := range inbox {
+		if k := it.(map[string]any)["key"].(string); strings.HasPrefix(k, "verdict:") && it.(map[string]any)["taskId"] == float64(taskID) {
+			t.Fatalf("the task's verdict row survived next to its review row: %v", it)
+		}
+	}
+
+	v := rpc("steward.get", `{"reviewId":`+fmtInt(id)+`}`)
+	if v["verdict"] != "CHANGES" || v["status"] != "done" || len(v["headSha"].(string)) != 40 || v["prNumber"] == nil || v["stale"] != nil {
+		t.Fatalf("steward.get = %v", v)
+	}
+	if n := len(v["findings"].([]any)); n != 3 {
+		t.Fatalf("findings = %d, want 3", n)
+	}
+	gates := v["gates"].([]any)
+	firstFail, firstPass := -1, -1
+	for i, g := range gates {
+		switch g.(map[string]any)["state"] {
+		case "fail":
+			if firstFail < 0 {
+				firstFail = i
+			}
+		case "pass":
+			if firstPass < 0 {
+				firstPass = i
+			}
+		}
+	}
+	if firstFail < 0 || firstPass < 0 || firstFail < firstPass {
+		t.Fatalf("want a failing gate stored after a passing one: %v", gates)
+	}
+	frames := v["frames"].([]any)
+	if len(frames) != 3 {
+		t.Fatalf("frames = %d, want 3", len(frames))
+	}
+	f := rpc("steward.frame", `{"reviewId":`+fmtInt(id)+`,"name":"review-dark-390.png"}`)
+	if f["contentType"] != "image/png" || f["data"] == "" {
+		t.Fatalf("steward.frame = %v", f)
+	}
+
+	// BLOCKED and a stale ACCEPTED, each a fresh task (one review per task here).
+	blockedTask := int64(p.mustOK("seed-run end_turn Blocked task")["taskId"].(float64))
+	bid := int64(p.mustOK("seed-review " + fmtInt(blockedTask) + " BLOCKED")["review-id"].(float64))
+	bv := rpc("steward.get", `{"reviewId":`+fmtInt(bid)+`}`)
+	if bv["status"] != "blocked" || bv["blockedReason"] == "" || bv["blockedReason"] == nil {
+		t.Fatalf("blocked review = %v", bv)
+	}
+	staleTask := int64(p.mustOK("seed-run end_turn Stale task")["taskId"].(float64))
+	sid := int64(p.mustOK("seed-review " + fmtInt(staleTask) + " ACCEPTED stale")["review-id"].(float64))
+	sv := rpc("steward.get", `{"reviewId":`+fmtInt(sid)+`}`)
+	if sv["stale"] == nil || sv["stale"] == "" || sv["mergeReady"] != false {
+		t.Fatalf("stale review = %v", sv)
+	}
+
+	if m := p.mustOK("seed-audit " + tid + " 10"); m["rows"] != float64(10) {
+		t.Fatalf("seed-audit: %v", m)
+	}
+	rows := rpc("policy.audit", `{"taskId":`+tid+`}`)["rows"].([]any)
+	if len(rows) != 10 {
+		t.Fatalf("policy.audit rows = %d, want 10", len(rows))
+	}
+	decisions, long, emptyRule := map[string]bool{}, false, false
+	for _, r := range rows {
+		rm := r.(map[string]any)
+		decisions[rm["decision"].(string)] = true
+		long = long || len(rm["target"].(string)) >= 300
+		emptyRule = emptyRule || rm["ruleId"] == ""
+	}
+	if len(decisions) < 4 || !long || !emptyRule {
+		t.Fatalf("audit mix: decisions=%v long=%v emptyRule=%v", decisions, long, emptyRule)
+	}
+	if m := p.do("seed-review 999999 CHANGES"); m["ok"] != false {
+		t.Fatalf("seed-review unknown task: %v", m)
+	}
+	p.mustOK("quit")
+}

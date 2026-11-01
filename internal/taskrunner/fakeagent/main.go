@@ -18,7 +18,9 @@
 // each, for proving a caller observes genuinely incremental delivery rather
 // than a reply buffered until the end; "permission" issues a real
 // session/request_permission call and streams back which option was chosen,
-// for proving Runner's PermissionDecider wiring end to end; "permission-edit"
+// for proving Runner's PermissionDecider wiring end to end; "permission-command"
+// and "permission-command-nomatch" ask for an execute permission with a long
+// multi-line shell command (policy-engine shape; see their case below); "permission-edit"
 // is the same idea for an edit-kind request, with a synchronization chunk
 // and a real delay before the request goes out so a test can reliably
 // change the run's permission settings mid-run before it arrives; anything
@@ -637,6 +639,54 @@ func runPromptScript(promptMsg message, cwd string) {
 		permResp := call("session/request_permission", map[string]any{
 			"sessionId": sessionID,
 			"toolCall":  map[string]any{"toolCallId": "tc-1", "title": "Run a risky command"},
+			"options": []map[string]any{
+				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+			},
+		})
+		optionID := ""
+		if permResp.Error == nil {
+			var result struct {
+				Outcome struct {
+					OptionID string `json:"optionId"`
+				} `json:"outcome"`
+			}
+			_ = json.Unmarshal(permResp.Result, &result)
+			optionID = result.Outcome.OptionID
+		}
+		sessionUpdate("chose:" + optionID)
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	if scenario == "permission-command" || scenario == "permission-command-nomatch" {
+		// An execute-kind permission carrying a LONG multi-line shell command
+		// (a heredoc body, then a git status and a test run), so the daemon
+		// builds detail.command and, with a policy engine on, detail.policy
+		// with the heredoc elided. "permission-command" ends in `npm test`
+		// (a policy with an argv0 npm rule matches it); the -nomatch variant
+		// ends in a command no sensible rule names, so the engine asks with
+		// no rule id. Like "permission", it asks first, with no update before.
+		var body strings.Builder
+		body.WriteString("cat <<'EOF' > notes/release-checklist.md\n")
+		for i := 1; i <= 15; i++ {
+			body.WriteString("step " + strconv.Itoa(i) + ": verify the staged change on a 390 px device in light and dark\n")
+		}
+		body.WriteString("EOF\n")
+		body.WriteString("&& git status ")
+		if scenario == "permission-command" {
+			body.WriteString("&& npm test -- --run src/some/very/long/path/to/a/test/file.test.ts")
+		} else {
+			body.WriteString("&& ./scripts/zzz-unlisted-check --run src/some/very/long/path/to/a/test/file.sh")
+		}
+		permResp := call("session/request_permission", map[string]any{
+			"sessionId": sessionID,
+			"toolCall": map[string]any{
+				"toolCallId": "tc-cmd-1",
+				"title":      "Run a long command",
+				"kind":       "execute",
+				"rawInput":   map[string]any{"command": body.String()},
+			},
 			"options": []map[string]any{
 				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
 				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},

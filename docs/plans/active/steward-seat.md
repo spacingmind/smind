@@ -164,7 +164,7 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 - S0 plan + ADR: this PR (docs only, Proposed).
 - S1: implemented 2026-10-31 on one branch (`internal/permpolicy`, audit store, `runs` hook, `policy.*` RPCs, `smind policy`, docs); PR and validator verdict below.
 - S2: seat, review loop, rails, trigger, seed and CLI implemented 2026-10-31 (PR link and validator verdict below once opened); S2b (steward_annotate) deferred to after S4 evidence.
-- S3a: daemon inbox `review` kind, `steward.frame`, web review card, permission policy line, read-only Permission policy page implemented 2026-11-01 (PR and validator verdict below once opened). S3b (mobile) and S2b: not started here.
+- S3a: daemon inbox `review` kind, `steward.frame`, web review card, permission policy line, read-only Permission policy page implemented 2026-11-01 (PR and validator verdict below once opened). S3b (mobile): implemented 2026-11-01 (PR and validator verdict below once opened). S4, S2b: not started.
 - S4: fake-LLM end-to-end tests and the one live haiku run done 2026-11-01 (PR below); pilot note `docs/steward-seat-pilot.md`. The Human's own pilot (policy enabled for one workspace, AC30) is not done by an agent.
 
 ## Validation
@@ -172,6 +172,17 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 Filled per PR: each AC → the test that confirms it, the mutation run and its failing test, commands (`task test`, `task lint`, `go test -race` on touched packages, `cd web && bunx
 tsc -b packages/ui`), screenshots for UI. For S1 the parser PR also needs a Windows dispatch (`windows-full-suite.yml --ref <branch> -f packages=internal/permpolicy,internal/runs`):
 path and quoting code is exactly what the nightly has caught before.
+
+### S3b (mobile review loop)
+
+Plan: `docs/plans/active/steward-seat-s3b.contract.md` holds the ACs and named tests (AC28). Decisions (no ADR needed, all mirror S3a): mobile decodes `review` inbox rows (key `review:<id>`, `links.reviewId`), reads `steward.get` / `steward.frame` / `policy.get` / `policy.audit` only, pushes two screens (`/review/[id]`, `/policy`) with the stock stack header and back arrow, shows the permission `detail.policy` rule line and the full normalised command wrapped. Mobile sources never contain merge, approve or always-allow (extends the inbox safety scan). Progress and Validation below are filled as steps land.
+
+### S3b (mobile review loop) validation
+
+Tests per AC are in `docs/plans/active/steward-seat-s3b.contract.md` (AC28). Mobile only plus harness tooling: `mobile/src/steward` (types, read-only client `steward.get`/`steward.frame`, view model, `useReview`), `mobile/src/policy` (types, read-only client `policy.get`/`policy.audit`, view model), inbox `review` kind (row model, section "Steward reviews" before verdicts, unknown kind never throws), `StewardReviewScreen` (+ `FrameThumb`, `VerdictChip`), `PolicyScreen`, `PermissionPolicyLine` in the permission card (rule line + FULL command wrapped in a vertical scroller), routes `/review/[id]` and `/policy` in the app group (stock header and back arrow), Inbox row chip and a "Permission policy" link row. Harness (`internal/relay/bridge/devharness/steward_cmds.go`, `seed-review`, `seed-audit`; fakeagent scenarios `permission-command` and `-nomatch`) exists only to drive frames against an isolated daemon; smoke stage `mobile/scripts/smoke/stages/85-steward-review.mjs`.
+Mutations (committed work, restored with `git checkout -- <file>`, each failed on an assertion, not a build error): M1 review kind mapped to the verdict meta -> `review row model`; M2 the literal "Always allow" in `PermissionPolicyLine.tsx` -> `steward mobile sources have no merge or approve control`; M3 gates sorted failing-last -> `steward gates failing first`; M4 normalised command cut to 200 chars -> `permission card full normalised command`; M5 empty severity instead of "unrated" -> `steward findings grouped by file with unrated`; M6 `ask` toned success -> `policy tones: ask is never green`.
+Frames: `/tmp/steward4/zcode-audit/after/steward-s3b/` (390 px, light + dark, `OBSERVATIONS.md`): the stage asserts mean luminance per frame (light > 0.8, dark < 0.25), no horizontal overflow and no element wider than the viewport, back arrow on every pushed screen, 44 px tap targets, no Approve/Merge/Always allow text; round 1 found the missing layout entries, no chip, green `ask`, round 2 the icon, unlabelled reason, text-only buttons, invisible thumbnails, all fixed and re-captured.
+Stated limits: no native device (react-native-web in Chrome only; the Human's group E); "Share findings" uses the RN `Share` sheet (no clipboard module is installed) and "Open task" opens the task (the phone has no PR url source); the expand of an evidence frame is an instant jump (no animation); the web fallback glyphs of the icon registry (`i`, `!`, `•`) show where native uses SF Symbols; policy has no push event (pull to refresh re-reads it); `Resolving…` disabled state not captured (the RPC answers in ms).
 
 ### S4 (pilot: fake-LLM end to end, one live haiku review)
 
