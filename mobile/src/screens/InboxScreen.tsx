@@ -4,13 +4,14 @@
 // inbox.changed and after every setter.
 
 import { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { markInboxSeen, resolveInbox, snoozeInbox } from '../inbox/api';
 import { useInbox } from '../inbox/useInbox';
 import { InboxRowView, inboxView } from '../inbox/view';
 import { RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { AppIcon } from '../ui/AppIcon';
 import { EmptyState } from '../ui/EmptyState';
 import { TextButton } from '../ui/TextButton';
 import { InboxActionSheet } from './inbox/InboxActionSheet';
@@ -121,6 +122,15 @@ export function InboxScreen({
               ))}
             </View>
           ))}
+        {/* The policy link stays the last child of the list, empty or not, so it is always reachable. */}
+        <Pressable accessibilityRole="button" accessibilityLabel="Permission policy" onPress={onOpenPolicy} style={styles.policyLink}>
+          <AppIcon name="lock" size={18} color={theme.foregroundSubtle} />
+          <View style={styles.policyTexts}>
+            <Text style={styles.policyTitle}>Permission policy</Text>
+            <Text style={styles.policyNote}>Rules that allow or deny agent requests. Read-only.</Text>
+          </View>
+          <AppIcon name="chevronRight" size={18} color={theme.foregroundSubtle} />
+        </Pressable>
       </ScrollView>
       <InboxActionSheet row={sheetRow} onClose={() => setSheetRow(null)} handlers={handlers} />
     </>
@@ -144,5 +154,20 @@ function makeStyles(theme: AppTheme) {
       padding: theme.spacing[3],
     },
     noticeText: { ...theme.type.body, color: theme.foreground },
+    policyLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing[3],
+      minHeight: 44,
+      padding: theme.spacing[3],
+      backgroundColor: theme.card,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: theme.radius.xl,
+      borderCurve: 'continuous',
+    },
+    policyTexts: { flex: 1, gap: theme.spacing[1] },
+    policyTitle: { ...theme.type.label, color: theme.foreground },
+    policyNote: { ...theme.type.small, color: theme.foregroundSubtle },
   });
 }
