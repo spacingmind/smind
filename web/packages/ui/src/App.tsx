@@ -142,7 +142,7 @@ const DROP_POSITION_TO_SPLIT_DIRECTION: Record<Exclude<SplitDropZonePosition, "c
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
   connecting: "Connecting…",
-  connected: "Connected to daemon",
+  connected: __SMIND_DEMO__ ? "Demo (scripted)" : "Connected to daemon",
   reconnecting: "Reconnecting to daemon…",
   disconnected: "Disconnected",
 };

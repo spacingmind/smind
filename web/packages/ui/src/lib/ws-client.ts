@@ -184,6 +184,8 @@ export class WsClient implements WsClientLike {
    * passes none.
    */
   static connect(url: string, protocols?: string[]): Promise<WsClient> {
+    // ADR-0051: the demo build has no daemon; this constant removes the only `new WebSocket(` below from it.
+    if (__SMIND_DEMO__) return Promise.reject(new Error("demo build has no daemon"));
     return new Promise((resolve, reject) => {
       const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
       const onOpen = () => {

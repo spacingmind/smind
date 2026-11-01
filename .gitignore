@@ -8,6 +8,7 @@ refs/
 web/node_modules/
 web/packages/*/node_modules/
 web/packages/*/*.tsbuildinfo
+web/packages/*/dist-demo/
 
 internal/server/dist/*
 !internal/server/dist/.gitkeep
@@ -28,3 +29,6 @@ docs/research/local/
 !.env.example
 !.env.sample
 !.env.template
+
+# wrangler local state (wrangler dev)
+web/packages/*/.wrangler/

@@ -1,0 +1,49 @@
+name: demo-build
+
+# ADR-0051: builds the web demo (vite build --mode demo) and checks what it must never contain (daemon/WebSocket code,
+# a weak CSP) and its size. NOT required, like e2e: it builds the production UI too, to measure the demo against it, and
+# adds about a minute, so it runs only when the web UI or the demo's own files change. The two cheap checks that protect
+# production (the guard's own tests and "no demo code in the embedded UI") stay in the required `ci` job.
+on:
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/demo-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  demo-build:
+    name: demo-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Install web dependencies
+        run: cd web && bun install --frozen-lockfile
+
+      # The baseline the demo is measured against: the production UI built from the same commit, in the same job. An
+      # unrelated PR that grows the web entry chunk grows both, so this goes red only when the demo itself grows.
+      - name: Build the production UI (baseline)
+        run: cd web/packages/ui && bunx vite build --outDir "$RUNNER_TEMP/prod-ui" --emptyOutDir
+
+      - name: Build the demo
+        run: cd web/packages/ui && bunx tsc -b && bunx vite build --mode demo
+
+      # Forbidden strings, CSP and its script hash, the lazy-chunk rule and the budgets. Initial JS may exceed the
+      # production entry by at most 32 KB gzip (measured demo overhead is 4.4 KB; the scripted daemon is a separate
+      # lazy chunk with its own 60 KB budget), initial CSS by at most 8 KB.
+      - name: Check the demo build
+        run: cd web/packages/ui && node scripts/check-demo-build.mjs dist-demo --baseline "$RUNNER_TEMP/prod-ui"
+
+      - name: No demo code in the production UI
+        run: cd web/packages/ui && node scripts/check-demo-build.mjs --production "$RUNNER_TEMP/prod-ui"
