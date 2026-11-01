@@ -1,7 +1,12 @@
 package wsapi
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -264,6 +269,129 @@ func TestDigestGet_OnlySeatOwnRun(t *testing.T) {
 	// A finished review hands its seat nothing either.
 	e.endReview(t, r.ReviewID)
 	_, err = budgetCall(t, e.api, seatRC(row), "steward.digest.get", map[string]any{"reviewId": r.ReviewID})
+	wantErrCode(t, err, codeForbidden)
+}
+
+// tinyPNG is a valid 1x1 png, the bytes a seeded frame file carries.
+var tinyPNG = []byte{
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+	0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+	0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+	0x42, 0x60, 0x82,
+}
+
+// seedFrameReview inserts a done review of the seat task whose digest names
+// the given files of dir as its frames, and returns the review id.
+func (e *stewardHostEnv) seedFrameReview(t *testing.T, dir string, names ...string) int64 {
+	t.Helper()
+	items := make([]steward.FrameInfo, 0, len(names))
+	for _, n := range names {
+		items = append(items, steward.FrameInfo{Path: filepath.Join(dir, n), Viewport: 1280, Theme: "light", CapturedSHA: "abc"})
+	}
+	digest, err := json.Marshal(steward.Digest{V: 1, Frames: steward.FramesSection{Dir: dir, Items: items}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := e.db.InsertStewardReview(store.StewardReview{TaskID: e.seatTask.ID, TriggerKind: steward.TriggerHuman,
+		HeadSHA: "head1", DigestJSON: string(digest), Status: "done"}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("InsertStewardReview() error = %v", err)
+	}
+	return row.ID
+}
+
+func TestStewardFrame_ServesDigestFrameOnly(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.bindSteward(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "home-light-1280.png"), tinyPNG, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id := e.seedFrameReview(t, dir, "home-light-1280.png")
+	human := &requestContext{local: true}
+
+	res, err := budgetCall(t, e.api, human, "steward.frame", map[string]any{"reviewId": id, "name": "home-light-1280.png"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		ContentType string `json:"contentType"`
+		Data        string `json:"data"`
+		CapturedSha string `json:"capturedSha"`
+	}
+	if err := json.Unmarshal(res, &f); err != nil {
+		t.Fatal(err)
+	}
+	if f.ContentType != "image/png" || f.CapturedSha != "abc" {
+		t.Fatalf("frame = %+v", f)
+	}
+	b, err := base64.StdEncoding.DecodeString(f.Data)
+	if err != nil {
+		t.Fatalf("data is not base64: %v", err)
+	}
+	if !bytes.Equal(b, tinyPNG) {
+		t.Fatalf("data = %d bytes, want the frame file verbatim", len(b))
+	}
+
+	// Only the digest's own frames answer: a name it does not carry is not
+	// found (the path read is never the caller's to choose).
+	for _, name := range []string{"missing.png", "../home-light-1280.png"} {
+		_, err := budgetCall(t, e.api, human, "steward.frame", map[string]any{"reviewId": id, "name": name})
+		wantErrCode(t, err, codeNotFound)
+	}
+	_, err = budgetCall(t, e.api, human, "steward.frame", map[string]any{"reviewId": id, "name": ""})
+	wantErrCode(t, err, codeInvalid)
+	_, err = budgetCall(t, e.api, human, "steward.frame", map[string]any{"reviewId": 9999, "name": "home-light-1280.png"})
+	wantErrCode(t, err, codeNotFound)
+}
+
+func TestStewardFrame_RefusesSymlinkEscapeAndOversize(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.bindSteward(t)
+	human := &requestContext{local: true}
+	dir := t.TempDir()
+
+	// A symlink inside the frames dir pointing at a file outside it: the
+	// digest names the symlink, but EvalSymlinks resolves it out of the dir.
+	if runtime.GOOS != "windows" {
+		outside := t.TempDir()
+		target := filepath.Join(outside, "secret.png")
+		if err := os.WriteFile(target, tinyPNG, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, "evil.png")); err != nil {
+			t.Fatal(err)
+		}
+		id := e.seedFrameReview(t, dir, "evil.png")
+		_, err := budgetCall(t, e.api, human, "steward.frame", map[string]any{"reviewId": id, "name": "evil.png"})
+		wantErrCode(t, err, codeInvalid)
+	}
+
+	// A 5 MiB png is over the 4 MiB limit.
+	big := make([]byte, 5<<20)
+	copy(big, tinyPNG)
+	if err := os.WriteFile(filepath.Join(dir, "big.png"), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id := e.seedFrameReview(t, dir, "big.png")
+	_, err := budgetCall(t, e.api, human, "steward.frame", map[string]any{"reviewId": id, "name": "big.png"})
+	wantErrCode(t, err, codeInvalid)
+}
+
+func TestStewardFrame_RefusedForRunScoped(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.bindSteward(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "home-light-1280.png"), tinyPNG, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id := e.seedFrameReview(t, dir, "home-light-1280.png")
+	agent := &requestContext{runScoped: true, ident: runIdentity{runID: e.runID, taskID: e.seatTask.ID}}
+	_, err := budgetCall(t, e.api, agent, "steward.frame", map[string]any{"reviewId": id, "name": "home-light-1280.png"})
 	wantErrCode(t, err, codeForbidden)
 }
 

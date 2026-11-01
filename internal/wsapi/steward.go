@@ -2,10 +2,14 @@ package wsapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/runs"
@@ -26,7 +30,7 @@ import (
 // stewardMethods lists every steward RPC; a test walks it.
 var stewardMethods = []string{
 	"steward.review", "steward.cancel", "steward.get", "steward.list",
-	"steward.digest.get", "steward.verdict.submit",
+	"steward.digest.get", "steward.verdict.submit", "steward.frame",
 }
 
 // configSteward reads the steward section on every call, so a human edit
@@ -153,6 +157,53 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 		return l, nil
 	}
 
+	// steward.frame serves one evidence frame of a review's digest: a
+	// human-only read (refuseAgent), and the file served is always the
+	// digest's own path for the named frame, never a caller-supplied one.
+	hs["steward.frame"] = func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		const m = "steward.frame"
+		if err := refuseAgent(m, rc); err != nil {
+			return nil, err
+		}
+		var p struct {
+			ReviewID int64  `json:"reviewId"`
+			Name     string `json:"name"`
+		}
+		if err := pluginParams(m, raw, &p); err != nil {
+			return nil, err
+		}
+		if p.ReviewID <= 0 || p.Name == "" {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": reviewId and name are required"}
+		}
+		row, err := h.db.GetStewardReview(p.ReviewID)
+		if err != nil {
+			return nil, stewardErr(m, fmt.Errorf("steward review %d: %w", p.ReviewID, steward.ErrNotFound))
+		}
+		var d steward.Digest
+		if strings.TrimSpace(row.DigestJSON) == "" || json.Unmarshal([]byte(row.DigestJSON), &d) != nil {
+			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": review has no digest"}
+		}
+		var item *steward.FrameInfo
+		for i := range d.Frames.Items {
+			if filepath.Base(d.Frames.Items[i].Path) == p.Name {
+				item = &d.Frames.Items[i]
+				break
+			}
+		}
+		if item == nil {
+			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": no frame named " + p.Name}
+		}
+		buf, err := framePNG(d, *item)
+		if err != nil {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": " + err.Error(), err: err}
+		}
+		return map[string]any{
+			"contentType": "image/png",
+			"data":        base64.StdEncoding.EncodeToString(buf),
+			"capturedSha": item.CapturedSHA,
+		}, nil
+	}
+
 	hs["steward.digest.get"] = func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		const m = "steward.digest.get"
 		if rc == nil || !rc.runScoped {
@@ -201,6 +252,43 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 	}
 
 	return hs
+}
+
+// frameMaxBytes caps one evidence frame the daemon will read and base64.
+const frameMaxBytes = 4 << 20
+
+// framePNG reads one digest frame's bytes. The full path always comes from
+// the digest, never the caller: the name only picks the digest item. The
+// file must be a png that, with symlinks resolved on both ends, lies inside
+// the digest's frames dir, is a regular file, and is at most 4 MiB.
+func framePNG(d steward.Digest, item steward.FrameInfo) ([]byte, error) {
+	name := filepath.Base(item.Path)
+	if filepath.Ext(name) != ".png" {
+		return nil, fmt.Errorf("frame %s is not a png", name)
+	}
+	file, err := filepath.EvalSymlinks(item.Path)
+	if err != nil {
+		return nil, fmt.Errorf("frame %s: %w", name, err)
+	}
+	dir, err := filepath.EvalSymlinks(d.Frames.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("frames dir: %w", err)
+	}
+	rel, err := filepath.Rel(dir, file)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("frame %s is outside the frames dir", name)
+	}
+	info, err := os.Lstat(file)
+	if err != nil {
+		return nil, fmt.Errorf("frame %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("frame %s is not a regular file", name)
+	}
+	if info.Size() > frameMaxBytes {
+		return nil, fmt.Errorf("frame %s is %d bytes, over the %d byte limit", name, info.Size(), frameMaxBytes)
+	}
+	return os.ReadFile(file)
 }
 
 // stewardObserver maps a finished run onto the auto trigger (ADR-0047 §4).

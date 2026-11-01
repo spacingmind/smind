@@ -679,3 +679,57 @@ func TestView_HidesTokenAndDigest(t *testing.T) {
 		t.Fatalf("DigestJSON(missing) error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestStewardView_CarriesPRNumberAndFrames(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	digest, err := json.Marshal(Digest{V: 1, Gates: []Gate{{ID: "ci", State: GatePass}},
+		PR:     &PRSummary{Number: 12},
+		Frames: FramesSection{Items: []FrameInfo{{Path: "/x/y/home-light-1280.png", Viewport: 1280, Theme: "light", CapturedSHA: "abc"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, _ := openReview(t, svc, string(digest))
+	v, err := svc.View(row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.PRNumber != 12 {
+		t.Fatalf("PRNumber = %d, want 12", v.PRNumber)
+	}
+	if len(v.Frames) != 1 || v.Frames[0] != (FrameView{Name: "home-light-1280.png", Viewport: 1280, Theme: "light", CapturedSHA: "abc"}) {
+		t.Fatalf("frames = %+v", v.Frames)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "/x/y") {
+		t.Fatalf("view JSON carries the frames dir path: %s", b)
+	}
+}
+
+func TestStewardView_NoDigestHasEmptyFrames(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	row, _ := openReview(t, svc, "")
+	v, err := svc.View(row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Frames == nil || len(v.Frames) != 0 {
+		t.Fatalf("frames = %#v, want an empty non-nil list", v.Frames)
+	}
+	if v.PRNumber != 0 {
+		t.Fatalf("PRNumber = %d, want 0 without a digest", v.PRNumber)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"frames":[]`) {
+		t.Fatalf("view JSON = %s, want frames to marshal as []", b)
+	}
+}

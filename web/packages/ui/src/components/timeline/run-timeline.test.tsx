@@ -553,7 +553,7 @@ describe("RunTimeline borderless chrome", () => {
     { type: "tool_call", toolCallId: "t2", toolName: "Read", title: "a.go", status: "success", input: { file_path: "/w/a.go" }, result: "package a" },
     { type: "tool_call", toolCallId: "t3", toolName: "Edit", title: "b.go", status: "failure", input: { file_path: "/w/b.go", old_string: "x", new_string: "y" } },
     { type: "tool_call", toolCallId: "t4", toolName: "Mystery", title: "huh", status: "running", input: { a: 1 }, result: "r" },
-    { type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason: "user" },
+    { type: "permission_resolved", requestId: "r1", optionId: "allow-1" },
     { type: "todo_list" },
     { type: "raw", kind: "plan", payload: { a: 1 } },
   ];
