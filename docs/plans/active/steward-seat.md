@@ -164,13 +164,20 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 - S0 plan + ADR: this PR (docs only, Proposed).
 - S1: implemented 2026-10-31 on one branch (`internal/permpolicy`, audit store, `runs` hook, `policy.*` RPCs, `smind policy`, docs); PR and validator verdict below.
 - S2: seat, review loop, rails, trigger, seed and CLI implemented 2026-10-31 (PR link and validator verdict below once opened); S2b (steward_annotate) deferred to after S4 evidence.
-- S3–S4: not started.
+- S3a: daemon inbox `review` kind, `steward.frame`, web review card, permission policy line, read-only Permission policy page implemented 2026-11-01 (PR and validator verdict below once opened). S3b (mobile), S4, S2b: not started.
 
 ## Validation
 
 Filled per PR: each AC → the test that confirms it, the mutation run and its failing test, commands (`task test`, `task lint`, `go test -race` on touched packages, `cd web && bunx
 tsc -b packages/ui`), screenshots for UI. For S1 the parser PR also needs a Windows dispatch (`windows-full-suite.yml --ref <branch> -f packages=internal/permpolicy,internal/runs`):
 path and quoting code is exactly what the nightly has caught before.
+
+### S3a (inbox review kind, web review card, policy line, policy page)
+
+Tests per AC are in `docs/plans/active/steward-seat-s3a.contract.md` (AC25-AC27). Daemon: `internal/inbox` derives `review:<id>` (replaces the task's verdict row, stale/open drop out, summary = verdict, PR, head7, failing gate ids), `wsapi` installs the review source and pokes the inbox from the steward service's publish (no `events.go` edit was needed), `steward.get` now carries `prNumber` and `frames` (base names only) and one new read-only method `steward.frame {reviewId,name}` serves a digest frame (png, inside the digest's frames dir after symlink resolution, regular file, <= 4 MiB, human-only). `methods.golden` lists it. Web: `StewardReviewCard`, `VerdictChip`, permission card `PolicyLine` (matched rule + why or "No rule matched", normalised command instead of the raw one), `policy_allow`/`policy_deny` resolution labels with unknown resolutions as raw text, Settings > Permission policy (read-only: banner, rules, audit, path, no control), `steward.updated` bridged in `event-bridge.ts`.
+Mutations (committed work, restored with `git checkout -- <file>`): M1 inbox keeps the verdict row -> `TestInboxList_ReviewReplacesVerdictRow` FAIL (keys `review:21,verdict:7,verdict:8`); M2 an "Always allow" button in `PolicyLine` -> `permission card has no always-allow or approve-all` FAIL; M3 `framePNG` drops the inside-dir check -> `TestStewardFrame_RefusesSymlinkEscapeAndOversize` FAIL (the first M3 attempt was a build failure and was discarded).
+Frames (`/tmp/steward4/zcode-audit/after/steward-s3a/`, light+dark x 1280/390, sheets `sheet-<theme>-<width>.png`, transitions `transition-{expand,collapse}-*-sheet.png`; isolated daemon under `~/.smind/dogfood/steward-s3a/` serving the built UI, steward/policy/inbox methods stubbed through the capture harness, no model call): ACCEPTED, CHANGES (3 findings, failing gate first, 2 frames inline), BLOCKED, list with a verdict row, stale dropping out (before/after), permission card with a matched rule and with none, policy page valid and invalid; console logs of every frame are empty. Transitions: the card appears in one frame (no animation), no layout jump; frames reserve an `aspect-video` slot.
+Stated limits: frames use ws stubs for steward/policy/inbox data (the wire is covered by the Go tests, the card by vitest); `Open PR` opens the PR url only when a cached `task.git` read holds it, else the task; the daemon sends `permission` detail.policy only when the engine decided or escalated; mobile (S3b) decodes `review` rows later.
 
 ### S2 (seat, review loop, rails, trigger, seed, CLI)
 
