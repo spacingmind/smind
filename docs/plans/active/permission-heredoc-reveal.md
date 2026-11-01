@@ -80,6 +80,9 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 - `index` is the marker order across nesting; a `bash -c` body whose quoting hides it falls back to whole-command redaction (#804): in that case `heredocs` is empty and the command shows the redaction text (no reveal possible). Recommendation: accept; revisit only if it shows up in practice.
 - Reveal cap 64 KiB, matching the 64 KiB command cap.
 
+- **Follow-up F1 (build after PR 5, the web/mobile toggles; not before): tool `result` echo.** A command that prints its own heredoc (`cat <<EOF ...`) puts the body into the call's `result`, which #810 does not elide (documented v1 limit, accepted by the Supervisor). Proposal: at the same `toRunToolCallParams` boundary, (1) when a result contains a body that was elided from the SAME call's input, replace that exact substring with the same `[heredoc N bytes]` marker, and (2) run the existing `secretdeny` redaction over the whole result. Tests: `SECRET_TOKEN_123` echoed in a result never reaches `run.logs` / live `tool_call` / timeline DOM; a result without a body is byte-identical; one mutation per test. Non-execute tools and unrecognised `raw` ACP events stay out of scope.
+- **Caveat (from #804/#810): `bash -c` bodies have no marker.** When quoting hides a `bash -c` script's heredoc, #804 deletes the body from the text by lookup, so `heredocs[]` lists it but the shown command has no `<<TAG [heredoc N bytes]` marker for it (if the body cannot be located at all the whole command is redacted and `heredocs` is empty). So `heredocs[]` is the source of truth for the toggles, not a marker count; clients render one toggle per `heredocs` entry even when the text shows no marker.
+
 ## Progress
 
 - 2026-11-01 spec written; Steward review: client delivery decided (a), tool calls elided at `toRunToolCallParams`, tool-card reveal added.
