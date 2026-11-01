@@ -19,4 +19,17 @@ test('fixture_stop_leaves_no_process_and_no_dir', async () => {
   await d.stop()
   expect(() => process.kill(pid, 0)).toThrow()
   expect(fs.existsSync(home)).toBe(false)
+  // nothing outliving the daemon may re-create the home afterwards: it stays absent for 1.5 s
+  const t0 = Date.now()
+  let recreated = false
+  await expect
+    .poll(
+      () => {
+        if (fs.existsSync(home)) recreated = true
+        return recreated ? 'recreated' : Date.now() - t0 >= 1_500 ? 'absent' : 'waiting'
+      },
+      { timeout: 5_000, intervals: [100] },
+    )
+    .not.toBe('waiting')
+  expect(recreated).toBe(false)
 })

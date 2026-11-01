@@ -64,20 +64,42 @@ export async function startDaemon(): Promise<Daemon> {
     assertSafeHome(home)
     assertSafePort(port)
     const fd = fs.openSync(logPath, 'a')
-    const c = spawn(bin, ['serve'], { env: { ...process.env, SMIND_HOME: home, HOME: home }, stdio: ['ignore', fd, fd] })
+    const c = spawn(bin, ['serve'], { env: { ...process.env, SMIND_HOME: home, HOME: home }, stdio: ['ignore', fd, fd], detached: true })
     fs.closeSync(fd)
     child = c
     await waitHealthy(url, c, logPath)
   }
+  const groupAlive = (pgid: number) => {
+    try {
+      process.kill(-pgid, 0)
+      return true
+    } catch (e) {
+      return (e as NodeJS.ErrnoException).code !== 'ESRCH'
+    }
+  }
+  const signalGroup = (pgid: number, sig: NodeJS.Signals) => {
+    try {
+      process.kill(-pgid, sig)
+    } catch {
+      /* group already gone */
+    }
+  }
+  // Kills the daemon's whole process group (provider probes and agent children included) and returns once it is empty.
   const kill = async () => {
     const c = child
     child = undefined
-    if (!c || c.exitCode !== null) return
-    const exited = new Promise<void>((r) => c.once('exit', () => r()))
-    c.kill('SIGTERM')
-    const timer = setTimeout(() => c.kill('SIGKILL'), 5_000)
+    const pgid = c?.pid
+    if (!c || pgid === undefined) return
+    const exited = c.exitCode !== null ? Promise.resolve() : new Promise<void>((r) => c.once('exit', () => r()))
+    signalGroup(pgid, 'SIGTERM')
+    const timer = setTimeout(() => signalGroup(pgid, 'SIGKILL'), 5_000)
     await exited // SIGKILL after 5 s still ends in an 'exit' event
     clearTimeout(timer)
+    for (let i = 0; groupAlive(pgid); i++) {
+      if (i === 50) signalGroup(pgid, 'SIGKILL')
+      if (i >= 150) throw new Error(`e2e: process group ${pgid} survived SIGKILL`)
+      await new Promise((r) => setTimeout(r, 100))
+    }
   }
 
   const d: Daemon = {
@@ -93,16 +115,18 @@ export async function startDaemon(): Promise<Daemon> {
     },
     stop: async () => {
       live.delete(d)
-      await kill()
       const keep = process.env.E2E_LOG_DIR
       try {
+        await kill()
         if (keep) {
           fs.mkdirSync(keep, { recursive: true })
           fs.copyFileSync(logPath, path.join(keep, `daemon-${port}.log`))
         }
         assertSafeHome(home)
         // agent and worktree git children can still be writing for a moment after the daemon exits
-        await fs.promises.rm(home, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
+        const rm = () => fs.promises.rm(home, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 })
+        await rm()
+        if (fs.existsSync(home)) await rm() // something re-created it after the first pass
       } catch (e) {
         console.error(`e2e: cleanup of ${home} failed: ${(e as Error).message}`)
       }
@@ -124,7 +148,7 @@ export async function startDaemon(): Promise<Daemon> {
     }
   }
   ;(d as any).__killSync = () => {
-    child?.kill('SIGKILL')
+    if (child?.pid !== undefined) signalGroup(child.pid, 'SIGKILL')
     try {
       assertSafeHome(home)
       fs.rmSync(home, { recursive: true, force: true })
