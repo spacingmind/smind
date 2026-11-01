@@ -18,8 +18,9 @@ Create the seat with the other roles (the daemon must be running):
 smind profile seed roles
 ```
 
-It creates `lead`, `peer-sonnet` and `validator`, skipping any that exist. See
-[Orchestration](orchestration.md) for the seats.
+It creates `lead`, `peer-sonnet`, `validator` and `steward`, skipping any that
+exist. See [Orchestration](orchestration.md) for the seats and
+[The Steward review seat](steward-review.md) for the fourth.
 
 ## The contract
 

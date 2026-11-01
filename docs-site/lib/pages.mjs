@@ -12,7 +12,7 @@ export const REPO_URL = 'https://github.com/spacingmind/smind'
 export const OG_IMAGE_URL = SITE_URL + '/og-card.png'
 export const OG_IMAGE_WIDTH = 1200
 export const OG_IMAGE_HEIGHT = 630
-export const OG_IMAGE_ALT = 'sMind by Spacing Mind: run coding agents from one place'
+export const OG_IMAGE_ALT = 'sMind by Spacing Mind: space for your agents, free for you'
 
 export const AI_CRAWLERS = [
   'GPTBot',
@@ -59,6 +59,31 @@ export function readPages(dir = DOCS_DIR) {
       return { slug, file: f, fm, body, order: Number(fm.order) }
     })
     .sort((a, b) => a.order - b.order)
+}
+
+// Sidebar sections, in reading order. Pages inside a section keep their `order`.
+// A page that is in no section lands in "More", so a new page never disappears;
+// the drift test fails until it is placed.
+export const SIDEBAR_GROUPS = [
+  { title: 'Get started', slugs: ['index', 'getting-started', 'workspaces-and-tasks', 'git-and-prs', 'inbox'] },
+  {
+    title: 'Providers and runs',
+    slugs: ['providers', 'provider-recipes', 'model-picker-gates', 'write-only-secrets', 'usage-and-limits', 'zai-usage-meter'],
+  },
+  {
+    title: 'Agents',
+    slugs: ['orchestration', 'automations', 'validator-and-review', 'steward-review', 'permission-policy', 'scripting-and-permissions', 'plugins', 'plugins-authoring'],
+  },
+  { title: 'Hosts and devices', slugs: ['hosts', 'mobile-and-relay'] },
+  { title: 'Operate and reference', slugs: ['running-the-daemon', 'troubleshooting', 'configuration', 'cli-reference'] },
+]
+
+export function sidebarGroups(pages) {
+  const placed = new Set(SIDEBAR_GROUPS.flatMap((g) => g.slugs))
+  const groups = SIDEBAR_GROUPS.map((g) => ({ title: g.title, pages: g.slugs.map((slug) => pages.find((p) => p.slug === slug)).filter(Boolean) }))
+  const rest = pages.filter((p) => !placed.has(p.slug))
+  if (rest.length) groups.push({ title: 'More', pages: rest })
+  return groups.filter((g) => g.pages.length)
 }
 
 export const pagePath = (slug) => (slug === 'index' ? '/' : `/${slug}`)

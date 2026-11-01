@@ -17,6 +17,7 @@ import {
  * instead" -- surfaced as LoginRequiredError.
  */
 export async function fetchToken(): Promise<string> {
+  if (__SMIND_DEMO__) throw new Error("demo build has no daemon");
   const res = await fetch("/api/token");
   if (res.status === 403) {
     throw new LoginRequiredError("required");
@@ -63,6 +64,7 @@ async function connectWithSession(session: Session): Promise<WsClient | LoginRea
  * "stop retrying", never as a transient failure.
  */
 export async function connectDaemon(): Promise<WsClient> {
+  if (__SMIND_DEMO__) throw new Error("demo build has no daemon");
   const { session, expired } = readSession();
   let reason: LoginReason = expired ? "expired" : "required";
   if (session) {

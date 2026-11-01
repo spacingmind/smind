@@ -132,6 +132,22 @@ any other:
 Anything the engine cannot place on Windows (`C:foo`, `\\.\pipe`,
 `file:stream`, trailing dots) is asked or denied, never allowed.
 
+## In the web app
+
+**Settings → Agents & providers → Permission policy** shows the policy without
+letting you change it: edit the file, not the page. It has:
+
+- a status line: **Policy active**, **No policy file yet** (every request that
+  the floor does not deny asks you), **Policy file is valid but the engine is
+  off** (`steward.policy.enabled` is not set), or **Policy file is invalid**
+  with the parse error, in which case the floor and ask apply, never allow;
+- **Policy file**: the rules, in the order they are read;
+- **Recent decisions**: the audit, the same list as `smind policy audit`.
+
+A permission request that the policy looked at shows a policy line in its card,
+for example from the [Inbox](inbox.md): the rule that matched, that rule's
+`why` text, and the normalised command the rule was matched against.
+
 ## What it does not change
 
 A provider mode that already approves everything (`bypassPermissions`, or
@@ -145,3 +161,4 @@ The policy applies to requests that reach smind's permission prompt. See
   the short version of this page.
 - [Inbox](inbox.md): the permission requests the policy asks about land here.
 - [Configuration reference](configuration.md): `steward.policy.enabled`.
+- [The Steward review seat](steward-review.md): the review engine that shares the `steward:` settings.

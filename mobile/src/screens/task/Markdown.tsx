@@ -2,6 +2,9 @@
 // supported subset only) with nested selectable Text (expo-native-ui:
 // selectable on transcript text). Links open through Linking.openURL; the
 // parser already guarantees only http/https/mailto URLs become links.
+// MarkdownBlocks is the same rendering as a reusable primitive: a caller
+// that already holds parsed blocks (the plugin view renderer) passes an
+// onLink to route safe links through its own action callback instead.
 
 import { memo, ReactNode, useMemo } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
@@ -13,7 +16,9 @@ function openLink(url: string) {
   void Linking.openURL(url).catch(() => {}); // an unhandled scheme must not crash the transcript
 }
 
-function renderInlines(inlines: Inline[], styles: ReturnType<typeof makeStyles>): ReactNode[] {
+type LinkHandler = (url: string) => void;
+
+function renderInlines(inlines: Inline[], styles: ReturnType<typeof makeStyles>, onLink?: LinkHandler): ReactNode[] {
   return inlines.map((inl, i) => {
     switch (inl.type) {
       case 'text':
@@ -38,7 +43,7 @@ function renderInlines(inlines: Inline[], styles: ReturnType<typeof makeStyles>)
         );
       case 'link':
         return (
-          <Text key={i} style={styles.link} onPress={() => openLink(inl.url)} accessibilityRole="link">
+          <Text key={i} style={styles.link} onPress={() => (onLink ?? openLink)(inl.url)} accessibilityRole="link">
             {inl.text}
           </Text>
         );
@@ -46,18 +51,18 @@ function renderInlines(inlines: Inline[], styles: ReturnType<typeof makeStyles>)
   });
 }
 
-function BlockView({ block, styles }: { block: Block; styles: ReturnType<typeof makeStyles> }) {
+function BlockView({ block, styles, onLink }: { block: Block; styles: ReturnType<typeof makeStyles>; onLink?: LinkHandler }) {
   switch (block.type) {
     case 'paragraph':
       return (
         <Text style={styles.body} selectable>
-          {renderInlines(block.inlines, styles)}
+          {renderInlines(block.inlines, styles, onLink)}
         </Text>
       );
     case 'heading':
       return (
         <Text style={block.level === 1 ? styles.h1 : block.level === 2 ? styles.h2 : styles.h3} selectable>
-          {renderInlines(block.inlines, styles)}
+          {renderInlines(block.inlines, styles, onLink)}
         </Text>
       );
     case 'list':
@@ -67,7 +72,7 @@ function BlockView({ block, styles }: { block: Block; styles: ReturnType<typeof 
             <View key={i} style={styles.listItem}>
               <Text style={styles.bullet}>{block.ordered ? `${i + 1}.` : '•'}</Text>
               <Text style={styles.listText} selectable>
-                {renderInlines(item, styles)}
+                {renderInlines(item, styles, onLink)}
               </Text>
             </View>
           ))}
@@ -85,24 +90,28 @@ function BlockView({ block, styles }: { block: Block; styles: ReturnType<typeof 
       return (
         <View style={styles.quote}>
           <Text style={styles.quoteText} selectable>
-            {renderInlines(block.inlines, styles)}
+            {renderInlines(block.inlines, styles, onLink)}
           </Text>
         </View>
       );
   }
 }
 
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+export function MarkdownBlocks({ blocks, onLink }: { blocks: Block[]; onLink?: LinkHandler }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const blocks = useMemo(() => parseMarkdown(text), [text]);
   return (
     <View style={styles.root}>
       {blocks.map((block, i) => (
-        <BlockView key={i} block={block} styles={styles} />
+        <BlockView key={i} block={block} styles={styles} onLink={onLink} />
       ))}
     </View>
   );
+}
+
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
+  const blocks = useMemo(() => parseMarkdown(text), [text]);
+  return <MarkdownBlocks blocks={blocks} />;
 });
 
 function makeStyles(theme: AppTheme) {

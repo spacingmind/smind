@@ -8,6 +8,7 @@ import {
   OG_IMAGE_URL,
   OG_IMAGE_WIDTH,
   REPO_ROOT,
+  SIDEBAR_GROUPS,
   buildLlmsFullTxt,
   buildLlmsTxt,
   buildRobotsTxt,
@@ -17,6 +18,7 @@ import {
   readPages,
   rawMarkdown,
   rewriteLinks,
+  sidebarGroups,
   version,
 } from '../lib/pages.mjs'
 
@@ -146,4 +148,34 @@ test('workflow shape', () => {
 
 test('parseFrontMatter handles quotes', () => {
   assert.equal(parseFrontMatter('---\ntitle: "A: b"\n---\nx').fm.title, 'A: b')
+})
+
+test('every page is in exactly one sidebar section, and every listed slug exists', () => {
+  const slugs = new Set(pages.map((p) => p.slug))
+  const listed = SIDEBAR_GROUPS.flatMap((g) => g.slugs)
+  assert.equal(new Set(listed).size, listed.length, 'a slug is listed in two sections')
+  for (const s of listed) assert.ok(slugs.has(s), `SIDEBAR_GROUPS lists ${s}, but public-docs/${s}.md does not exist`)
+  for (const p of pages) assert.ok(listed.includes(p.slug), `${p.file}: add it to SIDEBAR_GROUPS in docs-site/lib/pages.mjs`)
+  assert.ok(!sidebarGroups(pages).some((g) => g.title === 'More'))
+})
+
+test('theme tokens are the product site tokens', () => {
+  // Copied from spacingmind/spacing-mind-landing-page apps/web/src/index.css.
+  const css = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', '.vitepress', 'theme', 'custom.css'), 'utf8')
+  for (const token of [
+    '--background: #f8f8f8;',
+    '--background: #111111;',
+    '--brand: oklch(0.489 0.08 194.8);',
+    '--brand: oklch(0.904 0.136 196.2);',
+    '--card: #ffffff;',
+    '--card: #1a1a1a;',
+    '--radius: 0.5rem;',
+    '--muted-foreground: oklch(0.5 0 0);',
+    '--muted-foreground: oklch(0.65 0 0);',
+  ]) {
+    assert.ok(css.includes(token), `custom.css: ${token}`)
+  }
+  assert.match(css, /--vp-font-family-base:\s*'Geist Variable'/)
+  const config = fs.readFileSync(path.join(REPO_ROOT, 'docs-site', '.vitepress', 'config.mts'), 'utf8')
+  assert.ok(config.includes("appearance: 'dark'"), 'dark by default, like the product site')
 })

@@ -8,14 +8,13 @@ order: 17
 # Writing a plugin
 
 This page is for people who write plugins. To install and manage them, read
-[Plugins](plugins.md). Everything here exists today; two things in the design
-are not built and are marked **planned**: panels and sidebar items (declarative
-views), and plugins that add coding-agent providers.
+[Plugins](plugins.md). Everything here exists today except one thing in the
+design, plugins that add coding-agent providers, which is marked **planned**.
 
 A plugin is a directory with a `smind-plugin.json`. It can be data only (MCP
-servers, skills, profiles, prompt commands, themes: nothing runs) or it can also
-declare a long-lived `process` that smind starts, which adds hooks, RPCs and
-calls back into smind.
+servers, skills, profiles, prompt commands, themes and panels: nothing runs) or
+it can also declare a long-lived `process` that smind starts, which adds hooks,
+RPCs and calls back into smind.
 
 ## What a plugin can and cannot do
 
@@ -43,9 +42,10 @@ asks of smind; it does not **sandbox** the plugin.
 ## Quick start: hello-process
 
 `plugin-examples/hello-process/` in the repository is a complete process plugin
-in about 70 lines of Python 3 (standard library, no network). It has a process,
-one RPC (`echoPrompt`), an RPC-backed slash command (`/hello`), a `run.finished`
-hook that logs, and a typed setting (`greeting`).
+in about 100 lines of Python 3 (standard library, no network). It has a process,
+two RPCs (`echoPrompt` and `helloView`), an RPC-backed slash command (`/hello`),
+a `run.finished` hook that logs, a typed setting (`greeting`) and two panels
+(one served over an RPC, one from a view file).
 
 Turn plugins on (`plugins.enabled: true` in `config.yaml`), then, from the
 repository root:
@@ -131,7 +131,7 @@ Clean up with `smind plugin disable hello-process` and
 `server.py` reads `Content-Length`-framed JSON-RPC 2.0 messages from stdin and
 writes them to stdout (the framing language servers use). It answers
 `plugin.initialize` (the answer is the ready signal and must come within 10
-seconds), handles `rpc.echoPrompt` and `hook.run.finished`, exits on
+seconds), handles `rpc.echoPrompt`, `rpc.helloView` and `hook.run.finished`, exits on
 `plugin.shutdown`, and answers any other request with error `-32601`. Copy it as a
 starting point; any language that can read and write stdio works.
 
@@ -159,8 +159,10 @@ capability names. Every error names the field and the fix, and `install`, `enabl
 | `contributes.commands[]` | no | `name`, optional `description`, and exactly one of `prompt` (path of a UTF-8 text file, up to 16 KiB) or `rpc` (a name declared in `contributes.rpc`; needs `process`). |
 | `contributes.rpc[]` | no | `name`, optional `description`, optional `timeoutMs` (1 to 30000). Needs `process`. Names are unique. |
 | `contributes.themes[]` | no | `id`, optional `label` (up to 48 characters), `file` (a JSON color set). See [Themes](plugins.md#themes). |
+| `contributes.panels[]` | no | `id`, `title` (1-48 characters), optional `icon` (a Lucide name), `where` (`task`, `sidebar` or `palette`), optional `ui` (this smind understands `1`, the default) and `view`: exactly one of `file` (a `.json` view document inside the plugin, validated at install) or `rpc` (a name declared in `contributes.rpc`; needs `process`). At most 16 panels. See [Panels](#panels-data-only). |
+| `contributes.sidebar[]` | no | `id`, `title`, optional `icon`, and `opens`, the id of a declared panel. At most 16 items. |
 | `contributes.hooks[]` | no | `event` (`run.beforeStart` or `run.finished`) and optional `onError` (`open` or `closed`). Needs `process`. |
-| `contributes.providers[]`, `panels[]`, `sidebar[]` | no | Reserved. `providers` entries are checked but do nothing; `panels` and `sidebar` are accepted and ignored. **Planned**, not built. |
+| `contributes.providers[]` | no | Reserved. Entries are checked but do nothing. **Planned**, not built. |
 
 Names (`commands[].name`, `rpc[].name`, `themes[].id`, MCP server names) are 1-64
 characters of letters, digits, `.`, `_` and `-`, starting with a letter or digit.
@@ -322,9 +324,10 @@ the message box as plain characters and is never sent. See
 ## Panels (data only)
 
 A plugin can show a panel in the apps without any code reaching them. A panel is a
-**view document**: JSON at schema level `ui: 1` that the web and phone apps draw
-natively. The web and phone renderers arrive in the next releases; the daemon side
-below is already enforced, so you can write and validate panels now.
+**view document**: JSON at schema level `ui: 1` that the apps draw natively. The
+daemon validates and sanitises every document before it reaches a client, and the
+web app draws them (a task tab, a sidebar entry and a command-palette entry; see
+[Panels](plugins.md#panels) for what the app shows).
 
 ```json
 "contributes": {

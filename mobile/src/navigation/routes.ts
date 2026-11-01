@@ -48,6 +48,19 @@ export function parsePluginParams(params: { id?: Param }): { ok: true; id: strin
   return id !== undefined && id.trim() !== '' && id.length <= 128 ? { ok: true, id } : { ok: false };
 }
 
+/** One plugin panel's route (ADR-0042 section 5): the plugin and its plugin-local panel id. */
+export function pluginPanelHref(pluginId: string, panelId: string): { pathname: '/plugin-panel'; params: { plugin: string; panel: string } } {
+  return { pathname: '/plugin-panel', params: { plugin: pluginId, panel: panelId } };
+}
+
+/** The plugin and panel ids from route params; both are route strings only, so anything empty or overlong is refused. */
+export function parsePluginPanelParams(params: { plugin?: Param; panel?: Param }): { ok: true; plugin: string; panel: string } | { ok: false } {
+  const plugin = first(params.plugin);
+  const panel = first(params.panel);
+  const ok = (p: string | undefined): p is string => p !== undefined && p.trim() !== '' && p.length <= 128;
+  return ok(plugin) && ok(panel) ? { ok: true, plugin, panel } : { ok: false };
+}
+
 // The read-only automation screens (ADR-0044 section 10): the list, and one automation's run history by numeric id.
 export const AUTOMATIONS_HREF = '/automations' as const;
 

@@ -131,6 +131,7 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
  * logged, cached or retained after the request is built.
  */
 export async function loginWithPassword(password: string): Promise<Session> {
+  if (__SMIND_DEMO__) throw new LoginError({ kind: "disabled" });
   let res: Response;
   try {
     res = await fetch("/api/login", {
@@ -162,6 +163,7 @@ export async function loginWithPassword(password: string): Promise<Session> {
 
 /** GET /healthz's `authRequired` (a missing field -- an older daemon -- is false). Network failure rejects. */
 export async function fetchAuthRequired(): Promise<boolean> {
+  if (__SMIND_DEMO__) return false;
   const res = await fetch("/healthz");
   if (!res.ok) return false;
   const body = await readJson(res);

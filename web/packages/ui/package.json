@@ -7,7 +7,11 @@
     "build": "tsc -b && vite build --outDir ../../../internal/server/dist --emptyOutDir && vite build -c vite.pdf-viewer.config.ts --outDir ../../../internal/server/dist && touch ../../../internal/server/dist/.gitkeep",
     "build:desktop": "tsc -b && VITE_SMIND_DESKTOP=1 vite build --outDir ../../../desktop/ui/app --emptyOutDir && vite build -c vite.pdf-viewer.config.ts --outDir ../../../desktop/ui/app && touch ../../../desktop/ui/app/.gitkeep",
     "typecheck": "tsc -b",
-    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run"
+    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run",
+    "build:demo": "tsc -b && vite build --mode demo && node scripts/check-demo-build.mjs",
+    "preview:demo": "vite preview --mode demo",
+    "check:demo": "node scripts/check-demo-build.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.0",
