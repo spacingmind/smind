@@ -129,6 +129,15 @@ export function checkDemoBuild(dir, { budget = BUDGET, forbidden = FORBIDDEN, ba
     for (const need of ["Content-Security-Policy:", "frame-ancestors 'none'", "connect-src 'none'", "X-Content-Type-Options: nosniff", "Referrer-Policy:", "Permissions-Policy:"]) {
       if (!headers.includes(need)) errors.push(`_headers is missing ${need}`);
     }
+    // Cloudflare Web Analytics' auto-install injects a beacon <script> into HTML that its CSP blocks; it skips a response marked
+    // `Cache-Control: public, no-transform`. Every non-asset response (the HTML, the SPA fallback) must carry it, and /assets/*
+    // must detach it and keep its immutable caching.
+    const blocks = Object.fromEntries(headers.split(/\n\s*\n/).map((b) => [b.split("\n")[0].trim(), b]));
+    if (!/^\s+Cache-Control: public, no-transform$/m.test(blocks["/*"] ?? "")) errors.push("_headers: the /* rule must set Cache-Control: public, no-transform (keeps Cloudflare's beacon out of the HTML)");
+    const assets = blocks["/assets/*"] ?? "";
+    if (!/^\s+! Cache-Control$/m.test(assets) || !/^\s+Cache-Control: public, max-age=31536000, immutable$/m.test(assets)) {
+      errors.push("_headers: /assets/* must detach Cache-Control and set it to public, max-age=31536000, immutable");
+    }
   }
 
   // 3. size budget

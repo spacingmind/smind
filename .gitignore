@@ -32,3 +32,4 @@ docs/research/local/
 
 # wrangler local state (wrangler dev)
 web/packages/*/.wrangler/
+docs-site/.wrangler/
