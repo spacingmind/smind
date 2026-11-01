@@ -96,7 +96,7 @@ On failure the job uploads `web/e2e/test-results/` (screenshots, traces, the per
 
 - [x] Decisions 1-5 recorded (Supervisor default 2026-11-01, Human may veto).
 - [x] PR A: `web/e2e/` package, daemon fixture, guard, agent, the PR subset, a local README (no CI change). 65 tests per run in light-1280 and dark-390, about 95 s wall with 2 workers under `nice`; 5 consecutive full runs green, 0 flakes (`flaky.json` empty), no daemon, browser or temp dir left behind.
-- [ ] PR B: the `e2e` CI job (non-required), artifacts, nightly workflow, flake report.
+- [x] PR B (written, not yet run on GitHub): `.github/workflows/e2e.yml` (job `e2e` on path-filtered PRs with `--grep-invert @flaky`, 12 min cap; nightly 03:17 UTC and manual `full` run all four projects, 35 min cap; Chromium cache keyed on `web/bun.lock`; job summary; `e2e-failures-<run>` 7 days on failure; `e2e-timing-<run>` 30 days; `nightly-issue` job opens/comments an `e2e-nightly` issue), `.github/workflows/e2e-weekly-report.yml` (Mondays, last 20 runs, opens/updates an `e2e-flaky` issue when there are quarantine candidates), `web/e2e/scripts/flake-report.mjs` with 4 node tests, the JSON reporter in the config, `@flaky` quarantine tag. Verified locally: actionlint clean, node tests, `--summary` on a real `results.json`. NOT verified: any GitHub Actions run (action pins, `task build` + `playwright install --with-deps` on ubuntu-latest, artifact download in the weekly job, issue creation, runtime against the 8 min budget).
 - [ ] Mutation per spec recorded; budget measured on a real runner and written back here.
 
 ## Validation
