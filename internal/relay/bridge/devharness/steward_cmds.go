@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,11 +18,11 @@ import (
 
 	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/workspace"
 )
 
-// fakeReviewHead is the head sha every seeded review carries (40 hex chars).
-// The seeded task has no worktree, so the daemon reads no head "now" and a
-// review is never "head moved".
+// fakeReviewHead is the head sha a STALE seeded review carries (40 hex
+// chars): it is not the task's real head, so the daemon reads "head moved".
 const fakeReviewHead = "0123456789abcdef0123456789abcdef01234567"
 
 // writeFakeFrame writes a small valid PNG, 390 px wide, of one flat colour.
@@ -53,10 +54,11 @@ func writeFakeFrame(path string, c color.Color) (int64, error) {
 // seedReview handles seed-review <taskId> <ACCEPTED|CHANGES|BLOCKED> [stale]:
 // a FINISHED fake steward review of the task, written straight through the
 // store (no model call, no steward run). The frames are real PNG files under
-// the harness work dir, so steward.frame serves them. "stale" makes the
-// daemon compute a stale reason the least invasive way: the review stores a
-// contract sha while the task has no contract, so steward.View reads
-// "contract changed". The reply carries "review-id".
+// the harness work dir, so steward.frame serves them. A fresh review carries
+// the task's REAL worktree head (the daemon compares it on every read; a
+// head that differs reads stale and drops out of the inbox). "stale" stores a
+// head that is not the task's, so steward.View reads "head moved". The reply
+// carries "review-id".
 func (h *harness) seedReview(args []string) (map[string]any, error) {
 	if err := need(args, 2, "seed-review <taskId> <ACCEPTED|CHANGES|BLOCKED> [stale]"); err != nil {
 		return nil, err
@@ -72,8 +74,15 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 		return nil, fmt.Errorf("bad verdict %q (want ACCEPTED|CHANGES|BLOCKED)", verdict)
 	}
 	stale := len(args) > 2 && args[2] == "stale"
-	if _, err := h.store.GetTask(taskID); err != nil {
+	task, err := h.store.GetTask(taskID)
+	if err != nil {
 		return nil, err
+	}
+	head := fakeReviewHead
+	if !stale && task.WorktreePath != nil {
+		if real, err := workspace.GitHead(context.Background(), *task.WorktreePath); err == nil {
+			head = real
+		}
 	}
 
 	dir, err := os.MkdirTemp(h.workDir, "steward-frames-")
@@ -94,7 +103,7 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 			return nil, err
 		}
 		items = append(items, steward.FrameInfo{Path: filepath.Join(dir, f.name), SizeBytes: size,
-			CapturedSHA: fakeReviewHead, Viewport: 390, Theme: f.theme})
+			CapturedSHA: head, Viewport: 390, Theme: f.theme})
 	}
 
 	// Passing gates first, the failing one after them: the screen is the one
@@ -110,7 +119,7 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 	}
 	digest, err := json.Marshal(steward.Digest{
 		V:      1,
-		Task:   steward.TaskInfo{ID: taskID, HeadSHA: fakeReviewHead},
+		Task:   steward.TaskInfo{ID: taskID, HeadSHA: head},
 		PR:     &steward.PRSummary{Number: 482, Base: "develop", TitleConventional: true, HasValidated: true},
 		Frames: steward.FramesSection{Dir: dir, Items: items},
 		Gates:  gates,
@@ -119,17 +128,13 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 		return nil, err
 	}
 	sum := sha256.Sum256(digest)
-	contract := ""
-	if stale {
-		contract = hex.EncodeToString(sum[:]) // the task has no contract now, so this reads as changed
-	}
 
 	row, err := h.store.InsertStewardReview(store.StewardReview{TaskID: taskID, TriggerKind: steward.TriggerHuman,
-		HeadSHA: fakeReviewHead, Status: "pending"}, time.Now().UTC())
+		HeadSHA: head, Status: "pending"}, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
-	if err := h.store.SetStewardReviewDigest(row.ID, string(digest), hex.EncodeToString(sum[:]), "success", "", contract, 0); err != nil {
+	if err := h.store.SetStewardReviewDigest(row.ID, string(digest), hex.EncodeToString(sum[:]), "success", "", "", 0); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
@@ -164,7 +169,7 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"review-id": row.ID, "reviewId": row.ID, "taskId": taskID, "verdict": verdict, "stale": stale}, nil
+	return map[string]any{"review-id": row.ID, "reviewId": row.ID, "taskId": taskID, "verdict": verdict, "stale": stale, "headSha": head}, nil
 }
 
 // seedAudit handles seed-audit <taskId> <n>: appends n fake policy_audit rows
