@@ -18,7 +18,7 @@ lose or duplicate anything because there is no stored list to drift.
 
 ## What appears here
 
-Six kinds of item:
+Eight kinds of item:
 
 | Kind | What it is | When it leaves |
 |---|---|---|
@@ -28,6 +28,8 @@ Six kinds of item:
 | **host_pair** | Another host asked to pair with this one and waits for you to approve it. Compare the code both hosts show, then approve or reject on the Hosts page (see [Hosts](hosts.md)). | When you approve or reject it. |
 | **host_refused** | A link to a paired host was refused: the host's key changed, or its smind version does not support what this link needs. The row carries the update guidance. | When the cause is fixed and the link comes up, or when you resolve it. |
 | **host_down** | A link to a paired host has been down for more than five minutes. A brief reconnect never shows here. | When the link comes back, or when you resolve it. |
+| **review** | A finished [Steward review](steward-review.md) of a task, labelled **Steward review**. The row carries the verdict as its chip, the pull request and head commit, and the gates that failed; a BLOCKED review is marked high attention. Open it for the review card. | When its head commit moves, a newer contract or review replaces it, or you resolve it. An open review with no verdict yet never shows. |
+| **run_failed** | A run that failed with a class that has a next step (`auth_expired`, `model_not_in_plan`, `plan_window_exhausted`, `rate_limited`, or a `transient_429` that is not already being retried). The row shows the next step (for example **Sign in again**, or the models the plan allows) as a button, and `auth_expired` and `model_not_in_plan` are marked high attention. `cli_exited` keeps the **Continue** button on the run instead. See [Why a run failed](usage-and-limits.md#why-a-run-failed-and-what-to-do). | When a later run of the task replaces it, or you resolve it. |
 
 Host rows only exist when connected hosts are turned on. A remote host's
 permission request is not a host row: it is an ordinary **permission** row,

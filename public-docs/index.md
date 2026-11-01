@@ -25,13 +25,15 @@ agent is doing and what it costs.
 - [Getting started](getting-started.md): install smind, start the daemon, create your first workspace and task.
 - [Providers](providers.md): connect Claude, Codex, GLM and Kimi accounts.
 - [Provider recipes](provider-recipes.md): add a login for Z.AI, DeepSeek, OpenRouter or a local model server from a built-in template.
+- [Why a provider or model is greyed out](model-picker-gates.md): the Signed out, Plan used up, Cooling down, Not in plan and Unsupported labels, and which ones block a send.
 - [Write-only secrets](write-only-secrets.md): how provider keys are stored, what you can see afterwards and what is not protected.
 - [Workspaces and tasks](workspaces-and-tasks.md): the daily workflow, chats, attachments and the queue.
 - [Git and pull requests](git-and-prs.md): branches, publishing, updating from base and opening pull requests.
 - [Mobile and relay pairing](mobile-and-relay.md): pair a phone, what end-to-end encryption protects, push notifications.
 - [Orchestration](orchestration.md): run a Lead that launches Peers, with budgets, alerts and permission rules.
 - [The validator seat and review rows](validator-and-review.md): a fresh-context check of a commit against a contract, and its verdicts in the inbox.
-- [Inbox](inbox.md): one list of permissions, validator verdicts and stalled work that need you, on the web and on a phone.
+- [The Steward review seat](steward-review.md): a read-only second opinion on a finished task, with objective gates, a verdict and limits.
+- [Inbox](inbox.md): one list of permissions, verdicts, reviews, failed runs and stalled work that need you, on the web and on a phone.
 - [Scripting and permissions](scripting-and-permissions.md): drive agents from scripts, permission modes, the MCP server.
 - [Permission policy](permission-policy.md): answer routine permission requests from a file, with a fixed floor of always-denied commands.
 - [Run the daemon](running-the-daemon.md): run it as a service, reach it from other devices, Docker, updates, backups.

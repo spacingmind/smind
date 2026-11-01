@@ -237,3 +237,53 @@ smind relay devices approve <id>
 smind relay devices revoke <id>
 smind relay devices rename <id> <label>
 ```
+
+### task wait
+
+`smind task wait <runId|item:ID>` blocks until the run is terminal and reports
+the outcome in its exit code:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The run finished. |
+| 1 | Any other error. |
+| 3 | The run was stopped. |
+| 4 | The run finished at a cap and needs **Continue**. |
+| 5 | `--timeout` expired; the run keeps going. |
+| 6 | The run failed on a rate-limit class (`plan_window_exhausted`, `transient_429`, `rate_limited`). |
+| 7 | The run failed with something a human must fix (`auth_expired`, `model_not_in_plan`). |
+
+### host
+
+`smind host add|ls|rm|invite|approve|reject|enable-reverse|disable-reverse|rename|test|route|audit`
+pairs and manages connected hosts. Needs `fleet.enabled: true` and the daemon
+running. `<host>` is a host id or its alias. See [Connected hosts](hosts.md).
+
+### scratch
+
+`smind scratch usage [--json]` shows scratch disk usage (task temp dirs);
+`smind scratch clean [--json]` deletes closed tasks' scratch.
+
+### steward
+
+`smind steward review <taskId> [--sha <40 hex>]` asks for a read-only review
+of the task's head commit; `steward list`, `show` and `cancel` read and stop
+reviews. A review is advice: smind never merges.
+
+### policy
+
+`smind policy init` writes the commented policy template (never overwrites),
+`show` prints the engine switch and rules, `test "<command>"` explains what
+the engine would decide per segment, and `audit` lists recent decisions. The
+engine is off until `steward.policy.enabled` is true. Humans only.
+
+### push test
+
+`smind push test [<device id prefix>]` sends a test notification to phones
+registered for push. It exits 0 only if every phone was sent to.
+
+### update
+
+`smind update [--check] [--version <v>] [--force] [--dry-run] [--json]`
+updates the binary to the latest release (SHA-256 verified). `--check` only
+reports; it refuses while runs are active unless `--force`.
