@@ -5,7 +5,7 @@ base: origin/develop
 planRef: docs/plans/active/steward-seat.md
 acs:
   - id: AC25
-    text: "inbox.list/count derive kind review (key review:<reviewId>) from the task's latest finished, non-stale review; it replaces that task's verdict row; stale or open reviews drop out; summary <=160 chars (verdict, PR, head7, failing gate ids only); BLOCKED high, others normal; steward.updated pokes inbox.changed, coalesced; no approve-all or merge method."
+    text: "inbox.list/count derive kind review (key review:<reviewId>) from the task's latest finished, non-stale review; it replaces that task's verdict row; stale or open reviews drop out; summary <=160 chars (PR, head7, failing gate ids only; the verdict is the chip); BLOCKED high, others normal; steward.updated pokes inbox.changed, coalesced; no approve-all or merge method."
     covers: { tests: [TestInboxList_DerivesReviewKind, TestInboxList_ReviewReplacesVerdictRow, TestInboxList_StaleReviewDropsOut, TestInboxList_ReviewSummaryRedacted, TestInboxList_ReviewSummaryCarriesPRNumber, TestInboxChanged_CoalescedOnStewardUpdated, TestNoInboxApproveAllMethod], mutations: [M1] }
   - id: AC26
     text: "The permission card shows the matched rule id and why (or 'No rule matched') and the normalised heredoc-elided command, not the raw one; no approve-all, always-allow or merge control; policy-allowed/denied requests are not inbox items; policy_allow/policy_deny resolutions have labels and an unknown resolution renders as text."
