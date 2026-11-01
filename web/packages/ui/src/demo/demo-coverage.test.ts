@@ -31,7 +31,7 @@ describe("demo coverage guard", () => {
     const methods = uiMethods();
     // the scan itself must keep working: the UI calls well over a hundred distinct methods
     expect(methods.size).toBeGreaterThan(120);
-    const missing = [...methods].filter((m) => !(m in RULES)).sort();
+    const missing = [...methods].filter((m) => !Object.hasOwn(RULES, m)).sort();
     expect(missing, `add a rule (read/scripted/local) or list the method in REFUSED_METHODS: ${missing.join(", ")}`).toEqual([]);
   });
 

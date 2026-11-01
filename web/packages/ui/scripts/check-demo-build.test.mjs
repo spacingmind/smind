@@ -126,3 +126,31 @@ test("G-05 a production build with no demo code passes; one with the banner or t
   withDist({ "assets/connect-b.js": "export const x=1;" }, (dir) => assert.deepEqual(checkProductionBuild(dir).errors, []));
   withDist({ "assets/connect-b.js": "export const x='Demo — not connected';" }, (dir) => assert.ok(checkProductionBuild(dir).errors.length > 0));
 });
+
+test("G-05 catches a stray static import of any src/demo module: the landing route, the banner variable, the scripted daemon", () => {
+  for (const [file, text] of [
+    ["assets/index-a.js", "export const h='#/workspace/1/task/1/chat/1';"],
+    ["assets/index-a.css", ":root{--demo-banner-h:0px}"],
+    ["assets/index-a.js", "var c='demo_unsupported';"],
+  ]) {
+    withDist({ "assets/connect-b.js": null, [file]: text }, (dir) => assert.ok(checkProductionBuild(dir).errors.length > 0, `${file}: ${text}`));
+  }
+});
+
+test("G-02 with --baseline the initial budgets are relative: an unrelated, larger production entry does not turn the demo red", () => {
+  const noise = (n) => Array.from({ length: n }, (_, i) => `v${i}=${Math.random()};`).join("");
+  const demoEntry = noise(6000);
+  const demo = makeDist({ "assets/index-a.js": demoEntry });
+  const smallBase = makeDist({ "assets/index-a.js": noise(500), "assets/connect-b.js": null });
+  const sameBase = makeDist({ "assets/index-a.js": demoEntry, "assets/connect-b.js": null });
+  try {
+    const tight = { initialJsGzip: 1024, initialCssGzip: 8 * 1024 };
+    // the same entry as the baseline plus the allowance passes, however large the entry is in absolute terms
+    assert.deepEqual(checkDemoBuild(demo, { baseline: sameBase, relative: tight, budget: { ...BUDGET, initialJsGzip: 100 } }).errors, []);
+    // a demo much larger than the baseline plus the allowance fails
+    const { errors } = checkDemoBuild(demo, { baseline: smallBase, relative: tight });
+    assert.ok(errors.some((e) => e.includes("production entry + 1024")), errors.join("\n"));
+  } finally {
+    for (const d of [demo, smallBase, sameBase]) rmSync(d, { recursive: true, force: true });
+  }
+});

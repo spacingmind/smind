@@ -95,6 +95,13 @@ describe("demo socket", () => {
     expect(refused.message).toBe("Read-only in the demo.");
   });
 
+  it("D-02b a method named like an Object.prototype member fails closed as demo_unsupported", async () => {
+    const { client } = await start();
+    for (const method of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+      expect((await rejects(client.call(method))).code, method).toBe("demo_unsupported");
+    }
+  });
+
   it("D-04 a script plays its steps in order on an injected clock: events reach onEvent, and the run pauses on its permission request", async () => {
     const { client, clock } = await start();
     const { events, done } = attach(client, "demo-live");
@@ -131,6 +138,8 @@ describe("demo socket", () => {
     // the diff gains the file the request was about
     const diff = await h.client.call<{ diff: string }>("task.diff", { taskId: 1 });
     expect(diff.diff).toContain("internal/ratelimit/limiter.go");
+    // answering the request resolves its inbox row
+    expect(await h.client.call("inbox.count")).toMatchObject({ total: 3 });
 
     // deny
     h = await start();
@@ -145,6 +154,7 @@ describe("demo socket", () => {
     expect(text).toContain("I won't write that file");
     const after = await h.client.call<{ diff: string }>("task.diff", { taskId: 1 });
     expect(after.diff).not.toContain("internal/ratelimit/limiter.go");
+    expect(await h.client.call("inbox.count")).toMatchObject({ total: 3 }); // Deny resolves the row too
   });
 
   it("D-06 task.cancel and run.stop abort the matching script; nothing is emitted afterwards", async () => {

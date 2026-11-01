@@ -10,7 +10,6 @@ import { desktopOS, isDesktop } from "@/lib/platform";
 import { applyStoredPluginTheme } from "@/lib/plugin-theme";
 import { installDesktopContextMenu } from "@/lib/desktop-context-menu";
 import { installDesktopWebviewDefaults } from "@/lib/desktop-webview";
-import { DemoBanner } from "@/demo/demo-banner";
 import { IS_DEMO } from "@/demo/flag";
 import { landOnLiveTask } from "@/demo/land";
 import "@/index.css";
@@ -23,6 +22,9 @@ const FirstRunGate = isDesktop ? lazy(() => import("@/components/first-run/first
 // scenario load in parallel with it; in every other build IS_DEMO is a constant false and all of this is removed.
 const demoEngine = IS_DEMO ? import("@/demo/connect") : null;
 const demoConnect = demoEngine ? () => demoEngine.then((m) => m.connectDemo()) : undefined;
+// The banner (and its stylesheet) is a lazy chunk for the same reason: a static import would keep demo.css in the production CSS.
+const demoBanner = IS_DEMO ? import("@/demo/demo-banner") : null;
+const DemoBanner = demoBanner ? lazy(() => demoBanner.then((m) => ({ default: m.DemoBanner }))) : null;
 if (IS_DEMO) landOnLiveTask();
 
 // Desktop build only: scopes desktop-chrome.css's per-OS rules.
@@ -48,7 +50,11 @@ createRoot(document.getElementById("root")!).render(
         ) : (
           <App connect={demoConnect} />
         )}
-        {IS_DEMO ? <DemoBanner /> : null}
+        {DemoBanner ? (
+          <Suspense fallback={null}>
+            <DemoBanner />
+          </Suspense>
+        ) : null}
         <DesktopPaintedSignal />
         <Toaster />
       </TooltipProvider>

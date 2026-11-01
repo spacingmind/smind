@@ -385,6 +385,7 @@ export const REFUSED_METHODS = [
 
 for (const method of REFUSED_METHODS) RULES[method] ??= refused();
 
+/** Own keys only: a method named `constructor` or `toString` must fail closed (demo_unsupported), not find an Object.prototype member. */
 export function ruleFor(method: string): DemoRule | undefined {
-  return RULES[method];
+  return Object.hasOwn(RULES, method) ? RULES[method] : undefined;
 }
