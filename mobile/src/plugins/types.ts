@@ -95,3 +95,49 @@ export interface PluginUpdatedPayload {
 
 /** The only topic the plugin screens subscribe to. */
 export const PLUGIN_UPDATED_TOPIC = 'plugin.updated';
+
+/** The view schema level this client understands (ADR-0042 section 5): sent with every plugin.panels / plugin.view call. */
+export const PLUGIN_UI_LEVEL = 1;
+
+/** A plugin process asked clients to refetch a panel (kind is "refresh" in v1); the payload carries no view data. */
+export const PLUGIN_EVENT_TOPIC = 'plugin.event';
+
+/** One panel an active plugin contributes. The daemon withholds any panel whose `ui` is above this client's level. */
+export interface PluginPanel {
+  plugin: string;
+  id: string;
+  title: string;
+  icon?: string;
+  where: 'task' | 'sidebar' | 'palette';
+  ui: number;
+}
+
+/** One sidebar entry an active plugin contributes, opening one of its panels. */
+export interface PluginSidebarItem {
+  plugin: string;
+  id: string;
+  title: string;
+  icon?: string;
+  /** The plugin-local panel id this entry opens. */
+  opens: string;
+}
+
+/** The plugin.panels result. */
+export interface PluginPanelsResult {
+  panels: PluginPanel[];
+  sidebar: PluginSidebarItem[];
+}
+
+/** `plugin.event` payload. */
+export interface PluginEventPayload {
+  pluginId: string;
+  kind: string;
+  panelId?: string;
+}
+
+/** The plugin.view result: the panel's validated view document (data, rendered by the client, never executed). */
+export interface PluginViewResult {
+  pluginId: string;
+  panelId: string;
+  view: unknown;
+}

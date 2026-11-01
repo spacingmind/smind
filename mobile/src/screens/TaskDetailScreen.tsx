@@ -75,6 +75,7 @@ import { AssistantMessage } from './task/AssistantMessage';
 import { ErrorCard } from './task/ErrorCard';
 import { describeRunError, resetZoneNote } from '../runError';
 import { runSlashRpc } from '../plugins/slashRpc';
+import { takePendingInsert } from '../plugins/composerInbox';
 import { usePluginCommands } from '../plugins/usePluginCommands';
 import { Composer } from './task/Composer';
 import { FooterBanner } from './task/FooterBanner';
@@ -110,6 +111,18 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   // React state remains the source of truth for canSend and the
   // restore-on-failed-send path.
   const draftState = useNativeState('');
+  // A plugin panel's prompt action lands here as a draft, never sent: the
+  // inbox is drained once on mount and the text joins whatever is typed;
+  // only the Human's press on Send runs anything.
+  useEffect(() => {
+    const text = takePendingInsert();
+    if (text === null) return;
+    setDraft((d) => {
+      const next = d.trim() === '' ? text : `${d}\n${text}`;
+      draftState.value = next;
+      return next;
+    });
+  }, []);
   const slashCommands = usePluginCommands(conn);
   const [sendError, setSendError] = useState<string | null>(null);
   // ADR-0038 prompt attachments: the tray, the inline refusal text, and the daemon's accepted kinds (undefined until loaded / older daemon).
