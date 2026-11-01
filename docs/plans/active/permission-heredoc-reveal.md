@@ -24,7 +24,19 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
    - Everything else derives from those two: web timeline tool cards (`components/timeline/tool-call-detail.tsx:65` renders `input.command`), mobile timeline (`mobile/src/runTimeline.ts`), relay frames (the same wsapi payloads, encrypted), CLI run viewers, and MCP `task_logs` / `task_status` / `task_wait` (`cmd/smind/mcp_run_tools.go` reads `run.logs`).
    - `permission.pending` events and inbox rows carry `PermissionDetail` and `Summary` (handled by item 1).
    - Raw sits only in daemon memory (`Event.ToolInput` in run history) and daemon disk (`runs/persist.go` `ToolInput`); neither goes to a client.
-   Decision: elide at that boundary. `toRunToolCallParams` rewrites, for every call whose input has a string `command`/`cmd` that parses with heredocs, `input.command` to the elided form and `title` likewise, and adds `heredocs: [{index, bytes}]` to the payload. A raw body is never sent to a client; it stays in daemon memory/disk (the run's own record). Tool-call timeline cards get the same "Show heredoc (N bytes)" toggle, fed by `run.revealToolHeredoc {runId, toolCallId, index}`: human/relay only, redacted, content-free audit row `tool.heredoc_revealed`, works while the run's history holds the call (not only while a permission is pending, since the call outlives the approval). Not elided, deliberately: the tool call's `result` (the command's own output, which can echo a body if the command prints it; cannot be parsed, noted as a limit), non-execute tools (edit/write content is a different surface, out of scope).
+   Decision: elide at that boundary. `toRunToolCallParams` rewrites, for every call whose input has a string `command`/`cmd` that parses with heredocs, `input.command` to the elided form and `title` likewise, and adds `heredocs: [{index, bytes}]` to the payload. A raw body is never sent to a client; it stays in daemon memory/disk (the run's own record). Tool-call timeline cards get the same "Show heredoc (N bytes)" toggle, fed by `run.revealToolHeredoc {runId, toolCallId, index}`: human/relay only, redacted, content-free audit row `tool.heredoc_revealed`, works for a live run from its in-memory history and for a FINISHED run by reading the persisted on-disk log (`runs/persist.go`), still redacted, still human-only (Supervisor decision 2026-11-01: the reveal is not limited to pending permissions for tool cards).
+
+   The two reveals, side by side:
+
+   | | `permission.revealHeredoc` | `run.revealToolHeredoc` |
+   |---|---|---|
+   | key | `{permissionId, index}` | `{runId, toolCallId, index}` |
+   | source | the pending permission's in-memory raw bodies | live run history, else the persisted run log on disk |
+   | allowed when | the permission is still pending only | any time the call exists (live or finished) |
+   | callers | human/relay only; run-scoped agents and Peers get `forbidden` | same |
+   | audit row | `permission.heredoc_revealed {permissionId, index, bytes}` | `tool.heredoc_revealed {runId, toolCallId, index, bytes}` |
+   | content in audit/events | never | never |
+   | errors | `not_found` (not pending / bad index) | `not_found` (unknown run/call/index) | Not elided, deliberately: the tool call's `result` (the command's own output, which can echo a body if the command prints it; cannot be parsed, noted as a limit), non-execute tools (edit/write content is a different surface, out of scope).
 7. **Clients.** Web and mobile approval cards render `detail.command` (already elided) and, per `heredocs[i]`, a "Show heredoc (N bytes)" toggle that calls the RPC and renders the redacted body inline (collapsible, wrapped, never clipped, same card styles); redacted spans show the redaction marker. CLI: `smind permission show --reveal [--index N]` prints the redacted body to the terminal (sanitised for control codes).
 8. **CLI viewers** read the already-elided `detail.command`; no client-side elision.
 
@@ -36,7 +48,7 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 - AC4 Run-scoped and Peer callers cannot call it (walk test).
 - AC5 The reveal is never written to the audit or event stream; the audit gets a content-free `permission.heredoc_revealed` row.
 - AC6a The marker never appears in `run.logs`, live `tool_call` events, MCP `task_logs`/`task_status`/`task_wait` output, or the web/mobile timeline DOM for an execute call with a heredoc; timeline tool cards show the marker and a reveal toggle.
-- AC6b `run.revealToolHeredoc` redacts, refuses for run-scoped callers and unknown call/index, and writes a content-free audit row.
+- AC6b `run.revealToolHeredoc` redacts, refuses for run-scoped callers and unknown call/index, writes a content-free `tool.heredoc_revealed` audit row, and works for a finished run by reading the on-disk log (daemon restarted: still works, still redacted).
 - AC6 The marker `SECRET_TOKEN_123` in a heredoc never appears in: `detail.command`, `summary`, the permission.pending event, inbox rows, relay frames, CLI output, audit rows. It does appear only in the reveal response (redacted if token-shaped) and the daemon's own run history (never sent to a client).
 - AC7 Allow/deny/ask decisions unchanged: full permpolicy, runs and wsapi policy suites pass.
 - AC8 Web and mobile cards: collapsed, expanded, redacted-body and long-body frames, light and dark, 1280 and 390, theme pairs differ, nothing wider than the viewport.
@@ -52,7 +64,7 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 - `TestSecretNeverOnWire` (wsapi): the SECRET_TOKEN_123 sweep over event stream, inbox rows, relay frame encoder, audit.
 - `permission-detail.test.tsx` (web) and mobile card tests: toggle fetches once, renders redacted body, collapses.
 - CLI: `TestPermissionShowReveal`.
-- `TestToolCallParams_ElidesHeredocInputAndTitle`, `TestRunLogs_NeverCarryHeredocBody`, `TestMCPTaskLogs_NoHeredocBody`, `TestRunRevealToolHeredoc_*` (wsapi / cmd/smind); timeline DOM tests (web `tool-call.test.tsx`, mobile `runTimeline`).
+- `TestToolCallParams_ElidesHeredocInputAndTitle`, `TestRunLogs_NeverCarryHeredocBody`, `TestMCPTaskLogs_NoHeredocBody`, `TestRunRevealToolHeredoc_{Live,FinishedFromDisk,AfterRestart,RunScopeRefused,UnknownCall,AuditNoContent}` (wsapi / cmd/smind); timeline DOM tests (web `tool-call.test.tsx`, mobile `runTimeline`).
 - One mutation per load-bearing test, recorded under Validation.
 
 ## PR split
