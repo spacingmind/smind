@@ -68,3 +68,12 @@ jobs:
 
       - name: Check desktop version sync
         run: task check:versions
+
+      # ADR-0051: the demo build (no daemon code, a CSP, a size budget) and the guard that the
+      # production build `task build` just made contains no demo code. No deploy, only a check.
+      - name: Demo build guard
+        run: |
+          cd web/packages/ui
+          node --test scripts/*.test.mjs
+          bun run build:demo
+          node scripts/check-demo-build.mjs --production ../../../internal/server/dist
