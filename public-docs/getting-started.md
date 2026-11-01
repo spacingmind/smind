@@ -106,8 +106,9 @@ at once.
 
 ## Install the mobile app
 
-The repository does not document an app store listing. The app lives in the
-`mobile/` directory and you build it yourself:
+**The mobile app is not published yet**: there is no App Store, TestFlight or
+Google Play listing, and no public relay. The app lives in the `mobile/` directory and
+you build it yourself:
 
 ```sh
 cd mobile
@@ -116,7 +117,8 @@ npx expo run:ios      # or: npx expo run:android
 ```
 
 Expo Go cannot run it; use a development build. After it is installed, pair the
-phone with your daemon through a relay. See [Mobile and relay pairing](mobile-and-relay.md).
+phone with your daemon through a relay that you run yourself (a Cloudflare Tunnel
+gives it an address the phone trusts). See [Mobile and relay pairing](mobile-and-relay.md).
 
 ## Start the daemon
 
