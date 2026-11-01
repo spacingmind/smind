@@ -128,7 +128,7 @@ export function StewardReviewScreen({
       </Card>
 
       {groups.length > 0 && (
-        <View>
+        <View style={styles.section}>
           <SectionHeader title="Findings" />
           {groups.map((g) => (
             <Card key={g.file} style={styles.card}>
@@ -150,7 +150,7 @@ export function StewardReviewScreen({
       )}
 
       {frames.length > 0 && (
-        <View>
+        <View style={styles.section}>
           <SectionHeader title="Evidence frames" />
           <View style={styles.frames}>
             {frames.map((frame) => (
@@ -191,6 +191,7 @@ function makeStyles(theme: AppTheme) {
     content: { padding: theme.spacing[4], paddingBottom: theme.spacing[8], gap: theme.spacing[4] },
     center: { alignItems: 'center', justifyContent: 'center', padding: theme.spacing[4] },
     card: { gap: theme.spacing[3] },
+    section: { gap: theme.spacing[3] },
     headerCard: { gap: theme.spacing[2] },
     headerRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.spacing[2] },
     meta: { ...theme.type.small, color: theme.foregroundSubtle },
