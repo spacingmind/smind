@@ -54,6 +54,13 @@ func (w *Watch) Tick(dt time.Duration) bool {
 		return false
 	}
 	if row.Status == "done" || row.Status == "blocked" {
+		// The verdict closed the row mid-run: keep rolling the run's real
+		// cost in until the run ends (nil/unknown cost is never estimated).
+		if err := w.Svc.DB.RaiseStewardReviewCost(w.ReviewID, ps.CostUSD); err != nil {
+			return false
+		}
+	}
+	if row.Status == "done" || row.Status == "blocked" {
 		// The verdict is in; the post-check waits for the run to finish (or
 		// the wall clock) so changes made after submitting are seen too.
 		if ps.Running && (w.MaxMinutes <= 0 || w.elapsed < time.Duration(w.MaxMinutes)*time.Minute) {

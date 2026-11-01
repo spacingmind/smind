@@ -5,12 +5,25 @@
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { InboxRowView } from '../../inbox/view';
+import { RelayConnection } from '../../relay/RelayConnection';
 import { AppTheme, withAlpha } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { AppIcon } from '../../ui/AppIcon';
 import { Badge } from '../../ui/Badge';
+import { ReviewRowChip } from '../steward/ReviewRowChip';
 
-export function InboxRow({ row, onOpen, onMore }: { row: InboxRowView; onOpen: (row: InboxRowView) => void; onMore: (row: InboxRowView) => void }) {
+export function InboxRow({
+  row,
+  onOpen,
+  onMore,
+  conn,
+}: {
+  row: InboxRowView;
+  onOpen: (row: InboxRowView) => void;
+  onMore: (row: InboxRowView) => void;
+  /** The relay connection a review row's verdict chip subscribes with; without it no chip is drawn. */
+  conn?: RelayConnection;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const waiting = row.tone === 'waiting';
@@ -36,6 +49,9 @@ export function InboxRow({ row, onOpen, onMore }: { row: InboxRowView; onOpen: (
           <Text style={styles.summary} numberOfLines={2}>
             {row.summary}
           </Text>
+          {row.kind === 'review' && row.reviewId !== null && conn !== undefined && (
+            <ReviewRowChip conn={conn} reviewId={row.reviewId} />
+          )}
           <Text style={styles.time}>{`${row.label} · ${row.time}`}</Text>
         </View>
       </Pressable>

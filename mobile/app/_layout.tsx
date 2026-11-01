@@ -44,6 +44,8 @@ function RootStack() {
           <Stack.Screen name="plugin-panel" options={{ title: 'Panel' }} />
           <Stack.Screen name="hosts" options={{ title: 'Hosts' }} />
           <Stack.Screen name="inbox" options={{ title: 'Inbox' }} />
+          <Stack.Screen name="review/[id]" options={{ title: 'Review' }} />
+          <Stack.Screen name="policy" options={{ title: 'Permission policy' }} />
           <Stack.Screen name="automations" options={{ title: 'Automations' }} />
           <Stack.Screen name="automation/[id]" options={{ title: 'Automation' }} />
           <Stack.Screen name="task/[id]" options={({ route }) => ({ title: taskHeaderTitle(route.params as { id?: string; title?: string } | undefined) })} />

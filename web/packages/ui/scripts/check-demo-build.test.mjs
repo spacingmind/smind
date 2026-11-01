@@ -154,3 +154,22 @@ test("G-02 with --baseline the initial budgets are relative: an unrelated, large
     for (const d of [demo, smallBase, sameBase]) rmSync(d, { recursive: true, force: true });
   }
 });
+
+test("G-06 _headers keeps Cloudflare's beacon out of the HTML: no-transform on /*, detached with immutable caching on /assets/*", () => {
+  withDist({}, (dir) => assert.deepEqual(checkDemoBuild(dir).errors, []));
+  const hashes = inlineScriptHashes(`<script>${BOOT}</script>`);
+  const good = headersFile(hashes);
+  assert.match(good, /\/\*\n[^]*?  Cache-Control: public, no-transform\n/);
+  assert.match(good, /\/assets\/\*\n  ! Cache-Control\n  Cache-Control: public, max-age=31536000, immutable\n/);
+  for (const [name, broken] of [
+    ["no-transform missing", good.replace("  Cache-Control: public, no-transform\n", "")],
+    ["wrong value on /*", good.replace("public, no-transform", "no-cache")],
+    ["assets not detached", good.replace("  ! Cache-Control\n", "")],
+    ["assets lose immutable", good.replace("public, max-age=31536000, immutable", "public, max-age=60")],
+  ]) {
+    withDist({ _headers: broken }, (dir) => {
+      const { errors } = checkDemoBuild(dir);
+      assert.ok(errors.some((e) => e.startsWith("_headers:")), `${name}: ${errors.join(" | ")}`);
+    });
+  }
+});

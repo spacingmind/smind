@@ -13,6 +13,7 @@ import { permissionButtonVariants } from '../../transcript/permissionButtons';
 import { Card } from '../../ui/Card';
 import { TextButton } from '../../ui/TextButton';
 import { UiHost } from '../../ui/UiHost';
+import { PermissionPolicyLine } from './PermissionPolicyLine';
 
 export const PermissionCard = memo(function PermissionCard({
   request,
@@ -30,6 +31,7 @@ export const PermissionCard = memo(function PermissionCard({
       <Text style={styles.summary} selectable>
         {request.summary}
       </Text>
+      <PermissionPolicyLine detail={request.detail} />
       {request.status === 'pending' ? (
         <View style={styles.options}>
           {request.options.map((opt, i) =>
