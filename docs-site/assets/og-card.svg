@@ -1,25 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1c1c1e"/>
-      <stop offset="1" stop-color="#101012"/>
+      <stop offset="0" stop-color="#111111"/>
+      <stop offset="1" stop-color="#111111"/>
     </linearGradient>
     <linearGradient id="teal" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5eead4"/>
-      <stop offset="1" stop-color="#14b8a6"/>
+      <stop offset="0" stop-color="#51fbfd"/>
+      <stop offset="1" stop-color="#51fbfd"/>
     </linearGradient>
   </defs>
   <rect width="1200" height="630" fill="url(#bg)"/>
   <g transform="translate(920 315) scale(0.85)" fill="none" stroke="url(#teal)" stroke-linecap="round">
     <ellipse cx="0" cy="0" rx="230" ry="82" stroke-width="14" transform="rotate(-24)"/>
-    <circle cx="0" cy="0" r="92" stroke-width="14" fill="#1c1c1e"/>
+    <circle cx="0" cy="0" r="92" stroke-width="14" fill="#111111"/>
     <ellipse cx="-30" cy="-6" rx="13" ry="20" fill="url(#teal)" stroke="none"/>
     <ellipse cx="30" cy="-6" rx="13" ry="20" fill="url(#teal)" stroke="none"/>
     <circle cx="-210" cy="106" r="20" fill="url(#teal)" stroke="none"/>
     <circle cx="204" cy="-112" r="12" fill="url(#teal)" stroke="none"/>
     <path d="M-250 -160 l8 22 l22 8 l-22 8 l-8 22 l-8 -22 l-22 -8 l22 -8 z" fill="url(#teal)" stroke="none"/>
   </g>
-  <text x="80" y="300" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="120" font-weight="700" fill="#ffffff" letter-spacing="-3">sMind</text>
-  <text x="84" y="372" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="38" fill="#a1a1aa">Run coding agents from one place.</text>
-  <text x="84" y="552" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="30" fill="#5eead4">docs.spacingmind.com</text>
+  <text x="80" y="300" font-family="Geist Variable, Geist, Helvetica Neue, Arial, sans-serif" font-size="120" font-weight="600" fill="#51fbfd" letter-spacing="-3">sMind</text>
+  <text x="84" y="372" font-family="Geist Variable, Geist, Helvetica Neue, Arial, sans-serif" font-size="38" fill="#a6a6a6">Space for your agents, free for you.</text>
+  <text x="84" y="552" font-family="Geist Variable, Geist, Helvetica Neue, Arial, sans-serif" font-size="30" fill="#dedede">docs.spacingmind.com</text>
 </svg>

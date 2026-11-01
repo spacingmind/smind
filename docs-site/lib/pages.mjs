@@ -12,7 +12,7 @@ export const REPO_URL = 'https://github.com/spacingmind/smind'
 export const OG_IMAGE_URL = SITE_URL + '/og-card.png'
 export const OG_IMAGE_WIDTH = 1200
 export const OG_IMAGE_HEIGHT = 630
-export const OG_IMAGE_ALT = 'sMind by Spacing Mind: run coding agents from one place'
+export const OG_IMAGE_ALT = 'sMind by Spacing Mind: space for your agents, free for you'
 
 export const AI_CRAWLERS = [
   'GPTBot',
