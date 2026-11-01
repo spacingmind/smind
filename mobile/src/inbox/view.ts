@@ -6,7 +6,7 @@ import { IconName } from '../ui/icons';
 import { InboxItem, InboxKind } from './types';
 
 export const INBOX_EMPTY_TITLE = 'Nothing needs you';
-export const INBOX_EMPTY_TEXT = 'Permission requests, pairing requests, host links, validator verdicts and stalled tasks show up here.';
+export const INBOX_EMPTY_TEXT = 'Permission requests, pairing requests, host links, steward reviews, validator verdicts and stalled tasks show up here.';
 
 /** waiting: a permission asks for you; warning: a verdict that needs a decision (never a success tint); neutral: the rest. */
 export type InboxTone = 'waiting' | 'warning' | 'neutral';
@@ -27,6 +27,7 @@ export interface InboxRowView {
   kind: InboxKind;
   taskId: number | null;
   hostId: string | null;
+  reviewId: number | null;
   icon: IconName;
   label: string;
   title: string;
@@ -50,11 +51,12 @@ const KIND_META: Record<InboxKind, { icon: IconName; label: string; section: str
   host_pair: { icon: 'devices', label: 'Pairing', section: 'Host pairing' },
   host_refused: { icon: 'warning', label: 'Refused', section: 'Hosts refused' },
   host_down: { icon: 'link', label: 'Unreachable', section: 'Hosts unreachable' },
+  review: { icon: 'info', label: 'Review', section: 'Steward reviews' },
   verdict: { icon: 'check', label: 'Verdict', section: 'Validator verdicts' },
   stall: { icon: 'warning', label: 'Stalled', section: 'Stalled' },
 };
-/** Host rows come right after permissions: a pairing waits on this human, refusals need a look, a down link can wait. */
-const KIND_ORDER: InboxKind[] = ['permission', 'host_pair', 'host_refused', 'host_down', 'verdict', 'stall'];
+/** Host rows come right after permissions: a pairing waits on this human, refusals need a look, a down link can wait. Reviews come before verdicts. */
+const KIND_ORDER: InboxKind[] = ['permission', 'host_pair', 'host_refused', 'host_down', 'review', 'verdict', 'stall'];
 const HOST_KINDS: readonly InboxKind[] = ['host_pair', 'host_refused', 'host_down'];
 
 /** "just now", "5m ago", "3h ago", "2d ago" from an RFC 3339 instant; unparseable input is shown as it came. */
@@ -87,12 +89,14 @@ function rowTone(item: Pick<InboxItem, 'kind' | 'attention'>): InboxTone {
 }
 
 export function inboxRow(item: InboxItem, now: number): InboxRowView {
-  const meta = KIND_META[item.kind];
+  // An unknown kind (a daemon newer than this app) still renders: it never throws.
+  const meta = KIND_META[item.kind] ?? { icon: 'info' as IconName, label: String(item.kind), section: String(item.kind) };
   return {
     key: item.key,
     kind: item.kind,
     taskId: item.taskId ?? item.links?.taskId ?? null,
     hostId: item.links?.hostId ?? null,
+    reviewId: item.links?.reviewId ?? null,
     // A verdict that needs a decision (fail, blocked, scope violation) must not wear the green check of a pass.
     icon: item.kind === 'verdict' && item.attention === 'high' ? 'warning' : meta.icon,
     label: item.kind === 'verdict' ? (item.attention === 'high' ? 'Needs a decision' : 'Passed') : meta.label,

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ICONS as icons } from '../ui/icons';
-import { inboxActions, inboxAnnouncement, inboxBadgeLabel, inboxView, relativeTime, SNOOZE_CAP_MS, snoozeOptions } from '../inbox/view';
+import { inboxActions, inboxAnnouncement, inboxBadgeLabel, inboxRow, inboxView, relativeTime, SNOOZE_CAP_MS, snoozeOptions } from '../inbox/view';
 import { inboxItem } from './inboxFixtures';
 
 const NOW = Date.parse('2026-10-27T10:30:00Z');
@@ -120,5 +120,30 @@ describe('time and accessibility text', () => {
     );
     const tones = v.kind === 'list' ? v.sections.flatMap((s) => s.rows.map((r) => r.tone)) : [];
     expect(tones).toEqual(['waiting', 'warning', 'neutral', 'neutral']);
+  });
+});
+
+describe('steward review rows', () => {
+  it('review row model', () => {
+    const item = inboxItem({ key: 'review:21', kind: 'review', links: { taskId: 7, reviewId: 21 }, summary: 'PR #812 at 3fa9c1e', attention: 'high' });
+    const row = inboxRow(item, NOW);
+    expect(row.label).toBe('Review');
+    expect(row.icon).toBe('info');
+    expect(row.reviewId).toBe(21);
+    expect(row.taskId).toBe(7);
+    expect(row.tone).toBe('warning');
+    expect(row.summary).toBe('PR #812 at 3fa9c1e'); // no verdict prefix: the card adds it, not the row
+    for (const a of ['snooze', 'resolve', 'open']) expect(row.actions).toContain(a);
+
+    const v = inboxView([item, verdict], NOW);
+    expect(v.kind).toBe('list');
+    if (v.kind !== 'list') return;
+    expect(v.sections.map((s) => s.title)).toEqual(['Steward reviews', 'Validator verdicts']);
+    expect(v.sections[0].rows.map((r) => r.key)).toEqual(['review:21']);
+    expect(v.sections[1].rows.map((r) => r.key)).toEqual(['verdict:1']);
+
+    const future = inboxRow(inboxItem({ key: 'future:1', kind: 'future_kind' as never, title: 'Later' }), NOW);
+    expect(future.label).toBe('future_kind');
+    expect(future.icon).toBe('info');
   });
 });
