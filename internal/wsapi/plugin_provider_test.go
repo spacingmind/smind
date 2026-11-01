@@ -20,6 +20,13 @@ const providerSecretSentinel = "SENTINEL-provider-secret-5521"
 // they do not run in parallel.
 func newProviderPluginEnv(t *testing.T) *contribEnv {
 	t.Helper()
+	return newProviderPluginEnvWith(t, "#!/bin/sh\nexit 0\n", "")
+}
+
+// newProviderPluginEnvWith is the same with the agent file's body and an
+// extra provider-entry fragment (for example a health block).
+func newProviderPluginEnvWith(t *testing.T, agentBody, extra string) *contribEnv {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("plugins:\n  enabled: true\n"), 0o644); err != nil {
@@ -39,8 +46,8 @@ func newProviderPluginEnv(t *testing.T) *contribEnv {
 	manifest := `{"id":"acme","name":"Acme","version":"1.0.0","api":1,"engines":{"smind":">=0.1.0"},
 		"contributes":{"providers":[{"id":"agent","label":"Acme agent","icon":"Bot",
 		"acp":{"command":["bin/agent","--acp"],"secretEnv":[{"name":"ACME_API_KEY","label":"Acme key","required":true}]},
-		"models":[{"id":"big","default":true}],"modes":[{"id":"ask"}]}]}}`
-	for name, body := range map[string]string{"smind-plugin.json": manifest, "bin/agent": "#!/bin/sh\nexit 0\n"} {
+		"models":[{"id":"big","default":true}],"modes":[{"id":"ask"}]`+extra+`}]}}`
+	for name, body := range map[string]string{"smind-plugin.json": manifest, "bin/agent": agentBody} {
 		full := filepath.Join(src, name)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
@@ -194,5 +201,69 @@ func TestPluginProvider_ReloadKeepsPluginLayer_AndEventsPublished(t *testing.T) 
 	sub.mu.Unlock()
 	if n != 1 {
 		t.Fatalf("disable published %d provider.updated events, want 1", n)
+	}
+}
+
+// markerPlugin is a plugin whose agent file writes a marker when EXECUTED
+// (by anything: a version probe, a spawn). Nothing may ever run it before the
+// scrubbed launch exists.
+func markerPlugin(t *testing.T, health string) (*contribEnv, string) {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "executed")
+	body := "#!/bin/sh\necho ran > '" + marker + "'\necho 'agent 9.9.9'\n"
+	return newProviderPluginEnvWith(t, body, health), marker
+}
+
+func (e *contribEnv) providerTest(t *testing.T, id string) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal([]byte(e.json(t, "provider.test", localRC(), map[string]any{"provider": id})), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestProviderTest_PluginProvider_NeverExecutesTheCommand: provider.test on a
+// plugin provider reports the lookup of argv[0] and the hints, and never runs
+// the plugin's binary (no version probe), with a versionArg or without one.
+func TestProviderTest_PluginProvider_NeverExecutesTheCommand(t *testing.T) {
+	for name, health := range map[string]string{
+		"version arg set":   `,"health":{"install":"npm i -g acme","login":"run acme login","versionArg":"--version","minVersion":"1.0.0"}`,
+		"version arg unset": `,"health":{"install":"npm i -g acme","login":"run acme login"}`,
+		"no health":         "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			e, marker := markerPlugin(t, health)
+			res := e.providerTest(t, "acme/agent")
+			if res["ok"] != true || !strings.Contains(res["detail"].(string), "agent") {
+				t.Fatalf("the lookup must still report the file: %v", res)
+			}
+			if strings.Contains(res["detail"].(string), "9.9.9") {
+				t.Fatalf("a version was read, so the binary ran: %v", res)
+			}
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatal("provider.test EXECUTED the plugin's command")
+			}
+			if strings.Contains(health, "versionArg") && !strings.Contains(res["detail"].(string), "version check") {
+				t.Fatalf("the result should say the version check is not available yet: %v", res)
+			}
+			if strings.Contains(health, "login") && !strings.Contains(res["detail"].(string), "run acme login") {
+				t.Fatalf("login hint missing: %v", res)
+			}
+		})
+	}
+}
+
+func TestProviderTest_PluginProvider_RelaySessionStillNeverExecutes(t *testing.T) {
+	e, marker := markerPlugin(t, `,"health":{"versionArg":"--version"}`)
+	if _, err := e.call("provider.test", relayRC(), map[string]any{"provider": "acme/agent"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a relay provider.test executed the plugin's command")
+	}
+	// An agent connection cannot reach provider.test at all.
+	if !runScopedSet["provider.list"] || runScopedSet["provider.test"] {
+		t.Fatal("provider.test must not be callable by run-scoped agents")
 	}
 }

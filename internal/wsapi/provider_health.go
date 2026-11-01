@@ -30,6 +30,9 @@ var versionToken = regexp.MustCompile(`^(\d+(?:\.\d+)*)`)
 // VersionArg, and never when VersionArg is empty.
 func testProviderSpec(spec providers.Spec) providerTestResult {
 	res := testProviderCLI(spec.HealthCommand)
+	if spec.Plugin != "" {
+		return testPluginProviderSpec(spec, res)
+	}
 	if !res.OK {
 		if spec.Health.Install != "" {
 			res.Detail += "; install: " + spec.Health.Install
@@ -53,6 +56,28 @@ func testProviderSpec(spec providers.Spec) providerTestResult {
 	}
 	if spec.Health.Unverified {
 		res.Detail += "; not verified against a real login"
+	}
+	return res
+}
+
+// testPluginProviderSpec is the health check of a plugin provider: it NEVER
+// executes the plugin's command. A version probe would run plugin-controlled
+// code with the daemon's whole environment; the scrubbed, confined launch that
+// may do that arrives with PD2 (docs/plans/active/plugins-wave-d.md, AD18).
+// Until then it reports only whether argv[0] resolves (a stat), the install
+// and login hints, and that the version check is not available yet.
+func testPluginProviderSpec(spec providers.Spec, res providerTestResult) providerTestResult {
+	if !res.OK {
+		if spec.Health.Install != "" {
+			res.Detail += "; install: " + spec.Health.Install
+		}
+		return res
+	}
+	if spec.Health.VersionArg != "" {
+		res.Detail += "; version check is not available for plugin providers yet"
+	}
+	if spec.Health.Login != "" {
+		res.Detail += "; login: " + spec.Health.Login
 	}
 	return res
 }
