@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -46,7 +47,12 @@ rules:
 	}
 	branch := *task.Branch
 	d := runPermissionDecider{reg: reg, r: r}
-	ctx := context.Background()
+	// Bound every Decide call in this test: if a floor or rule regression
+	// turns one into an ask, the decider would otherwise park the request
+	// and wait out the full human timeout. A deadline makes the ask path's
+	// ctx.Done() case return an error within 10 s instead.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	// (1) Pushing the task's own branch is allowed by the rule, with no
 	// human involved: no pending request, no notification, and a resolved
