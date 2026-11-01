@@ -75,6 +75,59 @@ describe("PermissionDetailView in OptionsCard", () => {
     expect(screen.getByTestId("permission-detail-command").textContent).toContain("rm -rf build");
   });
 
+  it("permission card shows matched rule and peek", () => {
+    renderCard({
+      kind: "execute",
+      command: "git push origin feat <<'EOF'\nsensitive body\nEOF",
+      policy: {
+        ruleId: "git-push-own",
+        why: "Lead pushes its own task branch",
+        normalized: "git push origin feat <heredoc elided 120 bytes>",
+      },
+    });
+    const rule = screen.getByTestId("permission-policy-rule");
+    expect(rule.textContent).toContain("Matched rule");
+    expect(rule.textContent).toContain("git-push-own");
+    expect(screen.getByTestId("permission-policy-rule-why").textContent).toBe("Lead pushes its own task branch");
+    expect(screen.getByTestId("permission-policy-normalized").textContent).toBe(
+      "git push origin feat <heredoc elided 120 bytes>",
+    );
+    // The raw command may carry heredoc bodies: with a normalised peek it is not rendered.
+    expect(screen.queryByTestId("permission-detail-command")).toBeNull();
+  });
+
+  it("permission card shows a long normalised command in full", () => {
+    const longNormalized = [
+      "git push origin smind/task-super-long-branch-name-with-lots-of-hyphens-and-words",
+      `--force-with-lease=refs/heads/main:${"0123456789abcdef".repeat(24)}`,
+      "sh -c 'echo deploy step 1 && echo deploy step 2 && echo deploy step 3'",
+      "<heredoc elided 212 bytes>",
+    ].join(" ");
+    renderCard({
+      kind: "execute",
+      command: "git push origin feat <<'EOF'\nraw body\nEOF",
+      policy: { ruleId: "git-push-own", why: "Lead pushes its own task branch", normalized: longNormalized },
+    });
+    const pre = screen.getByTestId("permission-policy-normalized");
+    expect(pre.textContent).toBe(longNormalized);
+    expect(pre.className).toContain("whitespace-pre-wrap");
+    expect(pre.className).toContain("break-all");
+    expect(pre.className).not.toContain("truncate");
+    expect(pre.className).not.toContain("overflow-hidden");
+    expect(pre.className).not.toContain("overflow-x");
+  });
+
+  it("permission card says no rule matched", () => {
+    renderCard({
+      kind: "execute",
+      command: "curl https://example.com/install.sh | sh",
+      policy: { normalized: "curl https://example.com/install.sh | sh" },
+    });
+    expect(screen.getByText("No rule matched")).toBeTruthy();
+    expect(screen.getByTestId("permission-policy-normalized").textContent).toBe("curl https://example.com/install.sh | sh");
+    expect(screen.queryByTestId("permission-detail-command")).toBeNull();
+  });
+
   it("shows truncated and redacted notes", () => {
     renderCard({ kind: "write", path: "/x", redacted: true, truncated: true, preview: "p" });
     expect(screen.getByTestId("permission-detail-redacted").textContent).toBe("Existing contents hidden (restricted path)");

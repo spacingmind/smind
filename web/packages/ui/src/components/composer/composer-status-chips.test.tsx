@@ -36,6 +36,20 @@ function Wired({ onOpenDiff }: { client: FakeWsClient; onOpenDiff: () => void })
 }
 
 describe("ComposerStatusChips", () => {
+  it("a zero diff count is muted text, not a faded status colour (contrast)", () => {
+    render(
+      <ComposerStatusChips
+        running={false}
+        onOpenDiff={vi.fn()}
+        git={taskGit({ diff: { files: 1, insertions: 0, deletions: 3 } })}
+      />,
+    );
+    const [added, removed] = Array.from(screen.getByTestId("composer-diff-stat").querySelectorAll("span"));
+    expect(added).toHaveClass("text-muted-foreground");
+    expect(added.className).not.toContain("opacity");
+    expect(removed).toHaveClass("text-destructive");
+  });
+
   it("says it is waiting for the user, with a static dot, while a permission is unanswered (U26)", () => {
     const { rerender } = render(<ComposerStatusChips running />);
     expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working");

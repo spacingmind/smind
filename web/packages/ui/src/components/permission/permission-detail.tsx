@@ -106,6 +106,38 @@ function GitRuleView({ rule }: { rule: GitRule }) {
 }
 
 /**
+ * The policy engine's footprint (ADR-0047 §2): which rule matched and the normalised command it
+ * judged — the "peek", with heredoc bodies already elided by the daemon. Plain text only.
+ */
+function PolicyLine({ policy }: { policy: NonNullable<PermissionDetail["policy"]> }) {
+  return (
+    <div data-testid="permission-policy-rule" className="flex flex-col gap-1 text-ui-xs text-foreground-muted">
+      <div className="flex items-center gap-1.5">
+        <Icons.permission className="size-3.5 shrink-0" />
+        <span>
+          {policy.ruleId ? (
+            <>
+              Matched rule <span className="font-mono">{policy.ruleId}</span>
+            </>
+          ) : (
+            "No rule matched"
+          )}
+        </span>
+      </div>
+      {policy.ruleId && policy.why && <div data-testid="permission-policy-rule-why">{policy.why}</div>}
+      {policy.normalized && (
+        <pre
+          data-testid="permission-policy-normalized"
+          className="max-h-60 overflow-y-auto whitespace-pre-wrap break-all rounded border border-border bg-surface px-2 py-1 font-mono text-ui-xs"
+        >
+          {policy.normalized}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/**
  * The structured "what is this write/edit/command about to do" block shown
  * inside a permission card (dogfood-gap-fixes AC3). Rendered only when the
  * daemon sent a `detail`.
@@ -160,7 +192,8 @@ export function PermissionDetailView({ detail }: { detail: PermissionDetail }) {
         </details>
       )}
       {detail.gitRule && <GitRuleView rule={detail.gitRule} />}
-      {detail.command && !detail.gitRule && (
+      {detail.policy && <PolicyLine policy={detail.policy} />}
+      {detail.command && !detail.gitRule && !detail.policy?.normalized && (
         <div data-testid="permission-detail-command">
           <pre className="max-h-[5.5rem] overflow-auto rounded border border-border bg-surface px-2 py-1 font-mono text-ui-xs">
             {detail.command}

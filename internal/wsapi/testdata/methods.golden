@@ -131,6 +131,7 @@ space.get
 space.list
 steward.cancel
 steward.digest.get
+steward.frame
 steward.get
 steward.list
 steward.review

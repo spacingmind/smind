@@ -17,6 +17,7 @@ import (
 	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/ghctx"
 	"github.com/spacingmind/smind/internal/gitstate"
+	"github.com/spacingmind/smind/internal/inbox"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/plugins"
@@ -367,6 +368,46 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	reg.AddObserver(newStewardObserver(stewardH, db))
 	hs["session.identify"] = handleSessionIdentify(reg)
 	inboxH := newInboxHost(db, bus, reg, newValidationService(db, bus), stalled, fleetInboxPairs(db, configFleetEnabled))
+	// The inbox's review rows come from the steward reviews: one current
+	// (newest, finished) review per live task, with only the fields the
+	// summary is allowed to carry.
+	inboxH.setReviews(func() ([]inbox.Review, error) {
+		views, err := stewardSvc.List(0, 200)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[int64]bool{}
+		var out []inbox.Review
+		for _, v := range views { // newest first
+			if seen[v.TaskID] {
+				continue
+			}
+			seen[v.TaskID] = true
+			if v.Status != "done" && v.Status != "blocked" {
+				continue
+			}
+			if t, err := db.GetTask(v.TaskID); err != nil || t.ArchivedAt != nil {
+				continue
+			}
+			failing := make([]string, 0, len(v.Gates))
+			for _, g := range v.Gates {
+				if g.Failing() {
+					failing = append(failing, g.ID)
+				}
+			}
+			out = append(out, inbox.Review{ID: v.ID, TaskID: v.TaskID, Verdict: v.Verdict, Status: v.Status, Stale: v.Stale,
+				ValidationID: v.ValidationID, HeadSHA: v.HeadSHA, PRNumber: v.PRNumber, FailingGates: failing, CreatedAt: v.CreatedAt})
+		}
+		return out, nil
+	})
+	// A landed review changes the inbox (a review row appears or replaces a
+	// verdict row) and steward.updated alone does not re-derive it, so the
+	// service's publish pokes the inbox too.
+	origStewardPublish := stewardSvc.Publish
+	stewardSvc.Publish = func(taskID, id int64, status string) {
+		origStewardPublish(taskID, id, status)
+		inboxH.Poke()
+	}
 	for method, h := range inboxHandlers(inboxH) {
 		hs[method] = h
 	}

@@ -29,8 +29,8 @@ function DiffStatChip({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => 
       className={`${CHIP_CLASS} transition-colors hover:bg-hover hover:text-foreground`}
     >
       <Icons.diff aria-hidden className="size-3 opacity-70" />
-      <span className={`font-medium text-success${stat.additions === 0 ? " opacity-50" : ""}`}>+{formatCompactCount(stat.additions)}</span>
-      <span className={`font-medium text-destructive${stat.deletions === 0 ? " opacity-50" : ""}`}>−{formatCompactCount(stat.deletions)}</span>
+      <span className={`font-medium ${stat.additions === 0 ? "text-muted-foreground" : "text-success"}`}>+{formatCompactCount(stat.additions)}</span>
+      <span className={`font-medium ${stat.deletions === 0 ? "text-muted-foreground" : "text-destructive"}`}>−{formatCompactCount(stat.deletions)}</span>
     </button>
   );
 }

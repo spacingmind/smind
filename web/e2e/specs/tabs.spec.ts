@@ -14,7 +14,8 @@ test('J19/A-02 the header terminal button opens exactly one Terminal tab and the
   await expect(tabs).toHaveCount(1)
   await expect(tabs.first()).toContainText('Terminal')
   const rows = page.locator('.xterm-rows:visible').first()
-  await expect(rows).toContainText(/[%$#]\s*$/m, { timeout: 15_000 })
+  // the prompt ends in %, $ or # on POSIX shells and in > on Windows PowerShell ("PS C:\...>")
+  await expect(rows).toContainText(/[%$#>]\s*$/m, { timeout: 15_000 })
 
   // a second click focuses the existing tab, it does not open another
   await page.getByTestId('app-header-terminal').click()

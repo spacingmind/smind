@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -191,9 +192,19 @@ func (s *Service) FlagScopeViolation(reviewID int64) error {
 	return nil
 }
 
+// FrameView is one evidence frame of the digest as the review card reads it:
+// the base name only, never the absolute path.
+type FrameView struct {
+	Name        string `json:"name"`
+	Viewport    int    `json:"viewport"`
+	Theme       string `json:"theme"`
+	CapturedSHA string `json:"capturedSha"`
+}
+
 // View is a review as read: its verdicts, the computed staleness and the
 // merge-ready label. MergeReady is derived on every read, never stored. The
-// view never carries the token hash or the digest.
+// view never carries the token hash or the digest; the frames carry only
+// their base names, so the scratch path stays out.
 type View struct {
 	ID             int64         `json:"id"`
 	TaskID         int64         `json:"taskId"`
@@ -209,6 +220,8 @@ type View struct {
 	BlockedReason  string        `json:"blockedReason,omitempty"`
 	Findings       []SeatFinding `json:"findings"`
 	Gates          []Gate        `json:"gates"`
+	PRNumber       int           `json:"prNumber,omitempty"`
+	Frames         []FrameView   `json:"frames"`
 	Stale          string        `json:"stale,omitempty"`
 	MergeReady     bool          `json:"mergeReady"`
 	NotReadyReason string        `json:"notReadyReason,omitempty"`
@@ -268,22 +281,32 @@ func (s *Service) view(row store.StewardReview, latestReviewID int64) (View, err
 		ValidationID: row.ValidationID, CIState: row.CIState, Status: row.Status, Verdict: row.Verdict, SeatVerdict: row.SeatVerdict,
 		Summary: row.Summary, BlockedReason: row.BlockedReason, ScopeViolation: row.ScopeViolation, CostUSD: row.CostUSD,
 		RunID: row.RunID, StewardTaskID: row.StewardTaskID, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt,
-		Findings: []SeatFinding{}, Gates: []Gate{}}
+		Findings: []SeatFinding{}, Gates: []Gate{}, Frames: []FrameView{}}
 	if row.FindingsJSON != "" {
 		if err := json.Unmarshal([]byte(row.FindingsJSON), &v.Findings); err != nil {
 			return View{}, fmt.Errorf("steward review %d: findings: %w", row.ID, err)
 		}
 	}
+	var digest Digest
+	haveDigest := false
+	if strings.TrimSpace(row.DigestJSON) != "" {
+		haveDigest = json.Unmarshal([]byte(row.DigestJSON), &digest) == nil
+	}
 	if row.GatesJSON != "" {
 		if err := json.Unmarshal([]byte(row.GatesJSON), &v.Gates); err != nil {
 			return View{}, fmt.Errorf("steward review %d: gates: %w", row.ID, err)
 		}
-	} else if strings.TrimSpace(row.DigestJSON) != "" {
+	} else if haveDigest && len(digest.Gates) > 0 {
 		// A blocked review has no seat verdict, so no stored gates: the
 		// digest's gates are still the review's objective state.
-		var digest Digest
-		if json.Unmarshal([]byte(row.DigestJSON), &digest) == nil && len(digest.Gates) > 0 {
-			v.Gates = digest.Gates
+		v.Gates = digest.Gates
+	}
+	if haveDigest {
+		if digest.PR != nil {
+			v.PRNumber = digest.PR.Number
+		}
+		for _, f := range digest.Frames.Items {
+			v.Frames = append(v.Frames, FrameView{Name: filepath.Base(f.Path), Viewport: f.Viewport, Theme: f.Theme, CapturedSHA: f.CapturedSHA})
 		}
 	}
 	headNow := ""

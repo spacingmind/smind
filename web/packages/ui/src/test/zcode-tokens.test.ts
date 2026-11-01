@@ -16,6 +16,12 @@ const FIXTURE: Record<string, { light: string; dark: string } | string> = JSON.p
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), "zcode-tokens.fixture.json"), "utf-8"),
 );
 
+/**
+ * Deliberate deviations from ZCode's light values (`$overrides` in the fixture): each carries our light value and
+ * why. Dark is never overridden. A token that drifts WITHOUT an entry here still fails.
+ */
+const OVERRIDES = FIXTURE.$overrides as unknown as Record<string, { light: string; reason: string }>;
+
 /** The `{selector} { ... }` block (first occurrence), brace-balanced. */
 function block(selector: string): string {
   const start = INDEX_CSS.indexOf(`${selector} {`);
@@ -77,8 +83,15 @@ describe("ZCode token fixture parity (zcode-visual-parity plan, P1)", () => {
   const tokens = Object.keys(FIXTURE).filter((k) => !k.startsWith("$"));
 
   it.each(tokens)("%s resolves in :root (light)", (token) => {
-    const expected = (FIXTURE[token] as { light: string; dark: string }).light;
+    const expected = OVERRIDES[token]?.light ?? (FIXTURE[token] as { light: string; dark: string }).light;
     expect(resolve(lightMap, token)).toBe(expected);
+  });
+
+  it("every override names a real token and a reason", () => {
+    for (const [token, o] of Object.entries(OVERRIDES)) {
+      expect(tokens, token).toContain(token);
+      expect(o.reason.length, token).toBeGreaterThan(10);
+    }
   });
 
   it.each(tokens)("%s resolves in .dark", (token) => {

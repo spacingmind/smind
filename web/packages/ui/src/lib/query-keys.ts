@@ -85,6 +85,20 @@ export const queryKeys = {
    * would flash "already answered" over the card before its row leaves the list.
    */
   inboxRequest: (runId: string, requestId: string) => ["inbox.request", runId, requestId] as const,
+  /** One steward review (`steward.get`, ADR-0047 §5): commit-bound, re-read by the `steward.updated` event. */
+  stewardReview: (reviewId: number) => ["steward", "review", reviewId] as const,
+  /**
+   * One evidence frame's bytes (`steward.frame`). Deliberately NOT under the "steward" prefix (the
+   * `inboxRequest` precedent): a frame is immutable per review, and `steward.updated` invalidating
+   * `stewardAll()` would otherwise re-read every multi-megabyte frame on each event.
+   */
+  stewardFrame: (reviewId: number, name: string) => ["steward.frame", reviewId, name] as const,
+  /** Partial key: every cached steward read (a prefix, for the event bridge). */
+  stewardAll: () => ["steward"] as const,
+  /** `policy.get` (ADR-0047 §2): the human-edited policy file's status and rules; nothing invalidates it live. */
+  policyStatus: () => ["policy", "get"] as const,
+  /** `policy.audit` (ADR-0047 §2.3): append-only newest-first rows, read when the policy page opens. */
+  policyAudit: () => ["policy", "audit"] as const,
   /** `skill.list`: bundled skills and the active plugins' `<plugin>:<skill>` entries. */
   skillList: () => ["skill.list"] as const,
   /** `plugin.commands`: the prompt slash commands of the active plugins; refetched on `plugin.updated`. */
