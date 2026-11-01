@@ -156,6 +156,7 @@ No P0 found. Severity: P0 data loss/crash/blocked flow, P1 broken feature or wro
 | A-05 (FIXED in phase-2 PR4: folders first, .git hidden) | J22 | P3 | File explorer lists `.git` and puts folders after files. 4/4 | `j22-tree-light-1280.png` | `file-explorer-pane.tsx` / `files.list` |
 | A-14 | J06 | P3 | "New task" with nothing selected opens the generic palette. | - | `app-sidebar.tsx` |
 | A-15 | J05 | P3 | Bad-path error shows raw server wording. | `j05-b-light-1280.png` | daemon error text |
+| B-11 | J49 | P3 | The chat tabpanel (`role=tabpanel`, `tabindex=0`, `outline-none`) is a keyboard stop with no visible focus ring; the e2e suite tolerates it with a `known-b11` annotation. Not fixed. | - | chat tabpanel (`components/ui/tabs.tsx`) |
 
 Counts: 0 P0, 4 P1, 11 P2, 12 P3 (27 entries; B-02 and S-01/S-02 included in P2).
 
