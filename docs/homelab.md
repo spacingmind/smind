@@ -190,8 +190,11 @@ user's rights. Choose a long, unique one (the minimum is 12 characters; there is
 
 ## Path B: relay
 
-> **Hosted relay: pending.** A public relay operated for smind users is planned but does not exist yet, so for now you run
-> your own relay. `smind relay connect` always takes an address today.
+> **Hosted relay: pending.** A public relay operated for smind users is planned but does not exist yet (it waits for the mobile
+> app to be published, which has not happened), so for now you run your own relay. `smind relay connect` always takes an
+> address today. For a hostname the phone trusts without managing a certificate or opening ports, see
+> [Self-host the relay with Cloudflare Tunnel](../public-docs/mobile-and-relay.md#self-host-the-relay-with-cloudflare-tunnel):
+> a tunnel carries the phone's gRPC-web port, not the daemon's native gRPC, so the daemon dials the relay directly.
 
 ### 1. Run a relay
 
@@ -531,4 +534,5 @@ only have to turn notifications on again.
 
 - Same LAN or VPN, nothing to host: a direct connection (password), or an SSH tunnel.
 - Phone, laptop on another network, or a daemon behind NAT: a relay.
-- A hosted relay (no server to run) is planned; this page will say when it is available.
+- A hosted relay (no server to run) is planned for after the mobile app is published; this page will say when it is available.
+  Until then a relay behind a Cloudflare Tunnel is the easiest self-hosted setup for a phone.
