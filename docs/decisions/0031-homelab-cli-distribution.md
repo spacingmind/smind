@@ -3,6 +3,7 @@
 ## Status
 
 **Accepted (2026-10-14), except decisions 12, 27–32 and 36, which remain Open** (the hosted relay and everything it gates).
+**Update 2026-11-01 (Human): decision 12 is PENDING until the mobile app publishes (target about 2 months from 2026-11-01); self-hosting via Cloudflare Tunnel is documented meanwhile** (`public-docs/mobile-and-relay.md`). There is no published mobile app yet (users build it from source) and no public relay. Both hosting options below stay parked with it, and so do the decisions it gates (27–32, 36). A finding from the Tunnel write-up: a Cloudflare Tunnel *public hostname* cannot carry the daemon's native gRPC (Cloudflare: "Cloudflare Tunnel supports gRPC traffic via private subnet routing. Public hostname deployments are not currently supported."), so a self-hosted relay behind a Tunnel exposes only its gRPC-web port to phones and the daemon dials the relay directly.
 **Decision 9 (direct connections with a password, D8) was Accepted on 2026-10-15** with the recommended default. The accepted decisions are listed under "Decisions (accepted 2026-10-14)"
 with the default the Human approved; the Open ones stay under "Open decisions for Human", and **every PR they gate stays
 BLOCKED** in the plan
@@ -1001,6 +1002,8 @@ not port `reload` (hot reload) yet.
 
 ### D11. Hosted relay at `relay.spacingmind.com` — PENDING (hosting not decided)
 
+**Update 2026-11-01:** parked until the mobile app is close to publishing (about 2 months out); until then self-hosting is documented, with Cloudflare Tunnel as the way to a CA-trusted hostname (see the Status update and decision 12).
+
 **Decided so far (Human, 2026-10-13/14):** the hosted relay's name is `relay.spacingmind.com`; DNS is on
 Cloudflare (spacingmind.com is on the same account that deploys the landing site); the trust model below is
 accepted; deploys are gated by a GitHub Environment with required reviewers; the relay-side "workspace" is renamed
@@ -1323,7 +1326,7 @@ These remain **Open** (Human, 2026-10-14): the hosted relay (12 and everything i
 recommended default or its option list; **every PR they gate is BLOCKED in the plan.** (Decision 9, direct connections with a
 password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
 
-12. **⏳ Hosted relay hosting — PENDING (Human, 2026-10-14).** Options in D11: **(D)** Cloudflare's gRPC proxy (Network →
+12. **⏳ Hosted relay hosting — PENDING until the mobile app publishes (target ~2 months from 2026-11-01; Human, 2026-11-01); self-hosting via Tunnel is documented meanwhile (Human, first parked 2026-10-14).** Options in D11: **(D)** Cloudflare's gRPC proxy (Network →
     gRPC; origin on 443 with TLS + HTTP/2/ALPN; proxied record, SSL/TLS Full; 125 s read / 30 s write timeouts, so 30–60 s
     keepalive and client reconnect; Access ignores gRPC) in front of the unchanged Go relay on **Cloud Run** (documented
     bidi gRPC, streams capped at 60 min) or a **small VPS**; **(C)** the unchanged Go relay in **Cloudflare Containers behind a

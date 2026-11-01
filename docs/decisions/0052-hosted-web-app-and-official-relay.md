@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — 2026-11-01. A DRAFT FOR THE HUMAN. No code, nothing built, nothing decided.** This document lays out the options, what each
+**Proposed — 2026-11-01. A DRAFT FOR THE HUMAN. No code, nothing built, nothing decided.** *Update 2026-11-01 (Human): this ADR and the hosted relay are parked until the mobile app is close to publishing (about 2 months out); self-hosting with Cloudflare Tunnel is documented meanwhile (ADR-0031 decision 12, `public-docs/mobile-and-relay.md`).* This document lays out the options, what each
 costs and what each puts at risk, and ends with the decisions only the Human can make ([H1–H14](#human-decisions)). Nothing here is a recommendation
 to merge anything; a "Lead's lean" is marked as one and is not a decision.
 
