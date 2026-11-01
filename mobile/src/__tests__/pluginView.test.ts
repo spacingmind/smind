@@ -153,6 +153,19 @@ describe('plugin view model', () => {
     expect(children[1]).toMatchObject({ kind: 'unsupported', nodeType: 'hologram', path: 'root.children[1]' });
   });
 
+  it('a node whose property getter throws degrades to unsupported, siblings survive', () => {
+    const bad = Object.defineProperty({ type: 'text' }, 'text', { get() { throw new Error('boom'); }, enumerable: true });
+    const doc = { ui: 1, root: { type: 'stack', children: [{ type: 'text', text: 'before' }, bad, { type: 'text', text: 'after' }] } };
+    const view = buildView(doc);
+    if (view.supported !== true) throw new Error('expected a supported view');
+    expect(view.root.kind).toBe('stack');
+    const children = view.root.kind === 'stack' ? view.root.children : [];
+    expect(children).toHaveLength(3);
+    expect(children[0]).toMatchObject({ kind: 'text', text: 'before' });
+    expect(children[2]).toMatchObject({ kind: 'text', text: 'after' });
+    expect(children[1]).toMatchObject({ kind: 'unsupported', path: 'root.children[1]' });
+  });
+
   it('unsupported ui level', () => {
     expect(buildView({ ui: 2, root: { type: 'text', text: 'x' } })).toEqual({ supported: false });
     expect(buildView('garbage')).toEqual({ supported: false });
