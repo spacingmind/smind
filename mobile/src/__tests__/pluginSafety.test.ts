@@ -66,7 +66,7 @@ describe('no eval / new Function in the web plugin renderer', () => {
 });
 
 describe('plugin screens render plugin text as plain text', () => {
-  const screens = ['src/screens/PluginsScreen.tsx', 'src/screens/PluginDetailScreen.tsx', 'src/screens/plugins/PluginRow.tsx', 'src/screens/plugins/ThemePicker.tsx', 'src/screens/task/SlashSuggestions.tsx'];
+  const screens = ['src/screens/PluginsScreen.tsx', 'src/screens/PluginDetailScreen.tsx', 'src/screens/PluginPanelScreen.tsx', 'src/screens/plugins/PluginRow.tsx', 'src/screens/plugins/ThemePicker.tsx', 'src/screens/task/SlashSuggestions.tsx'];
 
   it('no HTML sinks, no markdown renderer, no image, no URL fetch, no dynamic import in the plugin screens', () => {
     for (const rel of screens) {
