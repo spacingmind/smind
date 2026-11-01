@@ -16,6 +16,7 @@ import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { Badge } from '../ui/Badge';
 import { EmptyState } from '../ui/EmptyState';
+import { AppIcon } from '../ui/AppIcon';
 import { LINK_WARNING_TEXT } from '../plugins/listView';
 import { SectionHeader } from './tasks/SectionHeader';
 
@@ -59,13 +60,16 @@ export function PluginDetailScreen({ conn, id }: { conn: RelayConnection; id: st
           {panelList.map((p) => (
             <Pressable
               key={p.id}
-              style={styles.item}
+              style={styles.panelRow}
               accessibilityRole="button"
               accessibilityLabel={p.title}
               onPress={() => router.push(pluginPanelHref(id, p.id))}
             >
-              <Text style={styles.itemMain}>{p.title}</Text>
-              <Text style={styles.itemSub}>{`${p.where} panel`}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.itemMain}>{p.title}</Text>
+                <Text style={styles.itemSub}>{`${p.where} panel`}</Text>
+              </View>
+              <AppIcon name="chevronRight" color={theme.foregroundSubtle} />
             </Pressable>
           ))}
         </Section>
@@ -160,6 +164,7 @@ function Item({ main, sub, styles }: { main: string; sub: string; styles: Styles
 }
 
 function makeStyles(theme: AppTheme) {
+  const item = { gap: 2 };
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: theme.background },
     content: { padding: theme.spacing[4], paddingBottom: theme.spacing[8], gap: theme.spacing[2] },
@@ -182,7 +187,8 @@ function makeStyles(theme: AppTheme) {
       padding: theme.spacing[3],
       gap: theme.spacing[3],
     },
-    item: { gap: 2 },
+    item,
+    panelRow: { ...item, flexDirection: 'row', alignItems: 'center' },
     itemMain: { ...theme.type.label, color: theme.foreground },
     itemSub: { ...theme.type.small, color: theme.foregroundSubtle },
     hint: { ...theme.type.small, color: theme.foregroundSubtle, marginTop: theme.spacing[3] },
