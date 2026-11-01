@@ -60,9 +60,9 @@ function badgeTone(tone: Tone | undefined): BadgeTone {
 }
 
 /** A plugin icon ref as an AppIcon: named registry icons as-is, generic degrades to 'info', none renders nothing. */
-function iconElement(icon: IconRef, size: number): ReactNode {
-  if (icon.kind === 'name') return <AppIcon name={icon.name} size={size} />;
-  if (icon.kind === 'generic') return <AppIcon name="info" size={size} />;
+function iconElement(icon: IconRef, size: number, color: string): ReactNode {
+  if (icon.kind === 'name') return <AppIcon name={icon.name} size={size} color={color} />;
+  if (icon.kind === 'generic') return <AppIcon name="info" size={size} color={color} />;
   return null;
 }
 
@@ -114,7 +114,7 @@ function PluginNode({ node, onAction }: { node: ViewNode; onAction: OnAction }) 
     case 'badge':
       return (
         <View style={styles.badgeRow}>
-          {iconElement(node.icon, 16)}
+          {iconElement(node.icon, 16, theme.foregroundSubtle)}
           <Badge tone={badgeTone(node.tone)}>{node.text}</Badge>
         </View>
       );
@@ -226,7 +226,7 @@ function PluginNode({ node, onAction }: { node: ViewNode; onAction: OnAction }) 
     case 'empty':
       return (
         <View style={styles.emptyCol}>
-          {iconElement(node.icon, 20)}
+          {iconElement(node.icon, 20, theme.foregroundSubtle)}
           <Text style={styles.emptyTitle}>{node.title}</Text>
           {node.text !== '' ? <Text style={styles.emptyText}>{node.text}</Text> : null}
         </View>
@@ -262,7 +262,7 @@ function ListRow({ item, onAction }: { item: ListItem; onAction: OnAction }) {
         </Text>
       ) : null}
       {item.badge !== '' ? <Badge>{item.badge}</Badge> : null}
-      {action !== null ? <AppIcon name="chevronRight" /> : null}
+      {action !== null ? <AppIcon name="chevronRight" color={theme.foregroundSubtle} /> : null}
     </>
   );
   if (action === null) return <View style={styles.listRow}>{content}</View>;
