@@ -530,7 +530,7 @@ func TestVerdictSubmit_OldVerdictParamRefusedNamingSubmission(t *testing.T) {
 
 	_, err := budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "verdict": acceptedVerdict(t, e, r.ReviewID)})
 	wantErrCode(t, err, codeInvalid)
-	if err == nil || !strings.Contains(err.Error(), "submission") {
+	if err == nil || !strings.Contains(err.Error(), "not `verdict`") {
 		t.Fatalf("error = %v, want it to name `submission`", err)
 	}
 	if after := e.row(t, r.ReviewID); after.Verdict != "" || after.TokenUsed {
