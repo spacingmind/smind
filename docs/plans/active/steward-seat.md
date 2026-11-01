@@ -164,13 +164,22 @@ Stated limits: a provider adapter that sends no detail (Codex, an ACP non-execut
 - S0 plan + ADR: this PR (docs only, Proposed).
 - S1: implemented 2026-10-31 on one branch (`internal/permpolicy`, audit store, `runs` hook, `policy.*` RPCs, `smind policy`, docs); PR and validator verdict below.
 - S2: seat, review loop, rails, trigger, seed and CLI implemented 2026-10-31 (PR link and validator verdict below once opened); S2b (steward_annotate) deferred to after S4 evidence.
-- S3a: daemon inbox `review` kind, `steward.frame`, web review card, permission policy line, read-only Permission policy page implemented 2026-11-01 (PR and validator verdict below once opened). S3b (mobile), S4, S2b: not started.
+- S3a: daemon inbox `review` kind, `steward.frame`, web review card, permission policy line, read-only Permission policy page implemented 2026-11-01 (PR and validator verdict below once opened). S3b (mobile) and S2b: not started here.
+- S4: fake-LLM end-to-end tests and the one live haiku run done 2026-11-01 (PR below); pilot note `docs/steward-seat-pilot.md`. The Human's own pilot (policy enabled for one workspace, AC30) is not done by an agent.
 
 ## Validation
 
 Filled per PR: each AC → the test that confirms it, the mutation run and its failing test, commands (`task test`, `task lint`, `go test -race` on touched packages, `cd web && bunx
 tsc -b packages/ui`), screenshots for UI. For S1 the parser PR also needs a Windows dispatch (`windows-full-suite.yml --ref <branch> -f packages=internal/permpolicy,internal/runs`):
 path and quoting code is exactly what the nightly has caught before.
+
+### S4 (pilot: fake-LLM end to end, one live haiku review)
+
+AC29: `internal/wsapi/steward_e2e_test.go` (in `wsapi`, not `internal/steward`: the host, the seat RPCs and the inbox only exist there; this is the one deviation from the PR split's write scope). `TestStewardE2E_FakeLLM_AcceptedThenStale` (review via `steward.review` -> scratch worktree -> seat `steward.digest.get` -> `steward.verdict.submit` -> ACCEPTED, mergeReady, one `review:<id>` inbox row; an empty commit on the Lead worktree makes `steward.get` stale, mergeReady false, and the row leaves the inbox), `TestStewardE2E_FakeLLM_CIFailureClampsToChanges` (seat ACCEPTED over a red ci gate stores CHANGES, seatVerdict kept, "clamped" in the summary), `TestStewardE2E_SafetyRails` (a Lead with the correct token is refused, a reused token is invalid, the same key returns the existing review, the hourly cap refuses a new key). `internal/runs/policy_e2e_test.go`: `TestPolicyE2E_PushOwnBranchAllowedStashDenied` (real task and branch: `git push origin <own branch>` allowed by the rule with no human, `git stash` denied by the `no-stash` floor, another branch asks and a human denies, all three audited).
+Mutations (committed work, restored with `git checkout -- <file>`; each FAIL is the named test, none a build failure): `steward/clamp.go` cap disabled -> `TestStewardE2E_FakeLLM_CIFailureClampsToChanges`; `steward/stale.go` head move ignored -> `TestStewardE2E_FakeLLM_AcceptedThenStale`; `steward/rails.go` dedupe lookup disabled -> `TestStewardE2E_SafetyRails`; `permpolicy/floor.go` `stash` no longer a floor -> `TestPolicyE2E_PushOwnBranchAllowedStashDenied`. A fifth, `store/steward.go` `ConsumeStewardToken` without `AND token_used = 0`, SURVIVED the e2e (the write-once review row also refuses the second submit); single use of the token is covered by `TestVerdictSubmit_TokenOnceOnly` (steward) and is a layered defence, not an e2e property.
+AC30: one live review, `claude-haiku-5-5` only, isolated daemon (`~/.smind/dogfood/steward-s4/`, port 4963, guarded script, caps USD 0.30 / 8 min). Result in `docs/steward-seat-pilot.md`: 4 correct findings incl. both planted flaws, BLOCKED (the throwaway repo has no `origin/develop`, so `not_stacked` failed), 20 s, USD 0.0126, digest 1.5 KB; findings: the review row's `costUsd` stays 0 (budget rail is wall-clock only today), tool schema trap (`verdict` object inside `verdict`), 200-byte `blockedReason` cap only visible in the error. Logs: `~/.smind/dogfood/steward-s4/pilot/`, `/tmp/steward-seat-pilot/`.
+Commands: `task lint`, `task test`, `go test -race ./internal/steward ./internal/wsapi ./internal/runs`, `GOOS=windows go vet` on `internal/wsapi internal/runs`.
+Stated limits: the verdict class of the live run is gate-driven (BLOCKED), not the CHANGES a clean gate set would give; autoReview's trigger and the per-task cap are covered by the S2 tests, not re-run here; the Human's pilot (AC30 second half) is not done.
 
 ### S3a (inbox review kind, web review card, policy line, policy page)
 
