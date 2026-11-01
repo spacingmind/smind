@@ -29,7 +29,8 @@ function toneOf(x: unknown): Tone | undefined {
 }
 
 function cellText(cell: unknown): string {
-  if (cell === null || cell === undefined) return '';
+  // A missing cell draws as an en dash, not an empty string, so a null row stays readable.
+  if (cell === null || cell === undefined) return '–';
   if (cell === true) return 'Yes';
   if (cell === false) return 'No';
   if (typeof cell === 'number') return String(cell);

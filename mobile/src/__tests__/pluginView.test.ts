@@ -144,6 +144,12 @@ describe('plugin view model', () => {
     }
   });
 
+  it('null table cells render as an en dash', () => {
+    const root = fixtureView('table').root;
+    if (root.kind !== 'table') throw new Error('expected a table');
+    expect(root.rows[2]).toEqual(['c.go', '–', '–']); // row c.go: both cells '–'
+  });
+
   it('unknown-node-placeholder', () => {
     const view = buildView({ ui: 1, root: { type: 'stack', children: [{ type: 'text', text: 'kept' }, { type: 'hologram', text: 'x' }] } });
     if (view.supported !== true) throw new Error('expected a supported view');
