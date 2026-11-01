@@ -14,32 +14,36 @@ const EXCLUDE: string[] = [
   '[data-testid=task-budget-chip]', // dashed "Set budget" chip: foreground-subtle when no cap is set
 ]
 
-async function contrast(page: Page, label: string, include?: string[]) {
-  const scan = async () => {
-    await pinColorsToRgb(page)
-    let b = new AxeBuilder({ page }).withRules(['color-contrast'])
-    for (const sel of include ?? []) b = b.include(sel)
-    for (const sel of EXCLUDE) b = b.exclude(sel)
-    const r = await b.analyze()
-    return { res: r, judged: r.passes.concat(r.violations).filter((x) => x.id === 'color-contrast').reduce((n, x) => n + x.nodes.length, 0) }
-  }
-  // A scan right after a screen opens can run while it is still painting and judge no node at all (seen on the first
-  // test of a fresh worker); poll that vacuous result until it judges something.
-  let res!: Awaited<ReturnType<typeof scan>>['res']
-  let judged = 0
+/** No finite animation or transition is running (an infinite one, e.g. a pulse, never ends and is ignored) and fonts are loaded. */
+async function settled(page: Page) {
+  await page.evaluate(() => document.fonts.ready.then(() => undefined))
   await expect
-    .poll(
-      async () => {
-        ;({ res, judged } = await scan())
-        return judged
-      },
-      { timeout: 7000, intervals: [100, 250, 500] },
-    )
-    .toBeGreaterThan(0)
-  // the rule must have actually judged text, or a zero-violation result proves nothing
-  expect(judged, `${label}: color-contrast checked nodes`).toBeGreaterThan(0)
+    .poll(() => page.evaluate(() => document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity && a.playState === 'running').length), {
+      message: 'animations settled',
+      intervals: [50, 100, 250],
+    })
+    .toBe(0)
+}
+
+async function contrast(page: Page, label: string, include?: string[]) {
+  await settled(page)
+  await pinColorsToRgb(page)
+  let b = new AxeBuilder({ page }).withRules(['color-contrast'])
+  for (const sel of include ?? []) b = b.include(sel)
+  for (const sel of EXCLUDE) b = b.exclude(sel)
+  const res = await b.analyze()
+  const count = (list: typeof res.passes) => list.filter((r) => r.id === 'color-contrast').reduce((n, r) => n + r.nodes.length, 0)
+  const judged = count(res.passes) + count(res.violations)
+  // the rule must have actually judged text, or a zero-violation result proves nothing: fail loudly, never retry
+  expect(judged, `axe judged no nodes for ${label}: passes=${count(res.passes)} violations=${count(res.violations)} incomplete=${res.incomplete.filter((r) => r.id === 'color-contrast').map((r) => (r as { message?: string }).message ?? r.nodes.length).join(',') || 0}`).toBeGreaterThan(0)
   const found = res.violations.flatMap((v) => v.nodes.map((n) => `${n.target.join(' ')} :: ${(n.any[0]?.message ?? '').slice(0, 200)}`))
   expect(found, `${label}: color-contrast violations`).toEqual([])
+}
+
+/** Every screen starts from a fresh page (the `app` fixture) with nothing open: no dialog, popover or palette left over. */
+async function clean(page: Page) {
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[role=dialog]')).toHaveCount(0)
 }
 
 const ring = (el: Locator) =>
@@ -128,8 +132,10 @@ test('B-05 axe color-contrast: sidebar and home', async ({ app }) => {
     Object.fromEntries(Object.entries(pinned).map(([title, [insertions, deletions]]) => [tasks[title], { files: 2, insertions, deletions }])),
   )
   await app.openApp()
+  await clean(page)
   await app.openDrawer()
   await expect(page.getByTestId('sidebar-quick-actions').first()).toBeVisible()
+  await expect(page.getByTestId('sidebar-task-row').first()).toBeVisible()
   for (const [title, [insertions, deletions]] of Object.entries(pinned)) {
     const row = page.getByTestId('sidebar-task-row').filter({ has: page.getByTestId('task-title').filter({ hasText: new RegExp(`^${title}$`) }) })
     await expect(row.first().getByTestId('sidebar-task-diffstat')).toHaveText(`+${insertions} -${deletions}`)
@@ -140,8 +146,10 @@ test('B-05 axe color-contrast: sidebar and home', async ({ app }) => {
 test('B-05 axe color-contrast: a finished task timeline', async ({ app }) => {
   const { page } = app
   await app.openApp()
+  await clean(page)
   await app.openTask('idle-done')
   await expect(page.getByTestId('app-main-content')).toContainText(/retry backoff/i)
+  await expect(page.getByTestId('run-log-column')).toBeVisible()
   // whole-page scans of the task screen return no result at all (axe gives up on the large DOM), so scan its regions
   await contrast(page, 'task timeline', ['[data-testid=run-log-column]', 'header', '[aria-label=Prompt]'])
 })
@@ -149,16 +157,22 @@ test('B-05 axe color-contrast: a finished task timeline', async ({ app }) => {
 test('B-05 axe color-contrast: Inbox', async ({ app }) => {
   const { page } = app
   await app.openApp()
+  await clean(page)
   await app.openDrawer()
   await page.getByTestId('sidebar-footer-inbox').click()
   await expect(page.getByTestId('inbox-screen')).toBeVisible()
+  // the list has loaded: a group of items, or the empty state, not the pre-fetch shell
+  await expect(page.locator('[data-testid^=inbox-group-]').first().or(page.getByTestId('inbox-empty'))).toBeVisible()
   await contrast(page, 'inbox')
 })
 
 test('B-05 axe color-contrast: Settings -> General', async ({ app }) => {
   const { page } = app
   await app.openApp()
+  await clean(page)
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('smind:open-settings', { detail: { sectionId: 'general' } })))
   await expect(page.getByTestId('settings-screen').first()).toBeVisible()
+  // the General section's own content is mounted, not only the screen frame
+  await expect(page.getByTestId('settings-section-general')).toBeVisible()
   await contrast(page, 'settings general')
 })
