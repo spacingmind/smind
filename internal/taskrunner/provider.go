@@ -151,9 +151,27 @@ type ProviderInfo struct {
 	Unverified   bool     `json:"unverified,omitempty"`
 	Vendor       string   `json:"vendor,omitempty"`
 
+	// Plugin is the plugin that contributes the provider (ADR-0042 Wave D),
+	// Icon the Lucide name it asks for, SecretSlots its declared secret
+	// variables (names and labels, never values), PluginState "disabled" or
+	// "global_off" on an inactive row (provider.list includeInactive). All
+	// additive; empty for every other provider.
+	Plugin      string           `json:"plugin,omitempty"`
+	Icon        string           `json:"icon,omitempty"`
+	SecretSlots []SecretSlotInfo `json:"secretSlots,omitempty"`
+	Inactive    bool             `json:"inactive,omitempty"`
+	PluginState string           `json:"pluginState,omitempty"`
+
 	// Instance is an instance's own overlay as configured (not the merged
 	// catalog), for editing; nil for a non-instance provider. Additive.
 	Instance *InstanceOverlay `json:"instance,omitempty"`
+}
+
+// SecretSlotInfo is one declared secret variable of a plugin provider.
+type SecretSlotInfo struct {
+	Name     string `json:"name"`
+	Label    string `json:"label,omitempty"`
+	Required bool   `json:"required,omitempty"`
 }
 
 // InstanceOverlay is an instance's own editable overlay (provider.updateInstance).
@@ -203,6 +221,12 @@ func infoFromSpec(s providers.Spec) ProviderInfo {
 	}
 	info.Modes, info.DefaultMode = staticModes(s)
 	info.Models = staticModels(s)
+	if s.Plugin != "" {
+		info.Plugin, info.Icon = s.Plugin, s.Icon
+		for _, sl := range s.SecretSlots {
+			info.SecretSlots = append(info.SecretSlots, SecretSlotInfo{Name: sl.Name, Label: sl.Label, Required: sl.Required})
+		}
+	}
 	applyRecipeFields(&info, s)
 	if s.IsInstance() {
 		info.Instance = instanceOverlay(s)

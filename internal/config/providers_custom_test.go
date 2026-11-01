@@ -401,3 +401,23 @@ func TestCodexEndpoint_YAMLRoundTrip(t *testing.T) {
 		t.Fatalf("registry instance = %+v", inst.Endpoint)
 	}
 }
+
+func TestCustomProvider_ExtendsPluginProvider_Refused(t *testing.T) {
+	useHome(t, "providers:\n  custom:\n    - {id: mine, extends: \"acme/agent\"}\n")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "providers.custom[0].extends") || !strings.Contains(err.Error(), "provided by a plugin") {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
+func TestConfig_ProvidersKey_PluginIDRejected(t *testing.T) {
+	// A custom id can never contain "/", so it cannot be, or shadow, a plugin id.
+	useHome(t, "providers:\n  custom:\n    - {id: \"acme/agent\", command: x}\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "providers.custom[0].id") {
+		t.Fatalf("Load() error = %v", err)
+	}
+	useHome(t, "providers:\n  \"acme/agent\":\n    defaultModel: x\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("a plugin id as a providers.<id> key: error = %v", err)
+	}
+}

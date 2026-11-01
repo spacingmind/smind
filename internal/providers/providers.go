@@ -123,6 +123,12 @@ type Endpoint struct {
 	BaseURL string
 }
 
+// SecretSlot is a secret environment variable a plugin provider declares.
+type SecretSlot struct {
+	Name, Label string
+	Required    bool
+}
+
 // Spec is one provider. The zero values of the optional fields mean "none".
 type Spec struct {
 	ID    string
@@ -141,6 +147,10 @@ type Spec struct {
 	// ADR-0042 section 7); empty for everything else. The spec's id is
 	// "<plugin>/<provider>".
 	Plugin string
+	// Icon is a Lucide name a plugin provider asks for ("" = the generic
+	// provider icon); SecretSlots are its declared secret variables.
+	Icon        string
+	SecretSlots []SecretSlot
 
 	// Command is the argv a turn spawns (ACP agent, or `codex app-server`;
 	// unused for claude-native, which the SDK launches). Env is a custom ACP
@@ -346,6 +356,7 @@ func Default() *Registry {
 }
 
 func cloneSpec(s Spec) Spec {
+	s.SecretSlots = append([]SecretSlot(nil), s.SecretSlots...)
 	s.Command = append([]string(nil), s.Command...)
 	s.HealthCommand = append([]string(nil), s.HealthCommand...)
 	s.Models = append([]Model(nil), s.Models...)

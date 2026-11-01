@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
@@ -15,6 +16,7 @@ import (
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/mcpservers"
+	"github.com/spacingmind/smind/internal/plugins"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/runs/failure"
@@ -31,7 +33,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"account.add":              handleAccountAdd(acctReg),
 		"account.oauthStart":       handleAccountOAuthStart(coord),
 		"account.oauthComplete":    handleAccountOAuthComplete(coord),
-		"provider.list":            handleProviderList(runner, reg, nil),
+		"provider.list":            handleProviderList(runner, reg, nil, nil),
 		"provider.test":            handleProviderTest(acctReg, runner),
 		"account.list":             handleAccountList(acctReg),
 		"account.rename":           handleAccountRename(acctReg),
@@ -2290,10 +2292,36 @@ type providerListEntry struct {
 // handleProviderList returns the daemon's supported providers, each with
 // its permission mode catalog (Runner.ProviderCatalog -- never blocks on
 // ACP mode discovery). No params.
-func handleProviderList(runner *taskrunner.Runner, reg *runs.Registry, gs *gateSource) handlerFunc {
-	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
-		return providerListResultFor(runner, reg, gs), nil
+//
+// Params {includeInactive?: bool}: also list the providers of installed
+// plugins that are not active (disabled, or plugins off), as rows with
+// inactive:true and pluginState; they are never registered and never run
+// (ADR-0042 Wave D). inactive is nil outside the daemon wiring.
+func handleProviderList(runner *taskrunner.Runner, reg *runs.Registry, gs *gateSource, inactive func() []plugins.InactiveProvider) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		res := providerListResultFor(runner, reg, gs)
+		var p struct {
+			IncludeInactive bool `json:"includeInactive"`
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &p)
+		}
+		if p.IncludeInactive && inactive != nil {
+			for _, ip := range inactive() {
+				res.Providers = append(res.Providers, providerListEntry{ProviderInfo: taskrunner.ProviderInfo{
+					ID: taskrunner.Provider(ip.ID), Label: ip.Label, Custom: true, Runner: "acp", Harness: "acp",
+					Plugin: pluginOfID(ip.ID), Icon: ip.Icon, Inactive: true, PluginState: ip.State,
+				}})
+			}
+		}
+		return res, nil
 	}
+}
+
+// pluginOfID is the plugin part of a "<plugin>/<provider>" id.
+func pluginOfID(id string) string {
+	plugin, _, _ := strings.Cut(id, "/")
+	return plugin
 }
 
 // providerListResultFor builds the provider.list result from the live registry.
