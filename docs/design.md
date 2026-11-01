@@ -70,6 +70,13 @@ predates this plan — `zcode-visual-parity` changes what these things
    warmer orange that still clears 4.5:1 on the tinted surfaces, dark =
    `--warning`). Light `--warning` is
    2.82:1 on `--background`, a known sub-3:1 exception for non-text use.
+   Status text follows the same rule: light `--success`/`--diff-added`/
+   `--git-added`/`--git-untracked`/`--terminal-green` are `#167333` and light
+   `--destructive`/`--diff-removed`/`--git-deleted`/`--terminal-red` are
+   `#ba2424` (ZCode's `#1e8a3e`/`#e03131` were 3.87:1 and 4.0:1 on the
+   `#f0f0f0` sidebar, worse on a hovered or selected row). A zero count
+   (`+0`, `-0`) is `text-muted-foreground`, never a status colour with
+   `opacity-50`. Dark values are unchanged (all pairs pass).
 
 **The input token exception.** smind's pre-existing `border-input`
 (shadcn's `--input`, used as a border color) and ZCode's `--color-input`
