@@ -134,11 +134,12 @@ describe("demo socket", () => {
     await h.clock.advance(20_000);
     await expect(run.done).resolves.toMatchObject({ stopReason: "end_turn" });
     const allowTools = run.events.filter((e) => e.event === "tool_call").map((e) => e.params.toolName);
-    expect(allowTools).toEqual(expect.arrayContaining(["Write", "Bash"]));
+    expect(allowTools).toEqual(expect.arrayContaining(["Write", "Edit", "Bash"]));
     expect(run.events.some((e) => e.event === "permission_resolved" && e.params.optionId === "allow")).toBe(true);
     // the diff gains the file the request was about
     const diff = await h.client.call<{ diff: string }>("task.diff", { taskId: 1 });
     expect(diff.diff).toContain("internal/webhook/limiter.go");
+    expect(diff.diff).toContain("internal/webhook/handler.go");
     // answering the request resolves its inbox row
     expect(await h.client.call("inbox.count")).toMatchObject({ total: 2 });
 

@@ -1,5 +1,5 @@
 // Synthetic worktree diffs and files of the demo tour (ADR-0051). Nothing here is real code or a real path. The diff sizes are the
-// landing hero's (+41 −0, +2 −1, +24 −0); scenario.test.ts pins them.
+// landing hero's (+44 −1 for the webhook task once allowed: handler.go +3 −1 and the new limiter.go +41; +2 −1; +24 −0); scenario.test.ts pins them.
 
 /** A new-file diff: every line of `body` added. */
 function newFile(path: string, body: string[]): string {
@@ -15,8 +15,27 @@ function newFile(path: string, body: string[]): string {
   ].join("\n");
 }
 
-/** Webhook (the live task): the limiter file the permission request is about, appended once the visitor allows it. +41 −0. */
-export const LIVE_EXTRA_DIFF = newFile("internal/webhook/limiter.go", [
+/** Webhook (the live task): the handler now wraps its route with the limiter. +3 −1. */
+const HANDLER_DIFF = `diff --git a/internal/webhook/handler.go b/internal/webhook/handler.go
+index 5c4d3e2..a1b2c3d 100644
+--- a/internal/webhook/handler.go
++++ b/internal/webhook/handler.go
+@@ -3,8 +3,10 @@ package webhook
+ import (
+ 	"net/http"
++	"checkout/internal/ratelimit"
+ )
+ 
+ // Register mounts the handler on mux.
+ func (h *Handler) Register(mux *http.ServeMux) {
+-	mux.Handle("/webhook", h)
++	limiter := ratelimit.New(5, 10)
++	mux.Handle("/webhook", limiter.Middleware(h))
+ }
+`;
+
+/** Webhook (the live task): what the visitor's Allow adds, appended once it is allowed: the handler wired to the limiter (+3 −1) and the new limiter file the permission request is about (+41 −0), +44 −1 in all. */
+export const LIVE_EXTRA_DIFF = HANDLER_DIFF + newFile("internal/webhook/limiter.go", [
   "package webhook",
   "",
   "import (",

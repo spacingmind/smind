@@ -111,7 +111,11 @@ describe("demo scenario", () => {
       }
       return [add, del];
     };
-    expect(stat(tour.liveTaskExtraDiff)).toEqual([41, 0]); // webhook, once allowed
+    expect(stat(tour.liveTaskExtraDiff)).toEqual([44, 1]); // webhook, once allowed: handler.go +3 -1 and limiter.go +41
+    const webhookFiles = splitDiff(tour.liveTaskExtraDiff);
+    expect(webhookFiles.map((f) => f.path)).toEqual(["internal/webhook/handler.go", "internal/webhook/limiter.go"]);
+    expect(stat(webhookFiles[0].chunk)).toEqual([3, 1]);
+    expect(stat(webhookFiles[1].chunk)).toEqual([41, 0]);
     expect(stat(tour.diffs[2])).toEqual([2, 1]); // TestRetry
     expect(stat(tour.diffs[3])).toEqual([24, 0]); // parseDate
     for (const id of [4, 5, 6, 12]) expect(tour.diffs[id], `task ${id} has no diff`).toBeUndefined();

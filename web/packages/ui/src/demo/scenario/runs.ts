@@ -73,10 +73,11 @@ export const PERMISSION_REQUEST: PermissionRequestEventParams = {
 
 const ALLOW_BRANCH: Step[] = [
   ...sequence(400, 600, write("t-write", "internal/webhook/limiter.go")),
-  ...sequence(1800, 1300, bash("t-test", "go test ./internal/webhook/...", "ok  \tcheckout/internal/webhook\t0.288s")),
-  { at: 4300, event: text("Added a token-bucket limiter in `limiter.go` and wired it into the handler. Tests pass.") },
-  { at: 4600, event: usage(48_200, 5_100, 0.05, 54_000) },
-  { at: 4800, event: done },
+  ...sequence(1600, 600, edit("t-wire", "internal/webhook/handler.go", 'mux.Handle("/webhook", h)', 'limiter := ratelimit.New(5, 10)\n\tmux.Handle("/webhook", limiter.Middleware(h))')),
+  ...sequence(2800, 1300, bash("t-test", "go test ./internal/webhook/...", "ok  \tcheckout/internal/webhook\t0.288s")),
+  { at: 5300, event: text("Added a token-bucket limiter in `limiter.go` and wired it into the handler. Tests pass.") },
+  { at: 5600, event: usage(48_200, 5_100, 0.05, 54_000) },
+  { at: 5800, event: done },
 ];
 
 const DENY_BRANCH: Step[] = [

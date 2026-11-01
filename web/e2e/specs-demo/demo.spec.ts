@@ -88,7 +88,7 @@ test('DM-02 the live task streams a tool call and reaches the permission card; A
   await card(page).getByRole('button', { name: 'Allow once' }).click()
   await expect(main(page)).toContainText('Tests pass.', { timeout: 25_000 })
   await expect(card(page)).toHaveCount(0)
-  await expect(page.getByTestId('composer-diff-stat').first()).toContainText('+41')
+  await expect(page.getByTestId('composer-diff-stat').first()).toContainText('+44')
 })
 
 test('DM-03 Deny finishes the run on the deny branch', async ({ page }) => {
