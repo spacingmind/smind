@@ -162,13 +162,6 @@ export function useDaemonEvents(client: WsClient | null, queryClient?: QueryClie
         } catch (err) {
           console.error("useDaemonEvents: query bridge threw", err);
         }
-        if (n.topic === "steward.updated") {
-          // Ids only, and a review is an inbox row too (ADR-0047 §5): both re-read. Bridged here,
-          // beside its subscription, because the steward slice owns this file; every other topic
-          // bridges in event-bridge.ts.
-          void queryClient.invalidateQueries({ queryKey: queryKeys.stewardAll() });
-          void queryClient.invalidateQueries({ queryKey: queryKeys.inboxAll() });
-        }
       }
       const set = listenersRef.current.get(n.topic);
       if (!set) return;
