@@ -385,7 +385,7 @@ Name drift, stated: the plan's early list names `TestLabelsValidation`, `TestSel
 **Not every AC is fully confirmed** (AC14 `out` rows, AC25 mobile device frames and the two chips), so this plan stays in `active/`.
 
 Open follow-ups:
-- Hosts settings page: a labels editor (F5 is CLI and MCP only).
+- ~~Hosts settings page: a labels editor (F5 is CLI and MCP only).~~ Done in the host labels editor follow-up (`hosts-labels-editor.contract.md`): a Labels row with chips and an Edit labels dialog.
 - ~~`smind host audit` and an audit view on the Hosts page (AC14).~~ Done in the host audit view follow-up (`fleet-hosts-audit-view.contract.md`); the caller half of the audit (`out` rows) is still not written by anything.
 - Mobile chip device or simulator frames (blocked on the native verification blocker); `TaskTreeRow` is not type-checked or run natively.
 - Task header chip for a task created by another host, and a chip on remote-origin permission rows (needs `origin_host` in the task payload and the inbox item).
@@ -399,3 +399,7 @@ Open follow-ups:
 - `smind host audit [--host alias] [--limit N] [--json]` over the new human-only, read-only `fleet.host.audit` (`internal/wsapi/fleet_host_audit.go`): direction, peer alias, method, decision, redacted summary, time; limit 50 by default, clamped to 200; refused over the relay, to agents, plugins and peer hosts. An Activity row per approved or revoked host in Settings -> Hosts (closed by default, fetched when opened).
 - **Gap closed in the writer:** `serve.Summary` kept the first 120 characters of the request JSON, so a `prompt` at the start of a `fleet.task.create` / `send` body was stored (up to about 100 characters of it). Free-text fields (`prompt`, `text`, `message`, `body`, `content`, `input`) are now reduced to `<N chars>` before the prefix is taken; the hash still covers the real body. The view masks the same fields again for rows written before this. `title` is left readable (it is a label shown across the UI).
 - Contract `fleet-hosts-audit-view.contract.md`; Peer ledger: peer-glm 0 runs, peer-sonnet 0 runs.
+
+### Hosts labels editor (follow-up, `hosts-labels-editor.contract.md`)
+
+Settings -> Hosts: an approved host row has a Labels line (chips, hint when empty) and an Edit labels dialog over `fleet.host.labels`. Client rules mirror `registry.ValidateLabels` and show the daemon's own text; Save sends only the diff (`set` / `remove`); cancel sends nothing; a daemon refusal stays in the dialog. Dialog rows scroll at 16 labels; the dialog is keyed per host so reopening on another host starts from that host's labels (found in frames). Validation: `bun run test` 429 files / 4520 tests, `tsc -b` and `task lint` clean. Mutations (each fails its tests): L1 cap 17, L2 no duplicate check, L3 empty secret list, L4 diff sends every row, L5 save error swallowed, L6 no per-host key (`labels_reopen_on_another_host_starts_from_its_labels`). Frames: light and dark at 1280 and 390 (rows, empty, filled, error, 16 of 16, daemon refusal, opening transition) on an isolated daemon with the fleet methods stubbed; not captured on a real two-host setup. Peers: peer-sonnet 2 (messages and tests; frames and fixes), peer-glm 0 (GLM window not open).

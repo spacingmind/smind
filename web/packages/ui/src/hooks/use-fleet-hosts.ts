@@ -77,6 +77,9 @@ export function useFleetHostActions() {
     reject: (hostId: string): Promise<unknown> => call("fleet.host.reject", { hostId }),
     remove: (hostId: string): Promise<unknown> => call("fleet.host.rm", { hostId }),
     revoke: (hostId: string): Promise<unknown> => call("fleet.host.revoke", { hostId }),
+    /** Merge `set` into and drop `remove` from this host's labels; the daemon validates and answers the resulting set. */
+    setLabels: (hostId: string, change: { set?: Record<string, string>; remove?: string[] }): Promise<{ labels: Record<string, string> }> =>
+      call("fleet.host.labels", { hostId, ...change }),
     rename: (hostId: string, alias: string): Promise<unknown> => call("fleet.host.rename", { hostId, alias }),
     setGrant: (hostId: string, grant: FleetGrant): Promise<unknown> => call("fleet.host.grant", { hostId, grant }),
     enableReverse: (hostId: string): Promise<unknown> => call("fleet.host.enable_reverse", { hostId }),
