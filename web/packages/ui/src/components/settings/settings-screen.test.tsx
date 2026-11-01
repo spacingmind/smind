@@ -1,6 +1,6 @@
 import { setSettingsBackGuard } from "@/lib/settings-back-guard";
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";

@@ -3,7 +3,7 @@
 // desktop-chrome.test.tsx, these tests `vi.doMock` @/lib/platform, and the
 // platform constants are module-load values shared by everything in a file,
 // so the mock stays local to this file.
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DesktopOS, WindowState } from "@/lib/platform";
