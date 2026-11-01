@@ -400,6 +400,14 @@ async function scenario(page, harness) {
     if (await page.getByText('Fill the required fields').isVisible().catch(() => false)) lib.fail(`the reason text stayed after the fields were filled (${scheme})`);
     if ((await submit.getAttribute('aria-disabled')) === 'true') lib.fail(`File report stayed disabled after the fields were filled (${scheme})`);
     await snap(page, 'pc3-form-filled', scheme);
+    const select = page.getByRole('combobox');
+    await select.click();
+    await page.getByRole('radio', { name: 'High' }).waitFor({ timeout: 5_000 }).catch(() => lib.fail(`the Severity list did not open with its options (${scheme})`));
+    await page.waitForTimeout(400);
+    await snap(page, 'pc3-form-select-open', scheme);
+    await page.getByRole('radio', { name: 'High' }).click();
+    await page.waitForTimeout(400);
+    await snap(page, 'pc3-form-select-picked', scheme);
     await submit.click();
     await expectText(page, 'Submitting…', `submitting state (${scheme})`, 5_000);
     await snap(page, 'pc3-form-submitting', scheme);
