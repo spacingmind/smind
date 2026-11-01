@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { parseThemeMaps, tokenContrast } from "@/lib/contrast";
+import { composite, contrastRatio, parseColor, parseThemeMaps, tokenContrast } from "@/lib/contrast";
 
 const { light, dark } = parseThemeMaps(readFileSync("src/index.css", "utf8"));
 const themes = [
@@ -57,6 +57,23 @@ describe("contrast AA regression", () => {
           expect(tokenContrast(vars, fg, surfaceToken, base)).toBeGreaterThanOrEqual(4.5);
         });
       }
+    }
+    // Diff row labels (`--d2h-*-label-color` = --diff-added/removed text) sit on the tinted rows: the tint source is
+    // `--diff-*-tint` (ZCode's original hue) over --card at the same percentages as the `--d2h-*` mixes in index.css.
+    // Light row tints (15% / 20% / 12%) are AA. The 30% word highlight in light and several dark tints are below 4.5
+    // (same-hue text on its own tint; dark is ZCode's untouched value, unchanged by the light AA work): the label text is
+    // not drawn on a word highlight, and those known cases only guard against getting worse (>= 3).
+    for (const [text, tint, pcts] of [
+      ["--diff-added", "--diff-added-tint", [0.15, 0.2, 0.3]],
+      ["--diff-removed", "--diff-removed-tint", [0.12, 0.3]],
+    ] as const) {
+      it.each(pcts)(`${text} text on ${tint} over --card at %s`, (pct) => {
+        const card = parseColor(vars.get("--card")!, vars);
+        const row = composite({ ...parseColor(vars.get(tint)!, vars), a: pct }, card);
+        const ratio = contrastRatio(parseColor(vars.get(text)!, vars), row);
+        const knownLow = pct === 0.3 || (vars !== light && !(text === "--diff-added" && pct === 0.15));
+        expect(ratio).toBeGreaterThanOrEqual(knownLow ? 3 : 4.5);
+      });
     }
     it.each(["--git-modified", "--git-descendant"])("%s (glyph only) on --background >= 3 (light: >= 2.8)", (fg) => {
       expect(tokenContrast(vars, fg, "--background")).toBeGreaterThanOrEqual(vars === light ? 2.8 : 3);

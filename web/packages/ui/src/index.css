@@ -680,6 +680,9 @@
     --warning-text: #a84a00;
     --destructive-surface: color-mix(in srgb, var(--destructive) 10%, transparent);
     --destructive-surface-foreground: #b42020;
+    /* Fill/border tint source for diff rows: ZCode's original hue (--diff-added/-removed text went AA-dark). */
+    --diff-added-tint: #1e8a3e;
+    --diff-removed-tint: #e03131;
 }
 
 /*
@@ -736,6 +739,8 @@
     --warning-text: var(--warning);
     --destructive-surface: color-mix(in srgb, var(--destructive) 16%, transparent);
     --destructive-surface-foreground: #ff8585;
+    --diff-added-tint: #46bf72;
+    --diff-removed-tint: #ff5c5c;
 }
 
 @layer base {
@@ -779,16 +784,16 @@
   --d2h-empty-placeholder-bg-color: var(--surface);
   --d2h-empty-placeholder-border-color: var(--border);
   --d2h-selected-color: color-mix(in oklch, var(--warning) 15%, transparent);
-  --d2h-ins-bg-color: color-mix(in oklch, var(--diff-added) 15%, transparent);
-  --d2h-ins-border-color: color-mix(in oklch, var(--diff-added) 40%, transparent);
-  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-added) 30%, transparent);
+  --d2h-ins-bg-color: color-mix(in oklch, var(--diff-added-tint) 15%, transparent);
+  --d2h-ins-border-color: color-mix(in oklch, var(--diff-added-tint) 40%, transparent);
+  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-added-tint) 30%, transparent);
   --d2h-ins-label-color: var(--diff-added);
-  --d2h-del-bg-color: color-mix(in oklch, var(--diff-removed) 12%, transparent);
-  --d2h-del-border-color: color-mix(in oklch, var(--diff-removed) 40%, transparent);
-  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-removed) 30%, transparent);
+  --d2h-del-bg-color: color-mix(in oklch, var(--diff-removed-tint) 12%, transparent);
+  --d2h-del-border-color: color-mix(in oklch, var(--diff-removed-tint) 40%, transparent);
+  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-removed-tint) 30%, transparent);
   --d2h-del-label-color: var(--diff-removed);
   --d2h-change-del-color: color-mix(in oklch, var(--warning) 20%, transparent);
-  --d2h-change-ins-color: color-mix(in oklch, var(--diff-added) 20%, transparent);
+  --d2h-change-ins-color: color-mix(in oklch, var(--diff-added-tint) 20%, transparent);
   --d2h-info-bg-color: var(--surface);
   --d2h-info-border-color: var(--border);
   --d2h-change-label-color: var(--warning);

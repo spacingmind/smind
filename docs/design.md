@@ -77,6 +77,12 @@ predates this plan — `zcode-visual-parity` changes what these things
    `#f0f0f0` sidebar, worse on a hovered or selected row). A zero count
    (`+0`, `-0`) is `text-muted-foreground`, never a status colour with
    `opacity-50`. Dark values are unchanged (all pairs pass).
+   The AA light values are a deliberate deviation from ZCode, recorded in
+   `$overrides` of `src/test/zcode-tokens.fixture.json` (the parity test
+   expects `override.light ?? fixture.light`; dark stays ZCode's). Fills keep
+   ZCode's tint: diff row backgrounds, borders and word highlights mix
+   `--diff-added-tint` / `--diff-removed-tint` (light `#1e8a3e` / `#e03131`,
+   dark equal to the dark text tokens), so only the text tokens went AA.
 
 **The input token exception.** smind's pre-existing `border-input`
 (shadcn's `--input`, used as a border color) and ZCode's `--color-input`
