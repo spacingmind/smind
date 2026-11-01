@@ -89,7 +89,7 @@ export function reviewHeader(r: StewardReview): {
     head7: (r.headSha ?? '').slice(0, 7),
     staleNote: r.stale ? `Stale: ${r.stale}` : null,
     summary: r.summary || null,
-    blockedReason: r.verdict === 'BLOCKED' && r.blockedReason ? r.blockedReason : null,
+    blockedReason: r.verdict === 'BLOCKED' && r.blockedReason ? `Reason: ${r.blockedReason}` : null,
   };
 }
 

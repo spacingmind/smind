@@ -98,7 +98,7 @@ describe('steward header and frames', () => {
     expect(h.staleNote).toBe('Stale: older head seen');
     expect(h.summary).toBe('ok');
     expect(h.blockedReason).toBeNull();
-    expect(reviewHeader(review({ verdict: 'BLOCKED', blockedReason: 'quota spent' })).blockedReason).toBe('quota spent');
+    expect(reviewHeader(review({ verdict: 'BLOCKED', blockedReason: 'quota spent' })).blockedReason).toBe('Reason: quota spent');
     expect(reviewHeader(review()).pr).toBeNull();
     expect(reviewHeader(review()).staleNote).toBeNull();
 
