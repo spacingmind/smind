@@ -70,27 +70,72 @@ function terminalsOf(s: DemoSession, taskId: number): DemoTerminal[] {
   return [...s.terminals.values()].filter((t) => t.taskId === taskId);
 }
 
-/** A task.tree node (a root with no children): its run state is derived from the task's latest run. */
-function treeNode(s: DemoSession, t: Task) {
+type Totals = { runs: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number; costUsd: number };
+const ZERO: Totals = { runs: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, costUsd: 0 };
+const addTotals = (a: Totals, b: Totals): Totals => ({
+  runs: a.runs + b.runs,
+  inputTokens: a.inputTokens + b.inputTokens,
+  outputTokens: a.outputTokens + b.outputTokens,
+  cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+  cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+  reasoningTokens: a.reasoningTokens + b.reasoningTokens,
+  costUsd: a.costUsd + b.costUsd,
+});
+
+/** A task's own usage, from the scenario's per-task usage rows. */
+function ownUsage(s: DemoSession, taskId: number): Totals {
+  const r = s.scenario.usage.summary.task.find((x) => x.key === String(taskId));
+  if (!r) return ZERO;
+  return { runs: r.count, inputTokens: r.inputTokens, outputTokens: r.outputTokens, cacheReadTokens: r.cacheReadTokens, cacheWriteTokens: r.cacheWriteTokens, reasoningTokens: r.reasoningTokens, costUsd: r.costUsd ?? 0 };
+}
+
+/** A task's run state, from the state of its latest run (and whether the live run is waiting for a permission answer). */
+function runStateOf(s: DemoSession, t: Task) {
   const runs = s.runList({ taskId: t.ID });
   const latest = runs[runs.length - 1];
   const pending = [...s.runs.values()].filter((r) => r.taskId === t.ID && r.pending).length;
   const running = runs.filter((r) => r.Status === "running").map((r) => r.ID);
   const state = pending > 0 ? "waiting_permission" : running.length > 0 ? "running" : !latest ? "idle" : latest.Status === "error" ? "error" : latest.Status === "stopped" ? "stopped" : "done";
-  const totals = { runs: runs.length, inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null, costUsd: null };
-  return {
-    id: t.ID,
-    parentId: null,
-    workspaceId: t.WorkspaceID,
-    title: t.Title,
-    depth: 0,
-    taskStatus: t.Status,
-    tier: null,
-    childCount: 0,
-    run: { state, runningRunIds: running, pendingPermissions: pending },
-    counts: { running: state === "running" ? 1 : 0, waitingPermission: pending, failed: state === "error" ? 1 : 0, done: state === "done" ? 1 : 0, idle: state === "idle" ? 1 : 0 },
-    usage: { own: totals, subtree: totals, archivedDescendants: 0 },
+  return { state, running, pending };
+}
+
+/**
+ * task.tree: the root first, then its descendants (the Lead/Peer tree of the design task). Each node carries its own and its
+ * subtree's usage and the run-state counts of its descendants, as the task header's chips read them.
+ */
+function taskTree(s: DemoSession, root: Task) {
+  const childrenOf = (id: number) => s.tasks.filter((t) => t.ParentTaskID === id && t.ArchivedAt === null);
+  const order: { task: Task; depth: number }[] = [];
+  const walk = (t: Task, depth: number) => {
+    order.push({ task: t, depth });
+    for (const c of childrenOf(t.ID)) walk(c, depth + 1);
   };
+  walk(root, 0);
+  const descendants = (t: Task): Task[] => childrenOf(t.ID).flatMap((c) => [c, ...descendants(c)]);
+  return order.map(({ task: t, depth }) => {
+    const { state, running, pending } = runStateOf(s, t);
+    const below = descendants(t).map((d) => runStateOf(s, d));
+    const count = (st: string) => below.filter((b) => b.state === st).length;
+    return {
+      id: t.ID,
+      parentId: t.ID === root.ID ? null : (t.ParentTaskID ?? null),
+      workspaceId: t.WorkspaceID,
+      title: t.Title,
+      depth,
+      taskStatus: t.Status,
+      tier: s.scenario.tiers[t.ID] ?? null,
+      childCount: childrenOf(t.ID).length,
+      run: { state, runningRunIds: running, pendingPermissions: pending },
+      counts: {
+        running: count("running"),
+        waitingPermission: below.reduce((n, b) => n + b.pending, 0),
+        failed: count("error"),
+        done: count("done"),
+        idle: count("idle"),
+      },
+      usage: { own: ownUsage(s, t.ID), subtree: descendants(t).reduce((acc, d) => addTotals(acc, ownUsage(s, d.ID)), ownUsage(s, t.ID)), archivedDescendants: 0 },
+    };
+  });
 }
 
 const EMPTY_REPLAY = { frames: [{ afterMs: 100, text: "\x1b[2mdemo terminal\x1b[0m\r\n" }] };
@@ -145,7 +190,7 @@ export const RULES: Record<string, DemoRule> = {
     );
   }),
   "task.get": read((c) => taskOf(c.session, c.params.id)),
-  "task.tree": read((c) => ({ nodes: [treeNode(c.session, taskOf(c.session, c.params.taskId))], truncated: false })),
+  "task.tree": read((c) => ({ nodes: taskTree(c.session, taskOf(c.session, c.params.taskId)), truncated: false })),
   "chat.list": read((c) => c.session.chats.filter((x) => x.TaskID === c.params.taskId && x.ArchivedAt === null)),
   "chat.get": read((c) => c.session.chats.find((x) => x.ID === c.params.id) ?? notFound("chat")),
   "chat.queueList": read({ items: [] }),

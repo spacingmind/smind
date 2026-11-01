@@ -1,154 +1,148 @@
-// Synthetic worktree diffs and files of the demo tour (ADR-0051). Nothing here is real code or a real path.
+// Synthetic worktree diffs and files of the demo tour (ADR-0051). Nothing here is real code or a real path. The diff sizes are the
+// landing hero's (+44 −1 for the webhook task once allowed: handler.go +3 −1 and the new limiter.go +41; +2 −1; +24 −0); scenario.test.ts pins them.
 
-const RATE_ROUTER = `diff --git a/cmd/api/router.go b/cmd/api/router.go
+/** A new-file diff: every line of `body` added. */
+function newFile(path: string, body: string[]): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    "new file mode 100644",
+    "index 0000000..e5f0a1b",
+    "--- /dev/null",
+    `+++ b/${path}`,
+    `@@ -0,0 +1,${body.length} @@`,
+    ...body.map((l) => `+${l}`),
+    "",
+  ].join("\n");
+}
+
+/** Webhook (the live task): the handler now wraps its route with the limiter. +3 −1. */
+const HANDLER_DIFF = `diff --git a/internal/webhook/handler.go b/internal/webhook/handler.go
+index 5c4d3e2..a1b2c3d 100644
+--- a/internal/webhook/handler.go
++++ b/internal/webhook/handler.go
+@@ -3,8 +3,10 @@ package webhook
+ import (
+ 	"net/http"
++	"checkout/internal/ratelimit"
+ )
+ 
+ // Register mounts the handler on mux.
+ func (h *Handler) Register(mux *http.ServeMux) {
+-	mux.Handle("/webhook", h)
++	limiter := ratelimit.New(5, 10)
++	mux.Handle("/webhook", limiter.Middleware(h))
+ }
+`;
+
+/** Webhook (the live task): what the visitor's Allow adds, appended once it is allowed: the handler wired to the limiter (+3 −1) and the new limiter file the permission request is about (+41 −0), +44 −1 in all. */
+export const LIVE_EXTRA_DIFF = HANDLER_DIFF + newFile("internal/webhook/limiter.go", [
+  "package webhook",
+  "",
+  "import (",
+  '\t"sync"',
+  '\t"time"',
+  ")",
+  "",
+  "// Limiter is a token bucket: rate tokens per second, burst at most.",
+  "// Tokens refill continuously at rate per second, up to burst.",
+  "// The zero Limiter denies everything; use NewLimiter.",
+  "type Limiter struct {",
+  "\tmu     sync.Mutex",
+  "\ttokens float64",
+  "\tlast   time.Time",
+  "\trate   float64",
+  "\tburst  float64",
+  "}",
+  "",
+  "// NewLimiter returns a full bucket.",
+  "func NewLimiter(rate float64, burst int) *Limiter {",
+  "\treturn &Limiter{tokens: float64(burst), rate: rate, burst: float64(burst)}",
+  "}",
+  "",
+  "// Allow takes one token if there is one, and says how long to wait if not.",
+  "func (l *Limiter) Allow(now time.Time) (bool, time.Duration) {",
+  "\tl.mu.Lock()",
+  "\tdefer l.mu.Unlock()",
+  "\tif !l.last.IsZero() {",
+  "\t\tl.tokens += now.Sub(l.last).Seconds() * l.rate",
+  "\t\tif l.tokens > l.burst {",
+  "\t\t\tl.tokens = l.burst",
+  "\t\t}",
+  "\t}",
+  "\tl.last = now",
+  "\tif l.tokens >= 1 {",
+  "\t\tl.tokens--",
+  "\t\treturn true, 0",
+  "\t}",
+  "\twait := time.Duration((1 - l.tokens) / l.rate * float64(time.Second))",
+  "\treturn false, wait",
+  "}",
+]);
+
+/** Debug (TestRetry): pin the jitter seed. +2 −1. */
+const RETRY_DIFF = `diff --git a/internal/retry/backoff.go b/internal/retry/backoff.go
 index 3b1c2f0..9a7d4e1 100644
---- a/cmd/api/router.go
-+++ b/cmd/api/router.go
-@@ -14,6 +14,7 @@ func NewRouter(cfg Config) http.Handler {
- 	mux := http.NewServeMux()
- 	mux.Handle("/v1/", http.StripPrefix("/v1", v1(cfg)))
-
--	return middleware.Auth(cfg.Keys)(mux)
-+	limited := ratelimit.Middleware(ratelimit.New(cfg.RateLimit))(mux)
-+	return middleware.Auth(cfg.Keys)(limited)
+--- a/internal/retry/backoff.go
++++ b/internal/retry/backoff.go
+@@ -14,4 +14,5 @@ func jitter(attempt int) time.Duration {
+ func jitter(attempt int) time.Duration {
+-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
++	seed := testSeed()
++	rng := rand.New(rand.NewSource(seed))
+ 	return time.Duration(rng.Int63n(int64(base << attempt)))
  }
 `;
 
-const RATE_CONFIG = `diff --git a/cmd/api/config.go b/cmd/api/config.go
-index 6e0f8a2..c41b9d7 100644
---- a/cmd/api/config.go
-+++ b/cmd/api/config.go
-@@ -9,6 +9,13 @@ type Config struct {
- 	Addr string
- 	Keys KeyStore
-+
-+	// RateLimit is applied per API key; zero values mean "use the defaults".
-+	RateLimit ratelimit.Config
- }
+/** First task (parseDate): the new table test. +24 −0. */
+const PARSE_DATE_DIFF = newFile("internal/dates/parse_test.go", [
+  "package dates",
+  "",
+  'import "testing"',
+  "",
+  "func TestParseDate(t *testing.T) {",
+  "\tcases := []struct {",
+  "\t\tname string",
+  "\t\tin   string",
+  "\t\tok   bool",
+  "\t}{",
+  '\t\t{"iso", "2026-02-27", true},',
+  '\t\t{"rfc3339", "2026-02-27T10:00:00+00:00", true},',
+  '\t\t{"empty", "", false},',
+  '\t\t{"bad month", "2026-13-01", false},',
+  '\t\t{"leap day", "2028-02-29", true},',
+  "\t}",
+  "\tfor _, c := range cases {",
+  "\t\tt.Run(c.name, func(t *testing.T) {",
+  "\t\t\tif _, err := parseDate(c.in); (err == nil) != c.ok {",
+  '\t\t\t\tt.Fatalf("parseDate(%q) error = %v, want ok=%v", c.in, err, c.ok)',
+  "\t\t\t}",
+  "\t\t})",
+  "\t}",
+  "}",
+]);
 
- func LoadConfig() (Config, error) {
-@@ -24,5 +31,9 @@ func LoadConfig() (Config, error) {
- 	cfg.Addr = envOr("ADDR", ":8080")
-+	cfg.RateLimit = ratelimit.Config{
-+		RequestsPerMinute: envInt("RATE_LIMIT_RPM", 100),
-+		Burst:             envInt("RATE_LIMIT_BURST", 20),
-+	}
- 	return cfg, nil
- }
-`;
-
-const RATE_TEST = `diff --git a/internal/middleware/auth_test.go b/internal/middleware/auth_test.go
-index 1d2e3f4..5a6b7c8 100644
---- a/internal/middleware/auth_test.go
-+++ b/internal/middleware/auth_test.go
-@@ -31,3 +31,12 @@ func TestAuthRejectsMissingKey(t *testing.T) {
- 		t.Fatalf("status = %d, want 401", rec.Code)
- 	}
- }
-+
-+func TestAuthExposesKeyIDToLaterMiddleware(t *testing.T) {
-+	var got string
-+	h := Auth(testKeys)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-+		got = KeyID(r.Context())
-+	}))
-+	h.ServeHTTP(httptest.NewRecorder(), authedRequest("k_live_demo"))
-+	if got != "demo" {
-+		t.Fatalf("KeyID = %q, want demo", got)
-+	}
-+}
-`;
-
-/** The live task's diff before the visitor answers the permission: two files already edited. */
-export const LIVE_DIFF = RATE_ROUTER + RATE_CONFIG + RATE_TEST;
-
-/** Appended once the visitor allows the write: the new limiter file the permission request was about. */
-export const LIVE_EXTRA_DIFF = `diff --git a/internal/ratelimit/limiter.go b/internal/ratelimit/limiter.go
-new file mode 100644
-index 0000000..e5f0a1b
---- /dev/null
-+++ b/internal/ratelimit/limiter.go
-@@ -0,0 +1,30 @@
-+package ratelimit
-+
-+import (
-+	"sync"
-+	"time"
-+)
-+
-+// Limiter is a per-key token bucket.
-+type Limiter struct {
-+	mu      sync.Mutex
-+	buckets map[string]*bucket
-+	rate    float64 // tokens per second
-+	burst   float64
-+}
-+
-+func New(cfg Config) *Limiter {
-+	return &Limiter{buckets: map[string]*bucket{}, rate: float64(cfg.RequestsPerMinute) / 60, burst: float64(cfg.Burst)}
-+}
-+
-+// Allow reports whether key may make a request now and, if not, how long to wait.
-+func (l *Limiter) Allow(key string, now time.Time) (bool, time.Duration) {
-+	l.mu.Lock()
-+	defer l.mu.Unlock()
-+	b := l.bucket(key, now)
-+	if b.tokens >= 1 {
-+		b.tokens--
-+		return true, 0
-+	}
-+	return false, time.Duration((1 - b.tokens) / l.rate * float64(time.Second))
-+}
-`;
-
-const FLAKY_DIFF = `diff --git a/internal/queue/worker_test.go b/internal/queue/worker_test.go
-index 8c9d0e1..2f3a4b5 100644
---- a/internal/queue/worker_test.go
-+++ b/internal/queue/worker_test.go
-@@ -42,9 +42,9 @@ func TestRetryBacksOff(t *testing.T) {
- 	w := NewWorker(clock, WithMaxAttempts(3))
- 	w.Enqueue(failingJob{})
--	time.Sleep(50 * time.Millisecond)
--	if w.Attempts() != 2 {
--		t.Fatalf("attempts = %d, want 2", w.Attempts())
-+	clock.Advance(w.BackoffFor(1))
-+	if got := w.Attempts(); got != 2 {
-+		t.Fatalf("attempts = %d, want 2", got)
- 	}
- }
-`;
-
-const DARK_DIFF = `diff --git a/src/settings/SettingsPage.tsx b/src/settings/SettingsPage.tsx
-index 4a5b6c7..8d9e0f1 100644
---- a/src/settings/SettingsPage.tsx
-+++ b/src/settings/SettingsPage.tsx
-@@ -3,7 +3,9 @@ import { Panel } from "../ui/Panel";
- export function SettingsPage() {
-+  const { theme, setTheme } = useTheme();
-   return (
--    <Panel title="Settings">
-+    <Panel title="Settings" data-theme={theme}>
-+      <ThemeToggle value={theme} onChange={setTheme} />
-       <ProfileForm />
-     </Panel>
-   );
-`;
-
+/** task.diff text by task id. The webhook task (1) has none until its permission is allowed. */
 export const DIFFS: Record<number, string> = {
-  1: LIVE_DIFF,
-  2: FLAKY_DIFF,
-  4: DARK_DIFF,
+  2: RETRY_DIFF,
+  3: PARSE_DATE_DIFF,
 };
 
 export const FILES: Record<number, Record<string, string>> = {
   1: {
-    "README.md": "# acme-api\n\nThe public HTTP API of the Acme demo service.\n",
-    "cmd/api/router.go": 'package main\n\nfunc NewRouter(cfg Config) http.Handler {\n\tmux := http.NewServeMux()\n\treturn middleware.Auth(cfg.Keys)(mux)\n}\n',
-    "internal/middleware/auth.go": "package middleware\n\n// Auth resolves the API key and stores its id on the request context.\n",
+    "README.md": "# checkout-api\n\nThe checkout service of the Acme demo.\n",
+    "internal/webhook/handler.go": "package webhook\n\n// Handler receives provider webhooks.\ntype Handler struct{}\n",
   },
   2: {
-    "internal/queue/worker.go": "package queue\n\n// Worker runs jobs with exponential backoff between attempts.\n",
+    "internal/retry/backoff.go": "package retry\n\nfunc jitter(attempt int) time.Duration {\n\treturn 0\n}\n",
   },
-  4: {
-    "src/settings/SettingsPage.tsx": 'export function SettingsPage() {\n  return <Panel title="Settings" />;\n}\n',
+  3: {
+    "internal/dates/parse.go": "package dates\n\nfunc parseDate(s string) (time.Time, error) { return time.Time{}, nil }\n",
+  },
+  6: {
+    "README.md": "# web-app\n\nThe customer dashboard.\n",
+    "src/app/page.tsx": "export default function Page() {\n  return null;\n}\n",
+  },
+  12: {
+    "docs/adr/job-queue.md": "# Job queue\n\n## Schema\n\n## Failure modes\n",
   },
 };

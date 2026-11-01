@@ -1,15 +1,19 @@
 import type { InboxItem } from "@/lib/inbox-types";
-import type { Chat, RunLogEvent, RunLogsResult, RunSummary, Space, Task, Workspace } from "@/lib/types";
+import type { Chat, RunLogEvent, RunLogsResult, RunSummary, Task, Workspace } from "@/lib/types";
 
 import type { DemoScenario } from "../types";
 import { DIFFS, FILES, LIVE_EXTRA_DIFF } from "./diffs";
 import {
-  DARKMODE_RUN_EVENTS,
-  FLAKY_RUN_EVENTS,
-  GUIDE_RUN_EVENTS,
+  ANALYSIS_EVENTS,
+  DESIGN_EVENTS,
   LIVE_SCRIPT,
-  PAGINATION_RUN_EVENTS,
-  TOOLCHAIN_RUN_EVENTS,
+  ONBOARDING_EVENTS,
+  PARSE_DATE_EVENTS,
+  PEER_FAILOVER_EVENTS,
+  PEER_SCHEMA_EVENTS,
+  RETRY_EVENTS,
+  REVIEW_EVENTS,
+  WEBHOOK_PROMPT,
   cannedReply,
 } from "./runs";
 import { TERMINALS } from "./terminal";
@@ -19,25 +23,26 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
+/** Task ids: the Lead of the design task is #12, as in the landing hero's `task_new ... parent: #12`. */
+export const TASK = { webhook: 1, retry: 2, parseDate: 3, review: 4, analysis: 5, onboarding: 6, design: 12, peerSchema: 13, peerFailover: 14 } as const;
+
 /**
- * The shipped "tour" scenario (ADR-0051 section 2). Every name, path, branch and number is synthetic; every timestamp is
- * written relative to `now`, so the demo never says "3 years ago".
+ * The shipped "tour" scenario (ADR-0051 section 2): the nine tasks of the landing page's hero, in the real UI. Every name, path,
+ * branch and number is synthetic; every timestamp is written relative to `now`, so the demo never says "3 years ago".
  */
 export function buildTour(now: number): DemoScenario {
   const ago = (ms: number) => new Date(now - ms).toISOString();
 
   const workspaces: Workspace[] = [
-    { ID: 1, Path: "/home/demo/acme-api", Title: "acme-api", RoutingPolicy: "", DefaultBase: "main", CreatedAt: ago(30 * DAY), UpdatedAt: ago(DAY) },
-    { ID: 2, Path: "/home/demo/web-dashboard", Title: "web-dashboard", RoutingPolicy: "", DefaultBase: "main", CreatedAt: ago(20 * DAY), UpdatedAt: ago(2 * DAY) },
-    { ID: 3, Path: "/home/demo/docs-site", Title: "docs-site", RoutingPolicy: "", DefaultBase: "main", CreatedAt: ago(12 * DAY), UpdatedAt: ago(3 * DAY) },
+    { ID: 1, Path: "/home/demo/checkout-api", Title: "checkout-api", RoutingPolicy: "", DefaultBase: "main", CreatedAt: ago(30 * DAY), UpdatedAt: ago(DAY) },
+    { ID: 2, Path: "/home/demo/web-app", Title: "web-app", RoutingPolicy: "", DefaultBase: "main", CreatedAt: ago(20 * DAY), UpdatedAt: ago(2 * DAY) },
+    { ID: 3, Path: "/home/demo/platform", Title: "platform", RoutingPolicy: "", DefaultBase: "main", CreatedAt: ago(12 * DAY), UpdatedAt: ago(3 * HOUR) },
   ];
 
-  const spaces: Space[] = [{ ID: 1, WorkspaceID: 1, Title: "Q4 hardening", EnvData: "{}", CreatedAt: ago(10 * DAY), UpdatedAt: ago(DAY) }];
-
-  const task = (ID: number, WorkspaceID: number, SpaceID: number | null, Title: string, Branch: string, updated: number): Task => ({
+  const task = (ID: number, WorkspaceID: number, Title: string, Branch: string, updated: number, ParentTaskID: number | null = null): Task => ({
     ID,
     WorkspaceID,
-    SpaceID,
+    SpaceID: null,
     Title,
     Status: "active",
     WorktreePath: `/home/demo/${workspaces[WorkspaceID - 1].Title}/.smind/worktrees/${Branch.replace("/", "-")}`,
@@ -45,107 +50,109 @@ export function buildTour(now: number): DemoScenario {
     CreatedAt: ago(updated + HOUR),
     UpdatedAt: ago(updated),
     ArchivedAt: null,
-    ParentTaskID: null,
+    ParentTaskID,
     SetupStatus: "",
   });
 
   const tasks: Task[] = [
-    task(1, 1, 1, "Add rate limiting to the public API", "feat/rate-limit", 2 * MIN),
-    task(2, 1, null, "Fix flaky TestRetryBacksOff in the queue worker", "fix/flaky-retry-test", 3 * HOUR),
-    task(3, 1, 1, "Upgrade the module to Go 1.24", "chore/go-1-24", 5 * HOUR),
-    task(4, 2, null, "Dark mode toggle on the settings page", "feat/dark-mode", DAY),
-    task(5, 2, null, "Paginate the audit log", "feat/audit-pagination", 2 * DAY),
-    task(6, 3, null, "Write the v1 to v2 migration guide", "docs/migrate-v2", 3 * DAY),
+    task(TASK.webhook, 1, "Rate-limit the webhook handler", "feat/webhook-rate-limit", 9 * MIN),
+    task(TASK.retry, 1, "Why does TestRetry fail on CI only?", "fix/retry-ci-flake", 2 * MIN),
+    task(TASK.parseDate, 1, "Add a unit test for parseDate", "test/parse-date", 8 * MIN),
+    task(TASK.review, 1, "Review PR #42 for race conditions", "review/pr-42", HOUR),
+    task(TASK.analysis, 1, "Why did p99 latency double since Tuesday?", "analysis/p99-latency", 3 * HOUR),
+    task(TASK.onboarding, 2, "Explain this repo to me", "docs/explain-repo", DAY),
+    task(TASK.design, 3, "Design a multi-region job queue", "design/multi-region-queue", 2 * HOUR),
+    task(TASK.peerSchema, 3, "Queue schema and leases", "design/queue-schema", 2 * HOUR, TASK.design),
+    task(TASK.peerFailover, 3, "Failover modes", "design/failover-modes", 2 * HOUR, TASK.design),
   ];
 
   const chats: Chat[] = tasks.map((t) => ({ ID: t.ID, TaskID: t.ID, Title: "Chat", Provider: "claude-code", AgentSession: null, CreatedAt: t.CreatedAt, ArchivedAt: null }));
 
-  const finished = (ID: string, taskId: number, prompt: string, started: number, status: RunSummary["Status"], stopReason: string): RunSummary => ({
+  const PROMPT = {
+    retry: "Why does TestRetry fail on CI only?",
+    parseDate: "Add a unit test for parseDate",
+    review: "Review PR #42 for race conditions",
+    analysis: "Why did p99 latency double since Tuesday?",
+    onboarding: "Explain this repo to me",
+    design: "Design a multi-region job queue",
+    peerSchema: "Draft the queue table and the lease protocol",
+    peerFailover: "List the failure modes and what each costs",
+  };
+
+  /** A finished run; `age` is how long ago it started, `secs` how long it ran (the landing hero's run footers). */
+  const finished = (ID: string, taskId: number, prompt: string, age: number, secs: number): RunSummary => ({
     ID,
     TaskID: taskId,
     ChatID: taskId,
     Provider: "claude-code",
     Prompt: prompt,
-    Status: status,
-    StartedAt: ago(started),
-    FinishedAt: ago(started - 4 * MIN),
-    StopReason: stopReason,
-    Err: status === "error" ? "The Go 1.24 toolchain could not be downloaded." : "",
+    Status: "done",
+    StartedAt: ago(age),
+    FinishedAt: ago(age - secs * 1000),
+    StopReason: "end_turn",
+    Err: "",
     PermissionMode: "default",
     AutoAccept: false,
     ThinkingLevel: "",
     Model: "claude-sonnet-5-5",
   });
-
-  const run = (id: string, events: RunLogEvent[], status: RunLogsResult["status"], stopReason: string): RunLogsResult => ({ runId: id, status, stopReason, events });
-  const PROMPTS = {
-    flaky: "TestRetryBacksOff is flaky on CI. Find out why and fix it without adding sleeps.",
-    go: "Upgrade the module to Go 1.24 and fix whatever breaks.",
-    dark: "Add a dark mode toggle to the settings page.",
-    page: "Paginate the audit log table, 50 rows per page.",
-    guide: "Write the v1 to v2 migration guide for the docs site.",
-  };
+  const logs = (id: string, events: RunLogEvent[]): RunLogsResult => ({ runId: id, status: "done", stopReason: "end_turn", events });
 
   const runs: RunSummary[] = [
-    finished("demo-run-flaky", 2, PROMPTS.flaky, 3 * HOUR, "done", "end_turn"),
-    finished("demo-run-go", 3, PROMPTS.go, 5 * HOUR, "error", "error"),
-    finished("demo-run-dark", 4, PROMPTS.dark, DAY, "done", "end_turn"),
-    finished("demo-run-page", 5, PROMPTS.page, 2 * DAY, "done", "end_turn"),
-    finished("demo-run-guide", 6, PROMPTS.guide, 3 * DAY, "done", "end_turn"),
+    finished("demo-run-retry", TASK.retry, PROMPT.retry, 2 * MIN + 9_000, 9),
+    finished("demo-run-test", TASK.parseDate, PROMPT.parseDate, 8 * MIN + 12_000, 12),
+    finished("demo-run-review", TASK.review, PROMPT.review, HOUR + 18_000, 18),
+    finished("demo-run-analysis", TASK.analysis, PROMPT.analysis, 3 * HOUR + 31_000, 31),
+    finished("demo-run-onboarding", TASK.onboarding, PROMPT.onboarding, DAY + 6_000, 6),
+    finished("demo-run-design", TASK.design, PROMPT.design, 2 * HOUR + 42_000, 42),
+    finished("run-14", TASK.peerSchema, PROMPT.peerSchema, 2 * HOUR + 40_000, 14),
+    finished("run-15", TASK.peerFailover, PROMPT.peerFailover, 2 * HOUR + 40_000, 16),
   ];
 
   const runLogs: Record<string, RunLogsResult> = {
-    "demo-run-flaky": run("demo-run-flaky", FLAKY_RUN_EVENTS, "done", "end_turn"),
-    "demo-run-go": { ...run("demo-run-go", TOOLCHAIN_RUN_EVENTS, "error", "error"), err: "The Go 1.24 toolchain could not be downloaded." },
-    "demo-run-dark": run("demo-run-dark", DARKMODE_RUN_EVENTS, "done", "end_turn"),
-    "demo-run-page": run("demo-run-page", PAGINATION_RUN_EVENTS, "done", "end_turn"),
-    "demo-run-guide": run("demo-run-guide", GUIDE_RUN_EVENTS, "done", "end_turn"),
+    "demo-run-retry": logs("demo-run-retry", RETRY_EVENTS),
+    "demo-run-test": logs("demo-run-test", PARSE_DATE_EVENTS),
+    "demo-run-review": logs("demo-run-review", REVIEW_EVENTS),
+    "demo-run-analysis": logs("demo-run-analysis", ANALYSIS_EVENTS),
+    "demo-run-onboarding": logs("demo-run-onboarding", ONBOARDING_EVENTS),
+    "demo-run-design": logs("demo-run-design", DESIGN_EVENTS),
+    "run-14": logs("run-14", PEER_SCHEMA_EVENTS),
+    "run-15": logs("run-15", PEER_FAILOVER_EVENTS),
   };
 
   const inbox: InboxItem[] = [
     {
       key: "perm:demo-req-1",
       kind: "permission",
-      taskId: 1,
-      title: "Add rate limiting to the public API",
-      summary: "Write internal/ratelimit/limiter.go",
+      taskId: TASK.webhook,
+      title: "Rate-limit the webhook handler",
+      summary: "Write internal/webhook/limiter.go",
       createdAt: ago(0),
       state: "new",
       attention: "high",
-      links: { taskId: 1, runId: "demo-live", permissionRequestId: "demo-req-1" },
-    },
-    {
-      key: "run_failed:demo-run-go",
-      kind: "run_failed",
-      taskId: 3,
-      title: "Upgrade the module to Go 1.24",
-      summary: "The run failed: the Go 1.24 toolchain could not be downloaded",
-      createdAt: ago(5 * HOUR),
-      state: "new",
-      attention: "normal",
-      links: { taskId: 3, runId: "demo-run-go" },
+      links: { taskId: TASK.webhook, runId: "demo-live", permissionRequestId: "demo-req-1" },
     },
     {
       key: "verdict:1",
       kind: "verdict",
-      taskId: 4,
-      title: "Dark mode toggle on the settings page",
+      taskId: TASK.retry,
+      title: "Why does TestRetry fail on CI only?",
       summary: "Validation passed at the current commit: ready for your merge decision",
-      createdAt: ago(20 * HOUR),
+      createdAt: ago(2 * MIN),
       state: "new",
       attention: "normal",
-      links: { taskId: 4, validationId: 1 },
+      links: { taskId: TASK.retry, validationId: 1 },
     },
     {
-      key: "stall:5:1",
-      kind: "stall",
-      taskId: 5,
-      title: "Paginate the audit log",
-      summary: "This task has been waiting for a reply for two days",
-      createdAt: ago(DAY),
-      state: "seen",
+      key: "verdict:2",
+      kind: "verdict",
+      taskId: TASK.parseDate,
+      title: "Add a unit test for parseDate",
+      summary: "Validation passed at the current commit: ready for your merge decision",
+      createdAt: ago(8 * MIN),
+      state: "new",
       attention: "normal",
-      links: { taskId: 5 },
+      links: { taskId: TASK.parseDate, validationId: 2 },
     },
   ];
 
@@ -154,17 +161,17 @@ export function buildTour(now: number): DemoScenario {
     now,
     daemon: { version: "demo", commit: "demo", files: { maxReadBytes: 1 << 20, maxChunkBytes: 1 << 16, previewKinds: [] } },
     workspaces,
-    spaces,
+    spaces: [],
     tasks,
     chats,
     runs,
     runLogs,
     live: {
-      taskId: 1,
-      chatId: 1,
+      taskId: TASK.webhook,
+      chatId: TASK.webhook,
       runId: "demo-live",
       provider: "claude-code",
-      prompt: "Add rate limiting to the public API: 100 requests per minute per API key, answer 429 with a Retry-After header, and add tests.",
+      prompt: WEBHOOK_PROMPT,
       script: LIVE_SCRIPT,
     },
     reply: cannedReply,
@@ -180,5 +187,6 @@ export function buildTour(now: number): DemoScenario {
       { ID: 2, Name: "Fast fixer", Provider: "claude-code", PermissionMode: "acceptEdits", AutoAccept: false, ThinkingLevel: "", Model: "claude-haiku-5-5", Notes: "Small, well-scoped changes.", CreatedAt: ago(15 * DAY), UpdatedAt: ago(15 * DAY) },
     ],
     files: FILES,
+    tiers: { [TASK.design]: "leader", [TASK.peerSchema]: "coder", [TASK.peerFailover]: "coder" },
   };
 }

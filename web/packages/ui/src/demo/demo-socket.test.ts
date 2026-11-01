@@ -83,7 +83,7 @@ describe("demo socket", () => {
     expect(info.version).toBe("demo");
     expect(info.files.previewKinds).toEqual([]);
     const workspaces = await client.call<{ Title: string }[]>("workspace.list");
-    expect(workspaces.map((w) => w.Title)).toEqual(["acme-api", "web-dashboard", "docs-site"]);
+    expect(workspaces.map((w) => w.Title)).toEqual(["checkout-api", "web-app", "platform"]);
   });
 
   it("D-02 an unlisted method answers RpcError demo_unsupported; a write answers demo_read_only with the read-only message", async () => {
@@ -112,12 +112,13 @@ describe("demo socket", () => {
     await clock.advance(30_000);
     const types = events.map((e) => e.event);
     expect(types.indexOf("thinking")).toBeLessThan(types.indexOf("tool_call"));
-    expect(types.filter((t) => t === "tool_call").length).toBeGreaterThanOrEqual(6); // three tools, each running then success
-    expect(types).toContain("usage");
+    expect(types.filter((t) => t === "tool_call")).toHaveLength(2); // the handler Read, running then success
     expect(types.at(-1)).toBe("permission_request");
     expect(ended).toBe(false);
     const tools = events.filter((e) => e.event === "tool_call").map((e) => e.params.toolName);
-    expect(new Set(tools)).toEqual(new Set(["Read", "Bash"]));
+    expect(new Set(tools)).toEqual(new Set(["Read"]));
+    const said = events.filter((e) => e.event === "chunk").map((e) => String(e.params.text)).join("");
+    expect(said).toContain("I need to add the limiter file.");
   });
 
   it("D-05 an ask step pauses until run.respondPermission: allow plays the allow branch, deny the deny branch, an unknown request is an error", async () => {
@@ -133,13 +134,14 @@ describe("demo socket", () => {
     await h.clock.advance(20_000);
     await expect(run.done).resolves.toMatchObject({ stopReason: "end_turn" });
     const allowTools = run.events.filter((e) => e.event === "tool_call").map((e) => e.params.toolName);
-    expect(allowTools).toContain("Write");
+    expect(allowTools).toEqual(expect.arrayContaining(["Write", "Edit", "Bash"]));
     expect(run.events.some((e) => e.event === "permission_resolved" && e.params.optionId === "allow")).toBe(true);
     // the diff gains the file the request was about
     const diff = await h.client.call<{ diff: string }>("task.diff", { taskId: 1 });
-    expect(diff.diff).toContain("internal/ratelimit/limiter.go");
+    expect(diff.diff).toContain("internal/webhook/limiter.go");
+    expect(diff.diff).toContain("internal/webhook/handler.go");
     // answering the request resolves its inbox row
-    expect(await h.client.call("inbox.count")).toMatchObject({ total: 3 });
+    expect(await h.client.call("inbox.count")).toMatchObject({ total: 2 });
 
     // deny
     h = await start();
@@ -151,10 +153,10 @@ describe("demo socket", () => {
     const denyTools = run.events.filter((e) => e.event === "tool_call").map((e) => e.params.toolName);
     expect(denyTools).not.toContain("Write");
     const text = run.events.filter((e) => e.event === "chunk").map((e) => String(e.params.text)).join("");
-    expect(text).toContain("I won't write that file");
+    expect(text).toContain("I won't create `limiter.go`");
     const after = await h.client.call<{ diff: string }>("task.diff", { taskId: 1 });
-    expect(after.diff).not.toContain("internal/ratelimit/limiter.go");
-    expect(await h.client.call("inbox.count")).toMatchObject({ total: 3 }); // Deny resolves the row too
+    expect(after.diff).toBe(""); // nothing was written
+    expect(await h.client.call("inbox.count")).toMatchObject({ total: 2 }); // Deny resolves the row too
   });
 
   it("D-06 task.cancel and run.stop abort the matching script; nothing is emitted afterwards", async () => {
@@ -225,7 +227,8 @@ describe("demo socket", () => {
     });
     await clock.advance(10_000);
     const replay = chunks.join("");
-    expect(replay.indexOf("git status")).toBeLessThan(replay.indexOf("go test"));
+    expect(replay).toContain("go test ./internal/webhook/...");
+    expect(replay.indexOf("go test")).toBeLessThan(replay.indexOf("checkout/internal/webhook"));
     expect(replay.endsWith("$ ")).toBe(true);
     await client.call("terminal.resize", { terminalId, cols: 80, rows: 24 });
     await client.call("terminal.write", { terminalId, data: "ls" });
@@ -241,21 +244,40 @@ describe("demo socket", () => {
     const topics: string[] = [];
     client.onNotification((n) => topics.push(n.topic));
     await client.call("events.subscribe", { topics: ["inbox.changed"] });
-    expect(await client.call("inbox.count")).toMatchObject({ total: 4, unseen: 3 });
-    await client.call("inbox.seen", { keys: ["run_failed:demo-run-go"] });
-    expect(await client.call("inbox.count")).toMatchObject({ total: 4, unseen: 2 });
-    await client.call("inbox.resolve", { keys: ["verdict:1"] });
-    await client.call("inbox.snooze", { keys: ["stall:5:1"], until: "2099-01-01T00:00:00Z" });
+    expect(await client.call("inbox.count")).toMatchObject({ total: 3, unseen: 3 });
+    await client.call("inbox.seen", { keys: ["verdict:1"] });
+    expect(await client.call("inbox.count")).toMatchObject({ total: 3, unseen: 2 });
+    await client.call("inbox.resolve", { keys: ["verdict:2"] });
+    await client.call("inbox.snooze", { keys: ["verdict:1"], until: "2099-01-01T00:00:00Z" });
     const { items } = await client.call<{ items: { key: string }[] }>("inbox.list", {});
-    expect(items.map((i) => i.key).sort()).toEqual(["perm:demo-req-1", "run_failed:demo-run-go"]);
+    expect(items.map((i) => i.key)).toEqual(["perm:demo-req-1"]);
     expect(topics.filter((t) => t === "inbox.changed")).toHaveLength(3);
   });
 
   it("D-12 a second connectDemo (a reconnect) shares the page-load session state", async () => {
     const { client } = await start();
-    await client.call("inbox.resolve", { keys: ["verdict:1"] });
+    await client.call("inbox.resolve", { keys: ["verdict:2"] });
     const again = await connectDemo(); // no options: the existing session is reused
-    expect(await again.call("inbox.count")).toMatchObject({ total: 3 });
+    expect(await again.call("inbox.count")).toMatchObject({ total: 2 });
+  });
+
+  it("D-14 the Lead/Peer tree: task.tree of the design Lead lists its two Peers, with tiers, usage and counts", async () => {
+    const { client } = await start();
+    const { nodes } = await client.call<{ nodes: { id: number; parentId: number | null; depth: number; tier: string | null; childCount: number; counts: { done: number }; usage: { own: { costUsd: number }; subtree: { costUsd: number } } }[] }>("task.tree", { taskId: 12 });
+    expect(nodes.map((n) => [n.id, n.parentId, n.depth, n.tier])).toEqual([
+      [12, null, 0, "leader"],
+      [13, 12, 1, "coder"],
+      [14, 12, 1, "coder"],
+    ]);
+    expect(nodes[0].childCount).toBe(2);
+    expect(nodes[0].counts.done).toBe(2);
+    expect(nodes[0].usage.own.costUsd).toBeCloseTo(0.31);
+    expect(nodes[0].usage.subtree.costUsd).toBeCloseTo(0.42);
+    const children = await client.call<{ ID: number }[]>("task.list", { workspaceId: 3, parentTaskId: 12 });
+    expect(children.map((c) => c.ID)).toEqual([13, 14]);
+    // a Peer's own tree is itself
+    const peer = await client.call<{ nodes: { id: number }[] }>("task.tree", { taskId: 13 });
+    expect(peer.nodes.map((n) => n.id)).toEqual([13]);
   });
 
   it("D-13 refused rules never mutate state", async () => {

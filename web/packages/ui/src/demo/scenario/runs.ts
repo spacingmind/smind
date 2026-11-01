@@ -2,90 +2,98 @@ import type { PermissionRequestEventParams, RunLogEvent, RunUsage } from "@/lib/
 
 import type { Script, Step } from "../types";
 
-// Synthetic agent behaviour of the demo tour (ADR-0051): run events exactly as run.attach streams them.
+// Synthetic agent behaviour of the demo tour (ADR-0051): run events exactly as run.attach streams them. The tasks, prompts and
+// answers are the landing page's hero scenarios (spacing-mind-landing-page, app-mock.tsx), so the hero and "Try it live" tell the
+// same story; the demo plays them through the real timeline, permission card, diff and terminal.
 
-const read = (id: string, path: string, result: string): RunLogEvent[] => [
-  { type: "tool_call", toolCallId: id, toolName: "Read", title: path, status: "running", input: { file_path: path } },
-  { type: "tool_call", toolCallId: id, toolName: "Read", title: path, status: "success", input: { file_path: path }, result },
-];
+// ---- tool-call builders: a tool call is one event while running and one when it finishes ---------------------------------
 
-const bash = (id: string, command: string, result: string, status: "success" | "failure" = "success"): RunLogEvent[] => [
-  { type: "tool_call", toolCallId: id, toolName: "Bash", title: command, status: "running", input: { command } },
-  { type: "tool_call", toolCallId: id, toolName: "Bash", title: command, status, input: { command }, result },
-];
+type Status = "success" | "failure";
+
+function call(toolCallId: string, toolName: string, title: string, input: unknown, result?: string, status: Status = "success"): RunLogEvent[] {
+  return [
+    { type: "tool_call", toolCallId, toolName, title, status: "running", input },
+    { type: "tool_call", toolCallId, toolName, title, status, input, ...(result === undefined ? {} : { result }) },
+  ];
+}
+const read = (id: string, path: string, result = "") => call(id, "Read", path, { file_path: path }, result);
+const grep = (id: string, pattern: string, path: string, result = "") => call(id, "Grep", `grep -rn "${pattern}" ${path}`, { pattern, path }, result);
+const edit = (id: string, path: string, oldS: string, newS: string) => call(id, "Edit", path, { file_path: path, old_string: oldS, new_string: newS }, "Edited");
+const write = (id: string, path: string) => call(id, "Write", path, { file_path: path }, "File created");
+const bash = (id: string, command: string, result: string, status: Status = "success") => call(id, "Bash", command, { command }, result, status);
+const agent = (id: string, toolName: "task_new" | "task_wait", title: string, input: unknown, result: string) => call(id, toolName, title, input, result);
 
 const usage = (inputTokens: number, outputTokens: number, costUsd: number, contextUsed: number): RunLogEvent => {
   const u: RunUsage = { inputTokens, outputTokens, cachedInputTokens: Math.round(inputTokens * 4), costUsd, model: "claude-sonnet-5-5", contextUsed, contextSize: 200_000, source: "provider" };
   return { type: "usage", usage: u };
 };
+const text = (body: string): RunLogEvent => ({ type: "chunk", text: body });
+const done: RunLogEvent = { type: "done", stopReason: "end_turn" };
 
 /** Spaces the events of one burst `gap` ms apart, starting at `start`. */
 function sequence(start: number, gap: number, events: RunLogEvent[]): Step[] {
   return events.map((event, i) => ({ at: start + i * gap, event }));
 }
 
+// ---- the live task: "Rate-limit the webhook handler", with the permission request -----------------------------------------
+
+export const WEBHOOK_PROMPT = "Add a rate limiter to the webhook handler";
+
 export const PERMISSION_REQUEST: PermissionRequestEventParams = {
   requestId: "demo-req-1",
-  summary: "Write internal/ratelimit/limiter.go",
+  summary: "Write internal/webhook/limiter.go",
   options: [
-    { id: "allow", label: "Allow", kind: "allow_once" },
+    { id: "allow", label: "Allow once", kind: "allow_once" },
+    { id: "allow_always", label: "Allow always", kind: "allow_always" },
     { id: "deny", label: "Deny", kind: "reject_once" },
   ],
   detail: {
     kind: "write",
-    path: "internal/ratelimit/limiter.go",
-    newBytes: 812,
-    newLines: 30,
+    path: "internal/webhook/limiter.go",
+    newBytes: 1046,
+    newLines: 41,
     replacesExisting: false,
     diff: [
       "@@ -0,0 +1,12 @@",
-      "+package ratelimit",
+      "+package webhook",
       "+",
       "+import (",
       '+\t"sync"',
       '+\t"time"',
       "+)",
       "+",
-      "+// Limiter is a per-key token bucket.",
+      "+// Limiter is a token bucket: rate tokens per second, burst at most.",
       "+type Limiter struct {",
-      "+\tmu      sync.Mutex",
-      "+\tbuckets map[string]*bucket",
+      "+\tmu     sync.Mutex",
+      "+\ttokens float64",
       "+}",
     ].join("\n"),
   },
 };
 
 const ALLOW_BRANCH: Step[] = [
-  { at: 400, event: { type: "tool_call", toolCallId: "t-write", toolName: "Write", title: "internal/ratelimit/limiter.go", status: "success", input: { file_path: "internal/ratelimit/limiter.go" }, result: "File created" } },
-  ...sequence(1200, 700, [
-    { type: "tool_call", toolCallId: "t-edit", toolName: "Edit", title: "cmd/api/router.go", status: "success", input: { file_path: "cmd/api/router.go", old_string: "return middleware.Auth(cfg.Keys)(mux)", new_string: "limited := ratelimit.Middleware(ratelimit.New(cfg.RateLimit))(mux)\n\treturn middleware.Auth(cfg.Keys)(limited)" }, result: "Edited" },
-  ]),
-  ...sequence(2200, 1400, bash("t-test2", "go test ./...", "?   \tacme/cmd/api\t[no test files]\nok  \tacme/internal/middleware\t0.412s\nok  \tacme/internal/ratelimit\t0.201s\nok  \tacme/internal/queue\t1.108s")),
-  { at: 5200, event: { type: "chunk", text: "Done. Requests are now limited to **100 per minute per API key** (burst of 20); anything over that gets a `429` with a `Retry-After` header.\n\n" } },
-  { at: 5500, event: { type: "chunk", text: "- new `internal/ratelimit` package (token bucket, one per key)\n- wired in after auth in `cmd/api/router.go`\n- `RATE_LIMIT_RPM` / `RATE_LIMIT_BURST` in `cmd/api/config.go`\n\nAll tests pass. This is a scripted demo — in smind you would now review the diff and commit." } },
-  { at: 5900, event: usage(61_200, 7_400, 1.12, 68_000) },
-  { at: 6100, event: { type: "done", stopReason: "end_turn" } },
+  ...sequence(400, 600, write("t-write", "internal/webhook/limiter.go")),
+  ...sequence(1600, 600, edit("t-wire", "internal/webhook/handler.go", 'mux.Handle("/webhook", h)', 'limiter := ratelimit.New(5, 10)\n\tmux.Handle("/webhook", limiter.Middleware(h))')),
+  ...sequence(2800, 1300, bash("t-test", "go test ./internal/webhook/...", "ok  \tcheckout/internal/webhook\t0.288s")),
+  { at: 5300, event: text("Added a token-bucket limiter in `limiter.go` and wired it into the handler. Tests pass.") },
+  { at: 5600, event: usage(48_200, 5_100, 0.05, 54_000) },
+  { at: 5800, event: done },
 ];
 
 const DENY_BRANCH: Step[] = [
-  { at: 500, event: { type: "chunk", text: "Understood — I won't write that file. Here is what I would do instead:\n\n" } },
-  { at: 900, event: { type: "chunk", text: "1. keep the limiter behind a small interface so you can pick the storage\n2. add it to the router after auth\n3. cover the `429` and `Retry-After` paths with tests\n\nTell me which part to start with. (This is a scripted demo reply.)" } },
-  { at: 1500, event: usage(52_800, 3_900, 0.74, 60_000) },
-  { at: 1700, event: { type: "done", stopReason: "end_turn" } },
+  { at: 500, event: text("Understood — I won't create `limiter.go`. Here is what I would do instead:\n\n") },
+  { at: 900, event: text("1. a small token-bucket `Limiter` behind an interface, so you can pick the storage\n2. call it at the top of the handler and answer `429` with `Retry-After`\n3. cover the burst and refill paths with tests\n\nTell me which part to start with. (This is a scripted demo reply.)") },
+  { at: 1500, event: usage(41_000, 2_400, 0.03, 46_000) },
+  { at: 1700, event: done },
 ];
 
-/** The run in progress on first paint: tool calls, a usage event, then a permission request the visitor answers. */
+/** The run in progress on first paint: it reads the handler, says it needs a new file, then asks. */
 export const LIVE_SCRIPT: Script = {
   steps: [
-    { at: 500, event: { type: "thinking", text: "I need to see how the HTTP stack is wired first: where auth runs, and what the API key looks like in the request context." } },
-    { at: 1400, event: { type: "chunk", text: "I'll start by reading the router and the auth middleware.\n\n" } },
-    ...sequence(2000, 900, read("t-read1", "cmd/api/router.go", 'func NewRouter(cfg Config) http.Handler {\n\tmux := http.NewServeMux()\n\tmux.Handle("/v1/", http.StripPrefix("/v1", v1(cfg)))\n\treturn middleware.Auth(cfg.Keys)(mux)\n}')),
-    ...sequence(3800, 900, read("t-read2", "internal/middleware/auth.go", "// Auth resolves the API key and stores its id on the request context.\nfunc KeyID(ctx context.Context) string { ... }")),
-    { at: 5600, event: { type: "chunk", text: "Auth already puts the key id on the context, so a limiter can key on it. I'll add a token-bucket limiter in `internal/ratelimit` and wire it in after auth. First, a baseline test run:\n\n" } },
-    ...sequence(6400, 1300, bash("t-test1", "go test ./internal/middleware/...", "ok  \tacme/internal/middleware\t0.412s")),
-    { at: 8200, event: usage(31_400, 3_100, 0.52, 36_000) },
-    { at: 8600, event: { type: "chunk", text: "Baseline is green. Now I'll create the limiter — this needs your approval.\n\n" } },
-    { at: 9400, ask: PERMISSION_REQUEST, allow: ALLOW_BRANCH, deny: DENY_BRANCH },
+    { at: 400, event: { type: "thinking", text: "The handler needs a per-client limit before it does any work. Let me read it first." } },
+    ...sequence(1200, 900, read("t-read", "internal/webhook/handler.go", 'func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n\tevt, err := h.decode(r)\n\t...\n}')),
+    { at: 3400, event: text("I need to add the limiter file.") },
+    { at: 4300, ask: PERMISSION_REQUEST, allow: ALLOW_BRANCH, deny: DENY_BRANCH },
   ],
 };
 
@@ -96,52 +104,104 @@ export function cannedReply(prompt: string, n: number): Script {
   return {
     steps: [
       { at: 300, event: { type: "thinking", text: `The visitor asked: "${short}". This is the scripted demo, so I will answer with a canned reply.` } },
-      { at: 1000, event: { type: "chunk", text: `${opening}\n\n` } },
-      { at: 1400, event: { type: "chunk", text: "This is a **scripted demo**: no model is running and nothing you type leaves your browser. " } },
-      { at: 1800, event: { type: "chunk", text: "Install smind to run this against your own repositories — it starts an agent in an isolated git worktree, streams its tool calls here, and asks before anything risky." } },
+      { at: 1000, event: text(`${opening}\n\n`) },
+      { at: 1400, event: text("This is a **scripted demo**: no model is running and nothing you type leaves your browser. ") },
+      { at: 1800, event: text("Install smind to run this against your own repositories — it starts an agent in an isolated git worktree, streams its tool calls here, and asks before anything risky.") },
       { at: 2300, event: usage(18_200, 1_100, 0.2, 20_000) },
-      { at: 2500, event: { type: "done", stopReason: "end_turn" } },
+      { at: 2500, event: done },
     ],
   };
 }
 
-// ---- finished runs (the timelines of the other tasks) -----------------------------------------------------------
+// ---- the finished tasks (each is the landing hero's story for that level) --------------------------------------------------
 
-export const FLAKY_RUN_EVENTS: RunLogEvent[] = [
-  { type: "thinking", text: "Flaky timing tests usually sleep for real time. Let me read the test and the worker's clock handling." },
-  { type: "chunk", text: "Let me look at the test and the worker.\n\n" },
-  ...read("f-read1", "internal/queue/worker_test.go", 'time.Sleep(50 * time.Millisecond)\nif w.Attempts() != 2 { ... }'),
-  ...read("f-read2", "internal/queue/worker.go", "type Clock interface { Now() time.Time; After(d time.Duration) <-chan time.Time }"),
-  { type: "chunk", text: "The test sleeps 50 ms and hopes the retry fired, but the worker already takes an injectable `Clock`. I'll drive the fake clock instead.\n\n" },
-  { type: "tool_call", toolCallId: "f-edit", toolName: "Edit", title: "internal/queue/worker_test.go", status: "success", input: { file_path: "internal/queue/worker_test.go", old_string: "time.Sleep(50 * time.Millisecond)", new_string: "clock.Advance(w.BackoffFor(1))" }, result: "Edited" },
-  ...bash("f-test", "go test -count=20 -run TestRetryBacksOff ./internal/queue", "ok  \tacme/internal/queue\t0.731s"),
-  { type: "chunk", text: "Fixed: the test now advances the fake clock by the worker's own backoff, so it no longer depends on wall-clock timing. Twenty consecutive runs pass." },
-  usage(41_000, 4_100, 0.64, 44_000),
-  { type: "done", stopReason: "end_turn" },
+/** Debug: "Why does TestRetry fail on CI only?" */
+export const RETRY_EVENTS: RunLogEvent[] = [
+  ...read("r-1", "ci/logs/retry.txt", "--- FAIL: TestRetry (0.00s)\n    retry_test.go:41: attempt order [3 1 2], want [1 2 3]"),
+  ...grep("r-2", "rand.Seed", "internal/", "internal/retry/backoff.go:15:\trng := rand.New(rand.NewSource(time.Now().UnixNano()))"),
+  ...edit("r-3", "internal/retry/backoff.go", "rng := rand.New(rand.NewSource(time.Now().UnixNano()))", "seed := testSeed()\n\trng := rand.New(rand.NewSource(seed))"),
+  ...bash("r-4", "go test -race -count=20 ./internal/retry/...", "ok  \tcheckout/internal/retry\t3.904s"),
+  text("The jitter is seeded from the wall clock, so CI's faster runner hits a different backoff order. I pinned the seed in the test; 20 repeated runs now pass."),
+  usage(30_000, 2_600, 0.03, 33_000),
+  done,
 ];
 
-export const TOOLCHAIN_RUN_EVENTS: RunLogEvent[] = [
-  { type: "chunk", text: "I'll bump the `go` directive and rebuild.\n\n" },
-  ...bash("g-build", "go build ./...", "go: downloading go1.24 (linux/amd64)\ngo: download go1.24: toolchain not available", "failure"),
-  { type: "chunk", text: "The Go 1.24 toolchain could not be downloaded in this environment, so I can't verify the upgrade." },
-  { type: "done", stopReason: "error" },
+/** First task: "Add a unit test for parseDate" */
+export const PARSE_DATE_EVENTS: RunLogEvent[] = [
+  ...read("p-1", "internal/dates/parse.go", "func parseDate(s string) (time.Time, error) { ... }"),
+  ...write("p-2", "internal/dates/parse_test.go"),
+  ...bash("p-3", "go test ./internal/dates/...", "ok  \tcheckout/internal/dates\t0.021s"),
+  text("Added a table test with 5 cases: ISO, RFC 3339, an empty string, a bad month and a leap day. `go test` is green."),
+  usage(22_000, 1_900, 0.02, 24_000),
+  done,
 ];
 
-export const DARKMODE_RUN_EVENTS: RunLogEvent[] = [
-  ...read("d-read", "src/settings/SettingsPage.tsx", 'export function SettingsPage() {\n  return <Panel title="Settings" />;\n}'),
-  { type: "tool_call", toolCallId: "d-edit", toolName: "Edit", title: "src/settings/SettingsPage.tsx", status: "success", input: { file_path: "src/settings/SettingsPage.tsx", old_string: '<Panel title="Settings">', new_string: '<Panel title="Settings" data-theme={theme}>' }, result: "Edited" },
-  { type: "chunk", text: "Added a `ThemeToggle` to the settings page, bound to the existing `useTheme` hook." },
-  usage(36_000, 3_000, 0.5, 40_000),
-  { type: "done", stopReason: "end_turn" },
+/** Review: "Review PR #42 for race conditions" (no code changed) */
+export const REVIEW_EVENTS: RunLogEvent[] = [
+  ...bash("v-1", "gh pr diff 42", "diff --git a/internal/cache/store.go b/internal/cache/store.go\n..."),
+  ...read("v-2", "internal/cache/store.go", "func (s *Store) Get(k string) (V, bool) { ... s.hits++ ... }"),
+  ...grep("v-3", "sync\\.", "internal/cache/", "internal/cache/store.go:12:\tmu sync.Mutex"),
+  text("Three problems, no code changed:\n\n"),
+  text(
+    "1. `store.go:58` `hits++` runs outside the mutex: a data race under concurrent `Get`.\n2. `store.go:91` `Len()` reads the map without `RLock`.\n3. `pool.go:34` `wg.Add` after the `go` statement can race with `Wait`.\n\nRun the tests with `-race` to confirm 1 and 2.",
+  ),
+  usage(38_000, 3_200, 0.04, 41_000),
+  done,
 ];
 
-export const PAGINATION_RUN_EVENTS: RunLogEvent[] = [
-  { type: "chunk", text: "Plan: add `?page=` to the audit endpoint, a `Pagination` control under the table, and keep the page in the URL. Say go and I'll start." },
-  { type: "done", stopReason: "end_turn" },
+/** Analysis: "Why did p99 latency double since Tuesday?" */
+export const ANALYSIS_EVENTS: RunLogEvent[] = [
+  ...read("a-1", "metrics/p99-by-route.csv", "route,p99_ms_mon,p99_ms_wed\nPOST /charge,38,240"),
+  ...read("a-2", "deploys.log", "Tue 14:02 checkout-api 4.12.0 (db pool 40 -> 10)"),
+  ...bash("a-3", "go tool pprof -top cpu.prof", "      flat  flat%   sum%        cum   cum%\n     1.20s 31.4% 31.4%      1.90s 49.7%  database/sql.(*DB).conn"),
+  text("Ranked by evidence:\n\n"),
+  text(
+    "1. **Pool shrunk 40 → 10** in Tuesday's deploy. Pool wait on `POST /charge`: p99 38 ms → 240 ms.\n2. **N+1 query** in the new order summary: about 9% of the increase.\n3. **GC pauses**: unlikely, the heap is flat.\n\nNext: restore the pool size behind a flag and compare p99.",
+  ),
+  usage(70_000, 6_100, 0.09, 76_000),
+  done,
 ];
 
-export const GUIDE_RUN_EVENTS: RunLogEvent[] = [
-  { type: "chunk", text: "Wrote `docs/migrate-v2.md`: breaking changes, a before/after config example, and a rollback section." },
-  usage(22_000, 3_400, 0.38, 25_000),
-  { type: "done", stopReason: "end_turn" },
+/** Onboarding (web-app): "Explain this repo to me" */
+export const ONBOARDING_EVENTS: RunLogEvent[] = [
+  ...read("o-1", "README.md", "# web-app\n\nThe customer dashboard."),
+  ...read("o-2", "package.json", '{ "name": "web-app", "dependencies": { "next": "15" } }'),
+  ...bash("o-3", "tree -L 2 src", "src\n├── app\n├── components\n└── lib"),
+  text("A Next.js app with three parts:\n\n"),
+  text("- `src/app`: the routes and layouts\n- `src/components`: UI, one folder per feature\n- `src/lib`: API clients and helpers\n\nStart with `src/app/page.tsx`, then follow its imports."),
+  usage(9_000, 900, 0.01, 11_000),
+  done,
+];
+
+/** Design (platform): the Lead. It starts two Peers, waits for them and writes the summary. */
+export const DESIGN_EVENTS: RunLogEvent[] = [
+  { type: "thinking", text: "Two independent questions: how jobs are stored and leased, and what each failure costs. Two Peers, then I merge their notes." },
+  ...agent("d-1", "task_new", '"queue schema and leases", parent: #12', { title: "Queue schema and leases", parentTaskId: 12 }, "task 13 started (run 14)"),
+  ...agent("d-2", "task_new", '"failover modes", parent: #12', { title: "Failover modes", parentTaskId: 12 }, "task 14 started (run 15)"),
+  ...agent("d-3", "task_wait", "run 14, run 15", { runs: [14, 15] }, "both runs done"),
+  text("Both Peers are done. Summary (ADR draft):\n\n"),
+  text(
+    "| Option | Failover | Ops cost |\n| --- | --- | --- |\n| One global queue | Single point of failure | Low |\n| Queue per region | Drain from the replica | Medium |\n| Event log | Replay by offset | High |\n\n",
+  ),
+  text("**Recommendation:** a queue per region, jobs pinned to their home region, the dead-letter table replicated."),
+  usage(120_000, 9_800, 0.31, 130_000),
+  done,
+];
+
+/** Design Peer 1: "Queue schema and leases" */
+export const PEER_SCHEMA_EVENTS: RunLogEvent[] = [
+  ...read("s-1", "docs/adr/storage.md", "# Storage\n\nPostgres per region."),
+  ...edit("s-2", "docs/adr/job-queue.md", "## Schema\n", "## Schema\n\n`jobs(id, region, state, lease_until, attempts)`\n"),
+  text("Drafted the `jobs` table and a 30 s lease with heartbeat renewal."),
+  usage(18_000, 1_500, 0.05, 20_000),
+  done,
+];
+
+/** Design Peer 2: "Failover modes" */
+export const PEER_FAILOVER_EVENTS: RunLogEvent[] = [
+  ...read("f-1", "docs/adr/regions.md", "# Regions\n\nus-east, eu-west, ap-south."),
+  ...edit("f-2", "docs/adr/job-queue.md", "## Failure modes\n", "## Failure modes\n\nRegion loss, replica lag, split brain.\n"),
+  text("Three modes: region loss, replica lag, split brain. Region loss is the only one that needs a human."),
+  usage(20_000, 1_700, 0.06, 22_000),
+  done,
 ];

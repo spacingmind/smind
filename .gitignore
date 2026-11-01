@@ -29,3 +29,6 @@ docs/research/local/
 !.env.example
 !.env.sample
 !.env.template
+
+# wrangler local state (wrangler dev)
+web/packages/*/.wrangler/

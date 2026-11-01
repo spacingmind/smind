@@ -73,4 +73,6 @@ export interface DemoScenario {
   profiles: AgentProfile[];
   /** Text files of each task's worktree (file.list / file.read), by task id then relative path. */
   files: Record<number, Record<string, string>>;
+  /** Orchestration tier by task id (the Lead of a tree is "leader", its Peers "coder"); absent = a plain task. */
+  tiers: Record<number, "supervisor" | "leader" | "coder">;
 }
