@@ -6,7 +6,7 @@
 // $SMIND_HOME/fixtures and installs it through the devharness plugin-* commands. No rpc action (that needs a process)
 // and no model call: the only run is the fake agent's seeded end_turn.
 //
-// Frames (light + dark): pc3-detail-panels, pc3-panel-open (+ -full), pc3-panel-form (harness route, see unsupportedFrame), pc3-panel-refresh-before/after,
+// Frames (light + dark): pc3-detail-panels, pc3-panel-open (+ -full), pc3-panel-form (harness route, see unsupportedFrame), pc3-panel-overcap (an rpc view from the process plugin panel-big), pc3-panel-refresh-before/after,
 // pc3-panel-openurl-confirm, pc3-panel-prompt, pc3-panel-disabled.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -66,6 +66,77 @@ function nodesView() {
 
 const smallView = (text) => ({ ui: 1, title: 'Small', root: { type: 'stack', children: [{ type: 'heading', text: 'Small panel', level: 2 }, { type: 'text', text }] } });
 
+const BIG_SERVER = `#!/usr/bin/env python3
+import json
+import sys
+
+
+def read_message():
+    length = None
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            return None
+        line = line.strip()
+        if not line:
+            break
+        key, _, value = line.partition(b":")
+        if key.strip().lower() == b"content-length":
+            length = int(value.strip())
+    if length is None:
+        return None
+    return json.loads(sys.stdin.buffer.read(length))
+
+
+def send(message):
+    body = json.dumps(message).encode("utf-8")
+    sys.stdout.buffer.write(b"Content-Length: %d\\r\\n\\r\\n" % len(body) + body)
+    sys.stdout.buffer.flush()
+
+
+def big_view(params):
+    # big: 1500 short nodes (~50 KB, over the 1000-node cap); bytes: 3500 long ones (over the 256 KiB result cap)
+    if (params or {}).get("panelId") == "bytes":
+        children = [{"type": "text", "text": "row %d %s" % (i, "x" * 60)} for i in range(3500)]
+    else:
+        children = [{"type": "text", "text": "row %d" % i} for i in range(1500)]
+    return {"ui": 1, "root": {"type": "stack", "children": children}}
+
+
+while True:
+    msg = read_message()
+    if msg is None:
+        break
+    method, msg_id = msg.get("method"), msg.get("id")
+    if method == "plugin.initialize":
+        send({"jsonrpc": "2.0", "id": msg_id, "result": {}})
+    elif method == "plugin.shutdown":
+        break
+    elif method == "rpc.bigView":
+        send({"jsonrpc": "2.0", "id": msg_id, "result": big_view(msg.get("params"))})
+    elif msg_id is not None:
+        send({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "method not found: %s" % method}})
+`;
+
+/** A small process plugin whose bigView rpc answers a valid ui:1 document over the node and byte caps. */
+function buildBigFixture(root) {
+  const dir = join(root, 'panel-big');
+  w(join(dir, 'smind-plugin.json'), JSON.stringify({
+    id: 'panel-big', name: 'Panel big', version: '1.0.0', api: 1, engines: { smind: '>=0.15.0' }, description: 'An rpc panel over the view caps',
+    process: { command: ['python3', 'server.py'] },
+    capabilities: [],
+    contributes: {
+      rpc: [{ name: 'bigView', description: 'Returns an over-cap ui:1 document.', timeoutMs: 10000 }],
+      panels: [
+        { id: 'big', title: 'Big', icon: 'Info', where: 'task', view: { rpc: 'bigView' } },
+        { id: 'bytes', title: 'Bytes', icon: 'Info', where: 'task', view: { rpc: 'bigView' } },
+      ],
+    },
+  }, null, 1));
+  w(join(dir, 'server.py'), BIG_SERVER);
+  return dir;
+}
+
 function buildFixture(root) {
   const dir = join(root, PLUGIN);
   w(join(dir, 'smind-plugin.json'), JSON.stringify({
@@ -104,14 +175,14 @@ async function assertSafe(page, evil, label) {
   if (evil.length > 0) lib.fail(`${label}: a request to evil.example was made: ${evil.join(', ')}`);
 }
 
-async function openDetail(page) {
+async function openDetail(page, name = 'Panel demo') {
   // The Connection sheet has several Open rows now: reach /plugins by the router's own history entry.
   await page.evaluate(() => {
     window.history.pushState({}, '', '/plugins');
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
   await page.getByRole('heading', { name: 'Plugins', exact: true }).waitFor({ timeout: 15_000 });
-  await page.getByRole('button', { name: /^Panel demo/ }).click();
+  await page.getByRole('button', { name: new RegExp(`^${name}`) }).click();
   await page.getByRole('heading', { name: 'Plugin', exact: true }).waitFor().catch(() => {});
 }
 
@@ -153,6 +224,7 @@ async function scenario(page, harness) {
   });
   w(join(HOME, 'config.yaml'), 'plugins:\n  enabled: true\n');
   const fx = buildFixture(join(HOME, 'fixtures'));
+  const fxBig = buildBigFixture(join(HOME, 'fixtures'));
 
   const seeded = await harness.cmd('seed-run end_turn Existing task');
   if (!seeded.ok) return lib.fail(`seeding failed: ${JSON.stringify(seeded)}`);
@@ -221,20 +293,34 @@ async function scenario(page, harness) {
   await page.locator('textarea').fill('');
   await openDetail(page);
 
-  // 6. refresh on plugin.updated: the small panel, no navigation
-  await page.getByRole('button', { name: 'Small panel' }).click();
-  await expectText(page, 'Version one of the small panel.', 'small panel');
-  await shoot(page, 'pc3-panel-refresh-before');
-  const urlBefore = page.url();
-  writeFileSync(join(fx, 'views', 'small.json'), JSON.stringify(smallView('Version two arrived live.')));
-  const rl = await harness.cmd(`plugin-reload ${PLUGIN}`);
-  console.log('plugin-reload ->', JSON.stringify(rl));
-  await nudge(page);
-  if (await expectText(page, 'Version two arrived live.', 'live refresh after plugin-reload', 15_000)) {
-    if (await page.getByText('Version one of the small panel.').isVisible().catch(() => false)) lib.fail('the old text is still visible after the refresh');
-    if (page.url() !== urlBefore) lib.fail('the refresh navigated');
+  // 6. refresh on plugin.updated: the small panel, no navigation. The scheme is set BEFORE the panel opens and held
+  // through the reload (changing it after the refetch once produced a light frame drawn in the dark theme).
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme });
+    writeFileSync(join(fx, 'views', 'small.json'), JSON.stringify(smallView('Version one of the small panel.')));
+    await harness.cmd(`plugin-reload ${PLUGIN}`);
+    await nudge(page);
+    await page.getByRole('button', { name: 'Small panel' }).click();
+    await expectText(page, 'Version one of the small panel.', `small panel (${scheme})`);
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: join(lib.SMOKE_DIR, `pc3-panel-refresh-before-${scheme}.png`), fullPage: true });
+    const urlBefore = page.url();
+    writeFileSync(join(fx, 'views', 'small.json'), JSON.stringify(smallView('Version two arrived live.')));
+    const rl = await harness.cmd(`plugin-reload ${PLUGIN}`);
+    console.log('plugin-reload ->', JSON.stringify(rl));
+    await nudge(page);
+    if (await expectText(page, 'Version two arrived live.', `live refresh after plugin-reload (${scheme})`, 15_000)) {
+      if (await page.getByText('Version one of the small panel.').isVisible().catch(() => false)) lib.fail('the old text is still visible after the refresh');
+      if (page.url() !== urlBefore) lib.fail('the refresh navigated');
+    }
+    await page.waitForTimeout(600);
+    const bg = await page.evaluate(() => getComputedStyle(document.body).color);
+    console.log(`refresh-after ${scheme}: text colour ${bg}`);
+    await page.screenshot({ path: join(lib.SMOKE_DIR, `pc3-panel-refresh-after-${scheme}.png`), fullPage: true });
+    await back(page);
   }
-  await shoot(page, 'pc3-panel-refresh-after');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.getByRole('button', { name: 'Small panel' }).click();
 
   // 7. disabled while open: the failed state with Retry
   const rd = await harness.cmd(`plugin-disable ${PLUGIN}`);
@@ -244,8 +330,25 @@ async function scenario(page, harness) {
   await shoot(page, 'pc3-panel-disabled');
   await back(page);
 
-  // pc3-panel-overcap is NOT produced: file views are validated (and size-capped) at install/link/reload, so the daemon
-  // never serves a file panel as view_invalid; only an rpc-backed panel (needs a process) can.
+  // 8. over-cap: only an RPC view can be refused by the daemon at open time (file views are checked at install).
+  for (const line of [`plugin-install ${fxBig}`, 'plugin-enable panel-big']) {
+    const r = await harness.cmd(line);
+    console.log(line, '->', JSON.stringify(r));
+    if (!r.ok) return lib.fail(`${line}: ${JSON.stringify(r)}`);
+  }
+  await nudge(page);
+  await openDetail(page, 'Panel big');
+  await page.getByRole('button', { name: 'Big' }).click();
+  if (await expectText(page, 'This panel is too large or invalid', 'over-cap panel', 30_000)) {
+    const body = await page.evaluate(() => document.body.innerText);
+    console.log('over-cap body:', JSON.stringify(body));
+    if (!/view_invalid at \$\.root[^\n]*more than 1000 nodes/.test(body)) lib.fail("the daemon's path message is not visible under the over-cap title");
+  }
+  await shoot(page, 'pc3-panel-overcap');
+  // The same rpc answering over the byte cap is refused by the host BEFORE validation (its own words, not view_invalid).
+  await back(page);
+  await page.getByRole('button', { name: 'Bytes' }).click();
+  if (await expectText(page, /over the \d+ byte cap/, 'byte-cap panel', 30_000)) await shoot(page, 'pc3-panel-overcap-bytes');
   await unsupportedFrame(page);
   console.log('plugin-panels stage done');
 }
