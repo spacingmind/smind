@@ -382,8 +382,20 @@ function makeStyles(theme: AppTheme) {
     kvKey: { ...theme.type.small, color: theme.foregroundSubtle },
     kvValue: { ...theme.type.body, color: theme.foreground, flex: 1 },
     tableRow: { flexDirection: 'row' },
-    tableHeader: { ...theme.type.label, color: theme.foreground, minWidth: 96, paddingVertical: theme.spacing[1] },
-    tableCell: { ...theme.type.small, color: theme.foreground, minWidth: 96, paddingVertical: theme.spacing[1] },
+    tableHeader: {
+      ...theme.type.label,
+      color: theme.foreground,
+      width: 112,
+      paddingVertical: theme.spacing[1],
+      paddingRight: theme.spacing[2],
+    },
+    tableCell: {
+      ...theme.type.small,
+      color: theme.foreground,
+      width: 112,
+      paddingVertical: theme.spacing[1],
+      paddingRight: theme.spacing[2],
+    },
     alignEnd: { textAlign: 'right' },
     codeBox: {
       backgroundColor: theme.surfaceSubtle,
