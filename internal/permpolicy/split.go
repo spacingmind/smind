@@ -940,7 +940,10 @@ func (s *scanner) normalized() string {
 	for _, h := range s.heredocs {
 		edits = append(edits, edit{h.opStart, h.opEnd, h.marker()})
 		if h.bodyStart > h.opEnd && h.bodyStart <= len(s.src) {
-			edits = append(edits, edit{h.bodyStart - 1, h.bodyEnd, ""}) // the newline that opened the body
+			// The deletion spans the newline that opened the body through the
+			// terminator's own newline, so one newline is put back: without it
+			// the next line's text would glue onto the operator's target.
+			edits = append(edits, edit{h.bodyStart - 1, h.bodyEnd, "\n"})
 		}
 	}
 	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
@@ -950,10 +953,10 @@ func (s *scanner) normalized() string {
 		if e.start < pos {
 			// Two bodies on one line make the deletions overlap; a deletion
 			// clamps into the union, an insertion never overlaps in practice.
-			if e.text != "" || e.end <= pos {
+			if e.end <= pos || e.text != "\n" {
 				continue
 			}
-			e.start = pos
+			e.start, e.text = pos, ""
 		}
 		if e.end > len(s.src) {
 			continue
