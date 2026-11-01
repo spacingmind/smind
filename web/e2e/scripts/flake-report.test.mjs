@@ -68,16 +68,14 @@ test('flake_report_weekly_flags_over_two_flakes_in_twenty_runs', () => {
     }
     // an older (21st) run with a flake must fall outside the window
     writeRun(two, 50, { flaky: true })
-    const flagged = run('--weekly', three)
-    assert.match(flagged, /Quarantine candidates/)
+    // The per-spec table also holds the row: only the candidates section proves the threshold.
+    const candidates = (out) => out.split('### Quarantine candidates')[1] ?? ''
+    const flagged = candidates(run('--weekly', three))
     assert.match(flagged, /\| S \| light-1280 \|/)
-    const section = flagged.split('Quarantine candidates')[1]
-    assert.match(section, /S/)
 
-    const clean = run('--weekly', two)
-    const cleanSection = clean.split('Quarantine candidates')[1] ?? ''
-    assert.doesNotMatch(cleanSection, /\| S \|/)
-    assert.match(cleanSection, /none/i)
+    const clean = candidates(run('--weekly', two))
+    assert.doesNotMatch(clean, /\| S \| light-1280 \|/)
+    assert.match(clean, /None\./)
   } finally {
     fs.rmSync(three, { recursive: true, force: true })
     fs.rmSync(two, { recursive: true, force: true })
