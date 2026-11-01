@@ -7,6 +7,7 @@ import { InboxScreen } from "@/components/inbox/inbox-screen";
 import { hostDownItem, hostPairItem, hostRefusedItem, InboxDaemon, permissionItem, REQUEST_EVENTS, runFailedItem, stallItem, verdictItem } from "@/test/inbox-fixtures";
 import { createQueryClient } from "@/lib/query/query-client";
 import { queryKeys } from "@/lib/query-keys";
+import type { InboxItem } from "@/lib/inbox-types";
 import { fleetHost } from "@/test/fleet-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 import type { WorkspaceWithTree } from "@/lib/workspace-tree";
@@ -48,6 +49,29 @@ describe("InboxScreen", () => {
     expect(screen.getByTestId("inbox-row-perm:q1")).toHaveAttribute("data-kind", "permission");
     expect(screen.getByTestId("inbox-summary-verdict:7")).toHaveTextContent("ready for your merge decision");
     expect(screen.getByTestId("inbox-kind-verdict:7")).toHaveTextContent("Passed");
+  });
+
+  it("review rows sit in the Steward reviews group before verdicts", async () => {
+    const reviewItem: InboxItem = {
+      key: "review:12",
+      kind: "review",
+      taskId: 9,
+      title: "Add the login fix",
+      summary: "Steward: changes requested",
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      state: "new",
+      attention: "normal",
+      links: { taskId: 9, reviewId: 12 },
+    };
+    await renderInbox(daemonWith(verdictItem(), reviewItem));
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual(["Steward reviews", "Validator verdicts"]);
+    const row = screen.getByTestId("inbox-row-review:12");
+    expect(row).toHaveAttribute("data-kind", "review");
+    expect(row).toHaveAccessibleName("Steward review: Add the login fix. Steward: changes requested");
+    // This daemon answers no steward.get, so the row's pill stays the quiet "Review".
+    expect(screen.getByTestId("inbox-kind-review:12")).toHaveTextContent("Review");
+    expect(within(row).getByTestId("inbox-review-review:12")).toHaveAttribute("aria-expanded", "false");
   });
 
   it("TestInboxRowShowsHostChip", async () => {

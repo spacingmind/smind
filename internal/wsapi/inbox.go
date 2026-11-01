@@ -49,10 +49,13 @@ type inboxHost struct {
 	// linkIssues is the fleet link-issue source SetFleet installs after the
 	// inbox loop is already running, hence atomic.
 	linkIssues atomic.Pointer[func() []inbox.HostLinkIssue]
-	bus        *eventBus
-	poke       chan struct{}
-	done       chan struct{}
-	once       sync.Once
+	// reviews is the steward review source the server installs after the
+	// inbox loop is already running, hence atomic.
+	reviews atomic.Pointer[func() ([]inbox.Review, error)]
+	bus     *eventBus
+	poke    chan struct{}
+	done    chan struct{}
+	once    sync.Once
 
 	mu   sync.Mutex
 	last string
@@ -75,6 +78,12 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 				}
 			}
 			return out, nil
+		},
+		Reviews: func() ([]inbox.Review, error) {
+			if f := h.reviews.Load(); f != nil {
+				return (*f)()
+			}
+			return nil, nil
 		},
 		FailedRuns: func() []inbox.FailedRun {
 			var out []inbox.FailedRun
@@ -115,6 +124,11 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 // setLinkIssues installs the source of host link issues.
 func (h *inboxHost) setLinkIssues(f func() []inbox.HostLinkIssue) {
 	h.linkIssues.Store(&f)
+}
+
+// setReviews installs the source of steward reviews.
+func (h *inboxHost) setReviews(f func() ([]inbox.Review, error)) {
+	h.reviews.Store(&f)
 }
 
 func (h *inboxHost) stop() {
