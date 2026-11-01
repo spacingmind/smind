@@ -76,6 +76,14 @@ On failure the job uploads `web/e2e/test-results/` (screenshots, traces, the per
 4. **Where the specs live**: `web/e2e/` as its own workspace package (recommended: keeps vitest and Playwright runners separate), or under `web/packages/ui/e2e/`.
 5. **Runner OS**: ubuntu only (recommended). macOS/Windows webviews are covered by the existing desktop workflows and the manual J56 check.
 
+### Recorded answers (Supervisor default 2026-11-01, Human may veto)
+
+1. Pinned `@playwright/test` 1.49.1 (the cached Chromium revision) and `@axe-core/playwright`, with cached browsers in CI.
+2. A non-required, path-filtered PR check that becomes required after 20 consecutive greens with flake < 2% and p95 < 6 min, plus a nightly full matrix never required (a red nightly opens an issue). The repo is public, so Actions minutes are free.
+3. The node fake agent (`web/e2e/fixtures/uat-agent.cjs`).
+4. `web/e2e/` as its own workspace package.
+5. Ubuntu only.
+
 ## Test scenarios (named, for the suite itself)
 
 - `fixture_refuses_foreign_home`, `fixture_refuses_reserved_port`: the guard.
@@ -86,11 +94,15 @@ On failure the job uploads `web/e2e/test-results/` (screenshots, traces, the per
 
 ## Progress
 
-- [ ] Human decisions 1-5 answered.
-- [ ] PR A: `web/e2e/` package, daemon fixture, guard, agent, the PR subset, a local README (no CI change).
+- [x] Decisions 1-5 recorded (Supervisor default 2026-11-01, Human may veto).
+- [x] PR A: `web/e2e/` package, daemon fixture, guard, agent, the PR subset, a local README (no CI change). 65 tests per run in light-1280 and dark-390, about 95 s wall with 2 workers under `nice`; 5 consecutive full runs green, 0 flakes (`flaky.json` empty), no daemon, browser or temp dir left behind.
 - [ ] PR B: the `e2e` CI job (non-required), artifacts, nightly workflow, flake report.
 - [ ] Mutation per spec recorded; budget measured on a real runner and written back here.
 
 ## Validation
 
-(filled in as the PRs land)
+PR A (the suite):
+- 5 consecutive full local runs (2 workers, `nice -n 10`, this Mac under load): 65 passed, 5 skipped by design (narrow/desktop-only specs), 0 flaky, 94-98 s wall; after each run `pgrep` shows no smind-e2e daemon or Chromium and `$TMPDIR/smind-e2e-*` is empty.
+- Seeded regressions (each rebuilt into a separate binary, the spec must go red, then restored): A-02 first terminal back to the indexed `Terminal 2` tab fails `J19/A-02` (both projects); B-01 the `task.archived` selection move disabled fails `J39/B-01` (both); A-01 the CRUD dialogs moved back inside the mobile Sheet fails both `A-01` palette specs at 390; the Jump-to-latest pill made `absolute` over the log fails the strengthened `Jump to latest pill` spec (4 of 4 runs) — the first version of that spec passed the same mutation and was rewritten to assert real overlap and layout stability. The unmutated control passes 12/12.
+- Bugs and gaps the suite surfaced while being written: J39 failed once in five runs because the daemon refuses to archive a task whose run is still `running` while the UI already shows it finished (the spec now waits for the daemon's own run status); J49 found a keyboard-focusable scroll region with no visible ring (B-11, P3, tolerated and annotated); the daemon fixture re-created its temp home through provider probes that outlived it (fixed with a process-group kill).
+- Not yet measured: runtime and flake rate on a real CI runner (PR B).
