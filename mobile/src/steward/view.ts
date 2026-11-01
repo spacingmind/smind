@@ -62,7 +62,7 @@ export function severityLabel(f: StewardFinding): string {
 /** The findings as the plain text the Human copies to the Lead: one header line, then one line per finding. */
 export function findingsAsPrompt(review: StewardReview): string {
   const lines = [
-    `Steward review ${review.id} of task ${review.taskId} at ${review.headSha.slice(0, 7)}: ${verdictChip(review.verdict).text}`,
+    `Steward review ${review.id} of task ${review.taskId} at ${(review.headSha ?? '').slice(0, 7)}: ${verdictChip(review.verdict).text}`,
   ];
   if (review.findings.length === 0) {
     lines.push('No findings.');
@@ -86,7 +86,7 @@ export function reviewHeader(r: StewardReview): {
   return {
     chip: verdictChip(r.verdict),
     pr: typeof r.prNumber === 'number' ? `PR #${r.prNumber}` : null,
-    head7: r.headSha.slice(0, 7),
+    head7: (r.headSha ?? '').slice(0, 7),
     staleNote: r.stale ? `Stale: ${r.stale}` : null,
     summary: r.summary || null,
     blockedReason: r.verdict === 'BLOCKED' && r.blockedReason ? r.blockedReason : null,

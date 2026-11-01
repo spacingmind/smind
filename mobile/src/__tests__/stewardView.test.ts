@@ -108,4 +108,11 @@ describe('steward header and frames', () => {
     expect(frameSource(null)).toBeNull();
     expect(frameSource(undefined)).toBeNull();
   });
+
+  it('steward review tolerates a missing head sha', () => {
+    const r = review({ headSha: undefined as never });
+    expect(reviewHeader(r).head7).toBe('');
+    expect(() => findingsAsPrompt(r)).not.toThrow();
+    expect(findingsAsPrompt(r).startsWith('Steward review ')).toBe(true);
+  });
 });
