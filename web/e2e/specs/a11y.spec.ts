@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import type { Locator, Page } from '@playwright/test'
 import { pinColorsToRgb } from '../fixtures/browser-stubs'
+import { stubTaskDiffs } from '../fixtures/git-stub'
 import { expect, test } from '../fixtures/test'
 
 // B-05 fixed --muted-foreground, --warning-text and the sidebar row time only (docs: contrast-table). Quiet text built on the
@@ -104,9 +105,20 @@ test('J49 keyboard only: every Tab stop shows a focus ring, Permission mode and 
 
 test('B-05 axe color-contrast: sidebar and home', async ({ app }) => {
   const { page } = app
+  // the scan must cover a non-zero case and both zero cases, whatever the checkout's real git diff is
+  const tasks = app.daemon.ids.tasks as Record<string, number>
+  const pinned = { 'idle-done': [5, 2], errored: [3, 0], 'long-timeline': [0, 4] } as const
+  await stubTaskDiffs(
+    page,
+    Object.fromEntries(Object.entries(pinned).map(([title, [insertions, deletions]]) => [tasks[title], { files: 2, insertions, deletions }])),
+  )
   await app.openApp()
   await app.openDrawer()
   await expect(page.getByTestId('sidebar-quick-actions').first()).toBeVisible()
+  for (const [title, [insertions, deletions]] of Object.entries(pinned)) {
+    const row = page.getByTestId('sidebar-task-row').filter({ has: page.getByTestId('task-title').filter({ hasText: new RegExp(`^${title}$`) }) })
+    await expect(row.first().getByTestId('sidebar-task-diffstat')).toHaveText(`+${insertions} -${deletions}`)
+  }
   await contrast(page, 'sidebar+home')
 })
 
