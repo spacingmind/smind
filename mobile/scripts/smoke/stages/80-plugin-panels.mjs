@@ -11,6 +11,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PNG } from 'pngjs';
 import * as lib from '../lib.mjs';
 
 const HOME = process.env.SMIND_HOME ?? '';
@@ -118,6 +119,61 @@ while True:
         send({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "method not found: %s" % method}})
 `;
 
+const FORM_SERVER = BIG_SERVER.split('def big_view')[0] + `def form_view():
+    return {
+        "ui": 1,
+        "root": {
+            "type": "form",
+            "id": "report",
+            "fields": [
+                {"name": "title", "type": "text", "label": "Title", "placeholder": "Repro title", "required": True},
+                {"name": "token", "type": "secret", "label": "API token", "required": True},
+                {"name": "severity", "type": "select", "label": "Severity", "options": [
+                    {"value": "low", "label": "Low"}, {"value": "medium", "label": "Medium"}, {"value": "high", "label": "High"}], "default": "low"},
+                {"name": "notify", "type": "toggle", "label": "Notify", "default": False},
+            ],
+            "submit": {"label": "File report", "action": {"kind": "rpc", "rpc": "submit", "params": {"form": "report"}}},
+        },
+    }
+
+
+while True:
+    msg = read_message()
+    if msg is None:
+        break
+    method, msg_id = msg.get("method"), msg.get("id")
+    if method == "plugin.initialize":
+        send({"jsonrpc": "2.0", "id": msg_id, "result": {}})
+    elif method == "plugin.shutdown":
+        break
+    elif method == "rpc.formView":
+        send({"jsonrpc": "2.0", "id": msg_id, "result": form_view()})
+    elif method == "rpc.submit":
+        time.sleep(2)
+        send({"jsonrpc": "2.0", "id": msg_id, "result": {}})
+    elif msg_id is not None:
+        send({"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "method not found: %s" % method}})
+`;
+
+/** A process plugin with a live form panel: formView draws it, submit sleeps 2 s so Submitting... is observable. */
+function buildFormFixture(root) {
+  const dir = join(root, 'panel-form');
+  w(join(dir, 'smind-plugin.json'), JSON.stringify({
+    id: 'panel-form', name: 'Panel form', version: '1.0.0', api: 1, engines: { smind: '>=0.15.0' }, description: 'A live form panel',
+    process: { command: ['python3', 'server.py'] },
+    capabilities: [],
+    contributes: {
+      rpc: [
+        { name: 'formView', description: 'Returns the form document.', timeoutMs: 10000 },
+        { name: 'submit', description: 'Sleeps two seconds, then returns {}.', timeoutMs: 15000 },
+      ],
+      panels: [{ id: 'form', title: 'Form', icon: 'Info', where: 'task', view: { rpc: 'formView' } }],
+    },
+  }, null, 1));
+  w(join(dir, 'server.py'), FORM_SERVER.replace('import json\nimport sys', 'import json\nimport sys\nimport time'));
+  return dir;
+}
+
 /** A small process plugin whose bigView rpc answers a valid ui:1 document over the node and byte caps. */
 function buildBigFixture(root) {
   const dir = join(root, 'panel-big');
@@ -203,10 +259,40 @@ async function nudge(page) {
   await page.waitForTimeout(3500);
 }
 
+/** Mean relative luminance (0..1) of a PNG, sampled on a grid. */
+function meanLuminance(buf) {
+  const png = PNG.sync.read(buf);
+  let sum = 0;
+  let n = 0;
+  for (let y = 0; y < png.height; y += 4) {
+    for (let x = 0; x < png.width; x += 4) {
+      const i = (y * png.width + x) * 4;
+      sum += (0.2126 * png.data[i] + 0.7152 * png.data[i + 1] + 0.0722 * png.data[i + 2]) / 255;
+      n++;
+    }
+  }
+  return sum / n;
+}
+
+/** Every frame goes through here: the PNG is written and its mean luminance must match the scheme it claims (light > 0.8, dark < 0.25). */
+async function snap(page, name, scheme, fullPage = true) {
+  const buf = await page.screenshot({ fullPage });
+  writeFileSync(join(lib.SMOKE_DIR, `${name}-${scheme}.png`), buf);
+  const lum = meanLuminance(buf);
+  const ok = scheme === 'light' ? lum > 0.8 : lum < 0.25;
+  console.log(`wrote ${name}-${scheme}.png luminance ${lum.toFixed(3)}${ok ? '' : ' WRONG THEME'}`);
+  if (!ok) lib.fail(`${name}-${scheme}.png has mean luminance ${lum.toFixed(3)}: not a ${scheme} frame`);
+}
+
+/** Both schemes of the current screen (scheme flipped in place; use snap with a held scheme where the flip itself is suspect). */
 async function shoot(page, name) {
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.waitForTimeout(700);
+    await snap(page, name, scheme);
+  }
   await page.emulateMedia({ colorScheme: 'light' });
-  await page.waitForTimeout(600);
-  await lib.shootBothSchemes(page, name);
+  await page.waitForTimeout(300);
 }
 
 async function scenario(page, harness) {
@@ -225,6 +311,7 @@ async function scenario(page, harness) {
   w(join(HOME, 'config.yaml'), 'plugins:\n  enabled: true\n');
   const fx = buildFixture(join(HOME, 'fixtures'));
   const fxBig = buildBigFixture(join(HOME, 'fixtures'));
+  const fxForm = buildFormFixture(join(HOME, 'fixtures'));
 
   const seeded = await harness.cmd('seed-run end_turn Existing task');
   if (!seeded.ok) return lib.fail(`seeding failed: ${JSON.stringify(seeded)}`);
@@ -234,7 +321,7 @@ async function scenario(page, harness) {
 
   // LINKED, not installed: an installed copy is hash-checked (editing it unloads the plugin: "hash mismatch"), so the
   // refresh frame edits the live directory and reloads.
-  for (const line of [`plugin-link ${fx}`, `plugin-enable ${PLUGIN}`]) {
+  for (const line of [`plugin-link ${fx}`, `plugin-enable ${PLUGIN}`, `plugin-install ${fxForm}`, 'plugin-enable panel-form']) {
     const r = await harness.cmd(line);
     if (!r.ok) return lib.fail(`${line}: ${JSON.stringify(r)}`);
   }
@@ -289,8 +376,39 @@ async function scenario(page, harness) {
   const draft = await page.locator('textarea').inputValue();
   if (!draft.includes(PROMPT_TEXT)) lib.fail(`the opened task composer does not contain the prompt: ${JSON.stringify(draft)}`);
   if (await page.getByText('Working…').isVisible().catch(() => false)) lib.fail('opening the prompted task started a run');
-  await lib.shootBothSchemes(page, 'pc3-panel-prompt-composer');
+  await shoot(page, 'pc3-panel-prompt-composer');
   await page.locator('textarea').fill('');
+  await openDetail(page);
+
+  // 5b. the live form panel (process plugin): empty, filled, submitting, after. Scheme set before opening, held.
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await openDetail(page, 'Panel form');
+    await page.getByRole('button', { name: 'Form', exact: true }).click();
+    await expectText(page, 'Fill the required fields', `form reason (${scheme})`, 30_000);
+    await page.waitForTimeout(500);
+    const header = await page.getByText('Panel', { exact: true }).first().isVisible().catch(() => false);
+    const backLink = await page.getByRole('link', { name: /(, back|^Go back)$/ }).isVisible().catch(() => false);
+    console.log(`form screen header: title "Panel" visible=${header}, back link visible=${backLink}`);
+    if (!header || !backLink) lib.fail(`the form panel screen lacks the Panel header (title ${header}, back ${backLink})`);
+    await snap(page, 'pc3-form-empty', scheme);
+    const submit = page.getByRole('button', { name: 'File report' });
+    if ((await submit.getAttribute('aria-disabled')) !== 'true') lib.fail(`File report is not disabled while the required fields are empty (${scheme})`);
+    await page.getByPlaceholder('Repro title').fill('Slow suite');
+    await page.locator('input[type="password"]').fill('s3cret');
+    await page.waitForTimeout(400);
+    if (await page.getByText('Fill the required fields').isVisible().catch(() => false)) lib.fail(`the reason text stayed after the fields were filled (${scheme})`);
+    if ((await submit.getAttribute('aria-disabled')) === 'true') lib.fail(`File report stayed disabled after the fields were filled (${scheme})`);
+    await snap(page, 'pc3-form-filled', scheme);
+    await submit.click();
+    await expectText(page, 'Submitting…', `submitting state (${scheme})`, 5_000);
+    await snap(page, 'pc3-form-submitting', scheme);
+    await page.getByText('Submitting…').waitFor({ state: 'detached', timeout: 15_000 }).catch(() => lib.fail(`Submitting… never cleared (${scheme})`));
+    await page.waitForTimeout(500);
+    await snap(page, 'pc3-form-after', scheme);
+    await back(page);
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
   await openDetail(page);
 
   // 6. refresh on plugin.updated: the small panel, no navigation. The scheme is set BEFORE the panel opens and held
@@ -303,7 +421,7 @@ async function scenario(page, harness) {
     await page.getByRole('button', { name: 'Small panel' }).click();
     await expectText(page, 'Version one of the small panel.', `small panel (${scheme})`);
     await page.waitForTimeout(600);
-    await page.screenshot({ path: join(lib.SMOKE_DIR, `pc3-panel-refresh-before-${scheme}.png`), fullPage: true });
+    await snap(page, 'pc3-panel-refresh-before', scheme);
     const urlBefore = page.url();
     writeFileSync(join(fx, 'views', 'small.json'), JSON.stringify(smallView('Version two arrived live.')));
     const rl = await harness.cmd(`plugin-reload ${PLUGIN}`);
@@ -316,7 +434,7 @@ async function scenario(page, harness) {
     await page.waitForTimeout(600);
     const bg = await page.evaluate(() => getComputedStyle(document.body).color);
     console.log(`refresh-after ${scheme}: text colour ${bg}`);
-    await page.screenshot({ path: join(lib.SMOKE_DIR, `pc3-panel-refresh-after-${scheme}.png`), fullPage: true });
+    await snap(page, 'pc3-panel-refresh-after', scheme);
     await back(page);
   }
   await page.emulateMedia({ colorScheme: 'light' });
@@ -366,14 +484,6 @@ async function unsupportedFrame(page) {
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
   if (await expectText(page, 'Unsupported in this app version', 'unsupported-node placeholder', 15_000)) await shoot(page, 'pc3-unsupported-node');
-  else await page.screenshot({ path: join(lib.SMOKE_DIR, 'pc3-unsupported-node-DEBUG.png') });
-  // A form's submit must be an rpc and an rpc must be declared (needs a process), so a data-only panel cannot hold a form:
-  // the form frame comes from the same throwaway route.
-  await page.evaluate(() => {
-    window.history.pushState({}, '', '/pc3-frames?v=form');
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  });
-  if (await expectText(page, 'File report', 'form frame', 15_000)) await shoot(page, 'pc3-panel-form');
 }
 
 export default {
