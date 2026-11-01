@@ -6,6 +6,7 @@
 // discipline). Mirrors Paseo's provider-selection/preferences shape.
 
 import { ModeInfo, ModelInfo, ProviderInfo } from './api';
+import { gateSuffix, isHardGate, liveGate, selectionGate } from './providerGate';
 
 export interface NewTaskSelection {
   provider: string;
@@ -43,10 +44,38 @@ function resolveMode(p: ProviderInfo, remembered: RememberedSelection | undefine
  * in the catalog, else the first provider; model/mode per that provider
  * (remembered else defaults). null for an empty catalog.
  */
-export function defaultSelection(providers: ProviderInfo[], remembered?: RememberedSelection): NewTaskSelection | null {
+export function defaultSelection(providers: ProviderInfo[], remembered?: RememberedSelection, now: number = Date.now()): NewTaskSelection | null {
   if (providers.length === 0) return null;
-  const id = remembered?.provider && providers.some((p) => p.id === remembered.provider) ? remembered.provider : providers[0].id;
+  // A hard-gated provider (signed out, cooling down...) is not a starting point while another one can run; if every
+  // provider is gated the first still opens the form and the notice explains.
+  const open = (p: ProviderInfo) => !isHardGate(liveGate(p.gate, now));
+  const rememberedOk = remembered?.provider ? providers.find((p) => p.id === remembered.provider && open(p)) : undefined;
+  const id = rememberedOk?.id ?? (providers.find(open) ?? providers[0]).id;
   return selectProvider(providers, id, remembered);
+}
+
+/** Switching provider unless it is hard-gated: then the current selection stays (the picker never lands on a provider that cannot run). */
+export function selectProviderChecked(
+  providers: ProviderInfo[],
+  providerId: string,
+  current: NewTaskSelection,
+  remembered?: RememberedSelection,
+  now: number = Date.now(),
+): NewTaskSelection {
+  const p = providers.find((x) => x.id === providerId);
+  if (p && isHardGate(liveGate(p.gate, now))) return current;
+  return selectProvider(providers, providerId, remembered);
+}
+
+/** Choosing a model unless it is hard-gated: then the current selection stays. */
+export function selectModelChecked(p: ProviderInfo | undefined, current: NewTaskSelection, modelId: string, now: number = Date.now()): NewTaskSelection {
+  if (modelId && isHardGate(selectionGate(p, modelId, now))) return current;
+  return { ...current, model: modelId };
+}
+
+/** Provider picker options: label, with " — <reason>" for a live gate (the native Picker cannot disable one item on iOS). */
+export function providerOptions(providers: ProviderInfo[], now: number = Date.now()): Array<{ value: string; label: string }> {
+  return providers.map((p) => ({ value: p.id, label: providerLabel(p) + gateSuffix(liveGate(p.gate, now)) }));
 }
 
 /** Switching provider re-resolves model+mode for that provider (remembered else defaults). */
@@ -103,8 +132,11 @@ export function providerNote(p: ProviderInfo | undefined): string | null {
 }
 
 /** First option is the synthetic Default ('' = daemon default), then the catalog's models. */
-export function modelOptions(p: ProviderInfo | undefined): Array<{ value: string; label: string }> {
-  return [{ value: '', label: 'Default' }, ...(p?.models ?? []).map((m: ModelInfo) => ({ value: m.id, label: m.label }))];
+export function modelOptions(p: ProviderInfo | undefined, now: number = Date.now()): Array<{ value: string; label: string }> {
+  return [
+    { value: '', label: 'Default' },
+    ...(p?.models ?? []).map((m: ModelInfo) => ({ value: m.id, label: m.label + gateSuffix(p?.modelGates?.[m.id] ? selectionGate(p, m.id, now) : undefined) })),
+  ];
 }
 
 /** The catalog's modes; auto-approves ones say so. No synthetic Default: defaultMode is preselected. */
