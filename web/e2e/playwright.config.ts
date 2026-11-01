@@ -22,7 +22,7 @@ export default defineConfig({
   retries: ci ? 1 : 0,
   timeout: 45_000,
   expect: { timeout: 7_000 },
-  reporter: [['list'], ['./reporters/flaky.ts']],
+  reporter: [['list'], ['json', { outputFile: 'test-results/results.json' }], ['./reporters/flaky.ts']],
   use: {
     actionTimeout: 5_000,
     trace: ci ? 'on-first-retry' : 'off',

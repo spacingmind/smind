@@ -238,7 +238,8 @@ What the web app shows for an enabled plugin:
   as a full page with a back button.
 - Every panel, whatever its `where`, has an **Open <title>** entry in the
   command palette (Ctrl-K or Cmd-K). With a task selected it opens as a tab,
-  otherwise as the full page.
+  otherwise as the full page; a `where: "sidebar"` panel always opens as the
+  full page.
 - A panel refreshes when its plugin asks for it, when you press the refresh
   button in its header, and after one of its buttons calls the plugin.
 

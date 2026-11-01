@@ -1,0 +1,118 @@
+{
+  "config": { "rootDir": "/work/web/e2e/specs", "version": "1.49.1", "workers": 2 },
+  "suites": [
+    {
+      "title": "smoke.spec.ts",
+      "file": "smoke.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "welcome and first task",
+          "file": "smoke.spec.ts",
+          "line": 5,
+          "column": 6,
+          "specs": [
+            {
+              "title": "J01 welcome screen",
+              "ok": true,
+              "tags": [],
+              "id": "a1",
+              "file": "smoke.spec.ts",
+              "line": 8,
+              "column": 7,
+              "tests": [
+                {
+                  "timeout": 45000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "light-1280",
+                  "projectName": "light-1280",
+                  "results": [{ "workerIndex": 0, "status": "passed", "duration": 4200, "errors": [], "stdout": [], "stderr": [], "retry": 0, "startTime": "2026-11-01T03:17:10.000Z", "attachments": [] }],
+                  "status": "expected"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "tabs.spec.ts",
+      "file": "tabs.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "J19 terminal tabs keep their order",
+          "ok": true,
+          "tags": [],
+          "id": "b1",
+          "file": "tabs.spec.ts",
+          "line": 4,
+          "column": 5,
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "dark-390",
+              "projectName": "dark-390",
+              "results": [
+                { "workerIndex": 1, "status": "failed", "duration": 7000, "error": { "message": "Timed out 7000ms waiting for expect(locator).toBeVisible()" }, "errors": [], "stdout": [], "stderr": [], "retry": 0, "startTime": "2026-11-01T03:17:20.000Z", "attachments": [{ "name": "screenshot", "contentType": "image/png", "path": "/work/web/e2e/test-results/tabs-J19-dark-390/test-failed-1.png" }] },
+                { "workerIndex": 1, "status": "passed", "duration": 6100, "errors": [], "stdout": [], "stderr": [], "retry": 1, "startTime": "2026-11-01T03:17:28.000Z", "attachments": [{ "name": "trace", "contentType": "application/zip", "path": "/work/web/e2e/test-results/tabs-J19-dark-390-retry1/trace.zip" }] }
+              ],
+              "status": "flaky"
+            }
+          ]
+        },
+        {
+          "title": "J20 tab close moves selection",
+          "ok": false,
+          "tags": [],
+          "id": "b2",
+          "file": "tabs.spec.ts",
+          "line": 30,
+          "column": 5,
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "light-1280",
+              "projectName": "light-1280",
+              "results": [
+                { "workerIndex": 0, "status": "failed", "duration": 9000, "error": { "message": "boom" }, "errors": [], "stdout": [], "stderr": [], "retry": 0, "startTime": "2026-11-01T03:17:40.000Z", "attachments": [] },
+                { "workerIndex": 0, "status": "failed", "duration": 8000, "error": { "message": "boom" }, "errors": [], "stdout": [], "stderr": [], "retry": 1, "startTime": "2026-11-01T03:17:50.000Z", "attachments": [{ "name": "trace", "contentType": "application/zip", "path": "/work/web/e2e/test-results/tabs-J20-light-1280-retry1/trace.zip" }] }
+              ],
+              "status": "unexpected"
+            }
+          ]
+        },
+        {
+          "title": "J21 desktop only",
+          "ok": true,
+          "tags": [],
+          "id": "b3",
+          "file": "tabs.spec.ts",
+          "line": 50,
+          "column": 5,
+          "tests": [
+            {
+              "timeout": 45000,
+              "annotations": [],
+              "expectedStatus": "skipped",
+              "projectId": "dark-390",
+              "projectName": "dark-390",
+              "results": [{ "workerIndex": -1, "status": "skipped", "duration": 0, "errors": [], "stdout": [], "stderr": [], "retry": 0, "startTime": "2026-11-01T03:18:00.000Z", "attachments": [] }],
+              "status": "skipped"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": { "startTime": "2026-11-01T03:17:09.000Z", "duration": 61500, "expected": 1, "skipped": 1, "unexpected": 1, "flaky": 1 }
+}

@@ -176,10 +176,14 @@ show the same class and step.
 | `rate_limited` | A limit smind cannot tell apart (no window, no reset time). | Retry after a short wait. |
 | `cli_exited` | The agent program ended without a result. | Continue the run. |
 
-Failures that need you (`auth_expired`, `model_not_in_plan`) appear in the
-inbox as **run failed** items until a later run replaces them. On the command
-line, `smind task wait` exits 6 for the limit classes and 7 when you must fix
-setup.
+A failed run also appears in the inbox as a **Run failed** item, with its next
+step as a button, until a later run replaces it; `auth_expired` and
+`model_not_in_plan` are marked high attention because only you can fix them.
+On the command line, `smind task wait` exits 6 for the limit classes and 7 when
+you must fix setup (see [`task wait`](cli-reference.md#task-wait)).
+
+The provider and model picker shows the same states before you send. See
+[Why a provider or model is greyed out](model-picker-gates.md).
 
 ## I reset my quota
 

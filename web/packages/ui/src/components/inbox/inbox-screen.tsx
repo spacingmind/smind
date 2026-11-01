@@ -5,6 +5,7 @@ import { AutomationChip } from "@/components/automations/automation-chip";
 import { DesktopWindowControls } from "@/components/desktop-window-controls";
 import { HostChip } from "@/components/host-chip";
 import { PermissionCard } from "@/components/permission/permission-card";
+import { ReviewRowChip, StewardReviewCard } from "@/components/inbox/steward-review-card";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -38,6 +39,7 @@ function tone(item: InboxItem): StatusBadgeStatus {
 
 function kindLabel(item: InboxItem): string {
   if (item.kind === "permission") return "Permission";
+  if (item.kind === "review") return "Steward review";
   if (item.kind === "stall") return "Stalled";
   if (item.kind === "host_pair") return "Pairing";
   if (item.kind === "host_refused") return "Refused";
@@ -162,7 +164,7 @@ export function InboxScreen({
       return;
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (item.kind === "permission") setExpanded((cur) => (cur === item.key ? null : item.key));
+      if (item.kind === "permission" || item.kind === "review") setExpanded((cur) => (cur === item.key ? null : item.key));
       else if (isHostKind(item.kind)) {
         if (onOpenSettings) openHosts(item);
       } else open(item);
@@ -214,7 +216,7 @@ export function InboxScreen({
               testId="inbox-empty"
               icon={<Icons.inbox aria-hidden className="size-6" />}
               title="Nothing needs you"
-              description="Permission requests, validator verdicts waiting for your decision, stalled task trees, pairing requests and host links that need you show up here."
+              description="Permission requests, validator verdicts waiting for your decision, steward reviews of finished work, stalled task trees, pairing requests and host links that need you show up here."
             />
           ) : (
             groups.map((g) => (
@@ -327,9 +329,16 @@ function InboxRow({
             <span className={cn("truncate text-ui-base text-foreground", item.state === "new" ? "font-medium" : "font-normal")} data-testid={`inbox-title-${item.key}`}>
               {item.title || "Task"}
             </span>
-            <StatusBadge status={tone(item)} data-testid={`inbox-kind-${item.key}`}>
-              {kindLabel(item)}
-            </StatusBadge>
+            {item.kind === "review" ? (
+              // The review row carries its own pill: the verdict itself, not a generic kind label.
+              <span data-testid={`inbox-kind-${item.key}`}>
+                <ReviewRowChip item={item} />
+              </span>
+            ) : (
+              <StatusBadge status={tone(item)} data-testid={`inbox-kind-${item.key}`}>
+                {kindLabel(item)}
+              </StatusBadge>
+            )}
             {automation && <AutomationChip task={automation} />}
             {alias && <HostChip alias={alias} testId={`inbox-host-chip-${item.key}`} />}
             {item.state === "new" && (
@@ -346,7 +355,7 @@ function InboxRow({
       </div>
 
       <div className="flex flex-wrap items-center gap-1">
-        {permission && (
+        {(permission || item.kind === "review") && (
           <Button
             type="button"
             variant="outline"
@@ -356,7 +365,7 @@ function InboxRow({
             data-testid={`inbox-review-${item.key}`}
             onClick={onToggle}
           >
-            {expanded ? "Hide request" : "Review request"}
+            {permission ? (expanded ? "Hide request" : "Review request") : expanded ? "Hide review" : "Review"}
           </Button>
         )}
         {item.kind === "run_failed" && item.action?.kind === "sign_in" && (
@@ -413,6 +422,7 @@ function InboxRow({
       </div>
 
       {permission && expanded && <RequestCard item={item} onOpenTask={onOpen} />}
+      {item.kind === "review" && expanded && <StewardReviewCard item={item} onOpenTask={onOpen} />}
     </li>
   );
 }

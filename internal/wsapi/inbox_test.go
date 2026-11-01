@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/steward"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -167,6 +169,84 @@ func TestInboxChanged_CoalescedOnPermissionVerdictStall(t *testing.T) {
 	e.api.SetStalledSource(func() map[int64]time.Time { return nil })
 	e.api.inbox.Poke()
 	waitCount(3)
+}
+
+// TestInboxChanged_CoalescedOnStewardUpdated: a steward review landing pokes
+// the inbox through the service's publish (steward.cancel ends a review with
+// WriteBlocked), two quick updates coalesce into one inbox.changed, and the
+// newest review of the task is the one review row.
+func TestInboxChanged_CoalescedOnStewardUpdated(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	head, err := workspace.GitHead(context.Background(), *e.seatTask.WorktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertPending := func() int64 {
+		row, err := e.db.InsertStewardReview(store.StewardReview{TaskID: e.seatTask.ID, TriggerKind: steward.TriggerHuman,
+			HeadSHA: head, Status: "pending"}, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return row.ID
+	}
+	var n atomic.Int32
+	e.api.bus.setTap(func(ev Event) {
+		if ev.Topic == TopicInboxChanged {
+			n.Add(1)
+		}
+	})
+	waitCount := func(want int32) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) && n.Load() < want {
+			time.Sleep(10 * time.Millisecond)
+		}
+		time.Sleep(inboxDebounce * 3) // anything extra would show up now
+		if got := n.Load(); got != want {
+			t.Fatalf("inbox.changed count = %d, want %d", got, want)
+		}
+	}
+
+	human := &requestContext{local: true}
+	cancel := func(id int64) {
+		if _, err := budgetCall(t, e.api, human, "steward.cancel", map[string]any{"reviewId": id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// two reviews end back to back: the second supersedes the first, and the
+	// two service publishes coalesce into one inbox.changed
+	r1 := insertPending()
+	cancel(r1)
+	r2 := insertPending()
+	cancel(r2)
+	waitCount(1)
+
+	raw, err := budgetCall(t, e.api, human, "inbox.list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Items []struct {
+			Key, Kind, Attention string
+		}
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		t.Fatal(err)
+	}
+	reviews := 0
+	for _, it := range listed.Items {
+		if it.Kind != "review" {
+			continue
+		}
+		reviews++
+		if it.Key != "review:"+itoa64(r2) || it.Attention != "high" {
+			t.Fatalf("review item = %+v, want review:%d with high attention", it, r2)
+		}
+	}
+	if reviews != 1 {
+		t.Fatalf("review items = %d of %s, want exactly the task's newest review", reviews, raw)
+	}
 }
 
 // TestInboxList_LivePermission_AnsweredThroughExistingRPC: a real pending

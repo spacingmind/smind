@@ -2,7 +2,15 @@
 
 import type { FailureAction } from "@/lib/failure-class";
 
-export type InboxKind = "permission" | "run_failed" | "verdict" | "stall" | "host_pair" | "host_down" | "host_refused";
+export type InboxKind =
+  | "permission"
+  | "run_failed"
+  | "review"
+  | "verdict"
+  | "stall"
+  | "host_pair"
+  | "host_down"
+  | "host_refused";
 export type InboxState = "new" | "seen" | "snoozed" | "resolved";
 
 export interface InboxItem {
@@ -17,7 +25,7 @@ export interface InboxItem {
   attention: "high" | "normal";
   /** A run_failed item's next action (the daemon-built failure action); absent for every other kind. */
   action?: FailureAction;
-  links: { taskId?: number; runId?: string; permissionRequestId?: string; validationId?: number; hostId?: string };
+  links: { taskId?: number; runId?: string; permissionRequestId?: string; validationId?: number; reviewId?: number; hostId?: string };
 }
 
 export interface InboxCounts {
@@ -33,6 +41,7 @@ export const INBOX_GROUPS: { kind: InboxKind; label: string }[] = [
   { kind: "host_pair", label: "Host pairing" },
   { kind: "host_refused", label: "Hosts refused" },
   { kind: "host_down", label: "Hosts unreachable" },
+  { kind: "review", label: "Steward reviews" },
   { kind: "verdict", label: "Validator verdicts" },
   { kind: "stall", label: "Stalled" },
 ];

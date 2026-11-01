@@ -20,6 +20,7 @@ import {
   pageTitle,
   pageUrl,
   rawMarkdown,
+  sidebarGroups,
   readPages,
   rewriteLinks,
   version,
@@ -39,21 +40,40 @@ export default defineConfig({
   srcDir: '../public-docs',
   cleanUrls: true,
   lastUpdated: true,
-  appearance: true,
+  // Dark by default, as on spacingmind.com; the switch in the header still works.
+  appearance: 'dark',
   // Any dead link fails the build (links into ../docs are rewritten below).
   ignoreDeadLinks: [/^https?:\/\/localhost/],
   // Pages live outside docs-site/, so bare imports from them must resolve here.
   vite: { resolve: { alias: [{ find: /^vue(\/.*)?$/, replacement: path.resolve(__dirname, '../node_modules/vue$1') }] } },
   sitemap: { hostname: SITE_URL },
-  head: [['meta', { name: 'theme-color', content: '#1c1c1e' }]],
+  head: [
+    // The product site's values: --background in light and dark.
+    ['meta', { name: 'theme-color', content: '#f8f8f8', media: '(prefers-color-scheme: light)' }],
+    ['meta', { name: 'theme-color', content: '#111111', media: '(prefers-color-scheme: dark)' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/icon-192.png' }],
+    ['link', { rel: 'apple-touch-icon', href: '/icon-192.png' }],
+  ],
   themeConfig: {
-    nav: [{ text: 'GitHub', link: REPO_URL }],
-    sidebar: pages.map((p) => ({ text: p.fm.title, link: pagePath(p.slug) })),
+    // Same links as the product site's header; Docs is this site.
+    siteTitle: 'sMind',
+    logoLink: 'https://spacingmind.com',
+    nav: [
+      { text: 'Docs', link: '/', activeMatch: '^/' },
+      { text: 'Changelog', link: `${REPO_URL}/releases` },
+      { text: 'Blog', link: 'https://spacingmind.com/blog' },
+      { text: 'Services', link: 'https://spacingmind.com/services' },
+    ],
+    sidebar: sidebarGroups(pages).map((g) => ({
+      text: g.title,
+      items: g.pages.map((p) => ({ text: p.slug === 'index' ? 'Overview' : p.fm.title, link: pagePath(p.slug) })),
+    })),
+    smindVersion: v,
+    smindGroups: Object.fromEntries(sidebarGroups(pages).flatMap((g) => g.pages.map((p) => [p.slug, g.title]))),
     socialLinks: [{ icon: 'github', link: REPO_URL }],
     outline: { level: [2, 3] },
     search: { provider: 'local' },
     editLink: { pattern: `${REPO_URL}/edit/develop/public-docs/:path`, text: 'Edit this page on GitHub' },
-    footer: { message: `${SITE_NAME}, version ${v}`, copyright: 'Documentation for the smind daemon, CLI and apps.' },
   },
   markdown: {
     // Lighthouse color-contrast: github-light's green tokens are 4.28:1 on the code block.
@@ -138,6 +158,7 @@ export default defineConfig({
     fs.writeFileSync(path.join(out, '.nojekyll'), '')
     fs.writeFileSync(path.join(out, 'robots.txt'), buildRobotsTxt())
     fs.copyFileSync(path.join(__dirname, '../assets/og-card.png'), path.join(out, 'og-card.png'))
+    fs.copyFileSync(path.join(__dirname, '../assets/icon-192.png'), path.join(out, 'icon-192.png'))
     fs.writeFileSync(path.join(out, 'llms.txt'), buildLlmsTxt(pages))
     fs.writeFileSync(path.join(out, 'llms-full.txt'), buildLlmsFullTxt(pages))
     for (const p of pages) fs.writeFileSync(path.join(out, `${p.slug}.md`), rawMarkdown(p, v))

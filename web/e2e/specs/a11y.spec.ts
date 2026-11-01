@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import type { Locator, Page } from '@playwright/test'
 import { pinColorsToRgb } from '../fixtures/browser-stubs'
+import { stubTaskDiffs } from '../fixtures/git-stub'
 import { expect, test } from '../fixtures/test'
 
 // B-05 fixed --muted-foreground, --warning-text and the sidebar row time only (docs: contrast-table). Quiet text built on the
@@ -14,13 +15,28 @@ const EXCLUDE: string[] = [
 ]
 
 async function contrast(page: Page, label: string, include?: string[]) {
-  await pinColorsToRgb(page)
-  let b = new AxeBuilder({ page }).withRules(['color-contrast'])
-  for (const sel of include ?? []) b = b.include(sel)
-  for (const sel of EXCLUDE) b = b.exclude(sel)
-  const res = await b.analyze()
+  const scan = async () => {
+    await pinColorsToRgb(page)
+    let b = new AxeBuilder({ page }).withRules(['color-contrast'])
+    for (const sel of include ?? []) b = b.include(sel)
+    for (const sel of EXCLUDE) b = b.exclude(sel)
+    const r = await b.analyze()
+    return { res: r, judged: r.passes.concat(r.violations).filter((x) => x.id === 'color-contrast').reduce((n, x) => n + x.nodes.length, 0) }
+  }
+  // A scan right after a screen opens can run while it is still painting and judge no node at all (seen on the first
+  // test of a fresh worker); poll that vacuous result until it judges something.
+  let res!: Awaited<ReturnType<typeof scan>>['res']
+  let judged = 0
+  await expect
+    .poll(
+      async () => {
+        ;({ res, judged } = await scan())
+        return judged
+      },
+      { timeout: 7000, intervals: [100, 250, 500] },
+    )
+    .toBeGreaterThan(0)
   // the rule must have actually judged text, or a zero-violation result proves nothing
-  const judged = res.passes.concat(res.violations).filter((r) => r.id === 'color-contrast').reduce((n, r) => n + r.nodes.length, 0)
   expect(judged, `${label}: color-contrast checked nodes`).toBeGreaterThan(0)
   const found = res.violations.flatMap((v) => v.nodes.map((n) => `${n.target.join(' ')} :: ${(n.any[0]?.message ?? '').slice(0, 200)}`))
   expect(found, `${label}: color-contrast violations`).toEqual([])
@@ -104,9 +120,20 @@ test('J49 keyboard only: every Tab stop shows a focus ring, Permission mode and 
 
 test('B-05 axe color-contrast: sidebar and home', async ({ app }) => {
   const { page } = app
+  // the scan must cover a non-zero case and both zero cases, whatever the checkout's real git diff is
+  const tasks = app.daemon.ids.tasks as Record<string, number>
+  const pinned = { 'idle-done': [5, 2], errored: [3, 0], 'long-timeline': [0, 4] } as const
+  await stubTaskDiffs(
+    page,
+    Object.fromEntries(Object.entries(pinned).map(([title, [insertions, deletions]]) => [tasks[title], { files: 2, insertions, deletions }])),
+  )
   await app.openApp()
   await app.openDrawer()
   await expect(page.getByTestId('sidebar-quick-actions').first()).toBeVisible()
+  for (const [title, [insertions, deletions]] of Object.entries(pinned)) {
+    const row = page.getByTestId('sidebar-task-row').filter({ has: page.getByTestId('task-title').filter({ hasText: new RegExp(`^${title}$`) }) })
+    await expect(row.first().getByTestId('sidebar-task-diffstat')).toHaveText(`+${insertions} -${deletions}`)
+  }
   await contrast(page, 'sidebar+home')
 })
 

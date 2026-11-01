@@ -927,6 +927,20 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(screen.getByTestId("sidebar-workspace-row").querySelector('[data-testid="row-aggregate"]')).not.toBeInTheDocument();
   });
 
+  it("a zero diff count is muted text, not a faded status colour (contrast)", async () => {
+    const client = renderSidebar();
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await screen.findByText("Fix the bug");
+    client.nth("task.gitList", 0).resolve({ items: [gitItem(TASK.ID, "feat/fix-bug", 1, 0, 4)] });
+    await flush();
+    const [added, removed] = Array.from(screen.getByTestId("sidebar-task-diffstat").querySelectorAll("span"));
+    expect(added).toHaveTextContent("+0");
+    expect(added).toHaveClass("text-muted-foreground");
+    expect(added.className).not.toContain("opacity");
+    expect(removed).toHaveTextContent("-4");
+    expect(removed).toHaveClass("text-destructive");
+  });
+
   it("a task row shows its diff stat on the row and its branch in the hover card once task.gitList reports them", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);

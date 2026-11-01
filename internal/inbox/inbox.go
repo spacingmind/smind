@@ -26,6 +26,7 @@ import (
 const (
 	KindPermission  = "permission"
 	KindVerdict     = "verdict"
+	KindReview      = "review"
 	KindStall       = "stall"
 	KindHostPair    = "host_pair"
 	KindHostDown    = "host_down"
@@ -79,6 +80,7 @@ type Links struct {
 	RunID               string `json:"runId,omitempty"`
 	PermissionRequestID string `json:"permissionRequestId,omitempty"`
 	ValidationID        int64  `json:"validationId,omitempty"`
+	ReviewID            int64  `json:"reviewId,omitempty"`
 	HostID              string `json:"hostId,omitempty"`
 }
 
@@ -129,6 +131,22 @@ type FailedRun struct {
 	FinishedAt time.Time
 }
 
+// Review is a Steward review as the inbox sees it (ADR-0047 §5): its verdict,
+// staleness and failing gates. It carries no seat text; the summary is rebuilt
+// from the verdict, the head and the gate ids alone.
+type Review struct {
+	ID           int64
+	TaskID       int64
+	Verdict      string
+	Status       string
+	Stale        string
+	ValidationID int64
+	HeadSHA      string
+	PRNumber     int
+	FailingGates []string
+	CreatedAt    time.Time
+}
+
 // Service derives the inbox. Every source is injected.
 type Service struct {
 	DB *store.Store
@@ -136,6 +154,9 @@ type Service struct {
 	Permissions func() []runs.PendingPermission
 	// Validations returns the newest validation view of every live task that has one.
 	Validations func() ([]validation.View, error)
+	// Reviews returns every task's current Steward review. Nil when steward
+	// is off: nothing is derived.
+	Reviews func() ([]Review, error)
 	// Stalls returns the currently stalled seats (task id -> stalled since).
 	Stalls func() map[int64]time.Time
 	// HostPairs lists peer hosts awaiting this human's approval. Nil when
@@ -206,12 +227,31 @@ func (s *Service) derive() ([]Item, error) {
 		s.mu.Unlock()
 	}
 
+	// A current review replaces the task's verdict row: the review judged the
+	// same work the validator did, and one row is one decision.
+	reviewTasks := map[int64]bool{}
+	if s.Reviews != nil {
+		reviews, err := s.Reviews()
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range reviews {
+			if it, ok := reviewItem(r, s.title(r.TaskID)); ok {
+				items = append(items, it)
+				reviewTasks[r.TaskID] = true
+			}
+		}
+	}
+
 	if s.Validations != nil {
 		views, err := s.Validations()
 		if err != nil {
 			return nil, err
 		}
 		for _, v := range views {
+			if reviewTasks[v.TaskID] {
+				continue
+			}
 			if it, ok := verdictItem(v, s.title(v.TaskID)); ok {
 				items = append(items, it)
 			}
@@ -299,6 +339,55 @@ func runFailedItem(fr FailedRun, title string) (Item, bool) {
 		Key: "runfail:" + fr.RunID, Kind: KindRunFailed, TaskID: fr.TaskID, Title: title, Summary: clip(summary, MaxSummary),
 		CreatedAt: fr.FinishedAt, Attention: attention, Links: Links{TaskID: fr.TaskID, RunID: fr.RunID}, Action: fr.Action,
 	}, true
+}
+
+// reviewItem turns a Steward review into an inbox item, or reports that it is
+// not one: an open review has no verdict yet, and a stale one (the head moved,
+// the contract changed, a newer review superseded it) has dropped out. The
+// summary carries only the PR, the head and the failing gate ids: the verdict
+// is the chip's, and the seat's own text stays in the review card.
+func reviewItem(r Review, title string) (Item, bool) {
+	if r.Stale != "" {
+		return Item{}, false
+	}
+	switch r.Verdict {
+	case "ACCEPTED", "CHANGES", "BLOCKED":
+	default:
+		return Item{}, false
+	}
+	head := r.HeadSHA
+	if len(head) > 7 {
+		head = head[:7]
+	}
+	var parts []string
+	if r.PRNumber > 0 {
+		parts = append(parts, fmt.Sprintf("PR #%d", r.PRNumber))
+	}
+	if head != "" {
+		if len(parts) == 0 {
+			parts = append(parts, "At "+head)
+		} else {
+			parts = append(parts, "at "+head)
+		}
+	}
+	summary := strings.Join(parts, " ")
+	if len(r.FailingGates) > 0 {
+		gates := "failing " + strings.Join(r.FailingGates, ", ")
+		if summary == "" {
+			summary = gates
+		} else {
+			summary += ": " + gates
+		}
+	}
+	if summary == "" {
+		summary = "Review finished"
+	}
+	attention := "normal"
+	if r.Verdict == "BLOCKED" {
+		attention = "high"
+	}
+	return Item{Key: fmt.Sprintf("review:%d", r.ID), Kind: KindReview, TaskID: r.TaskID, Title: title, Summary: clip(summary, MaxSummary),
+		CreatedAt: r.CreatedAt, Attention: attention, Links: Links{TaskID: r.TaskID, ReviewID: r.ID, ValidationID: r.ValidationID}}, true
 }
 
 // PermissionSummary builds the redacted line a permission item shows: the tool

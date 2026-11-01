@@ -16,14 +16,15 @@ import (
 )
 
 type fx struct {
-	svc    *Service
-	perms  []runs.PendingPermission
-	views  []validation.View
-	stall  map[int64]time.Time
-	pairs  []HostPair
-	issues []HostLinkIssue
-	failed []FailedRun
-	now    time.Time
+	svc     *Service
+	perms   []runs.PendingPermission
+	views   []validation.View
+	reviews []Review
+	stall   map[int64]time.Time
+	pairs   []HostPair
+	issues  []HostLinkIssue
+	failed  []FailedRun
+	now     time.Time
 }
 
 func newFx(t *testing.T) *fx {
@@ -37,6 +38,7 @@ func newFx(t *testing.T) *fx {
 	f.svc = &Service{DB: db,
 		Permissions: func() []runs.PendingPermission { return f.perms },
 		Validations: func() ([]validation.View, error) { return f.views, nil },
+		Reviews:     func() ([]Review, error) { return f.reviews, nil },
 		Stalls:      func() map[int64]time.Time { return f.stall },
 		HostPairs:   func() []HostPair { return f.pairs },
 		FailedRuns:  func() []FailedRun { return f.failed },
@@ -56,6 +58,11 @@ func verdict(id, task int64, status string, ready, stale bool) validation.View {
 
 func perm(req string, d *taskrunner.PermissionDetail) runs.PendingPermission {
 	return runs.PendingPermission{RunID: "r1", TaskID: 1, ChatID: 1, RequestID: req, Summary: "Run `curl http://secret`", Detail: d}
+}
+
+func review(id, task int64, verdict string) Review {
+	return Review{ID: id, TaskID: task, Verdict: verdict, Status: "done", HeadSHA: "abc1234deadbeef",
+		CreatedAt: time.Date(2026, 10, 27, 11, 30, 0, 0, time.UTC)}
 }
 
 func keysOf(items []Item) string {
@@ -118,6 +125,173 @@ func TestInboxList_StaleVerdictDropsOut(t *testing.T) {
 	items, _ := f.svc.List(Filter{})
 	if len(items) != 1 || !strings.Contains(items[0].Summary, "worktree") || items[0].Attention != "high" {
 		t.Fatalf("a scope violation needs a decision: %+v", items)
+	}
+}
+
+func TestInboxList_DerivesReviewKind(t *testing.T) {
+	f := newFx(t)
+	f.reviews = []Review{review(11, 2, "ACCEPTED"), review(12, 3, "CHANGES"), review(13, 4, "BLOCKED")}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("items = %s", keysOf(items))
+	}
+	got := map[string]Item{}
+	for _, it := range items {
+		got[it.Key] = it
+		if it.Kind != KindReview {
+			t.Errorf("%s kind = %s", it.Key, it.Kind)
+		}
+	}
+	if got["review:11"].Attention != "normal" || got["review:12"].Attention != "normal" || got["review:13"].Attention != "high" {
+		t.Fatalf("only BLOCKED is high: %+v", got)
+	}
+	if got["review:11"].Summary != "At abc1234" {
+		t.Fatalf("summary = %q", got["review:11"].Summary)
+	}
+	if got["review:11"].TaskID != 2 || got["review:11"].Links.TaskID != 2 || got["review:11"].Links.ReviewID != 11 {
+		t.Fatalf("links = %+v", got["review:11"])
+	}
+	if byKind, _ := f.svc.List(Filter{Kinds: []string{KindReview}}); len(byKind) != 3 {
+		t.Fatalf("kind filter = %v", keysOf(byKind))
+	}
+}
+
+func TestInboxList_ReviewReplacesVerdictRow(t *testing.T) {
+	f := newFx(t)
+	f.views = []validation.View{verdict(7, 2, "pass", true, false), verdict(8, 3, "pass", true, false)}
+	f.reviews = []Review{review(21, 2, "ACCEPTED")}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keysOf(items) != "review:21,verdict:8" {
+		t.Fatalf("keys = %q", keysOf(items))
+	}
+	n := 0
+	for _, it := range items {
+		if it.TaskID == 2 {
+			n++
+			if it.Kind != KindReview {
+				t.Errorf("task 2 item kind = %s", it.Kind)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("task 2 has %d items, want exactly the review", n)
+	}
+}
+
+func TestInboxList_StaleReviewDropsOut(t *testing.T) {
+	f := newFx(t)
+	f.views = []validation.View{verdict(7, 2, "pass", true, false)}
+	r := review(21, 2, "ACCEPTED")
+	r.Stale = "head moved"
+	f.reviews = []Review{r}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keysOf(items) != "verdict:7" {
+		t.Fatalf("a stale review must leave the task's verdict row listed: %q", keysOf(items))
+	}
+}
+
+// TestInboxList_ReviewSummaryRedacted: the summary is only the PR, the
+// first seven head chars and the failing gate ids, clipped to MaxSummary.
+func TestInboxList_ReviewSummaryRedacted(t *testing.T) {
+	f := newFx(t)
+	f.reviews = []Review{{ID: 1, TaskID: 1, Verdict: "CHANGES", Status: "done", HeadSHA: "abc",
+		FailingGates: []string{strings.Repeat("x", 300)}, CreatedAt: f.now}}
+	items, _ := f.svc.List(Filter{})
+	if len(items) != 1 {
+		t.Fatalf("items = %s", keysOf(items))
+	}
+	s := items[0].Summary
+	if rest := strings.TrimPrefix(s, "At abc: failing "); strings.Trim(rest, "x…") != "" {
+		t.Fatalf("summary carries more than the head and gate ids: %q", s)
+	}
+	if len([]rune(s)) > MaxSummary {
+		t.Fatalf("summary = %d runes, at most %d", len([]rune(s)), MaxSummary)
+	}
+}
+
+// TestInboxList_ReviewSummaryCarriesPRNumber: the summary names the PR when
+// the review has one, between the verdict and the head.
+func TestInboxList_ReviewSummaryCarriesPRNumber(t *testing.T) {
+	f := newFx(t)
+	r := review(31, 2, "ACCEPTED")
+	r.PRNumber = 12
+	r.FailingGates = []string{"ci"}
+	f.reviews = []Review{r}
+	items, _ := f.svc.List(Filter{})
+	if len(items) != 1 {
+		t.Fatalf("items = %s", keysOf(items))
+	}
+	if want := "PR #12 at abc1234: failing ci"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q", items[0].Summary, want)
+	}
+	f.reviews = []Review{review(32, 2, "ACCEPTED")}
+	items, _ = f.svc.List(Filter{})
+	if items[0].Summary != "At abc1234" {
+		t.Fatalf("summary = %q, want the shape without a PR", items[0].Summary)
+	}
+}
+
+// TestInboxList_ReviewSummaryHasNoVerdictPrefix: the row's chip already shows
+// the verdict, so the summary carries only the PR, the head and the failing
+// gates — and "Review finished" when it carries none of them.
+func TestInboxList_ReviewSummaryHasNoVerdictPrefix(t *testing.T) {
+	f := newFx(t)
+	r := review(41, 2, "ACCEPTED")
+	r.PRNumber = 812
+	f.reviews = []Review{r}
+	items, _ := f.svc.List(Filter{})
+	if want := "PR #812 at abc1234"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q", items[0].Summary, want)
+	}
+	r.FailingGates = []string{"scope", "ci"}
+	f.reviews = []Review{r}
+	items, _ = f.svc.List(Filter{})
+	if want := "PR #812 at abc1234: failing scope, ci"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q", items[0].Summary, want)
+	}
+	f.reviews = []Review{review(42, 2, "CHANGES")}
+	items, _ = f.svc.List(Filter{})
+	if want := "At abc1234"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q (a leading head is capitalised)", items[0].Summary, want)
+	}
+	f.reviews = []Review{{ID: 43, TaskID: 2, Verdict: "ACCEPTED", Status: "done", CreatedAt: f.now}}
+	items, _ = f.svc.List(Filter{})
+	if want := "Review finished"; items[0].Summary != want {
+		t.Fatalf("summary = %q, want %q", items[0].Summary, want)
+	}
+}
+
+// TestInboxList_PolicyAllowedDeniedNotListed documents that only pending
+// permissions derive: a request the policy already resolved (allowed or
+// denied) is no longer pending, so it never reaches the source and never
+// becomes an item.
+func TestInboxList_PolicyAllowedDeniedNotListed(t *testing.T) {
+	f := newFx(t)
+	f.perms = []runs.PendingPermission{perm("pending-1", nil)}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, it := range items {
+		if it.Kind == KindPermission {
+			n++
+			if it.Key != "perm:pending-1" {
+				t.Errorf("a resolved request must not be listed: %s", it.Key)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("permission items = %d of %s, want only the pending one", n, keysOf(items))
 	}
 }
 

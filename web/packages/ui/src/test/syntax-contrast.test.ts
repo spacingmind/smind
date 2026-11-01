@@ -4,11 +4,13 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { parseThemeMaps } from "@/lib/contrast";
+
 // The diff's `--syntax-*` tokens (index.css) must be readable on every
 // row the highlighted code can sit on -- WCAG AA (4.5:1) against the
 // context row (`--card`), the +/- row tints and their word-level
 // highlights, and the "change" tints (diff2html variables, same
-// color-mix percentages as index.css's `--d2h-*`). Retune the tokens
+// color-mix percentages and `--diff-*-tint` sources as index.css's `--d2h-*`). Retune the tokens
 // with this test, not by eye (git-github-ux G6).
 
 const CSS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "index.css"), "utf8");
@@ -58,9 +60,11 @@ function contrast(a: Rgb, b: Rgb): number {
 
 describe.each([":root", ".dark"] as const)("diff syntax tokens (%s)", (selector) => {
   const vars = themeBlock(selector);
+  // the tint sources live in the app-internal :root/.dark block, not the one that defines --syntax-*
+  const tints = parseThemeMaps(CSS)[selector === ":root" ? "light" : "dark"];
   const card = hex(vars["--card"]!);
-  const added = hex(vars["--diff-added"]!);
-  const removed = hex(vars["--diff-removed"]!);
+  const added = hex(tints.get("--diff-added-tint")!);
+  const removed = hex(tints.get("--diff-removed-tint")!);
   const warning = hex(vars["--warning"]!);
   const backgrounds: Record<string, Rgb> = {
     context: card,
@@ -95,6 +99,15 @@ describe.each([":root", ".dark"] as const)("diff syntax tokens (%s)", (selector)
     const fg = hex(value);
     for (const [label, bg] of Object.entries(backgrounds)) {
       expect(contrast(fg, bg), `${name} on ${label}`).toBeGreaterThanOrEqual(AA);
+    }
+  });
+});
+
+describe("diff row fills", () => {
+  it("mix the tint tokens this test measures, never the AA text tokens (--diff-added / --diff-removed)", () => {
+    expect(CSS.match(/color-mix\([^)]*var\(--diff-(?:added|removed)\)/g) ?? []).toEqual([]);
+    for (const name of ["ins-bg", "ins-border", "ins-highlight-bg", "del-bg", "del-border", "del-highlight-bg", "change-ins"]) {
+      expect(CSS, `--d2h-${name}`).toMatch(new RegExp(`--d2h-${name}-color: color-mix\\(in oklch, var\\(--diff-(?:added|removed)-tint\\)`));
     }
   });
 });

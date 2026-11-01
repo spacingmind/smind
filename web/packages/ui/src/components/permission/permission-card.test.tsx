@@ -105,6 +105,28 @@ describe("PermissionCard: options variant", () => {
     expect(screen.getByRole("button", { name: "Do it" })).toBeInTheDocument();
   });
 
+  // ADR-0047's "what we are NOT doing": no bulk approve, no "always allow", no merge on any card.
+  it("permission card has no always-allow or approve-all", () => {
+    render(
+      <PermissionCard
+        runId="run-1"
+        pending={pending({
+          summary: "git push origin feat",
+          detail: {
+            kind: "execute",
+            command: "git push origin feat",
+            policy: { ruleId: "git-push-own", why: "Lead pushes its own task branch", normalized: "git push origin feat" },
+          },
+        })}
+        onRespond={vi.fn()}
+        onChat={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("permission-policy-rule").textContent).toContain("git-push-own");
+    expect(screen.queryByRole("button", { name: /always allow|allow all|approve all|merge/i })).toBeNull();
+    expect(screen.queryByText(/always allow|approve all/i)).toBeNull();
+  });
+
   it("is focusable as a group and moves focus to itself when a new request arrives", () => {
     const { rerender } = render(
       <PermissionCard runId="run-1" pending={pending({ requestId: "req-1" })} onRespond={vi.fn()} onChat={vi.fn()} />,
