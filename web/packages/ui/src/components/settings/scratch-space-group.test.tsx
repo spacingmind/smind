@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -83,6 +84,26 @@ describe("ScratchSpaceGroup", () => {
     const result = await screen.findByTestId("scratch-space-result");
     await waitFor(() => expect(result).toHaveTextContent("1 task folder was kept because a run is still using it"));
     expect(result).toHaveTextContent("Freed 2.0 MiB (20 files).");
+  });
+
+  it("opening the card again re-reads the usage (a task may have closed meanwhile)", async () => {
+    const d = new FakeUsageDaemon([]);
+    d.scratchUsage = LOADED;
+    function Toggle() {
+      const [on, setOn] = useState(true);
+      return (
+        <>
+          <button onClick={() => setOn((v) => !v)}>toggle</button>
+          {on && <ScratchSpaceGroup />}
+        </>
+      );
+    }
+    renderWithDaemon(<Toggle />, d);
+    await screen.findByTestId("scratch-space-total");
+    expect(calls(d, "scratch.usage")).toBe(1);
+    fireEvent.click(screen.getByText("toggle")); // close
+    fireEvent.click(screen.getByText("toggle")); // open again
+    await waitFor(() => expect(calls(d, "scratch.usage")).toBe(2));
   });
 
   it("a read error shows the daemon's text with Retry, which re-reads", async () => {
