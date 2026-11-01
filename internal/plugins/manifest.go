@@ -178,15 +178,6 @@ type HookContribution struct {
 	OnError string `json:"onError,omitempty"`
 }
 
-// ProviderContribution is an ACP provider (Wave D).
-type ProviderContribution struct {
-	ID    string `json:"id"`
-	Label string `json:"label,omitempty"`
-	ACP   struct {
-		Command []string `json:"command"`
-	} `json:"acp"`
-}
-
 // PanelContribution is a data-only panel (ADR-0042 section 5): a view
 // document the clients render natively, from a file or over an rpc. No code
 // ever reaches a client through it.
@@ -291,6 +282,9 @@ func ParseManifest(data []byte, daemonVersion string) (*Manifest, error) {
 
 	if get("id", &m.ID, true, "set id to a lowercase name like \"acme-review\"") && !validID(m.ID) {
 		v.bad("id", fmt.Sprintf("%q is not a valid plugin id", m.ID), "use 1-64 characters from a-z, 0-9 and -, starting with a letter, and not a Windows device name")
+	}
+	if contains(ReservedPluginIDs, m.ID) {
+		v.bad("id", fmt.Sprintf("reserved_plugin_id: %q is reserved", m.ID), "choose another id: \"smind\" and \"plugin\" are reserved for provider ids")
 	}
 	if get("name", &m.Name, true, "set name to a short display name") {
 		if strings.TrimSpace(m.Name) == "" || len(m.Name) > 100 || strings.ContainsRune(m.Name, 0) {
@@ -439,9 +433,7 @@ func validateContributes(v *manifestVal, m *Manifest) {
 		}
 	}
 	for i, p := range c.Providers {
-		f := fmt.Sprintf("contributes.providers[%d]", i)
-		checkName(v, f+".id", p.ID)
-		validateCommand(v, f+".acp.command", p.ACP.Command)
+		validateProvider(v, fmt.Sprintf("contributes.providers[%d]", i), p, c.Providers[:i])
 	}
 	panelIDs := map[string]bool{}
 	for i, p := range c.Panels {

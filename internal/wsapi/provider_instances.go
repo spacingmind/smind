@@ -278,6 +278,22 @@ func customModels(in *[]modelParam) *[]config.CustomModel {
 // inheritClaudeConfig in config.yaml (a byte-level patch of that entry only),
 // then apply it live. An absent field is left alone, an empty one removes
 // the key. Humans only: a run-scoped (agent) caller is refused.
+// refusePluginProvider is the typed read_only_owned refusal for a write to a
+// provider a plugin contributes (its models, env and tools are manifest data),
+// active or not: any id of the form "<plugin>/<provider>".
+func refusePluginProvider(runner *taskrunner.Runner, method, id string) error {
+	plugin := ""
+	if s, ok := runner.Providers().Get(id); ok && s.Plugin != "" {
+		plugin = s.Plugin
+	} else if strings.Contains(id, "/") {
+		plugin = pluginOfID(id)
+	}
+	if plugin == "" {
+		return nil
+	}
+	return &rpcCodeError{code: codeReadOnlyOwned, msg: method + ": " + id + " is provided by plugin " + plugin + " and is read-only", data: map[string]string{"plugin": plugin}}
+}
+
 func handleProviderUpdateInstance(runner *taskrunner.Runner, bus *eventBus) handlerFunc {
 	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		if rc != nil && rc.runScoped {
@@ -295,6 +311,9 @@ func handleProviderUpdateInstance(runner *taskrunner.Runner, bus *eventBus) hand
 		}
 		if p.ID == "" {
 			return nil, errors.New("provider.updateInstance: id is required")
+		}
+		if err := refusePluginProvider(runner, "provider.updateInstance", p.ID); err != nil {
+			return nil, err
 		}
 		providerSetDefaultModelMu.Lock()
 		defer providerSetDefaultModelMu.Unlock()

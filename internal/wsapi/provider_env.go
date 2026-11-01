@@ -180,6 +180,9 @@ func handleProviderSetEnv(runner *taskrunner.Runner, bus *eventBus) handlerFunc 
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("provider.setEnv: invalid params: %w", err)
 		}
+		if err := refusePluginProvider(runner, "provider.setEnv", p.Provider); err != nil {
+			return nil, err
+		}
 		value := ""
 		if p.Value != nil {
 			value = strings.TrimSpace(*p.Value)

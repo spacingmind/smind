@@ -1,0 +1,10 @@
+{
+ "id": "agent",
+ "label": "Agent",
+ "acp": {
+  "command": [
+   "bin/a",
+   "x\ny"
+  ]
+ }
+}

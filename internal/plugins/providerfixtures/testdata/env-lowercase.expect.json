@@ -1,0 +1,4 @@
+{
+ "valid": false,
+ "field": "contributes.providers[0].acp.env.foo"
+}

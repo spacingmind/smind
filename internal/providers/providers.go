@@ -123,6 +123,12 @@ type Endpoint struct {
 	BaseURL string
 }
 
+// SecretSlot is a secret environment variable a plugin provider declares.
+type SecretSlot struct {
+	Name, Label string
+	Required    bool
+}
+
 // Spec is one provider. The zero values of the optional fields mean "none".
 type Spec struct {
 	ID    string
@@ -137,6 +143,14 @@ type Spec struct {
 	// Custom marks an entry that came from providers.custom (or a plugin),
 	// not the built-in table.
 	Custom bool
+	// Plugin is the id of the plugin that contributes this provider (Wave D,
+	// ADR-0042 section 7); empty for everything else. The spec's id is
+	// "<plugin>/<provider>".
+	Plugin string
+	// Icon is a Lucide name a plugin provider asks for ("" = the generic
+	// provider icon); SecretSlots are its declared secret variables.
+	Icon        string
+	SecretSlots []SecretSlot
 
 	// Command is the argv a turn spawns (ACP agent, or `codex app-server`;
 	// unused for claude-native, which the SDK launches). Env is a custom ACP
@@ -320,6 +334,10 @@ func ReservedID(id string) bool {
 type Registry struct {
 	mu    sync.RWMutex
 	specs []Spec
+	// The custom and plugin layers are kept apart so that replacing one
+	// (provider.reload, a plugin change) never drops the other.
+	custom  []Spec
+	plugins map[string][]Spec
 }
 
 // New returns a registry holding the built-in providers.
@@ -338,6 +356,7 @@ func Default() *Registry {
 }
 
 func cloneSpec(s Spec) Spec {
+	s.SecretSlots = append([]SecretSlot(nil), s.SecretSlots...)
 	s.Command = append([]string(nil), s.Command...)
 	s.HealthCommand = append([]string(nil), s.HealthCommand...)
 	s.Models = append([]Model(nil), s.Models...)
@@ -519,6 +538,7 @@ func (r *Registry) Register(s Spec) error {
 		return err
 	}
 	r.specs = append(r.specs, s)
+	r.custom = append(r.custom, s)
 	return nil
 }
 
@@ -529,6 +549,12 @@ func (r *Registry) Unregister(id string) bool {
 	for i, s := range r.specs {
 		if s.ID == id && !IsBuiltin(id) {
 			r.specs = append(r.specs[:i:i], r.specs[i+1:]...)
+			for j, c := range r.custom {
+				if c.ID == id {
+					r.custom = append(r.custom[:j:j], r.custom[j+1:]...)
+					break
+				}
+			}
 			return true
 		}
 	}
@@ -536,14 +562,14 @@ func (r *Registry) Unregister(id string) bool {
 }
 
 // SetCustom atomically replaces every custom entry (the providers.custom
-// config) with specs, in order, keeping the built-ins. An invalid entry
-// rejects the whole set and changes nothing; the error names the index and
-// field ("[2].command: required").
+// config) with specs, in order, keeping the built-ins and the plugin layer.
+// An invalid entry rejects the whole set and changes nothing; the error names
+// the index and field ("[2].command: required").
 func (r *Registry) SetCustom(specs []Spec) error {
-	var table []Spec
-	for _, s := range builtinsWithVendors() {
-		table = append(table, s)
-	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	table := builtinsWithVendors()
+	var custom []Spec
 	for i, s := range specs {
 		if ReservedID(s.ID) {
 			return fmt.Errorf("[%d].id: %q is reserved (built-in or reserved prefix)", i, s.ID)
@@ -553,10 +579,81 @@ func (r *Registry) SetCustom(specs []Spec) error {
 			return fmt.Errorf("[%d].%w", i, err)
 		}
 		table = append(table, res)
+		custom = append(custom, res)
 	}
+	r.custom = custom
+	return r.rebuildLocked()
+}
+
+// PluginProblem is one plugin's providers that were left out and why.
+type PluginProblem struct {
+	Plugin string
+	Err    error
+}
+
+// SetPlugins atomically replaces the plugin layer: the providers of each
+// active plugin, keyed by plugin id (Wave D). The table is rebuilt as
+// built-ins, custom entries, then plugins sorted by id, each in manifest
+// order. A plugin whose entries do not resolve (a bad id, a duplicate) is left
+// out whole and reported; the others and the other layers are unaffected.
+func (r *Registry) SetPlugins(byPlugin map[string][]Spec) []PluginProblem {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	table := append(builtinsWithVendors(), r.custom...)
+	ids := make([]string, 0, len(byPlugin))
+	for id := range byPlugin {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	layer := map[string][]Spec{}
+	var problems []PluginProblem
+	for _, pid := range ids {
+		var resolved []Spec
+		scratch := append([]Spec(nil), table...)
+		var perr error
+		for _, s := range byPlugin[pid] {
+			if s.Plugin != pid || !strings.HasPrefix(s.ID, pid+"/") || strings.Count(s.ID, "/") != 1 {
+				perr = fmt.Errorf("provider %q: a plugin provider id must be %q/<provider>", s.ID, pid)
+				break
+			}
+			if s.Extends != "" {
+				perr = fmt.Errorf("provider %q: a plugin provider cannot extend another provider", s.ID)
+				break
+			}
+			res, err := resolve(s, scratch)
+			if err != nil {
+				perr = fmt.Errorf("provider %q: %w", s.ID, err)
+				break
+			}
+			res.Plugin, res.Reflect, res.AccountProvider, res.CredentialKind = pid, false, "", ""
+			scratch = append(scratch, res)
+			resolved = append(resolved, res)
+		}
+		if perr != nil {
+			problems = append(problems, PluginProblem{Plugin: pid, Err: perr})
+			continue
+		}
+		table = append(table, resolved...)
+		layer[pid] = resolved
+	}
+	r.plugins = layer
+	_ = r.rebuildLocked()
+	return problems
+}
+
+// rebuildLocked recomputes specs from the layers. Callers hold r.mu.
+func (r *Registry) rebuildLocked() error {
+	table := builtinsWithVendors()
+	table = append(table, r.custom...)
+	ids := make([]string, 0, len(r.plugins))
+	for id := range r.plugins {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		table = append(table, r.plugins[id]...)
+	}
 	r.specs = table
-	r.mu.Unlock()
 	return nil
 }
 

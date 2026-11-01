@@ -1,0 +1,16 @@
+{
+ "id": "agent",
+ "label": "Agent",
+ "acp": {
+  "command": [
+   "bin/agent",
+   "--acp"
+  ]
+ },
+ "modes": [
+  {
+   "id": "a"
+  }
+ ],
+ "defaultMode": "b"
+}

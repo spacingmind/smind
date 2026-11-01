@@ -283,7 +283,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	acctReg.SetNotifier(busAccountNotifier{bus: bus, onChange: gs.credentialChanged})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db, gh)
-	hs["provider.list"] = handleProviderList(runner, reg, gs)
+	hs["provider.list"] = handleProviderList(runner, reg, gs, nil)
 	info := newDaemonInfo(time.Now())
 	for method, h := range gitHandlers(gitSvc, focus, prFocus) {
 		hs[method] = h
@@ -346,6 +346,11 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	profReg.SetSkillResolver(plugins.Resolver{M: pluginMgr})
 	reg.SetPluginSkills(skilldelivery.New(pluginMgr, filepath.Join(config.Dir(), "plugin-projection")))
 	pluginEv := newPluginEvents(bus, pluginMgr)
+	hs["provider.list"] = handleProviderList(runner, reg, gs, pluginMgr.InactiveProviders)
+	if runner != nil {
+		pluginEv.providers = runner.Providers()
+		pluginEv.syncProviders() // plugin providers join the registry once, after config.providers.custom
+	}
 	pluginMgr.SetOnChange(pluginEv.changed) // a crash, restart or failed breaker reaches clients as plugin.updated
 	for method, h := range pluginHandlers(pluginMgr, pluginEv) {
 		hs[method] = h
