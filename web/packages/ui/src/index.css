@@ -309,7 +309,7 @@
     --muted-foreground: oklch(0.5 0 0);
     --accent: #ebf4ff;
     --accent-foreground: oklch(0.205 0 0);
-    --destructive: #e03131;
+    --destructive: #ba2424;
     --border: rgba(13, 13, 13, 0.1);
     --input: oklch(0.922 0 0);
     /*
@@ -361,21 +361,21 @@
     --foreground-subtlest: color-mix(in oklab, var(--color-neutral-800) 40%, transparent);
     --foreground-inverse: #ffffff;
     --border-hover: rgba(13, 13, 13, 0.15);
-    --success: #1e8a3e;
+    --success: #167333;
     --success-foreground: #ffffff;
     --warning: #e07b00;
     --warning-foreground: #ffffff;
     --destructive-foreground: #ffffff;
-    --diff-added: #1e8a3e;
+    --diff-added: #167333;
     --diff-added-foreground: #ffffff;
-    --diff-removed: #e03131;
+    --diff-removed: #ba2424;
     --diff-removed-foreground: #ffffff;
     --git-none: var(--foreground);
     --git-modified: #e07b00;
-    --git-added: #1e8a3e;
-    --git-deleted: #e03131;
+    --git-added: #167333;
+    --git-deleted: #ba2424;
     --git-renamed: #0b7fff;
-    --git-untracked: #1e8a3e;
+    --git-untracked: #167333;
     --git-ignored: var(--foreground-subtlest);
     --git-descendant: #e07b00;
     --find-highlight: #fff4eb;
@@ -397,8 +397,8 @@
     --terminal-selection: rgba(11, 127, 255, 0.22);
     --terminal-selection-inactive: rgba(13, 13, 13, 0.1);
     --terminal-black: #5c5c5c;
-    --terminal-red: #e03131;
-    --terminal-green: #1e8a3e;
+    --terminal-red: #ba2424;
+    --terminal-green: #167333;
     --terminal-yellow: #e07b00;
     --terminal-blue: #0b7fff;
     --terminal-magenta: #9e77ed;
@@ -680,6 +680,9 @@
     --warning-text: #a84a00;
     --destructive-surface: color-mix(in srgb, var(--destructive) 10%, transparent);
     --destructive-surface-foreground: #b42020;
+    /* Fill/border tint source for diff rows: ZCode's original hue (--diff-added/-removed text went AA-dark). */
+    --diff-added-tint: #1e8a3e;
+    --diff-removed-tint: #e03131;
 }
 
 /*
@@ -736,6 +739,8 @@
     --warning-text: var(--warning);
     --destructive-surface: color-mix(in srgb, var(--destructive) 16%, transparent);
     --destructive-surface-foreground: #ff8585;
+    --diff-added-tint: #46bf72;
+    --diff-removed-tint: #ff5c5c;
 }
 
 @layer base {
@@ -779,16 +784,16 @@
   --d2h-empty-placeholder-bg-color: var(--surface);
   --d2h-empty-placeholder-border-color: var(--border);
   --d2h-selected-color: color-mix(in oklch, var(--warning) 15%, transparent);
-  --d2h-ins-bg-color: color-mix(in oklch, var(--diff-added) 15%, transparent);
-  --d2h-ins-border-color: color-mix(in oklch, var(--diff-added) 40%, transparent);
-  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-added) 30%, transparent);
+  --d2h-ins-bg-color: color-mix(in oklch, var(--diff-added-tint) 15%, transparent);
+  --d2h-ins-border-color: color-mix(in oklch, var(--diff-added-tint) 40%, transparent);
+  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-added-tint) 30%, transparent);
   --d2h-ins-label-color: var(--diff-added);
-  --d2h-del-bg-color: color-mix(in oklch, var(--diff-removed) 12%, transparent);
-  --d2h-del-border-color: color-mix(in oklch, var(--diff-removed) 40%, transparent);
-  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-removed) 30%, transparent);
+  --d2h-del-bg-color: color-mix(in oklch, var(--diff-removed-tint) 12%, transparent);
+  --d2h-del-border-color: color-mix(in oklch, var(--diff-removed-tint) 40%, transparent);
+  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-removed-tint) 30%, transparent);
   --d2h-del-label-color: var(--diff-removed);
   --d2h-change-del-color: color-mix(in oklch, var(--warning) 20%, transparent);
-  --d2h-change-ins-color: color-mix(in oklch, var(--diff-added) 20%, transparent);
+  --d2h-change-ins-color: color-mix(in oklch, var(--diff-added-tint) 20%, transparent);
   --d2h-info-bg-color: var(--surface);
   --d2h-info-border-color: var(--border);
   --d2h-change-label-color: var(--warning);

@@ -1,5 +1,16 @@
 {
   "$comment": "Every token ZCode's Zai Light/Dark palettes contribute to smind's index.css (zcode-visual-parity plan, P1 Step 2). Values are copied verbatim from refs/zcode/packages/ui/src/styles.css's `.theme-zai-light`/`.theme-zai-dark` blocks, then resolved through that file's own internal var() chains down to a literal or a Tailwind-global var() reference (e.g. `var(--color-neutral-800)`, from Tailwind's own default palette, not smind's). zcode-tokens.test.ts resolves smind's index.css the same way and asserts a match -- this is the 1:1 token-value guarantee, independent of which internal alias chain either file happens to use to get there.",
+  "$overrides": {
+    "--color-success": { "light": "#167333", "reason": "WCAG AA text on the sidebar and its selected/hover surfaces (UAT B-05 follow-up, docs/design.md)" },
+    "--color-diff-added": { "light": "#167333", "reason": "WCAG AA text on the sidebar and its selected/hover surfaces (UAT B-05 follow-up, docs/design.md)" },
+    "--color-git-added": { "light": "#167333", "reason": "WCAG AA text on the sidebar and its selected/hover surfaces (UAT B-05 follow-up, docs/design.md)" },
+    "--color-git-untracked": { "light": "#167333", "reason": "WCAG AA text on the sidebar and its selected/hover surfaces (UAT B-05 follow-up, docs/design.md)" },
+    "--color-terminal-green": { "light": "#167333", "reason": "WCAG AA text on the sidebar and its selected/hover surfaces (UAT B-05 follow-up, docs/design.md)" },
+    "--color-destructive": { "light": "#ba2424", "reason": "WCAG AA text on the sidebar and its selected/hover surfaces (UAT B-05 follow-up, docs/design.md)" },
+    "--color-diff-removed": { "light": "#ba2424", "reason": "WCAG AA text on the sidebar and its selected/hover surfaces (UAT B-05 follow-up, docs/design.md)" },
+    "--color-git-deleted": { "light": "#ba2424", "reason": "WCAG AA text on the sidebar and its selected/hover surfaces (UAT B-05 follow-up, docs/design.md)" },
+    "--color-terminal-red": { "light": "#ba2424", "reason": "WCAG AA text on the sidebar and its selected/hover surfaces (UAT B-05 follow-up, docs/design.md)" }
+  },
   "--color-background": { "light": "#f8f8f8", "dark": "#161616" },
   "--color-foreground": { "light": "var(--color-neutral-800)", "dark": "var(--color-neutral-300)" },
   "--color-card": { "light": "#ffffff", "dark": "#2b2b2b" },
