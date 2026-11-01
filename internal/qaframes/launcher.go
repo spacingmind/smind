@@ -157,7 +157,10 @@ func (l *RealLauncher) daemonEnv(home, listen string) []string {
 	if l.AllowSend {
 		path = os.Getenv("PATH")
 	}
-	env := []string{"HOME=" + home, "SMIND_HOME=" + home, "SMIND_LISTEN=" + listen, "PATH=" + path, "TMPDIR=" + os.TempDir()}
+	// GOTOOLCHAIN=local: a `go` the daemon runs under this scratch HOME must never download a toolchain into it (the module
+	// cache is read-only, so the temp home could not be removed). -modcacherw keeps any cache it does write removable.
+	env := []string{"HOME=" + home, "SMIND_HOME=" + home, "SMIND_LISTEN=" + listen, "PATH=" + path, "TMPDIR=" + os.TempDir(),
+		"GOTOOLCHAIN=local", "GOFLAGS=-modcacherw"}
 	if l.FakeAgent {
 		env = append(env, "SMIND_ACP_COMMAND="+filepath.Join(filepath.Dir(home), "fakeagent"))
 	}
