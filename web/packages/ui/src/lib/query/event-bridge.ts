@@ -140,6 +140,12 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       void queryClient.invalidateQueries({ queryKey: queryKeys.inboxAll() });
       return;
     }
+    case "steward.updated": {
+      // ids only; a review is an inbox row too (ADR-0047 §5).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.stewardAll() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.inboxAll() });
+      return;
+    }
     case "fleet.hosts.changed": {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fleetHosts() });
       return;
