@@ -4,13 +4,14 @@
 // inbox.changed and after every setter.
 
 import { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { markInboxSeen, resolveInbox, snoozeInbox } from '../inbox/api';
 import { useInbox } from '../inbox/useInbox';
 import { InboxRowView, inboxView } from '../inbox/view';
 import { RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { AppIcon } from '../ui/AppIcon';
 import { EmptyState } from '../ui/EmptyState';
 import { TextButton } from '../ui/TextButton';
 import { InboxActionSheet } from './inbox/InboxActionSheet';
@@ -20,11 +21,17 @@ export function InboxScreen({
   conn,
   onOpenTask,
   onOpenHosts,
+  onOpenReview,
+  onOpenPolicy,
 }: {
   conn: RelayConnection;
   onOpenTask: (taskId: number, title: string) => void;
   /** Opens the Hosts screen; hostId names the host the row is about, if any. */
   onOpenHosts: (hostId: string | null) => void;
+  /** Opens the read-only review screen; taskId is the review's task, when it has one. */
+  onOpenReview: (reviewId: number, taskId: number | null) => void;
+  /** Opens the read-only permission policy screen. */
+  onOpenPolicy: () => void;
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -44,14 +51,17 @@ export function InboxScreen({
 
   const open = useCallback(
     (row: InboxRowView) => {
+      // A review row opens the read-only review screen (it has its own Open task button), not the task.
+      const review = row.kind === 'review' && row.reviewId !== null;
       // A host row (pairing, link down or refused) opens the Hosts screen, not a task.
       const host = row.actions.includes('hosts');
-      if (row.taskId === null && !host) return;
+      if (!review && row.taskId === null && !host) return;
       if (row.unseen) markInboxSeen(conn, [row.key]).then(reload, () => {});
-      if (host) onOpenHosts(row.hostId);
+      if (review && row.reviewId !== null) onOpenReview(row.reviewId, row.taskId);
+      else if (host) onOpenHosts(row.hostId);
       else if (row.taskId !== null) onOpenTask(row.taskId, row.title);
     },
-    [conn, onOpenTask, onOpenHosts, reload],
+    [conn, onOpenTask, onOpenHosts, onOpenReview, reload],
   );
 
   const handlers = useMemo(
@@ -108,10 +118,19 @@ export function InboxScreen({
                 {section.title}
               </Text>
               {section.rows.map((row) => (
-                <InboxRow key={row.key} row={row} onOpen={open} onMore={setSheetRow} />
+                <InboxRow key={row.key} row={row} conn={conn} onOpen={open} onMore={setSheetRow} />
               ))}
             </View>
           ))}
+        {/* The policy link stays the last child of the list, empty or not, so it is always reachable. */}
+        <Pressable accessibilityRole="button" accessibilityLabel="Permission policy" onPress={onOpenPolicy} style={styles.policyLink}>
+          <AppIcon name="lock" size={18} color={theme.foregroundSubtle} />
+          <View style={styles.policyTexts}>
+            <Text style={styles.policyTitle}>Permission policy</Text>
+            <Text style={styles.policyNote}>Rules that allow or deny agent requests. Read-only.</Text>
+          </View>
+          <AppIcon name="chevronRight" size={18} color={theme.foregroundSubtle} />
+        </Pressable>
       </ScrollView>
       <InboxActionSheet row={sheetRow} onClose={() => setSheetRow(null)} handlers={handlers} />
     </>
@@ -135,5 +154,20 @@ function makeStyles(theme: AppTheme) {
       padding: theme.spacing[3],
     },
     noticeText: { ...theme.type.body, color: theme.foreground },
+    policyLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing[3],
+      minHeight: 44,
+      padding: theme.spacing[3],
+      backgroundColor: theme.card,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: theme.radius.xl,
+      borderCurve: 'continuous',
+    },
+    policyTexts: { flex: 1, gap: theme.spacing[1] },
+    policyTitle: { ...theme.type.label, color: theme.foreground },
+    policyNote: { ...theme.type.small, color: theme.foregroundSubtle },
   });
 }

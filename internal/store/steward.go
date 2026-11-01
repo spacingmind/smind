@@ -281,6 +281,16 @@ func (s *Store) SetStewardReviewCost(id int64, costUSD float64) error {
 	return nil
 }
 
+// RaiseStewardReviewCost records the seat run's cost on review id in any
+// status: the verdict usually lands while the run is still going, and its
+// usage row is only complete once the run ends. Cost only ever rises.
+func (s *Store) RaiseStewardReviewCost(id int64, costUSD float64) error {
+	if _, err := s.db.Exec(`UPDATE steward_reviews SET cost_usd = ? WHERE id = ? AND cost_usd < ?`, costUSD, id, costUSD); err != nil {
+		return fmt.Errorf("raise steward review cost: %w", err)
+	}
+	return nil
+}
+
 // CountStewardReviewsSince counts non-cancelled reviews created at or after
 // since (the per-hour budget check).
 func (s *Store) CountStewardReviewsSince(since time.Time) (int, error) {

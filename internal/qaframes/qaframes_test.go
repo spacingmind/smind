@@ -259,6 +259,11 @@ func TestFramesRun_IsolatedHome_NeverTouchesDefaultHomeOrPorts(t *testing.T) {
 	if strings.Contains(env, "secret") || strings.Contains(env, "/the/real/home") || !strings.Contains(env, "HOME=/tmp/iso/home") || !strings.Contains(env, "SMIND_HOME=/tmp/iso/home") {
 		t.Errorf("daemon env = %s", env)
 	}
+	// a `go` run under the scratch HOME must not download a toolchain into it (a read-only module cache there made the
+	// temp home impossible to remove in CI)
+	if !strings.Contains(env, "GOTOOLCHAIN=local") || !strings.Contains(env, "GOFLAGS=-modcacherw") {
+		t.Errorf("daemon env must pin GOTOOLCHAIN=local and GOFLAGS=-modcacherw: %s", env)
+	}
 }
 
 func TestFramesRun_ScriptedSend_RefusesNonHaiku_OffByDefault(t *testing.T) {

@@ -51,7 +51,7 @@ func seatDigestGet(t *testing.T, e *stewardHostEnv, row store.StewardReview) ste
 func seatSubmit(t *testing.T, e *stewardHostEnv, row store.StewardReview, verdict json.RawMessage) steward.View {
 	t.Helper()
 	res, err := budgetCall(t, e.api, seatRC(row), "steward.verdict.submit",
-		map[string]any{"reviewId": row.ID, "token": e.seatToken(t, row.StewardTaskID), "verdict": verdict})
+		map[string]any{"reviewId": row.ID, "token": e.seatToken(t, row.StewardTaskID), "submission": verdict})
 	if err != nil {
 		t.Fatalf("steward.verdict.submit: %v", err)
 	}
@@ -190,17 +190,17 @@ func TestStewardE2E_SafetyRails(t *testing.T) {
 
 	// The Lead's run holds the correct token and is still refused.
 	lead := &requestContext{runScoped: true, ident: runIdentity{runID: e.runID, taskID: e.seatTask.ID}}
-	_, err := budgetCall(t, e.api, lead, "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "verdict": verdict})
+	_, err := budgetCall(t, e.api, lead, "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "submission": verdict})
 	wantErrCode(t, err, codeForbidden)
 	if after := e.row(t, r.ReviewID); after.Status != "running" || after.TokenUsed {
 		t.Fatalf("a refused submit left a mark: %+v", after)
 	}
 
 	// The seat submits once; the same token is dead the second time.
-	if _, err := budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "verdict": verdict}); err != nil {
+	if _, err := budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "submission": verdict}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "verdict": verdict})
+	_, err = budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "submission": verdict})
 	wantErrCode(t, err, codeInvalid)
 
 	// A re-review of the same head and CI is the same review, not a new one.

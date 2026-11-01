@@ -65,6 +65,12 @@ describe('PermissionBoard (event/reducer behavior)', () => {
     expect(board.list()).toHaveLength(1);
   });
 
+  it('a permission request keeps its detail', () => {
+    const board = new PermissionBoard();
+    board.requestReceived('run-1', { ...REQ, detail: { policy: { ruleId: 'r1' } } });
+    expect(board.list()[0].detail).toEqual({ policy: { ruleId: 'r1' } });
+  });
+
   it('a permission_resolved event resolves an unanswered request regardless of origin (concurrent auto-accept resolution)', () => {
     const board = new PermissionBoard();
     board.requestReceived('run-1', REQ);

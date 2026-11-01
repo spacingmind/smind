@@ -22,11 +22,21 @@ export interface PermissionOption {
   kind: string;
 }
 
+/** The structured "what is this about" block of a permission request; the mobile subset of the web's detail map. */
+export interface PermissionDetail {
+  kind?: string;
+  command?: string;
+  truncated?: boolean;
+  /** The policy engine's footprint: the matched rule, its why, and the normalised command it judged. */
+  policy?: { ruleId?: string; why?: string; normalized?: string; action?: string };
+}
+
 /** The wire params of a permission_request event/log-entry. */
 export interface PermissionRequestParams {
   requestId: string;
   summary: string;
   options: PermissionOption[];
+  detail?: PermissionDetail;
 }
 
 /** The wire params of a permission_resolved event/log-entry. */
@@ -43,6 +53,7 @@ export interface PermissionRequestState {
   requestId: string;
   summary: string;
   options: PermissionOption[];
+  detail?: PermissionDetail;
   status: 'pending' | 'resolved';
   /** Set when status is resolved: which option won, and whether by this device's own tap or by an authoritative event. */
   resolvedWith?: { optionId: string; by: 'tap' | 'event' };
@@ -64,6 +75,7 @@ export class PermissionBoard {
       requestId: params.requestId,
       summary: params.summary,
       options: params.options ?? [],
+      detail: params.detail,
       status: 'pending',
       error: null,
     });

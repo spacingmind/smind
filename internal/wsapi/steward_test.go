@@ -154,10 +154,10 @@ func TestVerdictSubmit_LeadCannotWrite(t *testing.T) {
 	// The Lead's run holds the CORRECT token and still cannot write: its
 	// task is not the seat's, and the refusal happens before the token is
 	// even compared.
-	_, err := budgetCall(t, e.api, lead, "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "verdict": verdict})
+	_, err := budgetCall(t, e.api, lead, "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "submission": verdict})
 	wantErrCode(t, err, codeForbidden)
 	// The seat's own run with a wrong token is refused too.
-	_, err = budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": "not-the-token", "verdict": verdict})
+	_, err = budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": "not-the-token", "submission": verdict})
 	wantErrCode(t, err, codeForbidden)
 
 	after := e.row(t, r.ReviewID)
@@ -176,7 +176,7 @@ func TestVerdictSubmit_SeatRunSucceedsOnce(t *testing.T) {
 	row := e.waitSeatStarted(t, r.ReviewID)
 	token := e.seatToken(t, row.StewardTaskID)
 
-	res, err := budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "verdict": acceptedVerdict(t, e, r.ReviewID)})
+	res, err := budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "submission": acceptedVerdict(t, e, r.ReviewID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestVerdictSubmit_SeatRunSucceedsOnce(t *testing.T) {
 	}
 
 	// The token is one-time: the same call again is invalid, not forbidden.
-	_, err = budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "verdict": acceptedVerdict(t, e, r.ReviewID)})
+	_, err = budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "submission": acceptedVerdict(t, e, r.ReviewID)})
 	wantErrCode(t, err, codeInvalid)
 
 	// A gate that fails clamps the seat's ACCEPTED down: a new review key
@@ -201,7 +201,7 @@ func TestVerdictSubmit_SeatRunSucceedsOnce(t *testing.T) {
 	e.setInputs(greenInputs("failure"))
 	r2 := e.reviewViaRPC(t, &requestContext{local: true})
 	row2 := e.waitSeatStarted(t, r2.ReviewID)
-	res2, err := budgetCall(t, e.api, seatRC(row2), "steward.verdict.submit", map[string]any{"reviewId": r2.ReviewID, "token": e.seatToken(t, row2.StewardTaskID), "verdict": acceptedVerdict(t, e, r2.ReviewID)})
+	res2, err := budgetCall(t, e.api, seatRC(row2), "steward.verdict.submit", map[string]any{"reviewId": r2.ReviewID, "token": e.seatToken(t, row2.StewardTaskID), "submission": acceptedVerdict(t, e, r2.ReviewID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestVerdictSubmit_RequiresToken(t *testing.T) {
 	row := e.waitSeatStarted(t, r.ReviewID)
 	verdict := acceptedVerdict(t, e, r.ReviewID)
 	for _, tok := range []string{"", "   "} {
-		_, err := budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": tok, "verdict": verdict})
+		_, err := budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": tok, "submission": verdict})
 		wantErrCode(t, err, codeForbidden)
 	}
 	if after := e.row(t, r.ReviewID); after.Verdict != "" || after.TokenUsed {
@@ -514,4 +514,27 @@ func TestAdmission_LeadCannotLaunchStewardProfile(t *testing.T) {
 	if !mayLaunch(seat, store.AgentProfile{Name: "peer-sonnet", OrchestrationTools: &no}) {
 		t.Fatal("a leaf Lead may launch a peer profile")
 	}
+}
+
+// The outer parameter was renamed verdict -> submission (the old name
+// collided with the document's own verdict field). The old name is refused
+// with an error naming the new one, and stores nothing.
+func TestVerdictSubmit_OldVerdictParamRefusedNamingSubmission(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.setInputs(greenInputs("success"))
+	e.bindSteward(t)
+	r := e.reviewViaRPC(t, &requestContext{local: true})
+	row := e.waitSeatStarted(t, r.ReviewID)
+	token := e.seatToken(t, row.StewardTaskID)
+
+	_, err := budgetCall(t, e.api, seatRC(row), "steward.verdict.submit", map[string]any{"reviewId": r.ReviewID, "token": token, "verdict": acceptedVerdict(t, e, r.ReviewID)})
+	wantErrCode(t, err, codeInvalid)
+	if err == nil || !strings.Contains(err.Error(), "not `verdict`") {
+		t.Fatalf("error = %v, want it to name `submission`", err)
+	}
+	if after := e.row(t, r.ReviewID); after.Verdict != "" || after.TokenUsed {
+		t.Fatalf("a refused call stored something: %+v", after)
+	}
+	e.endReview(t, r.ReviewID)
 }
