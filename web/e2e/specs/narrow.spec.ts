@@ -153,40 +153,71 @@ test('A-13 at 390 the diff pane header keeps "2 files +5 −0" on one line', asy
   expect(sb!.x + sb!.width).toBeLessThanOrEqual(390 + 1)
 })
 
-test('Jump to latest slot sits outside the log and never overlaps its text; the end hides it', async ({ app }) => {
-  const { page } = app
-  await app.openApp()
-  await app.openTask('long-timeline')
-  const scroll = page.getByTestId('run-log-scroll')
-  await expect(scroll).toBeVisible()
-  await expect(page.getByTestId('timeline-assistant').last()).toBeVisible()
-  const setFromEnd = (d: number) => scroll.evaluate((sc, d) => { sc.scrollTop = Math.max(0, sc.scrollHeight - sc.clientHeight - d) }, d)
-  await setFromEnd(0)
-  await expect(page.getByTestId('jump-to-latest-slot')).toHaveCount(0)
-  await setFromEnd(150)
-  const slot = page.getByTestId('jump-to-latest-slot')
-  await expect(slot).toBeVisible()
-  const g = await page.evaluate(() => {
-    const sc = document.querySelector('[data-testid=run-log-scroll]')!
-    const slot = document.querySelector('[data-testid=jump-to-latest-slot]')!.getBoundingClientRect()
-    const log = sc.getBoundingClientRect()
-    // only text that is actually visible in the log viewport counts (the rest is scrolled out and clipped)
-    const clip = (r: DOMRect) => ({ left: Math.max(r.left, log.left), right: Math.min(r.right, log.right), top: Math.max(r.top, log.top), bottom: Math.min(r.bottom, log.bottom) })
-    const w = document.createTreeWalker(sc, NodeFilter.SHOW_TEXT)
-    let hits = 0
-    for (let n = w.nextNode(); n; n = w.nextNode()) {
-      if (!n.nodeValue?.trim()) continue
-      const rg = document.createRange()
-      rg.selectNodeContents(n)
-      for (const raw of rg.getClientRects()) {
-        const r = clip(raw)
-        if (r.right > r.left && r.bottom > r.top && Math.min(r.right, slot.right) > Math.max(r.left, slot.left) && Math.min(r.bottom, slot.bottom) > Math.max(r.top, slot.top)) hits++
-      }
+for (const taskTitle of ['long-timeline', 'idle-done']) {
+  test(`Jump to latest pill (${taskTitle}) never overlaps the log and its row shrinks the log without moving content; the end hides it`, async ({ app }) => {
+    const { page } = app
+    await app.openApp()
+    await app.openTask(taskTitle)
+    const scroll = page.getByTestId('run-log-scroll')
+    await expect(scroll).toBeVisible()
+    await expect(page.getByTestId('timeline-assistant').last()).toBeVisible()
+    const setFromEnd = (d: number) => scroll.evaluate((sc, d) => { sc.scrollTop = Math.max(0, sc.scrollHeight - sc.clientHeight - d) }, d)
+    const slot = page.getByTestId('jump-to-latest-slot')
+    const pill = page.getByTestId('jump-to-latest')
+
+    // rects in one evaluate: the log box, its text rects clipped to it, the pill, and the last user prompt in log-content coordinates
+    const measure = () =>
+      page.evaluate(() => {
+        const sc = document.querySelector('[data-testid=run-log-scroll]')!
+        const log = sc.getBoundingClientRect()
+        const pr = document.querySelector('[data-testid=jump-to-latest]')?.getBoundingClientRect() ?? null
+        const area = (a: { left: number; right: number; top: number; bottom: number }, b: { left: number; right: number; top: number; bottom: number }) =>
+          Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
+        let textHits = 0
+        if (pr) {
+          const w = document.createTreeWalker(sc, NodeFilter.SHOW_TEXT)
+          for (let n = w.nextNode(); n; n = w.nextNode()) {
+            if (!n.nodeValue?.trim()) continue
+            const rg = document.createRange()
+            rg.selectNodeContents(n)
+            for (const raw of rg.getClientRects()) {
+              const r = { left: Math.max(raw.left, log.left), right: Math.min(raw.right, log.right), top: Math.max(raw.top, log.top), bottom: Math.min(raw.bottom, log.bottom) }
+              if (r.right > r.left && r.bottom > r.top && area(r, pr) > 0) textHits++
+            }
+          }
+        }
+        const prompts = sc.querySelectorAll('[data-testid=run-prompt]')
+        const anchor = prompts[prompts.length - 1]
+        return {
+          logTop: log.top,
+          logBottom: log.bottom,
+          logHeight: log.height,
+          pill: pr && { top: pr.top, left: pr.left, right: pr.right, bottom: pr.bottom },
+          pillLogOverlap: pr ? area(pr, log) : 0,
+          textHits,
+          anchorDoc: anchor ? anchor.getBoundingClientRect().top - log.top + sc.scrollTop : null,
+        }
+      })
+
+    for (const d of [40, 80, 120, 200]) {
+      await setFromEnd(0)
+      await expect(slot).toHaveCount(0)
+      const before = await measure()
+      expect(before.anchorDoc, 'the log has a user prompt to anchor on').not.toBeNull()
+
+      await setFromEnd(d)
+      await expect(pill).toBeVisible()
+      // the slot is a row of its own: the log viewport gives up its height
+      await expect.poll(async () => (await measure()).logHeight, { message: `log shrinks at d=${d}` }).toBeLessThan(before.logHeight)
+      const after = await measure()
+
+      expect(after.pill!.top, `pill below the log at d=${d}`).toBeGreaterThanOrEqual(after.logBottom - 0.5)
+      expect(after.pillLogOverlap, `pill rect does not touch the log rect at d=${d}`).toBe(0)
+      expect(after.textHits, `pill never covers visible log text at d=${d}`).toBe(0)
+      expect(Math.abs(after.anchorDoc! - before.anchorDoc!), `last prompt did not move at d=${d}`).toBeLessThanOrEqual(1)
     }
-    return { slotTop: slot.top, slotBottom: slot.bottom, logTop: log.top, logBottom: log.bottom, hits }
+
+    await setFromEnd(0)
+    await expect(slot).toHaveCount(0)
   })
-  expect(g.slotTop).toBeGreaterThanOrEqual(g.logBottom - 1)
-  expect(g.hits).toBe(0)
-  await setFromEnd(0)
-  await expect(slot).toHaveCount(0)
-})
+}
