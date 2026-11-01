@@ -128,7 +128,7 @@ function PolicyLine({ policy }: { policy: NonNullable<PermissionDetail["policy"]
       {policy.normalized && (
         <pre
           data-testid="permission-policy-normalized"
-          className="max-h-[5.5rem] overflow-auto rounded border border-border bg-surface px-2 py-1 font-mono text-ui-xs"
+          className="max-h-60 overflow-y-auto whitespace-pre-wrap break-all rounded border border-border bg-surface px-2 py-1 font-mono text-ui-xs"
         >
           {policy.normalized}
         </pre>

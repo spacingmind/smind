@@ -96,6 +96,27 @@ describe("PermissionDetailView in OptionsCard", () => {
     expect(screen.queryByTestId("permission-detail-command")).toBeNull();
   });
 
+  it("permission card shows a long normalised command in full", () => {
+    const longNormalized = [
+      "git push origin smind/task-super-long-branch-name-with-lots-of-hyphens-and-words",
+      `--force-with-lease=refs/heads/main:${"0123456789abcdef".repeat(24)}`,
+      "sh -c 'echo deploy step 1 && echo deploy step 2 && echo deploy step 3'",
+      "<heredoc elided 212 bytes>",
+    ].join(" ");
+    renderCard({
+      kind: "execute",
+      command: "git push origin feat <<'EOF'\nraw body\nEOF",
+      policy: { ruleId: "git-push-own", why: "Lead pushes its own task branch", normalized: longNormalized },
+    });
+    const pre = screen.getByTestId("permission-policy-normalized");
+    expect(pre.textContent).toBe(longNormalized);
+    expect(pre.className).toContain("whitespace-pre-wrap");
+    expect(pre.className).toContain("break-all");
+    expect(pre.className).not.toContain("truncate");
+    expect(pre.className).not.toContain("overflow-hidden");
+    expect(pre.className).not.toContain("overflow-x");
+  });
+
   it("permission card says no rule matched", () => {
     renderCard({
       kind: "execute",
