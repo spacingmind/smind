@@ -20,6 +20,15 @@ export function formatScratchBytes(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${UNITS[unit]}`;
 }
 
+/** One skeleton bar centred in a block as tall as the text line it stands in for, so the loading card is as tall as the loaded one. */
+function SkeletonLine({ className, bar }: { className: string; bar: string }) {
+  return (
+    <span className={`flex items-center ${className}`}>
+      <Skeleton aria-hidden className={`${bar} bg-foreground/15`} />
+    </span>
+  );
+}
+
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
@@ -48,14 +57,19 @@ export function ScratchSpaceGroup() {
         <div role="status" data-testid="scratch-space-loading">
           <span className="sr-only">Loading scratch usage…</span>
           <SettingsRow
-            label={<Skeleton aria-hidden className="h-4 w-24 bg-foreground/10" />}
-            description={<Skeleton aria-hidden className="mt-1.5 h-3 w-44 bg-foreground/10" />}
-            control={<Skeleton aria-hidden className="h-4 w-14 bg-foreground/10" />}
+            label={<SkeletonLine className="h-6" bar="h-4 w-24" />}
+            description={<SkeletonLine className="h-5" bar="h-3 w-44" />}
+            control={<SkeletonLine className="h-6" bar="h-4 w-14" />}
           />
           <SettingsRow
-            label={<Skeleton aria-hidden className="h-4 w-24 bg-foreground/10" />}
-            description={<Skeleton aria-hidden className="mt-1.5 h-3 w-56 bg-foreground/10" />}
-            control={<Skeleton aria-hidden className="h-7 w-24 bg-foreground/10" />}
+            label={<SkeletonLine className="h-6" bar="h-4 w-24" />}
+            description={
+              <>
+                <SkeletonLine className="h-5" bar="h-3 w-60" />
+                <SkeletonLine className="h-5" bar="h-3 w-36" />
+              </>
+            }
+            control={<SkeletonLine className="h-8" bar="h-7 w-24" />}
           />
         </div>
       ) : error && !usage ? (
