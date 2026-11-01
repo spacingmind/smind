@@ -731,6 +731,12 @@ export interface PermissionDetail {
   /** Existing contents deliberately not shown (sensitive/outside path). */
   redacted?: boolean;
   gitRule?: GitRule;
+  /**
+   * The policy engine's footprint on this request (ADR-0047 §2, internal/taskrunner
+   * PolicyInfo): the matched rule (or floor) id, its why, the action taken, and the
+   * normalised, heredoc-elided command it judged.
+   */
+  policy?: { ruleId?: string; why?: string; normalized?: string; action?: string };
 }
 
 export interface PermissionRequestEventParams {
