@@ -752,9 +752,10 @@ export interface PermissionRequestEventParams {
 
 // Wire form of taskrunner.PermissionResolution (internal/taskrunner/event.go).
 // Widened past the three known values (rather than a strict union) so a
-// reason this client has never heard of still decodes and renders as
-// "no badge" instead of a type error -- the same append-only-enum
-// tolerance RunEventType documents below.
+// reason this client has never heard of still decodes and renders as its
+// raw text (permission-reason.ts's neutral fallback) instead of a type
+// error -- the same append-only-enum tolerance RunEventType documents
+// below.
 // "auto_safe" is legacy (ADR-0019 removed smind's auto-safe allowlist) --
 // kept so an older daemon's payload still renders.
 export type PermissionResolutionReason = "human" | "auto_accept" | "auto_safe" | "timeout" | (string & {});
