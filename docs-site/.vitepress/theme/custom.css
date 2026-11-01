@@ -359,6 +359,16 @@ body {
 .VPNavScreen .divider {
   background-color: var(--border);
 }
+.VPNavScreen .VPNavScreenMenu,
+.VPNavScreen .VPNavScreenMenuLink,
+.VPNavScreen .VPNavScreenMenuGroup {
+  border-bottom: 0 !important;
+  font-weight: 400 !important;
+}
+.VPNavScreenAppearance {
+  border-radius: var(--radius);
+  background: var(--card);
+}
 .lp-download-block {
   display: flex;
   width: 100%;
@@ -554,6 +564,8 @@ body {
   font-family: var(--vp-font-family-mono);
 }
 .vp-doc [class*='language-'] pre {
+  margin: 0;
+  padding: 0;
   background-color: transparent !important;
 }
 .vp-doc [class*='language-'] code {
