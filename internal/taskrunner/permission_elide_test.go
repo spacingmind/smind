@@ -30,8 +30,8 @@ func assertElided(t *testing.T, d *PermissionDetail) {
 	if strings.Contains(string(raw), elideSecret) {
 		t.Errorf("serialised detail carries the body: %s", raw)
 	}
-	if len(d.RevealBodies) != 1 || !strings.Contains(d.RevealBodies[0], elideSecret) || !strings.Contains(d.PolicyCommand, elideSecret) {
-		t.Errorf("the daemon must keep the raw body and the policy command: %+v", d)
+	if len(d.RevealBodies) != 1 || !strings.Contains(d.RevealBodies[0], elideSecret) {
+		t.Errorf("the daemon must keep the raw body: %+v", d)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestExecuteDetail_NoHeredocUnchanged(t *testing.T) {
 	t.Parallel()
 	d := &PermissionDetail{Kind: "execute"}
 	d.setExecuteCommand("go test ./...")
-	if d.Command != "go test ./..." || len(d.Heredocs) != 0 || d.PolicyCommand != "go test ./..." {
+	if d.Command != "go test ./..." || len(d.Heredocs) != 0 {
 		t.Errorf("detail = %+v", d)
 	}
 }

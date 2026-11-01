@@ -324,3 +324,23 @@ func TestDecider_HeredocBodyNeverOnPendingEvent(t *testing.T) {
 		})
 	}
 }
+
+// A command whose raw text exceeded the detail cap still asks, even though its
+// elided form is short: the elision changes what humans see, never what is
+// decided.
+func TestDecider_ElidedLongBodyStillAsks(t *testing.T) {
+	t.Parallel()
+	reg, r, runID, n := policyRun(t, taskrunner.PermissionSettings{}, goTestAllowPolicy, true)
+	d := runPermissionDecider{reg: reg, r: r}
+	cmd := "go test ./... <<EOF\n" + strings.Repeat("x", 3000) + "\nEOF\n"
+	tcJSON, _ := json.Marshal(map[string]any{"kind": "execute", "rawInput": map[string]any{"command": cmd}})
+	detail := taskrunner.BuildPermissionDetail(t.TempDir(), tcJSON)
+	out, reqID := decideAsync(t, d, detail)
+	if err := reg.RespondPermission(runID, reqID, "allow-1"); err != nil {
+		t.Fatal(err)
+	}
+	<-out
+	if n.pending.Load() != 1 {
+		t.Fatalf("pending = %d: a raw command over the cap must still ask", n.pending.Load())
+	}
+}

@@ -38,12 +38,8 @@ func (d runPermissionDecider) policyRequest(requestID, summary string, detail *t
 	switch {
 	case detail != nil && detail.Kind == "execute":
 		req.Tool = "Bash"
-		// The engine judges the raw (capped) command; Command is the elided
-		// form shown to humans and must never decide anything.
-		req.Command, req.Truncated = detail.Command, detail.Truncated
-		if detail.PolicyCommand != "" || detail.PolicyTruncated {
-			req.Command, req.Truncated = detail.PolicyCommand, detail.PolicyTruncated
-		}
+		req.Command = detail.Command
+		req.Truncated = detail.Truncated
 	case detail != nil && detail.Kind == "write":
 		req.Tool = "Write"
 		req.Paths = []string{detail.Path}
