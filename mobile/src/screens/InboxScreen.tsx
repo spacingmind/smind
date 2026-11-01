@@ -20,11 +20,17 @@ export function InboxScreen({
   conn,
   onOpenTask,
   onOpenHosts,
+  onOpenReview,
+  onOpenPolicy,
 }: {
   conn: RelayConnection;
   onOpenTask: (taskId: number, title: string) => void;
   /** Opens the Hosts screen; hostId names the host the row is about, if any. */
   onOpenHosts: (hostId: string | null) => void;
+  /** Opens the read-only review screen; taskId is the review's task, when it has one. */
+  onOpenReview: (reviewId: number, taskId: number | null) => void;
+  /** Opens the read-only permission policy screen. */
+  onOpenPolicy: () => void;
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -44,14 +50,17 @@ export function InboxScreen({
 
   const open = useCallback(
     (row: InboxRowView) => {
+      // A review row opens the read-only review screen (it has its own Open task button), not the task.
+      const review = row.kind === 'review' && row.reviewId !== null;
       // A host row (pairing, link down or refused) opens the Hosts screen, not a task.
       const host = row.actions.includes('hosts');
-      if (row.taskId === null && !host) return;
+      if (!review && row.taskId === null && !host) return;
       if (row.unseen) markInboxSeen(conn, [row.key]).then(reload, () => {});
-      if (host) onOpenHosts(row.hostId);
+      if (review && row.reviewId !== null) onOpenReview(row.reviewId, row.taskId);
+      else if (host) onOpenHosts(row.hostId);
       else if (row.taskId !== null) onOpenTask(row.taskId, row.title);
     },
-    [conn, onOpenTask, onOpenHosts, reload],
+    [conn, onOpenTask, onOpenHosts, onOpenReview, reload],
   );
 
   const handlers = useMemo(
@@ -108,7 +117,7 @@ export function InboxScreen({
                 {section.title}
               </Text>
               {section.rows.map((row) => (
-                <InboxRow key={row.key} row={row} onOpen={open} onMore={setSheetRow} />
+                <InboxRow key={row.key} row={row} conn={conn} onOpen={open} onMore={setSheetRow} />
               ))}
             </View>
           ))}
