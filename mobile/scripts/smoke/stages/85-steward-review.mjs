@@ -1,5 +1,6 @@
-// ADR-0047 S3b: the steward screens at 390 px, light + dark, on fake data: the inbox review rows, the review screen
-// (/review/<taskId>), the permission card's policy line, and the read-only policy page (/policy).
+// ADR-0047 S3b: the steward screens at 390 px, light + dark, on fake data: the inbox review rows (verdict chips, the
+// Permission policy link), the review screen (reached by tapping its inbox row), Resolve, the permission card's policy
+// line, and the read-only policy page (reached by the inbox link). Every pushed screen's back arrow is asserted.
 //
 // Needs an ISOLATED SMIND_HOME (never ~/.smind): run as
 //   SMIND_HOME=<isolated dir> SMOKE_OUT=<dir> node scripts/smoke-web.mjs --full --stage steward-review
@@ -9,11 +10,11 @@
 //
 // Frames (<name>-<light|dark>.png; a tall screen adds <name>-p2-..., one per further scroll page): inbox-reviews,
 // inbox-stale-before, inbox-stale-after, review-accepted, review-changes, review-blocked, review-frames-collapsed,
-// review-frames-expanded (+ seq-expand-<scheme>-NN), permission-matched, permission-nomatch, policy-page-top,
-// policy-page-rules, policy-page-audit, policy-audit-expanded, policy-invalid.
-// Every frame is asserted: mean luminance (light > 0.8, dark < 0.25), no horizontal overflow at the viewport width.
-// A screen that does not exist yet is reported as PENDING (a console line and PENDING.txt), not as a failure, unless
-// STEWARD_STRICT=1.
+// review-frames-expanded (+ seq-expand-<scheme>-NN), inbox-after-resolve, permission-matched, permission-nomatch,
+// inbox-policy-link, policy-page-top, policy-page-rules, policy-page-audit, policy-audit-expanded, policy-invalid.
+// Every frame is asserted: mean luminance (light > 0.8, dark < 0.25), no horizontal overflow at the viewport width;
+// tap targets are >= 44 px high. A screen that does not exist is reported as PENDING (console + PENDING.txt), not as a
+// failure, unless STEWARD_STRICT=1.
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -202,24 +203,9 @@ async function snap(page, name, pages = true) {
   await page.waitForTimeout(400);
 }
 
-/** Navigates inside the running app (a reload would pair a new device): history push + popstate. */
-async function goto(page, path) {
-  await page.evaluate((p) => {
-    window.history.pushState({}, '', p);
-    window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
-  }, path);
-  await page.waitForTimeout(600);
-}
-
-// soft: a screen reached by URL (no in-app entry exists yet) is the only route in the stack, so it has no back arrow
-// by construction; that is recorded in BACKARROW.txt instead of failing the run.
-const backNotes = [];
-async function backArrow(page, label, soft = false) {
+async function backArrow(page, label) {
   const n = await page.getByRole('link', { name: /(, back|^Go back)$/ }).count();
-  if (n === 0) {
-    if (soft) backNotes.push(`${label}: no back arrow (reached by URL; no in-app entry to push it)`);
-    else lib.fail(`${label}: no back arrow in the native-stack header`);
-  }
+  if (n === 0) lib.fail(`${label}: no back arrow in the native-stack header`);
   return n > 0;
 }
 
@@ -253,19 +239,61 @@ async function seed(harness, line) {
   return r;
 }
 
-async function reviewScreen(page, taskId, marker, name) {
-  await goto(page, `/review/${taskId}`);
-  if (!(await has(page, marker, 8_000))) {
-    markPending(`${name}: /review/${taskId} did not render "${marker}" (the review screen is missing or unfinished)`);
+/** Every given locator is a real tap target of at least 44 px height. */
+async function tapTargets(page, label, locators) {
+  for (const [what, loc] of locators) {
+    const n = await loc.count();
+    if (n === 0) {
+      lib.fail(`${label}: tap target "${what}" not found`);
+      continue;
+    }
+    for (let i = 0; i < Math.min(n, 4); i++) {
+      const b = await loc.nth(i).boundingBox();
+      if (b && b.height < 43.5) lib.fail(`${label}: tap target "${what}" is ${Math.round(b.height)} px high (< 44)`);
+    }
+  }
+}
+
+async function onTaskList(page) {
+  return page.getByRole('button', { name: /^Inbox/ }).first().isVisible().catch(() => false);
+}
+
+/** Back to the task list (pressing the header back arrow as often as needed). */
+async function toTaskList(page) {
+  for (let i = 0; i < 4 && !(await onTaskList(page)); i++) {
+    await lib.goBack(page).catch(() => {});
+    await page.waitForTimeout(500);
+  }
+}
+
+/** Task list -> Inbox through the real header entry. */
+async function toInbox(page) {
+  if (await page.getByText('Steward reviews', { exact: true }).isVisible().catch(() => false)) return true;
+  await toTaskList(page);
+  await page.getByRole('button', { name: /^Inbox/ }).first().click();
+  return has(page, 'Steward reviews', 15_000);
+}
+
+/** Inbox -> review screen by tapping the real row. */
+async function openReview(page, title, marker, name) {
+  if (!(await toInbox(page))) return lib.fail(`${name}: the inbox did not open`), false;
+  await page.getByRole('button', { name: new RegExp(`^Review.*: ${title}\\.`) }).first().click();
+  if (!(await has(page, marker, 15_000))) {
+    lib.fail(`${name}: the review screen did not show "${marker}"; page: ${JSON.stringify((await bodyText(page)).slice(0, 300))}`);
     return false;
   }
-  await backArrow(page, name, true);
+  await backArrow(page, name);
   return true;
 }
 
-async function scenario(page, harness) {
-  const inbox = page.getByRole('button', { name: /^Inbox/ });
+async function noReviewForbidden(page, label) {
+  const t = await bodyText(page);
+  for (const bad of ['Approve', 'Merge', 'Always allow']) {
+    if (t.includes(bad)) lib.fail(`${label}: page text contains "${bad}"`);
+  }
+}
 
+async function scenario(page, harness) {
   const t = {};
   for (const [key, title] of [['changes', 'Review changes task'], ['accepted', 'Review accepted task'], ['blocked', 'Review blocked task'], ['stale', 'Review stale task']]) {
     t[key] = (await seed(harness, `seed-run end_turn ${title}`)).taskId;
@@ -274,7 +302,6 @@ async function scenario(page, harness) {
   await seed(harness, `seed-review ${t.accepted} ACCEPTED`);
   await seed(harness, `seed-review ${t.blocked} BLOCKED`);
   await seed(harness, `seed-audit ${t.changes} 24`);
-
   for (const [sc, title] of [['permission-command', 'Policy matched task'], ['permission-command-nomatch', 'Policy nomatch task']]) {
     await seed(harness, `seed-live ${sc} ${title}`);
   }
@@ -283,125 +310,130 @@ async function scenario(page, harness) {
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
   if (!(await expectText(page, 'Review stale task', 'connect', 30_000))) return;
 
-  // Inbox: reviews.
-  const hasInbox = await inbox.first().isVisible().catch(() => false);
-  if (!hasInbox) markPending('inbox entry button not on the Tasks header');
-  else await inbox.first().click();
-  await page.waitForTimeout(800);
-  if (await has(page, 'Steward reviews', 5_000)) {
-    for (const v of ['Changes', 'Accepted', 'Blocked']) {
-      if (!(await has(page, v, 2_000))) markPending(`inbox-reviews: no "${v}" verdict chip on the review rows`);
-    }
-    await backArrow(page, 'inbox');
-    await snap(page, 'inbox-reviews');
-  } else {
-    markPending('inbox-reviews: no "Steward reviews" section on the inbox');
-    await snap(page, 'inbox-reviews');
+  // Inbox: reviews with verdict chips, the policy link at the bottom.
+  if (!(await toInbox(page))) return lib.fail('the inbox did not open from the Tasks header');
+  await backArrow(page, 'inbox');
+  for (const v of ['Changes requested', 'Accepted', 'Blocked']) {
+    if (!(await page.getByText(v, { exact: true }).first().waitFor({ timeout: 8_000 }).then(() => true, () => false))) lib.fail(`inbox verdict chip "${v}" did not appear`);
   }
+  const rowBtn = page.getByRole('button', { name: /^Review.*: Review (changes|accepted|blocked) task\./ });
+  await tapTargets(page, 'inbox', [['review row', rowBtn], ['Permission policy link', page.getByRole('button', { name: 'Permission policy' })]]);
+  await snap(page, 'inbox-reviews');
 
   // Stale: a review whose head moved must not show.
-  await snap(page, 'inbox-stale-before');
+  await snap(page, 'inbox-stale-before', false);
   await seed(harness, `seed-review ${t.stale} CHANGES stale`);
   await page.waitForTimeout(1500);
-  await goto(page, '/inbox');
-  await page.waitForTimeout(800);
+  await toTaskList(page);
+  await toInbox(page);
   if (await page.getByText('Review stale task').first().isVisible().catch(() => false)) lib.fail('a stale review appears in the inbox (Review stale task)');
-  await snap(page, 'inbox-stale-after');
+  await snap(page, 'inbox-stale-after', false);
+
+  // Review screens, each reached by tapping its inbox row.
+  if (await openReview(page, 'Review accepted task', 'Frames and gates agree', 'review-accepted')) {
+    await tapTargets(page, 'review-accepted', [['Open task', page.getByRole('button', { name: 'Open task' })], ['Resolve', page.getByRole('button', { name: 'Resolve' })]]);
+    if (await page.getByText('failing', { exact: false }).first().isVisible().catch(() => false)) lib.fail('review-accepted: an accepted review shows a failing gate');
+    await snap(page, 'review-accepted');
+    await noReviewForbidden(page, 'review-accepted');
+  }
+  await lib.goBack(page);
+  if (await openReview(page, 'Review changes task', 'Two files need work', 'review-changes')) {
+    await expectText(page, 'mobile/src/api.ts', 'review-changes findings by file', 5_000);
+    await tapTargets(page, 'review-changes', [['Open task', page.getByRole('button', { name: 'Open task' })], ['Resolve', page.getByRole('button', { name: 'Resolve' })]]);
+    await snap(page, 'review-changes');
+    await noReviewForbidden(page, 'review-changes');
+
+    // Frames: collapsed at the bottom, then a tapped thumbnail expands (10 frames, ~40 ms apart).
+    const thumb = page.getByRole('button', { name: /^Frame .*tap to expand/ }).first();
+    if ((await thumb.count()) === 0) {
+      lib.fail('review-frames: no frame thumbnail on the review screen');
+    } else {
+      await thumb.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+      await page.waitForTimeout(300);
+      await snap(page, 'review-frames-collapsed', false);
+      for (const scheme of ['light', 'dark']) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.waitForTimeout(400);
+        const tgt = page.getByRole('button', { name: /^Frame .*tap to (expand|collapse)/ }).first();
+        if (/tap to collapse/.test((await tgt.getAttribute('aria-label')) ?? '')) await tgt.click();
+        await page.waitForTimeout(400);
+        await sequence(page, 'seq-expand', scheme, () => tgt.click());
+        await page.waitForTimeout(500);
+        await shot(page, 'review-frames-expanded', scheme);
+        await tgt.click(); // collapse again for the next scheme
+        await page.waitForTimeout(400);
+      }
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.waitForTimeout(400);
+    }
+  }
+  await lib.goBack(page);
+  if (await openReview(page, 'Review blocked task', 'ran out of time', 'review-blocked')) {
+    await snap(page, 'review-blocked');
+    await noReviewForbidden(page, 'review-blocked');
+  }
+  await lib.goBack(page);
+
+  // Resolve: the accepted review leaves the inbox.
+  if (await openReview(page, 'Review accepted task', 'Frames and gates agree', 'review-resolve')) {
+    await page.getByRole('button', { name: 'Resolve' }).click();
+    if (!(await has(page, 'Steward reviews', 15_000))) lib.fail('Resolve did not return to the inbox');
+    await page.waitForTimeout(800);
+    if (await page.getByText('Review accepted task').first().isVisible().catch(() => false)) lib.fail('the resolved review is still in the inbox');
+    await snap(page, 'inbox-after-resolve', false);
+  }
 
   // Permission cards: matched rule and no match.
-  for (const [scenarioName, title, marker, frame] of [
-    ['permission-command', 'Policy matched task', 'Matched rule', 'permission-matched'],
-    ['permission-command-nomatch', 'Policy nomatch task', 'No rule matched', 'permission-nomatch'],
+  for (const [title, marker, frame, tail] of [
+    ['Policy matched task', 'Matched rule', 'permission-matched', 'file.test.ts'],
+    ['Policy nomatch task', 'No rule matched', 'permission-nomatch', 'file.sh'],
   ]) {
-    await goto(page, '/');
+    await toTaskList(page);
     await page.getByText(title, { exact: true }).first().click({ timeout: 20_000 }).catch(() => lib.fail(`${frame}: task ${title} not on the list`));
     if (!(await has(page, marker, 20_000))) {
       lib.fail(`${frame}: "${marker}" did not appear on the permission card; page: ${JSON.stringify((await bodyText(page)).slice(0, 400))}`);
-    } else {
-      if (frame === 'permission-matched') await expectText(page, 'ask-npm', frame, 3_000);
-      const tail = scenarioName === 'permission-command' ? 'file.test.ts' : 'file.sh';
-      const present = await page.evaluate((s) => document.body.textContent.includes(s), tail);
-      if (!present) lib.fail(`${frame}: the full command's tail "${tail}" is not in the DOM`);
-      await noForbidden(page, frame);
-      await snap(page, frame);
+      continue;
     }
-    await lib.goBack(page).catch(() => {});
+    if (frame === 'permission-matched') await expectText(page, 'ask-npm', frame, 3_000);
+    if (!(await page.evaluate((s) => document.body.textContent.includes(s), tail))) lib.fail(`${frame}: the full command's tail "${tail}" is not in the DOM`);
+    await noForbidden(page, frame);
+    await snap(page, frame);
   }
 
-  // Policy page.
-  await goto(page, '/policy');
-  if (await has(page, 'Policy file', 8_000)) {
-    await backArrow(page, 'policy page', true);
-    await snap(page, 'policy-page-top');
-    const info = await scrollInfo(page);
-    await expectText(page, 'deny-force-push', 'policy rules', 3_000);
-    if (info) {
-      await page.getByText('Rules', { exact: true }).first().evaluate((e) => e.scrollIntoView({ block: 'start' })).catch(() => {});
-    }
-    await snap(page, 'policy-page-rules', false);
-    await page.getByText('Recent decisions', { exact: true }).first().evaluate((e) => e.scrollIntoView({ block: 'start' })).catch(() => {});
-    await snap(page, 'policy-page-audit', false);
-    const row = page.getByRole('button', { name: /xxxxxxxxxx/ }).first();
-    if ((await row.count()) > 0) {
-      await row.evaluate((e) => e.scrollIntoView({ block: 'start' })).catch(() => {});
-      await row.click();
-      await page.waitForTimeout(300);
-      if (!(await page.evaluate(() => document.body.textContent.includes('x'.repeat(300))))) lib.fail('policy-audit-expanded: the 300-char target is not shown in full after the tap');
-      await snap(page, 'policy-audit-expanded', false);
-    } else {
-      lib.fail('policy page: no audit row to expand');
-    }
-    // Invalid file: the daemon reloads on its own.
-    w(join(HOME, 'steward', 'policy.yaml'), POLICY_BAD);
-    if (await has(page, 'Policy file is invalid', 20_000)) {
-      await page.getByText('Policy file is invalid').first().evaluate((e) => e.scrollIntoView({ block: 'start' })).catch(() => {});
-      await snap(page, 'policy-invalid', false);
-    } else {
-      // Not live-refetched: reopen the screen once.
-      await goto(page, '/');
-      await goto(page, '/policy');
-      if (await has(page, 'Policy file is invalid', 10_000)) {
-        console.log('note: policy-invalid appeared only after reopening the screen (no live refetch)');
-        await snap(page, 'policy-invalid', false);
-      } else {
-        lib.fail(`policy-invalid: "Policy file is invalid" never appeared; page: ${JSON.stringify((await bodyText(page)).slice(0, 300))}`);
-      }
-    }
-    w(join(HOME, 'steward', 'policy.yaml'), POLICY_OK);
+  // Policy page: the inbox's bottom link.
+  await toInbox(page);
+  await page.getByRole('button', { name: 'Permission policy' }).evaluate((e) => e.scrollIntoView({ block: 'center' }));
+  await snap(page, 'inbox-policy-link', false);
+  await page.getByRole('button', { name: 'Permission policy' }).click();
+  if (!(await has(page, 'Policy file', 10_000))) return lib.fail('the Permission policy link did not open the policy screen');
+  await backArrow(page, 'policy page');
+  await snap(page, 'policy-page-top');
+  await expectText(page, 'deny-force-push', 'policy rules', 3_000);
+  await page.getByText('Rules', { exact: true }).first().evaluate((e) => e.scrollIntoView({ block: 'start' }));
+  await snap(page, 'policy-page-rules', false);
+  await page.getByText('Recent decisions', { exact: true }).first().evaluate((e) => e.scrollIntoView({ block: 'start' }));
+  await snap(page, 'policy-page-audit', false);
+  const row = page.getByRole('button', { name: /xxxxxxxxxx/ }).first();
+  if ((await row.count()) > 0) {
+    await row.evaluate((e) => e.scrollIntoView({ block: 'start' }));
+    await row.click();
+    await page.waitForTimeout(300);
+    if (!(await page.evaluate(() => document.body.textContent.includes('x'.repeat(300))))) lib.fail('policy-audit-expanded: the 300-char target is not shown in full after the tap');
+    await snap(page, 'policy-audit-expanded', false);
   } else {
-    markPending('policy page: /policy did not render');
+    lib.fail('policy page: no audit row to expand');
   }
-
-  // Review screens.
-  if (await reviewScreen(page, t.accepted, 'Frames and gates agree', 'review-accepted')) {
-    await snap(page, 'review-accepted');
-    await noForbidden(page, 'review-accepted');
+  // Invalid file: the daemon reloads on its own; the screen shows it live or after re-entering.
+  w(join(HOME, 'steward', 'policy.yaml'), POLICY_BAD);
+  if (!(await has(page, 'Policy file is invalid', 20_000))) {
+    await lib.goBack(page);
+    await page.getByRole('button', { name: 'Permission policy' }).click();
+    if (await has(page, 'Policy file is invalid', 10_000)) console.log('note: policy-invalid appeared only after reopening the screen (no live refetch)');
+    else lib.fail(`policy-invalid: "Policy file is invalid" never appeared; page: ${JSON.stringify((await bodyText(page)).slice(0, 300))}`);
   }
-  if (await reviewScreen(page, t.changes, 'Two files need work', 'review-changes')) {
-    await expectText(page, 'mobile/src/api.ts', 'review-changes findings by file', 5_000);
-    await snap(page, 'review-changes');
-    await noForbidden(page, 'review-changes');
-  }
-  if (await reviewScreen(page, t.blocked, 'ran out of time', 'review-blocked')) {
-    await snap(page, 'review-blocked');
-    await noForbidden(page, 'review-blocked');
-  }
-
-  // Frames collapsed / expanded: the frames section of the changes review.
-  if (await reviewScreen(page, t.changes, 'Two files need work', 'review-frames')) {
-    const frameRow = page.getByRole('button', { name: /inbox-light-390|Frame|frame/ }).first();
-    const info = await scrollInfo(page);
-    if (info) await scrollTo(page, info.total);
-    await snap(page, 'review-frames-collapsed');
-    if (await frameRow.isVisible().catch(() => false)) {
-      await frameRow.evaluate((e) => e.scrollIntoView({ block: 'start' })).catch(() => {});
-      for (const scheme of ['light', 'dark']) await sequence(page, 'seq-expand', scheme, () => frameRow.click());
-      await page.waitForTimeout(500);
-      await snap(page, 'review-frames-expanded');
-    } else {
-      markPending('review-frames-expanded: no tappable frame row found on the review screen');
-    }
-  }
+  await page.getByText('Policy file is invalid').first().evaluate((e) => e.scrollIntoView({ block: 'start' })).catch(() => {});
+  await snap(page, 'policy-invalid', false);
+  w(join(HOME, 'steward', 'policy.yaml'), POLICY_OK);
 }
 
 export default {
@@ -420,7 +452,6 @@ export default {
     await page.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
     await scenario(page, harness);
     if (pending.length > 0) writeFileSync(join(lib.SMOKE_DIR, 'PENDING.txt'), pending.join('\n') + '\n');
-    if (backNotes.length > 0) writeFileSync(join(lib.SMOKE_DIR, 'BACKARROW.txt'), backNotes.join('\n') + '\n');
     await context.close();
   },
   // The orchestrator starts the harness before run(); the files must already exist then.
