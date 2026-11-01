@@ -4,14 +4,14 @@
 // never interpreted.
 
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { usePolicy } from '../policy/usePolicy';
-import { POLICY_EDIT_NOTE, auditRows, policyBanner, policyPath, ruleRows } from '../policy/view';
+import { POLICY_EDIT_NOTE, actionTone, auditRows, decisionTone, policyBanner, policyPath, ruleRows } from '../policy/view';
 import { RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { AppIcon } from '../ui/AppIcon';
-import { Badge, BadgeTone } from '../ui/Badge';
+import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { EmptyState } from '../ui/EmptyState';
 import { TextButton } from '../ui/TextButton';
@@ -45,7 +45,12 @@ export function PolicyScreen({ conn }: { conn: RelayConnection }) {
   const decisions = auditRows(state.rows, Date.now());
 
   return (
-    <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.screen}
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={false} onRefresh={reload} />}
+    >
       <View accessibilityRole={banner.tone === 'danger' ? 'alert' : undefined}>
         <Card>
           <View style={styles.bannerRow}>
@@ -117,20 +122,6 @@ export function PolicyScreen({ conn }: { conn: RelayConnection }) {
       )}
     </ScrollView>
   );
-}
-
-function actionTone(action: string): BadgeTone {
-  if (action === 'allow') return 'success';
-  if (action === 'deny') return 'destructive';
-  if (action === 'ask') return 'waiting';
-  return 'neutral';
-}
-
-function decisionTone(decision: string): BadgeTone {
-  if (decision.startsWith('allow') || decision === 'ask_human_allow') return 'success';
-  if (decision.includes('deny')) return 'destructive';
-  if (decision === 'ask') return 'waiting';
-  return 'neutral';
 }
 
 function makeStyles(theme: AppTheme) {

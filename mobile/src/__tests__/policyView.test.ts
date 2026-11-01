@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { fakeConnection } from './pluginFixtures';
 import { fetchPolicy, fetchPolicyAudit, POLICY_READ_METHODS } from '../policy/api';
 import { PolicyAuditRow, PolicyStatus } from '../policy/types';
-import { auditRows, DASH, policyBanner, policyPath, POLICY_EDIT_NOTE, ruleRows } from '../policy/view';
+import { actionTone, auditRows, DASH, decisionTone, policyBanner, policyPath, POLICY_EDIT_NOTE, ruleRows } from '../policy/view';
 
 const NOW = Date.UTC(2026, 0, 15, 12, 0, 0);
 
@@ -102,5 +102,16 @@ describe('policy view model', () => {
       title: 'Policy file is valid but the engine is off (steward.policy.enabled)',
       detail: null,
     });
+  });
+
+  it('policy tones: ask is never green', () => {
+    expect(actionTone('ask')).toBe('warning');
+    expect(decisionTone('ask')).toBe('warning');
+    expect(decisionTone('ask_timeout_deny')).toBe('destructive');
+    expect(decisionTone('ask_human_allow')).toBe('success');
+    expect(decisionTone('allow')).toBe('success');
+    expect(decisionTone('deny')).toBe('destructive');
+    expect(decisionTone('weird')).toBe('neutral');
+    expect(actionTone('weird')).toBe('neutral');
   });
 });

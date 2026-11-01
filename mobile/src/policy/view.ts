@@ -64,3 +64,19 @@ export function auditRows(
 export function policyPath(s: PolicyStatus): string {
   return s.path || DASH;
 }
+
+/** The tone a rule's action badge is drawn in: an ask waits on a human, so it is never green. */
+export function actionTone(action: string): 'success' | 'destructive' | 'warning' | 'neutral' {
+  if (action === 'allow') return 'success';
+  if (action === 'deny') return 'destructive';
+  if (action === 'ask') return 'warning';
+  return 'neutral';
+}
+
+/** The tone a decision badge is drawn in: an unresolved ask is a warning; a human's yes is green, any deny is red. */
+export function decisionTone(decision: string): 'success' | 'destructive' | 'warning' | 'neutral' {
+  if (decision.startsWith('allow') || decision === 'ask_human_allow') return 'success';
+  if (decision.includes('deny')) return 'destructive';
+  if (decision === 'ask' || (decision.startsWith('ask') && !decision.includes('allow') && !decision.includes('deny'))) return 'warning';
+  return 'neutral';
+}
