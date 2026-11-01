@@ -122,9 +122,47 @@ Named up front. Vitest unless stated; files under `web/packages/ui/src/demo/` un
 
 ## Progress
 
-- 2026-11-01: ADR-0051, ADR-0052 and this plan written (PR 1, docs only). Baseline production bundle measured: one 3,539,994 B JS chunk (1,067,437 B gzip), 166,378 B CSS (27,171 B gzip).
-- Not started: PR 2 (demo mode implementation, tests, Playwright smoke, size check, frames).
+- 2026-11-01: ADR-0051, ADR-0052 and this plan written (PR 1, docs only, #795). Baseline production bundle measured: one 3,539,994 B JS chunk (1,067,437 B gzip), 166,378 B CSS (27,171 B gzip).
+- 2026-11-01: PR 2 (#797, code) implemented and verified locally: `src/demo/` (DemoSocket, session, scripts, scenario "tour", banner), the `demo` Vite mode and CSP plugin, `check-demo-build.mjs` and its tests, unit tests, the Playwright smoke suite, the `ci` step, frames.
+- Not done, by decision: any deploy workflow, wrangler config, DNS, the landing link (they wait for the Human's steps in ADR-0051 section 9); ADR-0052 is a draft with no code.
+- Moves to `docs/plans/completed/` when #797 is merged and the criteria below hold on `develop`.
 
 ## Validation
 
-*(Filled in by PR 2: for each acceptance criterion, the test ID or manual check that confirmed it, the measured bundle numbers, the commands run and their results.)*
+Commands run on the PR 2 branch (Windows 11, Node 24, bun 1.4, system Chrome through `PW_CHROMIUM_PATH`):
+
+- `tsc -b` (ui) and `tsc --noEmit` (e2e) clean; `node scripts/no-sleep.mjs` clean; `go build ./...` and `go vet` unchanged (no Go file changed).
+- `vitest run src/demo`: 5 files, 24 tests pass. Full web suite: 4,938 tests pass; the 4 failures in `pdf-preview.test.tsx` under the full parallel run pass alone (7 of 7), a load flake unrelated to this change.
+- `node --test scripts/*.test.mjs`: 14 pass.
+- `bun run build:demo` (build, then `check-demo-build.mjs`): ok. Measured: initial JS 1,071,795 B gzip, initial CSS 27,353 B gzip, scripted daemon 13,761 B gzip in a lazy chunk. `check-demo-build.mjs --production` on a normal `vite build` output: "the build contains no demo code"; that build is 3,540,027 B (+33 B).
+- `playwright test -c playwright.demo.config.ts`: DM-01..DM-11 pass on `light-1280` and `dark-390` (22 of 22; DM-12 skipped without `DEMO_FRAMES_DIR`); DM-09 and DM-06 were fixed after a first run (a button name and the narrow drawer) and re-run green.
+
+Criteria, one by one:
+
+| AC | Confirmed by |
+|---|---|
+| 1 | `bun run build:demo` from this checkout: no daemon, no Go, no network; `dist-demo` is gitignored (`.gitignore`) and separate from `internal/server/dist` and `desktop/ui/app` |
+| 2 | `preview` config in `vite.config.ts` (`127.0.0.1`, `4173`, `strictPort`); `netstat` during the run showed only `127.0.0.1:4173`, and the port was free after |
+| 3 | G-05 (`check-demo-build.mjs --production`), and the CI step; the 33 B growth of the production bundle is the guards |
+| 4 | G-01 (seven forbidden strings, plus the tolerated placeholders) and the real build's `check-demo-build.mjs` run |
+| 5 | G-04, the CSP assertions of the check script on the real build, `_headers` content check; DM-11 shows the browser enforcing it |
+| 6 | diff review: outside `src/demo/` only `main.tsx`, `lib/ws-client.ts`, `lib/daemon.ts`, `lib/auth.ts`, the label string in `App.tsx`, `vite-env.d.ts`, `test/setup.ts`, `vite.config.ts`, `package.json`, `.gitignore` (+ e2e files and the CI step). `lib/auth.ts` is added to the list: its `/api/login` and `/healthz` fetches carry the guard |
+| 7 | D-02, D-03 (169 methods scanned), D-13 |
+| 8 | D-12; DemoSocket writes no storage (reading `src/demo`); a reload resets the tour (every Playwright test starts a fresh session) |
+| 9 | D-04, DM-02 |
+| 10 | D-05 (allow, deny, unknown request, an unanswered ask stays paused, inbox row resolved), DM-02, DM-03 |
+| 11 | D-05 (the diff gains `limiter.go`), DM-04, DM-02 (`+50` after Allow) |
+| 12 | D-10, DM-05 |
+| 13 | D-11, DM-06 (the plan's "review" item became a stalled-task notice: the review card needs a steward review the demo does not model) |
+| 14 | DM-07; frames `*-06-usage.png` |
+| 15 | D-09, DM-08 |
+| 16 | S-01..S-04 |
+| 17 | DM-09 (a write shows "Read-only in the demo."), D-13; no login screen is reachable (`fetchAuthRequired` and `loginWithPassword` are guarded) |
+| 18 | B-01, B-02, DM-01, DM-10 at 1280 and 390; the document title is *not* overridden: the app rewrites it from its attention count ("(3) sMind"), so that clause was dropped from this criterion |
+| 19 | the diff list under 6; the existing `no-hardcoded-colors` and token tests pass in the full run |
+| 20 | `check-demo-build.mjs` budgets (G-02) and the measured numbers above |
+| 21 | DM-01 (zero websockets, zero foreign requests), DM-11 |
+| 22 | the commands above |
+| 23 | 24 frames written by DM-12 to `%USERPROFILE%\.smind\dogfood\web-demo\frames\` (`<project>-0N-<moment>.png`, four projects, six moments); reviewed: no overlap at 390, banner wraps to two lines |
+
+Not covered by an automated test and said plainly: the demo has not been run in Safari or Firefox (Chrome only); `prefers-reduced-motion` is covered by D-07 at the engine level, not in a browser; the CSP `frame-ancestors` and the other `_headers` entries are checked as text, not served by a real Cloudflare Worker (that waits for the deploy PR).
