@@ -28,7 +28,9 @@ Rule for every PR: non-stacked, branched from `origin/develop`; a PR that needs 
 - `internal/taskrunner/fakeagent` is a scripted ACP agent with scenarios `reply`, `quota-error`, `auth-error`, `model-error`, `transient-error`, `residual-429`, `plain-error`, `permission*`, `hang`, ...
 - `plugin-examples/hello-process` is the only example (Python 3, standard library only).
 
-## Decisions taken (Lead defaults; the seven Human decisions are listed separately below)
+## Decisions taken (Lead defaults; H1-H7 below are **Supervisor default 2026-11-01, Human may veto**)
+
+Status of H1-H7: the Supervisor took all seven as recommended on 2026-11-01 (Supervisor default 2026-11-01, Human may veto); implementation proceeds on them.
 
 - **D1 One data path.** A plugin provider is a `providers.Spec` (`Runner: acp`, `Custom: true`, new field `Plugin: "<plugin id>"`) in the SAME registry, resolved by the same `resolve()` as a custom ACP entry, and
   run by the same `runACP`. No parallel table, no second runner, no change to run events, usage, model selection or permission modes.
@@ -274,7 +276,7 @@ IDs are `AD1..AD24` (Wave D); the mapping to the parent plan is AD1-AD8 = AC33, 
 | M14 | `internal/taskrunner/` failover | pick a plugin provider as an automatic fallback | `TestFailover_PluginProviderOnlyWhenProfileNamesIt` |
 | M15 | `web/.../provider-detail.tsx` | render the plugin provider without the badge | `plugin-providers.test.tsx` |
 
-## DECISIONS FOR THE HUMAN (recommendation first; every one is already the default this plan builds on)
+## DECISIONS FOR THE HUMAN (recommendation first; **all seven taken as Supervisor default 2026-11-01, Human may veto**)
 
 AGENTS.md rule (d): none of these is decided in ADR-0042 or ADR-0046. Vetoing one changes the PR named in brackets.
 
