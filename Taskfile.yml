@@ -128,10 +128,14 @@ tasks:
       - bun run --filter '@smind/ui' test
 
   lint:
-    desc: Vet + gofmt check
+    desc: Vet + gofmt check + web UI typecheck (tsc -b, the same strict check `build:web` runs, tests included)
     cmds:
       - go vet ./...
       - test -z "$(gofmt -l $(git ls-files '*.go'))"
+      # vitest does not typecheck, and tsc -b is what rejects unused imports
+      # (TS6133) in tests; without this step `task lint` is green while
+      # `task build` breaks.
+      - cd web && bun install --frozen-lockfile && bun run --filter '@smind/ui' typecheck
       - |
         if command -v shellcheck >/dev/null 2>&1; then
           shellcheck scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh scripts/task-setup.sh scripts/task_setup_test.sh
