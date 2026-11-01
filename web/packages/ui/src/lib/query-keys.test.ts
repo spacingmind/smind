@@ -83,4 +83,20 @@ describe("query keys", () => {
     expect(qc.getQueryCache().findAll({ queryKey: queryKeys.probesOfWorkspace(1) })).toHaveLength(1);
     expect(qc.getQueryCache().findAll({ queryKey: queryKeys.probesAll() })).toHaveLength(2);
   });
+
+  it("steward and policy keys are the RPC name plus its params, and the steward prefix matches every review", () => {
+    expect(queryKeys.stewardReview(7)).toEqual(["steward", "review", 7]);
+    expect(queryKeys.stewardAll()).toEqual(["steward"]);
+    expect(queryKeys.policyStatus()).toEqual(["policy", "get"]);
+    expect(queryKeys.policyAudit()).toEqual(["policy", "audit"]);
+    // `steward.updated` invalidates every cached review without touching the policy reads.
+    const qc = new QueryClient();
+    qc.setQueryData(queryKeys.stewardReview(7), null);
+    qc.setQueryData(queryKeys.stewardReview(8), null);
+    qc.setQueryData(queryKeys.policyStatus(), null);
+    void qc.invalidateQueries({ queryKey: queryKeys.stewardAll() });
+    expect(qc.getQueryState(queryKeys.stewardReview(7))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(queryKeys.stewardReview(8))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(queryKeys.policyStatus())?.isInvalidated).toBe(false);
+  });
 });

@@ -63,6 +63,9 @@ const STALL_TOPICS = ["task.stalled"];
 /** `inbox.changed` {} (ADR-0045): the inbox's visible set or state changed; the bridge re-reads the count and the list. */
 const INBOX_TOPICS = ["inbox.changed"];
 
+/** `steward.updated` {taskId, reviewId, status} (ADR-0047): a review changed; the review reads and the inbox rows re-read. */
+const STEWARD_TOPICS = ["steward.updated"];
+
 /** `fleet.hosts.changed` {} (ADR-0048): a host was added, approved, revoked or removed, or a link or grant changed; the bridge re-reads the host list. */
 const FLEET_TOPICS = ["fleet.hosts.changed"];
 
@@ -82,6 +85,7 @@ const TOPICS = [
   ...AUTOMATION_TOPICS,
   ...STALL_TOPICS,
   ...INBOX_TOPICS,
+  ...STEWARD_TOPICS,
   ...FLEET_TOPICS,
 ];
 
@@ -157,6 +161,13 @@ export function useDaemonEvents(client: WsClient | null, queryClient?: QueryClie
           applyDaemonEvent(queryClient, n.topic, n.payload);
         } catch (err) {
           console.error("useDaemonEvents: query bridge threw", err);
+        }
+        if (n.topic === "steward.updated") {
+          // Ids only, and a review is an inbox row too (ADR-0047 §5): both re-read. Bridged here,
+          // beside its subscription, because the steward slice owns this file; every other topic
+          // bridges in event-bridge.ts.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.stewardAll() });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.inboxAll() });
         }
       }
       const set = listenersRef.current.get(n.topic);
