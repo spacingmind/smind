@@ -4,7 +4,7 @@ Status: SPEC, awaiting Steward review. Size: L (security, wire shape, 3 clients)
 
 ## Decision record
 
-**Human decision 2026-11-01 (relayed by the Supervisor):** "elide by default, reveal on demand". The daemon always computes the elided form of a command for `detail.command` on every permission detail and every provider path, policy engine on or off. The body is read on demand through a human-only RPC, redacted, and only while the permission is pending. The raw body stays only in the run's own tool-call log. No compat shim (no users): every fixture that asserted the raw `detail.command` is updated.
+**Human decision 2026-11-01 (relayed by the Supervisor):** "elide by default, reveal on demand". The daemon always computes the elided form of a command for `detail.command` on every permission detail and every provider path, policy engine on or off. The body is read on demand through a human-only RPC, redacted, and only while the permission is pending. The raw body stays only on the daemon (run history in memory and its persisted log), never sent to a client. No compat shim (no users): every fixture that asserted the raw `detail.command` is updated.
 
 Builds on #803 (separator fix) and #804 (nested heredoc elision in `permpolicy.Parsed.Normalized`): this plan needs `Normalized` to be body-free at any nesting depth.
 
@@ -19,7 +19,12 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 3. **Wire shape.** `PermissionDetail` gains `heredocs: [{index, bytes}]` (omitted when none). `command` contains `<<TAG [heredoc N bytes]` markers; the Nth marker is `index N`. No body text, no preview.
 4. **Reveal RPC.** `permission.revealHeredoc {permissionId, index}` -> `{index, bytes, text, redacted: bool, truncated: bool}`. `text` is the body passed through `internal/secretdeny`/`redact` (same redactor the audit uses), capped at 64 KiB with `truncated`. Errors: `not_found` when the permission is not pending (resolved, expired, unknown id) or the index is out of range. Never writes the body to the event stream, audit or logs; writes one audit row `permission.heredoc_revealed` with `{permissionId, index, bytes}` and no content. Access: human/relay callers only (see scope below).
 5. **Scope.** The handler is registered in the human-only set; run-scoped agents and Peers get `forbidden`. The handler-map walk test (like `steward.review`) is extended so adding `permission.revealHeredoc` to a run-scoped map fails it.
-6. **Other paths carrying the raw command (to be audited in step 1 of implementation, report exactly which and what changed):** run/tool_call events (`runToolCallParams.Input`, `run.logs`), relay frames, inbox rows (`internal/wsapi/inbox*`), task logs the UI loads, MCP `task_permissions`, `PolicyInfo`. The agent's own tool-call log (`ToolInput`/`RawInput`) is deliberately left raw: it is the run's record of what the agent sent. Anything that reaches a client or relay beyond that gets the elided form.
+6. **Client delivery audit and decision (Steward review 2026-11-01): (a), clients never receive a raw heredoc body.** Audit of what delivers the command of an `execute` call to clients today:
+   - `wsapi.toRunToolCallParams` (`internal/wsapi/handlers.go:1319`) copies `Event.ToolInput` (raw provider `rawInput`: `command`/`cmd`) and `Event.ToolTitle` (providers put the command in the title) into the `tool_call` payload. It is the single boundary used by both client paths: the live `tool_call` emit (`handlers.go:1753`, task.prompt / run.attach) and `run.logs` (`toRunLogEvent`, `handlers.go:1878`).
+   - Everything else derives from those two: web timeline tool cards (`components/timeline/tool-call-detail.tsx:65` renders `input.command`), mobile timeline (`mobile/src/runTimeline.ts`), relay frames (the same wsapi payloads, encrypted), CLI run viewers, and MCP `task_logs` / `task_status` / `task_wait` (`cmd/smind/mcp_run_tools.go` reads `run.logs`).
+   - `permission.pending` events and inbox rows carry `PermissionDetail` and `Summary` (handled by item 1).
+   - Raw sits only in daemon memory (`Event.ToolInput` in run history) and daemon disk (`runs/persist.go` `ToolInput`); neither goes to a client.
+   Decision: elide at that boundary. `toRunToolCallParams` rewrites, for every call whose input has a string `command`/`cmd` that parses with heredocs, `input.command` to the elided form and `title` likewise, and adds `heredocs: [{index, bytes}]` to the payload. A raw body is never sent to a client; it stays in daemon memory/disk (the run's own record). Tool-call timeline cards get the same "Show heredoc (N bytes)" toggle, fed by `run.revealToolHeredoc {runId, toolCallId, index}`: human/relay only, redacted, content-free audit row `tool.heredoc_revealed`, works while the run's history holds the call (not only while a permission is pending, since the call outlives the approval). Not elided, deliberately: the tool call's `result` (the command's own output, which can echo a body if the command prints it; cannot be parsed, noted as a limit), non-execute tools (edit/write content is a different surface, out of scope).
 7. **Clients.** Web and mobile approval cards render `detail.command` (already elided) and, per `heredocs[i]`, a "Show heredoc (N bytes)" toggle that calls the RPC and renders the redacted body inline (collapsible, wrapped, never clipped, same card styles); redacted spans show the redaction marker. CLI: `smind permission show --reveal [--index N]` prints the redacted body to the terminal (sanitised for control codes).
 8. **CLI viewers** read the already-elided `detail.command`; no client-side elision.
 
@@ -30,6 +35,8 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 - AC3 `permission.revealHeredoc` returns the body with token-shaped secrets redacted while the permission is pending; refuses (not_found) after resolution; refuses out-of-range index.
 - AC4 Run-scoped and Peer callers cannot call it (walk test).
 - AC5 The reveal is never written to the audit or event stream; the audit gets a content-free `permission.heredoc_revealed` row.
+- AC6a The marker never appears in `run.logs`, live `tool_call` events, MCP `task_logs`/`task_status`/`task_wait` output, or the web/mobile timeline DOM for an execute call with a heredoc; timeline tool cards show the marker and a reveal toggle.
+- AC6b `run.revealToolHeredoc` redacts, refuses for run-scoped callers and unknown call/index, and writes a content-free audit row.
 - AC6 The marker `SECRET_TOKEN_123` in a heredoc never appears in: `detail.command`, `summary`, the permission.pending event, inbox rows, relay frames, CLI output, audit rows. It does appear only in the reveal response (redacted if token-shaped) and the run's own tool-call log.
 - AC7 Allow/deny/ask decisions unchanged: full permpolicy, runs and wsapi policy suites pass.
 - AC8 Web and mobile cards: collapsed, expanded, redacted-body and long-body frames, light and dark, 1280 and 390, theme pairs differ, nothing wider than the viewport.
@@ -45,15 +52,16 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 - `TestSecretNeverOnWire` (wsapi): the SECRET_TOKEN_123 sweep over event stream, inbox rows, relay frame encoder, audit.
 - `permission-detail.test.tsx` (web) and mobile card tests: toggle fetches once, renders redacted body, collapses.
 - CLI: `TestPermissionShowReveal`.
+- `TestToolCallParams_ElidesHeredocInputAndTitle`, `TestRunLogs_NeverCarryHeredocBody`, `TestMCPTaskLogs_NoHeredocBody`, `TestRunRevealToolHeredoc_*` (wsapi / cmd/smind); timeline DOM tests (web `tool-call.test.tsx`, mobile `runTimeline`).
 - One mutation per load-bearing test, recorded under Validation.
 
 ## PR split
 
 1. This spec (docs only).
-2. Daemon: `elideDetail` + wire shape + path audit + tests (AC1, 2, 6, 7).
-3. Daemon: `permission.revealHeredoc` + scope + audit + tests (AC3, 4, 5) and CLI `--reveal` (AC9).
-4. Web card (AC8 web) with frames.
-5. Mobile card (AC8 mobile) with frames.
+2. Daemon: `elideDetail` (permission detail/summary) + tool_call boundary elision (`toRunToolCallParams`) + wire shape + tests (AC1, 2, 6, 6a, 7).
+3. Daemon: `permission.revealHeredoc` and `run.revealToolHeredoc` + scope + audit + tests (AC3, 4, 5, 6b) and CLI `--reveal` (AC9).
+4. Web: approval card and timeline tool card toggles (AC8 web) with frames.
+5. Mobile: approval card and timeline tool card toggles (AC8 mobile) with frames.
 
 ## Open points for the Steward
 
@@ -62,7 +70,7 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 
 ## Progress
 
-- 2026-11-01 spec written.
+- 2026-11-01 spec written; Steward review: client delivery decided (a), tool calls elided at `toRunToolCallParams`, tool-card reveal added.
 
 ## Validation
 
