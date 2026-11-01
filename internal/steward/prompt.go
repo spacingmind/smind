@@ -32,7 +32,7 @@ func BuildPrompt(d Digest, reviewID int64, digestSha string) string {
 	w("- CHANGES: fixable findings, each with file, line, why and the exact check that shows it fixed.")
 	w("- BLOCKED: a hard gate the Lead cannot fix in this branch; give blockedReason.")
 	w("")
-	w("Call steward_verdict_submit ONCE with {v:1, reviewId:%d, verdict, summary, findings:[{file,line,why,check,severity P0..P3}], gates:[{id,ack:true}] for EVERY gate, frames:[{path,observation}] for EVERY frame, blockedReason}.", reviewID)
+	w("Call steward_verdict_submit ONCE with one argument, `submission`, the verdict document object {v:1, reviewId:%d, verdict (the string ACCEPTED|CHANGES|BLOCKED), summary, findings:[{file,line,why,check,severity P0..P3}], gates:[{id,ack:true}] for EVERY gate, frames:[{path,observation}] for EVERY frame, blockedReason (BLOCKED only, at most 200 bytes)}; the tool schema lists every cap.", reviewID)
 	w("The daemon rejects an incomplete verdict and names the missing item; fix what it names and submit again.")
 	w("You cannot merge, approve, write or message anyone.")
 	w("Your final message STARTS with one fenced json block {\"status\":\"done\",\"reviewId\":%d,\"verdict\":\"ACCEPTED|CHANGES|BLOCKED\"}.", reviewID)

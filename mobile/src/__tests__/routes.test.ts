@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTaskParams, taskHeaderTitle, taskHref } from '../navigation/routes';
+import { parseReviewParams, parseTaskParams, reviewHref, taskHeaderTitle, taskHref } from '../navigation/routes';
 
 describe('taskHref', () => {
   it('stringifies the id and carries the title', () => {
@@ -45,5 +45,20 @@ describe('taskHeaderTitle', () => {
     expect(taskHeaderTitle({ id: '12' })).toBe('Task 12');
     expect(taskHeaderTitle({ id: 'abc' })).toBe('Task');
     expect(taskHeaderTitle(undefined)).toBe('Task');
+  });
+});
+
+describe('review route', () => {
+  it('review route params', () => {
+    expect(reviewHref(21, 7)).toEqual({ pathname: '/review/[id]', params: { id: '21', task: '7' } });
+    expect(reviewHref(21)).toEqual({ pathname: '/review/[id]', params: { id: '21' } });
+    expect('task' in reviewHref(21).params).toBe(false);
+    expect(parseReviewParams({ id: '21', task: '7' })).toEqual({ ok: true, id: 21, taskId: 7 });
+    expect(parseReviewParams({ id: '21' })).toEqual({ ok: true, id: 21, taskId: null });
+    expect(parseReviewParams({ id: '21', task: 'x' })).toEqual({ ok: true, id: 21, taskId: null });
+    expect(parseReviewParams({ id: '0' })).toEqual({ ok: false });
+    expect(parseReviewParams({ id: 'x' })).toEqual({ ok: false });
+    expect(parseReviewParams({})).toEqual({ ok: false });
+    expect(parseReviewParams({ id: ['21'] })).toEqual({ ok: true, id: 21, taskId: null });
   });
 });

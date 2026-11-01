@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/version"
@@ -47,7 +49,7 @@ func stewardEnvFromOS() (stewardEnv, bool, error) {
 func newStewardMCPServer(client *wsclient.Client, env stewardEnv) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "smind", Title: "sMind steward", Version: version.Version}, nil)
 	mcp.AddTool(srv, &mcp.Tool{Name: steward.ToolDigestGet, Description: "The review digest you are judging: objective gates computed by the daemon, diff facts, frames, and the untrusted text block. Authoritative; read it first."}, mcpStewardDigestGet(client, env))
-	mcp.AddTool(srv, &mcp.Tool{Name: steward.ToolVerdictSubmit, Description: "Submit your one verdict (ACCEPTED, CHANGES or BLOCKED) with gate acknowledgements and a per-frame observation. The daemon rejects an incomplete verdict and names the missing item: fix it and submit again. Accepted once."}, mcpStewardVerdictSubmit(client, env))
+	mcp.AddTool(srv, &mcp.Tool{Name: steward.ToolVerdictSubmit, Description: "Submit your one verdict (ACCEPTED, CHANGES or BLOCKED) with gate acknowledgements and a per-frame observation. Pass the whole verdict document as the `submission` argument; its own `verdict` field holds the ACCEPTED|CHANGES|BLOCKED string. The daemon rejects an incomplete verdict and names the missing item: fix it and submit again. Accepted once.", InputSchema: stewardVerdictSchema()}, mcpStewardVerdictSubmit(client, env))
 	return srv
 }
 
@@ -62,17 +64,48 @@ func mcpStewardDigestGet(client *wsclient.Client, env stewardEnv) mcp.ToolHandle
 }
 
 type stewardVerdictSubmitInput struct {
-	Verdict steward.SeatVerdict `json:"verdict" jsonschema:"the verdict object: {v:1, reviewId, verdict ACCEPTED|CHANGES|BLOCKED, summary, findings:[{file,line,why,check,severity}], gates:[{id,ack,note}], frames:[{path,observation}], blockedReason (BLOCKED only)}"`
+	Submission steward.SeatVerdict `json:"submission" jsonschema:"the verdict document, an object: {v:1, reviewId, verdict: the string ACCEPTED|CHANGES|BLOCKED, summary, findings:[{file,line,why,check,severity}], gates:[{id,ack,note}], frames:[{path,observation}], blockedReason (BLOCKED only)}"`
+}
+
+// stewardVerdictSchema is the tool's input schema with the daemon's field
+// caps in it, so the model sees them before it submits. The daemon counts
+// bytes; JSON Schema maxLength counts characters, so the descriptions say
+// bytes and the daemon's error text still names the cap.
+func stewardVerdictSchema() *jsonschema.Schema {
+	schema, err := jsonschema.For[stewardVerdictSubmitInput](nil)
+	if err != nil {
+		panic("steward verdict schema: " + err.Error())
+	}
+	root := schema.Properties["submission"]
+	for path, n := range steward.SchemaCaps() {
+		node := root
+		parts := strings.Split(path, ".")
+		for _, part := range parts {
+			name := strings.TrimSuffix(part, "[]")
+			node = node.Properties[name]
+			if strings.HasSuffix(part, "[]") {
+				node = node.Items
+			}
+		}
+		max := n
+		node.MaxLength = &max
+		node.Description = strings.TrimSpace(node.Description + fmt.Sprintf(" At most %d bytes (UTF-8).", n))
+	}
+	for name, n := range steward.ArrayCaps() {
+		max := n
+		root.Properties[name].MaxItems = &max
+	}
+	return schema
 }
 
 func mcpStewardVerdictSubmit(client *wsclient.Client, env stewardEnv) mcp.ToolHandlerFor[stewardVerdictSubmitInput, map[string]any] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in stewardVerdictSubmitInput) (*mcp.CallToolResult, map[string]any, error) {
-		raw, err := json.Marshal(in.Verdict)
+		raw, err := json.Marshal(in.Submission)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%s: verdict: %w", steward.ToolVerdictSubmit, err)
+			return nil, nil, fmt.Errorf("%s: submission: %w", steward.ToolVerdictSubmit, err)
 		}
 		var out map[string]any
-		params := map[string]any{"reviewId": env.ReviewID, "token": env.Token, "verdict": json.RawMessage(raw)}
+		params := map[string]any{"reviewId": env.ReviewID, "token": env.Token, "submission": json.RawMessage(raw)}
 		if err := callWS(ctx, client, steward.ToolVerdictSubmit, "steward.verdict.submit", params, &out); err != nil {
 			return nil, nil, err
 		}

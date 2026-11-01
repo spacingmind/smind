@@ -143,7 +143,7 @@ func TestStewardMCPEntry_TokenFromEnvNotArgument(t *testing.T) {
 	if err := json.Unmarshal(raw, &asMap); err != nil {
 		t.Fatal(err)
 	}
-	if msg, rejected := callStewardVerdict(t, cs, map[string]any{"verdict": asMap}); rejected {
+	if msg, rejected := callStewardVerdict(t, cs, map[string]any{"submission": asMap}); rejected {
 		t.Fatalf("verdict submit rejected: %s", msg)
 	}
 	var got fakeDaemonCall
@@ -158,9 +158,9 @@ func TestStewardMCPEntry_TokenFromEnvNotArgument(t *testing.T) {
 	if got.params["reviewId"] != float64(9) || got.params["token"] != "seat-token" {
 		t.Fatalf("params = %v, want reviewId 9 and the env token", got.params)
 	}
-	verdict, isObject := got.params["verdict"].(map[string]any)
+	verdict, isObject := got.params["submission"].(map[string]any)
 	if !isObject {
-		t.Fatalf("verdict on the wire is %T, want a JSON object", got.params["verdict"])
+		t.Fatalf("verdict on the wire is %T, want a JSON object", got.params["submission"])
 	}
 	if verdict["verdict"] != steward.VerdictChanges || verdict["summary"] != want.Summary {
 		t.Fatalf("verdict = %v, want the CHANGES verdict that was sent", verdict)
@@ -170,7 +170,7 @@ func TestStewardMCPEntry_TokenFromEnvNotArgument(t *testing.T) {
 	// tool's strict input schema (additionalProperties: false) before the
 	// handler runs, so it never reaches the daemon; the only token the
 	// daemon can ever see is the env's.
-	msg, rejected := callStewardVerdict(t, cs, map[string]any{"verdict": asMap, "token": "model-supplied-token"})
+	msg, rejected := callStewardVerdict(t, cs, map[string]any{"submission": asMap, "token": "model-supplied-token"})
 	if !rejected {
 		t.Fatalf("a model-supplied token argument was accepted: %s", msg)
 	}
@@ -251,5 +251,59 @@ func TestRunScopedMethods_IncludeStewardSeatCalls(t *testing.T) {
 	sort.Strings(got)
 	if strings.Join(got, ",") != "steward.digest.get,steward.verdict.submit" {
 		t.Fatalf("steward.* methods in RunScopedMethods = %v, want exactly the seat's two", got)
+	}
+}
+
+// The model sees the renamed outer parameter and every field cap in the
+// schema before it submits.
+func TestStewardVerdictSchema_NamesSubmissionAndCaps(t *testing.T) {
+	raw, err := json.Marshal(stewardVerdictSchema())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties map[string]map[string]any `json:"properties"`
+		Required   []string                  `json:"required"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if _, old := schema.Properties["verdict"]; old || len(schema.Properties) != 1 {
+		t.Fatalf("top-level properties = %v, want only submission", schema.Properties)
+	}
+	sub, ok := schema.Properties["submission"]
+	if !ok {
+		t.Fatalf("no submission property: %s", raw)
+	}
+	field := func(path ...string) map[string]any {
+		node := sub
+		for _, p := range path {
+			props, _ := node["properties"].(map[string]any)
+			if p == "[]" {
+				node, _ = node["items"].(map[string]any)
+				continue
+			}
+			node, _ = props[p].(map[string]any)
+		}
+		return node
+	}
+	for _, c := range []struct {
+		path []string
+		max  float64
+	}{
+		{[]string{"blockedReason"}, 200}, {[]string{"summary"}, 800},
+		{[]string{"findings", "[]", "why"}, 600}, {[]string{"findings", "[]", "file"}, 300}, {[]string{"findings", "[]", "check"}, 400},
+		{[]string{"gates", "[]", "note"}, 300}, {[]string{"frames", "[]", "path"}, 300}, {[]string{"frames", "[]", "observation"}, 1000},
+	} {
+		f := field(c.path...)
+		if f["maxLength"] != c.max {
+			t.Errorf("%v maxLength = %v, want %v", c.path, f["maxLength"], c.max)
+		}
+		if d, _ := f["description"].(string); !strings.Contains(d, "bytes") {
+			t.Errorf("%v description %q does not say bytes", c.path, d)
+		}
+	}
+	if field("findings")["maxItems"] != float64(50) {
+		t.Errorf("findings maxItems = %v, want 50", field("findings")["maxItems"])
 	}
 }
