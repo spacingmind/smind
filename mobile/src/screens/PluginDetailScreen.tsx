@@ -1,13 +1,16 @@
 // PluginDetailScreen (ADR-0042 PA.5): one plugin's consent summary, READ-ONLY. It shows what the daemon returned for
 // plugin.get and which prompt commands the plugin contributes; the escalating profiles are flagged. There is no
-// control that changes a plugin; the only line about managing says where to do it. Plugin text is drawn as plain
-// <Text> and never interpreted.
+// control that changes a plugin (the Panels rows only navigate to a panel view); the only line about managing says
+// where to do it. Plugin text is drawn as plain <Text> and never interpreted.
 
 import { useCallback, useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { fetchPluginDetail } from '../plugins/api';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { fetchPluginDetail, fetchPluginPanels } from '../plugins/api';
 import { pluginDetailView, PluginDetailView } from '../plugins/listView';
+import { panelsOfPlugin } from '../plugins/panelView';
 import { usePluginResource } from '../plugins/usePluginResource';
+import { pluginPanelHref } from '../navigation/routes';
 import { RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -19,8 +22,12 @@ import { SectionHeader } from './tasks/SectionHeader';
 export function PluginDetailScreen({ conn, id }: { conn: RelayConnection; id: string }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const router = useRouter();
   const load = useCallback((c: RelayConnection) => fetchPluginDetail(c, id), [id]);
   const { state } = usePluginResource(conn, load);
+  // Only an ACTIVE plugin has panels listed (the daemon holds the rest back); loading or an error shows nothing.
+  const panelsRes = usePluginResource(conn, fetchPluginPanels);
+  const panelList = panelsRes.state.kind === 'ready' ? panelsOfPlugin(panelsRes.state.value, id) : [];
 
   if (state.kind === 'loading') {
     return (
@@ -47,6 +54,22 @@ export function PluginDetailScreen({ conn, id }: { conn: RelayConnection; id: st
       {v.header.lastError !== null && <Text style={styles.error}>{v.header.lastError}</Text>}
       <Text style={styles.line}>{v.dataOnly ? 'Data only: nothing it declares runs code.' : 'Runs code: it declares a process or hooks.'}</Text>
       {v.process.length > 0 && <Text style={styles.mono}>{v.process.join(' ')}</Text>}
+      {panelList.length > 0 && (
+        <Section title="Panels" styles={styles}>
+          {panelList.map((p) => (
+            <Pressable
+              key={p.id}
+              style={styles.item}
+              accessibilityRole="button"
+              accessibilityLabel={p.title}
+              onPress={() => router.push(pluginPanelHref(id, p.id))}
+            >
+              <Text style={styles.itemMain}>{p.title}</Text>
+              <Text style={styles.itemSub}>{`${p.where} panel`}</Text>
+            </Pressable>
+          ))}
+        </Section>
+      )}
       {v.capabilities.length > 0 && (
         <Section title="Capabilities" styles={styles}>
           <View style={styles.chips}>
