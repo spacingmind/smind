@@ -83,13 +83,24 @@ func (s *scanner) finish() {
 		if s.redacted && s.spans[i].start >= s.redactAt {
 			// Where the heredoc body ends is not knowable here, so a segment
 			// after the operator may really be body text: never show it.
-			s.segs[i].Raw = redactedText
+			s.segs[i].Raw = s.redactText()
 		}
 	}
 }
 
 // redactedText replaces text the splitter cannot vouch for as body-free.
 const redactedText = "[redacted: the command has a heredoc whose tag is not valid UTF-8]"
+
+// redactedScriptText replaces a command whose shell -c script holds a heredoc
+// that the quoting hides from the elision.
+const redactedScriptText = "[redacted: the command has a heredoc inside a quoted shell script]"
+
+func (s *scanner) redactText() string {
+	if s.redactMsg != "" {
+		return s.redactMsg
+	}
+	return redactedText
+}
 
 // word accumulates one shell word. dynamic is set for an unquoted or
 // double-quoted $ or backtick and for an unquoted * ? [ — single quotes are
@@ -118,6 +129,13 @@ func (h *heredoc) marker() string {
 	return "<<" + h.tag + " [heredoc " + strconv.Itoa(h.n) + " bytes]"
 }
 
+// edit replaces src[start:end) when a command is rendered for display. Rendering
+// with the edits is what keeps heredoc bodies out of every shown form.
+type edit struct {
+	start, end int
+	text       string
+}
+
 // dialect is the shell syntax a nested script is written in. The zero value
 // is POSIX sh; PowerShell and cmd differ in exactly the places that could hide
 // a command from a bash-flavoured scan (see the scanner cases that test it).
@@ -140,22 +158,23 @@ func (d dialect) String() string {
 }
 
 type scanner struct {
-	src      string
-	i        int
-	p        *Parsed
-	w        word
-	cur      *Segment
-	segs     []Segment
-	spans    []span // source range of each segment, for the final Raw pass
-	segStart int
-	pending  []*heredoc // heredoc operators on the line being scanned
-	heredocs []*heredoc // every heredoc, in operator order, once consumed
-	win      bool       // Windows mode: see winLiteralBackslashNext
-	dialect  dialect    // syntax of this script: sh, PowerShell or cmd
-	depth    int        // nesting level of substitutions and shells
-	redacted bool       // a heredoc tag was not valid UTF-8: see redactedText
-	redactAt int        // source offset of that heredoc operator
-	inner    []Segment  // segments of substituted/nested text, appended after segs
+	src       string
+	i         int
+	p         *Parsed
+	w         word
+	cur       *Segment
+	segs      []Segment
+	spans     []span // source range of each segment, for the final Raw pass
+	segStart  int
+	pending   []*heredoc // heredoc operators on the line being scanned
+	edits     []edit     // every heredoc's marker and body deletion, in src offsets; nested scans' edits are mapped in
+	win       bool       // Windows mode: see winLiteralBackslashNext
+	dialect   dialect    // syntax of this script: sh, PowerShell or cmd
+	depth     int        // nesting level of substitutions and shells
+	redacted  bool       // a heredoc tag was not valid UTF-8: see redactedText
+	redactAt  int        // source offset of that heredoc operator
+	redactMsg string     // what to show instead; empty means redactedText
+	inner     []Segment  // segments of substituted/nested text, appended after segs
 }
 
 // span is the source range a segment was built from; Raw is re-rendered from
@@ -643,19 +662,24 @@ func (s *scanner) substitution(kind byte) {
 		}
 		return
 	}
-	s.recurse(inner)
+	if kind == '$' {
+		s.recurseAt(inner, start+2)
+	} else {
+		s.recurseAt(inner, start+1)
+	}
 }
 
 // subshellGroup consumes a ( ... ) subshell at s.i: its commands run in a
 // child shell, so only the inner segments matter — the parens contribute no
 // segment of their own.
 func (s *scanner) subshellGroup() {
+	open := s.i
 	inner, after, ok := s.captureGroup(1)
 	s.i = after
 	if !ok {
 		s.unparsed("unclosed (")
 	}
-	s.recurse(strings.TrimSpace(inner))
+	s.recurseAt(inner, open+1)
 }
 
 // braceGroup consumes a { ...; } group at s.i like a subshell: braces and
@@ -673,7 +697,7 @@ func (s *scanner) braceGroup() {
 			j := strings.IndexByte(s.src[i+1:], '\'')
 			if j < 0 {
 				s.unparsed("unclosed {")
-				s.recurse(strings.TrimSpace(s.src[start:]))
+				s.recurseAt(s.src[start:], start)
 				s.i = len(s.src)
 				return
 			}
@@ -693,7 +717,7 @@ func (s *scanner) braceGroup() {
 		case '}', ')':
 			depth--
 			if depth < 0 {
-				s.recurse(s.src[start:i])
+				s.recurseAt(s.src[start:i], start)
 				s.i = i + 1
 				return
 			}
@@ -703,7 +727,7 @@ func (s *scanner) braceGroup() {
 		}
 	}
 	s.unparsed("unclosed {")
-	s.recurse(strings.TrimSpace(s.src[start:]))
+	s.recurseAt(s.src[start:], start)
 	s.i = len(s.src)
 }
 
@@ -773,25 +797,36 @@ func (s *scanner) captureBacktick() (inner string, after int, ok bool) {
 // a rule or floor check sees commands the outer words merely mention. The
 // inner scanner shares Parsed, so its heredoc byte count and its own doubt
 // propagate to the parent.
-func (s *scanner) recurse(inner string) {
+func (s *scanner) recurse(inner string) { s.recurseAt(inner, -1) }
+
+// recurseAt is recurse for text that sits verbatim in s.src at offset at (-1
+// when it does not, as for the unquoted word of shell -c), so the nested
+// scan's heredoc edits can be mapped back into this scanner's source.
+func (s *scanner) recurseAt(inner string, at int) {
 	if s.depth >= maxNestDepth {
 		s.unparsed("nesting too deep")
 		return
 	}
-	s.recurseAs(inner, s.dialect)
+	s.recurseAs(inner, s.dialect, at)
 }
 
 // recurseAs is recurse for a script written in dialect d. It returns how many
 // segments the script contributed (0 also when nesting was too deep, which is
 // reported as Unparsed).
-func (s *scanner) recurseAs(inner string, d dialect) int {
+func (s *scanner) recurseAs(inner string, d dialect, at int) int {
 	if s.depth >= maxNestDepth {
 		s.unparsed("nesting too deep")
 		return 0
 	}
+	if at >= 0 {
+		// The caller passes the untrimmed text; the scanner works on the trimmed one.
+		at += len(inner) - len(strings.TrimLeft(inner, " \t\r\n"))
+	}
+	inner = strings.TrimSpace(inner)
 	in := scanner{src: inner, p: s.p, segStart: -1, depth: s.depth + 1, win: s.win, dialect: d}
 	in.run()
 	in.finish()
+	s.mapEdits(&in, at)
 	if in.redacted && !s.redacted {
 		// The inner text sits inside this command's own text: redact all of it.
 		s.redacted, s.redactAt = true, 0
@@ -799,6 +834,29 @@ func (s *scanner) recurseAs(inner string, d dialect) int {
 	s.inner = append(s.inner, in.segs...)
 	s.inner = append(s.inner, in.inner...)
 	return len(in.segs) + len(in.inner)
+}
+
+// mapEdits carries a nested scan's heredoc elisions into s. When the nested
+// text sits verbatim in s.src (at >= 0) the offsets just shift. A shell -c
+// script was unquoted first, so each body deletion is looked up by its text in
+// s.src; one that cannot be found (quoting changed it) leaves no way to hide
+// the body, so the whole command is redacted instead.
+func (s *scanner) mapEdits(in *scanner, at int) {
+	for _, e := range in.edits {
+		if at >= 0 {
+			s.edits = append(s.edits, edit{e.start + at, e.end + at, e.text})
+			continue
+		}
+		if e.text != "\n" {
+			continue // an operator marker; its quoted spelling is not locatable
+		}
+		i := strings.Index(s.src, in.src[e.start:e.end])
+		if i < 0 {
+			s.redacted, s.redactAt, s.redactMsg = true, 0, redactedScriptText
+			return
+		}
+		s.edits = append(s.edits, edit{i, i + e.end - e.start, "\n"})
+	}
 }
 
 // shellScript recurses into the literal script word of bash|sh|zsh|dash|ksh
@@ -867,7 +925,13 @@ func (s *scanner) consumeHeredocBodies() {
 		if !ok {
 			s.unparsed("heredoc terminator not found")
 		}
-		s.heredocs = append(s.heredocs, h)
+		s.edits = append(s.edits, edit{h.opStart, h.opEnd, h.marker()})
+		if h.bodyStart > h.opEnd && h.bodyStart <= len(s.src) {
+			// The deletion spans the newline that opened the body through the
+			// terminator's own newline, so one newline is put back: without it
+			// the next line's text would glue onto the operator's target.
+			s.edits = append(s.edits, edit{h.bodyStart - 1, h.bodyEnd, "\n"})
+		}
 	}
 	s.pending = nil
 }
@@ -908,16 +972,21 @@ func (s *scanner) heredocBody(tag string, stripTabs bool) (n int, ok bool) {
 func (s *scanner) elided(base, end int) string {
 	var b strings.Builder
 	pos := base
-	for _, h := range s.heredocs {
-		if h.opStart < pos || h.opStart >= end {
+	for _, e := range s.sortedEdits() {
+		if e.start < pos || e.end > end {
 			continue
 		}
-		b.WriteString(s.src[pos:h.opStart])
-		b.WriteString(h.marker())
-		pos = h.opEnd
+		b.WriteString(s.src[pos:e.start])
+		b.WriteString(e.text)
+		pos = e.end
 	}
 	b.WriteString(s.src[pos:end])
 	return strings.TrimSpace(b.String())
+}
+
+func (s *scanner) sortedEdits() []edit {
+	sort.SliceStable(s.edits, func(i, j int) bool { return s.edits[i].start < s.edits[j].start })
+	return s.edits
 }
 
 // normalized renders the whole command with every heredoc body (and its
@@ -927,26 +996,12 @@ func (s *scanner) elided(base, end int) string {
 // interleave, so the edits are spliced in start order.
 func (s *scanner) normalized() string {
 	if s.redacted {
-		return redactedText
+		return s.redactText()
 	}
-	if len(s.heredocs) == 0 {
+	if len(s.edits) == 0 {
 		return strings.TrimSpace(s.src)
 	}
-	type edit struct {
-		start, end int
-		text       string
-	}
-	var edits []edit
-	for _, h := range s.heredocs {
-		edits = append(edits, edit{h.opStart, h.opEnd, h.marker()})
-		if h.bodyStart > h.opEnd && h.bodyStart <= len(s.src) {
-			// The deletion spans the newline that opened the body through the
-			// terminator's own newline, so one newline is put back: without it
-			// the next line's text would glue onto the operator's target.
-			edits = append(edits, edit{h.bodyStart - 1, h.bodyEnd, "\n"})
-		}
-	}
-	sort.Slice(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
+	edits := s.sortedEdits()
 	var b strings.Builder
 	pos := 0
 	for _, e := range edits {
