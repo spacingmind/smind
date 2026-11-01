@@ -84,3 +84,15 @@ func TestExecuteDetail_NoHeredocUnchanged(t *testing.T) {
 		t.Errorf("detail = %+v", d)
 	}
 }
+
+// A command whose raw text exceeds the detail cap stays Truncated even when
+// its elided form is short: the policy engine treats Truncated as "ask" before
+// any rule or floor, and eliding a long body must not change that decision.
+func TestExecuteDetail_LongBodyStaysTruncated(t *testing.T) {
+	t.Parallel()
+	d := &PermissionDetail{Kind: "execute"}
+	d.setExecuteCommand("cat <<EOF\n" + strings.Repeat("x", detailCommandMaxBytes*2) + "\nEOF\n")
+	if len(d.Command) >= detailCommandMaxBytes || !d.Truncated {
+		t.Errorf("Command %d bytes, Truncated=%v", len(d.Command), d.Truncated)
+	}
+}
