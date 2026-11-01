@@ -88,6 +88,7 @@ describe("SettingsScreen shell", () => {
       "settings-nav-automations",
       "settings-nav-providers",
       "settings-nav-usage",
+      "settings-nav-permission-policy",
     ]);
   });
 
