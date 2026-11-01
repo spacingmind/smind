@@ -26,6 +26,8 @@ is one row:
   live agents, minutes per run and the cost cap per 24 hours;
 - for a refused link, the reason and what to do about it (for example "update
   smind on the other host");
+- a **Labels** line for an approved host: the tags you gave it, shown as
+  `key:value` chips, and an **Edit labels** button (see Route by labels);
 - an **Activity** line that opens the latest exchanges with that host, read-only (see
   below);
 - a menu with **Edit access**, **Revoke** and **Remove**.
@@ -318,6 +320,12 @@ smind host label rm winbox arch
 smind host label ls
 smind host label ls winbox
 ```
+
+You can also edit them in **Settings → Hosts**: on an approved host choose **Edit
+labels**, then **Add label** for each `key` and `value`, and **Save**. Save sends
+only what you changed. The dialog checks the rules below as you type and shows the
+same message smind itself would give; a refusal from smind is shown in the dialog
+and nothing is lost. Cancelling sends nothing.
 
 A host has at most 16 labels. A key starts with a lowercase letter and is up to 32
 characters of `a-z`, `0-9`, `.`, `_` and `-`. A value is up to 32 characters of
