@@ -3,6 +3,7 @@ import { useState } from "react";
 import { AddHostDialog } from "@/components/hosts/add-host-dialog";
 import { ApproveHostDialog } from "@/components/hosts/approve-host-dialog";
 import { EditGrantDialog } from "@/components/hosts/edit-grant-dialog";
+import { EditLabelsDialog } from "@/components/hosts/edit-labels-dialog";
 import { HostRow } from "@/components/hosts/host-row";
 import { InviteHostDialog } from "@/components/hosts/invite-host-dialog";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
@@ -48,6 +49,10 @@ function HostsSection(_props: SettingsSectionContext) {
   // --- edit access: the grant of an approved, inbound-enabled host
   const [editId, setEditId] = useState<string | null>(null);
   const editTarget = useLastDefined(hosts?.find((h) => h.hostId === editId) ?? null);
+
+  // --- labels: the routing tags of an approved host
+  const [labelsId, setLabelsId] = useState<string | null>(null);
+  const labelsTarget = useLastDefined(hosts?.find((h) => h.hostId === labelsId) ?? null);
 
   // --- invite / add
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -130,6 +135,7 @@ function HostsSection(_props: SettingsSectionContext) {
                 error={rowError?.id === host.hostId ? rowError.message : null}
                 onReview={(h) => setReviewId(h.hostId)}
                 onEditGrant={(h) => setEditId(h.hostId)}
+                onEditLabels={(h) => setLabelsId(h.hostId)}
                 onRevoke={(h) => {
                   revokeAction.reset();
                   setRevokeId(h.hostId);
@@ -167,6 +173,17 @@ function HostsSection(_props: SettingsSectionContext) {
           open={editId !== null}
           onOpenChange={(open) => {
             if (!open) setEditId(null);
+          }}
+        />
+      )}
+
+      {labelsTarget && (
+        <EditLabelsDialog
+          key={labelsTarget.hostId}
+          host={labelsTarget}
+          open={labelsId !== null}
+          onOpenChange={(open) => {
+            if (!open) setLabelsId(null);
           }}
         />
       )}

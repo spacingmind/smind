@@ -304,6 +304,11 @@ export async function listProviders(conn: RelayConnection): Promise<ProviderInfo
   return result.providers ?? [];
 }
 
+/** provider.clearCooldown: the human's "I reset my quota" (a relay device is a human session). Resolves once cleared. */
+export async function clearProviderCooldown(conn: RelayConnection, provider: string): Promise<void> {
+  await conn.call('provider.clearCooldown', { provider });
+}
+
 /** Where a new task starts. HEAD is the daemon default (all three omitted); G4 (ADR-0039) adds variants. */
 export type StartMode =
   | { kind: 'head' }
