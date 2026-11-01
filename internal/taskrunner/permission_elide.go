@@ -101,3 +101,17 @@ func ElideToolCall(input json.RawMessage, title string) (json.RawMessage, string
 	}
 	return out, title, refs
 }
+
+// StringField returns the string value of key in a JSON object, for callers
+// that must read a tool input's command the same way ElideToolCall does.
+func StringField(input json.RawMessage, key string) (string, bool) {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(input, &obj) != nil {
+		return "", false
+	}
+	var s string
+	if raw, ok := obj[key]; !ok || json.Unmarshal(raw, &s) != nil {
+		return "", false
+	}
+	return s, true
+}

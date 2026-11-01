@@ -419,6 +419,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	for method, h := range policyHandlers(policyEngine, db) {
 		hs[method] = h
 	}
+	for method, h := range heredocRevealHandlers(reg, db) {
+		hs[method] = h
+	}
 	policySweep := startPolicySweeper(db)
 	admit := newSeatAdmission(reg, profReg, db)
 	profileListRaw := hs["profile.list"] // the plugin session must not get the seat-filtered form

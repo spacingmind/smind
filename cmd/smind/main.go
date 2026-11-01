@@ -96,6 +96,8 @@ func run(args []string) int {
 		return cmdLearn(args[1:])
 	case "policy":
 		return cmdPolicy(args[1:])
+	case "permission":
+		return cmdPermission(args[1:])
 	case "steward":
 		return cmdSteward(args[1:])
 	case "push":
@@ -214,6 +216,9 @@ Usage:
 
   smind policy init|show|test|audit                       permission policy engine: write the template, show rules, explain a command, list decisions
                                                            (humans only; the engine is off until steward.policy.enabled; run "smind policy" for flags)
+
+  smind permission show --reveal [--index N] <requestId> | --run <runId> --call <toolCallId>
+                                                           print one redacted heredoc body elided from a permission card or tool call (humans only)
 
   smind steward review|list|show|cancel                    ask for a read-only review of a task's head commit; read reviews (humans only; run "smind steward" for flags)
 

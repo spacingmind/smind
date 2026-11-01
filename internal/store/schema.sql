@@ -692,7 +692,7 @@ CREATE TABLE IF NOT EXISTS permission_policy_audit (
     tool TEXT NOT NULL DEFAULT '',
     target TEXT NOT NULL DEFAULT '',   -- redacted, heredocs elided, <= 512 chars
     paths TEXT NOT NULL DEFAULT '[]',  -- resolved, first 8, JSON
-    decision TEXT NOT NULL,            -- allow | deny | ask | ask_human_allow | ask_human_deny | ask_timeout_deny
+    decision TEXT NOT NULL,            -- allow | deny | ask | ask_human_allow | ask_human_deny | ask_timeout_deny | heredoc_revealed
     rule_id TEXT NOT NULL DEFAULT '',
     policy_sha TEXT NOT NULL DEFAULT '',
     reasons TEXT NOT NULL DEFAULT '',

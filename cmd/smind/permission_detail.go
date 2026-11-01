@@ -10,6 +10,11 @@ import (
 // the optional `detail` on a permission_request. Typed fields only: the MCP
 // SDK infers a bad schema for json.RawMessage (see mcpRunEvent).
 type permissionDetail struct {
+	// Heredocs lists the heredoc bodies elided from Command.
+	Heredocs []struct {
+		Index int `json:"index"`
+		Bytes int `json:"bytes"`
+	} `json:"heredocs,omitempty"`
 	Kind             string `json:"kind"`
 	Path             string `json:"path,omitempty"`
 	NewBytes         int    `json:"newBytes,omitempty"`

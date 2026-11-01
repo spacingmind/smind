@@ -32,6 +32,9 @@ var policyAuditDecisions = map[string]bool{
 	"ask_human_allow":  true,
 	"ask_human_deny":   true,
 	"ask_timeout_deny": true,
+	// A human revealed an elided heredoc body from a permission card or a
+	// tool call; the row names where, never what.
+	"heredoc_revealed": true,
 }
 
 // PolicyAuditRow is one policy-engine evaluation, or the later human/timeout
