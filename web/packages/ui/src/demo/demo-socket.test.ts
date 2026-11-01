@@ -131,6 +131,8 @@ describe("demo socket", () => {
     // the diff gains the file the request was about
     const diff = await h.client.call<{ diff: string }>("task.diff", { taskId: 1 });
     expect(diff.diff).toContain("internal/ratelimit/limiter.go");
+    // answering the request resolves its inbox row
+    expect(await h.client.call("inbox.count")).toMatchObject({ total: 3 });
 
     // deny
     h = await start();
@@ -145,6 +147,7 @@ describe("demo socket", () => {
     expect(text).toContain("I won't write that file");
     const after = await h.client.call<{ diff: string }>("task.diff", { taskId: 1 });
     expect(after.diff).not.toContain("internal/ratelimit/limiter.go");
+    expect(await h.client.call("inbox.count")).toMatchObject({ total: 3 }); // Deny resolves the row too
   });
 
   it("D-06 task.cancel and run.stop abort the matching script; nothing is emitted afterwards", async () => {
