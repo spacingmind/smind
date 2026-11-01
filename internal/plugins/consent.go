@@ -110,8 +110,20 @@ func profileEscalations(p ProfileSpec) []string {
 
 // AcpEntry is an ACP provider command a plugin contributes.
 type AcpEntry struct {
+	// ID is the registered provider id, "<plugin>/<provider>".
 	ID      string   `json:"id"`
+	Label   string   `json:"label,omitempty"`
 	Command []string `json:"command"`
+	// Resolves says how Command[0] is found: "plugin file" or "PATH".
+	Resolves string `json:"resolves,omitempty"`
+	// EnvKeys are the literal env names (never values); SecretEnv the secret
+	// slot names. EnvDigest hashes the literal values so a changed value
+	// re-confirms without ever being printed.
+	EnvKeys     []string `json:"envKeys,omitempty"`
+	SecretEnv   []string `json:"secretEnv,omitempty"`
+	EnvDigest   string   `json:"envDigest,omitempty"`
+	InheritHome bool     `json:"inheritHome,omitempty"`
+	Vendor      string   `json:"vendor,omitempty"`
 }
 
 // BuildConsent derives the consent summary of a validated manifest.
@@ -138,7 +150,7 @@ func BuildConsent(m *Manifest, source Source, hash string) Consent {
 	}
 	sort.Slice(c.McpServers, func(i, j int) bool { return c.McpServers[i].Name < c.McpServers[j].Name })
 	for _, p := range m.Contributes.Providers {
-		c.AcpProviders = append(c.AcpProviders, AcpEntry{ID: p.ID, Command: p.ACP.Command})
+		c.AcpProviders = append(c.AcpProviders, acpEntryOf(m.ID, p))
 	}
 	sort.Slice(c.AcpProviders, func(i, j int) bool { return c.AcpProviders[i].ID < c.AcpProviders[j].ID })
 
@@ -181,4 +193,29 @@ func fingerprint(c Consent) string {
 	}{c.Process, c.Capabilities, c.HookEvents, c.McpServers, c.AcpProviders, flagged})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+func acpEntryOf(plugin string, p ProviderContribution) AcpEntry {
+	e := AcpEntry{ID: ProviderID(plugin, p.ID), Label: p.Label, Command: append([]string(nil), p.ACP.Command...), InheritHome: p.ACP.InheritHome, Vendor: p.Vendor}
+	if form, _ := commandForm(p.ACP.Command[0]); form == "path" {
+		e.Resolves = "plugin file"
+	} else {
+		e.Resolves = "PATH"
+	}
+	for k := range p.ACP.Env {
+		e.EnvKeys = append(e.EnvKeys, k)
+	}
+	sort.Strings(e.EnvKeys)
+	h := sha256.New()
+	for _, k := range e.EnvKeys {
+		fmt.Fprintf(h, "%d:%s=%d:%s;", len(k), k, len(p.ACP.Env[k]), p.ACP.Env[k])
+	}
+	if len(e.EnvKeys) > 0 {
+		e.EnvDigest = hex.EncodeToString(h.Sum(nil))[:16]
+	}
+	for _, s := range p.ACP.SecretEnv {
+		e.SecretEnv = append(e.SecretEnv, s.Name)
+	}
+	sort.Strings(e.SecretEnv)
+	return e
 }

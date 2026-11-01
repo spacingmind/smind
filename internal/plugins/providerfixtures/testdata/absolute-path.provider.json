@@ -1,0 +1,9 @@
+{
+ "id": "agent",
+ "label": "Agent",
+ "acp": {
+  "command": [
+   "/usr/bin/agent"
+  ]
+ }
+}

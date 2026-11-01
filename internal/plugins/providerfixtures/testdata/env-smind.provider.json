@@ -1,0 +1,12 @@
+{
+ "id": "agent",
+ "label": "Agent",
+ "acp": {
+  "command": [
+   "bin/agent"
+  ],
+  "env": {
+   "SMIND_TOKEN_X": "x"
+  }
+ }
+}

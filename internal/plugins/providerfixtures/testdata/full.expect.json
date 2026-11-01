@@ -1,0 +1,17 @@
+{
+ "valid": true,
+ "display": {
+  "id": "demo/my-agent",
+  "label": "My agent",
+  "icon": "Bot",
+  "secrets": [
+   {
+    "name": "FOO_API_KEY",
+    "label": "Foo API key",
+    "required": true
+   }
+  ],
+  "models": 2,
+  "modes": 2
+ }
+}

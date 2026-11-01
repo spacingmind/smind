@@ -1,0 +1,20 @@
+{
+ "id": "agent",
+ "label": "Agent",
+ "acp": {
+  "command": [
+   "bin/agent",
+   "--acp"
+  ]
+ },
+ "models": [
+  {
+   "id": "a",
+   "default": true
+  },
+  {
+   "id": "b",
+   "default": true
+  }
+ ]
+}

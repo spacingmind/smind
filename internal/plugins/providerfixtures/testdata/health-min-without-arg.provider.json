@@ -1,0 +1,13 @@
+{
+ "id": "agent",
+ "label": "Agent",
+ "acp": {
+  "command": [
+   "bin/agent",
+   "--acp"
+  ]
+ },
+ "health": {
+  "minVersion": "1.0"
+ }
+}
