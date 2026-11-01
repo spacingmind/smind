@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { splitDiff } from "./git";
 import { PERMISSION_REQUEST } from "./scenario/runs";
 import { buildTour } from "./scenario";
 import type { Step } from "./types";
@@ -42,7 +43,8 @@ describe("demo scenario", () => {
       if (i.taskId !== undefined) expect(tasks.has(i.taskId), i.key).toBe(true);
       if (i.links.runId && i.links.runId !== tour.live.runId) expect(tour.runLogs[i.links.runId], i.key).toBeDefined();
     }
-    expect(tour.diffs[tour.live.taskId]).toBeTruthy();
+    expect(tour.diffs[2]).toBeTruthy();
+    expect(tour.diffs[tour.live.taskId]).toBeUndefined(); // the live task has no diff until its permission is allowed
     expect(tour.terminals[tour.live.taskId]).toBeDefined();
   });
 
@@ -70,12 +72,48 @@ describe("demo scenario", () => {
   });
 
   it("S-04 the permission request fits the production permission types: kinds, a unified-diff body, a path", () => {
-    expect(PERMISSION_REQUEST.options.map((o) => o.kind).sort()).toEqual(["allow_once", "reject_once"]);
+    expect(PERMISSION_REQUEST.options.map((o) => o.kind).sort()).toEqual(["allow_always", "allow_once", "reject_once"]);
     const d = PERMISSION_REQUEST.detail!;
     expect(d.kind).toBe("write");
-    expect(d.path).toBe("internal/ratelimit/limiter.go");
+    expect(d.path).toBe("internal/webhook/limiter.go");
     for (const line of d.diff!.split("\n")) expect(line).toMatch(/^( |\+|-|@@)/);
     expect(PERMISSION_REQUEST.requestId).toBe("demo-req-1");
     expect(tour.inbox.find((i) => i.kind === "permission")?.links.permissionRequestId).toBe(PERMISSION_REQUEST.requestId);
+  });
+
+  it("S-05 is the landing hero's nine tasks: titles, workspaces, the design Lead (#12) with two Peers, and the diff sizes", () => {
+    const byId = new Map(tour.tasks.map((t) => [t.ID, t]));
+    const ws = (id: number) => tour.workspaces.find((w) => w.ID === byId.get(id)!.WorkspaceID)!.Title;
+    expect(tour.workspaces.map((w) => w.Title)).toEqual(["checkout-api", "web-app", "platform"]);
+    expect(
+      tour.tasks.map((t) => [ws(t.ID), t.Title, t.ParentTaskID]),
+    ).toEqual([
+      ["checkout-api", "Rate-limit the webhook handler", null],
+      ["checkout-api", "Why does TestRetry fail on CI only?", null],
+      ["checkout-api", "Add a unit test for parseDate", null],
+      ["checkout-api", "Review PR #42 for race conditions", null],
+      ["checkout-api", "Why did p99 latency double since Tuesday?", null],
+      ["web-app", "Explain this repo to me", null],
+      ["platform", "Design a multi-region job queue", null],
+      ["platform", "Queue schema and leases", 12],
+      ["platform", "Failover modes", 12],
+    ]);
+    expect(byId.get(12)!.Title).toBe("Design a multi-region job queue");
+    expect(tour.tiers).toEqual({ 12: "leader", 13: "coder", 14: "coder" });
+    const stat = (diff: string) => {
+      let add = 0;
+      let del = 0;
+      for (const f of splitDiff(diff)) {
+        for (const l of f.chunk.split("\n")) {
+          if (l.startsWith("+") && !l.startsWith("+++")) add++;
+          else if (l.startsWith("-") && !l.startsWith("---")) del++;
+        }
+      }
+      return [add, del];
+    };
+    expect(stat(tour.liveTaskExtraDiff)).toEqual([41, 0]); // webhook, once allowed
+    expect(stat(tour.diffs[2])).toEqual([2, 1]); // TestRetry
+    expect(stat(tour.diffs[3])).toEqual([24, 0]); // parseDate
+    for (const id of [4, 5, 6, 12]) expect(tour.diffs[id], `task ${id} has no diff`).toBeUndefined();
   });
 });

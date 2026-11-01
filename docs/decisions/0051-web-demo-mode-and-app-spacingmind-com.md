@@ -109,13 +109,13 @@ type Script = { steps: Step[]; speed?: number };
 `at` is milliseconds since the script started; playback uses an **injectable clock** (`setTimeout` by default, fake timers in unit tests), honours
 `prefers-reduced-motion` (collapses delays to a few milliseconds), and is cancelled by `task.cancel`, `run.stop` or leaving the page.
 
-**The shipped scenario** (named "tour", ~6 tasks) covers exactly what the Human listed, each reachable in two clicks from first paint:
+**The shipped scenario** (named "tour": the nine tasks of the landing hero, three workspaces, a Lead with two Peers; see the plan's amendment) covers exactly what the Human listed, each reachable in two clicks from first paint:
 
 | Moment | How it plays |
 |---|---|
 | **A run streaming tool calls** | The landing task ("Add rate limiting to the public API") opens on a run already in progress: thinking, assistant text chunks, then `tool_call` cards (Read, Edit, a Bash `go test`), a `usage` event. It starts when the page loads and the demo opens on it (`#/workspace/1/task/1/chat/1`), so the visitor sees motion without doing anything. |
 | **A permission request** | The script reaches an `ask` step: `permission_request` with a `write`/`edit` detail and a diff preview (the real permission card). **Allow** → the script's `allow` branch finishes the edit, runs the tests, `done`. **Deny** → the `deny` branch has the agent acknowledge and propose a plan, `done`. `run.respondPermission` is the *only* thing that advances an `ask` (ADR-0019: no auto-answer). The decision is also reflected in the inbox row. |
-| **A diff tab** | `task.diff`/`task.fileDiff` return a small, real-looking unified diff (3 files); the diff viewer renders it exactly as production. Allowing the permission adds the file the request was about. |
+| **A diff tab** | `task.diff`/`task.fileDiff` return a small, real-looking unified diff (the debug fix, the first task test; the live task gains `limiter.go` on Allow); the diff viewer renders it exactly as production. Allowing the permission adds the file the request was about. |
 | **A terminal tab** | `terminal.create`/`terminal.list`/`terminal.attach` replay a canned session as base64 `data` events with recorded inter-frame delays (a `go test ./...` run, then a prompt). `terminal.write` is accepted and echoed locally; Enter answers one dim line, "demo: this terminal replays canned output; nothing runs here". `terminal.resize` is a no-op. |
 | **The inbox** | `inbox.list` returns the fixtures; `inbox.seen`, `inbox.snooze`, `inbox.resolve` are `local` rules (the badge count in the sidebar updates through the same notification the daemon pushes). |
 | **Usage** | `usage.summary`, `provider.usage`, `account.usage` return fixtures: a Pro-style account with a 5h and a weekly window, a month of spend by day and by model. Read-only. |
