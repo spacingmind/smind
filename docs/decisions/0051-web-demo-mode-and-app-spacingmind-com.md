@@ -220,25 +220,49 @@ Three options; one recommendation.
 follows a pattern the same Cloudflare account already runs. (b) couples two repos and two CSPs for no gain. (c) is the simplest but cannot send the
 CSP/`frame-ancestors` headers this ADR relies on (a `<meta>` CSP cannot express `frame-ancestors`), and moves hostnames later.
 
-**Not in this change:** no deploy workflow, no wrangler config, no DNS. The PR that adds them waits for the Human's steps in section 9 and this ADR's review.
-(Sketch for review, not committed: `web/packages/ui/wrangler.demo.jsonc` with `name: "smind-demo"`, `assets.directory: "dist-demo"`, `routes: [{pattern:
-"app.spacingmind.com", custom_domain: true}]`; workflow `deploy-demo.yml`, triggered by changes under `web/packages/ui/**` on
-`develop` and by `workflow_dispatch`, running `build:demo`, `check:demo`, then `wrangler deploy` in a GitHub Environment `demo-production`.)
+**Deploy (Human decision 2026-11-01: option (a)).** `web/packages/ui/wrangler.demo.jsonc` is a static-assets-only Worker, no script: `name: "smind-demo"`, `assets.directory: "./dist-demo"`,
+`assets.not_found_handling: "single-page-application"`, `routes: [{ pattern: "app.spacingmind.com", custom_domain: true }]`, `workers_dev: false` and `preview_urls: false` (the demo is reachable only on its own
+domain). `.github/workflows/demo-deploy.yml` builds and checks the demo and runs a pinned `wrangler@4.156.0 deploy`. Triggers: `release: published` (the release tag) and `workflow_dispatch` with a `ref` input (default
+`develop`). Hardening: `permissions: contents: read`, actions pinned by SHA, a `demo-deploy` concurrency group that never cancels a running deploy, a 15-minute timeout, `persist-credentials: false`. The two
+secrets are mapped only into the step that checks them and the step that deploys, never into the job, so the install and build steps (which run package scripts) cannot see them; if either is missing the run prints
+a notice and ends green without building or deploying. The workflow runs `check-demo-build.mjs dist-demo` (forbidden strings, CSP and its script hash, lazy chunk, budgets) before the upload, so a bundle that fails the
+guard is never published.
+
+**Headers are served, verified locally.** Workers static assets honour a `_headers` file in the assets directory, and `_headers` is exactly what the build already writes into `dist-demo`. With `wrangler dev --local` (Cloudflare's own
+`workerd` runtime, on 127.0.0.1, no token, no API call) every response carried the CSP including `frame-ancestors 'none'`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and `Cross-Origin-Opener-Policy`,
+`/assets/*` carried `Cache-Control: public, max-age=31536000, immutable`, and an unknown path (the SPA fallback) carried the same headers; the page loaded with no console error and no request beyond its own origin. No header
+config beyond `_headers` is needed, and there is no Worker script. Not verifiable without a deploy: the Cloudflare edge itself and the custom-domain certificate; the first manual run is the check (step 5 below).
 
 ### 9. The Human's infra steps
 
-None of these is done by the agent; the order matters.
+None of these is done by an agent; no agent asks for, prints or stores the token. The order matters.
 
-1. **Review this ADR**, choose the hosting option (default (a)) and accept or veto the banner text and the "Install smind" link target.
-2. **Cloudflare API token** for the account that holds the `spacingmind.com` zone: template "Edit Cloudflare Workers", account-scoped, plus **Zone → DNS → Edit** on
-   `spacingmind.com` only (a `custom_domain` route creates the DNS record and certificate). Store it in the smind repo as **`CLOUDFLARE_API_TOKEN`**, and the account id
-   as **`CLOUDFLARE_ACCOUNT_ID`**, as secrets of a GitHub Environment **`demo-production`** (optionally with required reviewers, like `relay-production` in ADR-0031 D11).
-3. **DNS**: no manual record if `custom_domain` is used (wrangler creates `app` as a proxied record); the hostname must not already have a conflicting `CNAME`/`A` record in the
-   zone. Confirm there is none today.
-4. **Then** ask the Lead to add `deploy-demo.yml` + `wrangler.demo.jsonc` in a separate PR; the first deploy is a manual `workflow_dispatch` to a `*.workers.dev` preview
-   URL before the custom domain is attached.
-5. **Landing**: the landing Lead adds the "Try it live" link (`https://app.spacingmind.com/`); it must not be added before step 4's first deploy is green.
-6. Optional: a Cloudflare **Web Analytics** or no analytics at all. The demo ships none (section 10); adding any is a Human decision and a CSP change.
+1. **Review this ADR**, choose the hosting option (done: (a), 2026-11-01) and accept or veto the banner text and the "Install smind" link target.
+2. **Create a Cloudflare API token** (Cloudflare dashboard → My Profile → API Tokens → Create Token → the **"Edit Cloudflare Workers"** template), with:
+   - **Account Resources:** Include → the **Spacing Mind** account only;
+   - **Zone Resources:** Include → Specific zone → **`spacingmind.com`** only;
+   - leave the template's permissions as they are (Account: Workers Scripts: Edit, and the template's other Workers, KV, R2 and routes entries). If the first deploy fails while attaching
+     `app.spacingmind.com` with a permission error, edit the token and add **Zone → DNS → Edit** for the same zone only (a `custom_domain` route creates the DNS record and the certificate);
+   - optionally add a client IP filter for GitHub's runners and a TTL; do not use the Global API key.
+3. **Add two repository secrets** to `spacingmind/smind` (Settings → Secrets and variables → Actions → New repository secret), by those exact names:
+   - **`CLOUDFLARE_API_TOKEN`**: the token from step 2;
+   - **`CLOUDFLARE_ACCOUNT_ID`**: the account id (dashboard → the account's Workers & Pages overview, right-hand side).
+   They are plain repository secrets (the workflow uses no GitHub Environment). Until both exist, `demo-deploy.yml` skips with a notice and passes.
+4. **DNS**: no manual record (wrangler creates `app` as a proxied record for the custom domain); the hostname must not already have a conflicting `CNAME`/`A`/`AAAA` record in the zone. Confirm there is none today.
+5. **First deploy, manually**, to put `develop`'s demo live before the next release:
+
+   ```
+   gh workflow run demo-deploy.yml -f ref=develop
+   gh run watch   # or the Actions tab
+   ```
+
+   Then open `https://app.spacingmind.com/`, check the banner, run the permission Allow flow, and look at the response headers (a browser's network panel, or `curl -sI https://app.spacingmind.com/`) for the
+   `content-security-policy` with `frame-ancestors 'none'`. A later published release redeploys from its tag by itself (note: GitHub does not start workflows for events created with the default
+   `GITHUB_TOKEN`, so if a release is ever published that way the `release` trigger will not fire; run the command above with `-f ref=<tag>`).
+6. **Landing**: the landing's "Try it live" link is `https://app.spacingmind.com/`; it must not go live before step 5 is green.
+7. Optional: a Cloudflare **Web Analytics** or no analytics at all. The demo ships none (section 10); adding any is a Human decision and a CSP change.
+
+**Rollback:** run the workflow again with an older `ref`; or delete the `smind-demo` Worker (Workers & Pages → smind-demo → Settings → Delete), which also removes the custom domain.
 
 ### 10. Security
 
