@@ -65,5 +65,27 @@ export function parseAutomationParams(params: { id?: Param }): { ok: true; id: n
 // The Human inbox (ADR-0045 section 5).
 export const INBOX_HREF = '/inbox' as const;
 
+// The permission policy screen (ADR-0049): one static page, no params.
+export const POLICY_HREF = '/policy' as const;
+
+// The read-only steward review (S3b): one review by id; `task` (optional) is the review's task id.
+export function reviewHref(reviewId: number, taskId?: number | null): { pathname: '/review/[id]'; params: { id: string; task?: string } } {
+  const params: { id: string; task?: string } = { id: String(reviewId) };
+  if (typeof taskId === 'number') params.task = String(taskId);
+  return { pathname: '/review/[id]', params };
+}
+
+/** The review id (and optional task id) from route params; a bad task degrades to null, a bad id is refused. */
+export function parseReviewParams(params: { id?: Param; task?: Param }): { ok: true; id: number; taskId: number | null } | { ok: false } {
+  const raw = first(params.id);
+  if (raw === undefined || !/^\d+$/.test(raw)) return { ok: false };
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id) || id <= 0) return { ok: false };
+  const rawTask = first(params.task);
+  if (rawTask === undefined || !/^\d+$/.test(rawTask)) return { ok: true, id, taskId: null };
+  const taskId = Number(rawTask);
+  return Number.isSafeInteger(taskId) && taskId > 0 ? { ok: true, id, taskId } : { ok: true, id, taskId: null };
+}
+
 // The read-only Hosts screen (ADR-0048 F1c); `focus` (a hostId) opens that pending host's approval panel.
 export const HOSTS_HREF = '/hosts' as const;
