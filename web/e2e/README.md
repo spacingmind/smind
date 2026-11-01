@@ -44,3 +44,16 @@ Put `@flaky` in a spec's title (`test('J19 tabs @flaky', ...)`). PRs run with `-
 ## Seeded-regression check
 
 To prove a spec is load-bearing, reintroduce the bug in `web/packages/ui/src`, rebuild (`bun run --filter @smind/ui build && go build -o <bin> ./cmd/smind`), and run the spec against that binary: it must fail. The PR that added the suite records this for A-02, B-01, A-01 and the Jump-to-latest overlap.
+
+## Demo smoke (web demo mode)
+
+`specs-demo/` is a separate suite for the web demo build (ADR-0051, `docs/plans/active/web-demo-mode.md`): the real UI against the scripted in-browser daemon in `web/packages/ui/src/demo/`. It needs no daemon, no Go and no network, so none of the isolation rules above apply: its `webServer` builds `web/packages/ui/dist-demo` (`build:demo`, which also runs the forbidden-string and size check) and serves it with `vite preview` on `127.0.0.1:4173`.
+
+```sh
+cd web/e2e
+bunx playwright test -c playwright.demo.config.ts           # or: bun run test:demo
+E2E_FULL=1 bunx playwright test -c playwright.demo.config.ts  # adds dark-1280 and light-390
+DEMO_FRAMES_DIR=<dir> bunx playwright test -c playwright.demo.config.ts -g DM-12   # writes the review frames
+```
+
+Preview it by hand: `bun run --filter @smind/ui build:demo && bun run --filter @smind/ui preview:demo`, then open `http://127.0.0.1:4173/`.

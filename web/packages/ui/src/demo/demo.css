@@ -1,0 +1,20 @@
+/*
+ * Demo build only (ADR-0051 section 3): the banner is a fixed strip above the app; the shell is made --demo-banner-h
+ * shorter (the body is padded down by the banner, so what the shell positions inside it, the sidebar rail included, follows).
+ * No component is edited or restyled.
+ */
+:root {
+  --demo-banner-h: 0px;
+}
+
+html[data-demo] body {
+  padding-top: var(--demo-banner-h);
+}
+
+html[data-demo] .h-svh {
+  height: calc(100svh - var(--demo-banner-h));
+}
+
+html[data-demo] .min-h-svh {
+  min-height: calc(100svh - var(--demo-banner-h));
+}

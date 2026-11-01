@@ -21,6 +21,8 @@ declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+// ADR-0051: a plain global under vitest (vite `define` replaces it only in a real build); tests of the demo flip it per case.
+(globalThis as { __SMIND_DEMO__?: boolean }).__SMIND_DEMO__ = false;
 
 // jsdom doesn't implement matchMedia; hooks/use-mobile.ts (used by the
 // shadcn Sidebar primitives, so anything rendering AppSidebar/SidebarProvider
