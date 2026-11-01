@@ -49,7 +49,7 @@ func (d runPermissionDecider) policyRequest(requestID, summary string, detail *t
 			// Fail closed: an adapter that elided bodies but kept no raw
 			// command would feed the engine text whose heredoc marker hides
 			// every command after it.
-			req.Doubt = "detail has elided heredocs but no policy command"
+			req.Doubt = "policy input missing"
 		}
 	case detail != nil && detail.Kind == "write":
 		req.Tool = "Write"

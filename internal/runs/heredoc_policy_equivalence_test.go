@@ -151,7 +151,7 @@ func TestDecider_ElidedDetailWithoutPolicyCommandAsks(t *testing.T) {
 		Heredocs: []taskrunner.HeredocRef{{Index: 0, Bytes: 9}},
 	}
 	dec := evalPolicy(t, d, detail)
-	if dec.Action != permpolicy.ActionAsk || len(dec.Reasons) != 1 || !strings.Contains(dec.Reasons[0], "elided heredocs but no policy command") {
+	if dec.Action != permpolicy.ActionAsk || len(dec.Reasons) != 1 || !strings.Contains(dec.Reasons[0], "policy input missing") {
 		t.Fatalf("decision = %s %v, want ask with the fail-closed reason", dec.Action, dec.Reasons)
 	}
 	// With the raw command set, the same detail is judged normally (deny-rm).
