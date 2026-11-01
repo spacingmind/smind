@@ -43,7 +43,35 @@ type Parsed struct {
 	Normalized   string
 	HeredocBytes int
 	Unparsed     []string
+
+	// bodies holds every heredoc body that Normalized elides, in source
+	// order, for ElideHeredocs. Unexported so a Parsed never serialises one.
+	bodies []HeredocBody
 }
+
+// HeredocBody is one heredoc body a command carries: its length in bytes and
+// its text. The text is raw (unredacted) and must only reach a human who asked
+// for it, through the reveal path.
+type HeredocBody struct {
+	Bytes int
+	Text  string
+}
+
+// ElideHeredocs returns cmd with every heredoc body replaced by its size
+// marker (at any nesting depth) and the bodies in source order. It is the one
+// place a card or an event is rendered from, so the shown text never carries a
+// body whatever the policy engine decides. A command the scanner cannot elide
+// (over the size cap, or with a tag that is not valid UTF-8) is shown as a
+// redaction notice and carries no revealable bodies.
+func ElideHeredocs(cmd string) (shown string, bodies []HeredocBody) {
+	if len(cmd) > maxCommandBytes {
+		return redactedOversizeText, nil
+	}
+	p := SplitCommand(cmd)
+	return p.Normalized, p.bodies
+}
+
+const redactedOversizeText = "[redacted: the command is too large to show]"
 
 // maxNestDepth caps substitution, subshell and shell -c recursion; past it
 // the text is still consumed but reported instead of analysed.
@@ -71,6 +99,9 @@ func splitCommand(cmd string, win bool) Parsed {
 	}
 	p.Segments = append(s.segs, s.inner...)
 	p.Normalized = s.normalized()
+	if !s.redacted {
+		p.bodies = s.orderedBodies()
+	}
 	return p
 }
 
@@ -129,6 +160,22 @@ func (h *heredoc) marker() string {
 	return "<<" + h.tag + " [heredoc " + strconv.Itoa(h.n) + " bytes]"
 }
 
+// bodyRec is one consumed heredoc body and the offset of its operator, which
+// orders bodies in source order across nesting.
+type bodyRec struct {
+	pos  int
+	body HeredocBody
+}
+
+func (s *scanner) orderedBodies() []HeredocBody {
+	sort.SliceStable(s.bodies, func(i, j int) bool { return s.bodies[i].pos < s.bodies[j].pos })
+	out := make([]HeredocBody, len(s.bodies))
+	for i, b := range s.bodies {
+		out[i] = b.body
+	}
+	return out
+}
+
 // edit replaces src[start:end) when a command is rendered for display. Rendering
 // with the edits is what keeps heredoc bodies out of every shown form.
 type edit struct {
@@ -167,6 +214,7 @@ type scanner struct {
 	spans     []span // source range of each segment, for the final Raw pass
 	segStart  int
 	pending   []*heredoc // heredoc operators on the line being scanned
+	bodies    []bodyRec  // every heredoc body consumed, with where its operator sits in src
 	edits     []edit     // every heredoc's marker and body deletion, in src offsets; nested scans' edits are mapped in
 	win       bool       // Windows mode: see winLiteralBackslashNext
 	dialect   dialect    // syntax of this script: sh, PowerShell or cmd
@@ -842,6 +890,16 @@ func (s *scanner) recurseAs(inner string, d dialect, at int) int {
 // s.src; one that cannot be found (quoting changed it) leaves no way to hide
 // the body, so the whole command is redacted instead.
 func (s *scanner) mapEdits(in *scanner, at int) {
+	for _, b := range in.bodies {
+		pos := b.pos + at
+		if at < 0 {
+			pos = strings.Index(s.src, b.body.Text)
+			if pos < 0 {
+				pos = len(s.src)
+			}
+		}
+		s.bodies = append(s.bodies, bodyRec{pos, b.body})
+	}
 	for _, e := range in.edits {
 		if at >= 0 {
 			s.edits = append(s.edits, edit{e.start + at, e.end + at, e.text})
@@ -926,6 +984,9 @@ func (s *scanner) consumeHeredocBodies() {
 			s.unparsed("heredoc terminator not found")
 		}
 		s.edits = append(s.edits, edit{h.opStart, h.opEnd, h.marker()})
+		if h.bodyStart+h.n <= len(s.src) {
+			s.bodies = append(s.bodies, bodyRec{h.opStart, HeredocBody{h.n, s.src[h.bodyStart : h.bodyStart+h.n]}})
+		}
 		if h.bodyStart > h.opEnd && h.bodyStart <= len(s.src) {
 			// The deletion spans the newline that opened the body through the
 			// terminator's own newline, so one newline is put back: without it

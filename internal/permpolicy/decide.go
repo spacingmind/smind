@@ -39,6 +39,10 @@ func Decide(req Request, pol *Policy) Decision {
 		d.Reasons = []string{"command truncated by provider"}
 		return d
 	}
+	if req.Doubt != "" {
+		d.Reasons = []string{req.Doubt}
+		return d
+	}
 	bash := req.Tool == "Bash" || (req.Tool == "" && req.Command != "")
 	cwd := req.Cwd
 	if cwd == "" {

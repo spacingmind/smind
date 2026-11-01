@@ -24,8 +24,10 @@ rules:
 
 // TestRegistry_PermissionCommandScenarios_CarryPolicyBlock proves the fake
 // agent's "permission-command" scenarios reach the phone the way the mobile
-// smoke needs them: an execute request whose detail.command is the long
-// multi-line command and whose detail.policy carries the matched rule id and
+// smoke needs them: an execute request whose detail.command is the elided
+// multi-line command (the body is out of band, listed in detail.heredocs),
+// judged on the RAW command (the rule still matches the npm after the heredoc),
+// and whose detail.policy carries the matched rule id and
 // the normalised command (heredoc elided) for one, and an empty rule id for
 // the other (no rule matched: ask).
 func TestRegistry_PermissionCommandScenarios_CarryPolicyBlock(t *testing.T) {
@@ -33,9 +35,10 @@ func TestRegistry_PermissionCommandScenarios_CarryPolicyBlock(t *testing.T) {
 	for _, tc := range []struct {
 		scenario string
 		wantRule string
+		wantCmd  string
 	}{
-		{"permission-command", "ask-npm"},
-		{"permission-command-nomatch", ""},
+		{"permission-command", "ask-npm", "cat <<EOF [heredoc 1056 bytes] > notes/release-checklist.md\n&& git status && npm test -- --run src/some/very/long/path/to/a/test/file.test.ts"},
+		{"permission-command-nomatch", "", "cat <<EOF [heredoc 1056 bytes] > notes/release-checklist.md\n&& git status && ./scripts/zzz-unlisted-check --run src/some/very/long/path/to/a/test/file.sh"},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
 			t.Parallel()
@@ -59,8 +62,11 @@ func TestRegistry_PermissionCommandScenarios_CarryPolicyBlock(t *testing.T) {
 			if d == nil || d.Kind != "execute" {
 				t.Fatalf("detail = %+v, want an execute detail", d)
 			}
-			if strings.Count(d.Command, "\n") < 15 || !strings.Contains(d.Command, "<<'EOF'") || !strings.Contains(d.Command, "git status") {
-				t.Fatalf("detail.command = %q, want the long multi-line command", d.Command)
+			if d.Command != tc.wantCmd {
+				t.Fatalf("detail.command = %q, want the elided command %q", d.Command, tc.wantCmd)
+			}
+			if len(d.Heredocs) != 1 || d.Heredocs[0].Index != 0 || d.Heredocs[0].Bytes != 1056 {
+				t.Fatalf("detail.heredocs = %+v, want the one 1056-byte body", d.Heredocs)
 			}
 			p := d.Policy
 			if p == nil {

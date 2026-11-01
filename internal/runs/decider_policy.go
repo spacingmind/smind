@@ -38,8 +38,19 @@ func (d runPermissionDecider) policyRequest(requestID, summary string, detail *t
 	switch {
 	case detail != nil && detail.Kind == "execute":
 		req.Tool = "Bash"
-		req.Command = detail.Command
-		req.Truncated = detail.Truncated
+		// The engine judges the RAW command. detail.Command is the elided
+		// form for humans; its [heredoc N bytes] marker would re-scan as a
+		// new heredoc and drop every command after it. A detail without
+		// PolicyCommand was not built by an adapter and has no elided form.
+		req.Command, req.Truncated = detail.Command, detail.Truncated
+		if detail.PolicyCommand != "" || detail.PolicyTruncated {
+			req.Command, req.Truncated = detail.PolicyCommand, detail.PolicyTruncated
+		} else if len(detail.Heredocs) > 0 {
+			// Fail closed: an adapter that elided bodies but kept no raw
+			// command would feed the engine text whose heredoc marker hides
+			// every command after it.
+			req.Doubt = "detail has elided heredocs but no policy command"
+		}
 	case detail != nil && detail.Kind == "write":
 		req.Tool = "Write"
 		req.Paths = []string{detail.Path}

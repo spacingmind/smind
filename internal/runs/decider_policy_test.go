@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,5 +286,61 @@ func TestDecider_BypassModeNeverAsksSoPolicyNotConsulted(t *testing.T) {
 	}
 	if rows := policyAudit(t, reg); len(rows) != 0 {
 		t.Fatalf("audit rows = %d, want 0", len(rows))
+	}
+}
+
+// A detail built by a provider adapter carries the elided command: the pending
+// event (what the card, inbox and relay render) never holds the body, with the
+// policy engine on or off, while the engine still judges the raw command.
+func TestDecider_HeredocBodyNeverOnPendingEvent(t *testing.T) {
+	t.Parallel()
+	cmd := "cat <<EOF > f\nkey=SECRET_TOKEN_123\nEOF\n"
+	for _, tc := range []struct {
+		name   string
+		policy string
+		on     bool
+	}{{"policy on", goTestAllowPolicy, true}, {"policy off", "-", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reg, r, runID, _ := policyRun(t, taskrunner.PermissionSettings{}, tc.policy, tc.on)
+			d := runPermissionDecider{reg: reg, r: r}
+			tcJSON, _ := json.Marshal(map[string]any{"kind": "execute", "rawInput": map[string]any{"command": cmd}})
+			detail := taskrunner.BuildPermissionDetail(t.TempDir(), tcJSON)
+			out, reqID := decideAsync(t, d, detail)
+			if err := reg.RespondPermission(runID, reqID, "allow-1"); err != nil {
+				t.Fatal(err)
+			}
+			<-out
+			reqs, _ := permEvents(r)
+			raw, _ := json.Marshal(reqs[0])
+			if strings.Contains(string(raw), "SECRET_TOKEN_123") || !strings.Contains(string(raw), "[heredoc ") {
+				t.Errorf("pending event = %s", raw)
+			}
+			for _, row := range policyAudit(t, reg) {
+				if strings.Contains(row.Target, "SECRET_TOKEN_123") {
+					t.Errorf("audit target = %q", row.Target)
+				}
+			}
+		})
+	}
+}
+
+// A command whose raw text exceeded the detail cap still asks, even though its
+// elided form is short: the elision changes what humans see, never what is
+// decided.
+func TestDecider_ElidedLongBodyStillAsks(t *testing.T) {
+	t.Parallel()
+	reg, r, runID, n := policyRun(t, taskrunner.PermissionSettings{}, goTestAllowPolicy, true)
+	d := runPermissionDecider{reg: reg, r: r}
+	cmd := "go test ./... <<EOF\n" + strings.Repeat("x", 3000) + "\nEOF\n"
+	tcJSON, _ := json.Marshal(map[string]any{"kind": "execute", "rawInput": map[string]any{"command": cmd}})
+	detail := taskrunner.BuildPermissionDetail(t.TempDir(), tcJSON)
+	out, reqID := decideAsync(t, d, detail)
+	if err := reg.RespondPermission(runID, reqID, "allow-1"); err != nil {
+		t.Fatal(err)
+	}
+	<-out
+	if n.pending.Load() != 1 {
+		t.Fatalf("pending = %d: a raw command over the cap must still ask", n.pending.Load())
 	}
 }
