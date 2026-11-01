@@ -54,19 +54,23 @@ export function ScratchSpaceGroup() {
       {loading && !usage ? (
         // Two skeleton rows with the loaded rows' own layout (label, one or two description lines, a control), so the
         // card keeps its height when the numbers land. Visible against the card in both themes (foreground tint).
-        <div role="status" data-testid="scratch-space-loading">
-          <span className="sr-only">Loading scratch usage…</span>
+        <div role="status" data-testid="scratch-space-loading" className="[&>*+*]:border-t [&>*+*]:border-border">
           <SettingsRow
-            label={<SkeletonLine className="h-6" bar="h-4 w-24" />}
-            description={<SkeletonLine className="h-5" bar="h-3 w-44" />}
-            control={<SkeletonLine className="h-6" bar="h-4 w-14" />}
+            label={
+              <>
+                <span className="sr-only">Loading scratch usage…</span>
+                <SkeletonLine className="h-5" bar="h-4 w-24" />
+              </>
+            }
+            description={<SkeletonLine className="h-[18px]" bar="h-3 w-44" />}
+            control={<SkeletonLine className="h-5" bar="h-4 w-14" />}
           />
           <SettingsRow
-            label={<SkeletonLine className="h-6" bar="h-4 w-24" />}
+            label={<SkeletonLine className="h-5" bar="h-4 w-24" />}
             description={
               <>
-                <SkeletonLine className="h-5" bar="h-3 w-60" />
-                <SkeletonLine className="h-5" bar="h-3 w-36" />
+                <SkeletonLine className="h-[18px]" bar="h-3 w-60" />
+                <SkeletonLine className="h-[18px]" bar="h-3 w-36" />
               </>
             }
             control={<SkeletonLine className="h-8" bar="h-7 w-24" />}
