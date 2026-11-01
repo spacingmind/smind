@@ -56,9 +56,15 @@ type PermissionDetail struct {
 	GitRule *GitRuleInfo `json:"gitRule,omitempty"`
 	// Heredocs lists the heredoc bodies Command elides (see setExecuteCommand).
 	Heredocs []HeredocRef `json:"heredocs,omitempty"`
-	// RevealBodies are the raw bodies a human may reveal. They stay in the
-	// daemon: json:"-" keeps them out of every payload and log.
-	RevealBodies []string `json:"-"`
+	// PolicyCommand and PolicyTruncated are the RAW command (capped as it
+	// always was) and its truncation flag: what the policy engine, the floor
+	// and the seat floor judge. They are never the elided Command: a heredoc
+	// marker re-scans as a new heredoc and would swallow every command after
+	// it. RevealBodies are the raw bodies a human may reveal. All three stay in
+	// the daemon: json:"-" keeps them out of every payload and log.
+	PolicyCommand   string   `json:"-"`
+	PolicyTruncated bool     `json:"-"`
+	RevealBodies    []string `json:"-"`
 	// Policy is set by internal/runs when the permission policy engine
 	// decided or escalated the request (ADR-0047 §2): the matched rule
 	// (or floor) id, its why, and the normalised, heredoc-elided command,

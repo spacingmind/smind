@@ -17,17 +17,15 @@ type HeredocRef struct {
 
 // setExecuteCommand fills d from a provider's raw command. Command is the
 // elided form (heredoc bodies become size markers), capped for the card; the
-// raw bodies stay in a json:"-" field so a human can reveal one later. A card
-// never carries a body whatever the policy engine does. Bodies are never
-// matched by policy rules, so judging the elided command decides the same.
+// raw (capped) command stays in a json:"-" field for the policy engine, which
+// must judge the raw text, and so do the bodies for a later reveal. A card
+// never carries a body whatever the policy engine does.
 func (d *PermissionDetail) setExecuteCommand(cmd string) {
 	shown, bodies := permpolicy.ElideHeredocs(cmd)
 	var capped bool
 	d.Command, capped = capBytes(shown, detailCommandMaxBytes)
-	// Truncated also records that the raw command exceeded the cap, which the
-	// policy engine treats as "ask": eliding a long body must not turn that
-	// into an allow.
-	d.Truncated = capped || len(cmd) > detailCommandMaxBytes
+	d.Truncated = capped
+	d.PolicyCommand, d.PolicyTruncated = capBytes(cmd, detailCommandMaxBytes)
 	for i, b := range bodies {
 		d.Heredocs = append(d.Heredocs, HeredocRef{Index: i, Bytes: b.Bytes})
 		d.RevealBodies = append(d.RevealBodies, b.Text)

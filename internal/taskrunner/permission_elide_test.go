@@ -30,6 +30,9 @@ func assertElided(t *testing.T, d *PermissionDetail) {
 	if strings.Contains(string(raw), elideSecret) {
 		t.Errorf("serialised detail carries the body: %s", raw)
 	}
+	if !strings.Contains(d.PolicyCommand, elideSecret) || strings.Contains(d.PolicyCommand, "[heredoc ") {
+		t.Errorf("PolicyCommand must be the raw command: %q", d.PolicyCommand)
+	}
 	if len(d.RevealBodies) != 1 || !strings.Contains(d.RevealBodies[0], elideSecret) {
 		t.Errorf("the daemon must keep the raw body: %+v", d)
 	}
@@ -85,14 +88,15 @@ func TestExecuteDetail_NoHeredocUnchanged(t *testing.T) {
 	}
 }
 
-// A command whose raw text exceeds the detail cap stays Truncated even when
-// its elided form is short: the policy engine treats Truncated as "ask" before
-// any rule or floor, and eliding a long body must not change that decision.
+// A command whose raw text exceeds the detail cap stays PolicyTruncated even
+// when its elided form is short: the policy engine treats a truncated command
+// as "ask" before any rule or floor, and eliding a long body must not change
+// that decision. The card itself is not marked truncated: what it shows is whole.
 func TestExecuteDetail_LongBodyStaysTruncated(t *testing.T) {
 	t.Parallel()
 	d := &PermissionDetail{Kind: "execute"}
 	d.setExecuteCommand("cat <<EOF\n" + strings.Repeat("x", detailCommandMaxBytes*2) + "\nEOF\n")
-	if len(d.Command) >= detailCommandMaxBytes || !d.Truncated {
-		t.Errorf("Command %d bytes, Truncated=%v", len(d.Command), d.Truncated)
+	if len(d.Command) >= detailCommandMaxBytes || d.Truncated || !d.PolicyTruncated {
+		t.Errorf("Command %d bytes, Truncated=%v PolicyTruncated=%v", len(d.Command), d.Truncated, d.PolicyTruncated)
 	}
 }
