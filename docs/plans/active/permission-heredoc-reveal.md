@@ -37,7 +37,7 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 - AC5 The reveal is never written to the audit or event stream; the audit gets a content-free `permission.heredoc_revealed` row.
 - AC6a The marker never appears in `run.logs`, live `tool_call` events, MCP `task_logs`/`task_status`/`task_wait` output, or the web/mobile timeline DOM for an execute call with a heredoc; timeline tool cards show the marker and a reveal toggle.
 - AC6b `run.revealToolHeredoc` redacts, refuses for run-scoped callers and unknown call/index, and writes a content-free audit row.
-- AC6 The marker `SECRET_TOKEN_123` in a heredoc never appears in: `detail.command`, `summary`, the permission.pending event, inbox rows, relay frames, CLI output, audit rows. It does appear only in the reveal response (redacted if token-shaped) and the run's own tool-call log.
+- AC6 The marker `SECRET_TOKEN_123` in a heredoc never appears in: `detail.command`, `summary`, the permission.pending event, inbox rows, relay frames, CLI output, audit rows. It does appear only in the reveal response (redacted if token-shaped) and the daemon's own run history (never sent to a client).
 - AC7 Allow/deny/ask decisions unchanged: full permpolicy, runs and wsapi policy suites pass.
 - AC8 Web and mobile cards: collapsed, expanded, redacted-body and long-body frames, light and dark, 1280 and 390, theme pairs differ, nothing wider than the viewport.
 - AC9 CLI `smind permission show --reveal` works against a pending permission and refuses otherwise.
