@@ -122,7 +122,7 @@ func TestPluginProviders_RegistryMatchesActiveSet(t *testing.T) {
 	check("remove beta")
 }
 
-func TestPluginProviders_FailedUpdate_KeepsLastGood(t *testing.T) {
+func TestPluginProviders_FailedReload_KeepsLastGood(t *testing.T) {
 	e := newEnv(t)
 	reg := providers.New()
 	src := providerPluginDir(t, "demo", "1.0.0", demoProviderEntry)
@@ -245,5 +245,27 @@ func TestConsent_Provider_ListsCommandEnvKeys_NoValues(t *testing.T) {
 	in4 := mustInstall(t, newEnv(t), providerPluginDir(t, "demo", "1.0.0", strings.Replace(demoProviderEntry, `"supportsMcpServers":false`, `"inheritHome":true`, 1)))
 	if in4.Consent.Fingerprint == in3.Consent.Fingerprint {
 		t.Fatal("inheritHome is not in the fingerprint")
+	}
+}
+
+func TestPluginProviders_GlobalSwitchOff_NoProviders(t *testing.T) {
+	e := newEnv(t)
+	reg := providers.New()
+	enableProviderPlugin(t, e, "demo", demoProviderEntry)
+	*e.on = false
+	e.m.SyncProviders(reg)
+	if got := pluginProviderIDs(reg); got != "" {
+		t.Fatalf("registered with the switch off: %q", got)
+	}
+}
+
+func TestPluginProviders_DuplicateAcrossPlugins_Impossible(t *testing.T) {
+	e := newEnv(t)
+	reg := providers.New()
+	enableProviderPlugin(t, e, "alpha", demoProviderEntry)
+	enableProviderPlugin(t, e, "beta", demoProviderEntry)
+	e.m.SyncProviders(reg)
+	if got := pluginProviderIDs(reg); got != "alpha/agent,beta/agent" {
+		t.Fatalf("ids = %q: two plugins with the same provider id must stay distinct", got)
 	}
 }
