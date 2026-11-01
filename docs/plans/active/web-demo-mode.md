@@ -124,6 +124,7 @@ Named up front. Vitest unless stated; files under `web/packages/ui/src/demo/` un
 
 - 2026-11-01: ADR-0051, ADR-0052 and this plan written (PR 1, docs only, #795). Baseline production bundle measured: one 3,539,994 B JS chunk (1,067,437 B gzip), 166,378 B CSS (27,171 B gzip).
 - 2026-11-01: PR 2 (#797, code) implemented and verified locally: `src/demo/` (DemoSocket, session, scripts, scenario "tour", banner), the `demo` Vite mode and CSP plugin, `check-demo-build.mjs` and its tests, unit tests, the Playwright smoke suite, the `ci` step, frames.
+- 2026-11-01: review of #797 (ACCEPT with changes): the demo build moved out of the required `ci` job into `demo-build.yml` with a relative budget (production entry + 32 KB JS, + 8 KB CSS); `ruleFor` uses `Object.hasOwn` (D-02b); `--production` also finds the landing route, the banner CSS variable and the scripted daemon, which caught `demo.css` riding into the production CSS through a static banner import, so the banner is now a lazy chunk.
 - Not done, by decision: any deploy workflow, wrangler config, DNS, the landing link (they wait for the Human's steps in ADR-0051 section 9); ADR-0052 is a draft with no code.
 - Moves to `docs/plans/completed/` when #797 is merged and the criteria below hold on `develop`.
 
@@ -143,7 +144,7 @@ Criteria, one by one:
 |---|---|
 | 1 | `bun run build:demo` from this checkout: no daemon, no Go, no network; `dist-demo` is gitignored (`.gitignore`) and separate from `internal/server/dist` and `desktop/ui/app` |
 | 2 | `preview` config in `vite.config.ts` (`127.0.0.1`, `4173`, `strictPort`); `netstat` during the run showed only `127.0.0.1:4173`, and the port was free after |
-| 3 | G-05 (`check-demo-build.mjs --production`), and the CI step; the 33 B growth of the production bundle is the guards |
+| 3 | G-05 (`check-demo-build.mjs --production`), and the CI steps (the `ci` job runs the `--production` check and the guard tests; `demo-build.yml`, non-required, builds the demo and checks it against a production build from the same job); the 33 B growth of the production bundle is the guards |
 | 4 | G-01 (seven forbidden strings, plus the tolerated placeholders) and the real build's `check-demo-build.mjs` run |
 | 5 | G-04, the CSP assertions of the check script on the real build, `_headers` content check; DM-11 shows the browser enforcing it |
 | 6 | diff review: outside `src/demo/` only `main.tsx`, `lib/ws-client.ts`, `lib/daemon.ts`, `lib/auth.ts`, the label string in `App.tsx`, `vite-env.d.ts`, `test/setup.ts`, `vite.config.ts`, `package.json`, `.gitignore` (+ e2e files and the CI step). `lib/auth.ts` is added to the list: its `/api/login` and `/healthz` fetches carry the guard |

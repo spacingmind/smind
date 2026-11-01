@@ -173,11 +173,11 @@ A banner is a promise; the build makes it checkable.
   the rest of each function and the strings `/api/token`, `/ws?token=`, `/api/login`, `new WebSocket(` do not appear in `dist-demo`.
 - Other `fetch(` callers in the UI (downloads, attachments, healthz, update checks) are reached only after a connect; they are listed once by
   `check-demo-build.mjs`, and `connect-src 'none'` in the CSP (section 10) makes any survivor fail closed in the browser, not silently succeed.
-- `scripts/check-demo-build.mjs` (run by `build:demo` and CI) fails the build if `dist-demo` contains any of: `/api/token`, `/api/login`, `new WebSocket(`, a `ws://` or `wss://` URL,
+- `scripts/check-demo-build.mjs` (run by `build:demo` and by the non-required `demo-build.yml`) fails the build if `dist-demo` contains any of: `/api/token`, `/api/login`, `new WebSocket(`, a `ws://` or `wss://` URL,
   a `http(s)://` URL to `localhost`/`127.0.0.1`/`[::1]`, `relay.spacingmind`, `smind.bearer`, `grpc`, `/healthz`, `new EventSource(`, `sendBeacon(` (the list is the script's data, reviewed in the PR). The bare words `localhost` and
   `127.0.0.1` are not forbidden: the UI compares `window.location.hostname` with them and two settings forms show `http://localhost:8080` / `http://localhost:54545/callback` as placeholder text for flows the demo refuses; those two
   placeholders are the script's only allow-list. It also fails on a missing or weak CSP (`connect-src 'none'`, `default-src 'none'`, no unsafe script sources, the script hash), a missing `_headers`, a `pdf-viewer.html` (the PDF page from `public/`
-  is removed from the demo output), the scripted daemon sitting in the entry chunk, and any budget overrun. `check-demo-build.mjs --production <dist>` asserts a normal build contains no demo code; CI runs both.
+  is removed from the demo output), the scripted daemon sitting in the entry chunk, and any budget overrun. `check-demo-build.mjs --production <dist>` asserts a normal build contains no demo code, by looking for the banner text, the scripted daemon, the tour's landing route and the banner's CSS variable (so a stray static `@/demo/*` import is caught even if it is not tree-shaken). The required `ci` job runs only the guard's own tests and the `--production` check; the demo build and its budgets run in `demo-build.yml`, path-filtered to `web/**`, so the size budget cannot fail an unrelated PR.
 
 ### 7. Bundle size budget and lazy loading
 
@@ -192,7 +192,7 @@ Budget for `dist-demo` (the numbers live in `scripts/check-demo-build.mjs`, so c
 | Item | Budget | Why |
 |---|---|---|
 | Demo code (`src/demo/**`: dispatcher, scripts, scenario) | **≤ 60 KB gzip**, in its own lazily imported chunk(s) | the demo must not be heavier than the product it shows by more than a few percent |
-| Initial JS (entry + modulepreloads) | **≤ 1,150,000 B gzip** (baseline 1,067,437 + demo + 5 % slack) | a regression gate against the baseline, not a target |
+| Initial JS (entry + modulepreloads) | **≤ the production entry chunk built in the same job + 32 KB gzip** (absolute fallback 1,150,000 B when run without a baseline); initial CSS + 8 KB | relative, so it goes red only when the demo itself grows: the measured demo overhead is 4.4 KB, 32 KB is about 7x that |
 | Initial CSS | ≤ 35 KB gzip | baseline 27 KB |
 | Any single demo asset (fixture, font subset) | ≤ 30 KB gzip | the scenario is data, not media |
 
