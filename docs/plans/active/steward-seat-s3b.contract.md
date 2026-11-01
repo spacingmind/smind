@@ -5,7 +5,7 @@ base: origin/develop
 planRef: docs/plans/active/steward-seat.md
 acs:
   - id: AC28
-    text: "Mobile: inbox rows of kind review (verdict chip icon+text, summary without a verdict prefix, unknown kind never crashes), a review screen (gates failing first, findings by file with a severity or 'unrated' chip, evidence frames inline with tap-to-expand, copy findings, open PR, resolve; no merge/approve/always-allow anywhere), the permission card rule line ('Matched rule <id>' + why, or 'No rule matched') with the FULL normalised command wrapped, and a read-only Permission policy screen (validity banner, rules and audit as stacked rows, path); one column, 44 pt, no hover-only action; the client sends only steward.get/frame, policy.get/audit, inbox.resolve."
+    text: "Mobile: review inbox rows with verdict chip, review screen (gates failing first, findings, frames, copy, open PR, resolve; no merge/approve), permission rule line with full wrapped command, read-only policy screen; one column, 44 pt."
     covers: { tests: ["review row model", "steward verdict chip never throws", "steward gates failing first", "steward findings grouped by file with unrated", "steward findings prompt", "permission card rule line", "permission card full normalised command", "policy audit read-only", "policy view stacks rules and audit", "steward client sends only read methods", "steward mobile sources have no merge or approve control"], mutations: [M1, M2] }
 tests:
   - { name: "review row model", run: "cd mobile && npx vitest run src/__tests__/inboxView.test.ts -t 'review row model'", timeoutSec: 600 }
