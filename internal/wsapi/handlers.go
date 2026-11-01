@@ -1314,16 +1314,24 @@ type runToolCallParams struct {
 	Status     string          `json:"status,omitempty"`
 	Input      json.RawMessage `json:"input,omitempty"`
 	Result     json.RawMessage `json:"result,omitempty"`
+	// Heredocs lists the heredoc bodies elided from Input and Title.
+	Heredocs []taskrunner.HeredocRef `json:"heredocs,omitempty"`
 }
 
+// toRunToolCallParams is the one place a tool call reaches a client (live
+// events, run.logs, and everything built on them: relay frames, the web and
+// mobile timelines, MCP task_logs). A command's heredoc bodies are elided
+// here; the raw call stays on the daemon.
 func toRunToolCallParams(e taskrunner.Event) runToolCallParams {
+	input, title, refs := taskrunner.ElideToolCall(e.ToolInput, e.ToolTitle)
 	return runToolCallParams{
 		ToolCallID: e.ToolCallID,
 		ToolName:   e.ToolName,
-		Title:      e.ToolTitle,
+		Title:      title,
 		Status:     e.ToolStatus,
-		Input:      e.ToolInput,
+		Input:      input,
 		Result:     e.ToolResult,
+		Heredocs:   refs,
 	}
 }
 
@@ -1849,6 +1857,8 @@ type runLogEvent struct {
 	Status     string          `json:"status,omitempty"`
 	Input      json.RawMessage `json:"input,omitempty"`
 	Result     json.RawMessage `json:"result,omitempty"`
+	// Heredocs lists the heredoc bodies elided from Input and Title.
+	Heredocs []taskrunner.HeredocRef `json:"heredocs,omitempty"`
 	// Kind and Payload are populated for a "raw" entry -- see
 	// runRawParams for the shared shape this mirrors.
 	Kind    string          `json:"kind,omitempty"`
@@ -1884,6 +1894,7 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 			Status:     p.Status,
 			Input:      p.Input,
 			Result:     p.Result,
+			Heredocs:   p.Heredocs,
 		}
 	case taskrunner.EventTypeRaw:
 		p := toRunRawParams(e)
