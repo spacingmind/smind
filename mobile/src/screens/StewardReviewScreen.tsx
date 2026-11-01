@@ -166,8 +166,14 @@ export function StewardReviewScreen({
             <Button variant="outlined" label={shared ? 'Shared' : 'Share findings'} onPress={share} style={{ height: 44 }} />
           </UiHost>
         )}
-        {typeof review.taskId === 'number' && <TextButton label="Open task" onPress={() => onOpenTask(review.taskId)} />}
-        <TextButton label={busy ? 'Resolving…' : 'Resolve'} onPress={resolve} disabled={busy} />
+        {typeof review.taskId === 'number' && (
+          <UiHost>
+            <Button variant="outlined" label="Open task" onPress={() => onOpenTask(review.taskId)} style={{ height: 44 }} />
+          </UiHost>
+        )}
+        <UiHost>
+          <Button variant="outlined" label={busy ? 'Resolving…' : 'Resolve'} onPress={resolve} disabled={busy} style={{ height: 44 }} />
+        </UiHost>
         <Text style={styles.small}>Resolving hides this review from your inbox. It does not change the PR.</Text>
         {error.length > 0 && (
           <Text style={styles.danger} accessibilityRole="alert" selectable>
