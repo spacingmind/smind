@@ -42,7 +42,7 @@ func TestPluginProvider_NoExecutionSite(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\necho ran > '"+marker+"'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	spec := providers.Spec{ID: "acme/agent", Plugin: "acme", Runner: providers.RunnerACP, Command: []string{script}, CommandForm: "path", PluginRoot: filepath.Dir(script), PluginData: t.TempDir()}
+	spec := providers.Spec{ID: "acme/agent", Plugin: "acme", Runner: providers.RunnerACP, Command: []string{"agent"}, CommandForm: "path", PluginRoot: filepath.Dir(script), PluginData: t.TempDir()}
 	reg := providers.New() // NOT registered: the plugin is disabled or gone
 	r := New(nil, WithProviderRegistry(reg), WithACPModeProbe())
 	sites := map[string]func() error{

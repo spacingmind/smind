@@ -141,6 +141,16 @@ func TestPluginProvider_AgentEnv_ScrubbedAndBuilt(t *testing.T) {
 	if env["PATH"] != "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" {
 		t.Errorf("PATH = %q, want the fixed system list (the plugin's PATH=/evil must not win)", env["PATH"])
 	}
+	// The agent PROCESS runs in the task's worktree.
+	if raw, err := os.ReadFile(filepath.Join(*f.task.WorktreePath, "envdump_cwd.txt")); err != nil {
+		t.Errorf("no cwd dump: %v", err)
+	} else {
+		want, _ := filepath.EvalSymlinks(*f.task.WorktreePath)
+		got, _ := filepath.EvalSymlinks(string(raw))
+		if got != want {
+			t.Errorf("the plugin agent's cwd = %q, want the task worktree %q", got, want)
+		}
+	}
 	wantHome := filepath.Join(f.dir, "data", "providers", "agent", "home")
 	if env["HOME"] != wantHome {
 		t.Errorf("HOME = %q, want the private %q", env["HOME"], wantHome)
@@ -427,6 +437,12 @@ func TestPluginProvider_CoreProviderLaunchUnchanged(t *testing.T) {
 	for _, kv := range os.Environ() {
 		if !got[kv] {
 			t.Errorf("the core provider's child lost the inherited variable %q", strings.SplitN(kv, "=", 2)[0])
+		}
+	}
+	if wd, err := os.ReadFile(filepath.Join(*task.WorktreePath, "envdump_cwd.txt")); err == nil {
+		want, _ := filepath.EvalSymlinks(*task.WorktreePath)
+		if g, _ := filepath.EvalSymlinks(string(wd)); g == want {
+			t.Error("a core provider's process cwd changed to the worktree: it must stay the daemon's")
 		}
 	}
 	if !got["SMIND_TOKEN="+daemonLeakValue] {

@@ -934,6 +934,10 @@ func runPromptScript(promptMsg message, cwd string) {
 	// daemon's launch env gave the agent child.
 	if scenario == "env-dump" {
 		_ = os.WriteFile(filepath.Join(cwd, "envdump.txt"), []byte(strings.Join(os.Environ(), "\n")), 0o644)
+		// The agent PROCESS's own working directory (not the session cwd).
+		if wd, err := os.Getwd(); err == nil {
+			_ = os.WriteFile(filepath.Join(cwd, "envdump_cwd.txt"), []byte(wd), 0o644)
+		}
 	}
 
 	sessionUpdate("Hello, ")
