@@ -175,6 +175,25 @@ export async function respondPermission(
   await conn.call('run.respondPermission', { runId, requestId, optionId });
 }
 
+/** One revealed heredoc body (wsapi heredoc_reveal.go's heredocRevealResult): already redacted, capped at 64 KiB. */
+export interface HeredocReveal {
+  index: number;
+  bytes: number;
+  text: string;
+  redacted: boolean;
+  truncated: boolean;
+}
+
+/** permission.revealHeredoc: one body of a PENDING permission, redacted server-side. */
+export async function revealPermissionHeredoc(conn: RelayConnection, permissionId: string, index: number): Promise<HeredocReveal> {
+  return (await conn.call('permission.revealHeredoc', { permissionId, index })) as HeredocReveal;
+}
+
+/** run.revealToolHeredoc: one body of any tool call (live run or the persisted log), redacted server-side. */
+export async function revealToolHeredoc(conn: RelayConnection, runId: string, toolCallId: string, index: number): Promise<HeredocReveal> {
+  return (await conn.call('run.revealToolHeredoc', { runId, toolCallId, index })) as HeredocReveal;
+}
+
 /** The daemon-side per-chat prompt queue (ADR-0021 §9): one pending item, wire shape as the Go field names. */
 export interface ChatQueueItem {
   ID: number;

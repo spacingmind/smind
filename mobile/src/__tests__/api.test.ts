@@ -6,7 +6,7 @@
 // the fake records every method that goes out).
 
 import { describe, expect, it } from 'vitest';
-import { defaultChatId, fetchOverview, fetchTaskTree, listWorkspaces, startRunWhenBusy, stopRun } from '../api';
+import { defaultChatId, fetchOverview, fetchTaskTree, listWorkspaces, revealPermissionHeredoc, revealToolHeredoc, startRunWhenBusy, stopRun } from '../api';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
 
@@ -184,6 +184,28 @@ describe('stopRun (run.stop wrapper)', () => {
       throw new Error('run not found');
     });
     await expect(stopRun(conn, 'run-x')).rejects.toThrow('run not found');
+  });
+});
+
+describe('api: heredoc reveal RPCs', () => {
+  it('revealPermissionHeredoc sends permission.revealHeredoc {permissionId, index} and returns the result', async () => {
+    const body = { index: 1, bytes: 42, text: 'echo hi', redacted: true, truncated: false };
+    const { conn, calls } = fakeConnection((m) => {
+      if (m === 'permission.revealHeredoc') return body;
+      throw new Error(`unexpected method ${m}`);
+    });
+    await expect(revealPermissionHeredoc(conn, 'perm-9', 1)).resolves.toEqual(body);
+    expect(calls).toEqual([['permission.revealHeredoc', { permissionId: 'perm-9', index: 1 }]]);
+  });
+
+  it('revealToolHeredoc sends run.revealToolHeredoc {runId, toolCallId, index} and returns the result', async () => {
+    const body = { index: 0, bytes: 120, text: 'SECRET=***', redacted: true, truncated: true };
+    const { conn, calls } = fakeConnection((m) => {
+      if (m === 'run.revealToolHeredoc') return body;
+      throw new Error(`unexpected method ${m}`);
+    });
+    await expect(revealToolHeredoc(conn, 'run-7', 'call-3', 0)).resolves.toEqual(body);
+    expect(calls).toEqual([['run.revealToolHeredoc', { runId: 'run-7', toolCallId: 'call-3', index: 0 }]]);
   });
 });
 
