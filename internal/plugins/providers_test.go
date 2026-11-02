@@ -399,6 +399,125 @@ func TestConsent_Provider_ValueNeverInSummaryOrLogs(t *testing.T) {
 	}
 }
 
+func TestPluginUpdate_ProviderCommandChange_PendingKeepsOldRegistered(t *testing.T) {
+	e := newEnv(t)
+	reg := providers.New()
+	src := providerPluginDir(t, "demo", "1.0.0", demoProviderEntry)
+	in := mustInstall(t, e, src)
+	if _, err := e.m.Enable("demo", in.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	e.m.SyncProviders(reg)
+	argOf := func(want string) bool {
+		s, ok := reg.Get("demo/agent")
+		return ok && s.Command[1] == want
+	}
+	if !argOf("--acp") {
+		s, _ := reg.Get("demo/agent")
+		t.Fatalf("setup: registered command = %v", s.Command)
+	}
+
+	v2 := strings.Replace(demoProviderEntry, `"bin/agent","--acp"`, `"bin/agent","--other"`, 1)
+	writeFile(t, filepath.Join(src, ManifestFile), []byte(manifestWith("demo", "2.0.0", `"contributes":{"providers":[`+v2+`]}`)))
+	res, err := e.m.Update(bg, "demo", "", false)
+	if err != nil || !res.Pending || res.Applied {
+		t.Fatalf("%+v %v", res, err)
+	}
+	e.m.SyncProviders(reg)
+	if !argOf("--acp") {
+		s, _ := reg.Get("demo/agent")
+		t.Fatalf("a pending update moved the registered command: %v", s.Command)
+	}
+
+	if res, err = e.m.Update(bg, "demo", "", true); err != nil || !res.Applied || res.Pending {
+		t.Fatalf("%+v %v", res, err)
+	}
+	e.m.SyncProviders(reg)
+	if !argOf("--other") {
+		s, _ := reg.Get("demo/agent")
+		t.Fatalf("the applied update did not move the registered command: %v", s.Command)
+	}
+}
+
+func TestPluginUpdate_ProviderSameFingerprint_Applies(t *testing.T) {
+	e := newEnv(t)
+	reg := providers.New()
+	src := providerPluginDir(t, "demo", "1.0.0", demoProviderEntry)
+	in := mustInstall(t, e, src)
+	if _, err := e.m.Enable("demo", in.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	e.m.SyncProviders(reg)
+	if pluginProviderIDs(reg) != "demo/agent" {
+		t.Fatal("setup: provider not registered")
+	}
+
+	// A version bump and a plugin description change nothing the fingerprint
+	// covers: the update applies at once, no re-consent needed.
+	writeFile(t, filepath.Join(src, ManifestFile), []byte(manifestWith("demo", "1.0.1", `"description":"now with a description","contributes":{"providers":[`+demoProviderEntry+`]}`)))
+	res, err := e.m.Update(bg, "demo", "", false)
+	if err != nil || !res.Applied || res.Pending {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if res.Info.Version != "1.0.1" || !res.Info.Active {
+		t.Fatalf("%+v", res.Info)
+	}
+	e.m.SyncProviders(reg)
+	if pluginProviderIDs(reg) != "demo/agent" {
+		t.Fatalf("the provider was lost by the applied update: %q", pluginProviderIDs(reg))
+	}
+}
+
+func TestPluginReload_Linked_ProviderChange_DisablesUntilConfirm(t *testing.T) {
+	e := newEnv(t)
+	reg := providers.New()
+	src := providerPluginDir(t, "demo", "1.0.0", demoProviderEntry)
+	lin, err := e.m.Link(bg, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Enable("demo", lin.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	e.m.SyncProviders(reg)
+	if pluginProviderIDs(reg) != "demo/agent" {
+		t.Fatal("setup: provider not registered")
+	}
+
+	// The linked manifest's argv changes under the daemon: reload must
+	// disable the plugin (the old files are gone) and unregister its provider.
+	v2 := strings.Replace(demoProviderEntry, `"bin/agent","--acp"`, `"bin/agent","--other"`, 1)
+	writeFile(t, filepath.Join(src, ManifestFile), []byte(manifestWith("demo", "1.1.0", `"contributes":{"providers":[`+v2+`]}`)))
+	got, err := e.m.Reload("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled || got.Active {
+		t.Fatalf("a changed provider must disable until re-consent: %+v", got)
+	}
+	e.m.SyncProviders(reg)
+	if ids := pluginProviderIDs(reg); ids != "" {
+		t.Fatalf("the provider of an unconsented reload stayed registered: %q", ids)
+	}
+
+	// The Human confirms the new argv: the provider comes back, with it.
+	fresh, err := e.m.Get("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Enable("demo", fresh.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	e.m.SyncProviders(reg)
+	s, ok := reg.Get("demo/agent")
+	if !ok {
+		t.Fatal("the provider did not come back after re-consent")
+	}
+	if s.Command[1] != "--other" {
+		t.Fatalf("command = %v, want the new argv", s.Command)
+	}
+}
+
 func TestPluginProviders_GlobalSwitchOff_NoProviders(t *testing.T) {
 	e := newEnv(t)
 	reg := providers.New()
