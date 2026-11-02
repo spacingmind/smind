@@ -100,6 +100,13 @@ func respond(id json.RawMessage, result any) {
 }
 
 func main() {
+	// FAKEAGENT_ENV_DUMP, when set, makes the agent write its own
+	// environment (one KEY=value per line) to that file at start, so tests
+	// can prove what the client's launch env actually gave the agent.
+	if p := os.Getenv("FAKEAGENT_ENV_DUMP"); p != "" {
+		_ = os.WriteFile(p, []byte(strings.Join(os.Environ(), "\n")), 0o644)
+	}
+
 	for _, a := range os.Args[1:] {
 		if v, ok := strings.CutPrefix(a, "mcp2="); ok {
 			mcpCaps2 = true

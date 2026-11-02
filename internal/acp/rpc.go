@@ -120,15 +120,15 @@ type conn struct {
 	pg *processGroup
 }
 
-// newConn spawns command[0] with command[1:] as arguments, wiring its
-// stdin/stdout as the JSON-RPC transport and stderr to logWriter. env
-// (NAME=VALUE) is appended to the inherited environment.
+// newConn is newConn with the daemon's environment inherited.
 func newConn(command []string, logWriter io.Writer) (*conn, error) {
-	return newConnEnv(command, logWriter, nil)
+	return newConnEnv(command, logWriter, nil, false)
 }
 
-// newConnEnv is newConn with extra environment entries.
-func newConnEnv(command []string, logWriter io.Writer, env []string) (*conn, error) {
+// newConnEnv is newConn with extra environment entries. When clean is true
+// the subprocess gets ONLY env (even when it is empty); otherwise it gets the
+// daemon's environment with env appended (last entry wins).
+func newConnEnv(command []string, logWriter io.Writer, env []string, clean bool) (*conn, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("acp: empty command")
 	}
@@ -138,7 +138,9 @@ func newConnEnv(command []string, logWriter io.Writer, env []string) (*conn, err
 
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stderr = logWriter
-	if len(env) > 0 {
+	if clean {
+		cmd.Env = append([]string{}, env...)
+	} else if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...) // last entry wins
 	}
 	setProcessGroup(cmd)
