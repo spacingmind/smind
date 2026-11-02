@@ -46,7 +46,7 @@ func newProviderPluginEnvWith(t *testing.T, agentBody, extra string) *contribEnv
 	manifest := `{"id":"acme","name":"Acme","version":"1.0.0","api":1,"engines":{"smind":">=0.1.0"},
 		"contributes":{"providers":[{"id":"agent","label":"Acme agent","icon":"Bot",
 		"acp":{"command":["bin/agent","--acp"],"secretEnv":[{"name":"ACME_API_KEY","label":"Acme key","required":true}]},
-		"models":[{"id":"big","default":true}],"modes":[{"id":"ask"}]`+extra+`}]}}`
+		"models":[{"id":"big","default":true}],"modes":[{"id":"ask"}]` + extra + `}]}}`
 	for name, body := range map[string]string{"smind-plugin.json": manifest, "bin/agent": agentBody} {
 		full := filepath.Join(src, name)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
