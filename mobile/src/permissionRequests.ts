@@ -27,6 +27,8 @@ export interface PermissionDetail {
   kind?: string;
   command?: string;
   truncated?: boolean;
+  /** Heredoc bodies elided from `command`: each `<<TAG [heredoc N bytes]` marker has an index here, revealed on demand. */
+  heredocs?: { index: number; bytes: number }[];
   /** The policy engine's footprint: the matched rule, its why, and the normalised command it judged. */
   policy?: { ruleId?: string; why?: string; normalized?: string; action?: string };
 }

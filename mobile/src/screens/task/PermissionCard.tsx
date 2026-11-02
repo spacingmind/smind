@@ -6,6 +6,7 @@
 import { memo, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button } from '@expo/ui';
+import { HeredocReveal } from '../../api';
 import { PermissionRequestState } from '../../permissionRequests';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -13,14 +14,17 @@ import { permissionButtonVariants } from '../../transcript/permissionButtons';
 import { Card } from '../../ui/Card';
 import { TextButton } from '../../ui/TextButton';
 import { UiHost } from '../../ui/UiHost';
+import { HeredocReveal as HeredocRevealToggles } from './HeredocReveal';
 import { PermissionPolicyLine } from './PermissionPolicyLine';
 
 export const PermissionCard = memo(function PermissionCard({
   request,
   onRespond,
+  onReveal,
 }: {
   request: PermissionRequestState;
   onRespond: (requestId: string, optionId: string) => void;
+  onReveal?: (requestId: string, index: number) => Promise<HeredocReveal>;
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -32,6 +36,10 @@ export const PermissionCard = memo(function PermissionCard({
         {request.summary}
       </Text>
       <PermissionPolicyLine detail={request.detail} />
+      {/* The body is only revealable while the request is pending (the daemon refuses afterwards). */}
+      {onReveal && request.status === 'pending' && request.detail?.heredocs ? (
+        <HeredocRevealToggles refs={request.detail.heredocs} reveal={(i) => onReveal(request.requestId, i)} />
+      ) : null}
       {request.status === 'pending' ? (
         <View style={styles.options}>
           {request.options.map((opt, i) =>

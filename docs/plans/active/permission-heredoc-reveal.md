@@ -86,6 +86,8 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 
 - 2026-11-02 step 2 merged (#810, incl. the engine-judges-raw fix and fail-closed ask). Step 3 (reveal RPCs, scope, audit rows, CLI `--reveal`, 'policy input missing' reason) in its own PR.
 
+- 2026-11-02 step 4 (web, #814), audit fail-closed (#817) and F1 (#816) landed; step 5 (mobile toggles + smoke stage) in its own PR.
+
 ## Validation
 
 (filled in as the PRs land)

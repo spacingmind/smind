@@ -49,7 +49,7 @@ import { createImageDeps, pickFiles, pickPhotos } from '../attachmentDeps';
 import { sendWithAttachments } from '../attachSend';
 import { lineAttachmentsFromRun } from '../lineAttachments';
 import { createThumbLoader } from '../thumbLoader';
-import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, listProviders, listRunsForTask, ProviderInfo, RunSummary } from '../api';
+import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, listProviders, listRunsForTask, ProviderInfo, revealPermissionHeredoc, revealToolHeredoc, RunSummary } from '../api';
 import { firstSendProvider } from '../firstSend';
 import { withRunPrompt } from '../promptLine';
 import { taskHref } from '../navigation/routes';
@@ -195,7 +195,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       if (isCancelled()) return;
       if (feedPermissionEvent(board, runId, event, params)) return;
       liveSeq.current++;
-      const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current);
+      const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current, runId);
       if (newLines.length === 0) return;
       // An echo of a prompt this client already shows optimistically is skipped, so a prompt shows once whichever
       // path (the run.start response or this adoption) attached the run first.
@@ -355,7 +355,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           if (cancelled) return;
           board.applyLogEvents(latest.ID, logs.events ?? []);
           // Merge, do not overwrite: a prompt sent or a run adopted while the logs were loading has already appended lines.
-          const logLines = timelineFromLogs(logs as { events?: never[] });
+          const logLines = timelineFromLogs({ runId: latest.ID, events: (logs.events ?? []) as never[] });
           // A run started by run.start carries no user message in its logs: show the run row's own prompt when the logs
           // have no user line (and a prompt sent while the logs loaded has not already rendered it).
           setLines((prev) => {
@@ -547,6 +547,10 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     [conn, board],
   );
 
+  // Heredoc reveals: the redacted body of one elided marker, straight from the daemon (stable: both take only conn).
+  const handlePermissionReveal = useCallback((requestId: string, index: number) => revealPermissionHeredoc(conn, requestId, index), [conn]);
+  const handleToolReveal = useCallback((runId: string, toolCallId: string, index: number) => revealToolHeredoc(conn, runId, toolCallId, index), [conn]);
+
   const toggleExpanded = useCallback((key: string) => {
     setExpandedToolCalls((prev) => {
       const next = new Set(prev);
@@ -641,19 +645,23 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
               status={item.status}
               expanded={expandedToolCalls.has(item.key)}
               onToggle={toggleExpanded}
+              toolCallId={item.toolCallId}
+              heredocs={item.heredocs}
+              runId={item.runId}
+              onRevealTool={handleToolReveal}
             />
           );
         case 'meta':
           return <MetaLine text={item.text} />;
         case 'permission':
-          return <PermissionCard request={item.request} onRespond={handlePermissionTap} />;
+          return <PermissionCard request={item.request} onRespond={handlePermissionTap} onReveal={handlePermissionReveal} />;
         case 'error':
           return <ErrorCard message={item.message} raw={item.raw} zoneNote={item.zoneNote} />;
         case 'footer':
           return <FooterBanner sentence={item.sentence} note={item.note} waiting={item.waiting} canContinue={item.canContinue} onContinue={handleContinue} />;
       }
     },
-    [expandedToolCalls, handleContinue, handlePermissionTap, loadThumb, toggleExpanded],
+    [expandedToolCalls, handleContinue, handlePermissionReveal, handlePermissionTap, handleToolReveal, loadThumb, toggleExpanded],
   );
 
   return (

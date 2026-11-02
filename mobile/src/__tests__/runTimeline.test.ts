@@ -49,6 +49,42 @@ describe('timelineFromLogs (run.logs history)', () => {
   it('drops unknown event types instead of rendering garbage', () => {
     expect(timelineFromLogs({ events: [{ type: 'raw' }] })).toEqual([]);
   });
+
+  it('a tool_call with heredocs carries toolCallId, the refs and the runId (reveal plumbing)', () => {
+    const lines = timelineFromLogs({
+      runId: 'run-7',
+      events: [
+        {
+          type: 'tool_call',
+          toolName: 'bash',
+          title: 'cat <<EOF [heredoc 42 bytes]',
+          status: 'success',
+          toolCallId: 'call-3',
+          heredocs: [{ index: 0, bytes: 42 }],
+        },
+      ],
+    });
+    expect(lines).toEqual([
+      {
+        key: 'e0',
+        role: '',
+        text: 'tool: bash — cat <<EOF [heredoc 42 bytes] [success]',
+        toolCall: {
+          toolName: 'bash',
+          title: 'cat <<EOF [heredoc 42 bytes]',
+          status: 'success',
+          toolCallId: 'call-3',
+          heredocs: [{ index: 0, bytes: 42 }],
+          runId: 'run-7',
+        },
+      },
+    ]);
+  });
+
+  it('a tool_call without heredoc refs stays lean (no runId either)', () => {
+    const lines = timelineFromLogs({ events: [{ type: 'tool_call', toolName: 'bash', title: 'ls', status: 'running' }] });
+    expect(lines[0].toolCall).toEqual({ toolName: 'bash', title: 'ls', status: 'running' });
+  });
 });
 
 describe('lineFromAttachEvent (run.attach live stream)', () => {
@@ -68,5 +104,17 @@ describe('lineFromAttachEvent (run.attach live stream)', () => {
 
   it('unknown live event names render nothing', () => {
     expect(lineFromAttachEvent('something_new', {}, 6)).toEqual([]);
+  });
+
+  it('the attach path copies toolCallId and heredocs and takes the run id', () => {
+    const params = { toolName: 'bash', title: 'cat <<EOF [heredoc 7 bytes]', status: 'running', toolCallId: 'call-9', heredocs: [{ index: 0, bytes: 7 }] };
+    expect(lineFromAttachEvent('tool_call', params, 4, 'run-2')).toEqual([
+      {
+        key: 'e4',
+        role: '',
+        text: 'tool: bash — cat <<EOF [heredoc 7 bytes] [running]',
+        toolCall: { toolName: 'bash', title: 'cat <<EOF [heredoc 7 bytes]', status: 'running', toolCallId: 'call-9', heredocs: [{ index: 0, bytes: 7 }], runId: 'run-2' },
+      },
+    ]);
   });
 });

@@ -109,7 +109,7 @@ export async function sendFollowUpPrompt(
         return;
       }
       deps.onEvent?.(event, params, runId);
-      const newLines = lineFromAttachEvent(event, params, nextSeq());
+      const newLines = lineFromAttachEvent(event, params, nextSeq(), runId);
       if (newLines.length > 0) deps.appendLines(newLines);
     },
   });
