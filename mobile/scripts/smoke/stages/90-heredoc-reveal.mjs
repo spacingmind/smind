@@ -26,7 +26,7 @@ async function heredoc(page, harness) {
   try {
     await page.getByText(title, { exact: true }).waitFor({ timeout: 30_000 });
   } catch {
-    lib.fail('the seeded task did not appear on the task list');
+    lib.fail(`the seeded task did not appear on the task list; the page says: ${JSON.stringify((await bodyText(page)).slice(0, 400))}`);
     return;
   }
   await page.getByText(title, { exact: true }).click();
@@ -41,13 +41,13 @@ async function heredoc(page, harness) {
 
   let text = await bodyText(page);
   if (!text.includes(`[heredoc ${BYTES} bytes]`)) lib.fail(`the card command does not contain "[heredoc ${BYTES} bytes]": ${JSON.stringify(text.slice(0, 600))}`);
-  if (text.includes('step 07')) lib.fail('the collapsed card already shows the heredoc body ("step 07")');
+  if (text.includes('step 7: verify the staged change')) lib.fail('the collapsed card already shows the heredoc body ("step 7: verify the staged change")');
   if (await overflows(page)) lib.fail('collapsed card: horizontal overflow');
   await lib.shootBothSchemes(page, 'heredoc-collapsed');
 
   await show.click();
   try {
-    await page.getByText(/step 07/).first().waitFor({ timeout: 15_000 });
+    await page.getByText(/step 7: verify the staged change/).first().waitFor({ timeout: 15_000 });
   } catch {
     lib.fail(`tapping Show did not reveal the body; the page says: ${JSON.stringify((await bodyText(page)).slice(0, 600))}`);
     return;
@@ -59,13 +59,13 @@ async function heredoc(page, harness) {
   await hide.click();
   await page.waitForTimeout(400);
   text = await bodyText(page);
-  if (text.includes('step 07')) lib.fail('after Hide the body is still shown ("step 07")');
+  if (text.includes('step 7: verify the staged change')) lib.fail('after Hide the body is still shown ("step 7: verify the staged change")');
   if (!(await show.isVisible().catch(() => false))) lib.fail('after Hide the button does not read "Show heredoc" again');
 }
 
 export default {
   name: 'heredoc-reveal',
-  harness: { fakeAgent: true },
+  harness: { args: ['-window-max', '1'], fakeAgent: true },
   full: true,
   run: async ({ browser, url, harness }) => {
     const context = await browser.newContext({ ...lib.contextViewport(), colorScheme: 'light', ignoreHTTPSErrors: true });
