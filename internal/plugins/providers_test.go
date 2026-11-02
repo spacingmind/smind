@@ -197,8 +197,13 @@ func TestProviderSpecs_ShapeFromManifest(t *testing.T) {
 		len(s.SecretSlots) != 1 || !s.SecretSlots[0].Required || len(s.Models) != 1 || len(s.Modes) != 2 || !s.Modes[1].AutoApproves {
 		t.Fatalf("spec = %+v", s)
 	}
-	if !filepath.IsAbs(s.Command[0]) || !strings.HasSuffix(filepath.ToSlash(s.Command[0]), "/plugins/demo/bin/agent") || s.Command[1] != "--acp" {
+	if s.Command[0] != "bin/agent" || s.Command[1] != "--acp" {
 		t.Fatalf("command = %v", s.Command)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(s.PluginRoot), "/plugins/demo") ||
+		!strings.HasSuffix(filepath.ToSlash(s.PluginData), "/plugins/demo/data") ||
+		s.CommandForm != "path" || !filepath.IsAbs(s.HealthCommand[0]) {
+		t.Fatalf("plugin fields = %q %q %q %v", s.PluginRoot, s.PluginData, s.CommandForm, s.HealthCommand)
 	}
 	if s.Health.Install != "npm i -g demo" {
 		t.Fatalf("health = %+v", s.Health)

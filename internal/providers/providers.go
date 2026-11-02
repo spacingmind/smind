@@ -151,6 +151,11 @@ type Spec struct {
 	// provider icon); SecretSlots are its declared secret variables.
 	Icon        string
 	SecretSlots []SecretSlot
+	// PluginRoot is the directory the plugin's files live in (the link source for a linked plugin), PluginData its data/ directory,
+	// CommandForm how Command[0] resolves: "path" (a file inside PluginRoot) or "bare" (a name on the fixed system PATH), InheritHome
+	// whether the agent gets the daemon user's real HOME (all set only for plugin providers).
+	PluginRoot, PluginData, CommandForm string
+	InheritHome                         bool
 
 	// Command is the argv a turn spawns (ACP agent, or `codex app-server`;
 	// unused for claude-native, which the SDK launches). Env is a custom ACP

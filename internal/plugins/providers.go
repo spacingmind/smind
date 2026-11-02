@@ -135,18 +135,24 @@ func (m *Manager) buildProviderSpecs(pluginID string, man *Manifest) ([]provider
 	var out []providers.Spec
 	for _, pc := range man.Contributes.Providers {
 		argv := append([]string(nil), pc.ACP.Command...)
-		if form, _ := commandForm(argv[0]); form == "path" {
+		form, _ := commandForm(argv[0])
+		s := providers.Spec{
+			ID: ProviderID(pluginID, pc.ID), Label: pc.Label, Plugin: pluginID, Icon: pc.Icon,
+			Runner: providers.RunnerACP, Command: argv,
+			PluginRoot: root, PluginData: filepath.Join(m.dir(pluginID), "data"),
+			CommandForm: form, InheritHome: pc.ACP.InheritHome,
+			Vendor: pc.Vendor, DefaultMode: pc.DefaultMode,
+			Health: providers.Health{Install: pc.Health.Install, Login: pc.Health.Login, VersionArg: pc.Health.VersionArg, MinVersion: pc.Health.MinVersion},
+		}
+		switch form {
+		case "path":
 			abs, err := confinedExecutable(root, argv[0])
 			if err != nil {
 				return nil, fmt.Errorf("provider %s: command %q: %w", ProviderID(pluginID, pc.ID), argv[0], err)
 			}
-			argv[0] = abs
-		}
-		s := providers.Spec{
-			ID: ProviderID(pluginID, pc.ID), Label: pc.Label, Plugin: pluginID, Icon: pc.Icon,
-			Runner: providers.RunnerACP, Command: argv, HealthCommand: []string{argv[0]},
-			Vendor: pc.Vendor, DefaultMode: pc.DefaultMode,
-			Health: providers.Health{Install: pc.Health.Install, Login: pc.Health.Login, VersionArg: pc.Health.VersionArg, MinVersion: pc.Health.MinVersion},
+			s.HealthCommand = []string{abs}
+		default:
+			s.HealthCommand = []string{argv[0]}
 		}
 		if pc.ACP.SupportsMcpServers != nil && !*pc.ACP.SupportsMcpServers {
 			s.NoMCPServers = true
