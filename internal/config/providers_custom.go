@@ -136,6 +136,9 @@ func ValidateCustomProviders(list []CustomProvider) error {
 }
 
 func validateInstance(p *CustomProvider, bases map[string]providers.Runner, field func(string) string) error {
+	if strings.Contains(p.Extends, "/") {
+		return fmt.Errorf("%s: %q is provided by a plugin and may vanish; extend a built-in provider or a providers.custom ACP entry", field("extends"), p.Extends)
+	}
 	runner, ok := bases[p.Extends]
 	if !ok {
 		return fmt.Errorf("%s: %q must be a built-in provider or an earlier providers.custom ACP entry", field("extends"), p.Extends)

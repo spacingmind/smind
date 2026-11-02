@@ -1,0 +1,53 @@
+{
+ "id": "my-agent",
+ "label": "My agent",
+ "description": "d",
+ "icon": "Bot",
+ "harness": "acp",
+ "acp": {
+  "command": [
+   "bin/my-agent",
+   "--acp"
+  ],
+  "env": {
+   "FOO_MODE": "acp"
+  },
+  "secretEnv": [
+   {
+    "name": "FOO_API_KEY",
+    "label": "Foo API key",
+    "required": true
+   }
+  ],
+  "inheritHome": false,
+  "supportsMcpServers": true
+ },
+ "models": [
+  {
+   "id": "large",
+   "label": "Large",
+   "default": true
+  },
+  {
+   "id": "small"
+  }
+ ],
+ "modes": [
+  {
+   "id": "default",
+   "label": "Ask"
+  },
+  {
+   "id": "auto",
+   "autoApproves": true
+  }
+ ],
+ "defaultMode": "default",
+ "vendor": "zai",
+ "health": {
+  "install": "npm i -g x",
+  "login": "run x login",
+  "versionArg": "--version",
+  "minVersion": "1.2.0"
+ }
+}

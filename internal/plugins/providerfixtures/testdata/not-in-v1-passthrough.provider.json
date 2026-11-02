@@ -1,0 +1,13 @@
+{
+ "id": "agent",
+ "label": "Agent",
+ "acp": {
+  "command": [
+   "bin/agent",
+   "--acp"
+  ]
+ },
+ "passthrough": [
+  "X"
+ ]
+}

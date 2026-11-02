@@ -471,8 +471,11 @@ var (
 	reservedEnvSuffixes = []string{"_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PASSWD", "_CREDENTIALS", "_CREDENTIAL", "_PROXY", "_AUTH"}
 )
 
-// refuseHookEnv explains why a hook may not set key=value, "" when it may.
-func refuseHookEnv(key, value string) string {
+// refuseEnvName explains why a plugin may not set the environment variable
+// key, "" when the name is acceptable. allowCredentialSuffix lets a name end
+// in _KEY, _TOKEN and the like (a provider's secret slot); _PROXY is never
+// allowed. One checker serves hooks and plugin providers.
+func refuseEnvName(key string, allowCredentialSuffix bool) string {
 	if !hookEnvKey.MatchString(key) {
 		return fmt.Sprintf("env name %q is not allowed: use upper-case letters, digits and underscores, starting with a letter", clip(key, 40))
 	}
@@ -485,9 +488,17 @@ func refuseHookEnv(key, value string) string {
 		}
 	}
 	for _, s := range reservedEnvSuffixes {
-		if strings.HasSuffix(key, s) {
+		if strings.HasSuffix(key, s) && !(allowCredentialSuffix && s != "_PROXY") {
 			return fmt.Sprintf("env %s looks like a credential or proxy setting and is refused", key)
 		}
+	}
+	return ""
+}
+
+// refuseHookEnv explains why a hook may not set key=value, "" when it may.
+func refuseHookEnv(key, value string) string {
+	if why := refuseEnvName(key, false); why != "" {
+		return why
 	}
 	if len(value) > MaxHookEnvValueBytes {
 		return fmt.Sprintf("env %s is %d bytes (the limit is %d)", key, len(value), MaxHookEnvValueBytes)

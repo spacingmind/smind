@@ -1,0 +1,12 @@
+{
+ "id": "agent",
+ "label": "Agent",
+ "acp": {
+  "command": [
+   "bin/agent"
+  ],
+  "args": [
+   "x"
+  ]
+ }
+}

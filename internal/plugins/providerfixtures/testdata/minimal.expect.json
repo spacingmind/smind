@@ -1,0 +1,11 @@
+{
+ "valid": true,
+ "display": {
+  "id": "demo/agent",
+  "label": "Agent",
+  "icon": "",
+  "secrets": [],
+  "models": 0,
+  "modes": 0
+ }
+}
