@@ -18,7 +18,7 @@ import (
 // audit uses. Both are human-only (a local or relay connection, never a
 // run-scoped agent: neither is on RunScopedMethods and each refuses agents),
 // never put the body in an event, a log or the audit, and write one
-// content-free audit row.
+// content-free audit row first (fail closed: no row, no body).
 
 // revealMaxBytes caps a revealed body, matching the 64 KiB command cap.
 const revealMaxBytes = 64 << 10
@@ -68,9 +68,10 @@ type heredocSource interface {
 func heredocRevealHandlers(reg heredocSource, db *store.Store) map[string]handlerFunc {
 	hs := map[string]handlerFunc{}
 
-	audit := func(source string, rev runs.HeredocReveal, requestID, target string, index, n int) {
-		// Content-free: where and how big, never the body. A failed write is
-		// logged but does not block the reveal the human already asked for.
+	// audit writes the content-free row BEFORE a body is returned and fails
+	// closed: if the row cannot be written the reveal is refused, so a body
+	// never leaves the daemon without its audit trail.
+	audit := func(source string, rev runs.HeredocReveal, requestID, target string, index, n int) error {
 		_, err := db.AppendPolicyAudit(store.PolicyAuditRow{
 			RunID: rev.RunID, TaskID: rev.TaskID, RequestID: requestID,
 			Tool: source + ".heredoc_revealed", Target: fmt.Sprintf("%s heredoc %d (%d bytes)", target, index, n),
@@ -78,7 +79,9 @@ func heredocRevealHandlers(reg heredocSource, db *store.Store) map[string]handle
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "wsapi: heredoc reveal audit: %v\n", err)
+			return fmt.Errorf("heredoc reveal refused: the audit row could not be written: %w", err)
 		}
+		return nil
 	}
 
 	hs["permission.revealHeredoc"] = func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
@@ -103,7 +106,9 @@ func heredocRevealHandlers(reg heredocSource, db *store.Store) map[string]handle
 		if err != nil {
 			return nil, err
 		}
-		audit("permission", rev, p.PermissionID, "permission "+p.PermissionID, p.Index, len(rev.Text))
+		if err := audit("permission", rev, p.PermissionID, "permission "+p.PermissionID, p.Index, len(rev.Text)); err != nil {
+			return nil, err
+		}
 		return revealResult(p.Index, rev.Text), nil
 	}
 
@@ -130,7 +135,9 @@ func heredocRevealHandlers(reg heredocSource, db *store.Store) map[string]handle
 		if err != nil {
 			return nil, err
 		}
-		audit("tool", rev, "", "run "+p.RunID+" call "+p.ToolCallID, p.Index, len(rev.Text))
+		if err := audit("tool", rev, "", "run "+p.RunID+" call "+p.ToolCallID, p.Index, len(rev.Text)); err != nil {
+			return nil, err
+		}
 		return revealResult(p.Index, rev.Text), nil
 	}
 	return hs
