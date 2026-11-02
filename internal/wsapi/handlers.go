@@ -1324,15 +1324,15 @@ type runToolCallParams struct {
 // events, run.logs, and everything built on them: relay frames, the web and
 // mobile timelines, MCP task_logs). A command's heredoc bodies are elided
 // here; the raw call stays on the daemon.
-func toRunToolCallParams(e taskrunner.Event) runToolCallParams {
-	input, title, refs := taskrunner.ElideToolCall(e.ToolInput, e.ToolTitle)
+func toRunToolCallParams(el *taskrunner.ToolCallElider, e taskrunner.Event) runToolCallParams {
+	input, title, result, refs := el.Elide(e.ToolCallID, e.ToolInput, e.ToolTitle, e.ToolResult)
 	return runToolCallParams{
 		ToolCallID: e.ToolCallID,
 		ToolName:   e.ToolName,
 		Title:      title,
 		Status:     e.ToolStatus,
 		Input:      input,
-		Result:     e.ToolResult,
+		Result:     result,
 		Heredocs:   refs,
 	}
 }
@@ -1745,6 +1745,7 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 	}
 	defer unsubscribe()
 
+	elider := taskrunner.NewToolCallElider()
 	cancelCh := ctx.Done()
 	for {
 		select {
@@ -1760,7 +1761,7 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 			case taskrunner.EventTypeThinking:
 				rc.Emit("thinking", taskChunkParams{Text: e.Text})
 			case taskrunner.EventTypeToolCall:
-				rc.Emit("tool_call", toRunToolCallParams(e))
+				rc.Emit("tool_call", toRunToolCallParams(elider, e))
 			case taskrunner.EventTypeRaw:
 				rc.Emit("raw", toRunRawParams(e))
 			case taskrunner.EventTypeUsage:
@@ -1878,7 +1879,7 @@ type runLogEvent struct {
 // default -- a default branch would otherwise silently mis-render a
 // permission event as an empty/wrong "chunk" entry instead of dropping or
 // erroring, which is worse and easy to miss if untested.
-func toRunLogEvent(e taskrunner.Event) runLogEvent {
+func toRunLogEvent(el *taskrunner.ToolCallElider, e taskrunner.Event) runLogEvent {
 	switch e.Type {
 	case taskrunner.EventTypeText:
 		return runLogEvent{Type: "chunk", Text: e.Text}
@@ -1887,7 +1888,7 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 	case taskrunner.EventTypeThinking:
 		return runLogEvent{Type: "thinking", Text: e.Text}
 	case taskrunner.EventTypeToolCall:
-		p := toRunToolCallParams(e)
+		p := toRunToolCallParams(el, e)
 		return runLogEvent{
 			Type:       "tool_call",
 			ToolCallID: p.ToolCallID,
@@ -1967,6 +1968,23 @@ type runLogsResult struct {
 	Events            []runLogEvent `json:"events"`
 }
 
+// runLogEvents converts a run's history to its run.logs wire form, last tail
+// entries when tail > 0. The whole history is converted in order BEFORE
+// tailing: the elider learns a call's heredoc bodies from the event that
+// carries its input, and the later event with its result may be inside the
+// tail while that one is not.
+func runLogEvents(history []taskrunner.Event, tail int) []runLogEvent {
+	elider := taskrunner.NewToolCallElider()
+	events := make([]runLogEvent, len(history))
+	for i, e := range history {
+		events[i] = toRunLogEvent(elider, e)
+	}
+	if tail > 0 && len(events) > tail {
+		events = events[len(events)-tail:]
+	}
+	return events
+}
+
 // handleRunLogs returns runID's full (or, with Tail set, last Tail)
 // recorded events plus its current status as a single response -- it never
 // streams and never blocks waiting for the run to progress, unlike
@@ -1985,14 +2003,7 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("run.logs: %w", err)
 		}
-		if p.Tail > 0 && len(history) > p.Tail {
-			history = history[len(history)-p.Tail:]
-		}
-
-		events := make([]runLogEvent, len(history))
-		for i, e := range history {
-			events[i] = toRunLogEvent(e)
-		}
+		events := runLogEvents(history, p.Tail)
 		var fallbackID int64
 		if failure.IsPlanLimit(status.FailureKind) {
 			fallbackID = reg.FallbackProfileFor(status.ProfileID)
