@@ -11,7 +11,7 @@ import (
 // adjacent chunks, so it must end in a paragraph break or the next assistant
 // text is glued onto it (UAT A-12).
 func TestToRunLogEvent_SessionNoteIsItsOwnParagraph(t *testing.T) {
-	got := toRunLogEvent(taskrunner.Event{Type: taskrunner.EventTypeSessionNote, Text: "uat does not support resuming a session"})
+	got := toRunLogEvent(taskrunner.NewToolCallElider(), taskrunner.Event{Type: taskrunner.EventTypeSessionNote, Text: "uat does not support resuming a session"})
 	if got.Type != "chunk" {
 		t.Fatalf("Type = %q, want chunk (wire format unchanged)", got.Type)
 	}
