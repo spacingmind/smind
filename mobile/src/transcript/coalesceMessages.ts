@@ -12,13 +12,13 @@
 
 import type { PermissionRequestState } from '../permissionRequests';
 import { stripErrorEcho, type RunErrorView } from '../runError';
-import type { LineAttachment, TimelineLine } from '../runTimeline';
+import type { LineAttachment, HeredocRef, TimelineLine } from '../runTimeline';
 
 export type TranscriptItem =
   | { type: 'user'; key: string; text: string; attachments?: LineAttachment[] }
   | { type: 'assistant'; key: string; text: string }
   | { type: 'thinking'; key: string; text: string }
-  | { type: 'tool'; key: string; toolName: string; title: string; status: string }
+  | { type: 'tool'; key: string; toolName: string; title: string; status: string; toolCallId?: string; heredocs?: HeredocRef[]; runId?: string }
   | { type: 'meta'; key: string; text: string }
   | { type: 'permission'; key: string; request: PermissionRequestState }
   | { type: 'error'; key: string; message: string; raw?: string; zoneNote?: string }

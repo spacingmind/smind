@@ -195,7 +195,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       if (isCancelled()) return;
       if (feedPermissionEvent(board, runId, event, params)) return;
       liveSeq.current++;
-      const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current);
+      const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current, runId);
       if (newLines.length === 0) return;
       // An echo of a prompt this client already shows optimistically is skipped, so a prompt shows once whichever
       // path (the run.start response or this adoption) attached the run first.
@@ -355,7 +355,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           if (cancelled) return;
           board.applyLogEvents(latest.ID, logs.events ?? []);
           // Merge, do not overwrite: a prompt sent or a run adopted while the logs were loading has already appended lines.
-          const logLines = timelineFromLogs(logs as { events?: never[] });
+          const logLines = timelineFromLogs({ runId: latest.ID, events: (logs.events ?? []) as never[] });
           // A run started by run.start carries no user message in its logs: show the run row's own prompt when the logs
           // have no user line (and a prompt sent while the logs loaded has not already rendered it).
           setLines((prev) => {

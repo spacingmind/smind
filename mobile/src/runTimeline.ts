@@ -19,6 +19,12 @@ export interface LineAttachment {
   runId?: string;
 }
 
+/** One elided heredoc of a tool call or permission detail: the marker's index and the body's byte count. */
+export interface HeredocRef {
+  index: number;
+  bytes: number;
+}
+
 /** One rendered timeline line. */
 export interface TimelineLine {
   key: string;
@@ -31,8 +37,11 @@ export interface TimelineLine {
    * no "queued" or "pending" state exists) plus name/title, so the UI
    * can render a collapsed row with a status icon instead of parsing
    * `text`. Item 3 (mobile-ui-polish plan)'s reason for this field.
+   * toolCallId/heredocs/runId (heredoc reveal) feed the
+   * run.revealToolHeredoc toggles; all three optional because older
+   * events carry none.
    */
-  toolCall?: { toolName: string; title: string; status: string };
+  toolCall?: { toolName: string; title: string; status: string; toolCallId?: string; heredocs?: HeredocRef[]; runId?: string };
   /** User lines only: the prompt's attachments (ADR-0038), shown read-only under the message. */
   attachments?: LineAttachment[];
 }
@@ -44,10 +53,13 @@ interface RunLogEvent {
   toolName?: string;
   title?: string;
   status?: string;
+  /** Elided heredoc refs (wsapi toRunToolCallParams) -- the reveal toggle's feed. */
+  toolCallId?: string;
+  heredocs?: HeredocRef[];
 }
 
 /** Render one run.logs entry into zero or more lines. */
-function renderLogEvent(ev: RunLogEvent, idx: number): TimelineLine[] {
+function renderLogEvent(ev: RunLogEvent, idx: number, runId?: string): TimelineLine[] {
   switch (ev.type) {
     case 'user_message':
       return [{ key: `e${idx}`, role: 'user', text: ev.text ?? '' }];
@@ -55,15 +67,24 @@ function renderLogEvent(ev: RunLogEvent, idx: number): TimelineLine[] {
       return [{ key: `e${idx}`, role: 'assistant', text: ev.text ?? '' }];
     case 'thinking':
       return [{ key: `e${idx}`, role: 'assistant (thinking)', text: ev.text ?? '' }];
-    case 'tool_call':
+    case 'tool_call': {
+      const toolCall: NonNullable<TimelineLine['toolCall']> = {
+        toolName: ev.toolName ?? '?',
+        title: ev.title ?? '',
+        status: ev.status ?? '',
+      };
+      if (ev.toolCallId) toolCall.toolCallId = ev.toolCallId;
+      if (ev.heredocs) toolCall.heredocs = ev.heredocs;
+      if (runId) toolCall.runId = runId;
       return [
         {
           key: `e${idx}`,
           role: '',
           text: `tool: ${ev.toolName ?? '?'}${ev.title ? ` — ${ev.title}` : ''}${ev.status ? ` [${ev.status}]` : ''}`,
-          toolCall: { toolName: ev.toolName ?? '?', title: ev.title ?? '', status: ev.status ?? '' },
+          toolCall,
         },
       ];
+    }
     case 'done':
       return [{ key: `e${idx}`, role: '', text: `done (${ev.stopReason ?? ''})` }];
     // permission_request/permission_resolved render through
@@ -76,21 +97,23 @@ function renderLogEvent(ev: RunLogEvent, idx: number): TimelineLine[] {
 }
 
 /** The full history from a run.logs result: {runId, status, events: [...]}. */
-export function timelineFromLogs(logsResult: { events?: RunLogEvent[] }): TimelineLine[] {
-  return (logsResult.events ?? []).flatMap(renderLogEvent);
+export function timelineFromLogs(logsResult: { runId?: string; events?: RunLogEvent[] }): TimelineLine[] {
+  const out: TimelineLine[] = [];
+  (logsResult.events ?? []).forEach((ev, i) => out.push(...renderLogEvent(ev, i, logsResult.runId)));
+  return out;
 }
 
 /** One live run.attach event (event name + params) appended to the timeline. */
-export function lineFromAttachEvent(event: string, params: unknown, seq: number): TimelineLine[] {
+export function lineFromAttachEvent(event: string, params: unknown, seq: number, runId?: string): TimelineLine[] {
   const p = (params ?? {}) as RunLogEvent & { text?: string };
   const asLog: Record<string, RunLogEvent> = {
     chunk: { type: 'chunk', text: p.text },
     user_message: { type: 'user_message', text: p.text },
     thinking: { type: 'thinking', text: p.text },
-    tool_call: { type: 'tool_call', toolName: p.toolName, title: p.title, status: p.status },
+    tool_call: { type: 'tool_call', toolName: p.toolName, title: p.title, status: p.status, toolCallId: p.toolCallId, heredocs: p.heredocs },
   };
   const mapped = asLog[event];
-  if (mapped) return renderLogEvent(mapped, seq);
-  if (event === 'done') return renderLogEvent({ type: 'done', stopReason: (p as { stopReason?: string }).stopReason }, seq);
+  if (mapped) return renderLogEvent(mapped, seq, runId);
+  if (event === 'done') return renderLogEvent({ type: 'done', stopReason: (p as { stopReason?: string }).stopReason }, seq, runId);
   return [];
 }
