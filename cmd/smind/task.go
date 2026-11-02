@@ -113,6 +113,9 @@ func renderPermissionRequest(runID, requestID, summary string, options []permiss
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n[permission] %s (request %s)\n", summary, requestID)
 	b.WriteString(renderPermissionDetail(detail))
+	if detail != nil && len(detail.Heredocs) > 0 {
+		fmt.Fprintf(&b, "  %d heredoc body(ies) hidden -> show: smind permission show --reveal --index N %s\n", len(detail.Heredocs), requestID)
+	}
 	for _, o := range options {
 		fmt.Fprintf(&b, "  - %s: %s (%s)\n", o.ID, o.Label, o.Kind)
 	}

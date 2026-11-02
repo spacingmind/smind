@@ -108,6 +108,9 @@ Usage:
   smind policy init|show|test|audit                       permission policy engine: write the template, show rules, explain a command, list decisions
                                                            (humans only; the engine is off until steward.policy.enabled; run "smind policy" for flags)
 
+  smind permission show --reveal [--index N] <requestId> | --run <runId> --call <toolCallId>
+                                                           print one redacted heredoc body elided from a permission card or tool call (humans only)
+
   smind steward review|list|show|cancel                    ask for a read-only review of a task's head commit; read reviews (humans only; run "smind steward" for flags)
 
   smind push test [<device id prefix>]                    send a test notification to phones registered for push
@@ -276,6 +279,16 @@ reviews. A review is advice: smind never merges.
 `show` prints the engine switch and rules, `test "<command>"` explains what
 the engine would decide per segment, and `audit` lists recent decisions. The
 engine is off until `steward.policy.enabled` is true. Humans only.
+
+### permission
+
+Permission cards and tool calls show a command's heredoc bodies elided as
+`<<TAG [heredoc N bytes]`. `smind permission show --reveal [--index N]
+<requestId>` prints one body of a still-pending permission request;
+`smind permission show --reveal [--index N] --run <runId> --call <toolCallId>`
+prints one from a recorded tool call, live or finished. Secrets in the body
+are redacted, each reveal is audited without its content, and it is humans
+only.
 
 ### push test
 
