@@ -146,7 +146,14 @@ func (r *Runner) acpCatalog(provider Provider) (acpModeCatalog, bool) {
 // maybeProbeACPModes starts a background discovery probe for provider
 // unless probing is disabled, its modes are already known, a probe is in
 // flight, or the last one failed less than acpModeProbeRetry ago.
+//
+// A plugin provider is never probed lazily: provider.list (callable by an
+// agent) must not start a plugin's code. Its manifest lists are static and
+// the first real run records what its session advertises.
 func (r *Runner) maybeProbeACPModes(provider Provider) {
+	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.Plugin != "" {
+		return
+	}
 	r.maybeProbe(provider, r.probeACPModes)
 }
 
@@ -198,19 +205,31 @@ func (r *Runner) probeACPModes(ctx context.Context, provider Provider) error {
 	defer os.RemoveAll(dir)
 
 	popts := []acp.Option{acp.WithPermissionPolicy(acp.AutoDenyPolicy{})}
-	launchEnv, err := r.launchEnvEntries(provider)
-	if err != nil {
-		return fmt.Errorf("launch env: %w", err)
-	}
-	// NO_BROWSER comes first so the probe's default never launches a
-	// browser, while a provider-configured NO_BROWSER (a later entry, and
-	// later entries win) still overrides it. Real runs set no such default.
-	launchEnv = append([]string{"NO_BROWSER=true"}, launchEnv...)
-	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.NoMCPServers {
+	spec, haveSpec := r.providerRegistry().Get(string(provider))
+	if haveSpec && spec.NoMCPServers {
 		popts = append(popts, acp.WithoutMcpServers())
 	}
-	if len(launchEnv) > 0 {
-		popts = append(popts, acp.WithEnv(launchEnv...))
+	if haveSpec && spec.Plugin != "" {
+		// Same scrubbed launch as a run; the probe's cwd is its scratch dir.
+		pcmd, pextra, perr := r.pluginLaunch(spec, dir)
+		if perr != nil {
+			return fmt.Errorf("launch: %w", perr)
+		}
+		command = pcmd
+		popts = append(popts, pextra...)
+		popts = append(popts, acp.WithEnv("NO_BROWSER=true"))
+	} else {
+		launchEnv, err := r.launchEnvEntries(provider)
+		if err != nil {
+			return fmt.Errorf("launch env: %w", err)
+		}
+		// NO_BROWSER comes first so the probe's default never launches a
+		// browser, while a provider-configured NO_BROWSER (a later entry, and
+		// later entries win) still overrides it. Real runs set no such default.
+		launchEnv = append([]string{"NO_BROWSER=true"}, launchEnv...)
+		if len(launchEnv) > 0 {
+			popts = append(popts, acp.WithEnv(launchEnv...))
+		}
 	}
 	secrets := r.providerSecretValues(provider)
 	client, err := r.newACPClient(command, popts...)

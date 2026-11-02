@@ -1,13 +1,20 @@
 package plugins
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/spacingmind/smind/internal/plugins/host"
+	"github.com/spacingmind/smind/internal/plugins/host/hosttest"
 	"github.com/spacingmind/smind/internal/providers"
 )
 
@@ -92,6 +99,60 @@ func TestPluginProvider_NamespacedId_NoShadowing_VanishesWithPlugin(t *testing.T
 	}
 }
 
+func TestPluginRemove_DeletesProviderSecrets_DisableKeeps(t *testing.T) {
+	e := newEnv(t)
+	enableProviderPlugin(t, e, "demo", demoProviderEntry)
+	if err := e.st.SetProviderSecret("demo/agent", "DEMO_API_KEY", "v-1234"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.SetProviderSecret("demo-x/agent", "DEMO_API_KEY", "other"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := e.m.Disable("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := e.st.ListProviderSecrets("demo/agent"); len(l) != 1 {
+		t.Fatalf("a disabled plugin's secrets were deleted: %v", l)
+	}
+	if _, err := e.m.Enable("demo", got.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.m.Remove("demo", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.st.ListProviderSecrets("demo/agent"); len(got) != 0 {
+		t.Fatalf("a removed plugin's secrets survived: %v", got)
+	}
+	if got, _ := e.st.ListProviderSecrets("demo-x/agent"); len(got) != 1 {
+		t.Fatalf("an unrelated plugin's secrets were deleted: %v", got)
+	}
+
+	// A linked plugin's secrets go with it too.
+	src := providerPluginDir(t, "linked", "1.0.0", demoProviderEntry)
+	lin, err := e.m.Link(bg, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Enable("linked", lin.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.SetProviderSecret("linked/agent", "DEMO_API_KEY", "v-5678"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.Remove("linked", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.st.ListProviderSecrets("linked/agent"); len(got) != 0 {
+		t.Fatalf("a removed linked plugin's secrets survived: %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(src, ManifestFile)); err != nil {
+		t.Fatal("remove deleted the linked source")
+	}
+}
+
 func TestPluginProviders_RegistryMatchesActiveSet(t *testing.T) {
 	e := newEnv(t)
 	reg := providers.New()
@@ -168,19 +229,14 @@ func TestConfinedExecutable(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "bin", "agent"), []byte("x"))
 	os.Chmod(filepath.Join(root, "bin", "agent"), 0o755)
-	writeFile(t, filepath.Join(root, "bin", "plain"), []byte("x"))
-	outside := t.TempDir()
-	writeFile(t, filepath.Join(outside, "evil"), []byte("x"))
-	os.Chmod(filepath.Join(outside, "evil"), 0o755)
-	os.Symlink(filepath.Join(outside, "evil"), filepath.Join(root, "bin", "link"))
-	os.Symlink(outside, filepath.Join(root, "dirlink"))
-	for rel, wantErr := range map[string]string{
-		"bin/agent": "", "bin/plain": "not executable", "bin/missing": "not found", "bin/link": "symlink", "dirlink/evil": "symlink", "bin": "regular",
-	} {
-		_, err := confinedExecutable(root, rel)
-		if wantErr == "" && err != nil || wantErr != "" && (err == nil || !strings.Contains(err.Error(), wantErr)) {
-			t.Errorf("%s: err = %v, want %q", rel, err, wantErr)
-		}
+	// The wrapper delegates to pluginagent.ConfinedExecutable, whose own
+	// table (TestPluginAgent_ConfinedExecutable) covers the refusal cases.
+	abs, err := confinedExecutable(root, "bin/agent")
+	if err != nil {
+		t.Fatalf("confinedExecutable: %v", err)
+	}
+	if !filepath.IsAbs(abs) || !strings.HasSuffix(filepath.ToSlash(abs), "/bin/agent") {
+		t.Fatalf("abs = %q", abs)
 	}
 }
 
@@ -197,8 +253,13 @@ func TestProviderSpecs_ShapeFromManifest(t *testing.T) {
 		len(s.SecretSlots) != 1 || !s.SecretSlots[0].Required || len(s.Models) != 1 || len(s.Modes) != 2 || !s.Modes[1].AutoApproves {
 		t.Fatalf("spec = %+v", s)
 	}
-	if !filepath.IsAbs(s.Command[0]) || !strings.HasSuffix(filepath.ToSlash(s.Command[0]), "/plugins/demo/bin/agent") || s.Command[1] != "--acp" {
+	if s.Command[0] != "bin/agent" || s.Command[1] != "--acp" {
 		t.Fatalf("command = %v", s.Command)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(s.PluginRoot), "/plugins/demo") ||
+		!strings.HasSuffix(filepath.ToSlash(s.PluginData), "/plugins/demo/data") ||
+		s.CommandForm != "path" || !filepath.IsAbs(s.HealthCommand[0]) {
+		t.Fatalf("plugin fields = %q %q %q %v", s.PluginRoot, s.PluginData, s.CommandForm, s.HealthCommand)
 	}
 	if s.Health.Install != "npm i -g demo" {
 		t.Fatalf("health = %+v", s.Health)
@@ -248,6 +309,218 @@ func TestConsent_Provider_ListsCommandEnvKeys_NoValues(t *testing.T) {
 	}
 }
 
+func TestConsent_Provider_FingerprintCoversArgvEnvValuesAndInheritHome(t *testing.T) {
+	// Every case installs the SAME id and version, so only the provider
+	// entry (or the plugin description) differs from the baseline.
+	fpOf := func(t *testing.T, entry, manifestExtra string, extraFiles map[string]string) string {
+		t.Helper()
+		files := map[string]string{"bin/agent": "#!/bin/sh\nexit 0\n"}
+		for n, b := range extraFiles {
+			files[n] = b
+		}
+		src := writePluginDir(t, manifestWith("demo", "1.0.0", `"contributes":{"providers":[`+entry+`]}`+manifestExtra), files)
+		for n := range files {
+			if err := os.Chmod(filepath.Join(src, filepath.FromSlash(n)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return mustInstall(t, newEnv(t), src).Consent.Fingerprint
+	}
+	base := fpOf(t, demoProviderEntry, "", nil)
+	cases := []struct {
+		name          string
+		entry         string
+		manifestExtra string
+		extraFiles    map[string]string
+		expectSame    bool
+	}{
+		{"extra argv entry", strings.Replace(demoProviderEntry, `"--acp"]`, `"--acp","-x"]`, 1), "", nil, false},
+		{"env value", strings.Replace(demoProviderEntry, `"DEMO_MODE":"acp"`, `"DEMO_MODE":"other"`, 1), "", nil, false},
+		{"env key renamed", strings.Replace(demoProviderEntry, `"DEMO_MODE":"acp"`, `"DEMO_KIND":"acp"`, 1), "", nil, false},
+		{"secret slot name", strings.Replace(demoProviderEntry, `"name":"DEMO_API_KEY"`, `"name":"DEMO_TOKEN"`, 1), "", nil, false},
+		{"inheritHome", strings.Replace(demoProviderEntry, `"acp":{`, `"acp":{"inheritHome":true,`, 1), "", nil, false},
+		{"vendor", strings.Replace(demoProviderEntry, `{"id":"agent"`, `{"id":"agent","vendor":"zai"`, 1), "", nil, false},
+		{"label", strings.Replace(demoProviderEntry, `"label":"Demo agent"`, `"label":"Demo agent two"`, 1), "", nil, false},
+		{"command file name", strings.Replace(demoProviderEntry, `"command":["bin/agent"`, `"command":["bin/agent2"`, 1), "", map[string]string{"bin/agent2": "#!/bin/sh\nexit 0\n"}, false},
+		// Descriptions are shown to the Human, never executed, so they are
+		// not part of the fingerprint (AcpEntry carries none).
+		{"provider description", strings.Replace(demoProviderEntry, `{"id":"agent"`, `{"id":"agent","description":"runs things"`, 1), "", nil, true},
+		{"plugin description", demoProviderEntry, `,"description":"a demo plugin"`, nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := fpOf(t, tc.entry, tc.manifestExtra, tc.extraFiles)
+			if tc.expectSame && fp != base {
+				t.Fatal("a change that runs nothing moved the fingerprint")
+			}
+			if !tc.expectSame && fp == base {
+				t.Fatal("a consent-relevant change kept the fingerprint")
+			}
+		})
+	}
+}
+
+func TestConsent_Provider_ValueNeverInSummaryOrLogs(t *testing.T) {
+	const sentinel = "SENTINEL-env-value-9931"
+	e := newHostEnv(t, host.DenyAll)
+	entry := strings.Replace(demoProviderEntry, `"DEMO_MODE":"acp"`, `"DEMO_MODE":"`+sentinel+`"`, 1)
+	// A process besides the provider, so the plugin log has real lines.
+	cmd, _ := json.Marshal(hosttest.Command("report"))
+	src := writePluginDir(t, manifestWith("demo", "1.0.0", `"process":{"command":`+string(cmd)+`},"contributes":{"providers":[`+entry+`]}`),
+		map[string]string{"bin/agent": "#!/bin/sh\nexit 0\n"})
+	if err := os.Chmod(filepath.Join(src, "bin", "agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in := mustInstall(t, e, src)
+
+	b, err := json.Marshal(in.Consent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), sentinel) {
+		t.Fatalf("the env value is in the consent summary: %s", b)
+	}
+	if s := fmt.Sprintf("%+v", in.Consent); strings.Contains(s, sentinel) {
+		t.Fatalf("the env value is in the formatted consent: %s", s)
+	}
+
+	if _, err := e.m.Enable("demo", in.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	waitProc(t, e.m, "demo", host.StateRunning)
+	logs, err := e.m.Logs("demo", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs.Lines) == 0 {
+		t.Fatal("setup: the plugin never logged anything")
+	}
+	for _, l := range logs.Lines {
+		if strings.Contains(l.Text, sentinel) {
+			t.Fatalf("the env value is in the plugin log: %q", l.Text)
+		}
+	}
+}
+
+func TestPluginUpdate_ProviderCommandChange_PendingKeepsOldRegistered(t *testing.T) {
+	e := newEnv(t)
+	reg := providers.New()
+	src := providerPluginDir(t, "demo", "1.0.0", demoProviderEntry)
+	in := mustInstall(t, e, src)
+	if _, err := e.m.Enable("demo", in.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	e.m.SyncProviders(reg)
+	argOf := func(want string) bool {
+		s, ok := reg.Get("demo/agent")
+		return ok && s.Command[1] == want
+	}
+	if !argOf("--acp") {
+		s, _ := reg.Get("demo/agent")
+		t.Fatalf("setup: registered command = %v", s.Command)
+	}
+
+	v2 := strings.Replace(demoProviderEntry, `"bin/agent","--acp"`, `"bin/agent","--other"`, 1)
+	writeFile(t, filepath.Join(src, ManifestFile), []byte(manifestWith("demo", "2.0.0", `"contributes":{"providers":[`+v2+`]}`)))
+	res, err := e.m.Update(bg, "demo", "", false)
+	if err != nil || !res.Pending || res.Applied {
+		t.Fatalf("%+v %v", res, err)
+	}
+	e.m.SyncProviders(reg)
+	if !argOf("--acp") {
+		s, _ := reg.Get("demo/agent")
+		t.Fatalf("a pending update moved the registered command: %v", s.Command)
+	}
+
+	if res, err = e.m.Update(bg, "demo", "", true); err != nil || !res.Applied || res.Pending {
+		t.Fatalf("%+v %v", res, err)
+	}
+	e.m.SyncProviders(reg)
+	if !argOf("--other") {
+		s, _ := reg.Get("demo/agent")
+		t.Fatalf("the applied update did not move the registered command: %v", s.Command)
+	}
+}
+
+func TestPluginUpdate_ProviderSameFingerprint_Applies(t *testing.T) {
+	e := newEnv(t)
+	reg := providers.New()
+	src := providerPluginDir(t, "demo", "1.0.0", demoProviderEntry)
+	in := mustInstall(t, e, src)
+	if _, err := e.m.Enable("demo", in.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	e.m.SyncProviders(reg)
+	if pluginProviderIDs(reg) != "demo/agent" {
+		t.Fatal("setup: provider not registered")
+	}
+
+	// A version bump and a plugin description change nothing the fingerprint
+	// covers: the update applies at once, no re-consent needed.
+	writeFile(t, filepath.Join(src, ManifestFile), []byte(manifestWith("demo", "1.0.1", `"description":"now with a description","contributes":{"providers":[`+demoProviderEntry+`]}`)))
+	res, err := e.m.Update(bg, "demo", "", false)
+	if err != nil || !res.Applied || res.Pending {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if res.Info.Version != "1.0.1" || !res.Info.Active {
+		t.Fatalf("%+v", res.Info)
+	}
+	e.m.SyncProviders(reg)
+	if pluginProviderIDs(reg) != "demo/agent" {
+		t.Fatalf("the provider was lost by the applied update: %q", pluginProviderIDs(reg))
+	}
+}
+
+func TestPluginReload_Linked_ProviderChange_DisablesUntilConfirm(t *testing.T) {
+	e := newEnv(t)
+	reg := providers.New()
+	src := providerPluginDir(t, "demo", "1.0.0", demoProviderEntry)
+	lin, err := e.m.Link(bg, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Enable("demo", lin.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	e.m.SyncProviders(reg)
+	if pluginProviderIDs(reg) != "demo/agent" {
+		t.Fatal("setup: provider not registered")
+	}
+
+	// The linked manifest's argv changes under the daemon: reload must
+	// disable the plugin (the old files are gone) and unregister its provider.
+	v2 := strings.Replace(demoProviderEntry, `"bin/agent","--acp"`, `"bin/agent","--other"`, 1)
+	writeFile(t, filepath.Join(src, ManifestFile), []byte(manifestWith("demo", "1.1.0", `"contributes":{"providers":[`+v2+`]}`)))
+	got, err := e.m.Reload("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled || got.Active {
+		t.Fatalf("a changed provider must disable until re-consent: %+v", got)
+	}
+	e.m.SyncProviders(reg)
+	if ids := pluginProviderIDs(reg); ids != "" {
+		t.Fatalf("the provider of an unconsented reload stayed registered: %q", ids)
+	}
+
+	// The Human confirms the new argv: the provider comes back, with it.
+	fresh, err := e.m.Get("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Enable("demo", fresh.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	e.m.SyncProviders(reg)
+	s, ok := reg.Get("demo/agent")
+	if !ok {
+		t.Fatal("the provider did not come back after re-consent")
+	}
+	if s.Command[1] != "--other" {
+		t.Fatalf("command = %v, want the new argv", s.Command)
+	}
+}
+
 func TestPluginProviders_GlobalSwitchOff_NoProviders(t *testing.T) {
 	e := newEnv(t)
 	reg := providers.New()
@@ -267,5 +540,118 @@ func TestPluginProviders_DuplicateAcrossPlugins_Impossible(t *testing.T) {
 	e.m.SyncProviders(reg)
 	if got := pluginProviderIDs(reg); got != "alpha/agent,beta/agent" {
 		t.Fatalf("ids = %q: two plugins with the same provider id must stay distinct", got)
+	}
+}
+
+// reportRecorder is a host registry that records the helper process's
+// test.report (its whole environment and the initialize params it received).
+type reportRecorder struct {
+	mu     sync.Mutex
+	report []byte
+}
+
+func (r *reportRecorder) Request(context.Context, string, string, json.RawMessage) (any, *host.RPCError) {
+	return nil, &host.RPCError{Code: -32601, Message: "method_not_found"}
+}
+
+func (r *reportRecorder) Notify(_, method string, params json.RawMessage) {
+	if method == "test.report" {
+		r.mu.Lock()
+		r.report = append([]byte(nil), params...)
+		r.mu.Unlock()
+	}
+}
+
+func (r *reportRecorder) get() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return string(r.report)
+}
+
+// TestPluginProvider_Secret_NotInPluginProcessEnvOrInitialize: a plugin that
+// has a process AND a provider with a stored provider secret: the process's
+// environment and its initialize payload never contain the secret (only the
+// provider's agent child gets it), and the plugin log redactor knows it, so a
+// host line quoting it is stored scrubbed.
+func TestPluginProvider_Secret_NotInPluginProcessEnvOrInitialize(t *testing.T) {
+	const secret = "SENTINEL-provider-secret-6612"
+	rec := &reportRecorder{}
+	e := newHostEnv(t, rec)
+	if err := e.st.SetProviderSecret("demo/agent", "DEMO_API_KEY", secret); err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ := json.Marshal(hosttest.Command("report"))
+	src := writePluginDir(t, manifestWith("demo", "1.0.0", `"process":{"command":`+string(cmd)+`},"contributes":{"providers":[`+demoProviderEntry+`]}`),
+		map[string]string{"bin/agent": "#!/bin/sh\nexit 0\n"})
+	if err := os.Chmod(filepath.Join(src, "bin", "agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in := mustInstall(t, e, src)
+	if _, err := e.m.Enable("demo", in.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	waitProc(t, e.m, "demo", host.StateRunning)
+	deadline := time.Now().Add(5 * time.Second)
+	for rec.get() == "" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	got := rec.get()
+	if got == "" {
+		t.Fatal("setup: the process never reported")
+	}
+	if strings.Contains(got, secret) || strings.Contains(got, "DEMO_API_KEY") {
+		t.Fatalf("a provider secret (or its slot name) reached the plugin process:\n%s", got)
+	}
+
+	// The redactor knows provider secrets: a host line that quotes one is stored scrubbed.
+	e.m.RefreshProviderSecrets("demo")
+	e.m.notePlugin("demo", "providers", "launch failed: key "+secret+" was rejected")
+	logs, err := e.m.Logs("demo", 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range logs.Lines {
+		if strings.Contains(l.Text, secret) {
+			t.Fatalf("a provider secret is in the plugin log: %q", l.Text)
+		}
+	}
+	if g, _ := e.m.Get("demo"); strings.Contains(g.LastError, secret) {
+		t.Fatalf("a provider secret is in the plugin's lastError: %q", g.LastError)
+	}
+}
+
+// A plugin's agent is handed the workspace's MCP servers (with their env
+// values) and smind's orchestration token only when its manifest asks, and
+// consent says so.
+func TestProviderSpecs_McpServersOnlyWhenDeclared(t *testing.T) {
+	cases := map[string]struct {
+		acpExtra  string
+		wantNoMCP bool
+		wantFlag  bool
+	}{
+		"default":      {"", true, false},
+		"explicit no":  {`,"supportsMcpServers":false`, true, false},
+		"explicit yes": {`,"supportsMcpServers":true`, false, true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			entry := strings.Replace(demoProviderEntry, `,"supportsMcpServers":false`, c.acpExtra, 1)
+			in := mustInstall(t, e, providerPluginDir(t, "demo", "1.0.0", entry))
+			if in.Consent.AcpProviders[0].ReceivesMcp != c.wantFlag {
+				t.Errorf("consent ReceivesMcp = %v, want %v", in.Consent.AcpProviders[0].ReceivesMcp, c.wantFlag)
+			}
+			if _, err := e.m.Enable("demo", in.Consent.Fingerprint); err != nil {
+				t.Fatal(err)
+			}
+			if got := e.m.ProviderSpecs()["demo"].Specs[0].NoMCPServers; got != c.wantNoMCP {
+				t.Errorf("NoMCPServers = %v, want %v", got, c.wantNoMCP)
+			}
+		})
+	}
+	a := mustInstall(t, newEnv(t), providerPluginDir(t, "demo", "1.0.0", demoProviderEntry))
+	b := mustInstall(t, newEnv(t), providerPluginDir(t, "demo", "1.0.0", strings.Replace(demoProviderEntry, `"supportsMcpServers":false`, `"supportsMcpServers":true`, 1)))
+	if a.Consent.Fingerprint == b.Consent.Fingerprint {
+		t.Fatal("asking for MCP servers does not change the consent fingerprint")
 	}
 }

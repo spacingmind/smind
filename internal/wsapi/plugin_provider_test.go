@@ -1,11 +1,15 @@
 package wsapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spacingmind/smind/internal/plugins"
 	"github.com/spacingmind/smind/internal/providers"
@@ -34,7 +38,7 @@ func newProviderPluginEnvWith(t *testing.T, agentBody, extra string) *contribEnv
 	}
 	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
-	runner := taskrunner.New(wm, taskrunner.WithProviderSecrets(db))
+	runner := taskrunner.New(wm, taskrunner.WithProviderSecrets(db), taskrunner.WithACPModeProbe())
 	api, err := New(wm, newTestAccountsRegistry(t), runner, db, "tok")
 	if err != nil {
 		t.Fatal(err)
@@ -204,13 +208,13 @@ func TestPluginProvider_ReloadKeepsPluginLayer_AndEventsPublished(t *testing.T) 
 	}
 }
 
-// markerPlugin is a plugin whose agent file writes a marker when EXECUTED
-// (by anything: a version probe, a spawn). Nothing may ever run it before the
-// scrubbed launch exists.
+// markerPlugin is a plugin whose agent file records how it was executed: its
+// whole environment, its cwd and its argv go to a marker file, and it prints a
+// version. Nothing may run it except the scrubbed launch.
 func markerPlugin(t *testing.T, health string) (*contribEnv, string) {
 	t.Helper()
 	marker := filepath.Join(t.TempDir(), "executed")
-	body := "#!/bin/sh\necho ran > '" + marker + "'\necho 'agent 9.9.9'\n"
+	body := "#!/bin/sh\n{ env; echo \"PWD_REAL=$(pwd -P)\"; echo \"ARGV=$*\"; } > '" + marker + "'\necho 'agent 9.9.9'\n"
 	return newProviderPluginEnvWith(t, body, health), marker
 }
 
@@ -223,12 +227,11 @@ func (e *contribEnv) providerTest(t *testing.T, id string) map[string]any {
 	return out
 }
 
-// TestProviderTest_PluginProvider_NeverExecutesTheCommand: provider.test on a
-// plugin provider reports the lookup of argv[0] and the hints, and never runs
-// the plugin's binary (no version probe), with a versionArg or without one.
+// TestProviderTest_PluginProvider_NeverExecutesTheCommand: without a declared
+// versionArg provider.test only looks argv[0] up; an inactive or removed
+// plugin's provider is not looked at at all; a relay caller gets the same.
 func TestProviderTest_PluginProvider_NeverExecutesTheCommand(t *testing.T) {
 	for name, health := range map[string]string{
-		"version arg set":   `,"health":{"install":"npm i -g acme","login":"run acme login","versionArg":"--version","minVersion":"1.0.0"}`,
 		"version arg unset": `,"health":{"install":"npm i -g acme","login":"run acme login"}`,
 		"no health":         "",
 	} {
@@ -238,33 +241,105 @@ func TestProviderTest_PluginProvider_NeverExecutesTheCommand(t *testing.T) {
 			if res["ok"] != true || !strings.Contains(res["detail"].(string), "agent") {
 				t.Fatalf("the lookup must still report the file: %v", res)
 			}
-			if strings.Contains(res["detail"].(string), "9.9.9") {
-				t.Fatalf("a version was read, so the binary ran: %v", res)
-			}
 			if _, err := os.Stat(marker); err == nil {
-				t.Fatal("provider.test EXECUTED the plugin's command")
-			}
-			if strings.Contains(health, "versionArg") && !strings.Contains(res["detail"].(string), "version check") {
-				t.Fatalf("the result should say the version check is not available yet: %v", res)
+				t.Fatal("provider.test EXECUTED the plugin's command without a versionArg")
 			}
 			if strings.Contains(health, "login") && !strings.Contains(res["detail"].(string), "run acme login") {
 				t.Fatalf("login hint missing: %v", res)
 			}
 		})
 	}
+	t.Run("plugin disabled", func(t *testing.T) {
+		e, marker := markerPlugin(t, `,"health":{"versionArg":"--version"}`)
+		if _, err := e.call("plugin.disable", localRC(), map[string]any{"id": "acme"}); err != nil {
+			t.Fatal(err)
+		}
+		if res := e.providerTest(t, "acme/agent"); res["ok"] == true {
+			t.Fatalf("an unregistered plugin provider tested ok: %v", res)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatal("a DISABLED plugin's command was executed by provider.test")
+		}
+	})
+	t.Run("relay", func(t *testing.T) {
+		e, marker := markerPlugin(t, "")
+		if _, err := e.call("provider.test", relayRC(), map[string]any{"provider": "acme/agent"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatal("a relay provider.test executed the command without a versionArg")
+		}
+	})
 }
 
-func TestProviderTest_PluginProvider_RelaySessionStillNeverExecutes(t *testing.T) {
-	e, marker := markerPlugin(t, `,"health":{"versionArg":"--version"}`)
-	if _, err := e.call("provider.test", relayRC(), map[string]any{"provider": "acme/agent"}); err != nil {
+// TestProviderTest_PluginProvider_VersionProbe_ScrubbedEnv: with a declared
+// versionArg the probe runs, but ONLY through the scrubbed launch: built env
+// (no daemon variable, no SMIND_*, no secret), private HOME, cwd the plugin
+// directory, argv exactly the declared flag.
+func TestProviderTest_PluginProvider_VersionProbe_ScrubbedEnv(t *testing.T) {
+	t.Setenv("SMIND_PD2_SENTINEL", "daemon-leak-8812")
+	t.Setenv("ANTHROPIC_API_KEY", "daemon-leak-8812")
+	e, marker := markerPlugin(t, `,"health":{"versionArg":"--version","minVersion":"1.0.0"}`)
+	if _, err := e.call("provider.setSecret", localRC(), map[string]any{"instanceId": "acme/agent", "name": "ACME_API_KEY", "value": providerSecretSentinel}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("a relay provider.test executed the plugin's command")
+	res := e.providerTest(t, "acme/agent")
+	if res["ok"] != true || !strings.Contains(res["detail"].(string), "9.9.9") {
+		t.Fatalf("the probe should read the version: %v", res)
 	}
-	// An agent connection cannot reach provider.test at all.
-	if !runScopedSet["provider.list"] || runScopedSet["provider.test"] {
-		t.Fatal("provider.test must not be callable by run-scoped agents")
+	raw, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the probe did not run: %v", err)
+	}
+	dump := string(raw)
+	for _, bad := range []string{"daemon-leak-8812", "SMIND_", "ANTHROPIC", providerSecretSentinel, "ACME_API_KEY"} {
+		if strings.Contains(dump, bad) {
+			t.Errorf("%q reached the version probe:\n%s", bad, dump)
+		}
+	}
+	for _, want := range []string{"PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin", "/plugins/acme/data/providers/agent/home", "ARGV=--version"} {
+		if !strings.Contains(dump, want) {
+			t.Errorf("probe env/argv is missing %q:\n%s", want, dump)
+		}
+	}
+	if !strings.Contains(dump, "PWD_REAL=") || !strings.Contains(dump, "/plugins/acme") {
+		t.Errorf("the probe's cwd is not the plugin directory:\n%s", dump)
+	}
+	// Too old: the declared minimum gates it, as for core providers.
+	e2, _ := markerPlugin(t, `,"health":{"versionArg":"--version","minVersion":"99.0.0","install":"update acme"}`)
+	if r := e2.providerTest(t, "acme/agent"); r["ok"] != false || !strings.Contains(r["detail"].(string), "too old") {
+		t.Fatalf("minVersion not enforced: %v", r)
+	}
+}
+
+// TestPluginProvider_ListAndAgentCallers_NeverStartPluginCode: provider.list
+// is callable by an agent and runs the lazy mode probe for providers; for a
+// plugin provider that probe must never start the plugin's code. (provider.test
+// and the write methods are not run-scoped at all: see
+// TestRunScopedMethods_NoProviderExecOrWriteMethod.)
+func TestPluginProvider_ListAndAgentCallers_NeverStartPluginCode(t *testing.T) {
+	e, marker := markerPlugin(t, `,"health":{"versionArg":"--version"}`)
+	for _, rc := range []*requestContext{agentRC(), localRC(), relayRC()} {
+		if _, err := e.call("provider.list", rc, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(600 * time.Millisecond) // a lazy probe is asynchronous
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("provider.list started a plugin's code")
+	}
+	// provider.test is refused to agents by the connection layer (it is not
+	// run-scoped); the handler-level guards cover the management methods.
+	if runScopedSet["provider.test"] {
+		t.Error("provider.test is run-scoped: an agent could trigger the version probe")
+	}
+	for _, m := range []string{"plugin.enable", "plugin.install", "plugin.reload", "provider.setSecret"} {
+		if _, err := e.call(m, agentRC(), map[string]any{"provider": "acme/agent", "instanceId": "acme/agent", "name": "ACME_API_KEY", "value": "x", "id": "acme", "confirm": "x", "source": "x"}); err == nil {
+			t.Errorf("an agent connection could call %s", m)
+		}
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("an agent call executed a plugin's code")
 	}
 }
 
@@ -291,5 +366,67 @@ func TestRunScopedMethods_NoProviderExecOrWriteMethod(t *testing.T) {
 		if strings.HasPrefix(m, "provider.") && m != "provider.list" {
 			t.Errorf("%s is run-scoped: only provider.list may be (a read; its mode probe is guarded for plugin providers)", m)
 		}
+	}
+}
+
+// TestPluginProvider_Secret_NeverInArgvLogsEventsTranscript: after a provider
+// secret is set and every surface that could echo it is exercised (set/clear
+// answers, provider.list, plugin.get, plugin.list, plugin.logs, the version
+// probe with its marker argv, the daemon log, the events on the bus), the
+// value is nowhere.
+func TestPluginProvider_Secret_NeverInArgvLogsEventsTranscript(t *testing.T) {
+	var logBuf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+	prevSlog := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prevSlog) })
+
+	e, marker := markerPlugin(t, `,"health":{"versionArg":"--version"}`)
+	sub := subscribeTopics(e.api, TopicProviderUpdated, TopicPluginUpdated)
+	var surfaces []string
+	rec := func(raw string) { surfaces = append(surfaces, raw) }
+
+	rec(e.json(t, "provider.setSecret", localRC(), map[string]any{"instanceId": "acme/agent", "name": "ACME_API_KEY", "value": providerSecretSentinel}))
+	rec(e.json(t, "provider.list", localRC(), nil))
+	rec(e.json(t, "provider.list", relayRC(), map[string]any{"includeInactive": true}))
+	rec(e.json(t, "plugin.get", localRC(), map[string]any{"id": "acme"}))
+	rec(e.json(t, "plugin.list", relayRC(), nil))
+	rec(e.json(t, "plugin.logs", localRC(), map[string]any{"id": "acme", "limit": 200}))
+	rec(e.json(t, "provider.test", localRC(), map[string]any{"provider": "acme/agent"}))
+	rec(e.json(t, "provider.clearSecret", localRC(), map[string]any{"instanceId": "acme/agent", "name": "ACME_API_KEY"}))
+	if raw, err := os.ReadFile(marker); err == nil {
+		rec(string(raw)) // the probe's whole env and argv
+	} else {
+		t.Fatalf("the probe did not run: %v", err)
+	}
+	sub.mu.Lock()
+	for _, ev := range sub.queue {
+		b, _ := json.Marshal(ev)
+		rec(string(b))
+	}
+	sub.mu.Unlock()
+	rec(logBuf.String())
+	for i, s := range surfaces {
+		if strings.Contains(s, providerSecretSentinel) {
+			t.Errorf("surface %d carries the provider secret: %.300s", i, s)
+		}
+	}
+}
+
+// TestPluginProvider_ErrorsAndLogs_LabeledByPlugin (AC34): the problems and
+// refusals about a plugin provider name the plugin.
+func TestPluginProvider_ErrorsAndLogs_LabeledByPlugin(t *testing.T) {
+	e := newProviderPluginEnv(t)
+	_, err := e.call("provider.updateInstance", localRC(), map[string]any{"id": "acme/agent", "additionalModels": []map[string]any{{"id": "x"}}})
+	if err == nil || !strings.Contains(err.Error(), "acme") {
+		t.Fatalf("refusal = %v", err)
+	}
+	// An unsafe command file after enable is recorded on the plugin, naming it and the provider.
+	e.api.plugins.NotePluginProblem("acme", "providers-label-test", "provider acme/agent: command \"bin/agent\": is not executable (chmod +x)")
+	raw := e.json(t, "plugin.get", localRC(), map[string]any{"id": "acme"})
+	if !strings.Contains(raw, "acme/agent") || !strings.Contains(raw, "lastError") {
+		t.Fatalf("plugin.get = %s", raw)
 	}
 }

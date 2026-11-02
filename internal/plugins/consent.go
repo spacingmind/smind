@@ -123,7 +123,11 @@ type AcpEntry struct {
 	SecretEnv   []string `json:"secretEnv,omitempty"`
 	EnvDigest   string   `json:"envDigest,omitempty"`
 	InheritHome bool     `json:"inheritHome,omitempty"`
-	Vendor      string   `json:"vendor,omitempty"`
+	// ReceivesMcp: the agent is handed the workspace's MCP servers (with
+	// their env values) and smind's orchestration token (manifest
+	// supportsMcpServers: true). Default false.
+	ReceivesMcp bool   `json:"receivesMcp,omitempty"`
+	Vendor      string `json:"vendor,omitempty"`
 }
 
 // BuildConsent derives the consent summary of a validated manifest.
@@ -196,7 +200,7 @@ func fingerprint(c Consent) string {
 }
 
 func acpEntryOf(plugin string, p ProviderContribution) AcpEntry {
-	e := AcpEntry{ID: ProviderID(plugin, p.ID), Label: p.Label, Command: append([]string(nil), p.ACP.Command...), InheritHome: p.ACP.InheritHome, Vendor: p.Vendor}
+	e := AcpEntry{ID: ProviderID(plugin, p.ID), Label: p.Label, Command: append([]string(nil), p.ACP.Command...), InheritHome: p.ACP.InheritHome, Vendor: p.Vendor, ReceivesMcp: p.ACP.SupportsMcpServers != nil && *p.ACP.SupportsMcpServers}
 	if form, _ := commandForm(p.ACP.Command[0]); form == "path" {
 		e.Resolves = "plugin file"
 	} else {

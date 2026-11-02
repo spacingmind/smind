@@ -515,25 +515,36 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	case r.acpPermissionPolicy != nil:
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
-	if spec, ok := r.providerRegistry().Get(string(provider)); ok && spec.NoMCPServers {
+	spec, haveSpec := r.providerRegistry().Get(string(provider))
+	if haveSpec && spec.NoMCPServers {
 		opts = append(opts, acp.WithoutMcpServers())
 	}
 
-	env, err := r.launchEnvEntries(provider)
-	if err != nil {
-		return fmt.Errorf("taskrunner: %w", err)
-	}
-	if add, note := hookEnvEntries(ctx, env); len(add) > 0 || note != "" {
-		env = append(env, add...)
-		if note != "" {
-			r.sendSessionNote(ctx, events, note)
+	if haveSpec && spec.Plugin != "" {
+		// A plugin's agent: scrubbed env, confined command, cwd = the task
+		// worktree. No scratch, hook or daemon env reaches it.
+		pcmd, popts, err := r.pluginLaunch(spec, worktreePath)
+		if err != nil {
+			return fmt.Errorf("taskrunner: %w", err)
 		}
-	}
-	// The scratch entries come first so any provider/task entry wins
-	// (WithEnv appends after the inherited environment; last entry wins).
-	env = append(append([]string(nil), scratchEnvFrom(ctx)...), env...)
-	if len(env) > 0 {
-		opts = append(opts, acp.WithEnv(env...))
+		command, opts = pcmd, append(opts, popts...)
+	} else {
+		env, err := r.launchEnvEntries(provider)
+		if err != nil {
+			return fmt.Errorf("taskrunner: %w", err)
+		}
+		if add, note := hookEnvEntries(ctx, env); len(add) > 0 || note != "" {
+			env = append(env, add...)
+			if note != "" {
+				r.sendSessionNote(ctx, events, note)
+			}
+		}
+		// The scratch entries come first so any provider/task entry wins
+		// (WithEnv appends after the inherited environment; last entry wins).
+		env = append(append([]string(nil), scratchEnvFrom(ctx)...), env...)
+		if len(env) > 0 {
+			opts = append(opts, acp.WithEnv(env...))
+		}
 	}
 
 	client, err := r.newACPClient(command, opts...)
@@ -549,6 +560,12 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	rows, err := r.mcpRowsFor(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
+	}
+	if haveSpec && spec.Plugin != "" {
+		// Even when the manifest asked for MCP servers (and consent said so), a
+		// plugin's agent never gets smind's own orchestration server: its env
+		// carries the run identity and the verdict/steward token.
+		rows = withoutSmindMcp(rows)
 	}
 	mcpWire, inactive, unresolved, states, err := acpMcpServers(rows, client, r.lookPathFunc())
 	if err != nil {

@@ -23,8 +23,10 @@
 // multi-line shell command (policy-engine shape; see their case below); "permission-edit"
 // is the same idea for an edit-kind request, with a synchronization chunk
 // and a real delay before the request goes out so a test can reliably
-// change the run's permission settings mid-run before it arrives; anything
-// else (including no file at all) runs the default two-chunk scripted reply.
+// change the run's permission settings mid-run before it arrives; "env-dump"
+// writes the agent's whole environment to "envdump.txt" in the session's
+// cwd and then replies with the default two chunks; anything else
+// (including no file at all) runs the default two-chunk scripted reply.
 package main
 
 import (
@@ -924,6 +926,18 @@ func runPromptScript(promptMsg message, cwd string) {
 	if strings.HasPrefix(scenario, "usage ") {
 		runUsageScript(promptMsg, scenario)
 		return
+	}
+
+	// "env-dump": write the agent's whole environment (os.Environ(), one
+	// KEY=value per line) to "envdump.txt" in the session's cwd, then the
+	// default two-chunk reply -- so a test can assert exactly what the
+	// daemon's launch env gave the agent child.
+	if scenario == "env-dump" {
+		_ = os.WriteFile(filepath.Join(cwd, "envdump.txt"), []byte(strings.Join(os.Environ(), "\n")), 0o644)
+		// The agent PROCESS's own working directory (not the session cwd).
+		if wd, err := os.Getwd(); err == nil {
+			_ = os.WriteFile(filepath.Join(cwd, "envdump_cwd.txt"), []byte(wd), 0o644)
+		}
 	}
 
 	sessionUpdate("Hello, ")
