@@ -1,6 +1,8 @@
 import { Icons } from "@/lib/icons";
+import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
 
-import type { GitRule, PermissionDetail } from "@/lib/types";
+import { HeredocReveal } from "@/components/permission/heredoc-reveal";
+import type { GitRule, HeredocReveal as HeredocRevealResult, PermissionDetail } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function kb(bytes: number): string {
@@ -140,9 +142,11 @@ function PolicyLine({ policy }: { policy: NonNullable<PermissionDetail["policy"]
 /**
  * The structured "what is this write/edit/command about to do" block shown
  * inside a permission card (dogfood-gap-fixes AC3). Rendered only when the
- * daemon sent a `detail`.
+ * daemon sent a `detail`. With a `requestId` and elided heredoc markers,
+ * each body is revealable on demand (permission.revealHeredoc).
  */
-export function PermissionDetailView({ detail }: { detail: PermissionDetail }) {
+export function PermissionDetailView({ detail, requestId }: { detail: PermissionDetail; requestId?: string }) {
+  const client = useDaemonConnection().client;
   const size = sizeSummary(detail);
   const body = detail.diff || detail.preview;
   const bodyTitle = detail.diff ? "Diff" : "Preview";
@@ -200,6 +204,17 @@ export function PermissionDetailView({ detail }: { detail: PermissionDetail }) {
           </pre>
           {detail.truncated && <div className="mt-1 text-foreground-muted" data-testid="permission-detail-truncated">Truncated</div>}
         </div>
+      )}
+      {detail.heredocs && detail.heredocs.length > 0 && requestId && (
+        <HeredocReveal
+          refs={detail.heredocs}
+          testId="permission-heredoc"
+          reveal={(index) =>
+            client
+              ? client.call<HeredocRevealResult>("permission.revealHeredoc", { permissionId: requestId, index })
+              : Promise.reject(new Error("no daemon connection"))
+          }
+        />
       )}
     </div>
   );

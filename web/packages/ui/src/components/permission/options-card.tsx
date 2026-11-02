@@ -49,7 +49,7 @@ export function OptionsCard({
       description={
         respondError || pending.detail ? (
           <>
-            {pending.detail && <PermissionDetailView detail={pending.detail} />}
+            {pending.detail && <PermissionDetailView detail={pending.detail} requestId={pending.requestId} />}
             {respondError && <div>{`respond failed: ${respondError}`}</div>}
           </>
         ) : undefined
