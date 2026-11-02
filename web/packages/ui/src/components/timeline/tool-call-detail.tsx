@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
+import { HeredocReveal } from "@/components/permission/heredoc-reveal";
 import { ToolPayload, stringifyToolPayload } from "@/components/timeline/tool-call-card";
 import { ToolReadPreview } from "@/components/timeline/tool-read-preview";
 import { num, toolInput, type ToolIntent } from "@/components/timeline/tool-renderers";
 import type { TimelineToolCallItem } from "@/hooks/use-run-timeline";
+import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
+import type { HeredocReveal as HeredocRevealResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** A tool result rendered as text, whatever the provider wrapped it in. */
@@ -66,6 +69,7 @@ export function ToolCallDetail({ item, intent }: { item: TimelineToolCallItem; i
     return (
       <>
         {command && <TerminalCommand body={command} />}
+        {item.heredocs && item.heredocs.length > 0 && item.runId && <ToolHeredocReveal item={item} />}
         {output && <TerminalOutput output={output} failed={item.status === "failure"} />}
         {!command && !output && <GenericBody item={item} />}
       </>
@@ -131,6 +135,26 @@ export function ToolCallDetail({ item, intent }: { item: TimelineToolCallItem; i
   }
 
   return <GenericBody item={item} />;
+}
+
+/**
+ * A terminal call's heredoc bodies, revealed on demand (run.revealToolHeredoc). A wrapper so the
+ * connection hook lives in a component that is mounted only when there is something to reveal.
+ */
+function ToolHeredocReveal({ item }: { item: TimelineToolCallItem }) {
+  const client = useDaemonConnection().client;
+  const runId = item.runId;
+  const refs = item.heredocs ?? [];
+  return (
+    <HeredocReveal
+      refs={refs}
+      testId="tool-heredoc"
+      reveal={(index) => {
+        if (!client || !runId) return Promise.reject(new Error("no daemon connection"));
+        return client.call<HeredocRevealResult>("run.revealToolHeredoc", { runId, toolCallId: item.toolCallId, index });
+      }}
+    />
+  );
 }
 
 /** The command line of a terminal call, in the same embedded well (`rounded-md bg-surface`) every other payload body uses. */

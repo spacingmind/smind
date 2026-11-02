@@ -7,7 +7,7 @@ import { supportsThinking } from "@/lib/thinking-levels";
 import type { WsClientLike } from "@/lib/ws-client";
 import { resendRequests } from "@/lib/attachments/reuse";
 import { runStartParams } from "@/lib/run-start";
-import type { AttachmentMeta, AttachmentRequest, PermissionSettings, PermissionQuestion, PermissionDetail, PermissionRequestEventParams, PermissionResolutionReason, PermissionResolvedEventParams, McpServerState, RunUsage, RunAttachResult, RunLogEvent, RunLogsResult, RunSetPermissionModeResult, RunStartResult, RunStatusEventPayload, RunStatusValue, RunSummary, ThinkingLevel, ToolCallStatus, WhenBusy } from "@/lib/types";
+import type { AttachmentMeta, AttachmentRequest, PermissionSettings, PermissionQuestion, PermissionDetail, PermissionRequestEventParams, PermissionResolutionReason, PermissionResolvedEventParams, HeredocRef, McpServerState, RunUsage, RunAttachResult, RunLogEvent, RunLogsResult, RunSetPermissionModeResult, RunStartResult, RunStatusEventPayload, RunStatusValue, RunSummary, ThinkingLevel, ToolCallStatus, WhenBusy } from "@/lib/types";
 
 /** A still-unanswered permission request on a run, as shown by the detail pane. */
 export interface PendingPermission {
@@ -53,6 +53,10 @@ export interface TimelineToolCallItem {
   status: ToolCallStatus;
   input?: unknown;
   result?: unknown;
+  /** The elided heredoc bodies behind the command's markers (run.revealToolHeredoc's index keys); kept from the first event that carried them. */
+  heredocs?: HeredocRef[];
+  /** The run whose history produced this item -- the key run.revealToolHeredoc needs; set by the timeline, never on the wire. */
+  runId?: string;
 }
 
 /**
@@ -164,7 +168,7 @@ const NON_ITEM_EVENTS = new Set(["done", "permission_request", "mcp_servers"]);
  * row", because a transcript that crashes on one bad event loses the
  * whole run's history with it.
  */
-export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): TimelineItem[] {
+export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent, runId?: string): TimelineItem[] {
   const type = event.type;
 
   if (NON_ITEM_EVENTS.has(type)) return items;
@@ -201,6 +205,8 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
           status: event.status ?? "running",
           input: event.input,
           result: event.result,
+          heredocs: event.heredocs,
+          runId,
         },
       ];
     }
@@ -214,6 +220,8 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
       status: event.status ?? existing.status,
       input: event.input ?? existing.input,
       result: event.result ?? existing.result,
+      heredocs: event.heredocs ?? existing.heredocs,
+      runId: runId ?? existing.runId,
     };
     const next = items.slice();
     next[index] = merged;
@@ -289,10 +297,10 @@ function planEntries(payload: unknown): PlanEntry[] | undefined {
 }
 
 /** Folds a whole backfilled event batch (run.logs) into the same item list the live stream builds. */
-export function buildTimeline(events: RunLogEvent[]): TimelineItem[] {
+export function buildTimeline(events: RunLogEvent[], runId?: string): TimelineItem[] {
   const requests = new PermissionRequestKinds();
   let items: TimelineItem[] = [];
-  for (const event of events) items = appendTimelineEvent(items, requests.annotate(event));
+  for (const event of events) items = appendTimelineEvent(items, requests.annotate(event), runId);
   return items;
 }
 
@@ -558,7 +566,7 @@ function appendEvent(setRuns: Dispatch<SetStateAction<RunEntry[] | null>>, id: s
     prev
       ? prev.map((r) => {
           if (r.id !== id) return r;
-          const items = appendTimelineEvent(r.items, event);
+          const items = appendTimelineEvent(r.items, event, id);
           // Identical array means the event changed nothing (an empty
           // chunk, a "done") -- returning the same run object keeps the
           // whole list's identity stable and skips the re-render.
@@ -832,7 +840,7 @@ export function useRunTimeline(
                 if (session.cancelled) return;
                 const usage = latestUsage(logs.events);
                 patch(setRuns, r.ID, {
-                  items: buildTimeline(logs.events),
+                  items: buildTimeline(logs.events, r.ID),
                   mcpServers: latestMcpServers(logs.events),
                   // Only set the key when a usage event exists, so a
                   // backfill never overwrites a list-seeded value with
@@ -978,7 +986,7 @@ export function useRunTimeline(
                 .then((logs) => {
                   if (session.cancelled) return;
                   patch(setRuns, r.ID, {
-                    items: buildTimeline(logs.events),
+                    items: buildTimeline(logs.events, r.ID),
                     ...attachmentsOf(logs),
                     ...lineageOf(logs),
                     status: logs.status,
