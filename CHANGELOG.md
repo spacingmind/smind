@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.18.0](https://github.com/spacingmind/smind/compare/v0.17.0...v0.18.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **permissions:** heredoc bodies are elided from every permission detail and tool call a client receives (web, mobile, relay, CLI, MCP `task_logs`): `detail.command` and the tool call's `input.command`/`title` show `<<TAG [heredoc N bytes]`, `detail.heredocs` lists `{index, bytes}`, and an echoed body in a tool `result` is replaced by the same marker. A human reveals a body with `permission.revealHeredoc` / `run.revealToolHeredoc`, `smind permission show --reveal` or the "Show heredoc" toggle. Clients that parsed the raw command from these fields must switch to the reveal. Policy decisions are unchanged: the engine still evaluates the raw command ([#810](https://github.com/spacingmind/smind/issues/810), [#813](https://github.com/spacingmind/smind/issues/813), [#816](https://github.com/spacingmind/smind/issues/816)).
+* **steward:** the `steward_verdict_submit` tool / `steward.verdict.submit` RPC takes the verdict document in `submission` (was `verdict`); the old name is refused with an error that names `submission` ([#807](https://github.com/spacingmind/smind/issues/807)).
+
+
+### Features
+
+* **mobile:** plugin panel renderer for ui:1 views (plugins wave C, PC3) ([#790](https://github.com/spacingmind/smind/issues/790)) ([9f58b44](https://github.com/spacingmind/smind/commit/9f58b446aacede578a1a9a5f135b6a64bdd5833b))
+* **mobile:** reveal elided heredoc bodies on the permission card and the tool row (reveal step 5) ([#818](https://github.com/spacingmind/smind/issues/818)) ([73123c5](https://github.com/spacingmind/smind/commit/73123c592df3f05b7d47821dd6a0622236829072))
+* **mobile:** steward review rows, review screen, permission rule line and read-only policy screen (S3b) ([#801](https://github.com/spacingmind/smind/issues/801)) ([53313b9](https://github.com/spacingmind/smind/commit/53313b90e51911f26f91c11d8c2eee6d1e5942ee))
+* **permissions:** elide heredoc bodies from permission details and tool_call events (reveal step 2) ([#810](https://github.com/spacingmind/smind/issues/810)) ([5c60c67](https://github.com/spacingmind/smind/commit/5c60c67ef9a1baf2ef6395b16f88a956290dc662))
+* **permissions:** human-only heredoc reveal RPCs, audit rows and smind permission show --reveal (reveal step 3) ([#813](https://github.com/spacingmind/smind/issues/813)) ([9a1c526](https://github.com/spacingmind/smind/commit/9a1c52643af5d1537b04687b001de378de29edc9))
+* **permissions:** scrub echoed heredoc bodies from tool results at the client boundary (reveal F1) ([#816](https://github.com/spacingmind/smind/issues/816)) ([5228e09](https://github.com/spacingmind/smind/commit/5228e09f3e813631663f37fc01ae37706ef2b0f8))
+* **plugins:** plugin-contributed ACP providers, manifest and registry (Wave D PD1) ([#812](https://github.com/spacingmind/smind/issues/812)) ([201b28c](https://github.com/spacingmind/smind/commit/201b28cac0b6baacd6d0e066728bb73476de0b00))
+* **plugins:** scrubbed, confined launch of plugin providers (Wave D PD2a) ([#815](https://github.com/spacingmind/smind/issues/815)) ([940f46e](https://github.com/spacingmind/smind/commit/940f46e930b5eb804508103520cc70d8647731b3))
+* **web:** demo mode, the real UI against a scripted in-browser daemon (ADR-0051) ([#797](https://github.com/spacingmind/smind/issues/797)) ([2e26909](https://github.com/spacingmind/smind/commit/2e269093825f4fe6e4d98dde786403ab5b07a847))
+* **web:** reveal elided heredoc bodies on the approval card and the timeline tool card (reveal step 4) ([#814](https://github.com/spacingmind/smind/issues/814)) ([723e3c6](https://github.com/spacingmind/smind/commit/723e3c628a46af02e75efc20c7292e0daabf00c4))
+* **web:** the demo tells the landing hero's nine tasks (scenario v2) ([#799](https://github.com/spacingmind/smind/issues/799)) ([aff5166](https://github.com/spacingmind/smind/commit/aff5166984a7593afa9953e7b53949ea6ee05ad7))
+
+
+### Bug Fixes
+
+* **permissions:** a heredoc reveal is refused when its audit row cannot be written ([#817](https://github.com/spacingmind/smind/issues/817)) ([ddf8e8b](https://github.com/spacingmind/smind/commit/ddf8e8bbb40d7839a660de9cc0fd28b8b02af8e5))
+* **permpolicy:** elide heredoc bodies inside nested scans from Normalized and Raw ([#804](https://github.com/spacingmind/smind/issues/804)) ([e24d260](https://github.com/spacingmind/smind/commit/e24d26057c3540f96611301d058f347a8306cf83))
+* **permpolicy:** heredoc elision keeps a newline so the card never glues tokens ([#803](https://github.com/spacingmind/smind/issues/803)) ([bce96c8](https://github.com/spacingmind/smind/commit/bce96c8d3ba1e557a8a8ce20b12c1301ae4eedd8))
+* **qaframes:** the scratch daemon never downloads a Go toolchain into its temp HOME ([#811](https://github.com/spacingmind/smind/issues/811)) ([373c4a3](https://github.com/spacingmind/smind/commit/373c4a3a4f4f73a25228a2107395a5d8d0e0b886))
+* **steward:** real seat cost in the review row, verdict param renamed to submission with caps in the schema ([#807](https://github.com/spacingmind/smind/issues/807)) ([2178979](https://github.com/spacingmind/smind/commit/217897974accaea9f03d105a50f265854a6aae7f))
+
 ## [0.17.0](https://github.com/spacingmind/smind/compare/v0.16.0...v0.17.0) (2026-11-01)
 
 
