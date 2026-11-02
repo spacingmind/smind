@@ -7,6 +7,7 @@ import (
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/pluginagent"
 	"github.com/spacingmind/smind/internal/providers"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // pluginLaunch is the ONLY way a plugin provider's agent is started (Wave D,
@@ -47,4 +48,15 @@ func (r *Runner) pluginLaunch(spec providers.Spec, dir string) (command []string
 // daemon's), so a caller that did not branch to pluginLaunch fails closed.
 func errPluginLaunchBypass(provider Provider, plugin string) error {
 	return fmt.Errorf("provider %q (plugin %s): the generic launch env is not used for plugin providers", provider, plugin)
+}
+
+// withoutSmindMcp drops smind's built-in orchestration server from rows.
+func withoutSmindMcp(rows []store.McpServer) []store.McpServer {
+	out := make([]store.McpServer, 0, len(rows))
+	for _, row := range rows {
+		if row.Name != smindMcpName {
+			out = append(out, row)
+		}
+	}
+	return out
 }

@@ -561,6 +561,12 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
+	if haveSpec && spec.Plugin != "" {
+		// Even when the manifest asked for MCP servers (and consent said so), a
+		// plugin's agent never gets smind's own orchestration server: its env
+		// carries the run identity and the verdict/steward token.
+		rows = withoutSmindMcp(rows)
+	}
 	mcpWire, inactive, unresolved, states, err := acpMcpServers(rows, client, r.lookPathFunc())
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)

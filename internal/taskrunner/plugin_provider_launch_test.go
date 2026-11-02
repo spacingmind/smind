@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -448,4 +450,67 @@ func TestPluginProvider_CoreProviderLaunchUnchanged(t *testing.T) {
 	if !got["SMIND_TOKEN="+daemonLeakValue] {
 		t.Error("core ACP providers must still inherit the daemon environment (unchanged behaviour)")
 	}
+}
+
+// TestPluginProvider_OrchestrationToken_NeverReachesPluginAgent: even a plugin
+// whose manifest asked for MCP servers (and so receives the workspace's
+// ordinary rows) never gets smind's own orchestration server, and the run
+// identity / verdict token (the policy env) is absent from both the MCP
+// config it is handed and its process environment.
+func TestPluginProvider_OrchestrationToken_NeverReachesPluginAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake agent launch is exercised on unix")
+	}
+	const token = "SENTINEL-orchestration-token-3318"
+	t.Setenv("FAKEAGENT_MCP_CAPS", "stdio,http")
+	dump := filepath.Join(t.TempDir(), "mcp-dump.json")
+	t.Setenv("FAKEAGENT_MCP_DUMP", dump)
+
+	st, wm, _ := newTestStoreAndManager(t)
+	task := newTestTaskUnder(t, wm)
+	if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte("env-dump"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mcpservers.New(st).Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "go", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	// The agent's environment is built, so the fake agent's switches travel as
+	// the plugin's own literal env.
+	f := newPluginFixture(t, "", func(s *providers.Spec) {
+		s.NoMCPServers = false
+		s.SecretSlots, s.SecretEnv = nil, nil
+		s.Env = map[string]string{"FAKEAGENT_MCP_CAPS": "stdio,http", "FAKEAGENT_MCP_DUMP": dump}
+	})
+	reg := f.reg
+	r := New(wm, WithProviderRegistry(reg), WithMcpServers(mcpservers.New(st)), WithSmindBinary("/usr/bin/smind-test"))
+
+	ctx := WithRunContract(context.Background(), RunContract{Mcp: &McpPolicy{Orchestration: true, Env: map[string]string{"SMIND_RUN_ID": "r-1", "SMIND_VERDICT_TOKEN": token}}})
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, "acme/agent", "hi", nil, PermissionSettings{}, "", "", events)
+	}()
+	var out []string
+	for e := range events {
+		b, _ := json.Marshal(e)
+		out = append(out, string(b))
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	wire := readMcpDump(t, dump)
+	if !strings.Contains(wire, `"pw"`) {
+		t.Fatalf("setup: with supportsMcpServers the ordinary row must be handed over: %s", wire)
+	}
+	if strings.Contains(wire, token) || strings.Contains(wire, "SMIND_") || strings.Contains(wire, `"smind"`) {
+		t.Fatalf("smind's orchestration server or its token reached the plugin agent's MCP config: %s", wire)
+	}
+	raw, err := os.ReadFile(filepath.Join(*task.WorktreePath, "envdump.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), token) || strings.Contains(string(raw), "SMIND_") {
+		t.Fatalf("the orchestration identity reached the plugin agent's environment:\n%s", raw)
+	}
+	assertNoSentinel(t, token, out...)
 }
