@@ -267,3 +267,29 @@ func TestProviderTest_PluginProvider_RelaySessionStillNeverExecutes(t *testing.T
 		t.Fatal("provider.test must not be callable by run-scoped agents")
 	}
 }
+
+// TestRunScopedMethods_NoProviderExecOrWriteMethod: a method that can execute
+// a provider's command (provider.test's version probe) or change what a
+// provider launches with must never become callable by an agent (MCP via
+// `smind mcp serve`). Only the read, provider.list, is run-scoped; a later
+// widening of RunScopedMethods that adds any of these fails here.
+func TestRunScopedMethods_NoProviderExecOrWriteMethod(t *testing.T) {
+	never := []string{
+		"provider.test", "provider.reload", "provider.addInstance", "provider.addFromRecipe", "provider.updateInstance",
+		"provider.setEnv", "provider.setSecret", "provider.clearSecret", "provider.setDefaultModel", "provider.clearCooldown",
+		"provider.recipes", "provider.dirSuggestions",
+	}
+	for _, m := range never {
+		if runScopedSet[m] {
+			t.Errorf("%s is run-scoped: an agent could trigger it", m)
+		}
+	}
+	for _, m := range RunScopedMethods {
+		if strings.HasPrefix(m, "plugin.") {
+			t.Errorf("%s is run-scoped: plugin methods are never agent-callable", m)
+		}
+		if strings.HasPrefix(m, "provider.") && m != "provider.list" {
+			t.Errorf("%s is run-scoped: only provider.list may be (a read; its mode probe is guarded for plugin providers)", m)
+		}
+	}
+}
