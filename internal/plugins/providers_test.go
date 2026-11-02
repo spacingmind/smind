@@ -1,6 +1,8 @@
 package plugins
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spacingmind/smind/internal/plugins/host"
+	"github.com/spacingmind/smind/internal/plugins/host/hosttest"
 	"github.com/spacingmind/smind/internal/providers"
 )
 
@@ -299,6 +303,99 @@ func TestConsent_Provider_ListsCommandEnvKeys_NoValues(t *testing.T) {
 	in4 := mustInstall(t, newEnv(t), providerPluginDir(t, "demo", "1.0.0", strings.Replace(demoProviderEntry, `"supportsMcpServers":false`, `"inheritHome":true`, 1)))
 	if in4.Consent.Fingerprint == in3.Consent.Fingerprint {
 		t.Fatal("inheritHome is not in the fingerprint")
+	}
+}
+
+func TestConsent_Provider_FingerprintCoversArgvEnvValuesAndInheritHome(t *testing.T) {
+	// Every case installs the SAME id and version, so only the provider
+	// entry (or the plugin description) differs from the baseline.
+	fpOf := func(t *testing.T, entry, manifestExtra string, extraFiles map[string]string) string {
+		t.Helper()
+		files := map[string]string{"bin/agent": "#!/bin/sh\nexit 0\n"}
+		for n, b := range extraFiles {
+			files[n] = b
+		}
+		src := writePluginDir(t, manifestWith("demo", "1.0.0", `"contributes":{"providers":[`+entry+`]}`+manifestExtra), files)
+		for n := range files {
+			if err := os.Chmod(filepath.Join(src, filepath.FromSlash(n)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return mustInstall(t, newEnv(t), src).Consent.Fingerprint
+	}
+	base := fpOf(t, demoProviderEntry, "", nil)
+	cases := []struct {
+		name          string
+		entry         string
+		manifestExtra string
+		extraFiles    map[string]string
+		expectSame    bool
+	}{
+		{"extra argv entry", strings.Replace(demoProviderEntry, `"--acp"]`, `"--acp","-x"]`, 1), "", nil, false},
+		{"env value", strings.Replace(demoProviderEntry, `"DEMO_MODE":"acp"`, `"DEMO_MODE":"other"`, 1), "", nil, false},
+		{"env key renamed", strings.Replace(demoProviderEntry, `"DEMO_MODE":"acp"`, `"DEMO_KIND":"acp"`, 1), "", nil, false},
+		{"secret slot name", strings.Replace(demoProviderEntry, `"name":"DEMO_API_KEY"`, `"name":"DEMO_TOKEN"`, 1), "", nil, false},
+		{"inheritHome", strings.Replace(demoProviderEntry, `"acp":{`, `"acp":{"inheritHome":true,`, 1), "", nil, false},
+		{"vendor", strings.Replace(demoProviderEntry, `{"id":"agent"`, `{"id":"agent","vendor":"zai"`, 1), "", nil, false},
+		{"label", strings.Replace(demoProviderEntry, `"label":"Demo agent"`, `"label":"Demo agent two"`, 1), "", nil, false},
+		{"command file name", strings.Replace(demoProviderEntry, `"command":["bin/agent"`, `"command":["bin/agent2"`, 1), "", map[string]string{"bin/agent2": "#!/bin/sh\nexit 0\n"}, false},
+		// Descriptions are shown to the Human, never executed, so they are
+		// not part of the fingerprint (AcpEntry carries none).
+		{"provider description", strings.Replace(demoProviderEntry, `{"id":"agent"`, `{"id":"agent","description":"runs things"`, 1), "", nil, true},
+		{"plugin description", demoProviderEntry, `,"description":"a demo plugin"`, nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fp := fpOf(t, tc.entry, tc.manifestExtra, tc.extraFiles)
+			if tc.expectSame && fp != base {
+				t.Fatal("a change that runs nothing moved the fingerprint")
+			}
+			if !tc.expectSame && fp == base {
+				t.Fatal("a consent-relevant change kept the fingerprint")
+			}
+		})
+	}
+}
+
+func TestConsent_Provider_ValueNeverInSummaryOrLogs(t *testing.T) {
+	const sentinel = "SENTINEL-env-value-9931"
+	e := newHostEnv(t, host.DenyAll)
+	entry := strings.Replace(demoProviderEntry, `"DEMO_MODE":"acp"`, `"DEMO_MODE":"`+sentinel+`"`, 1)
+	// A process besides the provider, so the plugin log has real lines.
+	cmd, _ := json.Marshal(hosttest.Command("report"))
+	src := writePluginDir(t, manifestWith("demo", "1.0.0", `"process":{"command":`+string(cmd)+`},"contributes":{"providers":[`+entry+`]}`),
+		map[string]string{"bin/agent": "#!/bin/sh\nexit 0\n"})
+	if err := os.Chmod(filepath.Join(src, "bin", "agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in := mustInstall(t, e, src)
+
+	b, err := json.Marshal(in.Consent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), sentinel) {
+		t.Fatalf("the env value is in the consent summary: %s", b)
+	}
+	if s := fmt.Sprintf("%+v", in.Consent); strings.Contains(s, sentinel) {
+		t.Fatalf("the env value is in the formatted consent: %s", s)
+	}
+
+	if _, err := e.m.Enable("demo", in.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	waitProc(t, e.m, "demo", host.StateRunning)
+	logs, err := e.m.Logs("demo", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs.Lines) == 0 {
+		t.Fatal("setup: the plugin never logged anything")
+	}
+	for _, l := range logs.Lines {
+		if strings.Contains(l.Text, sentinel) {
+			t.Fatalf("the env value is in the plugin log: %q", l.Text)
+		}
 	}
 }
 
