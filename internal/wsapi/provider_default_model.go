@@ -35,6 +35,9 @@ func handleProviderSetDefaultModel(runner *taskrunner.Runner, bus *eventBus) han
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("provider.setDefaultModel: invalid params: %w", err)
 		}
+		if err := refusePluginProvider(runner, "provider.setDefaultModel", p.Provider); err != nil {
+			return nil, err
+		}
 		model := strings.TrimSpace(p.Model)
 		providerSetDefaultModelMu.Lock()
 		defer providerSetDefaultModelMu.Unlock()

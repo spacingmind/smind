@@ -157,3 +157,22 @@ func TestProviderSecretStore_DeleteAndPrune(t *testing.T) {
 		t.Fatalf("rows after pruning everything = %d, want 0", got)
 	}
 }
+
+func TestPruneProviderSecrets_KeepsPluginProviderIDs(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	for _, id := range []string{"acme/agent", "custom-one"} {
+		if err := s.SetProviderSecret(id, "K", "value-1234"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.PruneProviderSecrets(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.ListProviderSecrets("acme/agent"); len(got) != 1 {
+		t.Fatalf("a plugin provider's secret was pruned with its plugin disabled: %v", got)
+	}
+	if got, _ := s.ListProviderSecrets("custom-one"); len(got) != 0 {
+		t.Fatalf("an orphaned custom secret survived: %v", got)
+	}
+}

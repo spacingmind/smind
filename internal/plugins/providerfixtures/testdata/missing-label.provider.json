@@ -1,0 +1,8 @@
+{
+ "id": "agent",
+ "acp": {
+  "command": [
+   "bin/a"
+  ]
+ }
+}

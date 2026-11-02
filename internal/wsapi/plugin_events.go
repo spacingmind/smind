@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/plugins"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -43,6 +44,10 @@ type pluginEventPayload struct {
 type pluginEvents struct {
 	bus *eventBus
 	mgr *plugins.Manager
+
+	// providers is the registry whose plugin layer follows the active
+	// plugins (Wave D); nil in tests that do not wire one.
+	providers *providers.Registry
 
 	mu     sync.Mutex
 	mcp    map[int64]store.McpServer
@@ -101,7 +106,19 @@ func (e *pluginEvents) changed(id string) {
 			e.bus.Publish(Event{Topic: TopicProfileDeleted, Payload: profileDeletedPayload{ID: pid}})
 		}
 	}
+	e.syncProviders()
 	e.bus.Publish(Event{Topic: TopicPluginUpdated, Payload: pluginUpdatedPayload{ID: id, GlobalEnabled: global}})
+}
+
+// syncProviders makes the registry's plugin layer match the active plugins
+// and tells clients when it changed (provider.updated, id "": refetch).
+func (e *pluginEvents) syncProviders() {
+	if e.providers == nil {
+		return
+	}
+	if e.mgr.SyncProviders(e.providers) {
+		e.bus.Publish(Event{Topic: TopicProviderUpdated, Payload: providerUpdatedPayload{}})
+	}
 }
 
 // watch notices a flip of plugins.enabled (a config.yaml edit has no daemon

@@ -1,0 +1,12 @@
+{
+ "id": "agent",
+ "label": "Agent",
+ "acp": {
+  "command": [
+   "bin/agent"
+  ],
+  "env": {
+   "ANTHROPIC_BASE_URL": "x"
+  }
+ }
+}

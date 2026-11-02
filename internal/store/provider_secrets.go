@@ -98,14 +98,16 @@ func (s *Store) DeleteProviderSecrets(instanceID string) error {
 
 // PruneProviderSecrets removes the secrets of every instance not in
 // keepInstanceIDs (an empty keep list removes all of them) and returns how
-// many rows were deleted.
+// many rows were deleted. A plugin provider's id ("<plugin>/<provider>")
+// always stays: its key survives the plugin being disabled, and the plugin's
+// removal deletes it by prefix (ProviderSecretsOfPlugin).
 func (s *Store) PruneProviderSecrets(keepInstanceIDs []string) (int, error) {
 	var (
 		res sql.Result
 		err error
 	)
 	if len(keepInstanceIDs) == 0 {
-		res, err = s.db.Exec(`DELETE FROM provider_secrets`)
+		res, err = s.db.Exec(`DELETE FROM provider_secrets WHERE instance_id NOT LIKE '%/%'`)
 	} else {
 		placeholders := strings.Repeat("?,", len(keepInstanceIDs))
 		args := make([]any, len(keepInstanceIDs))
@@ -113,7 +115,7 @@ func (s *Store) PruneProviderSecrets(keepInstanceIDs []string) (int, error) {
 			args[i] = id
 		}
 		res, err = s.db.Exec(
-			`DELETE FROM provider_secrets WHERE instance_id NOT IN (`+placeholders[:len(placeholders)-1]+`)`,
+			`DELETE FROM provider_secrets WHERE instance_id NOT LIKE '%/%' AND instance_id NOT IN (`+placeholders[:len(placeholders)-1]+`)`,
 			args...,
 		)
 	}
