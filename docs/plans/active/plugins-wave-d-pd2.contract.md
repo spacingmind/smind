@@ -5,7 +5,7 @@ base: origin/develop
 planRef: docs/plans/active/plugins-wave-d.md
 acs:
   - id: AC-D1
-    text: "The agent child of a plugin provider gets a BUILT environment, never the daemon's: fixed PATH, private HOME (or the real HOME only with inheritHome), the manifest literals and the resolved secrets, no SMIND_*, no daemon token, no passthrough; a plugin cannot override PATH or HOME."
+    text: "The agent child of a plugin provider gets a BUILT environment, never the daemon's: fixed PATH, private HOME (or the real HOME only with inheritHome), the manifest literals and the resolved secrets, no SMIND_*, no daemon token, no passthrough of daemon variables (only locale: LANG, LC_*, TZ, and on Windows the few variables a process cannot start without, are copied); a plugin cannot override PATH or HOME."
     covers: { tests: [TestPluginAgent_BaseEnv_BuiltNeverInherited, TestPluginProvider_AgentEnv_ScrubbedAndBuilt, TestPluginProvider_InheritHome_OnlyHome, TestPluginProvider_AgentEnv_NoPassthrough, TestPluginProvider_CoreProviderLaunchUnchanged] }
   - id: AC-D2
     text: "The command is confined at LAUNCH, not only at registration: a plugin-relative path is re-resolved and re-checked (inside, regular, no symlink, executable) before every spawn; a bare name is looked up on the fixed system PATH only and resolved to an absolute path before the spawn."
