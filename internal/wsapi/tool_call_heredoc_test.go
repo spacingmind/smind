@@ -19,8 +19,8 @@ func heredocToolEvent() taskrunner.Event {
 func TestToolCallToClients_NeverCarriesHeredocBody(t *testing.T) {
 	t.Parallel()
 	e := heredocToolEvent()
-	live, _ := json.Marshal(toRunToolCallParams(e))
-	logs, _ := json.Marshal(toRunLogEvent(e))
+	live, _ := json.Marshal(toRunToolCallParams(taskrunner.NewToolCallElider(), e))
+	logs, _ := json.Marshal(toRunLogEvent(taskrunner.NewToolCallElider(), e))
 	for name, raw := range map[string][]byte{"live tool_call": live, "run.logs": logs} {
 		if strings.Contains(string(raw), "SECRET_TOKEN_123") {
 			t.Errorf("%s carries the body: %s", name, raw)
@@ -40,8 +40,27 @@ func TestToolCallToClients_NeverCarriesHeredocBody(t *testing.T) {
 func TestToolCallToClients_NoHeredocIsByteIdentical(t *testing.T) {
 	t.Parallel()
 	in := json.RawMessage(`{"command":"go test ./...","x":1}`)
-	p := toRunToolCallParams(taskrunner.Event{Type: taskrunner.EventTypeToolCall, ToolInput: in, ToolTitle: "Run go test"})
+	p := toRunToolCallParams(taskrunner.NewToolCallElider(), taskrunner.Event{Type: taskrunner.EventTypeToolCall, ToolInput: in, ToolTitle: "Run go test"})
 	if string(p.Input) != string(in) || p.Title != "Run go test" || p.Heredocs != nil {
 		t.Errorf("params = %+v", p)
+	}
+}
+
+// The result of a call arrives on a later event that omits the input; the
+// elider, fed in order, still scrubs the echoed body from it, in run.logs even
+// when the tail cuts the input's event away.
+func TestRunLogs_ResultEchoOfHeredocBodyIsScrubbed(t *testing.T) {
+	t.Parallel()
+	first := heredocToolEvent()
+	done := taskrunner.Event{Type: taskrunner.EventTypeToolCall, ToolCallID: "t1", ToolStatus: "success",
+		ToolResult: json.RawMessage(`"echo: key=SECRET_TOKEN_123\n"`)}
+	tail := runLogEvents([]taskrunner.Event{first, done}, 1) // what run.logs {tail:1} returns
+	raw, _ := json.Marshal(tail)
+	if strings.Contains(string(raw), "SECRET_TOKEN_123") || !strings.Contains(string(raw), "[heredoc ") {
+		t.Errorf("tailed result = %s", raw)
+	}
+	live, _ := json.Marshal(toRunToolCallParams(taskrunner.NewToolCallElider(), done))
+	if !strings.Contains(string(live), "SECRET_TOKEN_123") {
+		t.Errorf("an unknown call must pass through untouched (nothing to scrub against): %s", live)
 	}
 }
