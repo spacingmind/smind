@@ -690,6 +690,12 @@ export interface PermissionQuestion {
   allowOther?: boolean;
 }
 
+/** One elided heredoc body of an execute permission/tool call: `command` carries only its `<<TAG [heredoc N bytes]` marker; the body is fetched on demand via permission.revealHeredoc/run.revealToolHeredoc. */
+export interface HeredocRef { index: number; bytes: number }
+
+/** Result of permission.revealHeredoc/run.revealToolHeredoc: the redacted body text, capped at 64 KiB. */
+export interface HeredocReveal { index: number; bytes: number; text: string; redacted: boolean; truncated: boolean }
+
 /** The git approval rule that gated a command (G13); absent for non-git permissions. */
 export interface GitRule {
   id: string;
@@ -725,7 +731,10 @@ export interface PermissionDetail {
   preview?: string;
   /** Unified-style text: lines start with ' ', '+', '-' or '@@'. */
   diff?: string;
+  /** The elided command: heredoc bodies appear only as `<<TAG [heredoc N bytes]` markers, one per `heredocs` entry. */
   command?: string;
+  /** The elided bodies behind `command`'s markers, in marker order; omitted when the command has none. */
+  heredocs?: HeredocRef[];
   /** The preview/diff was cut. */
   truncated?: boolean;
   /** Existing contents deliberately not shown (sensitive/outside path). */
@@ -797,6 +806,8 @@ export interface RunToolCallEventParams {
   status?: ToolCallStatus;
   input?: unknown;
   result?: unknown;
+  /** The elided heredoc bodies behind `input.command`'s `<<TAG [heredoc N bytes]` markers (the daemon rewrites them at the wsapi boundary), fetchable via run.revealToolHeredoc. */
+  heredocs?: HeredocRef[];
 }
 
 // One server entry in an "mcp_servers" run event (docs/plans/completed/
