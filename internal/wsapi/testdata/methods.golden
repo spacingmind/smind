@@ -75,6 +75,7 @@ mcp.get
 mcp.list
 mcp.setEnabled
 mcp.update
+permission.revealHeredoc
 plugin.call
 plugin.commands
 plugin.disable
@@ -119,6 +120,7 @@ run.list
 run.listConfigOptions
 run.logs
 run.respondPermission
+run.revealToolHeredoc
 run.setConfigOption
 run.setPermissionMode
 run.start

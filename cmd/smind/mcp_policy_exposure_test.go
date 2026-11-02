@@ -62,7 +62,7 @@ func TestMCPCatalog_HasNoPolicyTool(t *testing.T) {
 			if !ok || lit.Kind != token.STRING {
 				return true
 			}
-			if s, _ := strconv.Unquote(lit.Value); strings.HasPrefix(s, "policy.") || strings.HasPrefix(s, "steward.") {
+			if s, _ := strconv.Unquote(lit.Value); strings.HasPrefix(s, "policy.") || strings.HasPrefix(s, "steward.") || s == "permission.revealHeredoc" || s == "run.revealToolHeredoc" {
 				if seatMethodExceptions[name][s] {
 					return true
 				}

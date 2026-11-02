@@ -38,6 +38,7 @@ const (
 var policyAuditDecisions = map[string]bool{
 	"allow": true, "deny": true, "ask": true,
 	"ask_human_allow": true, "ask_human_deny": true, "ask_timeout_deny": true,
+	"heredoc_revealed": true,
 }
 
 // policySweeper deletes audit rows past their retention once at start and
