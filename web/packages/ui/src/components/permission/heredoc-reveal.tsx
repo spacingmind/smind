@@ -66,7 +66,7 @@ function HeredocRow({
           // body (and after a failure, Retry is the way to ask again).
           if (!open && !hasBody && error === null) void fetchBody();
         }}
-        className="text-foreground-muted underline-offset-2 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="text-foreground-muted underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         {open ? `Hide heredoc (${hd.bytes} bytes)` : `Show heredoc (${hd.bytes} bytes)`}
       </button>
