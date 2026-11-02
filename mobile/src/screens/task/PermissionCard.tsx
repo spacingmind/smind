@@ -36,7 +36,8 @@ export const PermissionCard = memo(function PermissionCard({
         {request.summary}
       </Text>
       <PermissionPolicyLine detail={request.detail} />
-      {onReveal && request.detail?.heredocs ? (
+      {/* The body is only revealable while the request is pending (the daemon refuses afterwards). */}
+      {onReveal && request.status === 'pending' && request.detail?.heredocs ? (
         <HeredocRevealToggles refs={request.detail.heredocs} reveal={(i) => onReveal(request.requestId, i)} />
       ) : null}
       {request.status === 'pending' ? (
