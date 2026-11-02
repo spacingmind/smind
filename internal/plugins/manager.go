@@ -625,9 +625,10 @@ func (m *Manager) Disable(id string) (Info, error) {
 	return m.info(p), nil
 }
 
-// Remove deletes the plugin's row, its files under plugins/<id> and any
-// pending update, and its data/ directory unless keepData. A linked source is
-// never touched: only the host-owned plugins/<id> directory is removed.
+// Remove deletes the plugin's row, its files under plugins/<id>, any pending
+// update and its provider secrets ("<id>/..." instances), and its data/
+// directory unless keepData. A linked source is never touched: only the
+// host-owned plugins/<id> directory is removed.
 func (m *Manager) Remove(id string, keepData bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -654,19 +655,20 @@ func (m *Manager) Remove(id string, keepData bool) error {
 		if err := os.RemoveAll(dst); err != nil {
 			return fmt.Errorf("plugin %q removed, but deleting %s failed: %w", id, dst, err)
 		}
-		return nil
-	}
-	ents, err := os.ReadDir(dst)
-	if err != nil {
-		return nil
-	}
-	for _, e := range ents {
-		if e.Name() == "data" {
-			continue
+	} else if ents, err := os.ReadDir(dst); err == nil {
+		for _, e := range ents {
+			if e.Name() == "data" {
+				continue
+			}
+			if err := os.RemoveAll(filepath.Join(dst, e.Name())); err != nil {
+				return fmt.Errorf("plugin %q removed, but deleting %s failed: %w", id, filepath.Join(dst, e.Name()), err)
+			}
 		}
-		if err := os.RemoveAll(filepath.Join(dst, e.Name())); err != nil {
-			return fmt.Errorf("plugin %q removed, but deleting %s failed: %w", id, filepath.Join(dst, e.Name()), err)
-		}
+	}
+	// The plugin's provider secrets ("<id>/<provider>" instances) go with it
+	// (they survive a disable); a failure here must not fail the removal.
+	if _, err := m.st.DeleteProviderSecretsByPrefix(id + "/"); err != nil {
+		slog.Warn("plugins: deleting provider secrets", "plugin", id, "err", err)
 	}
 	_ = p
 	return nil

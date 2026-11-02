@@ -96,6 +96,27 @@ func (s *Store) DeleteProviderSecrets(instanceID string) error {
 	return nil
 }
 
+// DeleteProviderSecretsByPrefix removes the secrets of every instance whose
+// id starts with prefix (a plugin's "<plugin>/<provider>" ids go with the
+// plugin when it is removed) and returns how many rows were deleted. LIKE
+// metacharacters in the prefix are escaped, so an id containing %, _ or \
+// is matched literally; an empty prefix is refused: it would match everything.
+func (s *Store) DeleteProviderSecretsByPrefix(prefix string) (int, error) {
+	if prefix == "" {
+		return 0, errors.New("provider secret prefix is empty: it would delete every secret")
+	}
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	res, err := s.db.Exec(`DELETE FROM provider_secrets WHERE instance_id LIKE ? ESCAPE '\'`, esc.Replace(prefix)+"%")
+	if err != nil {
+		return 0, fmt.Errorf("delete provider secrets by prefix %q: %w", prefix, err)
+	}
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete provider secrets by prefix %q: %w", prefix, err)
+	}
+	return int(deleted), nil
+}
+
 // PruneProviderSecrets removes the secrets of every instance not in
 // keepInstanceIDs (an empty keep list removes all of them) and returns how
 // many rows were deleted. A plugin provider's id ("<plugin>/<provider>")

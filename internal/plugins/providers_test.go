@@ -92,6 +92,60 @@ func TestPluginProvider_NamespacedId_NoShadowing_VanishesWithPlugin(t *testing.T
 	}
 }
 
+func TestPluginRemove_DeletesProviderSecrets_DisableKeeps(t *testing.T) {
+	e := newEnv(t)
+	enableProviderPlugin(t, e, "demo", demoProviderEntry)
+	if err := e.st.SetProviderSecret("demo/agent", "DEMO_API_KEY", "v-1234"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.SetProviderSecret("demo-x/agent", "DEMO_API_KEY", "other"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := e.m.Disable("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := e.st.ListProviderSecrets("demo/agent"); len(l) != 1 {
+		t.Fatalf("a disabled plugin's secrets were deleted: %v", l)
+	}
+	if _, err := e.m.Enable("demo", got.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.m.Remove("demo", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.st.ListProviderSecrets("demo/agent"); len(got) != 0 {
+		t.Fatalf("a removed plugin's secrets survived: %v", got)
+	}
+	if got, _ := e.st.ListProviderSecrets("demo-x/agent"); len(got) != 1 {
+		t.Fatalf("an unrelated plugin's secrets were deleted: %v", got)
+	}
+
+	// A linked plugin's secrets go with it too.
+	src := providerPluginDir(t, "linked", "1.0.0", demoProviderEntry)
+	lin, err := e.m.Link(bg, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Enable("linked", lin.Consent.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.SetProviderSecret("linked/agent", "DEMO_API_KEY", "v-5678"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.Remove("linked", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.st.ListProviderSecrets("linked/agent"); len(got) != 0 {
+		t.Fatalf("a removed linked plugin's secrets survived: %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(src, ManifestFile)); err != nil {
+		t.Fatal("remove deleted the linked source")
+	}
+}
+
 func TestPluginProviders_RegistryMatchesActiveSet(t *testing.T) {
 	e := newEnv(t)
 	reg := providers.New()
