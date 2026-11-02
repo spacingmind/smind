@@ -146,7 +146,7 @@ func RunVersion(spec providers.Spec, arg string, environ []string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, argv[0], append(argv[1:], arg)...)
+	cmd := exec.CommandContext(ctx, argv[0], arg) // the program and the version flag only, never the ACP arguments
 	cmd.Dir = spec.PluginRoot
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()

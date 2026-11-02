@@ -34,6 +34,9 @@ type hostState struct {
 	homes   []string
 	mu      sync.Mutex
 	secrets map[string][]string
+	// provSecrets are the stored provider secret values of each plugin's
+	// providers (log redaction only; the plugin process never gets them).
+	provSecrets map[string][]string
 }
 
 // newHost builds the host from o, forcing the global switch as its gate and
@@ -79,11 +82,50 @@ func (m *Manager) noteSecrets(id string, man *Manifest, settings map[string]any)
 		m.proc.secrets = map[string][]string{}
 	}
 	m.proc.secrets[id] = vals
+	m.rebuildRedactorLocked()
+}
+
+// rebuildRedactorLocked rebuilds the log redactor from every plugin's setting
+// secrets and provider secrets. Callers hold m.proc.mu.
+func (m *Manager) rebuildRedactorLocked() {
 	var all []string
 	for _, v := range m.proc.secrets {
 		all = append(all, v...)
 	}
+	for _, v := range m.proc.provSecrets {
+		all = append(all, v...)
+	}
 	m.proc.red.Store(redact.New(all, m.proc.homes))
+}
+
+// RefreshProviderSecrets makes the plugin log redactor know the current
+// values of a plugin's provider secrets (provider_secrets, "<plugin>/<provider>"
+// instances): the plugin process never receives them, but a host line that
+// quotes one (an agent error, a launch message) must not store it. The daemon
+// calls it when a provider secret is set or cleared and on every provider sync.
+func (m *Manager) RefreshProviderSecrets(id string) {
+	if m.proc == nil || m.st == nil {
+		return
+	}
+	var vals []string
+	if p, err := m.st.GetPlugin(id); err == nil {
+		if man, _, lerr := m.loadInstalled(p); lerr == nil && man != nil {
+			for _, pc := range man.Contributes.Providers {
+				for _, sl := range pc.ACP.SecretEnv {
+					if v, ok, gerr := m.st.GetProviderSecret(ProviderID(id, pc.ID), sl.Name); gerr == nil && ok && v != "" {
+						vals = append(vals, v)
+					}
+				}
+			}
+		}
+	}
+	m.proc.mu.Lock()
+	defer m.proc.mu.Unlock()
+	if m.proc.provSecrets == nil {
+		m.proc.provSecrets = map[string][]string{}
+	}
+	m.proc.provSecrets[id] = vals
+	m.rebuildRedactorLocked()
 }
 
 // SetOnChange registers the function told (asynchronously) that a plugin's

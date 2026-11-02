@@ -24,6 +24,7 @@ import (
 	"github.com/spacingmind/smind/internal/plugins/host"
 	"github.com/spacingmind/smind/internal/plugins/skilldelivery"
 	"github.com/spacingmind/smind/internal/profiles"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/store"
@@ -313,8 +314,8 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["task.tree"] = handleTaskTree(db, reg, stalled)
 	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)
 	hs["provider.setEnv"] = handleProviderSetEnv(runner, bus)
-	hs["provider.setSecret"] = handleProviderSetSecret(runner, db, bus)
-	hs["provider.clearSecret"] = handleProviderClearSecret(runner, db, bus)
+	hs["provider.setSecret"] = handleProviderSetSecret(runner, db, bus, nil)
+	hs["provider.clearSecret"] = handleProviderClearSecret(runner, db, bus, nil)
 	hs["provider.clearCooldown"] = handleProviderClearCooldown(runner, reg, bus)
 	hs["provider.reload"] = handleProviderReload(runner, bus)
 	hs["provider.addInstance"] = handleProviderAddInstance(runner, bus)
@@ -347,6 +348,14 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	reg.SetPluginSkills(skilldelivery.New(pluginMgr, filepath.Join(config.Dir(), "plugin-projection")))
 	pluginEv := newPluginEvents(bus, pluginMgr)
 	hs["provider.list"] = handleProviderList(runner, reg, gs, pluginMgr.InactiveProviders)
+	// A plugin provider's secret joins the plugin log redactor the moment it is set.
+	refreshPluginSecret := func(spec providers.Spec) {
+		if spec.Plugin != "" {
+			pluginMgr.RefreshProviderSecrets(spec.Plugin)
+		}
+	}
+	hs["provider.setSecret"] = handleProviderSetSecret(runner, db, bus, refreshPluginSecret)
+	hs["provider.clearSecret"] = handleProviderClearSecret(runner, db, bus, refreshPluginSecret)
 	if runner != nil {
 		pluginEv.providers = runner.Providers()
 		pluginEv.syncProviders() // plugin providers join the registry once, after config.providers.custom

@@ -129,6 +129,12 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 // the subprocess gets ONLY env (even when it is empty); otherwise it gets the
 // daemon's environment with env appended (last entry wins).
 func newConnEnv(command []string, logWriter io.Writer, env []string, clean bool) (*conn, error) {
+	return newConnEnvDir(command, logWriter, env, clean, "")
+}
+
+// newConnEnvDir is newConnEnv with the process's working directory (empty:
+// the daemon's).
+func newConnEnvDir(command []string, logWriter io.Writer, env []string, clean bool, dir string) (*conn, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("acp: empty command")
 	}
@@ -138,6 +144,7 @@ func newConnEnv(command []string, logWriter io.Writer, env []string, clean bool)
 
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stderr = logWriter
+	cmd.Dir = dir
 	if clean {
 		cmd.Env = append([]string{}, env...)
 	} else if len(env) > 0 {

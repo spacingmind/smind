@@ -207,3 +207,41 @@ func writeFile(t *testing.T, path string, content []byte, mode os.FileMode) {
 		t.Fatal(err)
 	}
 }
+
+// TestPluginAgent_RunVersion_ArgvAndEnv: the probe executes the resolved
+// program with ONLY the version flag (never the ACP arguments), cwd the
+// plugin root, and the built environment.
+func TestPluginAgent_RunVersion_ArgvAndEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script")
+	}
+	t.Setenv("SMIND_PROBE_SENTINEL", "leak-77")
+	root := t.TempDir()
+	out := filepath.Join(t.TempDir(), "probe.txt")
+	script := "#!/bin/sh\n{ echo \"ARGV=$*\"; echo \"PWD=$(pwd -P)\"; env; } > '" + out + "'\necho 'tool 3.4.5'\n"
+	if err := os.WriteFile(filepath.Join(root, "agent"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := providers.Spec{ID: "acme/agent", Plugin: "acme", Command: []string{"agent", "--acp", "--verbose"}, CommandForm: "path", PluginRoot: root, PluginData: t.TempDir()}
+	got := RunVersion(spec, "--version", os.Environ())
+	if !strings.Contains(got, "3.4.5") {
+		t.Fatalf("version output = %q", got)
+	}
+	raw, _ := os.ReadFile(out)
+	dump := string(raw)
+	if !strings.Contains(dump, "ARGV=--version\n") {
+		t.Errorf("argv must be only the version flag:\n%s", dump)
+	}
+	realRoot, _ := filepath.EvalSymlinks(root)
+	if !strings.Contains(dump, "PWD="+realRoot+"\n") {
+		t.Errorf("cwd must be the plugin root %s:\n%s", realRoot, dump)
+	}
+	if strings.Contains(dump, "SMIND_PROBE_SENTINEL") || strings.Contains(dump, "leak-77") {
+		t.Errorf("the daemon's environment reached the probe:\n%s", dump)
+	}
+	// A broken command (missing file) returns "" and runs nothing.
+	spec.Command = []string{"missing"}
+	if got := RunVersion(spec, "--version", os.Environ()); got != "" {
+		t.Errorf("a missing command returned %q", got)
+	}
+}

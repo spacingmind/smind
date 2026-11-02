@@ -98,6 +98,9 @@ func (m *Manager) SyncProviders(reg *providers.Registry) (changed bool) {
 		}
 		byPlugin[id] = pp.Specs
 	}
+	for id := range derived {
+		m.RefreshProviderSecrets(id)
+	}
 	before := pluginLayerSig(reg)
 	problems := reg.SetPlugins(byPlugin)
 	bad := map[string]bool{}
@@ -151,9 +154,11 @@ func (m *Manager) buildProviderSpecs(pluginID string, man *Manifest) ([]provider
 		default:
 			s.HealthCommand = []string{argv[0]}
 		}
-		if pc.ACP.SupportsMcpServers != nil && !*pc.ACP.SupportsMcpServers {
-			s.NoMCPServers = true
-		}
+		// A plugin's agent receives the workspace's MCP servers (their env
+		// values included) and smind's orchestration token ONLY when its
+		// manifest asks for it with supportsMcpServers: true, which consent
+		// shows and the fingerprint covers.
+		s.NoMCPServers = pc.ACP.SupportsMcpServers == nil || !*pc.ACP.SupportsMcpServers
 		if len(pc.ACP.Env) > 0 {
 			s.Env = map[string]string{}
 			for k, v := range pc.ACP.Env {

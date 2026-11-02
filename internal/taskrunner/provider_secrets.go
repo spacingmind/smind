@@ -72,9 +72,10 @@ func scrubEnvEntries(spec providers.Spec, policyOn bool) []string {
 func (r *Runner) launchEnvEntries(provider Provider) ([]string, error) {
 	spec, _ := r.providerRegistry().Get(string(provider))
 	if spec.Plugin != "" {
-		// Wave D PD1 registers plugin providers; the scrubbed, confined launch
-		// (PD2) is what lets one run. Until then it never spawns.
-		return nil, fmt.Errorf("provider %q (plugin %s): plugin providers cannot run in this build yet", provider, spec.Plugin)
+		// A plugin provider is launched only through pluginLaunch (scrubbed
+		// env, confined command); the generic builder inherits the daemon's
+		// environment, so it fails closed.
+		return nil, errPluginLaunchBypass(provider, spec.Plugin)
 	}
 	var literals []string
 	if spec.Runner == providers.RunnerACP {
