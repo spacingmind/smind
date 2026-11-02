@@ -3,13 +3,10 @@ package plugins
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
-	"strings"
 
-	"github.com/spacingmind/smind/internal/fsutil"
+	"github.com/spacingmind/smind/internal/pluginagent"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -195,32 +192,8 @@ func pluginRoot(m *Manager, p store.Plugin) string {
 	return m.dir(p.ID)
 }
 
-// confinedExecutable resolves rel under root and checks the file: inside the
-// plugin after symlinks, a regular file, and executable (the bit is not
-// checked on Windows). A symlink anywhere in the path is refused.
+// confinedExecutable is pluginagent.ConfinedExecutable, kept as a thin
+// wrapper for the existing callers and tests.
 func confinedExecutable(root, rel string) (string, error) {
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", fmt.Errorf("plugin directory: %w", err)
-	}
-	full := filepath.Join(realRoot, filepath.FromSlash(rel))
-	cur := realRoot
-	for _, seg := range strings.Split(rel, "/") {
-		cur = filepath.Join(cur, seg)
-		fi, err := os.Lstat(cur)
-		if err != nil {
-			return "", fmt.Errorf("not found in the plugin")
-		}
-		if fsutil.IsLink(fi.Mode()) {
-			return "", fmt.Errorf("a symlink in the path is refused")
-		}
-	}
-	fi, err := os.Stat(full)
-	if err != nil || !fi.Mode().IsRegular() {
-		return "", fmt.Errorf("is not a regular file")
-	}
-	if runtime.GOOS != "windows" && fi.Mode().Perm()&0o111 == 0 {
-		return "", fmt.Errorf("is not executable (chmod +x)")
-	}
-	return full, nil
+	return pluginagent.ConfinedExecutable(root, rel)
 }

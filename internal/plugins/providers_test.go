@@ -168,19 +168,14 @@ func TestConfinedExecutable(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "bin", "agent"), []byte("x"))
 	os.Chmod(filepath.Join(root, "bin", "agent"), 0o755)
-	writeFile(t, filepath.Join(root, "bin", "plain"), []byte("x"))
-	outside := t.TempDir()
-	writeFile(t, filepath.Join(outside, "evil"), []byte("x"))
-	os.Chmod(filepath.Join(outside, "evil"), 0o755)
-	os.Symlink(filepath.Join(outside, "evil"), filepath.Join(root, "bin", "link"))
-	os.Symlink(outside, filepath.Join(root, "dirlink"))
-	for rel, wantErr := range map[string]string{
-		"bin/agent": "", "bin/plain": "not executable", "bin/missing": "not found", "bin/link": "symlink", "dirlink/evil": "symlink", "bin": "regular",
-	} {
-		_, err := confinedExecutable(root, rel)
-		if wantErr == "" && err != nil || wantErr != "" && (err == nil || !strings.Contains(err.Error(), wantErr)) {
-			t.Errorf("%s: err = %v, want %q", rel, err, wantErr)
-		}
+	// The wrapper delegates to pluginagent.ConfinedExecutable, whose own
+	// table (TestPluginAgent_ConfinedExecutable) covers the refusal cases.
+	abs, err := confinedExecutable(root, "bin/agent")
+	if err != nil {
+		t.Fatalf("confinedExecutable: %v", err)
+	}
+	if !filepath.IsAbs(abs) || !strings.HasSuffix(filepath.ToSlash(abs), "/bin/agent") {
+		t.Fatalf("abs = %q", abs)
 	}
 }
 
