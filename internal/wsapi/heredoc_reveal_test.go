@@ -147,3 +147,33 @@ func TestHeredocReveal_AuditRowIsContentFree(t *testing.T) {
 		}
 	}
 }
+
+// Fail closed: a reveal whose audit row cannot be written is refused, and
+// neither the result nor the error carries the body.
+func TestHeredocReveal_RefusedWhenAuditFails(t *testing.T) {
+	t.Parallel()
+	_, db := newTestWorkspaceManager(t)
+	hs := heredocRevealHandlers(&fakeHeredocs{pending: true}, db)
+	if err := db.Close(); err != nil { // every later AppendPolicyAudit fails
+		t.Fatal(err)
+	}
+	human := &requestContext{local: true}
+	for name, params := range map[string]map[string]any{
+		"permission.revealHeredoc": {"permissionId": "perm-1", "index": 0},
+		"run.revealToolHeredoc":    {"runId": "run-1", "toolCallId": "call-1", "index": 0},
+	} {
+		res, err := revealCall(t, hs[name], human, params)
+		if err == nil {
+			t.Fatalf("%s: reveal succeeded without an audit row: %+v", name, res)
+		}
+		raw, _ := json.Marshal(res)
+		for _, leak := range []string{"SECRET_TOKEN_123", "ghp_", "plain "} {
+			if strings.Contains(string(raw), leak) || strings.Contains(err.Error(), leak) {
+				t.Errorf("%s: body leaked through %q: result %s, error %v", name, leak, raw, err)
+			}
+		}
+		if res.Text != "" {
+			t.Errorf("%s: result text = %q, want empty", name, res.Text)
+		}
+	}
+}
