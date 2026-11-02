@@ -84,6 +84,10 @@ Heredoc bodies are where pasted secrets live. Today `detail.command` is the raw 
 
 - 2026-11-01 spec written; Steward review: client delivery decided (a), tool calls elided at `toRunToolCallParams`, tool-card reveal added.
 
+- 2026-11-02 step 2 merged (#810, incl. the engine-judges-raw fix and fail-closed ask). Step 3 (reveal RPCs, scope, audit rows, CLI `--reveal`, 'policy input missing' reason) in its own PR.
+
 ## Validation
 
 (filled in as the PRs land)
+
+Step 3 (reveal RPCs): `permission.revealHeredoc` (pending only, in-memory bodies) and `run.revealToolHeredoc` (live history, else the persisted log) in `internal/wsapi/heredoc_reveal.go`; both `refuseAgent`, neither on `RunScopedMethods`; redaction by `internal/learning/redact` (the audit's redactor; `secretdeny` is a path-deny list, not a text redactor), 64 KiB cap; content-free audit row with decision `heredoc_revealed` (tool `permission.heredoc_revealed` / `tool.heredoc_revealed`). Tests: `TestPermissionRevealHeredoc_RedactsAndRefusesWhenNotPending`, `TestRunRevealToolHeredoc_RedactsAndRefusesUnknown`, `TestHeredocReveal_RefusesRunScopedCallers`, `TestHeredocReveal_NotRunScopedAndRegistered`, `TestHeredocReveal_AuditRowIsContentFree`, `TestPendingHeredoc_OnlyWhilePending`, `TestToolCallHeredoc_LiveAndFromDisk`, `TestPermissionShowReveal_*`. Not covered by an automated test: the reveal of a run on a peer host. Open: web/mobile toggles (PRs 4-5) and follow-up F1.
