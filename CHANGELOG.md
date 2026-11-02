@@ -3,6 +3,12 @@
 ## [0.18.0](https://github.com/spacingmind/smind/compare/v0.17.0...v0.18.0) (2026-11-02)
 
 
+### ⚠ BREAKING CHANGES
+
+* **permissions:** heredoc bodies are elided from every permission detail and tool call a client receives (web, mobile, relay, CLI, MCP `task_logs`): `detail.command` and the tool call's `input.command`/`title` show `<<TAG [heredoc N bytes]`, `detail.heredocs` lists `{index, bytes}`, and an echoed body in a tool `result` is replaced by the same marker. A human reveals a body with `permission.revealHeredoc` / `run.revealToolHeredoc`, `smind permission show --reveal` or the "Show heredoc" toggle. Clients that parsed the raw command from these fields must switch to the reveal. Policy decisions are unchanged: the engine still evaluates the raw command ([#810](https://github.com/spacingmind/smind/issues/810), [#813](https://github.com/spacingmind/smind/issues/813), [#816](https://github.com/spacingmind/smind/issues/816)).
+* **steward:** the `steward_verdict_submit` tool / `steward.verdict.submit` RPC takes the verdict document in `submission` (was `verdict`); the old name is refused with an error that names `submission` ([#807](https://github.com/spacingmind/smind/issues/807)).
+
+
 ### Features
 
 * **mobile:** plugin panel renderer for ui:1 views (plugins wave C, PC3) ([#790](https://github.com/spacingmind/smind/issues/790)) ([9f58b44](https://github.com/spacingmind/smind/commit/9f58b446aacede578a1a9a5f135b6a64bdd5833b))
