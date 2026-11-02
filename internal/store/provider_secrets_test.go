@@ -158,6 +158,54 @@ func TestProviderSecretStore_DeleteAndPrune(t *testing.T) {
 	}
 }
 
+func TestDeleteProviderSecretsByPrefix(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+
+	for _, inst := range []string{"demo/agent", "demo/two", "demo-x/agent", "demo_/agent", "custom"} {
+		if err := s.SetProviderSecret(inst, "api_key", "value-of-"+inst); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deleted, err := s.DeleteProviderSecretsByPrefix("demo/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 2 {
+		t.Fatalf("prefix demo/ deleted %d rows, want 2", deleted)
+	}
+	for _, inst := range []string{"demo/agent", "demo/two"} {
+		if got, _ := s.ListProviderSecrets(inst); len(got) != 0 {
+			t.Fatalf("secrets of %s survived the prefix delete: %v", inst, got)
+		}
+	}
+	for _, inst := range []string{"demo-x/agent", "demo_/agent", "custom"} {
+		if got, _ := s.ListProviderSecrets(inst); len(got) != 1 {
+			t.Fatalf("secrets of %s did not survive the prefix delete: %v", inst, got)
+		}
+	}
+
+	if _, err := s.DeleteProviderSecretsByPrefix(""); err == nil {
+		t.Fatal("an empty prefix deleted rows")
+	}
+	if got := countRows(t, s, `SELECT COUNT(*) FROM provider_secrets`); got != 3 {
+		t.Fatalf("rows after the refused empty prefix = %d, want 3", got)
+	}
+
+	// The _ in the prefix is a literal, not a single-char wildcard.
+	deleted, err = s.DeleteProviderSecretsByPrefix("dem_/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Fatalf("prefix dem_/ deleted %d rows, want 0 (the underscore must be literal)", deleted)
+	}
+	if got := countRows(t, s, `SELECT COUNT(*) FROM provider_secrets`); got != 3 {
+		t.Fatalf("rows after the underscore prefix = %d, want 3", got)
+	}
+}
+
 func TestPruneProviderSecrets_KeepsPluginProviderIDs(t *testing.T) {
 	t.Parallel()
 	s := newTestStore(t)

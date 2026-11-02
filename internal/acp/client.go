@@ -432,6 +432,8 @@ type Client struct {
 	policy    PermissionPolicy
 	logWriter io.Writer
 	env       []string
+	cleanEnv  bool
+	dir       string
 
 	mu           sync.Mutex
 	sessionCwd   map[string]string
@@ -466,6 +468,18 @@ func WithEnv(env ...string) Option {
 	return func(c *Client) { c.env = append(c.env, env...) }
 }
 
+// WithCleanEnv makes the agent get ONLY the WithEnv entries, not the
+// daemon's environment.
+func WithCleanEnv() Option {
+	return func(c *Client) { c.cleanEnv = true }
+}
+
+// WithDir sets the agent process's working directory (default: the
+// daemon's).
+func WithDir(dir string) Option {
+	return func(c *Client) { c.dir = dir }
+}
+
 // WithPermissionPolicy overrides the default PermissionPolicy. See
 // AutoApprovePolicy for the default and why it was chosen.
 func WithPermissionPolicy(p PermissionPolicy) Option {
@@ -497,7 +511,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 		opt(c)
 	}
 
-	conn, err := newConnEnv(command, c.logWriter, c.env)
+	conn, err := newConnEnvDir(command, c.logWriter, c.env, c.cleanEnv, c.dir)
 	if err != nil {
 		return nil, err
 	}

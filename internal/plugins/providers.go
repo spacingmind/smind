@@ -3,13 +3,10 @@ package plugins
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
-	"strings"
 
-	"github.com/spacingmind/smind/internal/fsutil"
+	"github.com/spacingmind/smind/internal/pluginagent"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -101,6 +98,9 @@ func (m *Manager) SyncProviders(reg *providers.Registry) (changed bool) {
 		}
 		byPlugin[id] = pp.Specs
 	}
+	for id := range derived {
+		m.RefreshProviderSecrets(id)
+	}
 	before := pluginLayerSig(reg)
 	problems := reg.SetPlugins(byPlugin)
 	bad := map[string]bool{}
@@ -135,22 +135,30 @@ func (m *Manager) buildProviderSpecs(pluginID string, man *Manifest) ([]provider
 	var out []providers.Spec
 	for _, pc := range man.Contributes.Providers {
 		argv := append([]string(nil), pc.ACP.Command...)
-		if form, _ := commandForm(argv[0]); form == "path" {
+		form, _ := commandForm(argv[0])
+		s := providers.Spec{
+			ID: ProviderID(pluginID, pc.ID), Label: pc.Label, Plugin: pluginID, Icon: pc.Icon,
+			Runner: providers.RunnerACP, Command: argv,
+			PluginRoot: root, PluginData: filepath.Join(m.dir(pluginID), "data"),
+			CommandForm: form, InheritHome: pc.ACP.InheritHome,
+			Vendor: pc.Vendor, DefaultMode: pc.DefaultMode,
+			Health: providers.Health{Install: pc.Health.Install, Login: pc.Health.Login, VersionArg: pc.Health.VersionArg, MinVersion: pc.Health.MinVersion},
+		}
+		switch form {
+		case "path":
 			abs, err := confinedExecutable(root, argv[0])
 			if err != nil {
 				return nil, fmt.Errorf("provider %s: command %q: %w", ProviderID(pluginID, pc.ID), argv[0], err)
 			}
-			argv[0] = abs
+			s.HealthCommand = []string{abs}
+		default:
+			s.HealthCommand = []string{argv[0]}
 		}
-		s := providers.Spec{
-			ID: ProviderID(pluginID, pc.ID), Label: pc.Label, Plugin: pluginID, Icon: pc.Icon,
-			Runner: providers.RunnerACP, Command: argv, HealthCommand: []string{argv[0]},
-			Vendor: pc.Vendor, DefaultMode: pc.DefaultMode,
-			Health: providers.Health{Install: pc.Health.Install, Login: pc.Health.Login, VersionArg: pc.Health.VersionArg, MinVersion: pc.Health.MinVersion},
-		}
-		if pc.ACP.SupportsMcpServers != nil && !*pc.ACP.SupportsMcpServers {
-			s.NoMCPServers = true
-		}
+		// A plugin's agent receives the workspace's MCP servers (their env
+		// values included) and smind's orchestration token ONLY when its
+		// manifest asks for it with supportsMcpServers: true, which consent
+		// shows and the fingerprint covers.
+		s.NoMCPServers = pc.ACP.SupportsMcpServers == nil || !*pc.ACP.SupportsMcpServers
 		if len(pc.ACP.Env) > 0 {
 			s.Env = map[string]string{}
 			for k, v := range pc.ACP.Env {
@@ -189,32 +197,8 @@ func pluginRoot(m *Manager, p store.Plugin) string {
 	return m.dir(p.ID)
 }
 
-// confinedExecutable resolves rel under root and checks the file: inside the
-// plugin after symlinks, a regular file, and executable (the bit is not
-// checked on Windows). A symlink anywhere in the path is refused.
+// confinedExecutable is pluginagent.ConfinedExecutable, kept as a thin
+// wrapper for the existing callers and tests.
 func confinedExecutable(root, rel string) (string, error) {
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", fmt.Errorf("plugin directory: %w", err)
-	}
-	full := filepath.Join(realRoot, filepath.FromSlash(rel))
-	cur := realRoot
-	for _, seg := range strings.Split(rel, "/") {
-		cur = filepath.Join(cur, seg)
-		fi, err := os.Lstat(cur)
-		if err != nil {
-			return "", fmt.Errorf("not found in the plugin")
-		}
-		if fsutil.IsLink(fi.Mode()) {
-			return "", fmt.Errorf("a symlink in the path is refused")
-		}
-	}
-	fi, err := os.Stat(full)
-	if err != nil || !fi.Mode().IsRegular() {
-		return "", fmt.Errorf("is not a regular file")
-	}
-	if runtime.GOOS != "windows" && fi.Mode().Perm()&0o111 == 0 {
-		return "", fmt.Errorf("is not executable (chmod +x)")
-	}
-	return full, nil
+	return pluginagent.ConfinedExecutable(root, rel)
 }

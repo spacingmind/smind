@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -47,7 +48,7 @@ func validProviderSecretValue(value string) error {
 // provider.updated. Human-only and write-only: a run-scoped (agent) caller
 // is refused, and no response, event or error ever carries the value --
 // only the store's last-4 fingerprint (ADR-0046 section 4).
-func handleProviderSetSecret(runner *taskrunner.Runner, db *store.Store, bus *eventBus) handlerFunc {
+func handleProviderSetSecret(runner *taskrunner.Runner, db *store.Store, bus *eventBus, after func(spec providers.Spec)) handlerFunc {
 	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		if rc != nil && rc.runScoped {
 			return nil, &rpcCodeError{code: codeForbidden, msg: "provider.setSecret is not available to agents"}
@@ -81,6 +82,9 @@ func handleProviderSetSecret(runner *taskrunner.Runner, db *store.Store, bus *ev
 		if err := db.SetProviderSecret(p.InstanceID, p.Name, value); err != nil {
 			return nil, fmt.Errorf("provider.setSecret: store failed")
 		}
+		if after != nil {
+			after(spec)
+		}
 		res := newProviderUpdatedPayload(runner, p.InstanceID)
 		if bus != nil {
 			bus.Publish(Event{Topic: TopicProviderUpdated, Payload: res})
@@ -98,7 +102,7 @@ func handleProviderSetSecret(runner *taskrunner.Runner, db *store.Store, bus *ev
 // remove one stored secret (clearing a secret that is not stored is not an
 // error), then publish provider.updated. Human-only, same guard as
 // provider.setSecret.
-func handleProviderClearSecret(runner *taskrunner.Runner, db *store.Store, bus *eventBus) handlerFunc {
+func handleProviderClearSecret(runner *taskrunner.Runner, db *store.Store, bus *eventBus, after func(spec providers.Spec)) handlerFunc {
 	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		if rc != nil && rc.runScoped {
 			return nil, &rpcCodeError{code: codeForbidden, msg: "provider.clearSecret is not available to agents"}
@@ -116,6 +120,9 @@ func handleProviderClearSecret(runner *taskrunner.Runner, db *store.Store, bus *
 		}
 		if err := db.ClearProviderSecret(p.InstanceID, p.Name); err != nil {
 			return nil, fmt.Errorf("provider.clearSecret: store failed")
+		}
+		if after != nil {
+			after(spec)
 		}
 		res := newProviderUpdatedPayload(runner, p.InstanceID)
 		if bus != nil {

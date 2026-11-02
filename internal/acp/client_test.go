@@ -554,3 +554,46 @@ func TestGLMCommand_PassesMaxTurns(t *testing.T) {
 		t.Fatalf("GLMCommand(WithMaxTurns(0)) = %v, want no --max-turns", got)
 	}
 }
+
+// TestClient_WithCleanEnv_DoesNotInheritEnvironment proves WithCleanEnv:
+// the agent subprocess gets ONLY the WithEnv entries, never the daemon's
+// environment (which carries secrets), while a client without it inherits
+// as before. The fake agent dumps its whole os.Environ to
+// FAKEAGENT_ENV_DUMP's path at startup.
+func TestClient_WithCleanEnv_DoesNotInheritEnvironment(t *testing.T) {
+	t.Setenv("SMIND_SENTINEL", "leak-1")
+
+	startAndDump := func(t *testing.T, opts ...Option) string {
+		t.Helper()
+		dump := filepath.Join(t.TempDir(), "env-dump")
+		opts = append(opts, WithEnv("FAKEAGENT_ENV_DUMP="+dump, "PATH="+os.Getenv("PATH")))
+		c, err := New([]string{fakeAgentPath}, opts...)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := c.Initialize(ctx); err != nil {
+			t.Fatalf("Initialize() error = %v", err)
+		}
+		b, err := os.ReadFile(dump)
+		if err != nil {
+			t.Fatalf("read env dump: %v", err)
+		}
+		return string(b)
+	}
+
+	clean := startAndDump(t, WithCleanEnv())
+	if !strings.Contains(clean, "FAKEAGENT_ENV_DUMP=") {
+		t.Fatalf("clean env is missing the WithEnv entries:\n%s", clean)
+	}
+	if strings.Contains(clean, "SMIND_SENTINEL") {
+		t.Fatalf("clean env inherited the daemon environment:\n%s", clean)
+	}
+
+	inherited := startAndDump(t)
+	if !strings.Contains(inherited, "SMIND_SENTINEL") {
+		t.Fatalf("a client without WithCleanEnv did not inherit the daemon environment:\n%s", inherited)
+	}
+}

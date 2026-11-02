@@ -3,12 +3,14 @@ package wsapi
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/spacingmind/smind/internal/pluginagent"
 	"github.com/spacingmind/smind/internal/providers"
 )
 
@@ -60,12 +62,12 @@ func testProviderSpec(spec providers.Spec) providerTestResult {
 	return res
 }
 
-// testPluginProviderSpec is the health check of a plugin provider: it NEVER
-// executes the plugin's command. A version probe would run plugin-controlled
-// code with the daemon's whole environment; the scrubbed, confined launch that
-// may do that arrives with PD2 (docs/plans/active/plugins-wave-d.md, AD18).
-// Until then it reports only whether argv[0] resolves (a stat), the install
-// and login hints, and that the version check is not available yet.
+// testPluginProviderSpec is the health check of a plugin provider. The
+// plugin's command is executed ONLY through pluginagent.RunVersion: the same
+// confined resolution and BUILT environment (no daemon env, private HOME,
+// fixed PATH, no secrets) as a real launch, cwd the plugin directory, a 3 s
+// timeout, no shell, and only when the manifest declared a versionArg. It
+// never starts a model session.
 func testPluginProviderSpec(spec providers.Spec, res providerTestResult) providerTestResult {
 	if !res.OK {
 		if spec.Health.Install != "" {
@@ -74,7 +76,14 @@ func testPluginProviderSpec(spec providers.Spec, res providerTestResult) provide
 		return res
 	}
 	if spec.Health.VersionArg != "" {
-		res.Detail += "; version check is not available for plugin providers yet"
+		if v, ok := parseVersion(pluginagent.RunVersion(spec, spec.Health.VersionArg, os.Environ())); ok {
+			if spec.Health.MinVersion != "" && compareVersions(v, spec.Health.MinVersion) < 0 {
+				res.OK = false
+				res.Detail = fmt.Sprintf("found %s, version %s is too old: needs >= %s (update: %s)", res.path, v, spec.Health.MinVersion, spec.Health.Install)
+			} else {
+				res.Detail = fmt.Sprintf("found %s (%s)", res.path, v)
+			}
+		}
 	}
 	if spec.Health.Login != "" {
 		res.Detail += "; login: " + spec.Health.Login
