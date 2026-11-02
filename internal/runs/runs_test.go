@@ -2085,7 +2085,7 @@ func TestRunsPermissionRequestEventCarriesDetail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if back.PermissionDetail == nil || *back.PermissionDetail != *detail {
+	if back.PermissionDetail == nil || !reflect.DeepEqual(back.PermissionDetail, detail) {
 		t.Fatalf("round trip detail = %+v, want %+v", back.PermissionDetail, detail)
 	}
 }

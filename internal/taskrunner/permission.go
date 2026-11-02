@@ -146,6 +146,9 @@ func summarizeACPToolCallIn(cwd string, raw json.RawMessage) string {
 	switch {
 	case tc.Title != "":
 		summary = tc.Title
+		if cmd, ok := tc.RawInput["command"].(string); ok {
+			summary = elideCommandInText(summary, cmd)
+		}
 	case tc.ToolCallID != "":
 		summary = fmt.Sprintf("tool call %s", tc.ToolCallID)
 	default:
@@ -243,7 +246,7 @@ func claudeBashDetail(cwd string, req claudecode.CanUseToolRequest) *PermissionD
 		return nil
 	}
 	d := &PermissionDetail{Kind: "execute"}
-	d.Command, d.Truncated = capBytes(cmd, detailCommandMaxBytes)
+	d.setExecuteCommand(cmd)
 	d.GitRule = gitRuleInfo(cwd, cmd)
 	return d
 }
@@ -266,7 +269,7 @@ type codexDeciderAdapter struct {
 }
 
 func (a codexDeciderAdapter) DecideCommandExecution(ctx context.Context, req codex.CommandExecutionApprovalRequest) (bool, error) {
-	summary := fmt.Sprintf("run %s", req.Command)
+	summary := fmt.Sprintf("run %s", elideCommandInText(req.Command, req.Command))
 	// Text only: codex's own sandbox policy decides what it escalates.
 	if r := ClassifyGitCommand(req.Command); r != nil && (r.Class == GitClassAlwaysAsk || r.Class == GitClassUnparsedGit) {
 		summary += " [" + r.Label + "]"

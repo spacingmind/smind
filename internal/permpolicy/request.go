@@ -31,6 +31,10 @@ type Request struct {
 	Workspace  string
 
 	Truncated bool
+	// Doubt is set by the caller when it knows the request cannot be judged
+	// (for example its command is not the raw text); the engine asks with it
+	// as the reason, before any rule or floor.
+	Doubt string
 
 	Home      string
 	SmindHome string

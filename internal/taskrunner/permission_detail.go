@@ -54,6 +54,17 @@ type PermissionDetail struct {
 	// GitRule is set when an execute command contains a non-read-only
 	// git/gh operation (see ClassifyGitCommand).
 	GitRule *GitRuleInfo `json:"gitRule,omitempty"`
+	// Heredocs lists the heredoc bodies Command elides (see setExecuteCommand).
+	Heredocs []HeredocRef `json:"heredocs,omitempty"`
+	// PolicyCommand and PolicyTruncated are the RAW command (capped as it
+	// always was) and its truncation flag: what the policy engine, the floor
+	// and the seat floor judge. They are never the elided Command: a heredoc
+	// marker re-scans as a new heredoc and would swallow every command after
+	// it. RevealBodies are the raw bodies a human may reveal. All three stay in
+	// the daemon: json:"-" keeps them out of every payload and log.
+	PolicyCommand   string   `json:"-"`
+	PolicyTruncated bool     `json:"-"`
+	RevealBodies    []string `json:"-"`
 	// Policy is set by internal/runs when the permission policy engine
 	// decided or escalated the request (ADR-0047 §2): the matched rule
 	// (or floor) id, its why, and the normalised, heredoc-elided command,
@@ -93,7 +104,7 @@ func BuildPermissionDetail(worktree string, toolCall json.RawMessage) *Permissio
 	case "execute":
 		d := &PermissionDetail{Kind: "execute"}
 		if cmd, ok := str("command"); ok {
-			d.Command, d.Truncated = capBytes(cmd, detailCommandMaxBytes)
+			d.setExecuteCommand(cmd)
 			d.GitRule = gitRuleInfo(worktree, cmd)
 		}
 		return d
