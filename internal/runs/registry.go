@@ -805,7 +805,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	if err := validateProbe(provider, opts); err != nil {
 		return "", err
 	}
-	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, startModel(opts))
+	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, startModel(opts), reg.explicitLevel(opts, thinkingLevel))
 	if err != nil {
 		return "", err
 	}
@@ -1042,11 +1042,32 @@ func (reg *Registry) resolveModel(runner *taskrunner.Runner, provider taskrunner
 	return runner.ResolveModel(provider, requested)
 }
 
+// explicitLevel reports whether a caller named thinkingLevel for this send
+// (it is then validated against the run's provider and model at send time)
+// rather than inheriting it: a queue delivery, a failover or retry, a seat or
+// automation run, or a profile's own pinned level sent back by a client are
+// all inherited and only ever dropped with a note.
+func (reg *Registry) explicitLevel(opts []StartOption, level taskrunner.ThinkingLevel) bool {
+	if level == "" {
+		return false
+	}
+	o := resolveStartOptions(opts)
+	if o.inheritedLevel {
+		return false
+	}
+	if o.profileSet && o.profileID != 0 {
+		if p, err := reg.st.GetAgentProfile(o.profileID); err == nil && p.ThinkingLevel == string(level) {
+			return false
+		}
+	}
+	return true
+}
+
 // prepareStart is Start's validation half: unknown task, chat resolution
 // and archiving, provider bind/match, the provider catalog, permission
 // settings (with default-mode normalization), and thinking level. Every
 // error is wrapped "runs: start: ..." exactly as before.
-func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, model string) (startParams, error) {
+func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, model string, explicitLevel bool) (startParams, error) {
 	task, err := wm.GetTask(taskID)
 	if err != nil {
 		return startParams{}, fmt.Errorf("runs: start: %w", err)
@@ -1099,6 +1120,14 @@ func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chat
 	}
 	if err := taskrunner.ValidateModel(catalog, model); err != nil {
 		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+	// An explicitly requested level must fit the provider and model it is
+	// sent to; an inherited one is dropped with a note when the run starts
+	// (taskrunner.RunPrompt), never refused here.
+	if explicitLevel {
+		if _, _, err := taskrunner.ResolveLevel(catalog, runner.RunnerKind(provider), model, thinkingLevel, true); err != nil {
+			return startParams{}, fmt.Errorf("runs: start: %w", err)
+		}
 	}
 
 	return startParams{taskID: taskID, chatID: chat.ID, provider: provider, prompt: prompt, perm: perm, thinkingLevel: thinkingLevel, model: model, catalog: catalog}, nil

@@ -595,7 +595,7 @@ func renderTaskList(w io.Writer, tasks []store.Task) {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]\n       smind task send <taskId> <prompt> --profile <profileId> [--chat <chatId>] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking off|standard|extended] [--detach] [--verbose]\n       (omit --profile to continue the chat's last profile; --profile none keeps the first form and drops it)"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking <level>] [--detach] [--verbose]\n       smind task send <taskId> <prompt> --profile <profileId> [--chat <chatId>] [--model <model>] [--when-busy reject|queue|interrupt] [--thinking <level>] [--detach] [--verbose]\n       (omit --profile to continue the chat's last profile; --profile none keeps the first form and drops it)"
 
 // unpinnedModelNote is the stderr note printed when a claude-native send names
 // no --model. resolved is the model the daemon's run.start reply says the run
@@ -631,7 +631,7 @@ const approvalPolicyRemovedMsg = "--approval-policy was removed; use --mode <mod
 // likewise passed through to run.start's chatId field; omitted, the task's
 // default chat is used, so pre-chats invocations keep working unchanged.
 //
-// --thinking (off, standard or extended; Claude-only) is passed through to
+// --thinking (claude-native: off, standard or extended; codex-native: one of the model's reasoning efforts) is passed through to
 // run.start's thinkingLevel field and omitted when not given. --detach
 // prints the runId alone on stdout and returns as soon as the run has
 // started, without streaming it.
@@ -762,10 +762,11 @@ func cmdTaskSend(args []string) int {
 			return 2
 		}
 	}
-	switch thinking {
-	case "", "off", "standard", "extended":
-	default:
-		fmt.Fprintf(os.Stderr, "task send: invalid --thinking %q (want off, standard, or extended)\n", thinking)
+	// Syntax only: which levels exist depends on the provider and model
+	// (claude-native off/standard/extended, codex-native the model's own
+	// efforts), so the daemon judges membership at send time.
+	if !taskrunner.ThinkingLevel(thinking).IsValid() {
+		fmt.Fprintf(os.Stderr, "task send: invalid --thinking %q (want a lowercase level: off, standard or extended for claude-native; the model's own effort, e.g. low, medium, high, xhigh, for codex-native)\n", thinking)
 		return 2
 	}
 	prompt := strings.Join(promptParts, " ")

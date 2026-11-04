@@ -58,8 +58,23 @@ func TestRegistry_CreateRejectsInvalidPermissionSettings(t *testing.T) {
 func TestRegistry_CreateRejectsInvalidThinkingLevel(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
-	if _, err := r.Create(store.AgentProfile{Name: "x", Provider: "claude-native", ThinkingLevel: "not-a-level"}); err == nil {
+	if _, err := r.Create(store.AgentProfile{Name: "x", Provider: "claude-native", ThinkingLevel: "Not A Level"}); err == nil {
 		t.Fatalf("Create() with invalid thinkingLevel error = nil, want error")
+	}
+}
+
+// A profile pins a Codex effort id verbatim (the model's own word, not
+// Claude's off/standard/extended); membership is checked when a run starts.
+func TestProfilePinsCodexEffort(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	p, err := r.Create(store.AgentProfile{Name: "peer-codex", Provider: "codex-native", ThinkingLevel: "xhigh"})
+	if err != nil {
+		t.Fatalf("Create() codex effort pin error = %v", err)
+	}
+	got, err := r.Get(p.ID)
+	if err != nil || got.ThinkingLevel != "xhigh" {
+		t.Fatalf("Get() = %+v, %v; want thinkingLevel xhigh", got, err)
 	}
 }
 

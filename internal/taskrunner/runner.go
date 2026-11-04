@@ -445,10 +445,10 @@ func (r *Runner) lookPathFunc() func(string) (string, error) {
 // --model, an ACP session/set_config_option on the agent's model option,
 // Codex's thread/start `model`.
 //
-// thinkingLevel is Claude-only (see ThinkingLevel's doc comment): every
-// other provider ignores it entirely, regardless of what it's set to.
-// ThinkingLevelUnspecified (the zero value) preserves today's behavior
-// exactly -- no thinking Option is added to the Claude Code session at all.
+// thinkingLevel is provider-scoped (see ThinkingLevel and ResolveLevel): it
+// is re-resolved here as an inherited level, so one the provider or model
+// does not support is dropped with a session note. ThinkingLevelUnspecified
+// (the zero value) leaves the provider's own default in place.
 //
 // The backend client spawned for this call is not reused: RunPrompt owns
 // its subprocess end to end and closes it before returning. ctx cancellation
@@ -483,13 +483,27 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 		}
 	}
 
+	// A level inherited from a profile pin, a queue row or a failover is
+	// re-checked against the provider and model this run really uses: one
+	// that does not fit is dropped with a note instead of failing the run.
+	if catalog, ok := r.ProviderCatalogFor(provider); ok {
+		level, note, err := ResolveLevel(catalog, r.runnerOf(provider), model, thinkingLevel, false)
+		if err != nil {
+			return fmt.Errorf("taskrunner: %w", err)
+		}
+		if note != "" {
+			r.sendSessionNote(ctx, events, note)
+		}
+		thinkingLevel = level
+	}
+
 	switch r.runnerOf(provider) {
 	case providers.RunnerACP:
 		return r.runACP(ctx, chatID, task.WorkspaceID, provider, worktreePath, prompt, decider, perm, model, events)
 	case providers.RunnerClaude:
 		return r.runClaudeNative(ctx, provider, chatID, task.WorkspaceID, worktreePath, workspace.TaskEnv(task), prompt, decider, perm, thinkingLevel, model, events)
 	case providers.RunnerCodex:
-		return r.runCodexNative(ctx, provider, chatID, task.WorkspaceID, worktreePath, prompt, decider, perm, model, events)
+		return r.runCodexNative(ctx, provider, chatID, task.WorkspaceID, worktreePath, prompt, decider, perm, thinkingLevel, model, events)
 	default:
 		return fmt.Errorf("taskrunner: unknown provider %q", provider)
 	}
@@ -995,6 +1009,8 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		// No thinking Option at all -- preserves today's SDK default
 		// exactly, for an older client or any request that never set the
 		// field.
+	default:
+		return fmt.Errorf("taskrunner: reasoning level %q is not a claude-native level", thinkingLevel)
 	}
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))
@@ -1355,7 +1371,7 @@ func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[strin
 // Shaped like runACP (an explicit Initialize/NewSession handshake, unlike
 // runClaudeNative), since codex.Client needs the same two-step setup ACP
 // clients do.
-func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, workspaceID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, model string, events chan<- Event) error {
+func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, workspaceID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, level ThinkingLevel, model string, events chan<- Event) error {
 	mode := perm.Mode
 	if mode == "" {
 		mode = CodexModeAuto
@@ -1449,6 +1465,9 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 
 	prompt, images := r.attachmentsFor(ctx, provider, prompt, true, events)
 	var codexOpts []codex.PromptOption
+	if level != ThinkingLevelUnspecified {
+		codexOpts = append(codexOpts, codex.WithEffort(string(level)))
+	}
 	if len(images) > 0 {
 		paths := make([]string, len(images))
 		for i, img := range images {

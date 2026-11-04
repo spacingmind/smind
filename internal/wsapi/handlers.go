@@ -1425,10 +1425,10 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			PermissionMode       string          `json:"permissionMode"`
 			AutoAccept           bool            `json:"autoAccept"`
 			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
-			// ThinkingLevel is Claude-only (see taskrunner.ThinkingLevel's
-			// doc comment); every other provider ignores it. Optional --
-			// an omitted field is taskrunner.ThinkingLevelUnspecified,
-			// preserving today's behavior exactly.
+			// ThinkingLevel is provider-scoped (see taskrunner.ThinkingLevel and
+			// ResolveLevel): claude-native off/standard/extended, codex-native
+			// the model's own reasoning effort. Optional -- an omitted field
+			// is taskrunner.ThinkingLevelUnspecified, the provider default.
 			ThinkingLevel taskrunner.ThinkingLevel `json:"thinkingLevel"`
 			// WhenBusy is ADR-0021 §2's busy-chat delivery mode. Optional;
 			// omitted or "reject" keeps today's behavior exactly, so old
@@ -1508,10 +1508,10 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			PermissionMode       string          `json:"permissionMode"`
 			AutoAccept           bool            `json:"autoAccept"`
 			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
-			// ThinkingLevel is Claude-only (see taskrunner.ThinkingLevel's
-			// doc comment); every other provider ignores it. Optional --
-			// an omitted field is taskrunner.ThinkingLevelUnspecified,
-			// preserving today's behavior exactly. This is the RPC the
+			// ThinkingLevel is provider-scoped (see taskrunner.ThinkingLevel and
+			// ResolveLevel): claude-native off/standard/extended, codex-native
+			// the model's own reasoning effort. Optional -- an omitted field
+			// is taskrunner.ThinkingLevelUnspecified, the provider default. This is the RPC the
 			// composer actually calls (see use-run-timeline.ts's
 			// submitPrompt), so this is where its thinking-level selector's
 			// choice lands on the wire.

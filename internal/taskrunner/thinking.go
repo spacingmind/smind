@@ -1,15 +1,14 @@
 package taskrunner
 
-// ThinkingLevel controls how much extended-thinking budget a Claude Code
-// native run gets, via claude-agent-sdk-go's own thinking Options (see
-// runClaudeNative). It's Claude-only: GLM/Kimi's equivalent is an entirely
-// different, live-session-scoped mechanism (ACP's ConfigOption, see
-// internal/taskrunner/config_options.go), and Codex has no reachable
-// per-turn reasoning-effort knob at all (confirmed against codex-rs's
-// app-server protocol -- see
-// docs/plans/active/task-move-approval-thinking.md's Context). So this type
-// only ever matters when Provider is ProviderClaudeNative; every other
-// provider ignores it.
+// ThinkingLevel is a run's reasoning level, scoped to the provider (and
+// model) it was validated for -- see ResolveLevel. For a Claude Code native
+// run it is off/standard/extended, applied through claude-agent-sdk-go's
+// thinking Options (see runClaudeNative). For a Codex native run it is one of
+// the model's own reasoning-effort ids as model/list advertises them
+// (low/medium/high/xhigh/..., never translated), applied as turn/start's
+// `effort`. GLM/Kimi's equivalent is a live-session-scoped ACP ConfigOption
+// (internal/taskrunner/config_options.go), so every other provider drops the
+// level. The zero value means "the provider's own default" everywhere.
 type ThinkingLevel string
 
 const (
@@ -44,16 +43,27 @@ const (
 // point of offering a separate "go big" tier at all.
 const extendedThinkingBudgetTokens = 32000
 
-// IsValid reports whether l is one of the ThinkingLevel values this package
-// knows how to apply: an unrecognized value from a wire caller should
-// surface as an error, not silently collapse to ThinkingLevelUnspecified
-// (the same rejection-over-silent-fallback rule ValidatePermissionSettings
-// applies to permission modes).
+// maxLevelLen bounds a level string's length.
+const maxLevelLen = 32
+
+// IsValid reports whether l has the shape of a level: empty, or a lowercase
+// token. It is deliberately syntax-only -- which levels exist depends on the
+// provider and model, so membership is ResolveLevel's job. A malformed wire
+// value still surfaces as an error instead of being passed on.
 func (l ThinkingLevel) IsValid() bool {
-	switch l {
-	case ThinkingLevelUnspecified, ThinkingLevelOff, ThinkingLevelStandard, ThinkingLevelExtended:
+	if l == "" {
 		return true
-	default:
+	}
+	if len(l) > maxLevelLen {
 		return false
 	}
+	for i, c := range l {
+		switch {
+		case c >= 'a' && c <= 'z':
+		case i > 0 && (c >= '0' && c <= '9' || c == '_' || c == '.' || c == '-'):
+		default:
+			return false
+		}
+	}
+	return true
 }

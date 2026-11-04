@@ -128,7 +128,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	if source == store.ChatQueueSourceRemote {
 		perm.AutoAccept = false
 	}
-	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, model)
+	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, model, reg.explicitLevel(opts, thinkingLevel))
 	if err != nil {
 		return StartOutcome{}, err
 	}
@@ -552,7 +552,7 @@ func (reg *Registry) deliverOne(chatID int64) {
 			}
 		}
 
-		startOpts := []StartOption{WithModel(cfg.Model), WithOrigin(item.Source)}
+		startOpts := []StartOption{WithModel(cfg.Model), WithOrigin(item.Source), WithInheritedLevel()}
 		if item.Priority == 1 {
 			startOpts = append(startOpts, WithInterrupt())
 		}
@@ -750,9 +750,19 @@ type startOptions struct {
 	notifySet bool
 	isolation *taskrunner.IsolationOptions
 	probe     *taskrunner.ProbeOptions
+	// inheritedLevel: see WithInheritedLevel.
+	inheritedLevel bool
 
 	attachments attach.Set
 	attachStore *attach.Store
+}
+
+// WithInheritedLevel marks the run's thinking level as inherited (a queued
+// delivery, a retry, a failover successor, a seat's or automation's profile
+// pin) rather than requested by a caller: a level the run's provider or model
+// does not support is then dropped with a session note instead of refused.
+func WithInheritedLevel() StartOption {
+	return func(o *startOptions) { o.inheritedLevel = true }
 }
 
 // WithOrigin records who authored the run's prompt (store.ChatQueueSource*:
