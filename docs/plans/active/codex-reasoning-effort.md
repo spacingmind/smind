@@ -123,6 +123,74 @@ unchanged, disabled state), `profiles-section.test.tsx` (pin).
 Mobile (`vitest`): effort row selection + empty state.
 Live: `~/.smind/dogfood/codex-effort/live.sh` (guarded).
 
+## Level scope and failover (Steward review, required)
+
+Because `thinkingLevel` is reused (decision 1), a level is **scoped to the
+provider and model it was validated for**. One function owns this:
+`taskrunner.ResolveLevel(catalog ProviderInfo, runner, model, level, explicit) (level, note, err)`
+(cache-only: it reads the discovered catalog, never probes).
+
+- **Explicit request** (a human/agent passes a level on task.prompt, run.start,
+  CLI `--thinking`, MCP `task_send.thinkingLevel`, or a queue item the caller
+  created with an explicit level): validated at **send time** in
+  `Registry.StartWhenBusy` (where `thinkingLevel.IsValid` is called today)
+  against the provider's runner vocabulary (Claude: off/standard/extended;
+  Codex: the model's list when discovered, else pass-through; ACP: none) and
+  the run's model. A mismatch is an error naming the supported levels.
+- **Inherited level** (failover fallback profile, rate-limit/transient retry,
+  queue re-dispatch from a stored `chatQueueRunConfig`, automation re-fire, a
+  profile's pinned level, a level stored on an old row): never an error.
+  If it is not valid for the provider+model the run will actually use, it is
+  **dropped to that provider's own default** (nothing sent / no Option) and a
+  visible run note is emitted ("reasoning level `xhigh` is not supported by
+  claude-native; using the provider default"). A successor profile's own
+  pinned level is applied by the same function (its own pin, validated
+  against its own provider+model); the failed run's level is never copied
+  across providers (`enqueueFallback` already builds the config from the
+  successor profile, `enqueueRetry` re-sends the same provider, so the
+  function is the safety net and the single rule, not a new copy path).
+- **Model change between sends** (task's model changed, queued item still
+  holds the old level): explicit request for the new model rejected at send;
+  a queued/inherited level that the new model does not list is dropped with a
+  note at dispatch time (`deliverOne`/`RunPrompt`, which re-resolves against
+  the model the run uses).
+- **Old rows**: `standard`/`extended` (or any level) stored on a codex task,
+  queue row, profile or automation can never brick a run: at run time they are
+  inherited-class and dropped with a note. Stale `off` on codex likewise.
+  No store migration (no users, nothing to rewrite).
+
+Every layer that validates `ThinkingLevel` today, and what changes:
+
+| Layer | Today | After |
+|---|---|---|
+| `wsapi/handlers.go` task.prompt (1451), run.start (1554) | `IsValid()` enum | syntax-only `IsValid()` (cheap early reject of garbage); membership is the registry's send-time check |
+| `runs/registry.go` Start (1097) | `IsValid()` | syntax + `ResolveLevel(explicit=true)` for direct starts; queue/failover/retry paths call it with `explicit=false` |
+| `profiles/registry.go` (251) | `IsValid()` | syntax-only; membership best-effort on set (cache-only), never blocks save when the catalogue is undiscovered |
+| store rows (`chat_queue` run config JSON, runs, automation rows) | opaque string | unchanged storage; re-resolved as inherited at dispatch |
+| `taskrunner.runClaudeNative` switch | unknown falls to default | the resolver strips non-Claude levels first; the switch keeps rejecting if it ever sees one |
+| MCP `task_send` / CLI `task send --thinking`, `task new`, `profile` | accept any | pass through; server error surfaces; help text lists per-provider vocab |
+
+## Additional acceptance criteria
+
+- AC10 Failover to a different provider never carries the failed run's level;
+  the successor runs with its own profile pin or provider default, with a run
+  note when a pin is invalid for its provider+model.
+- AC11 An explicit level invalid for the run's provider/model is rejected at
+  send time; an inherited/queued one is dropped with a note, never an error.
+- AC12 Old `standard`/`extended`/`off` on a codex task or queue row cannot
+  fail a run.
+
+## Additional named tests
+
+- `internal/runs`: `TestFailoverCodexToClaudeDropsEffort`,
+  `TestFailoverClaudeToCodexDropsThinking`,
+  `TestFailoverSuccessorProfileUsesOwnPinnedLevel`,
+  `TestQueuedEffortDroppedWhenModelChanges`,
+  `TestExplicitEffortRejectedWhenModelChanges`,
+  `TestOldStandardLevelOnCodexRowDroppedWithNote`.
+- `internal/taskrunner`: `TestResolveLevel` (table: explicit vs inherited x
+  claude/codex/acp x supported/unsupported/undiscovered).
+
 ## Progress
 
 - [ ] spec PR
