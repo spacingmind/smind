@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/spacingmind/smind/compare/v0.18.0...v0.19.0) (2026-11-04)
+
+
+### Features
+
+* **codex:** per-run reasoning effort discovered per model ([#820](https://github.com/spacingmind/smind/issues/820)) ([2b9d6cb](https://github.com/spacingmind/smind/commit/2b9d6cb7b2e12ee2b5112f1e3c7f6d894a54a028))
+
 ## [0.18.0](https://github.com/spacingmind/smind/compare/v0.17.0...v0.18.0) (2026-11-02)
 
 
