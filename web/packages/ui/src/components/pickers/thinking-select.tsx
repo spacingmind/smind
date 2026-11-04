@@ -35,7 +35,8 @@ export function ThinkingSelect({
 }) {
   const current = levels.find((t) => t.id === value);
   return (
-    <Select value={value} onValueChange={onChange} disabled={disabled}>
+    // Radix keeps the last picked item's text in the trigger when the value returns to "": remount on unset so the placeholder (the unset row's name) shows.
+    <Select key={value === "" ? "unset" : "set"} value={value} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger
         aria-label={label}
         title={title ?? current?.help}
