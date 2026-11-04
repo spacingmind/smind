@@ -413,14 +413,14 @@ describe("RunConfigToolbar reasoning level for codex-native", () => {
     expect(trigger).toHaveTextContent("Default (Medium)");
     fireEvent.click(trigger);
     const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["Default (Medium)", "Low", "Medium", "XHigh"]);
+    expect(options.map((o) => o.textContent)).toEqual(["Default (Medium)", "Low", "Medium", "Extra high"]);
   });
 
   it("switching to a model with fewer levels clears an unsupported pick", async () => {
     renderToolbar({ providers });
     await pickModel("codex-native", "m-wide");
-    await pick("Reasoning level", "XHigh");
-    expect(screen.getByLabelText("Reasoning level")).toHaveTextContent("XHigh");
+    await pick("Reasoning level", "Extra high");
+    expect(screen.getByLabelText("Reasoning level")).toHaveTextContent("Extra high");
     await pickModel("codex-native", "m-narrow");
     expect(screen.getByLabelText("Reasoning level")).toHaveTextContent("Default (Low)");
   });

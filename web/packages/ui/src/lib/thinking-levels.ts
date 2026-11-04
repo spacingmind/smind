@@ -51,7 +51,7 @@ const EFFORT_LABELS: Readonly<Record<string, string>> = {
   low: "Low",
   medium: "Medium",
   high: "High",
-  xhigh: "XHigh",
+  xhigh: "Extra high",
   max: "Max",
   ultra: "Ultra",
 };

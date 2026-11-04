@@ -181,14 +181,10 @@ export interface PermissionSettings {
   autoAccept: boolean;
 }
 
-// internal/taskrunner.ThinkingLevel's values, carried over the wire as
-// their underlying string -- run.start/task.prompt's optional
-// `thinkingLevel` param. Claude-only (every other provider ignores it, and
-// the composer only ever renders this control when provider === "claude-native");
-// GLM/Kimi's own thinking-level control is a completely different,
-// live-session-scoped mechanism (ACP's ConfigOption, see run.listConfigOptions/
-// run.setConfigOption), and Codex has no reachable per-turn equivalent at
-// all. "" (omitted) preserves today's SDK default exactly.
+// internal/taskrunner.ThinkingLevel, carried over the wire as its underlying string --
+// run.start/task.prompt's optional `thinkingLevel` param. GLM/Kimi's own thinking-level control is a
+// different, live-session-scoped mechanism (ACP's ConfigOption, see run.listConfigOptions/
+// run.setConfigOption). "" (omitted) leaves the provider's own default.
 // Provider-scoped: claude-native takes off/standard/extended, a codex-native run takes one of the
 // selected model's own `efforts` ids (ModelInfo), so it is a plain string. "" stays "unset".
 export type ThinkingLevel = string;

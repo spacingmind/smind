@@ -739,9 +739,9 @@ describe("profile editor reasoning level for codex-native", () => {
     const level = screen.getByTestId("profile-form-thinking-level");
     expect(level).toHaveAttribute("aria-label", "Reasoning level");
     fireEvent.click(level);
-    fireEvent.click(await screen.findByRole("option", { name: "XHigh" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Extra high" }));
     await flush();
-    expect(screen.getByTestId("profile-form-thinking-level")).toHaveTextContent("XHigh");
+    expect(screen.getByTestId("profile-form-thinking-level")).toHaveTextContent("Extra high");
     fireEvent.click(screen.getByTestId("profile-form-submit"));
     await flush();
     expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ provider: "codex-native", thinkingLevel: "xhigh" });
@@ -758,7 +758,7 @@ describe("profile editor reasoning level for codex-native", () => {
     fireEvent.click(screen.getByTestId("model-row-codex-native:m-wide"));
     await flush();
     fireEvent.click(screen.getByTestId("profile-form-thinking-level"));
-    fireEvent.click(await screen.findByRole("option", { name: "XHigh" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Extra high" }));
     await flush();
     fireEvent.click(screen.getByTestId("profile-form-provider"));
     fireEvent.click(await screen.findByTestId("model-picker-back"));

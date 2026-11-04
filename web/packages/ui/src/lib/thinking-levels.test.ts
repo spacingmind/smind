@@ -40,7 +40,7 @@ describe("reasoningLevels", () => {
   it("lists the selected model's efforts with the default marked", () => {
     const a = reasoningLevels("codex-native", "a", providers)!;
     expect(a.map((l) => l.id)).toEqual(["low", "medium", "xhigh"]);
-    expect(a.map((l) => l.label)).toEqual(["Low", "Medium", "XHigh"]);
+    expect(a.map((l) => l.label)).toEqual(["Low", "Medium", "Extra high"]);
     expect(a[0]!.help).toBe("Fast");
     expect(a[1]!.help).toBe("(default)");
     expect(reasoningLevels("codex-native", "b", providers)!.map((l) => l.id)).toEqual(["high"]);
