@@ -89,6 +89,65 @@ func TestServer_ProviderList_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestProviderListCodexEfforts(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	opts := []taskrunner.Option{taskrunner.WithACPModeProbe(), taskrunner.WithCodexCommand([]string{fakeCodexAgentPath})}
+	for _, p := range taskrunner.SupportedProviders() {
+		if p.Runner == "acp" {
+			opts = append(opts, taskrunner.WithACPCommand(p.ID, []string{"/nonexistent/agent"}))
+		}
+	}
+	runner := taskrunner.New(wm, opts...)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		sendRequest(t, ws, "efforts", "provider.list", nil)
+		resp := readEnvelopeFor(t, ws, "efforts", 5*time.Second)
+		if resp.Error != nil {
+			t.Fatalf("provider.list error = %v", resp.Error.Message)
+		}
+		var result struct {
+			Providers []map[string]json.RawMessage `json:"providers"`
+		}
+		if err := json.Unmarshal(resp.Result, &result); err != nil {
+			t.Fatal(err)
+		}
+		codex := providerNamed(t, result.Providers, "codex-native")
+		if string(codex["modelsDiscovered"]) == "true" {
+			var models []struct {
+				ID            string                  `json:"id"`
+				Efforts       []taskrunner.EffortInfo `json:"efforts"`
+				DefaultEffort string                  `json:"defaultEffort"`
+			}
+			if err := json.Unmarshal(codex["models"], &models); err != nil {
+				t.Fatal(err)
+			}
+			if len(models) != 2 {
+				t.Fatalf("models = %+v, want two visible models", models)
+			}
+			for i, want := range []struct {
+				id, defaultEffort string
+				efforts           []taskrunner.EffortInfo
+			}{
+				{"gpt-fake-a", "medium", []taskrunner.EffortInfo{{ID: "low", Description: "d-low"}, {ID: "medium", Description: "d-medium"}, {ID: "high", Description: "d-high"}}},
+				{"gpt-fake-b", "low", []taskrunner.EffortInfo{{ID: "low", Description: "d-low"}, {ID: "medium", Description: "d-medium"}}},
+			} {
+				got := models[i]
+				if got.ID != want.id || got.DefaultEffort != want.defaultEffort || !reflect.DeepEqual(got.Efforts, want.efforts) {
+					t.Errorf("model = %+v, want %s efforts %+v default %s", got, want.id, want.efforts, want.defaultEffort)
+				}
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("codex models never discovered through provider.list")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // callProviderTest sends a provider.test request for provider and decodes
 // its providerTestResult, failing the test on a wire-level error.
 func callProviderTest(t *testing.T, ws *websocket.Conn, id, provider string) providerTestResult {

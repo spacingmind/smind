@@ -295,7 +295,13 @@ func handle(msg message, threadCwd *string) {
 		if params.Cursor == "" {
 			respond(msg.ID, map[string]any{
 				"data": []map[string]any{
-					{"id": "gpt-fake-a", "model": "gpt-fake-a", "displayName": "GPT Fake A", "description": "first", "hidden": false, "isDefault": true},
+					{"id": "gpt-fake-a", "model": "gpt-fake-a", "displayName": "GPT Fake A", "description": "first", "hidden": false, "isDefault": true,
+						"supportedReasoningEfforts": []map[string]any{
+							{"reasoningEffort": "low", "description": "d-low"},
+							{"reasoningEffort": "medium", "description": "d-medium"},
+							{"reasoningEffort": "high", "description": "d-high"},
+						},
+						"defaultReasoningEffort": "medium"},
 				},
 				"nextCursor": "page2",
 			})
@@ -303,7 +309,12 @@ func handle(msg message, threadCwd *string) {
 		}
 		respond(msg.ID, map[string]any{
 			"data": []map[string]any{
-				{"id": "gpt-fake-b", "model": "gpt-fake-b", "displayName": "GPT Fake B", "description": "second", "hidden": false, "isDefault": false},
+				{"id": "gpt-fake-b", "model": "gpt-fake-b", "displayName": "GPT Fake B", "description": "second", "hidden": false, "isDefault": false,
+					"supportedReasoningEfforts": []map[string]any{
+						{"reasoningEffort": "low", "description": "d-low"},
+						{"reasoningEffort": "medium", "description": "d-medium"},
+					},
+					"defaultReasoningEffort": "low"},
 				{"id": "gpt-hidden", "model": "gpt-hidden", "displayName": "Hidden", "description": "", "hidden": true, "isDefault": false},
 			},
 			"nextCursor": nil,

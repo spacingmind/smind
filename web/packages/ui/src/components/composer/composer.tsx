@@ -37,7 +37,7 @@ import { Button } from "@/components/ui/button";
 import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
 import { formatCombo } from "@/keyboard/shortcut-string";
 import { COMPOSER_ACTION_BUTTON_CLASS, COMPOSER_CARD_CLASS } from "@/lib/composer-shell";
-import { supportsThinking } from "@/lib/thinking-levels";
+import { reasoningLevels } from "@/lib/thinking-levels";
 import type { AttachmentMeta, AttachmentRequest, ChatQueueItem, ConfigOptionParams, PermissionSettings, TaskGit, ThinkingLevel } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
@@ -318,7 +318,7 @@ export function Composer({
           provider,
           text,
           { permissionMode, autoAccept },
-          supportsThinking(provider, providers) && thinkingLevel ? thinkingLevel : undefined,
+          reasoningLevels(provider, model, providers)?.some((l) => l.id === thinkingLevel) && thinkingLevel ? thinkingLevel : undefined,
           whenBusy,
           model || undefined,
           attachments,
@@ -337,7 +337,7 @@ export function Composer({
         setSubmitting(false);
       }
     },
-    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, profileId, onQueued, attachItems, attachKey, attachLimits],
+    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, providers, profileId, onQueued, attachItems, attachKey, attachLimits],
   );
 
   // A plain submit always hands the prompt to the daemon's queue whenBusy

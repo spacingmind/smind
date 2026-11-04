@@ -101,8 +101,8 @@ func TestTaskSendDetachPrintsRunIDAndSkipsAttach(t *testing.T) {
 func TestTaskSendThinkingFlag(t *testing.T) {
 	client, id := hangingTask(t)
 
-	code, _, stderr := sendCaptured(t, []string{"task", "send", id, "glm", "hi", "--thinking", "bogus"})
-	if code != 2 || !strings.Contains(stderr, "invalid --thinking") || !strings.Contains(stderr, "off, standard, or extended") {
+	code, _, stderr := sendCaptured(t, []string{"task", "send", id, "glm", "hi", "--thinking", "Bad Level"})
+	if code != 2 || !strings.Contains(stderr, "invalid --thinking") || !strings.Contains(stderr, "codex-native") {
 		t.Fatalf("bogus: code %d stderr %q", code, stderr)
 	}
 
@@ -112,6 +112,8 @@ func TestTaskSendThinkingFlag(t *testing.T) {
 	}{
 		{[]string{"--thinking", "extended", "--detach"}, "extended"},
 		{[]string{"--thinking=off", "--detach"}, "off"},
+		// A Codex effort id travels verbatim; the daemon scopes it to the provider.
+		{[]string{"--thinking", "xhigh", "--detach"}, "xhigh"},
 	}
 	for _, tc := range cases {
 		code, stdout, stderr := sendCaptured(t, append([]string{"task", "send", id, "glm", "hi"}, tc.args...))

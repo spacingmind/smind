@@ -710,3 +710,64 @@ describe("profile editor with a provider instance", () => {
     expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ name: "Work login", provider: "claude-work" });
   });
 });
+
+describe("profile editor reasoning level for codex-native", () => {
+  const providers = {
+    providers: [
+      { id: "claude-native", label: "Claude Code", runner: "claude-native", defaultMode: "acceptEdits", modes: [{ id: "acceptEdits", label: "Accept File Edits" }], models: [] },
+      {
+        id: "codex-native",
+        label: "Codex",
+        runner: "codex-native",
+        defaultMode: "default",
+        modes: [{ id: "default", label: "Default" }],
+        models: [{ id: "m-wide", label: "Wide", default: true, defaultEffort: "medium", efforts: [{ id: "low" }, { id: "medium" }, { id: "xhigh" }] }],
+      },
+    ],
+  };
+
+  it("pins a codex effort, and a provider switch clears it", async () => {
+    const { daemon } = await renderWithProfiles([PROFILE], providers);
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+    fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Codex deep" } });
+    fireEvent.click(screen.getByTestId("profile-form-provider"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    fireEvent.click(screen.getByTestId("model-provider-codex-native"));
+    fireEvent.click(screen.getByTestId("model-row-codex-native:m-wide"));
+    await flush();
+    const level = screen.getByTestId("profile-form-thinking-level");
+    expect(level).toHaveAttribute("aria-label", "Reasoning level");
+    fireEvent.click(level);
+    fireEvent.click(await screen.findByRole("option", { name: "Extra high" }));
+    await flush();
+    expect(screen.getByTestId("profile-form-thinking-level")).toHaveTextContent("Extra high");
+    fireEvent.click(screen.getByTestId("profile-form-submit"));
+    await flush();
+    expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ provider: "codex-native", thinkingLevel: "xhigh" });
+  });
+
+  it("clears the pinned effort when the provider changes to one that does not list it", async () => {
+    const { daemon } = await renderWithProfiles([PROFILE], providers);
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+    fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Switcher" } });
+    fireEvent.click(screen.getByTestId("profile-form-provider"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    fireEvent.click(screen.getByTestId("model-provider-codex-native"));
+    fireEvent.click(screen.getByTestId("model-row-codex-native:m-wide"));
+    await flush();
+    fireEvent.click(screen.getByTestId("profile-form-thinking-level"));
+    fireEvent.click(await screen.findByRole("option", { name: "Extra high" }));
+    await flush();
+    fireEvent.click(screen.getByTestId("profile-form-provider"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    fireEvent.click(screen.getByTestId("model-provider-claude-native"));
+    fireEvent.click(screen.getByTestId("model-row-claude-native:"));
+    await flush();
+    expect(screen.getByTestId("profile-form-thinking-level")).toHaveAttribute("aria-label", "Thinking level");
+    fireEvent.click(screen.getByTestId("profile-form-submit"));
+    await flush();
+    expect(daemon.calls.find((c) => c.method === "profile.create")?.params).toMatchObject({ provider: "claude-native", thinkingLevel: "" });
+  });
+});

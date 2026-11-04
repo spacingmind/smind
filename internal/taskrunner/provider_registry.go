@@ -25,6 +25,9 @@ func (r *Runner) runnerOf(provider Provider) providers.Runner {
 	return r.providerRegistry().RunnerOf(string(provider))
 }
 
+// RunnerKind is the harness kind provider runs on (claude, codex, acp).
+func (r *Runner) RunnerKind(provider Provider) providers.Runner { return r.runnerOf(provider) }
+
 // IsClaude reports whether provider runs the Claude CLI (claude-native and its instances).
 func (r *Runner) IsClaude(provider Provider) bool { return r.isClaude(provider) }
 

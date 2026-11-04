@@ -12,6 +12,7 @@ export interface NewTaskSelection {
   provider: string;
   model: string; // '' = "daemon default"
   mode: string; // '' = "daemon default"
+  effort: string; // '' = the model's own default reasoning effort; never remembered
 }
 
 /** The last selection, per provider (session-only, newTaskPrefs owns storing it). */
@@ -64,13 +65,14 @@ export function selectProviderChecked(
 ): NewTaskSelection {
   const p = providers.find((x) => x.id === providerId);
   if (p && isHardGate(liveGate(p.gate, now))) return current;
-  return selectProvider(providers, providerId, remembered);
+  const next = selectProvider(providers, providerId, remembered);
+  return { ...next, effort: keepEffort(p, next.model, current.effort) };
 }
 
 /** Choosing a model unless it is hard-gated: then the current selection stays. */
 export function selectModelChecked(p: ProviderInfo | undefined, current: NewTaskSelection, modelId: string, now: number = Date.now()): NewTaskSelection {
   if (modelId && isHardGate(selectionGate(p, modelId, now))) return current;
-  return { ...current, model: modelId };
+  return { ...current, model: modelId, effort: keepEffort(p, modelId, current.effort) };
 }
 
 /** Provider picker options: label, with " — <reason>" for a live gate (the native Picker cannot disable one item on iOS). */
@@ -81,8 +83,8 @@ export function providerOptions(providers: ProviderInfo[], now: number = Date.no
 /** Switching provider re-resolves model+mode for that provider (remembered else defaults). */
 export function selectProvider(providers: ProviderInfo[], providerId: string, remembered?: RememberedSelection): NewTaskSelection {
   const p = providers.find((x) => x.id === providerId);
-  if (!p) return { provider: providerId, model: '', mode: '' };
-  return { provider: p.id, model: resolveModel(p, remembered), mode: resolveMode(p, remembered) };
+  if (!p) return { provider: providerId, model: '', mode: '', effort: '' };
+  return { provider: p.id, model: resolveModel(p, remembered), mode: resolveMode(p, remembered), effort: '' };
 }
 
 /**
@@ -144,10 +146,48 @@ export function modeOptions(p: ProviderInfo | undefined): Array<{ value: string;
   return (p?.modes ?? []).map((m: ModeInfo) => ({ value: m.id, label: m.autoApproves ? `${m.label} (auto-approves)` : m.label }));
 }
 
+const EFFORT_LABELS: Record<string, string> = {
+  none: 'None',
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+  ultra: 'Ultra',
+};
+
+function effortLabel(id: string): string {
+  return EFFORT_LABELS[id] ?? id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+/** The model's listed reasoning efforts ('' modelId = the provider's default model). */
+function modelEfforts(p: ProviderInfo | undefined, modelId: string): { efforts: NonNullable<ModelInfo['efforts']>; defaultEffort?: string } {
+  const m = modelId ? p?.models?.find((x) => x.id === modelId) : p?.models?.find((x) => x.default);
+  return { efforts: m?.efforts ?? [], defaultEffort: m?.defaultEffort };
+}
+
+/** Empty when the model lists no efforts; else a Default row (named after defaultEffort) then one row per effort. */
+export function effortOptions(p: ProviderInfo | undefined, modelId: string): Array<{ value: string; label: string }> {
+  const { efforts, defaultEffort } = modelEfforts(p, modelId);
+  if (efforts.length === 0) return [];
+  return [
+    { value: '', label: defaultEffort ? `Default (${effortLabel(defaultEffort)})` : 'Default' },
+    ...efforts.map((e) => ({ value: e.id, label: effortLabel(e.id) })),
+  ];
+}
+
+/** The current effort if the provider/model still lists it, else '' (the daemon would drop a stale level). */
+function keepEffort(p: ProviderInfo | undefined, modelId: string, effort: string): string {
+  return effort !== '' && effortOptions(p, modelId).some((o) => o.value === effort) ? effort : '';
+}
+
 /** What goes on the wire: '' and the daemon's default mode are omitted (undefined), so the default applies. */
-export function wireModelMode(p: ProviderInfo | undefined, sel: NewTaskSelection): { model?: string; permissionMode?: string } {
-  const out: { model?: string; permissionMode?: string } = {};
+export function wireModelMode(p: ProviderInfo | undefined, sel: NewTaskSelection): { model?: string; permissionMode?: string; thinkingLevel?: string } {
+  const out: { model?: string; permissionMode?: string; thinkingLevel?: string } = {};
   if (sel.model) out.model = sel.model;
   if (sel.mode && sel.mode !== p?.defaultMode) out.permissionMode = sel.mode;
+  const effort = keepEffort(p, sel.model, sel.effort);
+  if (effort) out.thinkingLevel = effort;
   return out;
 }

@@ -292,7 +292,11 @@ func (r *Runner) probeCodexModels(ctx context.Context, provider Provider) error 
 		if label == "" {
 			label = m.ID
 		}
-		c.models = append(c.models, ModelInfo{ID: m.ID, Label: label, Description: m.Description, Default: m.IsDefault, Source: ModelSourceDiscovered})
+		info := ModelInfo{ID: m.ID, Label: label, Description: m.Description, Default: m.IsDefault, Source: ModelSourceDiscovered, DefaultEffort: m.DefaultEffort}
+		for _, effort := range m.Efforts {
+			info.Efforts = append(info.Efforts, EffortInfo{ID: effort.ID, Description: effort.Description})
+		}
+		c.models = append(c.models, info)
 		if m.IsDefault {
 			c.current = m.ID
 		}

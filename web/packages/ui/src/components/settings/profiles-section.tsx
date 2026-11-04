@@ -25,7 +25,7 @@ import { ThinkingSelect } from "@/components/pickers/thinking-select";
 import { buildBrowserProviders } from "@/lib/model-browser";
 import { isDangerousMode, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
 import { subscribeSettingsIntent, takeSettingsIntent, type ProfileSeed } from "@/lib/settings-intent";
-import { supportsThinking, THINKING_LEVELS } from "@/lib/thinking-levels";
+import { reasoningLevels, supportsThinking } from "@/lib/thinking-levels";
 import { describeProfile } from "@/lib/describe-profile";
 import type { AgentProfile, ModeInfo, ProviderInfo } from "@/lib/types";
 import { Icons } from "@/lib/icons";
@@ -39,8 +39,8 @@ import { contractFromProfile, contractParams, EMPTY_CONTRACT, instructionsBytes,
 // permission modes from provider.list (ADR-0019).
 const PROVIDER_DEFAULT_MODE = { id: "", label: "Provider default" };
 
-/** The form's levels: the shared vocabulary (lib/thinking-levels.ts) plus "unset", which defers to the composer. */
-const FORM_THINKING_LEVELS = [{ id: "", label: "Composer default", help: "Use whatever the composer is set to for this agent's runs." }, ...THINKING_LEVELS];
+/** The form's "unset" row, which defers to the composer. */
+const COMPOSER_DEFAULT_LEVEL = { id: "", label: "Composer default", help: "Use whatever the composer is set to for this agent's runs." };
 
 /** The add/edit form's field state -- one instance shared by whichever card is open (the "new agent" card or a row's own inline edit), since only one is ever open at a time. */
 interface ProfileFormState extends ProfileContractState {
@@ -382,6 +382,7 @@ function ProfileForm({
   otherProfiles: AgentProfile[];
 }) {
   const browserProviders = useMemo(() => buildBrowserProviders(providers, {}, { loading: providersLoading }), [providers, providersLoading]);
+  const levels = reasoningLevels(form.provider, form.model, providers);
   return (
     <form className="flex flex-col gap-2" onSubmit={onSubmit}>
       <Input
@@ -407,11 +408,14 @@ function ProfileForm({
             onClearCooldown={requestClearCooldown}
             // Modes and models are provider-scoped: a new provider starts from its own defaults.
             onSelect={(provider, model) =>
-              setForm((f) =>
-                provider === f.provider
-                  ? { ...f, model }
-                  : { ...f, provider, permissionMode: "", autoAccept: false, model },
-              )
+              setForm((f) => {
+                const levels = reasoningLevels(provider, model, providers);
+                // A pinned level the new provider/model does not list would be refused by the daemon.
+                const thinkingLevel = levels !== null && !levels.some((l) => l.id === f.thinkingLevel) ? "" : f.thinkingLevel;
+                return provider === f.provider
+                  ? { ...f, model, thinkingLevel }
+                  : { ...f, provider, permissionMode: "", autoAccept: false, model, thinkingLevel };
+              })
             }
           />
           <ProviderHealthDot provider={form.provider} testId={`${idPrefix}-provider-health`} />
@@ -425,12 +429,15 @@ function ProfileForm({
           dangerous={isDangerousMode(providers, form.provider, form.permissionMode, form.autoAccept)}
           onChange={(value) => setForm((f) => ({ ...f, permissionMode: value }))}
         />
-        {supportsThinking(form.provider, providers) ? (
+        {levels !== null ? (
           <ThinkingSelect
             variant="field"
             testId={`${idPrefix}-thinking-level`}
-            levels={FORM_THINKING_LEVELS}
-            value={form.thinkingLevel}
+            label={supportsThinking(form.provider, providers) ? "Thinking level" : "Reasoning level"}
+            levels={levels.length > 0 ? [COMPOSER_DEFAULT_LEVEL, ...levels] : []}
+            value={levels.some((l) => l.id === form.thinkingLevel) ? form.thinkingLevel : ""}
+            disabled={levels.length === 0}
+            placeholder={levels.length === 0 ? "Default reasoning" : undefined}
             onChange={(value) => setForm((f) => ({ ...f, thinkingLevel: value }))}
           />
         ) : null}

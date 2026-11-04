@@ -193,13 +193,33 @@ Every layer that validates `ThinkingLevel` today, and what changes:
 
 ## Progress
 
-- [ ] spec PR
-- [ ] Go: codex client + discovery
-- [ ] Go: run path + validation + profiles + CLI
-- [ ] Web UI
-- [ ] Mobile UI
-- [ ] Frames, live check, mutations
+- [x] spec PR (#819)
+- [x] Go: codex client + discovery (`ListModels` efforts, `WithEffort`, `ModelInfo.efforts/defaultEffort`)
+- [x] Go: `ResolveLevel`, run path, send-time check, queue/failover/profile inheritance, CLI
+- [x] Web: `reasoningLevels`, toolbar, profile form
+- [x] Mobile: new-task Reasoning row
+- [x] Live check (below), mutations (below)
+- [ ] Frames reviewed by the Supervisor
+
+## Decisions taken while implementing
+
+- Per the Supervisor: reuse `thinkingLevel`, Codex ids 1:1 (no `off` -> `none` translation: `off` on codex is rejected with the model's list).
+- `ResolveLevel` lives in `internal/taskrunner/level.go`; `Registry` decides explicit vs inherited (`explicitLevel`): queue delivery sets `WithInheritedLevel`, and a profile pin sent back by a client (same level as the profile named by `WithProfile`) is inherited too (the CLI/MCP resolve the profile client-side, so the daemon cannot otherwise tell).
+- ACP providers: a level is dropped with a note in both modes (no error), preserving the old "ignored" behaviour instead of newly rejecting; explicit `--thinking` on a GLM run is therefore visible only as a note.
+- Profile save validates syntax only (membership needs the model's discovered list, which can be absent when saving); membership is enforced at run start. Deviation from decision 4's "best effort on set".
+- No MCP `task_send.thinkingLevel` exists, so nothing to change there.
 
 ## Validation
 
-(filled in as ACs are satisfied)
+- Protocol: verified against `refs/codex` @ `2c4a957` and installed codex-cli 0.166.0's generated schema (see Protocol facts).
+- AC1/AC2: `TestListModelsParsesEfforts` (internal/codex), `TestProbeCodexModelsRecordsEfforts`, `TestProviderListCodexEfforts` (wsapi, through provider.list).
+- AC3: `TestCodexEffortProbeIsCached` (counts fake-agent spawns across 10 `ProviderCatalogFor` calls = 1).
+- AC4: `TestPromptSendsEffortOnTurnStart`, `TestPromptOmitsEffortWhenUnspecified` (turn/start params recorded by the fake), `TestRunCodexAppliesSupportedEffort`, `TestRunCodexUnspecifiedEffortSendsNothing`.
+- AC5: `TestExplicitEffortRejectedWhenModelChanges` (error names `supported: low, medium`; `off` rejected with the list), `TestResolveLevel`.
+- AC6: `TestProfilePinsCodexEffort`; the profile pin travels as inherited through `explicitLevel` (profile level equals the named profile's) and `TestFailoverSuccessorProfileUsesOwnPinnedLevel`.
+- AC10-12: `TestFailoverCodexToClaudeDropsEffort`, `TestFailoverClaudeToCodexDropsThinking`, `TestQueuedEffortDroppedWhenModelChanges`, `TestOldStandardLevelOnCodexRowDroppedWithNote`, `TestRunCodexDropsUnsupportedInheritedEffort`. The two failover tests deliver a queue row whose provider/level pair is the failover pair (the queue is the path failover uses), not a real rate-limit failure of a codex run.
+- AC7: web `thinking-levels.test.ts`, `run-config-toolbar.test.tsx`, `profiles-section.test.tsx`; mobile `providerCatalog.test.ts`, `newTask.test.ts`; frames in `~/.smind/dogfood/codex-effort/frames`.
+- AC8 (live): `~/.smind/dogfood/codex-effort/live.sh gpt-6.1-sol low 4977` on an isolated daemon (port 4977, SMIND_HOME under the dogfood root, real HOME for the codex login): `--thinking off` rejected at send time; `--thinking low` run completed ("ok", 5s, 16k/5 tok) and Codex's own session log (`evidence/rollout-live.jsonl`) records `"effort":"low"` / `"reasoning_effort":"low"` on `gpt-6.1-sol`.
+- AC9: the stale comment is gone from `thinking.go`.
+- Mutations (each on committed work, named test fails): M1 `turn/start` effort dropped (`TestPromptSendsEffortOnTurnStart`); M2 probe drops `DefaultEffort` (`TestProbeCodexModelsRecordsEfforts`); M3 run path does not pass the level (`TestRunCodexAppliesSupportedEffort`); M4 inherited level raises instead of dropping (`TestRunCodexDropsUnsupportedInheritedEffort`, `TestQueuedEffortDroppedWhenModelChanges`, `TestOldStandardLevelOnCodexRowDroppedWithNote`); M5 explicit level never validated (`TestExplicitEffortRejectedWhenModelChanges`); M6 probe gate removed (`TestCodexEffortProbeIsCached`, 11 spawns; removing only the `e.models` clause survived because the retry window alone also gates, so the whole condition was mutated); M7 no resolve in `RunPrompt` (`TestRunCodexDropsUnsupportedInheritedEffort`, `TestFailoverCodexToClaudeDropsEffort`).
+- Gates: `go vet ./...`, `GOOS=windows go vet`, gofmt, `bun run typecheck`, web vitest for touched files + `src/demo`, mobile `tsc --noEmit` + vitest (106 files / 981 tests), `go test -race` for taskrunner, runs, profiles, codex, cmd/smind, wsapi. `internal/wsapi` `TestPolicyEngine_FloorProtectsDaemonHome` fails only when TMPDIR is under the daemon home (this lead's TMPDIR was `~/.smind/scratch/464`); it passes with a normal TMPDIR and is unrelated.

@@ -8,6 +8,13 @@ import (
 	"github.com/spacingmind/smind/internal/providers"
 )
 
+// EffortInfo is one reasoning effort a Codex model advertises: ID is the
+// wire string turn/start's `effort` takes, Description the model's own words.
+type EffortInfo struct {
+	ID          string `json:"id"`
+	Description string `json:"description,omitempty"`
+}
+
 // ModelInfo is one model a provider offers (ADR-0025): ID is the string the
 // provider itself takes (Claude's --model value, an ACP model config
 // option's value, a Codex model id); Label/Description are its own words.
@@ -17,6 +24,11 @@ type ModelInfo struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
 	Default     bool   `json:"default,omitempty"`
+	// Efforts/DefaultEffort: a Codex model's supported reasoning efforts and
+	// the one a run without an explicit level gets (model/list); empty for
+	// every other provider.
+	Efforts       []EffortInfo `json:"efforts,omitempty"`
+	DefaultEffort string       `json:"defaultEffort,omitempty"`
 	// Source says where the entry came from (additive wire field):
 	// "catalog" (smind's static Claude list), "config" (an instance's or a
 	// custom provider's configured models) or "discovered" (the agent's own

@@ -106,6 +106,18 @@ describe('submitNewTask', () => {
     ]);
   });
 
+  it('carries thinkingLevel on run.start only when the effort is set and listed', async () => {
+    const codex: ProviderInfo[] = [{ id: 'codex-native', models: [{ id: 'gpt-a', label: 'A', default: true, efforts: [{ id: 'low' }, { id: 'high' }] }] }];
+    const run = async (effort: string) => {
+      const { conn, calls } = fakeConnection((method) => (method === 'task.create' ? created : { runId: 'run-1' }));
+      await submitNewTask(conn, input({ prompt: 'go', provider: 'codex-native', model: 'gpt-a', mode: '', effort }), codex);
+      return calls[1][1] as Record<string, unknown>;
+    };
+    expect((await run('high')).thinkingLevel).toBe('high');
+    expect('thinkingLevel' in (await run(''))).toBe(false);
+    expect('thinkingLevel' in (await run('ultra'))).toBe(false);
+  });
+
   it('(c) task.create rejects -> create-failed, no run.start', async () => {
     const { conn, calls } = fakeConnection(() => {
       throw new Error('daemon says no');

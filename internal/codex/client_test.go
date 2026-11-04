@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -416,5 +417,94 @@ func TestCodex_LocalImageInput(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Input, want) {
 		t.Fatalf("input = %v, want %v", got.Input, want)
+	}
+}
+
+// TestListModelsParsesEfforts proves model/list's
+// supportedReasoningEfforts/defaultReasoningEffort ride onto ModelInfo per
+// model (gpt-fake-a three efforts, gpt-fake-b two, hidden skipped) -- the
+// per-model discovery the reasoning-effort picker is built on.
+func TestListModelsParsesEfforts(t *testing.T) {
+	t.Parallel()
+	c, _ := newTestClient(t, "")
+
+	models, err := c.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels() error = %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("models = %+v, want gpt-fake-a and gpt-fake-b", models)
+	}
+	effortIDs := func(m ModelInfo) string {
+		ids := make([]string, len(m.Efforts))
+		for i, e := range m.Efforts {
+			ids[i] = e.ID
+		}
+		return strings.Join(ids, ",")
+	}
+	if got := effortIDs(models[0]); got != "low,medium,high" {
+		t.Fatalf("gpt-fake-a efforts = %q, want low,medium,high", got)
+	}
+	if models[0].Efforts[0].Description != "d-low" {
+		t.Fatalf("gpt-fake-a efforts[0] = %+v, want description d-low", models[0].Efforts[0])
+	}
+	if models[0].DefaultEffort != "medium" {
+		t.Fatalf("gpt-fake-a defaultEffort = %q, want medium", models[0].DefaultEffort)
+	}
+	if got := effortIDs(models[1]); got != "low,medium" {
+		t.Fatalf("gpt-fake-b efforts = %q, want low,medium", got)
+	}
+	if models[1].DefaultEffort != "low" {
+		t.Fatalf("gpt-fake-b defaultEffort = %q, want low", models[1].DefaultEffort)
+	}
+}
+
+// recordedTurnInput runs one Prompt against the fake agent with its
+// opt-in "record-prompt-blocks" marker in place and returns the recorded
+// turn/start params as raw JSON.
+func recordedTurnInput(t *testing.T, opts ...PromptOption) map[string]json.RawMessage {
+	t.Helper()
+	c, cwd := newTestClient(t, "")
+	if err := os.WriteFile(filepath.Join(cwd, "record-prompt-blocks"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	threadID, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates := make(chan Update, 16)
+	if _, err := c.Prompt(ctx, threadID, "hi", updates, opts...); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(cwd, "turn-input"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode %q: %v", raw, err)
+	}
+	return got
+}
+
+// TestPromptSendsEffortOnTurnStart proves WithEffort's value reaches
+// turn/start's `effort` on the wire verbatim.
+func TestPromptSendsEffortOnTurnStart(t *testing.T) {
+	t.Parallel()
+	got := recordedTurnInput(t, WithEffort("high"))
+	if string(got["effort"]) != `"high"` {
+		t.Fatalf("turn/start effort = %s, want \"high\"", got["effort"])
+	}
+}
+
+// TestPromptOmitsEffortWhenUnspecified proves a Prompt without WithEffort
+// sends no `effort` key at all, leaving the model's own default in Codex.
+func TestPromptOmitsEffortWhenUnspecified(t *testing.T) {
+	t.Parallel()
+	got := recordedTurnInput(t)
+	if _, ok := got["effort"]; ok {
+		t.Fatalf("turn/start carries effort = %s, want no key", got["effort"])
 	}
 }

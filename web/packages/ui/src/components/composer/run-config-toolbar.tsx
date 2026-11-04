@@ -15,7 +15,7 @@ import {
   providerModes,
   supportsAutoAccept,
 } from "@/lib/permission-modes";
-import { supportsThinking } from "@/lib/thinking-levels";
+import { defaultEffortLabel, reasoningLevels, supportsThinking } from "@/lib/thinking-levels";
 import { ModeSelect } from "@/components/pickers/mode-select";
 import { ThinkingSelect } from "@/components/pickers/thinking-select";
 import { AutoAcceptToggle } from "@/components/pickers/auto-accept-toggle";
@@ -294,13 +294,17 @@ export function RunConfigToolbar({
   // resets to the new provider's own default mode and turns autoAccept off,
   // and the model is the one picked alongside it, so a model id never leaks
   // into a provider that lacks it. Same-provider picks keep the mode.
+  // A reasoning level is provider+model scoped too (a codex model lists its own efforts): one the new
+  // pick does not list is dropped, so the daemon is never sent a level the model lacks.
   const setProviderModel = useCallback((provider: string, model: string) => {
     setState((prev) => {
       const patch =
         provider === prev.provider ? { model } : { provider, permissionMode: "", autoAccept: false, model };
-      return { ...prev, ...patch, custom: prev.baseAgentId !== null ? true : prev.custom };
+      const levels = reasoningLevels(provider, model, providers);
+      const thinkingLevel = levels !== null && !levels.some((l) => l.id === prev.thinkingLevel) ? "" : prev.thinkingLevel;
+      return { ...prev, ...patch, thinkingLevel, custom: prev.baseAgentId !== null ? true : prev.custom };
     });
-  }, []);
+  }, [providers]);
   const setPermissionMode = useCallback((permissionMode: string) => setField({ permissionMode }), [setField]);
   const setAutoAccept = useCallback((autoAccept: boolean) => setField({ autoAccept }), [setField]);
   const setThinkingLevel = useCallback((thinkingLevel: ThinkingLevel) => setField({ thinkingLevel }), [setField]);
@@ -403,7 +407,7 @@ function RunConfigToolbarModelPicker() {
         onSelect={(provider, model) => actions.setProviderModel(provider, model)}
         onApplyProfile={actions.applyProfile}
         onClearAgent={actions.clearAgent}
-        currentConfig={{ permissionMode: state.permissionMode, autoAccept: state.autoAccept, thinkingLevel: supportsThinking(state.provider, meta.providers) ? state.thinkingLevel : "" }}
+        currentConfig={{ permissionMode: state.permissionMode, autoAccept: state.autoAccept, thinkingLevel: reasoningLevels(state.provider, state.model, meta.providers) !== null ? state.thinkingLevel : "" }}
         onManageAgents={() => openSettings("agents")}
         onCreateProfile={(seed) => {
           setSettingsIntent({ kind: "newProfile", seed });
@@ -508,21 +512,35 @@ function RunConfigToolbarMode() {
 
 function RunConfigToolbarThinking() {
   const { state, actions, meta } = useRunConfig();
-  // Claude-only, pre-run control (see thinking-levels.ts's doc comment) --
-  // omitted entirely, not just disabled, for every other provider: no
-  // dead control sitting in the toolbar for a provider that can't act on
-  // it. GLM/Kimi's own thinking-level control lives in this same row
-  // instead, once a live session exists (see run-config-options in
-  // task-detail), since that option list is only ever known after ACP's
-  // NewSession responds.
-  if (!supportsThinking(state.provider, meta.providers)) return null;
+  // A pre-run control, omitted entirely (not just disabled) for a provider with no reasoning level: no
+  // dead control in the toolbar. Claude takes the fixed vocabulary; a codex model its own advertised
+  // efforts (disabled when it lists none). GLM/Kimi's own thinking-level control lives in this same row
+  // instead, once a live session exists (see run-config-options in task-detail), since that option
+  // list is only ever known after ACP's NewSession responds.
+  const levels = reasoningLevels(state.provider, state.model, meta.providers);
+  if (levels === null) return null;
+  if (supportsThinking(state.provider, meta.providers)) {
+    return (
+      <ThinkingSelect
+        value={levels.some((l) => l.id === state.thinkingLevel) ? state.thinkingLevel || "standard" : "standard"}
+        onChange={(v) => actions.setThinkingLevel(v)}
+        disabled={meta.disabled}
+        variant="pill"
+        placeholder="Select thinking level"
+      />
+    );
+  }
+  // Codex: "" (nothing sent) is its own default row, so a user can go back to it.
+  const defaultLabel = defaultEffortLabel(state.provider, state.model, meta.providers);
   return (
     <ThinkingSelect
-      value={state.thinkingLevel || "standard"}
-      onChange={(v) => actions.setThinkingLevel(v as ThinkingLevel)}
-      disabled={meta.disabled}
+      label="Reasoning level"
+      levels={levels.length > 0 ? [{ id: "", label: defaultLabel, help: "Use the model's own default reasoning." }, ...levels] : []}
+      value={levels.some((l) => l.id === state.thinkingLevel) ? state.thinkingLevel : ""}
+      onChange={(v) => actions.setThinkingLevel(v)}
+      disabled={meta.disabled || levels.length === 0}
       variant="pill"
-      placeholder="Select thinking level"
+      placeholder={levels.length > 0 ? defaultLabel : "Default reasoning"}
     />
   );
 }

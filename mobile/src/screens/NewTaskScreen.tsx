@@ -24,7 +24,7 @@ import {
   singleFlight,
   submitNewTask,
 } from '../newTask';
-import { NewTaskSelection, catalogOrFallback, defaultSelection, modeOptions, modelOptions, providerNote, providerOptions, selectModelChecked, selectProviderChecked } from '../providerCatalog';
+import { NewTaskSelection, catalogOrFallback, defaultSelection, effortOptions, modeOptions, modelOptions, providerNote, providerOptions, selectModelChecked, selectProviderChecked } from '../providerCatalog';
 import { gateNotice, isHardGate, selectionGate } from '../providerGate';
 import { recallSelection, rememberSelection } from '../newTaskPrefs';
 import { issueMessage, spacesFor } from '../newTaskForm';
@@ -114,6 +114,7 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
       provider: selection?.provider ?? '',
       model: selection?.model ?? '',
       mode: selection?.mode ?? '',
+      effort: selection?.effort ?? '',
       start,
     }),
     [workspaceId, spaceId, title, prompt, selection, start],
@@ -193,6 +194,8 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
   }
 
   const { workspaces, providers } = load;
+  // Codex's per-model reasoning efforts; empty (row hidden) for providers/models that list none.
+  const efforts = selection ? effortOptions(provider, selection.model) : [];
   return (
     <ScrollView
       style={styles.container}
@@ -301,6 +304,19 @@ export function NewTaskScreen({ conn }: { conn: RelayConnection }) {
               </Picker>
             </UiHost>
           </FieldRow>
+          {efforts.length > 0 ? (
+            <View testID="new-task-reasoning">
+              <FieldRow label="Reasoning">
+                <UiHost style={styles.controlHost}>
+                  <Picker selectedValue={selection.effort} onValueChange={(v) => setSelection({ ...selection, effort: String(v) })}>
+                    {efforts.map((o) => (
+                      <Picker.Item key={o.value} label={o.label} value={o.value} />
+                    ))}
+                  </Picker>
+                </UiHost>
+              </FieldRow>
+            </View>
+          ) : null}
           <FieldRow label="Permission mode">
             <UiHost style={styles.controlHost}>
               <Picker selectedValue={selection.mode} onValueChange={(v) => setSelection({ ...selection, mode: String(v) })}>

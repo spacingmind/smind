@@ -9,11 +9,14 @@ import {
   FALLBACK_PROVIDERS,
   catalogOrFallback,
   defaultSelection,
+  effortOptions,
   modeOptions,
   modelOptions,
   providerLabel,
   providerNote,
+  selectModelChecked,
   selectProvider,
+  selectProviderChecked,
   wireModelMode,
 } from '../providerCatalog';
 
@@ -39,26 +42,26 @@ const claude: ProviderInfo = {
 
 describe('defaultSelection', () => {
   it('first provider with its default model and defaultMode when nothing is remembered', () => {
-    expect(defaultSelection([glm, claude])).toEqual({ provider: 'glm', model: 'glm-4.7', mode: 'default' });
+    expect(defaultSelection([glm, claude])).toEqual({ provider: 'glm', model: 'glm-4.7', mode: 'default', effort: '' });
   });
 
   it('remembered provider wins when it is in the catalog, with its remembered model/mode', () => {
     const remembered = { provider: 'claude-native', byProvider: { 'claude-native': { model: 'sonnet', mode: 'bypassPermissions' } } };
-    expect(defaultSelection([glm, claude], remembered)).toEqual({ provider: 'claude-native', model: 'sonnet', mode: 'bypassPermissions' });
+    expect(defaultSelection([glm, claude], remembered)).toEqual({ provider: 'claude-native', model: 'sonnet', mode: 'bypassPermissions', effort: '' });
   });
 
   it('an unknown remembered provider falls back to the first provider', () => {
-    expect(defaultSelection([glm], { provider: 'gone' })).toEqual({ provider: 'glm', model: 'glm-4.7', mode: 'default' });
+    expect(defaultSelection([glm], { provider: 'gone' })).toEqual({ provider: 'glm', model: 'glm-4.7', mode: 'default', effort: '' });
   });
 
   it('remembered model/mode ignored when no longer in the catalog', () => {
     const remembered = { provider: 'glm', byProvider: { glm: { model: 'glm-5', mode: 'deleted' } } };
-    expect(defaultSelection([glm], remembered)).toEqual({ provider: 'glm', model: 'glm-4.7', mode: 'default' });
+    expect(defaultSelection([glm], remembered)).toEqual({ provider: 'glm', model: 'glm-4.7', mode: 'default', effort: '' });
   });
 
   it('a provider without models/modes yields "" for both', () => {
     const bare: ProviderInfo = { id: 'bare' };
-    expect(defaultSelection([bare])).toEqual({ provider: 'bare', model: '', mode: '' });
+    expect(defaultSelection([bare])).toEqual({ provider: 'bare', model: '', mode: '', effort: '' });
   });
 
   it('empty catalog returns null', () => {
@@ -69,12 +72,12 @@ describe('defaultSelection', () => {
 describe('selectProvider', () => {
   it('re-resolves model+mode for the new provider (remembered else defaults)', () => {
     const remembered = { byProvider: { glm: { model: 'glm-air' } } };
-    expect(selectProvider([glm, claude], 'claude-native', remembered)).toEqual({ provider: 'claude-native', model: 'sonnet', mode: 'plan' });
-    expect(selectProvider([glm, claude], 'glm', remembered)).toEqual({ provider: 'glm', model: 'glm-air', mode: 'default' });
+    expect(selectProvider([glm, claude], 'claude-native', remembered)).toEqual({ provider: 'claude-native', model: 'sonnet', mode: 'plan', effort: '' });
+    expect(selectProvider([glm, claude], 'glm', remembered)).toEqual({ provider: 'glm', model: 'glm-air', mode: 'default', effort: '' });
   });
 
   it('an unknown provider id yields empty model/mode', () => {
-    expect(selectProvider([glm], 'nope')).toEqual({ provider: 'nope', model: '', mode: '' });
+    expect(selectProvider([glm], 'nope')).toEqual({ provider: 'nope', model: '', mode: '', effort: '' });
   });
 });
 
@@ -104,15 +107,15 @@ describe('labels and options', () => {
 
 describe('wireModelMode', () => {
   it("omits '' (daemon default model) and the provider's defaultMode", () => {
-    expect(wireModelMode(glm, { provider: 'glm', model: '', mode: 'default' })).toEqual({});
+    expect(wireModelMode(glm, { provider: 'glm', model: '', mode: 'default', effort: '' })).toEqual({});
   });
 
   it('sends a chosen model and a non-default mode', () => {
-    expect(wireModelMode(glm, { provider: 'glm', model: 'glm-air', mode: 'acceptEdits' })).toEqual({ model: 'glm-air', permissionMode: 'acceptEdits' });
+    expect(wireModelMode(glm, { provider: 'glm', model: 'glm-air', mode: 'acceptEdits', effort: '' })).toEqual({ model: 'glm-air', permissionMode: 'acceptEdits' });
   });
 
   it('with no provider entry, any non-empty selection still goes out', () => {
-    expect(wireModelMode(undefined, { provider: 'x', model: 'm', mode: 'acceptEdits' })).toEqual({ model: 'm', permissionMode: 'acceptEdits' });
+    expect(wireModelMode(undefined, { provider: 'x', model: 'm', mode: 'acceptEdits', effort: '' })).toEqual({ model: 'm', permissionMode: 'acceptEdits' });
   });
 });
 
@@ -190,5 +193,61 @@ describe('providerNote', () => {
       expect(p.secrets).toBeUndefined();
       expect(p.unverified).toBeUndefined();
     }
+  });
+});
+
+describe('reasoning efforts', () => {
+  const codex: ProviderInfo = {
+    id: 'codex-native',
+    defaultMode: 'default',
+    modes: [{ id: 'default', label: 'Default' }],
+    models: [
+      { id: 'gpt-a', label: 'A', default: true, defaultEffort: 'medium', efforts: [{ id: 'low' }, { id: 'medium' }, { id: 'xhigh' }] },
+      { id: 'gpt-b', label: 'B', defaultEffort: 'high', efforts: [{ id: 'high' }, { id: 'custom-deep' }] },
+      { id: 'gpt-c', label: 'C' },
+    ],
+  };
+  const sel = (model: string, effort: string) => ({ provider: 'codex-native', model, mode: '', effort });
+
+  it('lists a Default row named after defaultEffort, then the model efforts; differs per model', () => {
+    expect(effortOptions(codex, 'gpt-a')).toEqual([
+      { value: '', label: 'Default (Medium)' },
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'xhigh', label: 'Extra high' },
+    ]);
+    expect(effortOptions(codex, 'gpt-b')).toEqual([
+      { value: '', label: 'Default (High)' },
+      { value: 'high', label: 'High' },
+      { value: 'custom-deep', label: 'Custom-deep' },
+    ]);
+  });
+
+  it("uses the provider's default model for '' and returns [] for a model or provider with none", () => {
+    expect(effortOptions(codex, '')[0].label).toBe('Default (Medium)');
+    expect(effortOptions(codex, 'gpt-c')).toEqual([]);
+    expect(effortOptions(glm, 'glm-air')).toEqual([]);
+    expect(effortOptions(undefined, '')).toEqual([]);
+  });
+
+  it('resets effort when the new model does not list it, keeps it when it does', () => {
+    expect(selectModelChecked(codex, sel('gpt-a', 'xhigh'), 'gpt-b').effort).toBe('');
+    expect(selectModelChecked(codex, sel('gpt-a', 'low'), 'gpt-c').effort).toBe('');
+    expect(selectModelChecked(codex, sel('gpt-a', 'medium'), 'gpt-a').effort).toBe('medium');
+    expect(selectModelChecked(codex, sel('gpt-b', 'high'), 'gpt-a').effort).toBe('');
+  });
+
+  it('resets effort on provider switch and starts selections with none', () => {
+    expect(selectProvider([codex, glm], 'glm').effort).toBe('');
+    expect(selectProviderChecked([codex, glm], 'glm', sel('gpt-a', 'low')).effort).toBe('');
+    expect(defaultSelection([codex])?.effort).toBe('');
+  });
+
+  it('wireModelMode sends thinkingLevel only for a listed non-empty effort', () => {
+    expect(wireModelMode(codex, sel('gpt-a', 'xhigh'))).toEqual({ model: 'gpt-a', thinkingLevel: 'xhigh' });
+    expect(wireModelMode(codex, sel('gpt-a', ''))).toEqual({ model: 'gpt-a' });
+    expect(wireModelMode(codex, sel('gpt-b', 'xhigh'))).toEqual({ model: 'gpt-b' });
+    expect(wireModelMode(codex, sel('', 'medium'))).toEqual({ thinkingLevel: 'medium' });
+    expect(wireModelMode(glm, { provider: 'glm', model: '', mode: 'default', effort: 'high' })).toEqual({});
   });
 });
