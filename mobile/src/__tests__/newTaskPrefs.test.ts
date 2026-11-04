@@ -12,13 +12,13 @@ describe('newTaskPrefs', () => {
   });
 
   it('remembers the provider and its model/mode', () => {
-    rememberSelection({ provider: 'glm', model: 'glm-air', mode: 'default' });
+    rememberSelection({ provider: 'glm', model: 'glm-air', mode: 'default', effort: '' });
     expect(recallSelection()).toEqual({ provider: 'glm', byProvider: { glm: { model: 'glm-air', mode: 'default' } } });
   });
 
   it('keeps per-provider entries when the provider changes back', () => {
-    rememberSelection({ provider: 'glm', model: 'glm-air', mode: 'acceptEdits' });
-    rememberSelection({ provider: 'claude-native', model: '', mode: 'plan' });
+    rememberSelection({ provider: 'glm', model: 'glm-air', mode: 'acceptEdits', effort: '' });
+    rememberSelection({ provider: 'claude-native', model: '', mode: 'plan', effort: '' });
     expect(recallSelection().provider).toBe('claude-native');
     expect(recallSelection().byProvider).toEqual({
       glm: { model: 'glm-air', mode: 'acceptEdits' },
@@ -27,7 +27,7 @@ describe('newTaskPrefs', () => {
   });
 
   it('an unknown provider in byProvider recalls nothing for others', () => {
-    rememberSelection({ provider: 'glm', model: '', mode: '' });
+    rememberSelection({ provider: 'glm', model: '', mode: '', effort: '' });
     expect(recallSelection().byProvider?.['claude-native']).toBeUndefined();
   });
 });

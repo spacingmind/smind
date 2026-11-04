@@ -223,12 +223,13 @@ export type RunStartResult = { kind: 'started'; runId: string } | { kind: 'queue
 /** run.start with whenBusy: {queued, queueItemId} becomes the queued variant, {runId} the started one. */
 export async function startRunWhenBusy(
   conn: RelayConnection,
-  p: { taskId: number; chatId?: number; provider: string; prompt: string; whenBusy: WhenBusy; model?: string; permissionMode?: string; attachments?: AttachmentPayload[] },
+  p: { taskId: number; chatId?: number; provider: string; prompt: string; whenBusy: WhenBusy; model?: string; permissionMode?: string; thinkingLevel?: string; attachments?: AttachmentPayload[] },
 ): Promise<RunStartResult> {
   const params: Record<string, unknown> = { taskId: p.taskId, provider: p.provider, prompt: p.prompt, whenBusy: p.whenBusy };
   if (p.chatId !== undefined) params.chatId = p.chatId;
   if (p.model) params.model = p.model;
   if (p.permissionMode) params.permissionMode = p.permissionMode;
+  if (p.thinkingLevel) params.thinkingLevel = p.thinkingLevel;
   if (p.attachments && p.attachments.length > 0) params.attachments = p.attachments;
   const result = (await conn.call('run.start', params)) as { runId?: string; queued?: boolean; queueItemId?: number };
   if (result.queued) return { kind: 'queued', queueItemId: result.queueItemId! };
@@ -278,6 +279,9 @@ export interface ModelInfo {
   label: string;
   description?: string;
   default?: boolean;
+  /** Codex reasoning efforts this model lists (ids are what thinkingLevel carries); absent = no knob. */
+  efforts?: { id: string; description?: string }[];
+  defaultEffort?: string;
 }
 
 /** The picker gate (see web lib/types.ts ProviderGate): a client renders an unknown reason as its action label. */
@@ -367,7 +371,7 @@ export async function createTask(
  */
 export function startFirstRun(
   conn: RelayConnection,
-  p: { taskId: number; provider: string; prompt: string; model?: string; permissionMode?: string },
+  p: { taskId: number; provider: string; prompt: string; model?: string; permissionMode?: string; thinkingLevel?: string },
 ): Promise<RunStartResult> {
   return startRunWhenBusy(conn, { ...p, whenBusy: 'queue' });
 }

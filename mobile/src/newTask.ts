@@ -22,6 +22,7 @@ export interface NewTaskInput {
   provider: string;
   model: string;
   mode: string;
+  effort?: string;
   start: StartMode;
 }
 
@@ -80,7 +81,7 @@ export async function submitNewTask(conn: RelayConnection, input: NewTaskInput, 
       taskId: task.ID,
       provider: input.provider,
       prompt: clampPrompt(input.prompt),
-      ...wireModelMode(catalogEntry, { provider: input.provider, model: input.model, mode: input.mode }),
+      ...wireModelMode(catalogEntry, { provider: input.provider, model: input.model, mode: input.mode, effort: input.effort ?? '' }),
     });
     return { kind: 'ok', task, run };
   } catch (e) {
@@ -96,7 +97,7 @@ export async function retryFirstRun(conn: RelayConnection, task: Task, input: Ne
       taskId: task.ID,
       provider: input.provider,
       prompt: clampPrompt(input.prompt),
-      ...wireModelMode(catalogEntry, { provider: input.provider, model: input.model, mode: input.mode }),
+      ...wireModelMode(catalogEntry, { provider: input.provider, model: input.model, mode: input.mode, effort: input.effort ?? '' }),
     });
     return { kind: 'ok', task, run };
   } catch (e) {

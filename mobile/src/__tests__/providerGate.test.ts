@@ -74,7 +74,7 @@ describe('selection', () => {
   });
 
   it('a hard-gated provider cannot be chosen; an advisory one can', () => {
-    const current = { provider: 'claude-native', model: 'sonnet', mode: '' };
+    const current = { provider: 'claude-native', model: 'sonnet', mode: '', effort: '' };
     expect(selectProviderChecked([claude, glm(signedOut)], 'glm', current, undefined, NOW)).toEqual(current);
     const advisory = selectProviderChecked([claude, glm(outOfPlan)], 'glm', current, undefined, NOW);
     expect(advisory.provider).toBe('glm');
@@ -82,7 +82,7 @@ describe('selection', () => {
 
   it('a hard-gated model cannot be chosen; the model options carry the suffix', () => {
     const p: ProviderInfo = { ...claude, modelGates: { opus: { reason: 'model_not_in_plan', action: { kind: 'pick_model', label: 'Pick another model' } } } };
-    const current = { provider: 'claude-native', model: 'sonnet', mode: '' };
+    const current = { provider: 'claude-native', model: 'sonnet', mode: '', effort: '' };
     expect(selectModelChecked(p, current, 'opus', NOW)).toEqual(current);
     expect(selectModelChecked(p, current, 'sonnet', NOW).model).toBe('sonnet');
     expect(modelOptions(p, NOW).map((o) => o.label)).toEqual(['Default', 'Opus — not in plan', 'Sonnet']);
