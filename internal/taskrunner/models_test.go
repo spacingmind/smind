@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +135,68 @@ func TestProviderList_CodexModelsFromModelList(t *testing.T) {
 	}
 	if err := ValidateModel(p, "gpt-unknown"); err == nil {
 		t.Error("discovered codex catalog should reject an unknown id")
+	}
+}
+
+func TestProbeCodexModelsRecordsEfforts(t *testing.T) {
+	t.Parallel()
+	opts := []Option{WithACPModeProbe(), WithCodexCommand([]string{fakeCodexAgentPath})}
+	for _, p := range SupportedProviders() {
+		if p.Runner == "acp" {
+			opts = append(opts, WithACPCommand(p.ID, []string{"/nonexistent/agent"}))
+		}
+	}
+	r := New(nil, opts...)
+	p := waitForDiscoveredModels(t, r, ProviderCodexNative)
+	if len(p.Models) != 2 {
+		t.Fatalf("models = %+v, want two visible models", p.Models)
+	}
+	for i, want := range []struct {
+		id, defaultEffort string
+		efforts           []EffortInfo
+	}{
+		{"gpt-fake-a", "medium", []EffortInfo{{"low", "d-low"}, {"medium", "d-medium"}, {"high", "d-high"}}},
+		{"gpt-fake-b", "low", []EffortInfo{{"low", "d-low"}, {"medium", "d-medium"}}},
+	} {
+		got := p.Models[i]
+		if got.ID != want.id || got.DefaultEffort != want.defaultEffort || !reflect.DeepEqual(got.Efforts, want.efforts) {
+			t.Errorf("model = %+v, want %s efforts %+v default %s", got, want.id, want.efforts, want.defaultEffort)
+		}
+	}
+}
+
+func TestCodexEffortProbeIsCached(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("spawn counter uses a shell script")
+	}
+	t.Parallel()
+	dir := t.TempDir()
+	countPath := filepath.Join(dir, "count")
+	wrapper := filepath.Join(dir, "codex-wrapper")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nprintf 'spawn\\n' >> \"$1\"\nshift\nexec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts := []Option{WithACPModeProbe(), WithCodexCommand([]string{wrapper, countPath, fakeCodexAgentPath})}
+	for _, p := range SupportedProviders() {
+		if p.Runner == "acp" {
+			opts = append(opts, WithACPCommand(p.ID, []string{"/nonexistent/agent"}))
+		}
+	}
+	r := New(nil, opts...)
+	for range 5 {
+		r.ProviderCatalogFor(ProviderCodexNative)
+	}
+	waitForDiscoveredModels(t, r, ProviderCodexNative)
+	for range 5 {
+		r.ProviderCatalogFor(ProviderCodexNative)
+	}
+	time.Sleep(600 * time.Millisecond)
+	raw, err := os.ReadFile(countPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(raw), "\n"); got != 1 {
+		t.Fatalf("codex spawned %d times, want once; count file = %q", got, raw)
 	}
 }
 

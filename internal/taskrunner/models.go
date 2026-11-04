@@ -8,15 +8,22 @@ import (
 	"github.com/spacingmind/smind/internal/providers"
 )
 
+type EffortInfo struct {
+	ID          string `json:"id"`
+	Description string `json:"description,omitempty"`
+}
+
 // ModelInfo is one model a provider offers (ADR-0025): ID is the string the
 // provider itself takes (Claude's --model value, an ACP model config
 // option's value, a Codex model id); Label/Description are its own words.
 // Default marks the provider's current/default model when it reports one.
 type ModelInfo struct {
-	ID          string `json:"id"`
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-	Default     bool   `json:"default,omitempty"`
+	ID            string       `json:"id"`
+	Label         string       `json:"label"`
+	Description   string       `json:"description,omitempty"`
+	Default       bool         `json:"default,omitempty"`
+	Efforts       []EffortInfo `json:"efforts,omitempty"`
+	DefaultEffort string       `json:"defaultEffort,omitempty"`
 	// Source says where the entry came from (additive wire field):
 	// "catalog" (smind's static Claude list), "config" (an instance's or a
 	// custom provider's configured models) or "discovered" (the agent's own
