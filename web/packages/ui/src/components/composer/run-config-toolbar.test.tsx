@@ -385,3 +385,70 @@ describe("RunConfigToolbar hand-off state", () => {
     useDefaultAgentStore.getState().set(null);
   });
 });
+
+describe("RunConfigToolbar reasoning level for codex-native", () => {
+  const CODEX: ProviderInfo = {
+    id: "codex-native",
+    label: "Codex",
+    runner: "codex-native",
+    defaultMode: "default",
+    modes: [{ id: "default", label: "Default" }],
+    models: [
+      { id: "m-wide", label: "Wide", default: true, defaultEffort: "medium", efforts: [{ id: "low" }, { id: "medium" }, { id: "xhigh" }] },
+      { id: "m-narrow", label: "Narrow", defaultEffort: "low", efforts: [{ id: "low" }] },
+      { id: "m-none", label: "None" },
+    ],
+  };
+  const providers = [...SERVED_PROVIDERS, CODEX];
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("lists the selected model's efforts with a Default row naming its default", async () => {
+    renderToolbar({ providers });
+    await pickModel("codex-native", "m-wide");
+    expect(screen.queryByLabelText("Thinking level")).toBeNull();
+    const trigger = screen.getByLabelText("Reasoning level");
+    expect(trigger).toHaveTextContent("Default (Medium)");
+    fireEvent.click(trigger);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Default (Medium)", "Low", "Medium", "XHigh"]);
+  });
+
+  it("switching to a model with fewer levels clears an unsupported pick", async () => {
+    renderToolbar({ providers });
+    await pickModel("codex-native", "m-wide");
+    await pick("Reasoning level", "XHigh");
+    expect(screen.getByLabelText("Reasoning level")).toHaveTextContent("XHigh");
+    await pickModel("codex-native", "m-narrow");
+    expect(screen.getByLabelText("Reasoning level")).toHaveTextContent("Default (Low)");
+  });
+
+  it("keeps a pick the new model also lists", async () => {
+    renderToolbar({ providers });
+    await pickModel("codex-native", "m-wide");
+    await pick("Reasoning level", "Low");
+    await pickModel("codex-native", "m-narrow");
+    expect(screen.getByLabelText("Reasoning level")).toHaveTextContent("Low");
+  });
+
+  it("is disabled when the model lists no efforts", async () => {
+    renderToolbar({ providers });
+    await pickModel("codex-native", "m-none");
+    const trigger = screen.getByLabelText("Reasoning level");
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveTextContent("Default reasoning");
+  });
+
+  it("drops Claude's level when switching to codex, and leaves the Claude row alone", async () => {
+    renderToolbar({ providers });
+    await pick("Thinking level", "Extended");
+    expect(screen.getByLabelText("Thinking level")).toHaveTextContent("Extended");
+    await flush();
+    await pickModel("codex-native", "m-wide");
+    expect(screen.getByLabelText("Reasoning level")).toHaveTextContent("Default (Medium)");
+    await pickModel("claude-native", "claude-opus-5-5");
+    expect(screen.getByLabelText("Thinking level")).toHaveTextContent("Standard");
+  });
+});
