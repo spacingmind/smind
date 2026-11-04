@@ -64,12 +64,23 @@ type userInput struct {
 // PromptOption tunes one Prompt call.
 type PromptOption func(*promptOptions)
 
-type promptOptions struct{ images []string }
+type promptOptions struct {
+	images []string
+	effort string
+}
 
 // WithLocalImages appends {type:"localImage", path} inputs after the text
 // input; paths must be absolute.
 func WithLocalImages(paths []string) PromptOption {
 	return func(o *promptOptions) { o.images = paths }
+}
+
+// WithEffort sets the turn's `effort` (turn/start) to one of the model's
+// advertised reasoning efforts (ModelInfo.Efforts), verbatim. Empty (the
+// default) omits the field, leaving the model's own default
+// (ModelInfo.DefaultEffort).
+func WithEffort(effort string) PromptOption {
+	return func(o *promptOptions) { o.effort = effort }
 }
 
 type threadLoadedListResponse struct {
@@ -96,6 +107,7 @@ type threadUnarchiveParams struct {
 type turnStartParams struct {
 	ThreadID string      `json:"threadId"`
 	Input    []userInput `json:"input"`
+	Effort   string      `json:"effort,omitempty"`
 }
 
 type turnError struct {
@@ -302,12 +314,27 @@ func WithModelProvider(modelProvider string, config map[string]any) Option {
 	return func(c *Client) { c.modelProvider, c.threadConfig = modelProvider, config }
 }
 
+// EffortOption is one reasoning effort a model advertises
+// (model/list's supportedReasoningEfforts): the id to send back as
+// turn/start's `effort`, plus the model's own description of it. The id is
+// a plain wire string the model defines (none/minimal/low/medium/high/
+// xhigh/max/ultra or custom) -- never validated or translated here.
+type EffortOption struct {
+	ID          string
+	Description string
+}
+
 // ModelInfo is one entry of the app-server's model/list.
 type ModelInfo struct {
 	ID          string
 	DisplayName string
 	Description string
 	IsDefault   bool
+	// Efforts are the model's supported reasoning efforts and
+	// DefaultEffort the one a turn without an explicit `effort` gets;
+	// both empty when the model advertises none.
+	Efforts       []EffortOption
+	DefaultEffort string
 }
 
 type modelListParams struct {
@@ -316,12 +343,17 @@ type modelListParams struct {
 
 type modelListResponse struct {
 	Data []struct {
-		ID          string `json:"id"`
-		Model       string `json:"model"`
-		DisplayName string `json:"displayName"`
-		Description string `json:"description"`
-		Hidden      bool   `json:"hidden"`
-		IsDefault   bool   `json:"isDefault"`
+		ID                        string `json:"id"`
+		Model                     string `json:"model"`
+		DisplayName               string `json:"displayName"`
+		Description               string `json:"description"`
+		Hidden                    bool   `json:"hidden"`
+		IsDefault                 bool   `json:"isDefault"`
+		SupportedReasoningEfforts []struct {
+			ReasoningEffort string `json:"reasoningEffort"`
+			Description     string `json:"description"`
+		} `json:"supportedReasoningEfforts"`
+		DefaultReasoningEffort string `json:"defaultReasoningEffort"`
 	} `json:"data"`
 	NextCursor string `json:"nextCursor"`
 }
@@ -354,7 +386,14 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 			if id == "" {
 				id = m.ID
 			}
-			out = append(out, ModelInfo{ID: id, DisplayName: m.DisplayName, Description: m.Description, IsDefault: m.IsDefault})
+			info := ModelInfo{ID: id, DisplayName: m.DisplayName, Description: m.Description, IsDefault: m.IsDefault, DefaultEffort: m.DefaultReasoningEffort}
+			for _, e := range m.SupportedReasoningEfforts {
+				if e.ReasoningEffort == "" {
+					continue
+				}
+				info.Efforts = append(info.Efforts, EffortOption{ID: e.ReasoningEffort, Description: e.Description})
+			}
+			out = append(out, info)
 		}
 		if res.NextCursor == "" {
 			break
@@ -535,6 +574,7 @@ func (c *Client) Prompt(ctx context.Context, threadID, text string, updates chan
 	raw, err := c.conn.call(ctx, "turn/start", turnStartParams{
 		ThreadID: threadID,
 		Input:    input,
+		Effort:   po.effort,
 	})
 	if err != nil {
 		return "", fmt.Errorf("codex: turn/start: %w", err)
