@@ -35,6 +35,7 @@ const SKELETON_ROWS: Record<string, SkeletonRow> = {
   format_drift: { tone: "warning", message: "Showing a summary: the provider's session format was not recognised." },
   rebuild_failed: { tone: "warning", message: "Showing a summary: the full history could not be loaded (it may be too large or took too long).", loadable: true },
   rebuild_busy: { tone: "info", message: "Showing a summary: another history is loading. Try again in a moment.", loadable: true },
+  excerpt_pruned: { tone: "info", message: "Showing a summary: large tool output was removed after the retention period.", loadable: true },
 };
 
 const UNKNOWN_ROW: SkeletonRow = { tone: "info", message: "Showing a summary of this run." };

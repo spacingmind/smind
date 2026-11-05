@@ -46,6 +46,11 @@ describe("describeHistorySource", () => {
       message: "Showing a summary: another history is loading. Try again in a moment.",
       canLoad: false,
     });
+    expect(describeHistorySource(skeleton("excerpt_pruned", true))).toEqual({
+      tone: "info",
+      message: "Showing a summary: large tool output was removed after the retention period.",
+      canLoad: true,
+    });
   });
 
   it("an unknown reason falls back to the neutral summary sentence", () => {
@@ -58,7 +63,7 @@ describe("describeHistorySource", () => {
   });
 
   it("offers the button again after a failure that may pass (and only when the daemon says it can)", () => {
-    for (const reason of ["native_session_in_use", "rebuild_failed", "rebuild_busy"]) {
+    for (const reason of ["native_session_in_use", "rebuild_failed", "rebuild_busy", "excerpt_pruned"]) {
       expect(describeHistorySource(skeleton(reason, true)).canLoad, reason).toBe(true);
       expect(describeHistorySource(skeleton(reason, false)).canLoad, reason).toBe(false);
     }
