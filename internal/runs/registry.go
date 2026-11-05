@@ -18,6 +18,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/gate"
+	"github.com/spacingmind/smind/internal/history/native"
 	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/runs/failure"
@@ -92,6 +93,10 @@ type Registry struct {
 	// histLoadHook, when non-nil, runs before each store load of a finished
 	// run's history. A test seam (hist_test.go) to hold a load open; nil in production.
 	histLoadHook func()
+
+	// rebuilder reads a finished run's full history from the provider's own
+	// session (rebuild.go); nil = none can be rebuilt. Guarded by mu.
+	rebuilder *native.Rebuilder
 	// systemFinishedOrder is finishedOrder for system runs (see retain).
 	systemFinishedOrder []string
 

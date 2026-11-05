@@ -74,3 +74,31 @@ func codexHomeFor(spec providers.Spec, env map[string]string) string {
 	}
 	return ""
 }
+
+// SessionRoots lists the config roots a run of provider/harness is launched with
+// right now: where its session files may be read from (ADR-0053). A stored
+// native_ref cannot name any other directory.
+func (r *Runner) SessionRoots(provider, harness string) []string {
+	spec, ok := r.providerRegistry().Get(provider)
+	if !ok {
+		return nil
+	}
+	env := r.ProviderEnv(Provider(provider))
+	var dir string
+	switch providers.Harness(harness) {
+	case providers.HarnessClaudeCode:
+		dir = claudeConfigDirFor(spec, env)
+	case providers.HarnessCodexAppServer:
+		dir = codexHomeFor(spec, env)
+	}
+	if dir == "" {
+		return nil
+	}
+	return []string{dir}
+}
+
+// ProviderSecretValues are the exact secret values configured for provider, for
+// scrubbing text that must not show them.
+func (r *Runner) ProviderSecretValues(provider string) []string {
+	return r.providerSecretValues(Provider(provider))
+}

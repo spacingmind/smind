@@ -580,7 +580,7 @@ func TestElisionAndScrub(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(plain.Events), "sk-LIVE-1234") {
 		t.Fatal("setup: the secret is not in the unscrubbed rebuild")
 	}
-	e.rb = rebuilder(e.root, Config{Scrub: func(s string) string { return strings.ReplaceAll(s, "sk-LIVE-1234", "[redacted]") }})
+	e.rb = rebuilder(e.root, Config{Scrub: func(_, s string) string { return strings.ReplaceAll(s, "sk-LIVE-1234", "[redacted]") }})
 	scrubbed := e.rebuild()
 	if !scrubbed.OK() {
 		t.Fatal(scrubbed.Reason)

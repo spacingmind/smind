@@ -38,8 +38,8 @@ type Config struct {
 	// cannot name another directory. nil or empty = nothing can be read.
 	Roots func(provider, harness string) []string
 	// Scrub, when set, is applied to every string a rebuilt event carries
-	// (provider secret values and the like) before the elider runs.
-	Scrub func(string) string
+	// (the provider's secret values and the like) before the elider runs.
+	Scrub func(provider, s string) string
 
 	MaxConcurrent int           // 0 = DefaultConcurrent
 	Timeout       time.Duration // 0 = DefaultTimeout
@@ -211,7 +211,7 @@ func (rb *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 		return refuse(ReasonFormatDrift, why)
 	}
 	rb.recordDrift(key, false)
-	events, raw := rb.deliver(p.events)
+	events, raw := rb.deliver(ref.Provider, p.events)
 	return Result{Events: events, raw: raw, Detail: fmt.Sprintf("%d events from %d records", len(events), p.st.decoded)}
 }
 
@@ -282,16 +282,17 @@ func (rb *Rebuilder) recordDrift(key string, failed bool) {
 
 // deliver scrubs and elides a turn's events the way a live read does, and keeps
 // the raw heredoc bodies for the reveal path.
-func (rb *Rebuilder) deliver(in []taskrunner.Event) ([]taskrunner.Event, map[string][]string) {
+func (rb *Rebuilder) deliver(provider string, in []taskrunner.Event) ([]taskrunner.Event, map[string][]string) {
 	el := taskrunner.NewToolCallElider()
 	raw := map[string][]string{}
 	out := make([]taskrunner.Event, 0, len(in))
 	for _, e := range in {
 		if rb.cfg.Scrub != nil {
-			e.Text = rb.cfg.Scrub(e.Text)
-			e.ToolTitle = rb.cfg.Scrub(e.ToolTitle)
-			e.ToolInput = scrubJSON(e.ToolInput, rb.cfg.Scrub)
-			e.ToolResult = scrubJSON(e.ToolResult, rb.cfg.Scrub)
+			f := func(s string) string { return rb.cfg.Scrub(provider, s) }
+			e.Text = f(e.Text)
+			e.ToolTitle = f(e.ToolTitle)
+			e.ToolInput = scrubJSON(e.ToolInput, f)
+			e.ToolResult = scrubJSON(e.ToolResult, f)
 		}
 		if e.Type == taskrunner.EventTypeToolCall {
 			if _, ok := raw[e.ToolCallID]; !ok && len(e.ToolInput) > 0 {
