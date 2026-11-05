@@ -15,7 +15,7 @@ import (
 // relay and on a non-loopback connection; on no method list for either.
 
 // retentionMethods lists them; a test walks it.
-var retentionMethods = []string{"runs.prune", "db.compact"}
+var retentionMethods = []string{"doctor.sessions", "runs.prune", "db.compact"}
 
 // requireLocalHuman is the guard debug.memory and the retention RPCs share.
 func requireLocalHuman(method string, rc *requestContext) error {

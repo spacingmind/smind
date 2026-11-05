@@ -148,6 +148,33 @@ func (s *Store) ApplySkeleton(runID string, rows []SkeletonRow, at time.Time) (b
 	return true, tx.Commit()
 }
 
+// NativeRefRow is a skeleton run with its recorded provider session.
+type NativeRefRow struct {
+	RunID string
+	Ref   string
+}
+
+// ListNativeRefs returns the native_ref of up to limit finished runs in skeleton
+// form (newest first) and how many such runs exist, for `smind doctor`.
+func (s *Store) ListNativeRefs(limit int) (rows []NativeRefRow, skeletonRuns int, err error) {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM runs WHERE skeleton_at IS NOT NULL AND status != 'running' AND history_pruned_at IS NULL`).Scan(&skeletonRuns); err != nil {
+		return nil, 0, fmt.Errorf("count skeleton runs: %w", err)
+	}
+	r, err := s.db.Query(`SELECT id, native_ref FROM runs WHERE skeleton_at IS NOT NULL AND status != 'running' AND history_pruned_at IS NULL AND native_ref != '' ORDER BY started_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list native refs: %w", err)
+	}
+	defer r.Close()
+	for r.Next() {
+		var x NativeRefRow
+		if err := r.Scan(&x.RunID, &x.Ref); err != nil {
+			return nil, 0, err
+		}
+		rows = append(rows, x)
+	}
+	return rows, skeletonRuns, r.Err()
+}
+
 // SetRunNativeRef stores where the provider keeps the run's session (JSON).
 func (s *Store) SetRunNativeRef(runID, ref string) error {
 	if _, err := s.db.Exec(`UPDATE runs SET native_ref = ? WHERE id = ?`, ref, runID); err != nil {
