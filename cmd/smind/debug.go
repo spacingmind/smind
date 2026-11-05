@@ -70,6 +70,9 @@ func cmdDebug(args []string) int {
 // runDebug is cmdDebug with its environment injected. Exit codes: 0 ok, 1 a
 // daemon or call error, 2 usage.
 func runDebug(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "run-stats" {
+		return runRunStats(ctx, args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "memory" {
 		fmt.Fprint(stderr, debugUsage)
 		return 2

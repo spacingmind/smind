@@ -205,14 +205,14 @@ The two compose; #827 lands first (it is the smaller change and is in flight). T
 
 No compat shims. The question is what to do with the ~200+ finished runs already stored in full:
 
-| | (a) leave them until #827 removes them | (b) convert all to skeleton at upgrade |
+| | (a) leave them until the 30-day prune (#829) removes them | (b) convert all to skeleton at upgrade |
 |---|---|---|
 | Data | nothing lost before 30 days | recent runs lose their full detail **now**, and old runs have **no `native_ref`**, so there is no way back |
 | Disk | unchanged until the 30-day pass and a compact | reclaimed only after a compact anyway |
 | Risk | none new | an 850 MB rewrite at upgrade, in the middle of work |
 | Code | one path | one path (same finalizer) but a destructive default |
 
-**Decision: (a).** Legacy runs stay `stored-full` (`historySource` says so); #827 ages them out. A Human command
+**Decision: (a).** Legacy runs stay `stored-full` (`historySource` says so); the 30-day prune (#829) ages them out. A Human command
 `smind runs skeletonize --before <date> [--dry-run]` (later PR) converts on request, with the `native_ref` caveat printed. A
 running run at upgrade is untouched (D3). A future hybrid, verify-then-skeletonize a legacy run only when the chat's current
 session still contains its turn, is possible and deferred.
@@ -275,7 +275,7 @@ in the PR body.
 - H1 thinking text is not kept (descriptor row only).
 - H2 the skeleton is kept forever; `runs.skeletonRetentionDays` is reserved and **not built**.
 - H3 write-time chunk coalescing is the first feature PR (after a docs PR and the read-only measurement PR0).
-- H4 existing runs are left to #827; an opt-in `smind runs skeletonize` comes later.
+- H4 existing runs are left to the 30-day prune (#829); an opt-in `smind runs skeletonize` comes later.
 - H5 rebuild is automatic for claude-native and codex-native; ACP rebuilds only on an explicit "Load full history".
 - H6 thresholds are frozen only after PR0 reports the real distribution; 512 B / 8 KiB / 4+4 KiB are the starting values.
 - H7 orchestrators and agents read the **skeleton only** through `task_logs` and never trigger a rebuild; only a human request
@@ -290,7 +290,7 @@ Original text, each with the Lead's recommendation first:
   `runs.skeletonRetentionDays` reserved and not built; revisit with real growth after PR1.
 - **H3 Write-time coalescing of persisted chunk rows as the first PR**, before any of the rest. Recommend **yes**: independent,
   small, and most of the measured saving for ACP/Codex.
-- **H4 Existing runs** are left to #827 (option a). Recommend **(a)** plus the opt-in `smind runs skeletonize` later.
+- **H4 Existing runs** are left to the 30-day prune, #829 (option a). Recommend **(a)** plus the opt-in `smind runs skeletonize` later.
 - **H5 Rebuild policy.** Recommend **auto for claude-native and codex-native, explicit "Load full history" for ACP agents**
   (spawn, auth and side effects).
 - **H6 Thresholds 512 B / 8 KiB / 4+4 KiB**, frozen only after PR0 prints the real distribution. Recommend **accept as the
