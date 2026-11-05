@@ -166,6 +166,8 @@ flag. Record: rows and bytes per chunk-size model (20/40/100 B/block) for curren
 finalizer ms per run and per 1,000 runs; rebuild ms per provider (claude 126 KB / 3 MB / 55 MB files, codex rollout, codex RPC,
 ACP fake agent) resident vs rebuilt; startup time; `run.logs` latency skeleton vs rebuilt. The Human runs `smind db stats` once on
 the real db and sends the report so H6 is decided on facts.
+Done 2026-11-05: AC2's constants are frozen on that report (ADR-0053, Measurements on the real database). AC17's before/after sizes
+for the real database: 832 MiB now, 255 MiB after coalescing, 100 MiB skeleton + excerpts, 34 MiB after the excerpt prune (estimates).
 
 Already measured for the ADR (scratch script, sizes only from this machine's own transcripts, real db untouched): payload sizes
 (Claude p50 295 B / p99 10 KB / max 58 KB; Codex p50 1.2 KB / p99 40 KB), per 60 simulated runs the sizes in the ADR table
@@ -186,8 +188,9 @@ Already measured for the ADR (scratch script, sizes only from this machine's own
 - [x] ADR-0053 (Proposed) and this plan written.
 - [x] Steward review; Human answers H1–H8 (2026-11-05, accepted).
 - [x] PR-A docs (#831).
-- [ ] PR0 measurement: `smind debug run-stats --db <snapshot>` (hidden, offline, read-only; `internal/runstats`) built and tested on a synthetic snapshot; real-data run and frozen thresholds pending.
-- [ ] PR1 coalescing.
+- [x] PR0 measurement: `smind debug run-stats --db <snapshot>` (#832, fix #833); run on the Human's real snapshot 2026-11-05.
+- [x] H6 thresholds FROZEN 2026-11-05: 512 B / 8 KiB / 4+4 KiB unchanged (ADR-0053, Measurements on the real database).
+- [ ] PR1 coalescing (next; the real data says 3.18 M chunk rows, 98% of all rows).
 - [ ] PR A, B, C, D, E (not started).
 
 ## Validation
