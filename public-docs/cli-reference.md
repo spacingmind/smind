@@ -144,13 +144,18 @@ they reset. When you reset your quota by hand, `smind cooldown clear
 
 ### runs prune
 
-`smind runs prune --dry-run` shows how many runs, event rows and megabytes a
-retention pass would delete right now; `smind runs prune` does it. Only
-finished runs older than `runs.historyRetentionDays` are touched, and only
-those of archived tasks (a task you have not archived keeps its full history).
-The run itself, its cost, its failure reason and its final answer stay; opening
-the run shows a note that the detail was pruned. The daemon also runs a pass on
-its own every day. Humans only: agents and relay phones cannot call it.
+`smind runs prune --dry-run` shows what a retention pass would remove right
+now, and both the dry run and the pass report two things: the events of runs
+that are deleted whole (runs finished before summaries existed, and runs the
+daemon could not convert), and the large tool output of skeleton runs removed
+while their summaries stay; `smind runs prune` does it. Only finished runs
+older than `runs.historyRetentionDays` are touched, and only those of archived
+tasks (a task you have not archived keeps its full history). The run itself,
+its cost, its failure reason and its final answer always stay; a run deleted
+whole shows a note when opened, and a pruned run's full history can still be
+read from the provider's own session while that file exists. The daemon also
+runs a pass on its own every day. Humans only: agents and relay phones cannot
+call it.
 
 ### db compact
 
