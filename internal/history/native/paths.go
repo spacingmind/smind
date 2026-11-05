@@ -101,12 +101,19 @@ func allowedRoot(dir string, roots []string) bool {
 	return false
 }
 
+// afterOpen, when set (tests only), runs between the open and the identity
+// check of openRegular, so a test can swap the file there.
+var afterOpen func(real string)
+
 // openRegular opens real read-only and re-checks that the handle is the regular
 // file that was resolved (a swap between resolve and open is refused).
 func openRegular(real string, max int64) (*os.File, error) {
 	f, err := os.Open(real)
 	if err != nil {
 		return nil, errUnsafe
+	}
+	if afterOpen != nil {
+		afterOpen(real)
 	}
 	fst, err := f.Stat()
 	if err != nil || !fst.Mode().IsRegular() {

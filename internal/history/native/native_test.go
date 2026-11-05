@@ -598,3 +598,26 @@ func TestElisionAndScrub(t *testing.T) {
 		t.Fatal("the scrub did not run")
 	}
 }
+
+// A file swapped between the resolve and the open (a symlink or another file put
+// at the resolved path) is refused: the handle must be the file that was
+// resolved.
+func TestFileSwappedAfterOpenIsRefused(t *testing.T) {
+	e := newClaude(t)
+	other := filepath.Join(t.TempDir(), "other.jsonl")
+	copyFile(t, "testdata/claude/session.jsonl", other) // a perfectly good transcript, not the resolved one
+	afterOpen = func(real string) {
+		if err := os.Rename(other, real); err != nil { // the path now names another file
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { afterOpen = nil })
+	if res := e.rebuild(); res.Reason != ReasonSessionMissing || len(res.Events) != 0 {
+		t.Fatalf("a swapped file: %q (%s) with %d events, want native_session_missing", res.Reason, res.Detail, len(res.Events))
+	}
+	afterOpen = nil
+	e2 := newClaude(t)
+	if res := e2.rebuild(); !res.OK() {
+		t.Fatalf("without a swap: %q", res.Reason)
+	}
+}
