@@ -293,7 +293,8 @@ func TestPathSafety(t *testing.T) {
 		},
 		"session id with a separator": func(t *testing.T, e *env) { e.ref.SessionID = "a/b" },
 		"session id of dots":          func(t *testing.T, e *env) { e.ref.SessionID = ".." },
-		"config dir outside the allowed roots": func(t *testing.T, e *env) {
+		"config dir outside the allowed roots, with a real transcript there": func(t *testing.T, e *env) {
+			copyFile(t, "testdata/claude/session.jsonl", filepath.Join(outside, "projects", claudeProjectDir("/work/repo"), claudeSession+".jsonl"))
 			e.ref.ConfigDir = outside
 			e.ref.TranscriptPath = ""
 		},
