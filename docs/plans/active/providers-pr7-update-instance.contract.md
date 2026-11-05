@@ -21,7 +21,7 @@ acs:
     covers: { tests: [TestProviderList_InstanceEditableFields], frames: [] }
   - id: AC6
     text: "Two claude-native instances with different CLAUDE_CONFIG_DIR run concurrently and each process sees its own dir; a hand-written reference-style config loads and lists unchanged."
-    covers: { tests: [TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs, TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged], frames: [] }
+    covers: { tests: [TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs, TestHandWrittenReferenceStyleConfig_LoadsAndListsUnchanged], frames: [] }
   - id: AC7
     text: "CLI smind provider update sends the right params and the CLI reference stays in sync."
     covers: { tests: [TestProviderUpdateCLI, TestCLIReferenceMatchesHelp], frames: [] }
@@ -43,7 +43,7 @@ tests:
   - { name: TestProviderUpdateInstance_InvalidKeepsRegistry, run: "go test ./internal/wsapi -run '^TestProviderUpdateInstance_InvalidKeepsRegistry$' -count=1", timeoutSec: 300 }
   - { name: TestProviderList_InstanceEditableFields, run: "go test ./internal/wsapi -run '^TestProviderList_InstanceEditableFields$' -count=1", timeoutSec: 300 }
   - { name: TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs, run: "go test ./internal/taskrunner -run '^TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs$' -count=1", timeoutSec: 300 }
-  - { name: TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged, run: "go test ./internal/wsapi -run '^TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged$' -count=1", timeoutSec: 300 }
+  - { name: TestHandWrittenReferenceStyleConfig_LoadsAndListsUnchanged, run: "go test ./internal/wsapi -run '^TestHandWrittenReferenceStyleConfig_LoadsAndListsUnchanged$' -count=1", timeoutSec: 300 }
   - { name: TestProviderUpdateCLI, run: "go test ./cmd/smind -run '^TestProviderUpdateCLI$' -count=1", timeoutSec: 300 }
   - { name: TestCLIReferenceMatchesHelp, run: "go test ./cmd/smind -run '^TestCLIReferenceMatchesHelp$' -count=1", timeoutSec: 300 }
   - { name: ProviderInstanceEditors, run: "cd web && bun run --cwd packages/ui test provider-instance-editors", timeoutSec: 600 }

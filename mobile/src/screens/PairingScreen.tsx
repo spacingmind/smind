@@ -5,7 +5,7 @@
 // RelayConnection is handed to the app's screen stack instead of closing
 // it after one workspace.list.
 //
-// Rebuilt in the ZCode look (mobile-reference-redesign M2): a keyboard-safe
+// Rebuilt in the reference look (mobile-reference-redesign M2): a keyboard-safe
 // scroll view over theme.background, the form in the frozen Card, every
 // color from useAppTheme(). A native @expo/ui FieldGroup was NOT used: the
 // universal FieldGroup is a full-screen web ScrollView with its own

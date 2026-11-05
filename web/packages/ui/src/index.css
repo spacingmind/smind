@@ -75,7 +75,7 @@
     --color-diff-deletion: var(--diff-deletion);
 
     /*
-     * ZCode token vocabulary (reference-visual-parity plan, P1 Step 2) --
+     * reference token vocabulary (reference-visual-parity plan, P1 Step 2) --
      * ported verbatim (names and values) from
      * refs/zcode/packages/ui/src/styles.css's `.theme-zai-light` /
      * `.theme-zai-dark` blocks, the active light/dark experiences per
@@ -178,7 +178,7 @@
     --color-terminal-bright-white: var(--terminal-bright-white);
 
     /*
-     * ZCode tokens added in the reference-parity second pass (Stage 1) -- exports
+     * the reference tokens added in the reference-parity second pass (Stage 1) -- exports
      * values per refs/zcode/DESIGN.md / styles.css; the names<->ZCode map
      * lives in lib/zcode-tokens.ts (drift-tested).
      */
@@ -285,7 +285,7 @@
     /*
      * background/foreground/card/popover/popover-foreground/primary/
      * primary-foreground/secondary/accent/destructive/border/sidebar below
-     * are overwritten in place with ZCode's Zai Light values (reference-visual-
+     * are overwritten in place with the reference's Light values (reference-visual-
      * parity plan, P1 Step 2) rather than aliased -- ZCode reuses these
      * exact names for the same concepts, so there is nothing to alias onto,
      * only a value to replace. This is also where smind's teal `--primary`
@@ -335,7 +335,7 @@
     --sidebar-ring: oklch(0.75 0.11 194.8);
 
     /*
-     * ZCode token vocabulary, Zai Light values (reference-visual-parity plan,
+     * reference token vocabulary, Light values (reference-visual-parity plan,
      * P1 Step 2) -- brand-new raw vars with no pre-existing smind name to
      * collide with; ported verbatim from
      * refs/zcode/packages/ui/src/styles.css's `.theme-zai-light` block.
@@ -627,7 +627,7 @@
 }
 
 /*
- * ZCode Stage-1 tokens (reference-parity plan), Zai Light. A second block on purpose:
+ * Reference Stage-1 tokens (reference-parity plan), Light. A second block on purpose:
  * the plugin theme contract (internal/plugins/themetokens.json,
  * PLUGIN_THEME_TOKENS) is read from the FIRST :root/.dark blocks, and these
  * app-internal tokens are not plugin-themeable. Map + drift test:
@@ -686,7 +686,7 @@
 }
 
 /*
- * ZCode Stage-1 tokens (reference-parity plan), Zai Dark. A second block on purpose:
+ * Reference Stage-1 tokens (reference-parity plan), Dark. A second block on purpose:
  * the plugin theme contract (internal/plugins/themetokens.json,
  * PLUGIN_THEME_TOKENS) is read from the FIRST :root/.dark blocks, and these
  * app-internal tokens are not plugin-themeable. Map + drift test:

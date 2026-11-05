@@ -87,7 +87,7 @@ function ResizableHandle({
         // (correctly) refuses to treat that as a resize gesture, leaving a
         // dead zone along part of the drag handle.
         //
-        // Matches ZCode's WorkspaceShellLayout resize handle (reference-visual-
+        // Matches the reference's WorkspaceShellLayout resize handle (reference-visual-
         // parity plan P2): the separator itself is a transparent 4px hit
         // area (`w-1`); the visible thing is a 2px `::after` indicator,
         // rounded at both ends, that only appears on hover (after the

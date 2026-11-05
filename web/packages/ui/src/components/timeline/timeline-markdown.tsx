@@ -29,7 +29,7 @@ export const MARKDOWN_LINK_COMPONENTS: Components = {
  * chip styling (`[&_pre_code]`) and renders as plain text on the well.
  *
  * Heading scale is ZCode's own markdown type scale
- * (`refs/zcode/DESIGN.md`'s Markdown type scale, reference-visual-parity P3):
+ * (the reference design doc's Markdown type scale, reference-visual-parity P3):
  * h1 `text-ui-xl`, h2 `text-ui-lg`, h3-h6 share `text-ui-base` and are
  * distinguished by weight only (h3-h4 `font-semibold`, h5 `font-medium`,
  * h6 `font-normal`) -- not by size, since ZCode flattens the operational

@@ -137,7 +137,7 @@ export function AppHeader({
     // mounts) without main.tsx's app-level one.
     <TooltipProvider>
       {/*
-       * h-12/border-b/p-2 matches ZCode's WorkspaceHeader.tsx (reference-visual-parity plan P2).
+       * h-12/border-b/p-2 matches the reference's WorkspaceHeader.tsx (reference-visual-parity plan P2).
        * `deep`: every non-interactive descendant drags too; Tauri's drag script
        * already refuses to start a drag from buttons, inputs, links and
        * role=tab/menuitem elements, so none of those carry the attribute.

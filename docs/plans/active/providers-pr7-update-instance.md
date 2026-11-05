@@ -76,7 +76,7 @@ Counts: GLM 5 runs (3 ok, 1 output budget, 1 rate limit), Sonnet 11 runs (10 ok,
 | AC3 | `_IdempotentNoop` (bytes and mtime), `_NothingToUpdate`, wsapi `_IdempotentNoop` |
 | AC4 | wsapi `TestProviderUpdateInstance_RefusesAgentCaller`, `_RecipeMadeUIMadeHandWritten`, `_AppliesLive`, `_InvalidKeepsRegistry`; `provider.updateInstance` is in `humanOnly` of `TestPluginSession_CannotReachHumanOnlyMethods` and not in `RunScopedMethods` (automation and agents use that allowlist) |
 | AC5 | `TestProviderList_InstanceEditableFields`, `TestProviderInfo_InstanceOverlay`, `TestInstanceSpec_KeepsOwnOverlay` |
-| AC6 | `TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs` (start barrier; fakeclaude has no short-hold scenario, so overlap in time is not proven, the run paths share one Runner), `TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged` |
+| AC6 | `TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs` (start barrier; fakeclaude has no short-hold scenario, so overlap in time is not proven, the run paths share one Runner), `TestHandWrittenReferenceStyleConfig_LoadsAndListsUnchanged` |
 | AC7 | `TestProviderUpdateCLI`, `TestCLIReferenceMatchesHelp` |
 | AC8 | `provider-instance-editors.test.tsx` (9 tests); frames on an isolated daemon (no model call, no Send), light + dark at 1280 and 390, with Save and inherit-toggle transition frames, looked at by the Lead (Models + Disallowed tools + toggle at 1280 light, refusal text under Save at 390 dark) |
 | AC12 | `public-docs/providers.md` "Edit an instance", ADR-0046 amendment, docs drift test |
