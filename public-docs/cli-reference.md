@@ -118,6 +118,8 @@ Usage:
   smind cooldown ls                                       list providers cooling down after a rate limit
   smind cooldown clear <provider>                         I reset my quota: clear a provider cooldown, retry held runs now (humans only)
 
+  smind runs prune [--dry-run]                            delete detailed history of finished runs older than runs.historyRetentionDays (humans only)
+  smind db compact                                        shrink smind.db after pruning (holds the write lock; humans only)
   smind debug memory [--json]                             the running daemon's memory: Go heap, RSS/footprint, run history cache (local only)
 
   smind provider update <id> [--models a,b] [--add-models a,b]   edit an instance in config.yaml: its model list, extra models, disallowed tools
@@ -139,6 +141,25 @@ reset time and keeps `--on-rate-limit=wait` retries waiting until then.
 `smind cooldown ls` shows which providers are still cooling down and when
 they reset. When you reset your quota by hand, `smind cooldown clear
 <provider>` clears the cooldown and retries the held runs now (humans only).
+
+### runs prune
+
+`smind runs prune --dry-run` shows how many runs, event rows and megabytes a
+retention pass would delete right now; `smind runs prune` does it. Only
+finished runs older than `runs.historyRetentionDays` are touched, and only
+those of archived tasks (a task you have not archived keeps its full history).
+The run itself, its cost, its failure reason and its final answer stay; opening
+the run shows a note that the detail was pruned. The daemon also runs a pass on
+its own every day. Humans only: agents and relay phones cannot call it.
+
+### db compact
+
+Pruning frees space inside `smind.db` that the daemon reuses, but the file
+itself keeps its size. `smind db compact` rewrites it once to hand the space
+back to the disk and switches the file to a mode where later passes shrink it
+by themselves. It holds the write lock for the whole rewrite (minutes for a
+large file), needs free disk of about 1.2 times the file size, and is refused
+while any run is running. It never runs on its own.
 
 ### debug memory
 

@@ -106,6 +106,10 @@ func run(args []string) int {
 		return cmdCooldown(args[1:])
 	case "debug":
 		return cmdDebug(args[1:])
+	case "runs":
+		return cmdRuns(args[1:])
+	case "db":
+		return cmdDB(args[1:])
 	case "provider":
 		return cmdProvider(args[1:])
 	case "config":
@@ -229,6 +233,8 @@ Usage:
   smind cooldown ls                                       list providers cooling down after a rate limit
   smind cooldown clear <provider>                         I reset my quota: clear a provider cooldown, retry held runs now (humans only)
 
+  smind runs prune [--dry-run]                            delete detailed history of finished runs older than runs.historyRetentionDays (humans only)
+  smind db compact                                        shrink smind.db after pruning (holds the write lock; humans only)
   smind debug memory [--json]                             the running daemon's memory: Go heap, RSS/footprint, run history cache (local only)
 
   smind provider update <id> [--models a,b] [--add-models a,b]   edit an instance in config.yaml: its model list, extra models, disallowed tools

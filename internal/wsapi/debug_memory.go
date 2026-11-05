@@ -47,13 +47,8 @@ type debugGoMem struct {
 
 func handleDebugMemory(reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, rc *requestContext, _ json.RawMessage) (any, error) {
-		switch {
-		case rc == nil || rc.runScoped:
-			return nil, forbidden("debug.memory is not available to agents")
-		case !rc.local:
-			return nil, forbidden("debug.memory is only available on a direct connection, not over the relay")
-		case rc.channel != ChannelLoopback:
-			return nil, forbidden("debug.memory needs a local (loopback) connection")
+		if err := requireLocalHuman("debug.memory", rc); err != nil {
+			return nil, err
 		}
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)

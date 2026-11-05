@@ -26,7 +26,7 @@ func (s *Store) ListWorkspaceUserEvents(workspaceID int64, since time.Time, maxE
 	r, err := s.db.Query(
 		`SELECT e.run_id, COALESCE(r.chat_id, 0), e.id, e.seq, e.event_data, e.created_at
 		 FROM run_events e JOIN runs r ON r.id = e.run_id JOIN tasks t ON t.id = r.task_id
-		 WHERE t.workspace_id = ? AND r.purpose = 'user' AND t.kind != 'system' AND e.created_at >= ?
+		 WHERE t.workspace_id = ? AND r.purpose = 'user' AND t.kind != 'system' AND r.history_pruned_at IS NULL AND e.created_at >= ?
 		 ORDER BY e.id DESC LIMIT ?`, workspaceID, since.UTC(), maxEvents+1)
 	if err != nil {
 		return nil, false, fmt.Errorf("list user events of workspace %d: %w", workspaceID, err)

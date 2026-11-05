@@ -129,6 +129,9 @@ func heredocRevealHandlers(reg heredocSource, db *store.Store) map[string]handle
 			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": runId and toolCallId are required"}
 		}
 		rev, err := reg.ToolCallHeredoc(p.RunID, p.ToolCallID, p.Index)
+		if errors.Is(err, runs.ErrHistoryPruned) {
+			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": history pruned: the run's detailed history was deleted by retention"}
+		}
 		if errors.Is(err, runs.ErrNoHeredoc) {
 			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": no such heredoc on that tool call"}
 		}

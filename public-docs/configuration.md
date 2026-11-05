@@ -148,7 +148,18 @@ An unknown provider id under `providers.<id>` is an error. See
 
 | Key | Default | Notes |
 | --- | --- | --- |
+| `runs.historyRetentionDays` | `30` | How long a finished run keeps its detailed history (tool calls, output). Older runs keep their summary, status, cost, failure reason and final answer; opening one shows a note that its detail was pruned. A task that is not archived keeps everything, whatever its age. `0` keeps everything forever. Must be 0 or more. See the warning below. |
 | `runs.historyBudgetMB` | `64` | Memory the daemon keeps for finished runs' output. Older output stays in the database and is read when you open the run, complete and unchanged; a running run is never limited. Must be 1 or more. Raise it if reopening recent runs feels slow; lower it on a small machine. |
+
+> **Warning: detailed run history older than 30 days is deleted.** After you
+> upgrade, the first pass runs two minutes after the daemon starts and then once
+> a day, and removes the tool calls and output of finished runs older than
+> `runs.historyRetentionDays` (30 by default) whose task is archived. Runs of
+> tasks you have not archived are never touched. To keep everything, set
+> `runs.historyRetentionDays: 0` (or `SMIND_RUN_HISTORY_RETENTION_DAYS=0`)
+> before upgrading. Run `smind runs prune --dry-run` to see what a pass would
+> delete. Deleting rows does not shrink `smind.db`; run `smind db compact` once
+> to give the space back (see the CLI reference).
 
 ### debug
 
@@ -259,6 +270,7 @@ Every number must be 1 or more. Budgets must be above 0, and
 | `SMIND_EXPO_ACCESS_TOKEN` | Overrides `push.expoAccessToken`. |
 | `SMIND_LEARNING` | The same off values force `learning.enabled` off. |
 | `SMIND_RUN_HISTORY_BUDGET_MB` | A positive number overrides `runs.historyBudgetMB`. |
+| `SMIND_RUN_HISTORY_RETENTION_DAYS` | A whole number of days (0 or more) overrides `runs.historyRetentionDays`. |
 | `SMIND_PPROF` | `1`, `true`, `on`, `yes`, `y`, `t` or `enabled` turns `debug.pprof` on. |
 | `SMIND_VERSION`, `SMIND_INSTALL_DIR`, `SMIND_APP_DIR` | Read by the install scripts. See [Getting started](getting-started.md). |
 

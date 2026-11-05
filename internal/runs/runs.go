@@ -100,6 +100,10 @@ type RunStatus struct {
 	ProfileID  int64
 	FailoverOf string
 
+	// HistoryPrunedAt is when retention deleted this run's detailed events;
+	// nil while they exist. History/Tail then serve a summary.
+	HistoryPrunedAt *time.Time
+
 	// Err is populated once Status is StatusError, carrying the error
 	// RunPrompt returned.
 	Err string
