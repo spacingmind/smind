@@ -79,11 +79,17 @@ func newCoalesceEnv(t *testing.T) *coalesceEnv {
 	t.Helper()
 	e := newHistEnv(t)
 	reg := newTestRegistry(t, e.st)
-	now := time.Now().UTC()
-	if _, err := e.st.CreateRun(store.Run{ID: "live", TaskID: e.task.ID, Provider: "glm", Prompt: "p", Status: "running", StartedAt: now}); err != nil {
+	return &coalesceEnv{e: e, reg: reg, live: registerLive(t, e, reg, "live", time.Now().UTC())}
+}
+
+// registerLive stores a running run and registers it in reg without a driver, so
+// a test records events through the real reg.record path.
+func registerLive(t *testing.T, e *histEnv, reg *Registry, id string, started time.Time) *run {
+	t.Helper()
+	if _, err := e.st.CreateRun(store.Run{ID: id, TaskID: e.task.ID, Provider: "glm", Prompt: "p", Status: "running", StartedAt: started}); err != nil {
 		t.Fatal(err)
 	}
-	live := &run{id: "live", taskID: e.task.ID, status: StatusRunning, startedAt: now, subscribers: map[int]*subQueue{}, pendingPermissions: map[string]chan string{}, closedCh: make(chan struct{})}
+	live := &run{id: id, taskID: e.task.ID, status: StatusRunning, startedAt: started, subscribers: map[int]*subQueue{}, pendingPermissions: map[string]chan string{}, closedCh: make(chan struct{})}
 	var once sync.Once
 	live.cancel = func() { // CloseAll's cleanup stops it
 		once.Do(func() {
@@ -96,7 +102,7 @@ func newCoalesceEnv(t *testing.T) *coalesceEnv {
 	reg.mu.Lock()
 	reg.runs[live.id] = live
 	reg.mu.Unlock()
-	return &coalesceEnv{e: e, reg: reg, live: live}
+	return live
 }
 
 func (c *coalesceEnv) record(evs []Event) {
