@@ -2,10 +2,11 @@
 
 ## Status
 
-**Proposed — 2026-11-05.** Human direction (2026-11-05): smind keeps a small **skeleton** of every run and rebuilds the **full
-history on demand** from the provider's own session, instead of storing every chunk and every tool output forever. Nothing is built.
-The spec and the PR split are in [`docs/plans/active/run-skeleton-storage.md`](../plans/active/run-skeleton-storage.md); the
-decisions only the Human can make are at the end ([H1–H8](#human-decisions)).
+**Accepted — 2026-11-05 (Human decision, every recommendation).** Direction (2026-11-05): smind keeps a small **skeleton** of
+every run and rebuilds the **full history on demand** from the provider's own session, instead of storing every chunk and every
+tool output forever. The Human accepted H1–H8 as recommended (recorded under [Human decisions](#human-decisions)); implementation
+proceeds one PR at a time, each reviewed by the Human. The spec and the PR split are in
+[`docs/plans/active/run-skeleton-storage.md`](../plans/active/run-skeleton-storage.md).
 
 Builds on the lazy history and byte budget of `docs/plans/active/daemon-memory.md` (#823) and **amends** the 30-day retention spec
 `docs/plans/active/run-events-retention.md` (#827, being implemented in parallel; see [Retention](#retention-827)). Touches
@@ -135,7 +136,7 @@ found" and degrades (D6); smind never guesses.
 - `skeleton`: machine readers (steward digest/collector, learning executor/collector, parent notification, automations, fleet
   reads) and anything that must be deterministic. They **never** trigger a rebuild (no background agent spawns, no I/O in a
   worker's hot path).
-- `full`: rebuild or fail soft to the skeleton with the reason; `task_logs` accepts it for the owning daemon (H7).
+- `full`: rebuild or fail soft to the skeleton with the reason; human surfaces only. `task_logs` and every agent/orchestrator read return the skeleton and never rebuild (H7, decided).
 
 ### 6. Deleted, rotated, drifted or foreign sessions (D6, D7)
 
@@ -269,7 +270,19 @@ in the PR body.
 
 ## Human decisions
 
-Each with the Lead's recommendation first (a recommendation is not a decision).
+**Decided 2026-11-05 by the Human: every recommendation below is accepted.** Summary of what is binding:
+
+- H1 thinking text is not kept (descriptor row only).
+- H2 the skeleton is kept forever; `runs.skeletonRetentionDays` is reserved and **not built**.
+- H3 write-time chunk coalescing is the first feature PR (after a docs PR and the read-only measurement PR0).
+- H4 existing runs are left to #827; an opt-in `smind runs skeletonize` comes later.
+- H5 rebuild is automatic for claude-native and codex-native; ACP rebuilds only on an explicit "Load full history".
+- H6 thresholds are frozen only after PR0 reports the real distribution; 512 B / 8 KiB / 4+4 KiB are the starting values.
+- H7 orchestrators and agents read the **skeleton only** through `task_logs` and never trigger a rebuild; only a human request
+  rebuilds. (This replaces the recommendation below, which proposed letting an orchestrator request `detail=full`.)
+- H8 `smind doctor` warns about provider-side retention; smind never edits the CLI settings.
+
+Original text, each with the Lead's recommendation first:
 
 - **H1 Thinking text is not part of the skeleton** (descriptor only). Recommend **yes**: it is the largest payload class in the
   simulation, it is not in the agreed skeleton list, and the provider session usually still has it.
