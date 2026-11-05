@@ -159,6 +159,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /ws", s.ws)
 	if s.cfg.Debug.Pprof {
 		mux.Handle("/debug/pprof/", s.pprofHandler())
+	} else {
+		// Without this the web UI's catch-all would answer 200 for it.
+		mux.Handle("/debug/pprof/", http.NotFoundHandler())
 	}
 	mux.Handle("/", webUI())
 	return s.direct.guard(mux)
