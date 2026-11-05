@@ -1335,6 +1335,11 @@ func claudeEvents(msg claudecode.Message) []Event {
 	return out
 }
 
+// ClaudeMessageEvents is claudeEvents for packages that must produce the same
+// events from a recorded session (internal/history/native) and for the tests that
+// prove they do.
+func ClaudeMessageEvents(msg claudecode.Message) []Event { return claudeEvents(msg) }
+
 // claudeRateLimitEvents turns a rate_limit_event into one EventTypeRateLimit
 // only when the CLI reports the limit as rejected; any other status is a
 // warning, not an event.

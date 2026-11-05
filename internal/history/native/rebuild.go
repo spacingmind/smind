@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spacingmind/smind/internal/permpolicy"
@@ -90,6 +91,10 @@ type Rebuilder struct {
 	mu      sync.Mutex
 	drift   map[string]*driftState // key harness|version
 	nowFunc func() time.Time
+
+	// beforeParse, when set (tests only), runs in the parse goroutine just before
+	// the file is read, so a test can hold a slot or outlast the timeout.
+	beforeParse atomic.Pointer[func()]
 }
 
 type driftState struct {
@@ -183,6 +188,9 @@ func (rb *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 		// cannot let more than the bound run at once.
 		defer func() { f.Close(); <-rb.sem }()
 		rc := &readerCtx{f: f}
+		if h := rb.beforeParse.Load(); h != nil {
+			(*h)()
+		}
 		ev, st, m, err := parse(ctx, rc)
 		done <- parsed{ev, st, m, err}
 	}()

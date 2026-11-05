@@ -1,0 +1,26 @@
+{"timestamp":"2026-11-05T08:59:59.000Z","ordinal":0,"type":"session_meta","payload":{"id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","session_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","cwd":"/work/repo","cli_version":"0.166.0","timestamp":"2026-11-05T08:59:59.000Z"}}
+{"timestamp":"2026-11-05T09:00:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","started_at":1793869200}}
+{"timestamp":"2026-11-05T09:00:00.000Z","ordinal":0,"type":"turn_context","payload":{"turn_id":"turn-1","cwd":"/work/repo"}}
+{"timestamp":"2026-11-05T09:00:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-1","item":{"type":"UserMessage","id":"i","content":[{"type":"text","text":"Summarize the repository"}]}}}
+{"timestamp":"2026-11-05T09:00:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-1","item":{"type":"AgentMessage","id":"i","content":[{"Text":null,"type":"Text","text":"Summary text."}],"phase":"final"}}}
+{"timestamp":"2026-11-05T09:00:05.000Z","ordinal":0,"type":"token_usage_record","payload":{"thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-1","usage":{"input_tokens":1}}}
+{"timestamp":"2026-11-05T09:00:05.000Z","ordinal":0,"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1","last_agent_message":"Summary text."}}
+{"timestamp":"2026-11-05T09:10:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2","started_at":1793869800}}
+{"timestamp":"2026-11-05T09:10:00.000Z","ordinal":0,"type":"turn_context","payload":{"turn_id":"turn-2","cwd":"/work/repo"}}
+{"timestamp":"2026-11-05T09:10:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-2","item":{"type":"UserMessage","id":"i","content":[{"type":"text","text":"Fix the failing test"}]}}}
+{"timestamp":"2026-11-05T09:10:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-2","item":{"type":"AgentMessage","id":"i","content":[{"Text":null,"type":"Text","text":"I will run the tests. "}],"phase":"final"}}}
+{"timestamp":"2026-11-05T09:10:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-2","item":{"type":"AgentMessage","id":"i","content":[{"Text":null,"type":"Text","text":"Done: fixed."}],"phase":"final"}}}
+{"timestamp":"2026-11-05T09:10:09.000Z","ordinal":0,"type":"token_usage_record","payload":{"thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-2","usage":{"input_tokens":1}}}
+{"timestamp":"2026-11-05T09:10:09.000Z","ordinal":0,"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-2","last_agent_message":"Done: fixed."}}
+{"timestamp":"2026-11-05T09:20:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-3","started_at":1793870400}}
+{"timestamp":"2026-11-05T09:20:00.000Z","ordinal":0,"type":"turn_context","payload":{"turn_id":"turn-3","cwd":"/work/repo"}}
+{"timestamp":"2026-11-05T09:20:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-3","item":{"type":"UserMessage","id":"i","content":[{"type":"text","text":"continue"}]}}}
+{"timestamp":"2026-11-05T09:20:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-3","item":{"type":"AgentMessage","id":"i","content":[{"Text":null,"type":"Text","text":"first continue"}],"phase":"final"}}}
+{"timestamp":"2026-11-05T09:20:02.000Z","ordinal":0,"type":"token_usage_record","payload":{"thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-3","usage":{"input_tokens":1}}}
+{"timestamp":"2026-11-05T09:20:02.000Z","ordinal":0,"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-3","last_agent_message":"first continue"}}
+{"timestamp":"2026-11-05T09:25:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-4","started_at":1793870700}}
+{"timestamp":"2026-11-05T09:25:00.000Z","ordinal":0,"type":"turn_context","payload":{"turn_id":"turn-4","cwd":"/work/repo"}}
+{"timestamp":"2026-11-05T09:25:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-4","item":{"type":"UserMessage","id":"i","content":[{"type":"text","text":"continue"}]}}}
+{"timestamp":"2026-11-05T09:25:00.000Z","ordinal":0,"type":"event_msg","payload":{"type":"item_completed","thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-4","item":{"type":"AgentMessage","id":"i","content":[{"Text":null,"type":"Text","text":"second continue"}],"phase":"final"}}}
+{"timestamp":"2026-11-05T09:25:02.000Z","ordinal":0,"type":"token_usage_record","payload":{"thread_id":"01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee","turn_id":"turn-4","usage":{"input_tokens":1}}}
+{"timestamp":"2026-11-05T09:25:02.000Z","ordinal":0,"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-4","last_agent_message":"second continue"}}
