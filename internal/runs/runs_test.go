@@ -1567,17 +1567,14 @@ func TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("History() on reg2 (rehydrated) error = %v", err)
 	}
-	if len(gotHist) != len(wantHist) {
-		t.Fatalf("rehydrated History len = %d, want %d", len(gotHist), len(wantHist))
+	// The finished run is stored coalesced and in skeleton form (persistbuf.go,
+	// skeleton.go): same content and tool events, thinking text not kept.
+	if got, want := canonSkel(t, gotHist), canonSkel(t, wantHist); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("rehydrated History = %v, want %v", got, want)
 	}
-	for i := range wantHist {
-		w, g := wantHist[i], gotHist[i]
-		if g.Type != w.Type || g.Text != w.Text ||
-			g.ToolCallID != w.ToolCallID || g.ToolName != w.ToolName ||
-			g.ToolTitle != w.ToolTitle || g.ToolStatus != w.ToolStatus ||
-			string(g.ToolInput) != string(w.ToolInput) || string(g.ToolResult) != string(w.ToolResult) ||
-			g.RawKind != w.RawKind || string(g.RawPayload) != string(w.RawPayload) {
-			t.Fatalf("rehydrated History[%d] = %+v, want %+v", i, g, w)
+	for _, g := range gotHist {
+		if g.Type == taskrunner.EventTypeToolCall && g.ToolName == "" && g.ToolCallID == "" {
+			t.Fatalf("a rehydrated tool call lost its identity: %+v", g)
 		}
 	}
 }
