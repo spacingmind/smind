@@ -85,7 +85,10 @@ func runRuns(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "retention %d days (runs finished before %s)\n%s the events of %d runs: %d rows, about %s\n", rep.Days, rep.Cutoff, verb, rep.Runs, rep.Rows, mib(rep.Bytes))
 	if !dry {
-		fmt.Fprintf(stdout, "returned %s to the disk; the file also holds %.1f MiB of reusable space (run `smind db compact` to shrink it)\n", mib(rep.FreedBytes), rep.ReusableMB)
+		fmt.Fprintf(stdout, "returned %s to the disk\n", mib(rep.FreedBytes))
+		if rep.ReusableMB >= 1 {
+			fmt.Fprintf(stdout, "the file also holds %.1f MiB of reusable space: run `smind db compact` once to shrink it\n", rep.ReusableMB)
+		}
 		if rep.Incomplete {
 			fmt.Fprintln(stdout, "the pass was interrupted: run it again to finish")
 		}

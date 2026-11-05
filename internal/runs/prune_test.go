@@ -3,7 +3,10 @@ package runs
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -306,4 +309,100 @@ func TestCapText(t *testing.T) {
 	if capText("abc", 10) != "abc" {
 		t.Fatal("short text must be untouched")
 	}
+}
+
+// TestMeasureRetention prints the retention numbers on a synthetic database
+// (docs/plans/active/run-events-retention.md): SMIND_MEASURE_DB=<dir with
+// smind.db> go test ./internal/runs -run MeasureRetention -v. Skipped otherwise;
+// the database is modified, so point it at a copy.
+func TestMeasureRetention(t *testing.T) {
+	dir := os.Getenv("SMIND_MEASURE_DB")
+	if dir == "" {
+		t.Skip("SMIND_MEASURE_DB not set")
+	}
+	path := filepath.Join(dir, "smind.db")
+	size := func() int64 { fi, _ := os.Stat(path); return fi.Size() }
+	t0 := time.Now()
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	reg, err := New(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("open + New: %v; file %.1f MiB; incremental auto_vacuum: %v", time.Since(t0).Round(time.Millisecond), float64(size())/(1<<20), st.AutoVacuumIncremental())
+	p := NewPruner(reg, st, func() int { return 30 })
+	pv, err := p.Preview()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("dry run: %d runs, %d rows, %.1f MiB of event data", pv.Runs, pv.Rows, float64(pv.Bytes)/(1<<20))
+
+	ws, _ := st.ListWorkspaces()
+	task, err := st.CreateTask(store.Task{WorkspaceID: ws[0].ID, Title: "live writer", Status: "created"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateRun(store.Run{ID: "measure-live", TaskID: task.ID, Provider: "glm", Prompt: "p", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	writer := func(stop <-chan struct{}, lat *[]time.Duration, done chan<- struct{}, offset int64) {
+		defer close(done)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			t1 := time.Now()
+			if _, err := st.AppendRunEvent("measure-live", offset+int64(i), `{"type":0,"text":"live"}`); err != nil {
+				t.Errorf("live writer: %v", err)
+				return
+			}
+			*lat = append(*lat, time.Since(t1))
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	report := func(name string, lat []time.Duration) {
+		sort.Slice(lat, func(i, j int) bool { return lat[i] < lat[j] })
+		if len(lat) == 0 {
+			return
+		}
+		t.Logf("%s writer latency over %d writes: p50 %v p99 %v max %v", name, len(lat), lat[len(lat)/2], lat[len(lat)*99/100], lat[len(lat)-1])
+	}
+	var base []time.Duration
+	stop, done := make(chan struct{}), make(chan struct{})
+	go writer(stop, &base, done, 0)
+	time.Sleep(2 * time.Second)
+	close(stop)
+	<-done
+	report("baseline (no pruning)", base)
+
+	var during []time.Duration
+	stop, done = make(chan struct{}), make(chan struct{})
+	go writer(stop, &during, done, 1_000_000)
+	before := size()
+	t1 := time.Now()
+	rep, err := p.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	took := time.Since(t1)
+	close(stop)
+	<-done
+	report("during pruning", during)
+	t.Logf("prune pass: %v; %d runs, %d rows, freed %.1f MiB to the OS, reusable in file %.1f MiB; file %.1f MiB -> %.1f MiB", took.Round(time.Millisecond), rep.Runs, rep.Rows, float64(rep.FreedBytes)/(1<<20), rep.ReusableMB, float64(before)/(1<<20), float64(size())/(1<<20))
+
+	if os.Getenv("SMIND_MEASURE_COMPACT") != "" {
+		t2 := time.Now()
+		res, err := st.Compact(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("compact: %v; %.1f MiB -> %.1f MiB; incremental now: %v", time.Since(t2).Round(time.Millisecond), float64(res.BeforeBytes)/(1<<20), float64(res.AfterBytes)/(1<<20), st.AutoVacuumIncremental())
+	}
+	// Close the live run so cleanup does not wait for it.
+	_ = reg
 }

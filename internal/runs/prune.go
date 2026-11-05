@@ -25,7 +25,7 @@ const (
 	pruneBatchPause  = 20 * time.Millisecond
 	pruneStartDelay  = 2 * time.Minute
 	pruneInterval    = 24 * time.Hour
-	pruneVacuumPages = 2000
+	pruneVacuumPages = 200
 )
 
 // ErrPruneRunning is returned when a prune pass is already in progress.
