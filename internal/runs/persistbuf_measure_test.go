@@ -65,6 +65,32 @@ func TestMeasureCoalescingReplay(t *testing.T) {
 	}
 	coalDur := time.Since(t0)
 
+	// ADR-0053 finalizer on the coalesced runs: time per run and the result.
+	fin := time.Now().UTC()
+	for i := 0; i < n; i++ {
+		if _, err := coal.st.UpdateRunStatus(fmt.Sprintf("r%d", i), "done", &fin, "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t0 = time.Now()
+	for i := 0; i < n; i++ {
+		if err := Skeletonize(coal.st, fmt.Sprintf("r%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finalizeDur := time.Since(t0)
+	var skelBytes int64
+	var skelRows int
+	for i := 0; i < n; i++ {
+		x, _ := coal.st.ListRunEventsRaw(fmt.Sprintf("r%d", i))
+		skelRows += len(x)
+		for _, row := range x {
+			skelBytes += int64(len(row.EventData))
+		}
+	}
+	var excerptBytes int64
+	_ = coal.st.DB().QueryRow(`SELECT COALESCE(SUM(length(head) + length(tail)), 0) FROM run_excerpts`).Scan(&excerptBytes)
+
 	count := func(e *histEnv) (r int, b int64) {
 		for i := 0; i < n; i++ {
 			x, _ := e.st.ListRunEvents(fmt.Sprintf("r%d", i))
@@ -84,6 +110,9 @@ func TestMeasureCoalescingReplay(t *testing.T) {
 	t.Logf("rows: one-per-event %d -> coalesced %d (%.1f%%)", lr, cr, 100*float64(cr)/float64(lr))
 	t.Logf("event_data: %.1f MiB -> %.1f MiB; estimated on disk at 174 B/row: %.1f MiB -> %.1f MiB (%.0f%%)",
 		float64(lb)/(1<<20), float64(cb)/(1<<20), est(lr, lb), est(cr, cb), 100*est(cr, cb)/est(lr, lb))
+	est2 := func(r int, b int64) float64 { return float64(b+int64(r)*rowOverhead) / (1 << 20) }
+	t.Logf("skeleton form: %d rows, row bytes %.1f MiB + excerpts %.1f MiB; estimated on disk (rows at 174 B) %.1f MiB; finalizer %.1f ms/run",
+		skelRows, float64(skelBytes)/(1<<20), float64(excerptBytes)/(1<<20), est2(skelRows, skelBytes+excerptBytes), float64(finalizeDur.Microseconds())/1000/float64(n))
 	t.Logf("write time: %v -> %v (%.1f us/event -> %.1f us/event, includes fixture cost)", legacyDur.Round(time.Millisecond), coalDur.Round(time.Millisecond),
 		float64(legacyDur.Microseconds())/float64(legacyEvents), float64(coalDur.Microseconds())/float64(legacyEvents))
 }
