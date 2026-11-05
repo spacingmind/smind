@@ -37,6 +37,9 @@ func TestRunsPruneCommand(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
 	}
+	if strings.Contains(out.String(), "skeleton runs") {
+		t.Errorf("no excerpt prune to report:\n%s", out.String())
+	}
 	stubRetention(t, `{"enabled":true,"days":30,"cutoff":"2026-10-06T00:00:00Z","runs":2,"rows":10,"bytes":1048576,"freedBytes":524288,"reusableMB":3.5}`, &seen)
 	out.Reset()
 	if code := runRuns(context.Background(), []string{"prune"}, &out, &errb); code != 0 || seen["params"].(map[string]any)["dryRun"] != false || !strings.Contains(out.String(), "pruned the events of 2 runs") || !strings.Contains(out.String(), "smind db compact") {
@@ -46,6 +49,30 @@ func TestRunsPruneCommand(t *testing.T) {
 	out.Reset()
 	if code := runRuns(context.Background(), []string{"prune"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "retention is off") {
 		t.Fatalf("retention off (%d): %s", code, out.String())
+	}
+}
+
+func TestRunsPruneCommandExcerptLine(t *testing.T) {
+	stubRetention(t, `{"enabled":true,"days":30,"cutoff":"2026-10-06T00:00:00Z","dryRun":true,"runs":1,"rows":40,"bytes":1048576,"excerptRuns":7,"excerptRows":90,"excerptBytes":2097152}`, nil)
+	var out, errb bytes.Buffer
+	if code := runRuns(context.Background(), []string{"prune", "--dry-run"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	for _, want := range []string{
+		"would prune the events of 1 runs: 40 rows, about 1.0 MiB",
+		"would prune the large tool output of 7 skeleton runs: 90 rows, about 2.0 MiB (their summaries stay)",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("dry run output lacks %q:\n%s", want, out.String())
+		}
+	}
+	stubRetention(t, `{"enabled":true,"days":30,"cutoff":"2026-10-06T00:00:00Z","runs":1,"rows":40,"bytes":1048576,"excerptRuns":2,"excerptRows":9,"excerptBytes":1048576,"freedBytes":0}`, nil)
+	out.Reset()
+	if code := runRuns(context.Background(), []string{"prune"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if want := "pruned the large tool output of 2 skeleton runs: 9 rows, about 1.0 MiB (their summaries stay)"; !strings.Contains(out.String(), want) {
+		t.Errorf("real run output lacks %q:\n%s", want, out.String())
 	}
 }
 
