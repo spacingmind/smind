@@ -28,7 +28,7 @@ requests/decisions, usage/rate-limit rows, `diffStat`, `runs.native_ref`; thinki
 AC2 **Thresholds.** Payload ≤ 512 B inline; 512 B–8 KiB whole in `run_excerpts`; > 8 KiB head 4 KiB + tail 4 KiB with `bytes` and
 `sha256` of the whole; `sha256` absent for ≤ 512 B; head/tail cut on a rune boundary; the constants are not configurable.
 AC3 **Write full, finalize at finish.** A running run's rows are full and byte-identical to today's; the finalizer runs after
-`finish`'s callbacks and the #823 LRU insert; one transaction per run (batched over 32 MiB); rows are self-describing (`"v":2`) so a
+`finish`'s callbacks and the #823 LRU insert; one transaction per run (a run over 64 MiB stays full and is logged: the largest real run is 6 MiB); rows are self-describing (`"v":2`) so a
 mixed run reads correctly; an interrupted finalizer is completed by the next pass; it never touches `status='running'`.
 AC4 **Equivalence for what the skeleton keeps.** For every reader in the audit table, the output on a finalized run equals the
 output on the same run in full form for the fields the skeleton keeps (text answers, tool names/statuses, final text, permission
@@ -191,7 +191,7 @@ Already measured for the ADR (scratch script, sizes only from this machine's own
 - [x] PR0 measurement: `smind debug run-stats --db <snapshot>` (#832, fix #833); run on the Human's real snapshot 2026-11-05.
 - [x] H6 thresholds FROZEN 2026-11-05: 512 B / 8 KiB / 4+4 KiB unchanged (ADR-0053, Measurements on the real database).
 - [x] PR1 write-time coalescing of persisted chunk rows (H3): `internal/runs/persistbuf.go`; equivalence, crash/idle/stop and per-reader tests; replay on a synthetic stream shaped like the real data: 503,100 events -> 9,800 rows (1.9%), about 101 MiB -> 10 MiB estimated on disk at 174 B/row.
-- [ ] PR A, B, C, D, E (not started).
+- [x] PR2 finalizer + native_ref (this ADR, section "Implemented: the finalizer"). Open: C retention amendment, D rebuilders + read contract (`historySource`), E consumers + UI.
 
 ## Validation
 
