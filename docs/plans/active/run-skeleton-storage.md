@@ -6,8 +6,7 @@ Order of work (Human, 2026-11-05): PR-A docs; PR0 read-only measurement of the r
 chunk coalescing (H3); then finalizer + `native_ref`, rebuilders, read contract, UI. One PR at a time, each reviewed by the Human.
 Size: XL (10) — scope 3 (store, runs, taskrunner/new history package, wsapi, fleet, UI), PRs 5, risk 3 (data loss, format drift,
 reading files outside smind), decisions 1, verify 1 (synthetic db, three provider formats).
-Depends on: #823 (lazy history, byte budget; merged), #827 (30-day retention; spec PR open, implementation in flight; **lands
-first**: PR C below amends it).
+Depends on: #823 (lazy history, byte budget; merged), #827 (30-day retention spec) implemented by #829 (merged; PR C below amends it).
 
 ## Problem
 
@@ -142,7 +141,7 @@ web (PR D): component tests for the source badge, the "Load full history" button
 - D1 skeleton set; D2 thresholds; D3 write full / finalize at finish; D4 rebuilder + slice rule; D5 read contract and `detail`;
   D6 degrade, never error; D7 drift; D8 owner-only; D9 legacy runs left (all in the ADR).
 - Human answers (2026-11-05): H1 thinking not kept; H2 skeleton forever (`runs.skeletonRetentionDays` reserved, not built); H3
-  coalescing first; H4 (a) plus a later opt-in `smind runs skeletonize`; H5 auto for claude/codex, explicit for ACP; H6 thresholds
+  coalescing first; H4 (a, left to the 30-day prune #829) plus a later opt-in `smind runs skeletonize`; H5 auto for claude/codex, explicit for ACP; H6 thresholds
   frozen only after PR0; **H7 orchestrators/agents get the skeleton only through `task_logs` and never trigger a rebuild (only a
   human request rebuilds; this narrows AC16's `detail=full` for agents)**; H8 doctor warning only, never edit CLI settings.
 
@@ -186,7 +185,9 @@ Already measured for the ADR (scratch script, sizes only from this machine's own
 - [x] Research: provider sessions, formats, sizes, #823/#827 (2026-11-05).
 - [x] ADR-0053 (Proposed) and this plan written.
 - [x] Steward review; Human answers H1–H8 (2026-11-05, accepted).
-- [ ] PR-A docs (this change). PR0 measurement. PR1 coalescing.
+- [x] PR-A docs (#831).
+- [ ] PR0 measurement: `smind debug run-stats --db <snapshot>` (hidden, offline, read-only; `internal/runstats`) built and tested on a synthetic snapshot; real-data run and frozen thresholds pending.
+- [ ] PR1 coalescing.
 - [ ] PR A, B, C, D, E (not started).
 
 ## Validation
