@@ -86,6 +86,11 @@ func (s *Store) MarkRunPruned(runID, finalText string, at, cutoff time.Time) (bo
 // DeleteRunEventsBatch is phase 2: it deletes at most limit event rows of a run
 // that is already marked pruned (never of an unmarked run) and returns how many.
 func (s *Store) DeleteRunEventsBatch(runID string, limit int) (int64, error) {
+	// The excerpt tier (ADR-0053) goes with the first batch: a pruned run keeps
+	// no payload copies.
+	if _, err := s.db.Exec(`DELETE FROM run_excerpts WHERE run_id = ? AND EXISTS (SELECT 1 FROM runs r WHERE r.id = ? AND r.history_pruned_at IS NOT NULL)`, runID, runID); err != nil {
+		return 0, fmt.Errorf("delete run excerpts of %q: %w", runID, err)
+	}
 	res, err := s.db.Exec(
 		`DELETE FROM run_events WHERE id IN (
 		   SELECT e.id FROM run_events e WHERE e.run_id = ?

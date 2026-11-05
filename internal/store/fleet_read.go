@@ -26,6 +26,9 @@ func (s *Store) ListRunEventsAfterSeq(runID string, afterSeq int64, limit int) (
 		if err := rows.Scan(&e.ID, &e.RunID, &e.Seq, &e.EventData, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan run event: %w", err)
 		}
+		if e, err = s.rehydrate(e); err != nil {
+			return nil, err
+		}
 		events = append(events, e)
 	}
 	return events, rows.Err()

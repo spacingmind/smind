@@ -146,7 +146,14 @@ CREATE TABLE IF NOT EXISTS runs (
     -- Run events retention: when the run's detailed events were pruned (NULL =
     -- present), and the run's trailing assistant text kept in their place.
     history_pruned_at TIMESTAMP,
-    final_text TEXT NOT NULL DEFAULT ''
+    final_text TEXT NOT NULL DEFAULT '',
+    -- ADR-0053: where the provider keeps this run's session (JSON, '' = none),
+    -- when the run's rows were collapsed to skeleton form (NULL = full), and
+    -- skeleton_rev: -1 = finished before skeleton storage (never converted), 0 =
+    -- eligible, > 0 = converted (bumped by the finalizer).
+    native_ref TEXT NOT NULL DEFAULT '',
+    skeleton_at TIMESTAMP,
+    skeleton_rev INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -156,6 +163,20 @@ CREATE TABLE IF NOT EXISTS run_events (
     event_data TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL,
     UNIQUE (run_id, seq)
+);
+
+-- ADR-0053: the excerpt tier. A skeleton run's tool payloads over 512 B live
+-- here: whole up to 8 KiB (tail ''), else head and tail of 4 KiB each, with
+-- the whole payload's size and sha256. field is 'in' (tool input) or 'out'.
+CREATE TABLE IF NOT EXISTS run_excerpts (
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    seq INTEGER NOT NULL,
+    field TEXT NOT NULL,
+    head TEXT NOT NULL,
+    tail TEXT NOT NULL DEFAULT '',
+    bytes INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    PRIMARY KEY (run_id, seq, field)
 );
 
 CREATE TABLE IF NOT EXISTS terminal_sessions (

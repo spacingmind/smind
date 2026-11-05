@@ -37,6 +37,11 @@ func (s *Store) ListWorkspaceUserEvents(workspaceID int64, since time.Time, maxE
 		if err := r.Scan(&e.RunID, &e.ChatID, &e.ID, &e.Seq, &e.EventData, &e.CreatedAt); err != nil {
 			return nil, false, fmt.Errorf("scan user event of workspace %d: %w", workspaceID, err)
 		}
+		re, err := s.rehydrate(RunEvent{RunID: e.RunID, Seq: e.Seq, EventData: e.EventData})
+		if err != nil {
+			return nil, false, err
+		}
+		e.EventData = re.EventData
 		rows = append(rows, e)
 	}
 	if err := r.Err(); err != nil {

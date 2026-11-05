@@ -243,6 +243,11 @@ type RunEvent struct {
 	Seq       int64
 	EventData string
 	CreatedAt time.Time
+
+	// Truncated is set when the row was stored in skeleton form (ADR-0053) and
+	// what EventData carries is not the whole original: a payload the excerpt
+	// tier holds only as head and tail, or thinking text that is not kept.
+	Truncated bool
 }
 
 // TerminalSession is a persisted record of one internal/terminal.Registry

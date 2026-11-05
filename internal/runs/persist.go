@@ -37,6 +37,11 @@ type persistedEvent struct {
 	RawPayload           json.RawMessage                 `json:"rawPayload,omitempty"`
 	Usage                *taskrunner.Usage               `json:"usage,omitempty"`
 	McpServers           []taskrunner.McpServerState     `json:"mcpServers,omitempty"`
+
+	// V is 2 on a row the finalizer collapsed to skeleton form (ADR-0053);
+	// absent on every other row. Skel then describes what was moved out.
+	V    int       `json:"v,omitempty"`
+	Skel *skelInfo `json:"skel,omitempty"`
 }
 
 func encodeEvent(e Event) (string, error) {

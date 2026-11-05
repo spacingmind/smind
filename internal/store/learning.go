@@ -839,6 +839,9 @@ func (s *Store) ForgetWorkspaceLearning(workspaceID int64) error {
 	}
 	defer tx.Rollback()
 	for _, q := range []string{
+		`DELETE FROM run_excerpts WHERE run_id IN (
+			SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id
+			WHERE t.workspace_id = ? AND r.purpose = 'probe')`,
 		`DELETE FROM run_events WHERE run_id IN (
 			SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id
 			WHERE t.workspace_id = ? AND r.purpose = 'probe')`,

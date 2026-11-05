@@ -30,6 +30,9 @@ func (s *Store) StreamRunEvents(runID string, fn func(RunEvent) error) error {
 		if err := rows.Scan(&e.ID, &e.RunID, &e.Seq, &e.EventData, &e.CreatedAt); err != nil {
 			return fmt.Errorf("scan run event: %w", err)
 		}
+		if e, err = s.rehydrate(e); err != nil {
+			return err
+		}
 		if err := fn(e); err != nil {
 			return err
 		}
@@ -54,6 +57,9 @@ func (s *Store) TailRunEvents(runID string, n int) ([]RunEvent, error) {
 		var e RunEvent
 		if err := rows.Scan(&e.ID, &e.RunID, &e.Seq, &e.EventData, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan run event: %w", err)
+		}
+		if e, err = s.rehydrate(e); err != nil {
+			return nil, err
 		}
 		events = append(events, e)
 	}
@@ -90,6 +96,9 @@ func (s *Store) ToolCallInputEvents(runID string, ids []string, beforeSeq int64)
 		var e RunEvent
 		if err := rows.Scan(&e.ID, &e.RunID, &e.Seq, &e.EventData, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan run event: %w", err)
+		}
+		if e, err = s.rehydrate(e); err != nil {
+			return nil, err
 		}
 		events = append(events, e)
 	}

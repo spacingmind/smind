@@ -428,6 +428,7 @@ func (s *Store) DeleteTask(id int64) error {
 	}
 	for _, step := range []struct{ name, query string }{
 		{"detach children", `UPDATE tasks SET parent_task_id = NULL WHERE parent_task_id = ?`},
+		{"delete run excerpts", `DELETE FROM run_excerpts WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?)`},
 		{"delete run events", `DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?)`},
 		{"delete run usage", `DELETE FROM run_usage WHERE task_id = ?`},
 		{"delete runs", `DELETE FROM runs WHERE task_id = ?`},

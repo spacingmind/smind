@@ -1,0 +1,268 @@
+package runs
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+
+	"github.com/spacingmind/smind/internal/permpolicy"
+	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
+)
+
+// Skeleton form (ADR-0053 D1-D3). The finalizer collapses a finished run's
+// rows in place:
+//
+//   - thinking text is not kept (H1): the row says how big it was;
+//   - adjacent answer-text rows become one row; a longer one than
+//     store.TextRowCap keeps head and tail, as does a user message over
+//     store.UserRowCap;
+//   - a tool payload (input or result) over store.ExcerptInline moves to
+//     run_excerpts (whole up to store.ExcerptWhole, else head and tail) and its
+//     row keeps a summary and a descriptor; heredoc bodies of an input are
+//     described (index, size, hash) and elided in the summary;
+//   - every other row (permissions, usage, done, notes...) is untouched.
+//
+// store.Store.rehydrate puts the excerpts back on read, so a reader that does
+// not ask for the skeleton sees the events it always saw (payloads over
+// store.ExcerptWhole as head + marker + tail).
+
+// Summary caps of a tool row (ADR-0053 section 1).
+const (
+	argsSummaryCap   = 512
+	resultSummaryCap = 200
+	titleCap         = 512
+)
+
+// skelInfo is the "skel" object of a v2 row; the store package reads it back
+// (store/run_skeleton.go documents the shape).
+type skelInfo struct {
+	In    *skelField `json:"in,omitempty"`
+	Out   *skelField `json:"out,omitempty"`
+	Think *skelField `json:"think,omitempty"`
+	Txt   *skelField `json:"txt,omitempty"`
+}
+
+type skelField struct {
+	N   int64      `json:"n"`
+	SHA string     `json:"sha,omitempty"`
+	Ex  bool       `json:"ex,omitempty"`
+	Doc []skelBody `json:"doc,omitempty"`
+}
+
+type skelBody struct {
+	I   int    `json:"i"`
+	N   int    `json:"n"`
+	SHA string `json:"sha"`
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// capText returns s unchanged when it fits cap, else head + marker + tail with
+// half of cap on each side, cut on rune boundaries.
+func capText(s string, limit int) (string, bool) {
+	if len(s) <= limit {
+		return s, false
+	}
+	head, tail := store.CutRunes(s, limit/2)
+	return head + store.OmittedMarker(int64(len(s)-len(head)-len(tail))) + tail, true
+}
+
+// skeletonRows decides, for every row of a run in seq order, what the
+// finalizer writes. It is pure: rows that need no change are not returned, and
+// a v2 row (an earlier, interrupted pass) is never touched again, so the
+// function is idempotent over a mixed run.
+func skeletonRows(rows []store.RunEvent) ([]store.SkeletonRow, error) {
+	var out []store.SkeletonRow
+	// open answer-text run: the first row's decision, grown by each adjacent text row
+	var run *textRun
+	flush := func() {
+		if run != nil {
+			if r, changed := run.result(); changed {
+				out = append(out, r)
+			}
+			out = append(out, run.deleted...)
+			run = nil
+		}
+	}
+	for _, row := range rows {
+		var p persistedEvent
+		if err := json.Unmarshal([]byte(row.EventData), &p); err != nil {
+			flush()
+			continue // an undecodable row is left exactly as it is
+		}
+		if p.V == 2 {
+			flush()
+			continue
+		}
+		switch {
+		case p.Type == taskrunner.EventTypeText && textOnly(p):
+			if run == nil {
+				run = &textRun{first: row, p: p}
+			} else {
+				run.add(row, p)
+			}
+			continue
+		case p.Type == taskrunner.EventTypeThinking && textOnly(p):
+			flush()
+			n := int64(len(p.Text))
+			f := &skelField{N: n}
+			if n > store.ExcerptInline {
+				f.SHA = sha256Hex(p.Text)
+			}
+			p.Text, p.V, p.Skel = "", 2, &skelInfo{Think: f}
+			data, err := json.Marshal(p)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, store.SkeletonRow{ID: row.ID, Seq: row.Seq, EventData: string(data)})
+		case p.Type == taskrunner.EventTypeUserMessage:
+			flush()
+			if text, cut := capText(p.Text, store.UserRowCap); cut {
+				f := &skelField{N: int64(len(p.Text)), SHA: sha256Hex(p.Text)}
+				p.Text, p.V, p.Skel = text, 2, &skelInfo{Txt: f}
+				data, err := json.Marshal(p)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, store.SkeletonRow{ID: row.ID, Seq: row.Seq, EventData: string(data)})
+			}
+		case p.Type == taskrunner.EventTypeToolCall:
+			flush()
+			if r, changed, err := toolRow(row, p); err != nil {
+				return nil, err
+			} else if changed {
+				out = append(out, r)
+			}
+		default:
+			flush()
+		}
+	}
+	flush()
+	return out, nil
+}
+
+// textOnly reports whether p carries nothing but its type and text.
+func textOnly(p persistedEvent) bool {
+	return chunkOnly(Event{Type: p.Type, Text: p.Text, StopReason: p.StopReason, PermissionRequestID: p.PermissionRequestID,
+		PermissionSummary: p.PermissionSummary, PermissionOptions: p.PermissionOptions, PermissionOptionID: p.PermissionOptionID,
+		PermissionResolution: p.PermissionResolution, PermissionRuleID: p.PermissionRuleID, PermissionDetail: p.PermissionDetail,
+		ToolCallID: p.ToolCallID, ToolName: p.ToolName, ToolTitle: p.ToolTitle, ToolStatus: p.ToolStatus, ToolInput: p.ToolInput,
+		ToolResult: p.ToolResult, RawKind: p.RawKind, RawPayload: p.RawPayload, Usage: p.Usage, McpServers: p.McpServers})
+}
+
+// textRun merges adjacent answer-text rows into the first.
+type textRun struct {
+	first   store.RunEvent
+	p       persistedEvent
+	text    string
+	merged  bool
+	deleted []store.SkeletonRow
+}
+
+func (t *textRun) add(row store.RunEvent, p persistedEvent) {
+	if !t.merged {
+		t.text, t.merged = t.p.Text, true
+	}
+	t.text += p.Text
+	t.deleted = append(t.deleted, store.SkeletonRow{ID: row.ID, Seq: row.Seq, Delete: true})
+}
+
+func (t *textRun) result() (store.SkeletonRow, bool) {
+	text, whole := t.p.Text, t.p.Text
+	if t.merged {
+		text, whole = t.text, t.text
+	}
+	p := t.p
+	capped, cut := capText(text, store.TextRowCap)
+	if !t.merged && !cut {
+		return store.SkeletonRow{}, false
+	}
+	p.Text = capped
+	if cut {
+		p.V, p.Skel = 2, &skelInfo{Txt: &skelField{N: int64(len(whole)), SHA: sha256Hex(whole)}}
+	}
+	data, _ := json.Marshal(p)
+	return store.SkeletonRow{ID: t.first.ID, Seq: t.first.Seq, EventData: string(data)}, true
+}
+
+// toolRow collapses the payloads of one tool_call row.
+func toolRow(row store.RunEvent, p persistedEvent) (store.SkeletonRow, bool, error) {
+	sk := &skelInfo{}
+	var excerpts []store.Excerpt
+	changed := false
+
+	if n := len(p.ToolInput); n > store.ExcerptInline {
+		raw := string(p.ToolInput)
+		f, x := excerptOf("in", raw)
+		f.Doc = heredocDescriptors(p.ToolInput)
+		sk.In = f
+		excerpts = append(excerpts, x)
+		elided, _, _ := taskrunner.ElideToolCall(p.ToolInput, "")
+		p.ToolInput = capJSON(elided, argsSummaryCap)
+		changed = true
+	}
+	if n := len(p.ToolResult); n > store.ExcerptInline {
+		f, x := excerptOf("out", string(p.ToolResult))
+		sk.Out = f
+		excerpts = append(excerpts, x)
+		p.ToolResult = capJSON(p.ToolResult, resultSummaryCap)
+		changed = true
+	}
+	if !changed {
+		return store.SkeletonRow{}, false, nil
+	}
+	if title, cut := capText(p.ToolTitle, titleCap); cut {
+		p.ToolTitle = title
+	}
+	p.V, p.Skel = 2, sk
+	data, err := json.Marshal(p)
+	if err != nil {
+		return store.SkeletonRow{}, false, fmt.Errorf("skeleton row %d: %w", row.Seq, err)
+	}
+	return store.SkeletonRow{ID: row.ID, Seq: row.Seq, EventData: string(data), Excerpts: excerpts}, true, nil
+}
+
+// excerptOf is the descriptor and the excerpt-tier row of one payload over
+// the inline cap: whole up to ExcerptWhole, else head and tail.
+func excerptOf(field, raw string) (*skelField, store.Excerpt) {
+	x := store.Excerpt{Field: field, Head: raw, Bytes: int64(len(raw)), SHA256: sha256Hex(raw)}
+	if len(raw) > store.ExcerptWhole {
+		x.Head, x.Tail = store.CutRunes(raw, store.ExcerptHalf)
+	}
+	return &skelField{N: x.Bytes, SHA: x.SHA256, Ex: true}, x
+}
+
+// capJSON keeps raw when it fits limit, else a JSON string of its head. The
+// result is always valid JSON.
+func capJSON(raw json.RawMessage, limit int) json.RawMessage {
+	if len(raw) <= limit {
+		return raw
+	}
+	head, _ := store.CutRunes(string(raw), limit-8)
+	b, _ := json.Marshal(head + "…")
+	return b
+}
+
+// heredocDescriptors describes the heredoc bodies of a command input so a
+// rebuilt body can be checked against them (never the bodies themselves).
+func heredocDescriptors(input json.RawMessage) []skelBody {
+	for _, key := range []string{"command", "cmd"} {
+		cmd, ok := taskrunner.StringField(input, key)
+		if !ok {
+			continue
+		}
+		if _, bodies := permpolicy.ElideHeredocs(cmd); len(bodies) > 0 {
+			out := make([]skelBody, len(bodies))
+			for i, b := range bodies {
+				out[i] = skelBody{I: i, N: b.Bytes, SHA: sha256Hex(b.Text)}
+			}
+			return out
+		}
+	}
+	return nil
+}

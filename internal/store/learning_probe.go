@@ -310,6 +310,7 @@ func (s *Store) PurgeDecidedProbes(cutoff time.Time) (probes int, runIDs []strin
 
 		for _, r := range runs {
 			for _, q := range []string{
+				`DELETE FROM run_excerpts WHERE run_id = ?`,
 				`DELETE FROM run_events WHERE run_id = ?`,
 				`DELETE FROM run_usage WHERE run_id = ?`,
 				`DELETE FROM runs WHERE id = ?`,
