@@ -524,4 +524,4 @@ Web:
 - [Google Antigravity: Complete Guide to the Agent IDE](https://www.aibuilderclub.com/blog/google-antigravity-complete-guide)
 - [Antigravity 2.0 vs Claude Code vs Cursor 2026 — MCP.Directory](https://mcp.directory/blog/antigravity-2-vs-claude-code-vs-cursor-2026)
 - [Conductor.build: Run a Team of Parallel AI Coding Agents on Your Mac — CodePick](https://codepick.dev/en/guides/conductor-build-intro/)
-- [another workbench vs Intent (2026): macOS Agent Orchestrators — Augment Code](https://www.augmentcode.com/tools/intent-vs-conductor-macos-agent-orchestrators)
+- (competitor comparison article, link removed)

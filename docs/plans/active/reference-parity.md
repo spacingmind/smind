@@ -90,7 +90,7 @@ A reference desktop workbench `--color-<name>` (Tailwind `@theme` token) ↔ smi
 `:root` / `.dark`, re-exported as `--color-<name>` in `@theme inline`. Two other
 families keep their a reference desktop workbench name (`--text-ui-*`, `--shadow-composer-soft`,
 `--lucide-subtlest-opacity`). The full table is a typed constant in
-`web/packages/ui/src/lib/zcode-tokens.ts` (a reference desktop workbench name, smind var, light value,
+`the reference-token files` (a reference desktop workbench name, smind var, light value,
 dark value, status `ported` | `alias` | `added`); the Stage 1 PR pastes it here.
 
 ### Acceptance criteria
@@ -111,7 +111,7 @@ dark value, status `ported` | `alias` | `added`); the Stage 1 PR pastes it here.
 - **AC6** `task lint` and `task test` green on the final head; one mutation per
   load-bearing test, listed in the PR.
 
-### Named tests (web/packages/ui/src/lib/zcode-tokens.test.ts)
+### Named tests (the reference-token files)
 
 - `a reference desktop workbench token drift: every light value in the table matches index.css :root`
 - `a reference desktop workbench token drift: every dark value in the table matches index.css .dark`

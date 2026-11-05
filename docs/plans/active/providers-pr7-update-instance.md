@@ -33,7 +33,7 @@ CLI: `smind provider update <id> [--models a,b] [--add-models a,b] [--disallow T
 | AC6 | Applied live and atomically (registry reloaded as `provider.reload`; invalid config leaves the registry as it was); `provider.updated` published | `TestProviderUpdateInstance_AppliesLive`, `TestProviderUpdateInstance_InvalidKeepsRegistry` |
 | AC7 | `provider.list` serves the editable fields, additively, for instances only | `TestProviderList_InstanceEditableFields` |
 | AC8 | Two claude-native instances with different CLAUDE_CONFIG_DIR run concurrently, each process sees its own dir | `TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs` (taskrunner) |
-| AC9 | A hand-written reference-style config (two claude-native instances + an ACP entry) loads and lists unchanged | `TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged` |
+| AC9 | A hand-written reference-style config (two claude-native instances + an ACP entry) loads and lists unchanged | `TestHandWrittenReferenceStyleConfig_LoadsAndListsUnchanged` |
 | AC10 | CLI `smind provider update` sends the right params, exit codes, usage, docs drift | `TestProviderUpdateCLI_*`, `TestCLIReferenceMatchesHelp` |
 | AC11 | Web: models editor (add/remove, replace-vs-add), disallowedTools chips, inherit toggle on the Providers detail; shared primitives; light+dark frames 1280/390 incl. transitions | `provider-instance-editors.test.tsx`, frames in the validation section |
 | AC12 | Docs: `public-docs/providers.md` "Editing an instance", ADR-0046 amendment | docs drift test |

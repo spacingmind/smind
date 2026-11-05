@@ -229,7 +229,7 @@ subagents). Cascade-archive, detach, "Archive finished".
   project picker, isolation control, provider/model/mode controls, launch
   target (chat agent or a terminal profile), and a composer draft that
   survives.
-- Workspace **scripts** declared in `paseo.json` — `service` and `script`
+- Workspace **scripts** declared in an other-workbench setup file — `service` and `script`
   types, health tracked for services and surfaced on sidebar rows
   (`components/sidebar/workspace-meta-row/service-summary.ts`).
 - **Workspace labels** (`packages/app/src/workspace-labels/`): colored
@@ -273,7 +273,7 @@ under `app/settings/[section].tsx`:
   **Browser tools**, **Hosts** (add host, pair device, restart daemon,
   release channel, update).
 - **Projects** settings screen (`screens/projects-screen.tsx`,
-  `project-settings-screen.tsx`) editing `paseo.json`, with a
+  `project-settings-screen.tsx`) editing an other-workbench setup file, with a
   stale-write conflict alert.
 - Onboarding / welcome (`components/welcome-screen.tsx`).
 - **i18n** (`packages/app/src/i18n/`, a local reference clone) — every

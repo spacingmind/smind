@@ -260,7 +260,7 @@ Visual parity is verified **without ever running a reference desktop workbench**
 independent angles:
 
 1. **Token fixture comparison (P1, machine-checked).** A checked-in
-   fixture (`web/packages/ui/src/test/zcode-tokens.fixture.json`, or
+   fixture (`the reference-token files`, or
    `.md` table) lists every ported token with its Zai Light and Zai
    Dark values copied from a local reference clone.
    A unit test parses smind's `index.css`, resolves each token in both
@@ -329,7 +329,7 @@ migration, 4 commits — one per `MIGRATED_ROOTS` batch), `5610d0c`
 `20c2d32` (NOTICE + docs/design.md).
 
 - **index.css carries a reference desktop workbench's `@theme` semantic token set** — ported in
-  `8ee70c9`. `src/test/zcode-tokens.test.ts` + `zcode-tokens.fixture.json`
+  `8ee70c9`. `the reference-token files` + `the reference-token files`
   resolve all 82 ported `--color-*` tokens (41 families × 2 themes)
   through `index.css`'s own var() chains and assert a match against
   values copied from a local reference clone's
@@ -389,7 +389,7 @@ migration, 4 commits — one per `MIGRATED_ROOTS` batch), `5610d0c`
   and an updated Forbidden list (§14); keyboard/palette/persistence/
   responsive sections (§7–10) untouched, no a reference desktop workbench equivalent.
 - **Token fixture checked in, test asserts resolution in both themes**
-  — `zcode-tokens.fixture.json` + `zcode-tokens.test.ts`, `8ee70c9`
+  — `the reference-token files` + `the reference-token files`, `8ee70c9`
   (see above).
 
 **Web Interface Guidelines review** (P1 Step 7, `.agents/skills/

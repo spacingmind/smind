@@ -103,7 +103,7 @@ CSS-first — there is no `tailwind.config.js` in this package).
 (`bg-amber-500`, `text-emerald-600`, etc.) — every color comes from a
 token, so light/dark stay correct without touching component code.
 `src/test/no-hardcoded-colors.test.ts` greps for this;
-`src/test/zcode-tokens.test.ts` resolves every reference-derived token through
+`the reference-token files` resolves every reference-derived token through
 `index.css`'s own var() chains and asserts it matches a reference desktop workbench's source value
 in both themes (`src/test/zcode-tokens.fixture.json`); `src/test/
 token-presence.test.ts` covers the handful of tokens that survive from

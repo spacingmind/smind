@@ -703,7 +703,7 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
   item's test scenarios re-assert the ones it could plausibly break.
 - **Preferences are client-side until proven otherwise.** Item 13 persists
   to `localStorage` and says so. A daemon settings API (the
-  a reference agent harness model — `$DSH_HOME/settings.yaml` via a host RPC) is a
+  a reference agent harness model — `$REF_HOME/settings.yaml` via a host RPC) is a
   reasonable later step but is not in scope here and should not be
   half-built.
 - **Subagents are deferred, not dropped.** smind has no subagent concept

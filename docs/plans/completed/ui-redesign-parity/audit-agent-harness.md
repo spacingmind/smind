@@ -212,7 +212,7 @@ holds something moving. Escape closes and returns focus to the trigger.
   ledger. Feature packages own their own rows/sections (Permission,
   Language, Appearance, Models, Plugins).
 - Preferences are **host-backed**: written through the host settings API
-  into `$DSH_HOME/settings.yaml`, with namespace revisions, gesture-ordered
+  into `$REF_HOME/settings.yaml`, with namespace revisions, gesture-ordered
   serialization of rapid selections, and a reload of the durable value when
   a write is rejected. A remote (non-privileged) browser keeps its
   selection process-local.

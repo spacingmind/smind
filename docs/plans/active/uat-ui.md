@@ -206,7 +206,7 @@ Counts: 0 P0, 4 P1, 11 P2, 12 P3 (27 entries; B-02 and S-01/S-02 included in P2)
 
 ## Phase 2 PR5 validation (B-05 contrast tokens)
 
-Single source of truth changed (`index.css`, `zcode-tokens.json`, `docs/design.md`), no per-component colour overrides: light `--muted-foreground` oklch(0.556 0 0) to oklch(0.5 0 0) (4.15 to 5.26 on the sidebar); new role token `--warning-text` (light `#a84a00`, dark = `--warning`) for orange TEXT (2.63 to 5.06 on the sidebar, 2.35 to 4.52 on the warning chip over the sidebar); `--warning` stays a reference desktop workbench's orange for dots, fills and glyphs; the sidebar row time uses `text-muted-foreground` instead of `text-foreground-subtlest` (2.2:1). Text usages of `text-warning` switched to `text-warning-text`. First try `#914e00` read brown on the orange chips; `#a84a00` is the warmest value that still holds 4.5:1 on the tightest surface.
+Single source of truth changed (`index.css`, `the reference-token files`, `docs/design.md`), no per-component colour overrides: light `--muted-foreground` oklch(0.556 0 0) to oklch(0.5 0 0) (4.15 to 5.26 on the sidebar); new role token `--warning-text` (light `#a84a00`, dark = `--warning`) for orange TEXT (2.63 to 5.06 on the sidebar, 2.35 to 4.52 on the warning chip over the sidebar); `--warning` stays a reference desktop workbench's orange for dots, fills and glyphs; the sidebar row time uses `text-muted-foreground` instead of `text-foreground-subtlest` (2.2:1). Text usages of `text-warning` switched to `text-warning-text`. First try `#914e00` read brown on the orange chips; `#a84a00` is the warmest value that still holds 4.5:1 on the tightest surface.
 
 Before/after ratios (script: `web/packages/ui/scripts/contrast-table.ts`):
 
