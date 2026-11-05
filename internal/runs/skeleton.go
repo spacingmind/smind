@@ -1,10 +1,13 @@
 package runs
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
+	"time"
 
 	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/store"
@@ -62,9 +65,9 @@ func sha256Hex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// capText returns s unchanged when it fits cap, else head + marker + tail with
+// cutText returns s unchanged when it fits cap, else head + marker + tail with
 // half of cap on each side, cut on rune boundaries.
-func capText(s string, limit int) (string, bool) {
+func cutText(s string, limit int) (string, bool) {
 	if len(s) <= limit {
 		return s, false
 	}
@@ -122,7 +125,7 @@ func skeletonRows(rows []store.RunEvent) ([]store.SkeletonRow, error) {
 			out = append(out, store.SkeletonRow{ID: row.ID, Seq: row.Seq, EventData: string(data)})
 		case p.Type == taskrunner.EventTypeUserMessage:
 			flush()
-			if text, cut := capText(p.Text, store.UserRowCap); cut {
+			if text, cut := cutText(p.Text, store.UserRowCap); cut {
 				f := &skelField{N: int64(len(p.Text)), SHA: sha256Hex(p.Text)}
 				p.Text, p.V, p.Skel = text, 2, &skelInfo{Txt: f}
 				data, err := json.Marshal(p)
@@ -178,7 +181,7 @@ func (t *textRun) result() (store.SkeletonRow, bool) {
 		text, whole = t.text, t.text
 	}
 	p := t.p
-	capped, cut := capText(text, store.TextRowCap)
+	capped, cut := cutText(text, store.TextRowCap)
 	if !t.merged && !cut {
 		return store.SkeletonRow{}, false
 	}
@@ -216,7 +219,7 @@ func toolRow(row store.RunEvent, p persistedEvent) (store.SkeletonRow, bool, err
 	if !changed {
 		return store.SkeletonRow{}, false, nil
 	}
-	if title, cut := capText(p.ToolTitle, titleCap); cut {
+	if title, cut := cutText(p.ToolTitle, titleCap); cut {
 		p.ToolTitle = title
 	}
 	p.V, p.Skel = 2, sk
@@ -265,4 +268,67 @@ func heredocDescriptors(input json.RawMessage) []skelBody {
 		}
 	}
 	return nil
+}
+
+// skeletonMaxBytes bounds one run's conversion: it reads the run's rows into
+// memory and rewrites them in one transaction. The largest run on the real
+// database measured 6 MiB; a run over this cap stays in full form (logged).
+const skeletonMaxBytes = 64 << 20
+
+// finalizeRun collapses a finished run's rows to skeleton form. It is
+// idempotent and never touches a running, pruned or pre-skeleton run (the
+// store re-checks in the transaction). Best effort: a failure leaves the run in
+// full form for the next pass.
+func (reg *Registry) finalizeRun(id string) {
+	size, err := reg.st.RunEventBytes(id)
+	if err != nil {
+		log.Printf("runs: skeleton: %v", err)
+		return
+	}
+	if size > skeletonMaxBytes {
+		log.Printf("runs: skeleton: a run's rows (%d bytes) are over the %d byte cap; left in full form", size, skeletonMaxBytes)
+		return
+	}
+	rows, err := reg.st.ListRunEventsRaw(id)
+	if err != nil {
+		log.Printf("runs: skeleton: %v", err)
+		return
+	}
+	plan, err := skeletonRows(rows)
+	if err != nil {
+		log.Printf("runs: skeleton: %v", err)
+		return
+	}
+	if _, err := reg.st.ApplySkeleton(id, plan, time.Now()); err != nil {
+		log.Printf("runs: skeleton: %v", err)
+	}
+}
+
+// FinalizePending converts every eligible finished run not yet in skeleton
+// form: runs that were running at an upgrade or were interrupted by a crash
+// (finish never ran for them). It returns how many it looked at.
+func (reg *Registry) FinalizePending(ctx context.Context) int {
+	n := 0
+	for ctx.Err() == nil {
+		ids, err := reg.st.SkeletonCandidates(50)
+		if err != nil || len(ids) == 0 {
+			return n
+		}
+		progressed := false
+		for _, id := range ids {
+			if ctx.Err() != nil {
+				return n
+			}
+			before, _ := reg.st.GetRunSkeleton(id)
+			reg.finalizeRun(id)
+			n++
+			if after, err := reg.st.GetRunSkeleton(id); err == nil && after.SkeletonAt != nil && before.SkeletonAt == nil {
+				progressed = true
+			}
+		}
+		if !progressed {
+			return n // the rest could not be converted (over the cap); do not spin
+		}
+	}
+	return n
 }

@@ -212,6 +212,7 @@ func (s *Store) rehydrate(e RunEvent) (RunEvent, error) {
 		In    *skelField `json:"in"`
 		Out   *skelField `json:"out"`
 		Think *skelField `json:"think"`
+		Txt   *skelField `json:"txt"`
 	}
 	if err := json.Unmarshal(m["skel"], &sk); err != nil {
 		return e, nil
@@ -233,7 +234,12 @@ func (s *Store) rehydrate(e RunEvent) (RunEvent, error) {
 		if raw != nil {
 			m[f.name] = raw
 			e.Truncated = e.Truncated || cut
+		} else {
+			e.Truncated = true // the excerpt is gone: the row keeps its summary
 		}
+	}
+	if sk.Txt != nil {
+		e.Truncated = true
 	}
 	if sk.Think != nil {
 		b, _ := json.Marshal(fmt.Sprintf("[thinking not kept: %d bytes]", sk.Think.N))

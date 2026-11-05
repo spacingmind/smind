@@ -132,6 +132,9 @@ func heredocRevealHandlers(reg heredocSource, db *store.Store) map[string]handle
 		if errors.Is(err, runs.ErrHistoryPruned) {
 			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": history pruned: the run's detailed history was deleted by retention"}
 		}
+		if errors.Is(err, runs.ErrHeredocUnavailable) {
+			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": the tool input is no longer kept whole (head and tail only, or pruned), so the body cannot be shown"}
+		}
 		if errors.Is(err, runs.ErrNoHeredoc) {
 			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": no such heredoc on that tool call"}
 		}

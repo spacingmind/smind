@@ -54,7 +54,7 @@ type persistBuf struct {
 // persistedFieldsCovered is the number of persistedEvent fields chunkOnly
 // accounts for; TestChunkOnlyCoversPersistedFields fails when a field is added
 // to persistedEvent without deciding what it means for coalescing.
-const persistedFieldsCovered = 20
+const persistedFieldsCovered = 22
 
 // chunkOnly reports whether e is a plain text or thinking chunk: only its type
 // and text are set, so merging it with its neighbours loses nothing.
@@ -68,6 +68,8 @@ func chunkOnly(e Event) bool {
 		e.ToolTitle == "" && e.ToolStatus == "" && len(e.ToolInput) == 0 && len(e.ToolResult) == 0 &&
 		e.RawKind == "" && len(e.RawPayload) == 0 && e.Usage == nil && len(e.McpServers) == 0
 }
+
+// (V and Skel, the skeleton fields, are not on Event: a chunk is never skeleton.)
 
 var persistedEventFields = reflect.TypeOf(persistedEvent{}).NumField()
 
