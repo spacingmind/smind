@@ -83,6 +83,9 @@ func snapshot(t *testing.T) string {
 		if res > 0 {
 			m["toolResult"] = str(res)
 			m["toolStatus"] = "success"
+			if id != "c3" { // a result update usually omits the tool name
+				delete(m, "toolName")
+			}
 		}
 		return fixedEvent{ev(t, taskrunner.EventTypeToolCall, m), 0}
 	}
@@ -181,6 +184,11 @@ func TestComputeCountsAndThresholds(t *testing.T) {
 	}
 	if !other {
 		t.Errorf("a free-form tool name must be reported as \"other\": %+v", rep.ByTool)
+	}
+	for _, tl := range rep.ByTool {
+		if tl.Tool == "Bash" && (tl.Calls != 2 || tl.Input.N != 2 || tl.Result.N != 2 || tl.Result.Max != 10000) {
+			t.Errorf("a result without a tool name must count for its call's tool: %+v", tl)
+		}
 	}
 	if rep.DB.RowOverheadBytes <= 0 {
 		t.Errorf("overhead = %d", rep.DB.RowOverheadBytes)
