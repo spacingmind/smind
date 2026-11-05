@@ -501,6 +501,27 @@ func TestPruneExcerptsNeverTouchesLiveTaskOrRunning(t *testing.T) {
 	}
 }
 
+// The excerpt prune is for skeleton runs only: on a run in full form (even an
+// eligible one that somehow has an excerpt row) it neither deletes anything nor
+// stamps excerpts_pruned_at, which would later read as "its excerpts were pruned".
+func TestPruneExcerptsBatchRefusesAFullFormRun(t *testing.T) {
+	e := newRetEnv(t)
+	task := e.task(t, true, false)
+	e.run(t, "full", task, "done", "user", at(e.cutoff.Add(-2*time.Hour)), 3)
+	if _, err := e.s.db.Exec(`INSERT INTO run_excerpts (run_id, seq, field, head, tail, bytes, sha256) VALUES ('full', 1, 'out', '"x"', '', 3, 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := e.s.PruneExcerptsBatch("full", 10, time.Now().UTC(), e.cutoff); err != nil || n != 0 {
+		t.Fatalf("deleted %d excerpt rows of a full-form run, %v", n, err)
+	}
+	if sk, _ := e.s.GetRunSkeleton("full"); sk.ExcerptsPrunedAt != nil {
+		t.Fatal("a full-form run was stamped excerpts_pruned_at")
+	}
+	if e.excerpts(t, "full") != 1 {
+		t.Fatal("an excerpt row of a full-form run was deleted")
+	}
+}
+
 func TestPrunePreviewCountsExcerptsOfSkeletonRuns(t *testing.T) {
 	e := newRetEnv(t)
 	task := e.task(t, true, false)
