@@ -275,33 +275,36 @@ func heredocDescriptors(input json.RawMessage) []skelBody {
 // database measured 6 MiB; a run over this cap stays in full form (logged).
 const skeletonMaxBytes = 64 << 20
 
-// finalizeRun collapses a finished run's rows to skeleton form. It is
-// idempotent and never touches a running, pruned or pre-skeleton run (the
-// store re-checks in the transaction). Best effort: a failure leaves the run in
-// full form for the next pass.
+// finalizeRun collapses a finished run's rows to skeleton form, logging a
+// failure: best effort, the run stays in full form for the next pass.
 func (reg *Registry) finalizeRun(id string) {
-	size, err := reg.st.RunEventBytes(id)
-	if err != nil {
+	if err := Skeletonize(reg.st, id); err != nil {
 		log.Printf("runs: skeleton: %v", err)
-		return
+	}
+}
+
+// Skeletonize collapses runID's rows to skeleton form in one transaction. It is
+// idempotent and never touches a running, pruned or pre-skeleton run (the store
+// re-checks in the transaction); a run over skeletonMaxBytes is left in full
+// form. Exported for the packages whose readers must be tested on both forms.
+func Skeletonize(st *store.Store, id string) error {
+	size, err := st.RunEventBytes(id)
+	if err != nil {
+		return err
 	}
 	if size > skeletonMaxBytes {
-		log.Printf("runs: skeleton: a run's rows (%d bytes) are over the %d byte cap; left in full form", size, skeletonMaxBytes)
-		return
+		return fmt.Errorf("run's rows (%d bytes) are over the %d byte cap; left in full form", size, skeletonMaxBytes)
 	}
-	rows, err := reg.st.ListRunEventsRaw(id)
+	rows, err := st.ListRunEventsRaw(id)
 	if err != nil {
-		log.Printf("runs: skeleton: %v", err)
-		return
+		return err
 	}
 	plan, err := skeletonRows(rows)
 	if err != nil {
-		log.Printf("runs: skeleton: %v", err)
-		return
+		return err
 	}
-	if _, err := reg.st.ApplySkeleton(id, plan, time.Now()); err != nil {
-		log.Printf("runs: skeleton: %v", err)
-	}
+	_, err = st.ApplySkeleton(id, plan, time.Now())
+	return err
 }
 
 // FinalizePending converts every eligible finished run not yet in skeleton
