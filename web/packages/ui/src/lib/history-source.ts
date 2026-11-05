@@ -17,7 +17,7 @@ export interface HistorySourceNote {
 interface SkeletonRow {
   tone: "info" | "warning";
   message: string;
-  /** Only rebuild_not_requested offers the rebuild button (and only when canLoadFull says the daemon can). */
+  /** The reasons a human can act on offer the rebuild button (and only when canLoadFull says the daemon can): the first ask, and a retry after a failure that may pass (busy, running chat, too slow). */
   loadable?: boolean;
 }
 
@@ -30,11 +30,11 @@ const SKELETON_ROWS: Record<string, SkeletonRow> = {
   rebuild_not_requested: { tone: "info", message: "Showing a summary: large tool output was trimmed.", loadable: true },
   provider_cannot_rebuild: { tone: "info", message: "Showing a summary: this provider does not keep a history smind can read." },
   native_session_missing: { tone: "warning", message: "Showing a summary: the provider's session file is no longer there." },
-  native_session_in_use: { tone: "info", message: "Showing a summary: this chat is running. Try again when it ends." },
+  native_session_in_use: { tone: "info", message: "Showing a summary: this chat is running. Try again when it ends.", loadable: true },
   slice_not_found: { tone: "warning", message: "Showing a summary: this turn could not be matched in the provider's session." },
   format_drift: { tone: "warning", message: "Showing a summary: the provider's session format was not recognised." },
-  rebuild_failed: { tone: "warning", message: "Showing a summary: the full history could not be loaded (it may be too large or took too long)." },
-  rebuild_busy: { tone: "info", message: "Showing a summary: another history is loading. Try again in a moment." },
+  rebuild_failed: { tone: "warning", message: "Showing a summary: the full history could not be loaded (it may be too large or took too long).", loadable: true },
+  rebuild_busy: { tone: "info", message: "Showing a summary: another history is loading. Try again in a moment.", loadable: true },
 };
 
 const UNKNOWN_ROW: SkeletonRow = { tone: "info", message: "Showing a summary of this run." };

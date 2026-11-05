@@ -57,6 +57,16 @@ describe("describeHistorySource", () => {
     expect(describeHistorySource(skeleton("rebuild_not_requested")).canLoad).toBe(false);
   });
 
+  it("offers the button again after a failure that may pass (and only when the daemon says it can)", () => {
+    for (const reason of ["native_session_in_use", "rebuild_failed", "rebuild_busy"]) {
+      expect(describeHistorySource(skeleton(reason, true)).canLoad, reason).toBe(true);
+      expect(describeHistorySource(skeleton(reason, false)).canLoad, reason).toBe(false);
+    }
+    for (const reason of ["provider_cannot_rebuild", "native_session_missing", "slice_not_found", "format_drift"]) {
+      expect(describeHistorySource(skeleton(reason, true)).canLoad, `${reason} is not retryable`).toBe(false);
+    }
+  });
+
   it("a rebuilt history states it plainly, with no button", () => {
     expect(describeHistorySource({ source: "rebuilt" })).toEqual({
       tone: "info",
