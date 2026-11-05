@@ -296,3 +296,6 @@ func (s *Store) MarkLegacyForTest(runID string) error {
 	_, err := s.db.Exec(`UPDATE runs SET skeleton_rev = -1 WHERE id = ?`, runID)
 	return err
 }
+
+// DB exposes the handle to tests of other packages that need a raw query.
+func (s *Store) DB() *sql.DB { return s.db }
