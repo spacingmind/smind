@@ -58,7 +58,7 @@ type extraScanner struct {
 func (e extraScanner) Scan(dest ...any) error { return e.row.Scan(append(dest, e.extra...)...) }
 
 const windowRunScope = `FROM runs r JOIN tasks t ON t.id = r.task_id
-	WHERE r.chat_id = ? AND r.purpose = 'user' AND t.kind != 'system'`
+	WHERE r.chat_id = ? AND r.purpose = 'user' AND t.kind != 'system' AND r.history_pruned_at IS NULL`
 
 // ListChatRunsWithEventsAfter returns the chat's user runs that have at
 // least one event with id > afterEventID, ordered by started_at, each with
@@ -96,7 +96,7 @@ func (s *Store) ListChatRunsWithEventsAfter(chatID, afterEventID int64) ([]ChatW
 
 	evRows, err := s.db.Query(
 		`SELECT e.id, e.run_id, e.seq, e.event_data, e.created_at FROM run_events e JOIN runs r ON r.id = e.run_id JOIN tasks t ON t.id = r.task_id
-		 WHERE r.chat_id = ? AND r.purpose = 'user' AND t.kind != 'system' AND e.id > ?
+		 WHERE r.chat_id = ? AND r.purpose = 'user' AND t.kind != 'system' AND r.history_pruned_at IS NULL AND e.id > ?
 		 ORDER BY e.run_id, e.seq`, chatID, afterEventID)
 	if err != nil {
 		return nil, fmt.Errorf("list events of chat %d after event %d: %w", chatID, afterEventID, err)

@@ -210,6 +210,11 @@ func loadStoredEvents(st *store.Store, runID string) ([]Event, int64, error) {
 func (reg *Registry) finishedHistory(r *run) ([]Event, error) {
 	for {
 		r.mu.Lock()
+		if at := r.histPrunedAt; at != nil {
+			stop := r.stopReason
+			r.mu.Unlock()
+			return reg.prunedSummary(r.id, stop, *at), nil
+		}
 		if !r.histEvicted {
 			h := append([]Event(nil), r.history...)
 			r.mu.Unlock()
@@ -233,7 +238,7 @@ func (reg *Registry) finishedHistory(r *run) ([]Event, error) {
 		reg.hist.storeReads++
 		r.mu.Lock()
 		r.loadCh = nil
-		if err == nil && r.histEvicted && reg.runs[r.id] == r && size <= reg.histBudgetLocked() {
+		if err == nil && r.histEvicted && r.histPrunedAt == nil && reg.runs[r.id] == r && size <= reg.histBudgetLocked() {
 			r.history = hist
 			r.histEvicted = false
 			r.mu.Unlock()
@@ -284,7 +289,13 @@ func (reg *Registry) Tail(runID string, n int) (TailView, error) {
 		return view, nil
 	}
 	status := r.statusLocked()
+	pruned := r.histPrunedAt
 	r.mu.Unlock()
+	if pruned != nil {
+		view := tailOf(reg.prunedSummary(runID, status.StopReason, *pruned), n)
+		view.Status = reg.withUsage(status)
+		return view, nil
+	}
 	view, err := reg.storeTail(runID, n)
 	if err != nil {
 		return TailView{}, err
@@ -388,11 +399,14 @@ func (reg *Registry) storedTail(runID string, n int) (TailView, error) {
 	if err != nil {
 		return TailView{}, err
 	}
-	view, err := reg.storeTail(runID, n)
-	if err != nil {
+	meta := rehydrateMeta(reg.st, row)
+	status := meta.statusLocked()
+	var view TailView
+	if row.HistoryPrunedAt != nil {
+		view = tailOf(reg.prunedSummary(runID, row.StopReason, *row.HistoryPrunedAt), n)
+	} else if view, err = reg.storeTail(runID, n); err != nil {
 		return TailView{}, err
 	}
-	status := rehydrateMeta(reg.st, row).statusLocked()
 	if u, err := reg.st.GetRunUsage(runID); err == nil {
 		status.Usage = runUsageFromStore(u)
 	}
@@ -410,14 +424,21 @@ func (reg *Registry) trailingTextEvents(runID string, finalText bool) ([]Event, 
 	r, err := reg.get(runID)
 	if err == nil {
 		r.mu.Lock()
+		if at := r.histPrunedAt; at != nil {
+			stop := r.stopReason
+			r.mu.Unlock()
+			return reg.prunedSummary(runID, stop, *at), nil
+		}
 		if r.status == StatusRunning || !r.histEvicted {
 			h := append([]Event(nil), r.history...)
 			r.mu.Unlock()
 			return h, nil
 		}
 		r.mu.Unlock()
-	} else if _, serr := reg.storedReadable(runID); serr != nil {
+	} else if row, serr := reg.storedReadable(runID); serr != nil {
 		return nil, serr
+	} else if row.HistoryPrunedAt != nil {
+		return reg.prunedSummary(runID, row.StopReason, *row.HistoryPrunedAt), nil
 	}
 	for n := 64; ; n *= 8 {
 		view, err := reg.storeTail(runID, n)
@@ -477,14 +498,20 @@ func (reg *Registry) toolCallInput(runID, toolCallID string) ([]byte, error) {
 	r, err := reg.get(runID)
 	if err == nil {
 		r.mu.Lock()
+		if r.histPrunedAt != nil {
+			r.mu.Unlock()
+			return nil, ErrHistoryPruned
+		}
 		if r.status == StatusRunning || !r.histEvicted {
 			input := lastToolInput(r.history, toolCallID)
 			r.mu.Unlock()
 			return input, nil
 		}
 		r.mu.Unlock()
-	} else if _, serr := reg.storedReadable(runID); serr != nil {
+	} else if row, serr := reg.storedReadable(runID); serr != nil {
 		return nil, serr
+	} else if row.HistoryPrunedAt != nil {
+		return nil, ErrHistoryPruned
 	}
 	reg.mu.Lock()
 	reg.hist.storeReads++

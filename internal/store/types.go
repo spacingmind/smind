@@ -225,6 +225,9 @@ type Run struct {
 	// FailoverOf is the id of the run this one continues after a rate limit;
 	// "" = none.
 	FailoverOf string
+	// HistoryPrunedAt is when the run's detailed events were pruned
+	// (retention); nil while they are present. Its text is GetRunFinalText.
+	HistoryPrunedAt *time.Time
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was

@@ -266,6 +266,9 @@ func (c *stewardCollector) childHandoff(taskID int64) (steward.HandoffInfo, bool
 // turn's trailing bookkeeping events, the same notion the parent notifier
 // renders into a child event.
 func finalRunText(db *store.Store, runID string) (string, error) {
+	if row, err := db.GetRun(runID); err == nil && row.HistoryPrunedAt != nil {
+		return db.GetRunFinalText(runID) // retention kept the text in place of the events
+	}
 	events, err := db.ListRunEvents(runID)
 	if err != nil {
 		return "", err

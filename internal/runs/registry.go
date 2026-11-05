@@ -87,6 +87,8 @@ type Registry struct {
 	finishedOrder []string
 	// hist tracks which finished runs' histories are resident (hist.go). Guarded by mu.
 	hist histState
+	// retentionDays is the configured retention shown in a pruned run's marker (0 = unknown). Guarded by mu.
+	retentionDays int
 	// histLoadHook, when non-nil, runs before each store load of a finished
 	// run's history. A test seam (hist_test.go) to hold a load open; nil in production.
 	histLoadHook func()
@@ -418,6 +420,7 @@ func rehydrateMeta(st *store.Store, row store.Run) *run {
 		failureResetInferred: row.FailureResetInferred,
 		failureResetZone:     row.FailureResetZone,
 		histEvicted:          true,
+		histPrunedAt:         cloneTimePtr(row.HistoryPrunedAt),
 		baseSHA:              row.BaseSHA,
 		headSHA:              row.HeadSHA,
 		dirty:                row.Dirty,
@@ -585,11 +588,14 @@ type run struct {
 	// dropped by the budget); histBytes is its estimated size, histElem its
 	// LRU node (finished runs only), loadCh a store read in flight (hist.go).
 	histEvicted bool
-	histBytes   int64
-	histElem    *list.Element
-	loadCh      chan struct{}
-	subscribers map[int]*subQueue
-	nextSubID   int
+	// histPrunedAt is set once retention pruned the run's events (they are gone
+	// or going from the store); readers serve prunedSummary instead.
+	histPrunedAt *time.Time
+	histBytes    int64
+	histElem     *list.Element
+	loadCh       chan struct{}
+	subscribers  map[int]*subQueue
+	nextSubID    int
 
 	// nextEventSeq is the seq to assign the next persisted run_events row
 	// (see Registry.record) -- strictly increasing per run, starting at 0,
@@ -667,8 +673,9 @@ func (r *run) statusLocked() RunStatus {
 		ProfileID:      r.profileID,
 		FailoverOf:     r.failoverOf,
 
-		FailureKind:   r.failureKind,
-		FailureWindow: r.failureWindow,
+		HistoryPrunedAt: cloneTimePtr(r.histPrunedAt),
+		FailureKind:     r.failureKind,
+		FailureWindow:   r.failureWindow,
 	}
 	rs.FailureResetAt = cloneTimePtr(r.failureResetAt)
 	rs.FailureResetInferred = r.failureResetInferred
@@ -1881,13 +1888,18 @@ func (reg *Registry) storedHistory(runID string) ([]Event, RunStatus, error) {
 	if row.Status == string(StatusRunning) || row.Purpose != "" && row.Purpose != "user" {
 		return nil, RunStatus{}, ErrNotFound
 	}
-	hist, _, err := loadStoredEvents(reg.st, runID)
-	if err != nil {
-		return nil, RunStatus{}, fmt.Errorf("history of run %s: %w", runID, err)
+	var hist []Event
+	if row.HistoryPrunedAt != nil {
+		hist = reg.prunedSummary(runID, row.StopReason, *row.HistoryPrunedAt)
+	} else {
+		var err error
+		if hist, _, err = loadStoredEvents(reg.st, runID); err != nil {
+			return nil, RunStatus{}, fmt.Errorf("history of run %s: %w", runID, err)
+		}
+		reg.mu.Lock()
+		reg.hist.storeReads++
+		reg.mu.Unlock()
 	}
-	reg.mu.Lock()
-	reg.hist.storeReads++
-	reg.mu.Unlock()
 	status := rehydrateMeta(reg.st, row).statusLocked()
 	if u, err := reg.st.GetRunUsage(runID); err == nil {
 		status.Usage = runUsageFromStore(u)
