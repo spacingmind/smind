@@ -46,6 +46,7 @@ const SKELETON: Record<string, { tone: 'neutral' | 'warning'; message: string; l
   format_drift: { tone: 'warning', message: 'Showing a summary: the provider’s session format was not recognised.', loadable: false },
   rebuild_failed: { tone: 'warning', message: 'Showing a summary: the full history could not be loaded (it may be too large or took too long).', loadable: true },
   rebuild_busy: { tone: 'neutral', message: 'Showing a summary: another history is loading. Try again in a moment.', loadable: true },
+  excerpt_pruned: { tone: 'neutral', message: 'Showing a summary: large tool output was removed after the retention period.', loadable: true },
 };
 
 const SKELETON_FALLBACK = { tone: 'neutral', message: 'Showing a summary of this run.', loadable: false } as const;

@@ -17,6 +17,7 @@ describe('describeHistorySource', () => {
     { reason: 'format_drift', tone: 'warning', message: 'Showing a summary: the provider’s session format was not recognised.', canLoad: false },
     { reason: 'rebuild_failed', tone: 'warning', message: 'Showing a summary: the full history could not be loaded (it may be too large or took too long).', canLoad: true },
     { reason: 'rebuild_busy', tone: 'neutral', message: 'Showing a summary: another history is loading. Try again in a moment.', canLoad: true },
+    { reason: 'excerpt_pruned', tone: 'neutral', message: 'Showing a summary: large tool output was removed after the retention period.', canLoad: true },
   ];
 
   it('renders each skeleton reason with the web UI’s exact string, tone and loadability (canLoadFull true)', () => {
