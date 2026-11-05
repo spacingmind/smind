@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 function entry(history: RunEntry["history"]): RunEntry {
-  return { id: "r1", provider: "claude-native", prompt: "p", status: "done", startedAt: "2026-11-01T09:59:00Z", items: [], history } as RunEntry;
+  return { id: "r1", provider: "claude-native", prompt: "p", status: "done", startedAt: "2026-11-01T09:59:00Z", items: [], permissionMode: "", autoAccept: false, thinkingLevel: "", history };
 }
 
 const WARNING_REASONS = ["native_session_missing", "slice_not_found", "format_drift", "rebuild_failed"];
