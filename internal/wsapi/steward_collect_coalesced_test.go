@@ -3,9 +3,11 @@ package wsapi
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -25,13 +27,18 @@ func seedCoalescedReaderRuns(t *testing.T, db *store.Store, taskID int64, finalC
 		chunk(taskrunner.EventTypeText, "Hello "),
 		chunk(taskrunner.EventTypeText, "wor"),
 		chunk(taskrunner.EventTypeText, "ld"),
-		{"type": int(taskrunner.EventTypeToolCall), "toolName": "Read", "toolStatus": "success"},
+		{
+			"type": int(taskrunner.EventTypeToolCall), "toolName": "Read", "toolStatus": "success",
+			// Over the 512-byte inline cap, so the finalizer moves both to run_excerpts.
+			"toolInput":  strings.Repeat("i", 1500),
+			"toolResult": strings.Repeat("r", 3000),
+		},
 		chunk(taskrunner.EventTypeText, finalChunks[0]),
 		chunk(taskrunner.EventTypeText, finalChunks[1]),
 		chunk(taskrunner.EventTypeText, finalChunks[2]),
 		{"type": int(taskrunner.EventTypeDone), "stopReason": "end_turn"},
 	}
-	for _, runID := range []string{"legacy", "coal"} {
+	for _, runID := range []string{"legacy", "coal", "skel"} {
 		if _, err := db.CreateRun(store.Run{ID: runID, TaskID: taskID, Provider: "glm", Status: "done", StartedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
@@ -61,6 +68,26 @@ func seedCoalescedReaderRuns(t *testing.T, db *store.Store, taskID int64, finalC
 			}
 		}
 	}
+	// "skel" holds the legacy rows collapsed in place by the finalizer.
+	if err := runs.Skeletonize(db, "skel"); err != nil {
+		t.Fatalf("skeletonize: %v", err)
+	}
+	if sk, err := db.GetRunSkeleton("skel"); err != nil || sk.SkeletonAt == nil {
+		t.Fatalf("skel run not converted: %+v, %v", sk, err)
+	}
+	raw, err := db.ListRunEventsRaw("skel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v2 int
+	for _, row := range raw {
+		if strings.Contains(row.EventData, `"v":2`) {
+			v2++
+		}
+	}
+	if v2 == 0 {
+		t.Fatalf("no v2 rows after skeletonize: %+v", raw)
+	}
 }
 
 func TestFinalRunText_CoalescedEqualsLegacy(t *testing.T) {
@@ -75,8 +102,12 @@ func TestFinalRunText_CoalescedEqualsLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if legacy != "final answer here" || coal != legacy {
-		t.Fatalf("final text: legacy=%q, coalesced=%q, want both %q", legacy, coal, "final answer here")
+	skel, err := finalRunText(c.db, "skel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy != "final answer here" || coal != legacy || skel != legacy {
+		t.Fatalf("final text: legacy=%q, coalesced=%q, skeleton=%q, want all %q", legacy, coal, skel, "final answer here")
 	}
 }
 
@@ -90,7 +121,7 @@ func TestParseHandoff_CoalescedEqualsLegacy(t *testing.T) {
 		`"notes":"kept write ownership"}` + "\n```\n",
 	})
 	var handoffs []steward.HandoffInfo
-	for _, runID := range []string{"legacy", "coal"} {
+	for _, runID := range []string{"legacy", "coal", "skel"} {
 		text, err := finalRunText(c.db, runID)
 		if err != nil {
 			t.Fatal(err)
@@ -105,7 +136,7 @@ func TestParseHandoff_CoalescedEqualsLegacy(t *testing.T) {
 		handoffs = append(handoffs, handoff)
 	}
 	want := steward.HandoffInfo{Status: "done", NotVerified: []string{"gofmt"}, Notes: "kept write ownership"}
-	if !reflect.DeepEqual(handoffs[0], want) || !reflect.DeepEqual(handoffs[1], handoffs[0]) {
-		t.Fatalf("handoffs: legacy=%+v, coalesced=%+v, want %+v", handoffs[0], handoffs[1], want)
+	if !reflect.DeepEqual(handoffs[0], want) || !reflect.DeepEqual(handoffs[1], handoffs[0]) || !reflect.DeepEqual(handoffs[2], handoffs[0]) {
+		t.Fatalf("handoffs: legacy=%+v, coalesced=%+v, skeleton=%+v, want %+v", handoffs[0], handoffs[1], handoffs[2], want)
 	}
 }
