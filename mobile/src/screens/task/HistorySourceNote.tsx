@@ -7,12 +7,11 @@
 // pure logic, this only lays it out.
 
 import { memo, useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { historyNoteView, HistorySourceInfo } from '../../historySource';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { AppIcon } from '../../ui/AppIcon';
-import { TextButton } from '../../ui/TextButton';
 
 export const HistorySourceNote = memo(function HistorySourceNote({ info, loading, onLoad }: { info: HistorySourceInfo; loading: boolean; onLoad: () => void }) {
   const theme = useAppTheme();
@@ -28,10 +27,15 @@ export const HistorySourceNote = memo(function HistorySourceNote({ info, loading
           {view.message}
         </Text>
         {view.showButton ? (
-          <View style={styles.load}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Load full history"
+            onPress={onLoad}
+            style={({ pressed }) => [styles.load, pressed && styles.pressed]}
+          >
             <AppIcon name="history" size={theme.type.label.fontSize} color={theme.foreground} />
-            <TextButton label="Load full history" onPress={onLoad} />
-          </View>
+            <Text style={styles.loadLabel}>Load full history</Text>
+          </Pressable>
         ) : null}
         {view.showLoading ? (
           <Text style={styles.loading} accessibilityRole="text">
@@ -60,7 +64,9 @@ function makeStyles(theme: AppTheme) {
     dot: { width: 6, height: 6, borderRadius: theme.radius.full, marginTop: 5 },
     body: { flexShrink: 1, gap: theme.spacing[1] },
     message: { ...theme.type.small, color: theme.foregroundSubtle, flexShrink: 1 },
-    load: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
+    load: { alignSelf: 'flex-start', minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1] },
+    pressed: { opacity: 0.6 },
+    loadLabel: { ...theme.type.label, color: theme.foreground },
     loading: { ...theme.type.small, color: theme.foregroundSubtle },
   });
 }
