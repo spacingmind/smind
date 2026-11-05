@@ -153,7 +153,11 @@ CREATE TABLE IF NOT EXISTS runs (
     -- eligible, > 0 = converted (bumped by the finalizer).
     native_ref TEXT NOT NULL DEFAULT '',
     skeleton_at TIMESTAMP,
-    skeleton_rev INTEGER NOT NULL DEFAULT 0
+    skeleton_rev INTEGER NOT NULL DEFAULT 0,
+    -- ADR-0053 PR C: when a skeleton run's excerpt tier was pruned by
+    -- retention (NULL = present). The run's rows, final text and usage stay,
+    -- so every reader keeps serving the skeleton.
+    excerpts_pruned_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS run_events (

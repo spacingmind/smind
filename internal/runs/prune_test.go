@@ -245,6 +245,151 @@ func TestPrune_DryRunEqualsReal(t *testing.T) {
 	}
 }
 
+// skelPrunePair builds the PR C fixture: two 60-day-old runs on an archived
+// task with the readers' stream (a 3000-byte tool result, a ~1.5 KB heredoc
+// input), one stored full ("full") and one in skeleton form ("skel").
+func skelPrunePair(t *testing.T) *skelPair {
+	t.Helper()
+	return newSkelPair(t, skelStream(), true)
+}
+
+func (p *skelPair) pruner() *Pruner {
+	pr := NewPruner(p.reg, p.e.st, func() int { return 30 })
+	pr.pause, pr.batch = 0, 50
+	return pr
+}
+
+func excerptCount(t *testing.T, st *store.Store, id string) int {
+	t.Helper()
+	var n int
+	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM run_excerpts WHERE run_id = ?`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestPrune_SkeletonRunKeepsRowsDeletesExcerpts(t *testing.T) {
+	p := skelPrunePair(t)
+	rowsBefore := eventCount(t, p.e.st, p.skl)
+	rep, err := p.pruner().Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Runs != 1 || rep.Rows == 0 || rep.ExcerptRuns != 1 || rep.ExcerptRows == 0 {
+		t.Fatalf("report = %+v; want the full run's rows and the skeleton's excerpts", rep)
+	}
+	// the skeleton run: rows and final text unchanged, excerpts gone, never
+	// marked history-pruned
+	if n := eventCount(t, p.e.st, p.skl); n != rowsBefore {
+		t.Fatalf("skeleton run: %d rows, want the %d it had", n, rowsBefore)
+	}
+	if n := excerptCount(t, p.e.st, p.skl); n != 0 {
+		t.Fatalf("skeleton run: %d excerpt rows left", n)
+	}
+	if txt, _ := p.e.st.GetRunFinalText(p.skl); txt != "" {
+		t.Fatalf("skeleton run: final text = %q, want none", txt)
+	}
+	if row, _ := p.e.st.GetRun(p.skl); row.HistoryPrunedAt != nil {
+		t.Fatal("skeleton run was marked history-pruned")
+	}
+	if sk, _ := p.e.st.GetRunSkeleton(p.skl); sk.ExcerptsPrunedAt == nil {
+		t.Fatal("skeleton run has no excerpts_pruned_at")
+	}
+	// the full run prunes as before
+	if n := eventCount(t, p.e.st, p.full); n != 0 {
+		t.Fatalf("full run: %d rows left", n)
+	}
+	if row, _ := p.e.st.GetRun(p.full); row.HistoryPrunedAt == nil {
+		t.Fatal("full run was not marked history-pruned")
+	}
+}
+
+func TestPrune_ReportCountsExcerptsSeparately(t *testing.T) {
+	p := skelPrunePair(t)
+	fullRows := eventCount(t, p.e.st, p.full)
+	skelExcerpts := excerptCount(t, p.e.st, p.skl)
+	rep, err := p.pruner().Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Runs != 1 || rep.Rows != int64(fullRows) {
+		t.Fatalf("full counts = %d runs, %d rows; want 1, %d", rep.Runs, rep.Rows, fullRows)
+	}
+	if rep.ExcerptRuns != 1 || rep.ExcerptRows != int64(skelExcerpts) {
+		t.Fatalf("excerpt counts = %d runs, %d rows; want 1, %d", rep.ExcerptRuns, rep.ExcerptRows, skelExcerpts)
+	}
+}
+
+func TestPrune_DryRunEqualsRealWithSkeletonRuns(t *testing.T) {
+	p := skelPrunePair(t)
+	rowsBefore := eventCount(t, p.e.st, p.skl)
+	pv, err := p.pruner().Preview()
+	if err != nil || !pv.DryRun || pv.Runs != 1 || pv.ExcerptRuns != 1 || pv.Rows == 0 || pv.ExcerptRows == 0 {
+		t.Fatalf("preview = %+v, %v", pv, err)
+	}
+	if n := eventCount(t, p.e.st, p.skl); n != rowsBefore {
+		t.Fatal("the dry run changed the store")
+	}
+	rep, err := p.pruner().Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Runs != pv.Runs || rep.Rows != pv.Rows || rep.Bytes != pv.Bytes ||
+		rep.ExcerptRuns != pv.ExcerptRuns || rep.ExcerptRows != pv.ExcerptRows || rep.ExcerptBytes != pv.ExcerptBytes {
+		t.Fatalf("real %+v != dry run %+v", rep, pv)
+	}
+}
+
+func TestPrune_CrashResumeExcerpts(t *testing.T) {
+	p := skelPrunePair(t)
+	total := excerptCount(t, p.e.st, p.skl)
+	cutoff := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	// A crash after the mark and one batch: one excerpt row is gone, the mark
+	// is set, the rest survives.
+	if n, err := p.e.st.PruneExcerptsBatch(p.skl, 1, time.Now().UTC(), cutoff); err != nil || n != 1 {
+		t.Fatalf("first batch = %d, %v", n, err)
+	}
+	if sk, _ := p.e.st.GetRunSkeleton(p.skl); sk.ExcerptsPrunedAt == nil {
+		t.Fatal("the first batch did not mark the run")
+	}
+	rep, err := p.pruner().Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.ExcerptRuns != 1 || rep.ExcerptRows != int64(total-1) {
+		t.Fatalf("resume = %+v; want %d more excerpt rows", rep, total-1)
+	}
+	if n := excerptCount(t, p.e.st, p.skl); n != 0 {
+		t.Fatalf("%d excerpt rows left after the resume", n)
+	}
+}
+
+func TestHistoryInfo_ExcerptPruned(t *testing.T) {
+	env := newRebuildEnvFiller(t, true, 30) // the tool input has an excerpt
+	old := time.Now().UTC().Add(-60 * 24 * time.Hour)
+	if _, err := env.e.st.ArchiveTask(env.e.task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.e.st.DB().Exec(`UPDATE runs SET started_at = ?, finished_at = ? WHERE id = 'r'`, old.Add(time.Hour), old); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.reg.HistoryInfo("r"); got.Reason != "rebuild_not_requested" || !got.CanLoadFull {
+		t.Fatalf("before the prune: %+v", got)
+	}
+	pr := NewPruner(env.reg, env.e.st, func() int { return 30 })
+	pr.pause, pr.batch = 0, 50
+	if rep, err := pr.Run(context.Background()); err != nil || rep.ExcerptRuns != 1 {
+		t.Fatalf("prune = %+v, %v", rep, err)
+	}
+	if got := env.reg.HistoryInfo("r"); got.Source != "skeleton" || got.Reason != "excerpt_pruned" || !got.CanLoadFull {
+		t.Fatalf("after the prune: %+v; want excerpt_pruned and CanLoadFull", got)
+	}
+	// without a rebuilder the reason stays provider_cannot_rebuild
+	if got := newTestRegistry(t, env.e.st).HistoryInfo("r"); got.Reason != "provider_cannot_rebuild" || got.CanLoadFull {
+		t.Fatalf("no rebuilder: %+v", got)
+	}
+}
+
 func TestPrune_CrashResume(t *testing.T) {
 	e := newPruneEnv(t, true, 1)
 	cutoff := time.Now().Add(-30 * 24 * time.Hour)

@@ -224,6 +224,23 @@ func TestMigrationMarksFinishedRunsLegacy(t *testing.T) {
 	}
 }
 
+// The excerpts_pruned_at column (PR C) exists and GetRunSkeleton reads it.
+func TestExcerptsPrunedAtColumnExists(t *testing.T) {
+	e := newSkelEnv(t)
+	e.run(t, "r", "done")
+	sk, err := e.s.GetRunSkeleton("r")
+	if err != nil || sk.ExcerptsPrunedAt != nil {
+		t.Fatalf("fresh run: skeleton = %+v, %v; ExcerptsPrunedAt must be nil", sk, err)
+	}
+	at := time.Now().UTC().Truncate(time.Second)
+	if _, err := e.s.db.Exec(`UPDATE runs SET excerpts_pruned_at = ? WHERE id = 'r'`, at); err != nil {
+		t.Fatal(err)
+	}
+	if sk, _ := e.s.GetRunSkeleton("r"); sk.ExcerptsPrunedAt == nil || !sk.ExcerptsPrunedAt.Equal(at) {
+		t.Fatalf("after the stamp: %+v", sk)
+	}
+}
+
 func TestSkeletonCandidates(t *testing.T) {
 	e := newSkelEnv(t)
 	e.run(t, "ok", "done")

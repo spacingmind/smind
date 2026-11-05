@@ -148,18 +148,23 @@ An unknown provider id under `providers.<id>` is an error. See
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `runs.historyRetentionDays` | `30` | How long a finished run keeps its detailed history (tool calls, output). Older runs keep their summary, status, cost, failure reason and final answer; opening one shows a note that its detail was pruned. A task that is not archived keeps everything, whatever its age. `0` keeps everything forever. Must be 0 or more. See the warning below. |
+| `runs.historyRetentionDays` | `30` | How long a finished run keeps its large tool output (the copies over 512 bytes). After that the run keeps its prompts, answers, one row per tool call with a short summary, permissions, usage, failure reason and git facts, and its full history can still be read back from the provider's own session while that file exists. Runs finished before this rule, and runs the daemon could not convert, keep the old behaviour: their whole detail is deleted and opening one shows a note. A task that is not archived keeps everything, whatever its age. `0` keeps everything forever. Must be 0 or more. See the warning below. |
 | `runs.historyBudgetMB` | `64` | Memory the daemon keeps for finished runs' output. Older output stays in the database and is read when you open the run, complete and unchanged; a running run is never limited. Must be 1 or more. Raise it if reopening recent runs feels slow; lower it on a small machine. |
 
-> **Warning: detailed run history older than 30 days is deleted.** After you
+> **Warning: large tool output older than 30 days is removed.** After you
 > upgrade, the first pass runs two minutes after the daemon starts and then once
-> a day, and removes the tool calls and output of finished runs older than
-> `runs.historyRetentionDays` (30 by default) whose task is archived. Runs of
-> tasks you have not archived are never touched. To keep everything, set
-> `runs.historyRetentionDays: 0` (or `SMIND_RUN_HISTORY_RETENTION_DAYS=0`)
-> before upgrading. Run `smind runs prune --dry-run` to see what a pass would
-> delete. Deleting rows does not shrink `smind.db`; run `smind db compact` once
-> to give the space back (see the CLI reference).
+> a day, and removes the large tool output (the copies over 512 bytes) of
+> finished runs older than `runs.historyRetentionDays` (30 by default) whose
+> task is archived, while their prompts, answers, tool-call summaries,
+> permissions, usage, failure reason and git facts stay; the full history can
+> still be read back from the provider's own session while that file exists.
+> Runs finished before this rule, and runs the daemon could not convert, are
+> deleted whole, as before. Runs of tasks you have not archived are never
+> touched. To keep everything, set `runs.historyRetentionDays: 0` (or
+> `SMIND_RUN_HISTORY_RETENTION_DAYS=0`) before upgrading. Run `smind runs prune
+> --dry-run` to see what a pass would remove. Deleting rows does not shrink
+> `smind.db`; run `smind db compact` once to give the space back (see the CLI
+> reference).
 
 > **How a run is stored, and what a crash can lose.** While a run streams,
 > smind writes its text and thinking to `smind.db` in merged rows, not one row
@@ -172,8 +177,10 @@ An unknown provider id under `providers.<id>` is an error. See
 > stop, an agent error or a daemon shutdown loses nothing. Once a run finishes,
 > smind keeps its prompts, answers and one row per tool call, and moves large
 > tool output (over 512 bytes) to a separate table that the retention pass
-> removes with the rest of the detail; thinking text is not kept after the run
-> ends.
+> removes after `runs.historyRetentionDays` days while the rest of the summary
+> stays; the full history can still be read back from the provider's own session
+> (**Load full history**) while that file exists. Thinking text is not kept
+> after the run ends.
 
 ### debug
 

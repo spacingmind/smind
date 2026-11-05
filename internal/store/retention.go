@@ -23,11 +23,16 @@ import (
 const pruneEligible = `r.finished_at IS NOT NULL AND r.finished_at < ? AND r.status != 'running'
 	AND (r.history_pruned_at IS NOT NULL OR r.purpose != 'user' OR t.kind = 'system' OR t.archived_at IS NOT NULL)`
 
-// PruneCounts is what a prune pass would delete (or did).
+// PruneCounts is what a prune pass would delete (or did). The Rows fields
+// count the two kinds separately: full prunes delete a run's event rows,
+// excerpt prunes only the excerpt tier of a skeleton run.
 type PruneCounts struct {
-	Runs  int64 `json:"runs"`
-	Rows  int64 `json:"rows"`
-	Bytes int64 `json:"bytes"`
+	Runs         int64 `json:"runs"`
+	Rows         int64 `json:"rows"`
+	Bytes        int64 `json:"bytes"`
+	ExcerptRuns  int64 `json:"excerptRuns"`
+	ExcerptRows  int64 `json:"excerptRows"`
+	ExcerptBytes int64 `json:"excerptBytes"`
 }
 
 // PrunePreview counts the runs with eligible events left, their rows and the
@@ -37,19 +42,29 @@ func (s *Store) PrunePreview(cutoff time.Time) (PruneCounts, error) {
 	err := s.db.QueryRow(
 		`SELECT COUNT(DISTINCT r.id), COUNT(e.id), COALESCE(SUM(length(e.event_data)), 0)
 		 FROM runs r JOIN tasks t ON t.id = r.task_id JOIN run_events e ON e.run_id = r.id
-		 WHERE `+pruneEligible, cutoff.UTC()).Scan(&c.Runs, &c.Rows, &c.Bytes)
+		 WHERE r.skeleton_at IS NULL AND `+pruneEligible, cutoff.UTC()).Scan(&c.Runs, &c.Rows, &c.Bytes)
 	if err != nil {
 		return PruneCounts{}, fmt.Errorf("prune preview: %w", err)
+	}
+	err = s.db.QueryRow(
+		`SELECT COUNT(DISTINCT r.id), COUNT(*), COALESCE(SUM(length(x.head)+length(x.tail)), 0)
+		 FROM runs r JOIN tasks t ON t.id = r.task_id JOIN run_excerpts x ON x.run_id = r.id
+		 WHERE r.skeleton_at IS NOT NULL AND `+pruneEligible, cutoff.UTC()).Scan(&c.ExcerptRuns, &c.ExcerptRows, &c.ExcerptBytes)
+	if err != nil {
+		return PruneCounts{}, fmt.Errorf("prune preview: excerpts: %w", err)
 	}
 	return c, nil
 }
 
-// PruneCandidates returns up to limit eligible run ids that still have event
-// rows, oldest finished first.
+// PruneCandidates returns up to limit eligible run ids that still have work
+// left -- event rows for a run in full form, excerpt rows for a skeleton run
+// -- oldest finished first.
 func (s *Store) PruneCandidates(cutoff time.Time, limit int) ([]string, error) {
 	rows, err := s.db.Query(
 		`SELECT r.id FROM runs r JOIN tasks t ON t.id = r.task_id
-		 WHERE `+pruneEligible+` AND EXISTS (SELECT 1 FROM run_events e WHERE e.run_id = r.id)
+		 WHERE `+pruneEligible+` AND (
+		   (r.skeleton_at IS NULL AND EXISTS (SELECT 1 FROM run_events e WHERE e.run_id = r.id))
+		   OR (r.skeleton_at IS NOT NULL AND EXISTS (SELECT 1 FROM run_excerpts x WHERE x.run_id = r.id)))
 		 ORDER BY r.finished_at, r.id LIMIT ?`, cutoff.UTC(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("prune candidates: %w", err)
@@ -69,11 +84,12 @@ func (s *Store) PruneCandidates(cutoff time.Time, limit int) ([]string, error) {
 // MarkRunPruned is phase 1: it stores finalText and stamps history_pruned_at
 // if the run is still eligible (the predicate is re-checked in the UPDATE, so
 // a run that became live or running in between is left alone) and not yet
-// marked. It reports whether this call marked it.
+// marked. A skeleton run is never marked: its rows stay, only its excerpt
+// tier may go (PruneExcerptsBatch). It reports whether this call marked it.
 func (s *Store) MarkRunPruned(runID, finalText string, at, cutoff time.Time) (bool, error) {
 	res, err := s.db.Exec(
 		`UPDATE runs SET final_text = ?, history_pruned_at = ?
-		 WHERE id = ? AND history_pruned_at IS NULL AND EXISTS (
+		 WHERE id = ? AND history_pruned_at IS NULL AND skeleton_at IS NULL AND EXISTS (
 		   SELECT 1 FROM runs r JOIN tasks t ON t.id = r.task_id WHERE r.id = runs.id AND `+pruneEligible+`)`,
 		finalText, at.UTC(), runID, cutoff.UTC())
 	if err != nil {
@@ -100,6 +116,41 @@ func (s *Store) DeleteRunEventsBatch(runID string, limit int) (int64, error) {
 		return 0, fmt.Errorf("delete run events of %q: %w", runID, err)
 	}
 	return res.RowsAffected()
+}
+
+// PruneExcerptsBatch is the skeleton form's prune (ADR-0053 PR C): in one
+// transaction it stamps excerpts_pruned_at and deletes at most limit excerpt
+// rows of an eligible skeleton run, returning how many. run_events, the run
+// row and its final text are never touched, so every reader keeps serving the
+// skeleton (a payload whose excerpt is gone reads back as its summary). The
+// eligibility predicate is re-checked in both statements, as MarkRunPruned
+// does, so a run that is running, from a live task or not yet old enough is
+// left alone -- and a crash after the mark is resumed by the next call.
+func (s *Store) PruneExcerptsBatch(runID string, limit int, at, cutoff time.Time) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("prune excerpts of %q: %w", runID, err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
+		`UPDATE runs SET excerpts_pruned_at = ?
+		 WHERE id = ? AND excerpts_pruned_at IS NULL AND skeleton_at IS NOT NULL AND EXISTS (
+		   SELECT 1 FROM runs r JOIN tasks t ON t.id = r.task_id WHERE r.id = runs.id AND `+pruneEligible+`)`,
+		at.UTC(), runID, cutoff.UTC()); err != nil {
+		return 0, fmt.Errorf("prune excerpts of %q: mark: %w", runID, err)
+	}
+	res, err := tx.Exec(
+		`DELETE FROM run_excerpts WHERE rowid IN (
+		   SELECT x.rowid FROM run_excerpts x JOIN runs r ON r.id = x.run_id JOIN tasks t ON t.id = r.task_id
+		    WHERE x.run_id = ? AND r.skeleton_at IS NOT NULL AND `+pruneEligible+` LIMIT ?)`, runID, cutoff.UTC(), limit)
+	if err != nil {
+		return 0, fmt.Errorf("prune excerpts of %q: %w", runID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
 }
 
 // GetRunFinalText returns the final text kept on a pruned run ("" for none).

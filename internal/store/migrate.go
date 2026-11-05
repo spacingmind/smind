@@ -681,6 +681,15 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		// ADR-0053 PR C: retention prunes a skeleton run's excerpt tier
+		// separately from its rows; excerpts_pruned_at marks when (NULL =
+		// present). See internal/store/retention.go.
+		name: "run_excerpts_pruned",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "runs", "excerpts_pruned_at", "TIMESTAMP")
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and
