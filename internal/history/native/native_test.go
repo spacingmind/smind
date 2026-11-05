@@ -446,6 +446,13 @@ func TestBounds(t *testing.T) {
 			t.Fatalf("over the output bound: %q with %d events", res.Reason, len(res.Events))
 		}
 	})
+	t.Run("codex output over the cap", func(t *testing.T) {
+		e := newCodex(t)
+		e.rb = rebuilder(e.root, Config{MaxOutput: 5})
+		if res := e.rebuild(); res.Reason != ReasonFailed || len(res.Events) != 0 {
+			t.Fatalf("over the output bound: %q with %d events", res.Reason, len(res.Events))
+		}
+	})
 	t.Run("a record over the line cap", func(t *testing.T) {
 		e := newClaude(t)
 		f, _ := os.OpenFile(e.file, os.O_APPEND|os.O_WRONLY, 0o600)
