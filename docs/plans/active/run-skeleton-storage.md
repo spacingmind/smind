@@ -191,6 +191,7 @@ Already measured for the ADR (scratch script, sizes only from this machine's own
 - [x] PR0 measurement: `smind debug run-stats --db <snapshot>` (#832, fix #833); run on the Human's real snapshot 2026-11-05.
 - [x] H6 thresholds FROZEN 2026-11-05: 512 B / 8 KiB / 4+4 KiB unchanged (ADR-0053, Measurements on the real database).
 - [x] PR1 write-time coalescing of persisted chunk rows (H3): `internal/runs/persistbuf.go`; equivalence, crash/idle/stop and per-reader tests; replay on a synthetic stream shaped like the real data: 503,100 events -> 9,800 rows (1.9%), about 101 MiB -> 10 MiB estimated on disk at 174 B/row.
+- [x] PR4 read contract: `run.logs detail`, `historySource`/`skeletonReason`/`canLoadFull`, human-only rebuild, web + mobile note and "Load full history" (ADR-0053 "Implemented: the read contract"). Open: ACP `session/load`, budget cache + rebuild on open, fleet `owned_by_host`, `smind doctor` retention warning, retention amendment (PR C).
 - [x] PR3 claude-native + codex-native rebuilders (`internal/history/native`, `Registry.RebuildHistory`; ADR-0053 "Implemented: the claude-native and codex-native rebuilders"). Codex is read from the rollout file; `thread/read` deferred.
 - [x] PR2 finalizer + native_ref (this ADR, section "Implemented: the finalizer"). Open: C retention amendment, D rebuilders + read contract (`historySource`), E consumers + UI.
 

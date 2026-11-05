@@ -146,6 +146,23 @@ loses that buffer, at most 250 ms or 4 KiB per running run. The run comes back
 as interrupted. A normal stop, an agent error or a daemon shutdown (including
 `smind service stop`) writes the buffer first and loses nothing.
 
+## A run shows "Showing a summary"
+
+Once a run has finished, smind keeps its prompts, answers, tool calls and a trimmed copy of large tool output
+(see [Configuration](configuration.md)). Opening it shows a note above the transcript saying so. For a Claude Code or Codex
+run, **Load full history** asks smind to read the complete turn back from that CLI's own session file on this machine. It
+only works while that file is still there, and only for you: agents and automations always read the summary. If it cannot,
+the note says why and the summary stays:
+
+| The note says | What it means |
+| --- | --- |
+| the provider's session file is no longer there | the CLI deleted or moved it (check its own retention setting) |
+| this turn could not be matched | the session no longer holds this run's turn, or two turns look the same |
+| the session format was not recognised | the CLI changed its file format; smind falls back until it is updated |
+| could not be loaded (too large or too slow) | the session file is over 64 MB or reading it took over 10 s |
+| this provider does not keep a history smind can read | other providers have no session file smind can open |
+| another history is loading / this chat is running | try again in a moment, or when the chat's run ends |
+
 ## The daemon uses a lot of memory
 
 Run `smind debug memory`. The daemon keeps only a bounded amount of finished

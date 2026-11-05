@@ -342,6 +342,35 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
   not in the transcript (done, usage, permissions) into one history, the cache (AC13), the ACP `session/load` path and the wire
   contract come with the read contract.
 
+## Implemented: the read contract (PR4)
+
+`internal/wsapi/history_contract.go`, `Registry.HistoryInfo`, `runs.MergeRebuilt`, the web and mobile notes.
+
+- **Request.** `run.logs {runId, tail?, detail?}`; `detail` is `auto`, `skeleton` or `full`; anything else is an invalid-params error.
+  Omitted, `skeleton` and `auto` all serve the stored rows (the human surfaces ask for `full` explicitly; there is no rebuild on
+  open until the budget cache of AC13 exists, since every open would re-read the session). Only `full` rebuilds, and only for a
+  human principal (a connection that is not run-scoped); an agent, an orchestrator (`task_logs` sends no `detail`) or an
+  automation asking for `full` gets the stored rows and `skeletonReason: "rebuild_not_requested"`, never an error and never a
+  read of the provider session.
+- **Result.** Additive, `omitempty`, on the `run.logs` result and the `run.attach` terminal result: `historySource` (`full`,
+  `skeleton`, `rebuilt`), `skeletonReason`, `canLoadFull`. A run that is not in skeleton form carries no label unless a `detail`
+  was asked for, so a caller that sends none reads the same bytes as before. A skeleton run says `rebuild_not_requested`
+  (`canLoadFull` for a human when the provider has a reader) or `provider_cannot_rebuild`; a failed `full` says why with the
+  reason codes of the rebuilders (`native_session_missing`, `slice_not_found`, `format_drift`, `rebuild_failed`,
+  `rebuild_busy`, `native_session_in_use`) and serves the stored rows.
+- **Merge.** A rebuilt turn replaces every stored text, thinking and tool-call row; the stored rows that are not in the provider's
+  transcript (user message, permission requests and decisions, usage, rate limit, mcp servers, notes, done) keep their place
+  around it: the rebuilt block sits where the first stored transcript row was. A permission row that was interleaved between
+  two tool calls therefore ends up next to the block, not inside it. `tail` applies to the merged history.
+- **Elision.** Rebuilt events leave the rebuilder already in client form, with the heredoc references the elider reported next to
+  each call's input; the wire conversion uses a pass-through elider for them (`NewClientFormElider`), because eliding twice is not
+  idempotent. A live read and a rebuilt read of the same turn have equal tool-call events, references included.
+- **Heredoc reveal.** `run.revealToolHeredoc` (human only) falls back to `RebuildHeredoc` when the stored input is only head and tail
+  or pruned; the body is shown only if its sha256 equals the skeleton descriptor.
+- **Clients.** Web (`HistorySourceNote`, `loadFullHistory`) and mobile (`HistorySourceNote`, `historySource.ts`) show one
+  sentence per reason and a "Load full history" action that is offered only when the daemon says `canLoadFull` and the
+  reason can pass (first ask, busy, running chat, too slow). The sentences are one table in each client with identical text.
+
 ## Measurements on the real database (PR0, 2026-11-05)
 
 `smind debug run-stats` (hidden, offline, read-only) ran once on a `VACUUM INTO` snapshot of the Human's database (842 MiB file,
