@@ -280,3 +280,19 @@ func (s *Store) excerptPayload(runID string, seq int64, field string) (raw json.
 	b, _ := json.Marshal(head + OmittedMarker(bytes-int64(len(head))-int64(len(tail))) + tail)
 	return b, true, nil
 }
+
+// ResetSkeletonForTest clears a run's converted mark, as a crash between the
+// rewrite and the mark would leave it. For tests of the finalizer.
+func (s *Store) ResetSkeletonForTest(runID string) (int64, error) {
+	res, err := s.db.Exec(`UPDATE runs SET skeleton_at = NULL, skeleton_rev = 0 WHERE id = ?`, runID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// MarkLegacyForTest marks a run as finished before skeleton storage.
+func (s *Store) MarkLegacyForTest(runID string) error {
+	_, err := s.db.Exec(`UPDATE runs SET skeleton_rev = -1 WHERE id = ?`, runID)
+	return err
+}
