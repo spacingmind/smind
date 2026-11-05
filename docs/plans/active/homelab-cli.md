@@ -455,7 +455,7 @@ per-user task is the minimal boot/logon-persistence answer for the CLI. Nothing 
 
 **That workbench pattern — adapted.** The reference learns the daemon version over the existing client connection
 (WS `server_info`, `getDaemonStatus`; `pair.ts` gates on `features.daemonStatusRpc` and answers
-"Update the … daemon…"), so relay hosts need no separate probe — our `daemon.info` is the same
+"Update the daemon…"), so relay hosts need no separate probe — our `daemon.info` is the same
 idea. The copyable command is ours (Human's request).
 
 ### P11 — ★ Docker image
