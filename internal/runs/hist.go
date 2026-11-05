@@ -225,6 +225,9 @@ func (reg *Registry) finishedHistory(r *run) ([]Event, error) {
 		r.loadCh = done
 		r.mu.Unlock()
 
+		if reg.histLoadHook != nil {
+			reg.histLoadHook()
+		}
 		hist, size, err := loadStoredEvents(reg.st, r.id)
 		reg.mu.Lock()
 		reg.hist.storeReads++

@@ -87,6 +87,9 @@ type Registry struct {
 	finishedOrder []string
 	// hist tracks which finished runs' histories are resident (hist.go). Guarded by mu.
 	hist histState
+	// histLoadHook, when non-nil, runs before each store load of a finished
+	// run's history. A test seam (hist_test.go) to hold a load open; nil in production.
+	histLoadHook func()
 	// systemFinishedOrder is finishedOrder for system runs (see retain).
 	systemFinishedOrder []string
 

@@ -268,7 +268,7 @@ func TestBudgetNeverEvictsRunningRun(t *testing.T) {
 	reg.runs[live.id] = live
 	reg.mu.Unlock()
 
-	reg.SetHistoryBudget(10 << 10) // far below the live run's history
+	reg.SetHistoryBudget(150 << 10) // two seeded runs fit; the live run's history alone is far over it
 	hist := genHistory(99, 300<<10)
 	for _, ev := range hist {
 		reg.record(live, ev)
@@ -321,6 +321,7 @@ func TestConcurrentLoadsDeduped(t *testing.T) {
 	e := newHistEnv(t)
 	want := e.seed(t, 1, 200<<10)
 	reg := newTestRegistry(t, e.st)
+	reg.histLoadHook = func() { time.Sleep(100 * time.Millisecond) } // let every caller pile up behind one load
 	var wg sync.WaitGroup
 	errs := make(chan string, 32)
 	for i := 0; i < 32; i++ {
@@ -339,8 +340,8 @@ func TestConcurrentLoadsDeduped(t *testing.T) {
 		t.Fatal(m)
 	}
 	st := reg.HistoryStats()
-	if st.Loads != 1 {
-		t.Fatalf("loads = %d, want 1 (one store read shared by every caller)", st.Loads)
+	if st.Loads != 1 || st.StoreReads != 1 {
+		t.Fatalf("loads = %d, store reads = %d, want 1 and 1 (one store read shared by every caller)", st.Loads, st.StoreReads)
 	}
 	if st.ResidentBytes != historyBytes(want["seed-000"]) {
 		t.Fatalf("resident bytes %d double counted, want %d", st.ResidentBytes, historyBytes(want["seed-000"]))
