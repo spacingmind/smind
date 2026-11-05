@@ -5,7 +5,9 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **runs:** prune detailed run history after 30 days ([#829](https://github.com/spacingmind/smind/issues/829))
+* **runs:** detailed run history older than 30 days is deleted on upgrade, about 2 minutes after the daemon starts. A finished run of an archived (or system) task keeps its run row, final answer, usage and failure class; its tool calls and outputs are removed. Set `runs.historyRetentionDays: 0` (or `SMIND_RUN_HISTORY_RETENTION_DAYS=0`) before upgrading to keep everything. `smind runs prune --dry-run` shows what would go, and `smind db compact` reclaims the space of an existing database ([#829](https://github.com/spacingmind/smind/issues/829), [#840](https://github.com/spacingmind/smind/issues/840)).
+* **runs:** finished runs are now stored as a skeleton (ADR-0053). Thinking text is not kept. Answer text over 32 KiB and tool inputs/results over 8 KiB keep a 4 KiB head and a 4 KiB tail plus their size and hash. A human can load the full history from the provider's own session where it still exists ("Load full history", `run.logs` `detail: full`); agents always read the skeleton. Runs finished before the upgrade are not converted ([#836](https://github.com/spacingmind/smind/issues/836), [#837](https://github.com/spacingmind/smind/issues/837), [#838](https://github.com/spacingmind/smind/issues/838)).
+* **runs:** streamed text and thinking chunks are persisted coalesced (up to 4 KiB per row). A process killed mid-stream (kill -9, power loss) can lose up to 250 ms or 4 KiB of the last output of each running run ([#835](https://github.com/spacingmind/smind/issues/835)).
 
 ### Features
 
