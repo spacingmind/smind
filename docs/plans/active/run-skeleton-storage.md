@@ -190,7 +190,7 @@ Already measured for the ADR (scratch script, sizes only from this machine's own
 - [x] PR-A docs (#831).
 - [x] PR0 measurement: `smind debug run-stats --db <snapshot>` (#832, fix #833); run on the Human's real snapshot 2026-11-05.
 - [x] H6 thresholds FROZEN 2026-11-05: 512 B / 8 KiB / 4+4 KiB unchanged (ADR-0053, Measurements on the real database).
-- [ ] PR1 coalescing (next; the real data says 3.18 M chunk rows, 98% of all rows).
+- [x] PR1 write-time coalescing of persisted chunk rows (H3): `internal/runs/persistbuf.go`; equivalence, crash/idle/stop and per-reader tests; replay on a synthetic stream shaped like the real data: 503,100 events -> 9,800 rows (1.9%), about 101 MiB -> 10 MiB estimated on disk at 174 B/row.
 - [ ] PR A, B, C, D, E (not started).
 
 ## Validation

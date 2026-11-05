@@ -607,6 +607,10 @@ type run struct {
 	// comment) would make that unnecessary on its own.
 	nextEventSeq int64
 
+	// pbuf coalesces the persisted rows of consecutive text/thinking chunks
+	// (persistbuf.go). Own lock: record's persistence runs outside mu.
+	pbuf persistBuf
+
 	// pendingPermissions holds one buffered(1) channel per permission
 	// request currently awaiting an answer, keyed by request id -- see
 	// runPermissionDecider and RespondPermission.
@@ -1543,9 +1547,7 @@ func (reg *Registry) record(r *run, e Event) {
 	// request. A run whose events failed to persist just won't survive a
 	// restart with full history; it still finishes and streams normally in
 	// the current process.
-	if data, err := encodeEvent(e); err == nil {
-		_, _ = reg.st.AppendRunEvent(r.id, seq, data)
-	}
+	reg.persist(r, seq, e)
 
 	if e.Type == taskrunner.EventTypeUsage && e.Usage != nil {
 		reg.upsertUsage(r, e.Usage)
@@ -1577,6 +1579,10 @@ func cloneTimePtr(t *time.Time) *time.Time {
 
 func (reg *Registry) finish(r *run, err error) {
 	now := time.Now()
+
+	// Rows still buffered for the store (persistbuf.go) go out before anything
+	// that depends on the run's rows being complete.
+	reg.flushPersist(r)
 
 	r.mu.Lock()
 	stopRequested := r.stopRequested
