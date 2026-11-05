@@ -120,4 +120,13 @@ describe("demo scenario", () => {
     expect(stat(tour.diffs[3])).toEqual([24, 0]); // parseDate
     for (const id of [4, 5, 6, 12]) expect(tour.diffs[id], `task ${id} has no diff`).toBeUndefined();
   });
+
+  it("S-06 the default tour is clean: no run's logs carry a historySource, so the landing demo cannot show the summary note", () => {
+    for (const [id, logs] of Object.entries(tour.runLogs)) expect(logs.historySource, id).toBeUndefined();
+    const summarized = buildTour(NOW, { summarizedRun: true });
+    expect(summarized.runLogs["demo-run-retry"]).toMatchObject({ historySource: "skeleton", skeletonReason: "rebuild_not_requested", canLoadFull: true });
+    for (const [id, logs] of Object.entries(summarized.runLogs)) {
+      if (id !== "demo-run-retry") expect(logs.historySource, id).toBeUndefined();
+    }
+  });
 });
