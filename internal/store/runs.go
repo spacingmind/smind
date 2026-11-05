@@ -310,7 +310,7 @@ func (s *Store) ListRunEvents(runID string) ([]RunEvent, error) {
 
 // runColumns is the run SELECT column list; scanRun's Scan argument order
 // must stay in lockstep with it.
-const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments, failure_kind, failure_window, failure_reset_at, failure_reset_inferred, failure_reset_zone, reply_chat_id, parent_notified_at, profile_id, failover_of"
+const runColumns = "id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model, base_sha, head_sha, dirty, purpose, origin, interrupt, attachments, failure_kind, failure_window, failure_reset_at, failure_reset_inferred, failure_reset_zone, reply_chat_id, parent_notified_at, profile_id, failover_of, history_pruned_at"
 
 // runColumnsAs is runColumns with every column qualified by alias.
 func runColumnsAs(alias string) string {
@@ -333,10 +333,11 @@ func scanRun(row rowScanner) (Run, error) {
 	var replyChatID sql.NullInt64
 	var parentNotifiedAt sql.NullTime
 	var profileID sql.NullInt64
+	var prunedAt sql.NullTime
 	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
 		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model,
 		&baseSHA, &headSHA, &dirty, &r.Purpose, &r.Origin, &r.Interrupt, &r.Attachments,
-		&r.FailureKind, &r.FailureWindow, &failureResetAt, &r.FailureResetInferred, &r.FailureResetZone, &replyChatID, &parentNotifiedAt, &profileID, &r.FailoverOf); err != nil {
+		&r.FailureKind, &r.FailureWindow, &failureResetAt, &r.FailureResetInferred, &r.FailureResetZone, &replyChatID, &parentNotifiedAt, &profileID, &r.FailoverOf, &prunedAt); err != nil {
 		return Run{}, err
 	}
 	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's
@@ -354,6 +355,7 @@ func scanRun(row rowScanner) (Run, error) {
 	r.ReplyChatID = replyChatID.Int64
 	r.ParentNotifiedAt = nullToTimePtr(parentNotifiedAt)
 	r.ProfileID = profileID.Int64
+	r.HistoryPrunedAt = nullToTimePtr(prunedAt)
 	return r, nil
 }
 

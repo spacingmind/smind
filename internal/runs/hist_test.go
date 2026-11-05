@@ -490,7 +490,23 @@ func TestGenerateSyntheticDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := time.Now().Add(-48 * time.Hour).UTC()
+	// SMIND_GEN_OLD_PCT: this percent of the runs are 60 days old and belong to
+	// an archived task (retention measurements); the rest stay recent on an open task.
+	oldPct, _ := strconv.Atoi(os.Getenv("SMIND_GEN_OLD_PCT"))
+	var archived store.Task
+	if oldPct > 0 {
+		if archived, err = st.CreateTask(store.Task{WorkspaceID: ws.ID, Title: "archived", Status: "created"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.ArchiveTask(archived.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for i := 0; i < runsN; i++ {
-		seedFinished(t, st, tk.ID, fmt.Sprintf("synth-%04d", i), base.Add(time.Duration(i)*time.Minute), genHistory(i, mb<<20))
+		taskID, start := tk.ID, base.Add(time.Duration(i)*time.Minute)
+		if i*100 < oldPct*runsN {
+			taskID, start = archived.ID, time.Now().Add(-60*24*time.Hour).UTC().Add(time.Duration(i)*time.Minute)
+		}
+		seedFinished(t, st, taskID, fmt.Sprintf("synth-%04d", i), start, genHistory(i, mb<<20))
 	}
 }

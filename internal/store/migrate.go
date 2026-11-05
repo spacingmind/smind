@@ -413,6 +413,16 @@ var migrations = []migration{
 		},
 	},
 	{
+		// Run events retention: pruned marker and the kept final text.
+		name: "run_history_pruned",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "runs", "history_pruned_at", "TIMESTAMP"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(db, "runs", "final_text", "TEXT NOT NULL DEFAULT ''")
+		},
+	},
+	{
 		// ADR-0041 F2: the profile a run was launched with, and the run it
 		// continues after a rate limit.
 		name: "run_profile_failover",

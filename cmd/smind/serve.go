@@ -229,6 +229,8 @@ func cmdServe(args []string) int {
 	scratchW.start(ctx, srv.API(), srv.API().Runs)
 
 	// ADR-0039 §4: the git state loop idles until a client subscribes to task.git.
+	// Run events retention: first pass two minutes after start, then daily.
+	srv.API().Pruner.Start(ctx)
 	stopGitState := srv.API().StartGitState(ctx)
 
 	// ADR-0042: tidy install leftovers and re-validate enabled plugins.

@@ -11,6 +11,10 @@ import (
 // is not there (not pending, unknown, or an index past its elided bodies).
 var ErrNoHeredoc = errors.New("runs: no such heredoc")
 
+// ErrHistoryPruned is returned when the run's detailed history was deleted by
+// retention, so there is no tool input left to reveal from.
+var ErrHistoryPruned = errors.New("runs: the run's detailed history was pruned")
+
 // HeredocReveal is one raw heredoc body and where it came from. The text is
 // unredacted: the caller (a human-only RPC) redacts it before it leaves.
 type HeredocReveal struct {

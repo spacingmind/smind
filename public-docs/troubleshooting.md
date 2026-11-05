@@ -130,6 +130,13 @@ and `log.maxFiles`. See [Configuration](configuration.md).
 
 In the desktop app, **Settings** → **Daemon** shows the log file path.
 
+## smind.db is very large
+
+Most of the file is the detailed history of finished runs. The daemon prunes
+runs older than `runs.historyRetentionDays` (30 by default) of archived tasks
+every day; `smind runs prune --dry-run` shows what that would remove. The file
+only shrinks after `smind db compact` (see the CLI reference).
+
 ## The daemon uses a lot of memory
 
 Run `smind debug memory`. The daemon keeps only a bounded amount of finished

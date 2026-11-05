@@ -142,7 +142,11 @@ CREATE TABLE IF NOT EXISTS runs (
     -- history, never cleared on profile delete) and the run this one continues
     -- after a rate limit ('' = none).
     profile_id INTEGER,
-    failover_of TEXT NOT NULL DEFAULT ''
+    failover_of TEXT NOT NULL DEFAULT '',
+    -- Run events retention: when the run's detailed events were pruned (NULL =
+    -- present), and the run's trailing assistant text kept in their place.
+    history_pruned_at TIMESTAMP,
+    final_text TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS run_events (

@@ -70,6 +70,9 @@ func encodeEvent(e Event) (string, error) {
 
 // DecodeStoredEvent decodes one persisted run_events.event_data payload
 // (EncodeEvent's inverse).
+// EncodeStoredEvent is encodeEvent for packages that synthesise stored rows.
+func EncodeStoredEvent(e taskrunner.Event) (string, error) { return encodeEvent(e) }
+
 func DecodeStoredEvent(data string) (taskrunner.Event, error) { return decodeEvent(data) }
 
 func decodeEvent(data string) (Event, error) {

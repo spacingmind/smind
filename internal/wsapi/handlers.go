@@ -1965,8 +1965,12 @@ type runLogsResult struct {
 	// FallbackProfileID is set only for a rate_limited run whose profile
 	// names a fallback: the suggestion to start the work again on it, in a
 	// new chat.
-	FallbackProfileID int64         `json:"fallbackProfileId,omitempty"`
-	Events            []runLogEvent `json:"events"`
+	FallbackProfileID int64 `json:"fallbackProfileId,omitempty"`
+	// HistoryPruned/HistoryPrunedAt: retention deleted the run's detailed
+	// events; Events is then a summary (a note, the final text, done).
+	HistoryPruned   bool          `json:"historyPruned,omitempty"`
+	HistoryPrunedAt string        `json:"historyPrunedAt,omitempty"`
+	Events          []runLogEvent `json:"events"`
 }
 
 // runLogEvents converts a run's history to its run.logs wire form, last tail
@@ -2021,7 +2025,7 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 		if failure.IsPlanLimit(status.FailureKind) {
 			fallbackID = reg.FallbackProfileFor(status.ProfileID)
 		}
-		return runLogsResult{
+		res := runLogsResult{
 			ProfileID:         status.ProfileID,
 			FailoverOf:        status.FailoverOf,
 			FallbackProfileID: fallbackID,
@@ -2040,7 +2044,11 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			Dirty:             status.Dirty,
 			Attachments:       status.Attachments,
 			Events:            events,
-		}, nil
+		}
+		if status.HistoryPrunedAt != nil {
+			res.HistoryPruned, res.HistoryPrunedAt = true, status.HistoryPrunedAt.UTC().Format(time.RFC3339)
+		}
+		return res, nil
 	}
 }
 
