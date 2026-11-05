@@ -4,7 +4,8 @@
 // historyNoteView's three render states.
 
 import { describe, expect, it } from 'vitest';
-import { describeHistorySource, HistorySourceInfo, historyNoteView } from '../historySource';
+import { applyFullHistoryResult, describeHistorySource, HistorySourceInfo, historyNoteView } from '../historySource';
+import { TimelineLine } from '../runTimeline';
 
 describe('describeHistorySource', () => {
   const CASES: Array<{ reason: string; tone: 'neutral' | 'warning'; message: string; canLoad: boolean }> = [
@@ -99,5 +100,54 @@ describe('historyNoteView', () => {
   it('renders nothing when describeHistorySource says nothing', () => {
     expect(historyNoteView({ source: 'full' }, false)).toBeNull();
     expect(historyNoteView({}, true)).toBeNull();
+  });
+});
+
+describe('applyFullHistoryResult', () => {
+  const rebuilt = (texts: string[]): TimelineLine[] => texts.map((text, i) => ({ key: `e${i}`, role: 'assistant', text }));
+  const prev = (texts: string[]): TimelineLine[] => texts.map((text, i) => ({ key: `f${i}`, role: 'user', text }));
+
+  it('replaces the shown lines with the rebuilt events, keeping anything appended since after them', () => {
+    const out = applyFullHistoryResult(prev(['typed while loading']), { events: [{ type: 'chunk', text: 'rebuilt' }] }, 'the prompt');
+    expect(out).toEqual([
+      { key: 'pthe prompt', role: 'user', text: 'the prompt' },
+      { key: 'e0', role: 'assistant', text: 'rebuilt' },
+      { key: 'f0', role: 'user', text: 'typed while loading' },
+    ]);
+  });
+
+  it('does not prepend the run’s prompt when the shown lines already carry it (the optimistic line)', () => {
+    const out = applyFullHistoryResult(prev(['the prompt']), { events: [{ type: 'chunk', text: 'rebuilt' }] }, 'the prompt');
+    expect(out).toEqual([
+      { key: 'e0', role: 'assistant', text: 'rebuilt' },
+      { key: 'f0', role: 'user', text: 'the prompt' },
+    ]);
+  });
+
+  it('prepends the run’s own prompt when the rebuilt events carry no user line (a run.start run)', () => {
+    const out = applyFullHistoryResult([], { events: [{ type: 'chunk', text: 'rebuilt' }] }, 'the prompt');
+    expect(out).toEqual([
+      { key: 'pthe prompt', role: 'user', text: 'the prompt' },
+      { key: 'e0', role: 'assistant', text: 'rebuilt' },
+    ]);
+  });
+
+  it('does not duplicate the prompt when the rebuilt events already carry it', () => {
+    const out = applyFullHistoryResult([], { events: [{ type: 'user_message', text: 'the prompt' }] }, 'the prompt');
+    expect(out).toEqual([{ key: 'e0', role: 'user', text: 'the prompt' }]);
+  });
+
+  it('an empty rebuilt result still applies the run-prompt treatment', () => {
+    const out = applyFullHistoryResult(prev(['kept']), {}, 'the prompt');
+    expect(out).toEqual([
+      { key: 'pthe prompt', role: 'user', text: 'the prompt' },
+      { key: 'f0', role: 'user', text: 'kept' },
+    ]);
+  });
+
+  it('carries the run row’s attachments onto the prepended prompt line', () => {
+    const attachments = [{ id: 'a1', label: 'shot.png', sizeLabel: '1 KB', kind: 'image', thumbnail: true }];
+    const out = applyFullHistoryResult([], { events: [{ type: 'chunk', text: 'ok' }] }, 'the prompt', attachments);
+    expect(out[0]).toMatchObject({ role: 'user', text: 'the prompt', attachments });
   });
 });

@@ -3,7 +3,11 @@
 // finished run's transcript: one table of exact strings, shared wording
 // with the web UI, so the two never drift. Pure -- no react-native
 // import -- per theme.ts/icons.ts's discipline for vitest's plain
-// transform.
+// transform; the screen's rebuilt-history merge lives here for the same
+// reason.
+
+import { withRunPrompt } from './promptLine';
+import { LineAttachment, TimelineLine, timelineFromLogs } from './runTimeline';
 
 /** Where a run.logs result's events came from, plus whether the full history can be asked for. */
 export interface HistorySourceInfo {
@@ -83,4 +87,21 @@ export function historyNoteView(info: HistorySourceInfo, loading: boolean): Hist
   const note = describeHistorySource(info);
   if (note === null) return null;
   return { message: note.message, tone: note.tone, showButton: note.canLoad && !loading, showLoading: note.canLoad && loading };
+}
+
+/**
+ * The transcript replacement for a successful detail:'full' run.logs
+ * call: the rebuilt events as lines, with the initial load's own run-
+ * prompt treatment (a run.start run's logs carry no user message), and
+ * any lines appended since the load (an optimistic prompt) kept after.
+ */
+export function applyFullHistoryResult(
+  prev: readonly TimelineLine[],
+  result: { runId?: string; events?: unknown[] },
+  prompt: string,
+  attachments?: LineAttachment[],
+): TimelineLine[] {
+  const rebuilt = timelineFromLogs({ runId: result.runId, events: (result.events ?? []) as never[] });
+  if (prev.some((l) => l.role === 'user' && l.text === prompt)) return [...rebuilt, ...prev];
+  return [...withRunPrompt(rebuilt, prompt, attachments), ...prev];
 }

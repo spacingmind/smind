@@ -48,6 +48,7 @@ import { attachMenuItems } from '../attachmentTray';
 import { createImageDeps, pickFiles, pickPhotos } from '../attachmentDeps';
 import { sendWithAttachments } from '../attachSend';
 import { lineAttachmentsFromRun } from '../lineAttachments';
+import { applyFullHistoryResult, historySourceInfo, HistorySourceInfo, RunLogsResult } from '../historySource';
 import { createThumbLoader } from '../thumbLoader';
 import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, listProviders, listRunsForTask, ProviderInfo, revealPermissionHeredoc, revealToolHeredoc, RunSummary } from '../api';
 import { firstSendProvider } from '../firstSend';
@@ -79,6 +80,7 @@ import { takePendingInsert } from '../plugins/composerInbox';
 import { usePluginCommands } from '../plugins/usePluginCommands';
 import { Composer } from './task/Composer';
 import { FooterBanner } from './task/FooterBanner';
+import { HistorySourceNote } from './task/HistorySourceNote';
 import { LoadingState } from './task/LoadingState';
 import { MetaLine } from './task/MetaLine';
 import { PermissionCard } from './task/PermissionCard';
@@ -145,6 +147,9 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const [expandedToolCalls, setExpandedToolCalls] = useState<ReadonlySet<string>>(new Set());
   const [chatId, setChatId] = useState<number | null>(null);
   const [liveRunId, setLiveRunId] = useState<string | null>(null);
+  // ADR-0053: where the finished run's shown history came from (a skeleton's reason, or rebuilt), reset with the other per-run state.
+  const [history, setHistory] = useState<HistorySourceInfo | undefined>(undefined);
+  const [loadingFull, setLoadingFull] = useState(false);
   const { epoch, state: connState } = useConnectionState(conn); // reload what a drop interrupted (the run attach) once reconnected
   const board = useRef(new PermissionBoard()).current;
   const liveSeq = useRef(0);
@@ -243,6 +248,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       if ((next?.ID ?? null) !== lastRunId.current) {
         lastRunId.current = next?.ID ?? null;
         setContinued(false);
+        setHistory(undefined);
       }
       // Re-derive the live flag from the daemon's own list: a run.status the daemon dropped (event.dropped) must not leave
       // "live" stale, nor a live run unattached.
@@ -282,6 +288,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     setContinued(false);
     setLines([]);
     setPermissions([]);
+    setHistory(undefined);
     attachedRuns.current.clear();
     promptShown.current.clear();
     followerRef.current = null;
@@ -351,8 +358,9 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           attachRun(latest.ID, () => cancelled, lineAttachmentsFromRun(latest));
         } else {
           // A finished run: one run.logs fetch, the full transcript.
-          const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
+          const logs = (await conn.call('run.logs', { runId: latest.ID })) as RunLogsResult;
           if (cancelled) return;
+          setHistory(historySourceInfo(logs));
           board.applyLogEvents(latest.ID, logs.events ?? []);
           // Merge, do not overwrite: a prompt sent or a run adopted while the logs were loading has already appended lines.
           const logLines = timelineFromLogs({ runId: latest.ID, events: (logs.events ?? []) as never[] });
@@ -539,6 +547,26 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     }
   }, [appendLines, board, chatId, conn, continued, nextSeq, queue, removeLines, state, taskId, trackTail]);
 
+  // ADR-0053: ask the daemon to rebuild the run's history from the provider's own session and swap it in.
+  // The same setters the initial load uses, so permission rows re-apply and lines appended since (an
+  // optimistic prompt) survive; a thrown call never errors the screen, the note says what happened.
+  const loadFullHistory = useCallback(async () => {
+    if (state.kind !== 'ready' || state.run === null || loadingFull) return;
+    const latest = state.run;
+    setLoadingFull(true);
+    try {
+      const result = (await conn.call('run.logs', { runId: latest.ID, detail: 'full' })) as RunLogsResult;
+      if (!mounted.current || lastRunId.current !== latest.ID) return;
+      board.applyLogEvents(latest.ID, result.events ?? []);
+      setLines((prev) => applyFullHistoryResult(prev, result, latest.Prompt, lineAttachmentsFromRun(latest)));
+      setHistory(historySourceInfo(result));
+    } catch {
+      if (mounted.current) setHistory({ source: 'skeleton', reason: 'rebuild_failed', canLoadFull: true });
+    } finally {
+      if (mounted.current) setLoadingFull(false);
+    }
+  }, [board, conn, loadingFull, state]);
+
   const handlePermissionTap = useCallback(
     (requestId: string, optionId: string) => {
       hapticFor('permission');
@@ -681,6 +709,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
               data={items}
               keyExtractor={keyExtractor}
               renderItem={renderItem}
+              ListHeaderComponent={history ? <HistorySourceNote info={history} loading={loadingFull} onLoad={loadFullHistory} /> : undefined}
               ListEmptyComponent={state.run === null ? <ZeroRunEmptyState providers={providers} /> : emptyTranscript}
               contentInsetAdjustmentBehavior="automatic"
               onScroll={handleScroll}
