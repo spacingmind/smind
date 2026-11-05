@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spacingmind/smind/internal/history/native"
 	"github.com/spacingmind/smind/internal/providers"
 )
 
@@ -15,46 +16,15 @@ import (
 // session this run was a turn of. It names a place and a time window; it holds
 // no session content. The daemon writes it when the run ends, from what the
 // runner launched the CLI with, never from user input.
-type nativeRef struct {
-	Provider  string `json:"provider"`
-	Harness   string `json:"harness"`
-	SessionID string `json:"sessionId"`
-	// ConfigDir / CodexHome are the CLI's config roots as launched (a private
-	// directory for a compatible-endpoint instance).
-	ConfigDir string `json:"configDir,omitempty"`
-	CodexHome string `json:"codexHome,omitempty"`
-	// TranscriptPath is the session file when it exists at capture time
-	// (claude transcript, codex rollout); a reader re-resolves it under the
-	// root and never trusts a stored path outside it.
-	TranscriptPath  string     `json:"transcriptPath,omitempty"`
-	Cwd             string     `json:"cwd,omitempty"`
-	ProviderVersion string     `json:"providerVersion,omitempty"`
-	TurnWindow      turnWindow `json:"turnWindow"`
-	PromptSha256    string     `json:"promptSha256"`
-	CapturedAt      time.Time  `json:"capturedAt"`
-}
+type nativeRef = native.Ref
 
-type turnWindow struct {
-	StartedAt  time.Time `json:"startedAt"`
-	FinishedAt time.Time `json:"finishedAt"`
-}
+type turnWindow = native.TurnWindow
 
 // claudeProjectDir is the directory name Claude Code gives a working directory
 // under <config dir>/projects: every character that is not an ASCII letter or
 // digit becomes "-" (so "/.smind/" is "--smind-"). Verified against the
 // transcripts on a real machine; see TestClaudeProjectDirMatchesRealLayout.
-func claudeProjectDir(cwd string) string {
-	var b strings.Builder
-	for _, c := range cwd {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-			b.WriteRune(c)
-		default:
-			b.WriteByte('-')
-		}
-	}
-	return b.String()
-}
+func claudeProjectDir(cwd string) string { return native.ClaudeProjectDir(cwd) }
 
 // claudeTranscript is <configDir>/projects/<cwd dir>/<sessionID>.jsonl.
 func claudeTranscript(configDir, cwd, sessionID string) string {

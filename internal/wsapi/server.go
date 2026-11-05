@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/ghctx"
 	"github.com/spacingmind/smind/internal/gitstate"
+	"github.com/spacingmind/smind/internal/history/native"
 	"github.com/spacingmind/smind/internal/inbox"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/permpolicy"
@@ -434,6 +436,19 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		SmindHome: config.Dir(),
 	})
 	reg.SetPolicyEngine(policyEngine)
+	// ADR-0053: rebuild a finished run's history from the provider's own session
+	// (the read contract that exposes it comes later). The reader may only open
+	// files under the config roots the daemon launches providers with, and scrubs
+	// the provider's secret values from what it returns.
+	reg.SetRebuilder(native.New(native.Config{
+		Roots: runner.SessionRoots,
+		Scrub: func(provider, s string) string {
+			for _, v := range runner.ProviderSecretValues(provider) {
+				s = strings.ReplaceAll(s, v, "[redacted]")
+			}
+			return s
+		},
+	}))
 	for method, h := range policyHandlers(policyEngine, db) {
 		hs[method] = h
 	}
