@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,4 +166,170 @@ func TestLearningCollect_CoalescedRunWatermarkAndGaps(t *testing.T) {
 	if err != nil || len(remaining) != 0 {
 		t.Fatalf("past last id: runs = %+v, error = %v", remaining, err)
 	}
+}
+
+func TestLearningCollect_SkeletonRunWatermarkAndGaps(t *testing.T) {
+	t.Parallel()
+	st, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	ws, err := st.CreateWorkspace(store.Workspace{Path: "/repo", Title: "w", RoutingPolicy: "hard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := st.CreateTask(store.Task{WorkspaceID: ws.ID, Title: "t", Status: "created"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := st.CreateChat(task.ID, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bigResult := strings.Repeat("--- FAIL: TestSomething (0.00s) file_test.go:12: boom\n", 60)
+	stream := []map[string]any{
+		{"type": int(taskrunner.EventTypeThinking), "text": "a"},
+		{"type": int(taskrunner.EventTypeThinking), "text": "b"},
+		{"type": int(taskrunner.EventTypeThinking), "text": "c"},
+		{"type": int(taskrunner.EventTypeText), "text": "Hello "},
+		{"type": int(taskrunner.EventTypeText), "text": "wor"},
+		{"type": int(taskrunner.EventTypeText), "text": "ld"},
+		{"type": int(taskrunner.EventTypeToolCall), "toolCallId": "big", "toolName": "Bash", "toolInput": map[string]any{"command": "go test " + strings.Repeat("-race ", 250)}, "toolResult": bigResult},
+		{"type": int(taskrunner.EventTypeText), "text": "final "},
+		{"type": int(taskrunner.EventTypeText), "text": "answer "},
+		{"type": int(taskrunner.EventTypeText), "text": "here"},
+		{"type": int(taskrunner.EventTypeDone), "stopReason": "end_turn"},
+	}
+	start := time.Now().UTC()
+	end := start.Add(time.Second)
+	if _, err := st.CreateRun(store.Run{ID: "skel", TaskID: task.ID, ChatID: chat.ID, Provider: "claude-native", Status: "done", Purpose: "user", StartedAt: start, FinishedAt: &end}); err != nil {
+		t.Fatal(err)
+	}
+	var original []store.RunEvent
+	for seq, row := range stream {
+		data, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event, err := st.AppendRunEvent("skel", int64(seq), string(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		original = append(original, event)
+	}
+	// What the collector consumed before conversion: every possible boundary.
+	before := make([][]int64, len(original)+1)
+	for boundary := range before {
+		before[boundary] = collectIDsAfter(t, st, chat.ID, watermarkAt(original, boundary))
+	}
+
+	if err := runs.Skeletonize(st, "skel"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := st.ListRunEventsRaw("skel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := false
+	surviving := make(map[int64]bool)
+	for _, e := range raw {
+		moved = moved || strings.Contains(e.EventData, `"v":2`)
+		surviving[e.ID] = true
+	}
+	if sk, err := st.GetRunSkeleton("skel"); err != nil || sk.SkeletonAt == nil || !moved {
+		t.Fatalf("run not converted: err=%v skeleton=%+v moved=%v", err, sk, moved)
+	}
+	if len(raw) >= len(original) {
+		t.Fatalf("no rows merged away: %d raw rows of %d", len(raw), len(original))
+	}
+
+	for boundary := 0; boundary <= len(original); boundary++ {
+		watermark := watermarkAt(original, boundary)
+		var want []int64
+		for _, e := range original {
+			if e.ID > watermark && surviving[e.ID] {
+				want = append(want, e.ID)
+			}
+		}
+		got := collectIDsAfter(t, st, chat.ID, watermark)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("after id %d: ids = %v, want %v", watermark, got, want)
+		}
+		// Rows seen before conversion and rows seen after it never overlap and
+		// leave no hole: the surviving rows past the watermark were all in the
+		// pre-conversion tail.
+		inBefore := make(map[int64]bool)
+		for _, id := range before[boundary] {
+			inBefore[id] = true
+		}
+		for _, id := range got {
+			if !inBefore[id] {
+				t.Fatalf("after id %d: row %d appeared only after conversion", watermark, id)
+			}
+		}
+	}
+
+	windows, err := st.ListChatRunsWithEventsAfter(chat.ID, 0)
+	if err != nil || len(windows) != 1 {
+		t.Fatalf("full window = %+v, error = %v", windows, err)
+	}
+	var events []taskrunner.Event
+	for _, row := range windows[0].Events {
+		ev, err := runs.DecodeStoredEvent(row.EventData)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, ev)
+	}
+	var tool *taskrunner.Event
+	for i := range events {
+		if events[i].Type == taskrunner.EventTypeToolCall {
+			tool = &events[i]
+		}
+	}
+	if tool == nil || string(tool.ToolResult) != mustJSON(t, bigResult) {
+		t.Fatalf("tool result not rehydrated whole: %+v", tool)
+	}
+	if got := taskrunner.FinalText(events); got != "final answer here" {
+		t.Fatalf("final text = %q", got)
+	}
+}
+
+func watermarkAt(rows []store.RunEvent, boundary int) int64 {
+	if boundary == 0 {
+		return 0
+	}
+	return rows[boundary-1].ID
+}
+
+func collectIDsAfter(t *testing.T, st *store.Store, chatID int64, watermark int64) []int64 {
+	t.Helper()
+	windows, err := st.ListChatRunsWithEventsAfter(chatID, watermark)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, w := range windows {
+		for _, row := range w.Events {
+			if row.ID <= watermark {
+				t.Fatalf("row %d not after watermark %d", row.ID, watermark)
+			}
+			ids = append(ids, row.ID)
+		}
+	}
+	return ids
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
