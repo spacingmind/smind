@@ -65,6 +65,12 @@ type heredocSource interface {
 	ToolCallHeredoc(runID, toolCallID string, index int) (runs.HeredocReveal, error)
 }
 
+// heredocRebuilder is the optional second source of a finished run's heredoc body
+// (*runs.Registry implements it; a test double need not).
+type heredocRebuilder interface {
+	RebuildHeredoc(ctx context.Context, runID, callID string, index int, who runs.Requester) (runs.HeredocReveal, error)
+}
+
 func heredocRevealHandlers(reg heredocSource, db *store.Store) map[string]handlerFunc {
 	hs := map[string]handlerFunc{}
 
@@ -112,7 +118,7 @@ func heredocRevealHandlers(reg heredocSource, db *store.Store) map[string]handle
 		return revealResult(p.Index, rev.Text), nil
 	}
 
-	hs["run.revealToolHeredoc"] = func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+	hs["run.revealToolHeredoc"] = func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		const m = "run.revealToolHeredoc"
 		if err := refuseAgent(m, rc); err != nil {
 			return nil, err
@@ -129,6 +135,13 @@ func heredocRevealHandlers(reg heredocSource, db *store.Store) map[string]handle
 			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": runId and toolCallId are required"}
 		}
 		rev, err := reg.ToolCallHeredoc(p.RunID, p.ToolCallID, p.Index)
+		if errors.Is(err, runs.ErrHeredocUnavailable) {
+			// The stored input is only head and tail (or gone): a human may have it read
+			// back from the provider's own session, kept only if it matches the stored hash.
+			if rb, ok := reg.(heredocRebuilder); ok {
+				rev, err = rb.RebuildHeredoc(ctx, p.RunID, p.ToolCallID, p.Index, runs.RequesterHuman)
+			}
+		}
 		if errors.Is(err, runs.ErrHistoryPruned) {
 			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": history pruned: the run's detailed history was deleted by retention"}
 		}

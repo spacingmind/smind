@@ -22,6 +22,7 @@ export const ICONS = {
   file: { ios: 'doc', android: 'description', glyph: '▤' },
   image: { ios: 'photo', android: 'image', glyph: '▣' },
   devices: { ios: 'laptopcomputer.and.iphone', android: 'devices', glyph: '▭' },
+  history: { ios: 'clock.arrow.circlepath', android: 'history', glyph: '⟲' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

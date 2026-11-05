@@ -194,10 +194,17 @@ export class DemoSession {
       .filter((s) => (filter.chatId === undefined || s.ChatID === filter.chatId) && (filter.taskId === undefined || s.TaskID === filter.taskId));
   }
 
-  logsOf(runId: string): RunLogsResult | null {
+  logsOf(runId: string, detail?: string): RunLogsResult | null {
     const live = this.runs.get(runId);
     if (live) return { runId, status: live.status, stopReason: live.stopReason || undefined, events: [...live.events] };
-    return this.scenario.runLogs[runId] ?? null;
+    const logs = this.scenario.runLogs[runId] ?? null;
+    if (!logs) return null;
+    // ADR-0053: detail "full" rebuilds the run's history from the provider's own session --
+    // the demo's rebuild answers with the same events, provenance now "rebuilt".
+    if (detail === "full" && logs.historySource === "skeleton") {
+      return { ...logs, historySource: "rebuilt", skeletonReason: undefined, canLoadFull: undefined };
+    }
+    return logs;
   }
 
   /** Answers the permission the run is paused on. Returns false for an unknown run/request or an option it never offered. */

@@ -617,6 +617,12 @@ export interface RunAttachResult {
   stopReason: string;
   /** "needs-continue" when the run ended done at a cap (ADR-0027 D13). */
   disposition?: string;
+  /** Where the history this result backfilled came from (ADR-0053); omitted by an older daemon. */
+  historySource?: RunHistorySource;
+  /** Why historySource is "skeleton" (describeHistorySource's table keys it). */
+  skeletonReason?: string;
+  /** True when run.logs with detail "full" can rebuild the run's history. */
+  canLoadFull?: boolean;
 }
 
 // Params of every "chunk" event task.prompt/run.attach emit
@@ -873,6 +879,9 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   usage?: RunUsage;
 }
 
+/** Where a run's history came from: the full persisted log, a trimmed summary, or a rebuild from the provider's own session. */
+export type RunHistorySource = "full" | "skeleton" | "rebuilt";
+
 // Terminal result of run.logs (internal/wsapi/handlers.go's runLogsResult).
 export interface RunLogsResult {
   runId: string;
@@ -903,6 +912,12 @@ export interface RunLogsResult {
   /** A rate_limited run whose profile names a fallback: the profile to start the work again on (in a new chat). */
   fallbackProfileId?: number;
   events: RunLogEvent[];
+  /** Where `events` came from (ADR-0053); omitted by an older daemon. */
+  historySource?: RunHistorySource;
+  /** Why historySource is "skeleton" (describeHistorySource's table keys it). */
+  skeletonReason?: string;
+  /** True when calling again with detail "full" can rebuild the run's history. */
+  canLoadFull?: boolean;
 }
 
 // internal/terminal.Status's values (internal/terminal/terminal.go), carried

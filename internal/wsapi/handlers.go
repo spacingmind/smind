@@ -15,6 +15,7 @@ import (
 	"github.com/spacingmind/smind/internal/attach"
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gate"
+	"github.com/spacingmind/smind/internal/history/native"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/plugins"
 	"github.com/spacingmind/smind/internal/profiles"
@@ -1291,6 +1292,7 @@ type runQueuedResult struct {
 // taskPromptResult is the terminal result of a successful task.prompt (or
 // run.attach/run.start reaching StatusDone).
 type taskPromptResult struct {
+	historyFields
 	RunID       string `json:"runId"`
 	StopReason  string `json:"stopReason"`
 	Disposition string `json:"disposition,omitempty"`
@@ -1723,7 +1725,13 @@ func handleRunAttach(reg *runs.Registry) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.attach: invalid params: %w", err)
 		}
-		return attachAndStream(ctx, rc, reg, p.RunID, false)
+		res, err := attachAndStream(ctx, rc, reg, p.RunID, false)
+		if tpr, ok := res.(taskPromptResult); ok && err == nil {
+			// A finished run's skeleton label rides on the terminal result (omitted otherwise).
+			tpr.historyFields = historyLabel(reg, p.RunID, "", isHuman(rc))
+			return tpr, nil
+		}
+		return res, err
 	}
 }
 
@@ -1936,6 +1944,7 @@ func toRunLogEvent(el *taskrunner.ToolCallElider, e taskrunner.Event) runLogEven
 
 // runLogsResult is the terminal result of run.logs.
 type runLogsResult struct {
+	historyFields
 	RunID      string `json:"runId"`
 	Status     string `json:"status"`
 	StopReason string `json:"stopReason,omitempty"`
@@ -2006,13 +2015,17 @@ func runLogEventsPrimed(prime, history []taskrunner.Event, tail int) []runLogEve
 // streams and never blocks waiting for the run to progress, unlike
 // run.attach.
 func handleRunLogs(reg *runs.Registry) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			RunID string `json:"runId"`
-			Tail  int    `json:"tail"`
+			RunID  string `json:"runId"`
+			Tail   int    `json:"tail"`
+			Detail string `json:"detail"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.logs: invalid params: %w", err)
+		}
+		if !validDetail(p.Detail) {
+			return nil, detailError("run.logs", p.Detail)
 		}
 
 		view, err := reg.Tail(p.RunID, p.Tail)
@@ -2020,7 +2033,20 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("run.logs: %w", err)
 		}
 		status := view.Status
+		human := isHuman(rc)
+		label := historyLabel(reg, p.RunID, p.Detail, human)
 		events := runLogEventsPrimed(view.Prime, view.Events, p.Tail)
+		if p.Detail == detailFull && label.HistorySource == "skeleton" {
+			// A rebuild is only ever done for a human; an agent asking for it is told why not.
+			if !human {
+				label.SkeletonReason = string(native.ReasonHumanOnly)
+			} else if merged, refs, reason := rebuiltEvents(ctx, reg, p.RunID); reason == native.ReasonNone {
+				events = logEventsClientForm(merged, refs, p.Tail)
+				label.HistorySource, label.SkeletonReason = "rebuilt", ""
+			} else {
+				label.SkeletonReason = string(reason)
+			}
+		}
 		var fallbackID int64
 		if failure.IsPlanLimit(status.FailureKind) {
 			fallbackID = reg.FallbackProfileFor(status.ProfileID)
@@ -2044,6 +2070,7 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			Dirty:             status.Dirty,
 			Attachments:       status.Attachments,
 			Events:            events,
+			historyFields:     label,
 		}
 		if status.HistoryPrunedAt != nil {
 			res.HistoryPruned, res.HistoryPrunedAt = true, status.HistoryPrunedAt.UTC().Format(time.RFC3339)

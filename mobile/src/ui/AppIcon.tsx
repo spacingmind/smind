@@ -31,6 +31,7 @@ const NATIVE: Record<IconName, ReturnType<typeof Icon.select>> = {
   file: Icon.select({ ios: 'doc', android: import('@expo/material-symbols/description.xml') }),
   image: Icon.select({ ios: 'photo', android: import('@expo/material-symbols/image.xml') }),
   devices: Icon.select({ ios: 'laptopcomputer.and.iphone', android: import('@expo/material-symbols/devices.xml') }),
+  history: Icon.select({ ios: 'clock.arrow.circlepath', android: import('@expo/material-symbols/history.xml') }),
 };
 
 export function AppIcon({ name, size = 20, color }: { name: IconName; size?: number; color?: string }) {

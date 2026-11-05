@@ -58,6 +58,7 @@ describe("icon registry", () => {
         "groupByStatus": "ListChecks",
         "groupByWorkspace": "FolderGit2",
         "help": "CircleQuestionMark",
+        "history": "RotateCcwClock",
         "host": "Server",
         "image": "Image",
         "inbox": "Inbox",

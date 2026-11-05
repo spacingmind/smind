@@ -20,6 +20,21 @@ import (
 // the command prints it. Use one elider per ordered pass over a run's events.
 type ToolCallElider struct {
 	calls map[string]*elidedCall
+	// clientForm marks an elider for events that are ALREADY in client form
+	// (a history rebuilt from the provider's session, ADR-0053): Elide returns
+	// them unchanged, because eliding twice is not idempotent.
+	clientForm bool
+	// refs are the heredoc references of the calls' inputs, by tool call id, as
+	// the live elider reported them when it elided the input.
+	refs map[string][]HeredocRef
+}
+
+// NewClientFormElider returns an elider that passes through tool calls already
+// elided (a rebuilt history's), so one conversion path serves both. refs are
+// what eliding each call's input reported (by tool call id); they are returned
+// with the event that carries the input, as the live elider does.
+func NewClientFormElider(refs map[string][]HeredocRef) *ToolCallElider {
+	return &ToolCallElider{calls: map[string]*elidedCall{}, clientForm: true, refs: refs}
 }
 
 type elidedCall struct {
@@ -35,6 +50,12 @@ func NewToolCallElider() *ToolCallElider {
 // Elide returns what a client may see of one tool-call event. Calls without
 // heredoc bodies come back byte for byte.
 func (el *ToolCallElider) Elide(toolCallID string, input json.RawMessage, title string, result json.RawMessage) (json.RawMessage, string, json.RawMessage, []HeredocRef) {
+	if el.clientForm {
+		if len(input) > 0 {
+			return input, title, result, el.refs[toolCallID]
+		}
+		return input, title, result, nil
+	}
 	outInput, outTitle, refs := ElideToolCall(input, title)
 	if toolCallID != "" {
 		if cmds, bodies := commandBodies(input); len(bodies) > 0 {

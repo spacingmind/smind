@@ -97,6 +97,14 @@ export function buildTour(now: number): DemoScenario {
     Model: "claude-sonnet-5-5",
   });
   const logs = (id: string, events: RunLogEvent[]): RunLogsResult => ({ runId: id, status: "done", stopReason: "end_turn", events });
+  // ADR-0053: one finished run's persisted history is a trimmed summary the daemon can rebuild on demand
+  // (run.logs with detail "full") -- the landing tour's history-source note and its Load full history button.
+  const summarized = (id: string, events: RunLogEvent[]): RunLogsResult => ({
+    ...logs(id, events),
+    historySource: "skeleton",
+    skeletonReason: "rebuild_not_requested",
+    canLoadFull: true,
+  });
 
   const runs: RunSummary[] = [
     finished("demo-run-retry", TASK.retry, PROMPT.retry, 2 * MIN + 9_000, 9),
@@ -110,7 +118,7 @@ export function buildTour(now: number): DemoScenario {
   ];
 
   const runLogs: Record<string, RunLogsResult> = {
-    "demo-run-retry": logs("demo-run-retry", RETRY_EVENTS),
+    "demo-run-retry": summarized("demo-run-retry", RETRY_EVENTS),
     "demo-run-test": logs("demo-run-test", PARSE_DATE_EVENTS),
     "demo-run-review": logs("demo-run-review", REVIEW_EVENTS),
     "demo-run-analysis": logs("demo-run-analysis", ANALYSIS_EVENTS),

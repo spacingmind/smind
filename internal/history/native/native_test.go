@@ -567,6 +567,12 @@ func TestElisionAndScrub(t *testing.T) {
 	if !ok || !strings.Contains(body, "secret-token-123") {
 		t.Fatalf("HeredocBody = %q, %v", body, ok)
 	}
+	if refs := res.Refs["toolu_B1"]; len(refs) != 1 || refs[0].Index != 0 || refs[0].Bytes == 0 {
+		t.Fatalf("heredoc refs of the elided call = %v", refs)
+	}
+	if len(res.Refs["toolu_B3"]) != 0 {
+		t.Fatal("a call without a heredoc has refs")
+	}
 	if _, ok := res.HeredocBody("toolu_B1", 1); ok {
 		t.Fatal("a body index past the last was returned")
 	}

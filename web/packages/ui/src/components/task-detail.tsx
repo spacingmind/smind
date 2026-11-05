@@ -116,7 +116,7 @@ export function TaskDetailPane({
   // pills, subtree rollups. Never blocks the pane on load -- it renders
   // nothing until the lineage arrives.
   const lineage = useTaskLineage(client, task, events);
-  const { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort } = useRunTimeline(
+  const { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort, loadFullHistory } = useRunTimeline(
     client,
     task.ID,
     chat.ID,
@@ -511,6 +511,7 @@ export function TaskDetailPane({
                     isLatest={run.id === runs[runs.length - 1]?.id}
                     disconnected={connectionStatus !== "connected"}
                     deliverables={deliverableCtx}
+                    onLoadFullHistory={(r) => void loadFullHistory(r.id)}
                   />
                 ))}
               </ul>
