@@ -3,8 +3,11 @@ package runs
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -455,5 +458,38 @@ func TestEventBytesTracksHeap(t *testing.T) {
 	est := historyBytes(hist)
 	if est < 4<<20 || est > 3*(4<<20) {
 		t.Fatalf("estimate %d for a ~4 MB history is outside [1x, 3x]", est)
+	}
+}
+
+// TestGenerateSyntheticDB writes the dogfood database used for the memory
+// measurements (docs/plans/active/daemon-memory.md): SMIND_GEN_SYNTH_DB=<dir>
+// SMIND_GEN_RUNS=200 SMIND_GEN_RUN_MB=4 go test ./internal/runs -run GenerateSyntheticDB.
+// Skipped otherwise; it never touches a real home.
+func TestGenerateSyntheticDB(t *testing.T) {
+	dir := os.Getenv("SMIND_GEN_SYNTH_DB")
+	if dir == "" {
+		t.Skip("SMIND_GEN_SYNTH_DB not set")
+	}
+	runsN, _ := strconv.Atoi(os.Getenv("SMIND_GEN_RUNS"))
+	mb, _ := strconv.Atoi(os.Getenv("SMIND_GEN_RUN_MB"))
+	if runsN <= 0 || mb <= 0 {
+		t.Fatal("set SMIND_GEN_RUNS and SMIND_GEN_RUN_MB")
+	}
+	st, err := store.Open(filepath.Join(dir, "smind.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ws, err := st.CreateWorkspace(store.Workspace{Path: "/synthetic/repo", Title: "synthetic", RoutingPolicy: "hard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk, err := st.CreateTask(store.Task{WorkspaceID: ws.ID, Title: "synthetic", Status: "created"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().Add(-48 * time.Hour).UTC()
+	for i := 0; i < runsN; i++ {
+		seedFinished(t, st, tk.ID, fmt.Sprintf("synth-%04d", i), base.Add(time.Duration(i)*time.Minute), genHistory(i, mb<<20))
 	}
 }

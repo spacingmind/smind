@@ -97,14 +97,14 @@ func TestToolCallInputEvents(t *testing.T) {
 	}
 }
 
-// TestRunEventsTailQueryPlan: the lazy-history reads walk the (run_id, seq)
-// unique index: no table scan, no sort.
-func TestRunEventsTailQueryPlan(t *testing.T) {
+// TestRunEventsQueryPlans: the lazy-history reads walk the (run_id, seq) unique
+// index: an index search, no table scan, no sort.
+func TestRunEventsQueryPlans(t *testing.T) {
 	s := newTestStore(t)
 	for _, q := range []string{
-		`SELECT id, run_id, seq, event_data, created_at FROM run_events WHERE run_id = ? ORDER BY seq DESC LIMIT ?`,
-		`SELECT id, run_id, seq, event_data, created_at FROM run_events WHERE run_id = ? ORDER BY seq`,
-		`SELECT id, run_id, seq, event_data, created_at FROM run_events WHERE run_id = ? AND seq < ? AND json_extract(event_data, '$.toolCallId') IN (?) ORDER BY seq`,
+		streamRunEventsSQL,
+		tailRunEventsSQL,
+		fmt.Sprintf(toolCallInputSQL, "?"),
 	} {
 		args := []any{"r"}
 		for i := 1; i < strings.Count(q, "?"); i++ {
@@ -126,8 +126,8 @@ func TestRunEventsTailQueryPlan(t *testing.T) {
 		rows.Close()
 		joined := strings.Join(plan, "; ")
 		t.Logf("plan: %s", joined)
-		if !strings.Contains(joined, "USING INDEX") && !strings.Contains(joined, "USING COVERING INDEX") || strings.Contains(joined, "TEMP B-TREE") || strings.Contains(joined, "SCAN run_events") && !strings.Contains(joined, "USING") {
-			t.Fatalf("query plan for %q = %q: want an index search, no temp b-tree", q, joined)
+		if !strings.Contains(joined, "SEARCH run_events USING INDEX sqlite_autoindex_run_events_1 (run_id=?") || strings.Contains(joined, "TEMP B-TREE") || strings.Contains(joined, "SCAN") {
+			t.Fatalf("query plan = %q: want an index search on (run_id, seq), no scan, no temp b-tree", joined)
 		}
 	}
 }

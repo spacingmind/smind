@@ -5,14 +5,22 @@ import (
 	"strings"
 )
 
+// The lazy-history reads. Each is an index range scan on run_events'
+// (run_id, seq) unique index with no sort; TestRunEventsQueryPlans pins that.
+const (
+	streamRunEventsSQL = `SELECT id, run_id, seq, event_data, created_at FROM run_events WHERE run_id = ? ORDER BY seq`
+	tailRunEventsSQL   = `SELECT id, run_id, seq, event_data, created_at FROM run_events WHERE run_id = ? ORDER BY seq DESC LIMIT ?`
+	toolCallInputSQL   = `SELECT id, run_id, seq, event_data, created_at FROM run_events
+		 WHERE run_id = ? AND seq < ? AND json_extract(event_data, '$.toolCallId') IN (%s)
+		   AND json_extract(event_data, '$.toolInput') IS NOT NULL
+		 ORDER BY seq`
+)
+
 // StreamRunEvents calls fn for each of runID's events in recorded order, one
 // row in flight at a time (ListRunEvents holds them all). A fn error stops the
 // stream and is returned as is.
 func (s *Store) StreamRunEvents(runID string, fn func(RunEvent) error) error {
-	rows, err := s.db.Query(
-		`SELECT id, run_id, seq, event_data, created_at FROM run_events WHERE run_id = ? ORDER BY seq`,
-		runID,
-	)
+	rows, err := s.db.Query(streamRunEventsSQL, runID)
 	if err != nil {
 		return fmt.Errorf("stream run events for %q: %w", runID, err)
 	}
@@ -36,10 +44,7 @@ func (s *Store) TailRunEvents(runID string, n int) ([]RunEvent, error) {
 	if n <= 0 {
 		return nil, fmt.Errorf("tail run events for %q: n must be positive", runID)
 	}
-	rows, err := s.db.Query(
-		`SELECT id, run_id, seq, event_data, created_at FROM run_events WHERE run_id = ? ORDER BY seq DESC LIMIT ?`,
-		runID, n,
-	)
+	rows, err := s.db.Query(tailRunEventsSQL, runID, n)
 	if err != nil {
 		return nil, fmt.Errorf("tail run events for %q: %w", runID, err)
 	}
@@ -75,13 +80,7 @@ func (s *Store) ToolCallInputEvents(runID string, ids []string, beforeSeq int64)
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	rows, err := s.db.Query(
-		`SELECT id, run_id, seq, event_data, created_at FROM run_events
-		 WHERE run_id = ? AND seq < ? AND json_extract(event_data, '$.toolCallId') IN (`+marks+`)
-		   AND json_extract(event_data, '$.toolInput') IS NOT NULL
-		 ORDER BY seq`,
-		args...,
-	)
+	rows, err := s.db.Query(fmt.Sprintf(toolCallInputSQL, marks), args...)
 	if err != nil {
 		return nil, fmt.Errorf("tool call input events for %q: %w", runID, err)
 	}

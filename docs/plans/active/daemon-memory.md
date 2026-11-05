@@ -70,7 +70,11 @@ finished run whose history is not resident backfills the full history from the
 store, then closes (same observable contract as attaching to a rehydrated run
 today). Unknown ids and system runs still `ErrNotFound`.
 
-AC5 **Tail from the store, elider-correct.** `run.logs` with `tail=N` on a
+AC5 **Tail from the store, elider-correct.** (Implemented as ONE indexed query
+instead of the block scan described here: `ToolCallInputEvents` selects the
+earlier input-bearing events of the tail's tool call ids in a single
+`(run_id, seq)` range scan; a tail with more than 500 distinct ids falls back
+to a full load.) `run.logs` with `tail=N` on a
 non-resident finished run reads only the last N rows from the store (plus
 context for the elider, below), not the whole history. Output equals the output
 of "convert the full history, then take the last N" (the F1 elider #816): for a
