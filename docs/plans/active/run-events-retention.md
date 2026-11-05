@@ -195,9 +195,80 @@ config, CLI + docs, tests, measurements. Non-stacked from `origin/develop`.
 
 ## Progress
 
-- [x] Spec written.
-- [ ] Spec reviewed by the Steward.
+- [x] Spec written and accepted.
+- [x] Store: columns + migration, two-phase prune primitives, preview, compact,
+  incremental vacuum, new databases created `auto_vacuum=INCREMENTAL`.
+- [x] Runs: `Pruner` (daily job + on demand), summary readers, typed
+  `ErrHistoryPruned`, registry drops resident copies.
+- [x] wsapi: `run.logs` marker fields, `runs.prune`, `db.compact`, steward and
+  fleet readers; learning window/prevalence queries skip pruned runs.
+- [x] CLI: `smind runs prune [--dry-run]`, `smind db compact`; config + env;
+  docs with the upgrade warning.
+- [x] Measured on a synthetic ~990 MB database.
 
 ## Validation
 
-(filled in by the implementation PR)
+Synthetic database (`TestGenerateSyntheticDB` with `SMIND_GEN_OLD_PCT=60`: 200
+runs x ~4.6 MB, 120 of them 60 days old on an archived task, 80 recent on an
+open task), measured with `TestMeasureRetention` (in-process, real file, a live
+writer appending an event every 5 ms) and the real binary, macOS arm64. The real
+`~/.smind/smind.db` and running daemons were not touched.
+
+| | legacy file (auto_vacuum NONE) | new-style file (INCREMENTAL) |
+|---|---|---|
+| file before | 939.9 MiB | 944.2 MiB |
+| `runs prune --dry-run` | 120 runs, 352,200 rows, 486.7 MiB | same |
+| pass duration | 8.3 s | 30.6 s (includes returning 565 MiB to the OS in 200-page steps) |
+| file right after the pass | 940.0 MiB (563.4 MiB reusable inside) | 378.6 MiB (565.1 MiB freed) |
+| `smind db compact` | 1.7 s, 940.0 -> 377.0 MiB, file becomes INCREMENTAL | not needed |
+| live writer, baseline p50 / p99 / max | 36 us / 0.2 ms / 2.1 ms | 242 us / 0.7 ms / 3.4 ms |
+| live writer during the pass p50 / p99 / max | 83 us / 11.6 ms / 17.0 ms | 105 us / 22.3 ms / 22.9 ms |
+| daemon startup to /healthz (990 MB db) | 0.68 s | |
+
+An earlier run with 2,000-page vacuum steps finished in 18 s but one step held
+the write lock for 348 ms; 200 pages keeps the worst wait near 23 ms. End to end
+through the binary: `runs prune --dry-run` counts equal the real pass
+(120 / 352,200 / 486.7 MiB), `task logs` on a pruned run shows the marker and the
+final answer, a second pass prunes 0, `db compact` works.
+
+AC evidence (tests): AC1 `TestConfig_RetentionDays`; AC2
+`TestPruneRunEvents_CutoffBoundary`; AC3 `TestPruneRunEvents_NeverPrunesRunningOrOpenTask`,
+`TestPruneRunEvents_SystemRunsPrunedWhenTaskOpen`, `TestMarkRunPruned_RechecksEligibility`,
+`TestPrune_NeverTouchesOpenTaskOrRunningRuns` (a running run with pending
+permissions, and an open task, untouched; archiving the task makes only the
+finished runs eligible); AC4 `TestHistoryOfPrunedRun_SummaryAndMarker` (run row
+and usage deep-equal before/after except the marker; final text equals the full
+history's trailing text); AC5 `TestPrunedRun_EveryReaderServesTheSummary`
+(History, Subscribe, Tail, heredoc, Last/FinalAgentText on the same registry,
+after a restart and for an unlisted run), `TestRunLogsPrunedMarker`,
+`TestStewardFinalRunText_PrunedEqualsFull`, `TestFleetRunEvents_PrunedRunGetsSummary`,
+`TestLoadRun_PrunedRunHasNoEvents`, `TestCollectEvents_PrunedRunHasNoEvents`,
+`TestCountLoads_PrunedRunIsANoOp`, `TestWait_PrunedRunReturns`,
+`TestLearningReadersSkipPrunedRuns`; AC6 `TestPruneRunEvents_BatchBound`,
+`TestPruneRunEvents_TwoPhaseCrash`, `TestPrune_CrashResume`,
+`TestPruneRunEvents_WriterNotBlocked`, `TestPrune_OnePassAtATime`,
+`TestPruneJobStopsOnCancel`; AC7 `TestPrunePreviewEqualsReal`,
+`TestPrune_DryRunEqualsReal`, `TestRunsPruneCommand`; AC8 `TestNewDBIsIncrementalVacuum`,
+`TestCompactConvertsAndShrinks`, `TestCompactGuards`, `TestRetentionRPCs_RegisteredAndGuarded`
+(db.compact refused while a run runs, RPCs refused to agents/relay/non-loopback);
+AC9 the table above; AC10 public-docs configuration, CLI reference,
+troubleshooting.
+
+Mutations (each killed by an assertion): cutoff `<=`; drop the archived
+predicate; drop the running predicate; system runs need an archived task;
+remove the batch LIMIT; delete rows of an unmarked run; mark without
+re-checking eligibility; resume requires a live task; learning queries include
+pruned runs; History returns nothing for a pruned run; heredoc on a pruned run
+not typed; keep the resident copy after pruning; steward reader ignores the
+marker; fleet reader ignores the marker.
+
+Decisions made while implementing: `final_text` is read with `trailingAgentText`
+semantics, so `FinalAgentText` on a pruned run returns the same text (the two
+rules differ only when the last events are non-text tool calls, and the
+summary then reads as the last text run); the reader contract uses the existing
+`session_note` event so no client change is needed; `smind runs prune` with
+retention 0 reports "retention is off".
+
+Not done: the live-task exemption means a user who never archives tasks keeps
+everything (by decision); no automatic VACUUM (rejected); the web/mobile UI does
+not show a dedicated "pruned" badge (the note renders as a paragraph).

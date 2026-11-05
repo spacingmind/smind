@@ -40,7 +40,15 @@ type RunsConfig struct {
 	// Older history stays in the database and is read on demand, complete;
 	// running runs are never limited. Default 64; Load rejects values < 1.
 	HistoryBudgetMB int `yaml:"historyBudgetMB"`
+	// HistoryRetentionDays is how long finished runs keep their detailed
+	// history (tool calls, output). Older runs keep their summary, cost and
+	// final text; a task that is not archived keeps everything. Default 30;
+	// 0 keeps everything forever; Load rejects negative values.
+	HistoryRetentionDays int `yaml:"historyRetentionDays"`
 }
+
+// DefaultRunHistoryRetentionDays is RunsConfig.HistoryRetentionDays' default.
+const DefaultRunHistoryRetentionDays = 30
 
 // DebugConfig holds the opt-in diagnostics. Both are human edits of
 // config.yaml (or env): no RPC, agent or relay session can change them.
@@ -59,6 +67,8 @@ const (
 	EnvPprof = "SMIND_PPROF"
 	// EnvRunHistoryBudgetMB overrides runs.historyBudgetMB (a positive integer).
 	EnvRunHistoryBudgetMB = "SMIND_RUN_HISTORY_BUDGET_MB"
+	// EnvRunHistoryRetentionDays overrides runs.historyRetentionDays (an integer >= 0).
+	EnvRunHistoryRetentionDays = "SMIND_RUN_HISTORY_RETENTION_DAYS"
 )
 
 // PluginsConfig is the global plugin switch (ADR-0042). It is off by default
@@ -589,7 +599,7 @@ func Default() Config {
 		Validation:  ValidationConfig{MaxBudgetUsd: 5, DefaultBudgetUsd: 1.5},
 		Fleet:       DefaultFleet(),
 		Log:         LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
-		Runs:        RunsConfig{HistoryBudgetMB: DefaultRunHistoryBudgetMB},
+		Runs:        RunsConfig{HistoryBudgetMB: DefaultRunHistoryBudgetMB, HistoryRetentionDays: DefaultRunHistoryRetentionDays},
 	}
 }
 
@@ -664,6 +674,9 @@ func LoadFile(path string) (Config, error) {
 	if n := cfg.Runs.HistoryBudgetMB; n < 1 {
 		return cfg, fmt.Errorf("config %s: runs.historyBudgetMB must be >= 1, got %d", path, n)
 	}
+	if n := cfg.Runs.HistoryRetentionDays; n < 0 {
+		return cfg, fmt.Errorf("config %s: runs.historyRetentionDays must be >= 0 (0 keeps history forever), got %d", path, n)
+	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", path, MaxGLMTurns, *mt)
 	}
@@ -708,6 +721,11 @@ func applyEnv(cfg *Config) {
 	if v := strings.TrimSpace(os.Getenv(EnvRunHistoryBudgetMB)); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.Runs.HistoryBudgetMB = n
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvRunHistoryRetentionDays)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Runs.HistoryRetentionDays = n
 		}
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvLearning)); v != "" {

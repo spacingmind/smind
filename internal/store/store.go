@@ -26,6 +26,7 @@ var schema string
 // Store is a SQLite-backed store for smind's routing data.
 type Store struct {
 	db     *sql.DB
+	path   string // database file path as given to Open
 	closed atomic.Bool
 
 	// overlay supplies plugin-owned rows (overlay.go).
@@ -74,7 +75,7 @@ func Open(path string) (*Store, error) {
 			log.Printf("store: %s: journal_mode is %q, not WAL; continuing without it", path, got)
 		}
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, path: path}, nil
 }
 
 // closeCheckpointWait bounds how long Close waits for readers before giving up
@@ -208,7 +209,10 @@ func dsnFor(path, mode string) string {
 	if strings.Contains(path, "?") {
 		separator = "&"
 	}
-	dsn := path + separator + "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
+	// auto_vacuum only takes effect on an empty file: a new database is created
+	// incremental so retention can return pages to the OS; an existing one is
+	// converted by Compact.
+	dsn := path + separator + "_pragma=auto_vacuum(2)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
 	synchronous := ""
 	if mode == "WAL" {
 		dsn += "&_pragma=journal_mode(WAL)&_pragma=journal_size_limit(" + fmt.Sprint(walJournalSizeLimit) + ")"

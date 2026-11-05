@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/fleet/serve"
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // FleetWorkspaces is the workspace data the fleet read methods need;
@@ -163,6 +165,9 @@ func (s *fleetSource) RunCostUSD(runID string) (*float64, error) {
 }
 
 func (s *fleetSource) RunEvents(runID string, afterSeq int64, limit int) ([]store.RunEvent, error) {
+	if row, err := s.db.GetRun(runID); err == nil && row.HistoryPrunedAt != nil {
+		return s.prunedEvents(row, afterSeq)
+	}
 	return s.db.ListRunEventsAfterSeq(runID, afterSeq, limit)
 }
 
@@ -180,4 +185,28 @@ func (f *fleetHost) readHandler(method string) handlerFunc {
 		}
 		return res, err
 	}
+}
+
+// prunedEvents is a pruned run's summary (a note, its final text, done) as
+// stored-event rows with seq 0..2, so a remote reader gets something sensible
+// instead of an empty page.
+func (s *fleetSource) prunedEvents(row store.Run, afterSeq int64) ([]store.RunEvent, error) {
+	text, _ := s.db.GetRunFinalText(row.ID)
+	evs := []taskrunner.Event{{Type: taskrunner.EventTypeSessionNote, Text: "detailed history pruned on " + row.HistoryPrunedAt.UTC().Format("2006-01-02")}}
+	if text != "" {
+		evs = append(evs, taskrunner.Event{Type: taskrunner.EventTypeText, Text: text})
+	}
+	evs = append(evs, taskrunner.Event{Type: taskrunner.EventTypeDone, StopReason: row.StopReason})
+	var out []store.RunEvent
+	for i, e := range evs {
+		if int64(i) <= afterSeq {
+			continue
+		}
+		data, err := runs.EncodeStoredEvent(e)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, store.RunEvent{RunID: row.ID, Seq: int64(i), EventData: data, CreatedAt: *row.HistoryPrunedAt})
+	}
+	return out, nil
 }

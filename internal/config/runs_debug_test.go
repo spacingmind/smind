@@ -50,3 +50,41 @@ func TestConfig_RunsAndDebug(t *testing.T) {
 		t.Fatalf("a bad env value must leave the file value, got %d", cfg.Runs.HistoryBudgetMB)
 	}
 }
+
+func TestConfig_RetentionDays(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	t.Setenv(EnvRunHistoryRetentionDays, "")
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if cfg, err := Load(); err != nil || cfg.Runs.HistoryRetentionDays != 30 {
+		t.Fatalf("default = %d, %v, want 30", cfg.Runs.HistoryRetentionDays, err)
+	}
+	write("runs:\n  historyRetentionDays: 0\n")
+	if cfg, err := Load(); err != nil || cfg.Runs.HistoryRetentionDays != 0 {
+		t.Fatalf("0 (forever) = %d, %v", cfg.Runs.HistoryRetentionDays, err)
+	}
+	write("runs:\n  historyRetentionDays: -1\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "runs.historyRetentionDays") {
+		t.Fatalf("negative: err = %v", err)
+	}
+	write("runs:\n  historyRetentionDays: 90\n")
+	t.Setenv(EnvRunHistoryRetentionDays, "7")
+	if cfg, _ := Load(); cfg.Runs.HistoryRetentionDays != 7 {
+		t.Fatalf("env override = %d, want 7", cfg.Runs.HistoryRetentionDays)
+	}
+	t.Setenv(EnvRunHistoryRetentionDays, "0")
+	if cfg, _ := Load(); cfg.Runs.HistoryRetentionDays != 0 {
+		t.Fatalf("env 0 = %d, want 0 (forever)", cfg.Runs.HistoryRetentionDays)
+	}
+	for _, bad := range []string{"-3", "junk"} {
+		t.Setenv(EnvRunHistoryRetentionDays, bad)
+		if cfg, _ := Load(); cfg.Runs.HistoryRetentionDays != 90 {
+			t.Fatalf("bad env %q must leave the file value, got %d", bad, cfg.Runs.HistoryRetentionDays)
+		}
+	}
+}

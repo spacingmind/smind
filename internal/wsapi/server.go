@@ -86,6 +86,7 @@ type API struct {
 
 	Handler   http.Handler
 	Runs      *runs.Registry
+	Pruner    *runs.Pruner
 	Terminals *terminal.Registry
 
 	automations *automationHost
@@ -312,6 +313,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	stalled := &stalledSource{}
 	hs["task.tree"] = handleTaskTree(db, reg, stalled)
+	pruner := runs.NewPruner(reg, db, retentionDays)
+	hs["runs.prune"] = handleRunsPrune(pruner)
+	hs["db.compact"] = handleDBCompact(reg, db)
 	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)
 	hs["provider.setEnv"] = handleProviderSetEnv(runner, bus)
 	hs["provider.setSecret"] = handleProviderSetSecret(runner, db, bus, nil)
@@ -461,7 +465,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	pluginReg.bindPanels(panelDeclarations(pluginMgr))
 	reg.SetLaunchHooks(pluginHooks{pluginMgr})
 	reg.AddObserver(pluginHooks{pluginMgr})
-	api := &API{gate: gs, inbox: inboxH, policySweep: policySweep, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}, wm: wm, runner: runner}
+	api := &API{gate: gs, inbox: inboxH, policySweep: policySweep, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Pruner: pruner, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}, wm: wm, runner: runner}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}

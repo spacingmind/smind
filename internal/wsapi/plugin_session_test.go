@@ -339,7 +339,7 @@ var humanOnly = []string{
 	"task.create", "task.archive", "task.prompt", "task.setBudget", "task.stopTree", "task.commit", "task.push", "task.createPr",
 	"workspace.create", "workspace.delete", "workspace.setScripts", "workspace.get", "workspace.readiness",
 	"terminal.create", "terminal.write", "file.write", "file.read", "fs.listDir", "learning.setMode", "learning.curate",
-	"run.logs", "task.diff", "usage.summary", "daemon.info", "debug.memory",
+	"run.logs", "task.diff", "usage.summary", "daemon.info", "debug.memory", "runs.prune", "db.compact",
 }
 
 func TestPluginSession_CannotReachHumanOnlyMethods(t *testing.T) {
