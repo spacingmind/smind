@@ -43,10 +43,10 @@ file:line; everywhere else it says "relay host". The rename and its compatibilit
 
 ## Reference: what a reference workbench does (studied 2026-10-13)
 
-A local reference clone @ `8d9e7d3a`. The reference workbench is the product smind is meant to replace for
+Clone @ `8d9e7d3a`. The reference workbench is the product smind is meant to replace for
 daily use, and it already ships a server/homelab story. Paths below are
-relative to a local reference clone. Every item section further down ends with a **That workbench
-reference** block stating *ported / adapted / deliberately different (why)*.
+relative to the reference clone. Every item section further down ends with a **Reference
+pattern** block stating *ported / adapted / deliberately different (why)*.
 
 | Area | What the reference workbench does | Source |
 |---|---|---|
@@ -139,8 +139,8 @@ reference** block stating *ported / adapted / deliberately different (why)*.
   `https://homelab-relay.example.com:7401`, workspace `homelab`, a pinned
   fingerprint and a 32-byte secret is a **432-byte URL** (throw-away test,
   2026-10-13) and returns `ErrContentTooLong` at level M; level L is supported
-  (`qr.go:72`) but unused. That workbench's offer is ≈ 230 bytes because it carries no
-  secret and no fingerprint (see "the reference workbench pattern" in D6). Our offer also
+  (`qr.go:72`) but unused. The reference offer is ≈ 230 bytes because it carries no
+  secret and no fingerprint (see "the reference pattern" in D6). Our offer also
   repeats the key: `id` is the daemon's base64 public key
   (`internal/relay/bridge/bridge.go:57-59`) and `pk` is the same key again.
 - The offer is the **workspace master secret** plus the daemon public key and the
@@ -170,7 +170,7 @@ reference** block stating *ported / adapted / deliberately different (why)*.
   automatically with backoff capped at 30 s
   (`desktop/daemon-client/src/relay/client.rs:39`, `:485-491`), so two clients
   will likely evict each other repeatedly (unverified; test scenario in the
-  plan). **The reference workbench solves exactly this** (see D9).
+  plan). **The reference solves exactly this** (see D9).
 - Desktop side: Rust supports relay connections and exposes
   `connections_add_relay(label, pairing_url)`
   (`desktop/src-tauri/src/commands.rs:76-120`, registered `lib.rs:105`,
@@ -226,7 +226,7 @@ reference** block stating *ported / adapted / deliberately different (why)*.
   unauthenticated `GET /api/token` (ADR-0013 decision 1).
 - `desktop/ui/offline.html` is the Tauri `frontendDist` (`tauri.conf.json:7`)
   fallback; `desktop-unreachable.tsx` took over its job (ADR-0013 Consequences).
-- A reference desktop workbench's first-run screen is an account login with a "skip" escape
+- The reference first-run screen is an account login with a "skip" escape
 ; it has no connection
   onboarding, so it informs only visual style.
 
@@ -268,12 +268,12 @@ reference** block stating *ported / adapted / deliberately different (why)*.
   `--dry-run` does everything except the swap. `SMIND_UPDATE_BASE_URL` redirects
   downloads to an `httptest` server (test seam, unset in production).
 
-**That workbench pattern — deliberately different.** The reference workbench has no `update` command: it
+**Reference pattern — deliberately different.** The reference has no `update` command: it
 is an npm package, installed and upgraded with `npm install -g @reference/cli`
 (`README.md:94-100`), and its Docker image is replaced by pulling a new tag. smind
 is a single static binary with no package manager in the loop, so a self-updater
 is the equivalent of `npm update`; verification therefore has to be ours (npm's
-registry integrity has no counterpart here). Adopted from the reference workbench's lifecycle
+registry integrity has no counterpart here). Adopted from the reference's lifecycle
 style: the **graceful, in-band stop/restart before and after the swap** rather
 than killing processes (`stop.ts:25`, `restart.ts:57`; ours is
 `POST /api/shutdown`, ADR-0029), and the post-restart **confirmation that a
@@ -348,19 +348,19 @@ set from an env var the unit defines (`SMIND_SUPERVISOR=systemd|launchd|tasksche
 owns the port, and `smind service install` refuses to start while the app's managed
 daemon owns it.
 
-**That workbench pattern — deliberately different, plus two ports.** The reference workbench ships **no OS
+**Reference pattern — deliberately different, plus two ports.** The reference ships **no OS
 service installer**: `daemon start` is a one-shot background launch whose
 *supervisor* process restarts the worker (`supervisor-entrypoint.ts:170` sets `restartOnCrash: true`), and for servers
 it documents running `daemon run` (foreground, "deployment" mode) under your own
 systemd/Docker (`start.ts:36-55`, `local-daemon.ts:59`). smind keeps a first-class
 `service` command because Human asked for boot persistence on a homelab and
 because a Go single binary has no Node supervisor to lean on; the OS service
-manager *is* our supervisor. `smind serve` already equals the reference workbench's `daemon run`.
+manager *is* our supervisor. `smind serve` already equals the reference's `daemon run`.
 **Ported:** (a) the daemon owns a **rotating `daemon.log`** in its home
 (`supervisor.ts:15-16,128-129`, `daemon-instance.ts:51-55`), which removes the
 shell-redirect and per-OS log-location code I had planned (decision 7);
 (b) **status as an observation of the daemon's published endpoint**
-(`status.ts`), which our `status` follows. **Adapted:** That workbench marks ownership
+(`status.ts`), which our `status` follows. **Adapted:** The reference marks ownership
 *inside the daemon's own lock file* (`pid-lock.ts` `desktopManaged`; the app
 stops a daemon only if pid + startedAt match, `daemon-manager.ts:189-194`); we use
 an env-derived `/healthz managedBy` because the app already reads `/healthz`
@@ -391,7 +391,7 @@ decision 26).
   only after a release moves `master`; until then the documented URL is the raw
   GitHub one.
 
-**The reference workbench pattern — deliberately different.** The reference workbench has no install script (npm for
+**Reference pattern — deliberately different.** The reference has no install script (npm for
 the CLI; app installers from GitHub releases and reference.example/download,
 `README.md:88-100`). The curl|sh and `irm|iex` one-liners are the smind equivalent
 of `npm install -g`; there is nothing to port. The "server" quickstart shape *is*
@@ -411,11 +411,11 @@ WS RPC `daemon.info`** (open decision 17), because `/healthz` is unreachable
 through `relay://`. A relay daemon too old to answer shows "version unknown" with
 the installer commands, never a false "up to date".
 
-**That workbench pattern — adapted.** The reference workbench reads the daemon version over the normal
+**Reference pattern — adapted.** The reference reads the daemon version over the normal
 client connection (the WS `server_info` message and `getDaemonStatus` RPC,
 `packages/cli/src/commands/daemon/pair.ts` feature-checks `daemonStatusRpc`),
 which is why its version-skew UX works for relay hosts with no extra probe — and it
-tells the user "Update the reference workbench daemon before pairing from this command" rather
+tells the user "Update the reference daemon before pairing from this command" rather
 than offering a command. Our `daemon.info` is the same idea (version over the
 existing channel); the copyable *command* is ours, because Human asked for it.
 
@@ -426,25 +426,25 @@ existing channel); the copyable *command* is ours, because Human asked for it.
 binaries** (the Dockerfile `COPY`s the per-arch binary via `TARGETARCH`; no Go build
 inside Docker, no QEMU compilation, byte-identical to the checksummed release).
 Tags: `<version>`, `<major>.<minor>`, `latest` — stable releases only. Pull
-requests that touch Docker files build the image **without pushing** (the reference workbench's
+requests that touch Docker files build the image **without pushing** (the reference's
 non-publishing check); `workflow_dispatch` can republish.
 
 - Base `debian:bookworm-slim`. Contents: `smind`, `git`, `openssh-client`,
   `ca-certificates`, `curl` (healthcheck), `gosu`, `tini` (PID 1; zombie reaping),
   Node 22 LTS (GLM's `npx`).
-- **Entrypoint (ported from that workbench):** starts as root only to create/chown the
+- **Entrypoint (ported from the reference):** starts as root only to create/chown the
   mounted `/data` and `/home/smind` if they are root-owned, then drops to the
   non-root `smind` user (uid/gid 1000, matching most host users) with `gosu`; if
   started as non-root it just runs. This fixes the bind-mount permission pain that
   `--user` workarounds only paper over.
 - **Listening and auth (decision 9, accepted; needs P4):** the image sets
   `SMIND_LISTEN=0.0.0.0:4648` and **refuses to start without `SMIND_PASSWORD`**
-  (the reference workbench only warns, `reference-docker-entrypoint:60-65`), serves the web UI on the same
+  (the reference only warns, `reference-docker-entrypoint:60-65`), serves the web UI on the same
   origin, and `-p 4648:4648` works. Until P4 lands the image is relay-only
   (loopback bind, do not publish 4648).
 - State: `SMIND_HOME=/data` (`VOLUME`), repositories under a second mount
   (`/workspaces`); stored paths are container paths. Agent credentials persist under
-  `/home/smind` (`.claude`, `.codex`), as in the reference workbench.
+  `/home/smind` (`.claude`, `.codex`), as in the reference.
 - `HEALTHCHECK curl -fsS http://127.0.0.1:4648/healthz`.
 - Shipped files: `docker/docker-compose.example.yml`,
   `docker/Dockerfile.agents.example`, `docs/homelab.md` Docker section.
@@ -459,7 +459,7 @@ non-publishing check); `workflow_dispatch` can republish.
   a container refuses ("pull a new image tag"). (4) The container is the isolation
   boundary: agents can read/write whatever is mounted.
 
-**That workbench pattern — ported, with three deliberate differences.** Ported:
+**Reference pattern — ported, with three deliberate differences.** Ported:
 multi-arch ghcr.io image, `0.0.0.0` listen + published port + password for
 network-reachable use, bundled web UI on the same origin, agent CLIs **not** baked
 in with a child-image example, volumes split into state/home and workspace, root
@@ -467,9 +467,9 @@ entrypoint that fixes ownership then `gosu`s to a non-root user, `tini`, non-pub
 build on PRs and publish on stable tags
 (`docs/docker.md`, `docker/base/Dockerfile`, `reference-docker-entrypoint`,
 `.github/workflows/docker.yml:37,129`). Different: (1) **built from the release
-binaries**, not from source inside Docker (the reference workbench packs npm workspaces; ours is a
+binaries**, not from source inside Docker (the reference packs npm workspaces; ours is a
 checksummed Go binary); (2) **no start without a password** when the bind is
-non-loopback (the reference workbench warns and continues); (3) no example `REF_PASSWORD=change-me`
+non-loopback (the reference warns and continues); (3) no example `REF_PASSWORD=change-me`
 in the docs — examples read the password from an env file or a generated value.
 
 ### D6. Relay pairing for desktop clients
@@ -507,7 +507,7 @@ relay host + admission secret). It creates nothing in smind's data: every client
   native port as grpc-web − 1, `client.rs:45-68`; compare the fingerprint printed by `smind relay` with the one
   `relay connect` pins).
 
-**That workbench pattern — adapted (offer, confirmation, relay opt-in) and deliberately
+**Reference pattern — adapted (offer, confirmation, relay opt-in) and deliberately
 different (offer contents, hosting).**
 - *Ported:* the confirmation step before saving a host from a pairing link, showing
   the daemon key fingerprint and the relay endpoint
@@ -516,10 +516,10 @@ different (offer contents, hosting).**
   **different key or relay**); paste-a-link as a first-class path
   (`pair-link-modal.tsx`, Maestro `relay-pairing.yaml`); relay as an explicit,
   **opt-in** choice with a plain-language consent ("Your connection is end-to-end
-  encrypted. The reference workbench cannot read your code or messages.", `pair.ts:106-109`;
+  encrypted. The reference cannot read your code or messages.", `pair.ts:106-109`;
   `config.ts:302-307` keeps relay off by default) — our `relay connect` is already
   opt-in, and the docs/CLI text should carry the same consent wording.
-- *Different, offer contents:* the reference workbench's offer is `{v, serverId, daemonPublicKeyB64,
+- *Different, offer contents:* the reference's offer is `{v, serverId, daemonPublicKeyB64,
   relay}` and **contains no secret** (`connection-offer.ts:10-17`): the relay is a
   public service with no admission, the E2EE handshake with the daemon's key is the
   trust anchor, and an optional daemon password is sent *inside* the encrypted
@@ -528,12 +528,12 @@ different (offer contents, hosting).**
   — which is why it is a "password-like" link and why it does not fit a QR.
   Shrinking it (drop the duplicate `id`, base64url the fingerprint) is possible but
   needs a v2 offer decoded by Go, Rust and TS; deferred, level-L fallback instead.
-  That workbench also offers a compact `relay://host:port/<serverId>?key=…[&password=…]` URI
+  The reference also offers a compact `relay://host:port/<serverId>?key=…[&password=…]` URI
   (`daemon-endpoints.ts`) for typing/pasting; we do not need a second format yet.
-- *Hosting:* the reference workbench operates `relay.reference.example` (a Cloudflare Worker + Durable Object that currently forwards to a Fly
+- *Hosting:* the reference operates `relay.reference.example` (a Cloudflare Worker + Durable Object that currently forwards to a Fly
   deployment); smind's hosting for `relay.spacingmind.com` is **pending** (D11).
 - *Not ported yet, recorded:* a host with **several connections and a preferred one**
-  (relay now, direct when reachable; Maestro `relay-then-direct.yaml`; the reference workbench's
+  (relay now, direct when reachable; Maestro `relay-then-direct.yaml`; the reference's
   `HostProfile.connections` + `preferredConnectionId`, `host-connection.ts`) — smind's
   registry has one URL per connection; keep connection ids derived from the daemon
   identity so this can be added without migration (decision 25).
@@ -602,7 +602,7 @@ touching saved connections.
 *whether* the app installs/starts a daemon; the *how* stays in `daemon_manager.rs`'s
 install/update path, called by (a) through `daemon_install`. No new install code.
 
-**That workbench pattern — ported (settings toggle, welcome methods, SSH host, host
+**Reference pattern — ported (settings toggle, welcome methods, SSH host, host
 confirmation); deliberately different (first-run, quit behaviour).**
 - *Ported:* the persisted **`manageBuiltInDaemon`** toggle with a confirm before
   turning it off (`desktop-settings.ts:36-39`, `daemon-management-toggle.ts`; ours is
@@ -614,18 +614,18 @@ confirmation); deliberately different (first-run, quit behaviour).**
   — validates host/port, rejects hosts starting with `-`; we port those validations);
   the relay-link confirmation (D6); the redirect into the app as soon as a host is
   online (the first-run screen disappears itself once (a)/(d)/(b)/(c) succeeds).
-- *Different, first-run:* the reference workbench's desktop **auto-starts the built-in daemon silently**
+- *Different, first-run:* the reference's desktop **auto-starts the built-in daemon silently**
   by default (`_layout.tsx:362-370`) and shows its Welcome screen only to
   web/mobile (or desktop with management off and no hosts); the toggle is the escape
   hatch. Human asked for an explicit first-run choice including "no local daemon" and
   "use the one already running", so we ask once, pre-selecting the sensible answer, and
-  keep the reference workbench's toggle for later. If Human prefers that workbench's behaviour, decision 22's
+  keep the reference's toggle for later. If Human prefers the reference's behaviour, decision 22's
   alternative is "silent start + dismissible first-run banner".
-- *Different, quit:* the reference workbench stops its built-in daemon on quit by default
+- *Different, quit:* the reference stops its built-in daemon on quit by default
   (`keepRunningAfterQuit: false`, `quit-lifecycle.ts:56`); smind's daemon survives the
   app quitting (ADR-0013) so agent work continues. Not changed here; a
   "stop daemon when quitting" option could be added to the same settings file.
-- *Adapted, ownership:* the reference workbench's app knows it "owns" a daemon by pid + startedAt
+- *Adapted, ownership:* the reference's app knows it "owns" a daemon by pid + startedAt
   recorded in the daemon's lock file (`daemon-manager.ts:189-194`); ours stays the
   app-side `ManagedRecord` (`managed.rs:43-51`) plus `managedBy` from `/healthz`.
 
@@ -634,7 +634,7 @@ confirmation); deliberately different (first-run, quit behaviour).**
 **Status: ACCEPTED (2026-10-15, decision 9) — the recommended default below was approved; P4 implements it, and P5's password field, P8, P11 and P13c build on it. One amendment the same day (Human, on the P4 security review): with a password set, `/api/token` is closed even on loopback (see that bullet).**
 
 **Proposal.** Let the daemon listen on a non-loopback address, protected by a password,
-as that workbench does — making a LAN/Tailscale/VPN homelab work with **no relay at all** — while
+as the reference does — making a LAN/Tailscale/VPN homelab work with **no relay at all** — while
 keeping loopback-only as the default and refusing unsafe combinations.
 
 - Config (`config.yaml`, edited via `smind config`, decision 8): `server.listen`
@@ -643,7 +643,7 @@ keeping loopback-only as the default and refusing unsafe combinations.
   `server.hostnames` (extra allowed Host names; IPs and `localhost` always allowed).
   Env overrides for containers: `SMIND_LISTEN`, `SMIND_PASSWORD`, `SMIND_HOSTNAMES`.
 - **The daemon refuses to start with a non-loopback `listen` and no password.**
-  (the reference workbench only warns.) A weak password is rejected at `set-password` (minimum length 12;
+  (the reference only warns.) A weak password is rejected at `set-password` (minimum length 12;
   no default, no `change-me` in docs): anyone authenticated can run a shell through the
   terminal tab and every agent, so the password is an RCE credential.
 - **`GET /api/token`: without a password it is only served to a loopback client talking to a
@@ -671,28 +671,28 @@ keeping loopback-only as the default and refusing unsafe combinations.
   no CORS.
 - **Transport:** plain HTTP/WS on a LAN exposes the password to anyone who can sniff it;
   the docs say "LAN only if you trust it; otherwise Tailscale/WireGuard, an SSH tunnel,
-  or a TLS-terminating reverse proxy" (the reference workbench's own guidance, `docs/docker.md`
+  or a TLS-terminating reverse proxy" (the reference's own guidance, `docs/docker.md`
   "Security"). Built-in TLS is decision 10 (default: not in v1).
 - **Residual risk, stated:** a single shared password, no per-device revocation (a
   restart or `smind session revoke-all` invalidates sessions), no MFA, no audit log,
   and a same-user local process can still read the token file (`SECURITY.md` makes the
-  same statement about that workbench's `local-credential`).
+  same statement about the reference's `local-credential`).
 
 **When to use which:** *direct+password* for LAN/Tailscale/Docker-on-a-NAS (no extra
 server, works with the web UI in any browser); *SSH tunnel* (b2) when the user already
 has SSH and wants zero daemon exposure; *relay* for reaching a daemon behind NAT from
 mobile/cellular networks (D6, D9).
 
-**The reference workbench pattern — ported (model), stricter (enforcement).** Ported from
+**Reference pattern — ported (model), stricter (enforcement).** Ported from
 `SECURITY.md` "Local daemon trust boundary" and `config.ts:470-480`: loopback by default,
 `listen` configurable, a bcrypt-hashed password (`auth.ts:35`, `set-password.ts`) checked
 at admission before any session data (`session-admission-auth.ts`), the Host-header
 allowlist with the same Vite-style semantics (`hostnames.ts`; leading `.` matches a
 domain and subdomains), health endpoint exempt, and the same explicit statement that
-network exposure is the operator's responsibility. Stricter than the reference workbench: refuse to start
+network exposure is the operator's responsibility. Stricter than the reference: refuse to start
 non-loopback without a password; sessions are expiring tokens, not the standing
-credential; `/api/token` is closed to anything but a true loopback caller (that workbench has no
-unauthenticated token endpoint to close). The reference workbench's password-in-WS-`hello` is what we use
+credential; `/api/token` is closed to anything but a true loopback caller (the reference has no
+unauthenticated token endpoint to close). The reference's password-in-WS-`hello` is what we use
 for relay devices (decision 14); for HTTP+WS direct connections we choose login-then-token
 because our WS handshake today authenticates by token (`internal/wsapi`).
 
@@ -954,10 +954,10 @@ space). So the E2EE core stays untouched and identity is an **inner layer**:
   `revoke <id>`, `rename <id> <label>` talk to the **running daemon** over its authenticated WS API (new
   `relay.device.*` methods) so a revoke takes effect immediately; with no daemon running they edit the registry
   file directly. `smind relay host rotate` remains the hard reset (new host secret; every old offer and token dies).
-- This **amends ADR-0007 (g)**, which chose an ephemeral device key and "no persistent device secret". The reference workbench made
+- This **amends ADR-0007 (g)**, which chose an ephemeral device key and "no persistent device secret". The reference made
   the same choice on purpose ("the phone's keypair is ephemeral per connection, so there is no persistent
-  phone-side secret to steal", a local reference clone). We deviate because per-device listing and revocation
-  need an identity; the cost is one stored private key per device. If Human prefers that workbench's stance, decision 35's
+  phone-side secret to steal"). We deviate because per-device listing and revocation
+  need an identity; the cost is one stored private key per device. If Human prefers the reference's stance, decision 35's
   alternative keeps ephemeral keys: `devices ls` shows only *connected* devices (relay-assigned ids), `revoke`
   closes the connection, and the hard revoke is `host rotate`.
 
@@ -976,14 +976,13 @@ already maps to the same `Server`, so mobile devices get the same routes.
 **Test bar (spelled out in the plan): ≥ 3 simultaneous devices — 2 desktop clients and 1 mobile client — plus
 reconnect, daemon restart and revoke, in a Go integration test and in a cross-language interop run.**
 
-**The reference workbench pattern — ported (shape), adapted (frames, identity), different (device key).** Ported:
+**Reference pattern — ported (shape), adapted (frames, identity), different (device key).** Ported:
 control socket + per-connection data socket + the relay telling the daemon about each connection + per-connection
 E2EE + `sync` on control (re)connect + buffering until the daemon's data side exists
-(a local reference clone,
-`packages/server/src/server/relay-transport.ts:49-55,121-130`, test `clt_multi` at
+(`packages/server/src/server/relay-transport.ts:49-55,121-130`, test `clt_multi` at
 `cloudflare-adapter.test.ts:193-229`; control liveness `cloudflare-adapter.ts:219-250`). Adapted: gRPC streams
 instead of WebSockets (ADR-0007 (f) unchanged), SCRAM admission in front (ADR-0011), the new frames above.
-Different: the reference workbench's relay assigns `connectionId`s and keeps no device identity; smind adds a persistent device key
+Different: the reference's relay assigns `connectionId`s and keeps no device identity; smind adds a persistent device key
 for listing/revocation and a pairing window (decision 35).
 
 ### D10. `smind config get|set|unset` and no launch flags
@@ -994,7 +993,7 @@ daemon to apply" or apply live where trivially possible (decision 8). `smind ser
 keeps taking no flags. This gives `service install` and the Docker image one documented
 way to change `server.port`/`server.listen`/`server.hostnames` without per-OS unit edits.
 
-**That workbench pattern — ported.** The reference workbench removed `--port/--listen/--relay/--hostnames` from
+**Reference pattern — ported.** The reference removed `--port/--listen/--relay/--hostnames` from
 `daemon start` and rejects them with "use `daemon config set <path> <value>`, then
 restart" (`local-daemon.ts:82-110`), and provides `daemon config get/set/unset` and
 `daemon reload` (`config.ts:75-110`, `reload.ts`). We port `config get/set/unset`; we do
@@ -1057,13 +1056,13 @@ decision**. Multi-device (D9) does **not** depend on it.
   hosts the site, but depends on a private beta, a container's ephemeral disk needs an answer for the host store, and a
   long-lived stream keeps its object pinned and billed.
 
-**(B) WebSocket protocol v3 on Workers + Durable Objects, like the reference workbench — withdrawn as the preferred path.** Workers and
+**(B) WebSocket protocol v3 on Workers + Durable Objects, like the reference — withdrawn as the preferred path.** Workers and
 Durable Objects cannot terminate native gRPC bidirectional streams today (the post above), so this option replaces gRPC
 with a WebSocket protocol implemented twice (the Go relay and a TypeScript Worker, kept honest by one conformance suite) and
 migrates the Go, Rust and TypeScript clients. Kept only as notes: Durable Object pricing, limits and hibernation behaviour
 are in Cloudflare's docs ([pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/),
-[limits](https://developers.cloudflare.com/durable-objects/platform/limits/)); that workbench runs this design
-(a local reference clone, `wrangler.toml`, `.github/workflows/deploy-relay.yml`) but its
+[limits](https://developers.cloudflare.com/durable-objects/platform/limits/)); the reference runs this design
+(`wrangler.toml`, `.github/workflows/deploy-relay.yml`) but its
 current `wrangler.toml` sets `REF_RELAY_UPSTREAM = "https://reference-relay-next.fly.dev"` and `cutover-proxy.ts` forwards
 every request to a Fly deployment while `deploy-relay.yml` is "manual-only while relay.reference.example bridges traffic to the Fly
 deployment" (the repository does not say why; I did not verify a reason).
@@ -1075,7 +1074,7 @@ deployment" (the repository does not say why; I did not verify a reason).
 | Hard constraints | 443 + ALPN h2, Full TLS, gRPC toggle, 125 s / 30 s timeouts | beta access, Spectrum plan, container disk | no native gRPC; DO 32 MiB message, 1,000 req/s per object |
 | Ops | one small service + Cloudflare settings | all on Cloudflare, beta risk | all on Cloudflare, most code |
 | Cost | VPS ≈ a few $/month (unverified) or Cloud Run | Workers Paid + Containers active CPU (unpriced in the post) | Workers Paid + DO requests/duration |
-| Exit/fallback | n/a | fall back to (D) with no code change | fall back to a Go origin (the reference workbench's route) |
+| Exit/fallback | n/a | fall back to (D) with no code change | fall back to a Go origin (the reference's route) |
 
 **Lead's input to the decision (not a decision):** build D9 first (it contains the keepalive and reconnect behaviour
 every option needs); (D) on a small VPS or Cloud Run is the only option that can be run today and needs no protocol work
@@ -1128,7 +1127,7 @@ stores only `StoredKey`.
   `internal/relay/`, deployment definition in a self-contained directory (`relay-worker/` if option B is ever chosen,
   otherwise `deploy/relay/`), and any future shared protocol definition and conformance scenarios in `relay/protocol/` and
   `relay/conformance/`. Split the deploy directory into its own repository later if it ever needs separate ops or licensing
-  (AGPL-3.0 like the rest, ADR-0003; ADR-0007 (h)). The reference workbench precedent: a local reference clone plus
+  (AGPL-3.0 like the rest, ADR-0003; ADR-0007 (h)). The reference precedent:
   `.github/workflows/deploy-relay.yml` in its monorepo.
 - *Pipeline:* a **separate `deploy-relay.yml`, not tied to release-please**, triggered only by changes under the relay
   deployment paths (`internal/relay/**`, `deploy/relay/**`, or `relay-worker/**`) on `develop` and by manual dispatch;
@@ -1146,9 +1145,9 @@ stores only `StoredKey`.
 - *Privacy:* a page on spacingmind.com stating what the relay sees, the retention, and that there are no accounts — a
   landing-repo follow-up, **required before the hosted default is switched on**.
 
-**That workbench pattern — ported (the hosted-relay concept, `custom_domain` route, observability) and flagged (the Fly
-cutover).** A local reference clone, `src/cloudflare-adapter.ts`, `src/cutover-proxy.ts`,
-`.github/workflows/deploy-relay.yml`; the open (secret-less) relay model is why the reference workbench needs no enrolment, `SECURITY.md`
+**Reference pattern — ported (the hosted-relay concept, `custom_domain` route, observability) and flagged (the Fly
+cutover).** Files: `src/cloudflare-adapter.ts`, `src/cutover-proxy.ts`,
+`.github/workflows/deploy-relay.yml`; the open (secret-less) relay model is why the reference needs no enrolment, `SECURITY.md`
 "Relay threat model".
 
 ### D12. Terminology and CLI: relay host, not workspace
@@ -1175,18 +1174,18 @@ are renamed opportunistically, never by a wire-breaking change; the new messages
 - **System-level systemd unit by default.** Needs root, a dedicated user without the
   operator's agent logins. User unit + linger covers boot with the right identity.
   Decision 3.
-- **The reference workbench's model — no service installer, run `daemon run` under your own
-  systemd/Docker.** Fewer commands to maintain, and that workbench gets away with it. Rejected as the
+- **The reference model — no service installer, run `daemon run` under your own
+  systemd/Docker.** Fewer commands to maintain, and the reference gets away with it. Rejected as the
   *only* option because Human asked for first-class boot persistence and per-OS correctness
   (PATH capture, linger, launchd `KeepAlive`, Windows restart policy) is exactly what users
   get wrong; but `smind serve` stays a clean foreground entrypoint so people who prefer their
   own unit lose nothing.
-- **A background `smind start` with an in-process supervisor (the reference workbench `daemon start`).** A
+- **A background `smind start` with an in-process supervisor (the reference `daemon start`).** A
   second supervision mechanism next to the OS's. Not chosen (decision 26).
 - **Keep loopback-only and push every remote user to the relay or a tunnel (this ADR's first
   draft).** Forces homelab users on a trusted LAN to run a relay server, and cannot serve the
   Docker `-p` case. Replaced by D8 with the strict guards above.
-- **Direct connections without a password (bind-only).** The reference workbench permits this with a warning.
+- **Direct connections without a password (bind-only).** The reference permits this with a warning.
   Not chosen: the daemon's terminal tab is remote code execution.
 - **Self-host only, no hosted relay.** Remains the fallback if none of the hosting options in D11 proceeds; the Human
   wants a hosted `relay.spacingmind.com`, so it is not the plan.
@@ -1196,14 +1195,14 @@ are renamed opportunistically, never by a wire-breaking change; the new messages
 - **Multi-device by rewriting the transport first.** Rejected: multi-device needs only per-device routes, a control
   announcement and per-device sessions, all expressible on gRPC with the message slots `relay.proto` already declares
   (D9), so it does not wait for the hosting decision.
-- **Ephemeral device keys only (that workbench's model) for multi-device.** Cheaper (no stored device secret, no pairing window)
+- **Ephemeral device keys only (the reference's model) for multi-device.** Cheaper (no stored device secret, no pairing window)
   but cannot support `smind relay devices ls|revoke` beyond "who is connected now" plus `host rotate`; offered as the
   alternative in decision 35.
 - **Keep one device per relay host and document it (this ADR's first draft).** Replaced by D9.
-- **Building the Docker image from source inside Docker** (the reference workbench's approach for Node). Slow
+- **Building the Docker image from source inside Docker** (the reference's approach for Node). Slow
   multi-arch builds under QEMU and a binary that differs from the checksummed release.
-- **Baking agent CLIs into the image.** The reference workbench, too, leaves them out. Decision 19.
-- **Silent auto-install on first launch everywhere (status quo on macOS, that workbench's behaviour).**
+- **Baking agent CLIs into the image.** The reference, too, leaves them out. Decision 19.
+- **Silent auto-install on first launch everywhere (status quo on macOS, the reference's behaviour).**
   Removes the choice to run no local daemon or use an existing one. Not chosen (decision 22).
 - **Storing `manageLocalDaemon` inside `connections.json`.** Couples a behaviour flag to a
   registry that tolerates and rewrites corrupt files. Separate file.
@@ -1213,13 +1212,13 @@ are renamed opportunistically, never by a wire-breaking change; the new messages
 ## Decisions (accepted 2026-10-14)
 
 Human approved every decision below on 2026-10-14 with the default stated ("Ok làm đi"). **★ = the default changed, or the
-decision is new, because of the reference workbench study; ✔ = answered earlier by the Human.** Decisions 10, 14 and 24 are accepted but only take effect together with the
+decision is new, because of the reference study; ✔ = answered earlier by the Human.** Decisions 10, 14 and 24 are accepted but only take effect together with the
 decision 9 (direct connections with a password, accepted 2026-10-15), which P4 implements first (noted in the plan).
 
 1. **CLI signature verification.** Verify a minisign signature of `checksums.txt` in
    `smind update` with the existing desktop-updater public key (ADR-0023; no new secret),
    signed by a new `publish`-job step, as a separate PR after the unsigned core. *Recommended:
-   yes.* (the reference workbench has nothing to compare: npm integrity.) Install scripts stay checksum-only.
+   yes.* (the reference has nothing to compare: npm integrity.) Install scripts stay checksum-only.
 
 2. **Windows: Scheduled Task vs Service.** *Accepted: per-user Scheduled Task at logon.*
 
@@ -1233,7 +1232,7 @@ decision 9 (direct connections with a password, accepted 2026-10-15), which P4 i
    hand-started one print instructions.
 
 6. **Supervisor signal.** *Accepted:* additive `/healthz` field `managedBy` from env
-   `SMIND_SUPERVISOR` (the reference workbench records `desktopManaged` in its lock file instead — adapted).
+   `SMIND_SUPERVISOR` (the reference records `desktopManaged` in its lock file instead — adapted).
 
 7. **★ Daemon log file.** *Accepted: yes* — `smind serve` also writes a rotating
    `$SMIND_HOME/daemon.log` (e.g. 10 MiB × 5), `smind service logs` tails it on every OS;
@@ -1241,7 +1240,7 @@ decision 9 (direct connections with a password, accepted 2026-10-15), which P4 i
    rotation dependency or ~80 lines of code.
 
 8. **★ `smind config get|set|unset`; no launch flags.** *Accepted: yes, no
-   `--port/--listen` flags on `serve`* (that workbench removed the equivalent flags).
+   `--port/--listen` flags on `serve`* (the reference removed the equivalent flags).
 
 9. **★ Direct connections with a password (D8).** *Accepted (2026-10-15): yes* — `server.listen`, `smind set-password`
    (bcrypt hash, minimum 12 characters), the daemon refuses to start with a non-loopback `listen` and no password,
@@ -1253,7 +1252,7 @@ decision 9 (direct connections with a password, accepted 2026-10-15), which P4 i
     SSH, or a TLS reverse proxy (with the Host-rewrite caveat); revisit with `server.tls`.
 
 11. **★ SSH-tunnel connection type in the desktop app (b2).** *Accepted: yes* — the app runs
-    the system `ssh -L` (the reference workbench `remoteSsh`); no daemon exposure and no password.
+    the system `ssh -L` (the reference `remoteSsh`); no daemon exposure and no password.
 
 13. **★ Multi-device relay on gRPC (D9).** *Accepted: yes — start as soon as this ADR is accepted; independent of hosting.*
     Uses the existing protocol (`DeviceAttach`/`DeviceDetach` + additive messages), per-device E2EE sessions in the bridge,
@@ -1265,20 +1264,20 @@ decision 9 (direct connections with a password, accepted 2026-10-15), which P4 i
     standing credential, but the password remains the second factor.
 
 15. **Offer reuse/expiry.** *Accepted:* reusable, no expiry, loud "treat like a password"
-    wording, `--png` at 0600 (the reference workbench is the same: no expiry, no per-device credential).
+    wording, `--png` at 0600 (the reference is the same: no expiry, no per-device credential).
 
 16. **Deep link `smind://pair`.** *Accepted:* paste-only in v1; later with the confirmation
     screen, never auto-add.
 
 17. **`daemon.info` RPC.** *Accepted:* add a small additive WS method `{version, commit}`
-    so the notice works for relay connections (that workbench reads version from `server_info`).
+    so the notice works for relay connections (the reference reads version from `server_info`).
 
 18. **QR default.** *Accepted:* print the QR only on a TTY or `--qr`, fall back to level L,
     never fail the command; offer compaction (v2) deferred.
 
 19. **★ Docker image contents.** *Accepted:* one image (Debian-slim, git, ssh client, Node 22,
     `gosu`, `tini`, curl), **root entrypoint that fixes ownership then drops to uid 1000**
-    (the reference workbench), agent CLIs not baked in + child-image example + compose example, listen
+    (the reference), agent CLIs not baked in + child-image example + compose example, listen
     `0.0.0.0` only with a required password (needs decision 9). Alternative: a `-agents` variant.
 
 20. **Image provenance.** *Accepted:* buildx provenance/SBOM on releases; no cosign in v1.
@@ -1288,12 +1287,12 @@ decision 9 (direct connections with a password, accepted 2026-10-15), which P4 i
 
 22. **★ First-run default and silent install.** *Accepted:* explicit first-run screen on fresh
     installs, no silent install; (a) pre-selected when the port is free, (d) when a smind daemon
-    already answers. **Differs from the reference workbench** (silent auto-start + a settings toggle).
-    Alternative: that workbench parity — silent start with a dismissible banner.
+    already answers. **Differs from the reference** (silent auto-start + a settings toggle).
+    Alternative: reference parity — silent start with a dismissible banner.
 
 23. **★ Local daemon on later launches and quit.** *Accepted:* when `manageLocalDaemon` is
     true and `local` is selected, auto-start on every launch; the daemon keeps running after the
-    app quits (smind's ADR-0013 choice; the reference workbench stops it by default) — optionally add a "stop when
+    app quits (smind's ADR-0013 choice; the reference stops it by default) — optionally add a "stop when
     quitting" setting later.
 
 24. **★ Credential entry in "Connect to a daemon".** *Accepted:* an optional **password** field
@@ -1301,10 +1300,10 @@ decision 9 (direct connections with a password, accepted 2026-10-15), which P4 i
 
 25. **★ Default connection / host with several connections.** *Accepted:* keep "last selected";
     keep connection ids derived from daemon identity so a later "relay now, direct when
-    reachable" (the reference workbench `preferredConnectionId`, Maestro `relay-then-direct`) needs no migration.
+    reachable" (the reference `preferredConnectionId`, Maestro `relay-then-direct`) needs no migration.
 
 26. **★ Background `smind start` without an OS service.** *Accepted: no* — `smind service` and
-    the desktop app cover it; that workbench's `daemon start` + supervisor is a second supervision path.
+    the desktop app cover it; the reference's `daemon start` + supervisor is a second supervision path.
 
 33. **✔ Rename — DECIDED by Human (2026-10-13): relay "workspace" → "relay host"** (D12); `workspace` stays a deprecated CLI
     alias; wire/proto field names are not changed; smind's own "Workspace" is not renamed.
@@ -1317,7 +1316,7 @@ decision 9 (direct connections with a password, accepted 2026-10-15), which P4 i
 
 35. **★ Device identity and pairing window (D9).** *Accepted: yes* — a persistent Ed25519 device key proven inside
     `device_hello`, a daemon-side device registry, an offer-opened pairing window (10 minutes or one new device), and `smind
-    relay devices ls|approve|revoke|rename`; amends ADR-0007 (g). Alternative (the reference workbench's stance): ephemeral device keys, `devices
+    relay devices ls|approve|revoke|rename`; amends ADR-0007 (g). Alternative (the reference's stance): ephemeral device keys, `devices
     ls` shows only connected devices, `revoke` closes the connection, `host rotate` is the hard reset.
 
 ## Open decisions for Human
@@ -1390,6 +1389,6 @@ password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
   (`/api/shutdown`), ADR-0030 (Windows native daemon; rejected a service for the app).
 - `docs/plans/completed/desktop-relay-transport.md` (single-device limit),
   `docs/plans/completed/desktop-windows-native-daemon.md` and the `feat/windows-bundled-daemon` branch.
-- The reference workbench: see the reference table above and each "that workbench pattern" block.
+- The reference workbench: see the reference table above and each "the reference pattern" block.
 - Plan: [`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md).
 - Fleet (ADR-0048) reuses this ADR's pinned identity (D9) and the Ed25519 `device_hello` shape (D35) for host-to-host links: [`0048-fleet-connected-hosts.md`](0048-fleet-connected-hosts.md).
