@@ -1,7 +1,6 @@
 package wsapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"log"
 	"log/slog"
@@ -375,7 +374,7 @@ func TestRunScopedMethods_NoProviderExecOrWriteMethod(t *testing.T) {
 // probe with its marker argv, the daemon log, the events on the bus), the
 // value is nowhere.
 func TestPluginProvider_Secret_NeverInArgvLogsEventsTranscript(t *testing.T) {
-	var logBuf bytes.Buffer
+	var logBuf lockedBuf // the probe goroutine (taskrunner.maybeProbe) logs while this test reads
 	prevOut, prevFlags := log.Writer(), log.Flags()
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })

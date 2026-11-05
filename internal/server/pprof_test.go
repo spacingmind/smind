@@ -29,9 +29,16 @@ func serve(h http.Handler, r *http.Request) *httptest.ResponseRecorder {
 
 func TestPprofOffByDefault(t *testing.T) {
 	h := newTestServer(t, "tok").Handler()
-	rec := serve(h, pprofReq("127.0.0.1:50000", "tok", nil))
-	if strings.Contains(rec.Body.String(), "heap profile") || strings.Contains(rec.Body.String(), "heap_alloc") {
-		t.Fatalf("pprof answered with debug.pprof off: %d %.80s", rec.Code, rec.Body.String())
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/heap", "/debug/pprof/goroutine", "/debug/pprof/profile", "/debug/pprof/cmdline"} {
+		r := pprofReq("127.0.0.1:50000", "tok", nil)
+		r.URL.Path = path
+		rec := serve(h, r)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s with debug.pprof off: status %d, want 404 (never the web UI's 200 HTML)", path, rec.Code)
+		}
+		if strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+			t.Errorf("%s answered HTML with debug.pprof off", path)
+		}
 	}
 }
 
