@@ -231,7 +231,7 @@ func (b *coBuf) flush(out *[2]int64) {
 type runAcc struct {
 	provider    string
 	rows, bytes int64
-	calls       map[uint64]struct{}
+	calls       map[uint64]string // call id hash -> tool name label
 	bound, idle coBuf
 	lastAt      time.Time
 	runText     int // open contiguous text run (skeleton answer row)
@@ -308,7 +308,7 @@ func Compute(ctx context.Context, db *sql.DB, path string, now time.Time) (*Repo
 		}
 		ra := acc[runID]
 		if ra == nil {
-			ra = &runAcc{provider: providerLabel(runs[runID].provider), calls: map[uint64]struct{}{}}
+			ra = &runAcc{provider: providerLabel(runs[runID].provider), calls: map[uint64]string{}}
 			acc[runID] = ra
 		}
 		c.observe(ra, data, toTime(created))
@@ -486,13 +486,20 @@ func (c *collector) closeRun(ra *runAcc) {
 // id costs one skeleton tool row; each payload adds its summary, and one over
 // the inline cap adds a descriptor and an excerpt row.
 func (c *collector) toolEvent(ra *runAcc, pa *provAcc, r row) {
-	name := label(r.ToolName)
-	if r.ToolName == "" {
+	// A later event of a call (the result) often omits the tool name: it takes
+	// the name the call's first named event carried.
+	id := hash(r.ToolCallID)
+	name, seen := ra.calls[id]
+	if r.ToolName != "" && (!seen || name == "unknown") {
+		name = label(r.ToolName)
+	} else if name == "" {
 		name = "unknown"
 	}
+	if r.ToolCallID != "" {
+		ra.calls[id] = name
+	}
 	ta := c.tool(name)
-	if _, seen := ra.calls[hash(r.ToolCallID)]; !seen && r.ToolCallID != "" {
-		ra.calls[hash(r.ToolCallID)] = struct{}{}
+	if !seen && r.ToolCallID != "" {
 		c.toolCalls++
 		ta.calls++
 		c.toolRows++
