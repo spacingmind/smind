@@ -27,6 +27,7 @@ chat.queueGet
 chat.queueList
 chat.rename
 daemon.info
+db.compact
 debug.memory
 file.list
 file.read
@@ -126,6 +127,7 @@ run.setConfigOption
 run.setPermissionMode
 run.start
 run.stop
+runs.prune
 session.identify
 skill.list
 space.create

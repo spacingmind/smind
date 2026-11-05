@@ -123,8 +123,9 @@ type Pruner struct {
 	now  func() time.Time
 
 	// batch, pause are the bounded-batch knobs (tests shrink them).
-	batch int
-	pause time.Duration
+	batch      int
+	pause      time.Duration
+	startDelay time.Duration
 
 	running sync.Mutex
 }
@@ -132,7 +133,7 @@ type Pruner struct {
 // NewPruner returns a Pruner reading the retention days from days on each pass
 // (so a config edit applies without a restart).
 func NewPruner(reg *Registry, st *store.Store, days func() int) *Pruner {
-	return &Pruner{reg: reg, st: st, days: days, now: time.Now, batch: pruneBatchRows, pause: pruneBatchPause}
+	return &Pruner{reg: reg, st: st, days: days, now: time.Now, batch: pruneBatchRows, pause: pruneBatchPause, startDelay: pruneStartDelay}
 }
 
 func (p *Pruner) cutoff() (days int, cutoff time.Time) {
@@ -272,7 +273,7 @@ func (p *Pruner) reclaim(ctx context.Context) int64 {
 // then every 24 hours. Passes never overlap.
 func (p *Pruner) Start(ctx context.Context) {
 	go func() {
-		timer := time.NewTimer(pruneStartDelay)
+		timer := time.NewTimer(p.startDelay)
 		defer timer.Stop()
 		for {
 			select {

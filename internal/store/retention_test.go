@@ -392,3 +392,48 @@ func TestMigrationAddsPruneColumns(t *testing.T) {
 		t.Fatalf("columns missing after migrate: %v", err)
 	}
 }
+
+// A marked run (even with rows left mid-prune) is invisible to the learning
+// readers: they must not collect half a run, and a pruned run has nothing.
+func TestLearningReadersSkipPrunedRuns(t *testing.T) {
+	e := newRetEnv(t)
+	task := e.task(t, true, false)
+	chat, err := e.s.CreateChat(task, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(id string) {
+		if _, err := e.s.CreateRun(Run{ID: id, TaskID: task, ChatID: chat.ID, Provider: "glm", Prompt: "p", Status: "done", Purpose: "user", StartedAt: time.Now().UTC().Add(-90 * 24 * time.Hour), FinishedAt: at(e.cutoff.Add(-time.Hour))}); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 3; i++ {
+			if _, err := e.s.AppendRunEvent(id, int64(i), `{"type":0,"text":"x"}`); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	mk("full")
+	mk("mid-prune")
+	if ok, err := e.s.MarkRunPruned("mid-prune", "t", time.Now(), e.cutoff); !ok || err != nil {
+		t.Fatalf("mark: %v %v", ok, err)
+	}
+	if _, err := e.s.DeleteRunEventsBatch("mid-prune", 1); err != nil { // two rows left
+		t.Fatal(err)
+	}
+	got, err := e.s.ListChatRunsWithEventsAfter(chat.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Run.ID != "full" {
+		t.Fatalf("window runs = %v, want only the unpruned run", got)
+	}
+	rows, _, err := e.s.ListWorkspaceUserEvents(e.wsID, time.Now().Add(-365*24*time.Hour), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.RunID == "mid-prune" {
+			t.Fatal("events of a pruned run reached the prevalence scan")
+		}
+	}
+}
