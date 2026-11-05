@@ -10,17 +10,21 @@ import (
 func TestClientFormElidersPassesElidedCallsThrough(t *testing.T) {
 	in, _ := json.Marshal(map[string]string{"command": "cat > f <<'EOF'\nsecret body\nEOF\necho done"})
 	live := NewToolCallElider()
-	elided, title, result, _ := live.Elide("c", in, "cat > f <<'EOF'\nsecret body\nEOF", json.RawMessage(`"ok"`))
+	elided, title, result, liveRefs := live.Elide("c", in, "cat > f <<'EOF'\nsecret body\nEOF", json.RawMessage(`"ok"`))
 	if string(elided) == string(in) {
 		t.Fatal("setup: the live elider did not elide")
 	}
-	cf := NewClientFormElider()
+	cf := NewClientFormElider(map[string][]HeredocRef{"c": liveRefs})
 	got, gtitle, gresult, refs := cf.Elide("c", elided, title, result)
-	if string(got) != string(elided) || gtitle != title || string(gresult) != string(result) || refs != nil {
-		t.Fatalf("client-form elider changed an elided call: %s | %q", got, gtitle)
+	if string(got) != string(elided) || gtitle != title || string(gresult) != string(result) || len(refs) != len(liveRefs) || len(refs) == 0 {
+		t.Fatalf("client-form elider changed an elided call or lost its refs: %s | %q | %v vs %v", got, gtitle, refs, liveRefs)
+	}
+	// the refs ride only with the event that carries the input, as live
+	if _, _, _, r2 := cf.Elide("c", nil, "", json.RawMessage(`"ok"`)); r2 != nil {
+		t.Fatalf("a result event returned refs: %v", r2)
 	}
 	// it must not hide what it was never given to hide
-	if raw, _, _, _ := NewClientFormElider().Elide("c", in, "", nil); string(raw) != string(in) {
+	if raw, _, _, _ := NewClientFormElider(nil).Elide("c", in, "", nil); string(raw) != string(in) {
 		t.Fatal("a client-form elider is a pass-through, not a second elider")
 	}
 }

@@ -75,23 +75,23 @@ func historyLabel(reg *runs.Registry, runID, detail string, human bool) historyF
 // rebuiltEvents is the merged history of runID for a human who asked for "full":
 // the stored rows with the transcript replaced by the provider's own, or the
 // reason it could not be. Events are in client form (already elided).
-func rebuiltEvents(ctx context.Context, reg *runs.Registry, runID string) (events []taskrunner.Event, reason native.Reason, detail string) {
+func rebuiltEvents(ctx context.Context, reg *runs.Registry, runID string) (events []taskrunner.Event, refs map[string][]taskrunner.HeredocRef, reason native.Reason) {
 	got := reg.RebuildHistory(ctx, runID, runs.RequesterHuman)
 	if !got.OK() {
-		return nil, got.Reason, got.Detail
+		return nil, nil, got.Reason
 	}
 	stored, _, err := reg.History(runID)
 	if err != nil {
-		return nil, native.ReasonFailed, "the stored rows could not be read"
+		return nil, nil, native.ReasonFailed
 	}
-	return runs.MergeRebuilt(stored, got.Events), native.ReasonNone, got.Detail
+	return runs.MergeRebuilt(stored, got.Events), got.Refs, native.ReasonNone
 }
 
 // logEventsClientForm converts events that are already in client form (a
 // rebuilt history) to their wire shape; unlike runLogEventsPrimed it never
 // elides again.
-func logEventsClientForm(history []taskrunner.Event, tail int) []runLogEvent {
-	el := taskrunner.NewClientFormElider()
+func logEventsClientForm(history []taskrunner.Event, refs map[string][]taskrunner.HeredocRef, tail int) []runLogEvent {
+	el := taskrunner.NewClientFormElider(refs)
 	events := make([]runLogEvent, len(history))
 	for i, e := range history {
 		events[i] = toRunLogEvent(el, e)

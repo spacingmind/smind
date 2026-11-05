@@ -2040,8 +2040,8 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			// A rebuild is only ever done for a human; an agent asking for it is told why not.
 			if !human {
 				label.SkeletonReason = string(native.ReasonHumanOnly)
-			} else if merged, reason, _ := rebuiltEvents(ctx, reg, p.RunID); reason == native.ReasonNone {
-				events = logEventsClientForm(merged, p.Tail)
+			} else if merged, refs, reason := rebuiltEvents(ctx, reg, p.RunID); reason == native.ReasonNone {
+				events = logEventsClientForm(merged, refs, p.Tail)
 				label.HistorySource, label.SkeletonReason = "rebuilt", ""
 			} else {
 				label.SkeletonReason = string(reason)

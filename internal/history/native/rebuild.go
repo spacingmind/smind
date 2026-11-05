@@ -68,6 +68,11 @@ type Result struct {
 	// Detail carries counts only (never text) for logs and the UI note.
 	Detail string
 
+	// Refs are the heredoc references the elider reported for each call's input
+	// (by tool call id), for the layer that converts events to the wire: a live
+	// tool call carries them next to its elided input.
+	Refs map[string][]taskrunner.HeredocRef
+
 	raw map[string][]string // tool call id -> raw heredoc bodies, in elision order
 }
 
@@ -218,8 +223,8 @@ func (rb *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 		return refuse(ReasonFormatDrift, why)
 	}
 	rb.recordDrift(key, false)
-	events, raw := rb.deliver(ref.Provider, p.events)
-	return Result{Events: events, raw: raw, Detail: fmt.Sprintf("%d events from %d records", len(events), p.st.decoded)}
+	events, raw, refs := rb.deliver(ref.Provider, p.events)
+	return Result{Events: events, raw: raw, Refs: refs, Detail: fmt.Sprintf("%d events from %d records", len(events), p.st.decoded)}
 }
 
 type readerCtx struct {
@@ -289,9 +294,10 @@ func (rb *Rebuilder) recordDrift(key string, failed bool) {
 
 // deliver scrubs and elides a turn's events the way a live read does, and keeps
 // the raw heredoc bodies for the reveal path.
-func (rb *Rebuilder) deliver(provider string, in []taskrunner.Event) ([]taskrunner.Event, map[string][]string) {
+func (rb *Rebuilder) deliver(provider string, in []taskrunner.Event) ([]taskrunner.Event, map[string][]string, map[string][]taskrunner.HeredocRef) {
 	el := taskrunner.NewToolCallElider()
 	raw := map[string][]string{}
+	allRefs := map[string][]taskrunner.HeredocRef{}
 	out := make([]taskrunner.Event, 0, len(in))
 	for _, e := range in {
 		if rb.cfg.Scrub != nil {
@@ -307,11 +313,15 @@ func (rb *Rebuilder) deliver(provider string, in []taskrunner.Event) ([]taskrunn
 					raw[e.ToolCallID] = bodies
 				}
 			}
-			e.ToolInput, e.ToolTitle, e.ToolResult, _ = el.Elide(e.ToolCallID, e.ToolInput, e.ToolTitle, e.ToolResult)
+			var refs []taskrunner.HeredocRef
+			e.ToolInput, e.ToolTitle, e.ToolResult, refs = el.Elide(e.ToolCallID, e.ToolInput, e.ToolTitle, e.ToolResult)
+			if len(refs) > 0 {
+				allRefs[e.ToolCallID] = refs
+			}
 		}
 		out = append(out, e)
 	}
-	return out, raw
+	return out, raw, allRefs
 }
 
 // heredocBodies lists the raw heredoc bodies of a command input in the order

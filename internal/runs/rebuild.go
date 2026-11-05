@@ -32,6 +32,9 @@ func (reg *Registry) SetRebuilder(rb *native.Rebuilder) {
 // provider's session, or the reason the stored skeleton must be shown instead.
 type Rebuilt struct {
 	Events []Event
+	// Refs are the heredoc references of the rebuilt tool calls' inputs (by tool
+	// call id), what a live read carries next to the elided input.
+	Refs   map[string][]taskrunner.HeredocRef
 	Reason native.Reason
 	Detail string // counts only, never text
 }
@@ -77,7 +80,7 @@ func (reg *Registry) RebuildHistory(ctx context.Context, runID string, who Reque
 	if !res.OK() {
 		return degraded(res.Reason, res.Detail)
 	}
-	return Rebuilt{Events: res.Events, Detail: res.Detail}
+	return Rebuilt{Events: res.Events, Refs: res.Refs, Detail: res.Detail}
 }
 
 // chatHasRunningRun reports whether any run of chatID is running.
