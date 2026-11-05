@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { mergeAttachments, useRunTimeline } from "@/hooks/use-run-timeline";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
-import type { AttachmentMeta, RunLogsResult, RunSummary, RunUsage } from "@/lib/types";
+import type { AttachmentMeta, RunAttachResult, RunLogsResult, RunSummary, RunUsage } from "@/lib/types";
 
 function usage(overrides: Partial<RunUsage> = {}): RunUsage {
   return { inputTokens: 100, outputTokens: 20, source: "claude_result", ...overrides };
@@ -511,5 +511,115 @@ describe("useRunTimeline attachments (ADR-0038)", () => {
     expect(mergeAttachments([preview], undefined)).toEqual([preview]);
     expect(mergeAttachments(undefined, [stored])).toEqual([stored]);
     expect(mergeAttachments([{ ...preview, id: "2" }], [stored])).toEqual([stored]);
+  });
+});
+
+describe("useRunTimeline history source (ADR-0053)", () => {
+  it("an attach terminal result that names a skeleton history carries its reason onto the run", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary({ Status: "running", FinishedAt: null })]);
+    await flush();
+
+    await act(async () => {
+      client.nth("run.attach", 0).resolve({
+        runId: "run-1",
+        stopReason: "end_turn",
+        historySource: "skeleton",
+        skeletonReason: "rebuild_not_requested",
+        canLoadFull: true,
+      } satisfies RunAttachResult);
+    });
+
+    await waitFor(() => expect(result.current.runs?.[0]?.history).toEqual({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true }));
+  });
+
+  it("loadFullHistory asks for detail full, replaces the items and records the rebuild", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary()]);
+    await flush();
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", historySource: "skeleton", skeletonReason: "rebuild_not_requested", canLoadFull: true, events: [{ type: "chunk", text: "trimmed" }] } satisfies RunLogsResult);
+    });
+    await waitFor(() => expect(result.current.runs?.[0]?.history?.source).toBe("skeleton"));
+    expect(result.current.runs?.[0]?.items).toHaveLength(1);
+
+    let done!: Promise<void>;
+    await act(async () => {
+      done = result.current.loadFullHistory("run-1");
+      await Promise.resolve();
+    });
+    expect(result.current.runs?.[0]?.history?.loading).toBe(true);
+    const full = client.nth("run.logs", 1);
+    expect(full.params).toEqual({ runId: "run-1", detail: "full" });
+
+    await act(async () => {
+      full.resolve({ runId: "run-1", status: "done", historySource: "rebuilt", events: [{ type: "chunk", text: "the whole answer" }] } satisfies RunLogsResult);
+      await done;
+    });
+
+    await waitFor(() => expect(result.current.runs?.[0]?.history).toEqual({ source: "rebuilt", loading: false }));
+    expect(result.current.runs?.[0]?.items).toEqual([{ kind: "assistant", id: "assistant-0", text: "the whole answer" }]);
+  });
+
+  it("a degraded full-history answer stays a skeleton with the daemon's reason", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary()]);
+    await flush();
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", historySource: "skeleton", skeletonReason: "rebuild_not_requested", canLoadFull: true, events: [] } satisfies RunLogsResult);
+    });
+    await waitFor(() => expect(result.current.runs?.[0]?.history?.source).toBe("skeleton"));
+
+    let done!: Promise<void>;
+    await act(async () => {
+      done = result.current.loadFullHistory("run-1");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      client.nth("run.logs", 1).resolve({ runId: "run-1", status: "done", historySource: "skeleton", skeletonReason: "native_session_in_use", events: [] } satisfies RunLogsResult);
+      await done;
+    });
+
+    await waitFor(() => expect(result.current.runs?.[0]?.history).toEqual({ source: "skeleton", reason: "native_session_in_use", loading: false }));
+  });
+
+  it("a failed full-history call surfaces rebuild_failed and keeps the button available", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary()]);
+    await flush();
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", historySource: "skeleton", skeletonReason: "rebuild_not_requested", canLoadFull: true, events: [] } satisfies RunLogsResult);
+    });
+    await waitFor(() => expect(result.current.runs?.[0]?.history?.source).toBe("skeleton"));
+
+    let done!: Promise<void>;
+    await act(async () => {
+      done = result.current.loadFullHistory("run-1");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      client.nth("run.logs", 1).reject(new Error("socket dropped"));
+      await done;
+    });
+
+    await waitFor(() => expect(result.current.runs?.[0]?.history).toEqual({ source: "skeleton", reason: "rebuild_failed", canLoadFull: true, loading: false }));
+  });
+
+  it("a backfill without historySource leaves history undefined", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary()]);
+    await flush();
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", stopReason: "end_turn", events: [{ type: "chunk", text: "hi" }] } satisfies RunLogsResult);
+    });
+
+    await waitFor(() => expect(result.current.runs?.[0]?.items).toHaveLength(1));
+    expect(result.current.runs?.[0]?.history).toBeUndefined();
+    expect("history" in (result.current.runs?.[0] ?? {})).toBe(false);
   });
 });

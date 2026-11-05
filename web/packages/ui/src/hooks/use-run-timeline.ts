@@ -7,7 +7,7 @@ import { supportsThinking } from "@/lib/thinking-levels";
 import type { WsClientLike } from "@/lib/ws-client";
 import { resendRequests } from "@/lib/attachments/reuse";
 import { runStartParams } from "@/lib/run-start";
-import type { AttachmentMeta, AttachmentRequest, PermissionSettings, PermissionQuestion, PermissionDetail, PermissionRequestEventParams, PermissionResolutionReason, PermissionResolvedEventParams, HeredocRef, McpServerState, RunUsage, RunAttachResult, RunLogEvent, RunLogsResult, RunSetPermissionModeResult, RunStartResult, RunStatusEventPayload, RunStatusValue, RunSummary, ThinkingLevel, ToolCallStatus, WhenBusy } from "@/lib/types";
+import type { AttachmentMeta, AttachmentRequest, PermissionSettings, PermissionQuestion, PermissionDetail, PermissionRequestEventParams, PermissionResolutionReason, PermissionResolvedEventParams, HeredocRef, McpServerState, RunUsage, RunAttachResult, RunHistorySource, RunLogEvent, RunLogsResult, RunSetPermissionModeResult, RunStartResult, RunStatusEventPayload, RunStatusValue, RunSummary, ThinkingLevel, ToolCallStatus, WhenBusy } from "@/lib/types";
 
 /** A still-unanswered permission request on a run, as shown by the detail pane. */
 export interface PendingPermission {
@@ -413,6 +413,13 @@ export interface RunEntry {
    * changed, so the option refetch (use-run-config-options) still fires for them.
    */
   configRevision?: number;
+  /**
+   * Where this run's `items` came from (ADR-0053): a full history, a
+   * trimmed summary (`reason` names why, `canLoadFull` whether
+   * loadFullHistory can rebuild it), or the rebuild itself. Undefined
+   * while a backfill that carried no historySource built the items.
+   */
+  history?: { source: RunHistorySource; reason?: string; canLoadFull?: boolean; loading?: boolean };
 }
 
 /** The latest mcp_servers event's list in events, or undefined when no event carried one -- multiple events per run are possible, latest wins. */
@@ -496,6 +503,13 @@ interface TimelineState {
    * already gated the button that invokes this on canRetryWithHigherEffort).
    */
   retryWithHigherEffort: (run: RunEntry) => Promise<void>;
+  /**
+   * Rebuilds runId's history from the provider's own session (run.logs with
+   * detail "full", ADR-0053) and REPLACES the run's items with the fold of
+   * the events that come back. A degraded answer (or a failed call) keeps a
+   * skeleton `history` naming why, never an unexplained empty transcript.
+   */
+  loadFullHistory: (runId: string) => Promise<void>;
 }
 
 /**
@@ -673,7 +687,13 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
     )
     .then((result) => {
       if (session.cancelled) return;
-      patch(setRuns, runId, { status: "done", stopReason: result.stopReason, disposition: result.disposition, finishedAt: new Date().toISOString() });
+      patch(setRuns, runId, {
+        status: "done",
+        stopReason: result.stopReason,
+        disposition: result.disposition,
+        finishedAt: new Date().toISOString(),
+        ...historyOf(result),
+      });
     })
     .catch(() => {
       if (session.cancelled) return;
@@ -690,6 +710,7 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
             err: logs.err,
             ...provenanceOf(logs),
             ...attachmentsOf(logs),
+            ...historyOf(logs),
             finishedAt: new Date().toISOString(),
           });
         })
@@ -730,6 +751,23 @@ function provenanceOf(logs: RunLogsResult): Pick<RunEntry, "baseSha" | "headSha"
 /** `attachments` only when run.logs carries some, so an older daemon (or a prompt without any) never clears a list-seeded value. */
 function attachmentsOf(logs: RunLogsResult): Pick<RunEntry, "attachments"> | Record<string, never> {
   return logs.attachments && logs.attachments.length > 0 ? { attachments: logs.attachments } : {};
+}
+
+/**
+ * The history-provenance keys a run.attach/run.logs result carries -- only
+ * when it names a historySource at all, so an older daemon (or an
+ * unaffected run) leaves `history` untouched rather than blanking it.
+ */
+function historyOf(src: { historySource?: RunHistorySource; skeletonReason?: string; canLoadFull?: boolean }): Pick<RunEntry, "history"> | Record<string, never> {
+  return src.historySource
+    ? {
+        history: {
+          source: src.historySource,
+          ...(src.skeletonReason ? { reason: src.skeletonReason } : {}),
+          ...(src.canLoadFull !== undefined ? { canLoadFull: src.canLoadFull } : {}),
+        },
+      }
+    : {};
 }
 
 /** Maps one run.list entry to its timeline entry -- shared by the initial load and the adopt-unknown-runs path below, so the two can't drift. */
@@ -854,6 +892,7 @@ export function useRunTimeline(
                   ...failureOf(logs),
                   ...lineageOf(logs),
                   err: logs.err,
+                  ...historyOf(logs),
                 });
               })
               .catch((err: unknown) => {
@@ -994,6 +1033,7 @@ export function useRunTimeline(
                     disposition: logs.disposition,
                     ...failureOf(logs),
                     err: logs.err,
+                    ...historyOf(logs),
                   });
                 })
                 .catch(() => {});
@@ -1059,5 +1099,35 @@ export function useRunTimeline(
     [submitPrompt],
   );
 
-  return { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort };
+  const loadFullHistory = useCallback(
+    async (runId: string) => {
+      if (!client) throw new Error("not connected");
+      const session = sessionRef.current;
+      // Keep the sentence that is already on screen (its reason) and only
+      // flip it into its loading state -- patch replaces `history`
+      // wholesale, so the merge happens against the current run here.
+      setRuns((prev) =>
+        prev ? prev.map((r) => (r.id === runId && r.history ? { ...r, history: { ...r.history, loading: true } } : r)) : prev,
+      );
+      try {
+        const logs = await client.call<RunLogsResult>("run.logs", { runId, detail: "full" });
+        if (session?.cancelled) return;
+        patch(setRuns, runId, {
+          items: buildTimeline(logs.events, runId),
+          history: {
+            source: logs.historySource ?? "rebuilt",
+            ...(logs.skeletonReason ? { reason: logs.skeletonReason } : {}),
+            ...(logs.canLoadFull !== undefined ? { canLoadFull: logs.canLoadFull } : {}),
+            loading: false,
+          },
+        });
+      } catch {
+        if (session?.cancelled) return;
+        patch(setRuns, runId, { history: { source: "skeleton", reason: "rebuild_failed", canLoadFull: true, loading: false } });
+      }
+    },
+    [client],
+  );
+
+  return { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort, loadFullHistory };
 }
