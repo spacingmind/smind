@@ -328,6 +328,214 @@ func mustCandidates(t *testing.T, e *retEnv) []string {
 	return ids
 }
 
+// skelRun makes a run in skeleton form: two event rows and two excerpt rows,
+// the shape ApplySkeleton leaves behind.
+func (e *retEnv) skelRun(t *testing.T, id string, taskID int64, status string, fin *time.Time) {
+	t.Helper()
+	e.run(t, id, taskID, status, "user", fin, 2)
+	if _, err := e.s.db.Exec(`UPDATE runs SET skeleton_at = ?, skeleton_rev = 1 WHERE id = ?`, time.Now().UTC(), id); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := e.s.db.Exec(`INSERT INTO run_excerpts (run_id, seq, field, head, tail, enc, bytes, sha256) VALUES (?, ?, 'out', ?, '', 'raw', 40, 'x')`,
+			id, i, fmt.Sprintf(`"excerpt-%s-%d"`, id, i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func (e *retEnv) excerpts(t *testing.T, id string) int {
+	t.Helper()
+	var n int
+	if err := e.s.db.QueryRow(`SELECT COUNT(*) FROM run_excerpts WHERE run_id = ?`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// pruneExcerptsAll drives PruneExcerptsBatch to completion, as the pruner does.
+func (e *retEnv) pruneExcerptsAll(t *testing.T, id string, batch int) int64 {
+	t.Helper()
+	var total int64
+	for {
+		n, err := e.s.PruneExcerptsBatch(id, batch, time.Now().UTC(), e.cutoff)
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += n
+		if n == 0 {
+			return total
+		}
+	}
+}
+
+// pruneAllMixed drives both kinds of prune as the pruner does: a skeleton run
+// loses only its excerpts, a full run its rows.
+func (e *retEnv) pruneAllMixed(t *testing.T, batch int) PruneCounts {
+	t.Helper()
+	var c PruneCounts
+	for {
+		ids, err := e.s.PruneCandidates(e.cutoff, 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) == 0 {
+			return c
+		}
+		for _, id := range ids {
+			if sk, _ := e.s.GetRunSkeleton(id); sk.SkeletonAt != nil {
+				if rows := e.pruneExcerptsAll(t, id, batch); rows > 0 {
+					c.ExcerptRuns++
+					c.ExcerptRows += rows
+				}
+				continue
+			}
+			if _, err := e.s.MarkRunPruned(id, "final of "+id, time.Now(), e.cutoff); err != nil {
+				t.Fatal(err)
+			}
+			var rows int64
+			for {
+				n, err := e.s.DeleteRunEventsBatch(id, batch)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rows += n
+				if n == 0 {
+					break
+				}
+			}
+			if rows > 0 {
+				c.Runs++
+				c.Rows += rows
+			}
+		}
+	}
+}
+
+// A skeleton run's prune deletes only its excerpt tier: the rows, the run row
+// and its final text stay, and it is never marked history-pruned.
+func TestPruneExcerptsOnly_KeepsSkeleton(t *testing.T) {
+	e := newRetEnv(t)
+	task := e.task(t, true, false)
+	e.skelRun(t, "sk", task, "done", at(e.cutoff.Add(-time.Hour)))
+	if n := e.pruneExcerptsAll(t, "sk", 1); n != 2 {
+		t.Fatalf("deleted %d excerpt rows, want 2", n)
+	}
+	if e.excerpts(t, "sk") != 0 {
+		t.Fatal("excerpt rows left")
+	}
+	if n := e.events(t, "sk"); n != 2 {
+		t.Fatalf("%d event rows left, want the 2 stored ones untouched", n)
+	}
+	row, _ := e.s.GetRun("sk")
+	if row.HistoryPrunedAt != nil {
+		t.Fatal("a skeleton run must never be marked history-pruned")
+	}
+	if sk, _ := e.s.GetRunSkeleton("sk"); sk.ExcerptsPrunedAt == nil {
+		t.Fatal("excerpts_pruned_at not stamped")
+	}
+	if txt, _ := e.s.GetRunFinalText("sk"); txt != "" {
+		t.Fatalf("final text = %q, want the unchanged empty default", txt)
+	}
+}
+
+func TestMarkRunPrunedRefusesSkeletonRun(t *testing.T) {
+	e := newRetEnv(t)
+	task := e.task(t, true, false)
+	e.skelRun(t, "sk", task, "done", at(e.cutoff.Add(-time.Hour)))
+	ok, err := e.s.MarkRunPruned("sk", "kept", time.Now(), e.cutoff)
+	if err != nil || ok {
+		t.Fatalf("MarkRunPruned = %v, %v; a skeleton run must be refused", ok, err)
+	}
+	row, _ := e.s.GetRun("sk")
+	if row.HistoryPrunedAt != nil {
+		t.Fatal("the skeleton run was marked")
+	}
+	if txt, _ := e.s.GetRunFinalText("sk"); txt != "" {
+		t.Fatalf("final text = %q, want the unchanged empty default", txt)
+	}
+	if n := e.pruneExcerptsAll(t, "sk", 10); n != 2 {
+		t.Fatalf("its excerpts are still prunable, deleted %d", n)
+	}
+}
+
+func TestPruneCandidatesIncludeSkeletonRunsWithExcerpts(t *testing.T) {
+	e := newRetEnv(t)
+	task := e.task(t, true, false)
+	old := at(e.cutoff.Add(-time.Hour))
+	// a full run with no events and a skeleton run with no excerpts are not candidates
+	e.run(t, "full-noevents", task, "done", "user", old, 0)
+	e.run(t, "sk-noexcerpts", task, "done", "user", old, 2)
+	if _, err := e.s.db.Exec(`UPDATE runs SET skeleton_at = ?, skeleton_rev = 1 WHERE id = 'sk-noexcerpts'`, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	// both kinds with data are
+	e.run(t, "full", task, "done", "user", at(e.cutoff.Add(-2*time.Hour)), 1)
+	e.skelRun(t, "sk", task, "done", at(e.cutoff.Add(-3*time.Hour)))
+	ids, err := e.s.PruneCandidates(e.cutoff, 10)
+	if err != nil || fmt.Sprint(ids) != "[sk full]" {
+		t.Fatalf("candidates = %v, %v; want [sk full]", ids, err)
+	}
+}
+
+func TestPruneExcerptsNeverTouchesLiveTaskOrRunning(t *testing.T) {
+	e := newRetEnv(t)
+	open, archived := e.task(t, false, false), e.task(t, true, false)
+	old := at(e.cutoff.Add(-48 * time.Hour))
+	e.skelRun(t, "open-task", open, "done", old)
+	e.skelRun(t, "running", archived, "running", old)
+	e.skelRun(t, "young", archived, "done", at(e.cutoff.Add(time.Hour)))
+	for _, id := range []string{"open-task", "running", "young"} {
+		if n, err := e.s.PruneExcerptsBatch(id, 10, time.Now().UTC(), e.cutoff); err != nil || n != 0 {
+			t.Fatalf("%s: deleted %d excerpt rows, %v", id, n, err)
+		}
+		if e.excerpts(t, id) != 2 {
+			t.Errorf("%s lost its excerpts", id)
+		}
+		if sk, _ := e.s.GetRunSkeleton(id); sk.ExcerptsPrunedAt != nil {
+			t.Errorf("%s was stamped excerpts_pruned_at", id)
+		}
+	}
+	if ids, _ := e.s.PruneCandidates(e.cutoff, 10); len(ids) != 0 {
+		t.Fatalf("candidates = %v, want none", ids)
+	}
+}
+
+func TestPrunePreviewCountsExcerptsOfSkeletonRuns(t *testing.T) {
+	e := newRetEnv(t)
+	task := e.task(t, true, false)
+	e.run(t, "full", task, "done", "user", at(e.cutoff.Add(-2*time.Hour)), 3)
+	e.skelRun(t, "sk", task, "done", at(e.cutoff.Add(-time.Hour)))
+	c, err := e.s.PrunePreview(e.cutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Runs != 1 || c.Rows != 3 || c.Bytes <= 0 {
+		t.Fatalf("full counts = %+v, want 1 run / 3 rows / bytes", c)
+	}
+	if c.ExcerptRuns != 1 || c.ExcerptRows != 2 || c.ExcerptBytes <= 0 {
+		t.Fatalf("excerpt counts = %+v, want 1 run / 2 rows / bytes", c)
+	}
+}
+
+func TestPrunePreviewDryRunEqualsReal(t *testing.T) {
+	e := newRetEnv(t)
+	task := e.task(t, true, false)
+	e.run(t, "full", task, "done", "user", at(e.cutoff.Add(-2*time.Hour)), 5)
+	e.skelRun(t, "sk", task, "done", at(e.cutoff.Add(-time.Hour)))
+	want, err := e.s.PrunePreview(e.cutoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := e.pruneAllMixed(t, 2)
+	if got.Runs != want.Runs || got.Rows != want.Rows || got.ExcerptRuns != want.ExcerptRuns || got.ExcerptRows != want.ExcerptRows {
+		t.Fatalf("real %+v != dry run %+v", got, want)
+	}
+	if after, _ := e.s.PrunePreview(e.cutoff); after.Rows != 0 || after.ExcerptRows != 0 {
+		t.Fatalf("preview after the prune = %+v", after)
+	}
+}
+
 func TestNewDBIsIncrementalVacuum(t *testing.T) {
 	e := newRetEnv(t)
 	if !e.s.AutoVacuumIncremental() {
