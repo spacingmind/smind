@@ -191,9 +191,24 @@ Already measured for the ADR (scratch script, sizes only from this machine's own
 - [x] PR0 measurement: `smind debug run-stats --db <snapshot>` (#832, fix #833); run on the Human's real snapshot 2026-11-05.
 - [x] H6 thresholds FROZEN 2026-11-05: 512 B / 8 KiB / 4+4 KiB unchanged (ADR-0053, Measurements on the real database).
 - [x] PR1 write-time coalescing of persisted chunk rows (H3): `internal/runs/persistbuf.go`; equivalence, crash/idle/stop and per-reader tests; replay on a synthetic stream shaped like the real data: 503,100 events -> 9,800 rows (1.9%), about 101 MiB -> 10 MiB estimated on disk at 174 B/row.
+- [x] PR 3 (H8) `smind doctor`: provider-side retention warning (Claude Code `cleanupPeriodDays`; Codex has no expiry) + `doctor.sessions` counts; read-only, never edits a CLI setting (ADR-0053 "Implemented: smind doctor").
 - [x] PR4 read contract: `run.logs detail`, `historySource`/`skeletonReason`/`canLoadFull`, human-only rebuild, web + mobile note and "Load full history" (ADR-0053 "Implemented: the read contract"). Open: ACP `session/load`, budget cache + rebuild on open, fleet `owned_by_host`, `smind doctor` retention warning, retention amendment (PR C).
 - [x] PR3 claude-native + codex-native rebuilders (`internal/history/native`, `Registry.RebuildHistory`; ADR-0053 "Implemented: the claude-native and codex-native rebuilders"). Codex is read from the rollout file; `thread/read` deferred.
 - [x] PR2 finalizer + native_ref (this ADR, section "Implemented: the finalizer"). Open: C retention amendment, D rebuilders + read contract (`historySource`), E consumers + UI.
+
+## Parked (2026-11-05, Human decision after PR 3)
+
+The ADR-0053 work is paused here. Parked, not abandoned:
+
+- **AC13 budget cache + rebuild on open.** A rebuilt history enters the #823 LRU (keyed by the session file's size and mtime, never
+  written back); that is what makes rebuilding when a human opens a claude-native/codex-native run cheap enough to do
+  automatically (H5). Today the client asks for `detail: "full"` on a button press.
+- **ACP `session/load`** (explicit request only, agents that advertise `loadSession`).
+- **Fleet:** `skeletonRev` mirror re-sync and the `owned_by_host:<id>` label with a direct read on the owning host (AC9).
+- **Codex through `thread/read`** instead of the rollout file (ADR D4's preference; the file reader is the documented deviation).
+- **`smind runs skeletonize`** (opt-in conversion of legacy runs, H4) and the `runs.skeletonRetentionDays` knob (H2: reserved, not built).
+- Transcripts over 64 MiB are never rebuilt (0.5% on the measured machine); a streaming reader could lift the bound.
+- Done, no longer parked: the SameFile swap test (#837), the retention amendment (PR C, #840), the `smind doctor` warning (PR 3).
 
 ## Validation
 
