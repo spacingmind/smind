@@ -197,9 +197,26 @@ export const RULES: Record<string, DemoRule> = {
 
   // ---- runs: the timeline, the stream, sending a prompt -------------------------------------------------------------
   "run.list": read((c) => c.session.runList(c.params ?? {})),
-  "run.logs": read((c) => c.session.logsOf(c.params.runId) ?? notFound("run")),
+  "run.logs": read((c) => c.session.logsOf(c.params.runId, c.params.detail) ?? notFound("run")),
   "run.attach": scripted(async (c) => {
-    const run = c.session.runs.get(c.params.runId) ?? notFound("run");
+    const run = c.session.runs.get(c.params.runId);
+    if (!run) {
+      // ADR-0053: a run the scenario finished before page load replays its stored log, then
+      // answers with the stored terminal result -- history provenance included, like a daemon
+      // whose persisted history for that run is the trimmed summary.
+      const logs = c.session.scenario.runLogs[c.params.runId] ?? notFound("run");
+      for (const event of logs.events) {
+        const { type, ...rest } = event;
+        c.stream(type, rest);
+      }
+      return {
+        runId: c.params.runId,
+        stopReason: logs.stopReason ?? "",
+        ...(logs.historySource ? { historySource: logs.historySource } : {}),
+        ...(logs.skeletonReason ? { skeletonReason: logs.skeletonReason } : {}),
+        ...(logs.canLoadFull !== undefined ? { canLoadFull: logs.canLoadFull } : {}),
+      };
+    }
     let detach = () => {};
     const ended = new Promise<{ runId: string; stopReason: string }>((resolve) => {
       detach = run.attach((item) => {

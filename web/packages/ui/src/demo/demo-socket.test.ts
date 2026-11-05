@@ -217,6 +217,25 @@ describe("demo socket", () => {
     expect(runs.map((r) => r.Prompt)).toEqual(expect.arrayContaining(["hello there", "and again"]));
   });
 
+  it("D-09b a summarized history says so, rebuilds on detail full, and attach's terminal result carries the provenance", async () => {
+    const { client } = await start();
+    const logs = await client.call<{ historySource?: string; skeletonReason?: string; canLoadFull?: boolean; events: RunLogEvent[] }>("run.logs", { runId: "demo-run-retry" });
+    expect(logs).toMatchObject({ historySource: "skeleton", skeletonReason: "rebuild_not_requested", canLoadFull: true });
+
+    const full = await client.call<{ historySource?: string; skeletonReason?: string; events: RunLogEvent[] }>("run.logs", { runId: "demo-run-retry", detail: "full" });
+    expect(full.historySource).toBe("rebuilt");
+    expect(full.skeletonReason).toBeUndefined();
+    expect(full.events).toEqual(logs.events);
+
+    // every other finished run keeps its untouched history
+    const plain = await client.call<{ historySource?: string }>("run.logs", { runId: "demo-run-test" });
+    expect(plain.historySource).toBeUndefined();
+
+    const attached = attach(client, "demo-run-retry");
+    await expect(attached.done).resolves.toMatchObject({ stopReason: "end_turn", historySource: "skeleton", skeletonReason: "rebuild_not_requested", canLoadFull: true });
+    expect(attached.events).toHaveLength(logs.events.length);
+  });
+
   it("D-10 terminal replay: attach emits base64 data in order, resize is a no-op, write echoes locally, Enter prints the dim demo line", async () => {
     const { client, clock } = await start();
     const { terminalId } = await client.call<TerminalCreateResult>("terminal.create", { taskId: 1 });
