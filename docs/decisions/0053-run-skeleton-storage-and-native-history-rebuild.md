@@ -28,8 +28,8 @@ What was read for this ADR (2026-11-05):
   session holds a run's history only as a *slice*, and the handle alone does not say which slice.
 - **Provider sessions are real, on-disk or RPC-reachable, and richer than our copy** (matrix below).
 - **Real payloads are lighter than the 848 MB suggests.** Sizes only, from 5,674 Claude Code tool results and 1,298 Codex tool
-  outputs in this machine's own transcripts: p50 295 B / 1.2 KB, p90 2.2 KB / 6.8 KB, p99 10 KB / 40 KB, max 58 KB / 40 KB (both CLIs
-  cap their own tool output). Truncating every payload to 4 KB head + 4 KB tail would save only 10–27% of payload bytes. **The row
+  outputs in this machine's own transcripts: p50 295 B / 1.2 KB, p90 2.2 KB / 6.8 KB, p99 10 KB / 40 KB, max 58 KB / 40 KB (that sample was
+  small; the real database has a fatter tail, see [Measurements on the real database](#measurements-on-the-real-database-pr0-2026-11-05)). Truncating every payload to 4 KB head + 4 KB tail would save only 10–27% of payload bytes. **The row
   count dominates**: with per-chunk rows a 40-byte streamed chunk costs about 280 B on disk (JSON key overhead, the table row, two
   indexes). See [Measurements](#measurements): coalescing rows, not excerpting payloads, is the larger lever, and the real
   distribution must be taken on the Human's database before the thresholds are frozen (PR0).
@@ -56,6 +56,10 @@ Skeleton = everything needed to list, audit, cost, hand off and navigate a run, 
 Everything else is a **large payload**: tool inputs and results, file reads, test logs, diffs.
 
 ### 2. Large-payload thresholds (D2; measured, see Measurements)
+
+**Frozen 2026-11-05 (H6) after the real-data measurement: 512 B / 8 KiB / 4+4 KiB are unchanged.** The reasons are under
+[Measurements on the real database](#measurements-on-the-real-database-pr0-2026-11-05); the shares quoted in the three bullets below come
+from the earlier small sample and are superseded by the real ones there.
 
 For a payload (tool input or result, or an over-cap text row):
 
@@ -247,6 +251,65 @@ files 126 KB / 780 KB are single-digit milliseconds. Codex `thread/read` and ACP
 ms to seconds, not measured here: no live agent was started). The bounds in D4 (10 s, 64 MB) cover them; PR2 records Go numbers
 in the PR body.
 
+## Measurements on the real database (PR0, 2026-11-05)
+
+`smind debug run-stats` (hidden, offline, read-only) ran once on a `VACUUM INTO` snapshot of the Human's database (842 MiB file,
+1,127 runs, 3,244,656 events, 293.7 MiB of `event_data`). Counts and sizes only; the snapshot was deleted afterwards.
+
+**Where the bytes are.** The file is `run_events` table 567.7 MiB + indexes 266.1 MiB; the other tables are 8 MiB. Per-row overhead
+measured from `dbstat`: **174 B** beyond `event_data`. So rows cost more than their content:
+
+| Event type | rows | `event_data` | row size p50 / p99 |
+|---|---|---|---|
+| thinking | 2,994,288 | 68.7 MiB | 24 B / 31 B |
+| text | 184,232 | 5.7 MiB | 24 B / 114 B |
+| tool_call | 61,924 | 216.5 MiB | 403 B / 96 KB |
+| permission_request | 771 | 1.7 MiB | 1.3 KB / 17 KB |
+| raw | 345 | 0.8 MiB | 225 B / 6.9 KB |
+| usage, done, permission_resolved, mcp_servers, session_note | 3,096 | 0.4 MiB | tiny |
+
+98% of the rows are streamed chunks, almost all from the `glm` provider, whose chunks are **6 B at the median** (p99 13 B).
+Per provider: `glm` 370 runs, 3.17 M rows, 102.6 MiB of data; `claude-native` 733 runs, 61 k rows, 190.7 MiB; `codex-native` 22 runs,
+16.5 k rows, 0.4 MiB. Rows per run: p50 87, p90 10,218, p99 37,398, max 72,287. By run age: 277 MiB of the 294 MiB started in the last
+7 days, 11.4 MiB 7-30 days, 5.3 MiB older.
+
+**Payloads** (tool inputs and results, 51,012 of them, 209.5 MiB): p50 334 B, p90 5.5 KB, p99 113 KB, max 514 KB. `claude-native`
+results: p50 804 B, p90 15.3 KB, p99 195 KB, max 514 KB (169 MiB, 81% of all payload bytes); `glm` results: p50 1.2 KB, p90 9.0 KB, p99
+17.8 KB, max 79 KB. This **contradicts the earlier sample's "tools cap their own output at 40-58 KB"**: the real tail is several times
+longer. The design holds because the excerpt is a fixed cost per payload (see the grid), but the old per-bullet shares are not facts.
+
+**Threshold grid** (payload bytes only; whole cap W means "whole up to W, else head W/2 + tail W/2"):
+
+| inline | W | payloads kept whole | payload bytes within 30 days | after the excerpt prune |
+|---|---|---|---|---|
+| 512 | 4 KiB | 87.4% | 52.3 MiB (-75%) | 7.7 MiB |
+| **512** | **8 KiB** | **93.0%** | **70.9 MiB (-66%)** | **7.7 MiB (-96%)** |
+| 512 | 16 KiB | 96.2% | 90.7 MiB (-57%) | 7.7 MiB |
+| 512 | 32 KiB | 97.7% | 112.1 MiB (-47%) | 7.7 MiB |
+| 256 / 1024 | 8 KiB | 93.0% | 71.7 / 70.4 MiB | 5.1 / 10.9 MiB |
+
+**Why unchanged.** (1) Going from 8 to 16 KiB keeps 3.2 points more payloads whole for 19.8 MiB more; going to 4 KiB saves 18.6 MiB but
+cuts the tail to 2 KiB, too little for an error summary. (2) The inline cap moves the long-run size by +-3 MiB only. (3) The answer
+text runs are small: contiguous text runs p50 113 B, p90 2.1 KB, p99 5.1 KB, max 54.5 KB, so the 32 KiB answer cap clips only the
+extreme tail. (4) The excerpt tier is exactly what the 30-day prune removes, so its 63 MiB is a bounded, recurring cost, not growth.
+
+**Estimated effect** (model and assumptions printed by the tool; rows include the 174 B overhead):
+
+| Step | whole database |
+|---|---|
+| today | 832 MiB |
+| + write-time coalescing of chunk rows (PR1: boundary, 4 KiB, 250 ms idle) | 255 MiB (-69%) |
+| + skeleton form, excerpt tier still present (512 B / 8 KiB / 4+4 KiB, thinking dropped) | 100 MiB (-88%) |
+| + excerpt tier pruned after 30 days | 34 MiB (-96%) |
+
+Coalescing alone is the dominant lever: 3,178,520 chunk rows become 21,076 (boundary + 4 KiB) or 27,071 (with the 250 ms idle flush),
+saving about 577 MiB, of which most is row overhead, not text. Dropping thinking text (H1) then saves its remaining ~69 MiB of text,
+and excerpting payloads saves about 139 MiB of payload bytes (209.5 to 70.9 MiB). Growth: the last 7 days wrote 277 MiB of event data,
+about 40 MiB a day; after PR1 the same activity writes roughly a quarter of that.
+
+Known limit: this run attributed tool results to "unknown" because a result update omits the tool name (fixed in #833); the
+provider-level payload numbers above are unaffected.
+
 ## Consequences
 
 - Disk: the file grows by a fraction of today's rate and #827's prune now leaves a useful audit trail instead of a 3-event stub.
@@ -277,7 +340,8 @@ in the PR body.
 - H3 write-time chunk coalescing is the first feature PR (after a docs PR and the read-only measurement PR0).
 - H4 existing runs are left to the 30-day prune (#829); an opt-in `smind runs skeletonize` comes later.
 - H5 rebuild is automatic for claude-native and codex-native; ACP rebuilds only on an explicit "Load full history".
-- H6 thresholds are frozen only after PR0 reports the real distribution; 512 B / 8 KiB / 4+4 KiB are the starting values.
+- H6 thresholds are frozen only after PR0 reports the real distribution; **frozen 2026-11-05: 512 B / 8 KiB / 4+4 KiB, unchanged** (see
+  Measurements on the real database).
 - H7 orchestrators and agents read the **skeleton only** through `task_logs` and never trigger a rebuild; only a human request
   rebuilds. (This replaces the recommendation below, which proposed letting an orchestrator request `detail=full`.)
 - H8 `smind doctor` warns about provider-side retention; smind never edits the CLI settings.
