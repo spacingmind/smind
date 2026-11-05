@@ -120,6 +120,7 @@ Usage:
 
   smind runs prune [--dry-run]                            delete detailed history of finished runs older than runs.historyRetentionDays (humans only)
   smind db compact                                        shrink smind.db after pruning (holds the write lock; humans only)
+  smind doctor [--json]                                   check provider session retention (read-only; never edits a CLI setting)
   smind debug memory [--json]                             the running daemon's memory: Go heap, RSS/footprint, run history cache (local only)
 
   smind provider update <id> [--models a,b] [--add-models a,b]   edit an instance in config.yaml: its model list, extra models, disallowed tools
@@ -151,6 +152,37 @@ those of archived tasks (a task you have not archived keeps its full history).
 The run itself, its cost, its failure reason and its final answer stay; opening
 the run shows a note that the detail was pruned. The daemon also runs a pass on
 its own every day. Humans only: agents and relay phones cannot call it.
+
+### Provider session retention
+
+`smind doctor` checks how long Claude Code and Codex keep their own session
+files. smind can rebuild a finished run's full history from those files, but
+the CLI may delete them. smind keeps its own summaries; its copies of large
+tool output are removed after `runs.historyRetentionDays` (default 30, 0 =
+never). After that, the provider's session is the only source of the full
+history, and a CLI that deletes sessions sooner makes it disappear.
+
+`smind doctor` is read-only. It never edits a Claude Code or Codex setting or
+file; when a change would help it prints a `fix:` line for you to apply
+yourself. With `--json` it prints the findings and the session counts as JSON.
+
+- Claude Code deletes transcripts after `cleanupPeriodDays` days of inactivity
+  (default 30, minimum 1). The setting lives in `settings.json` in the config
+  directory (`$CLAUDE_CONFIG_DIR`, or `~/.claude`); `settings.local.json` there
+  overrides it. Provider instances keep their own directory under the smind
+  home. Project settings inside a repository and a managed policy file can
+  also set it; `smind doctor` does not check those.
+- Codex has no automatic session expiry: sessions stay until you delete them
+  with `codex delete`. Archived sessions (in `archived_sessions/`) can still be
+  read by smind.
+
+Each finding starts with its level. `[warn]` means the CLI deletes sessions
+no later than smind drops its own copies, so older runs lose their full
+history; `[info]` is context; `[ok]` needs no action. A warning still exits
+with status 0. If the daemon is running, the last line counts how many of
+smind's runs still have a provider session that can be read. Sessions that are
+already deleted cannot be restored: change the setting, then run `smind doctor`
+again.
 
 ### db compact
 
