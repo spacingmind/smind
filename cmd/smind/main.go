@@ -110,6 +110,8 @@ func run(args []string) int {
 		return cmdRuns(args[1:])
 	case "db":
 		return cmdDB(args[1:])
+	case "doctor":
+		return cmdDoctor(args[1:])
 	case "provider":
 		return cmdProvider(args[1:])
 	case "config":
@@ -235,6 +237,7 @@ Usage:
 
   smind runs prune [--dry-run]                            delete detailed history of finished runs older than runs.historyRetentionDays (humans only)
   smind db compact                                        shrink smind.db after pruning (holds the write lock; humans only)
+  smind doctor [--json]                                   check provider session retention (read-only; never edits a CLI setting)
   smind debug memory [--json]                             the running daemon's memory: Go heap, RSS/footprint, run history cache (local only)
 
   smind provider update <id> [--models a,b] [--add-models a,b]   edit an instance in config.yaml: its model list, extra models, disallowed tools

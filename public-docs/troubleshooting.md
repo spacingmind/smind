@@ -159,7 +159,7 @@ the note says why and the summary stays:
 
 | The note says | What it means |
 | --- | --- |
-| the provider's session file is no longer there | the CLI deleted or moved it (check its own retention setting) |
+| the provider's session file is no longer there | the CLI deleted or moved it (check its own retention setting). Run `smind doctor` to see the provider's retention setting. |
 | this turn could not be matched | the session no longer holds this run's turn, or two turns look the same |
 | the session format was not recognised | the CLI changed its file format; smind falls back until it is updated |
 | could not be loaded (too large or too slow) | the session file is over 64 MB or reading it took over 10 s |

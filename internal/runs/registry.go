@@ -74,6 +74,13 @@ type Registry struct {
 	mu   sync.Mutex
 	runs map[string]*run
 
+	// finishWG counts finish calls in flight; CloseAll waits for it so a
+	// finish that already published "done" still completes before the store
+	// is closed. finishStage is a test hook (nil in production), set before
+	// any run starts.
+	finishWG    sync.WaitGroup
+	finishStage func(stage string)
+
 	providerQuota ProviderQuota // guarded by mu
 	// gateFn and failureHook: the picker gate wiring (cooldown_window.go), guarded by mu.
 	gateFn      func(provider string, now time.Time) *gate.Gate
@@ -1583,6 +1590,8 @@ func cloneTimePtr(t *time.Time) *time.Time {
 }
 
 func (reg *Registry) finish(r *run, err error) {
+	reg.finishWG.Add(1)
+	defer reg.finishWG.Done()
 	now := time.Now()
 
 	// Rows still buffered for the store (persistbuf.go) go out before anything
@@ -1638,6 +1647,11 @@ func (reg *Registry) finish(r *run, err error) {
 	// is persisted, so the row and the in-memory status agree. The ctx is
 	// fresh (not the run's), so a Stop-cancelled run still captures.
 	reg.captureProvenance(context.Background(), r, false)
+
+	// ADR-0053: point at the provider's session BEFORE the terminal status is
+	// persisted and published, so a reader that sees "done" always finds
+	// native_ref. It needs only the run and the finish time, never the status.
+	reg.captureNativeRef(r, now)
 
 	// Persist before the in-memory status transition below becomes
 	// visible, not after: otherwise a caller that observes the terminal
@@ -1705,6 +1719,7 @@ func (reg *Registry) finish(r *run, err error) {
 		Purpose: observerPurpose(r.purpose), Status: string(status), StopReason: stopReason, Model: r.model, Origin: r.origin, FailureKind: fail.Kind, FailureAction: failureActionOf(fail.Kind, string(r.provider), r.model, fail.Window, fail.ResetAt, nil, 0), ToolCalls: toolCalls,
 		OfferedSkillIDs: offered.SkillIDs, OfferedMeasured: offered.Measured,
 	})
+	reg.stage("published")
 
 	// Close every subscriber still attached: their relay goroutines drain
 	// whatever's already queued (nothing is lost) and then close their out
@@ -1738,10 +1753,13 @@ func (reg *Registry) finish(r *run, err error) {
 	// deliverMu -> reg.mu, so no deadlock.
 	reg.DeliverQueued()
 
-	// ADR-0053: point at the provider's session, then collapse the rows to
-	// skeleton form. Before the closedCh signal, so CloseAll (and a test that
-	// waits on it) never closes the store under a conversion.
-	reg.captureNativeRef(r, now)
+	// ADR-0053: collapse the rows to skeleton form. Skeletonize needs the DB
+	// status to be terminal, so this stays after UpdateRunStatus; the skeleton
+	// form MAY LAG the "done" state (a reader that sees done may still read the
+	// full rows; every reader handles both forms), while native_ref is already
+	// present as soon as done is visible. Before the closedCh signal and inside
+	// finishWG, so CloseAll never closes the store under a conversion.
+	reg.stage("finalizing")
 	reg.finalizeRun(r.id)
 
 	// Signal last, same reasoning as internal/terminal.Registry's own
@@ -1754,6 +1772,13 @@ func (reg *Registry) finish(r *run, err error) {
 // systemRetentionCap bounds finished system runs kept in memory; they have
 // their own order so they never evict user runs from finishedRetentionCap.
 const systemRetentionCap = 50
+
+// stage reports a finish milestone to the test hook, if one is set.
+func (reg *Registry) stage(s string) {
+	if reg.finishStage != nil {
+		reg.finishStage(s)
+	}
+}
 
 func (reg *Registry) retain(id string) {
 	reg.mu.Lock()
@@ -2020,6 +2045,11 @@ func (reg *Registry) CloseAll() {
 		}
 		reg.mu.Unlock()
 		if len(running) == 0 {
+			// A run that was seen running is waited for through closedCh, and
+			// finish's Add happens-before that close, so every finish still in
+			// flight has already Added; runs whose status is already terminal
+			// (finish past its publish step) are covered by this Wait.
+			reg.finishWG.Wait()
 			return
 		}
 

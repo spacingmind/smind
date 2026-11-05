@@ -131,6 +131,33 @@ func openRegular(real string, max int64) (*os.File, error) {
 	return f, nil
 }
 
+// Probe says what a rebuild would find for ref under roots, without reading the
+// session: Found when its file resolves to a regular file inside an allowed root
+// and fits the size bound, TooLarge when it is there but over the bound. Both
+// false is "gone" (or not a path smind may open).
+type Probe struct{ Found, TooLarge bool }
+
+// ProbeSession applies exactly the path rules a rebuild does (validated ids, the
+// allowed roots, symlinks resolved, a regular file), and nothing else.
+func ProbeSession(ref Ref, roots []string) Probe {
+	var err error
+	switch ref.Harness {
+	case HarnessClaudeCode:
+		_, err = claudeSessionFile(ref, roots, MaxFileBytes)
+	case HarnessCodex:
+		_, err = codexSessionFile(ref, roots, MaxFileBytes)
+	default:
+		return Probe{}
+	}
+	switch {
+	case err == nil:
+		return Probe{Found: true}
+	case errors.Is(err, errTooLarge):
+		return Probe{TooLarge: true}
+	}
+	return Probe{}
+}
+
 // claudeSessionFile finds the transcript of ref under the allowed roots.
 func claudeSessionFile(ref Ref, roots []string, max int64) (string, error) {
 	if !validID(ref.SessionID) || ref.Cwd == "" || !allowedRoot(ref.ConfigDir, roots) {

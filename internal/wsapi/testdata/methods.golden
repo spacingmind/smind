@@ -29,6 +29,7 @@ chat.rename
 daemon.info
 db.compact
 debug.memory
+doctor.sessions
 file.list
 file.read
 file.readRange
