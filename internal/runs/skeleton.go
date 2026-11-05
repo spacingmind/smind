@@ -235,9 +235,21 @@ func toolRow(row store.RunEvent, p persistedEvent) (store.SkeletonRow, bool, err
 func excerptOf(field, raw string) (*skelField, store.Excerpt) {
 	x := store.Excerpt{Field: field, Head: raw, Bytes: int64(len(raw)), SHA256: sha256Hex(raw)}
 	if len(raw) > store.ExcerptWhole {
-		x.Head, x.Tail = store.CutRunes(raw, store.ExcerptHalf)
+		// A JSON string is cut as text, so the head and tail a reader sees have
+		// real line breaks, not "\n" escapes.
+		var text string
+		if len(raw) > 0 && raw[0] == '"' && json.Unmarshal([]byte(raw), &text) == nil {
+			// A string whose text fits head + tail is kept whole: cutting it
+			// would omit nothing (its quotes and escapes pushed it over 8 KiB).
+			if len(text) > 2*store.ExcerptHalf {
+				x.Enc, x.Bytes = "text", int64(len(text))
+				x.Head, x.Tail = store.CutRunes(text, store.ExcerptHalf)
+			}
+		} else {
+			x.Head, x.Tail = store.CutRunes(raw, store.ExcerptHalf)
+		}
 	}
-	return &skelField{N: x.Bytes, SHA: x.SHA256, Ex: true}, x
+	return &skelField{N: int64(len(raw)), SHA: x.SHA256, Ex: true}, x
 }
 
 // capJSON keeps raw when it fits limit, else a JSON string of its head. The

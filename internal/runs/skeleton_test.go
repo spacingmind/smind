@@ -85,7 +85,8 @@ func TestSkeletonThresholds(t *testing.T) {
 	}{
 		{2, false, false}, {200, false, false}, {512, false, false}, // inline: the row is untouched
 		{513, true, true}, {8192, true, true}, // whole in the excerpt tier
-		{8193, true, false}, {40000, true, false}, // head 4 KiB + tail 4 KiB
+		{8194, true, true},                        // over 8 KiB as JSON, but its text (8192) fits head + tail: kept whole
+		{8195, true, false}, {40000, true, false}, // head 4 KiB + tail 4 KiB of the text
 	} {
 		t.Run(fmt.Sprint(tc.n), func(t *testing.T) {
 			s := newSkelEnv(t)
@@ -128,7 +129,8 @@ func TestSkeletonThresholds(t *testing.T) {
 			if err := json.Unmarshal(ev.ToolResult, &text); err != nil {
 				t.Fatalf("rehydrated head+tail is not a JSON string: %v", err)
 			}
-			whole := string(res)
+			var whole string // the payload's text: a JSON string is cut as text, not as its escaped JSON
+			_ = json.Unmarshal(res, &whole)
 			if !strings.HasPrefix(text, whole[:store.ExcerptHalf]) || !strings.HasSuffix(text, whole[len(whole)-store.ExcerptHalf:]) ||
 				!strings.Contains(text, "bytes omitted") {
 				t.Fatalf("head/tail wrong (%d bytes)", len(text))

@@ -45,14 +45,10 @@ func TestSkeletonBigPayloadReadsTruncatedNotWrong(t *testing.T) {
 	if err := json.Unmarshal([]byte(events[0].EventData), &got); err != nil {
 		t.Fatal(err)
 	}
-	// The excerpt tier cuts the payload's raw JSON text (quotes included), so
-	// head and tail are bytes of that encoding.
-	enc, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// A JSON string payload is cut as text: head and tail are the first and last
+	// 4096 bytes of the decoded result.
 	if !strings.Contains(got.ToolResult, "bytes omitted") ||
-		!strings.HasPrefix(got.ToolResult, string(enc[:4096])) || !strings.HasSuffix(got.ToolResult, string(enc[len(enc)-4096:])) {
+		!strings.HasPrefix(got.ToolResult, result[:4096]) || !strings.HasSuffix(got.ToolResult, result[len(result)-4096:]) {
 		t.Fatalf("result not head+marker+tail (len %d): %.80q", len(got.ToolResult), got.ToolResult)
 	}
 	if !events[0].Truncated {

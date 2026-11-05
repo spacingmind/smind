@@ -39,6 +39,7 @@ type Excerpt struct {
 	Field  string // "in" or "out"
 	Head   string // the whole payload when Tail is ""
 	Tail   string
+	Enc    string // "" or "raw": head/tail cut the JSON text; "text": they cut a JSON string's decoded text
 	Bytes  int64
 	SHA256 string
 }
@@ -131,8 +132,12 @@ func (s *Store) ApplySkeleton(runID string, rows []SkeletonRow, at time.Time) (b
 			return false, fmt.Errorf("apply skeleton to %q: update row: %w", runID, err)
 		}
 		for _, x := range r.Excerpts {
-			if _, err := tx.Exec(`INSERT OR REPLACE INTO run_excerpts (run_id, seq, field, head, tail, bytes, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				runID, r.Seq, x.Field, x.Head, x.Tail, x.Bytes, x.SHA256); err != nil {
+			enc := x.Enc
+			if enc == "" {
+				enc = "raw"
+			}
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO run_excerpts (run_id, seq, field, head, tail, enc, bytes, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				runID, r.Seq, x.Field, x.Head, x.Tail, enc, x.Bytes, x.SHA256); err != nil {
 				return false, fmt.Errorf("apply skeleton to %q: excerpt: %w", runID, err)
 			}
 		}
@@ -265,9 +270,9 @@ type skelField struct {
 // marker + tail with cut = true. nil when the excerpt is gone (pruned): the
 // row keeps its summary.
 func (s *Store) excerptPayload(runID string, seq int64, field string) (raw json.RawMessage, cut bool, err error) {
-	var head, tail string
+	var head, tail, enc string
 	var bytes int64
-	err = s.db.QueryRow(`SELECT head, tail, bytes FROM run_excerpts WHERE run_id = ? AND seq = ? AND field = ?`, runID, seq, field).Scan(&head, &tail, &bytes)
+	err = s.db.QueryRow(`SELECT head, tail, enc, bytes FROM run_excerpts WHERE run_id = ? AND seq = ? AND field = ?`, runID, seq, field).Scan(&head, &tail, &enc, &bytes)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
