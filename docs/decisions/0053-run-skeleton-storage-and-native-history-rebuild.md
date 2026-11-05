@@ -302,6 +302,46 @@ in the PR body.
   ACP agents get the session id only. Open for the rebuilder PR: use the transcript's own `uuid` bounds instead of prompt
   hash plus time window.
 
+## Implemented: the claude-native and codex-native rebuilders (PR3)
+
+`internal/history/native` (the readers), `internal/runs/rebuild.go` (the Go API), wiring in `wsapi/server.go`. No wire field and no UI:
+the read contract that calls it (`historySource`, `detail`, "Load full history") is the next change.
+
+- **API.** `Registry.RebuildHistory(ctx, runID, requester)` returns the turn's events or a `Reason` (never an error);
+  `RebuildHeredoc` returns one raw heredoc body. Only `RequesterHuman` rebuilds (H7): an agent, an orchestrator or an
+  automation gets `rebuild_not_requested` and reads the stored skeleton; the check is in both layers.
+- **Sources (verified on a real machine, 2026-11-05).** Claude Code: the JSONL transcript named by `native_ref`
+  (`<config dir>/projects/<cwd dir>/<sessionId>.jsonl`; a turn starts at a user record whose content is a plain string, ends at the
+  next one; records of sub-agents and every unknown record type are skipped). Codex: the rollout file
+  (`sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl`, else `archived_sessions/`; a turn is `task_started`..`task_complete`, its prompt
+  the `UserMessage` item, its output the `AgentMessage` items). **Deviation from the matrix above:** Codex is read from the rollout
+  file, not `thread/read`, in this change: the typed RPC needs a spawned `codex app-server` with the right `CODEX_HOME` and is kept for
+  a later change; the file reader needs no process and is bounded the same way. What it returns equals the live path's events (text only
+  for Codex, which has no tool cards live).
+- **Slice.** Matched by the prompt sha256 AND the run's turn window, widened by 2 minutes on each side; no match or more than one
+  (a repeated prompt inside one window is ambiguous) is `slice_not_found`. smind never guesses.
+- **Path safety.** The file is derived from the run's own `native_ref` and an allow-listed root: the ref's config root must be one
+  of the roots the daemon would launch that provider with now (`Runner.SessionRoots`), the session id may not be a path (letters,
+  digits, `.`, `-`, `_`, no `..`), the recorded transcript path must equal the derived one (Claude), the real path (every symlink
+  resolved) must lie inside `<root>/projects` (or the Codex sessions/archive directories), be a regular file under the size bound,
+  and the opened handle must be that same file. Every refusal reads as `native_session_missing`.
+- **Bounds.** 2 concurrent rebuilds (a third is `rebuild_busy`; a timed-out parse keeps its slot until it really ends), 10 s, a 64 MiB
+  session file and 64 MiB of output, one record at most 16 MiB; over a bound is `rebuild_failed` with the reason in the detail. On
+  this machine 9 of 1,907 Claude transcripts (0.5%) are over 64 MiB (the largest 483 MB) and none of 43 Codex rollouts: those degrade
+  to the skeleton, by design.
+- **Drift.** A tolerant reader (unknown records and blocks skipped) with a self-check on the matched turn: at most 5% undecodable
+  records, at least 95% of tool calls paired with a result, the call count within 10% (at least one) of the stored run's. A failure is
+  `format_drift` with counts only; three consecutive failures for a (harness, CLI version) open a one-hour breaker that refuses
+  without reading.
+- **Redaction.** The output is client form: every tool call passes the same `ToolCallElider` a live read does (heredoc bodies elided
+  from the input, the title and an echoing result), the provider's secret values are scrubbed from every string first, and only text,
+  thinking and tool calls are returned: not user records, attachments, request blobs or any other record the live path never shows.
+  The raw heredoc body is reachable only through `RebuildHeredoc`, which returns it only if its sha256 equals the descriptor the
+  skeleton stored for that index (the finalizer's `skel.in.doc`), else `ErrHeredocUnavailable`.
+- **Not yet.** The rebuilt events are the transcript's content (text, thinking, tool calls); merging them with the stored rows that are
+  not in the transcript (done, usage, permissions) into one history, the cache (AC13), the ACP `session/load` path and the wire
+  contract come with the read contract.
+
 ## Measurements on the real database (PR0, 2026-11-05)
 
 `smind debug run-stats` (hidden, offline, read-only) ran once on a `VACUUM INTO` snapshot of the Human's database (842 MiB file,

@@ -3,7 +3,9 @@ package native
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -163,14 +165,19 @@ func (rb *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 		return refuse(ReasonBusy, "")
 	}
 
+	var f *os.File
 	real, err := find()
-	if err != nil {
-		<-rb.sem
-		return refuse(ReasonSessionMissing, "")
+	if err == nil {
+		var f2 *os.File
+		if f2, err = openRegular(real, MaxFileBytes); err == nil {
+			f = f2
+		}
 	}
-	f, err := openRegular(real, MaxFileBytes)
 	if err != nil {
 		<-rb.sem
+		if errors.Is(err, errTooLarge) {
+			return refuse(ReasonFailed, "the session file is over the size bound")
+		}
 		return refuse(ReasonSessionMissing, "")
 	}
 

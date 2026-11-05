@@ -325,8 +325,12 @@ func TestPathSafety(t *testing.T) {
 			e := newClaude(t)
 			setup(t, e)
 			res := e.rebuild()
-			if res.Reason != ReasonSessionMissing || len(res.Events) != 0 {
-				t.Fatalf("reason %q (%s) with %d events, want native_session_missing and nothing", res.Reason, res.Detail, len(res.Events))
+			want := ReasonSessionMissing
+			if name == "file over the size bound" {
+				want = ReasonFailed // a real session over the bound is not "missing": say why
+			}
+			if res.Reason != want || len(res.Events) != 0 {
+				t.Fatalf("reason %q (%s) with %d events, want %q and nothing", res.Reason, res.Detail, len(res.Events), want)
 			}
 		})
 	}

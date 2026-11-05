@@ -51,8 +51,11 @@ func resolveInside(candidate string, roots []string, under string, max int64) (s
 		return "", errUnsafe
 	}
 	st, err := os.Lstat(real)
-	if err != nil || !st.Mode().IsRegular() || st.Size() > max {
+	if err != nil || !st.Mode().IsRegular() {
 		return "", errUnsafe
+	}
+	if st.Size() > max {
+		return "", errTooLarge
 	}
 	for _, root := range roots {
 		if root == "" || !filepath.IsAbs(root) {
@@ -106,9 +109,13 @@ func openRegular(real string, max int64) (*os.File, error) {
 		return nil, errUnsafe
 	}
 	fst, err := f.Stat()
-	if err != nil || !fst.Mode().IsRegular() || fst.Size() > max {
+	if err != nil || !fst.Mode().IsRegular() {
 		f.Close()
 		return nil, errUnsafe
+	}
+	if fst.Size() > max {
+		f.Close()
+		return nil, errTooLarge
 	}
 	if lst, err := os.Lstat(real); err != nil || !os.SameFile(fst, lst) {
 		f.Close()
