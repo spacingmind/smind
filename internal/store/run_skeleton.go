@@ -158,19 +158,21 @@ func (s *Store) SetRunNativeRef(runID, ref string) error {
 
 // RunSkeleton is a run's skeleton columns.
 type RunSkeleton struct {
-	NativeRef  string
-	SkeletonAt *time.Time
-	Rev        int64
+	NativeRef        string
+	SkeletonAt       *time.Time
+	Rev              int64
+	ExcerptsPrunedAt *time.Time
 }
 
 // GetRunSkeleton reads the skeleton columns of runID.
 func (s *Store) GetRunSkeleton(runID string) (RunSkeleton, error) {
 	var out RunSkeleton
-	var at sql.NullTime
-	if err := s.db.QueryRow(`SELECT native_ref, skeleton_at, skeleton_rev FROM runs WHERE id = ?`, runID).Scan(&out.NativeRef, &at, &out.Rev); err != nil {
+	var at, exAt sql.NullTime
+	if err := s.db.QueryRow(`SELECT native_ref, skeleton_at, skeleton_rev, excerpts_pruned_at FROM runs WHERE id = ?`, runID).Scan(&out.NativeRef, &at, &out.Rev, &exAt); err != nil {
 		return RunSkeleton{}, fmt.Errorf("run %q skeleton: %w", runID, err)
 	}
 	out.SkeletonAt = nullToTimePtr(at)
+	out.ExcerptsPrunedAt = nullToTimePtr(exAt)
 	return out, nil
 }
 
