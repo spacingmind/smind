@@ -136,6 +136,10 @@ func TestDoctorSessionsLineAndDaemonDown(t *testing.T) {
 		!strings.Contains(out, `Run "smind doctor" again after changing the setting`) {
 		t.Fatalf("code %d out %q", code, out)
 	}
+	stubDoctor(t, doctorSessions{Runs: 5, WithRef: 5, Readable: 3, TooLarge: 1, Gone: 1}, nil)
+	if _, out, _ := runDoctorCmd(); !strings.Contains(out, "(1 already gone, 1 over the 64 MiB rebuild limit)") {
+		t.Fatalf("too-large count missing: %q", out)
+	}
 	stubDoctor(t, nil, errors.New("no daemon"))
 	code, out, _ = runDoctorCmd()
 	if code != 0 || !strings.Contains(out, "sessions: the daemon is not running") {

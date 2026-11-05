@@ -32,6 +32,7 @@ type doctorSessions struct {
 	Runs     int `json:"runs"`
 	WithRef  int `json:"withRef"`
 	Readable int `json:"readable"`
+	TooLarge int `json:"tooLarge"`
 	Gone     int `json:"gone"`
 }
 
@@ -100,7 +101,11 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintln(stdout, "sessions: the daemon is not running, so smind cannot count the provider sessions it can still read")
 		return 0
 	}
-	fmt.Fprintf(stdout, "sessions: %d of %d runs with a provider session can still be rebuilt (%d already gone)\n", sessions.Readable, sessions.WithRef, sessions.Gone)
+	fmt.Fprintf(stdout, "sessions: %d of %d runs with a provider session can still be rebuilt (%d already gone", sessions.Readable, sessions.WithRef, sessions.Gone)
+	if sessions.TooLarge > 0 {
+		fmt.Fprintf(stdout, ", %d over the 64 MiB rebuild limit", sessions.TooLarge)
+	}
+	fmt.Fprintln(stdout, ")")
 	if sessions.Gone > 0 && hasWarn {
 		fmt.Fprintln(stdout, `Run "smind doctor" again after changing the setting; sessions that are already deleted cannot be restored.`)
 	}
