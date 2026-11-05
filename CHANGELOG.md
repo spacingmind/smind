@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.20.0](https://github.com/spacingmind/smind/compare/v0.19.0...v0.20.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **runs:** prune detailed run history after 30 days ([#829](https://github.com/spacingmind/smind/issues/829))
+
+### Features
+
+* **cli:** smind doctor warns about provider-side session retention (ADR-0053 H8) ([#841](https://github.com/spacingmind/smind/issues/841)) ([bff7f64](https://github.com/spacingmind/smind/commit/bff7f64225a6fcbc20e8f379fae4d2c0d5f5cbc1))
+* **debug:** run-stats, a read-only measurement of run_events (ADR-0053 PR0) ([#832](https://github.com/spacingmind/smind/issues/832)) ([3f59985](https://github.com/spacingmind/smind/commit/3f599852fcddb123f00d79b332f5fb20670f290b))
+* **history:** claude-native and codex-native history rebuilders (ADR-0053) ([#837](https://github.com/spacingmind/smind/issues/837)) ([3890359](https://github.com/spacingmind/smind/commit/3890359b61ee7d312c581e9a2406cea766209f46))
+* **history:** read contract for rebuilt history, human-only Load full history (ADR-0053) ([#838](https://github.com/spacingmind/smind/issues/838)) ([546f845](https://github.com/spacingmind/smind/commit/546f845337dea980e5dc602ff8792573407d15fc))
+* **runs:** finalizer, skeleton rows and native_ref (ADR-0053) ([#836](https://github.com/spacingmind/smind/issues/836)) ([6d2ce57](https://github.com/spacingmind/smind/commit/6d2ce57734808b25f00c7e0ea5846d17cab46e1c))
+* **runs:** prune detailed run history after 30 days ([#829](https://github.com/spacingmind/smind/issues/829)) ([847123c](https://github.com/spacingmind/smind/commit/847123c983d5f47810e2c5d2373b2a76802e42c5))
+* **runs:** retention keeps a skeleton run's rows and deletes only its excerpts (ADR-0053) ([#840](https://github.com/spacingmind/smind/issues/840)) ([56b3358](https://github.com/spacingmind/smind/commit/56b33588360aeacd1bad2ebc7139525877a70cef))
+
+
+### Bug Fixes
+
+* **debug:** run-stats attributes a result event to its call's tool ([#833](https://github.com/spacingmind/smind/issues/833)) ([edfead2](https://github.com/spacingmind/smind/commit/edfead2e8c18b640bf931a5d24b26c82f4725c7a))
+* **server:** answer 404 for /debug/pprof/ when pprof is off ([#825](https://github.com/spacingmind/smind/issues/825)) ([2b8a5e2](https://github.com/spacingmind/smind/commit/2b8a5e21da96f9621df29590528a061d25efca99))
+* **ui:** keep the landing tour clean of the history note; align the mobile Load full history button ([#839](https://github.com/spacingmind/smind/issues/839)) ([4ac02f1](https://github.com/spacingmind/smind/commit/4ac02f1327c76f81fff9178cb82d9c78f1524279))
+
+
+### Performance Improvements
+
+* **runs:** coalesce persisted chunk rows at write time (ADR-0053 H3) ([#835](https://github.com/spacingmind/smind/issues/835)) ([a38bb70](https://github.com/spacingmind/smind/commit/a38bb70cf601a46c7ca7905f843063783e0706aa))
+* **runs:** lazy run history with a byte budget, pprof and smind debug memory ([#823](https://github.com/spacingmind/smind/issues/823)) ([84b52fb](https://github.com/spacingmind/smind/commit/84b52fb39c3fa7dedc315fcb2ea1d5e7cae0f266))
+
 ## [0.19.0](https://github.com/spacingmind/smind/compare/v0.18.0...v0.19.0) (2026-11-04)
 
 
