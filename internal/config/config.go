@@ -30,7 +30,36 @@ type Config struct {
 	Steward       StewardConfig       `yaml:"steward"`
 	Fleet         FleetConfig         `yaml:"fleet"`
 	Log           LogConfig           `yaml:"log"`
+	Runs          RunsConfig          `yaml:"runs"`
+	Debug         DebugConfig         `yaml:"debug"`
 }
+
+// RunsConfig tunes how much run history the daemon keeps in memory.
+type RunsConfig struct {
+	// HistoryBudgetMB caps the memory held by finished runs' event history.
+	// Older history stays in the database and is read on demand, complete;
+	// running runs are never limited. Default 64; Load rejects values < 1.
+	HistoryBudgetMB int `yaml:"historyBudgetMB"`
+}
+
+// DebugConfig holds the opt-in diagnostics. Both are human edits of
+// config.yaml (or env): no RPC, agent or relay session can change them.
+type DebugConfig struct {
+	// Pprof serves Go's /debug/pprof/ on the daemon's HTTP listener, to a
+	// loopback caller that sends the daemon token. Default false.
+	Pprof bool `yaml:"pprof"`
+}
+
+// DefaultRunHistoryBudgetMB is RunsConfig.HistoryBudgetMB's default.
+const DefaultRunHistoryBudgetMB = 64
+
+// Env overrides for the daemon diagnostics and run history budget.
+const (
+	// EnvPprof set to 1/true/on/yes/y/t/enabled turns debug.pprof on.
+	EnvPprof = "SMIND_PPROF"
+	// EnvRunHistoryBudgetMB overrides runs.historyBudgetMB (a positive integer).
+	EnvRunHistoryBudgetMB = "SMIND_RUN_HISTORY_BUDGET_MB"
+)
 
 // PluginsConfig is the global plugin switch (ADR-0042). It is off by default
 // and only a human edit of config.yaml turns it on: no RPC, agent or relay
@@ -560,6 +589,7 @@ func Default() Config {
 		Validation:  ValidationConfig{MaxBudgetUsd: 5, DefaultBudgetUsd: 1.5},
 		Fleet:       DefaultFleet(),
 		Log:         LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
+		Runs:        RunsConfig{HistoryBudgetMB: DefaultRunHistoryBudgetMB},
 	}
 }
 
@@ -631,6 +661,9 @@ func LoadFile(path string) (Config, error) {
 	if n := cfg.Log.MaxFiles; n < 1 {
 		return cfg, fmt.Errorf("config %s: log.maxFiles must be >= 1, got %d", path, n)
 	}
+	if n := cfg.Runs.HistoryBudgetMB; n < 1 {
+		return cfg, fmt.Errorf("config %s: runs.historyBudgetMB must be >= 1, got %d", path, n)
+	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", path, MaxGLMTurns, *mt)
 	}
@@ -665,6 +698,17 @@ func applyEnv(cfg *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvExpoAccessToken)); v != "" {
 		cfg.Push.ExpoAccessToken = v
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvPprof)); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "on", "yes", "y", "t", "enabled":
+			cfg.Debug.Pprof = true
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvRunHistoryBudgetMB)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Runs.HistoryBudgetMB = n
+		}
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvLearning)); v != "" {
 		switch strings.ToLower(v) {

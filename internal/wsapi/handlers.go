@@ -54,6 +54,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.list":                handleTaskList(wm, db),
 		"task.get":                 handleTaskGet(wm, db),
 		"task.setBudget":           handleTaskSetBudget(db, reg),
+		"debug.memory":             handleDebugMemory(reg),
 		"task.archive":             handleTaskArchive(wm, reg),
 		"task.archivePreview":      handleTaskArchivePreview(wm),
 		"task.restore":             handleTaskRestore(wm),

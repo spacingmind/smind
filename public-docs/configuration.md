@@ -144,6 +144,18 @@ An unknown provider id under `providers.<id>` is an error. See
 | `log.maxSizeMB` | `10` | Size at which `daemon.log` rotates. Must be 1 or more. |
 | `log.maxFiles` | `5` | Log files kept, including the active one. Must be 1 or more. |
 
+### runs
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `runs.historyBudgetMB` | `64` | Memory the daemon keeps for finished runs' output. Older output stays in the database and is read when you open the run, complete and unchanged; a running run is never limited. Must be 1 or more. Raise it if reopening recent runs feels slow; lower it on a small machine. |
+
+### debug
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `debug.pprof` | `false` | Serve Go's `/debug/pprof/` on the daemon's HTTP port for memory diagnosis. Only a local client that sends the daemon token (`Authorization: Bearer <token>`) is answered; everyone else gets an error. Leave it off unless you are chasing a memory problem. |
+
 ### fleet
 
 | Key | Default | Meaning |
@@ -246,6 +258,8 @@ Every number must be 1 or more. Budgets must be above 0, and
 | `SMIND_PUSH` | `0`, `false`, `off`, `no`, `n`, `f` or `disabled` turns push notifications off. |
 | `SMIND_EXPO_ACCESS_TOKEN` | Overrides `push.expoAccessToken`. |
 | `SMIND_LEARNING` | The same off values force `learning.enabled` off. |
+| `SMIND_RUN_HISTORY_BUDGET_MB` | A positive number overrides `runs.historyBudgetMB`. |
+| `SMIND_PPROF` | `1`, `true`, `on`, `yes`, `y`, `t` or `enabled` turns `debug.pprof` on. |
 | `SMIND_VERSION`, `SMIND_INSTALL_DIR`, `SMIND_APP_DIR` | Read by the install scripts. See [Getting started](getting-started.md). |
 
 Environment variables win over the file.

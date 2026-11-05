@@ -79,6 +79,7 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 		return nil, fmt.Errorf("server: new: %w", err)
 	}
 	api.SetManagedBy(o.managedBy)
+	api.Runs.SetHistoryBudget(int64(cfg.Runs.HistoryBudgetMB) << 20)
 	s := &Server{
 		cfg:       cfg,
 		proxy:     newProxy(reg, router, db, withObserver(o.observer)),
@@ -155,6 +156,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/chat/completions", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleOpenAI)))
 	mux.Handle("POST /api/shutdown", auth.RequireToken(s.token, http.HandlerFunc(s.handleShutdown)))
 	mux.Handle("GET /ws", s.ws)
+	if s.cfg.Debug.Pprof {
+		mux.Handle("/debug/pprof/", s.pprofHandler())
+	}
 	mux.Handle("/", webUI())
 	return s.direct.guard(mux)
 }

@@ -129,3 +129,11 @@ The file rotates at 10 MB and keeps 5 files. Change that with `log.maxSizeMB`
 and `log.maxFiles`. See [Configuration](configuration.md).
 
 In the desktop app, **Settings** → **Daemon** shows the log file path.
+
+## The daemon uses a lot of memory
+
+Run `smind debug memory`. The daemon keeps only a bounded amount of finished
+runs' output in memory (`runs.historyBudgetMB`, 64 MB by default); the rest is
+read from the database when you open a run, so a big `smind.db` does not mean a
+big process. If the numbers show something else growing, enable
+`debug.pprof` and take a heap profile (see [CLI reference](cli-reference.md)).

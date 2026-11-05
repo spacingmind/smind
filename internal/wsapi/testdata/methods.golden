@@ -27,6 +27,7 @@ chat.queueGet
 chat.queueList
 chat.rename
 daemon.info
+debug.memory
 file.list
 file.read
 file.readRange
