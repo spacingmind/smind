@@ -204,7 +204,7 @@ Settled for this plan:
   created per process and closed on reap or kill.
 - `.cmd` spawning follows the escaping rules for `cmd.exe` arguments
   (BatBadBut class). Refusing to start is preferred over best-effort
-  quoting. Reference: `refs/paseo` `packages/server/src/terminal/terminal.ts`
+  quoting. Reference: a local reference clone `packages/server/src/terminal/terminal.ts`
   (shim resolution with `cmd /d /s /c` and caret escaping).
 
 ## Progress

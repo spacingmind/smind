@@ -192,7 +192,7 @@ directly rather than trust secondhand paraphrase.
 - [x] Item 2 — `@expo/ui` `TextInput` for the two text inputs
       (best-effort; deferral with a named reason is an acceptable
       outcome).
-- [x] Hand off implementation via Paseo — GLM implemented both items
+- [x] Hand off implementation via a reference workbench — GLM implemented both items
       end to end this time (unlike mobile-ui-polish's double stall).
       One real intervention needed: mid-Item-2, GLM spent 7+ turns
       reading native SwiftUI/Compose source (`onTextChange` dispatch

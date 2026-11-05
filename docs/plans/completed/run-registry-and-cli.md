@@ -15,7 +15,7 @@
     (`run.stop`)
 - Detaching (a subscriber disconnecting or explicitly unsubscribing) does
   **not** stop the run — only an explicit `run.stop` does. This matches
-  the real precedent (`refs/paseo`'s `attach`: "Ctrl+C to detach", not
+  the real precedent (a local reference clone's `attach`: "Ctrl+C to detach", not
   stop).
 - The existing `task.prompt` method's behavior for a single connection
   driving a run start-to-finish (Phase 2's PR #18 test coverage) keeps
@@ -28,7 +28,7 @@
   `task stop <runId>`.
 - Explicitly out of scope (deferred, no real demand yet): persistent
   multi-turn sessions where a "send" continues an already-finished run's
-  same live agent process ("send to an idle agent" from `refs/paseo`).
+  same live agent process ("send to an idle agent" from a local reference clone).
   Every `task.prompt`/`run.start` is still a fresh one-shot subprocess
   per `internal/taskrunner`'s existing, deliberate design. A future `send`
   to a *finished* run starts a new run against the same task, it does not
@@ -75,12 +75,12 @@ CLI:
   (`~/.spacingmind/token` via `internal/auth`/`internal/config`), no
   separate credential mechanism invented.
 - `--host`/remote daemon support is explicitly **not** required for v1
-  (smind is single-machine for now, unlike Paseo's `--host`) — don't
+  (smind is single-machine for now, unlike a reference workbench's `--host`) — don't
   build it speculatively.
 
 ## Decisions
 
-- Modeled after `refs/paseo`'s actual CLI (`public-docs/cli.md`) and its
+- Modeled after a local reference clone's actual CLI (`public-docs/cli.md`) and its
   documented run/attach/logs/stop semantics, not invented from scratch —
   see Acceptance Criteria above for the specific behaviors carried over.
 - New backend method `run.start`: like `task.prompt`'s first half (calls

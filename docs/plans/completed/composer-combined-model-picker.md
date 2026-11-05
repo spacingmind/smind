@@ -1,13 +1,13 @@
-# Combined provider + model picker (Paseo-style)
+# Combined provider + model picker (reference-style)
 
 **Ask (2026-10-12, follow-up to [composer-redesign](../completed/composer-redesign.md)):**
-"Chọn provider => chọn model gộp vào 1 selection dropdown giống paseo." The
+"Chọn provider => chọn model gộp vào 1 selection dropdown giống a reference workbench." The
 composer toolbar's separate agent/profile pill, provider pill and model pill
-become **one** selector, ported from Paseo's model browser.
+become **one** selector, ported from a reference workbench's model browser.
 
 **Size:** M.
 
-**Sources ported from** (`refs/paseo/packages/app/src/`):
+**Sources ported from** (a local reference clone):
 `components/combined-model-selector.tsx` (trigger + popover shell),
 `components/model-browser.tsx` (root = pinned *Profiles* section + provider
 drill-down rows with model count/state; provider view = header with back
@@ -17,7 +17,7 @@ results at the root; unavailable/error empty state),
 profile grouping), `provider-selection/provider-selection.ts` (rows,
 synthetic default row, ranking, selected-label resolution),
 `composer/agent-controls/{index,model-sheet}.tsx` (compact → bottom sheet).
-Paseo is React Native; this ports the interaction model and the pure logic
+A reference workbench is React Native; this ports the interaction model and the pure logic
 (near-verbatim, with its tests), not the RN components.
 
 ## Today (verified on `3ffad8ec`)
@@ -39,7 +39,7 @@ credential check, no network) already backs the sidebar's health dot via
 1. **One trigger replaces `.Agent` + `.Provider` + `.Model`** (the three parts
    are removed, not kept as dead code). Thinking and permission stay separate
    pills and keep re-deriving from the selected provider.
-2. **Profiles become the pinned root section** of the popover, as in Paseo
+2. **Profiles become the pinned root section** of the popover, as in a reference workbench
    ("Profiles" above "Providers"): a "No agent" entry (detaches, as today),
    one row per profile with its `describeProfile` summary, the applied profile
    checked and marked "custom" when hand-edited, and a "Manage agents…" action
@@ -55,30 +55,30 @@ credential check, no network) already backs the sidebar's health dot via
    (= `setProvider` then the model; mode/autoAccept reset exactly as
    `setProvider` does today). Picking a model of the *current* provider only
    sets the model (mode kept). The per-provider "Default model" row (id `""`)
-   is always first, like Paseo's synthetic default row, and means "send
+   is always first, like a reference workbench's synthetic default row, and means "send
    nothing".
 4. **Trigger label** is `<Provider> · <Model>` (`Claude Code · Opus 5.5`;
    `Claude Code` alone for the default model). smind has no per-provider brand
-   glyphs (Paseo does), so the provider name carries what Paseo's icon does;
+   glyphs (a reference workbench does), so the provider name carries what a reference workbench's icon does;
    the leading icon stays `SquareTerminal`. Below `sm` the label hides and the
    trigger is the 44px icon-only button from composer-redesign.
 5. **Bound chat (ADR-0016 P3):** the provider cannot change, so the popover
    opens straight into the bound provider's view with no back button, no other
    providers and a one-line note ("Bound to X — start a new chat to switch
    providers"). Profiles of other providers are not offered.
-6. **Unavailable providers** (Paseo: disabled with reason): `provider.test`
+6. **Unavailable providers** (a reference workbench: disabled with reason): `provider.test`
    per provider, lazily on the first open per client (single-flight, local
    check only — no polling, no per-render calls), results cached. A failed
    provider's root row is disabled with `detail` as the reason; it is still
    shown (and stays usable as the *current* selection so an existing choice is
    never silently dropped). Untested/pending = enabled.
 7. **Narrow (`< md`, the app's mobile breakpoint):** the picker renders in a
-   bottom `Sheet` (Paseo's `model-sheet`) instead of a `Popover`; same content.
+   bottom `Sheet` (a reference workbench's `model-sheet`) instead of a `Popover`; same content.
 8. **Keyboard:** search input autofocuses; ↑/↓ move the active row, Enter
    activates it (select model / drill into provider / apply profile), ←/Backspace
    on an empty query goes back, Esc closes.
 9. **Where the pure logic lives:** `lib/model-browser.ts` (no React), tested
-   like Paseo's `model-browser-view.test.ts`. The UI is
+   like a reference workbench's `model-browser-view.test.ts`. The UI is
    `components/composer/model-picker.tsx`.
 
 ## Acceptance criteria
@@ -113,11 +113,11 @@ credential check, no network) already backs the sidebar's health dot via
   migrated to the new controls, not deleted.
 - **AC12 Visual.** Light+dark screenshots at 1440×900 and 390×844: closed
   trigger, open popover (provider view), search filtered, provider switch
-  result, narrow sheet; compared with Paseo's picker.
+  result, narrow sheet; compared with a reference workbench's picker.
 
 ## Test scenarios (named)
 
-`lib/model-browser.test.ts` (ported from Paseo's `model-browser-view.test.ts`
+`lib/model-browser.test.ts` (ported from a reference workbench's `model-browser-view.test.ts`
 and `provider-selection.test.ts`):
 
 - `opens a sole provider directly`
@@ -173,7 +173,7 @@ persistence + ★ default agent.
 
 - `peer-glm` (`5b12901a`, Step 1: pure logic + 18 ported tests): **ACCEPT**
   (`8c2d1b62`, `3f15b62e`). Reviewed the diff; its ranking follows the brief's
-  scoring (ties keep input order) instead of Paseo's `scoreTextFields`.
+  scoring (ties keep input order) instead of a reference workbench's `scoreTextFields`.
 - `peer-sonnet` (`96d35cb1`, Step 2: picker UI + 12 tests): **ACCEPT**
   (`185f724c`, `69776699`, `6f653de4`) with Lead fixes after review: type-scale
   tokens, highlight starting on the current selection, calmer search focus.
@@ -206,7 +206,7 @@ Verified 2026-10-12 on `feat/composer-combined-model-picker` (develop merged).
   is the bottom sheet and the trigger is icon-only), rendered from the real
   `<Composer>` against a fake client (local harness, `tmp/`). Not run against
   a live daemon.
-- Residual: a model row's secondary line is `description ?? id` (as Paseo does),
+- Residual: a model row's secondary line is `description ?? id` (as a reference workbench does),
   so a catalog model without a description shows its raw id; the trigger shows
   `Provider · Model` (e.g. `GLM · GLM 5.3`), a little redundant when the labels
   repeat.

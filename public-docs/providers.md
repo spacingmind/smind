@@ -264,7 +264,7 @@ or shown on mobile.
 | Recipe id | Harness | Needs | Source | Verified |
 | --- | --- | --- | --- | --- |
 | `zai-glm` | Claude Code | key | vendor docs | no |
-| `qwen-dashscope` | Claude Code | key | Paseo docs | no |
+| `qwen-dashscope` | Claude Code | key | A reference workbench docs | no |
 | `deepseek` | Claude Code | key | vendor docs | no |
 | `kimi-moonshot` | Claude Code | key | **inferred** | **no: the Claude Code base URL is a guess** |
 | `minimax` | Claude Code | key | vendor docs | no |
@@ -272,8 +272,8 @@ or shown on mobile.
 | `ollama` | Claude Code | a model id (local, no key) | vendor docs | no |
 | `lm-studio` | Claude Code | a model id (local, no key) | vendor docs | no |
 | `litellm` | Claude Code | URL, key, model ids | vendor docs | no |
-| `anthropic-compatible` | Claude Code | URL, key, model ids | Paseo docs | no |
-| `openai-responses-compatible` | Codex | URL, key, model ids | Paseo docs | no |
+| `anthropic-compatible` | Claude Code | URL, key, model ids | A reference workbench docs | no |
+| `openai-responses-compatible` | Codex | URL, key, model ids | A reference workbench docs | no |
 | `chat-completions-via-opencode` | OpenCode | URL, key, model ids | vendor docs | no |
 
 "Verified: no" means no row has been run against a live endpoint yet; the

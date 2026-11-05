@@ -1,4 +1,4 @@
-# Hosts page polish (ZCode visual parity, fleet lane)
+# Hosts page polish (a reference desktop workbench visual parity, fleet lane)
 
 Size: S, web only (`components/hosts/*`, `settings/hosts-section*.tsx`). No daemon/wsapi change.
 

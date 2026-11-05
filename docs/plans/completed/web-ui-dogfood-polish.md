@@ -2,7 +2,7 @@
 
 ## Context
 
-First real dogfood session on the merged visual-identity pass (#152) produced five concrete feedback items. Four are layout/IA gaps against paseo parity; one is a composer visual redesign to the reference screenshot (a paseo-style agent composer: status pills above, selectors and run controls inside the input's bottom toolbar).
+First real dogfood session on the merged visual-identity pass (#152) produced five concrete feedback items. Four are layout/IA gaps against a reference workbench parity; one is a composer visual redesign to the reference screenshot (a reference-style agent composer: status pills above, selectors and run controls inside the input's bottom toolbar).
 
 Current state, confirmed by reading the code:
 - `app-sidebar.tsx:410-421`: theme toggle + settings + (collapsed) menu buttons in `SidebarHeader`. When the sidebar is icon-collapsed via the rail toggle, the header row hides its children (`group-data-[collapsible=icon]:hidden`) but the row and its padding still occupy vertical space — the "space is still there" complaint.
@@ -11,7 +11,7 @@ Current state, confirmed by reading the code:
 - `settings/settings-screen.tsx:63-67`: settings is a `Dialog` popup.
 - `composer/composer.tsx`: functional but visually a labeled form (Provider/Approval policy labels + selects beside the textarea, Send/Stop to the right); the reference screenshot wants a self-contained input card: status pills (diff stat, subagent count) above the box, selectors + mic/stop inside a bottom toolbar of the box itself.
 
-## Reference patterns (refs/paseo, read 2026-09-18)
+## Reference patterns (a local reference clone, read 2026-09-18)
 
 - Settings as a **screen**: `app/settings/index.tsx` + `[section].tsx` (expo-router screens), `navigation/settings-navigation.ts` (push/dismiss routing, root → section drill-down). For smind's web UI this maps to a tab/screen route (`settings` view state in App, or a dedicated route) with a section nav rail, replacing the Dialog — the existing `settings-registry.ts` sections (appearance/general) carry over unchanged.
 - Composer pills: `composer/diff-stat-pill.tsx` — a compact pill (additions green / deletions red) rendered above the input, clickable to open the diff. smind already renders the same numbers in the diff tab; surfacing them at the composer is a placement change, not new data.
@@ -31,7 +31,7 @@ Tabs become user-owned: closing the last tab of a task shows an empty state (wit
 **Follow-up, 2026-09-18 (dogfood feedback: "default 1 tab agent đang mở thôi")** -- the first-visit seed itself was still all 4 base kinds, defeating the "user decides which tabs exist" point of this item. Changed `use-task-tabs.ts`'s `seedState` to seed only Chat; Files/Diff/Terminal stay one "+"/empty-state/command-palette click away (all three already read `BASE_TAB_KINDS`/`defaultTabsForTask` directly, untouched). Fixed a real bug this surfaced: `App.tsx`'s route-restore effect used `activate()` for a non-file base-kind route tab (e.g. deep-linking to `.../diff`), which is a no-op if that tab isn't already open -- with only Chat seeded, a fresh deep link to `.../diff` would silently land on Chat instead. Switched it to `openTab(match.ID, baseTabForKind(match.ID, kind))`, which opens-or-activates.
 
 ### Item 4 — settings as a screen, not a popup
-`settings-screen.tsx` stops being a Dialog. It becomes a full-pane screen (same surface as the task pane area) with a section nav (Appearance / General today, extensible via `settings-registry.ts`), opened from the sidebar settings button and closable back to the previous view (Esc / back affordance). Follows paseo's root→section pattern but web-simple: one screen, section rail, no router library introduction.
+`settings-screen.tsx` stops being a Dialog. It becomes a full-pane screen (same surface as the task pane area) with a section nav (Appearance / General today, extensible via `settings-registry.ts`), opened from the sidebar settings button and closable back to the previous view (Esc / back affordance). Follows a reference workbench's root→section pattern but web-simple: one screen, section rail, no router library introduction.
 
 ### Item 5 — composer redesign to the reference input card
 Reshape `composer.tsx` into the reference card anatomy:
@@ -51,7 +51,7 @@ Reshape `composer.tsx` into the reference card anatomy:
 
 ## Decisions
 
-- Settings screen is a view-state screen in App (no router lib) — matches "smallest coherent change" and paseo's pattern translated to web.
+- Settings screen is a view-state screen in App (no router lib) — matches "smallest coherent change" and a reference workbench's pattern translated to web.
 - Item 5 pills show only data smind actually has (diff stat yes; subagent count only when smind exposes it — otherwise omit, never fake).
 - Item 1 solution shape (collapsed icon stack vs remove) left to implementation, gated on "no dead space + still reachable".
 

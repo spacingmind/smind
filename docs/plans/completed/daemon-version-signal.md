@@ -2,7 +2,7 @@
 
 ## Context
 
-ADR-0013, in its version-skew sub-decision (user-approved 2026-09-25), needs the daemon to report its own version, so the desktop app can compare it against its own and offer "update daemon and restart". The flow is modeled on Paseo's `shouldRestartForVersion`.
+ADR-0013, in its version-skew sub-decision (user-approved 2026-09-25), needs the daemon to report its own version, so the desktop app can compare it against its own and offer "update daemon and restart". The flow is modeled on a reference workbench's `shouldRestartForVersion`.
 
 Today smind has no version concept at all:
 - `Taskfile.yml`'s `build` runs a plain `go build`, with no ldflags;

@@ -3,7 +3,7 @@
 Research doc, not a plan. Question: should smind's web UI split into an
 agent-orchestration mode and a VS Code-like editor mode, and if so how?
 Everything below is grounded in code actually read in this repo, in
-`refs/paseo`, or in a cited web source.
+A local reference clone, or in a cited web source.
 
 Two premise corrections up front, since the rest depends on them:
 
@@ -40,7 +40,7 @@ Two premise corrections up front, since the rest depends on them:
 
 | Product | Agent/editor relationship | Mode switch? | Isolation | Review surface | Commit model |
 | --- | --- | --- | --- | --- | --- |
-| **Paseo** (`refs/paseo`) | One workspace canvas. Every surface is a tab *kind* (`agent`, `terminal`, `file`, `working_diff`, `changes_tree`, `files`, `pull_request`, `commit_diff`, `browser`, `plugin`) with a declared `supportedHosts: ["main" \| "explorer"]` (`packages/app/src/panels/panel-manifest.ts`) | **No.** Agents, terminals, files and diffs all move between the Explorer dock and main panes (`docs/explorer-sidebar.md:18-21`) | git worktree per workspace (`docs/product.md`, "isolated copies (git worktrees)") | Live diff subscription (`subscribe_checkout_diff_request` → `checkout_diff_update`), GitHub-style **draft line comments** persisted per checkout (`packages/app/src/review/state.ts:6-14`) | `checkout_commit_request { cwd, message?, addAll? }` — coarse, whole-worktree. Plus push / PR create / PR merge / merge-from-base (`packages/app/src/git/policy.ts:9-25`) |
+| **A reference workbench** (a local reference clone) | One workspace canvas. Every surface is a tab *kind* (`agent`, `terminal`, `file`, `working_diff`, `changes_tree`, `files`, `pull_request`, `commit_diff`, `browser`, `plugin`) with a declared `supportedHosts: ["main" \| "explorer"]` (`packages/app/src/panels/panel-manifest.ts`) | **No.** Agents, terminals, files and diffs all move between the Explorer dock and main panes (`docs/explorer-sidebar.md:18-21`) | git worktree per workspace (`docs/product.md`, "isolated copies (git worktrees)") | Live diff subscription (`subscribe_checkout_diff_request` → `checkout_diff_update`), GitHub-style **draft line comments** persisted per checkout (`packages/app/src/review/state.ts:6-14`) | `checkout_commit_request { cwd, message?, addAll? }` — coarse, whole-worktree. Plus push / PR create / PR merge / merge-from-base (`packages/app/src/git/policy.ts:9-25`) |
 | **VS Code** (Copilot/agents) | Two shells over one session store: normal window (Chat view in sidebar + chat *editors* as tabs) and a chat-primary **Agents window** (Sessions / Customizations / Chat / Changes / Files) | **Two windows, not a toggle.** "Both surfaces share the same sessions, settings, and keybindings" | Worktree per session; "VS Code commits uncommitted changes to the session branch before it removes the worktree folder" | **Changes** view; "select a block of text in the diff to leave range-based feedback for the agent"; session rows carry a file-change stat for unreviewed edits | **Commit Changes** from the session, commit message auto-generated. Agent Merge (preview) drives a PR to mergeable |
 | **Cursor 3** | **Agents Window** listing every local+cloud agent across repos; agent tabs side-by-side or in a grid | Separate window; editor stays the editor | git worktree per agent, up to 8 parallel; `/worktree` command | Per-agent worktree diff; results land as a PR | Agent pushes results as a pull request |
 | **Google Antigravity** | The one mainstream product with an explicit dual surface: **Editor view** (VS Code-like, agent sidebar) and **Manager view** ("control center for orchestrating multiple agents working in parallel across workspaces") | **Yes** — and notably the switching mechanism is not documented anywhere public | Per-workspace | "Artifacts" — task lists, plans, screenshots, browser recordings — reviewed instead of raw tool calls | Not documented |
@@ -73,7 +73,7 @@ optional side dock. No mode switch.**
 
 - **Attention rail** = today's `app-sidebar.tsx` tree plus per-task
   badges: live run status, pending-permission count, unreviewed changed-file
-  count. Both Paseo (`AgentAttentionReason = "finished" | "error" |
+  count. Both a reference workbench (`AgentAttentionReason = "finished" | "error" |
   "permission"`, `packages/protocol/src/agent-attention-notification.ts:3`)
   and VS Code (per-session file-change stat for unreviewed edits) put
   exactly this information in a permanently visible list. It is the
@@ -81,7 +81,7 @@ optional side dock. No mode switch.**
 - **Main host** = a dynamic tab list, not a fixed tab strip. Tab kinds:
   `agent` (a run timeline), `file` (CodeMirror; many open at once),
   `diff`, `terminal`. Each kind declares which hosts it supports, exactly
-  as Paseo's `panel-manifest.ts` does.
+  as a reference workbench's `panel-manifest.ts` does.
 - **Side dock** = one extra pane host with "Open to Side". That single
   split is what makes "chat left, diff right" possible, which is the
   actual thing "Editor mode" was reaching for.
@@ -109,7 +109,7 @@ optional side dock. No mode switch.**
    chat-primary shell (VS Code's Agents window, Cursor's Agents Window)
    can be added over the same tab kinds. A mode switch cannot be upgraded
    into a tab model without a rewrite.
-4. **Phase 3 mobile needs one panel model, not two.** Paseo runs the same
+4. **Phase 3 mobile needs one panel model, not two.** a reference workbench runs the same
    panel implementations through a compact shell — a full-screen Explorer
    overlay for Changes/Files that closes after a file opens
    (`docs/explorer-sidebar.md:46-51`). Desktop modes plus a separate mobile
@@ -139,8 +139,8 @@ smind's constraints, read from the code:
 ### Recommendation: diff-review-then-commit, human-triggered, coarse
 
 1. **Add `task.commit { taskId, message }` = `git add -A` + commit inside
-   the worktree.** Same shape as Paseo's `checkout_commit_request { cwd,
-   message?, addAll? }` (`refs/paseo/packages/protocol/src/messages.ts:2068`).
+   the worktree.** Same shape as a reference workbench's `checkout_commit_request { cwd,
+   message?, addAll? }` (a local reference clone).
    Coarse is correct here specifically because `task.diff` already
    collapses staged/unstaged/untracked deliberately — per-file or per-hunk
    staging would require a second diff mode (staged vs unstaged) plus
@@ -158,9 +158,9 @@ smind's constraints, read from the code:
    one archive click destroys unreviewed agent work with no recovery path.
 4. **Route review comments to the agent, not to hand edits.** GitHub's
    mechanic — comments stay *pending* and private until one **Submit
-   review** — maps directly onto Paseo's implementation, which turns draft
+   review** — maps directly onto a reference workbench's implementation, which turns draft
    line comments into a `review` agent attachment
-   (`refs/paseo/packages/app/src/review/store.ts:266-279`) and sends it as
+   (a local reference clone) and sends it as
    a prompt. This is the highest-leverage piece: without it,
    review-then-commit degrades into the human fixing things by hand, which
    is the workflow smind exists to replace.
@@ -199,14 +199,14 @@ not. That property is worth protecting.
 | Cross-task attention (status, pending permissions, unreviewed changes) | No aggregate query exists; permission events only reach a client inside an active `run.attach` (`internal/wsapi/handlers.go:420-437`) | Agents-mode dashboard |
 | Any push/subscribe RPC | Handler table has no `*.watch`/`*.subscribe`; events are emitted only within a request's own stream (`handlers.go:420`, `terminal.go:88`) | Live sidebar, live diff, notifications, Phase 3 mobile |
 | Git status per file | `internal/files/files.go:26-30` — `Entry{Name, IsDir, Size}` | Explorer decorations, changed-file counts |
-| Live diff | `diff-viewer-pane.tsx:53-57` refetches only on task change or button press | Reviewing while the agent works. Paseo's equivalent: `subscribe_checkout_diff_request` / `checkout_diff_update` |
-| File-changed-on-disk detection / conflict handling | Nothing watches the worktree; `use-file-explorer.ts` reads once on select | The agent overwriting a file the human has open dirty. Paseo: `file-pane/conflict-alert.tsx` (`changed` / `deleted` / `checkFailed`, with Reload and Overwrite) over `file-pane/live-file/model.ts` |
-| Any git write op | No `git.*`/`task.commit` in `internal/wsapi/handlers.go:20-50` | Commit flow. Paseo has commit/pull/push/PR-create/PR-merge/merge/merge-from-base (`git/policy.ts:9-25`) |
+| Live diff | `diff-viewer-pane.tsx:53-57` refetches only on task change or button press | Reviewing while the agent works. A reference workbench's equivalent: `subscribe_checkout_diff_request` / `checkout_diff_update` |
+| File-changed-on-disk detection / conflict handling | Nothing watches the worktree; `use-file-explorer.ts` reads once on select | The agent overwriting a file the human has open dirty. A reference workbench: `file-pane/conflict-alert.tsx` (`changed` / `deleted` / `checkFailed`, with Reload and Overwrite) over `file-pane/live-file/model.ts` |
+| Any git write op | No `git.*`/`task.commit` in `internal/wsapi/handlers.go:20-50` | Commit flow. A reference workbench has commit/pull/push/PR-create/PR-merge/merge/merge-from-base (`git/policy.ts:9-25`) |
 | Per-file "viewed" state, per-file collapse | `diff-viewer-pane.tsx` renders one flat `diff2html` blob | Reviewing a large diff |
-| Review comments → agent | Nothing | The fix loop. Paseo: `review/state.ts` + `review/store.ts:266-279` |
+| Review comments → agent | Nothing | The fix loop. A reference workbench: `review/state.ts` + `review/store.ts:266-279` |
 | Safety commit before archive | `internal/workspace/task.go:112` force-removes | Not losing work |
 | Editor preview pane | Already tracked: `docs/plans/active/web-ui-editor-preview.md` | — |
-| File search / command palette | Nothing | Navigating a real repo. Paseo: `command-center/workspace-file-search.ts` |
+| File search / command palette | Nothing | Navigating a real repo. A reference workbench: `command-center/workspace-file-search.ts` |
 
 ### Smallest coherent increment
 
@@ -238,7 +238,7 @@ decide nothing architectural; step 3 onward needs maintainer answers below.
 Per AGENTS.md rule (d) — these materially affect data model / public API
 shape and are not decided in `docs/decisions/`.
 
-1. **Is the tab/pane layout scoped per task or per workspace?** Paseo
+1. **Is the tab/pane layout scoped per task or per workspace?** a reference workbench
    scopes tabs to a workspace (`buildWorkspaceTabPersistenceKey({serverId,
    workspaceId})`, `workspace-tabs/model.ts:58-68`), but in smind the
    worktree — and therefore files, diff and terminal — is *per task*
@@ -251,10 +251,10 @@ shape and are not decided in `docs/decisions/`.
    conflicts, notifications) needs one. Roadmap principle 3 says the
    protocol locks in from Phase 1, and Phase 3's relay carries the same
    API to mobile, so this shape is hard to change later. Options: a
-   generic `*.watch` subscription request per resource (Paseo's
+   generic `*.watch` subscription request per resource (a reference workbench's
    `subscribe_*`/`unsubscribe_*` pairs), one long-lived firehose per
    connection, or client polling.
-3. **Where does layout state live?** Paseo persists it client-side per
+3. **Where does layout state live?** a reference workbench persists it client-side per
    `(serverId, workspaceId)`. Server-side persistence would mean phone and
    desktop agree and layout survives a browser reset, but adds a UI-state
    table to `internal/store`.
@@ -274,7 +274,7 @@ shape and are not decided in `docs/decisions/`.
    distinguishable from human ones** (trailer, author, or a marker in
    `internal/store`) so review can filter to "what I haven't seen"?
 8. **Conflict policy when the agent rewrites a file the human has open
-   with unsaved edits** — reload, overwrite, or block the save? Paseo
+   with unsaved edits** — reload, overwrite, or block the save? A reference workbench
    offers Reload / Overwrite plus explicit `deleted` and `checkFailed`
    states (`file-pane/conflict-alert.tsx:11-14`). Depends on question 2.
 
@@ -286,7 +286,7 @@ Local code (read directly):
 - `internal/wsapi/{handlers.go,conn.go,terminal.go,files.go}`, `internal/workspace/{git.go,task.go}`, `internal/files/files.go`
 - `docs/ROADMAP.md`, `docs/plans/completed/web-ui-diff-viewer.md`, `docs/plans/active/web-ui-editor-preview.md`, `AGENTS.md`
 
-`refs/paseo` (local read-only clone):
+A local reference clone (local read-only clone):
 
 - `packages/app/src/panels/panel-manifest.ts`, `workspace-tabs/model.ts`, `docs/explorer-sidebar.md`, `docs/product.md`, `docs/agent-lifecycle.md`
 - `packages/app/src/review/{state.ts,store.ts}`, `git/{policy.ts,diff-pane.tsx}`, `file-pane/{conflict-alert.tsx,live-file/model.ts}`

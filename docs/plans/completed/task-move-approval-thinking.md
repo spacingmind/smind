@@ -11,7 +11,7 @@ decisions made via AskUserQuestion:
    shipped in PR #170, merged to `develop`). **UI action is still missing.**
 2. "có đủ option ... auto level" — approval-policy richness. User chose, when
    asked to pick between a generic unified tier vs. real per-provider modes:
-   **"Đúng theo từng provider (như Paseo/Codex/GLM thật)"** — expose each
+   **"Đúng theo từng provider (như Reference/Codex/GLM thật)"** — expose each
    provider's own real vocabulary, not one shared label across all three.
 3. "có đủ option ... thinking level" — reasoning-effort/thinking control.
    User chose, when asked which providers: **"Có, thêm cho provider hỗ trợ
@@ -289,8 +289,8 @@ already-shipped item (PR #169) — not part of this plan.
 - [x] Item 2 — Per-provider approval levels (`full-access` tier x3).
 - [x] Item 3 — Thinking level (Claude composer control + GLM/Kimi live-view
       control).
-- [x] ~~Hand off implementation via Paseo~~ -- superseded: the prior
-      GLM-via-Paseo delegation made zero progress after ~40 turns (two
+- [x] ~~Hand off implementation via a reference workbench~~ -- superseded: the prior
+      GLM-via-Reference delegation made zero progress after ~40 turns (two
       output-budget exhaustions, no Edit/Write calls), so this session
       implemented all three items directly instead, verifying each with
       `go build`/`go vet`/`go test ./...` and `bun run typecheck`/`bun run
@@ -394,7 +394,7 @@ To be filled in as each item lands:
   manual/auto-safe stay identical across providers, full-access's
   label/tooltip come from a `FULL_ACCESS_BY_PROVIDER` lookup using each
   provider's own real wording (Claude "Bypass" / Codex "Full Access" / GLM
-  &amp; Kimi "Bypass all permissions", per this session's Paseo-sourced
+  &amp; Kimi "Bypass all permissions", per this session's Reference-sourced
   ground truth). Both the closed trigger's tooltip (now reflecting the
   *current* selection, not a static auto-safe-only string) and each open
   option's own `title` carry the per-tier help text. New composer tests

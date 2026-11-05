@@ -1,27 +1,27 @@
-# Reference audit: Paseo (`refs/paseo`)
+# Reference audit: a reference workbench (a local reference clone)
 
-The north-star reference. Paseo is the product smind is meant to replace as
+The north-star reference. A reference workbench is the product smind is meant to replace as
 the maintainer's daily driver (`docs/plans/active/smind-dogfood.md`), so
-where the three references disagree, Paseo's model wins unless there is a
+where the three references disagree, a reference workbench's model wins unless there is a
 stated reason otherwise.
 
-**What it is** (`refs/paseo/docs/product.md`): a client/server agent IDE.
+**What it is** (a local reference clone): a client/server agent IDE.
 A Node daemon owns agent processes and streams over WebSocket; clients are
 Expo/React-Native-Web apps shipped as desktop (Electron), mobile
 (iOS/Android), web, plus a CLI. Multi-provider (Claude Code Agent SDK,
 Codex app-server, Copilot via ACP, OpenCode, Pi, OMP, plus a one-click ACP
 provider catalog), self-hosted, BYOK.
 
-**Where the UI lives**: `refs/paseo/packages/app/src`. ~180 e2e specs under
-`refs/paseo/packages/app/e2e/browser/` are themselves a readable feature
-inventory. Design law is written down in `refs/paseo/docs/design.md`;
-terminology in `refs/paseo/docs/glossary.md`.
+**Where the UI lives**: a local reference clone. ~180 e2e specs under
+A local reference clone are themselves a readable feature
+inventory. Design law is written down in a local reference clone;
+terminology in a local reference clone.
 
 ---
 
 ## 1. Information architecture
 
-Expo Router file-based routes, `refs/paseo/packages/app/src/app/`:
+Expo Router file-based routes, a local reference clone:
 
 | Route | Screen |
 | --- | --- |
@@ -39,7 +39,7 @@ Expo Router file-based routes, `refs/paseo/packages/app/src/app/`:
 | `app/settings/hosts/[serverId]/…` | per-host settings, per-project settings |
 | `app/h/[serverId]/plugin/[pluginId]/[surfaceId].tsx` | plugin-contributed surfaces |
 
-**Three-level object model** (`refs/paseo/docs/glossary.md`):
+**Three-level object model** (a local reference clone):
 `Project` (a stable filesystem root, grouped by normalized git remote) →
 `Workspace` (one concrete `cwd` on one daemon, `workspaceKind` of
 `directory | local_checkout | worktree`) → `Agent session` (one provider,
@@ -47,7 +47,7 @@ one model, one cwd, one timeline — opens as a tab).
 Plus `Host` = a client-side connection profile pointing at a daemon; the
 sidebar can span several hosts at once.
 
-**Shell topology** (`refs/paseo/docs/design.md` §9):
+**Shell topology** (a local reference clone §9):
 - Left sidebar — projects/workspaces list, pinned on desktop, overlaid on
   compact. `packages/app/src/components/left-sidebar.tsx`,
   `sidebar-workspace-list.tsx`.
@@ -56,7 +56,7 @@ sidebar can span several hosts at once.
   `packages/app/src/components/split-container.tsx`.
 - Explorer sidebar — a *dedicated dock* (not a pane in the split tree) for
   Files and Changes, own persisted width, `Cmd+E`.
-  `refs/paseo/docs/explorer-sidebar.md`,
+  a local reference clone,
   `packages/app/src/workspace-tabs/explorer-sidebar.ts`.
 - Side pane — an ordinary right-side pane for "open beside".
   `packages/app/src/workspace-tabs/open-beside.ts`.
@@ -69,7 +69,7 @@ values it supports (`packages/app/src/panels/panel-manifest.ts`,
 `panel-registry.ts`); launchers filter by host and tab moves reject
 unsupported destinations.
 
-Placement intent is a first-class concept (`refs/paseo/docs/explorer-sidebar.md`):
+Placement intent is a first-class concept (a local reference clone):
 `pane` (move it here) / `prefer` (new targets here, don't yank existing) /
 `focused` / `ambient`. Explicit "Open to Side" uses `pane`, implicit opens
 use `prefer`.
@@ -88,7 +88,7 @@ fixed in the glossary: **Composer** (whole surface), **Composer input**
 - **Agent controls** (`composer/agent-controls/`): provider, model, mode
   (plan/default/full-access — icon-only), thinking level, provider-specific
   feature toggles. Model picker is a two-level Model/Effort menu
-  (`refs/paseo/packages/client/ui-model-selection` equivalent lives in
+  (a local reference clone equivalent lives in
   `composer/agent-controls/model-sheet.tsx`).
 - **Attachments** (`composer/attachments/`, `packages/app/src/attachments/`):
   forge issue/PR, review context, uploaded file, text, image; drag-drop
@@ -136,7 +136,7 @@ difference from smind — the transcript is a typed item list, not text.
   **fork** (`hooks/use-fork-agent.ts`, glossary "Fork" — start a new agent
   seeded with a copy of curated history; on an in-flight turn it captures
   everything up to now).
-- **Timeline sync** (`refs/paseo/docs/timeline-sync.md`,
+- **Timeline sync** (a local reference clone,
   `timeline/timeline-sync-plan.ts`, `viewed-timeline-sync.ts`): authoritative
   catch-up, retry, viewed-state.
 
@@ -197,21 +197,21 @@ difference from smind — the transcript is a typed item list, not text.
 `packages/app/src/file-explorer/`, `file-pane/` (editor, live-file,
 markdown-preview, preview-lifecycle, source), `components/file-explorer-pane.tsx`,
 `components/material-file-icon.tsx` + `material-file-icons.ts` (icon theme,
-`refs/paseo/docs/file-icons.md`), context actions
+A local reference clone), context actions
 (`e2e/browser/file-explorer-context-actions.spec.ts`), file-change conflict
-handling (`refs/paseo/docs/file-observation.md`), `vimKeybindings` setting.
+handling (a local reference clone), `vimKeybindings` setting.
 
 ### Terminal
 `packages/app/src/terminal/` — three renderers (web xterm, native grid,
 webview), scrollback setting, terminal profiles (named shell commands,
 host-wide config), activity indicators
-(`refs/paseo/docs/terminal-activity.md`), alternate-screen handling, split
+(a local reference clone), alternate-screen handling, split
 and resize, local link detection, drop targets. A terminal is a workspace
 tab like any other and is also a New Workspace launch target.
 
 ### Subagents
-`refs/paseo/docs/agent-lifecycle.md` — the definitive text. Paseo
-subagents (managed agents with `paseo.parent-agent-id`) and provider
+A local reference clone — the definitive text. A reference workbench
+subagents (managed agents with `reference.parent-agent-id`) and provider
 subagents (Claude/Codex/OpenCode child sessions) both appear in the
 parent's **subagents track**; clicking opens a tab (read-only for provider
 subagents). Cascade-archive, detach, "Archive finished".
@@ -223,7 +223,7 @@ subagents). Cascade-archive, detach, "Archive finished".
 - Projects auto-detected from the filesystem, tagged by git remote; opaque
   `prj_<16 hex>` ids; a `projectKey` groups the logical project across hosts.
 - **Isolation** is a create-time choice — Local (reuse checkout) vs New
-  worktree (`~/.paseo/worktrees/{name}`) — remembered as a form preference.
+  worktree (`~/.reference/worktrees/{name}`) — remembered as a form preference.
   `workspaceKind` is the derived, persisted property.
 - New workspace screen (`screens/new-workspace-screen.tsx`) is a hero with
   project picker, isolation control, provider/model/mode controls, launch
@@ -268,7 +268,7 @@ under `app/settings/[section].tsx`:
   bundles (provider + model + mode + thinking + feature values + notes),
   applied into the agent controls and then forgotten.
 - **Agent skills** (`packages/app/src/agent-skills/`), **Plugins**
-  (`screens/settings/plugins-page.tsx`, `refs/paseo/docs/plugins.md`),
+  (`screens/settings/plugins-page.tsx`, a local reference clone),
   **Terminal profiles**, **Metadata generation**, **Editor**,
   **Browser tools**, **Hosts** (add host, pair device, restart daemon,
   release channel, update).
@@ -276,7 +276,7 @@ under `app/settings/[section].tsx`:
   `project-settings-screen.tsx`) editing `paseo.json`, with a
   stale-write conflict alert.
 - Onboarding / welcome (`components/welcome-screen.tsx`).
-- **i18n** (`packages/app/src/i18n/`, `refs/paseo/docs/i18n.md`) — every
+- **i18n** (`packages/app/src/i18n/`, a local reference clone) — every
   string goes through `react-i18next`.
 
 ---
@@ -286,12 +286,12 @@ under `app/settings/[section].tsx`:
 - **Status dots** — their own token family `statusDot{Success,Danger,Warning,Running}`
   read only through `utils/status-dot-color.ts`; the running one pulses.
   The reasoning for a separate, higher-chroma band is written out in
-  `refs/paseo/docs/design.md` §13.
+  a local reference clone §13.
 - **Status pills** — `components/ui/status-badge.tsx`, status token text on
   a neutral `surface3` shell.
 - **Workspace status bucket** — an aggregate per `workspaceId`; same-cwd
   workspaces intentionally share agent/terminal buckets
-  (`refs/paseo/docs/agent-lifecycle.md` §"Workspace activity").
+  (a local reference clone §"Workspace activity").
 - **Sidebar workspace meta row** (`components/sidebar/workspace-meta-row/`):
   branch, project, host badge, change-request state, labels, services
   health, CI checks summary, diff stat — each individually toggleable
@@ -316,7 +316,7 @@ under `app/settings/[section].tsx`:
 ## 6. Theming and appearance
 
 `packages/app/src/styles/theme.ts` (863 lines) is the single token source;
-`refs/paseo/docs/design.md` is the law.
+A local reference clone is the law.
 
 - Semantic colour tokens: `surface0..4`, `surfaceDiffEmpty`,
   `surfaceSidebar`, `foreground`, `foregroundMuted`, `foregroundExtraMuted`,
@@ -363,10 +363,10 @@ grouped results, file search, workspace actions.
 
 ## 8. Mobile / responsive
 
-- **Compact-first** (`refs/paseo/docs/design.md` §9). The branching is one
+- **Compact-first** (a local reference clone §9). The branching is one
   `useIsCompactFormFactor()` check per screen; list and detail are the same
   components in both layouts.
-- **Mobile panels** (`refs/paseo/docs/mobile-panels.md`,
+- **Mobile panels** (a local reference clone,
   `packages/app/src/mobile-panels/`): three mutually exclusive destinations
   — `agent-list` (left), `agent` (centre), `file-explorer` (right) — driven
   by *one* normalized position value (-1/0/1), so a panel and its backdrop
@@ -385,7 +385,7 @@ grouped results, file search, workspace actions.
 
 ## 9. Empty / loading / error states
 
-`refs/paseo/docs/design.md` §11 is prescriptive:
+A local reference clone §11 is prescriptive:
 
 - Loading is inline by default (`<LoadingSpinner size={14}>` next to the
   thing); page-level loading is a centred large spinner; card-level loading
@@ -404,14 +404,14 @@ grouped results, file search, workspace actions.
 
 ## 10. What smind cannot copy 1-to-1
 
-| Paseo capability | Why it doesn't port | Closest web equivalent |
+| A reference workbench capability | Why it doesn't port | Closest web equivalent |
 | --- | --- | --- |
 | Native iOS/Android app | smind is a Go daemon + web UI; there is no RN client and ADR 0002 commits to Vite/React for `web/` | Responsive web UI + PWA; `docs/plans/active/relay-e2ee-mobile.md` already owns remote access |
 | Real push notifications (`push-notifications/index.native.ts`) | Needs an app + APNs/FCM | Web Notifications API (already in smind) + Web Push via service worker if wanted later |
 | Voice mode / dictation (`voice/`, `dictation/`) | Needs native audio engines; `expo-two-way-audio` is a custom native module | Out of scope; Web Speech API is the fallback if ever asked for |
 | In-app browser tab (`desktop/browser/`) | Electron `<webview>` | An `<iframe>` tab is possible but of low value here |
 | Electron window-chrome obstruction handling | No desktop shell yet (Roadmap Phase 4) | Skip until Phase 4 |
-| Plugin system (`refs/paseo/docs/plugins.md`) | Large, and orthogonal to parity | Skip |
+| Plugin system (a local reference clone) | Large, and orthogonal to parity | Skip |
 | Unistyles / Reanimated animation contracts | RN-specific | CSS transitions |
 
 Everything else in this document is reachable from a React + Tailwind web

@@ -39,18 +39,18 @@ Windows" message instead.
   detached-start plumbing; user input like a connection URL/label never
   reaches a shell string).
 
-**Paseo reference (behavior ported, not code):**
-`refs/paseo/packages/desktop/src/daemon/daemon-manager.ts` — `ownedByDesktop`
+**A reference workbench pattern (behavior ported, not code):**
+A local reference clone — `ownedByDesktop`
 (compare a captured `{pid, startedAt}` against the live process, not trust
 the daemon), `shouldRestartForVersion` (only restart if owned, and versions
 differ after stripping a `v` prefix), explicit-confirmation stop
 (`confirmedInstance` must match `{pid, startedAt}` exactly).
-`refs/paseo/packages/app/src/desktop/updates/desktop-updates.ts` —
+A local reference clone —
 `isVersionMismatch`/`normalizeVersionForComparison` shape (this plan goes
 further: an actual older/same/newer ordering, since the banner text says
 "vX is older than this app").
 
-Paseo's daemon writes its own `paseo.pid` lock file with `{pid, startedAt}`,
+A reference workbench's daemon writes its own `reference.pid` lock file with `{pid, startedAt}`,
 so "owned" is a strict identity match. smind's daemon writes nothing — the
 app-side pid/state file is the *only* source of truth for "the app started
 this," and "is it still alive" is a liveness check the app does itself
@@ -118,7 +118,7 @@ relationship with the daemon.
     action — the confirmation dialog is what gates the invoke.
   - Restart/update re-check `find_port_owner` immediately before signalling,
     and refuse (typed error, no signal sent) if it no longer matches the
-    recorded pid — closes the PID-reuse race Paseo's `explicit` check also
+    recorded pid — closes the PID-reuse race a reference workbench's `explicit` check also
     guards against.
 - **AC4: Windows + WSL2.**
   `smind_daemon_client::daemon_manager::wsl` — pure argv builders, unit

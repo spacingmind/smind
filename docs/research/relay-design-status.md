@@ -94,15 +94,15 @@ Quét `internal/`, `cmd/`, `web/`, `go.mod/go.sum`:
 
 ## 4. Tham khảo refs/
 
-- **refs/paseo — precedent trực tiếp, gần sát với ý tưởng smind's roadmap.**
-  Paseo đã build, test, document đầy đủ một relay dumb-pipe tương tự:
+- **A local reference clone — precedent trực tiếp, gần sát với ý tưởng smind's roadmap.**
+  a reference workbench đã build, test, document đầy đủ một relay dumb-pipe tương tự:
   - `packages/relay/src/crypto.ts`: X25519 (Curve25519 ECDH) nhưng dùng
     **XSalsa20-Poly1305** (NaCl `box`), KHÁC với ChaCha20-Poly1305 mà smind
-    roadmap chốt — cần quyết định rõ ràng thay vì copy nguyên Paseo.
+    roadmap chốt — cần quyết định rõ ràng thay vì copy nguyên a reference workbench.
   - `packages/relay/src/encrypted-channel.ts`: handshake state machine
     (`e2ee_hello`/`e2ee_ready`), re-hello với key khác trên channel đang mở
     bị coi là tấn công và đóng socket (code 1008) — tức "key rotation" của
-    Paseo thực chất là "phiên mới = key mới", KHÔNG có live rekey.
+    a reference workbench thực chất là "phiên mới = key mới", KHÔNG có live rekey.
   - `packages/relay/src/cloudflare-adapter.ts`: dumb pipe thật (Cloudflare
     Durable Object, forward byte thô, không giải mã); có protocol v1 (1
     server-client pair) vs v2 (control socket + nhiều data socket per client)
@@ -111,7 +111,7 @@ Quét `internal/`, `cmd/`, `web/`, `go.mod/go.sum`:
     (đây chính là "reconnect grace" ở tầng relay).
   - `packages/server/src/server/relay-transport.ts` + `daemon-keypair.ts` +
     `connection-offer.ts` + `pairing-offer.ts`: daemon giữ X25519 keypair bền
-    (`$PASEO_HOME/daemon-keypair.json`, mode 0600), pairing offer đóng gói
+    (`$REF_HOME/daemon-keypair.json`, mode 0600), pairing offer đóng gói
     serverId + public key + relay endpoint, encode vào URL fragment (không lên
     server) rồi render QR; mobile sinh keypair ephemeral mỗi phiên.
   - `SECURITY.md` có sẵn threat model relay bằng văn bản, và tự thừa nhận một
@@ -119,10 +119,10 @@ Quét `internal/`, `cmd/`, `web/`, `go.mod/go.sum`:
     tracking) — smind nên quyết định rõ có chấp nhận rủi ro này hay không thay
     vì kế thừa ngầm.
   - Transport là WebSocket thuần, không phải gRPC — nếu smind giữ quyết định
-    gRPC, các pattern quản lý session/reconnect/backoff của Paseo vẫn áp dụng
+    gRPC, các pattern quản lý session/reconnect/backoff của a reference workbench vẫn áp dụng
     được về mặt khái niệm, nhưng wire framing sẽ phải thiết kế lại.
 
-- **refs/cliproxyapi — không phải precedent cho relay, chỉ hữu ích như phản ví dụ.**
+- **A local reference clone — không phải precedent cho relay, chỉ hữu ích như phản ví dụ.**
   `internal/wsrelay/` là một RPC-over-WebSocket có trạng thái (chuyển đổi
   HTTP request/response qua envelope, dùng cho 1 provider cụ thể — AI Studio
   qua browser extension), ngược hoàn toàn với triết lý "dumb pipe". Không có
@@ -161,9 +161,9 @@ Cụ thể theo từng mảnh:
 Khoảng cách lớn nhất trước khi có thể bắt đầu implement: (1) viết một ADR/plan
 riêng cho relay quyết định rõ state model (store-and-forward? multi-device
 fanout?) và cơ chế key rotation thật sự; (2) chốt xem có kế thừa pattern của
-refs/paseo (đặc biệt là cấu trúc control-socket + data-socket, và cách daemon
+A local reference clone (đặc biệt là cấu trúc control-socket + data-socket, và cách daemon
 giữ keypair bền) hay tự thiết kế lại cho gRPC; (3) quyết định rõ ràng
-ChaCha20-Poly1305 vs XSalsa20-Poly1305 và lý do khác với Paseo.
+ChaCha20-Poly1305 vs XSalsa20-Poly1305 và lý do khác với a reference workbench.
 
 ---
 
@@ -171,7 +171,7 @@ ChaCha20-Poly1305 vs XSalsa20-Poly1305 và lý do khác với Paseo.
 
 Từ audit ở trên (2026-09-11), **ADR-0007** đã chốt kiến trúc relay (blind
 forwarder, X25519 + ChaCha20-Poly1305 counter-nonce 12-byte, QR pairing qua
-URL-fragment offer, bounded store-and-forward buffer — tiền lệ paseo 200
+URL-fragment offer, bounded store-and-forward buffer — tiền lệ a reference workbench 200
 frame/side). Phần "reconnect grace + key rotation" từng là "the one open
 question" giờ có dữ kiện cụ thể từ 3 câu hỏi research bên ngoài, chạy qua
 `pplx ask -m best` (Perplexity Pro, dogfood qua smind task runner):
@@ -250,7 +250,7 @@ Overflow: mọi hệ thống tham chiếu đều **drop-oldest trong buffer boun
 (Signal ~30-46 ngày TTL, Matrix theo config retention) rồi bắt client
 **force full resync** khi phát hiện gap — không hệ thống nào cố "vá" gap
 bằng cách relay tự suy luận lại. Đây xác nhận chính xác lựa chọn "bounded
-buffer, drop-oldest" của ADR-0007 (tiền lệ paseo 200 frame/side) là đúng
+buffer, drop-oldest" của ADR-0007 (tiền lệ a reference workbench 200 frame/side) là đúng
 kiểu thiết kế chuẩn ngành, không phải giản lược tạm.
 
 **Auth daemon↔relay (tách biệt khỏi E2EE handshake daemon↔mobile):**

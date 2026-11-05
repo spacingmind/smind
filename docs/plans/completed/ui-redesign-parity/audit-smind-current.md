@@ -196,7 +196,7 @@ health dot from `provider.test`, a Connect button for
 `"api-key"` (`account.add`), and "managed externally" for
 `kind: "cli"` (GLM).
 
-Missing vs `audit-cliproxyapi.md`: no status message, no token expiry /
+Missing vs `audit-proxy-project.md`: no status message, no token expiry /
 last refresh, no rate-limit recovery time, no success/failure counters, no
 usage/quota, no per-account label or note, no disable toggle, no delete,
 no "which models does this credential serve", no cancel on an in-flight
@@ -217,7 +217,7 @@ default provider/policy, no terminal settings.
 `hooks/use-task-attention.ts` + `hooks/use-attention-notifications.ts` +
 `hooks/use-notification-permission.ts`:
 
-- Reasons: `error | finished | permission` — the same vocabulary Paseo
+- Reasons: `error | finished | permission` — the same vocabulary a reference workbench
   uses. Computed on every (re)connect from `run.list` + `run.logs` per
   running run (an unresolved `permission_request`), plus a seen-snapshot
   taken when a task is selected.

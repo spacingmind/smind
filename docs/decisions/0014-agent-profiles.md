@@ -17,10 +17,10 @@ persists a bundle of them. The composer (`composer.tsx`) holds all three as
 per-submission React state, reset to the same hardcoded defaults
 (`claude-native`/`manual`/unset) every time; there is no save/select-a-preset
 UI, and no daemon-side concept of a "profile" at all
-(`docs/research/local/paseo-skills-profiles-2026-09.md`'s gap analysis, §d).
+(local research notes's gap analysis, §d).
 
-Paseo's equivalent (`refs/paseo/packages/protocol/src/agent-profile.ts:12-30`)
-is a named, per-daemon (`PASEO_HOME`-global, not per-workspace) record --
+A reference workbench's equivalent (a local reference clone)
+is a named, per-daemon (`REF_HOME`-global, not per-workspace) record --
 `id`, `name`, `provider`, `model?`, `modeId?`, `thinkingOptionId?`,
 `featureValues?`, `notes?` -- deliberately carrying no `systemPrompt`, applied
 by copying its fields into the client's per-launch settings, never referenced
@@ -29,7 +29,7 @@ by id at launch time.
 **Decision already made by the user (2026-09-25):** smind gets agent
 profiles, stored **in the daemon**, so web, desktop, mobile, and CLI clients
 all share the same list, and so a future orchestrating agent can read them
-over RPC (Paseo's `list_profiles` MCP tool has no smind equivalent yet, but
+over RPC (a reference workbench's `list_profiles` MCP tool has no smind equivalent yet, but
 daemon-side storage is the prerequisite for one). This ADR records the data
 model, storage, and wire shape for that addition; everything else about
 smind's backend architecture is unchanged.
@@ -43,11 +43,11 @@ A new persisted record, `store.AgentProfile`:
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `id` | `int64` | yes | store-assigned (`AUTOINCREMENT`) |
-| `name` | `string` | yes | non-empty; a label, not a key -- uniqueness is not enforced, matching Paseo (profiles are referenced by `id`, never by name) |
+| `name` | `string` | yes | non-empty; a label, not a key -- uniqueness is not enforced, matching a reference workbench (profiles are referenced by `id`, never by name) |
 | `provider` | `string` | yes | must be one of `taskrunner.SupportedProviders()`'s ids at write time (`create`/`update`); stored as a plain string, not `taskrunner.Provider`, for the same reason `store.Run.Provider`/`ApprovalPolicy` are plain strings -- `internal/store` does not import `internal/taskrunner` (see `internal/store/types.go:81-84`'s doc comment) |
 | `approvalPolicy` | `string` | no, defaults to `""` (meaning "unset"; the composer's own default of `manual` applies when a profile leaves this unset) | when non-empty, must satisfy `taskrunner.ApprovalPolicy.IsValid()` |
 | `thinkingLevel` | `string` | no, defaults to `""` (`taskrunner.ThinkingLevelUnspecified`) | when non-empty, must satisfy `taskrunner.ThinkingLevel.IsValid()`; meaningful only when `provider` is `claude-native`, same as today's per-run field |
-| `notes` | `string` | no, defaults to `""` | free text, human-facing today; shaped to double as the LLM-legible field Paseo's `list_profiles` exposes to an orchestrating agent, if/when smind grows that RPC |
+| `notes` | `string` | no, defaults to `""` | free text, human-facing today; shaped to double as the LLM-legible field a reference workbench's `list_profiles` exposes to an orchestrating agent, if/when smind grows that RPC |
 | `createdAt` / `updatedAt` | `time.Time` | yes | store-stamped, matching every other `store` record |
 
 **Deferred: `model`.** The original draft of this ADR included an optional
@@ -64,9 +64,9 @@ real `model` parameter end to end; until then there is nothing for a
 profile's `model` to mean.
 
 **Deliberately excluded**, each for a reason specific to smind's current
-surface (not carried over just because Paseo has them):
+surface (not carried over just because a reference workbench has them):
 
-- **`systemPrompt`.** Omitted for the exact reason Paseo's own schema omits
+- **`systemPrompt`.** Omitted for the exact reason a reference workbench's own schema omits
   it (`agent-profile.ts`'s doc comment): every backend `taskrunner` drives
   (`claude-agent-sdk-go`, ACP's `NewSession`, Codex's app-server) treats its
   initial-session configuration as creation-only. A stored `systemPrompt`
@@ -74,12 +74,12 @@ surface (not carried over just because Paseo has them):
   no-op -- indistinguishable from working. Revisit only alongside a real
   "start a new task from this profile" flow that has a creation-time hook to
   honor it.
-- **`icon` / `color`.** Paseo's schema carries both for its host's
+- **`icon` / `color`.** a reference workbench's schema carries both for its host's
   agent-badge theming. smind's task list and composer have no per-agent
   badge/color concept today -- both fields would round-trip through the API
   with nothing ever rendering them. Add alongside whatever UI grows that
   need.
-- **`featureValues`.** Paseo's provider-specific feature flags map to
+- **`featureValues`.** a reference workbench's provider-specific feature flags map to
   smind's ACP `ConfigOption`s (`internal/taskrunner/config_options.go`),
   which are explicitly **live-session-scoped**: the option list is only
   known after ACP's `NewSession` responds (`run-config-options.tsx`), unlike
@@ -89,7 +89,7 @@ surface (not carried over just because Paseo has them):
 
 ### Scope: global per daemon, not per workspace
 
-Matches Paseo. A profile describes *how* to run an agent (which provider,
+Matches a reference workbench. A profile describes *how* to run an agent (which provider,
 how cautious, how much it thinks), not *what codebase* to run it against --
 scoping it to a workspace would mean re-creating "UI work: claude-native,
 manual, standard thinking" once per workspace, defeating the entire point of
@@ -188,13 +188,13 @@ store calls, so the "avoid duplicate emission across multiple store calls"
 half of ADR 0009's rationale doesn't independently apply here -- but the
 Notifier indirection is kept anyway for shape-consistency with every other
 mutating resource, and so a future non-wsapi caller (e.g. an orchestrating
-agent's own profile-materializing tool, mirroring Paseo's `list_profiles`)
+agent's own profile-materializing tool, mirroring a reference workbench's `list_profiles`)
 does not have to duplicate the emit.
 
 ### How a profile is applied
 
 **The client copies the profile's fields into its own per-run settings**,
-the same way Paseo's model picker applies a profile -- not a `profileId`
+the same way a reference workbench's model picker applies a profile -- not a `profileId`
 param on `task.prompt`.
 
 - `task.prompt`'s existing fields (`provider`, `approvalPolicy`,
@@ -205,9 +205,9 @@ param on `task.prompt`.
   copy, with **zero wire change to `task.prompt`**.
 - A `profileId` param would require the daemon to resolve and apply the
   profile server-side on every run, and would then need a second mechanism
-  to let the user tweak a field after picking a profile (Paseo's docs are
+  to let the user tweak a field after picking a profile (a reference workbench's docs are
   explicit that a profile's settings stay "editable before sending" --
-  `docs/research/local/paseo-skills-profiles-2026-09.md`'s §b). The
+  local research notes's §b). The
   copy-once approach gets "editable after applying" for free: it's just
   ordinary Select state once copied.
 ### CLI surface
@@ -252,7 +252,7 @@ profile is selected.
 - **`profileId` param on `task.prompt`**, server-side resolve-and-apply.
   Rejected in favor of client-side field copying -- see "How a profile is
   applied" above.
-- **Carrying Paseo's full schema verbatim** (`icon`, `color`,
+- **Carrying a reference workbench's full schema verbatim** (`icon`, `color`,
   `featureValues`, `systemPrompt`), and keeping `model` in the v1 schema as
   an inert field. Both rejected for the same reason: each needs a
   smind-side consumer that doesn't exist yet ("Deliberately excluded" and
@@ -268,7 +268,7 @@ client" (`accounts`, `workspaces`, `spaces`, `tasks`, each in `internal/store`
 with a wsapi method set and, since ADR 0009, lifecycle events). Agent
 profiles are the same shape as those, not a new architectural category --
 the smallest coherent addition is a new table plus the same CRUD + event
-pattern, applied by the client the same way Paseo's profile picker does,
+pattern, applied by the client the same way a reference workbench's profile picker does,
 rather than inventing a new persistence layer (`config.yaml`) or a new
 apply mechanism (`profileId`) neither of which any existing smind resource
 uses.

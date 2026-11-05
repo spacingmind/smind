@@ -2,7 +2,7 @@
 
 Re-scoped by user 2026-09-11 (was: "build a real scopedocs feature
 end-to-end from smind UI"). The Phase 2 gate is now: **use smind, not
-Paseo, as the daily driver for real work on this repo** — closing the
+A reference workbench, as the daily driver for real work on this repo** — closing the
 loop smind was built for. Everything else in Phase 2 is done
 (`docs/ROADMAP.md`).
 
@@ -12,17 +12,17 @@ loop smind was built for. Everything else in Phase 2 is done
   test SMIND_HOME), serving the embedded web UI, with at least one real
   working account (Claude credential imported 2026-09-11 flow).
 - Real tasks (bug fixes, plans, reviews — work that would otherwise
-  happen in Paseo or a bare terminal) are created, run, and reviewed
+  happen in a reference workbench or a bare terminal) are created, run, and reviewed
   through smind's UI: workspace = the smind repo itself.
 - Continuity: dogfood sessions accumulate without a forced return to
-  Paseo for anything smind was built to cover (task creation, prompting,
+  a reference workbench for anything smind was built to cover (task creation, prompting,
   timeline, diff review, file editing, terminal, permission approval).
 - Every real friction hit is recorded in this plan's Decisions/Notes so
   the gap list stays honest — dogfood exists to surface gaps, not to
   pretend there are none.
 - Definition of done (quantified): **5 real work sessions** completed
   through smind's UI on the smind repo, each ending with committed work,
-  with zero sessions abandoned back to Paseo/terminal-only for reasons
+  with zero sessions abandoned back to Reference/terminal-only for reasons
   smind itself could address.
 
 ## Test Scenarios
@@ -146,7 +146,7 @@ gaps hit.)
   - Dogfooded the full chain through smind itself: `smind /v1/messages`
     → per-account base_url (#140) → `pplx serve` → Perplexity Pro —
     live query "what is 2+2" returned "4". This session's orchestration
-    (multi-agent Paseo spawns debugging the fingerprint regression) was
+    (multi-agent a reference workbench spawns debugging the fingerprint regression) was
     itself the "real work" this plan's gate asks for, ending in landed
     commits.
   - PRs landed this session: smind #140 (per-account base_url routing)

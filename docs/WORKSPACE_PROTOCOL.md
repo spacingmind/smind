@@ -7,7 +7,7 @@ Lead does the item and launches **Peers** only where a Peer earns its own
 context. `AGENTS.md` rules still apply on top of it. This document adds roles
 and handoffs; it does not relax any rule in `AGENTS.md`.
 
-The Paseo-era text (Paseo profiles, the `glm-peer`/`claude-s-peer` providers, a
+The reference-era text (a reference workbench profiles, the `glm-peer`/`claude-s-peer` providers, a
 Supervisor tier, `peer-glm` as default coder with a 20-turn limit) is gone: the
 Supervisor seats and `peer-glm` were folded out of the role pack, and `glm` is
 just a provider.

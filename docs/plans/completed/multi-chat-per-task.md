@@ -2,7 +2,7 @@
 
 ## Context
 
-The user decided this on 2026-09-27: a task can hold several chats, each its own conversation, sharing the task's git worktree. This mirrors Paseo's workspace → agents model. All 8 sub-decisions in `docs/decisions/0016-multiple-chats-per-task.md` are Accepted; read that ADR first.
+The user decided this on 2026-09-27: a task can hold several chats, each its own conversation, sharing the task's git worktree. This mirrors a reference workbench's workspace → agents model. All 8 sub-decisions in `docs/decisions/0016-multiple-chats-per-task.md` are Accepted; read that ADR first.
 
 Along the way we found a real bug: **no runner resumes an agent session today**, so every follow-up prompt starts with no memory of the earlier ones.
 
@@ -51,14 +51,14 @@ Each phase ships as its own PR.
 - **P2.1 Session handle.** A handle `{provider, sessionId, nativeHandle?, metadata?}` is returned by each runner after a run and passed back on the next one.
   - Until P1 lands, it is kept behind an interface (`SessionStore`) with an in-memory implementation for tests.
   - Once P1 lands, it is persisted on `chats.agent_session`.
-- **P2.2 claude-native** resumes through the vendored SDK's `WithResume` / `WithSessionID`. Paseo's pattern is `refs/paseo/packages/server/src/server/agent/providers/claude/agent.ts:3153`.
-- **P2.3 ACP**, capability-driven, following Paseo's `providers/acp-agent.ts:1777-1800`:
+- **P2.2 claude-native** resumes through the vendored SDK's `WithResume` / `WithSessionID`. A reference workbench's pattern is a local reference clone.
+- **P2.3 ACP**, capability-driven, following a reference workbench's `providers/acp-agent.ts:1777-1800`:
   1. use `session/load` if `agentCapabilities.loadSession`;
   2. otherwise use `unstable_resumeSession` if `sessionCapabilities.resume`;
   3. otherwise start a new session **and surface it**, as an event or log plus a UI-visible note that context was not resumed.
 
   Verify against the real GLM ACP binary which capability it advertises, and record the result.
-- **P2.4 Codex** uses `thread/resume` with the stored thread id. Check `thread/loaded/list` first, and on the archived-thread error call `thread/unarchive` and retry. This follows Paseo's `providers/codex-app-server-agent.ts:3963-3980`.
+- **P2.4 Codex** uses `thread/resume` with the stored thread id. Check `thread/loaded/list` first, and on the archived-thread error call `thread/unarchive` and retry. This follows a reference workbench's `providers/codex-app-server-agent.ts:3963-3980`.
 - **P2.5 Failure handling:** a stale or unknown session id falls back to a new session with a surfaced note, never a hard failure of the user's prompt.
 
 ### P3 — web (after P1)
@@ -69,7 +69,7 @@ Each phase ships as its own PR.
 - The timeline shows only that chat's runs.
 - When another chat of the same task is running, a small banner warns: "Another chat is running in this worktree".
 - Task-level attention/unread in the sidebar aggregates across chats. Notifications and permission cards name the chat.
-- The UI follows `docs/design.md` (ZCode tokens, `text-ui-*`), and light/dark screenshots are reviewed.
+- The UI follows `docs/design.md` (a reference desktop workbench tokens, `text-ui-*`), and light/dark screenshots are reviewed.
 
 ### P4 — CLI and mobile (after P1)
 

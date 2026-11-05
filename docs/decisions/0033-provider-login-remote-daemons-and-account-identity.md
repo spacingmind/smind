@@ -5,7 +5,7 @@
 Accepted (2026-10-18, by the Human: "ok theo đề xuất" on all six recommendations below). Plan:
 [`docs/plans/active/providers-login-and-tab.md`](../plans/active/providers-login-and-tab.md). Builds on
 ADR-0028 (account usage; the rate-limit rules still apply) and ADR-0031 (connection kinds `local`/`url`/`ssh`/`relay`).
-Research behind it: a 2026-10-18 study of `refs/cliproxyapi`, `refs/codex`, `refs/claude-code`,
+Research behind it: a 2026-10-18 study of a local reference clone, `refs/codex`, `refs/claude-code`,
 `refs/agent-client-protocol` (local-only notes, not committed).
 
 ## Context
@@ -22,7 +22,7 @@ workspace assignments.
 References: Codex CLI offers browser login (loopback `1455/1457`) and a **device-code** login for headless machines
 (`codex-rs/login/src/device_code_auth.rs`, `POST …/api/accounts/deviceauth/usercode` then `…/deviceauth/token`, ≤15 min;
 a 404 means "not enabled" → fall back). Claude Code accepts a **pasted OAuth code** when the callback cannot reach
-localhost (WSL2/SSH/containers, changelog v2.1.126). cliproxyapi does both (paste via
+localhost (WSL2/SSH/containers, changelog v2.1.126). A reference proxy project does both (paste via
 `POST /v0/management/oauth-callback {provider,state,redirect_url}`, device code for Codex/Kimi/xAI), names accounts by
 stable identity (`claude-<email>.json`) and merges on re-login. Its fixed-port **all-interface** callback listener and
 its browser-opens-on-the-daemon-host default are the anti-patterns.
@@ -38,7 +38,7 @@ callback listener on **loopback only** (never `0.0.0.0`); remote completion goes
 
 `account.oauthStart` takes `method: "browser" | "device"` (default `"browser"`). `device` is accepted for `openai` only
 and uses the same endpoints and `redirect_uri` Codex CLI uses (`https://auth.openai.com/api/accounts/deviceauth/usercode`,
-`…/deviceauth/token`; reference implementation `refs/cliproxyapi/sdk/auth/codex_device.go:27-30`). The daemon emits
+`…/deviceauth/token`; reference implementation a local reference clone). The daemon emits
 `deviceCode {loginId, verificationUrl, userCode, expiresAt, intervalSeconds}` to the requesting connection, polls at the
 vendor interval until `expiresAt` (hard cap 15 min) or cancel, then exchanges as the browser flow does. A 404 on the
 user-code request returns the error code `device_unsupported`; the UI falls back to browser/paste. No port, no listener.
@@ -48,7 +48,7 @@ user-code request returns the error code `device_unsupported`; the UI falls back
 - `account.oauthStart` now emits `authorizeUrl {loginId, url}` (adds the `loginId`: random 128-bit, server-generated).
 - New RPC `account.oauthComplete {loginId, redirectUrl}`. `redirectUrl` is what the user copies from the browser's
   address bar after the vendor redirected to a localhost page that did not load. A lenient parser accepts the full URL,
-  a bare query (`code=…&state=…`) or Claude's `code#state` form (precedent: `refs/cliproxyapi/internal/misc/oauth.go:52`).
+  a bare query (`code=…&state=…`) or Claude's `code#state` form (precedent: a local reference clone).
 - The daemon checks that `loginId` is pending and of `browser` method, that `state` equals the login's (constant-time),
   and that a code is present; then it feeds the **same** result channel the loopback listener feeds. First delivery wins
   (the code is single-use); the second is ignored. `account.oauthComplete` returns `{}` immediately; the original
@@ -94,10 +94,10 @@ non-generalizable to remote transports). The explicit login contract below is th
   `"<provider>:<subject>"` join would allow), where `<subject>` is, from the **token exchange response**
   (no extra provider call, so ADR-0028's rate-limit rules are untouched): Anthropic → the token response's `account.uuid` and
   `organization.uuid`, length-prefixed the same way, **both required** (with either missing the login has no identity; the
-  login itself still succeeds; `refs/cliproxyapi/internal/auth/claude/anthropic_auth.go:134-160`); OpenAI → the id_token's
+  login itself still succeeds; a local reference clone); OpenAI → the id_token's
   `sub` and `chatgpt_account_id` claims, length-prefixed the same way, **both required** (with either missing the login has
   no identity, so two workspaces can never merge on `sub` alone;
-  `refs/cliproxyapi/internal/auth/codex/jwt_parser.go:19,43`). The id_token payload is decoded without signature
+  a local reference clone,43`). The id_token payload is decoded without signature
   verification (it came straight from the token endpoint over TLS, the trust the access token already gets), and an
   unexpected `account` / `organization` / `id_token` shape means "no identity", never a failed login. It is hashed so no
   vendor id/e-mail is stored or logged; it never crosses the wire (the wire only gets `hasIdentity: bool`). API-key
@@ -108,7 +108,7 @@ non-generalizable to remote transports). The explicit login contract below is th
   logging in to the team org would replace the personal row's credential in place (routing slot, quota rows and cooldown
   history of the wrong pool), and a row-level Re-login of the personal row completed in the team org would pass the identity
   check. With `(account.uuid, organization.uuid)` the team login creates a second row, and that row-level Re-login is an
-  `identity_mismatch`. This mirrors cockpit-tools, which keys on e-mail + account uuid + organization uuid and requires
+  `identity_mismatch`. This mirrors reference-tools, which keys on e-mail + account uuid + organization uuid and requires
   organization equality for CLI sync. No extra provider call is made (the organization comes from the same token exchange
   response).
   - *Migration:* none. The first Anthropic identity derivation (B1, commit `cace0114`) is in no release tag, so no
@@ -161,11 +161,11 @@ downgrading.
 | errors | stable codes in the message prefix: `login_in_progress`, `login_unknown`, `login_wrong_method`, `login_attempts_exceeded`, `login_bad_redirect`, `login_already_completed`, `state_mismatch`, `device_unsupported`, `device_expired`, `device_failed`, `login_bad_method`, `identity_mismatch`, `identity_in_use`, `identity_unverified`, `login_unknown_account`, `login_not_oauth_account`, `denied`, `timeout`. On the wire the message is `account.oauthStart: <code>: <detail>` (the handler's method prefix, then the code): clients anchor on the code after that prefix, never on the detail text |
 
 The client keeps a **generation counter** per Connect attempt: events/results from an older generation (after Cancel or a
-restart of the flow) are dropped (cliproxyapi's TUI pattern). One login per provider at a time stays (existing claim).
+restart of the flow) are dropped (a reference proxy project's TUI pattern). One login per provider at a time stays (existing claim).
 
 ## Alternatives considered
 
-- **Bind the callback on all interfaces + SSH-tunnel hint** (cliproxyapi). Rejected: exposes the listener, the hint assumes
+- **Bind the callback on all interfaces + SSH-tunnel hint** (a reference proxy project). Rejected: exposes the listener, the hint assumes
   `root@`/22, and it only works if the user forwards the port.
 - **Relay the vendor redirect through the smind relay.** Impossible: the registered `redirect_uri` is fixed to localhost.
 - **Open the browser on the daemon host.** Useless for a headless homelab daemon.

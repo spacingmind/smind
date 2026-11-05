@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-10-11). The user approved D1 of
-[`docs/plans/completed/orchestration-parity-paseo.md`](../plans/completed/orchestration-parity-paseo.md):
+[`docs/plans/completed/orchestration-reference-parity.md`](../plans/completed/orchestration-reference-parity.md):
 setup/teardown plus per-task port, stored **daemon-side and
 human-authored**, never read from a repo-committed file.
 
@@ -12,9 +12,9 @@ human-authored**, never read from a repo-committed file.
 A fresh task worktree (`internal/workspace.CreateTask`,
 `git worktree add`) has no installed dependencies and none of the ignored
 files (`.env`, local config) the repo needs, so every task starts broken
-for most real repos. Paseo solves this with `worktree.setup`/`teardown` in
+for most real repos. A reference workbench solves this with `worktree.setup`/`teardown` in
 a repo-committed `paseo.json`, read from the base branch, plus
-`$PASEO_PORT` allocation (`refs/paseo/public-docs/worktrees.md`).
+`$REF_PORT` allocation (a local reference clone).
 
 Reading commands from the repo means a cloned, untrusted repository
 registered as a workspace gets code execution on the first `task_new`. The
@@ -118,7 +118,7 @@ the portable channel for them is the setup script writing `.env.local` from
 
 ### Scripts and services
 
-Named scripts, supervised services, proxy URLs and health (Paseo's
+Named scripts, supervised services, proxy URLs and health (a reference workbench's
 `scripts.*`) are **not** part of this decision (gap G19 stays P2).
 
 ## Alternatives considered

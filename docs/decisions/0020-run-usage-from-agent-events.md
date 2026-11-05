@@ -10,10 +10,10 @@ a claude-native run through the proxy moves it off the user's own Claude
 login, and Claude Code disables claude.ai-only features (Remote Control,
 `/schedule`, claude.ai MCP connectors) once `ANTHROPIC_AUTH_TOKEN` is set.
 
-The user's position (2026-10-10): "proxy chỉ để quản lý thôi — paseo có
+The user's position (2026-10-10): "proxy chỉ để quản lý thôi — a reference workbench có
 cần đâu?" The proxy exists only to manage accounts for external clients.
-Paseo meters agents without any proxy: it reads usage from the agents'
-own events (`refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts`,
+A reference workbench meters agents without any proxy: it reads usage from the agents'
+own events (a local reference clone,
 `AgentUsage`, plus `turn_completed` / `usage_updated`).
 
 ## Context
@@ -110,7 +110,7 @@ own events (`refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts`,
    - `smind usage` gains `--scope` and the new groupings.
 5. **Unchanged proxy improvements for external clients.** These are
    carried over from the draft, because they don't touch runs:
-   - **(a) Base-URL semantics, the cliproxyapi convention.** For the
+   - **(a) Base-URL semantics, the reference proxy project convention.** For the
      Anthropic family the base is host plus prefix, and the full incoming
      path is appended. For the OpenAI family the base includes `/v1`,
      and the incoming path is appended minus its leading `/v1`. A legacy
@@ -167,6 +167,6 @@ own events (`refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts`,
 - ADR-0015 (account RPCs gain `models`).
 - ADR-0016 (chat-scoped runs).
 - `docs/plans/active/orchestration-and-metering.md` (M1, ADR-M section).
-- `refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts:230` (`AgentUsage`).
-- `refs/cliproxyapi`: `internal/runtime/executor/claude_executor_execute.go:30`,
+- A local reference clone (`AgentUsage`).
+- A local reference clone: `internal/runtime/executor/claude_executor_execute.go:30`,
   `openai_compat_executor.go:358`, `sdk/api/handlers/handlers_routing.go:203-219`.

@@ -14,7 +14,7 @@ that it depends on PR 1). PR 1 may overlap #587 (push target; touches `internal/
 
 A **PR tab** (tab kind `pr`) on a task that has a PR (stored `pr_number` / adopted PR):
 
-- Auto-opens once per task when a PR exists; closable. Closing opts that task out of auto-opening again (Paseo's rule).
+- Auto-opens once per task when a PR exists; closable. Closing opts that task out of auto-opening again (a reference workbench's rule).
 - Header: title, state (Open / Draft / Merged / Closed), "Open on GitHub", Refresh.
 - **Checks**: headline "All checks passed" / "Some checks were not successful" / "Checks are running", counts, the list (status, name,
   duration, link).

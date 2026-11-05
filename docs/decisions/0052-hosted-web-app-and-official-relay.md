@@ -14,7 +14,7 @@ if that hostname is later asked to talk to *real* daemons.
 
 Inputs: ADR-0007 (relay architecture), ADR-0011 (admission), ADR-0013 (bundled UI, same-origin `CheckOrigin`), ADR-0031 D8 (direct connections with a
 password), D9 (multi-device), D11 (hosted relay), D35 (device identity), ADR-0035 (E2EE v2), ADR-0040 (mobile push), ADR-0045/0047 (inbox,
-permission policy floor), ADR-0048 (fleet), `refs/paseo` (read for this ADR; files cited below).
+permission policy floor), ADR-0048 (fleet), a local reference clone (read for this ADR; files cited below).
 
 ## Context
 
@@ -30,27 +30,27 @@ device identity by Ed25519 `device_hello`). Only a self-hosted relay exists; `re
 The Human is considering two new things: a hosted **web app** that connects to users' daemons, and an **official relay** to make that (and mobile) work with no
 infrastructure on the user's side. They are separable, and the order matters (see [Staging](#staging-not-a-decision)).
 
-### What Paseo does (read for this ADR)
+### What a reference workbench does (read for this ADR)
 
-Paseo is the closest shipped precedent: a daemon, a mobile app, a CLI and a **hosted web app at `app.paseo.sh`**, with a hosted relay at `relay.paseo.sh`.
+A reference workbench is the closest shipped precedent: a daemon, a mobile app, a CLI and a **hosted web app at `app.reference.example`**, with a hosted relay at `relay.reference.example`.
 
 - **One app, three shells.** The web app is the same Expo/React-Native-web code as mobile, deployed to Cloudflare Pages on release tags
-  (`refs/paseo/.github/workflows/deploy-app.yml`). The daemon *can also serve that UI itself* (`features.webUi.enabled`, `public-docs/web-ui.md`: "the UI you serve always
-  matches your daemon version"), which is Paseo's answer to "I don't want to trust the hosted copy".
-- **Pairing = a URL whose fragment carries the offer.** `https://app.paseo.sh/#offer=<base64url>` (daemon id, daemon public key, relay endpoint;
+  (a local reference clone). The daemon *can also serve that UI itself* (`features.webUi.enabled`, `public-docs/web-ui.md`: "the UI you serve always
+  matches your daemon version"), which is a reference workbench's answer to "I don't want to trust the hosted copy".
+- **Pairing = a URL whose fragment carries the offer.** `https://app.reference.example/#offer=<base64url>` (daemon id, daemon public key, relay endpoint;
   `packages/protocol/src/connection-offer.ts`, `packages/server/src/server/pairing-offer.ts`). The fragment is never sent to a server, so the hosting origin does not see the key
   (`SECURITY.md`). The same link is pasted into the web app (`components/pair-link-modal.tsx`) or scanned by the phone. smind's offer already has the same shape (ADR-0007 (g)).
 - **Two ways in** (`SECURITY.md`): the relay (daemon dials out; clients meet it; E2EE) or a **direct** connection (`tcp://host:port?ssl=true&password=…`,
   `packages/protocol/src/daemon-endpoints.ts`).
-- **Direct from the hosted origin is an allowlist, on by default for Paseo's own origin.** The daemon's default config is `cors.allowedOrigins: ["https://app.paseo.sh"]`
+- **Direct from the hosted origin is an allowlist, on by default for a reference workbench's own origin.** The daemon's default config is `cors.allowedOrigins: ["https://app.reference.example"]`
   (`packages/server/src/server/persisted-config.ts:348`); CORS headers are emitted for allowed origins (`bootstrap.ts:717-745`) and the WebSocket upgrade rejects an `Origin`
-  that is neither allowed nor same-origin (`websocket-server.ts:880-908`, "Origin not allowed"). A password rides in `Sec-WebSocket-Protocol: paseo.bearer.<password>`. A `Host`
+  that is neither allowed nor same-origin (`websocket-server.ts:880-908`, "Origin not allowed"). A password rides in `Sec-WebSocket-Protocol: reference.bearer.<password>`. A `Host`
   allowlist blocks DNS rebinding (`SECURITY.md`). I found **no Private-Network-Access handling** in `packages/{app,server,client,relay}/src` (searched for `Private-Network`, `mixed content`).
 - **Relay** (`packages/relay`): a Cloudflare Worker + Durable Object per `serverId` with a daemon **control socket** and a per-client **data socket** (`cloudflare-adapter.ts:125-127`),
   a 200-frame store-and-forward buffer, **no accounts** (the open, secret-less relay model; `SECURITY.md` "Relay threat model"). E2EE is NaCl `box` with an ephemeral client key and the daemon's
   static key, random 24-byte nonces; **no replay protection inside a session** (stated in `SECURITY.md`; ADR-0035 already does better). Its `wrangler.toml` currently forwards to a Fly
-  upstream (`PASEO_RELAY_UPSTREAM`), which ADR-0031 D11 noted.
-- **Trust statement.** Paseo's SECURITY.md says the *relay* is untrusted. It does **not** say anything about trusting `app.paseo.sh`'s JavaScript, which holds the same keys the relay
+  upstream (`REF_RELAY_UPSTREAM`), which ADR-0031 D11 noted.
+- **Trust statement.** a reference workbench's SECURITY.md says the *relay* is untrusted. It does **not** say anything about trusting `app.reference.example`'s JavaScript, which holds the same keys the relay
   is kept away from. That gap is the central problem of this ADR.
 
 ## The options
@@ -98,7 +98,7 @@ Browser constraints a hosted `https://app.spacingmind.com` page runs into:
 2. **Chrome Private Network Access / Local Network Access.** A public site reaching a loopback or private-IP address is gated by Chrome: first as a CORS-preflight rule (`Access-Control-Request-Private-Network` →
    the daemon must answer `Access-Control-Allow-Private-Network: true`), and, as I understand the 2025–26 direction, a **user permission prompt** ("access devices on your local network") that replaces/extends that rule. WebSocket
    handshakes are not CORS-preflighted but are in scope of the permission. **I have not verified the exact current behaviour per Chrome version, and Firefox/Safari differ; it must be tested on real browsers before this option is chosen.**
-3. **Origin allowlist on the daemon.** Today's `CheckOrigin` accepts only same-origin, and there is no CORS. Option B needs a config like `server.allowedOrigins` (Paseo ships with its own origin allowed by default; smind
+3. **Origin allowlist on the daemon.** Today's `CheckOrigin` accepts only same-origin, and there is no CORS. Option B needs a config like `server.allowedOrigins` (a reference workbench ships with its own origin allowed by default; smind
    would have to choose a default — [H8](#human-decisions)), CORS + preflight handling for `/api/login`, `/healthz`, and the PNA header. Every one of these widens the daemon's attack surface, which is a terminal (remote code execution)
    behind a password.
 4. **DNS rebinding and `Host`** stay as they are; a hosted origin does not weaken them.
@@ -106,7 +106,7 @@ Browser constraints a hosted `https://app.spacingmind.com` page runs into:
 What it has going for it: no relay to operate, no relay cost, no metadata to a third party, and it works for the LAN/Tailscale homelab users that ADR-0031 D8 designed for. What it lacks: it does nothing for NAT (a laptop on a café network, a
 daemon behind CGNAT), which is the relay's whole reason to exist, and it depends on browser policy that is in motion.
 
-### Option C — both, one hosted bundle (the Paseo shape)
+### Option C — both, one hosted bundle (the reference workbench shape)
 
 Relay for off-LAN and mobile, direct for LAN and localhost, in the same hosted app, chosen per host entry. Strictly more work than A or B alone; the least bad for users; the largest attack surface.
 
@@ -189,7 +189,7 @@ None of these is decided by this ADR. Where a "Lead's lean" is given it is input
 - **H5. Capability tiers**: should a hosted-web device get a narrower default scope than a phone/desktop (read + prompt + permissions, no terminal/file-write unless the owner enables it)? This needs a device-class field in the pairing grant (a protocol and policy change, ADR-0047 interplay).
 - **H6. Browser key storage**: non-extractable IndexedDB device key (re-pair after eviction), per-session ephemeral only (re-pair every visit), or an optional passphrase-wrapped key?
 - **H7. What `app.spacingmind.com` is**: the demo only, the real app only (demo moves to `/demo` or `demo.spacingmind.com`), or both from one bundle (`?demo`)?
-- **H8. Daemon-side origin policy for Option B**: `server.allowedOrigins` empty by default and opt-in per origin (smind's own hosted origin included), or allowed by default as Paseo does for `app.paseo.sh`? Also whether to add built-in TLS (ADR-0031 decision 10) to make `wss://` practical.
+- **H8. Daemon-side origin policy for Option B**: `server.allowedOrigins` empty by default and opt-in per origin (smind's own hosted origin included), or allowed by default as a reference workbench does for `app.reference.example`? Also whether to add built-in TLS (ADR-0031 decision 10) to make `wss://` practical.
 - **H9. Self-hosters**: do we publish the web bundle as a release asset and/or container so anyone can serve it from a name they control, and may that bundle connect to other daemons (as the daemon-served UI could)?
 - **H10. Relay `Origin` policy** for browser clients: keep permissive (admission is the gate), or allowlist `app.spacingmind.com` plus operator-configured origins?
 - **H11. Operator and legal**: who operates `relay.`/`app.` (the entity named in the terms), who writes and owns the ToS and privacy notice, the retention period for relay logs (D32), and the jurisdiction question for IP addresses.

@@ -71,9 +71,9 @@ Decisions) and is explicitly deferred to a later Milestone 4.
   exist anywhere in this codebase today (no token registry, no outbound
   push integration at all). That's a materially bigger and more novel
   technical domain than "call two RPCs the web UI already calls," and
-  this session's own experience orchestrating Milestones 1-2 via Paseo
+  this session's own experience orchestrating Milestones 1-2 via a reference workbench
   found GLM reliably stalls in proportion to a task's size/novelty (see
-  this repo's Paseo-agent model-choice memory) — bundling push in here
+  this repo's Reference-agent model-choice memory) — bundling push in here
   would risk exactly that failure mode for no benefit, since it doesn't
   share any code with Items 1-2 anyway. Milestone 3 is scoped to exactly
   the two items that reuse 100% already-proven mobile patterns.
@@ -195,7 +195,7 @@ Decisions) and is explicitly deferred to a later Milestone 4.
 
 - [x] Item 1 — send a follow-up prompt.
 - [x] Item 2 — approve/deny a live permission request.
-- [ ] Hand off implementation via Paseo (GLM as primary implementer, per
+- [ ] Hand off implementation via a reference workbench (GLM as primary implementer, per
       the user's standing preference — nudge with a direct, specific
       `deny` + `send_agent_prompt` redirect if it shows the "many turns,
       no commits" stall pattern before escalating to a full Sonnet

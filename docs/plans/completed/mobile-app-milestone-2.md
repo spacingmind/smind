@@ -153,7 +153,7 @@ kept Milestone 1's GLM/Sonnet handoff tractable).
 - [x] Item 1 — persistent `RelayConnection` + event subscription.
 - [x] Item 2 — workspace/task list screens.
 - [x] Item 3 — task detail with realtime timeline (read-only).
-- [ ] Hand off implementation via Paseo (GLM as primary implementer, per
+- [ ] Hand off implementation via a reference workbench (GLM as primary implementer, per
       the user's standing preference — fall back to Sonnet immediately,
       without extended nudging, if GLM shows the "many turns, no commits"
       stall pattern documented in this session's own memory).

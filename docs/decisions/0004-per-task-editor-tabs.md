@@ -14,7 +14,7 @@ open-tab state. (Decided by the maintainer when resolving open question
 
 ## Alternatives considered
 
-- **Per-workspace tabs (Paseo's model).** Paseo keys open tabs on the
+- **Per-workspace tabs (a reference workbench's model).** a reference workbench keys open tabs on the
   workspace because its worktrees exist inside the workspace session
   lifecycle. Passed over: smind's model is different by definition —
   each *task* is its own git worktree with its own agent runs, its own
@@ -31,7 +31,7 @@ open-tab state. (Decided by the maintainer when resolving open question
   make the tab set mirror exactly what that task's agent sees and
   changes — the review surface (files + diff) belongs to the task whose
   work is being reviewed.
-- The maintainer also finds Paseo's code-review-and-commit UX poor;
+- The maintainer also finds a reference workbench's code-review-and-commit UX poor;
   task-scoped tabs are the foundation for a review surface that is
   deliberately *not* a copy of it (review loop design is tracked in
   `docs/research/dual-mode-ui.md` and follow-up plans).

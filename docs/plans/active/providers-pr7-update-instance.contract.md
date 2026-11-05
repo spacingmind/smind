@@ -20,7 +20,7 @@ acs:
     text: "provider.list serves the editable overlay of an instance only."
     covers: { tests: [TestProviderList_InstanceEditableFields], frames: [] }
   - id: AC6
-    text: "Two claude-native instances with different CLAUDE_CONFIG_DIR run concurrently and each process sees its own dir; a hand-written Paseo-style config loads and lists unchanged."
+    text: "Two claude-native instances with different CLAUDE_CONFIG_DIR run concurrently and each process sees its own dir; a hand-written reference-style config loads and lists unchanged."
     covers: { tests: [TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs, TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged], frames: [] }
   - id: AC7
     text: "CLI smind provider update sends the right params and the CLI reference stays in sync."

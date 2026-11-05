@@ -262,7 +262,7 @@ One place for what needs a person. **Derived, not stored**, with a small read-st
   **Mobile:** an **Inbox** entry in the tasks area with the same badge; one column, 44 pt rows, the permission card full-screen, no hover-only actions.
   **Accessibility:** the list is a `list` of buttons; the badge change is announced through a polite live region (never an assertive one, never a focus steal);
   state is never colour alone (icon + text); every action has a visible label; reduced-motion removes row transitions; the narrow layout is a single column with
-  the actions in a bottom sheet. Light and dark, 1280 and 390; the same ZCode visual parity as the rest of the app.
+  the actions in a bottom sheet. Light and dark, 1280 and 390; the same a reference desktop workbench visual parity as the rest of the app.
 - **What the inbox must NOT do:** no "approve all" or any bulk answer of a permission (answers are one request at a time, as today); no merge button or merge
   RPC; no auto-approve, "always allow" or "remember" shortcut on the inbox card (ADR-0019, ADR-0017); no way for an agent to create, mutate or clear an item;
   no hiding of a pending permission (it cannot be snoozed or dismissed); no content beyond the redacted summary in the list (detail lives in the card, on a

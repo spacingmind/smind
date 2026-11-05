@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-10-11). The user approved D2 of
-[`docs/plans/completed/orchestration-parity-paseo.md`](../plans/completed/orchestration-parity-paseo.md):
+[`docs/plans/completed/orchestration-reference-parity.md`](../plans/completed/orchestration-reference-parity.md):
 a `model` field on the run config and on profiles, sourced from ACP model
 config options plus a static Claude catalog; `provider_list` lists models,
 and live switching goes through `task_set_option`.
@@ -12,7 +12,7 @@ and live switching goes through `task_set_option`.
 
 smind has no model concept. `internal/taskrunner` never passes a model to
 any backend, profiles (ADR-0014) carry provider/permissionMode/thinking
-only, and `provider.list` returns permission modes but no models. Paseo has
+only, and `provider.list` returns permission modes but no models. A reference workbench has
 `list_models` and `update_agent settings.model`. Today the model a run uses
 is whatever each backend defaults to (a Claude login's default, GLM's
 default, Codex's default), so an orchestrator cannot pick a cheaper or
@@ -119,7 +119,7 @@ get NULL = provider default. Nothing is remapped or discarded.
   ACP and that the user asked live switching to go through.
 - **Model as a per-chat (bound) field like provider.** Rejected: ADR-0016
   binds provider because sessions are provider-specific; a model can change
-  between turns and Paseo's `update_agent` changes it live.
+  between turns and a reference workbench's `update_agent` changes it live.
 - **A strict allowlist from `provider_list` for every provider.** Rejected
   for Claude (a static list goes stale on every model release) and for
   undiscovered ACP/Codex catalogs (a failed probe would block all runs).

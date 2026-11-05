@@ -5,7 +5,7 @@
 Source: a Windows QA pass of smind desktop 0.10.0 (2026-10-11). Each item was
 re-checked against `origin/develop` (v0.10.0-21) before specifying; findings are
 in Decisions. Related: `desktop-native-feel.md` (D3 shortcuts),
-`orchestration-parity-paseo.md` (the run/queue work behind item 2).
+`orchestration-reference-parity.md` (the run/queue work behind item 2).
 
 ## Acceptance Criteria
 
@@ -31,7 +31,7 @@ in Decisions. Related: `desktop-native-feel.md` (D3 shortcuts),
   | Action | Escape-hatch combo |
   |---|---|
   | `palette.open` | `Mod+Shift+P` |
-  | `tab.close` | `Alt+Shift+W` (Paseo's web close-tab combo) |
+  | `tab.close` | `Alt+Shift+W` (a reference workbench's web close-tab combo) |
   | `sidebar.toggle` | `Mod+Shift+B` |
   | `pane.find` | `Mod+Shift+F` |
   | `composer.focus` | `Mod+Shift+L` |
@@ -144,19 +144,19 @@ Names are the exact `it(...)` / `Test...` titles.
 - **Rule, not a per-row flag (K1).** One predicate in the matcher (`terminal` scope,
   non-Mac, resolved combo is bare Ctrl+letter → skip) rather than flipping every row off
   `global`. A rebound combo is covered for free, and the table stays the single place a
-  binding is declared. Paseo does it per row (`when: { mac: false, terminal: false }`) and
+  binding is declared. A reference workbench does it per row (`when: { mac: false, terminal: false }`) and
   gives no hatch for most; we add hatches because the terminal is a first-class pane here.
 - **Letters plus `[` `\` `]` (supervisor decision, 2026-10-11).** Ctrl+`[` is ESC (vim
   users), Ctrl+`\` is SIGQUIT, Ctrl+`]` is GS; the shell owns them like the letters, so
   K1 covers them and `task.prev`/`task.next`/`pane.split.right` get Shift hatches. Ctrl+digit
   and Ctrl+`,`/`.` are not control bytes and keep firing.
 - **Hatch combos.** `Ctrl+Shift+W` as suggested is already `pane.close`, so close-tab uses
-  `Alt+Shift+W` (Paseo's own web close-tab combo, and it matches the existing
+  `Alt+Shift+W` (a reference workbench's own web close-tab combo, and it matches the existing
   `Alt+Shift+T/[/]` tab family). The others are the Shift variant of the default, which is
   not a readline key. Hatches fire in every scope (not just terminal) so the dialog has one
   honest list.
 - **Platform gate.** `BindingWhen.mac?: false` and an `isMac` argument on
-  `platformBindings`, mirroring Paseo's `when.mac`. Not an architecture change: the table
+  `platformBindings`, mirroring a reference workbench's `when.mac`. Not an architecture change: the table
   shape is unchanged.
 - **Item 2 status on develop.** `run.status` adoption (#259, post-0.10.0, not in the QA'd
   build) already covers the "run appears" half; the QA build predates it. Remaining gap

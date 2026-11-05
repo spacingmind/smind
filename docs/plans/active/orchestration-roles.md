@@ -13,7 +13,7 @@ enough**. Design: [ADR-0027](../../decisions/0027-profile-as-role-contract.md)
 pick up when that day comes; they are deliberately light.
 
 **Goal (user, 2026-10-11):** make the Supervisor → Lead → Peer workflow work
-better natively in smind than it does today on Paseo.
+better natively in smind than it does today on a reference workbench.
 
 **Related work, not duplicated here:**
 
@@ -22,18 +22,18 @@ better natively in smind than it does today on Paseo.
   `task.tree` and the tree concurrency guard (#289). This plan only adds an
   optional contract input to its `TierOf` after its PR-T lands, and edits
   none of its files.
-- `orchestration-parity-paseo.md` owns D12 and D13 (answered below).
+- `orchestration-reference-parity.md` owns D12 and D13 (answered below).
 - `self-learning-skills.md` (ADR-0026, PR #288) owns learning; the role
   interaction is a note for it (section 5).
 
 ## 1. Gap table
 
-| # | Capability | Paseo stopgap (today) | smind today | Target (ADR-0027) |
+| # | Capability | A reference workbench stopgap (today) | smind today | Target (ADR-0027) |
 |---|---|---|---|---|
 | 1 | Role instructions | Brief says "read `WORKSPACE_PROTOCOL.md`"; profile has only `notes` | Same; `systemPrompt` excluded (ADR-0014) | Profile `instructions` + bundled `skills`, delivered per spawn (Claude append-system-prompt, ACP first-prompt preface, Codex `developerInstructions`) |
-| 2 | Tool policy | `paseoTools.enabled=false` on two Peer providers | `smind mcp serve` added by hand; no policy | `orchestrationTools` bool; daemon builds the MCP config; strict MCP on Claude |
+| 2 | Tool policy | `refTools.enabled=false` on two Peer providers | `smind mcp serve` added by hand; no policy | `orchestrationTools` bool; daemon builds the MCP config; strict MCP on Claude |
 | 3 | Allowed children | Lead's note says Peers only | Any `profileId` or raw provider | `childPolicy` none / leaf / profiles, enforced on `task_send`/`task_new` |
-| 4 | Caller identity | Paseo parent label | Self-reported `source`/`fromTaskId` | Run-scoped token; forced parent and source; method allowlist; own-subtree scope |
+| 4 | Caller identity | A reference workbench parent label | Self-reported `source`/`fromTaskId` | Run-scoped token; forced parent and source; method allowlist; own-subtree scope |
 | 5 | Turn limit | "20-turn limit" in a note | `agents.glm.maxTurns`, daemon-wide | Per-profile `maxTurns` (Claude, GLM); "not enforced" where a provider can't |
 | 6 | Budget | none | Usage measured (ADR-0020), no cap | Per-run and per-subtree caps from `run_usage` |
 | 7 | Concurrency | none | Per-tree guard (#289) | `maxConcurrentRuns` on the same guard, rooted at the caller |
@@ -44,7 +44,7 @@ better natively in smind than it does today on Paseo.
 | 12 | Accept/reject record | In the plan's Progress | none | `handoff_review` per run |
 | 13 | Sizing | Supervisor scores in prose | none | Optional `tasks.size`; suggests profiles and a budget |
 | 14 | Worktree setup | `paseo.json` (repo file) | ADR-0024, daemon-side, human-authored (built) | none: done |
-| 15 | Supervisor heartbeat | Paseo heartbeat | none; schedules deferred (parity D5) | stays on Paseo or the host's `/loop` |
+| 15 | Supervisor heartbeat | A reference workbench heartbeat | none; schedules deferred (parity D5) | stays on a reference workbench or the host's `/loop` |
 | 16 | Read-only reviewer | `reviewer` profile, plan mode | `plan` mode (Claude); ACP modes are agent-defined | A profile; nothing new |
 
 ## 2. When to build (the trigger)
@@ -145,23 +145,23 @@ screenshots.
 
 **R9. Migration of the stopgap.** A documented role pack and an idempotent
 `smind profile seed roles` (human command), then one L item run end to end
-through smind with the Paseo stopgap as the control (section 4).
+through smind with the reference workbench stopgap as the control (section 4).
 
 **Learning (ADR-0026)** is not a phase here: the tier-scoped skill filter is
 specified in section 5 and built in the self-learning plan.
 
-## 4. Migrating the Paseo stopgap
+## 4. Migrating the reference workbench stopgap
 
 | Stopgap piece | smind |
 |---|---|
-| Profiles `supervisor`, `lead`, `peer-glm`, `peer-sonnet`, `reviewer` | Seeded as contract profiles. Supervisor is in no `childPolicy`, so only a human launches it (the Paseo "never spawned by agents" note, enforced). Lead: `childPolicy=leaf`. Peers and reviewer: `orchestrationTools=false` |
-| `glm-peer` / `claude-s-peer` (Paseo tools off) | `orchestrationTools=false` |
+| Profiles `supervisor`, `lead`, `peer-glm`, `peer-sonnet`, `reviewer` | Seeded as contract profiles. Supervisor is in no `childPolicy`, so only a human launches it (the reference workbench "never spawned by agents" note, enforced). Lead: `childPolicy=leaf`. Peers and reviewer: `orchestrationTools=false` |
+| `glm-peer` / `claude-s-peer` (a reference workbench tools off) | `orchestrationTools=false` |
 | `WORKSPACE_PROTOCOL.md` | Stays the repo-owned contract. Profile `instructions` stay short and point at it; they do not copy it |
 | `paseo.json` worktree setup | ADR-0024, already built: daemon-side, human-authored |
-| Supervisor heartbeat | Stays on Paseo or `/loop` until schedules (parity D5) |
+| Supervisor heartbeat | Stays on a reference workbench or `/loop` until schedules (parity D5) |
 | "20-turn limit", "never Opus" in notes | `maxTurns`; fixed `model` in the profile; a Lead cannot override it |
 
-Cutover is gradual: smind runs one L item while Paseo stays the control; the
+Cutover is gradual: smind runs one L item while a reference workbench stays the control; the
 stopgap is retired only after the trigger list in section 2 stops recurring
 under smind. Never both writing the same scope.
 
@@ -201,7 +201,7 @@ the trigger in section 2.
    over flipping a run live.
 7. **D13 (`needs-continue`).** Recommend a derived `disposition` and not a
    new run status (rationale in ADR-0027 item 4), reversing the earlier
-   "distinct status" lean in `orchestration-parity-paseo.md`.
+   "distinct status" lean in `orchestration-reference-parity.md`.
 8. **Reversing D8** (auto-inject `smind mcp serve`): recommend yes, but
    only for profiles that say `orchestrationTools=true`, now that the depth
    and concurrency guards exist.
@@ -213,7 +213,7 @@ the trigger in section 2.
 
 - 2026-10-23: **ADR-0041 (Accepted) amends ADR-0027** and pulls R2–R4 forward in reduced form (profile contract, daemon-side profile, built-in `smind` MCP entry with run identity, admission) as Item S of [`in-smind-orchestration.md`](../completed/in-smind-orchestration.md); R5, R6 and R8 stay parked behind the section 2 trigger. ADR-0041 was accepted and implemented (plan closed 2026-10-23: R2–R4 in reduced form, role pack, run identity, admission, sticky seats); R5, R6 and R8 stay parked behind the section 2 trigger, and this plan stays here for them.
 
-- 2026-10-22 (plans hygiene) — **STALE BY DESIGN, flagged for the Human.** Nothing here is built and ADR-0027 is still Proposed; the plan is deliberately parked until the trigger in section 2 fires. No occurrence of that trigger is recorded below. Since 2026-10-11 the neighbouring pieces landed: D12 (a human-only live mode switch) as #369 `smind task mode`; D13 stayed a derived `disposition` (#373); the tree guard and `task.tree` (see `task-hierarchy-tiers.md`). The Supervisor/Lead/Peer workflow still runs on Paseo plus `docs/WORKSPACE_PROTOCOL.md`. **Decision for the Human:** keep this parked, or move it to `completed/` with "not built, trigger never fired" so `active/` only holds live work. Not deleted.
+- 2026-10-22 (plans hygiene) — **STALE BY DESIGN, flagged for the Human.** Nothing here is built and ADR-0027 is still Proposed; the plan is deliberately parked until the trigger in section 2 fires. No occurrence of that trigger is recorded below. Since 2026-10-11 the neighbouring pieces landed: D12 (a human-only live mode switch) as #369 `smind task mode`; D13 stayed a derived `disposition` (#373); the tree guard and `task.tree` (see `task-hierarchy-tiers.md`). The Supervisor/Lead/Peer workflow still runs on a reference workbench plus `docs/WORKSPACE_PROTOCOL.md`. **Decision for the Human:** keep this parked, or move it to `completed/` with "not built, trigger never fired" so `active/` only holds live work. Not deleted.
 
 - 2026-10-11: ADR-0027 and this plan written as Proposed, docs-only. Not
   built, per the user. PR #290 (protocol) is on `develop`.

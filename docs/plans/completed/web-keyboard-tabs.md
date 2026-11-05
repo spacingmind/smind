@@ -2,10 +2,10 @@
 
 ## Context
 
-Paseo is keyboard-first: about 156 binding rows covering roughly 60
+A reference workbench is keyboard-first: about 156 binding rows covering roughly 60
 actions, multi-step chord shortcuts, rebinding in Settings with search,
 and many workspace actions in its Command Center. See
-`docs/research/local/paseo-uiux-2026-09.md` (local-only, gitignored) gaps #3, #4, #9 and the
+Local research notes (local-only, gitignored) gaps #3, #4, #9 and the
 `Cmd+digit` part of #8.
 
 smind today:
@@ -23,7 +23,7 @@ smind today:
 - Palette entries are few (`App.tsx` around lines 869/899,
   `app-sidebar.tsx` around lines 370/377).
 
-**Port the behavior from `refs/paseo/packages/app/src` (updated
+**Port the behavior from a local reference clone (updated
 2026-09-24):**
 
 - `keyboard/keyboard-shortcuts.ts`:
@@ -47,7 +47,7 @@ smind today:
 
 - **Chords:** extend a binding from one `KeyCombo` to `KeyCombo[]`. A
   first key that starts a chord waits for up to a timeout (take the value
-  from Paseo's `CHORD_TIMEOUT_MS`). The in-progress chord survives
+  from a reference workbench's `CHORD_TIMEOUT_MS`). The in-progress chord survives
   re-renders. Existing single-combo bindings and persisted overrides
   keep working unchanged, so migration is transparent.
 - **Pane focus:**
@@ -56,12 +56,12 @@ smind today:
   - Tab actions (`Ctrl+W`, the digit shortcuts, next/prev) target the
     focused pane, not just the default one.
   - A **rebound** pane-focus shortcut fires even while typing in an
-    input, matching Paseo #5287 -- the shipped **default** does not: it
+    input, matching a reference workbench #5287 -- the shipped **default** does not: it
     collides with the browser/OS's own Shift+Arrow text-selection key
     (word-select on Win/Linux, line-select on mac), and that collision is
-    exactly what Paseo's own `editable: false` guard exists to avoid for
+    exactly what a reference workbench's own `editable: false` guard exists to avoid for
     the default combo specifically.
-- **New actions**, with suggested defaults (read Paseo's table for the
+- **New actions**, with suggested defaults (read a reference workbench's table for the
   exact defaults and avoid clashing with browser/OS keys):
   - split right, split down;
   - focus pane left/right/up/down;
@@ -74,7 +74,7 @@ smind today:
     the existing `Ctrl+Alt+<digit>` tab-position binding). Not
     `Mod+<digit>`: Chrome/Edge/Firefox keep Ctrl/Cmd+1-9 for switching
     the *browser's own* tabs and a page never reliably sees it, matching
-    Paseo's own `desktop: true`-only `Mod+Digit` vs. its `Alt+Digit` web
+    a reference workbench's own `desktop: true`-only `Mod+Digit` vs. its `Alt+Digit` web
     fallback;
   - Shift+Tab in the composer cycles approval mode/policy.
 - **Settings → Shortcuts section:** move rebinding into the Settings
@@ -181,7 +181,7 @@ smind today:
   `closePaneInLayout`, `splitPaneEmptyInLayout`, `moveTabToPaneInLayout`)
   from an earlier item, unused by any UI -- this item is mostly wiring,
   not new data model. Added `lib/split-navigation.ts` (`findAdjacentPane`,
-  ported from Paseo's `utils/split-navigation.ts` -- normalizes every
+  ported from a reference workbench's `utils/split-navigation.ts` -- normalizes every
   pane's bounding box from the split tree's direction/sizes, picks the
   nearest candidate in a direction). `hooks/use-task-tabs.ts` grows
   `focusPane`/`closePane`/`splitPaneEmpty`/`moveTabToNextPane` over the
@@ -191,18 +191,18 @@ smind today:
   `findAdjacentPane` then `focusPane`. The focused pane gets a visible
   ring (`PaneTabStrip`'s outer div, `ring-1 ring-inset ring-ring`, only
   once `paneCount > 1`) and a click-anywhere-in-the-pane handler
-  (`onPointerDownCapture`) sets it, mirroring Paseo's
+  (`onPointerDownCapture`) sets it, mirroring a reference workbench's
   `shouldFocusPaneFromEventTarget` intent without its interactive-target
   exemption (unneeded here -- see the function's own doc comment).
   `tab.new` pops the focused pane's own `NewTabButton` menu open via a
   new controlled `open`/`onOpenChange` pair on that component (mirrors
-  Paseo's `workspace.tab.menu.open`, which opens a picker rather than a
+  a reference workbench's `workspace.tab.menu.open`, which opens a picker rather than a
   fixed kind). "Move tab to the next pane" (plan's Decisions, singular --
   not 4 directional variants) cycles through `collectAllPanes`' tree
   order, wrapping.
 
   Pane-focus's editable-scope rule (fixed in review, see below):
-  `BindingWhen` grows `editableWhenRebound?: true`, ported from Paseo's
+  `BindingWhen` grows `editableWhenRebound?: true`, ported from a reference workbench's
   `editable: false` + `withoutDefaultComboGuard` -- the pane-focus
   *default* combos (`Mod+Shift+Arrow*`) stay blocked in `editable` scope
   (they're the browser/OS's own text-selection keys there: word-select
@@ -210,7 +210,7 @@ smind today:
   block lifts for that binding's new combo. `bindingAllowedInScope` reads
   `ResolvedBinding.overridden` (already computed by `resolveBindings`) to
   tell "still on the default" from "rebound" apart; `terminal` scope is
-  untouched either way, matching Paseo's own guard being `editable`-only.
+  untouched either way, matching a reference workbench's own guard being `editable`-only.
   - `lib/split-navigation.test.ts`: adjacent-pane resolution across a
     nested 2x2 grid, overlap-over-center-distance tie-breaking, no
     candidate in a direction, unknown focused pane, single-pane tree.
@@ -239,24 +239,24 @@ smind today:
     task (distinct from `Ctrl+Alt+<digit>`'s tab-position jump).
 
   **Combo choices not already fixed by the plan's Decisions** (the plan
-  asked for defaults matching Paseo's table where it has one, adapted to
+  asked for defaults matching a reference workbench's table where it has one, adapted to
   avoid browser/OS conflicts on smind's web-only runtime):
   - `pane.split.right` `Mod+\`, `pane.split.down` `Mod+Shift+\`,
     `pane.close` `Mod+Shift+W`, `pane.focus.*` `Mod+Shift+Arrow*`,
-    `pane.move-tab.next` `Mod+Shift+M` -- Paseo's own pane-management
+    `pane.move-tab.next` `Mod+Shift+M` -- a reference workbench's own pane-management
     combos are mac-desktop-only rows (`when: { mac: true }`, no non-mac
     variant); smind's single `Mod` token makes one row cover both
     platforms, so these needed no second row.
   - `tab.new` `Alt+Shift+T`, `tab.next`/`tab.prev` `Alt+Shift+]`/`[` --
     not `Mod+T`/`Mod+Tab` (a browser tab's own shortcuts, unblockable in
-    a page's own JS), matching Paseo's own substitution pattern for its
+    a page's own JS), matching a reference workbench's own substitution pattern for its
     web runtime (its `close-tab`'s `Alt+Shift+W`, its already-universal
     `Alt+Shift+[`/`]` for tab prev/next).
   - `settings.open` `Mod+,` is the plan's own explicit choice.
     `sidebar.task-jump` shipped as `Mod+<digit>` initially and was
     corrected to `Alt+Digit` in review (see below) -- Chrome/Edge/Firefox
     keep Ctrl/Cmd+1-9 for their own tab switching and a page never
-    reliably sees it, matching Paseo's own `desktop: true`-only
+    reliably sees it, matching a reference workbench's own `desktop: true`-only
     `Mod+Digit` vs. `Alt+Digit` on web. Exact-modifier matching
     (`matchCombo`) is what keeps `Alt+Digit` from colliding with
     `tab-jump`'s `Mod+Alt+Digit`. A future desktop (Tauri) runtime that
@@ -265,18 +265,18 @@ smind today:
 
   **Review fixes (post-implementation, before merge):** two defaults
   shipped wrong and were corrected here, both against the same source
-  (`refs/paseo/packages/app/src/keyboard/keyboard-shortcuts.ts`) misread
+  (a local reference clone) misread
   the first time:
   1. Pane-focus's `Mod+Shift+Arrow*` originally carried `when: {
      global: true }`, so it fired inside a text field -- stealing
      Ctrl+Shift+Arrow's word-select and Cmd+Shift+Arrow's line-select
-     from the composer. Paseo's actual rule (`editable: false`, lifted
+     from the composer. A reference workbench's actual rule (`editable: false`, lifted
      only on a rebind via `withoutDefaultComboGuard`) is what's
      implemented now, via the new `editableWhenRebound` flag above.
   2. `sidebar.task-jump`'s default was `Mod+Digit`, which
      Chrome/Edge/Firefox already reserve for browser tab switching and a
      page never reliably receives -- changed to `Alt+Digit`, matching
-     Paseo's own `desktop: false` fallback for the same action.
+     a reference workbench's own `desktop: false` fallback for the same action.
 
 - **AC5 (Settings → Shortcuts).** `components/shortcuts-dialog.tsx`'s
   `<ShortcutRows />` was already written reusable ("exported so Item 13's
@@ -284,9 +284,9 @@ smind today:
   conflicts -- only search and chord-capture were missing, plus removing
   the dialog wrapper now that Settings is rebinding's permanent home. Added
   `keyboard/shortcut-help-search.ts` (`filterShortcutHelpSections`, scaled
-  down from Paseo's combinatorial-alias version: a fixed `Mod`/`Alt`/`Cmd`/
+  down from a reference workbench's combinatorial-alias version: a fixed `Mod`/`Alt`/`Cmd`/
   `Ctrl` -> word-alias table against `HelpRow`'s new `effectiveCombo` field,
-  since smind's rows carry one formatted string rather than Paseo's
+  since smind's rows carry one formatted string rather than a reference workbench's
   per-step chord array). `ShortcutRow`'s capture grew a second, opt-in
   "Record chord…" mode (multi-step, committed by Enter) alongside the
   original single-key "Change" (commits immediately, unchanged) -- a
@@ -370,7 +370,7 @@ smind today:
   option list ("Manual approval" / "Auto-safe" / that provider's own
   full-access wording). Added
   `components/composer/approval-policy-cycle.ts`'s
-  `resolveNextApprovalPolicy` (ported from Paseo's
+  `resolveNextApprovalPolicy` (ported from a reference workbench's
   `composer/agent-controls/mode.ts`'s `resolveNextAgentModeId`: cyclic
   next-index, wrapping, starting from the first option if the current
   value isn't found), wired into `handleKeyDown` on `Shift+Tab` (gated on

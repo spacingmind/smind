@@ -4,16 +4,16 @@ Size: M (4) — scope 1, PRs 0, risk 1, decisions 0, verify 2
 
 Goal (user, 2026-10-12): opening Settings replaces the *whole* shell (app
 sidebar + main view) with a dedicated Settings screen that has its own
-layout — left settings sidebar + main content view — like Paseo and ZCode.
+layout — left settings sidebar + main content view — like a reference workbench and a reference desktop workbench.
 Today `SettingsScreen` is a sibling of the task pane inside the shell, so
 the app sidebar stays visible.
 
 References (read-only, ported not invented):
-- Paseo `packages/app/src/screens/settings-screen.tsx`: desktop = 320px
+- A reference workbench `packages/app/src/screens/settings-screen.tsx`: desktop = 320px
   sidebar (back-to-workspace row at the top, `TitlebarDragRegion` above it,
   grouped list) + detail pane with a title header; compact = root is the
   list, a section is a pushed detail page with a back header.
-- ZCode `packages/ui/src/SettingsPage.tsx`: `grid-cols-[268px_1fr]`, `h-12`
+- A reference desktop workbench `packages/ui/src/SettingsPage.tsx`: `grid-cols-[268px_1fr]`, `h-12`
   drag strip above a ghost "Back to workspace" row, group labels
   (`text-ui-sm font-medium text-foreground-subtlest`), `h-8` nav rows,
   content in a framed panel (`border bg-background rounded-xl`, 4px inset),
@@ -118,9 +118,9 @@ References (read-only, ported not invented):
 ## Review round 1 (Supervisor, PR #297) — changes
 
 - **Shell shortcuts inert while Settings is open.** New `useActionRestriction(allowed)` in the keyboard provider narrows dispatch (keys, native menu, palette `runAction`) to an allow-list; a restricted key is left to the browser (no `preventDefault`). `App.tsx` restricts to `SETTINGS_SAFE_ACTIONS` = `palette.open`, `shortcuts.help`, `settings.open`, `theme.cycle`, `app.quit`. Tests: `useActionRestriction` (2, provider), `App settings view > shell shortcuts are inert while settings is open: task.next does not change the selection` (verified to fail without the restriction), `settings-safe shortcuts still work over settings`.
-- **Nav grouping (Paseo-style):** ungrouped app sections first — General · Appearance · Notifications (110) · Shortcuts (120) — then the Connection group (desktop only: Connections, Daemon), then Agents & providers (Agents, MCP servers, Providers, Usage). A divider ends a group if an ungrouped section is registered after one. Tests: nav-order, "Notifications and Shortcuts precede the Agents & providers heading", separator.
+- **Nav grouping (reference-style):** ungrouped app sections first — General · Appearance · Notifications (110) · Shortcuts (120) — then the Connection group (desktop only: Connections, Daemon), then Agents & providers (Agents, MCP servers, Providers, Usage). A divider ends a group if an ungrouped section is registered after one. Tests: nav-order, "Notifications and Shortcuts precede the Agents & providers heading", separator.
 - **No duplicate titles/actions:** `settings-title.tsx` (`SettingsSectionTitle` + `SectionTitleInHeaderProvider`). The screen provides `titleInHeader`; sections with a name-repeating `<h3>` (Agents, MCP servers, Providers, Usage, Notifications, Daemon) drop it and keep their actions (and Usage's description) right-aligned; rendered standalone they keep the title. Agents/MCP empty states lost their second "New …" CTA — the header button is the single primary action.
-- **Content column:** centred `max-w-4xl px-8` (ZCode's `SETTINGS_FRAME_CONTENT_CLASSNAME`; Paseo centres 720px) owned by the screen, identical for every section (gutter at 1440 ≈ 174px, was ≈ 230px).
+- **Content column:** centred `max-w-4xl px-8` (a reference desktop workbench's `SETTINGS_FRAME_CONTENT_CLASSNAME`; a reference workbench centres 720px) owned by the screen, identical for every section (gutter at 1440 ≈ 174px, was ≈ 230px).
 - **Known limitation (accepted):** crossing the 768px breakpoint remounts the active section (desktop ↔ narrow are different trees), so a section's unsaved local state (an open form) is lost on resize.
 
 ## Progress

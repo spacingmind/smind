@@ -3,7 +3,7 @@
 Open question 8 of `docs/research/dual-mode-ui.md`. Today an agent
 overwriting a file that's open with unsaved edits in the editor is
 silent — the human's next save clobbers the agent's work (or their own
-reload does). Paseo's precedent: `conflict-alert` with
+reload does). A reference workbench's precedent: `conflict-alert` with
 changed/deleted/checkFailed states and Reload/Overwrite actions.
 
 ## Acceptance Criteria
@@ -23,7 +23,7 @@ changed/deleted/checkFailed states and Reload/Overwrite actions.
   do NOT write; when omitted, current behavior (last-write-wins).
 - Editor UI (`file-editor-pane.tsx`): track the read-time mtime; on a
   conflicting save show an inline conflict banner with the two
-  states Paseo established — **changed on disk** (actions: Reload
+  states a reference workbench established — **changed on disk** (actions: Reload
   (discard buffer, re-read), Overwrite (force save without
   expectedMtime)) and **deleted on disk** (actions: Reload shows an
   error state, Overwrite recreates the file). Also re-check on window

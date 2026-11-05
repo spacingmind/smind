@@ -142,7 +142,7 @@ only push, no content/size leak to FCM/APNs):
   banner is the standard; explicit tap targets are preferred over swipe
   gestures for anything with real consequences (avoids accidental
   rejection of a critical operation via swipe).
-- **QR pairing UX, concrete precedent beyond paseo**: CLI/daemon
+- **QR pairing UX, concrete precedent beyond a reference workbench**: CLI/daemon
   generates the QR (trust originates on the already-trusted machine, not
   the phone); always offer a manual code fallback (6-digit) for no-camera
   cases; some implementations add a second-factor explicit CLI approval

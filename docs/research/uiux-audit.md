@@ -323,7 +323,7 @@ component engineering.
 
 ## 3. Benchmark: how 2026's agent IDEs present this surface
 
-`dual-mode-ui.md`'s comparison table (Paseo, VS Code, Cursor 3,
+`dual-mode-ui.md`'s comparison table (a reference workbench, VS Code, Cursor 3,
 Antigravity, Windsurf, Claude Code IDE ext., Continue, Aider, GitHub PR
 review) still stands as the primary reference — re-read here and still
 accurate against current code. What's changed since that doc's sources
@@ -421,7 +421,7 @@ switch).
 11. **Fix or confirm the stray chromatic sidebar-primary token**
     (`index.css:112`, §2.5, open question 2).
 12. **A `Suggested commit message` affordance** on the commit bar,
-    inspired by Conductor's "Suggested Git Actions" (§3) — even a
+    inspired by another workbench's "Suggested Git Actions" (§3) — even a
     non-LLM heuristic (file count + dominant change kind) would be a
     concrete, cheap step toward "this looks like a professional tool"
     without any new architecture.
@@ -524,4 +524,4 @@ Web:
 - [Google Antigravity: Complete Guide to the Agent IDE](https://www.aibuilderclub.com/blog/google-antigravity-complete-guide)
 - [Antigravity 2.0 vs Claude Code vs Cursor 2026 — MCP.Directory](https://mcp.directory/blog/antigravity-2-vs-claude-code-vs-cursor-2026)
 - [Conductor.build: Run a Team of Parallel AI Coding Agents on Your Mac — CodePick](https://codepick.dev/en/guides/conductor-build-intro/)
-- [Conductor vs Intent (2026): macOS Agent Orchestrators — Augment Code](https://www.augmentcode.com/tools/intent-vs-conductor-macos-agent-orchestrators)
+- [another workbench vs Intent (2026): macOS Agent Orchestrators — Augment Code](https://www.augmentcode.com/tools/intent-vs-conductor-macos-agent-orchestrators)

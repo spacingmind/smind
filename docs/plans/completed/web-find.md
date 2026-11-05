@@ -1,22 +1,22 @@
-# Web UI: Find in chat, file and terminal (Paseo 0.9 parity)
+# Web UI: Find in chat, file and terminal (a reference workbench 0.9 parity)
 
 ## Context
 
-Paseo 0.9 shipped `Cmd/Ctrl+F` Find across chat, file and terminal
-(`docs/research/local/paseo-uiux-2026-09.md` (local-only, gitignored), gap #1). smind has no Find
+A reference workbench 0.9 shipped `Cmd/Ctrl+F` Find across chat, file and terminal
+(local research notes (local-only, gitignored), gap #1). smind has no Find
 anywhere in `web/packages/ui/src`:
 
 - **Chat:** the timeline (`components/timeline/*`, `hooks/use-run-timeline.ts`)
   has no search. It loads a run's full history on the client (`run.logs`,
   `use-run-timeline.ts` ~L448/L525), so chat Find can be purely
-  client-side — no host search RPC like Paseo's.
+  client-side — no host search RPC like a reference workbench's.
 - **File:** the CodeMirror editor only has the stock, unstyled search panel
   from `basicSetup`.
 - **Terminal:** xterm has only `@xterm/addon-fit`; there is no
   `@xterm/addon-search`.
 
-**Port the behavior from `refs/paseo/packages/app/src` (updated
-2026-09-24), not the code verbatim.** Paseo is React Native + web, smind
+**Port the behavior from a local reference clone (updated
+2026-09-24), not the code verbatim.** a reference workbench is React Native + web, smind
 is React + Tailwind + shadcn.
 
 - `components/pane-find/index.tsx`: shared Find bar UI — input, match
@@ -115,7 +115,7 @@ is React + Tailwind + shadcn.
   `[data-chat-find-text]` containers (added to user/thinking text,
   `TimelineMarkdown`, and tool-call name/summary) to find matches, then
   paints them via the **CSS Custom Highlight API** (`CSS.highlights`/
-  `Highlight`, styled in `index.css`) — the same technique Paseo's web
+  `Highlight`, styled in `index.css`) — the same technique a reference workbench's web
   build uses. `chat-find.test.tsx` exercises the full stack through
   `TaskDetailPane`: `Mod+F` gated on chat-pane focus, highlight count/
   status, Enter/Shift+Enter wraparound, close clearing every highlight,
@@ -162,7 +162,7 @@ is React + Tailwind + shadcn.
   available at all. Full suite (`bun run test`) stayed green throughout
   (866/866 → 887/887 with this fix), confirming AC5.
 - **AC2 file Find**: `components/file-editor-find.ts`'s `FileFindModel` is
-  a near-verbatim port of Paseo's `file-pane/find/model.web.ts` (same
+  a near-verbatim port of a reference workbench's `file-pane/find/model.web.ts` (same
   `@codemirror/search` API, no React Native in the original to strip) --
   CodeMirror owns query/matching/selection/replacement; the model only
   drives its commands and republishes state as a snapshot. The floating

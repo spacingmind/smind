@@ -151,7 +151,7 @@ Web (`web/packages/ui`, vitest):
 
 ## Decisions
 
-- Direction: provider-native modes like Paseo, with no smind allowlist
+- Direction: provider-native modes like a reference workbench, with no smind allowlist
   (user, 2026-09-28). Recorded in ADR-0019.
 - The `fix/auto-safe-read-only-commands` branch is abandoned. Only e5017dd
   (the approve-hint fix) is salvaged, and it is cherry-picked or re-applied
@@ -191,7 +191,7 @@ Web (`web/packages/ui`, vitest):
     agent's error).
   - Claude Code's installed CLI lists `manual` as the canonical id for
     `default` and accepts `default` as an alias (Claude Code CHANGELOG).
-    smind keeps Paseo's `default`.
+    smind keeps a reference workbench's `default`.
 
 ## Implementation steps (after sign-off)
 

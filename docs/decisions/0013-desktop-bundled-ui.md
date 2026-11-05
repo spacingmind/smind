@@ -19,8 +19,8 @@ local default `http://127.0.0.1:4648`, an arbitrary URL reached through
 an SSH tunnel or Tailscale, and the Phase 3 E2EE relay pairing the
 mobile app already uses (`mobile/src/relay/*`, `internal/relay/*`,
 ADR-0007/ADR-0011) — with a host picker and a persisted connection
-list, like Paseo's host registry
-(`refs/paseo/packages/app/src/types/host-connection.ts`).
+list, like a reference workbench's host registry
+(a local reference clone).
 
 The daemon's HTTP posture constrains any browser-side UI:
 
@@ -34,7 +34,7 @@ The web UI assumes same-origin throughout (`daemon.ts` relative
 fetches; `ws-client.ts` builds the WS URL from `location.host`). The
 decision, already made: the backend does **not** change — no CORS, no
 Origin allowlist, no new endpoints — and the desktop app ships a
-**bundled** UI with a scoped IPC bridge, like ZCode and Paseo.
+**bundled** UI with a scoped IPC bridge, like a reference desktop workbench and a reference workbench.
 
 ## Decision
 
@@ -65,7 +65,7 @@ Origin allowlist, no new endpoints — and the desktop app ships a
    never to any remote/daemon origin. No wildcard `invoke` bridge.
 3. **Connection list, persisted client-side.** A registry of saved
    daemons (local default, arbitrary URLs, relay pairings), modeled on
-   Paseo's `HostConnection` union — directTcp / remoteSsh / relay
+   a reference workbench's `HostConnection` union — directTcp / remoteSsh / relay
    entries with stable ids, plus a picker with "local first" ordering
    — but persisted in desktop app storage, not in the daemon.
 
@@ -98,9 +98,9 @@ Origin allowlist, no new endpoints — and the desktop app ships a
   itself. The bundled UI stays transport-agnostic, and key material
   never enters the webview.
 - **Version skew: feature-detect, with a daemon update flow like
-  Paseo's.** The UI feature-detects what it needs and degrades
+  a reference workbench's.** The UI feature-detects what it needs and degrades
   gracefully. When the app is **newer** than a daemon it can manage,
-  the UI offers "update daemon and restart". This is modeled on Paseo's
+  the UI offers "update daemon and restart". This is modeled on a reference workbench's
   `desktop/src/daemon/daemon-manager.ts` (`shouldRestartForVersion`:
   app version vs the `daemonVersion` the daemon reports) and
   `app/src/desktop/components/desktop-updates-section.tsx`.
@@ -198,5 +198,5 @@ Origin allowlist, no new endpoints — and the desktop app ships a
   `web/packages/ui/src/lib/daemon.ts`,
   `web/packages/ui/src/lib/ws-client.ts` — the same-origin posture
   the loopback proxy preserves.
-- `refs/paseo/packages/app/src/types/host-connection.ts` — host
+- A local reference clone — host
   registry model referenced for the connection list.

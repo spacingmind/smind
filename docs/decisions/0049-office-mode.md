@@ -13,9 +13,9 @@ open in OS app). Epics **D**, **C**, docx/xlsx/pptx preview and mobile are *not*
 Inputs: ADR-0004 (per-task editor tabs, tab keys), ADR-0019 (an agent never answers a permission), ADR-0032 (shared preference stores),
 ADR-0035 (relay E2EE, 1 MiB frame cap), ADR-0038 (attachments: sniffing, per-transport limits in `daemon.info`), ADR-0042 (plugins: the
 `file.` prefix is on the plugin never-list; `files.read` and a sandboxed JS panel are parked), ADR-0045 (validation contracts),
-ADR-0047 (policy floor), ADR-0048 (fleet: remote hosts), `docs/WORKSPACE_PROTOCOL.md`, and a **local research note** on ZCode's office
+ADR-0047 (policy floor), ADR-0048 (fleet: remote hosts), `docs/WORKSPACE_PROTOCOL.md`, and a **local research note** on a reference desktop workbench's office
 mode (gitignored, local-only, not copied here). That product is a *reference only*: this ADR reimplements the ideas in smind's own
-code and copy; no ZCode code, skill text, strings, names or logos are used. `docs/plans/active/zcode-parity.md` says Office mode and
+code and copy; no a reference desktop workbench code, skill text, strings, names or logos are used. `docs/plans/active/reference-parity.md` says Office mode and
 doc/PDF previews are "not cloned" by the *visual parity* epic; that was a rule for that epic's scope, and this Human decision opens a
 separate epic.
 
@@ -30,7 +30,7 @@ places:
    Files tab and the editor cannot show a PDF the agent just produced, and there is no way to hand the bytes to the web UI at all.
 3. Nothing in the timeline says "the agent produced `report.pdf`". The human must find it in the Files tab.
 
-ZCode ships two separate things under "office mode": a presentation-only *interface preference*, and a *document capability*. The
+A reference desktop workbench ships two separate things under "office mode": a presentation-only *interface preference*, and a *document capability*. The
 research note's conclusion is to split them the same way, and to do the cheap, execution-free parts first. This ADR is those parts.
 
 ### What this ADR does not change
@@ -373,7 +373,7 @@ or by an agent.
 - The PDF viewer adds a third-party parser to the shipped web bundle (lazy) and an ongoing duty to bump it when a CVE is published;
   the exact pin and its advisory feed go in the plan.
 - Deliverable cards can miss a Bash-made file the agent never names; the fallback is the Files tab and a follow-up event (Alternative 4).
-- `zcode-parity.md`'s "Not cloned: Office mode, doc/PDF previews" is amended by this ADR for the new epic (the visual-parity epic
+- `reference-parity.md`'s "Not cloned: Office mode, doc/PDF previews" is amended by this ADR for the new epic (the visual-parity epic
   itself is unchanged).
 
 ## Open questions

@@ -1,13 +1,13 @@
-# Reference audit: CLIProxyAPI management UI (`refs/cliproxyapi`)
+# Reference audit: a reference proxy project management UI (a local reference clone)
 
 ## Scope caveat — read this first
 
-**The management UI's source is not in `refs/`.** `refs/cliproxyapi` ships
+**The management UI's source is not in `refs/`.** a local reference clone ships
 the *server*; the control panel is a single `management.html` asset
 downloaded at runtime from a separate repository
 (`router-for-me/Cli-Proxy-API-Management-Center`, "CPAMC"), with a CDN
 fallback at `https://cpamc.router-for.me/`. See
-`refs/cliproxyapi/internal/managementasset/updater.go:29-36`:
+A local reference clone:
 
 ```go
 defaultManagementReleaseURL  = ".../Cli-Proxy-API-Management-Center/releases/latest"
@@ -16,17 +16,17 @@ managementAssetName          = "management.html"
 updateCheckInterval          = 3 * time.Hour
 ```
 
-`refs/cliproxyapi/docs/` contains only SDK docs; the management API
+A local reference clone contains only SDK docs; the management API
 reference is an external site (`README.md:143` →
 `https://help.router-for.me/management/api`).
 
 So this audit is derived from **the API surface the panel is built
-against** (`refs/cliproxyapi/internal/api/server_management.go` and
-`refs/cliproxyapi/internal/api/handlers/management/`), which is the honest
+against** (a local reference clone and
+A local reference clone), which is the honest
 available source of truth for what the UX must express. Nothing here
 describes pixels, and nothing should be cited as "CPAMC does X visually".
 
-That is not a large loss: cliproxyapi is not an agent IDE. Its relevance to
+That is not a large loss: a reference proxy project is not an agent IDE. Its relevance to
 smind is **one dimension only — the accounts/providers/routing control
 surface** — and that dimension is legible from the API.
 
@@ -54,7 +54,7 @@ mode is on). The route groups map cleanly to panel sections:
 
 ## 2. The credential/account row — the part smind should copy
 
-`buildAuthFileEntry` (`refs/cliproxyapi/internal/api/handlers/management/auth_files.go:325-430`)
+`buildAuthFileEntry` (a local reference clone)
 is the richest account model in any of the three references. Every field
 below is one thing the panel can show per credential:
 
@@ -163,5 +163,5 @@ save just itself.
 - Deep usage analytics — upstream removed it on purpose.
 - The plugin store.
 - Routing-strategy UI beyond what smind's own routing engine needs;
-  cliproxyapi is a proxy first and its config surface is far wider than
+  a reference proxy project is a proxy first and its config surface is far wider than
   smind's.

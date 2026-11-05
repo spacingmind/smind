@@ -12,11 +12,11 @@ Accepted
 typed event model rich enough for the web UI to render tool-call cards,
 assistant text, reasoning, and user-turn text as distinct timeline items,
 per `docs/plans/active/ui-redesign-parity.md` Item 7 (gap A/D in
-`gap-matrix.md`: *"4 wire events, `text` only"* vs. Paseo's 7-kind
+`gap-matrix.md`: *"4 wire events, `text` only"* vs. A reference workbench's 7-kind
 `user_message | assistant_message | thought | tool_call | todo_list |
-activity_log | compaction` union and deepseek-harness's open registry of
-chat nodes keyed by wire tool name — see `audit-paseo.md` §2 "Streaming
-timeline"/"Tool-call rendering" and `audit-deepseek-harness.md` §2 same
+activity_log | compaction` union and a reference agent harness's open registry of
+chat nodes keyed by wire tool name — see `audit-workbench.md` §2 "Streaming
+timeline"/"Tool-call rendering" and `audit-agent-harness.md` §2 same
 sections).
 
 Three new `EventType` values are added, appended after the existing four
@@ -118,7 +118,7 @@ it always has been for this store.
   provider-agnostic in the first place.
 - **Serialize `Event.Raw` untyped and pass it through the wire as-is.**
   Rejected for the same reason: a UI tool-call renderer keyed by wire tool
-  name (`audit-deepseek-harness.md` §2's registry shape, the one this plan
+  name (`audit-agent-harness.md` §2's registry shape, the one this plan
   adopts) needs a consistent field name for "the tool name" across
   providers; Claude's `ToolUseBlock.Name` and ACP's `SessionUpdate.Kind`
   don't share a JSON shape today, so "pass it through" would just move the
@@ -134,8 +134,8 @@ it always has been for this store.
 ## Rationale
 
 The goal (`docs/plans/active/ui-redesign-parity.md`, itself gated on
-`docs/plans/active/smind-dogfood.md`'s "use smind, not Paseo" bar) is
-1-to-1 UX parity with Paseo's agent timeline, which the gap matrix ranks
+`docs/plans/active/smind-dogfood.md`'s "use smind, not a reference workbench" bar) is
+1-to-1 UX parity with a reference workbench's agent timeline, which the gap matrix ranks
 the single highest-impact gap: *"A `<pre>` of text vs typed items with
 tool-call cards. Everything about reviewing what an agent did depends on
 this."* That mandates structured events; there is no parity-preserving

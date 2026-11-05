@@ -42,7 +42,7 @@ reconnect/rotation machinery, and the wire protocol between them.
   it, generates its own ephemeral keypair for the session, and
   completes the handshake through the relay.
 - **Reconnect grace**: relay buffers a bounded number of frames
-  (starting point: paseo's 200-frame cap, ADR-0007 (a)) per connection
+  (starting point: a reference workbench's 200-frame cap, ADR-0007 (a)) per connection
   when the peer side is briefly disconnected, and flushes them on
   reconnect instead of dropping traffic outright. Buffer is bounded —
   a permanently-offline peer does not grow relay memory unboundedly;
@@ -55,7 +55,7 @@ reconnect/rotation machinery, and the wire protocol between them.
 - **Replay protection**: per-direction monotonic message counter
   (or equivalent) rejects replayed/out-of-order-beyond-window frames
   within a live session (ADR-0007 (d) — an explicit divergence from
-  paseo, which ships without this).
+  a reference workbench, which ships without this).
 - **Relay admission (daemon↔relay auth, ADR-0011)**: independent of the
   E2EE handshake — a workspace has a random 256-bit secret; the relay
   persists only its hash. The daemon authenticates via a nonce-based
@@ -90,7 +90,7 @@ reconnect/rotation machinery, and the wire protocol between them.
 - Go: handshake rejects a malformed/truncated hello frame without
   crashing or hanging.
 - Go: a second handshake attempt with a different key on an
-  already-established session is rejected (mirrors paseo's re-hello
+  already-established session is rejected (mirrors a reference workbench's re-hello
   key-mismatch close behavior) — connection is closed, not silently
   re-keyed.
 - Go: replay protection — a captured/replayed ciphertext frame (same

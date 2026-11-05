@@ -60,7 +60,7 @@ Status: **built** — B1–B4 merged (#385, #389, #396, #409; org-uuid identity 
   being visible (the URL is still opened — the paste field is what changes); no open of the verification URL without a click.
 
 ### A — Providers tab redesign (web; after client-state PR 1)
-- AC-A1 Master/detail card in Settings → Providers (ZCode chrome: 224px nav, `rounded-xl border bg-card`, `p-6` detail); nav rows =
+- AC-A1 Master/detail card in Settings → Providers (a reference desktop workbench chrome: 224px nav, `rounded-xl border bg-card`, `p-6` detail); nav rows =
   `ProviderGlyph` + label + tone dot (worst account); narrow desktop → icon rail; mobile/compact → list → pushed detail.
 - AC-A2 Detail = header → Accounts card → Models (read-only) → Diagnostics (collapsed, copyable plain text).
 - AC-A3 Account row from `useAccountStatus`: dot, label, credential badge, plan/tightest usage window bar, health badge

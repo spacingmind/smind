@@ -24,7 +24,7 @@
 # checksums.txt.minisig, ADR-0031 P7), and attach it all to that Release. No
 # OS code signing/notarization (out of scope); the Windows daemon ships as
 # smind_<version>_windows_{amd64,arm64}.zip. Modeled on
-# refs/cliproxyapi's release workflow, adapted to release-please already
+# A local reference clone's release workflow, adapted to release-please already
 # owning tag/Release creation.
 #
 # workflow_dispatch runs the exact same build+package+checksum steps as a

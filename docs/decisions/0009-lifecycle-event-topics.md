@@ -98,7 +98,7 @@ Alternative considered: **id + change kind, client refetches**
 snapshot, but it turns every event into a round trip — the exact
 `refresh()`-after-mutation pattern this replaces — and N tasks created by
 a CLI loop become N `task.get` calls per connected tab. Rejected.
-`refs/paseo` also pushes full snapshots for the same reason (its host
+A local reference clone also pushes full snapshots for the same reason (its host
 events carry the workspace/session object, not a poke).
 
 Alternative considered: **one `tree.changed` poke topic**. One topic, no

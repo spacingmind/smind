@@ -1,7 +1,7 @@
 # macOS desktop app (packaging, bundled daemon, Dock lifecycle)
 
 Goal (user, 2026-10-10): "đang xài mac — làm app macOS luôn, refs từ
-zcode, paseo". Today there is no macOS desktop build:
+A reference desktop workbench, a reference workbench". Today there is no macOS desktop build:
 
 - `desktop/src-tauri/tauri.conf.json` bundles only `deb`.
 - CI builds only Windows (`.github/workflows/desktop-windows.yml`, called
@@ -19,20 +19,20 @@ behaving like a Mac app.
 
 References:
 
-- **Paseo** `refs/paseo/packages/desktop/electron-builder.yml` (`mac:`
+- **A reference workbench** a local reference clone (`mac:`
   section):
   - `dmg` + `zip`
   - `minimumSystemVersion: 13.0.0`
   - category `public.app-category.developer-tools`
   - per-arch artifact names
   - the daemon binary shipped inside the app via
-    `extraResources: bin/paseo`
-- **ZCode** `refs/zcode/packages/desktop/electron-builder.config.js`
+    `extraResources: bin/reference`
+- **A reference desktop workbench** a local reference clone
   (`mac:` / `dmg:`):
   - signing is opt-in by env var, and unsigned builds still work
   - `CFBundleURLTypes` for the deep-link scheme
   - DMG background/layout
-- **ZCode** `desktopWindowChrome.ts`: no tray on macOS, only a Dock badge.
+- **A reference desktop workbench** `desktopWindowChrome.ts`: no tray on macOS, only a Dock badge.
 
 ## Acceptance Criteria
 
@@ -73,7 +73,7 @@ References:
    `Taskfile.yml:99`) still passes. The new config adds no version
    field, or is covered by the check if it does.
 
-### M2 — Bundled daemon (sidecar, like Paseo)
+### M2 — Bundled daemon (sidecar, like a reference workbench)
 
 1. The darwin `smind` binary for the build arch ships **inside**
    `smind.app` (Tauri `externalBin` or `resources`, whichever the
@@ -110,8 +110,8 @@ References:
 
 ### M3 — Mac lifecycle (Dock, not tray)
 
-1. **No tray/menu-bar icon on macOS** (user decision, matching ZCode and
-   Paseo). Windows and Linux keep the tray exactly as today.
+1. **No tray/menu-bar icon on macOS** (user decision, matching a reference desktop workbench and
+   a reference workbench). Windows and Linux keep the tray exactly as today.
 2. Closing the window (red traffic light, `Cmd+W` when no tab is left,
    or the D1 close path) hides the window, and the app stays in the
    Dock. Clicking the Dock icon (`RunEvent::Reopen`) shows and focuses
@@ -141,8 +141,8 @@ References:
 
 ### M5 — Update the daemon only when idle (user, 2026-10-10)
 
-Paseo restarts a desktop-owned daemon on any version mismatch at launch,
-with no prompt (`refs/paseo/packages/desktop/src/daemon/daemon-manager.ts`
+A reference workbench restarts a desktop-owned daemon on any version mismatch at launch,
+with no prompt (a local reference clone
 `shouldRestartForVersion`), and only warns "Running agent work will be
 interrupted." on a manual Stop (`desktop-daemon.ts`
 `confirmAndStopDesktopDaemon`). A smind daemon restart marks in-flight
@@ -172,7 +172,7 @@ update while runs are active instead.
    the banner reads, in substance: "Daemon vX is older than this app
    (vY) · N agents running — will update when they finish". It offers:
    - **Update now**, which opens a confirm dialog (destructive style,
-     Paseo's wording) that says "Running agent work will be interrupted"
+     a reference workbench's wording) that says "Running agent work will be interrupted"
      and names N. Confirming calls `daemonUpdate()`; cancelling changes
      nothing.
    - **Not now**, which disarms the deferred update for the rest of the
@@ -286,7 +286,7 @@ Web (vitest, `desktop-daemon-banner.test.tsx` + `use-task-attention.test.ts`):
 
 - **Unsigned / ad-hoc, personal use (user, 2026-10-10).** No Developer
   ID or notarization for now. Add it later behind an opt-in env, the
-  way ZCode does (`ZCODE_ENABLE_MAC_SIGN`), if the app gets distributed.
+  way a reference desktop workbench does (`REF_ENABLE_MAC_SIGN`), if the app gets distributed.
 - **Distribution trust (interim, 2026-10-22).** The Human decided not to buy
   the Apple Developer Program yet. The macOS app stays **ad-hoc signed and
   un-notarized**, so a `.dmg`/`.app` downloaded through a browser is
@@ -314,11 +314,11 @@ Web (vitest, `desktop-daemon-banner.test.tsx` + `use-task-attention.test.ts`):
   avoids App Translocation paths. Supersedes `desktop-managed-daemon`'s
   download path **for macOS only**.
 - **No tray on macOS (user, 2026-10-10).** Use the Dock with reopen
-  semantics and a Dock badge, as ZCode does. Windows and Linux are
+  semantics and a Dock badge, as a reference desktop workbench does. Windows and Linux are
   unchanged.
 - **Per-arch DMGs, not a universal binary.** This is simpler with a
   Go sidecar, because universal would need `lipo` on both the sidecar
-  and the app, and it matches Paseo's per-arch artifacts.
+  and the app, and it matches a reference workbench's per-arch artifacts.
 - **Coordination with `desktop-native-feel`.** D1 (Sonnet 5.5, branch
   `feat/desktop-chrome`) is editing the window builder in
   `desktop/src-tauri/src/lib.rs` in parallel. This plan's `lib.rs`
@@ -361,7 +361,7 @@ Web (vitest, `desktop-daemon-banner.test.tsx` + `use-task-attention.test.ts`):
 
 - **Update the daemon only when idle (user, 2026-10-10), M5.**
   This supersedes M2.4's unconditional auto-restart. It differs from
-  Paseo on purpose: Paseo always restarts at launch, while smind defers
+  a reference workbench on purpose: a reference workbench always restarts at launch, while smind defers
   when runs are in flight, because a restart marks them `interrupted`.
   The decision lives in the UI, which has the run state, so the Rust
   side only stops auto-restarting. No backend changes.

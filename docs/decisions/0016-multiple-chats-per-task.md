@@ -35,7 +35,7 @@ is enforced **only** client-side, by the web composer's queue
 null out another run's live client via the task-keyed map (`runner.go:283`),
 a latent hazard this ADR's chat-scoped state incidentally fixes (§4).
 
-**Paseo** (`refs/paseo/packages`, read-only) already has this shape. A
+**A reference workbench** (a local reference clone, read-only) already has this shape. A
 workspace is one record with a single `cwd` (`workspace-registry.ts:51-100`);
 N agents reference it via an optional `workspaceId` FK
 (`agent-storage.ts:43-73,146-151`), all resolving to the same directory
@@ -48,7 +48,7 @@ fixed for an agent's life; model/mode/thinking-option change mid-session via
 dedicated RPCs (`agent-manager.ts:1930-1944`). Session continuity is a
 persisted `AgentPersistenceHandle {provider, sessionId, nativeHandle,
 metadata}` on the agent's own record (`agent-types.ts:168-174`,
-`agent-storage.ts:33-40,66`). Paseo enforces **no coordination** between
+`agent-storage.ts:33-40,66`). A reference workbench enforces **no coordination** between
 agents sharing a workspace (confirmed by grep, zero hits) beyond
 file-explorer optimistic-concurrency unrelated to agents
 (`file-explorer/service.ts:20-39`).
@@ -59,7 +59,7 @@ Add a `chats` table between `tasks` and `runs`: the unit of conversation
 identity — provider binds to it once, its agent session persists across
 turns, it gets its own tab. A task keeps owning the shared worktree/branch
 (`tasks.worktree_path`/`branch`, unchanged); chats are threads inside that
-shared workspace, matching Paseo's workspace/agent split folded into
+shared workspace, matching a reference workbench's workspace/agent split folded into
 smind's existing task entity. Migration: every existing task's runs become
 one default chat. All RPC changes are additive.
 
@@ -100,7 +100,7 @@ column.
 
 **Recommendation: persist `agent_session_id`/`agent_session_meta` on the
 `chats` row**, written after a run completes and read back at the next run —
-mirroring Paseo's persisted `AgentPersistenceHandle`, not smind's current
+mirroring a reference workbench's persisted `AgentPersistenceHandle`, not smind's current
 in-memory `acpSessions` map. This requires each runner to actually resume,
 which none does today: claude-native must wire the vendored SDK's unused
 `WithResume`/`WithSessionID` options (`client.go:515-552,916-933`); ACP
@@ -115,12 +115,12 @@ follow-up after that resumes. Existing tasks start getting continuity from
 their next prompt on, because the user needs follow-ups to keep context
 now.
 
-**Resume mechanics, modeled on Paseo (user-reviewed 2026-09-27):**
-- Session state is persisted as a Paseo-style handle
+**Resume mechanics, modeled on a reference workbench (user-reviewed 2026-09-27):**
+- Session state is persisted as a reference-style handle
   `{provider, sessionId, nativeHandle, metadata}`
-  (`refs/paseo/.../agent/agent-types.ts:168-174`).
+  (a local reference clone).
 - **claude-native:** keep the SDK session id. The next run passes it via
-  `WithResume`, which Paseo does as `resume: sessionId` in
+  `WithResume`, which a reference workbench does as `resume: sessionId` in
   `providers/claude/agent.ts:3153`.
 - **Codex:** `thread/resume` with the stored thread id. Check
   `thread/loaded/list` first, and `thread/unarchive` then retry if the
@@ -132,14 +132,14 @@ now.
      the chat starts a new session and the UI says so. Never a silent
      fresh start.
 
-  Paseo does this in `providers/acp-agent.ts:1777-1800`. Which
+  a reference workbench does this in `providers/acp-agent.ts:1777-1800`. Which
   capability GLM's ACP agent actually advertises must be verified
   against the real binary during implementation.
 
 ### 3. Per-chat run config: provider binds at first run
 
 **Recommendation: `chats.provider` is set on first run, immutable after**,
-matching Paseo (provider fixed for an agent's life; only model/mode/thinking
+matching a reference workbench (provider fixed for an agent's life; only model/mode/thinking
 mutable, `agent-manager.ts:1930-1944`). `approvalPolicy`/`thinkingLevel` stay
 per-run knobs, unchanged. `RunConfigToolbar`'s persistence key moves from
 `smind:run-config:${taskId}` to `smind:run-config:${taskId}:${chatId}`
@@ -153,7 +153,7 @@ switching mid-chat would silently drop continuity.
 
 **Recommendation: one running run per chat, parallel across chats in the
 same task/worktree, with a UI warning.** Matches the motivating example (one
-chat codes while another reviews, same tree) and Paseo's model (no
+chat codes while another reviews, same tree) and a reference workbench's model (no
 cross-agent coordination). `runs.Registry.Start` (`registry.go:375-433`)
 gains a real guard — reject a new run if the **chat** already has one
 `status='running'` — enforced per chat, replacing today's unenforced
@@ -206,7 +206,7 @@ chat.archived  {"chat": Chat}
 Tab key changes `${taskId}:task` → `${taskId}:chat:${chatId}`
 (`tab-registry.tsx:72-75`); the migrated default chat opens as the task's
 first tab automatically, and "+" gains "New chat" → `chat.create` + open tab,
-mirroring Paseo's "New agent" launcher entry. Rename edits the tab label via
+mirroring a reference workbench's "New agent" launcher entry. Rename edits the tab label via
 `chat.rename`. Closing a tab is client-only — detaches (matching
 `run.attach`'s `stopOnDetach=false`, `handlers.go:892`), does not archive;
 the chat keeps running and reappears if still active. Archiving is a
@@ -234,7 +234,7 @@ already addressed by `runId`, which unambiguously identifies a chat via
 
 `permission.pending` gains `chatId` (§5). Any future push/attention
 notification (Phase 3 relay/mobile, ADR-0007) should carry `chatId`
-alongside `taskId`, the way Paseo's attention notification carries
+alongside `taskId`, the way a reference workbench's attention notification carries
 `workspaceId` alongside its agent fields
 (`agent-attention-notification.ts:8,22,208`) — noted so that surface
 doesn't retrofit chat-scoping later.
@@ -244,7 +244,7 @@ doesn't retrofit chat-scoping later.
 Rejected: a second task for the reviewer instead of a second chat — a task
 owns exactly one `worktree_path`/`branch`, so a second task means a
 *different* worktree, breaking the shared-tree requirement this ADR exists
-to satisfy; flattening `tasks` and `chats` into one entity (Paseo has no
+to satisfy; flattening `tasks` and `chats` into one entity (a reference workbench has no
 `tasks` layer) — `tasks` already owns git state unrelated to conversation
 identity, a much larger migration for no benefit over one FK layer.
 
@@ -261,7 +261,7 @@ ADR-0005 (event envelope/topics this extends), ADR-0008 (per-run event
 vocabulary, unchanged — a chat's transcript is its runs' events
 concatenated), ADR-0009 (the snapshot pattern `chat.*` follows), ADR-0014
 (precedent for a daemon-stored CRUD entity with wsapi methods + lifecycle
-events; profiles stay orthogonal). `refs/paseo/packages` (read-only) —
+events; profiles stay orthogonal). A local reference clone (read-only) —
 `server/src/server/agent/agent-storage.ts`, `agent-manager.ts`,
 `protocol/src/agent-types.ts`, `protocol/src/messages.ts`,
 `app/src/workspace-tabs/model.ts`, `app/src/panels/agent-panel.tsx`.

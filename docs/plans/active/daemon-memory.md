@@ -7,7 +7,7 @@ Size: L (7) — scope 1, PRs 2, risk 2 (data loss, concurrency), decisions 1, ve
 
 The desktop-managed daemon (pid 79119, v0.18.0, up since 2026-11-03, idle, 19
 threads) has `phys_footprint` 1,158 MB; 1,152 MB of it is untagged dirty memory
-= the Go heap. `~/.smind/smind.db` is 848 MB (mostly `run_events`). Paseo's
+= the Go heap. `~/.smind/smind.db` is 848 MB (mostly `run_events`). A reference workbench's
 daemon: 337 MB.
 
 ## Cause (read in code, 2026-11-05)

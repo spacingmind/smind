@@ -9,7 +9,7 @@ finished run ends with a raw meta line that reads like debug output:
 
 ## What the refs do (read 2026-10-13)
 
-- **Paseo** (`agent-stream/turn-footer.tsx`, `components/message.tsx`
+- **A reference workbench** (`agent-stream/turn-footer.tsx`, `components/message.tsx`
   `AssistantTurnFooter`, `utils/time.ts`): a completed turn's footer is
   `[copy] [fork] Worked for 14s`; hovering the label swaps it for the absolute
   completion time (`formatMessageTimestamp`), with an a11y label
@@ -17,7 +17,7 @@ finished run ends with a raw meta line that reads like debug output:
   Running = a loader + live elapsed (1 s tick, isolated in `LiveElapsed`).
   No model, tokens, cost or stop reason in the footer at all. Relative time
   (`useTimeAgo`, "5m ago") is used in lists, not under a turn.
-- **ZCode** (`v4/ConversationTurnGroup.tsx` `AssistantHistoryStatus`,
+- **A reference desktop workbench** (`v4/ConversationTurnGroup.tsx` `AssistantHistoryStatus`,
   `conversationWorkDuration.ts`): the turn header is a sentence — `Working for
   1m 2s` / `Worked for 1m 2s` / `Stopped` (interrupted). Message actions are
   hover-revealed. No usage in the turn.
@@ -47,7 +47,7 @@ focused (as today). Left to right:
   requested model → else the model the run reported (`usage.model`) → else the
   provider's default-model label → else the provider label. A raw id with no
   catalog entry is humanised (`claude-opus-5-5` → `Opus 5.5`), else shown raw.
-- **Duration** `formatDuration` as Paseo (`9s`, `1m 42s`, `1h 5m`); the title
+- **Duration** `formatDuration` as a reference workbench (`9s`, `1m 42s`, `1h 5m`); the title
   holds the precise value (`9.2 s`). Sub-second runs show `<1s`.
 - **Cost** is the only thing the usage pill shows inline (`$0.03`, two
   decimals ≥ $0.01 — the card has the exact `$0.032`); without a cost the pill
@@ -56,7 +56,7 @@ focused (as today). Left to right:
   detail. The pill's `aria-label` keeps the full detail.
 - **Relative finish time** (`2h ago`) is the last segment, only when ≥ 1 min
   old, a `<time dateTime>` whose `title` is the absolute local timestamp
-  (Paseo `formatMessageTimestamp` style); it re-ticks every 30 s.
+  (a reference workbench `formatMessageTimestamp` style); it re-ticks every 30 s.
 - **Actions.** *Continue* = the existing queue/`run.start` path with the prompt
   `Continue`, the run's provider/model/thinking and the composer's current
   permission settings (same as Re-run); shown only on the **latest** run.

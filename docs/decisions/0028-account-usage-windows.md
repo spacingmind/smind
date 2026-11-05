@@ -4,7 +4,7 @@
 
 **Accepted** (2026-10-11). The user approved the design and answered every
 open decision: D1–D4 and D6–D13 as the recommended defaults, **D5 changed**
-(the web UI ports Paseo's Usage UX; see "Decisions (accepted 2026-10-11)").
+(the web UI ports a reference workbench's Usage UX; see "Decisions (accepted 2026-10-11)").
 Nothing here is built yet; implementation follows the plan's PR split.
 
 **Amended 2026-10-12 (Human, firm rule):** the provider usage endpoints are
@@ -25,7 +25,7 @@ section plugs into the registry; and a zero-extra-call **passive rate-limit
 signal** was proposed as D14. See section 5 (Web) and the Decisions list.
 
 **Amended 2026-10-12 (Human, round 3): D14 is Accepted**, reshaped to the
-model of `refs/cliproxyapi` (verified at `4b5f1ea`): the routing signal is a
+model of a local reference clone (verified at `4b5f1ea`): the routing signal is a
 **hard rejection only** (an upstream 429 whose headers declare the shared 5-hour
 or 7-day window `rejected`), which puts the account in a persisted **cooldown
 until the reset**; success-response headers are **observation only** and never
@@ -62,7 +62,7 @@ Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/activ
   terminal, the Codex app, a phone) have used, and it has no notion of a
   window or a reset time.
 
-### What Paseo ships (reference, read-only; `refs/paseo` at v0.11.1-43)
+### What a reference workbench ships (reference, read-only; a local reference clone at v0.11.1-43)
 
 - **Model** (`packages/plugin/src/server/usage.ts`): a `UsageReport` is
   `available{planLabel, windows[], balances[], details[]}`,
@@ -97,7 +97,7 @@ Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/activ
   pinned window percents, a Usage modal over the current screen with
   per-account cards, a used/remaining preference, per-card and "Refresh all"
   buttons, a Usage settings section, a remembered host pick, per-agent plan
-  usage in the context-window details, and `paseo usage ls|inspect
+  usage in the context-window details, and `a reference workbench usage ls|inspect
   --refresh`. The UI's history (`#5685` footer item, `#5786` default
   percents + logos + remembered host, `#5805` streamlined sidebar usage,
   `#5876` unavailable quota explained, `#5903` derived window names and one
@@ -126,7 +126,7 @@ Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/activ
 
 ### 1. Data model: a windows report replaces `quota.Usage`
 
-`quota.Usage` is replaced by `quota.Report`, modeled on Paseo's, with the
+`quota.Usage` is replaced by `quota.Report`, modeled on a reference workbench's, with the
 additions the router needs (a machine-readable scope and a typed overage
 flag). Go sketch (names final, fields may gain `omitempty` details in PR-A):
 
@@ -218,8 +218,8 @@ type Report struct {
 ```
 
 Tone is derived once, in the quota package, from `UsedPct`: `> 90` danger,
-`>= 70` warning, else ok, default when `UsedPct` is nil (Paseo's thresholds).
-Paseo's `runsOutAt` / `shortfallPct` (pace prediction) are **not** in v1;
+`>= 70` warning, else ok, default when `UsedPct` is nil (a reference workbench's thresholds).
+A reference workbench's `runsOutAt` / `shortfallPct` (pace prediction) are **not** in v1;
 the ROADMAP's "Quota prediction" item stays open and can add them
 additively.
 
@@ -242,7 +242,7 @@ token, or a JWT claim. It is stable across token refresh and credential
 swaps (`account.updateCredential`), changes only if the account is removed
 and re-added, and is per-daemon (the ids are). The wire carries both
 `accountId` (for RPC joins) and `key` (for stable UI keys and pins).
-Paseo derives keys from provider identities because it reads several
+A reference workbench derives keys from provider identities because it reads several
 harness stores that can hold the same login; smind has one store, so the
 row id is the identity. Two smind accounts that hold the same provider login
 will show duplicate windows; de-duplicating them is a later add-on, not v1.
@@ -318,7 +318,7 @@ Rules that apply to every fetcher:
   providers, a 15 s request timeout, no redirects followed, a 1 MiB body
   cap. The URLs are constants; no config or account field can redirect a
   usage call (so an API-key account's custom `base_url` never receives one).
-- **Not read-only for the credential store, on purpose.** Paseo's `fetch`
+- **Not read-only for the credential store, on purpose.** a reference workbench's `fetch`
   never writes the login store because the harness owns refresh. In smind
   the daemon owns the credential and already refreshes it for the proxy, so
   the only write is the existing refreshed-token persist, and only when the
@@ -564,7 +564,7 @@ removed or reshaped.
   **every completed network fetch** (success, `unavailable` or error), so a
   refresh whose numbers did not change still advances `fetchedAt` ("Updated
   3m ago"); not emitted for a cache hit. This is how the UI receives a
-  slow account's report without holding back the others (Paseo streams
+  slow account's report without holding back the others (a reference workbench streams
   `usage.list_reports.update` for the same reason). A `mode:"refresh"` call
   with no `accountIds` fetches the eligible accounts (at most 2 in flight),
   each emitting as it settles. Registered in `knownTopics`.
@@ -579,9 +579,9 @@ removed or reshaped.
   `account_usage` tool returning the same `AccountUsage[]` (`touch` only: it
   has no refresh input, so an agent cannot force a call), added to the catalog and
   `mcp_instructions.go`, instead of widening `usage_summary`.
-- **Web (D5, amended 2026-10-12: a port of Paseo's Usage UX with a different
-  default placement).** The interaction model is Paseo's; the data source is
-  smind's accounts table. Paseo's `UsageReportEntry` becomes `AccountUsage`,
+- **Web (D5, amended 2026-10-12: a port of a reference workbench's Usage UX with a different
+  default placement).** The interaction model is a reference workbench's; the data source is
+  smind's accounts table. A reference workbench's `UsageReportEntry` becomes `AccountUsage`,
   its "source" becomes the account's provider (`anthropic` → "Claude",
   `openai` → "Codex"), its "account" is the smind account row, and its "host"
   has no equivalent inside one daemon: the remembered pick is an **account
@@ -683,12 +683,12 @@ removed or reshaped.
     enforces the budget either way.
   - **State and rules.** Preferences (`displayAs`, `pins`, picked account,
     "Show summary in sidebar") are client-side in `localStorage` (D11), with
-    Paseo's rules: `null` pins mean defaults, an array (even empty) is the
+    a reference workbench's rules: `null` pins mean defaults, an array (even empty) is the
     user's selection, an unknown account pick falls back to All. No new web
     dependency: reports live in a small module store fed by `account.usage`
     and its event, keeping the newer `fetchedAt` when a refresh and a list
     race. A missing or reshaped field renders as "not shown", never throws.
-  - **Verification.** Component and logic tests mirror Paseo's e2e specs
+  - **Verification.** Component and logic tests mirror a reference workbench's e2e specs
     (listed in the plan), and a light and dark screenshot pass (desktop and
     narrow) is required before each UI PR merges.
   - The Settings → Providers rows are unchanged (no per-row bars).
@@ -713,13 +713,13 @@ removed or reshaped.
 
 ### 7. Rejection cooldown and observed rate-limit headers (D14, Accepted 2026-10-12)
 
-**Status: Accepted** by the Human on 2026-10-12, **reshaped to cliproxyapi's
-model** (`refs/cliproxyapi` at `4b5f1ea`). It answers the routing freshness gap
+**Status: Accepted** by the Human on 2026-10-12, **reshaped to a reference proxy project's
+model** (a local reference clone at `4b5f1ea`). It answers the routing freshness gap
 accepted in the call budget: because only user surfaces fetch, the router
 cannot know about an account nobody has looked at. The proxy already receives
 the upstream response for every proxied request, with the serving account
 known, so two things can be learned with **zero extra HTTP calls**. They are
-kept strictly apart, as cliproxyapi keeps them:
+kept strictly apart, as a reference proxy project keeps them:
 
 1. a **routing signal**: a *hard rejection*, which starts a **cooldown**;
 2. an **observation**: rate-limit headers on any response, used for
@@ -732,7 +732,7 @@ own runs bypass it (ADR-0020), which is exactly the traffic the router serves.
 
 #### 7.1 Routing signal: hard rejection starts a cooldown
 
-Mirrors `refs/cliproxyapi/internal/runtime/executor/helps/claude_ratelimit.go`
+Mirrors a local reference clone
 (`ClaudeHeadersIndicateUnifiedRateLimitRejection`, `ParseClaudeRateLimitReset`)
 and its two call sites, `claude_executor_request.go:297-301` and
 `claude_executor_fast_error.go:149-150`, which classify only a **429**.
@@ -743,7 +743,7 @@ and its two call sites, `claude_executor_request.go:297-301` and
   - `anthropic-ratelimit-unified-7d-status: rejected`, or
   - `anthropic-ratelimit-unified-status: rejected` **unless** it is a
     `7d_oi`-only rejection (`5h-status` and `7d-status` both `allowed` and
-    `7d_oi-status` `rejected`), the case cliproxyapi's `isFableOnlyRejection`
+    `7d_oi-status` `rejected`), the case a reference proxy project's `isFableOnlyRejection`
     keeps model-scoped.
   Header names are case-insensitive. A 2xx or any other status never starts a
   cooldown.
@@ -763,14 +763,14 @@ and its two call sites, `claude_executor_request.go:297-301` and
   is `allowed`). Reset values are epoch seconds (fractions allowed), RFC 3339
   or HTTP-date. Take the **latest** future deadline (conservative), add a
   **bounded random grace of 1 to 30 seconds** (cryptographic RNG, as
-  cliproxyapi), and clamp the result to at most 8 days from now (a garbage
+  a reference proxy project), and clamp the result to at most 8 days from now (a garbage
   header cannot park an account). If a rejection is declared but **no valid
   future deadline** exists, fall back to the generic exponential cooldown 1, 2,
   4 … 30 min (persisted level, reset by the next non-rejected response on that
   account).
 - **A bare 429 is not exhaustion.** A 429 without an explicit `rejected`
   window (no unified headers, or 5h and 7d `allowed`) is an ordinary
-  model-level or burst limit (cliproxyapi's
+  model-level or burst limit (a reference proxy project's
   `claude_executor_ratelimit_test.go:517-530` exists so it does not block
   sibling models). It never cools the account down and never shows as
   exhausted. Its only effect is a **transient per-(account, model) back-off**
@@ -788,7 +788,7 @@ and its two call sites, `claude_executor_request.go:297-301` and
 
 #### 7.2 Observation: response headers are display-only
 
-Mirrors `refs/cliproxyapi/sdk/cliproxy/auth/quota_signals.go`
+Mirrors a local reference clone
 (`ObserveResponseHeadersForProvider`, whose doc says "Cooldown and scheduling
 fields are never read or written here"):
 
@@ -801,11 +801,11 @@ fields are never read or written here"):
   unified-*` and `Retry-After`. Codex: `x-codex-*` (plan type, active limit,
   credits, primary/secondary and additional-limit used-percent, window-minutes,
   reset-after-seconds, reset-at, allowed, limit-reached), and `x-ratelimit-*` is
-  ignored (cliproxyapi `quota_signals.go:177-184`). At most **64** headers, each
+  ignored (a reference proxy project `quota_signals.go:177-184`). At most **64** headers, each
   value at most **512** characters, no control characters (a CR/LF could forge
   a log line), unrelated headers (for example `Anthropic-Workspace-Id`) dropped.
 - **Typed, not raw.** Smind parses the allowlisted values into typed fields
-  and stores those (a deviation from cliproxyapi's raw header map, to keep the
+  and stores those (a deviation from a reference proxy project's raw header map, to keep the
   rule that raw header values are never stored or logged): window id, status
   (`allowed` | `allowed_warning` | `rejected`), utilization (a 0 to 1 fraction
   becomes `UsedPct`), reset time, representative claim, overage status. `5h` →
@@ -827,7 +827,7 @@ fields are never read or written here"):
 
 #### 7.3 Codex (fixtures-only, inert)
 
-`refs/cliproxyapi/internal/runtime/executor/helps/codex_quota.go`
+A local reference clone
 (`ParseCodexQuotaEventHeaders`) normalizes Codex websocket quota events into
 the same `x-codex-*` header form the HTTP responses use; the HTTP header names
 are in `refs/codex/codex-rs/codex-api/src/rate_limits.rs:28-60,200-315`. Smind
@@ -867,7 +867,7 @@ proxy. It becomes live only if that upstream question is answered later.
   smind's own runs; API-key accounts (no plan windows); what a bare 429 means;
   which model the `7d_oi` window belongs to (the rejected request's model is
   used); data between requests; or that the headers exist on every response or
-  keep their names (undocumented; names and units here come from cliproxyapi's
+  keep their names (undocumented; names and units here come from a reference proxy project's
   code and test fixtures, not from a capture of ours; that Anthropic sends them
   on every 200 is unverified, which is why success headers never drive
   routing).
@@ -892,14 +892,14 @@ rule d).
   Kimi, xAI, Antigravity and balance-only API-key providers are later.
 - **D5. UI placement and UX — CHANGED from the proposed default; amended
   again 2026-10-12.** (Round 2 below supersedes the footer wording here.) The web
-  UI **ports Paseo's Usage UX** (user: "tham khảo UI/UX paseo phần đó"):
+  UI **ports a reference workbench's Usage UX** (user: "tham khảo UI/UX a reference workbench phần đó"):
   sidebar footer Usage item (provider logo + default/pinned window
   percents, remembers the picked account), Usage opens as a modal over the
   current screen, Settings → Usage discoverable above the reports with
   per-account cards (window bars, reset countdown, tone, balances, problem
   states with explanations), refresh, pin windows, used/remaining toggle,
   and per-run plan usage as an optional last PR. Section 5 and the plan's
-  PR-D carry the details and the Paseo → smind file map. This replaces the
+  PR-D carry the details and the reference workbench → smind file map. This replaces the
   proposed "bars inside each Settings → Providers row".
 - **D6. Routing uses windows in the first release.** Yes, default
   `accountUsage.routing: true`.
@@ -924,7 +924,7 @@ rule d).
 - **Account filter** shared by footer, modal and Settings → Usage: accepted
   as proposed.
 - **D5 (amended).** The footer Usage item is **off by default**; the user
-  enables it in Settings → Usage (as in Paseo). Plan usage must instead show
+  enables it in Settings → Usage (as in a reference workbench). Plan usage must instead show
   **on hover of the usage icon in each chat** and in **Settings → Usage**. The
   per-chat plan card (PR-E) is **required**, and the order is D1 (Settings
   Usage + modal) → E (chat hover card) → D2 (footer item, default off, pins).
@@ -939,7 +939,7 @@ rule d).
   `docs/plans/active/settings-fullscreen.md`: a full-screen Settings screen
   with its own sidebar and content view). Settings → Usage plugs into the
   registry (`registerSettingsSection`) and assumes no in-shell layout.
-- **D14 (Accepted 2026-10-12, cliproxyapi model): zero-extra-call signals from
+- **D14 (Accepted 2026-10-12, a reference proxy project model): zero-extra-call signals from
   proxied upstream responses.** (1) **Routing signal = hard rejection only**:
   an Anthropic 429 whose headers declare the shared 5h or 7d window `rejected`
   (or unified `rejected` that is not 7d_oi-only) puts the account in a
@@ -991,7 +991,7 @@ specific manual probe (see the plan's Validation).
   smind's own traffic, not the account's other clients, and has no window
   or reset semantics. It remains the right answer for "what did my runs
   use" (token usage).
-- **Read Claude Code's keychain / `~/.codex/auth.json` like Paseo.**
+- **Read Claude Code's keychain / `~/.codex/auth.json` like a reference workbench.**
   Rejected: smind stores its own accounts; reading another app's secrets is
   a larger trust and OS-prompt cost (macOS keychain ACLs) and would report a
   different login than the one smind routes with.
@@ -1014,7 +1014,7 @@ specific manual probe (see the plan's Validation).
   with the most remaining quota is a routing-policy change (and wants
   history for pace); v1 only excludes exhausted accounts.
 - **Per-account bars inside Settings → Providers rows (the first draft of
-  D5).** Superseded by the Paseo port: one home for plan usage (footer item,
+  D5).** Superseded by the reference workbench port: one home for plan usage (footer item,
   modal, Settings → Usage) with pins and a summary, instead of bars buried in
   the connection-management list.
 - **Move per-run tokens into windows (one usage concept).** Rejected: they
@@ -1054,7 +1054,7 @@ specific manual probe (see the plan's Validation).
 - A thin new config section (`accountUsage`), one new table
   (`quota_poll_state`), and one new wsapi RPC, one
   topic, one CLI subcommand, one MCP tool, and one web component family
-  ported from Paseo's usage UI (several files, no new data-fetching
+  ported from a reference workbench's usage UI (several files, no new data-fetching
   dependency; a small segmented control and provider logo marks are the only
   new UI primitives).
 
@@ -1069,13 +1069,13 @@ specific manual probe (see the plan's Validation).
 - `internal/quota`, `internal/routing/router.go`,
   `internal/accounts/refresh.go`, `internal/server/proxy.go`,
   `cmd/smind/serve.go`.
-- `refs/paseo/packages/plugin/src/server/usage.ts`,
-  `refs/paseo/plugins/claude-usage-source/server/usage.ts`,
-  `refs/paseo/plugins/codex-usage-source/server/usage.ts`,
-  `refs/paseo/packages/server/src/server/plugins/usage-sources/index.ts`,
-  `refs/paseo/packages/app/src/usage/*` (ported by the web UI),
-  `refs/paseo/packages/app/e2e/browser/usage-{modal,settings,sidebar-item}.spec.ts`,
-  `refs/paseo/packages/cli/src/commands/usage/*`.
+- A local reference clone,
+  a local reference clone,
+  a local reference clone,
+  a local reference clone,
+  a local reference clone (ported by the web UI),
+  a local reference clone,settings,sidebar-item}.spec.ts`,
+  a local reference clone.
 - `docs/ROADMAP.md` ("Quota prediction", quota `Fetcher` stub) and
   `docs/plans/active/orchestration-and-metering.md` (the "feed the router's
   `TokensUsed`" backlog item, superseded by this ADR).

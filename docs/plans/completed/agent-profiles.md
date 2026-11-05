@@ -6,9 +6,9 @@ smind has the individual per-run knobs (`internal/taskrunner.Provider`,
 `ApprovalPolicy`, `ThinkingLevel`) but no way to name and persist a bundle of
 them for reuse. The composer (`composer.tsx`) resets to the same hardcoded
 defaults every time; there is no daemon-side concept of a "profile" at all.
-Paseo has one -- a named, per-daemon (`PASEO_HOME`-global) record applied by
+A reference workbench has one -- a named, per-daemon (`REF_HOME`-global) record applied by
 copying its fields into the client's launch settings
-(`docs/research/local/paseo-skills-profiles-2026-09.md`).
+(local research notes).
 
 The user decided (2026-09-25) that smind gets agent profiles, stored **in
 the daemon** so web, desktop, mobile, and CLI clients share one list and a
@@ -95,7 +95,7 @@ original argument. No inert fields ship in this plan's implementation.
     profile is applied" -- no `task.prompt` wire change).
 13. After selecting a profile, every field remains independently editable
     (selecting a profile is a one-time seed, not a locked mode) -- matches
-    Paseo's "still editable before sending" behavior.
+    a reference workbench's "still editable before sending" behavior.
 
 **Regression**
 

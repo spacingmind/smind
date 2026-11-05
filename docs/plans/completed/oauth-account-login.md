@@ -6,7 +6,7 @@ PR #69) with a real browser-based OAuth login for the two providers smind's
 proxy actually routes traffic to today: `anthropic` and `openai`. The manual
 paste path stays as-is for headless/scripted setups — this is additive.
 
-Prompted by comparing against `refs/cliproxyapi` (MIT-licensed, reference
+Prompted by comparing against a local reference clone (MIT-licensed, reference
 only), which implements this exact flow for the same OAuth client IDs smind
 already uses to *refresh* tokens (`internal/accounts/refresh_providers.go`).
 What's missing in smind is the initial authorization step that produces the
@@ -26,7 +26,7 @@ first access/refresh token pair.
     not smind's choice, and not configurable:
     - anthropic: `http://localhost:54545/callback`
     - openai: `http://localhost:1455/auth/callback`
-    (Confirmed against `refs/cliproxyapi/internal/auth/claude/anthropic_auth.go`
+    (Confirmed against a local reference clone
     and `.../auth/codex/openai_auth.go`, which use the same client IDs
     already hardcoded in `internal/accounts/refresh_providers.go`.)
   - Blocks (bounded wait, e.g. 5 minutes) until the vendor redirects back
@@ -148,7 +148,7 @@ first access/refresh token pair.
 - `Login.Exchange`'s signature ended up as `Exchange(ctx, code, state string, pkce PKCECodes)`,
   not the `Exchange(ctx, code string, pkce PKCECodes)` sketched in this plan's
   "What to build" section. Reason: the *verified* Anthropic token-exchange
-  request body (confirmed against `refs/cliproxyapi`) includes `state` as a
+  request body (confirmed against a local reference clone) includes `state` as a
   JSON field alongside `code`/`code_verifier`/etc., but OpenAI's
   form-encoded body never sends `state` at all. Keeping `Exchange`
   state-unaware (as sketched) would have made it impossible for

@@ -42,7 +42,7 @@ using the existing request/response envelope:
 
 ## Alternatives considered
 
-- **Per-resource `*.watch` subscriptions** (Paseo's
+- **Per-resource `*.watch` subscriptions** (a reference workbench's
   `subscribe_checkout_diff_*` pairs). Finer-grained filtering, but three
   times the methods for the same wire surface and the initial consumers
   (sidebar rail, badges) always want whole-domain streams anyway.

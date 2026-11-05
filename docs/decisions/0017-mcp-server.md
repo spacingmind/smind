@@ -21,20 +21,20 @@ persistent `/ws` connection, JSON envelopes with `id`/`method`/`params` vs.
 (`cmd/smind/serve.go:78-82`, `cmd/smind/client.go:15-35`).
 
 This shell-and-poll loop is the main reason the user still reaches for
-Paseo day to day: Paseo exposes agent orchestration natively as MCP tools
-(`refs/paseo/public-docs/mcp.md`), so an orchestrating agent calls
+A reference workbench day to day: a reference workbench exposes agent orchestration natively as MCP tools
+(a local reference clone), so an orchestrating agent calls
 `create_agent`/`send_agent_prompt`/`get_agent_status`/
 `list_pending_permissions`/`respond_to_permission` directly, with no shell
-round-trip or text-parsing of CLI output. Paseo's server-side wiring is
-`refs/paseo/packages/server/src/server/agent/mcp-server.ts` (52 lines): it
-wraps an internal "tool catalog" (`./tools/paseo-tools.js`) with
+round-trip or text-parsing of CLI output. A reference workbench's server-side wiring is
+A local reference clone (52 lines): it
+wraps an internal "tool catalog" (`./tools/reference-tools.js`) with
 `@modelcontextprotocol/sdk`'s `McpServer`, registering each tool's
 name/title/description/inputSchema and forwarding `CallToolResult`s -- the
 MCP layer is a thin protocol adapter over daemon-internal calls, not a
 second implementation of agent lifecycle logic.
 
 smind's daemon-side surface to wrap already exists and covers most of
-Paseo's catalog: `task.create`/`task.list`/`task.get` (agent/workspace
+A reference workbench's catalog: `task.create`/`task.list`/`task.get` (agent/workspace
 creation and listing), `task.prompt`/`run.start` (send, non-blocking --
 `internal/wsapi/handlers.go:789-799,819-870`), `run.attach`/`run.logs`
 (status/streaming, `cmd/smind/task.go:400-508`), `run.respondPermission`
@@ -105,7 +105,7 @@ github.com/modelcontextprotocol/go-sdk@v1.8.0` or later at implementation
 time). It ships the stdio transport, JSON schema tool registration, and
 typed `CallToolResult` handling `smind mcp serve` needs, mirroring exactly the
 role `@modelcontextprotocol/sdk`'s `McpServer` plays in
-`refs/paseo/packages/server/src/server/agent/mcp-server.ts`.
+A local reference clone.
 
 **Alternatives considered:**
 
@@ -155,25 +155,25 @@ back as MCP structured content.
 | `task_stop` | `run.stop` | `{runId}`. |
 
 `task_send`/`task_wait` split (rather than one blocking "send and wait"
-tool) mirrors Paseo's own `send_agent_prompt` (fire-and-forget) +
-`get_agent_status` (poll) split (`refs/paseo/public-docs/mcp.md:93-94`),
+tool) mirrors a reference workbench's own `send_agent_prompt` (fire-and-forget) +
+`get_agent_status` (poll) split (a local reference clone),
 and keeps a long-running turn from occupying an MCP tool-call slot for the
 run's entire duration.
 
 ### Pending permissions must not be auto-approved by the orchestrator
 
-The user has an existing rule, already enforced for Paseo/`smind task
+The user has an existing rule, already enforced for a reference workbench/`smind task
 approve` today: **an orchestrating agent must not auto-approve a
 sub-agent's permission requests** -- the human approves, even read-only
 ones. `task_approve`/`task_deny` as MCP tools would let an orchestrating
 agent (Claude Code) approve a *smind sub-agent's* tool call entirely on
 its own initiative, which is exactly the pattern the user has ruled out
-for Paseo. **Decided: the approve/deny tools do not exist** (Resolved
+for a reference workbench. **Decided: the approve/deny tools do not exist** (Resolved
 decision 1). The orchestrator only ever sees `task_permissions`
 read-only; a human always approves via the smind UI/CLI. Rejected
 alternatives: shipping them behind a default-off config flag
-(Paseo's `paseoTools.disabledTools` model,
-`refs/paseo/public-docs/mcp.md:22-67`), or exposing them
+(a reference workbench's `refTools.disabledTools` model,
+A local reference clone), or exposing them
 unconditionally.
 
 ### Surfacing long-running runs and pending permissions
@@ -216,7 +216,7 @@ mechanisms, layered:
 ## Rationale
 
 The daemon already exposes everything an orchestrator needs through
-`internal/wsapi`; the gap closing Paseo's parity requires is a transport
+`internal/wsapi`; the gap closing a reference workbench's parity requires is a transport
 and tool-schema adapter, not new agent-lifecycle logic. Keeping `smind
 mcp` a thin `wsclient` consumer (same boundary the CLI already respects)
 means the daemon remains the single source of truth for run/permission
