@@ -179,6 +179,32 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-permission")).toHaveTextContent(label);
   });
 
+  it("a run whose history is a skeleton shows the note above the transcript", () => {
+    render(
+      <ul>
+        <RunTimeline
+          run={run([{ type: "chunk", text: "the trimmed answer" }], { history: { source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true } })}
+          onLoadFullHistory={vi.fn()}
+        />
+      </ul>,
+    );
+    const note = screen.getByTestId("history-source-note");
+    const list = screen.getByTestId("run-timeline");
+    expect(note.textContent).toContain("Showing a summary: large tool output was trimmed.");
+    expect(screen.getByTestId("history-load-full")).toBeTruthy();
+    // The note explains the list, so it sits above it in the answer column.
+    expect(note.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("a run with a full history shows no note", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { history: { source: "full" } })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("history-source-note")).toBeNull();
+  });
+
   it("a person's Deny reads You denied, from the request's own option kinds (replayed log)", () => {
     const request = {
       type: "permission_request",

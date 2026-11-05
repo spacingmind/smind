@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import { ChildUpdateRow } from "@/components/timeline/child-update-row";
+import { HistorySourceNote } from "@/components/timeline/history-source-note";
 import { RunErrorBox } from "@/components/timeline/run-error-box";
 import { RunFooter } from "@/components/timeline/run-footer";
 import type { RunFailover } from "@/components/timeline/run-failover-actions";
@@ -54,6 +55,7 @@ export const RunTimeline = memo(function RunTimeline({
   isLatest = false,
   disconnected = false,
   deliverables,
+  onLoadFullHistory,
 }: {
   run: RunEntry;
   detailLevel?: DetailLevel;
@@ -76,6 +78,8 @@ export const RunTimeline = memo(function RunTimeline({
   disconnected?: boolean;
   /** What the deliverable cards under the answer need (client, task, local-path actions); omitted renders no cards. */
   deliverables?: DeliverableContext;
+  /** ADR-0053: rebuild this run's full history from the provider's session; omitted leaves the note's sentence only. */
+  onLoadFullHistory?: (run: RunEntry) => void;
 } & TimelineRowContext) {
   const items = run.status === "error" ? withoutErrorEcho(run.items, run.err) : run.items;
   const groups = groupTimeline(items, detailLevel);
@@ -109,6 +113,7 @@ export const RunTimeline = memo(function RunTimeline({
 
       {/* The answer side (items, error, footer) is its own hover group, so hovering the prompt reveals only the prompt bar. */}
       <div className="group/answer flex flex-col gap-2">
+        <HistorySourceNote run={run} onLoad={onLoadFullHistory} />
         {items.length > 0 && (
           <ol className="space-y-1.5" data-testid="run-timeline">
             {groups.map((group) =>

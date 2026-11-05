@@ -72,6 +72,7 @@ import {
   GitPullRequest,
   Globe,
   Hand,
+  RotateCcwClock,
   Hourglass,
   Image,
   Info,
@@ -235,6 +236,8 @@ export const Icons = {
   forge: GitFork,
   /** O1 provenance: a run's worktree commit. */
   commit: GitCommitHorizontal,
+  /** ADR-0053: a run's stored history ("Load full history"). Lucide's canonical name for the history glyph. */
+  history: RotateCcwClock,
   groupByStatus: ListChecks,
   /** The plan card's header. */
   listChecks: ListChecks,
