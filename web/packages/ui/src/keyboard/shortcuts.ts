@@ -15,7 +15,7 @@ import {
  * The binding table: which combo fires which action, under what focus
  * conditions, and how it reads in the shortcuts dialog.
  *
- * Shape follows `audit-paseo.md` §7 and
+ * Shape follows `audit-workbench.md` §7 and
  * `refs/paseo/packages/app/src/keyboard/keyboard-shortcuts.ts`, with one
  * deliberate simplification: Paseo writes every cross-platform shortcut
  * *twice* (a `Cmd+K` row gated `{mac: true}` and a `Ctrl+K` row gated

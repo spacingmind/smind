@@ -10,7 +10,7 @@ The web UI's editor tabs (open files, diff views, terminals) are scoped
 per **task**, not per workspace. Selecting a different task in the
 sidebar switches the tab set to that task's; each task keeps its own
 open-tab state. (Decided by the maintainer when resolving open question
-1 of `docs/research/dual-mode-ui.md`.)
+1 of `docs/research/local/dual-mode-ui.md`.)
 
 ## Alternatives considered
 
@@ -34,7 +34,7 @@ open-tab state. (Decided by the maintainer when resolving open question
 - The maintainer also finds a reference workbench's code-review-and-commit UX poor;
   task-scoped tabs are the foundation for a review surface that is
   deliberately *not* a copy of it (review loop design is tracked in
-  `docs/research/dual-mode-ui.md` and follow-up plans).
+  `docs/research/local/dual-mode-ui.md` and follow-up plans).
 - Matches the research recommendation's prerequisite (a `{kind, key}`
   tab registry): the key includes the task, so per-task scoping falls
   out of the registry naturally.

@@ -6,7 +6,7 @@ frames at 1280 and 390 per UI PR).
 
 Human directive (2026-10-30, "cu lam di"): a reference desktop workbench (an Apache-2.0 reference project,
 read-only clone at a local reference clone) is the **visual** north star; a reference workbench
-(a local reference clone) stays the **interaction** model (Find, chord shortcuts, split
+ stays the **interaction** model (Find, chord shortcuts, split
 panes, attention/unread, whenBusy queue).
 
 This is a second pass. P1–P4 of the first epic

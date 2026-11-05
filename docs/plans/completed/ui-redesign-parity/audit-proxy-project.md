@@ -1,4 +1,4 @@
-# Reference audit: a reference proxy project management UI (a local reference clone)
+# Reference audit: a reference proxy project management UI
 
 ## Scope caveat — read this first
 
@@ -21,8 +21,7 @@ reference is an external site (`README.md:143` →
 `https://help.router-for.me/management/api`).
 
 So this audit is derived from **the API surface the panel is built
-against** (a local reference clone and
-a local reference clone), which is the honest
+against**, which is the honest
 available source of truth for what the UX must express. Nothing here
 describes pixels, and nothing should be cited as "CPAMC does X visually".
 
@@ -54,7 +53,7 @@ mode is on). The route groups map cleanly to panel sections:
 
 ## 2. The credential/account row — the part smind should copy
 
-`buildAuthFileEntry` (a local reference clone)
+`buildAuthFileEntry`
 is the richest account model in any of the three references. Every field
 below is one thing the panel can show per credential:
 

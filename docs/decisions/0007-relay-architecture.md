@@ -12,7 +12,7 @@ unblocked.
 
 `docs/ROADMAP.md` Phase 3 ("Relay E2EE + Mobile") is the only place
 relay is designed as more than a passing mention (confirmed by
-`docs/research/relay-design-status.md`, a read-only audit of every
+`docs/research/local/relay-design-status.md`, a read-only audit of every
 "relay" reference in this repo plus a local reference clone).
 Verbatim from the roadmap:
 
@@ -48,7 +48,7 @@ best-practice reason to diverge**, called out per decision below.
 (follow the reference workbench).
 
 That workbench's Cloudflare Durable Object adapter
-(a local reference clone) buffers
+ buffers
 up to 200 frames per side when the peer isn't currently connected, and
 flushes them on reconnect, rather than dropping traffic the instant one
 side is briefly offline.
@@ -130,7 +130,7 @@ matching a local reference clone:**
   one call, slightly less surface for a handshake implementer to get
   wrong than composing X25519 + a separate AEAD by hand.
 - Directly mirrors the reference workbench's shipped, threat-modeled implementation
-  (a local reference clone) — matches the "follow that workbench unless a clear
+ — matches the "follow that workbench unless a clear
   reason to diverge" default this ADR otherwise applies everywhere
   else, and the reference workbench's wire framing (`[24-byte nonce][ciphertext]`) could
   be adopted verbatim rather than redesigned.
@@ -159,12 +159,12 @@ diverge from that workbench here.
 The reference workbench's own `SECURITY.md` states this outright: "Within a live session,
 replay protection is not yet implemented; the protocol uses random
 nonces and does not track nonce reuse or message counters"
-(a local reference clone). Simpler v1, and it's a documented,
+. Simpler v1, and it's a documented,
 accepted gap in a shipped product — not a hypothetical risk.
 
 **Rationale:** this is exactly the kind of known gap the research audit
 flagged as something smind should decide about deliberately rather than
-inherit by default (`docs/research/relay-design-status.md` §4). It's
+inherit by default (`docs/research/local/relay-design-status.md` §4). It's
 also cheaper to build in now than to retrofit: a dumb-pipe relay with a
 store-and-forward buffer (decision (a)) means a captured/replayed frame
 has a wider window to be re-injected than in that workbench's live-only-buffer
@@ -182,8 +182,7 @@ open connection.**
 That workbench's encrypted-channel state machine treats a second `e2ee_hello`
 with a *different* key arriving on an already-established channel as an
 attack and closes the socket with code 1008
-(a local reference clone, comment at
-lines 45-50). It does allow a duplicate `e2ee_hello` with the *same*
+. It does allow a duplicate `e2ee_hello` with the *same*
 key to be a harmless retry (peer didn't observe the `e2ee_ready` yet).
 There is no in-session rekey mechanism.
 
@@ -330,7 +329,7 @@ into this one as a side effect of building the relay's protocol.
   to.
 - `docs/decisions/0003-agpl-license-no-repo-split.md` — repo
   split/license expectation for a future relay repo (see (h)).
-- `docs/research/relay-design-status.md` — the audit this ADR is based
+- `docs/research/local/relay-design-status.md` — the audit this ADR is based
   on (docs/code inventory, a local reference clone comparison).
 - A local reference clone (read-only reference) — `packages/relay/src/crypto.ts`,
   `packages/relay/src/encrypted-channel.ts`,

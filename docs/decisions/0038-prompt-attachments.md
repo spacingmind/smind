@@ -44,7 +44,7 @@ Other facts that shape the design, measured from the code:
 | `file.list` lists one directory; there is no search RPC | `internal/wsapi/files.go`, `internal/files/files.go:72` |
 | `workspace` already shells out to `gh` through an overridable `runGH` | `internal/workspace/git.go:129` |
 
-The reference workbench (a local reference clone) is the interaction reference. Its protocol carries `images: [{data, mimeType}]` plus a typed
+The reference workbench is the interaction reference. Its protocol carries `images: [{data, mimeType}]` plus a typed
 `attachments` list, its daemon's `buildAgentPrompt` renders PR/issue/file attachments to text and puts images into
 provider content blocks, and its composer has attachment pills, an `@file` autocomplete and a GitHub picker. We port
 that shape, with the differences below (a single typed list, daemon-side GitHub fetch, on-disk persistence).

@@ -3,7 +3,7 @@
 Goal (user, 2026-10-10): the Tauri desktop app should stop feeling like
 "a web UI in a window" and feel like a reference desktop workbench does. A reference desktop workbench itself is not a
 native-toolkit app: it is Electron + a bundled React/Tailwind/shadcn
-renderer (a local reference clone) with a scoped preload bridge. smind
+renderer with a scoped preload bridge. smind
 already has the equivalent architecture (ADR-0013, plan
 `completed/desktop-bundled-ui.md`): bundled UI, loopback proxy,
 per-command IPC allowlist (`desktop/src-tauri/capabilities/proxy.json`),

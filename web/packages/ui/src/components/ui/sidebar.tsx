@@ -451,7 +451,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 
 const sidebarMenuButtonVariants = cva(
   // Hover/selected use ZCode's own surface tokens (`--hover`/`--selected`,
-  // zcode-visual-parity plan P2's WorkspaceSidebarItem reference) rather
+  // reference-visual-parity plan P2's WorkspaceSidebarItem reference) rather
   // than the static shadcn `--sidebar-accent` pair, so a row's hover/active
   // state reads the same as every other interactive surface in the app.
   "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-ui-base ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-hover focus-visible:ring-2 active:bg-selected disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-hover data-active:bg-selected data-active:font-medium [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",

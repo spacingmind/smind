@@ -99,7 +99,7 @@ export function taskSlotSignal(
 
 /**
  * The aggregate marker a workspace or space row carries for the tasks
- * beneath it (`audit-paseo.md` §5's workspace status bucket): the single
+ * beneath it (`audit-workbench.md` §5's workspace status bucket): the single
  * loudest signal in the bucket, so a collapsed container still tells the
  * user whether anything below it needs them.
  *

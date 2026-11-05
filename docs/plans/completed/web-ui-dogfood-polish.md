@@ -11,7 +11,7 @@ Current state, confirmed by reading the code:
 - `settings/settings-screen.tsx:63-67`: settings is a `Dialog` popup.
 - `composer/composer.tsx`: functional but visually a labeled form (Provider/Approval policy labels + selects beside the textarea, Send/Stop to the right); the reference screenshot wants a self-contained input card: status pills (diff stat, subagent count) above the box, selectors + mic/stop inside a bottom toolbar of the box itself.
 
-## Reference patterns (a local reference clone, read 2026-09-18)
+## Reference patterns
 
 - Settings as a **screen**: `app/settings/index.tsx` + `[section].tsx` (expo-router screens), `navigation/settings-navigation.ts` (push/dismiss routing, root → section drill-down). For smind's web UI this maps to a tab/screen route (`settings` view state in App, or a dedicated route) with a section nav rail, replacing the Dialog — the existing `settings-registry.ts` sections (appearance/general) carry over unchanged.
 - Composer pills: `composer/diff-stat-pill.tsx` — a compact pill (additions green / deletions red) rendered above the input, clickable to open the diff. smind already renders the same numbers in the diff tab; surfacing them at the composer is a placement change, not new data.

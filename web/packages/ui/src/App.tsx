@@ -1365,7 +1365,7 @@ function AppShell({
       ) : selectedTask && taskState ? (
         // Several panes are inset frames: p-1 (4px) gives them the same gap
         // against the panel edges that ResizableHandle's own 4px width
-        // already gives adjoining panes (zcode-visual-parity plan P2). A lone
+        // already gives adjoining panes (reference-visual-parity plan P2). A lone
         // pane is frameless -- the content panel around it is its frame.
         <div className={cn("h-full", paneCount > 1 && "p-1")}>
           {isMobile ? (
@@ -2264,7 +2264,7 @@ function PaneTabStrip({
   return (
     <div
       ref={setDroppableRef}
-      // Each pane is its own bg-panel/border frame (zcode-visual-parity
+      // Each pane is its own bg-panel/border frame (reference-visual-parity
       // plan P2: WorkspaceShellLayout's independent conversation/terminal/
       // side-pane frames), with the 4px ResizableHandle width providing
       // the gap between adjoining frames. The focus ring composes with

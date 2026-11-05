@@ -23,7 +23,7 @@
      `omitempty` on `"2.0"` -- genuinely absent).
   2. **No short default request timeout.** Turns can run for a very long
      time; a real production client's default request timeout is 14 days
-     (a local reference clone, `DEFAULT_TIMEOUT_MS`).
+.
      `codex.Client.Prompt` must wait on the caller's own `ctx`, never impose
      a short built-in default the way a naive port of ACP's request/response
      model might.
@@ -34,7 +34,7 @@
   - `Initialize(ctx) error` -- sends `initialize` (params: `clientInfo`),
     then a fire-and-forget `initialized` notification. Confirmed as the
     real required handshake order from a working production client
-    (a local reference clone).
+.
   - `NewSession(ctx, cwd) (threadID string, err error)` via `thread/start`
     (params include `cwd`).
   - `Prompt(ctx, threadID, text string, updates chan<- Update) (stopReason

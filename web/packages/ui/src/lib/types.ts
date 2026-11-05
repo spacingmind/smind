@@ -674,7 +674,7 @@ export interface PermissionOption {
 // Params of a "permission_request" event task.prompt/run.attach emit
 // (internal/wsapi/handlers.go's permissionRequestParams).
 // One question in a structured, multi-question permission ask
-// (ui-redesign-parity Item 11, per audit-deepseek-harness.md's question-
+// (ui-redesign-parity Item 11, per audit-agent-harness.md's question-
 // form card). **No provider on either wire path produces this shape
 // today** -- internal/taskrunner's PermissionDecider always resolves to a
 // flat PermissionOption list (see permission.go), so `questions` is

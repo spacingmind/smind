@@ -7,7 +7,7 @@ become **one** selector, ported from the reference workbench's model browser.
 
 **Size:** M.
 
-**Sources ported from** (a local reference clone):
+**Sources ported from**:
 `components/combined-model-selector.tsx` (trigger + popover shell),
 `components/model-browser.tsx` (root = pinned *Profiles* section + provider
 drill-down rows with model count/state; provider view = header with back

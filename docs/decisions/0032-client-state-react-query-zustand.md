@@ -7,7 +7,7 @@ Accepted (2026-10-18, by the Human). Plan: [`docs/plans/completed/client-state-s
 ## Decision
 
 The web UI (`web/packages/ui`, also the desktop app's webview) adopts two libraries, the same pair a reference workbench uses
-(a local reference clone):
+:
 
 1. **`@tanstack/react-query` owns every piece of daemon data** fetched over wsapi (provider catalog, accounts, plan
    usage, profiles, provider health, workspace/task lists, `daemon.info`, …) and the desktop bridge's read calls

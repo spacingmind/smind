@@ -35,7 +35,7 @@ is enforced **only** client-side, by the web composer's queue
 null out another run's live client via the task-keyed map (`runner.go:283`),
 a latent hazard this ADR's chat-scoped state incidentally fixes (§4).
 
-**A reference workbench** (a local reference clone, read-only) already has this shape. A
+**A reference workbench** already has this shape. A
 workspace is one record with a single `cwd` (`workspace-registry.ts:51-100`);
 N agents reference it via an optional `workspaceId` FK
 (`agent-storage.ts:43-73,146-151`), all resolving to the same directory
@@ -118,7 +118,7 @@ now.
 **Resume mechanics, modeled on the reference workbench (user-reviewed 2026-09-27):**
 - Session state is persisted as a reference-style handle
   `{provider, sessionId, nativeHandle, metadata}`
-  (a local reference clone).
+.
 - **claude-native:** keep the SDK session id. The next run passes it via
   `WithResume`, which that workbench does as `resume: sessionId` in
   `providers/claude/agent.ts:3153`.

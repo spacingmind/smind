@@ -252,7 +252,7 @@ export interface TaskSearchResult {
  *
  * Matching is a case-insensitive substring over the task's own title *and*
  * over the names of the containers it sits in -- following
- * `audit-deepseek-harness.md` §3, whose collapsed search matches "title
+ * `audit-agent-harness.md` §3, whose collapsed search matches "title
  * and workspace substrings". Typing a workspace or space name is therefore
  * a way to list everything under it, which is the thing a tree filter is
  * usually wanted for.

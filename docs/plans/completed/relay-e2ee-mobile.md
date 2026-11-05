@@ -3,7 +3,7 @@
 Builds `docs/ROADMAP.md` Phase 3's relay half: a self-hostable,
 dumb-pipe relay server (`smind relay`) that lets a paired mobile device
 reach a daemon it can't otherwise route to directly, without the relay
-ever seeing plaintext. Based on `docs/research/relay-design-status.md`
+ever seeing plaintext. Based on `docs/research/local/relay-design-status.md`
 (read-only audit: zero relay code exists today) and
 `docs/decisions/0007-relay-architecture.md` — **Accepted 2026-09-11**:
 crypto is X25519 + ChaCha20-Poly1305 (counter-based nonces); all other

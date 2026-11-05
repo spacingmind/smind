@@ -1,18 +1,18 @@
-# Reference audit: a reference agent harness / `a reference agent harness` (a local reference clone)
+# Reference audit: a reference agent harness / `a reference agent harness`
 
 **What it is**: DeepSeek's agent harness. Everything is a plugin on a
 Cordis-style DI/slot runtime. The web client is a *composition* of ~35
 `ui-*` plugin packages rather than an app with a component tree.
 
 **Where the UI lives**: not `apps/web` — that is a 10-line bootstrap
-(a local reference clone) over
+ over
 `a reference harness web client`. The real UI is
 a local reference clone. Each package's `README.md`
 is an unusually precise behavioural spec; they are the primary source used
 here.
 
-The e2e suite (a local reference clone) plus its
-ARIA-tree snapshots (a local reference clone)
+The e2e suite plus its
+ARIA-tree snapshots
 are a second, machine-checked description of the same behaviour — and the
 snapshot format itself is worth noting as a testing idea (assert the
 accessibility tree, not the DOM).
@@ -107,7 +107,7 @@ A local reference clone.
   declaration-merges its `ChatNodeDataMap` key, registers a
   `ConversationNodeDefinition`, and registers a keyed renderer on
   `conversation.chat.node`. There is a cookbook
-  (a local reference clone).
+.
 - **View tabs** (`conversation.view`): the chat view is one entry;
   `ui-trajectory` contributes another. Each view owns its own chrome and
   the composer stays put underneath.
@@ -301,4 +301,4 @@ A local reference clone.
 - Transient panel geometry (a reference agent harness's own README lists it as a limitation).
 - The three-column-only shell — a reference workbench's splittable tab tree is strictly
   more capable and is already the direction ADR 0004 and
-  `docs/research/dual-mode-ui.md` committed to.
+  `docs/research/local/dual-mode-ui.md` committed to.

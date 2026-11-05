@@ -1,11 +1,11 @@
-# Reference audit: a reference workbench (a local reference clone)
+# Reference audit: a reference workbench
 
 The north-star reference. A reference workbench is the product smind is meant to replace as
 the maintainer's daily driver (`docs/plans/active/smind-dogfood.md`), so
 where the three references disagree, a reference workbench's model wins unless there is a
 stated reason otherwise.
 
-**What it is** (a local reference clone): a client/server agent IDE.
+**What it is**: a client/server agent IDE.
 A Node daemon owns agent processes and streams over WebSocket; clients are
 Expo/React-Native-Web apps shipped as desktop (Electron), mobile
 (iOS/Android), web, plus a CLI. Multi-provider (Claude Code Agent SDK,
@@ -39,7 +39,7 @@ Expo Router file-based routes, a local reference clone:
 | `app/settings/hosts/[serverId]/…` | per-host settings, per-project settings |
 | `app/h/[serverId]/plugin/[pluginId]/[surfaceId].tsx` | plugin-contributed surfaces |
 
-**Three-level object model** (a local reference clone):
+**Three-level object model**:
 `Project` (a stable filesystem root, grouped by normalized git remote) →
 `Workspace` (one concrete `cwd` on one daemon, `workspaceKind` of
 `directory | local_checkout | worktree`) → `Agent session` (one provider,
@@ -47,7 +47,7 @@ one model, one cwd, one timeline — opens as a tab).
 Plus `Host` = a client-side connection profile pointing at a daemon; the
 sidebar can span several hosts at once.
 
-**Shell topology** (a local reference clone §9):
+**Shell topology**:
 - Left sidebar — projects/workspaces list, pinned on desktop, overlaid on
   compact. `packages/app/src/components/left-sidebar.tsx`,
   `sidebar-workspace-list.tsx`.
@@ -69,7 +69,7 @@ values it supports (`packages/app/src/panels/panel-manifest.ts`,
 `panel-registry.ts`); launchers filter by host and tab moves reject
 unsupported destinations.
 
-Placement intent is a first-class concept (a local reference clone):
+Placement intent is a first-class concept:
 `pane` (move it here) / `prefer` (new targets here, don't yank existing) /
 `focused` / `ambient`. Explicit "Open to Side" uses `pane`, implicit opens
 use `prefer`.
@@ -199,13 +199,13 @@ markdown-preview, preview-lifecycle, source), `components/file-explorer-pane.tsx
 `components/material-file-icon.tsx` + `material-file-icons.ts` (icon theme,
 a local reference clone), context actions
 (`e2e/browser/file-explorer-context-actions.spec.ts`), file-change conflict
-handling (a local reference clone), `vimKeybindings` setting.
+handling, `vimKeybindings` setting.
 
 ### Terminal
 `packages/app/src/terminal/` — three renderers (web xterm, native grid,
 webview), scrollback setting, terminal profiles (named shell commands,
 host-wide config), activity indicators
-(a local reference clone), alternate-screen handling, split
+, alternate-screen handling, split
 and resize, local link detection, drop targets. A terminal is a workspace
 tab like any other and is also a New Workspace launch target.
 
@@ -229,7 +229,7 @@ subagents). Cascade-archive, detach, "Archive finished".
   project picker, isolation control, provider/model/mode controls, launch
   target (chat agent or a terminal profile), and a composer draft that
   survives.
-- Workspace **scripts** declared in an other-workbench setup file — `service` and `script`
+- Workspace **scripts** declared in a workbench setup file — `service` and `script`
   types, health tracked for services and surfaced on sidebar rows
   (`components/sidebar/workspace-meta-row/service-summary.ts`).
 - **Workspace labels** (`packages/app/src/workspace-labels/`): colored
@@ -273,7 +273,7 @@ under `app/settings/[section].tsx`:
   **Browser tools**, **Hosts** (add host, pair device, restart daemon,
   release channel, update).
 - **Projects** settings screen (`screens/projects-screen.tsx`,
-  `project-settings-screen.tsx`) editing an other-workbench setup file, with a
+  `project-settings-screen.tsx`) editing a workbench setup file, with a
   stale-write conflict alert.
 - Onboarding / welcome (`components/welcome-screen.tsx`).
 - **i18n** (`packages/app/src/i18n/`, a local reference clone) — every
@@ -291,7 +291,7 @@ under `app/settings/[section].tsx`:
   a neutral `surface3` shell.
 - **Workspace status bucket** — an aggregate per `workspaceId`; same-cwd
   workspaces intentionally share agent/terminal buckets
-  (a local reference clone §"Workspace activity").
+.
 - **Sidebar workspace meta row** (`components/sidebar/workspace-meta-row/`):
   branch, project, host badge, change-request state, labels, services
   health, CI checks summary, diff stat — each individually toggleable
@@ -363,7 +363,7 @@ grouped results, file search, workspace actions.
 
 ## 8. Mobile / responsive
 
-- **Compact-first** (a local reference clone §9). The branching is one
+- **Compact-first**. The branching is one
   `useIsCompactFormFactor()` check per screen; list and detail are the same
   components in both layouts.
 - **Mobile panels** (a local reference clone,
@@ -411,7 +411,7 @@ A local reference clone §11 is prescriptive:
 | Voice mode / dictation (`voice/`, `dictation/`) | Needs native audio engines; `expo-two-way-audio` is a custom native module | Out of scope; Web Speech API is the fallback if ever asked for |
 | In-app browser tab (`desktop/browser/`) | Electron `<webview>` | An `<iframe>` tab is possible but of low value here |
 | Electron window-chrome obstruction handling | No desktop shell yet (Roadmap Phase 4) | Skip until Phase 4 |
-| Plugin system (a local reference clone) | Large, and orthogonal to parity | Skip |
+| Plugin system | Large, and orthogonal to parity | Skip |
 | Unistyles / Reanimated animation contracts | RN-specific | CSS transitions |
 
 Everything else in this document is reachable from a React + Tailwind web

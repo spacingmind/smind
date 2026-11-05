@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-Resolves open questions 4, 6, and 7 of `docs/research/dual-mode-ui.md`.
+Resolves open questions 4, 6, and 7 of `docs/research/local/dual-mode-ui.md`.
 
 1. **Staging granularity: per-file.** The commit flow exposes
    stage/unstage per file (a file list with checkboxes over the task's

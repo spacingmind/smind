@@ -24,7 +24,7 @@ const buttonVariants = cva(
         // bg-warning/10..20, compounding to a near-invisible, hue-shifted smudge (reads
         // as brown, not a dimmed orange) over a dark panel -- falling back to the flat
         // neutral muted color when disabled reads as a normal disabled button instead.
-        // The dark:disabled: pair repeats the same override explicitly (zcode-visual-
+        // The dark:disabled: pair repeats the same override explicitly (reference-visual-
         // parity P3 screenshot review): Tailwind v4 sorts the `dark:` and `disabled:`
         // variants independently of source order, so a bare `disabled:bg-muted` loses
         // the cascade to `dark:bg-warning/20` once both the .dark ancestor and :disabled

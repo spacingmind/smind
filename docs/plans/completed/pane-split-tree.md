@@ -6,7 +6,7 @@ Today a task's content area supports exactly **one** split: `use-task-tabs.ts`'s
 
 The user asked (2026-09-18) for VSCode-style custom layouts ("chia nửa là chat, nửa là terminal... giống chia layout window/layout vscode ấy"). A research pass this session found that **The reference workbench has already built exactly this** — a general split-tree model with pure, well-tested tree-manipulation functions — and confirmed (after pulling a local reference clone from stale 2026-08-27 to current `origin/main` @ `3cc4ae2`, 2026-09-17) that this code is present and structurally unchanged at that commit. Per this project's standing preference to port working UI/data-model patterns from that workbench rather than invent new ones, this plan ports the reference workbench's tree model and pure functions, while deferring the reference workbench's drag-to-split UI (see Decisions).
 
-## Reference patterns (a local reference clone @ 3cc4ae2, read 2026-09-18)
+## Reference patterns
 
 All citations are `packages/app/src/stores/workspace-layout-actions.ts` unless noted.
 

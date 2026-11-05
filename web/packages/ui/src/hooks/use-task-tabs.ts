@@ -30,7 +30,7 @@ export type PaneId = string;
 
 /**
  * Where an opened-or-moved tab is allowed to land. `prefer` is the
- * implicit-open case (`audit-paseo.md` §1): use an existing non-default
+ * implicit-open case (`audit-workbench.md` §1): use an existing non-default
  * pane if one exists, else the default pane -- but never move a tab
  * already placed somewhere. `{ pane }` (Item 9) names an exact, already-
  * existing pane id -- a discriminated object rather than a 4th bare string

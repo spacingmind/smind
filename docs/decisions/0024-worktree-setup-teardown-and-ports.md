@@ -13,8 +13,8 @@ A fresh task worktree (`internal/workspace.CreateTask`,
 `git worktree add`) has no installed dependencies and none of the ignored
 files (`.env`, local config) the repo needs, so every task starts broken
 for most real repos. A reference workbench solves this with `worktree.setup`/`teardown` in
-a repo-committed `paseo.json`, read from the base branch, plus
-`$REF_PORT` allocation (a local reference clone).
+a repo-committed workbench setup file, read from the base branch, plus
+`$REF_PORT` allocation.
 
 Reading commands from the repo means a cloned, untrusted repository
 registered as a workspace gets code execution on the first `task_new`. The
@@ -123,7 +123,7 @@ Named scripts, supervised services, proxy URLs and health (a reference workbench
 
 ## Alternatives considered
 
-- **Repo-committed `smind.json` / `paseo.json`-style file read from the base
+- **Repo-committed `smind.json` / a workbench setup file read from the base
   branch.** Rejected by the user: a cloned untrusted repo gets code
   execution on the first `task_new`. A trust-on-first-use hash approval
   could be added later as a separate decision.

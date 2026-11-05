@@ -56,7 +56,7 @@ detaches live subscriptions without stopping runs (`App.tsx:29-45`).
 
 **Not present**: splits, a side dock, an explorer dock, tab reordering,
 drag-and-drop, "open to side", a command palette, multiple panes of any
-kind. The side dock was scoped in `docs/research/dual-mode-ui.md` and named
+kind. The side dock was scoped in `docs/research/local/dual-mode-ui.md` and named
 in the `tab-registry-side-dock` plan's *title*, but it is not in that
 plan's acceptance criteria and did not ship.
 
@@ -253,7 +253,7 @@ Geist Variable as `--font-sans`.
 **A complete `.dark` block exists and is never applied.** Nothing sets the
 `dark` class, nothing reads `prefers-color-scheme`, and there is no
 toggle — confirmed by grep across `web/packages/ui/src`. This was already
-flagged as open question 1 in `docs/research/uiux-audit.md` §4 P2 item 10
+flagged as open question 1 in `docs/research/local/uiux-audit.md` §4 P2 item 10
 and is still open. In practice smind is light-mode only, which for an
 agent tool used at night is a real daily-driver complaint.
 
@@ -306,7 +306,7 @@ problem, not a hypothetical one.
 ## 9. Empty / loading / error states
 
 Handled per-pane, inconsistently — the specific finding of
-`docs/research/uiux-audit.md` §2.2, partially addressed since (the
+`docs/research/local/uiux-audit.md` §2.2, partially addressed since (the
 empty-database crash is fixed; CRUD dialogs exist so the empty state is no
 longer a dead end).
 

@@ -39,7 +39,7 @@ export function blankAnswerBatch(questions: PermissionQuestion[]): string {
 
 /**
  * The structured question-form variant (Item 11, per
- * `audit-deepseek-harness.md` §2): one or more questions, each
+ * `audit-agent-harness.md` §2): one or more questions, each
  * single-select, multi-select, or free-text, with an optional "other"
  * free-text answer and a "skip" escape hatch that submits the blank
  * shape rather than blocking the run forever.

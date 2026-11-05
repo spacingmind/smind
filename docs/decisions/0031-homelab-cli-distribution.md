@@ -227,7 +227,7 @@ reference** block stating *ported / adapted / deliberately different (why)*.
 - `desktop/ui/offline.html` is the Tauri `frontendDist` (`tauri.conf.json:7`)
   fallback; `desktop-unreachable.tsx` took over its job (ADR-0013 Consequences).
 - A reference desktop workbench's first-run screen is an account login with a "skip" escape
-  (a local reference clone); it has no connection
+; it has no connection
   onboarding, so it informs only visual style.
 
 ## Decision
@@ -1390,6 +1390,6 @@ password, left this list on 2026-10-15: it is Accepted, see "Decisions".)
   (`/api/shutdown`), ADR-0030 (Windows native daemon; rejected a service for the app).
 - `docs/plans/completed/desktop-relay-transport.md` (single-device limit),
   `docs/plans/completed/desktop-windows-native-daemon.md` and the `feat/windows-bundled-daemon` branch.
-- The reference workbench (a local reference clone @ `8d9e7d3a`): see the reference table above and each "that workbench pattern" block.
+- The reference workbench: see the reference table above and each "that workbench pattern" block.
 - Plan: [`docs/plans/active/homelab-cli.md`](../plans/active/homelab-cli.md).
 - Fleet (ADR-0048) reuses this ADR's pinned identity (D9) and the Ed25519 `device_hello` shape (D35) for host-to-host links: [`0048-fleet-connected-hosts.md`](0048-fleet-connected-hosts.md).

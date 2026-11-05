@@ -47,37 +47,9 @@ complexity-point sizing, one owner per write scope, the brief and the Peer's
 json handoff block (`status` done/blocked/failed), explicit accept/reject, and
 process safety (isolated sandboxes; kill only the PIDs you started).
 
-## refs/ map
+## refs/
 
-`refs/` holds read-only clones of other projects, used as pattern references
-— not dependencies, not code to copy wholesale. Gitignored; not part of this
-repo's history.
-
-- `refs/paseo` — UI and daemon patterns (workspace/agent orchestration UI
-  smind is meant to eventually replace for daily use).
-- `refs/cliproxyapi` — Go routing/proxy patterns for multi-account LLM
-  request routing (most relevant to the Phase 1 routing engine).
-- `refs/agent-client-protocol` — Agent Client Protocol (ACP) spec/impl, for
-  Phase 2 agent spawning (Claude Code, Codex, GLM) via a standard protocol.
-- `refs/codex` — OpenAI Codex CLI, approval/sandbox patterns.
-- `refs/claude-code` — Claude Code CLI, for SDK/protocol edge cases.
-- `refs/deepseek-harness` — DeepSeek's agent harness (`dsh`,
-  everything-is-a-plugin architecture on Cordis) — UI/plugin-system
-  reference for agent-harness patterns.
-- `refs/zcode` — Z.ai's ZCode AI coding workbench
-  (https://github.com/zai-org/ZCode): Electron desktop + browser UI +
-  terminal agent (`apps/zcode-cli`), pnpm monorepo (`packages/{desktop,
-  web,ui,server,rpc,provider}`), plugin store — reference for
-  desktop/web workbench UX and GLM-native agent/provider wiring.
-- `refs/cockpit-tools` — Cockpit Tools
-  (https://github.com/jlcodes99/cockpit-tools): Tauri (Rust + React,
-  zustand) multi-account manager for AI IDEs/CLIs (Codex, Claude, Copilot,
-  Cursor, Grok CLI, ZCode, …) — reference for account cards with plan badge
-  and 5h/weekly quota bars, quota refresh scheduling and cooldowns
-  (`src-tauri/src/modules/codex_quota*`, `quota_cache.rs`), Claude/Codex
-  OAuth and account identity (`claude_account_oauth_provider.rs`), redacted
-  export, per-account CLI instances, and its local Codex API gateway with
-  account pools.
+`refs/` holds local, read-only reference clones; see `refs/README.local.md` on your machine.
 
 Day-to-day style (Go idioms, React/TS conventions) is enforced by linters
 (`go vet`/`gofmt`, and ESLint/Prettier once added to `web/`), not by reading

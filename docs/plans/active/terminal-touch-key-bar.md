@@ -2,7 +2,7 @@
 
 Human request: on `pointer: coarse` the plain Copy/Paste row becomes a reference workbench's mobile terminal key bar, above the on-screen keyboard. Fine pointers: no bar. Scope: web/desktop only. The Expo mobile app (`mobile/`) has no terminal screen today (grep finds none), so nothing to do there.
 
-## A reference workbench pattern notes (a local reference clone, read-only)
+## A reference workbench pattern notes
 Sources: `src/terminal/runtime/terminal-virtual-keyboard.ts`, `terminal-key-dispatch.ts`, `src/components/terminal-pane.tsx` (styles ~l.1320+), `packages/protocol/src/terminal-key-input.ts` (encoder), `terminal-input-mode.ts`, `src/utils/terminal-keys.ts`.
 - **Keys** (id/label/DOM key): Esc `Escape`, Tab `Tab`, ↑ ↓ ← → `Arrow*`, Enter `Enter`; (Backspace and Space exist as constants but are in no row). Modifier toggles: Ctrl, Shift, Alt. Controls: Paste, Keyboard show/hide toggle. Copy is NOT in the bar (a floating Copy appears on selection, native only).
 - **Rows, default (compact/phone, width 300..659)**: row1 `Esc Tab Ctrl ↑ Shift Keyboard`; row2 `Alt Paste ← ↓ → Enter`. **Wide (non-compact, width >= 660)**: one row `Esc Tab Ctrl Alt Shift ← ↓ ↑ → Paste Keyboard Enter`. **Narrow (< 300)**: 4 rows of 3: `Esc Tab Ctrl / Alt Shift Keyboard / Paste ↑ Enter / ← ↓ →`.

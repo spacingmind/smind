@@ -1,7 +1,7 @@
 # wsapi: event subscription (push) RPC
 
 Addresses the biggest architectural gap from
-`docs/research/dual-mode-ui.md`: `internal/wsapi` had no subscribe/push
+`docs/research/local/dual-mode-ui.md`: `internal/wsapi` had no subscribe/push
 RPC — events only flowed inside a request's own stream
 (`handlers.go:420-437`). Live sidebar, live diff, file-conflict
 detection, and Phase 3 mobile notifications all need this. Roadmap

@@ -1,7 +1,7 @@
 # Archive task: checkpoint work before removing the worktree
 
 Fixes the data-loss bug found during the dual-mode UI research
-(`docs/research/dual-mode-ui.md`): archiving a task runs
+(`docs/research/local/dual-mode-ui.md`): archiving a task runs
 `git worktree remove --force` (`internal/workspace/task.go`), silently
 destroying unreviewed agent work with no recovery path.
 

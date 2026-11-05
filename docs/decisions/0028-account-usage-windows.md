@@ -714,7 +714,7 @@ removed or reshaped.
 ### 7. Rejection cooldown and observed rate-limit headers (D14, Accepted 2026-10-12)
 
 **Status: Accepted** by the Human on 2026-10-12, **reshaped to a reference proxy project's
-model** (a local reference clone at `4b5f1ea`). It answers the routing freshness gap
+model**. It answers the routing freshness gap
 accepted in the call budget: because only user surfaces fetch, the router
 cannot know about an account nobody has looked at. The proxy already receives
 the upstream response for every proxied request, with the serving account

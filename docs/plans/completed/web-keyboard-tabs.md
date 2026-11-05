@@ -265,7 +265,7 @@ smind today:
 
   **Review fixes (post-implementation, before merge):** two defaults
   shipped wrong and were corrected here, both against the same source
-  (a local reference clone) misread
+ misread
   the first time:
   1. Pane-focus's `Mod+Shift+Arrow*` originally carried `when: {
      global: true }`, so it fired inside a text field -- stealing

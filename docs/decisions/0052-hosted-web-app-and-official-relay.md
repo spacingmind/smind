@@ -35,7 +35,7 @@ infrastructure on the user's side. They are separable, and the order matters (se
 A reference workbench is the closest shipped precedent: a daemon, a mobile app, a CLI and a **hosted web app at `app.reference.example`**, with a hosted relay at `relay.reference.example`.
 
 - **One app, three shells.** The web app is the same Expo/React-Native-web code as mobile, deployed to Cloudflare Pages on release tags
-  (a local reference clone). The daemon *can also serve that UI itself* (`features.webUi.enabled`, `public-docs/web-ui.md`: "the UI you serve always
+. The daemon *can also serve that UI itself* (`features.webUi.enabled`, `public-docs/web-ui.md`: "the UI you serve always
   matches your daemon version"), which is a reference workbench's answer to "I don't want to trust the hosted copy".
 - **Pairing = a URL whose fragment carries the offer.** `https://app.reference.example/#offer=<base64url>` (daemon id, daemon public key, relay endpoint;
   `packages/protocol/src/connection-offer.ts`, `packages/server/src/server/pairing-offer.ts`). The fragment is never sent to a server, so the hosting origin does not see the key

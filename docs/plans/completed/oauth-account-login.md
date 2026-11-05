@@ -241,7 +241,7 @@ first access/refresh token pair.
   `smind account login` and the accounts dialog's Connect button alongside
   the pre-existing paste-only path, and is explicit that real-provider
   end-to-end validation is still outstanding. Searched
-  `docs/research/uiux-audit.md` for the "accounts dialog is paste-only"
+  `docs/research/local/uiux-audit.md` for the "accounts dialog is paste-only"
   wording this plan's Acceptance Criteria expected to find and close there
   — it isn't present in that file (that audit doesn't mention accounts at
   all); nothing to close in it, so nothing was added there. The gap that

@@ -15,7 +15,7 @@ const MAX_RESULTS = 50;
  * over the task's whole-worktree path list
  * (hooks/use-task-search-index.ts), filtered client-side
  * (lib/fuzzy-match.ts) as the query changes. Paseo binds this to Cmd+P
- * (`audit-paseo.md` §7), wired through the `quick-open.open` action in
+ * (`audit-workbench.md` §7), wired through the `quick-open.open` action in
  * `keyboard/actions.ts`.
  *
  * A controlled dialog (`open`/`onOpenChange`), like FolderPickerDialog --

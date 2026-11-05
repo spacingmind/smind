@@ -30,7 +30,7 @@ const FONT_SIZE_AXES: { axis: keyof FontSizes; label: string; description: strin
 
 /**
  * Item 13's Appearance section: theme plus the interface/content/code
- * font-size split (audit-paseo.md §6 -- "the one that actually matters
+ * font-size split (audit-workbench.md §6 -- "the one that actually matters
  * for an app that mixes chat prose, UI chrome and code"). Registers
  * itself at import time (see settings-registry.ts's doc comment); the
  * settings screen never references this file directly.

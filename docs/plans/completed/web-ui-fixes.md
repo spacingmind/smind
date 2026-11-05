@@ -3,7 +3,7 @@
 Three concrete bugs found live-testing `web/packages/ui` (real daemon,
 headless-Chromium screenshots at desktop/tablet/mobile widths) after the
 user flagged the UI as "sai thiết kế, không responsive" — not a request
-for a visual redesign pass (see `docs/research/ui-ux-polish-2026.md` for
+for a visual redesign pass (see `docs/research/local/ui-ux-polish-2026.md` for
 that, separate/later concern), these are functional/behavioral defects.
 
 **Port from a local reference clone where it has already solved the same problem**
@@ -76,7 +76,7 @@ based stack.
   full title, or check `scrollWidth <= clientWidth` after render) so
   this doesn't silently regress again.
 - Out of scope: the broader visual-design refresh from
-  `docs/research/ui-ux-polish-2026.md` (design tokens, typography,
+  `docs/research/local/ui-ux-polish-2026.md` (design tokens, typography,
   variant naming, motion) — that's a separate, larger, later pass with
   its own plan if pursued. This plan is bug fixes only.
 

@@ -55,8 +55,8 @@ and GLM steps took 5–15 minutes against 1–6 for Sonnet.
 
 ### What that workbench does (the port reference)
 
-- **Parent link** is a label: `PARENT_AGENT_ID_LABEL = "reference.parent-agent-id"` (a local reference clone).
-- **Notification** is `setupFinishNotification` (a local reference clone): armed when the parent creates or prompts a child
+- **Parent link** is a label: `PARENT_AGENT_ID_LABEL = "reference.parent-agent-id"`.
+- **Notification** is `setupFinishNotification`: armed when the parent creates or prompts a child
   (`notifyOnFinish`, default **true** for an agent caller, false for a top-level caller: `agent/tools/reference-tools.ts:1045-1072`, `:1868`). It watches the child's lifecycle and, on
   `finished` / `errored` / `needs permission` / `closed`, sends the parent a prompt through `sendPromptToAgent` with `source.kind = "agent-notification"` and
   `activeTurnBehavior: "steer"` (it **injects into the parent's running turn**). One armed notification per (child, caller) pair; re-arming replaces the old one; an

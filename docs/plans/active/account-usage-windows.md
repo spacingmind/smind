@@ -21,7 +21,7 @@ plugs into the registry of the full-screen Settings screen (parallel PR
 signal** is **D14, now Accepted (round 3, below)** with **PR-F** (AC59–AC66).
 
 **Amended 2026-10-12, round 3 (Human): D14 accepted, a reference proxy project model**
-(a local reference clone @ `4b5f1ea`, ADR-0028 §7): the **routing signal is a hard
+: the **routing signal is a hard
 rejection only** (an Anthropic 429 whose headers declare the shared 5h or 7d
 window `rejected`) → a persisted **cooldown until the latest reset + 1–30 s
 grace**; a `7d_oi`-only rejection cools down only the requested model; a bare

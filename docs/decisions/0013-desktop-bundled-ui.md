@@ -20,7 +20,7 @@ an SSH tunnel or Tailscale, and the Phase 3 E2EE relay pairing the
 mobile app already uses (`mobile/src/relay/*`, `internal/relay/*`,
 ADR-0007/ADR-0011) — with a host picker and a persisted connection
 list, like a reference workbench's host registry
-(a local reference clone).
+.
 
 The daemon's HTTP posture constrains any browser-side UI:
 

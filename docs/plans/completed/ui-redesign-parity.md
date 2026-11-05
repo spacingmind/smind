@@ -21,8 +21,8 @@ Phase 1 of this work (research) is complete; its output is under
   per-dimension verdict and north star, ending in the top-10 ranked gaps.
 
 This plan builds on, and does not re-litigate,
-`docs/research/dual-mode-ui.md` (no mode switch; one task-scoped tabbed
-canvas with an attention rail and a side dock), `docs/research/uiux-audit.md`
+`docs/research/local/dual-mode-ui.md` (no mode switch; one task-scoped tabbed
+canvas with an attention rail and a side dock), `docs/research/local/uiux-audit.md`
 (whose P1/P2 items that are still open are folded in below), ADR 0004
 (per-task tabs) and ADR 0006 (coarse, human-triggered commit flow).
 
@@ -72,7 +72,7 @@ item so several agents can work concurrently in separate worktrees; see
   defaults, so the three no longer disagree
   (`audit-smind-current.md` §6).
 - The stray chromatic `--sidebar-primary` in `.dark`
-  (`index.css:112`, flagged in `docs/research/uiux-audit.md` §2.5) is
+  (`index.css:112`, flagged in `docs/research/local/uiux-audit.md` §2.5) is
   resolved deliberately, not left as a shadcn leftover.
 - A theme control exists somewhere reachable (sidebar footer is fine
   until Item 13 lands a settings screen).
@@ -156,7 +156,7 @@ item so several agents can work concurrently in separate worktrees; see
 
 - The main content area supports **one split**: a primary pane and an
   optional side pane, resizable, persisted per task. This is the "side
-  dock" from `docs/research/dual-mode-ui.md` that ADR 0004's tab registry
+  dock" from `docs/research/local/dual-mode-ui.md` that ADR 0004's tab registry
   was the prerequisite for.
 - "Open to side" is available on file tabs, the diff tab and the terminal
   tab; a tab can be moved between panes; closing the last tab in the side
@@ -381,7 +381,7 @@ standalone if Item 5 slips.*
   side-by-side / unified toggle.
 - Review comments: per-line draft comments held locally, submitted as a
   single prompt back to the agent — the mechanism
-  `docs/research/dual-mode-ui.md` recommended and `audit-workbench.md` §2
+  `docs/research/local/dual-mode-ui.md` recommended and `audit-workbench.md` §2
   implements as persisted review drafts. Draft state survives collapsing a
   file and switching tabs.
 - A diff stat (files / +lines / -lines) surfaced outside this pane, so the
@@ -681,7 +681,7 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
   equivalent is more entangled with its provider layer), and account-row
   richness follows **A reference proxy project**, which has by far the best credential
   model of the three.
-- **No mode switch.** Re-affirming `docs/research/dual-mode-ui.md`: one
+- **No mode switch.** Re-affirming `docs/research/local/dual-mode-ui.md`: one
   task-scoped tabbed canvas, an attention rail, one optional side dock.
   Nothing in this plan introduces an "Agents mode" / "Editor mode" toggle.
 - **ADR 0004 (per-task tabs) and ADR 0006 (coarse commit flow) stand.**

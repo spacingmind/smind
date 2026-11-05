@@ -10,7 +10,7 @@
 
 `@dnd-kit/core` is not currently a smind dependency (checked `web/package.json`, `web/packages/ui/package.json`, `web/bun.lock` — no match).
 
-## Reference patterns (a local reference clone, read 2026-09-18)
+## Reference patterns
 
 - `components/split-drop-zone.tsx`: `resolveSplitDropPosition({width, height, x, y})` — pure function, ports near-verbatim. `EDGE_RATIO = 0.15` (outer 15% of each axis is an edge zone), `CENTER_RATIO = 0.4` (inner 40% is the "move here, don't split" zone), whichever edge is closest wins for a point that's in neither. The component itself (`SplitDropZone`) is React Native/Unistyles — only the geometry function ports; the overlay visuals get rebuilt in Tailwind.
 - `components/split-container.tsx`: `DndContext` wraps the whole split tree, `useSensors(PointerSensor)` (an 8px `activationConstraint.distance` so a plain click doesn't register as a drag start). `handleDragStart`/`updateDropPreview` (on `onDragMove`/`onDragOver`)/`handleDragEnd` — the latter reads `event.over`'s droppable data to decide `applyPaneDropEnd` (center -> move, edge -> split) vs (a reference workbench also has tab-onto-tab reordering, which smind doesn't have today and this pass doesn't add — out of scope, see Decisions).

@@ -7,7 +7,7 @@
 did not. This plan lists every difference found reading that workbench end to end, then
 ports the ones that apply.
 
-**Size:** M. **Sources** (a local reference clone, read at `8d9e7d3a`):
+**Size:** M. **Sources**:
 `components/model-browser.tsx` (1723 l), `components/model-browser-view.ts`,
 `components/combined-model-selector.tsx`,
 `composer/agent-controls/{index,control,glyph,layout,model-sheet,model-sheet-flow,model-loading,utils}`,

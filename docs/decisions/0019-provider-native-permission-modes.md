@@ -25,7 +25,7 @@ allowlist at all. It exposes each provider's own permission modes:
 
 - **Claude Code**: `plan` / `default` / `acceptEdits` / `auto` (Claude
   Code's own model classifier) / `bypassPermissions`
-  (a local reference clone). Modes switch
+. Modes switch
   mid-session via `setPermissionMode` (`:2415-2437`). That workbench always launches
   with `allowDangerouslySkipPermissions: true` so a later switch to bypass
   works (`:3297-3300`). `auto` is rejected on Bedrock/Vertex (`:941-952`).

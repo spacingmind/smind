@@ -27,7 +27,7 @@ Constraints that shape the answer (all verified, see the local research notes):
 
 1. **Privacy.** smind's relay is end-to-end encrypted (ADR-0035) so that the relay operator sees no task content. A push goes through
    Expo, then Apple or Google. A push that carries a task title or a permission summary would hand exactly that content to three
-   more parties. A reference workbench does this (a local reference clone sends `title`/`body` in clear); smind must not.
+   more parties. A reference workbench does this; smind must not.
 2. **There is no hosted relay** (ADR-0031 D11/decision 12 are deferred by the Human). Users run their own relay or homelab daemon, so the
    design cannot depend on infrastructure only we operate, and a self-hoster should not need to hold a push credential for the default path.
 3. **No paid Apple Developer Program for now.** Expo's own setup page: "A paid Apple Developer Account is required to generate

@@ -1,4 +1,4 @@
-// mobile-zcode-redesign M3: the task list in the ZCode look.
+// mobile-reference-redesign M3: the task list in the ZCode look.
 
 import { join } from 'node:path';
 import * as lib from '../lib.mjs';

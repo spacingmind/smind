@@ -44,7 +44,7 @@ predates this plan — `reference-visual-parity` changes what these things
    that keeps its own hue (see the Brand colour note below). `--ring` is
    neutralized (chroma zeroed, same lightness) rather than aliased —
    a reference desktop workbench has no ring/focus-glow token, and its inputs are "calm and
-   integrated, not glowing by default" (a local reference clone). `--input`
+   integrated, not glowing by default". `--input`
    and `--chart-*` are untouched holdouts (see the input token note
    below); `--radius*` is gone entirely (§ Radius).
 2. **Semantic layer** — a reference desktop workbench's own token vocabulary, ported verbatim

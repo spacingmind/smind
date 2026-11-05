@@ -56,7 +56,7 @@ using the existing request/response envelope:
 
 ## Rationale
 
-The gap (`docs/research/dual-mode-ui.md`): permission events only reach a
+The gap (`docs/research/local/dual-mode-ui.md`): permission events only reach a
 client inside an active `run.attach`; nothing else is pushable. This shape
 reuses the existing envelope and connection multiplexing
 (`internal/wsapi/conn.go`), keeps the notification/response distinction

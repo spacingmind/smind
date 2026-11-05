@@ -22,7 +22,7 @@ persistent `/ws` connection, JSON envelopes with `id`/`method`/`params` vs.
 
 This shell-and-poll loop is the main reason the user still reaches for
 a reference workbench day to day: a reference workbench exposes agent orchestration natively as MCP tools
-(a local reference clone), so an orchestrating agent calls
+, so an orchestrating agent calls
 `create_agent`/`send_agent_prompt`/`get_agent_status`/
 `list_pending_permissions`/`respond_to_permission` directly, with no shell
 round-trip or text-parsing of CLI output. A reference workbench's server-side wiring is
@@ -156,7 +156,7 @@ back as MCP structured content.
 
 `task_send`/`task_wait` split (rather than one blocking "send and wait"
 tool) mirrors a reference workbench's own `send_agent_prompt` (fire-and-forget) +
-`get_agent_status` (poll) split (a local reference clone),
+`get_agent_status` (poll) split,
 and keeps a long-running turn from occupying an MCP tool-call slot for the
 run's entire duration.
 

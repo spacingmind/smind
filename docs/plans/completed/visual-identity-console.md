@@ -14,12 +14,12 @@ accounts v2, responsive/compact layout. That work is done and merged.
 Two research passes done today (2026-09-17) on top of that foundation
 independently converged on the same diagnosis: **the architecture is
 right; what's missing is a deliberate visual-identity layer on top of it.**
-`docs/research/ui-ux-polish-2026.md` (`pplx -m best`, 3 queries): shadcn's
+`docs/research/local/ui-ux-polish-2026.md` (`pplx -m best`, 3 queries): shadcn's
 defaults *are* the generic look, and breaking out requires a product
 visual thesis + semantic tokens beyond `background`/`card`/`muted` +
 a real type-role scale + a spacing rhythm + product-meaning component
 variants + an elevation vocabulary + a motion vocabulary — not new
-features. `docs/research/uiux-audit.md`: catalogued concrete P0-P2 gaps
+features. `docs/research/local/uiux-audit.md`: catalogued concrete P0-P2 gaps
 live-tested in browser; re-verified against current code before writing
 this plan — **P0 crashes, dark-mode wiring, the stray token, workspace/
 space creation UI, and task-archive UI are already fixed/shipped** since
@@ -164,7 +164,7 @@ render-intent registry rather than replacing it).
   (popovers, dropdowns, dialogs) rather than each component picking its
   own shadow.
 - Shadow tiers added as tokens (`--shadow-sm/md/lg`) with the reference workbench's
-  light/dark asymmetry (a local reference clone):
+  light/dark asymmetry:
   light-mode shadows very soft (`alpha ~0.02-0.08`), dark-mode shadows
   harder (`alpha ~0.20-0.40`) — defined once per theme in `index.css`,
   consumed via `shadow-[var(--shadow-md)]` or an equivalent Tailwind

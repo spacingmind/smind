@@ -4,7 +4,7 @@ import type { TimelineItem, TimelineToolCallItem } from "@/hooks/use-run-timelin
 
 /**
  * How much of a tool call the transcript shows, matching Paseo's
- * `toolCallDetailLevel` (`audit-paseo.md` §2). `overview` collapses a run
+ * `toolCallDetailLevel` (`audit-workbench.md` §2). `overview` collapses a run
  * of consecutive tool calls into one row so a long agentic stretch reads
  * as "it did twelve things" rather than twelve cards of scrollback.
  */

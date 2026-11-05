@@ -43,7 +43,7 @@ better natively in smind than it does today on a reference workbench.
 | 11 | Turn-limit stop hidden as `done` | Lead reads the logs | Same (D-G5/D13) | `needs_continue` disposition, whatever the transcript claims |
 | 12 | Accept/reject record | In the plan's Progress | none | `handoff_review` per run |
 | 13 | Sizing | Supervisor scores in prose | none | Optional `tasks.size`; suggests profiles and a budget |
-| 14 | Worktree setup | `paseo.json` (repo file) | ADR-0024, daemon-side, human-authored (built) | none: done |
+| 14 | Worktree setup | a workbench setup file (repo file) | ADR-0024, daemon-side, human-authored (built) | none: done |
 | 15 | Supervisor heartbeat | A reference workbench heartbeat | none; schedules deferred (parity D5) | stays on a reference workbench or the host's `/loop` |
 | 16 | Read-only reviewer | `reviewer` profile, plan mode | `plan` mode (Claude); ACP modes are agent-defined | A profile; nothing new |
 
@@ -157,7 +157,7 @@ specified in section 5 and built in the self-learning plan.
 | Profiles `supervisor`, `lead`, `peer-glm`, `peer-sonnet`, `reviewer` | Seeded as contract profiles. Supervisor is in no `childPolicy`, so only a human launches it (the reference workbench "never spawned by agents" note, enforced). Lead: `childPolicy=leaf`. Peers and reviewer: `orchestrationTools=false` |
 | `glm-peer` / `claude-s-peer` (a reference workbench tools off) | `orchestrationTools=false` |
 | `WORKSPACE_PROTOCOL.md` | Stays the repo-owned contract. Profile `instructions` stay short and point at it; they do not copy it |
-| `paseo.json` worktree setup | ADR-0024, already built: daemon-side, human-authored |
+| a workbench setup file worktree setup | ADR-0024, already built: daemon-side, human-authored |
 | Supervisor heartbeat | Stays on a reference workbench or `/loop` until schedules (parity D5) |
 | "20-turn limit", "never Opus" in notes | `maxTurns`; fixed `model` in the profile; a Lead cannot override it |
 

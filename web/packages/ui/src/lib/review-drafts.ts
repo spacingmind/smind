@@ -23,7 +23,7 @@ export interface ReviewDraft {
  * don't force-mount inactive content), so component state could not
  * survive it by construction. Mirrored into localStorage on every
  * mutation, which also gets survival across a reload for free; Paseo
- * persists its review drafts for the same reason (`audit-paseo.md` §2).
+ * persists its review drafts for the same reason (`audit-workbench.md` §2).
  *
  * Keyed by task id, so drafts written against one task's diff can never
  * be submitted against another's.

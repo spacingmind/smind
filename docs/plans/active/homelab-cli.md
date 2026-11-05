@@ -130,7 +130,7 @@ its mailbox on a relay.
    spacingmind.com only after the landing redirect exists (raw GitHub URL until then).
 
 **That workbench pattern — deliberately different.** The reference workbench has no install script; its CLI is
-`npm install -g @reference/cli` and its apps are installers (a local reference clone).
+`npm install -g @reference/cli` and its apps are installers.
 Nothing to port; the "install, start, then choose how clients connect" server shape
 (`README.md:94-100`, `packages/cli/src/commands/onboard.ts`) is reflected in the closing
 message of both scripts ("Next: `smind serve`, then see docs/homelab.md").

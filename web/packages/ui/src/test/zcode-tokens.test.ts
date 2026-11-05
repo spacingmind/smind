@@ -72,7 +72,7 @@ function resolve(map: Record<string, string>, name: string, seen = new Set<strin
   return value;
 }
 
-describe("ZCode token fixture parity (zcode-visual-parity plan, P1)", () => {
+describe("ZCode token fixture parity (reference-visual-parity plan, P1)", () => {
   const themeInline = declarations(block("@theme inline"));
   const root = declarations(block(":root"));
   const dark = declarations(block(".dark"));

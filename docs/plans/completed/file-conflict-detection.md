@@ -1,6 +1,6 @@
 # File conflict detection: agent rewrote a file the human has open
 
-Open question 8 of `docs/research/dual-mode-ui.md`. Today an agent
+Open question 8 of `docs/research/local/dual-mode-ui.md`. Today an agent
 overwriting a file that's open with unsaved edits in the editor is
 silent — the human's next save clobbers the agent's work (or their own
 reload does). A reference workbench's precedent: `conflict-alert` with

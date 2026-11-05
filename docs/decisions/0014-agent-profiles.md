@@ -19,7 +19,7 @@ per-submission React state, reset to the same hardcoded defaults
 UI, and no daemon-side concept of a "profile" at all
 (local research notes's gap analysis, §d).
 
-A reference workbench's equivalent (a local reference clone)
+A reference workbench's equivalent
 is a named, per-daemon (`REF_HOME`-global, not per-workspace) record --
 `id`, `name`, `provider`, `model?`, `modeId?`, `thinkingOptionId?`,
 `featureValues?`, `notes?` -- deliberately carrying no `systemPrompt`, applied
