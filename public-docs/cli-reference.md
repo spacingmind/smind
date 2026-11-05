@@ -118,6 +118,8 @@ Usage:
   smind cooldown ls                                       list providers cooling down after a rate limit
   smind cooldown clear <provider>                         I reset my quota: clear a provider cooldown, retry held runs now (humans only)
 
+  smind debug memory [--json]                             the running daemon's memory: Go heap, RSS/footprint, run history cache (local only)
+
   smind provider update <id> [--models a,b] [--add-models a,b]   edit an instance in config.yaml: its model list, extra models, disallowed tools
       [--disallow T,U] [--inherit-claude-config=true|false]     (humans only; applied live; keys stay on the Providers settings)
 
@@ -137,6 +139,22 @@ reset time and keeps `--on-rate-limit=wait` retries waiting until then.
 `smind cooldown ls` shows which providers are still cooling down and when
 they reset. When you reset your quota by hand, `smind cooldown clear
 <provider>` clears the cooldown and retries the held runs now (humans only).
+
+### debug memory
+
+`smind debug memory` asks the running daemon how much memory it uses and
+prints the Go heap, the process size (resident set and, on macOS, the
+footprint Activity Monitor shows), and how much finished-run history is kept in
+memory against `runs.historyBudgetMB`. Add `--json` for a machine-readable
+form. It works only from the same machine; agents and relay phones cannot call
+it. For a heap profile, set `debug.pprof: true` (see
+[Configuration](configuration.md)), restart the daemon, then:
+
+```sh
+curl -H "Authorization: Bearer $(cat ~/.smind/token)" \
+  http://127.0.0.1:4648/debug/pprof/heap -o heap.pb.gz
+go tool pprof -sample_index=inuse_space heap.pb.gz
+```
 
 ### provider update
 

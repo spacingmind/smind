@@ -251,9 +251,7 @@ func (reg *Registry) startFallbackSuccessor(r *run, prof store.AgentProfile) {
 		return
 	}
 
-	r.mu.Lock()
-	tail := trailingAgentText(r.history)
-	r.mu.Unlock()
+	tail, _ := reg.LastAgentText(r.id)
 	prompt := failoverPreface(string(r.provider)) + stripProvenanceHeader(r.prompt)
 	if tail != "" {
 		prompt += "\n\n--- tail of the previous attempt's output (read-only context, may be incomplete) ---\n" + tailBytes(tail, fallbackTailMax)

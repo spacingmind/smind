@@ -196,8 +196,8 @@ func (reg *Registry) childEventFacts(task store.Task, run store.Run) ChildEventF
 	if u, err := reg.st.GetRunUsage(run.ID); err == nil {
 		f.CostUSD = u.CostUSD
 	}
-	if hist, _, err := reg.History(run.ID); err == nil {
-		f.LastText = trailingAgentText(hist)
+	if text, err := reg.LastAgentText(run.ID); err == nil {
+		f.LastText = text
 	}
 	return f
 }

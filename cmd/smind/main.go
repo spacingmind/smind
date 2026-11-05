@@ -104,6 +104,8 @@ func run(args []string) int {
 		return cmdPush(args[1:])
 	case "cooldown":
 		return cmdCooldown(args[1:])
+	case "debug":
+		return cmdDebug(args[1:])
 	case "provider":
 		return cmdProvider(args[1:])
 	case "config":
@@ -226,6 +228,8 @@ Usage:
 
   smind cooldown ls                                       list providers cooling down after a rate limit
   smind cooldown clear <provider>                         I reset my quota: clear a provider cooldown, retry held runs now (humans only)
+
+  smind debug memory [--json]                             the running daemon's memory: Go heap, RSS/footprint, run history cache (local only)
 
   smind provider update <id> [--models a,b] [--add-models a,b]   edit an instance in config.yaml: its model list, extra models, disallowed tools
       [--disallow T,U] [--inherit-claude-config=true|false]     (humans only; applied live; keys stay on the Providers settings)

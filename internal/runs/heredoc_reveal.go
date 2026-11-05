@@ -39,19 +39,12 @@ func (reg *Registry) PendingHeredoc(requestID string, index int) (HeredocReveal,
 // runID, for a live run from its history and for a finished one from the
 // persisted log. The index counts bodies the way taskrunner.ElideToolCall does.
 func (reg *Registry) ToolCallHeredoc(runID, toolCallID string, index int) (HeredocReveal, error) {
-	hist, _, err := reg.History(runID)
+	input, err := reg.toolCallInput(runID, toolCallID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return HeredocReveal{}, ErrNoHeredoc
 		}
 		return HeredocReveal{}, err
-	}
-	var input []byte
-	for _, e := range hist {
-		// A later update may omit the input: keep the last one that has it.
-		if e.Type == taskrunner.EventTypeToolCall && e.ToolCallID == toolCallID && len(e.ToolInput) > 0 {
-			input = e.ToolInput
-		}
 	}
 	if input == nil || index < 0 {
 		return HeredocReveal{}, ErrNoHeredoc
