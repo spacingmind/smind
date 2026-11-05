@@ -201,25 +201,32 @@ func TestSkeletonReader_Subscribe(t *testing.T) {
 	}
 }
 
-// The 30-day prune consumes: the trailing agent text (kept as final_text) and
-// every row of the run, and now its excerpts.
+// The 30-day prune consumes (PR C): a full run's rows, final text and
+// excerpts; a skeleton run's excerpt tier only -- its rows, final text and
+// usage stay, so readers keep serving the skeleton.
 func TestSkeletonReader_RetentionPrune(t *testing.T) {
 	p := newSkelPair(t, skelStream(), true)
 	pruner := NewPruner(p.reg, p.e.st, func() int { return 30 })
 	pruner.pause, pruner.batch = 0, 50
+	rowsBefore := eventCount(t, p.e.st, p.skl)
 	rep, err := pruner.Run(context.Background())
-	if err != nil || rep.Runs != 2 {
-		t.Fatalf("prune = %+v, %v; want both runs", rep, err)
+	if err != nil || rep.Runs != 1 || rep.ExcerptRuns != 1 || rep.ExcerptRows == 0 {
+		t.Fatalf("prune = %+v, %v; want the full run's rows and the skeleton's excerpts", rep, err)
 	}
-	a, _ := p.e.st.GetRunFinalText(p.full)
-	b, _ := p.e.st.GetRunFinalText(p.skl)
-	if a != b || !strings.HasPrefix(a, "final 0final 1") {
-		t.Fatalf("final text full %q skel %q", a, b)
+	if txt, _ := p.e.st.GetRunFinalText(p.full); !strings.HasPrefix(txt, "final 0final 1") {
+		t.Fatalf("full run final text = %q", txt)
 	}
-	for _, id := range []string{p.full, p.skl} {
-		if n := eventCount(t, p.e.st, id); n != 0 {
-			t.Fatalf("%s: %d rows left", id, n)
-		}
+	if n := eventCount(t, p.e.st, p.full); n != 0 {
+		t.Fatalf("%s: %d rows left", p.full, n)
+	}
+	if n := eventCount(t, p.e.st, p.skl); n != rowsBefore {
+		t.Fatalf("%s: %d rows left, want the %d it had", p.skl, n, rowsBefore)
+	}
+	if txt, _ := p.e.st.GetRunFinalText(p.skl); txt != "" {
+		t.Fatalf("%s: final text = %q, want none (its rows keep the text)", p.skl, txt)
+	}
+	if row, _ := p.e.st.GetRun(p.skl); row.HistoryPrunedAt != nil {
+		t.Fatalf("%s was marked history-pruned", p.skl)
 	}
 	var left int
 	if err := p.e.st.DB().QueryRow(`SELECT COUNT(*) FROM run_excerpts`).Scan(&left); err != nil || left != 0 {

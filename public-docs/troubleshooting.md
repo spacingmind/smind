@@ -132,10 +132,13 @@ In the desktop app, **Settings** → **Daemon** shows the log file path.
 
 ## smind.db is very large
 
-Most of the file is the detailed history of finished runs. The daemon prunes
-runs older than `runs.historyRetentionDays` (30 by default) of archived tasks
-every day; `smind runs prune --dry-run` shows what that would remove. The file
-only shrinks after `smind db compact` (see the CLI reference).
+Most of the file is the detailed history of finished runs. Every day the
+daemon removes the large tool output (the copies over 512 bytes) of finished
+runs older than `runs.historyRetentionDays` (30 by default) of archived tasks,
+while their prompts, answers and tool-call summaries stay; runs finished before
+this rule, and runs the daemon could not convert, are removed whole.
+`smind runs prune --dry-run` shows what that would remove. The file only
+shrinks after `smind db compact` (see the CLI reference).
 
 ## The end of a run's output is missing after a crash
 
@@ -162,6 +165,7 @@ the note says why and the summary stays:
 | could not be loaded (too large or too slow) | the session file is over 64 MB or reading it took over 10 s |
 | this provider does not keep a history smind can read | other providers have no session file smind can open |
 | another history is loading / this chat is running | try again in a moment, or when the chat's run ends |
+| large tool output was removed after the retention period | the daily retention pass deleted the trimmed copies of large tool output; the summary stays, and Load full history still works while the provider's session file exists |
 
 ## The daemon uses a lot of memory
 

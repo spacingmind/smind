@@ -36,17 +36,20 @@ func cmdDB(args []string) int {
 }
 
 type prunePrintReport struct {
-	Enabled    bool    `json:"enabled"`
-	Days       int     `json:"days"`
-	Cutoff     string  `json:"cutoff"`
-	DryRun     bool    `json:"dryRun"`
-	Runs       int64   `json:"runs"`
-	Rows       int64   `json:"rows"`
-	Bytes      int64   `json:"bytes"`
-	FreedBytes int64   `json:"freedBytes"`
-	ReusableMB float64 `json:"reusableMB"`
-	Duration   string  `json:"duration"`
-	Incomplete bool    `json:"incomplete"`
+	Enabled      bool    `json:"enabled"`
+	Days         int     `json:"days"`
+	Cutoff       string  `json:"cutoff"`
+	DryRun       bool    `json:"dryRun"`
+	Runs         int64   `json:"runs"`
+	Rows         int64   `json:"rows"`
+	Bytes        int64   `json:"bytes"`
+	ExcerptRuns  int64   `json:"excerptRuns"`
+	ExcerptRows  int64   `json:"excerptRows"`
+	ExcerptBytes int64   `json:"excerptBytes"`
+	FreedBytes   int64   `json:"freedBytes"`
+	ReusableMB   float64 `json:"reusableMB"`
+	Duration     string  `json:"duration"`
+	Incomplete   bool    `json:"incomplete"`
 }
 
 // runRuns is cmdRuns with its environment injected. Exit codes: 0 ok, 1 a
@@ -84,6 +87,9 @@ func runRuns(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		verb = "would prune"
 	}
 	fmt.Fprintf(stdout, "retention %d days (runs finished before %s)\n%s the events of %d runs: %d rows, about %s\n", rep.Days, rep.Cutoff, verb, rep.Runs, rep.Rows, mib(rep.Bytes))
+	if rep.ExcerptRuns > 0 {
+		fmt.Fprintf(stdout, "%s the large tool output of %d skeleton runs: %d rows, about %s (their summaries stay)\n", verb, rep.ExcerptRuns, rep.ExcerptRows, mib(rep.ExcerptBytes))
+	}
 	if !dry {
 		fmt.Fprintf(stdout, "returned %s to the disk\n", mib(rep.FreedBytes))
 		if rep.ReusableMB >= 1 {

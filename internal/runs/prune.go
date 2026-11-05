@@ -102,17 +102,20 @@ func capText(s string, max int) string {
 // PruneReport is the result of a prune pass or a dry run.
 type PruneReport struct {
 	// Enabled is false when retention is off (0 days): nothing is pruned.
-	Enabled    bool      `json:"enabled"`
-	Days       int       `json:"days"`
-	Cutoff     time.Time `json:"cutoff"`
-	DryRun     bool      `json:"dryRun"`
-	Runs       int64     `json:"runs"`
-	Rows       int64     `json:"rows"`
-	Bytes      int64     `json:"bytes"`
-	FreedBytes int64     `json:"freedBytes"`
-	ReusableMB float64   `json:"reusableMB"`
-	Duration   string    `json:"duration,omitempty"`
-	Incomplete bool      `json:"incomplete,omitempty"`
+	Enabled      bool      `json:"enabled"`
+	Days         int       `json:"days"`
+	Cutoff       time.Time `json:"cutoff"`
+	DryRun       bool      `json:"dryRun"`
+	Runs         int64     `json:"runs"`
+	Rows         int64     `json:"rows"`
+	Bytes        int64     `json:"bytes"`
+	ExcerptRuns  int64     `json:"excerptRuns"`
+	ExcerptRows  int64     `json:"excerptRows"`
+	ExcerptBytes int64     `json:"excerptBytes"`
+	FreedBytes   int64     `json:"freedBytes"`
+	ReusableMB   float64   `json:"reusableMB"`
+	Duration     string    `json:"duration,omitempty"`
+	Incomplete   bool      `json:"incomplete,omitempty"`
 }
 
 // Pruner runs retention passes: a daily job and on-demand passes.
@@ -154,6 +157,7 @@ func (p *Pruner) Preview() (PruneReport, error) {
 		return rep, err
 	}
 	rep.Runs, rep.Rows, rep.Bytes = c.Runs, c.Rows, c.Bytes
+	rep.ExcerptRuns, rep.ExcerptRows, rep.ExcerptBytes = c.ExcerptRuns, c.ExcerptRows, c.ExcerptBytes
 	return rep, nil
 }
 
@@ -176,6 +180,7 @@ func (p *Pruner) Run(ctx context.Context) (PruneReport, error) {
 		return rep, err
 	}
 	rep.Bytes = pre.Bytes
+	rep.ExcerptBytes = pre.ExcerptBytes
 
 	seen := map[string]bool{}
 	for ctx.Err() == nil {
@@ -190,11 +195,16 @@ func (p *Pruner) Run(ctx context.Context) (PruneReport, error) {
 			}
 			seen[id] = true
 			progressed = true
-			rows, err := p.pruneRun(ctx, id, cutoff)
+			rows, excerpts, err := p.pruneRun(ctx, id, cutoff)
 			if err != nil {
 				return rep, err
 			}
-			if rows > 0 {
+			if excerpts {
+				if rows > 0 {
+					rep.ExcerptRuns++
+					rep.ExcerptRows += rows
+				}
+			} else if rows > 0 {
 				rep.Runs++
 				rep.Rows += rows
 			}
@@ -214,25 +224,49 @@ func (p *Pruner) Run(ctx context.Context) (PruneReport, error) {
 		rep.ReusableMB = float64(pages*size) / (1 << 20)
 	}
 	rep.Duration = time.Since(start).Round(time.Millisecond).String()
-	log.Printf("runs: retention pass: %d runs, %d event rows pruned, %d bytes returned to the file system (cutoff %s)", rep.Runs, rep.Rows, rep.FreedBytes, cutoff.Format(time.RFC3339))
+	log.Printf("runs: retention pass: %d runs, %d event rows pruned, %d excerpt rows of %d skeleton runs, %d bytes returned to the file system (cutoff %s)", rep.Runs, rep.Rows, rep.ExcerptRows, rep.ExcerptRuns, rep.FreedBytes, cutoff.Format(time.RFC3339))
 	return rep, nil
 }
 
-// pruneRun prunes one run in the two phases and returns the rows deleted.
-func (p *Pruner) pruneRun(ctx context.Context, id string, cutoff time.Time) (int64, error) {
+// pruneRun prunes one run and returns the rows deleted and whether they were
+// excerpt rows. A run in skeleton form keeps its rows: only its excerpt tier
+// goes, so every reader keeps serving the skeleton (a payload whose excerpt is
+// gone reads back as its summary). A run in full form is pruned in the two
+// phases as before.
+func (p *Pruner) pruneRun(ctx context.Context, id string, cutoff time.Time) (rows int64, excerpts bool, err error) {
+	sk, err := p.st.GetRunSkeleton(id)
+	if err != nil {
+		return 0, false, err
+	}
+	if sk.SkeletonAt != nil {
+		var total int64
+		for ctx.Err() == nil {
+			n, err := p.st.PruneExcerptsBatch(id, p.batch, p.now().UTC(), cutoff)
+			if err != nil {
+				return total, true, err
+			}
+			total += n
+			if n == 0 {
+				break
+			}
+			time.Sleep(p.pause)
+		}
+		p.reg.dropResident(id)
+		return total, true, nil
+	}
 	row, err := p.st.GetRun(id)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if row.HistoryPrunedAt == nil {
 		text, _ := p.reg.LastAgentText(id)
 		now := p.now().UTC()
 		ok, err := p.st.MarkRunPruned(id, capText(text, finalTextMax), now, cutoff)
 		if err != nil {
-			return 0, err
+			return 0, false, err
 		}
 		if !ok {
-			return 0, nil // no longer eligible: left untouched
+			return 0, false, nil // no longer eligible: left untouched
 		}
 		p.reg.markHistoryPruned(id, now)
 	} else {
@@ -242,7 +276,7 @@ func (p *Pruner) pruneRun(ctx context.Context, id string, cutoff time.Time) (int
 	for ctx.Err() == nil {
 		n, err := p.st.DeleteRunEventsBatch(id, p.batch)
 		if err != nil {
-			return total, err
+			return total, false, err
 		}
 		total += n
 		if n == 0 {
@@ -250,7 +284,29 @@ func (p *Pruner) pruneRun(ctx context.Context, id string, cutoff time.Time) (int
 		}
 		time.Sleep(p.pause)
 	}
-	return total, nil
+	return total, false, nil
+}
+
+// dropResident drops a run's resident history without marking it pruned: the
+// run is not "pruned" (its skeleton rows are still in the store), so the next
+// read loads them again instead of serving the prune summary.
+func (reg *Registry) dropResident(id string) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	r, ok := reg.runs[id]
+	if !ok {
+		return
+	}
+	r.mu.Lock()
+	running := r.status == StatusRunning
+	r.mu.Unlock()
+	if running {
+		return
+	}
+	reg.dropHistLocked(r, true)
+	r.mu.Lock()
+	r.history, r.histEvicted = nil, true
+	r.mu.Unlock()
 }
 
 // reclaim returns freed pages to the OS when the file allows it and truncates
