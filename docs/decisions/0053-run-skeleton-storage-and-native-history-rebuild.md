@@ -371,6 +371,25 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
   sentence per reason and a "Load full history" action that is offered only when the daemon says `canLoadFull` and the
   reason can pass (first ask, busy, running chat, too slow). The sentences are one table in each client with identical text.
 
+## Implemented: `smind doctor` and the provider-retention warning (H8)
+
+`internal/doctor`, `cmd/smind/doctor.go`, `wsapi/doctor_sessions.go`. `smind doctor [--json]` is new and strictly read-only: it
+**never edits** a Claude Code or Codex setting or file (a test snapshots the home and the smind home before and after).
+
+- **Claude Code** (verified in the 2.1.310 binary and on this machine): `cleanupPeriodDays` in `settings.json` of the config
+  directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`; `settings.local.json` there overrides it; provider instances use
+  `<smind home>/providers/<id>/claude`): "days to retain chat transcripts before automatic cleanup (default: 30), minimum 1".
+  Project settings in a repository and a managed policy file can also set it and are not checked (the output says so in the docs).
+  Finding: `warn` when the provider keeps transcripts no longer than smind keeps its own large tool output
+  (`runs.historyRetentionDays`; after that the session is the only source of the full history), `ok` when it keeps them longer,
+  `info` when smind keeps everything (`runs.historyRetentionDays: 0`). A `fix:` line tells the user what to change; smind does not.
+- **Codex** (0.166.0): no automatic session expiry exists (no config key; sessions are removed by `codex delete`, `codex archive`
+  moves a rollout to `archived_sessions/`, which the rebuilder reads): an `info` finding.
+- **Counts.** The daemon answers `doctor.sessions` (local human only, like the retention RPCs): for the finished skeleton runs with a
+  recorded `native_ref`, how many provider session files are still there (resolved with exactly the rebuild's path rules, only
+  stat-ed, never opened), over the 64 MiB rebuild bound, or gone. Counts only: no path, no run id. If the daemon is not running
+  the command says so and still exits 0.
+
 ## Measurements on the real database (PR0, 2026-11-05)
 
 `smind debug run-stats` (hidden, offline, read-only) ran once on a `VACUUM INTO` snapshot of the Human's database (842 MiB file,
