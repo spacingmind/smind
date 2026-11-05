@@ -289,6 +289,7 @@ func TestBudgetNeverEvictsRunningRun(t *testing.T) {
 		t.Fatalf("stats do not report the running run: %+v", st)
 	}
 	// Once it finishes it is subject to the budget like any other run.
+	reg.flushPersist(live) // what finish does
 	live.mu.Lock()
 	live.status = StatusDone
 	live.mu.Unlock()
@@ -296,7 +297,8 @@ func TestBudgetNeverEvictsRunningRun(t *testing.T) {
 	if !live.histEvicted {
 		t.Fatal("a finished run over the budget stayed resident")
 	}
-	if got, _, err := reg.History("live"); err != nil || len(got) != len(hist) {
+	// The store holds the coalesced rows (persistbuf.go): same content, fewer events.
+	if got, _, err := reg.History("live"); err != nil || fmt.Sprint(canon(t, got)) != fmt.Sprint(canon(t, hist)) {
 		t.Fatalf("finished run history from the store: %d events, err %v", len(got), err)
 	}
 }

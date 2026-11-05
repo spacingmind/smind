@@ -97,6 +97,24 @@ Independent quick win (H3): **coalesce persisted text/thinking rows at write tim
 idle, at 4 KiB, at `Done`, and at shutdown; subscribers still receive every chunk live). It removes most rows before the finalizer
 ever sees them and shrinks the live write load.
 
+**Implemented (PR1, `internal/runs/persistbuf.go`).** Each run has a persist buffer for consecutive plain text or thinking chunks
+(a chunk that carries any other persisted field is a boundary, guarded by a field-count test). It is flushed, as ONE row written once
+(never updated), when: a non-chunk event arrives; the kind changes (text/thinking); the next chunk's seq is not the one right after
+the buffer's last (another goroutine recorded an event in between, so merging would reorder text around it); the buffer would pass 4 KiB
+(one larger chunk is its own row); 250 ms pass since the last chunk (timer); or the run finishes (`finish` flushes before the terminal
+status is stored, which is also what daemon shutdown and Stop go through). The row keeps the first chunk's `seq`; the other chunks'
+seqs are gaps. `r.history` and every subscriber are untouched: they still get each chunk.
+
+*Durability window.* A process that dies without running `finish` (kill -9, power loss) loses the open buffer: at most 250 ms of
+streaming, and at most 4 KiB of text of one kind, per running run. Everything before the last boundary or flush is on disk. Stop, an
+agent error and a daemon shutdown lose nothing. The window is acceptable because a crashed run is reconciled as interrupted anyway
+and its history is a transcript, not state the run resumes from. A multi-byte character split across two chunks was stored as
+replacement characters before (each chunk was encoded alone); merged, it is stored intact.
+
+*What readers see.* A run that finished after this change reads back with fewer, larger text/thinking events than it streamed (the
+content, order and tool events are identical; `Tail(n)` counts rows, so a window of n events holds more text). Runs stored before
+it are unchanged. Equivalence and per-reader tests: `persistbuf_test.go`, `persistbuf_readers_test.go`.
+
 ### 4. Full history on demand, from the provider (D4)
 
 A **rebuilder** per provider kind reads the native session and returns `[]Event` for the run's turn window, through the **same
