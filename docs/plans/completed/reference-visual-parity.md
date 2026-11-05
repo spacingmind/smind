@@ -9,9 +9,9 @@ smind's own roadmap; no backend/daemon/wsapi changes.
 
 User decisions (2026-09-25, not open for re-litigation):
 
-- **Visual 1:1 with a reference desktop workbench.** a reference desktop workbench sets the look — tokens, typography,
+- **Visual 1:1 with a reference desktop workbench.** A reference desktop workbench sets the look — tokens, typography,
   spacing, radii, shadows, component proportions, light/dark palettes.
-  a reference desktop workbench is Apache-2.0; a local reference clone and a local reference clone
+  A reference desktop workbench is Apache-2.0; a local reference clone
   are the attribution sources.
 - **Features stay smind's.** Explicitly out of scope, not to be planned:
   workflows, Goal Mode, plugin store, bots, Office mode, doc/PDF
@@ -87,7 +87,7 @@ PR to match what lands.
   diff, and terminal content keep independent numeric sizes per
   DESIGN.md's exceptions; smind's Find/chord/split/attention behavior is
   untouched while their chrome moves to `text-ui-*`.
-- **The one smind-branded element is the wordmark.** a reference desktop workbench's palettes
+- **The one smind-branded element is the wordmark.** A reference desktop workbench's palettes
   make `--color-primary` neutral (black/white); smind follows that for
   all primary actions. smind's own logo mark in the sidebar header keeps
   its identity hue — it is smind's mark, the anti-Zai-branding rule
@@ -406,7 +406,7 @@ One accepted trade-off, not fixed: `input.tsx`/`select.tsx`'s
 `focus-visible:ring-*` (guideline: interactive elements need a visible
 focus replacement for `outline-none`) — a border-color change is a
 real, present replacement, just lower-contrast than a ring; this is
-A reference desktop workbench's own actual design (a local reference clone
+a reference desktop workbench's own actual design (a local reference clone
 input.tsx`: inputs are "calm and integrated, not glowing by default"
 per a local reference clone), so fixing it would mean deviating from the
 visual-parity mandate rather than a real component bug.
@@ -602,7 +602,7 @@ avoids this.
 **Not done / deferred, in scope for a later phase, not left behind**:
 the workspace-header equivalent (task-detail.tsx's `PaneHeader` usage)
 was left on its existing `px-4 py-2.5` padding scale rather than
-A reference desktop workbench's `h-12`/`p-2` — that scale is a P1-documented, cross-cutting
+a reference desktop workbench's `h-12`/`p-2` — that scale is a P1-documented, cross-cutting
 convention (`docs/design.md` §4) shared by every `PaneHeader` consumer,
 including P4-owned panes (diff/terminal/file-editor); changing it here
 would reach outside this phase's file ownership for a padding

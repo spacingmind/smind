@@ -3,7 +3,7 @@
 Research doc, not a plan. Question: should smind's web UI split into an
 agent-orchestration mode and a VS Code-like editor mode, and if so how?
 Everything below is grounded in code actually read in this repo, in
-A local reference clone, or in a cited web source.
+a local reference clone, or in a cited web source.
 
 Two premise corrections up front, since the rest depends on them:
 
@@ -109,7 +109,7 @@ optional side dock. No mode switch.**
    chat-primary shell (VS Code's Agents window, Cursor's Agents Window)
    can be added over the same tab kinds. A mode switch cannot be upgraded
    into a tab model without a rewrite.
-4. **Phase 3 mobile needs one panel model, not two.** a reference workbench runs the same
+4. **Phase 3 mobile needs one panel model, not two.** A reference workbench runs the same
    panel implementations through a compact shell — a full-screen Explorer
    overlay for Changes/Files that closes after a file opens
    (`docs/explorer-sidebar.md:46-51`). Desktop modes plus a separate mobile
@@ -238,7 +238,7 @@ decide nothing architectural; step 3 onward needs maintainer answers below.
 Per AGENTS.md rule (d) — these materially affect data model / public API
 shape and are not decided in `docs/decisions/`.
 
-1. **Is the tab/pane layout scoped per task or per workspace?** a reference workbench
+1. **Is the tab/pane layout scoped per task or per workspace?** A reference workbench
    scopes tabs to a workspace (`buildWorkspaceTabPersistenceKey({serverId,
    workspaceId})`, `workspace-tabs/model.ts:58-68`), but in smind the
    worktree — and therefore files, diff and terminal — is *per task*
@@ -254,7 +254,7 @@ shape and are not decided in `docs/decisions/`.
    generic `*.watch` subscription request per resource (a reference workbench's
    `subscribe_*`/`unsubscribe_*` pairs), one long-lived firehose per
    connection, or client polling.
-3. **Where does layout state live?** a reference workbench persists it client-side per
+3. **Where does layout state live?** A reference workbench persists it client-side per
    `(serverId, workspaceId)`. Server-side persistence would mean phone and
    desktop agree and layout survives a browser reset, but adds a UI-state
    table to `internal/store`.

@@ -374,7 +374,7 @@ proxy rows; budgets and alerts; charts; cost estimation (never).
   - `interrupt` stops the running run and starts the queued prompt on the
     resumed session (depends on O1).
 - The queue is persisted in SQLite and survives a daemon restart.
-  a reference workbench's restart data loss is the counter-example.
+  A reference workbench's restart data loss is the counter-example.
 - MCP `task_send` defaults to `queue`. A lead that is a smind chat gets
   peer escalations as its next turn. An external lead sees peer results
   through `task_wait` on the peer's run; no `task_wait` change

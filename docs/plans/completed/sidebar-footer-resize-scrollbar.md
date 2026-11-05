@@ -7,7 +7,7 @@ Web UI only; no daemon/Go change.
 
 Human ask (2026-10-12): "polish smind UI: settings pushed to the bottom of the
 sidebar like a reference workbench (add project, usage, host, help & support, settings) and
-A reference desktop workbench (user name, mobile control, settings); the resize-by-mouse / toggle
+a reference desktop workbench (user name, mobile control, settings); the resize-by-mouse / toggle
 animation is bad -- check refs and follow them, keep it simple; custom
 scrollbars to match."
 

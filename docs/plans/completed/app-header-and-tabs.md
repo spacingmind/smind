@@ -8,8 +8,8 @@ header block. (2) reference-style tabs: no box, icon + truncated title, active =
 subtle filled pill, close only on hover/active, "+" right after the tabs.
 Web UI only; no daemon/Go change, no Rust change.
 
-Sources (read, not copied): a local reference clone,DesktopTopOverlay.tsx,WorkspaceHeaderSections/WorkspaceHeaderActionSection.tsx}`,
-A local reference clone (frames, radius); a local reference clone
+Sources (read, not copied): a local reference clone,
+a local reference clone (frames, radius); a local reference clone
 (36px row, 24px chip, 8px chip padding, 14px icon, hover `surface1`, active `surface2`, close overlay on hover/active, 8px dirty dot).
 
 Out of scope: a right/side panel (smind has none: panes are a split tree), back/forward

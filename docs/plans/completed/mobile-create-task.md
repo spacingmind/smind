@@ -6,8 +6,7 @@ Size: M (5) — scope 2 (mobile + one api surface, no daemon change), PRs 1, ris
 
 Closes a Phase 3 gap: the phone can read, follow and answer tasks (mobile-reference-redesign, completed) but cannot start one. Presentation follows a reference desktop workbench's narrow
 style on the M1 foundations (`theme.ts` tokens, `src/ui/*`, `@expo/ui` through `UiHost`); skills are the rulebook as in the redesign (expo-ui, expo-design-system,
-expo-native-ui, expo-router, expo-animation, vercel-react-native-skills). Pattern reference: a local reference clone,provider-selection,
-new-workspace-launch}` (one launch form; the last provider/model/mode is remembered per provider; model/mode come from the provider catalog).
+expo-native-ui, expo-router, expo-animation, vercel-react-native-skills). Pattern reference: a local reference clone (one launch form; the last provider/model/mode is remembered per provider; model/mode come from the provider catalog).
 
 ## Contract (read from the daemon, no daemon change)
 

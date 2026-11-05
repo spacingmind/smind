@@ -1,7 +1,7 @@
 # macOS desktop app (packaging, bundled daemon, Dock lifecycle)
 
 Goal (user, 2026-10-10): "đang xài mac — làm app macOS luôn, refs từ
-A reference desktop workbench, a reference workbench". Today there is no macOS desktop build:
+a reference desktop workbench, a reference workbench". Today there is no macOS desktop build:
 
 - `desktop/src-tauri/tauri.conf.json` bundles only `deb`.
 - CI builds only Windows (`.github/workflows/desktop-windows.yml`, called
@@ -19,7 +19,7 @@ behaving like a Mac app.
 
 References:
 
-- **A reference workbench** a local reference clone (`mac:`
+- **A reference workbench** A local reference clone (`mac:`
   section):
   - `dmg` + `zip`
   - `minimumSystemVersion: 13.0.0`
@@ -27,7 +27,7 @@ References:
   - per-arch artifact names
   - the daemon binary shipped inside the app via
     `extraResources: bin/reference`
-- **A reference desktop workbench** a local reference clone
+- **A reference desktop workbench** A local reference clone
   (`mac:` / `dmg:`):
   - signing is opt-in by env var, and unsigned builds still work
   - `CFBundleURLTypes` for the deep-link scheme

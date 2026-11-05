@@ -2,7 +2,7 @@
 
 Re-scoped by user 2026-09-11 (was: "build a real scopedocs feature
 end-to-end from smind UI"). The Phase 2 gate is now: **use smind, not
-A reference workbench, as the daily driver for real work on this repo** — closing the
+a reference workbench, as the daily driver for real work on this repo** — closing the
 loop smind was built for. Everything else in Phase 2 is done
 (`docs/ROADMAP.md`).
 

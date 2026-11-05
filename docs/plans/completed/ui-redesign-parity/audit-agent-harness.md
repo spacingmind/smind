@@ -7,7 +7,7 @@ Cordis-style DI/slot runtime. The web client is a *composition* of ~35
 **Where the UI lives**: not `apps/web` — that is a 10-line bootstrap
 (a local reference clone) over
 `a reference harness web client`. The real UI is
-A local reference clone. Each package's `README.md`
+a local reference clone. Each package's `README.md`
 is an unusually precise behavioural spec; they are the primary source used
 here.
 
@@ -212,7 +212,7 @@ holds something moving. Escape closes and returns focus to the trigger.
   ledger. Feature packages own their own rows/sections (Permission,
   Language, Appearance, Models, Plugins).
 - Preferences are **host-backed**: written through the host settings API
-  into `$REF_HOME/settings.yaml`, with namespace revisions, gesture-ordered
+  into `$DSH_HOME/settings.yaml`, with namespace revisions, gesture-ordered
   serialization of rapid selections, and a reload of the durable value when
   a write is rejected. A remote (non-privileged) browser keeps its
   selection process-local.

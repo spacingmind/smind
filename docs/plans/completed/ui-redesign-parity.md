@@ -2,7 +2,7 @@
 
 ## Context
 
-The Phase 2 gate is "use smind, not a reference workbench, as the daily driver"
+The Phase 2 gate is "use smind, not the reference workbench, as the daily driver"
 (`docs/plans/active/smind-dogfood.md`). Three dogfood sessions in, the
 daemon side holds up — runs survive restarts, reconnect resyncs, permission
 plumbing is correct end to end — and the thing standing between smind and
@@ -30,7 +30,7 @@ canvas with an attention rail and a side dock), `docs/research/uiux-audit.md`
 `web/`. They are called out explicitly and gated on maintainer sign-off
 because they change the wire contract — AGENTS.md rule (d).
 
-**Honest non-goals.** a reference workbench capabilities that do not port to a Go daemon +
+**Honest non-goals.** That workbench capabilities that do not port to a Go daemon +
 web UI are listed in `audit-workbench.md` §10 with their closest web
 equivalent: native mobile push (→ web Notifications, already present; Web
 Push only if asked), voice/dictation (→ dropped), in-app browser tab (→
@@ -126,7 +126,7 @@ item so several agents can work concurrently in separate worktrees; see
   `keyboard/shortcuts.ts`) modelled on `audit-workbench.md` §7: each binding is
   `{id, section, label, combo, action}`, matched against a normalized key
   event, with platform variants (`Cmd` on mac, `Ctrl` elsewhere).
-- Initial bindings, chosen to match a reference workbench where the action exists:
+- Initial bindings, chosen to match the reference workbench where the action exists:
   `Cmd+B` toggle sidebar (already exists — moves into the registry),
   `Cmd+K` command palette (Item 5), `Cmd+L` focus composer,
   `Cmd+W` close current tab, `Cmd+Alt+<digit>` jump to tab,
@@ -370,7 +370,7 @@ item so several agents can work concurrently in separate worktrees; see
 standalone if Item 5 slips.*
 
 - Fuzzy file search over the selected task's worktree, opening the match
-  as a file tab. A reference workbench binds this to `Cmd+P` (`audit-workbench.md` §7).
+  as a file tab. The reference workbench binds this to `Cmd+P` (`audit-workbench.md` §7).
 - Backed by `file.list` walking, or a new daemon-side search RPC if
   walking proves too slow — measure before adding an RPC.
 
@@ -673,11 +673,11 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
 
 ## Decisions
 
-- **A reference workbench is the north star; the others are consulted per dimension.**
-  Where they conflict, a reference workbench wins — it is the product being replaced
+- **That workbench is the north star; the others are consulted per dimension.**
+  Where they conflict, the reference workbench wins — it is the product being replaced
   (`docs/plans/active/smind-dogfood.md`). Two deliberate exceptions, both
   recorded in `gap-matrix.md`: tool-call rendering follows
-  a reference agent harness's **keyed-registry-by-wire-tool-name** shape (a reference workbench's
+  a reference agent harness's **keyed-registry-by-wire-tool-name** shape (the reference workbench's
   equivalent is more entangled with its provider layer), and account-row
   richness follows **A reference proxy project**, which has by far the best credential
   model of the three.
@@ -703,7 +703,7 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
   item's test scenarios re-assert the ones it could plausibly break.
 - **Preferences are client-side until proven otherwise.** Item 13 persists
   to `localStorage` and says so. A daemon settings API (the
-  a reference agent harness model — `$REF_HOME/settings.yaml` via a host RPC) is a
+  a reference agent harness model — `$DSH_HOME/settings.yaml` via a host RPC) is a
   reasonable later step but is not in scope here and should not be
   half-built.
 - **Subagents are deferred, not dropped.** smind has no subagent concept
@@ -712,9 +712,9 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
 - **Responsive work (Item 21) is scheduled, not optional.**
   `docs/plans/active/relay-e2ee-mobile.md` makes the daemon reachable from
   a phone; a desktop-only UI would waste that.
-- **Item 21's compact model is two destinations, not a reference workbench's three.**
+- **Item 21's compact model is two destinations, not that workbench's three.**
   `audit-workbench.md` §8 describes `agent-list` / `agent` / `file-explorer` as
-  three mutually exclusive top-level destinations because a reference workbench's file
+  three mutually exclusive top-level destinations because the reference workbench's file
   explorer is its own screen. smind's Files pane is already one of a
   task's tabs (ADR 0004's tab registry, Item 17), not a sibling route —
   building a third top-level destination for it would duplicate
@@ -766,9 +766,9 @@ this is the pointer:
   existing background/card/muted/accent scale already satisfies the
   elevation need with no known contrast problems.
 - **`status-danger` aliases `--destructive`** rather than introducing a
-  second red — smind has exactly one flavor of "bad" today, unlike a reference workbench,
+  second red — smind has exactly one flavor of "bad" today, unlike the reference workbench,
   which distinguishes a PR/CI-state red from a destructive-action red.
-- **`status-running`'s hue is new**, since a reference workbench's own status-family text
+- **`status-running`'s hue is new**, since that workbench's own status-family text
   tier has no running color (only its dot tier does) and the plan asks
   for one at both tiers.
 - **`useTheme()` outside a `<ThemeProvider>` returns a fully-functional,
@@ -911,7 +911,7 @@ this is the pointer:
   switching tabs *unmounts the diff pane* (App.tsx's Radix Tabs don't
   force-mount inactive content), so component state couldn't satisfy it
   by construction. Persisting gets survival across a reload for free, and
-  matches a reference workbench's own persisted review drafts (`audit-workbench.md` §2) and
+  matches the reference workbench's own persisted review drafts (`audit-workbench.md` §2) and
   the plan's "preferences are client-side" stance.
 - **Submitting starts a run with the daemon's first reported provider**,
   with no provider control of its own. The daemon-derived provider list
@@ -1045,7 +1045,7 @@ while backgrounded, and Items 4/5 should replace the local
 
 Phase 1 (research + plan) — this commit:
 
-- [x] Audit a reference workbench (`ui-redesign-parity/audit-workbench.md`)
+- [x] Audit the reference workbench (`ui-redesign-parity/audit-workbench.md`)
 - [x] Audit a reference agent harness (`ui-redesign-parity/audit-agent-harness.md`)
 - [x] Audit a reference proxy project (`ui-redesign-parity/audit-proxy-project.md`)
 - [x] Audit smind current (`ui-redesign-parity/audit-smind-current.md`)
@@ -1089,11 +1089,9 @@ Phase 2 (implementation) — not started:
 
 Phase 1 (research) — what was and wasn't actually done:
 
-- **A reference workbench** audited from source: a local reference clone,design,glossary,
-  explorer-sidebar,mobile-panels,agent-lifecycle,hub}.md` read in full,
-  plus `packages/app/src/{app,screens,navigation,workspace-tabs,composer,
-  agent-stream,tool-calls,timeline,keyboard,command-center,styles,
-  panels,hooks/use-settings}` read directly, and the ~180 e2e spec
+- **That workbench** audited from source: a local reference clone (its design docs read in full,
+  plus its app source for navigation, tabs, composer, stream, tool calls,
+  timeline, keyboard, command center, styles, panels and settings hooks read directly), and the ~180 e2e spec
   filenames under `packages/app/e2e/browser/` used as a feature inventory.
   The 4.4k-line `workspace-screen.tsx` was read for its imports and
   structure, not line by line — stated here rather than implied.
@@ -1691,7 +1689,7 @@ old task-status-only `SetTaskNotifier`).
   `TimelineMarkdown` from Item 8) with `Chat about it / Refuse / Approve`.
   Chat does not resolve the request at all — it moves focus into the
   composer (via a forwarded textarea ref) so the human can keep talking
-  while the request stays pending, matching a reference workbench's own behaviour for
+  while the request stays pending, matching the reference workbench's own behaviour for
   that action.
 - **Dispatch is by shape**, tested explicitly: `plan` wins over
   `questions` (both present renders the plan), an empty `questions: []`
@@ -2450,7 +2448,7 @@ Every acceptance criterion, and how it was confirmed:
   isolation: no-match returns null (not a low score), substring beats
   subsequence, start-of-filename beats mid-filename, and the highlighted-
   index output the dialog renders.
-- **Bound to Cmd+P (mac) / Ctrl+P (elsewhere), matching a reference workbench** —
+- **Bound to Cmd+P (mac) / Ctrl+P (elsewhere), matching the reference workbench** —
   `hooks/use-quick-open-shortcut.ts`, a local `document`-level listener
   rather than a global registry entry (Item 4 hasn't landed — see
   Decisions and the Track A hook note above).

@@ -8,7 +8,7 @@
 Closes the "Extend" gap in the Build → Review → Ship → **Extend** framing the Human took from a reference workbench (reference.example): smind covers Build, Review and Ship, and has no
 way for anyone but the core repo to add a panel, a command, a hook, a theme or a coding-agent provider.
 
-Inputs (local-only notes in `docs/research/local/plugins-research.md`): a reference workbench's plugin docs and runtime (a local reference clone at `b8bb335c`: `public-docs/plugins/*`,
+Inputs (local-only notes in `docs/research/local/plugins-research.md`): the reference workbench's plugin docs and runtime (a local reference clone at `b8bb335c`: `public-docs/plugins/*`,
 `packages/plugin`, `packages/server/src/server/plugins/*`, `packages/app/src/plugins/*`), a local reference clone (Cordis), a local reference clone (Claude-Code-format
 plugins and marketplace), and a map of smind's own seams at `bf7285bf`. Related ADRs: 0001, 0003, 0004, 0005, 0007, 0009, 0011, 0014, 0017, 0018, 0019, 0020,
 0021, 0024, 0026, 0027, 0031, 0032, 0035, 0036, 0037, 0040, 0041.
@@ -36,7 +36,7 @@ plugins and marketplace), and a map of smind's own seams at `bf7285bf`. Related 
 
 ### What the references teach
 
-- **A reference workbench** ships trusted, unsandboxed TypeScript plugins, off by default (`pluginsEnabled`). The server half runs in a subprocess (`globalThis.eval` with a
+- **That workbench** ships trusted, unsandboxed TypeScript plugins, off by default (`pluginsEnabled`). The server half runs in a subprocess (`globalThis.eval` with a
   `require` that falls through to Node). The client half is compiled **by the daemon**, sent to every client as a JS string over the normal channel and `eval`'d
   in the app, including on phones, with host React/React Native/TanStack Query injected. Lifecycle hooks (`on` observe, `before` rewrite) cover config/MCP
   injection, env, follow-ups and permission answers. Version checks run on the daemon **and on each client** before it evaluates client code. A reviewed
@@ -105,7 +105,7 @@ get right with the process and hook machinery already in place.
   user); it can open sockets. The mitigations are: the process gets a scrubbed environment (no `SMIND_*` secrets, an allowlisted `PATH`), a per-plugin working and
   data directory, process-group/job-object teardown (`internal/winjob` on Windows), a crash-loop breaker, and the consent screen. Real isolation (OS sandbox:
   seatbelt, bwrap/landlock, Windows job limits) is parked; ADR-0037's sandbox-attested arms are the precedent if the Human wants it later.
-- **Registry and signing: none in v1.** A reviewed registry (a reference workbench) or a CDN catalog (a reference desktop workbench) needs hosting, a review policy and someone to run it. That is a
+- **Registry and signing: none in v1.** A reviewed registry (the reference workbench) or a CDN catalog (a reference desktop workbench) needs hosting, a review policy and someone to run it. That is a
   money and operations decision for the Human and gets its own ADR if wanted. Nothing in the manifest or the on-disk layout prevents adding one.
 
 ### 3. Packaging, versioning, loading
@@ -113,7 +113,7 @@ get right with the process and hook machinery already in place.
 **Layout.** `$SMIND_HOME/plugins/<id>/` holds the installed copy; `$SMIND_HOME/plugins/<id>/data/` is persistent per-plugin storage that survives updates and is
 deleted on remove unless `--keep-data`. Install state lives in SQLite (`plugins`: id, version, source, hash, enabled, consented-capabilities hash, installed_at),
 **not** in the plugin directory, so a plugin cannot enable itself. Installs are staged in a temporary directory and swapped atomically; a failed install,
-update or reload keeps the last good version (a reference-harness transactional pattern). Ids match `^[a-z][a-z0-9-]{0,63}$`; every contributed name is namespaced
+update or reload keeps the last good version (the Reference/dsh transactional pattern). Ids match `^[a-z][a-z0-9-]{0,63}$`; every contributed name is namespaced
 `<id>:<name>` (MCP servers, skills, profiles, commands, themes, providers) so plugins cannot shadow core or each other. Contributed rows are **owned**: read-only
 in the UI ("from plugin X"), removed with the plugin, never editable by agents.
 
@@ -148,7 +148,7 @@ in the UI ("from plugin X"), removed with the plugin, never editable by agents.
 ```
 
 Paths are relative, forward-slashed, `..`-free and confined to the plugin directory. Unknown top-level keys are ignored; unknown keys inside `engines` and
-`capabilities` are rejected, so a misspelled constraint cannot silently skip a check (a reference workbench's rule). Sizes are capped (manifest, each view document, icons).
+`capabilities` are rejected, so a misspelled constraint cannot silently skip a check (the reference workbench's rule). Sizes are capped (manifest, each view document, icons).
 
 **Versioning.** Two independent gates, both checked at install, enable, reload and daemon start:
 - `api`: an integer, the plugin API major. The daemon supports a set (v1: `{1}`); a plugin whose `api` is not in the set does not load and the error says why.
@@ -207,11 +207,11 @@ each implement once. v1 vocabulary: `stack`, `row`, `heading`, `text`, `markdown
 same plugin), `prompt` (insert text into the composer; the user presses send), `command` (run a palette command), `openPanel`, and `openUrl` (OS browser, with the
 host shown, behind a confirm). There is no `eval`, no remote fetch, no HTML: markdown has raw HTML disabled and remote images are not loaded (images are
 `data:` URIs or daemon-served plugin assets, size-capped), so a view cannot beacon. Icons are a name from the **client's Lucide registry** (`lib/icons.ts`) or a
-sanitized inline SVG under a reference workbench's rules (one `<svg>`, ≤64 KiB, no script/style/foreignObject/handlers, fragment-only hrefs). Colors come from theme tokens
+sanitized inline SVG under that workbench's rules (one `<svg>`, ≤64 KiB, no script/style/foreignObject/handlers, fragment-only hrefs). Colors come from theme tokens
 (`tone: "success" | "warning" | "danger" | "muted"`), never raw values, so every theme and both color schemes work. Themes are JSON token sets validated for
 completeness against the host's token list (a reference agent harness's lesson: no validation of completeness produces broken themes).
 
-Why declarative and not a reference workbench's evaluated bundles: on mobile an evaluated plugin runs in the same JS runtime as the E2EE session keys and the relay pairing, so
+Why declarative and not the reference workbench's evaluated bundles: on mobile an evaluated plugin runs in the same JS runtime as the E2EE session keys and the relay pairing, so
 "the relay cannot read your data" would depend on every plugin author; it also leans on app-store rules about downloaded code and cannot be sandboxed in React
 Native. A declarative renderer cannot exfiltrate through the client at all: the only egress from a view is a daemon RPC to its own plugin. The cost is
 expressiveness (no custom canvases, no bespoke components); the vocabulary grows by schema level, not by escape hatch. Whether web and desktop should also get a
@@ -255,7 +255,7 @@ contributed provider reuses `runACP`, run events (ADR-0008/0010), usage (ADR-002
   and is split out so this alternative is not all-or-nothing.
 - **MCP-only extension.** MCP already gives agents tools and smind packages it (ADR-0017/0018). It does not provide UI, themes, commands, hooks or providers, and
   it is agent-facing: a human-facing panel or a pre-run hook has nowhere to live. Kept as one contribution type, not the extension model.
-- **A reference workbench's model: compile TS on the daemon, `eval` on every client.** One codebase on three clients and a mature SDK to copy. Rejected for mobile because
+- **The reference workbench's model: compile TS on the daemon, `eval` on every client.** One codebase on three clients and a mature SDK to copy. Rejected for mobile because
   plugin JS would run beside the E2EE keys with no sandbox and with store-policy exposure; for web/desktop it is the same code with the same privileges as the
   daemon UI (acceptable under "trusted", and revisitable under Q5). Keeping only the *server* half, hooks and RPCs, is what Wave B does, in any language over stdio.
 - **Full Cordis / everything-is-a-plugin (a reference agent harness).** Would mean rewriting the core around an injection framework; Go has no equivalent and ADR-0001 says one
@@ -273,7 +273,7 @@ contributed provider reuses `runACP`, run events (ADR-0008/0010), usage (ADR-002
 - **Data-first matches smind's shape.** Most of the value the references show (commands, skills, MCP, themes, panel content) is data. Data has the same behaviour
   on all clients, needs no consent beyond disclosure, and reuses registries that already exist (ADR-0017/0018/0014/0026).
 - **The honest trust model is the cheapest correct one.** smind's users already run MCP servers and setup scripts as themselves. A consent screen, mediation of
-  the host API, a scrubbed environment and local-only management add real safety; claiming a sandbox would add none and mislead. Matching a reference workbench's "off by default,
+  the host API, a scrubbed environment and local-only management add real safety; claiming a sandbox would add none and mislead. Matching that workbench's "off by default,
   trusted local plugins" meets the Human's stated reference while fixing its gap (no consent or capability disclosure in either reference).
 - **Declarative UI is the only design where the E2EE promise survives plugins.** Everything that reaches the phone is data and travels in the existing encrypted
   channel; there is nowhere for plugin code to run next to the keys.
@@ -308,7 +308,7 @@ Each has a recommendation; the plan assumes the recommendations. Answers change 
    management in v1 (consistent with relay admin handlers).
 5. **Client code on clients (§5).** Declarative view documents only; **never remote JS on mobile**; web/desktop JS panels (sandboxed iframe on a separate origin,
    postMessage bridge) deferred and decided later. *Recommendation:* declarative only for v1; revisit web/desktop JS only if a concrete plugin cannot be expressed in
-   the vocabulary. This is the decision that most differs from a reference workbench; overturning it means giving up the E2EE argument on mobile.
+   the vocabulary. This is the decision that most differs from the reference workbench; overturning it means giving up the E2EE argument on mobile.
 6. **Claude-Code-format import (§6).** A read-only adapter so `.claude-plugin` skills/commands/MCP work as data-only plugins. *Recommendation:* defer past Wave A,
    build it if users bring plugins; native manifest stays `smind-plugin.json`.
 7. **Hooks (§4).** One `before` hook (`run.beforeStart`, limited edits), default `onError: open`, no permission answering (ADR-0019), follow-ups rate-limited.
@@ -335,7 +335,7 @@ permission answering (Q7); stdio JSON-RPC (Q8); ACP-only plugin providers with `
 **Addition to Wave 0: provider instances.** A `providers.custom` entry may also *extend* a core provider (`claude-native`, `codex-native`) instead of naming an
 ACP command: it keeps that provider's runner and adds a label and environment from the existing config-directory allowlist (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
 ADR-0013 amendment / #603). Two instances of the same CLI then run side by side (for example "Claude" on `~/.claude` and "Claude S" on `~/.claude-scopedocs`),
-which is how a reference workbench's `extends` + `env` providers work. Settings → Providers lists `~/.claude*` and `~/.codex*` directories found in the daemon user's home as
+which is how the reference workbench's `extends` + `env` providers work. Settings → Providers lists `~/.claude*` and `~/.codex*` directories found in the daemon user's home as
 one-click suggestions; discovery reads directory names only, never file contents or credentials.
 
 **Amended by ADR-0046 (2026-10-30).** The instance overlay is no longer limited to a label and the two config-directory variables: an instance may extend any built-in provider or an earlier ACP entry, and carry `command`, `models` / `additionalModels` and `disallowedTools` (registry generalisation, PR1 of the providers epic). Typed env, provider secrets and recipes follow in later PRs of that epic; see [ADR-0046](0046-provider-spec-harness-overlay.md).

@@ -7,7 +7,7 @@ with only a `reference.parent-agent-id` label. smind should make the tiers
 obvious and manageable.
 
 **Short answer:** the *data model and daemon guards* are already ahead of
-A reference workbench (a real `tasks.parent_task_id`, a depth guard, MCP/CLI parenting).
+a reference workbench (a real `tasks.parent_task_id`, a depth guard, MCP/CLI parenting).
 The *surface* is not: the web UI has no hierarchy at all, there is no
 tree/rollup read API, and the per-tree concurrency guard promised by O2
 Wave 2 was never built. This plan lists every gap, builds the ones that need

@@ -1,6 +1,6 @@
 ---
 v: 1
-milestone: "a reference desktop workbench parity stage 7: Automations page, off-state explainer, task chip"
+milestone: "reference parity stage 7: Automations page, off-state explainer, task chip"
 base: origin/develop
 planRef: docs/plans/active/reference-parity.md
 acs:

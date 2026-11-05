@@ -1,8 +1,8 @@
 # Orchestration parity with a reference workbench (gap analysis + P0/P1 build)
 
-**Question (2026-10-11):** does smind already have a reference workbench's orchestration
+**Question (2026-10-11):** does smind already have the reference workbench's orchestration
 surface (orchestration skills, worktree setup, and so on)? If not, build it.
-The goal is for smind to replace a reference workbench as the orchestrator for daily
+The goal is for smind to replace that workbench as the orchestrator for daily
 development.
 
 **Short answer:** the *run/chat/queue* half is at parity or ahead
@@ -15,15 +15,15 @@ hook and no bundled orchestration skill. This plan lists every gap, builds
 the ones that need no new decision, and lists the rest with a
 recommendation.
 
-Sources: a reference workbench's live MCP tool catalog (the tools this session runs on),
-A local reference clone,public-docs/{mcp,worktrees,skills,agent-profiles}.md,an other-workbench setup file}`,
-the local-only note local research notes,
+Sources: the reference workbench's live MCP tool catalog (the tools this session runs on),
+a local reference clone,
+the local-only research notes,
 and smind at `origin/develop` 57ffa05
 (`cmd/smind/mcp*.go`, `internal/wsapi/handlers.go`, `internal/workspace`).
 
 ## 1. Inventory
 
-### 1.1 a reference workbench's orchestration surface
+### 1.1 the reference workbench's orchestration surface
 
 | Area | Tools / mechanism | What it does |
 |---|---|---|
@@ -37,13 +37,13 @@ and smind at `origin/develop` 57ffa05
 | | `list_workspaces`, `rename_workspace`, `archive_workspace` | Archive removes the owned worktree after the last reference goes. |
 | Worktree lifecycle | an other-workbench setup file (read from the *committed* base branch): `worktree.setup` / `teardown` (shell script or array; env `REF_SOURCE_CHECKOUT_PATH`, `REF_WORKTREE_PATH`, `REF_BRANCH_NAME`), `worktree.terminals`, `worktree.servicePorts` (range or `portScript`) | Deps install, `.env` copy, migrations, per-worktree port, teardown on archive. |
 | Workspace scripts | `list_workspace_scripts`, `start_workspace_script`, `stop_workspace_script`; `scripts.<name>` = plain command or supervised `service` (port `$REF_PORT`, reverse-proxy URL, health) | Named test/lint/dev-server commands per worktree. |
-| Permissions | `list_pending_permissions`, `respond_to_permission` | List and answer (a reference workbench allows the orchestrator to answer; smind deliberately does not, see ADR-0017). |
+| Permissions | `list_pending_permissions`, `respond_to_permission` | List and answer (that workbench allows the orchestrator to answer; smind deliberately does not, see ADR-0017). |
 | Providers / models | `list_providers`, `inspect_provider` (modes, features), `list_models`, `list_profiles` (human-authored bundles with `notes`) | Discovery + the delegation contract (profile notes tell the orchestrator which bundle fits). |
 | Terminals | `create_terminal`, `list_terminals`, `capture_terminal`, `send_terminal_keys`, `kill_terminal` | Drive a shell. |
 | Schedules / heartbeats | `create/list/inspect/update/pause/resume/run_once/delete_schedule`, `schedule_logs`, `create_heartbeat`, `delete_heartbeat` | Cron-started agents; cron reminders back to the caller. |
 | Browser | `browser_*` (navigate, click, fill, snapshot, screenshot, evaluate, tabs, …; opt-in) | Drive a browser host. |
 | Tool gating | `daemon.mcp.injectIntoAgents`, per-provider `disabledTools` | Spawned agents get the reference workbench tools automatically; gating per profile. |
-| Skills | Bundled `skills/{a reference workbench,reference-handoff,reference-committee,reference-advisor,reference-help,reference-plugin}`; synced to `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills` with a sha256 manifest (`.reference-managed-files.json`); startup auto-repair; UI toggles | Procedure for the orchestrating agent: read profiles → materialize into `create_agent` → don't poll → wait for notify. |
+| Skills | Bundled `skills/{the reference workbench,reference-handoff,reference-committee,reference-advisor,reference-help,reference-plugin}`; synced to `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills` with a sha256 manifest (`.reference-managed-files.json`); startup auto-repair; UI toggles | Procedure for the orchestrating agent: read profiles → materialize into `create_agent` → don't poll → wait for notify. |
 
 ### 1.2 smind's surface (today, `origin/develop`)
 
@@ -96,7 +96,7 @@ Effort: XS < ½ day, S ≈ 1 day, M 2–3 days, L > 3 days (GLM coder time,
 including tests). "Decision" = needs an ADR or the user's call (AGENTS.md
 rule d), so it is **not built in this plan**.
 
-| # | Capability | A reference workbench | smind today | Gap | Pri | Effort | Decision? |
+| # | Capability | The reference workbench | smind today | Gap | Pri | Effort | Decision? |
 |---|---|---|---|---|---|---|---|
 | G1 | Discover workspaces | `list_workspaces` | `workspace.list` wsapi only | Orchestrator can't learn the `workspaceId` that `task_new` requires | P0 | XS | No |
 | G2 | Discover providers + modes | `list_providers`, `inspect_provider` | `provider.list` wsapi only (modes + `autoApproves`) | No MCP tool | P0 | XS | No |
@@ -110,7 +110,7 @@ rule d), so it is **not built in this plan**.
 | G10 | Change a running task's permission mode | `set_agent_mode`, `update_agent` | `run.setPermissionMode` wsapi; no MCP; no server-side orchestrator guard | missing; guard (ADR-0019 #6) must be server-side | P1 | M | No (applies ADR-0019 #6) |
 | G11 | Change thinking level of a running task | `update_agent settings.thinkingOptionId` | `run.setConfigOption` wsapi/CLI; no MCP | missing (ACP providers only; Claude has none) | P1 | M | No (fail-closed on `mode` options) |
 | G12 | Wait for any of N runs | notify-on-finish (push) | `task_wait` takes one `runId` | Two coders ⇒ sequential or polling | P1 | S | No (additive input) |
-| G13 | Bundled orchestration skill(s) | `a reference workbench`, `-handoff`, `-committee`, `-advisor` | none (only dev-time `.agents/skills`) | Agents have no procedure for delegate/wait/review/queue/stop | P0 | M | CLI install no; auto-sync daemon = ADR (D11) |
+| G13 | Bundled orchestration skill(s) | `that workbench`, `-handoff`, `-committee`, `-advisor` | none (only dev-time `.agents/skills`) | Agents have no procedure for delegate/wait/review/queue/stop | P0 | M | CLI install no; auto-sync daemon = ADR (D11) |
 | G14 | Orchestration guidance in-band | skill only | none; `mcp.NewServer` passes no `Instructions` | Every MCP client could receive a condensed guide at `initialize` | P0 | XS | No |
 | G15 | Leader/coder pattern | profiles + skill | profiles have `notes`, hierarchy has `parentTaskId` + depth 2 | Needs skill text + the discovery tools above; no new code beyond G13 | P1 | S | No |
 | G16 | Queue list/cancel from MCP | n/a (steer) | `chat.queueList/Cancel` wsapi + CLI | Missing, **blocked on `feat/queue-cancel-kind`** (another leader owns `cancel_kind`) | P1 | S | Wait for that branch |
@@ -494,7 +494,7 @@ opt-in manual injection of `smind mcp serve`, PR creation stays human/CLI,
 
 | # | Item | Why it's a decision | Recommendation |
 |---|---|---|---|
-| D1 | **APPROVED 2026-10-11 → ADR-0024.** Worktree setup/teardown + per-task port (+ later scripts/services) (G17–G19) | New exec-of-commands surface (code execution on task create), and the file/format question: repo-committed file read from the base branch (a reference workbench's an other-workbench setup file) vs daemon-side config. A cloned untrusted repo would get code execution on the first `task_new` with the reference workbench model. | **Daemon-side, human-authored, per-workspace config** (new `workspaces.setup_script`/`teardown_script`, set only via CLI/web, never via MCP or any non-human source), matching the ADR-0014/0018 precedent that standing config is the human's. Commands run as an argv list or `sh -c` of the stored script in the worktree with `SMIND_SOURCE_CHECKOUT_PATH`, `SMIND_WORKTREE_PATH`, `SMIND_BRANCH`, `SMIND_PORT` (allocated from a configurable range, recorded on the task); bounded time, output kept in a task event; setup failure marks the task `setup_failed` and keeps the worktree. Optional later: a repo `smind.json` honoured only after a trust-on-first-use hash approval by a human. Needs an ADR. |
+| D1 | **APPROVED 2026-10-11 → ADR-0024.** Worktree setup/teardown + per-task port (+ later scripts/services) (G17–G19) | New exec-of-commands surface (code execution on task create), and the file/format question: repo-committed file read from the base branch (the reference workbench's an other-workbench setup file) vs daemon-side config. A cloned untrusted repo would get code execution on the first `task_new` with the reference workbench model. | **Daemon-side, human-authored, per-workspace config** (new `workspaces.setup_script`/`teardown_script`, set only via CLI/web, never via MCP or any non-human source), matching the ADR-0014/0018 precedent that standing config is the human's. Commands run as an argv list or `sh -c` of the stored script in the worktree with `SMIND_SOURCE_CHECKOUT_PATH`, `SMIND_WORKTREE_PATH`, `SMIND_BRANCH`, `SMIND_PORT` (allocated from a configurable range, recorded on the task); bounded time, output kept in a task event; setup failure marks the task `setup_failed` and keeps the worktree. Optional later: a repo `smind.json` honoured only after a trust-on-first-use hash approval by a human. Needs an ADR. |
 | D2 | **APPROVED 2026-10-11 → ADR-0025.** Model selection (G20) | Runs/profiles have no `model` field; adding one is a data-model/wire change across run.start, profile, provider.list. | Add `model` to the run config and profile (ADR), populated from ACP model config options and a static Claude catalog; then `provider_list` can list models and `task_set_option` covers live switches. Until then GLM/Claude default models apply. |
 | D3 | **Approval tools over MCP** (G21) | Would reverse ADR-0017 #1 / ADR-0019 #6, the user's standing rule. | **Keep as is.** The wait/notify pair already surfaces the pending request so the human is pulled in; improve that (D4) instead of delegating approval. |
 | D4 | **Push notification to the orchestrator** (G22) | ADR-0017 §3 deferred MCP resources/notifications; client support varies. | Ship wait-any (PR-C) now; revisit push only if wait-any proves insufficient in daily use. |

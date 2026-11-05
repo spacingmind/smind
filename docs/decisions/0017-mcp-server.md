@@ -21,12 +21,12 @@ persistent `/ws` connection, JSON envelopes with `id`/`method`/`params` vs.
 (`cmd/smind/serve.go:78-82`, `cmd/smind/client.go:15-35`).
 
 This shell-and-poll loop is the main reason the user still reaches for
-A reference workbench day to day: a reference workbench exposes agent orchestration natively as MCP tools
+a reference workbench day to day: a reference workbench exposes agent orchestration natively as MCP tools
 (a local reference clone), so an orchestrating agent calls
 `create_agent`/`send_agent_prompt`/`get_agent_status`/
 `list_pending_permissions`/`respond_to_permission` directly, with no shell
 round-trip or text-parsing of CLI output. A reference workbench's server-side wiring is
-A local reference clone (52 lines): it
+a local reference clone (52 lines): it
 wraps an internal "tool catalog" (`./tools/reference-tools.js`) with
 `@modelcontextprotocol/sdk`'s `McpServer`, registering each tool's
 name/title/description/inputSchema and forwarding `CallToolResult`s -- the
@@ -34,7 +34,7 @@ MCP layer is a thin protocol adapter over daemon-internal calls, not a
 second implementation of agent lifecycle logic.
 
 smind's daemon-side surface to wrap already exists and covers most of
-A reference workbench's catalog: `task.create`/`task.list`/`task.get` (agent/workspace
+a reference workbench's catalog: `task.create`/`task.list`/`task.get` (agent/workspace
 creation and listing), `task.prompt`/`run.start` (send, non-blocking --
 `internal/wsapi/handlers.go:789-799,819-870`), `run.attach`/`run.logs`
 (status/streaming, `cmd/smind/task.go:400-508`), `run.respondPermission`
@@ -105,7 +105,7 @@ github.com/modelcontextprotocol/go-sdk@v1.8.0` or later at implementation
 time). It ships the stdio transport, JSON schema tool registration, and
 typed `CallToolResult` handling `smind mcp serve` needs, mirroring exactly the
 role `@modelcontextprotocol/sdk`'s `McpServer` plays in
-A local reference clone.
+a local reference clone.
 
 **Alternatives considered:**
 
@@ -173,7 +173,7 @@ decision 1). The orchestrator only ever sees `task_permissions`
 read-only; a human always approves via the smind UI/CLI. Rejected
 alternatives: shipping them behind a default-off config flag
 (a reference workbench's `refTools.disabledTools` model,
-A local reference clone), or exposing them
+a local reference clone), or exposing them
 unconditionally.
 
 ### Surfacing long-running runs and pending permissions

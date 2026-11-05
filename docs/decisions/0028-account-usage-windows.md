@@ -62,7 +62,7 @@ Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/activ
   terminal, the Codex app, a phone) have used, and it has no notion of a
   window or a reset time.
 
-### What a reference workbench ships (reference, read-only; a local reference clone at v0.11.1-43)
+### What the reference workbench ships (reference, read-only; a local reference clone at v0.11.1-43)
 
 - **Model** (`packages/plugin/src/server/usage.ts`): a `UsageReport` is
   `available{planLabel, windows[], balances[], details[]}`,
@@ -97,7 +97,7 @@ Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/activ
   pinned window percents, a Usage modal over the current screen with
   per-account cards, a used/remaining preference, per-card and "Refresh all"
   buttons, a Usage settings section, a remembered host pick, per-agent plan
-  usage in the context-window details, and `a reference workbench usage ls|inspect
+  usage in the context-window details, and `that workbench usage ls|inspect
   --refresh`. The UI's history (`#5685` footer item, `#5786` default
   percents + logos + remembered host, `#5805` streamlined sidebar usage,
   `#5876` unavailable quota explained, `#5903` derived window names and one
@@ -126,7 +126,7 @@ Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/activ
 
 ### 1. Data model: a windows report replaces `quota.Usage`
 
-`quota.Usage` is replaced by `quota.Report`, modeled on a reference workbench's, with the
+`quota.Usage` is replaced by `quota.Report`, modeled on the reference workbench's, with the
 additions the router needs (a machine-readable scope and a typed overage
 flag). Go sketch (names final, fields may gain `omitempty` details in PR-A):
 
@@ -218,8 +218,8 @@ type Report struct {
 ```
 
 Tone is derived once, in the quota package, from `UsedPct`: `> 90` danger,
-`>= 70` warning, else ok, default when `UsedPct` is nil (a reference workbench's thresholds).
-A reference workbench's `runsOutAt` / `shortfallPct` (pace prediction) are **not** in v1;
+`>= 70` warning, else ok, default when `UsedPct` is nil (the reference workbench's thresholds).
+That workbench's `runsOutAt` / `shortfallPct` (pace prediction) are **not** in v1;
 the ROADMAP's "Quota prediction" item stays open and can add them
 additively.
 
@@ -242,7 +242,7 @@ token, or a JWT claim. It is stable across token refresh and credential
 swaps (`account.updateCredential`), changes only if the account is removed
 and re-added, and is per-daemon (the ids are). The wire carries both
 `accountId` (for RPC joins) and `key` (for stable UI keys and pins).
-A reference workbench derives keys from provider identities because it reads several
+The reference workbench derives keys from provider identities because it reads several
 harness stores that can hold the same login; smind has one store, so the
 row id is the identity. Two smind accounts that hold the same provider login
 will show duplicate windows; de-duplicating them is a later add-on, not v1.
@@ -318,7 +318,7 @@ Rules that apply to every fetcher:
   providers, a 15 s request timeout, no redirects followed, a 1 MiB body
   cap. The URLs are constants; no config or account field can redirect a
   usage call (so an API-key account's custom `base_url` never receives one).
-- **Not read-only for the credential store, on purpose.** a reference workbench's `fetch`
+- **Not read-only for the credential store, on purpose.** The reference workbench's `fetch`
   never writes the login store because the harness owns refresh. In smind
   the daemon owns the credential and already refreshes it for the proxy, so
   the only write is the existing refreshed-token persist, and only when the
@@ -564,7 +564,7 @@ removed or reshaped.
   **every completed network fetch** (success, `unavailable` or error), so a
   refresh whose numbers did not change still advances `fetchedAt` ("Updated
   3m ago"); not emitted for a cache hit. This is how the UI receives a
-  slow account's report without holding back the others (a reference workbench streams
+  slow account's report without holding back the others (that workbench streams
   `usage.list_reports.update` for the same reason). A `mode:"refresh"` call
   with no `accountIds` fetches the eligible accounts (at most 2 in flight),
   each emitting as it settles. Registered in `knownTopics`.
@@ -579,9 +579,9 @@ removed or reshaped.
   `account_usage` tool returning the same `AccountUsage[]` (`touch` only: it
   has no refresh input, so an agent cannot force a call), added to the catalog and
   `mcp_instructions.go`, instead of widening `usage_summary`.
-- **Web (D5, amended 2026-10-12: a port of a reference workbench's Usage UX with a different
-  default placement).** The interaction model is a reference workbench's; the data source is
-  smind's accounts table. A reference workbench's `UsageReportEntry` becomes `AccountUsage`,
+- **Web (D5, amended 2026-10-12: a port of the reference workbench's Usage UX with a different
+  default placement).** The interaction model is the reference workbench's; the data source is
+  smind's accounts table. That workbench's `UsageReportEntry` becomes `AccountUsage`,
   its "source" becomes the account's provider (`anthropic` → "Claude",
   `openai` → "Codex"), its "account" is the smind account row, and its "host"
   has no equivalent inside one daemon: the remembered pick is an **account
@@ -683,12 +683,12 @@ removed or reshaped.
     enforces the budget either way.
   - **State and rules.** Preferences (`displayAs`, `pins`, picked account,
     "Show summary in sidebar") are client-side in `localStorage` (D11), with
-    a reference workbench's rules: `null` pins mean defaults, an array (even empty) is the
+    the reference workbench's rules: `null` pins mean defaults, an array (even empty) is the
     user's selection, an unknown account pick falls back to All. No new web
     dependency: reports live in a small module store fed by `account.usage`
     and its event, keeping the newer `fetchedAt` when a refresh and a list
     race. A missing or reshaped field renders as "not shown", never throws.
-  - **Verification.** Component and logic tests mirror a reference workbench's e2e specs
+  - **Verification.** Component and logic tests mirror the reference workbench's e2e specs
     (listed in the plan), and a light and dark screenshot pass (desktop and
     narrow) is required before each UI PR merges.
   - The Settings → Providers rows are unchanged (no per-row bars).
@@ -892,7 +892,7 @@ rule d).
   Kimi, xAI, Antigravity and balance-only API-key providers are later.
 - **D5. UI placement and UX — CHANGED from the proposed default; amended
   again 2026-10-12.** (Round 2 below supersedes the footer wording here.) The web
-  UI **ports a reference workbench's Usage UX** (user: "tham khảo UI/UX a reference workbench phần đó"):
+  UI **ports that workbench's Usage UX** (user: "tham khảo UI/UX the reference workbench phần đó"):
   sidebar footer Usage item (provider logo + default/pinned window
   percents, remembers the picked account), Usage opens as a modal over the
   current screen, Settings → Usage discoverable above the reports with
@@ -924,7 +924,7 @@ rule d).
 - **Account filter** shared by footer, modal and Settings → Usage: accepted
   as proposed.
 - **D5 (amended).** The footer Usage item is **off by default**; the user
-  enables it in Settings → Usage (as in a reference workbench). Plan usage must instead show
+  enables it in Settings → Usage (as in the reference workbench). Plan usage must instead show
   **on hover of the usage icon in each chat** and in **Settings → Usage**. The
   per-chat plan card (PR-E) is **required**, and the order is D1 (Settings
   Usage + modal) → E (chat hover card) → D2 (footer item, default off, pins).
@@ -991,7 +991,7 @@ specific manual probe (see the plan's Validation).
   smind's own traffic, not the account's other clients, and has no window
   or reset semantics. It remains the right answer for "what did my runs
   use" (token usage).
-- **Read Claude Code's keychain / `~/.codex/auth.json` like a reference workbench.**
+- **Read Claude Code's keychain / `~/.codex/auth.json` like that workbench.**
   Rejected: smind stores its own accounts; reading another app's secrets is
   a larger trust and OS-prompt cost (macOS keychain ACLs) and would report a
   different login than the one smind routes with.
@@ -1054,7 +1054,7 @@ specific manual probe (see the plan's Validation).
 - A thin new config section (`accountUsage`), one new table
   (`quota_poll_state`), and one new wsapi RPC, one
   topic, one CLI subcommand, one MCP tool, and one web component family
-  ported from a reference workbench's usage UI (several files, no new data-fetching
+  ported from the reference workbench's usage UI (several files, no new data-fetching
   dependency; a small segmented control and provider logo marks are the only
   new UI primitives).
 
@@ -1070,11 +1070,7 @@ specific manual probe (see the plan's Validation).
   `internal/accounts/refresh.go`, `internal/server/proxy.go`,
   `cmd/smind/serve.go`.
 - A local reference clone,
-  a local reference clone,
-  a local reference clone,
-  a local reference clone,
   a local reference clone (ported by the web UI),
-  a local reference clone,settings,sidebar-item}.spec.ts`,
   a local reference clone.
 - `docs/ROADMAP.md` ("Quota prediction", quota `Fetcher` stub) and
   `docs/plans/active/orchestration-and-metering.md` (the "feed the router's

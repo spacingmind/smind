@@ -3,7 +3,7 @@
 ## Context
 
 `docs/plans/completed/ui-redesign-parity.md` shipped structural parity with
-reference workbench/harness/proxy: tokens (static + a first semantic
+a reference workbench, agent harness and proxy project: tokens (static + a first semantic
 layer), dark mode, shared primitives (`PaneHeader`, `StatusDot`,
 `StatusBadge`, `Alert`, `EmptyState`), keyboard registry, command palette,
 resizable panes, structured timeline + a render-intent tool-call system
@@ -29,7 +29,7 @@ folded into this plan below since it's small and token-adjacent.
 
 This session additionally read a local reference clone's and a local reference clone's
 actual source (not just their READMEs) for concrete, portable patterns —
-A reference workbench's `docs/design.md` (character → component-reuse rule → per-primitive
+a reference workbench's `docs/design.md` (character → component-reuse rule → per-primitive
 rules → forbidden list → canonical-surfaces table) and its
 `styles/theme.ts` token model; a reference agent harness's `docs/web-styling.md` +
 `ui-theme`/`ui-layout`/`ui-tool` packages (static→alias→specific token
@@ -45,7 +45,7 @@ render-intent registry rather than replacing it).
 ## Decisions
 
 - **Visual thesis: "calm technical console"** (maintainer decision,
-  2026-09-17) — a reference workbench's own character statement (a local reference clone
+  2026-09-17) — the reference workbench's own character statement (a local reference clone
   §1): minimal, spacious, quiet, confident; every visual choice serves
   *act on this* or *understand this*, never *look at this*; consistency
   from component reuse, not hand-matched per-surface styling. Rejected
@@ -53,19 +53,19 @@ render-intent registry rather than replacing it).
   more distinctive but more discipline-risk), "code laboratory"
   (mono/dark-first — furthest from the current shadcn baseline, most
   migration cost).
-- **Spacing/typography get a real numeric token scale**, matching a reference workbench's
+- **Spacing/typography get a real numeric token scale**, matching that workbench's
   `SPACING`/`FONT_SIZE` model rather than a reference agent harness's deliberately-untokenized
   px-per-component approach (maintainer decision). **Scope note that
   shrinks this materially**: Tailwind's default spacing scale
   (`1=4px, 2=8px, 3=12px, 4=16px, 6=24px, 8=32px, 12=48px, 16=64px`) is
-  *already numerically identical* to a reference workbench's `SPACING` table — so this is
+  *already numerically identical* to the reference workbench's `SPACING` table — so this is
   a **documentation-and-enforcement** task (name the scale as the one
   legal vocabulary, lint out arbitrary values), not a mechanical rename
   migration across the ~95 existing `.tsx` files. Typography is the part
   that needs real new tokens (Tailwind's default `text-*` scale does not
-  match a reference workbench's `FONT_SIZE`).
+  match the reference workbench's `FONT_SIZE`).
 - **No new display/brand font.** Consistent with "calm technical console"
-  — a reference workbench itself uses one interface font (system-ui stack) + one mono
+  — that workbench itself uses one interface font (system-ui stack) + one mono
   stack, differentiated by a 3-tier *weight* system and a content-vs-
   interface *size* split, not a second typeface. Avoids font-loading work
   entirely.
@@ -108,14 +108,14 @@ render-intent registry rather than replacing it).
 
 ### Item 1 — `docs/design.md` restructured as a real design-system doc
 
-- Adds, in a reference workbench's `docs/design.md` order: a **Character** section (the
+- Adds, in the reference workbench's `docs/design.md` order: a **Character** section (the
   "calm technical console" statement, 2-3 sentences, in this repo's own
-  words — not copied verbatim from a reference workbench); an explicit statement that
+  words — not copied verbatim from the reference workbench); an explicit statement that
   consistency comes from component reuse, not per-surface hand-styling.
 - Adds a **Forbidden** list: enumerable anti-patterns callable out in
   review (no hardcoded colors — already lint-enforced, cite the existing
   test; no `shadow-*` utility on more than one elevation tier per Item 3;
-  no color-only disabled state — opacity per a reference workbench §11; no ad-hoc pane
+  no color-only disabled state — opacity per that workbench §11; no ad-hoc pane
   header padding outside `PaneHeader`; no arbitrary Tailwind spacing
   value outside the documented scale; no font-weight `medium`/`semibold`
   on body text/button labels/badge text, only on structural labels per
@@ -134,15 +134,15 @@ render-intent registry rather than replacing it).
 - New CSS custom properties in `index.css`'s `@theme` block (or a
   dedicated layer) for a **type-role scale**, not raw sizes: at minimum
   `--text-workspace-title`, `--text-section-title`, `--text-panel-title`,
-  `--text-metadata-label`, `--text-code-annotation`, plus a reference workbench's
+  `--text-metadata-label`, `--text-code-annotation`, plus the reference workbench's
   content-vs-interface split (`--text-interface` = the existing
   UI-chrome ramp `12/13/14/16px`-ish already used by dense components,
   `--text-content` = one fixed size for message bodies/composer/Markdown/
-  PR prose, matching a reference workbench's fixed-15px rule so prose doesn't rescale
+  PR prose, matching the reference workbench's fixed-15px rule so prose doesn't rescale
   with the interface-density controls).
 - Each role token is documented in `docs/design.md` with its one
   canonical consumer (mirrors the Forbidden-list discipline of Item 1).
-- Font-weight collapses to exactly 3 legal tiers app-wide (a reference workbench §3):
+- Font-weight collapses to exactly 3 legal tiers app-wide (that workbench §3):
   screen/workspace titles get one fixed weight, structural labels
   (section headers, modal titles, form-field labels, dense metadata
   emphasis) get `font-medium`, everything else is `font-normal` — audit
@@ -163,7 +163,7 @@ render-intent registry rather than replacing it).
   `docs/design.md`, so "floating" always means the same recipe everywhere
   (popovers, dropdowns, dialogs) rather than each component picking its
   own shadow.
-- Shadow tiers added as tokens (`--shadow-sm/md/lg`) with a reference workbench's
+- Shadow tiers added as tokens (`--shadow-sm/md/lg`) with the reference workbench's
   light/dark asymmetry (a local reference clone):
   light-mode shadows very soft (`alpha ~0.02-0.08`), dark-mode shadows
   harder (`alpha ~0.20-0.40`) — defined once per theme in `index.css`,
@@ -206,7 +206,7 @@ render-intent registry rather than replacing it).
 
 - Confirm (or add if missing) a third, explicit color family for diff
   additions/deletions — `--diff-addition`/`--diff-deletion` — separate
-  from `status-success`/`status-danger`, per a reference workbench's three-family model
+  from `status-success`/`status-danger`, per the reference workbench's three-family model
   (status text tier / status dot tier / diff tier all differ in
   chroma/lightness on purpose). Today's `diff2html` override
   (`docs/design.md` §2) points at the library's own variable names
@@ -356,9 +356,9 @@ all confirmed accurate, no gaps found in Items 1/2/3/5.
   dialog 18/600 + sheet 16/500 to one 16/500 role); `text-content`
   adopted by `timeline-markdown.tsx`. Token-presence test asserts both
   themes carry every token.
-- **Item 3**: `--elevation-shadow-sm/md/lg` tiers with a reference workbench's light/dark
+- **Item 3**: `--elevation-shadow-sm/md/lg` tiers with that workbench's light/dark
   asymmetry (light alpha 0.04/0.06/0.08, dark 0.24/0.32/0.40 — round
-  values in a reference workbench's bands, inspired not copied); exposed via `@theme`
+  values in the reference workbench's bands, inspired not copied); exposed via `@theme`
   `--shadow-sm/md/lg` so existing `shadow-md/lg` call sites resolve to
   the tiers with zero churn. `--duration-hover/menu/panel` (150/200/300ms)
   consumed by dialog/sheet/dropdown-menu (`duration-(--duration-menu)`;
@@ -370,7 +370,7 @@ all confirmed accurate, no gaps found in Items 1/2/3/5.
   timer does not exist post-merge (handle is pure CSS) — nothing to
   repoint, recorded in design.md Decisions.
 - **Item 5**: `--diff-addition`/`--diff-deletion` third color family in
-  both themes (a reference workbench's light/dark diff tables); diff2html's ins/del
+  both themes (the reference workbench's light/dark diff tables); diff2html's ins/del
   overrides now reference the named tokens as the source of truth;
   `--color-diff-*` `@theme` re-exports. `no-hardcoded-colors.test.ts`
   still passes with zero exceptions (new color-bearing CSS lives only in

@@ -6,8 +6,8 @@ Human: "mỗi message item có các action khi hover, tham khảo a reference de
 
 ## References (read-only)
 
-- **A reference desktop workbench** a local reference clone: a small `MessageActions` bar *under* the message, `opacity-0 transition-opacity group-hover/<row>:opacity-100 focus-within:opacity-100`, forced visible on touch (`[@media(hover:none)]:opacity-100`); user row: Copy, Edit; assistant row: Copy, feedback, Fork, Retry. Icon-only buttons with tooltips.
-- **A reference workbench** a local reference clone: user message trailing row on hover (timestamp, rewind/restore-to-composer, copy), assistant turn footer (copy, fork menu, duration ↔ end time).
+- **A reference desktop workbench** A local reference clone: a small `MessageActions` bar *under* the message, `opacity-0 transition-opacity group-hover/<row>:opacity-100 focus-within:opacity-100`, forced visible on touch (`[@media(hover:none)]:opacity-100`); user row: Copy, Edit; assistant row: Copy, feedback, Fork, Retry. Icon-only buttons with tooltips.
+- **A reference workbench** A local reference clone: user message trailing row on hover (timestamp, rewind/restore-to-composer, copy), assistant turn footer (copy, fork menu, duration ↔ end time).
 
 ## What smind can back (checked)
 

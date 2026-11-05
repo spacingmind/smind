@@ -4,7 +4,7 @@ Size: L — scope 3 (web tokens, web components, desktop chrome), PRs ~10, risk 
 (visual regressions only; no behaviour), decisions 0, verification 3 (light+dark
 frames at 1280 and 390 per UI PR).
 
-Human directive (2026-10-30, "cu lam di"): a reference desktop workbench (an Apache-2.0 reference project, Apache-2.0,
+Human directive (2026-10-30, "cu lam di"): a reference desktop workbench (an Apache-2.0 reference project,
 read-only clone at a local reference clone) is the **visual** north star; a reference workbench
 (a local reference clone) stays the **interaction** model (Find, chord shortcuts, split
 panes, attention/unread, whenBusy queue).
@@ -157,7 +157,7 @@ Suggested stage split: (1) settings: 1, 2, 9–12; (2) shell+sidebar: 4, 8, 16;
 
 ## Stage 2 audit: ranked diff list (handed over 2026-10-30)
 
-A reference desktop workbench ran for real (empty state only: no model, so no task page, tool cards or dialogs on its side; those are read from DESIGN.md and component structure). Sheets L = a reference desktop workbench, R = smind. 390 gives no a reference desktop workbench parity target (its web build is not responsive).
+A reference desktop workbench ran for real (empty state only: no model, so no task page, tool cards or dialogs on its side; those are read from DESIGN.md and component structure). Sheets L = a reference desktop workbench, R = smind. 390 gives no reference parity target (its web build is not responsive).
 
 | # | Screen | What differs | Size | Stage |
 |---|---|---|---|---|

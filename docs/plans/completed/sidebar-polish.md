@@ -9,8 +9,7 @@ overflow with per-row indentation, and persisted expansion state. Web UI only;
 no daemon/Go change.
 
 Sources (local-only, gitignored): `docs/research/local/2026-10-12-sidebar-polish-lead-report.md`;
-refs a local reference clone,WorkspaceSidebarItem.tsx,TaskTitleOverflowText.tsx,workspace-grouped-tasks/}`
-and a local reference clone.
+refs a local reference clone.
 
 Out of scope: S9 scroll-edge fade / show-more, S10 drag reorder (needs a user
 decision on persisted order), S11 filter chips and ⌘1-9 badges. Do not touch

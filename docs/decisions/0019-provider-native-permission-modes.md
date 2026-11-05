@@ -20,26 +20,26 @@ Three Opus review rounds on `fix/auto-safe-read-only-commands`
 (2aff06e..fca5ae8) kept finding bypasses: redirection, quoting, brace/glob
 expansion, `go test -exec`, `-coverprofile`, `gofmt -w`, `task --taskfile`,
 and ugrep `--filter`. Deciding safety by matching or parsing command strings
-can't be made airtight. A reference workbench, smind's UX reference, has no command
+can't be made airtight. The reference workbench, smind's UX reference, has no command
 allowlist at all. It exposes each provider's own permission modes:
 
 - **Claude Code**: `plan` / `default` / `acceptEdits` / `auto` (Claude
   Code's own model classifier) / `bypassPermissions`
   (a local reference clone). Modes switch
-  mid-session via `setPermissionMode` (`:2415-2437`). A reference workbench always launches
+  mid-session via `setPermissionMode` (`:2415-2437`). That workbench always launches
   with `allowDangerouslySkipPermissions: true` so a later switch to bypass
   works (`:3297-3300`). `auto` is rejected on Bedrock/Vertex (`:941-952`).
 - **ACP (GLM, Kimi, ...)**: modes come from the agent's own `session/new`
   `modes.availableModes`, falling back to a `category: "mode"` select config
-  option (`deriveModesFromACP`, `acp-agent.ts:728-760`). A reference workbench switches them
-  with `session/set_mode` (`:2002-2070`). On top of that, a reference workbench has one
+  option (`deriveModesFromACP`, `acp-agent.ts:728-760`). The reference workbench switches them
+  with `session/set_mode` (`:2002-2070`). On top of that, the reference workbench has one
   `auto_accept` toggle that approves every ACP permission prompt (`:129`,
   `:821-835`). It is auto-enabled for unattended child agents (`:837-852`).
 - **Codex**: `auto` (on-request + workspace-write), `auto-review`
   (auto-reviewer subagent, version-gated), and `full-access` (never +
-  danger-full-access). A reference workbench sends these as `approvalPolicy`/`sandbox`
+  danger-full-access). That workbench sends these as `approvalPolicy`/`sandbox`
   presets (`codex-app-server-agent.ts:226-300`).
-- The only preapproval a reference workbench does is for MCP tools
+- The only preapproval the reference workbench does is for MCP tools
   (`toolPolicy.preapproved` → `mcp__server__tool` in `allowedTools`,
   `providers/claude/options.ts:93-103`).
 
@@ -59,25 +59,25 @@ allowlist at all. It exposes each provider's own permission modes:
      `bypassPermissions`. These are passed through as `--permission-mode`
      (`claudecode.WithPermissionMode`). `auto` is only offered when Claude
      Code talks to the Anthropic API directly (not Bedrock/Vertex), the same
-     rule a reference workbench uses.
+     rule the reference workbench uses.
    - `codex-native`: `auto` and `full-access`, sent as Codex's own
-     `approvalPolicy` + `sandbox` on `thread/start`, using a reference workbench's presets.
+     `approvalPolicy` + `sandbox` on `thread/start`, using that workbench's presets.
      Today smind sends only `cwd`. `auto-review` is deferred (Resolved
      decision 5).
    - ACP providers (`glm`, `kimi`): whatever the agent advertises in
      `session/new` (`modes.availableModes`, or a `category: "mode"` config
      option), applied with `session/set_mode` (or
-     `session/set_config_option`). Separately, there is a reference workbench's per-run
+     `session/set_config_option`). Separately, there is the reference workbench's per-run
      **`autoAccept`** boolean (approve every ACP `request_permission`,
      implemented by the existing `acp.AutoApprovePolicy`). It is the only
      unattended mechanism for an ACP agent that advertises no bypass mode.
-     Unlike a reference workbench, smind does not auto-enable it for unattended/child runs
+     Unlike the reference workbench, smind does not auto-enable it for unattended/child runs
      (see point 6).
 
 3. **Mode catalogs are served by the daemon, not hard-coded in clients.**
    `taskrunner.ProviderInfo` gains `Modes []ModeInfo{ID, Label,
    Description}` and `DefaultMode`. These are static for Claude and Codex.
-   For ACP they come from a lazily cached probe `session/new` (a reference workbench's
+   For ACP they come from a lazily cached probe `session/new` (that workbench's
    `listModes` probe pattern), with a static fallback. `provider.list`
    carries the catalog. The web composer, agent-profile form, and CLI render
    it verbatim, with provider-native labels.
@@ -169,7 +169,7 @@ Accepted by the user on 2026-09-28, each as recommended:
   ACP modes are agent-defined. The "full-access" per-provider label
   workaround in `web/packages/ui/src/lib/approval-policies.ts` already
   showed the strain.
-- **Copy a reference workbench's auto-enable of `autoAccept` for unattended children.**
+- **Copy the reference workbench's auto-enable of `autoAccept` for unattended children.**
   Rejected. It conflicts with ADR-0017's rule that a human approves
   sub-agent actions.
 - **Keep `approvalPolicy` as a deprecated alias on the wire.** Rejected.
@@ -185,5 +185,5 @@ sandbox, and ACP agents define their own modes. smind's value is surfacing
 those choices consistently and routing whatever still escalates to a human,
 not second-guessing shell strings. This also removes a large amount of
 smind-specific code and doc surface (policy.go, the ACP edit fast path, and
-live-policy plumbing) and brings smind to parity with a reference workbench, which the user
+live-policy plumbing) and brings smind to parity with the reference workbench, which the user
 is moving off of.

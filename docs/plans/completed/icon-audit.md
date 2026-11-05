@@ -35,7 +35,7 @@ Human ask: "rà soát và đồng bộ các icon trong app 1 lần". Icons were 
 | tokens / total / plan | `Coins` (run pill), `Sigma` (chat total), `Gauge` (plan) | `tokens`, `usageTotal`, `usage` — three scopes, kept distinct | run-usage-pill, chat-usage-total |
 | host / connections | `Server` (footer host, daemon section), `Network` (connections) | `host`, `connections` — unchanged | sidebar-footer, settings |
 
-A reference desktop workbench / a reference workbench pattern (counts of lucide imports, a local reference clone, a local reference clone): usage Gauge/Activity (both); retry RefreshCw 22 / RotateCw 22; reset Undo2 (both); external ExternalLink (both); more Ellipsis / MoreHorizontal (both mix); terminal SquareTerminal/Terminal ~50/50 (both); settings Settings (both), Settings2 secondary; warning TriangleAlert/CircleAlert; success CircleCheck; spinner Loader2/LoaderCircle; edit Pencil; shield Shield*; thinking Brain/Sparkles; agent Bot; workspace a reference workbench `FolderGit2`/`Layers`, a reference desktop workbench `Workflow`.
+A reference desktop workbench / a reference workbench pattern (counts of lucide imports, a local reference clone): usage Gauge/Activity (both); retry RefreshCw 22 / RotateCw 22; reset Undo2 (both); external ExternalLink (both); more Ellipsis / MoreHorizontal (both mix); terminal SquareTerminal/Terminal ~50/50 (both); settings Settings (both), Settings2 secondary; warning TriangleAlert/CircleAlert; success CircleCheck; spinner Loader2/LoaderCircle; edit Pencil; shield Shield*; thinking Brain/Sparkles; agent Bot; workspace a reference workbench `FolderGit2`/`Layers`, a reference desktop workbench `Workflow`.
 
 ### Size / stroke / colour findings
 

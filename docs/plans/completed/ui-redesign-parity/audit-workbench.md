@@ -13,7 +13,7 @@ Codex app-server, Copilot via ACP, OpenCode, Pi, OMP, plus a one-click ACP
 provider catalog), self-hosted, BYOK.
 
 **Where the UI lives**: a local reference clone. ~180 e2e specs under
-A local reference clone are themselves a readable feature
+a local reference clone are themselves a readable feature
 inventory. Design law is written down in a local reference clone;
 terminology in a local reference clone.
 
@@ -56,7 +56,7 @@ sidebar can span several hosts at once.
   `packages/app/src/components/split-container.tsx`.
 - Explorer sidebar — a *dedicated dock* (not a pane in the split tree) for
   Files and Changes, own persisted width, `Cmd+E`.
-  a local reference clone,
+  A local reference clone,
   `packages/app/src/workspace-tabs/explorer-sidebar.ts`.
 - Side pane — an ordinary right-side pane for "open beside".
   `packages/app/src/workspace-tabs/open-beside.ts`.
@@ -197,7 +197,7 @@ difference from smind — the transcript is a typed item list, not text.
 `packages/app/src/file-explorer/`, `file-pane/` (editor, live-file,
 markdown-preview, preview-lifecycle, source), `components/file-explorer-pane.tsx`,
 `components/material-file-icon.tsx` + `material-file-icons.ts` (icon theme,
-A local reference clone), context actions
+a local reference clone), context actions
 (`e2e/browser/file-explorer-context-actions.spec.ts`), file-change conflict
 handling (a local reference clone), `vimKeybindings` setting.
 
@@ -316,7 +316,7 @@ under `app/settings/[section].tsx`:
 ## 6. Theming and appearance
 
 `packages/app/src/styles/theme.ts` (863 lines) is the single token source;
-A local reference clone is the law.
+a local reference clone is the law.
 
 - Semantic colour tokens: `surface0..4`, `surfaceDiffEmpty`,
   `surfaceSidebar`, `foreground`, `foregroundMuted`, `foregroundExtraMuted`,

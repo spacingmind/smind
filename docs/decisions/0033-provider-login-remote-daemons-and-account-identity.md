@@ -97,7 +97,7 @@ non-generalizable to remote transports). The explicit login contract below is th
   login itself still succeeds; a local reference clone); OpenAI → the id_token's
   `sub` and `chatgpt_account_id` claims, length-prefixed the same way, **both required** (with either missing the login has
   no identity, so two workspaces can never merge on `sub` alone;
-  a local reference clone,43`). The id_token payload is decoded without signature
+  a local reference clone). The id_token payload is decoded without signature
   verification (it came straight from the token endpoint over TLS, the trust the access token already gets), and an
   unexpected `account` / `organization` / `id_token` shape means "no identity", never a failed login. It is hashed so no
   vendor id/e-mail is stored or logged; it never crosses the wire (the wire only gets `hasIdentity: bool`). API-key

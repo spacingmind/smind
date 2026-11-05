@@ -50,7 +50,7 @@ A reference workbench is the closest shipped precedent: a daemon, a mobile app, 
   a 200-frame store-and-forward buffer, **no accounts** (the open, secret-less relay model; `SECURITY.md` "Relay threat model"). E2EE is NaCl `box` with an ephemeral client key and the daemon's
   static key, random 24-byte nonces; **no replay protection inside a session** (stated in `SECURITY.md`; ADR-0035 already does better). Its `wrangler.toml` currently forwards to a Fly
   upstream (`REF_RELAY_UPSTREAM`), which ADR-0031 D11 noted.
-- **Trust statement.** a reference workbench's SECURITY.md says the *relay* is untrusted. It does **not** say anything about trusting `app.reference.example`'s JavaScript, which holds the same keys the relay
+- **Trust statement.** A reference workbench's SECURITY.md says the *relay* is untrusted. It does **not** say anything about trusting `app.reference.example`'s JavaScript, which holds the same keys the relay
   is kept away from. That gap is the central problem of this ADR.
 
 ## The options

@@ -16,7 +16,7 @@ anywhere in `web/packages/ui/src`:
   `@xterm/addon-search`.
 
 **Port the behavior from a local reference clone (updated
-2026-09-24), not the code verbatim.** a reference workbench is React Native + web, smind
+2026-09-24), not the code verbatim.** A reference workbench is React Native + web, smind
 is React + Tailwind + shadcn.
 
 - `components/pane-find/index.tsx`: shared Find bar UI — input, match

@@ -1,8 +1,7 @@
 # Task permission, attention & layout UX
 
 Follow-up from `docs/plans/active/smind-dogfood.md` Session 1
-(2026-09-11) and its 2026-09-12 UI/UX comparison against a local reference clone
-and a local reference clone. Session 1's real failure: a headless,
+(2026-09-11) and its 2026-09-12 UI/UX comparison against a local reference clone. Session 1's real failure: a headless,
 monitored Claude run got its file edits through (`acceptEdits`,
 `internal/taskrunner/runner.go:277-285`) but had **no way to get Bash
 approved** — `gofmt`/`go vet`/`go test` all require a live human click
@@ -11,7 +10,7 @@ commands, and no timeout — so the agent shipped a commit it never
 verified itself, and a monitoring script watching for the card had
 nothing to click. A reference workbench mitigates this with a pre-selected run mode
 (auto/plan/manual) and a permission card anchored near its composer;
-A local reference clone goes further with named permission-presets
+a local reference clone goes further with named permission-presets
 (sandbox mode + approval policy bundled) and an `ApprovalPanel` that
 takes over the composer so a pending request can't be scrolled past.
 
@@ -436,8 +435,8 @@ matching the observed failure shape.
 
 Prompted by trying to log in a GLM account through the web UI and
 finding no option for it at all. Root cause and comparison researched
-via subagent (read-only, a local reference clone, a local reference clone,
-A local reference clone):
+via subagent (read-only, a local reference clone,
+a local reference clone):
 
 - `web/packages/ui/src/components/accounts-dialog.tsx`'s provider list
   is a hand-maintained frontend constant (`MANUAL_PROVIDERS`/
@@ -486,7 +485,7 @@ still assert GLM never appears in that dropdown, just no longer that
 `provider.list` is uncalled) and renders any `kind: "cli"` entries as a
 read-only "Managed externally" row/badge — no credential form, no
 Connect button, no missing-key warning, following the
-A local reference clone `ui-settings-models` pattern of treating a
+a local reference clone `ui-settings-models` pattern of treating a
 provider with no required credential as automatically "ready". No
 changes to how GLM actually runs (`internal/acp/glm.go`'s
 `npx -y glm-acp-agent` spawn is untouched) — display only.
@@ -494,7 +493,7 @@ changes to how GLM actually runs (`internal/acp/glm.go`'s
 **Item 7c: account health/connection status + "test this provider now"
 diagnostic (closed 2026-09-13)** — the second and third bullets of Item
 7's "also missing" list above (a reference agent harness's credential-configured dot and
-A reference workbench's `provider-diagnostic-sheet.tsx` "test now" action), scoped to a
+a reference workbench's `provider-diagnostic-sheet.tsx` "test now" action), scoped to a
 single lightweight RPC rather than the full reference-style expandable
 detail panel or multi-account priority ordering (still open).
 

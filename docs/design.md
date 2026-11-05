@@ -131,7 +131,7 @@ is `reference-visual-parity`'s P4 scope.
   OS silently steer them back).
 - Applies by toggling the `dark` class on `<html>` — the only place any
   code should touch that class (`lib/theme.ts`'s `applyResolvedTheme`).
-  a reference desktop workbench's Zai Light/Zai Dark values live directly in `:root`/`.dark`
+  A reference desktop workbench's Zai Light/Zai Dark values live directly in `:root`/`.dark`
   (§1) — the `.theme-zai-*` class *names* are not shipped, only their
   values, so this mechanism needed no changes.
 - `index.html` carries a synchronous, dependency-free inline `<script>`
@@ -431,14 +431,14 @@ a new size scale.
   §2 above for why each library's own architecture forced a different
   answer.
 - **`status-running` (and its dot-tier equivalent) alias onto `warning`,
-  not a distinct hue.** a local reference clone's own workflow-timeline
+  not a distinct hue.** A local reference clone's own workflow-timeline
   section uses `--color-warning` for a running station lamp, so smind's
   "running" states (composer's execute-button variant, `StatusDot`'s
   `running` status) do the same rather than keeping the old
   reference-inspired blue "running" color the reference desktop workbench vocabulary doesn't have
   an equivalent for. This is a deliberate loss of distinctness, an
   accepted cost of "adopt a reference desktop workbench's token vocabulary wholesale."
-- **`--ring` is neutralized rather than left teal or deleted.** a reference desktop workbench
+- **`--ring` is neutralized rather than left teal or deleted.** A reference desktop workbench
   defines no ring/focus-glow token at all and its inputs are explicitly
   "not glowing by default" — but generic `focus-visible:ring-*` usage
   outside `components/ui/`'s input-family primitives still exists
@@ -489,7 +489,7 @@ the interface-density setting.
 class name 1:1 — the first migration pass did the latter mechanically
 (`text-sm`→`text-ui-sm`, `text-xs`→`text-ui-xs`) and a screenshot review
 caught the result reading roughly one step too small everywhere, since
-A reference desktop workbench's roles sit one tier higher than the old smind names suggest:
+a reference desktop workbench's roles sit one tier higher than the old smind names suggest:
 
 | Token | Role | smind examples |
 | --- | --- | --- |

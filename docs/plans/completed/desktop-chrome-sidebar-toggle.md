@@ -12,7 +12,7 @@ chỗ 3 nút màu" — chrome breaks around the three coloured buttons when the 
 
 ## Findings: how a reference desktop workbench and a reference workbench lay out the top bar
 
-Sources: a local reference clone,ui}`, a local reference clone,app}`
+Sources: a local reference clone
 (read-only; paths below are relative to those clones).
 
 ### A reference desktop workbench (Electron)

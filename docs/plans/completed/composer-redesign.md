@@ -5,11 +5,10 @@ interact like a reference workbench's. Reference screenshots (local, gitignored)
 `tmp/reference/{a reference desktop workbench,a reference workbench}-composer.png`; current look:
 `tmp/reference/smind-current-shell-dark.png`.
 
-**Sources ported from:** a local reference clone
+**Sources ported from:** A local reference clone
 (send/stop button pair, `rounded-2xl` shell, `ArrowUp`/`Square` icons) and
-A local reference clone (input tokens, `rounded-2xl` main-input exception);
-A local reference clone,
-input/input.tsx,pill-styles.ts,diff-stat-pill.tsx}` (icon+value trigger with
+a local reference clone (input tokens, `rounded-2xl` main-input exception);
+a local reference clone (icon+value trigger with
 an icon-only collapse, focus hint shown only when web ∧ unfocused ∧ empty,
 chip row above the card). A reference workbench is React Native, so this is a port of the
 *behaviour and proportions*, not the code.

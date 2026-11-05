@@ -14,7 +14,7 @@ open-tab state. (Decided by the maintainer when resolving open question
 
 ## Alternatives considered
 
-- **Per-workspace tabs (a reference workbench's model).** a reference workbench keys open tabs on the
+- **Per-workspace tabs (a reference workbench's model).** A reference workbench keys open tabs on the
   workspace because its worktrees exist inside the workspace session
   lifecycle. Passed over: smind's model is different by definition —
   each *task* is its own git worktree with its own agent runs, its own

@@ -95,7 +95,7 @@ Quét `internal/`, `cmd/`, `web/`, `go.mod/go.sum`:
 ## 4. Tham khảo refs/
 
 - **A local reference clone — precedent trực tiếp, gần sát với ý tưởng smind's roadmap.**
-  a reference workbench đã build, test, document đầy đủ một relay dumb-pipe tương tự:
+  A reference workbench đã build, test, document đầy đủ một relay dumb-pipe tương tự:
   - `packages/relay/src/crypto.ts`: X25519 (Curve25519 ECDH) nhưng dùng
     **XSalsa20-Poly1305** (NaCl `box`), KHÁC với ChaCha20-Poly1305 mà smind
     roadmap chốt — cần quyết định rõ ràng thay vì copy nguyên a reference workbench.
@@ -161,7 +161,7 @@ Cụ thể theo từng mảnh:
 Khoảng cách lớn nhất trước khi có thể bắt đầu implement: (1) viết một ADR/plan
 riêng cho relay quyết định rõ state model (store-and-forward? multi-device
 fanout?) và cơ chế key rotation thật sự; (2) chốt xem có kế thừa pattern của
-A local reference clone (đặc biệt là cấu trúc control-socket + data-socket, và cách daemon
+a local reference clone (đặc biệt là cấu trúc control-socket + data-socket, và cách daemon
 giữ keypair bền) hay tự thiết kế lại cho gRPC; (3) quyết định rõ ràng
 ChaCha20-Poly1305 vs XSalsa20-Poly1305 và lý do khác với a reference workbench.
 

@@ -2,12 +2,12 @@
 
 ## Scope caveat — read this first
 
-**The management UI's source is not in `refs/`.** a local reference clone ships
+**The management UI's source is not in `refs/`.** A local reference clone ships
 the *server*; the control panel is a single `management.html` asset
 downloaded at runtime from a separate repository
 (`router-for-me/Cli-Proxy-API-Management-Center`, "CPAMC"), with a CDN
 fallback at `https://cpamc.router-for.me/`. See
-A local reference clone:
+a local reference clone:
 
 ```go
 defaultManagementReleaseURL  = ".../Cli-Proxy-API-Management-Center/releases/latest"
@@ -22,7 +22,7 @@ reference is an external site (`README.md:143` →
 
 So this audit is derived from **the API surface the panel is built
 against** (a local reference clone and
-A local reference clone), which is the honest
+a local reference clone), which is the honest
 available source of truth for what the UX must express. Nothing here
 describes pixels, and nothing should be cited as "CPAMC does X visually".
 
