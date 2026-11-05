@@ -3,7 +3,7 @@
 This is the living reference for `web/packages/ui`'s token vocabulary,
 density, primitives, copy rules, and the keyboard/palette registration APIs
 — written from what actually landed. Visual values (tokens, typography,
-spacing, radii, shadows) follow a reference desktop workbench (Z.AI's Apache-2.0 AI coding
+spacing, radii, shadows) follow a reference desktop workbench (an Apache-2.0 AI coding
 workbench) as of the
 `reference-visual-parity` plan's P1 phase — the reference is the
 source of truth for those, and this file summarizes what P1 actually

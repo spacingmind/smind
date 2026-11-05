@@ -1,6 +1,6 @@
 # A reference desktop workbench visual parity (phased)
 
-Make smind's web UI (`web/packages/ui`) visually 1:1 with a reference desktop workbench — Z.ai's
+Make smind's web UI (`web/packages/ui`) visually 1:1 with a reference desktop workbench — an
 Apache-2.0 AI coding workbench, cloned read-only
 (`packages/ui` is the UI package). Visual parity only: features stay on
 smind's own roadmap; no backend/daemon/wsapi changes.
@@ -178,7 +178,7 @@ the previous is merged.
 - **The workspace header matches `WorkspaceHeader.tsx`:** height,
   padding, title treatment (`text-ui-base` + weight per DESIGN.md),
   border, and the theme toggle relocated if the reference's placement differs.
-- **The reference branding is absent:** no Zai logos, icons, or names; smind's
+- **The reference branding is absent:** no logos, icons, or names of the reference; smind's
   wordmark is the only mark. No billing/plan/usage footer widgets are
   added (the reference's `WorkspaceSidebarFooter` plan/usage surfaces are
   explicitly excluded).
