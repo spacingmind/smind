@@ -73,7 +73,7 @@ PR to match what lands.
   `diff-addition/deletion`, type-role `--text-*`) are migrated onto the
   reference names (aliased during a phase, removed at its end) rather than
   kept as a parallel vocabulary. The static shadcn oklch layer stays
-  only where some the reference token doesn't cover it.
+  only where some reference token doesn't cover it.
 - **Zai Light / Zai Dark are the palettes.** smind's light theme maps to
   `.theme-zai-light` values, dark to `.theme-zai-dark`, applied via the
   existing `dark`-class mechanism (`hooks/use-theme.tsx`,
