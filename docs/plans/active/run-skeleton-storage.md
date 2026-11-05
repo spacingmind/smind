@@ -1,8 +1,9 @@
 # Run skeleton storage: keep the skeleton, rebuild the full history from the provider
 
-Status: spec (docs-only PR), 2026-11-05. Owner: Lead of task `run-skeleton-adr-docs-cleanup`.
-Decision record: [ADR-0053](../../decisions/0053-run-skeleton-storage-and-native-history-rebuild.md) (**Proposed**; no code until the
-Steward/Human accept it and answer H1–H8).
+Status: **accepted, in implementation** (2026-11-05, Human decision: H1–H8 all as recommended, with H7 narrowed below).
+Decision record: [ADR-0053](../../decisions/0053-run-skeleton-storage-and-native-history-rebuild.md) (**Accepted**).
+Order of work (Human, 2026-11-05): PR-A docs; PR0 read-only measurement of the real data, thresholds frozen from it; PR1 write-time
+chunk coalescing (H3); then finalizer + `native_ref`, rebuilders, read contract, UI. One PR at a time, each reviewed by the Human.
 Size: XL (10) — scope 3 (store, runs, taskrunner/new history package, wsapi, fleet, UI), PRs 5, risk 3 (data loss, format drift,
 reading files outside smind), decisions 1, verify 1 (synthetic db, three provider formats).
 Depends on: #823 (lazy history, byte budget; merged), #827 (30-day retention; spec PR open, implementation in flight; **lands
@@ -63,7 +64,7 @@ AC15 **Migration.** Legacy runs stay `stored-full` and are untouched at upgrade;
 converted.
 AC16 **Security.** `native_ref` is written only by the daemon at run end; a read path is canonicalized and must lie under the
 provider root (private instance dirs included), symlinks that leave it are refused; `run.logs detail=full` is authorized like
-`run.logs` (run-scoped agents: own subtree only); logs carry counts, never text.
+`run.logs` for human callers; agent/orchestrator callers (`task_logs`, run-scoped agents) get the skeleton and never rebuild (H7); logs carry counts, never text.
 AC17 **Measured.** PR0 prints the real distribution on the Human's db (read-only); the PR bodies report db size before/after on the
 synthetic db (rows and bytes by chunk-size model), finalizer time per run, rebuild latency per provider (resident vs rebuilt, Go).
 
@@ -111,7 +112,7 @@ internal/wsapi + internal/fleet
   `TestParentNotifyLastTextSkeleton`, `TestAutomationFinalTextSkeleton` (AC4, AC11)
 - `TestFleetReadSkeletonOwnedByHost` + `TestFleetMirrorResyncOnSkeletonRev` (AC9) [ignore `skeletonRev`]
 - `TestRelayAttachFinishedRunBackfillsSkeleton`, `TestMobileDoesNotAutoLoadACP` (AC6)
-- `TestRebuildAuthorizedLikeRunLogs` (run-scoped agent cannot rebuild a foreign run) (AC16)
+- `TestRebuildAuthorizedLikeRunLogs` (a run-scoped agent never triggers a rebuild, H7; a human caller is authorized like run.logs) (AC16)
 
 cmd / config / docs
 - `TestDoctorReportsProviderSessionRetention` (H8), `TestDocsDriftCoversDetailAndSkeletonKeys`, `TestRunsPruneCommandExcerptOutput`
@@ -140,8 +141,10 @@ web (PR D): component tests for the source badge, the "Load full history" button
 
 - D1 skeleton set; D2 thresholds; D3 write full / finalize at finish; D4 rebuilder + slice rule; D5 read contract and `detail`;
   D6 degrade, never error; D7 drift; D8 owner-only; D9 legacy runs left (all in the ADR).
-- Defaults assumed by the PRs until answered: H1 yes, H2 forever, H3 yes (PR A), H4 (a), H5 auto for claude/codex, H6 as
-  written, H7 yes, H8 doctor warning only.
+- Human answers (2026-11-05): H1 thinking not kept; H2 skeleton forever (`runs.skeletonRetentionDays` reserved, not built); H3
+  coalescing first; H4 (a) plus a later opt-in `smind runs skeletonize`; H5 auto for claude/codex, explicit for ACP; H6 thresholds
+  frozen only after PR0; **H7 orchestrators/agents get the skeleton only through `task_logs` and never trigger a rebuild (only a
+  human request rebuilds; this narrows AC16's `detail=full` for agents)**; H8 doctor warning only, never edit CLI settings.
 
 ## PR split (non-stacked from `origin/develop`; A and B may run in parallel, C after #827, D after C, E after B)
 
@@ -182,7 +185,8 @@ Already measured for the ADR (scratch script, sizes only from this machine's own
 
 - [x] Research: provider sessions, formats, sizes, #823/#827 (2026-11-05).
 - [x] ADR-0053 (Proposed) and this plan written.
-- [ ] Steward review; Human answers H1–H8.
+- [x] Steward review; Human answers H1–H8 (2026-11-05, accepted).
+- [ ] PR-A docs (this change). PR0 measurement. PR1 coalescing.
 - [ ] PR A, B, C, D, E (not started).
 
 ## Validation
