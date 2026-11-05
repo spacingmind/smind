@@ -89,10 +89,7 @@ func TestRunProfile_RehydratedKeepsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun() error = %v", err)
 	}
-	r, err := rehydrateRun(e.st, row)
-	if err != nil {
-		t.Fatalf("rehydrateRun() error = %v", err)
-	}
+	r := rehydrateMeta(e.st, row)
 	if r.profileID != pid {
 		t.Fatalf("rehydrated profileID = %d, want %d", r.profileID, pid)
 	}

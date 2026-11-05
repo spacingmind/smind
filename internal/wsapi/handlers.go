@@ -1974,7 +1974,18 @@ type runLogsResult struct {
 // carries its input, and the later event with its result may be inside the
 // tail while that one is not.
 func runLogEvents(history []taskrunner.Event, tail int) []runLogEvent {
+	return runLogEventsPrimed(nil, history, tail)
+}
+
+// runLogEventsPrimed is runLogEvents for a history that is only its tail:
+// prime holds the earlier events that carry a tail call's input, run through
+// the elider first (output dropped) so it elides the tail as it would inside
+// the whole history.
+func runLogEventsPrimed(prime, history []taskrunner.Event, tail int) []runLogEvent {
 	elider := taskrunner.NewToolCallElider()
+	for _, e := range prime {
+		toRunLogEvent(elider, e)
+	}
 	events := make([]runLogEvent, len(history))
 	for i, e := range history {
 		events[i] = toRunLogEvent(elider, e)
@@ -1999,11 +2010,12 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("run.logs: invalid params: %w", err)
 		}
 
-		history, status, err := reg.History(p.RunID)
+		view, err := reg.Tail(p.RunID, p.Tail)
 		if err != nil {
 			return nil, fmt.Errorf("run.logs: %w", err)
 		}
-		events := runLogEvents(history, p.Tail)
+		status := view.Status
+		events := runLogEventsPrimed(view.Prime, view.Events, p.Tail)
 		var fallbackID int64
 		if failure.IsPlanLimit(status.FailureKind) {
 			fallbackID = reg.FallbackProfileFor(status.ProfileID)

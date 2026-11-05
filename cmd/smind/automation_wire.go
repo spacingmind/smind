@@ -98,8 +98,8 @@ func (s automationStarter) Status(taskID int64) (automation.RunStatus, error) {
 	if latest.Status == runs.StatusRunning {
 		return out, nil
 	}
-	if events, _, err := s.reg.History(latest.ID); err == nil {
-		out.FinalText = taskrunner.FinalText(events)
+	if text, err := s.reg.FinalAgentText(latest.ID); err == nil {
+		out.FinalText = text
 	}
 	if known, unknown, err := s.db.TreeKnownCost(taskID); err == nil && (known > 0 || unknown == 0) {
 		out.CostUSD = &known

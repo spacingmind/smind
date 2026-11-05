@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"container/list"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -25,21 +26,17 @@ import (
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
-// finishedRetentionCap bounds how many finished runs the Registry keeps in
-// memory: once more than this many runs have finished, the oldest
-// finished ones (by finish order) are evicted -- their entries removed
-// from the registry entirely, so History/Subscribe/Stop on an evicted ID
-// return ErrNotFound.
+// finishedRetentionCap bounds how many finished runs' METADATA the Registry
+// keeps in memory: once more than this many runs have finished, the oldest
+// finished ones (by finish order) are evicted -- their entries removed from
+// the registry (run.list no longer shows them). History/Subscribe/Tail on such
+// a run are still served, complete, from the store.
 //
-// This is the Registry's only memory bound, deliberately: still-running
-// runs and their history are never truncated (a run's own output is never
-// silently incomplete), and a real daemon's active-run count is bounded by
-// how many turns are actually in flight at once, not by uptime. Only the
-// *retention* of finished runs' history grows with uptime, and 200 finished
-// runs' worth of chunk history is a small, fixed amount of memory -- ample
-// for the "did my recent run finish, what did it say" use case run.list
-// and run.logs exist for, without needing real eviction-by-age or
-// persistence for this pass.
+// It is the secondary bound. What bounds memory is the byte budget on resident
+// finished-run history (hist.go, DefaultHistoryBudget): a run's event history
+// is not loaded at startup and is dropped (not truncated) from the oldest-used
+// finished run first once the budget is exceeded. Running runs are never
+// touched, so a run's own output is never silently incomplete.
 const finishedRetentionCap = 200
 
 // ChatBusyError is the "one running run per chat" rejection (ADR-0016
@@ -88,6 +85,8 @@ type Registry struct {
 	// finishedOrder records finished run IDs in finish order, so eviction
 	// (see finishedRetentionCap) always drops the oldest first.
 	finishedOrder []string
+	// hist tracks which finished runs' histories are resident (hist.go). Guarded by mu.
+	hist histState
 	// systemFinishedOrder is finishedOrder for system runs (see retain).
 	systemFinishedOrder []string
 
@@ -313,12 +312,11 @@ func (reg *Registry) notifyRunStatus(r *run) {
 //     definitely gone (nothing ties a run.start-originated subprocess's
 //     lifetime to the daemon's -- see CloseAll's doc comment), so "running"
 //     would be a lie and there is no way to resume it.
-//  2. Rehydration: the most recent finishedRetentionCap persisted runs
-//     (each with its full event history) are loaded into the in-memory map
-//     as already-terminal runs, so run.list/run.attach/run.logs keep
-//     serving recent history exactly as before the restart -- attaching to
-//     a rehydrated run immediately delivers its backfilled history then
-//     closes, same as attaching to any other already-finished run.
+//  2. Rehydration: the most recent finishedRetentionCap persisted runs are
+//     loaded into the in-memory map as already-terminal runs, METADATA ONLY:
+//     their event history stays in the store and is read on demand
+//     (finishedHistory), so run.list/run.attach/run.logs serve the same
+//     complete history as before, but boot holds no history at all.
 func New(st *store.Store) (*Registry, error) {
 	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool), syncing: make(map[int64]bool), notifyParent: true, notifyDebounce: defaultNotifyDebounce, notifyMaxHold: defaultNotifyMaxHold, retryGrace: defaultRetryGrace}
 
@@ -331,10 +329,7 @@ func New(st *store.Store) (*Registry, error) {
 		return nil, fmt.Errorf("runs: rehydrate: %w", err)
 	}
 	for _, row := range rows {
-		r, err := rehydrateRun(st, row)
-		if err != nil {
-			return nil, fmt.Errorf("runs: rehydrate run %q: %w", row.ID, err)
-		}
+		r := rehydrateMeta(st, row)
 		reg.runs[r.id] = r
 		reg.finishedOrder = append(reg.finishedOrder, r.id)
 	}
@@ -381,29 +376,12 @@ func closedChan() chan struct{} {
 	return ch
 }
 
-// rehydrateRun rebuilds an in-memory run from a persisted store.Run row and
-// its store.RunEvent history, for New's rehydration step. The result is
-// always terminal (StatusRunning never survives reconciliation, which runs
-// before this), so it carries no live ctx/cancel and an already-closed
-// closedCh.
-func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
-	storedEvents, err := st.ListRunEvents(row.ID)
-	if err != nil {
-		return nil, fmt.Errorf("list events: %w", err)
-	}
-	history := make([]Event, 0, len(storedEvents))
-	for _, se := range storedEvents {
-		e, err := decodeEvent(se.EventData)
-		if err != nil {
-			return nil, fmt.Errorf("decode event seq %d: %w", se.Seq, err)
-		}
-		history = append(history, e)
-	}
-	var nextSeq int64
-	if n := len(storedEvents); n > 0 {
-		nextSeq = storedEvents[n-1].Seq + 1
-	}
-
+// rehydrateMeta rebuilds an in-memory run from a persisted store.Run row,
+// without its event history (histEvicted: finishedHistory reads it from the
+// store on demand). The result is always terminal (StatusRunning never
+// survives reconciliation, which runs before this), so it carries no live
+// ctx/cancel and an already-closed closedCh.
+func rehydrateMeta(st *store.Store, row store.Run) *run {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // rehydrated runs are always already-terminal; ctx is inert.
 
@@ -436,14 +414,13 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		failureResetAt:       cloneTimePtr(row.FailureResetAt),
 		failureResetInferred: row.FailureResetInferred,
 		failureResetZone:     row.FailureResetZone,
-		history:              history,
-		nextEventSeq:         nextSeq,
+		histEvicted:          true,
 		baseSHA:              row.BaseSHA,
 		headSHA:              row.HeadSHA,
 		dirty:                row.Dirty,
 		subscribers:          make(map[int]*subQueue),
 		pendingPermissions:   make(map[string]chan string),
-	}, nil
+	}
 }
 
 // run is a Registry's internal bookkeeping for one Run: identity fields
@@ -600,7 +577,14 @@ type run struct {
 	// start-mode report seen after that is stale.
 	explicitModeSwitches atomic.Int64
 
-	history     []Event
+	history []Event
+	// histEvicted: history is not resident (rehydrated metadata-only, or
+	// dropped by the budget); histBytes is its estimated size, histElem its
+	// LRU node (finished runs only), loadCh a store read in flight (hist.go).
+	histEvicted bool
+	histBytes   int64
+	histElem    *list.Element
+	loadCh      chan struct{}
 	subscribers map[int]*subQueue
 	nextSubID   int
 
@@ -1521,6 +1505,7 @@ func (reg *Registry) RespondPermission(runID, requestID, optionID string) error 
 func (reg *Registry) record(r *run, e Event) {
 	r.mu.Lock()
 	r.history = append(r.history, e)
+	r.histBytes += eventBytes(e)
 	if e.Type == taskrunner.EventTypeDone {
 		r.stopReason = e.StopReason
 	}
@@ -1751,9 +1736,15 @@ func (reg *Registry) retain(id string) {
 		order, limit = &reg.systemFinishedOrder, systemRetentionCap
 	}
 	*order = append(*order, id)
+	if r, ok := reg.runs[id]; ok {
+		reg.admitFinishedLocked(r)
+	}
 	for len(*order) > limit {
 		evict := (*order)[0]
 		*order = (*order)[1:]
+		if r, ok := reg.runs[evict]; ok {
+			reg.dropHistLocked(r, false)
+		}
 		delete(reg.runs, evict)
 	}
 }
@@ -1792,6 +1783,9 @@ func (reg *Registry) get(runID string) (*run, error) {
 // preempted by a live push landing in between.
 func (reg *Registry) Subscribe(runID string) (<-chan Event, func(), error) {
 	r, err := reg.get(runID)
+	if errors.Is(err, ErrNotFound) {
+		return reg.storedSubscribe(runID)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1799,19 +1793,28 @@ func (reg *Registry) Subscribe(runID string) (<-chan Event, func(), error) {
 	q := newSubQueue()
 
 	r.mu.Lock()
-	for _, e := range r.history {
-		q.push(e)
-	}
 	live := r.status == StatusRunning
 	var id int
 	if live {
+		// A running run's history is always resident (never evicted).
+		for _, e := range r.history {
+			q.push(e)
+		}
 		id = r.nextSubID
 		r.nextSubID++
 		r.subscribers[id] = q
-	}
-	r.mu.Unlock()
-
-	if !live {
+		r.mu.Unlock()
+	} else {
+		r.mu.Unlock()
+		// Terminal: finishedHistory reads from memory or the store. A run
+		// never goes back to running, so there is no live tail to miss.
+		hist, err := reg.finishedHistory(r)
+		if err != nil {
+			return nil, nil, fmt.Errorf("history of run %s: %w", runID, err)
+		}
+		for _, e := range hist {
+			q.push(e)
+		}
 		// Already terminal: there will never be a live tail, so the
 		// backfill just pushed is the whole story.
 		q.closeQueue()
@@ -1849,20 +1852,24 @@ func (reg *Registry) History(runID string) ([]Event, RunStatus, error) {
 		return nil, RunStatus{}, err
 	}
 	r.mu.Lock()
-	hist := append([]Event(nil), r.history...)
+	if r.status == StatusRunning {
+		hist := append([]Event(nil), r.history...)
+		status := r.statusLocked()
+		r.mu.Unlock()
+		return hist, status, nil
+	}
 	status := r.statusLocked()
 	r.mu.Unlock()
-	if status.Usage == nil && status.Status != StatusRunning {
-		if u, err := reg.st.GetRunUsage(runID); err == nil {
-			status.Usage = runUsageFromStore(u)
-		}
+	hist, err := reg.finishedHistory(r)
+	if err != nil {
+		return nil, RunStatus{}, fmt.Errorf("history of run %s: %w", runID, err)
 	}
-	return hist, status, nil
+	return hist, reg.withUsage(status), nil
 }
 
-// storedHistory is History for a run the Registry no longer holds in memory
-// (evicted past finishedRetentionCap): rebuilt read-only from its persisted
-// row and events, without re-registering it. Unknown ids stay ErrNotFound.
+// storedHistory is History for a run the Registry no longer lists (past
+// finishedRetentionCap): read from the store without re-registering it.
+// Unknown ids stay ErrNotFound.
 func (reg *Registry) storedHistory(runID string) ([]Event, RunStatus, error) {
 	row, err := reg.st.GetRun(runID)
 	if err != nil {
@@ -1871,16 +1878,42 @@ func (reg *Registry) storedHistory(runID string) ([]Event, RunStatus, error) {
 	if row.Status == string(StatusRunning) || row.Purpose != "" && row.Purpose != "user" {
 		return nil, RunStatus{}, ErrNotFound
 	}
-	r, err := rehydrateRun(reg.st, row)
+	hist, _, err := loadStoredEvents(reg.st, runID)
 	if err != nil {
-		return nil, RunStatus{}, fmt.Errorf("rehydrate run %s: %w", runID, err)
+		return nil, RunStatus{}, fmt.Errorf("history of run %s: %w", runID, err)
 	}
-	hist := append([]Event(nil), r.history...)
-	status := r.statusLocked()
+	reg.mu.Lock()
+	reg.hist.storeReads++
+	reg.mu.Unlock()
+	status := rehydrateMeta(reg.st, row).statusLocked()
 	if u, err := reg.st.GetRunUsage(runID); err == nil {
 		status.Usage = runUsageFromStore(u)
 	}
 	return hist, status, nil
+}
+
+// storedSubscribe is Subscribe for a finished run the Registry no longer lists:
+// the whole stored history, then the channel closes.
+func (reg *Registry) storedSubscribe(runID string) (<-chan Event, func(), error) {
+	hist, _, err := reg.storedHistory(runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	q := newSubQueue()
+	for _, e := range hist {
+		q.push(e)
+	}
+	q.closeQueue()
+	out := make(chan Event)
+	done := make(chan struct{})
+	go relay(q, out, done)
+	var once sync.Once
+	return out, func() {
+		once.Do(func() {
+			q.closeQueue()
+			close(done)
+		})
+	}, nil
 }
 
 // Stop cancels runID's background context, from any caller regardless of
