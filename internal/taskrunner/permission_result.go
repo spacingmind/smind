@@ -20,6 +20,16 @@ import (
 // the command prints it. Use one elider per ordered pass over a run's events.
 type ToolCallElider struct {
 	calls map[string]*elidedCall
+	// clientForm marks an elider for events that are ALREADY in client form
+	// (a history rebuilt from the provider's session, ADR-0053): Elide returns
+	// them unchanged, because eliding twice is not idempotent.
+	clientForm bool
+}
+
+// NewClientFormElider returns an elider that passes through tool calls already
+// elided (a rebuilt history's), so one conversion path serves both.
+func NewClientFormElider() *ToolCallElider {
+	return &ToolCallElider{calls: map[string]*elidedCall{}, clientForm: true}
 }
 
 type elidedCall struct {
@@ -35,6 +45,9 @@ func NewToolCallElider() *ToolCallElider {
 // Elide returns what a client may see of one tool-call event. Calls without
 // heredoc bodies come back byte for byte.
 func (el *ToolCallElider) Elide(toolCallID string, input json.RawMessage, title string, result json.RawMessage) (json.RawMessage, string, json.RawMessage, []HeredocRef) {
+	if el.clientForm {
+		return input, title, result, nil
+	}
 	outInput, outTitle, refs := ElideToolCall(input, title)
 	if toolCallID != "" {
 		if cmds, bodies := commandBodies(input); len(bodies) > 0 {
