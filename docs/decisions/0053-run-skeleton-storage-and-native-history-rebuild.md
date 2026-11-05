@@ -371,6 +371,30 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
   sentence per reason and a "Load full history" action that is offered only when the daemon says `canLoadFull` and the
   reason can pass (first ask, busy, running chat, too slow). The sentences are one table in each client with identical text.
 
+## Implemented: the retention amendment (PR C)
+
+`internal/store/retention.go`, `internal/runs/prune.go`. This amends #829's pass (decisions 1, 4 and 6 above under "Retention").
+
+- **Skeleton runs lose only their excerpts.** For a run in skeleton form the daily pass (and `smind runs prune`) deletes its
+  `run_excerpts` rows and nothing else: the skeleton rows, `final_text`, usage and the run row stay, `history_pruned_at` stays NULL
+  (so no reader serves the three-event prune summary), and the new `runs.excerpts_pruned_at` is stamped. A run NOT in skeleton form
+  (finished before skeleton storage, or over the conversion cap) prunes exactly as before. `MarkRunPruned` refuses a skeleton run,
+  so the full path can never reach one.
+- **Same rules.** The age basis, the live-task and running-run protections and the batch size are the one `pruneEligible`
+  predicate; `PruneExcerptsBatch` re-checks it inside its statements, so a run that became live is left alone, and a crash after
+  the mark is resumed by the next pass (the candidate query lists a skeleton run until its excerpts are gone).
+- **Counts.** `PruneCounts` / `PruneReport` carry `excerptRuns`, `excerptRows`, `excerptBytes` beside the existing
+  `runs`/`rows`/`bytes`; the dry run counts the same two sets the pass then deletes (`TestPrune_DryRunEqualsRealWithSkeletonRuns`),
+  and `smind runs prune` prints a second line for the skeleton runs.
+- **Readers after a prune.** A payload whose excerpt is gone reads back as the row's summary and the row is flagged `Truncated`
+  (store rehydrate); a resident copy of the run is dropped so the next read loads the skeleton. `TestPrune_ReadersAfterAnExcerptPrune`
+  states what each reader sees: history, tail, subscribe and store paging give the same text and tool names/statuses with
+  summaries in place of large payloads; `LastAgentText`/`FinalAgentText` are unchanged; the heredoc reveal is
+  `ErrHeredocUnavailable` (never "no such heredoc"), and a human can still get the body from the provider's session when it exists.
+- **Label.** `HistoryInfo` reports `skeletonReason: "excerpt_pruned"` for a skeleton run whose excerpts were removed (the full
+  history is still loadable when a rebuild is possible); the web and mobile notes say "large tool output was removed after the
+  retention period".
+
 ## Measurements on the real database (PR0, 2026-11-05)
 
 `smind debug run-stats` (hidden, offline, read-only) ran once on a `VACUUM INTO` snapshot of the Human's database (842 MiB file,
