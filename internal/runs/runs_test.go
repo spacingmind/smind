@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1497,20 +1498,23 @@ func TestRegistry_Record_PersistsEventsInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.ListRunEvents() error = %v", err)
 	}
-	if len(persisted) != len(memHist) {
-		t.Fatalf("persisted event count = %d, want %d (matching in-memory History)", len(persisted), len(memHist))
-	}
+	// Consecutive text/thinking chunks are persisted as one row (persistbuf.go):
+	// compare the content, in order, not the row count; seq only has to increase.
+	var decodedRows []Event
+	last := int64(-1)
 	for i, pe := range persisted {
-		if pe.Seq != int64(i) {
-			t.Fatalf("persisted event %d Seq = %d, want %d", i, pe.Seq, i)
+		if pe.Seq <= last {
+			t.Fatalf("persisted event %d Seq = %d, not after %d", i, pe.Seq, last)
 		}
+		last = pe.Seq
 		decoded, err := decodeEvent(pe.EventData)
 		if err != nil {
 			t.Fatalf("decodeEvent(%d) error = %v", i, err)
 		}
-		if decoded.Type != memHist[i].Type || decoded.Text != memHist[i].Text || decoded.StopReason != memHist[i].StopReason {
-			t.Fatalf("persisted event %d = %+v, want it to match in-memory event %+v", i, decoded, memHist[i])
-		}
+		decodedRows = append(decodedRows, decoded)
+	}
+	if got, want := canon(t, decodedRows), canon(t, memHist); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("persisted events = %v, want content matching in-memory History %v", got, want)
 	}
 }
 
@@ -1676,13 +1680,9 @@ func TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries(t *testing.T
 	if gotStatus.Status != wantStatus.Status || gotStatus.TaskID != wantStatus.TaskID || gotStatus.Provider != wantStatus.Provider {
 		t.Fatalf("rehydrated RunStatus = %+v, want %+v", gotStatus, wantStatus)
 	}
-	if len(gotHist) != len(wantHist) {
-		t.Fatalf("rehydrated History len = %d, want %d", len(gotHist), len(wantHist))
-	}
-	for i := range wantHist {
-		if gotHist[i].Type != wantHist[i].Type || gotHist[i].Text != wantHist[i].Text || gotHist[i].StopReason != wantHist[i].StopReason {
-			t.Fatalf("rehydrated History[%d] = %+v, want %+v", i, gotHist[i], wantHist[i])
-		}
+	// Persisted chunk rows are coalesced (persistbuf.go): same content, fewer events.
+	if got, want := canon(t, gotHist), canon(t, wantHist); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("rehydrated History = %v, want content of %v", got, want)
 	}
 
 	summaries := reg2.List(0)
@@ -1703,12 +1703,12 @@ func TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries(t *testing.T
 		t.Fatalf("Subscribe() on rehydrated run error = %v", err)
 	}
 	defer unsubscribe()
-	n := 0
-	for range events {
-		n++
+	var delivered []Event
+	for e := range events {
+		delivered = append(delivered, e)
 	}
-	if n != len(wantHist) {
-		t.Fatalf("Subscribe() on rehydrated run delivered %d events, want %d", n, len(wantHist))
+	if len(delivered) != len(gotHist) {
+		t.Fatalf("Subscribe() on rehydrated run delivered %d events, want %d (its History)", len(delivered), len(gotHist))
 	}
 }
 
