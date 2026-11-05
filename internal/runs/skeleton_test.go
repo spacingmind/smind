@@ -317,10 +317,16 @@ func TestFinishConvertsAndRunningRunIsNeverTouched(t *testing.T) {
 	}
 	_ = reg.Stop(runID)
 	waitForStatus(t, reg, runID, StatusStopped, 10*time.Second)
-	reg.FinalizePending(context.Background()) // finish already converted it: a no-op
-	sk, err := st.GetRunSkeleton(runID)
-	if err != nil || sk.SkeletonAt == nil || sk.Rev != 1 {
-		t.Fatalf("the finished run is not in skeleton form: %+v, %v", sk, err)
+	// finish converts the run itself; the boot pass is NOT called here.
+	var sk store.RunSkeleton
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		sk, _ = st.GetRunSkeleton(runID)
+		if sk.SkeletonAt != nil {
+			break
+		}
+	}
+	if sk.SkeletonAt == nil || sk.Rev != 1 {
+		t.Fatalf("the finished run is not in skeleton form: %+v", sk)
 	}
 }
 
