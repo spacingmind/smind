@@ -1,7 +1,7 @@
 # A reference desktop workbench visual parity (phased)
 
 Make smind's web UI (`web/packages/ui`) visually 1:1 with a reference desktop workbench — Z.ai's
-Apache-2.0 AI coding workbench, cloned read-only at a local reference clone
+Apache-2.0 AI coding workbench, cloned read-only
 (`packages/ui` is the UI package). Visual parity only: features stay on
 smind's own roadmap; no backend/daemon/wsapi changes.
 
@@ -9,25 +9,25 @@ smind's own roadmap; no backend/daemon/wsapi changes.
 
 User decisions (2026-09-25, not open for re-litigation):
 
-- **Visual 1:1 with a reference desktop workbench.** A reference desktop workbench sets the look — tokens, typography,
+- **Visual 1:1 with the reference.** The reference sets the look — tokens, typography,
   spacing, radii, shadows, component proportions, light/dark palettes.
-  A reference desktop workbench is Apache-2.0; a local reference clone
+  The reference is Apache-2.0; its license and notice files
   are the attribution sources.
 - **Features stay smind's.** Explicitly out of scope, not to be planned:
   workflows, Goal Mode, plugin store, bots, Office mode, doc/PDF
   previews, billing.
 - **Existing reference-derived interaction UX stays working:** Find
-  (Mod+F), chord shortcuts, split panes, attention/unread/pins. A reference desktop workbench
+  (Mod+F), chord shortcuts, split panes, attention/unread/pins. The reference
   sets the *look* of these affordances; smind keeps the *behavior*.
 - **No reference logos, names, or branding** anywhere in smind's UI,
   code identifiers, or comments beyond license-required attribution.
-- **NOTICE attribution** for any code ported from a reference desktop workbench.
-- **Never run a reference desktop workbench** in any form — its indexing feature uploaded user
+- **NOTICE attribution** for any code ported from the reference.
+- **Never run the reference** in any form — its indexing feature uploaded user
   workspaces. Source is read only. Visual verification therefore never
-  screenshots a reference desktop workbench; it verifies against a reference desktop workbench's checked-in source and
+  screenshots the reference; it verifies against the reference's checked-in source and
   token values (see Test Scenarios).
 
-Primary a reference desktop workbench references (all under a local reference clone):
+Primary reference files (all in the clone):
 
 - `DESIGN.md` — the design system: `text-ui-*` scale, `--ui-font-size`,
   semantic color tokens, radius nesting rules, spacing, elevation,
@@ -64,20 +64,20 @@ PR to match what lands.
 
 ## Decisions
 
-- **Adopt a reference desktop workbench's token vocabulary wholesale.** Port the `@theme`
-  semantic tokens from a local reference clone under
-  their a reference desktop workbench names (`--color-background`, `--color-card`,
+- **Adopt the reference's token vocabulary wholesale.** Port the `@theme`
+  semantic tokens from the clone under
+  their reference names (`--color-background`, `--color-card`,
   `--color-foreground-subtle`, `--text-ui-*`, …) so ported component
   code compiles against the same classes it was written for. smind's
   existing semantic tokens (`surface-0..3`, `status-*`,
   `diff-addition/deletion`, type-role `--text-*`) are migrated onto the
-  a reference desktop workbench names (aliased during a phase, removed at its end) rather than
+  reference names (aliased during a phase, removed at its end) rather than
   kept as a parallel vocabulary. The static shadcn oklch layer stays
-  only where some a reference desktop workbench token doesn't cover it.
+  only where some the reference token doesn't cover it.
 - **Zai Light / Zai Dark are the palettes.** smind's light theme maps to
   `.theme-zai-light` values, dark to `.theme-zai-dark`, applied via the
   existing `dark`-class mechanism (`hooks/use-theme.tsx`,
-  `lib/theme.ts`). A reference desktop workbench's `:root`/`.dark` fallback palettes are not
+  `lib/theme.ts`). The reference's `:root`/`.dark` fallback palettes are not
   ported — DESIGN.md names Zai as the active experiences. The
   `.theme-zai-*` class *names* are not shipped; only their values.
 - **The `text-ui-*` scale replaces smind's type-role tokens and all
@@ -87,7 +87,7 @@ PR to match what lands.
   diff, and terminal content keep independent numeric sizes per
   DESIGN.md's exceptions; smind's Find/chord/split/attention behavior is
   untouched while their chrome moves to `text-ui-*`.
-- **The one smind-branded element is the wordmark.** A reference desktop workbench's palettes
+- **The one smind-branded element is the wordmark.** The reference's palettes
   make `--color-primary` neutral (black/white); smind follows that for
   all primary actions. smind's own logo mark in the sidebar header keeps
   its identity hue — it is smind's mark, the anti-Zai-branding rule
@@ -96,21 +96,21 @@ PR to match what lands.
   protocol work in any phase.
 - **Ported code keeps Apache-2.0 attribution.** smind is AGPL (ADR-0003)
   and can incorporate Apache-2.0 code; every file containing ported
-  a reference desktop workbench code gets a header comment, and a top-level `NOTICE` file (P1)
+  the reference code gets a header comment, and a top-level `NOTICE` file (P1)
   lists the derivation per Apache-2.0 §4(d).
-- **No a reference desktop workbench execution.** Parity verification = checked-in token
+- **No execution of the reference.** Parity verification = checked-in token
   fixtures + Playwright screenshots of smind + source-reading
   checklists (Test Scenarios below). Never build, launch, or screenshot
-  a reference desktop workbench.
+  the reference.
 
 ## Skills to use
 
 The repo already ships these agent skills under `.agents/skills/`, with symlinks in `.claude/skills/`. Agents that don't load skills automatically (for example GLM over ACP) should read the `SKILL.md` directly:
 
 - `.agents/skills/web-design-guidelines/SKILL.md`: the review checklist at the end of **every phase**, covering spacing, typography, interaction states, focus and a11y. Run it against the changed components before marking a phase done, and record the findings in Validation.
-- `.agents/skills/vercel-composition-patterns/SKILL.md`: use while porting a reference desktop workbench components (P2–P4), to keep compound components, slots and variants consistent instead of boolean-prop sprawl.
+- `.agents/skills/vercel-composition-patterns/SKILL.md`: use while porting the reference components (P2–P4), to keep compound components, slots and variants consistent instead of boolean-prop sprawl.
 - `.claude/skills/vercel-react-best-practices/SKILL.md`: use in P2–P4 to avoid re-render regressions. The timeline rows are memoized; keep them that way.
-- `.agents/skills/frontend-design/SKILL.md`: only for surfaces a reference desktop workbench has no equivalent for, i.e. smind-only features. **Do not** use it to restyle anything a reference desktop workbench already defines; a local reference clone wins.
+- `.agents/skills/frontend-design/SKILL.md`: only for surfaces the reference has no equivalent for, i.e. smind-only features. **Do not** use it to restyle anything the reference already defines; the clone wins.
 - Not used here: `sleek-design-mobile-apps` (mobile only) and `ui-ux-pro-max` (not installed; it proposes new palettes/styles, which conflicts with 1:1 parity).
 
 ## Acceptance Criteria
@@ -120,8 +120,8 @@ the previous is merged.
 
 ### P1 — Design system: tokens, type scale, guards
 
-- **`web/packages/ui/src/index.css` carries a reference desktop workbench's `@theme` semantic
-  token set** ported from a local reference clone:
+- **`web/packages/ui/src/index.css` carries the reference's `@theme` semantic
+  token set** ported from the clone:
   background/surface/card/popover/menu/input families, foreground
   hierarchy (`-subtle`, `-subtlest`, `-inverse`), border families,
   success/warning/destructive, diff added/removed, find-highlight,
@@ -130,10 +130,10 @@ the previous is merged.
   `.dark`.
 - **The `text-ui-*` scale exists and is the legal interface scale:**
   `--ui-font-size: 14px` plus `--text-ui-xl/lg/base/caption/sm/xs` with
-  a reference desktop workbench's exact `calc()` formulas. `--text-ui-2xs` and
+  the reference's exact `calc()` formulas. `--text-ui-2xs` and
   `text-mobile-input-safe` are not ported (no consumers: workflows and
   mobile-Web iOS are out of scope; revisit if either changes).
-- **A guard test (like a reference desktop workbench's DESIGN.md constraint, and sibling to
+- **A guard test (like the reference's DESIGN.md constraint, and sibling to
   `src/test/no-hardcoded-colors.test.ts`) fails the build on:** any
   `text-sm`/`text-xs`/`text-base` (Tailwind built-ins), arbitrary
   `text-[…px]`, or inline `font-size` in app-UI source. Exemptions
@@ -150,9 +150,9 @@ the previous is merged.
   `rounded-2xl` only for the approved exceptions (main composer shell,
   dialogs, toasts — smind has no workflow/status panels); spacing
   stays on the 4px Tailwind numeric scale; `shadow-md`/`shadow-lg` map
-  to a reference desktop workbench's overlay/attention tiers.
+  to the reference's overlay/attention tiers.
 - **`NOTICE` exists at the repo root** with the Apache-2.0 attribution
-  for reference-derived tokens/CSS, modeled on a local reference clone's
+  for reference-derived tokens/CSS, modeled on the reference's
   own format.
 - **`docs/design.md` is rewritten** to describe the reference-derived system
   (it currently documents the superseded token vocabulary).
@@ -172,22 +172,22 @@ the previous is merged.
   `--color-sidebar` background, item density, hover/selected states
   (`bg-surface-hover` / `bg-selected`), `text-ui-base` row titles,
   `min-w-0` truncation. smind's attention/unread dot and pinned-tasks
-  section keep their behavior, restyled onto a reference desktop workbench's tokens
+  section keep their behavior, restyled onto the reference's tokens
   (`WorkspacePinnedTasksSection.tsx` is the visual reference for
   pins).
 - **The workspace header matches `WorkspaceHeader.tsx`:** height,
   padding, title treatment (`text-ui-base` + weight per DESIGN.md),
-  border, and the theme toggle relocated if a reference desktop workbench's placement differs.
-- **A reference desktop workbench branding is absent:** no Zai logos, icons, or names; smind's
+  border, and the theme toggle relocated if the reference's placement differs.
+- **The reference branding is absent:** no Zai logos, icons, or names; smind's
   wordmark is the only mark. No billing/plan/usage footer widgets are
-  added (a reference desktop workbench's `WorkspaceSidebarFooter` plan/usage surfaces are
+  added (the reference's `WorkspaceSidebarFooter` plan/usage surfaces are
   explicitly excluded).
 
 ### P3 — Chat timeline + composer + cards
 
 - **Timeline rows match `v4/ConversationTimeline.tsx` /
   `ConversationTurnRow.tsx` / `ConversationRowView.tsx`:** message
-  containers `text-ui-base` at a reference desktop workbench's max-width and padding; markdown
+  containers `text-ui-base` at the reference's max-width and padding; markdown
   type scale per DESIGN.md (h1 `text-ui-xl`, h2 `text-ui-lg`,
   h3–h6 `text-ui-base` with the prescribed weights, inline code
   `font-mono text-ui-sm`); chat bubbles follow the radius container
@@ -197,11 +197,11 @@ the previous is merged.
   `rounded-2xl` exception, `bg-input`/`border-input-border` with
   hover/focus border tokens, `text-ui-base`; send/stop controls keep
   smind's variants restyled onto `--color-primary` treatment.
-  smind's provider/approval selects keep working, restyled as a reference desktop workbench
+  smind's provider/approval selects keep working, restyled as the reference
   Select triggers (`rounded-lg`, menu surface `bg-menu`).
 - **Tool-call cards match `ToolCallBlocks/`** (`ToolLayout.tsx`,
   `ToolSummaryRow.tsx`, per-tool `renderers/`): `rounded-xl` container,
-  `text-ui-sm` summaries, `font-mono` for paths/commands, a reference desktop workbench's
+  `text-ui-sm` summaries, `font-mono` for paths/commands, the reference's
   collapsed/expanded treatments. smind's tool-renderer registry
   structure stays; each renderer gets the visual pass.
 - **Permission and question cards match `PermissionDialog.tsx` /
@@ -216,7 +216,7 @@ the previous is merged.
 ### P4 — Panes: diff/git, terminal, files, settings
 
 - **Diff/git pane matches `GitPane.tsx` + `GitPaneChangeCard.tsx`:**
-  change rows, status colors from a reference desktop workbench's git status family
+  change rows, status colors from the reference's git status family
   (`--color-git-modified` etc. — ported as part of P1's token set),
   diff colors `--color-diff-added/-removed` (never generic
   success/destructive per DESIGN.md); diff2html variable overrides
@@ -225,7 +225,7 @@ the previous is merged.
 - **Terminal pane matches `Terminal.tsx` + `terminal/terminalTheme.ts`:**
   `--color-terminal-*` 16-color set wired through smind's existing
   `resolveTerminalTheme()` computed-style probe; xterm viewport
-  scrollbar hidden per a reference desktop workbench's rule; pane chrome `text-ui-*`.
+  scrollbar hidden per the reference's rule; pane chrome `text-ui-*`.
 - **File explorer matches `workspace-file-tree/`:** row height/indent
   density, `font-mono`-leaning file names, folder guides, git status
   markers using the git color family. No doc/PDF/office preview
@@ -235,7 +235,7 @@ the previous is merged.
   layout, control styling, `text-ui-*` roles. No marketplace,
   automation/workflow, or billing sections are added (excluded).
 - **File editor / preview pane chrome** (CodeMirror surfaces) follows
-  a reference desktop workbench's `PreviewPane`/`code-viewer` treatments where smind has an
+  the reference's `PreviewPane`/`code-viewer` treatments where smind has an
   equivalent surface; syntax colors unchanged.
 
 ### P5 — Desktop-only chrome — **BLOCKED** on ADR-0013
@@ -256,13 +256,13 @@ decision's outcome.
 
 ## Test Scenarios
 
-Visual parity is verified **without ever running a reference desktop workbench**, from three
+Visual parity is verified **without ever running the reference**, from three
 independent angles:
 
 1. **Token fixture comparison (P1, machine-checked).** A checked-in
    fixture (`the reference-token files`, or
    `.md` table) lists every ported token with its Zai Light and Zai
-   Dark values copied from a local reference clone.
+   Dark values copied from the clone.
    A unit test parses smind's `index.css`, resolves each token in both
    themes, and fails on any mismatch. This is the 1:1 guarantee at the
    token layer and catches drift on every future PR.
@@ -276,8 +276,8 @@ independent angles:
 3. **Source side-by-side checklist (P2–P4, human/grepped).** For each
    surface in the component map
    (local research notes), a checklist row:
-   a reference desktop workbench file(s), smind file, and the concrete visual properties read
-   from a reference desktop workbench's source (padding, radius, tokens used, states). The
+   the reference file(s), smind file, and the concrete visual properties read
+   from the reference's source (padding, radius, tokens used, states). The
    phase PR's Validation section records each row checked off; the
    class-name parallels are also greppable (e.g. smind's sidebar item
    uses the same token utilities as `WorkspaceSidebarItem.tsx`).
@@ -303,7 +303,7 @@ Per-phase scenarios:
   and steps to `-active`.
 - **P4:** git pane with a seeded repo state showing all status colors;
   diff view with +/- lines using diff tokens; terminal renders ANSI
-  test output in a reference desktop workbench's 16 colors both themes; file tree with nested
+  test output in the reference's 16 colors both themes; file tree with nested
   folders + mixed git statuses; settings page sections in both themes.
 - **P5 (when unblocked):** desktop window screenshots vs. the frame
   rules; web build unchanged (P1–P4 screenshot suites all green).
@@ -328,13 +328,13 @@ migration, 4 commits — one per `MIGRATED_ROOTS` batch), `5610d0c`
 (retired-token migration + alias deletion), `ac4ff69` (primitives),
 `20c2d32` (NOTICE + docs/design.md).
 
-- **index.css carries a reference desktop workbench's `@theme` semantic token set** — ported in
+- **index.css carries the reference's `@theme` semantic token set** — ported in
   `8ee70c9`. `the reference-token files` + `the reference-token files`
   resolve all 82 ported `--color-*` tokens (41 families × 2 themes)
   through `index.css`'s own var() chains and assert a match against
-  values copied from a local reference clone's
+  values copied from the clone's
   `.theme-zai-light`/`.theme-zai-dark` blocks — 164 assertions, all
-  green. Tokens a reference desktop workbench shares a name with smind's pre-existing static
+  green. Tokens the reference shares a name with smind's pre-existing static
   layer (background/foreground/card/popover/primary/secondary/accent/
   destructive/border/sidebar) are covered by the same test via their
   existing `--color-*` aliases, not duplicated in the fixture.
@@ -387,7 +387,7 @@ migration, 4 commits — one per `MIGRATED_ROOTS` batch), `5610d0c`
 - **`docs/design.md` is rewritten** — `20c2d32`; describes the
   reference-derived token/type-scale/radius/shadow system (§1, §12, §13)
   and an updated Forbidden list (§14); keyboard/palette/persistence/
-  responsive sections (§7–10) untouched, no a reference desktop workbench equivalent.
+  responsive sections (§7–10) untouched, no reference equivalent.
 - **Token fixture checked in, test asserts resolution in both themes**
   — `the reference-token files` + `the reference-token files`, `8ee70c9`
   (see above).
@@ -406,16 +406,15 @@ One accepted trade-off, not fixed: `input.tsx`/`select.tsx`'s
 `focus-visible:ring-*` (guideline: interactive elements need a visible
 focus replacement for `outline-none`) — a border-color change is a
 real, present replacement, just lower-contrast than a ring; this is
-a reference desktop workbench's own actual design (a local reference clone
-input.tsx`: inputs are "calm and integrated, not glowing by default"
-per a local reference clone), so fixing it would mean deviating from the
+the reference's own actual design (`input.tsx`: inputs are "calm and integrated, not glowing by default"
+per the clone), so fixing it would mean deviating from the
 visual-parity mandate rather than a real component bug.
 
 **Not done in P1** (all explicitly deferred to a later phase by the
 plan, not scope creep left behind): diff2html's own variable overrides
 still read `--diff-addition`/`-deletion` rather than the Reference-named
 `--diff-added`/`-removed` (P4); the terminal's `resolveTerminalTheme()`
-still only resolves chrome colors, not the reference desktop workbench 16-color ANSI set now
+still only resolves chrome colors, not the reference 16-color ANSI set now
 sitting unused in `index.css` (P4); markdown's heading hierarchy uses
 its pre-existing pixel-preserving `text-ui-*` mapping, not yet
 DESIGN.md's h1→`text-ui-xl`/h2→`text-ui-lg` scale (P3); most
@@ -423,7 +422,7 @@ DESIGN.md's h1→`text-ui-xl`/h2→`text-ui-lg` scale (P3); most
 overlay family (`sidebar.tsx`, `tooltip.tsx`, `hover-card.tsx`,
 `scroll-area.tsx`, `resizable.tsx`, `skeleton.tsx`) were left as-is —
 no explicit DESIGN.md violation found in a light pass, and their
-surfaces get pixel-matched against a specific a reference desktop workbench source file in
+surfaces get pixel-matched against a specific the reference source file in
 P2–P4 rather than guessed at here.
 
 ### P1 follow-up — screenshot-review bug fixes
@@ -449,7 +448,7 @@ fresh Playwright screenshots (home/task/settings, light+dark,
    unselected items share one `text-ui-*` class.
 2. **Overall text scale read too small (~11px body text).** The first
    migration pass ported the old Tailwind class name 1:1
-   (`text-sm`→`text-ui-sm`, `text-xs`→`text-ui-xs`), but a reference desktop workbench's roles
+   (`text-sm`→`text-ui-sm`, `text-xs`→`text-ui-xs`), but the reference's roles
    sit one tier higher than those old names suggest. Fixed in `da4abdd`
    by moving every body/label/title site up one tier and reverting the
    genuine badge/counter/kbd sites back to `text-ui-xs` (see the role
@@ -526,11 +525,11 @@ icons for the icon-collapsed rail).
   permanent line. A `p-1` wrapper around the split-tree area gives every
   frame the same 4px gap against the header/sidebar/window edges that
   the handle already gives adjoining panes. smind has no fixed
-  conversation/terminal/side-pane roles the way a reference desktop workbench does (`side dock`
+  conversation/terminal/side-pane roles the way the reference does (`side dock`
   placement can put any tab kind in either pane) — the frame treatment
   applies uniformly to whichever pane(s) the split tree currently holds,
   which is the equivalent for smind's architecture. The `withHandle`
-  prop/nub-dot decoration is gone (a reference desktop workbench's handle has no center grab
+  prop/nub-dot decoration is gone (the reference's handle has no center grab
   dot); `ResizableHandle`'s two call sites (`App.tsx`) updated to match.
   Existing split/resize-persistence tests (`resizable.test.tsx`,
   `App.test.tsx`) are green unchanged — only classNames moved.
@@ -538,7 +537,7 @@ icons for the icon-collapsed rail).
   — `9abd692`, `66cf979`. `--color-sidebar` background was already
   correct from P1 (no change needed); `sidebarMenuButtonVariants`/
   `SidebarMenuSubButton` (`components/ui/sidebar.tsx`) now hover/select
-  onto a reference desktop workbench's own `bg-hover`/`bg-selected` tokens instead of the static
+  onto the reference's own `bg-hover`/`bg-selected` tokens instead of the static
   shadcn `sidebar-accent` pair, matching every other interactive surface
   in the app. Row titles were already `text-ui-base` with `min-w-0
   truncate` (pre-existing, P1-migrated). The footer's Providers/Agents
@@ -558,7 +557,7 @@ icons for the icon-collapsed rail).
   — task rows now align close under the space header they belong to,
   instead of a compounding second indent/guide-line. Pinned-section and
   status-grouped-view task lists (single nesting level) are unaffected.
-- **A reference desktop workbench branding absent** — unchanged; smind's own `logo.png` +
+- **The reference branding absent** — unchanged; smind's own `logo.png` +
   "smind" wordmark are the only mark, no billing/plan/usage footer
   widgets were added.
 - **Attention/unread/pins, keyboard/chords, Find, split panes, drag-to-
@@ -602,7 +601,7 @@ avoids this.
 **Not done / deferred, in scope for a later phase, not left behind**:
 the workspace-header equivalent (task-detail.tsx's `PaneHeader` usage)
 was left on its existing `px-4 py-2.5` padding scale rather than
-a reference desktop workbench's `h-12`/`p-2` — that scale is a P1-documented, cross-cutting
+the reference's `h-12`/`p-2` — that scale is a P1-documented, cross-cutting
 convention (`docs/design.md` §4) shared by every `PaneHeader` consumer,
 including P4-owned panes (diff/terminal/file-editor); changing it here
 would reach outside this phase's file ownership for a padding
@@ -621,22 +620,22 @@ shell), `77c2049` (permission card + confirmation badge), `a3a0467`
 (dark-mode disabled-button fix, found in the composer screenshot pass).
 
 - **Markdown type scale** — `1884acc`. `timeline-markdown.tsx` now
-  matches a local reference clone's Markdown type scale exactly: h1
+  matches the reference's Markdown type scale exactly: h1
   `text-ui-xl`, h2 `text-ui-lg`, h3–h6 share `text-ui-base` and are
   distinguished by weight only (h3/h4 `font-semibold`, h5 `font-medium`,
   h6 `font-normal`), inline code `font-mono text-ui-sm`. This is the
-  "not yet adopting a reference desktop workbench's actual h1/h2 sizing" gap `docs/design.md`
+  "not yet adopting the reference's actual h1/h2 sizing" gap `docs/design.md`
   §12 flagged as P3 scope at the end of P1.
 - **Message containers / chat-bubble radius** — `1884acc`. The user
   bubble (`timeline-row.tsx`) moved to `rounded-xl rounded-tr-sm border
-  bg-surface px-4 py-3`, matching a reference desktop workbench's `ConversationRowView.tsx` user
+  bg-surface px-4 py-3`, matching the reference's `ConversationRowView.tsx` user
   bubble (`rounded-xl rounded-tr-xs border ... px-4 py-3`) — `rounded-tr-
-  sm` is the closest floor Tailwind's stock radius scale has to a reference desktop workbench's
+  sm` is the closest floor Tailwind's stock radius scale has to the reference's
   own custom `xs` step (`docs/design.md` §13: "no `--radius-*` override").
   The run-turn frame (`run-timeline.tsx`'s `<li>`) and the thinking/
   unrecognised-event boxes moved to the same `rounded-xl` tier: read as
   DESIGN.md's own "layout region... does not count as a radius level"
-  carve-out applied to smind's turn-card wrapper (a structure a reference desktop workbench has
+  carve-out applied to smind's turn-card wrapper (a structure the reference has
   no equivalent of at all), so the bubble, tool cards, and the turn frame
   are peers at the container hierarchy's first level, not three nested
   tiers.
@@ -658,7 +657,7 @@ shell), `77c2049` (permission card + confirmation badge), `a3a0467`
   and `focus-within:bg-input-focused` added alongside the pre-existing
   `focus-within:border-input-border-focused` — matching both the
   approved `rounded-2xl` main-composer exception (`docs/design.md` §13)
-  and a reference desktop workbench's "calm and integrated, not glowing by default" input
+  and the reference's "calm and integrated, not glowing by default" input
   philosophy (an always-visible, low-alpha resting border, not
   border-on-focus-only). Send/Stop and the provider/approval/thinking
   selects are unchanged Button/Select primitive consumers (already
@@ -744,7 +743,7 @@ both themes). One pre-existing, out-of-scope observation from the
 light-mode Find screenshot: `--find-highlight`'s ported light value
 (`#fff4eb`) is faint enough against a white page that only the *active*
 match (`--find-highlight-active`) reads clearly — this is P1's own
-faithfully-ported, fixture-tested a reference desktop workbench value, not something this phase
+faithfully-ported, fixture-tested the reference value, not something this phase
 introduced or should silently retune.
 
 **Verification:** `bun run --filter '@smind/ui' test` — 105 test files,
@@ -774,7 +773,7 @@ P4 owns, so no re-screenshot was needed for this phase's panes.
 
 - **Diff/git pane matches `GitPane.tsx`/`GitPaneChangeCard.tsx`** —
   `df4baaf`. diff2html's variable overrides repointed from the retired
-  `--diff-addition`/`-deletion` aliases onto a reference desktop workbench's own
+  `--diff-addition`/`-deletion` aliases onto the reference's own
   `--diff-added`/`-removed` tokens; `FileStatusMarker` (shared with the
   file explorer) colors A/M/D off the git-status token family instead of
   generic success/warning/destructive per DESIGN.md. Per-file rows get a
@@ -795,13 +794,13 @@ P4 owns, so no re-screenshot was needed for this phase's panes.
   prompt path — distinct ANSI hues in both themes, not a single
   foreground color.
 - **File explorer matches `workspace-file-tree/`** — `36592d8`. Rows
-  moved to a reference desktop workbench's 28px height and `depth*12px+8px` indent (was ad hoc
+  moved to the reference's 28px height and `depth*12px+8px` indent (was ad hoc
   14px/depth); a dashed vertical guide line renders per depth level
   (ported from `hierarchyGuides.ts`); hover uses `bg-surface-hover`
   (was generic `bg-hover`); git status markers share `FileStatusMarker`
   with the diff pane. Selection keeps smind's existing `bg-selected`
   fill per DESIGN.md's "use `bg-selected` for selected list rows" rule
-  rather than porting a reference desktop workbench's own selection treatment. Confirmed in
+  rather than porting the reference's own selection treatment. Confirmed in
   `file-explorer-{light,dark}.png` (flat seed: `.git`, `added.txt` green
   `A`, `keep.txt` orange `M`, selected-row highlight) plus code
   inspection of `file-explorer-pane.tsx`'s `hierarchyGuideStyle()`/
@@ -820,7 +819,7 @@ P4 owns, so no re-screenshot was needed for this phase's panes.
   `border-input-border`. Confirmed in `settings-{general,appearance,
   providers,agents,notifications,shortcuts}-{light,dark}.png` — one
   consistent card system across all six sections in both themes.
-- **File editor / preview pane chrome follows a reference desktop workbench's treatments** —
+- **File editor / preview pane chrome follows the reference's treatments** —
   `2cdb9b9`. `file-editor-pane.tsx`'s Edit/Preview segmented control
   moved off the pre-P1 `border-input` onto `border-input-border`,
   matching the diff pane's own segmented toggle; CodeMirror's chrome
