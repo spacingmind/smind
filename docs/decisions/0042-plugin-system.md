@@ -113,7 +113,7 @@ get right with the process and hook machinery already in place.
 **Layout.** `$SMIND_HOME/plugins/<id>/` holds the installed copy; `$SMIND_HOME/plugins/<id>/data/` is persistent per-plugin storage that survives updates and is
 deleted on remove unless `--keep-data`. Install state lives in SQLite (`plugins`: id, version, source, hash, enabled, consented-capabilities hash, installed_at),
 **not** in the plugin directory, so a plugin cannot enable itself. Installs are staged in a temporary directory and swapped atomically; a failed install,
-update or reload keeps the last good version (the Reference/dsh transactional pattern). Ids match `^[a-z][a-z0-9-]{0,63}$`; every contributed name is namespaced
+update or reload keeps the last good version (the reference harnesses' transactional pattern). Ids match `^[a-z][a-z0-9-]{0,63}$`; every contributed name is namespaced
 `<id>:<name>` (MCP servers, skills, profiles, commands, themes, providers) so plugins cannot shadow core or each other. Contributed rows are **owned**: read-only
 in the UI ("from plugin X"), removed with the plugin, never editable by agents.
 
