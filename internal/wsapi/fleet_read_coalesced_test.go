@@ -11,21 +11,22 @@ import (
 )
 
 func TestFleetRead_CoalescedRunPagesWithoutLoss(t *testing.T) {
-	e := newFleetEnv(t)
-	st := e.fleetStore()
-	ws, err := st.CreateWorkspace(store.Workspace{Path: t.TempDir(), Title: "coalesced reader", RoutingPolicy: "hard"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	task, err := st.CreateTask(store.Task{WorkspaceID: ws.ID, Title: "compare storage formats", Status: "done"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	seedCoalescedReaderRuns(t, st, task.ID, [3]string{"final ", "answer ", "here"})
-	cl, caller := approvedConn(t, e)
-
 	for _, limit := range []int{1, 2} {
 		t.Run(fmt.Sprintf("limit=%d", limit), func(t *testing.T) {
+			// A fresh env per limit: paging three runs exceeds one principal's rate-limit burst.
+			e := newFleetEnv(t)
+			st := e.fleetStore()
+			ws, err := st.CreateWorkspace(store.Workspace{Path: t.TempDir(), Title: "coalesced reader", RoutingPolicy: "hard"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			task, err := st.CreateTask(store.Task{WorkspaceID: ws.ID, Title: "compare storage formats", Status: "done"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedCoalescedReaderRuns(t, st, task.ID, [3]string{"final ", "answer ", "here"})
+
+			cl, caller := approvedConn(t, e)
 			read := func(runID string, storedSeqs, visibleSeqs []int64) string {
 				t.Helper()
 				cursor := int64(-1)
@@ -98,8 +99,19 @@ func TestFleetRead_CoalescedRunPagesWithoutLoss(t *testing.T) {
 			}
 			legacy := read("legacy", []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, []int64{3, 4, 5, 6, 7, 8, 9, 10})
 			coal := read("coal", []int64{0, 3, 6, 7, 10}, []int64{3, 6, 7, 10})
-			if legacy != "Hello worldfinal answer here" || coal != legacy {
-				t.Fatalf("text: legacy=%q, coalesced=%q", legacy, coal)
+			// The finalizer merges adjacent text rows into the first one's seq;
+			// thinking rows stay (text dropped) but the wire never shows them.
+			var skelStored []int64
+			raw, err := st.ListRunEventsRaw("skel")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range raw {
+				skelStored = append(skelStored, row.Seq)
+			}
+			skel := read("skel", skelStored, []int64{3, 6, 7, 10})
+			if legacy != "Hello worldfinal answer here" || coal != legacy || skel != legacy {
+				t.Fatalf("text: legacy=%q, coalesced=%q, skeleton=%q", legacy, coal, skel)
 			}
 		})
 	}

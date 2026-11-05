@@ -1733,6 +1733,12 @@ func (reg *Registry) finish(r *run, err error) {
 	// deliverMu -> reg.mu, so no deadlock.
 	reg.DeliverQueued()
 
+	// ADR-0053: point at the provider's session, then collapse the rows to
+	// skeleton form. Before the closedCh signal, so CloseAll (and a test that
+	// waits on it) never closes the store under a conversion.
+	reg.captureNativeRef(r, now)
+	reg.finalizeRun(r.id)
+
 	// Signal last, same reasoning as internal/terminal.Registry's own
 	// finish: CloseAll blocks on this to know the run's subprocess is
 	// actually gone and every subscriber has been notified, not just that

@@ -137,6 +137,15 @@ runs older than `runs.historyRetentionDays` (30 by default) of archived tasks
 every day; `smind runs prune --dry-run` shows what that would remove. The file
 only shrinks after `smind db compact` (see the CLI reference).
 
+## The end of a run's output is missing after a crash
+
+If the daemon was killed hard (`kill -9`, a power loss, a crash) while a run was
+streaming, the last moments of that run's output can be missing: smind buffers
+the open text for up to 250 ms or 4 KiB before writing it, and a hard kill
+loses that buffer, at most 250 ms or 4 KiB per running run. The run comes back
+as interrupted. A normal stop, an agent error or a daemon shutdown (including
+`smind service stop`) writes the buffer first and loses nothing.
+
 ## The daemon uses a lot of memory
 
 Run `smind debug memory`. The daemon keeps only a bounded amount of finished

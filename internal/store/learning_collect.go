@@ -107,6 +107,9 @@ func (s *Store) ListChatRunsWithEventsAfter(chatID, afterEventID int64) ([]ChatW
 		if err := evRows.Scan(&e.ID, &e.RunID, &e.Seq, &e.EventData, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan event of chat %d: %w", chatID, err)
 		}
+		if e, err = s.rehydrate(e); err != nil {
+			return nil, err
+		}
 		if i, ok := idx[e.RunID]; ok {
 			out[i].Events = append(out[i].Events, e)
 		}

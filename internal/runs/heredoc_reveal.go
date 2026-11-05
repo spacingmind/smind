@@ -15,6 +15,12 @@ var ErrNoHeredoc = errors.New("runs: no such heredoc")
 // retention, so there is no tool input left to reveal from.
 var ErrHistoryPruned = errors.New("runs: the run's detailed history was pruned")
 
+// ErrHeredocUnavailable is returned when a finished run's tool input is no
+// longer kept whole (skeleton storage, ADR-0053: over 8 KiB it keeps head and
+// tail only, and after 30 days only a summary), so the body cannot be shown.
+// It is never reported as "no such heredoc": the call may well have had one.
+var ErrHeredocUnavailable = errors.New("runs: the tool input is no longer kept whole")
+
 // HeredocReveal is one raw heredoc body and where it came from. The text is
 // unredacted: the caller (a human-only RPC) redacts it before it leaves.
 type HeredocReveal struct {

@@ -521,14 +521,18 @@ func (reg *Registry) toolCallInput(runID, toolCallID string) ([]byte, error) {
 		return nil, err
 	}
 	var input []byte
+	truncated := false
 	for _, se := range rows {
 		e, err := decodeEvent(se.EventData)
 		if err != nil {
 			return nil, fmt.Errorf("decode event seq %d: %w", se.Seq, err)
 		}
 		if e.Type == taskrunner.EventTypeToolCall && e.ToolCallID == toolCallID && len(e.ToolInput) > 0 {
-			input = e.ToolInput
+			input, truncated = e.ToolInput, se.Truncated
 		}
+	}
+	if truncated {
+		return nil, ErrHeredocUnavailable
 	}
 	return input, nil
 }

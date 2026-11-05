@@ -423,6 +423,26 @@ var migrations = []migration{
 		},
 	},
 	{
+		// ADR-0053: skeleton storage. Every run finished before this ships stays
+		// in full form for good (skeleton_rev -1: never converted); a run still
+		// running, and every later one, is eligible (0). run_excerpts is a new
+		// table, created by schema.sql.
+		name: "run_skeleton",
+		apply: func(db *sql.DB) error {
+			for _, c := range []struct{ name, def string }{
+				{"native_ref", "TEXT NOT NULL DEFAULT ''"},
+				{"skeleton_at", "TIMESTAMP"},
+				{"skeleton_rev", "INTEGER NOT NULL DEFAULT 0"},
+			} {
+				if err := addColumnIfMissing(db, "runs", c.name, c.def); err != nil {
+					return err
+				}
+			}
+			_, err := db.Exec(`UPDATE runs SET skeleton_rev = -1 WHERE status != 'running' AND skeleton_rev = 0`)
+			return err
+		},
+	},
+	{
 		// ADR-0041 F2: the profile a run was launched with, and the run it
 		// continues after a rate limit.
 		name: "run_profile_failover",

@@ -161,6 +161,20 @@ An unknown provider id under `providers.<id>` is an error. See
 > delete. Deleting rows does not shrink `smind.db`; run `smind db compact` once
 > to give the space back (see the CLI reference).
 
+> **How a run is stored, and what a crash can lose.** While a run streams,
+> smind writes its text and thinking to `smind.db` in merged rows, not one row
+> per token. The open row is flushed when a tool call or any other event arrives,
+> when the kind changes (text to thinking), after 250 ms without new output,
+> when it reaches 4 KiB, and when the run ends. If the daemon is killed hard
+> (`kill -9`, a power loss) the output still in that open buffer is lost: **at
+> most 250 ms of streaming or 4 KiB of text per running run**. A run left
+> running by a crash is marked interrupted at the next start anyway. A normal
+> stop, an agent error or a daemon shutdown loses nothing. Once a run finishes,
+> smind keeps its prompts, answers and one row per tool call, and moves large
+> tool output (over 512 bytes) to a separate table that the retention pass
+> removes with the rest of the detail; thinking text is not kept after the run
+> ends.
+
 ### debug
 
 | Key | Default | Notes |

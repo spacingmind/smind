@@ -78,7 +78,7 @@ so a short low-entropy secret is never published as a brute-forceable hash.
 A **running** run keeps today's behaviour: every event is appended in full. This is the "restart resume" guarantee: an upgrade or a
 crash mid-run loses nothing, and the live-history reads (attach, permission reveal) are unchanged. When the run **finishes** (after
 `finish`'s callbacks, the same point where #823 puts the run into the byte-budget LRU), a **finalizer** converts its rows to
-skeleton form inside one transaction (per run; a run over 32 MiB converts in batches with the rows self-describing, below):
+skeleton form inside one transaction per run (a run over 64 MiB of rows is left in full form and logged: the largest run on the real database is 6 MiB, so batching was dropped; rows stay self-describing, below):
 
 1. coalesce adjacent text rows (the first chunk's `id` and `seq` survive; the others are deleted: `seq` and `id` have gaps, which
    readers already must tolerate, #827 decision 3 test and `learning_collect.go`);
@@ -133,7 +133,7 @@ found" and degrades (D6); smind never guesses.
 
 | | claude-native | codex-native | ACP agents (GLM, Kimi, OpenCode, Copilot, Cline, Goose, Cursor, Gemini, ...) |
 |---|---|---|---|
-| Where the session lives | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<cwd with `/` → `-`>/<sessionId>.jsonl` (verified on disk). An instance with a private `claude/` config dir (`claude_config_dir.go`) stores it there, so `native_ref` records the dir. Survives deletion of the worktree (keyed by the cwd *string*) | `<CODEX_HOME or ~/.codex>/sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl` (verified), `archived_sessions/` after archive; instances use a private `CODEX_HOME` (`codex_endpoint.go`) | opaque, agent-owned; smind cannot read it |
+| Where the session lives | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<cwd with every character that is not an ASCII letter or digit → `-`, so `/.smind/` is `--smind-`>/<sessionId>.jsonl` (verified on disk). An instance with a private `claude/` config dir (`claude_config_dir.go`) stores it there, so `native_ref` records the dir. Survives deletion of the worktree (keyed by the cwd *string*) | `<CODEX_HOME or ~/.codex>/sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl` (verified), `archived_sessions/` after archive; instances use a private `CODEX_HOME` (`codex_endpoint.go`) | opaque, agent-owned; smind cannot read it |
 | How smind reads it | parse the JSONL file directly (read-only, streaming) | **prefer the typed app-server RPC**: `thread/read {threadId, includeTurns}` and `thread/turns/list` exist in the 0.166.0 generated schema; the rollout file is the fallback | spawn the agent and call `session/load` **only** when the agent advertised `loadSession` (`Client.SupportsLoadSession`); the agent replays the whole session as `session/update` notifications. `session/resume` does not replay and is useless here |
 | Format and stability | unversioned, internal, mixed record types (`user`, `assistant`, `system`, `attachment`, `queue-operation`, internal bookkeeping types we do not read); each record carries the CLI `version`. **Not a contract** | rollout lines are internal (`session_meta` carries `cli_version`); the app-server v2 protocol is typed and schema-generated, so RPC is the stable surface | the ACP wire is a published protocol, but what an agent replays (tool content, thinking) varies by agent |
 | Cost / side effects | file read: a 55 MB transcript parses in ~150 ms (Python upper bound); median file 126 KB | RPC: spawn `codex app-server` (no model call) | spawn an agent process, possibly auth and MCP wiring; slower and with side effects, so **explicit user action only** |
@@ -268,6 +268,39 @@ Python, an upper bound for a Go streaming reader: Claude Code transcript 55.7 MB
 files 126 KB / 780 KB are single-digit milliseconds. Codex `thread/read` and ACP `session/load` add a process spawn (hundreds of
 ms to seconds, not measured here: no live agent was started). The bounds in D4 (10 s, 64 MB) cover them; PR2 records Go numbers
 in the PR body.
+
+## Implemented: the finalizer, skeleton rows and `native_ref` (PR2)
+
+`internal/runs/skeleton.go`, `internal/store/run_skeleton.go`, `internal/runs/nativeref.go`.
+
+- **When.** `finish` captures `native_ref` and then converts the run, before it signals closed (so shutdown never closes the
+  store under a conversion). A boot pass (`FinalizePending`) converts runs `finish` never reached (a crash, a run running at an
+  upgrade). A migration marks every run finished before this change `skeleton_rev = -1`: those stay in full form for good (H4); a
+  running run and every later run is eligible (`0`); converted is `> 0`. The store re-checks all of it inside the transaction
+  (never `running`, never pruned, never converted, never legacy).
+- **What.** Thinking text is dropped (H1; the row says how big, plus a hash over 512 B). Adjacent answer-text rows become one
+  row; an answer over 32 KiB or a user message over 16 KiB keeps head and tail. A tool input or result over 512 B moves to
+  `run_excerpts` (whole to 8 KiB, else 4 KiB head + 4 KiB tail), the row keeps a summary (args: `ElideToolCall` output, at most
+  512 B; result at most 200 B) and a descriptor `{n, sha256, ex, heredoc bodies {index, n, sha256}}`; the tool title is capped at
+  512 B. Every other row (permissions, usage, done, notes, small tool calls) is untouched. Rows carry `"v":2` and `"skel"`.
+  Not captured today and therefore not in the skeleton: a tool call's duration and exit code (the event stream has no such field).
+- **Reads rehydrate.** Every store read of `run_events` (history, tail, tool-call input, fleet paging, learning windows)
+  merges the excerpt back into the row, so an unchanged reader sees the events it always saw: payloads up to 8 KiB identical,
+  larger ones as head + marker + tail, thinking as `[thinking not kept: N bytes]`. A row whose excerpt is gone (pruned) keeps its
+  summary and is flagged `Truncated`. The heredoc reveal of a finished run therefore still works within the excerpt tier; once the
+  input is only head and tail, or the excerpt is pruned, it is the typed `ErrHeredocUnavailable`, never "no such heredoc".
+- **Cache (#823).** The resident history of a just-finished run is untouched (full, chunk level); a reload from the store shows
+  the skeleton form. The label `historySource` that distinguishes them comes with the read-contract PR.
+- **Prune (#829).** Unchanged for now: the prune deletes a run's rows and, with them, its excerpts. Keeping the skeleton rows
+  and deleting only the excerpts is PR C.
+- **`native_ref`** (JSON on the run row, written by the daemon at run end from what the runner launched the CLI with):
+  provider, harness, session id, the effective config root (`CLAUDE_CONFIG_DIR` or the private instance dir; `CODEX_HOME`),
+  the transcript path when it exists, cwd, the CLI version read from the first lines of the session file, the turn window and
+  the prompt hash. Verified on a real machine: Claude Code keeps `<config dir>/projects/<cwd, each non-alphanumeric as
+  "-">/<sessionId>.jsonl`, whose records carry `uuid`, `parentUuid`, `promptId`, `version`, `timestamp`; Codex keeps
+  `sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl` whose first record `session_meta` carries `id`, `cli_version`, `cwd`.
+  ACP agents get the session id only. Open for the rebuilder PR: use the transcript's own `uuid` bounds instead of prompt
+  hash plus time window.
 
 ## Measurements on the real database (PR0, 2026-11-05)
 
