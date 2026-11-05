@@ -429,3 +429,20 @@ func TestRestartHistoryIsCoalescedAndEquivalent(t *testing.T) {
 		t.Errorf("restarted history has %d events for %d streamed: not coalesced", len(hist), len(stream))
 	}
 }
+
+// TestNonContiguousSeqIsNotMerged: chunks whose seqs are not adjacent had another
+// event recorded between them (a permission request from another goroutine):
+// merging would reorder the text around it, so the buffer is flushed instead.
+func TestNonContiguousSeqIsNotMerged(t *testing.T) {
+	c := newCoalesceEnv(t)
+	c.reg.persist(c.live, 0, txt("a"))
+	c.reg.persist(c.live, 2, txt("b"))
+	c.reg.flushPersist(c.live)
+	rows, err := c.e.st.ListRunEvents("live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Seq != 0 || rows[1].Seq != 2 {
+		t.Fatalf("rows = %+v, want two rows at seq 0 and 2", rows)
+	}
+}
