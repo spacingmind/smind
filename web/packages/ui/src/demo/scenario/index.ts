@@ -30,7 +30,7 @@ export const TASK = { webhook: 1, retry: 2, parseDate: 3, review: 4, analysis: 5
  * The shipped "tour" scenario (ADR-0051 section 2): the nine tasks of the landing page's hero, in the real UI. Every name, path,
  * branch and number is synthetic; every timestamp is written relative to `now`, so the demo never says "3 years ago".
  */
-export function buildTour(now: number): DemoScenario {
+export function buildTour(now: number, opts: { summarizedRun?: boolean } = {}): DemoScenario {
   const ago = (ms: number) => new Date(now - ms).toISOString();
 
   const workspaces: Workspace[] = [
@@ -98,7 +98,8 @@ export function buildTour(now: number): DemoScenario {
   });
   const logs = (id: string, events: RunLogEvent[]): RunLogsResult => ({ runId: id, status: "done", stopReason: "end_turn", events });
   // ADR-0053: one finished run's persisted history is a trimmed summary the daemon can rebuild on demand
-  // (run.logs with detail "full") -- the landing tour's history-source note and its Load full history button.
+  // (run.logs with detail "full"). Only tours built with { summarizedRun: true } carry it; the public
+  // landing tour stays clean of the history-source note.
   const summarized = (id: string, events: RunLogEvent[]): RunLogsResult => ({
     ...logs(id, events),
     historySource: "skeleton",
@@ -118,7 +119,7 @@ export function buildTour(now: number): DemoScenario {
   ];
 
   const runLogs: Record<string, RunLogsResult> = {
-    "demo-run-retry": summarized("demo-run-retry", RETRY_EVENTS),
+    "demo-run-retry": opts.summarizedRun ? summarized("demo-run-retry", RETRY_EVENTS) : logs("demo-run-retry", RETRY_EVENTS),
     "demo-run-test": logs("demo-run-test", PARSE_DATE_EVENTS),
     "demo-run-review": logs("demo-run-review", REVIEW_EVENTS),
     "demo-run-analysis": logs("demo-run-analysis", ANALYSIS_EVENTS),

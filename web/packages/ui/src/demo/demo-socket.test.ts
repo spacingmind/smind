@@ -51,7 +51,7 @@ interface Harness {
 async function start(reducedMotion = false): Promise<Harness> {
   resetDemoSession();
   const clock = new ManualClock();
-  const client = await connectDemo({ scenario: buildTour(NOW), clock, reducedMotion });
+  const client = await connectDemo({ scenario: buildTour(NOW, { summarizedRun: true }), clock, reducedMotion });
   return { client, clock };
 }
 
