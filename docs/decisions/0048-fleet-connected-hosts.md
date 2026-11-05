@@ -8,15 +8,15 @@ the PR named next to it in `docs/plans/active/fleet-hosts.md`. Spec, acceptance 
 
 Inputs: ADR-0031 (D9 multi-device, pinned relay identity; D35 Ed25519 `device_hello`), ADR-0035 (relay E2EE v2), ADR-0041 (seats,
 tree budget A5, parent notifications B3), ADR-0017/0019 (an agent never answers a permission), ADR-0044 (rails, audit), ADR-0045
-(inbox), ADR-0047 (policy floor S1), `docs/WORKSPACE_PROTOCOL.md`, Paseo's connected hosts (`refs/paseo/docs/connected-hosts.md`,
-`.../connected-hosts/`, `.../agent/tools/paseo-tools.ts`), and a local research note (`docs/research/local/fleet-connected-hosts.md`,
+(inbox), ADR-0047 (policy floor S1), `docs/WORKSPACE_PROTOCOL.md`, a reference workbench's connected hosts (a local reference clone,
+`.../connected-hosts/`, `.../agent/tools/reference-tools.ts`), and a local research note (`docs/research/local/fleet-connected-hosts.md`,
 gitignored).
 
 ## Context
 
 Today one smind daemon is one machine. The Human has several (a Mac, a Linux homelab box, a Windows box for Windows-only
 verification). A Lead on one of them cannot ask another to run a Peer, check a build on Windows, or read what a remote agent is doing.
-The Human relays by hand, and the work that needs a different OS or a bigger GPU box is the work that gets skipped. Paseo ships
+The Human relays by hand, and the work that needs a different OS or a bigger GPU box is the work that gets skipped. A reference workbench ships
 "connected hosts": daemon A saves daemon B and its agent tools take an optional `serverId`.
 
 smind already has the pieces of an identity-checked link, but each is built for a *human's device*: persistent Ed25519 device keys with a
@@ -49,7 +49,7 @@ All **ACCEPTED**. Wording is the Human's; the ADR text below implements it.
   hosts; the callee's own permpolicy floor (S1, ADR-0047) always applies; cross-host calls audited on both ends.
 - **D4 v1 remote operations.** List hosts, list workspaces and tasks, create a task or agent in a destination workspace (explicit
   provider and model), send a prompt, get status and activity, with finish notifications routed back and durable across a caller
-  restart (Paseo semantics: three failed observations = "status unknown", never "finished"). Remote terminal and file access are NOT in v1.
+  restart (a reference workbench semantics: three failed observations = "status unknown", never "finished"). Remote terminal and file access are NOT in v1.
 - **D5 Code moves through git only.** The destination fetches the branch from origin into its own worktree; no file sync; results come
   back as commits, PRs and run events.
 - **D6 Accounts and secrets never cross hosts.** Each host uses its own provider accounts; no borrowing of another host's accounts or
@@ -207,7 +207,7 @@ a peer are stored verbatim and shown in the callee's UI with an origin badge (th
 
 The **caller's** daemon owns the subscription. On a successful (or ambiguous) `fleet.task.create`/`send` with notify on (default), it writes
 a `fleet_watches` row **in the same transaction** that records the remote task mirror (local commit; the remote create is a separate
-commit, as in Paseo; a failed local write reports failure and tells the Lead to inspect before retrying; the create is idempotent
+commit, as in a reference workbench; a failed local write reports failure and tells the Lead to inspect before retrying; the create is idempotent
 by `idempotencyKey`, so retry is safe).
 
 - The watcher resumes at daemon start from `fleet_watches` and opens `fleet.run.wait` with its cursor; a run that finished while the
@@ -277,7 +277,7 @@ Caps: `maxHosts` 16, `maxConnectionsPerPeer` 1, handshake 10 s, frame 256 KiB, o
 1. **Mesh object / cluster membership.** One shared membership list. Rejected: a registry every node trusts is a new central authority;
    pairs with per-direction grants (D1) give the same mesh as a toggle without a coordinator.
 2. **Forward the Human's own device credentials / a shared token.** Rejected: one stolen token = every host; no per-direction grant.
-3. **Multiplex virtual sessions over one physical link (Paseo).** Deferred: needed for terminal and file bytes (not in v1). One wsapi
+3. **Multiplex virtual sessions over one physical link (a reference workbench).** Deferred: needed for terminal and file bytes (not in v1). One wsapi
    connection per link is enough for control operations and keeps the principal model simple.
 4. **Transitive routing with a hop budget.** Rejected for v1 (D3): hop limit 1; revisit only with a signed per-hop chain.
 5. **Let the caller choose the permission mode or profile of a remote run.** Rejected (ADR-0019 #6 pattern): authority is the callee's.

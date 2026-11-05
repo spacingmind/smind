@@ -514,7 +514,7 @@ PR3 (web picker, branch gate-reasons-pr3): AC13-AC17 and AC19 evidence
 
 - Vitest `provider-model-picker-gate.test.tsx` (24), `provider-gate.test.ts`, `gate-action-bridge.test.tsx`; full web suite 427 files / 4496 tests green; `tsc --noEmit` clean.
 - Mutations (each failed its named test): click selects a hard-gated row (provider rows test); Enter no longer runs the action (keyboard test); `isHardGate` always false (helper test); past `until` still gates (helper test); gate no longer inherited by model rows (build test); `gatesBlock` ignored (settings test); bridge listener removed (bridge test); clear control shown without a handler (actions test); gated rows dropped from the arrow walk (keyboard tests).
-- Frames: see the PR body (`/tmp/steward4/zcode-audit/after/gate-reasons/`).
+- Frames: see the PR body (`/tmp/steward4/reference-audit/after/gate-reasons/`).
 
 PR4 (mobile new-task picker, #778): AC18 evidence
 

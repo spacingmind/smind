@@ -6,8 +6,8 @@ Accepted (2026-10-18, by the Human). Plan: [`docs/plans/completed/client-state-s
 
 ## Decision
 
-The web UI (`web/packages/ui`, also the desktop app's webview) adopts two libraries, the same pair Paseo uses
-(`refs/paseo/packages/app`):
+The web UI (`web/packages/ui`, also the desktop app's webview) adopts two libraries, the same pair a reference workbench uses
+:
 
 1. **`@tanstack/react-query` owns every piece of daemon data** fetched over wsapi (provider catalog, accounts, plan
    usage, profiles, provider health, workspace/task lists, `daemon.info`, …) and the desktop bridge's read calls
@@ -34,8 +34,8 @@ The web UI (`web/packages/ui`, also the desktop app's webview) adopts two librar
 
 ## Alternatives considered
 
-- **SWR + zustand** (ZCode, `refs/zcode/packages/ui`). Smaller, but weaker mutation/invalidation story and no
-  devtools parity with Paseo, which is the interaction reference we port from.
+- **SWR + zustand** (a reference desktop workbench, a local reference clone). Smaller, but weaker mutation/invalidation story and no
+  devtools parity with a reference workbench, which is the interaction reference we port from.
 - **Keep the hand-rolled stores and standardise them.** No new dependency, but every entity would re-implement
   caching, single-flight, invalidation and loading/error states; the audit found 7 `provider.list`, 4 `profile.list`
   and 4 independent `provider.test` caches drifting apart.
@@ -47,5 +47,5 @@ A reuse audit (2026-10-18) found the same server entities fetched and cached ind
 surfaces disagree: Providers shows an account as "not tested"/OK while Plan usage reports its login expired;
 `account.updated` is never subscribed; profiles created in Settings never reach the composer until reconnect. A
 shared query cache keyed by RPC with event-driven invalidation removes that class of bug, and zustand replaces prop
-drilling from a 2,300-line `App.tsx` for shared UI state. Matching Paseo's stack makes porting its components
+drilling from a 2,300-line `App.tsx` for shared UI state. Matching a reference workbench's stack makes porting its components
 straightforward.

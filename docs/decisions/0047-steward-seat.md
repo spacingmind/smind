@@ -15,7 +15,7 @@ inbox with derived items), ADR-0037/#632 (secretdeny rules), `docs/plans/active/
 
 ### What the Steward does by hand today
 
-In the Paseo-era room and again in the smind trees of 2026-10-25..27 a human (or a Claude session acting for them) plays **Steward**: it briefs Leads, watches their
+In the reference-era room and again in the smind trees of 2026-10-25..27 a human (or a Claude session acting for them) plays **Steward**: it briefs Leads, watches their
 runs, answers their permission requests, reads their PRs and says "ACCEPTED, merge order …". Over ~45 PRs in one session this was the bottleneck and the main source of
 mistakes that a person makes at 3 a.m.: a request approved without reading the command, a stale screenshot accepted, a stacked PR pushed. The handoffs record what the
 Steward actually checks. Those checks are the specification of this ADR:

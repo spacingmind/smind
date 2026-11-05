@@ -4,7 +4,7 @@
 
 ADR-0013 (`docs/decisions/0013-desktop-bundled-ui.md`, Accepted 2026-09-25) moves the Tauri desktop app from "the webview loads the daemon's web UI" (ADR-0012) to a **bundled** web UI.
 
-The UI is served by a **Rust-side loopback proxy** that reverse-proxies `/api/*` and `/ws` to the selected daemon. There is also a Paseo-style **connection list** and a scoped IPC bridge.
+The UI is served by a **Rust-side loopback proxy** that reverse-proxies `/api/*` and `/ws` to the selected daemon. There is also a reference-style **connection list** and a scoped IPC bridge.
 
 **This plan is part 1.** Scope:
 - the bundled UI;
@@ -16,7 +16,7 @@ The UI is served by a **Rust-side loopback proxy** that reverse-proxies `/api/*`
 - the relay transport (Rust-side E2EE bridge);
 - version skew / "update daemon and restart";
 - the app-managed local daemon (WSL/macOS);
-- ZCode's desktop chrome (custom titlebar). That is `zcode-visual-parity` P5.
+- A reference desktop workbench's desktop chrome (custom titlebar). That is `reference-visual-parity` P5.
 
 **Hard constraints (user):**
 - **No daemon/backend architecture change:** no CORS, no Origin allowlist, no new endpoints. The web UI's same-origin assumptions (`web/packages/ui/src/lib/daemon.ts` fetches `/api/token`; `lib/ws-client.ts` builds the WS URL from `location.host`) are preserved by construction, through the proxy.

@@ -6,8 +6,8 @@
 nothing is scheduled. The user decided that the extensions below will be
 implemented later, and only if real use shows that **profile `notes` plus
 [`docs/WORKSPACE_PROTOCOL.md`](../WORKSPACE_PROTOCOL.md) are not enough**.
-`WORKSPACE_PROTOCOL.md` is on `develop` (#290); the Paseo stopgap (five
-profiles, two Paseo-tool-less Peer providers, a supervisor heartbeat) runs
+`WORKSPACE_PROTOCOL.md` is on `develop` (#290); the reference workbench stopgap (five
+profiles, two reference-tool-less Peer providers, a supervisor heartbeat) runs
 on it today. Until that evidence exists this ADR is a design to pick up,
 not a commitment. The numbered design below says what the extension would
 be; the "Decisions for the user" list in the plan is what to answer first.
@@ -27,13 +27,13 @@ Spec: [`docs/plans/active/orchestration-roles.md`](../plans/active/orchestration
 
 The Supervisor → Lead → Peer workflow needs five things from a profile that
 a smind profile (ADR-0014/0019/0025: provider, permission mode, thinking,
-model, notes) does not carry. Paseo's profile does not carry them either, so
+model, notes) does not carry. A reference workbench's profile does not carry them either, so
 the stopgap enforces each by prompt or by a provider switch:
 
-| Need | Paseo stopgap | smind today |
+| Need | A reference workbench stopgap | smind today |
 |---|---|---|
 | Role instructions | the agent reads `WORKSPACE_PROTOCOL.md` because the brief says to | same; ADR-0014 excluded `systemPrompt` |
-| Tool policy | `paseoTools.enabled: false` on the `glm-peer` / `claude-s-peer` providers | `smind mcp serve` is added by hand (ADR-0017/0018, `smind` skill); no per-profile policy |
+| Tool policy | `refTools.enabled: false` on the `glm-peer` / `claude-s-peer` providers | `smind mcp serve` is added by hand (ADR-0017/0018, `smind` skill); no per-profile policy |
 | Allowed children | the Lead's notes say "Peer profiles only" | none: `task_send` accepts any `profileId` or raw provider |
 | Limits | "20-turn limit" in a note | `agents.glm.maxTurns` (daemon-wide, #273), `orchestration.maxDepth`, the per-tree concurrency guard (#289); no per-profile turn or cost cap |
 | Outcome | prose handoff; `REOPEN_REQUEST` / `DEPENDENCY_REQUEST` / `BLOCKED` are words in a message | `done` plus `stopReason`; a GLM `max_turn_requests` stop reads as `done` (orchestration-parity D-G5/D13) |
@@ -60,7 +60,7 @@ exactly as today. All contract fields are **human-authored only**
 | Field | Meaning |
 |---|---|
 | `instructions` | text (capped, 16 KiB) plus `skills`: names of bundled skills (#279) whose bodies are appended, capped 32 KiB total. The developer-instructions equivalent |
-| `orchestrationTools` | bool. Whether the run gets the built-in `smind` MCP server (the orchestration catalog). Smind's `paseoTools.enabled` |
+| `orchestrationTools` | bool. Whether the run gets the built-in `smind` MCP server (the orchestration catalog). Smind's `refTools.enabled` |
 | `childPolicy` | `none` (default), `leaf` (any profile whose own `orchestrationTools` is false) or `profiles` plus `childProfileIds`. `orchestrationTools=false` forces `none` |
 | `maxTurns` | per run |
 | `budgetUsd`, `budgetTokens` | per run, from ADR-0020 usage |
@@ -127,7 +127,7 @@ optimization that would share the self-learning projector (ADR-0026).
 Honest limit: this is a guard against agent drift and mistakes, not a
 sandbox. A Peer with a shell can read the daemon token file and speak the
 wsapi as a human. The real boundary there is the provider's own
-permission mode or sandbox (ADR-0019), exactly as in the Paseo stopgap.
+permission mode or sandbox (ADR-0019), exactly as in the reference workbench stopgap.
 Unenforceable limits are reported, never faked: `maxTurns` on Codex, or a
 budget on a provider that reports no usage (ADR-0020: never estimated), are
 shown as "not enforced" on the profile.
@@ -207,7 +207,7 @@ limits. This is a note for the self-learning plan, not work in this one.
   do.
 - **A distinct `needs-continue` run status.** Not recommended (item 4), but
   it is the user's call (D13).
-- **Enforce only by not injecting the MCP server** (the Paseo model).
+- **Enforce only by not injecting the MCP server** (the reference workbench model).
   Insufficient: Codex cannot be stripped, a user-level `smind` MCP entry or
   a manual workspace row bypasses it, and self-reported provenance cannot
   scope a Lead to its own subtree.

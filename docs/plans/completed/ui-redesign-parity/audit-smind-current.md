@@ -56,7 +56,7 @@ detaches live subscriptions without stopping runs (`App.tsx:29-45`).
 
 **Not present**: splits, a side dock, an explorer dock, tab reordering,
 drag-and-drop, "open to side", a command palette, multiple panes of any
-kind. The side dock was scoped in `docs/research/dual-mode-ui.md` and named
+kind. The side dock was scoped in `docs/research/local/dual-mode-ui.md` and named
 in the `tab-registry-side-dock` plan's *title*, but it is not in that
 plan's acceptance criteria and did not ship.
 
@@ -196,7 +196,7 @@ health dot from `provider.test`, a Connect button for
 `"api-key"` (`account.add`), and "managed externally" for
 `kind: "cli"` (GLM).
 
-Missing vs `audit-cliproxyapi.md`: no status message, no token expiry /
+Missing vs `audit-proxy-project.md`: no status message, no token expiry /
 last refresh, no rate-limit recovery time, no success/failure counters, no
 usage/quota, no per-account label or note, no disable toggle, no delete,
 no "which models does this credential serve", no cancel on an in-flight
@@ -217,7 +217,7 @@ default provider/policy, no terminal settings.
 `hooks/use-task-attention.ts` + `hooks/use-attention-notifications.ts` +
 `hooks/use-notification-permission.ts`:
 
-- Reasons: `error | finished | permission` — the same vocabulary Paseo
+- Reasons: `error | finished | permission` — the same vocabulary a reference workbench
   uses. Computed on every (re)connect from `run.list` + `run.logs` per
   running run (an unresolved `permission_request`), plus a seen-snapshot
   taken when a task is selected.
@@ -253,7 +253,7 @@ Geist Variable as `--font-sans`.
 **A complete `.dark` block exists and is never applied.** Nothing sets the
 `dark` class, nothing reads `prefers-color-scheme`, and there is no
 toggle — confirmed by grep across `web/packages/ui/src`. This was already
-flagged as open question 1 in `docs/research/uiux-audit.md` §4 P2 item 10
+flagged as open question 1 in `docs/research/local/uiux-audit.md` §4 P2 item 10
 and is still open. In practice smind is light-mode only, which for an
 agent tool used at night is a real daily-driver complaint.
 
@@ -306,7 +306,7 @@ problem, not a hypothetical one.
 ## 9. Empty / loading / error states
 
 Handled per-pane, inconsistently — the specific finding of
-`docs/research/uiux-audit.md` §2.2, partially addressed since (the
+`docs/research/local/uiux-audit.md` §2.2, partially addressed since (the
 empty-database crash is fixed; CRUD dialogs exist so the empty state is no
 longer a dead end).
 

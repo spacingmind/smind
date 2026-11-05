@@ -7,8 +7,8 @@ user-approved sketch `docs/research/local/ui-sketch-run-config-2026-09.md`
 (both local-only, not committed — read them if still present on disk;
 otherwise the acceptance criteria below are the authoritative spec, they
 were transcribed from those files verbatim). User's own words when
-approving the sketch: "Ok hợp lí, làm đi, tôi cần nó clean như zcode/paseo
-nhé" — match ZCode's density and restraint (P1 design system,
+approving the sketch: "Ok hợp lí, làm đi, tôi cần nó clean như reference/reference
+nhé" — match a reference desktop workbench's density and restraint (P1 design system,
 `docs/design.md`): neutral tokens, `text-ui-*` scale only, radius nesting
 xl→lg→md→sm, one primary action per surface, muted metadata.
 
@@ -94,8 +94,8 @@ that already exists.
   light and dark theme against a temp daemon with sample data (workspace/
   space/tasks/accounts/profiles), saved to
   `Downloads\smind-run-config-ia\`, and visually checked against the
-  ZCode density bar before this is called done — per standing
-  instruction, "clean like ZCode/Paseo" is verified by screenshot, not
+  a reference desktop workbench density bar before this is called done — per standing
+  instruction, "clean like reference workbench" is verified by screenshot, not
   assumed from the diff.
 
 ## Test Scenarios
@@ -132,7 +132,7 @@ that already exists.
 10. Light/dark screenshots of: sidebar, composer toolbar (closed +
     agent-menu open + one field hand-edited), task header pill, Settings
     → Agents (list + inline edit open), Settings nav, command palette
-    open — all saved and self-reviewed against ZCode's density.
+    open — all saved and self-reviewed against a reference desktop workbench's density.
 
 ## Decisions
 
@@ -168,14 +168,14 @@ that already exists.
 
 - [x] Settings → Agents' "New agent" form redesigned: a header "+ New agent" button (top-right, `app-sidebar.tsx`'s "+ New workspace" pattern) opens the same inline `<ProfileForm>` card Edit uses, at the top of the list; Provider/Approval/Thinking are one 3-column equal grid (a non-Claude provider gets an empty grid cell, not a dead Thinking control); the empty state shows a sentence plus its own copy of the button.
 - [x] Agent trigger reads "No agent" (muted `text-foreground-muted`), not "Agents", matching the header pill and the agent menu's own wording for that state.
-- [x] Composer focus ring: `focus-within:border-input-border-focused` (no ring/glow), matching every Select/Input's own focus treatment and ZCode's "calm, not glowing" input style — the old `border-ring` + `ring-3 ring-ring/50` read as a bright double border in dark mode (`--ring` is near-white there).
+- [x] Composer focus ring: `focus-within:border-input-border-focused` (no ring/glow), matching every Select/Input's own focus treatment and a reference desktop workbench's "calm, not glowing" input style — the old `border-ring` + `ring-3 ring-ring/50` read as a bright double border in dark mode (`--ring` is near-white there).
 - [x] Sidebar footer "Providers" health dot + "N healthy" (see Progress above).
 
 ## Validation
 
 Confirmed via `task test` (Go `go test ./...` all green, web `bun run --filter '@smind/ui' test` 1295/1295 passing including every test listed above), `bun run --filter '@smind/ui' typecheck` (clean), and `task lint` (go vet + gofmt clean).
 
-Screenshots (desktop 1440×900, light + dark, against a temp daemon at a temp `SMIND_HOME` on :4706 seeded with one workspace/space/2 tasks/2 agent profiles/1 demo account) saved to `Downloads\smind-run-config-ia\` and reviewed by hand against ZCode's density:
+Screenshots (desktop 1440×900, light + dark, against a temp daemon at a temp `SMIND_HOME` on :4706 seeded with one workspace/space/2 tasks/2 agent profiles/1 demo account) saved to `Downloads\smind-run-config-ia\` and reviewed by hand against a reference desktop workbench's density:
 - `01-home` — sidebar footer's Providers (health dot + count)/Agents shortcuts.
 - `02-task-toolbar` — closed toolbar (Agent trigger reads "No agent", muted) + header pill.
 - `03-agent-menu-open` — agent menu (No agent / per-profile metadata rows / Manage agents…⌘,).

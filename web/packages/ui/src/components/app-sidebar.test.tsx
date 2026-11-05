@@ -1099,7 +1099,7 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
 
 /**
  * The collapsed-search field (ui-redesign-parity Item 12,
- * audit-deepseek-harness.md §3): a header toggle that expands into a
+ * audit-agent-harness.md §3): a header toggle that expands into a
  * field; a non-blank query flattens the tree; an outside click collapses
  * only an empty query.
  */

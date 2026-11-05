@@ -7,7 +7,7 @@ This is the working folder of the `single-agent-loop` skill (`.agents/skills/sin
 
 System audited: smind's in-smind tree orchestration as used to develop smind itself: Supervisor seat -> Lead seats -> Peer seats (ADR-0041), role pack `peer-sonnet`, `peer-glm`, `lead`, `reviewer`, `supervisor` (+ the hand-made `supervisor-sonnet`).
 
-Outside the system, so no rows and nothing to fold: the **Human** (goals, merges, releases) and the **Steward**, an external Paseo agent that plays Human and Lead-of-record: it sends briefs to the Supervisor seat (task 45) or straight to a Lead, reads every PR adversarially, approves seat pushes and reports verdicts (`docs/research/local/handoff-steward-2026-10-25.md`, local-only). The Supervisor session that delegated this audit is on this side too.
+Outside the system, so no rows and nothing to fold: the **Human** (goals, merges, releases) and the **Steward**, an external a reference workbench agent that plays Human and Lead-of-record: it sends briefs to the Supervisor seat (task 45) or straight to a Lead, reads every PR adversarially, approves seat pushes and reports verdicts (`docs/research/local/handoff-steward-2026-10-25.md`, local-only). The Supervisor session that delegated this audit is on this side too.
 
 Step 0 changed no code, profile or prompt, and ran no model.
 
@@ -59,7 +59,7 @@ to drop, instructions about other agents, router rules that conflict.
 - **Conflict: wait or end the turn.** `smind-leader/SKILL.md:35` tells the Lead to `task_wait`, while `:34` and `:63` say do not poll or wait, end the turn and let the `[child event]` arrive. The skill mixes an external orchestrator and an in-seat Lead.
 - **Hard limits written as prose.** "End your turn after you dispatch", "never end a turn waiting on a background command" (`rolepack.go:47,57`), "never merge" and "launch Peers only" (the last is enforced by admission, the others are not). The turn rules failed three times in the dogfood: a Lead stalled 18 min on its own Monitor (entry 76), ended on an intention for 16 min (entry 90) and ended on "may I push?" for 5 min (entry 91). They belong in a tool or in the daemon (the `stalled` flag on `task_tree` is the start), not in more prompt text.
 - **Instructions about other agents.** The Lead prompt carries Peer timings and prices (`rolepack.go:55`) that `peer-glm`'s Notes repeat (`rolepack.go:80`). `profile_list` already returns Notes, so one place is enough.
-- **Stale scope.** `WORKSPACE_PROTOCOL.md:3-7,33-35` still say it applies to Paseo profiles and the `glm-peer` provider; `:85-105` assume GLM's 20-turn limit.
+- **Stale scope.** `WORKSPACE_PROTOCOL.md:3-7,33-35` still say it applies to a reference workbench profiles and the `glm-peer` provider; `:85-105` assume GLM's 20-turn limit.
 - **Duplicated checks.** The Supervisor skill's "review the report, not the claim" (`smind-supervisor/SKILL.md:22`) and the protocol's "not a second Lead" (`WORKSPACE_PROTOCOL.md:22`) pull in different directions; the first run re-ran the same tests three times (Peer, Lead, Supervisor: dogfood entry 62).
 - **Persona.** No persona or tone instructions in any seat prompt. Nothing to drop.
 - **Size at start.** A Lead starts with about 6,200 tokens of instructions and reads (instructions, skill, protocol, `smind` skill); a Peer with about 450 plus the brief; the Supervisor with about 3,400.
@@ -142,7 +142,7 @@ Unchanged. Human decides later (no traffic found, nothing to measure).
 ### The three contradictions
 
 - (a) Protocol default coder: the Peer section was rewritten to `peer-sonnet` only; GLM is not default.
-- (b) Who does S work: the protocol's Supervisor role is gone; S and M items go to a Lead directly. The Paseo-era scope text (`:3-7,33-35`) was dropped, with one sentence saying so.
+- (b) Who does S work: the protocol's Supervisor role is gone; S and M items go to a Lead directly. The reference-era scope text (`:3-7,33-35`) was dropped, with one sentence saying so.
 - (c) `smind-leader` `task_wait` versus "never wait": the skill is now the single-loop Lead's and never tells it to wait or poll; the protocol says an outside Human or Steward may use `smind task wait`.
 
 ## Open questions for owners
@@ -150,7 +150,7 @@ Unchanged. Human decides later (no traffic found, nothing to measure).
 1. **Which seat is the single loop?** Recommended: the Lead (`main`). The alternative is the Supervisor, which would take over the Lead's spec/delegation/PR duties and make the Leads subagents. Blocks everything. (Human)
 2. **Is the Supervisor's cross-Lead job real?** Sizing, disjoint write scopes for parallel Leads, the merge queue and the tree cap are in its duties (`WORKSPACE_PROTOCOL.md:15-20`), yet the cap bit twice with a Supervisor present (dogfood entries 65, 72) and the Steward/Human did the merge queue and the reviews. Who owns the cap after a fold? (Human, Steward)
 3. **Peer return shape.** Which fields must survive a handoff for a Lead to accept a candidate without re-reading everything? Proposed in item 3; the Steward knows which of them it asked for most. (Steward)
-4. **`reviewer`:** was it ever run (in smind or Paseo)? If not, delete it or wire it as a tool? (Human)
+4. **`reviewer`:** was it ever run (in smind or a reference workbench)? If not, delete it or wire it as a tool? (Human)
 5. **`peer-glm`:** keep as an optional profile outside the seed pack, or drop it? It is also the only seat with a configured fallback (`rolepack.go:79`). (Human)
 6. **Cost is a lower bound.** Runs that end in an error report no usage (tasks 109 and 110: 11m28s and 28m06s, 'cli exited before sending a result'), GLM reports no cost, and the CLI's input column looks like uncached input only (4-30 tokens per run against ~2M cache-read per run in the rollup). Should step 1 record the provider-side totals too? (Human)
 7. **Two tree-1 style facts to confirm:** that tasks 108 and 113 were roots started by the Human/Steward directly (inferred: tree 45's rollup excludes them), and that profile 5 `supervisor` was never run. (Steward)
@@ -189,7 +189,7 @@ How the traces were made, because the CLI does not show what the audit needed:
 - Checks on the reconstruction: tasks 46-57 and 61, 88, 92, 105 match the handoffs exactly; the Lead's wake count equals its Peer count for 20 of 24 Leads (the other four had rework rounds); trace 45 sums to 175 runs and USD 90.12 against the rollup's 174 runs and USD 90.15.
 - `origin` is only `human` or `child_event`: an agent's `task_send` also shows as `human`, so the column cannot tell the Steward from a Lead.
 - `trace_id` is the root task id as the skill asks, but that gives three traces (45, 108, 113), so `coupling_map.by-root.md` is degenerate. `coupling_map.by-item.md` groups by work item instead (`item` = the Lead task; Supervisor runs are attached to an item by a time heuristic, labelled in `item_source`; 3 Supervisor runs belong to no item). Read it as 25 traces, still under the script's 50-trace line.
-- Tasks 1-44 (Paseo-led, no seat profiles; run rows for most were pruned) are left out. Input tokens in the CLI are uncached only, so the "median input tokens" column of the coupling map means nothing; cache-read totals come from the `task tree --json` rollup.
+- Tasks 1-44 (Reference-led, no seat profiles; run rows for most were pruned) are left out. Input tokens in the CLI are uncached only, so the "median input tokens" column of the coupling map means nothing; cache-read totals come from the `task tree --json` rollup.
 - Tree 45 as exported: 174 runs, USD 90.15, 354M cache-read, 3.3M uncached input, 2.0M output tokens; the Supervisor's own 43 runs: USD 8.90, 21.8M cache-read.
 
 ## Check-in 1 (after the audit)

@@ -3,7 +3,7 @@
 ## Context
 
 `docs/plans/completed/ui-redesign-parity.md` shipped structural parity with
-paseo/deepseek-harness/cliproxyapi: tokens (static + a first semantic
+a reference workbench, agent harness and proxy project: tokens (static + a first semantic
 layer), dark mode, shared primitives (`PaneHeader`, `StatusDot`,
 `StatusBadge`, `Alert`, `EmptyState`), keyboard registry, command palette,
 resizable panes, structured timeline + a render-intent tool-call system
@@ -14,12 +14,12 @@ accounts v2, responsive/compact layout. That work is done and merged.
 Two research passes done today (2026-09-17) on top of that foundation
 independently converged on the same diagnosis: **the architecture is
 right; what's missing is a deliberate visual-identity layer on top of it.**
-`docs/research/ui-ux-polish-2026.md` (`pplx -m best`, 3 queries): shadcn's
+`docs/research/local/ui-ux-polish-2026.md` (`pplx -m best`, 3 queries): shadcn's
 defaults *are* the generic look, and breaking out requires a product
 visual thesis + semantic tokens beyond `background`/`card`/`muted` +
 a real type-role scale + a spacing rhythm + product-meaning component
 variants + an elevation vocabulary + a motion vocabulary — not new
-features. `docs/research/uiux-audit.md`: catalogued concrete P0-P2 gaps
+features. `docs/research/local/uiux-audit.md`: catalogued concrete P0-P2 gaps
 live-tested in browser; re-verified against current code before writing
 this plan — **P0 crashes, dark-mode wiring, the stray token, workspace/
 space creation UI, and task-archive UI are already fixed/shipped** since
@@ -27,11 +27,11 @@ that audit was written (confirmed by direct grep, see Decisions). The one
 P2 item still genuinely open is a "Suggested commit message" affordance,
 folded into this plan below since it's small and token-adjacent.
 
-This session additionally read `refs/paseo`'s and `refs/deepseek-harness`'s
+This session additionally read a local reference clone's and a local reference clone's
 actual source (not just their READMEs) for concrete, portable patterns —
-paseo's `docs/design.md` (character → component-reuse rule → per-primitive
+a reference workbench's `docs/design.md` (character → component-reuse rule → per-primitive
 rules → forbidden list → canonical-surfaces table) and its
-`styles/theme.ts` token model; dsh's `docs/web-styling.md` +
+`styles/theme.ts` token model; a reference agent harness's `docs/web-styling.md` +
 `ui-theme`/`ui-layout`/`ui-tool` packages (static→alias→specific token
 layering, render-intent tool cards, two-tier permission UX). Full findings
 are in this session's transcript, not duplicated here — this plan cites
@@ -45,7 +45,7 @@ render-intent registry rather than replacing it).
 ## Decisions
 
 - **Visual thesis: "calm technical console"** (maintainer decision,
-  2026-09-17) — paseo's own character statement (`refs/paseo/docs/design.md`
+  2026-09-17) — the reference workbench's own character statement (a local reference clone
   §1): minimal, spacious, quiet, confident; every visual choice serves
   *act on this* or *understand this*, never *look at this*; consistency
   from component reuse, not hand-matched per-surface styling. Rejected
@@ -53,19 +53,19 @@ render-intent registry rather than replacing it).
   more distinctive but more discipline-risk), "code laboratory"
   (mono/dark-first — furthest from the current shadcn baseline, most
   migration cost).
-- **Spacing/typography get a real numeric token scale**, matching paseo's
-  `SPACING`/`FONT_SIZE` model rather than dsh's deliberately-untokenized
+- **Spacing/typography get a real numeric token scale**, matching that workbench's
+  `SPACING`/`FONT_SIZE` model rather than a reference agent harness's deliberately-untokenized
   px-per-component approach (maintainer decision). **Scope note that
   shrinks this materially**: Tailwind's default spacing scale
   (`1=4px, 2=8px, 3=12px, 4=16px, 6=24px, 8=32px, 12=48px, 16=64px`) is
-  *already numerically identical* to paseo's `SPACING` table — so this is
+  *already numerically identical* to the reference workbench's `SPACING` table — so this is
   a **documentation-and-enforcement** task (name the scale as the one
   legal vocabulary, lint out arbitrary values), not a mechanical rename
   migration across the ~95 existing `.tsx` files. Typography is the part
   that needs real new tokens (Tailwind's default `text-*` scale does not
-  match paseo's `FONT_SIZE`).
+  match the reference workbench's `FONT_SIZE`).
 - **No new display/brand font.** Consistent with "calm technical console"
-  — paseo itself uses one interface font (system-ui stack) + one mono
+  — that workbench itself uses one interface font (system-ui stack) + one mono
   stack, differentiated by a 3-tier *weight* system and a content-vs-
   interface *size* split, not a second typeface. Avoids font-loading work
   entirely.
@@ -73,7 +73,7 @@ render-intent registry rather than replacing it).
   (maintainer decision, despite touching timeline component internals) —
   because the intent *registry* (`tool-renderers.tsx`) already exists from
   Item 9 of the parity plan; this is a visual/detail-level upgrade of an
-  existing extensible system (dsh's dedicated-block-per-intent pattern),
+  existing extensible system (a reference agent harness's dedicated-block-per-intent pattern),
   not introducing the registry itself.
 - **Prerequisite, not part of this plan's scope**: `docs/plans/active/
   web-ui-fixes.md`'s three bug fixes (shadcn `Select` for composer
@@ -108,14 +108,14 @@ render-intent registry rather than replacing it).
 
 ### Item 1 — `docs/design.md` restructured as a real design-system doc
 
-- Adds, in paseo's `docs/design.md` order: a **Character** section (the
+- Adds, in the reference workbench's `docs/design.md` order: a **Character** section (the
   "calm technical console" statement, 2-3 sentences, in this repo's own
-  words — not copied verbatim from paseo); an explicit statement that
+  words — not copied verbatim from the reference workbench); an explicit statement that
   consistency comes from component reuse, not per-surface hand-styling.
 - Adds a **Forbidden** list: enumerable anti-patterns callable out in
   review (no hardcoded colors — already lint-enforced, cite the existing
   test; no `shadow-*` utility on more than one elevation tier per Item 3;
-  no color-only disabled state — opacity per paseo §11; no ad-hoc pane
+  no color-only disabled state — opacity per that workbench §11; no ad-hoc pane
   header padding outside `PaneHeader`; no arbitrary Tailwind spacing
   value outside the documented scale; no font-weight `medium`/`semibold`
   on body text/button labels/badge text, only on structural labels per
@@ -134,15 +134,15 @@ render-intent registry rather than replacing it).
 - New CSS custom properties in `index.css`'s `@theme` block (or a
   dedicated layer) for a **type-role scale**, not raw sizes: at minimum
   `--text-workspace-title`, `--text-section-title`, `--text-panel-title`,
-  `--text-metadata-label`, `--text-code-annotation`, plus paseo's
+  `--text-metadata-label`, `--text-code-annotation`, plus the reference workbench's
   content-vs-interface split (`--text-interface` = the existing
   UI-chrome ramp `12/13/14/16px`-ish already used by dense components,
   `--text-content` = one fixed size for message bodies/composer/Markdown/
-  PR prose, matching paseo's fixed-15px rule so prose doesn't rescale
+  PR prose, matching the reference workbench's fixed-15px rule so prose doesn't rescale
   with the interface-density controls).
 - Each role token is documented in `docs/design.md` with its one
   canonical consumer (mirrors the Forbidden-list discipline of Item 1).
-- Font-weight collapses to exactly 3 legal tiers app-wide (paseo §3):
+- Font-weight collapses to exactly 3 legal tiers app-wide (that workbench §3):
   screen/workspace titles get one fixed weight, structural labels
   (section headers, modal titles, form-field labels, dense metadata
   emphasis) get `font-medium`, everything else is `font-normal` — audit
@@ -163,8 +163,8 @@ render-intent registry rather than replacing it).
   `docs/design.md`, so "floating" always means the same recipe everywhere
   (popovers, dropdowns, dialogs) rather than each component picking its
   own shadow.
-- Shadow tiers added as tokens (`--shadow-sm/md/lg`) with paseo's
-  light/dark asymmetry (`refs/paseo/packages/app/src/styles/theme.ts`):
+- Shadow tiers added as tokens (`--shadow-sm/md/lg`) with the reference workbench's
+  light/dark asymmetry:
   light-mode shadows very soft (`alpha ~0.02-0.08`), dark-mode shadows
   harder (`alpha ~0.20-0.40`) — defined once per theme in `index.css`,
   consumed via `shadow-[var(--shadow-md)]` or an equivalent Tailwind
@@ -206,7 +206,7 @@ render-intent registry rather than replacing it).
 
 - Confirm (or add if missing) a third, explicit color family for diff
   additions/deletions — `--diff-addition`/`--diff-deletion` — separate
-  from `status-success`/`status-danger`, per paseo's three-family model
+  from `status-success`/`status-danger`, per the reference workbench's three-family model
   (status text tier / status dot tier / diff tier all differ in
   chroma/lightness on purpose). Today's `diff2html` override
   (`docs/design.md` §2) points at the library's own variable names
@@ -233,7 +233,7 @@ replace it.*
 - `search` intent: match count in the summary line, expandable match
   list, bounded preview (never an unbounded dump — same rule as
   terminal).
-- `generic`/unclassified fallback: dsh's IN/OUT two-section layout for
+- `generic`/unclassified fallback: a reference agent harness's IN/OUT two-section layout for
   plain text input/output (small labeled gutter, divider) instead of a
   raw JSON dump.
 - Every card keeps a **stable row height while its content is still
@@ -248,7 +248,7 @@ replace it.*
 - Apply the elevation vocabulary from Item 3 (a "floating"-tier card,
   not ad hoc) to the pending-permission card; confirm the existing
   structure (title/description, optional inline tool-call detail capped
-  at a max height, action row) already matches dsh's `ApprovalPanel`
+  at a max height, action row) already matches a reference agent harness's `ApprovalPanel`
   shape from this session's research — if it already does (Item 11 of
   the parity plan shipped this), this Item is a token/elevation pass
   only, not new structure. Verify and record which before implementing.
@@ -260,7 +260,7 @@ replace it.*
   suggested message (file count + dominant change kind — e.g. "Update 3
   files" / "Add feature.ts" for a single new file) as placeholder text
   or a one-click-to-fill affordance, per `uiux-audit.md` P2.12 and
-  Conductor's "Suggested Git Actions" precedent. Small, independent of
+  another workbench's "Suggested Git Actions" precedent. Small, independent of
   the token/visual work above — can run on its own track.
 
 ## Test Scenarios
@@ -309,7 +309,7 @@ replace it.*
 
 ## Tracks and dependencies
 
-Sized for parallel Paseo-orchestrated agents (`glm-acp-agent`, per this
+Sized for parallel Reference-orchestrated agents (`glm-acp-agent`, per this
 project's cost-conscious default; Sonnet 5 if a Claude agent is used
 instead of Opus):
 
@@ -356,9 +356,9 @@ all confirmed accurate, no gaps found in Items 1/2/3/5.
   dialog 18/600 + sheet 16/500 to one 16/500 role); `text-content`
   adopted by `timeline-markdown.tsx`. Token-presence test asserts both
   themes carry every token.
-- **Item 3**: `--elevation-shadow-sm/md/lg` tiers with paseo's light/dark
+- **Item 3**: `--elevation-shadow-sm/md/lg` tiers with that workbench's light/dark
   asymmetry (light alpha 0.04/0.06/0.08, dark 0.24/0.32/0.40 — round
-  values in paseo's bands, inspired not copied); exposed via `@theme`
+  values in the reference workbench's bands, inspired not copied); exposed via `@theme`
   `--shadow-sm/md/lg` so existing `shadow-md/lg` call sites resolve to
   the tiers with zero churn. `--duration-hover/menu/panel` (150/200/300ms)
   consumed by dialog/sheet/dropdown-menu (`duration-(--duration-menu)`;
@@ -370,7 +370,7 @@ all confirmed accurate, no gaps found in Items 1/2/3/5.
   timer does not exist post-merge (handle is pure CSS) — nothing to
   repoint, recorded in design.md Decisions.
 - **Item 5**: `--diff-addition`/`--diff-deletion` third color family in
-  both themes (paseo's light/dark diff tables); diff2html's ins/del
+  both themes (the reference workbench's light/dark diff tables); diff2html's ins/del
   overrides now reference the named tokens as the source of truth;
   `--color-diff-*` `@theme` re-exports. `no-hardcoded-colors.test.ts`
   still passes with zero exceptions (new color-bearing CSS lives only in
@@ -459,8 +459,8 @@ central-switch reintroduction.
   matching the terminal output's never-unbounded rule.
 - **generic/fallback**: `GenericBody` now renders a labeled IN/OUT
   two-section layout (small uppercase gutter label, `divide-y` border
-  between sections) instead of two unlabeled JSON dumps — the dsh
-  reference at `refs/deepseek-harness` was not present in this worktree
+  between sections) instead of two unlabeled JSON dumps — the reference agent harness
+  reference at a local reference clone was not present in this worktree
   (not checked out here), so the shape was built from the plan's own
   description (labeled gutter + divider) rather than copied; documented
   here as a deviation worth a follow-up diff against the actual reference
@@ -508,7 +508,7 @@ central-switch reintroduction.
   left as-is (already reasonably distinct — inline colored diff — and not
   named in the plan's per-intent upgrade list); the `fetch` intent
   likewise untouched (not named in the plan's list either, still uses the
-  plain `ToolPayload` well). The dsh `ui-tool` reference for the IN/OUT
+  plain `ToolPayload` well). The reference agent harness `ui-tool` reference for the IN/OUT
   shape could not be read directly (not present in this worktree) — worth
   a follow-up comparison if the reference becomes available. No live
   browser smoke test run this pass (per the plan's combined-smoke-test

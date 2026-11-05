@@ -34,7 +34,7 @@ function block(selector: string): string {
 /**
  * Every token the visual-identity-console plan's Items 3 and 5 add, plus
  * `--content-size` (Item 2's one surviving type-role token -- the rest were
- * retired by zcode-visual-parity's P1 Step 4 in favor of `text-ui-*`, see
+ * retired by reference-visual-parity's P1 Step 4 in favor of `text-ui-*`, see
  * text-ui-scale.test.ts). Values may be identical across themes, but the
  * declaration must exist in BOTH `:root` and `.dark` -- a token defined
  * only in one theme makes the other theme silently fall back to whatever

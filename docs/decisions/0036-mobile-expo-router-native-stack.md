@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-20, by the Human). Plan: [`docs/plans/completed/mobile-zcode-redesign.md`](../plans/completed/mobile-zcode-redesign.md).
+Accepted (2026-10-20, by the Human). Plan: [`docs/plans/completed/mobile-reference-redesign.md`](../plans/completed/mobile-reference-redesign.md).
 Supersedes the hand-rolled screen stack that `mobile/App.tsx` introduced in
 [`mobile-app-milestone-2`](../plans/completed/mobile-app-milestone-2.md) (a `useState` over a small `Screen` union).
 Does not change the relay, device identity, password, queue or stop behaviour ([ADR-0021](0021-per-chat-prompt-queue.md),
@@ -10,7 +10,7 @@ Does not change the relay, device identity, password, queue or stop behaviour ([
 
 ## Context
 
-The mobile redesign (ZCode visual parity; plan above) uses `@expo/ui` native components and the repo's Expo skills as its
+The mobile redesign (a reference desktop workbench visual parity; plan above) uses `@expo/ui` native components and the repo's Expo skills as its
 rulebook. Three of those rules cannot be met by a hand-rolled stack:
 
 - `expo-native-ui`: "ALWAYS use a navigation stack title instead of a custom text element on the page";

@@ -7,8 +7,7 @@ import (
 )
 
 // disposition.go -- the derived "what should happen next" of a finished run
-// (ADR-0027 section 4, decision D13 of docs/plans/active/orchestration-parity-
-// paseo.md). It exists because a run that stopped at a budget cap ends with
+// (ADR-0027 section 4, decision D13 of docs/plans/active/orchestration-reference-parity.md). It exists because a run that stopped at a budget cap ends with
 // Status done: the agent process finished cleanly, so every consumer that only
 // reads the status (a driver's task_wait, a queue's "finished" trigger, a
 // glance at the task list) takes the work for complete. The cap is in StopReason,

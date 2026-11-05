@@ -4,7 +4,7 @@ Status: active (2026-10-25).
 
 Size: L (6) — scope 1 (docs plus one Go test), PRs 2 (several, in sequence), risk 0 (docs and a test), decisions 1 (per-section homelab/README split, below), verification 2 (every statement checked against the binary and the real UI).
 
-`public-docs/` holds the documentation a user reads: install, first task, providers, git, mobile, orchestration, CLI, configuration. `docs/` stays internal (ADRs, plans, the workspace protocol). The split follows `refs/paseo` (`public-docs/` for users, `docs/` for contributors). Plain Markdown with a small front matter; no site generator and no hosting (a later Human infrastructure decision).
+`public-docs/` holds the documentation a user reads: install, first task, providers, git, mobile, orchestration, CLI, configuration. `docs/` stays internal (ADRs, plans, the workspace protocol). The split follows a local reference clone (`public-docs/` for users, `docs/` for contributors). Plain Markdown with a small front matter; no site generator and no hosting (a later Human infrastructure decision).
 
 ## Pages
 

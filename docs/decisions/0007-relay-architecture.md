@@ -12,8 +12,8 @@ unblocked.
 
 `docs/ROADMAP.md` Phase 3 ("Relay E2EE + Mobile") is the only place
 relay is designed as more than a passing mention (confirmed by
-`docs/research/relay-design-status.md`, a read-only audit of every
-"relay" reference in this repo plus `refs/paseo` and `refs/cliproxyapi`).
+`docs/research/local/relay-design-status.md`, a read-only audit of every
+"relay" reference in this repo plus a local reference clone).
 Verbatim from the roadmap:
 
 - Relay server (Go, dumb pipe), self-hostable as `smind relay`
@@ -33,11 +33,11 @@ As of this audit: **zero relay code exists** — no `cmd/relay`, no
 `smind relay` subcommand, no `.proto` files, no QR/X25519/ChaCha20-
 Poly1305 dependency in `go.mod`. Everything below is greenfield.
 
-The closest available precedent is `refs/paseo` (read-only reference,
+The closest available precedent is a local reference clone (read-only reference,
 per `AGENTS.md`'s `refs/` map), which has shipped, tested, and
 documented (`SECURITY.md`) an E2EE relay for the same daemon↔mobile
 problem shape. The user has approved the general principle for this
-draft: **default to following paseo's direction unless there's a clear
+draft: **default to following a reference workbench's direction unless there's a clear
 best-practice reason to diverge**, called out per decision below.
 
 ## Decisions
@@ -45,10 +45,10 @@ best-practice reason to diverge**, called out per decision below.
 ### (a) Relay state model — store-and-forward vs. pure forward
 
 **Recommendation: store-and-forward, bounded per-connection buffer**
-(follow paseo).
+(follow the reference workbench).
 
-Paseo's Cloudflare Durable Object adapter
-(`refs/paseo/packages/relay/src/cloudflare-adapter.ts:256-257`) buffers
+That workbench's Cloudflare Durable Object adapter
+ buffers
 up to 200 frames per side when the peer isn't currently connected, and
 flushes them on reconnect, rather than dropping traffic the instant one
 side is briefly offline.
@@ -65,23 +65,23 @@ with no relay-side recourse.
 sense if the relay holds something across the gap; a pure forwarder has
 nothing to make "graceful" about a reconnect — the client would simply
 resync from scratch every time, which is a different (and already
-roadmap-named "chỉ-ý-tưởng") feature. Bound size (paseo uses 200) is a
+roadmap-named "chỉ-ý-tưởng") feature. Bound size (the reference workbench uses 200) is a
 starting point to validate under load, not treated as load-bearing here.
 
 ### (b) Multi-device fanout — control + data socket split
 
-**Recommendation: adopt paseo's protocol v2 shape** — one persistent
+**Recommendation: adopt the reference workbench's protocol v2 shape** — one persistent
 control socket per daemon↔relay session, plus one data socket per
 paired mobile device, rather than a single shared pipe.
 
-**Alternative considered:** paseo's own protocol v1 (single
+**Alternative considered:** That workbench's own protocol v1 (single
 server-client socket pair, no fanout) — rejected because
 `docs/research/codmon-chat-server-notes.md` already flagged multi-device
 push fan-out as a known, deliberately deferred question ("Reject for
 now, revisit at Phase 3"); Phase 3 is now. A single pair can't serve
 more than one paired phone without ad hoc multiplexing bolted on later.
 
-**Rationale:** paseo already solved this exact problem (v1 → v2
+**Rationale:** The reference workbench already solved this exact problem (v1 → v2
 migration) and the v2 shape (control socket owns session/key
 lifecycle, data sockets carry per-device application traffic) maps
 cleanly onto smind's daemon↔relay gRPC transport as separate streams
@@ -91,11 +91,11 @@ rather than requiring a new multiplexing scheme designed from scratch.
 
 **This is the one item in this ADR with no recommended default — it
 requires an explicit user decision, not a rubber-stamp.** The roadmap
-already names ChaCha20-Poly1305; paseo's shipped implementation uses
+already names ChaCha20-Poly1305; the reference workbench's shipped implementation uses
 XSalsa20-Poly1305 via NaCl `box`. These are two different, non-
 interoperable AEAD choices for the same handshake role, and picking
 one silently (in either direction) would either overrule an existing
-written roadmap commitment or ignore the repo's own "follow paseo
+written roadmap commitment or ignore the repo's own "follow that workbench
 unless there's a reason" default — so it's surfaced here instead.
 
 **Option 1 — ChaCha20-Poly1305 (`golang.org/x/crypto/chacha20poly1305`),
@@ -118,25 +118,25 @@ as already written in `docs/ROADMAP.md` Phase 3:**
   need to reopen or justify a change from prior planning.
 
 **Option 2 — XSalsa20-Poly1305 / NaCl `box` (`golang.org/x/crypto/nacl/box`),
-matching `refs/paseo`:**
+matching a local reference clone:**
 - Same module (`golang.org/x/crypto`), equally available today with no
   new dependency either.
 - 24-byte random nonce — large enough that random generation alone
   (no counter needed) is safe against collision, which is exactly how
-  paseo uses it (`refs/paseo/packages/relay/src/crypto.ts:156-165`:
+  the reference workbench uses it (a local reference clone:
   fresh `nacl.randomBytes(24)` per message, bundle format
   `[nonce][ciphertext]`).
 - `box.Seal`/`box.Open`-style API bundles key agreement and AEAD into
   one call, slightly less surface for a handshake implementer to get
   wrong than composing X25519 + a separate AEAD by hand.
-- Directly mirrors paseo's shipped, threat-modeled implementation
-  (`refs/paseo/SECURITY.md`) — matches the "follow paseo unless a clear
+- Directly mirrors the reference workbench's shipped, threat-modeled implementation
+ — matches the "follow that workbench unless a clear
   reason to diverge" default this ADR otherwise applies everywhere
-  else, and paseo's wire framing (`[24-byte nonce][ciphertext]`) could
+  else, and the reference workbench's wire framing (`[24-byte nonce][ciphertext]`) could
   be adopted verbatim rather than redesigned.
 - Diverges from the roadmap's own already-written text, which would
   need to be edited and the divergence justified beyond "matches
-  paseo" alone — random nonce reuse is not a live problem being
+  the reference workbench" alone — random nonce reuse is not a live problem being
   avoided (24-byte nonces are already collision-safe at random), so
   there's no correctness argument forcing the change, only a
   consistency-with-precedent one.
@@ -153,37 +153,36 @@ direct import. No ROADMAP edit needed.
 **Recommendation: yes, build in replay protection (monotonic
 per-direction message counter, rejecting/closing on reuse or
 out-of-window sequence numbers) from the first handshake implementation** —
-diverge from paseo here.
+diverge from that workbench here.
 
-**Alternative considered:** ship without it, matching paseo exactly.
-Paseo's own `SECURITY.md` states this outright: "Within a live session,
+**Alternative considered:** ship without it, matching the reference workbench exactly.
+The reference workbench's own `SECURITY.md` states this outright: "Within a live session,
 replay protection is not yet implemented; the protocol uses random
 nonces and does not track nonce reuse or message counters"
-(`refs/paseo/SECURITY.md:39`). Simpler v1, and it's a documented,
+. Simpler v1, and it's a documented,
 accepted gap in a shipped product — not a hypothetical risk.
 
 **Rationale:** this is exactly the kind of known gap the research audit
 flagged as something smind should decide about deliberately rather than
-inherit by default (`docs/research/relay-design-status.md` §4). It's
+inherit by default (`docs/research/local/relay-design-status.md` §4). It's
 also cheaper to build in now than to retrofit: a dumb-pipe relay with a
 store-and-forward buffer (decision (a)) means a captured/replayed frame
-has a wider window to be re-injected than in paseo's live-only-buffer
-case, which raises the cost of the gap relative to paseo's version of
+has a wider window to be re-injected than in that workbench's live-only-buffer
+case, which raises the cost of the gap relative to the reference workbench's version of
 the same design. A per-direction counter is a small addition once a
 handshake/session-key exchange already exists, regardless of which AEAD
 (c) resolves to.
 
 ### (e) Key rotation — new session = new key, no live rekey (v1)
 
-**Recommendation: match paseo — a "rotated" key means starting a new
+**Recommendation: match the reference workbench — a "rotated" key means starting a new
 session (fresh ephemeral keypair, fresh handshake), not rekeying an
 open connection.**
 
-Paseo's encrypted-channel state machine treats a second `e2ee_hello`
+That workbench's encrypted-channel state machine treats a second `e2ee_hello`
 with a *different* key arriving on an already-established channel as an
 attack and closes the socket with code 1008
-(`refs/paseo/packages/relay/src/encrypted-channel.ts:120`, comment at
-lines 45-50). It does allow a duplicate `e2ee_hello` with the *same*
+. It does allow a duplicate `e2ee_hello` with the *same*
 key to be a harmless retry (peer didn't observe the `e2ee_ready` yet).
 There is no in-session rekey mechanism.
 
@@ -208,8 +207,8 @@ phone moving WiFi→cellular, a brief network drop) performed a fresh
 handshake with a fresh ephemeral key, the buffered ciphertext frames
 from before the drop would be undecryptable under the new key — the
 reconnect-grace buffer would never actually deliver anything. That is
-not what this item intended, and it is not what paseo's own referenced
-behavior does: paseo explicitly treats a duplicate `e2ee_hello` with the
+not what this item intended, and it is not what the reference workbench's own referenced
+behavior does: the reference workbench explicitly treats a duplicate `e2ee_hello` with the
 *same* key as "a harmless retry (peer didn't observe `e2ee_ready` yet)",
 not a rotation.
 
@@ -248,7 +247,7 @@ design is left to the implementation plan
 
 Out of scope for this item: the mobile↔relay wire protocol is *not*
 specified anywhere in the roadmap (only daemon↔relay is called out as
-gRPC). Paseo uses plain WebSocket end-to-end, including phone↔relay,
+gRPC). That workbench uses plain WebSocket end-to-end, including phone↔relay,
 specifically because gRPC has no native browser/React-Native-friendly
 support without a grpc-web proxy layer — the same reasoning the roadmap
 already uses to justify WS-RPC for the Phase 2 browser-facing API. This
@@ -275,19 +274,19 @@ behind an HTTP/1.1-only CDN or proxy. If that ever isn't possible for a
 given deployment, grpc-web-over-WebSocket (mirroring the mobile client)
 is the fallback for the desktop client too.
 
-### (g) QR pairing — persistent daemon keypair + URL-fragment offer (follow paseo)
+### (g) QR pairing — persistent daemon keypair + URL-fragment offer (follow the reference workbench)
 
-**Recommendation: adopt paseo's pairing pattern.**
+**Recommendation: adopt the reference workbench's pairing pattern.**
 
 - Daemon generates and persists an X25519 keypair once, on disk under
   smind's home directory (mode 0600), reused across restarts — mirrors
-  `refs/paseo/packages/server/src/server/daemon-keypair.ts` (`daemon-keypair.json`,
+  a local reference clone (`daemon-keypair.json`,
   `{v, publicKeyB64, secretKeyB64}`, regenerated only if the file is
   missing or fails to parse).
 - Pairing offer is a small object — server/daemon ID, daemon public
   key, relay endpoint — JSON-encoded and base64url'd into a URL
   **fragment** (`#offer=...`), never a query parameter and never sent
-  to any server (`refs/paseo/packages/server/src/server/connection-offer.ts:43-50`,
+  to any server (a local reference clone,
   `pairing-offer.ts`). The QR code encodes that URL; scanning it opens
   smind's mobile app directly to the pairing screen with the offer
   already in hand.
@@ -297,7 +296,7 @@ is the fallback for the desktop client too.
 **Alternative considered:** encode the raw public key/relay address
 directly in the QR with no URL/app-scheme wrapper. Simpler payload, but
 loses the deep-link entry point that lets a scan open straight into the
-mobile app's pairing screen, and paseo's specific choice to put the
+mobile app's pairing screen, and that workbench's specific choice to put the
 offer in a URL *fragment* rather than a query string is a deliberate
 privacy property (fragments never leave the client — no server, CDN,
 or access log ever sees them) that a bare-QR approach would need to
@@ -305,7 +304,7 @@ reinvent some other way.
 
 **Rationale:** this is a fully-baked, working pattern with no
 identified downside for smind's equivalent use case (daemon and mobile
-app, same pairing problem) — a clean case for "follow paseo" with no
+app, same pairing problem) — a clean case for "follow the reference workbench" with no
 best-practice reason to diverge.
 
 ### (h) Repo split + license — cross-reference to ADR-0003, not re-decided here
@@ -330,9 +329,9 @@ into this one as a side effect of building the relay's protocol.
   to.
 - `docs/decisions/0003-agpl-license-no-repo-split.md` — repo
   split/license expectation for a future relay repo (see (h)).
-- `docs/research/relay-design-status.md` — the audit this ADR is based
-  on (docs/code inventory, refs/paseo and refs/cliproxyapi comparison).
-- `refs/paseo` (read-only reference) — `packages/relay/src/crypto.ts`,
+- `docs/research/local/relay-design-status.md` — the audit this ADR is based
+  on (docs/code inventory, a local reference clone comparison).
+- A local reference clone (read-only reference) — `packages/relay/src/crypto.ts`,
   `packages/relay/src/encrypted-channel.ts`,
   `packages/relay/src/cloudflare-adapter.ts`,
   `packages/server/src/server/{daemon-keypair,connection-offer,pairing-offer,relay-transport}.ts`,

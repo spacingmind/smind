@@ -3,19 +3,19 @@
 This is the living reference for `web/packages/ui`'s token vocabulary,
 density, primitives, copy rules, and the keyboard/palette registration APIs
 — written from what actually landed. Visual values (tokens, typography,
-spacing, radii, shadows) follow ZCode (Z.AI's Apache-2.0 AI coding
-workbench, cloned read-only at `refs/zcode`) as of the
-`zcode-visual-parity` plan's P1 phase — `refs/zcode/DESIGN.md` is the
+spacing, radii, shadows) follow a reference desktop workbench (an Apache-2.0 AI coding
+workbench) as of the
+`reference-visual-parity` plan's P1 phase — the reference is the
 source of truth for those, and this file summarizes what P1 actually
 landed plus the behavioral systems (keyboard, palette, persistence,
-responsive layout) ZCode has no equivalent for. See `NOTICE` for the
+responsive layout) the reference has no equivalent for. See `NOTICE` for the
 Apache-2.0 attribution this incorporation requires.
 
 ## Character
 
 sMind is a calm technical console: quiet, dense, and operational rather
-than decorative — the same thesis `refs/zcode/DESIGN.md`'s Product
-Character section states for ZCode. Every visual decision serves either
+than decorative — the same thesis the reference's Product
+Character section states. Every visual decision serves either
 *act on this* or *understand this* — never *look at this*.
 
 Consistency comes from component reuse, not from hand-matching styles
@@ -24,8 +24,8 @@ different ways, one of them is wrong — the shared primitive (§3) wins,
 and the canonical-surfaces table (§15) says which file is the reference.
 
 Interaction behavior (Find, chord shortcuts, split panes, attention/
-unread/pins) is smind's own, ported from the Paseo-derived UX that
-predates this plan — `zcode-visual-parity` changes what these things
+unread/pins) is smind's own, ported from the reference-derived UX that
+predates this plan — `reference-visual-parity` changes what these things
 *look* like, not what they *do*.
 
 ## 1. Token layers
@@ -38,19 +38,19 @@ predates this plan — `zcode-visual-parity` changes what these things
    `sidebar*`). `background`/`foreground`/`card`/`popover`/
    `popover-foreground`/`primary`/`primary-foreground`/`secondary`/
    `accent`/`destructive`/`border`/`sidebar` are overwritten in place
-   with ZCode's Zai Light/Zai Dark values (the plan's P1 Step 2) — this
-   is also where the old teal `--primary` is superseded by ZCode's
+   with the Zai Light/Zai Dark values (the plan's P1 Step 2) — this
+   is also where the old teal `--primary` is superseded by a
    neutral black/white primary; the sidebar wordmark is the one element
    that keeps its own hue (see the Brand colour note below). `--ring` is
    neutralized (chroma zeroed, same lightness) rather than aliased —
-   ZCode has no ring/focus-glow token, and its inputs are "calm and
-   integrated, not glowing by default" (`refs/zcode/DESIGN.md`). `--input`
+   the reference has no ring/focus-glow token, and its inputs are "calm and
+   integrated, not glowing by default". `--input`
    and `--chart-*` are untouched holdouts (see the input token note
    below); `--radius*` is gone entirely (§ Radius).
-2. **Semantic layer** — ZCode's own token vocabulary, ported verbatim
-   (names and values) from `refs/zcode/packages/ui/src/styles.css`'s
+2. **Semantic layer** — the Zai token vocabulary, ported verbatim
+   (names and values) from the
    `.theme-zai-light`/`.theme-zai-dark` blocks (the active light/dark
-   experiences per `refs/zcode/DESIGN.md`'s Theme Modes section; ZCode's
+   experiences per the reference's Theme Modes section; its
    plain `:root`/`.dark` fallback palettes are not ported). Covers:
    background/surface/card/popover/menu/input families, foreground
    hierarchy (`-subtle`/`-subtlest`/`-inverse`), border families,
@@ -59,12 +59,12 @@ predates this plan — `zcode-visual-parity` changes what these things
    tooltip/tag, and the terminal 16-color set. `--ui-font-size` and the
    `--text-ui-*` type scale (§12) live here too. `--foreground-muted` (an
    explicit alias of `muted-foreground`) is the one pre-existing semantic
-   token that survived unrelated to ZCode's vocabulary.
+   token that survived unrelated to the Zai vocabulary.
 
    **Text contrast (WCAG AA).** Text tokens must reach 4.5:1 on every
    surface they sit on, in both themes (`lib/contrast-tokens.test.ts`
-   guards it). Light `--muted-foreground` is `oklch(0.5 0 0)` (ZCode's
-   lighter grey fell to 4.15:1 on the sidebar). `--warning` stays ZCode's
+   guards it). Light `--muted-foreground` is `oklch(0.5 0 0)` (the reference's
+   lighter grey fell to 4.15:1 on the sidebar). `--warning` stays the reference's
    orange for fills, dots and glyphs; orange **text** uses the added role
    token `--warning-text` (`text-warning-text`: light = `#a84a00`, a
    warmer orange that still clears 4.5:1 on the tinted surfaces, dark =
@@ -73,21 +73,21 @@ predates this plan — `zcode-visual-parity` changes what these things
    Status text follows the same rule: light `--success`/`--diff-added`/
    `--git-added`/`--git-untracked`/`--terminal-green` are `#167333` and light
    `--destructive`/`--diff-removed`/`--git-deleted`/`--terminal-red` are
-   `#ba2424` (ZCode's `#1e8a3e`/`#e03131` were 3.87:1 and 4.0:1 on the
+   `#ba2424` (the reference's `#1e8a3e`/`#e03131` were 3.87:1 and 4.0:1 on the
    `#f0f0f0` sidebar, worse on a hovered or selected row). A zero count
    (`+0`, `-0`) is `text-muted-foreground`, never a status colour with
    `opacity-50`. Dark values are unchanged (all pairs pass).
-   The AA light values are a deliberate deviation from ZCode, recorded in
+   The AA light values are a deliberate deviation from the reference, recorded in
    `$overrides` of `src/test/zcode-tokens.fixture.json` (the parity test
-   expects `override.light ?? fixture.light`; dark stays ZCode's). Fills keep
-   ZCode's tint: diff row backgrounds, borders and word highlights mix
+   expects `override.light ?? fixture.light`; dark stays the reference's). Fills keep
+   the reference tint: diff row backgrounds, borders and word highlights mix
    `--diff-added-tint` / `--diff-removed-tint` (light `#1e8a3e` / `#e03131`,
    dark equal to the dark text tokens), so only the text tokens went AA.
 
 **The input token exception.** smind's pre-existing `border-input`
-(shadcn's `--input`, used as a border color) and ZCode's `--color-input`
+(shadcn's `--input`, used as a border color) and the Zai `--color-input`
 (a field *background*) are different concepts that happen to share a
-name upstream. `--input`'s raw value is left alone; ZCode's field
+name upstream. `--input`'s raw value is left alone; the Zai field
 background/border family is ported as `--color-input`/
 `--color-input-border`/`--color-input-border-hover`/
 `--color-input-border-focused`/`--color-input-focused` instead, and
@@ -103,21 +103,21 @@ CSS-first — there is no `tailwind.config.js` in this package).
 (`bg-amber-500`, `text-emerald-600`, etc.) — every color comes from a
 token, so light/dark stay correct without touching component code.
 `src/test/no-hardcoded-colors.test.ts` greps for this;
-`src/test/zcode-tokens.test.ts` resolves every ZCode-derived token through
-`index.css`'s own var() chains and asserts it matches ZCode's source value
+`the reference-token files` resolves every reference-derived token through
+`index.css`'s own var() chains and asserts it matches the source value
 in both themes (`src/test/zcode-tokens.fixture.json`); `src/test/
 token-presence.test.ts` covers the handful of tokens that survive from
 before this plan (shadow tiers, durations, `--text-content`,
 `--diff-addition`/`-deletion`).
 
-**Retired tokens.** smind's pre-ZCode semantic layer (`surface-0..3`,
+**Retired tokens.** smind's pre-Reference semantic layer (`surface-0..3`,
 `status-{success,danger,warning,running}`, `status-dot-*`, and the
 type-role scale minus `--text-content`) is gone — every component was
-migrated onto ZCode's tokens and the aliases deleted in the same PR (the
+migrated onto the Zai tokens and the aliases deleted in the same PR (the
 plan's P1 Step 4). `--diff-addition`/`--diff-deletion` still alias onto
 `--diff-added`/`--diff-removed` for now — `index.css`'s diff2html
 override block is the only remaining consumer, and repointing it fully
-is `zcode-visual-parity`'s P4 scope.
+is `reference-visual-parity`'s P4 scope.
 
 ## 2. Theming
 
@@ -131,7 +131,7 @@ is `zcode-visual-parity`'s P4 scope.
   OS silently steer them back).
 - Applies by toggling the `dark` class on `<html>` — the only place any
   code should touch that class (`lib/theme.ts`'s `applyResolvedTheme`).
-  ZCode's Zai Light/Zai Dark values live directly in `:root`/`.dark`
+  The Zai Light/Zai Dark values live directly in `:root`/`.dark`
   (§1) — the `.theme-zai-*` class *names* are not shipped, only their
   values, so this mechanism needed no changes.
 - `index.html` carries a synchronous, dependency-free inline `<script>`
@@ -168,14 +168,14 @@ the app's theme:
   (`--d2h-bg-color` etc.) to reference smind's own tokens (including the
   `diff-added`/`diff-removed` family for the +/- pairs) means
   `diff-viewer-pane.tsx` needs no dark-mode-specific class at all. Full
-  parity with ZCode's git-status colors is P4 scope.
+  parity with the reference's git-status colors is P4 scope.
 - **xterm** (`components/terminal-pane.tsx`, `lib/terminal-theme.ts`):
   xterm's `ITheme` needs literal color strings, not live `var()`
   references. `resolveTerminalTheme()` resolves each token via a
   computed-style probe (set `color: var(--x)` on a detached element, read
   back the CSSOM's always-`rgb()` serialization) and `setTheme()` is
   re-applied whenever the resolved theme changes. Chrome only today
-  (background/foreground/cursor/selection); ZCode's ported 16-color
+  (background/foreground/cursor/selection); the ported 16-color
   terminal set (`--color-terminal-*`) exists in `index.css` and is wired
   through the same probe in P4.
 
@@ -184,13 +184,13 @@ the app's theme:
 | Primitive | Purpose | Canonical usage |
 | --- | --- | --- |
 | `PaneHeader` | Title + right action slot, one padding scale (`px-4 py-2.5`), one bottom border | `task-detail.tsx`, `file-editor-pane.tsx`, `diff-viewer-pane.tsx`, `terminal-pane.tsx` |
-| `StatusDot` | 6px filled dot, `success`/`destructive`/`warning` (ZCode has no distinct "running" hue — see §12) | sidebar task-attention marker, `accounts-dialog.tsx`'s connection dot |
+| `StatusDot` | 6px filled dot, `success`/`destructive`/`warning` (the reference has no distinct "running" hue — see §12) | sidebar task-attention marker, `accounts-dialog.tsx`'s connection dot |
 | `StatusBadge` | Pill: the semantic color on a neutral tinted shell | (available; no consumer yet — see Decisions) |
 | `Alert` | Page-level notice: 1px tinted border, transparent background, variant-tinted icon+title, muted description, actions in `children` | connection-lost banners, file-conflict banner, pending-permission card, inline error rows |
 | `EmptyState` | Centered, muted, short noun-phrase title + optional description/action | "No runs yet", "No changes", sidebar's empty-workspace state |
 | `InlineSpinner` | Small spinner next to the thing it relates to (loading is inline by default, not a page takeover) | "Loading runs…", "Loading diff…", "Loading…" |
-| `Toast` (`toast()` + `<Toaster />`) | Fire-and-forget notification queue, mounted once (`main.tsx`); `rounded-2xl`/`bg-toast`/`shadow-lg` per ZCode's toast exception | infrastructure for later items (commit/PR success, composer errors) — no consumer yet, see Decisions |
-| `Button` (`buttonVariants`) | Six generic variants (`default`/`secondary`/`destructive`/`outline`/`ghost`/`link`) plus three additive semantic variants with product meaning: `execute` — starts/stops a run; `approval` — the recommended/confirm action in a permission decision; `quiet` — a non-committal or structural action that shouldn't compete visually with the primary action nearby. One radius (`rounded-lg`) across every size variant — ZCode: "Control size... do not independently change radius." | `composer.tsx`'s Send/Stop pair (`execute`); `permission-option-button.tsx`'s recommended-allow option (`approval`); `crud-dialogs.tsx`'s shared `FormActions` Cancel button (`quiet`) |
+| `Toast` (`toast()` + `<Toaster />`) | Fire-and-forget notification queue, mounted once (`main.tsx`); `rounded-2xl`/`bg-toast`/`shadow-lg` per the reference's toast exception | infrastructure for later items (commit/PR success, composer errors) — no consumer yet, see Decisions |
+| `Button` (`buttonVariants`) | Six generic variants (`default`/`secondary`/`destructive`/`outline`/`ghost`/`link`) plus three additive semantic variants with product meaning: `execute` — starts/stops a run; `approval` — the recommended/confirm action in a permission decision; `quiet` — a non-committal or structural action that shouldn't compete visually with the primary action nearby. One radius (`rounded-lg`) across every size variant — the reference: "Control size... do not independently change radius." | `composer.tsx`'s Send/Stop pair (`execute`); `permission-option-button.tsx`'s recommended-allow option (`approval`); `crud-dialogs.tsx`'s shared `FormActions` Cancel button (`quiet`) |
 
 A new recurring surface reuses one of these before inventing a new pattern
 — that's the whole point of this table.
@@ -202,7 +202,7 @@ One padding scale for pane headers: `px-4 py-2.5`, via `PaneHeader`.
 **The spacing scale is Tailwind's default numeric scale — and nothing
 else.** `1`=4px through `16`=64px (`1 2 3 4 6 8 12 16`, plus the
 half-steps `0.5/1.5/2.5/3.5` Tailwind itself provides) is the one legal
-spacing vocabulary — this matches `refs/zcode/DESIGN.md`'s own Spacing
+spacing vocabulary — this matches the reference's own Spacing
 section (base unit 4px). An arbitrary value (`p-[13px]`, `gap-[10px]`) is
 a Forbidden-list item (§14): if the nearest scale step doesn't work, the
 layout is fighting the rhythm, not missing a step.
@@ -431,27 +431,27 @@ a new size scale.
   §2 above for why each library's own architecture forced a different
   answer.
 - **`status-running` (and its dot-tier equivalent) alias onto `warning`,
-  not a distinct hue.** `refs/zcode/DESIGN.md`'s own workflow-timeline
+  not a distinct hue.** The reference's own workflow-timeline
   section uses `--color-warning` for a running station lamp, so smind's
   "running" states (composer's execute-button variant, `StatusDot`'s
   `running` status) do the same rather than keeping the old
-  Paseo-inspired blue "running" color the ZCode vocabulary doesn't have
+  reference-inspired blue "running" color the reference vocabulary doesn't have
   an equivalent for. This is a deliberate loss of distinctness, an
-  accepted cost of "adopt ZCode's token vocabulary wholesale."
-- **`--ring` is neutralized rather than left teal or deleted.** ZCode
+  accepted cost of "adopt the reference token vocabulary wholesale."
+- **`--ring` is neutralized rather than left teal or deleted.** The reference
   defines no ring/focus-glow token at all and its inputs are explicitly
   "not glowing by default" — but generic `focus-visible:ring-*` usage
   outside `components/ui/`'s input-family primitives still exists
   (buttons, checkboxes, etc.), so the token stays, just without the old
   brand hue. `components/ui/input.tsx`/`select.tsx`'s own focus states
   use `border-input-border-focused`/`bg-input-focused` instead of a ring
-  at all, per ZCode's actual pattern.
+  at all, per the reference's actual pattern.
 - **The `text-ui-*` scale replaces the old type-role tokens** rather than
   living alongside them — see §12.
 
 ## 12. Typography — the `text-ui-*` scale
 
-`refs/zcode/DESIGN.md`'s "Highest-priority UI constraint": application
+The reference's "Highest-priority UI constraint": application
 interface text must use `text-ui-xl`/`text-ui-lg`/`text-ui-base`/
 `text-ui-caption`/`text-ui-sm`/`text-ui-xs` — never Tailwind's built-in
 `text-base`/`text-sm`/`text-xs`, never an arbitrary `text-[13px]`, never
@@ -485,11 +485,11 @@ survives, for exactly this reason: markdown prose must not rescale with
 the interface-density setting.
 
 **Role mapping.** `text-ui-*` is chosen by content role
-(`refs/zcode/DESIGN.md`'s own table), not by porting the old Tailwind
+(the reference's own table), not by porting the old Tailwind
 class name 1:1 — the first migration pass did the latter mechanically
 (`text-sm`→`text-ui-sm`, `text-xs`→`text-ui-xs`) and a screenshot review
 caught the result reading roughly one step too small everywhere, since
-ZCode's roles sit one tier higher than the old smind names suggest:
+the reference's roles sit one tier higher than the old smind names suggest:
 
 | Token | Role | smind examples |
 | --- | --- | --- |
@@ -503,11 +503,11 @@ ZCode's roles sit one tier higher than the old smind names suggest:
 The fix was mechanical too, but keyed off role rather than old name: every
 non-badge/kbd/counter site moved up one tier (old `text-xs`→`text-ui-sm`,
 old `text-sm`→`text-ui-base`); genuine badge/counter/kbd sites — matched
-against `refs/zcode/packages/ui/src/components/ui/badge.tsx` and
+against the reference and
 `kbd.tsx`, both of which stay `text-ui-xs` regardless of content — were
 left at (or reverted back to) `text-ui-xs`.
 
-**Weight** follows `refs/zcode/DESIGN.md`'s looser guidance rather than
+**Weight** follows the reference's looser guidance rather than
 the old strict three-tier token system (retired along with the type-role
 tokens it was defined against): prefer `font-medium` for headings and
 labels, avoid heavier weights without a reason, and keep `font-normal`
@@ -519,16 +519,16 @@ Markdown's own heading hierarchy (`components/timeline/
 timeline-markdown.tsx`) kept its own internal step spacing through the
 role-mapping fix above (h1 one tier above h2, h2 one tier above h3) —
 `text-ui-base`→`text-ui-lg` (h1), `text-ui-sm`→`text-ui-base` (h2) — without
-yet adopting ZCode's actual h1/h2 sizing (`text-ui-xl`/`text-ui-lg`) or its
+yet adopting the reference's actual h1/h2 sizing (`text-ui-xl`/`text-ui-lg`) or its
 h3–h6→`text-ui-base` flattening; full markdown-scale adoption is
-`zcode-visual-parity`'s P3 scope, "Timeline rows match
+`reference-visual-parity`'s P3 scope, "Timeline rows match
 `v4/ConversationTimeline.tsx`".
 
 ## 13. Radius, elevation, shadow, and motion
 
 **Radius is Tailwind's own default scale — no override.** `index.css` has
-no `--radius-*` theme entries (ZCode's own `styles.css` has none either).
-Nesting follows `refs/zcode/DESIGN.md`'s Radius section: the first rounded
+no `--radius-*` theme entries (the reference's own `styles.css` has none either).
+Nesting follows the reference's Radius section: the first rounded
 container in any tree starts at `rounded-xl`; nested rounded containers
 step down `rounded-lg` → `rounded-md` → `rounded-sm` (the floor). Basic
 controls (buttons, inputs, selects, menu triggers) default to `rounded-lg`
@@ -536,11 +536,11 @@ regardless of size — size and emphasis never independently change radius.
 Menu/dropdown/context-menu/select-popover shells use `rounded-lg`; their
 items use `rounded-md`; anything nested inside an item uses `rounded-sm`.
 Dialogs use `rounded-2xl`. Three more approved `rounded-2xl` exceptions:
-the main composer input shell, the toast shell, and (per ZCode) a
+the main composer input shell, the toast shell, and (per the reference) a
 conversation-status floating panel smind has no equivalent of yet.
 `rounded-full` is reserved for actual pills/circles.
 
-**Elevation vocabulary** (ZCode's four recipes, `refs/zcode/DESIGN.md`'s
+**Elevation vocabulary** (the reference's four recipes, from its
 Elevation and Depth section):
 
 | Elevation | Shadow | Canonical consumers |
@@ -553,7 +553,7 @@ Elevation and Depth section):
 The underlying `shadow-sm`/`-md`/`-lg` box-shadow recipes are still
 smind's own theme-asymmetric values (`--elevation-shadow-sm/md/lg` in
 `index.css` — light mode very soft, alpha 0.04–0.08; dark mode harder,
-alpha 0.24–0.40, so a near-black surface still reads depth) — ZCode's
+alpha 0.24–0.40, so a near-black surface still reads depth) — the reference's
 `DESIGN.md` doesn't prescribe exact shadow recipes, only usage tiers, so
 these weren't replaced, just re-pointed at the right components (P1 Step
 5 moved `dialog.tsx`/`sheet.tsx` from `shadow-lg` to `shadow-md`, and
@@ -565,7 +565,7 @@ feedback, `StatusBadge`'s color transitions), `--duration-menu` 200ms
 (Radix popover/dropdown/dialog open-close — `dialog.tsx`, `sheet.tsx`,
 `dropdown-menu.tsx` read it via `duration-(--duration-menu)`; Radix's own
 transform-origin machinery is untouched, no second mechanism added), and
-`--duration-panel` 300ms (panel-level transitions), matching ZCode's
+`--duration-panel` 300ms (panel-level transitions), matching the reference's
 "keep transitions fast and low-drama" motion guidance. A transition
 outside these three durations is a review flag. State-change animation is
 for agent moments (queued→running badge color, a permission card entering
@@ -593,11 +593,11 @@ the foreground) — not decorative entrance animation on every mount.
   (§4) — `p-[13px]`, `gap-[10px]` are review flags; the numeric scale is
   the vocabulary.
 - **Arbitrary radius values, or the ambiguous bare `rounded` utility**
-  (§13) — `rounded-full` is reserved for actual pills/circles, per ZCode's
+  (§13) — `rounded-full` is reserved for actual pills/circles, per the reference's
   Radius rules.
 - **A second font family.** One interface stack, one mono stack — no
   display or brand typeface.
-- **ZCode/Zai branding** — no logos, icons, or names anywhere in smind's
+- **reference branding** — no logos, icons, or names anywhere in smind's
   UI, code identifiers, or comments beyond the license-required
   attribution (`NOTICE`). smind's own sidebar wordmark is the only mark;
   see §1's Brand colour note.

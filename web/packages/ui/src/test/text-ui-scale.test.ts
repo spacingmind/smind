@@ -58,7 +58,7 @@ function relPath(f: string): string {
   return f.slice(SRC_DIR.length + 1).replaceAll("\\", "/");
 }
 
-describe("text-ui-* scale guard (zcode-visual-parity plan, P1 Step 3)", () => {
+describe("text-ui-* scale guard (reference-visual-parity plan, P1 Step 3)", () => {
   const files = listFiles(SRC_DIR)
     .filter((f) => !f.endsWith(".test.ts") && !f.endsWith(".test.tsx"))
     .filter((f) => !EXEMPT_FILES.has(relPath(f)));

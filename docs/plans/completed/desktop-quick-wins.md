@@ -4,7 +4,7 @@
 
 The user installed the Windows build (NSIS, from `.github/workflows/desktop-windows.yml`). Their feedback: it "is a wrapper of the web version; UI/UX can still improve".
 
-Research (local-only, `docs/research/local/zcode-desktop-2026-09.md`) compared the shell with ZCode's and Paseo's Electron apps. Both of those ship bundled UI with an IPC bridge; smind loads the daemon's web UI with **no IPC by design** (ADR-0012).
+Research (local-only, local research notes) compared the shell with a reference desktop workbench's and a reference workbench's Electron apps. Both of those ship bundled UI with an IPC bridge; smind loads the daemon's web UI with **no IPC by design** (ADR-0012).
 
 **User decisions (2026-09-24), not to be re-litigated:**
 1. Do the no-bridge quick wins now: items 1–6 below.

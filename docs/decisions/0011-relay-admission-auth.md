@@ -13,7 +13,7 @@ proof that a daemon may use the relay, and a successful relay admission
 is never treated as proof of E2EE authorization — the relay still
 cannot decrypt application payloads either way.
 
-Design, decided per `docs/research/relay-design-status.md` §7:
+Design, decided per `docs/research/local/relay-design-status.md` §7:
 
 - **Transport**: TLS. The relay uses a self-signed certificate (no
   external CA); the daemon pins the relay's certificate fingerprint at
@@ -110,7 +110,7 @@ outstanding challenges, admission bindings and idle routes (see
 
 - `docs/decisions/0007-relay-architecture.md` — relay architecture and
   E2EE handshake this ADR's admission layer is explicitly independent of.
-- `docs/research/relay-design-status.md` §7 — the research (pplx query
+- `docs/research/local/relay-design-status.md` §7 — the research (pplx query
   comparing token/mTLS/capability-token approaches against Tailscale
   DERP/ntfy/rathole/chisel) this decision is based on.
 - `docs/plans/active/relay-e2ee-mobile.md` — implementation plan; this

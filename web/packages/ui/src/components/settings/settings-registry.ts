@@ -12,7 +12,7 @@ export interface SettingsSectionContext {
   closeSettings?: () => void;
 }
 
-/** One entry in the settings screen's section list (audit-paseo.md §4's list+detail shape). */
+/** One entry in the settings screen's section list (audit-workbench.md §4's list+detail shape). */
 export interface SettingsSection {
   /** Stable identity: the list's key, and what a later re-registration under the same id replaces rather than duplicates. */
   id: string;

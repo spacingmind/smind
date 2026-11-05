@@ -1,16 +1,15 @@
-# Sidebar polish (ZCode visual + Paseo interaction)
+# Sidebar polish (a reference desktop workbench visual + a reference workbench interaction)
 
 Size: M (5) — scope 1, PRs 1, risk 1, decisions 0 (all approved by the Supervisor), verification 2 (screenshots).
 
-Goal: bring the task sidebar to "clean like ZCode": single-line 32px task rows,
+Goal: bring the task sidebar to "clean like a reference desktop workbench": single-line 32px task rows,
 row actions scoped to their own row, keyboard reachable, one status slot,
 consistent container-row chevrons, right-click menu, fade (not ellipsis) title
 overflow with per-row indentation, and persisted expansion state. Web UI only;
 no daemon/Go change.
 
 Sources (local-only, gitignored): `docs/research/local/2026-10-12-sidebar-polish-lead-report.md`;
-refs `refs/zcode/packages/ui/src/{TaskListItem.tsx,WorkspaceSidebarItem.tsx,TaskTitleOverflowText.tsx,workspace-grouped-tasks/}`
-and `refs/paseo/packages/app/src/components/sidebar/`.
+refs a local reference clone.
 
 Out of scope: S9 scroll-edge fade / show-more, S10 drag reorder (needs a user
 decision on persisted order), S11 filter chips and ⌘1-9 badges. Do not touch
@@ -46,7 +45,7 @@ decision on persisted order), S11 filter chips and ⌘1-9 badges. Do not touch
 
 ### S5 — container rows
 - SP-S5-AC1: the space ⋯ never overlaps its chevron; workspace and space ⋯ are not mounted at idle and mount on hover / focus-within / menu-open.
-- SP-S5-AC2: workspace, space, pinned and status-group headers use one chevron (same side — right after the title, as in ZCode group headers —, same size, muted).
+- SP-S5-AC2: workspace, space, pinned and status-group headers use one chevron (same side — right after the title, as in a reference desktop workbench group headers —, same size, muted).
 - SP-S5-AC3: a status-group count renders as a small pill.
 
 ### S6 — task context menu
@@ -65,7 +64,7 @@ decision on persisted order), S11 filter chips and ⌘1-9 badges. Do not touch
 - SP-S8-AC4: corrupt/absent storage falls back to "everything expanded".
 
 ### Review round 1 (PR #300 review: hierarchy, alignment, narrow titles, typography)
-- SP-R1-AC1: workspace content (spaces / Ungrouped / flat tasks), Pinned and status-group content sit behind one subtle guide line under the header's icon (`ml-4 border-l pl-1`, ZCode's `ml-4 border-l pl-2` narrowed); a space's / Ungrouped content carries the same guide only on a wide sidebar (>= 14rem container query) so a 192px sidebar keeps its title width. Spaces therefore read as nested under their workspace, not as siblings of the next workspace.
+- SP-R1-AC1: workspace content (spaces / Ungrouped / flat tasks), Pinned and status-group content sit behind one subtle guide line under the header's icon (`ml-4 border-l pl-1`, a reference desktop workbench's `ml-4 border-l pl-2` narrowed); a space's / Ungrouped content carries the same guide only on a wide sidebar (>= 14rem container query) so a 192px sidebar keeps its title width. Spaces therefore read as nested under their workspace, not as siblings of the next workspace.
 - SP-R1-AC2: depth-0 task titles share one x within a container whether or not the list contains a parent: every root row reserves the chevron gutter (`ROOT_PAD_PX` = 4px inset + 12px gutter); a task row sits at the same x in tree, search, Pinned and status-group lists.
 - SP-R1-AC3: container titles (workspace, space, Ungrouped, Pinned, status group) use `FadeText` (no ellipsis) and the chevron sits right after the title; the right padding for the ⋯ box (`pr-7`) and the hidden aggregate dot apply only while the row is hovered / focused / has its menu open.
 - SP-R1-AC4: typography is muted and graded: task titles `text-ui-base` at .76 opacity (1 on hover / selected); workspace header `text-ui-base font-medium`; space / Ungrouped / Pinned / status-group headers `text-ui-sm` + `text-foreground-subtle` (-> foreground on hover); relative time `text-ui-xs text-foreground-subtlest`.
@@ -93,18 +92,18 @@ Supervisor-approved (2026-10-12), implemented as written unless a deviation is l
 - One PR, one commit per item S1..S8.
 - S1: per-row wrapper (not the `li` containing descendants) owns hover/focus/menu-open state in JS; actions are conditionally mounted so tests are deterministic (jsdom cannot evaluate CSS `group-hover`).
 - S3: re-baselining `task-run-status-slot` / `task-unread-slot` / `task-attention-slot` into one slot is accepted; priority rules keep test coverage.
-  - Deviation/clarification: the latest run being `done` or `stopped` (no unread, no attention) renders no dot — ZCode's idle is empty. `error` and `running` stay. Container aggregates are unchanged.
+  - Deviation/clarification: the latest run being `done` or `stopped` (no unread, no attention) renders no dot — a reference desktop workbench's idle is empty. `error` and `running` stay. Container aggregates are unchanged.
 - S4 supersedes the "tier on the meta line" part of task-hierarchy-tiers U1-AC3 (tier is now in the hover card and the aria-label; child-count chip and rollup stay on the row).
-- S5: chevron goes immediately after the title (ZCode group header, `workspace-grouped-tasks/types.ts`), `size-3.5`, `text-foreground-subtlest`.
+- S5: chevron goes immediately after the title (a reference desktop workbench group header, `workspace-grouped-tasks/types.ts`), `size-3.5`, `text-foreground-subtlest`.
 - S6: `ContextMenuSub*` wrappers are added to `components/ui/context-menu.tsx` so the Move-to-space submenu can be shared.
-- S7: ZCode's marquee is not ported — only the right-fade mask. Container levels (workspace/space) add no extra indentation to task rows; only task depth does, so rows at the same task depth align across containers.
+- S7: a reference desktop workbench's marquee is not ported — only the right-fade mask. Container levels (workspace/space) add no extra indentation to task rows; only task depth does, so rows at the same task depth align across containers.
 - S8: one `STORAGE_KEYS.collapsedSidebarNodes` key holds a string-id set (`ws:<id>`, `space:<id>`, `ungrouped:<wsId>`, `pinned`, `status:<key>`) of *collapsed* nodes, so anything new (a new workspace, a new space) defaults expanded without a write.
 Review round 1 (Supervisor findings 1-4, human asked to fix before merge):
 
-- Hierarchy: ZCode's group content `ml-4 border-l pl-2` is ported as `ml-4 border-l pl-1` (20px per level instead of 25px). Two guide levels plus the always-reserved chevron gutter left ~60px of title at 192px, so a space's guide is wide-only (container query `@min-[14rem]/sb`); below that, tasks stay flush and their titles still line up with the space's label. This supersedes the S7 "container levels add no indentation / no guide line" decision; highlight of rows inside a container now spans from the guide line to the sidebar edge (what ZCode does), workspace headers stay full-width.
+- Hierarchy: a reference desktop workbench's group content `ml-4 border-l pl-2` is ported as `ml-4 border-l pl-1` (20px per level instead of 25px). Two guide levels plus the always-reserved chevron gutter left ~60px of title at 192px, so a space's guide is wide-only (container query `@min-[14rem]/sb`); below that, tasks stay flush and their titles still line up with the space's label. This supersedes the S7 "container levels add no indentation / no guide line" decision; highlight of rows inside a container now spans from the guide line to the sidebar edge (what a reference desktop workbench does), workspace headers stay full-width.
 - Alignment: the chevron gutter is always reserved for root rows (`ROOT_PAD_PX`), costing 12px on lists with no parents; chosen over a per-list conditional because the Supervisor asked for one stable column. Row inset 8 -> 4px (the container guide's `pl-1` supplies the rest).
-- Relative time (refs checked): ZCode shows a time on every row (`text-ui-sm text-foreground-subtle`), Paseo's rows show none; neither hides it by recency. Kept on every row, quieter (`text-ui-xs text-foreground-subtlest`); no recency logic. To drop it entirely later, remove the `task-row-time` span.
-- Muting: Paseo's title opacity .76 -> 1 is applied to task titles only (workspace/space headers are graded by size/weight/colour, not opacity).
+- Relative time (refs checked): a reference desktop workbench shows a time on every row (`text-ui-sm text-foreground-subtle`), a reference workbench's rows show none; neither hides it by recency. Kept on every row, quieter (`text-ui-xs text-foreground-subtlest`); no recency logic. To drop it entirely later, remove the `task-row-time` span.
+- Muting: a reference workbench's title opacity .76 -> 1 is applied to task titles only (workspace/space headers are graded by size/weight/colour, not opacity).
 - Visual tokens: existing classes only (`bg-hover`, `bg-selected`, `text-ui-base`, `text-foreground-subtle(st)`, `bg-tag`); no new color values.
 
 ## Progress

@@ -4,19 +4,19 @@
 
 **Accepted — 2026-10-23, by the Human** (via the Supervisor): all twelve open questions as recommended (see [Open questions](#open-questions-for-the-human), which record the accepted answers). **Implemented 2026-10-23** (plan closed in `docs/plans/completed/`): Item R (typed `rate_limited` reason, parent notification, failover `wait`/`fallback`, provider cooldown) and Item S (seat contract, role instructions, daemon-built MCP entry with run identity, admission, role pack, sticky seats) are built and merged; the first real item ran Supervisor → Lead → 2 Peers entirely inside smind for $0.99. **Not built, by decision:** the web failover buttons and badge, the tree budget (A5), the mobile read-only tree and push for a stuck tree (A7), write-scope warnings and sizing (A4); see the plan's "Remaining (parked)". Two corrections since acceptance: the GLM reset is UTC+8 (B1), and a follow-up that omits the profile inherits the chat's last profile ("sticky seats"; an explicit id or `0` overrides). Spec and PR split:
 [`docs/plans/completed/in-smind-orchestration.md`](../plans/completed/in-smind-orchestration.md).
-Closes the first "biggest gap" in `docs/ROADMAP.md` (Phase 2's original DoD: smind orchestrates its own work instead of Paseo).
+Closes the first "biggest gap" in `docs/ROADMAP.md` (Phase 2's original DoD: smind orchestrates its own work instead of a reference workbench).
 
 **Relationship to ADR-0027 (Profile as role contract): this ADR amends it.** ADR-0027 stays Proposed. This ADR takes a thin, enforceable slice of it
 (items 1–3 and 5 of section A), re-sequences it, and leaves 0027's handoff tools, budgets, sizing and tier-scoped learning parked behind their original
 trigger. Why amend and not supersede or fold is in [Alternatives](#alternatives-considered). Section B (resilience) is new and has no 0027 counterpart.
 
 Inputs: the dogfood logs of 2026-10-22/23 (`docs/research/local/dogfood-2026-10-22.md`, `dogfood-ui-2026-10-22.md`, local-only), ADR-0016/0017/0018/0019/
-0020/0021/0025/0027/0028/0039/0040, and Paseo's parent-notification and tool-policy code (cited inline, `refs/paseo` at `8d9e7d3a`).
+0020/0021/0025/0027/0028/0039/0040, and the reference workbench's parent-notification and tool-policy code (cited inline, a local reference clone at `8d9e7d3a`).
 
 ## Context
 
 On 2026-10-22 the Peers of three plans ran as smind tasks: ADR-0040 PRs 2–6 and the dogfood fixes went through `smind task send`, with step-by-step briefs, `--detach` and
-`task wait`. The Leads and the Supervisor still lived in Paseo. Two things stopped the Leads from moving in.
+`task wait`. The Leads and the Supervisor still lived in that workbench. Two things stopped the Leads from moving in.
 
 **What the dogfood showed works** (so this ADR does not redesign it): task → send → follow-up keeps the chat context; worktrees and branches survive failures and
 restarts and compose with other orchestrators; `claude-native --model claude-sonnet-5-5 --mode auto` runs unattended after #502; concurrent tasks share one daemon;
@@ -27,11 +27,11 @@ and GLM steps took 5–15 minutes against 1–6 for Sonnet.
 
 1. **A rate limit stalls the whole tree and nobody is told.** At ≈15:00 +07 GLM answered `429 Usage limit reached for 5 hour. Your limit will reset at 17:35:18`.
    Three runs ended as `error`; the CLI printed only `acp: rpc error -32603: Internal error`; the cause was an `[error]` chunk in the stream (since #505 it leads the
-   run's error text). `task runs` said `error`. A Lead learns about a failed child only if it is blocked in `task_wait`. Paseo pushes finish/error notifications to the
+   run's error text). `task runs` said `error`. A Lead learns about a failed child only if it is blocked in `task_wait`. The reference workbench pushes finish/error notifications to the
    parent agent (below), so a Lead there wakes up on its own. The recovery that worked was manual: the Supervisor decided "GLM 429 → claude-native Sonnet pinned"
    (entry 23), which needed `task chat new` because a chat is bound to its first provider (ADR-0016; entry 24).
 2. **Peers are not distinguishable from Leads.** The `smind` MCP server is added by hand per workspace (ADR-0018, `smind` skill), so every agent in that workspace
-   has it or none does. Paseo's `glm-peer` / `claude-s-peer` have tools disabled per provider; smind has no per-profile tool policy. Identity is self-reported
+   has it or none does. The reference workbench's `glm-peer` / `claude-s-peer` have tools disabled per provider; smind has no per-profile tool policy. Identity is self-reported
    (`fromTaskId`/`fromChatId`/`parentTaskId` are optional MCP arguments), so the daemon cannot tell who is a Lead.
 3. **Brief and judgment stay with the Lead**, which is fine (dogfood entry 33: the defects that mattered were found by reading code, not by the Peers).
 
@@ -53,20 +53,20 @@ and GLM steps took 5–15 minutes against 1–6 for Sonnet.
   (`internal/runs/tree_guard.go`, default 4), `task.tree` with usage rollups, derived tiers, the web sidebar nesting, attention rollup, lineage strip and tree actions.
   **Mobile has no tree** (no `parentTaskId` anywhere in `mobile/src`). The push notifier (ADR-0040) notifies for root tasks only.
 
-### What Paseo does (the port reference)
+### What that workbench does (the port reference)
 
-- **Parent link** is a label: `PARENT_AGENT_ID_LABEL = "paseo.parent-agent-id"` (`refs/paseo/packages/protocol/src/agent-labels.ts:1`).
-- **Notification** is `setupFinishNotification` (`refs/paseo/packages/server/src/server/agent/agent-prompt.ts:467`): armed when the parent creates or prompts a child
-  (`notifyOnFinish`, default **true** for an agent caller, false for a top-level caller: `agent/tools/paseo-tools.ts:1045-1072`, `:1868`). It watches the child's lifecycle and, on
+- **Parent link** is a label: `PARENT_AGENT_ID_LABEL = "reference.parent-agent-id"`.
+- **Notification** is `setupFinishNotification`: armed when the parent creates or prompts a child
+  (`notifyOnFinish`, default **true** for an agent caller, false for a top-level caller: `agent/tools/reference-tools.ts:1045-1072`, `:1868`). It watches the child's lifecycle and, on
   `finished` / `errored` / `needs permission` / `closed`, sends the parent a prompt through `sendPromptToAgent` with `source.kind = "agent-notification"` and
   `activeTurnBehavior: "steer"` (it **injects into the parent's running turn**). One armed notification per (child, caller) pair; re-arming replaces the old one; an
   archived caller is skipped; the child's last message is truncated at 4000 characters with a pointer to `get_agent_activity`
-  (`FINISH_NOTIFICATION_MESSAGE_LIMIT`, `formatFinishNotificationBody`). The envelope is an XML-ish `<paseo-system … kind="agent-notification" event="errored">`
+  (`FINISH_NOTIFICATION_MESSAGE_LIMIT`, `formatFinishNotificationBody`). The envelope is an XML-ish `<reference-system … kind="agent-notification" event="errored">`
   (`agent/agent-messages/index.ts`).
 - **What it does not have:** persistence (the subscription is in memory, so a daemon restart forgets every armed notification), coalescing, a cost rule, or any notion of
   "the child's subtree is done". Smind's design below keeps the good parts and adds those.
-- **Tool policy** is per **provider**, not per profile: `providers.<id>.paseoTools = { enabled, disabledTools }`
-  (`protocol/src/provider-config.ts:31-34`, `server/agent/paseo-tool-policy.ts`). A "Peer" is a second provider id (`glm-peer`) that extends the real one with tools off.
+- **Tool policy** is per **provider**, not per profile: `providers.<id>.refTools = { enabled, disabledTools }`
+  (`protocol/src/provider-config.ts:31-34`, `server/agent/reference-tool-policy.ts`). A "Peer" is a second provider id (`glm-peer`) that extends the real one with tools off.
 
 ## Decision
 
@@ -98,9 +98,9 @@ tool writes profiles. Seats are created by a human command, `smind profile seed 
 | `peer-sonnet` | claude-native `claude-sonnet-5-5` | `auto` | **no** | none | none | hard outcomes, and the GLM fallback |
 | `reviewer` | claude-native `claude-sonnet-5-5` | `plan` | **no** | none | none | read-only |
 
-No Opus anywhere in the pack except where the Human sets the Supervisor's model. The numbers above are the stopgap's own (Paseo profile names, `docs/WORKSPACE_PROTOCOL.md`).
+No Opus anywhere in the pack except where the Human sets the Supervisor's model. The numbers above are the stopgap's own (the reference workbench profile names, `docs/WORKSPACE_PROTOCOL.md`).
 
-The profile contract replaces Paseo's per-provider variants (`glm-peer`) with one profile concept smind already has; the cost is the daemon-side resolution in A2.
+The profile contract replaces the reference workbench's per-provider variants (`glm-peer`) with one profile concept smind already has; the cost is the daemon-side resolution in A2.
 
 ### A2. The daemon resolves the profile and builds the MCP entry (ADR-0027 R3 + R4, minus the token)
 
@@ -159,7 +159,7 @@ Web already has nesting, tier labels, attention rollup, lineage strip and tree a
 
 ### A8. Supervisor liveness
 
-Paseo's supervisor heartbeat (hourly poll) is replaced by B3: the Supervisor's chat is woken when a Lead's subtree goes quiet. A *stall* detector (a run alive with no events for N
+That workbench's supervisor heartbeat (hourly poll) is replaced by B3: the Supervisor's chat is woken when a Lead's subtree goes quiet. A *stall* detector (a run alive with no events for N
 minutes) is not designed here; the dogfood did not show a stall, only quota stops and a model that ended its turn early (entry 32).
 
 ---
@@ -195,25 +195,25 @@ Terminal states of a **child task's** run that the parent asked about, once its 
 
 ### B3. Parent notification: the daemon enqueues into the parent's chat
 
-Ported from Paseo's `setupFinishNotification`, with persistence, coalescing and a quiescence rule added.
+Ported from the reference workbench's `setupFinishNotification`, with persistence, coalescing and a quiescence rule added.
 
 **Which chat.** A run records `reply_chat_id`: the chat that sent the prompt that started it, when that prompt came from an agent (`source=agent`, `fromTaskId` = the child task's own
 `parent_task_id`, chat belongs to that parent). A2 makes those ids reliable. Otherwise the run notifies nothing: a human-sent prompt in a Peer's chat (the Human working in the UI), an
 `orchestrator` send (an external Claude Code session; it uses `task_wait`, ADR-0021 decision 10), a root task (**no parent: nothing is enqueued**; the Human is told by attention and push, ADR-0040).
-`task_send {notifyOnFinish:false}` is the per-send opt-out (Paseo's `notifyOnFinish`), and `orchestration.notifyParent: false` the global kill switch (default true).
-If the parent chat or task is archived, the notification is dropped (Paseo skips an archived caller).
+`task_send {notifyOnFinish:false}` is the per-send opt-out (the reference workbench's `notifyOnFinish`), and `orchestration.notifyParent: false` the global kill switch (default true).
+If the parent chat or task is archived, the notification is dropped (that workbench skips an archived caller).
 
 **Which states.** `done`, `error`, and `stopped`/`interrupted` only when the stop reason is `daemon_restart` (the run is resumable: #529). **Not** a plain `stopped` (the stopper knows),
-not `waiting_permission` (Paseo notifies; smind's Lead cannot act on one, and the Human already sees it; ADR-0017), not system/purpose runs. A `done` run with disposition `needs-continue` notifies
+not `waiting_permission` (the reference workbench notifies; smind's Lead cannot act on one, and the Human already sees it; ADR-0017), not system/purpose runs. A `done` run with disposition `needs-continue` notifies
 with that disposition. Only the **direct** parent is notified (a Peer's end reaches its Lead, not the Supervisor).
 
-**Quiescence rule (not in Paseo).** A child run's end notifies the parent only when that child **task's subtree is quiet**: no running run, no queued item on any of its chats, and no running run
+**Quiescence rule (not in the reference workbench).** A child run's end notifies the parent only when that child **task's subtree is quiet**: no running run, no queued item on any of its chats, and no running run
 in any descendant. Without it the Supervisor would be woken at the end of every Lead *turn*: a Lead ends its turn after dispatching Peers and again after each Peer notification, while its work item is
 not finished. With it, the Supervisor hears once, when the last Peer has finished, the Lead has been woken, handled it and gone idle with nothing queued. A rate-limit failover (B5) enqueues its
 successor before this check runs, so a failed-over run is not "quiet" and the failed run does not notify; the successor does, tagged "after failover from glm".
 
 **Delivery.** One `chat_queue` item, `source = child_event` (new value), `whenBusy = queue` semantics (ADR-0021: delivered at the next turn boundary, bounded at 20, survives restart). Not `interrupt`: unlike
-Paseo's `steer` it never cuts a running Lead turn. A run started from a `child_event` item has `origin = child_event`, carries **no `reply_chat_id`**, and so never notifies upward by itself; the Lead's
+that workbench's `steer` it never cuts a running Lead turn. A run started from a `child_event` item has `origin = child_event`, carries **no `reply_chat_id`**, and so never notifies upward by itself; the Lead's
 *work item* is reported by the quiescence rule on its original run chain.
 
 **Idempotency across restarts (outbox).** `runs.parent_notified_at` (nullable). `finish` sets it in the same transaction that enqueues the item. At startup, after reconciliation, the daemon scans
@@ -226,8 +226,8 @@ new nullable `chat_queue.not_before` holds the item for `orchestration.notifyDeb
 The same `not_before` column serves B5's `wait` policy.
 
 **Content.** Bounded and typed, one block per child: task id, title, run id, state, `failureKind`/`resetAt`, `disposition`, commits ahead of base and head SHA (O1 provenance), cost (nil shown as "not
-reported"), failover successor if any, and the child's last assistant text truncated at 1 KiB (Paseo: 4000) with "use `task_logs {runId}` for the rest". Wrapped in an envelope the receiving agent can
-recognise, and the child text is marked **untrusted data**: it is a prompt-injection channel from a Peer into a Lead (Paseo sends it unmarked). Example:
+reported"), failover successor if any, and the child's last assistant text truncated at 1 KiB (the reference workbench: 4000) with "use `task_logs {runId}` for the rest". Wrapped in an envelope the receiving agent can
+recognise, and the child text is marked **untrusted data**: it is a prompt-injection channel from a Peer into a Lead (the reference workbench sends it unmarked). Example:
 
 ```
 [child event] 2 children of task #8 need you
@@ -287,13 +287,13 @@ as separate small PRs, B1 first.
   independent resilience mechanisms.
 - **Amend (chosen).** 0027 gets a Status note pointing here; R1 is already built (#373); R2–R4 are pulled forward in reduced form (A1–A3); R5 (limits), R6 (handoff), R8 (sizing/brief) stay parked with their trigger; R7's
   tier label already exists structurally. The plan `orchestration-roles.md` keeps its parked status, with a progress line.
-- **Paseo-style provider variants** (`glm-peer` = a second provider id with tools off). Simple, and it is what the stopgap does; rejected because smind profiles already carry the same fields, a profile
+- **reference-style provider variants** (`glm-peer` = a second provider id with tools off). Simple, and it is what the stopgap does; rejected because smind profiles already carry the same fields, a profile
   also carries role text and a child policy, and a variant provider would show up in every provider picker and chat-binding check.
 - **Notes-only** (keep `notes` and `WORKSPACE_PROTOCOL.md`, add nothing). The status quo for Peers; rejected for tool policy, because "the Peer has no orchestration tools" cannot be a convention when the MCP server is
   per workspace, and the notification and failover need run identity that today does not exist.
-- **Notify with Paseo's `steer`** (inject into the parent's running turn). Impossible in smind (ADR-0021: no mid-turn input injection in ACP v2 or the Claude SDK).
+- **Notify with that workbench's `steer`** (inject into the parent's running turn). Impossible in smind (ADR-0021: no mid-turn input injection in ACP v2 or the Claude SDK).
 - **Notify on every child state change, or on every child run end.** Rejected for cost (a Supervisor woken on every Lead turn); quiescence + coalescing instead.
-- **Notify an in-memory subscription like Paseo.** Rejected: restart loses it, and ADR-0021 decision 5 made "nothing queued is lost across a restart" a smind rule. The outbox (`parent_notified_at`) is the fix.
+- **Notify an in-memory subscription like the reference workbench.** Rejected: restart loses it, and ADR-0021 decision 5 made "nothing queued is lost across a restart" a smind rule. The outbox (`parent_notified_at`) is the fix.
 - **A new run status `rate_limited`.** Rejected, same argument as D13: five statuses are a contract for the queue's "finished" trigger, the CLI exit codes, the tree and every client.
 - **Derive `failureKind` on read** (like `disposition`). Rejected for the free-text and time-zone reasons in B1.
 - **Per-workspace fallback provider list** instead of per profile. Possible later as a default for sends with no profile; per profile is where the policy and its human authorship already live.
@@ -305,7 +305,7 @@ as separate small PRs, B1 first.
 **All twelve accepted as recommended (2026-10-23).** Each entry's recommendation is the decision.
 
 1. **ADR-0027: amend, supersede or fold?** Recommend **amend** (this ADR), as above. `orchestration-roles.md` stays parked; R6 and R8 keep their trigger.
-2. **Seat model: profile contract (three new columns + daemon-built MCP entry) vs Paseo-style provider variants vs notes only?** Recommend the profile contract. It is the smallest change that gives
+2. **Seat model: profile contract (three new columns + daemon-built MCP entry) vs reference-style provider variants vs notes only?** Recommend the profile contract. It is the smallest change that gives
    a Peer no orchestration tools on every launch path (CLI, MCP, web, mobile) and gives the daemon run identity.
 3. **Enforcement strength: identity by env var plus admission checks now, run token and method allowlist later?** Recommend env identity now. State plainly that it is a drift guard and not a sandbox. Build
    the token only if a Peer is seen spawning or approving, the ADR-0027 trigger list.
@@ -358,7 +358,7 @@ skipped the paid eval (step 1) by choice; the changes were applied directly. Eve
   4 KiB escaped) on top of the 1 KiB text cut; a block after a long preamble survives but the preamble is cut to the 1 KiB budget. A missing or invalid block
   means "failed to report": the Lead reads the diff.
 - **The reviewer is unchanged**; the Human decides later whether it stays.
-- **The protocol and skills describe one shape**: Human/Steward → Lead → optional Peers. `docs/WORKSPACE_PROTOCOL.md` lost its Paseo-era scope text, the GLM
+- **The protocol and skills describe one shape**: Human/Steward → Lead → optional Peers. `docs/WORKSPACE_PROTOCOL.md` lost its reference-era scope text, the GLM
   default-coder section and the Supervisor duties; `smind-leader` no longer tells a Lead to `task_wait`.
 - **The daemon keeps** every mechanism: `childPolicy` (`none`, `leaf`, `profiles`) and the `profiles` branch of admission, `orchestration.maxDepth` (default
   still 2, pinned by a test; the extra level is now just headroom), the per-tree concurrency guard, sticky seats, the parent notifier and wake runs, rate-limit

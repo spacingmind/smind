@@ -2,7 +2,7 @@
 
 Incident: fresh install crashes ("Cannot read properties of null
 (reading 'map')"). Both audits agree on root cause and fix — see
-docs/research/uiux-audit.md and docs/research/test-gap-audit.md.
+docs/research/local/uiux-audit.md and docs/research/test-gap-audit.md.
 
 ## Acceptance Criteria
 

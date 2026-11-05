@@ -33,7 +33,7 @@ CLI: `smind provider update <id> [--models a,b] [--add-models a,b] [--disallow T
 | AC6 | Applied live and atomically (registry reloaded as `provider.reload`; invalid config leaves the registry as it was); `provider.updated` published | `TestProviderUpdateInstance_AppliesLive`, `TestProviderUpdateInstance_InvalidKeepsRegistry` |
 | AC7 | `provider.list` serves the editable fields, additively, for instances only | `TestProviderList_InstanceEditableFields` |
 | AC8 | Two claude-native instances with different CLAUDE_CONFIG_DIR run concurrently, each process sees its own dir | `TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs` (taskrunner) |
-| AC9 | A hand-written Paseo-style config (two claude-native instances + an ACP entry) loads and lists unchanged | `TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged` |
+| AC9 | A hand-written reference-style config (two claude-native instances + an ACP entry) loads and lists unchanged | `TestHandWrittenReferenceStyleConfig_LoadsAndListsUnchanged` |
 | AC10 | CLI `smind provider update` sends the right params, exit codes, usage, docs drift | `TestProviderUpdateCLI_*`, `TestCLIReferenceMatchesHelp` |
 | AC11 | Web: models editor (add/remove, replace-vs-add), disallowedTools chips, inherit toggle on the Providers detail; shared primitives; light+dark frames 1280/390 incl. transitions | `provider-instance-editors.test.tsx`, frames in the validation section |
 | AC12 | Docs: `public-docs/providers.md` "Editing an instance", ADR-0046 amendment | docs drift test |
@@ -61,7 +61,7 @@ from the list entry; share the env between the two instances; hide the toggle fo
 | GLM 172 #1 | web types, hook, editors, tests | done, 3 clean commits; could not run tests (no node_modules in the Peer worktree), they passed when the Lead ran them | none |
 | GLM 172 #2 | CLI `smind provider update` + docs | done, 3 clean commits | none |
 | Sonnet 163 x3 | fix lookup + finish tests; tighten two surviving mutations; fix multi-edit ordering bug found by the frames | done | none |
-| Sonnet 179 x2 | wsapi RPC, Spec overlay, list field, tests; concurrency + Paseo tests + docs | done | none |
+| Sonnet 179 x2 | wsapi RPC, Spec overlay, list field, tests; concurrency + a reference workbench tests + docs | done | none |
 | Sonnet 183, 188 | frame loops (round 1 found the daemon bug and 4 UI defects; round 2 clean) | done | round 1 CLI killed once (memory pressure), resumed |
 | Sonnet 172 x2 | UI fixes (layout, error placement, keys, placeholders); a test fix | first done; second stopped on a permission prompt (Bash it could not run unattended) | the Lead wrote that one test fix |
 
@@ -76,7 +76,7 @@ Counts: GLM 5 runs (3 ok, 1 output budget, 1 rate limit), Sonnet 11 runs (10 ok,
 | AC3 | `_IdempotentNoop` (bytes and mtime), `_NothingToUpdate`, wsapi `_IdempotentNoop` |
 | AC4 | wsapi `TestProviderUpdateInstance_RefusesAgentCaller`, `_RecipeMadeUIMadeHandWritten`, `_AppliesLive`, `_InvalidKeepsRegistry`; `provider.updateInstance` is in `humanOnly` of `TestPluginSession_CannotReachHumanOnlyMethods` and not in `RunScopedMethods` (automation and agents use that allowlist) |
 | AC5 | `TestProviderList_InstanceEditableFields`, `TestProviderInfo_InstanceOverlay`, `TestInstanceSpec_KeepsOwnOverlay` |
-| AC6 | `TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs` (start barrier; fakeclaude has no short-hold scenario, so overlap in time is not proven, the run paths share one Runner), `TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged` |
+| AC6 | `TestInstances_TwoClaudeInstancesRunConcurrentlyWithOwnConfigDirs` (start barrier; fakeclaude has no short-hold scenario, so overlap in time is not proven, the run paths share one Runner), `TestHandWrittenReferenceStyleConfig_LoadsAndListsUnchanged` |
 | AC7 | `TestProviderUpdateCLI`, `TestCLIReferenceMatchesHelp` |
 | AC8 | `provider-instance-editors.test.tsx` (9 tests); frames on an isolated daemon (no model call, no Send), light + dark at 1280 and 390, with Save and inherit-toggle transition frames, looked at by the Lead (Models + Disallowed tools + toggle at 1280 light, refusal text under Save at 390 dark) |
 | AC12 | `public-docs/providers.md` "Edit an instance", ADR-0046 amendment, docs drift test |

@@ -110,7 +110,7 @@ Manual: AC24's checklist items (a)–(j), one line each in Validation with devic
 
 ## Progress
 
-- 2026-10-22: research (Expo SDK 58 notifications and Push API docs, FCM/APNs limits, Paseo's push code); ADR-0040 and this plan written, docs PR opened. **Stopped for Supervisor acceptance.** No code, no live calls, no accounts.
+- 2026-10-22: research (Expo SDK 58 notifications and Push API docs, FCM/APNs limits, a reference workbench's push code); ADR-0040 and this plan written, docs PR opened. **Stopped for Supervisor acceptance.** No code, no live calls, no accounts.
 - 2026-10-22: ADR-0040 Accepted (#481, H1–H8 as recommended). EAS link and app identifiers merged (#485, not in the original PR table: `owner`, `projectId`, `com.spacingmind.smind`, `eas.json`). #480 (M6) merged, so mobile PRs 5–6 are unblocked once PR 2 lands.
 - 2026-10-22: **PR 2 opened as #487** (`internal/push`: seal/open + vector, registry, Expo sender; not wired). Orchestrated through smind (dogfood daemon, GLM peer, four steps); friction is logged in the local dogfood notes.
 - Correction found while briefing PR 3: `smind relay host rotate` is relay-side and does not clear daemon registrations (AC6 and the ADR no longer claim it); revoke and the approved-at-send check are the controls.

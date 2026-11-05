@@ -28,7 +28,7 @@ import type { RunEntry } from "@/hooks/use-run-timeline";
 /**
  * One run rendered as a turn: the prompt that started it, the typed
  * transcript, and a footer with elapsed time and a copy action
- * (`audit-paseo.md` §2). Replaces the single `<pre>` of collected text
+ * (`audit-workbench.md` §2). Replaces the single `<pre>` of collected text
  * the run card used to be.
  *
  * Memoized on `run`'s object identity: use-run-timeline.ts's `appendEvent`

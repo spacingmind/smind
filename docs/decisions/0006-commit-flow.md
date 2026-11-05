@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-Resolves open questions 4, 6, and 7 of `docs/research/dual-mode-ui.md`.
+Resolves open questions 4, 6, and 7 of `docs/research/local/dual-mode-ui.md`.
 
 1. **Staging granularity: per-file.** The commit flow exposes
    stage/unstage per file (a file list with checkboxes over the task's
@@ -29,7 +29,7 @@ Resolves open questions 4, 6, and 7 of `docs/research/dual-mode-ui.md`.
 
 ## Alternatives considered
 
-- **Coarse `git add -A` (Paseo's model, VS Code-like).** Rejected by the
+- **Coarse `git add -A` (a reference workbench's model, VS Code-like).** Rejected by the
   maintainer: review-then-commit with per-file selection is the point of
   the editor-mode review surface; coarse staging makes selective commits
   impossible.

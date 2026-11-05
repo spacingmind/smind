@@ -39,12 +39,12 @@ Other facts that shape the design, measured from the code:
 | The web UI connects directly to `/ws`; only mobile uses the relay today | `web/packages/ui/src` has no e2ee code; `mobile/src/relay/` does |
 | ACP agents opt in to images with `agentCapabilities.promptCapabilities.image`; the real GLM `initialize` advertises `promptCapabilities: {}` | ACP `schema.json` (`PromptCapabilities`); fixture `internal/acp/mcp_test.go:131` |
 | Codex app-server `UserInput` accepts `image {url}` and `localImage {path}` | `refs/codex/codex-rs/app-server-protocol/schema/json/…v2.schemas.json` |
-| The Claude CLI accepts Anthropic content blocks on stream-json input (`{type:"image", source:{type:"base64", media_type, data}}`) — Paseo builds exactly this in `claude/agent.ts` `toSdkUserMessage` | `refs/paseo/packages/server/src/server/agent/providers/claude/agent.ts:3508-3560` |
+| The Claude CLI accepts Anthropic content blocks on stream-json input (`{type:"image", source:{type:"base64", media_type, data}}`) — a reference workbench builds exactly this in `claude/agent.ts` `toSdkUserMessage` | A local reference clone |
 | `taskrunner.Delivery{AddDirs}` already lets a run read an extra directory (`claude --add-dir`), used by learning delivery | `internal/taskrunner/runner.go:773`, `internal/learning/delivery/delivery.go:135` |
 | `file.list` lists one directory; there is no search RPC | `internal/wsapi/files.go`, `internal/files/files.go:72` |
 | `workspace` already shells out to `gh` through an overridable `runGH` | `internal/workspace/git.go:129` |
 
-Paseo (`refs/paseo`) is the interaction reference. Its protocol carries `images: [{data, mimeType}]` plus a typed
+The reference workbench is the interaction reference. Its protocol carries `images: [{data, mimeType}]` plus a typed
 `attachments` list, its daemon's `buildAgentPrompt` renders PR/issue/file attachments to text and puts images into
 provider content blocks, and its composer has attachment pills, an `@file` autocomplete and a GitHub picker. We port
 that shape, with the differences below (a single typed list, daemon-side GitHub fetch, on-disk persistence).
@@ -190,15 +190,15 @@ prompt and leak into every reader of those tables (learning window, probe source
 One neutral value goes to every runner (`taskrunner.PromptInput`): the user's `Text`, the decoded `Images`
 (`{Name, MimeType, Path}`; bytes are read from the set on disk only when a runner sends them natively) and
 `Context []string`, pre-rendered text blocks for `file`, `file_ref`, `pr`/`issue` and for images the runner cannot send.
-Order matches Paseo: the user's text, then images, then context blocks. A prompt whose text is a slash command
+Order matches that workbench: the user's text, then images, then context blocks. A prompt whose text is a slash command
 (`/…`) keeps the text block **last** for claude-native, because the CLI expands a slash command only in the final
-block (Paseo `toSdkUserMessage` comment).
+block (the reference workbench `toSdkUserMessage` comment).
 
 | Runner | Images | Other attachments | Notes |
 |---|---|---|---|
 | **claude-native** | Native `image` content blocks (base64) once the SDK supports them. **DEPENDENCY** below. Until then: the universal fallback (path in text; the CLI's `Read` tool views images). | text blocks (§3.1) | `Delivery.AddDirs` adds `$SMIND_HOME/attachments/<set>` so the agent can read `file` and fallback images without a permission prompt. |
 | **ACP (GLM, Kimi, other)** | `{type:"image", data, mimeType}` blocks **only** when `agentCapabilities.promptCapabilities.image` is true, read the way `SupportsMcpHttp` reads `mcpCapabilities` (`client.go:182`). Otherwise the fallback. | text blocks | `acp.ContentBlock` gains `Data`/`MimeType`. `resource_link` is not used: text works for every agent. |
-| **codex** | `{type:"localImage", path}` (Paseo does the same; avoids a huge JSON-RPC frame). | text blocks | `userInput` gains `Path`. |
+| **codex** | `{type:"localImage", path}` (the reference workbench does the same; avoids a huge JSON-RPC frame). | text blocks | `userInput` gains `Path`. |
 | **GLM** | Advertises no image support (`promptCapabilities: {}`), so GLM always takes the **fallback**: a text note plus the file on disk. GLM's model may not be able to use it; the note says so honestly. | text blocks | The composer shows a hint on the pill ("GLM can't view images; the file path is sent instead"), but does not block the send ([O4](#open-questions)). |
 
 **3.1 Rendering to text** (all runners, deterministic, covered by golden tests):
@@ -258,7 +258,7 @@ worktree: writing there would show up in `task.diff`, branch checkpoints and `gi
   this repo resolves by number. Results are cached daemon-side (10 s TTL, single-flight per (repo, kind, query)) and
   client-side (`staleTime` 30 s, debounced 300 ms), following the call-budget lesson from the usage endpoints
   (ADR-0028). `gh` calls go through the existing overridable `runGH` pattern so tests never touch the network.
-- Not in v1 (follow-ups, listed in the plan): auto-attaching a PR when a URL is pasted (Paseo's `forge-auto-attach`, own-remote matching only), non-GitHub forges (a new `forge` value and implementation behind the same wire), a structured `review` kind (daemon-side rendering of diff review comments with ±3 lines of context), and richer PR metadata (`isDraft`, `mergeable`, `headRepository`) for seeding "check out this PR".
+- Not in v1 (follow-ups, listed in the plan): auto-attaching a PR when a URL is pasted (that workbench's `forge-auto-attach`, own-remote matching only), non-GitHub forges (a new `forge` value and implementation behind the same wire), a structured `review` kind (daemon-side rendering of diff review comments with ±3 lines of context), and richer PR metadata (`isDraft`, `mergeable`, `headRepository`) for seeding "check out this PR".
 - **Context, not identity.** An attached PR never links the task to it; that (and any PR status or polling) belongs to ADR-0039. The timeline renders an attached PR as an attachment pill, deliberately unlike a task's own PR status chip.
 
 ### 5. `@file` on the daemon machine
@@ -277,9 +277,9 @@ worktree: writing there would show up in `task.diff`, branch checkpoints and `gi
 ### 6. Composer and `@` mention behaviour
 
 - Selecting a result inserts `@path` into the prompt text at the mention (quoted when the path has spaces, like
-  Paseo's `applyFileMentionReplacement`) so the sentence reads naturally. The composer remembers confirmed mentions and
+  the reference workbench's `applyFileMentionReplacement`) so the sentence reads naturally. The composer remembers confirmed mentions and
   sends a `file_ref` for each one still present in the text at submit; the daemon dedupes against the text (§3.1).
-- Triggers: `@` at start or after whitespace (not inside an email, Paseo's `findActiveFileMention`). Paste, drop and the
+- Triggers: `@` at start or after whitespace (not inside an email, the reference workbench's `findActiveFileMention`). Paste, drop and the
   attach button accept images and files; an image is any `image/png|jpeg|gif|webp`, everything else is a `file`.
   Pasted images are named `clipboard-<n>.png`.
 - Attachments are draft state, not persisted across a reload (the text draft already persists; blobs do not belong in
@@ -301,7 +301,7 @@ All new web code follows ADR-0032 and `docs/design.md`; no bespoke `useEffect` +
 - **Icons** are added to `lib/icons.ts` (the registry's drift test applies): `attach: Paperclip`, `mention: AtSign`,
   `pullRequest: GitPullRequest`, `issue: CircleDot`; `image`, `file`, `folder`, `close`, `search`, `spinner`, `warning`
   already exist.
-- **Composer treatment** (ZCode's calm card, Paseo's pills, `rounded-2xl` input card per `docs/design.md` §13):
+- **Composer treatment** (a reference desktop workbench's calm card, that workbench's pills, `rounded-2xl` input card per `docs/design.md` §13):
   - An icon-only **Attach** button (`Icons.attach`, `size-8 rounded-lg`, tooltip "Attach") at the left of the toolbar row
     opens a `rounded-lg` overlay menu (`shadow-md`): *Image or file…* (native multi-file picker), *Mention a file*
     (inserts `@`), *GitHub pull request…*, *GitHub issue…* (opens a search popover).
@@ -309,7 +309,7 @@ All new web code follows ADR-0032 and `docs/design.md`; no bespoke `useEffect` +
     Image pills are 48 px squares, `rounded-lg`, `object-cover`, 1 px `border-border`; other pills are two-line
     (name over type or `PR #123`) with a registry icon, `bg-surface`, `text-ui-sm` over `text-ui-xs` muted, same 48 px
     height so a mixed tray aligns. A 16 px close badge sits top-right, revealed on hover and always visible below `md`
-    and on touch (Paseo `AttachmentPill`). Click opens the image in a `Dialog` lightbox (`rounded-2xl`,
+    and on touch (the reference workbench `AttachmentPill`). Click opens the image in a `Dialog` lightbox (`rounded-2xl`,
     `max-h-[80vh]`); a PR/issue pill opens its URL via `external-link.ts`. An over-cap or rejected pill shows
     `Icons.warning` and the reason as its subtitle.
   - **Drop target**: dragging files over the task pane sets a focused-border state on the card and a centered
@@ -322,7 +322,7 @@ All new web code follows ADR-0032 and `docs/design.md`; no bespoke `useEffect` +
   - The test asserting there is no attachment affordance (`composer.test.tsx:1042`) is replaced by one asserting the
     Attach button exists and that nothing else new appears while the daemon reports no attachment support.
 - **Timeline treatment**: the user's message shows its attachments under the text as read-only frames
-  (`AttachmentFrame` in Paseo terms): image thumbnails (≤ 160 px, `rounded-lg`, click for the lightbox), file and
+  (`AttachmentFrame` in the reference workbench terms): image thumbnails (≤ 160 px, `rounded-lg`, click for the lightbox), file and
   `file_ref` chips (clicking a `file_ref` opens it in the file editor tab), PR/issue chips. Queued rows
   (`queued-prompts.tsx`) show the same chips without thumbnails. While a thumbnail loads it is a same-size skeleton
   block, so there is no reflow. Optimistic echo: the new run entry uses the client's own object URLs until the daemon's
@@ -356,7 +356,7 @@ with authentication details), which the composer reads to say why the GitHub pic
 
 ## Alternatives considered
 
-- **Separate upload RPC then reference by id** (Paseo's `uploaded_file`). Rejected by D1: more state, a second failure
+- **Separate upload RPC then reference by id** (that workbench's `uploaded_file`). Rejected by D1: more state, a second failure
   mode, and a queued prompt would reference an upload that might expire.
 - **Inline `@file` contents in the prompt.** Rejected by D2; also wastes context and leaks a file the agent might not
   need.
@@ -364,7 +364,7 @@ with authentication details), which the composer reads to say why the GitHub pic
   the table; rejected for the on-disk set.
 - **Write fallback images inside the worktree** (`.smind/attachments/`). Pollutes `task.diff`, checkpoint commits and
   `git status`; rejected for `$SMIND_HOME` plus `AddDirs`.
-- **Client sends PR/issue body** (Paseo does). Cheaper for the daemon, but the client could forge what the agent is told
+- **Client sends PR/issue body** (the reference workbench does). Cheaper for the daemon, but the client could forge what the agent is told
   and a mobile client would need `gh` data it cannot get. The daemon fetches instead (the Supervisor's brief).
 - **Fork or vendor the Claude SDK** to get images now. Rejected: the SDK is the user's own repo; fix it there and use
   the fallback meanwhile.

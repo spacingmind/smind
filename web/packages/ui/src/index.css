@@ -14,7 +14,7 @@
  *      per name per theme -- background/foreground/card/popover/
  *      popover-foreground/primary/primary-foreground/secondary/accent/
  *      destructive/border/sidebar are overwritten in place with ZCode's
- *      Zai Light/Dark values (zcode-visual-parity plan, P1 Step 2; see
+ *      Zai Light/Dark values (reference-visual-parity plan, P1 Step 2; see
  *      the `:root`/`.dark` comments below); `--ring` is neutralized (P1
  *      Step 5) and the `--radius-*` scale is deleted in favor of
  *      Tailwind's own defaults (P1 Step 5, see below) -- `--input` and
@@ -63,7 +63,7 @@
     --color-foreground: var(--foreground);
     --color-background: var(--background);
     /*
-     * No --radius-* overrides (zcode-visual-parity plan, P1 Step 5
+     * No --radius-* overrides (reference-visual-parity plan, P1 Step 5
      * decision): Tailwind v4's own default radius scale applies
      * unmodified, for parity with ZCode (which does the same -- no radius
      * theme override in refs/zcode/packages/ui/src/styles.css either).
@@ -75,7 +75,7 @@
     --color-diff-deletion: var(--diff-deletion);
 
     /*
-     * ZCode token vocabulary (zcode-visual-parity plan, P1 Step 2) --
+     * reference token vocabulary (reference-visual-parity plan, P1 Step 2) --
      * ported verbatim (names and values) from
      * refs/zcode/packages/ui/src/styles.css's `.theme-zai-light` /
      * `.theme-zai-dark` blocks, the active light/dark experiences per
@@ -178,7 +178,7 @@
     --color-terminal-bright-white: var(--terminal-bright-white);
 
     /*
-     * ZCode tokens added in the zcode-parity second pass (Stage 1) -- exports
+     * the reference tokens added in the reference-parity second pass (Stage 1) -- exports
      * values per refs/zcode/DESIGN.md / styles.css; the names<->ZCode map
      * lives in lib/zcode-tokens.ts (drift-tested).
      */
@@ -233,7 +233,7 @@
      * surviving member of that Item's type-role scale -- the rest
      * (workspace-title/section-title/panel-title/metadata-label/
      * code-annotation/interface) were retired in favor of `text-ui-*`
-     * (zcode-visual-parity plan, P1 Step 4) and their aliases removed.
+     * (reference-visual-parity plan, P1 Step 4) and their aliases removed.
      * `--text-content` stays: markdown prose keeps its own independent
      * `--font-scale-content`-driven size, per refs/zcode/DESIGN.md's
      * code/diff/terminal-content exceptions to the `text-ui-*` scale.
@@ -242,7 +242,7 @@
     --text-content--line-height: var(--content-line-height);
 
     /*
-     * `text-ui-*` scale (zcode-visual-parity plan, P1 Step 3) -- the
+     * `text-ui-*` scale (reference-visual-parity plan, P1 Step 3) -- the
      * mandatory application-interface type scale per
      * refs/zcode/DESIGN.md's "Highest-priority UI constraint" and
      * refs/zcode/packages/ui/src/styles.css's `@theme` block, formulas
@@ -274,7 +274,7 @@
 
 :root {
     /*
-     * The one interface-scaling variable (zcode-visual-parity plan, P1
+     * The one interface-scaling variable (reference-visual-parity plan, P1
      * Step 3) -- refs/zcode/DESIGN.md: "Changing the interface font size
      * updates only --ui-font-size; never mutate the root html font size."
      * A single value, not per-theme -- unlike the color tokens above,
@@ -285,7 +285,7 @@
     /*
      * background/foreground/card/popover/popover-foreground/primary/
      * primary-foreground/secondary/accent/destructive/border/sidebar below
-     * are overwritten in place with ZCode's Zai Light values (zcode-visual-
+     * are overwritten in place with the reference's Light values (reference-visual-
      * parity plan, P1 Step 2) rather than aliased -- ZCode reuses these
      * exact names for the same concepts, so there is nothing to alias onto,
      * only a value to replace. This is also where smind's teal `--primary`
@@ -313,7 +313,7 @@
     --border: rgba(13, 13, 13, 0.1);
     --input: oklch(0.922 0 0);
     /*
-     * Neutral, not the sidebar wordmark's teal (zcode-visual-parity plan,
+     * Neutral, not the sidebar wordmark's teal (reference-visual-parity plan,
      * P1 Step 5 decision) -- refs/zcode/DESIGN.md's inputs are "calm and
      * integrated, not glowing by default", and ZCode has no ring/focus-glow
      * token at all. Same lightness as the retired teal value, chroma
@@ -335,7 +335,7 @@
     --sidebar-ring: oklch(0.75 0.11 194.8);
 
     /*
-     * ZCode token vocabulary, Zai Light values (zcode-visual-parity plan,
+     * reference token vocabulary, Light values (reference-visual-parity plan,
      * P1 Step 2) -- brand-new raw vars with no pre-existing smind name to
      * collide with; ported verbatim from
      * refs/zcode/packages/ui/src/styles.css's `.theme-zai-light` block.
@@ -416,7 +416,7 @@
     --foreground-muted: var(--muted-foreground);
 
     /*
-     * Diff family (retired -- zcode-visual-parity plan, P1 Step 2):
+     * Diff family (retired -- reference-visual-parity plan, P1 Step 2):
      * aliased onto ZCode's diff-added/-removed tokens so a future P1 Step
      * 4-style migration off this name (not required this phase -- see
      * P4's diff2html repointing) stays value-preserving.
@@ -507,7 +507,7 @@
      * from the mark and converted to OKLCH -- see docs/design.md). This
      * token was previously made deliberately achromatic (an earlier
      * unrelated blue was flagged as an unused anomaly and reset to match
-     * the rest of the palette, docs/research/uiux-audit.md §2.5) -- that
+     * the rest of the palette, docs/research/local/uiux-audit.md §2.5) -- that
      * reasoning no longer applies now that the product has an actual brand
      * mark to carry through. Matches --primary/--ring above: one hue, used
      * only on primary actions/focus rings/active-sidebar-state, everywhere
@@ -627,7 +627,7 @@
 }
 
 /*
- * ZCode Stage-1 tokens (zcode-parity plan), Zai Light. A second block on purpose:
+ * Reference Stage-1 tokens (reference-parity plan), Light. A second block on purpose:
  * the plugin theme contract (internal/plugins/themetokens.json,
  * PLUGIN_THEME_TOKENS) is read from the FIRST :root/.dark blocks, and these
  * app-internal tokens are not plugin-themeable. Map + drift test:
@@ -686,7 +686,7 @@
 }
 
 /*
- * ZCode Stage-1 tokens (zcode-parity plan), Zai Dark. A second block on purpose:
+ * Reference Stage-1 tokens (reference-parity plan), Dark. A second block on purpose:
  * the plugin theme contract (internal/plugins/themetokens.json,
  * PLUGIN_THEME_TOKENS) is read from the FIRST :root/.dark blocks, and these
  * app-internal tokens are not plugin-themeable. Map + drift test:
@@ -804,7 +804,7 @@
  * highlight.js's classes carry no color of their own now (diff-render.tsx
  * no longer imports a fixed `github.css` theme -- it painted a solid white
  * bar behind every diff line in dark mode and made strings unreadable
- * there, zcode-visual-parity P4 / git-github-ux G6). The base rule keeps
+ * there, reference-visual-parity P4 / git-github-ux G6). The base rule keeps
  * `background: transparent` so the diff2html row underneath shows through
  * (context lines fall back to the pane's own background; +/- lines keep
  * their `--d2h-ins/del-bg-color`), and `color: inherit` lets
@@ -919,7 +919,7 @@
  * Font-size scale (ui-redesign-parity plan, Item 13's Appearance
  * section) -- three independent step variables the settings screen
  * writes (lib/settings-preferences.ts's applyFontSizes), following
- * audit-paseo.md's interface/content/code split. `--font-scale-interface`
+ * audit-workbench.md's interface/content/code split. `--font-scale-interface`
  * is wired to the root font-size here, so it rescales every rem-based
  * Tailwind text utility app-wide -- the one axis this pass gives a real
  * visual effect. `--font-scale-content` and `--font-scale-code` are
@@ -961,7 +961,7 @@ html {
 /*
  * xterm.js's own viewport picks up the browser's native scrollbar,
  * showing a second, independent scrollbar down the terminal pane's
- * right edge next to the app's own chrome (zcode-visual-parity plan,
+ * right edge next to the app's own chrome (reference-visual-parity plan,
  * P4, porting `.terminal-xterm-shell .xterm-viewport` from
  * refs/zcode/packages/ui/src/styles.css). Scrolling still works --
  * this only hides the redundant native indicator; xterm keeps handling

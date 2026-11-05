@@ -4,10 +4,9 @@ Status: **completed 2026-10-22** (PR #480 and the follow-up below); native (devi
 
 Size: M (5) — scope 2 (mobile + one api surface, no daemon change), PRs 1, risk 1 (zero-run task flow, partial failure), decisions 0, verification 1 (390 px light+dark smoke, web only).
 
-Closes a Phase 3 gap: the phone can read, follow and answer tasks (mobile-zcode-redesign, completed) but cannot start one. Presentation follows ZCode's narrow
+Closes a Phase 3 gap: the phone can read, follow and answer tasks (mobile-reference-redesign, completed) but cannot start one. Presentation follows a reference desktop workbench's narrow
 style on the M1 foundations (`theme.ts` tokens, `src/ui/*`, `@expo/ui` through `UiHost`); skills are the rulebook as in the redesign (expo-ui, expo-design-system,
-expo-native-ui, expo-router, expo-animation, vercel-react-native-skills). Pattern reference: `refs/paseo/packages/app/src/{create-agent-preferences,provider-selection,
-new-workspace-launch}` (one launch form; the last provider/model/mode is remembered per provider; model/mode come from the provider catalog).
+expo-native-ui, expo-router, expo-animation, vercel-react-native-skills). Pattern reference: a local reference clone (one launch form; the last provider/model/mode is remembered per provider; model/mode come from the provider catalog).
 
 ## Contract (read from the daemon, no daemon change)
 
@@ -45,7 +44,7 @@ relay, E2EE, `chatQueue`, `runFollower`, `permissionRequests`, theme tokens, `sr
   created task, and offers `Open task` — a retry only re-runs `run.start` (never a second task). Double taps are ignored while busy.
 - **Zero-run tasks:** the detail composer becomes live for a task with no run; the first send uses the remembered selection else the daemon's first provider
   (`provider.list`), via `startFirstRun`. (Today's follow-ups on tasks with runs are unchanged.)
-- **Preferences:** `newTaskPrefs` keeps the last provider and per-provider model/mode **in memory for the session** (mirrors Paseo's `preferences.ts` shape);
+- **Preferences:** `newTaskPrefs` keeps the last provider and per-provider model/mode **in memory for the session** (mirrors a reference workbench's `preferences.ts` shape);
   persistence across launches is a follow-up (no storage dependency is added here).
 - **Payload hygiene:** title ≤ 200 chars, prompt ≤ 100 000 chars, clamped client-side with a visible counter only near the limit; nothing else is sent.
 
@@ -104,7 +103,7 @@ daemon has the task (via `task.list`), the header shows the title, and a second 
 
 ## Progress
 
-- 2026-10-22 — Plan written (this file). Contract read from `handlers.go`, web's dialog, Paseo's launch/preferences code.
+- 2026-10-22 — Plan written (this file). Contract read from `handlers.go`, web's dialog, a reference workbench's launch/preferences code.
 - 2026-10-22 — Lead review of the contract found ADR-0024's setup busy window: the first prompt is sent with `whenBusy: 'queue'` and `queued` counts as success (AC 4/5a).
 - 2026-10-22 — M6-A data layer (api additions, provider catalog, prefs, submit pipeline, live integration test); then in parallel M6-B1 (route, form, header entry, smoke
   stage 55) and M6-B2 (zero-run composer, first-send provider, run prompt on finished runs) in two worktrees, cherry-picked onto one branch. Review fixes: stale-closure

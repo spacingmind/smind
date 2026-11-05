@@ -1,17 +1,16 @@
 # Task permission, attention & layout UX
 
 Follow-up from `docs/plans/active/smind-dogfood.md` Session 1
-(2026-09-11) and its 2026-09-12 UI/UX comparison against `refs/paseo`
-and `refs/deepseek-harness`. Session 1's real failure: a headless,
+(2026-09-11) and its 2026-09-12 UI/UX comparison against a local reference clone. Session 1's real failure: a headless,
 monitored Claude run got its file edits through (`acceptEdits`,
 `internal/taskrunner/runner.go:277-285`) but had **no way to get Bash
 approved** — `gofmt`/`go vet`/`go test` all require a live human click
 on the permission card, there is no allowlist for known-safe read-only
 commands, and no timeout — so the agent shipped a commit it never
 verified itself, and a monitoring script watching for the card had
-nothing to click. Paseo mitigates this with a pre-selected run mode
+nothing to click. A reference workbench mitigates this with a pre-selected run mode
 (auto/plan/manual) and a permission card anchored near its composer;
-`refs/deepseek-harness` goes further with named permission-presets
+a local reference clone goes further with named permission-presets
 (sandbox mode + approval policy bundled) and an `ApprovalPanel` that
 takes over the composer so a pending request can't be scrolled past.
 
@@ -21,14 +20,14 @@ is a declared dependency and `App.tsx` already wraps content in a
 width (`App.tsx:134-136`) — no second pane to drag against, so nothing
 is actually resizable today. The sidebar (`sidebar.tsx`) shows a
 resize-style cursor on its rail but that rail only toggles
-collapsed/expanded at a fixed `16rem` — it doesn't drag-resize. Paseo,
+collapsed/expanded at a fixed `16rem` — it doesn't drag-resize. A reference workbench,
 by contrast, has a full custom split-pane system
 (`components/split-container.tsx` + `resize-handle.tsx`) with real drag
 handles and per-workspace persisted layout (`layoutByWorkspace` in
 `workspace-screen.tsx`).
 
 This plan covers six independent improvements, ordered by priority
-against the dogfood goal (use smind, not Paseo, as the daily driver).
+against the dogfood goal (use smind, not a reference workbench, as the daily driver).
 Each is scoped to be implementable and testable on its own — a single
 task/run can pick up one item without needing the others done first.
 
@@ -59,7 +58,7 @@ task/run can pick up one item without needing the others done first.
 3. **Permission card is not lost in the scrolling log.**
    - A pending permission request is visible without scrolling the
      chat/log history — pinned near the prompt input area (or
-     otherwise persistently rendered), matching Paseo's
+     otherwise persistently rendered), matching a reference workbench's
      composer-anchored card rather than today's inline
      `PendingPermissionView` in `task-detail.tsx`.
    - This holds even while new log chunks are streaming in underneath
@@ -436,8 +435,8 @@ matching the observed failure shape.
 
 Prompted by trying to log in a GLM account through the web UI and
 finding no option for it at all. Root cause and comparison researched
-via subagent (read-only, `refs/paseo`, `refs/deepseek-harness`,
-`refs/cliproxyapi`):
+via subagent (read-only, a local reference clone,
+a local reference clone):
 
 - `web/packages/ui/src/components/accounts-dialog.tsx`'s provider list
   is a hand-maintained frontend constant (`MANUAL_PROVIDERS`/
@@ -451,22 +450,22 @@ via subagent (read-only, `refs/paseo`, `refs/deepseek-harness`,
   dialog has no concept of "this provider is ready via an
   externally-managed CLI, here's how you'd know" — it just silently
   omits it.
-- `refs/deepseek-harness`'s `ui-settings-models` treats a provider with
+- A local reference clone's `ui-settings-models` treats a provider with
   no required API key as automatically "ready" (no credential row, no
   missing-key indicator) — the reference pattern for what a GLM row
   should look like here.
-- `refs/paseo`'s `acp-provider-catalog.ts` +
+- A local reference clone's `acp-provider-catalog.ts` +
   `provider-catalog-list.tsx` is the closest 1:1 template: a
   searchable catalog row per ACP agent (icon, version, install
   command, an "Add"/"Adding…" button, install-instructions link) —
   this is the right shape for adding GLM (and any future ACP agent)
   without hand-writing bespoke OAuth/paste UI per provider.
 - Also missing, ranked by how much each would close the parity gap:
-  connection/health status indicators per account (dsh's
-  credential-configured dot; cliproxyapi's active/disabled status +
+  connection/health status indicators per account (a reference agent harness's
+  credential-configured dot; a reference proxy project's active/disabled status +
   expandable detail panel), multi-account-per-provider with priority
-  ordering (cliproxyapi), and a "test this provider now" diagnostic
-  action (Paseo's `provider-diagnostic-sheet.tsx`).
+  ordering (a reference proxy project), and a "test this provider now" diagnostic
+  action (a reference workbench's `provider-diagnostic-sheet.tsx`).
 
 To be scoped as its own set of dispatched smind tasks (not hand-coded
 directly — per this plan's own dispatch-via-smind-task pattern), once
@@ -486,16 +485,16 @@ still assert GLM never appears in that dropdown, just no longer that
 `provider.list` is uncalled) and renders any `kind: "cli"` entries as a
 read-only "Managed externally" row/badge — no credential form, no
 Connect button, no missing-key warning, following the
-`refs/deepseek-harness` `ui-settings-models` pattern of treating a
+a local reference clone `ui-settings-models` pattern of treating a
 provider with no required credential as automatically "ready". No
 changes to how GLM actually runs (`internal/acp/glm.go`'s
 `npx -y glm-acp-agent` spawn is untouched) — display only.
 
 **Item 7c: account health/connection status + "test this provider now"
 diagnostic (closed 2026-09-13)** — the second and third bullets of Item
-7's "also missing" list above (dsh's credential-configured dot and
-Paseo's `provider-diagnostic-sheet.tsx` "test now" action), scoped to a
-single lightweight RPC rather than the full cliproxyapi-style expandable
+7's "also missing" list above (a reference agent harness's credential-configured dot and
+a reference workbench's `provider-diagnostic-sheet.tsx` "test now" action), scoped to a
+single lightweight RPC rather than the full reference-style expandable
 detail panel or multi-account priority ordering (still open).
 
 - New `provider.test {provider: string}` RPC
@@ -528,13 +527,13 @@ detail panel or multi-account priority ordering (still open).
 - `accounts-dialog.tsx`: both the account-credential rows and the
   "managed externally" (cli-kind) rows now render a small status dot
   (green once `provider.test` reports `ok`, red once it reports not-ok,
-  neutral/gray until tested at all — the dsh `ui-settings-models`
+  neutral/gray until tested at all — the reference agent harness `ui-settings-models`
   credential-configured-dot pattern) plus a "Test" button. Clicking Test
   calls `provider.test` with that row's provider id and renders the
   `detail` string inline underneath the row (green text on ok, the
   existing `text-destructive` token on not-ok), turning the dot to match.
   Kept intentionally minimal per scope — no new page, no sheet, no
-  expandable detail panel (cliproxyapi's pattern, left for a future
+  expandable detail panel (a reference proxy project's pattern, left for a future
   pass), no auto-run-on-mount (every provider would otherwise fire a
   `provider.test` on every dialog open).
 - Tests: `internal/wsapi/provider_test.go` adds

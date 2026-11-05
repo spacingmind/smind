@@ -2,10 +2,10 @@
 
 ## Context
 
-ADR-0013 (Accepted) lets the desktop app **install, update, and restart the local daemon it manages**: Windows via WSL2, and macOS natively. When the app is newer than the daemon, it offers "update daemon and restart". The flow is modeled on Paseo's `shouldRestartForVersion`.
+ADR-0013 (Accepted) lets the desktop app **install, update, and restart the local daemon it manages**: Windows via WSL2, and macOS natively. When the app is newer than the daemon, it offers "update daemon and restart". The flow is modeled on a reference workbench's `shouldRestartForVersion`.
 
 That needs two things that don't exist yet:
-1. A downloadable daemon binary per platform, attached to each GitHub Release. Today `.github/workflows/release-please.yml` stops at "tag + GitHub Release + changelog". Its own header comment says binaries are "a separate, not-yet-built distribution task … modeled on refs/cliproxyapi's release workflow".
+1. A downloadable daemon binary per platform, attached to each GitHub Release. Today `.github/workflows/release-please.yml` stops at "tag + GitHub Release + changelog". Its own header comment says binaries are "a separate, not-yet-built distribution task … modeled on a local reference clone's release workflow".
 2. The app's version must equal the daemon version it ships alongside. Today the desktop is `0.1.0` in four places (`desktop/package.json`, `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml`, `desktop/daemon-client/Cargo.toml`), while `.release-please-manifest.json` is `0.7.0`.
 
 Version stamping already exists (PR #195): `internal/version`, `smind --version`, and `/healthz` `version`. The `task build` ldflags recipe computes `<manifest>` at a `v<manifest>` tag.
@@ -50,13 +50,13 @@ Branching and release model (see memory/CONTRIBUTING):
 
 ## Decisions
 
-- Model the build on `refs/cliproxyapi`'s release workflow where it helps; record what was borrowed.
+- Model the build on a local reference clone's release workflow where it helps; record what was borrowed.
   - Borrowed: per-target matrix build job shape, archive layout (binary +
     LICENSE flat inside the tarball, no wrapping directory), and a final
     job that downloads every build's artifact and computes one
     `checksums.txt` over all of them (`publish-checksums` there, `publish`
     here).
-  - Not borrowed: cliproxyapi's workflow runs on tag push and creates the
+  - Not borrowed: a reference proxy project's workflow runs on tag push and creates the
     GitHub Release itself (`gh release create`/`edit`) before building;
     smind's release-please-action already owns tag + Release creation, so
     the new jobs key off its `release_created`/`tag_name` outputs instead

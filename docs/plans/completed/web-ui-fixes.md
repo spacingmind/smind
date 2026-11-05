@@ -3,13 +3,13 @@
 Three concrete bugs found live-testing `web/packages/ui` (real daemon,
 headless-Chromium screenshots at desktop/tablet/mobile widths) after the
 user flagged the UI as "sai thiết kế, không responsive" — not a request
-for a visual redesign pass (see `docs/research/ui-ux-polish-2026.md` for
+for a visual redesign pass (see `docs/research/local/ui-ux-polish-2026.md` for
 that, separate/later concern), these are functional/behavioral defects.
 
-**Port from `refs/paseo` where it has already solved the same problem**
+**Port from a local reference clone where it has already solved the same problem**
 (per user, 2026-09-17: smind's own from-scratch attempts at UI pieces
 like these keep shipping small bugs) — adapt the *behavior*, not
-verbatim code: paseo's UI is React Native + react-native-unistyles +
+verbatim code: a reference workbench's UI is React Native + react-native-unistyles +
 react-native-gesture-handler (`packages/app`), smind's is plain web
 React + Tailwind v4 + shadcn (`web/packages/ui`) — there is no file to
 copy-paste, only interaction logic/structure to port into smind's DOM-
@@ -43,19 +43,19 @@ based stack.
   mouse-down/move/up sequence (headless Chromium or equivalent), not
   just that the code compiles. If `react-resizable-panels` v4's own
   drag handling is the problem (confirm before assuming), port the
-  *interaction model* paseo already ships in
-  `refs/paseo/packages/app/src/components/resize-handle.tsx` and
+  *interaction model* a reference workbench already ships in
+  a local reference clone and
   `sidebar-resize-handle.tsx`: pointer capture on drag start
   (`setPointerCapture`/`releasePointerCapture`) so a fast drag never
   "loses" the handle even if the pointer leaves its bounding box, a hit
-  area meaningfully wider than the visible 1px separator line (paseo
+  area meaningfully wider than the visible 1px separator line (a reference workbench
   uses a 10px pointer hit area / 24-88px touch hit area, vs the current
   `after:w-1` ~4px), delta computed as a ratio of container size (not
   raw pixels) so resizing is stable across container size changes, and
   a hover-delay-then-highlight affordance so the handle doesn't flicker
   on incidental mouse-over. Whether this means patching smind's
   `resizable.tsx` wrapper or replacing `react-resizable-panels` with a
-  custom pointer-event hook modeled on paseo's is an implementation
+  custom pointer-event hook modeled on a reference workbench's is an implementation
   decision — the acceptance bar is "drag resizes smoothly and reliably",
   not a specific library choice.
 - **Sidebar task/workspace title text truncates correctly, not garbled.**
@@ -76,7 +76,7 @@ based stack.
   full title, or check `scrollWidth <= clientWidth` after render) so
   this doesn't silently regress again.
 - Out of scope: the broader visual-design refresh from
-  `docs/research/ui-ux-polish-2026.md` (design tokens, typography,
+  `docs/research/local/ui-ux-polish-2026.md` (design tokens, typography,
   variant naming, motion) — that's a separate, larger, later pass with
   its own plan if pursued. This plan is bug fixes only.
 
@@ -98,7 +98,7 @@ based stack.
   rendered width/flex-basis; a fast/large pointer move (simulating a
   quick drag) still resizes correctly, not just a slow small move —
   this is the scenario most likely to expose the "loses the handle"
-  failure mode paseo's pointer-capture pattern exists to prevent.
+  failure mode a reference workbench's pointer-capture pattern exists to prevent.
 - Vitest: a task with a title long enough to overflow the sidebar's
   available width renders truncated (not garbled/fragmented) at both a
   desktop and a narrow/mobile viewport width.
@@ -198,10 +198,10 @@ Read `react-resizable-panels` v4.12.3's actual shipped source (both the
 silently invisible to the other; wasted a round trip discovering this)
 before touching anything, rather than trusting either recorded suspect
 verbatim. That source confirms v4 already does the two things the
-Acceptance Criteria describe porting from paseo: it calls
+Acceptance Criteria describe porting from a reference workbench: it calls
 `setPointerCapture` on drag start, and computes the drag delta as
 `(clientX - startX) / groupSize`, i.e. a ratio of container size, not
-raw pixels. The bug isn't the library missing paseo's model — it already
+raw pixels. The bug isn't the library missing a reference workbench's model — it already
 has it. It's two smind-side integration bugs:
 
 1. **Confirmed real** (not just plausible): `App.tsx` fed
@@ -246,7 +246,7 @@ has it. It's two smind-side integration bugs:
 
 Also added, since the Acceptance Criteria call for it and it's a
 one-hover-state amount of code: a hover-delay-then-highlight affordance
-(150ms, matching paseo) via a small `highlighted` state + timer in
+(150ms, matching a reference workbench) via a small `highlighted` state + timer in
 `ResizableHandle`, exposed as `data-highlighted` for styling. Regression
 tested with fake timers: no highlight immediately on hover, highlight
 after the delay, immediate clear on pointer leave (cancelling a pending

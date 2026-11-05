@@ -7,7 +7,7 @@ Size: L (8) — scope 2, PRs 2, risk 2 (user tokens, outbound calls, refresh rac
 Status (original, 2026-10-11): **spec, ADR accepted**, docs-only so far. Design:
 [ADR-0028](../../decisions/0028-account-usage-windows.md) (**Accepted**).
 D1–D4 and D6–D13 were accepted as the recommended defaults; **D5 changed**:
-the web UI ports Paseo's Usage UX (PR-D1/D2 below). PR-A may start, but its
+the web UI ports a reference workbench's Usage UX (PR-D1/D2 below). PR-A may start, but its
 live-endpoint probes need Human go-ahead first (see Validation); until then
 it is fixtures-only.
 
@@ -20,8 +20,8 @@ plugs into the registry of the full-screen Settings screen (parallel PR
 `feat/settings-fullscreen`); and a zero-extra-call **passive rate-limit
 signal** is **D14, now Accepted (round 3, below)** with **PR-F** (AC59–AC66).
 
-**Amended 2026-10-12, round 3 (Human): D14 accepted, cliproxyapi model**
-(`refs/cliproxyapi` @ `4b5f1ea`, ADR-0028 §7): the **routing signal is a hard
+**Amended 2026-10-12, round 3 (Human): D14 accepted, a reference proxy project model**
+: the **routing signal is a hard
 rejection only** (an Anthropic 429 whose headers declare the shared 5h or 7d
 window `rejected`) → a persisted **cooldown until the latest reset + 1–30 s
 grace**; a `7d_oi`-only rejection cools down only the requested model; a bare
@@ -43,7 +43,7 @@ in the web UI, CLI and MCP. Today `serve.go` wires a `noopQuotaFetcher`, so
 `routing.Router.isExhausted` never fires.
 
 Not in scope: routing smind's own runs (ADR-0020), per-run token usage
-(unchanged), pace prediction (`runsOutAt`; the UI port omits Paseo's
+(unchanged), pace prediction (`runsOutAt`; the UI port omits the reference's
 "at risk / runs out" row), usage history, API-key balance
 fetchers, providers other than Anthropic and OpenAI/ChatGPT OAuth,
 least-pressure pool ordering, 429-based cooldown from anything other than an explicit `rejected` window (D14 covers the explicit case), per-account
@@ -222,7 +222,7 @@ Surfaces: wsapi, CLI, MCP (PR-C)
 - **AC27** The MCP tool (D8: `account_usage`) is read-only, present in the
   catalog and in `mcp_instructions.go`, uses `touch` only, and has no refresh
   input. `usage_summary` and `usage.summary` are unchanged.
-Web: Paseo's Usage UX ported (PR-D1 Settings + modal, PR-E chat hover card, PR-D2 footer item and pins)
+Web: the reference's Usage UX ported (PR-D1 Settings + modal, PR-E chat hover card, PR-D2 footer item and pins)
 
 - **AC28** (D2) Sidebar footer Usage item, **off by default**: absent on a
   fresh profile; the **Show summary in sidebar** switch in Settings → Usage
@@ -371,10 +371,10 @@ Web: Paseo's Usage UX ported (PR-D1 Settings + modal, PR-E chat hover card, PR-D
   (and from inside Settings, the modal portals above the Settings screen).
 
 PR-F: rejection cooldown and observed headers (D14, Accepted; ADR-0028 §7).
-Mirrors `refs/cliproxyapi/internal/runtime/executor/helps/claude_ratelimit.go`
+Mirrors the reference proxy project
 (`ClaudeHeadersIndicateUnifiedRateLimitRejection`, `ParseClaudeRateLimitReset`;
 call sites `claude_executor_request.go:297-301`, `claude_executor_fast_error.go:149-150`),
-`sdk/cliproxy/auth/quota_signals.go` and `helps/codex_quota.go`. The observer is
+`sdk/reference-proxy/auth/quota_signals.go` and `helps/codex_quota.go`. The observer is
 write-only and never fetches.
 
 - **AC59** *No extra calls.* The proxy holds a write-only `quota.Observer`
@@ -608,8 +608,8 @@ Persistence (AC52):
 
 ### Go tests: rejection cooldown and observation (PR-F, D14; `internal/quota/passive_test.go`, `internal/server`)
 
-Fixtures are built from the header sets in `refs/cliproxyapi`
-(`sdk/cliproxy/auth/quota_signals_test.go:68-110`,
+Fixtures are built from the header sets in the reference proxy project
+(`sdk/reference-proxy/auth/quota_signals_test.go:68-110`,
 `internal/runtime/executor/claude_executor_ratelimit_test.go:30-41,517-530`) and
 `refs/codex/codex-rs/core/tests/suite/client.rs:3206-3222`, never from a live
 call. The proxy tests use a fake upstream plus the usage `httptest` counter.
@@ -666,13 +666,13 @@ Storage and config (AC65, AC66):
 
 ### Web UI tests (vitest + Testing Library, `web/packages/ui`)
 
-smind's web has no in-repo Playwright, so Paseo's three e2e specs
+smind's web has no in-repo Playwright, so the reference's three e2e specs
 (`packages/app/e2e/browser/usage-{modal,settings,sidebar-item}.spec.ts`) are
 mirrored as component-level tests against a fake `WsClient` (the existing
 `App.test.tsx` style) that answers `account.usage` and can emit the
 `account.usage` / `account.removed` events and record every request. Logic
-tests port Paseo's unit tests (`pinned`, `model`, `preferences`, `format`,
-`copy`). The fixtures reuse Paseo's: a Claude account at 31% 5h / 54% wk and a
+tests port the reference's unit tests (`pinned`, `model`, `preferences`, `format`,
+`copy`). The fixtures reuse its: a Claude account at 31% 5h / 54% wk and a
 Codex account at 7% 5h / 12% wk.
 
 Logic (`lib/account-usage/*.test.ts`):
@@ -837,42 +837,42 @@ Note: "PR-A" elsewhere in this plan and the ADR means PR-A1 and PR-A2
 together (split because the call budget and its persisted state made one PR
 too large to review); the budget tests (`budget_*`) and AC44–AC52 land in PR-A2.
 
-### PR-D: Paseo → smind file map
+### PR-D: the reference → smind file map
 
-Paseo is React Native + Unistyles + react-query + a plugin registry with a
+It is React Native + Unistyles + react-query + a plugin registry with a
 host (machine) concept; smind's web is React 19 + Tailwind v4 + shadcn/Radix
 (`web/packages/ui`), no react-query, one daemon, and an accounts table rather
 than harness-login discovery. **Ported** = same behaviour and structure, **adapted** =
 same idea, rewritten for smind's stack/data, **dropped** = no smind
-equivalent. All smind paths are under `web/packages/ui/src/`. Read Paseo's file
+equivalent. All smind paths are under `web/packages/ui/src/`. Read the reference file
 before writing its counterpart (memory: prefer porting over writing UI from
 scratch).
 
-| Paseo (`packages/app/src/usage/`) | smind | How |
+| Reference (`packages/app/src/usage/`) | smind | How |
 |---|---|---|
 | `types.ts` | `lib/account-usage/types.ts` | Adapted: hand-written TS types for the `AccountUsage` wire shape (no zod protocol package); `UsageView` kept; guards tolerate missing fields (AC39) |
 | `model.ts` | `lib/account-usage/model.ts` | Ported: `usedPercent`, `displayPercent`, `usageWindowRowLabel`, `formatUsageFreshness`, `resolveUsageRefresh`, `replaceReport`, `upsertReport` (laterFetched wins), `settleReports`, `resolveUsageView`. **Adapted:** `resolveUsageHostId` / `resolveUsageModalHostId` → `resolveAccountFilter` (picked account, else All); "host not connected / needs update" → "daemon not connected / lacks `account.usage`". **Deferred to PR-E:** `resolveAgentUsageView` |
 | `preferences.ts` | `lib/account-usage/preferences.ts` | Ported rules (null pins = defaults, array incl. empty = selection, first toggle snapshots defaults, pins match a provider's window on every account, `effectiveUsagePins`, `toggleUsagePin`); **adapted:** `serverId` → `accountKey: string \| null`, `sourceId` → `provider`, zod → `readStored`/`writeStored` validators with a new `STORAGE_KEYS.usage` (`smind:usage-preferences`); the COMPAT legacy-`pinned` shim is dropped (no legacy) |
 | `pinned.ts` | `lib/account-usage/pinned.ts` | Ported: `choosePinnedUsageLayout` (constants `MIN_METER_WIDTH` 16, `METER_GAP` 4), `resolvePinnedUsage` |
 | `tone.ts` | `lib/account-usage/tone.ts` | Ported (daemon also sends `tone`; this is the fallback) |
-| `format.ts` | `lib/account-usage/format.ts` | Ported: `formatPct`, `formatDisplayPct`, `formatResetLabel`, `formatAmount` (`Intl`); token amounts reuse `lib/usage-format.ts` `formatTokens` instead of Paseo's `formatTokenCount` |
-| `copy.ts` | `lib/account-usage/copy.ts` | Ported single-file copy; **adapted:** remedies say "Reconnect it in Providers." (smind owns the login; Paseo's "Run <harness> to refresh it" does not apply); adds the disabled and old-daemon sentences; relative time via `lib/relative-time.ts` |
-| `queries.ts` | `hooks/use-account-usage.ts` | **Adapted:** react-query is replaced by a module store + `useSyncExternalStore`: `account.usage` list (stale after 60 s, daemon cache is 5 min), `refreshOne(accountId)`, `refreshAll()`, `account.usage` / `account.removed` events through `useDaemonEvents`, reconnect re-list, per-account upsert with the same race rules as Paseo's `upsertReport`/`settleReports`. Streaming list becomes events (the RPC itself is not streamed) |
+| `format.ts` | `lib/account-usage/format.ts` | Ported: `formatPct`, `formatDisplayPct`, `formatResetLabel`, `formatAmount` (`Intl`); token amounts reuse `lib/usage-format.ts` `formatTokens` instead of its `formatTokenCount` |
+| `copy.ts` | `lib/account-usage/copy.ts` | Ported single-file copy; **adapted:** remedies say "Reconnect it in Providers." (smind owns the login; the reference's "Run <harness> to refresh it" does not apply); adds the disabled and old-daemon sentences; relative time via `lib/relative-time.ts` |
+| `queries.ts` | `hooks/use-account-usage.ts` | **Adapted:** react-query is replaced by a module store + `useSyncExternalStore`: `account.usage` list (stale after 60 s, daemon cache is 5 min), `refreshOne(accountId)`, `refreshAll()`, `account.usage` / `account.removed` events through `useDaemonEvents`, reconnect re-list, per-account upsert with the same race rules as its `upsertReport`/`settleReports`. Streaming list becomes events (the RPC itself is not streamed) |
 | `display.ts` | `hooks/use-usage-preferences.ts` | Ported (`useUsageDisplay`) over a small `localStorage` store shared by every surface (same pattern as `use-notification-sound-preference.ts`) |
-| `hosts.ts`, `in-sidebar.ts` | `hooks/use-usage-preferences.ts` (account pick, `inSidebar`) | **Adapted:** host pick → account pick; Paseo's `useSidebarNavItems("footer")` registry does not exist in smind, so "Summary in sidebar" is a stored boolean (default on) |
+| `hosts.ts`, `in-sidebar.ts` | `hooks/use-usage-preferences.ts` (account pick, `inSidebar`) | **Adapted:** host pick → account pick; its `useSidebarNavItems("footer")` registry does not exist in smind, so "Summary in sidebar" is a stored boolean (default on) |
 | `sidebar-item.tsx` | `components/account-usage/usage-sidebar-item.tsx`, `usage-sidebar-root.tsx`; footer row in `components/app-sidebar.tsx` (**PR-D2, off by default**) | Ported structure (`UsageSidebarRoot` owns open state, mounts the modal on first open and unmounts after close; `PinnedUsageTrigger`/`PinnedUsageLine` with hidden measuring copies); **adapted:** RN `onLayout` → `ResizeObserver`, `SidebarMenuButton` row in `SidebarFooter` (icon-only in the collapsed rail) |
 | `usage-modal.tsx` | `components/account-usage/usage-modal.tsx` | **Adapted:** `AdaptiveModalSheet` → `components/ui/dialog.tsx` on wide, `components/ui/sheet.tsx` (bottom) when `useIsMobile()`; max width 640; sheet ≤ 80% height; body scrolls; keyed by account filter so a refresh in flight on one pick never shows on another |
 | `controls.tsx` | `components/account-usage/usage-controls.tsx` | Ported layout (filter, Refresh all, Settings); **adapted:** `HostFilter` → a `components/ui/select.tsx` account filter ("All accounts" + each account label), hidden with ≤ 1 account |
-| `options.tsx` | `components/account-usage/usage-options.tsx`, `components/ui/segmented-control.tsx` | **Adapted:** `DropdownMenu` + `SettingsSwitch` + `SegmentedControl` → `components/ui/popover.tsx` (sheet on narrow) with a Switch "Show summary in sidebar" (default **off**) and a new small Radix `ToggleGroup`-based segmented control for Used / Remaining. In Settings → Usage the same control is rendered as a visible labelled **Settings** button in the block header (Paseo #5921: discoverable above reports) |
-| `usage-section.tsx`, `host-usage-section.tsx` | `components/settings/usage-section.tsx` (existing file, registered via `registerSettingsSection`) | **Adapted:** one block, no host: Plan usage (`UsageBody`, `UsageMessage`, error `Alert` with Try again) above the existing token table, retitled Token usage. Registered section id `usage` stays. **Settings redesign:** it renders into whatever container the Settings screen gives it (in-shell today, `feat/settings-fullscreen`'s framed content view or narrow detail page later), keeps its controls in its own body (Paseo's `SettingsSection trailing` becomes a header row inside the block), uses no app-sidebar assumptions, and leaves the registry API and `settings-*` test ids untouched |
+| `options.tsx` | `components/account-usage/usage-options.tsx`, `components/ui/segmented-control.tsx` | **Adapted:** `DropdownMenu` + `SettingsSwitch` + `SegmentedControl` → `components/ui/popover.tsx` (sheet on narrow) with a Switch "Show summary in sidebar" (default **off**) and a new small Radix `ToggleGroup`-based segmented control for Used / Remaining. In Settings → Usage the same control is rendered as a visible labelled **Settings** button in the block header (reference #5921: discoverable above reports) |
+| `usage-section.tsx`, `host-usage-section.tsx` | `components/settings/usage-section.tsx` (existing file, registered via `registerSettingsSection`) | **Adapted:** one block, no host: Plan usage (`UsageBody`, `UsageMessage`, error `Alert` with Try again) above the existing token table, retitled Token usage. Registered section id `usage` stays. **Settings redesign:** it renders into whatever container the Settings screen gives it (in-shell today, `feat/settings-fullscreen`'s framed content view or narrow detail page later), keeps its controls in its own body (its `SettingsSection trailing` becomes a header row inside the block), uses no app-sidebar assumptions, and leaves the registry API and `settings-*` test ids untouched |
 | `list.tsx` | `components/account-usage/usage-list.tsx` | Ported (one card per account; rows pinnable only while the summary switch is on) |
-| `card.tsx` | `components/account-usage/usage-card.tsx` | Ported: header (logo, **display name** (`accounts.label`, provider default only if empty/default), plan `status-badge`, status dot/label, per-card refresh with freshness tooltip), messages, bars, balances, details, footer (inline freshness on narrow/touch; Paseo's account-label footer is gone because the label is now the title), "Unable to refresh usage". **Adapted:** `loginErrors` (several harness logins per account) is dropped: one credential per smind account |
+| `card.tsx` | `components/account-usage/usage-card.tsx` | Ported: header (logo, **display name** (`accounts.label`, provider default only if empty/default), plan `status-badge`, status dot/label, per-card refresh with freshness tooltip), messages, bars, balances, details, footer (inline freshness on narrow/touch; its account-label footer is gone because the label is now the title), "Unable to refresh usage". **Adapted:** `loginErrors` (several harness logins per account) is dropped: one credential per smind account |
 | `window-bar.tsx` | `components/account-usage/usage-window-bar.tsx` | Ported: checkbox row when pinnable, pinned/hover highlight layers, pin glyph + tooltip, `usageWindowRowLabel` accessible name. **Dropped:** the "runs out" at-risk line (no `runsOutAt` in v1) |
 | `balance-bar.tsx` | `components/account-usage/usage-balance-bar.tsx` | Ported (`Intl` language from the browser) |
 | `meter.tsx` | `components/account-usage/usage-meter.tsx` | Ported: 4 px track, tone fills (`ok`/`warning`/`danger`/default) using smind's existing status colour tokens, `quiet` variant for the footer |
 | `refresh-button.tsx` | `components/account-usage/usage-refresh-button.tsx` | Ported ("Refresh all", spinner via `components/ui/inline-spinner.tsx`) |
-| `source-icon.tsx` | `components/account-usage/usage-source-icon.tsx` + inline Claude and OpenAI marks | **Adapted:** Paseo ships catalog SVGs per source; smind has no provider icons yet, so PR-D1 adds two inline `currentColor` marks keyed by `provider` and a lucide `Gauge` fallback |
-| `agent-usage.tsx` + `useAgentUsage` + `resolveAgentUsageView`, and Paseo's context-window hover card (#5975, `fe10c40b`) | `components/account-usage/chat-plan-usage.tsx`, `plan-usage-compact.tsx`, `components/chat-usage-total.tsx`, `components/run-usage-pill.tsx` | **Required (PR-E), adapted:** Paseo resolves the agent's own account from its launch environment; smind cannot (runs use the user's own login, ADR-0020), so the section lists **all OAuth accounts of the chat's provider**, compactly, filter-selected first, from the cache only (`mode:"cached"`, no streaming per-agent query). Hover card where hover exists, tap popover on touch. Unpinnable, no refresh button (as Paseo's `refreshable=false`) |
+| `source-icon.tsx` | `components/account-usage/usage-source-icon.tsx` + inline Claude and OpenAI marks | **Adapted:** That workbench ships catalog SVGs per source; smind has no provider icons yet, so PR-D1 adds two inline `currentColor` marks keyed by `provider` and a lucide `Gauge` fallback |
+| `agent-usage.tsx` + `useAgentUsage` + `resolveAgentUsageView`, and the reference's context-window hover card (#5975, `fe10c40b`) | `components/account-usage/chat-plan-usage.tsx`, `plan-usage-compact.tsx`, `components/chat-usage-total.tsx`, `components/run-usage-pill.tsx` | **Required (PR-E), adapted:** The reference resolves the agent's own account from its launch environment; smind cannot (runs use the user's own login, ADR-0020), so the section lists **all OAuth accounts of the chat's provider**, compactly, filter-selected first, from the cache only (`mode:"cached"`, no streaming per-agent query). Hover card where hover exists, tap popover on touch. Unpinnable, no refresh button (as the reference's `refreshable=false`) |
 | `*.test.ts` (`pinned`, `model`, `preferences`, `format`, `copy`) | `lib/account-usage/*.test.ts` | Ported (names above) |
 | e2e `usage-modal/-settings/-sidebar-item.spec.ts` | `components/account-usage/*.test.tsx`, `settings/usage-section.test.tsx` | Adapted to Testing Library with a fake `WsClient` (names above) |
 | plugin registry, `useHosts`, host runtime, `HostFilter`, `AdaptiveModalSheet`, Unistyles themes | — | Dropped / replaced by smind's own sidebar, dialog/sheet and Tailwind tokens |
@@ -885,16 +885,16 @@ scratch).
   1→30 min backoff, D4 Anthropic + OpenAI OAuth, D6 routing on, D7 hard keeps
   its error, D8 new `account_usage` MCP tool, D9 overage suppresses, D10
   poller refreshes only expired tokens, D11 `localStorage`, D12 503 with reset
-  time, D13 global switch only). **D5 changed:** the web UI ports Paseo's
+  time, D13 global switch only). **D5 changed:** the web UI ports the reference's
   Usage UX. Round 2 (2026-10-12): footer item **off by default**, plan usage
   on **chat hover** (PR-E required) and in Settings → Usage, order
   D1 → E → D2, display name = `accounts.label`, Settings → Usage plugs into
-  the registry. Round 3: **D14 Accepted** (cliproxyapi model: hard-rejection
+  the registry. Round 3: **D14 Accepted** (a reference proxy project model: hard-rejection
   cooldown only, observation-only headers, fetched reports stay display + D1). Not reopened inside a PR.
 - Decided here, not in the ADR (small, reversible):
   1. Naming: "Plan usage" (windows, `account.usage`) vs "Token usage"
      (`usage.summary`, `run_usage`) in every surface. Provider display names:
-     `anthropic` → "Claude", `openai` → "Codex" (as in Paseo's fixtures).
+     `anthropic` → "Claude", `openai` → "Codex" (as in the reference's fixtures).
   2. Fixtures are redacted copies of real responses; the live probe is the
      manual step below, gated on Human go-ahead.
   3. The wsapi/web switch for `accountUsage.enabled` reuses whatever
@@ -905,7 +905,7 @@ scratch).
   4. Per-run and proxy token usage are untouched; `usage.summary` gains no
      window concepts.
   5. "Remembers the picked account" is an account filter ("All accounts" or
-     one), the smind analogue of Paseo's remembered host; **accepted by the
+     one), the smind analogue of its remembered host; **accepted by the
      Human (2026-10-12)** as shared by footer, modal and Settings → Usage.
   6. ~~The footer Usage row is present whenever polling is enabled~~
      **Superseded (2026-10-12):** the footer row is off by default and exists
@@ -935,11 +935,11 @@ scratch).
   `docs/account-usage-windows`. Source reading done: `internal/quota`,
   `internal/routing/router.go`, `internal/accounts/{refresh,credential}.go`,
   `internal/server/proxy.go`, `cmd/smind/serve.go`, wsapi account/usage
-  handlers, Paseo's usage plugin, server registry, app and CLI.
+  handlers, the reference's usage plugin, server registry, app and CLI.
 - 2026-10-11: Human approved ADR-0028; D1–D4, D6–D13 as recommended, D5
-  changed to "port Paseo's Usage UX". ADR set to Accepted; plan updated: web
+  changed to "port the reference workbench's Usage UX". ADR set to Accepted; plan updated: web
   ACs rewritten (AC28–AC42), PR-D split into D1/D2 (+ optional E) with the
-  Paseo → smind file map, test scenarios mirror Paseo's e2e specs. Paseo
+  reference → smind file map, test scenarios mirror the reference's e2e specs. What was
   read: `packages/app/src/usage/*`, `e2e/browser/usage-*.spec.ts`, history
   of #5685/#5786/#5805/#5876/#5903/#5921/#6216/#5975.
 - 2026-10-12: Human approved the three open items (account filter shared by
@@ -956,11 +956,11 @@ scratch).
   Settings → Usage plug into the registry of the full-screen Settings screen
   (parallel `feat/settings-fullscreen`); proposed **D14**, a zero-extra-call
   passive rate-limit signal. ADR §5 rewritten, §7 added (evidence from
-  refs/cliproxyapi, refs/codex, refs/claude-agent-sdk-python); plan ACs
+  the reference proxy project, refs/codex, refs/claude-agent-sdk-python); plan ACs
   AC28/AC30/AC32–AC34/AC37/AC54 amended, AC42 required, AC55–AC58, AC67,
   AC68 added, conditional PR-F (AC59–AC66) added.
-- 2026-10-12 (round 3): Human accepted D14 reshaped to cliproxyapi's model
-  (verified by the Supervisor in `refs/cliproxyapi` @ `4b5f1ea`). ADR §7
+- 2026-10-12 (round 3): Human accepted D14 reshaped to a reference proxy project's model
+  (verified by the Supervisor in the reference clone @ `4b5f1ea`). ADR §7
   rewritten (7.1 hard-rejection cooldown, 7.2 observation-only headers, 7.3
   Codex fixtures-only, 7.4 interfaces/storage), §4 gets the cooldown rule;
   PR-F ACs AC59–AC66 and tests rewritten, including
@@ -968,7 +968,7 @@ scratch).
   `passive_bare_429_not_exhausted`, `passive_success_headers_never_affect_routing`,
   `passive_cooldown_persists_restart`, `passive_zero_http_calls`.
 - [x] D1–D13 answered by the user
-- [x] D14 accepted by the Human (2026-10-12, cliproxyapi model); ADR §7 rewritten; PR-F rescoped
+- [x] D14 accepted by the Human (2026-10-12, a reference proxy project model); ADR §7 rewritten; PR-F rescoped
 - [x] PR-A1 types, fetchers, snapshot store (fixtures only) — merged #298
 - [x] PR-A2 poller with the call budget, persisted state, config, wiring — PR open (2026-10-12), awaiting review
 - [ ] Human go-ahead for the manual live probe (see Validation)
@@ -998,7 +998,7 @@ date and a yes/no (never a token, email or body):
 2. OpenAI: does a token stored by smind's login carry the
    `chatgpt_account_id` claim the `ChatGPT-Account-Id` header needs?
 3. OpenAI: does `chatgpt.com` accept the uTLS Chrome fingerprint on
-   `/backend-api/wham/usage` (Paseo uses a plain `fetch` with a browser
+   `/backend-api/wham/usage` (the reference uses a plain `fetch` with a browser
    `User-Agent`)?
 4. Anthropic: what `extra_usage.is_enabled` means for serving past a full
    window (D9).
@@ -1079,7 +1079,7 @@ Mapping for the implementation PRs (fill in as each lands):
 | AC17–AC23 | `route_*` tests, proxy tests |
 | AC24–AC27 | wsapi, CLI golden, MCP catalog tests |
 | AC28–AC31 | PR-D2 vitest tests (`pinned_windows_show_in_footer…`, `summary_in_sidebar_switch…`, logic tests) + footer screenshots |
-| AC32–AC40 | PR-D1 vitest tests mirroring Paseo's modal and settings specs + `pinned`/`model`/`preferences` logic tests |
+| AC32–AC40 | PR-D1 vitest tests mirroring the reference's modal and settings specs + `pinned`/`model`/`preferences` logic tests |
 | AC41 | light/dark × 1440×900 / 390×844 screenshot set attached to PR-D1 and PR-D2, viewed by the implementer and the supervisor |
 | AC42, AC55–AC57 | PR-E hover-card tests (cache-only request assertions) + hover/touch/narrow screenshots |
 | AC58 | `displayname_*` Go tests, wire/CLI/MCP tests, web label tests |
@@ -1092,11 +1092,11 @@ Unverified at spec time (the implementing PRs must confirm and record):
 
 - That the Anthropic `/api/oauth/usage` endpoint accepts smind's stored
   OAuth token. smind's login requests the `user:profile` scope
-  (`internal/accounts/refresh_providers.go`), which Paseo's reading of the
+  (`internal/accounts/refresh_providers.go`), which the reference's reading of the
   endpoint suggests is needed, but the endpoint was not called.
 - That an OpenAI token stored by smind's login carries the
   `chatgpt_account_id` claim the `ChatGPT-Account-Id` header needs, and that
-  `chatgpt.com` accepts Go's uTLS Chrome fingerprint for this path (Paseo
+  `chatgpt.com` accepts Go's uTLS Chrome fingerprint for this path (the reference
   uses a plain `fetch` with a browser `User-Agent`).
 - Whether Anthropic `extra_usage.is_enabled == true` really means requests
   continue past a full window (D9).
@@ -1252,7 +1252,7 @@ and a 210,000-case differential test (reviewer, scratch, not committed) of
 ### PR-D1 record (web: Settings -> Usage, modal, palette; 2026-10-12)
 
 - **Built.** `lib/account-usage/{types,tone,format,copy,model,preferences}.ts`
-  (ported from Paseo's `usage/*`, with their unit tests), `hooks/use-account-usage.ts`
+  (ported from the reference `usage/*`, with their unit tests), `hooks/use-account-usage.ts`
   (one report store per `WsClient` + the touch driver), `hooks/use-usage-preferences.ts`,
   `hooks/use-usage-modal.ts` (open-state store: `openUsageModal()` is what a footer
   item or hover card calls), `components/account-usage/{usage-card,list,body,controls,
@@ -1399,7 +1399,7 @@ and a 210,000-case differential test (reviewer, scratch, not committed) of
 ### PR-D2 record (web: footer summary + pins; 2026-10-12)
 
 - **Built.** `lib/account-usage/pinned.ts` (`resolvePinnedUsage`,
-  `choosePinnedUsageLayout`, same rules as Paseo's `pinned.ts`, `AccountUsage`
+  `choosePinnedUsageLayout`, same rules as the reference `pinned.ts`, `AccountUsage`
   in place of `UsageReportEntry`); `components/account-usage/usage-sidebar-item.tsx`
   (`UsageSidebarItem`: the touching surface, the one-line summary with hidden
   measuring copies read through `ResizeObserver`, the plain "Usage" row); pinnable
@@ -1412,13 +1412,13 @@ and a 210,000-case differential test (reviewer, scratch, not committed) of
   1. *Collapsed rail:* the summary renders **nothing** (the rail keeps its footer
      Usage icon, which opens the modal). A row of percents cannot fit 48px, and an
      unseen row must not keep touching the daemon, so the row is not mounted at
-     all (no request). Paseo hides its row when there is no data and the icon
+     all (no request). That workbench hides its row when there is no data and the icon
      stays; same outcome.
   2. *`UsageSidebarRoot` is not needed:* smind already mounts the modal once at
      shell level (`UsageModalRoot` + `openUsageModal()`), so the footer row calls
      that. The file-map row for `usage-sidebar-root.tsx` is therefore dropped.
   3. *Tone:* a healthy meter is neutral (`quiet`), a `warning`/`danger` meter is
-     coloured, and the percent text turns warning/destructive. Paseo's meter is
+     coloured, and the percent text turns warning/destructive. The reference meter is
      always neutral in the footer, which would never show danger.
   4. *Plain "Usage" row* (AC28) renders while the first answer is pending, on a
      failed list and when no account has a pinned window with a percent; it is

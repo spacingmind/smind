@@ -64,7 +64,7 @@ metadata incident:
 5. Current state: `develop` is ahead of v0.7.0 by **187 commits**,
    `master` has one orphan promotion commit, and nothing has released
    for 10 days despite major changes (multi-chat ADR-0016, desktop
-   managed daemon, ZCode parity, …).
+   managed daemon, reference parity, …).
 
 The crux: **the three guard layers (sync-develop,
 check-release-metadata, rulesets) did not detect this stall.** They

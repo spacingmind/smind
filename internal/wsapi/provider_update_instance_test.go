@@ -331,7 +331,7 @@ func TestProviderList_InstanceEditableFields(t *testing.T) {
 	}
 }
 
-func TestHandWrittenPaseoStyleConfig_LoadsAndListsUnchanged(t *testing.T) {
+func TestHandWrittenReferenceStyleConfig_LoadsAndListsUnchanged(t *testing.T) {
 	h := newSecretsHarness(t)
 	handWork, handHome := handDir(t, "hand-work"), handDir(t, "hand-home")
 	hand := "providers:\n  custom:\n" +

@@ -11,7 +11,7 @@ built web UI (embedded via `//go:embed`) from one process.
 
 ## Alternatives considered
 
-- **Node daemon (like Paseo).** Familiar for web-heavy teams, but adds a
+- **Node daemon (like a reference workbench).** Familiar for web-heavy teams, but adds a
   runtime dependency and generally weaker throughput/concurrency for a
   routing-heavy workload.
 - **Fork VS Code.** Would give a full editor for free, but pulls in a huge

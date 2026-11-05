@@ -190,7 +190,7 @@ wiring. Starts after O2 and O4 merged. Contract: `office-mode-o5.contract.md` (d
 
 - `docs/ARCHITECTURE.md`: an "Office mode (ADR-0049)" section (mode is client-only; file range methods; PDF sandbox; cards) — O5, final.
 - `docs/decisions/0049-office-mode.md`: status line and any veto outcomes; amend if a Supervisor default changes.
-- `docs/plans/active/zcode-parity.md`: one line under "Hard rules" saying Office mode / doc previews are now a separate epic (this plan) — this PR.
+- `docs/plans/active/reference-parity.md`: one line under "Hard rules" saying Office mode / doc previews are now a separate epic (this plan) — this PR.
 - Shortcut help text and Settings description strings (in code, O1).
 - `docs/ROADMAP.md`: only if the Steward asks.
 

@@ -40,8 +40,8 @@ What the UI needs from a daemon is already a clean seam:
   contract a demo daemon must honour: `call`, `callStream`, `onNotification`.
 
 The landing site's own hosting pattern is known (`spacingmind-web` Worker, `apps/web/wrangler.jsonc`: `assets`, `routes` with
-`custom_domain: true` for `spacingmind.com` and `www`). Paseo, the reference product, hosts its web app at `app.paseo.sh` as a static
-bundle deployed by a workflow with a Cloudflare token (`refs/paseo/.github/workflows/deploy-app.yml`, Cloudflare Pages) — the same shape.
+`custom_domain: true` for `spacingmind.com` and `www`). A reference workbench, the reference product, hosts its web app at `app.reference.example` as a static
+bundle deployed by a workflow with a Cloudflare token — the same shape.
 
 ## Decision
 

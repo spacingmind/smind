@@ -3,7 +3,7 @@
 ## Context
 
 smind runs agents in the background, so attention signals matter. See
-`docs/research/local/paseo-uiux-2026-09.md` (local-only, gitignored), gaps #7 and #8.
+Local research notes (local-only, gitignored), gaps #7 and #8.
 
 What smind does today:
 
@@ -20,7 +20,7 @@ What smind does today:
 - It has no pin, no mark-unread, no hover card and no group-by-status
   view.
 
-**Port the behavior from `refs/paseo/packages/app/src` (updated
+**Port the behavior from a local reference clone (updated
 2026-09-24):**
 
 - Notifications:
@@ -157,7 +157,7 @@ What smind does today:
   registered settings section (permission status/request -- moved from
   `general-section.tsx`, not duplicated; a sound toggle backed by
   `hooks/use-notification-sound-preference.ts`; a test-notification button
-  with sent/error feedback, behavior ported from refs/paseo's
+  with sent/error feedback, behavior ported from a local reference clone's
   `DesktopNotificationsSection`). Sound plays via
   `lib/notification-sound.ts`'s Web Audio chime, wired into
   `useAttentionNotifications`'s new `playSound` param. Covered by
@@ -172,7 +172,7 @@ What smind does today:
   renders every pinned task (flattened across workspaces, same `TaskRows`
   the tree uses) above the workspace list, and the task context menu gets
   a Pin/Unpin toggle. A pinned task still appears in its normal
-  workspace/space location too (Paseo removes it from the pool entirely;
+  workspace/space location too (a reference workbench removes it from the pool entirely;
   simpler to duplicate here given smind's tree is client-derived, not
   server-bucketed). Covered by `use-pinned-tasks.test.ts` (toggle,
   persistence) and `app-sidebar.test.tsx`'s "pinned section (AC4)" describe

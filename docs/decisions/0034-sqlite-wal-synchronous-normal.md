@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-10-19, by the Human). Plan: [`docs/plans/completed/sqlite-wal.md`](../plans/completed/sqlite-wal.md).
-Reference: ZCode does the same (`refs/zcode/packages/services/src/session/tasksDatabase/startup.ts:70`).
+Reference: a reference desktop workbench does the same.
 
 ## Decision
 

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  * on the left, an optional right-aligned action slot, one bottom border,
  * one padding scale. Every pane used to hand-roll its own
  * `flex items-center justify-between border-b px-{3,4} py-{2,3}` div with
- * drifting padding (docs/research/uiux-audit.md §2.4) -- this is the one
+ * drifting padding (docs/research/local/uiux-audit.md §2.4) -- this is the one
  * implementation, adopted by task-detail, file-editor-pane,
  * diff-viewer-pane and terminal-pane (see docs/design.md's canonical-
  * surface table).

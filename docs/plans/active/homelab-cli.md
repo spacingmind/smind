@@ -2,10 +2,10 @@
 
 Implements [ADR-0031](../../decisions/0031-homelab-cli-distribution.md)
 (**Accepted 2026-10-14**, except decisions 12, 27–32 and 36, which remain **Open**; the PRs they gate stay BLOCKED
-below. **Decision 9 (direct connections with a password) was Accepted 2026-10-15**: P4 and what depends on it are unblocked. Revised after a study of Paseo and the Human's answers: hosted-relay hosting is pending, multi-device is designed on
+below. **Decision 9 (direct connections with a password) was Accepted 2026-10-15**: P4 and what depends on it are unblocked. Revised after a study of a reference workbench and the Human's answers: hosted-relay hosting is pending, multi-device is designed on
 gRPC). Every PR below that depends on an
 open decision says so; the plan is written against the ADR's recommended defaults
-(★ = default changed or new because of Paseo), and a PR must not start before its
+(★ = default changed or new because of that study), and a PR must not start before its
 blocking decisions are answered (AGENTS.md rule d).
 
 Size (whole plan): **XL (10)** — scope 2, PRs 2, risk 2, decisions 2, verification 2
@@ -104,9 +104,9 @@ relay-side "workspace" becomes "relay host".
    host id".
 5. `rotate` generates a new secret, invalidates the old one for new admissions, and prints the new secret once.
 
-**Paseo reference — deliberately different.** Paseo calls the daemon a "host" in its UI (`HostProfile`,
+**That workbench pattern — deliberately different.** The reference calls the daemon a "host" in its UI (`HostProfile`,
 `packages/app/src/types/host-connection.ts`) and the relay session a `serverId`; it has no relay-side record that
-needs a separate name. We adopt "host" for the same thing Paseo's users see — a daemon — and add "relay host" for
+needs a separate name. We adopt "host" for the same thing its users see — a daemon — and add "relay host" for
 its mailbox on a relay.
 
 ### P1 — install scripts
@@ -129,8 +129,8 @@ its mailbox on a relay.
 6. README documents both one-liners and states that `install.ps1` is served from
    spacingmind.com only after the landing redirect exists (raw GitHub URL until then).
 
-**Paseo reference — deliberately different.** Paseo has no install script; its CLI is
-`npm install -g @getpaseo/cli` and its apps are installers (`refs/paseo/README.md:88-100`).
+**That workbench pattern — deliberately different.** The reference has no install script; its CLI is
+`npm install -g @reference/cli` and its apps are installers.
 Nothing to port; the "install, start, then choose how clients connect" server shape
 (`README.md:94-100`, `packages/cli/src/commands/onboard.ts`) is reflected in the closing
 message of both scripts ("Next: `smind serve`, then see docs/homelab.md").
@@ -147,7 +147,7 @@ message of both scripts ("Next: `smind serve`, then see docs/homelab.md").
 4. Help text and `relay connect`'s closing message say "for a mobile device or the desktop
    app" and "treat this URL like a password: anyone with it can reach this daemon through
    the relay; to revoke, run `smind relay host rotate`", and
-   carry Paseo-style consent wording ("traffic is end-to-end encrypted; the relay cannot
+   carry reference-style consent wording ("traffic is end-to-end encrypted; the relay cannot
    read your code or messages").
 5. `docs/homelab.md` documents **both** paths — direct connection (placeholder section
    completed by P4) and the relay (on a VPS or on the homelab; enrol → connect → offer →
@@ -156,14 +156,14 @@ message of both scripts ("Next: `smind serve`, then see docs/homelab.md").
    `relay connect` on first use), the one-device limit **until P12a–b and P13a–b land**, the SSH
    alternative, and when to prefer which transport.
 
-**Paseo reference — adapted / different.** *Adapted:* relay is an explicit opt-in with a
+**The reference workbench pattern — adapted / different.** *Adapted:* relay is an explicit opt-in with a
 plain-language E2EE consent (`packages/cli/src/commands/daemon/pair.ts:106-109`; relay off by
 default, `packages/server/src/server/config.ts:302-307`); the pairing link is printed with a QR
-(`pair.ts` `formatPairingInstructions`). *Different:* Paseo's offer is `{v, serverId,
+(`pair.ts` `formatPairingInstructions`). *Different:* its offer is `{v, serverId,
 daemonPublicKeyB64, relay}` with **no secret** (≈ 230 bytes, always QR-sized;
 `packages/protocol/src/connection-offer.ts:10-17`) because its relay is public and open; ours
 carries the relay host's admission secret and pinned fingerprint (432 bytes), hence the level-L
-fallback instead of a smaller offer (v2 compaction deferred, decision 18). Paseo also exposes
+fallback instead of a smaller offer (v2 compaction deferred, decision 18). The reference also exposes
 a compact `relay://host:port/<serverId>?key=…` URI (`daemon-endpoints.ts`); not needed yet.
 
 ### P3 — desktop "Add via relay link"
@@ -187,9 +187,9 @@ a compact `relay://host:port/<serverId>?key=…` URI (`daemon-endpoints.ts`); no
 6. Light and dark screenshots of the section, the preview, the changed-connection warning and an
    error state were looked at on the real desktop app.
 
-**Paseo reference — ported.** The confirm-before-save step with key fingerprint and relay
+**The reference workbench pattern — ported.** The confirm-before-save step with key fingerprint and relay
 endpoint, and the "new host" vs "changed connection" distinction, come from
-`refs/paseo/packages/app/src/runtime/host-confirmation.ts` (`HostConfirmationRequest`,
+the reference (`HostConfirmationRequest`,
 `confirmLink`); paste-a-link as a first-class entry is `components/pair-link-modal.tsx` and the
 Maestro flow `packages/app/maestro/relay-pairing.yaml`. Not ported: scanning a QR (no scanner on
 desktop), deep-link auto-pair (decision 16).
@@ -232,16 +232,16 @@ desktop), deep-link auto-pair (decision 16).
     exposure on a LAN, the Host-rewriting reverse-proxy caveat, and "the password is an RCE
     credential".
 
-**Paseo reference — ported (model), stricter (enforcement).** Ported: loopback default with a
+**That workbench pattern — ported (model), stricter (enforcement).** Ported: loopback default with a
 configurable `listen` (`packages/server/src/server/config.ts:470-480`), bcrypt-hashed password
 set by a CLI command (`packages/cli/src/commands/daemon/set-password.ts`, `auth.ts:35`) and
 checked at admission (`session-admission-auth.ts`), Host-header allowlist with Vite-style
 semantics (`hostnames.ts`, `SECURITY.md` "DNS rebinding protection"), `daemon config
 get/set/unset` and removed launch flags (`cli/src/commands/daemon/{config,local-daemon}.ts:82-110`),
-health endpoint exempt. Stricter: refuse non-loopback without a password (Paseo warns,
-`docker/base/rootfs/usr/local/bin/paseo-docker-entrypoint:60-65`); expiring session tokens
-rather than the standing credential; `/api/token` closed to non-loopback callers (Paseo has no
-such endpoint). Different transport detail: Paseo sends the password in the WS `hello`; we log in
+health endpoint exempt. Stricter: refuse non-loopback without a password (the reference warns,
+`docker/base/rootfs/usr/local/bin/reference-docker-entrypoint:60-65`); expiring session tokens
+rather than the standing credential; `/api/token` closed to non-loopback callers (the reference has no
+such endpoint). Different transport detail: the reference sends the password in the WS `hello`; we log in
 over HTTP first because our upgrade authenticates by token (`internal/wsapi`).
 
 ### P5 — ★ first-run and connection onboarding (macOS + Windows)
@@ -258,7 +258,7 @@ over HTTP first because our upgrade authenticates by token (`internal/wsapi`).
    (b2) *Connect over SSH*, (c) *Pair via relay link*, and (d) *Use the daemon already running
    here* when one is detected; "Skip for now" leaves first-run pending and installs nothing. On
    Linux (deb) (a) is replaced by guidance to run `smind service install`. The screen leaves by
-   itself once a choice succeeds (Paseo's redirect-when-online).
+   itself once a choice succeeds (the reference's redirect-when-online).
 5. **Pre-selection.** Port free → (a); a smind daemon answering and not managed by the app →
    (d) selected and (a) disabled with the reason; anything else answering or the port occupied →
    no pre-selection, (a) disabled with a port-conflict message.
@@ -298,7 +298,7 @@ over HTTP first because our upgrade authenticates by token (`internal/wsapi`).
     entry/exit transition frames) and of Settings → Connections were looked at on the real macOS app
     and on Windows 11, using whichever install path the bundled-daemon branch has merged by then.
 
-**Paseo reference — ported (toggle, methods, SSH, confirmation), deliberately different
+**The reference workbench pattern — ported (toggle, methods, SSH, confirmation), deliberately different
 (first-run, quit).** Ported: the persisted `manageBuiltInDaemon` toggle with a confirm and
 persist-before-stop ordering (`packages/app/src/desktop/settings/desktop-settings.ts:36-39`,
 `desktop/daemon/daemon-management-toggle.ts`); the welcome methods direct / paste link / SSH
@@ -306,12 +306,12 @@ persist-before-stop ordering (`packages/app/src/desktop/settings/desktop-setting
 `remoteSsh` host that tunnels to an already-running daemon and never starts one
 (`types/host-connection.ts`, `packages/cli/src/ssh/ssh-tunnel.ts`,
 `packages/protocol/src/ssh-transport.ts` — host/port validation); redirect once a host is online
-(`welcome-screen.tsx` `useAnyHostOnline`). Different: Paseo's desktop **silently auto-starts** the
+(`welcome-screen.tsx` `useAnyHostOnline`). Different: its desktop **silently auto-starts** the
 built-in daemon (`app/_layout.tsx:362-370`) and shows Welcome only when no host exists; we show an
-explicit first-run (decision 22, alternative = Paseo parity). Paseo **stops the daemon on quit**
+explicit first-run (decision 22, alternative = parity with the reference). The reference **stops the daemon on quit**
 (`keepRunningAfterQuit: false`, `packages/desktop/src/daemon/quit-lifecycle.ts:56`); ours keeps
 running (ADR-0013). Ownership is the app-side `ManagedRecord` (`managed.rs:43-51`) plus `/healthz
-managedBy`, where Paseo uses the daemon's lock file (`desktopManaged`, `pid-lock.ts`;
+managedBy`, where the reference uses the daemon's lock file (`desktopManaged`, `pid-lock.ts`;
 `daemon-manager.ts:189-194`).
 
 ### P6 — `smind update`
@@ -341,7 +341,7 @@ managedBy`, where Paseo uses the daemon's lock file (`desktopManaged`, `pid-lock
 8. Latest-version resolution uses the `releases/latest` redirect, not the GitHub API, and honours
    `HTTPS_PROXY`.
 
-**Paseo reference — deliberately different, lifecycle ideas ported.** Paseo has no updater (npm
+**The reference workbench pattern — deliberately different, lifecycle ideas ported.** The reference has no updater (npm
 upgrade; Docker by pulling a tag; `README.md:94-100`, `docs/docker.md`). Ported ideas: graceful,
 in-band stop/restart rather than killing (`packages/cli/src/commands/daemon/{stop,restart}.ts`
 → ours `POST /api/shutdown`) and **confirming the replacement is a new identity that is serving**
@@ -361,7 +361,7 @@ version == target, with rollback).
 4. Releases published before P7 are not updatable *to* by a P7 binary (documented): the verifier
    reports "release has no signature" rather than falling back to checksum-only.
 
-**Paseo reference — deliberately different.** Paseo relies on npm package integrity and signed
+**That workbench pattern — deliberately different.** The reference relies on npm package integrity and signed
 desktop updater bundles; it has no equivalent signature over CLI/daemon downloads. Nothing to
 port; we reuse our own desktop-updater key (ADR-0023) so there is one rotation story.
 
@@ -391,8 +391,8 @@ port; we reuse our own desktop-updater key (ADR-0023) so there is one rotation s
 9. `docs/homelab.md` documents systemd user vs system, linger, the macOS LaunchAgent limit (needs a
    logged-in GUI session), where logs live, and how the desktop app treats a service-managed daemon.
 
-**Paseo reference — deliberately different (service installer), ported (log file, status).**
-Paseo has **no OS-service installer**: a background launch with an in-process **supervisor** that
+**The reference workbench pattern — deliberately different (service installer), ported (log file, status).**
+It has **no OS-service installer**: a background launch with an in-process **supervisor** that
 restarts the worker (`packages/server/scripts/supervisor.ts`; `supervisor-entrypoint.ts:170`
 `restartOnCrash: true`) and `daemon run` for foreground use under your own unit
 (`packages/cli/src/commands/daemon/{start,local-daemon}.ts`). We keep `smind service` (Human asked
@@ -428,7 +428,7 @@ Ported: the daemon-owned **rotating `daemon.log`** (`supervisor.ts:15-16,128-129
 5. `install.ps1 -Service` (or `SMIND_SERVICE=1`, the `iex` form) installs then registers the task.
 6. Docs state plainly that the task starts at logon, not at boot, and runs only in the user's interactive session.
 
-**Paseo reference — deliberately different.** Paseo has no Windows service/task story either
+**The reference workbench pattern — deliberately different.** The reference has no Windows service/task story either
 (CLI via npm; the desktop app starts the daemon and its lock file marks `desktopManaged`,
 `pid-lock.ts`, `daemon-manager.ts:83-84`). ADR-0030 already rejected a service for the app; the
 per-user task is the minimal boot/logon-persistence answer for the CLI. Nothing to port.
@@ -453,9 +453,9 @@ per-user task is the minimal boot/logon-persistence answer for the CLI. Nothing 
    service owns the port.
 6. Light/dark screenshots of the banner in all four states were looked at.
 
-**Paseo reference — adapted.** Paseo learns the daemon version over the existing client connection
+**That workbench pattern — adapted.** The reference learns the daemon version over the existing client connection
 (WS `server_info`, `getDaemonStatus`; `pair.ts` gates on `features.daemonStatusRpc` and answers
-"Update the Paseo daemon…"), so relay hosts need no separate probe — our `daemon.info` is the same
+"Update the daemon…"), so relay hosts need no separate probe — our `daemon.info` is the same
 idea. The copyable command is ours (Human's request).
 
 ### P11 — ★ Docker image
@@ -483,14 +483,14 @@ idea. The copyable command is ours (Human's request).
    the child-image example that was actually built, browser OAuth caveat as tested, `/workspaces`
    mount, no example password like `change-me`).
 
-**Paseo reference — ported, with three deliberate differences.** Ported from `refs/paseo/docs/docker.md`,
-`docker/base/Dockerfile`, `docker/base/rootfs/usr/local/bin/paseo-docker-entrypoint`,
+**The reference workbench pattern — ported, with three deliberate differences.** Ported from the reference:
+`docker/base/Dockerfile`, `docker/base/rootfs/usr/local/bin/reference-docker-entrypoint`,
 `docker/docker-compose.example.yml`, `docker/Dockerfile.agents.example` and
 `.github/workflows/docker.yml`: multi-arch ghcr.io image, `0.0.0.0` listen + published port +
 password, bundled web UI, agent CLIs not baked in with a child-image example, state/home vs workspace
 volumes, root-entrypoint ownership fix then `gosu`, `tini`, non-publishing PR build, publish on stable
 tags. Different: (1) built from the release binaries, not from source in Docker; (2) refuses to start
-non-loopback without a password (Paseo warns); (3) no `change-me` example.
+non-loopback without a password (the reference warns); (3) no `change-me` example.
 
 ### P12a — ★ multi-device relay (gRPC): relay server, proto, integration harness
 
@@ -516,9 +516,9 @@ non-loopback without a password (Paseo warns); (3) no `change-me` example.
 8. A Go **integration harness** runs a relay, a bridge-like daemon and **three simultaneous devices** (two native-gRPC
    "desktops" and one grpc-web "mobile") and is reused by P12b, P13a and P13b.
 
-**Paseo reference — ported (shape).** Control socket + per-connection data socket + the relay telling the daemon about each
+**The reference workbench pattern — ported (shape).** Control socket + per-connection data socket + the relay telling the daemon about each
 connection + `sync` on control (re)connect + buffering until the daemon side exists
-(`refs/paseo/packages/relay/src/cloudflare-adapter.ts:119-127,340-395`, `relay-transport.ts:49-55,121-130`, test `clt_multi`
+(`relay-transport.ts:49-55,121-130`, test `clt_multi`
 `cloudflare-adapter.test.ts:193-229`, stale-control handling `:219-250`). Adapted: gRPC streams, SCRAM admission in front,
 the existing `DeviceAttach`/`DeviceDetach` slots (`relay.proto:121-148`) instead of new JSON control messages.
 
@@ -551,9 +551,9 @@ the existing `DeviceAttach`/`DeviceDetach` slots (`relay.proto:121-148`) instead
    served without approval and cannot be revoked (`docs/homelab.md`, ADR-0031 D9).
 8. No change to the E2EE core (`internal/relay/e2ee`): the handshake, HKDF salt and counters are untouched.
 
-**Paseo reference — different (device key).** Paseo's clients use an ephemeral key per connection and the daemon keeps no device
-identity ("there is no persistent phone-side secret to steal", `refs/paseo/SECURITY.md`, "How it works"); smind adds a persistent
-device key and a pairing window to support listing and revocation (decision 35; the alternative keeps Paseo's stance). Paseo's
+**The reference workbench pattern — different (device key).** Its clients use an ephemeral key per connection and the daemon keeps no device
+identity ("there is no persistent phone-side secret to steal", "How it works"); smind adds a persistent
+device key and a pairing window to support listing and revocation (decision 35; the alternative keeps its stance). Its
 optional daemon password inside the encrypted hello is the model for `device_hello.password` (P13c).
 
 ### P12c — CA-verified TLS mode for relay clients (Go) and no silent trust-on-first-use
@@ -600,8 +600,8 @@ optional daemon password inside the encrypted hello is the model for `device_hel
    the webview to Rust once (a Tauri command), is held in Rust memory only, and is never written to disk or logs nor sent back to
    the webview; mobile follows the same rules in JS memory (its own PR).
 
-**Paseo reference — ported.** The password inside the encrypted hello (`refs/paseo/SECURITY.md` "Trust model";
-`packages/server/src/server/session-admission-auth.ts` → `password_required`/`incorrect_password`). Different: Paseo currently
+**That workbench pattern — ported.** The password inside the encrypted hello (the reference's "Trust model";
+`packages/server/src/server/session-admission-auth.ts` → `password_required`/`incorrect_password`). Different: the reference currently
 admits relay clients with no credential for old mobile builds; we enforce once the legacy window closes.
 
 ### P14 — hosted relay: deploy and ops (**BLOCKED on decision 12**)
@@ -897,7 +897,7 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   (2026-10-14, with their recommended defaults, including 35), 9 remain **Open** (9, 12, 27–32, 36). The PRs gated by an Open
   decision stay BLOCKED; an answer that differs from the recommended default reopens only the PRs listed in the table's
   "Blocking decisions" column.
-- **Changed by the Paseo study** (see the ADR's reference table): direct connections with a password replace
+- **Changed by the reference study** (see the ADR's reference table): direct connections with a password replace
   "loopback only" (P4); relay multi-device is scheduled in scope (P12a–b, P13a–b) instead of deferred; Docker publishes a
   port behind a required password and uses a root-then-`gosu` entrypoint (P11); a daemon-owned rotating log replaces
   per-OS log redirection (P8); `smind config` replaces launch flags (P4); an SSH-tunnel connection type joins
@@ -955,7 +955,7 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
 - **Unverified (the plan's own "not verified" lists, none recorded as closed):** a real signed release with `smind update` end to end on Linux/Windows 11; a real reboot/logout cycle for `smind service`; Windows 10 and the Windows 11 client (CI is Server 2025 only); a real phone or simulator for the mobile relay and password paths; the published Docker image on real amd64 and arm64 hosts; the real Tauri app against a real relay with a password; a real macOS first-run and a real ssh host (P5); a real proxy (Cloudflare) in front of the relay.
 - The AC list was not re-audited per criterion in this pass; the per-PR Validation sections below remain the record.
 
-- 2026-10-13: ADR-0031 and this plan written (docs only), revised after studying Paseo, then for the Human's first
+- 2026-10-13: ADR-0031 and this plan written (docs only), revised after studying the reference workbench, then for the Human's first
   hosted-relay answers.
 - 2026-10-14: revised for the Human's new decisions: hosted-relay hosting is **pending** (options D/C/B recorded, B no longer
   preferred; P14–P16 blocked); multi-device designed now on gRPC (ADR-0031 D9: control-stream announcements, per-device E2EE
@@ -1101,7 +1101,7 @@ Rust `fn x`). A scenario marked **(real)** needs a real platform and is recorded
   added a connection was misread as an upgrade on the next launch); (2) choices (b)/(b2)/(c) set `manageLocalDaemon=false` (the user
   declined a local daemon; Settings can turn it back on), (a) sets it true, (d) false; (3) "Skip for now" dismisses for the session only,
   so the screen returns next launch until completed, and Settings keeps "Finish setup"; (4) the SSH connection is a persistent
-  `kind: "ssh"` entry (`ssh://[user@]host[:port]?daemonPort=N`, Paseo's URI shape) whose tunnel (one long-lived `ssh -N -L`, not Paseo's
+  `kind: "ssh"` entry (`ssh://[user@]host[:port]?daemonPort=N`, the reference's URI shape) whose tunnel (one long-lived `ssh -N -L`, not its
   per-connection `ssh -W`, so HTTP keep-alive works and there is one authentication) is re-established on select and at launch; a dead
   tunnel clears the proxy mapping and shows a 502 until re-selected; (5) **P4 follow-up in the proxy**: `/ws` forwards and echoes
   `smind.bearer.*` subprotocols; the built-in `local` connection keeps today's `/api/token` flow and only after a 403 from a daemon whose

@@ -10,12 +10,12 @@ fullscreen), and nothing jumps while the 200ms collapse/expand transition runs.
 Human report (2026-10-13, real macOS app): "UI trên macOS khi toggle panel bị lỗi
 chỗ 3 nút màu" — chrome breaks around the three coloured buttons when the panel is toggled.
 
-## Findings: how ZCode and Paseo lay out the top bar
+## Findings: how a reference desktop workbench and a reference workbench lay out the top bar
 
-Sources: `refs/zcode/packages/{desktop,ui}`, `refs/paseo/packages/{desktop,app}`
+Sources: a local reference clone
 (read-only; paths below are relative to those clones).
 
-### ZCode (Electron)
+### A reference desktop workbench (Electron)
 
 - **macOS window**: `titleBarStyle: "hidden"`, `trafficLightPosition {x:22,y:23}`
   (`desktop/src/main/desktopWindowChrome.ts:140`, `desktopWindowButtonPosition.ts:5`),
@@ -46,7 +46,7 @@ Sources: `refs/zcode/packages/{desktop,ui}`, `refs/paseo/packages/{desktop,app}`
 - **Transition**: panel width driven by one CSS var (`--workspace-sidebar-panel-width`) that the overlay
   also reads, so overlay and sidebar can't disagree mid-animation.
 
-### Paseo (Electron + React Native Web)
+### A reference workbench (Electron + React Native Web)
 
 - **macOS window**: `titleBarStyle: "hidden"`, `titleBarOverlay: true`, `trafficLightPosition {x:16,y:14}`
   (`desktop/src/window/window-manager.ts:17,58-60`) — the same x as smind. Fixed obstruction constants
@@ -73,7 +73,7 @@ Sources: `refs/zcode/packages/{desktop,ui}`, `refs/paseo/packages/{desktop,app}`
 ### Common pattern (what we port)
 
 1. A **fixed-position** sidebar toggle immediately right of the lights, independent of sidebar state
-   (ZCode overlay / Paseo window-level toggle). The thing that moved in smind was the toggle *and* the
+   (a reference desktop workbench overlay / a reference workbench window-level toggle). The thing that moved in smind was the toggle *and* the
    surface under the lights.
 2. The lights always sit on **one surface** (never straddling the sidebar/panel seam).
 3. The reserved zone is a single named constant (96px / 78px) the whole UI derives from; fullscreen drops it.
@@ -87,7 +87,7 @@ session was locked, see Validation). Measured on a 1280×800 viewport:
 
 1. **Collapsed rail: the lights straddle the rail and the content panel.** Rail is 48px; the lights end at
    x=76, so the yellow light sits on the seam: the panel's `border-l`, its rounded top-left corner and the
-   surface change (vibrancy sidebar → opaque panel) all run through the cluster. (ZCode/Paseo never have
+   surface change (vibrancy sidebar → opaque panel) all run through the cluster. (reference workbench never have
    this: they hide the sidebar, so the lights are always on one surface.)
 2. **The toggle jumps and loses focus.** Expanded it lives at the right end of the sidebar's top strip
    (x=220); collapsed it is re-mounted in the header at x=93. Flipping `toggleInSidebar` unmounts the button
@@ -100,14 +100,14 @@ session was locked, see Validation). Measured on a 1280×800 viewport:
 
 All within the existing model (collapsible="icon" rail, inset panel); no new architecture, no ADR.
 
-- D1. Port the shared ZCode/Paseo pattern: in the desktop build (non-compact) the sidebar toggle is ONE
+- D1. Port the shared reference workbench pattern: in the desktop build (non-compact) the sidebar toggle is ONE
   window-level element at a fixed x, mounted outside the sidebar and the header, so it never moves, never
   re-mounts (focus survives) and nothing reflows under it. macOS: x=84 (right after the lights);
   elsewhere/fullscreen: centred in the 48px rail (x=10). The sidebar strip and the header pad around it.
 - D2. macOS collapsed rail: the title bar (top 48px) is ONE panel-coloured bar spanning the window with the
   rail starting BELOW it; the seam/rounded corner start below the bar. The bar is painted by an absolutely
   positioned strip inside the animated sidebar panel wrapper, so it is uniform across the lights for the whole
-  200ms transition. Not done: hiding the rail on desktop like ZCode/Paseo -- the rail (#314) is a deliberate
+  200ms transition. Not done: hiding the rail on desktop like reference workbench -- the rail (#314) is a deliberate
   smind feature.
 - D3. The header's left inset animates with the same 200ms ease-out as the sidebar width, so the title slides
   monotonically instead of jumping and can never pass under the toggle zone.
@@ -206,7 +206,7 @@ its content is hidden (opacity 0, inert) meanwhile and fades in once settled, so
 shifted; the group label no longer animates its margin. (2) On macOS the panel-coloured bar (49px) stays across the
 window for the rail AND for every non-settled frame in both directions, the panel's corner/left border live below
 it, and the 4px resize handle only mounts once settled-expanded (it showed as a sidebar-coloured band in the strip
-during the expand). The settled-expanded corner at y=0 beside the sidebar strip is unchanged (ZCode macOS layout,
+during the expand). The settled-expanded corner at y=0 beside the sidebar strip is unchanged (a reference desktop workbench macOS layout,
 Supervisor decision).
 
 Real-macOS re-validation (bundle built from the branch with its own bundle identifier `dev.spacingmind.desktop.capture`
@@ -217,7 +217,7 @@ committed). `/tmp/smind-tl/shots/real/final/` (REAL macOS): `{dark,light}-{colla
 4-75,5-settled}` plus `*-0-expanded`. Checked every frame visually and by pixel row: in every non-settled frame the
 strip (y=40, x=120..1240) is a single colour, the lights zone (y=44, x=0..118) is a single colour, no vertical line
 or corner crosses y<49, sidebar content is hidden (never clipped), the toggle stays at x=84. Settled collapsed shows
-the rail badges at y=72 (same as a fresh load); settled expanded is the unchanged ZCode layout.
+the rail badges at y=72 (same as a fresh load); settled expanded is the unchanged a reference desktop workbench layout.
 
 Final real-macOS pass (fresh capture on the pushed code, `/tmp/smind-tl/shots/real/final2/`, REAL macOS): the 20
 transition frames (`{dark,light}-{collapse,expand}-{1-start,2-25,3-50,4-75,5-settled}`) re-checked by pixel row

@@ -1,18 +1,18 @@
-# Reference audit: deepseek-harness / `dsh` (`refs/deepseek-harness`)
+# Reference audit: a reference agent harness / `a reference agent harness`
 
 **What it is**: DeepSeek's agent harness. Everything is a plugin on a
 Cordis-style DI/slot runtime. The web client is a *composition* of ~35
 `ui-*` plugin packages rather than an app with a component tree.
 
 **Where the UI lives**: not `apps/web` — that is a 10-line bootstrap
-(`refs/deepseek-harness/apps/web/src/main.ts`) over
-`@deepseek-ai/dsh-client-web`. The real UI is
-`refs/deepseek-harness/packages/client/ui-*`. Each package's `README.md`
+ over
+`a reference harness web client`. The real UI is
+a local reference clone. Each package's `README.md`
 is an unusually precise behavioural spec; they are the primary source used
 here.
 
-The e2e suite (`refs/deepseek-harness/apps/web/tests/*.e2e.ts`) plus its
-ARIA-tree snapshots (`refs/deepseek-harness/apps/web/tests/snapshots/**/*.expected.md`)
+The e2e suite plus its
+ARIA-tree snapshots
 are a second, machine-checked description of the same behaviour — and the
 snapshot format itself is worth noting as a testing idea (assert the
 accessibility tree, not the DOM).
@@ -21,7 +21,7 @@ accessibility tree, not the DOM).
 
 ## 1. Information architecture
 
-**Three-column AppFrame** — `refs/deepseek-harness/packages/client/ui-layout`:
+**Three-column AppFrame** — a local reference clone:
 
 ```
 ┌──────────┬───────────────────────────┬──────────┐
@@ -44,7 +44,7 @@ accessibility tree, not the DOM).
   switching session ids closes details before paint. (Listed as a known
   limitation in their own README.)
 
-**Object model**: `Workspace` → `Session`. Flatter than Paseo — no
+**Object model**: `Workspace` → `Session`. Flatter than a reference workbench — no
 project/worktree layer, no host layer. Sessions can have **subagent
 lineage** (breadcrumbs in the conversation header).
 
@@ -65,7 +65,7 @@ lineage** (breadcrumbs in the conversation header).
 ## 2. Agent/task interaction model
 
 ### Composer
-`refs/deepseek-harness/packages/client/ui-conversation`.
+A local reference clone.
 
 - Sticky composer stack inside the scrollport: **stats dock** →
   **input docks** → **input bar**. The scrollport reserves its scrollbar
@@ -107,7 +107,7 @@ lineage** (breadcrumbs in the conversation header).
   declaration-merges its `ChatNodeDataMap` key, registers a
   `ConversationNodeDefinition`, and registers a keyed renderer on
   `conversation.chat.node`. There is a cookbook
-  (`refs/deepseek-harness/docs/cookbook/adding-a-conversation-node.md`).
+.
 - **View tabs** (`conversation.view`): the chat view is one entry;
   `ui-trajectory` contributes another. Each view owns its own chrome and
   the composer stays put underneath.
@@ -129,7 +129,7 @@ lineage** (breadcrumbs in the conversation header).
   Inline code references in the closing prose become links.
 
 ### Tool-call rendering
-`refs/deepseek-harness/packages/client/ui-tool`.
+A local reference clone.
 
 - One root `ToolCallBlock` containing recursive `subCalls`; the tree is
   walked and every node dispatched through a **keyed slot**
@@ -152,7 +152,7 @@ lineage** (breadcrumbs in the conversation header).
   bar while a wait is pending — amber strip, justification headline,
   the exact command line reconstructed from the running call's args, and
   one-shot Refuse / Allow. (Snapshot:
-  `refs/deepseek-harness/apps/web/tests/snapshots/approval-composer/ui.expected.md`.)
+  a local reference clone.)
 - **Questions** (`ui-user-questions`): one question at a time with progress
   navigation, single/multi select, recommendation badges derived from label
   suffixes, custom "other" answers that coexist with multi-select, a capped
@@ -227,7 +227,7 @@ holds something moving. Escape closes and returns focus to the trigger.
 
 ## 5. Theming and appearance
 
-`refs/deepseek-harness/packages/client/ui-theme`.
+A local reference clone.
 
 - `--dsw-*` token base stylesheets: a **static scale layer** plus an
   **alias semantic layer**. Five sheets in a fixed import order
@@ -245,7 +245,7 @@ holds something moving. Escape closes and returns focus to the trigger.
   server, it injects a synchronous bootstrap right after `<body>` carrying
   the registered `ui-theme.preference`, so `color-scheme` and the dark
   attribute are set before the loading page paints.
-- **Scrollbars are a design surface**: `--dsh-scrollbar-thumb` /
+- **Scrollbars are a design surface**: `--ref-scrollbar-thumb` /
   `-thumb-hover` are rebindable per container (elevated surfaces retint to
   l2 tokens; the sidebar rebinds to `transparent` while the pointer is
   elsewhere and keeps the thumb for 2s after it leaves). The Firefox
@@ -298,7 +298,7 @@ holds something moving. Escape closes and returns focus to the trigger.
 - The Cordis plugin/slot runtime itself. smind is a Go daemon + a small
   React app; a DI slot system is architecture smind has no need for, and
   ADR 0002 already fixed the web stack.
-- Transient panel geometry (dsh's own README lists it as a limitation).
-- The three-column-only shell — Paseo's splittable tab tree is strictly
+- Transient panel geometry (a reference agent harness's own README lists it as a limitation).
+- The three-column-only shell — a reference workbench's splittable tab tree is strictly
   more capable and is already the direction ADR 0004 and
-  `docs/research/dual-mode-ui.md` committed to.
+  `docs/research/local/dual-mode-ui.md` committed to.

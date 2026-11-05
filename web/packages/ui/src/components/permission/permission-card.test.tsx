@@ -71,7 +71,7 @@ describe("PermissionCard: options variant", () => {
     expect(outer.className).toContain("shadow-lg");
   });
 
-  // zcode-visual-parity P3: every blocking request reads as the same
+  // reference-visual-parity P3: every blocking request reads as the same
   // "waiting" state, in ZCode's one green confirmation treatment --
   // never the generic success color.
   it("carries the confirmation-tone waiting badge", () => {

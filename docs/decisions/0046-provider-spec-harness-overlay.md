@@ -17,7 +17,7 @@ smind has four providers: `claude-native`, `codex-native`, `glm` (ACP, third-par
 specs and added *instances*: a `providers.custom` entry with `extends: claude-native|codex-native` that runs the same CLI with its own launch env. That env is today limited to
 two directory keys (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), "no tokens, PATH or API keys" (`internal/config/provider_env.go`).
 
-Paseo (the reference app, `refs/paseo`) shows what the generalisation buys: one `extends` + `env` + `models` + `disallowedTools` + `command` overlay turns Claude Code into
+A reference workbench (the reference app, a local reference clone) shows what the generalisation buys: one `extends` + `env` + `models` + `disallowedTools` + `command` overlay turns Claude Code into
 a client for Z.AI, Qwen/DashScope, DeepSeek, OpenRouter, Ollama and so on, and a generic ACP provider turns any ACP agent into a provider by data (local research note, section 1).
 The gaps in smind (local research note, section 2), in order of weight:
 
@@ -47,7 +47,7 @@ Spec {
   Harness   claude-code | codex-app-server | acp         // today's Runner claude-native|codex-native|acp; wire values of "runner" are kept
   Extends   <id of a harness-bearing built-in or custom spec>      // instances
   Launch    { Command []string; Env map[string]EnvValue }          // EnvValue = literal | secretRef | passthrough
-  Models    []Model + ModelsMode replace|add                       // Paseo's models / additionalModels
+  Models    []Model + ModelsMode replace|add                       // a reference workbench's models / additionalModels
   ModelAliases map[string]string                                   // claude-code: opus/sonnet/haiku/subagent slot -> endpoint model id
   DisallowedTools []string
   Endpoint  *Endpoint { Kind anthropic|openai-responses; BaseURL; KeyRef; Timeout }   // typed sugar that expands to Env (+ the Codex config)
@@ -59,14 +59,14 @@ Spec {
 
 An *instance* is a spec with `Extends` set: it copies the base, then applies only the overlay `{Label, Description, Launch.Env, Launch.Command, Models(+mode), ModelAliases,
 DisallowedTools, Endpoint, Thinking}`. `Extends` may name `claude-native`, `codex-native` **or any ACP spec** (built-in or custom), not only the first two as today.
-`providers.custom[]` gains `models`, `additionalModels`, `disallowedTools`, `env`, `endpoint`, `command` on instances, mirroring Paseo's table minus `options`, `paseoTools`, `order`.
+`providers.custom[]` gains `models`, `additionalModels`, `disallowedTools`, `env`, `endpoint`, `command` on instances, mirroring a reference workbench's table minus `options`, `refTools`, `order`.
 
 Precedence for the model list: `models` (replace) > discovery (ACP config options, Codex model list) merged with `additionalModels`. A claude-code instance has no runtime discovery
 over an Anthropic-compatible endpoint: its list is the recipe's list plus the user's ids; any syntax-valid id is accepted (already true of `ValidateModelSyntax`). The default model
 of an instance is resolved from the instance first, and from the base only when the instance sets no models **and** has no endpoint. The run shows the raw model id for ids smind does
-not know (Paseo's `resolveObservedClaudeModelId` behaviour), never a blank.
+not know (a reference workbench's `resolveObservedClaudeModelId` behaviour), never a blank.
 
-Claude launch passes `WithDisallowedTools(spec.DisallowedTools...)` (the SDK has it; smind never used it). Merge rule as Paseo's: base + instance, concatenated.
+Claude launch passes `WithDisallowedTools(spec.DisallowedTools...)` (the SDK has it; smind never used it). Merge rule as a reference workbench's: base + instance, concatenated.
 
 ### 2. Harness kinds
 
@@ -109,7 +109,7 @@ variable from the daemon's own env at launch; for users who export keys outside 
 ### 5. Recipes: compatible endpoints as data
 
 A **recipe** is an embedded file (`internal/providers/recipes.yaml` via `go:embed`), a template for one `providers.custom` entry: harness, endpoint kind, base URL, env names and
-default values, default models + aliases, disallowed tools, thinking mode, caveat notes, docs link, and two provenance fields **`source`** (`paseo-docs | vendor-docs | inferred`)
+default values, default models + aliases, disallowed tools, thinking mode, caveat notes, docs link, and two provenance fields **`source`** (`reference-docs | vendor-docs | inferred`)
 and **`verifiedAt`** (a date or empty). The catalog is embedded only (Decision 7): offline, reviewable, updated with releases. `provider.recipes` lists it; "Add from recipe" asks
 for a key (and a region where the recipe has one) and writes the instance plus the secret. Users can still write entries by hand. The rows of the catalog are in the plan.
 
@@ -120,7 +120,7 @@ Defaults of every claude-code recipe: `Endpoint.Kind: anthropic`, `disallowedToo
 ### 6. Codex endpoints
 
 `thread/start` and `thread/resume` gain `config` and `modelProvider`. `Endpoint{openai-responses}` expands to `model_providers.<id> = {name, base_url (+/v1 once, trailing slashes
-stripped), wire_api: "responses", env_key: "OPENAI_API_KEY" only when a key is set, requires_openai_auth: false}`, as Paseo does. **Constraint:** Codex's config schema accepts only
+stripped), wire_api: "responses", env_key: "OPENAI_API_KEY" only when a key is set, requires_openai_auth: false}`, as a reference workbench does. **Constraint:** Codex's config schema accepts only
 `wire_api: "responses"`, so chat-completions-only vendors cannot go through Codex; they use an Anthropic-compatible route into Claude Code, a Responses gateway (LiteLLM), or OpenCode.
 A chat-only endpoint gets a clear "unsupported by the Codex harness" message, not a silent 404 at run time. Models are not discovered for Codex custom endpoints: `models` is required.
 
@@ -174,7 +174,7 @@ scrub set, a permission mode other than `default` (including `--dangerously-skip
 allowedTools explicitly"); the changelog adds a PID-namespace sandbox on Linux when it is set.
 
 **Facts, plainly.** (1) **By default Claude Code does NOT scrub the token from its Bash tool**: an agent running `printenv`, `env`, `set`, `echo $ANTHROPIC_AUTH_TOKEN` or
-`cat /proc/self/environ` reads the key (the same exposure exists in Paseo). A file-deny rule such as secretdeny's `Read` rules does not touch this path. (2)
+`cat /proc/self/environ` reads the key (the same exposure exists in a reference workbench). A file-deny rule such as secretdeny's `Read` rules does not touch this path. (2)
 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` works for the Anthropic names and many `*_KEY`/`*_TOKEN`/`*_SECRET`/`*_PASSWORD` names; it is a name heuristic and leaves `GITHUB_TOKEN` and
 `CUSTOMAUTH`-style names alone. (3) The scrub is a Claude-Code-only mechanism: Codex and ACP agents have no equivalent; their shell tools inherit the env (residual risk, stated in
 the docs). (4) Tested on one version and one OS (macOS, 2.1.310); Linux behaviour (the PID-namespace sandbox) and Windows were not measured. (5) Not measured: whether the scrub also
@@ -247,7 +247,7 @@ Each is "**Supervisor default 2026-10-30 under the Human's 'làm tất', Human m
 
 ## What we are NOT doing
 
-Usage meters per vendor (no PR7); Pi or OpenCode-`serve` runners; Paseo's `options` bag and `paseoTools`; a remote catalog; real-key tests (every test uses sentinel strings and a fake
+Usage meters per vendor (no PR7); Pi or OpenCode-`serve` runners; a reference workbench's `options` bag and `refTools`; a remote catalog; real-key tests (every test uses sentinel strings and a fake
 Anthropic-/OpenAI-compatible server on a local port); installing Ollama, LM Studio or any global tool; touching `~/.smind`, the launchd service or `:4648`; a release.
 
 ## Consequences

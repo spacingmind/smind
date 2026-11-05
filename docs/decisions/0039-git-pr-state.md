@@ -40,10 +40,10 @@ research appendix A):
 - **GitHub traffic is unbudgeted.** `runGH` and `runGit` run on `context.Background()` with no timeout except the `baseRef` fetch
   (`task_ref.go:15`); only provenance sets `GIT_TERMINAL_PROMPT=0` and `core.fsmonitor=false`.
 
-Reference points (local research, appendices B and C): Paseo has the interaction model (a state-driven action ladder with sentence-long
+Reference points (local research, appendices B and C): a reference workbench has the interaction model (a state-driven action ladder with sentence-long
 disabled reasons, one poll cadence per repo, PR association without stored ids, an untrusted-fork gate) but makes blind commits and blind
-PRs. ZCode has the visual language (quiet `+N −N` tokens, branch pill, warning banners). Codex and Claude Code show the approval posture
-(read-only git is free; push, PR and force always ask). We port Paseo's interaction and ZCode's look, and we keep smind's previewed,
+PRs. A reference desktop workbench has the visual language (quiet `+N −N` tokens, branch pill, warning banners). Codex and Claude Code show the approval posture
+(read-only git is free; push, PR and force always ask). We port the reference workbench's interaction and a reference desktop workbench's look, and we keep smind's previewed,
 human-authored actions.
 
 A live read-only check on 2026-10-22 shows the batching this ADR relies on works: one `gh pr list --repo spacingmind/smind --state open
@@ -207,7 +207,7 @@ Enumerations: `conflict.state` `none | conflicts | unknown`; `merged.state` `mer
 review_required | none`; `pr.checks.state` `success | failure | pending | none`; `pr.stale` `"" | "budget" | "backoff" | "rate_limited" |
 "unauthenticated" | "unavailable"` (why the numbers are not fresh; the age is `fetchedAt`).
 
-**`actions` is computed on the daemon**, a pure function of the payload (Paseo's `policy.ts`, ported to Go) and shipped with it, so web and
+**`actions` is computed on the daemon**, a pure function of the payload (that workbench's `policy.ts`, ported to Go) and shipped with it, so web and
 (later) mobile share one policy and one set of sentences instead of two ports that drift. Each entry is `{enabled, code?, reason?}`; when
 disabled, `reason` is a sentence that says why and, where there is one, the next step ("Create PR isn't available yet because this branch
 has no commits beyond `develop`. Commit your changes first."). This ADR defines `createPr` and `updatePr`; G7/G8 add `push`,
@@ -234,7 +234,7 @@ lesson): **daemon call budget, single-flight, cache-first reads, count-asserting
 unarchived and has a worktree. **Zero subscribers means zero forge calls and zero fetches.** A watched task is *focused* when any connection
 set it with `task.gitFocus` or it has a run in progress.
 
-**Cadence** (Paseo's, `workspace-git-service.ts`):
+**Cadence** (the reference workbench's, `workspace-git-service.ts`):
 
 | Class | Interval |
 |---|---|
@@ -276,7 +276,7 @@ clients are connected.
 **Adoption** (association without a stored id). The open-PR list also tells the poller which open PRs exist for tasks with no stored PR: a
 task whose branch (`pr_head_ref` or `branch.name`) equals an open PR's `headRefName` in the same repo, with `isCrossRepository == false`, is
 **adopted** (identity written to the task, `task.updated` published). It costs no extra call. Merged or closed PRs of tasks that never had an
-identity are not discovered in v1 (Paseo's exact-head-SHA rule needs a call per task; [O6](#o6-find-merged-or-closed-prs-for-tasks-with-no-stored-pr)).
+identity are not discovered in v1 (the reference workbench's exact-head-SHA rule needs a call per task; [O6](#o6-find-merged-or-closed-prs-for-tasks-with-no-stored-pr)).
 
 **Local status and the conflict token (G5).** All local git runs through a shared hardened runner: `-c core.fsmonitor=false`,
 `--no-optional-locks` for status, `GIT_TERMINAL_PROMPT=0`, a deadline, argv only. This also fixes the known exposure that daemon
@@ -357,8 +357,8 @@ the rename costs a find-and-replace now and a shim later.
 `behind`/`ahead` are against the default base, computed only for the returned page by one local `rev-list --left-right --count` each. No
 network.
 
-New Task dialog: **Start from** = *Workspace HEAD* (default; shows "Branch from `develop`") / *Branch…* / *Pull request…* / *Issue…*, ZCode's
-segmented control with Paseo's picker (`new-workspace-picker-item.ts`). The PR and issue pickers are ADR-0038's `github.search` popover
+New Task dialog: **Start from** = *Workspace HEAD* (default; shows "Branch from `develop`") / *Branch…* / *Pull request…* / *Issue…*, a reference desktop workbench's
+segmented control with that workbench's picker (`new-workspace-picker-item.ts`). The PR and issue pickers are ADR-0038's `github.search` popover
 (a pasted PR/issue URL or `#123` resolves one item). Choosing an **issue** sets the title from the issue and attaches it as an `issue`
 attachment on the first prompt (client-side; no `issueNumber` daemon param). Choosing a **PR** sends `prNumber` and attaches the `pr`.
 
@@ -370,7 +370,7 @@ the user can clear it. While `untrusted_source` is set:
   run it"); the teardown script is skipped at archive;
 - **`task.retrySetup` is the explicit "Run setup"** and clears the flag. `forge` calls for the task continue to work.
 
-This is narrower than Paseo's gate and for a different reason: smind's setup and teardown scripts are stored daemon-side and written by humans
+This is narrower than the reference workbench's gate and for a different reason: smind's setup and teardown scripts are stored daemon-side and written by humans
 (ADR-0024), so a fork cannot inject a script. The remaining risk is that the *human-authored* script (`npm install`, `make`) executes the
 fork's code. The banner also says the PR's own text (`AGENTS.md`, `CLAUDE.md`) reaches the agent as repository content. Update PR is
 `fork_pr_readonly` in v1: pushing to a fork needs a push remote ([O4](#o4-fork-pr-update)).
@@ -423,8 +423,8 @@ Policy only; G8 implements the dialog and the RPCs.
 
 ### 10. UI placement
 
-References: ZCode for the look (`DESIGN.md` token discipline: diff colours are never borrowed from success/destructive; status never by
-colour alone; `rounded-2xl` is reserved for floating panels; badges `text-ui-xs`), Paseo for the interaction. Every icon comes from
+References: a reference desktop workbench for the look (`DESIGN.md` token discipline: diff colours are never borrowed from success/destructive; status never by
+colour alone; `rounded-2xl` is reserved for floating panels; badges `text-ui-xs`), the reference workbench for the interaction. Every icon comes from
 `lib/icons.ts` (the drift test); shared state is the ADR-0032 store; light and dark screenshots, transition frames included, are part of
 each UI PR.
 
@@ -433,13 +433,13 @@ each UI PR.
   = "Open on GitHub" in v1 (the PR panel is G9). Its hover card shows `smind/task-x → develop`, the commit counts and the tokens.
 - **Sidebar row**: keeps `+N −M`; adds **one** glyph: PR state (open/draft/merged/closed) and a single dot for "unpublished" or "conflicts"
   (text only in the hover card), so the row stays quiet. Rows with nothing to say show nothing.
-- **Hover card** (sidebar and header): the full token line, quiet and mono, ZCode's `GitStatusSection`: `+22 −2 · 3 commits · ↑1 · ↓5
+- **Hover card** (sidebar and header): the full token line, quiet and mono, a reference desktop workbench's `GitStatusSection`: `+22 −2 · 3 commits · ↑1 · ↓5
   behind develop · ⚠ conflicts with develop`. Destructive tint on the conflicts token only.
 - **Composer status chips**: the PR chip beside the diff-stat chip, plus a `⚠ conflicts` chip. The diff-stat chip now reads `TaskGit.diff`,
   which fixes its staleness at the source (events refresh it).
 - **Diff header**: a single `<PrAction>` component renders **Create PR…** (opens the dialog), **Update PR** + **View PR** once a PR exists,
   and the disabled reason as a sentence in the tooltip and under the button on narrow widths.
-- **Create PR dialog** (ZCode's commit dialog and push card): a branch row with `+N −M`, a **Base** combobox (the task's `base_ref`), **Title**,
+- **Create PR dialog** (a reference desktop workbench's commit dialog and push card): a branch row with `+N −M`, a **Base** combobox (the task's `base_ref`), **Title**,
   **Body** (borderless textarea), a **Draft** switch, a summary line "3 commits · 2 files uncommitted (not included)" with "Commit staged
   first", a warning banner for blockers, the typed error in one line with a "Details" disclosure, copyable.
 - **New Task dialog**: the Start-from control above; the fork badge; "Branch from `develop`" for the default mode.
@@ -468,13 +468,13 @@ each UI PR.
 - **One `gh pr view` per task per tick.** Linear in tasks and clients; the single list call per repo is flat. Rejected on the usage-endpoint
   lesson.
 - **Poll every task regardless of clients.** Spends budget on work nobody sees. Rejected: interest-driven, zero subscribers = zero calls.
-- **Client-side action policy** (Paseo's `policy.ts`). Two copies (web, mobile) drift, and mobile would need its own sentences. Rejected for
+- **Client-side action policy** (that workbench's `policy.ts`). Two copies (web, mobile) drift, and mobile would need its own sentences. Rejected for
   server-computed `actions`; the client may still derive purely visual state.
 - **Several events** (`task.pr`, `task.status`-like, `task.conflict`). More topics, more races between them. Rejected for one snapshot topic.
 - **Persist local status.** It changes with every keystroke and is recomputed in milliseconds; persisting it adds a stale-data bug class for
   no gain. Only the PR snapshot and the ledger persist.
-- **Paseo's parallel `github_*` and `forge_*` schemas** with long-lived compat. Rejected; one vocabulary now (no installed base).
-- **Detect PRs through the PR's head SHA only** (Paseo, for closed/merged). A call per task; deferred (O6).
+- **The reference workbench's parallel `github_*` and `forge_*` schemas** with long-lived compat. Rejected; one vocabulary now (no installed base).
+- **Detect PRs through the PR's head SHA only** (the reference workbench, for closed/merged). A call per task; deferred (O6).
 - **Device flow for H4 now.** Needs smind's own OAuth app; the Human chose paste-a-token first.
 - **Edit the daemon user's `~/.gitconfig` with `gh auth setup-git`.** Global, persistent, surprising; a per-invocation helper does the same
   for smind's own git calls.
@@ -519,11 +519,11 @@ set ([§6](#6-error-codes)); ADR-0038's two codes become aliases in its amendmen
 **Recommendation:** draft **on**, remembered per workspace. A non-draft PR pings reviewers and starts CI the user may not want yet.
 
 ### O3. PR text in the sidebar row
-**Recommendation:** glyph and one dot only; text lives in the hover card. A per-user "show PR/checks in rows" toggle (Paseo's display
+**Recommendation:** glyph and one dot only; text lives in the hover card. A per-user "show PR/checks in rows" toggle (that workbench's display
 toggles) later, not in v1.
 
 ### O4. Fork PR Update
-v1 makes Update PR `fork_pr_readonly` for fork PRs (Paseo adds a `paseo-pr-N` push remote). **Recommendation:** keep it read-only until
+v1 makes Update PR `fork_pr_readonly` for fork PRs (the reference workbench adds a `reference-pr-N` push remote). **Recommendation:** keep it read-only until
 someone asks; the push-remote design needs the fork's permission model.
 
 ### O5. The cherry-pick Create path

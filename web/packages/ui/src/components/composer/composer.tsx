@@ -52,7 +52,7 @@ function draftPreview(item: DraftAttachment, index: number): AttachmentMeta {
 /**
  * Why the composer can't send right now, phrased for the placeholder. A
  * disabled composer must say *why* rather than silently greying out
- * (ui-redesign-parity Item 10, from audit-deepseek-harness.md §2's block
+ * (ui-redesign-parity Item 10, from audit-agent-harness.md §2's block
  * contract) -- and a run being in flight is deliberately not a block at
  * all here: that case queues instead (see Composer's doc comment).
  */
@@ -575,7 +575,7 @@ export function Composer({
        * the selects are aria-labelled rather than sitting under visible
        * <label> text.
        *
-       * `rounded-2xl`/`bg-input`/`border-input-border` (zcode-visual-parity
+       * `rounded-2xl`/`bg-input`/`border-input-border` (reference-visual-parity
        * P3): the main chat input shell is one of DESIGN.md's three
        * approved `rounded-2xl` exceptions, and a visible resting border
        * (not just on focus) is ZCode's own "calm and integrated, not

@@ -3,7 +3,7 @@ import { extendTailwindMerge } from "tailwind-merge"
 
 /**
  * tailwind-merge's default config has no idea `text-ui-xl/lg/base/caption/
- * sm/xs` (index.css's ZCode-derived type scale, zcode-visual-parity plan
+ * sm/xs` (index.css's reference-derived type scale, reference-visual-parity plan
  * P1 Step 3) are font-size utilities -- its built-in `font-size` group only
  * recognizes Tailwind's own scale keywords (`xs`, `sm`, `base`, `lg`, ...).
  * Unrecognized `text-{word}` utilities fall through to the `text-color`

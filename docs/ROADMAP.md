@@ -18,10 +18,10 @@ checklist line disagree, this table is newer.
 | | **DoD:** Claude Code via `ANTHROPIC_BASE_URL` works across 2 accounts with real failover | partial | Built and tested with fakes; **unverified** with two live accounts (`completed/oauth-account-login.md` Validation; `active/account-usage-windows.md` live check still open, needs the Human's go-ahead) |
 | **2 Workspaces / tasks / web UI** | Data model, workspaces with git worktrees, auth, ACP + claude-native + codex spawn, WS RPC, web UI (panes, tree, timeline, files, editor, diff, terminal, permissions, preview), CLI | done | Phase 2 checklist below; `completed/web-ui-*`, `completed/pane-split-tree*.md` |
 | | **DoD (re-scoped 2026-09-11):** dogfood smind on smind, 5 real sessions | done | `completed/smind-dogfood.md`, closed 2026-09-16 |
-| | **DoD (original goal):** a real feature built end to end from the smind UI **instead of Paseo**, i.e. smind replaces Paseo for orchestration | partial | ADR-0041 Accepted 2026-10-23 and built (`completed/in-smind-orchestration.md`, closed 2026-10-23): the seat contract and role pack (#561, #564-#567), parent notifier (#552), rate-limit resilience and failover (#541, #549, #555, #557), and a Lead → Peers run built entirely inside smind (#570). Then the supervisor seats were folded: Lead is the single loop and a Peer returns a json handoff (#617, `active/single-loop/PLAN.md`; its after-check and the `reviewer` decision are open). **Open:** a Steward outside smind (a Paseo agent) still briefs the Leads and reads PRs, `orchestration-and-metering` Step 3 on a non-smind project is not done, and `orchestration-roles` R5/R6/R8 stay parked by design |
+| | **DoD (original goal):** a real feature built end to end from the smind UI **instead of a reference workbench**, i.e. smind replaces a reference workbench for orchestration | partial | ADR-0041 Accepted 2026-10-23 and built (`completed/in-smind-orchestration.md`, closed 2026-10-23): the seat contract and role pack (#561, #564-#567), parent notifier (#552), rate-limit resilience and failover (#541, #549, #555, #557), and a Lead → Peers run built entirely inside smind (#570). Then the supervisor seats were folded: Lead is the single loop and a Peer returns a json handoff (#617, `active/single-loop/PLAN.md`; its after-check and the `reviewer` decision are open). **Open:** a Steward outside smind (a reference workbench agent) still briefs the Leads and reads PRs, `orchestration-and-metering` Step 3 on a non-smind project is not done, and `orchestration-roles` R5/R6/R8 stay parked by design |
 | **3 Relay E2EE + mobile** | Relay server, self-hostable, multi-device | done | #177, #345, #346 |
 | | E2EE handshake, QR pairing, reconnect grace, key rotation | done | ADR-0007; E2EE v2 with a fresh daemon ephemeral key in #431/#433/#434 (`completed/relay-e2ee-v2.md`) |
-| | Mobile: pairing, workspace/task list, realtime timeline, follow-up, **permission approval** | done | #175, #176, #178; relay device identity #350; ZCode redesign closed (`completed/mobile-zcode-redesign.md`, #467); read-only task tree (#594) |
+| | Mobile: pairing, workspace/task list, realtime timeline, follow-up, **permission approval** | done | #175, #176, #178; relay device identity #350; a reference desktop workbench redesign closed (`completed/mobile-reference-redesign.md`, #467); read-only task tree (#594) |
 | | Mobile: **push notifications** | partial | ADR-0040 Accepted 2026-10-22; PRs 1-6 merged (#481, #487, #499, #520, #493, #517, #521): E2EE-sealed payloads, `push.*` RPCs, `smind push test`, Android-first native wiring. AC1-AC23 and AC25 covered by tests (`active/mobile-push-notifications.md`). **Open:** AC24, the native checklist on a real Android device (never run; needs the Human's Firebase/Expo project), and iOS (PR 8, blocked on Human decision H2: no Apple Developer Program) |
 | | Mobile: **assign new work** from the phone | done in code; **unverified** on a device | New-task form with `whenBusy: queue` (#480, `completed/mobile-create-task.md`, status completed 2026-10-22, native verification the one open item); prompt attachments on mobile (#581, `active/mobile-prompt-attachments.md`, device run open) |
 | | Deploy relay at `relay.spacingmind.sh` (ADR text says `.com`) | **missing** | `homelab-cli.md` P14–P16 blocked on ADR-0031 decision 12 (hosting); no `deploy/` directory in the tree. Only a one-off live test through a Cloudflare Tunnel was recorded (#150) |
@@ -99,7 +99,7 @@ Definition of done: Claude Code pointed at `ANTHROPIC_BASE_URL=localhost:4648` w
 
 ## Phase 2 — Workspaces + Tasks + Web UI (weeks 6-10)
 
-Goal: replace Paseo as daily driver.
+Goal: replace a reference workbench as daily driver.
 
 - [x] Data model: Workspace/Space/Task + workspace_accounts (`internal/store`)
 - [x] Workspace CRUD + Task lifecycle with real git worktrees (`internal/workspace`) — `create`/`run`/`archive`, not yet wired to CLI/HTTP
@@ -129,7 +129,7 @@ quota'd successful agent turn, blocked on the account's Codex limit
 
 Definition of done (re-scoped by user, 2026-09-11 — was "a real
 scopedocs feature built end-to-end from smind UI"): **dogfood smind on
-smind** — use smind (not Paseo) as the daily driver for real work on
+smind** — use smind (not a reference workbench) as the daily driver for real work on
 this repo, closing the loop it was built for. A scopedocs feature
 remains a fine future stress test but is no longer the Phase 2 gate.
 
@@ -187,7 +187,7 @@ Status as of v0.10.0 (2026-10-11):
       on Windows instead of WSL2. It updates only when no runs are in
       flight (`desktop-managed-daemon`, `desktop-macos-app` M2/M5,
       `windows-bundled-daemon`).
-- [x] Native feel in the ZCode style:
+- [x] Native feel in the reference desktop workbench style:
   - custom window chrome with no launch flash (D1);
   - no webview-isms (D2);
   - desktop shortcuts and a native menu (D3);
@@ -243,7 +243,7 @@ Status as of v0.10.0 (2026-10-11):
 
 ## Guiding principles
 
-1. **Dogfood-first** — each finished phase replaces a piece of Paseo in real use.
+1. **Dogfood-first** — each finished phase replaces a piece of a reference workbench in real use.
 2. **No feature without real demand** — Phase 5+ items get built only when
    actually missing in daily use, never speculatively.
 3. **Go core API stays stable** — UI/mobile/desktop are just clients; the
@@ -257,4 +257,4 @@ Status as of v0.10.0 (2026-10-11):
 | --- | --- |
 | Agent protocols change (Claude/Codex) | target the ACP standard, avoid deep SDK integration |
 | ToS risk from account pooling | isolation-first defaults, pooling is opt-in |
-| Solo-dev maintenance load | keep scope tight — do not clone every Paseo feature |
+| Solo-dev maintenance load | keep scope tight — do not clone every a reference workbench feature |

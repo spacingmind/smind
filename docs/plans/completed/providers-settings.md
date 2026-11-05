@@ -2,7 +2,7 @@
 
 Moves account management out of the standalone Accounts dialog into a
 "Providers" section under Settings, grouped by runtime provider (Claude
-Code / GLM / Codex / Kimi), matching ZCode/Paseo's density. Source: UX
+Code / GLM / Codex / Kimi), matching reference workbench's density. Source: UX
 review `docs/research/local/ux-review-providers-agents-2026-09.md` and
 sketch `docs/research/local/ui-sketch-run-config-2026-09.md` (local-only
 files; content below is transcribed from them, so proceed even if they're
@@ -96,7 +96,7 @@ reply, then flip to Accepted.
     "ⓘ" tooltip, not silently hidden.
 - Screenshots (light + dark, temp daemon with sample accounts across at
   least two providers, one disconnected provider, one orphaned account)
-  saved to `Downloads\smind-providers\`, self-reviewed against ZCode
+  saved to `Downloads\smind-providers\`, self-reviewed against a reference desktop workbench
   density before calling this done.
 
 ## Test Scenarios
@@ -218,6 +218,6 @@ All acceptance criteria confirmed working as of 2026-09-26:
   provider (Kimi/Codex)) of the full section, the ⋯ menu open, inline
   Rename, Update credential, and the Remove confirm dialog: saved to
   `/mnt/c/Users/ADMIN/Downloads/smind-providers/`, self-reviewed against
-  ZCode/Paseo density, then checked against a fetched
+  reference workbench density, then checked against a fetched
   web-interface-guidelines pass (one finding fixed, see Progress above).
 

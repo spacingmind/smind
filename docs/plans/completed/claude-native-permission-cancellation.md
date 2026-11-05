@@ -157,7 +157,7 @@ mirroring how ACP providers already behave. Scoped to `runClaudeNative`'s
 decider branch only (Runner-level policy defaults answer
 programmatically and never wait on a dialog). A value already present in
 the environment is forwarded as-is — a deployment-wide escape hatch.
-Unlike paseo (refs/paseo), which only handles the abort signal, smind
+Unlike a reference workbench, which only handles the abort signal, smind
 extends the CLI's deadline so its own 5-minute window is the real
 deadline. The constant lives in taskrunner (not imported from
 internal/runs) because runs imports taskrunner.

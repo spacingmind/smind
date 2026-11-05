@@ -10,14 +10,14 @@ Anthropic/OpenAI accounts do (ADR-0028), and lets a used-up window steer like a 
 
 `verifiedAt: inferred` — no live call was made (no Human key). Sources:
 
-- ZCode `refs/zcode/docs/bigmodel-coding-plan-usage-quota.md` and `coding-plan-quota-remaining-api.md`
+- A reference desktop workbench a local reference clone and `coding-plan-quota-remaining-api.md`
   (Z.AI's own workbench, 2026-05/06): `GET <host>/api/monitor/usage/quota/limit`, host `https://api.z.ai`
   (overseas) or `https://bigmodel.cn` / `https://open.bigmodel.cn`; header `authorization: <full API key>`
   with **no `Bearer` prefix** (the doc says Bearer fails).
-- Paseo `refs/paseo/plugins/zai-usage-source/server/usage.ts` only reads `GET https://api.z.ai/api/biz/subscription/list`
+- A reference workbench a local reference clone only reads `GET https://api.z.ai/api/biz/subscription/list`
   with `Authorization: Bearer` (plan name/status, **no windows**). We do not use it for windows; it is the
   fallback reference for a plan label only if the quota call lacks `level`.
-- Response (ZCode doc): `{code:200, msg, success:true, data:{level:"lite|pro|max", limits:[...]}}`;
+- Response (a reference desktop workbench doc): `{code:200, msg, success:true, data:{level:"lite|pro|max", limits:[...]}}`;
   `limits[]` entries `{type, unit, number, percentage (USED %), nextResetTime (epoch ms, optional)}`:
   - `TOKENS_LIMIT unit=3 number=5` → five_hour window; `TOKENS_LIMIT unit=6` (number 1) → weekly (may be absent);
   - `TIME_LIMIT unit=5 number=1` → monthly MCP/tool pool `{usage, currentValue, remaining, usageDetails[]}` →

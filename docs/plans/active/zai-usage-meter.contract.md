@@ -92,5 +92,5 @@ limits: { budgetUsd: 2, maxMinutes: 45 }
 
 # Z.AI usage meter validation contract
 
-No live call and no real key: every test uses an httptest server and a sentinel key. The endpoint shape is `inferred` (ZCode docs), see the plan.
+No live call and no real key: every test uses an httptest server and a sentinel key. The endpoint shape is `inferred` (a reference desktop workbench docs), see the plan.
 Frames are captured by the Lead on an isolated daemon with a fake Z.AI server behind a throwaway, never-committed env seam (production has a host allowlist), so they are not validator frames; evidence under /tmp/zai-frames/out and in the PR body.

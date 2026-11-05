@@ -746,7 +746,7 @@ export function AppSidebar({
     return commands;
   }, [workspaces, profiles, onOpenSettings, onOpenAutomations]);
   useCommands("sidebar:actions", 5, paletteCommands);
-  // Collapsed search (audit-deepseek-harness.md §3): a header action that
+  // Collapsed search (audit-agent-harness.md §3): a header action that
   // expands into a field. An outside click collapses it only while the
   // query is empty -- a typed query survives clicking away, because
   // dismissing someone's search by accident is worse than leaving a field
@@ -1258,7 +1258,7 @@ export function AppSidebar({
 
 /**
  * The flat list a non-blank query replaces the tree with
- * (audit-deepseek-harness.md §3). Rows are the same TaskRows the tree
+ * (audit-agent-harness.md §3). Rows are the same TaskRows the tree
  * renders -- same status slot, same actions menu -- so a task
  * found by search behaves identically to one found by browsing; only the
  * grouping is gone.
@@ -2100,7 +2100,7 @@ function SpaceLikeItem({
 
 /**
  * The aggregate-activity dot a workspace or space row carries for the
- * tasks beneath it (audit-paseo.md §5's workspace status bucket), so a
+ * tasks beneath it (audit-workbench.md §5's workspace status bucket), so a
  * collapsed container still says whether anything below it needs the
  * user. Always in the DOM at a fixed width, dot or no dot, so a container
  * row never reflows when something below it starts or finishes -- the

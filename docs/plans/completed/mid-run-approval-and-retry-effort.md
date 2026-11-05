@@ -4,7 +4,7 @@
 
 Follow-up from dogfooding PR #171 (task-move UI, per-provider `full-access`
 approval tier, Claude/GLM thinking-level controls — merged to `develop`).
-While researching comparable tools' UX (Claude Code, Cursor, Windsurf, Cline,
+While researching comparable tools' UX (Claude Code, Cursor, Cline,
 Zed, Codex CLI, Copilot — via pplx, 2026-09-20) two concrete gaps stood out
 against smind's current design:
 

@@ -1,15 +1,15 @@
-# App header (ZCode) and simple tabs (Paseo)
+# App header (a reference desktop workbench) and simple tabs (a reference workbench)
 
 Size: M (5) — scope 1 (web UI only), PRs 1, risk 1, decisions 1 (all UI-level, recorded below), verification 2 (light+dark screenshots, desktop-chrome render).
 
-Goal: pre-v0.11 UI polish. (1) One ZCode-style top bar over an inset, rounded
+Goal: pre-v0.11 UI polish. (1) One reference-style top bar over an inset, rounded
 content panel, instead of "toggle + Connected to daemon" plus a separate task
-header block. (2) Paseo-style tabs: no box, icon + truncated title, active =
+header block. (2) reference-style tabs: no box, icon + truncated title, active =
 subtle filled pill, close only on hover/active, "+" right after the tabs.
 Web UI only; no daemon/Go change, no Rust change.
 
-Sources (read, not copied): `refs/zcode/packages/ui/src/{WorkspaceHeader.tsx,DesktopTopOverlay.tsx,WorkspaceHeaderSections/WorkspaceHeaderActionSection.tsx}`,
-`refs/zcode/DESIGN.md` (frames, radius); `refs/paseo/packages/app/src/screens/workspace/workspace-desktop-tabs-row.tsx`
+Sources (read, not copied): a local reference clone,
+a local reference clone (frames, radius); a local reference clone
 (36px row, 24px chip, 8px chip padding, 14px icon, hover `surface1`, active `surface2`, close overlay on hover/active, 8px dirty dot).
 
 Out of scope: a right/side panel (smind has none: panes are a split tree), back/forward
@@ -21,9 +21,9 @@ share/export (no feature), touching the chat timeline/message components
 
 - D1 Layout: the content area becomes one inset panel (`app-content-panel`): `bg-panel`, rounded top-left,
   `border-l border-t`, sitting on the sidebar-coloured window background (darker zone = sidebar + window, lighter
-  panel = content), as in ZCode's Windows build. The header is the panel's first row (h-12), the pane tree below.
+  panel = content), as in a reference desktop workbench's Windows build. The header is the panel's first row (h-12), the pane tree below.
   A single pane is frameless inside the panel; with more than one pane each pane keeps its own inset frame (`rounded-lg border`) as today.
-- D2 Left zone: ZCode floats it over the sidebar. smind's sidebar already owns a top strip (logo + wordmark, traffic-light
+- D2 Left zone: a reference desktop workbench floats it over the sidebar. smind's sidebar already owns a top strip (logo + wordmark, traffic-light
   inset on macOS), so the zone is that strip: the sidebar toggle sits at its right end while the sidebar is expanded.
   When the sidebar is the 48px rail (or a mobile sheet) there is no room (traffic lights overhang the rail), so the toggle
   sits at the header's left edge, after the existing macOS traffic-light inset. Exactly one toggle is on screen.
@@ -97,7 +97,7 @@ Web (vitest):
 - [x] Review, screenshots, `task lint`, `task test`
 
 Peer log: peer-glm (`3ba397b7`) hit a 429 usage limit before any edit (tree clean), so everything went to peer-sonnet (`fecb1c74`): tabs, then header tests. Candidates ACCEPTED after review.
-Review notes: (1) Peer keyed the active pill on `aria-selected` because `ContextMenuTrigger asChild` overwrites the trigger's `data-state` (confirmed) -- accepted. (2) Peer's in-flow opacity-0 close/split left a clickable invisible x and wide gaps between tabs; REJECTED in part and reworked by the Lead into one `pointer-events-none` floating wrapper (Paseo reserves 0px for the close too: `TAB_CLOSE_BUTTON_RESERVED_WIDTH = 0`) with a title fade on hover and an in-flow spacer for the active tab. (3) Tests accepted; AH-AC13's test selects at 1024px then resizes (compact sidebar is a closed sheet), not a phone-width first load.
+Review notes: (1) Peer keyed the active pill on `aria-selected` because `ContextMenuTrigger asChild` overwrites the trigger's `data-state` (confirmed) -- accepted. (2) Peer's in-flow opacity-0 close/split left a clickable invisible x and wide gaps between tabs; REJECTED in part and reworked by the Lead into one `pointer-events-none` floating wrapper (a reference workbench reserves 0px for the close too: `TAB_CLOSE_BUTTON_RESERVED_WIDTH = 0`) with a title fade on hover and an in-flow spacer for the active tab. (3) Tests accepted; AH-AC13's test selects at 1024px then resizes (compact sidebar is a closed sheet), not a phone-width first load.
 
 ## Validation
 

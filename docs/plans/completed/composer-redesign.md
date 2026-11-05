@@ -1,17 +1,16 @@
-# Composer redesign — ZCode card, Paseo interaction
+# Composer redesign — a reference desktop workbench card, a reference workbench interaction
 
-**Ask (2026-10-12):** the chat composer should look like ZCode's input card and
-interact like Paseo's. Reference screenshots (local, gitignored):
-`tmp/reference/{zcode,paseo}-composer.png`; current look:
+**Ask (2026-10-12):** the chat composer should look like a reference desktop workbench's input card and
+interact like a reference workbench's. Reference screenshots (local, gitignored):
+`tmp/reference/{a reference desktop workbench,a reference workbench}-composer.png`; current look:
 `tmp/reference/smind-current-shell-dark.png`.
 
-**Sources ported from:** `refs/zcode/packages/ui/src/v4/ConversationComposer.tsx`
+**Sources ported from:** A local reference clone
 (send/stop button pair, `rounded-2xl` shell, `ArrowUp`/`Square` icons) and
-`refs/zcode/DESIGN.md` (input tokens, `rounded-2xl` main-input exception);
-`refs/paseo/packages/app/src/composer/{agent-controls/control.tsx,
-input/input.tsx,pill-styles.ts,diff-stat-pill.tsx}` (icon+value trigger with
+a local reference clone (input tokens, `rounded-2xl` main-input exception);
+a local reference clone (icon+value trigger with
 an icon-only collapse, focus hint shown only when web ∧ unfocused ∧ empty,
-chip row above the card). Paseo is React Native, so this is a port of the
+chip row above the card). A reference workbench is React Native, so this is a port of the
 *behaviour and proportions*, not the code.
 
 ## Findings that shape the scope
@@ -34,7 +33,7 @@ chip row above the card). Paseo is React Native, so this is a port of the
 1. **No `+`, mic, voice or lightning buttons.** There is no attachment/voice
    feature to back them (follow-ups below). The agent-profile picker stays as
    the leftmost pill (only rendered when profiles exist, as today).
-2. **Pill order (Paseo):** agent profile · provider · model · thinking ·
+2. **Pill order (a reference workbench):** agent profile · provider · model · thinking ·
    permission (+ ACP Auto-accept toggle) … right edge: ACP live config options,
    then the send cluster. Icons (lucide): `Bot` profile, `SquareTerminal`
    provider, `Cpu` model, `Brain` thinking, `ShieldCheck` permission
@@ -46,16 +45,16 @@ chip row above the card). Paseo is React Native, so this is a port of the
    44×44 icon-only button (Item 21's touch target); `md:` and up the dense
    `h-7` sizing. Accessible names are the existing `aria-label`s, so icon-only
    is still labelled.
-5. **Send cluster (ZCode):** idle → one icon button (`ArrowUp`, label "Send",
+5. **Send cluster (a reference desktop workbench):** idle → one icon button (`ArrowUp`, label "Send",
    disabled grey when empty). Running → `Stop` (`Square`, always shown), the
    `Queue` button (`ArrowUp`, label "Queue", disabled while empty) and — only
    when the draft has text — `Send now` (`Zap`, interrupt). Queue/interrupt semantics (ADR-0021 §9),
    Escape-to-stop and Cmd/Ctrl+Enter are unchanged.
-6. **Status chips above the card (Paseo):** a "Working" chip (pulsing dot) while
+6. **Status chips above the card (a reference workbench):** a "Working" chip (pulsing dot) while
    a run is live; the existing diff-stat chip (`+adds −dels`, compact `k`
    formatting, click opens Diff). Row renders nothing when neither applies.
    Queued-prompt rows stay above the chips' row (server state, unchanged).
-7. **Focus hint (Paseo):** faint right-aligned `⌘L` / `Ctrl+L` text inside the
+7. **Focus hint (a reference workbench):** faint right-aligned `⌘L` / `Ctrl+L` text inside the
    card's top-right, visible only when the textarea is unfocused and empty;
    label comes from the *effective* binding of `composer-focus` (respects
    user rebinding; hidden if unbound).
@@ -132,7 +131,7 @@ chip row above the card). Paseo is React Native, so this is a port of the
 
 ## Validation
 
-Verified 2026-10-12 on branch `feat/composer-zcode-paseo` (develop merged,
+Verified 2026-10-12 on branch `feat/composer-reference-reference` (develop merged,
 incl. #297 -- `composer.focus` is not in `SETTINGS_SAFE_ACTIONS`, so it is
 inert while Settings is open).
 
@@ -147,7 +146,7 @@ inert while Settings is open).
   multi-line, model + permission pickers, running (Stop + chips), queued
   prompt, bypass tint and GLM auto-accept, rendered from the real `<Composer>`
   against a fake client (local harness, `tmp/`, not committed), compared
-  against the ZCode/Paseo references. The pills collapse to icon-only at
+  against the reference workbench references. The pills collapse to icon-only at
   390px with no wrapping. Not run against a live daemon.
 - Residual: with split panes, `composer.focus` goes to the most recently
   registered composer (the keyboard layer's stacking rule), not necessarily the

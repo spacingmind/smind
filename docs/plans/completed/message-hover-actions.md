@@ -2,12 +2,12 @@
 
 Size: M (4) — scope 1 (web UI only), PRs 1, risk 0–1 (composer prefill, re-run), decisions 0 (reuses `run.start` / `whenBusy:"queue"`; no new RPC), verification 2 (light/dark screenshots).
 
-Human: "mỗi message item có các action khi hover, tham khảo zcode và paseo".
+Human: "mỗi message item có các action khi hover, tham khảo a reference desktop workbench và a reference workbench".
 
 ## References (read-only)
 
-- **ZCode** `refs/zcode/packages/ui/src/v4/ConversationRowView.tsx`: a small `MessageActions` bar *under* the message, `opacity-0 transition-opacity group-hover/<row>:opacity-100 focus-within:opacity-100`, forced visible on touch (`[@media(hover:none)]:opacity-100`); user row: Copy, Edit; assistant row: Copy, feedback, Fork, Retry. Icon-only buttons with tooltips.
-- **Paseo** `refs/paseo/packages/app/src/components/message.tsx`: user message trailing row on hover (timestamp, rewind/restore-to-composer, copy), assistant turn footer (copy, fork menu, duration ↔ end time).
+- **A reference desktop workbench** A local reference clone: a small `MessageActions` bar *under* the message, `opacity-0 transition-opacity group-hover/<row>:opacity-100 focus-within:opacity-100`, forced visible on touch (`[@media(hover:none)]:opacity-100`); user row: Copy, Edit; assistant row: Copy, feedback, Fork, Retry. Icon-only buttons with tooltips.
+- **A reference workbench** A local reference clone: user message trailing row on hover (timestamp, rewind/restore-to-composer, copy), assistant turn footer (copy, fork menu, duration ↔ end time).
 
 ## What smind can back (checked)
 
@@ -23,7 +23,7 @@ Human: "mỗi message item có các action khi hover, tham khảo zcode và pase
 
 ## Decisions
 
-- **D1 One action bar per message, below it, hover/focus revealed.** `MessageActions` (new, `timeline/message-actions.tsx`) + `MessageAction` (icon button with tooltip, `aria-label`, `size-6`-ish, `text-ui-sm` muted → foreground on hover). Revealed by `group-hover` / `focus-within`, so it is keyboard reachable (the buttons are tabbable even while visually hidden; focus reveals the bar). On `(hover: none)` devices it is always visible, compact (ZCode's rule).
+- **D1 One action bar per message, below it, hover/focus revealed.** `MessageActions` (new, `timeline/message-actions.tsx`) + `MessageAction` (icon button with tooltip, `aria-label`, `size-6`-ish, `text-ui-sm` muted → foreground on hover). Revealed by `group-hover` / `focus-within`, so it is keyboard reachable (the buttons are tabbable even while visually hidden; focus reveals the bar). On `(hover: none)` devices it is always visible, compact (a reference desktop workbench's rule).
 - **D2 User prompt bubble**: Copy, Edit & resend. Bar is right-aligned under the bubble.
 - **D3 Assistant turn footer**: the footer stays one quiet line (status · provider · model · elapsed · stop reason · usage pill — the ADR-0028 hover card is unchanged). Its right side becomes the action bar: a Copy menu (`Copy answer (Markdown)` — the turn's assistant text joined, `Copy full turn (plain text)` — the old Copy-turn behaviour) and Re-run (hidden while the run is `running`). The old text "Copy" button is replaced (testid `run-copy-button` kept on the menu trigger; aria-label stays "Copy turn" for the full-turn item so existing tests keep their meaning).
 - **D4 Re-run** calls the pane's `submitPrompt(run.provider, run.prompt, permission, run.thinkingLevel, "queue", run.model || undefined)`, so it starts immediately when idle and queues behind a live run (ADR-0021; a queued result refreshes the composer's queue list). Provider, model and thinking come from the run; **permission settings come from what the composer shows now when it is on the same provider** (otherwise the run's recorded ones), so a re-run never silently replays a looser mode the old run was live-switched to. One re-submit per run at a time (double click = one run). A failure surfaces as an inline alert at the end of the log column, where the log follows the tail.
@@ -64,7 +64,7 @@ Human: "mỗi message item có các action khi hover, tham khảo zcode và pase
 
 ## Follow-ups (not backed by smind today)
 
-Fork into a new chat/task with conversation context; like/dislike feedback; rewind files to a turn; Copy/actions on ACP `user` rows and individual tool calls; timestamps swapping in the footer on hover (Paseo).
+Fork into a new chat/task with conversation context; like/dislike feedback; rewind files to a turn; Copy/actions on ACP `user` rows and individual tool calls; timestamps swapping in the footer on hover (a reference workbench).
 
 ## Progress
 

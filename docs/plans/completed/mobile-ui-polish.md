@@ -110,8 +110,8 @@ against the real wire contracts before deciding scope, not assumed):
   exercised by that style of test at all. Introducing a new,
   platform-specific, effectively-untestable rendering layer in the same
   pass as a token-system port is exactly the kind of large/novel-domain
-  scope this session's own Paseo-orchestration experience shows GLM
-  reliably stalls on (see this repo's Paseo model-choice memory).
+  scope this session's own Reference-orchestration experience shows GLM
+  reliably stalls on (see this repo's a reference workbench model-choice memory).
   Rebuild all three screens on the new token system in plain RN first;
   `@expo/ui` adoption is a clean, separable follow-up once the token
   foundation exists to theme it against.
@@ -244,7 +244,7 @@ against the real wire contracts before deciding scope, not assumed):
 - [x] Item 1 — token foundation + PairingScreen
 - [x] Item 2 — TasksScreen run-card list
 - [x] Item 3 — TaskDetailScreen + permission cards visual polish
-- [x] Hand off implementation via Paseo — GLM stalled twice in a row
+- [x] Hand off implementation via a reference workbench — GLM stalled twice in a row
       (20 turns of pure read-only research, zero commits; then, after a
       maximally concrete `send_agent_prompt` redirect handing over the
       exact token values to use, another 20 turns still produced zero

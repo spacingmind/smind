@@ -1,8 +1,8 @@
 ---
 v: 1
-milestone: "ZCode parity stage 7: Automations page, off-state explainer, task chip"
+milestone: "reference parity stage 7: Automations page, off-state explainer, task chip"
 base: origin/develop
-planRef: docs/plans/active/zcode-parity.md
+planRef: docs/plans/active/reference-parity.md
 acs:
   - id: AC-4
     text: "smind config set automations.enabled true|false edits config.yaml keeping comments; any other value is rejected naming the key."
@@ -45,4 +45,4 @@ limits: { budgetUsd: 2, maxMinutes: 60 }
 
 # Stage 7 validation contract
 
-Judge the head against the ACs and `docs/plans/active/zcode-parity.md` Stage 7. Attack targets: (1) the task wire leaking an automation name for a task the automation did not start, or for a deleted automation; (2) `config set` writing a non-bool or dropping comments; (3) any UI path that flips `automations.enabled` (ADR-0044 keeps it file/CLI-only); (4) Settings still rendering a second copy of the list.
+Judge the head against the ACs and `docs/plans/active/reference-parity.md` Stage 7. Attack targets: (1) the task wire leaking an automation name for a task the automation did not start, or for a deleted automation; (2) `config set` writing a non-bool or dropping comments; (3) any UI path that flips `automations.enabled` (ADR-0044 keeps it file/CLI-only); (4) Settings still rendering a second copy of the list.

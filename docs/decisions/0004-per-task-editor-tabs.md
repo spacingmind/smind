@@ -10,11 +10,11 @@ The web UI's editor tabs (open files, diff views, terminals) are scoped
 per **task**, not per workspace. Selecting a different task in the
 sidebar switches the tab set to that task's; each task keeps its own
 open-tab state. (Decided by the maintainer when resolving open question
-1 of `docs/research/dual-mode-ui.md`.)
+1 of `docs/research/local/dual-mode-ui.md`.)
 
 ## Alternatives considered
 
-- **Per-workspace tabs (Paseo's model).** Paseo keys open tabs on the
+- **Per-workspace tabs (a reference workbench's model).** A reference workbench keys open tabs on the
   workspace because its worktrees exist inside the workspace session
   lifecycle. Passed over: smind's model is different by definition —
   each *task* is its own git worktree with its own agent runs, its own
@@ -31,10 +31,10 @@ open-tab state. (Decided by the maintainer when resolving open question
   make the tab set mirror exactly what that task's agent sees and
   changes — the review surface (files + diff) belongs to the task whose
   work is being reviewed.
-- The maintainer also finds Paseo's code-review-and-commit UX poor;
+- The maintainer also finds a reference workbench's code-review-and-commit UX poor;
   task-scoped tabs are the foundation for a review surface that is
   deliberately *not* a copy of it (review loop design is tracked in
-  `docs/research/dual-mode-ui.md` and follow-up plans).
+  `docs/research/local/dual-mode-ui.md` and follow-up plans).
 - Matches the research recommendation's prerequisite (a `{kind, key}`
   tab registry): the key includes the task, so per-task scoping falls
   out of the registry naturally.

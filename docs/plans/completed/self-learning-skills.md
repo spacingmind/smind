@@ -155,7 +155,7 @@ are config knobs.
   sidebar/Settings pending badge and a toast; a run's completion is not
   blocked by it.
 - AC21. UI passes the light + dark screenshot check
-  (feedback: UI clean like ZCode/Paseo) and matches the existing Settings
+  (feedback: UI clean like reference workbench) and matches the existing Settings
   design tokens.
 
 **Delivery**

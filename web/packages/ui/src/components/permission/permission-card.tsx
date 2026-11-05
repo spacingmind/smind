@@ -63,7 +63,7 @@ export function PermissionCard({
        * A blocking request is one of ZCode's "waiting badges"
        * (TaskInteractionBadge.tsx) -- the one green confirmation
        * treatment every waiting state shares, never a recolored
-       * `--color-success` (zcode-visual-parity P3, refs/zcode/DESIGN.md's
+       * `--color-success` (reference-visual-parity P3, the reference design doc's
        * Blocking interaction colors).
        */}
       <span

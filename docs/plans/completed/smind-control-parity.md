@@ -1,12 +1,12 @@
-# smind control/orchestration parity with Paseo/dsh (Phase 3.1)
+# smind control/orchestration parity with a reference workbench or harness (Phase 3.1)
 
 Closes two of the three control-plane gaps found while dogfooding
-`smind task` as an orchestrator against `refs/paseo`'s `agent-manager.ts`
-and `refs/deepseek-harness`'s `subagent`/`interaction` packages (see
+`smind task` as an orchestrator against a local reference clone's `agent-manager.ts`
+and a local reference clone's `subagent`/`interaction` packages (see
 [[project_phase3_relay_e2ee]] memory, or ask for the comparison if that
 memory doesn't exist): live mid-session config mutation, and a task
 parent/child hierarchy. This plan does **not** attempt mid-turn steering
-(Paseo's `steerActiveTurn`) — ACP v2's method list
+(a reference workbench's `steerActiveTurn`) — ACP v2's method list
 (`refs/agent-client-protocol/agent-client-protocol-schema/src/v2/agent.rs`)
 has no verb to inject input into an in-flight `session/prompt` call, and
 `claude-agent-sdk-go`'s `Client` (`/home/longnp/Coding/personal/claude-agent-sdk-go/client.go`)
@@ -60,7 +60,7 @@ support.
   cold-resume/inbox semantics, no automatic cascade-behavior on parent
   archive/delete beyond what already exists for any task -- this is
   intentionally the minimal "tasks form a tree, and you can list a
-  node's children" primitive, not dsh's full continuable-child model.
+  node's children" primitive, not a reference agent harness's full continuable-child model.
 - Out of scope this pass: mid-turn steering (see above); any change to
   `claude-agent-sdk-go` itself (a separate repo); a generic
   cross-provider "mode" abstraction beyond what ACP's config-options

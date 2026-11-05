@@ -1,20 +1,20 @@
 # Chat timeline rail + borderless messages
 
-Size: M (4) — scope 1 (web UI only), PRs 1, risk 0–1 (scroll perf), decisions 0 (port of Paseo; no architecture choice), verification 2 (light/dark screenshots).
+Size: M (4) — scope 1 (web UI only), PRs 1, risk 0–1 (scroll perf), decisions 0 (port of a reference workbench; no architecture choice), verification 2 (light/dark screenshots).
 
 Human (pre-v0.11 polish): "chưa có thanh timeline để scroll nhanh" and "message có các border ko cần thiết, bỏ đi".
-Reference: Paseo's agent chat — a thin rail of tick marks at the left edge of the chat (one per user turn, current one longer/brighter, hover → preview, click → jump), and borderless messages (plain assistant text, subtle user bubble, compact muted tool rows).
+Reference: the reference workbench's agent chat — a thin rail of tick marks at the left edge of the chat (one per user turn, current one longer/brighter, hover → preview, click → jump), and borderless messages (plain assistant text, subtle user bubble, compact muted tool rows).
 
-Port source (read-only): `refs/paseo/packages/app/src/agent-stream/chat-outline/{rail.web.tsx,model.ts,hover-intent.ts}`.
+Port source (read-only): a local reference clone.
 
 ## Decisions
 
-- **D1 One tick per run (turn).** A smind run is exactly one prompt → answer turn (`RunEntry.prompt`), the equivalent of Paseo's "user prompt". Tick preview = first non-empty line of `run.prompt`. No daemon/API change: the whole chat is already loaded client-side, so there is no prompt index RPC like Paseo's.
-- **D2 Evenly stacked slots, not scroll-proportional.** Same as Paseo: slots tile the rail with no gaps (flex-shrink), so 200 turns still fit; the viewport's current turn is the highlighted (longer/brighter) tick. This is "positions mapped to the scroll content" in index order.
+- **D1 One tick per run (turn).** A smind run is exactly one prompt → answer turn (`RunEntry.prompt`), the equivalent of that workbench's "user prompt". Tick preview = first non-empty line of `run.prompt`. No daemon/API change: the whole chat is already loaded client-side, so there is no prompt index RPC like the reference workbench's.
+- **D2 Evenly stacked slots, not scroll-proportional.** Same as the reference workbench: slots tile the rail with no gaps (flex-shrink), so 200 turns still fit; the viewport's current turn is the highlighted (longer/brighter) tick. This is "positions mapped to the scroll content" in index order.
 - **D3 Active turn** = the last run whose top is at or above `scrollTop + 24px` (binary search over the run `<li>`s), the last run when scrolled to the bottom. Computed in a rAF-throttled passive scroll listener and published through an external store (`createActivePromptPublisher`, ported); only the rail subscribes (`useSyncExternalStore`) so scrolling never re-renders `TaskDetailPane` or any message.
 - **D4 Visibility.** Rail renders only when ≥ 2 runs AND the scroll content overflows the viewport AND the pane is ≥ 860px wide (reading column is `max-w-3xl` = 768px; rail + gap needs ~44px each side). Hidden below that (mobile 390px, split panes). Measured with `ResizeObserver` (guarded when absent).
-- **D5 Interaction.** Hover shows a preview card (first line, 2-line clamp) after Paseo's hover-intent delay and dock-style magnification (ported). Click jumps with `scrollTo({behavior:"smooth"})` (instant under `prefers-reduced-motion`). Pointer-drag across the rail scrubs (instant jumps). Keyboard: roving tabindex (the active tick is the only tab stop), ArrowUp/Down moves focus, Home/End, Enter/Space jumps; focus shows the same preview. `role="tablist"`/`tab`, `aria-selected`, labels "N of M: preview".
-- **D6 Borderless run.** The run card (`rounded-xl border`) with header/body/footer dividers goes away. The prompt is a right-aligned subtle bubble (`bg-surface`, no border, top-right small radius — Paseo's `surface3` bubble), assistant output is plain, runs are separated by spacing. The old run header (provider · model chip · status) moves into the footer meta line: `● status · provider · model · elapsed · stop reason · usage pill · Copy`. The footer is one muted line; for finished runs it is dimmed and brightens on run hover/focus-within; running/error/stopped runs keep it fully visible.
+- **D5 Interaction.** Hover shows a preview card (first line, 2-line clamp) after that workbench's hover-intent delay and dock-style magnification (ported). Click jumps with `scrollTo({behavior:"smooth"})` (instant under `prefers-reduced-motion`). Pointer-drag across the rail scrubs (instant jumps). Keyboard: roving tabindex (the active tick is the only tab stop), ArrowUp/Down moves focus, Home/End, Enter/Space jumps; focus shows the same preview. `role="tablist"`/`tab`, `aria-selected`, labels "N of M: preview".
+- **D6 Borderless run.** The run card (`rounded-xl border`) with header/body/footer dividers goes away. The prompt is a right-aligned subtle bubble (`bg-surface`, no border, top-right small radius — the reference workbench's `surface3` bubble), assistant output is plain, runs are separated by spacing. The old run header (provider · model chip · status) moves into the footer meta line: `● status · provider · model · elapsed · stop reason · usage pill · Copy`. The footer is one muted line; for finished runs it is dimmed and brightens on run hover/focus-within; running/error/stopped runs keep it fully visible.
 - **D7 Tool calls / thinking / tool groups / unknown events** become compact muted single-line rows (chevron + icon + name + summary, status dot; the status word is screen-reader-only for `success`), hover background, no card border. Expanded detail is indented with a subtle `bg-surface` block, no `border-t`. Inner code/IN-OUT/read-preview boxes lose their borders (background only). Semantic borders stay: markdown tables, blockquote rule, destructive/warning permission-detail badges, the pending-permission dock and composer (not messages).
 - **D8** The usage pill stays a popover trigger (ADR-0028 hover card unchanged) but drops its `border`.
 
@@ -24,7 +24,7 @@ Rail
 - **R-AC1** One tick per run, in order; ticks are `role=tab`, labelled `N of M: <first line of prompt>`; no rail with 0–1 runs.
 - **R-AC2** Rail hidden when content does not overflow, and when pane width < 860px; shown again when either flips (no reload).
 - **R-AC3** The active tick follows scrolling (rAF-throttled); scrolled to bottom → last tick; scrolled to top → first tick. Scrolling never re-renders `RunTimeline` rows or ticks other than the two whose active state flips.
-- **R-AC4** Hover (after intent delay) or focus shows a preview with the prompt's first line; leaving hides it; magnification band as in Paseo.
+- **R-AC4** Hover (after intent delay) or focus shows a preview with the prompt's first line; leaving hides it; magnification band as in the reference workbench.
 - **R-AC5** Click on a tick scrolls the run's `<li>` to the top of the viewport (smooth; instant with reduced motion). Drag across the rail scrubs through runs.
 - **R-AC6** Keyboard: Tab enters on the active tick only; ArrowUp/Down/Home/End move focus; Enter/Space jump.
 - **R-AC7** Streaming a chunk into the last run does not re-render ticks (props stable; prompts array identity stable when ids/previews unchanged).
@@ -95,4 +95,4 @@ Sandbox daemon (isolated `SMIND_HOME`, own port, GLM agent against the fake Open
 - **B-AC3**: `run footer is dimmed when finished and full strength when running or errored` (`opacity-70`, full on hover/focus-within and on `(hover: none)`).
 - **B-AC4**: `*-01-long-bottom`, `*-02-long-mid`, `*-03-long-rail-hover` (desktop), `*-04-long-after-click`, `*-05-long-overview-top` (Overview), `*-06-mixed` (done, error, turn-limit, interrupted), `*-07-mixed-tool-expanded`, `*-08-short`, `*-09-live-permission` (running run + permission dock) — all viewed.
 
-Deferred from review: per-frame O(runs) rect reads (fine at 200 runs; cache/binary-search if chats grow to thousands), the rail not forwarding wheel events (same as Paseo), a streamed chunk can cancel a smooth jump when the view was pinned to the tail (rare; needs a following-setter in `useAutoFollow`), O(runs) preview split per render.
+Deferred from review: per-frame O(runs) rect reads (fine at 200 runs; cache/binary-search if chats grow to thousands), the rail not forwarding wheel events (same as that workbench), a streamed chunk can cancel a smooth jump when the view was pinned to the tail (rare; needs a following-setter in `useAutoFollow`), O(runs) preview split per render.

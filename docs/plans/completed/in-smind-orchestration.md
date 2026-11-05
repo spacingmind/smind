@@ -10,7 +10,7 @@ Spec for [ADR-0041](../../decisions/0041-in-smind-orchestration.md) (**Accepted 
 
 ## Goal
 
-The Supervisor, the Leads and the Peers all run as smind tasks, so a real item (the next ADR's PRs) is orchestrated end to end without Paseo, and a provider rate limit does not stall the tree
+The Supervisor, the Leads and the Peers all run as smind tasks, so a real item (the next ADR's PRs) is orchestrated end to end without a reference workbench, and a provider rate limit does not stall the tree
 silently: the failed run says what happened and when it resets, the Lead is woken without polling, and, if the Human configured it, the work continues on another provider.
 
 ## Scope and PRs
@@ -44,7 +44,7 @@ Order: R1 → (R2 ‖ R3) → N1 → N2 → N3; F1 after R1; F2 after N1; F3 aft
 | S2a | **Daemon-side profile.** `run.start`/`task.prompt`/`chat.queue*` take `profileId`; `runs.profile_id`; the daemon applies the contract; per-provider instruction delivery (Claude append-system-prompt, ACP first-prompt preface with hash re-send, Codex developer instructions) | L | peer-sonnet | S1 merged |
 | S2b | **Built-in `smind` MCP entry + identity.** The daemon builds the reserved `smind` entry for `orchestrationTools=true` runs (Claude `--mcp-config`, ACP `mcpServers`), env `SMIND_TASK_ID/CHAT_ID/RUN_ID/HOME`; strict MCP on claude-native when false; Codex "not enforced"; `smind mcp serve` autofills `parentTaskId`/`fromTaskId`/`fromChatId` and rejects a disagreeing explicit value | L | peer-sonnet | S2a merged |
 | S3 | **Admission.** For identity-bearing callers: forced parent and source, `childPolicy` check against `profileId`, raw provider/mode/model rejected, own-subtree scope, `profile_list` filtered to allowed children; model-readable errors | M | peer-sonnet | S2b merged |
-| S4 | **Role pack and skills.** `smind profile seed roles` (human, idempotent), `smind-supervisor` bundled skill, `smind-leader` updated (archive each Peer after accept; briefs per `WORKSPACE_PROTOCOL.md`), `docs/WORKSPACE_PROTOCOL.md` "smind" section, README note; **then one real L item run Supervisor → Lead → 2 Peers entirely in smind, Paseo as the control** | M + a run | Lead + Human | S3 merged, R2 and N3 merged (the item needs the resilience pieces) |
+| S4 | **Role pack and skills.** `smind profile seed roles` (human, idempotent), `smind-supervisor` bundled skill, `smind-leader` updated (archive each Peer after accept; briefs per `WORKSPACE_PROTOCOL.md`), `docs/WORKSPACE_PROTOCOL.md` "smind" section, README note; **then one real L item run Supervisor → Lead → 2 Peers entirely in smind, a reference workbench as the control** | M + a run | Lead + Human | S3 merged, R2 and N3 merged (the item needs the resilience pieces) |
 | T1 | **Tree budget** (optional, ADR Q9): `tasks.budget_usd`, admission check, tree header, "N runs reported no cost" | M | peer-glm | S3 merged |
 | M1 | **Mobile read-only tree**: nested rows, attention rollup, failure badge | M | peer-glm | R3 merged; coordinate with the mobile Leads (do not edit `new-task.tsx`) |
 | M2 | **Push for a stuck tree** (ADR-0040 notifier: a root tree whose latest run is `rate_limited` with no failover pushes the root; new kind, rate limited like `needs_continue`) | S | peer-sonnet | R1 merged, ADR-0040 PR 3 merged (it is) |
@@ -93,7 +93,7 @@ Seats (S1–S4)
 23. `smind mcp serve` fills `parentTaskId`, `fromTaskId`, `fromChatId` from the env; an explicit value that disagrees is rejected; with no env (a human or external orchestrator) behaviour is unchanged.
 24. A Peer-seat caller's `task_new`/`task_send`/`chat_new` are rejected (no tools, and the daemon refuses identity-bearing calls of a no-orchestration profile); a `leaf` Lead may launch only profiles with `orchestrationTools=false`; a raw provider, `permissionMode` or `model` from an identity-bearing caller is rejected; sending to a task outside the caller's subtree is rejected; a self-reported `source` is ignored when identity is present.
 25. `smind profile seed roles` run twice yields five profiles once, matching the ADR table (no Opus); an agent cannot run it; editing a seeded profile survives a re-run.
-26. **Dogfood (manual, recorded under Validation):** one real L item is orchestrated Supervisor (root task, the Human talking) → Lead → at least two Peers entirely in smind, including one forced rate limit (fake agent on an isolated daemon, and, if the Human allows it, a real GLM limit) that exercises `fallback`; the Lead is woken by notifications with no polling; the Human sees and steers the tree in web; Paseo remains the control and the comparison (turns, cost, wall clock, interventions) is written down.
+26. **Dogfood (manual, recorded under Validation):** one real L item is orchestrated Supervisor (root task, the Human talking) → Lead → at least two Peers entirely in smind, including one forced rate limit (fake agent on an isolated daemon, and, if the Human allows it, a real GLM limit) that exercises `fallback`; the Lead is woken by notifications with no polling; the Human sees and steers the tree in web; a reference workbench remains the control and the comparison (turns, cost, wall clock, interventions) is written down.
 
 Later (T1, M1, M2)
 
@@ -151,7 +151,7 @@ Web / mobile (vitest, then screenshots)
 
 Manual (recorded under Validation)
 
-- AC26 end to end on an isolated daemon (`SMIND_HOME`, own port), haiku-pinned for any live call (memory: scripted sends are live calls); a fake agent returning the GLM 429 string for the forced limit; compare with a Paseo control run. A real GLM limit only if one occurs naturally and the Human agrees.
+- AC26 end to end on an isolated daemon (`SMIND_HOME`, own port), haiku-pinned for any live call (memory: scripted sends are live calls); a fake agent returning the GLM 429 string for the forced limit; compare with a reference workbench control run. A real GLM limit only if one occurs naturally and the Human agrees.
 
 ## Decisions
 
@@ -162,7 +162,7 @@ Manual (recorded under Validation)
 
 ## Progress
 
-- 2026-10-23: dogfood logs (2026-10-22/23), ADR-0016/0017/0018/0019/0020/0021/0027/0028/0040, the orchestration code (`internal/runs`, `cmd/smind/mcp_*`, bundled skills) and Paseo's notification and tool-policy code read; ADR-0041 and this plan written, docs PR opened. **Stopped for the Human's review.** No code, no live calls.
+- 2026-10-23: dogfood logs (2026-10-22/23), ADR-0016/0017/0018/0019/0020/0021/0027/0028/0040, the orchestration code (`internal/runs`, `cmd/smind/mcp_*`, bundled skills) and a reference workbench's notification and tool-policy code read; ADR-0041 and this plan written, docs PR opened. **Stopped for the Human's review.** No code, no live calls.
 - 2026-10-23: ADR-0041 **accepted by the Human** (all 12 as recommended); status updated in #530. Implementation starts with R1.
 - 2026-10-23: **Item R built through smind** (dogfood daemon, claude-native Sonnet 5.5 `--mode auto`, one Lead, about 45 Peer sends, roughly USD 35 in total) and merged as non-stacked PRs, in this order: R1 #541 (classifier, store columns, `rate_limit_event`, wire), R2 #546 (task wait exit 6, MCP, task.tree, skills), F1 #549 (provider cooldown), N1 #551 (reply chat, notifyOnFinish, held queue items), R3 #550 (web and mobile footer, sidebar dot, lineage), N2 #552 (parent notifier), F2 #555 (failover data and `wait`), zone fix #553. Also merged: F3 #557 (fallback), N3 #558 (child-update surfaces), and the flake fix #556.
 - Deviations from the plan as written: (1) a **profile send keeps `source=human`** (ADR-0019 auth) but now forwards `fromTaskId/fromChatId`, otherwise a Lead using seat profiles would never be notified (N1); (2) **GLM's reset text is UTC+8**, not the daemon's zone (#553, ADR correction); (3) a **model-scoped** Claude limit (`weekly-opus`, `weekly-sonnet`) does not cool the provider (F1); (4) there is **no `smind profile edit`** command (only add/ls/rm), so `onRateLimit` is set by `profile.update` or `profile add`; (5) the provider cooldown, `wait` and `fallback` all treat a **missing reset time** as "do nothing automatic" (never guessed); (6) `NotBefore` had to be added to the chat queue wire for the strip (N3).
@@ -196,7 +196,7 @@ Manual (recorded under Validation)
 | 23 | identity is `session.identify` on the connection, set from the registry (not params): `TestSessionIdentify_*`, `TestTaskCreate_ParentDefaultsToIdentity`, `TestRunStart_FromIdsFilledFromIdentity`, `TestRunStart_ForeignFromIdsRejectedWhenIdentified`, `TestUnidentifiedConn_BehaviourUnchanged`, `TestMCPServe_IdentifiesWhenRunIdEnvSet`, `TestMCPServe_NoEnvNoIdentify` (#565) |
 | 24 | `TestAdmission_PolicyNoneCallerRejected`, `TestAdmission_LeadLeafOnlyLaunchesPeerProfiles`, `TestAdmission_RunStartRequiresProfileId`, `TestAdmission_RawProviderModeModelRejected`, `TestAdmission_OtherSubtreeRejected`, `TestAdmission_ProfileListShowsOnlyAllowedChildren` (#567; the two load-bearing helpers were also mutation-checked) |
 | 25 | `TestSeedRoles_*` (five seats in order, idempotent, an edit survives, peer-glm falls back to peer-sonnet, no Opus), `TestProfileSeedRoles_*` (refused inside a run), `TestTaskSend_WithProfileUsesProfileSettings` (#566) |
-| 26 | the AC26 run above: dogfood notes entries 54-63 (local), the Peers' PR #570, the bug fix #569; Paseo was not used as a control run (the Human chose to dogfood directly) |
+| 26 | the AC26 run above: dogfood notes entries 54-63 (local), the Peers' PR #570, the bug fix #569; a reference workbench was not used as a control run (the Human chose to dogfood directly) |
 | sticky seats (design addition) | `TestStickySeat_*`, `TestRunStart_ProfileId*`, `TestTaskSend_ProfileNone*`, `TestMCPTaskSend_ProfileZero*` (#571) |
 
 **Remaining (parked), by decision; nothing here is a regression:**
@@ -208,4 +208,4 @@ Manual (recorded under Validation)
 
 **Not verified:** a real Claude `rate_limit_event` (none seen naturally, no quota burned; covered by the SDK decoder and a fake-CLI scenario); the GLM zone (UTC+8) is an inference from third-party reports plus one consistent run, not a vendor statement; Codex's turn error carries no structured reset (text matcher only); the GLM Peer and a real rate-limit failover were not exercised in the AC26 run.
 
-**Docs-only record for the ADR PR (#530):** ADR numbering, cited ADR/plan/PR existence and the code facts cited there were read on `develop` @ `235d22e9` (see the PR); Paseo citations at `refs/paseo` `8d9e7d3a`.
+**Docs-only record for the ADR PR (#530):** ADR numbering, cited ADR/plan/PR existence and the code facts cited there were read on `develop` @ `235d22e9` (see the PR); a reference workbench citations at a local reference clone `8d9e7d3a`.

@@ -1,12 +1,12 @@
-# Mobile redesign — ZCode visual language on native `@expo/ui` + Expo Router
+# Mobile redesign — a reference desktop workbench visual language on native `@expo/ui` + Expo Router
 
 Size: L (8) — scope 2, PRs 2 (eight), risk 1, decisions 1 (ADR-0036), verification 2 (390 px light+dark smoke incl. transition
 frames; no real device). **Status: completed 2026-10-22** — all eight PRs merged; native (device/simulator) verification is the one open item, listed under Follow-ups.
 
-Redesigns the Expo app (`mobile/`) with ZCode's tokens/type/radius/density (ZCode = visual north star, `refs/zcode`) using
+Redesigns the Expo app (`mobile/`) with a reference desktop workbench's tokens/type/radius/density (a reference desktop workbench = visual north star, a local reference clone) using
 `@expo/ui` native components (SwiftUI / Jetpack Compose) wherever one exists and RN only where it does not. **Presentation layer
 only**: relay pairing, device identity, daemon password, queue, stop and needs-continue behave exactly as before. Research and the
-component-by-component mapping: `docs/research/local/mobile-zcode-design.md` (local, gitignored; Revision 2). Navigation decision:
+component-by-component mapping: local research notes (local, gitignored; Revision 2). Navigation decision:
 [ADR-0036](../../decisions/0036-mobile-expo-router-native-stack.md).
 
 Rulebook (cite in code comments and PR bodies where a rule drives a choice): `expo-design-system`, `expo-native-ui`, `expo-ui`,
@@ -59,7 +59,7 @@ As built. A criterion that changed during the work says **Deviation** with the d
 ### M1 — Foundations
 1. `theme.ts` carries the Zai values (background `#f8f8f8`/`#161616`, card `#ffffff`/`#2b2b2b`, primary `#000000`/`#ffffff`, destructive, success, warning,
    `running` = warning); no teal; pure `withAlpha`; type roles are 18/16 headings + 14/13/12/10. **Deviation:** `foregroundSubtle` alpha is 0.65 (light) / 0.64 (dark) instead of
-   ZCode's 0.6 (4.04:1 and 4.44:1 at 0.6, below AA for small text); two status tiers are kept (`status` = AA text tier, `statusDot` = Zai fill tier).
+   a reference desktop workbench's 0.6 (4.04:1 and 4.44:1 at 0.6, below AA for small text); two status tiers are kept (`status` = AA text tier, `statusDot` = Zai fill tier).
 2. Radius `{4, 6, 8, 12, 16, full}`; `boxShadow` strings only; `borderCurve: 'continuous'` on rounded containers.
 3. `UiHost` passes `seedColor={theme.primary}` and `colorScheme={theme.mode}`: every `@expo/ui` `Button` is neutral (no iOS blue). `TextButton` is the one text-variant
    action (the web renderer paints raw text buttons in a low-contrast grey).

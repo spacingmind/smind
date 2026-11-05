@@ -1,6 +1,6 @@
 # Tab registry + per-task tabs + sidebar attention badges
 
-Implements the prerequisite recommended by `docs/research/dual-mode-ui.md`,
+Implements the prerequisite recommended by `docs/research/local/dual-mode-ui.md`,
 under the scoping decided in `docs/decisions/0004-per-task-editor-tabs.md`.
 Frontend-only; no daemon changes.
 

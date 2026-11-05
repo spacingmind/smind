@@ -1,8 +1,8 @@
-# Web UI/UX redesign: parity with paseo / deepseek-harness / cliproxyapi
+# Web UI/UX redesign: parity with a reference workbench / a reference agent harness / a reference proxy project
 
 ## Context
 
-The Phase 2 gate is "use smind, not Paseo, as the daily driver"
+The Phase 2 gate is "use smind, not the reference workbench, as the daily driver"
 (`docs/plans/active/smind-dogfood.md`). Three dogfood sessions in, the
 daemon side holds up — runs survive restarts, reconnect resyncs, permission
 plumbing is correct end to end — and the thing standing between smind and
@@ -11,9 +11,9 @@ that gate is the web UI. This plan is the redesign that closes it.
 Phase 1 of this work (research) is complete; its output is under
 [`ui-redesign-parity/`](ui-redesign-parity/):
 
-- [`audit-paseo.md`](ui-redesign-parity/audit-paseo.md) — the north star.
-- [`audit-deepseek-harness.md`](ui-redesign-parity/audit-deepseek-harness.md)
-- [`audit-cliproxyapi.md`](ui-redesign-parity/audit-cliproxyapi.md) —
+- [`audit-workbench.md`](ui-redesign-parity/audit-workbench.md) — the north star.
+- [`audit-agent-harness.md`](ui-redesign-parity/audit-agent-harness.md)
+- [`audit-proxy-project.md`](ui-redesign-parity/audit-proxy-project.md) —
   scope caveat: its UI source is not in `refs/`; audited from the
   management API it is built against.
 - [`audit-smind-current.md`](ui-redesign-parity/audit-smind-current.md)
@@ -21,8 +21,8 @@ Phase 1 of this work (research) is complete; its output is under
   per-dimension verdict and north star, ending in the top-10 ranked gaps.
 
 This plan builds on, and does not re-litigate,
-`docs/research/dual-mode-ui.md` (no mode switch; one task-scoped tabbed
-canvas with an attention rail and a side dock), `docs/research/uiux-audit.md`
+`docs/research/local/dual-mode-ui.md` (no mode switch; one task-scoped tabbed
+canvas with an attention rail and a side dock), `docs/research/local/uiux-audit.md`
 (whose P1/P2 items that are still open are folded in below), ADR 0004
 (per-task tabs) and ADR 0006 (coarse, human-triggered commit flow).
 
@@ -30,8 +30,8 @@ canvas with an attention rail and a side dock), `docs/research/uiux-audit.md`
 `web/`. They are called out explicitly and gated on maintainer sign-off
 because they change the wire contract — AGENTS.md rule (d).
 
-**Honest non-goals.** Paseo capabilities that do not port to a Go daemon +
-web UI are listed in `audit-paseo.md` §10 with their closest web
+**Honest non-goals.** That workbench capabilities that do not port to a Go daemon +
+web UI are listed in `audit-workbench.md` §10 with their closest web
 equivalent: native mobile push (→ web Notifications, already present; Web
 Push only if asked), voice/dictation (→ dropped), in-app browser tab (→
 dropped), Electron window-chrome handling (→ Phase 4), the plugin system
@@ -53,12 +53,12 @@ item so several agents can work concurrently in separate worktrees; see
 
 - `web/packages/ui/src/index.css` gains a documented two-layer token set:
   a static palette layer and a semantic layer, following
-  `audit-deepseek-harness.md` §5's layering and `audit-paseo.md` §6's
+  `audit-agent-harness.md` §5's layering and `audit-workbench.md` §6's
   vocabulary. The semantic layer must at minimum add what smind has no
   token for today: `surface0..3`, `foreground-muted`,
   `status-{success,danger,warning,running}` for pills and a separate,
   higher-chroma `status-dot-*` family for dots (the reasoning is
-  `refs/paseo/docs/design.md` §13 — a 6px dot at pill chroma reads dimmer
+  a local reference clone §13 — a 6px dot at pill chroma reads dimmer
   than the text beside it, which is backwards).
 - A `useTheme` hook + provider persists `light | dark | system` to
   `localStorage`, resolves `system` via `prefers-color-scheme`, applies
@@ -66,13 +66,13 @@ item so several agents can work concurrently in separate worktrees; see
   `system`.
 - A synchronous inline script in `web/packages/ui/index.html` applies the
   stored preference **before first paint** — no flash of the wrong theme
-  (`audit-deepseek-harness.md` §5).
+  (`audit-agent-harness.md` §5).
 - Every existing pane renders correctly in dark: CodeMirror, diff2html and
   xterm all take their palette from the app tokens rather than their own
   defaults, so the three no longer disagree
   (`audit-smind-current.md` §6).
 - The stray chromatic `--sidebar-primary` in `.dark`
-  (`index.css:112`, flagged in `docs/research/uiux-audit.md` §2.5) is
+  (`index.css:112`, flagged in `docs/research/local/uiux-audit.md` §2.5) is
   resolved deliberately, not left as a shadcn leftover.
 - A theme control exists somewhere reachable (sidebar footer is fine
   until Item 13 lands a settings screen).
@@ -95,7 +95,7 @@ item so several agents can work concurrently in separate worktrees; see
   (§4 P1 item 8).
 - **Layout stability**: a surface whose state changes (skeleton → content,
   badge arriving, count resolving) must not move its neighbours. The
-  reserved-space rule from `refs/paseo/docs/design.md` §11 applies to at
+  reserved-space rule from a local reference clone §11 applies to at
   least the sidebar row and the run entry.
 - `docs/design.md` is written: token vocabulary, when to use which
   primitive, copy rules, state rules, and a canonical-surface table naming
@@ -123,10 +123,10 @@ item so several agents can work concurrently in separate worktrees; see
 *Track A. Depends on: Item 2 (dialog/primitives).*
 
 - A data-driven action registry (`keyboard/actions.ts` +
-  `keyboard/shortcuts.ts`) modelled on `audit-paseo.md` §7: each binding is
+  `keyboard/shortcuts.ts`) modelled on `audit-workbench.md` §7: each binding is
   `{id, section, label, combo, action}`, matched against a normalized key
   event, with platform variants (`Cmd` on mac, `Ctrl` elsewhere).
-- Initial bindings, chosen to match Paseo where the action exists:
+- Initial bindings, chosen to match the reference workbench where the action exists:
   `Cmd+B` toggle sidebar (already exists — moves into the registry),
   `Cmd+K` command palette (Item 5), `Cmd+L` focus composer,
   `Cmd+W` close current tab, `Cmd+Alt+<digit>` jump to tab,
@@ -142,12 +142,12 @@ item so several agents can work concurrently in separate worktrees; see
 *Track A. Depends on: Item 4.*
 
 - `Cmd+K` opens a searchable palette with contributions grouped by source,
-  following `audit-paseo.md` §7's command-center shape: tasks (switch to),
+  following `audit-workbench.md` §7's command-center shape: tasks (switch to),
   workspaces, actions (new task, new workspace, open accounts, toggle
   theme, open a tab kind), and files in the selected task's worktree.
 - Keyboard-only operation: type to filter, arrows to move, Enter to run,
   Escape to close returning focus to the previous element
-  (`audit-deepseek-harness.md` §6's focus rule).
+  (`audit-agent-harness.md` §6's focus rule).
 - Contributions are registered, not hardcoded in the palette component, so
   later items can add entries without editing it.
 
@@ -156,12 +156,12 @@ item so several agents can work concurrently in separate worktrees; see
 
 - The main content area supports **one split**: a primary pane and an
   optional side pane, resizable, persisted per task. This is the "side
-  dock" from `docs/research/dual-mode-ui.md` that ADR 0004's tab registry
+  dock" from `docs/research/local/dual-mode-ui.md` that ADR 0004's tab registry
   was the prerequisite for.
 - "Open to side" is available on file tabs, the diff tab and the terminal
   tab; a tab can be moved between panes; closing the last tab in the side
   pane removes it.
-- Placement follows `audit-paseo.md` §1's intent model, reduced to the two
+- Placement follows `audit-workbench.md` §1's intent model, reduced to the two
   cases smind needs: explicit "Open to side" moves the tab (`pane`);
   implicit opens (clicking a file in the tree, clicking a file path in a
   tool call) use `prefer` — they open in the side pane if one exists but
@@ -181,7 +181,7 @@ item so several agents can work concurrently in separate worktrees; see
 - `internal/taskrunner.Event` grows beyond its four types
   (`event.go:7-29`) to carry, at minimum: assistant text, user message,
   reasoning/thinking, and **tool call** (id, tool name, input, status,
-  result/error) — the subset of `audit-paseo.md` §2's seven-kind union
+  result/error) — the subset of `audit-workbench.md` §2's seven-kind union
   that both supported providers can actually produce. The data already
   exists upstream: `Event.Raw` holds the provider message
   (`claudecode.Message` / the ACP update) and is discarded at the wire
@@ -203,7 +203,7 @@ item so several agents can work concurrently in separate worktrees; see
   `react-markdown` + `remark-gfm`), reasoning (collapsed by default), tool
   call (Item 9), and terminal status.
 - Runs group into turns with a footer carrying elapsed time and a copy
-  action (`audit-paseo.md` §2).
+  action (`audit-workbench.md` §2).
 - **Auto-follow the tail**: the transcript sticks to the bottom while
   streaming and releases when the user scrolls up, with a "jump to latest"
   affordance — today there is no scroll handling at all
@@ -211,7 +211,7 @@ item so several agents can work concurrently in separate worktrees; see
 - Streaming performance: appending a chunk must not re-render the whole
   transcript. A long run (≥2000 items) stays interactive; measure and
   state the approach taken (windowing or memoized rows), following
-  `audit-deepseek-harness.md` §2's "streaming tail isolation".
+  `audit-agent-harness.md` §2's "streaming tail isolation".
 - Rendering is resilient to a malformed or unknown event type: it renders
   a fallback row, never throws.
 
@@ -219,7 +219,7 @@ item so several agents can work concurrently in separate worktrees; see
 *Track B. Depends on: Item 8.*
 
 - A registry keyed by **wire tool name** with a generic fallback card, per
-  `audit-deepseek-harness.md` §2 — adding a tool renderer must not require
+  `audit-agent-harness.md` §2 — adding a tool renderer must not require
   editing a central switch.
 - Shared render intents implemented at minimum for: `terminal` (command +
   output), `read` (path + range), `edit`/`write` (inline diff), `search`
@@ -230,7 +230,7 @@ item so several agents can work concurrently in separate worktrees; see
 - A tool call carrying a file path is click-through: it opens that file's
   tab (in the side pane if Item 6 has landed, using `prefer`).
 - A detail-level control (`detailed | overview`) collapses consecutive
-  tool calls into a group, matching `audit-paseo.md` §2's
+  tool calls into a group, matching `audit-workbench.md` §2's
   `toolCallDetailLevel`.
 
 ### Item 10 — Composer v2
@@ -238,7 +238,7 @@ item so several agents can work concurrently in separate worktrees; see
 
 - Multiline autogrowing textarea with Enter to send and Shift+Enter for a
   newline, capped in height then scrolling, IME-safe
-  (`audit-deepseek-harness.md` §2).
+  (`audit-agent-harness.md` §2).
 - A **composer toolbar** replaces the two bare `<select>`s: provider,
   approval policy, and (where `provider.list` can report them) model —
   as proper controls with labels, not unlabelled native selects.
@@ -246,7 +246,7 @@ item so several agents can work concurrently in separate worktrees; see
 - Stop/interrupt moves into the composer (today it is only on the run
   card) and is bound to `Escape` via Item 4.
 - A disabled composer states *why* in its placeholder rather than silently
-  greying out (`audit-deepseek-harness.md` §2's block contract): no
+  greying out (`audit-agent-harness.md` §2's block contract): no
   connection, no task selected, run in flight.
 - The empty state (no task selected) becomes a usable entry point rather
   than a dead-end sentence — at minimum "create a task here", reusing the
@@ -268,7 +268,7 @@ item so several agents can work concurrently in separate worktrees; see
   and activatable without a mouse.
 - A structured **question form** variant (multi-question, single/multi
   select, free-text "other", skip) per
-  `audit-deepseek-harness.md` §2, rendered when the request carries that
+  `audit-agent-harness.md` §2, rendered when the request carries that
   shape.
 - A **plan review** variant: plan rendered as markdown with
   `Chat about it / Refuse / Approve`.
@@ -285,9 +285,9 @@ item so several agents can work concurrently in separate worktrees; see
   reasons already exist (`error | finished | permission`,
   `hooks/use-task-attention.ts`) and today all render identically.
 - Workspace and space rows carry an aggregate status derived from their
-  tasks (`audit-paseo.md` §5's workspace status bucket).
+  tasks (`audit-workbench.md` §5's workspace status bucket).
 - A search/filter field over the tree, following
-  `audit-deepseek-harness.md` §3's collapsed-search interaction: a
+  `audit-agent-harness.md` §3's collapsed-search interaction: a
   non-blank query replaces the tree with a flat result list; an outside
   click collapses only an empty query.
 - Rows do not reflow when a badge or count arrives (Item 2's layout-stability
@@ -297,11 +297,11 @@ item so several agents can work concurrently in separate worktrees; see
 *Track D. Depends on: Items 1, 2. (Item 3 if settings gets its own route.)*
 
 - A settings surface with a section list, following
-  `audit-paseo.md` §4's list+detail shape. Sections are registered, not
+  `audit-workbench.md` §4's list+detail shape. Sections are registered, not
   hardcoded, so Items 14/15 add their own.
 - **Appearance** section ships with it: theme, interface font size,
   content font size, code font size (the three-size split from
-  `audit-paseo.md` §6 — it is the one that actually matters for an app
+  `audit-workbench.md` §6 — it is the one that actually matters for an app
   that mixes chat prose, UI chrome and code).
 - **General**: default provider and default approval policy for new runs,
   notification preference (moving the existing bell button's state here).
@@ -313,14 +313,14 @@ item so several agents can work concurrently in separate worktrees; see
 *Track D. Depends on: Item 2. Richer with Item 13.*
 
 - Account rows carry what an operator actually needs when a run dies,
-  following `audit-cliproxyapi.md` §2: `status` + `status_message`,
+  following `audit-proxy-project.md` §2: `status` + `status_message`,
   token expiry / last refresh, **`next_retry_after`** (when a
   rate-limited account recovers), and success/failure counters — each one
   gated on the daemon being able to report it; a field the daemon cannot
   supply is omitted, not faked.
 - The OAuth flow becomes a real state machine — start → show URL → poll
   status → **cancel** — rather than a fire-and-forget button
-  (`audit-cliproxyapi.md` §3).
+  (`audit-proxy-project.md` §3).
 - Per-account actions: disable/enable, remove, and a per-account label.
 - The `ProviderInfo.id` vs `accountProvider` seam and the CLI-only
   `xai`/`antigravity` providers (documented in `accounts-dialog.tsx` and
@@ -331,8 +331,8 @@ item so several agents can work concurrently in separate worktrees; see
 *Track D. Depends on: Item 14.*
 
 - Per-account quota and rolling-window usage rendered as bars, following
-  `audit-paseo.md` §4's provider-usage presentation over the data shape in
-  `audit-cliproxyapi.md` §2 (`quota`, `model_quotas`, `recent_requests`).
+  `audit-workbench.md` §4's provider-usage presentation over the data shape in
+  `audit-proxy-project.md` §2 (`quota`, `model_quotas`, `recent_requests`).
 - Gated on `internal/quota` being able to report it; if it cannot, this
   item reduces to a daemon-side scoping note and does not ship UI that
   invents numbers.
@@ -370,7 +370,7 @@ item so several agents can work concurrently in separate worktrees; see
 standalone if Item 5 slips.*
 
 - Fuzzy file search over the selected task's worktree, opening the match
-  as a file tab. Paseo binds this to `Cmd+P` (`audit-paseo.md` §7).
+  as a file tab. The reference workbench binds this to `Cmd+P` (`audit-workbench.md` §7).
 - Backed by `file.list` walking, or a new daemon-side search RPC if
   walking proves too slow — measure before adding an RPC.
 
@@ -381,7 +381,7 @@ standalone if Item 5 slips.*
   side-by-side / unified toggle.
 - Review comments: per-line draft comments held locally, submitted as a
   single prompt back to the agent — the mechanism
-  `docs/research/dual-mode-ui.md` recommended and `audit-paseo.md` §2
+  `docs/research/local/dual-mode-ui.md` recommended and `audit-workbench.md` §2
   implements as persisted review drafts. Draft state survives collapsing a
   file and switching tabs.
 - A diff stat (files / +lines / -lines) surfaced outside this pane, so the
@@ -394,7 +394,7 @@ standalone if Item 5 slips.*
 
 - More than one terminal per task, each its own tab.
 - An activity indicator on an inactive terminal tab
-  (`audit-paseo.md` §2).
+  (`audit-workbench.md` §2).
 - Scrollback size as a setting (Item 13) and a copy/paste affordance.
 - The existing detach-not-close contract is preserved, including the
   `interrupted` status path added by the daemon-restart work.
@@ -403,7 +403,7 @@ standalone if Item 5 slips.*
 *Track A. Depends on: Items 3, 6, 10.*
 
 - A compact layout below the existing 768px breakpoint, following
-  `audit-paseo.md` §8's model but implemented in CSS rather than gestures:
+  `audit-workbench.md` §8's model but implemented in CSS rather than gestures:
   three mutually exclusive destinations — task list, task pane, files —
   with one selection value so a panel and its backdrop can never disagree.
 - The composer, permission card and timeline are usable one-handed on a
@@ -673,15 +673,15 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
 
 ## Decisions
 
-- **Paseo is the north star; the others are consulted per dimension.**
-  Where they conflict, Paseo wins — it is the product being replaced
+- **That workbench is the north star; the others are consulted per dimension.**
+  Where they conflict, the reference workbench wins — it is the product being replaced
   (`docs/plans/active/smind-dogfood.md`). Two deliberate exceptions, both
   recorded in `gap-matrix.md`: tool-call rendering follows
-  deepseek-harness's **keyed-registry-by-wire-tool-name** shape (Paseo's
+  a reference agent harness's **keyed-registry-by-wire-tool-name** shape (the reference workbench's
   equivalent is more entangled with its provider layer), and account-row
-  richness follows **cliproxyapi**, which has by far the best credential
+  richness follows **A reference proxy project**, which has by far the best credential
   model of the three.
-- **No mode switch.** Re-affirming `docs/research/dual-mode-ui.md`: one
+- **No mode switch.** Re-affirming `docs/research/local/dual-mode-ui.md`: one
   task-scoped tabbed canvas, an attention rail, one optional side dock.
   Nothing in this plan introduces an "Agents mode" / "Editor mode" toggle.
 - **ADR 0004 (per-task tabs) and ADR 0006 (coarse commit flow) stand.**
@@ -703,7 +703,7 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
   item's test scenarios re-assert the ones it could plausibly break.
 - **Preferences are client-side until proven otherwise.** Item 13 persists
   to `localStorage` and says so. A daemon settings API (the
-  deepseek-harness model — `$DSH_HOME/settings.yaml` via a host RPC) is a
+  a reference agent harness model — `$DSH_HOME/settings.yaml` via a host RPC) is a
   reasonable later step but is not in scope here and should not be
   half-built.
 - **Subagents are deferred, not dropped.** smind has no subagent concept
@@ -712,9 +712,9 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
 - **Responsive work (Item 21) is scheduled, not optional.**
   `docs/plans/active/relay-e2ee-mobile.md` makes the daemon reachable from
   a phone; a desktop-only UI would waste that.
-- **Item 21's compact model is two destinations, not Paseo's three.**
-  `audit-paseo.md` §8 describes `agent-list` / `agent` / `file-explorer` as
-  three mutually exclusive top-level destinations because Paseo's file
+- **Item 21's compact model is two destinations, not that workbench's three.**
+  `audit-workbench.md` §8 describes `agent-list` / `agent` / `file-explorer` as
+  three mutually exclusive top-level destinations because the reference workbench's file
   explorer is its own screen. smind's Files pane is already one of a
   task's tabs (ADR 0004's tab registry, Item 17), not a sibling route —
   building a third top-level destination for it would duplicate
@@ -728,10 +728,10 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
 - **Performance is asserted, not assumed.** Item 8's long-run scenario and
   Item 18's measure-before-adding-an-RPC rule exist because both
   references treat streaming and diff performance as tracked concerns with
-  their own test suites (`refs/paseo/packages/app/e2e/browser/agent-stream-smoothness.spec.ts`,
+  their own test suites (a local reference clone,
   `diff-performance.spec.ts`).
 - **ARIA-tree snapshot testing is worth adopting** for the timeline and
-  permission surfaces (`audit-deepseek-harness.md` §7): assert the
+  permission surfaces (`audit-agent-harness.md` §7): assert the
   accessibility tree rather than the DOM, which keeps tests readable and
   keeps accessibility from silently regressing. Optional per item, not
   mandated.
@@ -762,13 +762,13 @@ this is the pointer:
 
 - **`surface-0..3` alias the existing static token scale** rather than a
   second independent set of hex values — the plan named the vocabulary
-  (`audit-paseo.md` §6) but not the implementation shape, and smind's
+  (`audit-workbench.md` §6) but not the implementation shape, and smind's
   existing background/card/muted/accent scale already satisfies the
   elevation need with no known contrast problems.
 - **`status-danger` aliases `--destructive`** rather than introducing a
-  second red — smind has exactly one flavor of "bad" today, unlike Paseo,
+  second red — smind has exactly one flavor of "bad" today, unlike the reference workbench,
   which distinguishes a PR/CI-state red from a destructive-action red.
-- **`status-running`'s hue is new**, since Paseo's own status-family text
+- **`status-running`'s hue is new**, since that workbench's own status-family text
   tier has no running color (only its dot tier does) and the plan asks
   for one at both tiers.
 - **`useTheme()` outside a `<ThemeProvider>` returns a fully-functional,
@@ -911,7 +911,7 @@ this is the pointer:
   switching tabs *unmounts the diff pane* (App.tsx's Radix Tabs don't
   force-mount inactive content), so component state couldn't satisfy it
   by construction. Persisting gets survival across a reload for free, and
-  matches Paseo's own persisted review drafts (`audit-paseo.md` §2) and
+  matches the reference workbench's own persisted review drafts (`audit-workbench.md` §2) and
   the plan's "preferences are client-side" stance.
 - **Submitting starts a run with the daemon's first reported provider**,
   with no provider control of its own. The daemon-derived provider list
@@ -1045,9 +1045,9 @@ while backgrounded, and Items 4/5 should replace the local
 
 Phase 1 (research + plan) — this commit:
 
-- [x] Audit paseo (`ui-redesign-parity/audit-paseo.md`)
-- [x] Audit deepseek-harness (`ui-redesign-parity/audit-deepseek-harness.md`)
-- [x] Audit cliproxyapi (`ui-redesign-parity/audit-cliproxyapi.md`)
+- [x] Audit the reference workbench (`ui-redesign-parity/audit-workbench.md`)
+- [x] Audit a reference agent harness (`ui-redesign-parity/audit-agent-harness.md`)
+- [x] Audit a reference proxy project (`ui-redesign-parity/audit-proxy-project.md`)
 - [x] Audit smind current (`ui-redesign-parity/audit-smind-current.md`)
 - [x] Gap matrix + top-10 (`ui-redesign-parity/gap-matrix.md`)
 - [x] Plan doc with items, tracks and dependencies (this file)
@@ -1089,21 +1089,19 @@ Phase 2 (implementation) — not started:
 
 Phase 1 (research) — what was and wasn't actually done:
 
-- **Paseo** audited from source: `refs/paseo/docs/{product,design,glossary,
-  explorer-sidebar,mobile-panels,agent-lifecycle,hub}.md` read in full,
-  plus `packages/app/src/{app,screens,navigation,workspace-tabs,composer,
-  agent-stream,tool-calls,timeline,keyboard,command-center,styles,
-  panels,hooks/use-settings}` read directly, and the ~180 e2e spec
+- **That workbench** audited from source: a local reference clone (its design docs read in full,
+  plus its app source for navigation, tabs, composer, stream, tool calls,
+  timeline, keyboard, command center, styles, panels and settings hooks read directly), and the ~180 e2e spec
   filenames under `packages/app/e2e/browser/` used as a feature inventory.
   The 4.4k-line `workspace-screen.tsx` was read for its imports and
   structure, not line by line — stated here rather than implied.
-- **deepseek-harness** audited primarily from the `ui-*` package READMEs
-  under `refs/deepseek-harness/packages/client/`, which are precise
+- **A reference agent harness** audited primarily from the `ui-*` package READMEs
+  under a local reference clone, which are precise
   behavioural specs, cross-checked against the e2e test names and ARIA
-  snapshots under `refs/deepseek-harness/apps/web/tests/`. Component
+  snapshots under a local reference clone. Component
   source was not read; the READMEs are the better source and this is
   noted in the audit.
-- **cliproxyapi**: the management UI source is **not in `refs/`** — it is a
+- **A reference proxy project**: the management UI source is **not in `refs/`** — it is a
   runtime-downloaded `management.html` from a separate repo
   (`internal/managementasset/updater.go:29-36`). The audit is derived from
   the management API it is built against
@@ -1338,9 +1336,9 @@ task's branch and diff size (new `task.stats` RPC,
 `taskDiffStat`, `hooks/use-task-stats.ts`), falling back to the task's
 lifecycle status when no stat is available -- never a fabricated zero.
 Workspace and space rows carry an `aggregateStatus` derived from their
-tasks (`audit-paseo.md` §5's workspace status bucket), the single loudest
+tasks (`audit-workbench.md` §5's workspace status bucket), the single loudest
 signal below a collapsed container. A collapsed-search field
-(`audit-deepseek-harness.md` §3) replaces the tree with a flat
+(`audit-agent-harness.md` §3) replaces the tree with a flat
 `searchTasks` result list on a non-blank query; an outside click
 collapses the field only while it's empty.
 
@@ -1400,7 +1398,7 @@ instead of being threaded as props through
 
 A settings shell (`components/settings/settings-screen.tsx`) with a
 section list down the left and the active section's content on the
-right (`audit-paseo.md` §4's list+detail shape). Sections are registered
+right (`audit-workbench.md` §4's list+detail shape). Sections are registered
 through a plain module-level registry
 (`components/settings/settings-registry.ts`'s `registerSettingsSection`/
 `listSettingsSections`), not hardcoded into the shell -- `appearance-
@@ -1409,7 +1407,7 @@ import time, and Items 14/15 (accounts, quota) are expected to do the
 same from their own files.
 
 Appearance ships with theme (reusing Item 1's `useTheme`) and the
-interface/content/code font-size split (`audit-paseo.md` §6), persisted
+interface/content/code font-size split (`audit-workbench.md` §6), persisted
 via new `lib/settings-preferences.ts` (localStorage, same defensive
 per-key read/write shape as `lib/theme.ts`) and applied as
 `--font-scale-*` CSS custom properties (`index.css`). Only
@@ -1522,9 +1520,9 @@ Per the item's own acceptance criteria ("each one gated on the daemon
 being able to report it; a field the daemon cannot supply is omitted, not
 faked"), the honest scope for a Track D, UI-only pass (no wire change,
 AGENTS.md rule (d)) is smaller than the full row model
-`audit-cliproxyapi.md` §2 describes:
+`audit-proxy-project.md` §2 describes:
 
-- **Shipped**: the OAuth flow's missing half of `audit-cliproxyapi.md`
+- **Shipped**: the OAuth flow's missing half of `audit-proxy-project.md`
   §3's state machine -- **cancel**. `account.oauthStart` already blocks
   on a single request id rather than exposing a separate poll/status RPC,
   but request-id cancellation is already generic at the wire layer
@@ -1691,7 +1689,7 @@ old task-status-only `SetTaskNotifier`).
   `TimelineMarkdown` from Item 8) with `Chat about it / Refuse / Approve`.
   Chat does not resolve the request at all — it moves focus into the
   composer (via a forwarded textarea ref) so the human can keep talking
-  while the request stays pending, matching Paseo's own behaviour for
+  while the request stays pending, matching the reference workbench's own behaviour for
   that action.
 - **Dispatch is by shape**, tested explicitly: `plan` wins over
   `questions` (both present renders the plan), an empty `questions: []`
@@ -2450,7 +2448,7 @@ Every acceptance criterion, and how it was confirmed:
   isolation: no-match returns null (not a low score), substring beats
   subsequence, start-of-filename beats mid-filename, and the highlighted-
   index output the dialog renders.
-- **Bound to Cmd+P (mac) / Ctrl+P (elsewhere), matching Paseo** —
+- **Bound to Cmd+P (mac) / Ctrl+P (elsewhere), matching the reference workbench** —
   `hooks/use-quick-open-shortcut.ts`, a local `document`-level listener
   rather than a global registry entry (Item 4 hasn't landed — see
   Decisions and the Track A hook note above).

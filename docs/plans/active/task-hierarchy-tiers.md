@@ -1,13 +1,13 @@
 # Task hierarchy tiers (supervisor → leader → coder), made visible and manageable
 
-**Question (2026-10-11):** does smind now manage tasks like Paseo, but with
+**Question (2026-10-11):** does smind now manage tasks like a reference workbench, but with
 *clearer layering*? The user runs a 3-tier workflow every day (a supervisor,
-then leaders, then coders). On Paseo the sub-agents are shown mostly flat,
-with only a `paseo.parent-agent-id` label. smind should make the tiers
+then leaders, then coders). On a reference workbench the sub-agents are shown mostly flat,
+with only a `reference.parent-agent-id` label. smind should make the tiers
 obvious and manageable.
 
 **Short answer:** the *data model and daemon guards* are already ahead of
-Paseo (a real `tasks.parent_task_id`, a depth guard, MCP/CLI parenting).
+a reference workbench (a real `tasks.parent_task_id`, a depth guard, MCP/CLI parenting).
 The *surface* is not: the web UI has no hierarchy at all, there is no
 tree/rollup read API, and the per-tree concurrency guard promised by O2
 Wave 2 was never built. This plan lists every gap, builds the ones that need
@@ -17,9 +17,9 @@ Sources: `origin/develop` 17d0c6a (`internal/store/tasks.go`,
 `internal/workspace/task.go`, `internal/runs/{registry,queue}.go`,
 `internal/wsapi/handlers.go`, `cmd/smind/mcp*.go`,
 `web/packages/ui/src/{components/app-sidebar.tsx,components/task-detail.tsx,
-lib/workspace-tree.ts,hooks/use-task-attention.ts}`); Paseo's live MCP
+lib/workspace-tree.ts,hooks/use-task-attention.ts}`); a reference workbench's live MCP
 `list_agents` output (flat; the only link is the label
-`paseo.parent-agent-id`); `refs/paseo/packages/app/src/subagents/*`
+`reference.parent-agent-id`); a local reference clone
 (`select.ts`, `track-presentation.ts`, `archive-finished.ts`); and
 [orchestration-and-metering.md](orchestration-and-metering.md) §O2.
 
@@ -48,7 +48,7 @@ lib/workspace-tree.ts,hooks/use-task-attention.ts}`); Paseo's live MCP
 Effort: XS < ½ day, S ≈ 1 day, M 2–3 days (GLM coder time, with tests).
 "Decision" = needs the user's call (AGENTS.md rule d).
 
-| # | Capability | Paseo (live / `refs/paseo`) | smind today | Gap | Pri | Effort | Decision? |
+| # | Capability | A reference workbench (live / a local reference clone) | smind today | Gap | Pri | Effort | Decision? |
 |---|---|---|---|---|---|---|---|
 | H1 | Children nested under parent in the sidebar | Flat list; sub-agents live in a composer "track pill" + a sub-agent list on the parent (`subagents/select.ts`), not in the sidebar | Flat per space; no `ParentTaskID` in the TS type | Build the nesting, collapse, depth indent, tier styling | P0 | M | No |
 | H2 | Attention rollup on a collapsed parent | Pill lists per-state counts, "no mark for done" (`track-presentation.ts`) | Workspace/space rows have an aggregate dot; a task row has its own dot only | A child that needs a permission / failed / finished-unread must bubble to its collapsed parent | P0 | S | No |
@@ -307,11 +307,11 @@ decisions 0 (user approved 2026-10-18; shape below), verify 2 (screenshots +
 live daemon).
 
 Quoting §6.2 (the approval's basis): "an explicit 'Archive finished
-descendants' action (Paseo's `archive-finished` model: finished only, never
+descendants' action (a reference workbench's `archive-finished` model: finished only, never
 running, never silent) and a 'Stop all runs in this tree' action.
 Recommendation: build those two as explicit buttons later, not a cascade on
 archive." §3.3 stays true: `task.archive` itself still never cascades.
-Reference pattern: `refs/paseo/packages/app/src/subagents/archive-finished.ts`
+Reference pattern: a local reference clone
 (explicit action over a snapshot of *finished-only* rows, per-row guard
 re-check at execution time, per-row failure collection, retry only on
 still-eligible failures).
@@ -477,7 +477,7 @@ dialogs' counts equal the server selection and both actions work end to end.
 1. **Role/tier field — recommendation: derive, don't add one.** The three
    tiers are derivable from structure (§3.1), so no column is needed for the
    UI or for `task_tree`. Known limitation: if the supervisor is *not* a
-   smind task (it is your own Claude/Paseo session), the leaders are roots
+   smind task (it is your own Claude/Reference session), the leaders are roots
    with children and would be labelled "supervisor", and the coders
    "leader"/"coder" by their own position. If that is your normal setup,
    say so and the fix is a *display* setting (names per depth: e.g. depth
@@ -490,7 +490,7 @@ dialogs' counts equal the server selection and both actions work end to end.
    in PR-H11 (§5).* Archiving
    checkpoint-commits the worktree but drops ignored files (`.env`,
    `node_modules`), so an unconfirmed cascade can lose work. If you want it:
-   an explicit "Archive finished descendants" action (Paseo's
+   an explicit "Archive finished descendants" action (a reference workbench's
    `archive-finished` model: finished only, never running, never silent) and
    a "Stop all runs in this tree" action. Recommendation: build those two
    as explicit buttons later, not a cascade on archive.

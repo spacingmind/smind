@@ -33,9 +33,9 @@ How the references handle a message to a busy agent (verified
 
 | Project | Behavior | Durable? |
 |---|---|---|
-| Paseo | Replaces: cancels the running turn and starts the new prompt (`agent-prompt.ts:306-335`); optional provider steering | nothing queued |
+| A reference workbench | Replaces: cancels the running turn and starts the new prompt (`agent-prompt.ts:306-335`); optional provider steering | nothing queued |
 | Codex v2 | Mailbox with `send_message` = QueueOnly and `followup_task` = TriggerTurn (`multi_agents_v2/message_tool.rs`) | pending queue in memory only |
-| dsh | FIFO Agent inbox; `interrupt()` keeps the inbox (`docs/subsystems/subagent.md:138-144`) | yes |
+| A reference agent harness | FIFO Agent inbox; `interrupt()` keeps the inbox (`docs/subsystems/subagent.md:138-144`) | yes |
 | Claude Code | File-backed teammate inbox; refuses bursts beyond capacity (CHANGELOG) | yes |
 
 ## Decision
@@ -88,7 +88,7 @@ How the references handle a message to a busy agent (verified
    (ADR-0017).
 5. **After a daemon restart the queue keeps delivering** (user,
    2026-10-10). Queued items survive the restart. This is the reliability
-   lesson from Paseo's restart data loss.
+   lesson from a reference workbench's restart data loss.
    - Once `runs.New` has reconciled `running` rows to `interrupted`, the
      daemon delivers the oldest `queued` item of every chat that has one,
      through the same path as decision 3. The interrupted run is not
@@ -129,11 +129,11 @@ How the references handle a message to a busy agent (verified
 
 ## Alternatives considered
 
-- **Paseo's replace-by-default.** Rejected as the default, because it
+- **A reference workbench's replace-by-default.** Rejected as the default, because it
   silently throws away the running turn's in-flight work. It remains
   available explicitly as `interrupt`.
 - **An in-memory mailbox (Codex).** Rejected. A daemon restart would lose
-  undelivered escalations, which is exactly the Paseo reliability failure
+  undelivered escalations, which is exactly the reference workbench reliability failure
   smind is designed against.
 - **A separate inbox entity, distinct from the prompt path.** Rejected.
   It would be two delivery mechanisms with the same semantics. In smind,
@@ -149,7 +149,7 @@ One primitive covers both SLP needs. Peer→lead escalation is `queue`,
 and a human redirect is `interrupt` on top of session resume. It also
 fixes an existing product gap: queued follow-ups that only exist in one
 browser tab. Persisting the queue and pausing it after a restart puts the
-two failure modes the other way around from Paseo: nothing is lost, and
+two failure modes the other way around from a reference workbench: nothing is lost, and
 nothing runs unattended by surprise. The wire stays backward compatible
 because `reject` is the default and the new result shape needs an opt-in
 field.

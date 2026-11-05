@@ -5,7 +5,7 @@
 // empty daemon renders an honest empty state; a call failure shows the error
 // with a retry. Tapping a task hands off to the task detail screen.
 //
-// The ZCode-look list (mobile-zcode-redesign M3): ONE virtualized FlatList
+// The reference-look list (mobile-reference-redesign M3): ONE virtualized FlatList
 // (vercel-react-native-skills) whose data is flattened by taskListItems --
 // section headers, memoised rows grouped into one card per section, and
 // per-section empties. Tasks are sorted attention-first via a live

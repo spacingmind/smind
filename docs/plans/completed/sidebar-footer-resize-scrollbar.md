@@ -6,22 +6,22 @@ judgement calls are recorded below), verification 2 (screenshots + frames).
 Web UI only; no daemon/Go change.
 
 Human ask (2026-10-12): "polish smind UI: settings pushed to the bottom of the
-sidebar like Paseo (add project, usage, host, help & support, settings) and
-ZCode (user name, mobile control, settings); the resize-by-mouse / toggle
+sidebar like a reference workbench (add project, usage, host, help & support, settings) and
+a reference desktop workbench (user name, mobile control, settings); the resize-by-mouse / toggle
 animation is bad -- check refs and follow them, keep it simple; custom
 scrollbars to match."
 
-Sources (read, not copied): Paseo `packages/app/src/components/left-sidebar.tsx`
+Sources (read, not copied): a reference workbench `packages/app/src/components/left-sidebar.tsx`
 (`SidebarFooter`: one icon line, `border-t`; `SidebarHelpMenu`; `SidebarHostPicker`;
 footer *rows* slot above the line used by Usage/plugins),
 `sidebar-resize-handle.tsx` (direct width tracking, no transition while dragging,
-hover highlight after 100ms); ZCode `WorkspaceSidebarFooter.tsx` (profile row →
+hover highlight after 100ms); a reference desktop workbench `WorkspaceSidebarFooter.tsx` (profile row →
 menu with theme etc. + settings icon), `app-shell/WorkspaceShellLayout.tsx`
 (width in a CSS var written straight to the DOM during drag, React state
 committed on release, `transition-[width,opacity] duration-200 ease-out` on the
 panel switched off by a `data-…-resizing` attribute while dragging, pointer
 capture, keyboard ±step/Home/End), `styles.css` (global themed scrollbar,
-transparent track, rounded thumb), Paseo `styles/web-scrollbar.ts` (8px,
+transparent track, rounded thumb), a reference workbench `styles/web-scrollbar.ts` (8px,
 resting opacity 0.4).
 
 Out of scope: the Usage plan modal / footer usage summary (ADR-0028 PR-D1/D2 —
@@ -37,16 +37,16 @@ frame. The shadcn Sidebar's gap + `position: fixed` container both carry
 `transition-[width] duration-200 ease-linear`, so during a drag the pointer
 and the visible sidebar are 200ms apart (rubber-band lag), and a toggle snaps
 the Panel instantly while the sidebar content animates linearly — the two
-disagree. Fix = ZCode's model: one panel box, width from a CSS var, no
+disagree. Fix = a reference desktop workbench's model: one panel box, width from a CSS var, no
 transition during drag, one ease-out transition on toggle.
 
 ## Decisions
 
-- **D1 Footer layout (Paseo icon line + ZCode-style status).** A footer
+- **D1 Footer layout (a reference workbench icon line + reference-style status).** A footer
   region with `border-t`: an optional **rows slot** (empty for now; the
   registry hook ADR-0028 D1/D2 will fill with the footer Usage summary,
   default off) above **one icon line**: `Add workspace · Usage · Host` … spacer
-  … `Help · Settings`. Expanded sidebar = icon line with tooltips (Paseo).
+  … `Help · Settings`. Expanded sidebar = icon line with tooltips (a reference workbench).
   Collapsed 48px rail = same actions as a vertical icon stack.
 - **D2 Providers/Agents rows are folded into the Host popover**, not kept as
   rows: the Host button (Server icon, status dot = connection state, worst of
@@ -56,12 +56,12 @@ transition during drag, one ease-out transition on toggle.
   Daemon server* (→ Settings sections `daemon`/`connections`, which only exist
   on desktop). Both stay reachable in one click and via the palette
   ("Settings: Providers/Agents" already exist). Rationale: they were two
-  full-width rows of low-frequency info; the icon line is the Paseo shape and
-  Host is the nearest real analogue of Paseo's Hosts button. Providers health
+  full-width rows of low-frequency info; the icon line is the reference workbench shape and
+  Host is the nearest real analogue of a reference workbench's Hosts button. Providers health
   fetch (`provider.list`) stays where it is.
 - **D3 Usage** opens the plan-usage modal (`openUsageModal()`, ADR-0028 PR-D1, merged
   after this plan was written; originally Settings → Usage). No footer percentages (ADR-0028 D5: off by default).
-- **D4 Help & support** = dropdown (Paseo `SidebarHelpMenu`): Keyboard shortcuts
+- **D4 Help & support** = dropdown (a reference workbench `SidebarHelpMenu`): Keyboard shortcuts
   (→ Settings → Shortcuts, same as `shortcuts.help`), Command palette,
   Documentation (repo README on GitHub), Report an issue (GitHub issues).
   External URLs open via the platform's existing external-link helper if there
@@ -74,9 +74,9 @@ transition during drag, one ease-out transition on toggle.
   the full control. Header keeps only logo + wordmark (+ traffic-light inset on
   macOS desktop).
 - **D6 "+" in the Workspaces group header stays** (it is the contextual create
-  affordance next to the list) **and** the footer gets Add workspace (Paseo
+  affordance next to the list) **and** the footer gets Add workspace (a reference workbench
   parity); both open the same `CreateWorkspaceDialog`.
-- **D7 Resize = ZCode's custom split**, replacing `react-resizable-panels` for
+- **D7 Resize = a reference desktop workbench's custom split**, replacing `react-resizable-panels` for
   the *sidebar split only* (the task-pane splits keep it). Collapse target
   stays the 48px icon rail (smind's existing feature), not 0. Snap-to-collapse:
   releasing a drag whose raw width is below `SIDEBAR_SNAP_WIDTH` (144px)

@@ -1,13 +1,13 @@
-# Model/profile picker — parity with Paseo
+# Model/profile picker — parity with a reference workbench
 
 **Ask (2026-10-12, pre-v0.11 polish):** "Cái select model/profile vẫn chưa tối ưu,
-đọc refs paseo." The combined picker from PR #303
+đọc refs the reference workbench." The combined picker from PR #303
 ([composer-combined-model-picker](composer-combined-model-picker.md)) was a
 *partial* port: the pure logic came over, the interaction details and visuals
-did not. This plan lists every difference found reading Paseo end to end, then
+did not. This plan lists every difference found reading that workbench end to end, then
 ports the ones that apply.
 
-**Size:** M. **Sources** (`refs/paseo/packages/app/src/`, read at `8d9e7d3a`):
+**Size:** M. **Sources**:
 `components/model-browser.tsx` (1723 l), `components/model-browser-view.ts`,
 `components/combined-model-selector.tsx`,
 `composer/agent-controls/{index,control,glyph,layout,model-sheet,model-sheet-flow,model-loading,utils}`,
@@ -19,20 +19,20 @@ smind files: `components/composer/model-picker.tsx`, `lib/model-browser.ts`,
 `components/composer/run-config-toolbar.tsx` (`RunConfigToolbarModelPicker`),
 `components/settings/profiles-section.tsx`.
 
-## Gap analysis (Paseo → smind)
+## Gap analysis (the reference workbench → smind)
 
 Legend: **PORT** = in scope, **KEEP** = smind semantics win, **DEFER** = out of
 scope with the reason.
 
 ### Behaviour
 
-| # | Paseo | smind today | Verdict |
+| # | The reference workbench | smind today | Verdict |
 |---|-------|-------------|---------|
-| G1 | Opens on the selected provider's view (`resolveInitialModelBrowserView`). In Paseo the `hasProfiles → root` rule wins first; smind ported it verbatim, so **any user with a profile (the ★ default seeds one) always lands on the root**, and `selectedModel.length > 0` is required, so the *default model* (`""`, ADR-0025) also lands on the root. | root whenever profiles exist or model is `""` | **PORT, adapted**: open on the current provider's view whenever the provider exists (default model included); the provider view lists *that provider's* profiles (G2) and Back reaches every profile. Supervisor-requested deviation from Paseo's `hasProfiles` rule. |
-| G2 | Provider view = header + profile rows of that provider (tinted, above the models) + models. Empty profile list → muted "Create profile" row. Profiles hidden while searching. | provider profiles + "No agent" + "Manage agents…" row, then a "Models" heading | **PORT** layout (tinted section, pencil in the heading, "Create profile" empty row); **KEEP** "No agent" (detach) and the ✓ + `custom` badge on the applied profile (Paseo's profile rows are one-shot actions, smind's are bound — ADR-0014). |
+| G1 | Opens on the selected provider's view (`resolveInitialModelBrowserView`). In that workbench the `hasProfiles → root` rule wins first; smind ported it verbatim, so **any user with a profile (the ★ default seeds one) always lands on the root**, and `selectedModel.length > 0` is required, so the *default model* (`""`, ADR-0025) also lands on the root. | root whenever profiles exist or model is `""` | **PORT, adapted**: open on the current provider's view whenever the provider exists (default model included); the provider view lists *that provider's* profiles (G2) and Back reaches every profile. Supervisor-requested deviation from the reference workbench's `hasProfiles` rule. |
+| G2 | Provider view = header + profile rows of that provider (tinted, above the models) + models. Empty profile list → muted "Create profile" row. Profiles hidden while searching. | provider profiles + "No agent" + "Manage agents…" row, then a "Models" heading | **PORT** layout (tinted section, pencil in the heading, "Create profile" empty row); **KEEP** "No agent" (detach) and the ✓ + `custom` badge on the applied profile (the reference workbench's profile rows are one-shot actions, smind's are bound — ADR-0014). |
 | G3 | Profiles **grouped by provider+model** (`groupProfilesByProviderModel`) and shown on the model rows they use: hover (always visible on touch) action on a model row — **+ create profile from this model** (seed `{provider, modelId, name: modelLabel}`), one profile → its glyph → **edit it**, several → glyph → profiles list. | helper ported, never used; model rows have no profile affordance | **PORT.** Create/edit land in Settings → Agents with the inline form opened (prefilled seed / that profile). The seed of the *currently selected* model row also carries the live mode/autoAccept/thinking ("create profile from the current selection"). |
-| G4 | Profile glyph (`AgentProfileGlyph`: stored icon key + identity colour, default ★) leading every profile row and the row action. | no glyph | **PORT** the glyph slot with Paseo's default. **DEFER** per-profile icon/colour: smind's `AgentProfile` has neither field (store + wire change → ADR). |
-| G5 | Provider glyph (`useProviderIcon`: Claude/Codex SVG marks, `Bot` fallback) on provider rows, the provider header, model rows, and the trigger. | none (trigger uses a generic terminal icon) | **PORT** Claude + Codex marks, `Bot` fallback (what Paseo does for providers without a mark: GLM, Kimi). |
+| G4 | Profile glyph (`AgentProfileGlyph`: stored icon key + identity colour, default ★) leading every profile row and the row action. | no glyph | **PORT** the glyph slot with that workbench's default. **DEFER** per-profile icon/colour: smind's `AgentProfile` has neither field (store + wire change → ADR). |
+| G5 | Provider glyph (`useProviderIcon`: Claude/Codex SVG marks, `Bot` fallback) on provider rows, the provider header, model rows, and the trigger. | none (trigger uses a generic terminal icon) | **PORT** Claude + Codex marks, `Bot` fallback (what the reference workbench does for providers without a mark: GLM, Kimi). |
 | G6 | Provider header: glyph (foreground) + title + back + **settings icon** (opens that provider's settings). | back + title | **PORT**: gear opens Settings → Providers. |
 | G7 | Desktop popover height **sized to content**: `clamp(220, 80 + n·40, 400)`, `n` = models in the view (all rows at the root). | fixed `min(26rem, avail)` → big empty area under 3 models | **PORT** (`resolveDesktopFixedHeight`, unit-tested), capped by Radix available height. |
 | G8 | Row anatomy: 16px leading glyph · label · **description inline** (baseline, muted, truncated) · 16px check slot. Provider row: glyph · label · `N models` / spinner `Loading…` / ⚠ `Error` · chevron, hairline separators. | two-line stacked rows, no leading glyph | **PORT** (rows become ~36px, which is what G7's `40px/row` assumes). smind extra kept: unhealthy provider reason in the trailing slot, disabled. |
@@ -44,7 +44,7 @@ scope with the reason.
 | G14 | Compact sheet: search is **not** auto-focused (keyboard would cover the list); focusing it with an empty query shows **all model rows** (`searchAllOnFocus`); desktop popover autofocuses and keeps the browse root. | `autoFocus` always (mobile keyboard pops over the sheet); `isSearchFocused` hard-wired `false` | **PORT.** Rows `preventDefault` on pointer-down so tapping a row while the input is focused does not blur → re-render → lose the click. |
 | G15 | Provider row count = `rows.length`. | counts the synthetic "Default model" row too ("GLM: 3 models" for 2 real) | **PORT, adapted**: count real models; only-default → "Default model". |
 | G16 | Model description = `model.description ?? model.id`. | same | already equal |
-| G17 | Compact sheet 80–90% snap, flexible viewport, 44px rows. | `h-[75vh]`, 36px rows | **PORT** height 80dvh and 44px row hit target `< md`. (Paseo's two-step sheet — settings list that pushes the browser — is **DEFER**: smind's thinking/permission are separate pills.) |
+| G17 | Compact sheet 80–90% snap, flexible viewport, 44px rows. | `h-[75vh]`, 36px rows | **PORT** height 80dvh and 44px row hit target `< md`. (the reference workbench's two-step sheet — settings list that pushes the browser — is **DEFER**: smind's thinking/permission are separate pills.) |
 | G18 | Keyboard: none (React Native). | ↑/↓/Enter/←/Backspace/Esc | **KEEP** (AC10 of #303); new rows (profile action buttons) stay out of the arrow walk. |
 | G19 | Profiles are actions, no ✓. | ✓ + `custom` for the applied profile; "No agent" | **KEEP** (ADR-0014 bound agent). |
 | G20 | ADR-0019 mode reset on provider switch, ADR-0025 default model, bound chat, health-disabled provider | implemented | **KEEP**, unchanged. |
@@ -64,7 +64,7 @@ scope with the reason.
    mechanism as the existing event).
 3. Per-profile icon/colour and a Retry-provider RPC are deliberately not built
    (data-model / API surface → AGENTS rule d).
-4. Deviation from Paseo's `hasProfiles → root`: see G1.
+4. Deviation from that workbench's `hasProfiles → root`: see G1.
 
 ## Acceptance criteria
 
@@ -176,7 +176,7 @@ scope with the reason.
 
 ## Validation
 
-Verified 2026-10-12 on `fix/model-picker-paseo-parity` rebased on `origin/develop`
+Verified 2026-10-12 on `fix/model-picker-reference-parity` rebased on `origin/develop`
 (`594f3725`).
 
 - AC1-AC13: `lib/text-match.test.ts`, `lib/model-browser.test.ts`,
@@ -195,6 +195,6 @@ Verified 2026-10-12 on `fix/model-picker-paseo-parity` rebased on `origin/develo
   Agents with the form seeded, narrow sheet.
 - Not verified: Windows/desktop shell, a real phone keyboard, screen readers.
 - Residual: no per-profile icon/colour (store + wire change), no per-provider
-  Retry, Paseo's two-step compact sheet and toolbar density rules not ported
+  Retry, the reference workbench's two-step compact sheet and toolbar density rules not ported
   (see the gap table), tab-only keyboard path to "create profile from this
   model" (the pencil reaches Settings → Agents instead).

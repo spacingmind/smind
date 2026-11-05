@@ -4,7 +4,7 @@ Size: L (7) — scope 2, PRs 2, risk 1, decisions 1, verify 1
 
 Two human-only actions on a task's branch: **Push** ("Publish branch" when there is no upstream) and **Update from `<base>`**
 (merge `origin/<base>` into the task branch; rebase only as an explicit secondary option). Binding design: ADR-0039 §3–§6, §8, §11.
-Research: local-only `git-github-ux.md` G7/G5/G16, Paseo `policy.ts` (action ladder), ZCode `GitActionMenu` push card.
+Research: local-only `git-github-ux.md` G7/G5/G16, a reference workbench `policy.ts` (action ladder), a reference desktop workbench `GitActionMenu` push card.
 
 ## Decisions (made by the Supervisor; the Human may veto)
 

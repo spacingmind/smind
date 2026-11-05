@@ -19,7 +19,7 @@ Apache License, Version 2.0:
     implied. See the License for the specific language governing
     permissions and limitations under the License.
 
-Per the zcode-visual-parity plan (docs/plans/completed/), ZCode's look —
+Per the reference-visual-parity plan (docs/plans/completed/), ZCode's look —
 tokens, typography scale, spacing, radii, shadows — is adopted as
 smind's visual design system, no ZCode logos, names, or other branding
 included. This is a notice of derivation under Apache-2.0 §4(d), not a
@@ -38,7 +38,7 @@ Derived material, by file:
   `.theme-zai-dark`/`@theme` blocks). Values only — no ZCode source code
   structure, comments, or file layout was copied.
 
-This section is updated as later phases of the zcode-visual-parity plan
+This section is updated as later phases of the reference-visual-parity plan
 port additional ZCode-derived component structure or CSS.
 
 ---

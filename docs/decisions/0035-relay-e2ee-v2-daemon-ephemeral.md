@@ -31,7 +31,7 @@ deliberately untouched (`TestE2EECoreUnchanged`). 0.12.0 clients cannot connect 
 Reference points: **Noise `NK`** (`← s` pre-message; `→ e, es`; `← e, ee`) is exactly the shape we need: the initiator is
 anonymous, the responder is authenticated by a key the initiator already knows (the pairing offer), both contribute an
 ephemeral. libsignal's X3DH/PQXDH likewise mixes `DH(ephemeral, signed prekey)` with further ephemeral DHs, never a single
-static-only DH. `refs/paseo` (`SECURITY.md`, `packages/relay/src/crypto.ts`) uses NaCl `box` with an ephemeral phone key and
+static-only DH. A local reference clone (`SECURITY.md`, `packages/relay/src/crypto.ts`) uses NaCl `box` with an ephemeral phone key and
 the daemon's static key — the same construction as our v1, with random 24-byte nonces so it does not share the nonce-reuse
 property, but it has no daemon ephemeral and no replay protection within a session; there is nothing there to port. We
 follow Noise NK's structure.

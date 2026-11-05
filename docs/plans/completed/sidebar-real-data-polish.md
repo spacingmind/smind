@@ -15,7 +15,7 @@ PR.
    the inner `ScrollArea` never got a bounded height. Fix: `SidebarContent`
    becomes `overflow-hidden`, the group/content chain is `min-h-0 flex-1`, and
    the Radix `ScrollArea` is the only scroller. Workspace headers are
-   `sticky top-0`, space/ungrouped headers `sticky top-8` (ZCode's sticky group
+   `sticky top-0`, space/ungrouped headers `sticky top-8` (a reference desktop workbench's sticky group
    headers); each is bounded by its own `li`.
 2. **Indentation ate the title.** Space/ungrouped content carried a second
    ~21px guide line at ≥14rem, every root reserved a 12px chevron gutter, rows

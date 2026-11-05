@@ -24,7 +24,7 @@ export interface ToolRenderer {
 /**
  * The registry, keyed by **wire tool name** across both vocabularies
  * (Claude's `Bash`/`Read`/…, ACP's `execute`/`read`/…), following
- * `audit-deepseek-harness.md` §2.
+ * `audit-agent-harness.md` §2.
  *
  * Adding a renderer is a `registerToolRenderer` call — from this module,
  * a future one, or a test — and never an edit to a central switch. That

@@ -1,9 +1,9 @@
-# Desktop native feel (ZCode-style chrome + de-webview)
+# Desktop native feel (reference-style chrome + de-webview)
 
 Goal (user, 2026-10-10): the Tauri desktop app should stop feeling like
-"a web UI in a window" and feel like ZCode does. ZCode itself is not a
+"a web UI in a window" and feel like a reference desktop workbench does. A reference desktop workbench itself is not a
 native-toolkit app: it is Electron + a bundled React/Tailwind/shadcn
-renderer (`refs/zcode/packages/ui`) with a scoped preload bridge. smind
+renderer with a scoped preload bridge. smind
 already has the equivalent architecture (ADR-0013, plan
 `completed/desktop-bundled-ui.md`): bundled UI, loopback proxy,
 per-command IPC allowlist (`desktop/src-tauri/capabilities/proxy.json`),
@@ -12,19 +12,19 @@ left is the visible layer. The user chose this over a native-toolkit
 rewrite (≈28k lines of UI) and over moving to Electron.
 
 This plan also carries the unfinished **P5 (desktop-only chrome)** of
-`completed/zcode-visual-parity.md`, which was left "blocked on ADR-0013";
+`completed/reference-visual-parity.md`, which was left "blocked on ADR-0013";
 ADR-0013 has since shipped, so P5 is unblocked and lives here now.
 
-References (ZCode is Apache-2.0: keep `NOTICE` attribution for anything
+References (a reference desktop workbench is Apache-2.0: keep `NOTICE` attribution for anything
 ported):
 
-- `refs/zcode/packages/desktop/src/main/desktopWindowChrome.ts`
+- A local reference clone
   (`buildDesktopWindowVisualOptions`: per-platform window options)
-- `refs/zcode/packages/ui/src/DesktopWindowFrame.tsx`,
+- A local reference clone,
   `DesktopTopOverlay.tsx`, `WorkspaceHeader.tsx`, `WindowsTopLeftLogo.tsx`
-- `refs/paseo/packages/app/src/keyboard/keyboard-shortcuts.ts`
+- A local reference clone
   (`when: { desktop }` gating)
-- local research note `docs/research/local/zcode-desktop-2026-09.md`
+- local research note local research notes
   table (b)
 
 ## Acceptance Criteria
@@ -68,7 +68,7 @@ ported):
      light and dark.
    - Windows 11: Mica or Acrylic behind the window; plain opaque on
      Windows 10.
-   - Linux: opaque (no transparency). ZCode disables system shadow on
+   - Linux: opaque (no transparency). A reference desktop workbench disables system shadow on
      Linux for frameless windows; do the same only if a double outline
      shows up in testing.
 
@@ -114,7 +114,7 @@ ported):
 ### D3 — Desktop shortcuts and native menu
 
 1. The binding table (`web/packages/ui/src/keyboard/shortcuts.ts`)
-   supports a `desktop`-gated row, following Paseo's
+   supports a `desktop`-gated row, following a reference workbench's
    `when: { desktop }` pattern, without changing the existing `Mod`
    single-row model. A binding can be desktop-only, web-only, or both.
 2. **Desktop-only defaults**, with the web keeping its current
@@ -283,7 +283,7 @@ ported):
   - **Multi-window:** conflicts with the single-instance and
     one-window assumptions.
   - **Windows 11 Snap Layouts flyout** on the drawn maximize button.
-    Undecorated windows lose it, and ZCode accepts the same loss.
+    Undecorated windows lose it, and a reference desktop workbench accepts the same loss.
     Revisit if Tauri exposes `HTCLIENT`/`HTMAXBUTTON` hit-testing.
 - **Reload stays** in the View menu (`CmdOrCtrl+R`). It is an explicit
   app action, useful after switching connections, not a webview
@@ -356,7 +356,7 @@ internal-toggle-maximize,close,start-dragging,is-maximized,is-fullscreen}`.
 `is-fullscreen` and `internal-toggle-maximize` go beyond the list in D4.5
 (macOS hides the lights in fullscreen; Tauri's drag script calls the
 internal command on double-click), so D4's `capability_allowlist_exact`
-must include them. No ZCode code was copied (layout and approach only),
+must include them. No a reference desktop workbench code was copied (layout and approach only),
 so `NOTICE` is unchanged.
 
 #### Native checks on a real Mac (commit `49060a7`, run by the coordinator outside the sandbox)
@@ -588,7 +588,7 @@ Acceptance criteria:
    (`show_menu_on_left_click(false)` + `TrayIconEvent::Click{Left, Up}` handler).
 2. **Menu bar decision:** the window is undecorated on Windows/Linux, so the
    native menu bar is not drawn (it only appears on F10 with the Alt-key
-   fallback). Following ZCode/Paseo, the actions live in the UI header: a
+   fallback). Following reference workbench, the actions live in the UI header: a
    header **app-menu button** (hamburger, desktop non-macOS only) opening a
    menu with the same File/View/Window/Help actions, wired to the same
    handlers. The native menu stays installed (macOS needs it; on Windows/Linux
@@ -678,7 +678,7 @@ Named tests:
 - **Restart safety** is retry-once + clear error + status from the live port,
   not a rollback: the old process is already gone once Restart has decided to
   kill it, so the only honest outcomes are "new daemon up" or "error shown".
-- **Menu bar on Windows → header app-menu button** (ZCode/Paseo reference).
+- **Menu bar on Windows → header app-menu button** (reference workbench reference).
 
 ### Progress (W1–W4)
 

@@ -42,7 +42,7 @@ using the existing request/response envelope:
 
 ## Alternatives considered
 
-- **Per-resource `*.watch` subscriptions** (Paseo's
+- **Per-resource `*.watch` subscriptions** (a reference workbench's
   `subscribe_checkout_diff_*` pairs). Finer-grained filtering, but three
   times the methods for the same wire surface and the initial consumers
   (sidebar rail, badges) always want whole-domain streams anyway.
@@ -56,7 +56,7 @@ using the existing request/response envelope:
 
 ## Rationale
 
-The gap (`docs/research/dual-mode-ui.md`): permission events only reach a
+The gap (`docs/research/local/dual-mode-ui.md`): permission events only reach a
 client inside an active `run.attach`; nothing else is pushable. This shape
 reuses the existing envelope and connection multiplexing
 (`internal/wsapi/conn.go`), keeps the notification/response distinction

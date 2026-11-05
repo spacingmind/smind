@@ -43,7 +43,7 @@ import type { ProfileSeed } from "@/lib/settings-intent";
 import type { ProviderGate } from "@/lib/types";
 import { StatusDot } from "@/components/ui/status-dot";
 
-// Combined provider + model picker (docs/plans/completed/model-picker-paseo-parity.md),
+// Combined provider + model picker (docs/plans/completed/model-picker-reference-parity.md),
 // a port of Paseo's combined-model-selector / model-browser: opens on the
 // current provider's view, root = Profiles band + Providers drill-down, search
 // at both levels. Popover on desktop, bottom Sheet below md.

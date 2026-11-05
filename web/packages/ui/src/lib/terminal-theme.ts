@@ -28,7 +28,7 @@ function resolveCssColor(varName: string): string {
 
 /**
  * xterm field -> the `--color-terminal-*` custom property it reads
- * (zcode-visual-parity plan, P4 -- ZCode's own
+ * (reference-visual-parity plan, P4 -- the reference's own
  * `terminal/terminalTheme.ts` token map, ported onto this file's
  * existing computed-style probe rather than xterm's own `css.toColor`,
  * which doesn't understand `color-mix()`/`var()`). The 16-color ANSI

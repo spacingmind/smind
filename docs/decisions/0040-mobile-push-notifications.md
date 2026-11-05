@@ -27,7 +27,7 @@ Constraints that shape the answer (all verified, see the local research notes):
 
 1. **Privacy.** smind's relay is end-to-end encrypted (ADR-0035) so that the relay operator sees no task content. A push goes through
    Expo, then Apple or Google. A push that carries a task title or a permission summary would hand exactly that content to three
-   more parties. Paseo does this (`refs/paseo/packages/server/src/server/push/push-service.ts` sends `title`/`body` in clear); smind must not.
+   more parties. A reference workbench does this; smind must not.
 2. **There is no hosted relay** (ADR-0031 D11/decision 12 are deferred by the Human). Users run their own relay or homelab daemon, so the
    design cannot depend on infrastructure only we operate, and a self-hoster should not need to hold a push credential for the default path.
 3. **No paid Apple Developer Program for now.** Expo's own setup page: "A paid Apple Developer Account is required to generate
@@ -86,7 +86,7 @@ The daemon is the only party that knows the plaintext and the per-device key, so
   `push.expoAccessToken` / `SMIND_EXPO_ACCESS_TOKEN`, never logged). The credentials that make delivery work (FCM service account, later an APNs key) belong to
   whoever **built the app** and live in EAS, not on the daemon: a self-hoster who installs a published build, or the Human's own
   build, needs no secret to receive pushes. Errors: `DeviceNotRegistered` in a ticket removes that registration; `InvalidCredentials`/`MismatchSenderId`
-  are logged as an operator problem and the registration is kept (Paseo drops the token on `InvalidCredentials`; that discards good registrations because of a build-side mistake);
+  are logged as an operator problem and the registration is kept (a reference workbench drops the token on `InvalidCredentials`; that discards good registrations because of a build-side mistake);
   network errors, 429 and 5xx retry with exponential backoff at most 3 times within about a minute, then the push is dropped (a stale "needs approval" push is
   worse than none); 4xx payload errors are not retried. One receipt check, best effort, about 15 minutes after a send.
 - **The seam:** `push.Sender` (`Send(ctx, []Message) ([]Result, error)`), selected by the registration's `provider` field. Later senders are
@@ -184,7 +184,7 @@ The user docs (`docs/homelab.md`) state what leaves the daemon: the daemon's IP 
 
 ## Alternatives considered
 
-- **Plaintext push (what Paseo does).** Simplest and what users expect (the notification text works even when decryption would fail), but it gives Expo, Apple and Google
+- **Plaintext push (what a reference workbench does).** Simplest and what users expect (the notification text works even when decryption would fail), but it gives Expo, Apple and Google
   every task title and permission summary and defeats the point of an E2EE relay. Rejected (H1 is the veto point).
 - **Content-free wake, then fetch over the E2EE relay.** Maximal privacy and simple on the wire, but constraint 5 kills it: no password, evicts the foreground session,
   needs a full handshake in a background budget, and iOS silent push is throttled and absent after a force quit. Kept only as the generic fallback.
@@ -202,7 +202,7 @@ The user docs (`docs/homelab.md`) state what leaves the daemon: the daemon's IP 
 
 **All accepted as recommended, 2026-10-22** (H1–H8). H3 means the credentials come later from the Human; until then everything is built against fakes.
 
-- **H1. Privacy model.** *Recommended: encrypted payload with a generic fallback (§1).* Alternatives: always-generic (more private, less useful), plaintext (Paseo-style, rejected above).
+- **H1. Privacy model.** *Recommended: encrypted payload with a generic fallback (§1).* Alternatives: always-generic (more private, less useful), plaintext (reference-style, rejected above).
 - **H2. Apple Developer Program (USD 99 a year, an external cost).** *Recommended: not now.* Ship Android first; iOS push (APNs key, Notification Service Extension) waits. Without it nothing about iOS push can be tested or shipped.
 - **H3. Expo account, Firebase project, EAS credentials (external accounts and secrets).** *Recommended:* the Human creates one Expo organization (for example `spacingmind`) and one Firebase project,
   uploads the FCM V1 service-account key to EAS themselves (never in the repo, never given to an agent), and gives the Lead the `projectId` and `google-services.json` as environment values. Agents never create accounts or hold the key.

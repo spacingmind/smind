@@ -2,7 +2,7 @@ import rows from "@/lib/zcode-tokens.json";
 
 /**
  * Typed name map between ZCode design tokens and smind's `index.css`
- * (zcode-parity plan, Stage 1). ZCode is a visual spec: this table records
+ * (reference-parity plan, Stage 1). The reference is a visual spec: this table records
  * which ZCode token each smind raw var stands for and the value both themes
  * must resolve to; `zcode-tokens.test.ts` fails when `index.css` drifts.
  *

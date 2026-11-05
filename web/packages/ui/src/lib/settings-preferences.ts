@@ -11,7 +11,7 @@
 
 export type FontSizeStep = "small" | "medium" | "large";
 
-/** The three font-size axes Item 13 ships (audit-paseo.md §4's Appearance section): interface chrome, chat/content prose, and code. */
+/** The three font-size axes Item 13 ships (audit-workbench.md §4's Appearance section): interface chrome, chat/content prose, and code. */
 export interface FontSizes {
   interface: FontSizeStep;
   content: FontSizeStep;

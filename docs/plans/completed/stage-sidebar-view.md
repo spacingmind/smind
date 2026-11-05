@@ -3,7 +3,7 @@
 Size: M (5) — scope 1, PRs 1, risk 1, decisions 1, verify 1 (web only; screenshots)
 
 Owner: Lead ITEM N. Inputs: ADR-0039 (`task.git`/`task.gitList`), ADR-0032 (shared TanStack queries/stores),
-the existing "Group by status" view (AC6 of web-sidebar-attention), Paseo's sidebar status view model.
+the existing "Group by status" view (AC6 of web-sidebar-attention), a reference workbench's sidebar status view model.
 
 ## Goal
 
