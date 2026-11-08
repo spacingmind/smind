@@ -37,6 +37,12 @@ type remoteEnvelope struct {
 	Data          json.RawMessage `json:"data"`
 	StatusUnknown bool            `json:"statusUnknown"`
 	Failures      int             `json:"failures"`
+	// HistoryOwner is set on an activity read the owning host stores as a
+	// summary: the full history is on that host, rebuilt only there.
+	HistoryOwner *struct {
+		Host   string `json:"host"`
+		HostID string `json:"hostId"`
+	} `json:"historyOwner"`
 }
 
 const mcpFleetOffText = "host_unavailable: fleet is off on this daemon (set fleet.enabled in config.yaml); host reads need it"
@@ -320,5 +326,11 @@ func remoteTaskLogs(ctx context.Context, client *wsclient.Client, in taskLogsInp
 	for _, e := range d.Events {
 		events = append(events, mcpRunEvent{Type: e.Type, Text: e.Text, StopReason: e.StopReason})
 	}
-	return taskLogsOutput{RunID: in.RunID, Status: "remote", Events: events, Host: env.Host, NextCursor: d.NextCursor, HasMore: d.HasMore}, nil
+	out := taskLogsOutput{RunID: in.RunID, Status: "remote", Events: events, Host: env.Host, NextCursor: d.NextCursor, HasMore: d.HasMore}
+	if env.HistoryOwner != nil {
+		out.HistorySource = "skeleton"
+		out.SkeletonReason = "owned_by_host"
+		out.OwnedByHost = env.HistoryOwner.Host
+	}
+	return out, nil
 }
