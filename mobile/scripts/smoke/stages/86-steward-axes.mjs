@@ -25,7 +25,7 @@ const SCENARIOS = [
   ['many', 'Axes criteria many task', 'CHANGES', 'criteria-many', 'Changes requested by Spec.'],
   ['skipped', 'Axes skipped task', 'ACCEPTED', 'skipped', 'had nothing to judge.'],
   ['blocked', 'Axes blocked axis task', 'CHANGES', 'blocked-axis', 'did not complete.'],
-  ['running', 'Axes running task', 'ACCEPTED', 'running', 'accepted the change'],
+  ['running', 'Axes running task', 'ACCEPTED', 'running', 'Review in progress.'],
   ['partial', 'Axes partial task', 'CHANGES', 'partial', 'Partial review: only the standards axis ran'],
   ['old', 'Axes old changes task', 'CHANGES', null, 'Two files need work'],
   ['oldok', 'Axes old accepted task', 'ACCEPTED', null, 'Frames and gates agree'],
@@ -98,8 +98,11 @@ async function scenario(page, harness) {
       const t = await bodyText(page);
       if (/Review axes|Partial/.test(t)) lib.fail(`${name}: an old single-axis review shows axis UI`);
     }
-    if (sc === 'partial' && !(await page.getByLabel('Partial review').first().isVisible().catch(() => false))) lib.fail(`${name}: no Partial chip on the review screen`);
-    if (sc && sc !== 'partial' && (await page.getByLabel('Partial review').count()) > 0) lib.fail(`${name}: a full review shows the Partial chip`);
+    // The inbox screen stays mounted under the pushed review screen and holds the partial row's chip (1): a review screen
+    // adds one more only when the review itself is partial.
+    const partialNow = await page.getByLabel('Partial review').count();
+    if (sc === 'partial' && !(partialNow === 2 && (await page.getByLabel('Partial review').last().isVisible().catch(() => false)))) lib.fail(`${name}: no visible Partial chip on the review screen (${partialNow} in the DOM)`);
+    if (sc !== 'partial' && partialNow !== 1) lib.fail(`${name}: ${partialNow} Partial chip(s) in the DOM, want only the inbox row's (a ${sc ? 'full' : 'single-axis'} review is not partial)`);
     await noForbidden(page, name);
     if (sc === 'criteria-many') {
       // Collapsed by default (more than 3 criteria): the toggle is a 44 pt button; tap it for the expanded frame.

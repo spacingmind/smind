@@ -169,6 +169,8 @@ export function combinedSentence(review: Pick<StewardReview, "verdict" | "axes" 
   if (review.partial === true || isPartialAxes(axes)) {
     return `Partial review: only the ${names(ran).toLowerCase() || "requested"} axis ran, so it cannot be accepted.`;
   }
+  // A pass still pending or running: the review is not decided yet, whatever the stored verdict says.
+  if (axes.some((a) => a.status === "pending" || a.status === "running")) return "Review in progress.";
   const changes = axes.filter((a) => a.status === "done" && a.seatVerdict === "CHANGES");
   const failed = axes.filter((a) => a.status === "blocked");
   const skipped = axes.filter((a) => a.status === "skipped");

@@ -1,10 +1,10 @@
 // AxisCard is one review pass of a two-axis steward review (ADR-0054): the axis name, its status
 // chip, the pass summary, the model and, for the spec axis, the criteria checklist behind a
-// >= 44 pt toggle. Read-only: nothing here answers or lands anything. Every string is
+// >= 44 pt text-button toggle (the shared TextButton: a 44 pt native button whose label is its state). Read-only: nothing here answers or lands anything. Every string is
 // daemon-provided and drawn through <Text>, never interpreted. No cost is ever drawn.
 
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { StewardAxis } from '../../steward/types';
 import { axisLabel, axisStatusLabel, blockedReasonLabel, criteriaCounts } from '../../steward/view';
 import { AppTheme } from '../../theme';
@@ -12,6 +12,7 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import { AppIcon } from '../../ui/AppIcon';
 import { AxisChip, toneColor } from '../../ui/AxisChip';
 import { Card } from '../../ui/Card';
+import { TextButton } from '../../ui/TextButton';
 import { IconName } from '../../ui/icons';
 
 const COLLAPSE_ABOVE = 3;
@@ -52,15 +53,7 @@ export function AxisCard({ axis }: { axis: StewardAxis }) {
       {criteria.length > 0 && (
         <View style={styles.criteria}>
           <Text style={styles.small}>{countLine}</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={open ? 'Hide criteria' : 'Show criteria'}
-            accessibilityState={{ expanded: open }}
-            onPress={() => setOpen((v) => !v)}
-            style={styles.toggle}
-          >
-            <Text style={styles.toggleText}>{open ? 'Hide criteria' : 'Show criteria'}</Text>
-          </Pressable>
+          <TextButton label={open ? 'Hide criteria' : 'Show criteria'} onPress={() => setOpen((v) => !v)} style={styles.toggle} />
           {open &&
             criteria.map((c, i) => {
               const v = criterionView(c.status);
@@ -99,8 +92,7 @@ function makeStyles(theme: AppTheme) {
     mono: { ...theme.type.mono, color: theme.foregroundSubtle },
     danger: { ...theme.type.small, color: theme.status.danger },
     criteria: { gap: theme.spacing[2] },
-    toggle: { minHeight: 44, justifyContent: 'center' },
-    toggleText: { ...theme.type.label, color: theme.foreground },
+    toggle: { alignSelf: 'flex-start' },
     criterion: { flexDirection: 'row', gap: theme.spacing[2] },
     criterionColumn: { flexShrink: 1, flex: 1, gap: 2 },
     criterionFirst: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.spacing[2] },

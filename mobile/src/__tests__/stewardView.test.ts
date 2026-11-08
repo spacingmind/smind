@@ -193,6 +193,10 @@ describe('axis helpers', () => {
 
   const done = (axis: string, v: string) => ({ axis, status: 'done', seatVerdict: v, costUsd: 0 });
 
+  it('combinedSentence says in progress while a pass is still open', () => {
+    expect(combinedSentence({ verdict: 'ACCEPTED', axes: [done('standards', 'ACCEPTED'), { axis: 'spec', status: 'running', costUsd: 0 }] })).toBe('Review in progress.');
+  });
+
   it('combinedSentence never carries raw tags or skipped copy', () => {
     const skipped = { axis: 'spec', status: 'skipped', blockedReason: 'no_spec', costUsd: 0 };
     const sentences = [
