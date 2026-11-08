@@ -873,7 +873,7 @@ export function useRunTimeline(
             streamRun(client, session, setRuns, r.ID);
           } else {
             client
-              .call<RunLogsResult>("run.logs", { runId: r.ID })
+              .call<RunLogsResult>("run.logs", { runId: r.ID, detail: "auto" })
               .then((logs) => {
                 if (session.cancelled) return;
                 const usage = latestUsage(logs.events);
