@@ -333,6 +333,13 @@ func TestFleetSourceFlagsASkeletonRunAndNeverRebuilds(t *testing.T) {
 	if got := src.RunHistorySource("nope"); got != "" {
 		t.Fatalf("unknown run: %q", got)
 	}
+	// a summary with no native_ref cannot be rebuilt anywhere: no label
+	if err := e.db.SetRunNativeRef("skel", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := src.RunHistorySource("skel"); got != "" {
+		t.Fatalf("summary without a native_ref: %q", got)
+	}
 	if _, err := src.RunEvents("skel", 0, 50); err != nil {
 		t.Fatal(err)
 	}

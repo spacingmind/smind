@@ -39,10 +39,7 @@ type remoteEnvelope struct {
 	Failures      int             `json:"failures"`
 	// HistoryOwner is set on an activity read the owning host stores as a
 	// summary: the full history is on that host, rebuilt only there.
-	HistoryOwner *struct {
-		Host   string `json:"host"`
-		HostID string `json:"hostId"`
-	} `json:"historyOwner"`
+	HistoryOwner *historyOwnerView `json:"historyOwner"`
 }
 
 const mcpFleetOffText = "host_unavailable: fleet is off on this daemon (set fleet.enabled in config.yaml); host reads need it"

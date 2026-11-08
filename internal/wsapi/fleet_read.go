@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 	"sync"
@@ -172,15 +173,28 @@ func (s *fleetSource) RunEvents(runID string, afterSeq int64, limit int) ([]stor
 	return s.db.ListRunEventsAfterSeq(runID, afterSeq, limit)
 }
 
-// RunHistorySource says whether runID is stored as a summary here (a skeleton
-// run whose detail was not pruned): a peer reading its activity is told the full
-// history is on this host. Facts from this host's own store only.
+// RunHistorySource says whether runID is stored as a summary here whose full
+// history can be rebuilt on this host: a skeleton run (detail not pruned) that has a
+// native_ref. A peer reading its activity is told the full history is here. Facts
+// from this host's own store only; a store error is logged and reads as "not a
+// summary" (the unlabelled form, which is today's behaviour).
 func (s *fleetSource) RunHistorySource(runID string) string {
 	row, err := s.db.GetRun(runID)
-	if err != nil || row.HistoryPrunedAt != nil {
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("fleet: history source of run %s: %v", runID, err)
+		}
 		return ""
 	}
-	if sk, err := s.db.GetRunSkeleton(runID); err == nil && sk.SkeletonAt != nil {
+	if row.HistoryPrunedAt != nil {
+		return ""
+	}
+	sk, err := s.db.GetRunSkeleton(runID)
+	if err != nil {
+		log.Printf("fleet: history source of run %s: %v", runID, err)
+		return ""
+	}
+	if sk.SkeletonAt != nil && sk.NativeRef != "" {
 		return wire.HistorySkeleton
 	}
 	return ""

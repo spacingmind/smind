@@ -25,10 +25,14 @@ type hostReadResult struct {
 	Failures      int             `json:"failures"`
 	// HistoryOwner is set when the owning host stores the run only as a
 	// summary: the full history is on that host and is rebuilt only there.
-	HistoryOwner *struct {
-		Host   string `json:"host"`
-		HostID string `json:"hostId"`
-	} `json:"historyOwner"`
+	HistoryOwner *historyOwnerView `json:"historyOwner"`
+}
+
+// historyOwnerView is the part of remote.read's historyOwner the clients use (the
+// host fields come from the daemon's own registry; empty Host = cannot be named).
+type historyOwnerView struct {
+	Host   string `json:"host"`
+	HostID string `json:"hostId"`
 }
 
 type hostReadTask struct {

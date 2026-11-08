@@ -237,7 +237,8 @@ When a run's older output was trimmed to a summary on the host that ran it, the
 activity ends with `note: summary only; the full history is on host studio.
 Rebuild it there.` The name is the alias you gave that host. Rebuilding the full
 history only ever happens on that host, by someone using it; nothing is fetched
-from its session files across the link.
+from its session files across the link. The MCP `task_logs` tool answers a host
+read with the same fact as `historySource: "skeleton"`, `skeletonReason: "owned_by_host"` and `ownedByHost`.
 
 Errors name a code first:
 
