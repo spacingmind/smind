@@ -200,26 +200,61 @@ func claudeSessionFile(ref Ref, roots []string, max int64) (string, error) {
 	return resolveInside(want, []string{ref.ConfigDir}, "projects", max)
 }
 
+// rolloutName matches the rollout file of threadID: rollout-<ts>-<threadId>.jsonl,
+// or, for a reverted thread, rollout-<ts>-<threadId>_<rolloutId>.jsonl where
+// both ids are UUIDs. The timestamp has a fixed shape and the whole name is
+// anchored, so another thread's file (a thread id that merely ends with, or
+// extends, this one) never matches, and a "_" suffix can only be a UUID.
+func rolloutName(threadID string) *regexp.Regexp {
+	const ts = `\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}`
+	const uuid = `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`
+	suffix := ""
+	if !strings.Contains(threadID, "_") {
+		suffix = `(?:_` + uuid + `)?`
+	}
+	return regexp.MustCompile(`^rollout-` + ts + `-` + regexp.QuoteMeta(threadID) + suffix + `\.jsonl$`)
+}
+
 // codexSessionFile finds the rollout of ref's thread under the allowed roots:
-// sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl, else archived_sessions/.
+// sessions/YYYY/MM/DD/rollout-<ts>-<threadId>[_<rolloutId>].jsonl, else
+// archived_sessions/. A reverted thread has several rollout files; the most
+// recently written one is used (ties by name), so the choice is deterministic.
 func codexSessionFile(ref Ref, roots []string, max int64) (string, error) {
 	if !validID(ref.SessionID) || !allowedRoot(ref.CodexHome, roots) {
 		return "", errUnsafe
 	}
-	name := "rollout-*-" + ref.SessionID + ".jsonl"
+	// validID leaves no glob character in the id, so the broad pattern only
+	// narrows the listing; rolloutName decides what is a match.
+	name := "rollout-*-" + ref.SessionID + "*.jsonl"
+	re := rolloutName(ref.SessionID)
+	home := mustReal(ref.CodexHome)
 	for _, pattern := range []string{
 		filepath.Join(ref.CodexHome, "sessions", "*", "*", "*", name),
 		filepath.Join(ref.CodexHome, "archived_sessions", name),
 	} {
 		matches, _ := filepath.Glob(pattern)
+		var best string
+		var bestMod int64
 		for _, m := range matches {
+			if !re.MatchString(filepath.Base(m)) {
+				continue
+			}
 			// The recorded path is only a hint (the rollout may have been archived
 			// since): the file is whatever the glob under the allowed root finds.
-			if real, err := resolveInside(m, []string{ref.CodexHome}, "", max); err == nil {
-				if within(filepath.Join(mustReal(ref.CodexHome), "sessions"), real) || within(filepath.Join(mustReal(ref.CodexHome), "archived_sessions"), real) {
-					return real, nil
-				}
+			real, err := resolveInside(m, []string{ref.CodexHome}, "", max)
+			if err != nil || !(within(filepath.Join(home, "sessions"), real) || within(filepath.Join(home, "archived_sessions"), real)) {
+				continue
 			}
+			st, err := os.Stat(real)
+			if err != nil {
+				continue
+			}
+			if mod := st.ModTime().UnixNano(); best == "" || mod > bestMod || (mod == bestMod && real > best) {
+				best, bestMod = real, mod
+			}
+		}
+		if best != "" {
+			return best, nil
 		}
 	}
 	return "", errUnsafe
