@@ -230,6 +230,9 @@ func (r *Registry) validate(p *store.AgentProfile) error {
 	if err := r.validateFields(p); err != nil {
 		return err
 	}
+	if err := r.validateQuestions(p); err != nil {
+		return err
+	}
 	if err := r.validateFailover(p); err != nil {
 		return err
 	}
@@ -359,6 +362,20 @@ func (r *Registry) validateContract(p *store.AgentProfile) error {
 	legacy := p.OrchestrationTools == nil && p.Instructions == "" && len(p.Skills) == 0
 	if p.ChildPolicy == "" && !legacy {
 		p.ChildPolicy = "none"
+	}
+	return nil
+}
+
+// validateQuestions normalises an empty Questions to "ask" (ADR-0055):
+// what a run launched with this profile does with an agent's question to
+// the human.
+func (r *Registry) validateQuestions(p *store.AgentProfile) error {
+	switch p.Questions {
+	case "":
+		p.Questions = "ask"
+	case "ask", "decline", "disabled":
+	default:
+		return fmt.Errorf("invalid questions %q (want ask, decline or disabled)", p.Questions)
 	}
 	return nil
 }
