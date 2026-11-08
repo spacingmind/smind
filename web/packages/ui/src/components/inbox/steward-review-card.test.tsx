@@ -294,8 +294,16 @@ describe("StewardReviewCard", () => {
       expect(screen.queryByText("Review axes")).toBeNull();
     });
 
+    it("an empty axes array renders no axes section", async () => {
+      await openCard({ axes: [] });
+      expect(screen.queryByTestId("steward-axes")).toBeNull();
+    });
+
     it("axes never render a dollar amount", async () => {
-      await openCard({ axes: [axis(), axis({ axis: "spec" })] });
+      await openCard({
+        axes: [axis({ model: "claude-haiku-5-5", costUsd: 0.42 }), axis({ axis: "spec", model: "claude-sonnet-5-5", costUsd: 0.42 })],
+      });
+      expect(screen.getByTestId("steward-axis-standards")).toHaveTextContent("claude-haiku-5-5");
       const text = document.body.textContent ?? "";
       expect(text).not.toContain("$");
       expect(text).not.toContain("0.42");
