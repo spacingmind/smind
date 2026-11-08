@@ -291,11 +291,12 @@ test('Q-07 at 390px the docked card separates cleanly from the timeline rows abo
       ],
     },
   ])
+  await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByTestId('question-card')).toBeVisible()
   await expect(page.getByTestId('timeline-assistant')).toContainText('Second line')
   const dock = page.getByTestId('pending-permission-dock')
   await expect(dock).toBeVisible()
+  // Below md the dock has a separator; from md up it is just the card (no band behind it).
   await expect(dock).toHaveCSS('border-top-width', '1px')
-  await page.setViewportSize({ width: 390, height: 844 })
   await frame(page, testInfo, 'l-dock-narrow')
 })
