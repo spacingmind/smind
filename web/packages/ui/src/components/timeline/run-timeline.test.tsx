@@ -538,6 +538,34 @@ describe("RunTimeline", () => {
     expect(screen.queryByTestId("run-rerun")).toBeNull();
   });
 
+  it("only a done turn offers Fork from here; running, failed and prop-less turns do not", () => {
+    const onFork = vi.fn();
+    const done = run([], { status: "done" });
+    const { unmount } = render(
+      <ul>
+        <RunTimeline run={done} onFork={onFork} />
+      </ul>,
+    );
+    fireEvent.click(screen.getByTestId("run-fork"));
+    expect(onFork).toHaveBeenCalledWith(done);
+    unmount();
+    for (const status of ["running", "error", "stopped"] as const) {
+      const view = render(
+        <ul>
+          <RunTimeline run={run([], status === "error" ? { status, err: "boom" } : { status })} onFork={onFork} />
+        </ul>,
+      );
+      expect(screen.queryByTestId("run-fork")).toBeNull();
+      view.unmount();
+    }
+    render(
+      <ul>
+        <RunTimeline run={run([])} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-fork")).toBeNull();
+  });
+
   it("assistantMarkdown joins assistant text items with a blank line and ignores tools and thinking", () => {
     const items = buildTimeline([
       { type: "thinking", text: "hmm" },

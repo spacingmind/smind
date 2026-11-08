@@ -1697,7 +1697,7 @@ func parseInt64(s string) (int64, error) {
 
 // cmdTaskChatUsage is printed when `task chat` is invoked with no (or an
 // unknown) subcommand.
-const cmdTaskChatUsage = "usage: smind task chat <ls|new|rename|archive> ..."
+const cmdTaskChatUsage = "usage: smind task chat <ls|new|fork|rename|archive> ..."
 
 // cmdTaskChat dispatches the chat management subcommands (ADR-0016 P4):
 // ls/new operate per task, rename/archive per chat id.
@@ -1711,6 +1711,8 @@ func cmdTaskChat(args []string) int {
 		return cmdTaskChatLs(args[1:])
 	case "new":
 		return cmdTaskChatNew(args[1:])
+	case "fork":
+		return cmdTaskChatFork(args[1:])
 	case "rename":
 		return cmdTaskChatRename(args[1:])
 	case "archive":
@@ -1833,6 +1835,102 @@ func cmdTaskChatNew(args []string) int {
 		return 1
 	}
 	fmt.Printf("%d\t%s\n", chat.ID, chat.Title)
+	return 0
+}
+
+// cmdTaskChatForkUsage is printed on any argument error in cmdTaskChatFork.
+const cmdTaskChatForkUsage = "usage: smind task chat fork <chatId> --at <runId> [--seeded]"
+
+// cmdTaskChatFork forks a chat at one of its finished turns (ADR-0057):
+// native continues the provider's own session, --seeded starts a fresh one
+// from a condensed account of the earlier turns. A fork_unavailable
+// refusal is answered with the --seeded suggestion, not a bare error.
+func cmdTaskChatFork(args []string) int {
+	var chatIDArg, at string
+	var atSet, seeded bool
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--seeded":
+			if seeded {
+				fmt.Fprintln(os.Stderr, cmdTaskChatForkUsage)
+				return 2
+			}
+			seeded = true
+		case a == "--at":
+			if atSet || i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskChatForkUsage)
+				return 2
+			}
+			at = args[i+1]
+			atSet = true
+			i++
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(os.Stderr, "task chat fork: unknown flag %q\n", a)
+			fmt.Fprintln(os.Stderr, cmdTaskChatForkUsage)
+			return 2
+		case chatIDArg == "":
+			chatIDArg = a
+		default:
+			fmt.Fprintln(os.Stderr, cmdTaskChatForkUsage)
+			return 2
+		}
+	}
+	if chatIDArg == "" || !atSet || at == "" {
+		fmt.Fprintln(os.Stderr, cmdTaskChatForkUsage)
+		return 2
+	}
+	chatID, err := parseInt64(chatIDArg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task chat fork: invalid chatId %q: %v\n", chatIDArg, err)
+		fmt.Fprintln(os.Stderr, cmdTaskChatForkUsage)
+		return 2
+	}
+	mode := "native"
+	if seeded {
+		mode = "seeded"
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	var chat struct {
+		ID    int64
+		Title string
+		Fork  *struct {
+			Mode string
+		}
+	}
+	if err := client.Call(context.Background(), "chat.fork", map[string]any{"chatId": chatID, "atRunId": at, "mode": mode}, &chat); err != nil {
+		var rpc *wsclient.RPCError
+		if errors.As(err, &rpc) && rpc.Code == "fork_unavailable" {
+			var d struct {
+				Reason string `json:"reason"`
+				Detail string `json:"detail"`
+			}
+			why := stewardText(rpc.Message)
+			if json.Unmarshal(rpc.Data, &d) == nil && d.Reason != "" {
+				why = stewardText(d.Reason)
+			}
+			if d.Detail != "" {
+				why += ": " + stewardText(d.Detail)
+			}
+			fmt.Fprintf(os.Stderr, "task chat fork: the session cannot be forked here (%s)\n", why)
+			fmt.Fprintln(os.Stderr, "retry with --seeded to start a new session from the earlier turns (the agent will not remember tool calls)")
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "task chat fork: %v\n", err)
+		return 1
+	}
+	forkMode := mode
+	if chat.Fork != nil && chat.Fork.Mode != "" {
+		forkMode = chat.Fork.Mode
+	}
+	fmt.Printf("%d\t%s\t%s\n", chat.ID, stewardText(chat.Title), forkMode)
 	return 0
 }
 

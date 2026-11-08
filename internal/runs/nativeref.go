@@ -79,6 +79,16 @@ func transcriptVersion(path string) string {
 	return ""
 }
 
+// nativePrompt is the prompt text the provider's session holds for this run.
+func (r *run) nativePrompt() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.deliveredPrompt != "" {
+		return r.deliveredPrompt
+	}
+	return r.prompt
+}
+
 // captureNativeRef stores r's native_ref. Best effort: a run with no provider
 // session (nothing to point at) gets none.
 func (reg *Registry) captureNativeRef(r *run, finishedAt time.Time) {
@@ -92,7 +102,7 @@ func (reg *Registry) captureNativeRef(r *run, finishedAt time.Time) {
 	ref := nativeRef{
 		Provider: string(r.provider), Harness: ns.Harness, SessionID: ns.SessionID,
 		ConfigDir: ns.ConfigDir, CodexHome: ns.CodexHome,
-		TurnWindow: turnWindow{StartedAt: r.startedAt, FinishedAt: finishedAt}, PromptSha256: sha256Hex(r.prompt),
+		TurnWindow: turnWindow{StartedAt: r.startedAt, FinishedAt: finishedAt}, PromptSha256: sha256Hex(r.nativePrompt()),
 		CapturedAt: time.Now().UTC(),
 	}
 	if t, err := reg.st.GetTask(r.taskID); err == nil && t.WorktreePath != nil {
