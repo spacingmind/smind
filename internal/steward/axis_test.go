@@ -490,6 +490,31 @@ func TestPassVerdict_BothFailedBlocksReview(t *testing.T) {
 	}
 }
 
+func TestPassVerdict_BaseUnresolvedIsADaemonReason(t *testing.T) {
+	t.Parallel()
+
+	fx := openTwoAxis(t, axisDigest("AC1"))
+	if _, err := fx.submit(t, AxisSpec, specVerdict(VerdictAccepted, CriterionResult{ID: "AC1", Status: CriterionMet, Evidence: "combine.go implements it"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.WritePassBlocked(fx.row.ID, AxisStandards, "base_unresolved", "the merge-base could not be resolved", 0); err != nil {
+		t.Fatalf("WritePassBlocked(base_unresolved) error = %v, want nil", err)
+	}
+	got, err := fx.svc.View(fx.row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != VerdictChanges || got.Status != "done" {
+		t.Fatalf("view = %+v, want CHANGES/done with the standards axis failed", got)
+	}
+	if got.Axes[0].Status != PassBlocked || got.Axes[0].BlockedReason != "base_unresolved" {
+		t.Fatalf("axes = %+v, want standards blocked/base_unresolved", got.Axes)
+	}
+	if !strings.Contains(got.Summary, "axis standards did not complete (base_unresolved)") {
+		t.Fatalf("summary = %q, want the failed axis named", got.Summary)
+	}
+}
+
 func TestPassVerdict_SkippedSpecDoesNotBlockOrAccept(t *testing.T) {
 	t.Parallel()
 

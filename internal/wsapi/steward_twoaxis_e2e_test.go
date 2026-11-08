@@ -365,7 +365,7 @@ func TestTwoAxisE2E_UnresolvedBaseBlocksStandardsNeverJudgesTheHead(t *testing.T
 	e.bindSteward(t)
 	r := e.reviewViaRPC(t, &requestContext{local: true})
 	std := e.waitPass(t, r.ReviewID, steward.AxisStandards, steward.PassBlocked)
-	if std.BlockedReason != "crashed" || std.RunID != "" || std.StewardTaskID != 0 {
+	if std.BlockedReason != "base_unresolved" || std.RunID != "" || std.StewardTaskID != 0 {
 		t.Fatalf("standards pass = %+v, want blocked before any seat", std)
 	}
 	spec := e.waitPass(t, r.ReviewID, steward.AxisSpec, steward.PassRunning)
