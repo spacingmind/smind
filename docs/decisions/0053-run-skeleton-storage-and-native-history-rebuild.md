@@ -358,6 +358,7 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
   (`canLoadFull` for a human when the provider has a reader) or `provider_cannot_rebuild`; a failed `full` says why with the
   reason codes of the rebuilders (`native_session_missing`, `slice_not_found`, `format_drift`, `rebuild_failed`,
   `rebuild_busy`, `native_session_in_use`) and serves the stored rows.
+- **Principal boundary.** "Human" is any connection that is not run-scoped: an unidentified local connection counts as human, as for `full`. If a later ADR moves plugins or orchestrators onto a scoped principal, `auto` and `full` follow that principal with no change here.
 - **Merge.** A rebuilt turn replaces every stored text, thinking and tool-call row; the stored rows that are not in the provider's
   transcript (user message, permission requests and decisions, usage, rate limit, mcp servers, notes, done) keep their place
   around it: the rebuilt block sits where the first stored transcript row was. A permission row that was interleaved between
