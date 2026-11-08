@@ -40,6 +40,7 @@ type TurnWindow struct {
 const (
 	HarnessClaudeCode = "claude-code"
 	HarnessCodex      = "codex-app-server"
+	HarnessACP        = "acp"
 )
 
 // Reason says why a history could not be rebuilt; the caller shows the stored
@@ -47,15 +48,16 @@ const (
 type Reason string
 
 const (
-	ReasonNone           Reason = ""
-	ReasonCannotRebuild  Reason = "provider_cannot_rebuild" // no reader for this harness, or no native_ref
-	ReasonSessionMissing Reason = "native_session_missing"  // file gone, outside the root, not a regular file
-	ReasonSliceNotFound  Reason = "slice_not_found"         // no turn matches the prompt hash and window, or several do
-	ReasonFormatDrift    Reason = "format_drift"            // the session failed the self-check, or the breaker is open
-	ReasonFailed         Reason = "rebuild_failed"          // unreadable, timeout, or over the size bound
-	ReasonBusy           Reason = "rebuild_busy"            // the concurrency bound is full
-	ReasonHumanOnly      Reason = "rebuild_not_requested"   // asked by an agent or automation (H7)
-	ReasonSessionInUse   Reason = "native_session_in_use"   // the chat has a running run
+	ReasonNone            Reason = ""
+	ReasonCannotRebuild   Reason = "provider_cannot_rebuild" // no reader for this harness, or no native_ref
+	ReasonSessionMissing  Reason = "native_session_missing"  // file gone, outside the root, not a regular file
+	ReasonSliceNotFound   Reason = "slice_not_found"         // no turn matches the prompt hash and window, or several do
+	ReasonFormatDrift     Reason = "format_drift"            // the session failed the self-check, or the breaker is open
+	ReasonFailed          Reason = "rebuild_failed"          // unreadable, timeout, or over the size bound
+	ReasonBusy            Reason = "rebuild_busy"            // the concurrency bound is full
+	ReasonHumanOnly       Reason = "rebuild_not_requested"   // asked by an agent or automation (H7)
+	ReasonSessionInUse    Reason = "native_session_in_use"   // the chat has a running run
+	ReasonConfirmRequired Reason = "confirm_required"        // the load would start an agent and the human has not confirmed
 )
 
 // TimeTolerance is how far a turn may lie outside the run's window: a clock
