@@ -80,7 +80,9 @@ func Combine(passes []PassResult) (Combined, error) {
 			}
 		case PassBlocked:
 			// A pass the review never ran (a one-axis re-run) is a failed axis like
-			// any other, but never the reason a review is blocked for.
+			// any other, which is what keeps a partial review from ever being
+			// ACCEPTED (failed = true below), but never the reason a review is
+			// blocked for.
 			if res.BlockedReason == "" && p.BlockedReason != store.StewardPassNotRun {
 				res.BlockedReason = p.BlockedReason
 			}

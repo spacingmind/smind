@@ -117,6 +117,7 @@ describe("axis helpers", () => {
     expect(axisStatusLabel(ax("skipped", undefined, "no_spec"))).toEqual({ text: "Skipped · no spec available", tone: "neutral" });
     expect(axisStatusLabel(ax("skipped"))).toEqual({ text: "Skipped", tone: "neutral" });
     expect(axisStatusLabel(ax("blocked", undefined, "timeout"))).toEqual({ text: "Did not complete", tone: "danger" });
+    expect(axisStatusLabel(ax("blocked", undefined, "not_run"))).toEqual({ text: "Not run", tone: "neutral" });
   });
 
   it("blockedReasonLabel falls back to raw text", () => {

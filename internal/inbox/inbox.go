@@ -74,7 +74,8 @@ type Item struct {
 	Action *failure.Action `json:"action,omitempty"`
 	// Axes is a two-axis review's per-pass verdicts (ADR-0054), omitted for
 	// every other item, including a single-axis review. It carries only the
-	// axis name, the pass's seat verdict and its status: never seat text.
+	// axis name, the pass's seat verdict (an ACCEPTED|CHANGES|BLOCKED enum, checked
+	// when the seat submits it), its status and a daemon enum reason: never seat text.
 	Axes []ItemAxis `json:"axes,omitempty"`
 }
 

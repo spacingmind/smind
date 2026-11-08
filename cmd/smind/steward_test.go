@@ -391,3 +391,31 @@ func TestStewardUsage_HasNoApproveOrMerge(t *testing.T) {
 		t.Fatalf("usage lost its closing rule line:\n%s", cmdStewardUsage)
 	}
 }
+
+// TestStewardShow_TerminalEscapesAndForgedLinesAreNeutralised: the seat's and
+// the PR author's text reaches `show`; an escape sequence or a line break in it
+// must not move the cursor, recolour the terminal or forge another output line.
+func TestStewardShow_TerminalEscapesAndForgedLinesAreNeutralised(t *testing.T) {
+	res := map[string]any{
+		"id": float64(7), "taskId": float64(3), "verdict": "CHANGES", "headSha": strings.Repeat("a", 40), "mergeReady": false,
+		"summary": "ok\x1b[2J\nsummary line two",
+		"axes": []any{
+			map[string]any{"axis": "spec", "status": "done", "seatVerdict": "CHANGES", "model": "m\x1b[31m", "criteria": []any{
+				map[string]any{"id": "AC1", "status": "met", "evidence": "fine\x1b]0;pwned\x07\n  gate ci:pass"},
+			}},
+		},
+		"findings": []any{map[string]any{"axis": "spec", "file": "a.go\x1b[H", "line": float64(1), "severity": "P1", "why": "bad\n  gate scope:pass", "check": "go test\r", "rule": "r\x1b[0m"}},
+	}
+	code, got, errOut := runStewardCLI(t, &fakeStewardCaller{result: res}, "show", "7")
+	if code != 0 {
+		t.Fatalf("show = %d: %s", code, errOut)
+	}
+	if strings.ContainsRune(got, 0x1b) || strings.ContainsRune(got, 0x07) || strings.ContainsRune(got, '\r') {
+		t.Fatalf("output carries a control character: %q", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "gate ") {
+			t.Fatalf("a value forged an output line: %q in %q", line, got)
+		}
+	}
+}

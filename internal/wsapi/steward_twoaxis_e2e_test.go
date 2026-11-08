@@ -695,10 +695,17 @@ func TestTwoAxisE2E_AxisRerunRunsOnlyThatPassAndCapsAtChanges(t *testing.T) {
 	if v.Verdict != steward.VerdictChanges || v.MergeReady || !strings.Contains(v.Summary, "axis spec did not complete (not_run)") {
 		t.Fatalf("view = %+v, want CHANGES, never ACCEPTED, with the spec axis named", v)
 	}
+	if pv := e.view(t, r.ReviewID); pv.Stale != "" || !pv.Partial {
+		t.Fatalf("partial view = %+v, want fresh and partial", pv)
+	}
 	// An identical full review is not answered with the partial one (and the reverse).
 	full := e.reviewViaRPC(t, &requestContext{local: true})
 	if full.Existing || full.ReviewID == r.ReviewID {
 		t.Fatalf("the full review was deduped to the partial one: %+v", full)
+	}
+	// The full review that just started supersedes the partial one, not the reverse.
+	if pv := e.view(t, r.ReviewID); pv.Stale != steward.StaleSuperseded || !pv.Partial {
+		t.Fatalf("partial view = %+v, want superseded by the newer full review", pv)
 	}
 	e.endReview(t, full.ReviewID)
 	_ = e.api.Runs.Stop(std.RunID)
@@ -733,4 +740,17 @@ func TestTwoAxisE2E_AxisRerunValidation(t *testing.T) {
 	r := e2.reviewViaRPC(t, local)
 	e2.waitSeatStarted(t, r.ReviewID)
 	e2.endReview(t, r.ReviewID)
+}
+
+func (e *stewardHostEnv) view(t *testing.T, id int64) steward.View {
+	t.Helper()
+	raw, err := budgetCall(t, e.api, &requestContext{local: true}, "steward.get", map[string]any{"reviewId": id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v steward.View
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	return v
 }

@@ -258,18 +258,21 @@ type View struct {
 	Axes []ReviewAxis `json:"axes,omitempty"`
 	// StandardsChanged: the change edits a standards file (the digest's
 	// standards.changedInDiff, ADR-0054 D10); absent unless true.
-	StandardsChanged bool        `json:"standardsChanged,omitempty"`
-	PRNumber         int         `json:"prNumber,omitempty"`
-	Frames           []FrameView `json:"frames"`
-	Stale            string      `json:"stale,omitempty"`
-	MergeReady       bool        `json:"mergeReady"`
-	NotReadyReason   string      `json:"notReadyReason,omitempty"`
-	ScopeViolation   bool        `json:"scopeViolation,omitempty"`
-	CostUSD          float64     `json:"costUsd"`
-	RunID            string      `json:"runId,omitempty"`
-	StewardTaskID    int64       `json:"stewardTaskId"`
-	CreatedAt        time.Time   `json:"createdAt"`
-	FinishedAt       *time.Time  `json:"finishedAt,omitempty"`
+	StandardsChanged bool `json:"standardsChanged,omitempty"`
+	// Partial: a one-axis re-run, whose other pass was not run. It can never be
+	// ACCEPTED, supersedes no other review and is shown as its own review.
+	Partial        bool        `json:"partial,omitempty"`
+	PRNumber       int         `json:"prNumber,omitempty"`
+	Frames         []FrameView `json:"frames"`
+	Stale          string      `json:"stale,omitempty"`
+	MergeReady     bool        `json:"mergeReady"`
+	NotReadyReason string      `json:"notReadyReason,omitempty"`
+	ScopeViolation bool        `json:"scopeViolation,omitempty"`
+	CostUSD        float64     `json:"costUsd"`
+	RunID          string      `json:"runId,omitempty"`
+	StewardTaskID  int64       `json:"stewardTaskId"`
+	CreatedAt      time.Time   `json:"createdAt"`
+	FinishedAt     *time.Time  `json:"finishedAt,omitempty"`
 }
 
 // View reads review id with its staleness and merge-ready label.
@@ -281,11 +284,25 @@ func (s *Service) View(reviewID int64) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	latest, err := s.DB.LatestStewardReview(row.TaskID)
+	latest, latestFull, err := s.latestIDs(row.TaskID)
 	if err != nil {
 		return View{}, err
 	}
-	return s.view(row, latest.ID)
+	return s.view(row, latest, latestFull)
+}
+
+// latestIDs are the ids of the task's newest review and of its newest full
+// review (0 when there is none).
+func (s *Service) latestIDs(taskID int64) (latest, latestFull int64, err error) {
+	l, err := s.DB.LatestStewardReview(taskID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, err
+	}
+	f, err := s.DB.LatestFullStewardReview(taskID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, err
+	}
+	return l.ID, f.ID, nil
 }
 
 // List returns taskID's reviews, newest first (taskID 0: every task's).
@@ -294,18 +311,20 @@ func (s *Service) List(taskID int64, limit int) ([]View, error) {
 	if err != nil {
 		return nil, err
 	}
-	latest := map[int64]int64{}
+	type ids struct{ latest, full int64 }
+	latest := map[int64]ids{}
 	out := make([]View, 0, len(rows))
 	for _, row := range rows {
 		id, ok := latest[row.TaskID]
 		if !ok {
-			l, err := s.DB.LatestStewardReview(row.TaskID)
+			l, f, err := s.latestIDs(row.TaskID)
 			if err != nil {
 				return nil, err
 			}
-			id, latest[row.TaskID] = l.ID, l.ID
+			id = ids{l, f}
+			latest[row.TaskID] = id
 		}
-		v, err := s.view(row, id)
+		v, err := s.view(row, id.latest, id.full)
 		if err != nil {
 			return nil, err
 		}
@@ -314,8 +333,19 @@ func (s *Service) List(taskID int64, limit int) ([]View, error) {
 	return out, nil
 }
 
-// view maps one row with the newest review id of its task (0 = no rows).
-func (s *Service) view(row store.StewardReview, latestReviewID int64) (View, error) {
+// latestFor picks the id a review is compared with for supersession.
+func latestFor(partial bool, latest, latestFull int64) int64 {
+	if partial {
+		return latest
+	}
+	return latestFull
+}
+
+// view maps one row with the ids of its task's newest review and newest full
+// review (0 = none). A full review is superseded only by a newer full review;
+// a partial review (a one-axis re-run) supersedes nothing and is superseded by
+// any newer review.
+func (s *Service) view(row store.StewardReview, latestReviewID, latestFullID int64) (View, error) {
 	v := View{ID: row.ID, TaskID: row.TaskID, TriggerKind: row.TriggerKind, HeadSHA: row.HeadSHA, ContractSha256: row.ContractSha256,
 		ValidationID: row.ValidationID, CIState: row.CIState, Status: row.Status, Verdict: row.Verdict, SeatVerdict: row.SeatVerdict,
 		Summary: row.Summary, BlockedReason: row.BlockedReason, ScopeViolation: row.ScopeViolation, CostUSD: row.CostUSD,
@@ -336,6 +366,9 @@ func (s *Service) view(row store.StewardReview, latestReviewID int64) (View, err
 			return View{}, fmt.Errorf("steward review %d: %w", row.ID, err)
 		}
 		v.Axes = append(v.Axes, ax)
+		if p.BlockedReason == store.StewardPassNotRun {
+			v.Partial = true
+		}
 	}
 	var digest Digest
 	haveDigest := false
@@ -373,7 +406,7 @@ func (s *Service) view(row store.StewardReview, latestReviewID int64) (View, err
 		contractShaNow = s.ContractSha(row.TaskID)
 	}
 	v.Stale = StaleReason(StaleInput{ReviewID: row.ID, ReviewHeadSHA: row.HeadSHA, ReviewContractSha: row.ContractSha256,
-		HeadNow: headNow, ContractShaNow: contractShaNow, LatestReviewID: latestReviewID})
+		HeadNow: headNow, ContractShaNow: contractShaNow, LatestReviewID: latestFor(v.Partial, latestReviewID, latestFullID)})
 	ready, why := MergeReady(row.Verdict, row.Status, row.ScopeViolation, v.Stale)
 	v.MergeReady, v.NotReadyReason = ready, why
 	return v, nil

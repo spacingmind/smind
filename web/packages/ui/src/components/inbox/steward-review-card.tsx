@@ -43,11 +43,17 @@ export function VerdictChip({ verdict }: { verdict: string | undefined }) {
   );
 }
 
+/** The icon of a pass chip, picked from its label and tone; never the only signal (the text is always shown). */
+function axisIcon(text: string, tone: string) {
+  if (text === "Accepted") return Icons.check;
+  if (text === "Changes requested") return Icons.warning;
+  return tone === "danger" ? Icons.permissionDanger : Icons.verdict;
+}
+
 /** A pass's chip: icon plus the always-visible status text, in the tone of its seat verdict. */
 export function AxisChip({ axis, testId }: { axis: Pick<StewardAxis, "status" | "seatVerdict" | "blockedReason">; testId?: string }) {
   const { text, tone } = axisStatusLabel(axis);
-  const Icon =
-    text === "Accepted" ? Icons.check : text === "Changes requested" ? Icons.warning : tone === "danger" ? Icons.permissionDanger : Icons.verdict;
+  const Icon = axisIcon(text, tone);
   return (
     <StatusBadge status={tone} data-testid={testId}>
       <Icon aria-hidden className="size-3" />
@@ -62,7 +68,7 @@ export function ReviewRowAxes({ axes }: { axes: { axis: string; verdict?: string
     <span className="flex flex-wrap items-center gap-1" data-testid="inbox-review-axes">
       {axes.map((a, i) => {
         const { text, tone } = axisStatusLabel({ status: a.status ?? (a.verdict ? "done" : "pending"), seatVerdict: a.verdict, blockedReason: a.reason });
-        const Icon = text === "Accepted" ? Icons.check : text === "Changes requested" ? Icons.warning : tone === "danger" ? Icons.permissionDanger : Icons.verdict;
+        const Icon = axisIcon(text, tone);
         return (
           <StatusBadge key={`${a.axis}-${i}`} status={tone} className="px-1.5 py-0" data-testid={`inbox-review-axis-${a.axis}`}>
             <Icon aria-hidden className="size-3" />
@@ -258,6 +264,12 @@ export function StewardReviewCard({ item, onOpenTask }: { item: InboxItem; onOpe
         <div className="flex flex-col gap-1" data-testid="steward-axes">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="m-0 text-ui-sm font-medium">Review axes</h3>
+            {data.partial === true && (
+              <StatusBadge status="neutral" data-testid="steward-partial">
+                <Icons.verdict aria-hidden className="size-3" />
+                Partial review · cannot be accepted
+              </StatusBadge>
+            )}
             {data.standardsChanged === true && (
               <StatusBadge status="warning" data-testid="steward-standards-changed">
                 <Icons.warning aria-hidden className="size-3" />

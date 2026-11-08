@@ -202,7 +202,7 @@ func runSteward(args []string, env stewardIO) int {
 		line(res)
 		if sub == "show" && !asJSON {
 			if s, _ := res["summary"].(string); s != "" {
-				fmt.Fprintf(env.out, "  summary: %s\n", s)
+				fmt.Fprintf(env.out, "  summary: %s\n", stewardText(s))
 			}
 			if gates, ok := res["gates"].([]any); ok {
 				for _, g := range gates {
@@ -210,8 +210,8 @@ func runSteward(args []string, env stewardIO) int {
 					fmt.Fprintf(env.out, "  gate %v:%v\n", gm["id"], gm["state"])
 				}
 			}
-			if axes, ok := res["axes"].([]any); ok && len(axes) > 0 {
-				stewardPrintAxes(env.out, res, axes)
+			if passes, ok := res["axes"].([]any); ok && len(passes) > 0 {
+				stewardPrintAxes(env.out, res, passes)
 			}
 		}
 	default:
@@ -296,8 +296,16 @@ func stewardAxisModel(am map[string]any) string {
 	return ""
 }
 
+// stewardText makes seat- and PR-derived text safe to print: tabs and line
+// breaks become spaces (so a value cannot forge another output line) and every
+// other control character, ESC included, is dropped (so it cannot move the
+// cursor or inject ANSI).
+func stewardText(s string) string {
+	return sanitizeForTerminal(strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(s))
+}
+
 // stewardField reads a result field the way stewardLine does: a missing,
-// nil or empty one prints as `-`.
+// nil or empty one prints as `-`. The text is made terminal-safe.
 func stewardField(m map[string]any, k string) string {
 	v, ok := m[k]
 	if !ok || v == nil {
@@ -306,7 +314,7 @@ func stewardField(m map[string]any, k string) string {
 	if s, isStr := v.(string); isStr && s == "" {
 		return "-"
 	}
-	return fmt.Sprintf("%v", v)
+	return stewardText(fmt.Sprintf("%v", v))
 }
 
 // stewardEvidence flattens criterion evidence to one line of at most 120
@@ -316,7 +324,7 @@ func stewardEvidence(v any) string {
 	if s == "" {
 		return "-"
 	}
-	r := []rune(strings.ReplaceAll(s, "\n", " "))
+	r := []rune(stewardText(s))
 	if len(r) > 120 {
 		r = r[:120]
 	}

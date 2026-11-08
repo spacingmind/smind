@@ -716,3 +716,65 @@ func TestView_StandardsChangedFromTheDigest(t *testing.T) {
 		t.Fatalf("view JSON = %s, want no standardsChanged key", raw)
 	}
 }
+
+// TestView_PartialReviewDoesNotSupersedeFullReview: a one-axis re-run is shown
+// as its own review and never makes an earlier full review stale or unready;
+// only a newer FULL review supersedes a full one, and it supersedes the partial.
+func TestView_PartialReviewDoesNotSupersedeFullReview(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	taskID := seedTask(t, svc)
+	svc.Head = func(int64) (string, error) { return "head1", nil }
+	svc.ContractSha = func(int64) string { return "c1" }
+	now := time.Now().UTC()
+	insert := func(verdict string) store.StewardReview {
+		t.Helper()
+		r, err := svc.DB.InsertStewardReview(store.StewardReview{TaskID: taskID, TriggerKind: TriggerHuman, HeadSHA: "head1", ContractSha256: "c1",
+			Status: "done", Verdict: verdict, SeatVerdict: verdict}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	addPasses := func(id int64, notRun bool) {
+		t.Helper()
+		for _, axis := range []string{store.StewardAxisStandards, store.StewardAxisSpec} {
+			if _, err := svc.DB.InsertStewardReviewPass(store.StewardReviewPass{ReviewID: id, Axis: axis, Status: PassRunning}, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if notRun {
+			if err := svc.DB.SetStewardPassBlocked(id, store.StewardAxisSpec, store.StewardPassNotRun, "not requested", 0, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	full := insert(VerdictAccepted)
+	addPasses(full.ID, false)
+	partial := insert(VerdictChanges)
+	addPasses(partial.ID, true)
+
+	fv, _ := svc.View(full.ID)
+	pv, _ := svc.View(partial.ID)
+	if fv.Stale != "" || !fv.MergeReady || fv.Partial {
+		t.Fatalf("full review after a partial re-run = %+v, want fresh, merge-ready, not partial", fv)
+	}
+	if pv.Stale != "" || !pv.Partial || pv.MergeReady {
+		t.Fatalf("partial review = %+v, want fresh, partial, never merge-ready", pv)
+	}
+	if list, _ := svc.List(taskID, 10); len(list) != 2 || list[0].Stale != "" || list[1].Stale != "" {
+		t.Fatalf("List = %+v, want both fresh", list)
+	}
+
+	newer := insert(VerdictAccepted)
+	addPasses(newer.ID, false)
+	fv, _ = svc.View(full.ID)
+	pv, _ = svc.View(partial.ID)
+	if fv.Stale != StaleSuperseded || pv.Stale != StaleSuperseded {
+		t.Fatalf("after a newer full review: full stale %q, partial stale %q, want both superseded", fv.Stale, pv.Stale)
+	}
+	if nv, _ := svc.View(newer.ID); nv.Stale != "" || !nv.MergeReady {
+		t.Fatalf("the newer full review = %+v, want fresh and merge-ready", nv)
+	}
+}

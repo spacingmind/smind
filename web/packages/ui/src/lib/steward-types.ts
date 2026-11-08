@@ -73,6 +73,8 @@ export interface StewardReview {
   axes?: StewardAxis[];
   /** True when the change edits a standards file (ADR-0054); absent otherwise. */
   standardsChanged?: boolean;
+  /** True for a one-axis re-run: the other pass was not run, so it can never be accepted. */
+  partial?: boolean;
   prNumber?: number;
   stale?: string;
   mergeReady: boolean;
@@ -120,6 +122,8 @@ export function axisStatusLabel(axis: Pick<StewardAxis, "status" | "seatVerdict"
     case "skipped":
       return { text: axis.blockedReason === "no_spec" ? "Skipped · no spec available" : "Skipped", tone: "neutral" };
     case "blocked":
+      // A pass a one-axis re-run did not request is not a failure.
+      if (axis.blockedReason === "not_run") return { text: "Not run", tone: "neutral" };
       return { text: "Did not complete", tone: "danger" };
     default:
       return { text: axis.status ? axis.status : "Pending", tone: "neutral" };

@@ -397,13 +397,19 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		if err != nil {
 			return nil, err
 		}
-		seen := map[int64]bool{}
+		// One current review per task, and one more for a partial re-run: a
+		// partial review supersedes no full review, so both stay listed.
+		type slot struct {
+			task    int64
+			partial bool
+		}
+		seen := map[slot]bool{}
 		var out []inbox.Review
 		for _, v := range views { // newest first
-			if seen[v.TaskID] {
+			if seen[slot{v.TaskID, v.Partial}] {
 				continue
 			}
-			seen[v.TaskID] = true
+			seen[slot{v.TaskID, v.Partial}] = true
 			if v.Status != "done" && v.Status != "blocked" {
 				continue
 			}

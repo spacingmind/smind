@@ -221,6 +221,19 @@ describe("StewardReviewCard", () => {
       expect(screen.getByTestId("steward-axis-spec").textContent?.match(/no spec available/g)).toHaveLength(1);
     });
 
+    it("a not-run axis of a partial review says Not run and marks the review partial", async () => {
+      await openCard({ partial: true, axes: [axis(), axis({ axis: "spec", status: "blocked", seatVerdict: undefined, blockedReason: "not_run" })] });
+      const row = screen.getByTestId("steward-axis-spec");
+      expect(row).toHaveTextContent("Not run");
+      expect(row).not.toHaveTextContent("Did not complete");
+      expect(screen.getByTestId("steward-partial")).toHaveTextContent("Partial review · cannot be accepted");
+    });
+
+    it("no partial marker on a full review", async () => {
+      await openCard({ axes: [axis(), axis({ axis: "spec" })] });
+      expect(screen.queryByTestId("steward-partial")).toBeNull();
+    });
+
     it("blocked axis shows did not complete and its reason", async () => {
       await openCard({ axes: [axis({ status: "blocked", seatVerdict: undefined, blockedReason: "timeout" })] });
       const row = screen.getByTestId("steward-axis-standards");
