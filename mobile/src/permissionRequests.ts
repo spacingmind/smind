@@ -147,6 +147,16 @@ export function feedPermissionEvent(board: PermissionBoard, runId: string, event
 }
 
 /**
+ * The deny reason as run.respondPermission takes it: the trimmed text,
+ * cut at the daemon's 500-character cap; undefined when blank (in which
+ * case no `reason` key goes out at all).
+ */
+export function denyReasonParam(text: string): string | undefined {
+  const trimmed = text.trim();
+  return trimmed.length === 0 ? undefined : trimmed.slice(0, 500);
+}
+
+/**
  * The tap flow: optimistically resolve (so the UI disables immediately),
  * then run.respondPermission against the request's own run. A rejection
  * rolls back via chooseFailed -- which is a no-op if a permission_resolved
@@ -158,12 +168,13 @@ export async function respondToPermission(
   board: PermissionBoard,
   requestId: string,
   optionId: string,
+  reason?: string,
 ): Promise<void> {
   const req = board.list().find((r) => r.requestId === requestId);
   if (!req || req.status !== 'pending') return;
   board.choose(requestId, optionId);
   try {
-    await respondPermission(conn, req.runId, requestId, optionId);
+    await respondPermission(conn, req.runId, requestId, optionId, reason);
   } catch (e) {
     board.chooseFailed(requestId, optionId, e instanceof Error ? e.message : String(e));
   }
