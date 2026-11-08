@@ -189,11 +189,122 @@ func runSteward(args []string, env stewardIO) int {
 					fmt.Fprintf(env.out, "  gate %v:%v\n", gm["id"], gm["state"])
 				}
 			}
+			if axes, ok := res["axes"].([]any); ok && len(axes) > 0 {
+				stewardPrintAxes(env.out, res, axes)
+			}
 		}
 	default:
 		return usage()
 	}
 	return 0
+}
+
+// stewardPrintAxes renders a two-axis review's extra blocks for `smind
+// steward show`: one line per pass (its verdict or status, plus the model),
+// the spec criteria under the spec pass, then the findings tagged by axis.
+// Cost is never printed (ADR-0054: cost shows only in the Usage overview),
+// and every field is read tolerantly: a missing field prints `-`, a
+// malformed element prints nothing.
+func stewardPrintAxes(w io.Writer, res map[string]any, axes []any) {
+	fmt.Fprintln(w, "  axes:")
+	for _, a := range axes {
+		am, _ := a.(map[string]any)
+		if am == nil {
+			continue
+		}
+		fmt.Fprintf(w, "    %s: %s%s\n", stewardField(am, "axis"), stewardAxisState(am), stewardAxisModel(am))
+		if ax, _ := am["axis"].(string); ax == "spec" {
+			for _, c := range stewardSlice(am["criteria"]) {
+				cm, _ := c.(map[string]any)
+				if cm == nil {
+					continue
+				}
+				fmt.Fprintf(w, "      %s %s: %s\n", stewardField(cm, "id"), stewardField(cm, "status"), stewardEvidence(cm["evidence"]))
+			}
+		}
+	}
+	fmt.Fprintln(w, "  findings:")
+	for _, f := range stewardSlice(res["findings"]) {
+		fm, _ := f.(map[string]any)
+		if fm == nil {
+			continue
+		}
+		l := fmt.Sprintf("    [%s] %s:%s [%s] %s (check: %s)",
+			stewardField(fm, "axis"), stewardField(fm, "file"), stewardField(fm, "line"),
+			stewardField(fm, "severity"), stewardField(fm, "why"), stewardField(fm, "check"))
+		if r := stewardField(fm, "rule"); r != "-" {
+			l += " rule: " + r
+		}
+		fmt.Fprintln(w, l)
+	}
+}
+
+// stewardAxisState words a pass's state: a done pass shows its seat verdict
+// in lowercase, a skipped pass says why when it can, a blocked pass names
+// the reason it died; anything else shows the raw status.
+func stewardAxisState(am map[string]any) string {
+	status, _ := am["status"].(string)
+	reason, _ := am["blockedReason"].(string)
+	switch status {
+	case "done":
+		if v, _ := am["seatVerdict"].(string); v != "" {
+			return strings.ToLower(v)
+		}
+		return "-"
+	case "skipped":
+		if reason == "no_spec" {
+			return "skipped (no spec available)"
+		}
+		return "skipped"
+	case "blocked":
+		if reason == "" {
+			reason = "-"
+		}
+		return "did not complete (" + reason + ")"
+	}
+	if status == "" {
+		return "-"
+	}
+	return status
+}
+
+func stewardAxisModel(am map[string]any) string {
+	if m := stewardField(am, "model"); m != "-" {
+		return " model " + m
+	}
+	return ""
+}
+
+// stewardField reads a result field the way stewardLine does: a missing,
+// nil or empty one prints as `-`.
+func stewardField(m map[string]any, k string) string {
+	v, ok := m[k]
+	if !ok || v == nil {
+		return "-"
+	}
+	if s, isStr := v.(string); isStr && s == "" {
+		return "-"
+	}
+	return fmt.Sprintf("%v", v)
+}
+
+// stewardEvidence flattens criterion evidence to one line of at most 120
+// runes.
+func stewardEvidence(v any) string {
+	s, _ := v.(string)
+	if s == "" {
+		return "-"
+	}
+	r := []rune(strings.ReplaceAll(s, "\n", " "))
+	if len(r) > 120 {
+		r = r[:120]
+	}
+	return string(r)
+}
+
+func stewardSlice(v any) []any {
+	s, _ := v.([]any)
+	return s
 }
 
 // stewardLine renders one review as `#<id> task <taskId> <verdict or status>
