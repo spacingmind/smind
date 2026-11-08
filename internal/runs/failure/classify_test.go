@@ -430,7 +430,7 @@ func TestClassify_AuthErrorMentioning429StaysAuth(t *testing.T) {
 
 func TestClassify_StructuredCodeBeatsText(t *testing.T) {
 	now := at(2026, 11, 1, 3, 0, 0)
-	for code, want := range map[string]string{CodeUsageLimit: KindPlanWindowExhausted, CodeUnauthorized: KindAuthExpired, CodeOverloaded: KindTransient429, CodeRateLimit: KindTransient429} {
+	for code, want := range map[string]string{CodeUsageLimit: KindPlanWindowExhausted, CodeUnauthorized: KindAuthExpired, CodeOverloaded: KindTransient429, CodeRateLimit: KindTransient429, CodeModelNotFound: KindModelNotInPlan} {
 		if r := Classify(Input{Code: code, Err: "something unrelated"}, now); r.Kind != want {
 			t.Fatalf("code %s: got %+v, want %s", code, r, want)
 		}

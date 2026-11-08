@@ -32,11 +32,23 @@ type claudeRec struct {
 	Type        string `json:"type"`
 	IsSidechain bool   `json:"isSidechain"`
 	IsMeta      bool   `json:"isMeta"`
-	Timestamp   string `json:"timestamp"`
-	Version     string `json:"version"`
-	Message     struct {
+	// IsCompactSummary marks the synthetic user record an auto- or manual
+	// compaction writes (string content, the summary of the earlier turns);
+	// IsVisibleInTranscriptOnly marks other records the CLI keeps only for its
+	// own transcript view. Neither is something the human typed.
+	IsCompactSummary          bool   `json:"isCompactSummary"`
+	IsVisibleInTranscriptOnly bool   `json:"isVisibleInTranscriptOnly"`
+	Timestamp                 string `json:"timestamp"`
+	Version                   string `json:"version"`
+	Message                   struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
+}
+
+// synthetic reports a user record the CLI wrote itself (meta, compaction
+// summary, transcript-only): never a prompt and never part of a turn's events.
+func (r claudeRec) synthetic() bool {
+	return r.IsMeta || r.IsCompactSummary || r.IsVisibleInTranscriptOnly
 }
 
 type claudeBlock struct {
@@ -94,7 +106,12 @@ func parseClaude(ctx context.Context, r io.Reader, ref Ref, out *int64, limit in
 		if rec.IsSidechain {
 			return nil
 		}
-		if rec.Type == "user" && !rec.IsMeta {
+		if rec.Type == "user" && rec.synthetic() {
+			// A compaction can land in the middle of a turn: read as a prompt it
+			// would end the matched turn there and truncate the rebuilt run.
+			return nil
+		}
+		if rec.Type == "user" {
 			if text, ok := claudePrompt(rec.Message.Content); ok {
 				finish()
 				cur = &segment{uses: map[string]bool{}, version: rec.Version}
