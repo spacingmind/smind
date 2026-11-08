@@ -262,6 +262,7 @@ export function HomeLanding({
               >
                 <div data-testid="home-run-chips" className="flex flex-wrap items-center">
                   <RunConfigToolbar.ModelPicker />
+                  <RunConfigToolbar.Thinking />
                   <RunConfigToolbar.Mode />
                 </div>
               </RunConfigToolbar>

@@ -272,6 +272,47 @@ describe("HomeLanding", () => {
   });
 });
 
+describe("HomeLanding effort chip", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useHomeProjectStore.getState().reload();
+    useHomeRunConfigStore.getState().reload();
+    usePendingSendStore.setState({ entry: null });
+  });
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    useHomeProjectStore.getState().reload();
+    useHomeRunConfigStore.getState().reload();
+    usePendingSendStore.setState({ entry: null });
+  });
+
+  it("home_effort_chip_renders_and_level_reaches_pending_send", async () => {
+    const { onCreated } = renderHome();
+    await flush();
+    fireEvent.click(screen.getByLabelText("Thinking level"));
+    const options = await screen.findAllByRole("option");
+    fireEvent.click(options.find((o) => o.textContent === "Extended")!);
+    await flush();
+    type("Think hard");
+    fireEvent.click(screen.getByTestId("home-send-button"));
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(usePendingSendStore.getState().entry?.config.thinkingLevel).toBe("extended");
+  });
+
+  it("home_effort_chip_hidden_when_provider_has_no_levels", async () => {
+    const { call } = fakeClient();
+    call.mockImplementation(async (method: string) => {
+      if (method === "provider.list") return { providers: [{ id: "glm", label: "GLM", models: [{ id: "glm-5", label: "GLM 5" }] }] };
+      return [];
+    });
+    useHomeRunConfigStore.getState().set({ baseAgentId: null, custom: false, provider: "glm", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" });
+    render(<HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={THREE} onCreated={vi.fn()} />);
+    await flush();
+    expect(screen.queryByLabelText("Thinking level")).not.toBeInTheDocument();
+  });
+});
+
 describe("HomeLanding office suggestions", () => {
   beforeEach(() => {
     window.localStorage.clear();
