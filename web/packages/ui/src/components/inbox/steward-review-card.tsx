@@ -56,6 +56,24 @@ export function AxisChip({ axis, testId }: { axis: Pick<StewardAxis, "status" | 
   );
 }
 
+/** The inbox row's per-pass chips: "Standards: Accepted" style, icon plus text, wrapping. */
+export function ReviewRowAxes({ axes }: { axes: { axis: string; verdict?: string; status?: string }[] }) {
+  return (
+    <span className="flex flex-wrap items-center gap-1" data-testid="inbox-review-axes">
+      {axes.map((a, i) => {
+        const { text, tone } = axisStatusLabel({ status: a.status ?? (a.verdict ? "done" : "pending"), seatVerdict: a.verdict });
+        const Icon = text === "Accepted" ? Icons.check : text === "Changes requested" ? Icons.warning : tone === "danger" ? Icons.permissionDanger : Icons.verdict;
+        return (
+          <StatusBadge key={`${a.axis}-${i}`} status={tone} className="px-1.5 py-0" data-testid={`inbox-review-axis-${a.axis}`}>
+            <Icon aria-hidden className="size-3" />
+            {axisLabel(a.axis)}: {text}
+          </StatusBadge>
+        );
+      })}
+    </span>
+  );
+}
+
 /** One spec criterion: an icon, the status word, the criterion id and its evidence. */
 function CriterionLine({ criterion }: { criterion: StewardCriterion }) {
   const met = criterion.status === "met";

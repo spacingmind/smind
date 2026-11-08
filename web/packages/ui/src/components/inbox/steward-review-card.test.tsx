@@ -208,7 +208,7 @@ describe("StewardReviewCard", () => {
       await openCard({ axes: [axis(), axis({ axis: "spec", seatVerdict: "CHANGES" })] });
       expect(screen.getByTestId("steward-axis-standards")).toHaveTextContent("Accepted");
       expect(screen.getByTestId("steward-axis-spec")).toHaveTextContent("Changes requested");
-      expect(screen.getByTestId("steward-verdict-chip")).toHaveTextContent("Changes requested");
+      expect(within(screen.getByTestId("steward-review-review:12")).getByTestId("steward-verdict-chip")).toHaveTextContent("Changes requested");
     });
 
     it("skipped spec axis says Skipped · no spec available", async () => {
