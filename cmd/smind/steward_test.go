@@ -207,3 +207,187 @@ func TestCLI_StewardJSONFlagPassesThrough(t *testing.T) {
 		t.Fatalf("--json list output = %q (%v)", out, err)
 	}
 }
+
+// A two-axis review's show output: the axes block after summary and gates,
+// the spec criteria under the spec pass, the findings tagged by axis. Cost
+// never appears (it lives in the Usage overview), so a `costUsd` anywhere
+// in the output is a bug.
+func TestStewardShow_PrintsAxesBlock(t *testing.T) {
+	longEvidence := strings.Repeat("e", 118) + "\nabc"
+	f := &fakeStewardCaller{result: map[string]any{
+		"id": 21, "taskId": 7, "verdict": "CHANGES", "headSha": stewardSha, "stale": "", "mergeReady": false,
+		"summary": "two axes",
+		"gates":   []any{map[string]any{"id": "ci", "state": "pass"}},
+		"axes": []any{
+			map[string]any{"axis": "standards", "status": "done", "seatVerdict": "CHANGES", "summary": "one finding", "model": "claude-haiku-5-5", "costUsd": 0.42, "runId": "run-1"},
+			map[string]any{"axis": "spec", "status": "done", "seatVerdict": "ACCEPTED", "summary": "spec met", "model": "claude-sonnet-5-5", "costUsd": 0.1,
+				"criteria": []any{
+					map[string]any{"id": "crit-1", "status": "met", "evidence": "plan line 4 says so"},
+					map[string]any{"id": "crit-2", "status": "unmet", "evidence": longEvidence},
+				}},
+		},
+		"findings": []any{
+			map[string]any{"axis": "standards", "file": "a.go", "line": 10, "severity": "major", "why": "unused var", "check": "go-vet", "rule": "std-1", "costUsd": 0.42},
+			map[string]any{"axis": "spec", "file": "b.go", "line": 3, "severity": "minor", "why": "missing case", "check": "spec"},
+			map[string]any{"file": "c.go", "line": 5, "severity": "info", "why": "nit", "check": "misc"},
+		},
+	}}
+	code, out, errOut := runStewardCLI(t, f, "show", "21")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	want := "#21 task 7 CHANGES head 0123456 fresh mergeReady=false\n" +
+		"  summary: two axes\n" +
+		"  gate ci:pass\n" +
+		"  axes:\n" +
+		"    standards: changes model claude-haiku-5-5\n" +
+		"    spec: accepted model claude-sonnet-5-5\n" +
+		"      crit-1 met: plan line 4 says so\n" +
+		"      crit-2 unmet: " + strings.Repeat("e", 118) + " a\n" +
+		"  findings:\n" +
+		"    [standards] a.go:10 [major] unused var (check: go-vet) rule: std-1\n" +
+		"    [spec] b.go:3 [minor] missing case (check: spec)\n" +
+		"    [-] c.go:5 [info] nit (check: misc)\n"
+	if out != want {
+		t.Fatalf("show output =\n%q\nwant\n%q", out, want)
+	}
+	for _, bad := range []string{"costUsd", "$", "0.42"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("show output leaks cost (%q): %q", bad, out)
+		}
+	}
+}
+
+func TestStewardShow_SkippedAndBlockedAxes(t *testing.T) {
+	f := &fakeStewardCaller{result: map[string]any{
+		"id": 22, "taskId": 7, "status": "blocked", "headSha": stewardSha, "stale": "", "mergeReady": false,
+		"axes": []any{
+			map[string]any{"axis": "standards", "status": "blocked", "blockedReason": "timeout"},
+			map[string]any{"axis": "spec", "status": "skipped", "blockedReason": "no_spec"},
+		},
+	}}
+	code, out, errOut := runStewardCLI(t, f, "show", "22")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	if !strings.Contains(out, "    standards: did not complete (timeout)\n") {
+		t.Fatalf("blocked axis line missing: %q", out)
+	}
+	if !strings.Contains(out, "    spec: skipped (no spec available)\n") {
+		t.Fatalf("skipped axis line missing: %q", out)
+	}
+}
+
+// A single-axis review's show output must stay exactly as it was: no axes
+// block, no findings block, even when the result carries findings.
+func TestStewardShow_WithoutAxesIsUnchanged(t *testing.T) {
+	f := &fakeStewardCaller{result: map[string]any{"id": 5, "taskId": 7, "verdict": "CHANGES", "headSha": stewardSha, "stale": "", "mergeReady": false,
+		"summary": "two findings", "gates": []any{map[string]any{"id": "ci", "state": "pass"}, map[string]any{"id": "scope", "state": "fail"}},
+		"findings": []any{map[string]any{"file": "a.go", "line": 10, "severity": "major", "why": "unused var", "check": "go-vet"}}}}
+	code, out, errOut := runStewardCLI(t, f, "show", "5")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	want := "#5 task 7 CHANGES head 0123456 fresh mergeReady=false\n" +
+		"  summary: two findings\n" +
+		"  gate ci:pass\n" +
+		"  gate scope:fail\n"
+	if out != want {
+		t.Fatalf("show output =\n%q\nwant\n%q", out, want)
+	}
+}
+
+func TestStewardShow_MalformedAxesNeverPanic(t *testing.T) {
+	f := &fakeStewardCaller{result: map[string]any{
+		"id": 23, "taskId": 7, "status": "running", "headSha": stewardSha, "stale": "", "mergeReady": false,
+		"axes": []any{
+			"standards", 42, nil,
+			map[string]any{"axis": "spec", "criteria": "nope"},
+			map[string]any{"status": "done"},
+			map[string]any{"axis": 7, "status": "pending", "criteria": []any{"crit"}},
+		},
+		"findings": []any{"oops", 3, nil, map[string]any{"axis": "spec"}},
+	}}
+	code, out, errOut := runStewardCLI(t, f, "show", "23")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	if !strings.Contains(out, "  axes:\n") || !strings.Contains(out, "  findings:\n") ||
+		!strings.Contains(out, "    [spec] -:- [-] - (check: -)\n") {
+		t.Fatalf("show output = %q", out)
+	}
+}
+
+func TestStewardReview_AxisFlagSendsAxes(t *testing.T) {
+	f := &fakeStewardCaller{result: map[string]any{"reviewId": 31, "taskId": 7, "commitSha": stewardSha, "status": "running"}}
+	axesParam := func(want ...string) {
+		t.Helper()
+		got, ok := f.params["axes"].([]string)
+		if !ok || len(got) != len(want) {
+			t.Fatalf("axes = %#v want %v (params %v)", f.params["axes"], want, f.params)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("axes = %v want %v", got, want)
+			}
+		}
+	}
+	code, out, errOut := runStewardCLI(t, f, "review", "7", "--axis", "spec")
+	if code != 0 || !strings.Contains(out, "#31 task 7 running") || errOut != "" {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	axesParam("spec")
+
+	code, _, _ = runStewardCLI(t, f, "review", "7", "--axis", "spec", "--axis", "standards")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	axesParam("spec", "standards")
+
+	code, _, _ = runStewardCLI(t, f, "review", "7", "--axis", "standards", "--axis", "spec", "--axis", "standards")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	axesParam("standards", "spec")
+
+	code, _, _ = runStewardCLI(t, f, "review", "7")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if _, has := f.params["axes"]; has {
+		t.Fatalf("axes sent without --axis: %v", f.params)
+	}
+}
+
+func TestStewardReview_AxisFlagValidation(t *testing.T) {
+	f := &fakeStewardCaller{result: map[string]any{"id": 1, "taskId": 7}}
+	code, _, errOut := runStewardCLI(t, f, "review", "7", "--axis")
+	if code != 2 || f.dialed || !strings.Contains(errOut, "steward: --axis needs standards or spec") {
+		t.Fatalf("missing value: exit %d dialed %v err %q", code, f.dialed, errOut)
+	}
+	code, _, errOut = runStewardCLI(t, f, "review", "7", "--axis", "other")
+	if code != 2 || f.dialed || !strings.Contains(errOut, `steward: invalid axis "other" (want standards or spec)`) {
+		t.Fatalf("bad value: exit %d dialed %v err %q", code, f.dialed, errOut)
+	}
+	for _, args := range [][]string{
+		{"show", "5", "--axis", "spec"}, {"list", "--axis", "standards"}, {"cancel", "5", "--axis", "spec"},
+	} {
+		code, _, errOut = runStewardCLI(t, f, args...)
+		if code != 2 || f.dialed || !strings.Contains(errOut, "usage: smind steward") {
+			t.Fatalf("%v: exit %d dialed %v err %q", args, code, f.dialed, errOut)
+		}
+	}
+}
+
+func TestStewardUsage_HasNoApproveOrMerge(t *testing.T) {
+	if !strings.Contains(cmdStewardUsage, "[--axis standards|spec]") {
+		t.Fatalf("usage lacks --axis:\n%s", cmdStewardUsage)
+	}
+	lower := strings.ToLower(cmdStewardUsage)
+	if strings.Contains(lower, "approve") || strings.Contains(lower, "merge ") {
+		t.Fatalf("usage shows a verdict-acting command:\n%s", cmdStewardUsage)
+	}
+	if !strings.Contains(cmdStewardUsage, "A review is advice: smind never merges; you read it and you merge.") {
+		t.Fatalf("usage lost its closing rule line:\n%s", cmdStewardUsage)
+	}
+}
