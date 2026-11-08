@@ -47,8 +47,11 @@ shipped as three PRs. This file tracks PR A; B and C add their sections.
 
 ### Progress
 
-(filled in as work lands)
+PR A implemented (AC1-4). Peers ran on the GLM profile; no Sonnet fallback.
 
 ### Validation
 
-(filled in at the end)
+- Web: full vitest (448 files, 5042 tests) and tsc pass; the web demo guard (`src/demo`) is inside that run.
+- Mobile: vitest (108 files, 1019 tests) and tsc pass.
+- Frames (web 1280 and 390, light and dark, luminance and no horizontal overflow asserted): daemon-down refused, daemon-down no answer after 8 s, home, shortcuts overlay (plain and searched), Settings > Profiles, This daemon popover.
+- Not frame-verified: the Retry click path and recovery (unit tests only), the lineage chip without cost (unit tests only), the mobile tree row.
