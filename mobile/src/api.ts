@@ -62,6 +62,13 @@ export interface RunSummary {
   FailureResetInferred?: boolean;
   /** The zone the reset's text was read in: "UTC+8", an IANA name or "daemon-local:<zone>"; absent = no note. */
   FailureResetZone?: string;
+  /**
+   * The daemon's next step for the failure (runs.RunStatus.FailureAction; the
+   * outer key is the Go field name, the action's own keys are camelCase).
+   * `summary` is the daemon's one plain sentence for the kind (R3a AC4);
+   * absent on an older daemon.
+   */
+  FailureAction?: { kind: string; target?: string; label: string; summary?: string };
   /** ADR-0041: the id of the run this run continues (a failover successor); absent/empty otherwise. */
   FailoverOf?: string;
   /** The profile the run used; absent on older daemons. */
