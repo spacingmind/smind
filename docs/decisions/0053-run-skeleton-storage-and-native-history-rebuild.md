@@ -393,8 +393,30 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
 - **H7.** A run-scoped connection (an agent, an orchestrator seat, a plugin session) or a caller with no principal that sends `auto` reads exactly what it reads with
   no detail: no cache lookup, no probe, no read. The clients send `auto` when they open a finished run (web, mobile); the "Load full
   history" button (`full`) stays for everything the automatic path skips.
-- **Not done here.** ACP `session/load`, the fleet label, a negative cache for sessions that failed to rebuild (a failing open
+- **Not done here.** The fleet label, a negative cache for sessions that failed to rebuild (a failing open
   retries each time; the drift breaker bounds format failures), single-flight for two simultaneous cold opens of one run, a cache for `run.attach`'s terminal label.
+
+## Implemented: ACP `session/load` (explicit request only)
+
+`internal/history/native/acp.go`, `taskrunner.Runner.ReplayACPSession`, `acp.Client.LoadSessionReplay`. Spec and tests:
+[`docs/plans/active/acp-session-load.md`](../plans/active/acp-session-load.md).
+
+- **What the protocol guarantees, and what it does not.** `session/load` is allowed only when the agent advertised `loadSession`; the agent
+  must replay the whole conversation as `session/update` notifications and answer after the last one. The protocol says nothing about the
+  load leaving the session untouched, so "read-only" is not claimed: smind asks for nothing beyond the load (no prompt, no mode or option
+  change, no MCP servers, permission requests denied) and what an agent does internally on a load is its own.
+- **Who and when.** A human principal only, with `run.logs {detail:"full", confirmStart:true}`. `auto` never starts an agent;
+  `full` without `confirmStart` serves the stored rows with `skeletonReason: "confirm_required"`. A skeleton run of an ACP provider
+  carries `loadStartsAgent: true` (additive) so the clients confirm first ("Start the agent to load this history?").
+- **Launch.** The same launch as a run's agent (provider env, plugin confinement), cwd the task worktree (a missing worktree is
+  `native_session_missing`), closed before the call returns, on timeout, on cancel and on daemon shutdown.
+- **Bounds.** The shared 2-slot pool (held until the process is gone), 30 s (a process start plus the replay), the replay's bytes over
+  64 MiB refuse the load. Not cached.
+- **Slice.** The run's turn is the one whose user message hashes to the run's prompt, whole or its last chunk; exactly one match, else
+  `slice_not_found`. The tool call count is checked against the skeleton as for the file readers (`format_drift`).
+- **Learned refusal.** An agent that does not advertise `loadSession` is remembered until restart; its runs stop offering the button
+  (`provider_cannot_rebuild`).
+- **Not done.** A cache for ACP loads, `thread/read` for codex, running a load on a fleet peer.
 
 ## Implemented: the retention amendment (PR C)
 

@@ -20,8 +20,8 @@ contract of ADR-0053; nothing here changes how any other reader sees a run.
   servers, permission policy auto-deny), `initialize`, refuses unless the agent advertised `loadSession`, `session/load` with the
   run's session id and the task worktree as cwd, collects the replay, closes the agent. It never sends a prompt, sets a mode or a
   config option.
-- The replay covers every turn of the session. The run's turn is the one whose user message is the run's prompt (exact, or the
-  prompt as the tail of the user text: smind prepends role/skill text to a first prompt). Exactly one match is required; zero or
+- The replay covers every turn of the session. The run's turn is the one whose user message is the run's prompt (the whole user
+  text, or its last chunk: smind prepends role/skill text to a first prompt as an earlier block). Exactly one match is required; zero or
   several is `slice_not_found`. The turn's text, thinking and tool calls become events (adjacent text chunks coalesced), then the
   same scrub and elide as every rebuilder.
 - Bounds: the shared 2-concurrent slot pool, a 30 s timeout (a process start plus the replay; claude/codex files keep 10 s), 64 MiB
@@ -63,11 +63,11 @@ time) is the agent's own and is not verified here.
 
 ## Progress
 
-- [ ] spec
-- [ ] acp client replay + fake agent
-- [ ] native ACP rebuild (slice, bounds) + runs/wsapi wiring
-- [ ] web + mobile confirm dialog, frames
-- [ ] review, PR
+- [x] spec
+- [x] acp client replay + fake agent
+- [x] native ACP rebuild (slice, bounds) + runs/wsapi wiring
+- [x] web + mobile confirm dialog, frames
+- [x] review, PR
 
 ## Validation
 
