@@ -7,8 +7,6 @@ import {
   attentionRollup,
   budgetLine,
   buildTreeRows,
-  costLabel,
-  formatCost,
   formatCountdown,
   rateLimitCountdown,
   runStateLabel,
@@ -141,23 +139,10 @@ describe('taskTree', () => {
     expect(formatCountdown(-5)).toBe('0s');
   });
 
-  it('formatCost shows n/a for null, <$0.01 for tiny, never $0 for unknown', () => {
-    expect(formatCost(null)).toBe('n/a');
-    expect(formatCost(undefined)).toBe('n/a');
-    expect(formatCost(NaN)).toBe('n/a');
-    expect(formatCost(0.004)).toBe('<$0.01');
-    expect(formatCost(0)).toBe('$0.00');
-    expect(formatCost(0.01)).toBe('$0.01');
-    expect(formatCost(1.374)).toBe('$1.37');
-    expect(formatCost(null)).not.toMatch(/\$0/);
-  });
-
-  it('costLabel shows own and subtree, omits subtree for a childless node', () => {
-    const parent = node(1, { childCount: 2, usage: { own: usage(0.42), subtree: usage(1.37), archivedDescendants: 0 } });
-    expect(costLabel(parent)).toBe('$0.42 (subtree $1.37)');
-    expect(costLabel(node(2, { usage: { own: usage(0.42), subtree: usage(0.42), archivedDescendants: 0 } }))).toBe('$0.42');
-    expect(costLabel(node(3, { childCount: 1, usage: { own: usage(null), subtree: usage(null), archivedDescendants: 0 } }))).toBe('n/a');
-    expect(costLabel(node(4, { usage: { own: usage(null), subtree: usage(null), archivedDescendants: 0 } }))).toBe('n/a');
+  it('the row view model carries no cost', () => {
+    const list = [node(1, { childCount: 2 }), node(2)];
+    const { rows } = buildTreeRows({ nodes: list, truncated: false }, NOW, none);
+    expect(rows.every((r) => r.kind === 'more' || !('cost' in r))).toBe(true);
   });
 
   it('attentionRollup counts waiting and failed over the subtree', () => {
