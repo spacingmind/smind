@@ -227,6 +227,12 @@ func PruneSpecFor(axis Axis, extraStandards []string) PruneSpec {
 	return spec
 }
 
+// SingleSeatPruneSpec is what the single review's seat (steward.twoAxis off)
+// loses from its scratch tree: the autoload names at any depth, as both passes
+// do, and no standards paths (it has no base copies and is never pointed at a
+// standards file).
+func SingleSeatPruneSpec() PruneSpec { return PruneSpecFor("", nil) }
+
 // PruneScratch removes what spec names from a seat's scratch tree and never
 // follows a symlink: a symlink met at any component of a path, parent or last,
 // is removed itself and the walk stops there, and the by-name walk does not
