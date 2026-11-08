@@ -309,6 +309,9 @@ func (r *reader) Activity(g registry.Grant, p wire.TaskActivityParams) (wire.Act
 		return wire.Activity{}, err
 	}
 	res := wire.Activity{RunID: run.ID, Events: []wire.Event{}, NextCursor: p.Cursor}
+	if hs, ok := r.src.(HistorySourcer); ok {
+		res.HistorySource = hs.RunHistorySource(run.ID)
+	}
 	if len(evs) > limit {
 		res.HasMore = true
 		evs = evs[:limit]

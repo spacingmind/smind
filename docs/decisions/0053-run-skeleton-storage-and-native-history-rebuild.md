@@ -182,6 +182,8 @@ subtree, relay/mobile as today); rebuilt text passes redaction like live text; t
 
 ### 7. Where it runs (D8, fleet)
 
+*Amended by "Implemented: the fleet label": the label is `skeletonReason: owned_by_host` with the host as separate registry-derived fields (not `owned_by_host:<hostId>`), shown by the CLI and `task_logs`; the UI button, the direct read on the owning host and the `skeletonRev` mirror re-sync below are not built.*
+
 The rebuild runs **only on the daemon that owns the run** (the session lives in that user's home). A fleet read
 (`internal/fleet`, `ListRunEventsAfterSeq`) returns the skeleton and `skeletonReason: owned_by_host:<hostId>`; the UI offers "Full
 history on host X", a direct read on that host (hop limit 1 as for every other read). A mirror re-syncs a run when its
@@ -393,7 +395,7 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
 - **H7.** A run-scoped connection (an agent, an orchestrator seat, a plugin session) or a caller with no principal that sends `auto` reads exactly what it reads with
   no detail: no cache lookup, no probe, no read. The clients send `auto` when they open a finished run (web, mobile); the "Load full
   history" button (`full`) stays for everything the automatic path skips.
-- **Not done here.** The fleet label, a negative cache for sessions that failed to rebuild (a failing open
+- **Not done here.** A negative cache for sessions that failed to rebuild (a failing open
   retries each time; the drift breaker bounds format failures), single-flight for two simultaneous cold opens of one run, a cache for `run.attach`'s terminal label.
 
 ## Implemented: ACP `session/load` (explicit request only)
@@ -425,6 +427,23 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
 - **Learned refusal.** An agent that does not advertise `loadSession` is remembered until the daemon restarts (an agent upgraded to support it stays refused until then); its runs stop offering the button
   (`provider_cannot_rebuild`).
 - **Not done.** A cache for ACP loads, `thread/read` for codex, running a load on a fleet peer, a pre-check that spares the agent start for a prompt that repeats in the session (it answers `slice_not_found` after the load).
+
+## Implemented: the fleet label (AC9)
+
+`wire.Activity.HistorySource`, `serve.HistorySourcer`, `remote.read` `historyOwner`, `smind host activity`, the `task_logs` remote branch.
+
+- **Owner side.** The activity page of a run that the owner stores as a summary (skeleton form with a native_ref, detail not pruned) carries
+  `historySource: "skeleton"` (additive, `omitempty`; a run stored in full, a Source that cannot say and a peer that predates it send no
+  key). It is a flag, not text: the reader accepts exactly that one value.
+- **Reader side.** `remote.read {op: "activity"}` adds `historyOwner {historySource, skeletonReason: "owned_by_host", host, hostId}` to its
+  envelope. `host` and `hostId` are this daemon's own registry facts about the host it asked; nothing the peer sends names a host, and
+  any other value of the flag is dropped from the data too. The clients also handle a label with no host ("another host"); the bridge always resolves the host, so today that form is only reachable in unit tests.
+- **Surfaces.** The CLI prints `note: summary only; the full history is on host <alias>. Rebuild it there.` after the events (JSON
+  mode is the raw answer); `task_logs` of a remote run gains `historySource`, `skeletonReason`, `ownedByHost`. No web or mobile
+  screen shows a remote run's history today (a mirrored task is a read-only pill), so none gained a label.
+- **No rebuild across hosts.** There is no path from a fleet read to a rebuild or to a peer's session files: serving a peer's read never
+  asks the rebuilder for a root (a test counts them). A rebuild runs only on the owning daemon, for a human there.
+- **Not done.** A direct "load full history" read on the owning host from another host's UI; the mirror re-sync on `skeletonRev`.
 
 ## Implemented: the retention amendment (PR C)
 

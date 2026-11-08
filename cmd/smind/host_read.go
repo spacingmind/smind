@@ -23,6 +23,16 @@ type hostReadResult struct {
 	Data          json.RawMessage `json:"data"`
 	StatusUnknown bool            `json:"statusUnknown"`
 	Failures      int             `json:"failures"`
+	// HistoryOwner is set when the owning host stores the run only as a
+	// summary: the full history is on that host and is rebuilt only there.
+	HistoryOwner *historyOwnerView `json:"historyOwner"`
+}
+
+// historyOwnerView is the part of remote.read's historyOwner the clients use (the
+// host fields come from the daemon's own registry; empty Host = cannot be named).
+type historyOwnerView struct {
+	Host   string `json:"host"`
+	HostID string `json:"hostId"`
 }
 
 type hostReadTask struct {
@@ -459,6 +469,13 @@ func renderHostRead(w io.Writer, verb string, res hostReadResult) error {
 		}
 		for _, e := range d.Events {
 			fmt.Fprintf(w, "%d %s %s\n", e.Seq, hostSafeText(e.Type), hostSafeText(e.Text))
+		}
+		if res.HistoryOwner != nil {
+			if res.HistoryOwner.Host != "" {
+				fmt.Fprintf(w, "note: summary only; the full history is on host %s. Rebuild it there.\n", hostSafeText(res.HistoryOwner.Host))
+			} else {
+				fmt.Fprintln(w, "note: summary only; the full history is on another host.")
+			}
 		}
 		if d.HasMore {
 			fmt.Fprintf(w, "more: --cursor %d\n", d.NextCursor)

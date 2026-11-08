@@ -215,6 +215,12 @@ type taskLogsOutput struct {
 	Host       string `json:"host,omitempty"`
 	NextCursor int64  `json:"nextCursor,omitempty"`
 	HasMore    bool   `json:"hasMore,omitempty"`
+	// HistorySource, SkeletonReason and OwnedByHost are set on a host read
+	// whose owner stores the run only as a summary: the full history is on
+	// OwnedByHost (this daemon's registry alias) and is rebuilt only there.
+	HistorySource  string `json:"historySource,omitempty"`
+	SkeletonReason string `json:"skeletonReason,omitempty"`
+	OwnedByHost    string `json:"ownedByHost,omitempty"`
 }
 
 // mcpTaskLogs wraps run.logs: full or tailed transcript plus the run's
