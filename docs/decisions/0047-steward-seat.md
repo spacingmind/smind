@@ -2,7 +2,7 @@
 
 ## Status
 
-**Amended by [ADR-0054](0054-steward-two-axis-review.md) (Proposed): the review runs two passes, Standards and Spec.** **Accepted — 2026-10-31** (Supervisor, under the Human's 2026-10-31 directive "xử lí hết trừ nhóm E": every decision in section 11 accepted as written, including D1's amendment of ADR-0019; the Human may veto any of them). The Human directed "Steward-in-smind" (design a Steward seat inside smind that reviews task verdicts and
+**Amended by [ADR-0054](0054-steward-two-axis-review.md) (Accepted 2026-11-08): the review runs two passes, Standards and Spec.** **Accepted — 2026-10-31** (Supervisor, under the Human's 2026-10-31 directive "xử lí hết trừ nhóm E": every decision in section 11 accepted as written, including D1's amendment of ADR-0019; the Human may veto any of them). The Human directed "Steward-in-smind" (design a Steward seat inside smind that reviews task verdicts and
 surfaces permission requests through the inbox). Every decision in [section 11](#11-decisions-taken-as-supervisor-defaults) is a **Supervisor default 2026-10-31 under the
 Human's directive, Human may veto**; a veto changes the PR listed next to it. Spec, acceptance criteria and PR split: `docs/plans/active/steward-seat.md`.
 
