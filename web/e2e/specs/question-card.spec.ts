@@ -17,6 +17,8 @@ type Bridge = {
   hold(): void
   release(): void
   ask(requestId: string, questions: Question[], truncated?: boolean): void
+  /** Injects a streamed chunk on the run's subscription: real timeline rows above the dock. */
+  chunk(text: string): void
   resolve(requestId: string, reason: string, answer?: unknown): void
   attached(): Promise<void>
 }
@@ -61,6 +63,7 @@ async function bridge(page: Page, runId: string): Promise<Bridge> {
     },
     release: () => open?.(),
     ask: (requestId, questions, truncated) => emit('question_request', { requestId, request: { source: 'ask_user', questions, ...(truncated ? { truncated } : {}) } }),
+    chunk: (text) => emit('chunk', { text }),
     resolve: (requestId, reason, answer) => emit('question_resolved', { requestId, reason, ...(answer ? { answer } : {}) }),
     attached: () => attachedP,
   }
@@ -156,6 +159,10 @@ test('Q-02 a multi-select question with an Other line sends the checked options 
   await page.getByTestId('question-option-env-dev').check()
   await page.getByTestId('question-option-env-stg').check()
   await page.getByTestId('question-other-env').fill('canary in eu-west')
+  // The filled Other field stays named by its visible label (design review: a value alone said nothing).
+  await expect(page.getByLabel('Other:')).toBeVisible()
+  await expect(page.getByTestId('question-other-env')).toHaveValue('canary in eu-west')
+  await frame(page, testInfo, 'k-other-filled')
   await frame(page, testInfo, 'b-multi-other')
   await page.getByTestId('question-submit').click()
   await expect.poll(() => b.calls.length).toBe(1)
@@ -214,6 +221,21 @@ test('Q-04 an adversarial question renders as literal text: no links, no HTML, n
   const box = await card.boundingBox()
   expect(box!.width).toBeLessThanOrEqual(page.viewportSize()!.width)
   await frame(page, testInfo, 'd-adversarial')
+
+  // The long ask arrives collapsed (line-clamp is visual only -- the text above stays in the DOM),
+  // with the options and the toggle on screen.
+  const toggle = page.getByTestId('question-text-toggle')
+  await expect(toggle).toBeVisible()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(toggle).toHaveText('Show all')
+  await expect(card).toContainText('[Click here](https://evil.example/phish)')
+  await frame(page, testInfo, 'i-long-collapsed')
+
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(toggle).toHaveText('Show less')
+  await expect(card).toContainText('<img src=x onerror=alert(1)>')
+  await frame(page, testInfo, 'j-long-expanded')
 })
 
 test('Q-05 a refused secret question leaves a refused marker and no card', async ({ app }, testInfo) => {
@@ -250,4 +272,30 @@ test('Q-06 a question the daemon restart orphaned resolves to a cancelled marker
   await expect(marker).toContainText('Which database should the migration target?')
   await expect(marker).toContainText('cancelled (daemon restarted)')
   await frame(page, testInfo, 'h-restart-marker')
+})
+
+test('Q-07 at 390px the docked card separates cleanly from the timeline rows above it', async ({ app }, testInfo) => {
+  const { page } = app
+  const b = await open(app, testInfo, 'q07')
+  // A timeline with rows the dock must not cut off: streamed chunks the log shows above the card.
+  b.chunk('First line of streamed output above the dock.\n')
+  b.chunk('Second line: at 390px this row used to be half hidden behind the dock.\n')
+  b.ask('rq-7', [
+    {
+      id: 'db',
+      text: 'Which database should the fallback target?',
+      kind: 'single',
+      options: [
+        { id: 'pg', label: 'PostgreSQL' },
+        { id: 'sqlite', label: 'SQLite' },
+      ],
+    },
+  ])
+  await expect(page.getByTestId('question-card')).toBeVisible()
+  await expect(page.getByTestId('timeline-assistant')).toContainText('Second line')
+  const dock = page.getByTestId('pending-permission-dock')
+  await expect(dock).toBeVisible()
+  await expect(dock).toHaveCSS('border-top-width', '1px')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await frame(page, testInfo, 'l-dock-narrow')
 })
