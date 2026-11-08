@@ -26,7 +26,7 @@ import (
 // Standards seat can never satisfy the Spec pass. A VerdictError consumes
 // nothing: the seat fixes the document and resubmits. When it is the last
 // open pass the review itself is decided.
-func (s *Service) SubmitPassVerdict(reviewID int64, axis, token, runID string, raw []byte) (View, error) {
+func (s *Service) SubmitPassVerdict(reviewID int64, axis Axis, token, runID string, raw []byte) (View, error) {
 	row, pass, err := s.openPass(reviewID, axis)
 	if err != nil {
 		return View{}, err
@@ -75,10 +75,10 @@ func (s *Service) SubmitPassVerdict(reviewID int64, axis, token, runID string, r
 	if v.Verdict == VerdictBlocked {
 		summary += " [blocked: " + v.BlockedReason + "]"
 	}
-	if err := s.DB.ConsumeStewardPassToken(reviewID, axis); err != nil {
+	if err := s.DB.ConsumeStewardPassToken(reviewID, string(axis)); err != nil {
 		return View{}, err
 	}
-	if err := s.DB.SetStewardPassVerdict(reviewID, axis, v.Verdict, summary, string(findingsJSON), string(criteriaJSON), pass.CostUSD, s.now()); err != nil {
+	if err := s.DB.SetStewardPassVerdict(reviewID, string(axis), v.Verdict, summary, string(findingsJSON), string(criteriaJSON), pass.CostUSD, s.now()); err != nil {
 		return View{}, passClosed(err)
 	}
 	s.publish(row.TaskID, reviewID, "running")
@@ -89,7 +89,7 @@ func (s *Service) SubmitPassVerdict(reviewID int64, axis, token, runID string, r
 // the daemon-owned reasons, when the pass's run ended without a verdict. It
 // can never store a verdict. When it is the last open pass the review is
 // decided.
-func (s *Service) WritePassBlocked(reviewID int64, axis, reason, summary string, costUSD float64) error {
+func (s *Service) WritePassBlocked(reviewID int64, axis Axis, reason, summary string, costUSD float64) error {
 	if !IsDaemonBlockedReason(reason) {
 		return errors.New("the daemon may only write blocked passes for timeout, budget, crashed, cancelled or scope_violation")
 	}
@@ -97,7 +97,7 @@ func (s *Service) WritePassBlocked(reviewID int64, axis, reason, summary string,
 	if err != nil {
 		return err
 	}
-	if err := s.DB.SetStewardPassBlocked(reviewID, axis, reason, summary, costUSD, s.now()); err != nil {
+	if err := s.DB.SetStewardPassBlocked(reviewID, string(axis), reason, summary, costUSD, s.now()); err != nil {
 		return passClosed(err)
 	}
 	s.publish(row.TaskID, reviewID, "running")
@@ -109,7 +109,7 @@ func (s *Service) WritePassBlocked(reviewID int64, axis, reason, summary string,
 // verdict, no cost, reported as "no spec available" (ADR-0054 §6). Only the
 // Spec axis, and only while the digest carries no criteria: skipping is not a
 // way to drop an axis that has work.
-func (s *Service) WritePassSkipped(reviewID int64, axis string) error {
+func (s *Service) WritePassSkipped(reviewID int64, axis Axis) error {
 	if axis != AxisSpec {
 		return errors.New("only the spec pass can be skipped: the standards pass always runs")
 	}
@@ -124,7 +124,7 @@ func (s *Service) WritePassSkipped(reviewID int64, axis string) error {
 	if len(digest.criteriaIDs()) > 0 {
 		return errors.New("the spec pass cannot be skipped: the digest carries criteria to judge")
 	}
-	if err := s.DB.SetStewardPassSkipped(reviewID, axis, "no spec available", s.now()); err != nil {
+	if err := s.DB.SetStewardPassSkipped(reviewID, string(axis), "no spec available", s.now()); err != nil {
 		return passClosed(err)
 	}
 	s.publish(row.TaskID, reviewID, "running")
@@ -134,7 +134,7 @@ func (s *Service) WritePassSkipped(reviewID int64, axis string) error {
 
 // openPass loads the review and its pass for axis and requires both to be
 // open (pending or running).
-func (s *Service) openPass(reviewID int64, axis string) (store.StewardReview, store.StewardReviewPass, error) {
+func (s *Service) openPass(reviewID int64, axis Axis) (store.StewardReview, store.StewardReviewPass, error) {
 	row, err := s.DB.GetStewardReview(reviewID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, store.StewardReviewPass{}, fmt.Errorf("steward review %d: %w", reviewID, ErrNotFound)
@@ -145,7 +145,7 @@ func (s *Service) openPass(reviewID int64, axis string) (store.StewardReview, st
 	if row.Status != PassPending && row.Status != PassRunning {
 		return row, store.StewardReviewPass{}, ErrVerdictExists
 	}
-	pass, err := s.DB.GetStewardReviewPass(reviewID, axis)
+	pass, err := s.DB.GetStewardReviewPass(reviewID, string(axis))
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, pass, fmt.Errorf("steward review %d has no %s pass: %w", reviewID, axis, ErrNotFound)
 	}
@@ -191,7 +191,7 @@ func (s *Service) finalize(reviewID int64) (View, error) {
 	results := make([]PassResult, 0, len(passes))
 	cost := 0.0
 	for _, p := range passes {
-		results = append(results, PassResult{Axis: p.Axis, Status: p.Status, SeatVerdict: p.SeatVerdict, BlockedReason: p.BlockedReason})
+		results = append(results, PassResult{Axis: Axis(p.Axis), Status: p.Status, SeatVerdict: p.SeatVerdict, BlockedReason: p.BlockedReason})
 		cost += p.CostUSD
 	}
 	combined, err := Combine(results)
@@ -204,6 +204,13 @@ func (s *Service) finalize(reviewID int64) (View, error) {
 	summary := passSummaries(passes)
 	if combined.Blocked {
 		summary += " [" + strings.Join(combined.Notes, "; ") + "]"
+		if combined.ScopeViolation {
+			// As the single-pass watch does for a changed Lead worktree: the
+			// flag is allowed on a closed review and survives it.
+			if err := s.DB.SetStewardReviewScopeViolation(reviewID); err != nil {
+				return View{}, err
+			}
+		}
 		err = s.DB.SetStewardReviewBlocked(reviewID, combined.BlockedReason, summary, cost, s.now())
 		if errors.Is(err, store.ErrStewardReviewClosed) {
 			return s.View(reviewID) // already decided (a cancel won the race)
@@ -272,7 +279,7 @@ func mergedFindings(passes []store.StewardReviewPass) (string, error) {
 			return "", fmt.Errorf("steward review pass %s: findings: %w", p.Axis, err)
 		}
 		for i := range fs {
-			fs[i].Axis = p.Axis
+			fs[i].Axis = Axis(p.Axis)
 		}
 		all = append(all, fs...)
 	}

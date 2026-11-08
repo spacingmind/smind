@@ -3,20 +3,22 @@ package steward
 import (
 	"errors"
 	"fmt"
+
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // Pass statuses (ADR-0054 §2), the same strings steward_review_passes holds.
 const (
-	PassPending = "pending"
-	PassRunning = "running"
-	PassDone    = "done"
-	PassBlocked = "blocked"
-	PassSkipped = "skipped"
+	PassPending = store.StewardPassPending
+	PassRunning = store.StewardPassRunning
+	PassDone    = store.StewardPassDone
+	PassBlocked = store.StewardPassBlocked
+	PassSkipped = store.StewardPassSkipped
 )
 
 // PassResult is one pass of a two-axis review as Combine reads it.
 type PassResult struct {
-	Axis          string
+	Axis          Axis
 	Status        string
 	SeatVerdict   string // the pass's own verdict, when Status is PassDone
 	BlockedReason string // a DaemonBlockedReasons value, when Status is PassBlocked
@@ -31,6 +33,10 @@ type Combined struct {
 	// BlockedReason (the first failed pass's, standards first).
 	Blocked       bool
 	BlockedReason string
+	// ScopeViolation: a pass reported that the Lead's worktree changed. It
+	// blocks the whole review whatever the other pass said, and the review's
+	// scope-violation flag is set (ADR-0054 §6).
+	ScopeViolation bool
 	// Notes say which axis lowered or failed the review, in pass order.
 	Notes []string
 }
@@ -48,6 +54,14 @@ var ErrPassesOpen = errors.New("a steward review pass is still open")
 // caller passes its result to Clamp, which is unchanged.
 func Combine(passes []PassResult) (Combined, error) {
 	var res Combined
+	for _, p := range passes {
+		if p.Status == PassBlocked && p.BlockedReason == "scope_violation" {
+			// The worktree changed: nothing another pass says can save the
+			// review, so it does not wait for the other pass either.
+			return Combined{Blocked: true, BlockedReason: p.BlockedReason, ScopeViolation: true,
+				Notes: []string{fmt.Sprintf("axis %s: the lead's worktree changed while the seat ran", p.Axis)}}, nil
+		}
+	}
 	best, have := VerdictAccepted, false
 	failed := false
 	for _, p := range passes {

@@ -5,14 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // The two review axes (ADR-0054). A two-axis review runs one seat pass per
 // axis; SeatVerdict and SeatFinding stay the single-pass documents, so the
 // seat's tool schema and every stored single-pass review are unchanged.
+type Axis string
+
+// The axes, aliasing the store's strings so there is one source of truth.
 const (
-	AxisStandards = "standards"
-	AxisSpec      = "spec"
+	AxisStandards Axis = store.StewardAxisStandards
+	AxisSpec      Axis = store.StewardAxisSpec
 )
 
 // Criterion statuses a Spec pass reports for each acceptance criterion.
@@ -27,7 +32,7 @@ const (
 // from the pass's token on storage; a seat that sets it must set its own.
 type AxisFinding struct {
 	SeatFinding
-	Axis string `json:"axis,omitempty"`
+	Axis Axis   `json:"axis,omitempty"`
 	Rule string `json:"rule,omitempty"`
 }
 
@@ -43,7 +48,7 @@ type CriterionResult struct {
 type AxisVerdict struct {
 	V             int                `json:"v"`
 	ReviewID      int64              `json:"reviewId"`
-	Axis          string             `json:"axis"`
+	Axis          Axis               `json:"axis"`
 	Verdict       string             `json:"verdict"`
 	Summary       string             `json:"summary"`
 	Findings      []AxisFinding      `json:"findings"`
@@ -194,7 +199,7 @@ func (v AxisVerdict) seatFindings() []SeatFinding {
 //
 // The axis must equal the axis bound to the pass token: a Standards seat can
 // never satisfy the Spec pass.
-func CheckAxisVerdict(v AxisVerdict, d Digest, axis string, criteriaIDs []string) error {
+func CheckAxisVerdict(v AxisVerdict, d Digest, axis Axis, criteriaIDs []string) error {
 	if v.Axis != axis {
 		return ve("axis", "this pass is %q, the verdict says %q", axis, v.Axis)
 	}
@@ -223,19 +228,17 @@ func CheckAxisVerdict(v AxisVerdict, d Digest, axis string, criteriaIDs []string
 			return err
 		}
 	}
+	// ParseAxisVerdict only lets the three verdicts through.
 	switch v.Verdict {
 	case VerdictAccepted:
 		return checkAxisAccepted(v, d, axis)
 	case VerdictChanges:
 		return checkAxisChanges(v, axis)
-	case VerdictBlocked:
-		if strings.TrimSpace(v.BlockedReason) == "" {
-			return ve("blockedReason", "required for BLOCKED")
-		}
-		return nil
-	default:
-		return ve("verdict", "must be ACCEPTED, CHANGES or BLOCKED")
 	}
+	if strings.TrimSpace(v.BlockedReason) == "" {
+		return ve("blockedReason", "required for BLOCKED")
+	}
+	return nil
 }
 
 // checkCriteria requires exactly one result per extracted criterion, no
@@ -271,7 +274,7 @@ func checkCriteria(results []CriterionResult, ids []string) error {
 // The Spec pass keeps every ACCEPTED rule of a single-pass verdict (gate
 // acknowledgements, a real observation per frame) and may have no unmet
 // criterion; the Standards pass is shown neither gates nor images.
-func checkAxisAccepted(v AxisVerdict, d Digest, axis string) error {
+func checkAxisAccepted(v AxisVerdict, d Digest, axis Axis) error {
 	if axis == AxisSpec {
 		if hasUnmet(v.Criteria) {
 			return ve("criteria", "an ACCEPTED verdict cannot carry an unmet criterion")
@@ -298,7 +301,7 @@ func checkAxisAccepted(v AxisVerdict, d Digest, axis string) error {
 
 // checkAxisChanges enforces what a CHANGES verdict of one axis carries: a
 // complete finding, or for the Spec pass an unmet criterion instead.
-func checkAxisChanges(v AxisVerdict, axis string) error {
+func checkAxisChanges(v AxisVerdict, axis Axis) error {
 	if len(v.Findings) == 0 && !(axis == AxisSpec && hasUnmet(v.Criteria)) {
 		return ve("findings", "CHANGES needs at least one finding")
 	}

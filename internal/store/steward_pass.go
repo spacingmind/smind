@@ -7,10 +7,26 @@ import (
 )
 
 // The two review axes of ADR-0054 §2: each is one seat run of one review.
+// The steward package aliases these; they are the only place the strings are
+// written.
 const (
 	StewardAxisStandards = "standards"
 	StewardAxisSpec      = "spec"
 )
+
+// The statuses of a pass, and the blocked_reason a skipped pass carries.
+const (
+	StewardPassPending = "pending"
+	StewardPassRunning = "running"
+	StewardPassDone    = "done"
+	StewardPassBlocked = "blocked"
+	StewardPassSkipped = "skipped"
+
+	stewardPassNoSpec = "no_spec"
+)
+
+// stewardPassOpenCond is the WHERE clause of an open pass.
+const stewardPassOpenCond = `status IN ('` + StewardPassPending + `','` + StewardPassRunning + `')`
 
 // StewardReviewPass is one seat run of one steward review on one axis
 // (ADR-0054 §2). SeatVerdict is write-once: it stays "" while the pass is
@@ -90,7 +106,7 @@ func (s *Store) GetStewardReviewPass(reviewID int64, axis string) (StewardReview
 // single-pass).
 func (s *Store) ListStewardReviewPasses(reviewID int64) ([]StewardReviewPass, error) {
 	rows, err := s.db.Query(`SELECT `+stewardPassCols+` FROM steward_review_passes
-		WHERE review_id = ? ORDER BY CASE axis WHEN 'standards' THEN 0 ELSE 1 END, id`, reviewID)
+		WHERE review_id = ? ORDER BY CASE axis WHEN ? THEN 0 ELSE 1 END, id`, reviewID, StewardAxisStandards)
 	if err != nil {
 		return nil, fmt.Errorf("list steward review passes: %w", err)
 	}
@@ -122,7 +138,7 @@ func (s *Store) stewardPassOpen(q string, args ...any) error {
 // SetStewardPassRun records the pass's steward run, its task and scratch
 // directory once the seat has started it, while the pass is open.
 func (s *Store) SetStewardPassRun(reviewID int64, axis, runID string, stewardTaskID int64, scratchDir string) error {
-	if err := s.stewardPassOpen(`UPDATE steward_review_passes SET run_id = ?, steward_task_id = ?, scratch_dir = ? WHERE review_id = ? AND axis = ? AND status IN ('pending','running')`,
+	if err := s.stewardPassOpen(`UPDATE steward_review_passes SET run_id = ?, steward_task_id = ?, scratch_dir = ? WHERE review_id = ? AND axis = ? AND `+stewardPassOpenCond+``,
 		runID, stewardTaskID, scratchDir, reviewID, axis); err != nil {
 		return fmt.Errorf("set steward review pass run: %w", err)
 	}
@@ -131,10 +147,10 @@ func (s *Store) SetStewardPassRun(reviewID int64, axis, runID string, stewardTas
 
 // SetStewardPassStatus moves an open pass between pending and running.
 func (s *Store) SetStewardPassStatus(reviewID int64, axis, status string) error {
-	if status != "pending" && status != "running" {
+	if status != StewardPassPending && status != StewardPassRunning {
 		return fmt.Errorf("set steward review pass status: unknown status %q", status)
 	}
-	if err := s.stewardPassOpen(`UPDATE steward_review_passes SET status = ? WHERE review_id = ? AND axis = ? AND status IN ('pending','running')`, status, reviewID, axis); err != nil {
+	if err := s.stewardPassOpen(`UPDATE steward_review_passes SET status = ? WHERE review_id = ? AND axis = ? AND `+stewardPassOpenCond+``, status, reviewID, axis); err != nil {
 		return fmt.Errorf("set steward review pass status: %w", err)
 	}
 	return nil
@@ -143,7 +159,7 @@ func (s *Store) SetStewardPassStatus(reviewID int64, axis, status string) error 
 // SetStewardPassToken records the sha256 of the pass's one-time verdict
 // token, while the pass is open.
 func (s *Store) SetStewardPassToken(reviewID int64, axis, tokenHash string) error {
-	if err := s.stewardPassOpen(`UPDATE steward_review_passes SET token_hash = ? WHERE review_id = ? AND axis = ? AND status IN ('pending','running')`, tokenHash, reviewID, axis); err != nil {
+	if err := s.stewardPassOpen(`UPDATE steward_review_passes SET token_hash = ? WHERE review_id = ? AND axis = ? AND `+stewardPassOpenCond+``, tokenHash, reviewID, axis); err != nil {
 		return fmt.Errorf("set steward review pass token: %w", err)
 	}
 	return nil
@@ -168,7 +184,7 @@ func (s *Store) ConsumeStewardPassToken(reviewID int64, axis string) error {
 // ErrStewardPassClosed.
 func (s *Store) SetStewardPassVerdict(reviewID int64, axis, seatVerdict, summary, findingsJSON, criteriaJSON string, costUSD float64, now time.Time) error {
 	res, err := s.db.Exec(`UPDATE steward_review_passes SET seat_verdict = ?, summary = ?, findings_json = ?, criteria_json = ?,
-		cost_usd = ?, status = 'done', finished_at = ? WHERE review_id = ? AND axis = ? AND status IN ('pending','running') AND seat_verdict = ''`,
+		cost_usd = ?, status = '`+StewardPassDone+`', finished_at = ? WHERE review_id = ? AND axis = ? AND `+stewardPassOpenCond+` AND seat_verdict = ''`,
 		seatVerdict, capUTF8(summary, stewardSummaryMax), findingsJSON, criteriaJSON, costUSD, now.UTC(), reviewID, axis)
 	if err != nil {
 		return fmt.Errorf("set steward review pass verdict: %w", err)
@@ -184,7 +200,7 @@ func (s *Store) SetStewardPassVerdict(reviewID int64, axis, seatVerdict, summary
 // Write-once like the verdict; a second call returns ErrStewardPassClosed.
 func (s *Store) SetStewardPassBlocked(reviewID int64, axis, reason, summary string, costUSD float64, now time.Time) error {
 	res, err := s.db.Exec(`UPDATE steward_review_passes SET blocked_reason = ?, summary = ?, cost_usd = ?,
-		status = 'blocked', finished_at = ? WHERE review_id = ? AND axis = ? AND status IN ('pending','running') AND seat_verdict = ''`,
+		status = '`+StewardPassBlocked+`', finished_at = ? WHERE review_id = ? AND axis = ? AND `+stewardPassOpenCond+` AND seat_verdict = ''`,
 		reason, capUTF8(summary, stewardSummaryMax), costUSD, now.UTC(), reviewID, axis)
 	if err != nil {
 		return fmt.Errorf("set steward review pass blocked: %w", err)
@@ -198,9 +214,9 @@ func (s *Store) SetStewardPassBlocked(reviewID int64, axis, reason, summary stri
 // SetStewardPassSkipped ends an open pass that never ran because no spec
 // was resolvable (ADR-0054 §6): skipped, no cost, no seat verdict.
 func (s *Store) SetStewardPassSkipped(reviewID int64, axis, summary string, now time.Time) error {
-	res, err := s.db.Exec(`UPDATE steward_review_passes SET blocked_reason = 'no_spec', summary = ?, cost_usd = 0,
-		status = 'skipped', finished_at = ? WHERE review_id = ? AND axis = ? AND status IN ('pending','running') AND seat_verdict = ''`,
-		capUTF8(summary, stewardSummaryMax), now.UTC(), reviewID, axis)
+	res, err := s.db.Exec(`UPDATE steward_review_passes SET blocked_reason = ?, summary = ?, cost_usd = 0,
+		status = ?, finished_at = ? WHERE review_id = ? AND axis = ? AND `+stewardPassOpenCond+` AND seat_verdict = ''`,
+		stewardPassNoSpec, capUTF8(summary, stewardSummaryMax), StewardPassSkipped, now.UTC(), reviewID, axis)
 	if err != nil {
 		return fmt.Errorf("set steward review pass skipped: %w", err)
 	}

@@ -210,7 +210,7 @@ type FrameView struct {
 
 // ReviewAxis is one pass of a two-axis review as the card reads it.
 type ReviewAxis struct {
-	Axis          string            `json:"axis"`
+	Axis          Axis              `json:"axis"`
 	Status        string            `json:"status"`
 	SeatVerdict   string            `json:"seatVerdict,omitempty"`
 	Summary       string            `json:"summary,omitempty"`
@@ -224,7 +224,7 @@ type ReviewAxis struct {
 
 // reviewAxis maps one pass row; the token hash never leaves the store.
 func reviewAxis(p store.StewardReviewPass) (ReviewAxis, error) {
-	ax := ReviewAxis{Axis: p.Axis, Status: p.Status, SeatVerdict: p.SeatVerdict, Summary: p.Summary, BlockedReason: p.BlockedReason,
+	ax := ReviewAxis{Axis: Axis(p.Axis), Status: p.Status, SeatVerdict: p.SeatVerdict, Summary: p.Summary, BlockedReason: p.BlockedReason,
 		Model: p.Model, CostUSD: p.CostUSD, RunID: p.RunID, StewardTaskID: p.StewardTaskID}
 	if p.CriteriaJSON != "" {
 		if err := json.Unmarshal([]byte(p.CriteriaJSON), &ax.Criteria); err != nil {

@@ -67,6 +67,9 @@ func TestCombine_FailedAxisNeverAccepted(t *testing.T) {
 	t.Parallel()
 
 	for _, reason := range DaemonBlockedReasons {
+		if reason == "scope_violation" {
+			continue // blocks the whole review: TestCombine_ScopeViolationBlocksWholeReview
+		}
 		got, err := Combine([]PassResult{
 			{Axis: AxisStandards, Status: PassBlocked, BlockedReason: reason},
 			{Axis: AxisSpec, Status: PassDone, SeatVerdict: VerdictAccepted},
@@ -301,8 +304,8 @@ func TestSeatVerdict_SchemaCapsCoverNewFields(t *testing.T) {
 type twoAxisFixture struct {
 	svc    *Service
 	row    store.StewardReview
-	tokens map[string]string
-	runs   map[string]string
+	tokens map[Axis]string
+	runs   map[Axis]string
 }
 
 func openTwoAxis(t *testing.T, d Digest) twoAxisFixture {
@@ -313,14 +316,14 @@ func openTwoAxis(t *testing.T, d Digest) twoAxisFixture {
 	}
 	svc := newTestService(t)
 	row, _ := openReview(t, svc, string(b))
-	fx := twoAxisFixture{svc: svc, row: row, tokens: map[string]string{}, runs: map[string]string{}}
-	for _, axis := range []string{AxisStandards, AxisSpec} {
+	fx := twoAxisFixture{svc: svc, row: row, tokens: map[Axis]string{}, runs: map[Axis]string{}}
+	for _, axis := range []Axis{AxisStandards, AxisSpec} {
 		tok, err := NewToken()
 		if err != nil {
 			t.Fatal(err)
 		}
-		fx.tokens[axis], fx.runs[axis] = tok, "run-"+axis
-		if _, err := svc.DB.InsertStewardReviewPass(store.StewardReviewPass{ReviewID: row.ID, Axis: axis, Status: PassRunning,
+		fx.tokens[axis], fx.runs[axis] = tok, "run-"+string(axis)
+		if _, err := svc.DB.InsertStewardReviewPass(store.StewardReviewPass{ReviewID: row.ID, Axis: string(axis), Status: PassRunning,
 			RunID: fx.runs[axis], TokenHash: HashToken(tok)}, time.Now().UTC()); err != nil {
 			t.Fatalf("InsertStewardReviewPass(%s) error = %v", axis, err)
 		}
@@ -328,7 +331,7 @@ func openTwoAxis(t *testing.T, d Digest) twoAxisFixture {
 	return fx
 }
 
-func (fx twoAxisFixture) submit(t *testing.T, axis string, v AxisVerdict) (View, error) {
+func (fx twoAxisFixture) submit(t *testing.T, axis Axis, v AxisVerdict) (View, error) {
 	t.Helper()
 	v.ReviewID = fx.row.ID
 	raw, err := json.Marshal(v)
@@ -369,8 +372,8 @@ func TestTokenAxis_StandardsSeatCannotSubmitSpec(t *testing.T) {
 	if _, err := fx.svc.SubmitPassVerdict(fx.row.ID, AxisStandards, fx.tokens[AxisStandards], fx.runs[AxisStandards], lieRaw); err == nil {
 		t.Fatal("spec-labelled verdict on the standards pass = nil, want an axis error")
 	}
-	for _, axis := range []string{AxisStandards, AxisSpec} {
-		p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, axis)
+	for _, axis := range []Axis{AxisStandards, AxisSpec} {
+		p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(axis))
 		if p.TokenUsed || p.Status != PassRunning {
 			t.Fatalf("%s pass after refused submissions = %+v, want untouched", axis, p)
 		}
@@ -510,7 +513,7 @@ func TestPassVerdict_IncompleteConsumesNothing(t *testing.T) {
 	if _, err := fx.submit(t, AxisSpec, specVerdict(VerdictAccepted)); !errors.Is(err, ErrInvalidVerdict) {
 		t.Fatalf("spec ACCEPTED without criteria error = %v, want a VerdictError", err)
 	}
-	p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, AxisSpec)
+	p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisSpec))
 	if p.TokenUsed || p.Status != PassRunning {
 		t.Fatalf("spec pass = %+v, want the token unconsumed", p)
 	}
@@ -526,7 +529,7 @@ func TestPassVerdict_HoldWhenGateUnknownConsumesNothing(t *testing.T) {
 	if _, err := fx.submit(t, AxisStandards, v); err == nil {
 		t.Fatal("submitting with an unknown gate = nil, want an error")
 	}
-	if p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, AxisStandards); p.TokenUsed {
+	if p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisStandards)); p.TokenUsed {
 		t.Fatal("the token was consumed while a gate is unknown")
 	}
 }
@@ -591,7 +594,7 @@ func TestPassSkipped_OnlySpecAndOnlyWithoutCriteria(t *testing.T) {
 	if err := fx.svc.WritePassSkipped(fx.row.ID, AxisStandards); err == nil {
 		t.Fatal("WritePassSkipped(standards) = nil, want a refusal")
 	}
-	if p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, AxisStandards); p.Status != PassRunning {
+	if p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisStandards)); p.Status != PassRunning {
 		t.Fatalf("standards pass = %+v, want it untouched", p)
 	}
 	// A spec pass with criteria to judge cannot be skipped either.
@@ -607,5 +610,61 @@ func TestSeatVerdict_SpecAcceptedNeedsCriteriaToJudge(t *testing.T) {
 	fx := openTwoAxis(t, axisDigest())
 	if _, err := fx.submit(t, AxisSpec, specVerdict(VerdictAccepted)); !errors.Is(err, ErrInvalidVerdict) {
 		t.Fatalf("spec ACCEPTED with no criteria in the digest error = %v, want a VerdictError", err)
+	}
+}
+
+func TestCombine_ScopeViolationBlocksWholeReview(t *testing.T) {
+	t.Parallel()
+
+	for name, other := range map[string]PassResult{
+		"other accepted": {Axis: AxisSpec, Status: PassDone, SeatVerdict: VerdictAccepted},
+		"other open":     {Axis: AxisSpec, Status: PassRunning},
+		"other skipped":  {Axis: AxisSpec, Status: PassSkipped},
+	} {
+		got, err := Combine([]PassResult{{Axis: AxisStandards, Status: PassBlocked, BlockedReason: "scope_violation"}, other})
+		if err != nil || !got.Blocked || got.BlockedReason != "scope_violation" || !got.ScopeViolation || got.SeatVerdict != "" {
+			t.Fatalf("%s: Combine() = %+v, %v; want the whole review BLOCKED with scope_violation", name, got, err)
+		}
+	}
+	// An ordinary failed axis is not that.
+	got, _ := Combine([]PassResult{{Axis: AxisStandards, Status: PassBlocked, BlockedReason: "timeout"}, {Axis: AxisSpec, Status: PassDone, SeatVerdict: VerdictAccepted}})
+	if got.Blocked || got.ScopeViolation {
+		t.Fatalf("Combine(timeout + ACCEPTED) = %+v, want CHANGES, not a scope violation", got)
+	}
+}
+
+func TestPassVerdict_ScopeViolationBlocksWholeReview(t *testing.T) {
+	t.Parallel()
+
+	fx := openTwoAxis(t, axisDigest("AC1"))
+	if _, err := fx.submit(t, AxisSpec, specVerdict(VerdictAccepted, CriterionResult{ID: "AC1", Status: CriterionMet, Evidence: "combine.go implements it"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.WritePassBlocked(fx.row.ID, AxisStandards, "scope_violation", "the lead's worktree changed", 0.1); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fx.svc.View(fx.row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != VerdictBlocked || got.Status != "blocked" || got.BlockedReason != "scope_violation" || !got.ScopeViolation || got.MergeReady {
+		t.Fatalf("view = %+v, want BLOCKED, scope_violation, flag set, not merge-ready", got)
+	}
+}
+
+func TestPassVerdict_ScopeViolationDoesNotWaitForTheOtherPass(t *testing.T) {
+	t.Parallel()
+
+	fx := openTwoAxis(t, axisDigest("AC1"))
+	if err := fx.svc.WritePassBlocked(fx.row.ID, AxisSpec, "scope_violation", "the lead's worktree changed", 0); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := fx.svc.View(fx.row.ID)
+	if got.Verdict != VerdictBlocked || got.BlockedReason != "scope_violation" || !got.ScopeViolation {
+		t.Fatalf("view = %+v, want the review blocked at once", got)
+	}
+	// The still-open pass cannot reopen it.
+	if _, err := fx.submit(t, AxisStandards, standardsVerdict(VerdictAccepted)); !errors.Is(err, ErrVerdictExists) {
+		t.Fatalf("late standards verdict error = %v, want ErrVerdictExists", err)
 	}
 }
