@@ -11,10 +11,9 @@ import (
 )
 
 // Passive rejection detection (ADR-0028 §7.1, D14). Everything here is pure:
-// no clock reads, no I/O, no logging of header values. It ports
-// refs/cliproxyapi/internal/runtime/executor/helps/claude_ratelimit.go
-// (ClaudeHeadersIndicateUnifiedRateLimitRejection, ParseClaudeRateLimitReset,
-// randomClaudeFuzzDuration).
+// no clock reads, no I/O, no logging of header values. The rules
+// follow Anthropic's unified rate-limit headers: which responses are declared
+// rejections, how a reset deadline is read, and the random grace added to it.
 
 // MaxCooldown bounds any cooldown end, so a garbage header cannot park an
 // account.
@@ -116,26 +115,28 @@ func utilizationHealthy(raw string) bool {
 	return err == nil && !math.IsNaN(u) && !math.IsInf(u, 0) && u >= 0 && u < 1
 }
 
-// modelOnly ports the pattern of cliproxyapi's isOverageOrFableOnlyRejection:
-// a rejection that is only the account's overage budget or its Fable (7d_oi)
+// modelOnly reports a rejection that is only the account's overage budget or its Fable (7d_oi)
 // window, while the shared 5h and 7d windows are not exhausted. It must cool
 // down at most the rejected model, never the account. The shared windows count
 // as not exhausted when each is allowed (or allowed_warning) or, when its
 // status header is omitted, when its own utilization is healthy (< 1) or, for
 // an overage-claim rejection, absent: the API leaves a window out when it did
-// not evaluate it. Anything that does not match stays a whole-account
-// rejection: an unknown shape never fails open.
+// not evaluate it. A bare overage-disabled-reason header (many accounts send it
+// on every response) narrows only when both shared windows are explicitly
+// allowed: it is not enough to excuse an omitted window. Anything that does not
+// match stays a whole-account rejection: an unknown shape never fails open. The
+// window label of such a cooldown is weekly_model, whichever signal declared it.
 func (s unifiedStatuses) modelOnly() bool {
 	if s.fiveH == "rejected" || s.sevenD == "rejected" {
 		return false
 	}
-	overage := s.sevenDOI == "rejected" || s.overage == "rejected" || s.overageDisabledReason != "" || strings.Contains(s.claim, "overage")
-	if !overage {
-		return false
-	}
+	declared := s.sevenDOI == "rejected" || s.overage == "rejected" || strings.Contains(s.claim, "overage")
 	fiveOK, sevenOK := windowAllowed(s.fiveH), windowAllowed(s.sevenD)
 	if fiveOK && sevenOK {
-		return true
+		return declared || s.overageDisabledReason != ""
+	}
+	if !declared {
+		return false
 	}
 	if sevenOK && s.fiveH == "" {
 		if utilizationHealthy(s.util5h) || (s.unified == "rejected" && !s.has5hUtil) {
@@ -234,8 +235,7 @@ func CooldownEnd(deadline, now time.Time, grace time.Duration) time.Time {
 // GraceFunc yields the random grace added to a cooldown end.
 type GraceFunc func() time.Duration
 
-// DefaultGrace is a uniform integer 1 to 30 seconds from a cryptographic RNG
-// (cliproxyapi randomClaudeFuzzDuration).
+// DefaultGrace is a uniform integer 1 to 30 seconds from a cryptographic RNG.
 func DefaultGrace() time.Duration {
 	return graceFrom(func(max int64) (int64, error) {
 		n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(max))
@@ -305,7 +305,7 @@ func headerPresent(h http.Header, name string) bool {
 	return false
 }
 
-// headerFold is the ref's getHeaderCaseInsensitive: http.Header.Get cannot
+// headerFold is a case-insensitive header read: http.Header.Get cannot
 // find a non-canonical key that contains '_' (7d_oi), so fall back to a scan.
 func headerFold(h http.Header, name string) string {
 	if h == nil {

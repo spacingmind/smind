@@ -440,3 +440,25 @@ func Test_passive_overage_claim_with_omitted_windows_and_utilization(t *testing.
 		}
 	}
 }
+
+// A bare overage-disabled-reason header narrows a rejection only when both
+// shared windows are explicitly allowed; it never excuses an omitted window.
+func Test_passive_disabled_reason_alone_does_not_excuse_an_omitted_window(t *testing.T) {
+	t.Parallel()
+	const p = "Anthropic-Ratelimit-Unified-"
+	for name, tc := range map[string]struct {
+		kv        []string
+		wantModel bool
+	}{
+		"both windows allowed":     {[]string{p + "5h-Status", "allowed", p + "7d-Status", "allowed"}, true},
+		"5h omitted":               {[]string{p + "7d-Status", "allowed"}, false},
+		"5h omitted, healthy util": {[]string{p + "7d-Status", "allowed", p + "5h-Utilization", "0.2"}, false},
+		"7d omitted, healthy util": {[]string{p + "5h-Status", "allowed", p + "7d-Utilization", "0.2"}, false},
+		"both omitted":             {nil, false},
+	} {
+		kv := append([]string{p + "Status", "rejected", p + "Overage-Disabled-Reason", "out_of_credits"}, tc.kv...)
+		if got := ClassifyRejection(429, rawHeader(kv...)); !got.Rejected || got.ModelOnly != tc.wantModel {
+			t.Errorf("%s: got %+v, want rejected with ModelOnly=%v", name, got, tc.wantModel)
+		}
+	}
+}

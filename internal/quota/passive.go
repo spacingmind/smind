@@ -187,7 +187,7 @@ type Passive struct {
 	stop     chan struct{}
 	done     chan struct{}
 
-	// unnamedModelOnly counts 7d_oi-only rejections not recorded because the
+	// unnamedModelOnly counts model-scoped (overage-only or 7d_oi) rejections not recorded because the
 	// request's model is unknown (tests).
 	unnamedModelOnly atomic.Int64
 }
