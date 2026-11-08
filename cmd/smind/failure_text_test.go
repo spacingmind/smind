@@ -26,6 +26,9 @@ func TestFailureText_PerClass(t *testing.T) {
 		{runSummaryRow{Status: "error", FailureKind: failure.KindTransient429, FailureAction: actFor(failure.KindTransient429)}, []string{"transient 429", "next: GLM throttled briefly: retry"}},
 		{runSummaryRow{Status: "error", FailureKind: failure.KindPlanWindowExhausted, FailureWindow: "5h", FailureResetAt: &reset,
 			FailureAction: failure.NextAction(failure.KindPlanWindowExhausted, failure.ActionContext{Window: "5h", ResetAt: &reset, Now: now})}, []string{"rate limited (5h window), resets 12:00", "next: Wait"}},
+		{runSummaryRow{Status: "error", FailureKind: failure.KindContextWindowExceeded, FailureAction: actFor(failure.KindContextWindowExceeded)}, []string{"context window exceeded", "next: Start a fresh chat"}},
+		{runSummaryRow{Status: "error", FailureKind: failure.KindSessionBudgetExceeded, FailureAction: actFor(failure.KindSessionBudgetExceeded)}, []string{"session budget exceeded", "next: Raise the session budget"}},
+		{runSummaryRow{Status: "error", FailureKind: failure.KindTooManyDenials, FailureAction: actFor(failure.KindTooManyDenials)}, []string{"too many denials", "next: Review the permission policy"}},
 	} {
 		got := runStatusText(tc.row, now)
 		for _, w := range tc.want {
@@ -38,12 +41,26 @@ func TestFailureText_PerClass(t *testing.T) {
 	if got := runStatusText(runSummaryRow{Status: "error", FailureKind: failure.KindPlanWindowExhausted, FailureWindow: "5h"}, now); strings.Contains(got, "next:") {
 		t.Errorf("no action must add no next: %q", got)
 	}
+	// Every known class renders words, never just the raw kind id.
+	for _, kind := range failure.AllKinds() {
+		got := runStatusText(runSummaryRow{Status: "error", FailureKind: kind, FailureAction: actFor(kind)}, now)
+		if got == "" {
+			t.Errorf("runStatusText(%q) is empty", kind)
+		}
+		switch kind {
+		case failure.KindContextWindowExceeded, failure.KindSessionBudgetExceeded, failure.KindTooManyDenials:
+			if !strings.Contains(got, strings.ReplaceAll(kind, "_", " ")) {
+				t.Errorf("runStatusText(%q) = %q, want the class in words", kind, got)
+			}
+		}
+	}
 }
 
 func TestWaitExitCode_NewClasses(t *testing.T) {
 	for kind, want := range map[string]int{
 		failure.KindPlanWindowExhausted: 6, failure.KindTransient429: 6, failure.KindRateLimited: 6,
 		failure.KindAuthExpired: 7, failure.KindModelNotInPlan: 7, failure.KindCLIExited: 1, "": 1,
+		failure.KindContextWindowExceeded: 7, failure.KindSessionBudgetExceeded: 7, failure.KindTooManyDenials: 7,
 	} {
 		if got := waitExitCode(runSummaryRow{Status: "error", FailureKind: kind}); got != want {
 			t.Errorf("waitExitCode(%q) = %d, want %d", kind, got, want)
@@ -55,10 +72,13 @@ func TestWaitExitCode_NewClasses(t *testing.T) {
 // class means and what NOT to do, so a Lead can route on failureKind alone.
 func TestTaskStatus_MessageRoutesOnClass(t *testing.T) {
 	for kind, want := range map[string][]string{
-		failure.KindAuthExpired:         {"auth_expired", "Sign in again to GLM", "Do not retry", "do not fall back"},
-		failure.KindModelNotInPlan:      {"model_not_in_plan", "Pick another model", "Do not retry the same model"},
-		failure.KindPlanWindowExhausted: {"plan_window_exhausted", "Do not retry immediately"},
-		failure.KindTransient429:        {"transient_429", "Do not switch profile"},
+		failure.KindAuthExpired:           {"auth_expired", "Sign in again to GLM", "Do not retry", "do not fall back"},
+		failure.KindModelNotInPlan:        {"model_not_in_plan", "Pick another model", "Do not retry the same model"},
+		failure.KindPlanWindowExhausted:   {"plan_window_exhausted", "Do not retry immediately"},
+		failure.KindTransient429:          {"transient_429", "Do not switch profile"},
+		failure.KindContextWindowExceeded: {"context_window_exceeded", "Start a fresh chat", "do not retry the same chat"},
+		failure.KindSessionBudgetExceeded: {"session_budget_exceeded", "A human raises it", "do not retry and do not fall back"},
+		failure.KindTooManyDenials:        {"too_many_denials", "Review the permission policy", "do not widen permissions"},
 	} {
 		res := runLogsResult{RunID: "r-1", Status: "error", FailureKind: kind, Action: actFor(kind)}
 		st := buildTaskStatusOutput(res)
@@ -78,7 +98,7 @@ func TestTaskStatus_MessageRoutesOnClass(t *testing.T) {
 }
 
 func TestMCPInstructions_ListEveryClass(t *testing.T) {
-	for _, k := range []string{failure.KindAuthExpired, failure.KindPlanWindowExhausted, failure.KindModelNotInPlan, failure.KindTransient429, failure.KindRateLimited, failure.KindCLIExited} {
+	for _, k := range failure.AllKinds() {
 		if !strings.Contains(mcpInstructions, k) {
 			t.Errorf("mcpInstructions does not mention failureKind %q", k)
 		}

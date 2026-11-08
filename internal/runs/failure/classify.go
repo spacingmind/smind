@@ -25,6 +25,15 @@ const (
 	// KindRateLimited is the residual: a rate limit that cannot be told apart
 	// (a bare 429 / rate words, no window, no reset, no Retry-After).
 	KindRateLimited = "rate_limited"
+	// KindContextWindowExceeded: the conversation outgrew the model's context
+	// window; only a fresh chat (or compaction) can take the next turn.
+	KindContextWindowExceeded = "context_window_exceeded"
+	// KindSessionBudgetExceeded: the provider's own per-session budget
+	// (Codex config) is spent; a human raises it or starts a fresh chat.
+	KindSessionBudgetExceeded = "session_budget_exceeded"
+	// KindTooManyDenials: the provider stopped the run after too many denied
+	// actions; a human reviews the permission policy.
+	KindTooManyDenials = "too_many_denials"
 	// KindCLIExited: the CLI ended its stream without a result.
 	KindCLIExited = "cli_exited"
 )
@@ -32,11 +41,14 @@ const (
 // Typed class hints a runner passes in Input.Code when its backend reported a
 // structured error (a codex CodexErrorInfo, an HTTP status). They beat text.
 const (
-	CodeUsageLimit    = "usage_limit"
-	CodeUnauthorized  = "unauthorized"
-	CodeOverloaded    = "overloaded"
-	CodeRateLimit     = "rate_limit"
-	CodeModelNotFound = "model_not_found"
+	CodeUsageLimit     = "usage_limit"
+	CodeUnauthorized   = "unauthorized"
+	CodeOverloaded     = "overloaded"
+	CodeRateLimit      = "rate_limit"
+	CodeModelNotFound  = "model_not_found"
+	CodeContextWindow  = "context_window"
+	CodeSessionBudget  = "session_budget"
+	CodeTooManyDenials = "too_many_denials"
 )
 
 // Signal is a structured rate-limit report from a backend (claude-native's rate_limit_event).
@@ -110,6 +122,10 @@ var (
 	// core tests ("Model not found <m>", "The '<m>' model is not supported when
 	// using Codex with a ChatGPT account"), proxy.go model_not_found.
 	reModel = regexp.MustCompile(`(?i)issue with the selected model|may not exist or you may not have access|model not found|model_not_found|model is not supported when using codex|not_found_error[^\n]{0,80}\bmodel\b`)
+	// Sources: claude-code/Bedrock "prompt is too long" / "context limit
+	// reached" / "input is too long" refusals. Exact phrases only: an
+	// ambiguous "too long" text never classifies.
+	reContextWindow = regexp.MustCompile(`(?i)prompt is too long|context limit reached|input is too long`)
 	// Sources: refs/codex protocol error.rs ("Selected model is at capacity",
 	// "We're currently experiencing high demand", "rate limit exceeded: ..."),
 	// Anthropic overloaded_error (529).
@@ -160,12 +176,21 @@ func Classify(in Input, now time.Time) Result {
 		return Result{Kind: KindTransient429, RetryAfter: retryHint(in, now)}
 	case CodeModelNotFound:
 		return Result{Kind: KindModelNotInPlan}
+	case CodeContextWindow:
+		return Result{Kind: KindContextWindowExceeded}
+	case CodeSessionBudget:
+		return Result{Kind: KindSessionBudgetExceeded}
+	case CodeTooManyDenials:
+		return Result{Kind: KindTooManyDenials}
 	}
 	if reAuth.MatchString(in.Err) {
 		return Result{Kind: KindAuthExpired}
 	}
 	if reModel.MatchString(in.Err) {
 		return Result{Kind: KindModelNotInPlan}
+	}
+	if reContextWindow.MatchString(in.Err) {
+		return Result{Kind: KindContextWindowExceeded}
 	}
 	if reTransient.MatchString(in.Err) {
 		return Result{Kind: KindTransient429, RetryAfter: retryHint(in, now)}
