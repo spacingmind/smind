@@ -121,8 +121,8 @@ func (s *Service) WritePassSkipped(reviewID int64, axis Axis) error {
 	if err != nil {
 		return err
 	}
-	if len(digest.criteriaIDs()) > 0 {
-		return errors.New("the spec pass cannot be skipped: the digest carries criteria to judge")
+	if digest.Spec.HasSpec() {
+		return errors.New("the spec pass cannot be skipped: the digest resolved a spec to judge against")
 	}
 	if err := s.DB.SetStewardPassSkipped(reviewID, string(axis), "no spec available", s.now()); err != nil {
 		return passClosed(err)

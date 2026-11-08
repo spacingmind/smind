@@ -10,6 +10,9 @@ const SeatProfileName = "steward"
 const (
 	EnvReviewID = "SMIND_STEWARD_REVIEW_ID"
 	EnvToken    = "SMIND_STEWARD_TOKEN"
+	// EnvAxis names the pass of a two-axis review (ADR-0054); absent for the
+	// single review's seat.
+	EnvAxis = "SMIND_STEWARD_AXIS"
 )
 
 // SeatBuiltinTools are the ONLY provider tools the seat may use.
@@ -56,4 +59,13 @@ func SeatMCPEnv(reviewID int64, token string) map[string]string {
 		EnvReviewID: strconv.FormatInt(reviewID, 10),
 		EnvToken:    token,
 	}
+}
+
+// SeatMCPEnvAxis is SeatMCPEnv for one pass of a two-axis review: the same
+// two secrets-free values plus the pass's axis. The axis is also bound to the
+// token in the daemon, so a seat that rewrote it could not use it.
+func SeatMCPEnvAxis(reviewID int64, token string, axis Axis) map[string]string {
+	env := SeatMCPEnv(reviewID, token)
+	env[EnvAxis] = string(axis)
+	return env
 }

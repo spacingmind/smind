@@ -134,7 +134,10 @@ func resolveSpec(in Inputs) (SpecSection, map[string]string) {
 
 // HasSpec reports whether the daemon resolved anything for the Spec pass to
 // judge against: a found source or at least one criterion.
-func (s SpecSection) HasSpec() bool {
+func (s *SpecSection) HasSpec() bool {
+	if s == nil {
+		return false
+	}
 	if len(s.Criteria) > 0 {
 		return true
 	}
