@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
@@ -133,19 +134,94 @@ func renderPermissionResolved(requestID, optionID, reason string) string {
 	return fmt.Sprintf("[permission] %s -> %s (%s)\n", requestID, optionID, reason)
 }
 
+// sanitizeTerminalText replaces every control character except newline and
+// tab with '?': question text is agent-authored, and a hostile question
+// must not be able to emit terminal escape sequences (ANSI CSI, CR
+// overwrites, ...) into `task attach`'s or `task permissions`' output. The
+// daemon strips the same set before storing (taskrunner.capQuestionText);
+// this is the client-side half, so the CLI never renders what an older or
+// buggy daemon let through.
+func sanitizeTerminalText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) {
+			return '?'
+		}
+		return r
+	}, s)
+}
+
+// renderQuestionRequest formats a pending agent question (ADR-0055) the
+// way renderPermissionRequest formats a permission: each question as its
+// own block with the numbered choices (1-based, per question), then the
+// copy-pasteable answer/decline hints. Every agent-supplied text goes
+// through sanitizeTerminalText first.
+func renderQuestionRequest(runID, requestID string, q questionRequest) string {
+	var b strings.Builder
+	for _, item := range q.Questions {
+		if item.Header != "" {
+			fmt.Fprintf(&b, "\n[question] %s: %s (request %s)\n", sanitizeTerminalText(item.Header), sanitizeTerminalText(item.Text), requestID)
+		} else {
+			fmt.Fprintf(&b, "\n[question] %s (request %s)\n", sanitizeTerminalText(item.Text), requestID)
+		}
+		for i, o := range item.Options {
+			if o.Description != "" {
+				fmt.Fprintf(&b, "  %d) %s - %s\n", i+1, sanitizeTerminalText(o.Label), sanitizeTerminalText(o.Description))
+			} else {
+				fmt.Fprintf(&b, "  %d) %s\n", i+1, sanitizeTerminalText(o.Label))
+			}
+		}
+		if item.AllowOther {
+			b.WriteString("  *) other: free text\n")
+		}
+	}
+	if q.Truncated {
+		b.WriteString("  (text was shortened)\n")
+	}
+	fmt.Fprintf(&b, "  -> answer:  smind task answer %s %s\n", runID, requestID)
+	fmt.Fprintf(&b, "  -> decline: smind task answer %s %s --decline [--note \"...\"]\n", runID, requestID)
+	return b.String()
+}
+
+// renderQuestionResolved formats how a question request was resolved --
+// the reason (human, declined, timeout, ...) is all a watching human needs;
+// the answer itself only ever goes back to the agent.
+func renderQuestionResolved(requestID, reason string) string {
+	return fmt.Sprintf("[question] %s -> %s\n", requestID, reason)
+}
+
 // questionRequest mirrors the `question` object a question_request run.logs
 // entry carries (taskrunner.QuestionRequest's wire shape, ADR-0055); only
 // what the CLI and the MCP tools render is kept.
 type questionRequest struct {
 	Source    string         `json:"source"`
 	Questions []questionItem `json:"questions"`
+	// Truncated is true when a daemon-side cap dropped or shortened
+	// anything, so the card can say the text is not complete.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
-// questionItem is one question of a request.
+// questionItem is one question of a request. Kind is "single", "multi" or
+// "text" (taskrunner.QuestionKind).
 type questionItem struct {
 	ID     string `json:"id"`
 	Header string `json:"header,omitempty"`
 	Text   string `json:"text"`
+	Kind   string `json:"kind,omitempty"`
+	// Options are the choices of a single/multi question, in display
+	// order; the numbered lines renderQuestionRequest prints are their
+	// 1-based positions.
+	Options    []questionOption `json:"options,omitempty"`
+	AllowOther bool             `json:"allowOther,omitempty"`
+}
+
+// questionOption is one choice of a single/multi question.
+type questionOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
 }
 
 // runLogEvent is one event in a run.logs response.
@@ -194,7 +270,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|wait|logs|stop|permissions|approve|deny|mode|options|set-option|chat|queue|tree|archive|budget> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|wait|logs|stop|permissions|approve|deny|answer|mode|options|set-option|chat|queue|tree|archive|budget> ...")
 		return 2
 	}
 	switch args[0] {
@@ -1016,6 +1092,24 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string, opts 
 				return
 			}
 			v.permissionResolved(p.RequestID, p.OptionID, p.Reason)
+		case "question_request":
+			var p struct {
+				RequestID string          `json:"requestId"`
+				Request   questionRequest `json:"request"`
+			}
+			if err := json.Unmarshal(params, &p); err != nil {
+				return
+			}
+			v.questionRequest(p.RequestID, p.Request)
+		case "question_resolved":
+			var p struct {
+				RequestID string `json:"requestId"`
+				Reason    string `json:"reason"`
+			}
+			if err := json.Unmarshal(params, &p); err != nil {
+				return
+			}
+			v.questionResolved(p.RequestID, p.Reason)
 		}
 	}, &result)
 	v.flush()
@@ -1202,6 +1296,12 @@ func printRunLogs(result runLogsResult, opts viewOptions) {
 			v.mu.Lock()
 			v.print(renderPermissionResolved(e.RequestID, e.OptionID, e.Reason))
 			v.mu.Unlock()
+		case "question_request":
+			if e.Question != nil {
+				v.questionRequest(e.RequestID, *e.Question)
+			}
+		case "question_resolved":
+			v.questionResolved(e.RequestID, e.Reason)
 		}
 	}
 	fmt.Println()
@@ -1284,6 +1384,39 @@ func fetchPendingPermissions(ctx context.Context, client *wsclient.Client, runID
 	return pending, nil
 }
 
+// pendingQuestion is one still-unresolved question_request entry.
+type pendingQuestion struct {
+	RequestID string
+	Question  questionRequest
+}
+
+// fetchPendingQuestions returns a run's question_request entries with no
+// later question_resolved of the same requestId, oldest first. A terminal
+// run has none: its questions were resolved or can no longer be answered.
+func fetchPendingQuestions(ctx context.Context, client *wsclient.Client, runID string) ([]pendingQuestion, error) {
+	var result runLogsResult
+	if err := client.Call(ctx, "run.logs", map[string]any{"runId": runID}, &result); err != nil {
+		return nil, err
+	}
+	switch result.Status {
+	case "done", "error", "stopped":
+		return nil, nil
+	}
+	resolved := map[string]bool{}
+	for _, e := range result.Events {
+		if e.Type == "question_resolved" {
+			resolved[e.RequestID] = true
+		}
+	}
+	var pending []pendingQuestion
+	for _, e := range result.Events {
+		if e.Type == "question_request" && e.Question != nil && !resolved[e.RequestID] {
+			pending = append(pending, pendingQuestion{RequestID: e.RequestID, Question: *e.Question})
+		}
+	}
+	return pending, nil
+}
+
 // cmdTaskPermissions lists a run's still-pending permission requests --
 // the read half of the same gap task approve closes: without this, seeing
 // that a run needs a decision means either watching `task attach` live
@@ -1308,12 +1441,20 @@ func cmdTaskPermissions(args []string) int {
 		fmt.Fprintf(os.Stderr, "task permissions: %v\n", err)
 		return 1
 	}
-	if len(pending) == 0 {
-		fmt.Println("no pending permission requests")
+	questions, err := fetchPendingQuestions(context.Background(), client, runID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task permissions: %v\n", err)
+		return 1
+	}
+	if len(pending) == 0 && len(questions) == 0 {
+		fmt.Println("no pending permission requests or questions")
 		return 0
 	}
 	for _, p := range pending {
 		fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options, p.Detail))
+	}
+	for _, q := range questions {
+		fmt.Print(renderQuestionRequest(runID, q.RequestID, q.Question))
 	}
 	return 0
 }
