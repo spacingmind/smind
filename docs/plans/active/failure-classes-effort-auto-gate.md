@@ -22,17 +22,17 @@ Items touching approvals or credentials (R3a's denials class and R3c) get the hi
   `TurnError.Info` carries the class name (`internal/codex/client.go`).
 - Codex's session budget is a Codex-side rollout (token) budget with shared accounting (`core/src/agent/control/budget.rs`, `rollout_budget.rs`),
   **not smind's tree budget**. smind's budget (`internal/runs/budget.go`, the header's "Set budget") refuses a *launch* with RPC code `budget_exceeded`;
-  it never ends a run as a failure. `too many denials` comes from Codex's guardian (auto-review) path (`guardian_*` tests).
+  it never ends a run as a failure (a `budget_exceeded` stop reason also exists in `disposition.go`'s needs-continue set but no code emits it yet). `too many denials` comes from Codex's guardian (auto-review) path (`guardian_*` tests).
 - Claude equivalents: none are typed. The CLI compacts automatically, and the strings that reach a user are API/CLI text ("Prompt is too long",
-  "Context limit reached", `error_max_budget_usd` result subtype when `--max-budget-usd` is used, which smind does not pass today; auto-mode refusals
-  and a circuit breaker, `refs/claude-code/CHANGELOG.md`). Detection for Claude is text only and unconfirmed without real runs (see D3).
+  "Context limit reached", `refs/claude-code/CHANGELOG.md` lines 275 and 881; a budget result subtype `error_max_budget_usd` is named in the SDK changelog but not in the
+  CLI refs and smind passes no `--max-budget-usd`, so it is unconfirmed). Detection for Claude is text only and unconfirmed without real runs (see D3).
 - Claude effort: `claude --help` documents `--effort <level>` (`low, medium, high, xhigh, max`); the Go SDK has `WithEffort` (passthrough, unvalidated)
   and smind never sets it for Claude (`internal/taskrunner/runner.go` uses `codex.WithEffort` only). The CHANGELOG states effort is **per model**
-  (`/effort` saves per model), `xhigh`/`max` are invalid with thinking off (the CLI now sends `high` instead), an organisation's `maxEffortLevel` cap
-  lowers the level silently ("after any silent downgrade for the selected model"), a model "without effort" has none, and some gateways reject the
-  effort beta. `ultrathink` runs at `xhigh` on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 through Anthropic's API. smind's Claude catalog is exactly
-  those four plus the aliases `sonnet|opus|haiku` (`internal/taskrunner/models.go`). The reference types say the applied level is reported back
-  (`system/init.effort`, a hook's `effort.level`); whether the vendored Go SDK exposes it is **not verified**.
+  (`/effort` saves per model), `xhigh`/`max` with thinking off used to fail and the CLI now sends `high` in that case (CHANGELOG:4083; the error text at :2599), an organisation's
+  `maxEffortLevel` cap lowers the level and the CLI says which one it uses (:393, :3656), and some gateways reject the effort beta (:649). The type definitions
+  in `refs/claude-code/mods/types/claude-code.d.ts` say the active level is reported "after any silent downgrade for the selected model" and is absent "for a model without effort". `ultrathink` runs at `xhigh` on Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 through Anthropic's API. smind's Claude catalog is exactly
+  those four plus the aliases `sonnet|opus|haiku` (`internal/taskrunner/models.go`). The TypeScript SDK reports the applied level on `system/init` (`effort`, its changelog) and a hook's `effort.level`;
+  the vendored Go SDK v0.4.2 does **not** parse it (`SystemMessage` is `{Subtype, Raw}`, `messages.go`), so it is readable only from `SystemMessage.Raw`.
 - `ResolveLevel(catalog, kind, model, level, explicit)` (`internal/taskrunner/level.go`) already implements the rule: explicit unsupported level is an
   error naming the supported ones; an inherited one (profile pin, queue, failover, old row) is dropped with a note; Claude's vocabulary is today the fixed
   `off|standard|extended` (thinking), Codex's comes from the model catalog (`Efforts`).
@@ -89,8 +89,8 @@ a label containing "approve" → `TestFailureLabels_NoApprovalWords`; `cli_exite
 - AC9 Per-model gating through the existing `ResolveLevel`: the Claude catalog gains `Efforts` per model (D4). An explicit effort the model does not list is rejected naming the supported ones;
   an inherited one (profile pin, queued item, failover successor) is dropped with a note and never kills the run.
 - AC10 A provider instance with a custom `ANTHROPIC_BASE_URL` offers only the safe subset (D5) because a gateway may reject the effort beta; an unknown instance model never sends an effort.
-- AC11 The applied level is shown: when the CLI reports it (`system/init.effort`, if the SDK exposes it) the run header shows "effort <level>" and a silent downgrade (an organisation cap) is visible as a
-  session note; otherwise the requested level is shown as "requested" and the plan says so (D6).
+- AC11 The applied level is shown: smind reads `system/init.effort` from `SystemMessage.Raw` (no SDK change); the run header shows "effort <level>" and a downgrade (an organisation cap) is visible as a
+  session note; when the CLI reports none the requested level is shown as "requested" (D6).
 - AC12 Surfaces: composer selector (Claude shows both thinking words and effort ids, grouped), profile editor, CLI `--thinking`, MCP `task_send`, mobile composer; Codex and ACP behaviour unchanged.
 
 ### Test scenarios
@@ -109,7 +109,7 @@ gating skipped for inherited levels → `TestResolveLevel_ClaudeInheritedDropped
 
 ### Acceptance Criteria
 
-- AC13 For a claude-native provider instance whose spec env sets `ANTHROPIC_BASE_URL` (the detection already used by `applyRecipeFields`), the catalog's `auto` mode is **not offered by default**; a
+- AC13 For a claude-native provider instance whose spec env sets `ANTHROPIC_BASE_URL` (the detection `providers.go` uses to mark an instance's vendor generic; `applyRecipeFields` repeats it for recipe instances only), the catalog's `auto` mode is **not offered by default**; a
   run or profile naming it is rejected with a message ("auto mode needs Anthropic's own safety check, which an LLM gateway usually cannot answer; use default or acceptEdits, or pick it explicitly if your
   gateway forwards the check", D7). `bypassPermissions` is unchanged and is never offered as a substitute.
 - AC14 The gate reads the instance's resolved spec, not the daemon's process env; the existing Bedrock/Vertex rule stays.
@@ -138,7 +138,7 @@ mobile picker test. Mutations: gate removed → `TestClaudeModes_AutoGatedForBas
 | D3 | Claude class detection is text-only and unconfirmed. Ship fixtures from the changelog strings only, or hold the Claude half until a real run is captured? | **Ship Codex (typed) now; ship the Claude text patterns behind exact-match fixtures**, and add real captures when a run produces one (never guess a broader pattern). |
 | D4 | Claude per-model effort table: the changelog names Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 as supporting `xhigh`; the exact per-model set (and `max`, and `low`) is not documented in the refs. | **Static conservative table**: all five ids for those four models and their aliases, none for any other id; revisit with the CLI's reported applied level. |
 | D5 | Instances with a custom base URL: allow effort at all? (a gateway may reject the effort beta; the CLI retries without it.) | **Allow only `low|medium|high`**, and drop silently-with-a-note if the CLI reports none applied. |
-| D6 | Show the applied effort only if the SDK/CLI reports it; otherwise "requested". Is a small SDK change (read `system/init.effort`) in scope? | **Yes, small**, in R3b-1 only if the SDK already parses the field; otherwise "requested" and a follow-up. |
+| D6 | Show the applied effort: the vendored SDK does not parse `system/init.effort`. Read it from `SystemMessage.Raw` in smind, or change the SDK? | **Read it from `Raw` in smind** (no SDK release); show "requested" when the CLI reports none. |
 | D7 | Auto mode behind a gateway: **off by default with a per-instance human opt-in**, or hard-off? | **Off by default with an explicit per-instance opt-in** (some gateways do forward the check; `CLAUDE_CODE_AUTO_MODE_SERVER=0` is a CLI-side workaround we do not set for the user). |
 | D8 | Put the human sentence on the wire as `failureNote` (one table, clients stop keeping their own), or leave clients to word it? | **Wire it** (AC4): one source of truth, mobile and CLI get the same wording with no UI release. |
 | D9 | Order of the PR chains. | **R3a-1, R3a-2, R3c-1, R3c-2, R3b-1, R3b-2** (the failure sentences and the auto gate fix user-visible confusion today; effort is new capability). |
