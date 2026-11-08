@@ -85,6 +85,9 @@ type stewardHost struct {
 	profReg *profiles.Registry
 	config  func() (config.StewardConfig, error)
 
+	// prune removes what a seat's CLI would load on its own from a scratch tree
+	// (a test hook; steward.PruneScratch in production).
+	prune func(scratch string, spec steward.PruneSpec) error
 	// snapshot reads the Lead's worktree before the seats start (a test hook).
 	snapshot func(ctx context.Context, dir string) (validation.Snapshot, error)
 	// watches counts the running watcher goroutines, so a test can wait for
@@ -113,7 +116,7 @@ func newStewardHost(o stewardHostOptions) *stewardHost {
 		o.Config = configSteward
 	}
 	h := &stewardHost{svc: o.Svc, rails: o.Rails, collect: o.Collect, wm: o.WM, db: o.DB, reg: o.Reg, runner: o.Runner, profReg: o.ProfReg, config: o.Config,
-		snapshot: validation.Take, seats: map[int64]stewardSeatEntry{}, watchPeriod: o.WatchPeriod, recheckPeriod: o.RecheckPeriod, ctx: o.Ctx}
+		prune: steward.PruneScratch, snapshot: validation.Take, seats: map[int64]stewardSeatEntry{}, watchPeriod: o.WatchPeriod, recheckPeriod: o.RecheckPeriod, ctx: o.Ctx}
 	o.Reg.SetSeatSource(h.seatSource)
 	// The tokens are memory-only, so an open review can never resume after a
 	// restart: close every row the previous daemon left open.
@@ -353,6 +356,19 @@ func (h *stewardHost) startSeat(id int64, lead store.Task, prof store.AgentProfi
 	}
 	if task.WorktreePath == nil {
 		return fail(errors.New("the steward scratch worktree was not created"))
+	}
+	// The scratch tree is the PR's head checkout, so a change could plant what a
+	// seat's CLI loads on its own (instruction files, .claude, .mcp.json, other
+	// providers' equivalents, at any depth). They are removed before the seat's
+	// run exists, without following a symlink: the prune must never write or
+	// delete outside the scratch tree, and a failure here blocks the review.
+	// AGENTS.md goes too, as it does for the Spec pass: this seat judges from
+	// the digest and the diff's files, and its prompt (BuildPrompt) names no
+	// standards file, so nothing it needs is lost, while a head AGENTS.md is
+	// exactly what a PR could write to steer it.
+	if err := h.prune(*task.WorktreePath, steward.SingleSeatPruneSpec()); err != nil {
+		slog.Warn("steward: the single seat's scratch tree could not be pruned", "review", id, "err", err)
+		return fail(err)
 	}
 	chat, err := h.wm.DefaultChat(task.ID)
 	if err != nil {

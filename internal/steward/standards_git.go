@@ -203,29 +203,51 @@ type PruneSpec struct {
 }
 
 // autoloadNames are the base names, at any depth, that a seat's CLI would load
-// on its own as instructions, settings or tools, or that pose as the
-// repository's standards: Claude's CLAUDE.md, CLAUDE.local.md, .claude and
-// .mcp.json, the other providers' instruction files and directories, and
-// AGENTS.md. A change must not be able to plant any of them. The Spec seat does
-// not need AGENTS.md in its tree (the Standards axis judges it, and the Spec
-// seat sees what the change touches in the digest), so both passes lose it.
+// on its own as instructions, settings, tools or skills, or that pose as the
+// repository's standards: Claude's CLAUDE.md, CLAUDE.local.md, .claude,
+// .claude-plugin and .mcp.json; Codex's .codex, agents.override.md and the
+// .agents directory; the equivalents of the other providers smind integrates
+// with (Gemini, Cursor, OpenCode, Copilot, Cline, Goose); other tools'
+// conventions for instruction and rule files; and AGENTS.md. A change must not
+// be able to plant any of them. No seat needs AGENTS.md in its tree: the
+// Standards axis reads only the base copies, and the others judge from the
+// digest and the files the diff touches. Matching is case-insensitive.
 var autoloadNames = []string{
-	"claude.md", "claude.local.md", ".claude", ".mcp.json",
-	".codex", ".gemini", "gemini.md", ".cursor", ".cursorrules", ".opencode",
+	"claude.md", "claude.local.md", ".claude", ".claude-plugin", ".mcp.json",
+	".codex", "agents.override.md", ".agents",
+	".gemini", "gemini.md", ".cursor", ".cursorrules",
+	".opencode", "opencode.json", "opencode.jsonc",
+	"copilot-instructions.md", ".clinerules", ".goosehints", ".windsurf", ".windsurfrules",
+	".roo", ".kiro", ".continue", ".aider.conf.yml", ".aider.model.settings.yml", "crush.md", "qwen.md",
 	"agents.md",
 }
 
-// PruneSpecFor is what a pass loses: the autoload names at any depth for both
-// axes, and for the Standards pass also the head copies of the default and the
-// configured standards files, so the only standards it can read are the base
-// copies.
+// autoloadPaths are autoload locations that are named by a path, not a base
+// name: a base name like "instructions" is too common to prune at any depth.
+var autoloadPaths = []string{".github/instructions"}
+
+// autoloadSpec is what every seat loses: the autoload names at any depth and
+// the autoload paths.
+func autoloadSpec() PruneSpec {
+	return PruneSpec{Names: append([]string{}, autoloadNames...), Paths: append([]string{}, autoloadPaths...)}
+}
+
+// PruneSpecFor is what a pass loses: the autoload spec for both axes, and for
+// the Standards pass also the head copies of the default and the configured
+// standards files, so the only standards it can read are the base copies.
 func PruneSpecFor(axis Axis, extraStandards []string) PruneSpec {
-	spec := PruneSpec{Names: append([]string{}, autoloadNames...)}
+	spec := autoloadSpec()
 	if axis == AxisStandards {
-		spec.Paths = append(append([]string{}, DefaultStandardsFiles...), extraStandards...)
+		spec.Paths = append(append(spec.Paths, DefaultStandardsFiles...), extraStandards...)
 	}
 	return spec
 }
+
+// SingleSeatPruneSpec is what the single review's seat (the `steward.twoAxis`
+// config key off) loses from its scratch tree: exactly the autoload spec that
+// both passes lose, and no standards paths (it has no base copies, and its
+// prompt, BuildPrompt, names no standards file).
+func SingleSeatPruneSpec() PruneSpec { return autoloadSpec() }
 
 // PruneScratch removes what spec names from a seat's scratch tree and never
 // follows a symlink: a symlink met at any component of a path, parent or last,
@@ -234,6 +256,13 @@ func PruneSpecFor(axis Axis, extraStandards []string) PruneSpec {
 // scratch is ever touched. The seat has not started yet, so nothing else is
 // changing the tree.
 func PruneScratch(scratch string, spec PruneSpec) error {
+	// WalkDir does not descend a symlinked root: refuse one rather than prune
+	// nothing and report success.
+	if fi, err := os.Lstat(scratch); err != nil {
+		return err
+	} else if fsutil.IsLink(fi.Mode()) || !fi.IsDir() {
+		return fmt.Errorf("the scratch path %q is not a plain directory", scratch)
+	}
 	for _, p := range spec.Paths {
 		if !config.SafeRepoPath(p) {
 			continue
