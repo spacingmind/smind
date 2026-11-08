@@ -273,17 +273,15 @@ func checkCriteria(results []CriterionResult, ids []string) error {
 // criterion; the Standards pass is shown neither gates nor images.
 func checkAxisAccepted(v AxisVerdict, d Digest, axis string) error {
 	if axis == AxisSpec {
-		for _, c := range v.Criteria {
-			if c.Status == CriterionUnmet {
-				return ve("criteria", "an ACCEPTED verdict cannot carry the unmet criterion %q", c.ID)
-			}
+		if hasUnmet(v.Criteria) {
+			return ve("criteria", "an ACCEPTED verdict cannot carry an unmet criterion")
 		}
-		if err := checkAccepted(SeatVerdict{
+		if len(v.Criteria) == 0 {
+			return ve("criteria", "an ACCEPTED spec verdict needs a result for every criterion; there are none to judge")
+		}
+		return checkAccepted(SeatVerdict{
 			Verdict: v.Verdict, Findings: v.seatFindings(), Gates: v.Gates, Frames: v.Frames, BlockedReason: v.BlockedReason,
-		}, d); err != nil {
-			return err
-		}
-		return nil
+		}, d)
 	}
 	for i, f := range v.Findings {
 		switch f.Severity {
@@ -301,13 +299,7 @@ func checkAxisAccepted(v AxisVerdict, d Digest, axis string) error {
 // checkAxisChanges enforces what a CHANGES verdict of one axis carries: a
 // complete finding, or for the Spec pass an unmet criterion instead.
 func checkAxisChanges(v AxisVerdict, axis string) error {
-	unmet := false
-	for _, c := range v.Criteria {
-		if c.Status == CriterionUnmet {
-			unmet = true
-		}
-	}
-	if len(v.Findings) == 0 && !(axis == AxisSpec && unmet) {
+	if len(v.Findings) == 0 && !(axis == AxisSpec && hasUnmet(v.Criteria)) {
 		return ve("findings", "CHANGES needs at least one finding")
 	}
 	for i, f := range v.Findings {
@@ -316,4 +308,14 @@ func checkAxisChanges(v AxisVerdict, axis string) error {
 		}
 	}
 	return nil
+}
+
+// hasUnmet reports whether any criterion result is unmet.
+func hasUnmet(results []CriterionResult) bool {
+	for _, c := range results {
+		if c.Status == CriterionUnmet {
+			return true
+		}
+	}
+	return false
 }
