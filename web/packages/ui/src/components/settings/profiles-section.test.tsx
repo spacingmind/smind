@@ -93,7 +93,7 @@ describe("profiles-section", () => {
     expect(screen.getByText("UI work")).toBeInTheDocument();
   });
 
-  it("the header's + New agent button opens the add card at the top of the list, and creating a profile through it appears below", async () => {
+  it("the header's + New profile button opens the add card at the top of the list, and creating a profile through it appears below", async () => {
     const { daemon } = await renderWithProfiles([PROFILE]);
 
     expect(screen.queryByTestId("profile-form-name")).not.toBeInTheDocument();
@@ -173,15 +173,15 @@ describe("profiles-section", () => {
   it("keeps its own title when rendered outside the settings screen", async () => {
     await renderWithProfiles([]);
 
-    expect(screen.getByRole("heading", { level: 3, name: "Agents" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Profiles" })).toBeInTheDocument();
   });
 
-  it("empty state shows a sentence and the one + New agent button (no second CTA in the body)", async () => {
+  it("empty state shows a sentence and the one + New profile button (no second CTA in the body)", async () => {
     await renderWithProfiles([]);
 
     expect(screen.getByTestId("profiles-empty-state")).toBeInTheDocument();
     expect(screen.queryByTestId("profiles-empty-new-button")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /New agent/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /New profile/ })).toHaveLength(1);
     fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
 

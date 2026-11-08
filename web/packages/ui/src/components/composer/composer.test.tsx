@@ -1297,7 +1297,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       expect(await screen.findByTestId("model-profile-row-1")).not.toHaveTextContent("custom");
     });
 
-    it('the picker offers "No agent" and the Edit-profiles pencil, the latter opening Settings -> Agents', async () => {
+    it('the picker offers "No profile" and the Edit-profiles pencil, the latter opening Settings -> Profiles', async () => {
       const client = new FakeWsClient();
       renderComposer({ client });
 

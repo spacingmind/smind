@@ -134,7 +134,7 @@ Anything the engine cannot place on Windows (`C:foo`, `\\.\pipe`,
 
 ## In the web app
 
-**Settings → Agents & providers → Permission policy** shows the policy without
+**Settings → Profiles & providers → Permission policy** shows the policy without
 letting you change it: edit the file, not the page. It has:
 
 - a status line: **Policy active**, **No policy file yet** (every request that

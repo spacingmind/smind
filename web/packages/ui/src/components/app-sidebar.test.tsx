@@ -1399,10 +1399,10 @@ describe("AppSidebar footer Host popover and agent palette entries (run-config I
     client.nth("profile.list", 0).resolve([PROFILE]);
     await flush();
     const byTitle = new Map(commands.map((c) => [c.title, c]));
-    expect(byTitle.has("Settings: Agents")).toBe(true);
+    expect(byTitle.has("Settings: Profiles")).toBe(true);
     expect(byTitle.has("Settings: Providers")).toBe(true);
-    expect(byTitle.has("New agent…")).toBe(true);
-    expect(byTitle.has("Use agent: Quick Fixes")).toBe(true);
+    expect(byTitle.has("New profile…")).toBe(true);
+    expect(byTitle.has("Use profile: Quick Fixes")).toBe(true);
     // The Connection group of Settings is desktop-only (this file runs as a web build).
     expect(byTitle.has("Settings: Daemon server")).toBe(false);
     expect(byTitle.has("Settings: Daemon")).toBe(false);
@@ -1411,17 +1411,17 @@ describe("AppSidebar footer Host popover and agent palette entries (run-config I
     // toolbar-shared channel); Settings -> Providers (ADR-0015) is now a
     // real section, reached via the direct onOpenSettings(sectionId)
     // callback this command already has prop access to.
-    byTitle.get("Settings: Agents")!.run();
+    byTitle.get("Settings: Profiles")!.run();
     expect(openSettingsListener).toHaveBeenCalledTimes(1);
     expect((openSettingsListener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
-    byTitle.get("New agent…")!.run();
+    byTitle.get("New profile…")!.run();
     expect(openSettingsListener).toHaveBeenCalledTimes(2);
     expect((openSettingsListener.mock.calls[1]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
 
     byTitle.get("Settings: Providers")!.run();
     expect(onOpenSettings).toHaveBeenCalledWith("providers");
 
-    byTitle.get("Use agent: Quick Fixes")!.run();
+    byTitle.get("Use profile: Quick Fixes")!.run();
     expect(useAgentListener).toHaveBeenCalledTimes(1);
     expect((useAgentListener.mock.calls[0]![0] as CustomEvent).detail).toEqual(PROFILE);
     window.removeEventListener("smind:use-agent", useAgentListener);

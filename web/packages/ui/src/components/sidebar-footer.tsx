@@ -185,7 +185,7 @@ function HostButton({
         />
         <HostRow
           icon={Icons.agent}
-          label="Agents"
+          label="Profiles"
           testId="sidebar-footer-host-agents"
           onSelect={() => select("agents")}
           value={agentCount}

@@ -665,7 +665,7 @@ export function AppSidebar({
       {
         id: "settings-agents",
         group: "Settings",
-        title: "Settings: Agents",
+        title: "Settings: Profiles",
         keywords: ["profiles", "agents"],
         action: "settings.open",
         icon: "settings",
@@ -682,7 +682,7 @@ export function AppSidebar({
       {
         id: "new-agent",
         group: "Settings",
-        title: "New agent…",
+        title: "New profile…",
         keywords: ["create", "profile", "agent"],
         icon: "agent",
         run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
@@ -721,8 +721,8 @@ export function AppSidebar({
     for (const p of profiles) {
       commands.push({
         id: `use-agent-${p.ID}`,
-        group: "Agents",
-        title: `Use agent: ${p.Name}`,
+        group: "Profiles",
+        title: `Use profile: ${p.Name}`,
         keywords: ["agent", "profile", p.Provider],
         run: () => window.dispatchEvent(new CustomEvent("smind:use-agent", { detail: p })),
       });

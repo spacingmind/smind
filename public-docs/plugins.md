@@ -108,8 +108,8 @@ becomes read-only. The page does not show process logs yet (it says "Process
 logs arrive with plugin processes."); use `smind plugin logs <id>`.
 
 Anything a plugin added is labelled "from acme" (its id) in Settings → MCP
-servers and Settings → Agents, in the agent picker of the composer, and next to
-the plugin's skills when you choose skills for an agent. These rows cannot be
+servers and Settings → Profiles, in the profile picker of the composer, and next to
+the plugin's skills when you choose skills for a profile. These rows cannot be
 edited, disabled or deleted there; the badge opens the plugin in Settings →
 Plugins.
 
