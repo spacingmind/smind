@@ -623,3 +623,45 @@ func TestTwoAxisE2E_PruneFailureBlocksBothPasses(t *testing.T) {
 		}
 	}
 }
+
+// TestTwoAxisE2E_InboxItemCarriesAxes: through the real inbox.list, a finished
+// two-axis review is one review item with each pass's axis, verdict and status.
+func TestTwoAxisE2E_InboxItemCarriesAxes(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	id, std, spec := e.startTwoAxis(t, twoAxisOpts{withSpec: true})
+	f := steward.AxisFinding{SeatFinding: steward.SeatFinding{File: "main.go", Line: 3, Why: "no lint", Check: "task lint", Severity: "P2"}, Rule: ".smind-standards/AGENTS.md: Always run task lint."}
+	if _, err := e.submitPass(t, std, e.standardsDoc(id, steward.VerdictChanges, f)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.submitPass(t, spec, e.specDoc(t, id, steward.VerdictAccepted)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := budgetCall(t, e.api, &requestContext{local: true}, "inbox.list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Items []struct {
+			Key  string
+			Kind string
+			Axes []struct{ Axis, Verdict, Status string }
+		}
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range listed.Items {
+		if it.Kind != "review" {
+			continue
+		}
+		if len(it.Axes) != 2 || it.Axes[0].Axis != "standards" || it.Axes[0].Verdict != "CHANGES" || it.Axes[0].Status != "done" ||
+			it.Axes[1].Axis != "spec" || it.Axes[1].Verdict != "ACCEPTED" {
+			t.Fatalf("review item %s axes = %+v", it.Key, it.Axes)
+		}
+		_ = e.api.Runs.Stop(std.RunID)
+		_ = e.api.Runs.Stop(spec.RunID)
+		return
+	}
+	t.Fatalf("no review item in the inbox: %s", raw)
+}
