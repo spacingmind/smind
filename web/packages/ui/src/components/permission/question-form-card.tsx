@@ -51,7 +51,7 @@ export function QuestionFormCard({
 }: {
   runId: string;
   pending: PendingPermission & { questions: PermissionQuestion[] };
-  onRespond: (runId: string, requestId: string, optionId: string) => Promise<void>;
+  onRespond: (runId: string, requestId: string, optionId: string, reason?: string) => Promise<void>;
 }) {
   const [answers, setAnswers] = useState<Record<string, QuestionAnswer>>(() => {
     const initial: Record<string, QuestionAnswer> = {};

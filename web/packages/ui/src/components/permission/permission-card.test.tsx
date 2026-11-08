@@ -183,6 +183,58 @@ describe("PermissionCard: options variant", () => {
     await flush();
     expect(onRespond).toHaveBeenCalledWith("run-1", "req-1", "allow-1");
   });
+
+  it("deny_reason_is_sent_only_with_deny", async () => {
+    const onRespond = vi.fn().mockResolvedValue(undefined);
+    const { unmount } = render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
+
+    fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "  use the staged schema instead  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    await flush();
+    expect(onRespond).toHaveBeenCalledWith("run-1", "req-1", "deny-1", "use the staged schema instead");
+    expect(onRespond).toHaveBeenCalledTimes(1);
+
+    // A whitespace-only reason is no reason: the exact old three-arg call.
+    onRespond.mockClear();
+    unmount();
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    await flush();
+    expect(onRespond).toHaveBeenCalledTimes(1);
+    expect(onRespond).toHaveBeenCalledWith("run-1", "req-1", "deny-1");
+  });
+
+  it("deny_reason_is_capped_at_500", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    expect(screen.getByTestId("permission-deny-reason")).toHaveAttribute("maxlength", "500");
+  });
+
+  it("allow_never_sends_the_reason", async () => {
+    const onRespond = vi.fn().mockResolvedValue(undefined);
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
+
+    fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "not for allow to see" } });
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+    await flush();
+    expect(onRespond).toHaveBeenCalledTimes(1);
+    expect(onRespond).toHaveBeenCalledWith("run-1", "req-1", "allow-1");
+  });
+
+  it("old_onRespond_callers_unchanged", async () => {
+    const onRespond = vi.fn().mockResolvedValue(undefined);
+    const { unmount } = render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    await flush();
+    expect(onRespond).toHaveBeenCalledWith("run-1", "req-1", "deny-1");
+
+    unmount();
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+    await flush();
+    expect(onRespond).toHaveBeenCalledWith("run-1", "req-1", "allow-1");
+  });
 });
 
 describe("PermissionCard: question-form variant", () => {

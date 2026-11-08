@@ -486,7 +486,7 @@ interface TimelineState {
    * different connection answered first -- is what does that, so both
    * cases are handled by the exact same code path.
    */
-  respondPermission: (runId: string, requestId: string, optionId: string) => Promise<void>;
+  respondPermission: (runId: string, requestId: string, optionId: string, reason?: string) => Promise<void>;
   /**
    * Switches runId's live permission mode (modeId, applied through the
    * provider's own session) and/or its ACP autoAccept toggle
@@ -1070,9 +1070,11 @@ export function useRunTimeline(
   );
 
   const respondPermission = useCallback(
-    async (runId: string, requestId: string, optionId: string) => {
+    async (runId: string, requestId: string, optionId: string, reason?: string) => {
       if (!client) throw new Error("not connected");
-      await client.call("run.respondPermission", { runId, requestId, optionId });
+      // No reason (or an empty one) keeps the params exactly as they were,
+      // so the daemon's old no-reason path stays the default.
+      await client.call("run.respondPermission", reason ? { runId, requestId, optionId, reason } : { runId, requestId, optionId });
     },
     [client],
   );

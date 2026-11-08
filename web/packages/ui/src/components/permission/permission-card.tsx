@@ -40,7 +40,7 @@ export function PermissionCard({
 }: {
   runId: string;
   pending: PendingPermission;
-  onRespond: (runId: string, requestId: string, optionId: string) => Promise<void>;
+  onRespond: (runId: string, requestId: string, optionId: string, reason?: string) => Promise<void>;
   onChat: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
