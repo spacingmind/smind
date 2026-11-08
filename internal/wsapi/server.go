@@ -418,7 +418,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 			}
 			var axes []inbox.ItemAxis
 			for _, a := range v.Axes {
-				axes = append(axes, inbox.ItemAxis{Axis: string(a.Axis), Verdict: a.SeatVerdict, Status: a.Status})
+				axes = append(axes, inbox.ItemAxis{Axis: string(a.Axis), Verdict: a.SeatVerdict, Status: a.Status, Reason: a.BlockedReason})
 			}
 			out = append(out, inbox.Review{ID: v.ID, TaskID: v.TaskID, Verdict: v.Verdict, Status: v.Status, Stale: v.Stale,
 				ValidationID: v.ValidationID, HeadSHA: v.HeadSHA, PRNumber: v.PRNumber, FailingGates: failing, CreatedAt: v.CreatedAt, Axes: axes})

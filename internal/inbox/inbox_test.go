@@ -606,7 +606,7 @@ func TestDerive_RunFailedKeyStable(t *testing.T) {
 func TestInbox_ReviewItemCarriesAxesAdditively(t *testing.T) {
 	f := newFx(t)
 	two := review(31, 2, "CHANGES")
-	two.Axes = []ItemAxis{{Axis: "standards", Verdict: "CHANGES", Status: "done"}, {Axis: "spec", Status: "skipped"}}
+	two.Axes = []ItemAxis{{Axis: "standards", Verdict: "CHANGES", Status: "done"}, {Axis: "spec", Status: "skipped", Reason: "no_spec"}}
 	f.reviews = []Review{two, review(32, 3, "ACCEPTED")}
 	items, err := f.svc.List(Filter{})
 	if err != nil {
@@ -620,7 +620,7 @@ func TestInbox_ReviewItemCarriesAxesAdditively(t *testing.T) {
 		t.Fatalf("two-axis item axes = %+v", a)
 	}
 	raw, _ := json.Marshal(got["review:31"])
-	if !strings.Contains(string(raw), `"axes":[{"axis":"standards","verdict":"CHANGES","status":"done"},{"axis":"spec","status":"skipped"}]`) {
+	if !strings.Contains(string(raw), `"axes":[{"axis":"standards","verdict":"CHANGES","status":"done"},{"axis":"spec","status":"skipped","reason":"no_spec"}]`) {
 		t.Fatalf("two-axis item JSON = %s", raw)
 	}
 	single, _ := json.Marshal(got["review:32"])

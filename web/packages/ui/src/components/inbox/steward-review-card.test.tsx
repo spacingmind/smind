@@ -216,6 +216,11 @@ describe("StewardReviewCard", () => {
       expect(screen.getByTestId("steward-axis-spec")).toHaveTextContent("Skipped · no spec available");
     });
 
+    it("skipped no-spec axis does not repeat itself", async () => {
+      await openCard({ axes: [axis(), axis({ axis: "spec", status: "skipped", seatVerdict: undefined, blockedReason: "no_spec", summary: "no spec available" })] });
+      expect(screen.getByTestId("steward-axis-spec").textContent?.match(/no spec available/g)).toHaveLength(1);
+    });
+
     it("blocked axis shows did not complete and its reason", async () => {
       await openCard({ axes: [axis({ status: "blocked", seatVerdict: undefined, blockedReason: "timeout" })] });
       const row = screen.getByTestId("steward-axis-standards");

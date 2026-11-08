@@ -97,6 +97,27 @@ describe("InboxScreen", () => {
     expect(chips[0].querySelector("svg")).not.toBeNull();
   });
 
+  it("review row says why a skipped axis was skipped", async () => {
+    const item: InboxItem = {
+      key: "review:13",
+      kind: "review",
+      taskId: 9,
+      title: "Add the login fix",
+      summary: "At 3fa9c1e",
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      state: "new",
+      attention: "normal",
+      links: { taskId: 9, reviewId: 13 },
+      axes: [
+        { axis: "standards", verdict: "ACCEPTED", status: "done" },
+        { axis: "spec", status: "skipped", reason: "no_spec" },
+      ],
+    };
+    await renderInbox(daemonWith(item));
+    const chips = within(screen.getByTestId("inbox-row-review:13")).getAllByTestId(/inbox-review-axis-/);
+    expect(chips.map((c) => c.textContent)).toEqual(["Standards: Accepted", "Spec: Skipped · no spec available"]);
+  });
+
   it("review row without axes is unchanged", async () => {
     const item: InboxItem = {
       key: "review:12",

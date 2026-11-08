@@ -83,6 +83,9 @@ type ItemAxis struct {
 	Axis    string `json:"axis"`
 	Verdict string `json:"verdict,omitempty"`
 	Status  string `json:"status"`
+	// Reason is the daemon-written blocked reason of a pass that did not run to
+	// a verdict (timeout, no_spec, not_run, ...): an enum, never seat text.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Links point at what the item is about.

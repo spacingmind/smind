@@ -57,11 +57,11 @@ export function AxisChip({ axis, testId }: { axis: Pick<StewardAxis, "status" | 
 }
 
 /** The inbox row's per-pass chips: "Standards: Accepted" style, icon plus text, wrapping. */
-export function ReviewRowAxes({ axes }: { axes: { axis: string; verdict?: string; status?: string }[] }) {
+export function ReviewRowAxes({ axes }: { axes: { axis: string; verdict?: string; status?: string; reason?: string }[] }) {
   return (
     <span className="flex flex-wrap items-center gap-1" data-testid="inbox-review-axes">
       {axes.map((a, i) => {
-        const { text, tone } = axisStatusLabel({ status: a.status ?? (a.verdict ? "done" : "pending"), seatVerdict: a.verdict });
+        const { text, tone } = axisStatusLabel({ status: a.status ?? (a.verdict ? "done" : "pending"), seatVerdict: a.verdict, blockedReason: a.reason });
         const Icon = text === "Accepted" ? Icons.check : text === "Changes requested" ? Icons.warning : tone === "danger" ? Icons.permissionDanger : Icons.verdict;
         return (
           <StatusBadge key={`${a.axis}-${i}`} status={tone} className="px-1.5 py-0" data-testid={`inbox-review-axis-${a.axis}`}>
@@ -102,7 +102,7 @@ function AxisRow({ axis }: { axis: StewardAxis }) {
         <AxisChip axis={axis} />
         {axis.model && <span className="font-mono text-ui-xs text-foreground-muted">{axis.model}</span>}
       </span>
-      {axis.summary && <p className="m-0">{axis.summary}</p>}
+      {axis.summary && !(axis.status === "skipped" && axis.blockedReason === "no_spec") && <p className="m-0">{axis.summary}</p>}
       {showReason && <p className="m-0 text-destructive">{blockedReasonLabel(axis.blockedReason)}</p>}
       {criteria.length > 0 && (
         <>
