@@ -253,6 +253,10 @@ func TestQuestion_RunStopAbandonsAndSecondAnswerFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := <-ch
+	// Put the run back to its real (finished) status so CloseAll does not wait on it.
+	r.mu.Lock()
+	r.status = StatusDone
+	r.mu.Unlock()
 	if res.err == nil {
 		t.Fatalf("a stopped run must unblock the decider with an error, got %+v", res.out)
 	}
