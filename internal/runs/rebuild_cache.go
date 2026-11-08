@@ -25,6 +25,8 @@ type rebuildCache struct {
 	bytes  int64
 	budget int64 // <= 0 disables the cache
 
+	gen int64 // bumped by every invalidate: a put that started before one is dropped
+
 	hits, misses, evictions int64
 }
 
@@ -82,12 +84,14 @@ func (c *rebuildCache) get(runID string, size, mod int64) (Rebuilt, bool) {
 	}
 	c.lru.MoveToFront(el)
 	c.hits++
-	return Rebuilt{Events: append([]Event(nil), e.events...), Refs: e.refs, Detail: e.detail}, true
+	return Rebuilt{Events: append([]Event(nil), e.events...), Refs: copyRefs(e.refs), Detail: e.detail}, true
 }
 
 // put stores a successful rebuild. A history bigger than the whole budget is not
 // stored (it is served uncached).
-func (c *rebuildCache) put(runID string, size, mod int64, r Rebuilt) {
+// gen is the value of generation() read before the rebuild began: if the run was
+// invalidated since (pruned while its rebuild was in flight), nothing is stored.
+func (c *rebuildCache) put(runID string, gen, size, mod int64, r Rebuilt) {
 	est := historyBytes(r.Events)
 	for _, refs := range r.Refs {
 		est += int64(64 * (len(refs) + 1))
@@ -95,13 +99,13 @@ func (c *rebuildCache) put(runID string, size, mod int64, r Rebuilt) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
-	if c.budget <= 0 || est > c.budget {
+	if c.budget <= 0 || est > c.budget || gen != c.gen {
 		return
 	}
 	if el, ok := c.items[runID]; ok {
 		c.removeLocked(el)
 	}
-	e := &rebuildEntry{runID: runID, size: size, mod: mod, events: append([]Event(nil), r.Events...), refs: r.Refs, detail: r.Detail, estimate: est}
+	e := &rebuildEntry{runID: runID, size: size, mod: mod, events: append([]Event(nil), r.Events...), refs: copyRefs(r.Refs), detail: r.Detail, estimate: est}
 	c.items[runID] = c.lru.PushFront(e)
 	c.bytes += est
 	c.evictLocked()
@@ -112,9 +116,28 @@ func (c *rebuildCache) invalidate(runID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
+	c.gen++
 	if el, ok := c.items[runID]; ok {
 		c.removeLocked(el)
 	}
+}
+
+func (c *rebuildCache) generation() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.gen
+}
+
+// copyRefs gives each reader its own map and slices: the cache's copy is never shared.
+func copyRefs(in map[string][]taskrunner.HeredocRef) map[string][]taskrunner.HeredocRef {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string][]taskrunner.HeredocRef, len(in))
+	for k, v := range in {
+		out[k] = append([]taskrunner.HeredocRef(nil), v...)
+	}
+	return out
 }
 
 func (c *rebuildCache) removeLocked(el *list.Element) {
@@ -125,7 +148,7 @@ func (c *rebuildCache) removeLocked(el *list.Element) {
 }
 
 func (c *rebuildCache) evictLocked() {
-	for c.bytes > c.budget || c.budget <= 0 && c.lru.Len() > 0 {
+	for c.bytes > c.budget || (c.budget <= 0 && c.lru.Len() > 0) {
 		back := c.lru.Back()
 		if back == nil {
 			return

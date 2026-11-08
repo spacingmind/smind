@@ -136,7 +136,7 @@ func TestRebuildCacheBudget(t *testing.T) {
 	c.setBudget(1 << 20)
 	evs := []Event{{Type: taskrunner.EventTypeText, Text: strings.Repeat("x", 300<<10)}}
 	for _, id := range []string{"a", "b", "c", "d"} {
-		c.put(id, 1, 1, Rebuilt{Events: evs})
+		c.put(id, c.generation(), 1, 1, Rebuilt{Events: evs})
 		if id == "b" {
 			c.get("a", 1, 1) // a is now more recent than b
 		}
@@ -219,5 +219,34 @@ func TestRebuildOnOpenIsBoundedByCostNotByIdentity(t *testing.T) {
 	// the explicit request still rebuilds it
 	if full := env.reg.RebuildHistory(ctx, "r", RequesterHuman); !full.OK() {
 		t.Fatalf("explicit: %q", full.Reason)
+	}
+}
+
+// A reader that scribbles on a returned result (events or heredoc references)
+// does not change what the next reader gets.
+func TestRebuildCacheHandsOutCopies(t *testing.T) {
+	var c rebuildCache
+	c.setBudget(1 << 20)
+	refs := map[string][]taskrunner.HeredocRef{"call": {{Index: 0}}}
+	c.put("a", c.generation(), 1, 1, Rebuilt{Events: []Event{{Text: "x"}}, Refs: refs})
+	refs["call"][0].Index = 7 // the producer's own map
+	got, _ := c.get("a", 1, 1)
+	got.Refs["call"][0].Index = 9
+	delete(got.Refs, "call")
+	again, _ := c.get("a", 1, 1)
+	if len(again.Refs["call"]) != 1 || again.Refs["call"][0].Index != 0 {
+		t.Fatalf("the cache shares its refs: %+v", again.Refs)
+	}
+}
+
+// A rebuild that was in flight when its run was pruned is not cached afterwards.
+func TestRebuildCacheDropsAPutThatRacedAnInvalidate(t *testing.T) {
+	var c rebuildCache
+	c.setBudget(1 << 20)
+	gen := c.generation()
+	c.invalidate("a") // the prune lands while the rebuild runs
+	c.put("a", gen, 1, 1, Rebuilt{Events: []Event{{Text: "x"}}})
+	if c.stats().Entries != 0 {
+		t.Fatal("a pruned run's rebuild was cached")
 	}
 }

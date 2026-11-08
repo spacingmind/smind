@@ -134,13 +134,14 @@ func (reg *Registry) rebuildCached(ctx context.Context, rb *native.Rebuilder, re
 			return got
 		}
 	}
+	gen := reg.rcache.generation()
 	res := rb.Rebuild(ctx, native.Request{Ref: ref, Requester: RequesterHuman, ExpectedToolCalls: reg.storedToolCalls(runID)})
 	if !res.OK() {
 		return degraded(res.Reason, res.Detail)
 	}
 	out := Rebuilt{Events: res.Events, Refs: res.Refs, Detail: res.Detail}
 	// Client form only: res.raw (the unelided heredoc bodies) never enters the cache.
-	reg.rcache.put(runID, res.FileSize, res.FileModTime, out)
+	reg.rcache.put(runID, gen, res.FileSize, res.FileModTime, out)
 	return out
 }
 
