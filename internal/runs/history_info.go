@@ -34,7 +34,7 @@ func (reg *Registry) HistoryInfo(runID string) HistoryInfo {
 		reg.mu.Lock()
 		rb := reg.rebuilder
 		reg.mu.Unlock()
-		if rb != nil && ref.Harness == native.HarnessACP && ref.SessionID != "" && rb.SupportsACP() && !rb.ACPLoadUnsupported(ref.Provider) {
+		if rb != nil && ref.Harness == native.HarnessACP && ref.SessionID != "" && ref.PromptSha256 != "" && rb.SupportsACP() && !rb.ACPLoadUnsupported(ref.Provider) {
 			return HistoryInfo{Source: "skeleton", Reason: string(native.ReasonHumanOnly), CanLoadFull: true, LoadStartsAgent: true}
 		}
 		if rb != nil && (ref.Harness == native.HarnessClaudeCode || ref.Harness == native.HarnessCodex) && ref.SessionID != "" {

@@ -478,6 +478,11 @@ func handleResumeSession(msg message, sessionCwd *string) {
 	*sessionCwd = params.Cwd
 	recordSessionInitMethod(params.Cwd, msg.Method)
 	if msg.Method == "session/load" {
+		if _, err := os.Stat(filepath.Join(params.Cwd, "replay-hang")); err == nil {
+			// Record the pid and never answer: a test proves the client kills this process.
+			_ = os.WriteFile(filepath.Join(params.Cwd, "agent-pid"), []byte(strconv.Itoa(os.Getpid())), 0o644)
+			select {}
+		}
 		replayFromCwd(params.Cwd)
 		if _, err := os.Stat(filepath.Join(params.Cwd, "replay-permission")); err == nil {
 			// Ask for a permission while loading (off the read loop, which must stay

@@ -832,7 +832,9 @@ export function useRunTimeline(
   const sessionRef = useRef<Session | null>(null);
   // The latest runs, for callbacks that read a run's state without re-creating on every change.
   const runsRef = useRef(runs);
-  runsRef.current = runs;
+  useEffect(() => {
+    runsRef.current = runs;
+  }, [runs]);
   // Every run id this selection has already appended and/or attached a
   // stream to -- the dedupe that keeps a run.status racing submitPrompt's
   // run.start response from producing a duplicate entry or a second

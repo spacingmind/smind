@@ -39,13 +39,13 @@ contract of ADR-0053; nothing here changes how any other reader sees a run.
 
 - AC1 `detail:auto` and a machine caller never start an agent. `TestRunLogsACPAutoNeverStartsAgent`, `TestRebuildOnOpenSkipsACP`.
 - AC2 `full` without `confirmStart` starts nothing and says `confirm_required`. `TestRunLogsACPFullNeedsConfirm`.
-- AC3 an agent without `loadSession` is refused before `session/load`, and remembered. `TestReplayACPRefusesWithoutLoadSession`,
-  `TestHistoryInfoStopsOfferingAfterNoLoadSession`.
+- AC3 an agent without `loadSession` is refused before `session/load`, and remembered. `TestReplayACPSessionRefusesWithoutLoadSession`,
+  `TestHistoryInfoACPAndNoLoadSession`.
 - AC4 the replay is read without a prompt being sent. `TestLoadSessionReplayCollectsUpdatesAndSendsNoPrompt`.
 - AC5 turn slicing: unique prompt match, tail match, none, several. `TestSliceACPTurn*`.
 - AC6 same scrub and elision as the other rebuilders; equivalence with a live read of the same turn. `TestRebuildACPEquivalentToLive`.
 - AC7 bounds: slot pool busy, timeout kills the process, over-size replay is refused. `TestRebuildACPBounds`.
-- AC8 the process does not outlive the call (timeout, cancel). `TestReplayACPKillsAgentOnTimeout`.
+- AC8 the process does not outlive the call (timeout, cancel). `TestReplayACPSessionKillsAgentOnTimeout`.
 - AC9 default reads are byte-identical; ACP runs without a reason change only gain `loadStartsAgent` on a skeleton run.
   `TestRunLogsDefaultReadIsUnchanged` (existing) plus `TestRunLogsACPLabel`.
 - AC10 confirm dialog and states in web and mobile, light and dark.

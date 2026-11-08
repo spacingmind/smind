@@ -365,3 +365,16 @@ func TestHistoryInfoACPAndNoLoadSession(t *testing.T) {
 		t.Fatalf("after the agent said it cannot load: %+v", info)
 	}
 }
+
+// A run with no recorded prompt hash cannot be matched in a replay: no button, no dialog.
+func TestHistoryInfoACPNeedsAPromptHash(t *testing.T) {
+	env, _ := acpRunsEnv(t, nil)
+	ref := native.Ref{Provider: "glm", Harness: native.HarnessACP, SessionID: "s1", Cwd: t.TempDir()}
+	b, _ := json.Marshal(ref)
+	if err := env.e.st.SetRunNativeRef("r", string(b)); err != nil {
+		t.Fatal(err)
+	}
+	if info := env.reg.HistoryInfo("r"); info.CanLoadFull || info.LoadStartsAgent {
+		t.Fatalf("offered a load that cannot match a turn: %+v", info)
+	}
+}

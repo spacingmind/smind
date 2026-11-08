@@ -409,14 +409,14 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
   `full` without `confirmStart` serves the stored rows with `skeletonReason: "confirm_required"`. A skeleton run of an ACP provider
   carries `loadStartsAgent: true` (additive) so the clients confirm first ("Start the agent to load this history?").
 - **Launch.** The same launch as a run's agent (provider env, plugin confinement), cwd the task worktree (a missing worktree is
-  `native_session_missing`), closed before the call returns, on timeout, on cancel and on daemon shutdown.
+  `native_session_missing`), closed when the call ends: on completion, on timeout (the answer is `rebuild_failed` at once and the slot stays held until the process is gone) and when the request context ends (a closed connection, a daemon shutdown; no test of the shutdown path itself).
 - **Bounds.** The shared 2-slot pool (held until the process is gone), 30 s (a process start plus the replay), the replay's bytes over
   64 MiB refuse the load. Not cached.
 - **Slice.** The run's turn is the one whose user message hashes to the run's prompt, whole or its last chunk; exactly one match, else
   `slice_not_found`. The tool call count is checked against the skeleton as for the file readers (`format_drift`).
-- **Learned refusal.** An agent that does not advertise `loadSession` is remembered until restart; its runs stop offering the button
+- **Learned refusal.** An agent that does not advertise `loadSession` is remembered until the daemon restarts (an agent upgraded to support it stays refused until then); its runs stop offering the button
   (`provider_cannot_rebuild`).
-- **Not done.** A cache for ACP loads, `thread/read` for codex, running a load on a fleet peer.
+- **Not done.** A cache for ACP loads, `thread/read` for codex, running a load on a fleet peer, a pre-check that spares the agent start for a prompt that repeats in the session (it answers `slice_not_found` after the load), a re-check of the chat while a load runs.
 
 ## Implemented: the retention amendment (PR C)
 
