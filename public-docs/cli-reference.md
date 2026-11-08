@@ -68,6 +68,7 @@ Usage:
   smind task runs <taskId> [--chat <chatId>]              list a task's runs, optionally per chat
   smind task chat ls <taskId> [--all]                     list a task's chats (ID, title, provider, archived)
   smind task chat new <taskId> [title]                    create a chat
+  smind task chat fork <chatId> --at <runId> [--seeded]    fork a chat at a finished turn
   smind task chat rename <chatId> <title>                 rename a chat
   smind task chat archive <chatId>                        archive a chat
   smind task mode <runId> [--auto-accept on|off] [<mode>]  change a live run's permission mode or auto-accept (humans only)
@@ -134,6 +135,16 @@ WebSocket API, authenticating with the token the daemon itself wrote to
 ~/.smind/token (override the home directory with $SMIND_HOME).
 ```
 <!-- END GENERATED: smind --help -->
+
+### task chat fork
+
+`smind task chat fork <chatId> --at <runId> [--seeded]` creates a new chat of
+the same task that continues from the end of a finished turn of that chat; the
+parent chat is never touched. The default native fork continues the provider's
+own session and is offered for Claude chats; `--seeded` works for any provider
+but is labelled lossy, because the new session starts from a condensed account
+of the earlier turns: the agent knows what was said, not what it did. A fork is
+refused while the chat has a running run.
 
 ### cooldown
 
