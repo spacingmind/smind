@@ -18,10 +18,10 @@ acs:
     covers: { tests: [TestTaskDenyReasonFlag, TestTaskDenyReasonFlagNeedsAValueAndApproveHasNone], frames: [] }
   - id: B5
     text: "The web permission card has a labelled one-line field; Deny sends its text (capped at 500), Allow never sends it, and an old onRespond caller with three arguments is unchanged."
-    covers: { tests: [deny_reason_is_sent_only_with_deny, deny_reason_is_capped_at_500, allow_never_sends_the_reason, old_onRespond_callers_unchanged], frames: [web-permission-card-reason] }
+    covers: { tests: [deny_reason_is_sent_only_with_deny, deny_reason_is_capped_at_500, allow_never_sends_the_reason, old_onRespond_callers_unchanged], frames: [] }
   - id: B6
     text: "A write to a new path shows its content open under the title Content; an overwrite keeps the collapsed Diff."
-    covers: { tests: [new_file_write_shows_content_open, overwrite_keeps_collapsed_diff], frames: [web-permission-card-new-file] }
+    covers: { tests: [new_file_write_shows_content_open, overwrite_keeps_collapsed_diff], frames: [] }
   - id: B7
     text: "The demo permission card offers no Allow always."
     covers: { tests: [demo_permission_card_has_no_allow_always], frames: [] }
@@ -59,4 +59,4 @@ limits: { budgetUsd: 3, maxMinutes: 60 }
 # UX audit PR B validation contract
 
 The deny reason is the human's own text, delivered to the model only as the deny message of a tool use the human already refused. It never widens a permission, never selects an option, and an allow cannot carry one. Not stored in run history.
-Frames are captured by the Lead against an isolated daemon.
+Frames are not validator frames: the real-app frames (light and dark, 1280 and 390, against an isolated daemon) are captured by the Lead; their folder is named in the PR body.
