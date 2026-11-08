@@ -109,7 +109,7 @@ The daemon builds one digest as today (deterministic, no agent, ≤ 64 KiB, the 
   copies those base versions into a read-only directory `.smind-standards/` inside the Standards pass's own scratch tree before the seat starts (outside the git index, so it is never part
   of the diff) and the prompt tells the seat to judge against that directory only. The digest carries path, size and hash of the **base** text, and `headDiff` shows what the PR changes in
   those files, as data. A PR that edits `AGENTS.md` is therefore judged by the old `AGENTS.md`, and the edit itself is a finding the Human sees, never a way to lower the bar. When the
-  base ref cannot be resolved the pass is `blocked` (`crashed`), never silently judged against head. The Spec pass is unaffected. `steward.standards.rules` are extra one-line rules the Human wants enforced; they are
+  base ref cannot be resolved the pass is `blocked` (`base_unresolved`, a daemon-only reason that is no auto-pause strike), never silently judged against head. The Spec pass is unaffected. `steward.standards.rules` are extra one-line rules the Human wants enforced; they are
   config text, not agent text, and still sit in a delimited block.
 - **Spec resolution is the daemon's, deterministic, in this order**: (1) the task's validation contract (ADR-0045) acceptance criteria and named tests; (2) the plan file the
   digest already knows (`Inputs.PlanFile`) and its `## Acceptance Criteria` / `## Test Scenarios` sections; (3) the PR body: a `Spec:` line, `Closes|Fixes|Refs #N`, and `ADR-NNNN`
@@ -161,12 +161,12 @@ stored       = Clamp(seatCombined, gates)                           // internal/
   writes `ACCEPTED`.
 - **Disagreement** (one axis `ACCEPTED`, the other `CHANGES`) is the normal case, not an error: the stored verdict is `CHANGES`, both axes' verdicts and findings are shown, and there
   is no third "reconciling" run. The card says which axis lowered it.
-- **A failed axis** (a pass `blocked` with `timeout`, `budget`, `crashed`, `cancelled` or `scope_violation`): the review is never `ACCEPTED`. With D4 as recommended, the combined seat
+- **A failed axis** (a pass `blocked` with `timeout`, `budget`, `crashed`, `cancelled`, `scope_violation` or `base_unresolved`): the review is never `ACCEPTED`. With D4 as recommended, the combined seat
   verdict is `min(other axis, CHANGES)` with the reason `axis <name> did not complete` appended to the summary; if no pass produced a verdict (both failed, or one failed and the other was skipped) it is `BLOCKED` with the first failed pass's reason, and `crashed` as the fallback when none carries one. Daemon-written
   reasons stay the ones in `DaemonBlockedReasons`. `scope_violation` (the Lead worktree changed during either pass) blocks the whole review as today: the review is `BLOCKED` with reason `scope_violation` at once, without waiting for the other pass, and the review's scope-violation flag is set.
 - **No spec found** (`spec.sources` empty or every source `missing`/`unavailable`, and no criteria): the Spec pass is **not run**; its pass row is `skipped` with the daemon-written
   summary `no spec available`, no cost. The axis is reported as `n/a` and does not count as an `ACCEPTED` for the other axis. Whether the missing spec lowers the verdict is D5.
-- Rails: a review still counts once toward `maxReviewsPerHour` / `maxReviewsPerTask`; auto-pause counts a review as `crashed`/`timeout` only when **every** non-skipped pass was.
+- Rails: a review still counts once toward `maxReviewsPerHour` / `maxReviewsPerTask`; auto-pause counts a review as `crashed`/`timeout` only when **every** non-skipped pass was; a review blocked for `base_unresolved` alone is neither a strike nor a reset, and when the other pass really failed that failure is the review's reason.
 
 ### 7. Cost
 
