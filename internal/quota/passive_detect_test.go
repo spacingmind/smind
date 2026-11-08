@@ -392,3 +392,51 @@ func Test_passive_rejection_window_follows_deciding_deadline(t *testing.T) {
 		t.Fatalf("stored row = %+v/%v, want rejected_window five_hour", row, ok)
 	}
 }
+
+// A window that is itself rejected is never model scoped, so its own reset
+// still decides the deadline even when 7d_oi is rejected too.
+func Test_passive_rejected_window_keeps_its_deadline_with_oi_rejected(t *testing.T) {
+	t.Parallel()
+	reset := passiveNow.Add(2 * time.Hour)
+	h := rawHeader(
+		"Anthropic-Ratelimit-Unified-Status", "rejected",
+		"Anthropic-Ratelimit-Unified-5h-Status", "rejected",
+		"Anthropic-Ratelimit-Unified-5h-Reset", epoch(reset),
+		"Anthropic-Ratelimit-Unified-7d-Status", "allowed",
+		"Anthropic-Ratelimit-Unified-7d_oi-Status", "rejected")
+	r := ClassifyRejection(429, h)
+	if r.ModelOnly || r.Window != WindowFiveHour {
+		t.Fatalf("got %+v, want a whole-account five_hour rejection", r)
+	}
+	if got, ok := RejectionDeadline(h, passiveNow, r); !ok || !got.Equal(time.Unix(reset.Unix(), 0)) {
+		t.Fatalf("deadline = %v, %v, want the 5h reset %v", got, ok, reset)
+	}
+	// the same headers read as model scoped (guard bypassed) would drop the 5h
+	// reset: the unexported predicate must itself refuse
+	if readUnifiedStatuses(h).modelOnly() {
+		t.Fatal("modelOnly() true with the 5h window rejected")
+	}
+}
+
+// Both shared windows omitted: a rejected overage claim is model scoped only
+// while the utilization headers that are present are healthy.
+func Test_passive_overage_claim_with_omitted_windows_and_utilization(t *testing.T) {
+	t.Parallel()
+	const p = "Anthropic-Ratelimit-Unified-"
+	for name, tc := range map[string]struct {
+		extra     []string
+		wantModel bool
+	}{
+		"absent":                   {nil, true},
+		"healthy 5h":               {[]string{p + "5h-Utilization", "0.4"}, true},
+		"healthy both":             {[]string{p + "5h-Utilization", "0.4", p + "7d-Utilization", "0.9"}, true},
+		"exhausted 7d":             {[]string{p + "7d-Utilization", "1.0"}, false},
+		"unparsable 5h":            {[]string{p + "5h-Utilization", "n/a"}, false},
+		"healthy 5h, exhausted 7d": {[]string{p + "5h-Utilization", "0.2", p + "7d-Utilization", "1.2"}, false},
+	} {
+		kv := append([]string{p + "Status", "rejected", p + "Representative-Claim", "overage"}, tc.extra...)
+		if got := ClassifyRejection(429, rawHeader(kv...)); got.ModelOnly != tc.wantModel || !got.Rejected {
+			t.Errorf("%s: got %+v, want rejected with ModelOnly=%v", name, got, tc.wantModel)
+		}
+	}
+}
