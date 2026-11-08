@@ -1,5 +1,5 @@
 import { Icons } from "@/lib/icons";
-import { isRateLimitedLine, parseChildEventPrompt } from "@/lib/child-event";
+import { isHumanFixLine, isRateLimitedLine, parseChildEventPrompt } from "@/lib/child-event";
 
 /**
  * A run whose prompt is the daemon's child-event delivery (ADR-0041): not
@@ -25,28 +25,28 @@ export function ChildUpdateRow({ prompt }: { prompt: string }) {
         )
       ) : (
         <ul className="flex flex-col gap-2 pl-5">
-          {blocks.map((block, i) => (
-            <li key={i} data-testid="child-update-block" className="flex flex-col gap-0.5">
-              <p
-                data-testid="child-update-line"
-                data-tone={isRateLimitedLine(block.line) ? "warning" : "neutral"}
-                className={`break-words ${isRateLimitedLine(block.line) ? "text-warning-text" : ""}`}
-              >
-                {block.line}
-              </p>
-              {block.response !== undefined && (
-                <details className="group/details">
-                  <summary className="-mx-2 flex w-fit cursor-pointer items-center gap-1.5 rounded-md px-2 py-0.5 select-none hover:bg-hover [&::-webkit-details-marker]:hidden">
-                    <Icons.chevronRight aria-hidden className="size-3 shrink-0 transition-transform group-open/details:rotate-90" />
-                    Show response
-                  </summary>
-                  <div data-testid="child-update-response" className="py-1 pl-5 break-words whitespace-pre-wrap">
-                    {block.response}
-                  </div>
-                </details>
-              )}
-            </li>
-          ))}
+          {blocks.map((block, i) => {
+            // A throttled or human-fix line (a fresh chat, the session budget, the policy) reads as a warning, not a calm done.
+            const warn = isRateLimitedLine(block.line) || isHumanFixLine(block.line);
+            return (
+              <li key={i} data-testid="child-update-block" className="flex flex-col gap-0.5">
+                <p data-testid="child-update-line" data-tone={warn ? "warning" : "neutral"} className={`break-words ${warn ? "text-warning-text" : ""}`}>
+                  {block.line}
+                </p>
+                {block.response !== undefined && (
+                  <details className="group/details">
+                    <summary className="-mx-2 flex w-fit cursor-pointer items-center gap-1.5 rounded-md px-2 py-0.5 select-none hover:bg-hover [&::-webkit-details-marker]:hidden">
+                      <Icons.chevronRight aria-hidden className="size-3 shrink-0 transition-transform group-open/details:rotate-90" />
+                      Show response
+                    </summary>
+                    <div data-testid="child-update-response" className="py-1 pl-5 break-words whitespace-pre-wrap">
+                      {block.response}
+                    </div>
+                  </details>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
