@@ -13,10 +13,18 @@ import { Icons } from "@/lib/icons";
 import type { InboxItem } from "@/lib/inbox-types";
 import { queryKeys } from "@/lib/query-keys";
 import {
+  axisLabel,
+  axisStatusLabel,
+  blockedReasonLabel,
+  criteriaCounts,
   findingsAsPrompt,
+  groupFindingsByAxisThenFile,
   groupFindingsByFile,
   sortGatesFailingFirst,
   verdictLabel,
+  type StewardAxis,
+  type StewardCriterion,
+  type StewardFinding,
   type StewardFrame,
   type StewardGate,
 } from "@/lib/steward-types";
@@ -32,6 +40,95 @@ export function VerdictChip({ verdict }: { verdict: string | undefined }) {
       <Icon aria-hidden className="size-3" />
       {text}
     </StatusBadge>
+  );
+}
+
+/** A pass's chip: icon plus the always-visible status text, in the tone of its seat verdict. */
+export function AxisChip({ axis, testId }: { axis: Pick<StewardAxis, "status" | "seatVerdict" | "blockedReason">; testId?: string }) {
+  const { text, tone } = axisStatusLabel(axis);
+  const Icon =
+    text === "Accepted" ? Icons.check : text === "Changes requested" ? Icons.warning : tone === "danger" ? Icons.permissionDanger : Icons.verdict;
+  return (
+    <StatusBadge status={tone} data-testid={testId}>
+      <Icon aria-hidden className="size-3" />
+      {text}
+    </StatusBadge>
+  );
+}
+
+/** One spec criterion: an icon, the status word, the criterion id and its evidence. */
+function CriterionLine({ criterion }: { criterion: StewardCriterion }) {
+  const met = criterion.status === "met";
+  const unmet = criterion.status === "unmet";
+  const Icon = met ? Icons.check : unmet ? Icons.permissionDanger : Icons.verdict;
+  return (
+    <li className="flex items-start gap-1.5" data-testid={`steward-criterion-${criterion.id}`}>
+      <Icon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+      <span className="min-w-0 break-words">
+        {met ? "Met" : unmet ? "Unmet" : "Unverifiable"} <span className="font-mono">{criterion.id}</span>
+        {criterion.evidence && <span className="text-foreground-muted"> — {criterion.evidence}</span>}
+      </span>
+    </li>
+  );
+}
+
+/** One review pass: name, chip, summary, model, the reason it did not complete, and the spec checklist. */
+function AxisRow({ axis }: { axis: StewardAxis }) {
+  const criteria = axis.criteria ?? [];
+  const counts = criteriaCounts(criteria);
+  const showReason = axis.status === "blocked" && axis.blockedReason;
+  return (
+    <li className="flex flex-col gap-1" data-testid={`steward-axis-${axis.axis}`}>
+      <span className="flex flex-wrap items-center gap-1.5">
+        <span className="font-medium">{axisLabel(axis.axis)}</span>
+        <AxisChip axis={axis} />
+        {axis.model && <span className="font-mono text-ui-xs text-foreground-muted">{axis.model}</span>}
+      </span>
+      {axis.summary && <p className="m-0">{axis.summary}</p>}
+      {showReason && <p className="m-0 text-destructive">{blockedReasonLabel(axis.blockedReason)}</p>}
+      {criteria.length > 0 && (
+        <>
+          <span className="text-ui-xs text-foreground-muted" data-testid="steward-criteria-count">
+            {counts.met} met, {counts.unmet} unmet
+            {counts.unverifiable > 0 ? `, ${counts.unverifiable} unverifiable` : ""}
+          </span>
+          <ul className="m-0 flex flex-col gap-1 p-0" data-testid="steward-criteria">
+            {criteria.map((c) => (
+              <CriterionLine key={c.id} criterion={c} />
+            ))}
+          </ul>
+        </>
+      )}
+    </li>
+  );
+}
+
+/** The per-file finding blocks, as the card has always drawn them (a `rule` adds one muted line). */
+function FileBlocks({ files }: { files: { file: string; findings: StewardFinding[] }[] }) {
+  return (
+    <>
+      {files.map((g) => (
+        <div key={g.file} className="flex flex-col gap-1">
+          <h4 className="m-0 font-mono text-ui-xs font-medium">{g.file}</h4>
+          <ul className="m-0 flex flex-col gap-1.5 p-0">
+            {g.findings.map((f, i) => (
+              <li key={`${f.line}-${i}`} className="flex flex-col gap-0.5">
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <StatusBadge status="neutral" className="px-1.5 py-0" data-testid="steward-finding-severity">
+                    {f.severity || "unrated"}
+                  </StatusBadge>
+                  <span>
+                    line {f.line}: {f.why}
+                  </span>
+                </span>
+                <span className="text-ui-xs text-foreground-muted">check: {f.check}</span>
+                {f.rule && <span className="text-ui-xs text-foreground-muted">rule: {f.rule}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -139,6 +236,16 @@ export function StewardReviewCard({ item, onOpenTask }: { item: InboxItem; onOpe
           {data.blockedReason}
         </p>
       )}
+      {data.axes && data.axes.length > 0 && (
+        <div className="flex flex-col gap-1" data-testid="steward-axes">
+          <h3 className="m-0 text-ui-sm font-medium">Review axes</h3>
+          <ul className="m-0 flex flex-col gap-2 p-0">
+            {data.axes.map((a, i) => (
+              <AxisRow key={`${a.axis}-${i}`} axis={a} />
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="flex flex-col gap-1">
         <h3 className="m-0 text-ui-sm font-medium">Gates</h3>
         <ul className="m-0 flex flex-col gap-1 p-0" data-testid="steward-gates">
@@ -150,26 +257,16 @@ export function StewardReviewCard({ item, onOpenTask }: { item: InboxItem; onOpe
       {data.findings.length > 0 && (
         <div className="flex flex-col gap-2" data-testid="steward-findings">
           <h3 className="m-0 text-ui-sm font-medium">Findings</h3>
-          {groupFindingsByFile(data.findings).map((g) => (
-            <div key={g.file} className="flex flex-col gap-1">
-              <h4 className="m-0 font-mono text-ui-xs font-medium">{g.file}</h4>
-              <ul className="m-0 flex flex-col gap-1.5 p-0">
-                {g.findings.map((f, i) => (
-                  <li key={`${f.line}-${i}`} className="flex flex-col gap-0.5">
-                    <span className="flex flex-wrap items-center gap-1.5">
-                      <StatusBadge status="neutral" className="px-1.5 py-0" data-testid="steward-finding-severity">
-                        {f.severity || "unrated"}
-                      </StatusBadge>
-                      <span>
-                        line {f.line}: {f.why}
-                      </span>
-                    </span>
-                    <span className="text-ui-xs text-foreground-muted">check: {f.check}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {data.findings.some((f) => f.axis) ? (
+            groupFindingsByAxisThenFile(data.findings).map((g) => (
+              <div key={g.axis ?? ""} className="flex flex-col gap-2" data-testid={g.axis ? `steward-findings-${g.axis}` : undefined}>
+                {g.axis && <h4 className="m-0 text-ui-xs font-medium text-foreground-muted">{axisLabel(g.axis)}</h4>}
+                <FileBlocks files={g.files} />
+              </div>
+            ))
+          ) : (
+            <FileBlocks files={groupFindingsByFile(data.findings)} />
+          )}
         </div>
       )}
       {data.frames && data.frames.length > 0 && (
