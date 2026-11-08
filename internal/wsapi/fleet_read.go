@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/fleet/serve"
+	"github.com/spacingmind/smind/internal/fleet/wire"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -169,6 +170,20 @@ func (s *fleetSource) RunEvents(runID string, afterSeq int64, limit int) ([]stor
 		return s.prunedEvents(row, afterSeq)
 	}
 	return s.db.ListRunEventsAfterSeq(runID, afterSeq, limit)
+}
+
+// RunHistorySource says whether runID is stored as a summary here (a skeleton
+// run whose detail was not pruned): a peer reading its activity is told the full
+// history is on this host. Facts from this host's own store only.
+func (s *fleetSource) RunHistorySource(runID string) string {
+	row, err := s.db.GetRun(runID)
+	if err != nil || row.HistoryPrunedAt != nil {
+		return ""
+	}
+	if sk, err := s.db.GetRunSkeleton(runID); err == nil && sk.SkeletonAt != nil {
+		return wire.HistorySkeleton
+	}
+	return ""
 }
 
 // readHandler serves one fleet read method for an approved host principal.

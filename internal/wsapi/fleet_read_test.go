@@ -317,3 +317,26 @@ func TestFleetVersionSkewRefused(t *testing.T) {
 		t.Fatalf("fleet.info after normal hello: %v", err)
 	}
 }
+
+// The owner's side of ADR-0053 AC9: a skeleton run is flagged, a full or pruned run is
+// not, and serving a peer's read never opens the provider's session (a rebuild runs
+// only for a human on this daemon).
+func TestFleetSourceFlagsASkeletonRunAndNeverRebuilds(t *testing.T) {
+	e := newHCEnv(t) // run "skel" is in skeleton form with a readable native session, "full" is not
+	src := &fleetSource{db: e.db}
+	if got := src.RunHistorySource("skel"); got != wire.HistorySkeleton {
+		t.Fatalf("skeleton run: %q", got)
+	}
+	if got := src.RunHistorySource("full"); got != "" {
+		t.Fatalf("full run: %q", got)
+	}
+	if got := src.RunHistorySource("nope"); got != "" {
+		t.Fatalf("unknown run: %q", got)
+	}
+	if _, err := src.RunEvents("skel", 0, 50); err != nil {
+		t.Fatal(err)
+	}
+	if e.calls.Load() != 0 {
+		t.Fatalf("serving a peer's read touched the provider session roots %d times", e.calls.Load())
+	}
+}

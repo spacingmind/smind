@@ -61,6 +61,33 @@ type RemoteReadResult struct {
 	Data          any    `json:"data"`
 	StatusUnknown bool   `json:"statusUnknown,omitempty"`
 	Failures      int    `json:"failures,omitempty"`
+	// HistoryOwner is set on an activity read of a run the owner stores as a
+	// summary: the full history is in the owner's provider session and is rebuilt
+	// only there. Its host fields come from this daemon's own host registry, never
+	// from the peer's text; the peer only supplies the flag.
+	HistoryOwner *remoteHistoryOwner `json:"historyOwner,omitempty"`
+}
+
+// remoteHistoryOwner is the ADR-0053 owned_by_host label of a remote run.
+type remoteHistoryOwner struct {
+	Source string `json:"historySource"`    // "skeleton"
+	Reason string `json:"skeletonReason"`   // "owned_by_host"
+	Host   string `json:"host,omitempty"`   // alias in this daemon's registry; empty when unknown
+	HostID string `json:"hostId,omitempty"` // id in this daemon's registry; empty when unknown
+}
+
+// ownedByHostReason is the skeletonReason of a run whose full history is on
+// another fleet host.
+const ownedByHostReason = "owned_by_host"
+
+// historyOwnerOf is the label for an activity page: nil unless the owner said the
+// run is a summary. alias and hostID are this daemon's own facts about the host
+// the page came from ("" = this daemon cannot name it).
+func historyOwnerOf(a wire.Activity, alias, hostID string) *remoteHistoryOwner {
+	if a.HistorySource != wire.HistorySkeleton {
+		return nil
+	}
+	return &remoteHistoryOwner{Source: wire.HistorySkeleton, Reason: ownedByHostReason, Host: alias, HostID: hostID}
 }
 
 // remoteHostView is a host as remote.hosts lists it: names and states only.
@@ -226,7 +253,14 @@ func (r *fleetRemote) handleRead(ctx context.Context, rc *requestContext, raw js
 			res.Data = ob.Status
 		}
 	case "activity":
-		res.Data, err = r.client.Activity(ctx, p.Host, co, p.TaskID, p.RunID, p.Cursor, p.Limit)
+		var act wire.Activity
+		if act, err = r.client.Activity(ctx, p.Host, co, p.TaskID, p.RunID, p.Cursor, p.Limit); err == nil {
+			res.HistoryOwner = historyOwnerOf(act, h.Alias, h.HostID)
+			if res.HistoryOwner == nil {
+				act.HistorySource = "" // only the one known flag value is passed on, never a peer's text
+			}
+			res.Data = act
+		}
 	}
 	if err != nil {
 		return nil, remoteError(h.Alias, err)

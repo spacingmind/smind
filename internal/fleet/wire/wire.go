@@ -197,4 +197,13 @@ type Activity struct {
 	Events     []Event `json:"events"`
 	NextCursor int64   `json:"nextCursor"`
 	HasMore    bool    `json:"hasMore"`
+	// HistorySource is HistorySkeleton when the owner stored this run as a
+	// summary: its full history lives in the owner's own provider session and can
+	// only be rebuilt there (ADR-0053 AC9). Absent for a run stored in full, and
+	// from a peer that predates it. The reader treats it as a flag (any other
+	// value is ignored) and names the owner from its own host registry.
+	HistorySource string `json:"historySource,omitempty"`
 }
+
+// HistorySkeleton is the one value of Activity.HistorySource.
+const HistorySkeleton = "skeleton"

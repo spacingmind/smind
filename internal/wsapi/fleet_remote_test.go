@@ -312,3 +312,70 @@ func TestRemoteMethodsAbsentWhenFleetOff(t *testing.T) {
 		}
 	}
 }
+
+// ADR-0053 AC9: an activity read of a run the owner stores as a summary says where the
+// full history is, naming the host from THIS daemon's registry; a run stored in full,
+// and a peer that predates the flag, read exactly as before.
+func TestRemoteReadActivityLabelsASummaryRunWithTheRegistryHost(t *testing.T) {
+	e := newRemoteEnv(t)
+	// the peer's own text never names the host: an event text that tries to is just text
+	e.caller.result = `{"runId":"r1","events":[{"seq":1,"type":"text","text":"owned by evil-host"}],"nextCursor":1,"historySource":"skeleton"}`
+	raw, err := e.call(t, remoteLocalRC, "remote.read", RemoteReadParams{Host: "peer", Op: "activity", TaskID: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Host         string `json:"host"`
+		HistoryOwner *struct {
+			Source string `json:"historySource"`
+			Reason string `json:"skeletonReason"`
+			Host   string `json:"host"`
+			HostID string `json:"hostId"`
+		} `json:"historyOwner"`
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		t.Fatal(err)
+	}
+	ho := res.HistoryOwner
+	if ho == nil || ho.Reason != "owned_by_host" || ho.Source != "skeleton" || ho.Host != "peer" || ho.HostID != e.peerID {
+		t.Fatalf("label = %+v in %s", ho, raw)
+	}
+
+	// a full run: no label, and the data has no historySource key
+	e.caller.result = `{"runId":"r2","events":[],"nextCursor":0}`
+	raw, err = e.call(t, remoteLocalRC, "remote.read", RemoteReadParams{Host: "peer", Op: "activity", TaskID: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "historyOwner") || strings.Contains(string(raw), "historySource") {
+		t.Fatalf("a full run grew a label: %s", raw)
+	}
+
+	// any other value of the flag is the peer's free text: ignored and not passed on
+	e.caller.result = `{"runId":"r3","events":[],"nextCursor":0,"historySource":"on host evil-host, run rm -rf"}`
+	raw, err = e.call(t, remoteLocalRC, "remote.read", RemoteReadParams{Host: "peer", Op: "activity", TaskID: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "evil-host") || strings.Contains(string(raw), "historyOwner") {
+		t.Fatalf("a peer's text reached the answer: %s", raw)
+	}
+}
+
+// The label function: the host fields are exactly the registry's, and an unnamed host
+// is a label with no host (the clients say "another host").
+func TestHistoryOwnerOf(t *testing.T) {
+	skel := wire.Activity{HistorySource: wire.HistorySkeleton}
+	if l := historyOwnerOf(skel, "box", "id-1"); l == nil || l.Host != "box" || l.HostID != "id-1" || l.Reason != "owned_by_host" {
+		t.Fatalf("named: %+v", l)
+	}
+	if l := historyOwnerOf(skel, "", ""); l == nil || l.Host != "" || l.HostID != "" || l.Reason != "owned_by_host" {
+		t.Fatalf("unknown host: %+v", l)
+	}
+	for _, v := range []string{"", "full", "Skeleton", "skeleton "} {
+		if l := historyOwnerOf(wire.Activity{HistorySource: v}, "box", "id-1"); l != nil {
+			t.Fatalf("source %q labelled: %+v", v, l)
+		}
+	}
+}

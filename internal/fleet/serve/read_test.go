@@ -357,3 +357,47 @@ func TestFleetRunStatusNeedsExactlyOneSelector(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// historySource wraps memSource with the optional HistorySourcer method.
+type historySource struct {
+	*memSource
+	skeleton map[string]bool
+}
+
+func (h historySource) RunHistorySource(runID string) string {
+	if h.skeleton[runID] {
+		return wire.HistorySkeleton
+	}
+	return ""
+}
+
+// An activity read says when the owner stores the run as a summary; a run stored in
+// full, and a Source that cannot say, read exactly as before (no new key).
+func TestFleetActivityFlagsASummaryRun(t *testing.T) {
+	m := newMemSource()
+	m.workspaces = []WorkspaceInfo{{ID: 1}}
+	m.tasks[1] = store.Task{ID: 1, WorkspaceID: 1}
+	m.runs["skel"] = store.Run{ID: "skel", TaskID: 1}
+	m.runs["full"] = store.Run{ID: "full", TaskID: 1}
+	for _, id := range []string{"skel", "full"} {
+		m.addEvent(id, map[string]any{"type": int(taskrunner.EventTypeText), "text": "hello"})
+	}
+	g := allGrant()
+	rd := NewReader(historySource{m, map[string]bool{"skel": true}}, ReaderOptions{})
+	a, err := rd.Activity(g, wire.TaskActivityParams{TaskID: 1, RunID: "skel"})
+	if err != nil || a.HistorySource != wire.HistorySkeleton {
+		t.Fatalf("summary run: %+v, %v", a, err)
+	}
+	full, err := rd.Activity(g, wire.TaskActivityParams{TaskID: 1, RunID: "full"})
+	if err != nil || full.HistorySource != "" {
+		t.Fatalf("full run: %+v, %v", full, err)
+	}
+	plain, err := NewReader(m, ReaderOptions{}).Activity(g, wire.TaskActivityParams{TaskID: 1, RunID: "skel"})
+	if err != nil || plain.HistorySource != "" {
+		t.Fatalf("a source that cannot say: %+v, %v", plain, err)
+	}
+	b, _ := json.Marshal(full)
+	if strings.Contains(string(b), "historySource") {
+		t.Fatalf("a full run grew the key: %s", b)
+	}
+}
