@@ -296,6 +296,8 @@ func cmdTask(args []string) int {
 		return cmdTaskApprove(args[1:])
 	case "deny":
 		return cmdTaskDeny(args[1:])
+	case "answer":
+		return cmdTaskAnswer(args[1:])
 	case "mode":
 		return cmdTaskMode(args[1:])
 	case "options":
