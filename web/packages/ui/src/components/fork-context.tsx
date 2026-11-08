@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import type { RunEntry } from "@/hooks/use-run-timeline";
@@ -19,9 +17,9 @@ export function ForkContext({
   parentTitle,
   inherited,
   seed,
+  seedFailed = false,
   loading,
   worktreePath,
-  children,
 }: {
   chat: Chat;
   /** The parent chat's title, for the inherited block's label. */
@@ -30,10 +28,10 @@ export function ForkContext({
   inherited: RunEntry[] | null;
   /** useForkSource's seed text; shown only for a seeded fork. */
   seed: string | null;
+  /** The seed could not be fetched. */
+  seedFailed?: boolean;
   loading: boolean;
   worktreePath?: string;
-  /** This chat's own content, rendered below the divider (where it continues from). */
-  children?: ReactNode;
 }) {
   const fork = chat.fork;
   if (!fork) return null;
@@ -64,7 +62,13 @@ export function ForkContext({
             <details>
               <summary className="cursor-pointer text-ui-sm text-foreground-muted">Show the summary</summary>
               <div className="mt-2 rounded-lg border border-border bg-background p-3">
-                <pre className="whitespace-pre-wrap text-ui-sm">{seed}</pre>
+                {seedFailed ? (
+                  <p className="text-ui-sm" data-testid="fork-seed-error">
+                    The summary could not be loaded.
+                  </p>
+                ) : (
+                  <pre className="whitespace-pre-wrap text-ui-sm">{seed}</pre>
+                )}
               </div>
             </details>
           </div>
@@ -75,7 +79,6 @@ export function ForkContext({
         <span className="text-ui-sm text-foreground-muted">{label}</span>
         <span aria-hidden className="h-px flex-1 bg-border" />
       </div>
-      {children}
     </div>
   );
 }

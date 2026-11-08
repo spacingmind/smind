@@ -1,22 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { forkReasonLabel } from "@/components/fork-chat-dialog";
+import { forkReasonLabel, TRANSIENT_REASONS, type ForkUnavailable } from "@/components/fork-chat-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-error";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
 import type { ForkMode } from "@/hooks/use-fork-chat";
+import { RetryStartError } from "@/hooks/use-retry-chat";
 import type { Chat } from "@/lib/types";
 import { RpcError } from "@/lib/ws-client";
-
-/** chat.fork's refusal detail (rpcError.data): why native is impossible and whether a seeded fork is offered. */
-interface ForkUnavailable {
-  reason?: string;
-  seededAvailable?: boolean;
-}
-
-/** Refusals that pass: the chat is still running or the daemon is busy (fork-chat-dialog's own copy of the same idea). */
-const TRANSIENT_REASONS = new Set(["native_session_in_use", "rebuild_busy"]);
 
 /**
  * The "Edit & retry" dialog: edit the prompt of a turn and run the edit in a
@@ -48,51 +40,64 @@ export function RetryChatDialog({
   /** Whether an earlier finished turn exists to branch at (retryAnchor !== null). */
   hasAnchor: boolean;
   onRetry: (prompt: string, mode: ForkMode) => Promise<Chat>;
-  /** Called with the new chat on success (open its tab); also when only the chat could be created (see useRetryChat). */
+  /** Called with the new chat on success (open its tab); also when only the chat could be created, once the user chose to open it. */
   onRetried: (chat: Chat) => void;
 }) {
   const action = useConfirmAction(open);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [unavailable, setUnavailable] = useState<ForkUnavailable | null>(null);
+  // The chat exists but its prompt never started (RetryStartError): the dialog says so and offers the empty chat.
+  const [partial, setPartial] = useState<{ chat: Chat; message: string } | null>(null);
+  // One retry at a time: two clicks before React re-renders must not start two forks and two runs.
+  const inFlight = useRef(false);
 
   // Every open starts from the replaced turn's own text and the native attempt, so a previous edit never leaks into the next one.
   useEffect(() => {
     if (open) {
       setPrompt(initialPrompt);
       setUnavailable(null);
+      setPartial(null);
     }
   }, [open, initialPrompt]);
 
   const confirm = async (): Promise<void> => {
-    await action.run(async () => {
-      const mode: ForkMode = unavailable ? "seeded" : "native";
-      let chat: Chat;
-      try {
-        chat = await onRetry(prompt, mode);
-      } catch (err) {
-        if (mode === "native" && err instanceof RpcError && err.code === "fork_unavailable") {
-          const data = (err.data ?? {}) as ForkUnavailable;
-          if (data.reason && TRANSIENT_REASONS.has(data.reason)) {
-            // Not a limit of the agent: the same retry can work a moment later, so no lossy offer.
-            throw new Error(`The session cannot be forked right now: ${forkReasonLabel(data.reason)}.`);
+    if (partial) {
+      onRetried(partial.chat);
+      onOpenChange(false);
+      return;
+    }
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await action.run(async () => {
+        const mode: ForkMode = unavailable ? "seeded" : "native";
+        let chat: Chat;
+        try {
+          chat = await onRetry(prompt, mode);
+        } catch (err) {
+          if (mode === "native" && err instanceof RpcError && err.code === "fork_unavailable") {
+            const data = (err.data ?? {}) as ForkUnavailable;
+            if (data.reason && TRANSIENT_REASONS.has(data.reason)) {
+              // Not a limit of the agent: the same retry can work a moment later, so no lossy offer.
+              throw new Error(`The session cannot be forked right now: ${forkReasonLabel(data.reason)}.`);
+            }
+            if (data.seededAvailable) {
+              setUnavailable(data); // Not a failure to show -- the dialog's own fallback state.
+              return;
+            }
           }
-          if (data.seededAvailable) {
-            setUnavailable(data); // Not a failure to show -- the dialog's own fallback state.
+          if (err instanceof RetryStartError) {
+            setPartial({ chat: err.chat, message: err.message });
             return;
           }
+          throw err;
         }
-        // The chat was created but its prompt was not started: the caller still opens it and shows the message.
-        const partial = (err as { chat?: Chat }).chat;
-        if (partial) {
-          onRetried(partial);
-          onOpenChange(false);
-          return;
-        }
-        throw err;
-      }
-      onRetried(chat);
-      onOpenChange(false);
-    });
+        onRetried(chat);
+        onOpenChange(false);
+      });
+    } finally {
+      inFlight.current = false;
+    }
   };
 
   return (
@@ -128,7 +133,7 @@ export function RetryChatDialog({
               ? "The edited prompt runs in a new chat that continues from the turn before this one. This chat stays as it is."
               : "There is no earlier turn to branch from, so the edited prompt starts in a new chat. This chat stays as it is."}
         </p>
-        <FormError message={action.error} testId="dialog-retry-chat-error" />
+        <FormError message={partial?.message ?? action.error} testId="dialog-retry-chat-error" />
         <DialogFooter>
           <Button
             type="button"
@@ -141,11 +146,11 @@ export function RetryChatDialog({
           </Button>
           <Button
             type="button"
-            disabled={action.pending || prompt.trim() === ""}
+            disabled={action.pending || (!partial && prompt.trim() === "")}
             data-testid="dialog-retry-chat-confirm"
             onClick={() => void confirm()}
           >
-            {action.pending ? "Retrying…" : unavailable ? "Retry with a summary" : "Retry"}
+            {action.pending ? "Retrying…" : partial ? "Open the new chat" : unavailable ? "Retry with a summary" : "Retry"}
           </Button>
         </DialogFooter>
       </DialogContent>

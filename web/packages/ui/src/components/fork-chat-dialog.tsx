@@ -7,13 +7,13 @@ import type { Chat } from "@/lib/types";
 import { RpcError } from "@/lib/ws-client";
 
 /** chat.fork's refusal detail (rpcError.data): why native is impossible and whether a seeded fork is offered. */
-interface ForkUnavailable {
+export interface ForkUnavailable {
   reason?: string;
   seededAvailable?: boolean;
 }
 
 /** Refusals that pass: the chat is still running or the daemon is busy. */
-const TRANSIENT_REASONS = new Set(["native_session_in_use", "rebuild_busy"]);
+export const TRANSIENT_REASONS = new Set(["native_session_in_use", "rebuild_busy"]);
 
 /** The daemon's refusal reasons (internal/history/native Reason values) as words. */
 export function forkReasonLabel(reason: string | undefined): string {

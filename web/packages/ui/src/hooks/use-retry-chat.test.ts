@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { retryAnchor, useRetryChat } from "@/hooks/use-retry-chat";
+import { RetryStartError, retryAnchor, retrySource, useRetryChat } from "@/hooks/use-retry-chat";
 import type { RunEntry } from "@/hooks/use-run-timeline";
 import type { Chat } from "@/lib/types";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -135,9 +135,9 @@ describe("useRetryChat", () => {
     await act(async () => {
       thrown = await promise!.catch((err: unknown) => err);
     });
-    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toBeInstanceOf(RetryStartError);
     expect((thrown as Error).message).toBe("The new chat was created but the prompt could not be started: daemon busy");
-    expect((thrown as { chat?: Chat }).chat).toBe(CHILD);
+    expect((thrown as RetryStartError).chat).toBe(CHILD);
   });
 
   it("re-sends the run's reuse attachments on the new prompt", async () => {
@@ -181,5 +181,35 @@ describe("useRetryChat", () => {
         }),
       ).rejects.toThrow("no daemon connection");
     });
+  });
+});
+
+describe("retrySource", () => {
+  const FORKED: Chat = { ...CHAT, ID: 12, fork: { parentChatId: 7, forkedAtRunId: "parent-run-3", kind: "fork", mode: "native", lossy: false } };
+  it("is the chat's own earlier done run when there is one", () => {
+    const runs = [entry("own-1"), entry("own-2")];
+    expect(retrySource(FORKED, runs, runs[1])).toEqual({ chatId: 12, runId: "own-1" });
+  });
+  it("in a forked chat's first own turn it is the parent at the fork point, so the inherited history survives", () => {
+    const runs = [entry("own-1")];
+    expect(retrySource(FORKED, runs, runs[0])).toEqual({ chatId: 7, runId: "parent-run-3" });
+  });
+  it("is null for the first turn of a chat that is not a fork", () => {
+    const runs = [entry("run-1")];
+    expect(retrySource(CHAT, runs, runs[0])).toBeNull();
+  });
+});
+
+describe("useRetryChat in a forked chat", () => {
+  it("forks the parent at the fork point with kind retry", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRetryChat(client));
+    const chat: Chat = { ...CHAT, ID: 12, fork: { parentChatId: 7, forkedAtRunId: "parent-run-3", kind: "fork", mode: "native", lossy: false } };
+    const runs = [entry("own-1")];
+    await act(async () => {
+      void result.current.retry({ taskId: 1, chat, runs, run: runs[0], prompt: "edited", mode: "native", permission: { permissionMode: "", autoAccept: false } });
+      await Promise.resolve();
+    });
+    expect(client.nth("chat.fork", 0).params).toEqual({ chatId: 7, atRunId: "parent-run-3", mode: "native", kind: "retry" });
   });
 });

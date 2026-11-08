@@ -31,6 +31,12 @@ describe("ForkContext", () => {
     expect(screen.queryByTestId("fork-seed")).toBeNull();
   });
 
+  it("a summary that could not be loaded says so instead of showing an empty one", () => {
+    render(<ForkContext chat={forked({ mode: "seeded", lossy: true })} parentTitle="Original chat" inherited={null} seed={null} seedFailed loading={false} />);
+    expect(screen.getByTestId("fork-seed-error")).toHaveTextContent("The summary could not be loaded.");
+    expect(screen.getByTestId("fork-seed").querySelector("pre")).toBeNull();
+  });
+
   it("a seeded fork shows the labelled summary, collapsed until opened", () => {
     render(<ForkContext chat={forked({ mode: "seeded", lossy: true })} parentTitle="Original chat" inherited={null} seed={"User: hi\nAssistant: hello"} loading={false} />);
     const block = screen.getByTestId("fork-seed");

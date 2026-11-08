@@ -971,6 +971,8 @@ export function useRunTimeline(
   taskId: number | null,
   chatId: number | null,
   events: DaemonEvents | null = null,
+  /** Load only the chat's runs up to and including this one (a fork's source turns: nothing after the fork point is fetched or streamed). */
+  stopAtRunId: string | null = null,
 ): TimelineState {
   const [runs, setRuns] = useState<RunEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1010,7 +1012,9 @@ export function useRunTimeline(
       .then((list) => {
         if (session.cancelled) return;
 
-        const mine = [...list].sort((a, b) => a.StartedAt.localeCompare(b.StartedAt));
+        const sorted = [...list].sort((a, b) => a.StartedAt.localeCompare(b.StartedAt));
+        const stopAt = stopAtRunId === null ? -1 : sorted.findIndex((r) => r.ID === stopAtRunId);
+        const mine = stopAt === -1 ? sorted : sorted.slice(0, stopAt + 1);
 
         // An adoption may have landed while this fetch was in flight;
         // only the entries it doesn't already know about are new. Fresh
@@ -1061,7 +1065,7 @@ export function useRunTimeline(
       session.controller.abort();
       if (sessionRef.current === session) sessionRef.current = null;
     };
-  }, [client, taskId, chatId]);
+  }, [client, taskId, chatId, stopAtRunId]);
 
   const submitPrompt = useCallback(
     async (

@@ -103,7 +103,27 @@ describe("useForkSource", () => {
     const { result } = renderHook(() => useForkSource(client, TASK, PARENT));
     await flush();
 
-    expect(result.current).toEqual({ inherited: null, turn: null, seed: null, loading: false });
+    expect(result.current).toEqual({ inherited: null, turn: null, seed: null, seedFailed: false, loading: false });
     expect(client.calls).toEqual([]);
+  });
+
+  it("loads no history past the fork point and never attaches to a later running run", async () => {
+    const client = new FakeWsClient();
+    renderHook(() => useForkSource(client, TASK, forked({ forkedAtRunId: "run-1" })));
+    client.nth("run.list", 0).resolve([summary("run-1"), summary("run-2"), { ...summary("run-3"), Status: "running" }]);
+    await flush();
+    expect(client.calls.filter((c) => c.method === "run.logs").map((c) => (c.params as { runId: string }).runId)).toEqual(["run-1"]);
+    expect(client.calls.filter((c) => c.method === "run.attach")).toEqual([]);
+  });
+
+  it("a failed chat.forkSeed is reported, not shown as an empty summary", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useForkSource(client, TASK, forked({ mode: "seeded", lossy: true })));
+    client.nth("run.list", 0).resolve([summary("run-1"), summary("run-2")]);
+    client.nth("chat.forkSeed", 0).reject(new Error("daemon down"));
+    await flush();
+    expect(result.current.seedFailed).toBe(true);
+    expect(result.current.seed).toBeNull();
+    expect(result.current.loading).toBe(false);
   });
 });

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { RetryChatDialog } from "@/components/retry-chat-dialog";
+import { RetryStartError } from "@/hooks/use-retry-chat";
 import type { Chat } from "@/lib/types";
 import { RpcError } from "@/lib/ws-client";
 
@@ -135,15 +136,30 @@ describe("RetryChatDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
-  it("an error that still carries the new chat opens it, closes and shows nothing else", async () => {
+  it("a started-nothing failure says so and offers the new chat instead of closing", async () => {
     const { onRetry, onRetried, onOpenChange } = renderDialog();
-    const partial = Object.assign(new Error("The new chat was created but the prompt could not be started: daemon busy"), { chat: CHILD });
-    onRetry.mockRejectedValueOnce(partial);
+    onRetry.mockRejectedValueOnce(new RetryStartError(CHILD, new Error("daemon busy")));
     fireEvent.click(screen.getByTestId("dialog-retry-chat-confirm"));
     await flush();
+    expect(screen.getByTestId("dialog-retry-chat-error")).toHaveTextContent("The new chat was created but the prompt could not be started: daemon busy");
+    expect(onRetried).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId("dialog-retry-chat-confirm")).toHaveTextContent("Open the new chat");
+    fireEvent.click(screen.getByTestId("dialog-retry-chat-confirm"));
+    await flush();
+    expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onRetried).toHaveBeenCalledWith(CHILD);
     expect(onOpenChange).toHaveBeenCalledWith(false);
-    expect(screen.queryByTestId("dialog-retry-chat-error")).toBeNull();
+  });
+
+  it("two clicks before the dialog re-renders start one retry", async () => {
+    const { onRetry } = renderDialog();
+    onRetry.mockReturnValue(new Promise(() => {}));
+    const confirm = screen.getByTestId("dialog-retry-chat-confirm");
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    await flush();
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it("describes the no-anchor case: the edit starts in a new chat", () => {

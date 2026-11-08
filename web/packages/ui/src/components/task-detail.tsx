@@ -42,7 +42,7 @@ import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useForkChat } from "@/hooks/use-fork-chat";
 import { useForkSource } from "@/hooks/use-fork-source";
-import { retryAnchor, useRetryChat } from "@/hooks/use-retry-chat";
+import { retrySource, useRetryChat } from "@/hooks/use-retry-chat";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { canRetryWithHigherEffort, useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
@@ -498,7 +498,7 @@ export function TaskDetailPane({
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span>
               {chat.fork.kind === "retry"
-                ? `Retry of ${forkSource.turn !== null ? `turn ${forkSource.turn + 1} ` : "a turn "}from ${parentChat?.Title || "another chat"}.`
+                ? `Retry from ${parentChat?.Title || "another chat"}${forkSource.turn !== null ? ` after turn ${forkSource.turn}` : ""}.`
                 : `Forked from ${parentChat?.Title || "another chat"}${forkSource.turn !== null ? ` at turn ${forkSource.turn}` : ""}.`}
               {chat.fork.lossy && " The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning."}
             </span>
@@ -552,6 +552,7 @@ export function TaskDetailPane({
                 parentTitle={parentChat?.Title || "another chat"}
                 inherited={forkSource.inherited}
                 seed={forkSource.seed}
+                seedFailed={forkSource.seedFailed}
                 loading={forkSource.loading}
                 worktreePath={task.WorktreePath ?? undefined}
               />
@@ -731,14 +732,14 @@ export function TaskDetailPane({
           chatTitle={chat.Title}
           turn={runs.findIndex((r) => r.id === retryTarget.id) + 1}
           initialPrompt={retryTarget.prompt}
-          hasAnchor={retryAnchor(runs, retryTarget) !== null}
+          hasAnchor={retrySource(chat, runs, retryTarget) !== null}
           onRetry={(prompt, mode) => {
             // The composer's permission applies when it is on the run's provider, else the run's own (see resubmit).
             const composer = runConfigRef.current;
             const permission =
               composer && composer.provider === retryTarget.provider
                 ? { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }
-                : { permissionMode: retryTarget.permissionMode, autoAccept: retryTarget.autoAccept };
+                : { permissionMode: retryTarget.permissionMode, autoAccept: false }; // a new chat never inherits auto-accept from an old run
             return retryChat({ taskId: task.ID, chat, runs, run: retryTarget, prompt, mode, permission });
           }}
           onRetried={(child) => onOpenForkedChat?.(child)}

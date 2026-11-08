@@ -28,12 +28,14 @@ export function inheritedUpTo(runs: RunEntry[], runId: string): RunEntry[] {
  */
 export function useForkSource(client: WsClientLike | null, task: Task, chat: Chat) {
   const fork = chat.fork ?? null;
-  const { runs } = useRunTimeline(client, fork ? task.ID : null, fork?.parentChatId ?? null, null);
+  const { runs } = useRunTimeline(client, fork ? task.ID : null, fork?.parentChatId ?? null, null, fork?.forkedAtRunId ?? null);
   const [seed, setSeed] = useState<string | null>(null);
+  const [seedFailed, setSeedFailed] = useState(false);
   const seeded = fork?.mode === "seeded";
 
   useEffect(() => {
     setSeed(null);
+    setSeedFailed(false);
     if (!client || !seeded) return;
     let cancelled = false;
     client
@@ -42,9 +44,8 @@ export function useForkSource(client: WsClientLike | null, task: Task, chat: Cha
         if (!cancelled) setSeed(result.seed);
       })
       .catch(() => {
-        // A daemon without the seed (or a failed fetch) reads as "no
-        // summary to show" rather than an endless spinner.
-        if (!cancelled) setSeed("");
+        // A failed fetch says so (the card shows "could not be loaded"): an empty summary would misstate what the agent received.
+        if (!cancelled) setSeedFailed(true);
       });
     return () => {
       cancelled = true;
@@ -53,5 +54,5 @@ export function useForkSource(client: WsClientLike | null, task: Task, chat: Cha
 
   const inherited = fork && runs !== null ? inheritedUpTo(runs, fork.forkedAtRunId) : null;
   const turn = inherited !== null && inherited.length > 0 ? inherited.length : null;
-  return { inherited, turn, seed, loading: fork !== null && (runs === null || (seeded && seed === null)) };
+  return { inherited, turn, seed, seedFailed, loading: fork !== null && (runs === null || (seeded && seed === null && !seedFailed)) };
 }

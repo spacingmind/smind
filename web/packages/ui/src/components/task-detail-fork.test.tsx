@@ -66,10 +66,10 @@ async function renderPane(chat: Chat, props: Partial<Parameters<typeof TaskDetai
 }
 
 describe("TaskDetailPane fork", () => {
-  it("a retry names the next turn and View original opens the parent", async () => {
+  it("a retry names the turn it continues after and View original opens the parent", async () => {
     const onOpenParentChat = vi.fn();
     await renderPane(forked({ kind: "retry" }), { parentChat: PARENT, onOpenParentChat });
-    expect(screen.getByTestId("chat-fork-banner")).toHaveTextContent("Retry of turn 2 from Original chat.");
+    expect(screen.getByTestId("chat-fork-banner")).toHaveTextContent("Retry from Original chat after turn 1.");
     fireEvent.click(screen.getByTestId("chat-fork-view-original"));
     expect(onOpenParentChat).toHaveBeenCalledWith(PARENT.ID);
   });

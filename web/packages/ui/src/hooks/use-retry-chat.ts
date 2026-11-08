@@ -22,6 +22,30 @@ export function retryAnchor(runs: RunEntry[], run: RunEntry): RunEntry | null {
   return null;
 }
 
+/** The chat was created but the edited prompt could not be started in it. */
+export class RetryStartError extends Error {
+  constructor(
+    readonly chat: Chat,
+    cause: unknown,
+  ) {
+    super(`The new chat was created but the prompt could not be started: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "RetryStartError";
+  }
+}
+
+/**
+ * Where an "Edit & retry" forks: the replaced turn's own chat at the turn before it, or -- when
+ * this chat is itself a fork and the replaced turn is its first own turn -- the chat it was forked
+ * from, at its fork point, so the agent keeps the history this chat inherited. null: nothing to
+ * branch from (the edited prompt starts a plain new chat).
+ */
+export function retrySource(chat: Chat, runs: RunEntry[], run: RunEntry): { chatId: number; runId: string } | null {
+  const anchor = retryAnchor(runs, run);
+  if (anchor) return { chatId: chat.ID, runId: anchor.id };
+  if (chat.fork) return { chatId: chat.fork.parentChatId, runId: chat.fork.forkedAtRunId };
+  return null;
+}
+
 /**
  * "Edit & retry" behind the prompt action bar: fork the chat at the turn
  * before the replaced one (kind "retry") and start the edited prompt in
@@ -42,9 +66,9 @@ export function useRetryChat(client: WsClientLike | null) {
     }): Promise<Chat> => {
       const { taskId, chat, runs, run, prompt, mode, permission } = args;
       if (!client) return Promise.reject(new Error("no daemon connection"));
-      const anchor = retryAnchor(runs, run);
-      const child = anchor
-        ? client.call<Chat>("chat.fork", { chatId: chat.ID, atRunId: anchor.id, mode, kind: "retry" })
+      const source = retrySource(chat, runs, run);
+      const child = source
+        ? client.call<Chat>("chat.fork", { chatId: source.chatId, atRunId: source.runId, mode, kind: "retry" })
         : client.call<Chat>("chat.create", { taskId });
       // ADR-0038: the earlier run's attachments ride along as `reuse`/ref requests (the daemon copies the stored files).
       const reuse = resendRequests(run.id, run.attachments);
@@ -65,12 +89,8 @@ export function useRetryChat(client: WsClientLike | null) {
             }),
           );
         } catch (err) {
-          // The chat exists even though nothing runs in it: hand it back so the caller can still open it.
-          const failure = new Error(
-            `The new chat was created but the prompt could not be started: ${err instanceof Error ? err.message : String(err)}`,
-          );
-          (failure as { chat?: Chat }).chat = forked;
-          throw failure;
+          // The chat exists even though nothing runs in it: hand it back so the dialog can say so and offer it.
+          throw new RetryStartError(forked, err);
         }
         return forked;
       });

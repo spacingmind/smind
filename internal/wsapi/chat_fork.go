@@ -229,7 +229,7 @@ func handleChatForkSeed(db *store.Store) handlerFunc {
 			return map[string]any{"seed": ""}, nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s: %w", m, err)
 		}
 		return map[string]any{"seed": f.Seed}, nil
 	}
