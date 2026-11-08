@@ -39,7 +39,7 @@ func TestSeedRoles_StewardFourthAndIdempotent(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	res := seed(t, r)
-	want := []string{"peer-sonnet", "lead", "validator", "steward"}
+	want := []string{"peer-sonnet", "lead", "validator", "steward", "steward-standards"}
 	if len(res) != len(want) {
 		t.Fatalf("results = %+v, want %d", res, len(want))
 	}
@@ -97,8 +97,8 @@ func TestSeedRoles_IdempotentAndKeepsExisting(t *testing.T) {
 		}
 	}
 	all, _ := r.List()
-	if len(all) != 4 {
-		t.Errorf("profiles = %d, want 4", len(all))
+	if len(all) != 5 {
+		t.Errorf("profiles = %d, want 5", len(all))
 	}
 }
 
@@ -187,13 +187,13 @@ func TestSeedRoles_SeatsExactly(t *testing.T) {
 			t.Errorf("pack seeds %q (provider %q, childPolicy %q)", p.Name, p.Provider, p.ChildPolicy)
 		}
 	}
-	for _, n := range []string{"lead", "peer-sonnet", "validator", "steward"} {
+	for _, n := range []string{"lead", "peer-sonnet", "validator", "steward", "steward-standards"} {
 		if !got[n] {
 			t.Errorf("pack lacks %s", n)
 		}
 	}
-	if len(all) != 4 {
-		t.Errorf("profiles = %d, want exactly lead, peer-sonnet, validator, steward", len(all))
+	if len(all) != 5 {
+		t.Errorf("profiles = %d, want exactly lead, peer-sonnet, validator, steward, steward-standards", len(all))
 	}
 }
 
