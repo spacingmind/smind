@@ -48,9 +48,8 @@ func askAsync(t *testing.T, d runPermissionDecider, req taskrunner.QuestionReque
 		select {
 		case res := <-ch:
 			t.Fatalf("question did not park: %+v %v", res.out, res.err)
-		default:
+		case <-time.After(5 * time.Millisecond): // poll tick
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("no pending question")
 	return nil, ""
@@ -419,5 +418,51 @@ func TestQuestion_UnreadableProfileFailsClosed(t *testing.T) {
 	wantDeclined(t, out, taskrunner.QuestionResolvedProfile, "not attended")
 	if len(reg.PendingQuestions()) != 0 {
 		t.Fatal("an unreadable profile parked a question")
+	}
+}
+
+// A question parked in memory dies with the process. On startup the run is
+// marked interrupted and its still-open question_request gets a
+// question_resolved(run_ended), so history never holds an orphan that a client
+// would draw as a live card; an already answered question is left alone.
+func TestQuestion_RestartClosesOrphanRequests(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	if _, err := st.CreateRun(store.Run{ID: "orphan-run", TaskID: task.ID, Provider: "claude-native", Prompt: "p", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	req := colourQ("Which colour?")
+	events := []taskrunner.Event{
+		{Type: taskrunner.EventTypeQuestionRequest, Question: &taskrunner.QuestionEvent{RequestID: "answered", Request: &req}},
+		{Type: taskrunner.EventTypeQuestionResolved, Question: &taskrunner.QuestionEvent{RequestID: "answered", Resolution: taskrunner.QuestionResolvedByHuman}},
+		{Type: taskrunner.EventTypeQuestionRequest, Question: &taskrunner.QuestionEvent{RequestID: "open", Request: &req}},
+	}
+	for i, e := range events {
+		data, err := encodeEvent(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.AppendRunEvent("orphan-run", int64(i+1), data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg := newTestRegistry(t, st)
+	if _, status, err := reg.History("orphan-run"); err != nil || status.Status != StatusInterrupted {
+		t.Fatalf("status = %+v, %v; want interrupted", status, err)
+	}
+	rows, err := st.ListRunEvents("orphan-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resolved []string
+	for _, row := range rows {
+		e, _ := decodeEvent(row.EventData)
+		if e.Type == taskrunner.EventTypeQuestionResolved && e.Question.Resolution == taskrunner.QuestionResolvedRunEnded {
+			resolved = append(resolved, e.Question.RequestID)
+		}
+	}
+	if len(resolved) != 1 || resolved[0] != "open" {
+		t.Fatalf("run_ended resolutions = %v, want only the open request", resolved)
 	}
 }

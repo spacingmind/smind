@@ -29,28 +29,23 @@ const (
 	// TopicPermissionResolved is published when a pending permission
 	// request leaves the pending state (see permissionResolvedPayload).
 	TopicPermissionResolved = "permission.resolved"
-	// TopicQuestionPending / TopicQuestionResolved announce an agent's
-	// question to the human and its end (ADR-0055); payloads
-	// questionPendingPayload / questionResolvedPayload.
-	TopicQuestionPending  = "question.pending"
-	TopicQuestionResolved = "question.resolved"
-	TopicWorkspaceCreated = "workspace.created"
-	TopicWorkspaceDeleted = "workspace.deleted"
-	TopicSpaceCreated     = "space.created"
-	TopicSpaceDeleted     = "space.deleted"
-	TopicTaskCreated      = "task.created"
-	TopicTaskUpdated      = "task.updated"
-	TopicTaskArchived     = "task.archived"
-	TopicTaskDeleted      = "task.deleted"
-	TopicChatCreated      = "chat.created"
-	TopicChatUpdated      = "chat.updated"
-	TopicChatArchived     = "chat.archived"
-	TopicChatQueueUpdated = "chat.queueUpdated"
-	TopicProfileCreated   = "profile.created"
-	TopicProfileUpdated   = "profile.updated"
-	TopicProfileDeleted   = "profile.deleted"
-	TopicAccountUpdated   = "account.updated"
-	TopicAccountRemoved   = "account.removed"
+	TopicWorkspaceCreated   = "workspace.created"
+	TopicWorkspaceDeleted   = "workspace.deleted"
+	TopicSpaceCreated       = "space.created"
+	TopicSpaceDeleted       = "space.deleted"
+	TopicTaskCreated        = "task.created"
+	TopicTaskUpdated        = "task.updated"
+	TopicTaskArchived       = "task.archived"
+	TopicTaskDeleted        = "task.deleted"
+	TopicChatCreated        = "chat.created"
+	TopicChatUpdated        = "chat.updated"
+	TopicChatArchived       = "chat.archived"
+	TopicChatQueueUpdated   = "chat.queueUpdated"
+	TopicProfileCreated     = "profile.created"
+	TopicProfileUpdated     = "profile.updated"
+	TopicProfileDeleted     = "profile.deleted"
+	TopicAccountUpdated     = "account.updated"
+	TopicAccountRemoved     = "account.removed"
 	// TopicAccountUsage is published after every completed usage fetch
 	// (payload {usage: AccountUsage}); see AttachUsage.
 	TopicAccountUsage     = "account.usage"
@@ -80,6 +75,15 @@ const (
 	// host's link state or its connection changed (ADR-0048), so clients
 	// refetch fleet.host.list. Never published while fleet is off.
 	TopicFleetHostsChanged = "fleet.hosts.changed"
+)
+
+// Question topics (ADR-0055) live in their own block so adding them does not
+// re-align the one above: question.pending / question.resolved announce an
+// agent's question to the human and its end (payloads questionPendingPayload /
+// questionResolvedPayload).
+const (
+	TopicQuestionPending  = "question.pending"
+	TopicQuestionResolved = "question.resolved"
 )
 
 // providerUpdatedPayload is the payload of TopicProviderUpdated.

@@ -212,9 +212,6 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     -- provider rate limit: 'none' | 'wait' | 'fallback'.
     on_rate_limit TEXT NOT NULL DEFAULT 'none',
     fallback_profile_id INTEGER, -- NULL = none
-    -- ADR-0055: what a run does with an agent's question to the human:
-    -- 'ask' | 'decline' | 'disabled'.
-    questions TEXT NOT NULL DEFAULT 'ask',
     -- ADR-0041 S1: the seat contract. NULL orchestration_tools = unmanaged
     -- (legacy); skills / child_profile_ids are JSON array text ('' = none).
     orchestration_tools INTEGER,
@@ -223,7 +220,11 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     child_policy TEXT NOT NULL DEFAULT '',
     child_profile_ids TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    -- ADR-0055 (last, so a fresh install and a migrated one share column order):
+    -- what a run does with an agent's question to the human:
+    -- 'ask' | 'decline' | 'disabled'.
+    questions TEXT NOT NULL DEFAULT 'ask'
 );
 
 CREATE TABLE IF NOT EXISTS mcp_servers (

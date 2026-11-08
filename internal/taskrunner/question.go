@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -47,6 +48,11 @@ type QuestionOption struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+
+	// orig is the label exactly as the agent wrote it (Label may be capped for
+	// display); an answer is sent back under the original so the agent gets the
+	// option it offered, not a shortened copy.
+	orig string
 }
 
 // Question is one question of a request.
@@ -129,7 +135,6 @@ type QuestionDecider interface {
 
 // Standing decline notes the agent reads.
 const (
-	QuestionNoteTimeout = "No human answered within 5 minutes; proceed with your best judgement or stop and report what you need."
 	QuestionNoteSecret  = "Secrets cannot be provided through a question. Ask the human to set it in the environment or the provider's own login."
 	QuestionNoteProfile = "This run is not attended: questions are declined. Proceed with your best judgement or stop and report what you need."
 	QuestionNoteNoHuman = "No human is attached to this run."
@@ -272,7 +277,7 @@ func ParseClaudeAskUserQuestion(input map[string]any) (QuestionRequest, error) {
 			if strings.TrimSpace(label) == "" {
 				return req, fmt.Errorf("question %d option %d has no label", i, j)
 			}
-			o := QuestionOption{ID: fmt.Sprintf("o%d", j)}
+			o := QuestionOption{ID: fmt.Sprintf("o%d", j), orig: label}
 			req.secret = req.secret || mentionsSecret(label)
 			if d, ok := om["description"].(string); ok {
 				req.secret = req.secret || mentionsSecret(d)
@@ -373,7 +378,11 @@ func claudeAnswerValue(q Question, it QuestionAnswerItem) string {
 	for _, id := range it.OptionIDs {
 		for _, o := range q.Options {
 			if o.ID == id {
-				labels = append(labels, o.Label)
+				if o.orig != "" {
+					labels = append(labels, o.orig)
+				} else {
+					labels = append(labels, o.Label)
+				}
 			}
 		}
 	}
@@ -430,4 +439,24 @@ type QuestionEvent struct {
 	Request    *QuestionRequest   `json:"request,omitempty"`
 	Resolution QuestionResolution `json:"resolution,omitempty"`
 	Answer     *QuestionAnswer    `json:"answer,omitempty"`
+}
+
+// QuestionNoteTimeout is the decline note for a question nobody answered
+// within d (the run's real permission timeout, not a fixed figure).
+func QuestionNoteTimeout(d time.Duration) string {
+	return "No human answered within " + humanDuration(d) + "; proceed with your best judgement or stop and report what you need."
+}
+
+func humanDuration(d time.Duration) string {
+	switch {
+	case d >= time.Minute && d%time.Minute == 0:
+		if n := int(d / time.Minute); n == 1 {
+			return "1 minute"
+		} else {
+			return fmt.Sprintf("%d minutes", n)
+		}
+	case d >= time.Second && d%time.Second == 0:
+		return fmt.Sprintf("%d seconds", int(d/time.Second))
+	}
+	return d.Round(time.Millisecond).String()
 }

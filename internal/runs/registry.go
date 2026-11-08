@@ -341,6 +341,12 @@ func (reg *Registry) notifyRunStatus(r *run) {
 func New(st *store.Store) (*Registry, error) {
 	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool), syncing: make(map[int64]bool), notifyParent: true, notifyDebounce: defaultNotifyDebounce, notifyMaxHold: defaultNotifyMaxHold, retryGrace: defaultRetryGrace}
 
+	// A question parked in memory dies with the process: write its resolution
+	// before the run is marked interrupted, so history never holds an orphan
+	// question_request that a client would draw as a live card (ADR-0055).
+	if err := closeOrphanQuestions(st); err != nil {
+		return nil, fmt.Errorf("runs: close orphan questions: %w", err)
+	}
 	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted), func(chatID int64) string { return restartStopReason(st, chatID) }); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
 	}

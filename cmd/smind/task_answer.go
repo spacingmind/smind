@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	"github.com/mattn/go-isatty"
+
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // cmdTaskAnswerUsage is printed on any argument error in cmdTaskAnswer.
 const cmdTaskAnswerUsage = `usage: smind task answer <runId> [requestId] [--answer <questionId>=<optionNumber|optionLabel|text>]... [--decline] [--note <text>]`
 
-// maxAnswerNoteRunes mirrors the daemon's cap on a decline note.
-const maxAnswerNoteRunes = 500
 
 // answerStdinIsTerminal and answerInput are package vars so tests can drive
 // the interactive prompt without a real terminal.
@@ -88,8 +88,8 @@ func cmdTaskAnswer(args []string) int {
 		fmt.Fprintln(os.Stderr, cmdTaskAnswerUsage)
 		return 2
 	}
-	if len([]rune(note)) > maxAnswerNoteRunes {
-		fmt.Fprintf(os.Stderr, "task answer: --note is longer than %d characters\n", maxAnswerNoteRunes)
+	if len([]rune(note)) > taskrunner.MaxQuestionNote {
+		fmt.Fprintf(os.Stderr, "task answer: --note is longer than %d characters\n", taskrunner.MaxQuestionNote)
 		return 1
 	}
 	interactive := !decline && len(rawAnswers) == 0

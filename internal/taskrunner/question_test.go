@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 )
@@ -215,7 +216,7 @@ func TestClaudeAdapter_AskUserQuestionAnswerAllowsWithAnswers(t *testing.T) {
 }
 
 func TestClaudeAdapter_AskUserQuestionDeclineDeniesWithNote(t *testing.T) {
-	qd := &fakeQD{out: QuestionOutcome{Resolution: QuestionResolvedTimeout, Answer: QuestionAnswer{Action: QuestionActionDecline, Note: QuestionNoteTimeout}}}
+	qd := &fakeQD{out: QuestionOutcome{Resolution: QuestionResolvedTimeout, Answer: QuestionAnswer{Action: QuestionActionDecline, Note: QuestionNoteTimeout(5 * time.Minute)}}}
 	allow, in, msg, _, _, err := claudeDeciderAdapter{decider: qd}.Decide(context.Background(), askReq(t, "single"))
 	if err != nil || allow || in != nil {
 		t.Fatalf("allow=%v in=%v err=%v", allow, in, err)
@@ -316,5 +317,30 @@ func TestParseClaudeAskUserQuestion_StripsEveryDangerousRange(t *testing.T) {
 	}})
 	if got := req.Questions[0].Text; got != "line1\nline2\tx\ny" {
 		t.Fatalf("newline/tab handling: %q", got)
+	}
+}
+
+func TestQuestionNoteTimeout_UsesTheRealDuration(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		5 * time.Minute: "within 5 minutes", time.Minute: "within 1 minute", 90 * time.Second: "within 90 seconds", 40 * time.Millisecond: "within 40ms",
+	} {
+		if got := QuestionNoteTimeout(d); !strings.Contains(got, want) {
+			t.Errorf("QuestionNoteTimeout(%v) = %q, want it to contain %q", d, got, want)
+		}
+	}
+}
+
+// A label longer than the display cap is answered under the agent's original
+// text, not the shortened copy.
+func TestClaudeAnswersInput_UsesTheOriginalLabel(t *testing.T) {
+	long := strings.Repeat("L", 200)
+	in := map[string]any{"questions": []any{map[string]any{"question": "Pick", "options": []any{map[string]any{"label": long}}}}}
+	req, err := ParseClaudeAskUserQuestion(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ClaudeAnswersInput(in, req, QuestionAnswer{Action: QuestionActionAnswer, Answers: []QuestionAnswerItem{{QuestionID: "q0", OptionIDs: []string{"o0"}}}})
+	if v := got["answers"].(map[string]any)["Pick"]; v != long {
+		t.Fatalf("answer = %q, want the original label", v)
 	}
 }

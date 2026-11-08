@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/learning/redact"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -176,7 +177,8 @@ func (d runPermissionDecider) DecideQuestion(ctx context.Context, req taskrunner
 		Question: &taskrunner.QuestionEvent{RequestID: requestID, Request: &reqCopy},
 	})
 
-	timer := time.NewTimer(d.reg.getPermissionTimeout())
+	timeout := d.reg.getPermissionTimeout()
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
@@ -189,7 +191,7 @@ func (d runPermissionDecider) DecideQuestion(ctx context.Context, req taskrunner
 		}
 		d.recordQuestionResolved(requestID, taskrunner.QuestionResolvedTimeout, nil)
 		d.notifyQuestionResolved(requestID, string(taskrunner.QuestionResolvedTimeout))
-		return declineOutcome(taskrunner.QuestionResolvedTimeout, taskrunner.QuestionNoteTimeout), nil
+		return declineOutcome(taskrunner.QuestionResolvedTimeout, taskrunner.QuestionNoteTimeout(timeout)), nil
 
 	case <-ctx.Done():
 		if ans, ok := d.settleQuestion(requestID, pq); ok {
@@ -326,4 +328,59 @@ func scrubAnswerForHistory(ans taskrunner.QuestionAnswer) taskrunner.QuestionAns
 		out.Answers[i] = it
 	}
 	return out
+}
+
+// closeOrphanQuestions appends question_resolved(run_ended) for every question
+// request of a run the previous process left running that never got a
+// resolution. A parked question lives only in memory, so after a restart it
+// cannot be answered; without this its history row would stay open forever.
+func closeOrphanQuestions(st *store.Store) error {
+	ids, err := st.ListRunningRunIDs()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		rows, err := st.ListRunEvents(id)
+		if err != nil {
+			return err
+		}
+		open := map[string]bool{}
+		var order []string
+		var lastSeq int64
+		for _, row := range rows {
+			if row.Seq > lastSeq {
+				lastSeq = row.Seq
+			}
+			e, err := decodeEvent(row.EventData)
+			if err != nil || e.Question == nil {
+				continue
+			}
+			switch e.Type {
+			case taskrunner.EventTypeQuestionRequest:
+				if !open[e.Question.RequestID] {
+					order = append(order, e.Question.RequestID)
+				}
+				open[e.Question.RequestID] = true
+			case taskrunner.EventTypeQuestionResolved:
+				open[e.Question.RequestID] = false
+			}
+		}
+		for _, reqID := range order {
+			if !open[reqID] {
+				continue
+			}
+			data, err := encodeEvent(taskrunner.Event{
+				Type:     taskrunner.EventTypeQuestionResolved,
+				Question: &taskrunner.QuestionEvent{RequestID: reqID, Resolution: taskrunner.QuestionResolvedRunEnded},
+			})
+			if err != nil {
+				return err
+			}
+			lastSeq++
+			if _, err := st.AppendRunEvent(id, lastSeq, data); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
