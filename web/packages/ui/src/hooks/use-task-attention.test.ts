@@ -321,6 +321,21 @@ describe("useTaskAttention failure classes (run failure classes)", () => {
     }
   });
 
+  it("the human-action classes expose their class and label too (the sidebar row says what to do)", async () => {
+    for (const [kind, label] of [
+      ["context_window_exceeded", "Start a fresh chat for this task"],
+      ["session_budget_exceeded", "Raise the session budget in the provider's settings, or start a fresh chat"],
+      ["too_many_denials", "Review the permission policy"],
+    ]) {
+      const client = new FakeWsClient();
+      const { result } = renderHook(() => useTaskAttention(client, null, null));
+      client.nth("run.list").resolve([failed("r", kind, label)]);
+      await flush();
+      expect(result.current.runStatus.get(1)).toBe("error");
+      expect(result.current.rateLimit.get(1)).toEqual({ kind, label });
+    }
+  });
+
   it("a live terminal event sets it and a later status clears it", async () => {
     const client = new FakeWsClient();
     const stub = makeEventsStub();

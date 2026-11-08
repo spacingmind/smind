@@ -1,5 +1,5 @@
 import { act } from "react";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -859,6 +859,25 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     const dot = await screen.findByTestId("task-run-status");
     expect(dot).toHaveAttribute("data-status", "warning");
     expect(dot.getAttribute("aria-label")).toBe("latest run error, Retrying automatically (1 of 2)");
+  });
+
+  it("a human-action class keeps the danger dot and its action label (run failure classes)", async () => {
+    for (const [kind, label] of [
+      ["context_window_exceeded", "Start a fresh chat for this task"],
+      ["session_budget_exceeded", "Raise the session budget in the provider's settings, or start a fresh chat"],
+      ["too_many_denials", "Review the permission policy"],
+    ]) {
+      cleanup();
+      const client = renderSidebar({
+        runStatus: new Map([[TASK.ID, "error"]]),
+        rateLimit: new Map([[TASK.ID, { kind, label }]]),
+      });
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      const dot = await screen.findByTestId("task-run-status");
+      expect(dot).toHaveAttribute("data-status", "danger");
+      expect(dot.getAttribute("aria-label")).toBe(`latest run error, ${label}`);
+      expect(screen.getByTestId("sidebar-task-row").getAttribute("aria-label")).not.toContain("Rate limited");
+    }
   });
 
   it("plain error task still shows the error dot", async () => {

@@ -1,3 +1,4 @@
+import { failureSentence } from "@/lib/failure-text";
 import { selectProvider } from "@/stores/providers-view-store";
 
 /**
@@ -25,8 +26,23 @@ export interface FailureAction {
 export const AUTH_EXPIRED = "auth_expired";
 export const MODEL_NOT_IN_PLAN = "model_not_in_plan";
 export const TRANSIENT_429 = "transient_429";
+export const CONTEXT_WINDOW_EXCEEDED = "context_window_exceeded";
+export const SESSION_BUDGET_EXCEEDED = "session_budget_exceeded";
+export const TOO_MANY_DENIALS = "too_many_denials";
 
-const ACTIONABLE = new Set([AUTH_EXPIRED, MODEL_NOT_IN_PLAN, TRANSIENT_429, "plan_window_exhausted", "rate_limited"]);
+/** The human-action classes (R3a): a person must start a fresh chat, raise the provider's session budget or review the permission policy; never retried, never failed over. */
+export const HUMAN_ACTION_KINDS = new Set([CONTEXT_WINDOW_EXCEEDED, SESSION_BUDGET_EXCEEDED, TOO_MANY_DENIALS]);
+
+const ACTIONABLE = new Set([
+  AUTH_EXPIRED,
+  MODEL_NOT_IN_PLAN,
+  TRANSIENT_429,
+  "plan_window_exhausted",
+  "rate_limited",
+  CONTEXT_WINDOW_EXCEEDED,
+  SESSION_BUDGET_EXCEEDED,
+  TOO_MANY_DENIALS,
+]);
 
 /** True for a class that has a next action to show (cli_exited keeps the footer's Continue). */
 export function isActionableFailure(kind: string | undefined | null): boolean {
@@ -96,12 +112,12 @@ export interface FailureCardView {
   hint: string | null;
   /** The live countdown of a queued retry, or null. */
   countdown: string | null;
-  /** The control the card offers: Sign in (settings deep link) or none. */
-  control: "sign_in" | null;
+  /** The control the card offers: Sign in / Review the permission policy (settings deep links) or Start a fresh chat. */
+  control: "sign_in" | "review_policy" | "new_chat" | null;
   controlLabel: string | null;
 }
 
-/** The card view of a failure class that has its own card; null for plan windows, the residual, cli_exited and no failure. */
+/** The card view of a failure class that has its own card; null for plan windows, the residual and no failure (cli_exited's card carries no control; the footer keeps its Continue). */
 export function describeFailureCard(
   run: { failureKind?: string; failureAction?: FailureAction },
   now: Date,
@@ -131,6 +147,17 @@ export function describeFailureCard(
         controlLabel: null,
       };
     }
+    // The human-action classes (R3a): the daemon's one sentence says what happened, the
+    // action label says what a person does about it. Never a Retry, never a Continue.
+    case CONTEXT_WINDOW_EXCEEDED:
+      return { tone: "danger", message: failureSentence(CONTEXT_WINDOW_EXCEEDED, action), hint: action?.label ?? null, countdown: null, control: "new_chat", controlLabel: "Start a fresh chat" };
+    case SESSION_BUDGET_EXCEEDED:
+      // No control: whose budget it is and where to raise it differ per provider, so the label is the hint.
+      return { tone: "danger", message: failureSentence(SESSION_BUDGET_EXCEEDED, action), hint: action?.label ?? null, countdown: null, control: null, controlLabel: null };
+    case TOO_MANY_DENIALS:
+      return { tone: "danger", message: failureSentence(TOO_MANY_DENIALS, action), hint: action?.label ?? null, countdown: null, control: "review_policy", controlLabel: "Review the permission policy" };
+    case "cli_exited":
+      return { tone: "warning", message: failureSentence("cli_exited", action), hint: null, countdown: null, control: null, controlLabel: null };
   }
   return null;
 }

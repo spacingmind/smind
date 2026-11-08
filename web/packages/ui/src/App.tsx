@@ -1017,6 +1017,20 @@ function AppShell({
     return () => window.removeEventListener("smind:open-settings", onOpenSettings);
   }, [openSettings]);
 
+  // A failure card's "Start a fresh chat" (context_window_exceeded, lib/failure-class.ts) sits
+  // several layers below the shell: the same window-event shape as `smind:open-settings`,
+  // answered by the "+" tab button's own chat.create path. A detail naming another task is
+  // not this card's business (the card only renders inside the open task's timeline).
+  useEffect(() => {
+    const onNewChat = (e: Event) => {
+      const detail = (e as CustomEvent<{ taskId?: number }>).detail;
+      if (detail?.taskId != null && detail.taskId !== selectedTask?.ID) return;
+      openNewChat();
+    };
+    window.addEventListener("smind:new-chat", onNewChat);
+    return () => window.removeEventListener("smind:new-chat", onNewChat);
+  });
+
   // Settings' Automations link section: the page is not a settings section any more, so the section closes
   // Settings first and dispatches this event, same pattern as `smind:open-settings`.
   useEffect(() => {
