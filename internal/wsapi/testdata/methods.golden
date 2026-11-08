@@ -117,11 +117,13 @@ provider.setEnv
 provider.setSecret
 provider.test
 provider.updateInstance
+run.answerQuestion
 run.attach
 run.attachment
 run.list
 run.listConfigOptions
 run.logs
+run.pendingQuestions
 run.respondPermission
 run.revealToolHeredoc
 run.setConfigOption

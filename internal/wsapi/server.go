@@ -783,6 +783,24 @@ func (b busRunNotifier) NotifyPermissionResolved(runID string, taskID, chatID in
 	}})
 }
 
+func (b busRunNotifier) NotifyQuestionPending(runID string, taskID, chatID int64, requestID string, req taskrunner.QuestionRequest) {
+	if isSystemTask(b.db, taskID) {
+		return
+	}
+	b.bus.Publish(Event{Topic: TopicQuestionPending, Payload: questionPendingPayload{
+		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, Request: req,
+	}})
+}
+
+func (b busRunNotifier) NotifyQuestionResolved(runID string, taskID, chatID int64, requestID, reason string) {
+	if isSystemTask(b.db, taskID) {
+		return
+	}
+	b.bus.Publish(Event{Topic: TopicQuestionResolved, Payload: questionResolvedPayload{
+		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, Reason: reason,
+	}})
+}
+
 func (b busRunNotifier) NotifyChatQueueUpdated(chatID int64, items []store.ChatQueueItem) {
 	if b.db != nil {
 		if c, err := b.db.GetChat(chatID); err == nil && isSystemTask(b.db, c.TaskID) {

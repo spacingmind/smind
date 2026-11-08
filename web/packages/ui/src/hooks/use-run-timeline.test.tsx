@@ -456,6 +456,135 @@ describe("useRunTimeline live adoption", () => {
   });
 });
 
+describe("useRunTimeline agent questions (ADR-0055)", () => {
+  const questionRequest = (requestId = "q-req-1") => ({
+    requestId,
+    request: {
+      source: "agent",
+      questions: [{ id: "q1", header: "Deploy", text: "Which environment should I deploy to?", kind: "single" as const, options: [{ id: "prod", label: "Prod" }] }],
+    },
+  });
+
+  async function setup() {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary({ Status: "running", FinishedAt: null })]);
+    await flush();
+    return { client, result };
+  }
+
+  it("a live question_request sets pendingQuestion and renders no row", async () => {
+    const { client, result } = await setup();
+
+    await act(async () => {
+      client.emit("run.attach", 0, "question_request", questionRequest());
+    });
+
+    expect(result.current.runs?.[0]?.pendingQuestion).toMatchObject({ requestId: "q-req-1" });
+    expect(result.current.runs?.[0]?.pendingQuestion?.request.questions).toHaveLength(1);
+    expect(result.current.runs?.[0]?.items).toHaveLength(0);
+  });
+
+  it("question_resolved clears the pending question and lands one question item with the summary and the human answer", async () => {
+    const { client, result } = await setup();
+
+    await act(async () => {
+      client.emit("run.attach", 0, "question_request", questionRequest());
+    });
+    await act(async () => {
+      client.emit("run.attach", 0, "question_resolved", {
+        requestId: "q-req-1",
+        reason: "human",
+        answer: { action: "answer", answers: [{ questionId: "q1", optionIds: ["prod"] }] },
+      });
+    });
+
+    expect(result.current.runs?.[0]?.pendingQuestion).toBeUndefined();
+    const item = result.current.runs?.[0]?.items.find((i) => i.kind === "question");
+    expect(item).toMatchObject({ requestId: "q-req-1", reason: "human", summary: "Agent asked: Which environment should I deploy to?" });
+    expect(item && "answers" in item ? item.answers : undefined).toEqual({ action: "answer", answers: [{ questionId: "q1", optionIds: ["prod"] }] });
+    expect(result.current.runs?.[0]?.items).toHaveLength(1);
+  });
+
+  it("a backfill replay that ends unresolved keeps the question pending", async () => {
+    const { client, result } = await setup();
+
+    // The attach backfill replays the run's persisted events through the
+    // same callback a live event uses; a request nobody answered is the
+    // last question event in it.
+    await act(async () => {
+      client.emit("run.attach", 0, "chunk", { text: "working…" });
+      client.emit("run.attach", 0, "question_request", questionRequest());
+    });
+
+    expect(result.current.runs?.[0]?.pendingQuestion?.requestId).toBe("q-req-1");
+    expect(result.current.runs?.[0]?.items).toHaveLength(1); // the chunk only
+  });
+
+  it("a backfill replay whose request was resolved leaves nothing pending", async () => {
+    const { client, result } = await setup();
+
+    await act(async () => {
+      client.emit("run.attach", 0, "question_request", questionRequest());
+      client.emit("run.attach", 0, "question_resolved", { requestId: "q-req-1", reason: "timeout" });
+    });
+
+    expect(result.current.runs?.[0]?.pendingQuestion).toBeUndefined();
+    const item = result.current.runs?.[0]?.items.find((i) => i.kind === "question");
+    expect(item).toMatchObject({ reason: "timeout" });
+    expect(item && "answers" in item ? item.answers : undefined).toBeUndefined();
+  });
+
+  it("a resolution for a different requestId does not clear the pending question", async () => {
+    const { client, result } = await setup();
+
+    await act(async () => {
+      client.emit("run.attach", 0, "question_request", questionRequest("q-req-1"));
+      client.emit("run.attach", 0, "question_resolved", { requestId: "q-req-other", reason: "timeout" });
+    });
+
+    expect(result.current.runs?.[0]?.pendingQuestion?.requestId).toBe("q-req-1");
+  });
+
+  it("answerQuestion sends run.answerQuestion with the built answer", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([]);
+    await flush();
+
+    let answered!: Promise<void>;
+    await act(async () => {
+      answered = result.current.answerQuestion("run-1", "q-req-1", {
+        action: "answer",
+        answers: [{ questionId: "q1", optionIds: ["prod"] }],
+        note: "go",
+      });
+      await Promise.resolve();
+    });
+    expect(client.nth("run.answerQuestion", 0).params).toEqual({
+      runId: "run-1",
+      requestId: "q-req-1",
+      action: "answer",
+      answers: [{ questionId: "q1", optionIds: ["prod"] }],
+      note: "go",
+    });
+    await act(async () => {
+      client.nth("run.answerQuestion", 0).resolve(undefined);
+      await answered;
+    });
+
+    await act(async () => {
+      answered = result.current.answerQuestion("run-1", "q-req-1", { action: "decline" });
+      await Promise.resolve();
+    });
+    expect(client.nth("run.answerQuestion", 1).params).toEqual({ runId: "run-1", requestId: "q-req-1", action: "decline" });
+    await act(async () => {
+      client.nth("run.answerQuestion", 1).resolve(undefined);
+      await answered;
+    });
+  });
+});
+
 describe("useRunTimeline attachments (ADR-0038)", () => {
   const preview: AttachmentMeta = { id: "1", kind: "image", name: "a.png", mimeType: "image/png", size: 4, previewUrl: "blob:local" };
   const stored: AttachmentMeta = { id: "1", kind: "image", name: "a.png", mimeType: "image/png", size: 4, width: 2, height: 2 };

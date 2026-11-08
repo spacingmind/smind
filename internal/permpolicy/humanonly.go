@@ -30,7 +30,7 @@ var HumanOnlyRPCs = []string{
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not
 // on this branch yet; the wsapi drift test lets them be absent and drops the
 // tolerance for each as soon as its handler exists.
-var PendingHumanOnlyRPCs = []string{"run.answerPermission", "run.answerQuestion"}
+var PendingHumanOnlyRPCs = []string{"run.answerPermission"}
 
 // humanOnlyCommand is one human-only smind command: the words that name it
 // and the verbs of it that are human-only (nil: every verb).

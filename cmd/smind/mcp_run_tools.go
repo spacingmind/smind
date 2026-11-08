@@ -22,10 +22,10 @@ import (
 // registerMCPRunTools adds the run-reading tools, task_wait, and task_stop
 // to the catalog.
 func registerMCPRunTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request. A pending permission means the run is NOT finished: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended. A done run whose `disposition` is \"needs-continue\" hit a turn/token/budget cap and is NOT finished: send \"continue\". Includes the run's git provenance (baseSha, headSha, dirty) when known. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpTaskStatus(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request or agent question. A pending permission or question means the run is NOT finished: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); if it is waiting_question, a HUMAN answers it via `smind task answer` or the sMind UI (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended. A done run whose `disposition` is \"needs-continue\" hit a turn/token/budget cap and is NOT finished: send \"continue\". Includes the run's git provenance (baseSha, headSha, dirty) when known. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpTaskStatus(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_logs", Description: "Read a run's full (or tailed) transcript and current status."}, mcpTaskLogs(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the sMind web UI; there is no tool for that here. Each request carries a `detail` for writes (path, size change, replacesExisting, largeShrink, diff or preview): surface it to the human as is. loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended."}, mcpTaskPermissions(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "With host, one bounded long poll (max 25s) on a run of a peer host: re-issue it with the returned nextCursor until done; waiting_permission there means a HUMAN on that host approves, you cannot. Otherwise: block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). Check `state`: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended; a done run with `disposition` \"needs-continue\" hit a turn/token/budget cap and is NOT finished (send \"continue\"). A human approves or denies a pending permission out of band (sMind web UI or `smind task approve`); to keep waiting after surfacing it, re-issue task_wait with ignorePermissionIds listing the request ids you have already surfaced -- the wait then ends only on a NEW pending request, a terminal status, or the timeout. Pass runIds (2-16 distinct runs, instead of runId) to wait for the first of several: it returns as soon as any one is done/error/stopped or has a pending permission, and runId in the result names which. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpTaskWait(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "With host, one bounded long poll (max 25s) on a run of a peer host: re-issue it with the returned nextCursor until done; waiting_permission there means a HUMAN on that host approves, you cannot. Otherwise: block until a run finishes (done/error/stopped), a permission request or an agent question goes pending, or the timeout elapses (default 120s). Check `state`: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); if it is waiting_question, a HUMAN answers the question via `smind task answer` or the sMind UI (you cannot); then task_wait again (pass ignorePermissionIds to skip requests you already surfaced); only done/error/stopped mean the run ended; a done run with `disposition` \"needs-continue\" hit a turn/token/budget cap and is NOT finished (send \"continue\"). A human answers a pending question or approves a pending permission out of band (sMind web UI, `smind task answer` or `smind task approve`); to keep waiting after surfacing it, re-issue task_wait with ignorePermissionIds listing the request ids you have already surfaced -- the wait then ends only on a NEW pending request, a terminal status, or the timeout. Pass runIds (2-16 distinct runs, instead of runId) to wait for the first of several: it returns as soon as any one is done/error/stopped or has a pending permission, and runId in the result names which. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check. A failed run with failureKind rate_limited hit a provider quota: resetAt says when it resets; retry on another provider or after resetAt, do not retry immediately."}, mcpTaskWait(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_stop", Description: "Stop a running run. With host (and the remote taskId) it stops a run on a peer host."}, mcpTaskStop(client))
 }
 
@@ -118,11 +118,14 @@ type taskStatusOutput struct {
 	FallbackProfileID int64                 `json:"fallbackProfileId,omitempty" jsonschema:"for a rate_limited run: the profile its author named as the fallback; start the work again with task_send profileId set to it on a NEW chat (chat_new), because a chat is bound to its provider"`
 	Events            []mcpRunEvent         `json:"events"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
-	Host              string                `json:"host,omitempty" jsonschema:"set for a host read: the peer host's alias"`
-	GlobalID          string                `json:"globalId,omitempty" jsonschema:"set for a host read when the task is known: <alias>:<taskId>"`
-	CostUSD           *float64              `json:"costUsd,omitempty" jsonschema:"set for a host read: the run's cost in USD when the peer reports one"`
-	StatusUnknown     bool                  `json:"statusUnknown,omitempty" jsonschema:"set for a host read that could not observe the run: the run is NOT finished, its status is unknown"`
-	Note              string                `json:"note,omitempty" jsonschema:"set for a host read with status_unknown: what to do next"`
+	// PendingQuestion is the first still-pending agent question, the
+	// task_status twin of task_wait's waiting_question.
+	PendingQuestion *pendingQuestionOut `json:"pendingQuestion,omitempty"`
+	Host            string              `json:"host,omitempty" jsonschema:"set for a host read: the peer host's alias"`
+	GlobalID        string              `json:"globalId,omitempty" jsonschema:"set for a host read when the task is known: <alias>:<taskId>"`
+	CostUSD         *float64            `json:"costUsd,omitempty" jsonschema:"set for a host read: the run's cost in USD when the peer reports one"`
+	StatusUnknown   bool                `json:"statusUnknown,omitempty" jsonschema:"set for a host read that could not observe the run: the run is NOT finished, its status is unknown"`
+	Note            string              `json:"note,omitempty" jsonschema:"set for a host read with status_unknown: what to do next"`
 }
 
 // taskStatusInput is task_status's argument shape: runId, plus the optional
@@ -179,6 +182,9 @@ func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
 	out.Events = toMCPRunEvents(events)
 	if pending := pendingPermissionsFrom(result); len(pending) > 0 {
 		out.PendingPermission = &pending[0]
+	}
+	if pendingQ := pendingQuestionsFrom(result); len(pendingQ) > 0 {
+		out.PendingQuestion = &pendingQ[0]
 	}
 	return out
 }
@@ -286,6 +292,55 @@ func pendingPermissionsFrom(result runLogsResult) []pendingPermissionOut {
 	return pending
 }
 
+// pendingQuestionOut is one still-pending agent question (ADR-0055): the
+// request id plus the question texts, capped, for the orchestrator to
+// relay to the human. Read-only: a human answers via `smind task answer`
+// or the web UI -- there is no tool that answers.
+type pendingQuestionOut struct {
+	RequestID string   `json:"requestId"`
+	Questions []string `json:"questions"`
+}
+
+// pendingQuestionsFrom derives the still-pending question requests from a
+// run.logs result -- every question_request whose requestId never shows up
+// on a later question_resolved entry -- mirroring pendingPermissionsFrom.
+func pendingQuestionsFrom(result runLogsResult) []pendingQuestionOut {
+	// A finished run has nothing left to answer: a question left unresolved
+	// by a stop or crash must not make a driver wait on a dead run.
+	if isTerminalRunStatus(result.Status) {
+		return nil
+	}
+	resolved := map[string]bool{}
+	for _, e := range result.Events {
+		if e.Type == "question_resolved" {
+			resolved[e.RequestID] = true
+		}
+	}
+	var pending []pendingQuestionOut
+	for _, e := range result.Events {
+		if e.Type != "question_request" || resolved[e.RequestID] {
+			continue
+		}
+		var texts []string
+		if e.Question != nil {
+			for _, q := range e.Question.Questions {
+				texts = append(texts, capRunes(q.Text, 200))
+			}
+		}
+		pending = append(pending, pendingQuestionOut{RequestID: e.RequestID, Questions: texts})
+	}
+	return pending
+}
+
+// capRunes cuts s to at most max runes, marking a cut with an ellipsis.
+func capRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
+}
+
 // mcpTaskPermissions wraps the same run.logs read the CLI's
 // `task permissions` does: {runId} -> the run's still-pending permission
 // requests. Deliberately read-only (ADR-0017 resolved decision 1): the
@@ -383,15 +438,18 @@ type taskWaitOutput struct {
 	// Absent otherwise.
 	Disposition string `json:"disposition,omitempty"`
 	// State is the unambiguous summary of why task_wait returned:
-	// waiting_permission | running | done | error | stopped | timed_out.
-	// Only done/error/stopped mean the run ended.
+	// waiting_permission | waiting_question | running | done | error |
+	// stopped | timed_out. Only done/error/stopped mean the run ended.
 	State string `json:"state"`
 	// PendingPermissions lists every pending request that ended the wait
 	// (not ignored via ignorePermissionIds), in order; PendingPermission is
 	// just the first.
 	PendingPermissions []pendingPermissionOut `json:"pendingPermissions,omitempty"`
-	Message            string                 `json:"message,omitempty"`
-	FallbackProfileID  int64                  `json:"fallbackProfileId,omitempty" jsonschema:"for a rate_limited run: the profile its author named as the fallback; start the work again with task_send profileId set to it on a NEW chat (chat_new), because a chat is bound to its provider"`
+	// PendingQuestions lists every pending question that ended the wait
+	// (not ignored via ignorePermissionIds), in order.
+	PendingQuestions  []pendingQuestionOut `json:"pendingQuestions,omitempty"`
+	Message           string               `json:"message,omitempty"`
+	FallbackProfileID int64                `json:"fallbackProfileId,omitempty" jsonschema:"for a rate_limited run: the profile its author named as the fallback; start the work again with task_send profileId set to it on a NEW chat (chat_new), because a chat is bound to its provider"`
 	// Set for a host wait only; Events/NextCursor let the next wait resume.
 	Host              string        `json:"host,omitempty"`
 	NextCursor        int64         `json:"nextCursor,omitempty"`
@@ -417,6 +475,18 @@ func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut 
 		out.PendingPermissions = fresh
 		out.State = "waiting_permission"
 		out.Message = "Run " + result.RunID + " is waiting for a permission decision: a human must approve or deny this via `smind task approve` / `smind task deny` or the sMind web UI. This is NOT completion; surface it to the human, then call task_wait again with the same runId (ignorePermissionIds listing the request ids you surfaced)."
+		return out
+	}
+	var freshQuestions []pendingQuestionOut
+	for _, q := range pendingQuestionsFrom(result) {
+		if !ignore[q.RequestID] {
+			freshQuestions = append(freshQuestions, q)
+		}
+	}
+	if len(freshQuestions) > 0 {
+		out.PendingQuestions = freshQuestions
+		out.State = "waiting_question"
+		out.Message = "Run " + result.RunID + " is waiting for a HUMAN to answer an agent question (`smind task answer " + result.RunID + " <requestId>` or the sMind UI). You cannot answer it. This is NOT completion."
 		return out
 	}
 	switch {

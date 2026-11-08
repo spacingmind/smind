@@ -35,6 +35,10 @@ export function timelineToText(prompt: string, items: TimelineItem[]): string {
       lines.push(`[permission resolved]${resolution ? ` (${resolution.label})` : ""}`);
       continue;
     }
+    if (item.kind === "question") {
+      lines.push(`[question resolved] ${item.summary}`);
+      continue;
+    }
     const prefix = COPY_PREFIX[item.kind] ?? "";
     lines.push(prefix ? item.text.split("\n").map((l) => prefix + l).join("\n") : item.text);
   }

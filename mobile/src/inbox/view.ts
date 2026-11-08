@@ -60,6 +60,7 @@ export type InboxView = { kind: 'empty'; title: string; text: string } | { kind:
 
 const KIND_META: Record<InboxKind, { icon: IconName; label: string; section: string }> = {
   permission: { icon: 'lock', label: 'Permission', section: 'Needs you now' },
+  question: { icon: 'info', label: 'Question', section: 'Needs you now' },
   host_pair: { icon: 'devices', label: 'Pairing', section: 'Host pairing' },
   host_refused: { icon: 'warning', label: 'Refused', section: 'Hosts refused' },
   host_down: { icon: 'link', label: 'Unreachable', section: 'Hosts unreachable' },
@@ -68,7 +69,7 @@ const KIND_META: Record<InboxKind, { icon: IconName; label: string; section: str
   stall: { icon: 'warning', label: 'Stalled', section: 'Stalled' },
 };
 /** Host rows come right after permissions: a pairing waits on this human, refusals need a look, a down link can wait. Reviews come before verdicts. */
-const KIND_ORDER: InboxKind[] = ['permission', 'host_pair', 'host_refused', 'host_down', 'review', 'verdict', 'stall'];
+const KIND_ORDER: InboxKind[] = ['permission', 'question', 'host_pair', 'host_refused', 'host_down', 'review', 'verdict', 'stall'];
 const HOST_KINDS: readonly InboxKind[] = ['host_pair', 'host_refused', 'host_down'];
 
 /** "just now", "5m ago", "3h ago", "2d ago" from an RFC 3339 instant; unparseable input is shown as it came. */
@@ -82,19 +83,20 @@ export function relativeTime(iso: string, now: number): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-/** Row actions: Mark seen only while unseen; Snooze/Resolve never for a permission (or a "perm:" key); Open always. Host rows open the Hosts screen instead of a task. */
+/** Row actions: Mark seen only while unseen; Snooze/Resolve never for a permission or a question (or a "perm:"/"ques:" key); Open always. Host rows open the Hosts screen instead of a task. */
 export function inboxActions(item: Pick<InboxItem, 'key' | 'kind' | 'state' | 'taskId' | 'links'>): InboxAction[] {
   const out: InboxAction[] = [];
   if (item.state === 'new') out.push('seen');
-  if (item.kind !== 'permission' && !item.key.startsWith('perm:')) out.push('snooze', 'resolve');
+  const answerOnly = item.kind === 'permission' || item.kind === 'question' || item.key.startsWith('perm:') || item.key.startsWith('ques:');
+  if (!answerOnly) out.push('snooze', 'resolve');
   if (HOST_KINDS.includes(item.kind)) out.push('hosts');
   if ((item.taskId ?? item.links.taskId) !== undefined) out.push('open');
   return out;
 }
 
-/** waiting: a permission or pairing asks for you; warning: a refusal or a verdict that needs a decision (never a success tint); neutral: the rest. */
+/** waiting: a permission, a question or a pairing asks for you; warning: a refusal or a verdict that needs a decision (never a success tint); neutral: the rest. */
 function rowTone(item: Pick<InboxItem, 'kind' | 'attention'>): InboxTone {
-  if (item.kind === 'permission' || item.kind === 'host_pair') return 'waiting';
+  if (item.kind === 'permission' || item.kind === 'question' || item.kind === 'host_pair') return 'waiting';
   if (item.kind === 'host_refused') return 'warning';
   if (item.kind === 'host_down') return 'neutral';
   return item.attention === 'high' ? 'warning' : 'neutral';

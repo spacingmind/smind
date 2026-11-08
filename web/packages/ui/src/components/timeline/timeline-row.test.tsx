@@ -126,3 +126,29 @@ describe("child-event runs (ADR-0041)", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 });
+
+describe("TimelineRow's question marker (ADR-0055)", () => {
+  const request = { source: "claude", questions: [{ id: "q1", text: "Which target?", kind: "text" as const }] };
+  const events = (reason: string) =>
+    [
+      { type: "question_request", requestId: "r1", question: request },
+      { type: "question_resolved", requestId: "r1", reason },
+    ] as RunLogEvent[];
+
+  it("renders one marker row with the summary and how it ended", () => {
+    render(<RunTimeline run={run(events("timeout"))} />);
+    const row = screen.getByTestId("timeline-question");
+    expect(row).toHaveTextContent("Agent asked: Which target?");
+    expect(row).toHaveTextContent("no answer (timed out)");
+  });
+
+  it("labels a question a restart orphaned", () => {
+    render(<RunTimeline run={run(events("daemon_restart"))} />);
+    expect(screen.getByTestId("timeline-question")).toHaveTextContent("cancelled (daemon restarted)");
+  });
+
+  it("labels a human answer as answered", () => {
+    render(<RunTimeline run={run(events("human"))} />);
+    expect(screen.getByTestId("timeline-question")).toHaveTextContent("answered");
+  });
+});
