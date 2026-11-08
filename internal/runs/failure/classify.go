@@ -32,10 +32,11 @@ const (
 // Typed class hints a runner passes in Input.Code when its backend reported a
 // structured error (a codex CodexErrorInfo, an HTTP status). They beat text.
 const (
-	CodeUsageLimit   = "usage_limit"
-	CodeUnauthorized = "unauthorized"
-	CodeOverloaded   = "overloaded"
-	CodeRateLimit    = "rate_limit"
+	CodeUsageLimit    = "usage_limit"
+	CodeUnauthorized  = "unauthorized"
+	CodeOverloaded    = "overloaded"
+	CodeRateLimit     = "rate_limit"
+	CodeModelNotFound = "model_not_found"
 )
 
 // Signal is a structured rate-limit report from a backend (claude-native's rate_limit_event).
@@ -157,6 +158,8 @@ func Classify(in Input, now time.Time) Result {
 		return Result{Kind: KindAuthExpired}
 	case CodeOverloaded, CodeRateLimit:
 		return Result{Kind: KindTransient429, RetryAfter: retryHint(in, now)}
+	case CodeModelNotFound:
+		return Result{Kind: KindModelNotInPlan}
 	}
 	if reAuth.MatchString(in.Err) {
 		return Result{Kind: KindAuthExpired}
