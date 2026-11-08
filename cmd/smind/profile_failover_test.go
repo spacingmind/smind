@@ -108,3 +108,76 @@ func TestMCPProfileList_FailoverFields(t *testing.T) {
 		t.Errorf("main profile = %+v, want onRateLimit fallback / fallbackProfileId %d", main, target.ID)
 	}
 }
+
+func TestProfileAdd_QuestionsFlag(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+	reg := profiles.New(s)
+	var code int
+	captureStdout(t, func() { code = run([]string{"profile", "add", "quiet", "claude-native", "--questions=decline"}) })
+	if code != 0 {
+		t.Fatalf("add = %d", code)
+	}
+	captureStdout(t, func() { code = run([]string{"profile", "add", "plain", "claude-native"}) })
+	list, _ := reg.List()
+	got := map[string]string{}
+	for _, p := range list {
+		got[p.Name] = p.Questions
+	}
+	if got["quiet"] != "decline" || got["plain"] != "ask" {
+		t.Fatalf("stored questions = %v", got)
+	}
+	stderr := captureStderr(t, func() { code = run([]string{"profile", "add", "bad", "claude-native", "--questions=sometimes"}) })
+	if code == 0 {
+		t.Fatalf("invalid --questions accepted; stderr %q", stderr)
+	}
+}
+
+// An edit that does not name --questions carries the current value explicitly,
+// so a profile that declines never silently goes back to asking; naming it changes it.
+func TestProfileEdit_QuestionsFlagAndCarry(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+	reg := profiles.New(s)
+	p, err := reg.Create(store.AgentProfile{Name: "quiet", Provider: "claude-native", Questions: "decline"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strconv.FormatInt(p.ID, 10)
+	var code int
+	captureStdout(t, func() { code = run([]string{"profile", "edit", id, "--notes=changed"}) })
+	if code != 0 {
+		t.Fatalf("edit = %d", code)
+	}
+	got, _ := reg.Get(p.ID)
+	if got.Questions != "decline" || got.Notes != "changed" {
+		t.Fatalf("after notes-only edit: questions=%q notes=%q", got.Questions, got.Notes)
+	}
+	captureStdout(t, func() { code = run([]string{"profile", "edit", id, "--questions=disabled"}) })
+	got, _ = reg.Get(p.ID)
+	if code != 0 || got.Questions != "disabled" {
+		t.Fatalf("edit --questions=disabled: code %d, stored %q", code, got.Questions)
+	}
+}
+
+func TestProfileLs_ShowsQuestions(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+	reg := profiles.New(s)
+	_, _ = reg.Create(store.AgentProfile{Name: "quiet", Provider: "claude-native", Questions: "decline"})
+	var code int
+	out := captureStdout(t, func() { code = run([]string{"profile", "ls"}) })
+	if code != 0 || !strings.Contains(out, "QUESTIONS") || !strings.Contains(out, "decline") {
+		t.Fatalf("profile ls (code %d) = %q", code, out)
+	}
+}
+
+func TestAddProfileFailoverFields_ShowsQuestionsUnlessDefault(t *testing.T) {
+	p := map[string]any{"Questions": "decline"}
+	addProfileFailoverFields(p)
+	if p["questions"] != "decline" {
+		t.Fatalf("questions not shown: %v", p)
+	}
+	q := map[string]any{"Questions": "ask"}
+	addProfileFailoverFields(q)
+	if _, ok := q["questions"]; ok {
+		t.Fatalf("the default is shown: %v", q)
+	}
+}

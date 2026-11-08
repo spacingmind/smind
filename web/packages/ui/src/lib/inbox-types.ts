@@ -4,6 +4,7 @@ import type { FailureAction } from "@/lib/failure-class";
 
 export type InboxKind =
   | "permission"
+  | "question"
   | "run_failed"
   | "review"
   | "verdict"
@@ -27,7 +28,7 @@ export interface InboxItem {
   action?: FailureAction;
   /** A review item's passes (two-axis reviews only): the pass's seat verdict when done, and its status. */
   axes?: { axis: string; verdict?: string; status?: string; reason?: string }[];
-  links: { taskId?: number; runId?: string; permissionRequestId?: string; validationId?: number; reviewId?: number; hostId?: string };
+  links: { taskId?: number; runId?: string; permissionRequestId?: string; questionRequestId?: string; validationId?: number; reviewId?: number; hostId?: string };
 }
 
 export interface InboxCounts {
@@ -39,6 +40,7 @@ export interface InboxCounts {
 /** The groups of the page, in display order. */
 export const INBOX_GROUPS: { kind: InboxKind; label: string }[] = [
   { kind: "permission", label: "Needs you now" },
+  { kind: "question", label: "Questions" },
   { kind: "run_failed", label: "Runs that need you" },
   { kind: "host_pair", label: "Host pairing" },
   { kind: "host_refused", label: "Hosts refused" },
@@ -52,9 +54,9 @@ export function groupInbox(items: InboxItem[]): { kind: InboxKind; label: string
   return INBOX_GROUPS.map((g) => ({ ...g, items: items.filter((i) => i.kind === g.kind) })).filter((g) => g.items.length > 0);
 }
 
-/** A permission can only be answered: no snooze, no resolve (the daemon refuses both). */
+/** A permission or an agent question can only be answered: no snooze, no resolve (the daemon refuses both). */
 export function canSnoozeOrResolve(item: Pick<InboxItem, "kind">): boolean {
-  return item.kind !== "permission";
+  return item.kind !== "permission" && item.kind !== "question";
 }
 
 export const SNOOZE_OPTIONS: { id: string; label: string; ms: number }[] = [

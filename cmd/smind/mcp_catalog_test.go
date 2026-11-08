@@ -40,6 +40,18 @@ func TestMCPTools_NoApprovalToolInCatalog(t *testing.T) {
 	}
 }
 
+// TestMCP_NoToolAnswersQuestions pins ADR-0055 §3 (who may answer): a
+// question is answered by a human only, so the catalog never contains
+// task_answer or anything that could wrap run.respondQuestion.
+func TestMCP_NoToolAnswersQuestions(t *testing.T) {
+	env := newMCPSession(t)
+	for _, name := range mcpToolNames(t, env.cs) {
+		if strings.Contains(name, "answer") || strings.Contains(name, "respond_question") || strings.Contains(name, "respondQuestion") {
+			t.Fatalf("tools/list contains question-answering tool %q", name)
+		}
+	}
+}
+
 // TestMCPTools_NoToolCanEscalatePermissions: `smind task mode` is human-only
 // (orchestration-parity D12), so nothing in the MCP catalog may take an
 // source, and only task_send takes autoAccept (the daemon rejects true there:

@@ -166,6 +166,8 @@ var typeNames = map[int]string{
 	int(taskrunner.EventTypeUsage):                 "usage",
 	int(taskrunner.EventTypeMcpServers):            "mcp_servers",
 	int(taskrunner.EventTypeRateLimit):             "rate_limit",
+	int(taskrunner.EventTypeQuestionRequest):       "question_request",
+	int(taskrunner.EventTypeQuestionResolved):      "question_resolved",
 }
 
 func typeName(t int) string {

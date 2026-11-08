@@ -118,10 +118,17 @@ func (reg *Registry) withRunContract(ctx context.Context, r *run) context.Contex
 		plug = src.PluginSkillBody
 	}
 	text := buildInstructionsWith(p, bundle, plug)
-	if text == "" && p.OrchestrationTools == nil {
+	// A profile with questions: disabled (ADR-0055) takes the agent's
+	// ask-the-human tool away, so it knows it cannot ask (claude only; the
+	// other providers do not advertise the capability).
+	var disallow []string
+	if p.Questions == QuestionsDisabled {
+		disallow = append(disallow, "AskUserQuestion")
+	}
+	if text == "" && p.OrchestrationTools == nil && len(disallow) == 0 {
 		return ctx
 	}
-	c := taskrunner.RunContract{Instructions: text}
+	c := taskrunner.RunContract{Instructions: text, DisallowedTools: disallow}
 	if extra, ok := reg.runEnv(r.taskID); ok {
 		// ADR-0045: a validator run gets the built-in smind entry whatever
 		// its profile says; the entry's env switches `smind mcp serve` to
@@ -139,7 +146,7 @@ func (reg *Registry) withRunContract(ctx context.Context, r *run) context.Contex
 		for k, v := range spec.Env {
 			c.Mcp.Env[k] = v
 		}
-		c.DisallowedTools = append([]string(nil), spec.DisallowedTools...)
+		c.DisallowedTools = append(append([]string(nil), disallow...), spec.DisallowedTools...)
 		return taskrunner.WithRunContract(ctx, c)
 	}
 	if p.OrchestrationTools != nil {

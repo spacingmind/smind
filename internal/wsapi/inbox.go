@@ -66,6 +66,7 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 	h.svc = &inbox.Service{
 		DB:          db,
 		Permissions: reg.PendingPermissions,
+		Questions:   reg.PendingQuestions,
 		Validations: func() ([]validation.View, error) {
 			rows, err := db.ListLatestValidations()
 			if err != nil {

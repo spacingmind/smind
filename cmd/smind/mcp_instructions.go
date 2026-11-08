@@ -18,6 +18,11 @@ The loop:
      approve or deny it. This is NOT completion. Loop: task_wait, then
      (the human approves), then task_wait again -- passing
      ignorePermissionIds for the requests you already surfaced.
+   - waiting_question: the agent asked the human a question and a HUMAN
+     must answer it (` + "`smind task answer`" + ` or the sMind web UI). You cannot
+     answer it. This is NOT completion. Loop: task_wait, then (the human
+     answers), then task_wait again -- passing ignorePermissionIds for
+     the request ids you already surfaced.
    - done / error / stopped: the run ended. A done run whose disposition
      is "needs-continue" (it hit a turn, token or budget cap; status stays
      done) is NOT finished: send a follow-up prompt such as "continue".

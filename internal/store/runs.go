@@ -269,6 +269,25 @@ func (s *Store) listRuns(where string, limit int, args ...any) ([]Run, error) {
 	return runs, rows.Err()
 }
 
+// ListRunningRunIDs returns the ids of the runs whose stored status is
+// 'running' (at startup: the runs the previous process left unfinished).
+func (s *Store) ListRunningRunIDs() ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM runs WHERE status = 'running'`)
+	if err != nil {
+		return nil, fmt.Errorf("list running run ids: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("list running run ids: scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // AppendRunEvent inserts one run_events row, stamping created_at.
 func (s *Store) AppendRunEvent(runID string, seq int64, eventData string) (RunEvent, error) {
 	now := time.Now().UTC()

@@ -164,3 +164,30 @@ func TestRegistry_NilRegistrySetNotifierIsNoop(t *testing.T) {
 	var r *Registry
 	r.SetNotifier(&fakeNotifier{}) // must not panic
 }
+
+func TestRegistry_QuestionsValidation(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	for _, v := range []string{"ask", "decline", "disabled"} {
+		got, err := r.Create(store.AgentProfile{Name: "p", Provider: "claude-native", Questions: v})
+		if err != nil {
+			t.Fatalf("Questions %q: %v", v, err)
+		}
+		if got.Questions != v {
+			t.Errorf("Questions %q stored as %q", v, got.Questions)
+		}
+		if _, err := r.Update(store.AgentProfile{ID: got.ID, Name: "p", Provider: "claude-native", Questions: v}); err != nil {
+			t.Fatalf("update Questions %q: %v", v, err)
+		}
+	}
+	def, err := r.Create(store.AgentProfile{Name: "p", Provider: "claude-native"})
+	if err != nil {
+		t.Fatalf("Create() default questions: %v", err)
+	}
+	if def.Questions != "ask" {
+		t.Errorf("empty Questions stored as %q, want ask", def.Questions)
+	}
+	if _, err := r.Create(store.AgentProfile{Name: "p", Provider: "claude-native", Questions: "always"}); err == nil {
+		t.Fatalf("Questions always accepted, want error")
+	}
+}

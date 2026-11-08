@@ -7,19 +7,23 @@ import { supportsThinking } from "@/lib/thinking-levels";
 import type { WsClientLike } from "@/lib/ws-client";
 import { resendRequests } from "@/lib/attachments/reuse";
 import { runStartParams } from "@/lib/run-start";
-import type { AttachmentMeta, AttachmentRequest, PermissionSettings, PermissionQuestion, PermissionDetail, PermissionRequestEventParams, PermissionResolutionReason, PermissionResolvedEventParams, HeredocRef, McpServerState, RunUsage, RunAttachResult, RunHistorySource, RunLogEvent, RunLogsResult, RunSetPermissionModeResult, RunStartResult, RunStatusEventPayload, RunStatusValue, RunSummary, ThinkingLevel, ToolCallStatus, WhenBusy } from "@/lib/types";
+import type { AttachmentMeta, AttachmentRequest, PermissionSettings, PermissionDetail, PermissionRequestEventParams, PermissionResolutionReason, PermissionResolvedEventParams, HeredocRef, McpServerState, QuestionAnswer, QuestionRequest, QuestionRequestEventParams, QuestionResolutionReason, QuestionResolvedEventParams, RunUsage, RunAttachResult, RunHistorySource, RunLogEvent, RunLogsResult, RunSetPermissionModeResult, RunStartResult, RunStatusEventPayload, RunStatusValue, RunSummary, ThinkingLevel, ToolCallStatus, WhenBusy } from "@/lib/types";
 
 /** A still-unanswered permission request on a run, as shown by the detail pane. */
 export interface PendingPermission {
   requestId: string;
   summary: string;
   options: { id: string; label: string; kind: string }[];
-  /** See PermissionQuestion's doc comment in lib/types.ts -- present only for a question-form-shaped request. */
-  questions?: PermissionQuestion[];
   /** Present only for a plan-review-shaped request. */
   plan?: string;
   /** Structured write/edit/execute detail from the daemon, when it sent one. */
   detail?: PermissionDetail;
+}
+
+/** A still-unanswered agent question on a run (ADR-0055), as the question card renders it. */
+export interface PendingQuestion {
+  requestId: string;
+  request: QuestionRequest;
 }
 
 /**
@@ -34,7 +38,7 @@ export interface PendingPermission {
  * item at its original object identity, so React re-renders exactly one
  * row instead of the whole transcript.
  */
-export type TimelineItem = TimelineTextItem | TimelineToolCallItem | TimelinePermissionItem | TimelinePlanItem | TimelineUnknownItem;
+export type TimelineItem = TimelineTextItem | TimelineToolCallItem | TimelinePermissionItem | TimelineQuestionItem | TimelinePlanItem | TimelineUnknownItem;
 
 /** Assistant output, the human's own turn, or the model's reasoning -- three roles, one shape. */
 export interface TimelineTextItem {
@@ -82,6 +86,26 @@ export interface TimelinePermissionItem {
   optionKind?: string;
   /** Absent for an older server payload with no reason field -- renders with no reason badge, not a crash. */
   reason?: PermissionResolutionReason;
+}
+
+/**
+ * A resolved agent question (ADR-0055), rendered as a small marker row --
+ * the question twin of TimelinePermissionItem, with the same deliberate
+ * "no pending counterpart" rule: while a request is unanswered it lives
+ * only in `RunEntry.pendingQuestion` (the dock), and this item is created
+ * once, at the moment "question_resolved" arrives. `summary` is the
+ * one-line trace of what was asked ("Agent asked: …", built from the
+ * request's first question); `answers` carries the human's own answer
+ * payload, present only when a person actually answered.
+ */
+export interface TimelineQuestionItem {
+  kind: "question";
+  id: string;
+  requestId: string;
+  reason?: QuestionResolutionReason;
+  summary: string;
+  /** The human's answer (action/answers/note), only when reason is "human". */
+  answers?: QuestionAnswer;
 }
 
 /** One step of an ACP plan, as the plan card renders it. */
@@ -151,12 +175,13 @@ const CONFIG_REFRESH_RAW_KINDS = new Set(["available_commands_update", "config_o
 
 /**
  * Event names that are not transcript rows at all. "done" only drives run
- * status, and "permission_request" only drives the pending-permission
- * dock (RunEntry.pendingPermission) -- neither ever becomes an item.
- * "permission_resolved" is deliberately *not* in this set: it becomes a
- * TimelinePermissionItem, handled by its own branch below.
+ * status; "permission_request" and "question_request" only drive their
+ * pending dock (RunEntry.pendingPermission / pendingQuestion) -- none of
+ * them ever becomes an item. "permission_resolved" and
+ * "question_resolved" are deliberately *not* in this set: each becomes
+ * its own marker item, handled by its own branch below.
  */
-const NON_ITEM_EVENTS = new Set(["done", "permission_request", "mcp_servers"]);
+const NON_ITEM_EVENTS = new Set(["done", "permission_request", "question_request", "mcp_servers"]);
 
 /**
  * Appends one wire event to a run's item list, returning a new array.
@@ -242,6 +267,25 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent, r
     ];
   }
 
+  // The question twin of the permission branch above (ADR-0055): the
+  // resolution is the trace, the request itself never became a row.
+  // `summary`/`answers` are filled in from the matching request by the
+  // annotator when it was seen; a resolution whose request wasn't (a log
+  // starting mid-run) still renders, just less informatively.
+  if (type === "question_resolved") {
+    return [
+      ...items,
+      {
+        kind: "question",
+        id: `question-${items.length}`,
+        requestId: event.requestId ?? "",
+        reason: event.reason,
+        summary: event.questionSummary ?? "Agent asked a question",
+        ...(event.reason === "human" && event.questionAnswer ? { answers: event.questionAnswer } : {}),
+      },
+    ];
+  }
+
   // Per-turn usage (ADR-0020) is bookkeeping for usage reporting, not
   // transcript: the timeline has no row for it yet.
   if (type === "usage") return items;
@@ -298,9 +342,10 @@ function planEntries(payload: unknown): PlanEntry[] | undefined {
 
 /** Folds a whole backfilled event batch (run.logs) into the same item list the live stream builds. */
 export function buildTimeline(events: RunLogEvent[], runId?: string): TimelineItem[] {
-  const requests = new PermissionRequestKinds();
+  const permissionKinds = new PermissionRequestKinds();
+  const questionSummaries = new QuestionRequestSummaries();
   let items: TimelineItem[] = [];
-  for (const event of events) items = appendTimelineEvent(items, requests.annotate(event), runId);
+  for (const event of events) items = appendTimelineEvent(items, questionSummaries.annotate(permissionKinds.annotate(event)), runId);
   return items;
 }
 
@@ -325,6 +370,36 @@ class PermissionRequestKinds {
     }
     return event;
   }
+}
+
+/**
+ * The question twin of PermissionRequestKinds (ADR-0055): a
+ * "question_resolved" event names only the requestId, so the row's
+ * "Agent asked: …" summary has to be remembered from the request's own
+ * event when it passes by. One per run's event stream, same lifecycle.
+ */
+class QuestionRequestSummaries {
+  private readonly summaryByRequest = new Map<string, string>();
+
+  /** Records a request's summary; returns the event unchanged. For a resolution, returns it with `questionSummary` set when known. */
+  annotate(event: RunLogEvent): RunLogEvent {
+    if (event.type === "question_request" && event.requestId) {
+      this.summaryByRequest.set(event.requestId, questionSummary(event.question));
+      return event;
+    }
+    if (event.type === "question_resolved" && event.requestId) {
+      const summary = this.summaryByRequest.get(event.requestId);
+      return summary ? { ...event, questionSummary: summary } : event;
+    }
+    return event;
+  }
+}
+
+/** The one-line trace a resolved question's marker row shows: the first question's text, capped at 120 chars. */
+export function questionSummary(request: QuestionRequest | undefined): string {
+  const text = request?.questions?.[0]?.text?.trim();
+  if (!text) return "Agent asked a question";
+  return `Agent asked: ${text.length > 120 ? `${text.slice(0, 120)}…` : text}`;
 }
 
 /** One run in a task's timeline, as rendered by the detail pane. */
@@ -386,6 +461,14 @@ export interface RunEntry {
    * another connection could answer first.
    */
   pendingPermission?: PendingPermission;
+  /**
+   * The run's most recent still-unanswered agent question (ADR-0055),
+   * with the same lifecycle as pendingPermission: set by a
+   * "question_request" event (live or replayed in run.attach's backfill)
+   * and cleared by the matching "question_resolved" -- from any
+   * connection, since another connection could answer first.
+   */
+  pendingQuestion?: PendingQuestion;
   /**
    * The run's current per-server MCP state, from the latest "mcp_servers"
    * event (live or backfilled). Undefined when the run reported none.
@@ -488,6 +571,15 @@ interface TimelineState {
    */
   respondPermission: (runId: string, requestId: string, optionId: string) => Promise<void>;
   /**
+   * Answers runId's pending question requestId (run.answerQuestion,
+   * ADR-0055), from this connection. Never clears pendingQuestion itself:
+   * the subsequent "question_resolved" event does that, whichever
+   * connection answered -- the same single-code-path rule as
+   * respondPermission above. A rejected call throws and the request stays
+   * pending server-side, so the card stays up and shows the error.
+   */
+  answerQuestion: (runId: string, requestId: string, answer: QuestionAnswer) => Promise<void>;
+  /**
    * Switches runId's live permission mode (modeId, applied through the
    * provider's own session) and/or its ACP autoAccept toggle
    * (run.setPermissionMode). Only meaningful while the run is still
@@ -544,6 +636,8 @@ interface Session {
   controller: AbortController;
   /** The live attach's permission requests, so a resolution can be annotated with the chosen option's kind. */
   permissionRequests: PermissionRequestKinds;
+  /** The live attach's question requests, so a resolution can be annotated with what was asked (ADR-0055). */
+  questionRequests: QuestionRequestSummaries;
 }
 
 /**
@@ -607,7 +701,6 @@ function setPendingPermission(
       requestId: params.requestId,
       summary: params.summary,
       options: params.options,
-      questions: params.questions,
       plan: params.plan,
       detail: params.detail,
     },
@@ -632,6 +725,32 @@ function clearPendingPermission(
       ? prev.map((r) => (r.id === runId && r.pendingPermission?.requestId === params.requestId ? { ...r, pendingPermission: undefined } : r))
       : prev,
   );
+}
+
+/**
+ * Clears runId's pendingQuestion, but only if it's still the request being
+ * resolved -- same requestId guard as clearPendingPermission, for the same
+ * out-of-order/duplicate-event reason.
+ */
+function clearPendingQuestion(
+  setRuns: Dispatch<SetStateAction<RunEntry[] | null>>,
+  runId: string,
+  params: QuestionResolvedEventParams,
+): void {
+  setRuns((prev) =>
+    prev
+      ? prev.map((r) => (r.id === runId && r.pendingQuestion?.requestId === params.requestId ? { ...r, pendingQuestion: undefined } : r))
+      : prev,
+  );
+}
+
+/** Sets runId's pendingQuestion from a "question_request" event's params (ADR-0055). */
+function setPendingQuestion(
+  setRuns: Dispatch<SetStateAction<RunEntry[] | null>>,
+  runId: string,
+  params: QuestionRequestEventParams,
+): void {
+  patch(setRuns, runId, { pendingQuestion: { requestId: params.requestId, request: params.request } });
 }
 
 /**
@@ -662,6 +781,13 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
           setPendingPermission(setRuns, runId, request);
           return;
         }
+        if (event === "question_request") {
+          const request = params as QuestionRequestEventParams;
+          // Record the request (as the logs-entry shape the annotator reads) so its later resolution can carry the summary.
+          session.questionRequests.annotate({ type: event, requestId: request.requestId, question: request.request });
+          setPendingQuestion(setRuns, runId, request);
+          return;
+        }
         if (event === "mcp_servers") {
           patch(setRuns, runId, { mcpServers: (params as { mcpServers: McpServerState[] }).mcpServers });
         }
@@ -675,6 +801,25 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
           // still lands its own TimelinePermissionItem -- clearing the
           // dock and recording the trace are two separate effects of the
           // same event, not a fork in how it's handled.
+        }
+        if (event === "question_resolved") {
+          const resolved = params as QuestionResolvedEventParams;
+          clearPendingQuestion(setRuns, runId, resolved);
+          // Same two effects as permission_resolved, appended here because
+          // the streamed shape names the answer `answer` while the reducer
+          // reads the logs-entry shape's `questionAnswer` -- re-keying it
+          // is the whole translation a fall-through would need anyway.
+          appendEvent(
+            setRuns,
+            runId,
+            session.questionRequests.annotate({
+              type: event,
+              requestId: resolved.requestId,
+              reason: resolved.reason,
+              ...(resolved.answer ? { questionAnswer: resolved.answer } : {}),
+            } as RunLogEvent),
+          );
+          return;
         }
         // Everything else goes through the same reducer the backfill
         // does, so a live event and a replayed one can't diverge. The
@@ -855,7 +1000,7 @@ export function useRunTimeline(
       return;
     }
 
-    const session: Session = { cancelled: false, controller: new AbortController(), permissionRequests: new PermissionRequestKinds() };
+    const session: Session = { cancelled: false, controller: new AbortController(), permissionRequests: new PermissionRequestKinds(), questionRequests: new QuestionRequestSummaries() };
     sessionRef.current = session;
     knownRuns.current = new Set();
     adopting.current = new Set();
@@ -1077,6 +1222,14 @@ export function useRunTimeline(
     [client],
   );
 
+  const answerQuestion = useCallback(
+    async (runId: string, requestId: string, answer: QuestionAnswer) => {
+      if (!client) throw new Error("not connected");
+      await client.call("run.answerQuestion", { runId, requestId, ...answer });
+    },
+    [client],
+  );
+
   const setPermissionMode = useCallback(
     async (runId: string, change: { modeId?: string; autoAccept?: boolean }) => {
       if (!client) throw new Error("not connected");
@@ -1138,5 +1291,5 @@ export function useRunTimeline(
     [client],
   );
 
-  return { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort, loadFullHistory };
+  return { runs, error, submitPrompt, stopRun, respondPermission, answerQuestion, setPermissionMode, retryWithHigherEffort, loadFullHistory };
 }

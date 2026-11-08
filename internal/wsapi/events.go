@@ -77,6 +77,15 @@ const (
 	TopicFleetHostsChanged = "fleet.hosts.changed"
 )
 
+// Question topics (ADR-0055) live in their own block so adding them does not
+// re-align the one above: question.pending / question.resolved announce an
+// agent's question to the human and its end (payloads questionPendingPayload /
+// questionResolvedPayload).
+const (
+	TopicQuestionPending  = "question.pending"
+	TopicQuestionResolved = "question.resolved"
+)
+
 // providerUpdatedPayload is the payload of TopicProviderUpdated.
 type providerUpdatedPayload struct {
 	ID           string `json:"id"`
@@ -106,6 +115,8 @@ var knownTopics = map[string]bool{
 	TopicRunFailover:          true,
 	TopicPermissionPending:    true,
 	TopicPermissionResolved:   true,
+	TopicQuestionPending:      true,
+	TopicQuestionResolved:     true,
 	TopicWorkspaceCreated:     true,
 	TopicWorkspaceDeleted:     true,
 	TopicSpaceCreated:         true,
@@ -223,6 +234,28 @@ type permissionResolvedPayload struct {
 	ChatID    int64  `json:"chatId"`
 	RequestID string `json:"requestId"`
 	OptionID  string `json:"optionId,omitempty"`
+	Reason    string `json:"reason"`
+}
+
+// questionPendingPayload is the payload of question.pending events (ADR-0055):
+// {runId, taskId, chatId, requestId, request}. The request text is untrusted
+// agent output; clients render it as plain text.
+type questionPendingPayload struct {
+	RunID     string                     `json:"runId"`
+	TaskID    int64                      `json:"taskId"`
+	ChatID    int64                      `json:"chatId"`
+	RequestID string                     `json:"requestId"`
+	Request   taskrunner.QuestionRequest `json:"request"`
+}
+
+// questionResolvedPayload is the payload of question.resolved events:
+// {runId, taskId, chatId, requestId, reason}; reason is a
+// taskrunner.QuestionResolution.
+type questionResolvedPayload struct {
+	RunID     string `json:"runId"`
+	TaskID    int64  `json:"taskId"`
+	ChatID    int64  `json:"chatId"`
+	RequestID string `json:"requestId"`
 	Reason    string `json:"reason"`
 }
 

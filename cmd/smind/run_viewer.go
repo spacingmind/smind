@@ -174,3 +174,17 @@ func renderAutoAccepted(summary string, detail *permissionDetail, optionID strin
 	}
 	return fmt.Sprintf("[permission] auto-accepted %s -> %s\n", what, optionID)
 }
+
+// questionRequest prints an agent question's block (ADR-0055).
+func (v *runViewer) questionRequest(requestID string, q questionRequest) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.print(renderQuestionRequest(v.runID, requestID, q))
+}
+
+// questionResolved prints how a question request was resolved.
+func (v *runViewer) questionResolved(requestID, reason string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.print(renderQuestionResolved(requestID, reason))
+}

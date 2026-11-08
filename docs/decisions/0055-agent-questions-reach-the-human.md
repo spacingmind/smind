@@ -72,7 +72,7 @@ request over the caps in count (more than 4 questions, a form with unsupported p
 ### 2. Wire and storage (additive)
 
 - Events (ADR-0008 style, new types, unknown to old clients and ignored by them per ADR-0010): `question_request` {requestId, source, blocking, questions, truncated} and
-  `question_resolved` {requestId, resolution: `human` | `declined` | `timeout` | `refused_secret` | `refused_unsupported` | `provider_cancellation` | `run_ended`, answers
+  `question_resolved` {requestId, resolution: `human` | `declined` | `timeout` | `refused_secret` | `refused_unsupported` | `provider_cancellation` | `run_ended` | `daemon_restart`, answers
   summary}. The stored `question_resolved` keeps the **chosen option ids and free text** for a non-secret question (the history is the audit; the model also has the text in
   its own transcript) and never for a refused one.
 - RPC `run.answerQuestion {runId, requestId, action, answers[], note?}` and read-only `run.pendingQuestions` (or the question requests folded into the existing pending
@@ -200,7 +200,7 @@ synthesizes only allow-once. The Human asked for "allow this kind of request in 
 | Failure | Behaviour |
 |---|---|
 | nobody answers | decline with note after 5 minutes (§5), resolution `timeout` |
-| run stopped / daemon restart while parked | `abandon`, `question_resolved{run_ended}`; after restart the run is `interrupted`, the question is not re-asked (the agent re-asks on `continue` if it still needs to) |
+| run stopped / daemon restart while parked | `abandon`, `question_resolved{run_ended}`; after a restart the daemon writes `question_resolved{daemon_restart}` for every open request of the interrupted run (so no client draws a live card for a dead run) and the run is `interrupted`, the question is not re-asked (the agent re-asks on `continue` if it still needs to) |
 | client answers twice / for a resolved id | "already resolved" error (same as permission) |
 | answer fails validation (unknown option id, over cap, wrong `valueHint`) | RPC error, request stays parked; the card shows the field error |
 | provider cancels the request itself | resolution `provider_cancellation`, card closes |
