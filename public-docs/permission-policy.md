@@ -103,6 +103,13 @@ is a **deny** that names the rule id:
 | `no-curl-sh` | running downloaded code unreviewed (`curl … \| sh`) |
 | `no-real-home-tests` | tests that point `HOME` at your real home |
 | `no-add-all` | `git add -A`: stage named files, never the whole tree |
+| `no-self-approve` | an agent answering, approving or denying its own requests: `smind task approve\|deny\|answer`, `smind permission ...` (however wrapped, quoted or called by path), or a command that names a human-only daemon method such as `run.respondPermission` |
+
+`no-self-approve` narrows a hole and does not close it. The floor reads the
+command text, so it cannot see a script the agent wrote and runs later, a method
+name assembled at run time, or a run that needs no permission. An agent running
+as your user can still reach the local daemon by other means; the CLI also
+refuses these commands inside an agent run, and both are defence in depth.
 
 The floor is checked on every part of a command, even when another part could
 not be parsed, so a deny is never softened to an ask.

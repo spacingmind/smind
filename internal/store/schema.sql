@@ -854,7 +854,7 @@ CREATE TABLE IF NOT EXISTS steward_reviews (
     token_hash TEXT NOT NULL DEFAULT '',
     token_used INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL,                    -- pending | running | done | blocked
-    blocked_reason TEXT NOT NULL DEFAULT '', -- timeout | budget | crashed | scope_violation | cancelled
+    blocked_reason TEXT NOT NULL DEFAULT '', -- timeout | budget | crashed | scope_violation | cancelled | base_unresolved
     scope_violation INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL,
@@ -879,7 +879,7 @@ CREATE TABLE IF NOT EXISTS steward_review_passes (
     summary TEXT NOT NULL DEFAULT '',
     findings_json TEXT NOT NULL DEFAULT '',
     criteria_json TEXT NOT NULL DEFAULT '',   -- spec axis only
-    blocked_reason TEXT NOT NULL DEFAULT '',  -- timeout | budget | crashed | cancelled | scope_violation | no_spec
+    blocked_reason TEXT NOT NULL DEFAULT '',  -- timeout | budget | crashed | cancelled | scope_violation | base_unresolved | no_spec
     cost_usd REAL NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL,
     finished_at TIMESTAMP,

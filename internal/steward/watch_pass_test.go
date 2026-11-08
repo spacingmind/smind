@@ -162,3 +162,76 @@ func TestWatch_PassBudgetAlsoBoundsSpendAfterTheVerdict(t *testing.T) {
 		t.Fatalf("over budget after the verdict: stopped %d, want the run stopped", stopped)
 	}
 }
+
+func TestWatch_PassClockRunsFromCreationUntilTheRunStarts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a run that never starts times out", func(t *testing.T) {
+		t.Parallel()
+		fx := openTwoAxis(t, axisDigest("AC1"))
+		ps := validation.ProbeState{}
+		stopped := 0
+		w := fx.passWatch(AxisSpec, &ps, &stopped)
+		if w.Tick(19 * time.Minute) {
+			t.Fatal("Tick(19m of 20m, never started) = done")
+		}
+		if !w.Tick(time.Minute) {
+			t.Fatal("Tick(20m of 20m, never started) = not done")
+		}
+		p, err := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisSpec))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Status != PassBlocked || p.BlockedReason != "timeout" || stopped != 1 {
+			t.Fatalf("spec pass = %+v stopped %d, want blocked/timeout with the run stopped", p, stopped)
+		}
+	})
+	t.Run("a prompt held in the queue before any run still times out", func(t *testing.T) {
+		t.Parallel()
+		fx := openTwoAxis(t, axisDigest("AC1"))
+		ps := validation.ProbeState{Queued: true}
+		stopped := 0
+		w := fx.passWatch(AxisStandards, &ps, &stopped)
+		if !w.Tick(20 * time.Minute) {
+			t.Fatal("Tick(20m, queued and never started) = not done")
+		}
+		p, err := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisStandards))
+		if err != nil || p.BlockedReason != "timeout" {
+			t.Fatalf("standards pass = %+v, want timeout (err %v)", p, err)
+		}
+	})
+	t.Run("a rate-limit wait after the run started does not count", func(t *testing.T) {
+		t.Parallel()
+		fx := openTwoAxis(t, axisDigest("AC1"))
+		ps := validation.ProbeState{Running: true, Started: true}
+		stopped := 0
+		w := fx.passWatch(AxisSpec, &ps, &stopped)
+		if w.Tick(10 * time.Minute) {
+			t.Fatal("Tick(running 10m) = done")
+		}
+		ps = validation.ProbeState{Started: true, Queued: true}
+		for range 5 {
+			if w.Tick(time.Hour) {
+				t.Fatal("Tick(waiting out a rate limit) = done: the wait consumed the wall clock")
+			}
+		}
+		ps = validation.ProbeState{Running: true, Started: true}
+		if w.Tick(5 * time.Minute) {
+			t.Fatal("Tick(running 15m of 20m) = done")
+		}
+	})
+	t.Run("a run already over at the first look is a crash, not a timeout", func(t *testing.T) {
+		t.Parallel()
+		fx := openTwoAxis(t, axisDigest("AC1"))
+		ps := validation.ProbeState{Started: true}
+		stopped := 0
+		w := fx.passWatch(AxisSpec, &ps, &stopped)
+		if !w.Tick(time.Minute) {
+			t.Fatal("Tick(run over at first look) = not done")
+		}
+		p, err := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisSpec))
+		if err != nil || p.BlockedReason != "crashed" {
+			t.Fatalf("spec pass = %+v, want crashed (err %v)", p, err)
+		}
+	})
+}
