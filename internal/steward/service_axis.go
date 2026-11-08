@@ -318,7 +318,7 @@ func tokenMatches(token, storedHash string) bool {
 
 // AxisDigestJSON is the digest as the seat of one pass may read it (ADR-0054
 // §3): the shared objective fields plus only that axis's sections. The
-// Standards seat gets no spec section, no criteria texts and no PR body (the
+// Standards seat gets no spec section, no criteria texts, no PR body and no handoff notes (they restate the criteria) (the
 // text the spec is read from); the Spec seat gets no standards section, no
 // head diff of the standards files and no rules. The stored digest stays whole
 // (SubmitPassVerdict reads the criteria ids from it); this is a projection.
@@ -340,6 +340,7 @@ func (s *Service) AxisDigestJSON(reviewID int64, axis Axis) (json.RawMessage, er
 		d.Spec = nil
 		d.Untrusted.SpecCriteria = nil
 		d.Untrusted.PRBody = map[string]string{}
+		d.Untrusted.HandoffNotes = []string{}
 	case AxisSpec:
 		d.Standards = nil
 		d.Untrusted.StandardsHeadDiff = ""

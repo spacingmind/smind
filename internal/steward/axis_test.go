@@ -106,6 +106,29 @@ func TestCombine_BothFailedIsBlocked(t *testing.T) {
 	}
 }
 
+func TestCombine_BaseUnresolvedYieldsToARealFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		passes []PassResult
+		want   string
+	}{
+		{"alone", []PassResult{{Axis: AxisStandards, Status: PassBlocked, BlockedReason: ReasonBaseUnresolved}, {Axis: AxisSpec, Status: PassSkipped}}, ReasonBaseUnresolved},
+		{"spec timed out", []PassResult{{Axis: AxisStandards, Status: PassBlocked, BlockedReason: ReasonBaseUnresolved}, {Axis: AxisSpec, Status: PassBlocked, BlockedReason: "timeout"}}, "timeout"},
+		{"spec crashed", []PassResult{{Axis: AxisStandards, Status: PassBlocked, BlockedReason: ReasonBaseUnresolved}, {Axis: AxisSpec, Status: PassBlocked, BlockedReason: "crashed"}}, "crashed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Combine(tt.passes)
+			if err != nil || !got.Blocked || got.BlockedReason != tt.want {
+				t.Fatalf("Combine() = %+v, %v; want BLOCKED with reason %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestCombine_SkippedAndOpenPasses(t *testing.T) {
 	t.Parallel()
 

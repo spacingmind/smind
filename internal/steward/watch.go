@@ -183,10 +183,10 @@ func (w *Watch) tickPass(dt time.Duration) bool {
 		return true
 	}
 	ps := w.Probe(w.StewardTaskID)
-	// Until the run has been seen the pass's clock runs from its creation, so a
+	// Until the run has been seen the pass's clock runs from the watch's start (its creation), so a
 	// run that never starts still times out; once it has run, only the time it
 	// executes counts and a rate-limit wait does not (ADR-0047 §4).
-	if ps.Running || !w.sawRun && !ps.Started {
+	if ps.Running || (!w.sawRun && !ps.Started) {
 		w.elapsed += dt
 	}
 	if ps.Running || ps.Started {

@@ -232,6 +232,11 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 			d, err := h.svc.AxisDigestJSON(p.ReviewID, axis)
 			return d, stewardErr(m, err)
 		}
+		// Only a single-seat review's own seat reads the whole digest: a failed
+		// pass lookup must never fall through to it for a pass's seat.
+		if row.StewardTaskID == 0 || row.StewardTaskID != rc.ident.taskID {
+			return nil, forbidden(m + " is only available to the steward seat's own run")
+		}
 		d, err := h.svc.DigestJSON(p.ReviewID)
 		return d, stewardErr(m, err)
 	}

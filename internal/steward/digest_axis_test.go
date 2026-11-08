@@ -2,6 +2,7 @@ package steward
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -18,7 +19,7 @@ func fullAxisDigest() Digest {
 		PRTitle:           "MARK-SHARED-PRTITLE",
 		PRBody:            map[string]string{"summary": "MARK-PRBODY"},
 		CommitSubjects:    []string{"MARK-SHARED-COMMIT"},
-		HandoffNotes:      []string{},
+		HandoffNotes:      []string{"MARK-HANDOFF"},
 		StandardsHeadDiff: "MARK-HEADDIFF",
 		StandardsRules:    []string{"MARK-RULE"},
 		SpecCriteria:      map[string]string{"AC1": "MARK-CRITERION"},
@@ -31,6 +32,7 @@ func TestAxisDigestJSON_EachSeatSeesOnlyItsAxis(t *testing.T) {
 
 	standardsText := []string{"MARK-BASE", "MARK-STD", "MARK-HEADDIFF", "MARK-RULE"}
 	specText := []string{"MARK-PLAN", "TestMarkSpec", "MARK-CRITERION", "MARK-PRBODY"}
+	// The Standards seat also loses the peers' handoff notes; the Spec seat keeps them.
 	shared := []string{"MARK-SHARED-PRTITLE", "MARK-SHARED-COMMIT"}
 
 	tests := []struct {
@@ -39,8 +41,8 @@ func TestAxisDigestJSON_EachSeatSeesOnlyItsAxis(t *testing.T) {
 		mustLack []string
 		noKey    string
 	}{
-		{AxisStandards, append(append([]string{}, standardsText...), shared...), specText, `"spec"`},
-		{AxisSpec, append(append([]string{}, specText...), shared...), standardsText, `"standards"`},
+		{AxisStandards, slices.Concat(standardsText, shared), append(slices.Clone(specText), "MARK-HANDOFF"), `"spec"`},
+		{AxisSpec, slices.Concat(specText, shared, []string{"MARK-HANDOFF"}), standardsText, `"standards"`},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.axis), func(t *testing.T) {

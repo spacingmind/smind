@@ -178,7 +178,10 @@ func TestWatch_PassClockRunsFromCreationUntilTheRunStarts(t *testing.T) {
 		if !w.Tick(time.Minute) {
 			t.Fatal("Tick(20m of 20m, never started) = not done")
 		}
-		p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisSpec))
+		p, err := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisSpec))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if p.Status != PassBlocked || p.BlockedReason != "timeout" || stopped != 1 {
 			t.Fatalf("spec pass = %+v stopped %d, want blocked/timeout with the run stopped", p, stopped)
 		}
@@ -192,8 +195,9 @@ func TestWatch_PassClockRunsFromCreationUntilTheRunStarts(t *testing.T) {
 		if !w.Tick(20 * time.Minute) {
 			t.Fatal("Tick(20m, queued and never started) = not done")
 		}
-		if p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisStandards)); p.BlockedReason != "timeout" {
-			t.Fatalf("standards pass = %+v, want timeout", p)
+		p, err := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisStandards))
+		if err != nil || p.BlockedReason != "timeout" {
+			t.Fatalf("standards pass = %+v, want timeout (err %v)", p, err)
 		}
 	})
 	t.Run("a rate-limit wait after the run started does not count", func(t *testing.T) {
@@ -225,8 +229,9 @@ func TestWatch_PassClockRunsFromCreationUntilTheRunStarts(t *testing.T) {
 		if !w.Tick(time.Minute) {
 			t.Fatal("Tick(run over at first look) = not done")
 		}
-		if p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisSpec)); p.BlockedReason != "crashed" {
-			t.Fatalf("spec pass = %+v, want crashed", p)
+		p, err := fx.svc.DB.GetStewardReviewPass(fx.row.ID, string(AxisSpec))
+		if err != nil || p.BlockedReason != "crashed" {
+			t.Fatalf("spec pass = %+v, want crashed (err %v)", p, err)
 		}
 	})
 }
