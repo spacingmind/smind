@@ -601,7 +601,10 @@ export function TaskDetailPane({
        * wide screens.
        */}
       {pendingRuns.length > 0 && (
-        <div data-testid="pending-permission-dock" className="mx-auto w-full max-w-3xl shrink-0 space-y-2 px-4 py-2">
+        <div
+          data-testid="pending-permission-dock"
+          className="mx-auto w-full max-w-3xl shrink-0 space-y-2 border-t border-border bg-background px-4 py-2 shadow-[0_-6px_10px_-8px_rgb(0_0_0/0.18)] md:border-t-0 md:bg-transparent md:shadow-none"
+        >
           {pendingRuns.map((run) => (
             <Fragment key={run.id}>
               {run.pendingPermission && (
