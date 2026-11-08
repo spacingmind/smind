@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -201,5 +202,196 @@ func TestStewardConfig_TwoAxisDefaultsOffAndReadsYAML(t *testing.T) {
 	cfg, err = loadStewardYAML(t, "steward:\n  twoAxis: true\n")
 	if err != nil || !cfg.Steward.TwoAxis {
 		t.Fatalf("steward.twoAxis: true -> %v, %v; want on", cfg.Steward.TwoAxis, err)
+	}
+}
+
+// TestStewardConfig_PassLimitsDefaults pins the zero value of the two-axis
+// pass knobs (ADR-0054 §7): 0.4 + 1.1 = the 1.5 total, 20 minutes each, the
+// axis's own seat profile.
+func TestStewardConfig_PassLimitsDefaults(t *testing.T) {
+	var c StewardConfig
+	if err := c.Validate(); err != nil {
+		t.Fatalf("zero Validate() error = %v, want nil", err)
+	}
+	standards, spec := c.PassLimits()
+	if want := (StewardPassLimits{BudgetUSD: 0.4, MaxMinutes: 20, Profile: "steward-standards"}); standards != want {
+		t.Fatalf("standards PassLimits() = %+v, want %+v", standards, want)
+	}
+	if want := (StewardPassLimits{BudgetUSD: 1.1, MaxMinutes: 20, Profile: "steward"}); spec != want {
+		t.Fatalf("spec PassLimits() = %+v, want %+v", spec, want)
+	}
+	if StewardPassStandardsDefaultBudgetUsd+StewardPassSpecDefaultBudgetUsd != StewardDefaultBudgetUsd {
+		t.Fatal("pass budget defaults no longer sum to the total default")
+	}
+}
+
+func TestStewardConfig_PassLimitsFromYAML(t *testing.T) {
+	cfg, err := loadStewardYAML(t, `steward:
+  twoAxis: true
+  passes:
+    standards:
+      budgetUsd: 0.25
+      maxMinutes: 10
+      profile: "  steward-x  "
+    spec:
+      budgetUsd: 0.75
+      maxMinutes: 30
+      profile: my-spec
+  standards:
+    files: [AGENTS.md, docs/STANDARDS.md]
+    rules:
+      - "Every PR adds a test for new production code."
+`)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	c := cfg.Steward
+	standards, spec := c.PassLimits()
+	if want := (StewardPassLimits{BudgetUSD: 0.25, MaxMinutes: 10, Profile: "steward-x"}); standards != want {
+		t.Fatalf("standards PassLimits() = %+v, want %+v (profile trimmed)", standards, want)
+	}
+	if want := (StewardPassLimits{BudgetUSD: 0.75, MaxMinutes: 30, Profile: "my-spec"}); spec != want {
+		t.Fatalf("spec PassLimits() = %+v, want %+v", spec, want)
+	}
+	if len(c.Standards.Files) != 2 || c.Standards.Files[0] != "AGENTS.md" || c.Standards.Files[1] != "docs/STANDARDS.md" {
+		t.Fatalf("standards.files = %v", c.Standards.Files)
+	}
+	if len(c.Standards.Rules) != 1 || c.Standards.Rules[0] != "Every PR adds a test for new production code." {
+		t.Fatalf("standards.rules = %v", c.Standards.Rules)
+	}
+}
+
+// TestStewardConfig_PassBudgetsOverTotalRejectedOnlyWhenTwoAxis: the pass
+// budgets bound the total only when the two-axis switch is on; off, the pass
+// keys are inert and today's config loads.
+func TestStewardConfig_PassBudgetsOverTotalRejectedOnlyWhenTwoAxis(t *testing.T) {
+	const yaml = `  passes:
+    standards:
+      budgetUsd: 1
+    spec:
+      budgetUsd: 1
+`
+	if _, err := loadStewardYAML(t, "steward:\n  twoAxis: false\n"+yaml); err != nil {
+		t.Fatalf("twoAxis false: Load() error = %v, want nil", err)
+	}
+	_, err := loadStewardYAML(t, "steward:\n  twoAxis: true\n"+yaml)
+	if err == nil || !strings.Contains(err.Error(), "steward.passes budgets (1 + 1) exceed steward.budgetUsd 1.5") {
+		t.Fatalf("twoAxis true: Load() = %v, want the sum-over-total error", err)
+	}
+	// One pass over the total on its own names its own key.
+	if _, err := loadStewardYAML(t, "steward:\n  twoAxis: true\n  passes:\n    standards:\n      budgetUsd: 2\n"); err == nil ||
+		!strings.Contains(err.Error(), "steward.passes.standards.budgetUsd must be <= steward.budgetUsd") {
+		t.Fatalf("single pass over total: Load() = %v, want it to name steward.passes.standards.budgetUsd", err)
+	}
+}
+
+func TestStewardConfig_PassBudgetsAtTotalAccepted(t *testing.T) {
+	if _, err := loadStewardYAML(t, "steward:\n  twoAxis: true\n"); err != nil {
+		t.Fatalf("defaults (0.4 + 1.1): Load() error = %v", err)
+	}
+	if _, err := loadStewardYAML(t, "steward:\n  twoAxis: true\n  budgetUsd: 1.5\n  passes:\n    standards:\n      budgetUsd: 0.75\n    spec:\n      budgetUsd: 0.75\n"); err != nil {
+		t.Fatalf("0.75 + 0.75 = the total: Load() error = %v", err)
+	}
+	if _, err := loadStewardYAML(t, "steward:\n  twoAxis: true\n  budgetUsd: 2\n  passes:\n    standards:\n      budgetUsd: 0.4\n    spec:\n      budgetUsd: 1.6\n"); err != nil {
+		t.Fatalf("pass budgets at a raised total: Load() error = %v", err)
+	}
+}
+
+func TestStewardConfig_PassMinutesClampAndReject(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cfg  StewardConfig
+		want string
+	}{
+		{"negative standards minutes", StewardConfig{Passes: StewardPassesConfig{Standards: StewardPassConfig{MaxMinutes: -1}}}, "steward.passes.standards.maxMinutes"},
+		{"spec minutes over the ceiling", StewardConfig{Passes: StewardPassesConfig{Spec: StewardPassConfig{MaxMinutes: 61}}}, "steward.passes.spec.maxMinutes"},
+		{"negative standards budget", StewardConfig{Passes: StewardPassesConfig{Standards: StewardPassConfig{BudgetUsd: -0.1}}}, "steward.passes.standards.budgetUsd"},
+		{"NaN spec budget", StewardConfig{Passes: StewardPassesConfig{Spec: StewardPassConfig{BudgetUsd: math.NaN()}}}, "steward.passes.spec.budgetUsd"},
+		{"Inf standards budget", StewardConfig{Passes: StewardPassesConfig{Standards: StewardPassConfig{BudgetUsd: math.Inf(1)}}}, "steward.passes.standards.budgetUsd"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Validate() = %v, want an error naming %s", err, tt.want)
+			}
+		})
+	}
+	if err := (StewardConfig{TwoAxis: true, Passes: StewardPassesConfig{Standards: StewardPassConfig{MaxMinutes: 60}, Spec: StewardPassConfig{MaxMinutes: 60}}}).Validate(); err != nil {
+		t.Fatalf("60 minutes per pass rejected: %v", err)
+	}
+	for _, tt := range []struct {
+		name string
+		cfg  StewardPassConfig
+		want int
+	}{
+		{"zero is the default", StewardPassConfig{}, 20},
+		{"kept", StewardPassConfig{MaxMinutes: 25}, 25},
+		{"clamped to the ceiling", StewardPassConfig{MaxMinutes: 99}, 60},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			standards, _ := StewardConfig{Passes: StewardPassesConfig{Standards: tt.cfg}}.PassLimits()
+			if standards.MaxMinutes != tt.want {
+				t.Fatalf("MaxMinutes = %d, want %d", standards.MaxMinutes, tt.want)
+			}
+		})
+	}
+}
+
+// TestStewardConfig_StandardsFilesRejectsEscapes: the standards files are
+// human-authored repo paths the daemon reads and copies into the Standards
+// pass's scratch tree (ADR-0054 §3, D11), so anything that could name a file
+// outside the repository is a load error.
+func TestStewardConfig_StandardsFilesRejectsEscapes(t *testing.T) {
+	bad := []string{
+		"/etc/passwd",
+		"../x",
+		"a/../../x",
+		`C:\x`,
+		`a\b`,
+		"",
+		"a\nb",
+		"a\x00b",
+		strings.Repeat("a", 201),
+	}
+	for _, f := range bad {
+		err := (StewardConfig{Standards: StewardStandardsConfig{Files: []string{f}}}).Validate()
+		if err == nil || !strings.Contains(err.Error(), "steward.standards.files") {
+			t.Errorf("files [%q]: Validate() = %v, want an error naming steward.standards.files", f, err)
+		}
+	}
+	twentyOne := make([]string, 21)
+	for i := range twentyOne {
+		twentyOne[i] = fmt.Sprintf("f%d.md", i)
+	}
+	if err := (StewardConfig{Standards: StewardStandardsConfig{Files: twentyOne}}).Validate(); err == nil ||
+		!strings.Contains(err.Error(), "steward.standards.files") {
+		t.Errorf("21 files: Validate() = %v, want an error naming steward.standards.files", err)
+	}
+	if err := (StewardConfig{Standards: StewardStandardsConfig{Files: []string{"docs/STANDARDS.md", "AGENTS.md"}}}).Validate(); err != nil {
+		t.Fatalf("repository-relative files rejected: %v", err)
+	}
+}
+
+func TestStewardConfig_StandardsRulesCaps(t *testing.T) {
+	for _, r := range []string{"", strings.Repeat("r", 401), "line one\nline two"} {
+		err := (StewardConfig{Standards: StewardStandardsConfig{Rules: []string{r}}}).Validate()
+		if err == nil || !strings.Contains(err.Error(), "steward.standards.rules") {
+			t.Errorf("rules [%q]: Validate() = %v, want an error naming steward.standards.rules", r, err)
+		}
+	}
+	twentyOneRules := make([]string, 21)
+	for i := range twentyOneRules {
+		twentyOneRules[i] = "rule"
+	}
+	if err := (StewardConfig{Standards: StewardStandardsConfig{Rules: twentyOneRules}}).Validate(); err == nil ||
+		!strings.Contains(err.Error(), "steward.standards.rules") {
+		t.Errorf("21 rules: Validate() = %v, want an error naming steward.standards.rules", err)
+	}
+	ok := make([]string, 20)
+	for i := range ok {
+		ok[i] = strings.Repeat("r", 400)
+	}
+	if err := (StewardConfig{Standards: StewardStandardsConfig{Rules: ok}}).Validate(); err != nil {
+		t.Fatalf("20 rules of 400 bytes rejected: %v", err)
 	}
 }
