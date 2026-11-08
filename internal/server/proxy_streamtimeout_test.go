@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,5 +63,181 @@ func TestProxy_LongStreamOutlastsClientTimeout(t *testing.T) {
 	}
 	if !strings.HasSuffix(string(body), "event: message_stop\n\n") {
 		t.Fatalf("stream truncated: %d bytes, no message_stop", len(body))
+	}
+}
+
+// sseUpstream serves a stream whose behaviour per request is chosen by serve;
+// it counts the requests it received.
+func sseUpstream(t *testing.T, count *atomic.Int32, serve func(w http.ResponseWriter, r *http.Request)) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		serve(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func timeoutProxy(t *testing.T, upstream *httptest.Server, to upstreamTimeouts) *httptest.Server {
+	t.Helper()
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)), withUpstreamTimeouts(to))
+	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-ant-real")
+	srv := httptest.NewServer(http.HandlerFunc(p.handleAnthropic))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func postMessages(t *testing.T, srv *httptest.Server, body string) *http.Response {
+	t.Helper()
+	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("Post() error = %v", err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+func streamHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+}
+
+// A stream that runs ten times longer than the idle bound, each gap well inside
+// it, survives, and the upstream saw exactly one request.
+func TestProxy_StreamSurvivesWhileChunksKeepComing(t *testing.T) {
+	t.Parallel()
+	var n atomic.Int32
+	up := sseUpstream(t, &n, func(w http.ResponseWriter, r *http.Request) {
+		streamHeaders(w)
+		for i := 0; i < 20; i++ {
+			_, _ = w.Write([]byte("event: ping\n\n"))
+			w.(http.Flusher).Flush()
+			time.Sleep(25 * time.Millisecond)
+		}
+		_, _ = w.Write([]byte("event: message_stop\n\n"))
+	})
+	srv := timeoutProxy(t, up, upstreamTimeouts{header: time.Second, streamIdle: 150 * time.Millisecond, total: 100 * time.Millisecond})
+	body, err := io.ReadAll(postMessages(t, srv, `{"stream":true}`).Body)
+	if err != nil || !strings.HasSuffix(string(body), "message_stop\n\n") {
+		t.Fatalf("stream cut: %d bytes, err = %v", len(body), err)
+	}
+	if got := n.Load(); got != 1 {
+		t.Fatalf("upstream requests = %d, want 1", got)
+	}
+}
+
+// A stream that goes quiet is cut by the idle bound, and the client sees an
+// error rather than a clean end.
+func TestProxy_StalledStreamIsCutByIdleTimeout(t *testing.T) {
+	t.Parallel()
+	var n atomic.Int32
+	cancelled := make(chan struct{})
+	up := sseUpstream(t, &n, func(w http.ResponseWriter, r *http.Request) {
+		streamHeaders(w)
+		_, _ = w.Write([]byte("event: ping\n\n"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done() // stalls until the proxy gives up on it
+		close(cancelled)
+	})
+	srv := timeoutProxy(t, up, upstreamTimeouts{header: time.Second, streamIdle: 150 * time.Millisecond, total: time.Minute})
+	start := time.Now()
+	body, err := io.ReadAll(postMessages(t, srv, `{"stream":true}`).Body)
+	if err == nil {
+		t.Fatalf("a stalled stream ended cleanly with %q", body)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("cut after %v, want about the 150 ms idle bound", d)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the upstream request was not cancelled")
+	}
+	if got := n.Load(); got != 1 {
+		t.Fatalf("upstream requests = %d, want 1", got)
+	}
+}
+
+// An upstream that never answers is cut by the header bound with a 502.
+func TestProxy_DeadUpstreamFailsAtHeaderTimeout(t *testing.T) {
+	t.Parallel()
+	var n atomic.Int32
+	up := sseUpstream(t, &n, func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
+	srv := timeoutProxy(t, up, upstreamTimeouts{header: 150 * time.Millisecond, streamIdle: time.Minute, total: time.Minute})
+	start := time.Now()
+	resp := postMessages(t, srv, `{"stream":true}`)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("took %v", d)
+	}
+}
+
+// A non-streaming response keeps a total bound: a body that drips past it is cut,
+// one that finishes inside it is delivered whole.
+func TestProxy_NonStreamingKeepsATotalTimeout(t *testing.T) {
+	t.Parallel()
+	var n atomic.Int32
+	up := sseUpstream(t, &n, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		slow := strings.Contains(r.URL.RawQuery, "slow")
+		parts := 1
+		if slow {
+			parts = 30
+		}
+		for i := 0; i < parts; i++ {
+			_, _ = w.Write([]byte("x"))
+			w.(http.Flusher).Flush()
+			if slow {
+				time.Sleep(25 * time.Millisecond)
+			}
+		}
+	})
+	srv := timeoutProxy(t, up, upstreamTimeouts{header: time.Second, streamIdle: time.Minute, total: 300 * time.Millisecond})
+	resp, err := http.Post(srv.URL+"/v1/messages?slow=1", "application/json", strings.NewReader(`{}`))
+	if err == nil {
+		defer resp.Body.Close()
+		if b, rerr := io.ReadAll(resp.Body); rerr == nil {
+			t.Fatalf("a body dripping past the total bound ended cleanly (%d bytes)", len(b))
+		}
+	}
+	fast, err := io.ReadAll(postMessages(t, srv, `{}`).Body)
+	if err != nil || string(fast) != "x" {
+		t.Fatalf("fast body = %q, err = %v", fast, err)
+	}
+}
+
+// The client going away cancels the upstream request.
+func TestProxy_ClientDisconnectCancelsUpstream(t *testing.T) {
+	t.Parallel()
+	var n atomic.Int32
+	cancelled := make(chan struct{})
+	up := sseUpstream(t, &n, func(w http.ResponseWriter, r *http.Request) {
+		streamHeaders(w)
+		_, _ = w.Write([]byte("event: ping\n\n"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		close(cancelled)
+	})
+	srv := timeoutProxy(t, up, upstreamTimeouts{header: time.Minute, streamIdle: time.Minute, total: time.Minute})
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/messages", strings.NewReader(`{"stream":true}`))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 5)
+	if _, err := io.ReadFull(resp.Body, buf); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	resp.Body.Close()
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the upstream request was not cancelled after the client left")
 	}
 }
