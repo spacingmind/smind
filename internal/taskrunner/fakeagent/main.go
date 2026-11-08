@@ -217,6 +217,7 @@ func main() {
 }
 
 func handle(msg message, sessionCwd *string) {
+	defer func() { logMethodInCwd(*sessionCwd, msg.Method) }()
 	switch {
 	case msg.Method == "initialize":
 		caps := map[string]any{}
@@ -476,7 +477,44 @@ func handleResumeSession(msg message, sessionCwd *string) {
 	}
 	*sessionCwd = params.Cwd
 	recordSessionInitMethod(params.Cwd, msg.Method)
+	if msg.Method == "session/load" {
+		replayFromCwd(params.Cwd)
+	}
 	respond(msg.ID, map[string]any{"configOptions": defaultConfigOptions()})
+}
+
+// replayFromCwd emits the session/update objects of <cwd>/replay.json (an array)
+// before session/load answers, as an agent replaying its history does. Absent
+// file: nothing.
+func replayFromCwd(cwd string) {
+	data, err := os.ReadFile(filepath.Join(cwd, "replay.json"))
+	if err != nil {
+		return
+	}
+	var updates []map[string]any
+	if json.Unmarshal(data, &updates) != nil {
+		return
+	}
+	for _, u := range updates {
+		notify("session/update", map[string]any{"sessionId": sessionID, "update": u})
+	}
+}
+
+// logMethodInCwd appends msg.Method to <cwd>/methods.log once a cwd is known,
+// so a test can prove which requests reached the agent.
+func logMethodInCwd(cwd, method string) {
+	if cwd == "" || method == "" {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "methods.log")); err != nil {
+		return // only when the test asked for it by creating the file
+	}
+	f, err := os.OpenFile(filepath.Join(cwd, "methods.log"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(method + "\n")
 }
 
 func sessionUpdate(text string) {

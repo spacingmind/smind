@@ -11,6 +11,9 @@ type HistoryInfo struct {
 	Source      string // "full" | "skeleton"
 	Reason      string // "" when Source is "full"; else a native.Reason value, "rebuild_not_requested" or "excerpt_pruned"
 	CanLoadFull bool   // a human may ask for the rebuilt history
+	// LoadStartsAgent is true when loading would start the provider's agent (ACP):
+	// the client asks the human to confirm first.
+	LoadStartsAgent bool
 }
 
 // HistoryInfo reports whether runID's stored history is the full one or a
@@ -31,6 +34,9 @@ func (reg *Registry) HistoryInfo(runID string) HistoryInfo {
 		reg.mu.Lock()
 		rb := reg.rebuilder
 		reg.mu.Unlock()
+		if rb != nil && ref.Harness == native.HarnessACP && ref.SessionID != "" && rb.SupportsACP() && !rb.ACPLoadUnsupported(ref.Provider) {
+			return HistoryInfo{Source: "skeleton", Reason: string(native.ReasonHumanOnly), CanLoadFull: true, LoadStartsAgent: true}
+		}
 		if rb != nil && (ref.Harness == native.HarnessClaudeCode || ref.Harness == native.HarnessCodex) && ref.SessionID != "" {
 			reason := string(native.ReasonHumanOnly)
 			if sk.ExcerptsPrunedAt != nil {

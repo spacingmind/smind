@@ -96,9 +96,25 @@ func (reg *Registry) rebuildTarget(runID string, who Requester) (*native.Rebuild
 // form: heredoc bodies elided, provider secrets scrubbed, exactly as a live read.
 // A rebuild is served from the cache while the session file is unchanged.
 func (reg *Registry) RebuildHistory(ctx context.Context, runID string, who Requester) Rebuilt {
+	return reg.RebuildHistoryConfirmed(ctx, runID, who, false)
+}
+
+// RebuildHistoryConfirmed is RebuildHistory for a caller that may have the human's
+// explicit yes to starting an agent: an ACP run's history is the agent's own replay
+// of its session, so it is only loaded with confirmStart (else ReasonConfirmRequired,
+// nothing started). The claude and codex readers ignore it.
+func (reg *Registry) RebuildHistoryConfirmed(ctx context.Context, runID string, who Requester, confirmStart bool) Rebuilt {
 	rb, ref, refused, ok := reg.rebuildTarget(runID, who)
 	if !ok {
 		return refused
+	}
+	if ref.Harness == native.HarnessACP {
+		// No file to key a cache by: every confirmed load starts the agent once.
+		res := rb.Rebuild(ctx, native.Request{Ref: ref, Requester: RequesterHuman, ExpectedToolCalls: reg.storedToolCalls(runID), ConfirmStart: confirmStart})
+		if !res.OK() {
+			return degraded(res.Reason, res.Detail)
+		}
+		return Rebuilt{Events: res.Events, Refs: res.Refs, Detail: res.Detail}
 	}
 	return reg.rebuildCached(ctx, rb, ref, runID, rb.Probe(ref))
 }
@@ -112,6 +128,9 @@ func (reg *Registry) RebuildOnOpen(ctx context.Context, runID string, who Reques
 	rb, ref, refused, ok := reg.rebuildTarget(runID, who)
 	if !ok {
 		return refused
+	}
+	if ref.Harness == native.HarnessACP {
+		return Rebuilt{Skipped: true} // an automatic open never starts an agent
 	}
 	probe := rb.Probe(ref)
 	if !probe.Found {

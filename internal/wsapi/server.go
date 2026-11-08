@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -443,6 +444,18 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	// the provider's secret values from what it returns.
 	reg.SetRebuilder(native.New(native.Config{
 		Roots: runner.SessionRoots,
+		ACPReplay: func(ctx context.Context, ref native.Ref, maxBytes int64) ([]taskrunner.Event, error) {
+			evs, err := runner.ReplayACPSession(ctx, taskrunner.Provider(ref.Provider), ref.SessionID, ref.Cwd, maxBytes)
+			switch {
+			case errors.Is(err, taskrunner.ErrACPNoLoadSession):
+				return nil, native.ErrNoLoadSession
+			case errors.Is(err, taskrunner.ErrACPSessionUnknown):
+				return nil, native.ErrSessionUnknown
+			case errors.Is(err, taskrunner.ErrACPReplayTooLarge):
+				return nil, native.ErrReplayTooLarge
+			}
+			return evs, err
+		},
 		Scrub: func(provider, s string) string {
 			for _, v := range runner.ProviderSecretValues(provider) {
 				s = strings.ReplaceAll(s, v, "[redacted]")

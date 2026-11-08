@@ -28,6 +28,10 @@ var (
 	ErrSessionUnknown = errors.New("native: the agent does not know the session")
 )
 
+// ErrReplayTooLarge is returned by Config.ACPReplay when the replay passed the
+// byte bound it was given.
+var ErrReplayTooLarge = errTooLarge
+
 // SupportsACP reports whether ACP histories can be rebuilt at all.
 func (rb *Rebuilder) SupportsACP() bool { return rb.cfg.ACPReplay != nil }
 
