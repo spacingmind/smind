@@ -38,6 +38,11 @@ shipped as three PRs. This file tracks PR A; B and C add their sections.
 - `task-lineage.test.tsx`: no `$` text in the usage chip; tokens text still present.
 - mobile `taskTree.test.ts`: tree row view model carries no cost.
 
+### Polish after review
+
+- The daemon-down cause shows once, as readable copy on the home notice ("The daemon isn't running or isn't reachable at <address>." / "The daemon didn't answer within 8 s."); the header pill says "Disconnected" with Retry and the sidebar row "Can't reach the daemon" with Retry; the raw error is a tooltip.
+- The footer Providers row reads "N of M healthy" when degraded (amber), "N healthy" when all are (green).
+
 ### Decisions
 
 - Item 3 of the audit scope (home composer Attach and effort chips) is not small
