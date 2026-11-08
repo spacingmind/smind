@@ -1,0 +1,198 @@
+[
+  {
+    "name": "accepted",
+    "row": {
+      "blockedReason": "",
+      "findings": "[{\"file\":\"a.go\",\"line\":3,\"why\":\"nit\",\"check\":\"gofmt\",\"severity\":\"P3\"}]",
+      "gates": "[{\"id\":\"ci\",\"state\":\"pass\"},{\"id\":\"scope\",\"state\":\"pass\"}]",
+      "runBound": true,
+      "seatVerdict": "ACCEPTED",
+      "status": "done",
+      "summary": "all good",
+      "tokenUsed": true,
+      "verdict": "ACCEPTED"
+    },
+    "view": {
+      "id": 1,
+      "taskId": 1,
+      "triggerKind": "human",
+      "headSha": "head1",
+      "contractSha256": "c1",
+      "validationId": 0,
+      "ciState": "green",
+      "status": "done",
+      "verdict": "ACCEPTED",
+      "seatVerdict": "ACCEPTED",
+      "summary": "all good",
+      "findings": [
+        {
+          "file": "a.go",
+          "line": 3,
+          "why": "nit",
+          "check": "gofmt",
+          "severity": "P3"
+        }
+      ],
+      "gates": [
+        {
+          "id": "ci",
+          "state": "pass"
+        },
+        {
+          "id": "scope",
+          "state": "pass"
+        }
+      ],
+      "frames": [],
+      "mergeReady": true,
+      "costUsd": 0,
+      "runId": "seat-run-1",
+      "stewardTaskId": 1,
+      "createdAt": "0001-01-01T00:00:00Z"
+    }
+  },
+  {
+    "name": "changes",
+    "row": {
+      "blockedReason": "",
+      "findings": "[{\"file\":\"b.go\",\"line\":9,\"why\":\"race\",\"check\":\"go test -race\",\"severity\":\"P1\"}]",
+      "gates": "[{\"id\":\"ci\",\"state\":\"pass\"},{\"id\":\"scope\",\"state\":\"pass\"}]",
+      "runBound": true,
+      "seatVerdict": "CHANGES",
+      "status": "done",
+      "summary": "fix it",
+      "tokenUsed": true,
+      "verdict": "CHANGES"
+    },
+    "view": {
+      "id": 1,
+      "taskId": 1,
+      "triggerKind": "human",
+      "headSha": "head1",
+      "contractSha256": "c1",
+      "validationId": 0,
+      "ciState": "green",
+      "status": "done",
+      "verdict": "CHANGES",
+      "seatVerdict": "CHANGES",
+      "summary": "fix it",
+      "findings": [
+        {
+          "file": "b.go",
+          "line": 9,
+          "why": "race",
+          "check": "go test -race",
+          "severity": "P1"
+        }
+      ],
+      "gates": [
+        {
+          "id": "ci",
+          "state": "pass"
+        },
+        {
+          "id": "scope",
+          "state": "pass"
+        }
+      ],
+      "frames": [],
+      "mergeReady": false,
+      "notReadyReason": "not accepted",
+      "costUsd": 0,
+      "runId": "seat-run-1",
+      "stewardTaskId": 1,
+      "createdAt": "0001-01-01T00:00:00Z"
+    }
+  },
+  {
+    "name": "clamped",
+    "row": {
+      "blockedReason": "",
+      "findings": "[]",
+      "gates": "[{\"id\":\"ci\",\"state\":\"fail\",\"detail\":\"red\"},{\"id\":\"scope\",\"state\":\"pass\"}]",
+      "runBound": true,
+      "seatVerdict": "ACCEPTED",
+      "status": "done",
+      "summary": "looks fine [clamped to CHANGES: gate ci failed: red]",
+      "tokenUsed": true,
+      "verdict": "CHANGES"
+    },
+    "view": {
+      "id": 1,
+      "taskId": 1,
+      "triggerKind": "human",
+      "headSha": "head1",
+      "contractSha256": "c1",
+      "validationId": 0,
+      "ciState": "green",
+      "status": "done",
+      "verdict": "CHANGES",
+      "seatVerdict": "ACCEPTED",
+      "summary": "looks fine [clamped to CHANGES: gate ci failed: red]",
+      "findings": [],
+      "gates": [
+        {
+          "id": "ci",
+          "state": "fail",
+          "detail": "red"
+        },
+        {
+          "id": "scope",
+          "state": "pass"
+        }
+      ],
+      "frames": [],
+      "mergeReady": false,
+      "notReadyReason": "not accepted",
+      "costUsd": 0,
+      "runId": "seat-run-1",
+      "stewardTaskId": 1,
+      "createdAt": "0001-01-01T00:00:00Z"
+    }
+  },
+  {
+    "name": "blocked",
+    "row": {
+      "blockedReason": "",
+      "findings": "[]",
+      "gates": "[{\"id\":\"ci\",\"state\":\"pass\"},{\"id\":\"scope\",\"state\":\"pass\"}]",
+      "runBound": true,
+      "seatVerdict": "BLOCKED",
+      "status": "done",
+      "summary": "stacked [blocked: stacked on another PR]",
+      "tokenUsed": true,
+      "verdict": "BLOCKED"
+    },
+    "view": {
+      "id": 1,
+      "taskId": 1,
+      "triggerKind": "human",
+      "headSha": "head1",
+      "contractSha256": "c1",
+      "validationId": 0,
+      "ciState": "green",
+      "status": "done",
+      "verdict": "BLOCKED",
+      "seatVerdict": "BLOCKED",
+      "summary": "stacked [blocked: stacked on another PR]",
+      "findings": [],
+      "gates": [
+        {
+          "id": "ci",
+          "state": "pass"
+        },
+        {
+          "id": "scope",
+          "state": "pass"
+        }
+      ],
+      "frames": [],
+      "mergeReady": false,
+      "notReadyReason": "not accepted",
+      "costUsd": 0,
+      "runId": "seat-run-1",
+      "stewardTaskId": 1,
+      "createdAt": "0001-01-01T00:00:00Z"
+    }
+  }
+]
