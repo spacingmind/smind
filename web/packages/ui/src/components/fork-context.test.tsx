@@ -16,7 +16,7 @@ function forked(overrides: Partial<NonNullable<Chat["fork"]>> = {}): Chat {
   return { ...CHAT, fork: { parentChatId: 9, forkedAtRunId: "run-1", kind: "fork", mode: "native", lossy: false, ...overrides } };
 }
 
-const RUN: RunEntry = { id: "run-1", provider: "claude-native", prompt: "inherited prompt", status: "done", startedAt: "2024-01-01T00:00:00Z", items: [] };
+const RUN: RunEntry = { id: "run-1", provider: "claude-native", prompt: "inherited prompt", status: "done", startedAt: "2024-01-01T00:00:00Z", items: [], permissionMode: "", autoAccept: false, thinkingLevel: "" };
 
 describe("ForkContext", () => {
   it("a native fork shows the inherited turns read-only above the divider", () => {
