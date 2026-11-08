@@ -186,3 +186,20 @@ func TestStewardConfig_YAMLRoundTrip(t *testing.T) {
 		t.Fatalf("over-ceiling config Load() = %v, want an error naming steward.budgetUsd", err)
 	}
 }
+
+// TestStewardConfig_TwoAxisDefaultsOffAndReadsYAML pins ADR-0054's switch:
+// absent means off (today's single review run), only a human edit turns it on.
+func TestStewardConfig_TwoAxisDefaultsOffAndReadsYAML(t *testing.T) {
+	var c StewardConfig
+	if c.TwoAxis {
+		t.Fatal("zero StewardConfig.TwoAxis = true, want off")
+	}
+	cfg, err := loadStewardYAML(t, "steward:\n  enabled: true\n")
+	if err != nil || cfg.Steward.TwoAxis {
+		t.Fatalf("no twoAxis key -> %v, %v; want off", cfg.Steward.TwoAxis, err)
+	}
+	cfg, err = loadStewardYAML(t, "steward:\n  twoAxis: true\n")
+	if err != nil || !cfg.Steward.TwoAxis {
+		t.Fatalf("steward.twoAxis: true -> %v, %v; want on", cfg.Steward.TwoAxis, err)
+	}
+}

@@ -98,6 +98,22 @@ type Digest struct {
 	UntrustedNotice   string            `json:"untrustedNotice"`
 	Untrusted         Untrusted         `json:"untrusted"`
 	Truncated         []string          `json:"truncated"`
+	// Spec is the two-axis review's spec section (ADR-0054 §3). Nil, and then
+	// absent from the JSON, for a single-pass review.
+	Spec *SpecSection `json:"spec,omitempty"`
+}
+
+// SpecSection holds what the daemon resolved for the Spec pass. P1 carries
+// only the criteria the Spec pass must answer; the rest of the section is
+// added where the digest builds it.
+type SpecSection struct {
+	Criteria []SpecCriterion `json:"criteria"`
+}
+
+// SpecCriterion is one acceptance criterion the Spec pass must report on.
+type SpecCriterion struct {
+	ID   string `json:"id"`
+	Text string `json:"text,omitempty"`
 }
 
 // Build computes the whole digest from Inputs. It is pure: no clock, no I/O,

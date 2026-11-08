@@ -129,36 +129,8 @@ func ParseSeatVerdict(raw []byte) (SeatVerdict, error) {
 	if len(v.Frames) > verdictObservationsMax {
 		return SeatVerdict{}, ve("frames", "has %d items, the cap is %d", len(v.Frames), verdictObservationsMax)
 	}
-	for i, f := range v.Findings {
-		p := fmt.Sprintf("findings[%d]", i)
-		if len(f.File) > findingFileMax {
-			return SeatVerdict{}, ve(p+".file", "is %d bytes, the cap is %d", len(f.File), findingFileMax)
-		}
-		if len(f.Why) > findingWhyMax {
-			return SeatVerdict{}, ve(p+".why", "is %d bytes, the cap is %d", len(f.Why), findingWhyMax)
-		}
-		if len(f.Check) > findingCheckMax {
-			return SeatVerdict{}, ve(p+".check", "is %d bytes, the cap is %d", len(f.Check), findingCheckMax)
-		}
-		switch f.Severity {
-		case "", "P0", "P1", "P2", "P3":
-		default:
-			return SeatVerdict{}, ve(p+".severity", "must be P0, P1, P2 or P3")
-		}
-	}
-	for i, g := range v.Gates {
-		if len(g.Note) > gateAckNoteMax {
-			return SeatVerdict{}, ve(fmt.Sprintf("gates[%d].note", i), "is %d bytes, the cap is %d", len(g.Note), gateAckNoteMax)
-		}
-	}
-	for i, f := range v.Frames {
-		p := fmt.Sprintf("frames[%d]", i)
-		if len(f.Path) > observationPathMax {
-			return SeatVerdict{}, ve(p+".path", "is %d bytes, the cap is %d", len(f.Path), observationPathMax)
-		}
-		if len(f.Observation) > observationTextMax {
-			return SeatVerdict{}, ve(p+".observation", "is %d bytes, the cap is %d", len(f.Observation), observationTextMax)
-		}
+	if err := checkListCaps(v.Findings, v.Gates, v.Frames); err != nil {
+		return SeatVerdict{}, err
 	}
 	if v.Findings == nil {
 		v.Findings = []SeatFinding{}
@@ -170,6 +142,43 @@ func ParseSeatVerdict(raw []byte) (SeatVerdict, error) {
 		v.Frames = []FrameObservation{}
 	}
 	return v, nil
+}
+
+// checkListCaps applies the per-item caps of a verdict's findings, gate acks
+// and frame observations; ParseSeatVerdict and ParseAxisVerdict share it.
+func checkListCaps(findings []SeatFinding, gates []GateAck, frames []FrameObservation) error {
+	for i, f := range findings {
+		p := fmt.Sprintf("findings[%d]", i)
+		if len(f.File) > findingFileMax {
+			return ve(p+".file", "is %d bytes, the cap is %d", len(f.File), findingFileMax)
+		}
+		if len(f.Why) > findingWhyMax {
+			return ve(p+".why", "is %d bytes, the cap is %d", len(f.Why), findingWhyMax)
+		}
+		if len(f.Check) > findingCheckMax {
+			return ve(p+".check", "is %d bytes, the cap is %d", len(f.Check), findingCheckMax)
+		}
+		switch f.Severity {
+		case "", "P0", "P1", "P2", "P3":
+		default:
+			return ve(p+".severity", "must be P0, P1, P2 or P3")
+		}
+	}
+	for i, g := range gates {
+		if len(g.Note) > gateAckNoteMax {
+			return ve(fmt.Sprintf("gates[%d].note", i), "is %d bytes, the cap is %d", len(g.Note), gateAckNoteMax)
+		}
+	}
+	for i, f := range frames {
+		p := fmt.Sprintf("frames[%d]", i)
+		if len(f.Path) > observationPathMax {
+			return ve(p+".path", "is %d bytes, the cap is %d", len(f.Path), observationPathMax)
+		}
+		if len(f.Observation) > observationTextMax {
+			return ve(p+".observation", "is %d bytes, the cap is %d", len(f.Observation), observationTextMax)
+		}
+	}
+	return nil
 }
 
 // decodeMsg renders a decoder error as a verdict message; the unknown-field
@@ -261,19 +270,28 @@ func checkChanges(v SeatVerdict) error {
 		return ve("findings", "CHANGES needs at least one finding")
 	}
 	for i, f := range v.Findings {
-		p := fmt.Sprintf("findings[%d]", i)
-		if strings.TrimSpace(f.File) == "" {
-			return ve(p+".file", "is required")
+		if err := checkFindingComplete(i, f); err != nil {
+			return err
 		}
-		if f.Line <= 0 {
-			return ve(p+".line", "must be greater than 0")
-		}
-		if strings.TrimSpace(f.Why) == "" {
-			return ve(p+".why", "is required")
-		}
-		if strings.TrimSpace(f.Check) == "" {
-			return ve(p+".check", "the check that shows it fixed is required")
-		}
+	}
+	return nil
+}
+
+// checkFindingComplete requires finding i to carry file, line, why and the
+// check that shows it fixed.
+func checkFindingComplete(i int, f SeatFinding) error {
+	p := fmt.Sprintf("findings[%d]", i)
+	if strings.TrimSpace(f.File) == "" {
+		return ve(p+".file", "is required")
+	}
+	if f.Line <= 0 {
+		return ve(p+".line", "must be greater than 0")
+	}
+	if strings.TrimSpace(f.Why) == "" {
+		return ve(p+".why", "is required")
+	}
+	if strings.TrimSpace(f.Check) == "" {
+		return ve(p+".check", "the check that shows it fixed is required")
 	}
 	return nil
 }

@@ -88,6 +88,12 @@ func (s *Service) SubmitVerdict(reviewID int64, token, runID string, raw []byte)
 	if token == "" || subtle.ConstantTimeCompare([]byte(HashToken(token)), []byte(row.TokenHash)) != 1 {
 		return View{}, ErrBadToken
 	}
+	// A two-axis review is decided only through its passes (SubmitPassVerdict).
+	if passes, err := s.DB.ListStewardReviewPasses(reviewID); err != nil {
+		return View{}, err
+	} else if len(passes) > 0 {
+		return View{}, fmt.Errorf("review %d runs two passes: submit through a pass: %w", reviewID, ErrWrongRun)
+	}
 	if !s.isSeatRun(row, runID) {
 		return View{}, ErrWrongRun
 	}
@@ -201,6 +207,41 @@ type FrameView struct {
 	CapturedSHA string `json:"capturedSha"`
 }
 
+// ViewFinding is a finding as the card reads it: the seat's finding plus, for
+// a two-axis review, the axis that produced it and the rule it cites. Both are
+// omitted for a single-pass finding.
+type ViewFinding struct {
+	SeatFinding
+	Axis string `json:"axis,omitempty"`
+	Rule string `json:"rule,omitempty"`
+}
+
+// ReviewAxis is one pass of a two-axis review as the card reads it.
+type ReviewAxis struct {
+	Axis          string            `json:"axis"`
+	Status        string            `json:"status"`
+	SeatVerdict   string            `json:"seatVerdict,omitempty"`
+	Summary       string            `json:"summary,omitempty"`
+	BlockedReason string            `json:"blockedReason,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	CostUSD       float64           `json:"costUsd"`
+	RunID         string            `json:"runId,omitempty"`
+	StewardTaskID int64             `json:"stewardTaskId,omitempty"`
+	Criteria      []CriterionResult `json:"criteria,omitempty"`
+}
+
+// reviewAxis maps one pass row; the token hash never leaves the store.
+func reviewAxis(p store.StewardReviewPass) (ReviewAxis, error) {
+	ax := ReviewAxis{Axis: p.Axis, Status: p.Status, SeatVerdict: p.SeatVerdict, Summary: p.Summary, BlockedReason: p.BlockedReason,
+		Model: p.Model, CostUSD: p.CostUSD, RunID: p.RunID, StewardTaskID: p.StewardTaskID}
+	if p.CriteriaJSON != "" {
+		if err := json.Unmarshal([]byte(p.CriteriaJSON), &ax.Criteria); err != nil {
+			return ReviewAxis{}, fmt.Errorf("pass %s: criteria: %w", p.Axis, err)
+		}
+	}
+	return ax, nil
+}
+
 // View is a review as read: its verdicts, the computed staleness and the
 // merge-ready label. MergeReady is derived on every read, never stored. The
 // view never carries the token hash or the digest; the frames carry only
@@ -218,19 +259,22 @@ type View struct {
 	SeatVerdict    string        `json:"seatVerdict,omitempty"`
 	Summary        string        `json:"summary,omitempty"`
 	BlockedReason  string        `json:"blockedReason,omitempty"`
-	Findings       []SeatFinding `json:"findings"`
+	Findings       []ViewFinding `json:"findings"`
 	Gates          []Gate        `json:"gates"`
-	PRNumber       int           `json:"prNumber,omitempty"`
-	Frames         []FrameView   `json:"frames"`
-	Stale          string        `json:"stale,omitempty"`
-	MergeReady     bool          `json:"mergeReady"`
-	NotReadyReason string        `json:"notReadyReason,omitempty"`
-	ScopeViolation bool          `json:"scopeViolation,omitempty"`
-	CostUSD        float64       `json:"costUsd"`
-	RunID          string        `json:"runId,omitempty"`
-	StewardTaskID  int64         `json:"stewardTaskId"`
-	CreatedAt      time.Time     `json:"createdAt"`
-	FinishedAt     *time.Time    `json:"finishedAt,omitempty"`
+	// Axes is the two-axis review's per-pass state (ADR-0054); absent for a
+	// single-pass review, so an old client sees the review it always did.
+	Axes           []ReviewAxis `json:"axes,omitempty"`
+	PRNumber       int          `json:"prNumber,omitempty"`
+	Frames         []FrameView  `json:"frames"`
+	Stale          string       `json:"stale,omitempty"`
+	MergeReady     bool         `json:"mergeReady"`
+	NotReadyReason string       `json:"notReadyReason,omitempty"`
+	ScopeViolation bool         `json:"scopeViolation,omitempty"`
+	CostUSD        float64      `json:"costUsd"`
+	RunID          string       `json:"runId,omitempty"`
+	StewardTaskID  int64        `json:"stewardTaskId"`
+	CreatedAt      time.Time    `json:"createdAt"`
+	FinishedAt     *time.Time   `json:"finishedAt,omitempty"`
 }
 
 // View reads review id with its staleness and merge-ready label.
@@ -281,11 +325,22 @@ func (s *Service) view(row store.StewardReview, latestReviewID int64) (View, err
 		ValidationID: row.ValidationID, CIState: row.CIState, Status: row.Status, Verdict: row.Verdict, SeatVerdict: row.SeatVerdict,
 		Summary: row.Summary, BlockedReason: row.BlockedReason, ScopeViolation: row.ScopeViolation, CostUSD: row.CostUSD,
 		RunID: row.RunID, StewardTaskID: row.StewardTaskID, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt,
-		Findings: []SeatFinding{}, Gates: []Gate{}, Frames: []FrameView{}}
+		Findings: []ViewFinding{}, Gates: []Gate{}, Frames: []FrameView{}}
 	if row.FindingsJSON != "" {
 		if err := json.Unmarshal([]byte(row.FindingsJSON), &v.Findings); err != nil {
 			return View{}, fmt.Errorf("steward review %d: findings: %w", row.ID, err)
 		}
+	}
+	passes, err := s.DB.ListStewardReviewPasses(row.ID)
+	if err != nil {
+		return View{}, err
+	}
+	for _, p := range passes {
+		ax, err := reviewAxis(p)
+		if err != nil {
+			return View{}, fmt.Errorf("steward review %d: %w", row.ID, err)
+		}
+		v.Axes = append(v.Axes, ax)
 	}
 	var digest Digest
 	haveDigest := false
