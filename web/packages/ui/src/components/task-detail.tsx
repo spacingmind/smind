@@ -13,6 +13,7 @@ import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
 import { ForkChatDialog } from "@/components/fork-chat-dialog";
 import { ForkContext } from "@/components/fork-context";
+import { RetryChatDialog } from "@/components/retry-chat-dialog";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
@@ -41,6 +42,7 @@ import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useForkChat } from "@/hooks/use-fork-chat";
 import { useForkSource } from "@/hooks/use-fork-source";
+import { retryAnchor, useRetryChat } from "@/hooks/use-retry-chat";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { canRetryWithHigherEffort, useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
@@ -356,6 +358,14 @@ export function TaskDetailPane({
   const { fork: forkChat } = useForkChat(client);
   const forkRun = useCallback((run: RunEntry) => setForkTarget({ chatId: chat.ID, runId: run.id }), [chat.ID]);
 
+  // "Edit & retry": the run whose prompt the dialog edits (null = closed).
+  // Same shape as the fork wiring above -- a stable callback so RunTimeline's
+  // memo keeps bailing out; only this pane's state opens the dialog.
+  const [retryRunId, setRetryRunId] = useState<string | null>(null);
+  const { retry: retryChat } = useRetryChat(client);
+  const retryPrompt = useCallback((run: RunEntry) => setRetryRunId(run.id), []);
+  const retryTarget = retryRunId ? runs?.find((r) => r.id === retryRunId) ?? null : null;
+
   // ADR-0041 F2: the rate-limited footer's way out and the failed-run <-> successor links.
   const failoverIndex = useRunFailoverIndex(
     client,
@@ -567,6 +577,7 @@ export function TaskDetailPane({
                     onRetry={canRetryWithHigherEffort(run, providers) ? retryWithHigherEffort : undefined}
                     onRerun={rerun}
                     onFork={forkRun}
+                    onRetryPrompt={retryPrompt}
                     onEditPrompt={editPrompt}
                     onContinue={continueRun}
                     failover={failover}
@@ -701,6 +712,35 @@ export function TaskDetailPane({
         onFork={(mode) => (forkTarget ? forkChat(forkTarget.chatId, forkTarget.runId, mode) : Promise.reject(new Error("no turn selected")))}
         onForked={onOpenForkedChat}
       />
+
+      {/*
+       * The "Edit & retry" editor, opened by a prompt action. The retry
+       * runs in a child chat (useRetryChat forks at the turn before the
+       * replaced one); its tab opens via onOpenForkedChat, exactly like a
+       * fork's.
+       */}
+      {retryTarget && runs && (
+        <RetryChatDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setRetryRunId(null);
+          }}
+          chatTitle={chat.Title}
+          turn={runs.findIndex((r) => r.id === retryTarget.id) + 1}
+          initialPrompt={retryTarget.prompt}
+          hasAnchor={retryAnchor(runs, retryTarget) !== null}
+          onRetry={(prompt, mode) => {
+            // The composer's permission applies when it is on the run's provider, else the run's own (see resubmit).
+            const composer = runConfigRef.current;
+            const permission =
+              composer && composer.provider === retryTarget.provider
+                ? { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }
+                : { permissionMode: retryTarget.permissionMode, autoAccept: retryTarget.autoAccept };
+            return retryChat({ taskId: task.ID, chat, runs, run: retryTarget, prompt, mode, permission });
+          }}
+          onRetried={(child) => onOpenForkedChat?.(child)}
+        />
+      )}
     </div>
   );
 }

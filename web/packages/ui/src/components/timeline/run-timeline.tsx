@@ -48,6 +48,7 @@ export const RunTimeline = memo(function RunTimeline({
   onRetry,
   onRerun,
   onFork,
+  onRetryPrompt,
   onEditPrompt,
   onContinue,
   failover,
@@ -65,6 +66,8 @@ export const RunTimeline = memo(function RunTimeline({
   onRerun?: (run: RunEntry) => void;
   /** chat.fork this turn into a new chat; offered on a finished turn only, omitted hides the action. */
   onFork?: (run: RunEntry) => void;
+  /** "Edit & retry": runs an edited copy of this prompt in a new chat; omitted hides the action. */
+  onRetryPrompt?: (run: RunEntry) => void;
   /** Loads this run's prompt into the composer; omitted hides the action. */
   onEditPrompt?: (run: RunEntry) => void;
   /** Continue (max_tokens / turn-limit endings): submits "Continue" on the run's own config; omitted hides the button. */
@@ -108,6 +111,14 @@ export const RunTimeline = memo(function RunTimeline({
                 icon={<Icons.edit aria-hidden />}
                 data-testid="run-prompt-edit"
                 onClick={() => onEditPrompt(run)}
+              />
+            )}
+            {onRetryPrompt && run.origin !== "child_event" && run.status !== "running" && (
+              <MessageAction
+                label="Edit & retry"
+                icon={<Icons.retry aria-hidden />}
+                data-testid="run-prompt-retry"
+                onClick={() => onRetryPrompt(run)}
               />
             )}
           </MessageActions>
