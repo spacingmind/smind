@@ -196,8 +196,13 @@ function QuestionField({
   onChange: (next: Draft) => void;
 }) {
   const fieldId = useId();
+  const otherId = useId();
+  const [expanded, setExpanded] = useState(false);
   const options = question.options ?? [];
   const isChoice = question.kind === "single" || question.kind === "multi";
+  // Long asks collapse visually (the card stays scannable); the clamp is CSS
+  // only, so the legend still carries the fieldset's full accessible name.
+  const isLong = question.text.length > 480 || question.text.split("\n").length > 8;
 
   function toggleOption(optionId: string) {
     if (question.kind === "single") {
@@ -215,7 +220,27 @@ function QuestionField({
 
   return (
     <fieldset data-testid="question-field" className="flex flex-col gap-1.5">
-      <legend className="whitespace-pre-wrap break-words">{question.text}</legend>
+      {isLong ? (
+        <>
+          <legend>
+            <span className={`${expanded ? "block " : "line-clamp-8 "}whitespace-pre-wrap break-words`}>{question.text}</span>
+          </legend>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            data-testid="question-text-toggle"
+            aria-expanded={expanded}
+            disabled={disabled}
+            onClick={() => setExpanded((value) => !value)}
+            className="self-start"
+          >
+            {expanded ? "Show less" : "Show all"}
+          </Button>
+        </>
+      ) : (
+        <legend className="whitespace-pre-wrap break-words">{question.text}</legend>
+      )}
       {question.header && (
         <span className="inline-flex w-fit rounded-full border px-2 py-0.5 text-ui-xs text-foreground-muted">{question.header}</span>
       )}
@@ -257,23 +282,29 @@ function QuestionField({
         />
       ) : (
         question.allowOther && (
-          <Input
-            data-testid={`question-other-${question.id}`}
-            aria-label={`Other answer for: ${question.text.slice(0, 60)}`}
-            placeholder="Other…"
-            value={draft.otherText}
-            maxLength={MAX_ANSWER_CHARS}
-            disabled={disabled}
-            onChange={(e) =>
-              // Typing an Other answer deselects a single question's radio
-              // (multi keeps its checkboxes -- Other is just one more choice).
-              onChange({
-                ...draft,
-                otherText: e.target.value,
-                optionIds: question.kind === "single" && e.target.value !== "" ? [] : draft.optionIds,
-              })
-            }
-          />
+          <div className="flex flex-col gap-1">
+            {/* A visible label: once the field holds a value, "Other…"-alone no longer names it. */}
+            <label htmlFor={otherId} className="text-ui-sm text-foreground-muted">
+              Other:
+            </label>
+            <Input
+              id={otherId}
+              data-testid={`question-other-${question.id}`}
+              placeholder="Type another answer…"
+              value={draft.otherText}
+              maxLength={MAX_ANSWER_CHARS}
+              disabled={disabled}
+              onChange={(e) =>
+                // Typing an Other answer deselects a single question's radio
+                // (multi keeps its checkboxes -- Other is just one more choice).
+                onChange({
+                  ...draft,
+                  otherText: e.target.value,
+                  optionIds: question.kind === "single" && e.target.value !== "" ? [] : draft.optionIds,
+                })
+              }
+            />
+          </div>
         )
       )}
     </fieldset>
