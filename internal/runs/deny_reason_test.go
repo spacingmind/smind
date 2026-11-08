@@ -136,3 +136,16 @@ func TestSanitizeDenyReason_RefusesNUL(t *testing.T) {
 		t.Fatalf("NUL = %v; want ErrDenyReason", err)
 	}
 }
+
+func TestDenyReason_BlankReasonOnADenyIsAPlainDeny(t *testing.T) {
+	t.Parallel()
+	reg, r, runID, _ := policyRun(t, taskrunner.PermissionSettings{}, goTestAllowPolicy, true)
+	out, reqID := decideWithReasonAsync(t, runPermissionDecider{reg: reg, r: r}, true)
+	delivered, err := reg.RespondPermissionWithReason(runID, reqID, "deny-1", " \x07 ")
+	if err != nil || delivered {
+		t.Fatalf("blank reason = %v, %v; want a plain deny, not delivered", delivered, err)
+	}
+	if got := <-out; got.optionID != "deny-1" || got.reason != "" {
+		t.Fatalf("decide = %+v", got)
+	}
+}

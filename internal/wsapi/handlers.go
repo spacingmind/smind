@@ -2131,7 +2131,8 @@ func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.respondPermission: invalid params: %w", err)
 		}
-		if p.Reason == "" {
+		// A blank reason is no reason: the old path and the old {} result.
+		if strings.TrimSpace(p.Reason) == "" {
 			if err := reg.RespondPermission(p.RunID, p.RequestID, p.OptionID); err != nil {
 				return nil, fmt.Errorf("run.respondPermission: %w", err)
 			}

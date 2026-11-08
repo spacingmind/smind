@@ -628,9 +628,9 @@ type run struct {
 	// (persistbuf.go). Own lock: record's persistence runs outside mu.
 	pbuf persistBuf
 
-	// pendingPermissions holds one buffered(1) channel per permission
-	// request currently awaiting an answer, keyed by request id -- see
-	// runPermissionDecider and RespondPermission.
+	// pendingPermissions holds, per permission request currently awaiting
+	// an answer (one buffered(1) answer channel plus its options), keyed by request
+	// id -- see runPermissionDecider and RespondPermission.
 	pendingPermissions map[string]*pendingPermission
 
 	// usage is the latest usage event this run recorded (ADR-0020); nil if
@@ -1524,8 +1524,9 @@ var ErrDenyReason = errors.New("deny reason refused")
 
 // SanitizeDenyReason trims reason and checks it is plain text of at most
 // MaxDenyReasonRunes runes. Control characters other than a newline are
-// replaced by a space; invalid UTF-8 and NUL are refused. It never widens
-// anything: the result is only ever shown to the model as the deny message.
+// replaced by a space; invalid UTF-8 and NUL are refused. The result is only
+// ever shown to the model as the deny message; which option is chosen never
+// depends on it (RespondPermissionWithReason checks the option kind).
 func SanitizeDenyReason(reason string) (string, error) {
 	if !utf8.ValidString(reason) || strings.ContainsRune(reason, 0) {
 		return "", fmt.Errorf("%w: not valid text", ErrDenyReason)
@@ -1545,7 +1546,8 @@ func SanitizeDenyReason(reason string) (string, error) {
 // RespondPermissionWithReason is RespondPermission plus the text a human typed
 // with a Deny. A non-empty reason is only accepted with a reject option of
 // the pending request, and is passed on to the model only when the provider
-// can carry it (delivered); otherwise the Deny is sent as usual and delivered
+// can carry it and the answer was handed to the waiting decider (delivered: a
+// timeout firing at the same instant can still win, as for the option itself); otherwise the Deny is sent as usual and delivered
 // is false. An empty reason behaves exactly like RespondPermission.
 func (reg *Registry) RespondPermissionWithReason(runID, requestID, optionID, reason string) (delivered bool, err error) {
 	if reason != "" {
