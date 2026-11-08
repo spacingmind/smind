@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Icons } from "@/lib/icons";
 import { providerLabel, providerRunner } from "@/lib/provider-catalog";
@@ -14,6 +14,7 @@ import { FindBar } from "@/components/find/find-bar";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
+import { QuestionCard } from "@/components/permission/question-card";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useClearProviderCooldown, activeCooldownUntil } from "@/hooks/use-clear-provider-cooldown";
 import { useProfileList } from "@/hooks/use-profiles";
@@ -116,7 +117,7 @@ export function TaskDetailPane({
   // pills, subtree rollups. Never blocks the pane on load -- it renders
   // nothing until the lineage arrives.
   const lineage = useTaskLineage(client, task, events);
-  const { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort, loadFullHistory } = useRunTimeline(
+  const { runs, error, submitPrompt, stopRun, respondPermission, answerQuestion, setPermissionMode, retryWithHigherEffort, loadFullHistory } = useRunTimeline(
     client,
     task.ID,
     chat.ID,
@@ -170,13 +171,13 @@ export function TaskDetailPane({
   const git = useTaskGit(task.ID);
   useTaskGitFocus(task.ID);
 
-  // Every run currently holding an unanswered permission request -- in
-  // practice at most one (a task has one active run at a time), but this
-  // stays a list so nothing here assumes that. Rendered in a dock pinned
-  // between the scrolling log and the prompt form (see below) rather than
-  // inline per-run, so it can't be scrolled out of view while log chunks
-  // keep streaming in above/below it.
-  const pendingRuns = runs?.filter((run) => run.pendingPermission) ?? [];
+  // Every run currently holding an unanswered permission request or agent
+  // question (ADR-0055) -- in practice at most one (a task has one active
+  // run at a time), but this stays a list so nothing here assumes that.
+  // Rendered in a dock pinned between the scrolling log and the prompt
+  // form (see below) rather than inline per-run, so it can't be scrolled
+  // out of view while log chunks keep streaming in above/below it.
+  const pendingRuns = runs?.filter((run) => run.pendingPermission || run.pendingQuestion) ?? [];
 
   // The chat's most recent run only -- the header pill shows that run's
   // MCP servers, never an older run's (no fallback when it reported none).
@@ -576,13 +577,12 @@ export function TaskDetailPane({
       {pendingRuns.length > 0 && (
         <div data-testid="pending-permission-dock" className="mx-auto w-full max-w-3xl shrink-0 space-y-2 px-4 py-2">
           {pendingRuns.map((run) => (
-            <PermissionCard
-              key={run.id}
-              runId={run.id}
-              pending={run.pendingPermission!}
-              onRespond={respondPermission}
-              onChat={focusComposer}
-            />
+            <Fragment key={run.id}>
+              {run.pendingPermission && (
+                <PermissionCard runId={run.id} pending={run.pendingPermission} onRespond={respondPermission} onChat={focusComposer} />
+              )}
+              {run.pendingQuestion && <QuestionCard runId={run.id} pending={run.pendingQuestion} onAnswer={answerQuestion} />}
+            </Fragment>
           ))}
         </div>
       )}
@@ -595,7 +595,7 @@ export function TaskDetailPane({
         boundProvider={chat.Provider}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
-        waitingOnUser={!!runningRun?.pendingPermission}
+        waitingOnUser={!!(runningRun?.pendingPermission || runningRun?.pendingQuestion)}
         git={git}
         onOpenDiff={onOpenDiffTab}
         queuedItems={queue.items}

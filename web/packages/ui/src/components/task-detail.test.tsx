@@ -603,6 +603,29 @@ describe("TaskDetailPane", () => {
     expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
   });
 
+  it("docks the question card for a pending agent question and clears it on question_resolved (ADR-0055)", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    client.emit("run.attach", 0, "question_request", {
+      requestId: "q-1",
+      request: { source: "claude", questions: [{ id: "a", text: "Which target?", kind: "text" }] },
+    });
+    await flush();
+
+    const dock = screen.getByTestId("pending-permission-dock");
+    expect(within(dock).getByTestId("question-card")).toHaveTextContent("Which target?");
+
+    client.emit("run.attach", 0, "question_resolved", { requestId: "q-1", reason: "timeout" });
+    await flush();
+
+    expect(screen.queryByTestId("question-card")).not.toBeInTheDocument();
+    expect(screen.getByTestId("timeline-question")).toHaveTextContent("no answer (timed out)");
+  });
+
   it("surfaces a run.respondPermission failure without crashing, keeping the option buttons usable", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
