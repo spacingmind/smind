@@ -56,6 +56,9 @@ type inboxHost struct {
 	poke    chan struct{}
 	done    chan struct{}
 	once    sync.Once
+	// sub wakes the loop the moment a permission or question topic fires
+	// instead of waiting for the next fingerprint poll.
+	sub *subscriber
 
 	mu   sync.Mutex
 	last string
@@ -66,6 +69,7 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 	h.svc = &inbox.Service{
 		DB:          db,
 		Permissions: reg.PendingPermissions,
+		Questions:   reg.PendingQuestions,
 		Validations: func() ([]validation.View, error) {
 			rows, err := db.ListLatestValidations()
 			if err != nil {
@@ -117,6 +121,12 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 			return ""
 		},
 	}
+	// A permission or question going pending or resolved is exactly what
+	// the fingerprint watches for, so those topics wake the host at once;
+	// the fingerprint still gates what is published.
+	h.sub = newSubscriber()
+	h.sub.subscribe([]string{TopicPermissionPending, TopicPermissionResolved, TopicQuestionPending, TopicQuestionResolved})
+	bus.register(h.sub)
 	go h.loop()
 	return h
 }
@@ -135,7 +145,11 @@ func (h *inboxHost) stop() {
 	if h == nil {
 		return
 	}
-	h.once.Do(func() { close(h.done) })
+	h.once.Do(func() {
+		close(h.done)
+		h.bus.unregister(h.sub)
+		h.sub.close()
+	})
 }
 
 // Poke asks the host to re-check soon (a setter ran).
@@ -157,6 +171,14 @@ func (h *inboxHost) loop() {
 			if h.bus.HasSubscribers(TopicInboxChanged) {
 				h.check()
 			}
+		case <-h.sub.signal:
+			// Only the wake matters; no event is rendered, so just drain.
+			for {
+				if _, _, ok := h.sub.next(); !ok {
+					break
+				}
+			}
+			h.Poke()
 		case <-h.poke:
 			select {
 			case <-h.done:

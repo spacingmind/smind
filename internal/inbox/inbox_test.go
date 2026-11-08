@@ -3,6 +3,7 @@ package inbox
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,15 +18,16 @@ import (
 )
 
 type fx struct {
-	svc     *Service
-	perms   []runs.PendingPermission
-	views   []validation.View
-	reviews []Review
-	stall   map[int64]time.Time
-	pairs   []HostPair
-	issues  []HostLinkIssue
-	failed  []FailedRun
-	now     time.Time
+	svc       *Service
+	perms     []runs.PendingPermission
+	questions []runs.PendingQuestion
+	views     []validation.View
+	reviews   []Review
+	stall     map[int64]time.Time
+	pairs     []HostPair
+	issues    []HostLinkIssue
+	failed    []FailedRun
+	now       time.Time
 }
 
 func newFx(t *testing.T) *fx {
@@ -38,6 +40,7 @@ func newFx(t *testing.T) *fx {
 	f := &fx{now: time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC), stall: map[int64]time.Time{}}
 	f.svc = &Service{DB: db,
 		Permissions: func() []runs.PendingPermission { return f.perms },
+		Questions:   func() []runs.PendingQuestion { return f.questions },
 		Validations: func() ([]validation.View, error) { return f.views, nil },
 		Reviews:     func() ([]Review, error) { return f.reviews, nil },
 		Stalls:      func() map[int64]time.Time { return f.stall },
@@ -59,6 +62,15 @@ func verdict(id, task int64, status string, ready, stale bool) validation.View {
 
 func perm(req string, d *taskrunner.PermissionDetail) runs.PendingPermission {
 	return runs.PendingPermission{RunID: "r1", TaskID: 1, ChatID: 1, RequestID: req, Summary: "Run `curl http://secret`", Detail: d}
+}
+
+func question(req string, texts ...string) runs.PendingQuestion {
+	qs := make([]taskrunner.Question, 0, len(texts))
+	for i, text := range texts {
+		qs = append(qs, taskrunner.Question{ID: fmt.Sprintf("q%d", i+1), Text: text, Kind: taskrunner.QuestionSingle})
+	}
+	return runs.PendingQuestion{RunID: "r1", TaskID: 1, ChatID: 1, RequestID: req,
+		Request: taskrunner.QuestionRequest{Source: "claude", Questions: qs}}
 }
 
 func review(id, task int64, verdict string) Review {
@@ -407,6 +419,102 @@ func TestInboxCount_PermissionAlwaysCounted(t *testing.T) {
 	}
 	if c.Total != 2 || c.Unseen != 1 || c.ByKind[KindPermission] != 1 || c.ByKind[KindVerdict] != 1 {
 		t.Fatalf("a seen permission still counts as unseen, a seen verdict does not: %+v", c)
+	}
+}
+
+// TestInbox_QuestionItemDerivedFromPending: a pending question derives one
+// high-attention item keyed by its request id, and it leaves the list the
+// moment the question is no longer pending -- exactly like a permission.
+func TestInbox_QuestionItemDerivedFromPending(t *testing.T) {
+	f := newFx(t)
+	f.questions = []runs.PendingQuestion{question("qr1", "Which provider should this run use?")}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %s", keysOf(items))
+	}
+	it := items[0]
+	if it.Key != "ques:qr1" || it.Kind != KindQuestion || it.Attention != "high" || it.State != StateNew {
+		t.Fatalf("item = %+v", it)
+	}
+	if it.TaskID != 1 || it.Title != "task B" {
+		t.Fatalf("item task/title = %d/%q", it.TaskID, it.Title)
+	}
+	if it.Links.QuestionRequestID != "qr1" || it.Links.RunID != "r1" || it.Links.PermissionRequestID != "" {
+		t.Fatalf("links = %+v", it.Links)
+	}
+	if !it.CreatedAt.Equal(f.now) {
+		t.Fatalf("createdAt = %v, want the firstSeen time", it.CreatedAt)
+	}
+	f.questions = nil // answered: no longer pending
+	items, _ = f.svc.List(Filter{})
+	if len(items) != 0 {
+		t.Fatalf("a resolved question must leave the list: %s", keysOf(items))
+	}
+}
+
+// TestInbox_QuestionCannotBeSnoozedOrResolved mirrors the permission rule:
+// a question is only ever answered, so both setters refuse it and store
+// nothing.
+func TestInbox_QuestionCannotBeSnoozedOrResolved(t *testing.T) {
+	f := newFx(t)
+	f.questions = []runs.PendingQuestion{question("qr1", "Proceed?")}
+	if err := f.svc.Snooze([]string{"ques:qr1"}, f.now.Add(time.Hour), "local"); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("snoozing a question must be refused: %v", err)
+	}
+	if err := f.svc.Resolve([]string{"ques:qr1"}, "local"); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("resolving a question must be refused: %v", err)
+	}
+	if st, _ := f.svc.DB.ListInboxStates(); len(st) != 0 {
+		t.Fatalf("a refused action stored something: %v", st)
+	}
+	if items, _ := f.svc.List(Filter{States: []string{StateSnoozed, StateResolved}}); len(items) != 0 {
+		t.Fatalf("a question must never be hidden: %s", keysOf(items))
+	}
+}
+
+// TestInbox_QuestionSummaryIsOneLineAndCapped: the summary is the first
+// question's text with line breaks folded to spaces, never longer than
+// MaxSummary runes.
+func TestInbox_QuestionSummaryIsOneLineAndCapped(t *testing.T) {
+	f := newFx(t)
+	f.questions = []runs.PendingQuestion{question("qr1", "line one\nline two\n\nline three "+strings.Repeat("x", 300), "second question never shown")}
+	items, _ := f.svc.List(Filter{})
+	if len(items) != 1 {
+		t.Fatalf("items = %s", keysOf(items))
+	}
+	s := items[0].Summary
+	if strings.ContainsAny(s, "\n\r") {
+		t.Fatalf("summary must be one line: %q", s)
+	}
+	if !strings.HasPrefix(s, "line one line two") || strings.Contains(s, "second question") {
+		t.Fatalf("summary = %q, want the first question flattened", s)
+	}
+	if len([]rune(s)) > MaxSummary {
+		t.Fatalf("summary = %d runes, at most %d", len([]rune(s)), MaxSummary)
+	}
+	if got := QuestionSummary(taskrunner.QuestionRequest{}); got != "An agent has a question" {
+		t.Fatalf("empty request summary = %q", got)
+	}
+}
+
+// TestInbox_QuestionCountedAsUnseen mirrors the permission rule: a seen
+// question still counts as unseen -- it blocks a run until answered.
+func TestInbox_QuestionCountedAsUnseen(t *testing.T) {
+	f := newFx(t)
+	f.questions = []runs.PendingQuestion{question("qr1", "Proceed?")}
+	f.views = []validation.View{verdict(1, 1, "fail", false, false)}
+	if err := f.svc.MarkSeen([]string{"ques:qr1", "verdict:1"}, "local"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := f.svc.Count()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Total != 2 || c.Unseen != 1 || c.ByKind[KindQuestion] != 1 {
+		t.Fatalf("a seen question still counts as unseen, a seen verdict does not: %+v", c)
 	}
 }
 
