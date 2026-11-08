@@ -344,3 +344,46 @@ func TestClaudeAnswersInput_UsesTheOriginalLabel(t *testing.T) {
 		t.Fatalf("answer = %q, want the original label", v)
 	}
 }
+
+// A secret ask that lives ONLY in an option description is refused, both by
+// AsksForSecret on a built request (the check the decider runs) and by the
+// request builder's own scan of the agent's full text.
+func TestAsksForSecret_OnlyInAnOptionDescription(t *testing.T) {
+	descs := map[string]string{
+		"plain":      "needs your password",
+		"zero-width": "needs your pass​word",
+		"homoglyph":  "needs your раsswоrd",
+		"full-width": "needs your ｐａｓｓｗｏｒｄ",
+		"bidi":       "needs your api ‮key",
+		"upper":      "NEEDS YOUR PASSWORD",
+	}
+	for name, desc := range descs {
+		// Built by hand (no builder flag): only AsksForSecret's description scan can catch it.
+		req := QuestionRequest{Questions: []Question{{ID: "q0", Text: "Which one?", Kind: QuestionSingle,
+			Options: []QuestionOption{{ID: "o0", Label: "A", Description: desc}}}}}
+		if !AsksForSecret(req) {
+			t.Errorf("%s: AsksForSecret missed a secret ask in the description", name)
+		}
+	}
+	// Through the builder, where the description is capped before AsksForSecret sees it:
+	// a secret word past the description cap is caught by the builder's scan of the raw text.
+	past := strings.Repeat("x ", 150) + "password"
+	req, err := ParseClaudeAskUserQuestion(map[string]any{"questions": []any{
+		map[string]any{"question": "Which one?", "options": []any{map[string]any{"label": "A", "description": past}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(req.Questions[0].Options[0].Description), "password") {
+		t.Fatal("test setup: the secret word was not cut by the description cap")
+	}
+	if !AsksForSecret(req) {
+		t.Error("a secret word in an option description past the cap was missed")
+	}
+	// A plain description is not refused.
+	plain := QuestionRequest{Questions: []Question{{ID: "q0", Text: "Which one?", Kind: QuestionSingle,
+		Options: []QuestionOption{{ID: "o0", Label: "A", Description: "The managed one"}}}}}
+	if AsksForSecret(plain) {
+		t.Error("false positive on a plain description")
+	}
+}
