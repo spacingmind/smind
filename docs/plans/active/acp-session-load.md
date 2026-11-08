@@ -50,6 +50,15 @@ contract of ADR-0053; nothing here changes how any other reader sees a run.
   `TestRunLogsDefaultReadIsUnchanged` (existing) plus `TestRunLogsACPLabel`.
 - AC10 confirm dialog and states in web and mobile, light and dark.
 
+## Limits per run and per chat
+
+- No file system for the loading client (`acp.WithoutFS`): no fs capability advertised, every fs request refused.
+  `TestLoadSessionReplayWithoutFSRefusesEveryFSRequest`, `TestReplayACPSessionAdvertisesNoFileSystem`.
+- One load per run (`TestACPLoadIsSingleFlightPerRun`); 60 s cooldown after a failed load (`TestACPLoadCooldownAfterAFailure`).
+- The chat is re-checked with the slot held (`TestRebuildACPBeforeStartCanRefuse`), a run starting on the chat cancels the load
+  (`TestACPLoadIsCancelledWhenARunStartsOnTheChat`), `CloseAll` cancels loads (`TestACPLoadIsCancelledAtShutdown`),
+  a hung agent is killed (`TestReplayACPSessionKillsAgentOnTimeout`).
+
 ## Safety
 
 The agent is started like any run's agent (scrubbed env, plugin confinement) with auto-deny permissions and no MCP servers, cwd

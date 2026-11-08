@@ -408,15 +408,23 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
 - **Who and when.** A human principal only, with `run.logs {detail:"full", confirmStart:true}`. `auto` never starts an agent;
   `full` without `confirmStart` serves the stored rows with `skeletonReason: "confirm_required"`. A skeleton run of an ACP provider
   carries `loadStartsAgent: true` (additive) so the clients confirm first ("Start the agent to load this history?").
+- **No file system.** The loading client advertises no fs capability and refuses every `fs/read_text_file` and `fs/write_text_file`
+  (`acp.WithoutFS`), whatever session id the agent names, so a load can neither read nor write inside the worktree.
+- **Per run and per chat.** One load per run at a time (a second request answers `rebuild_busy` without starting anything); a load
+  that failed or found no turn answers the same reason for 60 s without starting the agent again (`runs.ACPLoadCooldown`, memory only);
+  the chat is checked again with the slot held, just before the agent starts; a run that starts on the chat cancels the load and the
+  agent is killed (`native_session_in_use`); `Registry.CloseAll` cancels every load, waits for the agents and refuses new ones.
+- **`confirmStart`.** A protocol flag of the UI ("the human saw the question"), not a security token: the gate is the principal
+  (`!runScoped`, as for `full`).
 - **Launch.** The same launch as a run's agent (provider env, plugin confinement), cwd the task worktree (a missing worktree is
-  `native_session_missing`), closed when the call ends: on completion, on timeout (the answer is `rebuild_failed` at once and the slot stays held until the process is gone) and when the request context ends (a closed connection, a daemon shutdown; no test of the shutdown path itself).
+  `native_session_missing`), closed when the call ends: on completion, on timeout (the answer is `rebuild_failed` at once and the slot stays held until the process is gone) and when the request context ends (a closed connection), when a run starts on the chat and at shutdown (`CloseAll`).
 - **Bounds.** The shared 2-slot pool (held until the process is gone), 30 s (a process start plus the replay), the replay's bytes over
   64 MiB refuse the load. Not cached.
 - **Slice.** The run's turn is the one whose user message hashes to the run's prompt, whole or its last chunk; exactly one match, else
   `slice_not_found`. The tool call count is checked against the skeleton as for the file readers (`format_drift`).
 - **Learned refusal.** An agent that does not advertise `loadSession` is remembered until the daemon restarts (an agent upgraded to support it stays refused until then); its runs stop offering the button
   (`provider_cannot_rebuild`).
-- **Not done.** A cache for ACP loads, `thread/read` for codex, running a load on a fleet peer, a pre-check that spares the agent start for a prompt that repeats in the session (it answers `slice_not_found` after the load), a re-check of the chat while a load runs.
+- **Not done.** A cache for ACP loads, `thread/read` for codex, running a load on a fleet peer, a pre-check that spares the agent start for a prompt that repeats in the session (it answers `slice_not_found` after the load).
 
 ## Implemented: the retention amendment (PR C)
 

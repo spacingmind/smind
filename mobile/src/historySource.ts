@@ -80,7 +80,7 @@ export function historySourceInfo(result: RunLogsResult): HistorySourceInfo {
   };
 }
 
-/** The question asked before a load that starts the agent (same words as the web UI). */
+/** The question asked before a load that starts the agent (same words as the web UI). "30 seconds" is native.DefaultACPTimeout in the daemon (internal/history/native/rebuild.go): keep them in step. */
 export const LOAD_STARTS_AGENT_CONFIRM = {
   title: 'Start the agent to load this history?',
   message: 'This starts the agent to read this run’s history from its own session. It can take up to 30 seconds. No prompt is sent.',

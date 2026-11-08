@@ -49,6 +49,7 @@ export function HistorySourceNote({ run, onLoad }: { run: RunEntry; onLoad?: (ru
           )}
         </>
       )}
+      {/* "30 seconds" is native.DefaultACPTimeout (internal/history/native/rebuild.go); the mobile copy is LOAD_STARTS_AGENT_CONFIRM. Keep the three in step. */}
       {history.loadStartsAgent && onLoad && (
         <ConfirmDialog
           open={confirming}
