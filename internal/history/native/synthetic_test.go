@@ -3,6 +3,7 @@ package native
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -62,5 +63,48 @@ func TestClaudeSyntheticUserRecordsAreNotPrompts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestClaudeProjectDirMatchesTheCLI: the expected names are what the CLI's own
+// sanitiser produces (its JS source run on the same strings): a name over 200
+// is cut and carries a base36 hash of the unsanitised cwd; an astral character
+// is two dashes.
+func TestClaudeProjectDirMatchesTheCLI(t *testing.T) {
+	long := "/Users/dev/" + strings.Repeat("projects/", 30) + "app.v2/é😀src"
+	cases := []struct{ cwd, want string }{
+		{"/work/repo", "-work-repo"},
+		{"/Users/x/.smind/wt", "-Users-x--smind-wt"},
+		{"/Users/x/😀y", "-Users-x---y"},
+		{long, "-Users-dev" + strings.Repeat("-projects", 21) + "--2i0l7y"},
+		{"/" + strings.Repeat("a/", 150), strings.Repeat("-a", 100) + "-1o1hgj"},
+		// exactly 200 is not cut
+		{"/" + strings.Repeat("b", 199), "-" + strings.Repeat("b", 199)},
+	}
+	for _, c := range cases {
+		if got := claudeProjectDir(c.cwd); got != c.want {
+			t.Errorf("claudeProjectDir(%.40q...) = %q, want %q", c.cwd, got, c.want)
+		}
+	}
+	// 201 chars: cut to 200 and hashed
+	if got := claudeProjectDir("/" + strings.Repeat("b", 200)); len(got) <= 200 || !strings.HasPrefix(got, "-"+strings.Repeat("b", 199)+"-") {
+		t.Errorf("201-char cwd not cut and hashed: %q", got)
+	}
+}
+
+// TestClaudeLongCwdTranscriptFound: a session under a long cwd resolves at the
+// capped name, and a recorded path that disagrees with it is still refused.
+func TestClaudeLongCwdTranscriptFound(t *testing.T) {
+	cwd := "/work/" + strings.Repeat("deep/", 60) + "repo"
+	e := newClaude(t)
+	file := filepath.Join(e.root, "projects", claudeProjectDir(cwd), claudeSession+".jsonl")
+	copyFile(t, "testdata/claude/session.jsonl", file)
+	e.ref.Cwd, e.ref.TranscriptPath = cwd, file
+	if res := e.rebuild(); !res.OK() {
+		t.Fatalf("long-cwd transcript not found: %q (%s)", res.Reason, res.Detail)
+	}
+	e.ref.TranscriptPath = filepath.Join(e.root, "projects", strings.Repeat("-work-deep", 20), claudeSession+".jsonl")
+	if res := e.rebuild(); res.OK() {
+		t.Fatal("a recorded path that is not the derived one was accepted")
 	}
 }

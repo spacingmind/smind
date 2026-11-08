@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode/utf16"
 )
 
 // errUnsafe is returned for every path refusal; the reason shown is always
@@ -19,20 +21,36 @@ var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 // digits, dot, dash, underscore; no separator, no "..", no glob character.
 func validID(id string) bool { return idPattern.MatchString(id) && !strings.Contains(id, "..") }
 
+// maxProjectDirName is the CLI's cap on a sanitised working-directory name.
+const maxProjectDirName = 200
+
 // claudeProjectDir is the directory name Claude Code gives a working
-// directory under <config dir>/projects: every character that is not an ASCII
-// letter or digit becomes "-" (so "/.smind/" is "--smind-").
+// directory under <config dir>/projects: every UTF-16 code unit that is not an
+// ASCII letter or digit becomes "-" (so "/.smind/" is "--smind-", and a
+// character outside the BMP is two dashes). A name longer than 200 is cut to
+// 200 and gets "-" plus a base36 hash of the whole, unsanitised cwd: the
+// CLI's 32-bit "h = h*31 + unit" over the UTF-16 units, absolute value.
 func claudeProjectDir(cwd string) string {
-	var b strings.Builder
-	for _, c := range cwd {
+	units := utf16.Encode([]rune(cwd))
+	name := make([]byte, len(units))
+	var h int32
+	for i, u := range units {
 		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-			b.WriteRune(c)
+		case u >= 'a' && u <= 'z', u >= 'A' && u <= 'Z', u >= '0' && u <= '9':
+			name[i] = byte(u)
 		default:
-			b.WriteByte('-')
+			name[i] = '-'
 		}
+		h = h<<5 - h + int32(u)
 	}
-	return b.String()
+	if len(name) <= maxProjectDirName {
+		return string(name)
+	}
+	abs := int64(h)
+	if abs < 0 {
+		abs = -abs
+	}
+	return string(name[:maxProjectDirName]) + "-" + strconv.FormatInt(abs, 36)
 }
 
 // ClaudeProjectDir is claudeProjectDir for the runs package, which records the
