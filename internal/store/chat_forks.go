@@ -125,3 +125,21 @@ func (s *Store) ChatClaudeTotalsAt(chatID int64, at time.Time) (string, error) {
 	}
 	return js, nil
 }
+
+// ListUserRunsByChat returns chatID's user runs, oldest first.
+func (s *Store) ListUserRunsByChat(chatID int64) ([]Run, error) {
+	rows, err := s.db.Query(`SELECT `+runColumns+` FROM runs WHERE purpose = 'user' AND chat_id = ? ORDER BY started_at ASC, rowid ASC`, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("list runs of chat %d: %w", chatID, err)
+	}
+	defer rows.Close()
+	var out []Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan run: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

@@ -1233,6 +1233,15 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 			if pa, ok := r.promptAttachments(); ok {
 				ctx = taskrunner.WithPromptAttachments(ctx, pa)
 			}
+			// A seeded fork (ADR-0057) carries the earlier turns in its first prompt, once;
+			// the stored prompt stays the user's own text.
+			if r.chatID != 0 {
+				if seed, ok, serr := reg.st.ClaimChatForkSeed(r.chatID, time.Now()); serr != nil {
+					log.Printf("runs: run %s: claim fork seed: %v", r.id, serr)
+				} else if ok {
+					prompt = seed + prompt
+				}
+			}
 			err = runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
 		}
 	}
