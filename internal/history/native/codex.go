@@ -20,6 +20,14 @@ import (
 //	   "item":{"type":"UserMessage"|"AgentMessage","content":[{"type":"text"|"Text","text":".."}]}}}
 //	{"type":"event_msg","payload":{"type":"task_complete","turn_id":".."}}
 //
+// Legacy-mode rollouts (older threads, still on disk) carry no item_completed;
+// they write the same turn as
+//
+//	{"type":"event_msg","payload":{"type":"user_message"|"agent_message","message":".."}}
+//
+// between the same task_started and task_complete. A file never has both forms
+// in one turn; if it did, the item_completed form wins (no duplicates).
+//
 // A turn is task_started .. task_complete. smind's live path turns only the
 // agent's message text into events for a Codex run (no tool cards), so that is
 // all this reader returns: it must not show more than a live read would.
@@ -28,6 +36,7 @@ type codexRec struct {
 	Timestamp string `json:"timestamp"`
 	Payload   struct {
 		Type      string `json:"type"`
+		Message   string `json:"message"`
 		TurnID    string `json:"turn_id"`
 		StartedAt int64  `json:"started_at"`
 		Item      struct {
@@ -47,6 +56,9 @@ func parseCodex(ctx context.Context, r io.Reader, ref Ref, out *int64, limit int
 		started time.Time
 		prompts []string
 		agent   []string
+		// the legacy user_message / agent_message form
+		legacyPrompts []string
+		legacyAgent   []string
 	}
 	var cur *turn
 	var kept *turn
@@ -55,6 +67,9 @@ func parseCodex(ctx context.Context, r io.Reader, ref Ref, out *int64, limit int
 			return
 		}
 		ok := inWindowTime(cur.started, ref.TurnWindow)
+		if len(cur.prompts) == 0 && len(cur.agent) == 0 {
+			cur.prompts, cur.agent = cur.legacyPrompts, cur.legacyAgent
+		}
 		hit := false
 		for _, p := range cur.prompts {
 			if promptMatches(p, ref.PromptSha256) {
@@ -92,6 +107,14 @@ func parseCodex(ctx context.Context, r io.Reader, ref Ref, out *int64, limit int
 			if cur != nil && (rec.Payload.TurnID == "" || rec.Payload.TurnID == cur.id) {
 				closeTurn()
 			}
+		case rec.Type == "event_msg" && rec.Payload.Type == "user_message" && cur != nil:
+			cur.legacyPrompts = append(cur.legacyPrompts, rec.Payload.Message)
+		case rec.Type == "event_msg" && rec.Payload.Type == "agent_message" && cur != nil:
+			*out += int64(len(rec.Payload.Message))
+			if *out > limit {
+				return errTooLarge
+			}
+			cur.legacyAgent = append(cur.legacyAgent, rec.Payload.Message)
 		case rec.Type == "event_msg" && rec.Payload.Type == "item_completed" && cur != nil:
 			var b strings.Builder
 			for _, c := range rec.Payload.Item.Content {
