@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -113,13 +114,7 @@ func newStewardHost(o stewardHostOptions) *stewardHost {
 	if rows, err := o.DB.ListStaleOpenStewardReviews(); err == nil {
 		for _, row := range rows {
 			_ = o.Svc.WriteBlocked(row.ID, "crashed", "the daemon restarted while the review was open", 0)
-			if passes, err := o.DB.ListStewardReviewPasses(row.ID); err == nil {
-				for _, p := range passes {
-					if p.Status == steward.PassPending || p.Status == steward.PassRunning {
-						_ = o.DB.SetStewardPassBlocked(row.ID, p.Axis, "crashed", "the daemon restarted while the review was open", p.CostUSD, time.Now())
-					}
-				}
-			}
+			h.blockOpenPasses(row.ID, "crashed", "the daemon restarted while the review was open")
 		}
 	}
 	return h
@@ -228,6 +223,7 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 		cfg, _ := h.config()
 		if err := h.openPasses(id, cfg); err != nil {
 			_ = h.svc.WriteBlocked(id, "crashed", "the review passes could not be opened", 0)
+			h.blockOpenPasses(id, "crashed", "the review passes could not be opened")
 			return reviewResult{}, fmt.Errorf("%s: open the passes: %w", m, err)
 		}
 		if stewardGateUnknown(d.Gates) {
@@ -291,7 +287,9 @@ func (h *stewardHost) recheck(id, taskID int64, lead store.Task, prof store.Agen
 		}
 		if in.TwoAxis != nil {
 			cfg, _ := h.config()
-			_, _ = h.startPasses(id, lead, d, dsha, sha, cfg)
+			if _, err := h.startPasses(id, lead, d, dsha, sha, cfg); err != nil {
+				slog.Warn("steward review passes", "review", id, "err", err)
+			}
 			return
 		}
 		_, _ = h.startSeat(id, lead, prof, d, dsha, sha)
@@ -421,6 +419,8 @@ func (h *stewardHost) seatSource(taskID int64) (runs.SeatSpec, bool) {
 	scratch := e.scratch
 	env := steward.SeatMCPEnv(e.reviewID, e.token)
 	if e.axis != "" {
+		// A pass that has ended (a verdict, a block, a cancel) loses its MCP
+		// env and floor at once, so its token is dead even in memory.
 		pass, err := h.db.GetStewardReviewPass(e.reviewID, string(e.axis))
 		if err != nil || (pass.Status != steward.PassPending && pass.Status != steward.PassRunning) {
 			return runs.SeatSpec{}, false

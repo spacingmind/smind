@@ -7,11 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/spacingmind/smind/internal/config"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
-	"unicode"
 )
 
 // DefaultStandardsFiles is the fixed, ordered list of the repository files
@@ -53,19 +52,14 @@ func MergeBase(ctx context.Context, dir, diffBase, head string) (string, error) 
 	return base, nil
 }
 
-// safeStandardsPath reports whether p is a clean, relative, in-repository
-// path: no absolute path, no ".." or "." element, no backslash, control
-// character or colon, at most 200 bytes.
-func safeStandardsPath(p string) bool {
-	if p == "" || len(p) > 200 || strings.HasPrefix(p, "/") || path.Clean(p) != p {
-		return false
-	}
-	for _, el := range strings.Split(p, "/") {
-		if el == "" || el == "." || el == ".." {
-			return false
-		}
-	}
-	return !strings.ContainsFunc(p, func(r rune) bool { return r == '\\' || r == ':' || unicode.IsControl(r) })
+// ReadFileAtRef reads one regular file at the commit ref through git's object
+// database, cut to StandardsFileMax; ok is false for a missing path, a
+// symlink, a submodule, a directory or an unsafe path. It is the one reader
+// for every repository file the two-axis review takes from a commit (the
+// standards files, the plan).
+func ReadFileAtRef(ctx context.Context, dir, ref, p string) (content []byte, ok bool, err error) {
+	content, _, ok, err = readBlobAtRef(ctx, dir, ref, p)
+	return content, ok, err
 }
 
 // readBlobAtRef reads path at the commit base through git's object database,
@@ -74,7 +68,7 @@ func safeStandardsPath(p string) bool {
 // repository can ever be read, and nothing depends on the checkout. ok is
 // false when the path does not exist at base or is not a regular file.
 func readBlobAtRef(ctx context.Context, dir, base, p string) (content []byte, truncated, ok bool, err error) {
-	if !sha40Re.MatchString(base) || !safeStandardsPath(p) {
+	if !sha40Re.MatchString(base) || !config.SafeRepoPath(p) {
 		return nil, false, false, nil
 	}
 	tree, err := gitOut(ctx, dir, "ls-tree", "-z", base, "--", p)
@@ -152,6 +146,13 @@ func StandardsHeadDiff(ctx context.Context, dir, base, head string, files []Stan
 // digest says it judges.
 func WriteStandardsCopies(ctx context.Context, dir, base, scratch string, files []StandardsFileInput) error {
 	root := filepath.Join(scratch, StandardsDir)
+	// The scratch tree is the PR's head checkout, so a change may carry its
+	// own .smind-standards (a symlink out of the tree, or extra files meant to
+	// pose as standards). Whatever is there is removed (a symlink is removed,
+	// never followed) before the copies are written into a fresh directory.
+	if err := os.RemoveAll(root); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return err
 	}
@@ -189,4 +190,32 @@ func (s *StandardsSection) FileInputs() []StandardsFileInput {
 		out = append(out, StandardsFileInput{Path: f.Path, Bytes: f.Bytes, SHA256: f.SHA256, Truncated: f.Truncated})
 	}
 	return out
+}
+
+// PruneScratch removes the given repository-relative paths from a seat's
+// scratch tree (the PR's head checkout): a symlink is removed, never followed.
+// The Standards pass prunes the head copies of the standards files, so the
+// only standards it can read are the base copies, and both passes prune what
+// a seat's CLI would load on its own as settings or tools (.claude,
+// .mcp.json), which a change must not be able to plant.
+func PruneScratch(scratch string, paths []string) error {
+	for _, p := range paths {
+		if !config.SafeRepoPath(p) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(scratch, filepath.FromSlash(p))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// HeadAutoloadPaths are the paths in a head checkout that a seat's CLI would
+// load on its own; both passes prune them.
+var HeadAutoloadPaths = []string{".claude", ".mcp.json"}
+
+// StandardsPrunePaths is every path the Standards pass removes from its head
+// checkout: the default and configured standards files and HeadAutoloadPaths.
+func StandardsPrunePaths(extra []string) []string {
+	return append(append(append([]string{}, DefaultStandardsFiles...), extra...), HeadAutoloadPaths...)
 }

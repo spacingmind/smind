@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"math"
+	"path"
 	"strings"
+	"unicode"
 )
 
 // StewardConfig is the steward section (ADR-0047). Everything under it is a
@@ -169,32 +171,8 @@ func (c StewardConfig) Validate() error {
 		return fmt.Errorf("steward.standards.files must list at most 20 entries, got %d", len(c.Standards.Files))
 	}
 	for i, f := range c.Standards.Files {
-		if f == "" {
-			return fmt.Errorf("steward.standards.files[%d] must not be empty", i)
-		}
-		if strings.HasPrefix(f, "/") || hasDriveLetter(f) {
-			return fmt.Errorf("steward.standards.files[%d] must be a relative path inside the repository, got %q", i, f)
-		}
-		if strings.Contains(f, `\`) {
-			return fmt.Errorf("steward.standards.files[%d] must not contain a backslash, got %q", i, f)
-		}
-		if strings.Contains(f, "..") {
-			escaped := false
-			for _, el := range strings.Split(f, "/") {
-				if el == ".." {
-					escaped = true
-					break
-				}
-			}
-			if escaped {
-				return fmt.Errorf("steward.standards.files[%d] must not contain a '..' path element, got %q", i, f)
-			}
-		}
-		if strings.IndexByte(f, 0) >= 0 || strings.Contains(f, "\n") {
-			return fmt.Errorf("steward.standards.files[%d] must not contain a NUL or newline, got %q", i, f)
-		}
-		if len(f) > 200 {
-			return fmt.Errorf("steward.standards.files[%d] must be at most 200 bytes, got %d", i, len(f))
+		if !SafeRepoPath(f) {
+			return fmt.Errorf("steward.standards.files[%d] must be a clean relative path inside the repository (at most 200 bytes, no \"..\", backslash, colon or control character), got %q", i, f)
 		}
 	}
 	if len(c.Standards.Rules) > 20 {
@@ -315,15 +293,21 @@ func passLimits(p StewardPassConfig, defaultBudget float64, defaultProfile strin
 	return StewardPassLimits{BudgetUSD: budget, MaxMinutes: minutes, Profile: profile}
 }
 
-// hasDriveLetter reports whether path starts with a Windows drive prefix
-// like C:.
-func hasDriveLetter(path string) bool {
-	if len(path) < 2 {
+// SafeRepoPath reports whether p is a clean, relative, in-repository path: no
+// absolute path, no "." or ".." element, no empty element, no backslash, colon
+// or control character, at most 200 bytes, and already in path.Clean form. It
+// is the one definition shared by the config loader and the readers of the
+// standards files, so a path the loader accepts is a path they read.
+func SafeRepoPath(p string) bool {
+	if p == "" || len(p) > 200 || strings.HasPrefix(p, "/") || path.Clean(p) != p {
 		return false
 	}
-	c := path[0]
-	isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-	return isLetter && path[1] == ':'
+	for _, el := range strings.Split(p, "/") {
+		if el == "" || el == "." || el == ".." {
+			return false
+		}
+	}
+	return !strings.ContainsFunc(p, func(r rune) bool { return r == '\\' || r == ':' || unicode.IsControl(r) })
 }
 
 // AutoReviewFor reports whether tasks of the workspace titled workspaceTitle

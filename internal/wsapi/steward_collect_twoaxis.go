@@ -2,10 +2,8 @@ package wsapi
 
 import (
 	"context"
-	"errors"
 	"os/exec"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/spacingmind/smind/internal/config"
@@ -19,8 +17,8 @@ var planPathRe = regexp.MustCompile(`^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}$`)
 // testNameRe finds test function names in plan text and contract criteria.
 var testNameRe = regexp.MustCompile(`\bTest[A-Za-z0-9_]{1,100}\b`)
 
-// stewardPlanMax bounds the plan text read at the head.
-const stewardPlanMax = 64 * 1024
+// testFuncNameRe is what a test name must look like before it reaches git grep.
+var testFuncNameRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,100}$`)
 
 // twoAxisInputs gathers what the Standards and Spec passes need beyond the
 // single review's inputs (ADR-0054 §3). Read-only, like the rest of the
@@ -58,7 +56,8 @@ func (c *stewardCollector) twoAxisInputs(ctx context.Context, dir, diffBase, hea
 	}
 	if p := in.PlanFile; p != "" && planPathRe.MatchString(p) && !strings.Contains(p, "..") && !strings.HasPrefix(p, "/") {
 		out.Spec.PlanPath = p
-		if txt, err := gitShowAt(ctx, dir, head, p, stewardPlanMax); err == nil {
+		if b, ok, err := steward.ReadFileAtRef(ctx, dir, head, p); err == nil && ok {
+			txt := string(b)
 			out.Spec.PlanText = txt
 			for _, n := range testNameRe.FindAllString(txt, -1) {
 				names[n] = true
@@ -75,27 +74,6 @@ func (c *stewardCollector) twoAxisInputs(ctx context.Context, dir, diffBase, hea
 		out.Spec.TestsInTree[n] = gitHasTestFunc(ctx, dir, head, n)
 	}
 	return out
-}
-
-// gitShowAt reads a regular file at head, through the object database (a
-// symlink or a missing path is an error), cut to max bytes.
-func gitShowAt(ctx context.Context, dir, head, path string, max int) (string, error) {
-	obj := head + ":" + path
-	size, err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", dir, "cat-file", "-s", obj).Output()
-	if err != nil {
-		return "", err
-	}
-	if n, err := strconv.Atoi(strings.TrimSpace(string(size))); err != nil || n > 8*max {
-		return "", errors.New("file too large")
-	}
-	out, err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", dir, "cat-file", "blob", obj).Output()
-	if err != nil {
-		return "", err
-	}
-	if len(out) > max {
-		out = out[:max]
-	}
-	return string(out), nil
 }
 
 // gitListDir lists the entry names of a directory at head.
@@ -116,7 +94,7 @@ func gitListDir(ctx context.Context, dir, head, path string) ([]string, error) {
 // gitHasTestFunc reports whether a Go test function of that name exists in a
 // *_test.go file at head (a hint for the Spec pass, never a gate).
 func gitHasTestFunc(ctx context.Context, dir, head, name string) bool {
-	if !regexp.MustCompile(`^[A-Za-z0-9_]{1,100}$`).MatchString(name) {
+	if !testFuncNameRe.MatchString(name) {
 		return false
 	}
 	err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", dir, "grep", "-q", "-F", "func "+name+"(", head, "--", "*_test.go").Run()

@@ -79,8 +79,11 @@ func resolveSpec(in Inputs) (SpecSection, map[string]string) {
 		addSource(SpecSourcePlan, si.PlanPath, status, sha)
 	}
 	if in.PR != nil {
-		for _, ref := range specLineRefs(in.PR.Body) {
-			addSource(SpecSourcePRBody, ref, SpecStatusFound, "")
+		// A `Spec:` line is only a pointer the author wrote: it is listed as a
+		// fixed, unresolved source (never found, never counted by HasSpec, and
+		// none of its text outside the untrusted block).
+		if len(specLineRefs(in.PR.Body)) > 0 {
+			addSource(SpecSourcePRBody, "pr-body-spec-line", SpecStatusUnavailable, "")
 		}
 		for _, m := range issueRefRe.FindAllStringSubmatch(in.PR.Body, -1) {
 			addSource(SpecSourceIssue, "#"+m[1], SpecStatusUnavailable, "")

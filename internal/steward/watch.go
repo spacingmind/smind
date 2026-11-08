@@ -203,7 +203,10 @@ func (w *Watch) tickPass(dt time.Duration) bool {
 	case !passOpen:
 		// The verdict is in; the post-check waits for the run to finish (or
 		// the wall clock) so changes made after submitting are seen too.
-		if ps.Running && (w.MaxMinutes <= 0 || w.elapsed < time.Duration(w.MaxMinutes)*time.Minute) {
+		// The per-pass budgets sum to the review's cap only if spend stops at
+		// the budget after the verdict too, not just before it.
+		overBudget := w.BudgetUSD > 0 && ps.CostUSD >= w.BudgetUSD
+		if ps.Running && !overBudget && (w.MaxMinutes <= 0 || w.elapsed < time.Duration(w.MaxMinutes)*time.Minute) {
 			return false
 		}
 		if ps.Running {

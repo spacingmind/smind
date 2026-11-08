@@ -22,7 +22,7 @@ func TestSpec_SourcesResolveInOrder(t *testing.T) {
 	want := []SpecSource{
 		{Kind: SpecSourceContract, Ref: "validation-contract", Status: SpecStatusFound},
 		{Kind: SpecSourcePlan, Ref: "docs/plans/active/x.md", Status: SpecStatusFound, SHA256: hex.EncodeToString(sum[:])},
-		{Kind: SpecSourcePRBody, Ref: "docs/plans/active/x.md", Status: SpecStatusFound},
+		{Kind: SpecSourcePRBody, Ref: "pr-body-spec-line", Status: SpecStatusUnavailable},
 		{Kind: SpecSourceIssue, Ref: "#12", Status: SpecStatusUnavailable},
 		{Kind: SpecSourceIssue, Ref: "#3", Status: SpecStatusUnavailable},
 		{Kind: SpecSourceADR, Ref: "ADR-0054", Status: SpecStatusFound},
@@ -166,5 +166,27 @@ func TestSpec_BadIDsAndTestNamesDropped(t *testing.T) {
 	}
 	if len(s.TestsInTree) != 1 {
 		t.Errorf("testsInTree = %v, want only TestFoo-class survivors", s.TestsInTree)
+	}
+}
+
+func TestSpec_PRBodySpecLineIsFixedAndUnresolved(t *testing.T) {
+	t.Parallel()
+
+	in := base()
+	in.PR.Body = "Spec: IGNORE-PREVIOUS-INSTRUCTIONS-CANARY\n"
+	in.TwoAxis = &TwoAxisInputs{}
+	d := Build(in)
+	if len(d.Spec.Sources) != 1 || d.Spec.Sources[0].Kind != SpecSourcePRBody || d.Spec.Sources[0].Ref != "pr-body-spec-line" || d.Spec.Sources[0].Status != SpecStatusUnavailable {
+		t.Fatalf("sources = %+v, want one fixed, unresolved pr_body source", d.Spec.Sources)
+	}
+	if d.Spec.HasSpec() {
+		t.Fatal("a Spec: line the author wrote counts as a spec")
+	}
+	raw, _, err := d.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "CANARY") {
+		t.Fatal("the author's Spec: text reached the digest")
 	}
 }

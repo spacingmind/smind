@@ -201,6 +201,15 @@ func TestTwoAxisE2E_BothAcceptedStoresAccepted(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(spec.ScratchDir, steward.StandardsDir)); err == nil {
 		t.Fatal("the spec seat's tree carries a standards copy")
 	}
+	// The Standards seat's tree has no head standards file to read (only the base
+	// copies); the Spec seat's tree keeps the head files. Neither carries a
+	// .claude directory.
+	if _, err := os.Stat(filepath.Join(std.ScratchDir, "AGENTS.md")); err == nil {
+		t.Fatal("the standards seat can read the head's AGENTS.md")
+	}
+	if got, err := os.ReadFile(filepath.Join(spec.ScratchDir, "AGENTS.md")); err != nil || string(got) != twoAxisHeadRules {
+		t.Fatalf("the spec seat's AGENTS.md = %q, %v; want the head file", got, err)
+	}
 	// Each seat reads the digest through its own run.
 	for _, p := range []store.StewardReviewPass{std, spec} {
 		raw, err := budgetCall(t, e.api, passRC(p), "steward.digest.get", map[string]any{"reviewId": id})

@@ -143,3 +143,22 @@ func TestWatch_PassAfterVerdictWaitsForTheRunThenPostChecks(t *testing.T) {
 		t.Fatal("a worktree change after the verdict was not flagged")
 	}
 }
+
+func TestWatch_PassBudgetAlsoBoundsSpendAfterTheVerdict(t *testing.T) {
+	t.Parallel()
+
+	fx := openTwoAxis(t, axisDigest("AC1"))
+	if _, err := fx.submit(t, AxisStandards, standardsVerdict(VerdictAccepted)); err != nil {
+		t.Fatal(err)
+	}
+	ps := validation.ProbeState{Running: true, Started: true, CostUSD: 0.1}
+	stopped := 0
+	w := fx.passWatch(AxisStandards, &ps, &stopped)
+	if w.Tick(time.Minute) || stopped != 0 {
+		t.Fatalf("under budget after the verdict: stopped %d, want it left running", stopped)
+	}
+	ps.CostUSD = 0.45
+	if !w.Tick(time.Minute) || stopped != 1 {
+		t.Fatalf("over budget after the verdict: stopped %d, want the run stopped", stopped)
+	}
+}

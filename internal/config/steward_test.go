@@ -395,3 +395,15 @@ func TestStewardConfig_StandardsRulesCaps(t *testing.T) {
 		t.Fatalf("20 rules of 400 bytes rejected: %v", err)
 	}
 }
+
+func TestSafeRepoPath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"AGENTS.md": true, "docs/STYLE.md": true, ".github/PULL_REQUEST_TEMPLATE.md": true,
+		"": false, "/etc/passwd": false, "../x": false, "a/../b": false, "a//b": false, "./a": false, "a/": false,
+		`a\b`: false, "C:x": false, "a\nb": false, "a\x00b": false, strings.Repeat("a", 201): false,
+	} {
+		if got := SafeRepoPath(p); got != want {
+			t.Errorf("SafeRepoPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
@@ -20,6 +21,18 @@ import (
 // token and Watch). Everything here runs only when steward.twoAxis was on at
 // collection time; with it off startReview takes the single-seat path
 // untouched.
+
+// passPlanEntry is one axis pass and the limits it runs under.
+type passPlanEntry struct {
+	axis   steward.Axis
+	limits config.StewardPassLimits
+}
+
+// passPlan is the two passes of a review in their fixed order, standards first.
+func passPlan(cfg config.StewardConfig) []passPlanEntry {
+	std, spec := cfg.PassLimits()
+	return []passPlanEntry{{steward.AxisStandards, std}, {steward.AxisSpec, spec}}
+}
 
 // passProfile resolves the seat profile a pass runs on: the configured name
 // (steward-standards by default), falling back to the steward profile when
@@ -39,6 +52,7 @@ func (h *stewardHost) passProfile(name string) (store.AgentProfile, error) {
 		}
 	}
 	if fallback != nil {
+		slog.Info("steward pass profile not seeded, using the steward profile", "wanted", name, "model", fallback.Model)
 		return *fallback, nil
 	}
 	return store.AgentProfile{}, fmt.Errorf("no %q or %q profile: run `smind profile seed roles`", name, steward.SeatProfileName)
@@ -47,11 +61,7 @@ func (h *stewardHost) passProfile(name string) (store.AgentProfile, error) {
 // openPasses creates the review's two pass rows (pending), each with the
 // profile and model it will run on.
 func (h *stewardHost) openPasses(reviewID int64, cfg config.StewardConfig) error {
-	std, spec := cfg.PassLimits()
-	for _, p := range []struct {
-		axis   steward.Axis
-		limits config.StewardPassLimits
-	}{{steward.AxisStandards, std}, {steward.AxisSpec, spec}} {
+	for _, p := range passPlan(cfg) {
 		prof, err := h.passProfile(p.limits.Profile)
 		if err != nil {
 			return err
@@ -71,7 +81,6 @@ func (h *stewardHost) openPasses(reviewID int64, cfg config.StewardConfig) error
 // against the head (D11), and the rest start together.
 func (h *stewardHost) startPasses(id int64, lead store.Task, d steward.Digest, dsha, sha string, cfg config.StewardConfig) (reviewResult, error) {
 	res := reviewResult{ReviewID: id, TaskID: lead.ID, CommitSHA: sha, Status: "running"}
-	std, spec := cfg.PassLimits()
 	before, _ := validation.Take(h.ctx, *lead.WorktreePath)
 	if err := h.db.SetStewardReviewStatus(id, "running"); err != nil {
 		return res, err
@@ -87,10 +96,7 @@ func (h *stewardHost) startPasses(id int64, lead store.Task, d steward.Digest, d
 			return res, err
 		}
 	}
-	for _, p := range []struct {
-		axis   steward.Axis
-		limits config.StewardPassLimits
-	}{{steward.AxisStandards, std}, {steward.AxisSpec, spec}} {
+	for _, p := range passPlan(cfg) {
 		pass, err := h.db.GetStewardReviewPass(id, string(p.axis))
 		if err != nil || pass.Status != steward.PassPending {
 			continue
@@ -119,7 +125,8 @@ func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.S
 	if err := h.db.SetStewardPassToken(id, string(axis), steward.HashToken(token)); err != nil {
 		return err
 	}
-	task, err := h.wm.CreateTask(lead.WorkspaceID, lead.SpaceID, fmt.Sprintf("steward review #%d (%s)", id, axis), workspace.WithParentTask(lead.ID), workspace.WithBaseRef(sha))
+	title := fmt.Sprintf("steward review #%d (%s)", id, axis)
+	task, err := h.wm.CreateTask(lead.WorkspaceID, lead.SpaceID, title, workspace.WithParentTask(lead.ID), workspace.WithBaseRef(sha))
 	if err != nil {
 		return err
 	}
@@ -131,6 +138,16 @@ func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.S
 		return err
 	}
 	if err := h.db.SetStewardPassRun(id, string(axis), "", task.ID, *task.WorktreePath); err != nil {
+		return err
+	}
+	// The scratch tree is the PR's head checkout: whatever a seat's CLI would
+	// load on its own from it (.claude, .mcp.json) is removed, and the Standards
+	// pass also loses the head copies of the standards files.
+	prune := steward.HeadAutoloadPaths
+	if axis == steward.AxisStandards {
+		prune = steward.StandardsPrunePaths(h.standardsExtra())
+	}
+	if err := steward.PruneScratch(*task.WorktreePath, prune); err != nil {
 		return err
 	}
 	if axis == steward.AxisStandards {
@@ -178,20 +195,38 @@ func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.S
 	return nil
 }
 
+// standardsExtra is the human-configured extra standards paths.
+func (h *stewardHost) standardsExtra() []string {
+	cfg, err := h.config()
+	if err != nil {
+		return nil
+	}
+	return cfg.Standards.Files
+}
+
+// blockOpenPasses closes every open pass of a review whose row was closed
+// without them (a restart, a failed start) as blocked with reason.
+func (h *stewardHost) blockOpenPasses(reviewID int64, reason, summary string) {
+	passes, err := h.db.ListStewardReviewPasses(reviewID)
+	if err != nil {
+		return
+	}
+	for _, p := range passes {
+		if p.Status == steward.PassPending || p.Status == steward.PassRunning {
+			_ = h.db.SetStewardPassBlocked(reviewID, p.Axis, reason, summary, p.CostUSD, time.Now())
+		}
+	}
+}
+
 // cancelPasses ends a two-axis review's open passes as cancelled and stops
 // their runs. The review row is already blocked by the caller, and every pass
 // row is written BEFORE any run is stopped: a watch must never see its run
 // end first and record a crash, which would also count toward the auto-pause.
 func (h *stewardHost) cancelPasses(reviewID int64) {
+	h.blockOpenPasses(reviewID, "cancelled", "cancelled by the Human")
 	passes, err := h.db.ListStewardReviewPasses(reviewID)
 	if err != nil {
 		return
-	}
-	now := time.Now()
-	for _, p := range passes {
-		if p.Status == steward.PassPending || p.Status == steward.PassRunning {
-			_ = h.db.SetStewardPassBlocked(reviewID, p.Axis, "cancelled", "cancelled by the Human", p.CostUSD, now)
-		}
 	}
 	for _, p := range passes {
 		if p.StewardTaskID != 0 {
@@ -203,7 +238,9 @@ func (h *stewardHost) cancelPasses(reviewID int64) {
 
 // passOf reports the pass of review reviewID whose seat is task taskID, while
 // that pass is open. It is how the seat's RPCs bind a call to the caller's
-// own pass: a task that is no pass's seat gets nothing.
+// own pass: a task that is no pass's seat gets nothing. The taskID != 0 check
+// is load-bearing: a pass that has not started has StewardTaskID 0, and
+// without it a caller with a zero task id would match it.
 func (h *stewardHost) passOf(reviewID, taskID int64) (steward.Axis, bool) {
 	passes, err := h.db.ListStewardReviewPasses(reviewID)
 	if err != nil {

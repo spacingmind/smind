@@ -149,3 +149,102 @@ func TestStandards_CopyRefusesAChangedFile(t *testing.T) {
 		t.Fatal("a file was written outside the standards directory")
 	}
 }
+
+// TestStandards_HeadSmindStandardsDirIsReplacedNotFollowed: the scratch tree is
+// the PR's head checkout, so a change can commit its own .smind-standards, as a
+// symlink out of the tree or as extra files posing as standards. The copies
+// replace it; nothing is written through it.
+func TestStandards_HeadSmindStandardsDirIsReplacedNotFollowed(t *testing.T) {
+	isolateGitConfig(t)
+	ctx := context.Background()
+	dir, commit := newRepo(t)
+	base := commit(t, dir, "AGENTS.md", "base rules\n", "rules")
+	files, err := StandardsAtBase(ctx, dir, base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("symlink out of the tree", func(t *testing.T) {
+		scratch, outside := t.TempDir(), t.TempDir()
+		if err := os.WriteFile(filepath.Join(outside, "AGENTS.md"), []byte("OUTSIDE"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(scratch, StandardsDir)); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteStandardsCopies(ctx, dir, base, scratch, files); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(outside, "AGENTS.md")); string(got) != "OUTSIDE" {
+			t.Fatalf("a file outside the scratch tree was overwritten through the symlink: %q", got)
+		}
+		if fi, err := os.Lstat(filepath.Join(scratch, StandardsDir)); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf(".smind-standards = %v, %v; want a real directory", fi, err)
+		}
+	})
+	t.Run("extra files from the head", func(t *testing.T) {
+		scratch := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(scratch, StandardsDir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{"RELAXED.md", "AGENTS.md"} {
+			if err := os.WriteFile(filepath.Join(scratch, StandardsDir, f), []byte("HEAD-PLANTED"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := WriteStandardsCopies(ctx, dir, base, scratch, files); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(scratch, StandardsDir, "RELAXED.md")); err == nil {
+			t.Fatal("a planted file survived next to the copies")
+		}
+		if got, _ := os.ReadFile(filepath.Join(scratch, StandardsDir, "AGENTS.md")); string(got) != "base rules\n" {
+			t.Fatalf("AGENTS.md copy = %q, want the base text", got)
+		}
+	})
+}
+
+// TestStandards_PruneScratchRemovesHeadStandardsAndAutoloads: the Standards
+// seat cannot read a head standards file, and neither seat finds a .claude
+// directory or .mcp.json to load; a symlink is removed, never followed.
+func TestStandards_PruneScratchRemovesHeadStandardsAndAutoloads(t *testing.T) {
+	scratch, outside := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "keep.md"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.WriteFile(filepath.Join(scratch, "AGENTS.md"), []byte("head"), 0o644))
+	must(os.Symlink(filepath.Join(outside, "keep.md"), filepath.Join(scratch, "CLAUDE.md")))
+	must(os.MkdirAll(filepath.Join(scratch, ".claude"), 0o755))
+	must(os.WriteFile(filepath.Join(scratch, ".claude", "settings.json"), []byte("{}"), 0o644))
+	must(os.WriteFile(filepath.Join(scratch, ".mcp.json"), []byte("{}"), 0o644))
+	must(os.WriteFile(filepath.Join(scratch, "main.go"), []byte("package x"), 0o644))
+
+	must(PruneScratch(scratch, append(StandardsPrunePaths([]string{"docs/STYLE.md", "../escape"}), "/etc/passwd")))
+	for _, p := range []string{"AGENTS.md", "CLAUDE.md", ".claude", ".mcp.json"} {
+		if _, err := os.Lstat(filepath.Join(scratch, p)); err == nil {
+			t.Fatalf("%s survived the prune", p)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(scratch, "main.go")); err != nil {
+		t.Fatal("the prune removed an ordinary file")
+	}
+	if got, _ := os.ReadFile(filepath.Join(outside, "keep.md")); string(got) != "keep" {
+		t.Fatal("the prune followed a symlink")
+	}
+	// The spec pass keeps the head's standards files but loses the autoloads.
+	must(os.WriteFile(filepath.Join(scratch, "AGENTS.md"), []byte("head"), 0o644))
+	must(os.MkdirAll(filepath.Join(scratch, ".claude"), 0o755))
+	must(PruneScratch(scratch, HeadAutoloadPaths))
+	if _, err := os.Stat(filepath.Join(scratch, "AGENTS.md")); err != nil {
+		t.Fatal("the autoload prune removed AGENTS.md")
+	}
+	if _, err := os.Stat(filepath.Join(scratch, ".claude")); err == nil {
+		t.Fatal(".claude survived the autoload prune")
+	}
+}
