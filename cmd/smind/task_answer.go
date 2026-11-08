@@ -17,7 +17,6 @@ import (
 // cmdTaskAnswerUsage is printed on any argument error in cmdTaskAnswer.
 const cmdTaskAnswerUsage = `usage: smind task answer <runId> [requestId] [--answer <questionId>=<optionNumber|optionLabel|text>]... [--decline] [--note <text>]`
 
-
 // answerStdinIsTerminal and answerInput are package vars so tests can drive
 // the interactive prompt without a real terminal.
 var (
