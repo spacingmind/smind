@@ -45,8 +45,9 @@ unsupported provider, or a path outside the provider root: the response is the s
 AC8 **Version drift.** A transcript/rollout whose self-check fails (prompt hash, ≥ 95% tool pairing, tool count ±10%) is
 `format_drift`; 3 consecutive failures for a (provider, version) open a 1 h breaker; golden fixtures per supported CLI version pass
 in CI; `smind doctor` reports the supported range.
-AC9 **Owner only.** Rebuild executes only on the owning daemon. A fleet read of a finished remote run returns the skeleton and
-`owned_by_host:<id>`; a mirror re-syncs on `skeletonRev` change; no remote host ever opens the owner's session files.
+AC9 **Owner only.** Rebuild executes only on the owning daemon. A fleet activity read of a finished remote run carries the label
+`owned_by_host` (host fields from the reader's own registry); no remote host ever opens the owner's session files. (The mirror re-sync on
+`skeletonRev` change is parked.)
 AC10 **Heredoc reveal.** Pending permission: reveal from the live request, unchanged. Finished run: body from the rebuilt session,
 accepted only when `sha256` equals the skeleton's descriptor for that `index`; otherwise typed `ErrHeredocUnavailable{reason}`;
 elision/redaction rules and the `index` counting are unchanged (shared `ElideToolCall`).
@@ -109,7 +110,7 @@ internal/wsapi + internal/fleet
 - `TestRunLogsDetailModes` (skeleton/full/auto, `historySource`, `skeletonReason`) (AC5, AC7)
 - `TestStewardCollectSkeletonRun`, `TestLearningCollectorSkeletonRun` (id gaps, watermark), `TestLearningExecutorSkeletonRun`,
   `TestParentNotifyLastTextSkeleton`, `TestAutomationFinalTextSkeleton` (AC4, AC11)
-- `TestFleetReadSkeletonOwnedByHost` + `TestFleetMirrorResyncOnSkeletonRev` (AC9) [ignore `skeletonRev`]
+- `TestFleetActivityFlagsASummaryRun`, `TestFleetSourceFlagsASkeletonRunAndNeverRebuilds`, `TestRemoteReadActivityLabelsASummaryRunWithTheRegistryHost`, `TestHistoryOwnerOf` (AC9; the mirror re-sync test is parked)
 - `TestRelayAttachFinishedRunBackfillsSkeleton`, `TestMobileDoesNotAutoLoadACP` (AC6)
 - `TestRebuildAuthorizedLikeRunLogs` (a run-scoped agent never triggers a rebuild, H7; a human caller is authorized like run.logs) (AC16)
 
@@ -205,7 +206,7 @@ The ADR-0053 work is paused here. Parked, not abandoned:
   (`runs.rebuildCacheMB`), keyed by run id + session file size/mtime, never written back; `run.logs detail: "auto"` from a human
   rebuilds when cached or the file is at most 8 MiB.
 - **ACP `session/load`** (explicit request only, agents that advertise `loadSession`).
-- **Fleet:** `skeletonRev` mirror re-sync and the `owned_by_host:<id>` label with a direct read on the owning host (AC9).
+- **Fleet:** done: the `owned_by_host` label on remote activity reads (ADR-0053 "Implemented: the fleet label"). Still parked: `skeletonRev` mirror re-sync and a direct read of the full history on the owning host.
 - **Codex through `thread/read`** instead of the rollout file (ADR D4's preference; the file reader is the documented deviation).
 - **`smind runs skeletonize`** (opt-in conversion of legacy runs, H4) and the `runs.skeletonRetentionDays` knob (H2: reserved, not built).
 - Transcripts over 64 MiB are never rebuilt (0.5% on the measured machine); a streaming reader could lift the bound.

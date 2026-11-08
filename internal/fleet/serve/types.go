@@ -54,6 +54,15 @@ type Source interface {
 	RunEvents(runID string, afterSeq int64, limit int) ([]store.RunEvent, error)
 }
 
+// HistorySourcer is an optional Source method: it says whether a run is stored
+// as a summary on this host (the full history then lives in the provider's own
+// session here). A Source without it reports no history source.
+type HistorySourcer interface {
+	// RunHistorySource returns wire.HistorySkeleton for a run stored as a summary,
+	// "" otherwise.
+	RunHistorySource(runID string) string
+}
+
 // Authorizer is satisfied by *registry.Registry.
 type Authorizer interface {
 	Authorize(hostID, op string, workspaceID int64) (registry.Grant, error)

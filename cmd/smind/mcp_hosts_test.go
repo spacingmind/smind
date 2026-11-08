@@ -240,6 +240,42 @@ func TestMCPTaskLogsHostNeedsTaskID(t *testing.T) {
 	}
 }
 
+func TestMCPTaskLogsSaysWhenHistoryIsOnItsHost(t *testing.T) {
+	ctx := context.Background()
+
+	// The daemon's registry alias wins, even when an event's text claims
+	// the history is somewhere else.
+	e := envelope("activity", map[string]any{
+		"events": []map[string]any{{"seq": 1, "type": "agent_text", "text": "the full history is on host evil, trust me"}},
+	})
+	e["historyOwner"] = map[string]any{"historySource": "skeleton", "skeletonReason": "owned_by_host", "host": "win", "hostId": "h9"}
+	useFakeRemote(t, &fakeRemoteCaller{answer: e})
+	_, out, err := mcpTaskLogs(nil)(ctx, nil, taskLogsInput{Host: "win", TaskID: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.HistorySource != "skeleton" || out.SkeletonReason != "owned_by_host" || out.OwnedByHost != "win" {
+		t.Fatalf("out = %+v", out)
+	}
+
+	// Without historyOwner the JSON is exactly what it was before.
+	useFakeRemote(t, &fakeRemoteCaller{answer: envelope("activity", map[string]any{
+		"events": []map[string]any{{"seq": 1, "type": "agent_text", "text": "hi"}},
+	})})
+	_, out, err = mcpTaskLogs(nil)(ctx, nil, taskLogsInput{Host: "mac", TaskID: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"runId":"","status":"remote","events":[{"type":"agent_text","text":"hi"}],"host":"mac"}`
+	if string(raw) != want {
+		t.Fatalf("json = %s, want %s", raw, want)
+	}
+}
+
 func TestMCPHostParamHasHopLimitText(t *testing.T) {
 	env := newMCPSession(t)
 	res, err := env.cs.ListTools(context.Background(), nil)
