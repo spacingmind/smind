@@ -157,6 +157,22 @@ export function denyReasonParam(text: string): string | undefined {
 }
 
 /**
+ * The permission card's tap dispatch: only a reject-kind option carries
+ * the deny reason (denyReasonParam of the field's text -- undefined when
+ * blank); every other kind calls back with exactly the two old arguments.
+ */
+export function dispatchPermissionTap(
+  onRespond: (requestId: string, optionId: string, reason?: string) => void,
+  requestId: string,
+  optionId: string,
+  kind: string,
+  reasonText: string,
+): void {
+  if (kind.startsWith('reject')) onRespond(requestId, optionId, denyReasonParam(reasonText));
+  else onRespond(requestId, optionId);
+}
+
+/**
  * The tap flow: optimistically resolve (so the UI disables immediately),
  * then run.respondPermission against the request's own run. A rejection
  * rolls back via chooseFailed -- which is a no-op if a permission_resolved

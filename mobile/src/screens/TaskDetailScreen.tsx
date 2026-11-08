@@ -568,9 +568,9 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   }, [board, conn, history, loadingFull, state]);
 
   const handlePermissionTap = useCallback(
-    (requestId: string, optionId: string) => {
+    (requestId: string, optionId: string, reason?: string) => {
       hapticFor('permission');
-      void respondToPermission(conn, board, requestId, optionId);
+      void respondToPermission(conn, board, requestId, optionId, reason);
     },
     [conn, board],
   );

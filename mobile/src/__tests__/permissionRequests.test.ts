@@ -6,7 +6,7 @@
 // traffic.
 
 import { describe, expect, it } from 'vitest';
-import { denyReasonParam, feedPermissionEvent, PermissionBoard, respondToPermission } from '../permissionRequests';
+import { denyReasonParam, dispatchPermissionTap, feedPermissionEvent, PermissionBoard, respondToPermission } from '../permissionRequests';
 import { respondPermission } from '../api';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
@@ -235,5 +235,31 @@ describe('deny reason', () => {
     board.requestReceived('run-9', REQ);
     await respondToPermission(conn, board, 'perm-1', 'allow', denyReasonParam('   '));
     expect(calls).toEqual([['run.respondPermission', { runId: 'run-9', requestId: 'perm-1', optionId: 'allow' }]]);
+  });
+
+  it('dispatchPermissionTap: a reject option carries the reason (trimmed/capped), blank stays undefined', () => {
+    const calls: unknown[][] = [];
+    const tap = (...args: unknown[]) => calls.push(args);
+    dispatchPermissionTap(tap, 'perm-1', 'deny', 'reject_once', ' use bun instead ');
+    dispatchPermissionTap(tap, 'perm-1', 'deny', 'reject_once', 'x'.repeat(600));
+    dispatchPermissionTap(tap, 'perm-1', 'deny', 'reject_once', '   ');
+    expect(calls).toEqual([
+      ['perm-1', 'deny', 'use bun instead'],
+      ['perm-1', 'deny', 'x'.repeat(500)],
+      ['perm-1', 'deny', undefined],
+    ]);
+  });
+
+  it('dispatchPermissionTap: any other option is called with exactly two arguments', () => {
+    const calls: unknown[][] = [];
+    const tap = (...args: unknown[]) => calls.push(args);
+    dispatchPermissionTap(tap, 'perm-1', 'allow', 'allow_once', 'use bun instead');
+    dispatchPermissionTap(tap, 'perm-1', 'always', 'allow_always', 'use bun instead');
+    dispatchPermissionTap(tap, 'perm-1', 'odd', 'weird', 'use bun instead');
+    expect(calls).toEqual([
+      ['perm-1', 'allow'],
+      ['perm-1', 'always'],
+      ['perm-1', 'odd'],
+    ]);
   });
 });
