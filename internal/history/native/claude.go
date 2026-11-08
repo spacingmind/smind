@@ -29,7 +29,9 @@ import (
 // reader is tolerant of what it does not know and strict about what it keeps
 // (see selfCheck).
 type claudeRec struct {
-	Type        string `json:"type"`
+	Type string `json:"type"`
+	// UUID is the record's own id: the entry a fork resumes at (ADR-0057).
+	UUID        string `json:"uuid"`
 	IsSidechain bool   `json:"isSidechain"`
 	IsMeta      bool   `json:"isMeta"`
 	// IsCompactSummary marks the synthetic user record an auto- or manual
@@ -68,6 +70,9 @@ type sliceStats struct {
 	uses, results, paired int
 	version               string
 	decoded, undecodable  int
+	// anchor is the uuid of the last assistant record of the matched turn ("" when
+	// the records carry none): what a fork resumes the session at.
+	anchor string
 }
 
 // parseClaude reads the transcript r and returns the events of the one turn whose
@@ -81,6 +86,7 @@ func parseClaude(ctx context.Context, r io.Reader, ref Ref, out *int64, limit in
 		results int
 		paired  int
 		version string
+		anchor  string
 	}
 	var cur *segment
 	var kept *segment
@@ -121,6 +127,9 @@ func parseClaude(ctx context.Context, r io.Reader, ref Ref, out *int64, limit in
 		}
 		if cur == nil || !cur.matched {
 			return nil
+		}
+		if rec.Type == "assistant" && rec.UUID != "" {
+			cur.anchor = rec.UUID
 		}
 		var blocks []claudeBlock
 		if json.Unmarshal(rec.Message.Content, &blocks) != nil {
@@ -167,7 +176,7 @@ func parseClaude(ctx context.Context, r io.Reader, ref Ref, out *int64, limit in
 		return nil, st, matches, err
 	}
 	if kept != nil {
-		st.uses, st.results, st.paired, st.version = len(kept.uses), kept.results, kept.paired, kept.version
+		st.uses, st.results, st.paired, st.version, st.anchor = len(kept.uses), kept.results, kept.paired, kept.version, kept.anchor
 		return kept.events, st, matches, nil
 	}
 	return nil, st, matches, nil
