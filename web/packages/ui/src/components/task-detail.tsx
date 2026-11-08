@@ -93,6 +93,7 @@ export function TaskDetailPane({
   onJumpToTask,
   onOpenForkedChat,
   parentChat,
+  onOpenParentChat,
 }: {
   client: WsClientLike | null;
   task: Task;
@@ -120,6 +121,8 @@ export function TaskDetailPane({
   onOpenForkedChat?: (chat: Chat) => void;
   /** The chat this one branched off (chat.fork.parentChatId looked up in the task's chats); the fork banner names it. */
   parentChat?: Chat | null;
+  /** The fork banner's "View original": open the parent chat's tab. */
+  onOpenParentChat?: (chatId: number) => void;
 }) {
   // Worktree setup state changes after the task was selected (ADR-0024), so
   // follow the task's own update events instead of the selection snapshot.
@@ -349,6 +352,7 @@ export function TaskDetailPane({
   // Like the hover actions above, the callback is stable so RunTimeline's
   // memo keeps bailing out; only this pane's state opens the dialog.
   const [forkTarget, setForkTarget] = useState<{ chatId: number; runId: string } | null>(null);
+  const forkTurn = forkTarget && runs ? runs.findIndex((r) => r.id === forkTarget.runId) + 1 || undefined : undefined;
   const { fork: forkChat } = useForkChat(client);
   const forkRun = useCallback((run: RunEntry) => setForkTarget({ chatId: chat.ID, runId: run.id }), [chat.ID]);
 
@@ -481,8 +485,24 @@ export function TaskDetailPane({
       <UntrustedBanner task={task} onTask={applyTask} />
       {chat.fork && (
         <NoticeBanner tone="info" testId="chat-fork-banner">
-          Forked from {parentChat?.Title || "another chat"}.
-          {chat.fork.lossy && " The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning."}
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>
+              {chat.fork.kind === "retry"
+                ? `Retry of ${forkSource.turn !== null ? `turn ${forkSource.turn + 1} ` : "a turn "}from ${parentChat?.Title || "another chat"}.`
+                : `Forked from ${parentChat?.Title || "another chat"}${forkSource.turn !== null ? ` at turn ${forkSource.turn}` : ""}.`}
+              {chat.fork.lossy && " The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning."}
+            </span>
+            {parentChat && onOpenParentChat && (
+              <Button
+                variant="link"
+                size="xs"
+                data-testid="chat-fork-view-original"
+                onClick={() => chat.fork && onOpenParentChat(chat.fork.parentChatId)}
+              >
+                View original
+              </Button>
+            )}
+          </span>
         </NoticeBanner>
       )}
       <SetupDetails client={client} task={task} onTask={applyTask} />
@@ -676,6 +696,7 @@ export function TaskDetailPane({
           if (!open) setForkTarget(null);
         }}
         chatTitle={chat.Title}
+        turn={forkTurn}
         runId={forkTarget?.runId ?? ""}
         onFork={(mode) => (forkTarget ? forkChat(forkTarget.chatId, forkTarget.runId, mode) : Promise.reject(new Error("no turn selected")))}
         onForked={onOpenForkedChat}

@@ -50,6 +50,7 @@ export function ForkChatDialog({
   open,
   onOpenChange,
   chatTitle,
+  turn,
   runId,
   onFork,
   onForked,
@@ -58,6 +59,8 @@ export function ForkChatDialog({
   onOpenChange: (open: boolean) => void;
   /** The chat being forked, named in the dialog body like the archive confirm does. */
   chatTitle: string;
+  /** The 1-based turn being forked; when given the title line names it. */
+  turn?: number;
   /** The turn to fork at -- also what resets the fallback offer when the target changes. */
   runId: string;
   onFork: (mode: ForkMode) => Promise<Chat>;
@@ -98,7 +101,7 @@ export function ForkChatDialog({
       title="Fork from here"
       description={
         <>
-          <span className="font-medium text-foreground">{chatTitle}</span>
+          <span className="font-medium text-foreground">{turn ? `From "${chatTitle}", turn ${turn}` : chatTitle}</span>
           <p className="mt-2">
             {unavailable
               ? `The agent's own session cannot be branched here (${forkReasonLabel(unavailable.reason)}). You can start a new chat that carries a short account of the earlier turns instead: the agent will not remember tool calls or its reasoning.`

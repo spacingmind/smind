@@ -106,6 +106,17 @@ describe("ForkChatDialog", () => {
   });
 });
 
+describe("ForkChatDialog heading line", () => {
+  it("names the turn when given, else the bare chat title", () => {
+    const props = { open: true, onOpenChange: vi.fn(), chatTitle: CHAT.Title, runId: "run-1", onFork: () => Promise.reject(new Error("x")) };
+    const { unmount } = render(<ForkChatDialog {...props} turn={3} />);
+    expect(screen.getByText(`From "Refactor the parser", turn 3`)).toBeInTheDocument();
+    unmount();
+    render(<ForkChatDialog {...props} />);
+    expect(screen.getByText("Refactor the parser")).toBeInTheDocument();
+  });
+});
+
 describe("forkReasonLabel", () => {
   it.each([
     ["fork_unsupported", "this agent has no session fork"],
