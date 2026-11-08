@@ -22,6 +22,15 @@ import (
 // collection time; with it off startReview takes the single-seat path
 // untouched.
 
+// logIgnored logs an error the caller deliberately does not act on: a failed
+// write on a path that is already failing closed. Nothing on the passes' paths
+// drops an error without saying so.
+func logIgnored(op string, err error, attrs ...any) {
+	if err != nil {
+		slog.Warn("steward: "+op, append([]any{"err", err}, attrs...)...)
+	}
+}
+
 // passPlanEntry is one axis pass and the limits it runs under.
 type passPlanEntry struct {
 	axis   steward.Axis
@@ -81,9 +90,17 @@ func (h *stewardHost) openPasses(reviewID int64, cfg config.StewardConfig) error
 // against the head (D11), and the rest start together.
 func (h *stewardHost) startPasses(id int64, lead store.Task, d steward.Digest, dsha, sha string, cfg config.StewardConfig) (reviewResult, error) {
 	res := reviewResult{ReviewID: id, TaskID: lead.ID, CommitSHA: sha, Status: "running"}
-	before, _ := validation.Take(h.ctx, *lead.WorktreePath)
 	if err := h.db.SetStewardReviewStatus(id, "running"); err != nil {
 		return res, err
+	}
+	// The scope check compares the Lead's worktree with this snapshot after the
+	// seats run: without one the comparison would be wrong, so scope is unknown
+	// and nothing starts.
+	before, err := h.snapshot(h.ctx, *lead.WorktreePath)
+	if err != nil {
+		logIgnored("block the passes: the lead worktree snapshot failed", err, "review", id)
+		h.failPasses(id, "crashed", "the lead's worktree could not be read before the seats started")
+		return res, nil
 	}
 
 	if !d.Spec.HasSpec() {
@@ -101,8 +118,9 @@ func (h *stewardHost) startPasses(id int64, lead store.Task, d steward.Digest, d
 		if err != nil || pass.Status != steward.PassPending {
 			continue
 		}
-		if err := h.startPassSeat(id, p.axis, p.limits, lead, d, dsha, sha, before); err != nil {
-			_ = h.svc.WritePassBlocked(id, p.axis, "crashed", "the steward seat could not be started", 0)
+		if err := h.startPassSeat(id, p.axis, p.limits, lead, d, dsha, sha, before, cfg.Standards.Files); err != nil {
+			slog.Warn("steward: a pass could not be started", "review", id, "axis", p.axis, "err", err)
+			logIgnored("block a pass that could not be started", h.svc.WritePassBlocked(id, p.axis, "crashed", "the steward seat could not be started", 0), "review", id, "axis", p.axis)
 		}
 	}
 	return res, nil
@@ -113,7 +131,7 @@ func (h *stewardHost) startPasses(id int64, lead store.Task, d steward.Digest, d
 // seat's run under the pass's own watcher. The seat entry exists before
 // reg.Start so the permission floor and the MCP env hook are there for the
 // run's first permission.
-func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.StewardPassLimits, lead store.Task, d steward.Digest, dsha, sha string, before validation.Snapshot) error {
+func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.StewardPassLimits, lead store.Task, d steward.Digest, dsha, sha string, before validation.Snapshot, standardsExtra []string) error {
 	prof, err := h.passProfile(limits.Profile)
 	if err != nil {
 		return err
@@ -141,13 +159,9 @@ func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.S
 		return err
 	}
 	// The scratch tree is the PR's head checkout: whatever a seat's CLI would
-	// load on its own from it (.claude, .mcp.json) is removed, and the Standards
-	// pass also loses the head copies of the standards files.
-	prune := steward.HeadAutoloadPaths
-	if axis == steward.AxisStandards {
-		prune = steward.StandardsPrunePaths(h.standardsExtra())
-	}
-	if err := steward.PruneScratch(*task.WorktreePath, prune); err != nil {
+	// load on its own from it, at any depth, is removed, and the Standards pass
+	// also loses the head copies of the standards files (steward.PruneSpecFor).
+	if err := steward.PruneScratch(*task.WorktreePath, steward.PruneSpecFor(axis, standardsExtra)); err != nil {
 		return err
 	}
 	if axis == steward.AxisStandards {
@@ -177,7 +191,7 @@ func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.S
 		h.forget(task.ID)
 		return err
 	}
-	_ = h.db.SetStewardPassRun(id, string(axis), runID, task.ID, *task.WorktreePath)
+	logIgnored("record the pass's run", h.db.SetStewardPassRun(id, string(axis), runID, task.ID, *task.WorktreePath), "review", id, "axis", axis)
 
 	w := &steward.Watch{
 		Svc: h.svc, ReviewID: id, StewardTaskID: task.ID, Axis: axis,
@@ -188,20 +202,13 @@ func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.S
 			return validation.Take(context.Background(), *lead.WorktreePath)
 		},
 	}
+	h.watches.Add(1)
 	go func() {
+		defer h.watches.Done()
 		defer h.forget(task.ID)
 		w.Run(h.ctx, h.watchPeriod)
 	}()
 	return nil
-}
-
-// standardsExtra is the human-configured extra standards paths.
-func (h *stewardHost) standardsExtra() []string {
-	cfg, err := h.config()
-	if err != nil {
-		return nil
-	}
-	return cfg.Standards.Files
 }
 
 // blockOpenPasses closes every open pass of a review whose row was closed
@@ -209,11 +216,31 @@ func (h *stewardHost) standardsExtra() []string {
 func (h *stewardHost) blockOpenPasses(reviewID int64, reason, summary string) {
 	passes, err := h.db.ListStewardReviewPasses(reviewID)
 	if err != nil {
+		logIgnored("list the passes to close", err, "review", reviewID)
 		return
 	}
 	for _, p := range passes {
 		if p.Status == steward.PassPending || p.Status == steward.PassRunning {
-			_ = h.db.SetStewardPassBlocked(reviewID, p.Axis, reason, summary, p.CostUSD, time.Now())
+			logIgnored("close an open pass", h.db.SetStewardPassBlocked(reviewID, p.Axis, reason, summary, p.CostUSD, time.Now()), "review", reviewID, "axis", p.Axis)
+		}
+	}
+}
+
+// failPasses ends every open pass of a still-open review as blocked through
+// the service, so the review is decided as soon as the last one is written
+// (BLOCKED when no pass produced a verdict).
+func (h *stewardHost) failPasses(reviewID int64, reason, summary string) {
+	passes, err := h.db.ListStewardReviewPasses(reviewID)
+	if err != nil {
+		logIgnored("list the passes to fail", err, "review", reviewID)
+		return
+	}
+	for _, p := range passes {
+		if p.Status != steward.PassPending && p.Status != steward.PassRunning {
+			continue
+		}
+		if err := h.svc.WritePassBlocked(reviewID, steward.Axis(p.Axis), reason, summary, p.CostUSD); err != nil && !errors.Is(err, steward.ErrVerdictExists) {
+			logIgnored("fail a pass", err, "review", reviewID, "axis", p.Axis)
 		}
 	}
 }
@@ -226,6 +253,7 @@ func (h *stewardHost) cancelPasses(reviewID int64) {
 	h.blockOpenPasses(reviewID, "cancelled", "cancelled by the Human")
 	passes, err := h.db.ListStewardReviewPasses(reviewID)
 	if err != nil {
+		logIgnored("list the passes to stop", err, "review", reviewID)
 		return
 	}
 	for _, p := range passes {

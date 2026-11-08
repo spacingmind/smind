@@ -85,6 +85,12 @@ type stewardHost struct {
 	profReg *profiles.Registry
 	config  func() (config.StewardConfig, error)
 
+	// snapshot reads the Lead's worktree before the seats start (a test hook).
+	snapshot func(ctx context.Context, dir string) (validation.Snapshot, error)
+	// watches counts the running watcher goroutines, so a test can wait for
+	// them to finish instead of sleeping.
+	watches sync.WaitGroup
+
 	mu    sync.Mutex
 	seats map[int64]stewardSeatEntry // by steward task id
 
@@ -107,7 +113,7 @@ func newStewardHost(o stewardHostOptions) *stewardHost {
 		o.Config = configSteward
 	}
 	h := &stewardHost{svc: o.Svc, rails: o.Rails, collect: o.Collect, wm: o.WM, db: o.DB, reg: o.Reg, runner: o.Runner, profReg: o.ProfReg, config: o.Config,
-		seats: map[int64]stewardSeatEntry{}, watchPeriod: o.WatchPeriod, recheckPeriod: o.RecheckPeriod, ctx: o.Ctx}
+		snapshot: validation.Take, seats: map[int64]stewardSeatEntry{}, watchPeriod: o.WatchPeriod, recheckPeriod: o.RecheckPeriod, ctx: o.Ctx}
 	o.Reg.SetSeatSource(h.seatSource)
 	// The tokens are memory-only, so an open review can never resume after a
 	// restart: close every row the previous daemon left open.
@@ -116,6 +122,15 @@ func newStewardHost(o stewardHostOptions) *stewardHost {
 			_ = o.Svc.WriteBlocked(row.ID, "crashed", "the daemon restarted while the review was open", 0)
 			h.blockOpenPasses(row.ID, "crashed", "the daemon restarted while the review was open")
 		}
+	}
+	// A pass can also be left open under a review that was already closed (a
+	// failed write in a watch): close those too.
+	if orphans, err := o.DB.ListOpenPassesOfClosedReviews(); err == nil {
+		for _, p := range orphans {
+			logIgnored("close an orphaned pass", o.DB.SetStewardPassBlocked(p.ReviewID, p.Axis, "crashed", "the pass was left open under a closed review", p.CostUSD, time.Now()), "review", p.ReviewID, "axis", p.Axis)
+		}
+	} else {
+		logIgnored("list orphaned passes", err)
 	}
 	return h
 }
@@ -220,9 +235,16 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 	// ADR-0054: a review whose inputs carry the two-axis section (the
 	// collector read steward.twoAxis as on) runs two passes, not one seat.
 	if in.TwoAxis != nil {
-		cfg, _ := h.config()
+		// Fail closed: the standards paths pruned from the head checkout come
+		// from this config, so an unreadable one blocks the review.
+		cfg, err := h.config()
+		if err != nil {
+			logIgnored("block a review whose config is unreadable", h.svc.WriteBlocked(id, "crashed", "the steward config could not be read", 0), "review", id)
+			h.blockOpenPasses(id, "crashed", "the steward config could not be read")
+			return reviewResult{}, fmt.Errorf("%s: read the steward config: %w", m, err)
+		}
 		if err := h.openPasses(id, cfg); err != nil {
-			_ = h.svc.WriteBlocked(id, "crashed", "the review passes could not be opened", 0)
+			logIgnored("block a review whose passes could not be opened", h.svc.WriteBlocked(id, "crashed", "the review passes could not be opened", 0), "review", id)
 			h.blockOpenPasses(id, "crashed", "the review passes could not be opened")
 			return reviewResult{}, fmt.Errorf("%s: open the passes: %w", m, err)
 		}
@@ -286,7 +308,12 @@ func (h *stewardHost) recheck(id, taskID int64, lead store.Task, prof store.Agen
 			return
 		}
 		if in.TwoAxis != nil {
-			cfg, _ := h.config()
+			cfg, err := h.config()
+			if err != nil {
+				logIgnored("block a pending review whose config is unreadable", h.svc.WriteBlocked(id, "crashed", "the steward config could not be read", 0), "review", id)
+				h.blockOpenPasses(id, "crashed", "the steward config could not be read")
+				return
+			}
 			if _, err := h.startPasses(id, lead, d, dsha, sha, cfg); err != nil {
 				slog.Warn("steward review passes", "review", id, "err", err)
 			}
@@ -366,7 +393,9 @@ func (h *stewardHost) startSeat(id int64, lead store.Task, prof store.AgentProfi
 			return validation.Take(context.Background(), *lead.WorktreePath)
 		},
 	}
+	h.watches.Add(1)
 	go func() {
+		defer h.watches.Done()
 		defer h.forget(task.ID)
 		w.Run(h.ctx, h.watchPeriod)
 	}()

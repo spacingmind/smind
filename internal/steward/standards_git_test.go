@@ -204,47 +204,172 @@ func TestStandards_HeadSmindStandardsDirIsReplacedNotFollowed(t *testing.T) {
 	})
 }
 
-// TestStandards_PruneScratchRemovesHeadStandardsAndAutoloads: the Standards
-// seat cannot read a head standards file, and neither seat finds a .claude
-// directory or .mcp.json to load; a symlink is removed, never followed.
-func TestStandards_PruneScratchRemovesHeadStandardsAndAutoloads(t *testing.T) {
-	scratch, outside := t.TempDir(), t.TempDir()
-	if err := os.WriteFile(filepath.Join(outside, "keep.md"), []byte("keep"), 0o644); err != nil {
+// pruneFixture builds a scratch tree with an outside directory holding files
+// that must survive, and helpers to plant things.
+type pruneFixture struct {
+	t                *testing.T
+	scratch, outside string
+}
+
+func newPruneFixture(t *testing.T) pruneFixture {
+	t.Helper()
+	f := pruneFixture{t: t, scratch: t.TempDir(), outside: t.TempDir()}
+	for _, name := range []string{"CONTRIBUTING.md", "PULL_REQUEST_TEMPLATE.md", "settings.json", "AGENTS.md", "CLAUDE.md", "keep.md"} {
+		f.writeFile(filepath.Join(f.outside, name), "OUTSIDE")
+	}
+	return f
+}
+
+func (f pruneFixture) writeFile(path, content string) {
+	f.t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f pruneFixture) symlink(rel, target string) {
+	f.t.Helper()
+	full := filepath.Join(f.scratch, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.Symlink(target, full); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f pruneFixture) outsideIntact() {
+	f.t.Helper()
+	for _, name := range []string{"CONTRIBUTING.md", "PULL_REQUEST_TEMPLATE.md", "settings.json", "AGENTS.md", "CLAUDE.md", "keep.md"} {
+		if got, err := os.ReadFile(filepath.Join(f.outside, name)); err != nil || string(got) != "OUTSIDE" {
+			f.t.Fatalf("outside/%s = %q, %v; the prune reached outside the scratch tree", name, got, err)
+		}
+	}
+}
+
+func (f pruneFixture) gone(rel string) {
+	f.t.Helper()
+	if _, err := os.Lstat(filepath.Join(f.scratch, filepath.FromSlash(rel))); err == nil {
+		f.t.Fatalf("%s survived the prune", rel)
+	}
+}
+
+func (f pruneFixture) present(rel string) {
+	f.t.Helper()
+	if _, err := os.Lstat(filepath.Join(f.scratch, filepath.FromSlash(rel))); err != nil {
+		f.t.Fatalf("%s was removed: %v", rel, err)
+	}
+}
+
+// TestStandards_PruneNeverFollowsASymlinkedParent: a change can commit `docs`,
+// `.github` or `.claude` as a symlink to a directory outside the tree. The
+// prune removes the symlink itself and never deletes what it points at.
+func TestStandards_PruneNeverFollowsASymlinkedParent(t *testing.T) {
+	f := newPruneFixture(t)
+	f.symlink("docs", f.outside)    // docs/CONTRIBUTING.md is a default standards path
+	f.symlink(".github", f.outside) // .github/PULL_REQUEST_TEMPLATE.md too
+	f.symlink(".claude", f.outside) // an autoload directory
+	f.symlink("sub", f.outside)     // reached by a configured path
+	f.symlink("linkdir", f.outside) // a symlinked directory the by-name walk must not descend into
+	f.writeFile(filepath.Join(f.scratch, "main.go"), "package x")
+
+	spec := PruneSpecFor(AxisStandards, []string{"sub/CLAUDE.md", "docs/extra/deep.md"})
+	if err := PruneScratch(f.scratch, spec); err != nil {
 		t.Fatal(err)
 	}
-	must := func(err error) {
-		t.Helper()
-		if err != nil {
+	f.outsideIntact()
+	f.gone("docs")
+	f.gone(".github")
+	f.gone(".claude")
+	f.gone("sub") // a configured path went through it: the link is removed, the target untouched
+	f.present("linkdir")
+	f.present("main.go")
+}
+
+func TestStandards_PruneRemovesAutoloadsAtAnyDepthAndCase(t *testing.T) {
+	f := newPruneFixture(t)
+	for _, rel := range []string{
+		"AGENTS.md", "agents.md", "sub/Agents.MD", "a/b/c/AGENTS.md",
+		"CLAUDE.md", "claude.md", "sub/CLAUDE.md", "sub/CLAUDE.local.md", "sub/Claude.Local.md",
+		".claude/settings.json", "sub/.claude/settings.json", "sub/.CLAUDE/x", ".mcp.json", "sub/.mcp.json",
+		".codex/config.toml", ".gemini/settings.json", "sub/.cursor/rules", ".opencode/o.json", "GEMINI.md", ".cursorrules",
+	} {
+		f.writeFile(filepath.Join(f.scratch, filepath.FromSlash(rel)), "planted")
+	}
+	f.writeFile(filepath.Join(f.scratch, "main.go"), "package x")
+	f.writeFile(filepath.Join(f.scratch, "docs", "notes.md"), "notes")
+	f.writeFile(filepath.Join(f.scratch, ".git"), "gitdir: elsewhere") // the worktree's own file
+	f.symlink("link-to-outside-agents.md", filepath.Join(f.outside, "AGENTS.md"))
+	f.symlink("AGENTS.md.link", f.outside)
+	f.symlink("nested/CLAUDE.md", filepath.Join(f.outside, "CLAUDE.md"))
+
+	for _, axis := range []Axis{AxisStandards, AxisSpec} {
+		if err := PruneScratch(f.scratch, PruneSpecFor(axis, nil)); err != nil {
 			t.Fatal(err)
 		}
-	}
-	must(os.WriteFile(filepath.Join(scratch, "AGENTS.md"), []byte("head"), 0o644))
-	must(os.Symlink(filepath.Join(outside, "keep.md"), filepath.Join(scratch, "CLAUDE.md")))
-	must(os.MkdirAll(filepath.Join(scratch, ".claude"), 0o755))
-	must(os.WriteFile(filepath.Join(scratch, ".claude", "settings.json"), []byte("{}"), 0o644))
-	must(os.WriteFile(filepath.Join(scratch, ".mcp.json"), []byte("{}"), 0o644))
-	must(os.WriteFile(filepath.Join(scratch, "main.go"), []byte("package x"), 0o644))
-
-	must(PruneScratch(scratch, append(StandardsPrunePaths([]string{"docs/STYLE.md", "../escape"}), "/etc/passwd")))
-	for _, p := range []string{"AGENTS.md", "CLAUDE.md", ".claude", ".mcp.json"} {
-		if _, err := os.Lstat(filepath.Join(scratch, p)); err == nil {
-			t.Fatalf("%s survived the prune", p)
+		for _, gone := range []string{
+			"AGENTS.md", "agents.md", "sub/Agents.MD", "a/b/c/AGENTS.md", "CLAUDE.md", "claude.md", "sub/CLAUDE.md", "sub/CLAUDE.local.md",
+			"sub/Claude.Local.md", ".claude", "sub/.claude", "sub/.CLAUDE", ".mcp.json", "sub/.mcp.json", ".codex", ".gemini", "sub/.cursor",
+			".opencode", "GEMINI.md", ".cursorrules", "nested/CLAUDE.md",
+		} {
+			f.gone(gone)
 		}
+		f.present("main.go")
+		f.present("docs/notes.md")
+		f.present(".git")
+		f.present("link-to-outside-agents.md") // not a pruned name: left as a link, never followed
+		f.present("AGENTS.md.link")
+		f.outsideIntact()
 	}
-	if _, err := os.Stat(filepath.Join(scratch, "main.go")); err != nil {
-		t.Fatal("the prune removed an ordinary file")
+}
+
+// TestStandards_PruneStandardsOnlyRemovesTheDefaultPathsForTheStandardsPass:
+// the head copies of the default and configured standards files go from the
+// Standards pass's tree only.
+func TestStandards_PruneStandardsOnlyRemovesTheDefaultPathsForTheStandardsPass(t *testing.T) {
+	for axis, wantGone := range map[Axis]bool{AxisStandards: true, AxisSpec: false} {
+		f := newPruneFixture(t)
+		for _, rel := range []string{"CONTRIBUTING.md", "docs/CONTRIBUTING.md", ".github/PULL_REQUEST_TEMPLATE.md", "docs/STYLE.md", "docs/other.md"} {
+			f.writeFile(filepath.Join(f.scratch, filepath.FromSlash(rel)), "head")
+		}
+		if err := PruneScratch(f.scratch, PruneSpecFor(axis, []string{"docs/STYLE.md", "../escape", "/etc/passwd"})); err != nil {
+			t.Fatal(err)
+		}
+		for _, rel := range []string{"CONTRIBUTING.md", "docs/CONTRIBUTING.md", ".github/PULL_REQUEST_TEMPLATE.md", "docs/STYLE.md"} {
+			if _, err := os.Lstat(filepath.Join(f.scratch, filepath.FromSlash(rel))); (err != nil) != wantGone {
+				t.Fatalf("%s pass: %s gone = %v, want %v", axis, rel, err != nil, wantGone)
+			}
+		}
+		f.present("docs/other.md")
 	}
-	if got, _ := os.ReadFile(filepath.Join(outside, "keep.md")); string(got) != "keep" {
-		t.Fatal("the prune followed a symlink")
+}
+
+// TestStandards_CopyIntoANestedPlantedSymlinkNeverEscapes: the copy writes into
+// a freshly created directory, so a head checkout that planted a symlink deeper
+// under .smind-standards cannot redirect a write.
+func TestStandards_CopyIntoANestedPlantedSymlinkNeverEscapes(t *testing.T) {
+	isolateGitConfig(t)
+	ctx := context.Background()
+	dir, commit := newRepo(t)
+	base := commit(t, dir, "docs/STYLE.md", "base style\n", "style")
+	files, err := StandardsAtBase(ctx, dir, base, []string{"docs/STYLE.md"})
+	if err != nil || len(files) != 1 {
+		t.Fatal(files, err)
 	}
-	// The spec pass keeps the head's standards files but loses the autoloads.
-	must(os.WriteFile(filepath.Join(scratch, "AGENTS.md"), []byte("head"), 0o644))
-	must(os.MkdirAll(filepath.Join(scratch, ".claude"), 0o755))
-	must(PruneScratch(scratch, HeadAutoloadPaths))
-	if _, err := os.Stat(filepath.Join(scratch, "AGENTS.md")); err != nil {
-		t.Fatal("the autoload prune removed AGENTS.md")
+	f := newPruneFixture(t)
+	f.symlink(".smind-standards/docs", f.outside)
+	if err := WriteStandardsCopies(ctx, dir, base, f.scratch, files); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(scratch, ".claude")); err == nil {
-		t.Fatal(".claude survived the autoload prune")
+	f.outsideIntact()
+	if _, err := os.Stat(filepath.Join(f.outside, "STYLE.md")); err == nil {
+		t.Fatal("a copy was written through a planted nested symlink")
+	}
+	got, err := os.ReadFile(filepath.Join(f.scratch, StandardsDir, "docs", "STYLE.md"))
+	if err != nil || string(got) != "base style\n" {
+		t.Fatalf("copy = %q, %v", got, err)
 	}
 }

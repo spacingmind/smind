@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/spacingmind/smind/internal/config"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -192,30 +193,114 @@ func (s *StandardsSection) FileInputs() []StandardsFileInput {
 	return out
 }
 
-// PruneScratch removes the given repository-relative paths from a seat's
-// scratch tree (the PR's head checkout): a symlink is removed, never followed.
-// The Standards pass prunes the head copies of the standards files, so the
-// only standards it can read are the base copies, and both passes prune what
-// a seat's CLI would load on its own as settings or tools (.claude,
-// .mcp.json), which a change must not be able to plant.
-func PruneScratch(scratch string, paths []string) error {
-	for _, p := range paths {
+// PruneSpec is what a seat loses from its scratch tree, the PR's head
+// checkout. Paths are exact repository-relative paths; Names are base names
+// removed at any depth, matched case-insensitively.
+type PruneSpec struct {
+	Paths []string
+	Names []string
+}
+
+// autoloadNames are the base names, at any depth, that a seat's CLI would load
+// on its own as instructions, settings or tools, or that pose as the
+// repository's standards: Claude's CLAUDE.md, CLAUDE.local.md, .claude and
+// .mcp.json, the other providers' instruction files and directories, and
+// AGENTS.md. A change must not be able to plant any of them. The Spec seat does
+// not need AGENTS.md in its tree (the Standards axis judges it, and the Spec
+// seat sees what the change touches in the digest), so both passes lose it.
+var autoloadNames = []string{
+	"claude.md", "claude.local.md", ".claude", ".mcp.json",
+	".codex", ".gemini", "gemini.md", ".cursor", ".cursorrules", ".opencode",
+	"agents.md",
+}
+
+// PruneSpecFor is what a pass loses: the autoload names at any depth for both
+// axes, and for the Standards pass also the head copies of the default and the
+// configured standards files, so the only standards it can read are the base
+// copies.
+func PruneSpecFor(axis Axis, extraStandards []string) PruneSpec {
+	spec := PruneSpec{Names: append([]string{}, autoloadNames...)}
+	if axis == AxisStandards {
+		spec.Paths = append(append([]string{}, DefaultStandardsFiles...), extraStandards...)
+	}
+	return spec
+}
+
+// PruneScratch removes what spec names from a seat's scratch tree and never
+// follows a symlink: a symlink met at any component of a path, parent or last,
+// is removed itself and the walk stops there, and the by-name walk does not
+// descend into symlinked directories. Nothing whose parent resolves outside
+// scratch is ever touched. The seat has not started yet, so nothing else is
+// changing the tree.
+func PruneScratch(scratch string, spec PruneSpec) error {
+	for _, p := range spec.Paths {
 		if !config.SafeRepoPath(p) {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(scratch, filepath.FromSlash(p))); err != nil {
+		if err := removeNoFollow(scratch, p); err != nil {
 			return err
 		}
 	}
-	return nil
+	if len(spec.Names) == 0 {
+		return nil
+	}
+	names := make(map[string]bool, len(spec.Names))
+	for _, n := range spec.Names {
+		names[strings.ToLower(n)] = true
+	}
+	return filepath.WalkDir(scratch, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if p == scratch {
+			return nil
+		}
+		if d.Name() == ".git" {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !names[strings.ToLower(d.Name())] {
+			return nil
+		}
+		// d is an entry of a real directory WalkDir reached without following a
+		// symlink, so removing it (a symlink is unlinked, a directory tree is
+		// removed entry by entry) cannot leave scratch.
+		if err := os.RemoveAll(p); err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	})
 }
 
-// HeadAutoloadPaths are the paths in a head checkout that a seat's CLI would
-// load on its own; both passes prune them.
-var HeadAutoloadPaths = []string{".claude", ".mcp.json"}
-
-// StandardsPrunePaths is every path the Standards pass removes from its head
-// checkout: the default and configured standards files and HeadAutoloadPaths.
-func StandardsPrunePaths(extra []string) []string {
-	return append(append(append([]string{}, DefaultStandardsFiles...), extra...), HeadAutoloadPaths...)
+// removeNoFollow removes rel (a safe repository-relative path) under root,
+// walking it one component at a time with Lstat: the first symlink on the way
+// is removed itself and nothing behind it is touched.
+func removeNoFollow(root, rel string) error {
+	cur := root
+	parts := strings.Split(rel, "/")
+	for i, part := range parts {
+		next := filepath.Join(cur, part)
+		fi, err := os.Lstat(next)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		switch {
+		case fi.Mode()&os.ModeSymlink != 0:
+			return os.Remove(next)
+		case i == len(parts)-1:
+			return os.RemoveAll(next)
+		case !fi.IsDir():
+			return nil
+		}
+		cur = next
+	}
+	return nil
 }

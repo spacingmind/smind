@@ -3,14 +3,17 @@ package wsapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/validation"
 )
 
 // The two-axis review's end-to-end tests (ADR-0054 P2), with a fake LLM: the
@@ -94,15 +97,11 @@ func (e *stewardHostEnv) pass(t *testing.T, id int64, axis steward.Axis) store.S
 // started run).
 func (e *stewardHostEnv) waitPass(t *testing.T, id int64, axis steward.Axis, status string) store.StewardReviewPass {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if p, err := e.db.GetStewardReviewPass(id, string(axis)); err == nil && p.Status == status && (status != steward.PassRunning || (p.RunID != "" && p.StewardTaskID != 0)) {
-			return p
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("pass %s of review %d did not reach %q: %+v", axis, id, status, e.pass(t, id, axis))
-	return store.StewardReviewPass{}
+	poll(t, 10*time.Second, "the "+string(axis)+" pass to be "+status, func() bool {
+		p, err := e.db.GetStewardReviewPass(id, string(axis))
+		return err == nil && p.Status == status && (status != steward.PassRunning || (p.RunID != "" && p.StewardTaskID != 0))
+	})
+	return e.pass(t, id, axis)
 }
 
 func passRC(p store.StewardReviewPass) *requestContext {
@@ -201,14 +200,16 @@ func TestTwoAxisE2E_BothAcceptedStoresAccepted(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(spec.ScratchDir, steward.StandardsDir)); err == nil {
 		t.Fatal("the spec seat's tree carries a standards copy")
 	}
-	// The Standards seat's tree has no head standards file to read (only the base
-	// copies); the Spec seat's tree keeps the head files. Neither carries a
-	// .claude directory.
-	if _, err := os.Stat(filepath.Join(std.ScratchDir, "AGENTS.md")); err == nil {
-		t.Fatal("the standards seat can read the head's AGENTS.md")
-	}
-	if got, err := os.ReadFile(filepath.Join(spec.ScratchDir, "AGENTS.md")); err != nil || string(got) != twoAxisHeadRules {
-		t.Fatalf("the spec seat's AGENTS.md = %q, %v; want the head file", got, err)
+	// Neither tree carries a head AGENTS.md (the Standards seat reads only the
+	// base copies, and the head's edit reaches the Spec seat through the
+	// digest), and the ordinary files of the checkout are still there.
+	for _, p := range []store.StewardReviewPass{std, spec} {
+		if _, err := os.Stat(filepath.Join(p.ScratchDir, "AGENTS.md")); err == nil {
+			t.Fatalf("the %s seat can read the head's AGENTS.md", p.Axis)
+		}
+		if _, err := os.Stat(filepath.Join(p.ScratchDir, "scenario")); err != nil {
+			t.Fatalf("the %s seat's tree lost an ordinary file: %v", p.Axis, err)
+		}
 	}
 	// Each seat reads the digest through its own run.
 	for _, p := range []store.StewardReviewPass{std, spec} {
@@ -397,7 +398,7 @@ func TestTwoAxisE2E_CancelWritesBothRowsBeforeStoppingAndIsNotACrash(t *testing.
 		t.Fatalf("review = %+v", row)
 	}
 	// The watches see their runs end after the rows are written: never a crash.
-	time.Sleep(300 * time.Millisecond)
+	e.waitWatches(t)
 	if n, _ := e.db.ConsecutiveStewardFailures(); n != 0 {
 		t.Fatalf("consecutive failures = %d, want 0 (a cancel is not a crash)", n)
 	}
@@ -515,4 +516,88 @@ func TestTwoAxisE2E_GateUnknownStartsNeitherPassUntilCIDecides(t *testing.T) {
 	e.waitPass(t, r.ReviewID, steward.AxisStandards, steward.PassRunning)
 	e.waitPass(t, r.ReviewID, steward.AxisSpec, steward.PassRunning)
 	e.endReview(t, r.ReviewID)
+}
+
+// TestTwoAxisE2E_UnreadableConfigFailsClosed: the standards paths pruned from the
+// head checkout come from the steward config, so a config that cannot be read at
+// start blocks the review: no seat starts, no pass is left open.
+func TestTwoAxisE2E_UnreadableConfigFailsClosed(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.enableTwoAxis(t, twoAxisOpts{withSpec: true})
+	e.wireHeadAndContract()
+	e.bindSteward(t)
+	e.cfgErr = errors.New("config.yaml: unreadable")
+	if _, err := budgetCall(t, e.api, &requestContext{local: true}, "steward.review", map[string]any{"taskId": e.seatTask.ID}); err == nil {
+		t.Fatal("a review started with an unreadable config")
+	}
+	rows, err := e.db.ListStewardReviews(e.seatTask.ID, 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("reviews = %+v, %v", rows, err)
+	}
+	if rows[0].Status != "blocked" || rows[0].BlockedReason != "crashed" {
+		t.Fatalf("review = %+v, want blocked/crashed", rows[0])
+	}
+	passes, _ := e.db.ListStewardReviewPasses(rows[0].ID)
+	for _, p := range passes {
+		if p.Status != steward.PassBlocked || p.StewardTaskID != 0 {
+			t.Fatalf("%s pass = %+v, want closed with no seat", p.Axis, p)
+		}
+	}
+}
+
+// TestTwoAxisE2E_SnapshotFailureBlocksTheReview: the scope check compares the
+// Lead's worktree with a snapshot taken before the seats start; without one the
+// comparison would be wrong, so nothing starts and the review is decided.
+func TestTwoAxisE2E_SnapshotFailureBlocksTheReview(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.host.snapshot = func(context.Context, string) (validation.Snapshot, error) {
+		return validation.Snapshot{}, errors.New("git status failed")
+	}
+	e.enableTwoAxis(t, twoAxisOpts{withSpec: true})
+	e.wireHeadAndContract()
+	e.bindSteward(t)
+	r := e.reviewViaRPC(t, &requestContext{local: true})
+	row := e.waitStatus(t, r.ReviewID, "blocked")
+	if row.Verdict != steward.VerdictBlocked || row.BlockedReason != "crashed" {
+		t.Fatalf("review = %+v, want BLOCKED/crashed", row)
+	}
+	for _, axis := range []steward.Axis{steward.AxisStandards, steward.AxisSpec} {
+		if p := e.pass(t, r.ReviewID, axis); p.Status != steward.PassBlocked || p.StewardTaskID != 0 || p.RunID != "" {
+			t.Fatalf("%s pass = %+v, want closed before any seat", axis, p)
+		}
+	}
+}
+
+// TestStewardHost_StartupClosesPassesLeftOpenUnderAClosedReview: a failed write
+// in a watch can leave a pass running under a review that is already closed;
+// the next start closes it.
+func TestStewardHost_StartupClosesPassesLeftOpenUnderAClosedReview(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	row, err := e.db.InsertStewardReview(store.StewardReview{TaskID: e.seatTask.ID, TriggerKind: steward.TriggerHuman, HeadSHA: "h", Status: "pending"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, axis := range []steward.Axis{steward.AxisStandards, steward.AxisSpec} {
+		if _, err := e.db.InsertStewardReviewPass(store.StewardReviewPass{ReviewID: row.ID, Axis: string(axis), Status: steward.PassRunning}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.db.SetStewardReviewBlocked(row.ID, "cancelled", "cancelled", 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if orphans, err := e.db.ListOpenPassesOfClosedReviews(); err != nil || len(orphans) != 2 {
+		t.Fatalf("orphans = %+v, %v; want 2", orphans, err)
+	}
+	newStewardHost(stewardHostOptions{Svc: e.svc, Rails: e.rails, Collect: e.coll.fn, WM: e.wm, DB: e.db, Reg: e.api.Runs, Runner: newTestRunner(e.wm), ProfReg: profiles.New(e.db)})
+	for _, axis := range []steward.Axis{steward.AxisStandards, steward.AxisSpec} {
+		if p := e.pass(t, row.ID, axis); p.Status != steward.PassBlocked || p.BlockedReason != "crashed" {
+			t.Fatalf("%s pass = %+v, want closed as crashed", axis, p)
+		}
+	}
+	if orphans, _ := e.db.ListOpenPassesOfClosedReviews(); len(orphans) != 0 {
+		t.Fatalf("orphans after the reconcile = %+v", orphans)
+	}
 }

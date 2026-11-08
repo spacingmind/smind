@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -133,7 +134,9 @@ func (w *Watch) leadChanged() []string {
 // worktree changed.
 func (w *Watch) postCheck(bool) {
 	if changed := w.leadChanged(); len(changed) > 0 {
-		_ = w.Svc.FlagScopeViolation(w.ReviewID)
+		if err := w.Svc.FlagScopeViolation(w.ReviewID); err != nil {
+			slog.Warn("steward watch: scope violation not flagged", "review", w.ReviewID, "err", err)
+		}
 	}
 }
 
@@ -189,6 +192,7 @@ func (w *Watch) tickPass(dt time.Duration) bool {
 	// The cost only rises, in any status: the verdict usually lands while the
 	// run is still going and its usage row is only complete once it ends.
 	if err := w.Svc.DB.RaiseStewardPassCost(w.ReviewID, string(w.Axis), ps.CostUSD); err != nil {
+		slog.Warn("steward pass watch: cost not recorded", "review", w.ReviewID, "axis", w.Axis, "err", err)
 		return false
 	}
 	passOpen := pass.Status == PassPending || pass.Status == PassRunning
@@ -198,7 +202,17 @@ func (w *Watch) tickPass(dt time.Duration) bool {
 		// The review was decided without this pass (the other pass broke
 		// scope, or the Human cancelled): this run has nothing left to judge.
 		w.stop()
-		_ = w.Svc.DB.SetStewardPassBlocked(w.ReviewID, string(w.Axis), "cancelled", "the review ended before this pass did", ps.CostUSD, w.Svc.now())
+		// Closing the pass is what keeps it from reading as running forever with
+		// no watcher: retry once, and if it still fails keep watching so the next
+		// tick tries again (a restart's reconcile closes it as well).
+		err := w.Svc.DB.SetStewardPassBlocked(w.ReviewID, string(w.Axis), "cancelled", "the review ended before this pass did", ps.CostUSD, w.Svc.now())
+		if err != nil && !errors.Is(err, store.ErrStewardPassClosed) {
+			err = w.Svc.DB.SetStewardPassBlocked(w.ReviewID, string(w.Axis), "cancelled", "the review ended before this pass did", ps.CostUSD, w.Svc.now())
+		}
+		if err != nil && !errors.Is(err, store.ErrStewardPassClosed) {
+			slog.Warn("steward pass watch: the pass could not be closed", "review", w.ReviewID, "axis", w.Axis, "err", err)
+			return false
+		}
 		return true
 	case !passOpen:
 		// The verdict is in; the post-check waits for the run to finish (or
@@ -221,7 +235,9 @@ func (w *Watch) tickPass(dt time.Duration) bool {
 	}
 	if changed := w.leadChanged(); len(changed) > 0 {
 		reason, summary = "scope_violation", scopeSummary(changed)
-		_ = w.Svc.FlagScopeViolation(w.ReviewID)
+		if err := w.Svc.FlagScopeViolation(w.ReviewID); err != nil {
+			slog.Warn("steward pass watch: scope violation not flagged", "review", w.ReviewID, "axis", w.Axis, "err", err)
+		}
 	}
 	if err := w.Svc.WritePassBlocked(w.ReviewID, w.Axis, reason, summary, ps.CostUSD); err != nil && !errors.Is(err, ErrVerdictExists) {
 		return false

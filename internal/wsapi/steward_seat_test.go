@@ -58,7 +58,9 @@ type stewardHostEnv struct {
 	rails *steward.Rails
 	coll  *fakeStewardCollect
 	cfg   config.StewardConfig
-	head  string
+	// cfgErr makes the host's config read fail (the collector's fake ignores it).
+	cfgErr error
+	head   string
 }
 
 func newStewardHostEnv(t *testing.T, ci string) *stewardHostEnv {
@@ -78,7 +80,7 @@ func newStewardHostEnv(t *testing.T, ci string) *stewardHostEnv {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	e.host = newStewardHost(stewardHostOptions{
-		Svc: e.svc, Rails: e.rails, Collect: e.coll.fn, Config: func() (config.StewardConfig, error) { return e.cfg, nil },
+		Svc: e.svc, Rails: e.rails, Collect: e.coll.fn, Config: func() (config.StewardConfig, error) { return e.cfg, e.cfgErr },
 		WM: e.wm, DB: e.db, Reg: e.api.Runs, Runner: newTestRunner(e.wm), ProfReg: profiles.New(e.db),
 		Ctx: ctx, WatchPeriod: 40 * time.Millisecond, RecheckPeriod: 20 * time.Millisecond,
 	})
@@ -99,30 +101,57 @@ func (e *stewardHostEnv) row(t *testing.T, id int64) store.StewardReview {
 	return row
 }
 
+// poll runs cond on a ticker until it holds or the timeout passes; it is the
+// one wait the steward host tests use for "eventually", never a bare sleep.
+func poll(t *testing.T, timeout time.Duration, what string, cond func() bool) {
+	t.Helper()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	deadline := time.After(timeout)
+	for {
+		if cond() {
+			return
+		}
+		select {
+		case <-tick.C:
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+// waitWatches waits until every steward watcher goroutine has returned, so a
+// test can assert on what the watchers did without guessing how long they take.
+func (e *stewardHostEnv) waitWatches(t *testing.T) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		e.host.watches.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the steward watchers did not finish")
+	}
+}
+
 func (e *stewardHostEnv) waitStatus(t *testing.T, id int64, status string) store.StewardReview {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if row, err := e.db.GetStewardReview(id); err == nil && row.Status == status {
-			return row
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("review %d did not reach %q: %+v", id, status, e.row(t, id))
-	return store.StewardReview{}
+	poll(t, 10*time.Second, "review "+status, func() bool {
+		row, err := e.db.GetStewardReview(id)
+		return err == nil && row.Status == status
+	})
+	return e.row(t, id)
 }
 
 func (e *stewardHostEnv) waitSeatStarted(t *testing.T, id int64) store.StewardReview {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if row, err := e.db.GetStewardReview(id); err == nil && row.Status == "running" && row.RunID != "" && row.StewardTaskID != 0 {
-			return row
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("review %d's seat did not start: %+v", id, e.row(t, id))
-	return store.StewardReview{}
+	poll(t, 10*time.Second, "the seat to start", func() bool {
+		row, err := e.db.GetStewardReview(id)
+		return err == nil && row.Status == "running" && row.RunID != "" && row.StewardTaskID != 0
+	})
+	return e.row(t, id)
 }
 
 func (e *stewardHostEnv) endReview(t *testing.T, id int64) {
@@ -457,10 +486,9 @@ func TestStewardCancel_NotRecordedAsCrash(t *testing.T) {
 	}
 	waitRunEnd(t, e.api.Runs, r.RunID)
 	// Watcher ticks after the seat's run ended must leave the row cancelled:
-	// a crash written here would count toward the auto-pause.
-	for i := 0; i < 5; i++ {
-		time.Sleep(e.host.watchPeriod)
-	}
+	// a crash written here would count toward the auto-pause. Wait for the
+	// watcher to finish rather than guess how many ticks it needs.
+	e.waitWatches(t)
 	row := e.row(t, r.ReviewID)
 	if row.Status != "blocked" || row.BlockedReason != "cancelled" || !strings.Contains(row.Summary, "cancelled by the Human") {
 		t.Fatalf("row = %+v", row)
