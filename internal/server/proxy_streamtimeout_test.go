@@ -88,9 +88,22 @@ func timeoutProxy(t *testing.T, upstream *httptest.Server, to upstreamTimeouts) 
 	return srv
 }
 
+// failFast bounds a test's own client so a broken bound fails the test in
+// seconds instead of hanging it.
+var failFast = &http.Client{Timeout: 6 * time.Second}
+
+// blockUntilGone holds an upstream handler until the proxy cancels the request
+// (or a safety limit, so a broken proxy cannot hang the server's Close).
+func blockUntilGone(r *http.Request) {
+	select {
+	case <-r.Context().Done():
+	case <-time.After(8 * time.Second):
+	}
+}
+
 func postMessages(t *testing.T, srv *httptest.Server, body string) *http.Response {
 	t.Helper()
-	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(body))
+	resp, err := failFast.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("Post() error = %v", err)
 	}
@@ -137,8 +150,10 @@ func TestProxy_StalledStreamIsCutByIdleTimeout(t *testing.T) {
 		streamHeaders(w)
 		_, _ = w.Write([]byte("event: ping\n\n"))
 		w.(http.Flusher).Flush()
-		<-r.Context().Done() // stalls until the proxy gives up on it
-		close(cancelled)
+		blockUntilGone(r) // stalls until the proxy gives up on it
+		if r.Context().Err() != nil {
+			close(cancelled)
+		}
 	})
 	srv := timeoutProxy(t, up, upstreamTimeouts{header: time.Second, streamIdle: 150 * time.Millisecond, total: time.Minute})
 	start := time.Now()
@@ -163,7 +178,7 @@ func TestProxy_StalledStreamIsCutByIdleTimeout(t *testing.T) {
 func TestProxy_DeadUpstreamFailsAtHeaderTimeout(t *testing.T) {
 	t.Parallel()
 	var n atomic.Int32
-	up := sseUpstream(t, &n, func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
+	up := sseUpstream(t, &n, func(w http.ResponseWriter, r *http.Request) { blockUntilGone(r) })
 	srv := timeoutProxy(t, up, upstreamTimeouts{header: 150 * time.Millisecond, streamIdle: time.Minute, total: time.Minute})
 	start := time.Now()
 	resp := postMessages(t, srv, `{"stream":true}`)
@@ -197,7 +212,7 @@ func TestProxy_NonStreamingKeepsATotalTimeout(t *testing.T) {
 		}
 	})
 	srv := timeoutProxy(t, up, upstreamTimeouts{header: time.Second, streamIdle: time.Minute, total: 300 * time.Millisecond})
-	resp, err := http.Post(srv.URL+"/v1/messages?slow=1", "application/json", strings.NewReader(`{}`))
+	resp, err := failFast.Post(srv.URL+"/v1/messages?slow=1", "application/json", strings.NewReader(`{}`))
 	if err == nil {
 		defer resp.Body.Close()
 		if b, rerr := io.ReadAll(resp.Body); rerr == nil {
@@ -219,8 +234,10 @@ func TestProxy_ClientDisconnectCancelsUpstream(t *testing.T) {
 		streamHeaders(w)
 		_, _ = w.Write([]byte("event: ping\n\n"))
 		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-		close(cancelled)
+		blockUntilGone(r)
+		if r.Context().Err() != nil {
+			close(cancelled)
+		}
 	})
 	srv := timeoutProxy(t, up, upstreamTimeouts{header: time.Minute, streamIdle: time.Minute, total: time.Minute})
 	ctx, cancel := context.WithCancel(context.Background())
