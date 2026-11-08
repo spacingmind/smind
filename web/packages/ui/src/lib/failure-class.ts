@@ -14,6 +14,8 @@ export interface FailureAction {
   /** `settings:providers?account=<id>` / `?provider=<id>`, `profile:<id>`, or an RFC 3339 time. */
   target?: string;
   label: string;
+  /** The daemon's one plain sentence of what happened (R3a); absent on an older daemon. */
+  summary?: string;
   models?: string[];
   attempt?: number;
   max?: number;
