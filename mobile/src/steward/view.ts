@@ -127,7 +127,7 @@ export function blockedReasonLabel(reason: string | undefined): string {
     case 'scope_violation':
       return 'Scope violation';
     case 'base_unresolved':
-      return 'Merge-base not found';
+      return 'Base commit not found';
     case 'not_run':
       return 'Not run';
     case 'no_spec':
