@@ -5,6 +5,8 @@ export interface HistorySourceInfo {
   source?: RunHistorySource;
   reason?: string;
   canLoadFull?: boolean;
+  /** Loading the full history starts the agent (ACP run): the Load button asks the human first. */
+  loadStartsAgent?: boolean;
 }
 
 /** The note HistorySourceNote renders: which tone of box, the exact sentence, and whether the "Load full history" button may show. */
@@ -34,6 +36,7 @@ const SKELETON_ROWS: Record<string, SkeletonRow> = {
   slice_not_found: { tone: "warning", message: "Showing a summary: this turn could not be matched in the provider's session." },
   format_drift: { tone: "warning", message: "Showing a summary: the provider's session format was not recognised." },
   rebuild_failed: { tone: "warning", message: "Showing a summary: the full history could not be loaded (it may be too large or took too long).", loadable: true },
+  confirm_required: { tone: "info", message: "Showing a summary: loading this history needs your confirmation.", loadable: true },
   rebuild_busy: { tone: "info", message: "Showing a summary: another history is loading. Try again in a moment.", loadable: true },
   excerpt_pruned: { tone: "info", message: "Showing a summary: large tool output was removed after the retention period.", loadable: true },
 };

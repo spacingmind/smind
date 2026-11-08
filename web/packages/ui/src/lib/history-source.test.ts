@@ -53,6 +53,15 @@ describe("describeHistorySource", () => {
     });
   });
 
+  it("confirm_required is an info row the human can act on", () => {
+    expect(describeHistorySource(skeleton("confirm_required", true))).toEqual({
+      tone: "info",
+      message: "Showing a summary: loading this history needs your confirmation.",
+      canLoad: true,
+    });
+    expect(describeHistorySource(skeleton("confirm_required", false)).canLoad).toBe(false);
+  });
+
   it("an unknown reason falls back to the neutral summary sentence", () => {
     expect(describeHistorySource(skeleton("something_new"))).toEqual({ tone: "info", message: "Showing a summary of this run.", canLoad: false });
   });

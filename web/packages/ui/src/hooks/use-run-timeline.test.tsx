@@ -563,6 +563,30 @@ describe("useRunTimeline history source (ADR-0053)", () => {
     expect(result.current.runs?.[0]?.items).toEqual([{ kind: "assistant", id: "assistant-0", text: "the whole answer" }]);
   });
 
+  it("an ACP run (loadStartsAgent) sends confirmStart on the full request and carries the flag from the attach/logs result", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+    client.nth("run.list", 0).resolve([summary()]);
+    await flush();
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", historySource: "skeleton", skeletonReason: "rebuild_not_requested", canLoadFull: true, loadStartsAgent: true, events: [] } satisfies RunLogsResult);
+    });
+    await waitFor(() => expect(result.current.runs?.[0]?.history).toEqual({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true, loadStartsAgent: true }));
+
+    let done!: Promise<void>;
+    await act(async () => {
+      done = result.current.loadFullHistory("run-1");
+      await Promise.resolve();
+    });
+    expect(client.nth("run.logs", 1).params).toEqual({ runId: "run-1", detail: "full", confirmStart: true });
+    await act(async () => {
+      client.nth("run.logs", 1).reject(new Error("socket dropped"));
+      await done;
+    });
+    // A failure keeps the button, and the next click still confirms first.
+    await waitFor(() => expect(result.current.runs?.[0]?.history).toEqual({ source: "skeleton", reason: "rebuild_failed", canLoadFull: true, loadStartsAgent: true, loading: false }));
+  });
+
   it("a degraded full-history answer stays a skeleton with the daemon's reason", async () => {
     const client = new FakeWsClient();
     const { result } = renderHook(() => useRunTimeline(client, 1, 10));

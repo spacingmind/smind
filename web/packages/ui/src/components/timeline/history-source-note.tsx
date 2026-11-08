@@ -1,4 +1,7 @@
+import { useState } from "react";
+
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { describeHistorySource } from "@/lib/history-source";
 import { Icons } from "@/lib/icons";
 import type { RunEntry } from "@/hooks/use-run-timeline";
@@ -14,6 +17,7 @@ import type { RunEntry } from "@/hooks/use-run-timeline";
  * `bg-surface` (the neutral well neighbouring info rows use) for the info tone.
  */
 export function HistorySourceNote({ run, onLoad }: { run: RunEntry; onLoad?: (run: RunEntry) => void }) {
+  const [confirming, setConfirming] = useState(false);
   const history = run.history;
   if (!history || history.source === "full") return null;
   const note = describeHistorySource(history);
@@ -38,12 +42,30 @@ export function HistorySourceNote({ run, onLoad }: { run: RunEntry; onLoad?: (ru
           </p>
           {/* No handler wired means no action to offer -- a button that does nothing reads as broken. */}
           {note.canLoad && onLoad && (
-            <Button type="button" variant="outline" size="xs" data-testid="history-load-full" onClick={() => onLoad(run)}>
+            <Button type="button" variant="outline" size="xs" data-testid="history-load-full" onClick={() => (history.loadStartsAgent ? setConfirming(true) : onLoad(run))}>
               <Icons.history aria-hidden />
               Load full history
             </Button>
           )}
         </>
+      )}
+      {history.loadStartsAgent && onLoad && (
+        <ConfirmDialog
+          open={confirming}
+          onOpenChange={setConfirming}
+          title="Start the agent to load this history?"
+          description="This starts the agent to read this run's history from its own session. It can take up to 30 seconds. No prompt is sent."
+          confirmLabel="Start agent"
+          pending={false}
+          destructive={false}
+          testId="history-load-confirm"
+          confirmTestId="history-load-confirm-start"
+          cancelTestId="history-load-confirm-cancel"
+          onConfirm={() => {
+            setConfirming(false);
+            onLoad(run);
+          }}
+        />
       )}
     </div>
   );
