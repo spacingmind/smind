@@ -117,6 +117,27 @@ describe("StewardReviewCard", () => {
     expect(chip.querySelector("svg")).not.toBeNull();
   });
 
+  it("the inbox row of a loaded partial review has a Partial chip next to the verdict, a full one has none", async () => {
+    for (const [partial, want] of [[true, true], [false, false]] as const) {
+      const d = new StewardDaemon();
+      d.reviews[12] = review({
+        partial,
+        axes: [
+          { axis: "standards", status: "done", seatVerdict: "ACCEPTED", costUsd: 0 },
+          partial ? { axis: "spec", status: "blocked", blockedReason: "not_run", costUsd: 0 } : { axis: "spec", status: "done", seatVerdict: "ACCEPTED", costUsd: 0 },
+        ],
+      });
+      d.items = [{ ...reviewItem(), axes: undefined }];
+      const { unmount } = renderWithDaemon(<InboxScreen onNavigateBack={() => {}} onOpenTask={() => {}} />, d);
+      await flush();
+      const chip = screen.getByTestId("inbox-kind-review:12");
+      await waitFor(() => expect(chip).toHaveTextContent("Changes requested"));
+      // The Partial chip comes from the LOADED review (the item carries no axes here), next to the verdict chip.
+      expect(within(screen.getByTestId("inbox-row-review:12")).queryByTestId("steward-partial-chip") !== null).toBe(want);
+      unmount();
+    }
+  });
+
   it("review card lists failing gates first", async () => {
     await openCard();
     const gates = within(screen.getByTestId("steward-gates")).getAllByRole("listitem");
