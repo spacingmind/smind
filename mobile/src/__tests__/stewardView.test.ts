@@ -193,6 +193,23 @@ describe('axis helpers', () => {
 
   const done = (axis: string, v: string) => ({ axis, status: 'done', seatVerdict: v, costUsd: 0 });
 
+  it('combinedSentence never misstates a decided review', () => {
+    // ACCEPTED beside a pass that did not complete is not "both accepted"; an unknown verdict is not "in progress".
+    expect(combinedSentence({ verdict: 'ACCEPTED', axes: [done('standards', 'ACCEPTED'), { axis: 'spec', status: 'blocked', blockedReason: 'timeout', costUsd: 0 }] })).toBe('Spec did not complete.');
+    expect(combinedSentence({ verdict: 'ACCEPTED', axes: [{ axis: 'standards', status: 'blocked', blockedReason: 'crashed', costUsd: 0 }, { axis: 'spec', status: 'skipped', blockedReason: 'no_spec', costUsd: 0 }] })).toBe('Standards did not complete.');
+    expect(combinedSentence({ verdict: 'ACCEPTED', axes: [{ axis: 'spec', status: 'skipped', blockedReason: 'no_spec', costUsd: 0 }] })).toBe('Review accepted.');
+    expect(combinedSentence({ verdict: 'MAYBE', axes: [done('standards', 'ACCEPTED')] })).toBe('Review finished.');
+    expect(combinedSentence({ verdict: undefined, axes: [done('standards', 'ACCEPTED')] })).toBe('Review in progress.');
+  });
+
+  it('axis chips carry an icon per tone', () => {
+    expect(axisStatusLabel({ status: 'done', seatVerdict: 'ACCEPTED' }).icon).toBe('check');
+    expect(axisStatusLabel({ status: 'done', seatVerdict: 'CHANGES' }).icon).toBe('warning');
+    expect(axisStatusLabel({ status: 'blocked', blockedReason: 'timeout' }).icon).toBe('stop');
+    expect(axisStatusLabel({ status: 'blocked', blockedReason: 'not_run' }).icon).toBe('info');
+    expect(axisStatusLabel({ status: 'running' }).icon).toBe('info');
+  });
+
   it('combinedSentence says in progress while a pass is still open', () => {
     expect(combinedSentence({ verdict: 'ACCEPTED', axes: [done('standards', 'ACCEPTED'), { axis: 'spec', status: 'running', costUsd: 0 }] })).toBe('Review in progress.');
   });

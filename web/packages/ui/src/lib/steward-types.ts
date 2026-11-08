@@ -1,5 +1,5 @@
 /**
- * Wire shapes and pure helpers of the steward review card (`steward.get`, ADR-0047 sections
+ * Wire shapes and pure helpers of the steward review card (the axis helpers have a twin in mobile/src/steward/view.ts: the wording is the same, change both) (`steward.get`, ADR-0047 sections
  * 5, 8 and 9). The daemon computes every gate and clamps the verdict; the card only renders.
  */
 
@@ -174,11 +174,12 @@ export function combinedSentence(review: Pick<StewardReview, "verdict" | "axes" 
   const changes = axes.filter((a) => a.status === "done" && a.seatVerdict === "CHANGES");
   const failed = axes.filter((a) => a.status === "blocked");
   const skipped = axes.filter((a) => a.status === "skipped");
+  const decided = axes.filter((a) => a.status === "done");
   switch (review.verdict) {
     case "ACCEPTED":
-      return skipped.length > 0
-        ? `${names(axes.filter((a) => a.status === "done"))} accepted the change; ${names(skipped).toLowerCase()} had nothing to judge.`
-        : "Both axes accepted the change.";
+      if (failed.length > 0) return `${names(failed)} did not complete.`;
+      if (decided.length === 0) return "Review accepted.";
+      return skipped.length > 0 ? `${names(decided)} accepted the change; ${names(skipped).toLowerCase()} had nothing to judge.` : "Both axes accepted the change.";
     case "CHANGES": {
       const parts: string[] = [];
       if (changes.length > 0) parts.push(`Changes requested by ${names(changes)}.`);
@@ -187,8 +188,11 @@ export function combinedSentence(review: Pick<StewardReview, "verdict" | "axes" 
     }
     case "BLOCKED":
       return "The review was blocked.";
-    default:
+    case undefined:
+    case "":
       return "Review in progress.";
+    default:
+      return "Review finished.";
   }
 }
 

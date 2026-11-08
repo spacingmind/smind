@@ -53,22 +53,16 @@ export function InboxRow({
           </Text>
           {row.axes.length > 0 && (
             <View style={styles.chips}>
-              {row.axes.map((a) => (
-                <AxisChip key={a.axis} text={`${a.label}: ${a.text}`} tone={a.tone} icon={a.icon} />
+              {row.axes.map((a, i) => (
+                <AxisChip key={`${a.axis}:${i}`} text={`${a.label}: ${a.text}`} tone={a.tone} icon={a.icon} />
               ))}
             </View>
           )}
-          {row.kind === 'review' &&
-            row.reviewId !== null &&
-            conn !== undefined &&
-            (row.partial ? (
-              <View style={styles.chips}>
-                <ReviewRowChip conn={conn} reviewId={row.reviewId} />
-                <PartialChip />
-              </View>
-            ) : (
-              <ReviewRowChip conn={conn} reviewId={row.reviewId} />
-            ))}
+          {row.kind === 'review' && row.reviewId !== null && conn !== undefined ? (
+            <ReviewRowChip conn={conn} reviewId={row.reviewId} partial={row.partial} />
+          ) : (
+            row.partial && <PartialChip />
+          )}
           <Text style={styles.time}>{`${row.label} · ${row.time}`}</Text>
         </View>
       </Pressable>

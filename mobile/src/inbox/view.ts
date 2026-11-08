@@ -100,11 +100,15 @@ function rowTone(item: Pick<InboxItem, 'kind' | 'attention'>): InboxTone {
   return item.attention === 'high' ? 'warning' : 'neutral';
 }
 
+/** An item axis as the shared helpers read it: the wire's `reason` is the pass's blocked reason, a missing status is read from the verdict. */
+function itemAxis(a: NonNullable<InboxItem['axes']>[number]): { status: string; seatVerdict?: string; blockedReason?: string } {
+  return { status: a.status ?? (a.verdict ? 'done' : 'pending'), seatVerdict: a.verdict, blockedReason: a.reason };
+}
+
 function axisChips(item: InboxItem): InboxAxisChip[] {
   if (!Array.isArray(item.axes)) return [];
   return item.axes.map((a) => {
-    const status = a.status ?? (a.verdict ? 'done' : 'pending');
-    const chip = axisStatusLabel({ status, seatVerdict: a.verdict, blockedReason: a.reason });
+    const chip = axisStatusLabel(itemAxis(a));
     return { axis: a.axis, label: axisLabel(a.axis), text: chip.text, tone: chip.tone, icon: chip.icon };
   });
 }
@@ -128,7 +132,7 @@ export function inboxRow(item: InboxItem, now: number): InboxRowView {
     unseen: item.state === 'new',
     actions: inboxActions({ ...item, links: item.links ?? {} }),
     axes: axisChips(item),
-    partial: Array.isArray(item.axes) && isPartialAxes(item.axes.map((a) => ({ status: a.status ?? (a.verdict ? 'done' : 'pending'), reason: a.reason }))),
+    partial: Array.isArray(item.axes) && isPartialAxes(item.axes.map(itemAxis)),
   };
 }
 

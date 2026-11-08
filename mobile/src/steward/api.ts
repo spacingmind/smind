@@ -10,12 +10,14 @@ export const STEWARD_READ_METHODS = ['steward.get', 'steward.frame'] as const;
 export async function fetchReview(conn: RelayConnection, reviewId: number): Promise<StewardReview> {
   const res = (await conn.call('steward.get', { reviewId })) as Partial<StewardReview> | null;
   const review: Partial<StewardReview> = res ?? {};
-  return {
+  const out = {
     ...review,
     findings: Array.isArray(review.findings) ? review.findings : [],
     gates: Array.isArray(review.gates) ? review.gates : [],
-    axes: Array.isArray(review.axes) ? review.axes : undefined,
   } as StewardReview;
+  // A single-axis review carries no `axes` key at all; a malformed one is dropped, never kept.
+  if (!Array.isArray(review.axes)) delete out.axes;
+  return out;
 }
 
 export async function fetchFrame(conn: RelayConnection, reviewId: number, name: string): Promise<{ contentType: string; data: string }> {

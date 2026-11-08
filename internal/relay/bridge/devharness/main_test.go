@@ -747,6 +747,18 @@ func TestSeedReviewAxes(t *testing.T) {
 	if cr := axes(v)[1]["criteria"].([]any); len(cr) != 3 || cr[1].(map[string]any)["status"] != "unmet" {
 		t.Fatalf("criteria = %v", v)
 	}
+	_, v = seed("Many task", "CHANGES", "criteria-many")
+	if cr := axes(v)[1]["criteria"].([]any); len(cr) != 5 {
+		t.Fatalf("criteria-many = %v", v)
+	}
+	_, v = seed("Blocked axis task", "CHANGES", "blocked-axis")
+	if a := axes(v)[0]; a["status"] != "blocked" || a["blockedReason"] != "timeout" || axes(v)[1]["seatVerdict"] != "ACCEPTED" {
+		t.Fatalf("blocked-axis = %v", v)
+	}
+	_, v = seed("Running task", "ACCEPTED", "running")
+	if a := axes(v)[1]; a["status"] != "running" || axes(v)[0]["seatVerdict"] != "ACCEPTED" {
+		t.Fatalf("running = %v", v)
+	}
 	sid, v := seed("Skipped task", "ACCEPTED", "skipped")
 	if a := axes(v)[1]; a["status"] != "skipped" || a["blockedReason"] != "no_spec" {
 		t.Fatalf("skipped = %v", v)

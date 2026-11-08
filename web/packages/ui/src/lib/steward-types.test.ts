@@ -172,6 +172,8 @@ describe("combinedSentence and isPartialAxes", () => {
       "Standards did not complete.",
     );
     expect(combinedSentence({ verdict: "ACCEPTED", axes: [done("standards", "ACCEPTED"), { axis: "spec", status: "running", costUsd: 0 }] })).toBe("Review in progress.");
+    expect(combinedSentence({ verdict: "ACCEPTED", axes: [done("standards", "ACCEPTED"), { axis: "spec", status: "blocked", blockedReason: "timeout", costUsd: 0 }] })).toBe("Spec did not complete.");
+    expect(combinedSentence({ verdict: "MAYBE", axes: [done("standards", "ACCEPTED")] })).toBe("Review finished.");
     expect(combinedSentence({ verdict: "BLOCKED", axes: [] })).toBe("The review was blocked.");
     expect(combinedSentence({ verdict: undefined, axes: [] })).toBe("Review in progress.");
   });
