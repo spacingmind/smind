@@ -11,6 +11,8 @@ import { useHomeRunConfigStore } from "@/stores/home-run-config-store";
 import { OFFICE_SUGGESTED_PROMPTS } from "@/lib/suggested-prompts";
 import { useInterfaceModeStore } from "@/stores/interface-mode-store";
 import { usePendingSendStore } from "@/stores/pending-send-store";
+import { attachmentDraftKey, HOME_ATTACHMENT_KEY, useComposerAttachmentsStore } from "@/stores/composer-attachments-store";
+import type { AttachmentLimits, Chat } from "@/lib/types";
 
 function ws(ID: number, Title: string): Workspace {
   return { ID, Title, Path: `/repos/${Title.toLowerCase()}`, RoutingPolicy: "", CreatedAt: "", UpdatedAt: "" };
@@ -310,6 +312,86 @@ describe("HomeLanding effort chip", () => {
     render(<HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={THREE} onCreated={vi.fn()} />);
     await flush();
     expect(screen.queryByLabelText("Thinking level")).not.toBeInTheDocument();
+  });
+});
+
+const LIMITS: AttachmentLimits = {
+  maxCount: 5,
+  maxImageBytes: 1 << 20,
+  maxFileBytes: 1 << 20,
+  maxTotalBytes: 4 << 20,
+  maxMessageBytes: 16 << 20,
+  images: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+};
+
+function attachClient(limits: AttachmentLimits | null, chats: Chat[] | Error = [{ ID: 7, TaskID: 42, ArchivedAt: null } as unknown as Chat]) {
+  const { call, task } = fakeClient();
+  call.mockImplementation(async (method: string) => {
+    if (method === "provider.list") return { providers: PROVIDERS };
+    if (method === "daemon.info") return limits ? { attachments: limits } : {};
+    if (method === "chat.list") {
+      if (chats instanceof Error) throw chats;
+      return chats;
+    }
+    if (method === "profile.list" || method === "run.list") return [];
+    return task;
+  });
+  const onCreated = vi.fn();
+  render(<HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={THREE} onCreated={onCreated} />);
+  return { call, task, onCreated };
+}
+
+describe("HomeLanding attachments", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useHomeProjectStore.getState().reload();
+    useHomeRunConfigStore.getState().reload();
+    usePendingSendStore.setState({ entry: null });
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
+  });
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    useHomeProjectStore.getState().reload();
+    useHomeRunConfigStore.getState().reload();
+    usePendingSendStore.setState({ entry: null });
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
+  });
+
+  it("home_attach_hidden_without_daemon_support", async () => {
+    attachClient(null);
+    await flush();
+    expect(screen.queryByTestId("composer-attach-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("home-attach-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("attachment-tray")).not.toBeInTheDocument();
+  });
+
+  it("home_attachments_move_to_the_new_tasks_draft_key", async () => {
+    const { onCreated } = attachClient(LIMITS);
+    await flush();
+    expect(screen.getByTestId("composer-attach-button")).toBeInTheDocument();
+    const file = new File([new Uint8Array(4)], "notes.txt", { type: "text/plain" });
+    fireEvent.change(await screen.findByTestId("home-attach-input"), { target: { files: [file] } });
+    expect(useComposerAttachmentsStore.getState().byKey[HOME_ATTACHMENT_KEY]).toHaveLength(1);
+    type("Read the notes");
+    fireEvent.click(screen.getByTestId("home-send-button"));
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    const { byKey } = useComposerAttachmentsStore.getState();
+    expect(byKey[attachmentDraftKey(42, 7)]).toHaveLength(1);
+    expect(byKey[attachmentDraftKey(42, 7)][0]).toMatchObject({ name: "notes.txt" });
+    expect(byKey[HOME_ATTACHMENT_KEY]).toBeUndefined();
+  });
+
+  it("a failed chat.list leaves the files in the home tray and does not open the task", async () => {
+    const { onCreated } = attachClient(LIMITS, new Error("no chats"));
+    await flush();
+    fireEvent.change(await screen.findByTestId("home-attach-input"), { target: { files: [new File([new Uint8Array(4)], "a.txt", { type: "text/plain" })] } });
+    type("Go");
+    fireEvent.click(screen.getByTestId("home-send-button"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no chats");
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(useComposerAttachmentsStore.getState().byKey[HOME_ATTACHMENT_KEY]).toHaveLength(1);
+    expect(usePendingSendStore.getState().entry).toBeNull();
   });
 });
 
