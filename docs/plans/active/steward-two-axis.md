@@ -1,7 +1,7 @@
 # Steward two-axis review: Standards and Spec in two fresh contexts (ADR-0054)
 
-Status: active (2026-11-08), **spec only until the Human accepts ADR-0054's decisions D1–D10**. Binding text:
-[`docs/decisions/0054-steward-two-axis-review.md`](../../decisions/0054-steward-two-axis-review.md) (Proposed; amends ADR-0047 §1, §3, §4, §8, §9).
+Status: active (2026-11-08), **ADR-0054 accepted 2026-11-08 (decisions D1–D11, accepted as recommended by the Supervisor under the Human's delegation; the Human may veto)**; `steward.twoAxis` stays false by default and the Haiku pilot (AC22) is the Human's. Binding text:
+[`docs/decisions/0054-steward-two-axis-review.md`](../../decisions/0054-steward-two-axis-review.md) (Accepted; amends ADR-0047 §1, §3, §4, §8, §9).
 
 Size: L (7) — scope 2 (daemon + web + mobile + CLI), PRs 2 (four, sequential, not stacked), risk 1 (verdict authority is unchanged; a second seat), decisions 1 (ten, each with a
 recommendation), verification 1 (UI frames, fake-LLM seat run).
