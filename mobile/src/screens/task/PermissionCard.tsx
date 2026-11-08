@@ -4,7 +4,7 @@
 // Reject options use TextButton (frozen primitive: its own Host + label colour).
 // A pending request with a reject option also offers the optional deny reason
 // (a plain single-line TextInput under the buttons); only the reject tap
-// carries it -- permissionRespondArgs keeps the two-argument call for the rest.
+// carries it -- dispatchPermissionTap keeps the two-argument call for the rest.
 
 import { memo, useMemo, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
