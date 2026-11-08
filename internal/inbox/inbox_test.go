@@ -678,6 +678,36 @@ func TestDerive_RunFailedPerClass(t *testing.T) {
 	}
 }
 
+// TestDerive_RunFailedNewClasses: the three human-action classes are inbox
+// items at high attention -- only a person can fix them.
+func TestDerive_RunFailedNewClasses(t *testing.T) {
+	f := newFx(t)
+	f.failed = []FailedRun{
+		failedRun("r-ctx", 1, failure.KindContextWindowExceeded, &failure.Action{Kind: failure.ActionNewChat, Label: "Start a fresh chat for this task"}),
+		failedRun("r-budget", 2, failure.KindSessionBudgetExceeded, &failure.Action{Kind: failure.ActionRaiseBudget, Label: "Raise the session budget"}),
+		failedRun("r-denials", 3, failure.KindTooManyDenials, &failure.Action{Kind: failure.ActionReviewPolicy, Label: "Review the permission policy"}),
+	}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Item{}
+	for _, it := range items {
+		if it.Kind == KindRunFailed {
+			got[it.Links.RunID] = it
+		}
+	}
+	if len(got) != 3 {
+		t.Fatalf("run_failed items = %v, want the three new classes", keysOf(items))
+	}
+	for run := range got {
+		it := got[run]
+		if it.Attention != "high" || it.Key != "runfail:"+run || it.Summary == "" || it.Action == nil {
+			t.Fatalf("%s item = %+v, want attention high, key runfail:%s, a summary and an action", run, it, run)
+		}
+	}
+}
+
 // TestDerive_RunFailedResolvesOnLaterRun: the item is keyed by the failed run;
 // once the source reports another run (or none), the key is gone.
 func TestDerive_RunFailedResolvesOnLaterRun(t *testing.T) {

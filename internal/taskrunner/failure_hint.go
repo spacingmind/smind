@@ -19,7 +19,7 @@ import (
 // throttles; modelNotFound is the plan not including the model;
 // policyCapacityUnavailable and flexUnavailable are capacity temporarily
 // unavailable (retryable). contextWindowExceeded, sessionBudgetExceeded and
-// tooManyDenials are deliberately none: retrying cannot fix them, a human
+// tooManyDenials map to their own classes: retrying cannot fix them, a human
 // must act (a new session, fewer denials). Every other class (badRequest,
 // internalServerError, ...) is none.
 func FailureHint(err error) (code string, retryAfter time.Duration) {
@@ -38,6 +38,12 @@ func FailureHint(err error) (code string, retryAfter time.Duration) {
 			return failure.CodeModelNotFound, 0
 		case "policyCapacityUnavailable", "flexUnavailable":
 			return failure.CodeOverloaded, 0
+		case "contextWindowExceeded":
+			return failure.CodeContextWindow, 0
+		case "sessionBudgetExceeded":
+			return failure.CodeSessionBudget, 0
+		case "tooManyDenials":
+			return failure.CodeTooManyDenials, 0
 		}
 	}
 	return "", 0
