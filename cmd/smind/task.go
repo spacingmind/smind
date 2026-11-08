@@ -1764,7 +1764,11 @@ func cmdTaskChatFork(args []string) int {
 		fmt.Fprintf(os.Stderr, "task chat fork: %v\n", err)
 		return 1
 	}
-	fmt.Printf("%d\t%s\t%s\n", chat.ID, stewardText(chat.Title), chat.Fork.Mode)
+	forkMode := mode
+	if chat.Fork != nil && chat.Fork.Mode != "" {
+		forkMode = chat.Fork.Mode
+	}
+	fmt.Printf("%d\t%s\t%s\n", chat.ID, stewardText(chat.Title), forkMode)
 	return 0
 }
 
