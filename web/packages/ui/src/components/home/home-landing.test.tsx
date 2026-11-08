@@ -147,10 +147,11 @@ describe("HomeLanding", () => {
 
   it("disconnected with a cause shows the notice with Retry and the serve hint (AC1)", () => {
     const onRetryConnect = vi.fn();
-    renderHome({ connected: false, connectionError: "no daemon listening", onRetryConnect });
+    renderHome({ connected: false, connectionError: "The daemon isn't running or isn't reachable.", connectionDetail: "Failed to fetch", onRetryConnect });
 
     const notice = screen.getByRole("alert");
-    expect(notice).toHaveTextContent("Can't reach the daemon: no daemon listening");
+    expect(notice).toHaveTextContent("The daemon isn't running or isn't reachable.");
+    expect(screen.getByTitle("Failed to fetch")).toBeInTheDocument();
     expect(notice).toHaveTextContent("Start it with smind serve");
     fireEvent.click(within(notice).getByRole("button", { name: "Retry connection" }));
     expect(onRetryConnect).toHaveBeenCalledTimes(1);

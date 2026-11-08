@@ -210,7 +210,7 @@ func TestRebuildSkippedWhileChatRunning(t *testing.T) {
 }
 
 func registerRunning(reg *Registry, id string, taskID, chatID int64, started time.Time) {
-	r := &run{id: id, taskID: taskID, chatID: chatID, status: StatusRunning, startedAt: started, subscribers: map[int]*subQueue{}, pendingPermissions: map[string]chan string{}, closedCh: make(chan struct{})}
+	r := &run{id: id, taskID: taskID, chatID: chatID, status: StatusRunning, startedAt: started, subscribers: map[int]*subQueue{}, pendingPermissions: map[string]*pendingPermission{}, closedCh: make(chan struct{})}
 	r.cancel = func() {
 		r.mu.Lock()
 		r.status = StatusStopped

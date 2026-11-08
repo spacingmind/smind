@@ -569,7 +569,7 @@ interface TimelineState {
    * different connection answered first -- is what does that, so both
    * cases are handled by the exact same code path.
    */
-  respondPermission: (runId: string, requestId: string, optionId: string) => Promise<void>;
+  respondPermission: (runId: string, requestId: string, optionId: string, reason?: string) => Promise<void>;
   /**
    * Answers runId's pending question requestId (run.answerQuestion,
    * ADR-0055), from this connection. Never clears pendingQuestion itself:
@@ -1215,9 +1215,11 @@ export function useRunTimeline(
   );
 
   const respondPermission = useCallback(
-    async (runId: string, requestId: string, optionId: string) => {
+    async (runId: string, requestId: string, optionId: string, reason?: string) => {
       if (!client) throw new Error("not connected");
-      await client.call("run.respondPermission", { runId, requestId, optionId });
+      // No reason (or an empty one) keeps the params exactly as they were,
+      // so the daemon's old no-reason path stays the default.
+      await client.call("run.respondPermission", reason ? { runId, requestId, optionId, reason } : { runId, requestId, optionId });
     },
     [client],
   );

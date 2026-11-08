@@ -147,6 +147,32 @@ export function feedPermissionEvent(board: PermissionBoard, runId: string, event
 }
 
 /**
+ * The deny reason as run.respondPermission takes it: the trimmed text,
+ * cut at the daemon's 500-character cap; undefined when blank (in which
+ * case no `reason` key goes out at all).
+ */
+export function denyReasonParam(text: string): string | undefined {
+  const trimmed = text.trim();
+  return trimmed.length === 0 ? undefined : trimmed.slice(0, 500);
+}
+
+/**
+ * The permission card's tap dispatch: only a reject-kind option carries
+ * the deny reason (denyReasonParam of the field's text -- undefined when
+ * blank); every other kind calls back with exactly the two old arguments.
+ */
+export function dispatchPermissionTap(
+  onRespond: (requestId: string, optionId: string, reason?: string) => void,
+  requestId: string,
+  optionId: string,
+  kind: string,
+  reasonText: string,
+): void {
+  if (kind.startsWith('reject')) onRespond(requestId, optionId, denyReasonParam(reasonText));
+  else onRespond(requestId, optionId);
+}
+
+/**
  * The tap flow: optimistically resolve (so the UI disables immediately),
  * then run.respondPermission against the request's own run. A rejection
  * rolls back via chooseFailed -- which is a no-op if a permission_resolved
@@ -158,12 +184,13 @@ export async function respondToPermission(
   board: PermissionBoard,
   requestId: string,
   optionId: string,
+  reason?: string,
 ): Promise<void> {
   const req = board.list().find((r) => r.requestId === requestId);
   if (!req || req.status !== 'pending') return;
   board.choose(requestId, optionId);
   try {
-    await respondPermission(conn, req.runId, requestId, optionId);
+    await respondPermission(conn, req.runId, requestId, optionId, reason);
   } catch (e) {
     board.chooseFailed(requestId, optionId, e instanceof Error ? e.message : String(e));
   }

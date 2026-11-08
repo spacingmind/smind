@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/attach"
@@ -450,7 +451,7 @@ func rehydrateMeta(st *store.Store, row store.Run) *run {
 		headSHA:              row.HeadSHA,
 		dirty:                row.Dirty,
 		subscribers:          make(map[int]*subQueue),
-		pendingPermissions:   make(map[string]chan string),
+		pendingPermissions:   make(map[string]*pendingPermission),
 	}
 }
 
@@ -639,10 +640,10 @@ type run struct {
 	// (persistbuf.go). Own lock: record's persistence runs outside mu.
 	pbuf persistBuf
 
-	// pendingPermissions holds one buffered(1) channel per permission
-	// request currently awaiting an answer, keyed by request id -- see
-	// runPermissionDecider and RespondPermission.
-	pendingPermissions map[string]chan string
+	// pendingPermissions holds, per permission request currently awaiting
+	// an answer (one buffered(1) answer channel plus its options), keyed by request
+	// id -- see runPermissionDecider and RespondPermission.
+	pendingPermissions map[string]*pendingPermission
 
 	// pendingQuestions and questionAsks are ADR-0055's question state:
 	// the parked requests of this run by request id, and the recent asks the
@@ -911,7 +912,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		closedCh:           make(chan struct{}),
 		status:             StatusRunning,
 		subscribers:        make(map[int]*subQueue),
-		pendingPermissions: make(map[string]chan string),
+		pendingPermissions: make(map[string]*pendingPermission),
 		treeRoot:           treeRoot,
 	}
 
@@ -1315,17 +1316,20 @@ func (d runPermissionDecider) notifyResolved(requestID, optionID, reason string)
 // DecideDetailed implements taskrunner.DetailedPermissionDecider: detail
 // (possibly nil) is recorded on the permission_request event.
 func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (string, error) {
-	optionID, _, err := d.decide(ctx, summary, detail, options)
+	optionID, _, err := d.decide(ctx, summary, detail, options, false)
 	return optionID, err
 }
 
 // DecideDetailedWithReason implements taskrunner.DenyReasonDecider: like
-// DecideDetailed, plus why the policy engine denied ("" otherwise).
+// DecideDetailed, plus why it denied ("" otherwise): the policy engine's
+// reason, or the text a human typed with the Deny. Only the Claude Code
+// adapter calls this, and only it can pass the reason to the model, so a
+// request that arrives here is marked as carrying a human reason.
 func (d runPermissionDecider) DecideDetailedWithReason(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (string, string, error) {
-	return d.decide(ctx, summary, detail, options)
+	return d.decide(ctx, summary, detail, options, true)
 }
 
-func (d runPermissionDecider) decide(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (string, string, error) {
+func (d runPermissionDecider) decide(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption, carriesReason bool) (string, string, error) {
 	requestID, err := newRunID()
 	if err != nil {
 		return "", "", fmt.Errorf("runs: permission request id: %w", err)
@@ -1404,9 +1408,9 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 	}
 	policyOn := detail != nil && detail.Policy != nil
 
-	ch := make(chan string, 1)
+	ch := make(chan permissionAnswer, 1)
 	d.r.mu.Lock()
-	d.r.pendingPermissions[requestID] = ch
+	d.r.pendingPermissions[requestID] = &pendingPermission{ch: ch, options: options, carriesReason: carriesReason}
 	d.r.mu.Unlock()
 
 	if n := d.reg.getNotifier(); n != nil {
@@ -1425,7 +1429,8 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 	defer timer.Stop()
 
 	select {
-	case optionID := <-ch:
+	case answer := <-ch:
+		optionID := answer.optionID
 		// Recorded here, on the same goroutine right after Decide wakes up
 		// -- not by RespondPermission directly -- so there's exactly one
 		// code path appending both the request and its resolution to
@@ -1445,7 +1450,7 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 			}
 			d.reg.getPolicyEngine().RecordOutcome(d.policyRequest(requestID, summary, detail), outcome)
 		}
-		return optionID, "", nil
+		return optionID, answer.reason, nil
 
 	case <-timer.C:
 		// Nobody answered within the timeout: auto-resolve to deny (never
@@ -1547,26 +1552,95 @@ func (d runPermissionDecider) abandon(requestID string) {
 // merely later -- finds no entry and returns a clear error, never a silent
 // no-op, a panic, or (worse) a second value nobody will ever receive.
 func (reg *Registry) RespondPermission(runID, requestID, optionID string) error {
+	_, err := reg.RespondPermissionWithReason(runID, requestID, optionID, "")
+	return err
+}
+
+// MaxDenyReasonRunes caps the text a human can attach to a Deny.
+const MaxDenyReasonRunes = 500
+
+// ErrDenyReason marks a refused deny reason (too long, not text, or sent with
+// an option that is not a deny).
+var ErrDenyReason = errors.New("deny reason refused")
+
+// SanitizeDenyReason trims reason and checks it is plain text of at most
+// MaxDenyReasonRunes runes. Control characters other than a newline are
+// replaced by a space; invalid UTF-8 and NUL are refused. The result is only
+// ever shown to the model as the deny message; which option is chosen never
+// depends on it (RespondPermissionWithReason checks the option kind).
+func SanitizeDenyReason(reason string) (string, error) {
+	if !utf8.ValidString(reason) || strings.ContainsRune(reason, 0) {
+		return "", fmt.Errorf("%w: not valid text", ErrDenyReason)
+	}
+	reason = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if r != '\n' && unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, reason))
+	if utf8.RuneCountInString(reason) > MaxDenyReasonRunes {
+		return "", fmt.Errorf("%w: longer than %d characters", ErrDenyReason, MaxDenyReasonRunes)
+	}
+	return reason, nil
+}
+
+// RespondPermissionWithReason is RespondPermission plus the text a human typed
+// with a Deny. A non-empty reason is only accepted with a reject option of
+// the pending request, and is passed on to the model only when the provider
+// can carry it and the answer was handed to the waiting decider (delivered: a
+// timeout firing at the same instant can still win, as for the option itself); otherwise the Deny is sent as usual and delivered
+// is false. An empty reason behaves exactly like RespondPermission.
+func (reg *Registry) RespondPermissionWithReason(runID, requestID, optionID, reason string) (delivered bool, err error) {
+	if reason != "" {
+		if reason, err = SanitizeDenyReason(reason); err != nil {
+			return false, err
+		}
+	}
 	r, err := reg.get(runID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	r.mu.Lock()
-	ch, ok := r.pendingPermissions[requestID]
+	pp, ok := r.pendingPermissions[requestID]
 	if !ok {
 		r.mu.Unlock()
-		return fmt.Errorf("runs: permission request %q: %w", requestID, ErrNotFound)
+		return false, fmt.Errorf("runs: permission request %q: %w", requestID, ErrNotFound)
+	}
+	if reason != "" {
+		if o, found := optionByID(pp.options, optionID); !found || !strings.HasPrefix(o.Kind, "reject") {
+			r.mu.Unlock()
+			return false, fmt.Errorf("%w: only a deny option can carry a reason", ErrDenyReason)
+		}
+	}
+	answer := permissionAnswer{optionID: optionID}
+	if pp.carriesReason {
+		answer.reason = reason
 	}
 	select {
-	case ch <- optionID:
+	case pp.ch <- answer:
 		delete(r.pendingPermissions, requestID)
 		r.mu.Unlock()
-		return nil
+		return reason != "" && pp.carriesReason, nil
 	default:
 		r.mu.Unlock()
-		return fmt.Errorf("runs: permission request %q already resolved", requestID)
+		return false, fmt.Errorf("runs: permission request %q already resolved", requestID)
 	}
+}
+
+// permissionAnswer is what a human's answer sends to the blocked Decide call.
+type permissionAnswer struct {
+	optionID string
+	reason   string
+}
+
+// pendingPermission is one parked permission request: the channel its answer
+// arrives on, the options it offered, and whether the provider can pass a
+// human's deny reason to the model.
+type pendingPermission struct {
+	ch            chan permissionAnswer
+	options       []taskrunner.PermissionOption
+	carriesReason bool
 }
 
 // record appends e to r's history and broadcasts it to every subscriber

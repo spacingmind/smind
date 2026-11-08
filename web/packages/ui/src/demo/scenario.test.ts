@@ -72,13 +72,17 @@ describe("demo scenario", () => {
   });
 
   it("S-04 the permission request fits the production permission types: kinds, a unified-diff body, a path", () => {
-    expect(PERMISSION_REQUEST.options.map((o) => o.kind).sort()).toEqual(["allow_always", "allow_once", "reject_once"]);
+    expect(PERMISSION_REQUEST.options.map((o) => o.kind).sort()).toEqual(["allow_once", "reject_once"]);
     const d = PERMISSION_REQUEST.detail!;
     expect(d.kind).toBe("write");
     expect(d.path).toBe("internal/webhook/limiter.go");
     for (const line of d.diff!.split("\n")) expect(line).toMatch(/^( |\+|-|@@)/);
     expect(PERMISSION_REQUEST.requestId).toBe("demo-req-1");
     expect(tour.inbox.find((i) => i.kind === "permission")?.links.permissionRequestId).toBe(PERMISSION_REQUEST.requestId);
+  });
+
+  it("demo_permission_card_has_no_allow_always", () => {
+    expect(PERMISSION_REQUEST.options.some((o) => o.kind.includes("always") || o.id.includes("always"))).toBe(false);
   });
 
   it("S-05 is the landing hero's nine tasks: titles, workspaces, the design Lead (#12) with two Peers, and the diff sizes", () => {
