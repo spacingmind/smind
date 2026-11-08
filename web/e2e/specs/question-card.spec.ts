@@ -97,21 +97,29 @@ const DB: Question = {
 test('Q-01 a single-choice question starts empty, submits the chosen option and leaves a resolved marker', async ({ app }, testInfo) => {
   const { page } = app
   const b = await open(app, testInfo, 'q01')
+  // Nothing mid-keystroke: the card takes focus when the ask lands (a focused composer keeps it, by design).
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined))
   b.ask('rq-1', [DB])
+  await frame(page, testInfo, 't-appear-1') // the first screenshot after the ask is injected (~0ms)
   const card = page.getByTestId('question-card')
   await expect(card).toBeVisible()
+  await frame(page, testInfo, 't-appear-2') // after the card is visible
+  await expect(card).toBeFocused()
+  await frame(page, testInfo, 't-appear-3') // settled: the card owns focus
   await expect(card.locator('input[type=radio]:checked')).toHaveCount(0)
   await expect(page.getByTestId('question-submit')).toBeDisabled()
   await frame(page, testInfo, 'a-single-choice')
 
   await page.getByTestId('question-option-db-sqlite').check()
   await expect(page.getByTestId('question-submit')).toBeEnabled()
+  await frame(page, testInfo, 't-answer-1') // one option picked, Submit live
   b.hold()
   await page.getByTestId('question-submit').click()
   await expect(page.getByTestId('question-submit')).toBeDisabled()
   await expect(page.getByTestId('question-decline')).toBeDisabled()
   await expect(page.getByTestId('question-option-db-pg')).toBeDisabled()
   await frame(page, testInfo, 'g-submitting-disabled')
+  await frame(page, testInfo, 't-answer-2') // same beat as g: the card locked while the answer is in flight
   expect(b.calls).toHaveLength(1)
   expect(b.calls[0]).toMatchObject({ requestId: 'rq-1', action: 'answer', answers: [{ questionId: 'db', optionIds: ['sqlite'] }] })
 
@@ -122,6 +130,7 @@ test('Q-01 a single-choice question starts empty, submits the chosen option and 
   await expect(marker).toContainText('Agent asked: Which database should the new service use?')
   await expect(marker).toContainText('answered')
   await frame(page, testInfo, 'e-resolved-marker')
+  await frame(page, testInfo, 't-answer-3') // the ask closed: card gone, marker row in its place
 })
 
 test('Q-02 a multi-select question with an Other line sends the checked options and the other text', async ({ app }, testInfo) => {
@@ -218,4 +227,27 @@ test('Q-05 a refused secret question leaves a refused marker and no card', async
   await expect(marker).toContainText('Paste your API key so I can continue')
   await expect(marker).toContainText('refused: secrets are not collected here')
   await frame(page, testInfo, 'f-refused-secret')
+})
+
+test('Q-06 a question the daemon restart orphaned resolves to a cancelled marker and no card', async ({ app }, testInfo) => {
+  const { page } = app
+  const b = await open(app, testInfo, 'q06')
+  b.ask('rq-6', [
+    {
+      id: 'db',
+      text: 'Which database should the migration target?',
+      kind: 'single',
+      options: [
+        { id: 'pg', label: 'PostgreSQL' },
+        { id: 'sqlite', label: 'SQLite' },
+      ],
+    },
+  ])
+  await expect(page.getByTestId('question-card')).toBeVisible()
+  b.resolve('rq-6', 'daemon_restart')
+  await expect(page.getByTestId('question-card')).toHaveCount(0)
+  const marker = page.getByTestId('timeline-question')
+  await expect(marker).toContainText('Which database should the migration target?')
+  await expect(marker).toContainText('cancelled (daemon restarted)')
+  await frame(page, testInfo, 'h-restart-marker')
 })
