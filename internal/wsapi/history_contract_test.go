@@ -363,7 +363,7 @@ func TestRunLogsAutoNeverRebuildsForAMachine(t *testing.T) {
 	plain, _ := e.logs(t, hcAgent, map[string]any{"runId": "skel"})
 	for _, rc := range []*requestContext{hcAgent, nil} {
 		res, _ := e.logs(t, rc, map[string]any{"runId": "skel", "detail": "auto"})
-		if res.HistorySource != "skeleton" || res.CanLoadFull || eventsText(res) != eventsText(plain) {
+		if res.historyFields != plain.historyFields || eventsText(res) != eventsText(plain) {
 			t.Fatalf("machine auto: %+v", res.historyFields)
 		}
 	}
