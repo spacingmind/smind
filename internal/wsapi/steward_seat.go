@@ -57,8 +57,11 @@ type stewardHostOptions struct {
 // (memory only) and its scratch directory.
 type stewardSeatEntry struct {
 	reviewID int64
-	token    string
-	scratch  string
+	// axis is the pass of a two-axis review this seat judges; empty for the
+	// single review's seat.
+	axis    steward.Axis
+	token   string
+	scratch string
 }
 
 // stewardHost starts steward reviews, supervises their seats and exposes the
@@ -102,6 +105,13 @@ func newStewardHost(o stewardHostOptions) *stewardHost {
 	if rows, err := o.DB.ListStaleOpenStewardReviews(); err == nil {
 		for _, row := range rows {
 			_ = o.Svc.WriteBlocked(row.ID, "crashed", "the daemon restarted while the review was open", 0)
+			if passes, err := o.DB.ListStewardReviewPasses(row.ID); err == nil {
+				for _, p := range passes {
+					if p.Status == steward.PassPending || p.Status == steward.PassRunning {
+						_ = o.DB.SetStewardPassBlocked(row.ID, p.Axis, "crashed", "the daemon restarted while the review was open", p.CostUSD, time.Now())
+					}
+				}
+			}
 		}
 	}
 	return h
@@ -204,6 +214,21 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 		h.svc.Publish(p.TaskID, id, "pending")
 	}
 
+	// ADR-0054: a review whose inputs carry the two-axis section (the
+	// collector read steward.twoAxis as on) runs two passes, not one seat.
+	if in.TwoAxis != nil {
+		cfg, _ := configSteward()
+		if err := h.openPasses(id, cfg); err != nil {
+			_ = h.svc.WriteBlocked(id, "crashed", "the review passes could not be opened", 0)
+			return reviewResult{}, fmt.Errorf("%s: open the passes: %w", m, err)
+		}
+		if stewardGateUnknown(d.Gates) {
+			go h.recheck(id, p.TaskID, lead, prof, sha)
+			return reviewResult{ReviewID: id, TaskID: p.TaskID, CommitSHA: sha, Status: "pending"}, nil
+		}
+		return h.startPasses(id, lead, d, dsha, sha, cfg)
+	}
+
 	if stewardGateUnknown(d.Gates) {
 		go h.recheck(id, p.TaskID, lead, prof, sha)
 		return reviewResult{ReviewID: id, TaskID: p.TaskID, CommitSHA: sha, Status: "pending"}, nil
@@ -254,6 +279,11 @@ func (h *stewardHost) recheck(id, taskID int64, lead store.Task, prof store.Agen
 			validationID = in.Validation.ID
 		}
 		if err := h.db.SetStewardReviewDigest(id, string(data), dsha, in.CI.State, "" /*policySha*/, h.contractShaOf(taskID), validationID); err != nil {
+			return
+		}
+		if in.TwoAxis != nil {
+			cfg, _ := configSteward()
+			_, _ = h.startPasses(id, lead, d, dsha, sha, cfg)
 			return
 		}
 		_, _ = h.startSeat(id, lead, prof, d, dsha, sha)
@@ -363,6 +393,7 @@ func (h *stewardHost) cancel(reviewID int64) error {
 		h.stopTask(row.StewardTaskID)
 		h.forget(row.StewardTaskID)
 	}
+	h.cancelPasses(reviewID)
 	return nil
 }
 
@@ -380,8 +411,16 @@ func (h *stewardHost) seatSource(taskID int64) (runs.SeatSpec, bool) {
 		return runs.SeatSpec{}, false
 	}
 	scratch := e.scratch
+	env := steward.SeatMCPEnv(e.reviewID, e.token)
+	if e.axis != "" {
+		pass, err := h.db.GetStewardReviewPass(e.reviewID, string(e.axis))
+		if err != nil || (pass.Status != steward.PassPending && pass.Status != steward.PassRunning) {
+			return runs.SeatSpec{}, false
+		}
+		env = steward.SeatMCPEnvAxis(e.reviewID, e.token, e.axis)
+	}
 	return runs.SeatSpec{
-		Env:             steward.SeatMCPEnv(e.reviewID, e.token),
+		Env:             env,
 		DisallowedTools: append([]string(nil), steward.SeatDisallowedTools...),
 		Floor: func(tool string, paths []string) (bool, string) {
 			return steward.SeatFloor(steward.SeatRequest{Tool: tool, Paths: paths, ScratchDir: scratch})

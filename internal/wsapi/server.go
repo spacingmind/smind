@@ -382,7 +382,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	hs["validation.request"] = newValidationSeat(valSvc, wm, db, reg, runner, profReg).request
 	stewardSvc := newStewardService(db, bus, valSvc)
-	stewardH := newStewardHost(stewardHostOptions{Svc: stewardSvc, Rails: &steward.Rails{Store: db, Config: configSteward}, Collect: newStewardCollector(db, valSvc, gitSvc).collect, WM: wm, DB: db, Reg: reg, Runner: runner, ProfReg: profReg})
+	stewardH := newStewardHost(stewardHostOptions{Svc: stewardSvc, Rails: &steward.Rails{Store: db, Config: configSteward}, Collect: newStewardCollector(db, valSvc, gitSvc).withConfig(configSteward).collect, WM: wm, DB: db, Reg: reg, Runner: runner, ProfReg: profReg})
 	for method, h := range stewardHandlers(stewardH) {
 		hs[method] = h
 	}
