@@ -28,7 +28,7 @@ was asked. Under a provider mode that auto-approves, Claude does not even call `
 
 The request side of the existing flow is solid and is reused: `runPermissionDecider.decide` (`internal/runs/registry.go`) registers a pending channel keyed by request id,
 publishes `permission.pending`, records `permission_request`/`permission_resolved`, and resolves on a human answer (`run.respondPermission` → `RespondPermission`), on the
-**5-minute timeout** (deny, resolution `timeout`), on provider cancellation or on run stop. System runs and seats resolve to a reject immediately; a remote run (ADR-0048)
+**5-minute timeout** (deny, resolution `timeout`), on provider cancellation or on run stop. System runs (`purpose != ""`) resolve to a reject immediately and a daemon-owned seat resolves through its floor (`applySeatFloor`, which may allow or deny) and never parks; a remote run (ADR-0048)
 never auto-accepts. `smind task approve|deny` and the inbox `permission` item (`internal/inbox`, `KindPermission`) sit on top. The MCP server exposes no tool that answers
 (`cmd/smind/mcp_instructions.go`).
 
@@ -86,8 +86,8 @@ request over the caps in count (more than 4 questions, a form with unsupported p
 
 Only a human connection (web, mobile, desktop, CLI over the daemon socket, relay with a paired device). An orchestrating agent never answers (ADR-0017): `task_wait`
 returns `waiting_permission` today; it returns **`waiting_question`** (new, additive state; clients that do not know it treat it as "not done, a human is needed", the same
-as `waiting_permission`) with the question text so the orchestrator can tell the human. A seat (`purpose != ""`, the Steward, the validator) never parks a question: the
-daemon declines immediately with note "no human is attached to this seat", exactly like the permission reject for system runs.
+as `waiting_permission`) with the question text so the orchestrator can tell the human. A system run (`purpose != ""`) and a daemon-owned seat (`reg.seatSpec`, the Steward, the validator) never park a question; the new path keys on both
+conditions and the daemon declines immediately with note "no human is attached to this seat", exactly like the permission reject for system runs.
 
 ### 4. Per-provider mapping (what each CLI expects back)
 
@@ -130,9 +130,9 @@ A question is the one request an agent can use to stall a run indefinitely, so t
    - `decline`: never park; decline at once with the note (for unattended Leads and automations, ADR-0044, which default to `decline`).
    - `disabled`: do not advertise the capability (Codex, ACP) or add `AskUserQuestion` to the run's disallowed tools (Claude), so the agent knows it cannot ask.
 3. **Composition with the permission timeout.** One timer per request, never stacked: a question and a permission that are pending together each own their 5 minutes. A run
-   with a pending question is still a running run, so the stall detector (`internal/stall`, which looks at running/queued activity) does not flag it; the task tree
+   with a pending question is still a running run, so the stall detector (`internal/stall`) skips any tree that has a running run, so it does not flag it; the task tree
    (`internal/runs/tree_view.go`) reports `waiting_question` where it reports `waiting_permission` today.
-4. **Escalation, not repetition.** After a `timeout` the inbox item stays visible as resolved-by-timeout with a "ask again" affordance that sends the original question
+4. **Escalation, not repetition.** After a `timeout` the run's timeline shows the resolved-by-timeout question (and, with D10, a resolved inbox item) with an "ask again" affordance that sends the original question
    text back to the chat as a human prompt (ordinary `task send`, no new mechanism); an agent that re-asks the same question text within the run is declined at once
    (`repeat`, cap 3 questions per run per 10 minutes, configurable) so a loop cannot spam a human.
 
@@ -150,7 +150,7 @@ is a separate ADR (D3).
 
 The question text, header, option labels and descriptions are **untrusted agent output**, possibly steered by a prompt injection in a file the agent read.
 - Render as **plain text** only: no markdown, no HTML, no links, no autolinking, no images; a URL-looking string is shown as text and is not tappable. The mobile card uses
-  `Text`, the web card a text node with `white-space: pre-wrap` (the heredoc-reveal card's rule, `permission-detail.tsx`).
+  `Text`, the web card a text node with `white-space: pre-wrap` (the existing rule in `permission-detail.tsx` and `heredoc-reveal.tsx`).
 - Length and count caps in the daemon (§1), so a card cannot be made to scroll a destructive option out of view or be a wall of text; options past the cap are dropped and
   flagged, not paged.
 - **No auto-answer, ever**: no default selection, no "recommended" marker from the agent (a Claude option text of "(Recommended)" is shown as ordinary text, no emphasis),
@@ -170,12 +170,12 @@ synthesizes only allow-once. The Human asked for "allow this kind of request in 
   different object: a **grant** in a new table `permission_grants` {id, workspaceId, tool, matcher (a structured, ADR-0047-style match: exact tool name, for Bash the
   argv0+subcommand, for file tools the **directory** under the worktree), createdAt, createdBy device, expiresAt (default 30 days), source requestId}. A grant is written
   only by `run.answerPermission` with `scope: "project"` from a human connection (same human-only rule as §3; a test walks the handler map and the MCP list).
-- **Evaluation order.** floor (never overridable) → policy rules → grants → ask. A grant can only turn an `ask` into an `allow`; it never overrides the floor or a policy
-  `deny`.
+- **Evaluation order.** Today `decide()` runs: seat floor → human AutoAccept → policy engine (`Truncated`/`Doubt` → ask, then the floor, then rules) → human. A grant
+  slots **after the engine's `ask`** and never applies when AutoAccept is set (a remote run never auto-accepts either). It can only turn an `ask` into an `allow`; it never
+  overrides the floor or a policy `deny`.
 - **Never offered** (the card shows only "allow once") for: any request the floor flags (secret paths, `SMIND_HOME`, outside the worktree), the destructive classes
-  (`rm`/`git push --force`/`git reset --hard`/anything the git-rule table marks always-ask, `GitRule != nil`, already stripped of standing options today by
-  `stripStandingOptions`), network-fetching Bash, `AskUserQuestion` and every other question (an answer is never a standing decision), and any request whose command the
-  splitter could not parse (`Doubt` set).
+  (`rm`/`git push --force`/`git reset --hard`/anything the git-rule table marks always-ask, `GitRule != nil`, already stripped of standing options for ACP by
+  `stripStandingOptions`; the Claude and Codex adapters synthesize allow-once only), network-fetching Bash, `AskUserQuestion` and every other question (an answer is never a standing decision), and any request the engine ends at `ask` because of `Truncated`, `Doubt` or an unparsed segment.
 - **Audit and revoke.** Every use of a grant records `permission_resolved` with resolution `grant` and the grant id; the Settings page lists grants with a revoke button and
   `smind task grants ls|revoke` (CLI). Revoking takes effect for the next request.
 - **Provider mapping.** Claude: the card choice maps to an `allow`; the grant is smind's, not Claude's `updatedPermissions` (which would live in the CLI's settings, outside
@@ -183,16 +183,16 @@ synthesizes only allow-once. The Human asked for "allow this kind of request in 
 
 ### 9. Surfaces
 
-- **Web** (`web/packages/ui/src/components/permission/`): a `QuestionCard` next to `PermissionCard`: header chip, per-question block (radio group / checkbox group /
+- **Web** (`web/packages/ui/src/components/permission/`): **replace the placeholder** `question-form-card.tsx` and `PermissionQuestion` (`lib/types.ts`), whose `encodeAnswerBatch` output goes through `run.respondPermission` and has **no daemon consumer today**, with a `QuestionCard` on `run.answerQuestion`: header chip, per-question block (radio group / checkbox group /
   textarea, an "Other" field when `allowOther`), a counter for caps, Submit (disabled until valid) and Decline with an optional note. A secret refusal renders as a closed,
   informational row. Light and dark frames, every state (single, multi, text, truncated, refused, resolved-by-timeout), per the screenshot rule.
-- **Mobile** (`mobile/`): the same model as a bottom sheet on the inbox item and the run screen, native pickers per `@expo/ui` (ADR-0036); push kind `question` (ADR-0040)
+- **Mobile** (`mobile/`): the same model as a bottom sheet on the inbox item and the run screen, native pickers per `@expo/ui` (ADR-0036); push kind `question` (ADR-0040; a new kind in `internal/push/seal.go`, so the seal vectors are updated)
   with no question text in the push payload (title only: "An agent has a question"), so nothing sensitive is on the lock screen.
 - **CLI**: `smind task answer <runId> [requestId]` prints the question(s) and reads the answer interactively on a TTY; non-interactive
   `smind task answer <runId> <requestId> --answer <qid>=<optionLabel|text> ... [--decline --note "..."]`. `smind task permissions` lists pending questions alongside
   permissions (marked `question`) and the existing "-> approve" hint line prints `-> answer: smind task answer <runId> <requestId>`.
-- **Inbox** (`internal/inbox`): new `KindQuestion` item: needs-attention state while pending, resolved (with the resolution) afterwards, superseded by the next question of
-  the same run; sorted with permissions (both are "a run is waiting on you"). Additive in `inbox.list`.
+- **Inbox** (`internal/inbox`): new `KindQuestion` item: needs-attention state while pending, derived from the live pending set like `KindPermission` (`internal/inbox/inbox.go`), so a resolved question leaves the list as a permission does; showing a
+  timed-out one with "ask again" needs a history-derived resolved item, which is new work in PR1 (D10); sorted with permissions (both are "a run is waiting on you"). Additive in `inbox.list`.
 - **MCP/orchestrators**: `task_wait` / `task_status` report `waiting_question` plus the question text; `task_permissions` stays permissions-only; no answering tool.
 
 ### 10. Failure modes
@@ -245,4 +245,5 @@ Each has a recommendation; accept all in one message or veto by number. "PR" = t
 | D6 | **"Always allow in this project"**: daemon-owned `permission_grants` (30-day default expiry, revocable, never for floor/destructive/network/unparsed/questions) rather than editing `policy.yaml` or Claude's `updatedPermissions` | **Grants table** (§8) | PR4 |
 | D7 | **Mobile push** for a question carries the title only, no question text | **Title only** (§9) | PR3 |
 | D8 | **Repeat guard**: decline a re-asked identical question; cap 3 per run per 10 minutes | **Accept** (§5.4) | PR1 |
+| D10 | **Resolved-question inbox items** (timed-out question stays listed with "ask again") need a history-derived inbox item, new work | **Accept, in PR1** | PR1 |
 | D9 | **Spend one Haiku probe** (a few cents, isolated home, cwd in `~/.smind/dogfood/`) to pin the Claude `updatedInput` shape before any code, and one Codex app-server probe for the decline encoding if a Codex login is available | **Yes to the Claude probe now; Codex probe only if the login exists** | PR1/PR2 |
