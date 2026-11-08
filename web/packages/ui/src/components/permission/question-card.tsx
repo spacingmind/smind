@@ -145,7 +145,7 @@ export function QuestionCard({
         <Input
           data-testid="question-decline-note"
           aria-label="Note sent with a decline (optional)"
-          placeholder="Note for the agent (optional, sent only with Decline)"
+          placeholder="Note for the agent (optional)"
           value={note}
           maxLength={MAX_NOTE_CHARS}
           disabled={submitting}
