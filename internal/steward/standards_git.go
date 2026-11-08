@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/fsutil"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -293,7 +294,7 @@ func removeNoFollow(root, rel string) error {
 			return err
 		}
 		switch {
-		case fi.Mode()&os.ModeSymlink != 0:
+		case fsutil.IsLink(fi.Mode()):
 			return os.Remove(next)
 		case i == len(parts)-1:
 			return os.RemoveAll(next)
