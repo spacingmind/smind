@@ -481,3 +481,29 @@ func TestTwoAxisSeats_FloorAndCatalogueAreTheSingleSeatsForBothAxes(t *testing.T
 	}
 	e.endReview(t, id)
 }
+
+// TestTwoAxisE2E_GateUnknownStartsNeitherPassUntilCIDecides: with CI pending
+// the review holds, both pass rows exist and neither seat starts; when CI
+// decides, the recheck starts both.
+func TestTwoAxisE2E_GateUnknownStartsNeitherPassUntilCIDecides(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.enableTwoAxis(t, twoAxisOpts{withSpec: true, ci: "pending"})
+	e.wireHeadAndContract()
+	e.bindSteward(t)
+	r := e.reviewViaRPC(t, &requestContext{local: true})
+	if r.Status != "pending" {
+		t.Fatalf("review = %+v, want it held pending", r)
+	}
+	for _, axis := range []steward.Axis{steward.AxisStandards, steward.AxisSpec} {
+		if p := e.pass(t, r.ReviewID, axis); p.Status != steward.PassPending || p.StewardTaskID != 0 || p.RunID != "" {
+			t.Fatalf("%s pass = %+v, want pending with no seat", axis, p)
+		}
+	}
+	e.coll.mu.Lock()
+	e.coll.inputs.CI = steward.CIInfo{State: "success"}
+	e.coll.mu.Unlock()
+	e.waitPass(t, r.ReviewID, steward.AxisStandards, steward.PassRunning)
+	e.waitPass(t, r.ReviewID, steward.AxisSpec, steward.PassRunning)
+	e.endReview(t, r.ReviewID)
+}
