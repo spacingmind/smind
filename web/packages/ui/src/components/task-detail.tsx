@@ -12,6 +12,7 @@ import { useAttachmentDrop } from "@/components/composer/use-attachment-drop";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
 import { ForkChatDialog } from "@/components/fork-chat-dialog";
+import { ForkContext } from "@/components/fork-context";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
@@ -39,6 +40,7 @@ import { useLiveTask } from "@/hooks/use-live-task";
 import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useForkChat } from "@/hooks/use-fork-chat";
+import { useForkSource } from "@/hooks/use-fork-source";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { canRetryWithHigherEffort, useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
@@ -132,6 +134,7 @@ export function TaskDetailPane({
     chat.ID,
     events,
   );
+  const forkSource = useForkSource(client, task, chat);
   // The daemon's per-chat prompt queue (ADR-0021 §9) -- one owner here,
   // the composer only renders/cancels what it's handed.
   const queue = useChatQueue(client, events ?? null, chat.ID);
@@ -513,10 +516,24 @@ export function TaskDetailPane({
            * their own full-width roots.
            */}
           <div data-testid="run-log-column" className="mx-auto max-w-3xl">
+            {chat.fork && (
+              <ForkContext
+                chat={chat}
+                parentTitle={parentChat?.Title || "another chat"}
+                inherited={forkSource.inherited}
+                seed={forkSource.seed}
+                loading={forkSource.loading}
+                worktreePath={task.WorktreePath ?? undefined}
+              />
+            )}
             {error && <Alert variant="error" description={error} />}
             {!error && runs === null && <InlineSpinner label="Loading runs…" />}
             {!error && runs !== null && runs.length === 0 && (
-              <EmptyState title="No runs yet" description="Send a prompt to start one" />
+              chat.fork ? (
+                <EmptyState title="Continue from here" description="Send a prompt to continue this chat" />
+              ) : (
+                <EmptyState title="No runs yet" description="Send a prompt to start one" />
+              )
             )}
             {runs !== null && runs.length > 0 && (
               <ul className="space-y-4">
