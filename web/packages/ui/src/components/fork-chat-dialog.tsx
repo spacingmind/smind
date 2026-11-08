@@ -12,6 +12,28 @@ interface ForkUnavailable {
   seededAvailable?: boolean;
 }
 
+/** The daemon's refusal reasons (internal/history/native Reason values) as words. */
+export function forkReasonLabel(reason: string | undefined): string {
+  switch (reason) {
+    case "fork_unsupported":
+      return "this agent has no session fork";
+    case "native_session_missing":
+      return "its session file is gone";
+    case "native_session_in_use":
+      return "the chat is still running";
+    case "slice_not_found":
+      return "this turn cannot be told apart in the session";
+    case "format_drift":
+      return "the session format was not recognised";
+    case "provider_cannot_rebuild":
+      return "no session was recorded for this turn";
+    case "rebuild_busy":
+      return "the daemon is busy, try again";
+    default:
+      return "unavailable";
+  }
+}
+
 /**
  * The "Fork from here" confirm: first the native fork (the agent branches
  * its own session, memory intact); when the daemon answers
@@ -72,7 +94,7 @@ export function ForkChatDialog({
           <span className="font-medium text-foreground">{chatTitle}</span>
           <p className="mt-2">
             {unavailable
-              ? `This agent cannot branch its own session here (${unavailable.reason ?? "unavailable"}). You can start a new chat that carries a short account of the earlier turns instead: the agent will not remember tool calls or its reasoning.`
+              ? `The agent's own session cannot be branched here (${forkReasonLabel(unavailable.reason)}). You can start a new chat that carries a short account of the earlier turns instead: the agent will not remember tool calls or its reasoning.`
               : "Continue in a new chat from this turn. The agent keeps its memory of the conversation up to here. Files are not changed."}
           </p>
         </>

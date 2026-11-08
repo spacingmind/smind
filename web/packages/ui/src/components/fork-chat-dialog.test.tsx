@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ForkChatDialog } from "@/components/fork-chat-dialog";
+import { ForkChatDialog, forkReasonLabel } from "@/components/fork-chat-dialog";
 import type { Chat } from "@/lib/types";
 import { RpcError } from "@/lib/ws-client";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -59,13 +59,13 @@ describe("ForkChatDialog", () => {
     const { client, onForked, onOpenChange } = renderDialog();
     fireEvent.click(screen.getByTestId("dialog-fork-chat-confirm"));
     client.nth("chat.fork", 0).reject(
-      new RpcError("cannot fork here", "fork_unavailable", { reason: "no session to branch", seededAvailable: true }),
+      new RpcError("cannot fork here", "fork_unavailable", { reason: "fork_unsupported", seededAvailable: true }),
     );
     await flush();
     // The dialog stays open, now describing the seeded alternative instead of an error.
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(screen.queryByTestId("dialog-fork-chat-error")).toBeNull();
-    expect(screen.getByTestId("dialog-fork-chat")).toHaveTextContent("no session to branch");
+    expect(screen.getByTestId("dialog-fork-chat")).toHaveTextContent("this agent has no session fork");
     expect(screen.getByTestId("dialog-fork-chat-confirm")).toHaveTextContent("Fork with a summary");
     fireEvent.click(screen.getByTestId("dialog-fork-chat-confirm"));
     await flush();
@@ -103,5 +103,17 @@ describe("ForkChatDialog", () => {
     fireEvent.click(screen.getByTestId("dialog-fork-chat-cancel"));
     expect(forkCalls(client)).toHaveLength(0);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("forkReasonLabel", () => {
+  it("words every daemon reason and never shows the raw code", () => {
+    for (const reason of ["fork_unsupported", "native_session_missing", "native_session_in_use", "slice_not_found", "format_drift", "provider_cannot_rebuild", "rebuild_busy"]) {
+      const label = forkReasonLabel(reason);
+      expect(label).not.toContain("_");
+      expect(label).not.toBe("unavailable");
+    }
+    expect(forkReasonLabel("something_new")).toBe("unavailable");
+    expect(forkReasonLabel(undefined)).toBe("unavailable");
   });
 });
