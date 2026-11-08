@@ -35,6 +35,14 @@ const (
 	listsShrinkMax    = 20
 )
 
+// Caps of the standards section (ADR-0054 §3). The head diff and the rules
+// are agent- or user-adjacent text, so they travel under Untrusted, capped.
+const (
+	standardsHeadDiffMax = 4096
+	standardsRulesMax    = 20
+	standardsRuleMax     = 400
+)
+
 // DiffStat sums the numstat rows; binary rows count as a file with 0/0.
 type DiffStat struct {
 	Files      int `json:"files"`
@@ -72,6 +80,10 @@ type Untrusted struct {
 	PRBody         map[string]string `json:"prBody"`
 	CommitSubjects []string          `json:"commitSubjects"`
 	HandoffNotes   []string          `json:"handoffNotes"`
+	// The standards section's free text (ADR-0054 §3): empty, and then
+	// absent from the JSON, for a single-pass review.
+	StandardsHeadDiff string   `json:"standardsHeadDiff,omitempty"`
+	StandardsRules    []string `json:"standardsRules,omitempty"`
 }
 
 // Digest is the deterministic JSON the daemon hands the seat (ADR-0047
@@ -101,6 +113,9 @@ type Digest struct {
 	// Spec is the two-axis review's spec section (ADR-0054 §3). Nil, and then
 	// absent from the JSON, for a single-pass review.
 	Spec *SpecSection `json:"spec,omitempty"`
+	// Standards is the two-axis review's standards section (ADR-0054 §3).
+	// Nil, and then absent from the JSON, for a single-pass review.
+	Standards *StandardsSection `json:"standards,omitempty"`
 }
 
 // SpecSection holds what the daemon resolved for the Spec pass. P1 carries
@@ -126,6 +141,25 @@ func (d Digest) criteriaIDs() []string {
 type SpecCriterion struct {
 	ID   string `json:"id"`
 	Text string `json:"text,omitempty"`
+}
+
+// StandardsSection is the Standards pass's bar: the standards files as they
+// are at the merge-base (D11), never at the head, plus which of them the PR
+// changes. The file contents are not here; the seat reads its copy of them
+// from its scratch tree.
+type StandardsSection struct {
+	BaseRef       string          `json:"baseRef"`
+	Files         []StandardsFile `json:"files"`
+	ChangedInDiff bool            `json:"changedInDiff"`
+}
+
+// StandardsFile is one standards file at BaseRef.
+type StandardsFile struct {
+	Path          string `json:"path"`
+	Bytes         int    `json:"bytes"`
+	SHA256        string `json:"sha256"`
+	Truncated     bool   `json:"truncated"`
+	ChangedInDiff bool   `json:"changedInDiff"`
 }
 
 // Build computes the whole digest from Inputs. It is pure: no clock, no I/O,
@@ -257,7 +291,56 @@ func Build(in Inputs) Digest {
 		d.Secrets[label] = n
 	}
 
+	if in.TwoAxis != nil {
+		d.Standards = buildStandards(in.TwoAxis.Standards)
+		d.Untrusted.StandardsHeadDiff = sanitize(in.TwoAxis.Standards.HeadDiff, standardsHeadDiffMax)
+		rules := make([]string, 0, len(in.TwoAxis.Standards.Rules))
+		for i, r := range in.TwoAxis.Standards.Rules {
+			if i >= standardsRulesMax {
+				break
+			}
+			rules = append(rules, sanitize(r, standardsRuleMax))
+		}
+		d.Untrusted.StandardsRules = rules
+	}
+
 	return d
+}
+
+// buildStandards copies the standards files read at BaseRef and flags which
+// of them the PR's head diff touches.
+func buildStandards(in StandardsInput) *StandardsSection {
+	s := &StandardsSection{
+		BaseRef: in.BaseRef,
+		Files:   make([]StandardsFile, 0, len(in.Files)),
+	}
+	for _, f := range in.Files {
+		s.Files = append(s.Files, StandardsFile{
+			Path:          f.Path,
+			Bytes:         f.Bytes,
+			SHA256:        f.SHA256,
+			Truncated:     f.Truncated,
+			ChangedInDiff: headDiffTouches(in.HeadDiff, f.Path),
+		})
+	}
+	for _, f := range s.Files {
+		if f.ChangedInDiff {
+			s.ChangedInDiff = true
+			break
+		}
+	}
+	return s
+}
+
+// headDiffTouches reports whether the head diff carries a file header for path.
+func headDiffTouches(headDiff, path string) bool {
+	prefix := "diff --git a/" + path + " b/" + path
+	for _, line := range strings.Split(headDiff, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // Marshal encodes the digest as deterministic JSON of at most DigestMaxBytes
