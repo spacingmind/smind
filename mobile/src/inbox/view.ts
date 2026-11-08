@@ -67,9 +67,10 @@ const KIND_META: Record<InboxKind, { icon: IconName; label: string; section: str
   review: { icon: 'file', label: 'Review', section: 'Steward reviews' },
   verdict: { icon: 'check', label: 'Verdict', section: 'Validator verdicts' },
   stall: { icon: 'warning', label: 'Stalled', section: 'Stalled' },
+  run_failed: { icon: 'warning', label: 'Run failed', section: 'Needs you now' },
 };
 /** Host rows come right after permissions: a pairing waits on this human, refusals need a look, a down link can wait. Reviews come before verdicts. */
-const KIND_ORDER: InboxKind[] = ['permission', 'question', 'host_pair', 'host_refused', 'host_down', 'review', 'verdict', 'stall'];
+const KIND_ORDER: InboxKind[] = ['permission', 'question', 'run_failed', 'host_pair', 'host_refused', 'host_down', 'review', 'verdict', 'stall'];
 const HOST_KINDS: readonly InboxKind[] = ['host_pair', 'host_refused', 'host_down'];
 
 /** "just now", "5m ago", "3h ago", "2d ago" from an RFC 3339 instant; unparseable input is shown as it came. */
