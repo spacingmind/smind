@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -63,6 +65,73 @@ type proxy struct {
 	// observer receives every Anthropic OAuth upstream response (ADR-0028
 	// §7). Nil means no observation.
 	observer quota.Observer
+
+	// timeouts bound each upstream request (see upstreamTimeouts).
+	timeouts upstreamTimeouts
+}
+
+// upstreamTimeouts bound one upstream request without an http.Client.Timeout,
+// which would also cut a long stream that is still healthy:
+//
+//   - header: time from sending the request to the response headers (any call);
+//   - streamIdle: for a text/event-stream response, the longest gap between
+//     two chunks (every chunk re-arms it, so a stream may run for hours);
+//   - total: for any other response, the whole call, headers and body.
+type upstreamTimeouts struct {
+	header, streamIdle, total time.Duration
+}
+
+const (
+	defaultUpstreamHeaderTimeout     = 60 * time.Second
+	defaultUpstreamStreamIdleTimeout = 90 * time.Second
+	defaultUpstreamTotalTimeout      = 60 * time.Second
+)
+
+// withUpstreamTimeouts overrides the upstream request bounds. Intended for
+// tests that need to cross a bound in milliseconds.
+func withUpstreamTimeouts(t upstreamTimeouts) proxyOption {
+	return func(p *proxy) { p.timeouts = t }
+}
+
+// errUpstreamTimeout is the cancel cause of a request cut by upstreamTimeouts.
+var errUpstreamTimeout = errors.New("upstream timed out")
+
+// upstreamWatch cancels an upstream request when its current bound passes.
+type upstreamWatch struct {
+	timer  *time.Timer
+	cancel context.CancelCauseFunc
+}
+
+func newUpstreamWatch(cancel context.CancelCauseFunc, d time.Duration) *upstreamWatch {
+	return &upstreamWatch{timer: time.AfterFunc(d, func() { cancel(errUpstreamTimeout) }), cancel: cancel}
+}
+
+// watchedBody wraps an upstream response body: with idle > 0 every chunk read
+// re-arms the watch for idle; Close releases the timer and the request context.
+type watchedBody struct {
+	io.ReadCloser
+	w    *upstreamWatch
+	idle time.Duration
+}
+
+func (b *watchedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 && b.idle > 0 {
+		b.w.timer.Reset(b.idle)
+	}
+	return n, err
+}
+
+func (b *watchedBody) Close() error {
+	b.w.timer.Stop()
+	err := b.ReadCloser.Close()
+	b.w.cancel(context.Canceled)
+	return err
+}
+
+func isEventStream(h http.Header) bool {
+	mt, _, _ := mime.ParseMediaType(h.Get("Content-Type"))
+	return mt == "text/event-stream"
 }
 
 // proxyOption configures a proxy constructed via newProxy.
@@ -112,11 +181,16 @@ func newProxy(reg *accounts.Registry, router *routing.Router, db *store.Store, o
 	p := &proxy{
 		registry:            reg,
 		router:              router,
-		anthropicClient:     transport.Client(utls.HelloFirefox_Auto),
-		openaiClient:        transport.Client(utls.HelloChrome_Auto),
+		anthropicClient:     transport.StreamClient(utls.HelloFirefox_Auto),
+		openaiClient:        transport.StreamClient(utls.HelloChrome_Auto),
 		anthropicRefresher:  accounts.NewAnthropicRefresher(),
 		openaiRefresher:     accounts.NewOpenAIRefresher(),
 		requestLogQueueSize: defaultRequestLogQueueSize,
+		timeouts: upstreamTimeouts{
+			header:     defaultUpstreamHeaderTimeout,
+			streamIdle: defaultUpstreamStreamIdleTimeout,
+			total:      defaultUpstreamTotalTimeout,
+		},
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -296,8 +370,19 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 	accountID := account.ID
 	row.AccountID = &accountID
 
-	resp, err := client.Do(outReq)
+	// The request, not the client, carries the bounds: a client's own Timeout
+	// (the default one has none) would cut a healthy stream, so it is not used.
+	upstreamClient := *client
+	upstreamClient.Timeout = 0
+	upCtx, upCancel := context.WithCancelCause(ctx)
+	watch := newUpstreamWatch(upCancel, p.timeouts.header)
+	resp, err := upstreamClient.Do(outReq.WithContext(upCtx))
 	if err != nil {
+		watch.timer.Stop()
+		if errors.Is(context.Cause(upCtx), errUpstreamTimeout) {
+			err = errUpstreamTimeout
+		}
+		upCancel(context.Canceled)
 		row.Status = http.StatusBadGateway
 		row.Outcome = store.RequestLogOutcomeUpstreamError
 		row.Error = truncatedError(fmt.Errorf("upstream request: %w", err))
@@ -305,6 +390,13 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		enqueue(row)
 		writeProviderError(w, provider, http.StatusBadGateway, fmt.Sprintf("upstream request: %v", err))
 		return
+	}
+	if isEventStream(resp.Header) {
+		watch.timer.Reset(p.timeouts.streamIdle)
+		resp.Body = &watchedBody{ReadCloser: resp.Body, w: watch, idle: p.timeouts.streamIdle}
+	} else {
+		watch.timer.Reset(max(p.timeouts.total-time.Since(start), 0))
+		resp.Body = &watchedBody{ReadCloser: resp.Body, w: watch}
 	}
 	defer resp.Body.Close()
 
