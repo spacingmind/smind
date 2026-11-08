@@ -116,7 +116,73 @@ describe("QuestionCard: rendering", () => {
     expect(card.textContent).toContain("line\n".repeat(60).trimEnd());
   });
 
-  it("labels the Other input with its own question's text, capped at 60 chars", () => {
+  it("collapses a long question to a visual clamp behind a Show all toggle, keeping the full text in the DOM", () => {
+    const long = `Please read this whole plan before answering. ${"Details follow. ".repeat(40)}`;
+    expect(long.length).toBeGreaterThan(480);
+    render(
+      <QuestionCard
+        runId="run-1"
+        pending={pendingQuestion({ request: { source: "agent", questions: [{ id: "q1", text: long, kind: "text" }] } })}
+        onAnswer={vi.fn()}
+      />,
+    );
+
+    const field = screen.getByTestId("question-field");
+    const text = field.querySelector("legend > span");
+    expect(text?.className).toContain("line-clamp-8");
+    // The clamp is visual only: the legend (the fieldset's accessible name) still holds every character.
+    expect(field.querySelector("legend")?.textContent).toBe(long);
+
+    const toggle = screen.getByTestId("question-text-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("Show all");
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("question-text-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("question-text-toggle")).toHaveTextContent("Show less");
+    expect(field.querySelector("legend > span")?.className).not.toContain("line-clamp");
+
+    fireEvent.click(screen.getByTestId("question-text-toggle"));
+    expect(screen.getByTestId("question-text-toggle")).toHaveTextContent("Show all");
+    expect(field.querySelector("legend > span")?.className).toContain("line-clamp-8");
+  });
+
+  it("collapses a many-lined question even when it is under the character threshold", () => {
+    const nineLines = Array.from({ length: 9 }, (_, i) => `line ${i + 1}`).join("\n");
+    expect(nineLines.length).toBeLessThanOrEqual(480);
+    render(
+      <QuestionCard
+        runId="run-1"
+        pending={pendingQuestion({ request: { source: "agent", questions: [{ id: "q1", text: nineLines, kind: "text" }] } })}
+        onAnswer={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("question-text-toggle")).toBeInTheDocument();
+  });
+
+  it("renders a short question exactly as before: no clamp, no toggle", () => {
+    render(<QuestionCard runId="run-1" pending={pendingQuestion()} onAnswer={vi.fn()} />);
+    expect(screen.queryByTestId("question-text-toggle")).not.toBeInTheDocument();
+    expect(screen.getByText("Which environment?").tagName).toBe("LEGEND");
+  });
+
+  it("keeps a long adversarial question as literal text while collapsed", () => {
+    const hostile = `${"Please confirm the rollout plan. ".repeat(14)}\n[Click here](https://evil.example/phish) or visit https://evil.example <b>bold</b> <img src=x onerror=alert(1)>`;
+    render(
+      <QuestionCard
+        runId="run-1"
+        pending={pendingQuestion({ request: { source: "agent", questions: [{ id: "q1", text: hostile, kind: "text" }] } })}
+        onAnswer={vi.fn()}
+      />,
+    );
+    const card = screen.getByTestId("question-card");
+    expect(screen.getByTestId("question-text-toggle")).toHaveAttribute("aria-expanded", "false");
+    expect(card.textContent).toContain("[Click here](https://evil.example/phish)");
+    expect(card.textContent).toContain("<b>bold</b>");
+    expect(card.querySelectorAll("a, b, i, img, script, strong, em")).toHaveLength(0);
+  });
+
+  it("labels each Other input with a visible 'Other:' label tied to its own field", () => {
     const long = "y".repeat(80);
     render(
       <QuestionCard
@@ -133,8 +199,20 @@ describe("QuestionCard: rendering", () => {
         onAnswer={vi.fn()}
       />,
     );
-    expect(screen.getByTestId("question-other-q1")).toHaveAccessibleName("Other answer for: Pick services");
-    expect(screen.getByTestId("question-other-q2")).toHaveAccessibleName(`Other answer for: ${"y".repeat(60)}`);
+    const card = screen.getByTestId("question-card");
+    const labels = within(card).getAllByText("Other:");
+    expect(labels).toHaveLength(2);
+    const other1 = within(card).getByTestId("question-other-q1");
+    const other2 = within(card).getByTestId("question-other-q2");
+    expect(other1).toHaveAccessibleName("Other:");
+    expect(other2).toHaveAccessibleName("Other:");
+    expect(other1).toHaveAttribute("placeholder", "Type another answer…");
+
+    // The label stays visible once the field holds a value: a filled answer keeps its name.
+    fireEvent.change(other1, { target: { value: "canary in eu-west" } });
+    expect(labels[0]).toBeVisible();
+    expect(other1).toHaveAccessibleName("Other:");
+    expect(other1).toHaveValue("canary in eu-west");
   });
 
   it("is focusable as a group and moves focus to itself on mount, unless a text field has focus", () => {
