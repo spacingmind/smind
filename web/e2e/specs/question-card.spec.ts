@@ -275,6 +275,7 @@ test('Q-06 a question the daemon restart orphaned resolves to a cancelled marker
 })
 
 test('Q-07 at 390px the docked card separates cleanly from the timeline rows above it', async ({ app }, testInfo) => {
+  test.skip(testInfo.project.name.endsWith('1280'), 'narrow-only: below md the dock gets a separator')
   const { page } = app
   const b = await open(app, testInfo, 'q07')
   // A timeline with rows the dock must not cut off: streamed chunks the log shows above the card.
@@ -291,7 +292,6 @@ test('Q-07 at 390px the docked card separates cleanly from the timeline rows abo
       ],
     },
   ])
-  await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByTestId('question-card')).toBeVisible()
   await expect(page.getByTestId('timeline-assistant')).toContainText('Second line')
   const dock = page.getByTestId('pending-permission-dock')
