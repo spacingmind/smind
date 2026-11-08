@@ -371,7 +371,8 @@ export function RunConfigToolbar({
  * works as before; the reset-to-agent button stays beside the trigger while
  * the run config has drifted from the applied profile.
  */
-function RunConfigToolbarModelPicker() {
+/** `showLabel` keeps a pill's label visible below sm (the home composer's chips); the task composer leaves it off. */
+function RunConfigToolbarModelPicker({ showLabel = false }: { showLabel?: boolean } = {}) {
   const { state, actions, meta } = useRunConfig();
   const browserProviders = useMemo(() => buildBrowserProviders(meta.providers, meta.health, { loading: meta.providersLoading }), [meta.providers, meta.health, meta.providersLoading]);
   const profileRows = useMemo<PickerProfileRow[]>(
@@ -401,6 +402,7 @@ function RunConfigToolbarModelPicker() {
         observedModel={observedModel}
         boundProvider={meta.boundProvider}
         disabled={meta.disabled}
+        showLabel={showLabel}
         profileRows={profileRows}
         baseAgentId={state.baseAgentId}
         custom={state.custom}
@@ -448,7 +450,7 @@ function RunConfigToolbarModelPicker() {
  * ACP provider an Auto-accept toggle sits beside it (Paseo's auto_accept:
  * approve every prompt), never switched on by default.
  */
-function RunConfigToolbarMode() {
+function RunConfigToolbarMode({ showLabel = false }: { showLabel?: boolean } = {}) {
   const { state, actions, meta } = useRunConfig();
   const live = meta.liveRun;
   const [pending, setPending] = useState(false);
@@ -497,9 +499,9 @@ function RunConfigToolbarMode() {
   };
   return (
     <>
-      <ModeSelect modes={modes} value={modeId} onChange={pickMode} disabled={disabled} dangerous={dangerous} variant="pill" />
+      <ModeSelect modes={modes} value={modeId} onChange={pickMode} disabled={disabled} dangerous={dangerous} variant="pill" showLabel={showLabel} />
       {showAutoAccept && (
-        <AutoAcceptToggle checked={autoAccept} onChange={toggleAutoAccept} disabled={disabled} pending={pending} variant="pill" />
+        <AutoAcceptToggle checked={autoAccept} onChange={toggleAutoAccept} disabled={disabled} pending={pending} variant="pill" showLabel={showLabel} />
       )}
       {error && (
         <span data-testid="permission-mode-error" role="alert" className="px-1 text-ui-sm text-destructive">
@@ -510,7 +512,7 @@ function RunConfigToolbarMode() {
   );
 }
 
-function RunConfigToolbarThinking() {
+function RunConfigToolbarThinking({ showLabel = false }: { showLabel?: boolean } = {}) {
   const { state, actions, meta } = useRunConfig();
   // A pre-run control, omitted entirely (not just disabled) for a provider with no reasoning level: no
   // dead control in the toolbar. Claude takes the fixed vocabulary; a codex model its own advertised
@@ -526,6 +528,7 @@ function RunConfigToolbarThinking() {
         onChange={(v) => actions.setThinkingLevel(v)}
         disabled={meta.disabled}
         variant="pill"
+        showLabel={showLabel}
         placeholder="Select thinking level"
       />
     );
@@ -540,6 +543,7 @@ function RunConfigToolbarThinking() {
       onChange={(v) => actions.setThinkingLevel(v)}
       disabled={meta.disabled || levels.length === 0}
       variant="pill"
+      showLabel={showLabel}
       placeholder={levels.length > 0 ? defaultLabel : "Default reasoning"}
     />
   );

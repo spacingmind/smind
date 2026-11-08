@@ -1,5 +1,5 @@
 import { Icons } from "@/lib/icons";
-import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
+import { pillTriggerClass } from "@/components/composer/pill-class";
 import {
   Select,
   SelectContent,
@@ -20,6 +20,7 @@ export function ThinkingSelect({
   testId,
   label = "Thinking level",
   title,
+  showLabel = false,
 }: {
   levels?: { id: string; label: string; help?: string }[];
   value: string;
@@ -32,6 +33,8 @@ export function ThinkingSelect({
   label?: string;
   /** Overrides the current level's help text as the tooltip (a live option's own description). */
   title?: string;
+  /** Pill only: keep the label visible below sm instead of the icon-only trigger. */
+  showLabel?: boolean;
 }) {
   const current = levels.find((t) => t.id === value);
   return (
@@ -41,7 +44,7 @@ export function ThinkingSelect({
         aria-label={label}
         title={title ?? current?.help}
         data-testid={testId}
-        className={variant === "pill" ? PILL_TRIGGER_CLASS : "w-full"}
+        className={variant === "pill" ? pillTriggerClass(showLabel) : "w-full"}
       >
         {variant === "pill" && <Icons.thinking aria-hidden className="shrink-0" />}
         <SelectValue placeholder={placeholder ?? levels.find((t) => t.id === "")?.label ?? label} />

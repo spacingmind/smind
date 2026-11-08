@@ -395,6 +395,30 @@ describe("HomeLanding attachments", () => {
   });
 });
 
+describe("HomeLanding chip labels", () => {
+  afterEach(() => cleanup());
+
+  it("home_chip_labels_visible_below_sm", async () => {
+    renderHome();
+    await flush();
+    const model = screen.getByTestId("composer-model-picker");
+    const thinking = screen.getByLabelText("Thinking level");
+    const mode = screen.getByLabelText("Permission mode");
+    expect(model.querySelector(":scope > span")).toHaveTextContent("Claude Code");
+    expect(model.querySelector(":scope > span")?.className).not.toContain("max-sm:hidden");
+    for (const trigger of [thinking, mode]) {
+      expect(trigger.className).not.toContain("max-sm:[&>span]:hidden!");
+      expect(trigger.className).not.toContain("size-11");
+    }
+    expect(thinking).toHaveTextContent("Standard");
+    expect(mode).toHaveTextContent("Accept File Edits");
+    // The chips wrap onto their own row first below sm; send stays on the right of the bottom row.
+    expect(screen.getByTestId("home-run-chips").className).toContain("max-sm:order-first");
+    expect(screen.getByTestId("home-run-chips").className).toContain("max-sm:w-full");
+    expect(screen.getByTestId("home-send-button").className).toContain("ml-auto");
+  });
+});
+
 describe("HomeLanding office suggestions", () => {
   beforeEach(() => {
     window.localStorage.clear();

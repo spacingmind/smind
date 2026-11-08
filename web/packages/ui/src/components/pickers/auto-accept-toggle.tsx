@@ -1,7 +1,7 @@
 import { Checkbox } from "@/components/ui/checkbox";
 import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL } from "@/lib/permission-modes";
 import { Icons } from "@/lib/icons";
-import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
+import { pillTriggerClass } from "@/components/composer/pill-class";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,7 @@ export function AutoAcceptToggle({
   pending = false,
   variant,
   testId,
+  showLabel = false,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -20,6 +21,8 @@ export function AutoAcceptToggle({
   pending?: boolean;
   variant: "pill" | "field";
   testId?: string;
+  /** Pill only: keep the label visible below sm. */
+  showLabel?: boolean;
 }) {
   if (variant === "field") {
     return (
@@ -45,10 +48,10 @@ export function AutoAcceptToggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       aria-label="Auto-accept"
-      className={cn(PILL_TRIGGER_CLASS, checked ? "text-warning-text hover:text-warning-text" : "text-foreground-muted")}
+      className={cn(pillTriggerClass(showLabel), checked ? "text-warning-text hover:text-warning-text" : "text-foreground-muted")}
     >
       <Icons.checkAll aria-hidden className="shrink-0" />
-      <span className="max-sm:hidden">{AUTO_ACCEPT_LABEL}</span>
+      <span className={showLabel ? undefined : "max-sm:hidden"}>{AUTO_ACCEPT_LABEL}</span>
     </Button>
   );
 }

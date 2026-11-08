@@ -1,5 +1,5 @@
 import { Icons } from "@/lib/icons";
-import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
+import { pillTriggerClass } from "@/components/composer/pill-class";
 import {
   Select,
   SelectContent,
@@ -23,6 +23,7 @@ export function ModeSelect({
   disabled = false,
   dangerous = false,
   variant,
+  showLabel = false,
   testId,
   extraItems,
 }: {
@@ -33,6 +34,8 @@ export function ModeSelect({
   /** The mode auto-approves (or ACP Auto-accept is on) -- warn without changing semantics. */
   dangerous?: boolean;
   variant: "pill" | "field";
+  /** Pill only: keep the label visible below sm instead of the icon-only trigger. */
+  showLabel?: boolean;
   testId?: string;
   /** Rendered before the provider's own modes (field variant's "Provider default" sentinel). */
   extraItems?: ModeInfo[];
@@ -46,7 +49,7 @@ export function ModeSelect({
         title={current?.description}
         data-testid={testId}
         data-danger={dangerous ? "true" : undefined}
-        className={variant === "pill" ? cn(PILL_TRIGGER_CLASS, "focus-visible:ring-3 focus-visible:ring-ring/50", dangerous && "text-warning-text hover:text-warning-text") : cn("w-full", dangerous && "text-warning-text")}
+        className={variant === "pill" ? cn(pillTriggerClass(showLabel), "focus-visible:ring-3 focus-visible:ring-ring/50", dangerous && "text-warning-text hover:text-warning-text") : cn("w-full", dangerous && "text-warning-text")}
       >
         {variant === "pill" &&
           (dangerous ? <Icons.permissionDanger aria-hidden className="shrink-0" /> : <Icons.permission aria-hidden className="shrink-0" />)}

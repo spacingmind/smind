@@ -259,8 +259,8 @@ export function HomeLanding({
               disabled={disabled}
               className="rounded-none border-0 bg-transparent px-4 pb-1 pt-3.5 focus-visible:border-transparent focus-visible:ring-0"
             />
-            <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
-              <div className="flex flex-wrap items-center">
+            {/* Below sm the chips take their own full-width row above attach and send (order-first); from sm up it is one row. */}
+            <div data-testid="home-toolbar-row" className="flex flex-wrap items-center gap-x-1 px-2 pb-2 pt-1">
               {attach.limits && (
                 <>
                   <input
@@ -294,17 +294,16 @@ export function HomeLanding({
                   configRef.current = v.state;
                 }}
               >
-                <div data-testid="home-run-chips" className="flex flex-wrap items-center">
-                  <RunConfigToolbar.ModelPicker />
-                  <RunConfigToolbar.Thinking />
-                  <RunConfigToolbar.Mode />
+                <div data-testid="home-run-chips" className="flex flex-wrap items-center max-sm:order-first max-sm:w-full">
+                  <RunConfigToolbar.ModelPicker showLabel />
+                  <RunConfigToolbar.Thinking showLabel />
+                  <RunConfigToolbar.Mode showLabel />
                 </div>
               </RunConfigToolbar>
-              </div>
               <Button
                 type="submit"
                 variant="execute"
-                className={COMPOSER_ACTION_BUTTON_CLASS}
+                className={cn(COMPOSER_ACTION_BUTTON_CLASS, "ml-auto")}
                 aria-label="Start task"
                 title="Start task (Enter)"
                 data-testid="home-send-button"
