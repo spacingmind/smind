@@ -91,7 +91,7 @@ func (s *Service) SubmitPassVerdict(reviewID int64, axis Axis, token, runID stri
 // decided.
 func (s *Service) WritePassBlocked(reviewID int64, axis Axis, reason, summary string, costUSD float64) error {
 	if !IsDaemonBlockedReason(reason) {
-		return errors.New("the daemon may only write blocked passes for timeout, budget, crashed, cancelled or scope_violation")
+		return errors.New("the daemon may only write blocked passes for timeout, budget, crashed, cancelled, scope_violation or base_unresolved")
 	}
 	row, _, err := s.openPass(reviewID, axis)
 	if err != nil {
@@ -314,4 +314,43 @@ func digestOf(row store.StewardReview) (Digest, error) {
 // tokenMatches compares a presented token with a stored hash in constant time.
 func tokenMatches(token, storedHash string) bool {
 	return subtle.ConstantTimeCompare([]byte(HashToken(token)), []byte(storedHash)) == 1
+}
+
+// AxisDigestJSON is the digest as the seat of one pass may read it (ADR-0054
+// §3): the shared objective fields plus only that axis's sections. The
+// Standards seat gets no spec section, no criteria texts, no PR body and no handoff notes (they restate the criteria) (the
+// text the spec is read from); the Spec seat gets no standards section, no
+// head diff of the standards files and no rules. The stored digest stays whole
+// (SubmitPassVerdict reads the criteria ids from it); this is a projection.
+// Any axis but the two is refused rather than answered with the full digest.
+func (s *Service) AxisDigestJSON(reviewID int64, axis Axis) (json.RawMessage, error) {
+	row, err := s.DB.GetStewardReview(reviewID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("steward review %d: %w", reviewID, ErrNotFound)
+	}
+	if err != nil {
+		return nil, err
+	}
+	d, err := digestOf(row)
+	if err != nil {
+		return nil, err
+	}
+	switch axis {
+	case AxisStandards:
+		d.Spec = nil
+		d.Untrusted.SpecCriteria = nil
+		d.Untrusted.PRBody = map[string]string{}
+		d.Untrusted.HandoffNotes = []string{}
+	case AxisSpec:
+		d.Standards = nil
+		d.Untrusted.StandardsHeadDiff = ""
+		d.Untrusted.StandardsRules = nil
+	default:
+		return nil, fmt.Errorf("steward review %d: unknown axis %q", reviewID, axis)
+	}
+	b, err := json.Marshal(d)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(b), nil
 }

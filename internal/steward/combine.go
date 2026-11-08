@@ -83,7 +83,10 @@ func Combine(passes []PassResult) (Combined, error) {
 			// any other, which is what keeps a partial review from ever being
 			// ACCEPTED (failed = true below), but never the reason a review is
 			// blocked for.
-			if res.BlockedReason == "" && p.BlockedReason != store.StewardPassNotRun {
+			// An unresolved merge-base is not a failure of the seat: a real
+			// failure of the other pass (crash, timeout, budget) is the reason
+			// the review reads and counts under, so it can still strike.
+			if p.BlockedReason != store.StewardPassNotRun && (res.BlockedReason == "" || res.BlockedReason == ReasonBaseUnresolved && p.BlockedReason != ReasonBaseUnresolved) {
 				res.BlockedReason = p.BlockedReason
 			}
 			failed = true
