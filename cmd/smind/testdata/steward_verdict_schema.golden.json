@@ -1,0 +1,139 @@
+{
+  "type": "object",
+  "properties": {
+    "submission": {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "integer"
+        },
+        "reviewId": {
+          "type": "integer"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string",
+          "description": "At most 800 bytes (UTF-8).",
+          "maxLength": 800
+        },
+        "findings": {
+          "type": [
+            "null",
+            "array"
+          ],
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string",
+                "description": "At most 300 bytes (UTF-8).",
+                "maxLength": 300
+              },
+              "line": {
+                "type": "integer"
+              },
+              "why": {
+                "type": "string",
+                "description": "At most 600 bytes (UTF-8).",
+                "maxLength": 600
+              },
+              "check": {
+                "type": "string",
+                "description": "At most 400 bytes (UTF-8).",
+                "maxLength": 400
+              },
+              "severity": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file",
+              "line",
+              "why",
+              "check"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 50
+        },
+        "gates": {
+          "type": [
+            "null",
+            "array"
+          ],
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ack": {
+                "type": "boolean"
+              },
+              "note": {
+                "type": "string",
+                "description": "At most 300 bytes (UTF-8).",
+                "maxLength": 300
+              }
+            },
+            "required": [
+              "id",
+              "ack"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 40
+        },
+        "frames": {
+          "type": [
+            "null",
+            "array"
+          ],
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "At most 300 bytes (UTF-8).",
+                "maxLength": 300
+              },
+              "observation": {
+                "type": "string",
+                "description": "At most 1000 bytes (UTF-8).",
+                "maxLength": 1000
+              }
+            },
+            "required": [
+              "path",
+              "observation"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 200
+        },
+        "blockedReason": {
+          "type": "string",
+          "description": "At most 200 bytes (UTF-8).",
+          "maxLength": 200
+        }
+      },
+      "description": "the verdict document, an object: {v:1, reviewId, verdict: the string ACCEPTED|CHANGES|BLOCKED, summary, findings:[{file,line,why,check,severity}], gates:[{id,ack,note}], frames:[{path,observation}], blockedReason (BLOCKED only)}",
+      "required": [
+        "v",
+        "reviewId",
+        "verdict",
+        "summary",
+        "findings",
+        "gates",
+        "frames"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "submission"
+  ],
+  "additionalProperties": false
+}

@@ -73,6 +73,9 @@ func (h *stewardHost) startPasses(id int64, lead store.Task, d steward.Digest, d
 	res := reviewResult{ReviewID: id, TaskID: lead.ID, CommitSHA: sha, Status: "running"}
 	std, spec := cfg.PassLimits()
 	before, _ := validation.Take(h.ctx, *lead.WorktreePath)
+	if err := h.db.SetStewardReviewStatus(id, "running"); err != nil {
+		return res, err
+	}
 
 	if !d.Spec.HasSpec() {
 		if err := h.svc.WritePassSkipped(id, steward.AxisSpec); err != nil && !errors.Is(err, steward.ErrVerdictExists) {

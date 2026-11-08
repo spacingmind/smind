@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/steward"
@@ -45,7 +46,10 @@ type stewardHostOptions struct {
 	Reg     *runs.Registry
 	Runner  *taskrunner.Runner
 	ProfReg *profiles.Registry
-	Ctx     context.Context
+	// Config reads the steward section (default configSteward); startReview
+	// reads it for the two-axis pass settings.
+	Config func() (config.StewardConfig, error)
+	Ctx    context.Context
 	// WatchPeriod supervises a running seat, RecheckPeriod polls a pending
 	// CI gate. Zero means the default (2s / 30s); a nil Ctx is
 	// context.Background().
@@ -78,6 +82,7 @@ type stewardHost struct {
 	reg     *runs.Registry
 	runner  *taskrunner.Runner
 	profReg *profiles.Registry
+	config  func() (config.StewardConfig, error)
 
 	mu    sync.Mutex
 	seats map[int64]stewardSeatEntry // by steward task id
@@ -97,7 +102,10 @@ func newStewardHost(o stewardHostOptions) *stewardHost {
 	if o.Ctx == nil {
 		o.Ctx = context.Background()
 	}
-	h := &stewardHost{svc: o.Svc, rails: o.Rails, collect: o.Collect, wm: o.WM, db: o.DB, reg: o.Reg, runner: o.Runner, profReg: o.ProfReg,
+	if o.Config == nil {
+		o.Config = configSteward
+	}
+	h := &stewardHost{svc: o.Svc, rails: o.Rails, collect: o.Collect, wm: o.WM, db: o.DB, reg: o.Reg, runner: o.Runner, profReg: o.ProfReg, config: o.Config,
 		seats: map[int64]stewardSeatEntry{}, watchPeriod: o.WatchPeriod, recheckPeriod: o.RecheckPeriod, ctx: o.Ctx}
 	o.Reg.SetSeatSource(h.seatSource)
 	// The tokens are memory-only, so an open review can never resume after a
@@ -217,7 +225,7 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 	// ADR-0054: a review whose inputs carry the two-axis section (the
 	// collector read steward.twoAxis as on) runs two passes, not one seat.
 	if in.TwoAxis != nil {
-		cfg, _ := configSteward()
+		cfg, _ := h.config()
 		if err := h.openPasses(id, cfg); err != nil {
 			_ = h.svc.WriteBlocked(id, "crashed", "the review passes could not be opened", 0)
 			return reviewResult{}, fmt.Errorf("%s: open the passes: %w", m, err)
@@ -282,7 +290,7 @@ func (h *stewardHost) recheck(id, taskID int64, lead store.Task, prof store.Agen
 			return
 		}
 		if in.TwoAxis != nil {
-			cfg, _ := configSteward()
+			cfg, _ := h.config()
 			_, _ = h.startPasses(id, lead, d, dsha, sha, cfg)
 			return
 		}

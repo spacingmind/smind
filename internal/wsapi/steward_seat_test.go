@@ -78,7 +78,7 @@ func newStewardHostEnv(t *testing.T, ci string) *stewardHostEnv {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	e.host = newStewardHost(stewardHostOptions{
-		Svc: e.svc, Rails: e.rails, Collect: e.coll.fn,
+		Svc: e.svc, Rails: e.rails, Collect: e.coll.fn, Config: func() (config.StewardConfig, error) { return e.cfg, nil },
 		WM: e.wm, DB: e.db, Reg: e.api.Runs, Runner: newTestRunner(e.wm), ProfReg: profiles.New(e.db),
 		Ctx: ctx, WatchPeriod: 40 * time.Millisecond, RecheckPeriod: 20 * time.Millisecond,
 	})
