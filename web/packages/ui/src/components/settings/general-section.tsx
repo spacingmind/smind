@@ -23,10 +23,10 @@ export function GeneralSection(_ctx: SettingsSectionContext) {
     <div className="flex flex-col gap-6" data-testid="settings-section-general">
       <SettingsGroup title="Defaults for new tasks">
         <SettingsRow
-          label="Default agent"
+          label="Default profile"
           description={
             <>
-              Set a ★ default agent in <span className="font-medium text-foreground">Settings → Agents</span> — a
+              Set a ★ default profile in <span className="font-medium text-foreground">Settings → Profiles</span> — a
               new task's composer starts from it.
             </>
           }

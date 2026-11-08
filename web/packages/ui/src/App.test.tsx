@@ -288,6 +288,97 @@ describe("App", () => {
     expect(screen.queryByText("Can't reach the daemon")).not.toBeInTheDocument();
   });
 
+  it("a failed first connect shows the cause on the sidebar and the home landing (AC1)", async () => {
+    const connect = vi.fn().mockRejectedValue(new Error("no daemon listening"));
+    render(<App connect={connect} />);
+    await flush();
+
+    expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-connection-error")).toHaveTextContent("no daemon listening");
+    expect(screen.getByText(/Can't reach the daemon: no daemon listening/)).toBeInTheDocument();
+    // jsdom is not a desktop build, so the serve hint shows.
+    expect(screen.getByText("Start it with smind serve")).toBeInTheDocument();
+  });
+
+  it("the home landing's Retry also re-runs the connect, and a later success clears the notice (AC1)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("no daemon listening"))
+      .mockResolvedValueOnce(new WsClient(socket));
+    render(<App connect={connect} />);
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry connection" }));
+    await flush();
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
+    expect(screen.queryByText(/Can't reach the daemon/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Start it with smind serve")).not.toBeInTheDocument();
+  });
+
+  it("a connect that never settles says the daemon did not answer after 8 s, and Retry restarts the timer (AC1)", async () => {
+    const connect = vi.fn().mockImplementation(() => new Promise<WsClient>(() => {}));
+    render(<App connect={connect} />);
+    await flush();
+    expect(screen.getByText("Connecting…")).toBeInTheDocument();
+    expect(screen.queryByText("Can't reach the daemon")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-connection-error")).toHaveTextContent("No answer from the daemon after 8 s");
+    expect(screen.getByText(/Can't reach the daemon: No answer from the daemon after 8 s/)).toBeInTheDocument();
+
+    // Retry re-runs the connect effect, so the 8 s timer restarts with it.
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await flush();
+    expect(screen.getByText("Connecting…")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(screen.getByText("No answer from the daemon after 8 s")).toBeInTheDocument();
+  });
+
+  it("a late connect success after the 8 s timeout still connects and clears the no-answer state (AC1)", async () => {
+    let settle: ((c: WsClient) => void) | undefined;
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockImplementation(
+      () =>
+        new Promise<WsClient>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    render(<App connect={connect} />);
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(screen.getByText("No answer from the daemon after 8 s")).toBeInTheDocument();
+
+    await act(async () => {
+      settle!(new WsClient(socket));
+    });
+    await flush();
+    expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
+    expect(screen.queryByText(/Can't reach the daemon/)).not.toBeInTheDocument();
+  });
+
+  it("a connect that resolves before 8 s never shows the no-answer notice (AC1)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+
+    expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
+    expect(screen.queryByText("No answer from the daemon after 8 s")).not.toBeInTheDocument();
+    expect(screen.queryByText("Can't reach the daemon")).not.toBeInTheDocument();
+  });
+
   it("an unexpected disconnect updates the header away from 'Connected to daemon', and a successful reconnect brings it back", async () => {
     const socket1 = new FakeSocket();
     const socket2 = new FakeSocket();
@@ -800,7 +891,7 @@ describe("App keyboard shortcuts", () => {
     );
   });
 
-  it("Shift+? opens Settings on the Shortcuts section, listing every binding (AC5: the old dialog is now a Settings section)", async () => {
+  it("Shift+? opens the shortcuts overlay with every binding, not Settings (AC2: the old dialog is back as a read-only overlay)", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -812,14 +903,70 @@ describe("App keyboard shortcuts", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
     // jsdom is not a desktop build: the web-only rows render.
-    expect(screen.getAllByTestId("shortcut-row")).toHaveLength(
+    expect(within(dialog).getAllByTestId("shortcut-row")).toHaveLength(
       platformBindings(SHORTCUT_BINDINGS, false, false).length,
     );
+    // Read-only: no rebind/reset controls and no Scope column.
+    expect(within(dialog).queryByRole("button", { name: /Change shortcut for/ })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Record a chord for/ })).not.toBeInTheDocument();
+
+    // "Customize in Settings" closes the overlay and deep-links the rebindable section.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Customize in Settings" }));
+    await flush();
+    expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
   });
 
-  it("Mod+, opens Settings on its default section, not the Shortcuts one a prior Shift+? left behind", async () => {
+  it("with a task selected, ? opens the overlay over the task view without unmounting it (AC2)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const paneBefore = screen.getByTestId("primary-pane");
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    });
+    await flush();
+
+    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+    // Same DOM node: the task view stayed mounted underneath the overlay.
+    expect(screen.getByTestId("primary-pane")).toBe(paneBefore);
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
+  });
+
+  it("? typed into the composer inserts ? and does not open the overlay (AC2)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const composer = screen.getByLabelText("Prompt");
+    composer.focus();
+    fireEvent.change(composer, { target: { value: "what?" } });
+    fireEvent.keyDown(composer, { key: "?", code: "Slash", shiftKey: true });
+    await flush();
+
+    expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Prompt")).toHaveValue("what?");
+  });
+
+  it("Mod+, opens Settings on its default section, not the Shortcuts one a prior 'Customize in Settings' left behind", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -828,6 +975,8 @@ describe("App keyboard shortcuts", () => {
     await act(async () => {
       fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
     });
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Customize in Settings" }));
     await flush();
     expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("settings-back-button"));
@@ -2027,6 +2176,9 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     // isn't stuck with the default's text-field exemption.
     fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
     await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Customize in Settings" }));
+    await flush();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Change shortcut for Focus pane left"));
     fireEvent.keyDown(window, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
     fireEvent.click(screen.getByTestId("settings-back-button"));
@@ -2759,7 +2911,7 @@ describe("App settings view (dogfood Item 4)", () => {
     expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
   });
 
-  it("settings-safe shortcuts still work over settings: Shift+? deep-links to Shortcuts", async () => {
+  it("settings-safe shortcuts still work over settings: Shift+? opens the overlay above Settings (AC2)", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -2773,7 +2925,10 @@ describe("App settings view (dogfood Item 4)", () => {
       fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
     });
     await flush();
-    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+    // Settings stays open underneath; the overlay did not navigate away.
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
   });
 
   it("a command-palette task pick while in settings leaves settings", async () => {

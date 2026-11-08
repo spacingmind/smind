@@ -144,7 +144,7 @@ describe("TaskLineageHeader (unit)", () => {
     expect(chip.getAttribute("title")).toContain(`tree: ${usageChipText(subtree)}`);
   });
 
-  it("the usage chip keeps its full text, with the tokens in a max-sm:hidden span (cost-only on narrow screens)", () => {
+  it("the usage chip shows tokens only, never a dollar figure", () => {
     const own = { ...usage(1), inputTokens: 1000, outputTokens: 500, costUsd: 0.3 };
     const subtree = { ...usage(3), inputTokens: 5000, outputTokens: 2500, costUsd: 1.5 };
     const lineage: TaskLineage = {
@@ -159,13 +159,12 @@ describe("TaskLineageHeader (unit)", () => {
     render(<TaskLineageHeader lineage={lineage} />);
     const chip = screen.getByTestId("task-tree-usage");
     expect(chip.textContent).toBe(`Task ${usageChipText(subtree)}`);
-    const tokens = screen.getByTestId("task-tree-usage-tokens");
-    expect(tokens.className).toContain("max-sm:hidden");
-    expect(tokens.textContent).toContain("7.5k tok");
-    expect(tokens.textContent).not.toContain("$");
+    expect(chip.textContent).toContain("7.5k tok");
+    expect(chip.textContent).not.toContain("$");
+    expect(chip.getAttribute("title")).not.toContain("$");
   });
 
-  it("with no cost the usage chip keeps its tokens visible on narrow screens", () => {
+  it("with no cost reported the usage chip still shows its tokens", () => {
     const own = { ...usage(1), inputTokens: 1000, outputTokens: 500, costUsd: null };
     const lineage: TaskLineage = {
       parent: null,
@@ -177,7 +176,6 @@ describe("TaskLineageHeader (unit)", () => {
       children: [],
     };
     render(<TaskLineageHeader lineage={lineage} />);
-    expect(screen.queryByTestId("task-tree-usage-tokens")).toBeNull();
     expect(screen.getByTestId("task-tree-usage").textContent).toContain("1.5k tok");
   });
 });
@@ -356,7 +354,9 @@ describe("task lineage header (in the pane)", () => {
     expect(row).toContainElement(screen.getByTestId("task-tree-usage"));
     expect(row).toContainElement(screen.getByTestId("task-tree-summary"));
     expect(row).toContainElement(screen.getByTestId("task-child-pill"));
-    expect(screen.getByTestId("task-tree-usage").textContent).toMatch(/^Task \$1\.12 · /);
+    expect(screen.getByTestId("task-tree-usage").textContent).toMatch(/^Task /);
+    expect(screen.getByTestId("task-tree-usage").textContent).toContain("557k tok");
+    expect(screen.getByTestId("task-tree-usage").textContent).not.toContain("$");
     expect(screen.queryByTestId("task-lineage-header")).toBeNull();
     expect(row.className).not.toMatch(/(^|\s)border(-b)?(\s|$)/);
   });

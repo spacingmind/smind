@@ -25,7 +25,6 @@ interface Props {
   stalledNote: string | null;
   permissions: number;
   unread: boolean;
-  cost: string;
   isRoot: boolean;
   host?: string | null;
   remote?: boolean;
@@ -51,7 +50,6 @@ export const TaskTreeRow = memo(function TaskTreeRow({
   stalledNote,
   permissions,
   unread,
-  cost,
   isRoot,
   host,
   remote,
@@ -81,9 +79,6 @@ export const TaskTreeRow = memo(function TaskTreeRow({
       </View>
       {permissions > 0 ? <Badge tone="waiting">{permLabel}</Badge> : null}
       {unread ? <StatusDot tone="unread" /> : null}
-      <Text style={styles.cost} numberOfLines={1}>
-        {cost}
-      </Text>
     </>
   );
   if (isRoot || remote) {
@@ -124,6 +119,5 @@ function makeStyles(theme: AppTheme, depth: number, isRoot: boolean) {
     titleLine: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
     title: { ...theme.type.label, color: theme.foreground, flexShrink: 1 },
     meta: { ...theme.type.small, color: theme.foregroundSubtle },
-    cost: { ...theme.type.mono, color: theme.foregroundSubtle },
   });
 }

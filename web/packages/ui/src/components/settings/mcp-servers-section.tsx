@@ -659,7 +659,7 @@ function upsertServer(list: McpServer[], s: McpServer): McpServer[] {
 registerSettingsSection({
   id: "mcp-servers",
   label: "MCP servers",
-  groupLabel: "Agents & providers",
+  groupLabel: "Profiles & providers",
   description: "MCP servers that give agents extra tools.",
   order: 177,
   icon: <Icons.mcp aria-hidden className="size-3.5" />,

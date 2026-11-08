@@ -40,7 +40,7 @@ import { contractFromProfile, contractParams, EMPTY_CONTRACT, instructionsBytes,
 const PROVIDER_DEFAULT_MODE = { id: "", label: "Provider default" };
 
 /** The form's "unset" row, which defers to the composer. */
-const COMPOSER_DEFAULT_LEVEL = { id: "", label: "Composer default", help: "Use whatever the composer is set to for this agent's runs." };
+const COMPOSER_DEFAULT_LEVEL = { id: "", label: "Composer default", help: "Use whatever the composer is set to for this profile's runs." };
 
 /** The add/edit form's field state -- one instance shared by whichever card is open (the "new agent" card or a row's own inline edit), since only one is ever open at a time. */
 interface ProfileFormState extends ProfileContractState {
@@ -209,14 +209,14 @@ function ProfilesSection(_props: SettingsSectionContext) {
 
   const newAgentButton = (
     <Button type="button" size="sm" data-testid="profile-new-button" onClick={openNew}>
-      <Icons.add aria-hidden className="size-3.5" /> New agent
+      <Icons.add aria-hidden className="size-3.5" /> New profile
     </Button>
   );
 
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-profiles">
       <section className="flex flex-col gap-2">
-        <SettingsSectionTitle title="Agents" actions={newAgentButton} />
+        <SettingsSectionTitle title="Profiles" actions={newAgentButton} />
 
         {profiles === null ? (
           <LoadingRows />
@@ -225,8 +225,8 @@ function ProfilesSection(_props: SettingsSectionContext) {
             {profiles.length === 0 && openCard !== "new" && (
               <SettingsEmptyCard
                 testId="profiles-empty-state"
-                title="No agents yet"
-                description="Create one with New agent to reuse a provider/mode/thinking bundle from the composer's Agents picker"
+                title="No profiles yet"
+                description="Create one with New profile to reuse a provider/mode/thinking bundle from the composer's Profiles picker"
               />
             )}
             {(profiles.length > 0 || openCard === "new") && (
@@ -242,7 +242,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                       onCancel={closeCard}
                       pending={pending}
                       error={error}
-                      submitLabel={pending ? "Saving…" : "Add agent"}
+                      submitLabel={pending ? "Saving…" : "Add profile"}
                       providersLoading={!providersSettled}
                       otherProfiles={profiles}
                     />
@@ -264,8 +264,8 @@ function ProfilesSection(_props: SettingsSectionContext) {
                           data-default={isDefault}
                           data-testid={`profile-default-${p.ID}`}
                           aria-pressed={isDefault}
-                          aria-label={isDefault ? `${p.Name} is the default agent` : `Set ${p.Name} as the default agent`}
-                          title={isDefault ? "Default agent for new tasks — click to clear" : "Set as default agent for new tasks"}
+                          aria-label={isDefault ? `${p.Name} is the default profile` : `Set ${p.Name} as the default profile`}
+                          title={isDefault ? "Default profile for new tasks — click to clear" : "Set as default profile for new tasks"}
                           onClick={() => setDefaultAgentId(isDefault ? null : String(p.ID))}
                         >
                           <Icons.defaultAgent aria-hidden fill={isDefault ? "currentColor" : "none"} />
@@ -320,7 +320,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
           setDeletingProfile(null);
           deleteAction.reset();
         }}
-        title="Delete agent?"
+        title="Delete profile?"
         description={
           <>
             <span className="font-medium text-foreground">{shownDeleting?.Name}</span> is removed for good. Tasks that already
@@ -386,7 +386,7 @@ function ProfileForm({
   return (
     <form className="flex flex-col gap-2" onSubmit={onSubmit}>
       <Input
-        aria-label="Agent name"
+        aria-label="Profile name"
         data-testid={`${idPrefix}-name`}
         placeholder="Name (e.g. Quick Fixes)"
         value={form.name}
@@ -454,7 +454,7 @@ function ProfileForm({
         aria-label="Notes"
         data-testid={`${idPrefix}-notes`}
         className="h-16 w-full resize-none rounded-lg border border-input-border bg-input px-2.5 py-1 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused"
-        placeholder="Notes (optional) — when to use this agent."
+        placeholder="Notes (optional) — when to use this profile."
         value={form.notes}
         onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
       />
@@ -554,8 +554,8 @@ function ProfileActionsMenu({
 
 registerSettingsSection({
   id: "agents",
-  label: "Agents",
-  groupLabel: "Agents & providers",
+  label: "Profiles",
+  groupLabel: "Profiles & providers",
   description: "Named bundles of provider, mode and thinking level for new tasks.",
   order: 175,
   icon: <Icons.agent aria-hidden className="size-3.5" />,

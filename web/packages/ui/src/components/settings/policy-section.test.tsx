@@ -75,7 +75,7 @@ describe("policy-section", () => {
     const section = listSettingsSections().find((s) => s.id === "permission-policy");
     expect(section).toBeDefined();
     expect(section?.label).toBe("Permission policy");
-    expect(section?.groupLabel).toBe("Agents & providers");
+    expect(section?.groupLabel).toBe("Profiles & providers");
   });
 
   it("policy settings page is read-only", async () => {

@@ -13,7 +13,7 @@ describe("palette categories", () => {
       expect(paletteCategory(group)).toBe("tasks");
     }
     expect(paletteCategory("Files")).toBe("files");
-    for (const group of ["Actions", "Open", "Settings", "Agents", "Commands"]) {
+    for (const group of ["Actions", "Open", "Settings", "Profiles", "Commands"]) {
       expect(paletteCategory(group)).toBe("actions");
     }
   });

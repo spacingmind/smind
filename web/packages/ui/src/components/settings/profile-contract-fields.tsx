@@ -120,7 +120,7 @@ export function ProfileContractFields<S extends ProfileContractState>({
         <fieldset className="flex min-w-0 flex-col gap-1" data-testid={id("child-profiles")}>
           <legend className="mb-1 text-ui-sm text-foreground-muted">Child profiles this seat may start</legend>
           {otherProfiles.length === 0 ? (
-            <p className="text-ui-sm text-foreground-subtlest">No other agents to choose from yet.</p>
+            <p className="text-ui-sm text-foreground-subtlest">No other profiles to choose from yet.</p>
           ) : (
             <div className="flex max-h-40 flex-col gap-0.5 overflow-y-auto rounded-lg border border-input-border bg-input p-1.5">
               {otherProfiles.map((p) => (
@@ -179,7 +179,7 @@ export function ProfileContractFields<S extends ProfileContractState>({
           </select>
         </Field>
         {form.onRateLimit === "fallback" && (
-          <Field label="Fallback agent" htmlFor={id("fallback-profile")}>
+          <Field label="Fallback profile" htmlFor={id("fallback-profile")}>
             <select
               id={id("fallback-profile")}
               data-testid={id("fallback-profile")}
@@ -187,7 +187,7 @@ export function ProfileContractFields<S extends ProfileContractState>({
               value={form.fallbackProfileId ?? ""}
               onChange={(e) => setForm((f) => ({ ...f, fallbackProfileId: e.target.value === "" ? null : Number(e.target.value) }))}
             >
-              <option value="">Choose an agent…</option>
+              <option value="">Choose a profile…</option>
               {otherProfiles.map((p) => (
                 <option key={p.ID} value={p.ID}>
                   {p.Name} ({p.Provider})

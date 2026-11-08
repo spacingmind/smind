@@ -42,7 +42,7 @@ export function ConsentSummary({ consent, testId = "plugin-consent" }: { consent
     <div className="flex flex-col gap-2" data-testid={testId}>
       {consent.dataOnly ? (
         <p className="text-ui-sm text-foreground-muted" data-testid={`${testId}-data-only`}>
-          Nothing runs: this plugin only adds data (MCP servers, skills, agents).
+          Nothing runs: this plugin only adds data (MCP servers, skills, profiles).
         </p>
       ) : (
         <Alert variant="warning" testId={`${testId}-runs-code`} description="This plugin runs code as you: the commands below start with your files and credentials." />
@@ -101,7 +101,7 @@ export function ConsentSummary({ consent, testId = "plugin-consent" }: { consent
           </Row>
         )}
         {profiles.length > 0 && (
-          <Row label="Agents" testId={`${testId}-profiles`}>
+          <Row label="Profiles" testId={`${testId}-profiles`}>
             <ul className="flex flex-col gap-1">
               {profiles.map((p) => {
                 const flags = p.escalations ?? [];

@@ -123,13 +123,13 @@ failed run's footer in the task shows what you can do.
   cooldown for the provider. See "I reset my quota" below.
 
 **Automatically.** An agent profile can say what to do on a rate limit. In
-**Settings → Agents**, the **On rate limit** field has three choices:
+**Settings → Profiles**, the **On rate limit** field has three choices:
 
 | Choice | Behavior |
 |---|---|
 | **None** | Do nothing. This is the default. |
 | **Wait** | Queue the same prompt on the same chat, to run after the limit lifts. |
-| **Fallback** | Continue on the **Fallback agent** you pick, in a new chat on the same task. |
+| **Fallback** | Continue on the **Fallback profile** you pick, in a new chat on the same task. |
 
 On the command line, use the same names on `smind profile add` (and
 `smind profile edit`):

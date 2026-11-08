@@ -139,12 +139,12 @@ function HostButton({
         hostTip.onMenuOpenChange(next);
       }}
     >
-      <FooterTooltip label="Host" tooltip={hostTip.tooltip}>
+      <FooterTooltip label="This daemon" tooltip={hostTip.tooltip}>
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Host"
+            aria-label="This daemon"
             data-testid="sidebar-footer-host"
             className={cn("relative", ICON_BUTTON_CLASS)}
           >
@@ -160,6 +160,7 @@ function HostButton({
         </PopoverTrigger>
       </FooterTooltip>
       <PopoverContent side="top" align="start" className="w-64 p-1" data-testid="sidebar-footer-host-popover">
+        <div className="px-2 pb-1 pt-1.5 text-ui-xs font-medium text-foreground-muted">This daemon</div>
         <div
           data-testid="sidebar-footer-host-connection"
           className="flex items-center gap-2 px-2 py-1.5 text-ui-sm text-foreground-subtle"
@@ -185,7 +186,7 @@ function HostButton({
         />
         <HostRow
           icon={Icons.agent}
-          label="Agents"
+          label="Profiles"
           testId="sidebar-footer-host-agents"
           onSelect={() => select("agents")}
           value={agentCount}
@@ -205,7 +206,7 @@ function HostButton({
   );
 }
 
-function HelpButton({ onOpenSettings }: { onOpenSettings?: (sectionId?: string) => void }) {
+function HelpButton() {
   const { runAction } = useKeyboard();
   const helpTip = useMenuTooltip();
   return (
@@ -224,7 +225,10 @@ function HelpButton({ onOpenSettings }: { onOpenSettings?: (sectionId?: string) 
         </DropdownMenuTrigger>
       </FooterTooltip>
       <DropdownMenuContent side="top" align="end">
-        <DropdownMenuItem data-testid="sidebar-footer-help-shortcuts" onSelect={() => onOpenSettings?.("shortcuts")}>
+        <DropdownMenuItem
+          data-testid="sidebar-footer-help-shortcuts"
+          onSelect={() => runAction("shortcuts.help", null, { source: "menu" })}
+        >
           Keyboard shortcuts
         </DropdownMenuItem>
         <DropdownMenuItem data-testid="sidebar-footer-help-palette" onSelect={() => runAction("palette.open")}>
@@ -311,7 +315,7 @@ export function SidebarFooterActions({
             onOpenSettings={onOpenSettings}
           />
           <div data-testid="sidebar-footer-spacer" className="flex-1 group-data-[collapsible=icon]:hidden" />
-          <HelpButton onOpenSettings={onOpenSettings} />
+          <HelpButton />
           <ThemeToggle withTooltip className={ICON_BUTTON_CLASS} />
           <FooterIconButton
             label="Settings"
