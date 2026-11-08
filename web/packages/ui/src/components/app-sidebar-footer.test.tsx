@@ -78,7 +78,7 @@ describe("sidebar footer", () => {
       "sidebar-settings-button",
     ]);
     const names = children.filter((el) => el.tagName === "BUTTON").map((el) => el.getAttribute("aria-label"));
-    expect(names).toEqual(["Add workspace", "Usage", "Host", "Help & support", "Theme: system", "Settings"]);
+    expect(names).toEqual(["Add workspace", "Usage", "This daemon", "Help & support", "Theme: system", "Settings"]);
   });
 
   it("settings, usage and add-workspace actions", () => {

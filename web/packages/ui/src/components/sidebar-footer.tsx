@@ -139,12 +139,12 @@ function HostButton({
         hostTip.onMenuOpenChange(next);
       }}
     >
-      <FooterTooltip label="Host" tooltip={hostTip.tooltip}>
+      <FooterTooltip label="This daemon" tooltip={hostTip.tooltip}>
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Host"
+            aria-label="This daemon"
             data-testid="sidebar-footer-host"
             className={cn("relative", ICON_BUTTON_CLASS)}
           >
