@@ -56,7 +56,31 @@ describe("PermissionDetailView in OptionsCard", () => {
     renderCard({ kind: "write", path: "new.txt", newLines: 12, newBytes: 410, preview: "hello" });
     expect(screen.getByTestId("permission-detail-size").textContent).toBe("new file · 12 lines · 0.4 KB");
     expect(screen.queryByTestId("permission-detail-replaces")).toBeNull();
-    expect(screen.getByText("Preview")).toBeTruthy();
+    expect(screen.getByText("Content")).toBeTruthy();
+  });
+
+  it("new_file_write_shows_content_open", () => {
+    renderCard({ kind: "write", path: "new.txt", newLines: 2, newBytes: 24, preview: "hello\nworld" });
+    const body = screen.getByTestId("permission-detail-body") as HTMLDetailsElement;
+    expect(body.open).toBe(true);
+    expect(within(body).getByText("Content")).toBeTruthy();
+    expect(screen.getByTestId("permission-detail-pre").textContent).toBe("hello\nworld");
+  });
+
+  it("a new file with only an additive diff shows the content it carries, uncolored", () => {
+    renderCard({ kind: "write", path: "new.txt", diff: "--- a/new.txt\n+++ b/new.txt\n@@ -0,0 +1,2 @@\n+hello\n+world" });
+    const body = screen.getByTestId("permission-detail-body") as HTMLDetailsElement;
+    expect(body.open).toBe(true);
+    expect(within(body).getByText("Content")).toBeTruthy();
+    expect(screen.getByTestId("permission-detail-pre").textContent).toBe("hello\nworld");
+    expect(screen.queryByText("+hello")).toBeNull();
+  });
+
+  it("overwrite_keeps_collapsed_diff", () => {
+    renderCard({ kind: "write", path: "a.sql", replacesExisting: true, existingLines: 30, newLines: 28, diff: "-old\n+new" });
+    const body = screen.getByTestId("permission-detail-body") as HTMLDetailsElement;
+    expect(body.open).toBe(false);
+    expect(within(body).getByText("Diff")).toBeTruthy();
   });
 
   it("flags a write outside the task folder", () => {

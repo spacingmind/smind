@@ -25,7 +25,7 @@ export function PlanReviewCard({
 }: {
   runId: string;
   pending: PendingPermission & { plan: string };
-  onRespond: (runId: string, requestId: string, optionId: string) => Promise<void>;
+  onRespond: (runId: string, requestId: string, optionId: string, reason?: string) => Promise<void>;
   onChat: () => void;
 }) {
   const [submitting, setSubmitting] = useState<string | null>(null);

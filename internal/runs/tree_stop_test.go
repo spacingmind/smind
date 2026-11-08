@@ -81,7 +81,7 @@ func TestStopAndWait_ContextDeadlineReturnsError(t *testing.T) {
 		cancel:             func() {},
 		closedCh:           make(chan struct{}),
 		subscribers:        make(map[int]*subQueue),
-		pendingPermissions: make(map[string]chan string),
+		pendingPermissions: make(map[string]*pendingPermission),
 	}
 	reg.mu.Lock()
 	reg.runs[r.id] = r

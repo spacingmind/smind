@@ -138,3 +138,53 @@ func TestTaskDenyRejectsThirdArg(t *testing.T) {
 		t.Fatalf("respondPermission called: %+v", got)
 	}
 }
+
+func TestTaskDenyReasonFlag(t *testing.T) {
+	responds := fakePermissionDaemon(t)
+	for _, args := range [][]string{
+		{"task", "deny", "run-1", "--reason", "use make test"},
+		{"task", "deny", "run-1", "req-2", "--reason=use make test"},
+	} {
+		if code := run(args); code != 0 {
+			t.Fatalf("%v exit = %d", args, code)
+		}
+	}
+	got := responds()
+	if len(got) != 2 || got[0]["reason"] != "use make test" || got[1]["reason"] != "use make test" || got[1]["requestId"] != "req-2" {
+		t.Fatalf("calls = %+v", got)
+	}
+}
+
+func TestTaskDenyWithoutReasonSendsNoReasonField(t *testing.T) {
+	responds := fakePermissionDaemon(t)
+	if code := run([]string{"task", "deny", "run-1"}); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if got := responds(); len(got) != 1 {
+		t.Fatalf("calls = %+v", got)
+	} else if _, has := got[0]["reason"]; has {
+		t.Fatalf("an old-style deny must not send a reason: %+v", got[0])
+	}
+}
+
+func TestTaskDenyReasonFlagNeedsAValueAndApproveHasNone(t *testing.T) {
+	responds := fakePermissionDaemon(t)
+	for _, args := range [][]string{
+		{"task", "deny", "run-1", "--reason"},
+		{"task", "deny", "run-1", "--reason", "a", "--reason", "b"},
+	} {
+		var code int
+		captureStderr(t, func() { code = run(args) })
+		if code != 2 {
+			t.Fatalf("%v exit = %d, want 2", args, code)
+		}
+	}
+	var code int
+	captureStderr(t, func() { code = run([]string{"task", "approve", "run-1", "--reason", "x"}) })
+	if code == 0 {
+		t.Fatal("approve must not take --reason")
+	}
+	if got := responds(); len(got) != 0 {
+		t.Fatalf("respondPermission called: %+v", got)
+	}
+}

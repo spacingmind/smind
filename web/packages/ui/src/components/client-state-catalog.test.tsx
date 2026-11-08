@@ -249,7 +249,7 @@ describe("shared catalog / profile / health cache", () => {
     await flush();
     fireEvent.click(screen.getByTestId("sidebar-footer-host"));
     // claude-native + codex-native answer ok, glm's check errored: 2 of 3, and the count is not hidden.
-    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("2 healthy");
+    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("2 of 3 healthy");
   });
 
   it("account.updated drops that account provider's health answer and the footer re-tests it (kimi's id is its account id)", async () => {

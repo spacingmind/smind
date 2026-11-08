@@ -2166,14 +2166,30 @@ func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
 			RunID     string `json:"runId"`
 			RequestID string `json:"requestId"`
 			OptionID  string `json:"optionId"`
+			// Reason is the text a human typed with a Deny (at most
+			// runs.MaxDenyReasonRunes); optional, and refused with an option
+			// that is not a deny.
+			Reason string `json:"reason"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.respondPermission: invalid params: %w", err)
 		}
-		if err := reg.RespondPermission(p.RunID, p.RequestID, p.OptionID); err != nil {
+		// A blank reason is no reason: the old path and the old {} result.
+		if strings.TrimSpace(p.Reason) == "" {
+			if err := reg.RespondPermission(p.RunID, p.RequestID, p.OptionID); err != nil {
+				return nil, fmt.Errorf("run.respondPermission: %w", err)
+			}
+			return struct{}{}, nil
+		}
+		delivered, err := reg.RespondPermissionWithReason(p.RunID, p.RequestID, p.OptionID, p.Reason)
+		if err != nil {
 			return nil, fmt.Errorf("run.respondPermission: %w", err)
 		}
-		return struct{}{}, nil
+		// reasonDelivered is false when the provider cannot pass the text to
+		// the agent: the Deny itself was still sent.
+		return struct {
+			ReasonDelivered bool `json:"reasonDelivered"`
+		}{delivered}, nil
 	}
 }
 

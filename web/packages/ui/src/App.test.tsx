@@ -267,8 +267,20 @@ describe("App", () => {
     render(<App connect={connect} />);
     await flush();
 
-    expect(screen.getByText(/disconnected: no daemon listening/i)).toBeInTheDocument();
+    expect(screen.getByTestId("app-connection-status")).toHaveTextContent(/^Disconnected/);
+    expect(screen.getByRole("alert")).toHaveTextContent("no daemon listening");
     expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("the header pill's Retry re-runs connect after an initial failure", async () => {
+    const connect = vi.fn().mockRejectedValue(new Error("Failed to fetch"));
+    render(<App connect={connect} />);
+    await flush();
+    expect(screen.getByRole("alert")).toHaveTextContent(/isn't running or isn't reachable/);
+
+    fireEvent.click(screen.getByTestId("app-connection-retry"));
+    await flush();
+    expect(connect).toHaveBeenCalledTimes(2);
   });
 
   it("the sidebar's Retry re-runs connect after an initial failure and recovers (UAT B-03)", async () => {
@@ -294,8 +306,11 @@ describe("App", () => {
     await flush();
 
     expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
-    expect(screen.getByTestId("sidebar-connection-error")).toHaveTextContent("no daemon listening");
-    expect(screen.getByText(/Can't reach the daemon: no daemon listening/)).toBeInTheDocument();
+    // The cause shows once, as human copy on the home notice; the raw error is only a tooltip.
+    expect(screen.getByRole("alert")).toHaveTextContent("The daemon answered with an error: no daemon listening");
+    expect(screen.getByTestId("app-connection-status")).toHaveTextContent(/^Disconnected/);
+    expect(screen.getByTestId("app-connection-status")).toHaveAttribute("title", "no daemon listening");
+    expect(screen.queryByTestId("sidebar-connection-error")).not.toBeInTheDocument();
     // jsdom is not a desktop build, so the serve hint shows.
     expect(screen.getByText("Start it with smind serve")).toBeInTheDocument();
   });
@@ -328,8 +343,7 @@ describe("App", () => {
       await vi.advanceTimersByTimeAsync(8_000);
     });
     expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
-    expect(screen.getByTestId("sidebar-connection-error")).toHaveTextContent("No answer from the daemon after 8 s");
-    expect(screen.getByText(/Can't reach the daemon: No answer from the daemon after 8 s/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("The daemon didn't answer within 8 s.");
 
     // Retry re-runs the connect effect, so the 8 s timer restarts with it.
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -338,7 +352,7 @@ describe("App", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(8_000);
     });
-    expect(screen.getByText("No answer from the daemon after 8 s")).toBeInTheDocument();
+    expect(screen.getByText("The daemon didn't answer within 8 s.")).toBeInTheDocument();
   });
 
   it("a late connect success after the 8 s timeout still connects and clears the no-answer state (AC1)", async () => {
@@ -355,7 +369,7 @@ describe("App", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(8_000);
     });
-    expect(screen.getByText("No answer from the daemon after 8 s")).toBeInTheDocument();
+    expect(screen.getByText("The daemon didn't answer within 8 s.")).toBeInTheDocument();
 
     await act(async () => {
       settle!(new WsClient(socket));
@@ -375,7 +389,7 @@ describe("App", () => {
     });
 
     expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
-    expect(screen.queryByText("No answer from the daemon after 8 s")).not.toBeInTheDocument();
+    expect(screen.queryByText("The daemon didn't answer within 8 s.")).not.toBeInTheDocument();
     expect(screen.queryByText("Can't reach the daemon")).not.toBeInTheDocument();
   });
 

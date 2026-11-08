@@ -179,7 +179,7 @@ func TestPrune_NeverTouchesOpenTaskOrRunningRuns(t *testing.T) {
 	if _, err := e.st.CreateRun(store.Run{ID: "live", TaskID: e.task.ID, Provider: "glm", Prompt: "p", Status: "running", StartedAt: now.Add(-90 * 24 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	live := &run{id: "live", taskID: e.task.ID, status: StatusRunning, cancel: func() {}, startedAt: now, subscribers: map[int]*subQueue{}, pendingPermissions: map[string]chan string{"req-1": make(chan string, 1)}, closedCh: make(chan struct{})}
+	live := &run{id: "live", taskID: e.task.ID, status: StatusRunning, cancel: func() {}, startedAt: now, subscribers: map[int]*subQueue{}, pendingPermissions: map[string]*pendingPermission{"req-1": {ch: make(chan permissionAnswer, 1)}}, closedCh: make(chan struct{})}
 	reg.mu.Lock()
 	reg.runs["live"] = live
 	reg.mu.Unlock()
