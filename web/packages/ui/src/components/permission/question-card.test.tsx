@@ -121,7 +121,7 @@ describe("QuestionCard: rendering", () => {
     expect(card.textContent).toContain("line\n".repeat(60).trimEnd());
   });
 
-  it("labels the Other input with its own question's text, capped at 60 chars", () => {
+  it("labels each Other input with a visible 'Other:' label tied to its own field", () => {
     const long = "y".repeat(80);
     render(
       <QuestionCard
@@ -138,8 +138,21 @@ describe("QuestionCard: rendering", () => {
         onAnswer={vi.fn()}
       />,
     );
-    expect(screen.getByTestId("question-other-q1")).toHaveAccessibleName("Other answer for: Pick services");
-    expect(screen.getByTestId("question-other-q2")).toHaveAccessibleName(`Other answer for: ${"y".repeat(60)}`);
+    const card = screen.getByTestId("question-card");
+    const labels = within(card).getAllByText("Other:");
+    expect(labels).toHaveLength(2);
+    const other1 = within(card).getByTestId("question-other-q1");
+    const other2 = within(card).getByTestId("question-other-q2");
+    expect(other1).toHaveAccessibleName("Other:");
+    expect(other2).toHaveAccessibleName("Other:");
+    expect(other1.labels?.[0]).toBe(labels[0]!);
+    expect(other2.labels?.[0]).toBe(labels[1]!);
+    expect(other1).toHaveAttribute("placeholder", "Type another answer…");
+
+    // The label stays visible once the field holds a value: a filled answer keeps its name.
+    fireEvent.change(other1, { target: { value: "canary in eu-west" } });
+    expect(labels[0]).toBeVisible();
+    expect(other1).toHaveValue("canary in eu-west");
   });
 
   it("is focusable as a group and moves focus to itself on mount, unless a text field has focus", () => {

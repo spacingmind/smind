@@ -198,6 +198,7 @@ function QuestionField({
   onChange: (next: Draft) => void;
 }) {
   const fieldId = useId();
+  const otherId = useId();
   const options = question.options ?? [];
   const isChoice = question.kind === "single" || question.kind === "multi";
 
@@ -259,23 +260,29 @@ function QuestionField({
         />
       ) : (
         question.allowOther && (
-          <Input
-            data-testid={`question-other-${question.id}`}
-            aria-label={`Other answer for: ${question.text.slice(0, 60)}`}
-            placeholder="Other…"
-            value={draft.otherText}
-            maxLength={MAX_ANSWER_CHARS}
-            disabled={disabled}
-            onChange={(e) =>
-              // Typing an Other answer deselects a single question's radio
-              // (multi keeps its checkboxes -- Other is just one more choice).
-              onChange({
-                ...draft,
-                otherText: e.target.value,
-                optionIds: question.kind === "single" && e.target.value !== "" ? [] : draft.optionIds,
-              })
-            }
-          />
+          <div className="flex flex-col gap-1">
+            {/* A visible label: once the field holds a value, "Other…"-alone no longer names it. */}
+            <label htmlFor={otherId} className="text-ui-sm text-foreground-muted">
+              Other:
+            </label>
+            <Input
+              id={otherId}
+              data-testid={`question-other-${question.id}`}
+              placeholder="Type another answer…"
+              value={draft.otherText}
+              maxLength={MAX_ANSWER_CHARS}
+              disabled={disabled}
+              onChange={(e) =>
+                // Typing an Other answer deselects a single question's radio
+                // (multi keeps its checkboxes -- Other is just one more choice).
+                onChange({
+                  ...draft,
+                  otherText: e.target.value,
+                  optionIds: question.kind === "single" && e.target.value !== "" ? [] : draft.optionIds,
+                })
+              }
+            />
+          </div>
         )
       )}
     </fieldset>
