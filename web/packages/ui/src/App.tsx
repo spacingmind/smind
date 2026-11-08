@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { ShortcutsOverlay } from "@/components/shortcuts-overlay";
 import { AutomationsPage } from "@/components/automations/automations-page";
 import { TabRenameInput } from "@/components/tab-rename-input";
 import { ArchiveChatDialog } from "@/components/crud-dialogs";
@@ -992,8 +993,12 @@ function AppShell({
   // rather than the shell -- `composer.focus`, `run.interrupt` -- are
   // deliberately absent here; the composer claims them itself.
 
+  // AC2: `?` opens a read-only cheat-sheet over the current view instead of
+  // navigating to Settings -- the task view (and even the Settings screen,
+  // via SETTINGS_SAFE_ACTIONS) stays mounted underneath.
+  const [shortcutsOverlayOpen, setShortcutsOverlayOpen] = useState(false);
   useActionHandler("shortcuts.help", () => {
-    openSettings("shortcuts");
+    setShortcutsOverlayOpen(true);
   });
 
   // RunConfigToolbar's "Manage agents…" entry (run-config-toolbar.tsx) is
@@ -1723,6 +1728,13 @@ function AppShell({
             />
           </div>
         )}
+        {/* AC2: the shortcuts overlay rides above every view, Settings included
+            (it is a portal, so it must not sit inside the hidden shell wrapper). */}
+        <ShortcutsOverlay
+          open={shortcutsOverlayOpen}
+          onOpenChange={setShortcutsOverlayOpen}
+          onCustomize={() => openSettings("shortcuts")}
+        />
         </div>
       </PluginActionsBridge>
     </DaemonQueryProvider>

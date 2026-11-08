@@ -34,6 +34,7 @@ import { conflictingBindings, helpSections, UNASSIGNED } from "@/keyboard/shortc
 function ShortcutRow({
   row,
   capturing,
+  readOnly = false,
   onStartCapture,
   onStartChordCapture,
   onCancelCapture,
@@ -43,6 +44,8 @@ function ShortcutRow({
 }: {
   row: ReturnType<typeof helpSections>[number]["rows"][number];
   capturing: false | "single" | "chord";
+  /** Read-only mode (the `?` cheat-sheet overlay): no rebind/reset controls, no Scope column. */
+  readOnly?: boolean;
   onStartCapture: () => void;
   onStartChordCapture: () => void;
   onCancelCapture: () => void;
@@ -113,42 +116,46 @@ function ShortcutRow({
           <Kbd keys={row.keys} />
         )}
       </td>
-      <td className="hidden whitespace-nowrap px-3 py-1.5 text-ui-sm text-foreground-muted sm:table-cell">Global</td>
-      <td className="max-sm:col-start-2 max-sm:row-start-1 max-sm:row-span-2 max-sm:self-center px-3 py-1.5">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button
-            variant="ghost"
-            size="xs"
-            className="whitespace-nowrap"
-            onClick={capturing ? onCancelCapture : onStartCapture}
-            aria-label={`${capturing ? "Cancel rebinding" : "Change shortcut for"} ${row.label}`}
-          >
-            {capturing ? "Cancel" : "Change"}
-          </Button>
-          {!capturing && (
+      {!readOnly && (
+        <td className="hidden whitespace-nowrap px-3 py-1.5 text-ui-sm text-foreground-muted sm:table-cell">Global</td>
+      )}
+      {!readOnly && (
+        <td className="max-sm:col-start-2 max-sm:row-start-1 max-sm:row-span-2 max-sm:self-center px-3 py-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               variant="ghost"
               size="xs"
               className="whitespace-nowrap"
-              onClick={onStartChordCapture}
-              aria-label={`Record a chord for ${row.label}`}
+              onClick={capturing ? onCancelCapture : onStartCapture}
+              aria-label={`${capturing ? "Cancel rebinding" : "Change shortcut for"} ${row.label}`}
             >
-              Record chord…
+              {capturing ? "Cancel" : "Change"}
             </Button>
-          )}
-          {row.overridden && !capturing && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="whitespace-nowrap"
-              onClick={onReset}
-              aria-label={`Reset shortcut for ${row.label}`}
-            >
-              Reset
-            </Button>
-          )}
-        </div>
-      </td>
+            {!capturing && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="whitespace-nowrap"
+                onClick={onStartChordCapture}
+                aria-label={`Record a chord for ${row.label}`}
+              >
+                Record chord…
+              </Button>
+            )}
+            {row.overridden && !capturing && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="whitespace-nowrap"
+                onClick={onReset}
+                aria-label={`Reset shortcut for ${row.label}`}
+              >
+                Reset
+              </Button>
+            )}
+          </div>
+        </td>
+      )}
     </tr>
   );
 }
@@ -157,8 +164,10 @@ function ShortcutRow({
  * The grouped binding list. Exported so the settings screen's Shortcuts
  * section (`components/settings/shortcuts-section.tsx`) can embed it
  * without a dialog around it, narrowed by that section's own search box.
+ * `readOnly` (the `?` cheat-sheet overlay) drops the rebind/reset controls
+ * and the Scope column, leaving a plain searchable list.
  */
-export function ShortcutRows({ query = "" }: { query?: string } = {}) {
+export function ShortcutRows({ query = "", readOnly = false }: { query?: string; readOnly?: boolean } = {}) {
   const { bindings, isMac, overrides, rebind, resetBinding, resetAllBindings } = useKeyboard();
   const [capturing, setCapturing] = useState<{ id: string; mode: "single" | "chord" } | null>(null);
 
@@ -193,22 +202,26 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
                   <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
                     Keybinding
                   </th>
-                  <th
-                    scope="col"
-                    className="hidden whitespace-nowrap px-3 py-2 text-ui-sm font-medium text-foreground-muted sm:table-cell"
-                  >
-                    Scope
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
-                    Actions
-                  </th>
+                  {!readOnly && (
+                    <th
+                      scope="col"
+                      className="hidden whitespace-nowrap px-3 py-2 text-ui-sm font-medium text-foreground-muted sm:table-cell"
+                    >
+                      Scope
+                    </th>
+                  )}
+                  {!readOnly && (
+                    <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
+                      Actions
+                    </th>
+                  )}
                 </tr>
               </thead>
               {sections.map((section) => (
                 <tbody key={section.id} data-testid={`shortcut-section-${section.id}`} className="max-sm:block">
                   <tr className="max-sm:block">
                     <th
-                      colSpan={4}
+                      colSpan={readOnly ? 2 : 4}
                       scope="colgroup"
                       className="max-sm:block bg-muted/40 px-4 py-1.5 text-ui-sm font-medium uppercase tracking-wide text-foreground-muted"
                     >
@@ -226,6 +239,7 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
                         key={row.id}
                         row={row}
                         capturing={capturing?.id === row.id ? capturing.mode : false}
+                        readOnly={readOnly}
                         onStartCapture={() => setCapturing({ id: row.id, mode: "single" })}
                         onStartChordCapture={() => setCapturing({ id: row.id, mode: "chord" })}
                         onCancelCapture={() => setCapturing(null)}
@@ -241,7 +255,7 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
           </div>
         </div>
       )}
-      {Object.keys(overrides).length > 0 && (
+      {Object.keys(overrides).length > 0 && !readOnly && (
         <div className="flex justify-end">
           <Button variant="ghost" size="sm" onClick={resetAllBindings}>
             Reset all to defaults

@@ -174,11 +174,11 @@ describe("sidebar footer", () => {
 
   it("help menu items and external links", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
-    const { onOpenSettings } = renderFooter();
+    renderFooter();
 
     openMenu("sidebar-footer-help");
     fireEvent.click(screen.getByTestId("sidebar-footer-help-shortcuts"));
-    expect(onOpenSettings).toHaveBeenLastCalledWith("shortcuts");
+    expect(runAction).toHaveBeenLastCalledWith("shortcuts.help", null, { source: "menu" });
 
     openMenu("sidebar-footer-help");
     fireEvent.click(screen.getByTestId("sidebar-footer-help-palette"));

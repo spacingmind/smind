@@ -891,7 +891,7 @@ describe("App keyboard shortcuts", () => {
     );
   });
 
-  it("Shift+? opens Settings on the Shortcuts section, listing every binding (AC5: the old dialog is now a Settings section)", async () => {
+  it("Shift+? opens the shortcuts overlay with every binding, not Settings (AC2: the old dialog is back as a read-only overlay)", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -903,14 +903,70 @@ describe("App keyboard shortcuts", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
     // jsdom is not a desktop build: the web-only rows render.
-    expect(screen.getAllByTestId("shortcut-row")).toHaveLength(
+    expect(within(dialog).getAllByTestId("shortcut-row")).toHaveLength(
       platformBindings(SHORTCUT_BINDINGS, false, false).length,
     );
+    // Read-only: no rebind/reset controls and no Scope column.
+    expect(within(dialog).queryByRole("button", { name: /Change shortcut for/ })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Record a chord for/ })).not.toBeInTheDocument();
+
+    // "Customize in Settings" closes the overlay and deep-links the rebindable section.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Customize in Settings" }));
+    await flush();
+    expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
   });
 
-  it("Mod+, opens Settings on its default section, not the Shortcuts one a prior Shift+? left behind", async () => {
+  it("with a task selected, ? opens the overlay over the task view without unmounting it (AC2)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const paneBefore = screen.getByTestId("primary-pane");
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    });
+    await flush();
+
+    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+    // Same DOM node: the task view stayed mounted underneath the overlay.
+    expect(screen.getByTestId("primary-pane")).toBe(paneBefore);
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
+  });
+
+  it("? typed into the composer inserts ? and does not open the overlay (AC2)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const composer = screen.getByLabelText("Prompt");
+    composer.focus();
+    fireEvent.change(composer, { target: { value: "what?" } });
+    fireEvent.keyDown(composer, { key: "?", code: "Slash", shiftKey: true });
+    await flush();
+
+    expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Prompt")).toHaveValue("what?");
+  });
+
+  it("Mod+, opens Settings on its default section, not the Shortcuts one a prior 'Customize in Settings' left behind", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -919,6 +975,8 @@ describe("App keyboard shortcuts", () => {
     await act(async () => {
       fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
     });
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Customize in Settings" }));
     await flush();
     expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("settings-back-button"));
@@ -2118,6 +2176,9 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     // isn't stuck with the default's text-field exemption.
     fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
     await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Customize in Settings" }));
+    await flush();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Change shortcut for Focus pane left"));
     fireEvent.keyDown(window, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
     fireEvent.click(screen.getByTestId("settings-back-button"));
@@ -2850,7 +2911,7 @@ describe("App settings view (dogfood Item 4)", () => {
     expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
   });
 
-  it("settings-safe shortcuts still work over settings: Shift+? deep-links to Shortcuts", async () => {
+  it("settings-safe shortcuts still work over settings: Shift+? opens the overlay above Settings (AC2)", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -2864,7 +2925,10 @@ describe("App settings view (dogfood Item 4)", () => {
       fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
     });
     await flush();
-    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+    // Settings stays open underneath; the overlay did not navigate away.
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
   });
 
   it("a command-palette task pick while in settings leaves settings", async () => {

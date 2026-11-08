@@ -205,7 +205,7 @@ function HostButton({
   );
 }
 
-function HelpButton({ onOpenSettings }: { onOpenSettings?: (sectionId?: string) => void }) {
+function HelpButton() {
   const { runAction } = useKeyboard();
   const helpTip = useMenuTooltip();
   return (
@@ -224,7 +224,10 @@ function HelpButton({ onOpenSettings }: { onOpenSettings?: (sectionId?: string) 
         </DropdownMenuTrigger>
       </FooterTooltip>
       <DropdownMenuContent side="top" align="end">
-        <DropdownMenuItem data-testid="sidebar-footer-help-shortcuts" onSelect={() => onOpenSettings?.("shortcuts")}>
+        <DropdownMenuItem
+          data-testid="sidebar-footer-help-shortcuts"
+          onSelect={() => runAction("shortcuts.help", null, { source: "menu" })}
+        >
           Keyboard shortcuts
         </DropdownMenuItem>
         <DropdownMenuItem data-testid="sidebar-footer-help-palette" onSelect={() => runAction("palette.open")}>
@@ -311,7 +314,7 @@ export function SidebarFooterActions({
             onOpenSettings={onOpenSettings}
           />
           <div data-testid="sidebar-footer-spacer" className="flex-1 group-data-[collapsible=icon]:hidden" />
-          <HelpButton onOpenSettings={onOpenSettings} />
+          <HelpButton />
           <ThemeToggle withTooltip className={ICON_BUTTON_CLASS} />
           <FooterIconButton
             label="Settings"
