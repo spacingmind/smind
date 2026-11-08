@@ -25,6 +25,8 @@ export interface InboxItem {
   attention: "high" | "normal";
   /** A run_failed item's next action (the daemon-built failure action); absent for every other kind. */
   action?: FailureAction;
+  /** A review item's passes (two-axis reviews only): the pass's seat verdict when done, and its status. */
+  axes?: { axis: string; verdict?: string; status?: string }[];
   links: { taskId?: number; runId?: string; permissionRequestId?: string; validationId?: number; reviewId?: number; hostId?: string };
 }
 
