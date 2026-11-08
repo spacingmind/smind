@@ -141,4 +141,62 @@ type Inputs struct {
 	Handoffs    []HandoffInfo     `json:"handoffs"`
 	SecretHits  map[string]int    `json:"secretHits"` // label -> count, never values
 	PolicyAudit PolicyAuditCounts `json:"policyAudit"`
+	// TwoAxis is what the two-axis review's passes need beyond the single
+	// review's inputs (ADR-0054 §3). Nil when steward.twoAxis is off: Build
+	// then produces exactly the digest it always did.
+	TwoAxis *TwoAxisInputs `json:"twoAxis,omitempty"`
+}
+
+// TwoAxisInputs is what the collector reads for the Standards and Spec passes.
+type TwoAxisInputs struct {
+	Standards StandardsInput `json:"standards"`
+	Spec      SpecInput      `json:"spec"`
+}
+
+// StandardsInput is the Standards pass's input (ADR-0054 §3, D11). The files
+// are read at BaseRef, the merge-base of the PR with its base branch, never at
+// the head, so a PR cannot lower the bar it is judged by.
+type StandardsInput struct {
+	// BaseRef is the merge-base commit (40-hex). Empty: it could not be
+	// resolved, and the Standards pass must not run against the head instead.
+	BaseRef string `json:"baseRef"`
+	// Files are the standards files that exist at BaseRef, in discovery order.
+	Files []StandardsFileInput `json:"files"`
+	// HeadDiff is `git diff BaseRef head -- <standards files>`: what the PR
+	// changes in them. Raw; Build sanitises and caps it.
+	HeadDiff string `json:"headDiff"`
+	// Rules are the human-authored one-line rules from steward.standards.rules.
+	Rules []string `json:"rules"`
+}
+
+// StandardsFileInput is one standards file as it is at BaseRef. The content is
+// never in the digest; the seat reads a copy of it from its scratch tree.
+type StandardsFileInput struct {
+	Path      string `json:"path"`
+	Bytes     int    `json:"bytes"`
+	SHA256    string `json:"sha256"`
+	Truncated bool   `json:"truncated"`
+}
+
+// SpecInput is the Spec pass's input: the texts the daemon resolved the spec
+// from, all of them agent- or user-written.
+type SpecInput struct {
+	// ContractCriteria are the acceptance criteria of the stored validation
+	// contract (ADR-0045), in contract order.
+	ContractCriteria []SpecCriterionInput `json:"contractCriteria"`
+	// PlanPath and PlanText: the plan file at the head ("" when none or unreadable).
+	PlanPath string `json:"planPath"`
+	PlanText string `json:"planText"`
+	// ADRFiles are the file names under docs/decisions at the head, for resolving ADR-NNNN.
+	ADRFiles []string `json:"adrFiles"`
+	// TestsInTree maps a candidate test name to whether a test function of
+	// that name exists at the head.
+	TestsInTree map[string]bool `json:"testsInTree"`
+}
+
+// SpecCriterionInput is one contract acceptance criterion.
+type SpecCriterionInput struct {
+	ID         string   `json:"id"`
+	Text       string   `json:"text"`
+	NamedTests []string `json:"namedTests"`
 }

@@ -279,8 +279,8 @@ func checkAxisAccepted(v AxisVerdict, d Digest, axis Axis) error {
 		if hasUnmet(v.Criteria) {
 			return ve("criteria", "an ACCEPTED verdict cannot carry an unmet criterion")
 		}
-		if len(v.Criteria) == 0 {
-			return ve("criteria", "an ACCEPTED spec verdict needs a result for every criterion; there are none to judge")
+		if len(v.Criteria) == 0 && !d.Spec.HasSpec() {
+			return ve("criteria", "an ACCEPTED spec verdict needs a spec to judge against; the digest resolved none")
 		}
 		return checkAccepted(SeatVerdict{
 			Verdict: v.Verdict, Findings: v.seatFindings(), Gates: v.Gates, Frames: v.Frames, BlockedReason: v.BlockedReason,

@@ -235,3 +235,24 @@ func (s *Store) RaiseStewardPassCost(reviewID int64, axis string, costUSD float6
 	}
 	return nil
 }
+
+// ListOpenPassesOfClosedReviews returns the passes still pending or running
+// under a review that is already closed: nothing watches them any more, so a
+// startup reconcile closes them.
+func (s *Store) ListOpenPassesOfClosedReviews() ([]StewardReviewPass, error) {
+	rows, err := s.db.Query(`SELECT ` + stewardPassCols + ` FROM steward_review_passes
+		WHERE ` + stewardPassOpenCond + ` AND review_id IN (SELECT id FROM steward_reviews WHERE status NOT IN ('pending','running'))`)
+	if err != nil {
+		return nil, fmt.Errorf("list open passes of closed reviews: %w", err)
+	}
+	defer rows.Close()
+	out := []StewardReviewPass{}
+	for rows.Next() {
+		p, err := scanStewardReviewPass(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list open passes of closed reviews: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

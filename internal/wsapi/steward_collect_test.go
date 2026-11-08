@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/qaframes"
+	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/validation"
@@ -377,5 +379,114 @@ func TestStewardCollect_DoesNotMutateWorktree(t *testing.T) {
 	}
 	if after := gitIn(t, wt, "status", "--porcelain"); after != before {
 		t.Fatalf("worktree changed: before %q after %q", before, after)
+	}
+}
+
+func twoAxisCfg(on bool) func() (config.StewardConfig, error) {
+	return func() (config.StewardConfig, error) {
+		return config.StewardConfig{Enabled: true, TwoAxis: on, Standards: config.StewardStandardsConfig{Rules: []string{"Keep comments short."}}}, nil
+	}
+}
+
+// TestStewardCollect_TwoAxisInputsReadStandardsAtTheMergeBase is D11 at the
+// collector: the standards files are read at the merge-base with the PR's
+// base branch, a file the PR only ADDS is not part of the bar, and the head's
+// edit reaches the digest only as a diff.
+func TestStewardCollect_TwoAxisInputsReadStandardsAtTheMergeBase(t *testing.T) {
+	t.Parallel()
+	c, _, task := newStewardEnv(t)
+	c.withConfig(twoAxisCfg(true))
+	wt := *task.WorktreePath
+	commitTaskFile(t, wt, "AGENTS.md", "# Rules\n\nAlways run task lint.\n", "base rules")
+	baseSha := gitIn(t, wt, "rev-parse", "HEAD")
+	gitIn(t, wt, "update-ref", "refs/remotes/origin/develop", baseSha)
+	commitTaskFile(t, wt, "AGENTS.md", "# Rules\n\nNothing applies.\n", "relax the rules")
+	commitTaskFile(t, wt, "CONTRIBUTING.md", "added by the change\n", "add contributing")
+	head := gitIn(t, wt, "rev-parse", "HEAD")
+
+	in, err := c.collect(context.Background(), task.ID, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ta := in.TwoAxis
+	if ta == nil || ta.Standards.BaseRef != baseSha {
+		t.Fatalf("TwoAxis = %+v, want the merge-base %s", ta, baseSha)
+	}
+	if len(ta.Standards.Files) != 1 || ta.Standards.Files[0].Path != "AGENTS.md" {
+		t.Fatalf("standards files = %+v, want only AGENTS.md (CONTRIBUTING.md exists only at the head)", ta.Standards.Files)
+	}
+	if !strings.Contains(ta.Standards.HeadDiff, "+Nothing applies.") || strings.Contains(ta.Standards.HeadDiff, "added by the change") {
+		t.Fatalf("head diff = %q", ta.Standards.HeadDiff)
+	}
+	if len(ta.Standards.Rules) != 1 {
+		t.Fatalf("rules = %v", ta.Standards.Rules)
+	}
+}
+
+func TestStewardCollect_TwoAxisOffByDefault(t *testing.T) {
+	t.Parallel()
+	c, _, task := newStewardEnv(t)
+	wt := *task.WorktreePath
+	commitTaskFile(t, wt, "AGENTS.md", "rules\n", "rules")
+	head := gitIn(t, wt, "rev-parse", "HEAD")
+	for name, col := range map[string]*stewardCollector{"no config": c, "flag off": c.withConfig(twoAxisCfg(false))} {
+		in, err := col.collect(context.Background(), task.ID, head)
+		if err != nil || in.TwoAxis != nil {
+			t.Fatalf("%s: TwoAxis = %+v, %v; want none", name, in.TwoAxis, err)
+		}
+	}
+}
+
+func TestStewardCollect_TwoAxisSpecInputs(t *testing.T) {
+	t.Parallel()
+	c, svc, task := newStewardEnv(t)
+	c.withConfig(twoAxisCfg(true))
+	wt := *task.WorktreePath
+	if err := os.MkdirAll(filepath.Join(wt, "docs", "decisions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(wt, "docs", "plans", "active"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	commitTaskFile(t, wt, "docs/decisions/0054-x.md", "adr\n", "adr")
+	commitTaskFile(t, wt, "docs/plans/active/x.md", "## Acceptance Criteria\n- AC7 does it, TestRealOne and TestMissingOne\n", "plan")
+	commitTaskFile(t, wt, "thing_test.go", "package x\n\nfunc TestRealOne(t *testing.T) {}\n", "test")
+	head := gitIn(t, wt, "rev-parse", "HEAD")
+	if _, err := svc.SubmitContract(task.ID, []byte(stewardContractDoc)); err != nil {
+		t.Fatalf("SubmitContract: %v", err)
+	}
+
+	in, err := c.collect(context.Background(), task.ID, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp := in.TwoAxis.Spec
+	if sp.PlanPath != "docs/plans/active/x.md" || !strings.Contains(sp.PlanText, "AC7") {
+		t.Fatalf("plan = %q / %q", sp.PlanPath, sp.PlanText)
+	}
+	if len(sp.ContractCriteria) != 1 || sp.ContractCriteria[0].ID != "AC1" {
+		t.Fatalf("contract criteria = %+v", sp.ContractCriteria)
+	}
+	if len(sp.ADRFiles) != 1 || sp.ADRFiles[0] != "0054-x.md" {
+		t.Fatalf("ADR files = %v", sp.ADRFiles)
+	}
+	if !sp.TestsInTree["TestRealOne"] || sp.TestsInTree["TestMissingOne"] {
+		t.Fatalf("tests in tree = %v, want TestRealOne found and TestMissingOne not", sp.TestsInTree)
+	}
+}
+
+// TestStewardCollect_TwoAxisPlanPathCannotEscape: a plan path that leaves the
+// repository is never read.
+func TestStewardCollect_TwoAxisPlanPathCannotEscape(t *testing.T) {
+	t.Parallel()
+	c, _, task := newStewardEnv(t)
+	wt := *task.WorktreePath
+	commitTaskFile(t, wt, "secret.txt", "SECRET\n", "secret")
+	head := gitIn(t, wt, "rev-parse", "HEAD")
+	for _, p := range []string{"../secret.txt", "/etc/passwd", "docs/../secret.txt", "a b", "-x"} {
+		out := c.twoAxisInputs(context.Background(), wt, "HEAD", head, config.StewardConfig{TwoAxis: true}, steward.Inputs{Task: steward.TaskInfo{ID: task.ID}, PlanFile: p})
+		if out.Spec.PlanPath != "" || out.Spec.PlanText != "" {
+			t.Fatalf("plan path %q was read: %+v", p, out.Spec)
+		}
 	}
 }

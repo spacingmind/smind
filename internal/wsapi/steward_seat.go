@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/steward"
@@ -45,7 +47,10 @@ type stewardHostOptions struct {
 	Reg     *runs.Registry
 	Runner  *taskrunner.Runner
 	ProfReg *profiles.Registry
-	Ctx     context.Context
+	// Config reads the steward section (default configSteward); startReview
+	// reads it for the two-axis pass settings.
+	Config func() (config.StewardConfig, error)
+	Ctx    context.Context
 	// WatchPeriod supervises a running seat, RecheckPeriod polls a pending
 	// CI gate. Zero means the default (2s / 30s); a nil Ctx is
 	// context.Background().
@@ -57,8 +62,11 @@ type stewardHostOptions struct {
 // (memory only) and its scratch directory.
 type stewardSeatEntry struct {
 	reviewID int64
-	token    string
-	scratch  string
+	// axis is the pass of a two-axis review this seat judges; empty for the
+	// single review's seat.
+	axis    steward.Axis
+	token   string
+	scratch string
 }
 
 // stewardHost starts steward reviews, supervises their seats and exposes the
@@ -75,6 +83,13 @@ type stewardHost struct {
 	reg     *runs.Registry
 	runner  *taskrunner.Runner
 	profReg *profiles.Registry
+	config  func() (config.StewardConfig, error)
+
+	// snapshot reads the Lead's worktree before the seats start (a test hook).
+	snapshot func(ctx context.Context, dir string) (validation.Snapshot, error)
+	// watches counts the running watcher goroutines, so a test can wait for
+	// them to finish instead of sleeping.
+	watches sync.WaitGroup
 
 	mu    sync.Mutex
 	seats map[int64]stewardSeatEntry // by steward task id
@@ -94,15 +109,28 @@ func newStewardHost(o stewardHostOptions) *stewardHost {
 	if o.Ctx == nil {
 		o.Ctx = context.Background()
 	}
-	h := &stewardHost{svc: o.Svc, rails: o.Rails, collect: o.Collect, wm: o.WM, db: o.DB, reg: o.Reg, runner: o.Runner, profReg: o.ProfReg,
-		seats: map[int64]stewardSeatEntry{}, watchPeriod: o.WatchPeriod, recheckPeriod: o.RecheckPeriod, ctx: o.Ctx}
+	if o.Config == nil {
+		o.Config = configSteward
+	}
+	h := &stewardHost{svc: o.Svc, rails: o.Rails, collect: o.Collect, wm: o.WM, db: o.DB, reg: o.Reg, runner: o.Runner, profReg: o.ProfReg, config: o.Config,
+		snapshot: validation.Take, seats: map[int64]stewardSeatEntry{}, watchPeriod: o.WatchPeriod, recheckPeriod: o.RecheckPeriod, ctx: o.Ctx}
 	o.Reg.SetSeatSource(h.seatSource)
 	// The tokens are memory-only, so an open review can never resume after a
 	// restart: close every row the previous daemon left open.
 	if rows, err := o.DB.ListStaleOpenStewardReviews(); err == nil {
 		for _, row := range rows {
 			_ = o.Svc.WriteBlocked(row.ID, "crashed", "the daemon restarted while the review was open", 0)
+			h.blockOpenPasses(row.ID, "crashed", "the daemon restarted while the review was open")
 		}
+	}
+	// A pass can also be left open under a review that was already closed (a
+	// failed write in a watch): close those too.
+	if orphans, err := o.DB.ListOpenPassesOfClosedReviews(); err == nil {
+		for _, p := range orphans {
+			logIgnored("close an orphaned pass", o.DB.SetStewardPassBlocked(p.ReviewID, p.Axis, "crashed", "the pass was left open under a closed review", p.CostUSD, time.Now()), "review", p.ReviewID, "axis", p.Axis)
+		}
+	} else {
+		logIgnored("list orphaned passes", err)
 	}
 	return h
 }
@@ -204,6 +232,29 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 		h.svc.Publish(p.TaskID, id, "pending")
 	}
 
+	// ADR-0054: a review whose inputs carry the two-axis section (the
+	// collector read steward.twoAxis as on) runs two passes, not one seat.
+	if in.TwoAxis != nil {
+		// Fail closed: the standards paths pruned from the head checkout come
+		// from this config, so an unreadable one blocks the review.
+		cfg, err := h.config()
+		if err != nil {
+			logIgnored("block a review whose config is unreadable", h.svc.WriteBlocked(id, "crashed", "the steward config could not be read", 0), "review", id)
+			h.blockOpenPasses(id, "crashed", "the steward config could not be read")
+			return reviewResult{}, fmt.Errorf("%s: read the steward config: %w", m, err)
+		}
+		if err := h.openPasses(id, cfg); err != nil {
+			logIgnored("block a review whose passes could not be opened", h.svc.WriteBlocked(id, "crashed", "the review passes could not be opened", 0), "review", id)
+			h.blockOpenPasses(id, "crashed", "the review passes could not be opened")
+			return reviewResult{}, fmt.Errorf("%s: open the passes: %w", m, err)
+		}
+		if stewardGateUnknown(d.Gates) {
+			go h.recheck(id, p.TaskID, lead, prof, sha)
+			return reviewResult{ReviewID: id, TaskID: p.TaskID, CommitSHA: sha, Status: "pending"}, nil
+		}
+		return h.startPasses(id, lead, d, dsha, sha, cfg)
+	}
+
 	if stewardGateUnknown(d.Gates) {
 		go h.recheck(id, p.TaskID, lead, prof, sha)
 		return reviewResult{ReviewID: id, TaskID: p.TaskID, CommitSHA: sha, Status: "pending"}, nil
@@ -254,6 +305,18 @@ func (h *stewardHost) recheck(id, taskID int64, lead store.Task, prof store.Agen
 			validationID = in.Validation.ID
 		}
 		if err := h.db.SetStewardReviewDigest(id, string(data), dsha, in.CI.State, "" /*policySha*/, h.contractShaOf(taskID), validationID); err != nil {
+			return
+		}
+		if in.TwoAxis != nil {
+			cfg, err := h.config()
+			if err != nil {
+				logIgnored("block a pending review whose config is unreadable", h.svc.WriteBlocked(id, "crashed", "the steward config could not be read", 0), "review", id)
+				h.blockOpenPasses(id, "crashed", "the steward config could not be read")
+				return
+			}
+			if _, err := h.startPasses(id, lead, d, dsha, sha, cfg); err != nil {
+				slog.Warn("steward review passes", "review", id, "err", err)
+			}
 			return
 		}
 		_, _ = h.startSeat(id, lead, prof, d, dsha, sha)
@@ -330,7 +393,9 @@ func (h *stewardHost) startSeat(id int64, lead store.Task, prof store.AgentProfi
 			return validation.Take(context.Background(), *lead.WorktreePath)
 		},
 	}
+	h.watches.Add(1)
 	go func() {
+		defer h.watches.Done()
 		defer h.forget(task.ID)
 		w.Run(h.ctx, h.watchPeriod)
 	}()
@@ -363,6 +428,7 @@ func (h *stewardHost) cancel(reviewID int64) error {
 		h.stopTask(row.StewardTaskID)
 		h.forget(row.StewardTaskID)
 	}
+	h.cancelPasses(reviewID)
 	return nil
 }
 
@@ -380,8 +446,18 @@ func (h *stewardHost) seatSource(taskID int64) (runs.SeatSpec, bool) {
 		return runs.SeatSpec{}, false
 	}
 	scratch := e.scratch
+	env := steward.SeatMCPEnv(e.reviewID, e.token)
+	if e.axis != "" {
+		// A pass that has ended (a verdict, a block, a cancel) loses its MCP
+		// env and floor at once, so its token is dead even in memory.
+		pass, err := h.db.GetStewardReviewPass(e.reviewID, string(e.axis))
+		if err != nil || (pass.Status != steward.PassPending && pass.Status != steward.PassRunning) {
+			return runs.SeatSpec{}, false
+		}
+		env = steward.SeatMCPEnvAxis(e.reviewID, e.token, e.axis)
+	}
 	return runs.SeatSpec{
-		Env:             steward.SeatMCPEnv(e.reviewID, e.token),
+		Env:             env,
 		DisallowedTools: append([]string(nil), steward.SeatDisallowedTools...),
 		Floor: func(tool string, paths []string) (bool, string) {
 			return steward.SeatFloor(steward.SeatRequest{Tool: tool, Paths: paths, ScratchDir: scratch})

@@ -35,6 +35,23 @@ const (
 	listsShrinkMax    = 20
 )
 
+// Caps of the standards section (ADR-0054 §3). The head diff and the rules
+// are agent- or user-adjacent text, so they travel under Untrusted, capped.
+const (
+	standardsHeadDiffMax = 4096
+	standardsRulesMax    = 20
+	standardsRuleMax     = 400
+)
+
+// Caps the two-axis sections shrink to before the existing shrink steps
+// (ADR-0054 §3: the new sections shrink first).
+const (
+	standardsHeadDiffShrinkMax = 1024
+	specCriteriaShrinkMax      = 20
+	specCriteriaTextShrinkMax  = 100
+	standardsRulesShrinkMax    = 5
+)
+
 // DiffStat sums the numstat rows; binary rows count as a file with 0/0.
 type DiffStat struct {
 	Files      int `json:"files"`
@@ -72,6 +89,13 @@ type Untrusted struct {
 	PRBody         map[string]string `json:"prBody"`
 	CommitSubjects []string          `json:"commitSubjects"`
 	HandoffNotes   []string          `json:"handoffNotes"`
+	// The standards section's free text (ADR-0054 §3): empty, and then
+	// absent from the JSON, for a single-pass review.
+	StandardsHeadDiff string   `json:"standardsHeadDiff,omitempty"`
+	StandardsRules    []string `json:"standardsRules,omitempty"`
+	// The spec criteria's texts, by criterion id (ADR-0054 §3): empty, and
+	// then absent from the JSON, for a single-pass review.
+	SpecCriteria map[string]string `json:"specCriteria,omitempty"`
 }
 
 // Digest is the deterministic JSON the daemon hands the seat (ADR-0047
@@ -101,13 +125,18 @@ type Digest struct {
 	// Spec is the two-axis review's spec section (ADR-0054 §3). Nil, and then
 	// absent from the JSON, for a single-pass review.
 	Spec *SpecSection `json:"spec,omitempty"`
+	// Standards is the two-axis review's standards section (ADR-0054 §3).
+	// Nil, and then absent from the JSON, for a single-pass review.
+	Standards *StandardsSection `json:"standards,omitempty"`
 }
 
-// SpecSection holds what the daemon resolved for the Spec pass. P1 carries
-// only the criteria the Spec pass must answer; the rest of the section is
-// added where the digest builds it.
+// SpecSection holds what the daemon resolved for the Spec pass: the sources
+// in fixed order, the criteria to judge and a hint of which named tests
+// exist at the head. Nil on the Digest for a single-pass review.
 type SpecSection struct {
-	Criteria []SpecCriterion `json:"criteria"`
+	Sources     []SpecSource    `json:"sources"`
+	Criteria    []SpecCriterion `json:"criteria"`
+	TestsInTree map[string]bool `json:"testsInTree"`
 }
 
 // criteriaIDs are the ids of the criteria the Spec pass must answer.
@@ -122,10 +151,40 @@ func (d Digest) criteriaIDs() []string {
 	return ids
 }
 
+// SpecSource is one place the spec was resolved from. SHA256 is the source's
+// content hash when the daemon has the content (the plan).
+type SpecSource struct {
+	Kind   string `json:"kind"` // contract|plan|pr_body|issue|adr
+	Ref    string `json:"ref"`
+	Status string `json:"status"` // found|missing|unavailable
+	SHA256 string `json:"sha256,omitempty"`
+}
+
 // SpecCriterion is one acceptance criterion the Spec pass must report on.
+// The criterion text is agent- or user-written and lives only under
+// Untrusted.specCriteria.
 type SpecCriterion struct {
-	ID   string `json:"id"`
-	Text string `json:"text,omitempty"`
+	ID         string   `json:"id"`
+	NamedTests []string `json:"namedTests"`
+}
+
+// StandardsSection is the Standards pass's bar: the standards files as they
+// are at the merge-base (D11), never at the head, plus which of them the PR
+// changes. The file contents are not here; the seat reads its copy of them
+// from its scratch tree.
+type StandardsSection struct {
+	BaseRef       string          `json:"baseRef"`
+	Files         []StandardsFile `json:"files"`
+	ChangedInDiff bool            `json:"changedInDiff"`
+}
+
+// StandardsFile is one standards file at BaseRef.
+type StandardsFile struct {
+	Path          string `json:"path"`
+	Bytes         int    `json:"bytes"`
+	SHA256        string `json:"sha256"`
+	Truncated     bool   `json:"truncated"`
+	ChangedInDiff bool   `json:"changedInDiff"`
 }
 
 // Build computes the whole digest from Inputs. It is pure: no clock, no I/O,
@@ -257,7 +316,59 @@ func Build(in Inputs) Digest {
 		d.Secrets[label] = n
 	}
 
+	if in.TwoAxis != nil {
+		d.Standards = buildStandards(in.TwoAxis.Standards)
+		d.Untrusted.StandardsHeadDiff = sanitize(in.TwoAxis.Standards.HeadDiff, standardsHeadDiffMax)
+		rules := make([]string, 0, len(in.TwoAxis.Standards.Rules))
+		for i, r := range in.TwoAxis.Standards.Rules {
+			if i >= standardsRulesMax {
+				break
+			}
+			rules = append(rules, sanitize(r, standardsRuleMax))
+		}
+		d.Untrusted.StandardsRules = rules
+		spec, texts := resolveSpec(in)
+		d.Spec = &spec
+		d.Untrusted.SpecCriteria = texts
+	}
+
 	return d
+}
+
+// buildStandards copies the standards files read at BaseRef and flags which
+// of them the PR's head diff touches.
+func buildStandards(in StandardsInput) *StandardsSection {
+	s := &StandardsSection{
+		BaseRef: in.BaseRef,
+		Files:   make([]StandardsFile, 0, len(in.Files)),
+	}
+	for _, f := range in.Files {
+		s.Files = append(s.Files, StandardsFile{
+			Path:          f.Path,
+			Bytes:         f.Bytes,
+			SHA256:        f.SHA256,
+			Truncated:     f.Truncated,
+			ChangedInDiff: headDiffTouches(in.HeadDiff, f.Path),
+		})
+	}
+	for _, f := range s.Files {
+		if f.ChangedInDiff {
+			s.ChangedInDiff = true
+			break
+		}
+	}
+	return s
+}
+
+// headDiffTouches reports whether the head diff carries a file header for path.
+func headDiffTouches(headDiff, path string) bool {
+	prefix := "diff --git a/" + path + " b/" + path
+	for _, line := range strings.Split(headDiff, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // Marshal encodes the digest as deterministic JSON of at most DigestMaxBytes
@@ -279,6 +390,57 @@ func (d Digest) Marshal() (data []byte, sha string, err error) {
 		name  string
 		apply func(d *Digest) bool
 	}{
+		{"untrusted.standardsHeadDiff", func(d *Digest) bool {
+			if len(d.Untrusted.StandardsHeadDiff) <= standardsHeadDiffShrinkMax {
+				return false
+			}
+			d.Untrusted.StandardsHeadDiff = sanitize(d.Untrusted.StandardsHeadDiff, standardsHeadDiffShrinkMax)
+			return true
+		}},
+		{"untrusted.specCriteria", func(d *Digest) bool {
+			if d.Spec == nil || len(d.Untrusted.SpecCriteria) == 0 {
+				return false
+			}
+			cut := false
+			kept := map[string]string{}
+			n := 0
+			// Criteria order is the deterministic drop order.
+			for _, c := range d.Spec.Criteria {
+				text, ok := d.Untrusted.SpecCriteria[c.ID]
+				if !ok {
+					continue
+				}
+				if n >= specCriteriaShrinkMax {
+					cut = true
+					continue
+				}
+				if len(text) > specCriteriaTextShrinkMax {
+					text = sanitize(text, specCriteriaTextShrinkMax)
+					cut = true
+				}
+				kept[c.ID] = text
+				n++
+			}
+			if !cut {
+				return false
+			}
+			d.Untrusted.SpecCriteria = kept
+			return true
+		}},
+		{"spec.testsInTree", func(d *Digest) bool {
+			if d.Spec == nil || len(d.Spec.TestsInTree) == 0 {
+				return false
+			}
+			d.Spec.TestsInTree = map[string]bool{}
+			return true
+		}},
+		{"untrusted.standardsRules", func(d *Digest) bool {
+			if len(d.Untrusted.StandardsRules) <= standardsRulesShrinkMax {
+				return false
+			}
+			d.Untrusted.StandardsRules = d.Untrusted.StandardsRules[:standardsRulesShrinkMax]
+			return true
+		}},
 		{"untrusted.handoffNotes", func(d *Digest) bool {
 			if len(d.Untrusted.HandoffNotes) == 0 {
 				return false

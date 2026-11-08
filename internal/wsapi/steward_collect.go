@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/qaframes"
@@ -37,6 +38,17 @@ type stewardCollector struct {
 	db  *store.Store
 	val *validation.Service
 	git stewardGit // may be nil: no PR and no CI known
+	// cfg reads the steward section on every collection; nil or an error means
+	// steward.twoAxis is off.
+	cfg func() (config.StewardConfig, error)
+}
+
+// withConfig lets the collector read steward.twoAxis and the standards
+// settings (ADR-0054). Without it a collection never carries the two-axis
+// inputs.
+func (c *stewardCollector) withConfig(cfg func() (config.StewardConfig, error)) *stewardCollector {
+	c.cfg = cfg
+	return c
 }
 
 func newStewardCollector(db *store.Store, val *validation.Service, git stewardGit) *stewardCollector {
@@ -111,6 +123,11 @@ func (c *stewardCollector) collect(ctx context.Context, taskID int64, sha string
 		in.PR, in.CI = info, ci
 	}
 	in.Handoffs = c.handoffs(taskID)
+	if c.cfg != nil {
+		if cfg, err := c.cfg(); err == nil && cfg.TwoAxis {
+			in.TwoAxis = c.twoAxisInputs(ctx, dir, c.diffBase(ctx, dir, pr, task.BaseSha), sha, cfg, in)
+		}
+	}
 	return in, nil
 }
 
