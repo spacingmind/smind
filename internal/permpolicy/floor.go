@@ -108,8 +108,6 @@ func (fs *floorSeg) unwrap() {
 			// A compound command's keyword ahead of its first command.
 		case "watch":
 			rest = skipFlags(rest, map[string]bool{"-n": true, "-d": true})
-		case "eval":
-			rest = strings.Fields(strings.Join(rest, " "))
 		case "exec":
 			rest = skipFlags(rest, map[string]bool{"-a": true})
 		case "nice":
