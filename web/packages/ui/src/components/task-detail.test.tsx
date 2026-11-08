@@ -586,8 +586,13 @@ describe("TaskDetailPane", () => {
     const dock = screen.getByTestId("pending-permission-dock");
     expect(scrollRegion.contains(dock)).toBe(false);
     expect(within(dock).getByTestId("pending-permission")).toBeInTheDocument();
-    // L-AC6: borderless like the timeline: the card alone, no border or background block behind it.
-    expect(dock.className).not.toMatch(/(^|\s)(border|bg-)/);
+    // Design review (narrow screens): a top separator, opaque background and a soft top shadow,
+    // so log content scrolling under the dock is cut cleanly, never half-visible behind it.
+    const classes = dock.className.split(/\s+/);
+    expect(classes).toContain("border-t");
+    expect(classes).toContain("border-border");
+    expect(classes).toContain("bg-background");
+    expect(classes).toContain("shadow-[0_-6px_10px_-8px_rgb(0_0_0/0.18)]");
 
     // A long/streaming log keeps growing inside the scroll region...
     for (let i = 0; i < 50; i++) {
