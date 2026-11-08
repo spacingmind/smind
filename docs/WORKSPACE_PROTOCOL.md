@@ -237,6 +237,14 @@ claims). The seat has only Read/Grep/Glob plus `steward_digest_get` and
 the daemon to the gates: the seat can lower a verdict, never raise one. A review goes
 **stale** when the head moves, a newer contract version appears, or a newer review does.
 
+With `steward.twoAxis` on (ADR-0054, off by default) the review runs two independent
+passes in two fresh contexts: **Standards** (the `steward-standards` seat, a cheaper
+model, judging against the repository's documented standards as they are at the
+merge-base with the PR's base branch, never at the head, so a change cannot lower the
+bar it is judged by) and **Spec** (the `steward` seat, judging each acceptance
+criterion of the resolved spec). Each finding carries its axis; the daemon takes the
+lower of the two verdicts and clamps it to the gates exactly as before.
+
 A Lead does not ask for one. The Human runs `smind steward review <task>` (optionally
 `--sha <40 hex>`), or opts a workspace into `steward.autoReview` (then a finished root
 Lead run with a pushed branch gets one review). A Lead never requests a review, reads
