@@ -200,7 +200,7 @@ synthesizes only allow-once. The Human asked for "allow this kind of request in 
 | Failure | Behaviour |
 |---|---|
 | nobody answers | decline with note after 5 minutes (§5), resolution `timeout` |
-| run stopped / daemon restart while parked | `abandon`, `question_resolved{run_ended}`; after restart the run is `interrupted`, the question is not re-asked (the agent re-asks on `continue` if it still needs to) |
+| run stopped / daemon restart while parked | `abandon`, `question_resolved{run_ended}`; after a restart the daemon writes `question_resolved{daemon_restart}` for every open request of the interrupted run (so no client draws a live card for a dead run) and the run is `interrupted`, the question is not re-asked (the agent re-asks on `continue` if it still needs to) |
 | client answers twice / for a resolved id | "already resolved" error (same as permission) |
 | answer fails validation (unknown option id, over cap, wrong `valueHint`) | RPC error, request stays parked; the card shows the field error |
 | provider cancels the request itself | resolution `provider_cancellation`, card closes |
