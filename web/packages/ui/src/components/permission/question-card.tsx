@@ -133,15 +133,18 @@ export function QuestionCard({
       </span>
       {pending.request.truncated && <p className="text-ui-xs text-foreground-muted">Some of this text was shortened.</p>}
       {error && <Alert variant="error" testId="question-error" description={error} />}
-      {questions.map((question) => (
-        <QuestionField
-          key={question.id}
-          question={question}
-          draft={drafts[question.id] ?? EMPTY_DRAFT}
-          disabled={submitting}
-          onChange={(next) => setDraft(question.id, next)}
-        />
-      ))}
+      {/* A long ask scrolls inside the card, so Submit and Decline stay on screen (phones). */}
+      <div data-testid="question-fields" className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto">
+        {questions.map((question) => (
+          <QuestionField
+            key={question.id}
+            question={question}
+            draft={drafts[question.id] ?? EMPTY_DRAFT}
+            disabled={submitting}
+            onChange={(next) => setDraft(question.id, next)}
+          />
+        ))}
+      </div>
       <div className="flex flex-col gap-2">
         <Input
           data-testid="question-decline-note"
