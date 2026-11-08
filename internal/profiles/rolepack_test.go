@@ -384,3 +384,19 @@ func TestSkillDelivery_ValidatorOnly(t *testing.T) {
 		t.Errorf("validator skills = %v", byName(t, r, "validator").Skills)
 	}
 }
+
+// Unattended seats (ADR-0055) never surface an agent's question to the
+// human: their runs decline it. The lead seat keeps the ask default.
+func TestRolePack_UnattendedSeatsDeclineQuestions(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	seed(t, r)
+	for _, name := range []string{"peer-sonnet", "validator", "steward", "steward-standards"} {
+		if got := byName(t, r, name).Questions; got != "decline" {
+			t.Errorf("seat %s Questions = %q, want decline", name, got)
+		}
+	}
+	if got := byName(t, r, "lead").Questions; got != "ask" {
+		t.Errorf("lead Questions = %q, want ask", got)
+	}
+}
