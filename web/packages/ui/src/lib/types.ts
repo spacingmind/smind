@@ -623,6 +623,8 @@ export interface RunAttachResult {
   skeletonReason?: string;
   /** True when run.logs with detail "full" can rebuild the run's history. */
   canLoadFull?: boolean;
+  /** True when loading the full history starts the agent process (an ACP run): the client confirms with the human, then sends confirmStart. */
+  loadStartsAgent?: boolean;
 }
 
 // Params of every "chunk" event task.prompt/run.attach emit
@@ -918,6 +920,8 @@ export interface RunLogsResult {
   skeletonReason?: string;
   /** True when calling again with detail "full" can rebuild the run's history. */
   canLoadFull?: boolean;
+  /** True when loading the full history starts the agent process (an ACP run): the client confirms with the human, then sends confirmStart. */
+  loadStartsAgent?: boolean;
 }
 
 // internal/terminal.Status's values (internal/terminal/terminal.go), carried

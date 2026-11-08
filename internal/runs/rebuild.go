@@ -96,9 +96,20 @@ func (reg *Registry) rebuildTarget(runID string, who Requester) (*native.Rebuild
 // form: heredoc bodies elided, provider secrets scrubbed, exactly as a live read.
 // A rebuild is served from the cache while the session file is unchanged.
 func (reg *Registry) RebuildHistory(ctx context.Context, runID string, who Requester) Rebuilt {
+	return reg.RebuildHistoryConfirmed(ctx, runID, who, false)
+}
+
+// RebuildHistoryConfirmed is RebuildHistory for a caller that may have the human's
+// explicit yes to starting an agent: an ACP run's history is the agent's own replay
+// of its session, so it is only loaded with confirmStart (else ReasonConfirmRequired,
+// nothing started). The claude and codex readers ignore it.
+func (reg *Registry) RebuildHistoryConfirmed(ctx context.Context, runID string, who Requester, confirmStart bool) Rebuilt {
 	rb, ref, refused, ok := reg.rebuildTarget(runID, who)
 	if !ok {
 		return refused
+	}
+	if ref.Harness == native.HarnessACP {
+		return reg.loadACP(ctx, rb, ref, runID, confirmStart)
 	}
 	return reg.rebuildCached(ctx, rb, ref, runID, rb.Probe(ref))
 }
@@ -112,6 +123,9 @@ func (reg *Registry) RebuildOnOpen(ctx context.Context, runID string, who Reques
 	rb, ref, refused, ok := reg.rebuildTarget(runID, who)
 	if !ok {
 		return refused
+	}
+	if ref.Harness == native.HarnessACP {
+		return Rebuilt{Skipped: true} // an automatic open never starts an agent
 	}
 	probe := rb.Probe(ref)
 	if !probe.Found {
@@ -240,4 +254,31 @@ func (reg *Registry) storedHeredocSha(runID, callID string, index int) (string, 
 		}
 	}
 	return "", false
+}
+
+// loadACP is the confirmed, human-only load of an ACP run's history: no cache (no
+// file identity to key it by), one load per run at a time, a cooldown after a
+// failure, cancelled when a run starts on the chat or the Registry closes.
+func (reg *Registry) loadACP(ctx context.Context, rb *native.Rebuilder, ref native.Ref, runID string, confirmStart bool) Rebuilt {
+	if !confirmStart {
+		return degraded(native.ReasonConfirmRequired, "")
+	}
+	row, err := reg.storedReadable(runID)
+	if err != nil {
+		return degraded(native.ReasonCannotRebuild, "")
+	}
+	ctx, done, refused := reg.beginACPLoad(ctx, runID, row.ChatID)
+	if refused != nil {
+		return *refused
+	}
+	res := rb.Rebuild(ctx, native.Request{
+		Ref: ref, Requester: RequesterHuman, ExpectedToolCalls: reg.storedToolCalls(runID), ConfirmStart: true,
+		// Re-checked with the slot held, just before the agent starts.
+		BeforeStart: func() bool { return row.ChatID == 0 || !reg.chatHasRunningRun(row.ChatID) },
+	})
+	out := Rebuilt{Reason: res.Reason, Detail: res.Detail}
+	if res.OK() {
+		out = Rebuilt{Events: res.Events, Refs: res.Refs, Detail: res.Detail}
+	}
+	return done(out)
 }

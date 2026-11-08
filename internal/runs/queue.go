@@ -354,6 +354,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 			return
 		}
 		reg.runs[id] = r
+		reg.cancelACPLoads(r.chatID)
 	}()
 	if archiving {
 		cancel()

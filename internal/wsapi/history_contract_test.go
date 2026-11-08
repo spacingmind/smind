@@ -371,3 +371,90 @@ func TestRunLogsAutoNeverRebuildsForAMachine(t *testing.T) {
 		t.Fatalf("a machine's auto reached the provider session (%d root lookups)", e.calls.Load())
 	}
 }
+
+// ---- ACP: loading starts an agent, so it takes a human and an explicit yes ----
+
+// acpHCEnv makes run "skel" an ACP run whose agent start is counted.
+func acpHCEnv(t *testing.T) (*hcEnv, *atomic.Int32) {
+	t.Helper()
+	e := newHCEnv(t)
+	starts := new(atomic.Int32)
+	var replay []taskrunner.Event
+	replay = append(replay, taskrunner.Event{Type: taskrunner.EventTypeUserMessage, Text: hcPrompt})
+	for _, ev := range hcLiveTurn() {
+		if ev.Type == taskrunner.EventTypeText || ev.Type == taskrunner.EventTypeThinking || ev.Type == taskrunner.EventTypeToolCall {
+			ev.Raw = nil
+			replay = append(replay, ev)
+		}
+	}
+	e.reg.SetRebuilder(native.New(native.Config{ACPReplay: func(ctx context.Context, ref native.Ref, max int64) ([]taskrunner.Event, error) {
+		starts.Add(1)
+		return replay, nil
+	}}))
+	sum := sha256.Sum256([]byte(hcPrompt))
+	ref, _ := json.Marshal(native.Ref{Provider: "glm", Harness: native.HarnessACP, SessionID: "s1", Cwd: t.TempDir(), PromptSha256: hex.EncodeToString(sum[:])})
+	if err := e.db.SetRunNativeRef("skel", string(ref)); err != nil {
+		t.Fatal(err)
+	}
+	return e, starts
+}
+
+func TestRunLogsACPLabel(t *testing.T) {
+	e, _ := acpHCEnv(t)
+	res, keys := e.logs(t, hcHuman, map[string]any{"runId": "skel"})
+	if res.HistorySource != "skeleton" || !res.CanLoadFull || !res.LoadStartsAgent {
+		t.Fatalf("human label: %+v", res.historyFields)
+	}
+	if string(keys["loadStartsAgent"]) != "true" {
+		t.Fatalf("wire key: %s", keys["loadStartsAgent"])
+	}
+	agent, akeys := e.logs(t, hcAgent, map[string]any{"runId": "skel"})
+	if agent.CanLoadFull || agent.LoadStartsAgent {
+		t.Fatalf("an agent is told it can load: %+v", agent.historyFields)
+	}
+	if _, ok := akeys["loadStartsAgent"]; ok {
+		t.Fatal("an agent's read has the key")
+	}
+	// a claude-native skeleton run never says it starts an agent
+	c := newHCEnv(t)
+	if r, _ := c.logs(t, hcHuman, map[string]any{"runId": "skel"}); r.LoadStartsAgent {
+		t.Fatal("a file-backed run claims to start an agent")
+	}
+}
+
+func TestRunLogsACPAutoNeverStartsAgent(t *testing.T) {
+	e, starts := acpHCEnv(t)
+	for _, rc := range []*requestContext{hcHuman, hcAgent, nil} {
+		res, _ := e.logs(t, rc, map[string]any{"runId": "skel", "detail": "auto"})
+		if res.HistorySource != "skeleton" {
+			t.Fatalf("auto rebuilt an ACP run: %+v", res.historyFields)
+		}
+	}
+	if starts.Load() != 0 {
+		t.Fatalf("auto started the agent %d times", starts.Load())
+	}
+}
+
+func TestRunLogsACPFullNeedsConfirm(t *testing.T) {
+	e, starts := acpHCEnv(t)
+	res, _ := e.logs(t, hcHuman, map[string]any{"runId": "skel", "detail": "full"})
+	if res.HistorySource != "skeleton" || res.SkeletonReason != string(native.ReasonConfirmRequired) || starts.Load() != 0 {
+		t.Fatalf("unconfirmed full: %+v, %d starts", res.historyFields, starts.Load())
+	}
+	// a machine's confirmed request is still refused and starts nothing
+	for _, rc := range []*requestContext{hcAgent, nil} {
+		r, _ := e.logs(t, rc, map[string]any{"runId": "skel", "detail": "full", "confirmStart": true})
+		if r.HistorySource != "skeleton" || r.SkeletonReason == "" || starts.Load() != 0 {
+			t.Fatalf("machine confirmed: %+v, %d starts", r.historyFields, starts.Load())
+		}
+	}
+	ok, _ := e.logs(t, hcHuman, map[string]any{"runId": "skel", "detail": "full", "confirmStart": true})
+	if ok.HistorySource != "rebuilt" || starts.Load() != 1 || !strings.Contains(eventsText(ok), "need the failing test first") || strings.Contains(eventsText(ok), hcSecret) {
+		t.Fatalf("confirmed: %+v, %d starts", ok.historyFields, starts.Load())
+	}
+	// confirmStart on a claude-native run is ignored: it rebuilds as before
+	c := newHCEnv(t)
+	if r, _ := c.logs(t, hcHuman, map[string]any{"runId": "skel", "detail": "full", "confirmStart": true}); r.HistorySource != "rebuilt" {
+		t.Fatalf("file-backed full: %+v", r.historyFields)
+	}
+}

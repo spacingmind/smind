@@ -449,6 +449,11 @@ type Client struct {
 	// send none.
 	noMCP bool
 
+	// noFS marks a client that exposes no file system to the agent: no fs
+	// capability is advertised and every fs/* request is refused, whatever
+	// session it names (see WithoutFS).
+	noFS bool
+
 	ProtocolVersion   int
 	AgentCapabilities json.RawMessage
 }
@@ -491,6 +496,15 @@ func WithPermissionPolicy(p PermissionPolicy) Option {
 // SupportsMcpStdio and friends), so callers send it none.
 func WithoutMcpServers() Option {
 	return func(c *Client) { c.noMCP = true }
+}
+
+// WithoutFS makes the client advertise NO fs capability at Initialize and refuse
+// every fs/read_text_file and fs/write_text_file request unconditionally, so an
+// agent that is only being asked for its history (session/load) can neither read
+// nor write anything on this machine, whatever session id it names and whenever
+// the session's cwd is registered.
+func WithoutFS() Option {
+	return func(c *Client) { c.noFS = true }
 }
 
 // New spawns command[0] with command[1:] as arguments and wires up an ACP
@@ -546,7 +560,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 	raw, err := c.conn.call(ctx, "initialize", initializeParams{
 		ProtocolVersion: protocolVersion,
 		ClientCapabilities: clientCapabilities{
-			FS: fileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
+			FS: fileSystemCapabilities{ReadTextFile: !c.noFS, WriteTextFile: !c.noFS},
 		},
 	})
 	if err != nil {
@@ -604,6 +618,31 @@ func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string, mcpServ
 
 	c.recordSession(sessionID, cwd, res.Modes)
 	return res.ConfigOptions, nil
+}
+
+// LoadSessionReplay is LoadSession for callers that want the replayed
+// history: it registers updates as the session's update subscriber (as
+// Prompt does) before calling session/load, so every session/update the
+// agent streams while replaying is forwarded onto updates, in order. The
+// caller must drain updates concurrently -- the agent replays the whole
+// session before answering the session/load request, and nothing is
+// prompted (no turn is started; the replay is the session's prior history
+// alone). updates is closed when this method returns, error or not. No
+// MCP servers are passed.
+func (c *Client) LoadSessionReplay(ctx context.Context, sessionID, cwd string, updates chan<- SessionUpdate) ([]ConfigOption, error) {
+	sub := &updateSub{ch: updates}
+	c.mu.Lock()
+	c.updateSubs[sessionID] = sub
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.updateSubs, sessionID)
+		c.mu.Unlock()
+		sub.wg.Wait()
+		close(updates)
+	}()
+
+	return c.LoadSession(ctx, sessionID, cwd, nil)
 }
 
 // ResumeSession resumes an existing session via ACP's session/resume, for

@@ -32,6 +32,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -42,6 +43,10 @@ import (
 )
 
 const sessionID = "fake-session-1"
+
+// initParams is the client's initialize request, kept so a load can report the
+// capabilities the client advertised (see replayFromCwd).
+var initParams []byte
 
 // capsMode is set from os.Args[1] (defaulting to "" -- no resume
 // capability at all) so a test can choose what this agent's initialize
@@ -217,8 +222,10 @@ func main() {
 }
 
 func handle(msg message, sessionCwd *string) {
+	defer func() { logMethodInCwd(*sessionCwd, msg.Method) }()
 	switch {
 	case msg.Method == "initialize":
+		initParams = append([]byte(nil), msg.Params...)
 		caps := map[string]any{}
 		if len(mcpCaps) > 0 {
 			m := map[string]any{}
@@ -476,7 +483,77 @@ func handleResumeSession(msg message, sessionCwd *string) {
 	}
 	*sessionCwd = params.Cwd
 	recordSessionInitMethod(params.Cwd, msg.Method)
+	if msg.Method == "session/load" {
+		if _, err := os.Stat(filepath.Join(params.Cwd, "replay-hang")); err == nil {
+			// Record the pid and never answer: a test proves the client kills this process.
+			_ = os.WriteFile(filepath.Join(params.Cwd, "agent-pid"), []byte(strconv.Itoa(os.Getpid())), 0o644)
+			select {}
+		}
+		replayFromCwd(params.Cwd)
+		if _, err := os.Stat(filepath.Join(params.Cwd, "replay-permission")); err == nil {
+			// Ask for a permission while loading (off the read loop, which must stay
+			// free to receive the answer) and record the option the client chose.
+			go func() {
+				resp := call("session/request_permission", map[string]any{
+					"sessionId": sessionID,
+					"toolCall":  map[string]any{"toolCallId": "tc-load"},
+					"options": []map[string]any{
+						{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+						{"optionId": "reject-1", "name": "Reject", "kind": "reject_once"},
+					},
+				})
+				var result struct {
+					Outcome struct {
+						OptionID string `json:"optionId"`
+					} `json:"outcome"`
+				}
+				_ = json.Unmarshal(resp.Result, &result)
+				_ = os.WriteFile(filepath.Join(params.Cwd, "permission-outcome"), []byte(result.Outcome.OptionID), 0o644)
+				respond(msg.ID, map[string]any{"configOptions": defaultConfigOptions()})
+			}()
+			return
+		}
+	}
 	respond(msg.ID, map[string]any{"configOptions": defaultConfigOptions()})
+}
+
+// replayFromCwd emits the session/update objects of <cwd>/replay.json (an array)
+// before session/load answers, as an agent replaying its history does. Absent
+// file: nothing.
+func replayFromCwd(cwd string) {
+	if _, err := os.Stat(filepath.Join(cwd, "methods.log")); err == nil {
+		// A test that asked for the method log also gets the client's advertised capabilities.
+		_ = os.WriteFile(filepath.Join(cwd, "client-capabilities"), initParams, 0o644)
+	}
+	data, err := os.ReadFile(filepath.Join(cwd, "replay.json"))
+	if err != nil {
+		return // no replay file: the common case, not an error
+	}
+	var updates []map[string]any
+	if err := json.Unmarshal(data, &updates); err != nil {
+		fmt.Fprintln(os.Stderr, "fakeagent: replay.json is not a JSON array:", err)
+		return
+	}
+	for _, u := range updates {
+		notify("session/update", map[string]any{"sessionId": sessionID, "update": u})
+	}
+}
+
+// logMethodInCwd appends msg.Method to <cwd>/methods.log once a cwd is known,
+// so a test can prove which requests reached the agent.
+func logMethodInCwd(cwd, method string) {
+	if cwd == "" || method == "" {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "methods.log")); err != nil {
+		return // only when the test asked for it by creating the file
+	}
+	f, err := os.OpenFile(filepath.Join(cwd, "methods.log"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(method + "\n")
 }
 
 func sessionUpdate(text string) {

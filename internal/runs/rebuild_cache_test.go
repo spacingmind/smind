@@ -279,3 +279,102 @@ func TestRebuildCacheEventsAreDeepCopies(t *testing.T) {
 		t.Fatal("an event with a pointer payload was cached")
 	}
 }
+
+// ---- ACP: a load starts an agent, so only a confirmed human request does it ----
+
+// acpEnv turns rebuild env run "r" into an ACP run whose "agent" is a counter.
+func acpRunsEnv(t *testing.T, replayErr error) (*rebuildEnv, *int) {
+	t.Helper()
+	env := newRebuildEnv(t, true)
+	starts := new(int)
+	live := liveTurn("")
+	var replay []Event
+	replay = append(replay, Event{Type: taskrunner.EventTypeUserMessage, Text: rebuildPrompt})
+	for _, e := range live {
+		if e.Type == taskrunner.EventTypeText || e.Type == taskrunner.EventTypeThinking || e.Type == taskrunner.EventTypeToolCall {
+			e.Raw = nil
+			replay = append(replay, e)
+		}
+	}
+	env.reg.SetRebuilder(native.New(native.Config{
+		ACPReplay: func(ctx context.Context, ref native.Ref, max int64) ([]Event, error) {
+			*starts++
+			return replay, replayErr
+		},
+	}))
+	ref := native.Ref{Provider: "glm", Harness: native.HarnessACP, SessionID: "s1", Cwd: t.TempDir(), PromptSha256: sha256Hex(rebuildPrompt)}
+	b, _ := json.Marshal(ref)
+	if err := env.e.st.SetRunNativeRef("r", string(b)); err != nil {
+		t.Fatal(err)
+	}
+	return env, starts
+}
+
+func TestRebuildOnOpenSkipsACP(t *testing.T) {
+	env, starts := acpRunsEnv(t, nil)
+	got := env.reg.RebuildOnOpen(context.Background(), "r", RequesterHuman)
+	if !got.Skipped || got.OK() || *starts != 0 {
+		t.Fatalf("an automatic open of an ACP run: %+v, %d agent starts", got, *starts)
+	}
+}
+
+func TestRebuildACPHistoryNeedsAConfirmedHuman(t *testing.T) {
+	env, starts := acpRunsEnv(t, nil)
+	ctx := context.Background()
+	if r := env.reg.RebuildHistory(ctx, "r", RequesterHuman); r.Reason != native.ReasonConfirmRequired || *starts != 0 {
+		t.Fatalf("unconfirmed: %q, %d starts", r.Reason, *starts)
+	}
+	if r := env.reg.RebuildHistoryConfirmed(ctx, "r", RequesterAgent, true); r.Reason != native.ReasonHumanOnly || *starts != 0 {
+		t.Fatalf("agent: %q, %d starts", r.Reason, *starts)
+	}
+	got := env.reg.RebuildHistoryConfirmed(ctx, "r", RequesterHuman, true)
+	if !got.OK() || *starts != 1 || !strings.Contains(fmt.Sprint(clientView(got.Events, false)), "need the failing test first") {
+		t.Fatalf("confirmed: %q (%s), %d starts", got.Reason, got.Detail, *starts)
+	}
+	// not cached: a second confirmed load starts the agent again
+	env.reg.RebuildHistoryConfirmed(ctx, "r", RequesterHuman, true)
+	if *starts != 2 || env.reg.RebuildCacheStats().Entries != 0 {
+		t.Fatalf("starts %d, cache %+v", *starts, env.reg.RebuildCacheStats())
+	}
+}
+
+// An ACP rebuild is equivalent to the stored-full read of the same turn.
+func TestRebuildACPEquivalentToLive(t *testing.T) {
+	env, _ := acpRunsEnv(t, nil)
+	got := env.reg.RebuildHistoryConfirmed(context.Background(), "r", RequesterHuman, true)
+	if !got.OK() {
+		t.Fatalf("refused: %q (%s)", got.Reason, got.Detail)
+	}
+	want := clientView(liveTurn(""), true)
+	// the replay coalesces text chunks like the live path does for the same message
+	if fmt.Sprint(clientView(got.Events, false)) != fmt.Sprint(want) {
+		t.Fatalf("differs from the live turn\n got %q\nwant %q", clientView(got.Events, false), want)
+	}
+}
+
+func TestHistoryInfoACPAndNoLoadSession(t *testing.T) {
+	env, _ := acpRunsEnv(t, native.ErrNoLoadSession)
+	info := env.reg.HistoryInfo("r")
+	if info.Source != "skeleton" || !info.CanLoadFull || !info.LoadStartsAgent {
+		t.Fatalf("before: %+v", info)
+	}
+	if r := env.reg.RebuildHistoryConfirmed(context.Background(), "r", RequesterHuman, true); r.Reason != native.ReasonCannotRebuild {
+		t.Fatalf("no loadSession: %q", r.Reason)
+	}
+	if info = env.reg.HistoryInfo("r"); info.CanLoadFull || info.LoadStartsAgent || info.Reason != string(native.ReasonCannotRebuild) {
+		t.Fatalf("after the agent said it cannot load: %+v", info)
+	}
+}
+
+// A run with no recorded prompt hash cannot be matched in a replay: no button, no dialog.
+func TestHistoryInfoACPNeedsAPromptHash(t *testing.T) {
+	env, _ := acpRunsEnv(t, nil)
+	ref := native.Ref{Provider: "glm", Harness: native.HarnessACP, SessionID: "s1", Cwd: t.TempDir()}
+	b, _ := json.Marshal(ref)
+	if err := env.e.st.SetRunNativeRef("r", string(b)); err != nil {
+		t.Fatal(err)
+	}
+	if info := env.reg.HistoryInfo("r"); info.CanLoadFull || info.LoadStartsAgent {
+		t.Fatalf("offered a load that cannot match a turn: %+v", info)
+	}
+}

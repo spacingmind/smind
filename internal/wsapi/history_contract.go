@@ -48,6 +48,9 @@ type historyFields struct {
 	SkeletonReason string `json:"skeletonReason,omitempty"`
 	// CanLoadFull is true when a human may ask for the rebuilt history.
 	CanLoadFull bool `json:"canLoadFull,omitempty"`
+	// LoadStartsAgent is true when loading the full history starts the agent
+	// (ACP): the client asks the human first and sends confirmStart.
+	LoadStartsAgent bool `json:"loadStartsAgent,omitempty"`
 }
 
 // validDetail reports whether d is an accepted value ("" = omitted).
@@ -65,7 +68,7 @@ func historyLabel(reg *runs.Registry, runID, detail string, human bool) historyF
 	info := reg.HistoryInfo(runID)
 	switch info.Source {
 	case "skeleton":
-		return historyFields{HistorySource: "skeleton", SkeletonReason: info.Reason, CanLoadFull: info.CanLoadFull && human}
+		return historyFields{HistorySource: "skeleton", SkeletonReason: info.Reason, CanLoadFull: info.CanLoadFull && human, LoadStartsAgent: info.LoadStartsAgent && human}
 	default:
 		if detail == "" {
 			return historyFields{} // today's bytes: no label on a run that is not in skeleton form
@@ -79,12 +82,12 @@ func historyLabel(reg *runs.Registry, runID, detail string, human bool) historyF
 // Events are in client form (already elided). auto is the open-time upgrade: it
 // rebuilds only when that is cheap, and reports skipped (no events, no reason,
 // nothing read) when it is not.
-func rebuiltEvents(ctx context.Context, reg *runs.Registry, runID string, auto bool) (events []taskrunner.Event, refs map[string][]taskrunner.HeredocRef, reason native.Reason, skipped bool) {
+func rebuiltEvents(ctx context.Context, reg *runs.Registry, runID string, auto, confirmStart bool) (events []taskrunner.Event, refs map[string][]taskrunner.HeredocRef, reason native.Reason, skipped bool) {
 	var got runs.Rebuilt
 	if auto {
 		got = reg.RebuildOnOpen(ctx, runID, runs.RequesterHuman)
 	} else {
-		got = reg.RebuildHistory(ctx, runID, runs.RequesterHuman)
+		got = reg.RebuildHistoryConfirmed(ctx, runID, runs.RequesterHuman, confirmStart)
 	}
 	if got.Skipped {
 		return nil, nil, native.ReasonNone, true

@@ -33,6 +33,9 @@ type writeTextFileResult struct{}
 // handleReadTextFile implements the agent-initiated fs/read_text_file
 // request, honoring the optional 1-based line/limit window.
 func (c *Client) handleReadTextFile(_ context.Context, raw json.RawMessage) (any, *RPCError) {
+	if c.noFS {
+		return nil, &RPCError{Code: ErrCodeMethodNotFound, Message: "fs/read_text_file: not available to this client"}
+	}
 	var p readTextFileParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &RPCError{Code: ErrCodeInvalidParams, Message: "fs/read_text_file: " + err.Error()}
@@ -58,6 +61,9 @@ func (c *Client) handleReadTextFile(_ context.Context, raw json.RawMessage) (any
 // handleWriteTextFile implements the agent-initiated fs/write_text_file
 // request.
 func (c *Client) handleWriteTextFile(_ context.Context, raw json.RawMessage) (any, *RPCError) {
+	if c.noFS {
+		return nil, &RPCError{Code: ErrCodeMethodNotFound, Message: "fs/write_text_file: not available to this client"}
+	}
 	var p writeTextFileParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &RPCError{Code: ErrCodeInvalidParams, Message: "fs/write_text_file: " + err.Error()}

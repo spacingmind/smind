@@ -28,6 +28,8 @@ const (
 	DefaultConcurrent = 2
 	DefaultTimeout    = 10 * time.Second
 	DefaultMaxOutput  = 64 << 20
+	// DefaultACPTimeout bounds an ACP load: the agent's start-up and its replay.
+	DefaultACPTimeout = 30 * time.Second
 	breakerFailures   = 3
 	breakerOpenFor    = time.Hour
 )
@@ -39,6 +41,12 @@ type Config struct {
 	// own ConfigDir/CodexHome must be one of them, so a stored or forged ref
 	// cannot name another directory. nil or empty = nothing can be read.
 	Roots func(provider, harness string) []string
+	// ACPReplay, when set, starts the provider's ACP agent, runs session/load for
+	// ref's session and returns every replayed event of the whole session (all
+	// turns), killing the process before it returns or when ctx ends. It returns
+	// ErrNoLoadSession / ErrSessionUnknown for those two refusals. nil = ACP
+	// histories cannot be rebuilt.
+	ACPReplay func(ctx context.Context, ref Ref, maxBytes int64) ([]taskrunner.Event, error)
 	// Scrub, when set, is applied to every string a rebuilt event carries
 	// (the provider's secret values and the like) before the elider runs.
 	Scrub func(provider, s string) string
@@ -46,6 +54,7 @@ type Config struct {
 	MaxConcurrent int           // 0 = DefaultConcurrent
 	Timeout       time.Duration // 0 = DefaultTimeout
 	MaxOutput     int64         // 0 = DefaultMaxOutput
+	ACPTimeout    time.Duration // 0 = DefaultACPTimeout: a process start plus the replay
 	Now           func() time.Time
 }
 
@@ -56,6 +65,13 @@ type Request struct {
 	// ExpectedToolCalls is the number of distinct tool calls the stored
 	// skeleton has, for the drift self-check; negative = unknown, not checked.
 	ExpectedToolCalls int
+	// ConfirmStart is the human's explicit yes to a load that starts an agent
+	// (ACP). Without it an ACP ref is refused with ReasonConfirmRequired.
+	ConfirmStart bool
+	// BeforeStart, when set (ACP), is asked once the slot is held and just before
+	// the agent would be started: false refuses with ReasonSessionInUse (the caller
+	// saw the chat idle when it asked, but a run may have started since).
+	BeforeStart func() bool
 }
 
 // Result is the outcome of a rebuild. A refusal is a Reason with no events,
@@ -100,9 +116,10 @@ type Rebuilder struct {
 	cfg Config
 	sem chan struct{}
 
-	mu      sync.Mutex
-	drift   map[string]*driftState // key harness|version
-	nowFunc func() time.Time
+	mu        sync.Mutex
+	drift     map[string]*driftState // key harness|version
+	acpNoLoad map[string]bool        // ACP providers found not to advertise loadSession
+	nowFunc   func() time.Time
 
 	// beforeParse, when set (tests only), runs in the parse goroutine just before
 	// the file is read, so a test can hold a slot or outlast the timeout.
@@ -137,6 +154,9 @@ func New(cfg Config) *Rebuilder {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultTimeout
 	}
+	if cfg.ACPTimeout <= 0 {
+		cfg.ACPTimeout = DefaultACPTimeout
+	}
 	if cfg.MaxOutput <= 0 {
 		cfg.MaxOutput = DefaultMaxOutput
 	}
@@ -144,7 +164,7 @@ func New(cfg Config) *Rebuilder {
 	if now == nil {
 		now = time.Now
 	}
-	return &Rebuilder{cfg: cfg, sem: make(chan struct{}, cfg.MaxConcurrent), drift: map[string]*driftState{}, nowFunc: now}
+	return &Rebuilder{cfg: cfg, sem: make(chan struct{}, cfg.MaxConcurrent), drift: map[string]*driftState{}, acpNoLoad: map[string]bool{}, nowFunc: now}
 }
 
 func refuse(r Reason, detail string) Result { return Result{Reason: r, Detail: detail} }
@@ -157,6 +177,9 @@ func (rb *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 		return refuse(ReasonHumanOnly, "")
 	}
 	ref := req.Ref
+	if ref.Harness == HarnessACP {
+		return rb.rebuildACP(ctx, req)
+	}
 	var roots []string
 	if rb.cfg.Roots != nil {
 		roots = rb.cfg.Roots(ref.Provider, ref.Harness)

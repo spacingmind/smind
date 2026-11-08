@@ -33,6 +33,7 @@ type acpBackend interface {
 	NewSession(ctx context.Context, cwd string, mcpServers []any) (string, []acp.ConfigOption, error)
 	LoadSession(ctx context.Context, sessionID, cwd string, mcpServers []any) ([]acp.ConfigOption, error)
 	ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers []any) ([]acp.ConfigOption, error)
+	LoadSessionReplay(ctx context.Context, sessionID, cwd string, updates chan<- acp.SessionUpdate) ([]acp.ConfigOption, error)
 	SupportsLoadSession() bool
 	SupportsResumeSession() bool
 	SupportsMcpStdio() bool

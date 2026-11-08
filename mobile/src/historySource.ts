@@ -14,6 +14,8 @@ export interface HistorySourceInfo {
   source?: string;
   reason?: string;
   canLoadFull?: boolean;
+  /** Loading the full history starts the agent (an ACP run): ask the human first. */
+  loadStartsAgent?: boolean;
 }
 
 /** run.logs' result shape as this screen reads it: the events plus ADR-0053's provenance fields. */
@@ -23,6 +25,7 @@ export interface RunLogsResult {
   historySource?: 'full' | 'skeleton' | 'rebuilt';
   skeletonReason?: string;
   canLoadFull?: boolean;
+  loadStartsAgent?: boolean;
 }
 
 export interface HistorySourceNote {
@@ -45,6 +48,7 @@ const SKELETON: Record<string, { tone: 'neutral' | 'warning'; message: string; l
   slice_not_found: { tone: 'warning', message: 'Showing a summary: this turn could not be matched in the provider’s session.', loadable: false },
   format_drift: { tone: 'warning', message: 'Showing a summary: the provider’s session format was not recognised.', loadable: false },
   rebuild_failed: { tone: 'warning', message: 'Showing a summary: the full history could not be loaded (it may be too large or took too long).', loadable: true },
+  confirm_required: { tone: 'neutral', message: 'Showing a summary: loading this history needs your confirmation.', loadable: true },
   rebuild_busy: { tone: 'neutral', message: 'Showing a summary: another history is loading. Try again in a moment.', loadable: true },
   excerpt_pruned: { tone: 'neutral', message: 'Showing a summary: large tool output was removed after the retention period.', loadable: true },
 };
@@ -68,7 +72,24 @@ export function describeHistorySource(info: HistorySourceInfo): HistorySourceNot
 
 /** The provenance fields of a run.logs result, as component state keeps them. */
 export function historySourceInfo(result: RunLogsResult): HistorySourceInfo {
-  return { source: result.historySource, reason: result.skeletonReason, canLoadFull: result.canLoadFull };
+  return {
+    source: result.historySource,
+    reason: result.skeletonReason,
+    canLoadFull: result.canLoadFull,
+    ...(result.loadStartsAgent ? { loadStartsAgent: true } : {}),
+  };
+}
+
+/** The question asked before a load that starts the agent (same words as the web UI). "30 seconds" is native.DefaultACPTimeout in the daemon (internal/history/native/rebuild.go): keep them in step. */
+export const LOAD_STARTS_AGENT_CONFIRM = {
+  title: 'Start the agent to load this history?',
+  message: 'This starts the agent to read this run’s history from its own session. It can take up to 30 seconds. No prompt is sent.',
+  confirmLabel: 'Start agent',
+} as const;
+
+/** run.logs params for "Load full history": confirmStart only when the load starts the agent (the human has just confirmed). */
+export function fullHistoryParams(runId: string, info: HistorySourceInfo | null | undefined): { runId: string; detail: 'full'; confirmStart?: true } {
+  return { runId, detail: 'full', ...(info?.loadStartsAgent ? { confirmStart: true as const } : {}) };
 }
 
 export interface HistoryNoteView {

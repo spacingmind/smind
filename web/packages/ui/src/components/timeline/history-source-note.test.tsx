@@ -62,3 +62,58 @@ describe("HistorySourceNote", () => {
     expect(container.querySelector('[data-testid="history-source-note"]')).toBeNull();
   });
 });
+
+describe("HistorySourceNote confirm before starting the agent (ADR-0053)", () => {
+  const acp = () => entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true, loadStartsAgent: true });
+
+  it("the button opens the confirm dialog and sends nothing", () => {
+    const onLoad = vi.fn();
+    render(<HistorySourceNote run={acp()} onLoad={onLoad} />);
+    expect(screen.queryByTestId("history-load-confirm")).toBeNull();
+    fireEvent.click(screen.getByTestId("history-load-full"));
+    const dialog = screen.getByTestId("history-load-confirm");
+    expect(dialog.textContent).toContain("Start the agent to load this history?");
+    expect(dialog.textContent).toContain("This starts the agent to read this run's history from its own session. It can take up to 30 seconds. No prompt is sent.");
+    expect(onLoad).not.toHaveBeenCalled();
+  });
+
+  it("Cancel closes the dialog, sends nothing and leaves the note as it was", () => {
+    const onLoad = vi.fn();
+    render(<HistorySourceNote run={acp()} onLoad={onLoad} />);
+    const before = screen.getByTestId("history-source-note").textContent;
+    fireEvent.click(screen.getByTestId("history-load-full"));
+    fireEvent.click(screen.getByTestId("history-load-confirm-cancel"));
+    expect(screen.queryByTestId("history-load-confirm")).toBeNull();
+    expect(onLoad).not.toHaveBeenCalled();
+    expect(screen.getByTestId("history-source-note").textContent).toBe(before);
+    expect(screen.getByTestId("history-load-full")).toBeTruthy();
+  });
+
+  it("Escape cancels", () => {
+    const onLoad = vi.fn();
+    render(<HistorySourceNote run={acp()} onLoad={onLoad} />);
+    fireEvent.click(screen.getByTestId("history-load-full"));
+    fireEvent.keyDown(screen.getByTestId("history-load-confirm"), { key: "Escape" });
+    expect(screen.queryByTestId("history-load-confirm")).toBeNull();
+    expect(onLoad).not.toHaveBeenCalled();
+  });
+
+  it("Start agent closes the dialog and loads exactly once", () => {
+    const onLoad = vi.fn();
+    const run = acp();
+    render(<HistorySourceNote run={run} onLoad={onLoad} />);
+    fireEvent.click(screen.getByTestId("history-load-full"));
+    fireEvent.click(screen.getByTestId("history-load-confirm-start"));
+    expect(screen.queryByTestId("history-load-confirm")).toBeNull();
+    expect(onLoad).toHaveBeenCalledTimes(1);
+    expect(onLoad).toHaveBeenCalledWith(run);
+  });
+
+  it("a run without loadStartsAgent loads straight away, no dialog", () => {
+    const onLoad = vi.fn();
+    render(<HistorySourceNote run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true })} onLoad={onLoad} />);
+    fireEvent.click(screen.getByTestId("history-load-full"));
+    expect(screen.queryByTestId("history-load-confirm")).toBeNull();
+    expect(onLoad).toHaveBeenCalledTimes(1);
+  });
+});
