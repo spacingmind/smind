@@ -222,7 +222,8 @@ describe('axis helpers', () => {
     expect(combinedSentence({ verdict: 'CHANGES', partial: true, axes })).toBe('Partial review: only the standards axis ran, so it cannot be accepted.');
     expect(isPartialAxes(axes)).toBe(true);
     expect(isPartialAxes([{ status: 'blocked', reason: 'not_run' }])).toBe(true);
-    expect(isPartialAxes([done('standards', 'ACCEPTED'), { axis: 'spec', status: 'blocked', blockedReason: 'timeout', costUsd: 0 }])).toBe(false);
+    const timedOut = [done('standards', 'ACCEPTED'), { axis: 'spec', status: 'blocked', blockedReason: 'timeout', costUsd: 0 }];
+    expect(isPartialAxes(timedOut)).toBe(false);
     expect(isPartialAxes(undefined)).toBe(false);
   });
 
