@@ -75,7 +75,9 @@ func realClaude(t *testing.T, path string) {
 	ref := Ref{Provider: "claude-native", Harness: HarnessClaudeCode, SessionID: id, ConfigDir: root, Cwd: cwd, PromptSha256: sha(prompt),
 		TurnWindow: TurnWindow{StartedAt: ts, FinishedAt: ts.Add(time.Minute)}}
 	rb := New(Config{Roots: func(string, string) []string { return []string{root} }, Timeout: 10 * time.Second})
+	t0 := time.Now()
 	res := rb.Rebuild(context.Background(), Request{Ref: ref, Requester: RequesterHuman, ExpectedToolCalls: -1})
+	t.Logf("claude: cold rebuild %v for %d bytes (probe size %d)", time.Since(t0), res.FileSize, rb.Probe(ref).Size)
 	counts := map[int]int{}
 	for _, e := range res.Events {
 		counts[int(e.Type)]++

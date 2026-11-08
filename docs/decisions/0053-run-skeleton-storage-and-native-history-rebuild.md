@@ -358,6 +358,7 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
   (`canLoadFull` for a human when the provider has a reader) or `provider_cannot_rebuild`; a failed `full` says why with the
   reason codes of the rebuilders (`native_session_missing`, `slice_not_found`, `format_drift`, `rebuild_failed`,
   `rebuild_busy`, `native_session_in_use`) and serves the stored rows.
+- **Principal boundary.** "Human" is any connection that is not run-scoped: an unidentified local connection counts as human, as for `full`. If a later ADR moves plugins or orchestrators onto a scoped principal, `auto` and `full` follow that principal with no change here.
 - **Merge.** A rebuilt turn replaces every stored text, thinking and tool-call row; the stored rows that are not in the provider's
   transcript (user message, permission requests and decisions, usage, rate limit, mcp servers, notes, done) keep their place
   around it: the rebuilt block sits where the first stored transcript row was. A permission row that was interleaved between
@@ -370,6 +371,30 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
 - **Clients.** Web (`HistorySourceNote`, `loadFullHistory`) and mobile (`HistorySourceNote`, `historySource.ts`) show one
   sentence per reason and a "Load full history" action that is offered only when the daemon says `canLoadFull` and the
   reason can pass (first ask, busy, running chat, too slow). The sentences are one table in each client with identical text.
+
+## Implemented: the budget cache and rebuild on open (AC13, H5)
+
+`internal/runs/rebuild_cache.go`, `Registry.RebuildOnOpen`, `run.logs detail: "auto"`.
+
+- **Cache.** A byte-budgeted LRU of rebuilt histories, separate from the finished-run LRU (a rebuilt history is not a run's history and
+  is never written to the store). Knob `runs.rebuildCacheMB` (default 16, `0` = off, negative rejected, env
+  `SMIND_RUN_REBUILD_CACHE_MB`). Keyed by run id and valid only for the session file's identity (size and mtime in nanoseconds,
+  taken from the handle the rebuild read); a changed file misses and the entry is dropped (a same-size rewrite inside one mtime tick of the filesystem would not be seen; the session of a finished run is not rewritten). An invalidation that lands while a rebuild is in flight stops that rebuild from being stored. A history over the whole budget is served
+  uncached. It holds client-form events and heredoc references only: the raw heredoc bodies of `Result` never enter it, and
+  `RebuildHeredoc` always reads the session itself. Pruning a run or its excerpts clears its entry.
+- **Cost.** A hit stats the file (`ProbeSession`) and reads nothing: the rebuilder's `Parses()` counter stays put. Measured on the
+  real session files of a development machine (warm page cache): 62 KB 0.6 ms, 3.3 MB 8 ms, 4.7 MB 9 ms, 6.9 MB 15 ms, 55.7 MB 96 ms
+  cold; a cached read of the fixture ~0.1 ms.
+- **Rebuild on open.** `run.logs detail: "auto"` from a human principal upgrades a skeleton run of a claude-native or codex-native
+  session when the rebuild is cached, or the session file is at most 8 MiB (`AutoRebuildMaxBytes`; about 15 to 20 ms, and it covers 37 of
+  the 38 session files measured). Otherwise the stored rows and today's label are served and nothing is read. The 64 MiB bound,
+  2 concurrent rebuilds and the 10 s limit apply unchanged. A busy bound or a running chat on an automatic open is not announced
+  (the button stays); any other failure carries its reason as for `full`.
+- **H7.** A run-scoped connection (an agent, an orchestrator seat, a plugin session) or a caller with no principal that sends `auto` reads exactly what it reads with
+  no detail: no cache lookup, no probe, no read. The clients send `auto` when they open a finished run (web, mobile); the "Load full
+  history" button (`full`) stays for everything the automatic path skips.
+- **Not done here.** ACP `session/load`, the fleet label, a negative cache for sessions that failed to rebuild (a failing open
+  retries each time; the drift breaker bounds format failures), single-flight for two simultaneous cold opens of one run, a cache for `run.attach`'s terminal label.
 
 ## Implemented: the retention amendment (PR C)
 

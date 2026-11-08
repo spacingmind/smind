@@ -1,0 +1,211 @@
+package runs
+
+import (
+	"container/list"
+	"encoding/json"
+	"sync"
+
+	"github.com/spacingmind/smind/internal/taskrunner"
+)
+
+// DefaultRebuildCacheBudget is the default cap on the estimated bytes of rebuilt
+// histories kept (config runs.rebuildCacheMB). It is separate from the finished
+// runs' history budget: a rebuilt history is never written to the store and is
+// never part of a run, it is a throwaway copy of the provider's session.
+const DefaultRebuildCacheBudget int64 = 16 << 20
+
+// rebuildCache is a byte-budgeted LRU of rebuilt histories (ADR-0053 AC13),
+// keyed by run id and valid only for the session file identity (size, mtime) it
+// was built from: a changed file misses. It holds client-form events only
+// (heredoc bodies elided, provider secrets scrubbed): never the raw bodies the
+// reveal path needs. All methods are safe for concurrent use.
+type rebuildCache struct {
+	mu     sync.Mutex
+	lru    *list.List // *rebuildEntry, most recently used at the front
+	items  map[string]*list.Element
+	bytes  int64
+	budget int64 // <= 0 disables the cache
+
+	gen int64 // bumped by every invalidate: a put that started before one is dropped
+
+	hits, misses, evictions int64
+}
+
+type rebuildEntry struct {
+	runID    string
+	size     int64
+	mod      int64
+	events   []Event
+	refs     map[string][]taskrunner.HeredocRef
+	detail   string
+	estimate int64
+}
+
+// RebuildCacheStats is the cache's counters, for tests and diagnostics.
+type RebuildCacheStats struct {
+	Entries   int   `json:"entries"`
+	Bytes     int64 `json:"bytes"`
+	Budget    int64 `json:"budgetBytes"`
+	Hits      int64 `json:"hits"`
+	Misses    int64 `json:"misses"`
+	Evictions int64 `json:"evictions"`
+}
+
+func (c *rebuildCache) init() {
+	if c.lru == nil {
+		c.lru = list.New()
+		c.items = map[string]*list.Element{}
+	}
+}
+
+func (c *rebuildCache) setBudget(b int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.budget = b
+	c.init()
+	c.evictLocked()
+}
+
+// get returns a copy of runID's rebuilt history when it was built from a file
+// of exactly this size and mtime.
+func (c *rebuildCache) get(runID string, size, mod int64) (Rebuilt, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	el, ok := c.items[runID]
+	if !ok {
+		c.misses++
+		return Rebuilt{}, false
+	}
+	e := el.Value.(*rebuildEntry)
+	if e.size != size || e.mod != mod {
+		c.removeLocked(el) // the session changed: the entry is dead
+		c.misses++
+		return Rebuilt{}, false
+	}
+	c.lru.MoveToFront(el)
+	c.hits++
+	return Rebuilt{Events: cloneEvents(e.events), Refs: copyRefs(e.refs), Detail: e.detail}, true
+}
+
+// put stores a successful rebuild. A history bigger than the whole budget is not
+// stored (it is served uncached).
+// gen is the value of generation() read before the rebuild began: if the run was
+// invalidated since (pruned while its rebuild was in flight), nothing is stored.
+func (c *rebuildCache) put(runID string, gen, size, mod int64, r Rebuilt) {
+	est := historyBytes(r.Events)
+	for _, refs := range r.Refs {
+		est += int64(64 * (len(refs) + 1))
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	if c.budget <= 0 || est > c.budget || gen != c.gen || !cacheable(r.Events) {
+		return
+	}
+	if el, ok := c.items[runID]; ok {
+		c.removeLocked(el)
+	}
+	e := &rebuildEntry{runID: runID, size: size, mod: mod, events: cloneEvents(r.Events), refs: copyRefs(r.Refs), detail: r.Detail, estimate: est}
+	c.items[runID] = c.lru.PushFront(e)
+	c.bytes += est
+	c.evictLocked()
+}
+
+// invalidate drops runID's entry (the run was pruned, or its excerpts were).
+func (c *rebuildCache) invalidate(runID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	c.gen++
+	if el, ok := c.items[runID]; ok {
+		c.removeLocked(el)
+	}
+}
+
+func (c *rebuildCache) generation() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.gen
+}
+
+// cacheable reports whether every event is of the shape a rebuilder produces:
+// text, thinking and tool calls, whose only reference fields are raw JSON bytes.
+// An event with a pointer or slice payload (usage, permissions, mcp servers) is
+// not cached, so a deep copy never has to chase nested pointers.
+func cacheable(in []Event) bool {
+	for _, e := range in {
+		if e.Usage != nil || e.RateLimit != nil || e.PermissionDetail != nil || len(e.PermissionOptions) > 0 || len(e.McpServers) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// cloneEvents copies events so the cache and its readers share no memory: the
+// raw JSON bytes are copied (a shallow slice copy would share them). No consumer
+// mutates an Event in place today (MergeRebuilt and the wire conversion copy and
+// read); the copy keeps it that way. Raw, the provider's native value, is dropped
+// as everywhere a history is retained. Only cacheable events are cloned.
+func cloneEvents(in []Event) []Event {
+	out := make([]Event, len(in))
+	for i, e := range in {
+		e.Raw = nil
+		e.ToolInput = cloneRaw(e.ToolInput)
+		e.ToolResult = cloneRaw(e.ToolResult)
+		e.RawPayload = cloneRaw(e.RawPayload)
+		out[i] = e
+	}
+	return out
+}
+
+func cloneRaw(in json.RawMessage) json.RawMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), in...)
+}
+
+// copyRefs gives each reader its own map and slices: the cache's copy is never shared.
+func copyRefs(in map[string][]taskrunner.HeredocRef) map[string][]taskrunner.HeredocRef {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string][]taskrunner.HeredocRef, len(in))
+	for k, v := range in {
+		out[k] = append([]taskrunner.HeredocRef(nil), v...)
+	}
+	return out
+}
+
+func (c *rebuildCache) removeLocked(el *list.Element) {
+	e := el.Value.(*rebuildEntry)
+	c.lru.Remove(el)
+	delete(c.items, e.runID)
+	c.bytes -= e.estimate
+}
+
+func (c *rebuildCache) evictLocked() {
+	for c.bytes > c.budget || (c.budget <= 0 && c.lru.Len() > 0) {
+		back := c.lru.Back()
+		if back == nil {
+			return
+		}
+		c.removeLocked(back)
+		c.evictions++
+	}
+}
+
+func (c *rebuildCache) stats() RebuildCacheStats {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	return RebuildCacheStats{Entries: c.lru.Len(), Bytes: c.bytes, Budget: c.budget, Hits: c.hits, Misses: c.misses, Evictions: c.evictions}
+}
+
+// SetRebuildCacheBudget sets the rebuilt-history cache budget in bytes; 0 turns
+// the cache off (every rebuild reads the session) and drops what it holds.
+func (reg *Registry) SetRebuildCacheBudget(bytes int64) { reg.rcache.setBudget(bytes) }
+
+// RebuildCacheStats snapshots the cache's counters.
+func (reg *Registry) RebuildCacheStats() RebuildCacheStats { return reg.rcache.stats() }

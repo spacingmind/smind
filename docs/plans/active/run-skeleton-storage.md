@@ -201,9 +201,9 @@ Already measured for the ADR (scratch script, sizes only from this machine's own
 
 The ADR-0053 work is paused here. Parked, not abandoned:
 
-- **AC13 budget cache + rebuild on open.** A rebuilt history enters the #823 LRU (keyed by the session file's size and mtime, never
-  written back); that is what makes rebuilding when a human opens a claude-native/codex-native run cheap enough to do
-  automatically (H5). Today the client asks for `detail: "full"` on a button press.
+- ~~**AC13 budget cache + rebuild on open.**~~ Done (ADR-0053 "Implemented: the budget cache and rebuild on open"): own LRU
+  (`runs.rebuildCacheMB`), keyed by run id + session file size/mtime, never written back; `run.logs detail: "auto"` from a human
+  rebuilds when cached or the file is at most 8 MiB.
 - **ACP `session/load`** (explicit request only, agents that advertise `loadSession`).
 - **Fleet:** `skeletonRev` mirror re-sync and the `owned_by_host:<id>` label with a direct read on the owning host (AC9).
 - **Codex through `thread/read`** instead of the rollout file (ADR D4's preference; the file reader is the documented deviation).

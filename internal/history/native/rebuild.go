@@ -73,6 +73,11 @@ type Result struct {
 	// tool call carries them next to its elided input.
 	Refs map[string][]taskrunner.HeredocRef
 
+	// FileSize and FileModTime (unix ns) identify the session file as it was when
+	// this rebuild opened it; set on success. A cache of the result is valid only
+	// while ProbeSession still reports the same pair.
+	FileSize, FileModTime int64
+
 	raw map[string][]string // tool call id -> raw heredoc bodies, in elision order
 }
 
@@ -102,6 +107,21 @@ type Rebuilder struct {
 	// beforeParse, when set (tests only), runs in the parse goroutine just before
 	// the file is read, so a test can hold a slot or outlast the timeout.
 	beforeParse atomic.Pointer[func()]
+
+	parses atomic.Int64 // sessions actually read and parsed (not cache hits)
+}
+
+// Parses is the number of session files this Rebuilder has read so far.
+func (rb *Rebuilder) Parses() int64 { return rb.parses.Load() }
+
+// Probe is ProbeSession under the roots the daemon allows now: what a rebuild of
+// ref would find, from a stat only (the file is not read).
+func (rb *Rebuilder) Probe(ref Ref) Probe {
+	var roots []string
+	if rb.cfg.Roots != nil {
+		roots = rb.cfg.Roots(ref.Provider, ref.Harness)
+	}
+	return ProbeSession(ref, roots)
 }
 
 type driftState struct {
@@ -171,11 +191,15 @@ func (rb *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 	}
 
 	var f *os.File
+	var fileSize, fileMod int64
 	real, err := find()
 	if err == nil {
 		var f2 *os.File
 		if f2, err = openRegular(real, MaxFileBytes); err == nil {
 			f = f2
+			if st, serr := f2.Stat(); serr == nil {
+				fileSize, fileMod = st.Size(), st.ModTime().UnixNano()
+			}
 		}
 	}
 	if err != nil {
@@ -200,6 +224,7 @@ func (rb *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 		// cannot let more than the bound run at once.
 		defer func() { f.Close(); <-rb.sem }()
 		rc := &readerCtx{f: f}
+		rb.parses.Add(1)
 		if h := rb.beforeParse.Load(); h != nil {
 			(*h)()
 		}
@@ -224,7 +249,7 @@ func (rb *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 	}
 	rb.recordDrift(key, false)
 	events, raw, refs := rb.deliver(ref.Provider, p.events)
-	return Result{Events: events, raw: raw, Refs: refs, Detail: fmt.Sprintf("%d events from %d records", len(events), p.st.decoded)}
+	return Result{Events: events, raw: raw, Refs: refs, FileSize: fileSize, FileModTime: fileMod, Detail: fmt.Sprintf("%d events from %d records", len(events), p.st.decoded)}
 }
 
 type readerCtx struct {
