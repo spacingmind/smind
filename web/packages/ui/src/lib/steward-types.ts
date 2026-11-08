@@ -152,6 +152,44 @@ export function blockedReasonLabel(reason: string | undefined): string {
   }
 }
 
+/** True when a pass was not requested (a one-axis re-run): the review can never be accepted. */
+export function isPartialAxes(axes: { status?: string; blockedReason?: string; reason?: string }[] | undefined): boolean {
+  return (axes ?? []).some((a) => a.status === "blocked" && (a.blockedReason ?? a.reason) === "not_run");
+}
+
+/**
+ * The plain sentence the card shows instead of the daemon's combined summary when the review has
+ * axes (the summary carries raw `[axis]` tags and daemon notes; the axis rows already say it per
+ * pass). Built only from the combined verdict and the passes' states, never from seat text.
+ */
+export function combinedSentence(review: Pick<StewardReview, "verdict" | "axes" | "partial">): string {
+  const axes = review.axes ?? [];
+  const names = (list: StewardAxis[]) => list.map((a) => axisLabel(a.axis)).join(" and ");
+  const ran = axes.filter((a) => !(a.status === "blocked" && a.blockedReason === "not_run"));
+  if (review.partial === true || isPartialAxes(axes)) {
+    return `Partial review: only the ${names(ran).toLowerCase() || "requested"} axis ran, so it cannot be accepted.`;
+  }
+  const changes = axes.filter((a) => a.status === "done" && a.seatVerdict === "CHANGES");
+  const failed = axes.filter((a) => a.status === "blocked");
+  const skipped = axes.filter((a) => a.status === "skipped");
+  switch (review.verdict) {
+    case "ACCEPTED":
+      return skipped.length > 0
+        ? `${names(axes.filter((a) => a.status === "done"))} accepted the change; ${names(skipped).toLowerCase()} had nothing to judge.`
+        : "Both axes accepted the change.";
+    case "CHANGES": {
+      const parts: string[] = [];
+      if (changes.length > 0) parts.push(`Changes requested by ${names(changes)}.`);
+      if (failed.length > 0) parts.push(`${names(failed)} did not complete.`);
+      return parts.length > 0 ? parts.join(" ") : "Changes requested.";
+    }
+    case "BLOCKED":
+      return "The review was blocked.";
+    default:
+      return "Review in progress.";
+  }
+}
+
 /** The spec axis's checklist counts; an unknown status counts as unverifiable. */
 export function criteriaCounts(criteria: StewardCriterion[] | undefined): { met: number; unmet: number; unverifiable: number } {
   const out = { met: 0, unmet: 0, unverifiable: 0 };

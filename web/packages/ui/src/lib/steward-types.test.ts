@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   axisLabel,
   axisStatusLabel,
+  combinedSentence,
+  isPartialAxes,
   blockedReasonLabel,
   findingsAsPrompt,
   groupFindingsByAxisThenFile,
@@ -154,5 +156,30 @@ describe("axis helpers", () => {
     expect(axisStatusLabel({ status: "weird" })).toEqual({ text: "weird", tone: "neutral" });
     expect(axisStatusLabel({ status: "done", seatVerdict: "ODD" }).text).toBe("ODD");
     expect(() => groupFindingsByAxisThenFile([f("a", 1, "novel")])).not.toThrow();
+  });
+});
+
+
+describe("combinedSentence and isPartialAxes", () => {
+  const done = (axis: string, v: string) => ({ axis, status: "done", seatVerdict: v, costUsd: 0 });
+  it("builds a plain sentence from the verdict and the passes, never from seat text", () => {
+    expect(combinedSentence({ verdict: "ACCEPTED", axes: [done("standards", "ACCEPTED"), done("spec", "ACCEPTED")] })).toBe("Both axes accepted the change.");
+    expect(
+      combinedSentence({ verdict: "ACCEPTED", axes: [done("standards", "ACCEPTED"), { axis: "spec", status: "skipped", blockedReason: "no_spec", costUsd: 0 }] }),
+    ).toBe("Standards accepted the change; spec had nothing to judge.");
+    expect(combinedSentence({ verdict: "CHANGES", axes: [done("standards", "CHANGES"), done("spec", "ACCEPTED")] })).toBe("Changes requested by Standards.");
+    expect(combinedSentence({ verdict: "CHANGES", axes: [{ axis: "standards", status: "blocked", blockedReason: "timeout", costUsd: 0 }, done("spec", "ACCEPTED")] })).toBe(
+      "Standards did not complete.",
+    );
+    expect(combinedSentence({ verdict: "BLOCKED", axes: [] })).toBe("The review was blocked.");
+    expect(combinedSentence({ verdict: undefined, axes: [] })).toBe("Review in progress.");
+  });
+  it("says a partial review ran one axis and cannot be accepted", () => {
+    const axes = [done("standards", "ACCEPTED"), { axis: "spec", status: "blocked", blockedReason: "not_run", costUsd: 0 }];
+    expect(combinedSentence({ verdict: "CHANGES", partial: true, axes })).toBe("Partial review: only the standards axis ran, so it cannot be accepted.");
+    expect(isPartialAxes(axes)).toBe(true);
+    expect(isPartialAxes([{ status: "blocked", reason: "not_run" }])).toBe(true);
+    expect(isPartialAxes([done("standards", "ACCEPTED"), done("spec", "ACCEPTED")])).toBe(false);
+    expect(isPartialAxes(undefined)).toBe(false);
   });
 });
