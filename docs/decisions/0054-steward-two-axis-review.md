@@ -208,7 +208,7 @@ No price is quoted from memory: the Usage page already prices runs, and the PR t
 - **RPCs and events:** none added; `steward.review` gains an optional `axes?: ["standards"|"spec"]` (Human and daemon trigger only, default both) so a single axis can be re-run from
   the CLI. A one-axis re-run is a **partial review**: the other pass is written as blocked `not_run`, which the combine reads as a failed axis, so the review can never be ACCEPTED (the
   stored verdict is at most CHANGES). It is never deduped against an identical review and no review is deduped to it; `axes` is refused when `steward.twoAxis` is off, for a name that is
-  not `standards`/`spec`, and for `["spec"]` when no spec resolved. The view also carries `standardsChanged` (optional bool: a standards file is edited in the diff); the existing `steward.updated {}` fires on each pass change.
+  not `standards`/`spec`, and for `["spec"]` when no spec resolved. A partial review supersedes no other review (only a newer FULL review supersedes a full one, and it supersedes the partial), so a re-run never makes an earlier full review stale or unready, and it is listed as its own review. The view also carries `partial` (optional bool, set for a partial review) and `standardsChanged` (optional bool: a standards file is edited in the diff); the existing `steward.updated {}` fires on each pass change.
 - **Config:** `steward.twoAxis`, `steward.passes.*`, `steward.standards.files|rules` above; all human-only, none an RPC.
 - **Role pack:** a fifth profile `steward-standards` (read-only, claude-native, `claude-haiku-5-5`, `default`, `childPolicy: none`), seeded idempotently by `smind profile seed roles`
   as today; the instructions text differs per axis, the tool lists are the same two MCP tools.

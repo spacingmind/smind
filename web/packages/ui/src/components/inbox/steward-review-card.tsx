@@ -100,7 +100,8 @@ function CriterionLine({ criterion }: { criterion: StewardCriterion }) {
 function AxisRow({ axis }: { axis: StewardAxis }) {
   const criteria = axis.criteria ?? [];
   const counts = criteriaCounts(criteria);
-  const showReason = axis.status === "blocked" && axis.blockedReason;
+  // A not-run pass is not a failure: its chip says so and no red reason line repeats it.
+  const showReason = axis.status === "blocked" && axis.blockedReason && axis.blockedReason !== "not_run";
   return (
     <li className="flex flex-col gap-1" data-testid={`steward-axis-${axis.axis}`}>
       <span className="flex flex-wrap items-center gap-1.5">

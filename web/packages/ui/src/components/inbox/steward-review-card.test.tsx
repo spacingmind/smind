@@ -226,6 +226,7 @@ describe("StewardReviewCard", () => {
       const row = screen.getByTestId("steward-axis-spec");
       expect(row).toHaveTextContent("Not run");
       expect(row).not.toHaveTextContent("Did not complete");
+      expect(row.querySelector(".text-destructive")).toBeNull();
       expect(screen.getByTestId("steward-partial")).toHaveTextContent("Partial review · cannot be accepted");
     });
 
