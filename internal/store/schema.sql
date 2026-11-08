@@ -857,3 +857,27 @@ CREATE TABLE IF NOT EXISTS steward_reviews (
     finished_at TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_steward_reviews_task ON steward_reviews(task_id, id);
+
+-- steward_review_passes: one seat run of one review on one axis (ADR-0054); additive.
+CREATE TABLE IF NOT EXISTS steward_review_passes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    review_id INTEGER NOT NULL REFERENCES steward_reviews(id),
+    axis TEXT NOT NULL,                       -- standards | spec
+    status TEXT NOT NULL,                     -- pending | running | done | blocked | skipped
+    profile TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    steward_task_id INTEGER NOT NULL DEFAULT 0,
+    scratch_dir TEXT NOT NULL DEFAULT '',
+    token_hash TEXT NOT NULL DEFAULT '',
+    token_used INTEGER NOT NULL DEFAULT 0,
+    seat_verdict TEXT NOT NULL DEFAULT '',    -- '' | ACCEPTED | CHANGES | BLOCKED (what this pass submitted)
+    summary TEXT NOT NULL DEFAULT '',
+    findings_json TEXT NOT NULL DEFAULT '',
+    criteria_json TEXT NOT NULL DEFAULT '',   -- spec axis only
+    blocked_reason TEXT NOT NULL DEFAULT '',  -- timeout | budget | crashed | cancelled | scope_violation | no_spec
+    cost_usd REAL NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP,
+    UNIQUE (review_id, axis)
+);
