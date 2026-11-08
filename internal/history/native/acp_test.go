@@ -171,6 +171,11 @@ func TestRebuildACPRefusals(t *testing.T) {
 	if r := e.rb.Rebuild(ctx, e.req(t, "nope", true)); r.Reason != ReasonSliceNotFound {
 		t.Fatalf("no matching turn: %q", r.Reason)
 	}
+	e.events = append(e.events, userMsg("first"), agentText("again"))
+	if r := e.rb.Rebuild(ctx, e.req(t, "first", true)); r.Reason != ReasonSliceNotFound {
+		t.Fatalf("the same prompt twice must never be guessed: %q", r.Reason)
+	}
+	e.events = twoTurnReplay()
 	req := e.req(t, "first", true)
 	req.Ref.Cwd = req.Ref.Cwd + "/gone"
 	if r := e.rb.Rebuild(ctx, req); r.Reason != ReasonSessionMissing {
