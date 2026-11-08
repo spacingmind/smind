@@ -16,7 +16,12 @@ import (
 // app-server-protocol/src/protocol/v2/shared.rs). usageLimitExceeded covers
 // codex's UsageLimitReached, QuotaExceeded and UsageNotIncluded; unauthorized
 // is a failed token refresh; serverOverloaded and rateLimitExceeded are the
-// throttles. Every other class (badRequest, internalServerError, ...) is none.
+// throttles; modelNotFound is the plan not including the model;
+// policyCapacityUnavailable and flexUnavailable are capacity temporarily
+// unavailable (retryable). contextWindowExceeded, sessionBudgetExceeded and
+// tooManyDenials are deliberately none: retrying cannot fix them, a human
+// must act (a new session, fewer denials). Every other class (badRequest,
+// internalServerError, ...) is none.
 func FailureHint(err error) (code string, retryAfter time.Duration) {
 	var te *codex.TurnError
 	if errors.As(err, &te) {
@@ -29,6 +34,10 @@ func FailureHint(err error) (code string, retryAfter time.Duration) {
 			return failure.CodeOverloaded, 0
 		case "rateLimitExceeded":
 			return failure.CodeRateLimit, 0
+		case "modelNotFound":
+			return failure.CodeModelNotFound, 0
+		case "policyCapacityUnavailable", "flexUnavailable":
+			return failure.CodeOverloaded, 0
 		}
 	}
 	return "", 0
