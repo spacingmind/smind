@@ -606,6 +606,31 @@ func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string, mcpServ
 	return res.ConfigOptions, nil
 }
 
+// LoadSessionReplay is LoadSession for callers that want the replayed
+// history: it registers updates as the session's update subscriber (as
+// Prompt does) before calling session/load, so every session/update the
+// agent streams while replaying is forwarded onto updates, in order. The
+// caller must drain updates concurrently -- the agent replays the whole
+// session before answering the session/load request, and nothing is
+// prompted (no turn is started; the replay is the session's prior history
+// alone). updates is closed when this method returns, error or not. No
+// MCP servers are passed.
+func (c *Client) LoadSessionReplay(ctx context.Context, sessionID, cwd string, updates chan<- SessionUpdate) ([]ConfigOption, error) {
+	sub := &updateSub{ch: updates}
+	c.mu.Lock()
+	c.updateSubs[sessionID] = sub
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.updateSubs, sessionID)
+		c.mu.Unlock()
+		sub.wg.Wait()
+		close(updates)
+	}()
+
+	return c.LoadSession(ctx, sessionID, cwd, nil)
+}
+
 // ResumeSession resumes an existing session via ACP's session/resume, for
 // an agent that advertises the sessionCapabilities.resume capability (see
 // SupportsResumeSession) but not loadSession -- the session's own history
