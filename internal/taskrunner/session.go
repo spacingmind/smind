@@ -39,6 +39,28 @@ type SessionHandle struct {
 	// the next result, so a turn's own usage is that result minus these
 	// (claudeTurnUsage).
 	UsageTotals *ClaudeUsageTotals `json:"usageTotals,omitempty"`
+
+	// Fork, when set, marks a claude-native handle that is a pending fork
+	// (ADR-0057): SessionID is the PARENT's session, and the chat's first turn
+	// launches with --resume SessionID --fork-session --resume-session-at
+	// Fork.EntryUUID. The marker is cleared as soon as the CLI reports the
+	// forked session's own id, so a later turn resumes that session and never
+	// forks again.
+	Fork *ForkAt `json:"fork,omitempty"`
+}
+
+// ForkAt is where a pending fork cuts its parent's session.
+type ForkAt struct {
+	// EntryUUID is the transcript entry the fork resumes at (the last assistant
+	// record of the anchor turn).
+	EntryUUID string `json:"entryUuid"`
+}
+
+// TotalsLogger is implemented by a SessionStore that keeps the history of a
+// chat's claude usage totals (ChatSessionStore does), so a fork can start its
+// first turn's usage from the totals at its anchor.
+type TotalsLogger interface {
+	LogClaudeTotals(chatID int64, totals *ClaudeUsageTotals)
 }
 
 // SessionStore persists one SessionHandle per key across runs, so a runner
