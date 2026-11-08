@@ -78,6 +78,16 @@ func Client(helloID utls.ClientHelloID, opts ...Option) *http.Client {
 	}
 }
 
+// StreamClient builds an *http.Client like Client but with no overall timeout:
+// http.Client.Timeout covers reading the response body, so it would cut a
+// long streaming response (SSE) that is still healthy. The caller bounds each
+// request itself (time to first byte, idle time between chunks, or a total
+// for a non-streaming call) with a request context. Dialing and the TLS
+// handshake keep their own timeouts.
+func StreamClient(helloID utls.ClientHelloID, opts ...Option) *http.Client {
+	return &http.Client{Transport: New(helloID, opts...)}
+}
+
 // RoundTrip implements http.RoundTripper.
 func (rt *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return rt.inner.RoundTrip(req)
