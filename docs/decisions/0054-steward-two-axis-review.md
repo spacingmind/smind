@@ -2,9 +2,9 @@
 
 ## Status
 
-**Proposed — 2026-11-08.** Amends [ADR-0047](0047-steward-seat.md) §1, §3, §4, §8 and §9 (the seat, the review loop, the rails, the wire and the card). Everything else in
+**Accepted — 2026-11-08.** Decisions D1–D11 accepted as recommended by the Supervisor under the Human's delegation; the Human may veto. `steward.twoAxis` stays false by default, and the Haiku pilot (AC22) remains the Human's. Amends [ADR-0047](0047-steward-seat.md) §1, §3, §4, §8 and §9 (the seat, the review loop, the rails, the wire and the card). Everything else in
 ADR-0047 stands: the policy engine, the gates, the clamp, the read-only seat, the Human merging. The Human asked for the review to run two independent passes; every choice
-listed under [Decisions for the Human](#decisions-for-the-human) carries a recommendation and a veto changes only the PR named next to it. Spec, acceptance criteria and PR
+listed under [Decisions for the Human](#decisions-for-the-human) carries a recommendation, and a Human veto changes only the PR named next to it. Spec, acceptance criteria and PR
 split: `docs/plans/active/steward-two-axis.md`.
 
 Inputs: ADR-0047 (seat, digest, gates, clamp), ADR-0045 (validator, verdict bound to a commit, inbox), ADR-0041 (seats, tree budget A5), ADR-0039 (forge status), ADR-0037
