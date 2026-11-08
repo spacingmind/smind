@@ -226,6 +226,12 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 		if err != nil || (row.Status != "pending" && row.Status != "running") || !h.ownsReview(row, rc.ident.taskID) {
 			return nil, forbidden(m + " is only available to the steward seat's own run")
 		}
+		// A pass's seat reads only its own axis's view of the digest, the axis
+		// coming from which pass its task is the seat of (ADR-0054 §3).
+		if axis, ok := h.passOf(p.ReviewID, rc.ident.taskID); ok {
+			d, err := h.svc.AxisDigestJSON(p.ReviewID, axis)
+			return d, stewardErr(m, err)
+		}
 		d, err := h.svc.DigestJSON(p.ReviewID)
 		return d, stewardErr(m, err)
 	}

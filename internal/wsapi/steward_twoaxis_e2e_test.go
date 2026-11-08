@@ -218,11 +218,22 @@ func TestTwoAxisE2E_BothAcceptedStoresAccepted(t *testing.T) {
 			t.Fatalf("digest.get as %s: %v", p.Axis, err)
 		}
 		var d steward.Digest
-		if err := json.Unmarshal(raw, &d); err != nil || d.Standards == nil || !d.Standards.ChangedInDiff || d.Spec == nil || len(d.Spec.Criteria) != 2 {
-			t.Fatalf("%s digest = %+v, %v", p.Axis, d, err)
+		if err := json.Unmarshal(raw, &d); err != nil {
+			t.Fatalf("%s digest: %v", p.Axis, err)
 		}
-		if !strings.Contains(d.Untrusted.StandardsHeadDiff, "No rules apply") {
-			t.Fatalf("the head edit of the standards is missing as data: %q", d.Untrusted.StandardsHeadDiff)
+		// Each seat reads only its own axis's sections (ADR-0054 §3).
+		switch p.Axis {
+		case string(steward.AxisStandards):
+			if d.Standards == nil || !d.Standards.ChangedInDiff || d.Spec != nil || len(d.Untrusted.SpecCriteria) != 0 || len(d.Untrusted.PRBody) != 0 {
+				t.Fatalf("standards digest = %+v, want the standards section only", d)
+			}
+			if !strings.Contains(d.Untrusted.StandardsHeadDiff, "No rules apply") {
+				t.Fatalf("the head edit of the standards is missing as data: %q", d.Untrusted.StandardsHeadDiff)
+			}
+		default:
+			if d.Spec == nil || len(d.Spec.Criteria) != 2 || d.Standards != nil || d.Untrusted.StandardsHeadDiff != "" || len(d.Untrusted.StandardsRules) != 0 {
+				t.Fatalf("spec digest = %+v, want the spec section only", d)
+			}
 		}
 	}
 
