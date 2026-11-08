@@ -405,6 +405,9 @@ func TestTwoAxisE2E_TokensAndSeatsAreBoundToTheirPass(t *testing.T) {
 	lead := &requestContext{runScoped: true, ident: runIdentity{runID: e.runID, taskID: e.seatTask.ID}}
 	_, err := budgetCall(t, e.api, lead, "steward.verdict.submit", map[string]any{"reviewId": id, "token": e.passToken(t, std), "submission": e.standardsDoc(id, steward.VerdictAccepted)})
 	wantErrCode(t, err, codeForbidden)
+	// Nor can any run that is no pass's seat read the digest.
+	_, err = budgetCall(t, e.api, lead, "steward.digest.get", map[string]any{"reviewId": id})
+	wantErrCode(t, err, codeForbidden)
 	// The spec seat with the standards seat's token: bad token, nothing consumed.
 	_, err = budgetCall(t, e.api, passRC(spec), "steward.verdict.submit", map[string]any{"reviewId": id, "token": e.passToken(t, std), "submission": e.specDoc(t, id, steward.VerdictAccepted)})
 	if err == nil {
