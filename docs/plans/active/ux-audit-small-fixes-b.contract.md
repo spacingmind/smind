@@ -1,6 +1,6 @@
 ---
 v: 1
-milestone: "UX audit PR B: a human Deny can carry a reason (daemon, CLI, web card, mobile card), new-file writes show their content, demo permission card parity, plus the PR A polish"
+milestone: "UX audit PR B: Deny with a reason, new-file content, demo card parity"
 base: origin/develop
 planRef: docs/plans/active/ux-audit-small-fixes.md
 acs:
