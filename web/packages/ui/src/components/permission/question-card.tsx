@@ -225,7 +225,7 @@ function QuestionField({
       {isLong ? (
         <>
           <legend>
-            <span className={`block whitespace-pre-wrap break-words${expanded ? "" : " line-clamp-8"}`}>{question.text}</span>
+            <span className={`${expanded ? "block " : "line-clamp-8 "}whitespace-pre-wrap break-words`}>{question.text}</span>
           </legend>
           <Button
             type="button"
