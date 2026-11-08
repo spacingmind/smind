@@ -16,7 +16,7 @@ Scope: a chat can be forked at a finished turn. The Claude harness forks nativel
 - AC6: the seeded fallback is built from stored run rows only (prompt and `final_text` of the earlier turns, newest turns kept, capped), never from a provider session, and is prepended to the child's first prompt once (`seed_used_at`), not stored in `runs.prompt`. The child is marked lossy in `chat.list`.
 - AC7: the first turn of a forked Claude chat reports its own usage, not the inherited conversation's: the baseline is the parent's cumulative totals as of the anchor run (the log is written when a Claude turn ends, by a session store that keeps one).
 - AC8: `chat.list` and `chat.get` answer an additive `fork {parentChatId, forkedAtRunId, kind, mode, lossy}` for a forked chat (on `chat.list`, `chat.get`, `chat.fork` and the `chat.created`/`chat.updated` events) and nothing new for any other (byte-identical payload for unforked chats: golden test).
-- AC9: web: a turn menu "Fork from here" (native, or the labelled fallback when native is refused), the fork banner and the parent shown on the tab. CLI: `smind chat fork <chatId> --at <runId> [--seeded]`. Mobile in PR 1b. Light and dark frames for each web state.
+- AC9: web: a "Fork from here" action on a finished turn (native, or the labelled fallback when native is refused; a passing refusal such as a running chat or a busy daemon stays an inline error), and a banner naming the parent. The parent is named in the pane's banner only: no tab affordance in PR 1 (the banner says "another chat" when the parent is archived). CLI: `smind task chat fork <chatId> --at <runId> [--seeded]`. Mobile in PR 1b. Light and dark frames for each web state (taken on the demo build with the scripted daemon).
 - AC10: deleting a task deletes its fork rows and totals log; archiving a chat leaves its children alone.
 
 ### Named tests (as written)
@@ -43,6 +43,8 @@ Mutations (all fail a named test): `--fork-session` dropped, `--resume-session-a
 
 ## Progress
 
-Daemon side done and tested: side tables, reader anchor, runner fork handle, `chat.fork`, seeded fallback, additive chat payloads, events. CLI and web are being added by peers (GLM first); mobile is PR 1b.
+Daemon side done and tested: side tables, reader anchor, runner fork handle, `chat.fork`, seeded fallback, additive chat payloads, events. CLI and web done (GLM peers, reviewed; frames light and dark at 1280 and 390: the turn action, the native dialog, the fallback dialog, the banner for a native and a lossy fork). Mobile is PR 1b.
 
 ## Validation
+
+CLI: `TestTaskChatForkSeeded`, `TestTaskChatForkNativeRefusedSuggestsSeeded`, `TestTaskChatForkUsageErrors`. Web: `fork-chat-dialog.test.tsx` (native, fallback, no seeded option, a passing refusal, generic error, cancel, reason labels), `task-detail-fork.test.tsx` (action opens the dialog, banner for forked and lossy chats, none for unforked), `run-timeline.test.tsx` (the action's visibility rules), the demo guard (`chat.fork` rule). Go and web suites pass. Plugin and ACP providers get the native refusal and then the labelled offer (the ADR's "hidden for a plugin provider" is not implemented). Not verified: a live `claude --fork-session` run.

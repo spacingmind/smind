@@ -107,13 +107,32 @@ describe("ForkChatDialog", () => {
 });
 
 describe("forkReasonLabel", () => {
-  it("words every daemon reason and never shows the raw code", () => {
-    for (const reason of ["fork_unsupported", "native_session_missing", "native_session_in_use", "slice_not_found", "format_drift", "provider_cannot_rebuild", "rebuild_busy"]) {
-      const label = forkReasonLabel(reason);
-      expect(label).not.toContain("_");
-      expect(label).not.toBe("unavailable");
-    }
-    expect(forkReasonLabel("something_new")).toBe("unavailable");
+  it.each([
+    ["fork_unsupported", "this agent has no session fork"],
+    ["native_session_missing", "its session file is gone"],
+    ["native_session_in_use", "the chat is still running"],
+    ["slice_not_found", "this turn cannot be told apart in the session"],
+    ["format_drift", "the session format was not recognised"],
+    ["provider_cannot_rebuild", "no session was recorded for this turn"],
+    ["rebuild_busy", "the daemon is busy, try again"],
+    ["something_new", "unavailable"],
+  ])("%s -> %s", (reason, want) => {
+    expect(forkReasonLabel(reason)).toBe(want);
+  });
+  it("an absent reason is unavailable", () => {
     expect(forkReasonLabel(undefined)).toBe("unavailable");
+  });
+});
+
+describe("a passing refusal", () => {
+  it.each(["native_session_in_use", "rebuild_busy"])("%s stays an inline error and offers no lossy fork", async (reason) => {
+    const { client, onForked } = renderDialog();
+    fireEvent.click(screen.getByTestId("dialog-fork-chat-confirm"));
+    client.nth("chat.fork", 0).reject(new RpcError("cannot fork here", "fork_unavailable", { reason, seededAvailable: true }));
+    await flush();
+    expect(screen.getByTestId("dialog-fork-chat-error")).toHaveTextContent("right now");
+    expect(screen.getByTestId("dialog-fork-chat-confirm")).toHaveTextContent("Fork");
+    expect(screen.getByTestId("dialog-fork-chat-confirm")).not.toHaveTextContent("summary");
+    expect(onForked).not.toHaveBeenCalled();
   });
 });

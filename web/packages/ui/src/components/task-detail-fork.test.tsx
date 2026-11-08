@@ -74,14 +74,14 @@ describe("TaskDetailPane fork", () => {
 
   it("a forked chat shows the banner naming its parent", async () => {
     await renderPane(forked({}), { parentChat: PARENT });
-    expect(screen.getByTestId("chat-fork-banner")).toHaveTextContent("Forked from Original chat at an earlier turn.");
+    expect(screen.getByTestId("chat-fork-banner")).toHaveTextContent("Forked from Original chat.");
     expect(screen.getByTestId("chat-fork-banner")).not.toHaveTextContent("summary of the earlier turns");
   });
 
   it("a lossy fork adds the summary sentence; a missing parent falls back to another chat", async () => {
     await renderPane(forked({ mode: "seeded", lossy: true }));
     expect(screen.getByTestId("chat-fork-banner")).toHaveTextContent(
-      "Forked from another chat at an earlier turn. The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning.",
+      "Forked from another chat. The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning.",
     );
   });
 

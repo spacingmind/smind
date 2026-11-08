@@ -1752,8 +1752,10 @@ func cmdTaskChatFork(args []string) int {
 				Reason string `json:"reason"`
 				Detail string `json:"detail"`
 			}
-			_ = json.Unmarshal(rpc.Data, &d)
-			why := stewardText(d.Reason)
+			why := stewardText(rpc.Message)
+			if json.Unmarshal(rpc.Data, &d) == nil && d.Reason != "" {
+				why = stewardText(d.Reason)
+			}
 			if d.Detail != "" {
 				why += ": " + stewardText(d.Detail)
 			}

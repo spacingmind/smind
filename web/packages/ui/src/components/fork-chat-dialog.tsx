@@ -12,6 +12,9 @@ interface ForkUnavailable {
   seededAvailable?: boolean;
 }
 
+/** Refusals that pass: the chat is still running or the daemon is busy. */
+const TRANSIENT_REASONS = new Set(["native_session_in_use", "rebuild_busy"]);
+
 /** The daemon's refusal reasons (internal/history/native Reason values) as words. */
 export function forkReasonLabel(reason: string | undefined): string {
   switch (reason) {
@@ -75,6 +78,10 @@ export function ForkChatDialog({
     } catch (err) {
       if (mode === "native" && err instanceof RpcError && err.code === "fork_unavailable") {
         const data = (err.data ?? {}) as ForkUnavailable;
+        if (data.reason && TRANSIENT_REASONS.has(data.reason)) {
+          // Not a limit of the agent: the same fork can work a moment later, so no lossy offer.
+          throw new Error(`The session cannot be forked right now: ${forkReasonLabel(data.reason)}.`);
+        }
         if (data.seededAvailable) {
           setUnavailable(data);
           return null; // Not a failure to show -- the dialog's own fallback state.

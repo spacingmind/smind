@@ -341,9 +341,9 @@ export function TaskDetailPane({
   // "Fork from here": the run whose turn the dialog targets (null = closed).
   // Like the hover actions above, the callback is stable so RunTimeline's
   // memo keeps bailing out; only this pane's state opens the dialog.
-  const [forkRunId, setForkRunId] = useState<string | null>(null);
+  const [forkTarget, setForkTarget] = useState<{ chatId: number; runId: string } | null>(null);
   const { fork: forkChat } = useForkChat(client, task.ID);
-  const forkRun = useCallback((run: RunEntry) => setForkRunId(run.id), []);
+  const forkRun = useCallback((run: RunEntry) => setForkTarget({ chatId: chat.ID, runId: run.id }), [chat.ID]);
 
   // ADR-0041 F2: the rate-limited footer's way out and the failed-run <-> successor links.
   const failoverIndex = useRunFailoverIndex(
@@ -474,7 +474,7 @@ export function TaskDetailPane({
       <UntrustedBanner task={task} onTask={applyTask} />
       {chat.fork && (
         <NoticeBanner tone="info" testId="chat-fork-banner">
-          Forked from {parentChat?.Title || "another chat"} at an earlier turn.
+          Forked from {parentChat?.Title || "another chat"}.
           {chat.fork.lossy && " The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning."}
         </NoticeBanner>
       )}
@@ -644,13 +644,13 @@ export function TaskDetailPane({
        * chat.created event useTaskChats already applies.
        */}
       <ForkChatDialog
-        open={forkRunId !== null}
+        open={forkTarget !== null && forkTarget.chatId === chat.ID}
         onOpenChange={(open) => {
-          if (!open) setForkRunId(null);
+          if (!open) setForkTarget(null);
         }}
         chatTitle={chat.Title}
-        runId={forkRunId ?? ""}
-        onFork={(mode) => forkChat(chat.ID, forkRunId!, mode)}
+        runId={forkTarget?.runId ?? ""}
+        onFork={(mode) => (forkTarget ? forkChat(forkTarget.chatId, forkTarget.runId, mode) : Promise.reject(new Error("no turn selected")))}
         onForked={onOpenForkedChat}
       />
     </div>
