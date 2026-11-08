@@ -154,6 +154,7 @@ describe('axis helpers', () => {
     expect(blockedReasonLabel('crashed')).toBe('Crashed');
     expect(blockedReasonLabel('cancelled')).toBe('Cancelled');
     expect(blockedReasonLabel('scope_violation')).toBe('Scope violation');
+    expect(blockedReasonLabel('base_unresolved')).toBe('Merge-base not found');
     expect(blockedReasonLabel('not_run')).toBe('Not run');
     expect(blockedReasonLabel('no_spec')).toBe('No spec available');
     expect(blockedReasonLabel('exotic')).toBe('exotic');
