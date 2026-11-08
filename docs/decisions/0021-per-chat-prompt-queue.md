@@ -273,7 +273,7 @@ Rules:
 | run ends between the click and the write | enqueue as a queue item, `state: queued` (rule 2) |
 | Codex `expectedTurnId` mismatch | same (the turn already moved on) |
 | the CLI/agent process died during the write | the run finishes `error` as it does today; the steer is enqueued; delivery follows the existing restart rules (decision 5) |
-| stdin write is not serialized with other writers (control responses are written from other goroutines) | the SDK already serializes `writeLine` with `writeMu`; PR1 adds a race-detector regression test |
+| a steer write races other stdin writers (control responses are written from other goroutines) | the SDK already serializes `writeLine` with `writeMu`; PR1 adds a race-detector regression test |
 | double-click / repeated steer | one in flight per run (rule 5) |
 | provider cannot steer | fallback per D2 with the reason in the result |
 | steer arrives while no tool runs (model streaming text) | **unknown today** (D9); until probed the card says "delivered at the model's next step" and the event is `echoed` only when the echo arrives, so the timeline never claims more than it saw |
