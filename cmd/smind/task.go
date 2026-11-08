@@ -1316,17 +1316,51 @@ const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [opti
 // internal/runs.firstOptionByKind's own selection so `task approve
 // <runId>` with no further arguments does the obvious thing.
 func cmdTaskApprove(args []string) int {
-	return cmdTaskDecide("approve", cmdTaskApproveUsage, true, 3, args)
+	return cmdTaskDecide("approve", cmdTaskApproveUsage, true, 3, "", args)
 }
 
 // cmdTaskDenyUsage is printed on any argument error in cmdTaskDeny.
-const cmdTaskDenyUsage = "usage: smind task deny <runId> [requestId]"
+const cmdTaskDenyUsage = "usage: smind task deny <runId> [requestId] [--reason <text>]"
 
 // cmdTaskDeny is the human-only counterpart of cmdTaskApprove: it rejects a
 // run's pending permission request with the request's own reject option.
 // CLI only -- there is deliberately no MCP deny tool (ADR-0017 #1).
+//
+// --reason <text> (or --reason=<text>) tells the agent why, at most
+// runs.MaxDenyReasonRunes characters; the daemon refuses a longer one.
 func cmdTaskDeny(args []string) int {
-	return cmdTaskDecide("deny", cmdTaskDenyUsage, false, 2, args)
+	reason, rest, ok := splitReasonFlag(args)
+	if !ok {
+		fmt.Fprintln(os.Stderr, cmdTaskDenyUsage)
+		return 2
+	}
+	return cmdTaskDecide("deny", cmdTaskDenyUsage, false, 2, reason, rest)
+}
+
+// splitReasonFlag pulls a --reason flag out of args, returning the reason and
+// the remaining arguments. ok is false for a --reason with no value or a
+// repeated one.
+func splitReasonFlag(args []string) (reason string, rest []string, ok bool) {
+	seen := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--reason":
+			if seen || i+1 >= len(args) {
+				return "", nil, false
+			}
+			seen, reason = true, args[i+1]
+			i++
+		case strings.HasPrefix(a, "--reason="):
+			if seen {
+				return "", nil, false
+			}
+			seen, reason = true, strings.TrimPrefix(a, "--reason=")
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return reason, rest, true
 }
 
 // isHelpArg reports whether a CLI argument asks for usage.
@@ -1334,7 +1368,7 @@ func isHelpArg(a string) bool { return a == "-h" || a == "--help" || a == "help"
 
 // cmdTaskDecide answers a pending permission request, picking the first
 // allow option (allow=true) or the first reject option (allow=false).
-func cmdTaskDecide(verb, usage string, allow bool, maxArgs int, args []string) int {
+func cmdTaskDecide(verb, usage string, allow bool, maxArgs int, reason string, args []string) int {
 	if len(args) > 0 && isHelpArg(args[0]) {
 		fmt.Println(usage)
 		return 0
@@ -1414,14 +1448,22 @@ func cmdTaskDecide(verb, usage string, allow bool, maxArgs int, args []string) i
 		return 1
 	}
 
-	err = client.Call(context.Background(), "run.respondPermission", map[string]any{
-		"runId": runID, "requestId": target.RequestID, "optionId": optionID,
-	}, nil)
+	params := map[string]any{"runId": runID, "requestId": target.RequestID, "optionId": optionID}
+	var result struct {
+		ReasonDelivered bool `json:"reasonDelivered"`
+	}
+	if reason != "" {
+		params["reason"] = reason
+	}
+	err = client.Call(context.Background(), "run.respondPermission", params, &result)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "task %s: %v\n", verb, err)
 		return 1
 	}
 	fmt.Printf("request %s -> %s\n", target.RequestID, optionID)
+	if reason != "" && !result.ReasonDelivered {
+		fmt.Fprintln(os.Stderr, "note: this provider cannot pass a reason to the agent; the deny was sent without it")
+	}
 	return 0
 }
 

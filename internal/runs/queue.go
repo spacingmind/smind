@@ -281,7 +281,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		closedCh:           make(chan struct{}),
 		status:             StatusRunning,
 		subscribers:        make(map[int]*subQueue),
-		pendingPermissions: make(map[string]chan string),
+		pendingPermissions: make(map[string]*pendingPermission),
 		treeRoot:           treeRoot,
 	}
 

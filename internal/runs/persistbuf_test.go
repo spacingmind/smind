@@ -89,7 +89,7 @@ func registerLive(t *testing.T, e *histEnv, reg *Registry, id string, started ti
 	if _, err := e.st.CreateRun(store.Run{ID: id, TaskID: e.task.ID, Provider: "glm", Prompt: "p", Status: "running", StartedAt: started}); err != nil {
 		t.Fatal(err)
 	}
-	live := &run{id: id, taskID: e.task.ID, status: StatusRunning, startedAt: started, subscribers: map[int]*subQueue{}, pendingPermissions: map[string]chan string{}, closedCh: make(chan struct{})}
+	live := &run{id: id, taskID: e.task.ID, status: StatusRunning, startedAt: started, subscribers: map[int]*subQueue{}, pendingPermissions: map[string]*pendingPermission{}, closedCh: make(chan struct{})}
 	var once sync.Once
 	live.cancel = func() { // CloseAll's cleanup stops it
 		once.Do(func() {

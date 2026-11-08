@@ -751,6 +751,9 @@ func TestServer_RunRespondPermission_CrossConnection(t *testing.T) {
 	if respondResp.Error != nil {
 		t.Fatalf("run.respondPermission error = %v", respondResp.Error.Message)
 	}
+	if string(respondResp.Result) != "{}" {
+		t.Fatalf("a respond without a reason must keep returning {}, got %s", respondResp.Result)
+	}
 
 	resolvedEnv := readEnvelopeFor(t, starter, "1", 5*time.Second)
 	if resolvedEnv.Event != "permission_resolved" {
@@ -1209,5 +1212,59 @@ func TestRunStart_TreeBusyErrorIsReturnedToWSClient(t *testing.T) {
 	var wantErr *runs.TreeBusyError
 	if !strings.Contains(resp.Error.Message, "task tree concurrency limit reached") || !strings.Contains(resp.Error.Message, fmt.Sprintf("task tree #%d", task.ID)) {
 		t.Fatalf("run.start error = %q, want the TreeBusyError text mentioning task tree #%d (%v)", resp.Error.Message, task.ID, wantErr)
+	}
+}
+
+// TestServer_RunRespondPermission_DenyReason: a reason is refused with an
+// allow option (the request stays pending), and accepted with the deny; this
+// provider cannot carry the text to the agent, so the result says so while
+// the plain deny still reaches the agent.
+func TestServer_RunRespondPermission_DenyReason(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+
+	starter := dialWS(t, srv, "tok")
+	sendRequest(t, starter, "1", "task.prompt", map[string]any{"taskId": task.ID, "provider": "glm", "prompt": "hi"})
+	permEnv := readEnvelopeFor(t, starter, "1", 5*time.Second)
+	if permEnv.Event != "permission_request" {
+		t.Fatalf("first message = %+v, want a permission_request event", permEnv)
+	}
+	var req permissionRequestParams
+	if err := json.Unmarshal(permEnv.Params, &req); err != nil {
+		t.Fatal(err)
+	}
+	sendRequest(t, starter, "list", "run.list", nil)
+	var summaries []runs.RunSummary
+	if err := json.Unmarshal(readEnvelopeFor(t, starter, "list", 5*time.Second).Result, &summaries); err != nil {
+		t.Fatal(err)
+	}
+	runID := summaries[0].ID
+
+	responder := dialWS(t, srv, "tok")
+	sendRequest(t, responder, "bad", "run.respondPermission", map[string]any{
+		"runId": runID, "requestId": req.RequestID, "optionId": "allow-1", "reason": "sneaky",
+	})
+	if bad := readEnvelopeFor(t, responder, "bad", 5*time.Second); bad.Error == nil || !strings.Contains(bad.Error.Message, "deny reason refused") {
+		t.Fatalf("allow with a reason = %+v, want a deny-reason refusal", bad)
+	}
+	sendRequest(t, responder, "long", "run.respondPermission", map[string]any{
+		"runId": runID, "requestId": req.RequestID, "optionId": "deny-1", "reason": strings.Repeat("x", runs.MaxDenyReasonRunes+1),
+	})
+	if long := readEnvelopeFor(t, responder, "long", 5*time.Second); long.Error == nil {
+		t.Fatal("an over-long reason must be refused")
+	}
+
+	sendRequest(t, responder, "ok", "run.respondPermission", map[string]any{
+		"runId": runID, "requestId": req.RequestID, "optionId": "deny-1", "reason": "use make test",
+	})
+	ok := readEnvelopeFor(t, responder, "ok", 5*time.Second)
+	if ok.Error != nil {
+		t.Fatalf("deny with a reason = %v", ok.Error.Message)
+	}
+	if string(ok.Result) != `{"reasonDelivered":false}` {
+		t.Fatalf("result = %s, want reasonDelivered false for a provider that cannot carry it", ok.Result)
 	}
 }
