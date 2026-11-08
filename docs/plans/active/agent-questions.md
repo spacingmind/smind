@@ -1,7 +1,7 @@
 # Agent questions reach the human (ADR-0055)
 
-Status: **spec, not started.** Nothing is implemented until the Human answers the decisions in
-[ADR-0055](../../decisions/0055-agent-questions-reach-the-human.md). Size: L (wsapi, inbox, events, UI on three surfaces, a table): each PR below with a
+Status: **PR1 in review** (decisions D1-D10 accepted as recommended on 2026-11-09; ADR-0055 stays Proposed until the first implementation PRs land).
+See [ADR-0055](../../decisions/0055-agent-questions-reach-the-human.md). Size: L (wsapi, inbox, events, UI on three surfaces, a table): each PR below with a
 validation contract (ADR-0045).
 
 ## Acceptance Criteria
@@ -46,7 +46,7 @@ evaluated before the floor → `TestGrants_EvaluatedAfterFloorAndPolicy`; an MCP
 
 1. **PR0 (probe, no product code):** the Claude `AskUserQuestion` Haiku probe + fixture + mode table (AC1). Wait for the Human's D9 answer first.
 2. **PR1 (Claude + core):** model, events, RPC, pending machinery, unattended policy, secret refusal, Claude mapping, inbox kind, `waiting_question`, CLI `task answer`.
-3. **PR2 (Codex + ACP):** capabilities, handlers, mappings, profile opt-in field.
+3. **PR2 (Codex + ACP):** capabilities, handlers, mappings (the profile field `questions` already landed in PR1). **The Codex half is waiting on the Codex probe** (the decline encoding and `isBlocking: false` semantics need the real app-server; Codex probes are deferred, no credits). The ACP half and the Claude path go ahead.
 4. **PR3 (UI):** web card, mobile sheet, push, light/dark frames. Parallelisable with PR2 after PR1.
 5. **PR4 ("always allow"):** `permission_grants`, card scope choice, settings list, CLI. After PR1.
 
@@ -54,11 +54,18 @@ One PR at a time, each stops for the Human's review.
 
 ## Decisions
 
-Proposed in ADR-0055 D1..D9; none taken yet.
+D1-D10 accepted as recommended (2026-11-09, under the Human's delegation). Conditions: Haiku probes pre-approved; Codex probes deferred.
+
+PR1 as built, and what it leaves for later (stated, not hidden):
+- The Claude answer shape is pinned by a recorded probe (fixtures in `internal/taskrunner/testdata/askuserquestion/`). The CLI did not advertise the `unanswered` capability, so a decline is a deny with a message; it also still sends the request under bypass permissions.
+- The per-profile `questions` setting is a profile column (default `ask`); seeded validator, steward and peer profiles default to `decline`.
+- Not in PR1: the mobile sheet and push (PR3), the grants table (PR4), Codex and ACP handlers (PR2), a `waiting_question` state in the task tree, fleet mirrors and automations (they still read a parked question as a running run; MCP `task_wait` and `task_status` do report `waiting_question`), and D10's resolved or timed-out inbox row (a run event carries no timestamp, so listing a timed-out question needs a small event-time addition; it stays a follow-up).
 
 ## Progress
 
-- 2026-11-08: ADR drafted (Proposed), spec written. Code facts checked against `internal/taskrunner/permission.go`, `internal/runs/registry.go`, `internal/codex/client.go`,
+- 2026-11-08: ADR drafted (Proposed), spec written; ADR merged.
+- 2026-11-09: Claude `AskUserQuestion` probe (Haiku, five scenarios, about USD 0.014); PR1 built: model, events, decider, RPCs, profile field, inbox item, MCP state, CLI, web card.
+- Earlier note: Code facts checked against `internal/taskrunner/permission.go`, `internal/runs/registry.go`, `internal/codex/client.go`,
   `internal/acp`, `internal/inbox`.
 
 ## Validation
