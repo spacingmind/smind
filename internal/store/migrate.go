@@ -690,6 +690,13 @@ var migrations = []migration{
 			return addColumnIfMissing(db, "runs", "excerpts_pruned_at", "TIMESTAMP")
 		},
 	},
+	{
+		// ADR-0055: what a run does with an agent's question to the human.
+		name: "profile_questions",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "agent_profiles", "questions", "TEXT NOT NULL DEFAULT 'ask'")
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

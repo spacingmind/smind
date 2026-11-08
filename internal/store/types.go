@@ -298,6 +298,9 @@ type AgentProfile struct {
 	// FallbackProfileID names the profile to continue on for "fallback"
 	// (a suggestion for "none"/"wait"); nil = none.
 	FallbackProfileID *int64
+	// Questions is what a run does with an agent's question to the human
+	// (ADR-0055): ask | decline | disabled; empty reads as ask.
+	Questions string
 	// The seat contract (ADR-0041 S1); every field optional, all unset =
 	// a legacy profile. OrchestrationTools nil = unmanaged, otherwise
 	// whether a run gets the built-in smind MCP server. Instructions is
