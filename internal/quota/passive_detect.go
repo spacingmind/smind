@@ -11,10 +11,9 @@ import (
 )
 
 // Passive rejection detection (ADR-0028 §7.1, D14). Everything here is pure:
-// no clock reads, no I/O, no logging of header values. It ports
-// refs/cliproxyapi/internal/runtime/executor/helps/claude_ratelimit.go
-// (ClaudeHeadersIndicateUnifiedRateLimitRejection, ParseClaudeRateLimitReset,
-// randomClaudeFuzzDuration).
+// no clock reads, no I/O, no logging of header values. The rules
+// follow Anthropic's unified rate-limit headers: which responses are declared
+// rejections, how a reset deadline is read, and the random grace added to it.
 
 // MaxCooldown bounds any cooldown end, so a garbage header cannot park an
 // account.
@@ -34,8 +33,9 @@ const (
 type Rejection struct {
 	// Rejected: the headers explicitly declare a hard rejection.
 	Rejected bool
-	// ModelOnly: the rejection is the 7d_oi-only shape, which cools down only
-	// the model of the rejected request.
+	// ModelOnly: the rejection is an overage-only or 7d_oi (Fable-only) shape
+	// (see unifiedStatuses.modelOnly), which cools down only the model of the
+	// rejected request, never the whole account.
 	ModelOnly bool
 	// Window names the rejected window for display (one of the Window*
 	// constants): weekly when the 7d window is rejected (also when the 5h one
@@ -70,7 +70,7 @@ func ClassifyRejection(status int, h http.Header) Rejection {
 		return Rejection{Rejected: true, Window: WindowFiveHour}
 	case s.unified != "rejected":
 		return Rejection{}
-	case s.oiOnly():
+	case s.modelOnly():
 		return Rejection{Rejected: true, ModelOnly: true, Window: WindowWeeklyModel}
 	}
 	return Rejection{Rejected: true, Window: WindowUnified}
@@ -78,23 +78,80 @@ func ClassifyRejection(status int, h http.Header) Rejection {
 
 type unifiedStatuses struct {
 	unified, fiveH, sevenD, sevenDOI string
+	// overage signals, read only to tell an overage-only rejection apart
+	overage, overageDisabledReason, claim string
+	// utilization headers: the raw value and whether the header was sent at all
+	util5h, util7d       string
+	has5hUtil, has7dUtil bool
 }
 
 func readUnifiedStatuses(h http.Header) unifiedStatuses {
-	get := func(name string) string {
-		return strings.ToLower(strings.TrimSpace(headerFold(h, "Anthropic-Ratelimit-Unified-"+name)))
-	}
+	const p = "Anthropic-Ratelimit-Unified-"
+	get := func(name string) string { return strings.TrimSpace(headerFold(h, p+name)) }
+	low := func(name string) string { return strings.ToLower(get(name)) }
+	has := func(name string) bool { return headerPresent(h, p+name) }
 	return unifiedStatuses{
-		unified:  get("Status"),
-		fiveH:    get("5h-Status"),
-		sevenD:   get("7d-Status"),
-		sevenDOI: get("7d_oi-Status"),
+		unified:               low("Status"),
+		fiveH:                 low("5h-Status"),
+		sevenD:                low("7d-Status"),
+		sevenDOI:              low("7d_oi-Status"),
+		overage:               low("Overage-Status"),
+		overageDisabledReason: get("Overage-Disabled-Reason"),
+		claim:                 low("Representative-Claim"),
+		util5h:                get("5h-Utilization"),
+		util7d:                get("7d-Utilization"),
+		has5hUtil:             has("5h-Utilization"),
+		has7dUtil:             has("7d-Utilization"),
 	}
 }
 
-// oiOnly is cliproxyapi's isFableOnlyRejection.
-func (s unifiedStatuses) oiOnly() bool {
-	return s.fiveH == "allowed" && s.sevenD == "allowed" && s.sevenDOI == "rejected"
+// windowAllowed: a shared window is not exhausted ("allowed_warning" is a
+// warning, not a rejection).
+func windowAllowed(status string) bool { return status == "allowed" || status == "allowed_warning" }
+
+// utilizationHealthy: a parsable utilization in [0, 1).
+func utilizationHealthy(raw string) bool {
+	u, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	return err == nil && !math.IsNaN(u) && !math.IsInf(u, 0) && u >= 0 && u < 1
+}
+
+// modelOnly reports a rejection that is only the account's overage budget or its Fable (7d_oi)
+// window, while the shared 5h and 7d windows are not exhausted. It must cool
+// down at most the rejected model, never the account. The shared windows count
+// as not exhausted when each is allowed (or allowed_warning) or, when its
+// status header is omitted, when its own utilization is healthy (< 1) or, for
+// an overage-claim rejection, absent: the API leaves a window out when it did
+// not evaluate it. A bare overage-disabled-reason header (many accounts send it
+// on every response) narrows only when both shared windows are explicitly
+// allowed: it is not enough to excuse an omitted window. Anything that does not
+// match stays a whole-account rejection: an unknown shape never fails open. The
+// window label of such a cooldown is weekly_model, whichever signal declared it.
+func (s unifiedStatuses) modelOnly() bool {
+	if s.fiveH == "rejected" || s.sevenD == "rejected" {
+		return false
+	}
+	declared := s.sevenDOI == "rejected" || s.overage == "rejected" || strings.Contains(s.claim, "overage")
+	fiveOK, sevenOK := windowAllowed(s.fiveH), windowAllowed(s.sevenD)
+	if fiveOK && sevenOK {
+		return declared || s.overageDisabledReason != ""
+	}
+	if !declared {
+		return false
+	}
+	if sevenOK && s.fiveH == "" {
+		if utilizationHealthy(s.util5h) || (s.unified == "rejected" && !s.has5hUtil) {
+			return true
+		}
+	}
+	if fiveOK && s.sevenD == "" && utilizationHealthy(s.util7d) {
+		return true
+	}
+	// both shared windows omitted: only a rejected overage claim relies on that
+	if s.unified == "rejected" && s.fiveH == "" && s.sevenD == "" && strings.Contains(s.claim, "overage") {
+		absentOrHealthy := func(raw string) bool { return strings.TrimSpace(raw) == "" || utilizationHealthy(raw) }
+		return absentOrHealthy(s.util5h) && absentOrHealthy(s.util7d)
+	}
+	return false
 }
 
 // RejectionDeadline returns the latest future reset among the candidates that
@@ -116,7 +173,7 @@ func RejectionDeadlineWindow(h http.Header, now time.Time, r Rejection) (deadlin
 		return time.Time{}, "", false
 	}
 	s := readUnifiedStatuses(h)
-	oiOnly := s.oiOnly()
+	modelOnly := s.modelOnly()
 	var latest time.Time
 	window = r.Window
 	// own is the window a candidate belongs to ("" = none in particular).
@@ -150,11 +207,11 @@ func RejectionDeadlineWindow(h http.Header, now time.Time, r Rejection) (deadlin
 		t, ok := reset("7d-Reset")
 		consider(t, ok, WindowWeekly)
 	}
-	if s.sevenDOI == "rejected" && !oiOnly {
+	if s.sevenDOI == "rejected" && !modelOnly {
 		t, ok := reset("7d_oi-Reset")
 		consider(t, ok, "")
 	}
-	unifiedRejected := !oiOnly && (s.unified == "rejected" || s.fiveH == "rejected" || s.sevenD == "rejected" ||
+	unifiedRejected := !modelOnly && (s.unified == "rejected" || s.fiveH == "rejected" || s.sevenD == "rejected" ||
 		s.sevenDOI == "rejected" || (s.unified == "" && s.fiveH != "allowed" && s.sevenD != "allowed"))
 	if unifiedRejected {
 		t, ok := reset("Reset")
@@ -178,8 +235,7 @@ func CooldownEnd(deadline, now time.Time, grace time.Duration) time.Time {
 // GraceFunc yields the random grace added to a cooldown end.
 type GraceFunc func() time.Duration
 
-// DefaultGrace is a uniform integer 1 to 30 seconds from a cryptographic RNG
-// (cliproxyapi randomClaudeFuzzDuration).
+// DefaultGrace is a uniform integer 1 to 30 seconds from a cryptographic RNG.
 func DefaultGrace() time.Duration {
 	return graceFrom(func(max int64) (int64, error) {
 		n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(max))
@@ -239,7 +295,17 @@ func RetryAfterBackoff(h http.Header, now time.Time) (time.Duration, bool) {
 	return d, true
 }
 
-// headerFold is the ref's getHeaderCaseInsensitive: http.Header.Get cannot
+// headerPresent reports whether the header was sent, whatever its value.
+func headerPresent(h http.Header, name string) bool {
+	for k := range h {
+		if strings.EqualFold(k, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// headerFold is a case-insensitive header read: http.Header.Get cannot
 // find a non-canonical key that contains '_' (7d_oi), so fall back to a scan.
 func headerFold(h http.Header, name string) string {
 	if h == nil {
