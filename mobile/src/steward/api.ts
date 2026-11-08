@@ -14,6 +14,7 @@ export async function fetchReview(conn: RelayConnection, reviewId: number): Prom
     ...review,
     findings: Array.isArray(review.findings) ? review.findings : [],
     gates: Array.isArray(review.gates) ? review.gates : [],
+    axes: Array.isArray(review.axes) ? review.axes : undefined,
   } as StewardReview;
 }
 

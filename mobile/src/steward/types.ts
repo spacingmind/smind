@@ -9,6 +9,31 @@ export interface StewardFinding {
   why: string;
   check: string;
   severity?: string;
+  /** The pass that raised it and the standards rule it cites (two-axis reviews only, ADR-0054). */
+  axis?: string;
+  rule?: string;
+}
+
+/** One criterion of the spec axis: met, unmet or unverifiable, with the evidence the seat gave. */
+export interface StewardCriterion {
+  id: string;
+  status: string;
+  evidence: string;
+}
+
+/** One review pass of a two-axis review (ADR-0054 section 9); every field but the axis may be missing on the wire. */
+export interface StewardAxis {
+  axis: string;
+  status: string;
+  seatVerdict?: string;
+  summary?: string;
+  blockedReason?: string;
+  model?: string;
+  /** Kept in the type only: cost is shown in the Usage overview, never on the card. */
+  costUsd: number;
+  runId?: string;
+  stewardTaskId?: number;
+  criteria?: StewardCriterion[];
 }
 
 /** One objective gate, each pass | fail | unknown | n/a. */
@@ -41,6 +66,12 @@ export interface StewardReview {
   findings: StewardFinding[];
   gates: StewardGate[];
   frames?: StewardFrame[];
+  /** Two-axis reviews only (ADR-0054); absent for a single-axis review. */
+  axes?: StewardAxis[];
+  /** True for a one-axis re-run: the other pass was not run, so it can never be accepted. */
+  partial?: boolean;
+  /** The standards file was edited in this change. */
+  standardsChanged?: boolean;
   prNumber?: number;
   stale?: string;
   notReadyReason?: string;
