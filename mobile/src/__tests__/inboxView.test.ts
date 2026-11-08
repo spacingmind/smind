@@ -147,3 +147,47 @@ describe('steward review rows', () => {
     expect(future.icon).toBe('info');
   });
 });
+
+describe('review rows with axes', () => {
+  const review = (over = {}) => inboxItem({ key: 'review:5', kind: 'review', links: { taskId: 7, reviewId: 5 }, ...over });
+
+  it('inbox row carries one chip per axis', () => {
+    const row = inboxRow(
+      review({ axes: [{ axis: 'standards', verdict: 'ACCEPTED' }, { axis: 'spec', status: 'skipped', reason: 'no_spec' }, { axis: 'novel' }] }),
+      NOW,
+    );
+    expect(row.axes).toEqual([
+      { axis: 'standards', label: 'Standards', text: 'Accepted', tone: 'success', icon: 'check' },
+      { axis: 'spec', label: 'Spec', text: 'Skipped · no spec available', tone: 'neutral', icon: 'info' },
+      { axis: 'novel', label: 'novel', text: 'Pending', tone: 'neutral', icon: 'info' },
+    ]);
+    expect(row.partial).toBe(false);
+  });
+
+  it('inbox row of a partial review is partial', () => {
+    const row = inboxRow(review({ axes: [{ axis: 'standards', verdict: 'ACCEPTED' }, { axis: 'spec', status: 'blocked', reason: 'not_run' }] }), NOW);
+    expect(row.partial).toBe(true);
+    expect(row.axes[1]).toMatchObject({ text: 'Not run', tone: 'neutral' });
+    expect(inboxRow(review({ axes: [{ axis: 'spec', status: 'blocked', reason: 'timeout' }] }), NOW).partial).toBe(false);
+  });
+
+  it('inbox row without axes is unchanged', () => {
+    expect(inboxRow(review(), NOW)).toEqual({
+      key: 'review:5',
+      kind: 'review',
+      taskId: 7,
+      hostId: null,
+      reviewId: 5,
+      icon: 'file',
+      label: 'Review',
+      title: 'Fix login',
+      summary: 'Validator passed',
+      time: '30m ago',
+      tone: 'neutral',
+      unseen: true,
+      actions: ['seen', 'snooze', 'resolve', 'open'],
+      axes: [],
+      partial: false,
+    });
+  });
+});

@@ -1,5 +1,5 @@
 /**
- * Wire shapes and pure helpers of the steward review card (`steward.get`, ADR-0047 sections
+ * Wire shapes and pure helpers of the steward review card (the axis helpers have a twin in mobile/src/steward/view.ts: the wording is the same, change both) (`steward.get`, ADR-0047 sections
  * 5, 8 and 9). The daemon computes every gate and clamps the verdict; the card only renders.
  */
 
@@ -149,6 +149,50 @@ export function blockedReasonLabel(reason: string | undefined): string {
       return "No spec available";
     default:
       return reason ?? "";
+  }
+}
+
+/** True when a pass was not requested (a one-axis re-run): the review can never be accepted. */
+export function isPartialAxes(axes: { status?: string; blockedReason?: string; reason?: string }[] | undefined): boolean {
+  return (axes ?? []).some((a) => a.status === "blocked" && (a.blockedReason ?? a.reason) === "not_run");
+}
+
+/**
+ * The plain sentence the card shows instead of the daemon's combined summary when the review has
+ * axes (the summary carries raw `[axis]` tags and daemon notes; the axis rows already say it per
+ * pass). Built only from the combined verdict and the passes' states, never from seat text.
+ */
+export function combinedSentence(review: Pick<StewardReview, "verdict" | "axes" | "partial">): string {
+  const axes = review.axes ?? [];
+  const names = (list: StewardAxis[]) => list.map((a) => axisLabel(a.axis)).join(" and ");
+  const ran = axes.filter((a) => !(a.status === "blocked" && a.blockedReason === "not_run"));
+  if (review.partial === true || isPartialAxes(axes)) {
+    return `Partial review: only the ${names(ran).toLowerCase() || "requested"} axis ran, so it cannot be accepted.`;
+  }
+  // A pass still pending or running: the review is not decided yet, whatever the stored verdict says.
+  if (axes.some((a) => a.status === "pending" || a.status === "running")) return "Review in progress.";
+  const changes = axes.filter((a) => a.status === "done" && a.seatVerdict === "CHANGES");
+  const failed = axes.filter((a) => a.status === "blocked");
+  const skipped = axes.filter((a) => a.status === "skipped");
+  const decided = axes.filter((a) => a.status === "done");
+  switch (review.verdict) {
+    case "ACCEPTED":
+      if (failed.length > 0) return `${names(failed)} did not complete.`;
+      if (decided.length === 0) return "Review accepted.";
+      return skipped.length > 0 ? `${names(decided)} accepted the change; ${names(skipped).toLowerCase()} had nothing to judge.` : "Both axes accepted the change.";
+    case "CHANGES": {
+      const parts: string[] = [];
+      if (changes.length > 0) parts.push(`Changes requested by ${names(changes)}.`);
+      if (failed.length > 0) parts.push(`${names(failed)} did not complete.`);
+      return parts.length > 0 ? parts.join(" ") : "Changes requested.";
+    }
+    case "BLOCKED":
+      return "The review was blocked.";
+    case undefined:
+    case "":
+      return "Review in progress.";
+    default:
+      return "Review finished.";
   }
 }
 

@@ -11,17 +11,19 @@ import { ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { Button } from '@expo/ui';
 import { resolveInbox } from '../inbox/api';
 import { RelayConnection } from '../relay/RelayConnection';
-import { findingsAsPrompt, gateRow, groupFindingsByFile, reviewHeader, severityLabel, sortGatesFailingFirst } from '../steward/view';
+import { axisLabel, findingsAsPrompt, gateRow, groupFindingsByAxisThenFile, groupFindingsByFile, reviewHeader, severityLabel, sortGatesFailingFirst } from '../steward/view';
 import { useReview } from '../steward/useReview';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { AppIcon } from '../ui/AppIcon';
+import { PartialChip } from '../ui/AxisChip';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { EmptyState } from '../ui/EmptyState';
 import { TextButton } from '../ui/TextButton';
 import { UiHost } from '../ui/UiHost';
 import { VerdictChip } from '../ui/VerdictChip';
+import { AxisCard } from './steward/AxisCard';
 import { FrameThumb } from './steward/FrameThumb';
 import { SectionHeader } from './tasks/SectionHeader';
 
@@ -74,6 +76,9 @@ export function StewardReviewScreen({
   const review = state.review;
   const h = reviewHeader(review);
   const gateRows = sortGatesFailingFirst(review.gates).map(gateRow);
+  const axes = Array.isArray(review.axes) ? review.axes : [];
+  const hasAxes = axes.length > 0;
+  const axisGroups = hasAxes && review.findings.some((f) => f.axis) ? groupFindingsByAxisThenFile(review.findings) : null;
   const groups = groupFindingsByFile(review.findings);
   const frames = review.frames ?? [];
 
@@ -93,17 +98,37 @@ export function StewardReviewScreen({
       <Card style={styles.headerCard}>
         <View style={styles.headerRow}>
           <VerdictChip verdict={review.verdict} />
+          {hasAxes && h.partial && <PartialChip />}
           {h.pr !== null && <Text style={styles.meta}>{h.pr}</Text>}
           <Text style={styles.mono}>{h.head7}</Text>
         </View>
         {h.staleNote !== null && <Text style={styles.warning}>{h.staleNote}</Text>}
-        {h.summary !== null && (
-          <Text style={styles.body} selectable>
-            {h.summary}
-          </Text>
+        {hasAxes && h.combined !== null ? (
+          <Text style={styles.body}>{h.combined}</Text>
+        ) : (
+          h.summary !== null && (
+            <Text style={styles.body} selectable>
+              {h.summary}
+            </Text>
+          )
+        )}
+        {hasAxes && review.standardsChanged === true && (
+          <View style={styles.headerRow} accessible accessibilityLabel="Standards file edited in this change">
+            <AppIcon name="warning" size={14} color={theme.status.warning} />
+            <Badge tone="warning">Standards file edited in this change</Badge>
+          </View>
         )}
         {h.blockedReason !== null && <Text style={styles.danger}>{h.blockedReason}</Text>}
       </Card>
+
+      {hasAxes && (
+        <View style={styles.section}>
+          <SectionHeader title="Review axes" />
+          {axes.map((a, i) => (
+            <AxisCard key={`${a.axis}:${i}`} axis={a} />
+          ))}
+        </View>
+      )}
 
       <SectionHeader title="Gates" />
       <Card style={styles.card}>
@@ -127,7 +152,7 @@ export function StewardReviewScreen({
         )}
       </Card>
 
-      {groups.length > 0 && (
+      {groups.length > 0 && axisGroups === null && (
         <View style={styles.section}>
           <SectionHeader title="Findings" />
           {groups.map((g) => (
@@ -145,6 +170,34 @@ export function StewardReviewScreen({
                 </View>
               ))}
             </Card>
+          ))}
+        </View>
+      )}
+
+      {axisGroups !== null && (
+        <View style={styles.section}>
+          <SectionHeader title="Findings" />
+          {axisGroups.map((ag) => (
+            <View key={ag.axis ?? '-'} style={styles.section}>
+              {ag.axis !== undefined && <Text style={styles.axisHeading}>{axisLabel(ag.axis)}</Text>}
+              {ag.files.map((g) => (
+                <Card key={g.file} style={styles.card}>
+                  <Text style={styles.mono} selectable>
+                    {g.file}
+                  </Text>
+                  {g.findings.map((f, i) => (
+                    <View key={`${g.file}:${f.line}:${i}`} style={styles.finding}>
+                      <View style={styles.findingRow}>
+                        <Badge>{severityLabel(f)}</Badge>
+                        <Text style={styles.small} selectable>{`line ${f.line}: ${f.why}`}</Text>
+                      </View>
+                      <Text style={styles.small} selectable>{`check: ${f.check}`}</Text>
+                      {!!f.rule && <Text style={styles.small} selectable>{`rule: ${f.rule}`}</Text>}
+                    </View>
+                  ))}
+                </Card>
+              ))}
+            </View>
           ))}
         </View>
       )}
@@ -205,6 +258,7 @@ function makeStyles(theme: AppTheme) {
     gateColumn: { flexShrink: 1, gap: 2 },
     gateFirstLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.spacing[2] },
     gateId: { ...theme.type.mono, color: theme.foreground, flexShrink: 0 },
+    axisHeading: { ...theme.type.label, color: theme.foreground },
     finding: { gap: 2 },
     findingRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.spacing[2] },
     frames: { gap: theme.spacing[3] },
