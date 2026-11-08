@@ -84,6 +84,9 @@ type Untrusted struct {
 	// absent from the JSON, for a single-pass review.
 	StandardsHeadDiff string   `json:"standardsHeadDiff,omitempty"`
 	StandardsRules    []string `json:"standardsRules,omitempty"`
+	// The spec criteria's texts, by criterion id (ADR-0054 §3): empty, and
+	// then absent from the JSON, for a single-pass review.
+	SpecCriteria map[string]string `json:"specCriteria,omitempty"`
 }
 
 // Digest is the deterministic JSON the daemon hands the seat (ADR-0047
@@ -118,11 +121,13 @@ type Digest struct {
 	Standards *StandardsSection `json:"standards,omitempty"`
 }
 
-// SpecSection holds what the daemon resolved for the Spec pass. P1 carries
-// only the criteria the Spec pass must answer; the rest of the section is
-// added where the digest builds it.
+// SpecSection holds what the daemon resolved for the Spec pass: the sources
+// in fixed order, the criteria to judge and a hint of which named tests
+// exist at the head. Nil on the Digest for a single-pass review.
 type SpecSection struct {
-	Criteria []SpecCriterion `json:"criteria"`
+	Sources     []SpecSource    `json:"sources"`
+	Criteria    []SpecCriterion `json:"criteria"`
+	TestsInTree map[string]bool `json:"testsInTree"`
 }
 
 // criteriaIDs are the ids of the criteria the Spec pass must answer.
@@ -137,10 +142,21 @@ func (d Digest) criteriaIDs() []string {
 	return ids
 }
 
+// SpecSource is one place the spec was resolved from. SHA256 is the source's
+// content hash when the daemon has the content (the plan).
+type SpecSource struct {
+	Kind   string `json:"kind"` // contract|plan|pr_body|issue|adr
+	Ref    string `json:"ref"`
+	Status string `json:"status"` // found|missing|unavailable
+	SHA256 string `json:"sha256,omitempty"`
+}
+
 // SpecCriterion is one acceptance criterion the Spec pass must report on.
+// The criterion text is agent- or user-written and lives only under
+// Untrusted.specCriteria.
 type SpecCriterion struct {
-	ID   string `json:"id"`
-	Text string `json:"text,omitempty"`
+	ID         string   `json:"id"`
+	NamedTests []string `json:"namedTests"`
 }
 
 // StandardsSection is the Standards pass's bar: the standards files as they
@@ -302,6 +318,9 @@ func Build(in Inputs) Digest {
 			rules = append(rules, sanitize(r, standardsRuleMax))
 		}
 		d.Untrusted.StandardsRules = rules
+		spec, texts := resolveSpec(in)
+		d.Spec = &spec
+		d.Untrusted.SpecCriteria = texts
 	}
 
 	return d
