@@ -180,3 +180,38 @@ func TestCodexRevertedThreadRolloutName(t *testing.T) {
 		}
 	})
 }
+
+// TestRolloutNameTable tests the matcher directly (the glob in front of it only
+// narrows the listing).
+func TestRolloutNameTable(t *testing.T) {
+	const th = "01a1aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee"
+	pre := "rollout-" + rolloutTS + "-"
+	upper := "01A1BBBB-BBBB-7CCC-8DDD-EEEEEEEEEEE1"
+	cases := []struct {
+		name, thread, file string
+		want               bool
+	}{
+		{"plain", th, pre + th + ".jsonl", true},
+		{"reverted suffix", th, pre + th + "_" + rolloutUUID1 + ".jsonl", true},
+		{"mixed-case uuid suffix", th, pre + th + "_" + upper + ".jsonl", true},
+		{"trailing .bak", th, pre + th + ".jsonl.bak", false},
+		{"trailing .zst", th, pre + th + ".jsonl.zst", false},
+		{"suffixed trailing .bak", th, pre + th + "_" + rolloutUUID1 + ".jsonl.bak", false},
+		{"trailing junk before extension", th, pre + th + "x.jsonl", false},
+		{"another thread ending with this id", th, pre + "x-" + th + ".jsonl", false},
+		{"another thread extending this id", th, pre + th + "9.jsonl", false},
+		{"non-uuid suffix", th, pre + th + "_notauuid.jsonl", false},
+		{"two suffixes", th, pre + th + "_" + rolloutUUID1 + "_" + rolloutUUID2 + ".jsonl", false},
+		{"free-form timestamp", th, "rollout-anything-" + th + ".jsonl", false},
+		{"no rollout prefix", th, "x" + rolloutTS + "-" + th + ".jsonl", false},
+		{"thread id with _ matches only itself", th + "_" + rolloutUUID1, pre + th + "_" + rolloutUUID1 + ".jsonl", true},
+		{"thread id with _ never takes a suffix", th + "_" + rolloutUUID1, pre + th + "_" + rolloutUUID1 + "_" + rolloutUUID2 + ".jsonl", false},
+		{"thread id with _ does not match the base thread's file", th + "_" + rolloutUUID1, pre + th + ".jsonl", false},
+		{"base thread does not match the longer thread's file", th, pre + th + "_" + rolloutUUID1 + "x.jsonl", false},
+	}
+	for _, c := range cases {
+		if got := rolloutName(c.thread).MatchString(c.file); got != c.want {
+			t.Errorf("%s: rolloutName(%q).Match(%q) = %v, want %v", c.name, c.thread, c.file, got, c.want)
+		}
+	}
+}
