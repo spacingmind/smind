@@ -133,6 +133,21 @@ func renderPermissionResolved(requestID, optionID, reason string) string {
 	return fmt.Sprintf("[permission] %s -> %s (%s)\n", requestID, optionID, reason)
 }
 
+// questionRequest mirrors the `question` object a question_request run.logs
+// entry carries (taskrunner.QuestionRequest's wire shape, ADR-0055); only
+// what the CLI and the MCP tools render is kept.
+type questionRequest struct {
+	Source    string         `json:"source"`
+	Questions []questionItem `json:"questions"`
+}
+
+// questionItem is one question of a request.
+type questionItem struct {
+	ID     string `json:"id"`
+	Header string `json:"header,omitempty"`
+	Text   string `json:"text"`
+}
+
 // runLogEvent is one event in a run.logs response.
 type runLogEvent struct {
 	Type       string                   `json:"type"`
@@ -144,6 +159,8 @@ type runLogEvent struct {
 	Detail     *permissionDetail        `json:"detail,omitempty"`
 	OptionID   string                   `json:"optionId,omitempty"`
 	Reason     string                   `json:"reason,omitempty"`
+	// Question is populated for a "question_request" entry (ADR-0055).
+	Question *questionRequest `json:"question,omitempty"`
 	toolCallEventParams
 	rawEventParams
 }
