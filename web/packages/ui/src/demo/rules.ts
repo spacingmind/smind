@@ -242,6 +242,15 @@ export const RULES: Record<string, DemoRule> = {
     const chat = c.session.chats.find((x) => x.TaskID === p.taskId);
     return { runId: c.session.startReply(p.taskId, p.chatId ?? chat?.ID ?? 0, p.provider ?? "claude-code", String(p.prompt ?? "")).id };
   }),
+  "chat.forkSeed": local((c) => {
+    const chat = c.session.chats.find((x) => x.ID === c.params.chatId);
+    return {
+      seed:
+        chat?.fork?.mode === "seeded"
+          ? "User: Add a retry to the upload step.\nAssistant: Added a bounded retry with backoff and a test.\nUser: Now make the delay configurable.\nAssistant: The delay now reads from the upload settings."
+          : "",
+    };
+  }),
   "run.pendingQuestions": local(() => ({ questions: [] })),
   "run.respondPermission": scripted((c) => {
     const { runId, requestId, optionId } = c.params;
