@@ -55,7 +55,19 @@ func cleanupAfterUpdate() {
 // entry. It is a drift guard, not a sandbox: an agent can unset either, and the
 // policy engine's no-self-approve floor rule is what judges that command.
 func inAgentRun() bool {
-	return os.Getenv(taskrunner.AgentRunEnv) != "" || os.Getenv("SMIND_RUN_ID") != ""
+	return os.Getenv(taskrunner.AgentRunEnv) != "" || os.Getenv(taskrunner.RunIDEnv) != ""
+}
+
+// nonFlagWords is the first n words of args that are not flags: the command
+// the refusal names.
+func nonFlagWords(args []string, n int) []string {
+	var out []string
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") && len(out) < n {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // run dispatches to a subcommand and returns the process exit code, rather
@@ -69,7 +81,7 @@ func run(args []string) int {
 	}
 
 	if permpolicy.HumanOnlyCLI(args) && inAgentRun() {
-		fmt.Fprintf(os.Stderr, "smind %s is for humans, not agents: an agent cannot answer, approve or deny its own requests\n", strings.Join(args[:min(len(args), 2)], " "))
+		fmt.Fprintf(os.Stderr, "smind %s is for humans, not agents: an agent cannot answer, approve or deny its own requests\n", strings.Join(nonFlagWords(args, 2), " "))
 		return 1
 	}
 

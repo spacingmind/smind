@@ -49,6 +49,10 @@ func WithSharedCaches(c scratch.SharedCaches) Option {
 // SMIND_RUN_ID, which only the MCP entry's environment has.
 const AgentRunEnv = "SMIND_AGENT_RUN"
 
+// RunIDEnv is the variable the daemon sets in the MCP entry's environment
+// (never the agent's shell) to the run's id.
+const RunIDEnv = "SMIND_RUN_ID"
+
 // scratchLaunchEnv returns the scratch-related env entries for a run of
 // taskID: the task's scratch dir as TMPDIR (when a scratch Manager is set)
 // plus the shared caches. Entries are meant to be prepended, so anything

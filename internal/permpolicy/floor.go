@@ -44,7 +44,7 @@ func CheckFloor(req Request, p Parsed) (FloorHit, bool) {
 	if curlShell(segs) {
 		return floorHit("no-curl-sh")
 	}
-	if namesHumanOnlyRPC(req.Command) {
+	if (namesHumanOnlyRPC(req.Command) && hasTransport(segs)) || shellFedHumanOnly(segs, req.Command) {
 		return floorHit("no-self-approve")
 	}
 	for _, seg := range p.Segments {
@@ -102,8 +102,14 @@ func (fs *floorSeg) unwrap() {
 		switch name {
 		case "env":
 			rest = fs.unwrapEnv(rest)
-		case "command", "nohup", "time", "builtin":
+		case "command", "nohup", "time", "builtin", "setsid", "stdbuf", "ionice":
 			rest = skipFlags(rest, nil)
+		case "then", "do", "else", "elif", "if", "while", "until", "!", "{", "coproc":
+			// A compound command's keyword ahead of its first command.
+		case "watch":
+			rest = skipFlags(rest, map[string]bool{"-n": true, "-d": true})
+		case "eval":
+			rest = strings.Fields(strings.Join(rest, " "))
 		case "exec":
 			rest = skipFlags(rest, map[string]bool{"-a": true})
 		case "nice":

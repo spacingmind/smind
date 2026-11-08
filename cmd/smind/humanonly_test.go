@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 var humanOnlyInvocations = [][]string{
@@ -12,14 +14,19 @@ var humanOnlyInvocations = [][]string{
 	{"task", "answer", "run-1", "req-1"},
 	{"permission", "show", "--reveal", "1"},
 	{"permission"},
+	{"--x", "task", "approve", "run-1"},
+	{"host", "approve", "laptop"},
+	{"host", "reject", "laptop"},
+	{"relay", "devices", "approve", "abc"},
+	{"relay", "devices", "revoke", "abc"},
 }
 
 func TestHumanOnlyCommandsRefuseInAgentRun(t *testing.T) {
-	for _, env := range []string{"SMIND_AGENT_RUN", "SMIND_RUN_ID"} {
+	for _, env := range []string{taskrunner.AgentRunEnv, taskrunner.RunIDEnv} {
 		for _, args := range humanOnlyInvocations {
 			t.Run(env+"/"+strings.Join(args, "_"), func(t *testing.T) {
-				t.Setenv("SMIND_AGENT_RUN", "")
-				t.Setenv("SMIND_RUN_ID", "")
+				t.Setenv(taskrunner.AgentRunEnv, "")
+				t.Setenv(taskrunner.RunIDEnv, "")
 				t.Setenv(env, "1")
 				var code int
 				stderr := captureStderr(t, func() { code = run(args) })
@@ -34,8 +41,8 @@ func TestHumanOnlyCommandsRefuseInAgentRun(t *testing.T) {
 // Without a marker the commands run: with no daemon and no arguments they get
 // as far as their usage line (exit 2), which proves the guard did not fire.
 func TestHumanOnlyCommandsRunForHumans(t *testing.T) {
-	t.Setenv("SMIND_AGENT_RUN", "")
-	t.Setenv("SMIND_RUN_ID", "")
+	t.Setenv(taskrunner.AgentRunEnv, "")
+	t.Setenv(taskrunner.RunIDEnv, "")
 	for _, args := range [][]string{{"task", "approve"}, {"task", "deny"}, {"permission"}} {
 		var code int
 		stderr := captureStderr(t, func() { code = run(args) })
@@ -47,11 +54,19 @@ func TestHumanOnlyCommandsRunForHumans(t *testing.T) {
 
 // The read and orchestration commands an agent uses are untouched.
 func TestHumanOnlyGuardLeavesAgentCommandsAlone(t *testing.T) {
-	t.Setenv("SMIND_AGENT_RUN", "1")
+	t.Setenv(taskrunner.AgentRunEnv, "1")
 	for _, args := range [][]string{{"task", "ls"}, {"task", "permissions"}, {"task", "send"}, {"task", "logs"}, {"status"}} {
 		stderr := captureStderr(t, func() { _ = run(args) })
 		if strings.Contains(stderr, "is for humans") {
 			t.Fatalf("run(%v) refused in an agent run: %q", args, stderr)
 		}
+	}
+}
+
+func TestHumanOnlyRefusalNamesTheCommandNotTheFlag(t *testing.T) {
+	t.Setenv(taskrunner.AgentRunEnv, "1")
+	stderr := captureStderr(t, func() { _ = run([]string{"--x", "task", "approve", "1"}) })
+	if !strings.Contains(stderr, "smind task approve is for humans") {
+		t.Fatalf("refusal = %q, want it to name `task approve`", stderr)
 	}
 }
