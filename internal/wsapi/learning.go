@@ -35,6 +35,9 @@ const (
 	codeInvalid      = "invalid_params"
 	codeUnavailable  = "unavailable"
 	codeForbidden    = "forbidden"
+	// codeForkUnavailable: a native chat fork that cannot be made; its data names
+	// the reason and says the seeded fallback is open (ADR-0057).
+	codeForkUnavailable = "fork_unavailable"
 )
 
 // exportTargets are the accepted learning.skills.export targets.

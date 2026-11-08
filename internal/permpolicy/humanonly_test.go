@@ -92,6 +92,10 @@ func TestFloor_SelfApproveCLIDenied(t *testing.T) {
 		{"smind host reject laptop", "no-self-approve"},
 		{"smind relay devices approve abc", "no-self-approve"},
 		{"smind relay devices revoke abc", "no-self-approve"},
+		{"smind task chat fork 3 --at run-1", "no-self-approve"},
+		{"smind task chat fork 3 --at run-1 --seeded", "no-self-approve"},
+		{"env -u SMIND_AGENT_RUN smind task chat fork 3 --at r", "no-self-approve"},
+		{"bash -lc 'smind task chat fork 3 --at r'", "no-self-approve"},
 		// a renamed copy or symlink: only the task verbs are matchable
 		{"./sm task approve 12", "no-self-approve"},
 		{"/tmp/x/runner task deny 12", "no-self-approve"},
@@ -112,6 +116,8 @@ func TestFloor_SelfApproveNearMissesAllowed(t *testing.T) {
 		{"smind host ls", ""},
 		{"smind host add laptop", ""},
 		{"smind relay devices ls", ""},
+		{"smind task chat ls 3", ""},
+		{"smind task chat new 3 title", ""},
 		{"smind task send 1 claude 'never run smind task approve yourself'", ""},
 		{"echo 'smind task approve 1' | cat", ""},
 		{"echo 'smind task approve 1' | tee note.txt", ""},
@@ -142,6 +148,7 @@ func TestFloor_SelfApproveRPCNameDenied(t *testing.T) {
 		{`curl -s -d '{"method":"run.answerQuestion","params":{}}' http://localhost:9/rpc`, "no-self-approve"},
 		{`echo '{"method":"run.answerPermission"}' | nc -U /tmp/x.sock`, "no-self-approve"},
 		{`python3 -c "ws.send('inbox.resolve')"`, "no-self-approve"},
+		{`curl -s -d '{"method":"chat.fork","params":{}}' http://localhost:9/rpc`, "no-self-approve"},
 		{`websocat ws://127.0.0.1:9/ws <<< '{"method":"run.respondPermission"}'`, "no-self-approve"},
 		{`node -e "call('permission.revealHeredoc')"`, "no-self-approve"},
 		{`echo '{"method":"run.revealToolHeredoc"}' | nc -U /tmp/x.sock`, "no-self-approve"},
@@ -192,7 +199,7 @@ func TestHumanOnlyCLI_Table(t *testing.T) {
 	for args, want := range map[string]bool{
 		"task approve 1": true, "task deny 1": true, "task answer 1": true, "permission show": true,
 		"permission": true, "--x task approve 1": true, "host approve h": true, "host reject h": true,
-		"relay devices approve d": true, "relay devices revoke d": true, "host ls": false, "relay devices ls": false, "relay status": false,
+		"task chat fork 1 --at r": true, "task chat ls 1": false, "task chat new 1": false, "relay devices approve d": true, "relay devices revoke d": true, "host ls": false, "relay devices ls": false, "relay status": false,
 		"task ls": false, "task permissions 1": false, "status": false, "": false, "task": false,
 	} {
 		if got := HumanOnlyCLI(splitWords(args)); got != want {

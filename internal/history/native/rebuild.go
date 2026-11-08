@@ -84,6 +84,11 @@ type Result struct {
 	// Detail carries counts only (never text) for logs and the UI note.
 	Detail string
 
+	// Anchor is, for a Claude Code session, the uuid of the last assistant record
+	// of the run's turn: the entry a fork resumes the session at (ADR-0057). ""
+	// for other harnesses and for a transcript whose records carry no uuid.
+	Anchor string
+
 	// Refs are the heredoc references the elider reported for each call's input
 	// (by tool call id), for the layer that converts events to the wire: a live
 	// tool call carries them next to its elided input.
@@ -272,7 +277,7 @@ func (rb *Rebuilder) Rebuild(ctx context.Context, req Request) Result {
 	}
 	rb.recordDrift(key, false)
 	events, raw, refs := rb.deliver(ref.Provider, p.events)
-	return Result{Events: events, raw: raw, Refs: refs, FileSize: fileSize, FileModTime: fileMod, Detail: fmt.Sprintf("%d events from %d records", len(events), p.st.decoded)}
+	return Result{Events: events, Anchor: p.st.anchor, raw: raw, Refs: refs, FileSize: fileSize, FileModTime: fileMod, Detail: fmt.Sprintf("%d events from %d records", len(events), p.st.decoded)}
 }
 
 type readerCtx struct {

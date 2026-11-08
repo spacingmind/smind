@@ -58,6 +58,7 @@ const (
 	ReasonHumanOnly       Reason = "rebuild_not_requested"   // asked by an agent or automation (H7)
 	ReasonSessionInUse    Reason = "native_session_in_use"   // the chat has a running run
 	ReasonConfirmRequired Reason = "confirm_required"        // the load would start an agent and the human has not confirmed
+	ReasonForkUnsupported Reason = "fork_unsupported"        // the harness cannot fork a session at a turn (ADR-0057)
 )
 
 // TimeTolerance is how far a turn may lie outside the run's window: a clock

@@ -3,6 +3,7 @@ package taskrunner
 import (
 	"encoding/json"
 	"log"
+	"time"
 
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -55,6 +56,23 @@ func (s *ChatSessionStore) Get(key int64) (SessionHandle, bool) {
 		return SessionHandle{}, false
 	}
 	return handle, true
+}
+
+// LogClaudeTotals implements TotalsLogger: it appends the totals a claude turn
+// ended with to the chat's log (ADR-0057). A failure is logged and dropped, like
+// every other write here.
+func (s *ChatSessionStore) LogClaudeTotals(key int64, totals *ClaudeUsageTotals) {
+	if totals == nil {
+		return
+	}
+	data, err := json.Marshal(totals)
+	if err != nil {
+		log.Printf("taskrunner: chat %d: marshal claude totals: %v", key, err)
+		return
+	}
+	if err := s.st.AppendChatClaudeTotals(key, time.Now(), string(data)); err != nil {
+		log.Printf("taskrunner: chat %d: log claude totals: %v", key, err)
+	}
 }
 
 // Set implements SessionStore. key is a chat id.

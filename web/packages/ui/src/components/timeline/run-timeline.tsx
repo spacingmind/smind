@@ -47,6 +47,7 @@ export const RunTimeline = memo(function RunTimeline({
   onOpenFile,
   onRetry,
   onRerun,
+  onFork,
   onEditPrompt,
   onContinue,
   failover,
@@ -62,6 +63,8 @@ export const RunTimeline = memo(function RunTimeline({
   onRetry?: (run: RunEntry) => void;
   /** Re-submits this run's prompt with its own provider/model/permission; omitted hides the action. */
   onRerun?: (run: RunEntry) => void;
+  /** chat.fork this turn into a new chat; offered on a finished turn only, omitted hides the action. */
+  onFork?: (run: RunEntry) => void;
   /** Loads this run's prompt into the composer; omitted hides the action. */
   onEditPrompt?: (run: RunEntry) => void;
   /** Continue (max_tokens / turn-limit endings): submits "Continue" on the run's own config; omitted hides the button. */
@@ -139,6 +142,14 @@ export const RunTimeline = memo(function RunTimeline({
                 icon={<Icons.retry aria-hidden />}
                 data-testid="run-rerun"
                 onClick={() => onRerun(run)}
+              />
+            )}
+            {onFork && run.status === "done" && (
+              <MessageAction
+                label="Fork from here"
+                icon={<Icons.fork aria-hidden />}
+                data-testid="run-fork"
+                onClick={() => onFork(run)}
               />
             )}
           </MessageActions>

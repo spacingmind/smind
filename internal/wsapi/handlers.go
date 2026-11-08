@@ -75,8 +75,9 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"workspace.defaultBase":    handleWorkspaceDefaultBase(wm),
 		"workspace.setDefaultBase": handleWorkspaceSetDefaultBase(wm),
 		"chat.create":              handleChatCreate(wm),
-		"chat.list":                handleChatList(wm),
-		"chat.get":                 handleChatGet(wm),
+		"chat.list":                handleChatList(wm, db),
+		"chat.get":                 handleChatGet(wm, db),
+		"chat.fork":                handleChatFork(wm, reg, db),
 		"chat.rename":              handleChatRename(wm),
 		"chat.archive":             handleChatArchive(wm, reg),
 		"chat.queueList":           handleChatQueueList(reg),
@@ -1089,7 +1090,7 @@ func handleChatCreate(wm *workspace.Manager) handlerFunc {
 // handleChatList returns taskId's chats, ordered by id (its default chat
 // first). includeArchived is optional, defaulting to false (the active
 // working set, matching task.list's own archived-tasks-excluded default).
-func handleChatList(wm *workspace.Manager) handlerFunc {
+func handleChatList(wm *workspace.Manager, db *store.Store) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			TaskID          int64 `json:"taskId"`
@@ -1102,12 +1103,16 @@ func handleChatList(wm *workspace.Manager) handlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("chat.list: %w", err)
 		}
-		return chats, nil
+		views, err := chatViewsOf(db, p.TaskID, chats)
+		if err != nil {
+			return nil, fmt.Errorf("chat.list: %w", err)
+		}
+		return views, nil
 	}
 }
 
 // handleChatGet returns the chat with the given id.
-func handleChatGet(wm *workspace.Manager) handlerFunc {
+func handleChatGet(wm *workspace.Manager, db *store.Store) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			ID int64 `json:"id"`
@@ -1119,7 +1124,7 @@ func handleChatGet(wm *workspace.Manager) handlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("chat.get: %w", err)
 		}
-		return c, nil
+		return chatViewOf(db, c), nil
 	}
 }
 

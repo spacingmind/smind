@@ -1151,6 +1151,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 					// a cancelled turn forget the totals the next turn subtracts.
 					handle, _ := r.sessionStore.Get(chatID)
 					handle.Provider, handle.SessionID = provider, w.SessionID
+					handle.Fork = nil // the fork (if any) happened: this is the child's own session now
 					r.sessionStore.Set(chatID, handle)
 				}
 				// The CLI tolerates a failing MCP server and runs on
@@ -1181,7 +1182,11 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		}
 		return fmt.Errorf("taskrunner: claude code prompt: %w", scrubError(err, r.providerSecretValues(provider)))
 	}
-	r.sessionStore.Set(chatID, SessionHandle{Provider: provider, SessionID: result.SessionID, UsageTotals: claudeTotalsOf(result)})
+	totals := claudeTotalsOf(result)
+	r.sessionStore.Set(chatID, SessionHandle{Provider: provider, SessionID: result.SessionID, UsageTotals: totals})
+	if tl, ok := r.sessionStore.(TotalsLogger); ok {
+		tl.LogClaudeTotals(chatID, totals)
+	}
 	r.sendUsage(ctx, events, claudeTurnUsage(result, baseline))
 
 	select {
@@ -1256,6 +1261,11 @@ func (r *Runner) newClaudeClientWithResume(ctx context.Context, provider Provide
 	}
 
 	resumeOpts := append(append([]claudecode.Option{}, opts...), claudecode.WithResume(handle.SessionID))
+	if handle.Fork != nil && ValidForkEntry(handle.Fork.EntryUUID) {
+		// A pending fork (ADR-0057): copy the parent's session up to the anchor
+		// entry into a new session instead of continuing the parent's.
+		resumeOpts = append(resumeOpts, claudecode.WithForkSession(), claudecode.WithResumeSessionAt(handle.Fork.EntryUUID))
+	}
 	client, err = r.newClaudeClient(worktreePath, resumeOpts...)
 	if err == nil {
 		return client, true, nil

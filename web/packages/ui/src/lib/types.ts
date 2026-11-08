@@ -159,6 +159,21 @@ export interface Chat {
   AgentSession: string | null;
   CreatedAt: string;
   ArchivedAt: string | null;
+  /**
+   * Present only on a forked chat (chat.fork's own return, chat.list/get and
+   * the chat.created/updated events carry it too). `mode` is how the daemon
+   * made the fork: "native" (the agent session itself branched, full memory)
+   * or "seeded" (a summary seed, `lossy`). `kind` is the daemon's own
+   * discriminator (e.g. "fork"); `lossy` marks that earlier tool calls and
+   * reasoning did not survive.
+   */
+  fork?: {
+    parentChatId: number;
+    forkedAtRunId: string;
+    kind: string;
+    mode: "native" | "seeded";
+    lossy: boolean;
+  };
 }
 
 // One of a provider's own permission modes (internal/taskrunner.ModeInfo,
