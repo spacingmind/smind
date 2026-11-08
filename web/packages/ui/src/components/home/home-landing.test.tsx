@@ -38,7 +38,7 @@ const PROVIDERS: ProviderInfo[] = [
 
 function fakeClient() {
   const task = { ID: 42, WorkspaceID: 2, Title: "Fix the bug" } as Task;
-  const call = vi.fn(async (method: string, _params?: unknown) => {
+  const call = vi.fn<(method: string, _params?: unknown) => Promise<unknown>>(async (method: string) => {
     if (method === "provider.list") return { providers: PROVIDERS };
     if (method === "profile.list" || method === "run.list") return [];
     return task;
