@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -282,4 +283,55 @@ func TestProxy_SilentAfterHeadersIsCutByIdleTimeout(t *testing.T) {
 	if d := time.Since(start); d > 3*time.Second {
 		t.Fatalf("cut after %v, want about the 150 ms idle bound", d)
 	}
+}
+
+// The OpenAI path and count_tokens go through the same serve: a long stream on
+// the OpenAI handler survives a client Timeout shorter than the stream.
+func TestProxy_OpenAILongStreamOutlastsClientTimeout(t *testing.T) {
+	t.Parallel()
+	var n atomic.Int32
+	up := sseUpstream(t, &n, func(w http.ResponseWriter, r *http.Request) {
+		streamHeaders(w)
+		for i := 0; i < 12; i++ {
+			_, _ = w.Write([]byte("data: x\n\n"))
+			w.(http.Flusher).Flush()
+			time.Sleep(50 * time.Millisecond)
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	})
+	p, reg := newTestProxy(t, withOpenAIHTTPClient(productionLikeClient(t, up, 200*time.Millisecond)))
+	addAPIKeyAccount(t, reg, providerOpenAI, "o1", "sk-real")
+	srv := httptest.NewServer(http.HandlerFunc(p.handleOpenAI))
+	defer srv.Close()
+	resp, err := failFast.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"stream":true,"model":"gpt-x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || !strings.HasSuffix(string(body), "data: [DONE]\n\n") {
+		t.Fatalf("openai stream cut: %d bytes, err = %v", len(body), err)
+	}
+	if got := n.Load(); got != 1 {
+		t.Fatalf("upstream requests = %d, want 1", got)
+	}
+}
+
+// A read cut by the watch reports the timeout, not a bare "context canceled".
+func TestWatchedBody_ReadReportsTheTimeoutCause(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	w := newUpstreamWatch(cancel, 20*time.Millisecond)
+	body := &watchedBody{ReadCloser: io.NopCloser(&failingReader{ctx: ctx}), watch: w, ctx: ctx, idle: time.Minute}
+	defer body.Close()
+	if _, err := body.Read(make([]byte, 4)); !errors.Is(err, errUpstreamTimeout) {
+		t.Fatalf("err = %v, want errUpstreamTimeout", err)
+	}
+}
+
+type failingReader struct{ ctx context.Context }
+
+func (r *failingReader) Read([]byte) (int, error) {
+	<-r.ctx.Done()
+	return 0, context.Canceled
 }

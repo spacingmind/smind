@@ -106,26 +106,38 @@ func newUpstreamWatch(cancel context.CancelCauseFunc, d time.Duration) *upstream
 	return &upstreamWatch{timer: time.AfterFunc(d, func() { cancel(errUpstreamTimeout) }), cancel: cancel}
 }
 
+// rearm moves the bound to d from now.
+func (u *upstreamWatch) rearm(d time.Duration) { u.timer.Reset(d) }
+
+// release stops the bound and frees the request context.
+func (u *upstreamWatch) release() {
+	u.timer.Stop()
+	u.cancel(context.Canceled)
+}
+
 // watchedBody wraps an upstream response body: with idle > 0 every chunk read
 // re-arms the watch for idle; Close releases the timer and the request context.
 type watchedBody struct {
 	io.ReadCloser
-	w    *upstreamWatch
-	idle time.Duration
+	watch *upstreamWatch
+	ctx   context.Context // the watched request's context, for the timeout cause
+	idle  time.Duration
 }
 
 func (b *watchedBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	if n > 0 && b.idle > 0 {
-		b.w.timer.Reset(b.idle)
+		b.watch.rearm(b.idle)
+	}
+	if err != nil && errors.Is(context.Cause(b.ctx), errUpstreamTimeout) {
+		err = errUpstreamTimeout // not a bare "context canceled" in the log
 	}
 	return n, err
 }
 
 func (b *watchedBody) Close() error {
-	b.w.timer.Stop()
 	err := b.ReadCloser.Close()
-	b.w.cancel(context.Canceled)
+	b.watch.release()
 	return err
 }
 
@@ -376,13 +388,13 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 	upstreamClient.Timeout = 0
 	upCtx, upCancel := context.WithCancelCause(ctx)
 	watch := newUpstreamWatch(upCancel, p.timeouts.header)
+	upstreamStart := time.Now()
 	resp, err := upstreamClient.Do(outReq.WithContext(upCtx))
 	if err != nil {
-		watch.timer.Stop()
 		if errors.Is(context.Cause(upCtx), errUpstreamTimeout) {
 			err = errUpstreamTimeout
 		}
-		upCancel(context.Canceled)
+		watch.release()
 		row.Status = http.StatusBadGateway
 		row.Outcome = store.RequestLogOutcomeUpstreamError
 		row.Error = truncatedError(fmt.Errorf("upstream request: %w", err))
@@ -392,11 +404,12 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		return
 	}
 	if isEventStream(resp.Header) {
-		watch.timer.Reset(p.timeouts.streamIdle)
-		resp.Body = &watchedBody{ReadCloser: resp.Body, w: watch, idle: p.timeouts.streamIdle}
+		watch.rearm(p.timeouts.streamIdle)
+		resp.Body = &watchedBody{ReadCloser: resp.Body, watch: watch, ctx: upCtx, idle: p.timeouts.streamIdle}
 	} else {
-		watch.timer.Reset(max(p.timeouts.total-time.Since(start), 0))
-		resp.Body = &watchedBody{ReadCloser: resp.Body, w: watch}
+		// the whole call, as the client's overall Timeout was: from the request
+		watch.rearm(max(p.timeouts.total-time.Since(upstreamStart), 0))
+		resp.Body = &watchedBody{ReadCloser: resp.Body, watch: watch, ctx: upCtx}
 	}
 	defer resp.Body.Close()
 
