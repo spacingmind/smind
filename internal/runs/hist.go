@@ -102,6 +102,23 @@ func eventBytes(e Event) int64 {
 	for _, m := range e.McpServers {
 		n += 64 + int64(len(m.Name)+len(m.Transport)+len(m.Status)+len(m.Reason))
 	}
+	if q := e.Question; q != nil {
+		n += 128 + int64(len(q.RequestID))
+		if q.Request != nil {
+			for _, qq := range q.Request.Questions {
+				n += 64 + int64(len(qq.Text)+len(qq.Header))
+				for _, o := range qq.Options {
+					n += 32 + int64(len(o.Label)+len(o.Description))
+				}
+			}
+		}
+		if q.Answer != nil {
+			for _, it := range q.Answer.Answers {
+				n += 32 + int64(len(it.Text))
+			}
+			n += int64(len(q.Answer.Note))
+		}
+	}
 	return n
 }
 

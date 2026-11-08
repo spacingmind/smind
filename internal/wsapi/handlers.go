@@ -75,8 +75,9 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"workspace.defaultBase":    handleWorkspaceDefaultBase(wm),
 		"workspace.setDefaultBase": handleWorkspaceSetDefaultBase(wm),
 		"chat.create":              handleChatCreate(wm),
-		"chat.list":                handleChatList(wm),
-		"chat.get":                 handleChatGet(wm),
+		"chat.list":                handleChatList(wm, db),
+		"chat.get":                 handleChatGet(wm, db),
+		"chat.fork":                handleChatFork(wm, reg, db),
 		"chat.rename":              handleChatRename(wm),
 		"chat.archive":             handleChatArchive(wm, reg),
 		"chat.queueList":           handleChatQueueList(reg),
@@ -89,6 +90,8 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"run.logs":                 handleRunLogs(reg),
 		"run.stop":                 handleRunStop(reg),
 		"run.respondPermission":    handleRunRespondPermission(reg),
+		"run.answerQuestion":       handleRunAnswerQuestion(reg),
+		"run.pendingQuestions":     handleRunPendingQuestions(reg),
 		"run.setPermissionMode":    handleRunSetPermissionMode(reg),
 		"run.listConfigOptions":    handleRunListConfigOptions(reg),
 		"run.setConfigOption":      handleRunSetConfigOption(reg),
@@ -1087,7 +1090,7 @@ func handleChatCreate(wm *workspace.Manager) handlerFunc {
 // handleChatList returns taskId's chats, ordered by id (its default chat
 // first). includeArchived is optional, defaulting to false (the active
 // working set, matching task.list's own archived-tasks-excluded default).
-func handleChatList(wm *workspace.Manager) handlerFunc {
+func handleChatList(wm *workspace.Manager, db *store.Store) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			TaskID          int64 `json:"taskId"`
@@ -1100,12 +1103,16 @@ func handleChatList(wm *workspace.Manager) handlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("chat.list: %w", err)
 		}
-		return chats, nil
+		views, err := chatViewsOf(db, p.TaskID, chats)
+		if err != nil {
+			return nil, fmt.Errorf("chat.list: %w", err)
+		}
+		return views, nil
 	}
 }
 
 // handleChatGet returns the chat with the given id.
-func handleChatGet(wm *workspace.Manager) handlerFunc {
+func handleChatGet(wm *workspace.Manager, db *store.Store) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			ID int64 `json:"id"`
@@ -1117,7 +1124,7 @@ func handleChatGet(wm *workspace.Manager) handlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("chat.get: %w", err)
 		}
-		return c, nil
+		return chatViewOf(db, c), nil
 	}
 }
 
@@ -1784,6 +1791,14 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 					Options:   toPermissionOptionParams(e.PermissionOptions),
 					Detail:    e.PermissionDetail,
 				})
+			case taskrunner.EventTypeQuestionRequest:
+				if e.Question != nil && e.Question.Request != nil {
+					rc.Emit("question_request", questionRequestParams{RequestID: e.Question.RequestID, Request: *e.Question.Request})
+				}
+			case taskrunner.EventTypeQuestionResolved:
+				if e.Question != nil {
+					rc.Emit("question_resolved", questionResolvedParams{RequestID: e.Question.RequestID, Reason: string(e.Question.Resolution), Answer: e.Question.Answer})
+				}
 			case taskrunner.EventTypePermissionResolved:
 				rc.Emit("permission_resolved", permissionResolvedParams{
 					RequestID: e.PermissionRequestID,
@@ -1834,6 +1849,20 @@ type runMcpServersParams struct {
 	McpServers []taskrunner.McpServerState `json:"mcpServers"`
 }
 
+// questionRequestParams / questionResolvedParams are the params payloads of
+// the "question_request" / "question_resolved" events task.prompt and
+// run.attach emit (ADR-0055). Answer is present only for a human answer.
+type questionRequestParams struct {
+	RequestID string                     `json:"requestId"`
+	Request   taskrunner.QuestionRequest `json:"request"`
+}
+
+type questionResolvedParams struct {
+	RequestID string                     `json:"requestId"`
+	Reason    string                     `json:"reason"`
+	Answer    *taskrunner.QuestionAnswer `json:"answer,omitempty"`
+}
+
 // runLogEvent is the wire shape of one event in a run.logs response --
 // the same fields task.prompt/run.attach's streamed events and terminal
 // results carry, just batched instead of streamed. Type is "chunk",
@@ -1844,12 +1873,16 @@ type runMcpServersParams struct {
 // Result) are additive, added by
 // docs/decisions/0008-structured-run-events.md.
 type runLogEvent struct {
-	Type       string                   `json:"type"`
-	Text       string                   `json:"text,omitempty"`
-	StopReason string                   `json:"stopReason,omitempty"`
-	RequestID  string                   `json:"requestId,omitempty"`
-	Summary    string                   `json:"summary,omitempty"`
-	Options    []permissionOptionParams `json:"options,omitempty"`
+	Type string `json:"type"`
+	// Question and QuestionAnswer are populated for "question_request" /
+	// "question_resolved" entries (ADR-0055).
+	Question       *taskrunner.QuestionRequest `json:"question,omitempty"`
+	QuestionAnswer *taskrunner.QuestionAnswer  `json:"questionAnswer,omitempty"`
+	Text           string                      `json:"text,omitempty"`
+	StopReason     string                      `json:"stopReason,omitempty"`
+	RequestID      string                      `json:"requestId,omitempty"`
+	Summary        string                      `json:"summary,omitempty"`
+	Options        []permissionOptionParams    `json:"options,omitempty"`
 	// Detail is populated for a "permission_request" entry that has one.
 	Detail   *taskrunner.PermissionDetail `json:"detail,omitempty"`
 	OptionID string                       `json:"optionId,omitempty"`
@@ -1929,6 +1962,16 @@ func toRunLogEvent(el *taskrunner.ToolCallElider, e taskrunner.Event) runLogEven
 			Options:   toPermissionOptionParams(e.PermissionOptions),
 			Detail:    e.PermissionDetail,
 		}
+	case taskrunner.EventTypeQuestionRequest:
+		if e.Question == nil || e.Question.Request == nil {
+			return runLogEvent{Type: "chunk"}
+		}
+		return runLogEvent{Type: "question_request", RequestID: e.Question.RequestID, Question: e.Question.Request}
+	case taskrunner.EventTypeQuestionResolved:
+		if e.Question == nil {
+			return runLogEvent{Type: "chunk"}
+		}
+		return runLogEvent{Type: "question_resolved", RequestID: e.Question.RequestID, Reason: string(e.Question.Resolution), QuestionAnswer: e.Question.Answer}
 	case taskrunner.EventTypePermissionResolved:
 		return runLogEvent{
 			Type:      "permission_resolved",
@@ -2147,6 +2190,65 @@ func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
 		return struct {
 			ReasonDelivered bool `json:"reasonDelivered"`
 		}{delivered}, nil
+	}
+}
+
+// handleRunAnswerQuestion answers a pending agent question (ADR-0055): the
+// human's answers, or a decline with an optional note. Like
+// run.respondPermission it is human-only: no MCP tool and no plugin session
+// can reach it, and the answer is validated against the question before the
+// parked agent call wakes.
+func handleRunAnswerQuestion(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			RunID     string                          `json:"runId"`
+			RequestID string                          `json:"requestId"`
+			Action    string                          `json:"action"`
+			Answers   []taskrunner.QuestionAnswerItem `json:"answers"`
+			Note      string                          `json:"note"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("run.answerQuestion: invalid params: %w", err)
+		}
+		ans := taskrunner.QuestionAnswer{Action: p.Action, Answers: p.Answers, Note: p.Note}
+		if err := reg.RespondQuestion(p.RunID, p.RequestID, ans); err != nil {
+			return nil, fmt.Errorf("run.answerQuestion: %w", err)
+		}
+		return struct{}{}, nil
+	}
+}
+
+// questionPendingEntry is one row of run.pendingQuestions.
+type questionPendingEntry struct {
+	RunID     string                     `json:"runId"`
+	TaskID    int64                      `json:"taskId"`
+	ChatID    int64                      `json:"chatId"`
+	RequestID string                     `json:"requestId"`
+	Request   taskrunner.QuestionRequest `json:"request"`
+}
+
+// handleRunPendingQuestions lists the questions live runs are waiting on
+// (read only), optionally for one run.
+func handleRunPendingQuestions(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			RunID string `json:"runId"`
+		}
+		if len(raw) > 0 && string(raw) != "null" {
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, fmt.Errorf("run.pendingQuestions: invalid params: %w", err)
+			}
+		}
+		out := []questionPendingEntry{}
+		for _, q := range reg.PendingQuestions() {
+			if p.RunID != "" && q.RunID != p.RunID {
+				continue
+			}
+			out = append(out, questionPendingEntry{RunID: q.RunID, TaskID: q.TaskID, ChatID: q.ChatID, RequestID: q.RequestID, Request: q.Request})
+		}
+		return struct {
+			Questions []questionPendingEntry `json:"questions"`
+		}{Questions: out}, nil
 	}
 }
 
@@ -2597,6 +2699,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			Notes                string          `json:"notes"`
 			OnRateLimit          string          `json:"onRateLimit"`
 			FallbackProfileID    *int64          `json:"fallbackProfileId"`
+			Questions            string          `json:"questions"`
 			OrchestrationTools   *bool           `json:"orchestrationTools"`
 			Instructions         string          `json:"instructions"`
 			Skills               []string        `json:"skills"`
@@ -2619,6 +2722,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			Notes:              p.Notes,
 			OnRateLimit:        p.OnRateLimit,
 			FallbackProfileID:  p.FallbackProfileID,
+			Questions:          p.Questions,
 			OrchestrationTools: p.OrchestrationTools,
 			Instructions:       p.Instructions,
 			Skills:             p.Skills,
@@ -2665,6 +2769,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			Notes                string          `json:"notes"`
 			OnRateLimit          string          `json:"onRateLimit"`
 			FallbackProfileID    *int64          `json:"fallbackProfileId"`
+			Questions            string          `json:"questions"`
 			OrchestrationTools   *bool           `json:"orchestrationTools"`
 			Instructions         string          `json:"instructions"`
 			Skills               []string        `json:"skills"`
@@ -2688,6 +2793,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			Notes:              p.Notes,
 			OnRateLimit:        p.OnRateLimit,
 			FallbackProfileID:  p.FallbackProfileID,
+			Questions:          p.Questions,
 			OrchestrationTools: p.OrchestrationTools,
 			Instructions:       p.Instructions,
 			Skills:             p.Skills,

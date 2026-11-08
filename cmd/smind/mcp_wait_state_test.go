@@ -170,6 +170,80 @@ func TestTaskWait_IgnoredPermissionDoesNotReportWaiting(t *testing.T) {
 	}
 }
 
+// questionRunLogs is a run.logs payload with one pending question, so the
+// waiting_question tests also pin the wire decode of the `question` field.
+var questionRunLogs = `{"runId":"r1","status":"running","events":[` +
+	`{"type":"question_request","requestId":"qr1","question":{"source":"claude",` +
+	`"questions":[{"id":"q1","text":"Which provider should this run use?"},` +
+	`{"id":"q2","text":"` + strings.Repeat("x", 300) + `"}]}}]}`
+
+func TestBuildTaskWaitOutput_WaitingQuestion(t *testing.T) {
+	var result runLogsResult
+	if err := json.Unmarshal([]byte(questionRunLogs), &result); err != nil {
+		t.Fatal(err)
+	}
+	out := buildTaskWaitOutput(result, nil, false)
+	if out.State != "waiting_question" {
+		t.Fatalf("state = %q, want waiting_question", out.State)
+	}
+	if len(out.PendingQuestions) != 1 || out.PendingQuestions[0].RequestID != "qr1" {
+		t.Fatalf("pendingQuestions = %+v, want exactly qr1", out.PendingQuestions)
+	}
+	qs := out.PendingQuestions[0].Questions
+	if len(qs) != 2 || qs[0] != "Which provider should this run use?" {
+		t.Fatalf("questions = %+v, want both texts", qs)
+	}
+	if len([]rune(qs[1])) > 200 {
+		t.Fatalf("question text = %d runes, at most 200", len([]rune(qs[1])))
+	}
+	if out.PendingPermission != nil {
+		t.Fatalf("pendingPermission = %+v, want none", out.PendingPermission)
+	}
+	for _, want := range []string{"HUMAN", "smind task answer", "You cannot answer it", "NOT completion"} {
+		if !strings.Contains(out.Message, want) {
+			t.Errorf("message %q missing %q", out.Message, want)
+		}
+	}
+}
+
+func TestBuildTaskWaitOutput_AnsweredQuestionIsNotPending(t *testing.T) {
+	answered := runLogsResult{RunID: "r1", Status: "running", Events: []runLogEvent{
+		{Type: "question_request", RequestID: "qr1", Question: &questionRequest{Questions: []questionItem{{ID: "q1", Text: "Proceed?"}}}},
+		{Type: "question_resolved", RequestID: "qr1", Reason: "human"},
+	}}
+	if out := buildTaskWaitOutput(answered, nil, false); out.State != "running" || len(out.PendingQuestions) != 0 || out.Message != "" {
+		t.Fatalf("answered question: %+v, want running with no pending", out)
+	}
+	// A terminal run never waits on a question its stop left unresolved.
+	stale := runLogsResult{RunID: "r1", Status: "stopped", Events: answered.Events[:1]}
+	if out := buildTaskWaitOutput(stale, nil, false); out.State != "stopped" || len(out.PendingQuestions) != 0 {
+		t.Fatalf("stopped run with stale question: %+v, want stopped", out)
+	}
+}
+
+func TestBuildTaskWaitOutput_QuestionIgnoredByID(t *testing.T) {
+	result := runLogsResult{RunID: "r1", Status: "running", Events: []runLogEvent{
+		{Type: "question_request", RequestID: "qr1", Question: &questionRequest{Questions: []questionItem{{ID: "q1", Text: "Proceed?"}}}},
+	}}
+	if out := buildTaskWaitOutput(result, map[string]bool{"qr1": true}, false); out.State != "running" || len(out.PendingQuestions) != 0 {
+		t.Fatalf("ignored question: %+v, want running with no pending", out)
+	}
+	if out := buildTaskWaitOutput(result, map[string]bool{"other": true}, false); out.State != "waiting_question" || len(out.PendingQuestions) != 1 {
+		t.Fatalf("fresh question: %+v, want waiting_question", out)
+	}
+}
+
+func TestBuildTaskWaitOutput_PermissionWinsOverQuestion(t *testing.T) {
+	result := runLogsResult{RunID: "r1", Status: "running", Events: []runLogEvent{
+		{Type: "question_request", RequestID: "qr1", Question: &questionRequest{Questions: []questionItem{{ID: "q1", Text: "Proceed?"}}}},
+		{Type: "permission_request", RequestID: "pr1", Summary: "Write file x", Options: []permissionOptionParams{{ID: "a", Kind: "allow_once"}}},
+	}}
+	out := buildTaskWaitOutput(result, nil, false)
+	if out.State != "waiting_permission" || out.PendingPermission == nil || out.PendingPermission.RequestID != "pr1" {
+		t.Fatalf("both pending: %+v, want waiting_permission to win", out)
+	}
+}
+
 // runLogsWithFallback is a run.logs payload for a rate-limited run whose
 // profile names profile 7 as the fallback.
 const runLogsWithFallback = `{"runId":"r1","status":"error","err":"429 usage limit","fallbackProfileId":7,"events":[]}`

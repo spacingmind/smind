@@ -13,8 +13,8 @@ import type { PendingPermission } from "@/hooks/use-run-timeline";
  * The default permission variant: a summary and one button per option,
  * styled by kind (Item 11 -- destructive/deny reads as deny, the
  * recommended action reads as primary). What every plain
- * allow/deny-shaped request renders as, and what the question-form/
- * plan-review variants fall back to if their own shape is incomplete.
+ * allow/deny-shaped request renders as, and what the plan-review
+ * variant falls back to if its own shape is incomplete.
  */
 export function OptionsCard({
   runId,

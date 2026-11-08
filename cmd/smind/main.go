@@ -213,6 +213,7 @@ Usage:
   smind task runs <taskId> [--chat <chatId>]              list a task's runs, optionally per chat
   smind task chat ls <taskId> [--all]                     list a task's chats (ID, title, provider, archived)
   smind task chat new <taskId> [title]                    create a chat
+  smind task chat fork <chatId> --at <runId> [--seeded]    fork a chat at a finished turn
   smind task chat rename <chatId> <title>                 rename a chat
   smind task chat archive <chatId>                        archive a chat
   smind task mode <runId> [--auto-accept on|off] [<mode>]  change a live run's permission mode or auto-accept (humans only)

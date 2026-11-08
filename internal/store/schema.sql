@@ -160,6 +160,32 @@ CREATE TABLE IF NOT EXISTS runs (
     excerpts_pruned_at TIMESTAMP
 );
 
+-- ADR-0057: a chat forked from a finished turn of another chat of the same
+-- task. A side table, so no existing query over chats changes. mode is
+-- 'native' (the provider forked its own session) or 'seeded' (a fresh session
+-- whose first prompt carries seed); seed_used_at is set when the seed was
+-- delivered, so it is prepended once.
+CREATE TABLE IF NOT EXISTS chat_forks (
+    chat_id INTEGER PRIMARY KEY REFERENCES chats(id),
+    parent_chat_id INTEGER NOT NULL REFERENCES chats(id),
+    forked_at_run_id TEXT NOT NULL,
+    fork_kind TEXT NOT NULL DEFAULT 'fork',
+    mode TEXT NOT NULL DEFAULT 'native',
+    seed TEXT NOT NULL DEFAULT '',
+    seed_used_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL
+);
+
+-- ADR-0057: the claude-native session's cumulative usage totals as of the end
+-- of each turn, so a fork can start its first turn's usage from the totals at
+-- the anchor instead of the whole inherited conversation.
+CREATE TABLE IF NOT EXISTS chat_claude_totals (
+    chat_id INTEGER NOT NULL REFERENCES chats(id),
+    at TIMESTAMP NOT NULL,
+    totals_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_claude_totals ON chat_claude_totals(chat_id, at);
+
 CREATE TABLE IF NOT EXISTS run_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL REFERENCES runs(id),
@@ -220,7 +246,11 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     child_policy TEXT NOT NULL DEFAULT '',
     child_profile_ids TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    -- ADR-0055 (last, so a fresh install and a migrated one share column order):
+    -- what a run does with an agent's question to the human:
+    -- 'ask' | 'decline' | 'disabled'.
+    questions TEXT NOT NULL DEFAULT 'ask'
 );
 
 CREATE TABLE IF NOT EXISTS mcp_servers (

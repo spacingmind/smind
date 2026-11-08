@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 
 import { OptionsCard } from "@/components/permission/options-card";
 import { PlanReviewCard } from "@/components/permission/plan-review-card";
-import { QuestionFormCard } from "@/components/permission/question-form-card";
 import type { PendingPermission } from "@/hooks/use-run-timeline";
 
 /** True when the currently focused element is a text input the user could be mid-keystroke in -- the composer's textarea, chiefly. */
@@ -13,14 +12,10 @@ function isTextEntryFocused(): boolean {
 }
 
 /**
- * Dispatches one pending permission request to its variant, by shape:
- * `plan` wins over `questions` (a plan review that also carried a
- * question list would be a plan review with extra baggage, not the
- * reverse), then `questions`, else the plain per-option card every
- * request renders as today. A shape that's present but empty (e.g.
- * `questions: []`) falls through rather than rendering a variant with
- * nothing in it -- "a request with no recognised kind still renders
- * every option" (Item 11's own scenario) is this fallthrough.
+ * Dispatches one pending permission request to its variant, by shape: a
+ * `plan` payload renders the plan-review card, everything else the plain
+ * per-option card. (Agent questions are a separate wire surface with
+ * their own card -- see question-card.tsx, ADR-0055.)
  *
  * Wrapped in a focusable, labelled group (Item 11's keyboard scenario):
  * `tabIndex={-1}` plus a programmatic focus once per requestId is what
@@ -74,8 +69,6 @@ export function PermissionCard({
       </span>
       {pending.plan ? (
         <PlanReviewCard runId={runId} pending={{ ...pending, plan: pending.plan }} onRespond={onRespond} onChat={onChat} />
-      ) : pending.questions && pending.questions.length > 0 ? (
-        <QuestionFormCard runId={runId} pending={{ ...pending, questions: pending.questions }} onRespond={onRespond} />
       ) : (
         <OptionsCard runId={runId} pending={pending} onRespond={onRespond} />
       )}

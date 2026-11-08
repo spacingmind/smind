@@ -90,7 +90,7 @@ var pluginNeverPrefixes = []string{
 }
 
 var pluginNeverMethods = []string{
-	"run.respondPermission", "run.setPermissionMode", "run.setConfigOption", "run.start", "run.stop",
+	"run.respondPermission", "run.answerQuestion", "run.pendingQuestions", "run.setPermissionMode", "run.setConfigOption", "run.start", "run.stop",
 	"run.attach", "run.attachment", "run.logs", "run.listConfigOptions",
 	"session.identify", "daemon.setPassword", "set-password",
 	"mcp.create", "mcp.update", "mcp.delete", "mcp.setEnabled",

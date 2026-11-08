@@ -328,5 +328,58 @@ describe("buildTimeline plan items", () => {
   });
 });
 
+describe("buildTimeline question items (ADR-0055)", () => {
+  const request = (requestId: string) =>
+    ({
+      type: "question_request",
+      requestId,
+      question: {
+        source: "agent",
+        questions: [
+          { id: "q1", text: "Which environment should I deploy to?", kind: "single", options: [{ id: "prod", label: "Prod" }] },
+          { id: "q2", text: "Anything else?", kind: "text" },
+        ],
+      },
+    }) as RunLogEvent;
+
+  it("a resolved request becomes one question item carrying the summary and the human answer", () => {
+    const items = buildTimeline([
+      request("q-req-1"),
+      { type: "chunk", text: "working…" } as RunLogEvent,
+      {
+        type: "question_resolved",
+        requestId: "q-req-1",
+        reason: "human",
+        questionAnswer: { action: "answer", answers: [{ questionId: "q1", optionIds: ["prod"] }, { questionId: "q2", text: "no" }] },
+      } as RunLogEvent,
+    ]);
+
+    expect(items).toHaveLength(2);
+    expect(items[1]).toEqual({
+      kind: "question",
+      id: "question-1",
+      requestId: "q-req-1",
+      reason: "human",
+      summary: "Agent asked: Which environment should I deploy to?",
+      answers: { action: "answer", answers: [{ questionId: "q1", optionIds: ["prod"] }, { questionId: "q2", text: "no" }] },
+    });
+  });
+
+  it("an unresolved request alone renders no row, and a resolution never seen request-side falls back to a bare summary", () => {
+    expect(buildTimeline([request("q-req-1")])).toEqual([]);
+    const items = buildTimeline([{ type: "question_resolved", requestId: "q-req-x", reason: "declined" } as RunLogEvent]);
+    expect(items).toEqual([{ kind: "question", id: "question-0", requestId: "q-req-x", reason: "declined", summary: "Agent asked a question" }]);
+  });
+
+  it("caps the summary's question text at 120 chars", () => {
+    const long = "x".repeat(130);
+    const items = buildTimeline([
+      { type: "question_request", requestId: "q-req-1", question: { source: "agent", questions: [{ id: "q1", text: long, kind: "text" }] } } as RunLogEvent,
+      { type: "question_resolved", requestId: "q-req-1", reason: "run_ended" } as RunLogEvent,
+    ]);
+    expect((items[0] as { summary: string }).summary).toBe(`Agent asked: ${"x".repeat(120)}…`);
+  });
+});
+
 // Referenced so vi stays imported even if unused in some configurations.
 void vi;

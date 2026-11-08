@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -25,6 +26,35 @@ func (m *Manager) CreateChat(taskID int64, title string) (store.Chat, error) {
 	c, err := m.store.CreateChat(taskID, title)
 	if err != nil {
 		return store.Chat{}, fmt.Errorf("create chat: %w", err)
+	}
+	if n := m.getNotifier(); n != nil {
+		n.NotifyChatCreated(c)
+	}
+	return c, nil
+}
+
+// CreateChatThen creates a chat of taskID, runs setup on it, and only then
+// announces it, so a client that reacts to the announcement already sees what
+// setup wrote (a fork's record, its session). If setup fails the chat is
+// archived and the error returned: no announcement.
+func (m *Manager) CreateChatThen(taskID int64, title string, setup func(store.Chat) error) (store.Chat, error) {
+	if _, err := m.store.GetTask(taskID); err != nil {
+		return store.Chat{}, fmt.Errorf("create chat: %w", err)
+	}
+	c, err := m.store.CreateChat(taskID, title)
+	if err != nil {
+		return store.Chat{}, fmt.Errorf("create chat: %w", err)
+	}
+	if setup != nil {
+		if err := setup(c); err != nil {
+			if _, aerr := m.store.ArchiveChat(c.ID); aerr != nil {
+				log.Printf("workspace: archive half-created chat %d: %v", c.ID, aerr)
+			}
+			return store.Chat{}, err
+		}
+	}
+	if c2, err := m.store.GetChat(c.ID); err == nil {
+		c = c2
 	}
 	if n := m.getNotifier(); n != nil {
 		n.NotifyChatCreated(c)

@@ -642,14 +642,14 @@ func (b busWorkspaceNotifier) NotifyChatCreated(c store.Chat) {
 	if isSystemTask(b.db, c.TaskID) {
 		return
 	}
-	b.bus.Publish(Event{Topic: TopicChatCreated, Payload: chatCreatedPayload{Chat: c}})
+	b.bus.Publish(Event{Topic: TopicChatCreated, Payload: chatCreatedPayload{Chat: chatViewOf(b.db, c)}})
 }
 
 func (b busWorkspaceNotifier) NotifyChatUpdated(c store.Chat) {
 	if isSystemTask(b.db, c.TaskID) {
 		return
 	}
-	b.bus.Publish(Event{Topic: TopicChatUpdated, Payload: chatUpdatedPayload{Chat: c}})
+	b.bus.Publish(Event{Topic: TopicChatUpdated, Payload: chatUpdatedPayload{Chat: chatViewOf(b.db, c)}})
 }
 
 func (b busWorkspaceNotifier) NotifyChatArchived(c store.Chat) {
@@ -780,6 +780,24 @@ func (b busRunNotifier) NotifyPermissionResolved(runID string, taskID, chatID in
 	}
 	b.bus.Publish(Event{Topic: TopicPermissionResolved, Payload: permissionResolvedPayload{
 		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, OptionID: optionID, Reason: reason,
+	}})
+}
+
+func (b busRunNotifier) NotifyQuestionPending(runID string, taskID, chatID int64, requestID string, req taskrunner.QuestionRequest) {
+	if isSystemTask(b.db, taskID) {
+		return
+	}
+	b.bus.Publish(Event{Topic: TopicQuestionPending, Payload: questionPendingPayload{
+		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, Request: req,
+	}})
+}
+
+func (b busRunNotifier) NotifyQuestionResolved(runID string, taskID, chatID int64, requestID, reason string) {
+	if isSystemTask(b.db, taskID) {
+		return
+	}
+	b.bus.Publish(Event{Topic: TopicQuestionResolved, Payload: questionResolvedPayload{
+		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, Reason: reason,
 	}})
 }
 

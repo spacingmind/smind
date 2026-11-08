@@ -65,6 +65,7 @@ import {
   FolderTree,
   Gauge,
   GitBranch,
+  GitBranchPlus,
   GitFork,
   GitCommitHorizontal,
   GitCompare,
@@ -232,6 +233,8 @@ export const Icons = {
   toolGroup: Boxes,
   tool: Wrench,
   branch: GitBranch,
+  /** A chat fork: branch a conversation off at an earlier turn. */
+  fork: GitBranchPlus,
   /** ADR-0039 §8: Settings -> GitHub (lucide ships no brand glyphs). */
   forge: GitFork,
   /** O1 provenance: a run's worktree commit. */

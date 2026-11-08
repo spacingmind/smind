@@ -81,13 +81,19 @@ func TestRenderTaskTree(t *testing.T) {
 					n.Run.Disposition = "needs-continue"
 					return n
 				}(),
+				func() taskTreeNode {
+					n := treeTestNode(5, 0, "Overflow", str("coder"), "error")
+					n.Run.FailureKind = "context_window_exceeded"
+					return n
+				}(),
 			}},
 			lines: []string{
-				"4 tasks: 0 running, 0 waiting, 3 failed, 1 done",
+				"5 tasks: 0 running, 0 waiting, 4 failed, 1 done",
 				"#1 Limited  coder  error: " + rateLimitedText("5h", &resetAt, false, now) + "  cost n/a",
 				"#2 Crashed  coder  error: crash  cost n/a",
 				"#3 Plain  coder  error  cost n/a",
 				"#4 Cut  coder  done (needs-continue)  cost n/a",
+				"#5 Overflow  coder  error: context window exceeded  cost n/a",
 			},
 		},
 		{

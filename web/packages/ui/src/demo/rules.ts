@@ -242,6 +242,7 @@ export const RULES: Record<string, DemoRule> = {
     const chat = c.session.chats.find((x) => x.TaskID === p.taskId);
     return { runId: c.session.startReply(p.taskId, p.chatId ?? chat?.ID ?? 0, p.provider ?? "claude-code", String(p.prompt ?? "")).id };
   }),
+  "run.pendingQuestions": local(() => ({ questions: [] })),
   "run.respondPermission": scripted((c) => {
     const { runId, requestId, optionId } = c.params;
     if (!c.session.respond(runId, requestId, optionId)) throw new DemoError("not_found", "no such pending permission request");
@@ -355,6 +356,24 @@ export const RULES: Record<string, DemoRule> = {
     c.session.notify("chat.created", { chat });
     return chat;
   }),
+  "chat.fork": local((c) => {
+    const parent = c.session.chats.find((x) => x.ID === c.params.chatId) ?? notFound("chat");
+    const mode: "native" | "seeded" = c.params.mode === "seeded" ? "seeded" : "native";
+    const now = c.session.nowIso();
+    const chat: Chat = {
+      ID: c.session.allocChatId(),
+      TaskID: parent.TaskID,
+      Title: `Fork of ${parent.Title}`,
+      Provider: parent.Provider,
+      AgentSession: null,
+      CreatedAt: now,
+      ArchivedAt: null,
+      fork: { parentChatId: parent.ID, forkedAtRunId: String(c.params.atRunId), kind: "fork", mode, lossy: mode === "seeded" },
+    };
+    c.session.chats.push(chat);
+    c.session.notify("chat.created", { chat });
+    return chat;
+  }),
   "chat.rename": local((c) => {
     const chat = c.session.chats.find((x) => x.ID === c.params.id) ?? notFound("chat");
     chat.Title = String(c.params.title ?? chat.Title);
@@ -443,6 +462,8 @@ export const REFUSED_METHODS = [
   "scratch.clean",
   "space.create", "space.delete",
   "run.revealToolHeredoc",
+  // the demo scripts no agent questions (ADR-0055): answering is refused like any other write
+  "run.answerQuestion",
   "task.archive", "task.archiveFinished", "task.commit", "task.createPr", "task.move", "task.push", "task.restore", "task.retrySetup",
   "task.setBudget", "task.stage", "task.stopTree", "task.updateFromBase", "task.updatePr",
   "workspace.create", "workspace.delete", "workspace.setDefaultBase", "workspace.setScripts",

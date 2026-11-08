@@ -1,0 +1,19 @@
+{
+  "questions": [
+    {
+      "question": "Which colour do you prefer?",
+      "header": "Colour",
+      "options": [
+        {
+          "label": "Red",
+          "description": "A warm, bold colour associated with energy and urgency."
+        },
+        {
+          "label": "Blue",
+          "description": "A cool, calm colour associated with trust and stability."
+        }
+      ],
+      "multiSelect": false
+    }
+  ]
+}

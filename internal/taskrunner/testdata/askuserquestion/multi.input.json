@@ -1,0 +1,23 @@
+{
+  "questions": [
+    {
+      "question": "Which of these colours do you like? (Select all that apply)",
+      "header": "Colours",
+      "options": [
+        {
+          "label": "Red",
+          "description": "A bold, warm colour associated with energy and passion."
+        },
+        {
+          "label": "Blue",
+          "description": "A cool colour associated with calm, trust, and depth."
+        },
+        {
+          "label": "Green",
+          "description": "A natural colour associated with growth, balance, and freshness."
+        }
+      ],
+      "multiSelect": true
+    }
+  ]
+}

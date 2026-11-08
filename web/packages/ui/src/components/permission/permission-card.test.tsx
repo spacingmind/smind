@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { blankAnswerBatch, encodeAnswerBatch } from "@/components/permission/question-form-card";
 import { optionVariant, recommendedOptionId } from "@/components/permission/permission-option-button";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { PLAN_REVIEW_APPROVE, PLAN_REVIEW_REFUSE } from "@/components/permission/plan-review-card";
@@ -237,67 +236,6 @@ describe("PermissionCard: options variant", () => {
   });
 });
 
-describe("PermissionCard: question-form variant", () => {
-  const withQuestions = pending({
-    questions: [
-      { id: "q1", prompt: "Which environment?", kind: "single_select", options: [{ id: "prod", label: "Prod" }, { id: "staging", label: "Staging" }] },
-      { id: "q2", prompt: "Anything else?", kind: "free_text" },
-    ],
-  });
-
-  it("renders the question form instead of a plain option list", () => {
-    render(<PermissionCard runId="run-1" pending={withQuestions} onRespond={vi.fn()} onChat={vi.fn()} />);
-    expect(screen.getByTestId("question-form")).toBeInTheDocument();
-    expect(screen.getAllByTestId("question-field")).toHaveLength(2);
-    expect(screen.getByText("Which environment?")).toBeInTheDocument();
-  });
-
-  it("submits one structured answer batch for both selections and free text", async () => {
-    const onRespond = vi.fn().mockResolvedValue(undefined);
-    render(<PermissionCard runId="run-1" pending={withQuestions} onRespond={onRespond} onChat={vi.fn()} />);
-
-    fireEvent.click(screen.getByTestId("question-option-prod"));
-    fireEvent.change(screen.getByTestId("question-other-input"), { target: { value: "nothing" } });
-    fireEvent.click(screen.getByTestId("question-form-submit"));
-    await flush();
-
-    expect(onRespond).toHaveBeenCalledTimes(1);
-    const [runId, requestId, batch] = onRespond.mock.calls[0]!;
-    expect(runId).toBe("run-1");
-    expect(requestId).toBe("req-1");
-    expect(JSON.parse(batch)).toEqual({
-      kind: "question_form_answers",
-      answers: {
-        q1: { optionIds: ["prod"], otherText: "" },
-        q2: { optionIds: [], otherText: "nothing" },
-      },
-    });
-  });
-
-  it("skip sends the blank shape", async () => {
-    const onRespond = vi.fn().mockResolvedValue(undefined);
-    render(<PermissionCard runId="run-1" pending={withQuestions} onRespond={onRespond} onChat={vi.fn()} />);
-
-    fireEvent.click(screen.getByTestId("question-form-skip"));
-    await flush();
-
-    const [, , batch] = onRespond.mock.calls[0]!;
-    expect(batch).toBe(blankAnswerBatch(withQuestions.questions!));
-  });
-
-  it("single_select keeps only the latest choice; multi_select accumulates", () => {
-    const multi = pending({
-      questions: [{ id: "q1", prompt: "Pick any", kind: "multi_select", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }],
-    });
-    render(<PermissionCard runId="run-1" pending={multi} onRespond={vi.fn()} onChat={vi.fn()} />);
-
-    fireEvent.click(screen.getByTestId("question-option-a"));
-    fireEvent.click(screen.getByTestId("question-option-b"));
-    expect(screen.getByTestId("question-option-a")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("question-option-b")).toHaveAttribute("aria-pressed", "true");
-  });
-});
-
 describe("PermissionCard: plan-review variant", () => {
   const withPlan = pending({ plan: "# Do the thing\n\n- step one\n- step two" });
 
@@ -337,25 +275,5 @@ describe("PermissionCard: plan-review variant", () => {
     render(<PermissionCard runId="run-1" pending={withPlan} onRespond={vi.fn()} onChat={vi.fn()} />);
     expect(screen.getByTestId("plan-review-approve").className).toContain("h-11");
     expect(screen.getByTestId("plan-review-approve").className).toContain("md:h-6");
-  });
-
-  it("a plan shape wins over a questions shape carried on the same request", () => {
-    render(
-      <PermissionCard
-        runId="run-1"
-        pending={{ ...withPlan, questions: [{ id: "q1", prompt: "ignored", kind: "free_text" }] }}
-        onRespond={vi.fn()}
-        onChat={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId("plan-review")).toBeInTheDocument();
-    expect(screen.queryByTestId("question-form")).not.toBeInTheDocument();
-  });
-});
-
-describe("encodeAnswerBatch", () => {
-  it("is a tagged JSON envelope, not an ad hoc string format", () => {
-    const encoded = encodeAnswerBatch({ q1: { optionIds: ["a"], otherText: "" } });
-    expect(JSON.parse(encoded)).toEqual({ kind: "question_form_answers", answers: { q1: { optionIds: ["a"], otherText: "" } } });
   });
 });

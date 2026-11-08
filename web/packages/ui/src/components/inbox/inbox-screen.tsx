@@ -30,7 +30,7 @@ const BASE_PADDING_PX = 8;
 
 /** The tone of an item's pill: a failed or blocked verdict and a permission ask for attention, a ready pass and a stall are calmer. */
 function tone(item: InboxItem): StatusBadgeStatus {
-  if (item.kind === "permission" || item.kind === "host_pair") return "warning";
+  if (item.kind === "permission" || item.kind === "question" || item.kind === "host_pair") return "warning";
   if (item.kind === "stall" || item.kind === "host_down") return "neutral";
   if (item.kind === "host_refused") return "danger";
   if (item.kind === "run_failed") return item.attention === "high" ? "danger" : "warning";
@@ -39,6 +39,7 @@ function tone(item: InboxItem): StatusBadgeStatus {
 
 function kindLabel(item: InboxItem): string {
   if (item.kind === "permission") return "Permission";
+  if (item.kind === "question") return "Question";
   if (item.kind === "review") return "Steward review";
   if (item.kind === "stall") return "Stalled";
   if (item.kind === "host_pair") return "Pairing";
@@ -56,7 +57,9 @@ function KindIcon({ item }: { item: InboxItem }) {
   const Icon =
     item.kind === "permission"
       ? Icons.permission
-      : item.kind === "stall"
+      : item.kind === "question"
+        ? Icons.question
+        : item.kind === "stall"
         ? Icons.stalled
         : item.kind === "host_pair" || item.kind === "host_down"
           ? Icons.host

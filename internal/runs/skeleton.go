@@ -155,7 +155,7 @@ func textOnly(p persistedEvent) bool {
 		PermissionSummary: p.PermissionSummary, PermissionOptions: p.PermissionOptions, PermissionOptionID: p.PermissionOptionID,
 		PermissionResolution: p.PermissionResolution, PermissionRuleID: p.PermissionRuleID, PermissionDetail: p.PermissionDetail,
 		ToolCallID: p.ToolCallID, ToolName: p.ToolName, ToolTitle: p.ToolTitle, ToolStatus: p.ToolStatus, ToolInput: p.ToolInput,
-		ToolResult: p.ToolResult, RawKind: p.RawKind, RawPayload: p.RawPayload, Usage: p.Usage, McpServers: p.McpServers})
+		ToolResult: p.ToolResult, RawKind: p.RawKind, RawPayload: p.RawPayload, Usage: p.Usage, McpServers: p.McpServers, Question: p.Question})
 }
 
 // textRun merges adjacent answer-text rows into the first.

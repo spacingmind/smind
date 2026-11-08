@@ -20,6 +20,7 @@ automation.resume
 automation.update
 chat.archive
 chat.create
+chat.fork
 chat.get
 chat.list
 chat.queueCancel
@@ -117,11 +118,13 @@ provider.setEnv
 provider.setSecret
 provider.test
 provider.updateInstance
+run.answerQuestion
 run.attach
 run.attachment
 run.list
 run.listConfigOptions
 run.logs
+run.pendingQuestions
 run.respondPermission
 run.revealToolHeredoc
 run.setConfigOption

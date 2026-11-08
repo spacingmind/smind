@@ -342,6 +342,12 @@ func (reg *Registry) notifyRunStatus(r *run) {
 func New(st *store.Store) (*Registry, error) {
 	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool), syncing: make(map[int64]bool), notifyParent: true, notifyDebounce: defaultNotifyDebounce, notifyMaxHold: defaultNotifyMaxHold, retryGrace: defaultRetryGrace}
 
+	// A question parked in memory dies with the process: write its resolution
+	// before the run is marked interrupted, so history never holds an orphan
+	// question_request that a client would draw as a live card (ADR-0055).
+	if err := closeOrphanQuestions(st); err != nil {
+		return nil, fmt.Errorf("runs: close orphan questions: %w", err)
+	}
 	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted), func(chatID int64) string { return restartStopReason(st, chatID) }); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
 	}
@@ -372,9 +378,12 @@ func chatHasSession(st *store.Store, chatID int64) bool {
 }
 
 // resumableKind is a failure kind DispositionOf may offer a continue for;
-// only those runs pay the chat lookup.
+// only those runs pay the chat lookup. The human-action classes never
+// resume: a plain "continue" on the same session cannot fix an outgrown
+// context window, a spent provider session budget or a denial-stopped run.
 func resumableKind(kind string) bool {
-	return failure.IsKnown(kind)
+	return failure.IsKnown(kind) && kind != failure.KindContextWindowExceeded &&
+		kind != failure.KindSessionBudgetExceeded && kind != failure.KindTooManyDenials
 }
 
 // restartStopReason is the stop reason for a run the daemon's going down cut
@@ -449,12 +458,15 @@ func rehydrateMeta(st *store.Store, row store.Run) *run {
 // run is a Registry's internal bookkeeping for one Run: identity fields
 // are immutable after Start, everything else is guarded by mu.
 type run struct {
-	id        string
-	taskID    int64
-	chatID    int64
-	provider  taskrunner.Provider
-	prompt    string
-	startedAt time.Time
+	id       string
+	taskID   int64
+	chatID   int64
+	provider taskrunner.Provider
+	prompt   string
+	// deliveredPrompt is what the provider was actually given when that differs from
+	// prompt (a seeded fork's first turn); "" otherwise. Guarded by mu.
+	deliveredPrompt string
+	startedAt       time.Time
 
 	// treeRoot is the root task id of this run's task tree, resolved via
 	// treeRootOf before reg.mu is taken and immutable thereafter -- the
@@ -632,6 +644,12 @@ type run struct {
 	// an answer (one buffered(1) answer channel plus its options), keyed by request
 	// id -- see runPermissionDecider and RespondPermission.
 	pendingPermissions map[string]*pendingPermission
+
+	// pendingQuestions and questionAsks are ADR-0055's question state:
+	// the parked requests of this run by request id, and the recent asks the
+	// repeat guard counts. Both lazily initialised under mu (question.go).
+	pendingQuestions map[string]*pendingQuestion
+	questionAsks     []questionAsk
 
 	// usage is the latest usage event this run recorded (ADR-0020); nil if
 	// it never emitted one, and always nil on a rehydrated run (List/History
@@ -1234,7 +1252,30 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 			if pa, ok := r.promptAttachments(); ok {
 				ctx = taskrunner.WithPromptAttachments(ctx, pa)
 			}
+			// A seeded fork (ADR-0057) carries the earlier turns in its first prompt, once;
+			// the stored prompt stays the user's own text.
+			seeded := false
+			if r.chatID != 0 {
+				if seed, ok, serr := reg.st.ClaimChatForkSeed(r.chatID, time.Now()); serr != nil {
+					log.Printf("runs: run %s: claim fork seed: %v", r.id, serr)
+				} else if ok {
+					prompt = seed + prompt
+					seeded = true
+					// The provider's session records the prompt it was given, so the
+					// native_ref hash that finds this turn again is of that text.
+					r.mu.Lock()
+					r.deliveredPrompt = prompt
+					r.mu.Unlock()
+				}
+			}
 			err = runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
+			if err != nil && seeded {
+				// The first run failed: give the seed back so the retry carries it
+				// (if the provider did see it, the retry repeats it: redundant, not lost).
+				if uerr := reg.st.UnclaimChatForkSeed(r.chatID); uerr != nil {
+					log.Printf("runs: run %s: unclaim fork seed: %v", r.id, uerr)
+				}
+			}
 		}
 	}
 	<-forwardDone
@@ -2086,6 +2127,9 @@ func (reg *Registry) Stop(runID string) error {
 	cancel := r.cancel
 	for id := range r.pendingPermissions {
 		delete(r.pendingPermissions, id)
+	}
+	for id := range r.pendingQuestions {
+		delete(r.pendingQuestions, id)
 	}
 	r.mu.Unlock()
 	cancel()

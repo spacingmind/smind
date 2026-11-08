@@ -25,12 +25,13 @@ var HumanOnlyRPCs = []string{
 	"fleet.host.reject",
 	"relay.device.approve",
 	"relay.device.revoke",
+	"chat.fork",
 }
 
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not
 // on this branch yet; the wsapi drift test lets them be absent and drops the
 // tolerance for each as soon as its handler exists.
-var PendingHumanOnlyRPCs = []string{"run.answerPermission", "run.answerQuestion"}
+var PendingHumanOnlyRPCs = []string{"run.answerPermission"}
 
 // humanOnlyCommand is one human-only smind command: the words that name it
 // and the verbs of it that are human-only (nil: every verb).
@@ -44,6 +45,7 @@ var humanOnlyCLI = []humanOnlyCommand{
 	{[]string{"permission"}, nil},
 	{[]string{"host"}, []string{"approve", "reject"}},
 	{[]string{"relay", "devices"}, []string{"approve", "revoke"}},
+	{[]string{"task", "chat"}, []string{"fork"}},
 }
 
 // HumanOnlyCLI reports whether args (what follows the smind binary: flags are
