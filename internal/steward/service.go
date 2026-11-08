@@ -3,7 +3,6 @@ package steward
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -85,13 +84,15 @@ func (s *Service) SubmitVerdict(reviewID int64, token, runID string, raw []byte)
 	if row.Status != "pending" && row.Status != "running" {
 		return View{}, ErrVerdictExists
 	}
-	if token == "" || subtle.ConstantTimeCompare([]byte(HashToken(token)), []byte(row.TokenHash)) != 1 {
+	if token == "" || !tokenMatches(token, row.TokenHash) {
 		return View{}, ErrBadToken
 	}
 	// A two-axis review is decided only through its passes (SubmitPassVerdict).
-	if passes, err := s.DB.ListStewardReviewPasses(reviewID); err != nil {
+	passes, err := s.DB.ListStewardReviewPasses(reviewID)
+	if err != nil {
 		return View{}, err
-	} else if len(passes) > 0 {
+	}
+	if len(passes) > 0 {
 		return View{}, fmt.Errorf("review %d runs two passes: submit through a pass: %w", reviewID, ErrWrongRun)
 	}
 	if !s.isSeatRun(row, runID) {
@@ -207,15 +208,6 @@ type FrameView struct {
 	CapturedSHA string `json:"capturedSha"`
 }
 
-// ViewFinding is a finding as the card reads it: the seat's finding plus, for
-// a two-axis review, the axis that produced it and the rule it cites. Both are
-// omitted for a single-pass finding.
-type ViewFinding struct {
-	SeatFinding
-	Axis string `json:"axis,omitempty"`
-	Rule string `json:"rule,omitempty"`
-}
-
 // ReviewAxis is one pass of a two-axis review as the card reads it.
 type ReviewAxis struct {
 	Axis          string            `json:"axis"`
@@ -259,7 +251,7 @@ type View struct {
 	SeatVerdict    string        `json:"seatVerdict,omitempty"`
 	Summary        string        `json:"summary,omitempty"`
 	BlockedReason  string        `json:"blockedReason,omitempty"`
-	Findings       []ViewFinding `json:"findings"`
+	Findings       []AxisFinding `json:"findings"`
 	Gates          []Gate        `json:"gates"`
 	// Axes is the two-axis review's per-pass state (ADR-0054); absent for a
 	// single-pass review, so an old client sees the review it always did.
@@ -325,7 +317,7 @@ func (s *Service) view(row store.StewardReview, latestReviewID int64) (View, err
 		ValidationID: row.ValidationID, CIState: row.CIState, Status: row.Status, Verdict: row.Verdict, SeatVerdict: row.SeatVerdict,
 		Summary: row.Summary, BlockedReason: row.BlockedReason, ScopeViolation: row.ScopeViolation, CostUSD: row.CostUSD,
 		RunID: row.RunID, StewardTaskID: row.StewardTaskID, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt,
-		Findings: []ViewFinding{}, Gates: []Gate{}, Frames: []FrameView{}}
+		Findings: []AxisFinding{}, Gates: []Gate{}, Frames: []FrameView{}}
 	if row.FindingsJSON != "" {
 		if err := json.Unmarshal([]byte(row.FindingsJSON), &v.Findings); err != nil {
 			return View{}, fmt.Errorf("steward review %d: findings: %w", row.ID, err)

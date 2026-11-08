@@ -582,3 +582,30 @@ func TestSubmitVerdict_RefusedOnTwoAxisReview(t *testing.T) {
 		t.Fatalf("review = %+v, want it untouched", row)
 	}
 }
+
+func TestPassSkipped_OnlySpecAndOnlyWithoutCriteria(t *testing.T) {
+	t.Parallel()
+
+	// Skipping the standards pass would let the spec pass alone ACCEPT.
+	fx := openTwoAxis(t, axisDigest())
+	if err := fx.svc.WritePassSkipped(fx.row.ID, AxisStandards); err == nil {
+		t.Fatal("WritePassSkipped(standards) = nil, want a refusal")
+	}
+	if p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, AxisStandards); p.Status != PassRunning {
+		t.Fatalf("standards pass = %+v, want it untouched", p)
+	}
+	// A spec pass with criteria to judge cannot be skipped either.
+	fx = openTwoAxis(t, axisDigest("AC1"))
+	if err := fx.svc.WritePassSkipped(fx.row.ID, AxisSpec); err == nil {
+		t.Fatal("WritePassSkipped(spec with criteria) = nil, want a refusal")
+	}
+}
+
+func TestSeatVerdict_SpecAcceptedNeedsCriteriaToJudge(t *testing.T) {
+	t.Parallel()
+
+	fx := openTwoAxis(t, axisDigest())
+	if _, err := fx.submit(t, AxisSpec, specVerdict(VerdictAccepted)); !errors.Is(err, ErrInvalidVerdict) {
+		t.Fatalf("spec ACCEPTED with no criteria in the digest error = %v, want a VerdictError", err)
+	}
+}

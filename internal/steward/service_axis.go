@@ -34,7 +34,7 @@ func (s *Service) SubmitPassVerdict(reviewID int64, axis, token, runID string, r
 	if token == "" || !tokenMatches(token, pass.TokenHash) {
 		return View{}, ErrBadToken
 	}
-	if !s.isPassRun(row, pass, runID) {
+	if !s.isPassRun(pass, runID) {
 		return View{}, ErrWrongRun
 	}
 	if pass.TokenUsed {
@@ -47,21 +47,16 @@ func (s *Service) SubmitPassVerdict(reviewID int64, axis, token, runID string, r
 	if v.ReviewID != reviewID {
 		return View{}, VerdictError{Field: "reviewId", Msg: fmt.Sprintf("the verdict must judge review %d", reviewID)}
 	}
-	var digest Digest
-	if strings.TrimSpace(row.DigestJSON) == "" || json.Unmarshal([]byte(row.DigestJSON), &digest) != nil {
-		return View{}, ve("digest", "review has no digest")
+	digest, err := digestOf(row)
+	if err != nil {
+		return View{}, err
 	}
-	var criteriaIDs []string
-	if digest.Spec != nil {
-		for _, c := range digest.Spec.Criteria {
-			criteriaIDs = append(criteriaIDs, c.ID)
-		}
-	}
+	criteriaIDs := digest.criteriaIDs()
 	if err := CheckAxisVerdict(v, digest, axis, criteriaIDs); err != nil {
 		return View{}, err
 	}
 	if Clamp(v.Verdict, digest.Gates).Hold {
-		return View{}, errors.New("a gate is still unknown; the review cannot be decided yet")
+		return View{}, errGateUnknown
 	}
 	findings := make([]AxisFinding, len(v.Findings))
 	copy(findings, v.Findings)
@@ -111,11 +106,23 @@ func (s *Service) WritePassBlocked(reviewID int64, axis, reason, summary string,
 }
 
 // WritePassSkipped ends the Spec pass of a review with no spec to judge: no
-// verdict, no cost, reported as "no spec available" (ADR-0054 §6).
+// verdict, no cost, reported as "no spec available" (ADR-0054 §6). Only the
+// Spec axis, and only while the digest carries no criteria: skipping is not a
+// way to drop an axis that has work.
 func (s *Service) WritePassSkipped(reviewID int64, axis string) error {
+	if axis != AxisSpec {
+		return errors.New("only the spec pass can be skipped: the standards pass always runs")
+	}
 	row, _, err := s.openPass(reviewID, axis)
 	if err != nil {
 		return err
+	}
+	digest, err := digestOf(row)
+	if err != nil {
+		return err
+	}
+	if len(digest.criteriaIDs()) > 0 {
+		return errors.New("the spec pass cannot be skipped: the digest carries criteria to judge")
 	}
 	if err := s.DB.SetStewardPassSkipped(reviewID, axis, "no spec available", s.now()); err != nil {
 		return passClosed(err)
@@ -135,7 +142,7 @@ func (s *Service) openPass(reviewID int64, axis string) (store.StewardReview, st
 	if err != nil {
 		return row, store.StewardReviewPass{}, err
 	}
-	if row.Status != "pending" && row.Status != "running" {
+	if row.Status != PassPending && row.Status != PassRunning {
 		return row, store.StewardReviewPass{}, ErrVerdictExists
 	}
 	pass, err := s.DB.GetStewardReviewPass(reviewID, axis)
@@ -154,7 +161,7 @@ func (s *Service) openPass(reviewID int64, axis string) (store.StewardReview, st
 // isPassRun reports whether runID is the pass's seat: its bound run, or any
 // run of the pass's own task (a rate-limit wait re-queues the prompt as a new
 // run of the same chat).
-func (s *Service) isPassRun(_ store.StewardReview, pass store.StewardReviewPass, runID string) bool {
+func (s *Service) isPassRun(pass store.StewardReviewPass, runID string) bool {
 	if runID == "" {
 		return false
 	}
@@ -207,13 +214,13 @@ func (s *Service) finalize(reviewID int64) (View, error) {
 		s.publish(row.TaskID, reviewID, "blocked")
 		return s.View(reviewID)
 	}
-	var digest Digest
-	if strings.TrimSpace(row.DigestJSON) == "" || json.Unmarshal([]byte(row.DigestJSON), &digest) != nil {
-		return View{}, ve("digest", "review has no digest")
+	digest, err := digestOf(row)
+	if err != nil {
+		return View{}, err
 	}
 	res := Clamp(combined.SeatVerdict, digest.Gates)
 	if res.Hold {
-		return View{}, errors.New("a gate is still unknown; the review cannot be decided yet")
+		return View{}, errGateUnknown
 	}
 	findings, err := mergedFindings(passes)
 	if err != nil {
@@ -283,6 +290,18 @@ func passClosed(err error) error {
 		return ErrVerdictExists
 	}
 	return err
+}
+
+// errGateUnknown is the refusal while a gate is undecided, as in SubmitVerdict.
+var errGateUnknown = errors.New("a gate is still unknown; the review cannot be decided yet")
+
+// digestOf decodes the digest a review was judged on.
+func digestOf(row store.StewardReview) (Digest, error) {
+	var d Digest
+	if strings.TrimSpace(row.DigestJSON) == "" || json.Unmarshal([]byte(row.DigestJSON), &d) != nil {
+		return Digest{}, ve("digest", "review has no digest")
+	}
+	return d, nil
 }
 
 // tokenMatches compares a presented token with a stored hash in constant time.

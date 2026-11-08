@@ -110,6 +110,18 @@ type SpecSection struct {
 	Criteria []SpecCriterion `json:"criteria"`
 }
 
+// criteriaIDs are the ids of the criteria the Spec pass must answer.
+func (d Digest) criteriaIDs() []string {
+	if d.Spec == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(d.Spec.Criteria))
+	for _, c := range d.Spec.Criteria {
+		ids = append(ids, c.ID)
+	}
+	return ids
+}
+
 // SpecCriterion is one acceptance criterion the Spec pass must report on.
 type SpecCriterion struct {
 	ID   string `json:"id"`
