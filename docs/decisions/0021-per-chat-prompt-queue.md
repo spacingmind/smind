@@ -179,8 +179,8 @@ Decision 2 and the Context said mid-turn injection is impossible because "ACP v2
 - **Claude native can steer, and the SDK already has the primitive.** `Client.Query` writes a user line to the CLI's stdin and does not wait; `Client.Interrupt` sends the CLI's
   `interrupt` control request (`engine.go`). smind simply never writes while a turn is in flight.
 - **Codex native has two verbs** smind never calls: `turn/steer` and `turn/interrupt` (app-server protocol, `v2/turn.rs`).
-- **ACP has no steer verb.** The v1 protocol has `session/cancel` (a notification that ends the running turn); the v2 draft decouples the prompt request from the turn so a
-  prompt "lasts until the user message is inserted", and says steering and queueing "remain separate concerns". smind sends neither today: `Registry.Stop` cancels the run's
+- **ACP has no explicit steer capability.** The v1 protocol has `session/cancel` (a notification that ends the running turn); the v2 draft decouples the prompt request from the turn so a
+  prompt "lasts until the user message is inserted", lets a `session/prompt` sent during active work be inserted at once or held by the agent, and leaves explicit steering and queueing capabilities to a later RFD (a future ACP agent may inject on a plain prompt; the catalog flag is per provider and re-probed, not assumed). smind sends neither today: `Registry.Stop` cancels the run's
   context and the agent process is closed (`internal/runs/registry.go`, `internal/acp/client.go`), and an `interrupt` item is delivered on the resumed session.
 
 ### Probe results (Claude Code CLI 2.1.310, Haiku, stream-json, `--replay-user-messages`; two runs, about USD 0.013 in total)
@@ -216,7 +216,7 @@ client decides from the catalog and none hard-codes a provider name. ACP provide
 | Mode | Meaning for a busy chat | Durable | Result shape |
 |---|---|---|---|
 | `reject` | error (default for wsapi callers) | n/a | error |
-| `queue` | append; delivered at the next turn boundary (the default for the MCP and CLI callers) | yes (`chat_queue`) | `{queued, queueItemId}` |
+| `queue` | append; delivered at the next turn boundary (the default for MCP `task_send`; the CLI defaults to `reject`, except that it asks for `queue` while the task's setup script is still running) | yes (`chat_queue`) | `{queued, queueItemId}` |
 | `interrupt` | insert at the front and stop the run; delivered on the resumed session | yes | `{queued, queueItemId}` |
 | **`steer`** | **inject into the running turn** (provider-native); the turn continues and the model sees the text at its next boundary | **no** while in flight, **never lost** (below) | **`{steered: true, runId, steerId}`** (additive; reachable only by passing `steer`) |
 
@@ -232,7 +232,7 @@ Rules:
    the echoed user line confirms it).
 3. **Text only in v1.** A steer with attachments, a model change or a permission-mode change is refused with a clear error (the run's configuration is never altered by a
    steer); the caller may send it as `queue`.
-4. **A pending permission or question** (ADR-0055) does not block a steer; Claude delivers it after that tool's result like any other (the permission is still waiting for its
+4. **A pending permission or question** (ADR-0055, Proposed, adds the question request; it is not merged yet) does not block a steer; Claude delivers it after that tool's result like any other (the permission is still waiting for its
    human). The card says "delivered after the pending request is answered".
 5. **Size:** the existing prompt size cap; one steer in flight per run (a second is rejected with "a steer is already pending" until the first is echoed or queued), so a loop
    cannot flood a turn.
@@ -248,8 +248,8 @@ Rules:
 
 ### History: what the run records
 
-- New additive event `user_steer` {steerId, text (capped), source, state: `sent` | `echoed` | `queued` | `failed`, turnId (Codex), at}. Old clients ignore unknown event types
-  (ADR-0010).
+- New additive event `user_steer` {steerId, text (capped), source, state: `sent` | `echoed` | `queued` | `failed`, turnId (Codex), at}. Old clients must ignore unknown event types (pinned by
+  `TestSteer_NewEventIgnoredByOldDecoder`; compare ADR-0010 for unknown ACP update kinds).
 - **Ordering.** Claude: smind adds `--replay-user-messages` (via the SDK's extra args) so the CLI's own echo anchors the steer **where the model actually saw it**, after the
   tool result; the event moves `sent` → `echoed` at that line. Without the echo the timeline would show the steer at send time, which is wrong by up to a whole tool call. Codex:
   the `turn/steer` response's `turnId` and the item order from the app-server. The timeline renders "You steered: …" at the anchor with the state ("queued instead" on fallback).
@@ -273,7 +273,7 @@ Rules:
 | run ends between the click and the write | enqueue as a queue item, `state: queued` (rule 2) |
 | Codex `expectedTurnId` mismatch | same (the turn already moved on) |
 | the CLI/agent process died during the write | the run finishes `error` as it does today; the steer is enqueued; delivery follows the existing restart rules (decision 5) |
-| stdin write is not serialized with other writers (control responses are written from other goroutines) | PR1 verifies `writeLine` is mutex-protected in the SDK and adds a regression test; if not, the steer takes the same lock path |
+| stdin write is not serialized with other writers (control responses are written from other goroutines) | the SDK already serializes `writeLine` with `writeMu`; PR1 adds a race-detector regression test |
 | double-click / repeated steer | one in flight per run (rule 5) |
 | provider cannot steer | fallback per D2 with the reason in the result |
 | steer arrives while no tool runs (model streaming text) | **unknown today** (D9); until probed the card says "delivered at the model's next step" and the event is `echoed` only when the echo arrives, so the timeline never claims more than it saw |

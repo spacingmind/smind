@@ -24,7 +24,7 @@ PR1 (claude + core; `internal/runs`, `internal/taskrunner`, `internal/wsapi`, `c
 `TestSteer_ClaudeInjectsWhileTurnRuns`, `TestSteer_ClaudeSingleResultStillOneResult` (fixture of the s1 stream), `TestSteer_EchoAnchorsEvent`, `TestSteer_WriteFailureEnqueuesOnce`,
 `TestSteer_RunFinishedInRaceEnqueues`, `TestSteer_NeverDuplicatesOnFallback`, `TestSteer_OneInFlightPerRun`, `TestSteer_RejectsAttachmentsAndSettingChanges`,
 `TestSteer_AgentAndRemoteSourcesDowngradedToQueue`, `TestSteer_CannotReachRespondPermission` (walks the handler map and MCP tools), `TestSteer_UnsupportedProviderDegradesToQueue`,
-`TestSteer_IdleChatStartsNormally`, `TestSteer_NewEventIgnoredByOldDecoder`, `TestClaudeStdinWritesAreSerialized` (race detector), `TestCatalog_SupportsSteerFlags`,
+`TestSteer_IdleChatStartsNormally`, `TestSteer_NewEventIgnoredByOldDecoder`, `TestClaudeStdinWritesAreSerialized` (race detector; the SDK already holds `writeMu`), `TestCatalog_SupportsSteerFlags`,
 `TestWhenBusy_InterruptUnchanged`, `TestCLI_TaskSendWhenBusySteer`.
 PR2 (codex; fake app-server): `TestCodex_TurnSteerUsesActiveTurnID`, `TestCodex_TurnSteerMismatchFallsBackToQueue`, `TestCodex_TurnIDTrackedFromTurnStart`, and if D5: `TestCodex_InterruptUsesTurnInterrupt`,
 `TestCodex_InterruptKeepsThread`.
