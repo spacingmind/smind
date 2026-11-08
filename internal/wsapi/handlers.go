@@ -2678,6 +2678,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			Notes                string          `json:"notes"`
 			OnRateLimit          string          `json:"onRateLimit"`
 			FallbackProfileID    *int64          `json:"fallbackProfileId"`
+			Questions            string          `json:"questions"`
 			OrchestrationTools   *bool           `json:"orchestrationTools"`
 			Instructions         string          `json:"instructions"`
 			Skills               []string        `json:"skills"`
@@ -2700,6 +2701,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			Notes:              p.Notes,
 			OnRateLimit:        p.OnRateLimit,
 			FallbackProfileID:  p.FallbackProfileID,
+			Questions:          p.Questions,
 			OrchestrationTools: p.OrchestrationTools,
 			Instructions:       p.Instructions,
 			Skills:             p.Skills,
@@ -2746,6 +2748,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			Notes                string          `json:"notes"`
 			OnRateLimit          string          `json:"onRateLimit"`
 			FallbackProfileID    *int64          `json:"fallbackProfileId"`
+			Questions            string          `json:"questions"`
 			OrchestrationTools   *bool           `json:"orchestrationTools"`
 			Instructions         string          `json:"instructions"`
 			Skills               []string        `json:"skills"`
@@ -2769,6 +2772,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			Notes:              p.Notes,
 			OnRateLimit:        p.OnRateLimit,
 			FallbackProfileID:  p.FallbackProfileID,
+			Questions:          p.Questions,
 			OrchestrationTools: p.OrchestrationTools,
 			Instructions:       p.Instructions,
 			Skills:             p.Skills,

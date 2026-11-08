@@ -313,12 +313,15 @@ func (m *Manager) profileFor(owner string, in Info, ps ProfileSpec, ids map[stri
 	p := store.AgentProfile{
 		ID: ids[ps.Name], Name: owner + ":" + ps.Name, Provider: ps.Provider,
 		PermissionMode: ps.PermissionMode, AutoAccept: ps.AutoAccept, ThinkingLevel: ps.ThinkingLevel,
-		Model: ps.Model, Notes: ps.Notes, OnRateLimit: ps.OnRateLimit, OrchestrationTools: ps.OrchestrationTools,
+		Model: ps.Model, Notes: ps.Notes, OnRateLimit: ps.OnRateLimit, Questions: ps.Questions, OrchestrationTools: ps.OrchestrationTools,
 		Instructions: ps.Instructions, Skills: append([]string(nil), ps.Skills...), ChildPolicy: ps.ChildPolicy,
 		CreatedAt: in.InstalledAt, UpdatedAt: in.UpdatedAt, Owner: &ow, ReadOnly: true,
 	}
 	if p.OnRateLimit == "" {
 		p.OnRateLimit = "none"
+	}
+	if p.Questions == "" {
+		p.Questions = "ask"
 	}
 	for _, c := range ps.ChildProfiles {
 		p.ChildProfileIDs = append(p.ChildProfileIDs, ids[c])

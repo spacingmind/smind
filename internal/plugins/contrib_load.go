@@ -52,6 +52,7 @@ type ProfileSpec struct {
 	Model              string   `json:"model,omitempty"`
 	Notes              string   `json:"notes,omitempty"`
 	OnRateLimit        string   `json:"onRateLimit,omitempty"`
+	Questions          string   `json:"questions,omitempty"`
 	OrchestrationTools *bool    `json:"orchestrationTools,omitempty"`
 	Instructions       string   `json:"instructions,omitempty"`
 	Skills             []string `json:"skills,omitempty"`
@@ -154,6 +155,11 @@ func validateProfileSpec(pluginID string, p ProfileSpec) error {
 	case "", "none", "wait":
 	default:
 		return fmt.Errorf("profile %q onRateLimit %q is not none or wait (fallback needs a stored profile id)", p.Name, p.OnRateLimit)
+	}
+	switch p.Questions {
+	case "", "ask", "decline", "disabled":
+	default:
+		return fmt.Errorf("profile %q questions %q is not ask, decline or disabled", p.Name, p.Questions)
 	}
 	switch p.ChildPolicy {
 	case "", "none", "leaf", "profiles":
