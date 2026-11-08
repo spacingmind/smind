@@ -30,9 +30,9 @@ Digest, prompts, seats (P2, daemon)
 Wire, inbox, UI, CLI (P3 web + CLI, P4 mobile)
 - AC16 `steward.get|list` return `axes[]` (`axis, status, seatVerdict, summary, blockedReason, model, costUsd, runId, stewardTaskId, criteria?, specSources?`) and `findings[].axis|rule`, absent for a single-pass review; old fields keep today's meaning; a client without the new fields renders a coherent review.
 - AC17 The inbox `review` item carries optional `axes:[{axis,verdict}]`; supersession, staleness and `mergeReady` are unchanged; summary ≤ 160 chars, redacted.
-- AC18 Web card: stored verdict chip, two axis rows (chip with icon and text, summary, model, cost), `Skipped · no spec available`, findings grouped by axis then file with a text axis label, Spec criteria checklist, `standards.changedInDiff` chip, copy-findings carries the axis; single-axis reviews render as today.
-- AC19 Mobile: the same, one column, 44 pt targets, criteria collapsible, two axis chips on the inbox row.
-- AC20 CLI: `smind steward show` prints an `AXES` block and `[standards]`/`[spec]` tags (`--json` carries the fields); `smind steward review <task> --axis standards|spec` re-runs one axis; no approve or merge subcommand.
+- AC18 Web card: stored verdict chip, two axis rows (chip with icon and text, summary, model; **never a dollar amount**), `Skipped · no spec available`, findings grouped by axis then file with a text axis label, Spec criteria checklist, `standardsChanged` hint chip, copy-findings tags a finding that has an axis; single-axis reviews render as today.
+- AC19 Mobile: the same, one column, 44 pt targets, criteria collapsible, two axis chips on the inbox row, no dollar amount (P4).
+- AC20 CLI: `smind steward show` prints an `AXES` block and `[standards]`/`[spec]` tags (`--json` carries the fields); `smind steward review <task> --axis standards|spec` re-runs one axis as a partial review (the other pass `not_run`, so never ACCEPTED, never deduped); no cost is printed; no approve or merge subcommand.
 
 Pilot (P5)
 - AC21 Fake-LLM end to end in an isolated `SMIND_HOME`: both ACCEPT → one `review` row ACCEPTED; Standards CHANGES + Spec ACCEPTED → CHANGES; CI failing + both ACCEPT → CHANGES; one pass killed → never ACCEPTED; no spec → Spec `skipped`.

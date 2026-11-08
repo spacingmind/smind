@@ -255,18 +255,21 @@ type View struct {
 	Gates          []Gate        `json:"gates"`
 	// Axes is the two-axis review's per-pass state (ADR-0054); absent for a
 	// single-pass review, so an old client sees the review it always did.
-	Axes           []ReviewAxis `json:"axes,omitempty"`
-	PRNumber       int          `json:"prNumber,omitempty"`
-	Frames         []FrameView  `json:"frames"`
-	Stale          string       `json:"stale,omitempty"`
-	MergeReady     bool         `json:"mergeReady"`
-	NotReadyReason string       `json:"notReadyReason,omitempty"`
-	ScopeViolation bool         `json:"scopeViolation,omitempty"`
-	CostUSD        float64      `json:"costUsd"`
-	RunID          string       `json:"runId,omitempty"`
-	StewardTaskID  int64        `json:"stewardTaskId"`
-	CreatedAt      time.Time    `json:"createdAt"`
-	FinishedAt     *time.Time   `json:"finishedAt,omitempty"`
+	Axes []ReviewAxis `json:"axes,omitempty"`
+	// StandardsChanged: the change edits a standards file (the digest's
+	// standards.changedInDiff, ADR-0054 D10); absent unless true.
+	StandardsChanged bool        `json:"standardsChanged,omitempty"`
+	PRNumber         int         `json:"prNumber,omitempty"`
+	Frames           []FrameView `json:"frames"`
+	Stale            string      `json:"stale,omitempty"`
+	MergeReady       bool        `json:"mergeReady"`
+	NotReadyReason   string      `json:"notReadyReason,omitempty"`
+	ScopeViolation   bool        `json:"scopeViolation,omitempty"`
+	CostUSD          float64     `json:"costUsd"`
+	RunID            string      `json:"runId,omitempty"`
+	StewardTaskID    int64       `json:"stewardTaskId"`
+	CreatedAt        time.Time   `json:"createdAt"`
+	FinishedAt       *time.Time  `json:"finishedAt,omitempty"`
 }
 
 // View reads review id with its staleness and merge-ready label.
@@ -351,6 +354,9 @@ func (s *Service) view(row store.StewardReview, latestReviewID int64) (View, err
 	if haveDigest {
 		if digest.PR != nil {
 			v.PRNumber = digest.PR.Number
+		}
+		if digest.Standards != nil && digest.Standards.ChangedInDiff {
+			v.StandardsChanged = true
 		}
 		for _, f := range digest.Frames.Items {
 			v.Frames = append(v.Frames, FrameView{Name: filepath.Base(f.Path), Viewport: f.Viewport, Theme: f.Theme, CapturedSHA: f.CapturedSHA})

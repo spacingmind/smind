@@ -697,3 +697,22 @@ func TestCombine_NotRunPassCapsAtChangesAndIsNeverTheBlockReason(t *testing.T) {
 		t.Fatalf("Combine(not run + skipped) = %+v, want BLOCKED with the crashed fallback", got)
 	}
 }
+
+func TestView_StandardsChangedFromTheDigest(t *testing.T) {
+	t.Parallel()
+
+	d := axisDigest("AC1")
+	d.Standards = &StandardsSection{BaseRef: "b", ChangedInDiff: true, Files: []StandardsFile{{Path: "AGENTS.md", ChangedInDiff: true}}}
+	fx := openTwoAxis(t, d)
+	v, err := fx.svc.View(fx.row.ID)
+	if err != nil || !v.StandardsChanged {
+		t.Fatalf("view = %+v, %v; want standardsChanged", v, err)
+	}
+	d.Standards.ChangedInDiff = false
+	fx2 := openTwoAxis(t, d)
+	v2, _ := fx2.svc.View(fx2.row.ID)
+	raw, _ := json.Marshal(v2)
+	if v2.StandardsChanged || strings.Contains(string(raw), "standardsChanged") {
+		t.Fatalf("view JSON = %s, want no standardsChanged key", raw)
+	}
+}
