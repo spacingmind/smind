@@ -121,12 +121,10 @@ export function QuestionCard({
       data-testid="question-card"
       className="flex flex-col gap-2 rounded-2xl bg-card p-2 shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
-      {/* Amber like the composer's "Waiting for you" chip (an attention state), not the permission card's green (a documented parity rule that card keeps). */}
       <span
         data-testid="question-waiting-badge"
-        className="inline-flex w-fit items-center gap-1.5 rounded-full bg-warning/10 px-2 py-0.5 text-ui-xs font-medium text-warning-text"
+        className="inline-flex w-fit items-center rounded-full bg-interaction-confirmation-surface px-2 py-0.5 text-ui-xs font-medium text-interaction-confirmation-foreground"
       >
-        <span aria-hidden className="size-2 rounded-full bg-warning" />
         Waiting for your response
       </span>
       {pending.request.truncated && <p className="text-ui-xs text-foreground-muted">Some of this text was shortened.</p>}

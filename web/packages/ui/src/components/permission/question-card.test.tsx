@@ -54,11 +54,6 @@ describe("QuestionCard: rendering", () => {
     expect(within(card).getByText("The production cluster")).toBeInTheDocument();
     expect(within(card).getByText("Deploy")).toBeInTheDocument();
     expect(within(card).getByText("Which environment?")).toBeInTheDocument();
-
-    // Amber like the composer's "Waiting for you" chip (attention), not the permission card's green.
-    const badge = within(card).getByTestId("question-waiting-badge");
-    expect(badge).toHaveClass("bg-warning/10", "text-warning-text");
-    expect(badge.querySelector("span")).toHaveClass("bg-warning");
   });
 
   it("preselects nothing", () => {
