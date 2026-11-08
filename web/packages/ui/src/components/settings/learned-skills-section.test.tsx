@@ -56,7 +56,7 @@ describe("registration", () => {
   it("registers Skills (learned) in Agents & providers with a deep-linkable id and a nav badge", () => {
     const section = listSettingsSections().find((s) => s.id === "learned-skills");
     expect(section?.label).toBe("Skills (learned)");
-    expect(section?.groupLabel).toBe("Agents & providers");
+    expect(section?.groupLabel).toBe("Profiles & providers");
     expect(section?.badge).toBeTruthy();
   });
 });

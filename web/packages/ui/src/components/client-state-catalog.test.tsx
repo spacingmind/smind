@@ -150,7 +150,7 @@ describe("shared catalog / profile / health cache", () => {
       d,
     );
     await flush();
-    expect(commands.some((c) => c.title.startsWith("Use agent:"))).toBe(false);
+    expect(commands.some((c) => c.title.startsWith("Use profile:"))).toBe(false);
 
     // Create through the real Settings -> Agents form.
     fireEvent.click(screen.getByTestId("profile-new-button"));
@@ -159,8 +159,8 @@ describe("shared catalog / profile / health cache", () => {
     fireEvent.click(screen.getByTestId("profile-form-submit"));
     await flush();
 
-    // The palette's "Use agent:" entry and the composer picker both have it, with no remount.
-    expect(commands.some((c) => c.title === "Use agent: Reviewer")).toBe(true);
+    // The palette's "Use profile:" entry and the composer picker both have it, with no remount.
+    expect(commands.some((c) => c.title === "Use profile: Reviewer")).toBe(true);
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50));
     });
@@ -173,19 +173,19 @@ describe("shared catalog / profile / health cache", () => {
     // A rename and a delete (events from another tab or the CLI) reach them live too.
     const created = d.profiles[0]!;
     await act(async () => d.emit("profile.updated", { profile: { ...created, Name: "Reviewer 2" } }));
-    expect(commands.some((c) => c.title === "Use agent: Reviewer 2")).toBe(true);
-    expect(commands.some((c) => c.title === "Use agent: Reviewer")).toBe(false);
+    expect(commands.some((c) => c.title === "Use profile: Reviewer 2")).toBe(true);
+    expect(commands.some((c) => c.title === "Use profile: Reviewer")).toBe(false);
     // The open picker shows the renamed entry too (Settings row + picker entry), and not the old name.
     expect((await screen.findAllByText("Reviewer 2")).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryAllByText("Reviewer")).toHaveLength(0);
     d.profiles = []; // the daemon's truth after the delete
     await act(async () => d.emit("profile.deleted", { id: created.ID }));
-    expect(commands.some((c) => c.title.startsWith("Use agent:"))).toBe(false);
+    expect(commands.some((c) => c.title.startsWith("Use profile:"))).toBe(false);
     expect(screen.queryAllByText("Reviewer 2")).toHaveLength(0);
     // A late update for the deleted profile does not bring it back (one re-read settles it).
     await act(async () => d.emit("profile.updated", { profile: { ...created, Name: "Reviewer 3" } }));
     await flush();
-    expect(commands.some((c) => c.title.startsWith("Use agent:"))).toBe(false);
+    expect(commands.some((c) => c.title.startsWith("Use profile:"))).toBe(false);
   });
 
   it("the footer counts run readiness by provider id while an account row's dot tests its credential", async () => {

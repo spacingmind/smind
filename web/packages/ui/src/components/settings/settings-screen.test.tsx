@@ -54,12 +54,12 @@ describe("SettingsScreen shell", () => {
     expect(screen.queryByTestId("settings-section-appearance")).not.toBeInTheDocument();
   });
 
-  it("groups the nav per the run-config IA regroup: Agents & providers, and Connection (desktop only)", () => {
+  it("groups the nav per the run-config IA regroup: Profiles & providers, and Connection (desktop only)", () => {
     renderScreen();
 
-    // Agents & providers group: heading once, then its two members.
-    expect(screen.getAllByText("Agents & providers").length).toBe(1);
-    expect(screen.getByTestId("settings-nav-agents")).toHaveTextContent("Agents");
+    // Profiles & providers group: heading once, then its two members.
+    expect(screen.getAllByText("Profiles & providers").length).toBe(1);
+    expect(screen.getByTestId("settings-nav-agents")).toHaveTextContent("Profiles");
     expect(screen.getByTestId("settings-nav-providers")).toHaveTextContent("Providers");
 
     // Connection is desktop-only; in a web test neither entry renders.
@@ -69,7 +69,7 @@ describe("SettingsScreen shell", () => {
 
     // Order (Paseo-style): the ungrouped app sections first (General ·
     // Appearance · Notifications · Shortcuts · GitHub · Hosts), then groups -- Connection
-    // (desktop only), then Agents & providers.
+    // (desktop only), then Profiles & providers.
     const ids = screen
       .getAllByRole("listitem")
       .map((li) => li.querySelector("[data-testid^='settings-nav-']")?.getAttribute("data-testid"))
@@ -92,11 +92,11 @@ describe("SettingsScreen shell", () => {
     ]);
   });
 
-  it("keeps Notifications and Shortcuts out of the Agents & providers group (they precede its heading)", () => {
+  it("keeps Notifications and Shortcuts out of the Profiles & providers group (they precede its heading)", () => {
     renderScreen();
 
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    const heading = within(nav).getByText("Agents & providers");
+    const heading = within(nav).getByText("Profiles & providers");
     for (const id of ["notifications", "shortcuts"]) {
       const item = within(nav).getByTestId(`settings-nav-${id}`);
       expect(item.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -125,7 +125,7 @@ describe("SettingsScreen shell", () => {
     renderScreen();
 
     for (const [id, label, action] of [
-      ["agents", "Agents", "profile-new-button"],
+      ["agents", "Profiles", "profile-new-button"],
       ["mcp-servers", "MCP servers", "mcp-new-button"],
       ["providers", "Providers", "providers-connect-toggle"],
       ["usage", "Usage", "usage-refresh"],
@@ -265,7 +265,7 @@ describe("SettingsScreen General section", () => {
     renderScreen();
     fireEvent.click(screen.getByTestId("settings-nav-general"));
 
-    expect(screen.getByTestId("settings-section-general")).toHaveTextContent("Settings → Agents");
+    expect(screen.getByTestId("settings-section-general")).toHaveTextContent("Settings → Profiles");
     expect(screen.queryByTestId("settings-default-provider")).not.toBeInTheDocument();
   });
 });

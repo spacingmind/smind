@@ -59,9 +59,9 @@ export function diffConsent(current: PluginConsent, next: PluginConsent): Plugin
   out.push(...diffKeyed("Hook", current.hookEvents, next.hookEvents, (h) => h.event, (h) => `${h.event} (on error: ${h.onError ?? "open"})`, true, (h) => `on error: ${h.onError ?? "open"}`));
   // Only profiles that need attention are part of the fingerprint; the calm ones are informational.
   const flagged = (c: PluginConsent) => (c.profiles ?? []).filter((p) => (p.escalations ?? []).length > 0);
-  out.push(...diffKeyed("Escalating agent", flagged(current), flagged(next), (p) => p.name, (p) => `${p.name}: ${(p.escalations ?? []).join("; ")}`, true, (p) => (p.escalations ?? []).join("; ")));
+  out.push(...diffKeyed("Escalating profile", flagged(current), flagged(next), (p) => p.name, (p) => `${p.name}: ${(p.escalations ?? []).join("; ")}`, true, (p) => (p.escalations ?? []).join("; ")));
   const calm = (c: PluginConsent) => (c.profiles ?? []).filter((p) => (p.escalations ?? []).length === 0);
-  out.push(...diffKeyed("Agent", calm(current), calm(next), (p) => p.name, (p) => p.name, false));
+  out.push(...diffKeyed("Profile", calm(current), calm(next), (p) => p.name, (p) => p.name, false));
   out.push(...diffKeyed("Skill", current.skills?.map((name) => ({ name })), next.skills?.map((name) => ({ name })), (s) => s.name, (s) => s.name, false));
   return out;
 }

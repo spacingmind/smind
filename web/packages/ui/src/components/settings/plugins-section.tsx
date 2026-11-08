@@ -636,7 +636,7 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
       <section className="flex flex-col gap-1" data-testid={`plugin-contributions-${p.id}`}>
         <h4 className="text-ui-sm font-medium text-foreground">Contributions</h4>
         {!contributes ? (
-          <p className="text-ui-sm text-foreground-muted">Declares no MCP servers, skills or agents.</p>
+          <p className="text-ui-sm text-foreground-muted">Declares no MCP servers, skills or profiles.</p>
         ) : (
           <ul className="flex flex-col gap-1">
             {mcp.map((s) => (
@@ -655,7 +655,7 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
             ))}
             {profiles.map((a) => (
               <li key={`profile-${a.name}`} className="flex items-center gap-2 text-ui-sm">
-                <span className="w-16 shrink-0 text-foreground-muted">Agent</span>
+                <span className="w-16 shrink-0 text-foreground-muted">Profile</span>
                 <span className="min-w-0 break-all">{`${p.id}:${a.name}`}</span>
                 <OwnerBadge owner={p.active ? p.id : null} link={false} />
               </li>
@@ -701,7 +701,7 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
 registerSettingsSection({
   id: PLUGINS_SECTION_ID,
   label: "Plugins",
-  groupLabel: "Agents & providers",
+  groupLabel: "Profiles & providers",
   description: "Installed plugins and what they add.",
   order: 179,
   icon: <Icons.plugin aria-hidden className="size-3.5" />,

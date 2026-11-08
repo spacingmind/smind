@@ -134,12 +134,33 @@ describe("HomeLanding", () => {
     const offline = renderHome({ connected: false });
     expect(screen.getByLabelText("Prompt")).toBeDisabled();
     expect(screen.getByTestId("home-send-button")).toBeDisabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     offline.unmount();
 
     renderHome({ workspaces: [] });
     expect(screen.getByLabelText("Prompt")).toBeDisabled();
     expect(screen.getByPlaceholderText("Add a project to start a task")).toBeInTheDocument();
     expect(screen.getByTestId("home-send-button")).toBeDisabled();
+  });
+
+  it("disconnected with a cause shows the notice with Retry and the serve hint (AC1)", () => {
+    const onRetryConnect = vi.fn();
+    renderHome({ connected: false, connectionError: "no daemon listening", onRetryConnect });
+
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("Can't reach the daemon: no daemon listening");
+    expect(notice).toHaveTextContent("Start it with smind serve");
+    fireEvent.click(within(notice).getByRole("button", { name: "Retry connection" }));
+    expect(onRetryConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("connected, or disconnected without a cause, shows no notice", () => {
+    const online = renderHome({ connectionError: "stale" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    online.unmount();
+
+    renderHome({ connected: false });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("project menu filters by search and picks a project", async () => {
