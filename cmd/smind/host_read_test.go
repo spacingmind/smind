@@ -221,3 +221,69 @@ func TestHostReadSanitizesRemoteText(t *testing.T) {
 		t.Fatalf("--json = %d, %v, %q", code, err, out)
 	}
 }
+
+func TestHostReadActivitySaysWhereHistoryIs(t *testing.T) {
+	hostHome(t, true)
+	activity := func() map[string]any {
+		return readResult("activity", map[string]any{
+			"events": []any{
+				map[string]any{"seq": 1, "type": "text", "text": "summary event"},
+			},
+			"nextCursor": 9, "hasMore": true,
+		})
+	}
+	d := &fakeDaemon{results: map[string]any{"remote.read": activity()}}
+	useHostDaemon(t, d)
+
+	// (a) a named owner: one note line after the events, before the cursor line.
+	d.results["remote.read"].(map[string]any)["historyOwner"] = map[string]any{
+		"historySource": "skeleton", "skeletonReason": "owned_by_host", "host": "box", "hostId": "h",
+	}
+	code, out, errOut := runHostCmd("activity", "box:1")
+	if code != 0 {
+		t.Fatalf("named = %d, stderr %q", code, errOut)
+	}
+	if want := "1 text summary event\nnote: summary only; the full history is on host box. Rebuild it there.\nmore: --cursor 9\n"; out != want {
+		t.Fatalf("named out = %q, want %q", out, want)
+	}
+
+	// (b) an owner this daemon cannot name.
+	res := activity()
+	res["historyOwner"] = map[string]any{"historySource": "skeleton", "skeletonReason": "owned_by_host", "host": "", "hostId": ""}
+	d.results["remote.read"] = res
+	code, out, errOut = runHostCmd("activity", "box:1")
+	if code != 0 {
+		t.Fatalf("unnamed = %d, stderr %q", code, errOut)
+	}
+	if want := "1 text summary event\nnote: summary only; the full history is on another host.\nmore: --cursor 9\n"; out != want {
+		t.Fatalf("unnamed out = %q, want %q", out, want)
+	}
+
+	// (d) a forged alias cannot repaint the screen or forge lines.
+	res = activity()
+	res["historyOwner"] = map[string]any{"historySource": "skeleton", "skeletonReason": "owned_by_host", "host": "b\x1b[2Jox\nline", "hostId": "h"}
+	d.results["remote.read"] = res
+	code, out, errOut = runHostCmd("activity", "box:1")
+	if code != 0 {
+		t.Fatalf("forged = %d, stderr %q", code, errOut)
+	}
+	if want := "1 text summary event\nnote: summary only; the full history is on host b [2Jox line. Rebuild it there.\nmore: --cursor 9\n"; out != want {
+		t.Fatalf("forged out = %q, want %q", out, want)
+	}
+
+	// (c) without historyOwner the bytes TestHostReadSanitizesRemoteText pinned stay.
+	d.results["remote.read"] = readResult("activity", map[string]any{
+		"events": []any{
+			map[string]any{"seq": 1, "type": "text", "text": "a\r\nfake line"},
+			map[string]any{"seq": 2, "type": "text", "text": "\x1b[2Jb"},
+		},
+		"nextCursor": 0, "hasMore": false,
+	})
+	code, out, errOut = runHostCmd("activity", "box:1")
+	if code != 0 {
+		t.Fatalf("plain = %d, stderr %q", code, errOut)
+	}
+	if want := "1 text a  fake line\n2 text  [2Jb\n"; out != want {
+		t.Fatalf("plain out = %q, want %q", out, want)
+	}
+}
