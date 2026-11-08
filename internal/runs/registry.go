@@ -104,6 +104,8 @@ type Registry struct {
 	// rebuilder reads a finished run's full history from the provider's own
 	// session (rebuild.go); nil = none can be rebuilt. Guarded by mu.
 	rebuilder *native.Rebuilder
+	// rcache holds rebuilt histories (rebuild_cache.go); it has its own lock.
+	rcache rebuildCache
 	// systemFinishedOrder is finishedOrder for system runs (see retain).
 	systemFinishedOrder []string
 

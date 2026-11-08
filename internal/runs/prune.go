@@ -57,6 +57,7 @@ func (reg *Registry) RunningCount() int {
 // markHistoryPruned records that run id's events were pruned: it drops any
 // resident copy so every later read serves the summary.
 func (reg *Registry) markHistoryPruned(id string, at time.Time) {
+	reg.rcache.invalidate(id)
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
 	r, ok := reg.runs[id]
@@ -291,6 +292,7 @@ func (p *Pruner) pruneRun(ctx context.Context, id string, cutoff time.Time) (row
 // run is not "pruned" (its skeleton rows are still in the store), so the next
 // read loads them again instead of serving the prune summary.
 func (reg *Registry) dropResident(id string) {
+	reg.rcache.invalidate(id)
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
 	r, ok := reg.runs[id]

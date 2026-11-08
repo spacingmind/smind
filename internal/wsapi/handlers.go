@@ -2036,15 +2036,27 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 		human := isHuman(rc)
 		label := historyLabel(reg, p.RunID, p.Detail, human)
 		events := runLogEventsPrimed(view.Prime, view.Events, p.Tail)
-		if p.Detail == detailFull && label.HistorySource == "skeleton" {
-			// A rebuild is only ever done for a human; an agent asking for it is told why not.
-			if !human {
+		// "full" is the human's explicit request; "auto" (a human's open) rebuilds only
+		// when that is cheap. Everyone else is served the stored rows (H7).
+		if (p.Detail == detailFull || p.Detail == detailAuto) && label.HistorySource == "skeleton" {
+			auto := p.Detail == detailAuto
+			switch {
+			case !human && auto:
+				// an agent's "auto" is the same as sending nothing: no label change, no read
+			case !human:
+				// A rebuild is only ever done for a human; an agent asking for it is told why not.
 				label.SkeletonReason = string(native.ReasonHumanOnly)
-			} else if merged, refs, reason := rebuiltEvents(ctx, reg, p.RunID); reason == native.ReasonNone {
-				events = logEventsClientForm(merged, refs, p.Tail)
-				label.HistorySource, label.SkeletonReason = "rebuilt", ""
-			} else {
-				label.SkeletonReason = string(reason)
+			default:
+				merged, refs, reason, skipped := rebuiltEvents(ctx, reg, p.RunID, auto)
+				switch {
+				case skipped:
+				case reason == native.ReasonNone:
+					events = logEventsClientForm(merged, refs, p.Tail)
+					label.HistorySource, label.SkeletonReason = "rebuilt", ""
+				case auto && quietOpenRefusal(reason):
+				default:
+					label.SkeletonReason = string(reason)
+				}
 			}
 		}
 		var fallbackID int64

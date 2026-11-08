@@ -80,6 +80,7 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 	}
 	api.SetManagedBy(o.managedBy)
 	api.Runs.SetHistoryBudget(int64(cfg.Runs.HistoryBudgetMB) << 20)
+	api.Runs.SetRebuildCacheBudget(int64(cfg.Runs.RebuildCacheMB) << 20)
 	api.Runs.SetRetentionDays(cfg.Runs.HistoryRetentionDays)
 	s := &Server{
 		cfg:       cfg,

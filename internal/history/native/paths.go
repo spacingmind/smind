@@ -135,23 +135,35 @@ func openRegular(real string, max int64) (*os.File, error) {
 // session: Found when its file resolves to a regular file inside an allowed root
 // and fits the size bound, TooLarge when it is there but over the bound. Both
 // false is "gone" (or not a path smind may open).
-type Probe struct{ Found, TooLarge bool }
+//
+// Size and ModTime (unix nanoseconds) identify the file that was found: a cache
+// of a rebuilt history is valid only while both are unchanged.
+type Probe struct {
+	Found, TooLarge bool
+	Size            int64
+	ModTime         int64
+}
 
 // ProbeSession applies exactly the path rules a rebuild does (validated ids, the
 // allowed roots, symlinks resolved, a regular file), and nothing else.
 func ProbeSession(ref Ref, roots []string) Probe {
 	var err error
+	var real string
 	switch ref.Harness {
 	case HarnessClaudeCode:
-		_, err = claudeSessionFile(ref, roots, MaxFileBytes)
+		real, err = claudeSessionFile(ref, roots, MaxFileBytes)
 	case HarnessCodex:
-		_, err = codexSessionFile(ref, roots, MaxFileBytes)
+		real, err = codexSessionFile(ref, roots, MaxFileBytes)
 	default:
 		return Probe{}
 	}
 	switch {
 	case err == nil:
-		return Probe{Found: true}
+		st, serr := os.Stat(real)
+		if serr != nil {
+			return Probe{}
+		}
+		return Probe{Found: true, Size: st.Size(), ModTime: st.ModTime().UnixNano()}
 	case errors.Is(err, errTooLarge):
 		return Probe{TooLarge: true}
 	}

@@ -336,3 +336,38 @@ func TestRevealToolHeredocFallsBackToTheProviderSession(t *testing.T) {
 	_, err = revealCall(t, h, hcHuman, map[string]any{"runId": "run-1", "toolCallId": "call-1", "index": 0})
 	wantErrCode(t, err, codeNotFound)
 }
+
+// H5: a human's detail=auto open rebuilds a small claude-native session by
+// itself, from the cache after the first read.
+func TestRunLogsAutoRebuildsOnOpenForAHuman(t *testing.T) {
+	e := newHCEnv(t)
+	e.reg.SetRebuildCacheBudget(16 << 20)
+	res, _ := e.logs(t, hcHuman, map[string]any{"runId": "skel", "detail": "auto"})
+	if res.HistorySource != "rebuilt" || res.SkeletonReason != "" {
+		t.Fatalf("label = %+v", res.historyFields)
+	}
+	if !strings.Contains(eventsText(res), "need the failing test first") || strings.Contains(eventsText(res), hcSecret) {
+		t.Fatal("auto did not return the rebuilt, elided history")
+	}
+	again, _ := e.logs(t, hcHuman, map[string]any{"runId": "skel", "detail": "auto"})
+	if eventsText(again) != eventsText(res) || e.reg.RebuildCacheStats().Hits != 1 {
+		t.Fatalf("second open: hits %d", e.reg.RebuildCacheStats().Hits)
+	}
+}
+
+// H7: an agent, an automation or a caller with no principal that sends auto reads
+// exactly what it reads with no detail, and never reaches the provider session.
+func TestRunLogsAutoNeverRebuildsForAMachine(t *testing.T) {
+	e := newHCEnv(t)
+	e.reg.SetRebuildCacheBudget(16 << 20)
+	plain, _ := e.logs(t, hcAgent, map[string]any{"runId": "skel"})
+	for _, rc := range []*requestContext{hcAgent, nil} {
+		res, _ := e.logs(t, rc, map[string]any{"runId": "skel", "detail": "auto"})
+		if res.HistorySource != "skeleton" || res.CanLoadFull || eventsText(res) != eventsText(plain) {
+			t.Fatalf("machine auto: %+v", res.historyFields)
+		}
+	}
+	if e.calls.Load() != 0 || e.reg.RebuildCacheStats().Entries != 0 {
+		t.Fatalf("a machine's auto reached the provider session (%d root lookups)", e.calls.Load())
+	}
+}

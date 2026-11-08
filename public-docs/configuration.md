@@ -150,6 +150,7 @@ An unknown provider id under `providers.<id>` is an error. See
 | --- | --- | --- |
 | `runs.historyRetentionDays` | `30` | How long a finished run keeps its large tool output (the copies over 512 bytes). After that the run keeps its prompts, answers, one row per tool call with a short summary, permissions, usage, failure reason and git facts, and its full history can still be read back from the provider's own session while that file exists. Runs finished before this rule, and runs the daemon could not convert, keep the old behaviour: their whole detail is deleted and opening one shows a note. A task that is not archived keeps everything, whatever its age. `0` keeps everything forever. Must be 0 or more. See the warning below. |
 | `runs.historyBudgetMB` | `64` | Memory the daemon keeps for finished runs' output. Older output stays in the database and is read when you open the run, complete and unchanged; a running run is never limited. Must be 1 or more. Raise it if reopening recent runs feels slow; lower it on a small machine. |
+| `runs.rebuildCacheMB` | `16` | Memory for full histories read back from a provider's own session (never stored by smind). While the session file is unchanged, reopening such a run is served from here without reading the file again. `0` turns it off. Must be 0 or more. |
 
 > **Warning: large tool output older than 30 days is removed.** After you
 > upgrade, the first pass runs two minutes after the daemon starts and then once
@@ -291,6 +292,7 @@ Every number must be 1 or more. Budgets must be above 0, and
 | `SMIND_EXPO_ACCESS_TOKEN` | Overrides `push.expoAccessToken`. |
 | `SMIND_LEARNING` | The same off values force `learning.enabled` off. |
 | `SMIND_RUN_HISTORY_BUDGET_MB` | A positive number overrides `runs.historyBudgetMB`. |
+| `SMIND_RUN_REBUILD_CACHE_MB` | A whole number of megabytes (0 or more) overrides `runs.rebuildCacheMB`. |
 | `SMIND_RUN_HISTORY_RETENTION_DAYS` | A whole number of days (0 or more) overrides `runs.historyRetentionDays`. |
 | `SMIND_PPROF` | `1`, `true`, `on`, `yes`, `y`, `t` or `enabled` turns `debug.pprof` on. |
 | `SMIND_VERSION`, `SMIND_INSTALL_DIR`, `SMIND_APP_DIR` | Read by the install scripts. See [Getting started](getting-started.md). |

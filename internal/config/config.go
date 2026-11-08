@@ -45,10 +45,19 @@ type RunsConfig struct {
 	// final text; a task that is not archived keeps everything. Default 30;
 	// 0 keeps everything forever; Load rejects negative values.
 	HistoryRetentionDays int `yaml:"historyRetentionDays"`
+	// RebuildCacheMB caps the memory held by rebuilt histories (a finished run's
+	// full history read back from the provider's own session). They are never
+	// stored; a cached one is served without reading the session again while the
+	// session file is unchanged. Default 16; 0 turns the cache off; Load rejects
+	// negative values.
+	RebuildCacheMB int `yaml:"rebuildCacheMB"`
 }
 
 // DefaultRunHistoryRetentionDays is RunsConfig.HistoryRetentionDays' default.
 const DefaultRunHistoryRetentionDays = 30
+
+// DefaultRunRebuildCacheMB is RunsConfig.RebuildCacheMB's default.
+const DefaultRunRebuildCacheMB = 16
 
 // DebugConfig holds the opt-in diagnostics. Both are human edits of
 // config.yaml (or env): no RPC, agent or relay session can change them.
@@ -69,6 +78,8 @@ const (
 	EnvRunHistoryBudgetMB = "SMIND_RUN_HISTORY_BUDGET_MB"
 	// EnvRunHistoryRetentionDays overrides runs.historyRetentionDays (an integer >= 0).
 	EnvRunHistoryRetentionDays = "SMIND_RUN_HISTORY_RETENTION_DAYS"
+	// EnvRunRebuildCacheMB overrides runs.rebuildCacheMB (an integer >= 0).
+	EnvRunRebuildCacheMB = "SMIND_RUN_REBUILD_CACHE_MB"
 )
 
 // PluginsConfig is the global plugin switch (ADR-0042). It is off by default
@@ -599,7 +610,7 @@ func Default() Config {
 		Validation:  ValidationConfig{MaxBudgetUsd: 5, DefaultBudgetUsd: 1.5},
 		Fleet:       DefaultFleet(),
 		Log:         LogConfig{MaxSizeMB: DefaultLogMaxSizeMB, MaxFiles: DefaultLogMaxFiles},
-		Runs:        RunsConfig{HistoryBudgetMB: DefaultRunHistoryBudgetMB, HistoryRetentionDays: DefaultRunHistoryRetentionDays},
+		Runs:        RunsConfig{HistoryBudgetMB: DefaultRunHistoryBudgetMB, HistoryRetentionDays: DefaultRunHistoryRetentionDays, RebuildCacheMB: DefaultRunRebuildCacheMB},
 	}
 }
 
@@ -677,6 +688,9 @@ func LoadFile(path string) (Config, error) {
 	if n := cfg.Runs.HistoryRetentionDays; n < 0 {
 		return cfg, fmt.Errorf("config %s: runs.historyRetentionDays must be >= 0 (0 keeps history forever), got %d", path, n)
 	}
+	if n := cfg.Runs.RebuildCacheMB; n < 0 {
+		return cfg, fmt.Errorf("config %s: runs.rebuildCacheMB must be >= 0 (0 turns the cache off), got %d", path, n)
+	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", path, MaxGLMTurns, *mt)
 	}
@@ -726,6 +740,11 @@ func applyEnv(cfg *Config) {
 	if v := strings.TrimSpace(os.Getenv(EnvRunHistoryRetentionDays)); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			cfg.Runs.HistoryRetentionDays = n
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvRunRebuildCacheMB)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Runs.RebuildCacheMB = n
 		}
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvLearning)); v != "" {
