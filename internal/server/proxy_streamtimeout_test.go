@@ -258,3 +258,23 @@ func TestProxy_ClientDisconnectCancelsUpstream(t *testing.T) {
 		t.Fatal("the upstream request was not cancelled after the client left")
 	}
 }
+
+// Headers answered, then silence before the first chunk: the idle bound is armed
+// from the moment the headers arrive, not from the first chunk.
+func TestProxy_SilentAfterHeadersIsCutByIdleTimeout(t *testing.T) {
+	t.Parallel()
+	var n atomic.Int32
+	up := sseUpstream(t, &n, func(w http.ResponseWriter, r *http.Request) {
+		streamHeaders(w)
+		w.(http.Flusher).Flush()
+		blockUntilGone(r)
+	})
+	srv := timeoutProxy(t, up, upstreamTimeouts{header: time.Second, streamIdle: 150 * time.Millisecond, total: time.Minute})
+	start := time.Now()
+	if body, err := io.ReadAll(postMessages(t, srv, `{"stream":true}`).Body); err == nil {
+		t.Fatalf("a silent stream ended cleanly with %q", body)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("cut after %v, want about the 150 ms idle bound", d)
+	}
+}
