@@ -18,7 +18,7 @@ See [README.md](README.md) for what smind is and how to build/run it.
   them as local-only.
 - `refs/` — read-only reference clones of other projects for pattern lookup (see below).
 
-- `.agents/skills/` (symlinked into `.claude/skills/`, pinned in `skills-lock.json`) — agent skills: frontend (`web-design-guidelines`, `vercel-composition-patterns`, `vercel-react-best-practices`, `frontend-design`), mobile (`expo-*`, `sleek-design-mobile-apps`, `vercel-react-native-skills`), Go (`golang-*`), process (`plan`, `adr`, `verify`, `single-agent-loop` — audit/fold multi-agent setups, notes in `docs/plans/active/single-loop/`). Agents that don't auto-load skills should read the relevant `SKILL.md` before UI work.
+- `.agents/skills/` (symlinked into `.claude/skills/`, pinned in `skills-lock.json`) — agent skills: frontend (`web-design-guidelines`, `vercel-composition-patterns`, `vercel-react-best-practices`, `frontend-design`), mobile (`expo-*`, `sleek-design-mobile-apps`, `vercel-react-native-skills`), Go (`golang-*`), process (`plan`, `adr`, `verify`, `diagnosing-bugs`, `writing-for-agents`, `retro`, `wizard`, `code-review`, `single-agent-loop` — audit/fold multi-agent setups, notes in `docs/plans/active/single-loop/`). Agents that don't auto-load skills should read the relevant `SKILL.md` before UI work.
 
 ## Workflow rules
 
@@ -46,6 +46,18 @@ optional Peers), follow [docs/WORKSPACE_PROTOCOL.md](docs/WORKSPACE_PROTOCOL.md)
 complexity-point sizing, one owner per write scope, the brief and the Peer's
 json handoff block (`status` done/blocked/failed), explicit accept/reject, and
 process safety (isolated sandboxes; kill only the PIDs you started).
+
+## Vendored process skills
+
+`diagnosing-bugs`, `writing-for-agents`, `retro`, `wizard` and `code-review`
+are vendored unmodified (MIT, see `NOTICE`); smind-specific meaning is mapped
+here, never edited into the skill files:
+
+- "issue tracker" means GitHub PRs and issues, with `docs/plans/active/<slug>.md`
+  as the spec source (what `code-review` calls the originating issue/spec).
+- `GLOSSARY.md` is optional; when it is absent, skip it.
+- `code-review`'s fixed point defaults to `origin/develop`.
+- The vendor's repo-setup skill is not used; this section replaces it.
 
 ## refs/
 
