@@ -373,3 +373,46 @@ func TestStandards_CopyIntoANestedPlantedSymlinkNeverEscapes(t *testing.T) {
 		t.Fatalf("copy = %q, %v", got, err)
 	}
 }
+
+// TestStandards_PruneRefusesASymlinkedScratchRoot: a walk does not descend a
+// symlinked root, so a prune of one would remove nothing and report success.
+func TestStandards_PruneRefusesASymlinkedScratchRoot(t *testing.T) {
+	f := newPruneFixture(t)
+	f.writeFile(filepath.Join(f.outside, "CLAUDE.md"), "OUTSIDE")
+	link := filepath.Join(t.TempDir(), "scratch")
+	if err := os.Symlink(f.outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := PruneScratch(link, PruneSpecFor(AxisSpec, nil)); err == nil {
+		t.Fatal("PruneScratch(symlinked root) = nil, want a refusal")
+	}
+	if err := PruneScratch(filepath.Join(f.scratch, "missing"), PruneSpecFor(AxisSpec, nil)); err == nil {
+		t.Fatal("PruneScratch(missing root) = nil, want an error")
+	}
+	f.outsideIntact()
+}
+
+// TestStandards_PruneCoversTheOtherProvidersAutoloads: the names a CLI loads on
+// its own beyond Claude's, at the root and nested.
+func TestStandards_PruneCoversTheOtherProvidersAutoloads(t *testing.T) {
+	f := newPruneFixture(t)
+	rels := []string{
+		"agents.override.md", ".agents/skills/x/SKILL.md", "opencode.json", "opencode.jsonc", ".github/copilot-instructions.md",
+		".github/instructions/a.md", ".clinerules", ".goosehints", ".windsurf/rules", ".windsurfrules", ".roo/r", ".kiro/k", ".continue/c",
+		".aider.conf.yml", "crush.md", "qwen.md", ".claude-plugin/p.json", "pkg/Opencode.JSON", "pkg/.Agents/x",
+	}
+	for _, rel := range rels {
+		f.writeFile(filepath.Join(f.scratch, filepath.FromSlash(rel)), "planted")
+	}
+	f.writeFile(filepath.Join(f.scratch, "main.go"), "package x")
+	f.writeFile(filepath.Join(f.scratch, ".github", "workflows", "ci.yml"), "ci")
+	if err := PruneScratch(f.scratch, SingleSeatPruneSpec()); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"agents.override.md", ".agents", "opencode.json", "opencode.jsonc", ".github/copilot-instructions.md", ".github/instructions",
+		".clinerules", ".goosehints", ".windsurf", ".windsurfrules", ".roo", ".kiro", ".continue", ".aider.conf.yml", "crush.md", "qwen.md", ".claude-plugin", "pkg/Opencode.JSON", "pkg/.Agents"} {
+		f.gone(rel)
+	}
+	f.present("main.go")
+	f.present(".github/workflows/ci.yml")
+}

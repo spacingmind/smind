@@ -601,3 +601,25 @@ func TestStewardHost_StartupClosesPassesLeftOpenUnderAClosedReview(t *testing.T)
 		t.Fatalf("orphans after the reconcile = %+v", orphans)
 	}
 }
+
+// TestTwoAxisE2E_PruneFailureBlocksBothPasses: fail closed. A prune that fails
+// leaves a head checkout that may still carry planted autoloads, so neither
+// pass starts a run and the review is decided BLOCKED.
+func TestTwoAxisE2E_PruneFailureBlocksBothPasses(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.host.prune = func(string, steward.PruneSpec) error { return errors.New("permission denied") }
+	e.enableTwoAxis(t, twoAxisOpts{withSpec: true})
+	e.wireHeadAndContract()
+	e.bindSteward(t)
+	r := e.reviewViaRPC(t, &requestContext{local: true})
+	row := e.waitStatus(t, r.ReviewID, "blocked")
+	if row.Verdict != steward.VerdictBlocked || row.BlockedReason != "crashed" {
+		t.Fatalf("review = %+v, want BLOCKED/crashed", row)
+	}
+	for _, axis := range []steward.Axis{steward.AxisStandards, steward.AxisSpec} {
+		if p := e.pass(t, r.ReviewID, axis); p.Status != steward.PassBlocked || p.RunID != "" {
+			t.Fatalf("%s pass = %+v, want blocked before any run", axis, p)
+		}
+	}
+}

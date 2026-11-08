@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/steward"
@@ -31,14 +32,18 @@ func (e *stewardHostEnv) plantSingleSeatTree(t *testing.T, outside string) strin
 	for _, rel := range []string{
 		"CLAUDE.md", "claude.local.md", "AGENTS.md", "agents.md", ".mcp.json", ".claude/settings.json", ".codex/config.toml",
 		"sub/CLAUDE.md", "Sub/Agents.MD", "sub/.claude/settings.json", "sub/.CLAUDE/x", "a/b/c/AGENTS.md", "GEMINI.md", ".cursorrules",
+		"agents.override.md", ".agents/skills/x/SKILL.md", "opencode.json", ".github/copilot-instructions.md", ".github/instructions/a.md",
+		".clinerules", ".goosehints", "deep/er/.windsurf/rules", ".claude-plugin/plugin.json", ".github/PULL_REQUEST_TEMPLATE.md",
 	} {
 		write(rel, "planted")
 	}
 	write("main.go", "package x")
 	write("docs/notes.md", "notes")
 	for rel, target := range map[string]string{
-		"nested-claude/.claude": outside, // a symlinked autoload directory
-		"link":                  outside, // an ordinary directory symlinked outside: never descended into
+		"nested-claude/.claude": outside,                             // a symlinked autoload directory
+		"link":                  outside,                             // an ordinary directory symlinked outside: never descended into
+		"x/AGENTS.md":           filepath.Join(outside, "AGENTS.md"), // a file symlink named like an autoload
+		"y/CLAUDE.md":           outside,                             // a directory symlink named like an autoload
 	} {
 		full := filepath.Join(wt, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -73,12 +78,15 @@ func TestSingleSeat_ScratchTreeLosesPlantedAutoloads(t *testing.T) {
 	for _, gone := range []string{
 		"CLAUDE.md", "claude.local.md", "AGENTS.md", "agents.md", ".mcp.json", ".claude", ".codex", "sub/CLAUDE.md", "Sub/Agents.MD",
 		"sub/.claude", "sub/.CLAUDE", "a/b/c/AGENTS.md", "GEMINI.md", ".cursorrules", "nested-claude/.claude",
+		"agents.override.md", ".agents", "opencode.json", ".github/copilot-instructions.md", ".github/instructions", ".clinerules",
+		".goosehints", "deep/er/.windsurf", ".claude-plugin", "x/AGENTS.md", "y/CLAUDE.md",
 	} {
 		if _, err := os.Lstat(filepath.Join(scratch, filepath.FromSlash(gone))); err == nil {
 			t.Errorf("the single seat's tree still carries %s", gone)
 		}
 	}
-	for _, kept := range []string{"main.go", "docs/notes.md", "scenario", "link"} {
+	// The single seat has no standards copies, so a head PR template stays.
+	for _, kept := range []string{"main.go", "docs/notes.md", "scenario", "link", ".github/PULL_REQUEST_TEMPLATE.md"} {
 		if _, err := os.Lstat(filepath.Join(scratch, filepath.FromSlash(kept))); err != nil {
 			t.Errorf("the prune removed %s: %v", kept, err)
 		}
@@ -115,11 +123,18 @@ func TestSingleSeat_PruneFailureBlocksTheReview(t *testing.T) {
 func TestSingleSeat_PruneSpecIsTheAutoloadsOnly(t *testing.T) {
 	t.Parallel()
 	spec := steward.SingleSeatPruneSpec()
-	if len(spec.Paths) != 0 {
-		t.Fatalf("single seat prune paths = %v, want none", spec.Paths)
+	for _, p := range spec.Paths {
+		for _, std := range steward.DefaultStandardsFiles {
+			if p == std {
+				t.Fatalf("the single seat prunes the standards path %s", p)
+			}
+		}
 	}
 	want := steward.PruneSpecFor(steward.AxisSpec, nil)
-	if len(spec.Names) != len(want.Names) {
-		t.Fatalf("single seat names = %v, want the same as the spec pass's %v", spec.Names, want.Names)
+	if !slices.Equal(spec.Names, want.Names) || !slices.Equal(spec.Paths, want.Paths) {
+		t.Fatalf("single seat spec = %+v, want exactly the spec pass's %+v", spec, want)
+	}
+	if std := steward.PruneSpecFor(steward.AxisStandards, nil); len(std.Paths) <= len(spec.Paths) {
+		t.Fatalf("the standards pass prunes no more paths than the single seat: %v", std.Paths)
 	}
 }

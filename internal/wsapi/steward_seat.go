@@ -359,12 +359,13 @@ func (h *stewardHost) startSeat(id int64, lead store.Task, prof store.AgentProfi
 	}
 	// The scratch tree is the PR's head checkout, so a change could plant what a
 	// seat's CLI loads on its own (instruction files, .claude, .mcp.json, other
-	// providers' equivalents, at any depth). They are removed before the seat
-	// starts, without following a symlink; a failure here blocks the review.
-	// AGENTS.md goes too, as it does for the Spec pass: this seat judges from the
-	// digest and the diff's files and is never pointed at a standards file, so
-	// nothing it needs is lost, and a head AGENTS.md is exactly what a PR could
-	// write to steer it.
+	// providers' equivalents, at any depth). They are removed before the seat's
+	// run exists, without following a symlink: the prune must never write or
+	// delete outside the scratch tree, and a failure here blocks the review.
+	// AGENTS.md goes too, as it does for the Spec pass: this seat judges from
+	// the digest and the diff's files, and its prompt (BuildPrompt) names no
+	// standards file, so nothing it needs is lost, while a head AGENTS.md is
+	// exactly what a PR could write to steer it.
 	if err := h.prune(*task.WorktreePath, steward.SingleSeatPruneSpec()); err != nil {
 		slog.Warn("steward: the single seat's scratch tree could not be pruned", "review", id, "err", err)
 		return fail(err)

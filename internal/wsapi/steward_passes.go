@@ -161,7 +161,7 @@ func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.S
 	// The scratch tree is the PR's head checkout: whatever a seat's CLI would
 	// load on its own from it, at any depth, is removed, and the Standards pass
 	// also loses the head copies of the standards files (steward.PruneSpecFor).
-	if err := steward.PruneScratch(*task.WorktreePath, steward.PruneSpecFor(axis, standardsExtra)); err != nil {
+	if err := h.prune(*task.WorktreePath, steward.PruneSpecFor(axis, standardsExtra)); err != nil {
 		return err
 	}
 	if axis == steward.AxisStandards {
