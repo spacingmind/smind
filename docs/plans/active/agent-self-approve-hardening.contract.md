@@ -11,7 +11,7 @@ acs:
     text: "smind task approve|deny|answer and smind permission refuse with exit 1 and a one-line message when SMIND_AGENT_RUN or SMIND_RUN_ID is set, and run normally without; the read and orchestration commands are untouched."
     covers: { tests: [cli_refuses_in_agent_run, cli_runs_for_humans, cli_leaves_agent_commands_alone], frames: [] }
   - id: SA3
-    text: "The floor rule no-self-approve denies those commands however they are wrapped or spelled (env -u, sh -c, bash -lc, xargs, command, exec, quoted or absolute binary, $(which smind), a renamed copy for the task verbs) and any command whose raw text, heredoc bodies included, names a human-only RPC; near misses stay allowed; a policy allow rule cannot beat it."
+    text: "The floor rule no-self-approve denies those commands however they are wrapped or spelled (env -u, sh -c, bash -lc, xargs, command, exec, quoted or absolute binary, $(which smind), a renamed copy for the task verbs) and any command whose raw text, heredoc bodies included, names a human-only RPC next to a network client or interpreter; near misses stay allowed; a policy allow rule cannot beat it."
     covers: { tests: [floor_cli_denied, floor_near_misses_allowed, floor_rpc_name_denied, floor_heredoc_body_denied, floor_not_allowable_by_policy], frames: [] }
   - id: SA4
     text: "The human-only tables cannot drift from the handler map: no named method is run-scoped, and the ones that exist stay handlers."
@@ -39,6 +39,8 @@ mutations:
   - { id: M5, file: internal/permpolicy/humanonly.go, change: "the permission command is removed from the human-only table", expectFail: [floor_cli_denied, cli_table] }
   - { id: M6, file: cmd/smind/main.go, change: "the agent-run guard in run() is disabled", expectFail: [cli_refuses_in_agent_run] }
   - { id: M7, file: cmd/smind/main.go, change: "inAgentRun ignores SMIND_RUN_ID", expectFail: [cli_refuses_in_agent_run] }
+  - { id: M9, file: internal/permpolicy/humanonly.go, change: "hasTransport is always true, so a search that names a method is denied", expectFail: [floor_rpc_name_denied] }
+  - { id: M10, file: internal/permpolicy/floor.go, change: "compound-command keywords are not unwrapped", expectFail: [floor_cli_denied] }
   - { id: M8, file: internal/taskrunner/runner.go, change: "RunPrompt no longer adds SMIND_AGENT_RUN to the launch env", expectFail: [agent_marker_claude, agent_marker_acp] }
 commands:
   - { id: C1, run: "go vet ./internal/permpolicy/ ./cmd/smind/ ./internal/taskrunner/ ./internal/wsapi/", timeoutSec: 900 }
