@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
@@ -69,16 +70,24 @@ func (h *stewardHost) passProfile(name string) (store.AgentProfile, error) {
 
 // openPasses creates the review's two pass rows (pending), each with the
 // profile and model it will run on.
-func (h *stewardHost) openPasses(reviewID int64, cfg config.StewardConfig) error {
+func (h *stewardHost) openPasses(reviewID int64, cfg config.StewardConfig, only []steward.Axis) error {
 	for _, p := range passPlan(cfg) {
 		prof, err := h.passProfile(p.limits.Profile)
 		if err != nil {
 			return err
 		}
-		if _, err := h.db.InsertStewardReviewPass(store.StewardReviewPass{
+		row, err := h.db.InsertStewardReviewPass(store.StewardReviewPass{
 			ReviewID: reviewID, Axis: string(p.axis), Status: steward.PassPending, Profile: prof.Name, Model: prof.Model,
-		}, time.Now()); err != nil {
+		}, time.Now())
+		if err != nil {
 			return err
+		}
+		// A one-axis re-run closes the other pass at once: it never runs, and the
+		// combine reads it as a failed axis, so the review can never be ACCEPTED.
+		if len(only) > 0 && !slices.Contains(only, p.axis) {
+			if err := h.db.SetStewardPassBlocked(reviewID, row.Axis, store.StewardPassNotRun, "not requested: this review re-runs one axis", 0, time.Now()); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

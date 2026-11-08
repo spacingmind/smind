@@ -72,6 +72,21 @@ type Item struct {
 	// Action is the next step of a run_failed item (failure.Action), omitted
 	// for every other kind.
 	Action *failure.Action `json:"action,omitempty"`
+	// Axes is a two-axis review's per-pass verdicts (ADR-0054), omitted for
+	// every other item, including a single-axis review. It carries only the
+	// axis name, the pass's seat verdict (an ACCEPTED|CHANGES|BLOCKED enum, checked
+	// when the seat submits it), its status and a daemon enum reason: never seat text.
+	Axes []ItemAxis `json:"axes,omitempty"`
+}
+
+// ItemAxis is one pass of a two-axis review on a review item.
+type ItemAxis struct {
+	Axis    string `json:"axis"`
+	Verdict string `json:"verdict,omitempty"`
+	Status  string `json:"status"`
+	// Reason is the daemon-written blocked reason of a pass that did not run to
+	// a verdict (timeout, no_spec, not_run, ...): an enum, never seat text.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Links point at what the item is about.
@@ -145,6 +160,8 @@ type Review struct {
 	PRNumber     int
 	FailingGates []string
 	CreatedAt    time.Time
+	// Axes is a two-axis review's passes (ADR-0054); nil for a single-axis review.
+	Axes []ItemAxis
 }
 
 // Service derives the inbox. Every source is injected.
@@ -387,7 +404,8 @@ func reviewItem(r Review, title string) (Item, bool) {
 		attention = "high"
 	}
 	return Item{Key: fmt.Sprintf("review:%d", r.ID), Kind: KindReview, TaskID: r.TaskID, Title: title, Summary: clip(summary, MaxSummary),
-		CreatedAt: r.CreatedAt, Attention: attention, Links: Links{TaskID: r.TaskID, ReviewID: r.ID, ValidationID: r.ValidationID}}, true
+		CreatedAt: r.CreatedAt, Attention: attention, Links: Links{TaskID: r.TaskID, ReviewID: r.ID, ValidationID: r.ValidationID},
+		Axes: append([]ItemAxis(nil), r.Axes...)}, true
 }
 
 // PermissionSummary builds the redacted line a permission item shows: the tool

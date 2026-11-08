@@ -90,8 +90,9 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 			return nil, err
 		}
 		var p struct {
-			TaskID    int64  `json:"taskId"`
-			CommitSHA string `json:"commitSha"`
+			TaskID    int64    `json:"taskId"`
+			CommitSHA string   `json:"commitSha"`
+			Axes      []string `json:"axes"`
 		}
 		if err := pluginParams(m, raw, &p); err != nil {
 			return nil, err
@@ -99,7 +100,11 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 		if p.TaskID <= 0 {
 			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": taskId is required"}
 		}
-		return h.startReview(ctx, reviewParams{TaskID: p.TaskID, CommitSHA: p.CommitSHA, Trigger: steward.TriggerHuman})
+		axes, err := parseReviewAxes(p.Axes)
+		if err != nil {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": " + err.Error()}
+		}
+		return h.startReview(ctx, reviewParams{TaskID: p.TaskID, CommitSHA: p.CommitSHA, Trigger: steward.TriggerHuman, Axes: axes})
 	}
 
 	hs["steward.cancel"] = func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
@@ -277,6 +282,25 @@ func (h *stewardHost) ownsReview(row store.StewardReview, taskID int64) bool {
 	}
 	_, ok := h.passOf(row.ID, taskID)
 	return ok
+}
+
+// parseReviewAxes validates the optional `axes` of steward.review (ADR-0054
+// D4): each must be standards or spec, repeats collapse, the order given is
+// kept. Empty means a full review.
+func parseReviewAxes(raw []string) ([]steward.Axis, error) {
+	var out []steward.Axis
+	seen := map[steward.Axis]bool{}
+	for _, a := range raw {
+		axis := steward.Axis(a)
+		if axis != steward.AxisStandards && axis != steward.AxisSpec {
+			return nil, fmt.Errorf("axes: %q is not standards or spec", a)
+		}
+		if !seen[axis] {
+			seen[axis] = true
+			out = append(out, axis)
+		}
+	}
+	return out, nil
 }
 
 // framePNG reads one digest frame's bytes. The full path always comes from

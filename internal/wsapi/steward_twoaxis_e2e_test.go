@@ -623,3 +623,134 @@ func TestTwoAxisE2E_PruneFailureBlocksBothPasses(t *testing.T) {
 		}
 	}
 }
+
+// TestTwoAxisE2E_InboxItemCarriesAxes: through the real inbox.list, a finished
+// two-axis review is one review item with each pass's axis, verdict and status.
+func TestTwoAxisE2E_InboxItemCarriesAxes(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	id, std, spec := e.startTwoAxis(t, twoAxisOpts{withSpec: true})
+	f := steward.AxisFinding{SeatFinding: steward.SeatFinding{File: "main.go", Line: 3, Why: "no lint", Check: "task lint", Severity: "P2"}, Rule: ".smind-standards/AGENTS.md: Always run task lint."}
+	if _, err := e.submitPass(t, std, e.standardsDoc(id, steward.VerdictChanges, f)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.submitPass(t, spec, e.specDoc(t, id, steward.VerdictAccepted)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := budgetCall(t, e.api, &requestContext{local: true}, "inbox.list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Items []struct {
+			Key  string
+			Kind string
+			Axes []struct{ Axis, Verdict, Status string }
+		}
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range listed.Items {
+		if it.Kind != "review" {
+			continue
+		}
+		if len(it.Axes) != 2 || it.Axes[0].Axis != "standards" || it.Axes[0].Verdict != "CHANGES" || it.Axes[0].Status != "done" ||
+			it.Axes[1].Axis != "spec" || it.Axes[1].Verdict != "ACCEPTED" {
+			t.Fatalf("review item %s axes = %+v", it.Key, it.Axes)
+		}
+		_ = e.api.Runs.Stop(std.RunID)
+		_ = e.api.Runs.Stop(spec.RunID)
+		return
+	}
+	t.Fatalf("no review item in the inbox: %s", raw)
+}
+
+// TestTwoAxisE2E_AxisRerunRunsOnlyThatPassAndCapsAtChanges: steward.review with
+// axes [standards] runs the Standards pass only; the Spec pass is written as not
+// run, and the review can never be ACCEPTED even when that one pass accepts.
+func TestTwoAxisE2E_AxisRerunRunsOnlyThatPassAndCapsAtChanges(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.enableTwoAxis(t, twoAxisOpts{withSpec: true})
+	e.wireHeadAndContract()
+	e.bindSteward(t)
+	res, err := budgetCall(t, e.api, &requestContext{local: true}, "steward.review", map[string]any{"taskId": e.seatTask.ID, "axes": []string{"standards"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r reviewResult
+	if err := json.Unmarshal(res, &r); err != nil {
+		t.Fatal(err)
+	}
+	std := e.waitPass(t, r.ReviewID, steward.AxisStandards, steward.PassRunning)
+	spec := e.waitPass(t, r.ReviewID, steward.AxisSpec, steward.PassBlocked)
+	if spec.BlockedReason != store.StewardPassNotRun || spec.RunID != "" || spec.StewardTaskID != 0 {
+		t.Fatalf("spec pass = %+v, want not_run with no seat", spec)
+	}
+	v, err := e.submitPass(t, std, e.standardsDoc(r.ReviewID, steward.VerdictAccepted))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Verdict != steward.VerdictChanges || v.MergeReady || !strings.Contains(v.Summary, "axis spec did not complete (not_run)") {
+		t.Fatalf("view = %+v, want CHANGES, never ACCEPTED, with the spec axis named", v)
+	}
+	if pv := e.view(t, r.ReviewID); pv.Stale != "" || !pv.Partial {
+		t.Fatalf("partial view = %+v, want fresh and partial", pv)
+	}
+	// An identical full review is not answered with the partial one (and the reverse).
+	full := e.reviewViaRPC(t, &requestContext{local: true})
+	if full.Existing || full.ReviewID == r.ReviewID {
+		t.Fatalf("the full review was deduped to the partial one: %+v", full)
+	}
+	// The full review that just started supersedes the partial one, not the reverse.
+	if pv := e.view(t, r.ReviewID); pv.Stale != steward.StaleSuperseded || !pv.Partial {
+		t.Fatalf("partial view = %+v, want superseded by the newer full review", pv)
+	}
+	e.endReview(t, full.ReviewID)
+	_ = e.api.Runs.Stop(std.RunID)
+}
+
+func TestTwoAxisE2E_AxisRerunValidation(t *testing.T) {
+	t.Parallel()
+	e := newStewardHostEnv(t, "success")
+	e.enableTwoAxis(t, twoAxisOpts{}) // no spec
+	e.wireHeadAndContract()
+	e.bindSteward(t)
+	local := &requestContext{local: true}
+	for name, axes := range map[string][]string{"unknown axis": {"everything"}, "empty axis": {""}} {
+		_, err := budgetCall(t, e.api, local, "steward.review", map[string]any{"taskId": e.seatTask.ID, "axes": axes})
+		if err == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+		wantErrCode(t, err, codeInvalid)
+	}
+	// Re-running only the spec axis when no spec resolves has nothing to run.
+	_, err := budgetCall(t, e.api, local, "steward.review", map[string]any{"taskId": e.seatTask.ID, "axes": []string{"spec"}})
+	wantErrCode(t, err, codeInvalid)
+	if rows, _ := e.db.ListStewardReviews(e.seatTask.ID, 10); len(rows) != 0 {
+		t.Fatalf("a refused request left reviews behind: %+v", rows)
+	}
+	// The flag off: axes is refused, a plain review still works.
+	e2 := newStewardHostEnv(t, "success")
+	e2.setInputs(greenInputs("success"))
+	e2.bindSteward(t)
+	_, err = budgetCall(t, e2.api, local, "steward.review", map[string]any{"taskId": e2.seatTask.ID, "axes": []string{"standards"}})
+	wantErrCode(t, err, codeInvalid)
+	r := e2.reviewViaRPC(t, local)
+	e2.waitSeatStarted(t, r.ReviewID)
+	e2.endReview(t, r.ReviewID)
+}
+
+func (e *stewardHostEnv) view(t *testing.T, id int64) steward.View {
+	t.Helper()
+	raw, err := budgetCall(t, e.api, &requestContext{local: true}, "steward.get", map[string]any{"reviewId": id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v steward.View
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}

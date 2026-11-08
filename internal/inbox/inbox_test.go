@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strconv"
@@ -595,5 +596,57 @@ func TestDerive_RunFailedKeyStable(t *testing.T) {
 	b, _ := f.svc.List(Filter{})
 	if len(a) != 1 || len(b) != 1 || a[0].Key != b[0].Key || !a[0].CreatedAt.Equal(b[0].CreatedAt) || !a[0].CreatedAt.Equal(f.failed[0].FinishedAt) {
 		t.Fatalf("a = %+v, b = %+v", a, b)
+	}
+}
+
+// TestInbox_ReviewItemCarriesAxesAdditively (ADR-0054): a two-axis review's
+// item carries one {axis, verdict, status} per pass and nothing else of the
+// seat's; an ordinary review's item is exactly what it always was, with no
+// "axes" key.
+func TestInbox_ReviewItemCarriesAxesAdditively(t *testing.T) {
+	f := newFx(t)
+	two := review(31, 2, "CHANGES")
+	two.Axes = []ItemAxis{{Axis: "standards", Verdict: "CHANGES", Status: "done"}, {Axis: "spec", Status: "skipped", Reason: "no_spec"}}
+	f.reviews = []Review{two, review(32, 3, "ACCEPTED")}
+	items, err := f.svc.List(Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Item{}
+	for _, it := range items {
+		got[it.Key] = it
+	}
+	if a := got["review:31"].Axes; len(a) != 2 || a[0] != two.Axes[0] || a[1] != two.Axes[1] {
+		t.Fatalf("two-axis item axes = %+v", a)
+	}
+	raw, _ := json.Marshal(got["review:31"])
+	if !strings.Contains(string(raw), `"axes":[{"axis":"standards","verdict":"CHANGES","status":"done"},{"axis":"spec","status":"skipped","reason":"no_spec"}]`) {
+		t.Fatalf("two-axis item JSON = %s", raw)
+	}
+	single, _ := json.Marshal(got["review:32"])
+	if strings.Contains(string(single), "axes") || got["review:32"].Axes != nil {
+		t.Fatalf("a single-axis item carries axes: %s", single)
+	}
+	if got["review:31"].Summary != got["review:32"].Summary {
+		t.Fatalf("axes changed the summary: %q vs %q", got["review:31"].Summary, got["review:32"].Summary)
+	}
+}
+
+// TestInbox_ReviewSupersessionUnchanged: axes change nothing about which
+// reviews are items: a two-axis review still replaces the task's verdict row
+// and a stale one still drops out.
+func TestInbox_ReviewSupersessionUnchanged(t *testing.T) {
+	f := newFx(t)
+	f.views = []validation.View{verdict(7, 2, "pass", true, false)}
+	r := review(41, 2, "ACCEPTED")
+	r.Axes = []ItemAxis{{Axis: "standards", Verdict: "ACCEPTED", Status: "done"}, {Axis: "spec", Verdict: "ACCEPTED", Status: "done"}}
+	f.reviews = []Review{r}
+	if items, _ := f.svc.List(Filter{}); keysOf(items) != "review:41" {
+		t.Fatalf("keys = %q, want the review to replace the verdict row", keysOf(items))
+	}
+	r.Stale = "head moved"
+	f.reviews = []Review{r}
+	if items, _ := f.svc.List(Filter{}); keysOf(items) != "verdict:7" {
+		t.Fatalf("keys = %q, want the stale two-axis review to drop out", keysOf(items))
 	}
 }

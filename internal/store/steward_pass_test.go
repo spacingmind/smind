@@ -305,3 +305,34 @@ func TestStore_PassCostOnlyRises(t *testing.T) {
 		t.Fatalf("cost after done = %v, want 0.95", got.CostUSD)
 	}
 }
+
+// TestStore_FindReviewByKeyIgnoresPartialReviews: a review with a not_run pass
+// (a one-axis re-run) is never the dedupe match of a full review.
+func TestStore_FindReviewByKeyIgnoresPartialReviews(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	seedStewardTasks(t, s, 1)
+	now := time.Now().UTC().Truncate(time.Second)
+	r, err := s.InsertStewardReview(StewardReview{TaskID: 1, TriggerKind: "human", HeadSHA: "h1", ContractSha256: "c", CIState: "success", Status: "done"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.FindStewardReviewByKey(1, "h1", "c", "success"); err != nil || got.ID != r.ID {
+		t.Fatalf("FindStewardReviewByKey(full review) = %+v, %v", got, err)
+	}
+	for _, axis := range []string{StewardAxisStandards, StewardAxisSpec} {
+		if _, err := s.InsertStewardReviewPass(StewardReviewPass{ReviewID: r.ID, Axis: axis, Status: "pending"}, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := s.FindStewardReviewByKey(1, "h1", "c", "success"); err != nil || got.ID != r.ID {
+		t.Fatalf("a two-axis review stays a dedupe match: %+v, %v", got, err)
+	}
+	if err := s.SetStewardPassBlocked(r.ID, StewardAxisSpec, StewardPassNotRun, "not requested", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FindStewardReviewByKey(1, "h1", "c", "success"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("FindStewardReviewByKey(partial review) error = %v, want no rows", err)
+	}
+}

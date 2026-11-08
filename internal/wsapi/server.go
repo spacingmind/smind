@@ -398,13 +398,19 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		if err != nil {
 			return nil, err
 		}
-		seen := map[int64]bool{}
+		// One current review per task, and one more for a partial re-run: a
+		// partial review supersedes no full review, so both stay listed.
+		type slot struct {
+			task    int64
+			partial bool
+		}
+		seen := map[slot]bool{}
 		var out []inbox.Review
 		for _, v := range views { // newest first
-			if seen[v.TaskID] {
+			if seen[slot{v.TaskID, v.Partial}] {
 				continue
 			}
-			seen[v.TaskID] = true
+			seen[slot{v.TaskID, v.Partial}] = true
 			if v.Status != "done" && v.Status != "blocked" {
 				continue
 			}
@@ -417,8 +423,12 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 					failing = append(failing, g.ID)
 				}
 			}
+			var axes []inbox.ItemAxis
+			for _, a := range v.Axes {
+				axes = append(axes, inbox.ItemAxis{Axis: string(a.Axis), Verdict: a.SeatVerdict, Status: a.Status, Reason: a.BlockedReason})
+			}
 			out = append(out, inbox.Review{ID: v.ID, TaskID: v.TaskID, Verdict: v.Verdict, Status: v.Status, Stale: v.Stale,
-				ValidationID: v.ValidationID, HeadSHA: v.HeadSHA, PRNumber: v.PRNumber, FailingGates: failing, CreatedAt: v.CreatedAt})
+				ValidationID: v.ValidationID, HeadSHA: v.HeadSHA, PRNumber: v.PRNumber, FailingGates: failing, CreatedAt: v.CreatedAt, Axes: axes})
 		}
 		return out, nil
 	})

@@ -74,6 +74,66 @@ describe("InboxScreen", () => {
     expect(within(row).getByTestId("inbox-review-review:12")).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("review row shows an axis chip per axis", async () => {
+    const item: InboxItem = {
+      key: "review:12",
+      kind: "review",
+      taskId: 9,
+      title: "Add the login fix",
+      summary: "Steward: changes requested",
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      state: "new",
+      attention: "normal",
+      links: { taskId: 9, reviewId: 12 },
+      axes: [
+        { axis: "standards", verdict: "ACCEPTED", status: "done" },
+        { axis: "spec", status: "skipped" },
+      ],
+    };
+    await renderInbox(daemonWith(item));
+    const row = screen.getByTestId("inbox-row-review:12");
+    const chips = within(within(row).getByTestId("inbox-review-axes")).getAllByTestId(/inbox-review-axis-/);
+    expect(chips.map((c) => c.textContent)).toEqual(["Standards: Accepted", "Spec: Skipped"]);
+    expect(chips[0].querySelector("svg")).not.toBeNull();
+  });
+
+  it("review row says why a skipped axis was skipped", async () => {
+    const item: InboxItem = {
+      key: "review:13",
+      kind: "review",
+      taskId: 9,
+      title: "Add the login fix",
+      summary: "At 3fa9c1e",
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      state: "new",
+      attention: "normal",
+      links: { taskId: 9, reviewId: 13 },
+      axes: [
+        { axis: "standards", verdict: "ACCEPTED", status: "done" },
+        { axis: "spec", status: "skipped", reason: "no_spec" },
+      ],
+    };
+    await renderInbox(daemonWith(item));
+    const chips = within(screen.getByTestId("inbox-row-review:13")).getAllByTestId(/inbox-review-axis-/);
+    expect(chips.map((c) => c.textContent)).toEqual(["Standards: Accepted", "Spec: Skipped · no spec available"]);
+  });
+
+  it("review row without axes is unchanged", async () => {
+    const item: InboxItem = {
+      key: "review:12",
+      kind: "review",
+      taskId: 9,
+      title: "Add the login fix",
+      summary: "Steward: changes requested",
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      state: "new",
+      attention: "normal",
+      links: { taskId: 9, reviewId: 12 },
+    };
+    await renderInbox(daemonWith(item));
+    expect(screen.queryByTestId("inbox-review-axes")).toBeNull();
+  });
+
   it("TestInboxRowShowsHostChip", async () => {
     const d = daemonWith(hostPairItem(), permissionItem());
     const holder = d.client as unknown as { call: (m: string, p?: unknown) => Promise<unknown> };

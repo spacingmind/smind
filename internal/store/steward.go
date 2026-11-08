@@ -148,6 +148,15 @@ func (s *Store) ListStewardReviews(taskID int64, limit int) ([]StewardReview, er
 }
 
 // LatestStewardReview returns taskID's newest review, or sql.ErrNoRows.
+// LatestFullStewardReview is the task's newest review that is not a partial
+// one (a one-axis re-run, whose other pass is not_run): only a full review
+// supersedes another full review.
+func (s *Store) LatestFullStewardReview(taskID int64) (StewardReview, error) {
+	return scanStewardReview(s.db.QueryRow(`SELECT `+stewardReviewCols+` FROM steward_reviews WHERE task_id = ?
+		AND NOT EXISTS (SELECT 1 FROM steward_review_passes p WHERE p.review_id = steward_reviews.id AND p.blocked_reason = '`+StewardPassNotRun+`')
+		ORDER BY id DESC LIMIT 1`, taskID))
+}
+
 func (s *Store) LatestStewardReview(taskID int64) (StewardReview, error) {
 	return scanStewardReview(s.db.QueryRow(`SELECT `+stewardReviewCols+` FROM steward_reviews WHERE task_id = ? ORDER BY id DESC LIMIT 1`, taskID))
 }
@@ -156,10 +165,12 @@ func (s *Store) LatestStewardReview(taskID int64) (StewardReview, error) {
 // {task, head, contract, CI state}, or sql.ErrNoRows. It is the dedupe
 // lookup, and only an open or finished review counts; a blocked one
 // (timeout, budget, crashed, cancelled) never blocks a retry of the same
-// head.
+// head. A partial review (a re-run of one axis, whose other pass is not_run)
+// is never a match: a full review must not be answered with one.
 func (s *Store) FindStewardReviewByKey(taskID int64, headSHA, contractSha, ciState string) (StewardReview, error) {
 	return scanStewardReview(s.db.QueryRow(`SELECT `+stewardReviewCols+` FROM steward_reviews
 		WHERE task_id = ? AND head_sha = ? AND contract_sha256 = ? AND ci_state = ? AND status IN ('pending','running','done')
+		AND NOT EXISTS (SELECT 1 FROM steward_review_passes p WHERE p.review_id = steward_reviews.id AND p.blocked_reason = '`+StewardPassNotRun+`')
 		ORDER BY id DESC LIMIT 1`, taskID, headSHA, contractSha, ciState))
 }
 
