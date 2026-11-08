@@ -297,3 +297,19 @@ func (q *questionRecorder) NotifyQuestionPending(string, int64, int64, string, t
 func (q *questionRecorder) NotifyQuestionResolved(string, int64, int64, string, string) {
 	q.qResolved.Add(1)
 }
+
+// A profile with questions: disabled takes the agent's ask tool away (claude);
+// ask and decline leave it available.
+func TestQuestion_DisabledProfileDisallowsAskTool(t *testing.T) {
+	t.Parallel()
+	c, _ := policyFor(t, store.AgentProfile{Questions: QuestionsDisabled})
+	if len(c.DisallowedTools) != 1 || c.DisallowedTools[0] != "AskUserQuestion" {
+		t.Fatalf("disabled: DisallowedTools = %v", c.DisallowedTools)
+	}
+	for _, q := range []string{QuestionsAsk, QuestionsDecline} {
+		c, _ := policyFor(t, store.AgentProfile{Questions: q, Instructions: "ROLE"})
+		if len(c.DisallowedTools) != 0 {
+			t.Fatalf("%s: DisallowedTools = %v", q, c.DisallowedTools)
+		}
+	}
+}
