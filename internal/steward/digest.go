@@ -43,6 +43,15 @@ const (
 	standardsRuleMax     = 400
 )
 
+// Caps the two-axis sections shrink to before the existing shrink steps
+// (ADR-0054 §3: the new sections shrink first).
+const (
+	standardsHeadDiffShrinkMax = 1024
+	specCriteriaShrinkMax      = 20
+	specCriteriaTextShrinkMax  = 100
+	standardsRulesShrinkMax    = 5
+)
+
 // DiffStat sums the numstat rows; binary rows count as a file with 0/0.
 type DiffStat struct {
 	Files      int `json:"files"`
@@ -381,6 +390,57 @@ func (d Digest) Marshal() (data []byte, sha string, err error) {
 		name  string
 		apply func(d *Digest) bool
 	}{
+		{"untrusted.standardsHeadDiff", func(d *Digest) bool {
+			if len(d.Untrusted.StandardsHeadDiff) <= standardsHeadDiffShrinkMax {
+				return false
+			}
+			d.Untrusted.StandardsHeadDiff = sanitize(d.Untrusted.StandardsHeadDiff, standardsHeadDiffShrinkMax)
+			return true
+		}},
+		{"untrusted.specCriteria", func(d *Digest) bool {
+			if d.Spec == nil || len(d.Untrusted.SpecCriteria) == 0 {
+				return false
+			}
+			cut := false
+			kept := map[string]string{}
+			n := 0
+			// Criteria order is the deterministic drop order.
+			for _, c := range d.Spec.Criteria {
+				text, ok := d.Untrusted.SpecCriteria[c.ID]
+				if !ok {
+					continue
+				}
+				if n >= specCriteriaShrinkMax {
+					cut = true
+					continue
+				}
+				if len(text) > specCriteriaTextShrinkMax {
+					text = sanitize(text, specCriteriaTextShrinkMax)
+					cut = true
+				}
+				kept[c.ID] = text
+				n++
+			}
+			if !cut {
+				return false
+			}
+			d.Untrusted.SpecCriteria = kept
+			return true
+		}},
+		{"spec.testsInTree", func(d *Digest) bool {
+			if d.Spec == nil || len(d.Spec.TestsInTree) == 0 {
+				return false
+			}
+			d.Spec.TestsInTree = map[string]bool{}
+			return true
+		}},
+		{"untrusted.standardsRules", func(d *Digest) bool {
+			if len(d.Untrusted.StandardsRules) <= standardsRulesShrinkMax {
+				return false
+			}
+			d.Untrusted.StandardsRules = d.Untrusted.StandardsRules[:standardsRulesShrinkMax]
+			return true
+		}},
 		{"untrusted.handoffNotes", func(d *Digest) bool {
 			if len(d.Untrusted.HandoffNotes) == 0 {
 				return false
