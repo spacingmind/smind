@@ -40,10 +40,13 @@ func Test_passive_rejection_truth_table(t *testing.T) {
 
 					// Independent expectation.
 					wantRej := f == "rejected" || d == "rejected" || u == "rejected"
-					wantModel := u == "rejected" && f == "allowed" && d == "allowed" && oi == "rejected"
-					if f == "rejected" || d == "rejected" {
-						wantModel = false
-					}
+					// A rejected 7d_oi with the shared windows not exhausted is model
+					// scoped: both allowed, or a 7d that is allowed while the 5h
+					// status was omitted (the API leaves out a window it did not
+					// evaluate) on a rejected unified status with no 5h utilization.
+					// An omitted 7d status with no healthy utilization is not enough.
+					wantModel := u == "rejected" && oi == "rejected" && f != "rejected" && d != "rejected" &&
+						((f == "allowed" && d == "allowed") || (f == "" && d == "allowed"))
 					want := Rejection{Rejected: wantRej, ModelOnly: wantModel}
 					switch {
 					case !wantRej:
