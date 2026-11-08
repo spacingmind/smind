@@ -41,3 +41,42 @@ func TestNextAction_PerClass(t *testing.T) {
 		t.Fatal("empty or unknown kind must have no action")
 	}
 }
+
+func TestNextAction_NewClasses(t *testing.T) {
+	cases := []struct {
+		name, kind, wantKind, wantTarget, wantLabel string
+	}{
+		{"context window", KindContextWindowExceeded, ActionNewChat, "chat:new", "Start a fresh chat for this task"},
+		{"session budget", KindSessionBudgetExceeded, ActionRaiseBudget, "", "Raise the session budget in the provider's settings, or start a fresh chat"},
+		{"too many denials", KindTooManyDenials, ActionReviewPolicy, "settings:permission-policy", "Review the permission policy"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := NextAction(c.kind, ActionContext{Provider: "codex-native"})
+			if a == nil || a.Kind != c.wantKind || a.Target != c.wantTarget || a.Label != c.wantLabel {
+				t.Fatalf("got %+v, want kind %q target %q label %q", a, c.wantKind, c.wantTarget, c.wantLabel)
+			}
+			if a.Summary == "" {
+				t.Fatalf("Summary empty, want Describe(%q)", c.kind)
+			}
+		})
+	}
+}
+
+// TestNextAction_SummaryOnEveryClass: every action of every known kind carries
+// the class's plain sentence, so a client never needs its own label map.
+func TestNextAction_SummaryOnEveryClass(t *testing.T) {
+	now := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	reset := now.Add(2 * time.Hour)
+	next := now.Add(30 * time.Second)
+	ctxs := []ActionContext{
+		{Provider: "glm", ProviderLabel: "GLM", Model: "opus", AllowedModels: []string{"sonnet"}, Window: "5h", ResetAt: &reset, Now: now, Attempt: 1, Max: 2, NextAt: &next},
+	}
+	for _, kind := range AllKinds() {
+		if a := NextAction(kind, ctxs[0]); a == nil || a.Summary == "" {
+			t.Errorf("NextAction(%q) = %+v, want an action carrying a Summary", kind, a)
+		} else if a.Summary != Describe(kind) {
+			t.Errorf("NextAction(%q).Summary = %q, want Describe %q", kind, a.Summary, Describe(kind))
+		}
+	}
+}

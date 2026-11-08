@@ -694,25 +694,90 @@ export interface PermissionOption {
   kind: string;
 }
 
-// Params of a "permission_request" event task.prompt/run.attach emit
-// (internal/wsapi/handlers.go's permissionRequestParams).
-// One question in a structured, multi-question permission ask
-// (ui-redesign-parity Item 11, per audit-agent-harness.md's question-
-// form card). **No provider on either wire path produces this shape
-// today** -- internal/taskrunner's PermissionDecider always resolves to a
-// flat PermissionOption list (see permission.go), so `questions` is
-// defined here as forward-compatible, additive surface: a future daemon
-// change could populate it without breaking today's clients, and today's
-// UI can already render it correctly (see permission-card.tsx's
-// Validation note) the moment something does.
-export interface PermissionQuestion {
+// ---- Agent questions (ADR-0055): run.answerQuestion and the question_* events ----------------------------
+
+/** One selectable choice of a "single"/"multi" question (internal/taskrunner's wire shape, ADR-0055). */
+export interface QuestionOption {
   id: string;
-  prompt: string;
-  kind: "single_select" | "multi_select" | "free_text";
-  /** Present for single_select/multi_select. */
-  options?: { id: string; label: string }[];
-  /** Whether a free-text "other" answer is accepted alongside the listed options. */
+  label: string;
+  description?: string;
+}
+
+/** One question of a question request (ADR-0055): one choice mode, its options, and whether free text is accepted. */
+export interface Question {
+  id: string;
+  /** A short category label the agent may set ("Deploy target"); absent for a bare question. */
+  header?: string;
+  text: string;
+  kind: "single" | "multi" | "text";
+  /** Present for "single"/"multi". */
+  options?: QuestionOption[];
+  /** Whether a free-text "Other" answer is accepted alongside the listed options. */
   allowOther?: boolean;
+}
+
+/** A whole question request as the daemon emits it (ADR-0055): the asking source, the questions, and whether agent text was elided server-side. */
+export interface QuestionRequest {
+  source: string;
+  questions: Question[];
+  truncated?: boolean;
+}
+
+/** One question's answer as run.answerQuestion carries it: the chosen option ids and/or free text; empty fields are omitted by the sender. */
+export interface QuestionAnswerItem {
+  questionId: string;
+  optionIds?: string[];
+  text?: string;
+}
+
+/** run.answerQuestion's answer payload (ADR-0055): the action, the per-question answers (for "answer"), and an optional note. */
+export interface QuestionAnswer {
+  action: "answer" | "decline";
+  answers?: QuestionAnswerItem[];
+  note?: string;
+}
+
+// Wire form of the daemon's question resolution (ADR-0055), widened past
+// the known values the same way PermissionResolutionReason is: a reason
+// this client has never heard of still decodes and renders as raw text.
+export type QuestionResolutionReason =
+  | "human"
+  | "declined"
+  | "timeout"
+  | "refused_secret"
+  | "refused_unsupported"
+  | "repeat"
+  | "profile_decline"
+  | "no_human"
+  | "provider_cancellation"
+  | "run_ended"
+  | "daemon_restart"
+  | (string & {});
+
+// Params of a "question_request" event run.attach emits
+// (internal/wsapi/handlers.go, ADR-0055). In run.logs entries the same
+// data appears as {type:"question_request", requestId, question}.
+export interface QuestionRequestEventParams {
+  requestId: string;
+  request: QuestionRequest;
+}
+
+// Params of a "question_resolved" event run.attach emits (ADR-0055). In
+// run.logs entries the answer appears as `questionAnswer` instead.
+export interface QuestionResolvedEventParams {
+  requestId: string;
+  reason: QuestionResolutionReason;
+  answer?: QuestionAnswer;
+}
+
+// Params of run.answerQuestion (ADR-0055): an error response leaves the
+// request pending, so a rejected call must keep the card on screen.
+export interface RunAnswerQuestionParams {
+  runId: string;
+  requestId: string;
+  action: "answer" | "decline";
+  answers?: QuestionAnswerItem[];
+  note?: string;
 }
 
 /** One elided heredoc body of an execute permission/tool call: `command` carries only its `<<TAG [heredoc N bytes]` marker; the body is fetched on demand via permission.revealHeredoc/run.revealToolHeredoc. */
@@ -773,13 +838,13 @@ export interface PermissionDetail {
   policy?: { ruleId?: string; why?: string; normalized?: string; action?: string };
 }
 
+// Params of a "permission_request" event task.prompt/run.attach emit
+// (internal/wsapi/handlers.go's permissionRequestParams).
 export interface PermissionRequestEventParams {
   requestId: string;
   summary: string;
   options: PermissionOption[];
-  /** Present only for a question-form-shaped request -- see PermissionQuestion's doc comment on why nothing produces this yet. */
-  questions?: PermissionQuestion[];
-  /** Present only for a plan-review-shaped request: the plan as markdown, reviewed via Chat about it / Refuse / Approve rather than a plain option list. Same "additive, no producer yet" status as `questions`. */
+  /** Present only for a plan-review-shaped request: the plan as markdown, reviewed via Chat about it / Refuse / Approve rather than a plain option list. */
   plan?: string;
   detail?: PermissionDetail;
 }
@@ -858,6 +923,8 @@ export type RunEventType =
   | "done"
   | "permission_request"
   | "permission_resolved"
+  | "question_request"
+  | "question_resolved"
   | "mcp_servers"
   | "usage"
   | "raw";
@@ -886,6 +953,12 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   /** Client-side only: the kind of `optionId`, filled in from the matching "permission_request" by the timeline hook. */
   optionKind?: string;
   reason?: PermissionResolutionReason;
+  /** Populated for a "question_request" entry (ADR-0055) -- the request object, under the logs entry's own `question` key. */
+  question?: QuestionRequest;
+  /** Populated for a "question_resolved" entry (ADR-0055) -- the answer, when one was given. */
+  questionAnswer?: QuestionAnswer;
+  /** Client-side only: the row summary, filled in from the matching "question_request" by the timeline hook. */
+  questionSummary?: string;
   /** Populated for a "raw" entry (ADR 0010) -- the ACP session-update kind the normalizer didn't recognize (e.g. "plan"). */
   kind?: string;
   /** Populated for a "raw" entry (ADR 0010) -- the update's full original JSON, forwarded as-is. */

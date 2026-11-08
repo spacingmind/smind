@@ -18,6 +18,11 @@ The loop:
      approve or deny it. This is NOT completion. Loop: task_wait, then
      (the human approves), then task_wait again -- passing
      ignorePermissionIds for the requests you already surfaced.
+   - waiting_question: the agent asked the human a question and a HUMAN
+     must answer it (` + "`smind task answer`" + ` or the sMind web UI). You cannot
+     answer it. This is NOT completion. Loop: task_wait, then (the human
+     answers), then task_wait again -- passing ignorePermissionIds for
+     the request ids you already surfaced.
    - done / error / stopped: the run ended. A done run whose disposition
      is "needs-continue" (it hit a turn, token or budget cap; status stays
      done) is NOT finished: send a follow-up prompt such as "continue".
@@ -39,6 +44,18 @@ The loop:
                            profile (action auto_retry / retry_now).
      rate_limited          a limit of unknown kind: retry after a short wait;
                            do not assume the plan is exhausted.
+     context_window_exceeded the conversation no longer fits the model's
+                           context window: a human must start a fresh chat for
+                           the task; do not retry the same chat, do not fall
+                           back (action new_chat).
+     session_budget_exceeded the provider's own session budget is used up (not
+                           smind's tree budget): a human raises it in the
+                           provider's settings or starts a fresh chat; do not
+                           retry, do not fall back (action raise_budget).
+     too_many_denials      the provider stopped the run after too many denied
+                           actions: a human must review the permission policy;
+                           do not retry the same run, do not widen permissions
+                           from inside the run (action review_policy).
      cli_exited            the CLI died; its session is stored: send
                            "continue".
    task wait exits 6 for the limit classes and 7 when a human must fix setup.

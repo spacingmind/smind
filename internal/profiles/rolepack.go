@@ -93,6 +93,7 @@ var RoleSeats = []RoleSeat{
 			Name: seatPeerSonnet, Provider: "claude-native", Model: sonnetModel, PermissionMode: "auto",
 			OrchestrationTools: boolRef(false), ChildPolicy: "none", Skills: []string{"smind-peer"},
 			OnRateLimit:  "wait", // an account limit holds the work until it resets
+			Questions:    "decline",
 			Instructions: peerInstructions,
 			Notes:        "Bounded step: about 1.5 to 5 minutes, about $0.15 to $0.50 on the Human's measurements. Sonnet 5.5, auto mode, no orchestration tools. Ends with a json handoff block.",
 		}
@@ -109,7 +110,7 @@ var RoleSeats = []RoleSeat{
 	{Name: seatValidator, Build: func(map[string]int64) store.AgentProfile {
 		return store.AgentProfile{
 			Name: seatValidator, Provider: "claude-native", Model: sonnetModel, PermissionMode: "auto",
-			OrchestrationTools: boolRef(false), ChildPolicy: "none", OnRateLimit: "wait",
+			OrchestrationTools: boolRef(false), ChildPolicy: "none", OnRateLimit: "wait", Questions: "decline",
 			Skills:       []string{"smind-validator-frames"}, // the frame harness, for this seat only (ADR-0045 §7)
 			Instructions: validatorInstructions,
 			Notes:        "ADR-0045: judges one commit against a stored contract in a fresh context and scratch worktree. Started by validation.request, which gives its run the two validator tools; not a general reviewer. Sonnet 5.5, auto mode.",
@@ -118,7 +119,7 @@ var RoleSeats = []RoleSeat{
 	{Name: seatSteward, Build: func(map[string]int64) store.AgentProfile {
 		return store.AgentProfile{
 			Name: seatSteward, Provider: "claude-native", Model: sonnetModel, PermissionMode: "default",
-			OrchestrationTools: boolRef(false), ChildPolicy: "none", OnRateLimit: "wait",
+			OrchestrationTools: boolRef(false), ChildPolicy: "none", OnRateLimit: "wait", Questions: "decline",
 			Instructions: stewardInstructions,
 			Notes:        "ADR-0047: reviews one commit in a fresh context and scratch worktree; read-only (no Bash, no write tool). Started by steward.review, which gives its run the two steward tools; not a general reviewer. Sonnet 5.5, mode default.",
 		}
@@ -126,7 +127,7 @@ var RoleSeats = []RoleSeat{
 	{Name: seatStewardStandards, Build: func(map[string]int64) store.AgentProfile {
 		return store.AgentProfile{
 			Name: seatStewardStandards, Provider: "claude-native", Model: haikuModel, PermissionMode: "default",
-			OrchestrationTools: boolRef(false), ChildPolicy: "none", OnRateLimit: "wait",
+			OrchestrationTools: boolRef(false), ChildPolicy: "none", OnRateLimit: "wait", Questions: "decline",
 			Instructions: standardsInstructions,
 			Notes:        "ADR-0054: the Standards axis of a two-axis review; judges one commit against the repository's documented standards (the base-branch copies under .smind-standards/ in its scratch worktree), never the head versions. Read-only like the steward seat, same two steward tools. Haiku 5.5, mode default.",
 		}

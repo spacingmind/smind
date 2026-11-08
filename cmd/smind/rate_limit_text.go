@@ -69,6 +69,12 @@ func failureText(kind, window string, resetAt *time.Time, inferred bool, action 
 		head = "auth expired"
 	case failure.KindModelNotInPlan:
 		head = "model not in plan"
+	case failure.KindContextWindowExceeded:
+		head = "context window exceeded"
+	case failure.KindSessionBudgetExceeded:
+		head = "session budget exceeded"
+	case failure.KindTooManyDenials:
+		head = "too many denials"
 	default:
 		head = kind
 	}

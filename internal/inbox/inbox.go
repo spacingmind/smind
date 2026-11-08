@@ -1,8 +1,8 @@
 // Package inbox is the Human console's read model (ADR-0045 §5): one list of
 // what needs a person, DERIVED on every read from existing state (pending
-// permission requests, validator verdicts, stall alerts), plus a small table of
-// what the Human did to each item. Nothing here answers, approves, merges or
-// edits the things it lists.
+// permission requests and agent questions, validator verdicts, stall
+// alerts), plus a small table of what the Human did to each item. Nothing
+// here answers, approves, merges or edits the things it lists.
 package inbox
 
 import (
@@ -25,6 +25,7 @@ import (
 // Item kinds.
 const (
 	KindPermission  = "permission"
+	KindQuestion    = "question"
 	KindVerdict     = "verdict"
 	KindReview      = "review"
 	KindStall       = "stall"
@@ -94,6 +95,7 @@ type Links struct {
 	TaskID              int64  `json:"taskId,omitempty"`
 	RunID               string `json:"runId,omitempty"`
 	PermissionRequestID string `json:"permissionRequestId,omitempty"`
+	QuestionRequestID   string `json:"questionRequestId,omitempty"`
 	ValidationID        int64  `json:"validationId,omitempty"`
 	ReviewID            int64  `json:"reviewId,omitempty"`
 	HostID              string `json:"hostId,omitempty"`
@@ -169,6 +171,8 @@ type Service struct {
 	DB *store.Store
 	// Permissions lists the live pending permission requests.
 	Permissions func() []runs.PendingPermission
+	// Questions lists the live pending agent questions (ADR-0055).
+	Questions func() []runs.PendingQuestion
 	// Validations returns the newest validation view of every live task that has one.
 	Validations func() ([]validation.View, error)
 	// Reviews returns every task's current Steward review. Nil when steward
@@ -190,7 +194,7 @@ type Service struct {
 	Now       func() time.Time
 
 	mu        sync.Mutex
-	firstSeen map[string]time.Time // permission keys: when this process first saw them
+	firstSeen map[string]time.Time // permission and question keys: when this process first saw them
 }
 
 func (s *Service) now() time.Time {
@@ -213,28 +217,50 @@ func PermissionKey(requestID string) string { return "perm:" + requestID }
 // IsPermissionKey reports whether key names a permission item.
 func IsPermissionKey(key string) bool { return strings.HasPrefix(key, "perm:") }
 
+// QuestionKey is the key of a pending agent question (ADR-0055).
+func QuestionKey(requestID string) string { return "ques:" + requestID }
+
+// IsQuestionKey reports whether key names a question item.
+func IsQuestionKey(key string) bool { return strings.HasPrefix(key, "ques:") }
+
 // derive builds every current item (state not yet applied).
 func (s *Service) derive() ([]Item, error) {
 	now := s.now()
 	var items []Item
 
-	if s.Permissions != nil {
+	if s.Permissions != nil || s.Questions != nil {
 		s.mu.Lock()
 		if s.firstSeen == nil {
 			s.firstSeen = map[string]time.Time{}
 		}
 		live := map[string]bool{}
-		for _, p := range s.Permissions() {
-			key := PermissionKey(p.RequestID)
-			live[key] = true
-			if _, ok := s.firstSeen[key]; !ok {
-				s.firstSeen[key] = now
+		if s.Permissions != nil {
+			for _, p := range s.Permissions() {
+				key := PermissionKey(p.RequestID)
+				live[key] = true
+				if _, ok := s.firstSeen[key]; !ok {
+					s.firstSeen[key] = now
+				}
+				items = append(items, Item{
+					Key: key, Kind: KindPermission, TaskID: p.TaskID, Title: s.title(p.TaskID),
+					Summary: PermissionSummary(p.Detail), CreatedAt: s.firstSeen[key], Attention: "high",
+					Links: Links{TaskID: p.TaskID, RunID: p.RunID, PermissionRequestID: p.RequestID},
+				})
 			}
-			items = append(items, Item{
-				Key: key, Kind: KindPermission, TaskID: p.TaskID, Title: s.title(p.TaskID),
-				Summary: PermissionSummary(p.Detail), CreatedAt: s.firstSeen[key], Attention: "high",
-				Links: Links{TaskID: p.TaskID, RunID: p.RunID, PermissionRequestID: p.RequestID},
-			})
+		}
+		if s.Questions != nil {
+			for _, q := range s.Questions() {
+				key := QuestionKey(q.RequestID)
+				live[key] = true
+				if _, ok := s.firstSeen[key]; !ok {
+					s.firstSeen[key] = now
+				}
+				items = append(items, Item{
+					Key: key, Kind: KindQuestion, TaskID: q.TaskID, Title: s.title(q.TaskID),
+					Summary: QuestionSummary(q.Request), CreatedAt: s.firstSeen[key], Attention: "high",
+					Links: Links{TaskID: q.TaskID, RunID: q.RunID, QuestionRequestID: q.RequestID},
+				})
+			}
 		}
 		for k := range s.firstSeen {
 			if !live[k] {
@@ -333,12 +359,14 @@ func (s *Service) derive() ([]Item, error) {
 // runFailedItem is the inbox row of a failed run, or false when the class has
 // none: cli_exited keeps the footer's Continue, a transient_429 whose retry is
 // still queued is not yet a problem, and an unknown class is not guessed at.
-// A human-fix class (auth_expired, model_not_in_plan) is high: only a person
-// can fix it. The key and CreatedAt come from the run, so reads are stable.
+// A human-fix class (auth_expired, model_not_in_plan, context_window_exceeded,
+// session_budget_exceeded, too_many_denials) is high: only a person can fix
+// it. The key and CreatedAt come from the run, so reads are stable.
 func runFailedItem(fr FailedRun, title string) (Item, bool) {
 	attention := "normal"
 	switch fr.Kind {
-	case failure.KindAuthExpired, failure.KindModelNotInPlan:
+	case failure.KindAuthExpired, failure.KindModelNotInPlan,
+		failure.KindContextWindowExceeded, failure.KindSessionBudgetExceeded, failure.KindTooManyDenials:
 		attention = "high"
 	case failure.KindPlanWindowExhausted, failure.KindRateLimited:
 	case failure.KindTransient429:
@@ -431,6 +459,18 @@ func PermissionSummary(d *taskrunner.PermissionDetail) string {
 	return "A tool needs your permission"
 }
 
+// QuestionSummary builds the one-line summary a question item shows: the
+// first question's text with line breaks folded to spaces, capped to
+// MaxSummary. The full request (every question, its options) stays in the
+// question card.
+func QuestionSummary(req taskrunner.QuestionRequest) string {
+	if len(req.Questions) == 0 || strings.TrimSpace(req.Questions[0].Text) == "" {
+		return "An agent has a question"
+	}
+	oneLine := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(req.Questions[0].Text)
+	return clip(oneLine, MaxSummary)
+}
+
 // verdictItem turns a validation view into an inbox item, or reports that it
 // is not one: running validations have no verdict, and a stale one has dropped
 // out. A pass is listed only when merge-ready ("awaiting a decision"); a fail,
@@ -491,8 +531,8 @@ func (s *Service) withState(items []Item, states []store.InboxState) []Item {
 				}
 			}
 		}
-		// A permission is never hidden: it blocks a run.
-		if it.Kind == KindPermission && (it.State == StateSnoozed || it.State == StateResolved) {
+		// A permission or a question is never hidden: either blocks a run.
+		if (it.Kind == KindPermission || it.Kind == KindQuestion) && (it.State == StateSnoozed || it.State == StateResolved) {
 			it.State, it.SnoozedUntil = StateNew, nil
 		}
 		out = append(out, it)
@@ -568,8 +608,8 @@ func (s *Service) List(f Filter) ([]Item, error) {
 }
 
 // Count is the badge: visible items (new or seen), and how many of them are
-// unseen. Every pending permission counts as unseen: it is never quietly
-// absorbed.
+// unseen. Every pending permission and question counts as unseen: it is never
+// quietly absorbed.
 func (s *Service) Count() (Counts, error) {
 	items, err := s.all()
 	if err != nil {
@@ -582,7 +622,7 @@ func (s *Service) Count() (Counts, error) {
 		}
 		c.Total++
 		c.ByKind[it.Kind]++
-		if it.State == StateNew || it.Kind == KindPermission {
+		if it.State == StateNew || it.Kind == KindPermission || it.Kind == KindQuestion {
 			c.Unseen++
 		}
 	}
@@ -608,7 +648,7 @@ func (s *Service) MarkSeen(keys []string, actor string) error {
 	return s.set(keys, StateSeen, nil, actor, false)
 }
 
-// Snooze hides non-permission items until until (at most 24 h ahead).
+// Snooze hides non-permission, non-question items until until (at most 24 h ahead).
 func (s *Service) Snooze(keys []string, until time.Time, actor string) error {
 	now := s.now()
 	if !until.After(now) {
@@ -620,15 +660,15 @@ func (s *Service) Snooze(keys []string, until time.Time, actor string) error {
 	return s.set(keys, StateSnoozed, &until, actor, true)
 }
 
-// Resolve marks non-permission items resolved.
+// Resolve marks non-permission, non-question items resolved.
 func (s *Service) Resolve(keys []string, actor string) error {
 	return s.set(keys, StateResolved, nil, actor, true)
 }
 
 // set validates the keys against what currently derives (an unknown key is an
 // error for snooze/resolve: nothing is stored for an item that is not there)
-// and writes the state. A permission cannot be snoozed or resolved: it is only
-// ever answered.
+// and writes the state. A permission or a question cannot be snoozed or
+// resolved: it is only ever answered.
 func (s *Service) set(keys []string, state string, until *time.Time, actor string, refusePermission bool) error {
 	if len(keys) == 0 {
 		return fmt.Errorf("%w: no keys", ErrNotAllowed)
@@ -646,8 +686,8 @@ func (s *Service) set(keys []string, state string, until *time.Time, actor strin
 	}
 	var ok []string
 	for _, k := range keys {
-		if refusePermission && IsPermissionKey(k) {
-			return fmt.Errorf("%w: a permission request cannot be %s here, only answered", ErrNotAllowed, state)
+		if refusePermission && (IsPermissionKey(k) || IsQuestionKey(k)) {
+			return fmt.Errorf("%w: a permission or question request cannot be %s here, only answered", ErrNotAllowed, state)
 		}
 		if live[k] {
 			ok = append(ok, k)

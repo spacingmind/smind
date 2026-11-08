@@ -51,6 +51,27 @@ describe("InboxScreen", () => {
     expect(screen.getByTestId("inbox-kind-verdict:7")).toHaveTextContent("Passed");
   });
 
+  it("InboxPage_QuestionRow: an agent question renders as plain text and opens its task", async () => {
+    const onOpenTask = vi.fn();
+    const question: InboxItem = {
+      key: "question:r1",
+      kind: "question",
+      taskId: 4,
+      title: "Add the login fix",
+      summary: "Which database? <b>[x](http://evil)</b>",
+      createdAt: "2026-11-09T00:00:00Z",
+      state: "new",
+      attention: "high",
+      links: { taskId: 4, runId: "run-1", questionRequestId: "r1" },
+    };
+    await renderInbox(daemonWith(question), { onOpenTask });
+    expect(screen.getByTestId("inbox-kind-question:r1")).toHaveTextContent("Question");
+    expect(screen.getByTestId("inbox-summary-question:r1")).toHaveTextContent("Which database? <b>[x](http://evil)</b>");
+    expect(screen.getByTestId("inbox-row-question:r1").querySelector("a, b")).toBeNull();
+    await click(screen.getByTestId("inbox-open-question:r1"));
+    expect(onOpenTask).toHaveBeenCalledWith(4);
+  });
+
   it("review rows sit in the Steward reviews group before verdicts", async () => {
     const reviewItem: InboxItem = {
       key: "review:12",

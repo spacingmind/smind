@@ -15,13 +15,27 @@ func IsLimitKind(kind string) bool {
 	return IsPlanLimit(kind) || kind == KindTransient429
 }
 
-// IsHumanFix reports whether kind needs a person to change setup (sign in, or
-// pick another model): never retried, never failed over, never on cooldown.
+// IsHumanFix reports whether kind needs a person to change setup (sign in,
+// pick another model, start a fresh chat, raise the provider's session
+// budget, review the permission policy): never retried, never failed over,
+// never on cooldown.
 func IsHumanFix(kind string) bool {
-	return kind == KindAuthExpired || kind == KindModelNotInPlan
+	return kind == KindAuthExpired || kind == KindModelNotInPlan ||
+		kind == KindContextWindowExceeded || kind == KindSessionBudgetExceeded || kind == KindTooManyDenials
 }
 
 // IsKnown reports whether kind is one of the kinds this daemon produces.
 func IsKnown(kind string) bool {
 	return IsLimitKind(kind) || IsHumanFix(kind) || kind == KindCLIExited
+}
+
+// AllKinds returns every kind this daemon produces, in a fixed order
+// (limit classes, human-fix classes, then cli_exited).
+func AllKinds() []string {
+	return []string{
+		KindPlanWindowExhausted, KindTransient429, KindRateLimited,
+		KindAuthExpired, KindModelNotInPlan,
+		KindContextWindowExceeded, KindSessionBudgetExceeded, KindTooManyDenials,
+		KindCLIExited,
+	}
 }

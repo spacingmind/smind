@@ -121,6 +121,16 @@ const (
 	// EventTypePermissionModeChanged it is for internal/runs to apply to
 	// the run and is never recorded into the transcript.
 	EventTypeRateLimit
+
+	// EventTypeQuestionRequest records a pending question an agent asked the
+	// human (ADR-0055): Question carries the request id and the questions.
+	// Recorded directly by internal/runs, like the permission events.
+	EventTypeQuestionRequest
+
+	// EventTypeQuestionResolved records how a question request ended:
+	// Question carries the same request id, the resolution and, for a human
+	// answer, the answers.
+	EventTypeQuestionResolved
 )
 
 // RateLimitSignal is the payload of EventTypeRateLimit.
@@ -255,6 +265,10 @@ type Event struct {
 	// rule's why next to the badge, and the audit links back to it. Empty
 	// for every other resolution.
 	PermissionRuleID string
+
+	// Question is populated for EventTypeQuestionRequest and
+	// EventTypeQuestionResolved (ADR-0055).
+	Question *QuestionEvent
 
 	// ToolCallID identifies one tool call, populated for EventTypeToolCall.
 	// Correlates a "running" event with the later "success"/"failure"

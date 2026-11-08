@@ -440,11 +440,85 @@ func TestClassify_StructuredCodeBeatsText(t *testing.T) {
 	}
 }
 
-// An expired login can surface as "issue with the selected model" (claude-code
-// CHANGELOG), so auth text wins over model text.
+// TestClassify_AuthBeatsModelText: an expired login can surface as "issue
+// with the selected model" (claude-code CHANGELOG), so auth text wins over
+// model text.
 func TestClassify_AuthBeatsModelText(t *testing.T) {
 	r := Classify(Input{Err: `Not logged in · Please run /login (There's an issue with the selected model (x). It may not exist or you may not have access to it.)`}, at(2026, 11, 1, 3, 0, 0))
 	if r.Kind != KindAuthExpired {
 		t.Fatalf("got %+v", r)
+	}
+}
+
+// TestClassify_CodexNewClasses: each new typed code gives its kind, beats an
+// empty text that might look like a plan limit, and beats the text of an
+// unrelated error (typed wins, as today).
+func TestClassify_CodexNewClasses(t *testing.T) {
+	now := at(2026, 11, 1, 3, 0, 0)
+	for code, want := range map[string]string{
+		CodeContextWindow:  KindContextWindowExceeded,
+		CodeSessionBudget:  KindSessionBudgetExceeded,
+		CodeTooManyDenials: KindTooManyDenials,
+	} {
+		if r := Classify(Input{Code: code}, now); r.Kind != want {
+			t.Fatalf("code %s: got %+v, want %s", code, r, want)
+		}
+		// The text of an unrelated error loses to the typed code.
+		if r := Classify(Input{Code: code, Err: `API Error: 429 {"type":"rate_limit_error"}`}, now); r.Kind != want {
+			t.Fatalf("code %s with rate-limit-looking text: got %+v, want %s", code, r, want)
+		}
+	}
+}
+
+// TestClassify_ClaudeContextTextFixtures: the documented Claude/Bedrock
+// phrases classify; the pattern is exact-phrase, so unrelated "too long"
+// wording does not.
+func TestClassify_ClaudeContextTextFixtures(t *testing.T) {
+	now := at(2026, 11, 1, 3, 0, 0)
+	for _, e := range []string{
+		"prompt is too long: 200000 tokens > 200000 maximum context length",
+		"context limit reached",
+		"input is too long",
+	} {
+		if r := Classify(Input{Vendor: "anthropic", Err: e}, now); r.Kind != KindContextWindowExceeded {
+			t.Fatalf("%q: got %+v, want %s", e, r, KindContextWindowExceeded)
+		}
+	}
+	for _, e := range []string{
+		"request too long for the proxy",
+		"this meeting is taking too long",
+		"output is too long",
+	} {
+		if r := Classify(Input{Vendor: "anthropic", Err: e}, now); r.Kind != "" {
+			t.Fatalf("%q: got %+v, want not classified", e, r)
+		}
+	}
+}
+
+func TestIsHumanFix_NewClasses(t *testing.T) {
+	for _, k := range []string{KindContextWindowExceeded, KindSessionBudgetExceeded, KindTooManyDenials} {
+		if !IsHumanFix(k) || !IsKnown(k) {
+			t.Errorf("IsHumanFix(%q)/IsKnown(%q) = false/false, want true/true", k, k)
+		}
+		if ExitCode(k) != 7 {
+			t.Errorf("ExitCode(%q) = %d, want 7", k, ExitCode(k))
+		}
+	}
+}
+
+func TestAllKinds_AreKnown(t *testing.T) {
+	all := AllKinds()
+	if len(all) != 9 {
+		t.Fatalf("AllKinds() = %v, want 9 kinds", all)
+	}
+	seen := map[string]bool{}
+	for _, k := range all {
+		if !IsKnown(k) {
+			t.Errorf("AllKinds has unknown kind %q", k)
+		}
+		if seen[k] {
+			t.Errorf("AllKinds lists %q twice", k)
+		}
+		seen[k] = true
 	}
 }

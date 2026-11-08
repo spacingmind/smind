@@ -48,6 +48,22 @@ describe('inbox grouping', () => {
   });
 });
 
+const question = inboxItem({ key: 'ques:r1:q9', kind: 'question', attention: 'high', title: 'Which database?', links: { taskId: 7, runId: 'r1', questionRequestId: 'q9' } });
+
+describe('agent question rows (ADR-0055)', () => {
+  it('sorts with permissions in "Needs you now", is waiting-toned and never snoozable or resolvable', () => {
+    const v = inboxView([stall, question, perm], NOW);
+    expect(v.kind).toBe('list');
+    if (v.kind !== 'list') return;
+    expect(v.sections[0].title).toBe('Needs you now');
+    expect(v.sections.map((s) => s.kind)).toEqual(['permission', 'question', 'stall']);
+    expect(v.sections[1].rows[0]).toMatchObject({ key: 'ques:r1:q9', label: 'Question', tone: 'waiting', taskId: 7, unseen: true });
+    expect(inboxActions(question)).toEqual(['seen', 'open']);
+    expect(inboxActions({ ...question, kind: 'verdict' })).not.toContain('snooze'); // a ques: key is enough on its own
+    expect(inboxActions({ ...question, kind: 'verdict' })).not.toContain('resolve');
+  });
+});
+
 describe('inbox actions', () => {
   it('never offers snooze or resolve for a permission', () => {
     expect(inboxActions(perm)).toEqual(['seen', 'open']);

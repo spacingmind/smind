@@ -55,8 +55,8 @@ Items touching approvals or credentials (R3a's denials class and R3c) get the hi
   - `session_budget_exceeded` → action `raise_budget`; the label names whose budget it is (D1): the provider's own session budget (Codex config) is **not** smind's "Set budget".
   - `too_many_denials` → action `review_policy` (target `settings:permission-policy`), label "Review the permission policy". It never offers to approve, allow or retry.
 - AC4 Every existing class has a human sentence, not only the Lead guidance: `cli_exited` reads as "The agent stopped before finishing (its session is saved). Continue
-  to pick up where it left off." and the other five get one plain sentence each. One daemon-owned table (`failure.Describe(kind)`), carried additively on the wire as `failureNote`
-  (omitted for an unknown kind), replaces the clients' private label maps (`FAILURE_LABELS` in web and mobile).
+  to pick up where it left off." and the other five get one plain sentence each. One daemon-owned table (`failure.Describe(kind)`), carried additively on the wire as `action.summary`
+  (omitted for an unknown kind; `failureNote` is taken by the MCP Lead routing note), replaces the clients' private label maps (`FAILURE_LABELS` in web and mobile).
 - AC5 Wire additive: `failureKind` accepts the new values; `action.kind` gains `new_chat`, `raise_budget`, `review_policy` (clients render `label` for an unknown kind).
   Old rows and old clients are unchanged.
 - AC6 Surfaces: web run error card, footer, sidebar hint and inbox `run_failed` item; mobile run footer (text); CLI `task runs|logs|wait` status line (`· next: <label>`);
@@ -69,7 +69,7 @@ Items touching approvals or credentials (R3a's denials class and R3c) get the hi
 `TestClassify_CodexNewClasses` (typed code beats text), `TestClassify_ClaudeContextTextFixtures` (changelog strings; an ambiguous string does not classify),
 `TestFailureHint_NewCodexInfos`, `TestIsHumanFix_NewClasses`, `TestExitCode_NewClassesIs7`, `TestNextAction_NewClasses` (kind, target, label), `TestGuidance_PerClass` (all nine
 non-empty and each says what NOT to do), `TestDescribe_EveryKnownClassHasASentence`, `TestDescribe_CLIExitedIsReadable`, `TestFinish_NewClassesNeverRetryNeverCooldownNeverFailover`,
-`TestRunLogs_CarriesFailureNote`, `TestDerive_RunFailedNewClasses` (inbox, attention high), `TestFailureText_PerClass` (CLI), `TestMCPInstructions_ListEveryClass`,
+`TestNextAction_SummaryOnEveryClass`, `TestDerive_RunFailedNewClasses` (inbox, attention high), `TestFailureText_PerClass` (CLI), `TestMCPInstructions_ListEveryClass`,
 `TestFailureLabels_NoApprovalWords` (Go: guidance, labels, descriptions), web `failure-class.safety.test.ts` and mobile `failureSafety.test.ts` (source scan with the regex),
 `failure-class.test.ts` / `run-footer-model.test.ts` / `runFooter.test.ts` (every class has a sentence; the Continue prompt uses the daemon's `failureNote`).
 Mutations (each named test must then fail): the hint mapping removed → `TestFailureHint_NewCodexInfos`; a class dropped from `IsHumanFix` → `TestFinish_NewClassesNeverRetry...`;
@@ -131,6 +131,8 @@ mobile picker test. Mutations: gate removed → `TestClaudeModes_AutoGatedForBas
 
 ## Decisions for the Human (each with a recommendation)
 
+**Taken (2026-11-09, Supervisor):** D1-D9 as recommended, with this wording fix: the human sentence ships as **`action.summary`**, not `failureNote` (that name is already the MCP Lead routing note, `cmd/smind/failure_note.go`).
+
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | `session_budget_exceeded` is **Codex's own** rollout budget, not smind's tree budget ("Set budget" is a different object). Link the action to "Set budget" anyway, or word it as the provider's budget? | **Word it as the provider's budget** (label: "Raise the session budget in Codex's settings, or start a fresh chat"), and keep "Set budget" for smind's own `budget_exceeded` launch refusal (a separate card). |
@@ -140,12 +142,13 @@ mobile picker test. Mutations: gate removed → `TestClaudeModes_AutoGatedForBas
 | D5 | Instances with a custom base URL: allow effort at all? (a gateway may reject the effort beta; the CLI retries without it.) | **Allow only `low|medium|high`**, and drop silently-with-a-note if the CLI reports none applied. |
 | D6 | Show the applied effort: the vendored SDK does not parse `system/init.effort`. Read it from `SystemMessage.Raw` in smind, or change the SDK? | **Read it from `Raw` in smind** (no SDK release); show "requested" when the CLI reports none. |
 | D7 | Auto mode behind a gateway: **off by default with a per-instance human opt-in**, or hard-off? | **Off by default with an explicit per-instance opt-in** (some gateways do forward the check; `CLAUDE_CODE_AUTO_MODE_SERVER=0` is a CLI-side workaround we do not set for the user). |
-| D8 | Put the human sentence on the wire as `failureNote` (one table, clients stop keeping their own), or leave clients to word it? | **Wire it** (AC4): one source of truth, mobile and CLI get the same wording with no UI release. |
+| D8 | Put the human sentence on the wire as `action.summary` (named `failureNote` when drafted; that name is already the MCP routing note) (one table, clients stop keeping their own), or leave clients to word it? | **Wire it** (AC4): one source of truth, mobile and CLI get the same wording with no UI release. |
 | D9 | Order of the PR chains. | **R3a-1, R3a-2, R3c-1, R3c-2, R3b-1, R3b-2** (the failure sentences and the auto gate fix user-visible confusion today; effort is new capability). |
 
 ## Progress
 
 - 2026-11-09: spec drafted from the code and reference sources; no probes run.
+- 2026-11-09: R3a-1 built (kinds, codes, classify, hints, actions, `Describe`, guidance, routing, inbox, CLI, MCP text). The wire carrier is `action.summary`. Not in R3a-1: web and mobile surfaces (R3a-2).
 
 ## Validation
 

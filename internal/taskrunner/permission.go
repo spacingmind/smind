@@ -199,6 +199,11 @@ type claudeDeciderAdapter struct {
 }
 
 func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseToolRequest) (bool, map[string]any, string, []claudecode.PermissionUpdate, bool, error) {
+	if req.ToolName == claudeAskUserQuestionTool {
+		if qd, ok := a.decider.(QuestionDecider); ok {
+			return a.decideQuestion(ctx, qd, req)
+		}
+	}
 	opts := []PermissionOption{
 		{ID: claudeOptionAllow, Label: "Allow", Kind: "allow_once"},
 		{ID: claudeOptionDeny, Label: "Deny", Kind: "reject_once"},
@@ -295,4 +300,27 @@ func (a codexDeciderAdapter) decide(ctx context.Context, summary string) (bool, 
 		return false, err
 	}
 	return optionID == codexOptionAccept, nil
+}
+
+// claudeAskUserQuestionTool is Claude Code's "ask the human" tool (ADR-0055).
+const claudeAskUserQuestionTool = "AskUserQuestion"
+
+// decideQuestion handles an AskUserQuestion can_use_tool request: the input
+// becomes a QuestionRequest a human answers, an answer is returned as an
+// allow whose updatedInput carries the answers, and a decline (a human's, a
+// timeout, a refusal) as a deny whose message the model reads. A request that
+// cannot be shown is declined whole, never auto-answered (ADR-0055 §1, §5).
+func (a claudeDeciderAdapter) decideQuestion(ctx context.Context, qd QuestionDecider, req claudecode.CanUseToolRequest) (bool, map[string]any, string, []claudecode.PermissionUpdate, bool, error) {
+	qr, err := ParseClaudeAskUserQuestion(req.Input)
+	if err != nil {
+		return false, nil, ClaudeDeclineMessage(QuestionNoteBadForm), nil, false, nil
+	}
+	out, err := qd.DecideQuestion(ctx, qr)
+	if err != nil {
+		return false, nil, "", nil, false, err
+	}
+	if out.Answer.Action == QuestionActionAnswer {
+		return true, ClaudeAnswersInput(req.Input, qr, out.Answer), "", nil, false, nil
+	}
+	return false, nil, ClaudeDeclineMessage(out.Answer.Note), nil, false, nil
 }

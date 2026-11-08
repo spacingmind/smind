@@ -242,6 +242,7 @@ export const RULES: Record<string, DemoRule> = {
     const chat = c.session.chats.find((x) => x.TaskID === p.taskId);
     return { runId: c.session.startReply(p.taskId, p.chatId ?? chat?.ID ?? 0, p.provider ?? "claude-code", String(p.prompt ?? "")).id };
   }),
+  "run.pendingQuestions": local(() => ({ questions: [] })),
   "run.respondPermission": scripted((c) => {
     const { runId, requestId, optionId } = c.params;
     if (!c.session.respond(runId, requestId, optionId)) throw new DemoError("not_found", "no such pending permission request");
@@ -461,6 +462,8 @@ export const REFUSED_METHODS = [
   "scratch.clean",
   "space.create", "space.delete",
   "run.revealToolHeredoc",
+  // the demo scripts no agent questions (ADR-0055): answering is refused like any other write
+  "run.answerQuestion",
   "task.archive", "task.archiveFinished", "task.commit", "task.createPr", "task.move", "task.push", "task.restore", "task.retrySetup",
   "task.setBudget", "task.stage", "task.stopTree", "task.updateFromBase", "task.updatePr",
   "workspace.create", "workspace.delete", "workspace.setDefaultBase", "workspace.setScripts",
