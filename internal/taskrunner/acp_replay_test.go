@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -154,5 +155,30 @@ func TestReplayACPSessionDeniesPermissionRequests(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(dir, "permission-outcome"))
 	if err != nil || string(got) != "reject-1" {
 		t.Fatalf("the agent's permission request was answered %q (%v), want reject-1", got, err)
+	}
+}
+
+// The replay client advertises no file system to the agent.
+func TestReplayACPSessionAdvertisesNoFileSystem(t *testing.T) {
+	var closed atomic.Int32
+	r := replayRunner("loadSession", &closed)
+	dir := replayDir(t)
+	if _, err := r.ReplayACPSession(context.Background(), ProviderGLM, "fake-session-1", dir, 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "client-capabilities"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p struct {
+		ClientCapabilities struct {
+			FS struct{ ReadTextFile, WriteTextFile bool } `json:"fs"`
+		} `json:"clientCapabilities"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.ClientCapabilities.FS.ReadTextFile || p.ClientCapabilities.FS.WriteTextFile {
+		t.Fatalf("the replay client advertised fs capabilities: %s", raw)
 	}
 }

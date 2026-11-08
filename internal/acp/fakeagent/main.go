@@ -229,6 +229,24 @@ func handle(msg message, sessionCwd *string) {
 		*sessionCwd = params.Cwd
 		if msg.Method == "session/load" {
 			replaySession()
+			if p := os.Getenv("FAKEAGENT_LOAD_FS"); p != "" {
+				// Try a write and a read through the client while loading (off the read
+				// loop, which must stay free to receive the answers); the outcomes go to
+				// the file p, one "write:ok|error" and one "read:ok|error" line.
+				go func(cwd string, id json.RawMessage) {
+					w := call("fs/write_text_file", map[string]any{"sessionId": sessionID, "path": cwd + "/fs-probe.txt", "content": "written by the agent"})
+					r := call("fs/read_text_file", map[string]any{"sessionId": sessionID, "path": cwd + "/fs-probe.txt"})
+					out := func(m message) string {
+						if m.Error != nil {
+							return "error"
+						}
+						return "ok"
+					}
+					_ = os.WriteFile(p, []byte("write:"+out(w)+"\nread:"+out(r)+"\n"), 0o644)
+					respond(id, map[string]any{"configOptions": []map[string]any{}})
+				}(params.Cwd, msg.ID)
+				return
+			}
 		}
 		respond(msg.ID, map[string]any{
 			"configOptions": []map[string]any{{
@@ -291,10 +309,12 @@ func replaySession() {
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "fakeagent: FAKEAGENT_REPLAY:", err)
 		return
 	}
 	var updates []map[string]any
-	if json.Unmarshal(data, &updates) != nil {
+	if err := json.Unmarshal(data, &updates); err != nil {
+		fmt.Fprintln(os.Stderr, "fakeagent: FAKEAGENT_REPLAY is not a JSON array:", err)
 		return
 	}
 	for _, u := range updates {

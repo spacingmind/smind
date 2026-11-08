@@ -714,3 +714,50 @@ func TestClient_WithCleanEnv_DoesNotInheritEnvironment(t *testing.T) {
 		t.Fatalf("a client without WithCleanEnv did not inherit the daemon environment:\n%s", inherited)
 	}
 }
+
+// loadWithFSProbe loads a session while the fake agent tries to write and read a
+// file through the client, with the session's cwd already registered so the fs
+// boundary check would pass. It returns the agent's own report of both calls and
+// whether the file exists afterwards.
+func loadWithFSProbe(t *testing.T, opts ...Option) (report string, written bool) {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "fs-report")
+	c, cwd := newTestClient(t, append([]Option{WithEnv("FAKEAGENT_LOAD_FS=" + logPath)}, opts...)...)
+	c.recordSession("fake-session-1", cwd, nil) // the boundary is registered: nothing but the option stops the agent
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	updates := make(chan SessionUpdate)
+	go func() {
+		for range updates {
+		}
+	}()
+	if _, err := c.LoadSessionReplay(ctx, "fake-session-1", cwd, updates); err != nil {
+		t.Fatalf("LoadSessionReplay() error = %v", err)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("the agent never reported: %v", err)
+	}
+	_, statErr := os.Stat(filepath.Join(cwd, "fs-probe.txt"))
+	return string(b), statErr == nil
+}
+
+// WithoutFS: an agent loading its session can neither write nor read through the
+// client, even with the session's cwd registered; without the option the same
+// calls succeed (so the probe is sensitive).
+func TestLoadSessionReplayWithoutFSRefusesEveryFSRequest(t *testing.T) {
+	t.Parallel()
+	report, written := loadWithFSProbe(t, WithoutFS())
+	if report != "write:error\nread:error\n" || written {
+		t.Fatalf("with WithoutFS: report %q, file written %v", report, written)
+	}
+}
+
+func TestLoadSessionReplayFSProbeIsSensitive(t *testing.T) {
+	t.Parallel()
+	report, written := loadWithFSProbe(t)
+	if report != "write:ok\nread:ok\n" || !written {
+		t.Fatalf("without WithoutFS the probe should succeed: report %q, file written %v", report, written)
+	}
+}

@@ -31,7 +31,8 @@ func (r *Runner) ReplayACPSession(ctx context.Context, provider Provider, sessio
 	if !ok {
 		return nil, fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
 	}
-	popts := []acp.Option{acp.WithPermissionPolicy(acp.AutoDenyPolicy{})}
+	// No file system for this agent: it is only asked for its history.
+	popts := []acp.Option{acp.WithPermissionPolicy(acp.AutoDenyPolicy{}), acp.WithoutFS()}
 	spec, haveSpec := r.providerRegistry().Get(string(provider))
 	if haveSpec && spec.NoMCPServers {
 		popts = append(popts, acp.WithoutMcpServers())

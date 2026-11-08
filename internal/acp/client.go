@@ -449,6 +449,11 @@ type Client struct {
 	// send none.
 	noMCP bool
 
+	// noFS marks a client that exposes no file system to the agent: no fs
+	// capability is advertised and every fs/* request is refused, whatever
+	// session it names (see WithoutFS).
+	noFS bool
+
 	ProtocolVersion   int
 	AgentCapabilities json.RawMessage
 }
@@ -491,6 +496,15 @@ func WithPermissionPolicy(p PermissionPolicy) Option {
 // SupportsMcpStdio and friends), so callers send it none.
 func WithoutMcpServers() Option {
 	return func(c *Client) { c.noMCP = true }
+}
+
+// WithoutFS makes the client advertise NO fs capability at Initialize and refuse
+// every fs/read_text_file and fs/write_text_file request unconditionally, so an
+// agent that is only being asked for its history (session/load) can neither read
+// nor write anything on this machine, whatever session id it names and whenever
+// the session's cwd is registered.
+func WithoutFS() Option {
+	return func(c *Client) { c.noFS = true }
 }
 
 // New spawns command[0] with command[1:] as arguments and wires up an ACP
@@ -546,7 +560,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 	raw, err := c.conn.call(ctx, "initialize", initializeParams{
 		ProtocolVersion: protocolVersion,
 		ClientCapabilities: clientCapabilities{
-			FS: fileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
+			FS: fileSystemCapabilities{ReadTextFile: !c.noFS, WriteTextFile: !c.noFS},
 		},
 	})
 	if err != nil {

@@ -32,6 +32,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -42,6 +43,10 @@ import (
 )
 
 const sessionID = "fake-session-1"
+
+// initParams is the client's initialize request, kept so a load can report the
+// capabilities the client advertised (see replayFromCwd).
+var initParams []byte
 
 // capsMode is set from os.Args[1] (defaulting to "" -- no resume
 // capability at all) so a test can choose what this agent's initialize
@@ -220,6 +225,7 @@ func handle(msg message, sessionCwd *string) {
 	defer func() { logMethodInCwd(*sessionCwd, msg.Method) }()
 	switch {
 	case msg.Method == "initialize":
+		initParams = append([]byte(nil), msg.Params...)
 		caps := map[string]any{}
 		if len(mcpCaps) > 0 {
 			m := map[string]any{}
@@ -515,12 +521,17 @@ func handleResumeSession(msg message, sessionCwd *string) {
 // before session/load answers, as an agent replaying its history does. Absent
 // file: nothing.
 func replayFromCwd(cwd string) {
+	if _, err := os.Stat(filepath.Join(cwd, "methods.log")); err == nil {
+		// A test that asked for the method log also gets the client's advertised capabilities.
+		_ = os.WriteFile(filepath.Join(cwd, "client-capabilities"), initParams, 0o644)
+	}
 	data, err := os.ReadFile(filepath.Join(cwd, "replay.json"))
 	if err != nil {
-		return
+		return // no replay file: the common case, not an error
 	}
 	var updates []map[string]any
-	if json.Unmarshal(data, &updates) != nil {
+	if err := json.Unmarshal(data, &updates); err != nil {
+		fmt.Fprintln(os.Stderr, "fakeagent: replay.json is not a JSON array:", err)
 		return
 	}
 	for _, u := range updates {
