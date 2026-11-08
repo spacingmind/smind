@@ -166,7 +166,7 @@ func (s *Service) isSeatRun(row store.StewardReview, runID string) bool {
 // never store ACCEPTED.
 func (s *Service) WriteBlocked(reviewID int64, reason, summary string, costUSD float64) error {
 	if !IsDaemonBlockedReason(reason) {
-		return errors.New("the daemon may only write blocked reviews for timeout, budget, crashed, cancelled or scope_violation")
+		return errors.New("the daemon may only write blocked reviews for timeout, budget, crashed, cancelled, scope_violation or base_unresolved")
 	}
 	row, err := s.DB.GetStewardReview(reviewID)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -324,9 +324,9 @@ func (s *Store) CountStewardReviewsForTask(taskID int64) (int, error) {
 
 // ConsecutiveStewardFailures counts the crash/timeout run of blocked reviews
 // ending at the newest row: it walks rows newest first, skipping open
-// (pending/running) and cancelled rows, counting status blocked with reason
-// crashed or timeout, and stops at the first row that is neither (a done
-// review, or a blocked one for another reason).
+// (pending/running), cancelled and base_unresolved rows, counting status
+// blocked with reason crashed or timeout, and stops at the first row that is
+// neither (a done review, or a blocked one for another reason).
 func (s *Store) ConsecutiveStewardFailures() (int, error) {
 	rows, err := s.db.Query(`SELECT status, blocked_reason FROM steward_reviews ORDER BY id DESC`)
 	if err != nil {
@@ -339,7 +339,7 @@ func (s *Store) ConsecutiveStewardFailures() (int, error) {
 		if err := rows.Scan(&status, &reason); err != nil {
 			return 0, fmt.Errorf("consecutive steward failures: %w", err)
 		}
-		if status == "pending" || status == "running" || reason == "cancelled" {
+		if status == "pending" || status == "running" || reason == "cancelled" || reason == "base_unresolved" {
 			continue
 		}
 		if status == "blocked" && (reason == "crashed" || reason == "timeout") {

@@ -118,7 +118,7 @@ func (h *stewardHost) startPasses(id int64, lead store.Task, d steward.Digest, d
 		}
 	}
 	if d.Standards == nil || d.Standards.BaseRef == "" {
-		if err := h.svc.WritePassBlocked(id, steward.AxisStandards, "crashed", "the merge-base could not be resolved, so the standards were not read", 0); err != nil && !errors.Is(err, steward.ErrVerdictExists) {
+		if err := h.svc.WritePassBlocked(id, steward.AxisStandards, steward.ReasonBaseUnresolved, "the merge-base could not be resolved, so the standards were not read", 0); err != nil && !errors.Is(err, steward.ErrVerdictExists) {
 			return res, err
 		}
 	}
