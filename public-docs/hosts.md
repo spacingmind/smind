@@ -233,6 +233,12 @@ branch, never a local path; its tasks by title, branch and state; and the text o
 a run's activity, cut to 1 KiB per event. Text that came from another host is
 printed with control characters removed so it cannot repaint your terminal.
 
+When a run's older output was trimmed to a summary on the host that ran it, the
+activity ends with `note: summary only; the full history is on host studio.
+Rebuild it there.` The name is the alias you gave that host. Rebuilding the full
+history only ever happens on that host, by someone using it; nothing is fetched
+from its session files across the link.
+
 Errors name a code first:
 
 | Code | Meaning |

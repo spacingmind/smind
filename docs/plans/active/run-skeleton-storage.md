@@ -205,7 +205,7 @@ The ADR-0053 work is paused here. Parked, not abandoned:
   (`runs.rebuildCacheMB`), keyed by run id + session file size/mtime, never written back; `run.logs detail: "auto"` from a human
   rebuilds when cached or the file is at most 8 MiB.
 - **ACP `session/load`** (explicit request only, agents that advertise `loadSession`).
-- **Fleet:** `skeletonRev` mirror re-sync and the `owned_by_host:<id>` label with a direct read on the owning host (AC9).
+- **Fleet:** done: the `owned_by_host` label on remote activity reads (ADR-0053 "Implemented: the fleet label"). Still parked: `skeletonRev` mirror re-sync and a direct read of the full history on the owning host.
 - **Codex through `thread/read`** instead of the rollout file (ADR D4's preference; the file reader is the documented deviation).
 - **`smind runs skeletonize`** (opt-in conversion of legacy runs, H4) and the `runs.skeletonRetentionDays` knob (H2: reserved, not built).
 - Transcripts over 64 MiB are never rebuilt (0.5% on the measured machine); a streaming reader could lift the bound.
