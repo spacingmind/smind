@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -20,8 +21,11 @@ type Watch struct {
 	Svc           *Service
 	ReviewID      int64
 	StewardTaskID int64
-	MaxMinutes    int
-	BudgetUSD     float64
+	// Axis is the pass this watch supervises in a two-axis review (ADR-0054);
+	// empty for the single review's one seat.
+	Axis       Axis
+	MaxMinutes int
+	BudgetUSD  float64
 
 	Probe func(taskID int64) validation.ProbeState
 	// Stop stops the seat's running runs.
@@ -39,6 +43,9 @@ type Watch struct {
 // Only time during which the seat's run is executing counts toward
 // MaxMinutes: waiting out a rate limit does not.
 func (w *Watch) Tick(dt time.Duration) bool {
+	if w.Axis != "" {
+		return w.tickPass(dt)
+	}
 	row, err := w.Svc.DB.GetStewardReview(w.ReviewID)
 	if err != nil {
 		return true
@@ -72,17 +79,8 @@ func (w *Watch) Tick(dt time.Duration) bool {
 		w.postCheck(true)
 		return true
 	}
-	var reason, summary string
-	switch {
-	case w.MaxMinutes > 0 && w.elapsed >= time.Duration(w.MaxMinutes)*time.Minute:
-		w.stop()
-		reason, summary = "timeout", "the steward seat ran out of its wall-clock limit"
-	case w.BudgetUSD > 0 && ps.CostUSD >= w.BudgetUSD:
-		w.stop()
-		reason, summary = "budget", "the steward seat reached its budget"
-	case w.sawRun && !ps.Running && !ps.Queued:
-		reason, summary = "crashed", "the steward seat's run ended without submitting a verdict"
-	default:
+	reason, summary, ended := w.endReason(ps)
+	if !ended {
 		return false
 	}
 	// A changed lead worktree outranks the other reasons: the review must
@@ -94,6 +92,23 @@ func (w *Watch) Tick(dt time.Duration) bool {
 		return false
 	}
 	return true
+}
+
+// endReason says why the seat's run must be ended without a verdict, if it
+// must: its wall clock or budget ran out (the run is stopped), or it ended
+// by itself without submitting.
+func (w *Watch) endReason(ps validation.ProbeState) (reason, summary string, ended bool) {
+	switch {
+	case w.MaxMinutes > 0 && w.elapsed >= time.Duration(w.MaxMinutes)*time.Minute:
+		w.stop()
+		return "timeout", "the steward seat ran out of its wall-clock limit", true
+	case w.BudgetUSD > 0 && ps.CostUSD >= w.BudgetUSD:
+		w.stop()
+		return "budget", "the steward seat reached its budget", true
+	case w.sawRun && !ps.Running && !ps.Queued:
+		return "crashed", "the steward seat's run ended without submitting a verdict", true
+	}
+	return "", "", false
 }
 
 func (w *Watch) stop() {
@@ -119,7 +134,9 @@ func (w *Watch) leadChanged() []string {
 // worktree changed.
 func (w *Watch) postCheck(bool) {
 	if changed := w.leadChanged(); len(changed) > 0 {
-		_ = w.Svc.FlagScopeViolation(w.ReviewID)
+		if err := w.Svc.FlagScopeViolation(w.ReviewID); err != nil {
+			slog.Warn("steward watch: scope violation not flagged", "review", w.ReviewID, "err", err)
+		}
 	}
 }
 
@@ -151,4 +168,79 @@ func (w *Watch) Run(ctx context.Context, period time.Duration) {
 			last = now
 		}
 	}
+}
+
+// tickPass is Tick for one pass of a two-axis review: its cost, wall clock
+// and budget are the pass's own, and ending it writes the pass's blocked row
+// (the review is decided when every pass is).
+func (w *Watch) tickPass(dt time.Duration) bool {
+	review, err := w.Svc.DB.GetStewardReview(w.ReviewID)
+	if err != nil {
+		return true
+	}
+	pass, err := w.Svc.DB.GetStewardReviewPass(w.ReviewID, string(w.Axis))
+	if err != nil {
+		return true
+	}
+	ps := w.Probe(w.StewardTaskID)
+	if ps.Running || ps.Started {
+		w.sawRun = true
+	}
+	if ps.Running {
+		w.elapsed += dt
+	}
+	// The cost only rises, in any status: the verdict usually lands while the
+	// run is still going and its usage row is only complete once it ends.
+	if err := w.Svc.DB.RaiseStewardPassCost(w.ReviewID, string(w.Axis), ps.CostUSD); err != nil {
+		slog.Warn("steward pass watch: cost not recorded", "review", w.ReviewID, "axis", w.Axis, "err", err)
+		return false
+	}
+	passOpen := pass.Status == PassPending || pass.Status == PassRunning
+	reviewOpen := review.Status == "pending" || review.Status == "running"
+	switch {
+	case !reviewOpen && passOpen:
+		// The review was decided without this pass (the other pass broke
+		// scope, or the Human cancelled): this run has nothing left to judge.
+		w.stop()
+		// Closing the pass is what keeps it from reading as running forever with
+		// no watcher: retry once, and if it still fails keep watching so the next
+		// tick tries again (a restart's reconcile closes it as well).
+		err := w.Svc.DB.SetStewardPassBlocked(w.ReviewID, string(w.Axis), "cancelled", "the review ended before this pass did", ps.CostUSD, w.Svc.now())
+		if err != nil && !errors.Is(err, store.ErrStewardPassClosed) {
+			err = w.Svc.DB.SetStewardPassBlocked(w.ReviewID, string(w.Axis), "cancelled", "the review ended before this pass did", ps.CostUSD, w.Svc.now())
+		}
+		if err != nil && !errors.Is(err, store.ErrStewardPassClosed) {
+			slog.Warn("steward pass watch: the pass could not be closed", "review", w.ReviewID, "axis", w.Axis, "err", err)
+			return false
+		}
+		return true
+	case !passOpen:
+		// The verdict is in; the post-check waits for the run to finish (or
+		// the wall clock) so changes made after submitting are seen too.
+		// The per-pass budgets sum to the review's cap only if spend stops at
+		// the budget after the verdict too, not just before it.
+		overBudget := w.BudgetUSD > 0 && ps.CostUSD >= w.BudgetUSD
+		if ps.Running && !overBudget && (w.MaxMinutes <= 0 || w.elapsed < time.Duration(w.MaxMinutes)*time.Minute) {
+			return false
+		}
+		if ps.Running {
+			w.stop()
+		}
+		w.postCheck(true)
+		return true
+	}
+	reason, summary, ended := w.endReason(ps)
+	if !ended {
+		return false
+	}
+	if changed := w.leadChanged(); len(changed) > 0 {
+		reason, summary = "scope_violation", scopeSummary(changed)
+		if err := w.Svc.FlagScopeViolation(w.ReviewID); err != nil {
+			slog.Warn("steward pass watch: scope violation not flagged", "review", w.ReviewID, "axis", w.Axis, "err", err)
+		}
+	}
+	if err := w.Svc.WritePassBlocked(w.ReviewID, w.Axis, reason, summary, ps.CostUSD); err != nil && !errors.Is(err, ErrVerdictExists) {
+		return false
+	}
+	return true
 }

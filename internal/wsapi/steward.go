@@ -218,7 +218,7 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 		// The row must be this run's own open review: anything else answers
 		// forbidden alike, so no other run learns whether a review exists.
 		row, err := h.db.GetStewardReview(p.ReviewID)
-		if err != nil || row.StewardTaskID != rc.ident.taskID || (row.Status != "pending" && row.Status != "running") {
+		if err != nil || (row.Status != "pending" && row.Status != "running") || !h.ownsReview(row, rc.ident.taskID) {
 			return nil, forbidden(m + " is only available to the steward seat's own run")
 		}
 		d, err := h.svc.DigestJSON(p.ReviewID)
@@ -249,8 +249,14 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 		// Defence in depth: a Lead's run is refused here, before its token
 		// is even compared.
 		row, err := h.db.GetStewardReview(p.ReviewID)
-		if err != nil || row.StewardTaskID != rc.ident.taskID {
+		if err != nil || !h.ownsReview(row, rc.ident.taskID) {
 			return nil, forbidden(m + " is only available to the steward seat's own run")
+		}
+		// A two-axis review is decided only through its passes: the axis comes
+		// from which pass the caller's task is the seat of, never from the call.
+		if axis, ok := h.passOf(p.ReviewID, rc.ident.taskID); ok {
+			v, err := h.svc.SubmitPassVerdict(p.ReviewID, axis, p.Token, rc.ident.runID, p.Submission)
+			return v, stewardErr(m, err)
 		}
 		v, err := h.svc.SubmitVerdict(p.ReviewID, p.Token, rc.ident.runID, p.Submission)
 		return v, stewardErr(m, err)
@@ -261,6 +267,17 @@ func stewardHandlers(h *stewardHost) map[string]handlerFunc {
 
 // frameMaxBytes caps one evidence frame the daemon will read and base64.
 const frameMaxBytes = 4 << 20
+
+// ownsReview reports whether task taskID is a seat of review row: its single
+// seat, or the seat of one of its open passes. Anything else is refused
+// alike, so no other run learns whether a review exists.
+func (h *stewardHost) ownsReview(row store.StewardReview, taskID int64) bool {
+	if taskID != 0 && row.StewardTaskID == taskID {
+		return true
+	}
+	_, ok := h.passOf(row.ID, taskID)
+	return ok
+}
 
 // framePNG reads one digest frame's bytes. The full path always comes from
 // the digest, never the caller: the name only picks the digest item. The

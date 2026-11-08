@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -305,5 +307,73 @@ func TestStewardVerdictSchema_NamesSubmissionAndCaps(t *testing.T) {
 	}
 	if field("findings")["maxItems"] != float64(50) {
 		t.Errorf("findings maxItems = %v, want 50", field("findings")["maxItems"])
+	}
+}
+
+// TestStewardVerdictSchema_FlagOffIsByteIdentical pins ADR-0054's flag-off
+// rule: the single-pass seat's tool schema is exactly what it was before the
+// two-axis change (the golden was generated on the code that predates it).
+func TestStewardVerdictSchema_FlagOffIsByteIdentical(t *testing.T) {
+	raw, err := json.MarshalIndent(stewardVerdictSchema(), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "steward_verdict_schema.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(append(raw, '\n')) != string(want) {
+		t.Fatalf("the single-pass seat's tool schema changed:\n%s", raw)
+	}
+}
+
+// TestStewardMCPEntry_BothAxesKeepTheSameTwoTools: a pass's seat gets the same
+// catalogue as the single seat (ADR-0054 §10): its two tools, nothing that acts.
+func TestStewardMCPEntry_BothAxesKeepTheSameTwoTools(t *testing.T) {
+	want := append([]string(nil), steward.SeatMCPTools(false)...)
+	sort.Strings(want)
+	for _, axis := range []steward.Axis{steward.AxisStandards, steward.AxisSpec} {
+		cs := stewardSession(t, stewardEnv{ReviewID: 9, Token: "tok", Axis: axis})
+		got := mcpToolNames(t, cs)
+		sort.Strings(got)
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("%s catalogue = %v, want exactly %v", axis, got, want)
+		}
+		for _, name := range got {
+			for _, bad := range []string{"task_", "approve", "merge", "permission", "validation", "shell", "write", "web", "message"} {
+				if strings.Contains(name, bad) {
+					t.Errorf("%s tool %q contains %q", axis, name, bad)
+				}
+			}
+		}
+	}
+}
+
+// TestStewardAxisVerdictSchema_CarriesTheAxisFieldsAndCaps: the two-axis tool
+// takes the axis document with its own caps, and the env only accepts the two
+// axes.
+func TestStewardAxisVerdictSchema_CarriesTheAxisFieldsAndCaps(t *testing.T) {
+	raw, err := json.Marshal(stewardAxisVerdictSchema())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"axis"`, `"criteria"`, `"rule"`, `"evidence"`, `"maxItems":60`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("axis verdict schema lacks %s: %s", want, raw)
+		}
+	}
+	t.Setenv(steward.EnvReviewID, "5")
+	t.Setenv(steward.EnvToken, "tok")
+	t.Setenv(steward.EnvAxis, "spec")
+	if env, ok, err := stewardEnvFromOS(); err != nil || !ok || env.Axis != steward.AxisSpec {
+		t.Fatalf("stewardEnvFromOS() = %+v, %v, %v", env, ok, err)
+	}
+	t.Setenv(steward.EnvAxis, "everything")
+	if _, _, err := stewardEnvFromOS(); err == nil {
+		t.Fatal("stewardEnvFromOS(axis everything) = nil error, want a refusal")
+	}
+	t.Setenv(steward.EnvAxis, "")
+	if env, _, err := stewardEnvFromOS(); err != nil || env.Axis != "" {
+		t.Fatalf("stewardEnvFromOS(no axis) = %+v, %v; want the single seat", env, err)
 	}
 }

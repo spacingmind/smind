@@ -39,7 +39,7 @@ func TestSeedRoles_StewardFourthAndIdempotent(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	res := seed(t, r)
-	want := []string{"peer-sonnet", "lead", "validator", "steward"}
+	want := []string{"peer-sonnet", "lead", "validator", "steward", "steward-standards"}
 	if len(res) != len(want) {
 		t.Fatalf("results = %+v, want %d", res, len(want))
 	}
@@ -97,8 +97,8 @@ func TestSeedRoles_IdempotentAndKeepsExisting(t *testing.T) {
 		}
 	}
 	all, _ := r.List()
-	if len(all) != 4 {
-		t.Errorf("profiles = %d, want 4", len(all))
+	if len(all) != 5 {
+		t.Errorf("profiles = %d, want 5", len(all))
 	}
 }
 
@@ -187,13 +187,13 @@ func TestSeedRoles_SeatsExactly(t *testing.T) {
 			t.Errorf("pack seeds %q (provider %q, childPolicy %q)", p.Name, p.Provider, p.ChildPolicy)
 		}
 	}
-	for _, n := range []string{"lead", "peer-sonnet", "validator", "steward"} {
+	for _, n := range []string{"lead", "peer-sonnet", "validator", "steward", "steward-standards"} {
 		if !got[n] {
 			t.Errorf("pack lacks %s", n)
 		}
 	}
-	if len(all) != 4 {
-		t.Errorf("profiles = %d, want exactly lead, peer-sonnet, validator, steward", len(all))
+	if len(all) != 5 {
+		t.Errorf("profiles = %d, want exactly lead, peer-sonnet, validator, steward, steward-standards", len(all))
 	}
 }
 
@@ -307,6 +307,59 @@ func TestSeedRoles_ValidatorNeverOverwritten(t *testing.T) {
 	}
 	if byName(t, r, "validator").Instructions != "edited by a human" {
 		t.Fatalf("a human edit was overwritten")
+	}
+}
+
+// TestRolePack_SeedsStewardStandardsIdempotently: the fifth seat (ADR-0054
+// §8) is seeded once, a re-run keeps it, and a Human's edit to it survives.
+func TestRolePack_SeedsStewardStandardsIdempotently(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	res := seed(t, r)
+	last := res[len(res)-1]
+	if last.Name != "steward-standards" || last.Action != SeedCreated || last.ID == 0 {
+		t.Fatalf("last result = %+v, want created steward-standards", last)
+	}
+	s := byName(t, r, "steward-standards")
+	if s.Provider != "claude-native" || s.Model != "claude-haiku-5-5" || s.PermissionMode != "default" ||
+		s.OrchestrationTools == nil || *s.OrchestrationTools || s.ChildPolicy != "none" || s.OnRateLimit != "wait" ||
+		len(s.Skills) != 0 || !strings.Contains(s.Instructions, `.smind-standards/`) ||
+		!strings.Contains(s.Instructions, `"axis":"standards"`) || !strings.Contains(s.Instructions, "steward_verdict_submit") {
+		t.Errorf("steward-standards = %+v", s)
+	}
+	for _, x := range seed(t, r) {
+		if x.Name == "steward-standards" && x.Action != SeedKept {
+			t.Errorf("rerun %+v, want kept", x)
+		}
+	}
+	s.Model = "claude-sonnet-5-5"
+	if _, err := r.Update(s); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	seed(t, r)
+	if got := byName(t, r, "steward-standards").Model; got != "claude-sonnet-5-5" {
+		t.Errorf("model after reseed = %q, want the Human's edit to survive", got)
+	}
+}
+
+// TestRolePack_StewardSeatUnchanged: the fifth seat changes nothing about the
+// steward seat its profile falls back to.
+func TestRolePack_StewardSeatUnchanged(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(t)
+	seed(t, r)
+	s := byName(t, r, "steward")
+	if s.Model != "claude-sonnet-5-5" {
+		t.Errorf("steward model = %q, want claude-sonnet-5-5", s.Model)
+	}
+	if s.Instructions != stewardInstructions {
+		t.Errorf("steward instructions changed (%d bytes, want %d)", len(s.Instructions), len(stewardInstructions))
+	}
+	if !strings.Contains(s.Instructions, "steward_verdict_submit") {
+		t.Errorf("steward instructions lack steward_verdict_submit")
+	}
+	if strings.Contains(s.Instructions, "standards") {
+		t.Errorf("steward instructions mention standards")
 	}
 }
 
