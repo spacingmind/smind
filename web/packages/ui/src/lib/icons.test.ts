@@ -54,6 +54,7 @@ describe("icon registry", () => {
         "folderAdd": "FolderPlus",
         "folderOpen": "FolderOpen",
         "forge": "GitFork",
+        "fork": "GitBranchPlus",
         "groupByStage": "Kanban",
         "groupByStatus": "ListChecks",
         "groupByWorkspace": "FolderGit2",
