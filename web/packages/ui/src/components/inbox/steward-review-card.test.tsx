@@ -266,6 +266,23 @@ describe("StewardReviewCard", () => {
       expect(box).toHaveTextContent("rule: no-raw-sql");
     });
 
+    it("standards-changed hint shows only when true", async () => {
+      await openCard({ axes: [axis()], standardsChanged: true });
+      const hint = screen.getByTestId("steward-standards-changed");
+      expect(hint).toHaveTextContent("Standards file edited in this change");
+      expect(hint.querySelector("svg")).not.toBeNull();
+    });
+
+    it("no hint without axes or when absent", async () => {
+      await openCard({ standardsChanged: true });
+      expect(screen.queryByTestId("steward-standards-changed")).toBeNull();
+    });
+
+    it("no hint when standardsChanged is absent", async () => {
+      await openCard({ axes: [axis()] });
+      expect(screen.queryByTestId("steward-standards-changed")).toBeNull();
+    });
+
     it("no axes payload renders no axes section", async () => {
       await openCard();
       expect(screen.queryByTestId("steward-axes")).toBeNull();

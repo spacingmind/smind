@@ -71,6 +71,8 @@ export interface StewardReview {
   gates: StewardGate[];
   frames?: StewardFrame[];
   axes?: StewardAxis[];
+  /** True when the change edits a standards file (ADR-0054); absent otherwise. */
+  standardsChanged?: boolean;
   prNumber?: number;
   stale?: string;
   mergeReady: boolean;

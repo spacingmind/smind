@@ -256,7 +256,15 @@ export function StewardReviewCard({ item, onOpenTask }: { item: InboxItem; onOpe
       )}
       {data.axes && data.axes.length > 0 && (
         <div className="flex flex-col gap-1" data-testid="steward-axes">
-          <h3 className="m-0 text-ui-sm font-medium">Review axes</h3>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 className="m-0 text-ui-sm font-medium">Review axes</h3>
+            {data.standardsChanged === true && (
+              <StatusBadge status="warning" data-testid="steward-standards-changed">
+                <Icons.warning aria-hidden className="size-3" />
+                Standards file edited in this change
+              </StatusBadge>
+            )}
+          </div>
           <ul className="m-0 flex flex-col gap-2 p-0">
             {data.axes.map((a, i) => (
               <AxisRow key={`${a.axis}-${i}`} axis={a} />
