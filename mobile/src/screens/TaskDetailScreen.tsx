@@ -48,7 +48,7 @@ import { attachMenuItems } from '../attachmentTray';
 import { createImageDeps, pickFiles, pickPhotos } from '../attachmentDeps';
 import { sendWithAttachments } from '../attachSend';
 import { lineAttachmentsFromRun } from '../lineAttachments';
-import { applyFullHistoryResult, historySourceInfo, HistorySourceInfo, RunLogsResult } from '../historySource';
+import { applyFullHistoryResult, fullHistoryParams, historySourceInfo, HistorySourceInfo, RunLogsResult } from '../historySource';
 import { createThumbLoader } from '../thumbLoader';
 import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, listProviders, listRunsForTask, ProviderInfo, revealPermissionHeredoc, revealToolHeredoc, RunSummary } from '../api';
 import { firstSendProvider } from '../firstSend';
@@ -555,17 +555,17 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     const latest = state.run;
     setLoadingFull(true);
     try {
-      const result = (await conn.call('run.logs', { runId: latest.ID, detail: 'full' })) as RunLogsResult;
+      const result = (await conn.call('run.logs', fullHistoryParams(latest.ID, history))) as RunLogsResult;
       if (!mounted.current || lastRunId.current !== latest.ID) return;
       board.applyLogEvents(latest.ID, result.events ?? []);
       setLines((prev) => applyFullHistoryResult(prev, result, latest.Prompt, lineAttachmentsFromRun(latest)));
       setHistory(historySourceInfo(result));
     } catch {
-      if (mounted.current) setHistory({ source: 'skeleton', reason: 'rebuild_failed', canLoadFull: true });
+      if (mounted.current) setHistory({ source: 'skeleton', reason: 'rebuild_failed', canLoadFull: true, ...(history?.loadStartsAgent ? { loadStartsAgent: true } : {}) });
     } finally {
       if (mounted.current) setLoadingFull(false);
     }
-  }, [board, conn, loadingFull, state]);
+  }, [board, conn, history, loadingFull, state]);
 
   const handlePermissionTap = useCallback(
     (requestId: string, optionId: string) => {

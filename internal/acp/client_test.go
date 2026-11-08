@@ -497,6 +497,123 @@ func TestClient_LoadSessionAndResumeSession(t *testing.T) {
 	}
 }
 
+// TestLoadSessionReplayCollectsUpdatesAndSendsNoPrompt drives
+// LoadSessionReplay against a fake agent scripted (via FAKEAGENT_REPLAY)
+// to replay four updates on session/load, proving the replay is forwarded
+// onto the updates channel in order, the channel is closed once the call
+// returns, and -- via the fake agent's FAKEAGENT_METHOD_LOG -- that the
+// client sent only initialize and session/load: no session/new (the
+// session is not re-created), no session/prompt (a replay prompts
+// nothing), and none of the mode/config calls.
+func TestLoadSessionReplayCollectsUpdatesAndSendsNoPrompt(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	replayPath := filepath.Join(dir, "replay.json")
+	methodLog := filepath.Join(dir, "methods.log")
+	replay := `[
+		{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hi"}},
+		{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}},
+		{"sessionUpdate":"tool_call","toolCallId":"t1","kind":"execute","title":"ls","status":"completed"},
+		{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}
+	]`
+	if err := os.WriteFile(replayPath, []byte(replay), 0o644); err != nil {
+		t.Fatalf("write replay file: %v", err)
+	}
+
+	c, cwd := newTestClient(t, WithEnv(
+		"FAKEAGENT_REPLAY="+replayPath,
+		"FAKEAGENT_METHOD_LOG="+methodLog,
+	))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	updates := make(chan SessionUpdate)
+	var got []SessionUpdate
+	drained := make(chan struct{})
+	go func() {
+		for u := range updates {
+			got = append(got, u)
+		}
+		close(drained)
+	}()
+
+	if _, err := c.LoadSessionReplay(ctx, "fake-session-1", cwd, updates); err != nil {
+		t.Fatalf("LoadSessionReplay() error = %v", err)
+	}
+	<-drained // proves updates was closed, after the call returned
+
+	if len(got) != 4 {
+		t.Fatalf("collected %d updates, want 4: %+v", len(got), got)
+	}
+	if got[0].Type != SessionUpdateUserMessageChunk {
+		t.Errorf("updates[0].Type = %q, want %q", got[0].Type, SessionUpdateUserMessageChunk)
+	}
+	if text, ok := got[0].Text(); !ok || text != "hi" {
+		t.Errorf("updates[0].Text() = %q, %v; want %q, true", text, ok, "hi")
+	}
+	if got[1].Type != SessionUpdateAgentMessageChunk {
+		t.Errorf("updates[1].Type = %q, want %q", got[1].Type, SessionUpdateAgentMessageChunk)
+	}
+	if text, ok := got[1].Text(); !ok || text != "hello" {
+		t.Errorf("updates[1].Text() = %q, %v; want %q, true", text, ok, "hello")
+	}
+	if got[2].Type != SessionUpdateToolCall || got[2].ToolCallID != "t1" || got[2].Kind != "execute" || got[2].Title != "ls" {
+		t.Errorf("updates[2] = %+v, want a tool_call t1 (execute, %q)", got[2], "ls")
+	}
+	if got[3].Type != SessionUpdateAgentMessageChunk {
+		t.Errorf("updates[3].Type = %q, want %q", got[3].Type, SessionUpdateAgentMessageChunk)
+	}
+	if text, ok := got[3].Text(); !ok || text != "done" {
+		t.Errorf("updates[3].Text() = %q, %v; want %q, true", text, ok, "done")
+	}
+
+	logBytes, err := os.ReadFile(methodLog)
+	if err != nil {
+		t.Fatalf("read method log: %v", err)
+	}
+	sent := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(logBytes)), "\n") {
+		if line != "" {
+			sent[line] = true
+		}
+	}
+	for _, want := range []string{"initialize", "session/load"} {
+		if !sent[want] {
+			t.Errorf("method log missing %q: %v", want, sent)
+		}
+	}
+	for _, banned := range []string{"session/prompt", "session/new", "session/set_mode", "session/set_config_option"} {
+		if sent[banned] {
+			t.Errorf("method log contains %q (a replay must not send it): %v", banned, sent)
+		}
+	}
+}
+
+// TestLoadSessionReplayUnknownSession proves an agent-side rejection of
+// session/load (unknown session id) surfaces as a Go error from
+// LoadSessionReplay while the updates channel is still closed cleanly.
+func TestLoadSessionReplayUnknownSession(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	updates := make(chan SessionUpdate)
+	if _, err := c.LoadSessionReplay(ctx, "nope", cwd, updates); err == nil {
+		t.Fatal("LoadSessionReplay() error = nil, want the agent's unknown-session rejection")
+	}
+	select {
+	case _, ok := <-updates:
+		if ok {
+			t.Fatal("received an unexpected update after LoadSessionReplay() returned")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("updates channel was not closed after LoadSessionReplay() returned")
+	}
+}
+
 // TestClient_SessionModes proves session/new's modes (ACP's
 // SessionModeState) are decoded and retained per session, and that
 // SetSessionMode sends session/set_mode, updates CurrentModeID on success,
@@ -595,5 +712,52 @@ func TestClient_WithCleanEnv_DoesNotInheritEnvironment(t *testing.T) {
 	inherited := startAndDump(t)
 	if !strings.Contains(inherited, "SMIND_SENTINEL") {
 		t.Fatalf("a client without WithCleanEnv did not inherit the daemon environment:\n%s", inherited)
+	}
+}
+
+// loadWithFSProbe loads a session while the fake agent tries to write and read a
+// file through the client, with the session's cwd already registered so the fs
+// boundary check would pass. It returns the agent's own report of both calls and
+// whether the file exists afterwards.
+func loadWithFSProbe(t *testing.T, opts ...Option) (report string, written bool) {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "fs-report")
+	c, cwd := newTestClient(t, append([]Option{WithEnv("FAKEAGENT_LOAD_FS=" + logPath)}, opts...)...)
+	c.recordSession("fake-session-1", cwd, nil) // the boundary is registered: nothing but the option stops the agent
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	updates := make(chan SessionUpdate)
+	go func() {
+		for range updates {
+		}
+	}()
+	if _, err := c.LoadSessionReplay(ctx, "fake-session-1", cwd, updates); err != nil {
+		t.Fatalf("LoadSessionReplay() error = %v", err)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("the agent never reported: %v", err)
+	}
+	_, statErr := os.Stat(filepath.Join(cwd, "fs-probe.txt"))
+	return string(b), statErr == nil
+}
+
+// WithoutFS: an agent loading its session can neither write nor read through the
+// client, even with the session's cwd registered; without the option the same
+// calls succeed (so the probe is sensitive).
+func TestLoadSessionReplayWithoutFSRefusesEveryFSRequest(t *testing.T) {
+	t.Parallel()
+	report, written := loadWithFSProbe(t, WithoutFS())
+	if report != "write:error\nread:error\n" || written {
+		t.Fatalf("with WithoutFS: report %q, file written %v", report, written)
+	}
+}
+
+func TestLoadSessionReplayFSProbeIsSensitive(t *testing.T) {
+	t.Parallel()
+	report, written := loadWithFSProbe(t)
+	if report != "write:ok\nread:ok\n" || !written {
+		t.Fatalf("without WithoutFS the probe should succeed: report %q, file written %v", report, written)
 	}
 }

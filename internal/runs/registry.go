@@ -106,6 +106,8 @@ type Registry struct {
 	rebuilder *native.Rebuilder
 	// rcache holds rebuilt histories (rebuild_cache.go); it has its own lock.
 	rcache rebuildCache
+	// acp tracks the in-flight loads of ACP histories (acp_load.go); own lock.
+	acp acpLoads
 	// systemFinishedOrder is finishedOrder for system runs (see retain).
 	systemFinishedOrder []string
 
@@ -935,6 +937,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 			return
 		}
 		reg.runs[id] = r
+		reg.cancelACPLoads(r.chatID)
 	}()
 	if archiving {
 		cancel()
@@ -969,6 +972,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *taskrunner.Runner) error {
 	reg.mu.Lock()
 	reg.runs[r.id] = r
+	reg.cancelACPLoads(r.chatID)
 	reg.mu.Unlock()
 
 	// Persisted after registration but before driving the turn: a
@@ -2029,6 +2033,7 @@ func (reg *Registry) Stop(runID string) error {
 func (reg *Registry) CloseAll() {
 	reg.closing.Store(true)
 	reg.stopQueueWake()
+	reg.closeACPLoads()
 
 	// Loop until a pass finds nothing running: a finish that was already
 	// inside its queue hand-off when closing latched can still register a

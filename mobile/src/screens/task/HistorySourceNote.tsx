@@ -8,16 +8,25 @@
 
 import { memo, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { historyNoteView, HistorySourceInfo } from '../../historySource';
+import { historyNoteView, HistorySourceInfo, LOAD_STARTS_AGENT_CONFIRM } from '../../historySource';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { AppIcon } from '../../ui/AppIcon';
+import { confirmNative } from '../../ui/confirm';
 
 export const HistorySourceNote = memo(function HistorySourceNote({ info, loading, onLoad }: { info: HistorySourceInfo; loading: boolean; onLoad: () => void }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const view = historyNoteView(info, loading);
   if (view === null) return null;
+  // A load that starts the agent (an ACP run) asks first; Cancel does nothing.
+  const press = () => {
+    if (!info.loadStartsAgent) return onLoad();
+    const { title, message, confirmLabel } = LOAD_STARTS_AGENT_CONFIRM;
+    void confirmNative(title, message, confirmLabel, false).then((ok) => {
+      if (ok) onLoad();
+    });
+  };
   const dot = view.tone === 'warning' ? theme.statusDot.warning : theme.foregroundSubtlest;
   return (
     <View style={styles.strip} accessibilityLiveRegion="polite">
@@ -30,7 +39,7 @@ export const HistorySourceNote = memo(function HistorySourceNote({ info, loading
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Load full history"
-            onPress={onLoad}
+            onPress={press}
             style={({ pressed }) => [styles.load, pressed && styles.pressed]}
           >
             <AppIcon name="history" size={theme.type.label.fontSize} color={theme.foreground} />

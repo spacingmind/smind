@@ -4,7 +4,7 @@
 // historyNoteView's three render states.
 
 import { describe, expect, it } from 'vitest';
-import { applyFullHistoryResult, describeHistorySource, HistorySourceInfo, historyNoteView } from '../historySource';
+import { applyFullHistoryResult, describeHistorySource, fullHistoryParams, HistorySourceInfo, historyNoteView, historySourceInfo, LOAD_STARTS_AGENT_CONFIRM } from '../historySource';
 import { TimelineLine } from '../runTimeline';
 
 describe('describeHistorySource', () => {
@@ -16,6 +16,7 @@ describe('describeHistorySource', () => {
     { reason: 'slice_not_found', tone: 'warning', message: 'Showing a summary: this turn could not be matched in the provider’s session.', canLoad: false },
     { reason: 'format_drift', tone: 'warning', message: 'Showing a summary: the provider’s session format was not recognised.', canLoad: false },
     { reason: 'rebuild_failed', tone: 'warning', message: 'Showing a summary: the full history could not be loaded (it may be too large or took too long).', canLoad: true },
+    { reason: 'confirm_required', tone: 'neutral', message: 'Showing a summary: loading this history needs your confirmation.', canLoad: true },
     { reason: 'rebuild_busy', tone: 'neutral', message: 'Showing a summary: another history is loading. Try again in a moment.', canLoad: true },
     { reason: 'excerpt_pruned', tone: 'neutral', message: 'Showing a summary: large tool output was removed after the retention period.', canLoad: true },
   ];
@@ -150,5 +151,26 @@ describe('applyFullHistoryResult', () => {
     const attachments = [{ id: 'a1', label: 'shot.png', sizeLabel: '1 KB', kind: 'image', thumbnail: true }];
     const out = applyFullHistoryResult([], { events: [{ type: 'chunk', text: 'ok' }] }, 'the prompt', attachments);
     expect(out[0]).toMatchObject({ role: 'user', text: 'the prompt', attachments });
+  });
+});
+
+describe('confirm before starting the agent (ADR-0053)', () => {
+  it('the dialog copy matches the web UI word for word', () => {
+    expect(LOAD_STARTS_AGENT_CONFIRM).toEqual({
+      title: 'Start the agent to load this history?',
+      message: 'This starts the agent to read this run’s history from its own session. It can take up to 30 seconds. No prompt is sent.',
+      confirmLabel: 'Start agent',
+    });
+  });
+
+  it('fullHistoryParams sends confirmStart only for a run whose load starts the agent', () => {
+    expect(fullHistoryParams('r1', { source: 'skeleton', reason: 'rebuild_not_requested', canLoadFull: true, loadStartsAgent: true })).toEqual({ runId: 'r1', detail: 'full', confirmStart: true });
+    expect(fullHistoryParams('r1', { source: 'skeleton', reason: 'rebuild_not_requested', canLoadFull: true })).toEqual({ runId: 'r1', detail: 'full' });
+    expect(fullHistoryParams('r1', undefined)).toEqual({ runId: 'r1', detail: 'full' });
+  });
+
+  it('historySourceInfo carries loadStartsAgent through, and omits it when the daemon did not send it', () => {
+    expect(historySourceInfo({ historySource: 'skeleton', skeletonReason: 'rebuild_not_requested', canLoadFull: true, loadStartsAgent: true }).loadStartsAgent).toBe(true);
+    expect('loadStartsAgent' in historySourceInfo({ historySource: 'skeleton', canLoadFull: true })).toBe(false);
   });
 });

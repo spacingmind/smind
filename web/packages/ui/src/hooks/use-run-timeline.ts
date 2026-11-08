@@ -419,7 +419,7 @@ export interface RunEntry {
    * loadFullHistory can rebuild it), or the rebuild itself. Undefined
    * while a backfill that carried no historySource built the items.
    */
-  history?: { source: RunHistorySource; reason?: string; canLoadFull?: boolean; loading?: boolean };
+  history?: { source: RunHistorySource; reason?: string; canLoadFull?: boolean; loadStartsAgent?: boolean; loading?: boolean };
 }
 
 /** The latest mcp_servers event's list in events, or undefined when no event carried one -- multiple events per run are possible, latest wins. */
@@ -758,13 +758,14 @@ function attachmentsOf(logs: RunLogsResult): Pick<RunEntry, "attachments"> | Rec
  * when it names a historySource at all, so an older daemon (or an
  * unaffected run) leaves `history` untouched rather than blanking it.
  */
-function historyOf(src: { historySource?: RunHistorySource; skeletonReason?: string; canLoadFull?: boolean }): Pick<RunEntry, "history"> | Record<string, never> {
+function historyOf(src: { historySource?: RunHistorySource; skeletonReason?: string; canLoadFull?: boolean; loadStartsAgent?: boolean }): Pick<RunEntry, "history"> | Record<string, never> {
   return src.historySource
     ? {
         history: {
           source: src.historySource,
           ...(src.skeletonReason ? { reason: src.skeletonReason } : {}),
           ...(src.canLoadFull !== undefined ? { canLoadFull: src.canLoadFull } : {}),
+          ...(src.loadStartsAgent ? { loadStartsAgent: true } : {}),
         },
       }
     : {};
@@ -829,6 +830,11 @@ export function useRunTimeline(
   const [runs, setRuns] = useState<RunEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
+  // The latest runs, for callbacks that read a run's state without re-creating on every change.
+  const runsRef = useRef(runs);
+  useEffect(() => {
+    runsRef.current = runs;
+  }, [runs]);
   // Every run id this selection has already appended and/or attached a
   // stream to -- the dedupe that keeps a run.status racing submitPrompt's
   // run.start response from producing a duplicate entry or a second
@@ -1103,6 +1109,8 @@ export function useRunTimeline(
     async (runId: string) => {
       if (!client) throw new Error("not connected");
       const session = sessionRef.current;
+      // The caller already confirmed with the human when loading starts the agent (ACP run).
+      const startsAgent = runsRef.current?.find((r) => r.id === runId)?.history?.loadStartsAgent === true;
       // Keep the sentence that is already on screen (its reason) and only
       // flip it into its loading state -- patch replaces `history`
       // wholesale, so the merge happens against the current run here.
@@ -1110,7 +1118,7 @@ export function useRunTimeline(
         prev ? prev.map((r) => (r.id === runId && r.history ? { ...r, history: { ...r.history, loading: true } } : r)) : prev,
       );
       try {
-        const logs = await client.call<RunLogsResult>("run.logs", { runId, detail: "full" });
+        const logs = await client.call<RunLogsResult>("run.logs", { runId, detail: "full", ...(startsAgent ? { confirmStart: true } : {}) });
         if (session?.cancelled) return;
         patch(setRuns, runId, {
           items: buildTimeline(logs.events, runId),
@@ -1118,12 +1126,13 @@ export function useRunTimeline(
             source: logs.historySource ?? "rebuilt",
             ...(logs.skeletonReason ? { reason: logs.skeletonReason } : {}),
             ...(logs.canLoadFull !== undefined ? { canLoadFull: logs.canLoadFull } : {}),
+            ...(logs.loadStartsAgent ? { loadStartsAgent: true } : {}),
             loading: false,
           },
         });
       } catch {
         if (session?.cancelled) return;
-        patch(setRuns, runId, { history: { source: "skeleton", reason: "rebuild_failed", canLoadFull: true, loading: false } });
+        patch(setRuns, runId, { history: { source: "skeleton", reason: "rebuild_failed", canLoadFull: true, ...(startsAgent ? { loadStartsAgent: true } : {}), loading: false } });
       }
     },
     [client],

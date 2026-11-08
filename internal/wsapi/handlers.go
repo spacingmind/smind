@@ -2020,6 +2020,8 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 			RunID  string `json:"runId"`
 			Tail   int    `json:"tail"`
 			Detail string `json:"detail"`
+			// ConfirmStart is the human's yes to a load that starts the agent (ACP).
+			ConfirmStart bool `json:"confirmStart"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.logs: invalid params: %w", err)
@@ -2047,7 +2049,7 @@ func handleRunLogs(reg *runs.Registry) handlerFunc {
 				// A rebuild is only ever done for a human; an agent asking for it is told why not.
 				label.SkeletonReason = string(native.ReasonHumanOnly)
 			default:
-				merged, refs, reason, skipped := rebuiltEvents(ctx, reg, p.RunID, auto)
+				merged, refs, reason, skipped := rebuiltEvents(ctx, reg, p.RunID, auto, p.ConfirmStart)
 				switch {
 				case skipped:
 				case reason == native.ReasonNone:
