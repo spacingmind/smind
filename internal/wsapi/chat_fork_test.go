@@ -376,3 +376,59 @@ func TestChatLifecycleEventsCarryTheForkField(t *testing.T) {
 		t.Fatalf("chat.updated = %s %+v, want the fork field", ev.Topic, updated.Chat)
 	}
 }
+
+func TestChatFork_RetryKindIsRecordedAndTitled(t *testing.T) {
+	t.Parallel()
+	e := newForkEnv(t)
+	for _, mode := range []string{"native", "seeded"} {
+		got, err := e.call(t, e.fork, humanRC, map[string]any{"chatId": e.parent.ID, "atRunId": "r1", "kind": "retry", "mode": mode})
+		if err != nil {
+			t.Fatalf("chat.fork retry (%s) error = %v", mode, err)
+		}
+		v := got.(chatView)
+		if v.Fork == nil || v.Fork.Kind != store.ChatForkKindRetry || !strings.HasPrefix(v.Title, "Retry of main") {
+			t.Fatalf("%s retry child = %+v fork %+v, want kind retry and a Retry title", mode, v.Chat, v.Fork)
+		}
+		f, err := e.db.GetChatFork(v.ID)
+		if err != nil || f.Kind != store.ChatForkKindRetry {
+			t.Fatalf("stored fork = %+v, %v; want kind retry", f, err)
+		}
+	}
+	if _, err := e.call(t, e.fork, humanRC, map[string]any{"chatId": e.parent.ID, "atRunId": "r1", "kind": "rewrite"}); err == nil {
+		t.Fatal("an unknown kind was accepted")
+	}
+}
+
+func TestChatForkSeed_ReturnsTheSeedOnlyForASeededFork(t *testing.T) {
+	t.Parallel()
+	e := newForkEnv(t)
+	seedOf := func(rc *requestContext, chatID int64) (string, error) {
+		got, err := e.call(t, handleChatForkSeed(e.db), rc, map[string]any{"chatId": chatID})
+		if err != nil {
+			return "", err
+		}
+		return got.(map[string]any)["seed"].(string), nil
+	}
+	seeded, err := e.call(t, e.fork, humanRC, map[string]any{"chatId": e.parent.ID, "atRunId": "r1", "mode": "seeded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native, err := e.call(t, e.fork, humanRC, map[string]any{"chatId": e.parent.ID, "atRunId": "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, err := seedOf(humanRC, seeded.(chatView).ID); err != nil || !strings.Contains(s, hcPrompt) {
+		t.Fatalf("seeded fork seed = %q, %v; want the stored turns", s, err)
+	}
+	for name, id := range map[string]int64{"native fork": native.(chatView).ID, "unforked chat": e.parent.ID, "unknown chat": 9999} {
+		if s, err := seedOf(humanRC, id); err != nil || s != "" {
+			t.Fatalf("%s seed = %q, %v; want empty", name, s, err)
+		}
+	}
+	if _, err := seedOf(&requestContext{runScoped: true}, seeded.(chatView).ID); err == nil {
+		t.Fatal("a run-scoped caller read a fork's seed")
+	}
+	if slices.Contains(RunScopedMethods, "chat.forkSeed") {
+		t.Fatal("chat.forkSeed is run-scoped")
+	}
+}

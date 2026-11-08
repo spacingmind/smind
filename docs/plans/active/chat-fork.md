@@ -42,6 +42,24 @@ Mutations (all fail a named test): `--fork-session` dropped, `--resume-session-a
 - Usage: the first turn of a native fork starts from the totals logged at or before the anchor turn's end; a turn that logged none falls back to the previous turn's (over-reports at worst).
 - Condition from the Supervisor for the PR that creates `refs/smind/turns/` (PR 3, not this one): the refs are never pushed (no push path may carry them), are pruned with run retention and on task delete, with tests for each.
 
+## PR 2: edit-and-retry and what a fork shows
+
+Scope: a user prompt can be edited and retried without touching the original (fork at the previous turn, then the edited text sent in the child); a forked chat shows where it came from. No file undo (PR 3, 4).
+
+### Acceptance criteria
+
+- AC11: `chat.fork` takes `kind` (`fork` default, `retry`); a retry's fork record has kind `retry` and the child is titled "Retry of ...". Unknown kinds are refused. Human-only like fork.
+- AC12: `chat.forkSeed {chatId}` (human-only, not run-scoped) returns the seed a seeded fork was given, "" for any other chat.
+- AC13 (web): an "Edit & retry" action on a user prompt opens a dialog with the prompt in an editable box. Confirm forks at the nearest earlier DONE turn of the chat (native, with the labelled fallback exactly as in PR 1) and starts the edited prompt in the child with the replaced run's provider, model and thinking and the composer's current permission mode; the child's tab opens. A first turn (no earlier finished turn) starts the edited prompt in a plain new chat, and the dialog says so. The original chat is never changed.
+- AC14 (web): the fork dialog's heading line is `From "<chat title>", turn <n>`; a retry dialog says it replaces turn <n>.
+- AC15 (web): in a forked chat the turns inherited from the parent, up to the fork point, are shown read-only and de-emphasised above the chat's own turns with a "Forked here" divider (also in the empty state, replacing "No runs yet" with an invitation to continue). A seeded fork shows instead the summary that was actually sent, labelled "Summary sent to the agent".
+- AC16 (web): the banner reads "Forked from <chat> at turn <n>." (a retry: "Retry of turn <n> from <chat>.") with a "View original" button that opens the parent chat; the 390 width keeps all of it. An archived or missing parent reads "another chat" without the button.
+- AC17: light and dark frames at 1280 and 390 for each state.
+
+### Named tests
+
+Daemon: `TestChatFork_RetryKindIsRecordedAndTitled`, `TestChatForkSeed_ReturnsTheSeedOnlyForASeededFork`, the method-map golden. Web: named with the peers' tests (retry dialog, retry flow, first-turn path, inherited turns, seeded summary, banner link, dialog heading).
+
 ## Progress
 
 Daemon side done and tested: side tables, reader anchor, runner fork handle, `chat.fork`, seeded fallback, additive chat payloads, events. CLI and web done (GLM peers, reviewed; frames light and dark at 1280 and 390: the turn action, the native dialog, the fallback dialog, the banner for a native and a lossy fork). Mobile is PR 1b.
