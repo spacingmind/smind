@@ -130,7 +130,7 @@ describe('describeRunFooter', () => {
 
     it('cli_exited: Continue only with the disposition; every other failure has no footer (J1)', () => {
       expect(describeRunFooter({ Status: 'error', FailureKind: 'cli_exited', Disposition: 'needs-continue' }, now)).toEqual({
-        sentence: 'Failed · the agent CLI exited without a result',
+        sentence: 'Failed · The agent stopped before finishing; its session is saved, so you can continue where it left off.',
         tone: 'warning',
         action: 'continue',
       });
@@ -140,12 +140,55 @@ describe('describeRunFooter', () => {
       }
     });
 
+    describe('human-action classes (R3a): the footer explains, never offers Continue', () => {
+      const kinds = ['context_window_exceeded', 'session_budget_exceeded', 'too_many_denials'] as const;
+
+      it('the sentence is the daemon summary when the run carries one', () => {
+        for (const kind of kinds) {
+          const run = { Status: 'error' as const, FailureKind: kind, FailureAction: { kind: 'new_chat', label: 'Start a fresh chat', summary: `Daemon words ${kind}.` } };
+          expect(describeRunFooter(run, now)).toEqual({ sentence: `Daemon words ${kind}.`, tone: 'warning', action: null });
+        }
+      });
+
+      it('the fallback sentence shows when no action summary came (an older daemon)', () => {
+        expect(describeRunFooter({ Status: 'error', FailureKind: 'context_window_exceeded' }, now)).toEqual({
+          sentence: "The conversation no longer fits the model's context window.",
+          tone: 'warning',
+          action: null,
+        });
+        expect(describeRunFooter({ Status: 'error', FailureKind: 'session_budget_exceeded' }, now)).toEqual({
+          sentence: "The provider's session budget for this run is used up.",
+          tone: 'warning',
+          action: null,
+        });
+        expect(describeRunFooter({ Status: 'error', FailureKind: 'too_many_denials', FailureAction: { kind: 'review_policy', label: 'Review the permission policy' } }, now)).toEqual({
+          sentence: 'The agent kept asking for actions that were denied, so the provider stopped the run.',
+          tone: 'warning',
+          action: null,
+        });
+      });
+
+      it('no Continue even when the disposition says needs-continue (a person must act, not the agent)', () => {
+        for (const kind of kinds) {
+          expect(describeRunFooter({ Status: 'error', FailureKind: kind, Disposition: 'needs-continue' }, now)?.action).toBeNull();
+        }
+      });
+    });
+
     it('continuePrompt: plain Continue for a cap, one line naming the failure for an error', () => {
       expect(continuePrompt({ Status: 'done' })).toBe('Continue');
       expect(continuePrompt({ Status: 'error', FailureKind: 'cli_exited' })).toBe(
-        'Continue from where you left off (the previous run ended unexpectedly: the agent CLI exited without a result).',
+        'Continue from where you left off (the previous run ended unexpectedly: the agent stopped before finishing; its session is saved, so you can continue where it left off).',
       );
       expect(continuePrompt({ Status: 'error', FailureKind: 'rate_limited' })).toContain('provider rate limit');
+      expect(continuePrompt({ Status: 'error', FailureKind: 'context_window_exceeded' })).toBe(
+        "Continue from where you left off (the previous run ended unexpectedly: the conversation no longer fits the model's context window).",
+      );
+      expect(continuePrompt({ Status: 'error' })).toBe('Continue from where you left off (the previous run ended unexpectedly: an unexpected error).');
+      // The daemon's own sentence wins when the run carries one.
+      expect(
+        continuePrompt({ Status: 'error', FailureKind: 'cli_exited', FailureAction: { kind: 'continue', label: 'Continue the run', summary: 'Daemon sentence.' } }),
+      ).toBe('Continue from where you left off (the previous run ended unexpectedly: daemon sentence).');
     });
 
     it('plain error footer unchanged: still none', () => {

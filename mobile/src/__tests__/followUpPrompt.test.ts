@@ -102,7 +102,7 @@ describe('sendFollowUpPrompt (fake connection)', () => {
       throw new Error(`unexpected method ${method}`);
     });
     const rec = recordingDeps();
-    const prompt = 'Continue from where you left off (the previous run ended unexpectedly: the agent CLI exited without a result).';
+    const prompt = 'Continue from where you left off (the previous run ended unexpectedly: the agent stopped before finishing; its session is saved, so you can continue where it left off).';
 
     await continueRun(conn, rec.deps, 7, { Provider: 'claude-native', Status: 'error', FailureKind: 'cli_exited' }, seqFrom(0));
 
