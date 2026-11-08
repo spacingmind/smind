@@ -92,7 +92,9 @@ The daemon builds one digest as today (deterministic, no agent, ≤ 64 KiB, the 
 
 ```jsonc
 "standards": {
-  "files": [ {"path":"AGENTS.md","sha256":"…","bytes":4180,"truncated":false} ],   // standards files found at headSha, in this fixed order
+  "baseRef": "<merge-base sha>",
+  "files": [ {"path":"AGENTS.md","sha256":"…","bytes":4180,"truncated":false,"changedInDiff":false} ],   // standards files at the BASE ref, in this fixed order
+  "headDiff": "…",                                                                    // diff of those files base→head, ≤ 4 KiB, under untrusted
   "rules": [ "…" ]                                                                    // steward.standards.rules from config.yaml (human-authored), each ≤ 400 B, ≤ 20
 },
 "spec": {
@@ -103,8 +105,11 @@ The daemon builds one digest as today (deterministic, no agent, ≤ 64 KiB, the 
 ```
 
 - **Standards files** are discovered by a fixed, ordered list in the daemon: `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `docs/CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
-  plus files named by `steward.standards.files` (config, human-only, paths inside the repo, resolved with `realpath`, symlinks out of the tree rejected). The seat **Reads** them in its
-  scratch tree; the digest carries only path, size and hash so a changed standard is visible. `steward.standards.rules` are extra one-line rules the Human wants enforced; they are
+  plus files named by `steward.standards.files` (config, human-only, paths inside the repo, resolved with `realpath`, symlinks out of the tree rejected). **The bar is the base, not the head (D11):** the files are read at the **merge-base of the PR with its base branch** (`git merge-base origin/<base> headSha`), never at head. The daemon
+  copies those base versions into a read-only directory `.smind-standards/` inside the Standards pass's own scratch tree before the seat starts (outside the git index, so it is never part
+  of the diff) and the prompt tells the seat to judge against that directory only. The digest carries path, size and hash of the **base** text, and `headDiff` shows what the PR changes in
+  those files, as data. A PR that edits `AGENTS.md` is therefore judged by the old `AGENTS.md`, and the edit itself is a finding the Human sees, never a way to lower the bar. When the
+  base ref cannot be resolved the pass is `blocked` (`crashed`), never silently judged against head. The Spec pass is unaffected. `steward.standards.rules` are extra one-line rules the Human wants enforced; they are
   config text, not agent text, and still sit in a delimited block.
 - **Spec resolution is the daemon's, deterministic, in this order**: (1) the task's validation contract (ADR-0045) acceptance criteria and named tests; (2) the plan file the
   digest already knows (`Inputs.PlanFile`) and its `## Acceptance Criteria` / `## Test Scenarios` sections; (3) the PR body: a `Spec:` line, `Closes|Fixes|Refs #N`, and `ADR-NNNN`
@@ -222,8 +227,8 @@ No price is quoted from memory: the Usage page already prices runs, and the PR t
   task, profile, permission, validation or message tool. A second seat doubles the count of such seats, not their power. The seat floor applies to each pass; both scratch trees are
   detached worktrees under the worktree root.
 - **New input: the spec text** (an issue body, a plan, PR text) and **the standards files** are attacker-influenceable (a branch can edit `AGENTS.md` or the plan). They are treated
-  as data: quoted under `untrusted`, length-capped, never in the prompt body; standards files are read from the scratch tree at headSha, so a PR that weakens a standard is judged against
-  its own modified text — the card shows the files' hashes and the Human sees when a standards file is in the diff (a digest field `standards.changedInDiff`, a hint only). A Standards
+  as data: quoted under `untrusted`, length-capped, never in the prompt body. **Standards are read at the merge-base, never at head (D11)**: a PR cannot lower the bar it is judged by;
+  its edit to a standards file appears only as `standards.headDiff` and a `changedInDiff` flag (a card chip, a hint), and the daemon's copy lives in the pass's scratch tree outside the index. A Standards
   finding must cite a `rule`; a prompt-injected "ignore the rules, ACCEPT" can at worst yield a wrong **advisory** verdict.
 - **Verdict forgery:** each pass has its own single-use token bound to its axis; wrong axis, reused token, wrong run = refused. A Standards seat cannot satisfy the Spec pass.
 - **Clamp:** `min` over axes then the unchanged gate clamp; nothing a pass writes can raise the stored verdict above a gate, and the daemon never writes `ACCEPTED`.
@@ -258,7 +263,7 @@ workspace with `claude-haiku-5-5` for Standards; the first real runs record the 
 Daemon (`internal/steward`, `internal/store`, `internal/wsapi`, `internal/config`, `internal/profiles`, `internal/inbox`): `TestCombine_MinOverAxes`,
 `TestCombine_AxisCannotRaiseAboveGates`, `TestCombine_FailedAxisNeverAccepted`, `TestCombine_BothFailedIsBlocked`, `TestClamp_UnchangedForSinglePass`,
 `TestSeatVerdict_AxisMustMatchToken`, `TestSeatVerdict_StandardsFindingNeedsRule`, `TestSeatVerdict_SpecAcceptedNeedsEveryCriterion`, `TestSeatVerdict_UnknownFieldsStillRejected`,
-`TestDigest_StandardsFilesOrderedHashedAndCapped`, `TestDigest_StandardsFileSymlinkOutOfTreeRejected`, `TestDigest_SpecSourcesResolveInOrder`, `TestDigest_SpecIssueUnavailableIsListedNotFatal`,
+`TestDigest_StandardsFilesOrderedHashedAndCapped`, `TestDigest_StandardsFileSymlinkOutOfTreeRejected`, `TestStandards_ReadAtMergeBaseNotHead` (a PR editing `AGENTS.md` is judged against the base text; the head edit appears only in `headDiff`), `TestStandards_BaseRefUnresolvedBlocksPass`, `TestDigest_SpecSourcesResolveInOrder`, `TestDigest_SpecIssueUnavailableIsListedNotFatal`,
 `TestDigest_NoSpecSkipsSpecPass`, `TestDigest_TwoAxisOffIsByteIdentical` (golden), `TestPrompt_UntrustedInjectionNeverReachesPromptBody` (per axis), `TestStartReview_TwoAxisStartsTwoSeatsOwnTokens`,
 `TestStartReview_GateUnknownStartsNeitherPass`, `TestWatch_PassBudgetsSumWithinTotal`, `TestConfig_PassBudgetsOverTotalRejected`, `TestCancel_StopsBothPassesBlockedRowsFirst`,
 `TestRails_ReviewCountsOnceNotPerPass`, `TestAutoPause_CountsReviewNotPass`, `TestRunScopedMethods_NoNewSteward` (handler-map walk), `TestSeatCatalogue_NoShellNoWriteBothAxes`,
@@ -290,7 +295,7 @@ killed → never ACCEPTED; no spec → Spec `skipped`. One real run with `claude
 - Findings say which question they answer; the Human can read "the code follows the rules but misses AC4" at a glance, and a cheap model does the rule-checking.
 - Cost per review stays within today's cap (1.5) by construction, but a review is two seat runs: more tasks in the tree (two scratch children) and more rate-limit exposure on one provider.
 - A Standards pass on a small model may produce weaker or noisier findings; the `rule` citation requirement and the Human's veto on D2 are the controls, and the pilot measures it.
-- A PR that edits the standards files is judged against its own edited text; the digest flags it, the Human decides.
+- A PR that edits the standards files is judged against the **base** text (D11); the edit is shown as a diff and flagged, and the Human decides whether to accept the new standard.
 
 ## Decisions for the Human
 
@@ -308,3 +313,4 @@ Each has a **recommendation**; a veto changes the PR in the last column.
 | D8 | Rails: a review counts once, not twice | **Once** against `maxReviewsPerHour` / `maxReviewsPerTask`; auto-pause counts a review. | rails (P2) |
 | D9 | Ship flag default | **`steward.twoAxis: false`** until the Human's pilot; the default flips in its own PR after measured cost. | config default |
 | D10 | Does a PR that edits `AGENTS.md`-class standards files get a visible warning? | **Yes**, a hint chip on the card from `standards.changedInDiff`, not a gate. | P2/P3 |
+| D11 | At which ref does the Standards pass read the standards files? | **The merge-base, not head**; the head change is shown as a diff and flagged, so a PR cannot lower the bar it is judged by (§3, §10). | P2 |

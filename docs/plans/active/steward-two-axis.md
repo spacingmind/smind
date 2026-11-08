@@ -18,7 +18,7 @@ Schema and combine (P1, daemon, flag-gated)
 
 Digest, prompts, seats (P2, daemon)
 - AC7 With the flag on, the digest gains `standards` (ordered files with path, bytes, sha256, truncated; configured rules; `changedInDiff`) and `spec` (sources found/missing/unavailable, criteria ≤ 60, `namedTestsInTree`), within the 64 KiB cap and the same shrink order.
-- AC8 Standards files come from a fixed ordered list plus `steward.standards.files`; a symlink leaving the tree is rejected; contents are read by the seat from its scratch tree, never inlined in the prompt.
+- AC8 Standards files come from a fixed ordered list plus `steward.standards.files`; a symlink leaving the tree is rejected; they are read at the **merge-base** (never head, D11): the daemon copies the base versions into `.smind-standards/` in the pass's scratch tree (outside the index), the digest carries their base hashes and a capped `headDiff`, a PR editing `AGENTS.md` is judged against the base text, and an unresolvable base ref blocks the pass; contents are never inlined in the prompt.
 - AC9 Spec resolution is deterministic in the daemon in the order contract → plan file → PR body (`Spec:`, `Closes|Fixes|Refs #N`, `ADR-NNNN`); an issue fetch failure is `unavailable`, never a pass failure; no spec at all skips the Spec pass (`skipped`, `no spec available`, cost 0).
 - AC10 Each pass is a separate seat run: own scratch worktree at the same sha, own task, chat, run, single-use token hashed in the pass row, own `Watch` (budget, minutes); both start together after the gates are decided; an unknown gate starts neither.
 - AC11 Per-pass budgets sum to at most `steward.budgetUsd`; a config that exceeds it is a load error; a pass over its own cap is `BLOCKED: budget`.
@@ -44,7 +44,7 @@ P1 (`internal/steward`, `internal/store`): `TestCombine_MinOverAxes`, `TestCombi
 `TestClamp_UnchangedForSinglePass`, `TestSeatVerdict_AxisMustMatchToken`, `TestSeatVerdict_StandardsFindingNeedsRule`, `TestSeatVerdict_SpecAcceptedNeedsEveryCriterion`,
 `TestSeatVerdict_UnknownFieldsStillRejected`, `TestSeatVerdict_SchemaCapsCoverNewFields`, `TestStore_PassRowsUniquePerAxis`, `TestView_AxesAbsentWhenSinglePass`, `TestTwoAxisOff_ReviewIsByteIdentical` (golden).
 
-P2 (`internal/steward`, `internal/wsapi`, `internal/config`, `internal/profiles`, `cmd/smind`): `TestDigest_StandardsFilesOrderedHashedAndCapped`, `TestDigest_StandardsFileSymlinkOutOfTreeRejected`,
+P2 (`internal/steward`, `internal/wsapi`, `internal/config`, `internal/profiles`, `cmd/smind`): `TestDigest_StandardsFilesOrderedHashedAndCapped`, `TestDigest_StandardsFileSymlinkOutOfTreeRejected`, `TestStandards_ReadAtMergeBaseNotHead`, `TestStandards_BaseRefUnresolvedBlocksPass`,
 `TestDigest_StandardsChangedInDiff`, `TestDigest_SpecSourcesResolveInOrder`, `TestDigest_SpecIssueUnavailableIsListedNotFatal`, `TestDigest_NoSpecSkipsSpecPass`, `TestDigest_TwoAxisSectionsShrinkBeforeExistingOnes`,
 `TestPrompt_UntrustedInjectionNeverReachesPromptBody` (both axes), `TestStartReview_TwoAxisStartsTwoSeatsOwnTokens`, `TestStartReview_GateUnknownStartsNeitherPass`, `TestStartReview_StandardsProfileFallsBack`,
 `TestConfig_PassBudgetsOverTotalRejected`, `TestWatch_PassBudgetBlocksOnlyThatPass`, `TestCancel_StopsBothPassesBlockedRowsFirst`, `TestRails_ReviewCountsOnceNotPerPass`, `TestAutoPause_CountsReviewNotPass`,
@@ -57,7 +57,7 @@ P4 (`mobile`): review screen unit tests for the axis rows and the criteria secti
 
 P5: AC21, AC22 above.
 
-Mutations (committed work, one at a time, restored with `git checkout -- <file>`; each named test must then fail): the combine uses `max` → `TestCombine_MinOverAxes`; a failed axis counts as ACCEPTED →
+Mutations (committed work, one at a time, restored with `git checkout -- <file>`; each named test must then fail): standards read at head instead of the merge-base → `TestStandards_ReadAtMergeBaseNotHead`; the combine uses `max` → `TestCombine_MinOverAxes`; a failed axis counts as ACCEPTED →
 `TestCombine_FailedAxisNeverAccepted`; the axis is not checked against the token → `TestTokenAxis_StandardsSeatCannotSubmitSpec`; the budget sum check removed → `TestConfig_PassBudgetsOverTotalRejected`;
 plan text is copied into the prompt → `TestPrompt_UntrustedInjectionNeverReachesPromptBody`; the flag off still writes pass rows → `TestTwoAxisOff_ReviewIsByteIdentical`.
 
@@ -77,7 +77,7 @@ UI PRs (P3, P4) need light and dark frames at 1280 and 390, every transition fra
 
 ## Decisions
 
-Ten decisions D1–D10 with recommendations are in the ADR ("Decisions for the Human"); this section records the accepted answers once the Human gives them.
+Eleven decisions D1–D11 with recommendations are in the ADR ("Decisions for the Human"); this section records the accepted answers once the Human gives them.
 
 ## Progress
 
