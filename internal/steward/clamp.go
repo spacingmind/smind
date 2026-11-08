@@ -4,7 +4,7 @@ import "fmt"
 
 // DaemonBlockedReasons are the BLOCKED reasons only the daemon may write
 // (AC19): the seat and validators cannot claim them.
-var DaemonBlockedReasons = []string{"timeout", "budget", "crashed", "cancelled", "scope_violation"}
+var DaemonBlockedReasons = []string{"timeout", "budget", "crashed", "cancelled", "scope_violation", "base_unresolved"}
 
 // IsDaemonBlockedReason reports whether reason is one a daemon may write.
 func IsDaemonBlockedReason(reason string) bool {

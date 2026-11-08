@@ -91,7 +91,7 @@ func (s *Service) SubmitPassVerdict(reviewID int64, axis Axis, token, runID stri
 // decided.
 func (s *Service) WritePassBlocked(reviewID int64, axis Axis, reason, summary string, costUSD float64) error {
 	if !IsDaemonBlockedReason(reason) {
-		return errors.New("the daemon may only write blocked passes for timeout, budget, crashed, cancelled or scope_violation")
+		return errors.New("the daemon may only write blocked passes for timeout, budget, crashed, cancelled, scope_violation or base_unresolved")
 	}
 	row, _, err := s.openPass(reviewID, axis)
 	if err != nil {
