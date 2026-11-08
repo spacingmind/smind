@@ -48,6 +48,30 @@ function lineClass(line: string): string {
   return "text-foreground";
 }
 
+/**
+ * A write to a path that did not exist: no existing file is being replaced,
+ * so what the daemon has is the new content, not a change to something.
+ */
+function isNewFileWrite(d: PermissionDetail): boolean {
+  return d.kind === "write" && !d.replacesExisting && d.existingLines === undefined;
+}
+
+/**
+ * A new-file `diff` is just the content wearing unified-diff clothes: when
+ * every body line starts with "+" (headers aside), return the content they
+ * carry -- leading "+" removed, "@@"/"+++ "/"--- " dropped. null when the
+ * diff carries any other line (not a pure addition -- keep it a diff).
+ */
+function diffAsContent(diff: string): string | null {
+  const body: string[] = [];
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("@@") || line.startsWith("+++ ") || line.startsWith("--- ")) continue;
+    if (!line.startsWith("+")) return null;
+    body.push(line.slice(1));
+  }
+  return body.join("\n");
+}
+
 /** Plain-text, line-by-line; never HTML. Long lines scroll rather than widen the card. */
 function Pre({ text, colored, testId }: { text: string; colored?: boolean; testId: string }) {
   return (
@@ -148,8 +172,12 @@ function PolicyLine({ policy }: { policy: NonNullable<PermissionDetail["policy"]
 export function PermissionDetailView({ detail, requestId }: { detail: PermissionDetail; requestId?: string }) {
   const client = useDaemonConnection().client;
   const size = sizeSummary(detail);
-  const body = detail.diff || detail.preview;
-  const bodyTitle = detail.diff ? "Diff" : "Preview";
+  // A new file shows its content: title "Content", open, plain text -- a
+  // collapsed diff of an entirely-new file says nothing at a glance.
+  const newFile = isNewFileWrite(detail);
+  const content = newFile ? (detail.preview ?? (detail.diff ? diffAsContent(detail.diff) : null)) : null;
+  const body = content ?? detail.diff ?? detail.preview;
+  const bodyTitle = content ? "Content" : detail.diff ? "Diff" : "Preview";
 
   return (
     <div data-testid="permission-detail" className="mt-1 flex flex-col gap-1.5 text-ui-sm text-foreground">
@@ -185,9 +213,9 @@ export function PermissionDetailView({ detail, requestId }: { detail: Permission
         </div>
       )}
       {body && (
-        <details open={detail.largeShrink && !!detail.diff} data-testid="permission-detail-body">
+        <details open={content !== null || (detail.largeShrink && !!detail.diff)} data-testid="permission-detail-body">
           <summary className="cursor-pointer text-foreground-muted">{bodyTitle}</summary>
-          <Pre text={body} colored={!!detail.diff} testId="permission-detail-pre" />
+          <Pre text={body} colored={content === null && !!detail.diff} testId="permission-detail-pre" />
           {detail.truncated && (
             <div className="mt-1 text-foreground-muted" data-testid="permission-detail-truncated">
               Truncated
