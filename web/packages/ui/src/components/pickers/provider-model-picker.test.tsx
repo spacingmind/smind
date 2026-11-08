@@ -264,7 +264,7 @@ describe("model picker", () => {
     expect(onSelect).toHaveBeenCalledWith("claude-native", "sonnet-5-5");
   });
 
-  it("profile rows apply, No agent detaches, the pencil opens settings", () => {
+  it("profile rows apply, No profile detaches, the pencil opens settings", () => {
     const spies = renderPicker({ profileRows: PROFILES, baseAgentId: "1", custom: true });
     open();
     fireEvent.click(screen.getByTestId("model-picker-back"));

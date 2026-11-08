@@ -1,7 +1,7 @@
 import { HostChip } from "@/components/host-chip";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Icons, ICON_SIZE } from "@/lib/icons";
-import { pillStatusWithSubtree, rateLimitHint, stalledHint, statusSummary, usageChipParts, usageChipText } from "@/lib/task-lineage";
+import { pillStatusWithSubtree, rateLimitHint, stalledHint, statusSummary, usageChipText } from "@/lib/task-lineage";
 import type { TaskLineage } from "@/hooks/use-task-lineage";
 
 /**
@@ -25,7 +25,6 @@ export function TaskLineageChips({
   const remoteChildren = children.filter((c) => c.remote);
   const summary = node ? statusSummary(node.counts) : "";
   const usage = node ? usageChipText(node.usage.subtree) : null;
-  const usageParts = node ? usageChipParts(node.usage.subtree) : null;
   // This task's own rate limit is not repeated here: the run footer under the failed run states the reset once (with its actions); only a child's limit is hinted, on its pill.
   const stalled = node ? stalledHint(node, new Date()) : null;
   if (!parent && children.length === 0 && !summary && !usage && !stalled) return null;
@@ -38,18 +37,7 @@ export function TaskLineageChips({
           title={`Task total (this task and its subtree) -- own: ${usageChipText(node.usage.own) ?? "—"} · tree: ${usageChipText(node.usage.subtree) ?? "—"}`}
           className="min-w-0 truncate rounded-full border px-2 py-0.5"
         >
-          Task{" "}
-          {usageParts?.cost ? (
-            <>
-              <span>{usageParts.cost}</span>
-              <span data-testid="task-tree-usage-tokens" className="max-sm:hidden">
-                {" "}
-                · {usageParts.tokens}
-              </span>
-            </>
-          ) : (
-            usage
-          )}
+          Task {usage}
         </span>
       )}
       {parent && !parent.archived && (

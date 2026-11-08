@@ -32,7 +32,7 @@ export const PALETTE_GROUP_ICON: Record<string, IconName> = {
   Actions: "play",
   Commands: "terminal",
   Settings: "settings",
-  Agents: "agent",
+  Profiles: "agent",
   Plugins: "plugin",
 };
 

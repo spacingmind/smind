@@ -25,9 +25,9 @@ describe("diffConsent", () => {
     expect(by("Process")[0]).toMatchObject({ kind: "added", text: "node main.js", runs: true });
     expect(by("Hook")[0]).toMatchObject({ kind: "added", runs: true });
     expect(by("MCP server")[0]).toMatchObject({ kind: "changed", runs: true });
-    expect(by("Escalating agent")[0]).toMatchObject({ kind: "added", runs: true });
-    // the calm agent and the skill that went away are informational only
-    expect(by("Agent")[0]).toMatchObject({ kind: "removed", runs: false });
+    expect(by("Escalating profile")[0]).toMatchObject({ kind: "added", runs: true });
+    // the calm profile and the skill that went away are informational only
+    expect(by("Profile")[0]).toMatchObject({ kind: "removed", runs: false });
     expect(by("Skill")[0]).toMatchObject({ kind: "removed", runs: false });
   });
 });

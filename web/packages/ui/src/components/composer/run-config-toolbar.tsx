@@ -429,8 +429,8 @@ function RunConfigToolbarModelPicker() {
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label={`Reset to ${baseAgent?.Name ?? "agent"} defaults`}
-          title={`Reset to ${baseAgent?.Name ?? "agent"}'s saved config`}
+          aria-label={`Reset to ${baseAgent?.Name ?? "profile"} defaults`}
+          title={`Reset to ${baseAgent?.Name ?? "profile"}'s saved config`}
           data-testid="composer-agent-reset"
           disabled={meta.disabled}
           onClick={() => actions.resetToAgent()}

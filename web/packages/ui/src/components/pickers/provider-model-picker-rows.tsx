@@ -183,7 +183,7 @@ export function NoAgentRow(shell: RowShellProps) {
   return (
     <RowShell {...shell} testId="model-no-agent">
       <span className="size-4 shrink-0" />
-      <span className="text-ui-base text-foreground">No agent</span>
+      <span className="text-ui-base text-foreground">No profile</span>
     </RowShell>
   );
 }

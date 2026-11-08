@@ -28,7 +28,6 @@ export type TreeRow =
       countdown: string | null;
       /** 'Stalled · no run for 23 min' while the node's tree is stalled, else null. */
       stalledNote: string | null;
-      cost: string;
       isRoot: boolean;
       /** F4: owning host alias of a remote node (read-only, negative id), else null. */
       host: string | null;
@@ -132,22 +131,6 @@ export function stalledNote(node: Pick<TaskTreeNode, 'stalled' | 'stalledSince'>
   return `Stalled · no run for ${Math.max(0, Math.floor((now.getTime() - since) / 60000))} min`;
 }
 
-/** Cost text: unknown is 'n/a' and never '$0.00'. */
-export function formatCost(costUsd: number | null | undefined): string {
-  if (costUsd === null || costUsd === undefined || !Number.isFinite(costUsd)) return 'n/a';
-  if (costUsd > 0 && costUsd < 0.01) return '<$0.01';
-  return `$${costUsd.toFixed(2)}`;
-}
-
-/** Own cost, plus the subtree rollup when the node has children. */
-export function costLabel(node: Pick<TaskTreeNode, 'childCount' | 'usage'>): string {
-  const own = formatCost(node.usage?.own?.costUsd);
-  if (!(node.childCount > 0)) return own;
-  const subtree = formatCost(node.usage?.subtree?.costUsd);
-  if (own === 'n/a' && subtree === 'n/a') return 'n/a';
-  return `${own} (subtree ${subtree})`;
-}
-
 export type BudgetLine = { text: string; tone: StateTone };
 
 /**
@@ -220,7 +203,6 @@ export function buildTreeRows(
       rateLimited: isRateLimited(n.run),
       countdown: rateLimitCountdown(n.run, now),
       stalledNote: stalledNote(n, now),
-      cost: costLabel(n),
       isRoot: i === 0,
       host: n.remote ? n.host ?? null : null,
       remote: n.remote === true,

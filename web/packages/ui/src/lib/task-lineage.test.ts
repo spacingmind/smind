@@ -41,17 +41,23 @@ describe("statusSummary", () => {
 });
 
 describe("usageChipText", () => {
-  it("usageChipText is null when nothing is reported and never shows 0 for unreported", () => {
+  it("usageChipText is null when no token count is reported and never shows 0 for unreported", () => {
     expect(usageChipText(usage())).toBeNull();
     // Zero runs means "nothing ran", not "0 tokens reported".
-    expect(usageChipText(usage({ runs: 0, costUsd: 1 }))).toBeNull();
-    // Only a cost reported: tokens stay an em dash, never 0.
-    expect(usageChipText(usage({ runs: 2, costUsd: 0.5 }))).toBe("$0.500 · — tok");
+    expect(usageChipText(usage({ runs: 0, inputTokens: 100 }))).toBeNull();
+    // Only a cost reported, no token count: nothing to show on the chip.
+    expect(usageChipText(usage({ runs: 2, costUsd: 0.5 }))).toBeNull();
   });
 
   it("usageChipText sums input and output when only one is reported", () => {
-    expect(usageChipText(usage({ runs: 1, inputTokens: 1200 }))).toBe("— · 1.2k tok");
-    expect(usageChipText(usage({ runs: 3, inputTokens: 700, outputTokens: 300 }))).toBe("— · 1k tok");
+    expect(usageChipText(usage({ runs: 1, inputTokens: 1200 }))).toBe("1.2k tok");
+    expect(usageChipText(usage({ runs: 3, inputTokens: 700, outputTokens: 300 }))).toBe("1k tok");
+  });
+
+  it("usageChipText never shows a dollar figure", () => {
+    const text = usageChipText(usage({ runs: 3, inputTokens: 700, outputTokens: 300, costUsd: 1.5 }));
+    expect(text).toBe("1k tok");
+    expect(text).not.toContain("$");
   });
 });
 

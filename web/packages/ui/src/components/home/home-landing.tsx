@@ -14,6 +14,7 @@ import { useProfileList } from "@/hooks/use-profiles";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import { Icons } from "@/lib/icons";
+import { isDesktop } from "@/lib/platform";
 import { OFFICE_SUGGESTED_PROMPTS } from "@/lib/suggested-prompts";
 import type { Task, Workspace } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -48,12 +49,18 @@ function placeholderFor(connected: boolean, hasProjects: boolean): string {
 export function HomeLanding({
   client,
   connected,
+  connectionError,
+  onRetryConnect,
   workspaces,
   onCreated,
   onAddProject,
 }: {
   client: WsClientLike | null;
   connected: boolean;
+  /** The initial connect's failure cause (App.tsx) -- shown above the composer while the daemon is unreachable. */
+  connectionError?: string | null;
+  /** Re-runs the daemon connection (App.tsx) -- the notice's Retry. */
+  onRetryConnect?: () => void;
   workspaces: Workspace[];
   onCreated: (task: Task) => void;
   onAddProject?: () => void;
@@ -127,6 +134,31 @@ export function HomeLanding({
       <HomeIllustration />
       <h1 className="text-ui-xl font-semibold text-foreground">{greeting}</h1>
       <div className="w-full max-w-2xl">
+        {!connected && connectionError && (
+          <div
+            role="alert"
+            data-testid="home-connection-notice"
+            className="mb-3 flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-3 text-ui-sm text-foreground"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Icons.warning aria-hidden className="size-4 shrink-0 text-destructive" />
+              <span>Can't reach the daemon: {connectionError}</span>
+              {onRetryConnect && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto"
+                  aria-label="Retry connection"
+                  onClick={onRetryConnect}
+                >
+                  Retry
+                </Button>
+              )}
+            </div>
+            {!isDesktop && <p className="text-ui-sm text-foreground-muted">Start it with smind serve</p>}
+          </div>
+        )}
         <div className="-mb-3 rounded-t-2xl bg-muted/60 px-1.5 pb-4 pt-1.5">
           <Popover
             open={menuOpen}

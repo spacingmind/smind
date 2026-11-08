@@ -246,7 +246,7 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
 registerSettingsSection({
   id: LEARNED_SKILLS_SECTION_ID,
   label: "Skills (learned)",
-  groupLabel: "Agents & providers",
+  groupLabel: "Profiles & providers",
   description: "Skills learned from each workspace's runs.",
   order: 178,
   icon: <Icons.skills aria-hidden className="size-3.5" />,

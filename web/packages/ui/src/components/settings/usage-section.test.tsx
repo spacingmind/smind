@@ -50,7 +50,7 @@ describe("usage-section", () => {
     const section = listSettingsSections().find((s) => s.id === "usage");
     expect(section).toBeDefined();
     expect(section?.label).toBe("Usage");
-    expect(section?.groupLabel).toBe("Agents & providers");
+    expect(section?.groupLabel).toBe("Profiles & providers");
   });
 
   it("defaults to scope runs, groupBy task and a 7 day since", async () => {

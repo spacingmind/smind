@@ -57,7 +57,7 @@ describe("AppSidebar palette entries in a desktop build", () => {
 
     expect(byTitle.get("Settings: Daemon server")?.group).toBe("Settings");
     expect(byTitle.get("Settings: Daemon")?.group).toBe("Settings");
-    expect(byTitle.has("Settings: Agents")).toBe(true);
+    expect(byTitle.has("Settings: Profiles")).toBe(true);
     expect(byTitle.has("Settings: Providers")).toBe(true);
   });
 
