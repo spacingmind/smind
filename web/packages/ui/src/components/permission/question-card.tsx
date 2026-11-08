@@ -199,8 +199,12 @@ function QuestionField({
 }) {
   const fieldId = useId();
   const otherId = useId();
+  const [expanded, setExpanded] = useState(false);
   const options = question.options ?? [];
   const isChoice = question.kind === "single" || question.kind === "multi";
+  // Long asks collapse visually (the card stays scannable); the clamp is CSS
+  // only, so the legend still carries the fieldset's full accessible name.
+  const isLong = question.text.length > 480 || question.text.split("\n").length > 8;
 
   function toggleOption(optionId: string) {
     if (question.kind === "single") {
@@ -218,7 +222,27 @@ function QuestionField({
 
   return (
     <fieldset data-testid="question-field" className="flex flex-col gap-1.5">
-      <legend className="whitespace-pre-wrap break-words">{question.text}</legend>
+      {isLong ? (
+        <>
+          <legend>
+            <span className={`block whitespace-pre-wrap break-words${expanded ? "" : " line-clamp-8"}`}>{question.text}</span>
+          </legend>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            data-testid="question-text-toggle"
+            aria-expanded={expanded}
+            disabled={disabled}
+            onClick={() => setExpanded((value) => !value)}
+            className="self-start"
+          >
+            {expanded ? "Show less" : "Show all"}
+          </Button>
+        </>
+      ) : (
+        <legend className="whitespace-pre-wrap break-words">{question.text}</legend>
+      )}
       {question.header && (
         <span className="inline-flex w-fit rounded-full border px-2 py-0.5 text-ui-xs text-foreground-muted">{question.header}</span>
       )}
