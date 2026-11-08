@@ -132,6 +132,7 @@ test('F-04 a cli_exited failure reads as a sentence a person can act on', async 
 })
 
 test('F-05 the sidebar shows the failed tasks and each class action label', async ({ app }, testInfo) => {
+  test.skip(testInfo.project.name.endsWith('390'), 'wide-only: at 390 the sidebar is a drawer, not a column of rows')
   const specs = ['context-window', 'session-budget', 'too-many-denials']
   const runs = new Map<string, ClassSpec>()
   const titles: string[] = []
