@@ -645,6 +645,33 @@ describe("TaskDetailPane", () => {
     expect(screen.queryByTestId("question-card")).not.toBeInTheDocument();
   });
 
+  it("remounts the question card for a new requestId, discarding in-progress answers", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    client.emit("run.attach", 0, "question_request", {
+      requestId: "q-1",
+      request: { source: "claude", questions: [{ id: "a", text: "Which target?", kind: "text" }] },
+    });
+    await flush();
+
+    fireEvent.change(screen.getByTestId("question-text-a"), { target: { value: "a draft answer" } });
+    expect(screen.getByTestId("question-text-a")).toHaveValue("a draft answer");
+
+    client.emit("run.attach", 0, "question_request", {
+      requestId: "q-2",
+      request: { source: "claude", questions: [{ id: "a", text: "Try again?", kind: "text" }] },
+    });
+    await flush();
+
+    // A new ask is a whole new card (keyed by requestId): the old draft is not an answer to it.
+    expect(screen.getByTestId("question-card")).toHaveTextContent("Try again?");
+    expect(screen.getByTestId("question-text-a")).toHaveValue("");
+  });
+
   it("surfaces a run.respondPermission failure without crashing, keeping the option buttons usable", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);

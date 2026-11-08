@@ -116,6 +116,27 @@ describe("QuestionCard: rendering", () => {
     expect(card.textContent).toContain("line\n".repeat(60).trimEnd());
   });
 
+  it("labels the Other input with its own question's text, capped at 60 chars", () => {
+    const long = "y".repeat(80);
+    render(
+      <QuestionCard
+        runId="run-1"
+        pending={pendingQuestion({
+          request: {
+            source: "agent",
+            questions: [
+              { id: "q1", text: "Pick services", kind: "multi", options: [{ id: "api", label: "API" }], allowOther: true },
+              { id: "q2", text: long, kind: "single", options: [{ id: "a", label: "A" }], allowOther: true },
+            ],
+          },
+        })}
+        onAnswer={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("question-other-q1")).toHaveAccessibleName("Other answer for: Pick services");
+    expect(screen.getByTestId("question-other-q2")).toHaveAccessibleName(`Other answer for: ${"y".repeat(60)}`);
+  });
+
   it("is focusable as a group and moves focus to itself on mount, unless a text field has focus", () => {
     const { rerender } = render(<QuestionCard runId="run-1" pending={pendingQuestion()} onAnswer={vi.fn()} />);
     const group = screen.getByRole("group", { name: "Agent question: Which environment?" });
@@ -142,6 +163,31 @@ describe("QuestionCard: rendering", () => {
 });
 
 describe("QuestionCard: submit and decline payloads", () => {
+  it("shows the answer hint only while Submit is disabled because a question is unanswered and not submitting", () => {
+    render(<QuestionCard runId="run-1" pending={pendingQuestion()} onAnswer={vi.fn()} />);
+    expect(screen.getByTestId("question-submit-hint")).toHaveTextContent("Answer every question to submit.");
+
+    answerAll(screen.getByTestId("question-card"));
+    expect(screen.queryByTestId("question-submit-hint")).not.toBeInTheDocument();
+  });
+
+  it("hides the hint once every question is answered, and while a call is in flight from an unanswered card", async () => {
+    const held = vi.fn(() => new Promise<void>(() => {}));
+    const { unmount } = render(<QuestionCard runId="run-1" pending={pendingQuestion()} onAnswer={held} />);
+
+    answerAll(screen.getByTestId("question-card"));
+    expect(screen.queryByTestId("question-submit-hint")).not.toBeInTheDocument();
+    unmount();
+
+    // Decline is clickable while unanswered: the hint must not survive into the in-flight state.
+    const declined = vi.fn(() => new Promise<void>(() => {}));
+    render(<QuestionCard runId="run-2" pending={pendingQuestion()} onAnswer={declined} />);
+    expect(screen.getByTestId("question-submit-hint")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("question-decline"));
+    await flush();
+    expect(screen.queryByTestId("question-submit-hint")).not.toBeInTheDocument();
+  });
+
   it("keeps Submit disabled until every question has a valid answer", () => {
     render(<QuestionCard runId="run-1" pending={pendingQuestion()} onAnswer={vi.fn()} />);
     const submit = screen.getByTestId("question-submit");

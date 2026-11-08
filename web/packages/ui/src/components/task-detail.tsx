@@ -584,7 +584,14 @@ export function TaskDetailPane({
               {run.pendingPermission && (
                 <PermissionCard runId={run.id} pending={run.pendingPermission} onRespond={respondPermission} onChat={focusComposer} />
               )}
-              {run.pendingQuestion && liveQuestion(run) && <QuestionCard runId={run.id} pending={run.pendingQuestion} onAnswer={answerQuestion} />}
+              {run.pendingQuestion && liveQuestion(run) && (
+                <QuestionCard
+                  key={`${run.id}:${run.pendingQuestion.requestId}`}
+                  runId={run.id}
+                  pending={run.pendingQuestion}
+                  onAnswer={answerQuestion}
+                />
+              )}
             </Fragment>
           ))}
         </div>

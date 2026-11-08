@@ -81,13 +81,9 @@ export function QuestionCard({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // A new requestId replaces the ask wholesale: whatever was typed against
-  // the previous question ids is not an answer to this one.
-  useEffect(() => {
-    setDrafts({});
-    setNote("");
-  }, [pending.requestId]);
-
+  // A new requestId is a whole new ask: task-detail keys this card by
+  // requestId, so it remounts (drafts and note discarded) rather than
+  // mutating in place.
   useEffect(() => {
     if (isTextEntryFocused()) return;
     ref.current?.focus();
@@ -155,6 +151,11 @@ export function QuestionCard({
           disabled={submitting}
           onChange={(e) => setNote(e.target.value)}
         />
+        {!submitting && !allAnswered && (
+          <p data-testid="question-submit-hint" className="text-ui-xs text-foreground-muted">
+            Answer every question to submit.
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -258,7 +259,7 @@ function QuestionField({
         question.allowOther && (
           <Input
             data-testid={`question-other-${question.id}`}
-            aria-label="Other"
+            aria-label={`Other answer for: ${question.text.slice(0, 60)}`}
             placeholder="Other…"
             value={draft.otherText}
             maxLength={MAX_ANSWER_CHARS}
