@@ -25,7 +25,7 @@ contract of ADR-0053; nothing here changes how any other reader sees a run.
   several is `slice_not_found`. The turn's text, thinking and tool calls become events (adjacent text chunks coalesced), then the
   same scrub and elide as every rebuilder.
 - Bounds: the shared 2-concurrent slot pool, a 30 s timeout (a process start plus the replay; claude/codex files keep 10 s), 64 MiB
-  of replayed bytes. The process is killed on completion, timeout, cancellation and daemon shutdown (the client's close).
+  of replayed bytes. The process is killed when the call ends: on completion, timeout, cancellation of the request's context, when a run starts on the chat and at `Registry.CloseAll`.
 - Degrades to the skeleton with a reason: `provider_cannot_rebuild` (no loadSession, or no command), `native_session_missing`
   (agent says the session is unknown, worktree gone), `slice_not_found`, `format_drift` (tool call count off by more than 10%),
   `rebuild_failed` (timeout, size, agent error), `rebuild_busy`.
