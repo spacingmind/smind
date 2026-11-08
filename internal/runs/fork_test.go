@@ -218,3 +218,38 @@ func TestChatFork_SeedGivenBackWhenTheFirstRunFails(t *testing.T) {
 		t.Fatalf("the retry prompt = %q, %v; want the seed given back after the failure", data, err)
 	}
 }
+
+// The wiring: a seeded fork's first run stores a native_ref whose prompt hash is of
+// the text the provider was given (seed and prompt), so the session reader can find
+// the turn again; the next run's hash is of its own prompt.
+func TestChatFork_SeededRunsNativeRefHashesTheDeliveredPrompt(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}), taskrunner.WithSessionStore(taskrunner.NewMemorySessionStore()))
+	reg := newTestRegistry(t, st)
+	parent, _ := st.CreateChat(task.ID, "parent")
+	child, _ := st.CreateChat(task.ID, "child")
+	if err := st.InsertChatFork(store.ChatFork{ChatID: child.ID, ParentChatID: parent.ID, ForkedAtRunID: "x", Mode: store.ChatForkModeSeeded, Seed: "SEED\n\n"}); err != nil {
+		t.Fatal(err)
+	}
+	hashOf := func(prompt string) string {
+		runID, err := reg.Start(t.Context(), wm, runner, task.ID, child.ID, taskrunner.ProviderGLM, prompt, taskrunner.PermissionSettings{}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitForStatus(t, reg, runID, StatusDone, 10*time.Second)
+		sk, err := st.GetRunSkeleton(runID)
+		var ref nativeRef
+		if err != nil || json.Unmarshal([]byte(sk.NativeRef), &ref) != nil {
+			t.Fatalf("native_ref of %s: %+v, %v", runID, sk, err)
+		}
+		return ref.PromptSha256
+	}
+	if got := hashOf("first"); got != sha256Hex("SEED\n\nfirst") {
+		t.Fatalf("first run hash = %s, want the hash of the delivered seed+prompt", got)
+	}
+	if got := hashOf("second"); got != sha256Hex("second") {
+		t.Fatalf("second run hash = %s, want the hash of its own prompt", got)
+	}
+}

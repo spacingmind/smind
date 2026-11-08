@@ -337,3 +337,42 @@ func TestChatFork_RefusesARunThatIsNotAUserRun(t *testing.T) {
 		t.Fatal("a seeded fork at a non-user run succeeded: its seed would carry every turn of the chat")
 	}
 }
+
+// Through the real notifier: chat.created for a chat made with a fork record and
+// chat.updated for a renamed fork carry the fork field; an unforked chat's events
+// do not.
+func TestChatLifecycleEventsCarryTheForkField(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	srv := newTestWSServer(t, wm, newTestRunner(wm), db, "tok")
+	ec := newEventConn(t, dialWS(t, srv, "tok"))
+	ec.subscribe("sub", TopicChatCreated, TopicChatUpdated)
+
+	parent, err := db.CreateChat(task.ID, "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := wm.CreateChatThen(task.ID, "child", func(c store.Chat) error {
+		return db.InsertChatFork(store.ChatFork{ChatID: c.ID, ParentChatID: parent.ID, ForkedAtRunID: "r", Mode: store.ChatForkModeSeeded, Seed: "s"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := ec.nextEvent(5 * time.Second)
+	var created chatCreatedPayload
+	decodePayload(t, ev, &created)
+	if ev.Topic != TopicChatCreated || created.Chat.ID != child.ID || created.Chat.Fork == nil || !created.Chat.Fork.Lossy {
+		t.Fatalf("chat.created = %s %+v, want the fork field", ev.Topic, created.Chat)
+	}
+	sendRequest(t, ec.ws, "rename", "chat.rename", map[string]any{"id": child.ID, "title": "Renamed"})
+	if resp := ec.nextResponse("rename", 5*time.Second); resp.Error != nil {
+		t.Fatalf("chat.rename error = %v", resp.Error.Message)
+	}
+	ev = ec.nextEvent(5 * time.Second)
+	var updated chatUpdatedPayload
+	decodePayload(t, ev, &updated)
+	if ev.Topic != TopicChatUpdated || updated.Chat.Fork == nil {
+		t.Fatalf("chat.updated = %s %+v, want the fork field", ev.Topic, updated.Chat)
+	}
+}
