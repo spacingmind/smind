@@ -271,8 +271,13 @@ func TestProxy_SilentAfterHeadersIsCutByIdleTimeout(t *testing.T) {
 	})
 	srv := timeoutProxy(t, up, upstreamTimeouts{header: time.Second, streamIdle: 150 * time.Millisecond, total: time.Minute})
 	start := time.Now()
-	if body, err := io.ReadAll(postMessages(t, srv, `{"stream":true}`).Body); err == nil {
-		t.Fatalf("a silent stream ended cleanly with %q", body)
+	// no body byte ever reached the client, so the abort may surface already at
+	// the response headers; either way the call must end in an error, quickly
+	if resp, err := failFast.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"stream":true}`)); err == nil {
+		defer resp.Body.Close()
+		if body, rerr := io.ReadAll(resp.Body); rerr == nil {
+			t.Fatalf("a silent stream ended cleanly with %q", body)
+		}
 	}
 	if d := time.Since(start); d > 3*time.Second {
 		t.Fatalf("cut after %v, want about the 150 ms idle bound", d)
