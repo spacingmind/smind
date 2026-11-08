@@ -371,9 +371,12 @@ func chatHasSession(st *store.Store, chatID int64) bool {
 }
 
 // resumableKind is a failure kind DispositionOf may offer a continue for;
-// only those runs pay the chat lookup.
+// only those runs pay the chat lookup. The human-action classes never
+// resume: a plain "continue" on the same session cannot fix an outgrown
+// context window, a spent provider session budget or a denial-stopped run.
 func resumableKind(kind string) bool {
-	return failure.IsKnown(kind)
+	return failure.IsKnown(kind) && kind != failure.KindContextWindowExceeded &&
+		kind != failure.KindSessionBudgetExceeded && kind != failure.KindTooManyDenials
 }
 
 // restartStopReason is the stop reason for a run the daemon's going down cut

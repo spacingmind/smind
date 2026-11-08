@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 const (
@@ -54,6 +56,92 @@ func TestFinish_AuthExpiredSetsNoCooldownNoFallbackNoWait(t *testing.T) {
 func TestFinish_ModelNotInPlanNeverRetriesSameAccount(t *testing.T) {
 	t.Parallel()
 	humanFixNeverActs(t, failure.KindModelNotInPlan, modelErrText)
+}
+
+// TestFinish_NewClassesNeverRetryNeverCooldownNeverFailover: the three
+// human-action classes behave like auth_expired at finish: no cooldown, no
+// wait or fallback successor, no retry item, for either profile policy.
+func TestFinish_NewClassesNeverRetryNeverCooldownNeverFailover(t *testing.T) {
+	t.Parallel()
+	for kind, err := range map[string]error{
+		failure.KindContextWindowExceeded: errors.New("codex prompt: prompt is too long: 210000 tokens > 200000 maximum"),
+		failure.KindSessionBudgetExceeded: &codex.TurnError{Info: "sessionBudgetExceeded", Message: "session budget exceeded"},
+		failure.KindTooManyDenials:        &codex.TurnError{Info: "tooManyDenials", Message: "too many denials"},
+	} {
+		t.Run(kind, func(t *testing.T) {
+			e := newFallbackEnv(t, "")
+			fbMain, _ := fallbackProfiles(t, e.st)
+			r := e.failedRun(t, "nc-fallback", failedOpts{profileID: fbMain})
+			e.reg.finish(r, err)
+			if st := r.statusLocked(); st.FailureKind != kind || st.FailureAction == nil {
+				t.Fatalf("status = kind %q action %+v, want %q with an action", st.FailureKind, st.FailureAction, kind)
+			}
+			if n := len(extraChats(t, e, r.taskID)); n != 0 {
+				t.Fatalf("fallback chats = %d, want 0", n)
+			}
+			if n := len(retryItems(t, e.st, r.chatID)); n != 0 {
+				t.Fatalf("retry items = %d, want 0", n)
+			}
+			if _, ok, _ := e.st.GetProviderCooldown("glm", time.Now()); ok {
+				t.Fatal("provider cooldown set")
+			}
+
+			// A wait policy, even when a (made-up) future reset rode along.
+			wait := profileWith(t, e.st, "wait")
+			r2 := e.failedRun(t, "nc-wait", failedOpts{profileID: wait})
+			at := time.Now().Add(time.Hour).UTC()
+			e.reg.applyRateLimitPolicy(r2, failure.Result{Kind: kind, ResetAt: &at})
+			if n := len(retryItems(t, e.st, r2.chatID)); n != 0 {
+				t.Fatalf("wait retry items = %d, want 0", n)
+			}
+		})
+	}
+}
+
+// TestFinish_NewClassesAreNotSessionResumable: a chat that does have a stored
+// session never offers a continue for the three human-action classes -- a
+// plain "continue" on the same session cannot fix them.
+func TestFinish_NewClassesAreNotSessionResumable(t *testing.T) {
+	t.Parallel()
+	for kind, err := range map[string]error{
+		failure.KindContextWindowExceeded: errors.New("prompt is too long: 210000 tokens > 200000 maximum context length"),
+		failure.KindSessionBudgetExceeded: &codex.TurnError{Info: "sessionBudgetExceeded", Message: "session budget exceeded"},
+		failure.KindTooManyDenials:        &codex.TurnError{Info: "tooManyDenials", Message: "too many denials"},
+	} {
+		t.Run(kind, func(t *testing.T) {
+			wm, st := newTestWorkspaceManager(t)
+			task := newTestTask(t, wm, "")
+			chats, err2 := st.ListChatsByTask(task.ID, false)
+			if err2 != nil || len(chats) == 0 {
+				t.Fatalf("ListChatsByTask: %v %d", err2, len(chats))
+			}
+			chatID := chats[0].ID
+			if _, err := st.BindChatProvider(chatID, "codex-native"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.SetChatAgentSession(chatID, `{"id":"s1"}`); err != nil {
+				t.Fatal(err)
+			}
+			reg := newTestRegistry(t, st)
+			id := "not-resumable"
+			if _, err := st.CreateRun(store.Run{ID: id, TaskID: task.ID, ChatID: chatID, Provider: "codex-native", Prompt: "p", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
+				t.Fatal(err)
+			}
+			r := registerTestRun(reg, id)
+			r.taskID, r.chatID, r.provider, r.prompt = task.ID, chatID, taskrunner.ProviderCodexNative, "p"
+			reg.finish(r, err)
+			if r.hasSession {
+				t.Fatal("hasSession = true, want false")
+			}
+			_, status, err3 := reg.History(id)
+			if err3 != nil {
+				t.Fatal(err3)
+			}
+			if status.FailureKind != kind || status.Disposition != "" {
+				t.Fatalf("kind=%q disposition=%q, want %q and no disposition", status.FailureKind, status.Disposition, kind)
+			}
+		})
+	}
 }
 
 func TestFinish_Transient429RetriesTwiceThenSurfaces(t *testing.T) {
@@ -193,6 +281,12 @@ func TestResumableKind_NewClasses(t *testing.T) {
 	for _, k := range []string{failure.KindAuthExpired, failure.KindModelNotInPlan, failure.KindTransient429, failure.KindPlanWindowExhausted, failure.KindRateLimited, failure.KindCLIExited} {
 		if !resumableKind(k) {
 			t.Errorf("resumableKind(%q) = false", k)
+		}
+	}
+	// The human-action classes: a "continue" on the same session cannot fix them.
+	for _, k := range []string{failure.KindContextWindowExceeded, failure.KindSessionBudgetExceeded, failure.KindTooManyDenials} {
+		if resumableKind(k) {
+			t.Errorf("resumableKind(%q) = true, want false", k)
 		}
 	}
 	if resumableKind("") || resumableKind("martian") {
