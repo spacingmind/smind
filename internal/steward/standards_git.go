@@ -206,12 +206,12 @@ type PruneSpec struct {
 // on its own as instructions, settings, tools or skills, or that pose as the
 // repository's standards: Claude's CLAUDE.md, CLAUDE.local.md, .claude,
 // .claude-plugin and .mcp.json; Codex's .codex, agents.override.md and the
-// .agents directory; and the equivalents of the other providers smind
-// integrates with (Gemini, Cursor, OpenCode, Copilot, Cline, Goose, plus the
-// common editors' rule files); and AGENTS.md. A change must not be able to
-// plant any of them. No seat needs AGENTS.md in its tree: the Standards axis
-// reads only the base copies, and the others judge from the digest and the
-// files the diff touches. Matching is case-insensitive.
+// .agents directory; the equivalents of the other providers smind integrates
+// with (Gemini, Cursor, OpenCode, Copilot, Cline, Goose); other tools'
+// conventions for instruction and rule files; and AGENTS.md. A change must not
+// be able to plant any of them. No seat needs AGENTS.md in its tree: the
+// Standards axis reads only the base copies, and the others judge from the
+// digest and the files the diff touches. Matching is case-insensitive.
 var autoloadNames = []string{
 	"claude.md", "claude.local.md", ".claude", ".claude-plugin", ".mcp.json",
 	".codex", "agents.override.md", ".agents",
