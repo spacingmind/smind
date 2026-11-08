@@ -25,8 +25,8 @@ validation contract (ADR-0045).
 ## Test Scenarios
 
 PR1 (`internal/taskrunner`, `internal/runs`, `internal/wsapi`, `internal/inbox`, `cmd/smind`, fake CLI):
-`TestClaudeAskUserQuestion_BuildsQuestionRequest`, `TestClaudeAskUserQuestion_AnswerSingleMultiOther` (golden against the AC1 fixture),
-`TestClaudeAskUserQuestion_DeclineIsDenyWithNote`, `TestQuestion_TimeoutDeclinesWithNote`, `TestQuestion_NeverAutoAnswers`, `TestQuestion_SeatDeclinesImmediately`,
+`TestParseClaudeAskUserQuestion_*`, `TestClaudeAnswersInput_GoldenAgainstRecordedShape` (golden against the AC1 fixture),
+`TestClaudeAdapter_AskUserQuestionDeclineDeniesWithNote`, `TestQuestion_TimeoutDeclinesWithNote`, `TestQuestion_NeverAutoAnswers`, `TestQuestion_SeatDeclinesImmediately`,
 `TestQuestion_ProfileDeclineAndDisabled`, `TestQuestion_RepeatGuard`, `TestQuestion_CapsAndTruncationFlag`, `TestQuestion_SecretVocabularyRefused`,
 `TestQuestion_AnswerValidation` (unknown option, over cap, double answer), `TestQuestion_RunStopAbandons`, `TestWsapi_AnswerQuestionIsHumanOnly` (walks the handler map and the
 MCP tool list), `TestMCP_TaskWaitReportsWaitingQuestion`, `TestInbox_QuestionItem`, `TestCLI_TaskAnswer*`, `TestEvents_UnknownQuestionTypesIgnoredByOldDecoder`.
@@ -59,7 +59,7 @@ D1-D10 accepted as recommended (2026-11-09, under the Human's delegation). Condi
 PR1 as built, and what it leaves for later (stated, not hidden):
 - The Claude answer shape is pinned by a recorded probe (fixtures in `internal/taskrunner/testdata/askuserquestion/`). The CLI did not advertise the `unanswered` capability, so a decline is a deny with a message; it also still sends the request under bypass permissions.
 - The per-profile `questions` setting is a profile column (default `ask`); seeded validator, steward and peer profiles default to `decline`.
-- Not in PR1: the mobile sheet and push (PR3), the grants table (PR4), Codex and ACP handlers (PR2), a `waiting_question` state in the task tree, fleet mirrors and automations (they still read a parked question as a running run; MCP `task_wait` and `task_status` do report `waiting_question`), and D10's resolved or timed-out inbox row (a run event carries no timestamp, so listing a timed-out question needs a small event-time addition; it stays a follow-up).
+- Not in PR1: the mobile sheet and push (PR3), the grants table (PR4), Codex and ACP handlers (PR2), a `waiting_question` state in the task tree, fleet mirrors and automations (they still read a parked question as a running run; MCP `task_wait` and `task_status` do report `waiting_question`), the "an agent asked for a secret" inbox line and the "ask again" affordance after a timeout (both need a history-derived resolved item), the `decline` default for automations and orchestrated Leads (only the seeded peer, validator and steward profiles default to `decline` in PR1; a Lead stays `ask`), and D10's resolved or timed-out inbox row (a run event carries no timestamp, so listing a timed-out question needs a small event-time addition; it stays a follow-up).
 
 ## Progress
 

@@ -214,10 +214,10 @@ function QuestionField({
 
   return (
     <fieldset data-testid="question-field" className="flex flex-col gap-1.5">
+      <legend className="whitespace-pre-wrap break-words">{question.text}</legend>
       {question.header && (
         <span className="inline-flex w-fit rounded-full border px-2 py-0.5 text-ui-xs text-foreground-muted">{question.header}</span>
       )}
-      <legend className="whitespace-pre-wrap break-words">{question.text}</legend>
 
       {isChoice && (
         <div className="flex flex-col gap-1">

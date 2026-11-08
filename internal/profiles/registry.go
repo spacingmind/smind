@@ -372,7 +372,7 @@ func (r *Registry) validateContract(p *store.AgentProfile) error {
 func (r *Registry) validateQuestions(p *store.AgentProfile) error {
 	switch p.Questions {
 	case "":
-		p.Questions = "ask"
+		// Left empty: a create stores "ask", an update keeps the stored value.
 	case "ask", "decline", "disabled":
 	default:
 		return fmt.Errorf("invalid questions %q (want ask, decline or disabled)", p.Questions)

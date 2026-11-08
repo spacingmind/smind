@@ -1844,15 +1844,6 @@ type runMcpServersParams struct {
 	McpServers []taskrunner.McpServerState `json:"mcpServers"`
 }
 
-// runLogEvent is the wire shape of one event in a run.logs response --
-// the same fields task.prompt/run.attach's streamed events and terminal
-// results carry, just batched instead of streamed. Type is "chunk",
-// "user_message", "thinking", "tool_call", "done", "permission_request",
-// or "permission_resolved"; which of the other fields are populated
-// depends on it, mirroring taskrunner.Event's own discriminated-by-Type
-// shape. The tool-call fields (ToolCallID/ToolName/Title/Status/Input/
-// Result) are additive, added by
-// docs/decisions/0008-structured-run-events.md.
 // questionRequestParams / questionResolvedParams are the params payloads of
 // the "question_request" / "question_resolved" events task.prompt and
 // run.attach emit (ADR-0055). Answer is present only for a human answer.
@@ -1867,6 +1858,15 @@ type questionResolvedParams struct {
 	Answer    *taskrunner.QuestionAnswer `json:"answer,omitempty"`
 }
 
+// runLogEvent is the wire shape of one event in a run.logs response --
+// the same fields task.prompt/run.attach's streamed events and terminal
+// results carry, just batched instead of streamed. Type is "chunk",
+// "user_message", "thinking", "tool_call", "done", "permission_request",
+// or "permission_resolved"; which of the other fields are populated
+// depends on it, mirroring taskrunner.Event's own discriminated-by-Type
+// shape. The tool-call fields (ToolCallID/ToolName/Title/Status/Input/
+// Result) are additive, added by
+// docs/decisions/0008-structured-run-events.md.
 type runLogEvent struct {
 	Type string `json:"type"`
 	// Question and QuestionAnswer are populated for "question_request" /

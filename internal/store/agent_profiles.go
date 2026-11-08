@@ -162,7 +162,12 @@ func (s *Store) UpdateAgentProfile(p AgentProfile) (AgentProfile, error) {
 		p.OnRateLimit = "none"
 	}
 	if p.Questions == "" {
-		p.Questions = "ask"
+		// An update that does not name the setting (an older client) keeps the
+		// stored one: a profile that declines questions must not silently go
+		// back to asking (ADR-0055).
+		if err := s.db.QueryRow(`SELECT questions FROM agent_profiles WHERE id = ?`, p.ID).Scan(&p.Questions); err != nil || p.Questions == "" {
+			p.Questions = "ask"
+		}
 	}
 
 	skills, err := jsonListText(p.Skills)

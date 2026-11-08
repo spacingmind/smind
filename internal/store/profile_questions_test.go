@@ -66,3 +66,23 @@ func TestAgentProfile_QuestionsRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// An update that does not name the setting keeps the stored one: a profile
+// that declines questions never silently goes back to asking.
+func TestAgentProfile_UpdateKeepsQuestionsWhenOmitted(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	p, err := s.CreateAgentProfile(AgentProfile{Name: "peer", Provider: "glm", Questions: "decline"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Questions = ""
+	p.Notes = "edited by an older client"
+	if _, err := s.UpdateAgentProfile(p); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetAgentProfile(p.ID)
+	if got.Questions != "decline" || got.Notes != "edited by an older client" {
+		t.Fatalf("after update: questions=%q notes=%q", got.Questions, got.Notes)
+	}
+}

@@ -129,7 +129,7 @@ func TestQuestion_InvalidAnswerLeavesItParked(t *testing.T) {
 	}
 }
 
-// TestQuestion_NeverAutoAnswers: nobody answers, the timeout fires, and the
+// TestQuestion_TimeoutDeclinesWithNote: nobody answers, the timeout fires, and the
 // agent gets a decline with a note, never an answer and never an allow.
 func TestQuestion_TimeoutDeclinesWithNote(t *testing.T) {
 	t.Parallel()
@@ -310,6 +310,74 @@ func TestQuestion_DisabledProfileDisallowsAskTool(t *testing.T) {
 		c, _ := policyFor(t, store.AgentProfile{Questions: q, Instructions: "ROLE"})
 		if len(c.DisallowedTools) != 0 {
 			t.Fatalf("%s: DisallowedTools = %v", q, c.DisallowedTools)
+		}
+	}
+}
+
+// TestQuestion_NeverAutoAnswers: whatever ends a question without a human
+// answer (timeout, repeat, profile, secret, seat), the outcome carries no
+// chosen option and no free text.
+func TestQuestion_NeverAutoAnswers(t *testing.T) {
+	t.Parallel()
+	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{})
+	reg.SetPermissionTimeout(30 * time.Millisecond)
+	d := runPermissionDecider{reg: reg, r: r}
+	for _, q := range []taskrunner.QuestionRequest{colourQ("Which colour?"), colourQ("Paste the password"), colourQ("which colour?")} {
+		out, err := d.DecideQuestion(context.Background(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Answer.Action != taskrunner.QuestionActionDecline || len(out.Answer.Answers) != 0 {
+			t.Fatalf("%q ended with an answer: %+v", q.Questions[0].Text, out)
+		}
+	}
+}
+
+// TestQuestion_AnswerWinsRaceWithTimeout: an answer that RespondQuestion has
+// already accepted is never overruled by the timeout arm.
+func TestQuestion_AnswerWinsRaceWithTimeout(t *testing.T) {
+	t.Parallel()
+	reg, r, runID := startedRun(t, taskrunner.PermissionSettings{})
+	d := runPermissionDecider{reg: reg, r: r}
+	pq := &pendingQuestion{req: colourQ("Which colour?"), ch: make(chan taskrunner.QuestionAnswer, 1)}
+	r.mu.Lock()
+	r.pendingQuestions = map[string]*pendingQuestion{"req1": pq}
+	r.mu.Unlock()
+	if err := reg.RespondQuestion(runID, "req1", pickBlue()); err != nil {
+		t.Fatal(err)
+	}
+	// RespondQuestion took the entry and delivered; the timeout arm now fires.
+	ans, ok := d.settleQuestion("req1", pq)
+	if !ok || ans.Action != taskrunner.QuestionActionAnswer {
+		t.Fatalf("settleQuestion = %+v, %v; want the delivered answer", ans, ok)
+	}
+	// Without a delivered answer the entry is removed and the decline stands.
+	r.mu.Lock()
+	r.pendingQuestions = map[string]*pendingQuestion{"req2": pq}
+	r.mu.Unlock()
+	if _, ok := d.settleQuestion("req2", pq); ok {
+		t.Fatal("settleQuestion invented an answer")
+	}
+	if len(reg.PendingQuestions()) != 0 {
+		t.Fatal("entry left pending")
+	}
+}
+
+// Question events survive the persisted-row round trip.
+func TestEvent_QuestionRoundTripsThroughPersistence(t *testing.T) {
+	t.Parallel()
+	req := colourQ("Which colour?")
+	for _, e := range []taskrunner.Event{
+		{Type: taskrunner.EventTypeQuestionRequest, Question: &taskrunner.QuestionEvent{RequestID: "r", Request: &req}},
+		{Type: taskrunner.EventTypeQuestionResolved, Question: &taskrunner.QuestionEvent{RequestID: "r", Resolution: taskrunner.QuestionResolvedByHuman, Answer: &taskrunner.QuestionAnswer{Action: "answer"}}},
+	} {
+		raw, err := encodeEvent(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := decodeEvent(raw)
+		if err != nil || got.Type != e.Type || got.Question == nil || got.Question.RequestID != "r" {
+			t.Fatalf("round trip: %+v %v", got, err)
 		}
 	}
 }

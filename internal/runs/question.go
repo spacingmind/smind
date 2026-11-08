@@ -173,41 +173,66 @@ func (d runPermissionDecider) DecideQuestion(ctx context.Context, req taskrunner
 
 	select {
 	case ans := <-pq.ch:
-		res := taskrunner.QuestionResolvedByHuman
-		var stored *taskrunner.QuestionAnswer
-		if ans.Action == taskrunner.QuestionActionDecline {
-			res = taskrunner.QuestionResolvedDeclined
-		} else {
-			stored = &ans
-		}
-		d.recordQuestionResolved(requestID, res, stored)
-		d.notifyQuestionResolved(requestID, string(res))
-		return taskrunner.QuestionOutcome{Answer: ans, Resolution: res}, nil
+		return d.answered(requestID, ans), nil
 
 	case <-timer.C:
-		d.abandonQuestion(requestID)
+		if ans, ok := d.settleQuestion(requestID, pq); ok {
+			return d.answered(requestID, ans), nil
+		}
 		d.recordQuestionResolved(requestID, taskrunner.QuestionResolvedTimeout, nil)
 		d.notifyQuestionResolved(requestID, string(taskrunner.QuestionResolvedTimeout))
 		return declineOutcome(taskrunner.QuestionResolvedTimeout, taskrunner.QuestionNoteTimeout), nil
 
 	case <-ctx.Done():
-		d.abandonQuestion(requestID)
+		if ans, ok := d.settleQuestion(requestID, pq); ok {
+			return d.answered(requestID, ans), nil
+		}
 		d.recordQuestionResolved(requestID, taskrunner.QuestionResolvedProviderStop, nil)
 		d.notifyQuestionResolved(requestID, string(taskrunner.QuestionResolvedProviderStop))
 		return taskrunner.QuestionOutcome{}, ctx.Err()
 
 	case <-d.r.ctx.Done():
-		d.abandonQuestion(requestID)
+		if ans, ok := d.settleQuestion(requestID, pq); ok {
+			return d.answered(requestID, ans), nil
+		}
 		d.recordQuestionResolved(requestID, taskrunner.QuestionResolvedRunEnded, nil)
 		d.notifyQuestionResolved(requestID, string(taskrunner.QuestionResolvedRunEnded))
 		return taskrunner.QuestionOutcome{}, d.r.ctx.Err()
 	}
 }
 
-func (d runPermissionDecider) abandonQuestion(requestID string) {
+// answered records and announces a human's answer or decline.
+func (d runPermissionDecider) answered(requestID string, ans taskrunner.QuestionAnswer) taskrunner.QuestionOutcome {
+	res := taskrunner.QuestionResolvedByHuman
+	var stored *taskrunner.QuestionAnswer
+	if ans.Action == taskrunner.QuestionActionDecline {
+		res = taskrunner.QuestionResolvedDeclined
+	} else {
+		stored = &ans
+	}
+	d.recordQuestionResolved(requestID, res, stored)
+	d.notifyQuestionResolved(requestID, string(res))
+	return taskrunner.QuestionOutcome{Answer: ans, Resolution: res}
+}
+
+// settleQuestion is the give-up path (timeout, provider cancel, run end): it
+// removes the pending entry under the lock. If RespondQuestion already took
+// the entry and delivered an answer in the instant the select fired, that
+// answer wins and is returned, so a human who was told "answered" is never
+// overruled by a timeout decline.
+func (d runPermissionDecider) settleQuestion(requestID string, pq *pendingQuestion) (taskrunner.QuestionAnswer, bool) {
 	d.r.mu.Lock()
-	delete(d.r.pendingQuestions, requestID)
-	d.r.mu.Unlock()
+	defer d.r.mu.Unlock()
+	if _, still := d.r.pendingQuestions[requestID]; still {
+		delete(d.r.pendingQuestions, requestID)
+		return taskrunner.QuestionAnswer{}, false
+	}
+	select {
+	case ans := <-pq.ch:
+		return ans, true
+	default:
+		return taskrunner.QuestionAnswer{}, false
+	}
 }
 
 // RespondQuestion answers runID's pending question requestID. The answer is
