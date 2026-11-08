@@ -131,6 +131,8 @@ mobile picker test. Mutations: gate removed → `TestClaudeModes_AutoGatedForBas
 
 ## Decisions for the Human (each with a recommendation)
 
+**Taken (2026-11-09, Supervisor):** D1-D9 as recommended, with this wording fix: the human sentence ships as **`action.summary`**, not `failureNote` (that name is already the MCP Lead routing note, `cmd/smind/failure_note.go`).
+
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | `session_budget_exceeded` is **Codex's own** rollout budget, not smind's tree budget ("Set budget" is a different object). Link the action to "Set budget" anyway, or word it as the provider's budget? | **Word it as the provider's budget** (label: "Raise the session budget in Codex's settings, or start a fresh chat"), and keep "Set budget" for smind's own `budget_exceeded` launch refusal (a separate card). |
