@@ -138,6 +138,7 @@ These are the checks the Steward made by hand, hard-coded:
 | `no-curl-sh` | a pipe from a network fetch into an interpreter (`curl … \| sh`, `wget -O- … \| bash`) |
 | `no-real-home-tests` | a command that sets `HOME` or `SMIND_HOME` to `$HOME`, `~`, or unsets them for a test/mutation run (tests must use `HOME=$(mktemp -d)`) |
 | `no-add-all` | `git add -A`, `git add .`, `git add -u` (files are added by name; binaries and churn are checked before every commit) |
+| `no-self-approve` | an agent answering its own requests: `smind task approve\|deny\|answer` and `smind permission ...` however wrapped, quoted or called by path, and any command whose raw text (heredoc bodies included) names a human-only daemon method (`run.respondPermission`, `run.answerQuestion`, `inbox.resolve`, the heredoc reveals). Defence in depth: see `docs/plans/active/agent-self-approve-hardening.md` for what it cannot see |
 
 The floor is the **only** place `deny` is non-negotiable; `deny` rules a human adds are in the same bucket for precedence but removable by editing the file. A floor `deny`
 resolves the request to a deny option immediately and the agent sees an ordinary "denied" with the floor id in the message, so it can adapt (use `git add <file>`).
