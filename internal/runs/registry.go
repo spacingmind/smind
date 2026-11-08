@@ -632,6 +632,12 @@ type run struct {
 	// runPermissionDecider and RespondPermission.
 	pendingPermissions map[string]chan string
 
+	// pendingQuestions and questionAsks are ADR-0055's question state:
+	// the parked requests of this run by request id, and the recent asks the
+	// repeat guard counts. Both lazily initialised under mu (question.go).
+	pendingQuestions map[string]*pendingQuestion
+	questionAsks     []questionAsk
+
 	// usage is the latest usage event this run recorded (ADR-0020); nil if
 	// it never emitted one, and always nil on a rehydrated run (List/History
 	// read the persisted run_usage row for those). Guarded by mu.
@@ -2012,6 +2018,9 @@ func (reg *Registry) Stop(runID string) error {
 	cancel := r.cancel
 	for id := range r.pendingPermissions {
 		delete(r.pendingPermissions, id)
+	}
+	for id := range r.pendingQuestions {
+		delete(r.pendingQuestions, id)
 	}
 	r.mu.Unlock()
 	cancel()

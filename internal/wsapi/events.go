@@ -29,23 +29,28 @@ const (
 	// TopicPermissionResolved is published when a pending permission
 	// request leaves the pending state (see permissionResolvedPayload).
 	TopicPermissionResolved = "permission.resolved"
-	TopicWorkspaceCreated   = "workspace.created"
-	TopicWorkspaceDeleted   = "workspace.deleted"
-	TopicSpaceCreated       = "space.created"
-	TopicSpaceDeleted       = "space.deleted"
-	TopicTaskCreated        = "task.created"
-	TopicTaskUpdated        = "task.updated"
-	TopicTaskArchived       = "task.archived"
-	TopicTaskDeleted        = "task.deleted"
-	TopicChatCreated        = "chat.created"
-	TopicChatUpdated        = "chat.updated"
-	TopicChatArchived       = "chat.archived"
-	TopicChatQueueUpdated   = "chat.queueUpdated"
-	TopicProfileCreated     = "profile.created"
-	TopicProfileUpdated     = "profile.updated"
-	TopicProfileDeleted     = "profile.deleted"
-	TopicAccountUpdated     = "account.updated"
-	TopicAccountRemoved     = "account.removed"
+	// TopicQuestionPending / TopicQuestionResolved announce an agent's
+	// question to the human and its end (ADR-0055); payloads
+	// questionPendingPayload / questionResolvedPayload.
+	TopicQuestionPending  = "question.pending"
+	TopicQuestionResolved = "question.resolved"
+	TopicWorkspaceCreated = "workspace.created"
+	TopicWorkspaceDeleted = "workspace.deleted"
+	TopicSpaceCreated     = "space.created"
+	TopicSpaceDeleted     = "space.deleted"
+	TopicTaskCreated      = "task.created"
+	TopicTaskUpdated      = "task.updated"
+	TopicTaskArchived     = "task.archived"
+	TopicTaskDeleted      = "task.deleted"
+	TopicChatCreated      = "chat.created"
+	TopicChatUpdated      = "chat.updated"
+	TopicChatArchived     = "chat.archived"
+	TopicChatQueueUpdated = "chat.queueUpdated"
+	TopicProfileCreated   = "profile.created"
+	TopicProfileUpdated   = "profile.updated"
+	TopicProfileDeleted   = "profile.deleted"
+	TopicAccountUpdated   = "account.updated"
+	TopicAccountRemoved   = "account.removed"
 	// TopicAccountUsage is published after every completed usage fetch
 	// (payload {usage: AccountUsage}); see AttachUsage.
 	TopicAccountUsage     = "account.usage"
@@ -106,6 +111,8 @@ var knownTopics = map[string]bool{
 	TopicRunFailover:          true,
 	TopicPermissionPending:    true,
 	TopicPermissionResolved:   true,
+	TopicQuestionPending:      true,
+	TopicQuestionResolved:     true,
 	TopicWorkspaceCreated:     true,
 	TopicWorkspaceDeleted:     true,
 	TopicSpaceCreated:         true,
@@ -223,6 +230,28 @@ type permissionResolvedPayload struct {
 	ChatID    int64  `json:"chatId"`
 	RequestID string `json:"requestId"`
 	OptionID  string `json:"optionId,omitempty"`
+	Reason    string `json:"reason"`
+}
+
+// questionPendingPayload is the payload of question.pending events (ADR-0055):
+// {runId, taskId, chatId, requestId, request}. The request text is untrusted
+// agent output; clients render it as plain text.
+type questionPendingPayload struct {
+	RunID     string                     `json:"runId"`
+	TaskID    int64                      `json:"taskId"`
+	ChatID    int64                      `json:"chatId"`
+	RequestID string                     `json:"requestId"`
+	Request   taskrunner.QuestionRequest `json:"request"`
+}
+
+// questionResolvedPayload is the payload of question.resolved events:
+// {runId, taskId, chatId, requestId, reason}; reason is a
+// taskrunner.QuestionResolution.
+type questionResolvedPayload struct {
+	RunID     string `json:"runId"`
+	TaskID    int64  `json:"taskId"`
+	ChatID    int64  `json:"chatId"`
+	RequestID string `json:"requestId"`
 	Reason    string `json:"reason"`
 }
 
