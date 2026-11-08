@@ -1,6 +1,9 @@
 package wsapi
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // ADR-0055 §3: answering a question is human-only. The RPCs exist, no plugin
 // session can reach them, and the question topics (agent text) are not offered
@@ -29,5 +32,24 @@ func TestWsapi_AnswerQuestionIsHumanOnly(t *testing.T) {
 		if pluginTopicSet[topic] {
 			t.Errorf("%s (agent text) is offered to plugins", topic)
 		}
+	}
+}
+
+// An agent's own connection (identified, run scoped: what the MCP server and
+// every `smind mcp serve` tool use) can reach neither question method: they are
+// not on RunScopedMethods and an identified connection is refused before any
+// handler runs (ADR-0055 §3, ADR-0017). The other half of the guarantee, the
+// CLI refusing inside an agent shell, is TestTaskAnswer_RefusedInsideAnAgentRun.
+func TestWsapi_QuestionMethodsRefusedForRunScoped(t *testing.T) {
+	t.Parallel()
+	for _, m := range []string{"run.answerQuestion", "run.pendingQuestions"} {
+		if slices.Contains(RunScopedMethods, m) {
+			t.Fatalf("%s is on RunScopedMethods", m)
+		}
+	}
+	e := newIdentEnv(t, "hang")
+	ws := e.identified(t)
+	for _, m := range []string{"run.answerQuestion", "run.pendingQuestions"} {
+		wantForbidden(t, callWS(t, ws, m, map[string]any{"runId": e.runID, "requestId": "x", "action": "decline"}), "not available to agents")
 	}
 }

@@ -381,3 +381,43 @@ func TestEvent_QuestionRoundTripsThroughPersistence(t *testing.T) {
 		}
 	}
 }
+
+// A credential typed into a question the secret check did not catch reaches the
+// agent as typed (the human's intent) but is scrubbed in the stored history.
+func TestQuestion_StoredAnswerTextIsScrubbed(t *testing.T) {
+	t.Parallel()
+	reg, r, runID := startedRun(t, taskrunner.PermissionSettings{})
+	d := runPermissionDecider{reg: reg, r: r}
+	ch, id := askAsync(t, d, colourQ("Which colour?"))
+	secret := "Authorization: Bearer abcdef0123456789abcdef0123456789"
+	ans := taskrunner.QuestionAnswer{Action: taskrunner.QuestionActionAnswer,
+		Answers: []taskrunner.QuestionAnswerItem{{QuestionID: "q0", Text: secret}}}
+	if err := reg.RespondQuestion(runID, id, ans); err != nil {
+		t.Fatal(err)
+	}
+	res := <-ch
+	if got := res.out.Answer.Answers[0].Text; got != secret {
+		t.Fatalf("the agent must get the answer as typed, got %q", got)
+	}
+	_, resolved := questionEvents(r)
+	stored := resolved[0].Question.Answer.Answers[0].Text
+	if strings.Contains(stored, "abcdef0123456789") {
+		t.Fatalf("stored history keeps the credential: %q", stored)
+	}
+}
+
+// A profile whose setting cannot be read fails closed: the question is
+// declined, not parked for a human.
+func TestQuestion_UnreadableProfileFailsClosed(t *testing.T) {
+	t.Parallel()
+	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{})
+	r.profileID = 987654 // no such profile: the store read errors
+	out, err := runPermissionDecider{reg: reg, r: r}.DecideQuestion(context.Background(), colourQ("Which colour?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDeclined(t, out, taskrunner.QuestionResolvedProfile, "not attended")
+	if len(reg.PendingQuestions()) != 0 {
+		t.Fatal("an unreadable profile parked a question")
+	}
+}

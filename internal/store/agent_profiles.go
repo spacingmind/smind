@@ -165,7 +165,10 @@ func (s *Store) UpdateAgentProfile(p AgentProfile) (AgentProfile, error) {
 		// An update that does not name the setting (an older client) keeps the
 		// stored one: a profile that declines questions must not silently go
 		// back to asking (ADR-0055).
-		if err := s.db.QueryRow(`SELECT questions FROM agent_profiles WHERE id = ?`, p.ID).Scan(&p.Questions); err != nil || p.Questions == "" {
+		if err := s.db.QueryRow(`SELECT questions FROM agent_profiles WHERE id = ?`, p.ID).Scan(&p.Questions); err != nil {
+			return AgentProfile{}, fmt.Errorf("read stored questions setting: %w", err)
+		}
+		if p.Questions == "" {
 			p.Questions = "ask"
 		}
 	}

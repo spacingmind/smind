@@ -42,6 +42,15 @@ func cmdTaskAnswer(args []string) int {
 		fmt.Println(cmdTaskAnswerUsage)
 		return 0
 	}
+	// A question is answered by a human, never by the agent that asked it: an
+	// agent shell inherits SMIND_RUN_ID, so refuse there (same guard as
+	// `smind profile seed`). This is a speed bump, not a boundary: the daemon
+	// treats an unidentified local connection as a human, so the policy engine
+	// should also deny the command to agents (open item in the plan).
+	if os.Getenv("SMIND_RUN_ID") != "" {
+		fmt.Fprintln(os.Stderr, "task answer is for humans: a human must answer an agent's question, not the agent")
+		return 1
+	}
 	var (
 		positional []string
 		rawAnswers []string

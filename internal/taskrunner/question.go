@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // This file is ADR-0055's provider-agnostic question model: what an agent's
@@ -63,6 +66,10 @@ type QuestionRequest struct {
 	// Truncated is true when a cap dropped or shortened anything, so the card
 	// can say the text is not complete.
 	Truncated bool `json:"truncated,omitempty"`
+
+	// secret is set while parsing, on the agent's FULL text before any cap, when
+	// a header, question or option text asks for a secret (see AsksForSecret).
+	secret bool
 }
 
 // QuestionAnswer actions.
@@ -134,16 +141,50 @@ const (
 // secret (ADR-0055 §6). A false positive costs a decline with a clear note.
 var secretVocab = regexp.MustCompile(`(?i)\b(passwords?|passphrases?|passcodes?|secrets?|api[ _-]?keys?|access[ _-]?tokens?|auth(?:entication)?[ _-]?tokens?|bearer|tokens?|credentials?|private[ _-]?keys?|ssh[ _-]?keys?|2fa|otp)\b`)
 
-// AsksForSecret reports whether any header, text or option label of req
-// matches the secret vocabulary. Matching is on the agent's own text, so it is
-// a refusal heuristic, not a boundary.
+// secretHomoglyphs folds the lookalike letters (Cyrillic, Greek) an agent can
+// use to dodge the vocabulary into the Latin letter they imitate.
+var secretHomoglyphs = map[rune]rune{
+	'а': 'a', 'с': 'c', 'е': 'e', 'о': 'o', 'р': 'p', 'х': 'x', 'у': 'y', 'і': 'i', 'ј': 'j', 'ѕ': 's',
+	'ԁ': 'd', 'һ': 'h', 'ԛ': 'q', 'ԝ': 'w', 'к': 'k', 'м': 'm', 'т': 't', 'ӏ': 'l',
+	'α': 'a', 'ε': 'e', 'ο': 'o', 'ρ': 'p', 'υ': 'u', 'ν': 'v', 'ι': 'i', 'κ': 'k', 'τ': 't', 'χ': 'x',
+}
+
+// secretSkeleton reduces s to a plain lowercase Latin skeleton before the
+// vocabulary is matched: compatibility-decomposed (full-width and styled
+// letters), with combining marks, controls and format characters (zero-width
+// joiners, bidi marks) removed, and common homoglyphs folded.
+func secretSkeleton(s string) string {
+	var b strings.Builder
+	for _, r := range norm.NFKD.String(s) {
+		if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Cf, r) || unicode.IsControl(r) {
+			continue
+		}
+		r = unicode.ToLower(r)
+		if f, ok := secretHomoglyphs[r]; ok {
+			r = f
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func mentionsSecret(s string) bool { return secretVocab.MatchString(secretSkeleton(s)) }
+
+// AsksForSecret reports whether any header, text, option label or option
+// description of req matches the secret vocabulary after normalisation. The
+// request builder also checks the agent's full text before it is capped, so a
+// secret word past a cap cannot hide. It is a refusal heuristic, not a
+// boundary.
 func AsksForSecret(req QuestionRequest) bool {
+	if req.secret {
+		return true
+	}
 	for _, q := range req.Questions {
-		if secretVocab.MatchString(q.Header) || secretVocab.MatchString(q.Text) {
+		if mentionsSecret(q.Header) || mentionsSecret(q.Text) {
 			return true
 		}
 		for _, o := range q.Options {
-			if secretVocab.MatchString(o.Label) {
+			if mentionsSecret(o.Label) || mentionsSecret(o.Description) {
 				return true
 			}
 		}
@@ -152,14 +193,19 @@ func AsksForSecret(req QuestionRequest) bool {
 }
 
 // capQuestionText shortens s to max runes with an ellipsis and says whether it did.
-// It also drops control characters other than newline and tab, so a card
-// cannot be made to render escape sequences.
+// It also drops control and format characters (other than newline and tab) and
+// maps line/paragraph separators to newline, so a card, a terminal or a log
+// cannot be made to render escape sequences, reordered text or hidden characters.
 func capQuestionText(s string, max int) (string, bool) {
 	s = strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
+		switch {
+		case r == '\n' || r == '\t':
 			return r
-		}
-		if r < 0x20 || r == 0x7f {
+		case r == '\u2028' || r == '\u2029':
+			return '\n'
+		case unicode.IsControl(r), unicode.Is(unicode.Cf, r):
+			// C0, DEL and C1 controls (including CSI U+009B), and format
+			// characters: bidi overrides and isolates, zero-width characters.
 			return -1
 		}
 		return r
@@ -196,6 +242,10 @@ func ParseClaudeAskUserQuestion(input map[string]any) (QuestionRequest, error) {
 		}
 		q := Question{ID: fmt.Sprintf("q%d", i), Kind: QuestionSingle, AllowOther: true}
 		var cut bool
+		req.secret = req.secret || mentionsSecret(text)
+		if h, ok := m["header"].(string); ok {
+			req.secret = req.secret || mentionsSecret(h)
+		}
 		q.Text, cut = capQuestionText(text, maxQuestionText)
 		req.Truncated = req.Truncated || cut
 		if h, ok := m["header"].(string); ok {
@@ -223,6 +273,10 @@ func ParseClaudeAskUserQuestion(input map[string]any) (QuestionRequest, error) {
 				return req, fmt.Errorf("question %d option %d has no label", i, j)
 			}
 			o := QuestionOption{ID: fmt.Sprintf("o%d", j)}
+			req.secret = req.secret || mentionsSecret(label)
+			if d, ok := om["description"].(string); ok {
+				req.secret = req.secret || mentionsSecret(d)
+			}
 			o.Label, cut = capQuestionText(label, maxOptionLabel)
 			req.Truncated = req.Truncated || cut
 			if d, ok := om["description"].(string); ok {

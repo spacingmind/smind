@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/spacingmind/smind/internal/learning/redact"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -92,14 +94,20 @@ func (r *run) repeatedLocked(hash string, now time.Time) bool {
 	return false
 }
 
-// questionPolicy is the run's profile setting; a run with no profile, or one
-// whose profile cannot be read, asks (the default).
+// questionPolicy is the run's profile setting. A run with no profile asks (the
+// default). A profile that cannot be read fails CLOSED: the setting is unknown,
+// and a profile that declines questions must not reach the human on a store
+// hiccup, so the question is declined (and the error logged).
 func (d runPermissionDecider) questionPolicy() string {
 	if d.r.profileID == 0 || d.reg.st == nil {
 		return QuestionsAsk
 	}
 	p, err := d.reg.st.GetAgentProfile(d.r.profileID)
-	if err != nil || p.Questions == "" {
+	if err != nil {
+		slog.Warn("runs: question policy unreadable; declining", "run", d.r.id, "profile", d.r.profileID, "err", err)
+		return QuestionsDecline
+	}
+	if p.Questions == "" {
 		return QuestionsAsk
 	}
 	return p.Questions
@@ -208,7 +216,8 @@ func (d runPermissionDecider) answered(requestID string, ans taskrunner.Question
 	if ans.Action == taskrunner.QuestionActionDecline {
 		res = taskrunner.QuestionResolvedDeclined
 	} else {
-		stored = &ans
+		scrubbed := scrubAnswerForHistory(ans)
+		stored = &scrubbed
 	}
 	d.recordQuestionResolved(requestID, res, stored)
 	d.notifyQuestionResolved(requestID, string(res))
@@ -298,5 +307,23 @@ func (reg *Registry) PendingQuestions() []PendingQuestion {
 		}
 		return out[i].RequestID < out[j].RequestID
 	})
+	return out
+}
+
+// questionRedactor scrubs what a human typed before it is kept in run history.
+var questionRedactor = redact.New(nil, nil)
+
+// scrubAnswerForHistory returns ans with its free text passed through the
+// run-event secret redactor. The agent receives the answer verbatim (it is the
+// human's intent); only the stored copy is scrubbed, so a credential typed into
+// a question the secret check did not catch is not kept in history (ADR-0055 §6).
+func scrubAnswerForHistory(ans taskrunner.QuestionAnswer) taskrunner.QuestionAnswer {
+	out := ans
+	out.Note = questionRedactor.String(ans.Note)
+	out.Answers = make([]taskrunner.QuestionAnswerItem, len(ans.Answers))
+	for i, it := range ans.Answers {
+		it.Text = questionRedactor.String(it.Text)
+		out.Answers[i] = it
+	}
 	return out
 }

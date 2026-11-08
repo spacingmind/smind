@@ -233,3 +233,88 @@ func TestClaudeAdapter_AskUserQuestionMalformedIsDeclinedNotAnswered(t *testing.
 		t.Fatalf("allow=%v msg=%q err=%v asked=%v", allow, msg, err, qd.got != nil)
 	}
 }
+
+func parsedSecret(t *testing.T, header, text, label, desc string) bool {
+	t.Helper()
+	req, err := ParseClaudeAskUserQuestion(map[string]any{"questions": []any{
+		map[string]any{"header": header, "question": text, "options": []any{map[string]any{"label": label, "description": desc}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return AsksForSecret(req)
+}
+
+// The refusal sees through the usual evasions: zero-width and format
+// characters, full-width letters, combining marks, Cyrillic and Greek
+// lookalikes, a word hidden in an option description, and a word past the cap.
+func TestAsksForSecret_Evasions(t *testing.T) {
+	cases := map[string][4]string{
+		"zero-width space":    {"", "Please paste your pass​word", "ok", ""},
+		"zero-width joiner":   {"", "the to‍ken?", "ok", ""},
+		"bidi override":       {"", "api ‮key", "ok", ""},
+		"soft hyphen":         {"", "pass­word", "ok", ""},
+		"full-width":          {"", "ｐａｓｓｗｏｒｄ please", "ok", ""},
+		"combining marks":     {"", "pássword", "ok", ""},
+		"cyrillic lookalikes": {"", "your раsswоrd", "ok", ""},
+		"greek lookalikes":    {"", "your ρasswοrd", "ok", ""},
+		"in the header":       {"Cre​dentials", "?", "ok", ""},
+		"in an option label":  {"", "?", "my secr​et", ""},
+		"in a description":    {"", "Which one?", "A", "needs your private key"},
+		"past the text cap":   {"", strings.Repeat("x ", 700) + "password", "ok", ""},
+		"upper case":          {"", "PASSWORD", "ok", ""},
+	}
+	for name, c := range cases {
+		if !parsedSecret(t, c[0], c[1], c[2], c[3]) {
+			t.Errorf("%s not refused", name)
+		}
+	}
+	if parsedSecret(t, "Colour", "Which colour do you prefer?", "Red", "A warm colour") {
+		t.Error("false positive on a plain question")
+	}
+}
+
+// Every control, format and separator range is stripped from agent text before
+// it reaches a card, a terminal, an inbox summary or a log; newline and tab stay.
+func TestParseClaudeAskUserQuestion_StripsEveryDangerousRange(t *testing.T) {
+	var bad []rune
+	for r := rune(0); r < 0x20; r++ {
+		if r != '\n' && r != '\t' {
+			bad = append(bad, r)
+		}
+	}
+	for r := rune(0x7f); r <= 0x9f; r++ { // DEL and the C1 controls, including CSI U+009B
+		bad = append(bad, r)
+	}
+	for r := rune(0x202a); r <= 0x202e; r++ { // bidi embeddings and overrides
+		bad = append(bad, r)
+	}
+	for r := rune(0x2066); r <= 0x2069; r++ { // bidi isolates
+		bad = append(bad, r)
+	}
+	for r := rune(0x200b); r <= 0x200f; r++ { // zero-width and directional marks
+		bad = append(bad, r)
+	}
+	bad = append(bad, 0x00ad, 0x061c, 0xfeff, 0x2060, 0x2061, 0x180e)
+	for _, r := range bad {
+		in := "a" + string(r) + "b"
+		req, err := ParseClaudeAskUserQuestion(map[string]any{"questions": []any{
+			map[string]any{"header": in, "question": in, "options": []any{map[string]any{"label": in, "description": in}}},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := req.Questions[0]
+		for _, got := range []string{q.Header, q.Text, q.Options[0].Label, q.Options[0].Description} {
+			if got != "ab" {
+				t.Fatalf("U+%04X survived: %q", r, got)
+			}
+		}
+	}
+	req, _ := ParseClaudeAskUserQuestion(map[string]any{"questions": []any{
+		map[string]any{"question": "line1\nline2\tx y", "options": []any{map[string]any{"label": "a"}}},
+	}})
+	if got := req.Questions[0].Text; got != "line1\nline2\tx\ny" {
+		t.Fatalf("newline/tab handling: %q", got)
+	}
+}

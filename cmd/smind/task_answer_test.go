@@ -178,3 +178,10 @@ func TestTaskAnswer_DaemonErrorExit1(t *testing.T) {
 		t.Fatalf("code=%d err=%q", code, errOut)
 	}
 }
+
+func TestTaskAnswer_RefusedInsideAnAgentRun(t *testing.T) {
+	t.Setenv("SMIND_RUN_ID", "run-1")
+	if code := cmdTaskAnswer([]string{"run-1", "--decline"}); code != 1 {
+		t.Fatalf("exit code = %d, want 1 (refused inside an agent run)", code)
+	}
+}
