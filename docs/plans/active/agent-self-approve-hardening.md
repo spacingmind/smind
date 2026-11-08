@@ -26,7 +26,7 @@ The human-only RPCs (`run.respondPermission`, `run.answerQuestion`, `inbox.resol
 
 ## Limits (honest)
 
-An agent running as the same OS user can still reach the daemon by means this cannot see: a script file it wrote earlier and runs (the floor judges the command text, not the file), a name assembled at run time, another language's socket client, `bypassPermissions` runs (no request is ever judged), an environment it edits before launching the CLI, or a copy of the CLI renamed to something the matcher does not know (only `task approve|deny|answer` is matched without the name). These two layers narrow the hole; they do not close it. The principal question (an unidentified local connection counts as the human) is ADR-0056.
+An agent running as the same OS user can still reach the daemon by means this cannot see: a script file it wrote earlier and runs (the floor judges the command text, not the file), a name assembled at run time, another language's socket client, `bypassPermissions` runs (no request is ever judged), an environment it edits before launching the CLI, a copy of the CLI renamed to something the matcher does not know (only `task approve|deny|answer` is matched without the name), a program that starts the CLI from another language with the arguments as separate list items (`subprocess.run(['smind','task','approve'])`), or a command that hands the CLI's name and arguments to another program as one word (`ssh host 'smind task approve 1'`). Plugin providers are launched with a scrubbed environment, so they carry no marker: the floor rule is their only layer. These two layers narrow the hole; they do not close it. The principal question (an unidentified local connection counts as the human) is ADR-0056.
 
 ## Decisions
 
@@ -35,4 +35,8 @@ An agent running as the same OS user can still reach the daemon by means this ca
 
 ## Progress
 
+Built: `permpolicy.HumanOnlyCLI` and `HumanOnlyRPCs` (one table), the `no-self-approve` floor rule (per segment after unwrapping, plus a raw-text scan for the RPC names so heredoc bodies count), the guard in `run()`, `SMIND_AGENT_RUN` in the per-task launch env of every harness (Claude native, Codex, ACP, GLM), the drift test in wsapi, docs (public permission-policy table, ADR-0047 floor table, the policy template comment). `run.answerQuestion`/`run.answerPermission` are named ahead of their handlers (the agent-questions work); the drift test lets them be absent but never run-scoped.
+
 ## Validation
+
+Mutations (each fails the named test when applied to the committed file): no raw-RPC scan, no per-segment CLI rule, no renamed-binary case, no harmless-reader exemption, no `permission` in the table, no `task answer` verb, no `run.respondPermission` in the RPC table, no computed-name case, the guard in `run()` off, `SMIND_RUN_ID` ignored, `SMIND_AGENT_RUN` ignored, the launch env marker dropped. Two survived on the first run (the harmless-reader and computed-name branches); cases were added and both are killed.
