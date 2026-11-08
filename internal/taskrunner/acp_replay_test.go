@@ -139,3 +139,20 @@ func TestReplayACPSessionUsesTheProvidersLaunchEnv(t *testing.T) {
 		t.Fatalf("the provider's env did not reach the agent: %v", env["REPLAY_TEST_VAR"])
 	}
 }
+
+// A permission request the agent makes while loading is denied, never approved.
+func TestReplayACPSessionDeniesPermissionRequests(t *testing.T) {
+	var closed atomic.Int32
+	r := replayRunner("loadSession", &closed)
+	dir := replayDir(t)
+	if err := os.WriteFile(filepath.Join(dir, "replay-permission"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ReplayACPSession(context.Background(), ProviderGLM, "fake-session-1", dir, 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "permission-outcome"))
+	if err != nil || string(got) != "reject-1" {
+		t.Fatalf("the agent's permission request was answered %q (%v), want reject-1", got, err)
+	}
+}

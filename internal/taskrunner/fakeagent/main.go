@@ -479,6 +479,29 @@ func handleResumeSession(msg message, sessionCwd *string) {
 	recordSessionInitMethod(params.Cwd, msg.Method)
 	if msg.Method == "session/load" {
 		replayFromCwd(params.Cwd)
+		if _, err := os.Stat(filepath.Join(params.Cwd, "replay-permission")); err == nil {
+			// Ask for a permission while loading (off the read loop, which must stay
+			// free to receive the answer) and record the option the client chose.
+			go func() {
+				resp := call("session/request_permission", map[string]any{
+					"sessionId": sessionID,
+					"toolCall":  map[string]any{"toolCallId": "tc-load"},
+					"options": []map[string]any{
+						{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+						{"optionId": "reject-1", "name": "Reject", "kind": "reject_once"},
+					},
+				})
+				var result struct {
+					Outcome struct {
+						OptionID string `json:"optionId"`
+					} `json:"outcome"`
+				}
+				_ = json.Unmarshal(resp.Result, &result)
+				_ = os.WriteFile(filepath.Join(params.Cwd, "permission-outcome"), []byte(result.Outcome.OptionID), 0o644)
+				respond(msg.ID, map[string]any{"configOptions": defaultConfigOptions()})
+			}()
+			return
+		}
 	}
 	respond(msg.ID, map[string]any{"configOptions": defaultConfigOptions()})
 }
