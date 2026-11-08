@@ -142,6 +142,10 @@ type reviewParams struct {
 	TaskID    int64
 	CommitSHA string
 	Trigger   string // steward.TriggerHuman | steward.TriggerAuto
+	// Axes names the passes to run (steward.review {axes}); empty runs both.
+	// A subset makes a partial review: the passes left out are written as
+	// not_run, so it can never be ACCEPTED.
+	Axes []steward.Axis
 }
 
 type reviewResult struct {
@@ -196,9 +200,18 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 		return reviewResult{}, fmt.Errorf("%s: build the digest: %w", m, err)
 	}
 	contractSha := h.contractShaOf(p.TaskID)
+	partial := len(p.Axes) > 0 && len(p.Axes) < 2
+	if len(p.Axes) > 0 {
+		if in.TwoAxis == nil {
+			return reviewResult{}, &rpcCodeError{code: codeInvalid, msg: m + ": axes needs steward.twoAxis on"}
+		}
+		if partial && p.Axes[0] == steward.AxisSpec && !d.Spec.HasSpec() {
+			return reviewResult{}, &rpcCodeError{code: codeInvalid, msg: m + ": no spec available: there is nothing to re-run on the spec axis"}
+		}
+	}
 
 	if err := h.rails.Check(steward.RailRequest{
-		Key:     steward.ReviewKey{TaskID: p.TaskID, HeadSHA: sha, ContractSha: contractSha, CIState: in.CI.State},
+		Key:     steward.ReviewKey{TaskID: p.TaskID, HeadSHA: sha, ContractSha: contractSha, CIState: in.CI.State, Partial: partial},
 		Trigger: p.Trigger,
 	}); err != nil {
 		var dup *steward.DuplicateError
@@ -246,7 +259,7 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 			h.blockOpenPasses(id, "crashed", "the steward config could not be read")
 			return reviewResult{}, fmt.Errorf("%s: read the steward config: %w", m, err)
 		}
-		if err := h.openPasses(id, cfg); err != nil {
+		if err := h.openPasses(id, cfg, p.Axes); err != nil {
 			logIgnored("block a review whose passes could not be opened", h.svc.WriteBlocked(id, "crashed", "the review passes could not be opened", 0), "review", id)
 			h.blockOpenPasses(id, "crashed", "the review passes could not be opened")
 			return reviewResult{}, fmt.Errorf("%s: open the passes: %w", m, err)

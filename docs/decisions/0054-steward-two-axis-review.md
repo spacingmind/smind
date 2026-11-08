@@ -206,7 +206,9 @@ No price is quoted from memory: the Usage page already prices runs, and the PR t
 - **Inbox:** the `review` item gains an optional `axes: [{axis, verdict}]` next to today's verdict (`internal/inbox`), summary still ≤ 160 chars and redacted; supersession, staleness
   and `mergeReady` are unchanged.
 - **RPCs and events:** none added; `steward.review` gains an optional `axes?: ["standards"|"spec"]` (Human and daemon trigger only, default both) so a single axis can be re-run from
-  the CLI; the existing `steward.updated {}` fires on each pass change.
+  the CLI. A one-axis re-run is a **partial review**: the other pass is written as blocked `not_run`, which the combine reads as a failed axis, so the review can never be ACCEPTED (the
+  stored verdict is at most CHANGES). It is never deduped against an identical review and no review is deduped to it; `axes` is refused when `steward.twoAxis` is off, for a name that is
+  not `standards`/`spec`, and for `["spec"]` when no spec resolved. A partial review supersedes no other review (only a newer FULL review supersedes a full one, and it supersedes the partial), so a re-run never makes an earlier full review stale or unready, and it is listed as its own review. The view also carries `partial` (optional bool, set for a partial review) and `standardsChanged` (optional bool: a standards file is edited in the diff); the existing `steward.updated {}` fires on each pass change.
 - **Config:** `steward.twoAxis`, `steward.passes.*`, `steward.standards.files|rules` above; all human-only, none an RPC.
 - **Role pack:** a fifth profile `steward-standards` (read-only, claude-native, `claude-haiku-5-5`, `default`, `childPolicy: none`), seeded idempotently by `smind profile seed roles`
   as today; the instructions text differs per axis, the tool lists are the same two MCP tools.
@@ -214,11 +216,11 @@ No price is quoted from memory: the Usage page already prices runs, and the PR t
 ### 9. UI, CLI
 
 - **Web card:** the verdict chip stays the stored (combined, clamped) verdict. Under it, **two axis rows**, `Standards` and `Spec`, each a chip with icon plus text
-  (`ACCEPTED | CHANGES | BLOCKED | Skipped · no spec available | Running`), its one-line summary, model name and cost; findings are grouped by axis, then by file (the axis tag shown
+  (`ACCEPTED | CHANGES | BLOCKED | Skipped · no spec available | Running`), its one-line summary and model name (**no dollar amount anywhere on the card or the inbox row**: cost is shown only in the Usage overview; the wire field stays); a hint chip when the change edits a standards file (`standardsChanged`); findings are grouped by axis, then by file (the axis tag shown
   as a small label, not colour alone); a Spec criteria checklist (met/unmet/unverifiable with the evidence); the gates checklist stays above both. A single-axis review (old row or
-  flag off) renders exactly as today. "Copy findings" gains an `Axis:` line per finding. Light and dark, 1280 and 390, every transition frame reviewed.
-- **Mobile:** the same two rows in the review screen, one column, 44 pt targets, criteria in a collapsible section; the inbox row shows two small axis chips.
-- **CLI:** `smind steward show <id>` prints an `AXES` block (axis, status, verdict, cost) and tags each finding `[standards]`/`[spec]`; `--json` carries the new fields;
+  flag off) renders exactly as today. "Copy findings" tags each finding that carries an axis. Light and dark, 1280 and 390, every transition frame reviewed.
+- **Mobile:** the same two rows in the review screen, one column, 44 pt targets, criteria in a collapsible section; the inbox row shows two small axis chips; like the web card, no dollar amount.
+- **CLI:** `smind steward show <id>` prints an `AXES` block (axis, status, verdict, model; no cost) and tags each finding `[standards]`/`[spec]`; `--json` carries the new fields;
   `smind steward review <task> [--axis standards|spec]`. No approve or merge subcommand (unchanged).
 
 ### 10. Security review

@@ -5,7 +5,7 @@ import { AutomationChip } from "@/components/automations/automation-chip";
 import { DesktopWindowControls } from "@/components/desktop-window-controls";
 import { HostChip } from "@/components/host-chip";
 import { PermissionCard } from "@/components/permission/permission-card";
-import { ReviewRowChip, StewardReviewCard } from "@/components/inbox/steward-review-card";
+import { ReviewRowAxes, ReviewRowChip, StewardReviewCard } from "@/components/inbox/steward-review-card";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -350,6 +350,7 @@ function InboxRow({
           <span className="break-words text-ui-sm text-muted-foreground" data-testid={`inbox-summary-${item.key}`}>
             {item.summary}
           </span>
+          {item.kind === "review" && item.axes && item.axes.length > 0 && <ReviewRowAxes axes={item.axes} />}
           <span className="text-ui-sm text-muted-foreground">{formatRelativeTime(item.createdAt)}</span>
         </div>
       </div>

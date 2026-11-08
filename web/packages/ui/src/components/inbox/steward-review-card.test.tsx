@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { InboxScreen } from "@/components/inbox/inbox-screen";
-import { findingsAsPrompt, type StewardReview } from "@/lib/steward-types";
+import { findingsAsPrompt, type StewardAxis, type StewardReview } from "@/lib/steward-types";
 import type { InboxItem } from "@/lib/inbox-types";
 import { InboxDaemon } from "@/test/inbox-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
@@ -183,5 +183,150 @@ describe("StewardReviewCard", () => {
   it("stale review shows the stale note", async () => {
     await openCard({ stale: "head moved on" });
     expect(screen.getByTestId("steward-stale")).toHaveTextContent("Stale: head moved on");
+  });
+
+  describe("two axes", () => {
+    const axis = (over: Partial<StewardAxis> = {}): StewardAxis => ({ axis: "standards", status: "done", seatVerdict: "ACCEPTED", costUsd: 0.42, ...over });
+
+    it("two axis rows render chip text and model", async () => {
+      await openCard({
+        axes: [axis({ summary: "Follows the rules", model: "sonnet-5.5" }), axis({ axis: "spec", seatVerdict: "ACCEPTED", model: "glm-5.3" })],
+      });
+      const rows = within(screen.getByTestId("steward-axes")).getAllByRole("listitem");
+      expect(screen.getByRole("heading", { name: "Review axes" })).toBeInTheDocument();
+      const std = screen.getByTestId("steward-axis-standards");
+      expect(std).toHaveTextContent("Standards");
+      expect(std).toHaveTextContent("Accepted");
+      expect(std).toHaveTextContent("sonnet-5.5");
+      expect(std).toHaveTextContent("Follows the rules");
+      expect(std.querySelector("svg")).not.toBeNull();
+      expect(screen.getByTestId("steward-axis-spec")).toHaveTextContent("glm-5.3");
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("disagreement shows one accepted and one changes axis", async () => {
+      await openCard({ axes: [axis(), axis({ axis: "spec", seatVerdict: "CHANGES" })] });
+      expect(screen.getByTestId("steward-axis-standards")).toHaveTextContent("Accepted");
+      expect(screen.getByTestId("steward-axis-spec")).toHaveTextContent("Changes requested");
+      expect(within(screen.getByTestId("steward-review-review:12")).getByTestId("steward-verdict-chip")).toHaveTextContent("Changes requested");
+    });
+
+    it("skipped spec axis says Skipped · no spec available", async () => {
+      await openCard({ axes: [axis(), axis({ axis: "spec", status: "skipped", seatVerdict: undefined, blockedReason: "no_spec" })] });
+      expect(screen.getByTestId("steward-axis-spec")).toHaveTextContent("Skipped · no spec available");
+    });
+
+    it("skipped no-spec axis does not repeat itself", async () => {
+      await openCard({ axes: [axis(), axis({ axis: "spec", status: "skipped", seatVerdict: undefined, blockedReason: "no_spec", summary: "no spec available" })] });
+      expect(screen.getByTestId("steward-axis-spec").textContent?.match(/no spec available/g)).toHaveLength(1);
+    });
+
+    it("a not-run axis of a partial review says Not run and marks the review partial", async () => {
+      await openCard({ partial: true, axes: [axis(), axis({ axis: "spec", status: "blocked", seatVerdict: undefined, blockedReason: "not_run" })] });
+      const row = screen.getByTestId("steward-axis-spec");
+      expect(row).toHaveTextContent("Not run");
+      expect(row).not.toHaveTextContent("Did not complete");
+      expect(row.querySelector(".text-destructive")).toBeNull();
+      expect(screen.getByTestId("steward-partial")).toHaveTextContent("Partial review · cannot be accepted");
+    });
+
+    it("no partial marker on a full review", async () => {
+      await openCard({ axes: [axis(), axis({ axis: "spec" })] });
+      expect(screen.queryByTestId("steward-partial")).toBeNull();
+    });
+
+    it("blocked axis shows did not complete and its reason", async () => {
+      await openCard({ axes: [axis({ status: "blocked", seatVerdict: undefined, blockedReason: "timeout" })] });
+      const row = screen.getByTestId("steward-axis-standards");
+      expect(row).toHaveTextContent("Did not complete");
+      expect(row).toHaveTextContent("Timed out");
+    });
+
+    it("running axis shows Running", async () => {
+      await openCard({ axes: [axis({ status: "running", seatVerdict: undefined })] });
+      expect(screen.getByTestId("steward-axis-standards")).toHaveTextContent("Running");
+    });
+
+    it("spec criteria checklist lists met unmet and unverifiable with evidence", async () => {
+      await openCard({
+        axes: [
+          axis({
+            axis: "spec",
+            seatVerdict: "CHANGES",
+            criteria: [
+              { id: "AC1", status: "met", evidence: "test covers it" },
+              { id: "AC2", status: "met", evidence: "see handler" },
+              { id: "AC3", status: "unmet", evidence: "no retry path" },
+              { id: "AC4", status: "unverifiable", evidence: "needs a device" },
+            ],
+          }),
+        ],
+      });
+      const items = within(screen.getByTestId("steward-criteria")).getAllByRole("listitem");
+      expect(items).toHaveLength(4);
+      expect(items[0]).toHaveTextContent("Met AC1 — test covers it");
+      expect(items[2]).toHaveTextContent("Unmet AC3 — no retry path");
+      expect(items[3]).toHaveTextContent("Unverifiable AC4 — needs a device");
+      expect(items[0].querySelector("svg")).not.toBeNull();
+      expect(screen.getByTestId("steward-criteria-count")).toHaveTextContent("2 met, 1 unmet, 1 unverifiable");
+    });
+
+    it("findings group by axis then file with the rule line", async () => {
+      await openCard({
+        axes: [axis(), axis({ axis: "spec" })],
+        findings: [
+          { file: "s.go", line: 2, why: "misses AC3", check: "task test", axis: "spec" },
+          { file: "a.go", line: 7, why: "raw sql", check: "task lint", axis: "standards", rule: "no-raw-sql" },
+        ],
+      });
+      const box = screen.getByTestId("steward-findings");
+      const heads = within(box).getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
+      expect(heads).toEqual(["Standards", "a.go", "Spec", "s.go"]);
+      expect(box).toHaveTextContent("rule: no-raw-sql");
+    });
+
+    it("standards-changed hint shows only when true", async () => {
+      await openCard({ axes: [axis()], standardsChanged: true });
+      const hint = screen.getByTestId("steward-standards-changed");
+      expect(hint).toHaveTextContent("Standards file edited in this change");
+      expect(hint.querySelector("svg")).not.toBeNull();
+    });
+
+    it("no hint without axes or when absent", async () => {
+      await openCard({ standardsChanged: true });
+      expect(screen.queryByTestId("steward-standards-changed")).toBeNull();
+    });
+
+    it("no hint when standardsChanged is absent", async () => {
+      await openCard({ axes: [axis()] });
+      expect(screen.queryByTestId("steward-standards-changed")).toBeNull();
+    });
+
+    it("no axes payload renders no axes section", async () => {
+      await openCard();
+      expect(screen.queryByTestId("steward-axes")).toBeNull();
+      expect(screen.queryByText("Review axes")).toBeNull();
+    });
+
+    it("an empty axes array renders no axes section", async () => {
+      await openCard({ axes: [] });
+      expect(screen.queryByTestId("steward-axes")).toBeNull();
+    });
+
+    it("axes never render a dollar amount", async () => {
+      await openCard({
+        axes: [axis({ model: "claude-haiku-5-5", costUsd: 0.42 }), axis({ axis: "spec", model: "claude-sonnet-5-5", costUsd: 0.42 })],
+      });
+      expect(screen.getByTestId("steward-axis-standards")).toHaveTextContent("claude-haiku-5-5");
+      const text = document.body.textContent ?? "";
+      expect(text).not.toContain("$");
+      expect(text).not.toContain("0.42");
+    });
+
+    it("card with axes still has no merge or approve control", async () => {
+      await openCard({ axes: [axis(), axis({ axis: "spec" })] });
+      const card = screen.getByTestId("steward-review-review:12");
+      expect(within(card).queryByRole("button", { name: /merge|approve|accept|always allow/i })).toBeNull();
+    });
   });
 });

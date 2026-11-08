@@ -271,3 +271,23 @@ func TestEffectiveBudget(t *testing.T) {
 		t.Fatalf("negative request falls back to limits: got %g / %d, want 1.5 / 20", usd, minutes)
 	}
 }
+
+// TestRails_PartialRequestBypassesDedupe: a one-axis re-run is asked for
+// precisely because an identical review exists, so it is never answered with it.
+func TestRails_PartialRequestBypassesDedupe(t *testing.T) {
+	key := baseKey()
+	st := &fakeRailStore{byKey: map[ReviewKey]int64{key: 42}}
+	r := newRails(st, fixedConfig(enabledConfig()))
+	partial := baseRequest()
+	partial.Key.Partial = true
+	if err := r.Check(partial); err != nil {
+		t.Fatalf("partial request: got %v, want nil", err)
+	}
+	if len(st.keyCalls) != 0 {
+		t.Fatalf("a partial request looked up the dedupe key: %+v", st.keyCalls)
+	}
+	var dup *DuplicateError
+	if err := r.Check(baseRequest()); !errors.As(err, &dup) {
+		t.Fatalf("the full request: got %v, want it deduped as before", err)
+	}
+}

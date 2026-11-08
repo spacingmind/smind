@@ -668,3 +668,113 @@ func TestPassVerdict_ScopeViolationDoesNotWaitForTheOtherPass(t *testing.T) {
 		t.Fatalf("late standards verdict error = %v, want ErrVerdictExists", err)
 	}
 }
+
+// TestCombine_NotRunPassCapsAtChangesAndIsNeverTheBlockReason: a pass a one-axis
+// re-run did not request is a failed axis (the review can never be ACCEPTED), but
+// when nothing produced a verdict the review is blocked for a real reason.
+func TestCombine_NotRunPassCapsAtChangesAndIsNeverTheBlockReason(t *testing.T) {
+	t.Parallel()
+
+	got, err := Combine([]PassResult{
+		{Axis: AxisStandards, Status: PassDone, SeatVerdict: VerdictAccepted},
+		{Axis: AxisSpec, Status: PassBlocked, BlockedReason: "not_run"},
+	})
+	if err != nil || got.Blocked || got.SeatVerdict != VerdictChanges {
+		t.Fatalf("Combine(standards ACCEPTED, spec not run) = %+v, %v; want CHANGES", got, err)
+	}
+	got, _ = Combine([]PassResult{
+		{Axis: AxisStandards, Status: PassBlocked, BlockedReason: "not_run"},
+		{Axis: AxisSpec, Status: PassBlocked, BlockedReason: "timeout"},
+	})
+	if !got.Blocked || got.BlockedReason != "timeout" {
+		t.Fatalf("Combine(not run + timeout) = %+v, want BLOCKED for timeout", got)
+	}
+	got, _ = Combine([]PassResult{
+		{Axis: AxisStandards, Status: PassBlocked, BlockedReason: "not_run"},
+		{Axis: AxisSpec, Status: PassSkipped},
+	})
+	if !got.Blocked || got.BlockedReason != "crashed" {
+		t.Fatalf("Combine(not run + skipped) = %+v, want BLOCKED with the crashed fallback", got)
+	}
+}
+
+func TestView_StandardsChangedFromTheDigest(t *testing.T) {
+	t.Parallel()
+
+	d := axisDigest("AC1")
+	d.Standards = &StandardsSection{BaseRef: "b", ChangedInDiff: true, Files: []StandardsFile{{Path: "AGENTS.md", ChangedInDiff: true}}}
+	fx := openTwoAxis(t, d)
+	v, err := fx.svc.View(fx.row.ID)
+	if err != nil || !v.StandardsChanged {
+		t.Fatalf("view = %+v, %v; want standardsChanged", v, err)
+	}
+	d.Standards.ChangedInDiff = false
+	fx2 := openTwoAxis(t, d)
+	v2, _ := fx2.svc.View(fx2.row.ID)
+	raw, _ := json.Marshal(v2)
+	if v2.StandardsChanged || strings.Contains(string(raw), "standardsChanged") {
+		t.Fatalf("view JSON = %s, want no standardsChanged key", raw)
+	}
+}
+
+// TestView_PartialReviewDoesNotSupersedeFullReview: a one-axis re-run is shown
+// as its own review and never makes an earlier full review stale or unready;
+// only a newer FULL review supersedes a full one, and it supersedes the partial.
+func TestView_PartialReviewDoesNotSupersedeFullReview(t *testing.T) {
+	t.Parallel()
+
+	svc := newTestService(t)
+	taskID := seedTask(t, svc)
+	svc.Head = func(int64) (string, error) { return "head1", nil }
+	svc.ContractSha = func(int64) string { return "c1" }
+	now := time.Now().UTC()
+	insert := func(verdict string) store.StewardReview {
+		t.Helper()
+		r, err := svc.DB.InsertStewardReview(store.StewardReview{TaskID: taskID, TriggerKind: TriggerHuman, HeadSHA: "head1", ContractSha256: "c1",
+			Status: "done", Verdict: verdict, SeatVerdict: verdict}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	addPasses := func(id int64, notRun bool) {
+		t.Helper()
+		for _, axis := range []string{store.StewardAxisStandards, store.StewardAxisSpec} {
+			if _, err := svc.DB.InsertStewardReviewPass(store.StewardReviewPass{ReviewID: id, Axis: axis, Status: PassRunning}, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if notRun {
+			if err := svc.DB.SetStewardPassBlocked(id, store.StewardAxisSpec, store.StewardPassNotRun, "not requested", 0, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	full := insert(VerdictAccepted)
+	addPasses(full.ID, false)
+	partial := insert(VerdictChanges)
+	addPasses(partial.ID, true)
+
+	fv, _ := svc.View(full.ID)
+	pv, _ := svc.View(partial.ID)
+	if fv.Stale != "" || !fv.MergeReady || fv.Partial {
+		t.Fatalf("full review after a partial re-run = %+v, want fresh, merge-ready, not partial", fv)
+	}
+	if pv.Stale != "" || !pv.Partial || pv.MergeReady {
+		t.Fatalf("partial review = %+v, want fresh, partial, never merge-ready", pv)
+	}
+	if list, _ := svc.List(taskID, 10); len(list) != 2 || list[0].Stale != "" || list[1].Stale != "" {
+		t.Fatalf("List = %+v, want both fresh", list)
+	}
+
+	newer := insert(VerdictAccepted)
+	addPasses(newer.ID, false)
+	fv, _ = svc.View(full.ID)
+	pv, _ = svc.View(partial.ID)
+	if fv.Stale != StaleSuperseded || pv.Stale != StaleSuperseded {
+		t.Fatalf("after a newer full review: full stale %q, partial stale %q, want both superseded", fv.Stale, pv.Stale)
+	}
+	if nv, _ := svc.View(newer.ID); nv.Stale != "" || !nv.MergeReady {
+		t.Fatalf("the newer full review = %+v, want fresh and merge-ready", nv)
+	}
+}

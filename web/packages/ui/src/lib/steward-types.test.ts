@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  axisLabel,
+  axisStatusLabel,
+  blockedReasonLabel,
   findingsAsPrompt,
+  groupFindingsByAxisThenFile,
   groupFindingsByFile,
   sortGatesFailingFirst,
   verdictLabel,
@@ -98,5 +102,57 @@ describe("findingsAsPrompt", () => {
     expect(findingsAsPrompt(review({ verdict: undefined }))).toBe(
       "Steward review 7 of task 42 at 0123456: Pending\nNo findings.",
     );
+  });
+});
+
+describe("axis helpers", () => {
+  const ax = (status: string, seatVerdict?: string, blockedReason?: string) => ({ axis: "spec", status, seatVerdict, blockedReason, costUsd: 0 });
+
+  it("axisStatusLabel maps every status", () => {
+    expect(axisStatusLabel(ax("done", "ACCEPTED"))).toEqual({ text: "Accepted", tone: "success" });
+    expect(axisStatusLabel(ax("done", "CHANGES"))).toEqual({ text: "Changes requested", tone: "warning" });
+    expect(axisStatusLabel(ax("done", "BLOCKED"))).toEqual({ text: "Blocked", tone: "danger" });
+    expect(axisStatusLabel(ax("running"))).toEqual({ text: "Running", tone: "neutral" });
+    expect(axisStatusLabel(ax("pending"))).toEqual({ text: "Pending", tone: "neutral" });
+    expect(axisStatusLabel(ax("skipped", undefined, "no_spec"))).toEqual({ text: "Skipped · no spec available", tone: "neutral" });
+    expect(axisStatusLabel(ax("skipped"))).toEqual({ text: "Skipped", tone: "neutral" });
+    expect(axisStatusLabel(ax("blocked", undefined, "timeout"))).toEqual({ text: "Did not complete", tone: "danger" });
+    expect(axisStatusLabel(ax("blocked", undefined, "not_run"))).toEqual({ text: "Not run", tone: "neutral" });
+  });
+
+  it("blockedReasonLabel falls back to raw text", () => {
+    expect(blockedReasonLabel("timeout")).toBe("Timed out");
+    expect(blockedReasonLabel("budget")).toBe("Over its budget");
+    expect(blockedReasonLabel("crashed")).toBe("Crashed");
+    expect(blockedReasonLabel("cancelled")).toBe("Cancelled");
+    expect(blockedReasonLabel("scope_violation")).toBe("Scope violation");
+    expect(blockedReasonLabel("not_run")).toBe("Not run");
+    expect(blockedReasonLabel("no_spec")).toBe("No spec available");
+    expect(blockedReasonLabel("exotic")).toBe("exotic");
+  });
+
+  const f = (file: string, line: number, axis?: string): StewardFinding => ({ file, line, why: "w", check: "c", axis });
+
+  it("groupFindingsByAxisThenFile orders standards before spec", () => {
+    const groups = groupFindingsByAxisThenFile([f("z.go", 1), f("b.go", 9, "spec"), f("a.go", 5, "standards"), f("a.go", 2, "standards")]);
+    expect(groups.map((g) => g.axis)).toEqual(["standards", "spec", undefined]);
+    expect(groups[0].files[0].findings.map((x) => x.line)).toEqual([2, 5]);
+  });
+
+  it("findingsAsPrompt is unchanged without an axis", () => {
+    const r = review({ findings: [{ file: "a.go", line: 3, why: "bad", check: "task test", severity: "high", rule: "ignored" }] });
+    expect(findingsAsPrompt(r)).toBe("Steward review 7 of task 42 at 0123456: Changes requested\n- a.go:3 [high] bad (check: task test)");
+  });
+
+  it("findingsAsPrompt tags a finding with its axis and rule", () => {
+    const r = review({ findings: [{ file: "a.go", line: 3, why: "bad", check: "task test", axis: "standards", rule: "no-raw-sql" }] });
+    expect(findingsAsPrompt(r)).toContain("- a.go:3 [standards] bad (check: task test) rule: no-raw-sql");
+  });
+
+  it("unknown axis and status never throw", () => {
+    expect(axisLabel("novel")).toBe("novel");
+    expect(axisStatusLabel({ status: "weird" })).toEqual({ text: "weird", tone: "neutral" });
+    expect(axisStatusLabel({ status: "done", seatVerdict: "ODD" }).text).toBe("ODD");
+    expect(() => groupFindingsByAxisThenFile([f("a", 1, "novel")])).not.toThrow();
   });
 });
