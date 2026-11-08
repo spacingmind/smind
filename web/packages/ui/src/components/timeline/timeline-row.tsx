@@ -180,6 +180,7 @@ export const QUESTION_REASON_LABEL: Record<string, { label: string; status: Stat
   refused_unsupported: { label: "declined automatically", status: "neutral" },
   provider_cancellation: { label: "cancelled", status: "warning" },
   run_ended: { label: "cancelled", status: "warning" },
+  daemon_restart: { label: "cancelled (daemon restarted)", status: "warning" },
 };
 
 /** A resolved question's marker row: the summary plus how it ended, with no badge when the reason is absent/unknown. */

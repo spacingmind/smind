@@ -142,6 +142,11 @@ describe("TimelineRow's question marker (ADR-0055)", () => {
     expect(row).toHaveTextContent("no answer (timed out)");
   });
 
+  it("labels a question a restart orphaned", () => {
+    render(<RunTimeline run={run(events("daemon_restart"))} />);
+    expect(screen.getByTestId("timeline-question")).toHaveTextContent("cancelled (daemon restarted)");
+  });
+
   it("labels a human answer as answered", () => {
     render(<RunTimeline run={run(events("human"))} />);
     expect(screen.getByTestId("timeline-question")).toHaveTextContent("answered");

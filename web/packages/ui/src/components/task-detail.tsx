@@ -177,7 +177,10 @@ export function TaskDetailPane({
   // Rendered in a dock pinned between the scrolling log and the prompt
   // form (see below) rather than inline per-run, so it can't be scrolled
   // out of view while log chunks keep streaming in above/below it.
-  const pendingRuns = runs?.filter((run) => run.pendingPermission || run.pendingQuestion) ?? [];
+  // A question belongs to a RUNNING run only: after a restart or a stop a stored, unresolved
+  // question_request must never draw a live card for a dead run (ADR-0055).
+  const liveQuestion = (run: { status: string; pendingQuestion?: unknown }) => run.status === "running" && !!run.pendingQuestion;
+  const pendingRuns = runs?.filter((run) => run.pendingPermission || liveQuestion(run)) ?? [];
 
   // The chat's most recent run only -- the header pill shows that run's
   // MCP servers, never an older run's (no fallback when it reported none).
@@ -581,7 +584,7 @@ export function TaskDetailPane({
               {run.pendingPermission && (
                 <PermissionCard runId={run.id} pending={run.pendingPermission} onRespond={respondPermission} onChat={focusComposer} />
               )}
-              {run.pendingQuestion && <QuestionCard runId={run.id} pending={run.pendingQuestion} onAnswer={answerQuestion} />}
+              {run.pendingQuestion && liveQuestion(run) && <QuestionCard runId={run.id} pending={run.pendingQuestion} onAnswer={answerQuestion} />}
             </Fragment>
           ))}
         </div>
@@ -595,7 +598,7 @@ export function TaskDetailPane({
         boundProvider={chat.Provider}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
-        waitingOnUser={!!(runningRun?.pendingPermission || runningRun?.pendingQuestion)}
+        waitingOnUser={!!(runningRun?.pendingPermission || (runningRun && liveQuestion(runningRun)))}
         git={git}
         onOpenDiff={onOpenDiffTab}
         queuedItems={queue.items}

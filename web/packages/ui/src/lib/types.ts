@@ -736,6 +736,7 @@ export type QuestionResolutionReason =
   | "no_human"
   | "provider_cancellation"
   | "run_ended"
+  | "daemon_restart"
   | (string & {});
 
 // Params of a "question_request" event run.attach emits

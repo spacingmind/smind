@@ -626,6 +626,25 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("timeline-question")).toHaveTextContent("no answer (timed out)");
   });
 
+  it("never docks a question card for a run that is no longer running (a stored, unresolved question_request)", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+    client.emit("run.attach", 0, "question_request", {
+      requestId: "q-1",
+      request: { source: "claude", questions: [{ id: "a", text: "Which target?", kind: "text" }] },
+    });
+    await flush();
+    expect(screen.getByTestId("question-card")).toBeInTheDocument();
+
+    // The run ends with the question still unresolved (a restart, a stop): no live card for a dead run.
+    client.nth("run.attach", 0).resolve({ runId: "run-1", stopReason: "cancelled" });
+    await flush();
+    expect(screen.queryByTestId("question-card")).not.toBeInTheDocument();
+  });
+
   it("surfaces a run.respondPermission failure without crashing, keeping the option buttons usable", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
