@@ -3,6 +3,7 @@
 // interpreted. A permission can only be ANSWERED: it never gets Snooze or Resolve.
 
 import { IconName } from '../ui/icons';
+import { axisLabel, axisStatusLabel, ChipTone, isPartialAxes } from '../steward/view';
 import { InboxItem, InboxKind } from './types';
 
 export const INBOX_EMPTY_TITLE = 'Nothing needs you';
@@ -22,6 +23,15 @@ export interface SnoozeOption {
   until: string;
 }
 
+/** One axis chip of a review row: "<label>: <text>" drawn as icon + text. */
+export interface InboxAxisChip {
+  axis: string;
+  label: string;
+  text: string;
+  tone: ChipTone;
+  icon: IconName;
+}
+
 export interface InboxRowView {
   key: string;
   kind: InboxKind;
@@ -36,6 +46,8 @@ export interface InboxRowView {
   tone: InboxTone;
   unseen: boolean;
   actions: InboxAction[];
+  axes: InboxAxisChip[];
+  partial: boolean;
 }
 
 export interface InboxSection {
@@ -88,6 +100,15 @@ function rowTone(item: Pick<InboxItem, 'kind' | 'attention'>): InboxTone {
   return item.attention === 'high' ? 'warning' : 'neutral';
 }
 
+function axisChips(item: InboxItem): InboxAxisChip[] {
+  if (!Array.isArray(item.axes)) return [];
+  return item.axes.map((a) => {
+    const status = a.status ?? (a.verdict ? 'done' : 'pending');
+    const chip = axisStatusLabel({ status, seatVerdict: a.verdict, blockedReason: a.reason });
+    return { axis: a.axis, label: axisLabel(a.axis), text: chip.text, tone: chip.tone, icon: chip.icon };
+  });
+}
+
 export function inboxRow(item: InboxItem, now: number): InboxRowView {
   // An unknown kind (a daemon newer than this app) still renders: it never throws.
   const meta = KIND_META[item.kind] ?? { icon: 'info' as IconName, label: String(item.kind), section: String(item.kind) };
@@ -106,6 +127,8 @@ export function inboxRow(item: InboxItem, now: number): InboxRowView {
     tone: rowTone(item),
     unseen: item.state === 'new',
     actions: inboxActions({ ...item, links: item.links ?? {} }),
+    axes: axisChips(item),
+    partial: Array.isArray(item.axes) && isPartialAxes(item.axes.map((a) => ({ status: a.status ?? (a.verdict ? 'done' : 'pending'), reason: a.reason }))),
   };
 }
 

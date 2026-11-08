@@ -9,6 +9,7 @@ import { RelayConnection } from '../../relay/RelayConnection';
 import { AppTheme, withAlpha } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { AppIcon } from '../../ui/AppIcon';
+import { AxisChip, PartialChip } from '../../ui/AxisChip';
 import { Badge } from '../../ui/Badge';
 import { ReviewRowChip } from '../steward/ReviewRowChip';
 
@@ -28,11 +29,12 @@ export function InboxRow({
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const waiting = row.tone === 'waiting';
   const warning = row.tone === 'warning';
+  const axesText = row.axes.length > 0 ? ` Axes: ${row.axes.map((a) => `${a.label} ${a.text}`).join(', ')}.` : '';
   return (
     <View style={[styles.card, waiting && styles.waiting, warning && styles.warning]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${row.label}${row.unseen ? ', new' : ''}: ${row.title}. ${row.summary}. ${row.time}`}
+        accessibilityLabel={`${row.label}${row.unseen ? ', new' : ''}: ${row.title}. ${row.summary}.${axesText} ${row.time}`}
         onPress={() => onOpen(row)}
         style={styles.main}
       >
@@ -49,9 +51,24 @@ export function InboxRow({
           <Text style={styles.summary} numberOfLines={2}>
             {row.summary}
           </Text>
-          {row.kind === 'review' && row.reviewId !== null && conn !== undefined && (
-            <ReviewRowChip conn={conn} reviewId={row.reviewId} />
+          {row.axes.length > 0 && (
+            <View style={styles.chips}>
+              {row.axes.map((a) => (
+                <AxisChip key={a.axis} text={`${a.label}: ${a.text}`} tone={a.tone} icon={a.icon} />
+              ))}
+            </View>
           )}
+          {row.kind === 'review' &&
+            row.reviewId !== null &&
+            conn !== undefined &&
+            (row.partial ? (
+              <View style={styles.chips}>
+                <ReviewRowChip conn={conn} reviewId={row.reviewId} />
+                <PartialChip />
+              </View>
+            ) : (
+              <ReviewRowChip conn={conn} reviewId={row.reviewId} />
+            ))}
           <Text style={styles.time}>{`${row.label} · ${row.time}`}</Text>
         </View>
       </Pressable>
@@ -82,6 +99,7 @@ function makeStyles(theme: AppTheme) {
     top: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.spacing[2] },
     title: { ...theme.type.label, color: theme.foreground, flexShrink: 1 },
     summary: { ...theme.type.small, color: theme.foregroundSubtle },
+    chips: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.spacing[2] },
     time: { ...theme.type.small, color: theme.foregroundSubtle },
     more: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   });
