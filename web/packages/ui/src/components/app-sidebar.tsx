@@ -346,6 +346,7 @@ export function AppSidebar({
   onOpenPluginPanel,
   connectionStatus = "connected",
   connectionStatusText,
+  connectionError,
   onRetryConnect,
   onTaskCreated,
   headerActions,
@@ -401,6 +402,8 @@ export function AppSidebar({
   /** The daemon connection state and its human text (App.tsx's STATUS_LABEL / connect error) -- the footer's Host popover shows it. */
   connectionStatus?: ConnectionStatus;
   connectionStatusText?: string;
+  /** The initial connect's failure cause (App.tsx) -- the "Can't reach the daemon" row's second, muted line. */
+  connectionError?: string | null;
   /** Re-runs the daemon connection after the initial connect failed (App.tsx) -- the "Can't reach the daemon" row's Retry. */
   onRetryConnect?: () => void;
   /** A task was created through the New task dialog; falls back to `onSelectTask` (App uses it to also focus the composer). */
@@ -962,6 +965,7 @@ export function AppSidebar({
                     <StatusRow
                       icon={<Icons.error className="size-3.5" />}
                       text="Can't reach the daemon"
+                      subtext={connectionError ?? undefined}
                       action={
                         onRetryConnect && (
                           <Button variant="outline" size="xs" className="ml-auto" onClick={onRetryConnect}>
@@ -1539,12 +1543,28 @@ function StageGroupItem({
   );
 }
 
-function StatusRow({ icon, text, className, action }: { icon?: ReactNode; text: string; className?: string; action?: ReactNode }) {
+function StatusRow({
+  icon,
+  text,
+  subtext,
+  className,
+  action,
+}: {
+  icon?: ReactNode;
+  text: string;
+  /** A second, muted line under the row's text (the connect failure cause). */
+  subtext?: string;
+  className?: string;
+  action?: ReactNode;
+}) {
   return (
     <SidebarMenuItem>
       <div className={cn("flex items-center gap-2 px-2 py-1.5 text-ui-sm text-muted-foreground", className)}>
         {icon}
-        <span>{text}</span>
+        <span className="min-w-0 flex-1">
+          {text}
+          {subtext && <span className="block truncate text-foreground-muted" data-testid="sidebar-connection-error">{subtext}</span>}
+        </span>
         {action}
       </div>
     </SidebarMenuItem>

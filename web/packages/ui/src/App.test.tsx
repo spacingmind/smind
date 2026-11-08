@@ -288,6 +288,97 @@ describe("App", () => {
     expect(screen.queryByText("Can't reach the daemon")).not.toBeInTheDocument();
   });
 
+  it("a failed first connect shows the cause on the sidebar and the home landing (AC1)", async () => {
+    const connect = vi.fn().mockRejectedValue(new Error("no daemon listening"));
+    render(<App connect={connect} />);
+    await flush();
+
+    expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-connection-error")).toHaveTextContent("no daemon listening");
+    expect(screen.getByText(/Can't reach the daemon: no daemon listening/)).toBeInTheDocument();
+    // jsdom is not a desktop build, so the serve hint shows.
+    expect(screen.getByText("Start it with smind serve")).toBeInTheDocument();
+  });
+
+  it("the home landing's Retry also re-runs the connect, and a later success clears the notice (AC1)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("no daemon listening"))
+      .mockResolvedValueOnce(new WsClient(socket));
+    render(<App connect={connect} />);
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry connection" }));
+    await flush();
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
+    expect(screen.queryByText(/Can't reach the daemon/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Start it with smind serve")).not.toBeInTheDocument();
+  });
+
+  it("a connect that never settles says the daemon did not answer after 8 s, and Retry restarts the timer (AC1)", async () => {
+    const connect = vi.fn().mockImplementation(() => new Promise<WsClient>(() => {}));
+    render(<App connect={connect} />);
+    await flush();
+    expect(screen.getByText("Connecting…")).toBeInTheDocument();
+    expect(screen.queryByText("Can't reach the daemon")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-connection-error")).toHaveTextContent("No answer from the daemon after 8 s");
+    expect(screen.getByText(/Can't reach the daemon: No answer from the daemon after 8 s/)).toBeInTheDocument();
+
+    // Retry re-runs the connect effect, so the 8 s timer restarts with it.
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await flush();
+    expect(screen.getByText("Connecting…")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(screen.getByText("No answer from the daemon after 8 s")).toBeInTheDocument();
+  });
+
+  it("a late connect success after the 8 s timeout still connects and clears the no-answer state (AC1)", async () => {
+    let settle: ((c: WsClient) => void) | undefined;
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockImplementation(
+      () =>
+        new Promise<WsClient>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    render(<App connect={connect} />);
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(screen.getByText("No answer from the daemon after 8 s")).toBeInTheDocument();
+
+    await act(async () => {
+      settle!(new WsClient(socket));
+    });
+    await flush();
+    expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
+    expect(screen.queryByText(/Can't reach the daemon/)).not.toBeInTheDocument();
+  });
+
+  it("a connect that resolves before 8 s never shows the no-answer notice (AC1)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+
+    expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
+    expect(screen.queryByText("No answer from the daemon after 8 s")).not.toBeInTheDocument();
+    expect(screen.queryByText("Can't reach the daemon")).not.toBeInTheDocument();
+  });
+
   it("an unexpected disconnect updates the header away from 'Connected to daemon', and a successful reconnect brings it back", async () => {
     const socket1 = new FakeSocket();
     const socket2 = new FakeSocket();

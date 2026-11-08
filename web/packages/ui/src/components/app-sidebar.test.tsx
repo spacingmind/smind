@@ -1963,4 +1963,20 @@ describe("AppSidebar unreachable daemon (UAT B-03)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetryConnect).toHaveBeenCalledTimes(1);
   });
+
+  it("shows the connect cause as a second, muted line under 'Can't reach the daemon' (AC1)", () => {
+    render(
+      <SidebarProvider>
+        <AppSidebar
+          client={null}
+          selectedTaskId={null}
+          connectionStatus="disconnected"
+          connectionError="no daemon listening"
+          onRetryConnect={() => {}}
+        />
+      </SidebarProvider>,
+    );
+    expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-connection-error")).toHaveTextContent("no daemon listening");
+  });
 });

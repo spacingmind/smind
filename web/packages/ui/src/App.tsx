@@ -236,11 +236,17 @@ function AppShell({
   const [client, setClient] = useState<WsClient | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  // AC1: set when the initial connect never settled within 8 s -- the shell
+  // then reports the no-answer line instead of sitting on "Connecting…"
+  // forever. Cleared when the connect settles either way, and by Retry.
+  const [connectTimedOut, setConnectTimedOut] = useState(false);
+  const connectErrorText = connectTimedOut ? "No answer from the daemon after 8 s" : connectError;
   // Bumped by the sidebar's Retry: re-runs the connect effect below, so a failed
   // first connect can be retried (and its reconnect loop armed) without a reload.
   const [connectAttempt, setConnectAttempt] = useState(0);
   const retryConnect = useCallback(() => {
     setConnectError(null);
+    setConnectTimedOut(false);
     setConnectionStatus("connecting");
     setConnectAttempt((n) => n + 1);
   }, []);
@@ -414,7 +420,19 @@ function AppShell({
 
   useEffect(() => {
     let cancelled = false;
+    let settled = false;
     let reconnectHandle: ReconnectHandle | null = null;
+    // AC1: only the initial connect (and each manual Retry, which re-runs
+    // this effect) gets this timer -- a first connect that hangs on a stuck
+    // fetch or a websocket that never opens must not sit on "Connecting…"
+    // forever. Mid-session drops stay with watchForReconnect's own loop.
+    // A late settle still wins: the timer only flips the status; the
+    // then/catch below overwrite it either way.
+    const timeout = window.setTimeout(() => {
+      if (cancelled || settled) return;
+      setConnectTimedOut(true);
+      setConnectionStatus("disconnected");
+    }, 8_000);
 
     connect()
       .then((c) => {
@@ -422,7 +440,11 @@ function AppShell({
           c.close();
           return;
         }
+        settled = true;
+        window.clearTimeout(timeout);
         setConnectionStatus("connected");
+        setConnectError(null);
+        setConnectTimedOut(false);
         setClient(c);
         // Arms the reconnect loop only after a first successful connect --
         // an initial-connect failure keeps the pre-existing connectError
@@ -448,16 +470,20 @@ function AppShell({
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        settled = true;
+        window.clearTimeout(timeout);
         if (err instanceof LoginRequiredError) {
           onLoginRequired(err.reason);
           return;
         }
         setConnectionStatus("disconnected");
+        setConnectTimedOut(false);
         setConnectError(err instanceof Error ? err.message : String(err));
       });
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
       reconnectHandle?.close();
     };
   }, [connect, onLoginRequired, connectAttempt]);
@@ -1232,7 +1258,8 @@ function AppShell({
       onOpenAutomations={openAutomations}
       onOpenPluginPanel={openPluginPage}
       connectionStatus={connectionStatus}
-      connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+      connectionStatusText={connectErrorText ? `Disconnected: ${connectErrorText}` : STATUS_LABEL[connectionStatus]}
+      connectionError={connectErrorText}
       onRetryConnect={retryConnect}
       onTaskCreated={taskCreatedFromDialog}
       headerActions={
@@ -1251,7 +1278,7 @@ function AppShell({
   const headerElement = (
     <>
       <AppHeader
-        statusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+        statusText={connectErrorText ? `Disconnected: ${connectErrorText}` : STATUS_LABEL[connectionStatus]}
         connectionStatus={connectionStatus}
         sidebarPx={isMobile ? 0 : sidebarOpen ? sidebarWidth : SIDEBAR_ICON_WIDTH}
         showSidebarToggle={!toggleInSidebar && !windowToggle}
@@ -1294,6 +1321,8 @@ function AppShell({
       <HomeLanding
         client={client}
         connected={client !== null && connectionStatus === "connected"}
+        connectionError={connectErrorText}
+        onRetryConnect={retryConnect}
         workspaces={allWorkspaces}
         onCreated={selectTaskFromSidebar}
         onAddProject={requestNewWorkspace}
