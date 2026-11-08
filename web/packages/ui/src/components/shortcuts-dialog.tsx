@@ -6,7 +6,7 @@ import { useKeyboard } from "@/keyboard/keyboard-provider";
 import { filterShortcutHelpSections } from "@/keyboard/shortcut-help-search";
 import { comboStringFromEvent } from "@/keyboard/shortcut-string";
 import { conflictingBindings, helpSections, UNASSIGNED } from "@/keyboard/shortcuts";
-
+import { cn } from "@/lib/utils";
 /**
  * The grouped, searchable, rebindable binding list -- what the Settings
  * screen's Shortcuts section (`components/settings/shortcuts-section.tsx`)
@@ -193,13 +193,13 @@ export function ShortcutRows({ query = "", readOnly = false }: { query?: string;
           data-testid="shortcut-sections"
         >
           <div className="overflow-x-auto">
-            <table className="max-sm:block w-full border-collapse text-left text-ui-base">
+            <table className={cn("max-sm:block w-full border-collapse text-left text-ui-base", readOnly && "sm:table-fixed")}>
               <thead className="max-sm:sr-only">
                 <tr className="border-b border-border">
                   <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
                     Command
                   </th>
-                  <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
+                  <th scope="col" className={cn("px-3 py-2 text-ui-sm font-medium text-foreground-muted", readOnly && "sm:w-36")}>
                     Keybinding
                   </th>
                   {!readOnly && (

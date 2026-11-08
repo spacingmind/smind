@@ -160,6 +160,7 @@ function HostButton({
         </PopoverTrigger>
       </FooterTooltip>
       <PopoverContent side="top" align="start" className="w-64 p-1" data-testid="sidebar-footer-host-popover">
+        <div className="px-2 pb-1 pt-1.5 text-ui-xs font-medium text-foreground-muted">This daemon</div>
         <div
           data-testid="sidebar-footer-host-connection"
           className="flex items-center gap-2 px-2 py-1.5 text-ui-sm text-foreground-subtle"
