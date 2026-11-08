@@ -342,7 +342,7 @@ export function TaskDetailPane({
   // Like the hover actions above, the callback is stable so RunTimeline's
   // memo keeps bailing out; only this pane's state opens the dialog.
   const [forkTarget, setForkTarget] = useState<{ chatId: number; runId: string } | null>(null);
-  const { fork: forkChat } = useForkChat(client, task.ID);
+  const { fork: forkChat } = useForkChat(client);
   const forkRun = useCallback((run: RunEntry) => setForkTarget({ chatId: chat.ID, runId: run.id }), [chat.ID]);
 
   // ADR-0041 F2: the rate-limited footer's way out and the failed-run <-> successor links.

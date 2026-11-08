@@ -37,6 +37,7 @@ Mutations (all fail a named test): `--fork-session` dropped, `--resume-session-a
 - A seeded fork's seed is claimed just before the run starts and given back if the run fails (a retry may then repeat a seed the provider already saw: redundant, never lost). The first run's native_ref hashes the delivered text, so its history rebuilds and it can be forked natively.
 - A native fork whose resume fails at start-up degrades like any stale session (a fresh session and a session note); the chat keeps saying `native` (documented limit, no mark is written).
 - `CreateChatThen` is not atomic: a failed setup archives the half-made chat and suppresses the announcement; an `includeArchived` list can show it.
+- `chat.fork` has no dedupe: a double submit or two concurrent calls make two chats (harmless). `smind task chat fork` and the RPC are in the human-only tables of the agent self-approval hardening (CLI refusal in agent runs, `no-self-approve` floor rule, `HumanOnlyRPCs`).
 - The CLI is `smind task chat fork` (under the existing `task chat` group), not `smind chat fork` as the ADR text says.
 - Usage: the first turn of a native fork starts from the totals logged at or before the anchor turn's end; a turn that logged none falls back to the previous turn's (over-reports at worst).
 - Condition from the Supervisor for the PR that creates `refs/smind/turns/` (PR 3, not this one): the refs are never pushed (no push path may carry them), are pruned with run retention and on task delete, with tests for each.

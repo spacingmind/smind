@@ -91,20 +91,13 @@ func (s *Store) ListChatForksByTask(taskID int64) (map[int64]ChatFork, error) {
 // fork) gets "", false. The claim is a single conditional UPDATE, so two runs
 // racing for the same chat cannot both receive the seed.
 func (s *Store) ClaimChatForkSeed(chatID int64, now time.Time) (string, bool, error) {
-	res, err := s.db.Exec(`UPDATE chat_forks SET seed_used_at = ? WHERE chat_id = ? AND mode = 'seeded' AND seed <> '' AND seed_used_at IS NULL`, now.UTC(), chatID)
-	if err != nil {
-		return "", false, fmt.Errorf("claim chat fork seed %d: %w", chatID, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return "", false, fmt.Errorf("claim chat fork seed %d: %w", chatID, err)
-	}
-	if n == 0 {
+	var seed string
+	err := s.db.QueryRow(`UPDATE chat_forks SET seed_used_at = ? WHERE chat_id = ? AND mode = 'seeded' AND seed <> '' AND seed_used_at IS NULL RETURNING seed`, now.UTC(), chatID).Scan(&seed)
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
-	var seed string
-	if err := s.db.QueryRow(`SELECT seed FROM chat_forks WHERE chat_id = ?`, chatID).Scan(&seed); err != nil {
-		return "", false, fmt.Errorf("read chat fork seed %d: %w", chatID, err)
+	if err != nil {
+		return "", false, fmt.Errorf("claim chat fork seed %d: %w", chatID, err)
 	}
 	return seed, true, nil
 }

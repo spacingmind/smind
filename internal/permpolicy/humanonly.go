@@ -25,6 +25,7 @@ var HumanOnlyRPCs = []string{
 	"fleet.host.reject",
 	"relay.device.approve",
 	"relay.device.revoke",
+	"chat.fork",
 }
 
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not
@@ -44,6 +45,7 @@ var humanOnlyCLI = []humanOnlyCommand{
 	{[]string{"permission"}, nil},
 	{[]string{"host"}, []string{"approve", "reject"}},
 	{[]string{"relay", "devices"}, []string{"approve", "revoke"}},
+	{[]string{"task", "chat"}, []string{"fork"}},
 }
 
 // HumanOnlyCLI reports whether args (what follows the smind binary: flags are

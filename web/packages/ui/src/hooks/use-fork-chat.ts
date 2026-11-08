@@ -11,13 +11,13 @@ export type ForkMode = "native" | "seeded";
  * chat arrives both as the call's own return and as the chat.created event
  * useTaskChats already applies to the task's chat list.
  */
-export function useForkChat(client: WsClientLike | null, taskId: number) {
+export function useForkChat(client: WsClientLike | null) {
   const fork = useCallback(
     (chatId: number, runId: string, mode: ForkMode): Promise<Chat> => {
-      if (!client) return Promise.reject(new Error(`no daemon connection (task ${taskId})`));
+      if (!client) return Promise.reject(new Error("no daemon connection"));
       return client.call<Chat>("chat.fork", { chatId, atRunId: runId, mode });
     },
-    [client, taskId],
+    [client],
   );
   return { fork };
 }

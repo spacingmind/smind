@@ -71,7 +71,7 @@ func ForkSeed(runs []store.Run, finalText func(runID string) string) string {
 		if p == "" && a == "" {
 			continue
 		}
-		turns = append(turns, turn{clip(p, forkSeedTurnTextMax), clip(a, forkSeedTurnTextMax)})
+		turns = append(turns, turn{neutralise(clip(p, forkSeedTurnTextMax)), neutralise(clip(a, forkSeedTurnTextMax))})
 	}
 	if len(turns) == 0 {
 		return ""
@@ -94,8 +94,17 @@ func ForkSeed(runs []store.Run, finalText func(runID string) string) string {
 		fmt.Fprintf(&b, "(%d earlier turn(s) left out.)\n\n", dropped)
 	}
 	b.WriteString(strings.Join(parts, "\n\n"))
-	b.WriteString("\n\n--- end of the earlier turns; the user's new message follows ---\n\n")
+	b.WriteString("\n\n" + forkSeedEnd + "\n\n")
 	return b.String()
+}
+
+// forkSeedEnd is the line that closes the seed. A turn's own text cannot carry it:
+// neutralise rewrites the dash run that opens it, so a stored prompt or answer
+// cannot fake the boundary and make the rest of the seed read as the new message.
+const forkSeedEnd = "--- end of the earlier turns; the user's new message follows ---"
+
+func neutralise(s string) string {
+	return strings.ReplaceAll(s, "---", "- - -")
 }
 
 func clip(s string, n int) string {
