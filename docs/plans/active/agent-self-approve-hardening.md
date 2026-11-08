@@ -1,0 +1,38 @@
+# Agents must not answer their own requests: CLI refusal and a compiled-in floor rule
+
+Status: active (2026-11-09). Defence in depth, not a fix: see Limits. Size: M (4): scope 2 (CLI, policy engine, run launch env), risk 2 (permissions).
+
+## The hole
+
+The human-only RPCs (`run.respondPermission`, `run.answerQuestion`, `inbox.resolve`, the heredoc reveals) refuse an identified run-scoped connection, but a connection that never calls `session.identify` counts as the human's. An agent with a shell can run `smind task approve|deny|answer`, `smind permission ...`, or speak the socket itself, and answer its own request. The CLI identifies only inside `smind mcp serve`, and only from `SMIND_RUN_ID`, which the daemon sets for the MCP entry's environment and not for the agent's shell.
+
+## Acceptance criteria
+
+- AC1: every harness launch of an agent run carries `SMIND_AGENT_RUN=1` in its environment, so the agent's shell inherits it (the one place all launches read: the per-task launch env in `RunPrompt`).
+- AC2: the human-only CLI commands refuse, with exit 1 and a one-line message, when `SMIND_RUN_ID` or `SMIND_AGENT_RUN` is set: `task approve|deny|answer`, `permission ...`, and the other verbs of the one shared table (`permpolicy.HumanOnlyCLI`). `smind mcp serve` and the read-only commands are unaffected.
+- AC3: a compiled-in floor rule `no-self-approve` denies, in any agent Bash request, a command that runs one of those CLI commands however it is wrapped (`env`, `command`, `exec`, `xargs`, `nohup`, `sh -c`, `bash -lc`, a quoted or absolute-path binary, `$(which smind)`, `env -u SMIND_RUN_ID`), and one that names a human-only RPC method anywhere in its raw text, heredoc bodies included (curl, nc, python, websocat to the socket). No `policy.yaml` rule can allow it.
+- AC4: the CLI table, the floor rule and the daemon's handler map cannot drift: a test walks the handler map and fails when a method the table names is run-scoped or does not exist.
+- AC5: the limits below are written in the docs.
+
+## Test scenarios
+
+- `TestFloor_SelfApproveCLIDenied`: the plain commands, every wrapper listed in AC3, a quoted and an absolute binary, `$(which smind)`, a renamed binary for `task approve`, a bodyless and a heredoc-body RPC name; near misses allowed (`smind task ls`, `echo smind task approve`, a commit message, `smind task permissions`).
+- `TestFloor_SelfApproveRPCNameDenied`, `TestFloor_SelfApproveHeredocBodyDenied`.
+- `TestDecide_SelfApproveCannotBeAllowedByPolicy`: an `allow` rule for `smind *` does not win over the floor.
+- `TestHumanOnlyCLI_TableMatchesHandlers` (wsapi): every named RPC exists and none is run-scoped.
+- cmd/smind: `TestHumanOnlyCommandsRefuseInAgentRun` (both markers, each command), `TestHumanOnlyCommandsRunForHumans`, `TestMcpServeStillRuns`.
+- taskrunner: `TestRunPromptLaunchEnvCarriesAgentMarker`.
+- Each rule and branch has a mutation that fails a test (recorded in Validation).
+
+## Limits (honest)
+
+An agent running as the same OS user can still reach the daemon by means this cannot see: a script file it wrote earlier and runs (the floor judges the command text, not the file), a name assembled at run time, another language's socket client, `bypassPermissions` runs (no request is ever judged), an environment it edits before launching the CLI, or a copy of the CLI renamed to something the matcher does not know (only `task approve|deny|answer` is matched without the name). These two layers narrow the hole; they do not close it. The principal question (an unidentified local connection counts as the human) is ADR-0056.
+
+## Decisions
+
+- One marker, `SMIND_AGENT_RUN`, in the launch env; `SMIND_RUN_ID` (the MCP entry's) is honoured too.
+- A shared table in `permpolicy` (`HumanOnlyCLI`, `HumanOnlyRPCs`) is the single source for the CLI refusal and the floor rule.
+
+## Progress
+
+## Validation

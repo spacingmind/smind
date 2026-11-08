@@ -76,6 +76,11 @@ func buildSmind(t *testing.T) string {
 }
 
 func TestMain(m *testing.M) {
+	// The tests may run inside an agent run, whose markers would make run()
+	// refuse the human-only commands they exercise; tests that want a marker
+	// set it themselves.
+	_ = os.Unsetenv("SMIND_AGENT_RUN")
+	_ = os.Unsetenv("SMIND_RUN_ID")
 	cleanupHome := isolateProcessHome()
 	code := m.Run()
 	if smindBinDir != "" {

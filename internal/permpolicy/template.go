@@ -19,7 +19,7 @@ const Template = `# smind permission policy (human-edited; nothing in smind writ
 #
 # The floor is compiled in and can never be overridden by any rule here:
 #   no-stash  no-force-push  no-merge  no-install-state  no-secrets
-#   no-destructive-outside  no-curl-sh  no-real-home-tests  no-add-all
+#   no-destructive-outside  no-curl-sh  no-real-home-tests  no-add-all  no-self-approve
 #
 # Every allow needs a tool, a path scope (match.paths.within) and a why of
 # at most 160 characters. To opt in to an example, delete its leading "#> "

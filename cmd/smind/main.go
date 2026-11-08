@@ -13,9 +13,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spacingmind/smind/internal/claudecli"
+	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/selfupdate"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 func main() {
@@ -47,6 +50,14 @@ func cleanupAfterUpdate() {
 	selfupdate.CleanupStale(exe)
 }
 
+// inAgentRun reports whether this process runs inside an agent's run: the
+// daemon sets SMIND_AGENT_RUN in every agent launch and SMIND_RUN_ID in the MCP
+// entry. It is a drift guard, not a sandbox: an agent can unset either, and the
+// policy engine's no-self-approve floor rule is what judges that command.
+func inAgentRun() bool {
+	return os.Getenv(taskrunner.AgentRunEnv) != "" || os.Getenv("SMIND_RUN_ID") != ""
+}
+
 // run dispatches to a subcommand and returns the process exit code, rather
 // than calling os.Exit itself, so it stays testable (and so deferred
 // cleanup in subcommands, e.g. closing a *wsclient.Client, actually runs
@@ -55,6 +66,11 @@ func run(args []string) int {
 	if len(args) == 0 {
 		printUsage(os.Stderr)
 		return 2
+	}
+
+	if permpolicy.HumanOnlyCLI(args) && inAgentRun() {
+		fmt.Fprintf(os.Stderr, "smind %s is for humans, not agents: an agent cannot answer, approve or deny its own requests\n", strings.Join(args[:min(len(args), 2)], " "))
+		return 1
 	}
 
 	switch args[0] {

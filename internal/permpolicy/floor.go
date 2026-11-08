@@ -17,6 +17,7 @@ var floorReasons = map[string]string{
 	"no-curl-sh":             "downloaded code must not run unreviewed",
 	"no-real-home-tests":     "tests must run against a temporary HOME, not the real one",
 	"no-add-all":             "stage named files, never the whole tree",
+	"no-self-approve":        "an agent must not answer, approve or deny its own requests",
 }
 
 func floorHit(id string) (FloorHit, bool) {
@@ -43,8 +44,14 @@ func CheckFloor(req Request, p Parsed) (FloorHit, bool) {
 	if curlShell(segs) {
 		return floorHit("no-curl-sh")
 	}
+	if namesHumanOnlyRPC(req.Command) {
+		return floorHit("no-self-approve")
+	}
 	for _, seg := range p.Segments {
 		fs := newFloorSeg(req, seg, cwd)
+		if h, ok := fs.selfApproveRules(); ok {
+			return h, true
+		}
 		if h, ok := fs.gitRules(); ok {
 			return h, true
 		}
