@@ -67,7 +67,7 @@ func scanStewardReviewPass(row rowScanner) (StewardReviewPass, error) {
 // with the status the caller passes ("pending" or "running"). A second
 // insert for the same (review, axis) fails on the UNIQUE constraint.
 func (s *Store) InsertStewardReviewPass(p StewardReviewPass, now time.Time) (StewardReviewPass, error) {
-	res, err := s.db.Exec(`INSERT INTO steward_review_passes
+	_, err := s.db.Exec(`INSERT INTO steward_review_passes
 		(review_id, axis, status, profile, model, run_id, steward_task_id, scratch_dir, token_hash, token_used,
 		seat_verdict, summary, findings_json, criteria_json, blocked_reason, cost_usd, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
@@ -76,8 +76,7 @@ func (s *Store) InsertStewardReviewPass(p StewardReviewPass, now time.Time) (Ste
 	if err != nil {
 		return StewardReviewPass{}, fmt.Errorf("insert steward review pass: %w", err)
 	}
-	id, _ := res.LastInsertId()
-	return s.GetStewardReviewPass(id, p.Axis)
+	return s.GetStewardReviewPass(p.ReviewID, p.Axis)
 }
 
 // GetStewardReviewPass returns the review's pass on one axis, or
