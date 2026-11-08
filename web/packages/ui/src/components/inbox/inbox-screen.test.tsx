@@ -118,6 +118,48 @@ describe("InboxScreen", () => {
     expect(chips.map((c) => c.textContent)).toEqual(["Standards: Accepted", "Spec: Skipped · no spec available"]);
   });
 
+  it("review row of a partial review carries a Partial chip", async () => {
+    const item: InboxItem = {
+      key: "review:14",
+      kind: "review",
+      taskId: 9,
+      title: "Add the login fix",
+      summary: "At 3fa9c1e",
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      state: "new",
+      attention: "normal",
+      links: { taskId: 9, reviewId: 14 },
+      axes: [
+        { axis: "standards", verdict: "ACCEPTED", status: "done" },
+        { axis: "spec", status: "blocked", reason: "not_run" },
+      ],
+    };
+    await renderInbox(daemonWith(item));
+    const row = screen.getByTestId("inbox-row-review:14");
+    expect(within(row).getByTestId("steward-partial-chip")).toHaveTextContent("Partial");
+    expect(within(row).getAllByTestId(/inbox-review-axis-/).map((c) => c.textContent)).toEqual(["Standards: Accepted", "Spec: Not run"]);
+  });
+
+  it("review row of a full review has no Partial chip", async () => {
+    const item: InboxItem = {
+      key: "review:15",
+      kind: "review",
+      taskId: 9,
+      title: "Add the login fix",
+      summary: "At 3fa9c1e",
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      state: "new",
+      attention: "normal",
+      links: { taskId: 9, reviewId: 15 },
+      axes: [
+        { axis: "standards", verdict: "ACCEPTED", status: "done" },
+        { axis: "spec", verdict: "ACCEPTED", status: "done" },
+      ],
+    };
+    await renderInbox(daemonWith(item));
+    expect(within(screen.getByTestId("inbox-row-review:15")).queryByTestId("steward-partial-chip")).toBeNull();
+  });
+
   it("review row without axes is unchanged", async () => {
     const item: InboxItem = {
       key: "review:12",

@@ -40,7 +40,7 @@
 //            ignoreHTTPSErrors on the browser context. The web target has no
 //            secure store, so each page load is a new device.
 //   --stage <name>  (repeatable) run only the named stages, full or not.
-// Env: SMOKE_PORT (static server port), SMOKE_VIEWPORT (WxH[@dpr]), SMOKE_OUT.
+// Env: SMOKE_PORT (static server port), SMOKE_VIEWPORT (WxH[@dpr]), SMOKE_OUT, SMOKE_CHROMIUM (browser binary).
 //
 // The build is deterministic (`npx expo export --platform web` + a tiny
 // static file server), not the Metro dev server, so the run does not
@@ -105,7 +105,8 @@ async function run() {
 
   const server = await startStaticServer();
   const url = `http://127.0.0.1:${PORT}/`;
-  const browser = await chromium.launch();
+  // SMOKE_CHROMIUM: a Chromium binary to use when the one Playwright expects is not installed.
+  const browser = await chromium.launch(process.env.SMOKE_CHROMIUM ? { executablePath: process.env.SMOKE_CHROMIUM } : {});
 
   let fakeAgent = null;
   try {

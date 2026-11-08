@@ -16,10 +16,12 @@ import {
   axisLabel,
   axisStatusLabel,
   blockedReasonLabel,
+  combinedSentence,
   criteriaCounts,
   findingsAsPrompt,
   groupFindingsByAxisThenFile,
   groupFindingsByFile,
+  isPartialAxes,
   sortGatesFailingFirst,
   verdictLabel,
   type StewardAxis,
@@ -157,11 +159,33 @@ function FileBlocks({ files }: { files: { file: string; findings: StewardFinding
   );
 }
 
+/** "Partial": a one-axis re-run whose other pass was not run, so the verdict beside it is not a full review's. */
+export function PartialChip() {
+  return (
+    <StatusBadge status="neutral" data-testid="steward-partial-chip">
+      <Icons.statusSkipped aria-hidden className="size-3" />
+      Partial
+    </StatusBadge>
+  );
+}
+
 /** The review row's kind pill: the verdict itself once the review is loaded, a quiet "Review" until then. */
 export function ReviewRowChip({ item }: { item: InboxItem }) {
   const review = useStewardReview(item.links.reviewId);
-  if (review.isPending || review.isError || !review.data) return <StatusBadge status="neutral">Review</StatusBadge>;
-  return <VerdictChip verdict={review.data.verdict} />;
+  if (review.isPending || review.isError || !review.data) {
+    return (
+      <>
+        <StatusBadge status="neutral">Review</StatusBadge>
+        {isPartialAxes(item.axes) && <PartialChip />}
+      </>
+    );
+  }
+  return (
+    <>
+      <VerdictChip verdict={review.data.verdict} />
+      {(review.data.partial === true || isPartialAxes(item.axes ?? review.data.axes)) && <PartialChip />}
+    </>
+  );
 }
 
 /** One gate of the checklist: an icon for the state, the gate's id, the state text, and the daemon's detail when it has one. */
@@ -247,6 +271,7 @@ export function StewardReviewCard({ item, onOpenTask }: { item: InboxItem; onOpe
     <div data-testid={`steward-review-${item.key}`} className="flex flex-col gap-2 px-1 text-ui-sm text-foreground">
       <div className="flex flex-wrap items-center gap-2">
         <VerdictChip verdict={data.verdict} />
+        {(data.partial === true || isPartialAxes(data.axes)) && <PartialChip />}
         {data.prNumber !== undefined && <span className="text-foreground-muted">PR #{data.prNumber}</span>}
         <span className="font-mono text-ui-xs text-foreground-muted">{data.headSha.slice(0, 7)}</span>
         {data.stale && (
@@ -255,7 +280,13 @@ export function StewardReviewCard({ item, onOpenTask }: { item: InboxItem; onOpe
           </span>
         )}
       </div>
-      {data.summary && <p className="m-0">{data.summary}</p>}
+      {data.axes && data.axes.length > 0 ? (
+        <p className="m-0" data-testid="steward-combined">
+          {combinedSentence(data)}
+        </p>
+      ) : (
+        data.summary && <p className="m-0">{data.summary}</p>
+      )}
       {data.verdict === "BLOCKED" && data.blockedReason && (
         <p className="m-0 text-destructive" data-testid="steward-blocked-reason">
           {data.blockedReason}
@@ -265,12 +296,6 @@ export function StewardReviewCard({ item, onOpenTask }: { item: InboxItem; onOpe
         <div className="flex flex-col gap-1" data-testid="steward-axes">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="m-0 text-ui-sm font-medium">Review axes</h3>
-            {data.partial === true && (
-              <StatusBadge status="neutral" data-testid="steward-partial">
-                <Icons.verdict aria-hidden className="size-3" />
-                Partial review · cannot be accepted
-              </StatusBadge>
-            )}
             {data.standardsChanged === true && (
               <StatusBadge status="warning" data-testid="steward-standards-changed">
                 <Icons.warning aria-hidden className="size-3" />

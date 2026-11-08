@@ -117,6 +117,27 @@ describe("StewardReviewCard", () => {
     expect(chip.querySelector("svg")).not.toBeNull();
   });
 
+  it("the inbox row of a loaded partial review has a Partial chip next to the verdict, a full one has none", async () => {
+    for (const [partial, want] of [[true, true], [false, false]] as const) {
+      const d = new StewardDaemon();
+      d.reviews[12] = review({
+        partial,
+        axes: [
+          { axis: "standards", status: "done", seatVerdict: "ACCEPTED", costUsd: 0 },
+          partial ? { axis: "spec", status: "blocked", blockedReason: "not_run", costUsd: 0 } : { axis: "spec", status: "done", seatVerdict: "ACCEPTED", costUsd: 0 },
+        ],
+      });
+      d.items = [{ ...reviewItem(), axes: undefined }];
+      const { unmount } = renderWithDaemon(<InboxScreen onNavigateBack={() => {}} onOpenTask={() => {}} />, d);
+      await flush();
+      const chip = screen.getByTestId("inbox-kind-review:12");
+      await waitFor(() => expect(chip).toHaveTextContent("Changes requested"));
+      // The Partial chip comes from the LOADED review (the item carries no axes here), next to the verdict chip.
+      expect(within(screen.getByTestId("inbox-row-review:12")).queryByTestId("steward-partial-chip") !== null).toBe(want);
+      unmount();
+    }
+  });
+
   it("review card lists failing gates first", async () => {
     await openCard();
     const gates = within(screen.getByTestId("steward-gates")).getAllByRole("listitem");
@@ -227,12 +248,31 @@ describe("StewardReviewCard", () => {
       expect(row).toHaveTextContent("Not run");
       expect(row).not.toHaveTextContent("Did not complete");
       expect(row.querySelector(".text-destructive")).toBeNull();
-      expect(screen.getByTestId("steward-partial")).toHaveTextContent("Partial review · cannot be accepted");
+      expect(within(screen.getByTestId("steward-review-review:12")).getByTestId("steward-partial-chip")).toHaveTextContent("Partial");
+    });
+
+    it("with axes the card shows a plain combined sentence and never the raw tags or skipped copy", async () => {
+      await openCard({
+        summary: "[standards] Follows the documented standards. [spec] axis spec skipped",
+        verdict: "ACCEPTED",
+        axes: [axis(), axis({ axis: "spec", status: "skipped", seatVerdict: undefined, blockedReason: "no_spec", summary: "no spec available" })],
+      });
+      const card = screen.getByTestId("steward-review-review:12");
+      expect(within(card).getByTestId("steward-combined")).toHaveTextContent("Standards accepted the change; spec had nothing to judge.");
+      expect(card.textContent).not.toContain("[standards]");
+      expect(card.textContent).not.toContain("[spec]");
+      expect(card.textContent).not.toMatch(/axis spec skipped/i);
+    });
+
+    it("without axes the daemon summary is shown as before", async () => {
+      await openCard({ summary: "All gates pass." });
+      expect(screen.getByText("All gates pass.")).toBeTruthy();
+      expect(screen.queryByTestId("steward-combined")).toBeNull();
     });
 
     it("no partial marker on a full review", async () => {
       await openCard({ axes: [axis(), axis({ axis: "spec" })] });
-      expect(screen.queryByTestId("steward-partial")).toBeNull();
+      expect(screen.queryByTestId("steward-partial-chip")).toBeNull();
     });
 
     it("blocked axis shows did not complete and its reason", async () => {

@@ -16,6 +16,14 @@ export interface InboxLinks {
   hostId?: string;
 }
 
+/** One pass of a two-axis steward review on an inbox review item (ADR-0054); every field but the axis may be missing. */
+export interface InboxAxis {
+  axis: string;
+  verdict?: string;
+  status?: string;
+  reason?: string;
+}
+
 export interface InboxItem {
   key: string;
   kind: InboxKind;
@@ -28,6 +36,8 @@ export interface InboxItem {
   snoozedUntil?: string;
   attention: InboxAttention;
   links: InboxLinks;
+  /** Review items of a two-axis review only. */
+  axes?: InboxAxis[];
 }
 
 export interface InboxCount {
