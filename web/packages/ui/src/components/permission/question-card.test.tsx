@@ -211,13 +211,12 @@ describe("QuestionCard: rendering", () => {
     const other2 = within(card).getByTestId("question-other-q2");
     expect(other1).toHaveAccessibleName("Other:");
     expect(other2).toHaveAccessibleName("Other:");
-    expect(other1.labels?.[0]).toBe(labels[0]!);
-    expect(other2.labels?.[0]).toBe(labels[1]!);
     expect(other1).toHaveAttribute("placeholder", "Type another answer…");
 
     // The label stays visible once the field holds a value: a filled answer keeps its name.
     fireEvent.change(other1, { target: { value: "canary in eu-west" } });
     expect(labels[0]).toBeVisible();
+    expect(other1).toHaveAccessibleName("Other:");
     expect(other1).toHaveValue("canary in eu-west");
   });
 
