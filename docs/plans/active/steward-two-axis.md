@@ -123,7 +123,7 @@ Review round: `TestStandards_HeadSmindStandardsDirIsReplacedNotFollowed`, `TestS
 ### Open items after the P2 review (not built)
 
 - Per-axis digest filtering: one digest serves both passes, so the Standards seat can read plan and issue text and the Spec seat can read the standards diff. Filter `steward_digest_get` by the caller's axis.
-- The single seat (flag off) still runs in an unpruned head checkout, as before: a PR-planted `.claude`, `.mcp.json` or instruction file reaches it. A separate hardening item that needs its own flag-off golden.
+- ~~The single seat (flag off) still runs in an unpruned head checkout.~~ Done (single-seat hardening): the single seat's scratch tree is pruned with the same `PruneSpec` as the passes (`SingleSeatPruneSpec`: the autoload names at any depth, no standards paths), no symlink followed, fail closed. AGENTS.md goes too, as for the Spec pass: that seat judges from the digest and the diff's files and is never pointed at a standards file, and a head AGENTS.md is what a PR could write to steer it. Its prompt, tool schema and verdict path are untouched (the existing goldens).
 - A pass whose run never starts has an elapsed time of zero, so `maxMinutes` never fires (the same weakness as the single watch).
 - An unresolved merge-base is written as `crashed` on the Standards pass and so counts toward the auto-pause when the other pass fails too. Arguable; `DaemonBlockedReasons` has no reason for "refused to run".
 
