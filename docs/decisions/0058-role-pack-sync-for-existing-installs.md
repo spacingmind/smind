@@ -10,7 +10,7 @@ Human's delegation) answers.
 
 The role pack is code: `RoleSeats` in `internal/profiles/rolepack.go` builds five seat profiles (`peer-sonnet`, `lead`, `validator`, `steward`, `steward-standards`), each with its model, mode,
 orchestration and child settings, notes and a long `Instructions` text that the daemon stores in the profile row. `SeedRoles` creates a seat only when no profile of that name exists, and
-"a seat whose name already exists is left completely untouched" (its doc comment, pinned by `TestSeedRoles_EditSurvivesRerun` and `TestSeedRoles_ExistingSeatKeptUntouched`). That protects the
+"a seat whose name already exists in existing is left completely untouched" (its doc comment, pinned by `TestSeedRoles_EditSurvivesRerun` and `TestSeedRoles_ExistingSeatKeptUntouched`). That protects the
 Human's edits, and it means every later improvement of a role prompt (a new rule in the Lead's text, a corrected handoff format) reaches new installs only: an existing install keeps the
 text it was seeded with, until the Human copies the new text by hand. Fact summary:
 
@@ -19,10 +19,11 @@ text it was seeded with, until the Human copies the new text by hand. Fact summa
 | Seats are built by `Build` closures; `Instructions` are package constants | `internal/profiles/rolepack.go` |
 | Seeding is by name; an existing seat is `kept` and never read | `SeedRolesWith` |
 | A profile row has no record of where it came from or what text it was seeded with | `agent_profiles` (`internal/store/schema.sql`) has no provenance column |
-| An edit is a full-record replace through `Registry.Update` (`profile.update`), validated by the same rules as create | `internal/profiles/registry.go`, `internal/wsapi/handlers.go` |
-| The CLI seeds through `profile.list` and `profile.create`, and refuses only when `SMIND_RUN_ID` is set | `cmd/smind/profile.go` (`cmdProfileSeed`) |
-| The only profile editor is the web Settings -> Profiles section; mobile has none | `web/packages/ui/src/components/settings/profiles-section.tsx` |
-| Plugin-contributed profiles are read-only and never stored | `store.AgentProfile.Owner`, `Registry.refuseOwned` |
+| An edit is a full-record replace through `Registry.Update` (`profile.update`), validated by the same rules as create. The store sets `updated_at` itself and nothing checks it: there is no optimistic-concurrency guard in the store, the registry or the RPC params, so the guard below is new work in all three | `internal/profiles/registry.go`, `internal/store/agent_profiles.go`, `internal/wsapi/handlers.go` |
+| The CLI seeds through `profile.list` and `profile.create`; `cmdProfileSeed` accepts only `roles` as an argument and refuses only when `SMIND_RUN_ID` is set. The process-wide agent-run guard (`SMIND_AGENT_RUN` or `SMIND_RUN_ID`) covers only the commands of the human-only table, which has no `profile` entry and matches verbs, not flags; `smind profile add` and `edit`, which can rewrite instructions and modes, are not gated either | `cmd/smind/profile.go`, `cmd/smind/main.go`, `internal/permpolicy/humanonly.go` |
+| Profiles are edited in the web Settings -> Profiles section and by `smind profile add` / `edit` (any field, including `--instructions-file`); mobile has no profile editor | `web/packages/ui/src/components/settings/profiles-section.tsx`, `cmd/smind/profile.go` |
+| Plugin-contributed profiles are read-only and never stored | `store.AgentProfile.Owner`, `store.IsOwnedID`, `Registry.refuseOwned` |
+| The seats' skill names (`smind-leader`, `smind-peer`, `smind-validator-frames`) resolve against the bundle embedded in the running binary; the bundle is installed to disk only by `smind skill install`. Only the profile row goes stale | `internal/skills`, `internal/profiles/registry.go` |
 
 So there are three kinds of profile named like a seat: **untouched** (still exactly what some released pack version seeded), **customised** (the Human edited it), and **unknown** (we cannot
 tell). Anything that updates stored prompts must be safe for all three, because the cost of overwriting a customised prompt is a person's work and the cost of leaving an untouched one stale is
@@ -55,11 +56,10 @@ of a synced field is missing from its history table, so a release cannot ship a 
 - `--diff [seat[.field]]`: a unified diff of stored against current for each stale or customised field, with capability fields marked.
 - `--apply [--backup-dir <dir>] [--take seat[.field]]... [--dry-run]`: writes the **stale prompt fields of untouched profiles** only. A customised field or a capability field changes only when
   named with `--take`. Before the first write the command saves every profile it is about to change, in full, to `<backup-dir>/<timestamp>/<seat>-<id>.json` (mode 0600; default
-  `<smind home>/backups/role-pack/`); if the backup cannot be written nothing is changed. Each profile is updated with `Registry.Update` from the row the check read, guarded by its
+  `<smind home>/backups/role-pack/`, a new convention: nothing creates a backups directory today; the directory is 0700); if the backup cannot be written nothing is changed. Each profile is updated with `Registry.Update` from the row the check read, guarded by its
   `updatedAt`: a profile edited since the check is skipped and reported `changed_meanwhile`.
 - `--apply` is idempotent: run twice, the second run reports every field `current`.
-- Human-only: `--apply` refuses inside an agent run (`SMIND_AGENT_RUN` or `SMIND_RUN_ID`) and is added to the human-only command table of the `no-self-approve` floor rule, because it rewrites
-  the instructions and permission mode an agent runs under. The daemon side (below) is not run-scoped and refuses a run-scoped caller.
+- Human-only: `--apply` refuses inside an agent run (`SMIND_AGENT_RUN` or `SMIND_RUN_ID`, through `inAgentRun`, not the single variable `cmdProfileSeed` checks today) and `--apply` is added to the human-only command table of the `no-self-approve` floor rule (which needs flag matching, new to that table), because it rewrites the instructions and permission mode an agent runs under. This is partial protection while `profile add` and `edit` stay ungated; gating them is a separate decision (D6). The daemon RPCs are not on `RunScopedMethods`, so a run-scoped connection never reaches them.
 
 ### 4. Web (second PR)
 
@@ -129,4 +129,5 @@ history guard removed; the `updatedAt` guard removed.
   Alternative: also stale capability fields on untouched profiles.
 - **D3: backup.** Recommendation: always, before the first write, in the smind home by default, never skippable. Alternative: opt-in `--backup-dir`.
 - **D4: surfaces.** Recommendation: CLI in PR 1, web banner and review dialog plus a `doctor` line in PR 2, nothing on mobile. Alternative: CLI only.
+- **D6: gate `smind profile add` and `edit` against agent runs too.** Recommendation: yes, in the same table, since they can rewrite what `--apply` protects. Alternative: leave them (a pre-existing gap, tracked with ADR-0056's principal question).
 - **D5: customised profiles.** Recommendation: never changed without `--take seat[.field]`; the diff is always available. Alternative: also offer "take all" for customised fields in the web dialog (one confirm, with the backup).
