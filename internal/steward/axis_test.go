@@ -106,6 +106,29 @@ func TestCombine_BothFailedIsBlocked(t *testing.T) {
 	}
 }
 
+func TestCombine_BaseUnresolvedYieldsToARealFailure(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		passes []PassResult
+		want   string
+	}{
+		{"alone", []PassResult{{Axis: AxisStandards, Status: PassBlocked, BlockedReason: ReasonBaseUnresolved}, {Axis: AxisSpec, Status: PassSkipped}}, ReasonBaseUnresolved},
+		{"spec timed out", []PassResult{{Axis: AxisStandards, Status: PassBlocked, BlockedReason: ReasonBaseUnresolved}, {Axis: AxisSpec, Status: PassBlocked, BlockedReason: "timeout"}}, "timeout"},
+		{"spec crashed", []PassResult{{Axis: AxisStandards, Status: PassBlocked, BlockedReason: ReasonBaseUnresolved}, {Axis: AxisSpec, Status: PassBlocked, BlockedReason: "crashed"}}, "crashed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Combine(tt.passes)
+			if err != nil || !got.Blocked || got.BlockedReason != tt.want {
+				t.Fatalf("Combine() = %+v, %v; want BLOCKED with reason %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestCombine_SkippedAndOpenPasses(t *testing.T) {
 	t.Parallel()
 
@@ -487,6 +510,31 @@ func TestPassVerdict_BothFailedBlocksReview(t *testing.T) {
 	}
 	if err := fx.svc.WritePassBlocked(fx.row.ID, AxisSpec, "not-a-reason", "x", 0); err == nil {
 		t.Fatal("WritePassBlocked(non-daemon reason) = nil, want an error")
+	}
+}
+
+func TestPassVerdict_BaseUnresolvedIsADaemonReason(t *testing.T) {
+	t.Parallel()
+
+	fx := openTwoAxis(t, axisDigest("AC1"))
+	if _, err := fx.submit(t, AxisSpec, specVerdict(VerdictAccepted, CriterionResult{ID: "AC1", Status: CriterionMet, Evidence: "combine.go implements it"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.svc.WritePassBlocked(fx.row.ID, AxisStandards, "base_unresolved", "the merge-base could not be resolved", 0); err != nil {
+		t.Fatalf("WritePassBlocked(base_unresolved) error = %v, want nil", err)
+	}
+	got, err := fx.svc.View(fx.row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != VerdictChanges || got.Status != "done" {
+		t.Fatalf("view = %+v, want CHANGES/done with the standards axis failed", got)
+	}
+	if got.Axes[0].Status != PassBlocked || got.Axes[0].BlockedReason != "base_unresolved" {
+		t.Fatalf("axes = %+v, want standards blocked/base_unresolved", got.Axes)
+	}
+	if !strings.Contains(got.Summary, "axis standards did not complete (base_unresolved)") {
+		t.Fatalf("summary = %q, want the failed axis named", got.Summary)
 	}
 }
 

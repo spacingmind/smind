@@ -474,6 +474,9 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 	if err != nil {
 		return fmt.Errorf("taskrunner: %w", err)
 	}
+	// Every harness launch of an agent run carries the marker, so a smind
+	// command typed in the agent's shell knows it is not the human's.
+	entries = append(entries, AgentRunEnv+"=1")
 	ctx = withScratchEnv(ctx, entries)
 
 	if model != "" {

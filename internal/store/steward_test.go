@@ -342,7 +342,7 @@ func TestStewardReviews_CountsSinceAndPerTask(t *testing.T) {
 
 // finishStewardRow appends one review in the given end state, oldest first,
 // each on its own task so open rows never block each other. State is done or
-// a blocked_reason.
+// a blocked_reason (crashed, timeout, budget, cancelled, base_unresolved...).
 func finishStewardRow(t *testing.T, s *Store, taskID int64, state string) {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -366,7 +366,7 @@ func TestStewardReviews_ConsecutiveFailures(t *testing.T) {
 
 	tests := []struct {
 		name string
-		rows []string // end states, oldest first: done | crashed | timeout | budget | cancelled
+		rows []string // end states, oldest first: done | crashed | timeout | budget | cancelled | base_unresolved
 		want int
 	}{
 		{"done then two crashes", []string{"done", "crashed", "timeout"}, 2},
@@ -375,6 +375,8 @@ func TestStewardReviews_ConsecutiveFailures(t *testing.T) {
 		{"all failing", []string{"crashed", "timeout", "crashed"}, 3},
 		{"cancelled skipped", []string{"cancelled", "crashed"}, 1},
 		{"budget blocked stops the run", []string{"budget", "crashed"}, 1},
+		{"base_unresolved skipped", []string{"base_unresolved", "crashed"}, 1},
+		{"base_unresolved between crashes", []string{"crashed", "base_unresolved", "crashed"}, 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

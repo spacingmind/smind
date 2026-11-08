@@ -155,10 +155,10 @@ func TestClamp_UnknownSeatValueFailsClosed(t *testing.T) {
 }
 
 func TestDaemonNeverWritesAccepted(t *testing.T) {
-	if len(DaemonBlockedReasons) != 5 {
-		t.Fatalf("DaemonBlockedReasons = %v, want exactly the five daemon reasons", DaemonBlockedReasons)
+	if len(DaemonBlockedReasons) != 6 {
+		t.Fatalf("DaemonBlockedReasons = %v, want exactly the six daemon reasons", DaemonBlockedReasons)
 	}
-	for _, r := range []string{"timeout", "budget", "crashed", "cancelled", "scope_violation"} {
+	for _, r := range []string{"timeout", "budget", "crashed", "cancelled", "scope_violation", "base_unresolved"} {
 		if !IsDaemonBlockedReason(r) {
 			t.Errorf("IsDaemonBlockedReason(%q) = false, want true", r)
 		}
