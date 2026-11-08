@@ -5,8 +5,8 @@ import { permissionResolutionLabel } from "@/components/timeline/permission-reas
 import { PlanCard } from "@/components/timeline/plan-card";
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
 import { ToolCall } from "@/components/timeline/tool-call";
-import { StatusBadge } from "@/components/ui/status-badge";
-import type { TimelineItem, TimelinePermissionItem } from "@/hooks/use-run-timeline";
+import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/status-badge";
+import type { TimelineItem, TimelinePermissionItem, TimelineQuestionItem } from "@/hooks/use-run-timeline";
 
 /**
  * The file-opening context a tool-call card needs. Both must be stable
@@ -88,6 +88,13 @@ export const TimelineRow = memo(function TimelineRow({
         </li>
       );
 
+    case "question":
+      return (
+        <li data-testid="timeline-question" data-item-kind="question">
+          <QuestionRow item={item} />
+        </li>
+      );
+
     case "plan":
       return (
         <li data-testid="timeline-plan-row" data-item-kind="plan">
@@ -145,6 +152,42 @@ function PermissionRow({ item }: { item: TimelinePermissionItem }) {
     <p className="flex items-center gap-2 text-ui-sm text-foreground-muted">
       <Icons.permission className="size-3 shrink-0" />
       Permission resolved
+      {resolution && <StatusBadge status={resolution.status}>{resolution.label}</StatusBadge>}
+    </p>
+  );
+}
+
+/**
+ * How a resolved question's `reason` (ADR-0055) reads inline: same
+ * one-line trace shape as PERMISSION_REASON_LABEL. `human` is the calm
+ * expected case; `declined` a person's own refusal; `timeout` nobody
+ * answered in time; `refused_secret` the daemon refusing to collect a
+ * secret for the agent (secrets are never collected here); the four
+ * automatic refusals (repeat / profile_decline / no_human /
+ * refused_unsupported) share one plain label, and the two
+ * not-actually-answered ends (provider_cancellation / run_ended) read as
+ * cancelled. A reason this build has never heard of renders as its raw
+ * text in the neutral tone, never a crash.
+ */
+export const QUESTION_REASON_LABEL: Record<string, { label: string; status: StatusBadgeStatus }> = {
+  human: { label: "answered", status: "success" },
+  declined: { label: "declined", status: "warning" },
+  timeout: { label: "no answer (timed out)", status: "warning" },
+  refused_secret: { label: "refused: secrets are not collected here", status: "warning" },
+  repeat: { label: "declined automatically", status: "neutral" },
+  profile_decline: { label: "declined automatically", status: "neutral" },
+  no_human: { label: "declined automatically", status: "neutral" },
+  refused_unsupported: { label: "declined automatically", status: "neutral" },
+  provider_cancellation: { label: "cancelled", status: "warning" },
+  run_ended: { label: "cancelled", status: "warning" },
+};
+
+/** A resolved question's marker row: the summary plus how it ended, with no badge when the reason is absent/unknown. */
+function QuestionRow({ item }: { item: TimelineQuestionItem }) {
+  const resolution = item.reason ? (QUESTION_REASON_LABEL[item.reason] ?? { label: item.reason, status: "neutral" as const }) : undefined;
+  return (
+    <p className="flex items-center gap-2 text-ui-sm text-foreground-muted">
+      <span className="whitespace-pre-wrap break-words">{item.summary}</span>
       {resolution && <StatusBadge status={resolution.status}>{resolution.label}</StatusBadge>}
     </p>
   );
