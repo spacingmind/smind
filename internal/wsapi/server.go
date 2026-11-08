@@ -642,14 +642,14 @@ func (b busWorkspaceNotifier) NotifyChatCreated(c store.Chat) {
 	if isSystemTask(b.db, c.TaskID) {
 		return
 	}
-	b.bus.Publish(Event{Topic: TopicChatCreated, Payload: chatCreatedPayload{Chat: c}})
+	b.bus.Publish(Event{Topic: TopicChatCreated, Payload: chatCreatedPayload{Chat: chatViewOf(b.db, c)}})
 }
 
 func (b busWorkspaceNotifier) NotifyChatUpdated(c store.Chat) {
 	if isSystemTask(b.db, c.TaskID) {
 		return
 	}
-	b.bus.Publish(Event{Topic: TopicChatUpdated, Payload: chatUpdatedPayload{Chat: c}})
+	b.bus.Publish(Event{Topic: TopicChatUpdated, Payload: chatUpdatedPayload{Chat: chatViewOf(b.db, c)}})
 }
 
 func (b busWorkspaceNotifier) NotifyChatArchived(c store.Chat) {

@@ -448,12 +448,15 @@ func rehydrateMeta(st *store.Store, row store.Run) *run {
 // run is a Registry's internal bookkeeping for one Run: identity fields
 // are immutable after Start, everything else is guarded by mu.
 type run struct {
-	id        string
-	taskID    int64
-	chatID    int64
-	provider  taskrunner.Provider
-	prompt    string
-	startedAt time.Time
+	id       string
+	taskID   int64
+	chatID   int64
+	provider taskrunner.Provider
+	prompt   string
+	// deliveredPrompt is what the provider was actually given when that differs from
+	// prompt (a seeded fork's first turn); "" otherwise. Guarded by mu.
+	deliveredPrompt string
+	startedAt       time.Time
 
 	// treeRoot is the root task id of this run's task tree, resolved via
 	// treeRootOf before reg.mu is taken and immutable thereafter -- the
@@ -1235,14 +1238,28 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 			}
 			// A seeded fork (ADR-0057) carries the earlier turns in its first prompt, once;
 			// the stored prompt stays the user's own text.
+			seeded := false
 			if r.chatID != 0 {
 				if seed, ok, serr := reg.st.ClaimChatForkSeed(r.chatID, time.Now()); serr != nil {
 					log.Printf("runs: run %s: claim fork seed: %v", r.id, serr)
 				} else if ok {
 					prompt = seed + prompt
+					seeded = true
+					// The provider's session records the prompt it was given, so the
+					// native_ref hash that finds this turn again is of that text.
+					r.mu.Lock()
+					r.deliveredPrompt = prompt
+					r.mu.Unlock()
 				}
 			}
 			err = runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
+			if err != nil && seeded {
+				// The first run failed: give the seed back so the retry carries it
+				// (if the provider did see it, the retry repeats it: redundant, not lost).
+				if uerr := reg.st.UnclaimChatForkSeed(r.chatID); uerr != nil {
+					log.Printf("runs: run %s: unclaim fork seed: %v", r.id, uerr)
+				}
+			}
 		}
 	}
 	<-forwardDone

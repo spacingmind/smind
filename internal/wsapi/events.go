@@ -300,13 +300,13 @@ type taskDeletedPayload struct {
 // chatCreatedPayload is the payload of chat.created events:
 // {chat: store.Chat}.
 type chatCreatedPayload struct {
-	Chat store.Chat `json:"chat"`
+	Chat chatView `json:"chat"` // store.Chat's fields, plus `fork` for a forked chat
 }
 
 // chatUpdatedPayload is the payload of chat.updated events (a rename):
 // {chat: store.Chat}.
 type chatUpdatedPayload struct {
-	Chat store.Chat `json:"chat"`
+	Chat chatView `json:"chat"`
 }
 
 // chatArchivedPayload is the payload of chat.archived events:

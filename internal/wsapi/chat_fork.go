@@ -9,16 +9,13 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
 )
-
-// codeForkUnavailable is the wire code of a native fork that cannot be made; its
-// data names the reason and says the seeded fallback is open.
-const codeForkUnavailable = "fork_unavailable"
 
 // chatForkInfo is the additive `fork` field of a forked chat (ADR-0057).
 type chatForkInfo struct {
@@ -43,10 +40,10 @@ func forkInfoOf(f store.ChatFork) *chatForkInfo {
 }
 
 // chatViewsOf decorates chats of one task with their fork records.
-func chatViewsOf(db *store.Store, taskID int64, chats []store.Chat) []chatView {
+func chatViewsOf(db *store.Store, taskID int64, chats []store.Chat) ([]chatView, error) {
 	forks, err := db.ListChatForksByTask(taskID)
 	if err != nil {
-		log.Printf("wsapi: chat list: fork records of task %d: %v", taskID, err)
+		return nil, err
 	}
 	out := make([]chatView, len(chats))
 	for i, c := range chats {
@@ -55,7 +52,7 @@ func chatViewsOf(db *store.Store, taskID int64, chats []store.Chat) []chatView {
 			out[i].Fork = forkInfoOf(f)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func chatViewOf(db *store.Store, c store.Chat) chatView {
@@ -102,7 +99,7 @@ func handleChatFork(wm *workspace.Manager, reg *runs.Registry, db *store.Store) 
 			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": no such chat"}
 		}
 		run, err := db.GetRun(p.AtRunID)
-		if err != nil || run.ChatID != parent.ID || run.Status != string(runs.StatusDone) {
+		if err != nil || run.ChatID != parent.ID || run.Status != string(runs.StatusDone) || run.Purpose != "user" {
 			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": atRunId must be a finished run of this chat"}
 		}
 		if parent.Provider == nil {
@@ -124,7 +121,9 @@ func handleChatFork(wm *workspace.Manager, reg *runs.Registry, db *store.Store) 
 					log.Printf("wsapi: %s: totals baseline of chat %d: %v", m, parent.ID, terr)
 				} else if js != "" {
 					var totals taskrunner.ClaudeUsageTotals
-					if json.Unmarshal([]byte(js), &totals) == nil {
+					if uerr := json.Unmarshal([]byte(js), &totals); uerr != nil {
+						log.Printf("wsapi: %s: totals baseline of chat %d is unreadable, the child starts without one: %v", m, parent.ID, uerr)
+					} else {
 						handle.UsageTotals = &totals
 					}
 				}
@@ -155,7 +154,10 @@ func handleChatFork(wm *workspace.Manager, reg *runs.Registry, db *store.Store) 
 				}
 			}
 			seed := runs.ForkSeed(upTo, func(id string) string {
-				t, _ := reg.FinalAgentText(id)
+				t, terr := reg.FinalAgentText(id)
+				if terr != nil {
+					log.Printf("wsapi: %s: final text of run %s: %v", m, id, terr)
+				}
 				return t
 			})
 			if seed == "" {
@@ -181,8 +183,11 @@ func forkTitle(parent string) string {
 	if parent == "" {
 		parent = "Chat"
 	}
-	if len(parent) > 60 {
-		parent = parent[:60]
+	if utf8.RuneCountInString(parent) > forkTitleMax {
+		parent = string([]rune(parent)[:forkTitleMax])
 	}
 	return "Fork of " + parent
 }
+
+// forkTitleMax caps the parent's title (in characters) inside a fork's title.
+const forkTitleMax = 60

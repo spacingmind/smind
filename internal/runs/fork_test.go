@@ -168,3 +168,53 @@ func TestChatFork_SeededPrefixOnceAndNotStored(t *testing.T) {
 		t.Fatalf("the second prompt the agent saw = %q, want no seed", got)
 	}
 }
+
+// The native_ref hash that finds a seeded fork's first turn again is of the text
+// the provider was given, not of the stored prompt.
+func TestRun_NativePromptIsTheDeliveredOne(t *testing.T) {
+	t.Parallel()
+	r := &run{prompt: "question"}
+	if r.nativePrompt() != "question" {
+		t.Fatal("without a seed the native prompt is the run's prompt")
+	}
+	r.deliveredPrompt = "SEED question"
+	if r.nativePrompt() != "SEED question" {
+		t.Fatal("with a seed the native prompt is what was delivered")
+	}
+}
+
+// A first run that fails gives the seed back, so the retry still carries it.
+func TestChatFork_SeedGivenBackWhenTheFirstRunFails(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "plain-error")
+	wt := *e.task.WorktreePath
+	if err := os.WriteFile(filepath.Join(wt, "record-prompt-blocks"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parent, _ := e.st.CreateChat(e.task.ID, "parent")
+	child, _ := e.st.CreateChat(e.task.ID, "child")
+	if err := e.st.InsertChatFork(store.ChatFork{ChatID: child.ID, ParentChatID: parent.ID, ForkedAtRunID: "x", Mode: store.ChatForkModeSeeded, Seed: "SEED-MARKER\n\n"}); err != nil {
+		t.Fatal(err)
+	}
+	start := func(prompt string) string {
+		runID, err := e.reg.Start(context.Background(), e.wm, e.runner, e.task.ID, child.ID, taskrunner.ProviderGLM, prompt, taskrunner.PermissionSettings{}, "")
+		if err != nil {
+			t.Fatalf("Start(%q) error = %v", prompt, err)
+		}
+		waitForTerminal(t, e.reg, runID)
+		return runID
+	}
+	failed := start("first")
+	if row, _ := e.st.GetRun(failed); row.Status != "error" {
+		t.Fatalf("first run status = %q, want error (the scenario must fail the turn)", row.Status)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "scenario"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(filepath.Join(wt, "prompt-blocks"))
+	start("retry")
+	data, err := os.ReadFile(filepath.Join(wt, "prompt-blocks"))
+	if err != nil || !strings.Contains(string(data), "SEED-MARKER") {
+		t.Fatalf("the retry prompt = %q, %v; want the seed given back after the failure", data, err)
+	}
+}

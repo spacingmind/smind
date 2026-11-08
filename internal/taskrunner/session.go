@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"encoding/json"
+	"regexp"
 	"sync"
 )
 
@@ -55,6 +56,13 @@ type ForkAt struct {
 	// record of the anchor turn).
 	EntryUUID string `json:"entryUuid"`
 }
+
+var forkEntryPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z-]{7,63}$`)
+
+// ValidForkEntry reports whether s has the shape of a transcript entry uuid. The
+// value goes into one equals-joined CLI argument, so this is defence in depth
+// against an edited transcript, not an injection fix.
+func ValidForkEntry(s string) bool { return forkEntryPattern.MatchString(s) }
 
 // TotalsLogger is implemented by a SessionStore that keeps the history of a
 // chat's claude usage totals (ChatSessionStore does), so a fork can start its

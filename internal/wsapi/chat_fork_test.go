@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/history/native"
 	"github.com/spacingmind/smind/internal/runs"
@@ -286,5 +287,53 @@ func TestChatList_ForkFieldAdditive(t *testing.T) {
 		if has != (int64(r["ID"].(float64)) == forked.(chatView).ID) {
 			t.Fatalf("fork field on chat %v = %v", r["ID"], has)
 		}
+	}
+}
+
+func TestForkTitle(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("Chào", 40) // multi-byte, well past the cap
+	for name, tc := range map[string]struct{ in, want string }{
+		"plain":       {"main", "Fork of main"},
+		"empty":       {"  ", "Fork of Chat"},
+		"trimmed":     {"  side  ", "Fork of side"},
+		"cut by rune": {long, "Fork of " + string([]rune(long)[:forkTitleMax])},
+	} {
+		got := forkTitle(tc.in)
+		if got != tc.want || !utf8.ValidString(got) {
+			t.Errorf("%s: forkTitle = %q, want %q (valid UTF-8)", name, got, tc.want)
+		}
+	}
+}
+
+// chat.created and chat.updated carry the fork field of a forked chat, so a client
+// that patches its list from the event keeps the banner.
+func TestChatEventsCarryTheForkField(t *testing.T) {
+	t.Parallel()
+	e := newForkEnv(t)
+	got, err := e.call(t, e.fork, humanRC, map[string]any{"chatId": e.parent.ID, "atRunId": "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := got.(chatView)
+	b, _ := json.Marshal(chatCreatedPayload{Chat: chatViewOf(e.db, child.Chat)})
+	if !strings.Contains(string(b), `"fork":{"parentChatId":`) {
+		t.Fatalf("created payload = %s, want a fork field", b)
+	}
+	b, _ = json.Marshal(chatCreatedPayload{Chat: chatViewOf(e.db, e.parent)})
+	if strings.Contains(string(b), `"fork"`) {
+		t.Fatalf("an unforked chat's payload = %s, want no fork field", b)
+	}
+}
+
+func TestChatFork_RefusesARunThatIsNotAUserRun(t *testing.T) {
+	t.Parallel()
+	e := newForkEnv(t)
+	started := time.Now().UTC()
+	if _, err := e.db.CreateRun(store.Run{ID: "sys", TaskID: e.task.ID, ChatID: e.parent.ID, Provider: "claude-native", Prompt: "p", Status: "done", Purpose: "reflect", StartedAt: started, FinishedAt: &started}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.call(t, e.fork, humanRC, map[string]any{"chatId": e.parent.ID, "atRunId": "sys", "mode": "seeded"}); err == nil {
+		t.Fatal("a seeded fork at a non-user run succeeded: its seed would carry every turn of the chat")
 	}
 }

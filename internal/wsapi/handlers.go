@@ -1101,7 +1101,11 @@ func handleChatList(wm *workspace.Manager, db *store.Store) handlerFunc {
 		if err != nil {
 			return nil, fmt.Errorf("chat.list: %w", err)
 		}
-		return chatViewsOf(db, p.TaskID, chats), nil
+		views, err := chatViewsOf(db, p.TaskID, chats)
+		if err != nil {
+			return nil, fmt.Errorf("chat.list: %w", err)
+		}
+		return views, nil
 	}
 }
 

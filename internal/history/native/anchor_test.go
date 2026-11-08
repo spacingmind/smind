@@ -1,16 +1,13 @@
 package native
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"testing"
 )
 
-// withDistinctUUIDs rewrites the fixture so every record carries its own uuid
-// ("rec-<line>"), as a real transcript does; the checked-in fixture reuses one
-// placeholder.
-func withDistinctUUIDs(t *testing.T, e *env, keep bool) {
+// withoutUUIDs strips the uuid of every record, as a transcript that carries none.
+func withoutUUIDs(t *testing.T, e *env) {
 	t.Helper()
 	b, err := os.ReadFile(e.file)
 	if err != nil {
@@ -18,12 +15,9 @@ func withDistinctUUIDs(t *testing.T, e *env, keep bool) {
 	}
 	lines := strings.Split(string(b), "\n")
 	for i, l := range lines {
-		if keep {
-			l = strings.Replace(l, `"uuid":"a"`, fmt.Sprintf(`"uuid":"rec-%d"`, i), 1)
-			l = strings.Replace(l, `"uuid":"u"`, fmt.Sprintf(`"uuid":"rec-%d"`, i), 1)
-		} else {
-			l = strings.Replace(l, `"uuid":"a",`, "", 1)
-			l = strings.Replace(l, `"uuid":"a"`, `"x":1`, 1)
+		if j := strings.Index(l, `"uuid":"`); j >= 0 {
+			k := strings.Index(l[j+8:], `"`)
+			l = l[:j] + `"x":1` + l[j+8+k+1:]
 		}
 		lines[i] = l
 	}
@@ -36,15 +30,14 @@ func withDistinctUUIDs(t *testing.T, e *env, keep bool) {
 // sidechain record inside it, not a record of another turn.
 func TestAnchor_ClaudeLastAssistantUUIDOfTheMatchedTurn(t *testing.T) {
 	e := newClaude(t)
-	withDistinctUUIDs(t, e, true)
 	res := e.rebuild()
 	if !res.OK() {
 		t.Fatalf("rebuild: %q (%s)", res.Reason, res.Detail)
 	}
 	// Fixture line 19 (0-based, 09:10:09) is the last non-sidechain assistant
 	// record of the 09:10:00 turn; line 12 is a sidechain record inside it.
-	if res.Anchor != "rec-19" {
-		t.Fatalf("Anchor = %q, want rec-19 (the turn's last main-thread assistant record)", res.Anchor)
+	if res.Anchor != "00000000-0000-4000-8000-000000000019" {
+		t.Fatalf("Anchor = %q, want ...0019 (the turn's last main-thread assistant record)", res.Anchor)
 	}
 }
 
@@ -52,7 +45,7 @@ func TestAnchor_ClaudeLastAssistantUUIDOfTheMatchedTurn(t *testing.T) {
 // rebuild still works, the anchor is empty, and the caller refuses the fork.
 func TestAnchor_MissingUUIDIsEmpty(t *testing.T) {
 	e := newClaude(t)
-	withDistinctUUIDs(t, e, false)
+	withoutUUIDs(t, e)
 	res := e.rebuild()
 	if !res.OK() {
 		t.Fatalf("rebuild: %q (%s)", res.Reason, res.Detail)
@@ -65,7 +58,6 @@ func TestAnchor_MissingUUIDIsEmpty(t *testing.T) {
 // Two turns with the same prompt text in the run's window cannot be told apart.
 func TestAnchor_SliceNotFoundOnDuplicatePrompt(t *testing.T) {
 	e := newClaude(t)
-	withDistinctUUIDs(t, e, true)
 	e.ref.TurnWindow = TurnWindow{StartedAt: at("2026-11-05T08:00:00Z"), FinishedAt: at("2026-11-05T10:00:00Z")}
 	b, err := os.ReadFile(e.file)
 	if err != nil {

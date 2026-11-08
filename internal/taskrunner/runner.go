@@ -1261,7 +1261,7 @@ func (r *Runner) newClaudeClientWithResume(ctx context.Context, provider Provide
 	}
 
 	resumeOpts := append(append([]claudecode.Option{}, opts...), claudecode.WithResume(handle.SessionID))
-	if handle.Fork != nil && handle.Fork.EntryUUID != "" {
+	if handle.Fork != nil && ValidForkEntry(handle.Fork.EntryUUID) {
 		// A pending fork (ADR-0057): copy the parent's session up to the anchor
 		// entry into a new session instead of continuing the parent's.
 		resumeOpts = append(resumeOpts, claudecode.WithForkSession(), claudecode.WithResumeSessionAt(handle.Fork.EntryUUID))

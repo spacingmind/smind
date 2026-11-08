@@ -23,7 +23,8 @@ type ChatFork struct {
 
 // Fork kinds and modes.
 const (
-	ChatForkKindFork  = "fork"
+	ChatForkKindFork = "fork"
+	// ChatForkKindRetry is written by edit-and-retry (ADR-0057 PR 2).
 	ChatForkKindRetry = "retry"
 
 	ChatForkModeNative = "native"
@@ -63,9 +64,10 @@ func (s *Store) GetChatFork(chatID int64) (ChatFork, error) {
 	return f, nil
 }
 
-// ListChatForksByTask returns the fork records of a task's chats by chat id.
+// ListChatForksByTask returns the fork records of a task's chats by chat id,
+// without the seeds (they can be large and a listing never needs them).
 func (s *Store) ListChatForksByTask(taskID int64) (map[int64]ChatFork, error) {
-	rows, err := s.db.Query(`SELECT f.chat_id, f.parent_chat_id, f.forked_at_run_id, f.fork_kind, f.mode, f.seed, f.seed_used_at, f.created_at
+	rows, err := s.db.Query(`SELECT f.chat_id, f.parent_chat_id, f.forked_at_run_id, f.fork_kind, f.mode, '', f.seed_used_at, f.created_at
 		FROM chat_forks f JOIN chats c ON c.id = f.chat_id WHERE c.task_id = ?`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list chat forks for task %d: %w", taskID, err)
@@ -93,7 +95,11 @@ func (s *Store) ClaimChatForkSeed(chatID int64, now time.Time) (string, bool, er
 	if err != nil {
 		return "", false, fmt.Errorf("claim chat fork seed %d: %w", chatID, err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return "", false, fmt.Errorf("claim chat fork seed %d: %w", chatID, err)
+	}
+	if n == 0 {
 		return "", false, nil
 	}
 	var seed string
@@ -101,6 +107,17 @@ func (s *Store) ClaimChatForkSeed(chatID int64, now time.Time) (string, bool, er
 		return "", false, fmt.Errorf("read chat fork seed %d: %w", chatID, err)
 	}
 	return seed, true, nil
+}
+
+// UnclaimChatForkSeed gives a claimed seed back, for a first run that failed: the
+// retry then carries the context again. If the provider had already seen the
+// seed the retry repeats it, which costs a redundant summary and never lost
+// context.
+func (s *Store) UnclaimChatForkSeed(chatID int64) error {
+	if _, err := s.db.Exec(`UPDATE chat_forks SET seed_used_at = NULL WHERE chat_id = ? AND mode = 'seeded'`, chatID); err != nil {
+		return fmt.Errorf("unclaim chat fork seed %d: %w", chatID, err)
+	}
+	return nil
 }
 
 // AppendChatClaudeTotals logs the cumulative usage totals (JSON) a claude

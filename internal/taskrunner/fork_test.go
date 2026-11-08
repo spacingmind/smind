@@ -124,3 +124,35 @@ func TestRunner_ForkMarkerClearedAtInitEvenWhenTheTurnDies(t *testing.T) {
 		t.Fatalf("handle after the dead turn = %+v, want the child's session fork-sess and no fork marker", h)
 	}
 }
+
+func TestValidForkEntry(t *testing.T) {
+	t.Parallel()
+	for s, want := range map[string]bool{
+		"00000000-0000-4000-8000-000000000019": true,
+		"abcdef01":                             true,
+		"":                                     false,
+		"a":                                    false,
+		"-leading-dash-0123":                   false,
+		"has space 0123456":                    false,
+		"new\nline-0123456":                    false,
+		"with=equals-0123":                     false,
+	} {
+		if got := ValidForkEntry(s); got != want {
+			t.Errorf("ValidForkEntry(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+// A marker whose entry id has an odd shape (an edited transcript) never reaches the
+// CLI as a fork flag: the turn resumes the parent's session plainly.
+func TestRunner_ForkWithMalformedEntryNeverPassesForkFlags(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "echo-args")
+	r := claudeNativeRunner(t, wm)
+	r.sessionStore.Set(task.ID, SessionHandle{Provider: ProviderClaudeNative, SessionID: "parent-session", Fork: &ForkAt{EntryUUID: "--dangerous=1"}})
+	runClaudeTurn(t, r, task.ID, "hi")
+	args := readArgsFile(t, *task.WorktreePath)
+	if strings.Contains(args, "--fork-session") || strings.Contains(args, "--resume-session-at") {
+		t.Fatalf("args = %q, want no fork flags for a malformed entry id", args)
+	}
+}

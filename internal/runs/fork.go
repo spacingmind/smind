@@ -7,6 +7,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/history/native"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // ForkAnchor is what the daemon needs to fork a chat natively at a finished turn
@@ -44,8 +45,8 @@ func (reg *Registry) ForkAnchorOf(ctx context.Context, runID string) ForkAnchor 
 	if !res.OK() {
 		return ForkAnchor{Reason: res.Reason, Detail: res.Detail}
 	}
-	if res.Anchor == "" {
-		return ForkAnchor{Reason: native.ReasonFormatDrift, Detail: "the transcript records carry no entry uuid"}
+	if res.Anchor == "" || !taskrunner.ValidForkEntry(res.Anchor) {
+		return ForkAnchor{Reason: native.ReasonFormatDrift, Detail: "the transcript records carry no usable entry uuid"}
 	}
 	return ForkAnchor{SessionID: ref.SessionID, EntryUUID: res.Anchor}
 }
