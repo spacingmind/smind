@@ -102,3 +102,25 @@ func TestRunner_ClaudeTurnLogsItsTotals(t *testing.T) {
 		t.Fatalf("logged totals = %v, want one per turn", spy.got)
 	}
 }
+
+// The marker is cleared as soon as the CLI reports the child's own session id,
+// not only at the result: a first turn that dies after the init message leaves a
+// handle that resumes the child's session and never forks the parent again.
+func TestRunner_ForkMarkerClearedAtInitEvenWhenTheTurnDies(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "init-then-exit")
+	r := claudeNativeRunner(t, wm)
+	r.sessionStore.Set(task.ID, SessionHandle{Provider: ProviderClaudeNative, SessionID: "parent-session", Fork: &ForkAt{EntryUUID: "entry-42"}})
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", testClaudeModel, events)
+	}()
+	drainEvents(events)
+	<-errCh // the turn failed: that is the point
+	h, ok := r.sessionStore.Get(task.ID)
+	if !ok || h.SessionID != "fork-sess" || h.Fork != nil {
+		t.Fatalf("handle after the dead turn = %+v, want the child's session fork-sess and no fork marker", h)
+	}
+}

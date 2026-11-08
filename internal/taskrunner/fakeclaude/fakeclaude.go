@@ -134,6 +134,13 @@ func Run() {
 			"result":      "done",
 		})
 
+	case "init-then-exit":
+		// The CLI reports its session id (the init system message), then dies
+		// before any result: what a cancelled first turn of a fork looks like.
+		stdin.Scan()
+		writeLine(map[string]any{"type": "system", "subtype": "init", "session_id": "fork-sess"})
+		os.Exit(3)
+
 	case "cli-exit-nonzero", "cli-exit-signal", "cli-exit-zero":
 		// The CLI streams one API message's usage (two messages: the first
 		// complete, the second cut off before its message_delta) and some
