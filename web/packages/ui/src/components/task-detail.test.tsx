@@ -98,7 +98,7 @@ describe("TaskDetailPane", () => {
     await flush();
 
     const logsCall = client.nth("run.logs", 0);
-    expect(logsCall.params).toEqual({ runId: "run-1" });
+    expect(logsCall.params).toEqual({ runId: "run-1", detail: "auto" });
     const logs: RunLogsResult = {
       runId: "run-1",
       status: "done",

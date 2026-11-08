@@ -18,7 +18,9 @@ import (
 //	detail      who may ask           what it does
 //	(omitted)   anyone                the stored rows
 //	"skeleton"  anyone                the stored rows, never a rebuild
-//	"auto"      anyone                the stored rows (the human surfaces ask for "full" explicitly)
+//	"auto"      a human, for the open  the stored rows, upgraded to the rebuilt history only when that is
+//	                                  cheap (cached, or a session file of at most runs.AutoRebuildMaxBytes);
+//	                                  anyone else gets the stored rows
 //	"full"      a human only          rebuild the turn from the provider's session and merge it with the
 //	                                  stored non-transcript rows; any failure serves the stored rows
 //	                                  with a skeletonReason, never an error
@@ -72,19 +74,36 @@ func historyLabel(reg *runs.Registry, runID, detail string, human bool) historyF
 	}
 }
 
-// rebuiltEvents is the merged history of runID for a human who asked for "full":
-// the stored rows with the transcript replaced by the provider's own, or the
-// reason it could not be. Events are in client form (already elided).
-func rebuiltEvents(ctx context.Context, reg *runs.Registry, runID string) (events []taskrunner.Event, refs map[string][]taskrunner.HeredocRef, reason native.Reason) {
-	got := reg.RebuildHistory(ctx, runID, runs.RequesterHuman)
+// rebuiltEvents is the merged history of runID for a human: the stored rows with
+// the transcript replaced by the provider's own, or the reason it could not be.
+// Events are in client form (already elided). auto is the open-time upgrade: it
+// rebuilds only when that is cheap, and reports skipped (no events, no reason,
+// nothing read) when it is not.
+func rebuiltEvents(ctx context.Context, reg *runs.Registry, runID string, auto bool) (events []taskrunner.Event, refs map[string][]taskrunner.HeredocRef, reason native.Reason, skipped bool) {
+	var got runs.Rebuilt
+	if auto {
+		got = reg.RebuildOnOpen(ctx, runID, runs.RequesterHuman)
+	} else {
+		got = reg.RebuildHistory(ctx, runID, runs.RequesterHuman)
+	}
+	if got.Skipped {
+		return nil, nil, native.ReasonNone, true
+	}
 	if !got.OK() {
-		return nil, nil, got.Reason
+		return nil, nil, got.Reason, false
 	}
 	stored, _, err := reg.History(runID)
 	if err != nil {
-		return nil, nil, native.ReasonFailed
+		return nil, nil, native.ReasonFailed, false
 	}
-	return runs.MergeRebuilt(stored, got.Events), got.Refs, native.ReasonNone
+	return runs.MergeRebuilt(stored, got.Events), got.Refs, native.ReasonNone, false
+}
+
+// quietOpenRefusal reports a reason an automatic open should not announce: the
+// concurrency bound being full or the chat being busy says nothing about the
+// session, and the button is still the way to ask later.
+func quietOpenRefusal(reason native.Reason) bool {
+	return reason == native.ReasonBusy || reason == native.ReasonSessionInUse
 }
 
 // logEventsClientForm converts events that are already in client form (a

@@ -37,13 +37,56 @@ type Rebuilt struct {
 	Refs   map[string][]taskrunner.HeredocRef
 	Reason native.Reason
 	Detail string // counts only, never text
+	// Skipped is set by RebuildOnOpen when it did not try (not cached, too big):
+	// not a failure, the caller keeps the skeleton and its "load full" button.
+	Skipped bool
 }
 
 // OK reports whether the history was rebuilt.
-func (r Rebuilt) OK() bool { return r.Reason == native.ReasonNone }
+func (r Rebuilt) OK() bool { return r.Reason == native.ReasonNone && !r.Skipped }
 
 func degraded(reason native.Reason, detail string) Rebuilt {
 	return Rebuilt{Reason: reason, Detail: detail}
+}
+
+// AutoRebuildMaxBytes is the largest session file a human's "auto" open will
+// parse on its own (H5); anything bigger waits for the explicit button. The
+// bound comes from the measurement in ADR-0053 ("Implemented: the budget cache"):
+// at this size a cold rebuild stays far inside the 10 s limit.
+const AutoRebuildMaxBytes = 8 << 20
+
+// autoRebuildMax is AutoRebuildMaxBytes as a variable so a test can lower it.
+var autoRebuildMax int64 = AutoRebuildMaxBytes
+
+// rebuildTarget checks everything a rebuild of runID needs before the session is
+// touched: a human requester, a wired reader, a finished readable run whose chat
+// is idle, and a readable native_ref.
+func (reg *Registry) rebuildTarget(runID string, who Requester) (*native.Rebuilder, native.Ref, Rebuilt, bool) {
+	var ref native.Ref
+	if who != RequesterHuman {
+		return nil, ref, degraded(native.ReasonHumanOnly, ""), false
+	}
+	reg.mu.Lock()
+	rb := reg.rebuilder
+	reg.mu.Unlock()
+	if rb == nil {
+		return nil, ref, degraded(native.ReasonCannotRebuild, ""), false
+	}
+	row, err := reg.storedReadable(runID)
+	if err != nil {
+		return nil, ref, degraded(native.ReasonCannotRebuild, ""), false
+	}
+	if row.ChatID != 0 && reg.chatHasRunningRun(row.ChatID) {
+		return nil, ref, degraded(native.ReasonSessionInUse, ""), false
+	}
+	sk, err := reg.st.GetRunSkeleton(runID)
+	if err != nil || sk.NativeRef == "" {
+		return nil, ref, degraded(native.ReasonCannotRebuild, "no native_ref recorded"), false
+	}
+	if json.Unmarshal([]byte(sk.NativeRef), &ref) != nil {
+		return nil, ref, degraded(native.ReasonCannotRebuild, "native_ref unreadable"), false
+	}
+	return rb, ref, Rebuilt{}, true
 }
 
 // RebuildHistory reads runID's turn from the provider session named by its
@@ -51,36 +94,55 @@ func degraded(reason native.Reason, detail string) Rebuilt {
 // whose chat has no running run (the session must not be read while it is being
 // written), and never fails: a refusal is a Reason. The events are in client
 // form: heredoc bodies elided, provider secrets scrubbed, exactly as a live read.
+// A rebuild is served from the cache while the session file is unchanged.
 func (reg *Registry) RebuildHistory(ctx context.Context, runID string, who Requester) Rebuilt {
-	if who != RequesterHuman {
-		return degraded(native.ReasonHumanOnly, "")
+	rb, ref, refused, ok := reg.rebuildTarget(runID, who)
+	if !ok {
+		return refused
 	}
-	reg.mu.Lock()
-	rb := reg.rebuilder
-	reg.mu.Unlock()
-	if rb == nil {
-		return degraded(native.ReasonCannotRebuild, "")
+	return reg.rebuildCached(ctx, rb, ref, runID, rb.Probe(ref))
+}
+
+// RebuildOnOpen is the automatic upgrade of a human's open (ADR-0053 H5): it
+// rebuilds only when that is cheap, that is when the rebuild is already cached or
+// the session file is at most AutoRebuildMaxBytes; otherwise Skipped is true and
+// nothing was read. An agent, an orchestrator or an automation never gets here
+// (H7): the requester check is the first thing rebuildTarget does.
+func (reg *Registry) RebuildOnOpen(ctx context.Context, runID string, who Requester) Rebuilt {
+	rb, ref, refused, ok := reg.rebuildTarget(runID, who)
+	if !ok {
+		return refused
 	}
-	row, err := reg.storedReadable(runID)
-	if err != nil {
-		return degraded(native.ReasonCannotRebuild, "")
+	probe := rb.Probe(ref)
+	if !probe.Found {
+		return Rebuilt{Skipped: true}
 	}
-	if row.ChatID != 0 && reg.chatHasRunningRun(row.ChatID) {
-		return degraded(native.ReasonSessionInUse, "")
+	if got, hit := reg.rcache.get(runID, probe.Size, probe.ModTime); hit {
+		return got
 	}
-	sk, err := reg.st.GetRunSkeleton(runID)
-	if err != nil || sk.NativeRef == "" {
-		return degraded(native.ReasonCannotRebuild, "no native_ref recorded")
+	if probe.Size > autoRebuildMax {
+		return Rebuilt{Skipped: true}
 	}
-	var ref native.Ref
-	if json.Unmarshal([]byte(sk.NativeRef), &ref) != nil {
-		return degraded(native.ReasonCannotRebuild, "native_ref unreadable")
+	return reg.rebuildCached(ctx, rb, ref, runID, probe)
+}
+
+// rebuildCached serves runID's rebuild from the cache when probe's file identity
+// matches, else rebuilds and caches the result. A hit reads nothing.
+func (reg *Registry) rebuildCached(ctx context.Context, rb *native.Rebuilder, ref native.Ref, runID string, probe native.Probe) Rebuilt {
+	if probe.Found {
+		if got, hit := reg.rcache.get(runID, probe.Size, probe.ModTime); hit {
+			return got
+		}
 	}
-	res := rb.Rebuild(ctx, native.Request{Ref: ref, Requester: who, ExpectedToolCalls: reg.storedToolCalls(runID)})
+	gen := reg.rcache.generation()
+	res := rb.Rebuild(ctx, native.Request{Ref: ref, Requester: RequesterHuman, ExpectedToolCalls: reg.storedToolCalls(runID)})
 	if !res.OK() {
 		return degraded(res.Reason, res.Detail)
 	}
-	return Rebuilt{Events: res.Events, Refs: res.Refs, Detail: res.Detail}
+	out := Rebuilt{Events: res.Events, Refs: res.Refs, Detail: res.Detail}
+	// Client form only: res.raw (the unelided heredoc bodies) never enters the cache.
+	reg.rcache.put(runID, gen, res.FileSize, res.FileModTime, out)
+	return out
 }
 
 // chatHasRunningRun reports whether any run of chatID is running.

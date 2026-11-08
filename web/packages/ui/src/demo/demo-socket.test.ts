@@ -227,6 +227,11 @@ describe("demo socket", () => {
     expect(full.skeletonReason).toBeUndefined();
     expect(full.events).toEqual(logs.events);
 
+    // detail "auto" leaves the rebuild to the server; the demo serves the stored log unchanged
+    const auto = await client.call<{ historySource?: string; skeletonReason?: string; canLoadFull?: boolean; events: RunLogEvent[] }>("run.logs", { runId: "demo-run-retry", detail: "auto" });
+    expect(auto).toMatchObject({ historySource: "skeleton", skeletonReason: "rebuild_not_requested", canLoadFull: true });
+    expect(auto.events).toEqual(logs.events);
+
     // every other finished run keeps its untouched history
     const plain = await client.call<{ historySource?: string }>("run.logs", { runId: "demo-run-test" });
     expect(plain.historySource).toBeUndefined();
