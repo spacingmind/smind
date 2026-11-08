@@ -26,4 +26,6 @@ Last of three PRs from the UX audit (A and B are in `ux-audit-small-fixes.md`). 
 
 ## Validation
 
-(filled in at the end)
+- Web: full vitest (451 files, 5098 tests, includes `src/demo`), `tsc -b` and the UI build pass. All named scenarios exist; mutations on committed code: dropping the draft `move` fails `home_attachments_move_to_the_new_tasks_draft_key`; dropping the effort chip fails `home_effort_chip_renders_and_level_reaches_pending_send` and `home_chip_labels_visible_below_sm`.
+- Frames (isolated daemon, web 1280 and 390, light and dark, luminance and no horizontal overflow asserted): home default, home with an attached file and a typed prompt. Chips read "Claude Code", "Standard", "Accept File Edits" at 390 and wrap onto their own row above attach and send.
+- Not verified: sending the attachment through a real daemon (the move is tested with a stubbed `chat.list`; the task composer's send of those items is the existing path); a long model name at 390; the disabled and attachment-error states in frames; transition frames.
