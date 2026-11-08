@@ -68,6 +68,26 @@ PR1 as built, and what it leaves for later (stated, not hidden):
 - Earlier note: Code facts checked against `internal/taskrunner/permission.go`, `internal/runs/registry.go`, `internal/codex/client.go`,
   `internal/acp`, `internal/inbox`.
 
+## Open items (from review, not in PR1)
+
+- **Protect `smind task approve|deny|answer` from agent shells in the policy engine** (a deterministic deny rule on the command for seats and agents). Today `smind task answer` refuses when `SMIND_RUN_ID` is set, but that is a speed bump: an agent can unset the variable, and the daemon treats an unidentified local connection as a human. `task approve` and `task deny` have the same pre-existing hole.
+- Repeat guard hashes the question text only (a reworded loop passes until the cap of 3 per 10 minutes); refusals for seat, profile, secret and repeat never touch the guard.
+- Text keys of `answers` collide for two questions with identical text (the CLI keys the same way).
+- Secret vocabulary is English only and a heuristic; a secure entry path is a later ADR (D3).
+- The `ask|decline|disabled` literals are repeated in profiles, store and plugins; one shared constant set is a cleanup.
+- Question card nits: an `aria-label` per Other input, a hint saying why Submit is disabled, key the card by request id instead of a reset effect.
+
 ## Validation
 
-Pending implementation.
+PR1 (review round 2 applied). Acceptance criteria, with where each is shown:
+
+- AC1 Claude answer shape pinned: recorded fixtures `internal/taskrunner/testdata/askuserquestion/` and `TestClaudeAnswersInput_GoldenAgainstRecordedShape`, `TestClaudeAnswersInput_UsesTheOriginalLabel`. The probe results are kept under the dogfood directory, not in the repo.
+- AC2 `TestParseClaudeAskUserQuestion_*`, `TestClaudeAdapter_AskUserQuestionAnswerAllowsWithAnswers`.
+- AC3 answer and decline mapping: the same adapter tests plus `TestQuestion_HumanAnswerResolvesAndIsRecorded`.
+- AC4 human only: `TestWsapi_AnswerQuestionIsHumanOnly`, `TestWsapi_QuestionMethodsRefusedForRunScoped`, `TestMCP_NoToolAnswersQuestions`, `TestTaskAnswer_RefusedInsideAnAgentRun`; the open item above states the remaining limit.
+- AC5 unattended: `TestQuestion_TimeoutDeclinesWithNote`, `TestQuestion_NeverAutoAnswers`, `TestQuestion_ProfileDeclineAndDisabled`, `TestQuestion_UnreadableProfileFailsClosed`, `TestQuestion_DisabledProfileDisallowsAskTool`, `TestQuestionNoteTimeout_UsesTheRealDuration`.
+- AC6 secrets: `TestAsksForSecret_Evasions`, `TestQuestion_SecretRefusedNothingRenderedOrStored`, `TestQuestion_StoredAnswerTextIsScrubbed`.
+- AC7 untrusted text: `TestParseClaudeAskUserQuestion_StripsEveryDangerousRange`, caps tests, web `question-card.test.tsx` and e2e `Q-04`.
+- AC8 inbox, web, CLI, MCP: `internal/inbox` question tests, `TestBuildTaskWaitOutput_WaitingQuestion`, `TestTaskAnswer_*`, e2e `Q-01`..`Q-05`.
+- AC12 additive and never silent: `TestEvent_QuestionRoundTripsThroughPersistence`, `TestQuestion_RestartClosesOrphanRequests`, `TestWsapiMethodMapGoldenFleetOff`.
+- Not yet shown: AC9, AC10 (PR2), AC11 (PR4), push and mobile card (PR3).
