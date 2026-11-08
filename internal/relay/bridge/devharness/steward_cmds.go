@@ -60,7 +60,7 @@ func writeFakeFrame(path string, c color.Color) (int64, error) {
 // head that is not the task's, so steward.View reads "head moved". The reply
 // carries "review-id". An optional trailing `axes=<scenario>` makes it a
 // two-axis review (ADR-0054): both-accepted, disagreement, criteria, skipped,
-// blocked-axis, running, partial; the pass rows, their findings and the
+// criteria-many, blocked-axis, running, partial; the pass rows, their findings and the
 // standards-changed hint are written through the store like the verdict is.
 func (h *harness) seedReview(args []string) (map[string]any, error) {
 	if err := need(args, 2, "seed-review <taskId> <ACCEPTED|CHANGES|BLOCKED> [stale]"); err != nil {
@@ -272,7 +272,7 @@ func axisSeedFindings(scenario string) ([]steward.AxisFinding, string) {
 			{SeatFinding: steward.SeatFinding{File: "internal/wsapi/steward_passes.go", Line: 301, Severity: "P3", Check: "read the comment against the code",
 				Why: "A comment states an invariant the code does not enforce."}, Axis: steward.AxisStandards, Rule: ".smind-standards/AGENTS.md: \"comments state what the code does\""},
 		}, "[standards] One rule is not followed. [spec] Every criterion is met."
-	case "criteria":
+	case "criteria", "criteria-many":
 		return []steward.AxisFinding{{SeatFinding: steward.SeatFinding{File: "internal/wsapi/steward.go", Line: 97, Severity: "P1", Check: "go test ./internal/wsapi -run TestTwoAxisE2E_AxisRerunValidation",
 			Why: "An unknown axis name is accepted by steward.review."}, Axis: steward.AxisSpec}}, "[spec] One criterion is not met and one cannot be verified."
 	case "skipped":
@@ -328,15 +328,21 @@ func (h *harness) seedAxes(id int64, scenario string) error {
 			return err
 		}
 		return specAccepted()
-	case "criteria":
+	case "criteria", "criteria-many":
 		if err := stdOK(); err != nil {
 			return err
 		}
-		return verdict(steward.AxisSpec, steward.VerdictChanges, "The re-run path is missing its validation; one criterion cannot be checked from the diff.", []steward.CriterionResult{
+		crit := []steward.CriterionResult{
 			met("AC1", "The inbox item carries axes; TestInbox_ReviewItemCarriesAxesAdditively covers it."),
 			{ID: "AC2", Status: steward.CriterionUnmet, Evidence: "steward.review accepts an unknown axis name without refusing it."},
 			{ID: "AC3", Status: steward.CriterionUnverifiable, Evidence: "Light and dark frames are required but none were captured at this commit."},
-		})
+		}
+		if scenario == "criteria-many" {
+			crit = append(crit,
+				met("AC4", "The CLI prints the AXES block; TestStewardShow_PrintsAxesBlock covers it."),
+				met("AC5", "The web card shows no dollar amount; the cost test covers it."))
+		}
+		return verdict(steward.AxisSpec, steward.VerdictChanges, "The re-run path is missing its validation; one criterion cannot be checked from the diff.", crit)
 	case "skipped":
 		if err := stdOK(); err != nil {
 			return err
