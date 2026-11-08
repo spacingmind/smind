@@ -355,6 +355,24 @@ export const RULES: Record<string, DemoRule> = {
     c.session.notify("chat.created", { chat });
     return chat;
   }),
+  "chat.fork": local((c) => {
+    const parent = c.session.chats.find((x) => x.ID === c.params.chatId) ?? notFound("chat");
+    const mode: "native" | "seeded" = c.params.mode === "seeded" ? "seeded" : "native";
+    const now = c.session.nowIso();
+    const chat: Chat = {
+      ID: c.session.allocChatId(),
+      TaskID: parent.TaskID,
+      Title: `Fork of ${parent.Title}`,
+      Provider: parent.Provider,
+      AgentSession: null,
+      CreatedAt: now,
+      ArchivedAt: null,
+      fork: { parentChatId: parent.ID, forkedAtRunId: String(c.params.atRunId), kind: "fork", mode, lossy: mode === "seeded" },
+    };
+    c.session.chats.push(chat);
+    c.session.notify("chat.created", { chat });
+    return chat;
+  }),
   "chat.rename": local((c) => {
     const chat = c.session.chats.find((x) => x.ID === c.params.id) ?? notFound("chat");
     chat.Title = String(c.params.title ?? chat.Title);
