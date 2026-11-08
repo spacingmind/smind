@@ -711,3 +711,61 @@ func TestSeedReviewAndAudit(t *testing.T) {
 	}
 	p.mustOK("quit")
 }
+
+// TestSeedReviewAxes proves the two-axis scenarios reach a phone over the
+// relay: steward.get carries the passes, the partial marker and the tagged
+// findings, and the inbox item carries its axes with the skip/not-run reasons.
+func TestSeedReviewAxes(t *testing.T) {
+	p := startFake(t)
+	p.mustOK("window 1")
+	p.mustOK("peer-add a")
+	rpc := func(method, params string) map[string]any {
+		return p.mustOK("peer-rpc a " + method + " " + params)["result"].(map[string]any)
+	}
+	seed := func(title, verdict, scenario string) (int64, map[string]any) {
+		task := int64(p.mustOK("seed-run end_turn " + title)["taskId"].(float64))
+		id := int64(p.mustOK("seed-review " + fmtInt(task) + " " + verdict + " axes=" + scenario)["review-id"].(float64))
+		return id, rpc("steward.get", `{"reviewId":`+fmtInt(id)+`}`)
+	}
+	axes := func(v map[string]any) []map[string]any {
+		var out []map[string]any
+		for _, a := range v["axes"].([]any) {
+			out = append(out, a.(map[string]any))
+		}
+		return out
+	}
+
+	_, v := seed("Both task", "ACCEPTED", "both-accepted")
+	if a := axes(v); len(a) != 2 || a[0]["axis"] != "standards" || a[1]["axis"] != "spec" || a[1]["seatVerdict"] != "ACCEPTED" || v["partial"] != nil {
+		t.Fatalf("both-accepted = %v", v)
+	}
+	_, v = seed("Disagree task", "CHANGES", "disagreement")
+	if v["standardsChanged"] != true || len(v["findings"].([]any)) != 2 || v["findings"].([]any)[0].(map[string]any)["axis"] != "standards" {
+		t.Fatalf("disagreement = %v", v)
+	}
+	_, v = seed("Criteria task", "CHANGES", "criteria")
+	if cr := axes(v)[1]["criteria"].([]any); len(cr) != 3 || cr[1].(map[string]any)["status"] != "unmet" {
+		t.Fatalf("criteria = %v", v)
+	}
+	sid, v := seed("Skipped task", "ACCEPTED", "skipped")
+	if a := axes(v)[1]; a["status"] != "skipped" || a["blockedReason"] != "no_spec" {
+		t.Fatalf("skipped = %v", v)
+	}
+	_, v = seed("Partial task", "CHANGES", "partial")
+	if a := axes(v)[1]; v["partial"] != true || a["status"] != "blocked" || a["blockedReason"] != "not_run" {
+		t.Fatalf("partial = %v", v)
+	}
+	var item map[string]any
+	for _, it := range rpc("inbox.list", "{}")["items"].([]any) {
+		if im := it.(map[string]any); im["key"] == "review:"+fmtInt(sid) {
+			item = im
+		}
+	}
+	if item == nil {
+		t.Fatal("no inbox item for the skipped review")
+	}
+	ia := item["axes"].([]any)
+	if len(ia) != 2 || ia[1].(map[string]any)["reason"] != "no_spec" || ia[1].(map[string]any)["status"] != "skipped" {
+		t.Fatalf("inbox item axes = %v", ia)
+	}
+}

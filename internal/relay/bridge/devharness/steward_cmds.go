@@ -58,7 +58,10 @@ func writeFakeFrame(path string, c color.Color) (int64, error) {
 // the task's REAL worktree head (the daemon compares it on every read; a
 // head that differs reads stale and drops out of the inbox). "stale" stores a
 // head that is not the task's, so steward.View reads "head moved". The reply
-// carries "review-id".
+// carries "review-id". An optional trailing `axes=<scenario>` makes it a
+// two-axis review (ADR-0054): both-accepted, disagreement, criteria, skipped,
+// blocked-axis, running, partial; the pass rows, their findings and the
+// standards-changed hint are written through the store like the verdict is.
 func (h *harness) seedReview(args []string) (map[string]any, error) {
 	if err := need(args, 2, "seed-review <taskId> <ACCEPTED|CHANGES|BLOCKED> [stale]"); err != nil {
 		return nil, err
@@ -73,7 +76,15 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 	default:
 		return nil, fmt.Errorf("bad verdict %q (want ACCEPTED|CHANGES|BLOCKED)", verdict)
 	}
-	stale := len(args) > 2 && args[2] == "stale"
+	stale, scenario := false, ""
+	for _, a := range args[2:] {
+		if a == "stale" {
+			stale = true
+		}
+		if v, ok := strings.CutPrefix(a, "axes="); ok {
+			scenario = v
+		}
+	}
 	task, err := h.store.GetTask(taskID)
 	if err != nil {
 		return nil, err
@@ -122,13 +133,18 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 		{ID: "not_stacked", State: steward.GateNA},
 		{ID: "pr_hygiene", State: steward.GatePass, Detail: "title conventional, Validated section present"},
 	}
-	digest, err := json.Marshal(steward.Digest{
+	dg := steward.Digest{
 		V:      1,
 		Task:   steward.TaskInfo{ID: taskID, HeadSHA: head},
 		PR:     &steward.PRSummary{Number: 482, Base: "develop", TitleConventional: true, HasValidated: true},
 		Frames: steward.FramesSection{Dir: dir, Items: items},
 		Gates:  gates,
-	})
+	}
+	if scenario == "disagreement" {
+		dg.Standards = &steward.StandardsSection{BaseRef: strings.Repeat("b", 40), ChangedInDiff: true,
+			Files: []steward.StandardsFile{{Path: "AGENTS.md", ChangedInDiff: true}}}
+	}
+	digest, err := json.Marshal(dg)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +177,17 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 					Check: "Open the review on a 390 px device, scroll to the gates section and confirm the failing gate is the first row, then re-run the frame matrix for the light and dark themes and compare each pair side by side."},
 			}
 		}
-		fj, merr := json.Marshal(append([]steward.SeatFinding{}, findings...))
+		var fj []byte
+		var merr error
+		if scenario != "" {
+			af, sum := axisSeedFindings(scenario)
+			fj, merr = json.Marshal(af)
+			if sum != "" {
+				summary = sum
+			}
+		} else {
+			fj, merr = json.Marshal(append([]steward.SeatFinding{}, findings...))
+		}
 		if merr != nil {
 			return nil, merr
 		}
@@ -173,6 +199,11 @@ func (h *harness) seedReview(args []string) (map[string]any, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if scenario != "" {
+		if err := h.seedAxes(row.ID, scenario); err != nil {
+			return nil, err
+		}
 	}
 	return map[string]any{"review-id": row.ID, "reviewId": row.ID, "taskId": taskID, "verdict": verdict, "stale": stale, "headSha": head}, nil
 }
@@ -228,4 +259,106 @@ func (h *harness) seedAudit(args []string) (map[string]any, error) {
 		last = id
 	}
 	return map[string]any{"taskId": taskID, "rows": n, "lastId": last}, nil
+}
+
+// axisSeedFindings are the tagged findings (and the raw-tag combined summary the
+// daemon writes) of a two-axis scenario.
+func axisSeedFindings(scenario string) ([]steward.AxisFinding, string) {
+	switch scenario {
+	case "disagreement":
+		return []steward.AxisFinding{
+			{SeatFinding: steward.SeatFinding{File: "internal/steward/combine.go", Line: 58, Severity: "P2", Check: "go test ./internal/steward -run TestCombine_NotRun",
+				Why: "New production code has no test for the not_run branch."}, Axis: steward.AxisStandards, Rule: ".smind-standards/AGENTS.md: \"tests for production code\""},
+			{SeatFinding: steward.SeatFinding{File: "internal/wsapi/steward_passes.go", Line: 301, Severity: "P3", Check: "read the comment against the code",
+				Why: "A comment states an invariant the code does not enforce."}, Axis: steward.AxisStandards, Rule: ".smind-standards/AGENTS.md: \"comments state what the code does\""},
+		}, "[standards] One rule is not followed. [spec] Every criterion is met."
+	case "criteria":
+		return []steward.AxisFinding{{SeatFinding: steward.SeatFinding{File: "internal/wsapi/steward.go", Line: 97, Severity: "P1", Check: "go test ./internal/wsapi -run TestTwoAxisE2E_AxisRerunValidation",
+			Why: "An unknown axis name is accepted by steward.review."}, Axis: steward.AxisSpec}}, "[spec] One criterion is not met and one cannot be verified."
+	case "skipped":
+		return []steward.AxisFinding{}, "[standards] Follows the documented standards. [spec] axis spec skipped"
+	case "blocked-axis":
+		return []steward.AxisFinding{}, "[spec] Every criterion is met. [axis standards did not complete (timeout)]"
+	case "partial":
+		return []steward.AxisFinding{}, "[standards] Follows the documented standards. [axis spec did not complete (not_run)]"
+	default:
+		return []steward.AxisFinding{}, "[standards] Follows the documented standards. [spec] Every acceptance criterion is met."
+	}
+}
+
+// seedAxes writes the two pass rows of a two-axis scenario for review id.
+func (h *harness) seedAxes(id int64, scenario string) error {
+	now := time.Now().UTC()
+	pass := func(axis steward.Axis, model string) error {
+		_, err := h.store.InsertStewardReviewPass(store.StewardReviewPass{ReviewID: id, Axis: string(axis), Status: steward.PassRunning, Profile: "steward", Model: model}, now)
+		return err
+	}
+	verdict := func(axis steward.Axis, v, summary string, criteria []steward.CriterionResult) error {
+		cj, err := json.Marshal(criteria)
+		if err != nil {
+			return err
+		}
+		return h.store.SetStewardPassVerdict(id, string(axis), v, summary, "[]", string(cj), 0.3, now)
+	}
+	const haiku, sonnet = "claude-haiku-5-5", "claude-sonnet-5-5"
+	met := func(cid, ev string) steward.CriterionResult {
+		return steward.CriterionResult{ID: cid, Status: steward.CriterionMet, Evidence: ev}
+	}
+	specOK := []steward.CriterionResult{
+		met("AC1", "internal/steward/combine.go implements the min over the axes; TestCombine_MinOverAxes covers it."),
+		met("AC2", "TestTwoAxisOff_ReviewIsByteIdentical pins the flag-off output."),
+	}
+	for _, axis := range []struct {
+		a steward.Axis
+		m string
+	}{{steward.AxisStandards, haiku}, {steward.AxisSpec, sonnet}} {
+		if err := pass(axis.a, axis.m); err != nil {
+			return err
+		}
+	}
+	stdOK := func() error {
+		return verdict(steward.AxisStandards, steward.VerdictAccepted, "Commit messages, naming and layering follow AGENTS.md.", nil)
+	}
+	specAccepted := func() error {
+		return verdict(steward.AxisSpec, steward.VerdictAccepted, "Both acceptance criteria are covered by the diff and its tests.", specOK)
+	}
+	switch scenario {
+	case "disagreement":
+		if err := verdict(steward.AxisStandards, steward.VerdictChanges, "The change adds production code without a test, which AGENTS.md requires.", nil); err != nil {
+			return err
+		}
+		return specAccepted()
+	case "criteria":
+		if err := stdOK(); err != nil {
+			return err
+		}
+		return verdict(steward.AxisSpec, steward.VerdictChanges, "The re-run path is missing its validation; one criterion cannot be checked from the diff.", []steward.CriterionResult{
+			met("AC1", "The inbox item carries axes; TestInbox_ReviewItemCarriesAxesAdditively covers it."),
+			{ID: "AC2", Status: steward.CriterionUnmet, Evidence: "steward.review accepts an unknown axis name without refusing it."},
+			{ID: "AC3", Status: steward.CriterionUnverifiable, Evidence: "Light and dark frames are required but none were captured at this commit."},
+		})
+	case "skipped":
+		if err := stdOK(); err != nil {
+			return err
+		}
+		return h.store.SetStewardPassSkipped(id, string(steward.AxisSpec), "no spec available", now)
+	case "blocked-axis":
+		if err := h.store.SetStewardPassBlocked(id, string(steward.AxisStandards), "timeout", "the steward seat ran out of its wall-clock limit", 0.4, now); err != nil {
+			return err
+		}
+		return specAccepted()
+	case "partial":
+		if err := stdOK(); err != nil {
+			return err
+		}
+		return h.store.SetStewardPassBlocked(id, string(steward.AxisSpec), store.StewardPassNotRun, "not requested: this review re-runs one axis", 0, now)
+	case "running":
+		// The second pass is left running: a state only a stubbed or racing read can see.
+		return stdOK()
+	default: // both-accepted
+		if err := stdOK(); err != nil {
+			return err
+		}
+		return specAccepted()
+	}
 }
