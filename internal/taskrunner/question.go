@@ -115,6 +115,8 @@ const (
 	QuestionResolvedNoHuman      QuestionResolution = "no_human"
 	QuestionResolvedProviderStop QuestionResolution = "provider_cancellation"
 	QuestionResolvedRunEnded     QuestionResolution = "run_ended"
+	// QuestionResolvedDaemonRestart closes a question a restart orphaned.
+	QuestionResolvedDaemonRestart QuestionResolution = "daemon_restart"
 )
 
 // QuestionOutcome is a QuestionDecider's result: the answer to forward to the
@@ -174,6 +176,10 @@ func secretSkeleton(s string) string {
 }
 
 func mentionsSecret(s string) bool { return secretVocab.MatchString(secretSkeleton(s)) }
+
+// MentionsSecret reports whether s matches the secret vocabulary after the
+// same normalisation AsksForSecret uses (for callers deciding what to persist).
+func MentionsSecret(s string) bool { return mentionsSecret(s) }
 
 // AsksForSecret reports whether any header, text, option label or option
 // description of req matches the secret vocabulary after normalisation. The

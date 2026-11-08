@@ -315,22 +315,36 @@ func (reg *Registry) PendingQuestions() []PendingQuestion {
 // questionRedactor scrubs what a human typed before it is kept in run history.
 var questionRedactor = redact.New(nil, nil)
 
-// scrubAnswerForHistory returns ans with its free text passed through the
-// run-event secret redactor. The agent receives the answer verbatim (it is the
-// human's intent); only the stored copy is scrubbed, so a credential typed into
-// a question the secret check did not catch is not kept in history (ADR-0055 §6).
+// answerWithheld replaces stored text that looks like a secret.
+const answerWithheld = "[answer withheld: it looks like a secret]"
+
+// scrubStoredText returns text for run history. Text the secret redactor would
+// change, or that itself matches the secret vocabulary, is NEVER persisted: the
+// whole value is replaced, not partially masked (ADR-0055 §6). Other text is
+// kept.
+func scrubStoredText(text string) string {
+	if text != "" && (questionRedactor.Changed(text) || taskrunner.MentionsSecret(text)) {
+		return answerWithheld
+	}
+	return text
+}
+
+// scrubAnswerForHistory returns ans with its free text and note made safe to
+// store. The agent receives the answer verbatim (it is the human's intent);
+// only the stored copy is withheld, so a credential typed into a question the
+// secret check did not catch is not kept in history.
 func scrubAnswerForHistory(ans taskrunner.QuestionAnswer) taskrunner.QuestionAnswer {
 	out := ans
-	out.Note = questionRedactor.String(ans.Note)
+	out.Note = scrubStoredText(ans.Note)
 	out.Answers = make([]taskrunner.QuestionAnswerItem, len(ans.Answers))
 	for i, it := range ans.Answers {
-		it.Text = questionRedactor.String(it.Text)
+		it.Text = scrubStoredText(it.Text)
 		out.Answers[i] = it
 	}
 	return out
 }
 
-// closeOrphanQuestions appends question_resolved(run_ended) for every question
+// closeOrphanQuestions appends question_resolved(daemon_restart) for every question
 // request of a run the previous process left running that never got a
 // resolution. A parked question lives only in memory, so after a restart it
 // cannot be answered; without this its history row would stay open forever.
@@ -371,7 +385,7 @@ func closeOrphanQuestions(st *store.Store) error {
 			}
 			data, err := encodeEvent(taskrunner.Event{
 				Type:     taskrunner.EventTypeQuestionResolved,
-				Question: &taskrunner.QuestionEvent{RequestID: reqID, Resolution: taskrunner.QuestionResolvedRunEnded},
+				Question: &taskrunner.QuestionEvent{RequestID: reqID, Resolution: taskrunner.QuestionResolvedDaemonRestart},
 			})
 			if err != nil {
 				return err

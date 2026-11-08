@@ -400,8 +400,13 @@ func TestQuestion_StoredAnswerTextIsScrubbed(t *testing.T) {
 	}
 	_, resolved := questionEvents(r)
 	stored := resolved[0].Question.Answer.Answers[0].Text
-	if strings.Contains(stored, "abcdef0123456789") {
-		t.Fatalf("stored history keeps the credential: %q", stored)
+	if stored != answerWithheld {
+		t.Fatalf("stored history keeps a secret-looking answer: %q", stored)
+	}
+	for text, keep := range map[string]bool{"my p\u200bassword is hunter2": false, "Blue": true} {
+		if got := scrubStoredText(text); (got == text) != keep {
+			t.Fatalf("scrubStoredText(%q) = %q", text, got)
+		}
 	}
 }
 
@@ -458,11 +463,11 @@ func TestQuestion_RestartClosesOrphanRequests(t *testing.T) {
 	var resolved []string
 	for _, row := range rows {
 		e, _ := decodeEvent(row.EventData)
-		if e.Type == taskrunner.EventTypeQuestionResolved && e.Question.Resolution == taskrunner.QuestionResolvedRunEnded {
+		if e.Type == taskrunner.EventTypeQuestionResolved && e.Question.Resolution == taskrunner.QuestionResolvedDaemonRestart {
 			resolved = append(resolved, e.Question.RequestID)
 		}
 	}
 	if len(resolved) != 1 || resolved[0] != "open" {
-		t.Fatalf("run_ended resolutions = %v, want only the open request", resolved)
+		t.Fatalf("daemon_restart resolutions = %v, want only the open request", resolved)
 	}
 }

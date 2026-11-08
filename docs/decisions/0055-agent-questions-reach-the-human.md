@@ -72,7 +72,7 @@ request over the caps in count (more than 4 questions, a form with unsupported p
 ### 2. Wire and storage (additive)
 
 - Events (ADR-0008 style, new types, unknown to old clients and ignored by them per ADR-0010): `question_request` {requestId, source, blocking, questions, truncated} and
-  `question_resolved` {requestId, resolution: `human` | `declined` | `timeout` | `refused_secret` | `refused_unsupported` | `provider_cancellation` | `run_ended`, answers
+  `question_resolved` {requestId, resolution: `human` | `declined` | `timeout` | `refused_secret` | `refused_unsupported` | `provider_cancellation` | `run_ended` | `daemon_restart`, answers
   summary}. The stored `question_resolved` keeps the **chosen option ids and free text** for a non-secret question (the history is the audit; the model also has the text in
   its own transcript) and never for a refused one.
 - RPC `run.answerQuestion {runId, requestId, action, answers[], note?}` and read-only `run.pendingQuestions` (or the question requests folded into the existing pending
