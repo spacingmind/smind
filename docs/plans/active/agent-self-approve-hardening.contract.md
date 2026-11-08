@@ -1,6 +1,6 @@
 ---
 v: 1
-milestone: "Agents must not answer their own requests: the CLI refuses human-only commands in agent runs, and a compiled-in no-self-approve floor rule denies them in an agent's shell"
+milestone: "Agent self-approval hardening: CLI refusal in agent runs + no-self-approve floor rule"
 base: origin/develop
 planRef: docs/plans/active/agent-self-approve-hardening.md
 acs:
