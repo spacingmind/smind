@@ -11,6 +11,7 @@ import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { useAttachmentDrop } from "@/components/composer/use-attachment-drop";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
+import { ForkChatDialog } from "@/components/fork-chat-dialog";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
@@ -30,11 +31,13 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
+import { NoticeBanner } from "@/components/ui/notice-banner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { useLiveTask } from "@/hooks/use-live-task";
 import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
+import { useForkChat } from "@/hooks/use-fork-chat";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { canRetryWithHigherEffort, useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
@@ -85,6 +88,8 @@ export function TaskDetailPane({
   onOpenDiffTab,
   onOpenFilesTab,
   onJumpToTask,
+  onOpenForkedChat,
+  parentChat,
 }: {
   client: WsClientLike | null;
   task: Task;
@@ -108,6 +113,10 @@ export function TaskDetailPane({
   onOpenFilesTab?: () => void;
   /** Selects another task (the lineage strip's parent/child jump targets). Optional: without it the strip renders but isn't click-through. */
   onJumpToTask?: (taskId: number) => void;
+  /** Opens a chat.fork result as its own tab (App.tsx's openChatTab); without it a successful fork only lands via the chat list. */
+  onOpenForkedChat?: (chat: Chat) => void;
+  /** The chat this one branched off (chat.fork.parentChatId looked up in the task's chats); the fork banner names it. */
+  parentChat?: Chat | null;
 }) {
   // Worktree setup state changes after the task was selected (ADR-0024), so
   // follow the task's own update events instead of the selection snapshot.
@@ -329,6 +338,13 @@ export function TaskDetailPane({
     setPrefill((prev) => ({ text: run.prompt, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
 
+  // "Fork from here": the run whose turn the dialog targets (null = closed).
+  // Like the hover actions above, the callback is stable so RunTimeline's
+  // memo keeps bailing out; only this pane's state opens the dialog.
+  const [forkRunId, setForkRunId] = useState<string | null>(null);
+  const { fork: forkChat } = useForkChat(client, task.ID);
+  const forkRun = useCallback((run: RunEntry) => setForkRunId(run.id), []);
+
   // ADR-0041 F2: the rate-limited footer's way out and the failed-run <-> successor links.
   const failoverIndex = useRunFailoverIndex(
     client,
@@ -456,6 +472,12 @@ export function TaskDetailPane({
       />
 
       <UntrustedBanner task={task} onTask={applyTask} />
+      {chat.fork && (
+        <NoticeBanner tone="info" testId="chat-fork-banner">
+          Forked from {parentChat?.Title || "another chat"} at an earlier turn.
+          {chat.fork.lossy && " The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning."}
+        </NoticeBanner>
+      )}
       <SetupDetails client={client} task={task} onTask={applyTask} />
 
       {connectionStatus === "reconnecting" && (
@@ -503,6 +525,7 @@ export function TaskDetailPane({
                     onOpenFile={openFile}
                     onRetry={canRetryWithHigherEffort(run, providers) ? retryWithHigherEffort : undefined}
                     onRerun={rerun}
+                    onFork={forkRun}
                     onEditPrompt={editPrompt}
                     onContinue={continueRun}
                     failover={failover}
@@ -612,6 +635,23 @@ export function TaskDetailPane({
         otherRunningChat={otherRunningChat}
         onJumpToChat={onJumpToChat}
         configOptions={{ options: configOptions.options, error: configOptions.error, onSetOption: configOptions.setOption }}
+      />
+
+      {/*
+       * The "Fork from here" confirm, opened by a finished turn's action.
+       * A successful fork's tab opens via onOpenForkedChat (App.tsx's
+       * openChatTab); the chat itself lands in the pane's list through the
+       * chat.created event useTaskChats already applies.
+       */}
+      <ForkChatDialog
+        open={forkRunId !== null}
+        onOpenChange={(open) => {
+          if (!open) setForkRunId(null);
+        }}
+        chatTitle={chat.Title}
+        runId={forkRunId ?? ""}
+        onFork={(mode) => forkChat(chat.ID, forkRunId!, mode)}
+        onForked={onOpenForkedChat}
       />
     </div>
   );

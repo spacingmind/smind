@@ -2759,6 +2759,10 @@ function TabContent({
     otherRunningChatId !== undefined
       ? { id: otherRunningChatId, title: (chats ?? []).find((c) => c.ID === otherRunningChatId)?.Title || "Chat" }
       : null;
+  // The fork banner names the chat this one branched off; the parent may
+  // not (yet) be in the task's list -- the banner falls back to "another chat".
+  const forkMeta = chat?.fork;
+  const parentChat = forkMeta ? (chats ?? []).find((c) => c.ID === forkMeta.parentChatId) : undefined;
 
   const renderers: Record<TabKind, React.ReactNode> = {
     chat: chat ? (
@@ -2775,6 +2779,8 @@ function TabContent({
         onOpenDiffTab={onRevealInDiff}
         onOpenFilesTab={onOpenFilesTab}
         onJumpToTask={onJumpToTask}
+        parentChat={parentChat ?? null}
+        onOpenForkedChat={(forked) => onOpenChat(forked.ID)}
       />
     ) : null,
     files: (

@@ -36,7 +36,8 @@ export function ForkChatDialog({
   /** The turn to fork at -- also what resets the fallback offer when the target changes. */
   runId: string;
   onFork: (mode: ForkMode) => Promise<Chat>;
-  onForked: (chat: Chat) => void;
+  /** Called with the new chat on success (open its tab); optional so a bare pane can still fork. */
+  onForked?: (chat: Chat) => void;
 }) {
   const action = useConfirmAction(open);
   const [unavailable, setUnavailable] = useState<ForkUnavailable | null>(null);
@@ -86,7 +87,7 @@ export function ForkChatDialog({
         await action.run(async () => {
           const chat = await attempt(unavailable ? "seeded" : "native");
           if (chat) {
-            onForked(chat);
+            onForked?.(chat);
             onOpenChange(false);
           }
         });
