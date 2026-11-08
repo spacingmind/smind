@@ -16,6 +16,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
@@ -76,6 +77,11 @@ func buildSmind(t *testing.T) string {
 }
 
 func TestMain(m *testing.M) {
+	// The tests may run inside an agent run, whose markers would make run()
+	// refuse the human-only commands they exercise; tests that want a marker
+	// set it themselves.
+	_ = os.Unsetenv(taskrunner.AgentRunEnv)
+	_ = os.Unsetenv(taskrunner.RunIDEnv)
 	cleanupHome := isolateProcessHome()
 	code := m.Run()
 	if smindBinDir != "" {

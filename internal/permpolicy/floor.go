@@ -17,6 +17,7 @@ var floorReasons = map[string]string{
 	"no-curl-sh":             "downloaded code must not run unreviewed",
 	"no-real-home-tests":     "tests must run against a temporary HOME, not the real one",
 	"no-add-all":             "stage named files, never the whole tree",
+	"no-self-approve":        "an agent must not answer, approve or deny its own requests",
 }
 
 func floorHit(id string) (FloorHit, bool) {
@@ -43,8 +44,14 @@ func CheckFloor(req Request, p Parsed) (FloorHit, bool) {
 	if curlShell(segs) {
 		return floorHit("no-curl-sh")
 	}
+	if (namesHumanOnlyRPC(req.Command) && hasTransport(segs)) || shellFedHumanOnly(segs, req.Command) {
+		return floorHit("no-self-approve")
+	}
 	for _, seg := range p.Segments {
 		fs := newFloorSeg(req, seg, cwd)
+		if h, ok := fs.selfApproveRules(); ok {
+			return h, true
+		}
 		if h, ok := fs.gitRules(); ok {
 			return h, true
 		}
@@ -95,8 +102,12 @@ func (fs *floorSeg) unwrap() {
 		switch name {
 		case "env":
 			rest = fs.unwrapEnv(rest)
-		case "command", "nohup", "time", "builtin":
+		case "command", "nohup", "time", "builtin", "setsid", "stdbuf", "ionice":
 			rest = skipFlags(rest, nil)
+		case "then", "do", "else", "elif", "if", "while", "until", "!", "{", "coproc":
+			// A compound command's keyword ahead of its first command.
+		case "watch":
+			rest = skipFlags(rest, map[string]bool{"-n": true, "-d": true})
 		case "exec":
 			rest = skipFlags(rest, map[string]bool{"-a": true})
 		case "nice":

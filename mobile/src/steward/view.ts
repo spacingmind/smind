@@ -126,6 +126,8 @@ export function blockedReasonLabel(reason: string | undefined): string {
       return 'Cancelled';
     case 'scope_violation':
       return 'Scope violation';
+    case 'base_unresolved':
+      return 'Base commit not found';
     case 'not_run':
       return 'Not run';
     case 'no_spec':
