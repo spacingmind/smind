@@ -250,3 +250,32 @@ func TestRebuildCacheDropsAPutThatRacedAnInvalidate(t *testing.T) {
 		t.Fatal("a pruned run's rebuild was cached")
 	}
 }
+
+// The events a reader gets share nothing with the cache: a scribbled element or
+// a raw JSON byte does not show up in the next read; an event with a pointer or
+// slice payload is never cached.
+func TestRebuildCacheEventsAreDeepCopies(t *testing.T) {
+	var c rebuildCache
+	c.setBudget(1 << 20)
+	in := []Event{{Type: taskrunner.EventTypeToolCall, Text: "t", ToolInput: json.RawMessage(`{"a":1}`), ToolResult: json.RawMessage(`"ok"`), RawPayload: json.RawMessage(`{"k":1}`)}}
+	c.put("a", c.generation(), 1, 1, Rebuilt{Events: in})
+	in[0].ToolInput[2] = 'Z' // the producer's own bytes
+	first, _ := c.get("a", 1, 1)
+	if string(first.Events[0].ToolInput) != `{"a":1}` {
+		t.Fatalf("put kept the producer's bytes: %s", first.Events[0].ToolInput)
+	}
+	first.Events[0].Text = "scribble"
+	first.Events[0].ToolInput[2] = 'Y'
+	first.Events[0].ToolResult[1] = 'Y'
+	first.Events[0].RawPayload[2] = 'Y'
+	again, _ := c.get("a", 1, 1)
+	e := again.Events[0]
+	if e.Text != "t" || string(e.ToolInput) != `{"a":1}` || string(e.ToolResult) != `"ok"` || string(e.RawPayload) != `{"k":1}` {
+		t.Fatalf("a reader changed the cached history: %+v", e)
+	}
+	// an event that carries pointers is served uncached
+	c.put("b", c.generation(), 1, 1, Rebuilt{Events: []Event{{Type: taskrunner.EventTypeUsage, Usage: &taskrunner.Usage{}}}})
+	if _, ok := c.get("b", 1, 1); ok {
+		t.Fatal("an event with a pointer payload was cached")
+	}
+}

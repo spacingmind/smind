@@ -2,6 +2,7 @@ package runs
 
 import (
 	"container/list"
+	"encoding/json"
 	"sync"
 
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -84,7 +85,7 @@ func (c *rebuildCache) get(runID string, size, mod int64) (Rebuilt, bool) {
 	}
 	c.lru.MoveToFront(el)
 	c.hits++
-	return Rebuilt{Events: append([]Event(nil), e.events...), Refs: copyRefs(e.refs), Detail: e.detail}, true
+	return Rebuilt{Events: cloneEvents(e.events), Refs: copyRefs(e.refs), Detail: e.detail}, true
 }
 
 // put stores a successful rebuild. A history bigger than the whole budget is not
@@ -99,13 +100,13 @@ func (c *rebuildCache) put(runID string, gen, size, mod int64, r Rebuilt) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
-	if c.budget <= 0 || est > c.budget || gen != c.gen {
+	if c.budget <= 0 || est > c.budget || gen != c.gen || !cacheable(r.Events) {
 		return
 	}
 	if el, ok := c.items[runID]; ok {
 		c.removeLocked(el)
 	}
-	e := &rebuildEntry{runID: runID, size: size, mod: mod, events: append([]Event(nil), r.Events...), refs: copyRefs(r.Refs), detail: r.Detail, estimate: est}
+	e := &rebuildEntry{runID: runID, size: size, mod: mod, events: cloneEvents(r.Events), refs: copyRefs(r.Refs), detail: r.Detail, estimate: est}
 	c.items[runID] = c.lru.PushFront(e)
 	c.bytes += est
 	c.evictLocked()
@@ -126,6 +127,43 @@ func (c *rebuildCache) generation() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.gen
+}
+
+// cacheable reports whether every event is of the shape a rebuilder produces:
+// text, thinking and tool calls, whose only reference fields are raw JSON bytes.
+// An event with a pointer or slice payload (usage, permissions, mcp servers) is
+// not cached, so a deep copy never has to chase nested pointers.
+func cacheable(in []Event) bool {
+	for _, e := range in {
+		if e.Usage != nil || e.RateLimit != nil || e.PermissionDetail != nil || len(e.PermissionOptions) > 0 || len(e.McpServers) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// cloneEvents copies events so the cache and its readers share no memory: the
+// raw JSON bytes are copied (a shallow slice copy would share them). No consumer
+// mutates an Event in place today (MergeRebuilt and the wire conversion copy and
+// read); the copy keeps it that way. Raw, the provider's native value, is dropped
+// as everywhere a history is retained. Only cacheable events are cloned.
+func cloneEvents(in []Event) []Event {
+	out := make([]Event, len(in))
+	for i, e := range in {
+		e.Raw = nil
+		e.ToolInput = cloneRaw(e.ToolInput)
+		e.ToolResult = cloneRaw(e.ToolResult)
+		e.RawPayload = cloneRaw(e.RawPayload)
+		out[i] = e
+	}
+	return out
+}
+
+func cloneRaw(in json.RawMessage) json.RawMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), in...)
 }
 
 // copyRefs gives each reader its own map and slices: the cache's copy is never shared.
