@@ -13,6 +13,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -136,6 +137,7 @@ func main() {
 }
 
 func handle(msg message, sessionCwd *string) {
+	logMethod(msg.Method)
 	switch {
 	case msg.Method == "initialize":
 		caps := map[string]any{
@@ -225,6 +227,9 @@ func handle(msg message, sessionCwd *string) {
 		}
 		recordMcpServers(params.McpServers)
 		*sessionCwd = params.Cwd
+		if msg.Method == "session/load" {
+			replaySession()
+		}
 		respond(msg.ID, map[string]any{
 			"configOptions": []map[string]any{{
 				"configId":     "thinking-level",
@@ -272,6 +277,46 @@ func recordMcpServers(raw json.RawMessage) {
 		raw = json.RawMessage("[]")
 	}
 	lastMcpServers = append([]byte(nil), raw...)
+}
+
+// replaySession emits the session/update objects listed in the JSON file
+// at FAKEAGENT_REPLAY (an array of update payloads, same shape as the
+// update field of a session/update notification), in order -- mimicking
+// the history replay a real agent streams on session/load. Off unless the
+// env var is set.
+func replaySession() {
+	p := os.Getenv("FAKEAGENT_REPLAY")
+	if p == "" {
+		return
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var updates []map[string]any
+	if json.Unmarshal(data, &updates) != nil {
+		return
+	}
+	for _, u := range updates {
+		sessionUpdate(u)
+	}
+}
+
+// logMethod appends one line per received JSON-RPC request method name to
+// the file at FAKEAGENT_METHOD_LOG, so tests can assert exactly which
+// methods the client sent. Off unless the env var is set; responses to
+// the agent's own requests carry no method and are skipped.
+func logMethod(method string) {
+	p := os.Getenv("FAKEAGENT_METHOD_LOG")
+	if p == "" || method == "" {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintln(f, method)
 }
 
 func sessionUpdate(update map[string]any) {
