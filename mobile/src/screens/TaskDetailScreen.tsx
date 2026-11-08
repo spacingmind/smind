@@ -358,7 +358,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
           attachRun(latest.ID, () => cancelled, lineAttachmentsFromRun(latest));
         } else {
           // A finished run: one run.logs fetch, the full transcript.
-          const logs = (await conn.call('run.logs', { runId: latest.ID })) as RunLogsResult;
+          const logs = (await conn.call('run.logs', { runId: latest.ID, detail: 'auto' })) as RunLogsResult;
           if (cancelled) return;
           setHistory(historySourceInfo(logs));
           board.applyLogEvents(latest.ID, logs.events ?? []);
