@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -14,8 +15,9 @@ import (
 // (ADR-0047 §9): a review is advice for the Human, who reads it and merges.
 const cmdStewardUsage = `usage: smind steward <command>
 
-  smind steward review <taskId> [--sha <40 hex>] [--json]
+  smind steward review <taskId> [--sha <40 hex>] [--axis standards|spec] [--json]
                                     ask for a read-only review of the task's head commit (or the given sha)
+                                    --axis re-runs only the named pass; the other axis is reported as not run and the review can never be accepted
   smind steward list [<taskId>] [--limit N] [--json]
                                     the reviews, newest first, optionally one task's only
   smind steward show <reviewId> [--json]
@@ -44,11 +46,27 @@ func runSteward(args []string, env stewardIO) int {
 	sub, rest := args[0], args[1:]
 	asJSON, sha := false, ""
 	var limit int64
+	var axes []string
 	var pos []string
 	for i := 0; i < len(rest); i++ {
 		switch a := rest[i]; a {
 		case "--json":
 			asJSON = true
+		case "--axis":
+			i++
+			if i >= len(rest) {
+				fmt.Fprintln(env.errOut, "steward: --axis needs standards or spec")
+				return 2
+			}
+			switch rest[i] {
+			case "standards", "spec":
+			default:
+				fmt.Fprintf(env.errOut, "steward: invalid axis %q (want standards or spec)\n", rest[i])
+				return 2
+			}
+			if !slices.Contains(axes, rest[i]) {
+				axes = append(axes, rest[i])
+			}
 		case "--sha":
 			i++
 			if i >= len(rest) {
@@ -126,13 +144,16 @@ func runSteward(args []string, env stewardIO) int {
 			}
 			params["commitSha"] = sha
 		}
+		if len(axes) > 0 {
+			params["axes"] = axes
+		}
 		res, code := call("steward.review", params)
 		if code != 0 {
 			return code
 		}
 		line(res)
 	case "list":
-		if len(pos) > 1 || sha != "" {
+		if len(pos) > 1 || sha != "" || len(axes) > 0 {
 			return usage()
 		}
 		params := map[string]any{}
@@ -163,7 +184,7 @@ func runSteward(args []string, env stewardIO) int {
 			fmt.Fprintln(env.out, stewardLine(m))
 		}
 	case "show", "cancel":
-		if len(pos) != 1 || sha != "" || limit > 0 {
+		if len(pos) != 1 || sha != "" || limit > 0 || len(axes) > 0 {
 			return usage()
 		}
 		rid, ok := idArg(pos[0], "reviewId")
