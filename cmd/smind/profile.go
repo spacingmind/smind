@@ -14,7 +14,7 @@ import (
 
 const cmdProfileSeedUsage = "usage: smind profile seed roles"
 
-const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--notes=<text>] [--orchestration-tools=true|false] [--instructions=<text>] [--instructions-file=<path>] [--skills=a,b] [--child-policy=none|leaf|profiles] [--child-profiles=1,2]"
+const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--questions=<ask|decline|disabled>] [--notes=<text>] [--orchestration-tools=true|false] [--instructions=<text>] [--instructions-file=<path>] [--skills=a,b] [--child-policy=none|leaf|profiles] [--child-profiles=1,2]"
 
 const cmdProfileEditUsage = "usage: smind profile edit <id> [--name=..] [--provider=..] [every `profile add` flag]"
 
@@ -46,6 +46,7 @@ func cmdProfile(args []string) int {
 // accepts `--auto-accept`, `--auto-accept=true`, and `--auto-accept=false`.
 type profileFlags struct {
 	mode, thinkingLevel, model, notes, onRateLimit string
+	questions                                      string
 	instructions, instructionsFile, skills         string
 	childPolicy, childProfiles, name, provider     string
 	fallbackProfile                                *int64
@@ -113,6 +114,8 @@ func parseProfileFlags(cmd string, args []string, allowRename bool) (profileFlag
 			f.model = value
 		case "--on-rate-limit":
 			f.onRateLimit = value
+		case "--questions":
+			f.questions = value
 		case "--fallback-profile":
 			id, err := parseInt64(value)
 			if err != nil {
@@ -227,6 +230,9 @@ func cmdProfileAdd(args []string) int {
 	if flags.onRateLimit != "" {
 		params["onRateLimit"] = flags.onRateLimit
 	}
+	if flags.questions != "" {
+		params["questions"] = flags.questions
+	}
 	if flags.fallbackProfile != nil {
 		params["fallbackProfileId"] = *flags.fallbackProfile
 	}
@@ -319,7 +325,7 @@ func cmdProfileEdit(args []string) int {
 		"id":   id,
 		"name": current.Name, "provider": current.Provider, "permissionMode": current.PermissionMode,
 		"autoAccept": current.AutoAccept, "thinkingLevel": current.ThinkingLevel, "model": current.Model,
-		"notes": current.Notes, "onRateLimit": current.OnRateLimit,
+		"notes": current.Notes, "onRateLimit": current.OnRateLimit, "questions": current.Questions,
 		"orchestrationTools": current.OrchestrationTools, "instructions": current.Instructions,
 		"skills": skills, "childPolicy": current.ChildPolicy, "childProfileIds": currentChildIDs,
 	}
@@ -349,6 +355,9 @@ func cmdProfileEdit(args []string) int {
 	}
 	if flags.set["--on-rate-limit"] {
 		params["onRateLimit"] = flags.onRateLimit
+	}
+	if flags.set["--questions"] {
+		params["questions"] = flags.questions
 	}
 	if flags.fallbackSet {
 		if flags.fallbackRaw == 0 {
@@ -406,9 +415,9 @@ func cmdProfileList(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING\tMODEL\tON-RATE-LIMIT\tROLE\tOWNER")
+	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING\tMODEL\tON-RATE-LIMIT\tQUESTIONS\tROLE\tOWNER")
 	for _, p := range profiles {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model, profileRateLimitColumn(p), profileRole(p), ownerColumn(p.Owner))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model, profileRateLimitColumn(p), profileQuestionsColumn(p), profileRole(p), ownerColumn(p.Owner))
 	}
 	tw.Flush()
 	return 0
@@ -439,6 +448,15 @@ func profileRateLimitColumn(p store.AgentProfile) string {
 		}
 	}
 	return p.OnRateLimit
+}
+
+// profileQuestionsColumn renders what a run of the profile does with an agent's
+// question to the human (ADR-0055): "ask" (also when unset), "decline" or "disabled".
+func profileQuestionsColumn(p store.AgentProfile) string {
+	if p.Questions == "" {
+		return "ask"
+	}
+	return p.Questions
 }
 
 // profileRole derives the display label for a profile's seat (ADR-0041): a
@@ -525,7 +543,7 @@ func cmdProfileSeed(args []string) int {
 	create := func(p store.AgentProfile) (store.AgentProfile, error) {
 		params := map[string]any{
 			"name": p.Name, "provider": p.Provider, "permissionMode": p.PermissionMode, "autoAccept": p.AutoAccept,
-			"thinkingLevel": p.ThinkingLevel, "model": p.Model, "notes": p.Notes, "onRateLimit": p.OnRateLimit,
+			"thinkingLevel": p.ThinkingLevel, "model": p.Model, "notes": p.Notes, "onRateLimit": p.OnRateLimit, "questions": p.Questions,
 			"orchestrationTools": p.OrchestrationTools, "instructions": p.Instructions, "skills": p.Skills,
 			"childPolicy": p.ChildPolicy, "childProfileIds": p.ChildProfileIDs,
 		}
