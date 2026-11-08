@@ -333,12 +333,14 @@ func (s *Service) derive() ([]Item, error) {
 // runFailedItem is the inbox row of a failed run, or false when the class has
 // none: cli_exited keeps the footer's Continue, a transient_429 whose retry is
 // still queued is not yet a problem, and an unknown class is not guessed at.
-// A human-fix class (auth_expired, model_not_in_plan) is high: only a person
-// can fix it. The key and CreatedAt come from the run, so reads are stable.
+// A human-fix class (auth_expired, model_not_in_plan, context_window_exceeded,
+// session_budget_exceeded, too_many_denials) is high: only a person can fix
+// it. The key and CreatedAt come from the run, so reads are stable.
 func runFailedItem(fr FailedRun, title string) (Item, bool) {
 	attention := "normal"
 	switch fr.Kind {
-	case failure.KindAuthExpired, failure.KindModelNotInPlan:
+	case failure.KindAuthExpired, failure.KindModelNotInPlan,
+		failure.KindContextWindowExceeded, failure.KindSessionBudgetExceeded, failure.KindTooManyDenials:
 		attention = "high"
 	case failure.KindPlanWindowExhausted, failure.KindRateLimited:
 	case failure.KindTransient429:

@@ -39,6 +39,18 @@ The loop:
                            profile (action auto_retry / retry_now).
      rate_limited          a limit of unknown kind: retry after a short wait;
                            do not assume the plan is exhausted.
+     context_window_exceeded the conversation no longer fits the model's
+                           context window: a human must start a fresh chat for
+                           the task; do not retry the same chat, do not fall
+                           back (action new_chat).
+     session_budget_exceeded the provider's own session budget is used up (not
+                           smind's tree budget): a human raises it in the
+                           provider's settings or starts a fresh chat; do not
+                           retry, do not fall back (action raise_budget).
+     too_many_denials      the provider stopped the run after too many denied
+                           actions: a human must review the permission policy;
+                           do not retry the same run, do not widen permissions
+                           from inside the run (action review_policy).
      cli_exited            the CLI died; its session is stored: send
                            "continue".
    task wait exits 6 for the limit classes and 7 when a human must fix setup.

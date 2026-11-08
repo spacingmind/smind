@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
 
@@ -88,6 +89,13 @@ func TestRenderWaitSummary(t *testing.T) {
 	er := renderWaitSummary(runSummaryRow{ID: "x", Status: "error", Err: "boom"}, "text", time.Now())
 	if lines := strings.Split(er, "\n"); lines[len(lines)-1] != "error: boom" {
 		t.Errorf("error row last line: %q", er)
+	}
+
+	ctx := renderWaitSummary(runSummaryRow{ID: "x", Status: "error", Err: "prompt is too long", FailureKind: "context_window_exceeded"}, "", time.Now())
+	for _, w := range []string{"context window exceeded", failure.Guidance("context_window_exceeded")} {
+		if !strings.Contains(ctx, w) {
+			t.Errorf("context-window row %q missing %q", ctx, w)
+		}
 	}
 
 	long := renderWaitSummary(runSummaryRow{ID: "x", Status: "done"}, strings.Repeat("é", 1000), time.Now())
