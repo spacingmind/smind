@@ -46,7 +46,7 @@ operation with its own record). They share one anchor, the **turn**, which is a 
   history. Archiving the parent does not touch the child.
 - `runs.tree_before TEXT`, `runs.tree_after TEXT`: git tree object ids of the worktree's contents at the start and end of the turn (§4). `''` = not captured.
 - `turn_undos (run_id, undone_at, actor, files_json, outcome)` for audit and to refuse a second undo.
-- No backfill: turns before the migration have no record and show no undo. No compatibility shim (no installed base, `feedback_no_users_breaking_ok`).
+- No backfill: turns before the migration have no record and show no undo. No compatibility shim (no installed base).
 
 ### 2. Fork
 
@@ -110,7 +110,7 @@ person committed after the turn, `head_moved` refuses: they revert with git, whi
   banner; chat tabs show the fork parent. **Mobile:** the same actions in the turn's action sheet, narrow style. **CLI:** `smind chat fork <chatId> --at <runId>`,
   `smind task retry <chatId> <runId> [--prompt ...]`, `smind turn undo <runId> [--dry-run]`.
 - Inbox/notifications: none. These are human actions, never an agent's: all three RPCs are refused to run-scoped connections and are not MCP tools (a handler-map test, as for the
-  other human-only methods; see ADR-0056 for what "human" means on the socket).
+  other human-only methods; ADR-0056, Proposed, covers what "human" means on the socket).
 - Light and dark frames for each state on web and mobile are part of the UI PRs.
 
 ### 6. Failure modes
