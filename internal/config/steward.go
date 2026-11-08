@@ -14,6 +14,9 @@ type StewardConfig struct {
 	Policy StewardPolicyConfig `yaml:"policy"`
 	// Enabled is the review engine's switch. Off by default.
 	Enabled bool `yaml:"enabled"`
+	// TwoAxis runs a review as two independent seat passes, Standards and Spec
+	// (ADR-0054). Off by default: off is today's single run, unchanged.
+	TwoAxis bool `yaml:"twoAxis"`
 	// AutoReview lists workspace titles whose tasks are reviewed without a
 	// human asking (exact match, like learning_mode's workspaces).
 	AutoReview []string `yaml:"autoReview"`

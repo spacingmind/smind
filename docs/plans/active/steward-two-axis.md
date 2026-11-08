@@ -82,9 +82,23 @@ Eleven decisions D1–D11 with recommendations are in the ADR ("Decisions for th
 ## Progress
 
 - 2026-11-08 Phase 1: ADR-0054 (Proposed) and this spec, docs only. Implementation does not start until the decisions are answered.
+- 2026-11-08 Decisions D1-D11 accepted. P1 implemented (schema + combine, daemon, flag off). Deviations from the spec text, decided while building:
+  - AC5 is met with parallel types, not by editing the single-pass ones: `AxisVerdict`/`AxisFinding`/`CriterionResult` and `AxisSchemaCaps`/`AxisArrayCaps`. The single-pass seat's tool schema is built from `SeatVerdict`, `SchemaCaps` and `ArrayCaps`, so adding fields there would change what a flag-off seat sees; `TestSeatVerdict_SchemaCapsCoverNewFields` pins that they stay unchanged. P2 builds the two-axis seat's tool schema from the new types.
+  - ADR §4's "`CheckSeatVerdict` gains an axis argument" is implemented as `CheckAxisVerdict` over the parallel types, on purpose (same reason as AC5).
+  - No pass produced a verdict (both failed, or one failed and the other skipped) is `BLOCKED` with the first failed pass's reason, `crashed` as the fallback when none carries one.
+  - A pass blocked with `scope_violation` blocks the whole review at once (reason `scope_violation`, the review's scope-violation flag set, no wait for the other pass); `TestCombine_ScopeViolationBlocksWholeReview`, `TestPassVerdict_ScopeViolationBlocksWholeReview`, `TestPassVerdict_ScopeViolationDoesNotWaitForTheOtherPass`.
+  - The axis and pass-status strings live once, in `internal/store`; `internal/steward` aliases them and has a named `Axis` type.
+  - `View.findings[]` is now `[]AxisFinding` (the seat's finding plus optional `axis`, `rule`), JSON-identical for a single-pass review (golden).
+  - `Digest.Spec` carries only `criteria[]` in P1 (the verdict path needs the ids); P2 fills the rest of the section. `steward.twoAxis` exists in config; nothing reads it yet because nothing starts a pass.
+  - A Spec `ACCEPTED` needs at least one criterion to judge, `WritePassSkipped` is spec-only and refused while criteria exist, and `SubmitVerdict` (single-pass) is refused on a review that has pass rows (found by the independent review). P2 relaxes the "at least one criterion" rule only if it adds a `spec.sources` field that says the spec exists but has no parseable criteria.
 
 ## Validation
 
 Phase 1 is docs only: no tests apply. Checked: ADR number 0054 is the next free on `origin/develop` and in open PRs; every code reference in the ADR's Context section exists on `origin/develop`
 (`internal/steward/{clamp,verdict,prompt,watch,rails,digest}.go`, `internal/wsapi/steward_seat.go`, `internal/profiles/rolepack.go`, `internal/store/schema.sql`, the web card, the mobile screen,
 `cmd/smind/steward.go`); every ADR cited (0037, 0039, 0041, 0045, 0047) exists; each acceptance criterion has a named test or a stated manual check.
+
+### P1 (2026-11-08)
+
+Tests: every P1 test in the list above, plus `TestCombine_SkippedAndOpenPasses`, `TestPassVerdict_*` (both accepted, axes disagree, gate clamps, failed axis never accepted, both failed blocked, skipped spec, incomplete and held verdicts consume nothing), `TestPassSkipped_OnlySpecAndOnlyWithoutCriteria`, `TestSeatVerdict_SpecAcceptedNeedsCriteriaToJudge`, `TestSubmitVerdict_RefusedOnTwoAxisReview`, `TestStewardConfig_TwoAxisDefaultsOffAndReadsYAML`. `TestTwoAxisOff_ReviewIsByteIdentical` is a golden generated on the code before the change (its own first commit).
+Mutations (committed work, one at a time, restored with `git checkout -- <file>`), each killed by the named test: combine uses max, failed axis counted ACCEPTED, axis not bound to the token, Clamp lets `not_stacked` cap only at CHANGES, Clamp ignores a failing gate, single-pass submit allowed on a two-axis review, flag-off view carries `axes`, standards finding needs no rule, spec accepts a missing criterion, standards pass skippable, spec ACCEPTED with no criteria.
