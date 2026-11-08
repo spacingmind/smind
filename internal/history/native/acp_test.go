@@ -230,3 +230,24 @@ func TestRebuildACPOverSizeIsRefused(t *testing.T) {
 		t.Fatalf("over size: %q %q", r.Reason, r.Detail)
 	}
 }
+
+// The chat is re-checked with the slot held, just before the agent would start.
+func TestRebuildACPBeforeStartCanRefuse(t *testing.T) {
+	e := newACPEnv(t, nil)
+	req := e.req(t, "first", true)
+	req.BeforeStart = func() bool { return false }
+	if r := e.rb.Rebuild(context.Background(), req); r.Reason != ReasonSessionInUse || e.calls.Load() != 0 {
+		t.Fatalf("a chat that started a run: %q, %d starts", r.Reason, e.calls.Load())
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(e.rb.sem) != 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(e.rb.sem) != 0 {
+		t.Fatal("the slot was not released")
+	}
+	req.BeforeStart = func() bool { return true }
+	if r := e.rb.Rebuild(context.Background(), req); !r.OK() {
+		t.Fatalf("idle chat: %q", r.Reason)
+	}
+}

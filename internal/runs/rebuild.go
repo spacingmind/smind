@@ -109,12 +109,7 @@ func (reg *Registry) RebuildHistoryConfirmed(ctx context.Context, runID string, 
 		return refused
 	}
 	if ref.Harness == native.HarnessACP {
-		// No file to key a cache by: every confirmed load starts the agent once.
-		res := rb.Rebuild(ctx, native.Request{Ref: ref, Requester: RequesterHuman, ExpectedToolCalls: reg.storedToolCalls(runID), ConfirmStart: confirmStart})
-		if !res.OK() {
-			return degraded(res.Reason, res.Detail)
-		}
-		return Rebuilt{Events: res.Events, Refs: res.Refs, Detail: res.Detail}
+		return reg.loadACP(ctx, rb, ref, runID, confirmStart)
 	}
 	return reg.rebuildCached(ctx, rb, ref, runID, rb.Probe(ref))
 }
@@ -259,4 +254,31 @@ func (reg *Registry) storedHeredocSha(runID, callID string, index int) (string, 
 		}
 	}
 	return "", false
+}
+
+// loadACP is the confirmed, human-only load of an ACP run's history: no cache (no
+// file identity to key it by), one load per run at a time, a cooldown after a
+// failure, cancelled when a run starts on the chat or the Registry closes.
+func (reg *Registry) loadACP(ctx context.Context, rb *native.Rebuilder, ref native.Ref, runID string, confirmStart bool) Rebuilt {
+	if !confirmStart {
+		return degraded(native.ReasonConfirmRequired, "")
+	}
+	row, err := reg.storedReadable(runID)
+	if err != nil {
+		return degraded(native.ReasonCannotRebuild, "")
+	}
+	ctx, done, refused := reg.beginACPLoad(ctx, runID, row.ChatID)
+	if refused != nil {
+		return *refused
+	}
+	res := rb.Rebuild(ctx, native.Request{
+		Ref: ref, Requester: RequesterHuman, ExpectedToolCalls: reg.storedToolCalls(runID), ConfirmStart: true,
+		// Re-checked with the slot held, just before the agent starts.
+		BeforeStart: func() bool { return row.ChatID == 0 || !reg.chatHasRunningRun(row.ChatID) },
+	})
+	out := Rebuilt{Reason: res.Reason, Detail: res.Detail}
+	if res.OK() {
+		out = Rebuilt{Events: res.Events, Refs: res.Refs, Detail: res.Detail}
+	}
+	return done(out)
 }

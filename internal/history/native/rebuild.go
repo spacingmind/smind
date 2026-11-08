@@ -68,6 +68,10 @@ type Request struct {
 	// ConfirmStart is the human's explicit yes to a load that starts an agent
 	// (ACP). Without it an ACP ref is refused with ReasonConfirmRequired.
 	ConfirmStart bool
+	// BeforeStart, when set (ACP), is asked once the slot is held and just before
+	// the agent would be started: false refuses with ReasonSessionInUse (the caller
+	// saw the chat idle when it asked, but a run may have started since).
+	BeforeStart func() bool
 }
 
 // Result is the outcome of a rebuild. A refusal is a Reason with no events,

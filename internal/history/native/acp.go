@@ -32,6 +32,9 @@ var (
 // byte bound it was given.
 var ErrReplayTooLarge = errTooLarge
 
+// errNotIdle: BeforeStart said the chat is no longer idle.
+var errNotIdle = errors.New("native: the chat started a run")
+
 // SupportsACP reports whether ACP histories can be rebuilt at all.
 func (rb *Rebuilder) SupportsACP() bool { return rb.cfg.ACPReplay != nil }
 
@@ -80,6 +83,10 @@ func (rb *Rebuilder) rebuildACP(ctx context.Context, req Request) Result {
 	go func() {
 		// The slot stays held until the agent process is really gone.
 		defer func() { <-rb.sem }()
+		if req.BeforeStart != nil && !req.BeforeStart() {
+			done <- replayed{err: errNotIdle}
+			return
+		}
 		ev, err := rb.cfg.ACPReplay(ctx, ref, rb.cfg.MaxOutput)
 		done <- replayed{ev, err}
 	}()
@@ -90,6 +97,8 @@ func (rb *Rebuilder) rebuildACP(ctx context.Context, req Request) Result {
 		return refuse(ReasonFailed, "timed out")
 	}
 	switch {
+	case errors.Is(r.err, errNotIdle):
+		return refuse(ReasonSessionInUse, "")
 	case errors.Is(r.err, ErrNoLoadSession):
 		rb.mu.Lock()
 		rb.acpNoLoad[ref.Provider] = true
