@@ -23,6 +23,10 @@ const (
 	StewardPassSkipped = "skipped"
 
 	stewardPassNoSpec = "no_spec"
+
+	// StewardPassNotRun is the blocked reason of a pass a partial review did
+	// not request (`steward.review {axes}`): it never ran.
+	StewardPassNotRun = "not_run"
 )
 
 // stewardPassOpenCond is the WHERE clause of an open pass.

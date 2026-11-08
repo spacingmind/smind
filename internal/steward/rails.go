@@ -37,6 +37,9 @@ type ReviewKey struct {
 	HeadSHA     string
 	ContractSha string
 	CIState     string
+	// Partial: a re-run of one axis (`steward.review {axes}`). It is never
+	// deduped against an identical review, because the point is to run again.
+	Partial bool
 }
 
 // RailRequest is one review the rails judge. BudgetUSD and MaxMinutes are 0
@@ -134,10 +137,12 @@ func (r *Rails) Check(req RailRequest) error {
 	if req.BudgetUSD < 0 || req.BudgetUSD > ceiling || req.MaxMinutes < 0 || req.MaxMinutes > config.StewardMaxMinutesCeiling {
 		return ErrBudgetCeiling
 	}
-	if existing, err := r.Store.FindStewardReviewByKey(req.Key.TaskID, req.Key.HeadSHA, req.Key.ContractSha, req.Key.CIState); err == nil {
-		return &DuplicateError{ReviewID: existing.ID}
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("steward dedupe check: %w", err)
+	if !req.Key.Partial {
+		if existing, err := r.Store.FindStewardReviewByKey(req.Key.TaskID, req.Key.HeadSHA, req.Key.ContractSha, req.Key.CIState); err == nil {
+			return &DuplicateError{ReviewID: existing.ID}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("steward dedupe check: %w", err)
+		}
 	}
 	since, err := r.Store.CountStewardReviewsSince(r.now().Add(-time.Hour))
 	if err != nil {

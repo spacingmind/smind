@@ -157,9 +157,13 @@ func (s *Store) LatestStewardReview(taskID int64) (StewardReview, error) {
 // lookup, and only an open or finished review counts; a blocked one
 // (timeout, budget, crashed, cancelled) never blocks a retry of the same
 // head.
+// FindStewardReviewByKey is the dedupe lookup. A partial review (a re-run of
+// one axis, whose other pass was never run) is never a match: a full review
+// must not be answered with one.
 func (s *Store) FindStewardReviewByKey(taskID int64, headSHA, contractSha, ciState string) (StewardReview, error) {
 	return scanStewardReview(s.db.QueryRow(`SELECT `+stewardReviewCols+` FROM steward_reviews
 		WHERE task_id = ? AND head_sha = ? AND contract_sha256 = ? AND ci_state = ? AND status IN ('pending','running','done')
+		AND NOT EXISTS (SELECT 1 FROM steward_review_passes p WHERE p.review_id = steward_reviews.id AND p.blocked_reason = '`+StewardPassNotRun+`')
 		ORDER BY id DESC LIMIT 1`, taskID, headSHA, contractSha, ciState))
 }
 

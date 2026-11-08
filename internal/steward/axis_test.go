@@ -668,3 +668,32 @@ func TestPassVerdict_ScopeViolationDoesNotWaitForTheOtherPass(t *testing.T) {
 		t.Fatalf("late standards verdict error = %v, want ErrVerdictExists", err)
 	}
 }
+
+// TestCombine_NotRunPassCapsAtChangesAndIsNeverTheBlockReason: a pass a one-axis
+// re-run did not request is a failed axis (the review can never be ACCEPTED), but
+// when nothing produced a verdict the review is blocked for a real reason.
+func TestCombine_NotRunPassCapsAtChangesAndIsNeverTheBlockReason(t *testing.T) {
+	t.Parallel()
+
+	got, err := Combine([]PassResult{
+		{Axis: AxisStandards, Status: PassDone, SeatVerdict: VerdictAccepted},
+		{Axis: AxisSpec, Status: PassBlocked, BlockedReason: "not_run"},
+	})
+	if err != nil || got.Blocked || got.SeatVerdict != VerdictChanges {
+		t.Fatalf("Combine(standards ACCEPTED, spec not run) = %+v, %v; want CHANGES", got, err)
+	}
+	got, _ = Combine([]PassResult{
+		{Axis: AxisStandards, Status: PassBlocked, BlockedReason: "not_run"},
+		{Axis: AxisSpec, Status: PassBlocked, BlockedReason: "timeout"},
+	})
+	if !got.Blocked || got.BlockedReason != "timeout" {
+		t.Fatalf("Combine(not run + timeout) = %+v, want BLOCKED for timeout", got)
+	}
+	got, _ = Combine([]PassResult{
+		{Axis: AxisStandards, Status: PassBlocked, BlockedReason: "not_run"},
+		{Axis: AxisSpec, Status: PassSkipped},
+	})
+	if !got.Blocked || got.BlockedReason != "crashed" {
+		t.Fatalf("Combine(not run + skipped) = %+v, want BLOCKED with the crashed fallback", got)
+	}
+}

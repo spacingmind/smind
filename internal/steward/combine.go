@@ -79,7 +79,9 @@ func Combine(passes []PassResult) (Combined, error) {
 				res.Notes = append(res.Notes, fmt.Sprintf("axis %s: %s", p.Axis, v))
 			}
 		case PassBlocked:
-			if !failed {
+			// A pass the review never ran (a one-axis re-run) is a failed axis like
+			// any other, but never the reason a review is blocked for.
+			if res.BlockedReason == "" && p.BlockedReason != store.StewardPassNotRun {
 				res.BlockedReason = p.BlockedReason
 			}
 			failed = true
