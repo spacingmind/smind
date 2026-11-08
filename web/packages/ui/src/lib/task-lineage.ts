@@ -1,6 +1,6 @@
 import type { StatusDotStatus } from "@/components/ui/status-dot";
 import { describeRateLimitReset, isRateLimitedRun } from "@/lib/rate-limit";
-import { formatCost, formatTokens } from "@/lib/usage-format";
+import { formatTokens } from "@/lib/usage-format";
 
 // Wire shapes of the task.tree wsapi call (docs/plans/active/
 // task-hierarchy-tiers.md §4.1): lowercase json tags, flat depth-first
@@ -181,21 +181,14 @@ export function pillStatusWithSubtree(node: TaskTreeNode, all?: ReadonlyArray<Ta
 }
 
 /**
- * The usage chip text: "<cost> · <tokens> tok", or null when nothing to
- * show (runs === 0 or no field reported). The token total sums the
- * non-null of input/output -- both null means "not reported" (an em dash
- * inside formatTokens), never 0, per ADR-0020.
+ * The usage chip text: "<tokens> tok", or null when no token count was
+ * reported (runs === 0, or both input and output null -- "not reported",
+ * never 0, per ADR-0020). Tokens only, never a cost: the per-task cost
+ * lives in Settings > Usage.
  */
 export function usageChipText(usage: TreeUsageTotals): string | null {
   if (usage.runs === 0) return null;
-  if (usage.costUsd === null && usage.inputTokens === null && usage.outputTokens === null) return null;
-  const tokens = usage.inputTokens === null && usage.outputTokens === null ? null : (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-  return `${formatCost(usage.costUsd)} · ${formatTokens(tokens, "compact")} tok`;
-}
-
-/** `usageChipText` split into its cost and token segments (`null` cost when none was reported), for a chip that drops the tokens on narrow screens. */
-export function usageChipParts(usage: TreeUsageTotals): { cost: string | null; tokens: string } | null {
-  if (usageChipText(usage) === null) return null;
-  const tokens = usage.inputTokens === null && usage.outputTokens === null ? null : (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-  return { cost: usage.costUsd === null ? null : formatCost(usage.costUsd), tokens: `${formatTokens(tokens, "compact")} tok` };
+  if (usage.inputTokens === null && usage.outputTokens === null) return null;
+  const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+  return `${formatTokens(tokens, "compact")} tok`;
 }
