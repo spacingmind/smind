@@ -361,6 +361,14 @@ func TestTokenAxis_StandardsSeatCannotSubmitSpec(t *testing.T) {
 	if _, err := fx.svc.SubmitPassVerdict(fx.row.ID, AxisSpec, fx.tokens[AxisSpec], fx.runs[AxisStandards], raw); !errors.Is(err, ErrWrongRun) {
 		t.Fatalf("standards run on the spec pass error = %v, want ErrWrongRun", err)
 	}
+	// The mirror image, without criteria to give the lie away: a spec-labelled
+	// verdict that is otherwise a valid standards one, on the standards pass.
+	lie := standardsVerdict(VerdictAccepted)
+	lie.Axis, lie.ReviewID = AxisSpec, fx.row.ID
+	lieRaw, _ := json.Marshal(lie)
+	if _, err := fx.svc.SubmitPassVerdict(fx.row.ID, AxisStandards, fx.tokens[AxisStandards], fx.runs[AxisStandards], lieRaw); err == nil {
+		t.Fatal("spec-labelled verdict on the standards pass = nil, want an axis error")
+	}
 	for _, axis := range []string{AxisStandards, AxisSpec} {
 		p, _ := fx.svc.DB.GetStewardReviewPass(fx.row.ID, axis)
 		if p.TokenUsed || p.Status != PassRunning {
