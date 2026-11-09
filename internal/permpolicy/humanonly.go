@@ -128,10 +128,26 @@ func taskVerbPair(args []string) bool {
 	return false
 }
 
+// profileVerbPair reports `profile add|edit`, or `profile seed` with --apply,
+// as adjacent words anywhere in args: a renamed copy, `go run ./cmd/smind` or
+// a launcher spells the profile commands so. Over-denies a foreign tool that
+// happens to have a `profile edit` command; the Human runs those.
+func profileVerbPair(args []string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] != "profile" {
+			continue
+		}
+		if args[i+1] == "add" || args[i+1] == "edit" || (args[i+1] == "seed" && hasFlag(args, "--apply")) {
+			return true
+		}
+	}
+	return false
+}
+
 // humanOnlyText finds a human-only smind command written out as text: inside a
 // script handed to a command runner (`su -c '...'`, `eval '...'`, `ssh host
 // '...'`) or piped to a shell.
-var humanOnlyText = regexp.MustCompile(`\btask\s+(approve|deny|answer)\b|smind\S*\s+(permission\b|host\s+(approve|reject)\b|relay\s+devices\s+(approve|revoke)\b)`)
+var humanOnlyText = regexp.MustCompile(`\btask\s+(approve|deny|answer)\b|smind\S*\s+(permission\b|host\s+(approve|reject)\b|relay\s+devices\s+(approve|revoke)\b|profile\s+(add|edit)\b|profile\s+seed\b[^\n]*?--(apply|take)(?:[\s='"]|$))`)
 
 // commandRunners take a command, or a script, as arguments and run it; the
 // effective argv does not name it as a command word.
@@ -168,7 +184,7 @@ func (fs *floorSeg) selfApproveRules() (FloorHit, bool) {
 	switch {
 	case smindish && (HumanOnlyCLI(args) || dynamicHumanOnly(args)):
 		return floorHit("no-self-approve")
-	case !smindish && taskVerbPair(args):
+	case !smindish && (taskVerbPair(args) || profileVerbPair(args)):
 		return floorHit("no-self-approve")
 	case commandRunners[name] && humanOnlyText.MatchString(strings.Join(args, " ")):
 		return floorHit("no-self-approve")
