@@ -21,4 +21,6 @@ Follow-up nits from the review of PRs B and C (see `ux-audit-small-fixes.md` and
 
 ## Validation
 
-(filled in at the end)
+- Web: full vitest (460 files, 5209 tests, includes `src/demo`) and `tsc -b` pass; mobile vitest (110 files, 1049 tests) and tsc pass. Mutations on committed code: dropping the rune clamp in the field fails `deny_reason_at_limit_refuses_more_text` and `deny_reason_counts_runes_not_utf16`; dropping `showLabel` on the task composer's mode chip fails `task_composer_chip_labels_visible_below_sm`.
+- Frames (demo build, web 1280 and 390, light and dark, luminance and no horizontal overflow asserted): the Deny reason field empty, filled, near the limit (420 / 500) and at the limit (500 / 500, a longer paste is cut at 500); the task composer with labelled chips (wrapped on their own rows at 390, one row at 1280). The first dark frame showed the field with no visible border, so the field now uses the shared input tokens.
+- Not verified: the mobile field (no device or simulator: logic tested, layout not seen); a real daemon send with a multi-line reason; the field disabled mid-response in frames; transition frames.

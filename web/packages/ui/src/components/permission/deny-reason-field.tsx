@@ -31,7 +31,8 @@ export function DenyReasonField({
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, MAX_FIELD_HEIGHT_PX)}px`;
-    el.style.overflowY = el.scrollHeight > MAX_FIELD_HEIGHT_PX ? "auto" : "hidden";
+    el.style.overflowY =
+      el.scrollHeight > MAX_FIELD_HEIGHT_PX ? "auto" : "hidden";
   }, [value]);
 
   return (
@@ -50,15 +51,20 @@ export function DenyReasonField({
         aria-describedby={counter.shown ? counterId : undefined}
         onChange={(e) => onChange(clampRunes(e.target.value))}
         className={cn(
-          "w-full resize-none rounded-md border border-input bg-transparent px-3 py-1.5 text-ui-base leading-5 text-foreground",
-          "placeholder:text-foreground-subtlest focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50",
+          "w-full min-w-0 resize-none rounded-lg border border-input-border bg-input px-2.5 py-1.5 text-ui-base leading-5 text-foreground outline-none transition-colors",
+          "placeholder:text-foreground-subtlest hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused disabled:cursor-not-allowed disabled:opacity-50",
         )}
       />
       {counter.shown && (
         <div
           id={counterId}
           data-testid={`${testId}-counter`}
-          className={cn("self-end text-ui-xs tabular-nums", counter.atLimit ? "font-medium text-destructive" : "text-foreground-muted")}
+          className={cn(
+            "self-end text-ui-xs tabular-nums",
+            counter.atLimit
+              ? "font-medium text-destructive"
+              : "text-foreground-muted",
+          )}
         >
           {counter.used} / {counter.max}
           {counter.atLimit ? " — limit reached" : ""}
