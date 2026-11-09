@@ -35,11 +35,11 @@ function summary(id: string, prompt: string): RunSummary {
   };
 }
 
-async function renderPane() {
+async function renderPane(autoAccept = false) {
   const client = new FakeWsClient();
   const onOpenForkedChat = vi.fn();
   render(<TaskDetailPane client={client} task={TASK} chat={CHAT} isDefaultChat onOpenForkedChat={onOpenForkedChat} />);
-  client.nth("run.list", 0).resolve([summary("run-1", "first prompt"), summary("run-2", "second prompt")]);
+  client.nth("run.list", 0).resolve([{ ...summary("run-1", "first prompt"), AutoAccept: autoAccept, Provider: autoAccept ? "codex-native" : "claude-native" }, { ...summary("run-2", "second prompt"), AutoAccept: autoAccept, Provider: autoAccept ? "codex-native" : "claude-native" }]);
   await flush();
   for (const [i, id] of ["run-1", "run-2"].entries()) {
     client.nth("run.logs", i).resolve({ runId: id, status: "done", stopReason: "end_turn", err: "", events: [] });
@@ -84,5 +84,15 @@ describe("TaskDetailPane edit & retry", () => {
     client.nth("run.start", 0).resolve({});
     await flush();
     expect(onOpenForkedChat).toHaveBeenCalledWith(CHILD);
+  });
+
+  it("a retry never carries auto-accept from the replaced run into the new chat", async () => {
+    const { client } = await renderPane(true);
+    fireEvent.click(screen.getAllByTestId("run-prompt-retry")[1]);
+    editAndConfirm("second prompt, better");
+    await flush();
+    client.nth("chat.fork", 0).resolve(CHILD);
+    await flush();
+    expect(client.nth("run.start", 0).params).not.toHaveProperty("autoAccept");
   });
 });

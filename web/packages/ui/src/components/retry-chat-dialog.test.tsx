@@ -156,8 +156,11 @@ describe("RetryChatDialog", () => {
     const { onRetry } = renderDialog();
     onRetry.mockReturnValue(new Promise(() => {}));
     const confirm = screen.getByTestId("dialog-retry-chat-confirm");
-    fireEvent.click(confirm);
-    fireEvent.click(confirm);
+    // Both clicks land in one batch, before the first has re-rendered the button disabled.
+    await act(async () => {
+      confirm.click();
+      confirm.click();
+    });
     await flush();
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
