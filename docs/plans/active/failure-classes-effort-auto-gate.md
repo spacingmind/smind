@@ -149,6 +149,7 @@ mobile picker test. Mutations: gate removed → `TestClaudeModes_AutoGatedForBas
 
 - 2026-11-09: spec drafted from the code and reference sources; no probes run.
 - 2026-11-09: R3a-1 built (kinds, codes, classify, hints, actions, `Describe`, guidance, routing, inbox, CLI, MCP text). The wire carrier is `action.summary`. Not in R3a-1: web and mobile surfaces (R3a-2).
+- 2026-11-09: R3a-2 built: web (`lib/failure-text.ts` one fallback table, failure cards and controls for the three classes and `cli_exited`, sidebar signal, footer sentence, Continue prompt from the daemon sentence, inbox policy link, child-event tone), mobile (`failureText.ts`, run footer, `run_failed` inbox kind), label-safety source scans on both, e2e frames. Follow-ups noted from the frames: the card and the footer repeat the same sentence for the human-action classes; the per-message toolbar still shows its generic retry icon on those failures.
 
 ## Validation
 

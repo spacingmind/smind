@@ -173,6 +173,13 @@ describe("RunConfigToolbar pills", () => {
       else expect(trigger.className).toContain("max-sm:[&>span]:hidden!");
     }
   });
+
+  it("home_chip_labels_visible_below_sm keeps the task composer's pills icon-only by default", () => {
+    renderToolbar();
+    expect(screen.getByTestId("composer-model-picker").querySelector(":scope > span")?.className).toContain("max-sm:hidden");
+    expect(screen.getByLabelText("Permission mode").className).toContain("max-sm:[&>span]:hidden!");
+    expect(screen.getByLabelText("Thinking level").className).toContain("max-sm:[&>span]:hidden!");
+  });
 });
 
 describe("RunConfigToolbar live run (D1)", () => {

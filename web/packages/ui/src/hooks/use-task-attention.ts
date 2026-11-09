@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
-import { AUTH_EXPIRED, MODEL_NOT_IN_PLAN, TRANSIENT_429 } from "@/lib/failure-class";
+import { AUTH_EXPIRED, HUMAN_ACTION_KINDS, MODEL_NOT_IN_PLAN, TRANSIENT_429 } from "@/lib/failure-class";
 import { isPlanLimitKind } from "@/lib/rate-limit";
 import type { RunLogEvent, RunLogsResult, RunStatusValue, RunSummary } from "@/lib/types";
 
@@ -75,8 +75,9 @@ interface RunLike extends Pick<RunSummary, "ID" | "TaskID" | "ChatID" | "Status"
 }
 
 /**
- * The row signal of a failed run: a plan limit keeps its window/reset; auth_expired, model_not_in_plan and transient_429 (run failure classes)
- * carry their class and the daemon's action label instead, so a row says what to do. undefined for every other run.
+ * The row signal of a failed run: a plan limit keeps its window/reset; auth_expired, model_not_in_plan, transient_429 and the
+ * human-action classes (run failure classes) carry their class and the daemon's action label instead, so a row says what to do.
+ * undefined for every other run.
  */
 function failureSignal(
   kind: string | undefined | null,
@@ -86,7 +87,7 @@ function failureSignal(
   resetInferred?: boolean | null,
 ): RunLike["rateLimit"] | undefined {
   if (isPlanLimitKind(kind)) return failureDetail(window, resetAt, resetInferred);
-  if (kind === AUTH_EXPIRED || kind === MODEL_NOT_IN_PLAN || kind === TRANSIENT_429) return { kind, ...(label ? { label } : {}) };
+  if (kind === AUTH_EXPIRED || kind === MODEL_NOT_IN_PLAN || kind === TRANSIENT_429 || HUMAN_ACTION_KINDS.has(kind ?? "")) return { kind: kind as string, ...(label ? { label } : {}) };
   return undefined;
 }
 

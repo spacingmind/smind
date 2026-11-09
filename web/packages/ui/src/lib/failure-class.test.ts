@@ -14,7 +14,7 @@ const NOW = new Date("2026-11-01T10:00:00Z");
 
 describe("isActionableFailure", () => {
   it("is true for every class the daemon sends except cli_exited", () => {
-    for (const k of ["auth_expired", "plan_window_exhausted", "model_not_in_plan", "transient_429", "rate_limited"]) expect(isActionableFailure(k)).toBe(true);
+    for (const k of ["auth_expired", "plan_window_exhausted", "model_not_in_plan", "transient_429", "rate_limited", "context_window_exceeded", "session_budget_exceeded", "too_many_denials"]) expect(isActionableFailure(k)).toBe(true);
     for (const k of ["cli_exited", "", undefined, "martian"]) expect(isActionableFailure(k)).toBe(false);
   });
 });
@@ -89,6 +89,36 @@ describe("describeFailureCard", () => {
     expect(describeFailureCard({ ...base, failureKind: "plan_window_exhausted" }, NOW)).toBeNull();
     expect(describeFailureCard({ ...base, failureKind: "rate_limited" }, NOW)).toBeNull();
     expect(describeFailureCard({ ...base, failureKind: undefined }, NOW)).toBeNull();
+  });
+
+  const HUMAN_FIX: [string, FailureAction][] = [
+    ["context_window_exceeded", { kind: "new_chat", target: "chat:new", label: "Start a fresh chat for this task" }],
+    ["session_budget_exceeded", { kind: "raise_budget", label: "Raise the session budget in the provider's settings, or start a fresh chat" }],
+    ["too_many_denials", { kind: "review_policy", target: "settings:permission-policy", label: "Review the permission policy" }],
+  ];
+
+  it.each(HUMAN_FIX)("%s: the daemon's summary as the sentence, the action label as the hint, never a retry", (_kind, action) => {
+    const v = describeFailureCard({ ...base, failureKind: _kind, failureAction: { ...action, summary: "Daemon sentence." } }, NOW);
+    expect(v).toMatchObject({ tone: "danger", message: "Daemon sentence.", hint: action.label, countdown: null });
+  });
+
+  it.each(HUMAN_FIX)("%s: the fallback sentence when the daemon sent no summary (an older daemon)", (kind, action) => {
+    const v = describeFailureCard({ ...base, failureKind: kind, failureAction: action }, NOW);
+    expect(v?.message.length).toBeGreaterThan(0);
+    expect(v?.message).not.toBe("Daemon sentence.");
+    expect(v?.hint).toBe(action.label);
+  });
+
+  it("context_window_exceeded offers Start a fresh chat; session_budget_exceeded only the label; too_many_denials the policy link", () => {
+    expect(describeFailureCard({ ...base, failureKind: "context_window_exceeded", failureAction: HUMAN_FIX[0][1] }, NOW)).toMatchObject({ control: "new_chat", controlLabel: "Start a fresh chat" });
+    expect(describeFailureCard({ ...base, failureKind: "session_budget_exceeded", failureAction: HUMAN_FIX[1][1] }, NOW)).toMatchObject({ control: null, controlLabel: null });
+    expect(describeFailureCard({ ...base, failureKind: "too_many_denials", failureAction: HUMAN_FIX[2][1] }, NOW)).toMatchObject({ control: "review_policy", controlLabel: "Review the permission policy" });
+  });
+
+  it("cli_exited has a readable card with no control (the footer keeps its Continue)", () => {
+    const v = describeFailureCard({ ...base, failureKind: "cli_exited", failureAction: { kind: "continue", label: "Continue the run" } }, NOW);
+    expect(v).toMatchObject({ tone: "warning", hint: null, countdown: null, control: null, controlLabel: null });
+    expect(v?.message).toBe("The agent stopped before finishing; its session is saved, so you can continue where it left off.");
   });
 });
 

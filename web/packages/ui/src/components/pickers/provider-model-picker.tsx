@@ -19,7 +19,8 @@ import {
   type PickerProfileRow,
   type RowShellProps,
 } from "@/components/pickers/provider-model-picker-rows";
-import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
+import { pillTriggerClass } from "@/components/composer/pill-class";
+import { cn } from "@/lib/utils";
 import { ProviderIcon } from "@/components/provider-icon";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -66,6 +67,8 @@ export interface ProviderModelPickerProps {
    * profile form) that opens downwards. Same popover, same rows, same health-disabled providers.
    */
   variant?: "pill" | "field";
+  /** Pill only: keep the model label visible below sm instead of the icon-only trigger. */
+  showLabel?: boolean;
   /** The trigger's data-testid (the composer keeps "composer-model-picker"). */
   testId?: string;
   /**
@@ -196,6 +199,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
     boundNotice,
     disabled,
     variant = "pill",
+    showLabel = false,
     testId = "composer-model-picker",
     profileRows = NO_PROFILE_ROWS,
     baseAgentId = null,
@@ -670,12 +674,12 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         title={title}
         data-gated={selectedGate?.reason}
         disabled={disabled}
-        className={PILL_TRIGGER_CLASS}
+        className={pillTriggerClass(showLabel)}
         onClick={isMobile ? () => changeOpen(!open) : undefined}
       >
         <ProviderIcon provider={selectedProvider} className="shrink-0" />
         {selectedGate && <StatusDot status="warning" aria-hidden data-testid="model-trigger-gate-dot" className="size-1.5 shrink-0" />}
-        <span className="max-w-[12rem] min-w-0 truncate max-sm:hidden">{label}</span>
+        <span className={cn("max-w-[12rem] min-w-0 truncate", !showLabel && "max-sm:hidden")}>{label}</span>
         <Icons.chevronDown aria-hidden className="shrink-0" />
       </Button>
     ) : (

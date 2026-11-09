@@ -11,6 +11,8 @@ import { useHomeRunConfigStore } from "@/stores/home-run-config-store";
 import { OFFICE_SUGGESTED_PROMPTS } from "@/lib/suggested-prompts";
 import { useInterfaceModeStore } from "@/stores/interface-mode-store";
 import { usePendingSendStore } from "@/stores/pending-send-store";
+import { attachmentDraftKey, HOME_ATTACHMENT_KEY, useComposerAttachmentsStore } from "@/stores/composer-attachments-store";
+import type { AttachmentLimits, Chat } from "@/lib/types";
 
 function ws(ID: number, Title: string): Workspace {
   return { ID, Title, Path: `/repos/${Title.toLowerCase()}`, RoutingPolicy: "", CreatedAt: "", UpdatedAt: "" };
@@ -36,7 +38,7 @@ const PROVIDERS: ProviderInfo[] = [
 
 function fakeClient() {
   const task = { ID: 42, WorkspaceID: 2, Title: "Fix the bug" } as Task;
-  const call = vi.fn(async (method: string, _params?: unknown) => {
+  const call = vi.fn<(method: string, _params?: unknown) => Promise<unknown>>(async (method: string) => {
     if (method === "provider.list") return { providers: PROVIDERS };
     if (method === "profile.list" || method === "run.list") return [];
     return task;
@@ -270,6 +272,151 @@ describe("HomeLanding", () => {
     fireEvent.click(screen.getByTestId("home-send-button"));
     await waitFor(() => expect(onCreated).toHaveBeenCalled());
     expect(usePendingSendStore.getState().entry?.config).toMatchObject({ provider: "claude-native", permissionMode: "plan" });
+  });
+});
+
+describe("HomeLanding effort chip", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useHomeProjectStore.getState().reload();
+    useHomeRunConfigStore.getState().reload();
+    usePendingSendStore.setState({ entry: null });
+  });
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    useHomeProjectStore.getState().reload();
+    useHomeRunConfigStore.getState().reload();
+    usePendingSendStore.setState({ entry: null });
+  });
+
+  it("home_effort_chip_renders_and_level_reaches_pending_send", async () => {
+    const { onCreated } = renderHome();
+    await flush();
+    fireEvent.click(screen.getByLabelText("Thinking level"));
+    const options = await screen.findAllByRole("option");
+    fireEvent.click(options.find((o) => o.textContent === "Extended")!);
+    await flush();
+    type("Think hard");
+    fireEvent.click(screen.getByTestId("home-send-button"));
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(usePendingSendStore.getState().entry?.config.thinkingLevel).toBe("extended");
+  });
+
+  it("home_effort_chip_hidden_when_provider_has_no_levels", async () => {
+    const { call } = fakeClient();
+    call.mockImplementation(async (method: string) => {
+      if (method === "provider.list") return { providers: [{ id: "glm", label: "GLM", models: [{ id: "glm-5", label: "GLM 5" }] }] };
+      return [];
+    });
+    useHomeRunConfigStore.getState().set({ baseAgentId: null, custom: false, provider: "glm", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" });
+    render(<HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={THREE} onCreated={vi.fn()} />);
+    await flush();
+    expect(screen.queryByLabelText("Thinking level")).not.toBeInTheDocument();
+  });
+});
+
+const LIMITS: AttachmentLimits = {
+  maxCount: 5,
+  maxImageBytes: 1 << 20,
+  maxFileBytes: 1 << 20,
+  maxTotalBytes: 4 << 20,
+  maxMessageBytes: 16 << 20,
+  images: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+};
+
+function attachClient(limits: AttachmentLimits | null, chats: Chat[] | Error = [{ ID: 7, TaskID: 42, ArchivedAt: null } as unknown as Chat]) {
+  const { call, task } = fakeClient();
+  call.mockImplementation(async (method: string) => {
+    if (method === "provider.list") return { providers: PROVIDERS };
+    if (method === "daemon.info") return limits ? { attachments: limits } : {};
+    if (method === "chat.list") {
+      if (chats instanceof Error) throw chats;
+      return chats;
+    }
+    if (method === "profile.list" || method === "run.list") return [];
+    return task;
+  });
+  const onCreated = vi.fn();
+  render(<HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={THREE} onCreated={onCreated} />);
+  return { call, task, onCreated };
+}
+
+describe("HomeLanding attachments", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useHomeProjectStore.getState().reload();
+    useHomeRunConfigStore.getState().reload();
+    usePendingSendStore.setState({ entry: null });
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
+  });
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    useHomeProjectStore.getState().reload();
+    useHomeRunConfigStore.getState().reload();
+    usePendingSendStore.setState({ entry: null });
+    useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
+  });
+
+  it("home_attach_hidden_without_daemon_support", async () => {
+    attachClient(null);
+    await flush();
+    expect(screen.queryByTestId("composer-attach-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("home-attach-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("attachment-tray")).not.toBeInTheDocument();
+  });
+
+  it("home_attachments_move_to_the_new_tasks_draft_key", async () => {
+    const { onCreated } = attachClient(LIMITS);
+    await flush();
+    expect(screen.getByTestId("composer-attach-button")).toBeInTheDocument();
+    const file = new File([new Uint8Array(4)], "notes.txt", { type: "text/plain" });
+    fireEvent.change(await screen.findByTestId("home-attach-input"), { target: { files: [file] } });
+    expect(useComposerAttachmentsStore.getState().byKey[HOME_ATTACHMENT_KEY]).toHaveLength(1);
+    type("Read the notes");
+    fireEvent.click(screen.getByTestId("home-send-button"));
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    const { byKey } = useComposerAttachmentsStore.getState();
+    expect(byKey[attachmentDraftKey(42, 7)]).toHaveLength(1);
+    expect(byKey[attachmentDraftKey(42, 7)][0]).toMatchObject({ name: "notes.txt" });
+    expect(byKey[HOME_ATTACHMENT_KEY]).toBeUndefined();
+  });
+
+  it("a failed chat.list leaves the files in the home tray and does not open the task", async () => {
+    const { onCreated } = attachClient(LIMITS, new Error("no chats"));
+    await flush();
+    fireEvent.change(await screen.findByTestId("home-attach-input"), { target: { files: [new File([new Uint8Array(4)], "a.txt", { type: "text/plain" })] } });
+    type("Go");
+    fireEvent.click(screen.getByTestId("home-send-button"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no chats");
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(useComposerAttachmentsStore.getState().byKey[HOME_ATTACHMENT_KEY]).toHaveLength(1);
+    expect(usePendingSendStore.getState().entry).toBeNull();
+  });
+});
+
+describe("HomeLanding chip labels", () => {
+  afterEach(() => cleanup());
+
+  it("home_chip_labels_visible_below_sm", async () => {
+    renderHome();
+    await flush();
+    const model = screen.getByTestId("composer-model-picker");
+    const thinking = screen.getByLabelText("Thinking level");
+    const mode = screen.getByLabelText("Permission mode");
+    expect(model.querySelector(":scope > span")).toHaveTextContent("Claude Code");
+    expect(model.querySelector(":scope > span")?.className).not.toContain("max-sm:hidden");
+    for (const trigger of [thinking, mode]) {
+      expect(trigger.className).not.toContain("max-sm:[&>span]:hidden!");
+      expect(trigger.className).not.toContain("size-11");
+    }
+    expect(thinking).toHaveTextContent("Standard");
+    expect(mode).toHaveTextContent("Accept File Edits");
+    // The chips wrap onto their own row first below sm; send stays on the right of the bottom row.
+    expect(screen.getByTestId("home-run-chips").className).toContain("max-sm:order-first");
+    expect(screen.getByTestId("home-run-chips").className).toContain("max-sm:w-full");
+    expect(screen.getByTestId("home-send-button").className).toContain("ml-auto");
   });
 });
 

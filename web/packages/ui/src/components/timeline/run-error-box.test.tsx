@@ -61,4 +61,62 @@ describe("RunErrorBox failure classes", () => {
     expect(screen.queryByTestId("run-failure-signin")).toBeNull();
     expect(screen.queryByTestId("run-failure-retry")).toBeNull();
   });
+
+  it("context_window_exceeded: the daemon's summary, the label as hint, and Start a fresh chat dispatches smind:new-chat", () => {
+    const seen: CustomEvent[] = [];
+    const on = (e: Event) => seen.push(e as CustomEvent);
+    window.addEventListener("smind:new-chat", on);
+    render(
+      <RunErrorBox
+        run={entry({
+          failureKind: "context_window_exceeded",
+          failureAction: { kind: "new_chat", target: "chat:new", label: "Start a fresh chat for this task", summary: "The conversation no longer fits the model's context window." },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("run-error").textContent).toBe("The conversation no longer fits the model's context window.");
+    expect(screen.getByTestId("run-failure-hint").textContent).toBe("Start a fresh chat for this task");
+    fireEvent.click(screen.getByTestId("run-failure-new-chat"));
+    window.removeEventListener("smind:new-chat", on);
+    expect(seen).toHaveLength(1);
+    expect(screen.queryByTestId("run-failure-signin")).toBeNull();
+  });
+
+  it("session_budget_exceeded: the fallback sentence without a summary, the label as hint, no control", () => {
+    render(<RunErrorBox run={entry({ failureKind: "session_budget_exceeded", failureAction: { kind: "raise_budget", label: "Raise the session budget in the provider's settings, or start a fresh chat" } })} />);
+    expect(screen.getByTestId("run-error").textContent).toBe("The provider's session budget for this run is used up.");
+    expect(screen.getByTestId("run-failure-hint").textContent).toContain("Raise the session budget");
+    expect(screen.queryByTestId("run-failure-signin")).toBeNull();
+    expect(screen.queryByTestId("run-failure-new-chat")).toBeNull();
+    expect(screen.queryByTestId("run-failure-review-policy")).toBeNull();
+  });
+
+  it("too_many_denials: Review the permission policy opens Settings through the deep-link event", () => {
+    const seen: CustomEvent[] = [];
+    const on = (e: Event) => seen.push(e as CustomEvent);
+    window.addEventListener("smind:open-settings", on);
+    render(
+      <RunErrorBox
+        run={entry({
+          failureKind: "too_many_denials",
+          failureAction: { kind: "review_policy", target: "settings:permission-policy", label: "Review the permission policy", summary: "The agent kept asking for actions that were denied, so the provider stopped the run." },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("run-error").textContent).toBe("The agent kept asking for actions that were denied, so the provider stopped the run.");
+    expect(screen.getByTestId("run-failure-hint").textContent).toBe("Review the permission policy");
+    fireEvent.click(screen.getByTestId("run-failure-review-policy"));
+    window.removeEventListener("smind:open-settings", on);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].detail).toEqual({ sectionId: "permission-policy" });
+  });
+
+  it("cli_exited: the readable sentence, a warning card, no control", () => {
+    render(<RunErrorBox run={entry({ failureKind: "cli_exited", failureAction: { kind: "continue", label: "Continue the run" } })} />);
+    expect(screen.getByTestId("run-error").textContent).toBe("The agent stopped before finishing; its session is saved, so you can continue where it left off.");
+    expect(screen.queryByTestId("run-failure-hint")).toBeNull();
+    expect(screen.queryByTestId("run-failure-signin")).toBeNull();
+    expect(screen.queryByTestId("run-failure-new-chat")).toBeNull();
+    expect(screen.queryByTestId("run-failure-review-policy")).toBeNull();
+  });
 });

@@ -41,6 +41,22 @@ export function RunErrorBox({ run, onRetry }: { run: RunEntry; onRetry?: (run: R
             {card.controlLabel}
           </Button>
         )}
+        {card?.control === "review_policy" && (
+          <Button type="button" variant="outline" size="xs" data-testid="run-failure-review-policy" onClick={() => openFailureSettings(run.failureAction)}>
+            {card.controlLabel}
+          </Button>
+        )}
+        {card?.control === "new_chat" && (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            data-testid="run-failure-new-chat"
+            onClick={() => window.dispatchEvent(new CustomEvent("smind:new-chat"))}
+          >
+            {card.controlLabel}
+          </Button>
+        )}
         {onRetry && (
           <Button type="button" variant="outline" size="xs" data-testid="run-retry-higher-effort" onClick={() => onRetry(run)}>
             Retry with higher effort

@@ -419,6 +419,27 @@ describe("InboxScreen run_failed (run failure classes)", () => {
     expect(screen.getByTestId("inbox-summary-runfail:m")).toHaveTextContent("Pick another model");
     expect(screen.getByTestId("inbox-summary-runfail:p")).toHaveTextContent("Wait: 5h window");
   });
+
+  it("a human-action class is high attention, shows the daemon's label, and the policy one opens Settings", async () => {
+    const seen: CustomEvent[] = [];
+    const on = (e: Event) => seen.push(e as CustomEvent);
+    window.addEventListener("smind:open-settings", on);
+    await renderInbox(
+      daemonWith(
+        runFailedItem({ key: "runfail:d", summary: "Review the permission policy", attention: "high", action: { kind: "review_policy", target: "settings:permission-policy", label: "Review the permission policy" } }),
+        runFailedItem({ key: "runfail:c", summary: "Start a fresh chat for this task", attention: "high", action: { kind: "new_chat", target: "chat:new", label: "Start a fresh chat for this task" } }),
+      ),
+    );
+    expect(screen.getByTestId("inbox-kind-runfail:d")).toHaveTextContent("Run failed");
+    expect(screen.getByTestId("inbox-summary-runfail:d")).toHaveTextContent("Review the permission policy");
+    expect(screen.getByTestId("inbox-summary-runfail:c")).toHaveTextContent("Start a fresh chat for this task");
+    expect(screen.queryByTestId("inbox-signin-runfail:d")).toBeNull();
+    await click(screen.getByTestId("inbox-review-policy-runfail:d"));
+    window.removeEventListener("smind:open-settings", on);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].detail).toEqual({ sectionId: "permission-policy" });
+    expect(screen.queryByTestId("inbox-review-policy-runfail:c")).toBeNull();
+  });
 });
 
 describe("InboxBadge", () => {

@@ -1484,7 +1484,7 @@ describe("TaskDetailPane message hover actions", () => {
         taskId: TASK_A.ID,
         chatId: CHAT_A.ID,
         provider: "glm",
-        prompt: "Continue from where you left off (the previous run ended unexpectedly: the agent CLI exited without a result).",
+        prompt: "Continue from where you left off (the previous run ended unexpectedly: the agent stopped before finishing; its session is saved, so you can continue where it left off).",
         whenBusy: "queue",
         permissionMode: "acceptEdits",
         model: "glm-5.3",

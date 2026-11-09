@@ -44,3 +44,8 @@ export function parseChildEventPrompt(prompt: string): ChildEventPrompt {
 export function isRateLimitedLine(line: string): boolean {
   return line.includes("rate_limited") || line.includes("plan_window_exhausted");
 }
+
+/** A status line of a child whose failure needs a person (R3a: a fresh chat, the provider's session budget, the permission policy): also the warning tone. */
+export function isHumanFixLine(line: string): boolean {
+  return line.includes("context_window_exceeded") || line.includes("session_budget_exceeded") || line.includes("too_many_denials");
+}

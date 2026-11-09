@@ -141,4 +141,27 @@ describe("attachmentErrorMessage", () => {
     expect(useComposerAttachmentsStore.getState().takeInserts(key)).toEqual([]);
     expect(useComposerAttachmentsStore.getState().pendingInserts.other).toHaveLength(1);
   });
+
+  it("attachment_store_move_transfers_items_and_clears_source", () => {
+    const s = useComposerAttachmentsStore.getState();
+    const target = attachmentDraftKey(9, 10);
+    s.add("home", [file("a.png", "image/png", 10), file("b.txt", "text/plain", 10)], limits);
+    s.add(target, [file("c.txt", "text/plain", 10)], limits);
+    s.rememberMention("home", { path: "a.go" });
+    const before = useComposerAttachmentsStore.getState().byKey.home.map((i) => i.localId);
+    const previewUrl = (useComposerAttachmentsStore.getState().byKey.home[0] as DraftFile).previewUrl;
+    const revokeSpy = vi.spyOn(URL, "revokeObjectURL");
+
+    s.move("home", target);
+
+    const state = useComposerAttachmentsStore.getState();
+    expect(state.byKey.home).toBeUndefined();
+    expect(state.mentions.home).toBeUndefined();
+    expect(state.byKey[target].map((i) => i.localId).slice(1)).toEqual(before);
+    expect(state.byKey[target]).toHaveLength(3);
+    expect((state.byKey[target][1] as DraftFile).previewUrl).toBe(previewUrl);
+    expect(state.mentions[target]).toEqual([{ path: "a.go" }]);
+    expect(revokeSpy).not.toHaveBeenCalled();
+    revokeSpy.mockRestore();
+  });
 });
