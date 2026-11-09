@@ -118,7 +118,8 @@ func TestFloor_SelfApproveCLIDenied(t *testing.T) {
 		{"go run ./cmd/smind profile seed roles --apply", "no-self-approve"},
 		{"./sm profile edit 3 --model x", "no-self-approve"},
 		{"/tmp/x/runner profile seed roles --apply", "no-self-approve"},
-		// a renamed copy or symlink: only the task verbs are matchable
+		{"./sm task chat fork 3 --at r", "no-self-approve"},
+		// a renamed copy or symlink: only the bare rows of the table are matchable
 		{"./sm task approve 12", "no-self-approve"},
 		{"/tmp/x/runner task deny 12", "no-self-approve"},
 		{"/tmp/x/runner task answer 12", "no-self-approve"},
@@ -145,6 +146,8 @@ func TestFloor_SelfApproveNearMissesAllowed(t *testing.T) {
 		{"smind profile seed roles --diff lead", ""},
 		{"smind profile seed roles --apply-later", ""},
 		{"smind profile rm 3", ""},
+		{"ssh h 'grep host approve notes.txt'", ""},
+		{"ssh h 'less permission.txt'", ""},
 		{"grep -rn \"smind profile edit\" docs", ""},
 		{"git commit -m 'document smind profile edit and seed roles --apply'", ""},
 		{"echo 'smind profile edit 3' | cat", ""},
