@@ -38,4 +38,34 @@ describe('DaemonError', () => {
   it('has an undefined code when none is given', () => {
     expect(new DaemonError('m').code).toBeUndefined();
   });
+
+  it("carries the envelope error's data (e.g. fork_unavailable's reason/seededAvailable)", async () => {
+    const { conn, daemon } = await pair();
+    const p = conn.call('chat.fork', { chatId: 3, atRunId: 'r1', mode: 'native' });
+    const req = JSON.parse(new TextDecoder().decode(await daemon.receive()));
+    daemon.send(
+      new TextEncoder().encode(
+        JSON.stringify({ id: req.id, error: { message: 'cannot fork', code: 'fork_unavailable', data: { reason: 'fork_unsupported', seededAvailable: true } } }),
+      ),
+    );
+    const err = await p.then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(DaemonError);
+    expect((err as DaemonError).code).toBe('fork_unavailable');
+    expect((err as DaemonError).data).toEqual({ reason: 'fork_unsupported', seededAvailable: true });
+  });
+
+  it('leaves data undefined when the envelope carries none', async () => {
+    const { conn, daemon } = await pair();
+    const p = conn.call('x');
+    const req = JSON.parse(new TextDecoder().decode(await daemon.receive()));
+    daemon.send(new TextEncoder().encode(JSON.stringify({ id: req.id, error: { message: 'nope', code: 'x' } })));
+    const err = await p.then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect((err as DaemonError).data).toBeUndefined();
+  });
 });

@@ -5,6 +5,10 @@ describe('taskHref', () => {
   it('stringifies the id and carries the title', () => {
     expect(taskHref({ ID: 7, Title: 'Fix bug' })).toEqual({ pathname: '/task/[id]', params: { id: '7', title: 'Fix bug' } });
   });
+  it('carries the chat param only when a chat id is given', () => {
+    expect(taskHref({ ID: 7, Title: 'Fix bug' }, 12)).toEqual({ pathname: '/task/[id]', params: { id: '7', title: 'Fix bug', chat: '12' } });
+    expect('chat' in taskHref({ ID: 7, Title: 'Fix bug' }).params).toBe(false);
+  });
 });
 
 describe('parseTaskParams', () => {
@@ -34,6 +38,18 @@ describe('parseTaskParams', () => {
   });
   it('takes the first element of array params', () => {
     expect(parseTaskParams({ id: ['5', '6'], title: ['A', 'B'] })).toEqual({ ok: true, id: 5, title: 'A' });
+  });
+  it('reads the optional chat param (AC18)', () => {
+    expect(parseTaskParams({ id: '12', chat: '9' })).toEqual({ ok: true, id: 12, title: 'Task 12', chat: 9 });
+    expect(parseTaskParams({ id: '12', chat: ['9', '10'] })).toEqual({ ok: true, id: 12, title: 'Task 12', chat: 9 });
+    expect('chat' in parseTaskParams({ id: '12' })).toBe(false);
+  });
+  it('ignores a chat that is not a positive safe integer, without refusing the id', () => {
+    for (const chat of ['junk', '0', '-3', '1e3', '1.5', '99999999999999999999', '']) {
+      const parsed = parseTaskParams({ id: '12', chat });
+      expect(parsed).toEqual({ ok: true, id: 12, title: 'Task 12' });
+      expect('chat' in parsed).toBe(false);
+    }
   });
 });
 
