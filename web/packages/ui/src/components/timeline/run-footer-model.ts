@@ -1,6 +1,7 @@
 import { formatCost } from "@/lib/usage-format";
 import { formatRelativeTime } from "@/lib/relative-time";
-import { AUTH_EXPIRED, MODEL_NOT_IN_PLAN, TRANSIENT_429, type FailureAction } from "@/lib/failure-class";
+import { AUTH_EXPIRED, HUMAN_ACTION_KINDS, MODEL_NOT_IN_PLAN, TRANSIENT_429, type FailureAction } from "@/lib/failure-class";
+import { failureSentence } from "@/lib/failure-text";
 import { describeRateLimit, isRateLimitedRun } from "@/lib/rate-limit";
 import type { RunStatusValue, RunUsage } from "@/lib/types";
 
@@ -80,9 +81,11 @@ const CAP_SENTENCES: Record<string, string> = {
 /** The prompt of a Continue on a run that ended done at a cap or was cut off by a restart. */
 export const CONTINUE_PROMPT = "Continue";
 
-/** How a resumable failure kind reads in the error run's Continue prompt. */
-const FAILURE_LABELS: Record<string, string> = {
-  cli_exited: "the agent CLI exited without a result",
+/**
+ * How the two resumable quota kinds read in the error run's Continue prompt: the sentence
+ * alone does not say the quota has since reset, which is the reason a Continue exists.
+ */
+const RESUMABLE_FAILURE_LABELS: Record<string, string> = {
   rate_limited: "a provider rate limit, which has since reset",
   plan_window_exhausted: "the plan's usage window, which has since reset",
 };
@@ -90,12 +93,14 @@ const FAILURE_LABELS: Record<string, string> = {
 /**
  * The follow-up prompt the footer's Continue sends for `run`: the standard
  * "Continue" for a capped or restart-interrupted run, one line naming the
- * failure for an errored one (J1).
+ * failure for an errored one (J1) -- the daemon's own sentence, so every
+ * surface reads the same words.
  */
-export function continuePrompt(run: Pick<RunFooterRun, "status" | "failureKind">): string {
+export function continuePrompt(run: Pick<RunFooterRun, "status" | "failureKind" | "failureAction">): string {
   if (run.status !== "error") return CONTINUE_PROMPT;
-  const label = FAILURE_LABELS[run.failureKind ?? ""] ?? "an unexpected error";
-  return `Continue from where you left off (the previous run ended unexpectedly: ${label}).`;
+  const sentence = failureSentence(run.failureKind, run.failureAction);
+  const label = RESUMABLE_FAILURE_LABELS[run.failureKind ?? ""] ?? (sentence ? sentence.charAt(0).toLowerCase() + sentence.slice(1).replace(/\.$/, "") : null);
+  return `Continue from where you left off (the previous run ended unexpectedly: ${label ?? "an unexpected error"}).`;
 }
 
 const MINUTE_MS = 60_000;
@@ -257,7 +262,10 @@ export function describeRunFooter(
 
   // The failure classes with their own sentence (run failure classes plan): a person-fix class never offers Retry on the same setup;
   // a transient 429 says it is retrying, or offers Retry once the daemon's retries are spent.
-  if (run.status === "error" && (run.failureKind === AUTH_EXPIRED || run.failureKind === MODEL_NOT_IN_PLAN || run.failureKind === TRANSIENT_429)) {
+  if (
+    run.status === "error" &&
+    (run.failureKind === AUTH_EXPIRED || run.failureKind === MODEL_NOT_IN_PLAN || run.failureKind === TRANSIENT_429 || HUMAN_ACTION_KINDS.has(run.failureKind ?? ""))
+  ) {
     const a = run.failureAction;
     const retrying = run.failureKind === TRANSIENT_429 && a?.kind === "auto_retry";
     const sentence =
@@ -265,9 +273,11 @@ export function describeRunFooter(
         ? "Signed out"
         : run.failureKind === MODEL_NOT_IN_PLAN
           ? "Model not in your plan"
-          : retrying
-            ? `Provider busy · retrying${a.attempt && a.max ? ` (${a.attempt} of ${a.max})` : ""}`
-            : "Provider busy for a moment";
+          : HUMAN_ACTION_KINDS.has(run.failureKind ?? "")
+            ? failureSentence(run.failureKind, a)
+            : retrying
+              ? `Provider busy · retrying${a.attempt && a.max ? ` (${a.attempt} of ${a.max})` : ""}`
+              : "Provider busy for a moment";
     return detail({
       kind: "abnormal",
       sentence,

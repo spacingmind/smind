@@ -377,6 +377,11 @@ function InboxRow({
             Sign in
           </Button>
         )}
+        {item.kind === "run_failed" && item.action?.kind === "review_policy" && (
+          <Button type="button" variant="outline" size="sm" className={btn} data-testid={`inbox-review-policy-${item.key}`} onClick={() => openFailureSettings(item.action)}>
+            Review the permission policy
+          </Button>
+        )}
         {isHostKind(item.kind)
           ? onOpenHosts && (
               <Button type="button" variant="outline" size="sm" className={btn} data-testid={`inbox-hosts-${item.key}`} onClick={onOpenHosts}>

@@ -6,6 +6,7 @@
 // testable without mounting anything.
 
 import { RunSummary } from './api';
+import { failureSentence } from './failureText';
 
 /** The prompt the Continue button sends on the run's own provider (web task-detail.tsx sends the same word). */
 export const CONTINUE_PROMPT = 'Continue';
@@ -13,18 +14,21 @@ export const CONTINUE_PROMPT = 'Continue';
 /**
  * The prompt Continue sends for `run`: the plain word for a capped run, one
  * line naming the failure for an errored one (J1; the same text as the web
- * footer's continuePrompt in run-footer-model.ts).
+ * footer's continuePrompt in run-footer-model.ts). The failure is named by
+ * the daemon's sentence (action.summary, R3a AC4), lower-cased and without
+ * its trailing period; rate_limited keeps its own wording.
  */
-export function continuePrompt(run: Pick<RunSummary, 'Status' | 'FailureKind'>): string {
+export function continuePrompt(run: Pick<RunSummary, 'Status' | 'FailureKind' | 'FailureAction'>): string {
   if (run.Status !== 'error') return CONTINUE_PROMPT;
-  const label = FAILURE_LABELS[run.FailureKind ?? ''] ?? 'an unexpected error';
+  let label: string;
+  if (run.FailureKind === RATE_LIMITED) {
+    label = 'a provider rate limit, which has since reset';
+  } else {
+    const sentence = failureSentence(run.FailureKind, run.FailureAction);
+    label = sentence ? sentence.charAt(0).toLowerCase() + sentence.slice(1).replace(/\.$/, '') : 'an unexpected error';
+  }
   return `Continue from where you left off (the previous run ended unexpectedly: ${label}).`;
 }
-
-const FAILURE_LABELS: Record<string, string> = {
-  cli_exited: 'the agent CLI exited without a result',
-  rate_limited: 'a provider rate limit, which has since reset',
-};
 
 export interface RunFooterView {
   sentence: string;
@@ -58,6 +62,9 @@ const CAP: Record<string, string> = {
 
 /** runs.FailureKindRateLimited (ADR-0041). */
 const RATE_LIMITED = 'rate_limited';
+
+/** The human-action failure classes (R3a AC1): a person must fix these, so they are never continued or retried from here. */
+const HUMAN_FIX_KINDS: ReadonlySet<string> = new Set(['context_window_exceeded', 'session_budget_exceeded', 'too_many_denials']);
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -96,7 +103,7 @@ function rateLimitSentence(window: string | undefined, resetAt: string | null | 
  * stop-reason cases cover the two caps it can report.
  */
 export function describeRunFooter(
-  run: Pick<RunSummary, 'Status' | 'StopReason' | 'Disposition' | 'FailureKind' | 'FailureWindow' | 'FailureResetAt' | 'FailureResetInferred'>,
+  run: Pick<RunSummary, 'Status' | 'StopReason' | 'Disposition' | 'FailureKind' | 'FailureWindow' | 'FailureResetAt' | 'FailureResetInferred' | 'FailureAction'>,
   now: Date = new Date(),
   ctx?: RunFooterContext,
 ): RunFooterView | null {
@@ -117,9 +124,15 @@ export function describeRunFooter(
     }
     return view;
   }
+  // R3a: a human-action class (the conversation outgrew the context window, the provider's session
+  // budget is spent, or the permission policy stopped the run) needs a person, so the footer only
+  // explains: no Continue, whatever the disposition says.
+  if (run.Status === 'error' && run.FailureKind !== undefined && HUMAN_FIX_KINDS.has(run.FailureKind)) {
+    return { sentence: failureSentence(run.FailureKind, run.FailureAction), tone: 'warning', action: null };
+  }
   // J1: a CLI that died without a result is resumable when the daemon says so (it has a stored session).
   if (run.Status === 'error' && run.FailureKind === 'cli_exited' && run.Disposition === NEEDS_CONTINUE) {
-    return { sentence: 'Failed · the agent CLI exited without a result', tone: 'warning', action: 'continue' };
+    return { sentence: `Failed · ${failureSentence('cli_exited', run.FailureAction)}`, tone: 'warning', action: 'continue' };
   }
   if (run.Status !== 'done') return null;
   if (run.Disposition === NEEDS_CONTINUE) {

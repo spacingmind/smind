@@ -50,6 +50,42 @@ describe('inbox grouping', () => {
 
 const question = inboxItem({ key: 'ques:r1:q9', kind: 'question', attention: 'high', title: 'Which database?', links: { taskId: 7, runId: 'r1', questionRequestId: 'q9' } });
 
+describe('run failed rows (R3a)', () => {
+  // The daemon's run_failed item: a failed run a person must look at (the human-action
+  // classes come at high attention); snoozable/resolvable like a stall, and it opens the task.
+  const failed = inboxItem({
+    key: 'runfail:r-ctx',
+    kind: 'run_failed',
+    attention: 'high',
+    title: 'Context window exceeded',
+    summary: "The conversation no longer fits the model's context window.",
+    links: { taskId: 7, runId: 'r-ctx' },
+  });
+
+  it('renders with its own label and icon instead of the raw kind string', () => {
+    const row = inboxRow(failed, NOW);
+    expect(row).toMatchObject({ label: 'Run failed', icon: 'warning', tone: 'warning', taskId: 7, unseen: true });
+    expect(row.label).not.toBe('run_failed');
+  });
+
+  it('sits in "Needs you now" after the questions, snoozable and resolvable like a stall', () => {
+    const v = inboxView([failed, stall, question], NOW);
+    expect(v.kind).toBe('list');
+    if (v.kind !== 'list') return;
+    // Sections are per kind: the run_failed group shares the "Needs you now" title with questions.
+    expect(v.sections.map((s) => s.title)).toEqual(['Needs you now', 'Needs you now', 'Stalled']);
+    expect(v.sections.map((s) => s.kind)).toEqual(['question', 'run_failed', 'stall']);
+    expect(v.sections[1].rows.map((r) => r.key)).toEqual(['runfail:r-ctx']);
+    expect(inboxActions(failed)).toEqual(['seen', 'snooze', 'resolve', 'open']);
+  });
+
+  it('a normal-attention failure is neutral-toned but still snoozable', () => {
+    const row = inboxRow(inboxItem({ ...failed, key: 'runfail:r-plan', attention: 'normal' }), NOW);
+    expect(row.tone).toBe('neutral');
+    expect(row.actions).toContain('snooze');
+  });
+});
+
 describe('agent question rows (ADR-0055)', () => {
   it('sorts with permissions in "Needs you now", is waiting-toned and never snoozable or resolvable', () => {
     const v = inboxView([stall, question, perm], NOW);

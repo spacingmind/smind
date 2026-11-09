@@ -148,7 +148,7 @@ export function continueRun(
   conn: RelayConnection,
   deps: SendFollowUpDeps,
   taskId: number,
-  run: Pick<RunSummary, 'Provider' | 'Status' | 'FailureKind'>,
+  run: Pick<RunSummary, 'Provider' | 'Status' | 'FailureKind' | 'FailureAction'>,
   nextSeq: () => number,
   chatId?: number,
 ): Promise<RunStartResult> {

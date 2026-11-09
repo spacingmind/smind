@@ -382,10 +382,23 @@ describe("continuePrompt", () => {
   });
   it("is one line naming the failure for an errored run", () => {
     const p = continuePrompt({ status: "error", failureKind: "cli_exited" });
-    expect(p).toBe("Continue from where you left off (the previous run ended unexpectedly: the agent CLI exited without a result).");
+    expect(p).toBe(
+      "Continue from where you left off (the previous run ended unexpectedly: the agent stopped before finishing; its session is saved, so you can continue where it left off).",
+    );
     expect(p).not.toContain("\n");
     expect(continuePrompt({ status: "error", failureKind: "rate_limited" })).toContain("provider rate limit");
     expect(continuePrompt({ status: "error" })).toContain("an unexpected error");
+  });
+
+  it("uses the daemon's summary when it sent one, lowercased and without the trailing period", () => {
+    const p = continuePrompt({ status: "error", failureKind: "too_many_denials", failureAction: { kind: "review_policy", label: "Review the permission policy", summary: "The provider stopped the run." } });
+    expect(p).toBe("Continue from where you left off (the previous run ended unexpectedly: the provider stopped the run).");
+  });
+
+  it("a human-action class still names what happened; the class fallback stands in without a summary", () => {
+    const p = continuePrompt({ status: "error", failureKind: "context_window_exceeded", failureAction: { kind: "new_chat", label: "Start a fresh chat for this task" } });
+    expect(p).toContain("the conversation no longer fits the model's context window");
+    expect(continuePrompt({ status: "error", failureKind: "session_budget_exceeded" })).toContain("the provider's session budget for this run is used up");
   });
 });
 
@@ -417,5 +430,18 @@ describe("describeRunFooter failure classes", () => {
 
   it("an old daemon (no action) still reads sensibly for the new kinds", () => {
     expect(describeRunFooter(freshRun({ status: "error", failureKind: "auth_expired" }), { now: NOW, modelLabel: "" }).sentence).toBe("Signed out");
+  });
+
+  it.each([
+    ["context_window_exceeded", "new_chat", "Start a fresh chat for this task", "The conversation no longer fits the model's context window."],
+    ["session_budget_exceeded", "raise_budget", "Raise the session budget in the provider's settings, or start a fresh chat", "The provider's session budget for this run is used up."],
+    ["too_many_denials", "review_policy", "Review the permission policy", "The agent kept asking for actions that were denied, so the provider stopped the run."],
+  ])("%s: the daemon's sentence, danger tone, never Retry or Continue (even with the disposition)", (kind, actionKind, label, summary) => {
+    const v = describeRunFooter(freshRun({ status: "error", failureKind: kind, failureAction: act(actionKind, { label, summary }), disposition: "needs-continue" }), { now: NOW, modelLabel: "" });
+    expect(v).toMatchObject({ kind: "abnormal", sentence: summary, tone: "danger", action: null });
+    // An older daemon sent no summary: the class's fallback sentence stands in.
+    const fallback = describeRunFooter(freshRun({ status: "error", failureKind: kind, failureAction: act(actionKind, { label }) }), { now: NOW, modelLabel: "" });
+    expect(fallback.sentence).toBe(summary);
+    expect(fallback.sentence).not.toMatch(/merge|approve|always[ _-]?allow/i);
   });
 });
