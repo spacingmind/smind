@@ -96,6 +96,8 @@ test('F-01 a context-window failure shows the sentence, the label and Start a fr
   const spec = CLASSES['context-window']
   const page = await openFailedTask(app, testInfo, 'f01', spec)
   await expect(page.getByTestId('run-failure-hint')).toHaveText(spec.action.label)
+  // The footer names the class only; the card above it carries the whole sentence.
+  await expect(page.getByTestId('run-stop-reason').first()).toHaveText('Context window full')
   await frame(page, testInfo, 'a-context-window')
   // The control is the "+" tab button's own path: chat.create through the app's smind:new-chat event.
   const chatCreated = waitForRpc(page, 'chat.create')
@@ -107,6 +109,7 @@ test('F-02 a session-budget failure shows the sentence and the label as its hint
   const spec = CLASSES['session-budget']
   const page = await openFailedTask(app, testInfo, 'f02', spec)
   await expect(page.getByTestId('run-failure-hint')).toHaveText(spec.action.label)
+  await expect(page.getByTestId('run-stop-reason').first()).toHaveText('Session budget used up')
   await expect(page.getByTestId('run-failure-signin')).toHaveCount(0)
   await expect(page.getByTestId('run-failure-new-chat')).toHaveCount(0)
   await expect(page.getByTestId('run-failure-review-policy')).toHaveCount(0)
@@ -117,6 +120,7 @@ test('F-03 too many denials offers Review the permission policy, which opens Set
   const spec = CLASSES['too-many-denials']
   const page = await openFailedTask(app, testInfo, 'f03', spec)
   await expect(page.getByTestId('run-failure-hint')).toHaveText(spec.action.label)
+  await expect(page.getByTestId('run-stop-reason').first()).toHaveText('Stopped after too many denials')
   await frame(page, testInfo, 'c-too-many-denials')
   await page.getByTestId('run-failure-review-policy').click()
   await expect(page.getByTestId('settings-screen')).toBeVisible()

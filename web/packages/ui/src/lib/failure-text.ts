@@ -24,3 +24,15 @@ export function failureSentence(kind: string | undefined | null, action?: { summ
   if (action?.summary) return action.summary;
   return kind ? (FAILURE_FALLBACK_SENTENCE[kind] ?? "") : "";
 }
+
+/** The run footer's short label of the human-action classes: the error card carries the full sentence, so the footer only names the class. */
+export const FAILURE_SHORT_LABEL: Record<string, string> = {
+  context_window_exceeded: "Context window full",
+  session_budget_exceeded: "Session budget used up",
+  too_many_denials: "Stopped after too many denials",
+};
+
+/** The class's short label, or "" for any other kind. */
+export function failureShortLabel(kind: string | undefined | null): string {
+  return kind ? (FAILURE_SHORT_LABEL[kind] ?? "") : "";
+}

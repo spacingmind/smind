@@ -433,15 +433,16 @@ describe("describeRunFooter failure classes", () => {
   });
 
   it.each([
-    ["context_window_exceeded", "new_chat", "Start a fresh chat for this task", "The conversation no longer fits the model's context window."],
-    ["session_budget_exceeded", "raise_budget", "Raise the session budget in the provider's settings, or start a fresh chat", "The provider's session budget for this run is used up."],
-    ["too_many_denials", "review_policy", "Review the permission policy", "The agent kept asking for actions that were denied, so the provider stopped the run."],
-  ])("%s: the daemon's sentence, danger tone, never Retry or Continue (even with the disposition)", (kind, actionKind, label, summary) => {
+    ["context_window_exceeded", "new_chat", "Start a fresh chat for this task", "The conversation no longer fits the model's context window.", "Context window full"],
+    ["session_budget_exceeded", "raise_budget", "Raise the session budget in the provider's settings, or start a fresh chat", "The provider's session budget for this run is used up.", "Session budget used up"],
+    ["too_many_denials", "review_policy", "Review the permission policy", "The agent kept asking for actions that were denied, so the provider stopped the run.", "Stopped after too many denials"],
+  ])("%s: the short class label, danger tone, never Retry or Continue (even with the disposition)", (kind, actionKind, label, summary, short) => {
     const v = describeRunFooter(freshRun({ status: "error", failureKind: kind, failureAction: act(actionKind, { label, summary }), disposition: "needs-continue" }), { now: NOW, modelLabel: "" });
-    expect(v).toMatchObject({ kind: "abnormal", sentence: summary, tone: "danger", action: null });
-    // An older daemon sent no summary: the class's fallback sentence stands in.
+    expect(v).toMatchObject({ kind: "abnormal", sentence: short, tone: "danger", action: null });
+    // The card keeps the sentence; the footer never repeats it, with or without the daemon's summary.
+    expect(v.sentence).not.toContain(summary);
     const fallback = describeRunFooter(freshRun({ status: "error", failureKind: kind, failureAction: act(actionKind, { label }) }), { now: NOW, modelLabel: "" });
-    expect(fallback.sentence).toBe(summary);
+    expect(fallback.sentence).toBe(short);
     expect(fallback.sentence).not.toMatch(/merge|approve|always[ _-]?allow/i);
   });
 });

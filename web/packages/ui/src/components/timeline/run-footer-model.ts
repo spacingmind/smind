@@ -1,7 +1,7 @@
 import { formatCost } from "@/lib/usage-format";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { AUTH_EXPIRED, HUMAN_ACTION_KINDS, MODEL_NOT_IN_PLAN, TRANSIENT_429, type FailureAction } from "@/lib/failure-class";
-import { failureSentence } from "@/lib/failure-text";
+import { failureSentence, failureShortLabel } from "@/lib/failure-text";
 import { describeRateLimit, isRateLimitedRun } from "@/lib/rate-limit";
 import type { RunStatusValue, RunUsage } from "@/lib/types";
 
@@ -268,13 +268,15 @@ export function describeRunFooter(
   ) {
     const a = run.failureAction;
     const retrying = run.failureKind === TRANSIENT_429 && a?.kind === "auto_retry";
+    // The human-action classes say the whole sentence in the error card; the footer names the class only.
+    const shortLabel = failureShortLabel(run.failureKind);
     const sentence =
       run.failureKind === AUTH_EXPIRED
         ? "Signed out"
         : run.failureKind === MODEL_NOT_IN_PLAN
           ? "Model not in your plan"
           : HUMAN_ACTION_KINDS.has(run.failureKind ?? "")
-            ? failureSentence(run.failureKind, a)
+            ? shortLabel || failureSentence(run.failureKind, a)
             : retrying
               ? `Provider busy · retrying${a.attempt && a.max ? ` (${a.attempt} of ${a.max})` : ""}`
               : "Provider busy for a moment";
