@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spacingmind/smind/internal/fsutil"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -357,7 +358,7 @@ func ApplyRoles(items []ApplyItem, opt ApplyOptions) (string, []ApplyResult, err
 	if opt.Now != nil {
 		now = opt.Now
 	}
-	if fi, err := os.Lstat(opt.BackupDir); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+	if fi, err := os.Lstat(opt.BackupDir); err == nil && fsutil.IsLink(fi.Mode()) {
 		return "", nil, fmt.Errorf("role pack apply: backup directory %s is a symlink", opt.BackupDir)
 	}
 	dir := filepath.Join(opt.BackupDir, now().UTC().Format("20060102T150405Z")+fmt.Sprintf("-pack-v%d", PackVersion))
