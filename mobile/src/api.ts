@@ -255,6 +255,41 @@ export async function defaultChatId(conn: RelayConnection, taskId: number): Prom
   return chats[0].ID;
 }
 
+/** chat.list/chat.get's additive `fork` field (ADR-0057 PR1 AC8): where a forked chat came from. */
+export interface ChatForkInfo {
+  parentChatId: number;
+  forkedAtRunId: string;
+  kind: string;
+  mode: 'native' | 'seeded';
+  lossy: boolean;
+}
+
+/** One chat of a task, wire field names verbatim (chat.list's entries). */
+export interface ChatInfo {
+  ID: number;
+  TaskID: number;
+  Title: string;
+  ArchivedAt: string | null;
+  /** Present only for a forked chat; absent for every other. */
+  fork?: ChatForkInfo;
+}
+
+/** chat.list with archived included (the banner's "another chat" needs the parent even when archived). */
+export async function listChats(conn: RelayConnection, taskId: number): Promise<ChatInfo[]> {
+  return (await conn.call('chat.list', { taskId, includeArchived: true })) as ChatInfo[];
+}
+
+/** chat.fork: fork chatId at runId (a finished turn); native branches the agent session, seeded starts fresh with a summary seed. */
+export async function forkChat(conn: RelayConnection, chatId: number, runId: string, mode: 'native' | 'seeded'): Promise<ChatInfo> {
+  return (await conn.call('chat.fork', { chatId, atRunId: runId, mode })) as ChatInfo;
+}
+
+/** chat.forkSeed: the seed a seeded fork was given; "" for any other chat. */
+export async function forkSeed(conn: RelayConnection, chatId: number): Promise<string> {
+  const result = (await conn.call('chat.forkSeed', { chatId })) as { seed?: string };
+  return result.seed ?? '';
+}
+
 /** chat.queueList: the chat's queue snapshot (queued, delivered, cancelled). */
 export async function listChatQueue(conn: RelayConnection, chatId: number): Promise<ChatQueueItem[]> {
   const result = (await conn.call('chat.queueList', { chatId })) as { items?: ChatQueueItem[] };
