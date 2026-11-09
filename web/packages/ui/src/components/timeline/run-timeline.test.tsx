@@ -573,6 +573,36 @@ describe("RunTimeline", () => {
     expect(screen.queryByTestId("run-rerun")).toBeNull();
   });
 
+  it("Re-run hides on a human-action failure (a person must act first), stays for every other error and for done runs", () => {
+    const onRerun = vi.fn();
+    for (const failureKind of ["context_window_exceeded", "session_budget_exceeded", "too_many_denials"]) {
+      const { unmount } = render(
+        <ul>
+          <RunTimeline run={run([], { status: "error", err: "boom", failureKind })} onRerun={onRerun} />
+        </ul>,
+      );
+      expect(screen.queryByTestId("run-rerun")).toBeNull();
+      unmount();
+    }
+    // After a sign-in or a model change, re-running the same prompt is exactly what the user wants.
+    for (const failureKind of ["auth_expired", "model_not_in_plan", "transient_429", undefined]) {
+      const { unmount } = render(
+        <ul>
+          <RunTimeline run={run([], { status: "error", err: "boom", failureKind })} onRerun={onRerun} />
+        </ul>,
+      );
+      expect(screen.getByTestId("run-rerun")).toBeInTheDocument();
+      unmount();
+    }
+    const { unmount } = render(
+      <ul>
+        <RunTimeline run={run([], { status: "done", failureKind: "context_window_exceeded" })} onRerun={onRerun} />
+      </ul>,
+    );
+    expect(screen.getByTestId("run-rerun")).toBeInTheDocument();
+    unmount();
+  });
+
   it("only a done turn offers Fork from here; running, failed and prop-less turns do not", () => {
     const onFork = vi.fn();
     const done = run([], { status: "done" });

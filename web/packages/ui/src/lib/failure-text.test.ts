@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { FAILURE_FALLBACK_SENTENCE, failureSentence } from "@/lib/failure-text";
+import { FAILURE_FALLBACK_SENTENCE, FAILURE_SHORT_LABEL, failureSentence, failureShortLabel } from "@/lib/failure-text";
 
 describe("FAILURE_FALLBACK_SENTENCE", () => {
   it("has one plain sentence for each of the nine classes", () => {
@@ -52,5 +52,33 @@ describe("failureSentence", () => {
     expect(failureSentence(undefined)).toBe("");
     expect(failureSentence("")).toBe("");
     expect(failureSentence(null)).toBe("");
+  });
+});
+
+describe("FAILURE_SHORT_LABEL", () => {
+  it("a short label for each human-action class the footer names", () => {
+    expect(FAILURE_SHORT_LABEL).toEqual({
+      context_window_exceeded: "Context window full",
+      session_budget_exceeded: "Session budget used up",
+      too_many_denials: "Stopped after too many denials",
+    });
+    for (const label of Object.values(FAILURE_SHORT_LABEL)) {
+      expect(label).toMatch(/^[A-Z]/);
+      expect(label).not.toMatch(/\.$/);
+      // A label says what happened, never what to approve, allow or merge (AC7).
+      expect(label).not.toMatch(/merge|approve|always[ _-]?allow/i);
+    }
+  });
+});
+
+describe("failureShortLabel", () => {
+  it("is the class's short label, empty for any other kind or no failure at all", () => {
+    expect(failureShortLabel("context_window_exceeded")).toBe("Context window full");
+    expect(failureShortLabel("session_budget_exceeded")).toBe("Session budget used up");
+    expect(failureShortLabel("too_many_denials")).toBe("Stopped after too many denials");
+    expect(failureShortLabel("auth_expired")).toBe("");
+    expect(failureShortLabel("martian")).toBe("");
+    expect(failureShortLabel(undefined)).toBe("");
+    expect(failureShortLabel(null)).toBe("");
   });
 });
