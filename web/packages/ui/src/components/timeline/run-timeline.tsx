@@ -2,6 +2,7 @@ import { RunAttachments } from "@/components/timeline/run-attachments";
 import { DeliverableCards, type DeliverableContext } from "@/components/timeline/deliverable-card";
 import { memo } from "react";
 import { Icons } from "@/lib/icons";
+import { HUMAN_ACTION_KINDS } from "@/lib/failure-class";
 
 import { groupTimeline, type DetailLevel } from "@/components/timeline/detail-level";
 import { TimelineRow, type TimelineRowContext } from "@/components/timeline/timeline-row";
@@ -147,7 +148,8 @@ export const RunTimeline = memo(function RunTimeline({
         <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} waiting={Boolean(run.pendingPermission)} disconnected={disconnected} onContinue={onContinue} onRerun={onRerun} failover={failover}>
           <MessageActions group="run" className="ml-auto" data-testid="run-actions">
             <RunCopyMenu run={run} />
-            {onRerun && run.status !== "running" && (
+            {/* Re-running the same prompt cannot fix a human-action failure (a person must act first), so the icon hides for those. */}
+            {onRerun && !(run.status === "error" && HUMAN_ACTION_KINDS.has(run.failureKind ?? "")) && run.status !== "running" && (
               <MessageAction
                 label="Re-run this prompt"
                 icon={<Icons.retry aria-hidden />}
