@@ -18,6 +18,10 @@ func TestFloor_SelfApproveCLIDenied(t *testing.T) {
 		{"smind task answer 12 req-1 --answer q1=yes", "no-self-approve"},
 		{"smind permission show --reveal 1", "no-self-approve"},
 		{"smind permission", "no-self-approve"},
+		{"smind profile add p glm --agent-questions", "no-self-approve"},
+		{"smind profile edit 3 --agent-questions=true", "no-self-approve"},
+		{"smind profile add p glm --questions=ask", ""},
+		{`curl -d '{"method":"profile.update","params":{"agentQuestions":true}}' http://localhost:9/rpc`, "no-self-approve"},
 		// wrappers and env games
 		{"env -u SMIND_RUN_ID smind task approve 12", "no-self-approve"},
 		{"env -u SMIND_AGENT_RUN -u SMIND_RUN_ID smind task approve 12", "no-self-approve"},
@@ -202,7 +206,8 @@ func TestHumanOnlyCLI_Table(t *testing.T) {
 		"task approve 1": true, "task deny 1": true, "task answer 1": true, "permission show": true,
 		"permission": true, "--x task approve 1": true, "host approve h": true, "host reject h": true,
 		"task chat fork 1 --at r": true, "task chat ls 1": false, "task chat new 1": false, "relay devices approve d": true, "relay devices revoke d": true, "host ls": false, "relay devices ls": false, "relay status": false,
-		"task ls": false, "task permissions 1": false, "status": false, "": false, "task": false,
+		"profile add p glm --agent-questions": true, "profile edit 3 --agent-questions=false": true, "--x profile add p glm --agent-questions=true": true,
+		"profile add p glm": false, "profile edit 3 --questions=ask": false, "profile ls": false, "task ls": false, "task permissions 1": false, "status": false, "": false, "task": false,
 	} {
 		if got := HumanOnlyCLI(splitWords(args)); got != want {
 			t.Errorf("HumanOnlyCLI(%q) = %v, want %v", args, got, want)

@@ -104,14 +104,14 @@ conditions and the daemon declines immediately with note "no human is attached t
 - Modes where Claude never calls `can_use_tool` for the tool (bypass/auto, `dontAsk`) are unchanged and stated as a limit (AC1 records what the CLI does for
   `AskUserQuestion` in each mode; if it can run without asking, PR1 adds `AskUserQuestion` to the run's disallowed tools for an unattended profile, see §5).
 
-**Codex native** (`internal/codex`): opt-in. PR2 adds `capabilities: {experimentalApi: true}` to `initialize` **only when the profile sets `questions: ask`** (§5), registers
+**Codex native** (`internal/codex`): opt-in. PR2 adds `capabilities: {experimentalApi: true}` to `initialize` **only when the profile explicitly opts in** (the `agent_questions` flag, §5; `questions: ask` alone is not enough), registers
 `item/tool/requestUserInput` and `mcpServer/elicitation/request` handlers and maps `questions[]` (`isOther` → `allowOther`; `options` absent → `text`; `isSecret` → §6).
 Response `{answers: {<questionId>: {answers: [string]}}}` (option labels, or the typed text). Decline → an empty `answers` for each question; the exact "declined" encoding for
 a blocking request is **verified against the real app-server before merge** (AC9); the fallback is a JSON-RPC error with the note. `isBlocking: false` (the model continues
 without waiting) → the card is shown but the request is answered immediately with empty answers and recorded `non_blocking`; a human sees what was asked, nothing hangs. MCP
 elicitation (form mode only, §below) maps through the ACP form mapping; url mode is declined.
 
-**ACP** (`internal/acp`): PR2 declares `capabilities.elicitation.form` (never `url`) at `initialize` for providers whose profile sets `questions: ask`, and handles
+**ACP** (`internal/acp`): PR2 declares `capabilities.elicitation.form` (never `url`) at `initialize` for providers whose profile explicitly opts in (`agent_questions`, default off, together with `questions: ask`), and handles
 `elicitation/create`. Form schema → questions: string with `enum`/`oneOf` → `single`; array of enum → `multi`; string → `text` (`minLength`/`maxLength`/`pattern`/`format`
 validated on the card and again in the daemon); integer/number → `text` with `valueHint`; boolean → `single` {Yes, No}. Any other property type or a nested schema → decline the
 whole request (`refused_unsupported`). Answer → `{action: "accept", content: {<prop>: value}}`; decline → `{action: "decline"}`; the 5-minute timeout and a run stop →
@@ -219,7 +219,7 @@ synthesizes only allow-once. The Human asked for "allow this kind of request in 
 ## Consequences
 
 - A Claude `AskUserQuestion` is finally a question card whose answer the model receives; the "empty answers" incident class goes away.
-- Codex and ACP questions work only when a profile opts in (`questions: ask`), so no running setup changes behaviour on upgrade.
+- Codex and ACP questions work only when a profile explicitly opts in (the separate `agent_questions` flag, default off, plus `questions: ask`). `questions: ask` is the default of every existing profile and so cannot be the opt-in; the flag is human-only (an agent cannot set it), so no running setup changes behaviour on upgrade.
 - `waiting_question` is a new state for orchestrators; the doc string in `mcp_instructions.go` and the CLI hint change.
 - The grant table is the first human-written standing decision stored in the DB rather than the policy file; the evaluation order and the never-offered list keep it
   strictly narrower than the policy file's capabilities.
@@ -240,7 +240,7 @@ Each has a recommendation; accept all in one message or veto by number. "PR" = t
 | D1 | A **separate question request** (own events, RPC, inbox kind, card) rather than extending the permission request | **Separate** (§1, §2; options 1 rejected) | PR1 |
 | D2 | **Unattended policy**: per-profile `questions: ask\|decline\|disabled`, default `ask`; automations and orchestrated Leads default `decline`; 5-minute timeout then **decline with a note, never an answer** | **Accept as written** (§5) | PR1 |
 | D3 | **Secrets**: refuse and tell the human (no input, nothing stored); a secure entry flow is a later ADR | **Refuse in v1** (§6) | PR1 |
-| D4 | **Codex and ACP questions are opt-in per profile** (capability advertised only with `questions: ask`) | **Opt-in**, so no running setup changes on upgrade | PR2 |
+| D4 | **Codex and ACP questions are opt-in per profile** (capability advertised only when the profile explicitly opts in with the separate `agent_questions` flag, default off, and `questions` is `ask`; the flag is human-only) | **Opt-in**, so no running setup changes on upgrade | PR2 |
 | D5 | **Orchestrator visibility**: a new `waiting_question` state in `task_wait/task_status` (additive) instead of reusing `waiting_permission` | **New state** (§3) | PR1 |
 | D6 | **"Always allow in this project"**: daemon-owned `permission_grants` (30-day default expiry, revocable, never for floor/destructive/network/unparsed/questions) rather than editing `policy.yaml` or Claude's `updatedPermissions` | **Grants table** (§8) | PR4 |
 | D7 | **Mobile push** for a question carries the title only, no question text | **Title only** (§9) | PR3 |

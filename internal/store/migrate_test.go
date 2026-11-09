@@ -1005,3 +1005,49 @@ func TestMigration_RateLimitedWithWindowBecomesPlanWindow(t *testing.T) {
 		s.Close()
 	}
 }
+
+// ADR-0055 D4: an upgraded install (profiles that exist before the
+// agent_questions column) must come out with the ACP opt-in OFF, while the
+// Claude `questions` default stays ask. The pre-upgrade shape is rebuilt by
+// dropping the column from a database that already has profiles.
+func TestMigrate_AgentQuestionsOffForExistingProfiles(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"acp-old", "glm-old"} {
+		if _, err := s.CreateAgentProfile(AgentProfile{Name: name, Provider: "glm"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
+
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE agent_profiles DROP COLUMN agent_questions`); err != nil {
+		t.Fatalf("drop column: %v", err)
+	}
+	db.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	list, err := s.ListAgentProfiles()
+	if err != nil || len(list) != 2 {
+		t.Fatalf("list = %d, %v", len(list), err)
+	}
+	for _, p := range list {
+		if p.AgentQuestions {
+			t.Errorf("migrated profile %q has the ACP opt-in on", p.Name)
+		}
+		if p.Questions != "ask" {
+			t.Errorf("migrated profile %q questions = %q, want ask", p.Name, p.Questions)
+		}
+	}
+}

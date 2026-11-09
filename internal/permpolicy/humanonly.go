@@ -27,6 +27,10 @@ var HumanOnlyRPCs = []string{
 	"relay.device.revoke",
 	"chat.fork",
 	"chat.forkSeed",
+	// Profile writes carry the ACP elicitation opt-in (agentQuestions): an agent
+	// must not opt itself in to being able to ask the human (ADR-0055 D4).
+	"profile.create",
+	"profile.update",
 }
 
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not
@@ -54,6 +58,9 @@ var humanOnlyCLI = []humanOnlyCommand{
 // the floor denies them in an agent's shell, from this one table.
 func HumanOnlyCLI(args []string) bool {
 	words := nonFlags(args)
+	if agentQuestionsOptIn(words, args) {
+		return true
+	}
 	for _, c := range humanOnlyCLI {
 		if len(words) < len(c.path) || !slices.Equal(words[:len(c.path)], c.path) {
 			continue
@@ -62,6 +69,22 @@ func HumanOnlyCLI(args []string) bool {
 			return true
 		}
 		if len(words) > len(c.path) && containsWord(c.verbs, words[len(c.path)]) {
+			return true
+		}
+	}
+	return false
+}
+
+// agentQuestionsOptIn reports `profile add|edit ... --agent-questions[=...]`:
+// the flag that opts a profile in to ACP elicitation is human-only (ADR-0055
+// D4), so an agent cannot give itself, or a child it launches, a channel to ask
+// the human. Other profile flags stay open to agents.
+func agentQuestionsOptIn(words, args []string) bool {
+	if len(words) < 2 || words[0] != "profile" || !containsWord([]string{"add", "edit"}, words[1]) {
+		return false
+	}
+	for _, a := range args {
+		if a == "--agent-questions" || strings.HasPrefix(a, "--agent-questions=") {
 			return true
 		}
 	}
