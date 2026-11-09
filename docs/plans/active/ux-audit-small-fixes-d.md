@@ -1,0 +1,24 @@
+# UX audit small fixes, PR D: deny reason field polish, labelled chips on the task composer
+
+Follow-up nits from the review of PRs B and C (see `ux-audit-small-fixes.md` and `ux-audit-small-fixes-c.md`).
+
+## Acceptance criteria
+
+1. **Deny reason is a small auto-growing textarea** (web and mobile): two lines at rest, growing to three, then scrolling; Enter inserts a newline; label and placeholder unchanged; disabled while a response is in flight.
+2. **Counter near the limit.** From 400 characters the field shows "used / 500"; at 500 it says the limit is reached and further typing is refused. Nothing is shown below 400.
+3. **Runes, one constant.** The web counts characters the way the daemon does (runes, `Array.from`), not UTF-16 units; the cap and the counter threshold live in one place per client (`lib/deny-reason.ts` on web; one exported constant in `mobile/src/permissionRequests.ts`), and no other literal 500 remains in the card code.
+4. **Labelled chips on the task composer at 390.** The task composer's model, effort and mode chips keep their text labels below `sm` (the `showLabel` prop from PR C) and wrap onto their own row above the attach and send controls, as on the home composer. At `sm` and above the task composer renders as before.
+
+## Test scenarios (named)
+
+- web: `deny_reason_textarea_grows_to_three_lines`, `deny_reason_counter_from_400`, `deny_reason_counts_runes_not_utf16`, `deny_reason_at_limit_refuses_more_text`, the existing `deny_reason_is_sent_only_with_deny` / `allow_never_sends_the_reason` / `old_onRespond_callers_unchanged` stay green (the field is a textarea now: update them)
+- web: `task_composer_chip_labels_visible_below_sm`
+- mobile: `denyReasonParam` keeps its tests; add `denyReasonCounter` tests (hidden below 400, shown from 400, flagged at 500) and a rune-vs-UTF-16 case
+
+## Decisions
+
+- Enter in the reason field is a newline (the Deny button is the only submit), so a multi-line reason is possible.
+
+## Validation
+
+(filled in at the end)
