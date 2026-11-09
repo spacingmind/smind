@@ -146,14 +146,35 @@ export function feedPermissionEvent(board: PermissionBoard, runId: string, event
   return false;
 }
 
+/** The daemon's cap on a deny reason, in runes (characters) -- one constant for the field and the counter. */
+export const DENY_REASON_MAX = 500;
+/** From this many runes the "used / max" counter is shown under the reason field. */
+export const DENY_REASON_COUNTER_FROM = 400;
+
+/** The number of characters (runes) in text, counted the way the daemon does -- not UTF-16 units. */
+export function runeCount(text: string): number {
+  return Array.from(text).length;
+}
+
+/** Cuts text to at most max runes, never splitting a surrogate pair (an emoji is one character). */
+export function clampRunes(text: string, max = DENY_REASON_MAX): string {
+  return Array.from(text).slice(0, max).join('');
+}
+
+/** The counter state under the reason field: hidden until DENY_REASON_COUNTER_FROM runes, flagged at the cap. */
+export function denyReasonCounter(text: string): { shown: boolean; used: number; max: number; atLimit: boolean } {
+  const used = runeCount(text);
+  return { shown: used >= DENY_REASON_COUNTER_FROM, used, max: DENY_REASON_MAX, atLimit: used >= DENY_REASON_MAX };
+}
+
 /**
  * The deny reason as run.respondPermission takes it: the trimmed text,
- * cut at the daemon's 500-character cap; undefined when blank (in which
+ * cut at the daemon's cap (clampRunes); undefined when blank (in which
  * case no `reason` key goes out at all).
  */
 export function denyReasonParam(text: string): string | undefined {
   const trimmed = text.trim();
-  return trimmed.length === 0 ? undefined : trimmed.slice(0, 500);
+  return trimmed.length === 0 ? undefined : clampRunes(trimmed);
 }
 
 /**

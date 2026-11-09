@@ -204,9 +204,50 @@ describe("PermissionCard: options variant", () => {
     expect(onRespond).toHaveBeenCalledWith("run-1", "req-1", "deny-1");
   });
 
-  it("deny_reason_is_capped_at_500", () => {
+  it("deny_reason_at_limit_refuses_more_text", () => {
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
-    expect(screen.getByTestId("permission-deny-reason")).toHaveAttribute("maxlength", "500");
+    fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "x".repeat(600) } });
+    expect(screen.getByTestId("permission-deny-reason")).toHaveValue("x".repeat(500));
+  });
+
+  it("deny_reason_counts_runes_not_utf16", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    // 499 x plus one emoji is 501 UTF-16 units but 500 runes -- the daemon's unit.
+    const atLimit = "x".repeat(499) + "😀";
+    const field = screen.getByTestId("permission-deny-reason");
+    fireEvent.change(field, { target: { value: atLimit } });
+    expect(field).toHaveValue(atLimit);
+    expect(Array.from((field as HTMLTextAreaElement).value)).toHaveLength(500);
+    // One more character is refused: the emoji stays, the newcomer is dropped.
+    fireEvent.change(field, { target: { value: atLimit + "y" } });
+    expect(field).toHaveValue(atLimit);
+  });
+
+  it("deny_reason_counter_from_400", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    const field = screen.getByTestId("permission-deny-reason");
+    fireEvent.change(field, { target: { value: "x".repeat(399) } });
+    expect(screen.queryByTestId("permission-deny-reason-counter")).toBeNull();
+    fireEvent.change(field, { target: { value: "x".repeat(400) } });
+    expect(screen.getByTestId("permission-deny-reason-counter")).toHaveTextContent("400 / 500");
+    fireEvent.change(field, { target: { value: "x".repeat(500) } });
+    expect(screen.getByTestId("permission-deny-reason-counter")).toHaveTextContent(/limit reached/);
+  });
+
+  it("deny_reason_textarea_grows_to_three_lines", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    const field = screen.getByTestId("permission-deny-reason") as HTMLTextAreaElement;
+    expect(field.tagName).toBe("TEXTAREA");
+    expect(field).toHaveAttribute("rows", "2");
+    // jsdom has no layout, so stub the measured height: past the three-line cap the box stops growing and scrolls.
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", { configurable: true, value: 200 });
+    try {
+      fireEvent.change(field, { target: { value: "one\ntwo\nthree\nfour" } });
+      expect(field.style.height).toBe("84px");
+      expect(field.style.overflowY).toBe("auto");
+    } finally {
+      delete (HTMLTextAreaElement.prototype as { scrollHeight?: number }).scrollHeight;
+    }
   });
 
   it("allow_never_sends_the_reason", async () => {
