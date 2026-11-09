@@ -103,6 +103,9 @@ type sessionNotificationParams struct {
 
 type clientCapabilities struct {
 	FS fileSystemCapabilities `json:"fs"`
+	// Elicitation is declared only when an ElicitationPolicy is installed
+	// (WithElicitation); the form mode only, never url (ADR-0055).
+	Elicitation *elicitationCapabilities `json:"elicitation,omitempty"`
 }
 
 type fileSystemCapabilities struct {
@@ -454,6 +457,10 @@ type Client struct {
 	// session it names (see WithoutFS).
 	noFS bool
 
+	// elicitation, when set (WithElicitation), is advertised at initialize and
+	// decides every elicitation/create request (ADR-0055).
+	elicitation ElicitationPolicy
+
 	ProtocolVersion   int
 	AgentCapabilities json.RawMessage
 }
@@ -535,6 +542,10 @@ func New(command []string, opts ...Option) (*Client, error) {
 	conn.handleRequest("fs/write_text_file", c.handleWriteTextFile)
 	conn.handleRequest("session/request_permission", c.handleRequestPermission)
 	conn.handleNotification("session/update", c.handleSessionUpdate)
+	if c.elicitation != nil {
+		conn.handleRequest("elicitation/create", c.handleElicitationCreate)
+		conn.handleNotification("elicitation/complete", c.handleElicitationComplete)
+	}
 
 	return c, nil
 }
@@ -557,11 +568,13 @@ func newInstanceID() string {
 // terminal support (out of scope). It stores the agent's negotiated
 // protocol version and capabilities on the Client.
 func (c *Client) Initialize(ctx context.Context) error {
+	caps := clientCapabilities{FS: fileSystemCapabilities{ReadTextFile: !c.noFS, WriteTextFile: !c.noFS}}
+	if c.elicitation != nil {
+		caps.Elicitation = &elicitationCapabilities{}
+	}
 	raw, err := c.conn.call(ctx, "initialize", initializeParams{
-		ProtocolVersion: protocolVersion,
-		ClientCapabilities: clientCapabilities{
-			FS: fileSystemCapabilities{ReadTextFile: !c.noFS, WriteTextFile: !c.noFS},
-		},
+		ProtocolVersion:    protocolVersion,
+		ClientCapabilities: caps,
 	})
 	if err != nil {
 		return fmt.Errorf("acp: initialize: %w", err)

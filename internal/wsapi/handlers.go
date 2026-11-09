@@ -2701,6 +2701,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			OnRateLimit          string          `json:"onRateLimit"`
 			FallbackProfileID    *int64          `json:"fallbackProfileId"`
 			Questions            string          `json:"questions"`
+			AgentQuestions       *bool           `json:"agentQuestions"`
 			OrchestrationTools   *bool           `json:"orchestrationTools"`
 			Instructions         string          `json:"instructions"`
 			Skills               []string        `json:"skills"`
@@ -2714,6 +2715,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			return nil, fmt.Errorf("profile.create: %w", err)
 		}
 		return profReg.Create(store.AgentProfile{
+			AgentQuestions:     p.AgentQuestions != nil && *p.AgentQuestions,
 			Name:               p.Name,
 			Provider:           p.Provider,
 			PermissionMode:     p.PermissionMode,
@@ -2771,6 +2773,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			OnRateLimit          string          `json:"onRateLimit"`
 			FallbackProfileID    *int64          `json:"fallbackProfileId"`
 			Questions            string          `json:"questions"`
+			AgentQuestions       *bool           `json:"agentQuestions"`
 			OrchestrationTools   *bool           `json:"orchestrationTools"`
 			Instructions         string          `json:"instructions"`
 			Skills               []string        `json:"skills"`
@@ -2786,8 +2789,17 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 		if err := rejectLegacyApprovalPolicy(p.LegacyApprovalPolicy); err != nil {
 			return nil, fmt.Errorf("profile.update: %w", err)
 		}
+		// An update that does not name agentQuestions keeps the stored value
+		// (an older client must not switch an opt-in off or on).
+		agentQ := false
+		if p.AgentQuestions != nil {
+			agentQ = *p.AgentQuestions
+		} else if cur, gerr := profReg.Get(p.ID); gerr == nil {
+			agentQ = cur.AgentQuestions
+		}
 		updated, err := func() (store.AgentProfile, error) {
 			next := store.AgentProfile{
+				AgentQuestions:     agentQ,
 				ID:                 p.ID,
 				Name:               p.Name,
 				Provider:           p.Provider,

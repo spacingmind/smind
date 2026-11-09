@@ -43,6 +43,19 @@ var (
 	pendingMu sync.Mutex
 	pending   = map[int64]chan message{}
 
+	// elicitMode is scripted via an "elicit=<form|url|badtype|none>"
+	// os.Args entry (default none: today's behaviour, unchanged). When
+	// set, the prompt script asks the client an elicitation/create request
+	// of that shape between the initial chunks and the final "world!"
+	// chunk (see runElicitationScript).
+	elicitMode string
+
+	// clientElicitCaps is the clientCapabilities.elicitation JSON the
+	// client sent at initialize ("none" when it advertised none), echoed
+	// back as a "caps:<json>" chunk so a test sees exactly what was
+	// advertised.
+	clientElicitCaps = []byte("none")
+
 	releaseOnce sync.Once
 	releaseCh   = make(chan struct{})
 
@@ -116,6 +129,8 @@ func main() {
 			}
 		} else if v, ok := strings.CutPrefix(a, "mcp="); ok && v != "none" {
 			mcpCaps = strings.Split(v, ",")
+		} else if v, ok := strings.CutPrefix(a, "elicit="); ok {
+			elicitMode = v
 		}
 	}
 
@@ -140,6 +155,15 @@ func handle(msg message, sessionCwd *string) {
 	logMethod(msg.Method)
 	switch {
 	case msg.Method == "initialize":
+		var init struct {
+			ClientCapabilities struct {
+				Elicitation json.RawMessage `json:"elicitation"`
+			} `json:"clientCapabilities"`
+		}
+		if err := json.Unmarshal(msg.Params, &init); err == nil && len(init.ClientCapabilities.Elicitation) > 0 &&
+			string(init.ClientCapabilities.Elicitation) != "null" {
+			clientElicitCaps = append([]byte(nil), init.ClientCapabilities.Elicitation...)
+		}
 		caps := map[string]any{
 			"loadSession":         true,
 			"sessionCapabilities": map[string]any{"resume": map[string]any{}},
@@ -353,6 +377,38 @@ func textChunk(text string) map[string]any {
 	}
 }
 
+// runElicitationScript is the "elicit=<mode>" os.Args scenario: it first
+// streams a "caps:<json>" chunk with the elicitation capability the client
+// advertised at initialize (so a test sees it), then sends a real
+// elicitation/create request and streams the response back as
+// "elicitation:<raw result JSON>" (or "elicitation:error:<message>").
+func runElicitationScript() {
+	sessionUpdate(textChunk("caps:" + string(clientElicitCaps)))
+	resp := call("elicitation/create", elicitParams())
+	if resp.Error != nil {
+		sessionUpdate(textChunk("elicitation:error:" + resp.Error.Message))
+		return
+	}
+	sessionUpdate(textChunk("elicitation:" + string(resp.Result)))
+}
+
+// elicitParams is the elicitation/create request body of each elicit mode.
+func elicitParams() any {
+	switch elicitMode {
+	case "url":
+		return json.RawMessage(`{"mode":"url","sessionId":"fake-session-1","message":"Open the link","elicitationId":"e1","url":"https://example.invalid/x"}`)
+	case "badtype":
+		return json.RawMessage(`{"mode":"form","sessionId":"fake-session-1","message":"Pick","requestedSchema":{"type":"object","properties":{"nested":{"type":"object","title":"Nested"}}}}`)
+	default: // "form"
+		return json.RawMessage(`{"mode":"form","sessionId":"fake-session-1","message":"Pick a deploy target","requestedSchema":{"type":"object","properties":{` +
+			`"env":{"type":"string","title":"Environment","oneOf":[{"const":"prod","title":"Production"},{"const":"stg","title":"Staging"}]},` +
+			`"tags":{"type":"array","title":"Tags","items":{"type":"string","enum":["a","b","c"]}},` +
+			`"count":{"type":"integer","title":"Count","minimum":1,"maximum":5},` +
+			`"note":{"type":"string","title":"Note","maxLength":20},` +
+			`"ok":{"type":"boolean","title":"Confirm"}},"required":["env"]}}`)
+	}
+}
+
 func runPromptScript(promptMsg message, cwd string) {
 	sessionUpdate(textChunk("Hello, "))
 
@@ -391,6 +447,10 @@ func runPromptScript(promptMsg message, cwd string) {
 		optionID = result.Outcome.OptionID
 	}
 	sessionUpdate(textChunk("permission:" + optionID))
+
+	if elicitMode != "" {
+		runElicitationScript()
+	}
 
 	sessionUpdate(textChunk("world!"))
 

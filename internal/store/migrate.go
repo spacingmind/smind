@@ -697,6 +697,14 @@ var migrations = []migration{
 			return addColumnIfMissing(db, "agent_profiles", "questions", "TEXT NOT NULL DEFAULT 'ask'")
 		},
 	},
+	{
+		// ADR-0055 D4: ACP elicitation is opt-in per profile, off for every
+		// profile that exists before it is set.
+		name: "profile_agent_questions",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "agent_profiles", "agent_questions", "INTEGER NOT NULL DEFAULT 0")
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -423,6 +424,119 @@ func TestQuestion_UnreadableProfileFailsClosed(t *testing.T) {
 	wantDeclined(t, out, taskrunner.QuestionResolvedProfile, "not attended")
 	if len(reg.PendingQuestions()) != 0 {
 		t.Fatal("an unreadable profile parked a question")
+	}
+}
+
+// A request the provider mapping refused (an ACP form it cannot model) is
+// declined whole: recorded refused_unsupported, never parked, never shown.
+func TestQuestion_RefusedRequestDeclinedAndRecordedNotParked(t *testing.T) {
+	t.Parallel()
+	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{})
+	req := colourQ("Which colour?")
+	req.Refuse = taskrunner.QuestionResolvedUnsupported
+	out, err := runPermissionDecider{reg: reg, r: r}.DecideQuestion(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDeclined(t, out, taskrunner.QuestionResolvedUnsupported, "could not be shown")
+	reqs, resolved := questionEvents(r)
+	if len(reqs) != 0 {
+		t.Fatalf("a refused request was shown: %+v", reqs)
+	}
+	if len(resolved) != 1 || resolved[0].Question.Resolution != taskrunner.QuestionResolvedUnsupported ||
+		resolved[0].Question.Request != nil || resolved[0].Question.Answer != nil {
+		t.Fatalf("resolved: %+v, want one bare refused_unsupported", resolved)
+	}
+	if len(reg.PendingQuestions()) != 0 {
+		t.Fatal("a refused request parked")
+	}
+}
+
+// The refusal does not bypass the earlier gates: a seat or system run still
+// resolves NoHuman, a declining profile still resolves profile_decline.
+func TestQuestion_RefuseDoesNotBypassSeatOrProfile(t *testing.T) {
+	t.Parallel()
+	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{})
+	reg.SetSeatSource(func(int64) (SeatSpec, bool) { return SeatSpec{}, true })
+	req := colourQ("Which colour?")
+	req.Refuse = taskrunner.QuestionResolvedUnsupported
+	out, err := runPermissionDecider{reg: reg, r: r}.DecideQuestion(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDeclined(t, out, taskrunner.QuestionResolvedNoHuman, "No human")
+
+	reg2, r2, _ := startedRun(t, taskrunner.PermissionSettings{})
+	p, err := reg2.st.CreateAgentProfile(store.AgentProfile{Name: "refuse-decline", Provider: "claude-native", Questions: QuestionsDecline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.profileID = p.ID
+	out, err = runPermissionDecider{reg: reg2, r: r2}.DecideQuestion(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDeclined(t, out, taskrunner.QuestionResolvedProfile, "not attended")
+}
+
+// TestElicitationEnabled_Matrix pins who may advertise the ACP elicitation
+// capability (ADR-0055 D4): only an attended run whose profile EXPLICITLY opted
+// in (agent_questions) and asks. The default `ask` alone is not an opt-in.
+func TestElicitationEnabled_Matrix(t *testing.T) {
+	t.Parallel()
+	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{})
+	n := 0
+	profile := func(questions string, optIn bool) int64 {
+		n++
+		p, err := reg.st.CreateAgentProfile(store.AgentProfile{Name: fmt.Sprintf("elicit-%d", n), Provider: "glm", Questions: questions, AgentQuestions: optIn})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.ID
+	}
+
+	r.profileID = profile(QuestionsAsk, true)
+	if !reg.elicitationEnabled(r) {
+		t.Fatal("a run whose profile opted in and asks must advertise elicitation")
+	}
+	// An existing / default profile (questions ask by default, no opt-in) must
+	// NOT advertise: upgrading changes no running setup.
+	r.profileID = profile("", false)
+	if reg.elicitationEnabled(r) {
+		t.Fatal("a default profile (ask, not opted in) must not advertise")
+	}
+	r.profileID = profile(QuestionsAsk, false)
+	if reg.elicitationEnabled(r) {
+		t.Fatal("ask without the explicit opt-in must not advertise")
+	}
+	for _, setting := range []string{QuestionsDecline, QuestionsDisabled} {
+		r.profileID = profile(setting, true)
+		if reg.elicitationEnabled(r) {
+			t.Fatalf("profile %q must not advertise even when opted in", setting)
+		}
+	}
+
+	r.profileID = 0
+	if reg.elicitationEnabled(r) {
+		t.Fatal("a run without a profile must not advertise")
+	}
+
+	r.profileID = profile(QuestionsAsk, true)
+	r.purpose = "learning"
+	if reg.elicitationEnabled(r) {
+		t.Fatal("a system run must not advertise")
+	}
+	r.purpose = ""
+
+	reg.SetSeatSource(func(int64) (SeatSpec, bool) { return SeatSpec{}, true })
+	if reg.elicitationEnabled(r) {
+		t.Fatal("a daemon-owned seat must not advertise")
+	}
+
+	reg.SetSeatSource(func(int64) (SeatSpec, bool) { return SeatSpec{}, false })
+	r.profileID = 987654 // no such profile: the store read errors
+	if reg.elicitationEnabled(r) {
+		t.Fatal("an unreadable profile must fail closed")
 	}
 }
 

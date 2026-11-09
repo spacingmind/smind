@@ -10,7 +10,7 @@ import (
 
 // agentProfileColumns is the agent_profiles SELECT column list;
 // scanAgentProfile's Scan argument order must stay in lockstep with it.
-const agentProfileColumns = "id, name, provider, permission_mode, auto_accept, thinking_level, model, notes, on_rate_limit, fallback_profile_id, orchestration_tools, instructions, skills, child_policy, child_profile_ids, questions, created_at, updated_at"
+const agentProfileColumns = "id, name, provider, permission_mode, auto_accept, thinking_level, model, notes, on_rate_limit, fallback_profile_id, orchestration_tools, instructions, skills, child_policy, child_profile_ids, questions, agent_questions, created_at, updated_at"
 
 // scanAgentProfile scans one row selected with agentProfileColumns.
 func scanAgentProfile(row rowScanner) (AgentProfile, error) {
@@ -18,7 +18,7 @@ func scanAgentProfile(row rowScanner) (AgentProfile, error) {
 	var model sql.NullString
 	var fallback, orch sql.NullInt64
 	var skills, childIDs string
-	if err := row.Scan(&p.ID, &p.Name, &p.Provider, &p.PermissionMode, &p.AutoAccept, &p.ThinkingLevel, &model, &p.Notes, &p.OnRateLimit, &fallback, &orch, &p.Instructions, &skills, &p.ChildPolicy, &childIDs, &p.Questions, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Provider, &p.PermissionMode, &p.AutoAccept, &p.ThinkingLevel, &model, &p.Notes, &p.OnRateLimit, &fallback, &orch, &p.Instructions, &skills, &p.ChildPolicy, &childIDs, &p.Questions, &p.AgentQuestions, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return AgentProfile{}, err
 	}
 	if orch.Valid {
@@ -96,10 +96,10 @@ func (s *Store) CreateAgentProfile(p AgentProfile) (AgentProfile, error) {
 		return AgentProfile{}, fmt.Errorf("encode child profile ids: %w", err)
 	}
 	res, err := s.db.Exec(
-		`INSERT INTO agent_profiles (name, provider, permission_mode, auto_accept, thinking_level, model, notes, on_rate_limit, fallback_profile_id, orchestration_tools, instructions, skills, child_policy, child_profile_ids, questions, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO agent_profiles (name, provider, permission_mode, auto_accept, thinking_level, model, notes, on_rate_limit, fallback_profile_id, orchestration_tools, instructions, skills, child_policy, child_profile_ids, questions, agent_questions, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Name, p.Provider, p.PermissionMode, p.AutoAccept, p.ThinkingLevel, nullString(p.Model), p.Notes, p.OnRateLimit, nullInt64Ptr(p.FallbackProfileID),
-		nullOrchBool(p.OrchestrationTools), p.Instructions, skills, p.ChildPolicy, childIDs, p.Questions, p.CreatedAt, p.UpdatedAt,
+		nullOrchBool(p.OrchestrationTools), p.Instructions, skills, p.ChildPolicy, childIDs, p.Questions, p.AgentQuestions, p.CreatedAt, p.UpdatedAt,
 	)
 	if err != nil {
 		return AgentProfile{}, fmt.Errorf("insert agent profile: %w", err)
@@ -208,10 +208,10 @@ func (s *Store) updateAgentProfile(p AgentProfile, expected *time.Time) (AgentPr
 	}
 	res, err := s.db.Exec(
 		`UPDATE agent_profiles SET name = ?, provider = ?, permission_mode = ?, auto_accept = ?, thinking_level = ?, model = ?, notes = ?, on_rate_limit = ?, fallback_profile_id = ?,
-		        orchestration_tools = ?, instructions = ?, skills = ?, child_policy = ?, child_profile_ids = ?, questions = ?, updated_at = ?
+		        orchestration_tools = ?, instructions = ?, skills = ?, child_policy = ?, child_profile_ids = ?, questions = ?, agent_questions = ?, updated_at = ?
 		 `+where,
 		append([]any{p.Name, p.Provider, p.PermissionMode, p.AutoAccept, p.ThinkingLevel, nullString(p.Model), p.Notes, p.OnRateLimit, nullInt64Ptr(p.FallbackProfileID),
-			nullOrchBool(p.OrchestrationTools), p.Instructions, skills, p.ChildPolicy, childIDs, p.Questions, p.UpdatedAt}, args...)...,
+			nullOrchBool(p.OrchestrationTools), p.Instructions, skills, p.ChildPolicy, childIDs, p.Questions, p.AgentQuestions, p.UpdatedAt}, args...)...,
 	)
 	if err != nil {
 		return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, err)

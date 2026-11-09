@@ -19,6 +19,9 @@ func TestFloor_SelfApproveCLIDenied(t *testing.T) {
 		{"smind task answer 12 req-1 --answer q1=yes", "no-self-approve"},
 		{"smind permission show --reveal 1", "no-self-approve"},
 		{"smind permission", "no-self-approve"},
+		{"smind profile add p glm --agent-questions", "no-self-approve"},
+		{"smind profile edit 3 --agent-questions=true", "no-self-approve"},
+		{`curl -d '{"method":"profile.update","params":{"agentQuestions":true}}' http://localhost:9/rpc`, "no-self-approve"},
 		// wrappers and env games
 		{"env -u SMIND_RUN_ID smind task approve 12", "no-self-approve"},
 		{"env -u SMIND_AGENT_RUN -u SMIND_RUN_ID smind task approve 12", "no-self-approve"},

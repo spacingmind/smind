@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -759,5 +760,237 @@ func TestLoadSessionReplayFSProbeIsSensitive(t *testing.T) {
 	report, written := loadWithFSProbe(t)
 	if report != "write:ok\nread:ok\n" || !written {
 		t.Fatalf("without WithoutFS the probe should succeed: report %q, file written %v", report, written)
+	}
+}
+
+// --- ACP elicitation (ADR-0055 section 4) ---
+
+// recordingElicitPolicy is a test ElicitationPolicy that records the
+// request the client decoded and answers with a canned response or error.
+type recordingElicitPolicy struct {
+	calls int
+	got   *ElicitationRequest
+	resp  ElicitationResponse
+	err   error
+}
+
+func (p *recordingElicitPolicy) Decide(_ context.Context, req ElicitationRequest) (ElicitationResponse, error) {
+	p.calls++
+	got := req
+	p.got = &got
+	return p.resp, p.err
+}
+
+// newElicitClient starts the fake agent with its "elicit=<mode>" scenario
+// argument (see fakeagent's runElicitationScript) plus any client options,
+// mirroring newTestClient.
+func newElicitClient(t *testing.T, mode string, opts ...Option) (*Client, string) {
+	t.Helper()
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "hello.txt"), []byte("file-content"), 0o644); err != nil {
+		t.Fatalf("write hello.txt: %v", err)
+	}
+	c, err := New([]string{fakeAgentPath, "elicit=" + mode}, opts...)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	return c, cwd
+}
+
+// elicitTurn runs one full prompt turn against the elicit scenario and
+// returns every text chunk the agent streamed, in order: the read and
+// permission chunks, then "caps:<...>", "elicitation:<...>" and "world!".
+func elicitTurn(t *testing.T, c *Client, cwd string) []string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sessionID, _, err := c.NewSession(ctx, cwd, nil)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	updates := make(chan SessionUpdate)
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.Prompt(ctx, sessionID, "hi", updates)
+		errCh <- err
+	}()
+	readUpdate(t, updates) // "Hello, ": release the gate only after it arrives
+	if err := c.conn.notify("_test/release", nil); err != nil {
+		t.Fatalf("notify(_test/release) error = %v", err)
+	}
+	var texts []string
+	for u := range updates {
+		text, ok := u.Text()
+		if !ok {
+			t.Fatalf("update not a text chunk: %+v", u)
+		}
+		texts = append(texts, text)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	return texts
+}
+
+// elicitChunk returns the one chunk of texts starting with prefix.
+func elicitChunk(t *testing.T, texts []string, prefix string) string {
+	t.Helper()
+	for _, s := range texts {
+		if strings.HasPrefix(s, prefix) {
+			return s
+		}
+	}
+	t.Fatalf("no %q chunk in %v", prefix, texts)
+	return ""
+}
+
+// TestElicitation_NotAdvertisedWithoutPolicy proves the default client
+// stays exactly as before ADR-0055: no elicitation capability is advertised
+// at initialize, and an agent that asks anyway gets method-not-found.
+func TestElicitation_NotAdvertisedWithoutPolicy(t *testing.T) {
+	t.Parallel()
+	c, cwd := newElicitClient(t, "form")
+	texts := elicitTurn(t, c, cwd)
+	if got := elicitChunk(t, texts, "caps:"); got != "caps:none" {
+		t.Fatalf("caps chunk = %q, want %q", got, "caps:none")
+	}
+	if got := elicitChunk(t, texts, "elicitation:"); !strings.Contains(got, "method not found") {
+		t.Fatalf("elicitation chunk = %q, want a method-not-found error", got)
+	}
+}
+
+// TestElicitation_AdvertisedFormOnlyWithPolicy proves WithElicitation
+// advertises exactly the form mode -- never url.
+func TestElicitation_AdvertisedFormOnlyWithPolicy(t *testing.T) {
+	t.Parallel()
+	c, cwd := newElicitClient(t, "form", WithElicitation(&recordingElicitPolicy{}))
+	caps := elicitChunk(t, elicitTurn(t, c, cwd), "caps:")
+	if !strings.Contains(caps, `"form":{}`) {
+		t.Fatalf("caps chunk = %q, want the form capability", caps)
+	}
+	if strings.Contains(caps, "url") {
+		t.Fatalf("caps chunk = %q, url must never be advertised", caps)
+	}
+}
+
+// TestElicitation_FormRoundTripAccept drives one full form elicitation
+// through the decode: the policy sees the properties sorted by name with
+// their choices and constraints intact, and its accept answer reaches the
+// agent as the elicitation/create result.
+func TestElicitation_FormRoundTripAccept(t *testing.T) {
+	t.Parallel()
+	p := &recordingElicitPolicy{resp: ElicitationResponse{
+		Action:  ElicitationAccept,
+		Content: map[string]any{"env": "prod", "tags": []string{"a", "c"}, "count": 3, "note": "hi", "ok": true},
+	}}
+	c, cwd := newElicitClient(t, "form", WithElicitation(p))
+	texts := elicitTurn(t, c, cwd)
+
+	if p.calls != 1 || p.got == nil {
+		t.Fatalf("policy called %d times, got %+v", p.calls, p.got)
+	}
+	req := p.got
+	if req.SessionID != "fake-session-1" || req.Message != "Pick a deploy target" || req.Mode != "form" {
+		t.Fatalf("request header fields = %+v", req)
+	}
+	if len(req.Properties) != 5 {
+		t.Fatalf("properties = %+v, want 5", req.Properties)
+	}
+	names := make([]string, len(req.Properties))
+	for i, prop := range req.Properties {
+		names[i] = prop.Name
+	}
+	if !reflect.DeepEqual(names, []string{"count", "env", "note", "ok", "tags"}) {
+		t.Fatalf("property order = %v, want sorted by name", names)
+	}
+	byName := map[string]ElicitationProperty{}
+	for _, prop := range req.Properties {
+		byName[prop.Name] = prop
+	}
+	if env := byName["env"]; env.Type != "string" || !reflect.DeepEqual(env.Options, []ElicitationOption{{Value: "prod", Title: "Production"}, {Value: "stg", Title: "Staging"}}) {
+		t.Fatalf("env property = %+v", env)
+	}
+	if tags := byName["tags"]; tags.Type != "array" || !reflect.DeepEqual(tags.Options, []ElicitationOption{{Value: "a"}, {Value: "b"}, {Value: "c"}}) {
+		t.Fatalf("tags property = %+v", tags)
+	}
+	if count := byName["count"]; count.Type != "integer" || count.Minimum == nil || *count.Minimum != 1 || count.Maximum == nil || *count.Maximum != 5 {
+		t.Fatalf("count property = %+v", count)
+	}
+	if note := byName["note"]; note.Type != "string" || note.MaxLength == nil || *note.MaxLength != 20 {
+		t.Fatalf("note property = %+v", note)
+	}
+	if !reflect.DeepEqual(req.Required, []string{"env"}) {
+		t.Fatalf("required = %v", req.Required)
+	}
+
+	want := `elicitation:{"action":"accept","content":{"count":3,"env":"prod","note":"hi","ok":true,"tags":["a","c"]}}`
+	if got := elicitChunk(t, texts, "elicitation:"); got != want {
+		t.Fatalf("elicitation chunk = %q, want %q", got, want)
+	}
+}
+
+// TestElicitation_Decline and TestElicitation_Cancel prove the other two
+// actions round-trip with no content attached.
+func TestElicitation_Decline(t *testing.T) {
+	t.Parallel()
+	p := &recordingElicitPolicy{resp: ElicitationResponse{Action: ElicitationDecline}}
+	c, cwd := newElicitClient(t, "form", WithElicitation(p))
+	if got := elicitChunk(t, elicitTurn(t, c, cwd), "elicitation:"); got != `elicitation:{"action":"decline"}` {
+		t.Fatalf("elicitation chunk = %q, want a bare decline", got)
+	}
+}
+
+func TestElicitation_Cancel(t *testing.T) {
+	t.Parallel()
+	p := &recordingElicitPolicy{resp: ElicitationResponse{Action: ElicitationCancel}}
+	c, cwd := newElicitClient(t, "form", WithElicitation(p))
+	if got := elicitChunk(t, elicitTurn(t, c, cwd), "elicitation:"); got != `elicitation:{"action":"cancel"}` {
+		t.Fatalf("elicitation chunk = %q, want a bare cancel", got)
+	}
+}
+
+// TestElicitation_UrlModeDeclinedWithoutAskingThePolicy proves a url-mode
+// request is refused before any policy runs: url was never advertised.
+func TestElicitation_UrlModeDeclinedWithoutAskingThePolicy(t *testing.T) {
+	t.Parallel()
+	p := &recordingElicitPolicy{resp: ElicitationResponse{Action: ElicitationAccept, Content: map[string]any{"x": "y"}}}
+	c, cwd := newElicitClient(t, "url", WithElicitation(p))
+	texts := elicitTurn(t, c, cwd)
+	if p.calls != 0 {
+		t.Fatalf("the policy was asked %d times for a url request", p.calls)
+	}
+	if got := elicitChunk(t, texts, "elicitation:"); got != `elicitation:{"action":"decline"}` {
+		t.Fatalf("elicitation chunk = %q, want a decline", got)
+	}
+}
+
+// TestElicitation_UnsupportedPropertyIsFlagged proves a property whose
+// schema this client cannot model decodes as Unsupported rather than being
+// silently dropped or erroring the whole request.
+func TestElicitation_UnsupportedPropertyIsFlagged(t *testing.T) {
+	t.Parallel()
+	p := &recordingElicitPolicy{resp: ElicitationResponse{Action: ElicitationDecline}}
+	c, cwd := newElicitClient(t, "badtype", WithElicitation(p))
+	elicitTurn(t, c, cwd)
+	if p.got == nil || len(p.got.Properties) != 1 || !p.got.Properties[0].Unsupported || p.got.Properties[0].Name != "nested" {
+		t.Fatalf("properties = %+v, want one unsupported \"nested\"", p.got)
+	}
+}
+
+// TestElicitation_PolicyErrorIsInternalError proves a failing policy
+// surfaces to the agent as a JSON-RPC error, never as a phantom answer.
+func TestElicitation_PolicyErrorIsInternalError(t *testing.T) {
+	t.Parallel()
+	p := &recordingElicitPolicy{err: errors.New("boom")}
+	c, cwd := newElicitClient(t, "form", WithElicitation(p))
+	got := elicitChunk(t, elicitTurn(t, c, cwd), "elicitation:")
+	if !strings.HasPrefix(got, "elicitation:error:") || !strings.Contains(got, "boom") {
+		t.Fatalf("elicitation chunk = %q, want an error carrying the policy failure", got)
 	}
 }

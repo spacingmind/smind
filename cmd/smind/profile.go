@@ -14,7 +14,7 @@ import (
 
 const cmdProfileSeedUsage = "usage: smind profile seed roles [--check | --diff [seat[.field]] | --apply [--backup-dir <dir>] [--take <seat>[.<field>]]... [--dry-run]]"
 
-const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--questions=<ask|decline|disabled>] [--notes=<text>] [--orchestration-tools=true|false] [--instructions=<text>] [--instructions-file=<path>] [--skills=a,b] [--child-policy=none|leaf|profiles] [--child-profiles=1,2]"
+const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--questions=<ask|decline|disabled>] [--agent-questions[=true|false]] [--notes=<text>] [--orchestration-tools=true|false] [--instructions=<text>] [--instructions-file=<path>] [--skills=a,b] [--child-policy=none|leaf|profiles] [--child-profiles=1,2]"
 
 const cmdProfileEditUsage = "usage: smind profile edit <id> [--name=..] [--provider=..] [every `profile add` flag]"
 
@@ -47,6 +47,7 @@ func cmdProfile(args []string) int {
 type profileFlags struct {
 	mode, thinkingLevel, model, notes, onRateLimit string
 	questions                                      string
+	agentQuestions                                 *bool
 	instructions, instructionsFile, skills         string
 	childPolicy, childProfiles, name, provider     string
 	fallbackProfile                                *int64
@@ -81,6 +82,17 @@ func parseProfileFlags(cmd string, args []string, allowRename bool) (profileFlag
 			flag, value, hasValue = n, v, true
 		}
 		switch flag {
+		case "--agent-questions":
+			b := true
+			if hasValue {
+				var err error
+				if b, err = strconv.ParseBool(value); err != nil {
+					fmt.Fprintf(os.Stderr, "%s: --agent-questions: %q is not a boolean\n", cmd, value)
+					return f, 2
+				}
+			}
+			f.agentQuestions = &b
+			continue
 		case "--auto-accept":
 			f.autoAccept = true
 			if hasValue {
@@ -232,6 +244,9 @@ func cmdProfileAdd(args []string) int {
 	}
 	if flags.questions != "" {
 		params["questions"] = flags.questions
+	}
+	if flags.agentQuestions != nil {
+		params["agentQuestions"] = *flags.agentQuestions
 	}
 	if flags.fallbackProfile != nil {
 		params["fallbackProfileId"] = *flags.fallbackProfile

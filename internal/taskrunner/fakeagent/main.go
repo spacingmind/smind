@@ -48,6 +48,19 @@ const sessionID = "fake-session-1"
 // capabilities the client advertised (see replayFromCwd).
 var initParams []byte
 
+// elicitMode is set from an "elicit=<form|url|badtype|none>" os.Args entry
+// (default none: today's behaviour, unchanged). When set, the default reply
+// scenario first streams a "caps:<json>" chunk with the elicitation
+// capability the client advertised at initialize ("none" when it advertised
+// none), then makes a real elicitation/create request of that shape and
+// streams the response back as "elicitation:<raw result JSON>" (or
+// "elicitation:error:<message>") -- mirroring internal/acp/fakeagent's own
+// elicit scripting, for Runner's elicitation wiring (ADR-0055).
+var (
+	elicitMode       string
+	clientElicitCaps = []byte("none")
+)
+
 // capsMode is set from os.Args[1] (defaulting to "" -- no resume
 // capability at all) so a test can choose what this agent's initialize
 // response advertises: "loadSession" (session/load supported), "resume"
@@ -199,6 +212,8 @@ func main() {
 			liveOpts = true
 		} else if a == "models" {
 			modelsMode = true
+		} else if v, ok := strings.CutPrefix(a, "elicit="); ok {
+			elicitMode = v
 		} else {
 			capsMode = a
 		}
@@ -226,6 +241,15 @@ func handle(msg message, sessionCwd *string) {
 	switch {
 	case msg.Method == "initialize":
 		initParams = append([]byte(nil), msg.Params...)
+		var init struct {
+			ClientCapabilities struct {
+				Elicitation json.RawMessage `json:"elicitation"`
+			} `json:"clientCapabilities"`
+		}
+		if err := json.Unmarshal(msg.Params, &init); err == nil && len(init.ClientCapabilities.Elicitation) > 0 &&
+			string(init.ClientCapabilities.Elicitation) != "null" {
+			clientElicitCaps = append([]byte(nil), init.ClientCapabilities.Elicitation...)
+		}
 		caps := map[string]any{}
 		if len(mcpCaps) > 0 {
 			m := map[string]any{}
@@ -564,6 +588,39 @@ func sessionUpdate(text string) {
 			"content":       map[string]any{"type": "text", "text": text},
 		},
 	})
+}
+
+// runElicitationScript is the "elicit=<mode>" os.Args scenario (see
+// elicitMode): a caps chunk, a real elicitation/create round trip, and the
+// response streamed back. Mirrors internal/acp/fakeagent's own script.
+func runElicitationScript() {
+	sessionUpdate("caps:" + string(clientElicitCaps))
+	resp := call("elicitation/create", elicitParams())
+	if resp.Error != nil {
+		sessionUpdate("elicitation:error:" + resp.Error.Message)
+		return
+	}
+	sessionUpdate("elicitation:" + string(resp.Result))
+}
+
+// elicitParams is the elicitation/create request body of each elicit mode.
+// Unlike internal/acp/fakeagent's form (which keeps all five properties --
+// that package has no cap), the form here drops "note": the question model
+// refuses a form with more than 4 properties outright (ADR-0055 section 1),
+// so a 5-property form could never round-trip accept through Runner.
+func elicitParams() any {
+	switch elicitMode {
+	case "url":
+		return json.RawMessage(`{"mode":"url","sessionId":"fake-session-1","message":"Open the link","elicitationId":"e1","url":"https://example.invalid/x"}`)
+	case "badtype":
+		return json.RawMessage(`{"mode":"form","sessionId":"fake-session-1","message":"Pick","requestedSchema":{"type":"object","properties":{"nested":{"type":"object","title":"Nested"}}}}`)
+	default: // "form"
+		return json.RawMessage(`{"mode":"form","sessionId":"fake-session-1","message":"Pick a deploy target","requestedSchema":{"type":"object","properties":{` +
+			`"env":{"type":"string","title":"Environment","oneOf":[{"const":"prod","title":"Production"},{"const":"stg","title":"Staging"}]},` +
+			`"tags":{"type":"array","title":"Tags","items":{"type":"string","enum":["a","b","c"]}},` +
+			`"count":{"type":"integer","title":"Count","minimum":1,"maximum":5},` +
+			`"ok":{"type":"boolean","title":"Confirm"}},"required":["env"]}}`)
+	}
 }
 
 func runPromptScript(promptMsg message, cwd string) {
@@ -1018,6 +1075,9 @@ func runPromptScript(promptMsg message, cwd string) {
 	}
 
 	sessionUpdate("Hello, ")
+	if elicitMode != "" {
+		runElicitationScript()
+	}
 	sessionUpdate("world!")
 	respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
 }

@@ -157,6 +157,17 @@ func TestRunScoped_MethodAllowlistFailsClosed(t *testing.T) {
 	}
 }
 
+// ADR-0055 D4: an agent run cannot opt a profile in to ACP elicitation, nor
+// create or edit any profile, through its identified connection.
+func TestRunScoped_CannotSetAgentQuestions(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	ws := e.identified(t)
+	for _, m := range []string{"profile.create", "profile.update"} {
+		wantForbidden(t, callWS(t, ws, m, map[string]any{"id": 1, "name": "p", "provider": "glm", "agentQuestions": true}), "not available to agents")
+	}
+}
+
 func TestRunScoped_AllowlistedMethodsStillWork(t *testing.T) {
 	t.Parallel()
 	e := newIdentEnv(t, "hang")

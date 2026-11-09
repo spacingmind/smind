@@ -17,7 +17,7 @@ validation contract (ADR-0045).
 - AC8 Inbox `question` item, web card, mobile sheet and `smind task answer` work and agree; push carries a title only.
 - AC9 Codex: with `questions: ask` the client advertises `experimentalApi`, answers `item/tool/requestUserInput` in the documented shape; the decline encoding is verified
   against the real app-server (or the fallback is documented).
-- AC10 ACP: with `questions: ask` the client advertises `elicitation.form` only, maps the form subset, declines the rest; `accept|decline|cancel` mapped.
+- AC10 (done in PR2) ACP: with `questions: ask` the client advertises `elicitation.form` only, maps the form subset, declines the rest; `accept|decline|cancel` mapped.
 - AC11 "Always allow in this project": a `permission_grants` row from a human `scope: project` answer, evaluated after floor and policy, never offered for the
   never-offered list, audited on every use, revocable in the UI and CLI, expiring.
 - AC12 Additive wire: old clients ignore the new events and states; a run never hangs silently.
@@ -64,6 +64,7 @@ PR1 as built, and what it leaves for later (stated, not hidden):
 ## Progress
 
 - 2026-11-08: ADR drafted (Proposed), spec written; ADR merged.
+- 2026-11-09: R1 PR2 (ACP half) built: `internal/acp/elicitation.go` (capability advertised only with a policy, form mode only, url refused), `internal/taskrunner/acp_elicitation.go` (form to question mapping, answer to content, constraints validated daemon-side), `runs.elicitationEnabled`. **D4 reading:** the profile column defaults to `ask`, so "opt-in per profile" is implemented as: a run advertises the capability only when it has a profile whose setting is `ask`; a run with no profile, a system run or a seat never advertises. A profile left at its default `ask` therefore advertises; set `decline` or `disabled` to stop it. Limits: every form field is required (a human cannot leave one blank), ACP's decline carries no note (the reason is in run history), a pattern RE2 cannot read is not enforced here. More limits: a timeout is answered with ACP's `decline` (ADR section 4 said `cancel`; the Supervisor asked for decline-with-note, and a run stop is `cancel`); `format` other than `password` is not validated daemon-side; `minItems`/`maxItems`/`uniqueItems` of a multi-select are not decoded; a form with more than 4 properties is refused as unsupported (the question cap). The Codex half (`item/tool/requestUserInput`, `mcpServer/elicitation/request`) still waits on the Codex probe.
 - 2026-11-09: Claude `AskUserQuestion` probe (Haiku, five scenarios, about USD 0.014); PR1 built: model, events, decider, RPCs, profile field, inbox item, MCP state, CLI, web card.
 - Earlier note: Code facts checked against `internal/taskrunner/permission.go`, `internal/runs/registry.go`, `internal/codex/client.go`,
   `internal/acp`, `internal/inbox`.
@@ -91,3 +92,7 @@ PR1 (review round 2 applied). Acceptance criteria, with where each is shown:
 - AC8 inbox, web, CLI, MCP: `internal/inbox` question tests, `TestBuildTaskWaitOutput_WaitingQuestion`, `TestTaskAnswer_*`, e2e `Q-01`..`Q-05`.
 - AC12 additive and never silent: `TestEvent_QuestionRoundTripsThroughPersistence`, `TestQuestion_RestartClosesOrphanRequests`, `TestWsapiMethodMapGoldenFleetOff`.
 - Not yet shown: AC9, AC10 (PR2), AC11 (PR4), push and mobile card (PR3).
+
+### PR2 follow-up: D4 explicit opt-in
+
+D4 says ACP/Codex questions are opt-in so no running setup changes on upgrade, but the `questions` column defaults to `ask` for every existing profile, so reading `ask` as the opt-in would switch every ACP profile on. A separate `agent_questions` flag (default off) is the opt-in: an ACP run advertises elicitation only when `agent_questions` is true AND `questions` is `ask`. Set through `profile.create`/`profile.update` (`agentQuestions`, kept when omitted on update) and `smind profile ... --agent-questions[=true|false]`. A profile-less run never advertises. Claude keeps the `ask` default. No web/mobile profile editor control yet (follow-up).

@@ -86,3 +86,29 @@ func TestAgentProfile_UpdateKeepsQuestionsWhenOmitted(t *testing.T) {
 		t.Fatalf("after update: questions=%q notes=%q", got.Questions, got.Notes)
 	}
 }
+
+// ADR-0055 D4: ACP elicitation is an explicit per-profile opt-in. A profile
+// created without it (every profile that existed before) reads false, and the
+// flag round-trips through create and update.
+func TestAgentProfile_AgentQuestionsDefaultsOffAndRoundTrips(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	p, err := s.CreateAgentProfile(AgentProfile{Name: "old", Provider: "glm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetAgentProfile(p.ID); got.AgentQuestions || got.Questions != "ask" {
+		t.Fatalf("default profile: agentQuestions=%v questions=%q; want false/ask", got.AgentQuestions, got.Questions)
+	}
+	p.AgentQuestions = true
+	if _, err := s.UpdateAgentProfile(p); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetAgentProfile(p.ID); !got.AgentQuestions {
+		t.Fatal("opt-in did not persist")
+	}
+	list, _ := s.ListAgentProfiles()
+	if len(list) != 1 || !list[0].AgentQuestions {
+		t.Fatalf("list: %+v", list)
+	}
+}
