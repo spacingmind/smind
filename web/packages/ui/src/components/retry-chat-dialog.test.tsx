@@ -197,9 +197,10 @@ describe("what the retry will run with", () => {
     onRetry.mockResolvedValue(CHILD);
     expect(screen.getByTestId("retry-attachments")).toHaveTextContent("2 attachments");
     expect(screen.getByTestId("retry-attachments")).toHaveTextContent("spec.md, shot.png");
-    const keep = screen.getByTestId("retry-attachments-keep") as HTMLInputElement;
-    expect(keep.checked).toBe(true);
+    const keep = screen.getByTestId("retry-attachments-keep");
+    expect(keep).toHaveAttribute("data-state", "checked");
     fireEvent.click(keep);
+    expect(keep).toHaveAttribute("data-state", "unchecked");
     fireEvent.click(screen.getByTestId("dialog-retry-chat-confirm"));
     await flush();
     expect(onRetry).toHaveBeenCalledWith("do the thing", "native", false);

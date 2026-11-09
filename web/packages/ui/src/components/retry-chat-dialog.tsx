@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { forkReasonLabel, TRANSIENT_REASONS, type ForkUnavailable } from "@/components/fork-chat-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-error";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
@@ -143,12 +144,11 @@ export function RetryChatDialog({
         </p>
         {attachmentNames.length > 0 && (
           <label className="flex items-start gap-2 text-ui-sm" data-testid="retry-attachments">
-            <input
-              type="checkbox"
+            <Checkbox
               className="mt-0.5"
               checked={keepAttachments}
               disabled={action.pending || partial !== null}
-              onChange={(e) => setKeepAttachments(e.target.checked)}
+              onCheckedChange={(checked) => setKeepAttachments(checked === true)}
               data-testid="retry-attachments-keep"
             />
             <span>
