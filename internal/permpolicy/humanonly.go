@@ -44,16 +44,19 @@ type humanOnlyCommand struct {
 	// flag, when set, makes the command human-only only with that flag (`--flag` or
 	// `--flag=value`): `smind profile seed roles` reads, `--apply` rewrites role prompts.
 	flag string
+	// bare marks a command no other tool spells: it is also matched without the
+	// binary's name (a renamed copy, `go run`, text handed to a shell).
+	bare bool
 }
 
 var humanOnlyCLI = []humanOnlyCommand{
-	{path: []string{"task"}, verbs: []string{"approve", "deny", "answer"}},
+	{path: []string{"task"}, verbs: []string{"approve", "deny", "answer"}, bare: true},
 	{path: []string{"permission"}},
 	{path: []string{"host"}, verbs: []string{"approve", "reject"}},
 	{path: []string{"relay", "devices"}, verbs: []string{"approve", "revoke"}},
-	{path: []string{"task", "chat"}, verbs: []string{"fork"}},
-	{path: []string{"profile"}, verbs: []string{"add", "edit"}},
-	{path: []string{"profile", "seed"}, flag: "--apply"},
+	{path: []string{"task", "chat"}, verbs: []string{"fork"}, bare: true},
+	{path: []string{"profile"}, verbs: []string{"add", "edit"}, bare: true},
+	{path: []string{"profile", "seed"}, flag: "--apply", bare: true},
 }
 
 // HumanOnlyCLI reports whether args (what follows the smind binary: flags are
@@ -115,39 +118,79 @@ func dynamicHumanOnly(args []string) bool {
 	return false
 }
 
-// taskVerbPair reports `task approve|deny|answer` as adjacent words anywhere
-// in args: how a renamed copy, `go run ./cmd/smind` or a launcher that takes
-// the real command as arguments spells it. Only the task verbs are matched
-// without the binary's name: no other tool spells them so.
-func taskVerbPair(args []string) bool {
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "task" && containsWord(humanOnlyCLI[0].verbs, args[i+1]) {
+// namedBare reports the command spelled as adjacent words anywhere in args,
+// without the binary's name: how a renamed copy, `go run ./cmd/smind` or a
+// launcher that takes the real command as arguments writes it.
+func (c humanOnlyCommand) namedBare(args []string) bool {
+	for i := 0; i+len(c.path) <= len(args); i++ {
+		if !slices.Equal(args[i:i+len(c.path)], c.path) {
+			continue
+		}
+		rest := args[i+len(c.path):]
+		switch {
+		case c.flag != "":
+			if hasFlag(args, c.flag) {
+				return true
+			}
+		case c.verbs == nil:
+			return true
+		case len(rest) > 0 && containsWord(c.verbs, rest[0]):
 			return true
 		}
 	}
 	return false
 }
 
-// profileVerbPair reports `profile add|edit`, or `profile seed` with --apply,
-// as adjacent words anywhere in args: a renamed copy, `go run ./cmd/smind` or
-// a launcher spells the profile commands so. Over-denies a foreign tool that
-// happens to have a `profile edit` command; the Human runs those.
-func profileVerbPair(args []string) bool {
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] != "profile" {
-			continue
-		}
-		if args[i+1] == "add" || args[i+1] == "edit" || (args[i+1] == "seed" && hasFlag(args, "--apply")) {
+// bareVerbPair reports a command of the table that is safe to match without
+// the binary's name (the bare rows).
+func bareVerbPair(args []string) bool {
+	for _, c := range humanOnlyCLI {
+		if c.bare && c.namedBare(args) {
 			return true
 		}
 	}
 	return false
+}
+
+// pattern is the command as text: `smind… <path> <verb>` (without the binary
+// for a bare row), or `<path> … <flag>` for a flag row.
+func (c humanOnlyCommand) pattern() string {
+	words := make([]string, len(c.path))
+	for i, w := range c.path {
+		words[i] = regexp.QuoteMeta(w)
+	}
+	p := strings.Join(words, `\s+`)
+	switch {
+	case c.flag != "":
+		p += `\b[^\n]*?` + regexp.QuoteMeta(c.flag) + `(?:[\s='"]|$)`
+	case c.verbs != nil:
+		vs := make([]string, len(c.verbs))
+		for i, v := range c.verbs {
+			vs[i] = regexp.QuoteMeta(v)
+		}
+		p += `\s+(?:` + strings.Join(vs, "|") + `)\b`
+	default:
+		p += `\b`
+	}
+	if !c.bare {
+		p = `smind\S*\s+` + p
+	}
+	return p
 }
 
 // humanOnlyText finds a human-only smind command written out as text: inside a
 // script handed to a command runner (`su -c '...'`, `eval '...'`, `ssh host
-// '...'`) or piped to a shell.
-var humanOnlyText = regexp.MustCompile(`\btask\s+(approve|deny|answer)\b|smind\S*\s+(permission\b|host\s+(approve|reject)\b|relay\s+devices\s+(approve|revoke)\b|profile\s+(add|edit)\b|profile\s+seed\b[^\n]*?--(apply|take)(?:[\s='"]|$))`)
+// '...'`) or piped to a shell. Built from the one table, so a new human-only
+// command cannot miss it.
+var humanOnlyText = buildHumanOnlyText()
+
+func buildHumanOnlyText() *regexp.Regexp {
+	alts := make([]string, len(humanOnlyCLI))
+	for i, c := range humanOnlyCLI {
+		alts[i] = c.pattern()
+	}
+	return regexp.MustCompile(`\b(?:` + strings.Join(alts, "|") + `)`)
+}
 
 // commandRunners take a command, or a script, as arguments and run it; the
 // effective argv does not name it as a command word.
@@ -184,7 +227,7 @@ func (fs *floorSeg) selfApproveRules() (FloorHit, bool) {
 	switch {
 	case smindish && (HumanOnlyCLI(args) || dynamicHumanOnly(args)):
 		return floorHit("no-self-approve")
-	case !smindish && (taskVerbPair(args) || profileVerbPair(args)):
+	case !smindish && bareVerbPair(args):
 		return floorHit("no-self-approve")
 	case commandRunners[name] && humanOnlyText.MatchString(strings.Join(args, " ")):
 		return floorHit("no-self-approve")

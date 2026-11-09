@@ -1,6 +1,7 @@
 package permpolicy
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -248,4 +249,36 @@ func TestHumanOnlyCLI_Table(t *testing.T) {
 	if !slices.Contains(HumanOnlyRPCs, "run.respondPermission") {
 		t.Fatal("run.respondPermission must be human-only")
 	}
+}
+
+// Every row of the one table is denied in every wrapper the floor knows, so a
+// new human-only command cannot ship without its wrappers: the rows are
+// generated from the table, not listed by hand.
+func TestFloor_EveryTableRowIsDeniedInEveryWrapper(t *testing.T) {
+	t.Parallel()
+	named := []string{
+		"%s", "env -u SMIND_AGENT_RUN %s", "bash -lc '%s'", "sh -c '%s'", "xargs %s", "nohup %s", "command %s",
+		"su -c '%s' someone", "ssh h '%s'", "eval '%s'", "echo '%s' | sh", "echo '%s' | bash -s", "bash <<< '%s'",
+	}
+	bare := []string{"go run ./cmd/smind %s", "./sm %s", "/tmp/x/runner %s", "env -u SMIND_AGENT_RUN go run ./cmd/smind %s"}
+	var cases []floorCase
+	for _, c := range humanOnlyCLI {
+		words := slices.Clone(c.path)
+		switch {
+		case c.flag != "":
+			words = append(words, c.flag)
+		case c.verbs != nil:
+			words = append(words, c.verbs[0])
+		}
+		cmd := strings.Join(words, " ")
+		for _, w := range named {
+			cases = append(cases, floorCase{fmt.Sprintf(w, "smind "+cmd), "no-self-approve"})
+		}
+		if c.bare {
+			for _, w := range bare {
+				cases = append(cases, floorCase{fmt.Sprintf(w, cmd), "no-self-approve"})
+			}
+		}
+	}
+	checkFloorCases(t, cases)
 }
