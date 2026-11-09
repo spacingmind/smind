@@ -97,19 +97,18 @@ type rawElicitationSchema struct {
 }
 
 type rawElicitationProperty struct {
-	Type        string            `json:"type"`
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	Format      string            `json:"format"`
-	Enum        []string          `json:"enum"`
-	OneOf       []rawConstTitle   `json:"oneOf"`
-	MinLength   *int              `json:"minLength"`
-	MaxLength   *int              `json:"maxLength"`
-	Pattern     string            `json:"pattern"`
-	Minimum     *float64          `json:"minimum"`
-	Maximum     *float64          `json:"maximum"`
-	Items       *rawElicitItems   `json:"items"`
-	Extra       map[string]string `json:"-"`
+	Type        string          `json:"type"`
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Format      string          `json:"format"`
+	Enum        []string        `json:"enum"`
+	OneOf       []rawConstTitle `json:"oneOf"`
+	MinLength   *int            `json:"minLength"`
+	MaxLength   *int            `json:"maxLength"`
+	Pattern     string          `json:"pattern"`
+	Minimum     *float64        `json:"minimum"`
+	Maximum     *float64        `json:"maximum"`
+	Items       *rawElicitItems `json:"items"`
 }
 
 type rawConstTitle struct {

@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -217,8 +218,10 @@ func (a acpElicitationAdapter) Decide(ctx context.Context, req acp.ElicitationRe
 	qr, fields := buildACPQuestionRequest(req)
 	out, err := a.decider.DecideQuestion(ctx, qr)
 	if err != nil {
-		if ctx.Err() != nil {
-			// A stopped run or a cancelled call is ACP's own "cancel".
+		// A stopped run (the decider returns the run's context error while the
+		// per-call context here is a plain background one) or a cancelled call is
+		// ACP's own "cancel", never an RPC error the agent would read as a bug.
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return acp.ElicitationResponse{Action: acp.ElicitationCancel}, nil
 		}
 		return acp.ElicitationResponse{}, err

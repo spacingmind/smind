@@ -3,6 +3,7 @@ package taskrunner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -575,5 +576,22 @@ func TestRunACP_ElicitationDeclineWhenHumanDeclines(t *testing.T) {
 	texts := runACPElicitTurn(t, WithElicitation(context.Background(), true), d)
 	if got := elicitText(t, texts, "elicitation:"); got != `elicitation:{"action":"decline"}` {
 		t.Fatalf("elicitation chunk = %q, want a bare decline", got)
+	}
+}
+
+// A run stop surfaces from the decider as the run context's error while the
+// per-call context is still live (the ACP handler's context is a plain
+// background one): the agent gets ACP's cancel, not an internal-error response.
+func TestACPElicitationAdapter_RunStopIsCancelNotAnError(t *testing.T) {
+	for name, err := range map[string]error{"canceled": context.Canceled, "deadline": context.DeadlineExceeded, "wrapped": fmt.Errorf("run: %w", context.Canceled)} {
+		qd := &fakeQD{err: err}
+		resp, rerr := acpElicitationAdapter{decider: qd}.Decide(context.Background(), acp.ElicitationRequest{Mode: "form", Properties: []acp.ElicitationProperty{{Name: "a", Type: "string"}}})
+		if rerr != nil || resp.Action != acp.ElicitationCancel {
+			t.Fatalf("%s: resp=%+v err=%v; want cancel, no error", name, resp, rerr)
+		}
+	}
+	// A real decider failure is still an error.
+	if _, rerr := (acpElicitationAdapter{decider: &fakeQD{err: errors.New("boom")}}).Decide(context.Background(), acp.ElicitationRequest{Mode: "form", Properties: []acp.ElicitationProperty{{Name: "a", Type: "string"}}}); rerr == nil {
+		t.Fatal("a non-context decider error was swallowed")
 	}
 }
