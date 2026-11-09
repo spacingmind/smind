@@ -21,6 +21,10 @@ var humanOnlyInvocations = [][]string{
 	{"relay", "devices", "revoke", "abc"},
 	{"task", "chat", "fork", "3", "--at", "run-1"},
 	{"task", "chat", "fork", "3", "--at", "run-1", "--seeded"},
+	{"profile", "add", "--name", "x"},
+	{"profile", "edit", "3", "--model", "x"},
+	{"profile", "seed", "roles", "--apply"},
+	{"profile", "seed", "roles", "--take", "lead", "--apply"},
 }
 
 func TestHumanOnlyCommandsRefuseInAgentRun(t *testing.T) {

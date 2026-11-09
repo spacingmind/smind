@@ -82,6 +82,10 @@ Usage:
       [--notes=<text>]                                    create an agent profile
   smind profile ls                                         list agent profiles
   smind profile rm <id>                                    remove an agent profile
+  smind profile seed roles [--check | --diff [seat[.field]] | --apply
+      [--backup-dir <dir>] [--take <seat>[.<field>]]... [--dry-run]]
+                                                           create the missing role-pack seats; --check, --diff
+                                                           and --apply sync their fields with the pack
 
   smind usage [--since <RFC3339>] [--until <RFC3339>]     token usage per account, model, or day
       [--by account|model|day]
@@ -313,7 +317,7 @@ smind task set-option <runId> <configId> <value>
 smind task queue ls --chat <chatId>
 smind task queue cancel <itemId>
 smind profile edit <id> [--name=..] [--provider=..] [every `profile add` flag]
-smind profile seed roles
+smind profile seed roles [--check | --diff [seat[.field]] | --apply [--backup-dir <dir>] [--take <seat>[.<field>]]... [--dry-run]]
 smind mcp serve
 smind mcp add <name> <stdio|http|sse> [--command <cmd>] [--arg <value>]... [--url <url>] [--env <KEY=VALUE>]... [--header <KEY=VALUE>]...
 smind mcp ls
@@ -327,6 +331,26 @@ smind relay devices approve <id>
 smind relay devices revoke <id>
 smind relay devices rename <id> <label>
 ```
+
+### profile seed roles
+
+`smind profile seed roles` creates the seats the standard role pack defines,
+and only the missing ones: a profile you already have or edited is kept as is.
+`--check` reports, per seat and per field, whether the stored value is
+current, stale (an earlier release's text: safe to update) or customised
+(yours), and exits 10 when a seat has an update available. `--diff` (optionally
+filtered to one seat or one field) shows the differences. `--apply` updates the
+stale prompt fields of untouched seats after saving a backup of every profile
+it writes (under the smind home by default; `--backup-dir` chooses where), and
+`--dry-run` shows what would change without writing. Customised fields and
+capability fields (model, permission mode, rate-limit behaviour) change only
+with an explicit `--take <seat>[.<field>]`. A field you cleared (an empty
+value) counts as customised, so `--apply` never fills it unasked. The backup is
+fsynced but not written atomically: a crash can leave a partial file, and no
+write to a profile starts before every backup is on disk. A backup directory
+that is itself a symlink is refused, and a second `--apply` in the same second
+fails before writing anything (run it again). `--apply` exits 1 when a profile
+changed since the check (it is skipped) or a write failed.
 
 ### task wait
 
