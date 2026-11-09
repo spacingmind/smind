@@ -12,7 +12,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
-const cmdProfileSeedUsage = "usage: smind profile seed roles"
+const cmdProfileSeedUsage = "usage: smind profile seed roles [--check | --diff [seat[.field]] | --apply [--backup-dir <dir>] [--take <seat>[.<field>]]... [--dry-run]]"
 
 const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--on-rate-limit=<none|wait|fallback>] [--fallback-profile=<id>] [--questions=<ask|decline|disabled>] [--notes=<text>] [--orchestration-tools=true|false] [--instructions=<text>] [--instructions-file=<path>] [--skills=a,b] [--child-policy=none|leaf|profiles] [--child-profiles=1,2]"
 
@@ -514,15 +514,36 @@ func cmdProfileRemove(args []string) int {
 	return 0
 }
 
-// cmdProfileSeed parses `smind profile seed roles`: it creates the standard
-// seat pack (ADR-0041 S4a) over the profile.list and profile.create RPCs,
-// leaving every existing profile of the same name untouched. It is a human
-// command: inside an agent run (SMIND_RUN_ID set) it refuses.
+// cmdProfileSeed parses `smind profile seed roles`: with no mode flag it
+// creates the standard seat pack (ADR-0041 S4a) over the profile.list and
+// profile.create RPCs, leaving every existing profile of the same name
+// untouched; --check/--diff/--apply (ADR-0058) sync the pack's fields into the
+// existing seats (see profile_rolesync.go). It is a human command: inside an
+// agent run (SMIND_RUN_ID set) the writing paths refuse.
 func cmdProfileSeed(args []string) int {
-	if len(args) != 1 || args[0] != "roles" {
+	if len(args) == 0 || args[0] != "roles" {
 		fmt.Fprintln(os.Stderr, cmdProfileSeedUsage)
 		return 2
 	}
+	flags, code := parseSeedRolesFlags(args[1:])
+	if code != 0 {
+		return code
+	}
+	switch flags.mode {
+	case seedModeCheck:
+		return cmdProfileSeedRolesCheck()
+	case seedModeDiff:
+		return cmdProfileSeedRolesDiff(flags.diffFilter)
+	case seedModeApply:
+		return cmdProfileSeedRolesApply(flags)
+	default:
+		return seedMissingSeats()
+	}
+}
+
+// seedMissingSeats is `smind profile seed roles` with no mode flag: create the
+// missing seats only, keeping every existing profile of the same name as is.
+func seedMissingSeats() int {
 	if os.Getenv("SMIND_RUN_ID") != "" {
 		fmt.Fprintln(os.Stderr, "profile seed is for humans, not agents")
 		return 1
