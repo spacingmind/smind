@@ -171,15 +171,20 @@ export async function startRun(
 /**
  * run.respondPermission (Milestone 3 Item 2): resolve runId's pending
  * permission request requestId with optionId, from this connection --
- * whatever connection answers first wins server-side.
+ * whatever connection answers first wins server-side. A deny may carry a
+ * reason (denyReasonParam's cleaned text); without one the params are
+ * exactly the old three keys.
  */
 export async function respondPermission(
   conn: RelayConnection,
   runId: string,
   requestId: string,
   optionId: string,
+  reason?: string,
 ): Promise<void> {
-  await conn.call('run.respondPermission', { runId, requestId, optionId });
+  const params: Record<string, unknown> = { runId, requestId, optionId };
+  if (reason !== undefined) params.reason = reason;
+  await conn.call('run.respondPermission', params);
 }
 
 /** One revealed heredoc body (wsapi heredoc_reveal.go's heredocRevealResult): already redacted, capped at 64 KiB. */

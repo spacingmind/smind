@@ -47,6 +47,9 @@ export function attachmentDraftKey(taskId: number, chatId: number): string {
   return `${taskId}:${chatId}`;
 }
 
+/** The key of the home landing's tray: there is no task yet, so it is moved to the new task's key on create. */
+export const HOME_ATTACHMENT_KEY = "home";
+
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const NONE: DraftAttachment[] = [];
 const NO_MENTIONS: MentionRef[] = [];
@@ -114,6 +117,8 @@ interface ComposerAttachmentsState {
   remove: (key: string, localId: string, limits?: AttachmentLimits | null) => void;
   /** Drops the tray and revokes its object URLs (on unmount). */
   clear: (key: string) => void;
+  /** Moves the tray (and remembered mentions) of `fromKey` onto the end of `toKey`'s WITHOUT revoking: the items keep their ids and object URLs. */
+  move: (fromKey: string, toKey: string) => void;
   /** Removes the sent items after a successful send WITHOUT revoking: the optimistic run entry now owns the preview URLs. */
   release: (key: string, localIds: string[]) => void;
 }
@@ -199,6 +204,14 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     current.forEach(revoke);
     const { [key]: _gone, ...rest } = get().byKey;
     set({ byKey: rest });
+  },
+  move: (fromKey, toKey) => {
+    if (fromKey === toKey) return;
+    const { [fromKey]: moved, ...byKey } = get().byKey;
+    const { [fromKey]: movedMentions, ...mentions } = get().mentions;
+    if (moved && moved.length > 0) byKey[toKey] = [...(byKey[toKey] ?? NONE), ...moved];
+    if (movedMentions && movedMentions.length > 0) mentions[toKey] = [...(mentions[toKey] ?? NO_MENTIONS), ...movedMentions];
+    set({ byKey, mentions });
   },
   release: (key, localIds) => {
     const left = (get().byKey[key] ?? NONE).filter((i) => !localIds.includes(i.localId));

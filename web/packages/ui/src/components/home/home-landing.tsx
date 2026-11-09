@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import { AttachMenu } from "@/components/composer/attach-menu";
+import { AttachmentTray } from "@/components/composer/attachment-tray";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { RunConfigToolbar, type RunConfigState } from "@/components/composer/run-config-toolbar";
+import { useHomeAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,9 +19,10 @@ import { useProviderHealth } from "@/hooks/use-provider-health";
 import { Icons } from "@/lib/icons";
 import { isDesktop } from "@/lib/platform";
 import { OFFICE_SUGGESTED_PROMPTS } from "@/lib/suggested-prompts";
-import type { Task, Workspace } from "@/lib/types";
+import type { Chat, Task, Workspace } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { WsClientLike } from "@/lib/ws-client";
+import { attachmentDraftKey, HOME_ATTACHMENT_KEY, useComposerAttachmentsStore } from "@/stores/composer-attachments-store";
 import { useHomeProjectStore } from "@/stores/home-project-store";
 import { useHomeRunConfigStore } from "@/stores/home-run-config-store";
 import { useInterfaceModeStore } from "@/stores/interface-mode-store";
@@ -50,6 +54,7 @@ export function HomeLanding({
   client,
   connected,
   connectionError,
+  connectionDetail,
   onRetryConnect,
   workspaces,
   onCreated,
@@ -59,6 +64,8 @@ export function HomeLanding({
   connected: boolean;
   /** The initial connect's failure cause (App.tsx) -- shown above the composer while the daemon is unreachable. */
   connectionError?: string | null;
+  /** The raw error behind it, kept as a tooltip for debugging. */
+  connectionDetail?: string | null;
   /** Re-runs the daemon connection (App.tsx) -- the notice's Retry. */
   onRetryConnect?: () => void;
   workspaces: Workspace[];
@@ -76,6 +83,8 @@ export function HomeLanding({
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const attach = useHomeAttachmentDraft();
 
   const { providersOrFallback: providers, settled: providersSettled } = useProviderCatalog();
   const profiles = useProfileList();
@@ -98,12 +107,19 @@ export function HomeLanding({
     : workspaces;
 
   async function submit() {
-    if (disabled || busy || sendingRef.current || prompt.trim() === "") return;
+    if (disabled || busy || sendingRef.current || prompt.trim() === "" || attach.hasError) return;
     sendingRef.current = true;
     setBusy(true);
     setError("");
     try {
       const task = await client.call<Task>("task.create", { workspaceId: chosen.ID, title: titleFromPrompt(prompt) });
+      // The task composer sends the draft's attachments with the draft text; they follow the task's default chat.
+      if (attach.items.length > 0) {
+        const chats = await client.call<Chat[]>("chat.list", { taskId: task.ID });
+        const defaultChat = (chats ?? []).filter((c) => !c.ArchivedAt).sort((a, b) => a.ID - b.ID)[0];
+        if (!defaultChat) throw new Error("The task was created but its chat could not be found; your files are still attached here.");
+        useComposerAttachmentsStore.getState().move(HOME_ATTACHMENT_KEY, attachmentDraftKey(task.ID, defaultChat.ID));
+      }
       try {
         window.localStorage.setItem(draftStorageKey(task.ID), prompt);
       } catch {
@@ -142,7 +158,7 @@ export function HomeLanding({
           >
             <div className="flex flex-wrap items-center gap-2">
               <Icons.warning aria-hidden className="size-4 shrink-0 text-destructive" />
-              <span>Can't reach the daemon: {connectionError}</span>
+              <span title={connectionDetail ?? undefined}>{connectionError}</span>
               {onRetryConnect && (
                 <Button
                   type="button"
@@ -234,6 +250,7 @@ export function HomeLanding({
         </div>
         <form data-testid="home-composer" onSubmit={onSubmit} className="relative">
           <div data-testid="home-composer-card" className={cn(COMPOSER_CARD_CLASS)}>
+            {attach.limits && <AttachmentTray items={attach.items} onRemove={attach.remove} />}
             <PromptTextarea
               ref={textareaRef}
               label="Prompt"
@@ -245,7 +262,27 @@ export function HomeLanding({
               disabled={disabled}
               className="rounded-none border-0 bg-transparent px-4 pb-1 pt-3.5 focus-visible:border-transparent focus-visible:ring-0"
             />
-            <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
+            {/* Below sm the chips take their own full-width row above attach and send (order-first); from sm up it is one row. */}
+            <div data-testid="home-toolbar-row" className="flex flex-wrap items-center gap-x-1 px-2 pb-2 pt-1">
+              {attach.limits && (
+                <>
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    multiple
+                    hidden
+                    tabIndex={-1}
+                    aria-hidden
+                    data-testid="home-attach-input"
+                    onChange={(e) => {
+                      attach.add(Array.from(e.target.files ?? []));
+                      // Picking the same file twice must fire change again.
+                      e.target.value = "";
+                    }}
+                  />
+                  <AttachMenu disabled={disabled || busy} onPickFiles={() => fileInput.current?.click()} />
+                </>
+              )}
               <RunConfigToolbar
                 taskId={null}
                 chatId={null}
@@ -260,19 +297,20 @@ export function HomeLanding({
                   configRef.current = v.state;
                 }}
               >
-                <div data-testid="home-run-chips" className="flex flex-wrap items-center">
-                  <RunConfigToolbar.ModelPicker />
-                  <RunConfigToolbar.Mode />
+                <div data-testid="home-run-chips" className="flex flex-wrap items-center max-sm:order-first max-sm:w-full">
+                  <RunConfigToolbar.ModelPicker showLabel />
+                  <RunConfigToolbar.Thinking showLabel />
+                  <RunConfigToolbar.Mode showLabel />
                 </div>
               </RunConfigToolbar>
               <Button
                 type="submit"
                 variant="execute"
-                className={COMPOSER_ACTION_BUTTON_CLASS}
+                className={cn(COMPOSER_ACTION_BUTTON_CLASS, "ml-auto")}
                 aria-label="Start task"
                 title="Start task (Enter)"
                 data-testid="home-send-button"
-                disabled={disabled || busy || prompt.trim() === ""}
+                disabled={disabled || busy || prompt.trim() === "" || attach.hasError}
               >
                 <Icons.send aria-hidden />
               </Button>

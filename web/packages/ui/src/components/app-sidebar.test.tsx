@@ -1380,7 +1380,7 @@ describe("AppSidebar footer Host popover and agent palette entries (run-config I
 
     const dot = screen.getByTestId("sidebar-footer-providers-health-dot");
     expect(dot).toHaveAttribute("data-status", "warning");
-    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("1 healthy");
+    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent(/1 (of \d+ )?healthy/);
 
     // Re-rendering the same client doesn't re-test.
     rerender(
@@ -1983,19 +1983,20 @@ describe("AppSidebar unreachable daemon (UAT B-03)", () => {
     expect(onRetryConnect).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the connect cause as a second, muted line under 'Can't reach the daemon' (AC1)", () => {
+  it("keeps the raw connect error as a tooltip only, not a second line (AC1)", () => {
     render(
       <SidebarProvider>
         <AppSidebar
           client={null}
           selectedTaskId={null}
           connectionStatus="disconnected"
-          connectionError="no daemon listening"
+          connectionDetail="no daemon listening"
           onRetryConnect={() => {}}
         />
       </SidebarProvider>,
     );
     expect(screen.getByText("Can't reach the daemon")).toBeInTheDocument();
-    expect(screen.getByTestId("sidebar-connection-error")).toHaveTextContent("no daemon listening");
+    expect(screen.getByText("Can't reach the daemon").closest("[title]")).toHaveAttribute("title", "no daemon listening");
+    expect(screen.queryByText("no daemon listening")).not.toBeInTheDocument();
   });
 });

@@ -110,7 +110,7 @@ describe("sidebar footer", () => {
     });
     openHost();
     expect(screen.getByTestId("sidebar-footer-host-connection")).toHaveTextContent("Connected to 127.0.0.1");
-    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("1 healthy");
+    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("1 of 2 healthy");
     expect(screen.getByTestId("sidebar-footer-providers-health-dot")).toHaveAttribute("data-status", "warning");
     expect(screen.getByTestId("sidebar-footer-host-agents")).toHaveTextContent("3");
 
@@ -238,5 +238,20 @@ describe("sidebar footer", () => {
     screen.getByTestId("sidebar-footer-help").focus();
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+});
+
+describe("Providers row health label", () => {
+  it("says N healthy with a green dot when every provider is healthy, N of M with amber when degraded", () => {
+    const ok = renderFooter({ providerHealth: { healthy: 2, total: 2 } });
+    openHost();
+    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent(/^Providers2 healthy$/);
+    expect(screen.getByTestId("sidebar-footer-providers-health-dot")).toHaveAttribute("data-status", "success");
+    ok.unmount();
+
+    renderFooter({ providerHealth: { healthy: 4, total: 8 } });
+    openHost();
+    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("4 of 8 healthy");
+    expect(screen.getByTestId("sidebar-footer-providers-health-dot")).toHaveAttribute("data-status", "warning");
   });
 });

@@ -44,7 +44,6 @@ export const PERMISSION_REQUEST: PermissionRequestEventParams = {
   summary: "Write internal/webhook/limiter.go",
   options: [
     { id: "allow", label: "Allow once", kind: "allow_once" },
-    { id: "allow_always", label: "Allow always", kind: "allow_always" },
     { id: "deny", label: "Deny", kind: "reject_once" },
   ],
   detail: {

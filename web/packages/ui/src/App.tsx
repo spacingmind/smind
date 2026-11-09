@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { CONNECT_TIMEOUT_MS, describeConnectError } from "@/lib/connect-error";
 import { ShortcutsOverlay } from "@/components/shortcuts-overlay";
 import { AutomationsPage } from "@/components/automations/automations-page";
 import { TabRenameInput } from "@/components/tab-rename-input";
@@ -241,7 +242,7 @@ function AppShell({
   // then reports the no-answer line instead of sitting on "Connecting…"
   // forever. Cleared when the connect settles either way, and by Retry.
   const [connectTimedOut, setConnectTimedOut] = useState(false);
-  const connectErrorText = connectTimedOut ? "No answer from the daemon after 8 s" : connectError;
+  const connectCause = describeConnectError(connectError, connectTimedOut);
   // Bumped by the sidebar's Retry: re-runs the connect effect below, so a failed
   // first connect can be retried (and its reconnect loop armed) without a reload.
   const [connectAttempt, setConnectAttempt] = useState(0);
@@ -433,7 +434,7 @@ function AppShell({
       if (cancelled || settled) return;
       setConnectTimedOut(true);
       setConnectionStatus("disconnected");
-    }, 8_000);
+    }, CONNECT_TIMEOUT_MS);
 
     connect()
       .then((c) => {
@@ -1277,8 +1278,8 @@ function AppShell({
       onOpenAutomations={openAutomations}
       onOpenPluginPanel={openPluginPage}
       connectionStatus={connectionStatus}
-      connectionStatusText={connectErrorText ? `Disconnected: ${connectErrorText}` : STATUS_LABEL[connectionStatus]}
-      connectionError={connectErrorText}
+      connectionStatusText={connectCause ? "Disconnected" : STATUS_LABEL[connectionStatus]}
+      connectionDetail={connectCause?.raw}
       onRetryConnect={retryConnect}
       onTaskCreated={taskCreatedFromDialog}
       headerActions={
@@ -1297,7 +1298,9 @@ function AppShell({
   const headerElement = (
     <>
       <AppHeader
-        statusText={connectErrorText ? `Disconnected: ${connectErrorText}` : STATUS_LABEL[connectionStatus]}
+        statusText={connectCause ? "Disconnected" : STATUS_LABEL[connectionStatus]}
+        statusTitle={connectCause?.raw}
+        onRetryConnect={retryConnect}
         connectionStatus={connectionStatus}
         sidebarPx={isMobile ? 0 : sidebarOpen ? sidebarWidth : SIDEBAR_ICON_WIDTH}
         showSidebarToggle={!toggleInSidebar && !windowToggle}
@@ -1340,7 +1343,8 @@ function AppShell({
       <HomeLanding
         client={client}
         connected={client !== null && connectionStatus === "connected"}
-        connectionError={connectErrorText}
+        connectionError={connectCause?.copy}
+        connectionDetail={connectCause?.raw}
         onRetryConnect={retryConnect}
         workspaces={allWorkspaces}
         onCreated={selectTaskFromSidebar}

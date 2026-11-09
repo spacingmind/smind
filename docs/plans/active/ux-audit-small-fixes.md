@@ -38,6 +38,11 @@ shipped as three PRs. This file tracks PR A; B and C add their sections.
 - `task-lineage.test.tsx`: no `$` text in the usage chip; tokens text still present.
 - mobile `taskTree.test.ts`: tree row view model carries no cost.
 
+### Polish after review
+
+- The daemon-down cause shows once, as readable copy on the home notice ("The daemon isn't running or isn't reachable at <address>." / "The daemon didn't answer within 8 s."); the header pill says "Disconnected" with Retry and the sidebar row "Can't reach the daemon" with Retry; the raw error is a tooltip.
+- The footer Providers row reads "N of M healthy" when degraded (amber), "N healthy" when all are (green).
+
 ### Decisions
 
 - Item 3 of the audit scope (home composer Attach and effort chips) is not small
@@ -55,3 +60,44 @@ PR A implemented (AC1-4). Peers ran on the GLM profile; no Sonnet fallback.
 - Mobile: vitest (108 files, 1019 tests) and tsc pass.
 - Frames (web 1280 and 390, light and dark, luminance and no horizontal overflow asserted): daemon-down refused, daemon-down no answer after 8 s, home, shortcuts overlay (plain and searched), Settings > Profiles, This daemon popover.
 - Not frame-verified: the Retry click path and recovery (unit tests only), the lineage chip without cost (unit tests only), the mobile tree row.
+
+## PR B: Deny with a reason, new-file content, demo card parity
+
+Also carries the PR A polish (cause shown once as readable copy; "N of M healthy").
+
+### Acceptance criteria
+
+5. **Deny can carry a reason.** `run.respondPermission` takes an optional `reason`:
+   text, trimmed, control characters other than a newline turned into spaces,
+   NUL and invalid UTF-8 refused, at most 500 characters, and only with a
+   reject option of the pending request (an allow with a reason, an unknown
+   option or an over-cap text is an error and the request stays pending).
+   The text reaches the agent as the deny message ("denied by human reviewer:
+   <reason>") for providers that run through the Claude Code adapter; for the
+   others the Deny is sent as before, the result says `reasonDelivered: false`
+   and the CLI prints a note. Callers that send no reason get exactly the old
+   behaviour and the old `{}` result. The reason is not stored in run history.
+   Surfaces: web permission card and mobile permission card (a labelled
+   one-line field, "Reason for denying (optional)", used only by Deny; Allow
+   never sends it), CLI `smind task deny <run> [req] --reason <text>`.
+6. **New-file writes show their content.** A write to a path that did not exist
+   shows its content (title "Content", open, plain text, truncation notice
+   kept) instead of a collapsed Diff; overwrites and edits keep the Diff.
+7. **Demo parity.** The demo's permission card offers Allow once and Deny only,
+   like the real card for the main provider, until the "always" choice lands.
+
+### Test scenarios
+
+Go: TestDenyReason_* (delivered; not delivered where the provider cannot carry
+it; empty reason identical to the old path and a second answer refused;
+allow/unknown option/over cap/invalid text refused and the request stays
+pending), TestSanitizeDenyReason*, TestServer_RunRespondPermission_DenyReason
+(and `{}` kept for a plain respond), TestTaskDenyReasonFlag,
+TestTaskDenyWithoutReasonSendsNoReasonField,
+TestTaskDenyReasonFlagNeedsAValueAndApproveHasNone.
+Web: deny_reason_is_sent_only_with_deny, deny_reason_is_capped_at_500,
+allow_never_sends_the_reason, old_onRespond_callers_unchanged,
+new_file_write_shows_content_open, overwrite_keeps_collapsed_diff,
+demo_permission_card_has_no_allow_always. Mobile: deny reason request builder
+and cap tests.
+

@@ -97,6 +97,8 @@ function HeaderTask({
  */
 export function AppHeader({
   statusText,
+  statusTitle,
+  onRetryConnect,
   connectionStatus = "connected",
   sidebarPx,
   showSidebarToggle = true,
@@ -110,6 +112,10 @@ export function AppHeader({
   onOpenUpdate,
 }: {
   statusText: string;
+  /** Tooltip for the status pill (the raw connect error). */
+  statusTitle?: string;
+  /** Re-runs the daemon connection: a Retry inside the pill while it is disconnected. */
+  onRetryConnect?: () => void;
   connectionStatus?: ConnectionStatus;
   sidebarPx: number;
   /** Whether the toggle (and, by default, the update badge) live here rather than in the sidebar's top strip or the window-level toggle. */
@@ -160,6 +166,7 @@ export function AppHeader({
         <span
           role="status"
           data-testid="app-connection-status"
+          title={statusTitle}
           data-connection={connectionStatus}
           className={cn(
             connected
@@ -171,6 +178,17 @@ export function AppHeader({
           )}
         >
           {statusText}
+          {!connected && connectionStatus === "disconnected" && onRetryConnect && (
+            <button
+              type="button"
+              data-testid="app-connection-retry"
+              aria-label="Retry connecting"
+              onClick={onRetryConnect}
+              className="ml-2 font-medium underline underline-offset-2"
+            >
+              Retry
+            </button>
+          )}
         </span>
         <div className="min-w-0 flex-1" />
         <div className="flex shrink-0 items-center gap-1">
