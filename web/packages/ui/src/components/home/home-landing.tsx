@@ -50,6 +50,7 @@ export function HomeLanding({
   client,
   connected,
   connectionError,
+  connectionDetail,
   onRetryConnect,
   workspaces,
   onCreated,
@@ -59,6 +60,8 @@ export function HomeLanding({
   connected: boolean;
   /** The initial connect's failure cause (App.tsx) -- shown above the composer while the daemon is unreachable. */
   connectionError?: string | null;
+  /** The raw error behind it, kept as a tooltip for debugging. */
+  connectionDetail?: string | null;
   /** Re-runs the daemon connection (App.tsx) -- the notice's Retry. */
   onRetryConnect?: () => void;
   workspaces: Workspace[];
@@ -142,7 +145,7 @@ export function HomeLanding({
           >
             <div className="flex flex-wrap items-center gap-2">
               <Icons.warning aria-hidden className="size-4 shrink-0 text-destructive" />
-              <span>Can't reach the daemon: {connectionError}</span>
+              <span title={connectionDetail ?? undefined}>{connectionError}</span>
               {onRetryConnect && (
                 <Button
                   type="button"

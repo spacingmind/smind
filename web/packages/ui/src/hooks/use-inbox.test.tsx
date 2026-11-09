@@ -1,7 +1,7 @@
 import { act } from "react";
 import { describe, expect, it } from "vitest";
 
-import { useInboxActions, useInboxCount, useInboxList, useInboxRequest } from "@/hooks/use-inbox";
+import { useInboxActions, useInboxCount, useInboxList, useInboxRequest, useRespondPermission } from "@/hooks/use-inbox";
 import { InboxDaemon, permissionItem, REQUEST_EVENTS, stallItem, verdictItem } from "@/test/inbox-fixtures";
 import { renderHookWithDaemon } from "@/test/render-with-daemon";
 
@@ -74,5 +74,20 @@ describe("inbox hooks", () => {
     const { result } = renderHookWithDaemon(() => useInboxRequest("run-1", "q1", true), d, { initialProps: null });
     await flush();
     expect(result.current.data).toBeNull();
+  });
+
+  it("respondPermission params carry a reason key only when a reason is given", async () => {
+    const d = daemonWith(permissionItem());
+    const { result } = renderHookWithDaemon(() => useRespondPermission(), d, { initialProps: null });
+    await act(async () => {
+      await result.current("run-1", "q1", "deny-1");
+    });
+    await act(async () => {
+      await result.current("run-1", "q1", "deny-1", "ask for a narrower change");
+    });
+    const calls = d.callsOf("run.respondPermission");
+    expect(calls[0].params).toEqual({ runId: "run-1", requestId: "q1", optionId: "deny-1" });
+    expect("reason" in (calls[0].params as object)).toBe(false);
+    expect(calls[1].params).toEqual({ runId: "run-1", requestId: "q1", optionId: "deny-1", reason: "ask for a narrower change" });
   });
 });

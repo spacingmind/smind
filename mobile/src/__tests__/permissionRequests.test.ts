@@ -6,7 +6,8 @@
 // traffic.
 
 import { describe, expect, it } from 'vitest';
-import { feedPermissionEvent, PermissionBoard, respondToPermission } from '../permissionRequests';
+import { denyReasonParam, dispatchPermissionTap, feedPermissionEvent, PermissionBoard, respondToPermission } from '../permissionRequests';
+import { respondPermission } from '../api';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
 
@@ -186,5 +187,79 @@ describe('respondToPermission (tap flow, fake connection)', () => {
     await respondToPermission(conn, board, 'perm-1', 'allow');
     expect(calls).toEqual([]);
     expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny', by: 'event' });
+  });
+});
+
+describe('deny reason', () => {
+  it('denyReasonParam trims and returns the text', () => {
+    expect(denyReasonParam('  use bun instead  ')).toBe('use bun instead');
+  });
+
+  it('denyReasonParam returns undefined for blank text', () => {
+    expect(denyReasonParam('')).toBeUndefined();
+    expect(denyReasonParam('   \t\n  ')).toBeUndefined();
+  });
+
+  it('denyReasonParam cuts at 500 characters', () => {
+    expect(denyReasonParam('x'.repeat(600))).toBe('x'.repeat(500));
+    expect(denyReasonParam(` ${'x'.repeat(500)}x `)).toBe('x'.repeat(500));
+  });
+
+  it('respondPermission sends no reason key without a reason', async () => {
+    const { conn, calls } = fakeConnection(() => ({}));
+    await respondPermission(conn, 'run-9', 'perm-1', 'deny');
+    expect(calls).toEqual([['run.respondPermission', { runId: 'run-9', requestId: 'perm-1', optionId: 'deny' }]]);
+  });
+
+  it('respondPermission sends the reason when given', async () => {
+    const { conn, calls } = fakeConnection(() => ({}));
+    await respondPermission(conn, 'run-9', 'perm-1', 'deny', 'use bun instead');
+    expect(calls).toEqual([
+      ['run.respondPermission', { runId: 'run-9', requestId: 'perm-1', optionId: 'deny', reason: 'use bun instead' }],
+    ]);
+  });
+
+  it('respondToPermission passes the reason through to the wire', async () => {
+    const { conn, calls } = fakeConnection(() => ({}));
+    const board = new PermissionBoard();
+    board.requestReceived('run-9', REQ);
+    await respondToPermission(conn, board, 'perm-1', 'deny', 'use bun instead');
+    expect(calls).toEqual([
+      ['run.respondPermission', { runId: 'run-9', requestId: 'perm-1', optionId: 'deny', reason: 'use bun instead' }],
+    ]);
+  });
+
+  it('respondToPermission without a reason keeps the old params exactly', async () => {
+    const { conn, calls } = fakeConnection(() => ({}));
+    const board = new PermissionBoard();
+    board.requestReceived('run-9', REQ);
+    await respondToPermission(conn, board, 'perm-1', 'allow', denyReasonParam('   '));
+    expect(calls).toEqual([['run.respondPermission', { runId: 'run-9', requestId: 'perm-1', optionId: 'allow' }]]);
+  });
+
+  it('dispatchPermissionTap: a reject option carries the reason (trimmed/capped), blank stays undefined', () => {
+    const calls: unknown[][] = [];
+    const tap = (...args: unknown[]) => calls.push(args);
+    dispatchPermissionTap(tap, 'perm-1', 'deny', 'reject_once', ' use bun instead ');
+    dispatchPermissionTap(tap, 'perm-1', 'deny', 'reject_once', 'x'.repeat(600));
+    dispatchPermissionTap(tap, 'perm-1', 'deny', 'reject_once', '   ');
+    expect(calls).toEqual([
+      ['perm-1', 'deny', 'use bun instead'],
+      ['perm-1', 'deny', 'x'.repeat(500)],
+      ['perm-1', 'deny', undefined],
+    ]);
+  });
+
+  it('dispatchPermissionTap: any other option is called with exactly two arguments', () => {
+    const calls: unknown[][] = [];
+    const tap = (...args: unknown[]) => calls.push(args);
+    dispatchPermissionTap(tap, 'perm-1', 'allow', 'allow_once', 'use bun instead');
+    dispatchPermissionTap(tap, 'perm-1', 'always', 'allow_always', 'use bun instead');
+    dispatchPermissionTap(tap, 'perm-1', 'odd', 'weird', 'use bun instead');
+    expect(calls).toEqual([
+      ['perm-1', 'allow'],
+      ['perm-1', 'always'],
+      ['perm-1', 'odd'],
+    ]);
   });
 });

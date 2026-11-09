@@ -104,9 +104,9 @@ export function useRespondPermission() {
   const { client } = useDaemonConnection();
   const queryClient = useQueryClient();
   return useCallback(
-    async (runId: string, requestId: string, optionId: string) => {
+    async (runId: string, requestId: string, optionId: string, reason?: string) => {
       if (!client) throw new Error("no daemon connection");
-      await client.call("run.respondPermission", { runId, requestId, optionId });
+      await client.call("run.respondPermission", reason ? { runId, requestId, optionId, reason } : { runId, requestId, optionId });
       void queryClient.invalidateQueries({ queryKey: queryKeys.inboxAll() });
     },
     [client, queryClient],

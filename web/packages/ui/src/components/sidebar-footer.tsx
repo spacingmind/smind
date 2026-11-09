@@ -179,7 +179,9 @@ function HostButton({
             providerHealth.total > 0 && (
               <>
                 <StatusDot status={tone ?? "neutral"} data-testid="sidebar-footer-providers-health-dot" />
-                {providerHealth.healthy} healthy
+                {providerHealth.healthy === providerHealth.total
+                  ? `${providerHealth.healthy} healthy`
+                  : `${providerHealth.healthy} of ${providerHealth.total} healthy`}
               </>
             )
           }
