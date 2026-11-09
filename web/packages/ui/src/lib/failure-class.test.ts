@@ -97,16 +97,21 @@ describe("describeFailureCard", () => {
     ["too_many_denials", { kind: "review_policy", target: "settings:permission-policy", label: "Review the permission policy" }],
   ];
 
-  it.each(HUMAN_FIX)("%s: the daemon's summary as the sentence, the action label as the hint, never a retry", (_kind, action) => {
+  it.each(HUMAN_FIX)("%s: the daemon's summary as the sentence, never a retry", (_kind, action) => {
     const v = describeFailureCard({ ...base, failureKind: _kind, failureAction: { ...action, summary: "Daemon sentence." } }, NOW);
-    expect(v).toMatchObject({ tone: "danger", message: "Daemon sentence.", hint: action.label, countdown: null });
+    expect(v).toMatchObject({ tone: "danger", message: "Daemon sentence.", countdown: null });
   });
 
   it.each(HUMAN_FIX)("%s: the fallback sentence when the daemon sent no summary (an older daemon)", (kind, action) => {
     const v = describeFailureCard({ ...base, failureKind: kind, failureAction: action }, NOW);
     expect(v?.message.length).toBeGreaterThan(0);
     expect(v?.message).not.toBe("Daemon sentence.");
-    expect(v?.hint).toBe(action.label);
+  });
+
+  it("the hint never repeats the control's own words: a static reason for a fresh chat, the label where there is no control, nothing for the policy", () => {
+    expect(describeFailureCard({ ...base, failureKind: "context_window_exceeded", failureAction: HUMAN_FIX[0][1] }, NOW)).toMatchObject({ hint: "Earlier turns stay in this chat." });
+    expect(describeFailureCard({ ...base, failureKind: "session_budget_exceeded", failureAction: HUMAN_FIX[1][1] }, NOW)).toMatchObject({ hint: HUMAN_FIX[1][1].label });
+    expect(describeFailureCard({ ...base, failureKind: "too_many_denials", failureAction: HUMAN_FIX[2][1] }, NOW)).toMatchObject({ hint: null });
   });
 
   it("context_window_exceeded offers Start a fresh chat; session_budget_exceeded only the label; too_many_denials the policy link", () => {

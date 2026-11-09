@@ -62,7 +62,7 @@ describe("RunErrorBox failure classes", () => {
     expect(screen.queryByTestId("run-failure-retry")).toBeNull();
   });
 
-  it("context_window_exceeded: the daemon's summary, the label as hint, and Start a fresh chat dispatches smind:new-chat", () => {
+  it("context_window_exceeded: the daemon's summary, the static reason as hint, and Start a fresh chat dispatches smind:new-chat", () => {
     const seen: CustomEvent[] = [];
     const on = (e: Event) => seen.push(e as CustomEvent);
     window.addEventListener("smind:new-chat", on);
@@ -75,7 +75,7 @@ describe("RunErrorBox failure classes", () => {
       />,
     );
     expect(screen.getByTestId("run-error").textContent).toBe("The conversation no longer fits the model's context window.");
-    expect(screen.getByTestId("run-failure-hint").textContent).toBe("Start a fresh chat for this task");
+    expect(screen.getByTestId("run-failure-hint").textContent).toBe("Earlier turns stay in this chat.");
     fireEvent.click(screen.getByTestId("run-failure-new-chat"));
     window.removeEventListener("smind:new-chat", on);
     expect(seen).toHaveLength(1);
@@ -104,7 +104,8 @@ describe("RunErrorBox failure classes", () => {
       />,
     );
     expect(screen.getByTestId("run-error").textContent).toBe("The agent kept asking for actions that were denied, so the provider stopped the run.");
-    expect(screen.getByTestId("run-failure-hint").textContent).toBe("Review the permission policy");
+    // The control's own words are not repeated as a hint.
+    expect(screen.queryByTestId("run-failure-hint")).toBeNull();
     fireEvent.click(screen.getByTestId("run-failure-review-policy"));
     window.removeEventListener("smind:open-settings", on);
     expect(seen).toHaveLength(1);
