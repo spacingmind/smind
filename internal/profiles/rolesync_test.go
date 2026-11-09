@@ -116,6 +116,35 @@ func TestRolePackSync_WhitespaceOnlyDifferenceIsNotCustomised(t *testing.T) {
 	}
 }
 
+func TestRolePackSync_AnEmptyStoredValueIsCustomisedNotStale(t *testing.T) {
+	t.Parallel()
+	pack := seededPack()
+	seatOf(t, pack, "peer-sonnet").Instructions = ""
+	checks := CheckRoles(pack)
+	if got := fieldState(t, checks, "peer-sonnet", "instructions"); got != StateCustomised {
+		t.Fatalf("peer-sonnet.instructions cleared = %s, want customised (never overwritten unasked)", got)
+	}
+	if items := PlanApply(checks, pack, nil); len(items) != 0 {
+		t.Fatalf("PlanApply over a cleared field = %d items, want none", len(items))
+	}
+}
+
+func TestRolePackSync_ASymlinkedBackupDirIsRefused(t *testing.T) {
+	t.Parallel()
+	pack := seededPack()
+	seatOf(t, pack, "lead").Instructions = "x"
+	real, link := t.TempDir(), filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	items := PlanApply(checkRoles(pack, historyWith("lead", "instructions", "x")), pack, []Take{{Seat: "lead", Field: "instructions"}})
+	called := false
+	_, _, err := ApplyRoles(items, ApplyOptions{BackupDir: link, Update: func(p store.AgentProfile, _ time.Time) (store.AgentProfile, error) { called = true; return p, nil }})
+	if err == nil || called {
+		t.Fatalf("ApplyRoles into a symlinked dir: err = %v, update called = %v; want a refusal and no write", err, called)
+	}
+}
+
 func TestRolePackSync_MissingAndOwnedSeatsAreReported(t *testing.T) {
 	t.Parallel()
 	pack := seededPack()

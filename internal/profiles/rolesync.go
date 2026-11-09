@@ -204,6 +204,10 @@ func checkRoles(existing []store.AgentProfile, history map[string]map[string][]s
 			switch h := fieldHash(stored); {
 			case h == fieldHash(wantText):
 				state = StateCurrent
+			case normalizeField(stored) == "":
+				// An empty value equals what the first release seeded for some fields, but a
+				// Human who cleared a field cannot be told from it: never overwrite it unasked.
+				state = StateCustomised
 			case slices.Contains(history[seat.Name][f.name], h):
 				state = StateStale
 			}
@@ -353,6 +357,9 @@ func ApplyRoles(items []ApplyItem, opt ApplyOptions) (string, []ApplyResult, err
 	if opt.Now != nil {
 		now = opt.Now
 	}
+	if fi, err := os.Lstat(opt.BackupDir); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return "", nil, fmt.Errorf("role pack apply: backup directory %s is a symlink", opt.BackupDir)
+	}
 	dir := filepath.Join(opt.BackupDir, now().UTC().Format("20060102T150405Z")+fmt.Sprintf("-pack-v%d", PackVersion))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", nil, fmt.Errorf("role pack apply: backup directory: %w", err)
@@ -367,6 +374,10 @@ func ApplyRoles(items []ApplyItem, opt ApplyOptions) (string, []ApplyResult, err
 			return "", nil, fmt.Errorf("role pack apply: back up %s: %w", it.Seat, err)
 		}
 		if _, err := f.Write(append(data, '\n')); err != nil {
+			f.Close()
+			return "", nil, fmt.Errorf("role pack apply: back up %s: %w", it.Seat, err)
+		}
+		if err := f.Sync(); err != nil {
 			f.Close()
 			return "", nil, fmt.Errorf("role pack apply: back up %s: %w", it.Seat, err)
 		}

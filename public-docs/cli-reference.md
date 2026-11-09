@@ -344,7 +344,13 @@ stale prompt fields of untouched seats after saving a backup of every profile
 it writes (under the smind home by default; `--backup-dir` chooses where), and
 `--dry-run` shows what would change without writing. Customised fields and
 capability fields (model, permission mode, rate-limit behaviour) change only
-with an explicit `--take <seat>[.<field>]`.
+with an explicit `--take <seat>[.<field>]`. A field you cleared (an empty
+value) counts as customised, so `--apply` never fills it unasked. The backup is
+fsynced but not written atomically: a crash can leave a partial file, and no
+write to a profile starts before every backup is on disk. A backup directory
+that is itself a symlink is refused, and a second `--apply` in the same second
+fails before writing anything (run it again). `--apply` exits 1 when a profile
+changed since the check (it is skipped) or a write failed.
 
 ### task wait
 

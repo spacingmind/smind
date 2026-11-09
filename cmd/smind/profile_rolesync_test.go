@@ -47,10 +47,13 @@ func seatProfile(t *testing.T, s *store.Store, name string) store.AgentProfile {
 	return store.AgentProfile{}
 }
 
+// staleNotes is the text the first pack release seeded as peer-sonnet's notes.
+const staleNotes = "Hard outcomes and the GLM fallback. Sonnet 5.5, auto mode. No orchestration tools."
+
 // storeSetSeat rewrites one stored seat through the store (no RPC, no
 // validation), the way an earlier release's text or a human edit would sit
-// there. The empty text is what the first pack release seeded, so the history
-// table classifies it stale.
+// there. staleNotes is the first pack release's peer-sonnet notes, so the history
+// table classifies them stale.
 func storeSetSeat(t *testing.T, s *store.Store, name string, set func(*store.AgentProfile)) {
 	t.Helper()
 	p := seatProfile(t, s, name)
@@ -76,7 +79,7 @@ func TestProfileSeedRolesCheck_ExitCodes(t *testing.T) {
 		_, s := newTestProfileDaemon(t)
 		humanEnv(t)
 		seedRolePack(t)
-		storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Instructions = "" })
+		storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Notes = staleNotes })
 
 		var code int
 		out := captureStdout(t, func() { code = run([]string{"profile", "seed", "roles", "--check"}) })
@@ -86,8 +89,8 @@ func TestProfileSeedRolesCheck_ExitCodes(t *testing.T) {
 		if !strings.Contains(out, "updates available for 1 seat(s)") {
 			t.Errorf("out %q, want updates available for 1 seat(s)", out)
 		}
-		if !strings.Contains(out, "peer-sonnet (id ") || !strings.Contains(out, "instructions") || !strings.Contains(out, "stale") {
-			t.Errorf("out %q, want a stale instructions line for peer-sonnet", out)
+		if !strings.Contains(out, "peer-sonnet (id ") || !strings.Contains(out, "notes") || !strings.Contains(out, "stale") {
+			t.Errorf("out %q, want a stale notes line for peer-sonnet", out)
 		}
 	})
 	t.Run("customised only exits 0", func(t *testing.T) {
@@ -111,7 +114,7 @@ func TestProfileSeedRolesDiff_ShowsStaleAndCustomised(t *testing.T) {
 	_, s := newTestProfileDaemon(t)
 	humanEnv(t)
 	seedRolePack(t)
-	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Instructions = "" })
+	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Notes = staleNotes })
 	storeSetSeat(t, s, "lead", func(p *store.AgentProfile) { p.Notes = "my own notes" })
 
 	var code int
@@ -119,22 +122,23 @@ func TestProfileSeedRolesDiff_ShowsStaleAndCustomised(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("--diff = %d, want 0; out %q", code, out)
 	}
-	if !strings.Contains(out, "+++ peer-sonnet.instructions") {
-		t.Errorf("out %q, want a +++ peer-sonnet.instructions header", out)
+	if !strings.Contains(out, "+++ peer-sonnet.notes") {
+		t.Errorf("out %q, want a +++ peer-sonnet.notes header", out)
 	}
-	if !strings.Contains(out, "+You are a Peer") {
+	if !strings.Contains(out, "+Bounded step") {
 		t.Errorf("out %q, want + lines carrying the pack text", out)
 	}
 	if !strings.Contains(out, "lead.notes") || !strings.Contains(out, "customised") {
 		t.Errorf("out %q, want the customised lead notes as customised", out)
 	}
 
-	out = captureStdout(t, func() { code = run([]string{"profile", "seed", "roles", "--diff", "peer-sonnet.notes"}) })
-	if code != 0 || strings.Contains(out, "peer-sonnet.instructions") || strings.Contains(out, "lead.notes") {
-		t.Fatalf("--diff peer-sonnet.notes = %d, out %q; want only the filtered field", code, out)
+	out = captureStdout(t, func() { code = run([]string{"profile", "seed", "roles", "--diff", "lead.notes"}) })
+	if code != 0 || strings.Contains(out, "peer-sonnet.notes") || !strings.Contains(out, "lead.notes") {
+		t.Fatalf("--diff lead.notes = %d, out %q; want only the filtered field", code, out)
 	}
-	if !strings.Contains(out, "no differences") {
-		t.Errorf("out %q, want no differences for a field that matches nothing", out)
+	out = captureStdout(t, func() { code = run([]string{"profile", "seed", "roles", "--diff", "peer-sonnet.skills"}) })
+	if code != 0 || !strings.Contains(out, "no differences") {
+		t.Errorf("--diff peer-sonnet.skills = %d, out %q, want no differences for a field that matches nothing", code, out)
 	}
 }
 
@@ -155,7 +159,7 @@ func TestProfileSeedRolesApply_UpdatesStaleAndBacksUp(t *testing.T) {
 	humanEnv(t)
 	seedRolePack(t)
 	id := seatProfile(t, s, "peer-sonnet").ID
-	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Instructions = "" })
+	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Notes = staleNotes })
 
 	backup := t.TempDir()
 	var code int
@@ -163,13 +167,13 @@ func TestProfileSeedRolesApply_UpdatesStaleAndBacksUp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("--apply = %d, want 0; out %q", code, out)
 	}
-	want := "updated peer-sonnet (id " + strconv.FormatInt(id, 10) + "): instructions"
+	want := "updated peer-sonnet (id " + strconv.FormatInt(id, 10) + "): notes"
 	if !strings.Contains(out, want) {
 		t.Errorf("out %q, want %q", out, want)
 	}
 
-	if got := seatProfile(t, s, "peer-sonnet").Instructions; !strings.Contains(got, "You are a Peer") {
-		t.Errorf("stored instructions = %q, want the pack text", got)
+	if got := seatProfile(t, s, "peer-sonnet").Notes; !strings.Contains(got, "json handoff") {
+		t.Errorf("stored notes = %q, want the pack text", got)
 	}
 
 	var dir string
@@ -189,8 +193,8 @@ func TestProfileSeedRolesApply_UpdatesStaleAndBacksUp(t *testing.T) {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		t.Fatalf("parse the backup: %v", err)
 	}
-	if saved.Instructions != "" {
-		t.Errorf("backup instructions = %q, want the old (empty) ones", saved.Instructions)
+	if saved.Notes != staleNotes {
+		t.Errorf("backup notes = %q, want the old ones", saved.Notes)
 	}
 
 	out = captureStdout(t, func() { code = run([]string{"profile", "seed", "roles", "--apply", "--backup-dir", backup}) })
@@ -233,7 +237,7 @@ func TestProfileSeedRolesApply_DryRunWritesNothing(t *testing.T) {
 	_, s := newTestProfileDaemon(t)
 	humanEnv(t)
 	seedRolePack(t)
-	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Instructions = "" })
+	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Notes = staleNotes })
 
 	backup := t.TempDir()
 	var code int
@@ -250,8 +254,8 @@ func TestProfileSeedRolesApply_DryRunWritesNothing(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Errorf("backup dir after a dry run = %d entries (%v), want none", len(entries), err)
 	}
-	if got := seatProfile(t, s, "peer-sonnet").Instructions; got != "" {
-		t.Errorf("instructions = %q, want still the stale empty ones", got)
+	if got := seatProfile(t, s, "peer-sonnet").Notes; got != staleNotes {
+		t.Errorf("notes = %q, want still the stale ones", got)
 	}
 }
 
@@ -259,7 +263,7 @@ func TestProfileSeedRolesApply_RefusedInAnAgentRun(t *testing.T) {
 	_, s := newTestProfileDaemon(t)
 	humanEnv(t)
 	seedRolePack(t)
-	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Instructions = "" })
+	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Notes = staleNotes })
 
 	t.Setenv("SMIND_AGENT_RUN", "1")
 	var code int
@@ -268,8 +272,8 @@ func TestProfileSeedRolesApply_RefusedInAnAgentRun(t *testing.T) {
 		t.Fatalf("--apply in an agent run = %d, stderr %q; want 1 and the refusal", code, stderr)
 	}
 	t.Setenv("SMIND_AGENT_RUN", "")
-	if got := seatProfile(t, s, "peer-sonnet").Instructions; got != "" {
-		t.Errorf("instructions = %q, want nothing written", got)
+	if got := seatProfile(t, s, "peer-sonnet").Notes; got != staleNotes {
+		t.Errorf("notes = %q, want nothing written", got)
 	}
 }
 
@@ -298,7 +302,7 @@ func TestProfileSeedRolesApply_NoBackupNoWrite(t *testing.T) {
 	_, s := newTestProfileDaemon(t)
 	humanEnv(t)
 	seedRolePack(t)
-	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Instructions = "" })
+	storeSetSeat(t, s, "peer-sonnet", func(p *store.AgentProfile) { p.Notes = staleNotes })
 
 	blocker := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(blocker, []byte("a regular file"), 0o600); err != nil {
@@ -313,7 +317,7 @@ func TestProfileSeedRolesApply_NoBackupNoWrite(t *testing.T) {
 	if code != 1 || !strings.Contains(stderr, "profile seed:") {
 		t.Fatalf("--apply with an unusable backup dir = %d, stderr %q; want 1 and the error", code, stderr)
 	}
-	if got := seatProfile(t, s, "peer-sonnet").Instructions; got != "" {
-		t.Errorf("instructions = %q, want nothing written without a backup", got)
+	if got := seatProfile(t, s, "peer-sonnet").Notes; got != staleNotes {
+		t.Errorf("notes = %q, want nothing written without a backup", got)
 	}
 }
