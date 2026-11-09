@@ -731,9 +731,12 @@ export function Composer({
                 </Popover>
               </>
             )}
-            <RunConfigToolbar.ModelPicker />
-            <RunConfigToolbar.Thinking />
-            <RunConfigToolbar.Mode />
+            {/* Below sm the chips take their own full-width row above attach and send (order-first); from sm up it is one row. */}
+            <div className="flex flex-wrap items-center max-sm:order-first max-sm:w-full">
+              <RunConfigToolbar.ModelPicker showLabel />
+              <RunConfigToolbar.Thinking showLabel />
+              <RunConfigToolbar.Mode showLabel />
+            </div>
             {configOptions && (
               <RunConfigOptions
                 options={configOptions.options}
