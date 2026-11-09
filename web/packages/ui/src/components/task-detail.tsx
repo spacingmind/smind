@@ -42,7 +42,7 @@ import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useForkChat } from "@/hooks/use-fork-chat";
 import { useForkSource } from "@/hooks/use-fork-source";
-import { retrySource, useRetryChat } from "@/hooks/use-retry-chat";
+import { retryPermission, retrySource, useRetryChat } from "@/hooks/use-retry-chat";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { canRetryWithHigherEffort, useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
@@ -733,14 +733,20 @@ export function TaskDetailPane({
           turn={runs.findIndex((r) => r.id === retryTarget.id) + 1}
           initialPrompt={retryTarget.prompt}
           hasAnchor={retrySource(chat, runs, retryTarget) !== null}
-          onRetry={(prompt, mode) => {
-            // The composer's permission applies when it is on the run's provider, else the run's own (see resubmit).
-            const composer = runConfigRef.current;
-            const permission =
-              composer && composer.provider === retryTarget.provider
-                ? { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }
-                : { permissionMode: retryTarget.permissionMode, autoAccept: false }; // a new chat never inherits auto-accept from an old run
-            return retryChat({ taskId: task.ID, chat, runs, run: retryTarget, prompt, mode, permission });
+          permissionNote={
+            retryPermission(runConfigRef.current, retryTarget.provider).fromComposer
+              ? `It runs in the mode shown in the composer${runConfigRef.current?.permissionMode ? ` (${runConfigRef.current.permissionMode})` : " (the provider's default)"}, never in the mode this turn was switched to.`
+              : "It runs in the provider's default mode, never in the mode this turn was switched to."
+          }
+          attachmentNames={(retryTarget.attachments ?? []).map((a) => a.name || a.title || a.path || a.kind)}
+          onRetry={(prompt, mode, keepAttachments) => {
+            // A provider that is no longer configured is refused before any chat is created.
+            // (An empty catalog means it has not loaded yet: that never refuses.)
+            if (providers.length > 0 && !providers.some((p) => p.id === retryTarget.provider)) {
+              return Promise.reject(new Error(`The agent of this turn (${retryTarget.provider}) is no longer available: start the prompt from the composer instead.`));
+            }
+            const { permission } = retryPermission(runConfigRef.current, retryTarget.provider);
+            return retryChat({ taskId: task.ID, chat, runs, run: retryTarget, prompt, mode, permission, keepAttachments });
           }}
           onRetried={(child) => onOpenForkedChat?.(child)}
         />

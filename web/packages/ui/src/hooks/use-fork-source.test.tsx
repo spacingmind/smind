@@ -126,4 +126,13 @@ describe("useForkSource", () => {
     expect(result.current.seed).toBeNull();
     expect(result.current.loading).toBe(false);
   });
+
+  it("a fork point that is gone loads no history at all (fails closed)", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useForkSource(client, TASK, forked({ forkedAtRunId: "run-gone" })));
+    client.nth("run.list", 0).resolve([summary("run-1"), summary("run-2")]);
+    await flush();
+    expect(client.calls.filter((c) => c.method === "run.logs" || c.method === "run.attach")).toEqual([]);
+    expect(result.current.inherited).toEqual([]);
+  });
 });

@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { RetryStartError, retryAnchor, retrySource, useRetryChat } from "@/hooks/use-retry-chat";
+import { RetryStartError, retryAnchor, retryPermission, retrySource, useRetryChat } from "@/hooks/use-retry-chat";
 import type { RunEntry } from "@/hooks/use-run-timeline";
 import type { Chat } from "@/lib/types";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -69,7 +69,7 @@ describe("useRetryChat", () => {
         run: runs[1],
         prompt: "edited prompt",
         mode: "native",
-        permission: { permissionMode: "default", autoAccept: false },
+        permission: { permissionMode: "default", autoAccept: false }, keepAttachments: true
       });
       await Promise.resolve();
     });
@@ -96,7 +96,7 @@ describe("useRetryChat", () => {
         run: runs[0],
         prompt: "edited",
         mode: "native",
-        permission: { permissionMode: "", autoAccept: false },
+        permission: { permissionMode: "", autoAccept: false }, keepAttachments: true
       });
       await Promise.resolve();
     });
@@ -124,7 +124,7 @@ describe("useRetryChat", () => {
         run: runs[1],
         prompt: "edited",
         mode: "native",
-        permission: { permissionMode: "", autoAccept: false },
+        permission: { permissionMode: "", autoAccept: false }, keepAttachments: true
       });
       await Promise.resolve();
     });
@@ -157,7 +157,7 @@ describe("useRetryChat", () => {
         run: runs[1],
         prompt: "edited",
         mode: "native",
-        permission: { permissionMode: "", autoAccept: false },
+        permission: { permissionMode: "", autoAccept: false }, keepAttachments: true
       });
       await Promise.resolve();
     });
@@ -178,6 +178,7 @@ describe("useRetryChat", () => {
           prompt: "x",
           mode: "native",
           permission: { permissionMode: "", autoAccept: false },
+          keepAttachments: true,
         }),
       ).rejects.toThrow("no daemon connection");
     });
@@ -207,9 +208,55 @@ describe("useRetryChat in a forked chat", () => {
     const chat: Chat = { ...CHAT, ID: 12, fork: { parentChatId: 7, forkedAtRunId: "parent-run-3", kind: "fork", mode: "native", lossy: false } };
     const runs = [entry("own-1")];
     await act(async () => {
-      void result.current.retry({ taskId: 1, chat, runs, run: runs[0], prompt: "edited", mode: "native", permission: { permissionMode: "", autoAccept: false } });
+      void result.current.retry({ taskId: 1, chat, runs, run: runs[0], prompt: "edited", mode: "native", permission: { permissionMode: "", autoAccept: false }, keepAttachments: true });
       await Promise.resolve();
     });
     expect(client.nth("chat.fork", 0).params).toEqual({ chatId: 7, atRunId: "parent-run-3", mode: "native", kind: "retry" });
+  });
+});
+
+describe("retryPermission", () => {
+  it("is the composer's when it is on the replaced run's provider", () => {
+    expect(retryPermission({ provider: "claude-native", permissionMode: "plan", autoAccept: false }, "claude-native")).toEqual({
+      permission: { permissionMode: "plan", autoAccept: false },
+      fromComposer: true,
+    });
+  });
+  it("is the provider's safe default when the composer is on another provider", () => {
+    expect(retryPermission({ provider: "codex-native", permissionMode: "auto", autoAccept: true }, "claude-native")).toEqual({
+      permission: { permissionMode: "", autoAccept: false },
+      fromComposer: false,
+    });
+  });
+  it("is the provider's safe default when there is no composer state", () => {
+    expect(retryPermission(null, "claude-native").permission).toEqual({ permissionMode: "", autoAccept: false });
+    expect(retryPermission(undefined, "claude-native").fromComposer).toBe(false);
+  });
+});
+
+describe("useRetryChat attachments", () => {
+  it("sends none when the user dropped them", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRetryChat(client));
+    const runs = [entry("run-1"), entry("run-2", { attachments: [{ id: "a1", kind: "file", name: "spec.md" }] })];
+    await act(async () => {
+      void result.current.retry({ taskId: 1, chat: CHAT, runs, run: runs[1], prompt: "edited", mode: "native", permission: { permissionMode: "", autoAccept: false }, keepAttachments: false });
+      await Promise.resolve();
+    });
+    client.nth("chat.fork", 0).resolve(CHILD);
+    await flush();
+    expect(client.nth("run.start", 0).params).not.toHaveProperty("attachments");
+  });
+  it("re-sends them by default", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRetryChat(client));
+    const runs = [entry("run-1"), entry("run-2", { attachments: [{ id: "a1", kind: "file", name: "spec.md" }] })];
+    await act(async () => {
+      void result.current.retry({ taskId: 1, chat: CHAT, runs, run: runs[1], prompt: "edited", mode: "native", permission: { permissionMode: "", autoAccept: false }, keepAttachments: true });
+      await Promise.resolve();
+    });
+    client.nth("chat.fork", 0).resolve(CHILD);
+    await flush();
+    expect(client.nth("run.start", 0).params).toHaveProperty("attachments");
   });
 });

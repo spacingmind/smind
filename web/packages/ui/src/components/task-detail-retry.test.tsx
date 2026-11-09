@@ -35,11 +35,11 @@ function summary(id: string, prompt: string): RunSummary {
   };
 }
 
-async function renderPane(autoAccept = false) {
+async function renderPane(autoAccept = false, permissionMode = "") {
   const client = new FakeWsClient();
   const onOpenForkedChat = vi.fn();
   render(<TaskDetailPane client={client} task={TASK} chat={CHAT} isDefaultChat onOpenForkedChat={onOpenForkedChat} />);
-  client.nth("run.list", 0).resolve([{ ...summary("run-1", "first prompt"), AutoAccept: autoAccept, Provider: autoAccept ? "codex-native" : "claude-native" }, { ...summary("run-2", "second prompt"), AutoAccept: autoAccept, Provider: autoAccept ? "codex-native" : "claude-native" }]);
+  client.nth("run.list", 0).resolve([{ ...summary("run-1", "first prompt"), AutoAccept: autoAccept, PermissionMode: permissionMode, Provider: autoAccept ? "codex-native" : "claude-native" }, { ...summary("run-2", "second prompt"), AutoAccept: autoAccept, PermissionMode: permissionMode, Provider: autoAccept ? "codex-native" : "claude-native" }]);
   await flush();
   for (const [i, id] of ["run-1", "run-2"].entries()) {
     client.nth("run.logs", i).resolve({ runId: id, status: "done", stopReason: "end_turn", err: "", events: [] });
@@ -93,6 +93,29 @@ describe("TaskDetailPane edit & retry", () => {
     await flush();
     client.nth("chat.fork", 0).resolve(CHILD);
     await flush();
+    expect(client.nth("run.start", 0).params).not.toHaveProperty("autoAccept");
+  });
+
+  it("a turn whose provider is no longer configured is refused before any chat is created", async () => {
+    const { client } = await renderPane();
+    client.nth("provider.list", 0).resolve({ providers: [{ id: "glm", label: "GLM", kind: "cli" }] });
+    await flush();
+    fireEvent.click(screen.getAllByTestId("run-prompt-retry")[1]);
+    editAndConfirm("second prompt, better");
+    await flush();
+    expect(screen.getByTestId("dialog-retry-chat-error")).toHaveTextContent("no longer available");
+    expect(client.calls.some((c) => c.method === "chat.fork" || c.method === "chat.create" || c.method === "run.start")).toBe(false);
+  });
+
+  it("never runs in the old run's permission mode: the provider default when the composer is on another provider or absent", async () => {
+    const { client } = await renderPane(false, "bypass_permissions");
+    fireEvent.click(screen.getAllByTestId("run-prompt-retry")[1]);
+    expect(screen.getByTestId("retry-permission-note")).toHaveTextContent("never in the mode this turn was switched to");
+    editAndConfirm("second prompt, better");
+    await flush();
+    client.nth("chat.fork", 0).resolve(CHILD);
+    await flush();
+    expect(client.nth("run.start", 0).params).not.toHaveProperty("permissionMode");
     expect(client.nth("run.start", 0).params).not.toHaveProperty("autoAccept");
   });
 });

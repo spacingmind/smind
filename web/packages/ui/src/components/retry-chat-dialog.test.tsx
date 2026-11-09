@@ -18,7 +18,7 @@ async function flush(): Promise<void> {
 }
 
 function renderDialog(overrides: Partial<Parameters<typeof RetryChatDialog>[0]> = {}) {
-  const onRetry = vi.fn<(prompt: string, mode: "native" | "seeded") => Promise<Chat>>();
+  const onRetry = vi.fn<(prompt: string, mode: "native" | "seeded", keepAttachments: boolean) => Promise<Chat>>();
   const onRetried = vi.fn();
   const onOpenChange = vi.fn();
   const { rerender } = render(
@@ -31,6 +31,8 @@ function renderDialog(overrides: Partial<Parameters<typeof RetryChatDialog>[0]> 
       hasAnchor
       onRetry={onRetry}
       onRetried={onRetried}
+      permissionNote="It runs in the provider's default mode, never in the mode this turn was switched to."
+      attachmentNames={[]}
       {...overrides}
     />,
   );
@@ -61,6 +63,8 @@ describe("RetryChatDialog", () => {
         hasAnchor
         onRetry={vi.fn()}
         onRetried={vi.fn()}
+        permissionNote="x"
+        attachmentNames={[]}
       />,
     );
     rerender(
@@ -73,6 +77,8 @@ describe("RetryChatDialog", () => {
         hasAnchor
         onRetry={vi.fn()}
         onRetried={vi.fn()}
+        permissionNote="x"
+        attachmentNames={[]}
       />,
     );
     expect(textarea().value).toBe("do the thing");
@@ -92,7 +98,7 @@ describe("RetryChatDialog", () => {
     edit("the edited prompt");
     fireEvent.click(screen.getByTestId("dialog-retry-chat-confirm"));
     await flush();
-    expect(onRetry).toHaveBeenCalledWith("the edited prompt", "native");
+    expect(onRetry).toHaveBeenCalledWith("the edited prompt", "native", true);
     expect(onRetried).toHaveBeenCalledWith(CHILD);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
@@ -110,7 +116,7 @@ describe("RetryChatDialog", () => {
     onRetry.mockResolvedValueOnce({ ...CHILD, fork: { parentChatId: CHAT.ID, forkedAtRunId: "run-1", kind: "retry", mode: "seeded", lossy: true } });
     fireEvent.click(screen.getByTestId("dialog-retry-chat-confirm"));
     await flush();
-    expect(onRetry).toHaveBeenLastCalledWith("do the thing", "seeded");
+    expect(onRetry).toHaveBeenLastCalledWith("do the thing", "seeded", true);
     expect(onRetried).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
@@ -177,5 +183,30 @@ describe("RetryChatDialog", () => {
     fireEvent.click(screen.getByTestId("dialog-retry-chat-cancel"));
     expect(onRetry).not.toHaveBeenCalled();
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("what the retry will run with", () => {
+  it("states the permission mode that applies", () => {
+    renderDialog({ permissionNote: "It runs in the provider's default mode, never in the mode this turn was switched to." });
+    expect(screen.getByTestId("retry-permission-note")).toHaveTextContent("never in the mode this turn was switched to");
+  });
+
+  it("shows the old turn's attachments, keeps them by default and lets the user drop them", async () => {
+    const { onRetry } = renderDialog({ attachmentNames: ["spec.md", "shot.png"] });
+    onRetry.mockResolvedValue(CHILD);
+    expect(screen.getByTestId("retry-attachments")).toHaveTextContent("2 attachments");
+    expect(screen.getByTestId("retry-attachments")).toHaveTextContent("spec.md, shot.png");
+    const keep = screen.getByTestId("retry-attachments-keep") as HTMLInputElement;
+    expect(keep.checked).toBe(true);
+    fireEvent.click(keep);
+    fireEvent.click(screen.getByTestId("dialog-retry-chat-confirm"));
+    await flush();
+    expect(onRetry).toHaveBeenCalledWith("do the thing", "native", false);
+  });
+
+  it("shows no attachment control when the turn had none", () => {
+    renderDialog({ attachmentNames: [] });
+    expect(screen.queryByTestId("retry-attachments")).toBeNull();
   });
 });

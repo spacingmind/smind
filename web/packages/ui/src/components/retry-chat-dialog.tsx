@@ -28,6 +28,8 @@ export function RetryChatDialog({
   hasAnchor,
   onRetry,
   onRetried,
+  permissionNote,
+  attachmentNames,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -39,12 +41,17 @@ export function RetryChatDialog({
   initialPrompt: string;
   /** Whether an earlier finished turn exists to branch at (retryAnchor !== null). */
   hasAnchor: boolean;
-  onRetry: (prompt: string, mode: ForkMode) => Promise<Chat>;
+  onRetry: (prompt: string, mode: ForkMode, keepAttachments: boolean) => Promise<Chat>;
+  /** What permission mode the retry will run in, in words (it never inherits the replaced turn's mode). */
+  permissionNote: string;
+  /** The replaced turn's attachments, by name: they are sent again unless the user clears the box. */
+  attachmentNames: string[];
   /** Called with the new chat on success (open its tab); also when only the chat could be created, once the user chose to open it. */
   onRetried: (chat: Chat) => void;
 }) {
   const action = useConfirmAction(open);
   const [prompt, setPrompt] = useState(initialPrompt);
+  const [keepAttachments, setKeepAttachments] = useState(true);
   const [unavailable, setUnavailable] = useState<ForkUnavailable | null>(null);
   // The chat exists but its prompt never started (RetryStartError): the dialog says so and offers the empty chat.
   const [partial, setPartial] = useState<{ chat: Chat; message: string } | null>(null);
@@ -55,6 +62,7 @@ export function RetryChatDialog({
   useEffect(() => {
     if (open) {
       setPrompt(initialPrompt);
+      setKeepAttachments(true);
       setUnavailable(null);
       setPartial(null);
     }
@@ -73,7 +81,7 @@ export function RetryChatDialog({
         const mode: ForkMode = unavailable ? "seeded" : "native";
         let chat: Chat;
         try {
-          chat = await onRetry(prompt, mode);
+          chat = await onRetry(prompt, mode, keepAttachments);
         } catch (err) {
           if (mode === "native" && err instanceof RpcError && err.code === "fork_unavailable") {
             const data = (err.data ?? {}) as ForkUnavailable;
@@ -132,6 +140,25 @@ export function RetryChatDialog({
             : hasAnchor
               ? "The edited prompt runs in a new chat that continues from the turn before this one. This chat stays as it is."
               : "There is no earlier turn to branch from, so the edited prompt starts in a new chat. This chat stays as it is."}
+        </p>
+        {attachmentNames.length > 0 && (
+          <label className="flex items-start gap-2 text-ui-sm" data-testid="retry-attachments">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={keepAttachments}
+              disabled={action.pending || partial !== null}
+              onChange={(e) => setKeepAttachments(e.target.checked)}
+              data-testid="retry-attachments-keep"
+            />
+            <span>
+              Send the {attachmentNames.length === 1 ? "attachment" : `${attachmentNames.length} attachments`} of this turn again
+              <span className="block text-foreground-muted">{attachmentNames.join(", ")}</span>
+            </span>
+          </label>
+        )}
+        <p className="text-ui-sm text-foreground-muted" data-testid="retry-permission-note">
+          {permissionNote}
         </p>
         <FormError message={partial?.message ?? action.error} testId="dialog-retry-chat-error" />
         <DialogFooter>

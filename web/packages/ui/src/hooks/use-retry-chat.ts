@@ -22,6 +22,22 @@ export function retryAnchor(runs: RunEntry[], run: RunEntry): RunEntry | null {
   return null;
 }
 
+/**
+ * The permission settings a retry runs with: the composer's when it is on the replaced run's
+ * provider (what the user sees), otherwise the provider's SAFE DEFAULT (mode "", auto-accept off).
+ * Never the old run's mode: a retry creates a new session and must not run more permissively than
+ * the composer shows (an old run live-switched to bypass does not carry over).
+ */
+export function retryPermission(
+  composer: { provider: string; permissionMode: string; autoAccept: boolean } | null | undefined,
+  runProvider: string,
+): { permission: PermissionSettings; fromComposer: boolean } {
+  if (composer && composer.provider === runProvider) {
+    return { permission: { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }, fromComposer: true };
+  }
+  return { permission: { permissionMode: "", autoAccept: false }, fromComposer: false };
+}
+
 /** The chat was created but the edited prompt could not be started in it. */
 export class RetryStartError extends Error {
   constructor(
@@ -63,15 +79,17 @@ export function useRetryChat(client: WsClientLike | null) {
       prompt: string;
       mode: ForkMode;
       permission: PermissionSettings;
+      /** Send the replaced turn's attachments again (the dialog's choice; default keep). */
+      keepAttachments: boolean;
     }): Promise<Chat> => {
-      const { taskId, chat, runs, run, prompt, mode, permission } = args;
+      const { taskId, chat, runs, run, prompt, mode, permission, keepAttachments } = args;
       if (!client) return Promise.reject(new Error("no daemon connection"));
       const source = retrySource(chat, runs, run);
       const child = source
         ? client.call<Chat>("chat.fork", { chatId: source.chatId, atRunId: source.runId, mode, kind: "retry" })
         : client.call<Chat>("chat.create", { taskId });
       // ADR-0038: the earlier run's attachments ride along as `reuse`/ref requests (the daemon copies the stored files).
-      const reuse = resendRequests(run.id, run.attachments);
+      const reuse = keepAttachments ? resendRequests(run.id, run.attachments) : [];
       return child.then(async (forked) => {
         try {
           await client.call(

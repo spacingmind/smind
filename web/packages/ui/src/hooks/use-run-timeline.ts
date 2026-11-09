@@ -1014,7 +1014,8 @@ export function useRunTimeline(
 
         const sorted = [...list].sort((a, b) => a.StartedAt.localeCompare(b.StartedAt));
         const stopAt = stopAtRunId === null ? -1 : sorted.findIndex((r) => r.ID === stopAtRunId);
-        const mine = stopAt === -1 ? sorted : sorted.slice(0, stopAt + 1);
+        // A fork point that is no longer among the runs (retention) loads NOTHING: failing open would fetch (and stream) every run after it.
+        const mine = stopAtRunId === null ? sorted : sorted.slice(0, stopAt + 1);
 
         // An adoption may have landed while this fetch was in flight;
         // only the entries it doesn't already know about are new. Fresh
