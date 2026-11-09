@@ -458,3 +458,122 @@ func TestElicitationCtx_DefaultsToDisabled(t *testing.T) {
 		t.Fatal("WithElicitation(false) was lost")
 	}
 }
+
+// --- end to end through Runner against the fake agent ---
+
+// elicitingDecider answers the fake agent's deploy-target form the way a
+// human would, and records what it was asked.
+type elicitingDecider struct {
+	decline bool
+	got     *QuestionRequest
+}
+
+func (d *elicitingDecider) Decide(context.Context, string, []PermissionOption) (string, error) {
+	return "allow-1", nil // the reply scenario raises no permission request
+}
+
+func (d *elicitingDecider) DecideQuestion(_ context.Context, req QuestionRequest) (QuestionOutcome, error) {
+	got := req
+	d.got = &got
+	if d.decline {
+		return QuestionOutcome{Resolution: QuestionResolvedDeclined,
+			Answer: QuestionAnswer{Action: QuestionActionDecline, Note: "not now"}}, nil
+	}
+	items := make([]QuestionAnswerItem, 0, len(req.Questions))
+	for _, q := range req.Questions {
+		switch q.Header {
+		case "Count":
+			items = append(items, QuestionAnswerItem{QuestionID: q.ID, Text: "3"})
+		case "Environment":
+			items = append(items, QuestionAnswerItem{QuestionID: q.ID, OptionIDs: optionIDs("o1")})
+		case "Note": // not in the fake agent's 4-property form; kept for the brief's answer table
+			items = append(items, QuestionAnswerItem{QuestionID: q.ID, Text: "hi"})
+		case "Confirm":
+			items = append(items, QuestionAnswerItem{QuestionID: q.ID, OptionIDs: optionIDs("o0")})
+		case "Tags":
+			items = append(items, QuestionAnswerItem{QuestionID: q.ID, OptionIDs: optionIDs("o0", "o2")})
+		default:
+			return QuestionOutcome{}, errors.New("unexpected question header " + q.Header)
+		}
+	}
+	return QuestionOutcome{Resolution: QuestionResolvedByHuman,
+		Answer: QuestionAnswer{Action: QuestionActionAnswer, Answers: items}}, nil
+}
+
+// runACPElicitTurn runs one GLM turn against the fake agent's elicit=form
+// scenario under ctx and returns the streamed text chunks.
+func runACPElicitTurn(t *testing.T, ctx context.Context, d PermissionDecider) []string {
+	t.Helper()
+	r, _, task, _ := newMcpTestEnv(t, "", "elicit=form")
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", "", events)
+	}()
+	var texts []string
+	for _, e := range drainEvents(events) {
+		if e.Type == EventTypeText {
+			texts = append(texts, e.Text)
+		}
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	return texts
+}
+
+func elicitText(t *testing.T, texts []string, prefix string) string {
+	t.Helper()
+	for _, s := range texts {
+		if strings.HasPrefix(s, prefix) {
+			return s
+		}
+	}
+	t.Fatalf("no %q chunk in %v", prefix, texts)
+	return ""
+}
+
+// TestRunACP_ElicitationEndToEnd: with the ctx flag on, Runner advertises
+// the form capability, the agent's form reaches the QuestionDecider, and
+// the human's answer goes back as the elicitation content.
+func TestRunACP_ElicitationEndToEnd(t *testing.T) {
+	d := &elicitingDecider{}
+	texts := runACPElicitTurn(t, WithElicitation(context.Background(), true), d)
+	if got := elicitText(t, texts, "caps:"); got != `caps:{"form":{}}` {
+		t.Fatalf("caps chunk = %q, want the form capability only", got)
+	}
+	want := `elicitation:{"action":"accept","content":{"count":3,"env":"stg","ok":true,"tags":["a","c"]}}`
+	if got := elicitText(t, texts, "elicitation:"); got != want {
+		t.Fatalf("elicitation chunk = %q, want %q", got, want)
+	}
+	if d.got == nil || len(d.got.Questions) != 4 || d.got.Source != QuestionSourceACP {
+		t.Fatalf("decider request = %+v, want the 4-field form", d.got)
+	}
+}
+
+// TestRunACP_ElicitationNotAdvertisedWhenDisabled: without the ctx flag the
+// capability is absent and the agent's request gets method-not-found -- the
+// pre-ADR-0055 wire behaviour.
+func TestRunACP_ElicitationNotAdvertisedWhenDisabled(t *testing.T) {
+	d := &elicitingDecider{}
+	texts := runACPElicitTurn(t, context.Background(), d)
+	if got := elicitText(t, texts, "caps:"); got != "caps:none" {
+		t.Fatalf("caps chunk = %q, want none", got)
+	}
+	if got := elicitText(t, texts, "elicitation:"); !strings.Contains(got, "method not found") {
+		t.Fatalf("elicitation chunk = %q, want a method-not-found error", got)
+	}
+	if d.got != nil {
+		t.Fatal("the decider was asked although the capability was off")
+	}
+}
+
+// TestRunACP_ElicitationDeclineWhenHumanDeclines: a declined form goes back
+// as ACP's bare decline.
+func TestRunACP_ElicitationDeclineWhenHumanDeclines(t *testing.T) {
+	d := &elicitingDecider{decline: true}
+	texts := runACPElicitTurn(t, WithElicitation(context.Background(), true), d)
+	if got := elicitText(t, texts, "elicitation:"); got != `elicitation:{"action":"decline"}` {
+		t.Fatalf("elicitation chunk = %q, want a bare decline", got)
+	}
+}
