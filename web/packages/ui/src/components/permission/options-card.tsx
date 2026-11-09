@@ -1,8 +1,8 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 
+import { DenyReasonField } from "@/components/permission/deny-reason-field";
 import { PermissionDetailView } from "@/components/permission/permission-detail";
 import { Alert } from "@/components/ui/alert";
-import { Input } from "@/components/ui/input";
 import {
   PermissionOptionButton,
   recommendedOptionId,
@@ -33,7 +33,6 @@ export function OptionsCard({
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [respondError, setRespondError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
-  const reasonFieldId = useId();
   // A git rule is per-call: never offer a sticky "always" choice for it.
   const options = pending.detail?.gitRule
     ? pending.options.filter((o) => !o.kind.endsWith("_always"))
@@ -94,24 +93,11 @@ export function OptionsCard({
           ))}
         </div>
         {options.some((o) => o.kind.startsWith("reject")) && (
-          <div className="flex w-full flex-col gap-1">
-            <label
-              htmlFor={reasonFieldId}
-              className="text-ui-xs text-foreground-muted"
-            >
-              Reason for denying (optional)
-            </label>
-            <Input
-              id={reasonFieldId}
-              data-testid="permission-deny-reason"
-              placeholder="Tell the agent what to do instead"
-              maxLength={500}
-              value={reason}
-              disabled={respondingTo !== null}
-              onChange={(e) => setReason(e.target.value)}
-              className="text-foreground"
-            />
-          </div>
+          <DenyReasonField
+            value={reason}
+            onChange={setReason}
+            disabled={respondingTo !== null}
+          />
         )}
       </div>
     </Alert>
