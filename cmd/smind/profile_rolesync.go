@@ -101,6 +101,7 @@ func parseSeedRolesFlags(args []string) (seedRolesArgs, int) {
 			}
 			take, err := profiles.ParseTake(v)
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "profile seed: %v\n", stewardText(err.Error()))
 				return a, seedRolesUsage()
 			}
 			a.takes = append(a.takes, take)

@@ -217,7 +217,11 @@ func (s *Store) updateAgentProfile(p AgentProfile, expected *time.Time) (AgentPr
 		return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, err)
 	}
 	if expected != nil {
-		if n, rerr := res.RowsAffected(); rerr != nil || n == 0 {
+		n, rerr := res.RowsAffected()
+		if rerr != nil {
+			return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, rerr)
+		}
+		if n == 0 {
 			return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, ErrAgentProfileChanged)
 		}
 	}

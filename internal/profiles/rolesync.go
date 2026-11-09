@@ -179,7 +179,8 @@ func checkRoles(existing []store.AgentProfile, history map[string]map[string][]s
 	byName := make(map[string]store.AgentProfile, len(existing))
 	ids := make(map[string]int64, len(RoleSeats))
 	for _, p := range existing {
-		if _, dup := byName[p.Name]; !dup {
+		// A plugin-owned profile of the same name must not hide the Human's own.
+		if prev, dup := byName[p.Name]; !dup || (prev.Owner != nil || prev.ReadOnly) && p.Owner == nil && !p.ReadOnly {
 			byName[p.Name] = p
 			ids[p.Name] = p.ID
 		}

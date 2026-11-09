@@ -101,6 +101,8 @@ func TestFloor_SelfApproveCLIDenied(t *testing.T) {
 		{"smind profile seed roles --apply --backup-dir /tmp/b", "no-self-approve"},
 		{"smind profile seed roles --take lead --apply", "no-self-approve"},
 		{"smind profile seed roles --apply=true", "no-self-approve"},
+		{"smind profile seed roles $X", "no-self-approve"},
+		{"smind profile seed roles $(echo --apply)", "no-self-approve"},
 		{"smind task chat fork 3 --at run-1 --seeded", "no-self-approve"},
 		{"env -u SMIND_AGENT_RUN smind task chat fork 3 --at r", "no-self-approve"},
 		{"bash -lc 'smind task chat fork 3 --at r'", "no-self-approve"},

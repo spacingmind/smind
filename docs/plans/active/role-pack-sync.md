@@ -27,6 +27,12 @@ Engine: `TestRolePackHistory_ContainsTheCurrentText`, `TestRolePackSync_Classifi
 
 ## Progress
 
-Engine, history, store/registry/RPC guard and the human-only gates are built and tested; the CLI is next.
+Engine, history, store/registry/RPC guard and the human-only gates are built and tested; the CLI (`--check`, `--diff`, `--apply`) was written by a GLM peer and reviewed by the Lead.
 
 ## Validation
+
+AC1-AC7 are covered by the named tests in `internal/profiles/rolesync_test.go`, `cmd/smind/profile_rolesync_test.go`, `internal/permpolicy/humanonly_test.go` and `internal/wsapi/profile_test.go`.
+Mutation checks on committed code killed every engine, guard and CLI mutation except two, which survive on purpose:
+the `updated_at` clause of the store's conditional UPDATE (the pre-check already rejects every reproducible stale write, so the clause only covers the race between check and UPDATE),
+and the CLI's `expectedUpdatedAt` param (no test can interleave a write between the CLI's list and update).
+Known decision: an empty stored `peer-sonnet.instructions` is the first release's value, so it classifies as stale; a Human who deliberately clears it is overwritten by `--apply` (after a backup, and `--check` shows it first).

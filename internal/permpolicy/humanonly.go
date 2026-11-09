@@ -100,7 +100,15 @@ func dynamicHumanOnly(args []string) bool {
 		return true
 	}
 	for _, c := range humanOnlyCLI {
-		if len(words) > len(c.path) && slices.Equal(words[:len(c.path)], c.path) && dynamicWord(words[len(c.path)]) {
+		if len(words) <= len(c.path) || !slices.Equal(words[:len(c.path)], c.path) {
+			continue
+		}
+		if dynamicWord(words[len(c.path)]) {
+			return true
+		}
+		// A flag-gated command (`profile seed roles --apply`) may get its flag
+		// from the shell: any computed word after the path could be it.
+		if c.flag != "" && slices.ContainsFunc(words[len(c.path):], dynamicWord) {
 			return true
 		}
 	}
