@@ -92,3 +92,7 @@ PR1 (review round 2 applied). Acceptance criteria, with where each is shown:
 - AC8 inbox, web, CLI, MCP: `internal/inbox` question tests, `TestBuildTaskWaitOutput_WaitingQuestion`, `TestTaskAnswer_*`, e2e `Q-01`..`Q-05`.
 - AC12 additive and never silent: `TestEvent_QuestionRoundTripsThroughPersistence`, `TestQuestion_RestartClosesOrphanRequests`, `TestWsapiMethodMapGoldenFleetOff`.
 - Not yet shown: AC9, AC10 (PR2), AC11 (PR4), push and mobile card (PR3).
+
+### PR2 follow-up: D4 explicit opt-in
+
+D4 says ACP/Codex questions are opt-in so no running setup changes on upgrade, but the `questions` column defaults to `ask` for every existing profile, so reading `ask` as the opt-in would switch every ACP profile on. A separate `agent_questions` flag (default off) is the opt-in: an ACP run advertises elicitation only when `agent_questions` is true AND `questions` is `ask`. Set through `profile.create`/`profile.update` (`agentQuestions`, kept when omitted on update) and `smind profile ... --agent-questions[=true|false]`. A profile-less run never advertises. Claude keeps the `ask` default. No web/mobile profile editor control yet (follow-up).

@@ -407,7 +407,9 @@ func closeOrphanQuestions(st *store.Store) error {
 }
 
 // elicitationEnabled reports whether an ACP run may advertise the elicitation
-// capability (ADR-0055 D4): a run with a profile whose setting is `ask`. A run
+// capability (ADR-0055 D4): a run whose profile explicitly opted in
+// (agent_questions, off by default) and whose setting is `ask`. The default
+// `ask` alone is not an opt-in: it is what every existing profile has. A run
 // with no profile, a system run and a daemon-owned seat never advertise (they
 // would only decline), so an agent is never offered a channel nobody answers.
 func (reg *Registry) elicitationEnabled(r *run) bool {
@@ -418,5 +420,5 @@ func (reg *Registry) elicitationEnabled(r *run) bool {
 		return false
 	}
 	p, err := reg.st.GetAgentProfile(r.profileID)
-	return err == nil && p.Questions == QuestionsAsk
+	return err == nil && p.AgentQuestions && p.Questions == QuestionsAsk
 }

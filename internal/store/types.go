@@ -301,6 +301,10 @@ type AgentProfile struct {
 	// Questions is what a run does with an agent's question to the human
 	// (ADR-0055): ask | decline | disabled; empty reads as ask.
 	Questions string
+	// AgentQuestions is the explicit opt-in for ACP elicitation (ADR-0055 D4):
+	// an ACP run advertises the capability only when it is true AND Questions
+	// is ask. False for every profile that exists before the opt-in is set.
+	AgentQuestions bool
 	// The seat contract (ADR-0041 S1); every field optional, all unset =
 	// a legacy profile. OrchestrationTools nil = unmanaged, otherwise
 	// whether a run gets the built-in smind MCP server. Instructions is

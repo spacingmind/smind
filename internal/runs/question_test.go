@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -479,26 +480,39 @@ func TestQuestion_RefuseDoesNotBypassSeatOrProfile(t *testing.T) {
 }
 
 // TestElicitationEnabled_Matrix pins who may advertise the ACP elicitation
-// capability (ADR-0055 D4): only an attended run whose profile asks.
+// capability (ADR-0055 D4): only an attended run whose profile EXPLICITLY opted
+// in (agent_questions) and asks. The default `ask` alone is not an opt-in.
 func TestElicitationEnabled_Matrix(t *testing.T) {
 	t.Parallel()
 	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{})
-	profile := func(questions string) int64 {
-		p, err := reg.st.CreateAgentProfile(store.AgentProfile{Name: "elicit-" + questions, Provider: "glm", Questions: questions})
+	n := 0
+	profile := func(questions string, optIn bool) int64 {
+		n++
+		p, err := reg.st.CreateAgentProfile(store.AgentProfile{Name: fmt.Sprintf("elicit-%d", n), Provider: "glm", Questions: questions, AgentQuestions: optIn})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return p.ID
 	}
 
-	r.profileID = profile(QuestionsAsk)
+	r.profileID = profile(QuestionsAsk, true)
 	if !reg.elicitationEnabled(r) {
-		t.Fatal("a run whose profile asks must advertise elicitation")
+		t.Fatal("a run whose profile opted in and asks must advertise elicitation")
+	}
+	// An existing / default profile (questions ask by default, no opt-in) must
+	// NOT advertise: upgrading changes no running setup.
+	r.profileID = profile("", false)
+	if reg.elicitationEnabled(r) {
+		t.Fatal("a default profile (ask, not opted in) must not advertise")
+	}
+	r.profileID = profile(QuestionsAsk, false)
+	if reg.elicitationEnabled(r) {
+		t.Fatal("ask without the explicit opt-in must not advertise")
 	}
 	for _, setting := range []string{QuestionsDecline, QuestionsDisabled} {
-		r.profileID = profile(setting)
+		r.profileID = profile(setting, true)
 		if reg.elicitationEnabled(r) {
-			t.Fatalf("profile %q must not advertise", setting)
+			t.Fatalf("profile %q must not advertise even when opted in", setting)
 		}
 	}
 
@@ -507,7 +521,7 @@ func TestElicitationEnabled_Matrix(t *testing.T) {
 		t.Fatal("a run without a profile must not advertise")
 	}
 
-	r.profileID = profile(QuestionsAsk)
+	r.profileID = profile(QuestionsAsk, true)
 	r.purpose = "learning"
 	if reg.elicitationEnabled(r) {
 		t.Fatal("a system run must not advertise")
