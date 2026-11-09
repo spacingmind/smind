@@ -33,7 +33,7 @@ async function fork(page, harness) {
     lib.fail(`a finished run does not offer "Fork from here"; the page says: ${JSON.stringify((await bodyText(page)).slice(0, 600))}`);
     return;
   }
-  if (await page.getByText(/^Forked from /).count()) lib.fail('an unforked chat shows a fork banner');
+  if (await page.getByText(/^Forked from /).first().isVisible().catch(() => false)) lib.fail('an unforked chat shows a fork banner');
   if (await overflows(page)) lib.fail('fork action: horizontal overflow');
   await lib.shootBothSchemes(page, 'fork-action');
 
@@ -56,7 +56,7 @@ async function fork(page, harness) {
 
   const text = await bodyText(page);
   if (!/Forked from .+ at turn 1\./.test(text)) lib.fail(`the banner does not read "Forked from <chat> at turn 1.": ${JSON.stringify(text.slice(0, 400))}`);
-  for (const t of ['Summary sent to the agent', 'Forked here']) if (!text.includes(t)) lib.fail(`the forked chat does not show "${t}"`);
+  for (const t of ['Summary sent to the agent', 'Forked here', 'Continue from the fork']) if (!text.includes(t)) lib.fail(`the forked chat does not show "${t}"`);
   if (!(await page.getByRole('button', { name: 'View original', exact: true }).isVisible().catch(() => false))) lib.fail('no "View original" on the banner');
   if (await page.getByRole('button', { name: 'Fork from here', exact: true }).isVisible().catch(() => false)) lib.fail('a forked chat with no run of its own offers "Fork from here"');
   if (await overflows(page)) lib.fail('forked chat: horizontal overflow');
@@ -78,7 +78,7 @@ async function fork(page, harness) {
     lib.fail('"View original" did not open the parent chat');
     return;
   }
-  if (await page.getByText(/^Forked from /).count()) lib.fail('the parent chat shows a fork banner');
+  if (await page.getByText(/^Forked from /).first().isVisible().catch(() => false)) lib.fail('the parent chat shows a fork banner');
   await lib.shootBothSchemes(page, 'fork-original');
 }
 

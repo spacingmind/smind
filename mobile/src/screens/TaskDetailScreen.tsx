@@ -785,7 +785,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
               ListFooterComponent={
                 canForkRun(state.run) && liveRunId === null && chatId !== null ? <ForkAction onPress={() => void handleFork()} busy={forking} error={forkError} /> : undefined
               }
-              ListEmptyComponent={state.run === null ? <ZeroRunEmptyState providers={providers} /> : emptyTranscript}
+              ListEmptyComponent={state.run === null ? <ZeroRunEmptyState providers={providers} forked={forkView.fork !== null} /> : emptyTranscript}
               contentInsetAdjustmentBehavior="automatic"
               onScroll={handleScroll}
               scrollEventThrottle={16}
@@ -838,8 +838,9 @@ const noPendingTasks: ReadonlySet<number> = new Set();
 const keyExtractor = (item: TranscriptItem) => item.key;
 const emptyTranscript = <EmptyState title="(empty transcript)" body="Nothing has been said in this run yet." />;
 /** A task with no run: either no providers to send with, or ready for its first prompt. */
-function ZeroRunEmptyState({ providers }: { providers: ProviderInfo[] | null }) {
+function ZeroRunEmptyState({ providers, forked }: { providers: ProviderInfo[] | null; forked: boolean }) {
   if (providers !== null && providers.length === 0) return <EmptyState title="This daemon has no providers." body="Add one to start a run." />;
+  if (forked) return <EmptyState title="Continue from the fork" body="Send a prompt to carry on from where this chat was forked." />;
   return <EmptyState title="No prompts yet" body="Send the first prompt to start a run." />;
 }
 
