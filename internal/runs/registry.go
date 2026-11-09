@@ -1249,6 +1249,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 		} else {
 			ctx = reg.withDelivery(ctx, r)
 			ctx = reg.withRunContract(ctx, r)
+			ctx = taskrunner.WithElicitation(ctx, reg.elicitationEnabled(r))
 			if pa, ok := r.promptAttachments(); ok {
 				ctx = taskrunner.WithPromptAttachments(ctx, pa)
 			}

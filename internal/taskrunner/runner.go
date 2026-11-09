@@ -533,6 +533,12 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	case r.acpPermissionPolicy != nil:
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
+	// ACP elicitation (ADR-0055 D4): advertised only for a run the registry
+	// enabled (its profile sets `questions: ask`), through the same human-only
+	// question decider as every other question. No decider, no capability.
+	if qd, ok := decider.(QuestionDecider); ok && ElicitationEnabled(ctx) {
+		opts = append(opts, acp.WithElicitation(acpElicitationAdapter{decider: qd}))
+	}
 	spec, haveSpec := r.providerRegistry().Get(string(provider))
 	if haveSpec && spec.NoMCPServers {
 		opts = append(opts, acp.WithoutMcpServers())

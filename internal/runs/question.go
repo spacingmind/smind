@@ -151,6 +151,13 @@ func (d runPermissionDecider) DecideQuestion(ctx context.Context, req taskrunner
 		return declineOutcome(taskrunner.QuestionResolvedProfile, taskrunner.QuestionNoteProfile), nil
 	}
 
+	// A request the provider mapping could not model (an ACP form with an
+	// unsupported field) is declined whole, with nothing shown.
+	if req.Refuse != "" {
+		d.recordQuestionResolved(requestID, req.Refuse, nil)
+		return declineOutcome(req.Refuse, taskrunner.QuestionNoteBadForm), nil
+	}
+
 	// Secrets are refused, with nothing rendered and nothing stored.
 	if taskrunner.AsksForSecret(req) {
 		d.recordQuestionResolved(requestID, taskrunner.QuestionResolvedSecret, nil)
@@ -397,4 +404,19 @@ func closeOrphanQuestions(st *store.Store) error {
 		}
 	}
 	return nil
+}
+
+// elicitationEnabled reports whether an ACP run may advertise the elicitation
+// capability (ADR-0055 D4): a run with a profile whose setting is `ask`. A run
+// with no profile, a system run and a daemon-owned seat never advertise (they
+// would only decline), so an agent is never offered a channel nobody answers.
+func (reg *Registry) elicitationEnabled(r *run) bool {
+	if r.profileID == 0 || r.purpose != "" || reg.st == nil {
+		return false
+	}
+	if _, seat := reg.seatSpec(r.taskID); seat {
+		return false
+	}
+	p, err := reg.st.GetAgentProfile(r.profileID)
+	return err == nil && p.Questions == QuestionsAsk
 }

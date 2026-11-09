@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -63,6 +65,14 @@ type Question struct {
 	Kind       QuestionKind     `json:"kind"`
 	Options    []QuestionOption `json:"options,omitempty"`
 	AllowOther bool             `json:"allowOther,omitempty"`
+
+	// Answer constraints of an ACP form field (ADR-0055 section 4), checked by
+	// ValidateQuestionAnswer so a bad free-text answer is rejected before the
+	// agent sees it. Zero values mean unconstrained.
+	valueHint      string // "number" or "integer" for a numeric text field
+	minLen, maxLen int
+	pattern        *regexp.Regexp
+	minVal, maxVal *float64
 }
 
 // QuestionRequest is what a provider adapter hands a QuestionDecider.
@@ -72,6 +82,10 @@ type QuestionRequest struct {
 	// Truncated is true when a cap dropped or shortened anything, so the card
 	// can say the text is not complete.
 	Truncated bool `json:"truncated,omitempty"`
+
+	// Refuse, when set, makes the decider decline the request without showing it
+	// (an ACP form the mapping cannot model); it records this resolution.
+	Refuse QuestionResolution `json:"-"`
 
 	// secret is set while parsing, on the agent's FULL text before any cap, when
 	// a header, question or option text asks for a secret (see AsksForSecret).
@@ -364,6 +378,9 @@ func ValidateQuestionAnswer(req QuestionRequest, a QuestionAnswer) error {
 			if text == "" || len(it.OptionIDs) > 0 {
 				return fmt.Errorf("question %q needs free text", q.ID)
 			}
+			if err := q.checkText(text); err != nil {
+				return fmt.Errorf("question %q: %w", q.ID, err)
+			}
 		}
 	}
 	return nil
@@ -465,4 +482,45 @@ func humanDuration(d time.Duration) string {
 		return fmt.Sprintf("%d seconds", int(d/time.Second))
 	}
 	return d.Round(time.Millisecond).String()
+}
+
+// checkText applies an ACP form field's constraints to a free-text answer: a
+// numeric hint (and its range), a length range and a pattern. A question built
+// by the Claude path has none and always passes.
+func (q Question) checkText(text string) error {
+	switch q.valueHint {
+	case "integer":
+		n, err := strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			return errors.New("needs a whole number")
+		}
+		return q.checkRange(float64(n))
+	case "number":
+		f, err := strconv.ParseFloat(text, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return errors.New("needs a number")
+		}
+		return q.checkRange(f)
+	}
+	n := utf8.RuneCountInString(text)
+	if q.minLen > 0 && n < q.minLen {
+		return fmt.Errorf("needs at least %d characters", q.minLen)
+	}
+	if q.maxLen > 0 && n > q.maxLen {
+		return fmt.Errorf("allows at most %d characters", q.maxLen)
+	}
+	if q.pattern != nil && !q.pattern.MatchString(text) {
+		return errors.New("does not match the required format")
+	}
+	return nil
+}
+
+func (q Question) checkRange(v float64) error {
+	if q.minVal != nil && v < *q.minVal {
+		return fmt.Errorf("must be at least %v", *q.minVal)
+	}
+	if q.maxVal != nil && v > *q.maxVal {
+		return fmt.Errorf("must be at most %v", *q.maxVal)
+	}
+	return nil
 }
