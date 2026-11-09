@@ -6,6 +6,13 @@
 // transform; the screens' components stay thin views over it.
 
 import type { ChatForkInfo } from './api';
+
+/** One inherited turn as the screen shows it: the prompt and the assistant's final text (null when the turn has none). */
+export interface ForkTurn {
+  key: string;
+  prompt: string;
+  answer: string | null;
+}
 import { DaemonError } from './relay/RelayConnection';
 
 /** The daemon's refusal reasons (internal/history/native Reason values) as words -- the web's forkReasonLabel verbatim. */

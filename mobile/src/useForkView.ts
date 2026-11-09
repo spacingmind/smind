@@ -6,8 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChatInfo, forkSeed, listChats, listRunsForTask, RunSummary } from './api';
-import { forkBannerText, forkDividerLabel, forkTurnNumber, inheritedUpTo } from './chatFork';
-import type { ForkTurn } from './screens/task/ForkContext';
+import { forkBannerText, forkDividerLabel, forkTurnNumber, ForkTurn, inheritedUpTo } from './chatFork';
 import { RunLogsResult } from './historySource';
 import type { RelayConnection } from './relay/RelayConnection';
 import { timelineFromLogs } from './runTimeline';
@@ -61,6 +60,7 @@ export function useForkView(conn: RelayConnection, taskId: number, chatId: numbe
     setParentRuns(null);
     setExpanded(false);
     setTurns(null);
+    setLoadingTurns(false);
     setSeed(null);
     setSeedFailed(false);
     if (chatId === null) return;

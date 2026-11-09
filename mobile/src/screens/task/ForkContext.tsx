@@ -8,17 +8,10 @@
 
 import { memo, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { earlierTurnsLabel } from '../../chatFork';
+import { earlierTurnsLabel, ForkTurn } from '../../chatFork';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { AppIcon } from '../../ui/AppIcon';
-
-/** One inherited turn as the screen hands it over: the prompt and the assistant's final text (null when the turn has none). */
-export interface ForkTurn {
-  key: string;
-  prompt: string;
-  answer: string | null;
-}
 
 export const ForkContext = memo(function ForkContext({
   dividerLabel,
@@ -45,7 +38,7 @@ export const ForkContext = memo(function ForkContext({
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const header = mode === 'native' ? earlierTurnsLabel(turnCount) : 'Summary sent to the agent';
+  const header = mode === 'native' ? (turnCount > 0 ? earlierTurnsLabel(turnCount) : 'Earlier turns') : 'Summary sent to the agent';
   return (
     <View style={styles.block} accessibilityLabel={mode === 'native' ? (parentTitle !== null ? `Earlier turns from ${parentTitle}` : 'Earlier turns') : 'Summary sent to the agent'}>
       <Pressable

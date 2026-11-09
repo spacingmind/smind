@@ -305,6 +305,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
     setLiveRunId(null);
     setChatId(null);
     chatIdRef.current = null;
+    refreshSeq.current++; // a refresh still in flight for the previous chat must not write into this one
     // PermissionBoard mutates its request objects in place: hand the memoised PermissionCard fresh copies so a state change re-renders it.
     board.onChange = () => setPermissions(board.list().map((r) => ({ ...r })));
 
@@ -605,10 +606,14 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
   const latestRun = state.kind === 'ready' ? state.run : null;
   const forkView = useForkView(conn, taskId, chatId, latestRun?.ID ?? null);
   const [forking, setForking] = useState(false);
+  const forkingRef = useRef(false);
   const [forkError, setForkError] = useState<string | null>(null);
-  useEffect(() => setForkError(null), [chatId, latestRun?.ID]);
+  useEffect(() => {
+    setForkError(null);
+  }, [chatId, latestRun?.ID]);
   const handleFork = useCallback(async () => {
-    if (forking || chatId === null || latestRun === null) return;
+    if (forkingRef.current || chatId === null || latestRun === null) return;
+    forkingRef.current = true;
     setForking(true);
     setForkError(null);
     try {
@@ -616,7 +621,9 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
         const t = forkConfirmText(forkView.chatTitle || `Chat ${chatId}`, forkView.forkTurn, fallback, reason);
         return confirmNative(t.title, t.message, t.confirmLabel, false);
       };
-      if (!(await ask(false))) return;
+      // The screen may have moved to another chat while a confirm was open: act only for the chat the tap was on.
+      const moved = () => !mounted.current || chatIdRef.current !== chatId;
+      if (!(await ask(false)) || moved()) return;
       let made: ChatInfo | null = null;
       try {
         made = await forkChat(conn, chatId, latestRun.ID, 'native');
@@ -626,16 +633,20 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
           if (mounted.current) setForkError(view.message);
           return;
         }
-        if (!(await ask(true, view.reason))) return;
+        if (!(await ask(true, view.reason)) || moved()) return;
         made = await forkChat(conn, chatId, latestRun.ID, 'seeded');
       }
-      if (mounted.current && made) router.replace(taskHref({ ID: taskId, Title: title ?? 'Task' }, made.ID));
+      if (!moved() && made) router.replace(taskHref({ ID: taskId, Title: title ?? 'Task' }, made.ID));
     } catch (err) {
       if (mounted.current) setForkError(err instanceof Error ? err.message : String(err));
     } finally {
+      forkingRef.current = false;
       if (mounted.current) setForking(false);
     }
-  }, [chatId, conn, forkView.chatTitle, forkView.forkTurn, forking, latestRun, router, taskId, title]);
+  }, [chatId, conn, forkView.chatTitle, forkView.forkTurn, latestRun, router, taskId, title]);
+  const onForkPress = useCallback(() => {
+    void handleFork();
+  }, [handleFork]);
   const openOriginal = useCallback(() => {
     if (forkView.fork) router.push(taskHref({ ID: taskId, Title: title ?? 'Task' }, forkView.fork.parentChatId));
   }, [forkView.fork, router, taskId, title]);
@@ -783,7 +794,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
                 ) : undefined
               }
               ListFooterComponent={
-                canForkRun(state.run) && liveRunId === null && chatId !== null ? <ForkAction onPress={() => void handleFork()} busy={forking} error={forkError} /> : undefined
+                canForkRun(state.run) && liveRunId === null && chatId !== null ? <ForkAction onPress={onForkPress} busy={forking} error={forkError} /> : undefined
               }
               ListEmptyComponent={state.run === null ? <ZeroRunEmptyState providers={providers} forked={forkView.fork !== null} /> : emptyTranscript}
               contentInsetAdjustmentBehavior="automatic"
