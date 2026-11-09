@@ -148,14 +148,15 @@ export function describeFailureCard(
       };
     }
     // The human-action classes (R3a): the daemon's one sentence says what happened, the
-    // action label says what a person does about it. Never a Retry, never a Continue.
+    // control says what a person does about it -- a hint never repeats the control's own
+    // words. Never a Retry, never a Continue.
     case CONTEXT_WINDOW_EXCEEDED:
-      return { tone: "danger", message: failureSentence(CONTEXT_WINDOW_EXCEEDED, action), hint: action?.label ?? null, countdown: null, control: "new_chat", controlLabel: "Start a fresh chat" };
+      return { tone: "danger", message: failureSentence(CONTEXT_WINDOW_EXCEEDED, action), hint: "Earlier turns stay in this chat.", countdown: null, control: "new_chat", controlLabel: "Start a fresh chat" };
     case SESSION_BUDGET_EXCEEDED:
       // No control: whose budget it is and where to raise it differ per provider, so the label is the hint.
       return { tone: "danger", message: failureSentence(SESSION_BUDGET_EXCEEDED, action), hint: action?.label ?? null, countdown: null, control: null, controlLabel: null };
     case TOO_MANY_DENIALS:
-      return { tone: "danger", message: failureSentence(TOO_MANY_DENIALS, action), hint: action?.label ?? null, countdown: null, control: "review_policy", controlLabel: "Review the permission policy" };
+      return { tone: "danger", message: failureSentence(TOO_MANY_DENIALS, action), hint: null, countdown: null, control: "review_policy", controlLabel: "Review the permission policy" };
     case "cli_exited":
       return { tone: "warning", message: failureSentence("cli_exited", action), hint: null, countdown: null, control: null, controlLabel: null };
   }
