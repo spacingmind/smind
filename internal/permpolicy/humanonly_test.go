@@ -1,6 +1,7 @@
 package permpolicy
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -97,10 +98,32 @@ func TestFloor_SelfApproveCLIDenied(t *testing.T) {
 		{"smind relay devices approve abc", "no-self-approve"},
 		{"smind relay devices revoke abc", "no-self-approve"},
 		{"smind task chat fork 3 --at run-1", "no-self-approve"},
+		{"smind profile add --name x --provider glm", "no-self-approve"},
+		{"smind profile edit 3 --instructions-file notes.md", "no-self-approve"},
+		{"env -u SMIND_AGENT_RUN smind profile edit 3 --model x", "no-self-approve"},
+		{"bash -lc 'smind profile add --name x'", "no-self-approve"},
+		{"smind profile seed roles --apply", "no-self-approve"},
+		{"smind profile seed roles --apply --backup-dir /tmp/b", "no-self-approve"},
+		{"smind profile seed roles --take lead --apply", "no-self-approve"},
+		{"smind profile seed roles --apply=true", "no-self-approve"},
+		{"smind profile seed roles $X", "no-self-approve"},
+		{"smind profile seed roles $(echo --apply)", "no-self-approve"},
 		{"smind task chat fork 3 --at run-1 --seeded", "no-self-approve"},
 		{"env -u SMIND_AGENT_RUN smind task chat fork 3 --at r", "no-self-approve"},
 		{"bash -lc 'smind task chat fork 3 --at r'", "no-self-approve"},
-		// a renamed copy or symlink: only the task verbs are matchable
+		// the profile commands wrapped as text, in go run, or in a renamed copy
+		{"su -c 'smind profile edit 3 --model x' someone", "no-self-approve"},
+		{"ssh h 'smind profile seed roles --apply'", "no-self-approve"},
+		{"eval 'smind profile edit 3 --model x'", "no-self-approve"},
+		{"echo 'smind profile edit 3 --model x' | sh", "no-self-approve"},
+		{"echo 'smind profile seed roles --take lead --apply' | bash -s", "no-self-approve"},
+		{"go run ./cmd/smind profile edit 3 --model x", "no-self-approve"},
+		{"go run ./cmd/smind profile add --name x", "no-self-approve"},
+		{"go run ./cmd/smind profile seed roles --apply", "no-self-approve"},
+		{"./sm profile edit 3 --model x", "no-self-approve"},
+		{"/tmp/x/runner profile seed roles --apply", "no-self-approve"},
+		{"./sm task chat fork 3 --at r", "no-self-approve"},
+		// a renamed copy or symlink: only the bare rows of the table are matchable
 		{"./sm task approve 12", "no-self-approve"},
 		{"/tmp/x/runner task deny 12", "no-self-approve"},
 		{"/tmp/x/runner task answer 12", "no-self-approve"},
@@ -121,6 +144,22 @@ func TestFloor_SelfApproveNearMissesAllowed(t *testing.T) {
 		{"smind host add laptop", ""},
 		{"smind relay devices ls", ""},
 		{"smind task chat ls 3", ""},
+		{"smind profile ls", ""},
+		{"smind profile seed roles", ""},
+		{"smind profile seed roles --check", ""},
+		{"smind profile seed roles --diff lead", ""},
+		{"smind profile seed roles --apply-later", ""},
+		{"smind profile rm 3", ""},
+		{"ssh h 'grep host approve notes.txt'", ""},
+		{"ssh h 'less permission.txt'", ""},
+		{"grep -rn \"smind profile edit\" docs", ""},
+		{"git commit -m 'document smind profile edit and seed roles --apply'", ""},
+		{"echo 'smind profile edit 3' | cat", ""},
+		{"ssh h 'smind profile seed roles --check'", ""},
+		{"go run ./cmd/smind profile ls", ""},
+		{"go run ./cmd/smind profile seed roles --check", ""},
+		{"./sm profile ls", ""},
+		{"ssh h 'smind profile seed roles --apply-later'", ""},
 		{"smind task chat new 3 title", ""},
 		{"smind task send 1 claude 'never run smind task approve yourself'", ""},
 		{"echo 'smind task approve 1' | cat", ""},
@@ -154,6 +193,8 @@ func TestFloor_SelfApproveRPCNameDenied(t *testing.T) {
 		{`python3 -c "ws.send('inbox.resolve')"`, "no-self-approve"},
 		{`curl -s -d '{"method":"chat.fork","params":{}}' http://localhost:9/rpc`, "no-self-approve"},
 		{`curl -s -d '{"method":"chat.forkSeed","params":{"chatId":3}}' http://localhost:9/rpc`, "no-self-approve"},
+		{`curl -s -d '{"method":"profile.update","params":{"id":3}}' http://localhost:9/rpc`, "no-self-approve"},
+		{`python3 -c "ws.send('profile.create')"`, "no-self-approve"},
 		{`python3 -c "ws.send('chat.forkSeed')"`, "no-self-approve"},
 		{`websocat ws://127.0.0.1:9/ws <<< '{"method":"run.respondPermission"}'`, "no-self-approve"},
 		{`node -e "call('permission.revealHeredoc')"`, "no-self-approve"},
@@ -205,9 +246,8 @@ func TestHumanOnlyCLI_Table(t *testing.T) {
 	for args, want := range map[string]bool{
 		"task approve 1": true, "task deny 1": true, "task answer 1": true, "permission show": true,
 		"permission": true, "--x task approve 1": true, "host approve h": true, "host reject h": true,
-		"task chat fork 1 --at r": true, "task chat ls 1": false, "task chat new 1": false, "relay devices approve d": true, "relay devices revoke d": true, "host ls": false, "relay devices ls": false, "relay status": false,
-		"profile add p glm --agent-questions": true, "profile edit 3 --agent-questions=false": true, "--x profile add p glm --agent-questions=true": true,
-		"profile add p glm": false, "profile edit 3 --questions=ask": false, "profile ls": false, "task ls": false, "task permissions 1": false, "status": false, "": false, "task": false,
+		"task chat fork 1 --at r": true, "profile add --name x": true, "profile edit 3": true, "profile seed roles --apply": true, "profile seed roles": false, "profile seed roles --check": false, "profile ls": false, "task chat ls 1": false, "task chat new 1": false, "relay devices approve d": true, "relay devices revoke d": true, "host ls": false, "relay devices ls": false, "relay status": false,
+		"task ls": false, "task permissions 1": false, "status": false, "": false, "task": false,
 	} {
 		if got := HumanOnlyCLI(splitWords(args)); got != want {
 			t.Errorf("HumanOnlyCLI(%q) = %v, want %v", args, got, want)
@@ -216,4 +256,36 @@ func TestHumanOnlyCLI_Table(t *testing.T) {
 	if !slices.Contains(HumanOnlyRPCs, "run.respondPermission") {
 		t.Fatal("run.respondPermission must be human-only")
 	}
+}
+
+// Every row of the one table is denied in every wrapper the floor knows, so a
+// new human-only command cannot ship without its wrappers: the rows are
+// generated from the table, not listed by hand.
+func TestFloor_EveryTableRowIsDeniedInEveryWrapper(t *testing.T) {
+	t.Parallel()
+	named := []string{
+		"%s", "env -u SMIND_AGENT_RUN %s", "bash -lc '%s'", "sh -c '%s'", "xargs %s", "nohup %s", "command %s",
+		"su -c '%s' someone", "ssh h '%s'", "eval '%s'", "echo '%s' | sh", "echo '%s' | bash -s", "bash <<< '%s'",
+	}
+	bare := []string{"go run ./cmd/smind %s", "./sm %s", "/tmp/x/runner %s", "env -u SMIND_AGENT_RUN go run ./cmd/smind %s"}
+	var cases []floorCase
+	for _, c := range humanOnlyCLI {
+		words := slices.Clone(c.path)
+		switch {
+		case c.flag != "":
+			words = append(words, c.flag)
+		case c.verbs != nil:
+			words = append(words, c.verbs[0])
+		}
+		cmd := strings.Join(words, " ")
+		for _, w := range named {
+			cases = append(cases, floorCase{fmt.Sprintf(w, "smind "+cmd), "no-self-approve"})
+		}
+		if c.bare {
+			for _, w := range bare {
+				cases = append(cases, floorCase{fmt.Sprintf(w, cmd), "no-self-approve"})
+			}
+		}
+	}
+	checkFloorCases(t, cases)
 }

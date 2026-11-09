@@ -19,7 +19,7 @@ export default function TaskRoute() {
   return (
     <>
       <Stack.Screen options={{ title: parsed.title }} />
-      <TaskDetailScreen conn={ctx.conn} taskId={parsed.id} />
+      <TaskDetailScreen conn={ctx.conn} taskId={parsed.id} chat={parsed.chat} title={parsed.title} />
     </>
   );
 }

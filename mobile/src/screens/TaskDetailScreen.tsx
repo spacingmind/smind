@@ -50,7 +50,7 @@ import { sendWithAttachments } from '../attachSend';
 import { lineAttachmentsFromRun } from '../lineAttachments';
 import { applyFullHistoryResult, fullHistoryParams, historySourceInfo, HistorySourceInfo, RunLogsResult } from '../historySource';
 import { createThumbLoader } from '../thumbLoader';
-import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, listProviders, listRunsForTask, ProviderInfo, revealPermissionHeredoc, revealToolHeredoc, RunSummary } from '../api';
+import { AttachmentsInfo, ChatInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, forkChat, listProviders, listRunsForTask, ProviderInfo, revealPermissionHeredoc, revealToolHeredoc, RunSummary } from '../api';
 import { firstSendProvider } from '../firstSend';
 import { withRunPrompt } from '../promptLine';
 import { taskHref } from '../navigation/routes';
@@ -81,6 +81,12 @@ import { usePluginCommands } from '../plugins/usePluginCommands';
 import { Composer } from './task/Composer';
 import { FooterBanner } from './task/FooterBanner';
 import { HistorySourceNote } from './task/HistorySourceNote';
+import { ForkAction } from './task/ForkAction';
+import { ForkBanner } from './task/ForkBanner';
+import { ForkContext } from './task/ForkContext';
+import { canForkRun, classifyForkError, forkConfirmText } from '../chatFork';
+import { useForkView } from '../useForkView';
+import { confirmNative } from '../ui/confirm';
 import { LoadingState } from './task/LoadingState';
 import { MetaLine } from './task/MetaLine';
 import { PermissionCard } from './task/PermissionCard';
@@ -98,9 +104,13 @@ type LoadState =
 interface Props {
   conn: RelayConnection;
   taskId: number;
+  /** The chat to show (the route's `chat` param, PR 1b AC18); absent = the task's latest run's chat, as before. */
+  chat?: number;
+  /** The task's title from the route (the header hint a chat switch keeps). */
+  title?: string;
 }
 
-export function TaskDetailScreen({ conn, taskId }: Props) {
+export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props) {
   const theme = useAppTheme();
   const router = useRouter();
   const openTask = useCallback((id: number, title: string) => router.push(taskHref({ ID: id, Title: title })), [router]);
@@ -295,6 +305,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
     setLiveRunId(null);
     setChatId(null);
     chatIdRef.current = null;
+    refreshSeq.current++; // a refresh still in flight for the previous chat must not write into this one
     // PermissionBoard mutates its request objects in place: hand the memoised PermissionCard fresh copies so a state change re-renders it.
     board.onChange = () => setPermissions(board.list().map((r) => ({ ...r })));
 
@@ -312,13 +323,13 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
 
     (async () => {
       try {
-        const runs = await listRunsForTask(conn, taskId);
+        const runs = await listRunsForTask(conn, taskId, chatParam);
         if (cancelled) return;
         const latest = runs[0] ?? null;
         setState({ kind: 'ready', run: latest });
         lastRunId.current = latest?.ID ?? null;
 
-        let resolved: number | null = latest?.ChatID ?? null;
+        let resolved: number | null = chatParam ?? latest?.ChatID ?? null;
         if (resolved === null) {
           try {
             resolved = await defaultChatId(conn, taskId);
@@ -386,7 +397,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       for (const tail of followUpTails.current) tail.cancel();
       followUpTails.current = [];
     };
-  }, [conn, taskId, epoch, refreshLatest]);
+  }, [conn, taskId, chatParam, epoch, refreshLatest]);
 
   // The provider a send uses — the run's own when it has one, else the first-send resolution over the catalog.
   const sendProvider = state.kind === 'ready' ? firstSendProvider(providers ?? [], state.run?.Provider ?? null, recallSelection()) : null;
@@ -591,6 +602,55 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const canSend = draft.trim().length > 0 && sendProvider !== null;
   const stopView = stopControlView(liveRunId, stopping);
 
+  // ADR-0057 PR 1b: the fork action on a finished latest run, and what a forked chat shows (banner, inherited turns).
+  const latestRun = state.kind === 'ready' ? state.run : null;
+  const forkView = useForkView(conn, taskId, chatId, latestRun?.ID ?? null);
+  const [forking, setForking] = useState(false);
+  const forkingRef = useRef(false);
+  const [forkError, setForkError] = useState<string | null>(null);
+  useEffect(() => {
+    setForkError(null);
+  }, [chatId, latestRun?.ID]);
+  const handleFork = useCallback(async () => {
+    if (forkingRef.current || chatId === null || latestRun === null) return;
+    forkingRef.current = true;
+    setForking(true);
+    setForkError(null);
+    try {
+      const ask = async (fallback: boolean, reason?: string) => {
+        const t = forkConfirmText(forkView.chatTitle || `Chat ${chatId}`, forkView.forkTurn, fallback, reason);
+        return confirmNative(t.title, t.message, t.confirmLabel, false);
+      };
+      // The screen may have moved to another chat while a confirm was open: act only for the chat the tap was on.
+      const moved = () => !mounted.current || chatIdRef.current !== chatId;
+      if (!(await ask(false)) || moved()) return;
+      let made: ChatInfo | null = null;
+      try {
+        made = await forkChat(conn, chatId, latestRun.ID, 'native');
+      } catch (err) {
+        const view = classifyForkError(err);
+        if (view.kind === 'error') {
+          if (mounted.current) setForkError(view.message);
+          return;
+        }
+        if (!(await ask(true, view.reason)) || moved()) return;
+        made = await forkChat(conn, chatId, latestRun.ID, 'seeded');
+      }
+      if (!moved() && made) router.replace(taskHref({ ID: taskId, Title: title ?? 'Task' }, made.ID));
+    } catch (err) {
+      if (mounted.current) setForkError(err instanceof Error ? err.message : String(err));
+    } finally {
+      forkingRef.current = false;
+      if (mounted.current) setForking(false);
+    }
+  }, [chatId, conn, forkView.chatTitle, forkView.forkTurn, latestRun, router, taskId, title]);
+  const onForkPress = useCallback(() => {
+    void handleFork();
+  }, [handleFork]);
+  const openOriginal = useCallback(() => {
+    if (forkView.fork) router.push(taskHref({ ID: taskId, Title: title ?? 'Task' }, forkView.fork.parentChatId));
+  }, [forkView.fork, router, taskId, title]);
+
   // The not-finished footer: same visibility rule as before, now the last transcript item.
   const failedRun = state.kind === 'ready' && state.run?.FailureKind === 'rate_limited' ? state.run : null;
   const failedRunId = failedRun?.ID ?? null;
@@ -709,8 +769,34 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
               data={items}
               keyExtractor={keyExtractor}
               renderItem={renderItem}
-              ListHeaderComponent={history ? <HistorySourceNote info={history} loading={loadingFull} onLoad={loadFullHistory} /> : undefined}
-              ListEmptyComponent={state.run === null ? <ZeroRunEmptyState providers={providers} /> : emptyTranscript}
+              ListHeaderComponent={
+                forkView.fork || history ? (
+                  <>
+                    {forkView.fork ? (
+                      <>
+                        <ForkBanner text={forkView.fork.bannerText} onViewOriginal={forkView.fork.parentGone ? undefined : openOriginal} />
+                        <ForkContext
+                          dividerLabel={forkView.fork.dividerLabel}
+                          loading={forkView.fork.loadingTurns}
+                          mode={forkView.fork.mode}
+                          parentTitle={forkView.fork.parentTitle}
+                          turns={forkView.fork.turns}
+                          turnCount={forkView.fork.turnCount}
+                          expanded={forkView.fork.expanded}
+                          onToggle={forkView.toggle}
+                          seed={forkView.fork.seed}
+                          seedFailed={forkView.fork.seedFailed}
+                        />
+                      </>
+                    ) : null}
+                    {history ? <HistorySourceNote info={history} loading={loadingFull} onLoad={loadFullHistory} /> : null}
+                  </>
+                ) : undefined
+              }
+              ListFooterComponent={
+                canForkRun(state.run) && liveRunId === null && chatId !== null ? <ForkAction onPress={onForkPress} busy={forking} error={forkError} /> : undefined
+              }
+              ListEmptyComponent={state.run === null ? <ZeroRunEmptyState providers={providers} forked={forkView.fork !== null} /> : emptyTranscript}
               contentInsetAdjustmentBehavior="automatic"
               onScroll={handleScroll}
               scrollEventThrottle={16}
@@ -763,8 +849,9 @@ const noPendingTasks: ReadonlySet<number> = new Set();
 const keyExtractor = (item: TranscriptItem) => item.key;
 const emptyTranscript = <EmptyState title="(empty transcript)" body="Nothing has been said in this run yet." />;
 /** A task with no run: either no providers to send with, or ready for its first prompt. */
-function ZeroRunEmptyState({ providers }: { providers: ProviderInfo[] | null }) {
+function ZeroRunEmptyState({ providers, forked }: { providers: ProviderInfo[] | null; forked: boolean }) {
   if (providers !== null && providers.length === 0) return <EmptyState title="This daemon has no providers." body="Add one to start a run." />;
+  if (forked) return <EmptyState title="Continue from the fork" body="Send a prompt to carry on from where this chat was forked." />;
   return <EmptyState title="No prompts yet" body="Send the first prompt to start a run." />;
 }
 

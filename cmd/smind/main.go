@@ -227,6 +227,10 @@ Usage:
       [--notes=<text>]                                    create an agent profile
   smind profile ls                                         list agent profiles
   smind profile rm <id>                                    remove an agent profile
+  smind profile seed roles [--check | --diff [seat[.field]] | --apply
+      [--backup-dir <dir>] [--take <seat>[.<field>]]... [--dry-run]]
+                                                           create the missing role-pack seats; --check, --diff
+                                                           and --apply sync their fields with the pack
 
   smind usage [--since <RFC3339>] [--until <RFC3339>]     token usage per account, model, or day
       [--by account|model|day]

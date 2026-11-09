@@ -199,7 +199,10 @@ cites the `validationId`, or says "no contract: <reason>".
 smind hosts the roles itself as seat profiles (ADR-0041). Seed the standard
 pack once with `smind profile seed roles`: `lead`, `peer-sonnet` and
 `validator`. Seeding is idempotent by name; a profile you already have or edited
-is kept as is. A follow-up to a seat's chat that does not name a profile keeps
+is kept as is. When a later release changes the pack's text, `smind profile
+seed roles --check` reports which seat fields are stale and `--apply` brings
+them over (a backup first; a customised field only with `--take`). A follow-up
+to a seat's chat that does not name a profile keeps
 the chat's last profile (a seat stays a seat); pass `--profile none` /
 `profileId: 0` to drop it, or start a new chat. The seats are seeded with
 `onRateLimit=wait`: when the account's usage limit cuts a run off ("You've hit

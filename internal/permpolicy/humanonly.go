@@ -27,8 +27,6 @@ var HumanOnlyRPCs = []string{
 	"relay.device.revoke",
 	"chat.fork",
 	"chat.forkSeed",
-	// Profile writes carry the ACP elicitation opt-in (agentQuestions): an agent
-	// must not opt itself in to being able to ask the human (ADR-0055 D4).
 	"profile.create",
 	"profile.update",
 }
@@ -43,14 +41,22 @@ var PendingHumanOnlyRPCs = []string{"run.answerPermission"}
 type humanOnlyCommand struct {
 	path  []string
 	verbs []string
+	// flag, when set, makes the command human-only only with that flag (`--flag` or
+	// `--flag=value`): `smind profile seed roles` reads, `--apply` rewrites role prompts.
+	flag string
+	// bare marks a command no other tool spells: it is also matched without the
+	// binary's name (a renamed copy, `go run`, text handed to a shell).
+	bare bool
 }
 
 var humanOnlyCLI = []humanOnlyCommand{
-	{[]string{"task"}, []string{"approve", "deny", "answer"}},
-	{[]string{"permission"}, nil},
-	{[]string{"host"}, []string{"approve", "reject"}},
-	{[]string{"relay", "devices"}, []string{"approve", "revoke"}},
-	{[]string{"task", "chat"}, []string{"fork"}},
+	{path: []string{"task"}, verbs: []string{"approve", "deny", "answer"}, bare: true},
+	{path: []string{"permission"}},
+	{path: []string{"host"}, verbs: []string{"approve", "reject"}},
+	{path: []string{"relay", "devices"}, verbs: []string{"approve", "revoke"}},
+	{path: []string{"task", "chat"}, verbs: []string{"fork"}, bare: true},
+	{path: []string{"profile"}, verbs: []string{"add", "edit"}, bare: true},
+	{path: []string{"profile", "seed"}, flag: "--apply", bare: true},
 }
 
 // HumanOnlyCLI reports whether args (what follows the smind binary: flags are
@@ -58,33 +64,28 @@ var humanOnlyCLI = []humanOnlyCommand{
 // the floor denies them in an agent's shell, from this one table.
 func HumanOnlyCLI(args []string) bool {
 	words := nonFlags(args)
-	if agentQuestionsOptIn(words, args) {
-		return true
-	}
 	for _, c := range humanOnlyCLI {
 		if len(words) < len(c.path) || !slices.Equal(words[:len(c.path)], c.path) {
 			continue
 		}
-		if c.verbs == nil {
+		switch {
+		case c.flag != "":
+			if hasFlag(args, c.flag) {
+				return true
+			}
+		case c.verbs == nil:
 			return true
-		}
-		if len(words) > len(c.path) && containsWord(c.verbs, words[len(c.path)]) {
+		case len(words) > len(c.path) && containsWord(c.verbs, words[len(c.path)]):
 			return true
 		}
 	}
 	return false
 }
 
-// agentQuestionsOptIn reports `profile add|edit ... --agent-questions[=...]`:
-// the flag that opts a profile in to ACP elicitation is human-only (ADR-0055
-// D4), so an agent cannot give itself, or a child it launches, a channel to ask
-// the human. Other profile flags stay open to agents.
-func agentQuestionsOptIn(words, args []string) bool {
-	if len(words) < 2 || words[0] != "profile" || !containsWord([]string{"add", "edit"}, words[1]) {
-		return false
-	}
+// hasFlag reports `flag` or `flag=value` among args.
+func hasFlag(args []string, flag string) bool {
 	for _, a := range args {
-		if a == "--agent-questions" || strings.HasPrefix(a, "--agent-questions=") {
+		if a == flag || strings.HasPrefix(a, flag+"=") {
 			return true
 		}
 	}
@@ -102,30 +103,94 @@ func dynamicHumanOnly(args []string) bool {
 		return true
 	}
 	for _, c := range humanOnlyCLI {
-		if len(words) > len(c.path) && slices.Equal(words[:len(c.path)], c.path) && dynamicWord(words[len(c.path)]) {
+		if len(words) <= len(c.path) || !slices.Equal(words[:len(c.path)], c.path) {
+			continue
+		}
+		if dynamicWord(words[len(c.path)]) {
+			return true
+		}
+		// A flag-gated command (`profile seed roles --apply`) may get its flag
+		// from the shell: any computed word after the path could be it.
+		if c.flag != "" && slices.ContainsFunc(words[len(c.path):], dynamicWord) {
 			return true
 		}
 	}
 	return false
 }
 
-// taskVerbPair reports `task approve|deny|answer` as adjacent words anywhere
-// in args: how a renamed copy, `go run ./cmd/smind` or a launcher that takes
-// the real command as arguments spells it. Only the task verbs are matched
-// without the binary's name: no other tool spells them so.
-func taskVerbPair(args []string) bool {
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "task" && containsWord(humanOnlyCLI[0].verbs, args[i+1]) {
+// namedBare reports the command spelled as adjacent words anywhere in args,
+// without the binary's name: how a renamed copy, `go run ./cmd/smind` or a
+// launcher that takes the real command as arguments writes it.
+func (c humanOnlyCommand) namedBare(args []string) bool {
+	for i := 0; i+len(c.path) <= len(args); i++ {
+		if !slices.Equal(args[i:i+len(c.path)], c.path) {
+			continue
+		}
+		rest := args[i+len(c.path):]
+		switch {
+		case c.flag != "":
+			if hasFlag(args, c.flag) {
+				return true
+			}
+		case c.verbs == nil:
+			return true
+		case len(rest) > 0 && containsWord(c.verbs, rest[0]):
 			return true
 		}
 	}
 	return false
+}
+
+// bareVerbPair reports a command of the table that is safe to match without
+// the binary's name (the bare rows).
+func bareVerbPair(args []string) bool {
+	for _, c := range humanOnlyCLI {
+		if c.bare && c.namedBare(args) {
+			return true
+		}
+	}
+	return false
+}
+
+// pattern is the command as text: `smind… <path> <verb>` (without the binary
+// for a bare row), or `<path> … <flag>` for a flag row.
+func (c humanOnlyCommand) pattern() string {
+	words := make([]string, len(c.path))
+	for i, w := range c.path {
+		words[i] = regexp.QuoteMeta(w)
+	}
+	p := strings.Join(words, `\s+`)
+	switch {
+	case c.flag != "":
+		p += `\b[^\n]*?` + regexp.QuoteMeta(c.flag) + `(?:[\s='"]|$)`
+	case c.verbs != nil:
+		vs := make([]string, len(c.verbs))
+		for i, v := range c.verbs {
+			vs[i] = regexp.QuoteMeta(v)
+		}
+		p += `\s+(?:` + strings.Join(vs, "|") + `)\b`
+	default:
+		p += `\b`
+	}
+	if !c.bare {
+		p = `smind\S*\s+` + p
+	}
+	return p
 }
 
 // humanOnlyText finds a human-only smind command written out as text: inside a
 // script handed to a command runner (`su -c '...'`, `eval '...'`, `ssh host
-// '...'`) or piped to a shell.
-var humanOnlyText = regexp.MustCompile(`\btask\s+(approve|deny|answer)\b|smind\S*\s+(permission\b|host\s+(approve|reject)\b|relay\s+devices\s+(approve|revoke)\b)`)
+// '...'`) or piped to a shell. Built from the one table, so a new human-only
+// command cannot miss it.
+var humanOnlyText = buildHumanOnlyText()
+
+func buildHumanOnlyText() *regexp.Regexp {
+	alts := make([]string, len(humanOnlyCLI))
+	for i, c := range humanOnlyCLI {
+		alts[i] = c.pattern()
+	}
+	return regexp.MustCompile(`\b(?:` + strings.Join(alts, "|") + `)`)
+}
 
 // commandRunners take a command, or a script, as arguments and run it; the
 // effective argv does not name it as a command word.
@@ -162,7 +227,7 @@ func (fs *floorSeg) selfApproveRules() (FloorHit, bool) {
 	switch {
 	case smindish && (HumanOnlyCLI(args) || dynamicHumanOnly(args)):
 		return floorHit("no-self-approve")
-	case !smindish && taskVerbPair(args):
+	case !smindish && bareVerbPair(args):
 		return floorHit("no-self-approve")
 	case commandRunners[name] && humanOnlyText.MatchString(strings.Join(args, " ")):
 		return floorHit("no-self-approve")

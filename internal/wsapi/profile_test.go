@@ -237,3 +237,41 @@ func TestProfile_ModelRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// profile.update with expectedUpdatedAt is conditional (ADR-0058): it succeeds only while the
+// profile still has that updatedAt, else code conflict and nothing is written; without it the
+// update is what it always was.
+func TestProfile_UpdateExpectedUpdatedAt(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, wm, newTestRunner(wm), db, "tok")
+	t.Cleanup(srv.Close)
+	ws := dialWS(t, srv, "tok")
+	t.Cleanup(func() { _ = ws.Close() })
+	call := func(id, method string, params map[string]any) envelope {
+		sendRequest(t, ws, id, method, params)
+		return readEnvelopeFor(t, ws, id, 5*time.Second)
+	}
+	var created store.AgentProfile
+	mustDecode(t, call("c", "profile.create", map[string]any{"name": "seat", "provider": "claude-native", "instructions": "v1"}).Result, &created)
+
+	params := func(instr string, expected time.Time) map[string]any {
+		return map[string]any{"id": created.ID, "name": "seat", "provider": "claude-native", "instructions": instr, "expectedUpdatedAt": expected.Format(time.RFC3339Nano)}
+	}
+	resp := call("ok", "profile.update", params("v2", created.UpdatedAt))
+	if resp.Error != nil {
+		t.Fatalf("guarded profile.update error = %v", resp.Error.Message)
+	}
+	resp = call("stale", "profile.update", params("v3", created.UpdatedAt))
+	if resp.Error == nil || resp.Error.Code != codeConflict {
+		t.Fatalf("stale guarded profile.update = %+v, want code %s", resp.Error, codeConflict)
+	}
+	var got store.AgentProfile
+	mustDecode(t, call("g", "profile.get", map[string]any{"id": created.ID}).Result, &got)
+	if got.Instructions != "v2" {
+		t.Fatalf("stored instructions = %q: a refused update must write nothing", got.Instructions)
+	}
+	if resp := call("plain", "profile.update", map[string]any{"id": created.ID, "name": "seat", "provider": "claude-native", "instructions": "v4"}); resp.Error != nil {
+		t.Fatalf("unguarded profile.update error = %v", resp.Error.Message)
+	}
+}

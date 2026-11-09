@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spacingmind/smind/internal/skills"
 	"github.com/spacingmind/smind/internal/store"
@@ -195,6 +196,29 @@ func (r *Registry) Update(p store.AgentProfile) (store.AgentProfile, error) {
 		return store.AgentProfile{}, err
 	}
 	updated, err := r.store.UpdateAgentProfile(p)
+	if err != nil {
+		return store.AgentProfile{}, err
+	}
+	if n := r.getNotifier(); n != nil {
+		n.NotifyProfileUpdated(updated)
+	}
+	return updated, nil
+}
+
+// UpdateIf is Update guarded by the profile's updated_at as the caller read it
+// (ADR-0058): a profile edited since is refused with store.ErrAgentProfileChanged.
+func (r *Registry) UpdateIf(p store.AgentProfile, expected time.Time) (store.AgentProfile, error) {
+	if err := r.refuseOwned(p.ID); err != nil {
+		return store.AgentProfile{}, err
+	}
+	if err := r.refuseOwnedName(strings.TrimSpace(p.Name)); err != nil {
+		return store.AgentProfile{}, err
+	}
+	p.Owner, p.ReadOnly = nil, false
+	if err := r.validate(&p); err != nil {
+		return store.AgentProfile{}, err
+	}
+	updated, err := r.store.UpdateAgentProfileIf(p, expected)
 	if err != nil {
 		return store.AgentProfile{}, err
 	}

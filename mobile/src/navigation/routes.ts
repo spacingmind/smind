@@ -2,10 +2,13 @@
 // route params are strings, so the id is parsed once here.
 
 // `title` is only a display hint for the header (a deep link can carry any text); nothing trusts it.
-export type TaskRouteParams = { id: string; title: string };
+// `chat` (PR 1b AC18) picks the task screen's chat; absent = the default chat, exactly today's behaviour.
+export type TaskRouteParams = { id: string; title: string; chat?: string };
 
-export function taskHref(task: { ID: number; Title: string }): { pathname: '/task/[id]'; params: TaskRouteParams } {
-  return { pathname: '/task/[id]', params: { id: String(task.ID), title: task.Title } };
+export function taskHref(task: { ID: number; Title: string }, chatId?: number): { pathname: '/task/[id]'; params: TaskRouteParams } {
+  const params: TaskRouteParams = { id: String(task.ID), title: task.Title };
+  if (chatId !== undefined) params.chat = String(chatId);
+  return { pathname: '/task/[id]', params };
 }
 
 type Param = string | string[] | undefined;
@@ -14,13 +17,17 @@ function first(p: Param): string | undefined {
   return Array.isArray(p) ? p[0] : p;
 }
 
-export function parseTaskParams(params: { id?: Param; title?: Param }): { ok: true; id: number; title: string } | { ok: false } {
+export function parseTaskParams(params: { id?: Param; title?: Param; chat?: Param }): { ok: true; id: number; title: string; chat?: number } | { ok: false } {
   const rawId = first(params.id);
   if (rawId === undefined || !/^\d+$/.test(rawId)) return { ok: false };
   const id = Number(rawId);
   if (!Number.isSafeInteger(id) || id <= 0) return { ok: false };
   const title = first(params.title);
-  return { ok: true, id, title: title ? title : `Task ${id}` };
+  // The chat param is optional: anything not a positive safe integer is ignored (the default chat loads), never a refusal.
+  const rawChat = first(params.chat);
+  const chat = rawChat !== undefined && /^\d+$/.test(rawChat) ? Number(rawChat) : undefined;
+  const chatId = chat !== undefined && Number.isSafeInteger(chat) && chat > 0 ? chat : undefined;
+  return { ok: true, id, title: title ? title : `Task ${id}`, ...(chatId !== undefined ? { chat: chatId } : {}) };
 }
 
 /**

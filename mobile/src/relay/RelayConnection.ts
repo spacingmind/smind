@@ -64,6 +64,8 @@ interface WireError {
   code?: string;
   /** Seconds a rate-limited client should wait (code too_many_attempts). */
   retry_after?: number;
+  /** The error's structured detail (e.g. fork_unavailable's reason/seededAvailable); untyped on the wire. */
+  data?: unknown;
 }
 
 interface WireEnvelope {
@@ -211,6 +213,7 @@ export class DaemonError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    readonly data?: unknown,
   ) {
     super(message);
   }
@@ -782,7 +785,7 @@ export class RelayConnection {
       const p = this.pending.get(env.id);
       if (p) {
         this.pending.delete(env.id);
-        p.reject(new DaemonError(env.error.message, typeof env.error.code === 'string' ? env.error.code : undefined));
+        p.reject(new DaemonError(env.error.message, typeof env.error.code === 'string' ? env.error.code : undefined, env.error.data));
       }
       return;
     }
