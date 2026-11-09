@@ -2776,6 +2776,9 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			Skills               []string        `json:"skills"`
 			ChildPolicy          string          `json:"childPolicy"`
 			ChildProfileIDs      []int64         `json:"childProfileIds"`
+			// ExpectedUpdatedAt, when set, makes the update conditional on the profile still having
+			// that updatedAt (ADR-0058): an edit since is refused with code conflict.
+			ExpectedUpdatedAt *time.Time `json:"expectedUpdatedAt"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("profile.update: invalid params: %w", err)
@@ -2783,25 +2786,34 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 		if err := rejectLegacyApprovalPolicy(p.LegacyApprovalPolicy); err != nil {
 			return nil, fmt.Errorf("profile.update: %w", err)
 		}
-		updated, err := profReg.Update(store.AgentProfile{
-			ID:                 p.ID,
-			Name:               p.Name,
-			Provider:           p.Provider,
-			PermissionMode:     p.PermissionMode,
-			AutoAccept:         p.AutoAccept,
-			ThinkingLevel:      p.ThinkingLevel,
-			Model:              p.Model,
-			Notes:              p.Notes,
-			OnRateLimit:        p.OnRateLimit,
-			FallbackProfileID:  p.FallbackProfileID,
-			Questions:          p.Questions,
-			OrchestrationTools: p.OrchestrationTools,
-			Instructions:       p.Instructions,
-			Skills:             p.Skills,
-			ChildPolicy:        p.ChildPolicy,
-			ChildProfileIDs:    p.ChildProfileIDs,
-		})
+		updated, err := func() (store.AgentProfile, error) {
+			next := store.AgentProfile{
+				ID:                 p.ID,
+				Name:               p.Name,
+				Provider:           p.Provider,
+				PermissionMode:     p.PermissionMode,
+				AutoAccept:         p.AutoAccept,
+				ThinkingLevel:      p.ThinkingLevel,
+				Model:              p.Model,
+				Notes:              p.Notes,
+				OnRateLimit:        p.OnRateLimit,
+				FallbackProfileID:  p.FallbackProfileID,
+				Questions:          p.Questions,
+				OrchestrationTools: p.OrchestrationTools,
+				Instructions:       p.Instructions,
+				Skills:             p.Skills,
+				ChildPolicy:        p.ChildPolicy,
+				ChildProfileIDs:    p.ChildProfileIDs,
+			}
+			if p.ExpectedUpdatedAt != nil {
+				return profReg.UpdateIf(next, *p.ExpectedUpdatedAt)
+			}
+			return profReg.Update(next)
+		}()
 		if err != nil {
+			if errors.Is(err, store.ErrAgentProfileChanged) {
+				return nil, &rpcCodeError{code: codeConflict, msg: "profile.update: the profile was changed since it was read", err: err}
+			}
 			return nil, ownedRPCErr("profile.update", err)
 		}
 		return updated, nil

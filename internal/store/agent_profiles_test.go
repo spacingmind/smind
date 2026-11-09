@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestStore_AgentProfiles(t *testing.T) {
 	t.Parallel()
@@ -133,5 +136,36 @@ func assertAgentProfilesEqual(t *testing.T, got, want AgentProfile) {
 	}
 	if !got.CreatedAt.Equal(want.CreatedAt) || !got.UpdatedAt.Equal(want.UpdatedAt) {
 		t.Errorf("agent profile timestamps = %+v, want %+v", got, want)
+	}
+}
+
+func TestStore_UpdateAgentProfileIf(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	created, err := s.CreateAgentProfile(AgentProfile{Name: "seat", Provider: "claude-native", Instructions: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := created
+	next.Instructions = "v2"
+	updated, err := s.UpdateAgentProfileIf(next, created.UpdatedAt)
+	if err != nil || updated.Instructions != "v2" {
+		t.Fatalf("guarded update with the right updatedAt = %+v, %v", updated, err)
+	}
+	// someone else edited meanwhile: the stale expectation is refused and writes nothing
+	stale := created
+	stale.Instructions = "v3"
+	if _, err := s.UpdateAgentProfileIf(stale, created.UpdatedAt); !errors.Is(err, ErrAgentProfileChanged) {
+		t.Fatalf("guarded update with a stale updatedAt error = %v, want ErrAgentProfileChanged", err)
+	}
+	got, err := s.GetAgentProfile(created.ID)
+	if err != nil || got.Instructions != "v2" {
+		t.Fatalf("stored profile = %+v, %v; a refused update must change nothing", got, err)
+	}
+	// the unguarded update is unchanged
+	other := got
+	other.Instructions = "v4"
+	if _, err := s.UpdateAgentProfile(other); err != nil {
+		t.Fatalf("unguarded update error = %v", err)
 	}
 }

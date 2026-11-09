@@ -27,6 +27,8 @@ var HumanOnlyRPCs = []string{
 	"relay.device.revoke",
 	"chat.fork",
 	"chat.forkSeed",
+	"profile.create",
+	"profile.update",
 }
 
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not
@@ -39,14 +41,19 @@ var PendingHumanOnlyRPCs = []string{"run.answerPermission"}
 type humanOnlyCommand struct {
 	path  []string
 	verbs []string
+	// flag, when set, makes the command human-only only with that flag (`--flag` or
+	// `--flag=value`): `smind profile seed roles` reads, `--apply` rewrites role prompts.
+	flag string
 }
 
 var humanOnlyCLI = []humanOnlyCommand{
-	{[]string{"task"}, []string{"approve", "deny", "answer"}},
-	{[]string{"permission"}, nil},
-	{[]string{"host"}, []string{"approve", "reject"}},
-	{[]string{"relay", "devices"}, []string{"approve", "revoke"}},
-	{[]string{"task", "chat"}, []string{"fork"}},
+	{path: []string{"task"}, verbs: []string{"approve", "deny", "answer"}},
+	{path: []string{"permission"}},
+	{path: []string{"host"}, verbs: []string{"approve", "reject"}},
+	{path: []string{"relay", "devices"}, verbs: []string{"approve", "revoke"}},
+	{path: []string{"task", "chat"}, verbs: []string{"fork"}},
+	{path: []string{"profile"}, verbs: []string{"add", "edit"}},
+	{path: []string{"profile", "seed"}, flag: "--apply"},
 }
 
 // HumanOnlyCLI reports whether args (what follows the smind binary: flags are
@@ -58,10 +65,24 @@ func HumanOnlyCLI(args []string) bool {
 		if len(words) < len(c.path) || !slices.Equal(words[:len(c.path)], c.path) {
 			continue
 		}
-		if c.verbs == nil {
+		switch {
+		case c.flag != "":
+			if hasFlag(args, c.flag) {
+				return true
+			}
+		case c.verbs == nil:
+			return true
+		case len(words) > len(c.path) && containsWord(c.verbs, words[len(c.path)]):
 			return true
 		}
-		if len(words) > len(c.path) && containsWord(c.verbs, words[len(c.path)]) {
+	}
+	return false
+}
+
+// hasFlag reports `flag` or `flag=value` among args.
+func hasFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag || strings.HasPrefix(a, flag+"=") {
 			return true
 		}
 	}

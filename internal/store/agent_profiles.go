@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -149,12 +150,31 @@ func (s *Store) ListAgentProfiles() ([]AgentProfile, error) {
 // section), preserving its original created_at. Updating a nonexistent id
 // is a clear not-found error, never a silent no-op.
 func (s *Store) UpdateAgentProfile(p AgentProfile) (AgentProfile, error) {
+	return s.updateAgentProfile(p, nil)
+}
+
+// ErrAgentProfileChanged is returned by UpdateAgentProfileIf when the stored profile was
+// edited after the caller read it (its updated_at is no longer the one expected).
+var ErrAgentProfileChanged = errors.New("the profile was changed since it was read")
+
+// UpdateAgentProfileIf is UpdateAgentProfile guarded by optimistic concurrency (ADR-0058):
+// the replace happens only if the stored updated_at is still expected, else
+// ErrAgentProfileChanged and nothing is written. The check and the write are one
+// conditional UPDATE, so a concurrent edit cannot slip between them.
+func (s *Store) UpdateAgentProfileIf(p AgentProfile, expected time.Time) (AgentProfile, error) {
+	return s.updateAgentProfile(p, &expected)
+}
+
+func (s *Store) updateAgentProfile(p AgentProfile, expected *time.Time) (AgentProfile, error) {
 	if IsOwnedID(p.ID) {
 		return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, errOwnedProfile)
 	}
 	existing, err := s.GetAgentProfile(p.ID)
 	if err != nil {
 		return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, err)
+	}
+	if expected != nil && !existing.UpdatedAt.Equal(expected.UTC()) {
+		return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, ErrAgentProfileChanged)
 	}
 	p.CreatedAt = existing.CreatedAt
 	p.UpdatedAt = time.Now().UTC()
@@ -181,14 +201,25 @@ func (s *Store) UpdateAgentProfile(p AgentProfile) (AgentProfile, error) {
 	if err != nil {
 		return AgentProfile{}, fmt.Errorf("encode child profile ids: %w", err)
 	}
-	if _, err := s.db.Exec(
+	where, args := `WHERE id = ?`, []any{p.ID}
+	if expected != nil {
+		// The stored value as read above: the write loses if anyone changed the row in between.
+		where, args = `WHERE id = ? AND updated_at = ?`, []any{p.ID, existing.UpdatedAt}
+	}
+	res, err := s.db.Exec(
 		`UPDATE agent_profiles SET name = ?, provider = ?, permission_mode = ?, auto_accept = ?, thinking_level = ?, model = ?, notes = ?, on_rate_limit = ?, fallback_profile_id = ?,
 		        orchestration_tools = ?, instructions = ?, skills = ?, child_policy = ?, child_profile_ids = ?, questions = ?, updated_at = ?
-		 WHERE id = ?`,
-		p.Name, p.Provider, p.PermissionMode, p.AutoAccept, p.ThinkingLevel, nullString(p.Model), p.Notes, p.OnRateLimit, nullInt64Ptr(p.FallbackProfileID),
-		nullOrchBool(p.OrchestrationTools), p.Instructions, skills, p.ChildPolicy, childIDs, p.Questions, p.UpdatedAt, p.ID,
-	); err != nil {
+		 `+where,
+		append([]any{p.Name, p.Provider, p.PermissionMode, p.AutoAccept, p.ThinkingLevel, nullString(p.Model), p.Notes, p.OnRateLimit, nullInt64Ptr(p.FallbackProfileID),
+			nullOrchBool(p.OrchestrationTools), p.Instructions, skills, p.ChildPolicy, childIDs, p.Questions, p.UpdatedAt}, args...)...,
+	)
+	if err != nil {
 		return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, err)
+	}
+	if expected != nil {
+		if n, rerr := res.RowsAffected(); rerr != nil || n == 0 {
+			return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, ErrAgentProfileChanged)
+		}
 	}
 	return p, nil
 }
