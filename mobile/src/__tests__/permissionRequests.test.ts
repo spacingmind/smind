@@ -6,7 +6,18 @@
 // traffic.
 
 import { describe, expect, it } from 'vitest';
-import { denyReasonParam, dispatchPermissionTap, feedPermissionEvent, PermissionBoard, respondToPermission } from '../permissionRequests';
+import {
+  clampRunes,
+  DENY_REASON_COUNTER_FROM,
+  DENY_REASON_MAX,
+  denyReasonCounter,
+  denyReasonParam,
+  dispatchPermissionTap,
+  feedPermissionEvent,
+  PermissionBoard,
+  respondToPermission,
+  runeCount,
+} from '../permissionRequests';
 import { respondPermission } from '../api';
 import { CloseableStream, RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
@@ -203,6 +214,50 @@ describe('deny reason', () => {
   it('denyReasonParam cuts at 500 characters', () => {
     expect(denyReasonParam('x'.repeat(600))).toBe('x'.repeat(500));
     expect(denyReasonParam(` ${'x'.repeat(500)}x `)).toBe('x'.repeat(500));
+  });
+
+  it('denyReasonCounter is hidden below DENY_REASON_COUNTER_FROM runes', () => {
+    expect(denyReasonCounter('x'.repeat(DENY_REASON_COUNTER_FROM - 1))).toEqual({
+      shown: false,
+      used: DENY_REASON_COUNTER_FROM - 1,
+      max: DENY_REASON_MAX,
+      atLimit: false,
+    });
+  });
+
+  it('denyReasonCounter is shown from DENY_REASON_COUNTER_FROM runes with used and max', () => {
+    expect(denyReasonCounter('x'.repeat(DENY_REASON_COUNTER_FROM))).toEqual({
+      shown: true,
+      used: DENY_REASON_COUNTER_FROM,
+      max: DENY_REASON_MAX,
+      atLimit: false,
+    });
+  });
+
+  it('denyReasonCounter flags the limit at the cap', () => {
+    expect(denyReasonCounter('x'.repeat(DENY_REASON_MAX))).toEqual({
+      shown: true,
+      used: DENY_REASON_MAX,
+      max: DENY_REASON_MAX,
+      atLimit: true,
+    });
+  });
+
+  it('runeCount counts characters (runes), not UTF-16 units: an emoji is one', () => {
+    expect(runeCount('use bun instead')).toBe('use bun instead'.length);
+    expect(runeCount('😀')).toBe(1);
+    expect(runeCount('😀 no')).toBe(4);
+  });
+
+  it('clampRunes accepts 499 x plus an emoji whole, and cuts one more character (never a surrogate half)', () => {
+    const atCap = 'x'.repeat(499) + '😀'; // 500 runes, 501 UTF-16 units
+    expect(clampRunes(atCap)).toBe(atCap);
+    expect(clampRunes(atCap + 'y')).toBe(atCap);
+    expect(runeCount(clampRunes(atCap + 'y'))).toBe(DENY_REASON_MAX);
+  });
+
+  it('denyReasonParam of 600 emoji returns exactly 500 emoji', () => {
+    expect(denyReasonParam('😀'.repeat(600))).toBe('😀'.repeat(DENY_REASON_MAX));
   });
 
   it('respondPermission sends no reason key without a reason', async () => {

@@ -437,6 +437,16 @@ describe("Composer", () => {
     expect(screen.getByLabelText("Permission mode").className).toContain("focus-visible:ring-");
   });
 
+  it("task_composer_chip_labels_visible_below_sm", async () => {
+    renderComposer();
+    await flush();
+    // The picker hides its label in a direct span; the Select pills hide theirs via the trigger class.
+    expect(screen.getByTestId("composer-model-picker").querySelector(":scope > span")?.className).not.toContain("max-sm:hidden");
+    for (const label of ["Thinking level", "Permission mode"]) {
+      expect(screen.getByLabelText(label).className).not.toContain("max-sm:[&>span]:hidden!");
+    }
+  });
+
   it("the permission-mode dropdown lists the provider's own modes, in its own words, and submits the pick (W1)", async () => {
     const client = new FakeWsClient();
     const { submissions } = renderComposer({ client });
@@ -790,8 +800,9 @@ describe("Composer", () => {
 
     // The trigger element is what the finger lands on, so the rule has to
     // survive on it and not be merged away by SelectTrigger's own h-8.
+    // The chips are labelled (AC4), so the picker is the auto-width 44px-high pill.
     const picker = screen.getByTestId("composer-model-picker");
-    expect(picker.className).toContain("size-11");
+    expect(picker.className).toContain("h-11");
     expect(picker.className).toContain("md:h-7");
     const policy = screen.getByLabelText("Permission mode");
     expect(policy.className).toContain("h-11");
