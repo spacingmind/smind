@@ -50,7 +50,7 @@ import { sendWithAttachments } from '../attachSend';
 import { lineAttachmentsFromRun } from '../lineAttachments';
 import { applyFullHistoryResult, fullHistoryParams, historySourceInfo, HistorySourceInfo, RunLogsResult } from '../historySource';
 import { createThumbLoader } from '../thumbLoader';
-import { AttachmentsInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, listProviders, listRunsForTask, ProviderInfo, revealPermissionHeredoc, revealToolHeredoc, RunSummary } from '../api';
+import { AttachmentsInfo, ChatInfo, defaultChatId, fetchDaemonInfo, fetchRunAttachment, forkChat, listProviders, listRunsForTask, ProviderInfo, revealPermissionHeredoc, revealToolHeredoc, RunSummary } from '../api';
 import { firstSendProvider } from '../firstSend';
 import { withRunPrompt } from '../promptLine';
 import { taskHref } from '../navigation/routes';
@@ -81,6 +81,12 @@ import { usePluginCommands } from '../plugins/usePluginCommands';
 import { Composer } from './task/Composer';
 import { FooterBanner } from './task/FooterBanner';
 import { HistorySourceNote } from './task/HistorySourceNote';
+import { ForkAction } from './task/ForkAction';
+import { ForkBanner } from './task/ForkBanner';
+import { ForkContext } from './task/ForkContext';
+import { canForkRun, classifyForkError, forkConfirmText } from '../chatFork';
+import { useForkView } from '../useForkView';
+import { confirmNative } from '../ui/confirm';
 import { LoadingState } from './task/LoadingState';
 import { MetaLine } from './task/MetaLine';
 import { PermissionCard } from './task/PermissionCard';
@@ -98,9 +104,13 @@ type LoadState =
 interface Props {
   conn: RelayConnection;
   taskId: number;
+  /** The chat to show (the route's `chat` param, PR 1b AC18); absent = the task's latest run's chat, as before. */
+  chat?: number;
+  /** The task's title from the route (the header hint a chat switch keeps). */
+  title?: string;
 }
 
-export function TaskDetailScreen({ conn, taskId }: Props) {
+export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props) {
   const theme = useAppTheme();
   const router = useRouter();
   const openTask = useCallback((id: number, title: string) => router.push(taskHref({ ID: id, Title: title })), [router]);
@@ -312,13 +322,13 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
 
     (async () => {
       try {
-        const runs = await listRunsForTask(conn, taskId);
+        const runs = await listRunsForTask(conn, taskId, chatParam);
         if (cancelled) return;
         const latest = runs[0] ?? null;
         setState({ kind: 'ready', run: latest });
         lastRunId.current = latest?.ID ?? null;
 
-        let resolved: number | null = latest?.ChatID ?? null;
+        let resolved: number | null = chatParam ?? latest?.ChatID ?? null;
         if (resolved === null) {
           try {
             resolved = await defaultChatId(conn, taskId);
@@ -386,7 +396,7 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
       for (const tail of followUpTails.current) tail.cancel();
       followUpTails.current = [];
     };
-  }, [conn, taskId, epoch, refreshLatest]);
+  }, [conn, taskId, chatParam, epoch, refreshLatest]);
 
   // The provider a send uses — the run's own when it has one, else the first-send resolution over the catalog.
   const sendProvider = state.kind === 'ready' ? firstSendProvider(providers ?? [], state.run?.Provider ?? null, recallSelection()) : null;
@@ -591,6 +601,45 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
   const canSend = draft.trim().length > 0 && sendProvider !== null;
   const stopView = stopControlView(liveRunId, stopping);
 
+  // ADR-0057 PR 1b: the fork action on a finished latest run, and what a forked chat shows (banner, inherited turns).
+  const latestRun = state.kind === 'ready' ? state.run : null;
+  const forkView = useForkView(conn, taskId, chatId, latestRun?.ID ?? null);
+  const [forking, setForking] = useState(false);
+  const [forkError, setForkError] = useState<string | null>(null);
+  useEffect(() => setForkError(null), [chatId, latestRun?.ID]);
+  const handleFork = useCallback(async () => {
+    if (forking || chatId === null || latestRun === null) return;
+    setForking(true);
+    setForkError(null);
+    try {
+      const ask = async (fallback: boolean, reason?: string) => {
+        const t = forkConfirmText(forkView.chatTitle || `Chat ${chatId}`, forkView.forkTurn, fallback, reason);
+        return confirmNative(t.title, t.message, t.confirmLabel, false);
+      };
+      if (!(await ask(false))) return;
+      let made: ChatInfo | null = null;
+      try {
+        made = await forkChat(conn, chatId, latestRun.ID, 'native');
+      } catch (err) {
+        const view = classifyForkError(err);
+        if (view.kind === 'error') {
+          if (mounted.current) setForkError(view.message);
+          return;
+        }
+        if (!(await ask(true, view.reason))) return;
+        made = await forkChat(conn, chatId, latestRun.ID, 'seeded');
+      }
+      if (mounted.current && made) router.replace(taskHref({ ID: taskId, Title: title ?? 'Task' }, made.ID));
+    } catch (err) {
+      if (mounted.current) setForkError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (mounted.current) setForking(false);
+    }
+  }, [chatId, conn, forkView.chatTitle, forkView.forkTurn, forking, latestRun, router, taskId, title]);
+  const openOriginal = useCallback(() => {
+    if (forkView.fork) router.push(taskHref({ ID: taskId, Title: title ?? 'Task' }, forkView.fork.parentChatId));
+  }, [forkView.fork, router, taskId, title]);
+
   // The not-finished footer: same visibility rule as before, now the last transcript item.
   const failedRun = state.kind === 'ready' && state.run?.FailureKind === 'rate_limited' ? state.run : null;
   const failedRunId = failedRun?.ID ?? null;
@@ -709,7 +758,33 @@ export function TaskDetailScreen({ conn, taskId }: Props) {
               data={items}
               keyExtractor={keyExtractor}
               renderItem={renderItem}
-              ListHeaderComponent={history ? <HistorySourceNote info={history} loading={loadingFull} onLoad={loadFullHistory} /> : undefined}
+              ListHeaderComponent={
+                forkView.fork || history ? (
+                  <>
+                    {forkView.fork ? (
+                      <>
+                        <ForkBanner text={forkView.fork.bannerText} onViewOriginal={forkView.fork.parentGone ? undefined : openOriginal} />
+                        <ForkContext
+                          dividerLabel={forkView.fork.dividerLabel}
+                          loading={forkView.fork.loadingTurns}
+                          mode={forkView.fork.mode}
+                          parentTitle={forkView.fork.parentTitle}
+                          turns={forkView.fork.turns}
+                          turnCount={forkView.fork.turnCount}
+                          expanded={forkView.fork.expanded}
+                          onToggle={forkView.toggle}
+                          seed={forkView.fork.seed}
+                          seedFailed={forkView.fork.seedFailed}
+                        />
+                      </>
+                    ) : null}
+                    {history ? <HistorySourceNote info={history} loading={loadingFull} onLoad={loadFullHistory} /> : null}
+                  </>
+                ) : undefined
+              }
+              ListFooterComponent={
+                canForkRun(state.run) && liveRunId === null && chatId !== null ? <ForkAction onPress={() => void handleFork()} busy={forking} error={forkError} /> : undefined
+              }
               ListEmptyComponent={state.run === null ? <ZeroRunEmptyState providers={providers} /> : emptyTranscript}
               contentInsetAdjustmentBehavior="automatic"
               onScroll={handleScroll}
