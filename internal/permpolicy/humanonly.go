@@ -26,6 +26,7 @@ var HumanOnlyRPCs = []string{
 	"relay.device.approve",
 	"relay.device.revoke",
 	"chat.fork",
+	"chat.forkSeed",
 }
 
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not

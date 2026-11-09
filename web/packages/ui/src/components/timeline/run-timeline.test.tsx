@@ -440,6 +440,41 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("run-prompt-copy")).toBeInTheDocument();
   });
 
+  it("the prompt bar offers Edit & retry; a click calls onRetryPrompt with the run", () => {
+    const onRetryPrompt = vi.fn();
+    const r = run([{ type: "chunk", text: "x" }]);
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={r} onRetryPrompt={onRetryPrompt} />
+      </ul>,
+    );
+    fireEvent.click(screen.getByTestId("run-prompt-retry"));
+    expect(onRetryPrompt).toHaveBeenCalledWith(r);
+
+    rerender(
+      <ul>
+        <RunTimeline run={r} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-prompt-retry")).toBeNull();
+  });
+
+  it("Edit & retry is hidden while the run is running and on a child_event row", () => {
+    const onRetryPrompt = vi.fn();
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { status: "running" })} onRetryPrompt={onRetryPrompt} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-prompt-retry")).toBeNull();
+    rerender(
+      <ul>
+        <RunTimeline run={run([], { origin: "child_event" })} onRetryPrompt={onRetryPrompt} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-prompt-retry")).toBeNull();
+  });
+
   it("a needs-continue disposition shows the not-finished warning and Continue, even for a cap this client does not know", () => {
     const onContinue = vi.fn();
     const r = run([{ type: "chunk", text: "x" }], { stopReason: "budget_exceeded", disposition: "needs-continue" });

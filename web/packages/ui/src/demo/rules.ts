@@ -242,6 +242,15 @@ export const RULES: Record<string, DemoRule> = {
     const chat = c.session.chats.find((x) => x.TaskID === p.taskId);
     return { runId: c.session.startReply(p.taskId, p.chatId ?? chat?.ID ?? 0, p.provider ?? "claude-code", String(p.prompt ?? "")).id };
   }),
+  "chat.forkSeed": local((c) => {
+    const chat = c.session.chats.find((x) => x.ID === c.params.chatId);
+    return {
+      seed:
+        chat?.fork?.mode === "seeded"
+          ? "User: Add a retry to the upload step.\nAssistant: Added a bounded retry with backoff and a test.\nUser: Now make the delay configurable.\nAssistant: The delay now reads from the upload settings."
+          : "",
+    };
+  }),
   "run.pendingQuestions": local(() => ({ questions: [] })),
   "run.respondPermission": scripted((c) => {
     const { runId, requestId, optionId } = c.params;
@@ -359,16 +368,17 @@ export const RULES: Record<string, DemoRule> = {
   "chat.fork": local((c) => {
     const parent = c.session.chats.find((x) => x.ID === c.params.chatId) ?? notFound("chat");
     const mode: "native" | "seeded" = c.params.mode === "seeded" ? "seeded" : "native";
+    const kind: "fork" | "retry" = c.params.kind === "retry" ? "retry" : "fork";
     const now = c.session.nowIso();
     const chat: Chat = {
       ID: c.session.allocChatId(),
       TaskID: parent.TaskID,
-      Title: `Fork of ${parent.Title}`,
+      Title: `${kind === "retry" ? "Retry" : "Fork"} of ${parent.Title}`,
       Provider: parent.Provider,
       AgentSession: null,
       CreatedAt: now,
       ArchivedAt: null,
-      fork: { parentChatId: parent.ID, forkedAtRunId: String(c.params.atRunId), kind: "fork", mode, lossy: mode === "seeded" },
+      fork: { parentChatId: parent.ID, forkedAtRunId: String(c.params.atRunId), kind, mode, lossy: mode === "seeded" },
     };
     c.session.chats.push(chat);
     c.session.notify("chat.created", { chat });

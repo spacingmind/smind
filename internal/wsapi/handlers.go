@@ -78,6 +78,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"chat.list":                handleChatList(wm, db),
 		"chat.get":                 handleChatGet(wm, db),
 		"chat.fork":                handleChatFork(wm, reg, db),
+		"chat.forkSeed":            handleChatForkSeed(db),
 		"chat.rename":              handleChatRename(wm),
 		"chat.archive":             handleChatArchive(wm, reg),
 		"chat.queueList":           handleChatQueueList(reg),

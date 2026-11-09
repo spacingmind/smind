@@ -21,6 +21,7 @@ automation.update
 chat.archive
 chat.create
 chat.fork
+chat.forkSeed
 chat.get
 chat.list
 chat.queueCancel

@@ -83,6 +83,9 @@ func handleChatFork(wm *workspace.Manager, reg *runs.Registry, db *store.Store) 
 			ChatID  int64  `json:"chatId"`
 			AtRunID string `json:"atRunId"`
 			Mode    string `json:"mode"`
+			// Kind is "fork" (the default) or "retry" (edit-and-retry: the fork's anchor is the
+			// turn BEFORE the one being replaced; the client sends the edited prompt next).
+			Kind string `json:"kind"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": invalid params"}
@@ -93,6 +96,13 @@ func handleChatFork(wm *workspace.Manager, reg *runs.Registry, db *store.Store) 
 		}
 		if p.ChatID <= 0 || p.AtRunID == "" || (mode != store.ChatForkModeNative && mode != store.ChatForkModeSeeded) {
 			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": chatId, atRunId and a mode of native or seeded are required"}
+		}
+		kind := p.Kind
+		if kind == "" {
+			kind = store.ChatForkKindFork
+		}
+		if kind != store.ChatForkKindFork && kind != store.ChatForkKindRetry {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": kind must be fork or retry"}
 		}
 		parent, err := db.GetChat(p.ChatID)
 		if err != nil {
@@ -106,6 +116,9 @@ func handleChatFork(wm *workspace.Manager, reg *runs.Registry, db *store.Store) 
 			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": the chat has not run yet"}
 		}
 		title := forkTitle(parent.Title)
+		if kind == store.ChatForkKindRetry {
+			title = retryTitle(parent.Title)
+		}
 
 		var setup func(store.Chat) error
 		switch mode {
@@ -139,7 +152,7 @@ func handleChatFork(wm *workspace.Manager, reg *runs.Registry, db *store.Store) 
 				if _, err := db.SetChatAgentSession(c.ID, string(data)); err != nil {
 					return err
 				}
-				return db.InsertChatFork(store.ChatFork{ChatID: c.ID, ParentChatID: parent.ID, ForkedAtRunID: p.AtRunID, Kind: store.ChatForkKindFork, Mode: store.ChatForkModeNative})
+				return db.InsertChatFork(store.ChatFork{ChatID: c.ID, ParentChatID: parent.ID, ForkedAtRunID: p.AtRunID, Kind: kind, Mode: store.ChatForkModeNative})
 			}
 		default:
 			all, lerr := db.ListUserRunsByChat(parent.ID)
@@ -167,7 +180,7 @@ func handleChatFork(wm *workspace.Manager, reg *runs.Registry, db *store.Store) 
 				if _, err := db.BindChatProvider(c.ID, *parent.Provider); err != nil {
 					return err
 				}
-				return db.InsertChatFork(store.ChatFork{ChatID: c.ID, ParentChatID: parent.ID, ForkedAtRunID: p.AtRunID, Kind: store.ChatForkKindFork, Mode: store.ChatForkModeSeeded, Seed: seed, CreatedAt: time.Now()})
+				return db.InsertChatFork(store.ChatFork{ChatID: c.ID, ParentChatID: parent.ID, ForkedAtRunID: p.AtRunID, Kind: kind, Mode: store.ChatForkModeSeeded, Seed: seed, CreatedAt: time.Now()})
 			}
 		}
 		child, err := wm.CreateChatThen(parent.TaskID, title, setup)
@@ -178,7 +191,11 @@ func handleChatFork(wm *workspace.Manager, reg *runs.Registry, db *store.Store) 
 	}
 }
 
-func forkTitle(parent string) string {
+func forkTitle(parent string) string { return "Fork of " + titleBase(parent) }
+
+func retryTitle(parent string) string { return "Retry of " + titleBase(parent) }
+
+func titleBase(parent string) string {
 	parent = strings.TrimSpace(parent)
 	if parent == "" {
 		parent = "Chat"
@@ -186,8 +203,34 @@ func forkTitle(parent string) string {
 	if utf8.RuneCountInString(parent) > forkTitleMax {
 		parent = string([]rune(parent)[:forkTitleMax])
 	}
-	return "Fork of " + parent
+	return parent
 }
 
 // forkTitleMax caps the parent's title (in characters) inside a fork's title.
 const forkTitleMax = 60
+
+// handleChatForkSeed implements chat.forkSeed {chatId}: the text a seeded fork was
+// given in place of the earlier turns, so the child chat can show what the agent
+// actually received (ADR-0057). Human only; "" for a chat that is not a seeded fork.
+func handleChatForkSeed(db *store.Store) handlerFunc {
+	const m = "chat.forkSeed"
+	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		if err := refuseAgent(m, rc); err != nil {
+			return nil, err
+		}
+		var p struct {
+			ChatID int64 `json:"chatId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil || p.ChatID <= 0 {
+			return nil, &rpcCodeError{code: codeInvalid, msg: m + ": chatId is required"}
+		}
+		f, err := db.GetChatFork(p.ChatID)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && f.Mode != store.ChatForkModeSeeded) {
+			return map[string]any{"seed": ""}, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", m, err)
+		}
+		return map[string]any{"seed": f.Seed}, nil
+	}
+}

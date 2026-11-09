@@ -35,11 +35,11 @@ async function renderPane(chat: Chat, props: Partial<Parameters<typeof TaskDetai
   const client = new FakeWsClient();
   const onOpenForkedChat = vi.fn();
   render(<TaskDetailPane client={client} task={TASK} chat={chat} isDefaultChat onOpenForkedChat={onOpenForkedChat} {...props} />);
-  client.nth("run.list", 0).resolve([
+  const summary = (chatId: number): RunSummary => (
     {
       ID: "run-1",
       TaskID: 1,
-      ChatID: chat.ID,
+      ChatID: chatId,
       Provider: "claude-native",
       Prompt: "do the thing",
       Status: "done",
@@ -50,15 +50,35 @@ async function renderPane(chat: Chat, props: Partial<Parameters<typeof TaskDetai
       PermissionMode: "",
       AutoAccept: false,
       ThinkingLevel: "",
-    } satisfies RunSummary,
-  ]);
+    });
+  client.nth("run.list", 0).resolve([summary(chat.ID)]);
   await flush();
   client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", stopReason: "end_turn", err: "", events: [] });
   await flush();
+  if (chat.fork) {
+    // The fork source's load of the parent's turns (use-fork-source), which names the banner's turn.
+    client.nth("run.list", 1).resolve([summary(chat.fork.parentChatId)]);
+    await flush();
+    client.nth("run.logs", 1).resolve({ runId: "run-1", status: "done", stopReason: "end_turn", err: "", events: [] });
+    await flush();
+  }
   return { client, onOpenForkedChat };
 }
 
 describe("TaskDetailPane fork", () => {
+  it("a retry names the turn it continues after and View original opens the parent", async () => {
+    const onOpenParentChat = vi.fn();
+    await renderPane(forked({ kind: "retry" }), { parentChat: PARENT, onOpenParentChat });
+    expect(screen.getByTestId("chat-fork-banner")).toHaveTextContent("Retry from Original chat after turn 1.");
+    fireEvent.click(screen.getByTestId("chat-fork-view-original"));
+    expect(onOpenParentChat).toHaveBeenCalledWith(PARENT.ID);
+  });
+
+  it("no View original button when the parent is unknown", async () => {
+    await renderPane(forked({}), { onOpenParentChat: vi.fn() });
+    expect(screen.queryByTestId("chat-fork-view-original")).toBeNull();
+  });
+
   it("Fork on a finished turn opens the dialog and a confirm forks the chat at that run", async () => {
     const { client, onOpenForkedChat } = await renderPane(CHAT);
     fireEvent.click(screen.getByTestId("run-fork"));
@@ -74,14 +94,14 @@ describe("TaskDetailPane fork", () => {
 
   it("a forked chat shows the banner naming its parent", async () => {
     await renderPane(forked({}), { parentChat: PARENT });
-    expect(screen.getByTestId("chat-fork-banner")).toHaveTextContent("Forked from Original chat.");
+    expect(screen.getByTestId("chat-fork-banner")).toHaveTextContent("Forked from Original chat at turn 1.");
     expect(screen.getByTestId("chat-fork-banner")).not.toHaveTextContent("summary of the earlier turns");
   });
 
   it("a lossy fork adds the summary sentence; a missing parent falls back to another chat", async () => {
     await renderPane(forked({ mode: "seeded", lossy: true }));
     expect(screen.getByTestId("chat-fork-banner")).toHaveTextContent(
-      "Forked from another chat. The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning.",
+      "Forked from another chat at turn 1. The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning.",
     );
   });
 

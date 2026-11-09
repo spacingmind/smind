@@ -12,6 +12,8 @@ import { useAttachmentDrop } from "@/components/composer/use-attachment-drop";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
 import { ForkChatDialog } from "@/components/fork-chat-dialog";
+import { ForkContext } from "@/components/fork-context";
+import { RetryChatDialog } from "@/components/retry-chat-dialog";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails, UntrustedBanner } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
@@ -39,6 +41,8 @@ import { useLiveTask } from "@/hooks/use-live-task";
 import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useForkChat } from "@/hooks/use-fork-chat";
+import { useForkSource } from "@/hooks/use-fork-source";
+import { retryPermission, retrySource, useRetryChat } from "@/hooks/use-retry-chat";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { canRetryWithHigherEffort, useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useRunFailoverIndex } from "@/hooks/use-run-failover-index";
@@ -91,6 +95,7 @@ export function TaskDetailPane({
   onJumpToTask,
   onOpenForkedChat,
   parentChat,
+  onOpenParentChat,
 }: {
   client: WsClientLike | null;
   task: Task;
@@ -118,6 +123,8 @@ export function TaskDetailPane({
   onOpenForkedChat?: (chat: Chat) => void;
   /** The chat this one branched off (chat.fork.parentChatId looked up in the task's chats); the fork banner names it. */
   parentChat?: Chat | null;
+  /** The fork banner's "View original": open the parent chat's tab. */
+  onOpenParentChat?: (chatId: number) => void;
 }) {
   // Worktree setup state changes after the task was selected (ADR-0024), so
   // follow the task's own update events instead of the selection snapshot.
@@ -132,6 +139,7 @@ export function TaskDetailPane({
     chat.ID,
     events,
   );
+  const forkSource = useForkSource(client, task, chat);
   // The daemon's per-chat prompt queue (ADR-0021 §9) -- one owner here,
   // the composer only renders/cancels what it's handed.
   const queue = useChatQueue(client, events ?? null, chat.ID);
@@ -346,8 +354,17 @@ export function TaskDetailPane({
   // Like the hover actions above, the callback is stable so RunTimeline's
   // memo keeps bailing out; only this pane's state opens the dialog.
   const [forkTarget, setForkTarget] = useState<{ chatId: number; runId: string } | null>(null);
+  const forkTurn = forkTarget && runs ? runs.findIndex((r) => r.id === forkTarget.runId) + 1 || undefined : undefined;
   const { fork: forkChat } = useForkChat(client);
   const forkRun = useCallback((run: RunEntry) => setForkTarget({ chatId: chat.ID, runId: run.id }), [chat.ID]);
+
+  // "Edit & retry": the run whose prompt the dialog edits (null = closed).
+  // Same shape as the fork wiring above -- a stable callback so RunTimeline's
+  // memo keeps bailing out; only this pane's state opens the dialog.
+  const [retryRunId, setRetryRunId] = useState<string | null>(null);
+  const { retry: retryChat } = useRetryChat(client);
+  const retryPrompt = useCallback((run: RunEntry) => setRetryRunId(run.id), []);
+  const retryTarget = retryRunId ? runs?.find((r) => r.id === retryRunId) ?? null : null;
 
   // ADR-0041 F2: the rate-limited footer's way out and the failed-run <-> successor links.
   const failoverIndex = useRunFailoverIndex(
@@ -478,8 +495,24 @@ export function TaskDetailPane({
       <UntrustedBanner task={task} onTask={applyTask} />
       {chat.fork && (
         <NoticeBanner tone="info" testId="chat-fork-banner">
-          Forked from {parentChat?.Title || "another chat"}.
-          {chat.fork.lossy && " The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning."}
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>
+              {chat.fork.kind === "retry"
+                ? `Retry from ${parentChat?.Title || "another chat"}${forkSource.turn !== null ? ` after turn ${forkSource.turn}` : ""}.`
+                : `Forked from ${parentChat?.Title || "another chat"}${forkSource.turn !== null ? ` at turn ${forkSource.turn}` : ""}.`}
+              {chat.fork.lossy && " The agent was given a summary of the earlier turns, so it does not remember tool calls or reasoning."}
+            </span>
+            {parentChat && onOpenParentChat && (
+              <Button
+                variant="link"
+                size="xs"
+                data-testid="chat-fork-view-original"
+                onClick={() => chat.fork && onOpenParentChat(chat.fork.parentChatId)}
+              >
+                View original
+              </Button>
+            )}
+          </span>
         </NoticeBanner>
       )}
       <SetupDetails client={client} task={task} onTask={applyTask} />
@@ -513,10 +546,25 @@ export function TaskDetailPane({
            * their own full-width roots.
            */}
           <div data-testid="run-log-column" className="mx-auto max-w-3xl">
+            {chat.fork && (
+              <ForkContext
+                chat={chat}
+                parentTitle={parentChat?.Title || "another chat"}
+                inherited={forkSource.inherited}
+                seed={forkSource.seed}
+                seedFailed={forkSource.seedFailed}
+                loading={forkSource.loading}
+                worktreePath={task.WorktreePath ?? undefined}
+              />
+            )}
             {error && <Alert variant="error" description={error} />}
             {!error && runs === null && <InlineSpinner label="Loading runs…" />}
             {!error && runs !== null && runs.length === 0 && (
-              <EmptyState title="No runs yet" description="Send a prompt to start one" />
+              chat.fork ? (
+                <EmptyState title="Continue from here" description="Send a prompt to continue this chat" />
+              ) : (
+                <EmptyState title="No runs yet" description="Send a prompt to start one" />
+              )
             )}
             {runs !== null && runs.length > 0 && (
               <ul className="space-y-4">
@@ -530,6 +578,7 @@ export function TaskDetailPane({
                     onRetry={canRetryWithHigherEffort(run, providers) ? retryWithHigherEffort : undefined}
                     onRerun={rerun}
                     onFork={forkRun}
+                    onRetryPrompt={retryPrompt}
                     onEditPrompt={editPrompt}
                     onContinue={continueRun}
                     failover={failover}
@@ -662,10 +711,46 @@ export function TaskDetailPane({
           if (!open) setForkTarget(null);
         }}
         chatTitle={chat.Title}
+        turn={forkTurn}
         runId={forkTarget?.runId ?? ""}
         onFork={(mode) => (forkTarget ? forkChat(forkTarget.chatId, forkTarget.runId, mode) : Promise.reject(new Error("no turn selected")))}
         onForked={onOpenForkedChat}
       />
+
+      {/*
+       * The "Edit & retry" editor, opened by a prompt action. The retry
+       * runs in a child chat (useRetryChat forks at the turn before the
+       * replaced one); its tab opens via onOpenForkedChat, exactly like a
+       * fork's.
+       */}
+      {retryTarget && runs && (
+        <RetryChatDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setRetryRunId(null);
+          }}
+          chatTitle={chat.Title}
+          turn={runs.findIndex((r) => r.id === retryTarget.id) + 1}
+          initialPrompt={retryTarget.prompt}
+          hasAnchor={retrySource(chat, runs, retryTarget) !== null}
+          permissionNote={
+            retryPermission(runConfigRef.current, retryTarget.provider).fromComposer
+              ? `It runs in the mode shown in the composer${runConfigRef.current?.permissionMode ? ` (${runConfigRef.current.permissionMode})` : " (the provider's default)"}, never in the mode this turn was switched to.`
+              : "It runs in the provider's default mode, never in the mode this turn was switched to."
+          }
+          attachmentNames={(retryTarget.attachments ?? []).map((a) => a.name || a.title || a.path || a.kind)}
+          onRetry={(prompt, mode, keepAttachments) => {
+            // A provider that is no longer configured is refused before any chat is created.
+            // (An empty catalog means it has not loaded yet: that never refuses.)
+            if (providers.length > 0 && !providers.some((p) => p.id === retryTarget.provider)) {
+              return Promise.reject(new Error(`The agent of this turn (${retryTarget.provider}) is no longer available: start the prompt from the composer instead.`));
+            }
+            const { permission } = retryPermission(runConfigRef.current, retryTarget.provider);
+            return retryChat({ taskId: task.ID, chat, runs, run: retryTarget, prompt, mode, permission, keepAttachments });
+          }}
+          onRetried={(child) => onOpenForkedChat?.(child)}
+        />
+      )}
     </div>
   );
 }

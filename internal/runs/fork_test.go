@@ -266,3 +266,39 @@ func TestForkSeed_TurnTextCannotFakeTheBoundary(t *testing.T) {
 		t.Fatalf("the seed must end with the boundary:\n%s", seed)
 	}
 }
+
+// A retry (or any start) of a turn whose provider is no longer configured is refused
+// before a run exists: the registry checks the provider against the CURRENT registry,
+// not against what the old run used.
+func TestStart_UnknownProviderIsRefusedBeforeAnyRun(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "")
+	chat, err := e.st.CreateChat(e.task.ID, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.reg.Start(context.Background(), e.wm, e.runner, e.task.ID, chat.ID, taskrunner.Provider("removed-plugin:agent"), "hi", taskrunner.PermissionSettings{}, "")
+	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("Start(removed provider) error = %v, want an unknown provider refusal", err)
+	}
+	if runs, _ := e.st.ListUserRunsByChat(chat.ID); len(runs) != 0 {
+		t.Fatalf("a run was recorded for a refused start: %+v", runs)
+	}
+}
+
+// A permission mode the provider no longer offers is refused the same way.
+func TestStart_PermissionModeOutsideTheCatalogIsRefused(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "")
+	chat, err := e.st.CreateChat(e.task.ID, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.reg.Start(context.Background(), e.wm, e.runner, e.task.ID, chat.ID, taskrunner.ProviderClaudeNative, "hi", taskrunner.PermissionSettings{Mode: "no-such-mode"}, "")
+	if err == nil {
+		t.Fatal("Start accepted a permission mode outside the provider's catalog")
+	}
+	if runs, _ := e.st.ListUserRunsByChat(chat.ID); len(runs) != 0 {
+		t.Fatalf("a run was recorded for a refused start: %+v", runs)
+	}
+}

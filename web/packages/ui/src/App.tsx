@@ -2799,6 +2799,7 @@ function TabContent({
         onJumpToTask={onJumpToTask}
         parentChat={parentChat ?? null}
         onOpenForkedChat={(forked) => onOpenChat(forked.ID)}
+        onOpenParentChat={(id) => onOpenChat(id)}
       />
     ) : null,
     files: (
