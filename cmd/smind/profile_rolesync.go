@@ -227,7 +227,7 @@ func cmdProfileSeedRolesDiff(filter string) int {
 	}
 	defer client.Close()
 
-	any := false
+	found := false
 	for _, c := range profiles.CheckRoles(existing) {
 		if c.Status != profiles.SeatOK {
 			continue
@@ -239,7 +239,7 @@ func cmdProfileSeedRolesDiff(filter string) int {
 			if filter != "" && filter != c.Name && filter != c.Name+"."+f.Name {
 				continue
 			}
-			any = true
+			found = true
 			kind := ""
 			if f.Kind == profiles.KindCapability {
 				kind = ", capability"
@@ -251,7 +251,7 @@ func cmdProfileSeedRolesDiff(filter string) int {
 			}
 		}
 	}
-	if !any {
+	if !found {
 		fmt.Println("no differences")
 	}
 	return 0
