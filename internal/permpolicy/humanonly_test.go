@@ -149,6 +149,8 @@ func TestFloor_SelfApproveRPCNameDenied(t *testing.T) {
 		{`echo '{"method":"run.answerPermission"}' | nc -U /tmp/x.sock`, "no-self-approve"},
 		{`python3 -c "ws.send('inbox.resolve')"`, "no-self-approve"},
 		{`curl -s -d '{"method":"chat.fork","params":{}}' http://localhost:9/rpc`, "no-self-approve"},
+		{`curl -s -d '{"method":"chat.forkSeed","params":{"chatId":3}}' http://localhost:9/rpc`, "no-self-approve"},
+		{`python3 -c "ws.send('chat.forkSeed')"`, "no-self-approve"},
 		{`websocat ws://127.0.0.1:9/ws <<< '{"method":"run.respondPermission"}'`, "no-self-approve"},
 		{`node -e "call('permission.revealHeredoc')"`, "no-self-approve"},
 		{`echo '{"method":"run.revealToolHeredoc"}' | nc -U /tmp/x.sock`, "no-self-approve"},

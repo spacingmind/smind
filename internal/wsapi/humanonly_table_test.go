@@ -35,7 +35,7 @@ func TestHumanOnlyRPCTable_MatchesHandlers(t *testing.T) {
 		}
 	}
 	mustExist := []string{"run.respondPermission", "inbox.resolve", "permission.revealHeredoc", "run.revealToolHeredoc",
-		"fleet.host.approve", "fleet.host.reject", "relay.device.approve", "relay.device.revoke", "chat.fork"}
+		"fleet.host.approve", "fleet.host.reject", "relay.device.approve", "relay.device.revoke", "chat.fork", "chat.forkSeed"}
 	for _, m := range mustExist {
 		if !slices.Contains(permpolicy.HumanOnlyRPCs, m) {
 			t.Errorf("%s must stay in permpolicy.HumanOnlyRPCs", m)
