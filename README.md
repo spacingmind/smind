@@ -111,7 +111,7 @@ Install each agent's own command first; smind does not install it for you
 (GLM downloads through `npx`). Of the ACP agents, only OpenCode has been
 checked (the real CLI against a local fake server); the others are not
 verified against a real login. Built-in recipes also point Claude Code or Codex at a
-compatible OpenAI-style endpoint, including local model servers: you paste a
+compatible chat-completions endpoint, including local model servers: you paste a
 key, and a few recipes need a URL or a model id. See
 [Providers](public-docs/providers.md) and
 [Provider recipes](public-docs/provider-recipes.md).
