@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.21.0](https://github.com/spacingmind/smind/compare/v0.20.0...v0.21.0) (2026-11-09)
+
+
+### Features
+
+* **chat:** edit and retry a prompt, and show what a fork came from (ADR-0057 PR2) ([#875](https://github.com/spacingmind/smind/issues/875)) ([342230f](https://github.com/spacingmind/smind/commit/342230f9d4ae243be5c0e21a14cb4b4df9f33a97))
+* **chat:** fork a chat at a finished turn (ADR-0057 PR1: data model, Claude fork, labelled fallback, CLI, web) ([#869](https://github.com/spacingmind/smind/issues/869)) ([b94c615](https://github.com/spacingmind/smind/commit/b94c6156bb9549269e16bcc30a2b506bf8c9ea08))
+* **failure:** context-window, session-budget and too-many-denials classes, readable text for every class (R3a-1) ([#870](https://github.com/spacingmind/smind/issues/870)) ([d3228a7](https://github.com/spacingmind/smind/commit/d3228a7881c9fe145e57288ff65df895aab1d025))
+* **fleet:** say which host holds the full history of a remote run (ADR-0053 AC9) ([#853](https://github.com/spacingmind/smind/issues/853)) ([6adb3be](https://github.com/spacingmind/smind/commit/6adb3bee35affbf3743a11baf41b6b377c71f13b))
+* **mobile:** chat fork on the task screen: fork action, banner, inherited turns (ADR-0057 PR 1b) ([#880](https://github.com/spacingmind/smind/issues/880)) ([004429f](https://github.com/spacingmind/smind/commit/004429f89d9beacb51a808674fdf9a221eea2c12))
+* **profiles:** role pack sync — profile seed roles --check/--diff/--apply, human-only profile gates (ADR-0058 PR1) ([#878](https://github.com/spacingmind/smind/issues/878)) ([7d4efef](https://github.com/spacingmind/smind/commit/7d4efef39fc498174d3c7ed8b2105887d7bc67a8))
+* **questions:** ACP elicitation questions reach the human (ADR-0055 PR2, ACP half) ([#881](https://github.com/spacingmind/smind/issues/881)) ([28cbe9b](https://github.com/spacingmind/smind/commit/28cbe9bcd103d47df610550986d8e30185d98102))
+* **questions:** agent questions reach the human, Claude path, inbox, CLI and web card (ADR-0055 PR1) ([#862](https://github.com/spacingmind/smind/issues/862)) ([a3727c7](https://github.com/spacingmind/smind/commit/a3727c73343a0abacddfba3cd4129190a14792d4))
+* **runs:** cache rebuilt histories and rebuild a cheap one on open (ADR-0053 AC13) ([#848](https://github.com/spacingmind/smind/issues/848)) ([bba5188](https://github.com/spacingmind/smind/commit/bba5188cb623fd321a1fb40471284e452adb431d))
+* **runs:** load an ACP run's full history via session/load on a confirmed human request (ADR-0053) ([#850](https://github.com/spacingmind/smind/issues/850)) ([9d96985](https://github.com/spacingmind/smind/commit/9d96985c79ee544780b712bf41c30527e831ebb8))
+* **steward:** per-axis digest, pass clock from creation, base_unresolved (ADR-0054 pre-pilot) ([#861](https://github.com/spacingmind/smind/issues/861)) ([a4bff50](https://github.com/spacingmind/smind/commit/a4bff508a98b64ff403b9d91b4df102b781a65ac))
+* **steward:** two-axis review digest, prompts and two seats, flag off (ADR-0054 P2) ([#847](https://github.com/spacingmind/smind/issues/847)) ([a032bdb](https://github.com/spacingmind/smind/commit/a032bdbff6ba418a916fdc2dcc82c048e05072c5))
+* **steward:** two-axis review inbox item, review card and CLI (ADR-0054 P3) ([#851](https://github.com/spacingmind/smind/issues/851)) ([4b8bbc4](https://github.com/spacingmind/smind/commit/4b8bbc4c25233a74f596b28df6dc88806305f498))
+* **steward:** two-axis review on mobile, combined sentence and Partial chip (ADR-0054 P4) ([#852](https://github.com/spacingmind/smind/issues/852)) ([5d1bd91](https://github.com/spacingmind/smind/commit/5d1bd919241e836f476001b0343d1ed82829f175))
+* **steward:** two-axis review schema, verdict checks and combine, flag off (ADR-0054 P1) ([#845](https://github.com/spacingmind/smind/issues/845)) ([c411c11](https://github.com/spacingmind/smind/commit/c411c1113cac3c822a5a8f1c84071d33f65e115e))
+* **ux:** Deny with a reason, new-file content, demo card parity; daemon-down cause once ([#872](https://github.com/spacingmind/smind/issues/872)) ([cec8c58](https://github.com/spacingmind/smind/commit/cec8c58f9378b661e8f2b455b47365b79c5b9b78))
+* **web,mobile:** deny reason textarea with a counter and rune counting; labelled chips on the task composer at 390 ([#876](https://github.com/spacingmind/smind/issues/876)) ([b97e7a5](https://github.com/spacingmind/smind/commit/b97e7a53e92f5dca8b4a718c2630e8ef26c7785a))
+* **web,mobile:** surfaces for the human-action failure classes and the daemon's failure sentence (R3a-2) ([#874](https://github.com/spacingmind/smind/issues/874)) ([7f01901](https://github.com/spacingmind/smind/commit/7f0190196c006e2cefaf93ba30930a22f0c5024c))
+* **web:** home composer gets Attach and the effort chip; chips are labelled at 390 ([#873](https://github.com/spacingmind/smind/issues/873)) ([2f96a00](https://github.com/spacingmind/smind/commit/2f96a007c9fbfab088dadd9beb11121cd6b6744a))
+
+
+### Bug Fixes
+
+* **history,failure:** rebuilder compaction/legacy/long-cwd fixes and new Codex error classes ([#854](https://github.com/spacingmind/smind/issues/854)) ([106b2ad](https://github.com/spacingmind/smind/commit/106b2ad6c5c3f42a5d32eb8250414eafbbb0903a))
+* **permissions:** an agent cannot answer its own requests from its shell (CLI refusal + no-self-approve floor rule) ([#863](https://github.com/spacingmind/smind/issues/863)) ([22eb507](https://github.com/spacingmind/smind/commit/22eb507a08c1c8ce64f67523cf40efcd6f7349cf))
+* **proxy:** bound upstream calls per request so a long SSE stream is not cut at 60 s ([#856](https://github.com/spacingmind/smind/issues/856)) ([8e8ebb4](https://github.com/spacingmind/smind/commit/8e8ebb4040515634baa53a031d3dfeae68ade6a8))
+* **quota:** scope overage-only and Fable-only 429s to the model, never the whole account ([#859](https://github.com/spacingmind/smind/issues/859)) ([b7412e9](https://github.com/spacingmind/smind/commit/b7412e9caaa4e4ab0401fb04bc4d257354be9ff7))
+* **steward:** prune planted autoloads from the single review seat's scratch tree ([#849](https://github.com/spacingmind/smind/issues/849)) ([6621f5d](https://github.com/spacingmind/smind/commit/6621f5d037d62a1e4ffff393dbccf6310d3b0183))
+* **ux:** daemon-down cause and Retry, ? shortcuts overlay, Profiles naming, no per-task cost chip ([#860](https://github.com/spacingmind/smind/issues/860)) ([cf7bae2](https://github.com/spacingmind/smind/commit/cf7bae28b81c024a224c5c26d9974acd5e88f766))
+* **web:** failure cards polish: short footer label, no repeated hints, no re-run icon on human-action failures ([#877](https://github.com/spacingmind/smind/issues/877)) ([d6b3601](https://github.com/spacingmind/smind/commit/d6b3601c9555c709670272a2f7fb57c20473a18b))
+* **web:** question card polish: Other label, dock separator, long-question collapse ([#871](https://github.com/spacingmind/smind/issues/871)) ([05179da](https://github.com/spacingmind/smind/commit/05179da1f15be44146644d8bb6c661c85c8b7f49))
+
 ## [0.20.0](https://github.com/spacingmind/smind/compare/v0.19.0...v0.20.0) (2026-11-05)
 
 
