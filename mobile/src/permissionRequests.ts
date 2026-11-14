@@ -13,6 +13,8 @@
 // rejects AND no authoritative resolution landed in the meantime.
 
 import { respondPermission } from './api';
+import { answerPermissionAlways } from './grants/api';
+import type { GrantOffer } from './grants/types';
 import { RelayConnection } from './relay/RelayConnection';
 
 /** One option of a permission_request (handlers.go's permissionOptionParams). */
@@ -31,6 +33,8 @@ export interface PermissionDetail {
   heredocs?: { index: number; bytes: number }[];
   /** The policy engine's footprint: the matched rule, its why, and the normalised command it judged. */
   policy?: { ruleId?: string; why?: string; normalized?: string; action?: string };
+  /** Present only on a request the daemon offers as "always allow in this project" (never in the demo, never for a git rule). */
+  grant?: GrantOffer;
 }
 
 /** The wire params of a permission_request event/log-entry. */
@@ -214,5 +218,28 @@ export async function respondToPermission(
     await respondPermission(conn, req.runId, requestId, optionId, reason);
   } catch (e) {
     board.chooseFailed(requestId, optionId, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * The scoped tap: allow this request with its single-allow option and save it as a project grant. Optimistic like
+ * respondToPermission (the card resolves at once) and rolled back the same way when the daemon refuses (a runner
+ * without its opt-in, a request that was not offered, one already answered): the refusal shows inline.
+ */
+export async function respondToPermissionAlways(
+  conn: RelayConnection,
+  board: PermissionBoard,
+  requestId: string,
+  allowProjectCode: boolean,
+): Promise<void> {
+  const req = board.list().find((r) => r.requestId === requestId);
+  if (!req || req.status !== 'pending') return;
+  const allow = req.options.find((o) => o.kind === 'allow_once');
+  if (!allow || !req.detail?.grant) return;
+  board.choose(requestId, allow.id);
+  try {
+    await answerPermissionAlways(conn, req.runId, requestId, allow.id, allowProjectCode);
+  } catch (e) {
+    board.chooseFailed(requestId, allow.id, e instanceof Error ? e.message : String(e));
   }
 }
