@@ -291,16 +291,30 @@ mod tests {
         assert!(before.trim_end().ends_with("#[cfg(feature = \"audit-guard\")]"), "the call must be behind the feature");
     }
 
-    #[test]
-    fn audit_guard_is_not_a_default_feature() {
+    /// The `[features]` table of Cargo.toml, as (name, value) lines.
+    fn feature_lines() -> Vec<(String, String)> {
         let cargo = include_str!("../Cargo.toml");
-        assert!(cargo.contains("\ndefault = []\n"), "audit-guard must not be a default feature");
-        assert!(!cargo.contains("default = [\"audit-guard\""), "audit-guard must not be a default feature");
+        let table = cargo.split("\n[features]\n").nth(1).expect("Cargo.toml has a [features] table");
+        table
+            .lines()
+            .take_while(|l| !l.trim_start().starts_with('['))
+            .filter_map(|l| l.split_once('='))
+            .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+            .collect()
     }
 
-    #[cfg(not(feature = "audit-guard"))]
     #[test]
-    fn audit_guard_is_off_by_default() {
-        assert!(!cfg!(feature = "audit-guard"));
+    fn audit_guard_is_not_a_default_feature() {
+        let features = feature_lines();
+        let default = features.iter().find(|(k, _)| k == "default").expect("Cargo.toml sets default features");
+        assert_eq!(default.1, "[]", "default features must stay empty, got {}", default.1);
+        let audit = features.iter().find(|(k, _)| k == "audit-guard").expect("the audit-guard feature exists");
+        assert!(audit.1.contains("dep:libc"), "audit-guard enables the optional libc dependency: {}", audit.1);
+        // no other feature pulls it in either
+        for (name, value) in &features {
+            if name != "audit-guard" {
+                assert!(!value.contains("audit-guard"), "feature {name} must not enable audit-guard: {value}");
+            }
+        }
     }
 }
