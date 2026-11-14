@@ -101,6 +101,7 @@ tasks:
       - node --test 'docs-site/scripts/*.test.mjs'
       - sh scripts/install_test.sh
       - sh scripts/task_setup_test.sh
+      - sh scripts/desktop-audit-build_test.sh
 
   docs:cli:
     desc: Regenerate the CLI summary blocks of public-docs/cli-reference.md from smind --help
@@ -138,7 +139,7 @@ tasks:
       - cd web && bun install --frozen-lockfile && bun run --filter '@smind/ui' typecheck
       - |
         if command -v shellcheck >/dev/null 2>&1; then
-          shellcheck scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh scripts/task-setup.sh scripts/task_setup_test.sh
+          shellcheck scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh scripts/task-setup.sh scripts/task_setup_test.sh scripts/desktop-audit-build.sh scripts/desktop-audit-build_test.sh
         else
           echo "shellcheck not installed; skipping install script lint" >&2
         fi
