@@ -242,21 +242,7 @@ func shellFedHumanOnly(segs []*floorSeg, raw string) bool {
 	if !humanOnlyText.MatchString(raw) {
 		return false
 	}
-	for _, fs := range segs {
-		if len(fs.argv) == 0 || !shellNames[fs.name()] {
-			continue
-		}
-		bare := true
-		for _, a := range fs.argv[1:] {
-			if a == "-c" || shortCluster(a, "c") || (!strings.HasPrefix(a, "-") && a != "-") {
-				bare = false
-			}
-		}
-		if bare {
-			return true
-		}
-	}
-	return false
+	return bareShellFed(segs)
 }
 
 var shellNames = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true}

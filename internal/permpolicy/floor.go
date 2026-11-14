@@ -18,6 +18,7 @@ var floorReasons = map[string]string{
 	"no-real-home-tests":     "tests must run against a temporary HOME, not the real one",
 	"no-add-all":             "stage named files, never the whole tree",
 	"no-self-approve":        "an agent must not answer, approve or deny its own requests",
+	"no-catastrophic":        "a catastrophic command (wiping the root or the home, formatting a device, a fork bomb, a power-off) is never allowed",
 }
 
 func floorHit(id string) (FloorHit, bool) {
@@ -47,6 +48,9 @@ func CheckFloor(req Request, p Parsed) (FloorHit, bool) {
 	if (namesHumanOnlyRPC(req.Command) && hasTransport(segs)) || shellFedHumanOnly(segs, req.Command) {
 		return floorHit("no-self-approve")
 	}
+	if forkBomb(segs, req.Command) || shellFedCatastrophic(req, segs, req.Command) {
+		return floorHit(catastrophicID)
+	}
 	for _, seg := range p.Segments {
 		fs := newFloorSeg(req, seg, cwd)
 		if h, ok := fs.selfApproveRules(); ok {
@@ -59,6 +63,9 @@ func CheckFloor(req Request, p Parsed) (FloorHit, bool) {
 			return h, true
 		}
 		if h, ok := fs.envRules(); ok {
+			return h, true
+		}
+		if h, ok := fs.catastrophicRules(); ok {
 			return h, true
 		}
 		cwd = fs.cwdAfter()
