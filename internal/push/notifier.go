@@ -16,6 +16,7 @@ import (
 // push RPC, never through Notify.
 const (
 	KindPermission    = "permission"
+	KindQuestion      = "question"
 	KindNeedsContinue = "needs_continue"
 	KindDone          = "done"
 	KindError         = "error"
@@ -23,8 +24,12 @@ const (
 	KindTest          = "test"
 )
 
+// QuestionBody is the fixed body of a question push (ADR-0055 D7): it says an
+// agent asked, never what.
+const QuestionBody = "An agent has a question"
+
 // AllKinds is every kind a device can subscribe to, in canonical order.
-var AllKinds = []string{KindPermission, KindNeedsContinue, KindDone, KindError, KindStalled}
+var AllKinds = []string{KindPermission, KindQuestion, KindNeedsContinue, KindDone, KindError, KindStalled}
 
 const (
 	// QueueSize bounds the async queue Enqueue feeds.
@@ -38,7 +43,7 @@ const (
 
 // Input is one daemon event the notifier may turn into pushes.
 type Input struct {
-	Kind    string // permission | needs_continue | done | error | stalled
+	Kind    string // permission | question | needs_continue | done | error | stalled
 	Key     string // dedupe key: permission = the requestId; run events = runId + ":" + kind; stalled = "stall:<taskId>:<since unix>"
 	TaskID  int64
 	ChatID  int64
@@ -358,6 +363,10 @@ func (n *Notifier) event(in Input, info TaskInfo, now time.Time) Event {
 		} else {
 			body = "Needs approval: " + in.Summary
 		}
+	case KindQuestion:
+		// ADR-0055 D7: the title only. The question text is untrusted agent
+		// output and never goes on a lock screen, so this body is fixed.
+		body = QuestionBody
 	case KindNeedsContinue:
 		body = "Reached the turn cap. Open to continue."
 	case KindDone:

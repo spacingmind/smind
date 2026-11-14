@@ -4,8 +4,8 @@
 import { base64Encode } from '../relay/base64';
 import type { PushKeyStore } from './keys';
 
-export type PushKind = 'permission' | 'needs_continue' | 'done' | 'error' | 'stalled';
-export const ALL_KINDS: readonly PushKind[] = ['permission', 'needs_continue', 'done', 'error', 'stalled'];
+export type PushKind = 'permission' | 'question' | 'needs_continue' | 'done' | 'error' | 'stalled';
+export const ALL_KINDS: readonly PushKind[] = ['permission', 'question', 'needs_continue', 'done', 'error', 'stalled'];
 
 export interface RegisterDeps {
   platform: 'android' | 'ios';
@@ -61,6 +61,9 @@ async function register(
     }
     return { ok: true, kinds: [...kinds] };
   } catch (e) {
+    // A daemon from before the question kind refuses the whole list as "invalid kinds": register again without it,
+    // so a new app on an older daemon still gets every other push (the question push needs the newer daemon).
+    if (kinds.includes('question') && /invalid kinds/i.test(errorMessage(e))) return register(deps, token, key, kinds.filter((k) => k !== 'question'));
     return { ok: false, reason: 'rpc_failed', message: errorMessage(e) };
   }
 }

@@ -108,3 +108,12 @@ describe('buildTranscript error card', () => {
     expect(items[0]).toEqual({ type: 'assistant', key: 'b', text: 'Working.' });
   });
 });
+
+describe('buildTranscript questions (ADR-0055)', () => {
+  it('appends a question item per tracked question after the permissions and before the footer, keyed ques-<id>', () => {
+    const q = { runId: 'r', requestId: 'rq-1', request: { source: 's', questions: [] }, status: 'pending' as const, error: null };
+    const items = buildTranscript([], [], { sentence: 'x' }, null, [q]);
+    expect(items.map((i) => i.type)).toEqual(['question', 'footer']);
+    expect(items[0]).toMatchObject({ type: 'question', key: 'ques-rq-1' });
+  });
+});

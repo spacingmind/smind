@@ -57,6 +57,8 @@ import { taskHref } from '../navigation/routes';
 import { recallSelection } from '../newTaskPrefs';
 import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
+import { answerToQuestion, feedQuestionEvent, QuestionBoard, QuestionState, showsCard } from '../questionRequests';
+import type { QuestionAnswer } from '../questionAnswer';
 import { RelayConnection } from '../relay/RelayConnection';
 import { useConnectionState } from '../relay/useConnectionState';
 import { RunFollower, RunStatusEvent } from '../runFollower';
@@ -90,6 +92,8 @@ import { confirmNative } from '../ui/confirm';
 import { LoadingState } from './task/LoadingState';
 import { MetaLine } from './task/MetaLine';
 import { PermissionCard } from './task/PermissionCard';
+import { QuestionCard } from './task/QuestionCard';
+import { QuestionMarker } from './task/QuestionMarker';
 import { RunStrip } from './task/RunStrip';
 import { TaskTreeSection } from './task/TaskTreeSection';
 import { ThinkingRow } from './task/ThinkingRow';
@@ -154,6 +158,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
   const [continued, setContinued] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
+  const [questions, setQuestions] = useState<QuestionState[]>([]);
   const [expandedToolCalls, setExpandedToolCalls] = useState<ReadonlySet<string>>(new Set());
   const [chatId, setChatId] = useState<number | null>(null);
   const [liveRunId, setLiveRunId] = useState<string | null>(null);
@@ -162,6 +167,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
   const [loadingFull, setLoadingFull] = useState(false);
   const { epoch, state: connState } = useConnectionState(conn); // reload what a drop interrupted (the run attach) once reconnected
   const board = useRef(new PermissionBoard()).current;
+  const questionBoard = useRef(new QuestionBoard()).current;
   const liveSeq = useRef(0);
   const followUpTails = useRef<RunTail[]>([]);
   const followerRef = useRef<RunFollower | null>(null);
@@ -208,7 +214,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
     attachedRuns.current.add(runId);
     const handle = (event: string, params: unknown) => {
       if (isCancelled()) return;
-      if (feedPermissionEvent(board, runId, event, params)) return;
+      if (feedPermissionEvent(board, runId, event, params) || feedQuestionEvent(questionBoard, runId, event, params)) return;
       liveSeq.current++;
       const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current, runId);
       if (newLines.length === 0) return;
@@ -298,6 +304,8 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
     setContinued(false);
     setLines([]);
     setPermissions([]);
+    questionBoard.clear();
+    setQuestions([]);
     setHistory(undefined);
     attachedRuns.current.clear();
     promptShown.current.clear();
@@ -308,6 +316,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
     refreshSeq.current++; // a refresh still in flight for the previous chat must not write into this one
     // PermissionBoard mutates its request objects in place: hand the memoised PermissionCard fresh copies so a state change re-renders it.
     board.onChange = () => setPermissions(board.list().map((r) => ({ ...r })));
+    questionBoard.onChange = () => setQuestions(questionBoard.list().map((r) => ({ ...r })));
 
     // Subscribe to run.status BEFORE the first await: a run the daemon delivers (or starts) while this screen is still
     // loading must not be missed. Events wait in `early` until the follower (which needs the chat id) exists.
@@ -373,6 +382,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
           if (cancelled) return;
           setHistory(historySourceInfo(logs));
           board.applyLogEvents(latest.ID, logs.events ?? []);
+          questionBoard.applyLogEvents(latest.ID, logs.events ?? []);
           // Merge, do not overwrite: a prompt sent or a run adopted while the logs were loading has already appended lines.
           const logLines = timelineFromLogs({ runId: latest.ID, events: (logs.events ?? []) as never[] });
           // A run started by run.start carries no user message in its logs: show the run row's own prompt when the logs
@@ -439,7 +449,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
             appendLines,
             removeLines,
             trackTail,
-            onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params),
+            onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params) || feedQuestionEvent(questionBoard, runId, event, params),
             shouldAttach: (runId) => {
               if (attachedRuns.current.has(runId)) return false;
               attachedRuns.current.add(runId);
@@ -470,7 +480,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
         sending.current = false;
       }
     },
-    [appendLines, board, chatId, conn, draft, nextSeq, queue, refreshLatest, removeLines, sendProvider, taskId, trackTail],
+    [appendLines, board, chatId, conn, draft, nextSeq, queue, questionBoard, refreshLatest, removeLines, sendProvider, taskId, trackTail],
   );
 
   const caps = useMemo(() => capabilities(attachInfo), [attachInfo]);
@@ -539,7 +549,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
           appendLines,
           removeLines,
           trackTail,
-          onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params),
+          onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params) || feedQuestionEvent(questionBoard, runId, event, params),
           shouldAttach: (runId) => {
             if (attachedRuns.current.has(runId)) return false;
             attachedRuns.current.add(runId);
@@ -556,7 +566,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
       setContinued(false);
       setSendError(e instanceof Error ? e.message : String(e));
     }
-  }, [appendLines, board, chatId, conn, continued, nextSeq, queue, removeLines, state, taskId, trackTail]);
+  }, [appendLines, board, chatId, conn, continued, nextSeq, queue, questionBoard, removeLines, state, taskId, trackTail]);
 
   // ADR-0053: ask the daemon to rebuild the run's history from the provider's own session and swap it in.
   // The same setters the initial load uses, so permission rows re-apply and lines appended since (an
@@ -569,6 +579,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
       const result = (await conn.call('run.logs', fullHistoryParams(latest.ID, history))) as RunLogsResult;
       if (!mounted.current || lastRunId.current !== latest.ID) return;
       board.applyLogEvents(latest.ID, result.events ?? []);
+      questionBoard.applyLogEvents(latest.ID, result.events ?? []);
       setLines((prev) => applyFullHistoryResult(prev, result, latest.Prompt, lineAttachmentsFromRun(latest)));
       setHistory(historySourceInfo(result));
     } catch {
@@ -576,7 +587,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
     } finally {
       if (mounted.current) setLoadingFull(false);
     }
-  }, [board, conn, history, loadingFull, state]);
+  }, [board, conn, history, loadingFull, questionBoard, state]);
 
   const handlePermissionTap = useCallback(
     (requestId: string, optionId: string, reason?: string) => {
@@ -584,6 +595,14 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
       void respondToPermission(conn, board, requestId, optionId, reason);
     },
     [conn, board],
+  );
+
+  const handleQuestionAnswer = useCallback(
+    (requestId: string, answer: QuestionAnswer) => {
+      hapticFor('permission'); // the same "a human decided" tap as a permission answer
+      void answerToQuestion(conn, questionBoard, requestId, answer);
+    },
+    [conn, questionBoard],
   );
 
   // Heredoc reveals: the redacted body of one elided marker, straight from the daemon (stable: both take only conn).
@@ -686,7 +705,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
     const zoneNote = resetZoneNote(run.FailureResetZone);
     return { ...describeRunError(run.Err!, { rateLimited, hasReset }), zoneNote, err: run.Err! };
   }, [liveRunId, state]);
-  const items = useMemo(() => buildTranscript(lines, permissions, footer, runError), [lines, permissions, footer, runError]);
+  const items = useMemo(() => buildTranscript(lines, permissions, footer, runError, questions), [lines, permissions, footer, runError, questions]);
 
   // Stick-to-bottom (vercel-react-native-skills: never track scroll position in useState per frame): `following` is a
   // ref written by onScroll; React state (`showJump`) changes only when the boolean flips.
@@ -743,13 +762,15 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
           return <MetaLine text={item.text} />;
         case 'permission':
           return <PermissionCard request={item.request} onRespond={handlePermissionTap} onReveal={handlePermissionReveal} />;
+        case 'question':
+          return showsCard(item.state) ? <QuestionCard state={item.state} onAnswer={handleQuestionAnswer} /> : <QuestionMarker state={item.state} />;
         case 'error':
           return <ErrorCard message={item.message} raw={item.raw} zoneNote={item.zoneNote} />;
         case 'footer':
           return <FooterBanner sentence={item.sentence} note={item.note} waiting={item.waiting} canContinue={item.canContinue} onContinue={handleContinue} />;
       }
     },
-    [expandedToolCalls, handleContinue, handlePermissionReveal, handlePermissionTap, handleToolReveal, loadThumb, toggleExpanded],
+    [expandedToolCalls, handleContinue, handlePermissionReveal, handlePermissionTap, handleQuestionAnswer, handleToolReveal, loadThumb, toggleExpanded],
   );
 
   return (

@@ -7,10 +7,11 @@
 // concatenated in order, key = the FIRST line's key, so a streaming append
 // re-renders only that item); consecutive 'assistant (thinking)' lines merge
 // the same way; a tool-call line, a user line or a meta line breaks a run.
-// Permissions (key `perm-<requestId>`) and the footer (key `footer`) are
+// Permissions (key `perm-<requestId>`), questions (`ques-<requestId>`) and the footer (key `footer`) are
 // appended after the lines, in that order.
 
 import type { PermissionRequestState } from '../permissionRequests';
+import type { QuestionState } from '../questionRequests';
 import { stripErrorEcho, type RunErrorView } from '../runError';
 import type { LineAttachment, HeredocRef, TimelineLine } from '../runTimeline';
 
@@ -21,6 +22,7 @@ export type TranscriptItem =
   | { type: 'tool'; key: string; toolName: string; title: string; status: string; toolCallId?: string; heredocs?: HeredocRef[]; runId?: string }
   | { type: 'meta'; key: string; text: string }
   | { type: 'permission'; key: string; request: PermissionRequestState }
+  | { type: 'question'; key: string; state: QuestionState }
   | { type: 'error'; key: string; message: string; raw?: string; zoneNote?: string }
   | { type: 'footer'; key: string; sentence: string; note?: string; waiting?: boolean; canContinue?: boolean };
 
@@ -33,6 +35,7 @@ export function buildTranscript(
   permissions: readonly PermissionRequestState[] = [],
   footer: { sentence: string; note?: string; waiting?: boolean; action?: 'continue' | null } | null = null,
   error: (RunErrorView & { err: string; zoneNote?: string | null }) | null = null,
+  questions: readonly QuestionState[] = [],
 ): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   for (const line of lines) {
@@ -62,6 +65,7 @@ export function buildTranscript(
     items.push({ type: 'error', key: 'error', message: error.message, ...(error.raw ? { raw: error.raw } : {}), ...(error.zoneNote ? { zoneNote: error.zoneNote } : {}) });
   }
   for (const request of permissions) items.push({ type: 'permission', key: `perm-${request.requestId}`, request });
+  for (const state of questions) items.push({ type: 'question', key: `ques-${state.requestId}`, state });
   if (footer) items.push({ type: 'footer', key: 'footer', sentence: footer.sentence, ...(footer.note ? { note: footer.note } : {}), ...(footer.waiting ? { waiting: true } : {}), ...(footer.action === 'continue' ? { canContinue: true } : {}) });
   return items;
 }
