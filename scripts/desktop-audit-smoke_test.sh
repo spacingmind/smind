@@ -75,8 +75,9 @@ grep -q "no-url: the app was still running" "$work/out" || fail "wrong failure f
 [ "$(calls nourl)" = 2 ] || fail "nourl should have been launched twice"
 
 # fails-on-exit-zero
-fake exits0 'echo "smind audit build: SMIND_HOME" >&2; exit 0'
+fake exits0 'echo "smind audit build: SMIND_HOME SMIND_DAEMON_URL" >&2; exit 0'
 if bash "$smoke" "$work/exits0" >"$work/out" 2>&1; then fail "fails-on-exit-zero: accepted exit 0"; fi
+grep -q "exit status 0, want 2" "$work/out" || fail "wrong failure for exit 0: $(cat "$work/out")"
 
 # fails-on-exit-two-without-the-message
 fake nomsg 'echo "something else" >&2; exit 2'
