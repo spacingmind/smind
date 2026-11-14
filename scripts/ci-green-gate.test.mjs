@@ -139,6 +139,17 @@ test("gate-bad-sha-usage-error", () => {
   });
 });
 
+test("gate-path-shaped-input-usage-error", () => {
+  withGh(green, (gh) => {
+    for (const [opt, value] of [["--tag", "v1/../x"], ["--tag", "v1?x=y"], ["--workflow", "a/b.yml"], ["--workflow", "ci.yml?x"]]) {
+      const res = spawnGate(gh, ["--repo", REPO, "--sha", SHA, opt, value]);
+      assert.equal(res.status, 2, `${opt} ${value}`);
+      assert.match(res.stderr, new RegExp(opt));
+      assert.deepEqual(gh.calls(), [], "no API call was made for a bad option");
+    }
+  });
+});
+
 test("gate-missing-args-usage-error", () => {
   withGh(green, (gh) => {
     let res = spawnGate(gh, []);

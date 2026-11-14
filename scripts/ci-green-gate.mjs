@@ -20,6 +20,10 @@ appear, --interval between polls.`;
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+// These end up inside an API path: no "/", "?", "#", "%" or ".." can get through.
+const TAG_RE = /^[\w][\w.+-]*$/;
+const WORKFLOW_RE = /^[\w.-]+\.ya?ml$/;
+const JOB_RE = /^[\w .-]+$/;
 const NOT_FOUND_RE = /Not Found|HTTP 404|\b404\b/;
 const API_ATTEMPTS = 3;
 // With --interval 0 the tracked clock never advances, so each waiting phase
@@ -202,6 +206,11 @@ function main(argv) {
     throw new UsageError(`missing required option${missing.length > 1 ? "s" : ""}: ${missing.map((k) => `--${k}`).join(" ")}`);
   }
   if (!SHA_RE.test(args.sha)) throw new UsageError(`--sha must be 40 hex characters, found ${JSON.stringify(args.sha)}`);
+  for (const [key, re] of [["tag", TAG_RE], ["workflow", WORKFLOW_RE], ["job", JOB_RE]]) {
+    if (args[key] !== undefined && !re.test(args[key])) {
+      throw new UsageError(`--${key} has an unexpected shape: ${JSON.stringify(args[key])}`);
+    }
+  }
   if (!REPO_RE.test(args.repo)) throw new UsageError(`--repo must be owner/name, found ${JSON.stringify(args.repo)}`);
   return gate(
     {
