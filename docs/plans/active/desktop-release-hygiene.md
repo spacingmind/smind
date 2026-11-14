@@ -102,7 +102,7 @@ Mutations (each must fail the named test): newest-run rule replaced by "any run 
 ## Progress
 
 - [x] Item 1 verifier (script + 42 tests by peer-glm, CI wiring, `docs/release-verification.md`)
-- [ ] Item 2 CI-green gate (script by peer-glm, wiring + docs by the lead; PR open when checked)
+- [x] Item 2 CI-green gate (script + tests by peer-glm, wiring, wiring test, docs, input hardening by the lead)
 - [ ] Item 3 crash capture
 - [ ] Item 4 `requireSignedVersion`
 - [ ] Item 5 notarization prep
@@ -117,3 +117,12 @@ Mutations (each must fail the named test): newest-run rule replaced by "any run 
 - Real Go binaries built with the release ldflags (linux/darwin host build and a windows/amd64 cross build) were confirmed to contain `internal/version.Version=<v>` in their build settings, the basis of AC7.
 - Run against the real published v0.20.0 assets (downloaded to a scratch dir, deleted afterwards): all 8 checks `ok`, so the naming and layout rules match what the pipeline produces today.
 - Not verified: a real release run (the workflow step runs only on `develop` pushes and dry-run dispatches; no dispatch was made from this branch).
+
+### Item 2
+
+- `node --test scripts/ci-green-gate.test.mjs scripts/ci-green-gate-wiring.test.mjs`: 23 pass (the 22 named tests, `gate-path-shaped-input-usage-error`, and the wiring test).
+- Mutations on the committed script, each failed the named tests: newest-run rule inverted -> `gate-rerun-after-failure-passes`, `gate-newest-run-wins-failure`; in-progress treated as done -> `gate-in-progress-*`, `gate-dry-run-does-not-wait`; sha filter dropped -> `gate-other-sha-run-ignored`; tag check skipped -> `gate-tag-moved-refuses`; dry-run exit follows the verdict -> `gate-dry-run-never-fails`; `ci-gate` removed from `publish.needs` -> `gate-workflow-wiring`.
+- `actionlint .github/workflows/release-please.yml`: clean.
+- Real GitHub, `--dry-run` with a read-only `gh` login (nothing published): a develop commit with a green push run -> `WOULD PASS`; a sha with no run -> `WOULD REFUSE: no ci.yml push run found`; the v0.20.0 tag against a different sha -> `WOULD REFUSE: tag ... points at commit ..., expected ...`.
+- Found in review of the peer's script and fixed: `--tag`/`--workflow`/`--job` went unvalidated into an API path (read-only GET, but a `?`/`/` could have queried another endpoint); now rejected with exit 2 before any call.
+- Not verified: a real release run or a `workflow_dispatch` dry run of `release-please.yml` (the two jobs are read by actionlint and a static test, not executed); the wait paths against a really running CI.
