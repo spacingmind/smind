@@ -113,6 +113,34 @@ Remove the crashes folder listed above, or any file in it. It is safe to do
 at any time: nothing depends on the reports, and the folder is recreated on
 the next recorded panic.
 
+## The desktop shell
+
+The desktop app records its own panics the same way, from a panic hook installed
+as the first thing the app does (`desktop/crash-report`). It writes the same
+report (`source` is `desktop-shell`; `site` is `desktop.main` for the main thread
+and `desktop.thread` for any other, never a thread name or panic text) into the
+folder listed above, with the same limits, permissions and refusal of a linked
+folder, and `smind doctor` lists it. Differences worth knowing:
+
+- The message of a Rust panic is kept only when it is one of a short list of
+  fixed or number-only runtime messages (`index out of bounds: the len is 3 but
+  the index is 5`, arithmetic overflow, `unwrap()` on a `None`, a `RefCell`
+  already borrowed, `capacity overflow`). Everything else, including `unwrap()` on
+  an `Err` (which prints the error's debug text) and every `panic!` or `expect`
+  with its own text, is withheld: the type is recorded, the message is not.
+- The hook records and then lets Rust carry on as it would have (the default
+  message still prints, a main-thread panic still ends the app). It does not
+  restart anything or keep the app alive.
+- A panic inside a panic hook aborts the process in Rust, so the recorder is
+  written so that nothing on its path can panic (the crate denies `unwrap`,
+  `expect`, indexing and `panic!` outside tests, and compiles its fixed patterns
+  before the hook is set). Installing the hook does no disk access.
+- The redaction rules are the daemon's, tested against one shared file of cases
+  (`internal/crash/testdata/redact_vectors.json`) in Go and in Rust.
+- Not caught: an abort or `panic = "abort"` build, a stack overflow, a crash in
+  the web view or other native code, a panic before the hook is set at the start
+  of `run()`.
+
 ## What happens after a panic
 
 Recording a panic does not always mean the daemon carries on; each goroutine
