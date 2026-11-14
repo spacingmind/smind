@@ -106,6 +106,7 @@ func runTaskWait(args []string, out, errw io.Writer) int {
 	var finalText strings.Builder
 	permIDs := make(chan string, 64)
 	permDone := make(chan struct{})
+	// not under crash.Go: a CLI command, not the daemon
 	go func() {
 		defer close(permDone)
 		announced := map[string]bool{}

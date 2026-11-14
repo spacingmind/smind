@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/inbox"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
@@ -118,7 +119,7 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 			return ""
 		},
 	}
-	go h.loop()
+	crash.GoFatal("wsapi.inboxLoop", func() { h.loop() })
 	return h
 }
 

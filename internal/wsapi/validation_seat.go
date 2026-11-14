@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
@@ -224,10 +225,10 @@ func (s *validationSeat) request(ctx context.Context, rc *requestContext, raw js
 		Probe: s.probe, Stop: func() { s.stopTask(vtask.ID) },
 		Before: before, LeadSnapshot: func() (validation.Snapshot, error) { return validation.Take(context.Background(), *lead.WorktreePath) },
 	}
-	go func() {
+	crash.GoFatal("wsapi.validationWatch", func() {
 		defer s.forget(vtask.ID)
 		w.Run(s.ctx, s.watchPeriod)
-	}()
+	})
 	return requestResult{ValidationID: val.ID, ContractID: rec.ID, CommitSHA: sha, ValidatorTaskID: vtask.ID, ChatID: chat.ID, RunID: runID}, nil
 }
 

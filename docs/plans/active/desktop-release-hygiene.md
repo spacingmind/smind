@@ -103,7 +103,7 @@ Mutations (each must fail the named test): newest-run rule replaced by "any run 
 
 - [x] Item 1 verifier (script + 42 tests by peer-glm, CI wiring, `docs/release-verification.md`)
 - [x] Item 2 CI-green gate (script + tests by peer-glm, wiring, wiring test, docs, input hardening by the lead)
-- [ ] Item 3 crash capture
+- [ ] Item 3 crash capture (spec: `crash-capture.md`; two PRs, 3a Go + doctor + docs, 3b Rust shell)
 - [ ] Item 4 `requireSignedVersion`
 - [ ] Item 5 notarization prep
 

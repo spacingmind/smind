@@ -97,6 +97,7 @@ func cmdMcpServe(args []string) int {
 		return 1
 	}
 	srvDone := make(chan error, 1)
+	// not under crash.Go: only forwards srv.Run's result to a channel
 	go func() { srvDone <- srv.Run(ctx, &mcp.StdioTransport{}) }()
 
 	select {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/crash"
 )
 
 // acpModeProbeTimeout bounds one background mode-discovery probe (spawn,
@@ -175,7 +176,7 @@ func (r *Runner) maybeProbe(provider Provider, probe func(context.Context, Provi
 	r.acpModes[provider] = e
 	r.modeMu.Unlock()
 
-	go func() {
+	crash.GoFatal("taskrunner.acpModeProbe", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), acpModeProbeTimeout)
 		defer cancel()
 		if err := probe(ctx, provider); err != nil {
@@ -186,7 +187,7 @@ func (r *Runner) maybeProbe(provider Provider, probe func(context.Context, Provi
 		e.probing = false
 		r.acpModes[provider] = e
 		r.modeMu.Unlock()
-	}()
+	})
 }
 
 // probeACPModes spawns provider's agent, opens a throwaway session in a

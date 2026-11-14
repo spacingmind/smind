@@ -5,9 +5,11 @@ import (
 	"errors"
 	"log"
 	"math/rand/v2"
+	"runtime/debug"
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -248,7 +250,7 @@ func (u *ProviderUsage) request(ctx context.Context, id string, forced bool) Res
 	e.inflight = fl
 	e.mu.Unlock()
 
-	go u.run(id, e, fl)
+	crash.Go("quota.providerFetch", func() { u.run(id, e, fl) })
 	return u.wait(ctx, e, fl)
 }
 
@@ -301,7 +303,8 @@ func (u *ProviderUsage) run(id string, e *instUsage, fl *flight) {
 // bug in a fetcher cannot leave the flight open or the semaphore held.
 func (u *ProviderUsage) safeFetch(id string) (rep Report, err error) {
 	defer func() {
-		if recover() != nil {
+		if v := recover(); v != nil {
+			crash.Default().Record("quota.providerUsageFetch", v, debug.Stack())
 			log.Printf("quota: provider instance fetch panicked")
 			rep, err = errorReport("error", u.clock()), &FetchError{msg: "error"}
 		}
