@@ -23,7 +23,7 @@ already knows (its own workspace list). Wire changes: none.
    *Sign in to an agent* (one status word per installed provider: Ready, Sign-in needed, Checking; providers whose CLI is not installed fold into one "N not installed" count; an "Open Providers" button deep-links to Settings > Providers)
    and *Add a project* (opens the existing add-project dialog; "Done" with the project name once one
    exists).
-2. **No empty provider pre-selected.** When every provider has been tested and none is ready, the
+2. **No empty provider pre-selected.** (Also: the card hides while the daemon is unreachable; the connection notice is the whole story.) When every provider has been tested and none is ready, the
    home composer is disabled with the placeholder "Sign in to an agent to start a task" (a project
    without a ready agent is not a startable state). While readiness is unknown (not yet tested or the
    check failed) the composer is not disabled on that account.
@@ -73,12 +73,18 @@ project), daemon unreachable, no provider (project exists), provider ready (no p
 
 ## Progress
 
-- [ ] spec
-- [ ] card + helper + tests
-- [ ] landing wiring + placeholder
-- [ ] Settings re-open + providers copy
-- [ ] frames
+- [x] spec
+- [x] card + helper + tests (GLM peer)
+- [x] landing wiring + placeholder (GLM peer)
+- [x] Settings re-open + providers copy (GLM peer)
+- [x] review fixes (Open Providers action, compact list, hidden while disconnected; Lead)
+- [x] frames
 
 ## Validation
 
-(filled in when the PR is ready)
+- AC1-5, 8: `get-started-card.test.tsx`, `readiness.test.ts`, `home-landing.test.tsx` (including the disconnected case); mutation checks: making `agentsReady` never return "none" fails 3 tests, removing the `connected` gate fails the disconnected test.
+- AC4: `general-section.test.tsx` (the re-open row clears the dismissal); dismissed frames.
+- AC6: `providers-screen.test.tsx` copy assertions.
+- AC7: 32 frames (8 states, light and dark, 1280 and 390), all opened and compared pairwise; mean luminance and scrollWidth checks pass.
+- Suites: web 463 files / 5235 tests, mobile 112 files / 1077 tests, `task lint` clean.
+- Not verified: a real daemon (demo scenario with scripted provider health only); the Windows desktop shell; mobile (out of scope).
