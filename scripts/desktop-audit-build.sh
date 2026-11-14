@@ -27,7 +27,9 @@ cd "$root"
 id=${AUDIT_ID-audit}
 out=${1:-$HOME/.smind/dogfood/desktop-audit}
 real=$(jq -r .identifier desktop/src-tauri/tauri.conf.json)
-[ -n "$real" ] && [ "$real" != null ] || die "cannot read the real bundle identifier from tauri.conf.json"
+if [ -z "$real" ] || [ "$real" = null ]; then
+  die "cannot read the real bundle identifier from tauri.conf.json"
+fi
 
 printf '%s' "$id" | LC_ALL=C grep -Eq '^[a-z][a-z0-9-]{0,23}$' ||
   die "AUDIT_ID must be 1 to 24 characters, a lowercase letter then a-z, 0-9 or '-', got '$id'"
