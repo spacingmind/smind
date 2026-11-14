@@ -18,12 +18,15 @@ vi.mock("@/lib/platform", async (orig) => ({
     contextMenuShow: bridge.show,
     onContextMenuAction: (cb: (s: { open: number; id: string }) => void) => {
       bridge.listener = cb;
-      return bridge.unlisten;
+      return Promise.resolve(bridge.unlisten);
     },
   },
 }));
 
 const deliver = (open: number, id: string) => act(() => bridge.listener?.({ open, id }));
+// The blink guard (claimNativeOpen) reads Date.now: tests that open twice move the clock between the opens.
+let clock = Date.now() + 10_000_000;
+const later = () => vi.spyOn(Date, "now").mockReturnValue((clock += 1000));
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
 function menu(onA: () => void, onB: () => void = () => {}): MenuEntry[] {
@@ -42,7 +45,10 @@ beforeEach(() => {
   bridge.unlisten.mockReset();
   resetNativeContextMenuForTests();
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("AppContextMenu in the desktop build", () => {
   it("right-click pops the native menu with descriptors only (no icons, test ids or handlers), at the pointer, and renders no in-page menu", async () => {
@@ -90,11 +96,10 @@ describe("AppContextMenu in the desktop build", () => {
     );
     fireEvent.contextMenu(screen.getByTestId("row"), { clientX: 1, clientY: 1 });
     await flush();
-    expect(onOpenChange).toHaveBeenLastCalledWith(true);
+    expect(onOpenChange.mock.calls).toEqual([[true], [false]]);
     deliver(1, "a");
     deliver(1, "a");
     expect(onA).toHaveBeenCalledTimes(1);
-    expect(onOpenChange).toHaveBeenLastCalledWith(false);
   });
 
   it("a stale open, an unknown id and a disabled item's id never run anything", async () => {
@@ -132,6 +137,7 @@ describe("AppContextMenu in the desktop build", () => {
     bridge.show.mockResolvedValueOnce(1).mockResolvedValueOnce(2);
     fireEvent.contextMenu(screen.getByTestId("r1"), { clientX: 1, clientY: 1 });
     await flush();
+    later();
     fireEvent.contextMenu(screen.getByTestId("r2"), { clientX: 2, clientY: 2 });
     await flush();
     deliver(1, "a");
@@ -157,7 +163,7 @@ describe("AppContextMenu in the desktop build", () => {
     await flush();
   });
 
-  it("a dismissed menu leaves no handler: after the time-out a late selection does nothing and the menu reports closed", async () => {
+  it("the menu reports closed when the native menu returns, a selection just after still runs, and after the time-out none does", async () => {
     vi.useFakeTimers();
     const onA = vi.fn();
     const onOpenChange = vi.fn();
@@ -168,10 +174,45 @@ describe("AppContextMenu in the desktop build", () => {
     );
     fireEvent.contextMenu(screen.getByTestId("row"), { clientX: 1, clientY: 1 });
     await act(async () => { await Promise.resolve(); });
-    act(() => vi.advanceTimersByTime(ARMED_TTL_MS + 1));
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
+    act(() => vi.advanceTimersByTime(ARMED_TTL_MS - 1));
+    act(() => vi.advanceTimersByTime(2));
     deliver(1, "a");
     expect(onA).not.toHaveBeenCalled();
+  });
+
+  it("a selection that arrives after the native menu returned, within the time-out, still runs its handler", async () => {
+    const onA = vi.fn();
+    render(
+      <AppContextMenu entries={menu(onA)}>
+        <div data-testid="row">row</div>
+      </AppContextMenu>,
+    );
+    fireEvent.contextMenu(screen.getByTestId("row"), { clientX: 1, clientY: 1 });
+    await flush();
+    deliver(1, "a");
+    expect(onA).toHaveBeenCalledTimes(1);
+  });
+
+  it("a second open within a blink is ignored, and an empty model opens nothing", async () => {
+    const { rerender } = render(
+      <AppContextMenu entries={menu(() => {})}>
+        <div data-testid="row">row</div>
+      </AppContextMenu>,
+    );
+    fireEvent.contextMenu(screen.getByTestId("row"), { clientX: 1, clientY: 1 });
+    fireEvent.contextMenu(screen.getByTestId("row"), { clientX: 2, clientY: 2 });
+    await flush();
+    expect(bridge.show).toHaveBeenCalledTimes(1);
+    resetNativeContextMenuForTests();
+    rerender(
+      <AppContextMenu entries={[{ kind: "separator" }]}>
+        <div data-testid="row">row</div>
+      </AppContextMenu>,
+    );
+    fireEvent.contextMenu(screen.getByTestId("row"), { clientX: 3, clientY: 3 });
+    await flush();
+    expect(bridge.show).toHaveBeenCalledTimes(1);
   });
 
   it("when Rust refuses the model the menu is disarmed and reported closed, and the page keeps working", async () => {
@@ -209,6 +250,7 @@ describe("AppContextMenu in the desktop build", () => {
     await flush();
     expect(bridge.show).toHaveBeenCalledTimes(1);
     expect(bridge.show.mock.calls[0].slice(1)).toEqual([18, 50]);
+    later();
     fireEvent.keyDown(row, { key: "F10", shiftKey: true });
     await flush();
     expect(bridge.show).toHaveBeenCalledTimes(2);

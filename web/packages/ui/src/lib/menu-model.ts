@@ -96,15 +96,28 @@ export function outline(entries: readonly MenuEntry[]): string[] {
 }
 
 /** Native entries plus the handler of each item id. A disabled item gets no handler: the native menu cannot select it, and a forged selection finds nothing to run. */
+const MAX_NATIVE_LABEL = 100;
+
+/** A label safe for the native menu: control, bidi and zero-width characters out, whitespace collapsed, long text cut. */
+export function nativeLabel(raw: string): string {
+  const clean = raw
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return "Untitled";
+  const chars = Array.from(clean);
+  return chars.length > MAX_NATIVE_LABEL ? `${chars.slice(0, MAX_NATIVE_LABEL - 1).join("")}…` : clean;
+}
+
 export function toNative(entries: readonly MenuEntry[]): { entries: NativeMenuEntry[]; handlers: Map<string, () => void> } {
   const handlers = new Map<string, () => void>();
   const convert = (list: readonly MenuEntry[]): NativeMenuEntry[] =>
     list.map((e): NativeMenuEntry => {
       if (e.kind === "separator") return { kind: "separator" };
-      if (e.kind === "submenu") return { kind: "submenu", label: e.label, enabled: e.enabled !== false, children: convert(e.children) };
+      if (e.kind === "submenu") return { kind: "submenu", label: nativeLabel(e.label), enabled: e.enabled !== false, children: convert(e.children) };
       const enabled = e.enabled !== false;
       if (enabled) handlers.set(e.id, e.onSelect);
-      return { kind: "item", id: e.id, label: e.note ? `${e.label} (${e.note})` : e.label, enabled };
+      return { kind: "item", id: e.id, label: nativeLabel(e.note ? `${e.label} (${e.note})` : e.label), enabled };
     });
   return { entries: convert(normalizeEntries(entries)), handlers };
 }

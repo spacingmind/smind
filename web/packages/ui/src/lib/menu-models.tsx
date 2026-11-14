@@ -263,11 +263,11 @@ export function taskRowMenu(
   return entries;
 }
 
-/** A workspace or space row's actions (the same items its ⋯ menu offers), as a model. Ids are slugs of the labels; `fadeOut` items keep the menu's exit animation, the others close it instantly because they open a dialog. */
+/** A workspace or space row's actions (the same items its ⋯ menu offers), as a model. Ids are positional (`item-<n>`), so two rows with the same label never collide; `fadeOut` items keep the menu's exit animation, the others close it instantly because they open a dialog. */
 export function rowMenu(items: { label: string; icon: ReactNode; onSelect: () => void; fadeOut?: boolean }[]): MenuEntry[] {
-  return items.map((item) => ({
+  return items.map((item, index) => ({
     kind: "item" as const,
-    id: item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "item",
+    id: `item-${index}`,
     label: item.label,
     icon: item.icon,
     opensDialog: item.fadeOut !== true,

@@ -343,7 +343,8 @@ describe("native context menu (desktop-native-feel DT2 a)", () => {
     vi.stubEnv("VITE_SMIND_DESKTOP", "");
     const { desktop } = await import("@/lib/platform");
     await expect(desktop.contextMenuShow([{ kind: "item", id: "a", label: "A", enabled: true }], 1, 2)).rejects.toThrow(/unavailable/i);
-    expect(() => desktop.onContextMenuAction(() => {})()).not.toThrow();
+    const off = await desktop.onContextMenuAction(() => {});
+    expect(() => off()).not.toThrow();
   });
 
   it("contextMenuShow calls context_menu_show with the descriptors and the pointer, resolves with the open id and turns a plain-string refusal into an Error", async () => {
@@ -372,8 +373,8 @@ describe("native context menu (desktop-native-feel DT2 a)", () => {
     vi.doMock("@tauri-apps/api/event", () => ({ listen }));
     const { desktop } = await import("@/lib/platform");
     const cb = vi.fn();
-    const off = desktop.onContextMenuAction(cb);
-    await vi.waitFor(() => expect(listen).toHaveBeenCalledWith("context-menu-action", expect.any(Function)));
+    const off = await desktop.onContextMenuAction(cb);
+    expect(listen).toHaveBeenCalledWith("context-menu-action", expect.any(Function));
     handler!({ payload: { open: 2, id: "rename" } });
     expect(cb).toHaveBeenCalledWith({ open: 2, id: "rename" });
     off();

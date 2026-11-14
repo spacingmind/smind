@@ -38,6 +38,21 @@ describe("menu model helpers", () => {
     expect(JSON.stringify(native)).not.toMatch(/ICON|tid|onSelect/);
   });
 
+  it("native labels lose control, bidi and zero-width characters, collapse whitespace, are cut at 100 characters and never come out empty", () => {
+    const { entries } = toNative([
+      item("a", { label: "Fix\n the \u202Ebug\u200B\ttitle" }),
+      item("b", { label: "x".repeat(300) }),
+      item("c", { label: " \n\u200B " }),
+      { kind: "submenu", id: "s", label: "Move\nto space", children: [item("d")] },
+    ]);
+    const labels = entries.map((e) => (e.kind === "separator" ? "-" : e.label));
+    expect(labels[0]).toBe("Fix the bug title");
+    expect(Array.from(labels[1]).length).toBe(100);
+    expect(labels[1].endsWith("…")).toBe(true);
+    expect(labels[2]).toBe("Untitled");
+    expect(labels[3]).toBe("Move to space");
+  });
+
   it("enabledIds lists only the enabled items, submenus included", () => {
     expect(enabledIds([item("a"), item("b", { enabled: false }), { kind: "submenu", id: "s", label: "S", children: [item("c"), item("d", { enabled: false })] }])).toEqual(["a", "c"]);
   });
@@ -122,14 +137,15 @@ describe("tabMenu", () => {
 // ---- workspace / space row -----------------------------------------------------------------------------
 
 describe("rowMenu", () => {
-  it("one item per action in order, ids from the labels, a dialog-opening item flagged", () => {
+  it("one item per action in order, positional ids, a dialog-opening item flagged", () => {
     const menu = rowMenu([
       { label: "Add task", icon: null, onSelect: noop },
       { label: "Reveal in Finder", icon: null, onSelect: noop, fadeOut: true },
       { label: "Worktree settings", icon: null, onSelect: noop },
+      { label: "Add task", icon: null, onSelect: noop },
     ]);
-    expect(outline(menu)).toEqual(["add-task", "reveal-in-finder", "worktree-settings"]);
-    expect(menu.map((e) => e.kind === "item" && e.opensDialog)).toEqual([true, false, true]);
+    expect(outline(menu)).toEqual(["item-0", "item-1", "item-2", "item-3"]);
+    expect(menu.map((e) => e.kind === "item" && e.opensDialog)).toEqual([true, false, true, true]);
   });
 });
 

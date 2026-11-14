@@ -106,7 +106,7 @@ function mockPlatform(opts: { current: Connection; openInEditor?: (id: string, p
       contextMenuShow: native.show,
       onContextMenuAction: (cb: (s: { open: number; id: string }) => void) => {
         native.listener = cb;
-        return () => {};
+        return Promise.resolve(() => {});
       },
     },
   }));

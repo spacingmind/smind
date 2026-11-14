@@ -224,7 +224,7 @@ export interface DesktopApi {
    */
   contextMenuShow(entries: NativeMenuEntry[], x: number, y: number): Promise<number>;
   /** Subscribes to native context-menu selections (`context-menu-action`: the open id and the chosen item id). */
-  onContextMenuAction(cb: (selection: { open: number; id: string }) => void): () => void;
+  onContextMenuAction(cb: (selection: { open: number; id: string }) => void): Promise<() => void>;
   /** Runs a native-only app-menu item (`app_menu_action`) -- what the header app menu uses on Windows/Linux, where the native menu bar isn't drawn. */
   menuAction(id: NativeMenuActionId): Promise<void>;
   /** ADR-0013 part D2: install/update/restart/take-over the app-managed local daemon. */
@@ -352,7 +352,7 @@ function unavailable(): DesktopApi {
     // The browser stub never fires: there is no native menu there.
     onMenuAction: () => () => {},
     contextMenuShow: () => reject(),
-    onContextMenuAction: () => () => {},
+    onContextMenuAction: () => Promise.resolve(() => {}),
     editorsList: () => reject(),
     openInEditor: () => reject(),
     openPathDefault: () => reject(),
@@ -556,22 +556,9 @@ function realDesktopApi(): DesktopApi {
         throw asError(err);
       }
     },
-    onContextMenuAction(cb) {
-      let unlisten: (() => void) | null = null;
-      let cancelled = false;
-      import("@tauri-apps/api/event").then(({ listen }) =>
-        listen<{ open: number; id: string }>("context-menu-action", (event) => cb(event.payload)).then((fn) => {
-          if (cancelled) {
-            fn();
-          } else {
-            unlisten = fn;
-          }
-        }),
-      );
-      return () => {
-        cancelled = true;
-        unlisten?.();
-      };
+    async onContextMenuAction(cb) {
+      const { listen } = await import("@tauri-apps/api/event");
+      return listen<{ open: number; id: string }>("context-menu-action", (event) => cb(event.payload));
     },
     async daemonStatus() {
       const invoke = await loadInvoke();
