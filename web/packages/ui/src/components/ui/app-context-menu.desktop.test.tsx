@@ -194,6 +194,35 @@ describe("AppContextMenu in the desktop build", () => {
     expect(onA).toHaveBeenCalledTimes(1);
   });
 
+  it("the native menu is not shown before the selection listener is registered", async () => {
+    let registered!: () => void;
+    const gate = new Promise<() => void>((resolve) => {
+      registered = () => resolve(bridge.unlisten);
+    });
+    const order: string[] = [];
+    bridge.show.mockImplementation(async () => {
+      order.push("show");
+      return 1;
+    });
+    const { desktop } = await import("@/lib/platform");
+    vi.spyOn(desktop, "onContextMenuAction").mockImplementation((cb) => {
+      bridge.listener = cb;
+      order.push("listen");
+      return gate;
+    });
+    render(
+      <AppContextMenu entries={menu(() => {})}>
+        <div data-testid="row">row</div>
+      </AppContextMenu>,
+    );
+    fireEvent.contextMenu(screen.getByTestId("row"), { clientX: 1, clientY: 1 });
+    await flush();
+    expect(order).toEqual(["listen"]);
+    registered();
+    await flush();
+    expect(order).toEqual(["listen", "show"]);
+  });
+
   it("a second open within a blink is ignored, and an empty model opens nothing", async () => {
     const { rerender } = render(
       <AppContextMenu entries={menu(() => {})}>
