@@ -57,6 +57,7 @@ func TestNeverList_Denied(t *testing.T) {
 		"parallel rm -rf ::: /", "flock /tmp/l rm -rf /", "script -c 'rm -rf /' /dev/null", "at now <<< 'rm -rf /'",
 		"su -c 'su -c \"rm -rf /\"'", "find . -exec sh -c 'rm -rf /' ;", "bash -c ':(){ :|:& };:'", "ssh h ':(){ :|:& };:'",
 		"echo ':(){ :|:& };:' | sh", "su -c 'diskutil eraseDisk JHFS+ X disk2'", "ssh h 'reboot'",
+		"su -c 'mv ~ /dev/null'", "ssh h mv /usr /tmp/x", "su -c 'dd if=/dev/zero of=/dev/sda'", "su -c 'echo x > /dev/sda'", "ssh h 'cat x > /dev/disk2'",
 		"sh <<EOF\nrm -rf /\nEOF", "echo ok && sh <<'X'\nmkfs /dev/sda\nX",
 	}
 	for _, cmd := range cmds {
@@ -250,6 +251,19 @@ func TestFloorReasons_InDocs(t *testing.T) {
 			if !strings.Contains(string(b), id) {
 				t.Errorf("%s does not name floor id %q", file, id)
 			}
+		}
+	}
+}
+
+// The parent of the home is catastrophic too, whatever the layout.
+func TestNeverList_ParentOfHome(t *testing.T) {
+	t.Parallel()
+	req := neverReq(t, "")
+	req.Home = "/data/people/dev"
+	fs := &floorSeg{req: req, cwd: "/data/people/dev", pl: req.pl()}
+	for w, want := range map[string]bool{"/data/people": true, "/data/people/dev": true, "..": true, "/data": false, "/data/people/other": false} {
+		if got := fs.rootLikeWord(w); got != want {
+			t.Errorf("rootLikeWord(%q) = %v, want %v", w, got, want)
 		}
 	}
 }
