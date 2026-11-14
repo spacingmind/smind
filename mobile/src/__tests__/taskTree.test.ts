@@ -10,6 +10,7 @@ import {
   formatCountdown,
   rateLimitCountdown,
   runStateLabel,
+  runStateTone,
   stalledNote,
   tierLabel,
 } from '../taskTree';
@@ -91,6 +92,7 @@ describe('taskTree', () => {
   it('runStateLabel maps every daemon state and needs-continue', () => {
     expect(runStateLabel(run({ state: 'running' }))).toBe('Running');
     expect(runStateLabel(run({ state: 'waiting_permission' }))).toBe('Waiting for permission');
+    expect(runStateLabel(run({ state: 'waiting_question' }))).toBe('Waiting for your answer');
     expect(runStateLabel(run({ state: 'done' }))).toBe('Done');
     expect(runStateLabel(run({ state: 'error' }))).toBe('Error');
     expect(runStateLabel(run({ state: 'stopped' }))).toBe('Stopped');
@@ -156,6 +158,11 @@ describe('taskTree', () => {
     expect(attentionRollup(list)).toEqual({ waiting: 2, failed: 1, rateLimited: 0 });
     expect(attentionRollup([])).toEqual({ waiting: 0, failed: 0, rateLimited: 0 });
     expect(buildTreeRows({ nodes: list, truncated: false }, NOW, none).attention).toEqual({ waiting: 2, failed: 1, rateLimited: 0 });
+  });
+
+  it('a run waiting on a question counts as waiting and reads as a warning', () => {
+    expect(attentionRollup([node(1, { run: run({ state: 'waiting_question' }) }), node(2, { run: run({ state: 'waiting_permission' }) })])).toEqual({ waiting: 2, failed: 0, rateLimited: 0 });
+    expect(runStateTone(run({ state: 'waiting_question' }))).toBe('warning');
   });
 
   it('attentionRollup counts a rate-limited run as rate limited, not failed', () => {

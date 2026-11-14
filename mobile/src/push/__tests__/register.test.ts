@@ -203,3 +203,33 @@ describe('the kinds a phone subscribes to', () => {
     expect(ALL_KINDS).toContain('stalled');
   });
 });
+
+describe('the question kind', () => {
+  it('is subscribed by default', () => {
+    expect(ALL_KINDS).toContain('question');
+  });
+
+  it('an older daemon that refuses the list as "invalid kinds" is registered again without question', async () => {
+    const h = harness({
+      rpc: async (_m, params) => {
+        if ((params as { kinds: string[] }).kinds.includes('question')) throw new Error('push.register: invalid kinds');
+        return {};
+      },
+    });
+    const r = await enablePush(h.deps);
+    expect(r.ok).toBe(true);
+    expect(h.calls).toHaveLength(2);
+    expect((h.calls[1].params as { kinds: string[] }).kinds).toEqual(['permission', 'needs_continue', 'done', 'error', 'stalled']);
+  });
+
+  it('any other failure is not retried', async () => {
+    const h = harness({
+      rpc: async () => {
+        throw new Error('network down');
+      },
+    });
+    const r = await enablePush(h.deps);
+    expect(r).toMatchObject({ ok: false, reason: 'rpc_failed' });
+    expect(h.calls).toHaveLength(1);
+  });
+});

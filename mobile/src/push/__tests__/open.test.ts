@@ -165,3 +165,26 @@ describe('stalled pushes (daemon kind "stalled")', () => {
     expect(openBlob(key, deviceId, seal({ ...stalled, kind: 'bogus' }))).toEqual({ ok: false, error: 'malformed' });
   });
 });
+
+describe('question pushes (daemon kind "question", ADR-0055 D7)', () => {
+  const question = {
+    id: 'ev-q-1',
+    kind: 'question',
+    taskId: 4,
+    runId: 'run-7',
+    chatId: 2,
+    title: 'Deploy task',
+    body: 'An agent has a question',
+    at: 1_000_000,
+  };
+  const seal = (event: object) => sealRaw(framed(new TextEncoder().encode(JSON.stringify(event))));
+
+  it('opens as itself and shows the daemon title with the fixed body (no question text)', () => {
+    const r = openBlob(key, deviceId, seal(question));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.event.kind).toBe('question');
+    const n = notificationFor(openWithAnyKey([{ deviceId, key }], seal(question)), 1_000_100);
+    expect(n).toMatchObject({ title: 'Deploy task', body: 'An agent has a question' });
+    expect(n?.data).toMatchObject({ eventId: 'ev-q-1', taskId: 4 });
+  });
+});

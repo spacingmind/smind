@@ -8,6 +8,7 @@
 // carry no json tags, so Go field names are the wire keys verbatim (see
 // store/types.go), and internal/runs.RunStatus likewise.
 
+import type { QuestionAnswer } from './questionAnswer';
 import { RelayConnection } from './relay/RelayConnection';
 
 export interface Workspace {
@@ -185,6 +186,17 @@ export async function respondPermission(
   const params: Record<string, unknown> = { runId, requestId, optionId };
   if (reason !== undefined) params.reason = reason;
   await conn.call('run.respondPermission', params);
+}
+
+/**
+ * run.answerQuestion (ADR-0055): answer runId's pending agent question requestId, or decline it with an optional note.
+ * Human-only on the daemon (no MCP tool reaches it); a rejected call leaves the question pending.
+ */
+export async function answerQuestion(conn: RelayConnection, runId: string, requestId: string, answer: QuestionAnswer): Promise<void> {
+  const params: Record<string, unknown> = { runId, requestId, action: answer.action };
+  if (answer.answers) params.answers = answer.answers;
+  if (answer.note !== undefined) params.note = answer.note;
+  await conn.call('run.answerQuestion', params);
 }
 
 /** One revealed heredoc body (wsapi heredoc_reveal.go's heredocRevealResult): already redacted, capped at 64 KiB. */

@@ -274,6 +274,15 @@ func pushInput(e Event) (push.Input, bool) {
 			return push.Input{}, false
 		}
 		return push.Input{Kind: push.KindPermission, Key: p.RequestID, TaskID: p.TaskID, ChatID: p.ChatID, RunID: p.RunID, Summary: p.Summary}, true
+	case TopicQuestionPending:
+		// ADR-0055 D7: the push carries no question text (the notifier writes a
+		// fixed body), only the ids the tap needs to open the task. Resolved
+		// questions never notify.
+		p, ok := e.Payload.(questionPendingPayload)
+		if !ok {
+			return push.Input{}, false
+		}
+		return push.Input{Kind: push.KindQuestion, Key: p.RequestID, TaskID: p.TaskID, ChatID: p.ChatID, RunID: p.RunID}, true
 	case TopicAutomationPaused:
 		// ADR-0044 question 7: an auto-pause always notifies, because it needs
 		// a person. It rides the existing "error" kind. With a failed task it
