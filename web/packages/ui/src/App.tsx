@@ -2271,7 +2271,7 @@ function PaneTabStrip({
   client: WsClient | null;
   connectionStatus: ConnectionStatus;
   events: ReturnType<typeof useDaemonEvents>;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, forTaskId?: number) => void;
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
@@ -2758,7 +2758,7 @@ function TabContent({
   /** Whether this tab is the one in front -- only the force-mounted terminal panes can be rendered while false. */
   active: boolean;
   connectionStatus: ConnectionStatus;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, forTaskId?: number) => void;
   onOpenFileToSide: (path: string) => void;
   onRevealInDiff: () => void;
   /** Brings this pane's Files tab forward (the deliverable cards' "+ N more files"). */
