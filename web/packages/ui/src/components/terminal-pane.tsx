@@ -7,6 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 import { FindBar, type FindBarHandle } from "@/components/find/find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { TerminalKeyBar, type TerminalModifier } from "@/components/terminal-key-bar";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useTheme } from "@/hooks/use-theme";
@@ -264,9 +265,18 @@ export function TerminalPane({
   const termRef = useRef<TerminalHandle | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
+  // The current session effect's attach(), read by handleRestart (DT3-B
+  // AC8) -- a restart attaches into the live session's wiring without
+  // re-running the whole list/create effect.
+  const attachRef = useRef<((id: string) => void) | null>(null);
+  const restartingRef = useRef(false);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [endedStatus, setEndedStatus] = useState<"interrupted" | "closed" | null>(null);
+  // The old session's scrollback is gone (DT3-B AC9): the pane says so
+  // next to the Restart button instead of silently showing an empty shell.
+  const [outputGone, setOutputGone] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   // Copy is disabled only when the handle can actually report "nothing is
   // selected" -- a handle without onSelectionChange leaves it enabled, so
   // the button is never permanently dead (see TerminalHandle).
@@ -407,6 +417,7 @@ export function TerminalPane({
   useEffect(() => {
     setError(null);
     setEndedStatus(null);
+    setOutputGone(false);
     setTerminalId(null);
     terminalIdRef.current = null;
 
@@ -453,6 +464,14 @@ export function TerminalPane({
           },
           { signal: session.controller.signal },
         )
+        .then(() => {
+          // The stream resolving means the session itself ended (the
+          // daemon returns the terminal result when the shell exits); a
+          // rejection (abort, lost connection) is not an end. A restart's
+          // attach has since superseded this id -- don't mark it ended.
+          if (session.cancelled || terminalIdRef.current !== id) return;
+          setEndedStatus("closed");
+        })
         .catch(() => {
           // Either our own detach (unmount/task switch, the expected
           // path) or the session closing server-side -- neither needs
@@ -461,6 +480,7 @@ export function TerminalPane({
           // output, which is visible in the terminal itself.
         });
     }
+    attachRef.current = attach;
 
     client
       .call<TerminalSessionStatus[]>("terminal.list", { taskId: task.ID })
@@ -488,6 +508,30 @@ export function TerminalPane({
             attach(prev.ID);
           } else {
             setEndedStatus(prev?.Status === "interrupted" ? "interrupted" : "closed");
+            // A session found ended on connect still has its retained
+            // scrollback server-side (closedRetentionCap): replay it into
+            // the terminal without binding or adopting the session --
+            // the daemon backfills then ends the stream. Only a replay
+            // that fails (not our own abort) means the output is gone.
+            if (prev) {
+              client!
+                .callStream<TerminalAttachResult>(
+                  "terminal.attach",
+                  { terminalId: prev.ID },
+                  (event, params) => {
+                    if (session.cancelled) return;
+                    if (event === "data") {
+                      termRef.current?.write(base64ToBytes((params as TerminalDataEventParams).data));
+                    }
+                  },
+                  { signal: session.controller.signal },
+                )
+                .catch(() => {
+                  if (!session.cancelled) setOutputGone(true);
+                });
+            } else {
+              setOutputGone(true);
+            }
           }
           return;
         }
@@ -522,6 +566,7 @@ export function TerminalPane({
       session.cancelled = true;
       session.controller.abort();
       if (sessionRef.current === session) sessionRef.current = null;
+      attachRef.current = null;
     };
   }, [client, key, task.ID]);
 
@@ -712,6 +757,35 @@ export function TerminalPane({
     }
   }
 
+  /**
+   * Restart an ended session (DT3-B AC8): one terminal.create into the
+   * same xterm -- a dim separator line keeps the old output above the
+   * new shell -- then attach through the live session's own attach()
+   * wiring, without re-running the list/create effect.
+   */
+  function handleRestart() {
+    if (restartingRef.current || !client) return;
+    restartingRef.current = true;
+    setRestarting(true);
+    setError(null);
+    client
+      .call<TerminalCreateResult>("terminal.create", { taskId: task.ID })
+      .then(({ terminalId: id }) => {
+        if (unmountedRef.current || !attachRef.current) return;
+        termRef.current?.write("\r\n\x1b[2m--- restarted ---\x1b[0m\r\n");
+        setEndedStatus(null);
+        setOutputGone(false);
+        attachRef.current(id);
+      })
+      .catch((err: unknown) => {
+        if (!unmountedRef.current) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        restartingRef.current = false;
+        if (!unmountedRef.current) setRestarting(false);
+      });
+  }
+
   function clearModifiers() {
     modifiersRef.current = { ctrl: false, shift: false, alt: false };
     setModifiers(modifiersRef.current);
@@ -748,10 +822,26 @@ export function TerminalPane({
       {(endedStatus || !terminalId) && (
         <p
           data-testid="terminal-status"
-          className="border-b px-3 py-1 text-ui-sm text-foreground-subtle"
+          className="flex flex-wrap items-center gap-2 border-b px-3 py-1 text-ui-sm text-foreground-subtle"
           title={terminalId ?? undefined}
         >
           {endedStatus ? `session ${endedStatus}` : "starting terminal…"}
+          {endedStatus && (
+            <>
+              {outputGone && <span data-testid="terminal-output-gone">Its output is no longer kept.</span>}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="max-sm:min-h-11"
+                data-testid="terminal-restart"
+                disabled={restarting}
+                onClick={handleRestart}
+              >
+                Restart terminal
+              </Button>
+            </>
+          )}
         </p>
       )}
       {connectionStatus === "reconnecting" && (
