@@ -40,11 +40,11 @@ tests:
   - { name: TestWsapi_GrantMethodsRefusedForRunScoped, run: "go test ./internal/wsapi -run '^TestWsapi_GrantMethodsRefusedForRunScoped$' -count=1", timeoutSec: 300 }
   - { name: TestMCP_NoToolSavesOrRevokesGrants, run: "go test ./cmd/smind -run '^TestMCP_NoToolSavesOrRevokesGrants$' -count=1", timeoutSec: 300 }
 mutations:
-  - { id: M1, file: "internal/runs/registry.go", change: "evaluate the grant before applyPolicy (a grant lookup ahead of the engine)", expectFail: [TestGrants_EvaluatedAfterFloorAndPolicy, TestGrants_PolicyDenyBeatsGrant] }
+  - { id: M1, file: "internal/runs/decider_policy.go", change: "applyPolicy reports grantable for every ask (drop dec.Grantable)", expectFail: [TestGrants_NeverOfferedForFloorDestructiveNetworkUnparsedQuestion] }
   - { id: M2, file: "internal/runs/grants.go", change: "look the grant up by command only (workspace id 0)", expectFail: [TestGrants_MatchIsExactCommandAndProject] }
   - { id: M3, file: "internal/runs/grants.go", change: "drop the expiry check", expectFail: [TestGrants_ExpireAndRevoke, TestGrants_AskedAgainAfterEveryInvalidation] }
   - { id: M4, file: "internal/runs/grants.go", change: "drop the MCP fingerprint comparison", expectFail: [TestGrants_VoidOnMcpChange, TestGrants_AskedAgainAfterEveryInvalidation] }
-  - { id: M5, file: "internal/permpolicy/grantable.go", change: "remove curl from neverGrantPrograms", expectFail: [TestGrantable_NeverGrantPrograms] }
+  - { id: M5, file: "internal/permpolicy/grantable.go", change: "add curl to grantAllow", expectFail: [TestGrantable_NeverGrantPrograms] }
   - { id: M6, file: "internal/runs/grants.go", change: "RespondPermissionScoped skips the offer check (pp.grant == nil)", expectFail: [TestGrants_AnswerOnlyAllowOnceOfAnOfferedRequest, TestGrants_NeverOfferedForFloorDestructiveNetworkUnparsedQuestion] }
   - { id: M7, file: "internal/permpolicy/humanonly.go", change: "drop permission.grants.revoke from HumanOnlyRPCs", expectFail: [TestWsapi_GrantMethodsAreHumanOnly] }
   - { id: M8, file: "internal/runs/grants.go", change: "do not record the use", expectFail: [TestGrants_UseIsAudited] }

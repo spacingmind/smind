@@ -43,8 +43,11 @@ type grantOffer struct {
 }
 
 func (reg *Registry) grantNow() time.Time {
-	if reg.grantClock != nil {
-		return reg.grantClock()
+	reg.mu.Lock()
+	clock := reg.grantClock
+	reg.mu.Unlock()
+	if clock != nil {
+		return clock()
 	}
 	return time.Now()
 }
@@ -89,8 +92,10 @@ func boolInt(b bool) int {
 // The same function runs at offer time and at use time, so a request that
 // stopped qualifying asks again.
 func (d runPermissionDecider) buildGrantOffer(detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) *grantOffer {
-	// An attended, user-authored run only: no system run, seat, remote run, or AutoAccept.
-	if d.r.purpose != "" || d.r.origin == store.ChatQueueSourceRemote || d.r.getPerm().AutoAccept {
+	// An attended run a human started only: no system run, seat, AutoAccept, and
+	// no run an agent, an orchestrator, a plugin, a child event or a paired host
+	// queued ("" is a run started from a human surface).
+	if d.r.purpose != "" || d.r.getPerm().AutoAccept || (d.r.origin != "" && d.r.origin != store.ChatQueueSourceHuman) {
 		return nil
 	}
 	if _, seat := d.reg.seatSpec(d.r.taskID); seat {
@@ -146,7 +151,7 @@ func (d runPermissionDecider) applyGrant(requestID, summary string, detail *task
 	}
 	now := d.reg.grantNow()
 	skip := func(kind, note string) {
-		if err := d.reg.st.AppendGrantAudit(store.GrantAuditRow{GrantID: g.ID, At: now, Kind: kind, Actor: "daemon", RunID: d.r.id, RequestID: requestID, Note: note}); err != nil {
+		if err := d.reg.st.NoteGrantSkip(store.GrantAuditRow{GrantID: g.ID, At: now, Kind: kind, Actor: "daemon", RunID: d.r.id, RequestID: requestID, Note: note}); err != nil {
 			slog.Warn("permission grant audit failed", "err", err)
 		}
 	}
@@ -160,7 +165,9 @@ func (d runPermissionDecider) applyGrant(requestID, summary string, detail *task
 	}
 	// The use is audited first: an allow that cannot be audited is not given.
 	if err := d.reg.st.RecordGrantUse(g.ID, d.r.id, requestID, now); err != nil {
-		slog.Warn("permission grant use audit failed; asking", "err", err)
+		if !errors.Is(err, store.ErrGrantInactive) { // inactive = revoked or expired since the check: a plain ask
+			slog.Warn("permission grant use audit failed; asking", "err", err)
+		}
 		return "", false
 	}
 	d.recordPolicyResolved(requestID, summary, withGrantOffer(detail, o), options, o.allowOptionID, taskrunner.PermissionResolvedByGrant, fmt.Sprintf("grant:%d", g.ID))

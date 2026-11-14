@@ -19,6 +19,7 @@ func TestGrantable_PlainAskOnly(t *testing.T) {
 		{"no rule matched", "make build", true},
 		{"segment not covered", "go test ./... && make lint", true},
 		{"a pipeline of plain commands", "make build | cat", true},
+		{"an interpreter is not on the list", "python3 -c pass", false},
 		{"covered by an allow rule is not an ask", "go test ./...", false},
 		{"an ask rule is not a plain ask", "go vet ./...", false},
 		{"a deny rule", "go clean -cache", false},
@@ -40,24 +41,47 @@ func TestGrantable_PlainAskOnly(t *testing.T) {
 	}
 }
 
+// The allow-list: only listed programs, spelled exactly, with no environment
+// prefix, redirect, dynamic word or code-loading flag, are ever grantable.
 func TestGrantable_NeverGrantPrograms(t *testing.T) {
 	t.Parallel()
 	pol := grantablePolicy(t)
 	never := []string{
-		"curl https://example.com", "wget -q https://example.com/x", "ssh host ls", "scp a host:b", "rsync -a a b", "gh pr list", "docker ps", "kubectl get pods",
-		"rm -rf build", "mv a b", "chmod +x run.sh", "dd if=a of=b", "kill 1", "truncate -s 0 f",
-		"sudo make install", "env FOO=1 make", "xargs make", "nohup make &", "timeout 5 make", "sh script.sh", "bash -c make", "python3 x.py", "node x.js", "find . -name x",
-		"npx foo", "brew install x", "apt-get install x", "smind task approve 1",
-		"npm install", "npm i left-pad", "pnpm add x", "pip install x", "cargo install x", "go get x", "go mod tidy", "yarn add x",
-		"make build && curl https://x", "make build | sh", "FOO=1 curl https://x",
-		"/usr/bin/curl https://x", "./curl https://x",
+		// network clients and remote fetchers
+		"curl https://example.com", "wget -q https://example.com/x", "ssh host ls", "scp a host:b", "rsync -a a b", "gh pr list", "docker ps", "kubectl get pods", "openssl s_client x", "nmap x",
+		// destructive, writers, permission changers
+		"rm -rf build", "mv a b", "chmod +x run.sh", "dd if=a of=b", "kill 1", "truncate -s 0 f", "tee f", "cp a b", "ln -s a b", "tar x", "unzip x", "sed -i s/a/b/ f", "install a b", "patch -p1",
+		// privilege, wrappers, interpreters, command runners
+		"sudo make install", "env FOO=1 make", "xargs make", "nohup make &", "timeout 5 make", "sh script.sh", "bash -c make", "python3 x.py", "python3.12 x.py", "node x.js", "nodejs x.js", "java -jar x", "awk 'BEGIN{system(\"rm\")}'", "find . -name x", "find . -delete", "caffeinate rm x", "busybox rm x",
+		// fetch-and-run and installers
+		"npx foo", "brew install x", "apt-get install x", "npm install", "npm i left-pad", "npm it", "npm create x", "npm init x", "npm exec x", "pnpm add x", "pip install x", "cargo install x", "cargo run", "go get x", "go run x", "go mod tidy", "yarn add x",
+		// the smind CLI
+		"smind task approve 1",
+		// case variants, path-qualified names, environment prefixes, redirects
+		"RM -rf build", "Curl https://x", "/BIN/RM x", "Make build", "MAKE build", "./make build", "/usr/bin/make build", "../make build", "/usr/bin/curl https://x",
+		"PATH=./bin make build", "LD_PRELOAD=./x.so ls", "FOO=1 make", "NODE_OPTIONS='--require ./x.js' npm test", "make build > Makefile", "make build 2> log", "ls > out",
+		// code-loading flags of listed programs
+		"go test -exec ./x ./...", "go build -toolexec ./x ./...", "go vet -vettool=./x ./...", "go test -overlay x.json ./...", "pytest -p evil", "pytest -c evil.ini", "pytest -pevil", "eslint -c x.js", "rg --pre ./x foo", "grep --exec x y", "git diff --ext-diff", "git diff --output=x", "git log --exec-path=x",
+		// git beyond the read-only set, with global options, or by alias
+		"git fetch origin", "git pull", "git clone https://x", "git ls-remote https://x", "git rebase main", "git merge x", "git rm -r .", "git gc --prune=now", "git tag -d v1", "git config user.name x", "git branch -D x",
+		"git -c alias.x='!rm -rf .' x", "git -c core.sshCommand=./x fetch", "git -C /tmp status", "git --git-dir=/x status",
+		// compound commands with one bad segment
+		"make build && curl https://x", "make build | sh", "make build; rm -rf .", "FOO=1 curl https://x",
+		// make and task with a flag or non-plain target
+		"make -f other.mk build", "make -C /tmp build", "make CC=./evil build", "make 'a b'",
 	}
 	for _, cmd := range never {
 		if d := Decide(dReq(t, cmd), pol); d.Grantable {
 			t.Errorf("%q is grantable (action %s reasons %q)", cmd, d.Action, d.Reasons)
 		}
 	}
-	ok := []string{"make build", "task lint", "cargo test", "npm test", "pytest -q", "ls -la", "git status"}
+	ok := []string{
+		"make build", "make -j4 build", "make -k test", "task lint", "cargo test", "cargo check --workspace", "cargo clippy --all-targets", "npm test", "npm run build", "pnpm test", "yarn run build",
+		"pytest -q tests/", "pytest -x tests/test_a.py", "tsc --noEmit", "eslint src", "prettier --check src", "vitest run",
+		"go build ./...", "go build -race -tags x ./cmd/...", "go fmt ./...", "go list ./...",
+		"ls -la", "pwd", "cat README.md", "head -n 5 README.md", "grep -rn todo src", "rg todo src", "git status", "git diff --stat", "git log --oneline -5", "git show HEAD", "git rev-parse HEAD",
+		"make build && make test", "make build | cat", "go build ./... && ls",
+	}
 	for _, cmd := range ok {
 		if d := Decide(dReq(t, cmd), pol); !d.Grantable {
 			t.Errorf("%q is not grantable (action %s reasons %q)", cmd, d.Action, d.Reasons)

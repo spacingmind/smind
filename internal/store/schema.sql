@@ -920,7 +920,7 @@ CREATE TABLE IF NOT EXISTS steward_review_passes (
 -- mcp_fingerprint voids the grant when the project's MCP servers change.
 CREATE TABLE IF NOT EXISTS permission_grants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workspace_id INTEGER NOT NULL,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     command_sha TEXT NOT NULL,
     command_len INTEGER NOT NULL,
     command_display TEXT NOT NULL,
@@ -942,7 +942,7 @@ CREATE TABLE IF NOT EXISTS permission_grants (
 -- of a grant (kind: created | used | revoked | skipped_expired | skipped_void).
 CREATE TABLE IF NOT EXISTS permission_grant_audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    grant_id INTEGER NOT NULL,
+    grant_id INTEGER NOT NULL REFERENCES permission_grants(id) ON DELETE CASCADE,
     at TIMESTAMP NOT NULL,
     kind TEXT NOT NULL,
     actor TEXT NOT NULL DEFAULT '',

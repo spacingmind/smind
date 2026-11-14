@@ -1,6 +1,10 @@
 package permpolicy
 
-import "slices"
+import (
+	"regexp"
+	"slices"
+	"strings"
+)
 
 // Saved grants (ADR-0055 section 8, docs/plans/active/saved-grants.md): a
 // human may save "allow this exact command in this project". Whether a
@@ -8,51 +12,142 @@ import "slices"
 // APPLIED to it, is one predicate, decided here beside the rules it must never
 // outrank: Decision.Grantable. The engine sets it only on an `ask` that is
 // plain (no rule matched, or a segment no allow rule covers) for a command it
-// parsed completely, whose every segment is free of dynamic words, and none of
-// whose programs is on the never-grant list below. Every other request (a
-// floor hit, a rule deny or ask, an unparsed or truncated command, a command
-// the engine cannot see into) is not grantable, so it asks every time.
+// parsed completely, and only when EVERY segment is on the allow-list below.
+//
+// The list is an allow-list on purpose (decision G8, reversed after review: a
+// deny-list leaked for case variants, interpreters, git configuration and
+// environment prefixes). A program nobody listed asks every time. A segment
+// qualifies only if it has:
+//   - a bare program name on the list, spelled exactly (no path, no case
+//     variant, no wrapper peeled off), so `./make`, `Make` and `env make` do not;
+//   - no environment assignment, no redirect and no dynamic word;
+//   - arguments within that program's own constraints (plain words, no flag
+//     that loads or runs code).
+//
+// Programs that run project-defined code (make, task, npm run, go test) are on
+// the list deliberately: a saved grant for `make build` is the feature, and a
+// project whose Makefile an agent can edit is a limit the plan states.
 
-// neverGrantPrograms are the programs no saved grant may cover, by canonical
-// program name: clients that reach the network, programs that destroy or
-// rewrite data or permissions, privilege and wrapper programs that run another
-// command the engine would have to see through, and tools whose job is to
-// fetch and run code. A deny-list is only as good as its list: the structural
-// limits (exact command, no dynamic word, no heredoc, no redirect target the
-// floor did not already judge) hold for programs nobody thought to list.
-var neverGrantPrograms = []string{
-	// network clients
-	"curl", "wget", "fetch", "aria2c", "ssh", "scp", "sftp", "ftp", "telnet", "nc", "ncat", "netcat", "socat", "rsync",
-	"gh", "hub", "docker", "podman", "kubectl", "helm", "terraform", "aws", "gcloud", "az", "wrangler", "cf", "vercel", "netlify", "fly", "heroku",
-	"ping", "dig", "nslookup", "mail", "sendmail",
-	// destructive or permission-changing
-	"rm", "rmdir", "unlink", "shred", "dd", "mkfs", "fdisk", "parted", "truncate", "mv", "chmod", "chown", "chgrp", "setfacl", "chattr",
-	"kill", "killall", "pkill", "shutdown", "reboot", "halt", "diskutil", "launchctl", "systemctl", "crontab", "defaults",
-	// privilege and wrappers that run another command
-	"sudo", "doas", "su", "env", "xargs", "nohup", "timeout", "time", "nice", "ionice", "watch", "exec", "command", "builtin", "setsid", "stdbuf", "script", "parallel", "find",
-	"sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "pwsh", "powershell", "cmd", "eval", "source", "python", "python3", "node", "ruby", "perl", "php", "osascript", "deno", "bun",
-	// fetch and run code
-	"npx", "pnpx", "bunx", "uvx", "pipx", "brew", "apt", "apt-get", "dnf", "yum", "pacman", "apk", "snap", "winget", "choco", "scoop", "gem", "composer", "nuget",
-	// the smind CLI itself: its human-only verbs, and anything that talks to the daemon
-	"smind",
+// grantProg constrains one program's arguments.
+type grantProg struct {
+	// verbs, when set, restricts the first argument to this set (a subcommand).
+	verbs []string
+	// deny adds flags refused for this program on top of codeFlags.
+	deny []string
+	// okFlags are the only flags allowed after the verb when anyArgs is false;
+	// every other argument must be a plain word.
+	okFlags []string
+	// anyArgs allows any arguments except the denied flags (read-only tools).
+	anyArgs bool
 }
 
-// neverGrantVerbs are subcommands that fetch or install, for programs that are
-// otherwise everyday (a build or test run).
-var neverGrantVerbs = map[string][]string{
-	"npm":    {"install", "i", "add", "ci", "update", "upgrade", "publish", "login", "exec", "x", "link", "unlink", "uninstall", "remove", "rm", "run-script"},
-	"pnpm":   {"install", "i", "add", "update", "up", "upgrade", "publish", "login", "exec", "dlx", "link", "unlink", "uninstall", "remove", "rm"},
-	"yarn":   {"install", "add", "up", "upgrade", "publish", "login", "exec", "dlx", "link", "unlink", "remove", "global"},
-	"pip":    {"install", "download", "uninstall", "wheel", "config"},
-	"pip3":   {"install", "download", "uninstall", "wheel", "config"},
-	"uv":     {"add", "sync", "pip", "tool", "run", "python", "publish", "remove", "lock", "venv", "init", "self"},
-	"cargo":  {"install", "add", "update", "publish", "login", "fetch", "uninstall", "remove", "yank", "owner"},
-	"go":     {"get", "install", "mod", "work", "env", "clean", "generate", "telemetry"},
-	"git":    {}, // git commands carry their own rule table (GitRule); the empty list only marks the program as known
-	"make":   {},
-	"task":   {},
-	"gradle": {"publish", "uploadArchives"},
-	"mvn":    {"deploy", "release", "dependency:get"},
+var plainWord = regexp.MustCompile(`^[A-Za-z0-9_./][A-Za-z0-9_./:@,+~-]*$`)
+
+// codeFlags are long and Go-style flags that load or run other code or reach
+// outside the project; they are refused for every program on the list.
+var codeFlags = []string{"-exec", "--exec", "-toolexec", "-vettool", "-overlay", "--pre", "--compress-program", "--config", "--exec-path", "--ext-diff", "--textconv",
+	"--output", "--plugin", "--require", "--import", "--loader", "--eval", "--upload-pack", "--receive-pack", "--manifest-path", "--git-dir", "--work-tree", "--no-index", "--rootdir"}
+
+var grantAllow = map[string]grantProg{
+	// build and test drivers: the target or script is a plain word
+	"make":  {okFlags: []string{"-j", "-k", "-s", "-n"}},
+	"task":  {},
+	"go":    {verbs: []string{"test", "build", "vet", "fmt", "list"}, okFlags: []string{"-v", "-race", "-short", "-count", "-run", "-cover", "-json", "-timeout", "-tags", "-l", "-d", "-w", "-m", "-f"}},
+	"cargo": {verbs: []string{"test", "build", "check", "clippy", "fmt", "doc"}, okFlags: []string{"-q", "-v", "--all", "--workspace", "--release", "--all-targets", "--all-features", "--check", "--no-run", "--lib", "--bins", "--tests"}},
+	"npm":   {verbs: []string{"test", "run", "t"}},
+	"pnpm":  {verbs: []string{"test", "run", "t"}},
+	"yarn":  {verbs: []string{"test", "run"}},
+	// test and lint tools: any plain arguments; -p and -c load plugins and config
+	"pytest":   {anyArgs: true, deny: []string{"-p", "-c"}},
+	"tsc":      {anyArgs: true},
+	"eslint":   {anyArgs: true, deny: []string{"-c"}},
+	"prettier": {anyArgs: true},
+	"vitest":   {verbs: []string{"run"}},
+	// read-only inspection (the floor already judges the paths they name)
+	"ls": {anyArgs: true}, "pwd": {anyArgs: true}, "cat": {anyArgs: true}, "head": {anyArgs: true}, "tail": {anyArgs: true}, "wc": {anyArgs: true},
+	"grep": {anyArgs: true}, "rg": {anyArgs: true}, "diff": {anyArgs: true}, "echo": {anyArgs: true},
+	"true": {anyArgs: true}, "which": {anyArgs: true}, "date": {anyArgs: true}, "stat": {anyArgs: true}, "file": {anyArgs: true}, "tree": {anyArgs: true},
+	// git: read-only subcommands only, and no global option before the verb
+	"git": {verbs: []string{"status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "describe", "shortlog"}, anyArgs: true},
+}
+
+// denied reports whether argument a is the flag d, `d=value`, or (for a short
+// flag) d with its value attached.
+func denied(a, d string) bool {
+	if a == d || strings.HasPrefix(a, d+"=") {
+		return true
+	}
+	return len(d) == 2 && !strings.HasPrefix(a, "--") && strings.HasPrefix(a, d) && len(a) > 2
+}
+
+// segmentGrantable reports whether one command segment may be covered by a grant.
+func segmentGrantable(s Segment, fs *floorSeg) bool {
+	if s.Dynamic || s.Inspected || len(s.Argv) == 0 || len(s.Env) > 0 || len(s.Redirects) > 0 || len(fs.assigns) > 0 {
+		return false
+	}
+	// A wrapper peeled off argv means the command runs something else.
+	if len(fs.argv) != len(s.Argv) {
+		return false
+	}
+	prog := s.Argv[0]
+	if strings.ContainsAny(prog, `/\`) { // a path-qualified program runs that file, whatever it is called
+		return false
+	}
+	p, ok := grantAllow[prog] // exact, case-sensitive
+	if !ok || fs.name() != prog {
+		return false
+	}
+	args := s.Argv[1:]
+	for _, a := range args {
+		for _, d := range slices.Concat(codeFlags, p.deny) {
+			if denied(a, d) {
+				return false
+			}
+		}
+	}
+	if len(p.verbs) > 0 {
+		if len(args) == 0 || !slices.Contains(p.verbs, args[0]) {
+			return false
+		}
+		args = args[1:]
+	}
+	if p.anyArgs {
+		return true
+	}
+	for _, a := range args {
+		switch {
+		case strings.HasPrefix(a, "-"):
+			if !flagAllowed(a, p.okFlags) {
+				return false
+			}
+		case !plainWord.MatchString(a):
+			return false
+		}
+	}
+	return true
+}
+
+// flagAllowed reports whether flag (maybe `-count=1`, `-j4`) is one of ok.
+func flagAllowed(flag string, ok []string) bool {
+	name, _, _ := strings.Cut(flag, "=")
+	for _, o := range ok {
+		if name == o || (len(o) == 2 && strings.HasPrefix(name, o) && name != o && isDigits(name[2:])) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // grantableSegments reports whether every segment of a plain-ask command may be
@@ -62,26 +157,11 @@ func grantableSegments(req Request, segs []Segment, cwd string) bool {
 		return false
 	}
 	for _, s := range segs {
-		if s.Dynamic || s.Inspected || len(s.Argv) == 0 {
+		if len(s.Argv) == 0 {
 			return false
 		}
-		fs := newFloorSeg(req, s, cwd)
-		// A wrapper peeled off argv means the command runs something else.
-		if len(fs.argv) == 0 || len(fs.argv) != len(s.Argv) {
+		if !segmentGrantable(s, newFloorSeg(req, s, cwd)) {
 			return false
-		}
-		name := fs.name()
-		if slices.Contains(neverGrantPrograms, name) {
-			return false
-		}
-		if verbs, listed := neverGrantVerbs[name]; listed && len(verbs) > 0 {
-			// Any word that is a fetch or install verb: the verb is usually the
-			// first non-flag word, but a flag value could precede it.
-			for _, w := range fs.argv[1:] {
-				if slices.Contains(verbs, w) {
-					return false
-				}
-			}
 		}
 	}
 	return true

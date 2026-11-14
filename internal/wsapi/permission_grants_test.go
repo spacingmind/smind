@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,12 +88,16 @@ func TestWsapi_GrantListAndRevoke(t *testing.T) {
 	if len(list.Grants) != 2 {
 		t.Fatalf("grants = %s", b)
 	}
+	if strings.Contains(string(b), "commandSha") || strings.Contains(string(b), "commandLen") || strings.Contains(string(b), "mcpFingerprint") {
+		t.Errorf("the list leaks the match key: %s", b)
+	}
 	for _, v := range list.Grants {
 		if v.ID == expired.ID && v.Status != "expired" {
 			t.Errorf("expired grant status = %s", v.Status)
 		}
-		if v.ID == g.ID && v.Status == "revoked" {
-			t.Errorf("live grant already revoked")
+		// Its stored MCP fingerprint is not the project's current one, so it is void, not active.
+		if v.ID == g.ID && v.Status != "void" {
+			t.Errorf("a grant whose MCP fingerprint differs reads %q, want void", v.Status)
 		}
 	}
 	out, err := e.api.hs["permission.grants.revoke"](context.Background(), rc, json.RawMessage(`{"grantId":`+jsonInt(g.ID)+`}`))

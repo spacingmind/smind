@@ -262,8 +262,9 @@ type Event struct {
 	// PermissionRuleID is the policy rule or floor id behind a
 	// policy_allow/policy_deny PermissionResolution (ADR-0047 §2),
 	// populated for EventTypePermissionResolved: the timeline renders the
-	// rule's why next to the badge, and the audit links back to it. Empty
-	// for every other resolution.
+	// rule's why next to the badge, and the audit links back to it. A saved
+	// grant reuses it ("grant:<id>" for a use, "grant-saved:<id>" on the human
+	// answer that saved one); empty for every other resolution.
 	PermissionRuleID string
 
 	// Question is populated for EventTypeQuestionRequest and

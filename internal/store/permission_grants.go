@@ -14,8 +14,8 @@ import (
 type PermissionGrant struct {
 	ID              int64      `json:"id"`
 	WorkspaceID     int64      `json:"workspaceId"`
-	CommandSHA      string     `json:"commandSha"`
-	CommandLen      int        `json:"commandLen"`
+	CommandSHA      string     `json:"-"`
+	CommandLen      int        `json:"-"`
 	CommandDisplay  string     `json:"command"`
 	Folder          string     `json:"folder"`
 	MCPFingerprint  string     `json:"-"`
@@ -50,6 +50,10 @@ type GrantAuditRow struct {
 	RequestID string    `json:"requestId,omitempty"`
 	Note      string    `json:"note,omitempty"`
 }
+
+// ErrGrantInactive reports a use of a grant that is revoked or expired (or gone):
+// the use is refused and nothing is recorded.
+var ErrGrantInactive = errors.New("permission grant is not active")
 
 // ErrGrantNotFound reports a grant id that does not exist.
 var ErrGrantNotFound = errors.New("permission grant not found")
@@ -171,19 +175,42 @@ func (s *Store) RevokeGrant(id int64, actor string, now time.Time) (bool, error)
 }
 
 // RecordGrantUse counts a use of the grant and audits it, in one transaction.
+// The update itself requires the grant to be neither revoked nor expired at
+// `now`, so a revoke that lands between the caller's check and this call still
+// wins: ErrGrantInactive, nothing counted, nothing audited.
 func (s *Store) RecordGrantUse(id int64, runID, requestID string, now time.Time) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("record permission grant use: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`UPDATE permission_grants SET use_count = use_count + 1, last_used_at = ? WHERE id = ?`, now.UTC(), id); err != nil {
+	res, err := tx.Exec(`UPDATE permission_grants SET use_count = use_count + 1, last_used_at = ? WHERE id = ? AND revoked_at IS NULL AND expires_at > ?`, now.UTC(), id, now.UTC())
+	if err != nil {
 		return fmt.Errorf("record permission grant use: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrGrantInactive
 	}
 	if _, err := tx.Exec(`INSERT INTO permission_grant_audit (grant_id, at, kind, actor, run_id, request_id) VALUES (?, ?, ?, 'daemon', ?, ?)`, id, now.UTC(), GrantAuditUsed, runID, requestID); err != nil {
 		return fmt.Errorf("record permission grant use: audit: %w", err)
 	}
 	return tx.Commit()
+}
+
+// NoteGrantSkip audits a refusal to apply a grant (expired, void), once per
+// episode: it writes nothing when the grant's latest audit row is already the
+// same kind, so a grant that stays expired does not grow the table on every
+// request it fails to cover.
+func (s *Store) NoteGrantSkip(row GrantAuditRow) error {
+	var last string
+	err := s.db.QueryRow(`SELECT kind FROM permission_grant_audit WHERE grant_id = ? ORDER BY id DESC LIMIT 1`, row.GrantID).Scan(&last)
+	if err == nil && last == row.Kind {
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("note permission grant skip: %w", err)
+	}
+	return s.AppendGrantAudit(row)
 }
 
 // AppendGrantAudit writes one audit row (a skipped use, for instance).
