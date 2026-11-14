@@ -109,7 +109,7 @@ sizes (open, one entry disabled), and the composer after a send. Desktop real-wi
 - [x] spec
 - [x] A: matchers, resolver, link provider, reveal store and editor scroll (PR A, #889)
 - [x] B: restart (PR B)
-- [ ] C: send set (PR C)
+- [x] C: send set (PR C)
 
 ## Validation
 
@@ -129,3 +129,11 @@ Restart; hidden after a replay whose scrollback re-showed it); two mutations kil
 Ended and restarted frames re-shot and opened, light and dark at 1280 and 390: no block cursor while ended, the outline cursor is back after Restart.
 Not verified (PR A): a real daemon, the desktop webview (the `open_external` bridge is existing code), wrapped long lines
 (only the row under the pointer is scanned), mutation checks (the runs were not approved).
+
+PR C: `send-set.test.ts`, `send-menu` (`send-to-agent-menu.test.tsx`), `use-send-text-to-chat.test.tsx`, `terminal-send-set.test.tsx`,
+`file-send-set.test.tsx`; web 470 files / 5294 tests, `tsc -b`, `vite build`. Mutations on committed code, all killed: clip cap removed,
+fence length fixed at 3, terminal Selection never disabled, editor end-of-line adjustment removed, hook no longer queues the text.
+Frames (28, light and dark, 1280 and 390: both menus open, one entry disabled, the toast, the composer after each send) all opened.
+The frames found a layout flaw (a floating button covered the first output line at 390), fixed with a slim row of its own.
+Note: in the dev server (StrictMode) a text queued while the chat tab is unmounted is lost on remount; production builds are fine
+(frames were taken on a production build). Not verified: a real daemon, the desktop webview, `file_ref` against a real daemon.
