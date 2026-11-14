@@ -146,7 +146,6 @@ func TestGrantable_EquivalentToDecideAsk(t *testing.T) {
 	}
 }
 
-
 // The allow-list is pinned: its exact contents are listed here, so adding a
 // program, a verb or a flag to grantAllow fails this test and needs a reviewed
 // edit of both. The behavioural table below it pins the near-misses that must
