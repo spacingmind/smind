@@ -911,3 +911,45 @@ CREATE TABLE IF NOT EXISTS steward_review_passes (
     finished_at TIMESTAMP,
     UNIQUE (review_id, axis)
 );
+
+-- permission_grants: saved "allow always in this project" decisions (ADR-0055
+-- section 8, docs/plans/active/saved-grants.md). One row per project and exact
+-- RAW command (command_sha = SHA-256 of the command the policy engine judged;
+-- the command_display is the redacted, heredoc-elided text a human saw).
+-- Written only by a human answer; never edited, only revoked or expired.
+-- mcp_fingerprint voids the grant when the project's MCP servers change.
+CREATE TABLE IF NOT EXISTS permission_grants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    command_sha TEXT NOT NULL,
+    command_len INTEGER NOT NULL,
+    command_display TEXT NOT NULL,
+    folder TEXT NOT NULL DEFAULT '',
+    mcp_fingerprint TEXT NOT NULL DEFAULT '',
+    class TEXT NOT NULL DEFAULT 'readonly',   -- 'readonly' | 'runner' (decided by the daemon, never the caller)
+    runner_opt_in INTEGER NOT NULL DEFAULT 0, -- the human's explicit opt-in to run project code; required for 'runner'
+    created_at TIMESTAMP NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_by TEXT NOT NULL DEFAULT '',
+    source_run_id TEXT NOT NULL DEFAULT '',
+    source_request_id TEXT NOT NULL DEFAULT '',
+    revoked_at TIMESTAMP,
+    revoked_by TEXT NOT NULL DEFAULT '',
+    use_count INTEGER NOT NULL DEFAULT 0,
+    last_used_at TIMESTAMP,
+    UNIQUE (workspace_id, command_sha)
+);
+
+-- permission_grant_audit: every creation, use, revocation and refusal to apply
+-- of a grant (kind: created | used | revoked | skipped_expired | skipped_void).
+CREATE TABLE IF NOT EXISTS permission_grant_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    grant_id INTEGER NOT NULL REFERENCES permission_grants(id) ON DELETE CASCADE,
+    at TIMESTAMP NOT NULL,
+    kind TEXT NOT NULL,
+    actor TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    request_id TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_permission_grant_audit_grant ON permission_grant_audit(grant_id, id);

@@ -13,10 +13,15 @@ import (
 // connection that never identifies counts as the human's, which is why the
 // floor also refuses a command that names one next to a transport. The two
 // answer methods of the agent-questions work are named ahead of their
-// handlers (see pendingHumanOnlyRPCs).
+// handlers (see PendingHumanOnlyRPCs; empty today). The saved-grant methods
+// (run.answerPermission creates a grant, permission.grants.* list and revoke
+// them) are here for the same reason: an agent that could save or revoke one
+// would be deciding for itself.
 var HumanOnlyRPCs = []string{
 	"run.respondPermission",
 	"run.answerPermission",
+	"permission.grants.list",
+	"permission.grants.revoke",
 	"run.answerQuestion",
 	"inbox.resolve",
 	"permission.revealHeredoc",
@@ -34,7 +39,7 @@ var HumanOnlyRPCs = []string{
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not
 // on this branch yet; the wsapi drift test lets them be absent and drops the
 // tolerance for each as soon as its handler exists.
-var PendingHumanOnlyRPCs = []string{"run.answerPermission"}
+var PendingHumanOnlyRPCs = []string{}
 
 // humanOnlyCommand is one human-only smind command: the words that name it
 // and the verbs of it that are human-only (nil: every verb).
