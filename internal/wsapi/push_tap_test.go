@@ -11,6 +11,7 @@ import (
 	"github.com/spacingmind/smind/internal/push"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // pushKinds is the default kind list the push RPC tests compare against.
@@ -29,6 +30,10 @@ func TestPushInputMapping(t *testing.T) {
 	}{
 		{"permission", Event{Topic: TopicPermissionPending, Payload: permissionPendingPayload{RunID: "r1", TaskID: 4, ChatID: 5, RequestID: "q1", Summary: "s"}}, true,
 			push.Input{Kind: push.KindPermission, Key: "q1", TaskID: 4, ChatID: 5, RunID: "r1", Summary: "s"}},
+		{"question", Event{Topic: TopicQuestionPending, Payload: questionPendingPayload{RunID: "r1", TaskID: 4, ChatID: 5, RequestID: "q1"}}, true,
+			push.Input{Kind: push.KindQuestion, Key: "q1", TaskID: 4, ChatID: 5, RunID: "r1"}},
+		{"question resolved", Event{Topic: TopicQuestionResolved, Payload: questionResolvedPayload{RunID: "r1", TaskID: 4, RequestID: "q1", Reason: "human"}}, false, push.Input{}},
+		{"wrong payload question", Event{Topic: TopicQuestionPending, Payload: runStatusPayload{}}, false, push.Input{}},
 		{"done", rs("done", "", ""), true, push.Input{Kind: push.KindDone, Key: "r1:done", TaskID: 4, ChatID: 5, RunID: "r1"}},
 		{"needs continue", rs("done", runs.DispositionNeedsContinue, ""), true, push.Input{Kind: push.KindNeedsContinue, Key: "r1:needs_continue", TaskID: 4, ChatID: 5, RunID: "r1"}},
 		{"error", rs("error", "", "bad"), true, push.Input{Kind: push.KindError, Key: "r1:error", TaskID: 4, ChatID: 5, RunID: "r1", Err: "bad"}},
@@ -244,5 +249,25 @@ func TestAutomationSink_PausedCarriesTaskID(t *testing.T) {
 	p, ok := got[0].Payload.(automationPausedPayload)
 	if !ok || p.TaskID != 12 || p.AutomationID != 3 || p.Reason != "why" || p.Name != "nightly" || p.At == 0 {
 		t.Fatalf("payload = %+v", got[0].Payload)
+	}
+}
+
+// ADR-0055 D7: the mapping carries ids only; the question text never reaches
+// the notifier input, and a resolution never notifies.
+func TestPushInput_QuestionPendingMapsToQuestionKind(t *testing.T) {
+	t.Parallel()
+	req := taskrunner.QuestionRequest{Questions: []taskrunner.Question{{ID: "q0", Text: "Drop the production database?", Kind: "single"}}}
+	got, ok := pushInput(Event{Topic: TopicQuestionPending, Payload: questionPendingPayload{RunID: "r1", TaskID: 4, ChatID: 5, RequestID: "rq", Request: req}})
+	if !ok || got.Kind != push.KindQuestion || got.Key != "rq" || got.Summary != "" || got.Err != "" || got.Title != "" {
+		t.Fatalf("pushInput = (%+v, %v)", got, ok)
+	}
+}
+
+func TestPushInput_QuestionResolvedNeverNotifies(t *testing.T) {
+	t.Parallel()
+	for _, reason := range []string{"human", "declined", "timeout", "refused_secret", "run_ended", "daemon_restart"} {
+		if in, ok := pushInput(Event{Topic: TopicQuestionResolved, Payload: questionResolvedPayload{RunID: "r1", TaskID: 4, RequestID: "rq", Reason: reason}}); ok {
+			t.Errorf("a %s resolution notified: %+v", reason, in)
+		}
 	}
 }
