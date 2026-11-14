@@ -73,6 +73,18 @@ describe('words', () => {
     expect(grantExpiryText('not a date', NOW)).toBe('not a date');
   });
 
+  it.each(['void', 'expired', 'revoked'])('a %s grant has no expiry countdown, only its reason, so the row never suggests it still works', (status) => {
+    const [row] = grantRows([{ id: 1, workspaceId: 2, command: 'make build', folder: '/repo', class: 'runner', runnerOptIn: true, createdAt: '2026-11-13T12:00:00Z', expiresAt: '2026-12-13T12:00:00Z', createdBy: 'local', useCount: 1, status }], NOW);
+    expect(row.expiry).toBe('');
+    expect(row.statusLabel).not.toBe('Active');
+    expect(row.hint).toMatch(/asks again/);
+  });
+
+  it('an active grant keeps its countdown', () => {
+    const [row] = grantRows([{ id: 1, workspaceId: 2, command: 'ls', folder: '/repo', class: 'readonly', runnerOptIn: false, createdAt: '2026-11-13T12:00:00Z', expiresAt: '2026-12-13T12:00:00Z', createdBy: 'local', useCount: 0, status: 'active' }], NOW);
+    expect(row.expiry).toBe('Expires in 28d');
+  });
+
   it('builds a row with every line a plain string and Revoke only until revoked', () => {
     const g = (over: Partial<SavedGrant>): SavedGrant => ({
       id: 1, workspaceId: 2, command: 'make build', folder: '/repo', class: 'runner', runnerOptIn: true, createdAt: '2026-11-13T12:00:00Z', expiresAt: '2026-12-13T12:00:00Z', createdBy: 'local', useCount: 1, lastUsedAt: '2026-11-15T11:00:00Z', status: 'active', ...over,

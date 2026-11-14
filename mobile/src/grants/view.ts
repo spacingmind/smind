@@ -88,6 +88,7 @@ export interface GrantRowView {
   classLabel: string;
   isRunner: boolean;
   optInLine: string | null;
+  /** The countdown, only for an active grant; '' for void, expired and revoked, which show their reason instead so the row never suggests the grant still works. */
   expiry: string;
   folderLine: string;
   usageLine: string;
@@ -104,7 +105,7 @@ export function grantRows(grants: readonly SavedGrant[], now: number): GrantRowV
     classLabel: grantClassLabel(g.class),
     isRunner: g.class !== 'readonly',
     optInLine: g.class === 'readonly' ? null : g.runnerOptIn ? "You allowed this to run the project's code (the agent can change it)." : 'No project-code opt-in: this is never applied.',
-    expiry: grantExpiryText(g.expiresAt, now),
+    expiry: g.status === 'active' ? grantExpiryText(g.expiresAt, now) : '',
     folderLine: `Project folder: ${g.folder || 'unknown'}`,
     usageLine: `Used ${g.useCount} ${g.useCount === 1 ? 'time' : 'times'}${g.lastUsedAt ? `, last ${grantAgo(g.lastUsedAt, now)}` : ''}. Saved ${grantAgo(g.createdAt, now)}.`,
     hint: grantStatusHint(g),

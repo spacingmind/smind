@@ -216,6 +216,9 @@ test('G-05 Settings lists the saved grants with their class and status, and Revo
   await expect(page.getByTestId('grant-3-status')).toContainText('Void')
   await expect(page.getByTestId('grant-4-status')).toHaveText('Expired')
   await expect(page.getByTestId('grant-5-command')).toHaveText('echo <b>x</b> https://evil.example')
+  // void, expired and revoked rows drop the countdown; only an active one shows it
+  for (const id of [3, 4, 5]) await expect(page.getByTestId(`grant-${id}-expiry`)).toHaveCount(0)
+  for (const id of [1, 2]) await expect(page.getByTestId(`grant-${id}-expiry`)).toContainText('Expires in')
   await expect(page.getByTestId('grant-5-revoke')).toHaveCount(0)
   await expect(page.getByTestId('grant-5').locator('a, b')).toHaveCount(0)
   expect(await noOverflow(page)).toBe(true)

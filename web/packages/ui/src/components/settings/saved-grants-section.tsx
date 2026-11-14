@@ -18,7 +18,7 @@ import type { SavedGrant } from "@/lib/types";
 
 const STATUS_TIER: Record<string, StatusBadgeStatus> = { active: "success", expired: "neutral", void: "warning", revoked: "neutral" };
 
-/** "in 12d", "in 3h", or "expired" / "3d ago" for a time that has passed. */
+/** "Expires in 12d" / "Expires in 3h" for a grant that is active; any other status shows its reason instead (a void, expired or revoked grant never shows a countdown that suggests it still works). */
 function expiryText(g: SavedGrant): string {
   const at = new Date(g.expiresAt).getTime();
   if (Number.isNaN(at)) return g.expiresAt;
@@ -66,7 +66,11 @@ function SavedGrantsSection(_ctx: SettingsSectionContext) {
                 <StatusBadge status={g.class === "readonly" ? "neutral" : "warning"} data-testid={`grant-${g.id}-class`}>
                   {grantClassLabel(g.class)}
                 </StatusBadge>
-                <span className="text-ui-sm text-foreground-muted">{expiryText(g)}</span>
+                {g.status === "active" && (
+                  <span data-testid={`grant-${g.id}-expiry`} className="text-ui-sm text-foreground-muted">
+                    {expiryText(g)}
+                  </span>
+                )}
               </div>
               <div data-testid={`grant-${g.id}-command`} className="min-w-0 font-mono text-ui-sm whitespace-pre-wrap break-all text-foreground">
                 {g.command}

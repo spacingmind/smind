@@ -79,7 +79,7 @@ export function SavedGrantsList({ rows, error, onReload, onRevoke }: { rows: Gra
             <View style={styles.wrapRow}>
               <Badge tone={STATUS_TONE[row.status] ?? 'neutral'}>{row.statusLabel}</Badge>
               <Badge tone={row.isRunner ? 'warning' : 'neutral'}>{row.classLabel}</Badge>
-              <Text style={styles.muted}>{row.expiry}</Text>
+              {row.expiry !== '' ? <Text style={styles.muted}>{row.expiry}</Text> : null}
             </View>
             <Text style={styles.mono} selectable>
               {row.command}

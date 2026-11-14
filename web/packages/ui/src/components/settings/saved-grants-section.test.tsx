@@ -85,6 +85,28 @@ describe("saved-grants-section", () => {
     expect(screen.getByTestId("grant-1-revoke")).toBeInTheDocument();
   });
 
+  it.each([
+    ["void", "make test", "Void: tool setup changed"],
+    ["expired", "ls -la", "Expired"],
+    ["revoked", "git log", "Revoked"],
+  ])("a %s grant shows only its reason, never an expiry countdown that suggests it still works", async (status, command, label) => {
+    const client = renderSection();
+    client.nth("permission.grants.list").resolve({ grants: [grant({ id: 9, command, status })] });
+    await flush();
+    const row = screen.getByTestId("grant-9");
+    expect(within(row).getByTestId("grant-9-status")).toHaveTextContent(label);
+    expect(within(row).queryByTestId("grant-9-expiry")).toBeNull();
+    expect(row).not.toHaveTextContent(/Expires in|Expired \d|Expired just now/);
+    expect(row).toHaveTextContent("asks again");
+  });
+
+  it("an active grant still shows its countdown", async () => {
+    const client = renderSection();
+    client.nth("permission.grants.list").resolve({ grants: [grant({ id: 9 })] });
+    await flush();
+    expect(screen.getByTestId("grant-9-expiry")).toHaveTextContent(/^Expires in 2\dd$/);
+  });
+
   it("revokes after a confirmation that says what will ask again, then refreshes", async () => {
     const client = renderSection();
     client.nth("permission.grants.list").resolve({ grants: [grant({ id: 7, command: "make build", class: "runner", runnerOptIn: true })] });
