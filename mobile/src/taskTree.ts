@@ -67,6 +67,8 @@ export function runStateLabel(run: RunLike): string {
       return 'Running';
     case 'waiting_permission':
       return 'Waiting for permission';
+    case 'waiting_question':
+      return 'Waiting for your answer';
     case 'done':
       return 'Done';
     case 'error':
@@ -89,6 +91,7 @@ export function runStateTone(run: RunLike): StateTone {
   switch (run?.state) {
     case 'running':
     case 'waiting_permission':
+    case 'waiting_question':
       return 'warning';
     case 'error':
       return 'danger';
@@ -150,13 +153,13 @@ export function budgetLine(root: Pick<TaskTreeNode, 'budgetUsd' | 'budgetSpentUs
   return { text: partial ? `${amounts} · partial` : `Budget ${amounts}`, tone: 'default' };
 }
 
-/** Waiting-for-permission, failed and rate-limited counts over the given nodes' own run state; a rate-limited run is not a failure. */
+/** Waiting-for-permission (or -answer), failed and rate-limited counts over the given nodes' own run state; a rate-limited run is not a failure. */
 export function attentionRollup(nodes: readonly TaskTreeNode[]): { waiting: number; failed: number; rateLimited: number } {
   let waiting = 0;
   let failed = 0;
   let rateLimited = 0;
   for (const n of nodes) {
-    if (n.run?.state === 'waiting_permission') waiting++;
+    if (n.run?.state === 'waiting_permission' || n.run?.state === 'waiting_question') waiting++;
     else if (isRateLimited(n.run)) rateLimited++;
     else if (n.run?.state === 'error') failed++;
   }
