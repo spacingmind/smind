@@ -19,7 +19,18 @@ acs:
   - id: AC5
     text: "Every creation, use, revoke and skip is audited; a use is a permission_resolved with resolution grant."
     covers: { tests: [TestGrants_UseIsAudited, TestGrants_AuditRows], mutations: [M8] }
+  - id: AC6
+    text: "Strict classes (Human decision 2026-11-15): a command is read-only, runner or never, decided by the daemon from compiled lists; a runner grant needs the explicit per-grant opt-in at creation and at use; the class is re-checked at use; the caller cannot assert the class."
+    covers: { tests: [TestGrantable_AllowListIsPinned, TestGrantable_ClassesArePinned, TestGrantable_NearMissesStayUngrantable, TestGrants_ReadOnlyGrantNeedsNoOptIn, TestGrants_RunnerGrantNeedsOptIn, TestGrants_ClassAndOptInRecheckedAtUse, TestGrants_ClassIsNotTakenFromTheRequest, TestGrants_RunnerNeedsOptInInStore], mutations: [M9, M10, M11, M12, M13] }
 tests:
+  - { name: TestGrantable_AllowListIsPinned, run: "go test ./internal/permpolicy -run '^TestGrantable_AllowListIsPinned$' -count=1", timeoutSec: 300 }
+  - { name: TestGrantable_ClassesArePinned, run: "go test ./internal/permpolicy -run '^TestGrantable_ClassesArePinned$' -count=1", timeoutSec: 300 }
+  - { name: TestGrantable_NearMissesStayUngrantable, run: "go test ./internal/permpolicy -run '^TestGrantable_NearMissesStayUngrantable$' -count=1", timeoutSec: 300 }
+  - { name: TestGrants_ReadOnlyGrantNeedsNoOptIn, run: "go test ./internal/runs -run '^TestGrants_ReadOnlyGrantNeedsNoOptIn$' -count=1", timeoutSec: 300 }
+  - { name: TestGrants_RunnerGrantNeedsOptIn, run: "go test ./internal/runs -run '^TestGrants_RunnerGrantNeedsOptIn$' -count=1", timeoutSec: 300 }
+  - { name: TestGrants_ClassAndOptInRecheckedAtUse, run: "go test ./internal/runs -run '^TestGrants_ClassAndOptInRecheckedAtUse$' -count=1", timeoutSec: 300 }
+  - { name: TestGrants_ClassIsNotTakenFromTheRequest, run: "go test ./internal/runs -run '^TestGrants_ClassIsNotTakenFromTheRequest$' -count=1", timeoutSec: 300 }
+  - { name: TestGrants_RunnerNeedsOptInInStore, run: "go test ./internal/store -run '^TestGrants_RunnerNeedsOptInInStore$' -count=1", timeoutSec: 300 }
   - { name: TestGrants_OnlyHumanScopeProject, run: "go test ./internal/runs -run '^TestGrants_OnlyHumanScopeProject$' -count=1", timeoutSec: 300 }
   - { name: TestGrants_AnswerOnlyAllowOnceOfAnOfferedRequest, run: "go test ./internal/runs -run '^TestGrants_AnswerOnlyAllowOnceOfAnOfferedRequest$' -count=1", timeoutSec: 300 }
   - { name: TestGrants_MatchIsExactCommandAndProject, run: "go test ./internal/runs -run '^TestGrants_MatchIsExactCommandAndProject$' -count=1", timeoutSec: 300 }
@@ -40,6 +51,11 @@ tests:
   - { name: TestWsapi_GrantMethodsRefusedForRunScoped, run: "go test ./internal/wsapi -run '^TestWsapi_GrantMethodsRefusedForRunScoped$' -count=1", timeoutSec: 300 }
   - { name: TestMCP_NoToolSavesOrRevokesGrants, run: "go test ./cmd/smind -run '^TestMCP_NoToolSavesOrRevokesGrants$' -count=1", timeoutSec: 300 }
 mutations:
+  - { id: M9, file: "internal/permpolicy/grantable.go", change: "add push to the git verbs", expectFail: [TestGrantable_AllowListIsPinned, TestGrantable_ClassesArePinned, TestGrantable_NearMissesStayUngrantable] }
+  - { id: M10, file: "internal/runs/grants.go", change: "drop the opt-in check at use", expectFail: [TestGrants_ClassAndOptInRecheckedAtUse] }
+  - { id: M11, file: "internal/runs/grants.go", change: "drop the opt-in check at creation (RespondPermissionScoped)", expectFail: [TestGrants_RunnerGrantNeedsOptIn] }
+  - { id: M12, file: "internal/runs/grants.go", change: "take the class from the request detail instead of the engine", expectFail: [TestGrants_ClassIsNotTakenFromTheRequest] }
+  - { id: M13, file: "internal/permpolicy/grantable.go", change: "move make into the read-only class", expectFail: [TestGrantable_AllowListIsPinned, TestGrantable_ClassesArePinned] }
   - { id: M1, file: "internal/runs/decider_policy.go", change: "applyPolicy reports grantable for every ask (drop dec.Grantable)", expectFail: [TestGrants_NeverOfferedForFloorDestructiveNetworkUnparsedQuestion] }
   - { id: M2, file: "internal/runs/grants.go", change: "look the grant up by command only (workspace id 0)", expectFail: [TestGrants_MatchIsExactCommandAndProject] }
   - { id: M3, file: "internal/runs/grants.go", change: "drop the expiry check", expectFail: [TestGrants_ExpireAndRevoke, TestGrants_AskedAgainAfterEveryInvalidation] }
