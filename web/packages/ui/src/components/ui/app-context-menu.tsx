@@ -60,15 +60,20 @@ export function AppContextMenu({
   onDialogSelect?: () => void;
 }) {
   if (isDesktop) {
+    const open = (event: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>) => {
+      // Everything above this trigger (a parent row's menu, the document policy) must not also act.
+      event.preventDefault();
+      event.stopPropagation();
+      void showNativeContextMenu(entries, menuPoint(event), { onOpenChange }).catch((err: unknown) => {
+        console.warn("native context menu failed", err);
+      });
+    };
     return (
       <Slot.Root
-        onContextMenu={(event: MouseEvent<HTMLElement>) => {
-          // Everything above this trigger (a parent row's menu, the document policy) must not also act.
-          event.preventDefault();
-          event.stopPropagation();
-          void showNativeContextMenu(entries, menuPoint(event), { onOpenChange }).catch((err: unknown) => {
-            console.warn("native context menu failed", err);
-          });
+        onContextMenu={open}
+        onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
+          // The keyboard routes a webview may not turn into a `contextmenu` event itself: the Menu key and Shift+F10, on the focused trigger.
+          if (event.target === event.currentTarget && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) open(event);
         }}
       >
         {children}

@@ -190,6 +190,30 @@ describe("AppContextMenu in the desktop build", () => {
     warn.mockRestore();
   });
 
+  it("the Menu key and Shift+F10 on the focused trigger open the native menu; other keys, and a key on a descendant, do not", async () => {
+    render(
+      <AppContextMenu entries={menu(() => {})}>
+        <button data-testid="row" type="button">
+          row <span data-testid="inner">x</span>
+        </button>
+      </AppContextMenu>,
+    );
+    const row = screen.getByTestId("row");
+    row.getBoundingClientRect = () => ({ left: 10, bottom: 50, top: 20, right: 60, width: 50, height: 30, x: 10, y: 20, toJSON() {} }) as DOMRect;
+    fireEvent.keyDown(row, { key: "a" });
+    fireEvent.keyDown(row, { key: "F10" }); // without Shift: not the menu chord
+    fireEvent.keyDown(screen.getByTestId("inner"), { key: "ContextMenu" });
+    await flush();
+    expect(bridge.show).not.toHaveBeenCalled();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    await flush();
+    expect(bridge.show).toHaveBeenCalledTimes(1);
+    expect(bridge.show.mock.calls[0].slice(1)).toEqual([18, 50]);
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    await flush();
+    expect(bridge.show).toHaveBeenCalledTimes(2);
+  });
+
   it("a keyboard-invoked menu (reported at 0,0) opens at the focused element's lower-left corner", async () => {
     render(
       <AppContextMenu entries={menu(() => {})}>
