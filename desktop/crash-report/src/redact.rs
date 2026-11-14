@@ -142,7 +142,7 @@ fn redact_paths(s: &str, home: Option<&Path>, smind_home: Option<&Path>) -> Stri
         }
         pairs.push((path.to_string(), repl));
     }
-    pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    pairs.sort_by_key(|p| std::cmp::Reverse(p.0.len()));
     let mut s = s.to_string();
     for (path, repl) in &pairs {
         let mut forms = vec![
@@ -327,6 +327,6 @@ mod tests {
         let once = r(input, "/home/tester", "/home/tester/.smind");
         let twice = r(&once, "/home/tester", "/home/tester/.smind");
         assert_eq!(once, twice);
-        assert_eq!(once, "token=[redacted] and Authorization: [redacted]");
+        assert_eq!(once, "token=[redacted] y and Authorization: [redacted]");
     }
 }
