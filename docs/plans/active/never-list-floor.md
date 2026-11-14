@@ -55,13 +55,17 @@ A command the matcher cannot read stays outside it: a script the agent wrote and
 
 ## Progress
 
-- [ ] spec (this file)
-- [ ] rules + tests
-- [ ] docs (public page, ADR-0047 table, template comment)
-- [ ] mutation table
-- [ ] two-axis review
-- [ ] PR
+- [x] spec (this file)
+- [x] rules + tests (`internal/permpolicy/never_list.go`, `never_list_test.go`, `never_list_win_test.go`)
+- [x] docs (public page, ADR-0047 table, template comment) and the drift test `TestFloorReasons_InDocs`
+- [x] mutation table (below)
+- [x] two-axis review, findings fixed (below)
+- [ ] Human review, merge
 
 ## Validation
 
-Filled in when the PR is ready.
+- AC1-AC4: `TestNeverList_Denied` (about 150 rows, every wrapper of AC3), `TestNeverList_WindowsDenied`, `TestNeverList_NearMissesAllowed` (about 130 rows), `TestNeverList_WindowsNearMissesAllowed`, `TestNeverList_RootLikeTargets`, `TestNeverList_ParentOfHome`, `TestNeverList_ForkBombText`, `TestNeverList_RunnerTextRejudged`, `TestDecide_NeverListCannotBeAllowedByPolicy`, `TestNeverList_ExistingIDsKept` (all pass).
+- AC5: `TestFloorReasons_InDocs`. AC7: the `no-self-approve` tests pass untouched after `bareShellFed` was shared.
+- AC6 mutations (one per row, run on the committed file; each makes at least one named test fail): rm root-like target, `--no-preserve-root`, home, parent of home, system roots, filesystem root, glob tail strip, bare `*`, Windows star quirk, mkfs on a device, mv source, chmod -R, find -delete, find -exec, dd `of=`, wipefs -a, redirect to a device, partitioner device and read-only exemption, diskutil verbs and apfs delete, cryptsetup, Windows disk commands, power commands, systemctl power verbs, `init 0|6`, Windows `format`, `cipher /w`, busybox applet, runner script text, runner word suffix, runner here-string, shell-fed lines and echo words, fork bomb definition, `fork while fork`, fork-bomb runnable-segment guard, shared `bareShellFed`, runner depth cap, `viaSuffix`, ssh command word. Two rows first survived (dd `of=` and the device redirect: the old rule already denied them); rows reachable only through a runner (`su -c 'dd ... of=/dev/sda'`) now pin them.
+- Review (code-review skill, two fresh-context agents): the Spec/attack axis found false positives (`ssh host systemctl status reboot`, `ssh reboot`, a fork-bomb string argument of `npm test`) and gaps (`fish -c`); fixed: power verbs are judged only as the real command, never as a later word of a runner's arguments; the fork bomb needs a command that can run text; `fish csh tcsh` added to the shells. Standards axis: no hard violations; fixed the dead `mkfs.ext4` entry, missing doc comments, and moved the shared helper next to its sibling.
+- Not verified: Windows behaviour on a real Windows host (fake-platform tests and `GOOS=windows go vet` only); `internal/wsapi` `TestPolicyEngine_FloorProtectsDaemonHome` fails on this machine on `origin/develop` too (E9 item 3a).
