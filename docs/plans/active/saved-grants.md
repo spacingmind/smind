@@ -56,4 +56,15 @@ Mutations (committed code, one at a time): a grant evaluated before the engine -
 
 ## Validation
 
-(to be filled when PR4a lands)
+PR4a, acceptance criteria and where each is shown (AC6 list status and AC7 additive wire are daemon-side here; the screens are PR4b):
+
+- AC1 `TestGrants_OnlyHumanScopeProject`, `TestGrants_AnswerOnlyAllowOnceOfAnOfferedRequest`, `TestWsapi_GrantMethodsAreHumanOnly`, `TestWsapi_GrantMethodsRefusedForRunScoped`, `TestMCP_NoToolSavesOrRevokesGrants`, `TestHumanOnlyRPCTable_MatchesHandlers`, `TestHumanOnlyCommandsRefuseInAgentRun` (the two `permission grants` rows).
+- AC2 `TestGrants_MatchIsExactCommandAndProject`.
+- AC3 `TestGrantable_PlainAskOnly`, `TestGrantable_NeverGrantPrograms` (about 200 commands), `TestGrantable_EquivalentToDecideAsk`, `TestGrants_EvaluatedAfterFloorAndPolicy`, `TestGrants_PolicyDenyBeatsGrant`, `TestGrants_NeverOfferedForFloorDestructiveNetworkUnparsedQuestion`, `TestGrants_NotUnderAutoAcceptSeatSystemRemote`, `TestGrants_EngineOffAsksEveryTime`.
+- AC4 `TestGrants_ExpireAndRevoke`, `TestGrants_VoidOnMcpChange`, `TestGrants_AskedAgainAfterEveryInvalidation`, store `TestGrants_ExpireAndVoidNotApplied` (a revoke between the check and the use still wins).
+- AC5 `TestGrants_UseIsAudited`, `TestGrants_AuditRows`, `TestGrants_SkipIsAuditedOncePerEpisode`.
+- AC6 `TestWsapi_GrantListAndRevoke` (status expired and void, no match key on the wire), `TestCLI_PermissionGrants*`.
+- AC7 the offer is `PermissionDetail.grant` (omitempty); `methods.golden` gains the three methods.
+
+Review: Standards and Spec/attack axes, both fresh-context and foreground, then a re-attack of the allow-list. Findings fixed: the deny-list leaked (replaced by the allow-list, G8); a revoke racing the use (conditional update); the match key on the wire; grants offered to agent, orchestrator, plugin and child-event runs; unbounded skip-audit rows; no foreign keys; a comment that claimed the hash stayed inside; weak and timing-based tests. Mutations run on committed code, each made its named test fail (contract M1-M8, plus the store's conditional update).
+PR4b (card control, web and mobile lists, the mobile question-card polish) is not done.
