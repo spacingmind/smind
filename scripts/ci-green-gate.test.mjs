@@ -86,6 +86,7 @@ const run = (over = {}) => ({
   conclusion: "success",
   created_at: "2026-11-14T00:00:00Z",
   head_sha: SHA,
+  head_branch: "develop",
   run_attempt: 1,
   ...over,
 });
@@ -358,5 +359,52 @@ test("gate-token-never-printed", () => {
   });
 });
 
-test("gate-workflow-wiring", { skip: "pinned by the lead in the workflow PR" }, () => {});
+test("gate-other-branch-run-ignored", () => {
+  withGh({ [RUNS]: [runsList(run({ id: 120, head_branch: "master" }))] }, (gh) => {
+    const res = runGate(gh);
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, /no ci\.yml push run/);
+  });
+});
+
+test("gate-equal-timestamps-higher-run-id-wins", () => {
+  const same = "2026-11-14T00:00:00Z";
+  withGh(
+    {
+      [RUNS]: [runsList(run({ id: 131, created_at: same }), run({ id: 130, created_at: same }))],
+      [`repos/${REPO}/actions/runs/131/jobs?per_page=100`]: [{ jobs: [{ name: "ci", status: "completed", conclusion: "failure" }] }],
+      [`repos/${REPO}/actions/runs/130/jobs?per_page=100`]: [{ jobs: [{ name: "ci", status: "completed", conclusion: "success" }] }],
+    },
+    (gh) => {
+      const res = runGate(gh);
+      assert.equal(res.status, 1, "run 131 (higher id) decides");
+      assert.match(res.stdout, /run 131/);
+    }
+  );
+});
+
+test("gate-unparsable-created-at-never-wins", () => {
+  withGh(
+    {
+      [RUNS]: [runsList(run({ id: 141, created_at: "garbage" }), run({ id: 140, created_at: "2026-11-14T00:00:00Z" }))],
+      [`repos/${REPO}/actions/runs/141/jobs?per_page=100`]: [{ jobs: [{ name: "ci", status: "completed", conclusion: "failure" }] }],
+      [`repos/${REPO}/actions/runs/140/jobs?per_page=100`]: [{ jobs: [{ name: "ci", status: "completed", conclusion: "success" }] }],
+    },
+    (gh) => {
+      const res = runGate(gh);
+      assert.equal(res.status, 0);
+      assert.match(res.stdout, /run 140/);
+    }
+  );
+});
+
+test("gate-404-in-tag-name-is-not-not-found", () => {
+  // a transient error on a tag whose name contains "404" must be retried, not read as a missing tag
+  const tag = "v0.404.0";
+  withGh({ [`repos/${REPO}/git/ref/tags/${tag}`]: [{ __error: "HTTP 502 Bad Gateway", __exit: 1 }] }, (gh) => {
+    const res = runGate(gh, ["--tag", tag]);
+    assert.equal(res.status, 3);
+    assert.equal(gh.calls().filter((c) => c.includes(`git/ref/tags/${tag}`)).length, 3, "retried 3 times");
+  });
+});
 

@@ -27,6 +27,10 @@
 # A local reference clone's release workflow, adapted to release-please already
 # owning tag/Release creation.
 #
+# Before anything is uploaded, `ci-gate` requires the `ci` job of this exact commit to be green
+# (scripts/ci-green-gate.mjs) and `publish` runs scripts/verify-release-artifacts.mjs over the
+# assembled set; see docs/release-verification.md.
+#
 # workflow_dispatch runs the exact same build+package+checksum steps as a
 # dry run: it never touches a Release, it only publishes the results as
 # workflow artifacts. Used to prove the pipeline out on a branch -- see
@@ -73,6 +77,8 @@ jobs:
       always() &&
       (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    # The script waits at most 10 min for the CI run to appear, then 40 min for it to finish
+    # (--grace/--timeout defaults), plus retries: 60 leaves the margin.
     timeout-minutes: 60
     permissions:
       contents: read

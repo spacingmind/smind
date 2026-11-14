@@ -9,9 +9,10 @@
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 
-const USAGE = `Usage: node scripts/ci-green-gate.mjs --repo <owner/name> --sha <40 hex> [--tag <vX.Y.Z>] [--workflow <file>] [--job <name>] [--timeout <seconds>] [--grace <seconds>] [--interval <seconds>] [--dry-run]
+const USAGE = `Usage: node scripts/ci-green-gate.mjs --repo <owner/name> --sha <40 hex> [--tag <vX.Y.Z>] [--workflow <file>] [--job <name>] [--branch <name>] [--timeout <seconds>] [--grace <seconds>] [--interval <seconds>] [--dry-run]
 
-The newest push run of the workflow for exactly --sha decides (older runs
+The newest push run on --branch (default develop; master also gets a push run for the
+same commit when it is fast-forwarded to the tag and must not be judged instead) of the workflow for exactly --sha decides (older runs
 never mask newer ones); its --job job must conclude success. --tag must
 resolve to --sha. Exit: 0 pass (any verdict under --dry-run), 1 refuse,
 2 usage error, 3 persistent GitHub API error. Times are seconds:
@@ -24,7 +25,9 @@ const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 const TAG_RE = /^[\w][\w.+-]*$/;
 const WORKFLOW_RE = /^[\w.-]+\.ya?ml$/;
 const JOB_RE = /^[\w .-]+$/;
-const NOT_FOUND_RE = /Not Found|HTTP 404|\b404\b/;
+// Matched against gh's stderr only: err.message also carries the command line, and a tag such as v0.404.0 must not read as "404".
+const NOT_FOUND_RE = /Not Found|HTTP 404/;
+const isNotFound = (err) => NOT_FOUND_RE.test(String(err?.stderr ?? ""));
 const API_ATTEMPTS = 3;
 // With --interval 0 the tracked clock never advances, so each waiting phase
 // is also capped by poll count to keep runs bounded.
@@ -39,7 +42,7 @@ class ApiError extends Error {
 }
 class TagNotFoundError extends Error {}
 
-const STRING_OPTIONS = new Set(["repo", "sha", "tag", "workflow", "job"]);
+const STRING_OPTIONS = new Set(["repo", "sha", "tag", "workflow", "job", "branch"]);
 const NUMBER_OPTIONS = new Set(["timeout", "grace", "interval"]);
 
 export function parseArgs(argv) {
@@ -77,14 +80,13 @@ const oneLine = (text) => String(text).replace(/\s+/g, " ").trim();
 const firstLine = (err) =>
   (String(err?.shortMessage ?? err?.message ?? err).split("\n")[0] || "").trim() || "gh api failed";
 
+// An unparsable created_at counts as the epoch, so it can never beat a dated run.
+const stamp = (run) => Date.parse(run.created_at) || 0;
+
 function newestRun(runs) {
   let newest = null;
   for (const run of runs) {
-    if (
-      newest === null ||
-      Date.parse(run.created_at) > Date.parse(newest.created_at) ||
-      (Date.parse(run.created_at) === Date.parse(newest.created_at) && run.id > newest.id)
-    ) {
+    if (newest === null || stamp(run) > stamp(newest) || (stamp(run) === stamp(newest) && run.id > newest.id)) {
       newest = run;
     }
   }
@@ -95,7 +97,7 @@ function newestRun(runs) {
 // deps: {gh(args) -> stdout string (throws on failure), sleep(ms), now() -> ms}
 // Returns {pass, reason, exit}; prints the waiting lines and the final verdict.
 export function gate(opts, deps) {
-  const o = { workflow: "ci.yml", job: "ci", timeout: 2400, grace: 600, interval: 30, dryRun: false, ...opts };
+  const o = { workflow: "ci.yml", job: "ci", branch: "develop", timeout: 2400, grace: 600, interval: 30, dryRun: false, ...opts };
   const say = (line) => process.stdout.write(`${line}\n`);
   const finish = (pass, reason, exit = pass ? 0 : 1) => {
     const text = oneLine(reason);
@@ -112,10 +114,10 @@ export function gate(opts, deps) {
         return JSON.parse(deps.gh(["api", path]));
       } catch (err) {
         lastErr = err;
-        if (notFoundIsFinal && NOT_FOUND_RE.test(String(err?.message))) break;
+        if (notFoundIsFinal && isNotFound(err)) break;
       }
     }
-    const notFound = notFoundIsFinal && NOT_FOUND_RE.test(String(lastErr?.message));
+    const notFound = notFoundIsFinal && isNotFound(lastErr);
     throw new ApiError(`GitHub API error: ${firstLine(lastErr)}`, notFound);
   };
   const resolveTag = () => {
@@ -147,7 +149,7 @@ export function gate(opts, deps) {
     const outOfTime = (limit) => elapsed() >= limit || (o.interval === 0 && polls >= MAX_POLLS_AT_ZERO_INTERVAL);
     for (;;) {
       // Re-fetched every iteration: a re-run changes state, a newer run may appear.
-      const newest = newestRun((api(runsPath).workflow_runs ?? []).filter((r) => r.head_sha === o.sha));
+      const newest = newestRun((api(runsPath).workflow_runs ?? []).filter((r) => r.head_sha === o.sha && r.head_branch === o.branch));
       if (phase !== (newest ? "job" : "run-lookup")) {
         phase = newest ? "job" : "run-lookup";
         polls = 0;
@@ -206,7 +208,7 @@ function main(argv) {
     throw new UsageError(`missing required option${missing.length > 1 ? "s" : ""}: ${missing.map((k) => `--${k}`).join(" ")}`);
   }
   if (!SHA_RE.test(args.sha)) throw new UsageError(`--sha must be 40 hex characters, found ${JSON.stringify(args.sha)}`);
-  for (const [key, re] of [["tag", TAG_RE], ["workflow", WORKFLOW_RE], ["job", JOB_RE]]) {
+  for (const [key, re] of [["tag", TAG_RE], ["workflow", WORKFLOW_RE], ["job", JOB_RE], ["branch", JOB_RE]]) {
     if (args[key] !== undefined && !re.test(args[key])) {
       throw new UsageError(`--${key} has an unexpected shape: ${JSON.stringify(args[key])}`);
     }
@@ -219,6 +221,7 @@ function main(argv) {
       tag: args.tag,
       workflow: args.workflow ?? "ci.yml",
       job: args.job ?? "ci",
+      branch: args.branch ?? "develop",
       timeout: args.timeout ?? 2400,
       grace: args.grace ?? 600,
       interval: args.interval ?? 30,
