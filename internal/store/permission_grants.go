@@ -51,6 +51,20 @@ type GrantAuditRow struct {
 	Note      string    `json:"note,omitempty"`
 }
 
+// Limits: a project holds at most MaxGrantsPerWorkspace grants (a save past it
+// first drops the oldest revoked or expired ones, and is refused with
+// ErrGrantLimit if the rest are all live), and each grant keeps its latest
+// MaxGrantAuditRows audit rows, so a busy `make test` grant cannot grow the
+// table without bound. The creation row can age out of a very busy grant; the
+// grant row itself keeps created_at, use_count and last_used_at.
+const (
+	MaxGrantsPerWorkspace = 100
+	MaxGrantAuditRows     = 200
+)
+
+// ErrGrantLimit reports a save past MaxGrantsPerWorkspace live grants.
+var ErrGrantLimit = errors.New("this project has the maximum number of saved grants; revoke one first")
+
 // ErrGrantInactive reports a use of a grant that is revoked or expired (or gone):
 // the use is refused and nothing is recorded.
 var ErrGrantInactive = errors.New("permission grant is not active")
@@ -78,6 +92,15 @@ func (s *Store) SaveGrant(g PermissionGrant) (PermissionGrant, error) {
 		return PermissionGrant{}, fmt.Errorf("save permission grant: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	var exists int
+	switch err := tx.QueryRow(`SELECT 1 FROM permission_grants WHERE workspace_id = ? AND command_sha = ?`, g.WorkspaceID, g.CommandSHA).Scan(&exists); {
+	case errors.Is(err, sql.ErrNoRows):
+		if err := makeRoomForGrant(tx, g.WorkspaceID, g.CreatedAt); err != nil {
+			return PermissionGrant{}, err
+		}
+	case err != nil:
+		return PermissionGrant{}, fmt.Errorf("save permission grant: %w", err)
+	}
 	if _, err := tx.Exec(`INSERT INTO permission_grants (workspace_id, command_sha, command_len, command_display, folder, mcp_fingerprint, created_at, expires_at, created_by, source_run_id, source_request_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id, command_sha) DO UPDATE SET command_len = excluded.command_len, command_display = excluded.command_display, folder = excluded.folder,
@@ -95,6 +118,40 @@ func (s *Store) SaveGrant(g PermissionGrant) (PermissionGrant, error) {
 		return PermissionGrant{}, fmt.Errorf("save permission grant: audit: %w", err)
 	}
 	return out, tx.Commit()
+}
+
+// makeRoomForGrant keeps a project under MaxGrantsPerWorkspace: it deletes the
+// oldest revoked or expired grants (their audit rows go with them) and refuses
+// when every remaining one is live.
+func makeRoomForGrant(tx *sql.Tx, workspaceID int64, now time.Time) error {
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM permission_grants WHERE workspace_id = ?`, workspaceID).Scan(&n); err != nil {
+		return fmt.Errorf("save permission grant: %w", err)
+	}
+	if n < MaxGrantsPerWorkspace {
+		return nil
+	}
+	if _, err := tx.Exec(`DELETE FROM permission_grants WHERE id IN (
+		SELECT id FROM permission_grants WHERE workspace_id = ? AND (revoked_at IS NOT NULL OR expires_at <= ?) ORDER BY id LIMIT ?)`,
+		workspaceID, now.UTC(), n-MaxGrantsPerWorkspace+1); err != nil {
+		return fmt.Errorf("save permission grant: prune: %w", err)
+	}
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM permission_grants WHERE workspace_id = ?`, workspaceID).Scan(&n); err != nil {
+		return fmt.Errorf("save permission grant: %w", err)
+	}
+	if n >= MaxGrantsPerWorkspace {
+		return ErrGrantLimit
+	}
+	return nil
+}
+
+// pruneGrantAudit keeps a grant's latest MaxGrantAuditRows audit rows.
+func pruneGrantAudit(tx *sql.Tx, grantID int64) error {
+	if _, err := tx.Exec(`DELETE FROM permission_grant_audit WHERE grant_id = ? AND id NOT IN (
+		SELECT id FROM permission_grant_audit WHERE grant_id = ? ORDER BY id DESC LIMIT ?)`, grantID, grantID, MaxGrantAuditRows); err != nil {
+		return fmt.Errorf("prune permission grant audit: %w", err)
+	}
+	return nil
 }
 
 // FindGrant returns the grant for (workspace, command sha), whatever its
@@ -194,6 +251,9 @@ func (s *Store) RecordGrantUse(id int64, runID, requestID string, now time.Time)
 	if _, err := tx.Exec(`INSERT INTO permission_grant_audit (grant_id, at, kind, actor, run_id, request_id) VALUES (?, ?, ?, 'daemon', ?, ?)`, id, now.UTC(), GrantAuditUsed, runID, requestID); err != nil {
 		return fmt.Errorf("record permission grant use: audit: %w", err)
 	}
+	if err := pruneGrantAudit(tx, id); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -215,11 +275,19 @@ func (s *Store) NoteGrantSkip(row GrantAuditRow) error {
 
 // AppendGrantAudit writes one audit row (a skipped use, for instance).
 func (s *Store) AppendGrantAudit(row GrantAuditRow) error {
-	if _, err := s.db.Exec(`INSERT INTO permission_grant_audit (grant_id, at, kind, actor, run_id, request_id, note) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("append permission grant audit: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`INSERT INTO permission_grant_audit (grant_id, at, kind, actor, run_id, request_id, note) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		row.GrantID, row.At.UTC(), row.Kind, row.Actor, row.RunID, row.RequestID, row.Note); err != nil {
 		return fmt.Errorf("append permission grant audit: %w", err)
 	}
-	return nil
+	if err := pruneGrantAudit(tx, row.GrantID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListGrantAudit returns a grant's audit rows, oldest first.

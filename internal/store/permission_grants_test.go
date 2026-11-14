@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -174,5 +175,61 @@ func TestGrants_WorkspaceDeleteRemovesItsGrants(t *testing.T) {
 	}
 	if rows, _ := s.ListGrantAudit(g.ID); len(rows) != 0 {
 		t.Fatalf("audit rows left: %+v", rows)
+	}
+}
+
+func TestGrants_CapPerWorkspaceAndAuditRetention(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ws := grantWorkspaces(t, s, 2)
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	mk := func(w int64, i int) PermissionGrant {
+		g := sampleGrant(w, fmt.Sprintf("sha-%d", i))
+		g.CreatedAt, g.ExpiresAt = now, now.Add(30*24*time.Hour)
+		return g
+	}
+	for i := 0; i < MaxGrantsPerWorkspace; i++ {
+		if _, err := s.SaveGrant(mk(ws[0], i)); err != nil {
+			t.Fatalf("save %d: %v", i, err)
+		}
+	}
+	// All live: the next one is refused; another project is unaffected; re-saving an existing one still works.
+	if _, err := s.SaveGrant(mk(ws[0], 1000)); err != ErrGrantLimit {
+		t.Fatalf("past the cap = %v, want ErrGrantLimit", err)
+	}
+	if _, err := s.SaveGrant(mk(ws[1], 1000)); err != nil {
+		t.Fatalf("another project: %v", err)
+	}
+	if _, err := s.SaveGrant(mk(ws[0], 5)); err != nil {
+		t.Fatalf("re-save of an existing grant: %v", err)
+	}
+	// A revoked grant makes room: the oldest dead one is dropped.
+	first, _, _ := s.FindGrant(ws[0], "sha-0")
+	_, _ = s.RevokeGrant(first.ID, "local", now)
+	if _, err := s.SaveGrant(mk(ws[0], 1000)); err != nil {
+		t.Fatalf("after a revoke: %v", err)
+	}
+	if _, ok, _ := s.FindGrant(ws[0], "sha-0"); ok {
+		t.Fatal("the revoked grant was not pruned")
+	}
+	if l, _ := s.ListGrants(ws[0]); len(l) != MaxGrantsPerWorkspace {
+		t.Fatalf("%d grants, want the cap", len(l))
+	}
+	// Audit retention: a very busy grant keeps only its latest rows.
+	g, _, _ := s.FindGrant(ws[0], "sha-7")
+	for i := 0; i < MaxGrantAuditRows+50; i++ {
+		if err := s.RecordGrantUse(g.ID, "r", fmt.Sprintf("q%d", i), now.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, _ := s.ListGrantAudit(g.ID)
+	if len(rows) != MaxGrantAuditRows {
+		t.Fatalf("%d audit rows, want %d", len(rows), MaxGrantAuditRows)
+	}
+	if got, _ := s.GetGrant(g.ID); got.UseCount != MaxGrantAuditRows+50 {
+		t.Fatalf("use count %d must keep counting past the retention", got.UseCount)
+	}
+	if rows[len(rows)-1].RequestID != fmt.Sprintf("q%d", MaxGrantAuditRows+49) {
+		t.Fatalf("the newest row was pruned: %+v", rows[len(rows)-1])
 	}
 }

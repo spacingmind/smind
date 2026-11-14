@@ -114,7 +114,7 @@ func TestGrants_OnlyHumanScopeProject(t *testing.T) {
 		t.Fatalf("answered without a human: %q", imm)
 	}
 	offer := e.lastRequestDetail().Grant
-	if offer == nil || offer.Command != "make build" || offer.ExpiresInDays != 30 || offer.Project != "W" || offer.Folder == "" {
+	if offer == nil || offer.Command != "make build" || offer.ExpiresInDays != 30 || offer.Project != "W" || offer.Folder == "" || offer.Note != GrantNote {
 		t.Fatalf("offer = %+v", offer)
 	}
 	// Nothing is saved until a human answers with scope project.

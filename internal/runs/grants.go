@@ -23,6 +23,9 @@ import (
 // GrantTTL is how long a saved grant lasts; a use does not renew it.
 const GrantTTL = 30 * 24 * time.Hour
 
+// GrantNote is shown on the card beside the always-allow control.
+const GrantNote = "Saves this exact command for this project for 30 days. It runs code defined in this project (a Makefile, script or test) that the agent can change later."
+
 // maxGrantCommandBytes caps the raw command a grant can cover.
 const maxGrantCommandBytes = 2000
 
@@ -134,7 +137,7 @@ func (d runPermissionDecider) buildGrantOffer(detail *taskrunner.PermissionDetai
 // withGrantOffer copies detail and sets the offer the card shows.
 func withGrantOffer(detail *taskrunner.PermissionDetail, o *grantOffer) *taskrunner.PermissionDetail {
 	c := *detail
-	c.Grant = &taskrunner.GrantOffer{Command: o.display, Project: o.project, Folder: o.folder, ExpiresInDays: int(GrantTTL / (24 * time.Hour))}
+	c.Grant = &taskrunner.GrantOffer{Command: o.display, Project: o.project, Folder: o.folder, ExpiresInDays: int(GrantTTL / (24 * time.Hour)), Note: GrantNote}
 	return &c
 }
 

@@ -84,6 +84,10 @@ type GrantOffer struct {
 	Project       string `json:"project"`
 	Folder        string `json:"folder"`
 	ExpiresInDays int    `json:"expiresInDays"`
+	// Note is the sentence the card must show beside the control: a saved
+	// command runs project-defined code (a Makefile, a script, a test) that the
+	// agent can change later.
+	Note string `json:"note"`
 }
 
 // PolicyInfo is the policy engine's footprint on a permission request
