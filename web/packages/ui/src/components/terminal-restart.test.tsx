@@ -261,6 +261,48 @@ describe("TerminalPane restart (DT3-B)", () => {
     expect(client.nth("terminal.write", 0).params).toEqual({ terminalId: "term-2", data: "echo hi\n" });
   });
 
+  describe("cursor", () => {
+    const HIDE = "\x1b[?25l";
+    const SHOW = "\x1b[?25h";
+    /** The order of the cursor-visibility sequences the pane wrote. */
+    function cursorOps(fake: FakeTerminalHandle): string[] {
+      return [...decodedWrites(fake).matchAll(/\x1b\[\?25[lh]/g)].map((m) => m[0]);
+    }
+
+    it("a running session never touches the cursor", async () => {
+      const client = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      await mountRunning(client, fake);
+      expect(cursorOps(fake)).toEqual([]);
+    });
+
+    it("the cursor is hidden once the shell has exited, and restored by Restart", async () => {
+      const client = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      await mountRunning(client, fake);
+      client.nth("terminal.attach", 0).resolve({ terminalId: "term-1" });
+      await flush();
+      expect(cursorOps(fake)).toEqual([HIDE]);
+
+      fireEvent.click(screen.getByTestId("terminal-restart"));
+      await flush();
+      client.nth("terminal.create", 1).resolve({ terminalId: "term-2" });
+      await flush();
+      expect(cursorOps(fake)).toEqual([HIDE, SHOW]);
+    });
+
+    it("a replayed ended session ends with the cursor hidden even if its scrollback re-showed it", async () => {
+      const { client2, fake } = await reconnect();
+      client2.nth("terminal.list", 0).resolve([sessionStatus({ ID: "term-1", Status: "closed" })]);
+      await flush();
+      client2.emit("terminal.attach", 0, "data", { data: base64Of("old prompt\x1b[?25h") });
+      client2.nth("terminal.attach", 0).resolve({ terminalId: "term-1" });
+      await flush();
+      const ops = cursorOps(fake);
+      expect(ops[ops.length - 1]).toBe(HIDE);
+    });
+  });
+
   it("a double click on Restart is one terminal.create and the button is disabled while pending", async () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();

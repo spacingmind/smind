@@ -292,6 +292,13 @@ export function TerminalPane({
   const linkNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // A file.stat that settles after unmount must not show a notice or arm a timer nobody clears.
   const unmountedRef = useRef(false);
+  // An ended session must not look live: the block cursor is hidden (DEC mode 25) while it is ended and restored on restart.
+  const cursorHiddenRef = useRef(false);
+  const setCursorHidden = useCallback((hidden: boolean) => {
+    if (cursorHiddenRef.current === hidden) return;
+    cursorHiddenRef.current = hidden;
+    termRef.current?.write(hidden ? "\x1b[?25l" : "\x1b[?25h");
+  }, []);
   // Sticky Ctrl/Shift/Alt of the touch key bar; the ref mirrors state for the onData closure.
   const [modifiers, setModifiers] = useState({ ctrl: false, shift: false, alt: false });
   const modifiersRef = useRef(modifiers);
@@ -530,6 +537,13 @@ export function TerminalPane({
                   },
                   { signal: session.controller.signal },
                 )
+                .then(() => {
+                  // The replayed scrollback may end with the old shell's own "show cursor": hide it again afterwards.
+                  if (!session.cancelled) {
+                    cursorHiddenRef.current = false;
+                    setCursorHidden(true);
+                  }
+                })
                 .catch(() => {
                   if (!session.cancelled) setOutputGone(true);
                 });
@@ -767,6 +781,10 @@ export function TerminalPane({
    * new shell -- then attach through the live session's own attach()
    * wiring, without re-running the list/create effect.
    */
+  useEffect(() => {
+    setCursorHidden(endedStatus !== null);
+  }, [endedStatus, setCursorHidden]);
+
   function handleRestart() {
     if (restartingRef.current || !client) return;
     restartingRef.current = true;
