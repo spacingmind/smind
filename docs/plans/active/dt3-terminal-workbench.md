@@ -42,8 +42,11 @@ lands for both. Three PRs, each branched from `wave/desktop`, one at a time:
 
 ### B. Restart an exited terminal
 
-7. When a terminal session has ended (closed or interrupted) the pane replays its retained output and
-   shows "Session ended" with a labelled **Restart terminal** button.
+7. When a terminal session has ended the pane shows its retained output and a labelled **Restart terminal**
+   button. Ended means: the session is reported closed or interrupted when the pane (re)connects, **or** the live
+   `terminal.attach` stream finishes (the shell exited). A stream that fails or is aborted (connection loss, tab
+   switch) is not an end. For a session found ended on connect the output is replayed through `terminal.attach`
+   (the daemon backfills the scrollback of a retained session, then ends the stream).
 8. Restart creates one new session, writes a dim separator line into the same xterm (the old output stays
    above it) and attaches to the new session. One click is one `terminal.create`; the button is disabled while
    pending and an error shows inline.
@@ -88,7 +91,7 @@ sizes, and the composer after a send. Desktop real-window frames only if the DT0
 ## Progress
 
 - [x] spec
-- [x] A: matchers, resolver, link provider, reveal store and editor scroll (PR A)
+- [x] A: matchers, resolver, link provider, reveal store and editor scroll (PR A, #889)
 - [ ] B: restart
 - [ ] C: send set
 
