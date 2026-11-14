@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/doctor"
 )
 
 const doctorUsage = `Usage:
-  smind doctor [--json]    check provider-side session retention (read-only; never edits a CLI setting)
+  smind doctor [--json]    check provider-side session retention (read-only; never edits a CLI setting); also lists recent crash reports, read-only
 `
 
 // doctorDial is a variable so tests can stub the daemon connection.
@@ -34,6 +38,39 @@ type doctorSessions struct {
 	Readable int `json:"readable"`
 	TooLarge int `json:"tooLarge"`
 	Gone     int `json:"gone"`
+}
+
+// doctorCrashesSummary is crash.Summary as doctor reports it; crash.Summary
+// is not marshalled directly so the on-disk struct stays a private contract.
+type doctorCrashesSummary struct {
+	Dir          string `json:"dir"`
+	Count        int    `json:"count"`
+	Newest       string `json:"newest"`
+	NewestSite   string `json:"newestSite"`
+	NewestSource string `json:"newestSource"`
+	Refused      bool   `json:"refused"`
+	Err          string `json:"err"`
+}
+
+type doctorCrashes struct {
+	Daemon  doctorCrashesSummary  `json:"daemon"`
+	Desktop *doctorCrashesSummary `json:"desktop"`
+}
+
+func crashesJSON(s crash.Summary) doctorCrashesSummary {
+	newest := ""
+	if !s.Newest.IsZero() {
+		newest = s.Newest.UTC().Format(time.RFC3339)
+	}
+	return doctorCrashesSummary{
+		Dir:          s.Dir,
+		Count:        s.Count,
+		Newest:       newest,
+		NewestSite:   printable(s.NewestSite, 40),
+		NewestSource: printable(s.NewestSource, 40),
+		Refused:      s.Refused,
+		Err:          s.Err,
+	}
 }
 
 // runDoctor is cmdDoctor with its environment injected. Exit codes: 0 ok (a
@@ -76,11 +113,25 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		closeFn()
 	}
 
+	// crash.List is read-only: listing must never create the directory.
+	daemonCrashes := crash.List(filepath.Join(config.Dir(), "crashes"))
+	var desktopCrashes *crash.Summary
+	if dir := crash.DesktopDir(); dir != "" {
+		s := crash.List(dir)
+		desktopCrashes = &s
+	}
+	var desktopJSON *doctorCrashesSummary
+	if desktopCrashes != nil {
+		s := crashesJSON(*desktopCrashes)
+		desktopJSON = &s
+	}
+
 	if asJSON {
 		out, _ := json.MarshalIndent(struct {
 			Findings []doctor.Finding `json:"findings"`
 			Sessions *doctorSessions  `json:"sessions"`
-		}{findings, sessions}, "", "  ")
+			Crashes  doctorCrashes    `json:"crashes"`
+		}{findings, sessions, doctorCrashes{crashesJSON(daemonCrashes), desktopJSON}}, "", "  ")
 		fmt.Fprintln(stdout, string(out))
 		return 0
 	}
@@ -97,6 +148,8 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		}
 	}
 	fmt.Fprintln(stdout)
+	printCrashes(stdout, daemonCrashes, desktopCrashes)
+	fmt.Fprintln(stdout)
 	if sessions == nil {
 		fmt.Fprintln(stdout, "sessions: the daemon is not running, so smind cannot count the provider sessions it can still read")
 		return 0
@@ -110,4 +163,56 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintln(stdout, `Run "smind doctor" again after changing the setting; sessions that are already deleted cannot be restored.`)
 	}
 	return 0
+}
+
+// printCrashes writes the crashes section, one line per summary. The daemon
+// line is always present; a desktop directory with no reports says nothing.
+func printCrashes(w io.Writer, daemon crash.Summary, desktop *crash.Summary) {
+	fmt.Fprintln(w, crashLine("crashes", daemon, true))
+	if desktop == nil || (desktop.Count == 0 && !desktop.Refused && desktop.Err == "") {
+		return
+	}
+	if line := crashLine("desktop crashes", *desktop, false); line != "" {
+		fmt.Fprintln(w, line)
+	}
+}
+
+// crashLine formats one summary as a single line, or "" when there is
+// nothing worth saying (the none case of the desktop directory).
+func crashLine(prefix string, s crash.Summary, daemon bool) string {
+	switch {
+	case s.Refused:
+		return fmt.Sprintf("%s: %s is a link, so it was not read", prefix, s.Dir)
+	case s.Err != "":
+		return fmt.Sprintf("%s: %s could not be read: %s", prefix, s.Dir, s.Err)
+	case s.Count == 0:
+		if !daemon {
+			return ""
+		}
+		return fmt.Sprintf("crashes: none recorded (daemon: %s)", s.Dir)
+	default:
+		return fmt.Sprintf("%s: %d recorded in %s; newest %s (%s, %s). Reports stay on this machine and are never uploaded.",
+			prefix, s.Count, s.Dir, s.Newest.UTC().Format(time.RFC3339),
+			printable(s.NewestSource, 40), printable(s.NewestSite, 40))
+	}
+}
+
+// printable keeps only ASCII letters, digits and ._-: and replaces every
+// other rune with ?, cut at max runes. Site and source come from report
+// files, so they must not smuggle control bytes into terminal output.
+func printable(s string, max int) string {
+	var b strings.Builder
+	for _, r := range s {
+		if b.Len() >= max {
+			break
+		}
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-', r == ':':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('?')
+		}
+	}
+	return b.String()
 }
