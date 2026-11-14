@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {}, pendingTexts: {} });
+  useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {}, pendingTexts: {}, chips: {} });
   useFocusedChatStore.setState({ byTask: { 1: 10 }, revealRequest: null });
 });
 
@@ -131,20 +131,21 @@ describe("TerminalPane send set (DT3-C)", () => {
     expect(items[0]).toHaveTextContent("12 B");
   });
 
-  it("choosing Selection queues exactly one fenced block under the focused chat's key", async () => {
+  it("choosing Selection adds exactly one terminal chip under the focused chat's key", async () => {
     const { fake } = await mount();
     fake.selection = "hello world!";
     const items = await openMenu();
     fireEvent.click(items[0]);
 
     const key = attachmentDraftKey(TASK_A.ID, 10);
-    const texts = useComposerAttachmentsStore.getState().pendingTexts[key] ?? [];
-    expect(texts).toHaveLength(1);
-    expect(texts[0]!.startsWith("Terminal output, selection, 12 B:")).toBe(true);
-    expect(texts[0]).toContain("```\nhello world!\n```");
+    const chips = useComposerAttachmentsStore.getState().chips[key] ?? [];
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toMatchObject({ kind: "terminal", body: "hello world!", blockLabel: "selection", label: "Terminal selection · 1 line · 12 B" });
+    // Nothing is queued into the draft: the block is built at send time.
+    expect(useComposerAttachmentsStore.getState().pendingTexts).toEqual({});
   });
 
-  it("Last 100 lines queues a block labelled with the tail's size", async () => {
+  it("Last 100 lines adds a chip labelled with the tail's size and line count", async () => {
     const { fake } = await mount();
     fake.lastLines = "first\nsecond\nthird\n";
     const items = await openMenu();
@@ -152,13 +153,13 @@ describe("TerminalPane send set (DT3-C)", () => {
     fireEvent.click(items[1]);
 
     const key = attachmentDraftKey(TASK_A.ID, 10);
-    const texts = useComposerAttachmentsStore.getState().pendingTexts[key] ?? [];
-    expect(texts).toHaveLength(1);
-    expect(texts[0]!.split("\n")[0]).toBe("Terminal output, last 100 lines, 19 B:");
-    expect(texts[0]).toContain("```\nfirst\nsecond\nthird\n```");
+    const chips = useComposerAttachmentsStore.getState().chips[key] ?? [];
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toMatchObject({ kind: "terminal", body: "first\nsecond\nthird\n", blockLabel: "last 100 lines", label: "Terminal output · 4 lines · 19 B" });
+    expect(useComposerAttachmentsStore.getState().pendingTexts).toEqual({});
   });
 
-  it("a 20 KiB tail is cut to the cap, says what was omitted, and the entry shows the cut size", async () => {
+  it("a 20 KiB tail is cut to the cap at send time: the chip says (cut) and holds the full text", async () => {
     const { fake } = await mount();
     fake.lastLines = "a".repeat(20 * 1024);
     const items = await openMenu();
@@ -168,14 +169,15 @@ describe("TerminalPane send set (DT3-C)", () => {
     fireEvent.click(items[1]);
 
     const key = attachmentDraftKey(TASK_A.ID, 10);
-    const texts = useComposerAttachmentsStore.getState().pendingTexts[key] ?? [];
-    expect(texts).toHaveLength(1);
-    expect(texts[0]!.split("\n")[0]).toBe("Terminal output, last 100 lines, 16 KiB:");
-    expect(texts[0]).toContain("(4.0 KiB omitted)");
-    expect(texts[0]).not.toContain("a".repeat(17 * 1024));
+    const chips = useComposerAttachmentsStore.getState().chips[key] ?? [];
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toMatchObject({ kind: "terminal", blockLabel: "last 100 lines" });
+    expect(chips[0].kind === "terminal" && chips[0].label).toContain("(cut)");
+    // The chip keeps the whole tail; the clip happens when the block is built.
+    expect(chips[0].kind === "terminal" && chips[0].body).toBe("a".repeat(20 * 1024));
   });
 
-  it("opening the menu alone queues nothing", async () => {
+  it("opening the menu alone adds nothing", async () => {
     const { fake } = await mount();
     fake.selection = "hello world!";
     fake.lastLines = "first\nsecond";
@@ -183,5 +185,6 @@ describe("TerminalPane send set (DT3-C)", () => {
 
     expect(useComposerAttachmentsStore.getState().pendingTexts).toEqual({});
     expect(useComposerAttachmentsStore.getState().pendingInserts).toEqual({});
+    expect(useComposerAttachmentsStore.getState().chips).toEqual({});
   });
 });
