@@ -117,7 +117,7 @@ key, and a few recipes need a URL or a model id. See
 
 ## Privacy and data
 
-- State stays on your machine in the smind home (`~/.smind`, or `SMIND_HOME`):
+- State stays on your machine in the sMind home (`~/.smind`, or `SMIND_HOME`):
   the database, `config.yaml` and the daemon log.
   [Configuration](public-docs/configuration.md),
   [Run the daemon](public-docs/running-the-daemon.md)
@@ -131,7 +131,7 @@ key, and a few recipes need a URL or a model id. See
 - The phone relay is end-to-end encrypted: it forwards sealed bytes and cannot
   read your code, prompts or agent output.
   [Mobile and relay pairing](public-docs/mobile-and-relay.md)
-- smind has no telemetry or analytics. Its network use is the providers and
+- sMind has no telemetry or analytics. Its network use is the providers and
   git hosts you connect, update checks against GitHub releases, a push service
   only when a phone has notifications on, and a relay only if you configure
   one.
