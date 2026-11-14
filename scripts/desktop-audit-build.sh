@@ -75,17 +75,23 @@ JSON
 echo "override: $conf"
 echo "identifier: $identifier"
 
+# The build target and the one tauri command line, fixed before the dry-run exit so a test can assert
+# on exactly what the real build runs. `audit-guard` compiles the launch guard in (see
+# docs/plans/active/desktop-audit-app-guard.md); only this script ever passes it.
+case $(uname -m) in
+  arm64 | aarch64) target=aarch64-apple-darwin goarch=arm64 ;;
+  x86_64) target=x86_64-apple-darwin goarch=amd64 ;;
+  *) die "unsupported architecture $(uname -m)" ;;
+esac
+tauri_args=(build --target "$target" --bundles app --features audit-guard --config "$conf")
+echo "tauri args: ${tauri_args[*]}"
+
 if [ "${DRY_RUN:-}" = 1 ]; then
   echo "DRY_RUN: stopping before any build"
   exit 0
 fi
 
 [ "$(uname -s)" = Darwin ] || die "the app build needs macOS (use DRY_RUN=1 to check the override only)"
-case $(uname -m) in
-  arm64) target=aarch64-apple-darwin goarch=arm64 ;;
-  x86_64) target=x86_64-apple-darwin goarch=amd64 ;;
-  *) die "unsupported architecture $(uname -m)" ;;
-esac
 
 version=$(jq -r .version desktop/src-tauri/tauri.conf.json)
 short=$(git rev-parse --short HEAD)
@@ -97,10 +103,13 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=$goarch go build -buildvcs=false \
   -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$version -X github.com/spacingmind/smind/internal/version.Commit=$short" \
   -o "desktop/src-tauri/binaries/smind-$target" ./cmd/smind
 
-(cd desktop && npm ci && npx tauri build --target "$target" --bundles app --config "$conf")
+(cd desktop && npm ci && npx tauri "${tauri_args[@]}")
 
 # CARGO_TARGET_DIR (if set) is honoured by cargo and by the copy below, so a cache can be shared.
 app="${CARGO_TARGET_DIR:-desktop/src-tauri/target}/$target/release/bundle/macos/sMind Audit.app"
 rm -rf "$out/sMind Audit.app"
 ditto "$app" "$out/sMind Audit.app"
 echo "built: $out/sMind Audit.app"
+
+# The built app must really carry the guard: launched without the scratch environment it has to refuse.
+"$(dirname "$0")/desktop-audit-smoke.sh" "$out/sMind Audit.app/Contents/MacOS/smind-desktop"

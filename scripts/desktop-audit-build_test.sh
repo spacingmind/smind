@@ -88,4 +88,21 @@ mkdir -p "$home/Library/Application Support/$real"
 ln -s "$home/Library/Application Support/$real" "$work/link"
 refused "refuses-symlink-to-real-app-data" "$work/link"
 
+# build-args-carry-the-guard-feature: the dry run prints the exact tauri command line the real build runs
+run "$work/args" || fail "build-args-carry-the-guard-feature: dry run failed"
+args="$(grep '^tauri args:' "$work/stdout" || true)"
+[ -n "$args" ] || fail "build-args-carry-the-guard-feature: the dry run printed no tauri args"
+case "$args" in *" --features audit-guard "*) ;; *) fail "build-args-carry-the-guard-feature: no --features audit-guard in: $args" ;; esac
+case "$args" in *" --bundles app "*) ;; *) fail "tauri args lack --bundles app: $args" ;; esac
+case "$args" in *" --config "*"/args/tauri.audit.conf.json") ;; *) fail "tauri args lack the override --config: $args" ;; esac
+# shellcheck disable=SC2016 # the pattern is the literal source text, not an expansion
+grep -q 'npx tauri "${tauri_args\[@\]}"' "$script" || fail "the real build does not run the printed tauri args"
+grep -q 'desktop-audit-smoke.sh' "$script" || fail "the build does not run the smoke check on the built app"
+
+# the guard stays out of every release path: not a default feature, and nothing but the audit script passes it
+grep -q '^default = \[\]$' "$repo/desktop/src-tauri/Cargo.toml" || fail "audit-guard must not be a default feature: Cargo.toml lacks default = []"
+if grep -rn 'audit-guard' "$repo/.github" "$repo/Taskfile.yml" "$repo/desktop/src-tauri/tauri.conf.json" "$repo/desktop/src-tauri/tauri.macos.conf.json" "$repo/desktop/package.json" >/dev/null 2>&1; then
+	fail "a workflow, Taskfile target or tauri config mentions audit-guard: the release build must not enable it"
+fi
+
 echo "desktop-audit-build_test: ok"
