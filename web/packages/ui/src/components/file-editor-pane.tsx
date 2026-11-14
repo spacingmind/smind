@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "@/lib/icons";
-import type { EditorView } from "@codemirror/view";
+import { EditorSelection } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 
 import { CodeMirrorEditor } from "@/components/code-mirror-editor";
 import { FileEditorFindBar, FileFindModel } from "@/components/file-editor-find-bar";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { fileTabKey } from "@/components/tab-registry";
+import { useFileRevealStore } from "@/stores/file-reveal-store";
 import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
@@ -156,6 +158,27 @@ export function TextEditorPane({
     // with the same ID shouldn't discard the user's in-progress edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, task.ID, path, applyRead]);
+
+  // Terminal-link reveals (DT3-A AC4): consume a queued line request once
+  // the file has actually loaded and the editor view exists. The store
+  // selector returns a fresh object per request (new nonce), so a second
+  // click on an already-open tab re-triggers this effect; `loading` in the
+  // deps re-runs it when the read finishes after the request was queued.
+  const revealRequest = useFileRevealStore((state) => state.requests[tabKey]);
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!revealRequest || loading || !view) return;
+    useFileRevealStore.getState().consume(tabKey);
+    const doc = view.state.doc;
+    const ln = doc.line(Math.min(Math.max(revealRequest.line, 1), doc.lines));
+    const pos = Math.min(ln.from + Math.max(revealRequest.col, 1) - 1, ln.to);
+    // Selecting the whole line is the visible mark; the cursor column is what scrollIntoView centers on.
+    view.dispatch({
+      selection: EditorSelection.range(ln.from, ln.to),
+      effects: EditorView.scrollIntoView(pos, { y: "center" }),
+    });
+    view.focus();
+  }, [revealRequest, loading, tabKey]);
 
   const setContent = useCallback((next: string) => {
     setContentState(next);
