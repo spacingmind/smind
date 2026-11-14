@@ -55,7 +55,7 @@ export function AppContextMenu({
 }: {
   entries: readonly MenuEntry[];
   children: ReactNode;
-  contentProps?: Omit<ComponentProps<typeof ContextMenuContent>, "children">;
+  contentProps?: Omit<ComponentProps<typeof ContextMenuContent>, "children"> & Record<`data-${string}`, string>;
   onOpenChange?: (open: boolean) => void;
   onDialogSelect?: () => void;
 }) {

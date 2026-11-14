@@ -47,13 +47,8 @@ import { TerminalTabReaper } from "@/hooks/use-terminal-tab-reaper";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { AppContextMenu } from "@/components/ui/app-context-menu";
+import { tabMenu } from "@/lib/menu-models";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -2524,8 +2519,36 @@ function DraggableTabTrigger({
   }
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
+    <AppContextMenu
+      entries={tabMenu({
+        kind: entry.kind,
+        path: entry.path,
+        closable: entry.closable,
+        hasOtherClosableTabs,
+        hasClosableTabsToLeft,
+        hasClosableTabsToRight,
+        canSplit: isMovableKind(entry.kind) && showMoveAffordance,
+        onClose: () => onClose(entry.key),
+        onCloseOthers: () => onCloseOthers(entry.key),
+        onCloseLeft: () => onCloseLeft(entry.key),
+        onCloseRight: () => onCloseRight(entry.key),
+        onRename: () => setRenaming(true),
+        onArchiveChat: () => onArchiveChat(entry),
+        onSplit: (direction) => onSplit(entry.key, direction),
+      })}
+      contentProps={{
+        "data-testid": "workspace-tab-context-menu",
+        "data-tab-key": entry.key,
+        // Radix's own dismiss-time focus restoration would otherwise move
+        // focus to whatever it considers "the trigger" right as this
+        // menu closes -- for Rename specifically, that trigger element
+        // has just been replaced by the rename <input>, so restoring
+        // focus there yanks it right back off. The explicit rAF-deferred
+        // focus above is what actually focuses the input; this only
+        // stops Radix's own attempt from fighting it.
+        onCloseAutoFocus: (e: Event) => e.preventDefault(),
+      }}
+    >
         <TabsTrigger
           ref={setNodeRef}
           value={entry.key}
@@ -2618,96 +2641,7 @@ function DraggableTabTrigger({
       )}
           </span>
         </TabsTrigger>
-      </ContextMenuTrigger>
-      <ContextMenuContent
-        data-testid="workspace-tab-context-menu"
-        data-tab-key={entry.key}
-        // Radix's own dismiss-time focus restoration would otherwise move
-        // focus to whatever it considers "the trigger" right as this
-        // menu closes -- for Rename specifically, that trigger element
-        // has just been replaced by the rename <input>, so restoring
-        // focus there yanks it right back off. The explicit rAF-deferred
-        // focus above is what actually focuses the input; this only
-        // stops Radix's own attempt from fighting it.
-        onCloseAutoFocus={(e) => e.preventDefault()}
-      >
-        <ContextMenuItem
-          disabled={!entry.closable}
-          onSelect={() => onClose(entry.key)}
-          data-testid="workspace-tab-menu-close"
-        >
-          Close
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!hasOtherClosableTabs}
-          onSelect={() => onCloseOthers(entry.key)}
-          data-testid="workspace-tab-menu-close-others"
-        >
-          Close others
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!hasClosableTabsToLeft}
-          onSelect={() => onCloseLeft(entry.key)}
-          data-testid="workspace-tab-menu-close-left"
-        >
-          Close to the left
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!hasClosableTabsToRight}
-          onSelect={() => onCloseRight(entry.key)}
-          data-testid="workspace-tab-menu-close-right"
-        >
-          Close to the right
-        </ContextMenuItem>
-        {(entry.kind === "terminal" || entry.kind === "chat" || (entry.kind === "file" && entry.path)) && (
-          <ContextMenuSeparator />
-        )}
-        {(entry.kind === "terminal" || entry.kind === "chat") && (
-          <ContextMenuItem onSelect={() => setRenaming(true)} data-testid="workspace-tab-menu-rename">
-            <Icons.edit />
-            Rename
-          </ContextMenuItem>
-        )}
-        {entry.kind === "chat" && (
-          <ContextMenuItem onSelect={() => onArchiveChat(entry)} data-testid="workspace-tab-menu-archive-chat">
-            <Icons.archive />
-            Archive chat
-          </ContextMenuItem>
-        )}
-        {entry.kind === "file" && entry.path && (
-          <ContextMenuItem
-            onSelect={() => {
-              void navigator.clipboard?.writeText(entry.path!).catch(() => {});
-            }}
-            data-testid="workspace-tab-menu-copy-path"
-          >
-            <Icons.copy />
-            Copy path
-          </ContextMenuItem>
-        )}
-        {isMovableKind(entry.kind) && showMoveAffordance && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => onSplit(entry.key, "left")} data-testid="workspace-tab-menu-split-left">
-              <Icons.splitColumns />
-              Split left
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => onSplit(entry.key, "right")} data-testid="workspace-tab-menu-split-right">
-              <Icons.splitColumns />
-              Split right
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => onSplit(entry.key, "up")} data-testid="workspace-tab-menu-split-up">
-              <Icons.splitRows />
-              Split up
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => onSplit(entry.key, "down")} data-testid="workspace-tab-menu-split-down">
-              <Icons.splitRows />
-              Split down
-            </ContextMenuItem>
-          </>
-        )}
-      </ContextMenuContent>
-    </ContextMenu>
+    </AppContextMenu>
   );
 }
 

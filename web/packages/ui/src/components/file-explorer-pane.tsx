@@ -3,13 +3,8 @@ import { Icons } from "@/lib/icons";
 
 import { AddToChatButton } from "@/components/add-to-chat-button";
 import { FileStatusMarker } from "@/components/file-status-marker";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { AppContextMenu } from "@/components/ui/app-context-menu";
+import { dirRowMenu, fileRowMenu } from "@/lib/menu-models";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/lib/file-icons";
 import { requestDiffReveal } from "@/lib/diff-reveal";
@@ -302,64 +297,13 @@ function RowContextMenu({
   pathActions: RowPathActions | null;
   children: ReactNode;
 }) {
-  const absolutePath = pathActions ? `${pathActions.root}/${path}` : null;
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent data-testid="file-row-menu" data-path={path}>
-        <ContextMenuItem
-          disabled={!changed}
-          onSelect={() => onRevealInDiff(path)}
-          data-testid="file-menu-reveal-in-diff"
-        >
-          <Icons.diff />
-          Reveal in diff
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!onOpenToSide}
-          onSelect={() => onOpenToSide?.(path)}
-          data-testid="file-menu-open-to-side"
-        >
-          <Icons.openToSide />
-          Open to side
-        </ContextMenuItem>
-        {onAddToChat && (
-          <ContextMenuItem onSelect={() => onAddToChat(path)} data-testid="file-menu-add-to-chat">
-            <Icons.mention />
-            Add to chat
-          </ContextMenuItem>
-        )}
-        <ContextMenuItem
-          onSelect={() => {
-            void navigator.clipboard?.writeText(path).catch(() => {});
-          }}
-          data-testid="file-menu-copy-path"
-        >
-          <Icons.copy />
-          Copy path
-        </ContextMenuItem>
-        {pathActions && absolutePath && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => pathActions.actions.reveal(absolutePath)} data-testid="file-menu-reveal">
-              <Icons.folderOpen />
-              {pathActions.actions.revealLabel}
-            </ContextMenuItem>
-            {pathActions.actions.editors.map((editor) => (
-              <ContextMenuItem
-                key={editor.id}
-                onSelect={() => pathActions.actions.open(editor.id, absolutePath)}
-                data-testid="file-menu-open-in-editor"
-                data-editor-id={editor.id}
-              >
-                <Icons.externalLink />
-                Open in {editor.label}
-              </ContextMenuItem>
-            ))}
-          </>
-        )}
-      </ContextMenuContent>
-    </ContextMenu>
+    <AppContextMenu
+      entries={fileRowMenu({ path, changed, onRevealInDiff, onOpenToSide, onAddToChat, pathActions })}
+      contentProps={{ "data-testid": "file-row-menu", "data-path": path }}
+    >
+      {children}
+    </AppContextMenu>
   );
 }
 
@@ -367,15 +311,9 @@ function RowContextMenu({
 function DirContextMenu({ path, onAddToChat, children }: { path: string; onAddToChat?: (path: string) => void; children: ReactNode }) {
   if (!onAddToChat) return <>{children}</>;
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent data-testid="dir-row-menu" data-path={path}>
-        <ContextMenuItem onSelect={() => onAddToChat(path)} data-testid="dir-menu-add-to-chat">
-          <Icons.mention />
-          Add to chat
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    <AppContextMenu entries={dirRowMenu({ path, onAddToChat })} contentProps={{ "data-testid": "dir-row-menu", "data-path": path }}>
+      {children}
+    </AppContextMenu>
   );
 }
 
