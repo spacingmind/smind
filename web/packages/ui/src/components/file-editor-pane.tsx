@@ -84,6 +84,8 @@ export function TextEditorPane({
   // the moment `pane.find` fires, never needing a render of its own.
   const findModel = useMemo(() => new FileFindModel(), []);
   const editorViewRef = useRef<EditorView | null>(null);
+  // State twin of the ref: the editor is lazy-loaded, so its view can appear after the file read -- a pending reveal must re-run then.
+  const [viewReady, setViewReady] = useState(false);
   const { focused: findFocused, onFocus: onFindFocus, onBlur: onFindBlur } = usePaneFocusWithin();
 
   // null for non-previewable files -- the Edit/Preview control doesn't
@@ -168,7 +170,7 @@ export function TextEditorPane({
   useEffect(() => {
     const view = editorViewRef.current;
     // `mtime` is set only when a read has returned: `loading` is false on the very first render, before the read starts.
-    if (!revealRequest || loading || mtime === null || !view) return;
+    if (!revealRequest || loading || mtime === null || !viewReady || !view) return;
     useFileRevealStore.getState().consume(tabKey);
     const doc = view.state.doc;
     const ln = doc.line(Math.min(Math.max(revealRequest.line, 1), doc.lines));
@@ -179,7 +181,7 @@ export function TextEditorPane({
       effects: EditorView.scrollIntoView(pos, { y: "center" }),
     });
     view.focus();
-  }, [revealRequest, loading, mtime, tabKey]);
+  }, [revealRequest, loading, mtime, viewReady, tabKey]);
 
   const setContent = useCallback((next: string) => {
     setContentState(next);
@@ -391,6 +393,7 @@ export function TextEditorPane({
                 findExtension={findModel.extension}
                 onViewReady={(view) => {
                   editorViewRef.current = view;
+                  setViewReady(view !== null);
                 }}
               />
               <FileEditorFindBar model={findModel} editor={editorViewRef} focused={findFocused} />
