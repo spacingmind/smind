@@ -74,6 +74,22 @@ describe("file reveal", () => {
     expect(useFileRevealStore.getState().requests[tabKey]).toBeUndefined();
   });
 
+  it("a request queued BEFORE the pane mounts (as the terminal link does) waits for the read, then selects the line", async () => {
+    const tabKey = fileTabKey(TASK.ID, PATH);
+    useFileRevealStore.getState().request(tabKey, 3);
+    const client = await mount();
+    // Still unread: the request must not have been spent on the empty initial document.
+    expect(useFileRevealStore.getState().requests[tabKey]).toBeDefined();
+
+    client.nth("file.read", 0).resolve({ content: CONTENT });
+    await flush();
+
+    const ln = view().state.doc.line(3);
+    expect(view().state.selection.main.from).toBe(ln.from);
+    expect(view().state.selection.main.to).toBe(ln.to);
+    expect(useFileRevealStore.getState().requests[tabKey]).toBeUndefined();
+  });
+
   it("clamps a line beyond the end of the document to the last line", async () => {
     const tabKey = fileTabKey(TASK.ID, PATH);
     const client = await mount();

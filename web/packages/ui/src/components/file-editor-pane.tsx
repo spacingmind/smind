@@ -167,7 +167,8 @@ export function TextEditorPane({
   const revealRequest = useFileRevealStore((state) => state.requests[tabKey]);
   useEffect(() => {
     const view = editorViewRef.current;
-    if (!revealRequest || loading || !view) return;
+    // `mtime` is set only when a read has returned: `loading` is false on the very first render, before the read starts.
+    if (!revealRequest || loading || mtime === null || !view) return;
     useFileRevealStore.getState().consume(tabKey);
     const doc = view.state.doc;
     const ln = doc.line(Math.min(Math.max(revealRequest.line, 1), doc.lines));
@@ -178,7 +179,7 @@ export function TextEditorPane({
       effects: EditorView.scrollIntoView(pos, { y: "center" }),
     });
     view.focus();
-  }, [revealRequest, loading, tabKey]);
+  }, [revealRequest, loading, mtime, tabKey]);
 
   const setContent = useCallback((next: string) => {
     setContentState(next);
