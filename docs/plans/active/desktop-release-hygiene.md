@@ -67,7 +67,7 @@ Mutation table (each must make the named test fail; recorded in Validation): com
 
 ## Progress
 
-- [ ] Item 1 verifier
+- [x] Item 1 verifier (script + 42 tests by peer-glm, CI wiring, `docs/release-verification.md`)
 - [ ] Item 2 CI-green gate
 - [ ] Item 3 crash capture
 - [ ] Item 4 `requireSignedVersion`
@@ -75,4 +75,10 @@ Mutation table (each must make the named test fail; recorded in Validation): com
 
 ## Validation
 
-(filled per item as each PR lands)
+### Item 1
+
+- `node --test scripts/verify-release-artifacts.test.mjs`: 42 pass (every test in the named list; a CLI exit-code test is added).
+- `actionlint .github/workflows/release-please.yml`: clean.
+- Mutations (each applied to the committed script, the named test failed, then restored): digest comparison off -> `verify-checksum-wrong-digest`; duplicate check off -> `verify-checksum-duplicate-entry`; prefix accepted in the sidecar match -> `verify-sidecar-prefix-version-not-accepted`; signature-equals-`.sig` comparison off -> `verify-latest-signature-mismatch`; `file:` comment check off -> `verify-minisig-wrong-file`.
+- Real Go binaries built with the release ldflags (linux/darwin host build and a windows/amd64 cross build) were confirmed to contain `internal/version.Version=<v>` in their build settings, the basis of AC7.
+- Not verified: a real release run (the workflow step runs only on `develop` pushes and dry-run dispatches; no dispatch was made from this branch).
