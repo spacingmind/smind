@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -330,7 +331,7 @@ func (p *Pruner) reclaim(ctx context.Context) int64 {
 // Start runs the daily job until ctx ends: the first pass shortly after start,
 // then every 24 hours. Passes never overlap.
 func (p *Pruner) Start(ctx context.Context) {
-	go func() {
+	crash.GoFatal("runs.pruneLoop", func() {
 		timer := time.NewTimer(p.startDelay)
 		defer timer.Stop()
 		for {
@@ -344,5 +345,5 @@ func (p *Pruner) Start(ctx context.Context) {
 			}
 			timer.Reset(pruneInterval)
 		}
-	}()
+	})
 }

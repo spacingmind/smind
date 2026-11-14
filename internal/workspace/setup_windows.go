@@ -79,6 +79,7 @@ func runScript(ctx context.Context, worktree, script string, env []string, timeo
 	}
 
 	done := make(chan error, 1)
+	// not under crash.Go: only forwards Wait's result to a channel
 	go func() { done <- cmd.Wait() }()
 
 	var timer <-chan time.Time

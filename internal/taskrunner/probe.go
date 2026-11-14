@@ -9,6 +9,7 @@ import (
 	"time"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/learning/probe/arm"
 	"github.com/spacingmind/smind/internal/learning/probe/sandbox"
 )
@@ -155,7 +156,7 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	)
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
-	go func() {
+	crash.GoFatal("taskrunner.probeForward", func() {
 		defer close(forwardDone)
 		for msg := range updates {
 			if sys, ok := msg.(claudecode.SystemMessage); ok && sys.Subtype == "init" {
@@ -196,7 +197,7 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 				}
 			}
 		}
-	}()
+	})
 
 	result, perr := client.Prompt(runCtx, prompt, updates)
 	<-forwardDone

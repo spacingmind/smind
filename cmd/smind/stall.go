@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/stall"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/wsapi"
@@ -44,10 +45,10 @@ func wireStallAlert(ctx context.Context, db *store.Store, api *wsapi.API, minute
 	api.SetStalledSource(det.Current)
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	go func() {
+	crash.GoFatal("smind.stallDetector", func() {
 		defer close(done)
 		det.Run(ctx, stallTickPeriod(minutes))
-	}()
+	})
 	return func() {
 		cancel()
 		<-done

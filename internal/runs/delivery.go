@@ -3,7 +3,9 @@ package runs
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -80,6 +82,7 @@ func (reg *Registry) withDelivery(ctx context.Context, r *run) context.Context {
 		func() {
 			defer func() {
 				if v := recover(); v != nil {
+					crash.Default().Record("runs.pluginSkillDelivery", v, debug.Stack())
 					slog.Error("runs: plugin skill delivery panicked; run proceeds without it", "run", r.id, "panic", v)
 					pd = taskrunner.Delivery{}
 				}
@@ -108,6 +111,7 @@ func (reg *Registry) withDelivery(ctx context.Context, r *run) context.Context {
 	func() {
 		defer func() {
 			if v := recover(); v != nil {
+				crash.Default().Record("runs.deliveryPrepare", v, debug.Stack())
 				slog.Error("runs: delivery provider panicked; run proceeds without delivery", "run", r.id, "panic", v)
 				d, oi = taskrunner.Delivery{}, OfferedInfo{}
 			}
