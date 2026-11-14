@@ -92,7 +92,7 @@ sizes, and the composer after a send. Desktop real-window frames only if the DT0
 
 - [x] spec
 - [x] A: matchers, resolver, link provider, reveal store and editor scroll (PR A, #889)
-- [ ] B: restart
+- [x] B: restart (PR B)
 - [ ] C: send set
 
 ## Validation
@@ -103,5 +103,10 @@ PR A: matcher, resolver, open-logic and reveal tests (`terminal-links.test.ts`, 
 all opened pairwise; a plain click opens nothing and Ctrl+click opens exactly one tab or one URL (browser popup count
 checked). The frames found two real bugs the unit tests missed (a reveal spent on the empty initial document; a reveal
 dropped when the lazy editor view appeared after the read), both fixed with tests. Two-axis review run before the PR (findings in the PR body).
-Not verified: a real daemon, the desktop webview (the `open_external` bridge is existing code), wrapped long lines
+PR B: `terminal-restart.test.tsx` (8 tests) plus the existing terminal suites; web 465 files / 5267 tests, mobile 116 / 1130,
+`tsc -b`, `vite build`. Mutations on committed code, all killed: restart ref guard removed (double-click test), stream-finish
+handler removed (shell-exit test), separator write removed, emulator reset removed, "no longer kept" branch removed.
+A first run of the ref-guard mutation SURVIVED (the test only used the disabled state); the test was strengthened (two clicks
+in one act) and the mutation then failed it. Frames: 12 (running, ended, restarted; light and dark; 1280 and 390), all opened.
+Not verified (PR A): a real daemon, the desktop webview (the `open_external` bridge is existing code), wrapped long lines
 (only the row under the pointer is scanned), mutation checks (the runs were not approved).
