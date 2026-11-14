@@ -35,7 +35,7 @@
 
 ## What sMind is
 
-smind is a self-hosted platform for running coding agents. It is one Go binary
+sMind is a self-hosted platform for running coding agents. It is one Go binary
 that serves both the API and a web interface, and it spreads agent traffic
 across your own provider accounts instead of a single shared pool. Each task
 runs in its own isolated git worktree, so several agents can work on one
@@ -55,7 +55,7 @@ desktop app, the command line or a phone.
 
 ## Get started
 
-1. [Install](public-docs/getting-started.md) smind.
+1. [Install](public-docs/getting-started.md) sMind.
 2. Start the daemon and open <http://localhost:4648> in a browser:
 
    ```sh
@@ -65,7 +65,7 @@ desktop app, the command line or a phone.
 3. Connect a provider under Settings → Providers: log in with the agent's own
    CLI, then check it with the Test button or `smind account test`. See
    [Providers](public-docs/providers.md).
-4. Add a workspace (an existing git repository) and create a task. smind gives
+4. Add a workspace (an existing git repository) and create a task. sMind gives
    the task its own worktree; send your prompt in the task's chat. See
    [Workspaces and tasks](public-docs/workspaces-and-tasks.md).
 
@@ -88,7 +88,7 @@ desktop app, the command line or a phone.
 - **Orchestrate**: a Lead agent launches Peer agents as child tasks, with
   budgets and stall alerts. [Orchestration](public-docs/orchestration.md)
 - **Automate**: start a task on a schedule or when a GitHub workflow fails
-  ([automations](public-docs/automations.md)); drive smind from scripts,
+  ([automations](public-docs/automations.md)); drive sMind from scripts,
   another agent over [MCP](public-docs/scripting-and-permissions.md), or the
   [CLI](public-docs/cli-reference.md).
 - **Reach it from anywhere**: desktop app, a phone paired through an
@@ -99,7 +99,7 @@ desktop app, the command line or a phone.
 
 ## Supported agents
 
-| Agent | How smind runs it | Login |
+| Agent | How sMind runs it | Login |
 | --- | --- | --- |
 | Claude Code | the `claude` command | the CLI's own login |
 | Codex | `codex app-server` | the CLI's own login |
@@ -107,10 +107,9 @@ desktop app, the command line or a phone.
 | Kimi | `kimi acp` | a logged-in Kimi Code CLI, or a Kimi API key |
 | OpenCode, GitHub Copilot, Cline, Goose, Cursor | over ACP, each with its own command | each agent's own login |
 
-Install each agent's own command first; smind does not install it for you
-(GLM downloads through `npx`). Of the ACP agents, only OpenCode has been
-checked (the real CLI against a local fake server); the others are not
-verified against a real login. Built-in recipes also point Claude Code or Codex at a
+Install each agent's own command first; sMind does not install it for you
+(GLM downloads through `npx`). OpenCode is tested; the other ACP agents are
+supported but not yet verified against a real login. Built-in recipes also point Claude Code or Codex at a
 compatible chat-completions endpoint, including local model servers: you paste a
 key, and a few recipes need a URL or a model id. See
 [Providers](public-docs/providers.md) and
