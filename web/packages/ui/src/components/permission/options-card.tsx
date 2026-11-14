@@ -101,6 +101,7 @@ export function OptionsCard({
         </div>
         {grantOffer && allowOnce && onAlwaysAllow && (
           <GrantControl
+            key={pending.requestId}
             offer={grantOffer}
             disabled={respondingTo !== null}
             onSave={async (allowProjectCode) => {

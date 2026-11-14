@@ -39,10 +39,14 @@ describe('the opt-in rule (the daemon is the guard; this is the human view of it
     expect(grantAllowProjectCode(RUNNER, false)).toBe(false);
   });
 
-  it('the class decides: an unknown class, or a runner flagged as needing no opt-in, still needs it', () => {
-    expect(grantNeedsOptIn({ class: 'mystery', requiresOptIn: false })).toBe(true);
-    expect(grantNeedsOptIn({ class: 'runner', requiresOptIn: false })).toBe(true);
-    expect(grantSaveEnabled({ class: 'mystery', requiresOptIn: false }, false, false)).toBe(false);
+  it('the class decides, both ways: an unknown class or a runner flagged as needing no opt-in still needs it; a read-only offer flagged as needing one does not', () => {
+    const runnerNoFlag: GrantOffer = { ...RUNNER, requiresOptIn: false };
+    const readonlyFlagged: GrantOffer = { ...READONLY, requiresOptIn: true };
+    expect(grantNeedsOptIn({ class: 'mystery' })).toBe(true);
+    expect(grantNeedsOptIn(runnerNoFlag)).toBe(true);
+    expect(grantSaveEnabled({ class: 'mystery' }, false, false)).toBe(false);
+    expect(grantNeedsOptIn(readonlyFlagged)).toBe(false);
+    expect(grantAllowProjectCode(readonlyFlagged, true)).toBe(false);
   });
 
   it('nothing saves while an answer is in flight', () => {

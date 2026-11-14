@@ -15,9 +15,9 @@ export const GRANT_NEEDS_OPT_IN_HINT = "Tick the box above to save this command.
 /** The opt-in's label when the daemon sends none (it always does today). */
 export const GRANT_OPT_IN_FALLBACK = "Also allow running this project's code (the agent can change it)";
 
-/** True when saving needs the project-code opt-in: the daemon says so, or the class is not a known read-only one. */
-export function grantNeedsOptIn(offer: Pick<GrantOffer, "class" | "requiresOptIn">): boolean {
-  return offer.requiresOptIn || offer.class !== "readonly";
+/** True when saving needs the project-code opt-in: the CLASS decides (anything but the known read-only class is a runner); the daemon's own flag cannot lower it, nor raise it for a read-only command (the daemon would refuse that opt-in). */
+export function grantNeedsOptIn(offer: Pick<GrantOffer, "class">): boolean {
+  return offer.class !== "readonly";
 }
 
 /** "Read-only" or "Runs project code": a text label for a class, never colour alone. */

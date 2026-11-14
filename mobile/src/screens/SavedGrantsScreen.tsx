@@ -54,7 +54,10 @@ export function SavedGrantsScreen({ conn }: { conn: RelayConnection }) {
     }
   }
 
-  return <SavedGrantsList rows={rows} error={error} onReload={reload} onRevoke={(row) => void onRevoke(row)} />;
+  return <SavedGrantsList rows={rows} error={error} onReload={() => {
+    setError(null);
+    reload();
+  }} onRevoke={(row) => void onRevoke(row)} />;
 }
 
 /** The list itself, presentational: the screen feeds it rows; the frames feed it fixtures. */

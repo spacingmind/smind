@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { SettingsGroup } from "@/components/settings/settings-layout";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FormError } from "@/components/ui/form-error";
@@ -80,7 +81,7 @@ function SavedGrantsSection(_ctx: SettingsSectionContext) {
               {grantStatusHint(g) && <div className="text-ui-sm text-foreground-muted">{grantStatusHint(g)}</div>}
               {g.status !== "revoked" && (
                 <div>
-                  <Button type="button" variant="outline" size="sm" data-testid={`grant-${g.id}-revoke`} onClick={() => setRevokeId(g.id)}>
+                  <Button type="button" variant="outline" size="sm" className={COMPACT_TOUCH_BUTTON_CLASS} data-testid={`grant-${g.id}-revoke`} onClick={() => setRevokeId(g.id)}>
                     Revoke
                   </Button>
                 </div>

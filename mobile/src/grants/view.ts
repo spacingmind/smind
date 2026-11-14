@@ -8,9 +8,9 @@ export const GRANT_BUTTON_LABEL = 'Always allow in this project';
 export const GRANT_NEEDS_OPT_IN_HINT = 'Tick the box above to save this command.';
 export const GRANT_OPT_IN_FALLBACK = "Also allow running this project's code (the agent can change it)";
 
-/** True when saving needs the project-code opt-in: the daemon says so, or the class is not the known read-only one. */
-export function grantNeedsOptIn(offer: Pick<GrantOffer, 'class' | 'requiresOptIn'>): boolean {
-  return offer.requiresOptIn || offer.class !== 'readonly';
+/** True when saving needs the project-code opt-in: the CLASS decides (anything but the known read-only class is a runner); the daemon's flag can neither lower it nor raise it for a read-only command. */
+export function grantNeedsOptIn(offer: Pick<GrantOffer, 'class'>): boolean {
+  return offer.class !== 'readonly';
 }
 
 export function grantClassLabel(klass: string): string {
@@ -44,13 +44,13 @@ export function grantStatusHint(g: Pick<SavedGrant, 'status'>): string {
   }
 }
 
-/** The label of the save control's enabled state: the opt-in must be ticked first for a runner. */
-export function grantSaveEnabled(offer: Pick<GrantOffer, 'class' | 'requiresOptIn'>, optIn: boolean, busy: boolean): boolean {
+/** Whether the save control is enabled: the opt-in must be ticked first for a runner, and nothing saves while busy. */
+export function grantSaveEnabled(offer: Pick<GrantOffer, 'class'>, optIn: boolean, busy: boolean): boolean {
   return !busy && (!grantNeedsOptIn(offer) || optIn);
 }
 
 /** Whether the save sends allowProjectCode: only a runner with its opt-in ticked. */
-export function grantAllowProjectCode(offer: Pick<GrantOffer, 'class' | 'requiresOptIn'>, optIn: boolean): boolean {
+export function grantAllowProjectCode(offer: Pick<GrantOffer, 'class'>, optIn: boolean): boolean {
   return grantNeedsOptIn(offer) && optIn;
 }
 

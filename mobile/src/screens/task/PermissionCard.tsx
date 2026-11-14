@@ -79,7 +79,7 @@ export const PermissionCard = memo(function PermissionCard({
               ),
             )}
           </View>
-          {request.detail?.grant && onAlwaysAllow && request.options.some((o) => o.kind === 'allow_once') ? (
+          {request.detail?.grant && !request.detail.gitRule && onAlwaysAllow && request.options.some((o) => o.kind === 'allow_once') ? (
             <GrantControl offer={request.detail.grant} busy={false} onSave={(allowProjectCode) => onAlwaysAllow(request.requestId, allowProjectCode)} />
           ) : null}
           {hasReject ? (

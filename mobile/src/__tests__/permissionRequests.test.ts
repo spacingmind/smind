@@ -341,6 +341,14 @@ describe('respondToPermissionAlways (scoped tap, fake connection)', () => {
     expect(calls[0][1]).toEqual({ runId: 'run-3', requestId: 'perm-g', optionId: 'allow', scope: 'project' });
   });
 
+  it('sends nothing for a git-rule request even if an offer is present', async () => {
+    const { conn, calls } = fakeConnection(() => ({}));
+    const board = new PermissionBoard();
+    board.requestReceived('run-3', { ...REQ_G, requestId: 'g', detail: { ...REQ_G.detail, gitRule: { id: 'x' } } });
+    await respondToPermissionAlways(conn, board, 'g', false);
+    expect(calls).toEqual([]);
+  });
+
   it('sends nothing for a request with no offer or no single-allow option', async () => {
     const { conn, calls } = fakeConnection(() => ({}));
     const board = new PermissionBoard();

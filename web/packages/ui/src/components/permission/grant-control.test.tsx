@@ -93,6 +93,14 @@ describe("GrantControl", () => {
     expect(screen.getByRole("button", { name: GRANT_BUTTON_LABEL })).toBeDisabled();
   });
 
+  it("a read-only offer whose flag claims an opt-in shows none (the daemon would refuse it): the class decides both ways", () => {
+    const onSave = vi.fn();
+    render(<GrantControl offer={{ ...READONLY, requiresOptIn: true }} disabled={false} onSave={onSave} />);
+    expect(screen.queryByTestId("grant-optin")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: GRANT_BUTTON_LABEL }));
+    expect(onSave).toHaveBeenCalledWith(false);
+  });
+
   it("renders agent-authored text inertly (no markup, no links)", () => {
     render(<GrantControl offer={{ ...READONLY, command: "echo <b>x</b> https://evil.example [a](https://evil.example)", project: "<i>p</i>" }} disabled={false} onSave={vi.fn()} />);
     const c = screen.getByTestId("grant-control");
@@ -114,9 +122,25 @@ describe("PermissionCard with a grant offer", () => {
     expect(screen.getByTestId("grant-control")).toBeInTheDocument();
   });
 
-  it("is not offered when the host gave no handler, nor for a git rule", () => {
+  it("is not offered when the host gave no handler", () => {
     render(<PermissionCard runId="r" pending={pending(READONLY)} onRespond={vi.fn()} onChat={vi.fn()} />);
     expect(screen.queryByTestId("grant-control")).toBeNull();
+  });
+
+  it("is not offered for a git rule, even if an offer is present", () => {
+    const withRule = pending(READONLY, { detail: { kind: "execute", command: "git push", grant: READONLY, gitRule: { id: "x", class: "always-ask", label: "push", command: "git push", perCall: true } } });
+    render(<PermissionCard runId="r" pending={withRule} onRespond={vi.fn()} onAlwaysAllow={vi.fn()} onChat={vi.fn()} />);
+    expect(screen.queryByTestId("grant-control")).toBeNull();
+  });
+
+  it("a ticked opt-in does not carry to the next request (a new requestId remounts the control, unticked)", () => {
+    const first = pending(RUNNER, { requestId: "req-A" });
+    const { rerender } = render(<PermissionCard runId="r" pending={first} onRespond={vi.fn()} onAlwaysAllow={vi.fn()} onChat={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("grant-optin"));
+    expect(screen.getByTestId("grant-optin")).toHaveAttribute("aria-checked", "true");
+    rerender(<PermissionCard runId="r" pending={pending(RUNNER, { requestId: "req-B" })} onRespond={vi.fn()} onAlwaysAllow={vi.fn()} onChat={vi.fn()} />);
+    expect(screen.getByTestId("grant-optin")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("grant-save")).toBeDisabled();
   });
 
   it("saving answers with the request's own single-allow option, not a typed one, and the runner's opt-in", async () => {

@@ -657,7 +657,7 @@ export function TaskDetailPane({
           {pendingRuns.map((run) => (
             <Fragment key={run.id}>
               {run.pendingPermission && (
-                <PermissionCard runId={run.id} pending={run.pendingPermission} onRespond={respondPermission} onAlwaysAllow={answerPermissionAlways} onChat={focusComposer} />
+                <PermissionCard key={run.pendingPermission.requestId} runId={run.id} pending={run.pendingPermission} onRespond={respondPermission} onAlwaysAllow={answerPermissionAlways} onChat={focusComposer} />
               )}
               {run.pendingQuestion && liveQuestion(run) && (
                 <QuestionCard

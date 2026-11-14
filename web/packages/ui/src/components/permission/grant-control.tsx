@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 
+import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -60,7 +61,7 @@ export function GrantControl({
         </label>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" size="sm" data-testid="grant-save" disabled={disabled || blocked} onClick={() => void onSave(needsOptIn && optIn)}>
+        <Button type="button" variant="outline" size="sm" className={COMPACT_TOUCH_BUTTON_CLASS} data-testid="grant-save" disabled={disabled || blocked} onClick={() => void onSave(needsOptIn && optIn)}>
           {GRANT_BUTTON_LABEL}
         </Button>
         {blocked && !disabled && (

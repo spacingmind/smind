@@ -35,6 +35,8 @@ export interface PermissionDetail {
   policy?: { ruleId?: string; why?: string; normalized?: string; action?: string };
   /** Present only on a request the daemon offers as "always allow in this project" (never in the demo, never for a git rule). */
   grant?: GrantOffer;
+  /** Present on a git-rule request; such a request is per call and never offers a grant (the daemon never sends both). */
+  gitRule?: unknown;
 }
 
 /** The wire params of a permission_request event/log-entry. */
@@ -235,7 +237,7 @@ export async function respondToPermissionAlways(
   const req = board.list().find((r) => r.requestId === requestId);
   if (!req || req.status !== 'pending') return;
   const allow = req.options.find((o) => o.kind === 'allow_once');
-  if (!allow || !req.detail?.grant) return;
+  if (!allow || !req.detail?.grant || req.detail.gitRule) return;
   board.choose(requestId, allow.id);
   try {
     await answerPermissionAlways(conn, req.runId, requestId, allow.id, allowProjectCode);
