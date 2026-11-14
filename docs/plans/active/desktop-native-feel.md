@@ -18,12 +18,12 @@ The macOS app-name menu and File/Edit/View/Window/Help with the accelerator tabl
 ### Acceptance criteria
 
 - AC1 In the desktop build, a right-click on a sidebar workspace row, a task row (including the same item set as its "more" menu), a workspace tab, a file row and a folder row pops a NATIVE menu at the pointer (Tauri `Menu::popup_at`), with the same items, order, separators, disabled state and "Move to space" submenu as the in-page menu has today. Choosing an item runs exactly the handler the in-page item would.
-- AC2 In the browser build (and whenever the desktop bridge is unavailable) the existing Radix menu renders exactly as today: same test ids, same behaviour. No `@tauri-apps/api` import is reachable in the browser build.
+- AC2 In the browser build the existing Radix menu renders exactly as today: same test ids, same behaviour (it is the same model drawn by the in-page renderer). No `@tauri-apps/api` import is reachable in the browser build. In the desktop build the Radix content is never rendered; if Rust refuses a model the menu is disarmed, reported closed and a warning is logged (there is no second, in-page, menu to fall back to).
 - AC3 Menus are data, not JSX: each of the five menus is built by one pure function into a menu model (`id`, `label`, `enabled`, `destructive`, `separator`, `children`), and BOTH renderers (Radix and native) consume that same model, so the two cannot drift.
-- AC4 The IPC carries descriptors only: the webview sends labels, opaque item ids and enabled flags and gets item ids back. It cannot make Rust run a path, a command or a URL through this channel. Rust validates the model (at most 64 entries and depth 2, ids 1-64 chars of `[A-Za-z0-9._:-]` and unique per menu, labels at most 120 characters with no control characters, a menu with no actionable item is refused) and refuses one that fails. The new command is added to `capabilities/proxy.json` by name (ADR-0013 section 2), no wildcard.
+- AC4 The IPC carries descriptors only: the webview sends labels, opaque item ids and enabled flags and gets item ids back. It cannot make Rust run a path, a command or a URL through this channel. Rust validates the model (at most 64 entries and depth 2, ids 1-64 chars of `[A-Za-z0-9._:-]` and unique per menu, labels at most 120 characters with no control characters, a menu with no item at all, only separators or empty submenus, is refused; a menu whose items are all disabled is still shown, as the in-page one is) and refuses one that fails. The new command is added to `capabilities/proxy.json` by name (ADR-0013 section 2), no wildcard.
 - AC5 A native menu's selection reaches only the menu that opened it: a stale selection (an earlier menu, a duplicate) is ignored, opening a second menu replaces the first, and a dismissed menu leaves no handler that fires later.
 - AC6 The web webview's own default menu stays suppressed everywhere else (D2.2 unchanged); editable fields keep their native Cut/Copy/Paste menu, which the new handler never intercepts.
-- AC7 Keyboard parity: the same menus open from the keyboard (Shift+F10 and the Menu key) on the focused row, natively on desktop.
+- AC7 Keyboard parity (best effort, not verified in a real window): the Menu key and Shift+F10 on the focused trigger open the same native menu, at the element's lower-left corner when the webview reports the event at 0,0.
 - AC8 Windows and Linux use the same path (the menu API is cross-platform); only macOS is verified here (stated limit).
 
 ### Named tests
@@ -62,7 +62,19 @@ Open question for the Supervisor before it is specified: where a window's layout
 ## Progress
 
 - 2026-11-15: spec written against `origin/wave/desktop` cb8593cce. The screen was locked, so real-window frames wait.
+- 2026-11-15: PR (a) built: `context_menu.rs` (the validated descriptor-only command, namespaced per open, TTL), `lib/menu-model.ts` + `lib/menu-models.tsx` (the five menus as pure builders), `AppContextMenu` + `MenuEntries` (two renderers), `lib/native-context-menu.ts` and the `platform.ts` bridge, the five sites converted (task row, workspace row, tab, file row, folder row); the Radix menus are byte-for-byte the same in the browser build (the existing sidebar, tab and explorer suites are unchanged and green).
 
 ## Validation
 
-(filled as each PR lands)
+### PR (a)
+
+- AC1 (native menus with the same items, order, separators, disabled state, submenu): per-menu table tests `menu-models.test.tsx` (file row 6 states, folder row, tab 7 states and handlers, workspace row, task row 11 states incl. Move to space and the tree actions) and `app-context-menu.desktop.test.tsx`. **Not verified in a real window:** the screen was locked (`CGSSessionScreenIsLocked`), so no `screencapture -l` frames of the native menus exist; they wait for an unlocked screen.
+- AC2: `app-context-menu.web.test.tsx` (the Radix menu from the model with its test ids, disabled and reachable-disabled items, never the desktop bridge), the unchanged sidebar, App and explorer suites, the e2e spec `context-menus.spec.ts` CM-01..CM-03 on the four projects, and the platform stub test.
+- AC3: one model, two renderers: `menu-model.ts`/`menu-models.tsx` feed both `MenuEntries` and `toNative`.
+- AC4: Rust `context_menu_validate_table` (15 cases), `context_menu_model_deserializes_only_its_own_fields` (a path, a command or an unknown kind is rejected at decode), `context_menu_command_takes_no_path_or_command`, `capability_allowlist_exact` and `capability_app_grants_match_build_rs_commands` (the new command named in `proxy.json` and `build.rs`, no wildcard).
+- AC5: Rust `context_menu_selection_of_a_stale_open_is_ignored` (an id both menus carry, so only the open id separates them), `..._after_the_ttl_...`; web `app-context-menu.desktop.test.tsx` (stale open, unknown id, disabled id, second menu replaces the first, a selection that beats Rust's answer, the time-out, a refused model).
+- AC6: unchanged `lib/desktop-context-menu.ts` and its tests; the handler stops the event only on a trigger that has a menu.
+- AC7: `app-context-menu.desktop.test.tsx` (Menu key, Shift+F10, the 0,0 keyboard report). Not verified in a real window.
+- AC8: the same Rust path on every platform; only macOS builds were run (`cargo test --lib`: 181 passed, `cargo clippy --all-targets` clean). Windows and Linux are not built or run here.
+- Mutations (committed code, one at a time, each failed its named test): duplicate ids accepted, a stale open accepted, the TTL ignored, `/` allowed in an id, a disabled item armed, no `stopPropagation`, the bridge accepting a stale open, the tab menu's Close-left always enabled, the tree action ignoring its availability.
+- Review: see the PR body.
