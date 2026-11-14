@@ -559,6 +559,14 @@ mod tests {
         std::os::unix::fs::symlink(&outside, &inner).unwrap();
         let q = inner.join("..").join("y");
         assert!(check(&fx.env(&q), Some(&fx.real_home())).is_err(), "{q:?}");
+        // the OS applies `..` to the link's target: scratch/up -> <home>/other, so scratch/up/../.smind is
+        // the real smind home, while the cleaner's reading (scratch/.smind) is harmless
+        let other_dir = fx.real_home().join("other");
+        std::fs::create_dir_all(&other_dir).unwrap();
+        let up = scratch.join("up");
+        std::os::unix::fs::symlink(&other_dir, &up).unwrap();
+        let r = up.join("..").join(".smind");
+        assert!(check(&fx.env(&r), Some(&fx.real_home())).is_err(), "{r:?}");
         // a link whose target is elsewhere, followed by `..`, is just scratch
         let other = fx.dir.path().join("elsewhere").join("deep");
         std::fs::create_dir_all(&other).unwrap();
