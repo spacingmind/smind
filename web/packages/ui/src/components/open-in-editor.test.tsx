@@ -72,7 +72,25 @@ async function flush(): Promise<void> {
   });
 }
 
+// In the desktop build the explorer's row menu is NATIVE (DT2 a): the page sends descriptors to `contextMenuShow` and
+// the chosen item comes back through `onContextMenuAction`. These hooks stand in for the Rust side.
+const native: { show: ReturnType<typeof vi.fn>; deliver: (id: string) => void; listener: ((s: { open: number; id: string }) => void) | null } = {
+  show: vi.fn(),
+  listener: null,
+  deliver(id) {
+    act(() => native.listener?.({ open: 1, id }));
+  },
+};
+
+/** Every item label the native menu was shown with, submenus flattened. */
+function nativeLabels(): string[] {
+  const entries = native.show.mock.calls.at(-1)?.[0] as Array<{ kind: string; label?: string; children?: Array<{ label?: string }> }> | undefined;
+  return (entries ?? []).flatMap((e) => (e.kind === "item" ? [e.label ?? ""] : e.kind === "submenu" ? (e.children ?? []).map((c) => c.label ?? "") : []));
+}
+
 function mockPlatform(opts: { current: Connection; openInEditor?: (id: string, path: string) => Promise<void> }) {
+  native.show = vi.fn(async () => 1);
+  native.listener = null;
   const openInEditor = vi.fn(opts.openInEditor ?? (() => Promise.resolve()));
   vi.doMock("@/lib/platform", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/lib/platform")>()),
@@ -85,6 +103,11 @@ function mockPlatform(opts: { current: Connection; openInEditor?: (id: string, p
       daemonStatus: () => Promise.reject(new Error("unused")),
       onDaemonProgress: () => () => {},
       onMenuAction: () => () => {},
+      contextMenuShow: native.show,
+      onContextMenuAction: (cb: (s: { open: number; id: string }) => void) => {
+        native.listener = cb;
+        return () => {};
+      },
     },
   }));
   return openInEditor;
@@ -118,6 +141,7 @@ async function mountSidebar() {
 }
 
 async function mountExplorer() {
+  vi.resetModules(); // the warm-up above cached the explorer against the real platform module; this scenario's mock must apply
   const { FileExplorerPane } = await import("@/components/file-explorer-pane");
   const { Toaster } = await import("@/components/ui/toast");
   const { renderWithClientProp } = await import("@/test/render-with-daemon");
@@ -131,7 +155,8 @@ async function mountExplorer() {
   client.nth("file.list", 0).resolve([{ name: "README.md", isDir: false, size: 1 }]);
   await flush();
   fireEvent.contextMenu(await screen.findByTestId("file-row"));
-  await screen.findByTestId("file-menu-copy-path");
+  await waitFor(() => expect(native.show).toHaveBeenCalled());
+  return nativeLabels();
 }
 
 describe("open in editor", () => {
@@ -145,9 +170,9 @@ describe("open in editor", () => {
       vi.resetModules();
 
       mockPlatform({ current });
-      await mountExplorer();
-      expect(screen.queryByText(/^Reveal in (?!diff$)/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/^Open in/)).not.toBeInTheDocument();
+      const labels = await mountExplorer();
+      expect(labels.some((l) => /^Reveal in (?!diff$)/.test(l))).toBe(false);
+      expect(labels.some((l) => /^Open in/.test(l))).toBe(false);
       cleanup();
       vi.resetModules();
     }
@@ -163,9 +188,9 @@ describe("open in editor", () => {
     vi.resetModules();
 
     mockPlatform({ current: LOCAL });
-    await mountExplorer();
-    expect(await screen.findByText("Reveal in Finder")).toBeInTheDocument();
-    expect(screen.getByText("Open in VS Code")).toBeInTheDocument();
+    const labels = await mountExplorer();
+    expect(labels).toContain("Reveal in Finder");
+    expect(labels).toContain("Open in VS Code");
   });
 
   it("open-in-editor-hidden-for-remote: items are absent in a non-desktop build", async () => {
@@ -210,7 +235,7 @@ describe("open in editor", () => {
   it("open-in-editor-passes-id-and-absolute-path: file row joins the worktree path and the relative path", async () => {
     const openInEditor = mockPlatform({ current: LOCAL });
     await mountExplorer();
-    fireEvent.click(await screen.findByText("Open in VS Code"));
+    native.deliver("open-in-editor:vscode");
     await waitFor(() => expect(openInEditor).toHaveBeenCalledTimes(1));
     // The worktree's trailing slash is trimmed so the join has exactly one.
     expect(openInEditor).toHaveBeenCalledWith("vscode", "/home/dev/repo-wt/README.md");
@@ -251,7 +276,8 @@ describe("open in editor", () => {
     client.nth("file.list", 0).resolve([{ name: "README.md", isDir: false, size: 1 }]);
     await flush();
     fireEvent.contextMenu(await screen.findByTestId("file-row"));
-    await screen.findByTestId("file-menu-copy-path");
-    expect(screen.queryByText(/^Reveal in (?!diff$)/)).not.toBeInTheDocument();
+    await waitFor(() => expect(native.show).toHaveBeenCalled());
+    expect(nativeLabels().some((l) => /^Reveal in (?!diff$)/.test(l))).toBe(false);
+    expect(nativeLabels()).toContain("Copy path");
   });
 });
