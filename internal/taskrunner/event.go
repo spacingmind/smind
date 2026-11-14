@@ -389,4 +389,9 @@ const (
 	// floor id a human cannot override already answered. PermissionRuleID
 	// carries the rule or floor id.
 	PermissionResolvedByPolicyDeny PermissionResolution = "policy_deny"
+
+	// PermissionResolvedByGrant is a saved grant (a human's earlier "allow
+	// always in this project" for this exact command) allowing the request:
+	// no human was asked. PermissionRuleID carries "grant:<id>".
+	PermissionResolvedByGrant PermissionResolution = "grant"
 )

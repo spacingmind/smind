@@ -112,14 +112,14 @@ func withPolicy(detail *taskrunner.PermissionDetail, info taskrunner.PolicyInfo)
 // human path with detailOut, which carries the policy footprint when the
 // engine was on. An allow the provider gave no allow_once option for is an
 // ask: the engine never picks an "always" option.
-func (d runPermissionDecider) applyPolicy(requestID, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (optionID, denyReason string, handled bool, detailOut *taskrunner.PermissionDetail) {
+func (d runPermissionDecider) applyPolicy(requestID, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (optionID, denyReason string, handled bool, detailOut *taskrunner.PermissionDetail, grantable bool) {
 	engine := d.reg.getPolicyEngine()
 	if engine == nil {
-		return "", "", false, detail
+		return "", "", false, detail, false
 	}
 	dec, on := engine.Evaluate(d.policyRequest(requestID, summary, detail))
 	if !on {
-		return "", "", false, detail
+		return "", "", false, detail, false
 	}
 	info := taskrunner.PolicyInfo{RuleID: dec.RuleID, Why: dec.Why, Normalized: dec.Normalized, Action: string(dec.Action)}
 	if dec.RuleID == "" {
@@ -129,7 +129,7 @@ func (d runPermissionDecider) applyPolicy(requestID, summary string, detail *tas
 	case permpolicy.ActionAllow:
 		if id, ok := firstOptionByKind(options, "allow_once"); ok {
 			d.recordPolicyResolved(requestID, summary, withPolicy(detail, info), options, id, taskrunner.PermissionResolvedByPolicyAllow, dec.RuleID)
-			return id, "", true, detail
+			return id, "", true, detail, false
 		}
 	case permpolicy.ActionDeny:
 		ruleID := dec.FloorID
@@ -140,13 +140,13 @@ func (d runPermissionDecider) applyPolicy(requestID, summary string, detail *tas
 		}
 		id, _ := firstOptionByKind(options, "reject_once", "reject_always")
 		if id == "" {
-			return "", "", true, detail
+			return "", "", true, detail, false
 		}
 		d.recordPolicyResolved(requestID, summary, withPolicy(detail, info), options, id, taskrunner.PermissionResolvedByPolicyDeny, ruleID)
-		return id, reason, true, detail
+		return id, reason, true, detail, false
 	}
 	info.Action = string(permpolicy.ActionAsk)
-	return "", "", false, withPolicy(detail, info)
+	return "", "", false, withPolicy(detail, info), dec.Grantable && dec.Action == permpolicy.ActionAsk
 }
 
 func (d runPermissionDecider) recordPolicyResolved(requestID, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption, optionID string, resolution taskrunner.PermissionResolution, ruleID string) {
