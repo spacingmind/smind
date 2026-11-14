@@ -166,6 +166,21 @@ func Recover(site string) {
 	}
 }
 
+// RecordAndRepanic is for the daemon's main goroutine (`defer
+// crash.RecordAndRepanic("main")`): a panic there must still end the process,
+// but it is recorded first. It records on the process-default recorder and
+// panics again with the same value.
+func RecordAndRepanic(site string) {
+	v := recover()
+	if v == nil {
+		return
+	}
+	if r := Default(); r != nil {
+		r.Record(site, v, debug.Stack())
+	}
+	panic(v)
+}
+
 // Go runs fn on a new goroutine with Recover(site) installed, so a panic in
 // fn ends that goroutine only.
 func Go(site string, fn func()) {

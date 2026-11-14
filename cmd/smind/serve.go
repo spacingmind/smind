@@ -20,6 +20,7 @@ import (
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/automation"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/logging"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/providers"
@@ -41,6 +42,11 @@ import (
 // is the previous (pre-subcommand) main()'s entire body, unchanged except
 // for the SMIND_ACP_COMMAND hook below.
 func cmdServe(args []string) int {
+	// Before anything starts a goroutine: a panic anywhere in the daemon is
+	// recorded locally (redacted, never uploaded). The main goroutine's own
+	// panic is recorded and then still ends the process.
+	initCrash()
+	defer crash.RecordAndRepanic("serve")
 	if len(args) != 0 {
 		// Launch flags were removed (ADR-0031 D10): one documented place
 		// configures the daemon, the same for a terminal, a service and Docker.

@@ -3,9 +3,12 @@ package wsapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/runs"
 )
 
@@ -258,6 +261,18 @@ func (c *conn) dispatch(connCtx context.Context, env envelope) {
 	c.mu.Lock()
 	c.inflight[env.ID] = &inflightRequest{cancel: cancel}
 	c.mu.Unlock()
+
+	// A panic in any method must not take the daemon down, nor leave the
+	// caller waiting: record it (redacted, local only) and answer with a
+	// generic internal error. Registered after the in-flight entry so the
+	// answer goes through the one-terminal-response guard; cancel() above
+	// still runs afterwards.
+	defer func() {
+		if v := recover(); v != nil {
+			crash.Default().Record("wsapi.dispatch", v, debug.Stack())
+			c.sendError(env.ID, errors.New("internal error"))
+		}
+	}()
 
 	ident, scoped := c.identity()
 	rc := &requestContext{conn: c, id: env.ID, runScoped: scoped, ident: ident, local: c.local, deviceID: c.deviceID, channel: c.channel}
