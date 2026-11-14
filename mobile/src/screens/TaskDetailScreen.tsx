@@ -57,7 +57,7 @@ import { taskHref } from '../navigation/routes';
 import { recallSelection } from '../newTaskPrefs';
 import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
-import { answerToQuestion, feedQuestionEvent, QuestionBoard, QuestionState } from '../questionRequests';
+import { answerToQuestion, feedQuestionEvent, QuestionBoard, QuestionState, showsCard } from '../questionRequests';
 import type { QuestionAnswer } from '../questionAnswer';
 import { RelayConnection } from '../relay/RelayConnection';
 import { useConnectionState } from '../relay/useConnectionState';
@@ -304,6 +304,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
     setContinued(false);
     setLines([]);
     setPermissions([]);
+    questionBoard.clear();
     setQuestions([]);
     setHistory(undefined);
     attachedRuns.current.clear();
@@ -598,7 +599,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
 
   const handleQuestionAnswer = useCallback(
     (requestId: string, answer: QuestionAnswer) => {
-      hapticFor('permission');
+      hapticFor('permission'); // the same "a human decided" tap as a permission answer
       void answerToQuestion(conn, questionBoard, requestId, answer);
     },
     [conn, questionBoard],
@@ -762,7 +763,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
         case 'permission':
           return <PermissionCard request={item.request} onRespond={handlePermissionTap} onReveal={handlePermissionReveal} />;
         case 'question':
-          return item.state.status === 'pending' ? <QuestionCard state={item.state} onAnswer={handleQuestionAnswer} /> : <QuestionMarker state={item.state} />;
+          return showsCard(item.state) ? <QuestionCard state={item.state} onAnswer={handleQuestionAnswer} /> : <QuestionMarker state={item.state} />;
         case 'error':
           return <ErrorCard message={item.message} raw={item.raw} zoneNote={item.zoneNote} />;
         case 'footer':

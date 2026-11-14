@@ -104,7 +104,7 @@ and card, the mobile timeline marker, the `question` push kind (daemon and mobil
 ### Test scenarios (PR3)
 
 Go: `TestPush_QuestionTitleOnly`, `TestPush_QuestionKindIsSubscribable`, `TestPush_QuestionDedupedByRequestID`, `TestPushInput_QuestionPendingMapsToQuestionKind`, `TestPushInput_QuestionResolvedNeverNotifies`.
-Mobile (vitest): `questionRequests.test.ts` (board from history, live resolve beats tap, failed answer rolls back only without an event, double tap, unknown resolution, history pair lands resolved), `questionAnswer.test.ts` (draft validity, answers payload, empty fields omitted, decline note trimmed and rune-clamped, single/other exclusion, multi), `questionResolution.test.ts` (every resolution word), `questionCard.test.tsx` or a pure-view-model equivalent (no preselect, inert text, collapse threshold, submit-disabled reason), `pushQuestion.test.ts` (open and routing of kind `question`), `taskTree.test.ts` additions (waiting_question label/tone/rollup), `inboxView.test.ts` unchanged.
+Mobile (vitest): `questionRequests.test.ts` (board from history, a refusal that has no request becomes a closed marker, a resolution that raced its request stays resolved, live resolve beats tap, failed answer rolls back only without an event, the card stays mounted while an answer is in flight, `clear()` on reload, double tap, unknown resolution), `questionAnswer.test.ts` (draft validity, no preselect, payload, empty fields omitted, decline note trimmed and rune-clamped, single/other exclusion), `questionView.test.ts` (collapse thresholds pinned to the web numbers, every resolution word, summaries), `questionSafety.test.ts` (source scan: no link opening, no markdown, no approve/merge/always-allow wording), `push/__tests__/open.test.ts` and `register.test.ts` (kind `question` opens, is subscribed, old-daemon fallback), `taskTree.test.ts` and `coalesceMessages.test.ts` additions. There is no rendered-component unit test (the repo has no RN renderer in vitest): the rendering is shown by the frames below.
 Frames (390 light+dark, component-level, see Validation): single, multi, other, free text, adversarial, long collapsed and expanded, submit disabled with reason, submitting, resolved marker per outcome (answered, declined, timeout, refused secret, restart).
 
 ### PR3 limits (stated up front)
@@ -112,6 +112,15 @@ Frames (390 light+dark, component-level, see Validation): single, multi, other, 
 - No device and no daemon-driven question exist in the mobile smoke harness, so the frames are component-level (the real card on fixtures through the web target), not a daemon round trip.
 - An already registered device that stored an explicit kinds list does not receive `question` pushes until it re-registers (it does on the next app start with the new build, since `ALL_KINDS` grows).
 - `waiting_question` does not come from the task tree yet.
+- The push title is the task title like every other kind; for a task an orchestrator created that title is agent-authored (already true of the permission, done and error pushes). Question pushes are not rate limited beyond the daemon's repeat guard.
+- A pending card of a run that ended without a `question_resolved` event (a daemon from before the restart marker) stays answerable and fails with an inline error; the daemon is the authority.
+- ADR-0055 and ADR-0040 still list the push kinds without `question` (doc follow-up); `seal.go` needed no change (the kind is a string).
+
+### PR3 validation
+
+Review (two fresh-context axes, Standards and Spec/attack) found and this PR fixed: refusals have no `question_request`, so their resolution was dropped (now a closed marker); a failed answer remounted the card and lost the drafts (the card now stays mounted while the answer is in flight); a reconnect left the board holding entries so a pending question vanished (the board is cleared on reload); a resolution racing its request left a stale card (the request fills the placeholder); text-input `maxLength` counted UTF-16 units against a rune cap; ellipsis cuts split surrogate pairs.
+AC3.1-AC3.5: `questionAnswer.test.ts`, `questionView.test.ts`, frames 01-09. AC3.3: `questionRequests.test.ts` (refusal marker). AC3.6: `TestPush_*`, `TestPushInput_*`, `open.test.ts`, `register.test.ts`. AC3.7: `taskTree.test.ts`. AC3.8: both suites, `questionSafety.test.ts`.
+Mutations run (committed code, one at a time): body from `Summary` fails `TestPush_QuestionTitleOnly`; resolved mapped to a push fails `TestPushInput_QuestionResolvedNeverNotifies`; `question` out of `AllKinds` fails `TestPush_QuestionKindIsSubscribable`; rollback after an event fails `questionRequests.test.ts`; Submit unblocked fails `questionAnswer.test.ts`; collapse threshold raised fails `questionView.test.ts`.
 
 ## Open items (from review, not in PR1)
 

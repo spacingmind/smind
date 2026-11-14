@@ -40,11 +40,17 @@ export function resolutionNeedsAttention(reason: string | undefined): boolean {
   return reason === 'timeout' || reason === 'refused_secret' || reason === 'daemon_restart' || reason === 'run_ended';
 }
 
+/** At most max characters (not UTF-16 units: a surrogate pair is never split), ending in an ellipsis when cut. */
+function cap(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : text;
+}
+
 /** The one-line trace of what was asked: the first question's text, capped at 120 characters. */
 export function questionSummary(request: QuestionRequest | undefined): string {
   const text = request?.questions?.[0]?.text?.trim();
   if (!text) return 'Agent asked a question';
-  return text.length > 120 ? `${text.slice(0, 119)}…` : text;
+  return cap(text, 120);
 }
 
 function labelsOf(question: Question, optionIds: readonly string[]): string[] {
@@ -63,5 +69,5 @@ export function answerSummary(request: QuestionRequest | undefined, answer: Ques
     if (bits.length > 0) parts.push(bits.join(', '));
   }
   const joined = parts.join(' · ');
-  return joined.length > 160 ? `${joined.slice(0, 159)}…` : joined;
+  return cap(joined, 160);
 }

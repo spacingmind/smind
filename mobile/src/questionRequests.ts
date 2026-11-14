@@ -50,15 +50,31 @@ export class QuestionBoard {
 
   /** A question_request from history or a live attach. A duplicate (the attach backfill) changes nothing. */
   requestReceived(runId: string, requestId: string, request: QuestionRequest | undefined): void {
-    if (!requestId || !request || !Array.isArray(request.questions) || this.requests.has(requestId)) return;
+    if (!requestId || !request || !Array.isArray(request.questions)) return;
+    const existing = this.requests.get(requestId);
+    if (existing) {
+      // A resolution that arrived first (a refusal never emits a request, and live events can race the history) holds an
+      // empty placeholder: the request fills it in, and it stays resolved. Anything else is a duplicate (the attach backfill).
+      if (existing.request.questions.length === 0 && request.questions.length > 0) {
+        existing.request = request;
+        this.onChange();
+      }
+      return;
+    }
     this.requests.set(requestId, { runId, requestId, request, status: 'pending', error: null });
     this.onChange();
   }
 
   /** A question_resolved from history or a live attach: authoritative over any optimistic state, whatever closed it. */
-  resolvedEvent(requestId: string, reason: string | undefined, answer: QuestionAnswer | undefined): void {
-    const req = this.requests.get(requestId);
-    if (!req) return;
+  resolvedEvent(runId: string, requestId: string, reason: string | undefined, answer: QuestionAnswer | undefined): void {
+    if (!requestId) return;
+    // A resolution with no request seen yet is kept as a placeholder, not dropped: the daemon records a refusal (secret,
+    // unsupported form, repeat, profile decline, no human) as a resolution alone, and the human should still see it.
+    let req = this.requests.get(requestId);
+    if (!req) {
+      req = { runId, requestId, request: { source: '', questions: [] }, status: 'pending', error: null };
+      this.requests.set(requestId, req);
+    }
     req.status = 'resolved';
     req.resolution = { reason: reason ?? '', by: 'event', ...(answer ? { answer } : {}) };
     req.error = null;
@@ -69,7 +85,7 @@ export class QuestionBoard {
   applyLogEvents(runId: string, events: unknown[]): void {
     for (const ev of events as QuestionLogEntry[]) {
       if (ev.type === 'question_request') this.requestReceived(runId, ev.requestId ?? '', ev.question);
-      else if (ev.type === 'question_resolved') this.resolvedEvent(ev.requestId ?? '', ev.reason, ev.questionAnswer);
+      else if (ev.type === 'question_resolved') this.resolvedEvent(runId, ev.requestId ?? '', ev.reason, ev.questionAnswer);
     }
   }
 
@@ -93,9 +109,22 @@ export class QuestionBoard {
     this.onChange();
   }
 
+  /** Forgets every request: a screen that reloads its runs (a reconnect, another chat) re-feeds the board from history. */
+  clear(): void {
+    this.requests.clear();
+  }
+
   list(): QuestionState[] {
     return [...this.requests.values()];
   }
+}
+
+/**
+ * Whether the card (rather than the closed marker) shows: while pending, and while this device's own answer is in flight
+ * (so a rejected answer finds the card, with its drafts, still mounted). Only an authoritative event closes it.
+ */
+export function showsCard(state: QuestionState): boolean {
+  return state.status === 'pending' || state.resolution?.by === 'tap';
 }
 
 /** Routes one live attach event into the board; true if it was a question event (those never render as timeline text). */
@@ -107,7 +136,7 @@ export function feedQuestionEvent(board: QuestionBoard, runId: string, event: st
   }
   if (event === 'question_resolved') {
     const p = params as QuestionResolvedParams;
-    board.resolvedEvent(p?.requestId, p?.reason, p?.answer);
+    board.resolvedEvent(runId, p?.requestId, p?.reason, p?.answer);
     return true;
   }
   return false;

@@ -12,7 +12,6 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button } from '@expo/ui';
 import {
   Draft,
-  MAX_ANSWER_CHARS,
   MAX_NOTE_CHARS,
   Question,
   QuestionAnswer,
@@ -46,7 +45,8 @@ export const QuestionCard = memo(function QuestionCard({
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [note, setNote] = useState('');
   const questions = state.request.questions;
-  const blocked = submitBlockedReason(questions, drafts);
+  const sending = state.status === 'resolved'; // this device's answer is in flight; an event (not a tap) closes the card
+  const blocked = sending ? 'Sending your answer…' : submitBlockedReason(questions, drafts);
 
   return (
     <Card style={styles.card}>
@@ -59,6 +59,7 @@ export const QuestionCard = memo(function QuestionCard({
           key={q.id}
           question={q}
           draft={draftOf(drafts, q.id)}
+          disabled={sending}
           onChange={(next) => setDrafts((prev) => ({ ...prev, [q.id]: next }))}
         />
       ))}
@@ -85,13 +86,13 @@ export const QuestionCard = memo(function QuestionCard({
             variant="filled"
             disabled={blocked !== null}
             onPress={() => {
-              const payload = submitPayload(questions, drafts);
+              const payload = sending ? null : submitPayload(questions, drafts);
               if (payload) onAnswer(state.requestId, payload);
             }}
             style={styles.button}
           />
         </UiHost>
-        <TextButton label="Decline" onPress={() => onAnswer(state.requestId, declinePayload(note))} />
+        <TextButton label="Decline" disabled={sending} onPress={() => onAnswer(state.requestId, declinePayload(note))} />
       </View>
       {state.error !== null ? (
         <Text style={styles.error} selectable>
@@ -102,7 +103,7 @@ export const QuestionCard = memo(function QuestionCard({
   );
 });
 
-function QuestionField({ question, draft, onChange }: { question: Question; draft: Draft; onChange: (next: Draft) => void }) {
+function QuestionField({ question, draft, disabled, onChange }: { question: Question; draft: Draft; disabled: boolean; onChange: (next: Draft) => void }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [expanded, setExpanded] = useState(false);
@@ -132,6 +133,7 @@ function QuestionField({ question, draft, onChange }: { question: Question; draf
                 accessibilityRole={question.kind === 'multi' ? 'checkbox' : 'radio'}
                 accessibilityState={{ checked: selected }}
                 accessibilityLabel={option.label}
+                disabled={disabled}
                 onPress={() => onChange(toggleOption(question, draft, option.id))}
                 style={({ pressed }) => [styles.option, selected && styles.optionSelected, pressed && styles.pressed]}
               >
@@ -160,7 +162,7 @@ function QuestionField({ question, draft, onChange }: { question: Question; draf
           placeholder="Type your answer…"
           placeholderTextColor={theme.foregroundSubtlest}
           multiline
-          maxLength={MAX_ANSWER_CHARS}
+          editable={!disabled}
           accessibilityLabel={`Answer: ${question.text.slice(0, 80)}`}
         />
       ) : question.allowOther ? (
@@ -170,6 +172,7 @@ function QuestionField({ question, draft, onChange }: { question: Question; draf
             style={styles.input}
             value={draft.otherText}
             onChangeText={(next) => onChange(setOtherText(question, draft, next))}
+            editable={!disabled}
             placeholder="Type another answer…"
             placeholderTextColor={theme.foregroundSubtlest}
             accessibilityLabel={`Other answer: ${question.text.slice(0, 80)}`}

@@ -40,7 +40,7 @@ export interface QuestionAnswer {
   note?: string;
 }
 
-/** The daemon's caps (ADR-0055 section 1), in runes: one constant each for the field and the clamp. */
+/** The daemon's caps (ADR-0055 section 1), in runes (characters), enforced by the clamp helpers; inputs carry no UTF-16 maxLength of their own. */
 export const MAX_ANSWER_CHARS = 2000;
 export const MAX_NOTE_CHARS = 500;
 

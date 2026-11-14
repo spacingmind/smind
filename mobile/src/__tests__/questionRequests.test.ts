@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { answerQuestion } from '../api';
 import type { QuestionAnswer, QuestionRequest } from '../questionAnswer';
-import { answerToQuestion, feedQuestionEvent, QuestionBoard } from '../questionRequests';
+import { answerToQuestion, feedQuestionEvent, QuestionBoard, showsCard } from '../questionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
 
@@ -58,7 +58,7 @@ describe('QuestionBoard', () => {
     board.requestReceived('run-1', 'rq-1', REQ);
     board.choose('rq-1', ANSWER);
     expect(board.list()[0].resolution).toMatchObject({ by: 'tap', reason: 'human' });
-    board.resolvedEvent('rq-1', 'timeout', undefined);
+    board.resolvedEvent('run-1', 'rq-1', 'timeout', undefined);
     expect(board.list()[0].resolution).toEqual({ reason: 'timeout', by: 'event' });
   });
 
@@ -72,7 +72,7 @@ describe('QuestionBoard', () => {
   it('a second tap after resolution changes nothing', () => {
     const board = new QuestionBoard();
     board.requestReceived('run-1', 'rq-1', REQ);
-    board.resolvedEvent('rq-1', 'declined', undefined);
+    board.resolvedEvent('run-1', 'rq-1', 'declined', undefined);
     board.choose('rq-1', ANSWER);
     expect(board.list()[0].resolution?.by).toBe('event');
   });
@@ -90,7 +90,7 @@ describe('QuestionBoard', () => {
     const board = new QuestionBoard();
     board.requestReceived('run-1', 'rq-1', REQ);
     board.choose('rq-1', ANSWER);
-    board.resolvedEvent('rq-1', 'timeout', undefined);
+    board.resolvedEvent('run-1', 'rq-1', 'timeout', undefined);
     board.chooseFailed('rq-1', 'already resolved');
     expect(board.list()[0]).toMatchObject({ status: 'resolved', error: null, resolution: { reason: 'timeout', by: 'event' } });
   });
@@ -98,8 +98,52 @@ describe('QuestionBoard', () => {
   it('an unknown resolution reason is kept as its raw word', () => {
     const board = new QuestionBoard();
     board.requestReceived('run-1', 'rq-1', REQ);
-    board.resolvedEvent('rq-1', 'brand_new_reason', undefined);
+    board.resolvedEvent('run-1', 'rq-1', 'brand_new_reason', undefined);
     expect(board.list()[0].resolution?.reason).toBe('brand_new_reason');
+  });
+});
+
+describe('resolutions without (or before) a request, and the card lifetime', () => {
+  it('a refusal has no request event: the resolution alone becomes a closed marker, not dropped', () => {
+    const board = new QuestionBoard();
+    board.resolvedEvent('run-1', 'rq-9', 'refused_secret', undefined);
+    expect(board.list()).toHaveLength(1);
+    expect(board.list()[0]).toMatchObject({ runId: 'run-1', requestId: 'rq-9', status: 'resolved', resolution: { reason: 'refused_secret', by: 'event' } });
+    expect(showsCard(board.list()[0])).toBe(false);
+  });
+
+  it('a resolution that raced ahead of its request keeps the request and stays resolved (never a live card)', () => {
+    const board = new QuestionBoard();
+    board.resolvedEvent('run-1', 'rq-1', 'timeout', undefined);
+    board.requestReceived('run-1', 'rq-1', REQ);
+    expect(board.list()).toHaveLength(1);
+    expect(board.list()[0]).toMatchObject({ status: 'resolved', request: REQ });
+    expect(showsCard(board.list()[0])).toBe(false);
+  });
+
+  it('the card stays mounted while this device answer is in flight, and after a rollback (drafts survive); only an event closes it', () => {
+    const board = new QuestionBoard();
+    board.requestReceived('run-1', 'rq-1', REQ);
+    expect(showsCard(board.list()[0])).toBe(true);
+    board.choose('rq-1', ANSWER);
+    expect(showsCard(board.list()[0])).toBe(true);
+    board.chooseFailed('rq-1', 'network');
+    expect(showsCard(board.list()[0])).toBe(true);
+    board.choose('rq-1', ANSWER);
+    board.resolvedEvent('run-1', 'rq-1', 'human', ANSWER);
+    expect(showsCard(board.list()[0])).toBe(false);
+  });
+
+  it('clear() forgets everything, so a reload re-feeds the board and a still-pending question reappears', () => {
+    const board = new QuestionBoard();
+    let changes = 0;
+    board.requestReceived('run-1', 'rq-1', REQ);
+    board.onChange = () => changes++;
+    board.clear();
+    expect(board.list()).toEqual([]);
+    board.requestReceived('run-1', 'rq-1', REQ);
+    expect(changes).toBe(1);
+    expect(board.list()[0].status).toBe('pending');
   });
 });
 
@@ -161,7 +205,7 @@ describe('answerToQuestion (tap flow, fake connection)', () => {
     const { conn, calls } = fakeConnection(() => ({}));
     const board = new QuestionBoard();
     board.requestReceived('run-9', 'rq-1', REQ);
-    board.resolvedEvent('rq-1', 'timeout', undefined);
+    board.resolvedEvent('run-1', 'rq-1', 'timeout', undefined);
     await answerToQuestion(conn, board, 'rq-1', ANSWER);
     await answerToQuestion(conn, board, 'nope', ANSWER);
     expect(calls).toEqual([]);
