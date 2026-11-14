@@ -76,3 +76,77 @@ test("gate-workflow-wiring", () => {
   const real = gate.split("\n").find((l) => l.includes('--tag "$RELEASE_TAG"'));
   assert.doesNotMatch(real, /--dry-run/);
 });
+
+// --- structure pins (review of #888): the gate must not be neutered by a small edit ---
+
+const stripComments = (text) => text.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+const gateJob = () => stripComments(job("ci-gate"));
+const publishJob = () => stripComments(job("publish"));
+
+// The lines of the `run: |` block that follows `marker` (a line of the step), dedented.
+function runBlock(block, marker) {
+  const lines = block.split("\n");
+  const at = lines.findIndex((l) => l.includes(marker));
+  assert.notEqual(at, -1, `step ${marker} not found`);
+  const run = lines.findIndex((l, i) => i > at && l === "        run: |");
+  assert.notEqual(run, -1, "step has a run block");
+  const out = [];
+  for (let i = run + 1; i < lines.length && (lines[i] === "" || lines[i].startsWith("          ")); i++) out.push(lines[i].trim());
+  return out.filter((l) => l !== "");
+}
+
+test("gate-wiring-no-escape-hatches", () => {
+  for (const [name, block] of [["ci-gate", gateJob()], ["publish", publishJob()]]) {
+    assert.doesNotMatch(block, /continue-on-error/, `${name}: continue-on-error would let a red gate pass`);
+    assert.doesNotMatch(block, /\|\|\s*(true|:|exit 0)\b/, `${name}: '|| true' swallows a failure`);
+    assert.doesNotMatch(block, /set \+e/, `${name}: set +e swallows a failure`);
+  }
+  // no step of the gate may be skipped by a step-level condition
+  assert.doesNotMatch(gateJob(), /^ {8}if:|^ {6}- if:/m, "a step-level if could skip the gate");
+});
+
+test("gate-wiring-invocation-shape", () => {
+  const gate = gateJob();
+  // The whole script of the step, exactly: the real invocation (with the tag, without --dry-run) is the
+  // then-branch of IS_RELEASE = true, the dry run only the else-branch, and nothing after the fi.
+  assert.deepEqual(runBlock(gate, "name: Require CI green on the release commit"), [
+    "set -euo pipefail",
+    'if [ "$IS_RELEASE" = "true" ]; then',
+    'node scripts/ci-green-gate.mjs --repo "$REPO" --sha "$SHA" --tag "$RELEASE_TAG"',
+    "else",
+    'node scripts/ci-green-gate.mjs --repo "$REPO" --sha "$SHA" --dry-run',
+    "fi",
+  ]);
+  // where the inputs come from
+  assert.match(gate, /^ {10}IS_RELEASE: \$\{\{ needs\.release-please\.outputs\.release_created \}\}$/m);
+  assert.match(gate, /^ {10}RELEASE_TAG: \$\{\{ needs\.release-please\.outputs\.tag_name \}\}$/m);
+  assert.match(gate, /^ {10}SHA: \$\{\{ github\.sha \}\}$/m);
+  assert.equal((gate.match(/ci-green-gate\.mjs/g) ?? []).length, 2, "the script runs in exactly the two branches");
+});
+
+test("gate-wiring-permissions-exact", () => {
+  const lines = gateJob().split("\n");
+  const at = lines.findIndex((l) => l === "    permissions:");
+  assert.notEqual(at, -1, "ci-gate declares its permissions");
+  const perms = [];
+  for (let i = at + 1; i < lines.length && /^ {6}\S/.test(lines[i]); i++) perms.push(lines[i].trim());
+  assert.deepEqual(perms.sort(), ["actions: read", "contents: read"]);
+});
+
+test("gate-wiring-publish-needs-superset", () => {
+  const needsOf = (block) => new Set(block.match(/^ {4}needs: \[?([^\]\n]*)\]?$/m)?.[1].split(",").map((n) => n.trim()).filter(Boolean));
+  const gateNeeds = needsOf(gateJob());
+  const publishNeeds = needsOf(publishJob());
+  assert.ok(gateNeeds.size > 0 && publishNeeds.size > 0);
+  for (const n of [...gateNeeds, "ci-gate"]) assert.ok(publishNeeds.has(n), `publish must need ${n}`);
+});
+
+test("gate-wiring-release-uploads-only-in-publish", () => {
+  const jobs = [...stripComments(workflow).matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)].map((m) => m[1]);
+  assert.ok(jobs.includes("publish") && jobs.includes("ci-gate"));
+  for (const name of jobs) {
+    if (name === "publish") continue;
+    assert.doesNotMatch(stripComments(job(name)), /gh release (upload|create|edit)/, `${name} must not publish release assets`);
+  }
+  assert.match(publishJob(), /gh release upload/);
+});
