@@ -268,6 +268,39 @@ describe("TerminalPane restart (DT3-B)", () => {
     client.nth("terminal.attach", 0).resolve({ terminalId: "term-1" });
     await flush();
 
+    // Two clicks inside one act(): the second lands before React has painted the disabled state, so only the
+    // ref guard stands between it and a second terminal.create.
+    act(() => {
+      const button = screen.getByTestId("terminal-restart");
+      button.click();
+      button.click();
+    });
+    await flush();
+
+    expect(screen.getByTestId("terminal-restart")).toBeDisabled();
+    // The first create is the pane's own initial one; the restart added exactly one.
+    expect(client.calls.filter((c) => c.method === "terminal.create")).toHaveLength(2);
+
+    client.nth("terminal.create", 1).resolve({ terminalId: "term-2" });
+    await flush();
+
+    // The old output stays, separated by the dim line, in the same xterm.
+    expect(decodedWrites(fake)).toContain("--- restarted ---");
+    expect(client.nth("terminal.attach", 1).params).toEqual({ terminalId: "term-2" });
+    expect(screen.queryByTestId("terminal-status")).not.toBeInTheDocument();
+
+    fake.emitData("echo hi\n");
+    await flush();
+    expect(client.nth("terminal.write", 0).params).toEqual({ terminalId: "term-2", data: "echo hi\n" });
+  });
+
+  it("a double click on Restart is one terminal.create and the button is disabled while pending", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    await mountRunning(client, fake);
+    client.nth("terminal.attach", 0).resolve({ terminalId: "term-1" });
+    await flush();
+
     fireEvent.click(screen.getByTestId("terminal-restart"));
     await flush();
 
