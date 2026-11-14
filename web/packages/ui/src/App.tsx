@@ -65,6 +65,7 @@ import {
   defaultTabsForTask,
   prTab,
   fileTab,
+  fileTabKey,
   filePathFromTabKey,
   NewTabButton,
   pluginTab,
@@ -88,6 +89,7 @@ import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
+import { useFileRevealStore } from "@/stores/file-reveal-store";
 import { useTheme } from "@/hooks/use-theme";
 import type { ActionId } from "@/keyboard/actions";
 import { KeyboardProvider, useActionHandler, useActionRestriction, useKeyboard } from "@/keyboard/keyboard-provider";
@@ -580,8 +582,10 @@ function AppShell({
     return off;
   }, [events, selectedTask, allTasks, selectTask]);
 
-  function openFileTab(path: string) {
+  function openFileTab(path: string, forTaskId?: number) {
     if (!selectedTask) return;
+    // A terminal link resolves asynchronously (file.stat): if the person switched tasks meanwhile, the file belongs to the old task and must not open in the new one.
+    if (forTaskId !== undefined && forTaskId !== selectedTask.ID) return;
     // Implicit open (file-tree click, a tool-call's click-through): prefer
     // the side pane if the task already has one, but never yank a tab
     // already placed -- openTab's own "prefer" placement is exactly this
@@ -2053,7 +2057,7 @@ interface SplitPaneCallbacks {
   client: WsClient | null;
   connectionStatus: ConnectionStatus;
   events: ReturnType<typeof useDaemonEvents>;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, forTaskId?: number) => void;
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
@@ -2267,7 +2271,7 @@ function PaneTabStrip({
   client: WsClient | null;
   connectionStatus: ConnectionStatus;
   events: ReturnType<typeof useDaemonEvents>;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, forTaskId?: number) => void;
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
@@ -2754,7 +2758,7 @@ function TabContent({
   /** Whether this tab is the one in front -- only the force-mounted terminal panes can be rendered while false. */
   active: boolean;
   connectionStatus: ConnectionStatus;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, forTaskId?: number) => void;
   onOpenFileToSide: (path: string) => void;
   onRevealInDiff: () => void;
   /** Brings this pane's Files tab forward (the deliverable cards' "+ N more files"). */
@@ -2823,6 +2827,13 @@ function TabContent({
         tabKey={entry.key}
         active={active}
         connectionStatus={connectionStatus}
+        // A terminal link opens the file like the explorer's implicit open
+        // (openFileTab's "prefer" placement) and queues the reveal-at-line
+        // request for the tab the editor pane will consume (DT3-A AC4).
+        onOpenFile={(path, line, col) => {
+          onOpenFile(path, task.ID);
+          if (line) useFileRevealStore.getState().request(fileTabKey(task.ID, path), line, col);
+        }}
       />
     ),
   };

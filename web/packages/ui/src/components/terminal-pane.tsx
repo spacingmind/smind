@@ -12,6 +12,9 @@ import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useTheme } from "@/hooks/use-theme";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
+import { openExternalUrl } from "@/lib/external-link";
+import { activateTerminalLink, findTerminalLinks, type TerminalLinkMatch } from "@/lib/terminal-links";
+import { resolveTerminalPath } from "@/lib/terminal-path";
 import { encodeTerminalKey, hasPendingModifiers, resolvePendingModifierData, terminalKeyInput } from "@/lib/terminal-keys";
 import { loadTerminalScrollback } from "@/lib/terminal-prefs";
 import {
@@ -69,6 +72,15 @@ export interface TerminalHandle {
   find?: TerminalFindHandle;
   /** Whether the shell switched the cursor keys to application mode (SS3 arrows). Optional for the same reason setTheme is; absent means normal mode. */
   applicationCursorKeys?(): boolean;
+  /**
+   * Links terminal matches to a handler (DT3-A): a real xterm registers a
+   * link provider that runs lib/terminal-links over each rendered line and
+   * forwards a Ctrl/Cmd+click to the handler. Optional so the test fake
+   * doesn't need it -- a handle without it simply has no links, never dead
+   * clicks. `null` clears the handler; the returned disposable tears the
+   * provider down with it.
+   */
+  setLinkHandler?(handler: ((match: TerminalLinkMatch, event: MouseEvent) => void) | null): { dispose(): void };
   dispose(): void;
 }
 
@@ -105,6 +117,7 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
   term.loadAddon(fit);
   const search = new SearchAddon();
   term.loadAddon(search);
+  let linkHandler: ((match: TerminalLinkMatch, event: MouseEvent) => void) | null = null;
   return {
     open: (container) => term.open(container),
     onData: (callback) => term.onData(callback),
@@ -119,6 +132,40 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
     getSelection: () => term.getSelection(),
     applicationCursorKeys: () => term.modes.applicationCursorKeysMode,
     onSelectionChange: (callback) => term.onSelectionChange(callback),
+    setLinkHandler: (handler) => {
+      linkHandler = handler;
+      const provider = term.registerLinkProvider({
+        // Match indexes are character offsets in translateToString's line;
+        // wide/CJK characters occupy two cells, shifting xterm's 1-based
+        // cell columns slightly off the match (accepted -- the link's
+        // activate still carries the exact match). Wrapped lines are not
+        // joined either: only the wrapped row the pointer is on is scanned
+        // (accepted limitation).
+        provideLinks(y, callback) {
+          const line = term.buffer.active.getLine(y - 1);
+          if (!line) return callback(undefined);
+          const text = line.translateToString(true);
+          const matches = findTerminalLinks(text);
+          callback(
+            matches.length
+              ? matches.map((m) => ({
+                  range: { start: { x: m.start + 1, y }, end: { x: m.end, y } },
+                  text: m.text,
+                  decorations: { underline: true, pointerCursor: true },
+                  activate: (event: MouseEvent) => activateTerminalLink(event, () => linkHandler?.(m, event)),
+                  hover: () => {
+                    if (term.element) term.element.title = "Ctrl+click to open (Cmd+click on macOS)";
+                  },
+                  leave: () => {
+                    term.element?.removeAttribute("title");
+                  },
+                }))
+              : undefined,
+          );
+        },
+      });
+      return { dispose: () => provider.dispose() };
+    },
     find: {
       search: (query, direction) => {
         if (!query) {
@@ -138,6 +185,10 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
 
 /** How long a container's size must go quiet before fit() re-runs -- see the ResizeObserver effect below. */
 const RESIZE_DEBOUNCE_MS = 100;
+
+/** How long the quiet not-a-file notice stays up (DT3-A AC3). */
+const LINK_NOTICE_MS = 4000;
+const LINK_NOTICE_TEXT = "Not a file in this task's workspace";
 
 function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64);
@@ -191,6 +242,7 @@ export function TerminalPane({
   active = true,
   connectionStatus = "connected",
   createTerminal = createRealTerminal,
+  onOpenFile,
 }: {
   client: WsClientLike | null;
   task: Task;
@@ -202,6 +254,8 @@ export function TerminalPane({
   connectionStatus?: ConnectionStatus;
   /** Overridable for tests -- see TerminalHandle's doc comment. Defaults to a real xterm.js + FitAddon instance. */
   createTerminal?: (options: { scrollback: number }) => TerminalHandle;
+  /** Opens a matched terminal path after the client filter and a successful file.stat (DT3-A). Optional: a pane without it shows URL links only. */
+  onOpenFile?: (path: string, line?: number, col?: number) => void;
 }) {
   const key = tabKey ?? `${task.ID}:terminal`;
   const { resolved } = useTheme();
@@ -219,6 +273,12 @@ export function TerminalPane({
   const [hasSelection, setHasSelection] = useState(false);
   const [selectionReportable, setSelectionReportable] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
+  // The quiet "not a file in this task's workspace" notice (DT3-A AC3):
+  // one line, cleared on a timer, cleared again on unmount.
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  const linkNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A file.stat that settles after unmount must not show a notice or arm a timer nobody clears.
+  const unmountedRef = useRef(false);
   // Sticky Ctrl/Shift/Alt of the touch key bar; the ref mirrors state for the onData closure.
   const [modifiers, setModifiers] = useState({ ctrl: false, shift: false, alt: false });
   const modifiersRef = useRef(modifiers);
@@ -531,6 +591,59 @@ export function TerminalPane({
     return () => disposable?.dispose();
   }, [createTerminal]);
 
+  // Terminal links (DT3-A): one Ctrl/Cmd+click handler for the provider
+  // registered by setLinkHandler. Kept stable across App re-renders via a
+  // ref -- App passes a fresh onOpenFile closure every render, and
+  // re-registering the provider each time would churn xterm's hover state.
+  const onOpenFileRef = useRef(onOpenFile);
+  onOpenFileRef.current = onOpenFile;
+
+  function showLinkNotice(): void {
+    if (unmountedRef.current) return;
+    setLinkNotice(LINK_NOTICE_TEXT);
+    if (linkNoticeTimer.current !== null) clearTimeout(linkNoticeTimer.current);
+    linkNoticeTimer.current = setTimeout(() => setLinkNotice(null), LINK_NOTICE_MS);
+  }
+
+  const handleLinkMatch = useCallback(
+    (match: TerminalLinkMatch): void => {
+      if (match.kind === "url") {
+        // The matcher only yields http(s), but this check is what stands
+        // between arbitrary text and the system browser, so it stays.
+        if (!/^https?:\/\//i.test(match.url)) return;
+        openExternalUrl(match.url);
+        return;
+      }
+      const rel = resolveTerminalPath(match.path, task.WorktreePath);
+      if (!rel || !client) {
+        showLinkNotice();
+        return;
+      }
+      // Daemon authority (AC3): only a successful stat -- a regular file
+      // in the task's worktree -- opens anything; an error is the notice.
+      client
+        .call("file.stat", { taskId: task.ID, path: rel })
+        .then(() => {
+          onOpenFileRef.current?.(rel, match.line, match.col);
+        })
+        .catch(() => showLinkNotice());
+    },
+    [client, task],
+  );
+
+  useEffect(() => {
+    const disposable = termRef.current?.setLinkHandler?.(handleLinkMatch);
+    return () => disposable?.dispose();
+  }, [handleLinkMatch, createTerminal]);
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      if (linkNoticeTimer.current !== null) clearTimeout(linkNoticeTimer.current);
+    };
+  }, []);
+
   const openFind = useCallback(() => {
     if (!termRef.current?.find) return;
     setFindOpen(true);
@@ -662,6 +775,11 @@ export function TerminalPane({
       {pasteError && (
         <p className="px-3 py-1 text-ui-sm text-destructive" data-testid="terminal-paste-error">
           paste failed: {pasteError}
+        </p>
+      )}
+      {linkNotice && (
+        <p data-testid="terminal-link-notice" className="px-3 py-1 text-ui-sm text-foreground-subtle">
+          {linkNotice}
         </p>
       )}
       <div data-testid="terminal-inset" className="relative min-h-0 flex-1 bg-terminal-bg p-2">

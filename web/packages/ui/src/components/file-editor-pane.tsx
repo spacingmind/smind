@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "@/lib/icons";
-import type { EditorView } from "@codemirror/view";
+import { EditorSelection } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 
 import { CodeMirrorEditor } from "@/components/code-mirror-editor";
 import { FileEditorFindBar, FileFindModel } from "@/components/file-editor-find-bar";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { fileTabKey } from "@/components/tab-registry";
+import { useFileRevealStore } from "@/stores/file-reveal-store";
 import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
@@ -82,6 +84,8 @@ export function TextEditorPane({
   // the moment `pane.find` fires, never needing a render of its own.
   const findModel = useMemo(() => new FileFindModel(), []);
   const editorViewRef = useRef<EditorView | null>(null);
+  // State twin of the ref: the editor is lazy-loaded, so its view can appear after the file read -- a pending reveal must re-run then.
+  const [viewReady, setViewReady] = useState(false);
   const { focused: findFocused, onFocus: onFindFocus, onBlur: onFindBlur } = usePaneFocusWithin();
 
   // null for non-previewable files -- the Edit/Preview control doesn't
@@ -156,6 +160,31 @@ export function TextEditorPane({
     // with the same ID shouldn't discard the user's in-progress edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, task.ID, path, applyRead]);
+
+  // Terminal-link reveals (DT3-A AC4): consume a queued line request once
+  // the file has actually loaded and the editor view exists. The store
+  // selector returns a fresh object per request (new nonce), so a second
+  // click on an already-open tab re-triggers this effect; `loading` in the
+  // deps re-runs it when the read finishes after the request was queued.
+  const revealRequest = useFileRevealStore((state) => state.requests[tabKey]);
+  useEffect(() => {
+    const view = editorViewRef.current;
+    // `mtime` is set only when a read has returned: `loading` is false on the very first render, before the read starts.
+    if (!revealRequest || loading || mtime === null || !viewReady || !view) return;
+    // consume() drops a stale request (older than its TTL) instead of returning it.
+    const taken = useFileRevealStore.getState().consume(tabKey);
+    if (!taken) return;
+    const doc = view.state.doc;
+    const ln = doc.line(Math.min(Math.max(taken.line, 1), doc.lines));
+    const pos = Math.min(ln.from + Math.max(taken.col, 1) - 1, ln.to);
+    // The cursor on the line plus the editor's active-line band is the mark. A whole-line selection reads badly in dark
+    // (the selection fill is pale under the pale text), so it is not used.
+    view.dispatch({
+      selection: EditorSelection.cursor(pos),
+      effects: EditorView.scrollIntoView(pos, { y: "center" }),
+    });
+    view.focus();
+  }, [revealRequest, loading, mtime, viewReady, tabKey]);
 
   const setContent = useCallback((next: string) => {
     setContentState(next);
@@ -367,6 +396,7 @@ export function TextEditorPane({
                 findExtension={findModel.extension}
                 onViewReady={(view) => {
                   editorViewRef.current = view;
+                  setViewReady(view !== null);
                 }}
               />
               <FileEditorFindBar model={findModel} editor={editorViewRef} focused={findFocused} />
