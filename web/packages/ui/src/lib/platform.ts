@@ -1,5 +1,6 @@
 import type { ActionId } from "@/keyboard/actions";
 import { CONNECTION_CHANGED_EVENT } from "@/lib/local-paths";
+import type { NativeMenuEntry } from "@/lib/menu-model";
 
 /**
  * The desktop platform surface (ADR-0013 AC6): a single `isDesktop` /
@@ -216,6 +217,14 @@ export interface DesktopApi {
   openExternal(url: string): Promise<void>;
   /** Quits the app (`app_quit`). The renderer's Ctrl+Q on Windows/Linux, where the undecorated window has no menu to carry the accelerator. */
   quit(): Promise<void>;
+  /**
+   * Pops a NATIVE context menu (`context_menu_show`, DT2 (a)) at the pointer (client pixels) from a menu model's descriptors:
+   * labels, opaque ids and enabled flags only. Resolves with the open id Rust stamped on it; rejects with Rust's message when it
+   * refuses the model. Use `lib/native-context-menu.ts`, not this, from a component.
+   */
+  contextMenuShow(entries: NativeMenuEntry[], x: number, y: number): Promise<number>;
+  /** Subscribes to native context-menu selections (`context-menu-action`: the open id and the chosen item id). */
+  onContextMenuAction(cb: (selection: { open: number; id: string }) => void): () => void;
   /** Runs a native-only app-menu item (`app_menu_action`) -- what the header app menu uses on Windows/Linux, where the native menu bar isn't drawn. */
   menuAction(id: NativeMenuActionId): Promise<void>;
   /** ADR-0013 part D2: install/update/restart/take-over the app-managed local daemon. */
@@ -342,6 +351,8 @@ function unavailable(): DesktopApi {
     onDaemonProgress: () => () => {},
     // The browser stub never fires: there is no native menu there.
     onMenuAction: () => () => {},
+    contextMenuShow: () => reject(),
+    onContextMenuAction: () => () => {},
     editorsList: () => reject(),
     openInEditor: () => reject(),
     openPathDefault: () => reject(),
@@ -536,6 +547,31 @@ function realDesktopApi(): DesktopApi {
       } catch (err) {
         throw asError(err);
       }
+    },
+    async contextMenuShow(entries, x, y) {
+      const invoke = await loadInvoke();
+      try {
+        return await invoke<number>("context_menu_show", { entries, x, y });
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    onContextMenuAction(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/event").then(({ listen }) =>
+        listen<{ open: number; id: string }>("context-menu-action", (event) => cb(event.payload)).then((fn) => {
+          if (cancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        }),
+      );
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
     },
     async daemonStatus() {
       const invoke = await loadInvoke();

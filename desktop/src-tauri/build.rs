@@ -77,6 +77,7 @@ fn main() {
             "open_external",
             "app_quit",
             "app_menu_action",
+            "context_menu_show",
             "editors_list",
             "open_in_editor",
             "open_path_default",

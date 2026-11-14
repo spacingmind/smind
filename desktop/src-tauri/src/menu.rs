@@ -370,6 +370,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 /// handle_event dispatches one menu item click by id. Called from
 /// `App::on_menu_event`.
 pub fn handle_event(app: &AppHandle, id: &str) {
+    // DT2 (a): a native context-menu selection is forwarded to the renderer, never run here.
+    if crate::context_menu::handle_event(app, id) {
+        return;
+    }
     // Renderer actions (D3.3): one event whose payload is the action id,
     // dispatched by the UI through the same registry a keystroke uses.
     if let Some(action) = menu_action_for(id) {

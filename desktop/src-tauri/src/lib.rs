@@ -22,6 +22,7 @@ mod audit_guard;
 mod assets;
 mod client_watch;
 mod commands;
+mod context_menu;
 mod daemon_manager;
 mod deeplink;
 mod editors;
@@ -157,6 +158,7 @@ pub fn run() {
             commands::open_external,
             commands::app_quit,
             menu::app_menu_action,
+            context_menu::context_menu_show,
             editors::editors_list,
             editors::open_in_editor,
             open_path::open_path_default,
@@ -237,6 +239,7 @@ pub fn run() {
             // D1/D2.1: per-platform chrome, created hidden and shown
             // when the UI reports its first paint (or after the fallback).
             app.manage(window_chrome::ShowGate::default());
+            app.manage(context_menu::ContextMenuState::default());
             let builder = WebviewWindowBuilder::new(
                 app,
                 MAIN_WINDOW,
