@@ -51,7 +51,7 @@ test('CM-02 a workspace row opens its context menu', async ({ app }, testInfo) =
   await frame(page, testInfo, 'b-workspace-row-menu')
 })
 
-test('CM-03 a chat tab opens its context menu: Close is off for the only tab, the rest follow the tab kind', async ({ app }, testInfo) => {
+test('CM-03 a chat tab opens its context menu: Close others is off with no other tab, Rename and Archive chat are offered', async ({ app }, testInfo) => {
   const { page } = app
   await openTaskByLink(app, { id: app.daemon.ids.tasks['idle-done'] }, 'idle-done')
   const tab = page.getByTestId('workspace-tab-chat').first()

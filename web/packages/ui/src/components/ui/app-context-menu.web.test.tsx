@@ -36,7 +36,7 @@ describe("AppContextMenu in the browser build", () => {
     expect(desktopBridge.contextMenuShow).not.toHaveBeenCalled();
   });
 
-  it("a disabled item does not run, and an empty model renders an empty menu body", async () => {
+  it("a disabled item does not run", async () => {
     const run = vi.fn();
     render(
       <AppContextMenu entries={[{ kind: "item", id: "x", label: "X", testId: "m-x", enabled: false, onSelect: run }]} contentProps={{ "data-testid": "the-menu" }}>
