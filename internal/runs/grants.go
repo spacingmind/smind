@@ -227,3 +227,9 @@ func (reg *Registry) RespondPermissionScoped(runID, requestID, optionID, scope, 
 		return fmt.Errorf("runs: permission request %q already resolved", requestID)
 	}
 }
+
+// GrantFingerprint is the MCP fingerprint a grant of this project is checked
+// against today (for the list's void status).
+func (reg *Registry) GrantFingerprint(workspaceID int64) (string, error) {
+	return mcpFingerprint(reg.st, workspaceID)
+}

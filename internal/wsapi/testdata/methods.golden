@@ -80,6 +80,8 @@ mcp.get
 mcp.list
 mcp.setEnabled
 mcp.update
+permission.grants.list
+permission.grants.revoke
 permission.revealHeredoc
 plugin.call
 plugin.commands
@@ -119,6 +121,7 @@ provider.setEnv
 provider.setSecret
 provider.test
 provider.updateInstance
+run.answerPermission
 run.answerQuestion
 run.attach
 run.attachment
