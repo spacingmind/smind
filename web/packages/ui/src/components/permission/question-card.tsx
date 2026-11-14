@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { QUESTION_NOTE_HELPER, QUESTION_NOTE_LABEL, QUESTION_NOTE_PLACEHOLDER, humanizeQuestionError } from "@/lib/question-copy";
 import { Input } from "@/components/ui/input";
 import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
 import type { PendingQuestion } from "@/hooks/use-run-timeline";
@@ -128,7 +129,21 @@ export function QuestionCard({
         Waiting for your response
       </span>
       {pending.request.truncated && <p className="text-ui-xs text-foreground-muted">Some of this text was shortened.</p>}
-      {error && <Alert variant="error" testId="question-error" description={error} />}
+      {error && (
+        <Alert
+          variant="error"
+          testId="question-error"
+          description={
+            <>
+              <span>{humanizeQuestionError(error).text}</span>
+              <details data-testid="question-error-details" className="mt-1 text-ui-xs text-foreground-muted">
+                <summary className="cursor-pointer">Details</summary>
+                <span className="whitespace-pre-wrap break-words">{error}</span>
+              </details>
+            </>
+          }
+        />
+      )}
       {/* A long ask scrolls inside the card, so Submit and Decline stay on screen (phones). */}
       <div data-testid="question-fields" className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto">
         {questions.map((question) => (
@@ -144,13 +159,16 @@ export function QuestionCard({
       <div className="flex flex-col gap-2">
         <Input
           data-testid="question-decline-note"
-          aria-label="Note sent with a decline (optional)"
-          placeholder="Note for the agent (optional)"
+          aria-label={QUESTION_NOTE_LABEL}
+          placeholder={QUESTION_NOTE_PLACEHOLDER}
           value={note}
           maxLength={MAX_NOTE_CHARS}
           disabled={submitting}
           onChange={(e) => setNote(e.target.value)}
         />
+        <p data-testid="question-note-helper" className="text-ui-xs text-foreground-muted">
+          {QUESTION_NOTE_HELPER}
+        </p>
         {!submitting && !allAnswered && (
           <p data-testid="question-submit-hint" className="text-ui-xs text-foreground-muted">
             Answer every question to submit.

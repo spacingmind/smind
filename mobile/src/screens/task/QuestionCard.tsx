@@ -25,12 +25,13 @@ import {
 } from '../../questionAnswer';
 import { clampRunes } from '../../permissionRequests';
 import type { QuestionState } from '../../questionRequests';
+import { QUESTION_NOTE_HELPER, QUESTION_NOTE_LABEL, QUESTION_NOTE_PLACEHOLDER, humanizeQuestionError } from '../../questionCopy';
 import { COLLAPSED_LINES, isLongAsk } from '../../questionView';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { AppIcon } from '../../ui/AppIcon';
 import { Card } from '../../ui/Card';
-import { TextButton } from '../../ui/TextButton';
+import { OutlineButton } from '../../ui/OutlineButton';
 import { UiHost } from '../../ui/UiHost';
 
 export const QuestionCard = memo(function QuestionCard({
@@ -64,15 +65,15 @@ export const QuestionCard = memo(function QuestionCard({
         />
       ))}
       <View style={styles.noteField}>
-        <Text style={styles.label}>Note for the agent (optional)</Text>
         <TextInput
           style={styles.input}
           value={note}
           onChangeText={(next) => setNote(clampRunes(next, MAX_NOTE_CHARS))}
-          placeholder="Sent only if you decline"
+          placeholder={QUESTION_NOTE_PLACEHOLDER}
           placeholderTextColor={theme.foregroundSubtlest}
-          accessibilityLabel="Note for the agent (optional)"
+          accessibilityLabel={QUESTION_NOTE_LABEL}
         />
+        <Text style={styles.muted}>{QUESTION_NOTE_HELPER}</Text>
       </View>
       {blocked !== null ? (
         <Text style={styles.muted} accessibilityLiveRegion="polite">
@@ -92,16 +93,35 @@ export const QuestionCard = memo(function QuestionCard({
             style={styles.button}
           />
         </UiHost>
-        <TextButton label="Decline" disabled={sending} onPress={() => onAnswer(state.requestId, declinePayload(note))} />
+        <OutlineButton label="Decline" disabled={sending} onPress={() => onAnswer(state.requestId, declinePayload(note))} />
       </View>
-      {state.error !== null ? (
-        <Text style={styles.error} selectable>
-          Couldn't send the answer: {state.error}
-        </Text>
-      ) : null}
+      {state.error !== null ? <ErrorLine raw={state.error} /> : null}
     </Card>
   );
 });
+
+/** The daemon's refusal in words a person can act on, with the raw text one tap away. */
+function ErrorLine({ raw }: { raw: string }) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const [open, setOpen] = useState(false);
+  const { text, details } = humanizeQuestionError(raw);
+  return (
+    <View style={styles.errorBox} accessibilityRole="alert">
+      <Text style={styles.error} selectable>
+        {text}
+      </Text>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen((v) => !v)} style={styles.toggle}>
+        <Text style={styles.toggleText}>{open ? 'Hide details' : 'Details'}</Text>
+      </Pressable>
+      {open ? (
+        <Text style={styles.muted} selectable>
+          {details}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
 
 function QuestionField({ question, draft, disabled, onChange }: { question: Question; draft: Draft; disabled: boolean; onChange: (next: Draft) => void }) {
   const theme = useAppTheme();
@@ -186,8 +206,8 @@ function QuestionField({ question, draft, disabled, onChange }: { question: Ques
 function makeStyles(theme: AppTheme) {
   const mark = { width: 20, height: 20, borderWidth: 1.5, borderColor: theme.foregroundSubtle, alignItems: 'center', justifyContent: 'center', marginTop: 1 } as const;
   return StyleSheet.create({
-    card: { backgroundColor: theme.waiting.surface, gap: theme.spacing[3] },
-    badge: { alignSelf: 'flex-start', borderRadius: theme.radius.full, paddingHorizontal: theme.spacing[2], paddingVertical: 2, backgroundColor: theme.card },
+    card: { gap: theme.spacing[3] },
+    badge: { alignSelf: 'flex-start', borderRadius: theme.radius.full, paddingHorizontal: theme.spacing[2], paddingVertical: 2, backgroundColor: theme.waiting.surface },
     badgeText: { ...theme.type.small, color: theme.waiting.foreground, fontWeight: '600' },
     field: { gap: theme.spacing[2] },
     chip: { alignSelf: 'flex-start', borderRadius: theme.radius.full, borderWidth: 1, borderColor: theme.border, paddingHorizontal: theme.spacing[2], paddingVertical: 2 },
@@ -234,5 +254,6 @@ function makeStyles(theme: AppTheme) {
     actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.spacing[2] },
     button: { height: 44 },
     error: { ...theme.type.small, color: theme.status.danger },
+    errorBox: { gap: theme.spacing[1] },
   });
 }

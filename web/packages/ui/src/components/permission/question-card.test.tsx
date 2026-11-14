@@ -384,7 +384,8 @@ describe("QuestionCard: in-flight and failure states", () => {
     await flush();
 
     const card = screen.getByTestId("question-card");
-    expect(within(card).getByTestId("question-error")).toHaveTextContent("boom");
+    expect(within(card).getByTestId("question-error")).toHaveTextContent("Couldn't send the answer.");
+    expect(within(card).getByTestId("question-error-details")).toHaveTextContent("boom");
     expect(within(card).getByTestId("question-submit")).toBeEnabled();
     expect(within(card).getByTestId("question-decline")).toBeEnabled();
   });

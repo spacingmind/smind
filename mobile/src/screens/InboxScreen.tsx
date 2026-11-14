@@ -23,6 +23,7 @@ export function InboxScreen({
   onOpenHosts,
   onOpenReview,
   onOpenPolicy,
+  onOpenGrants,
 }: {
   conn: RelayConnection;
   onOpenTask: (taskId: number, title: string) => void;
@@ -32,6 +33,8 @@ export function InboxScreen({
   onOpenReview: (reviewId: number, taskId: number | null) => void;
   /** Opens the read-only permission policy screen. */
   onOpenPolicy: () => void;
+  /** Opens the Saved grants screen (list and revoke). */
+  onOpenGrants: () => void;
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -128,6 +131,14 @@ export function InboxScreen({
           <View style={styles.policyTexts}>
             <Text style={styles.policyTitle}>Permission policy</Text>
             <Text style={styles.policyNote}>Rules that allow or deny agent requests. Read-only.</Text>
+          </View>
+          <AppIcon name="chevronRight" size={18} color={theme.foregroundSubtle} />
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Saved grants" onPress={onOpenGrants} style={styles.policyLink}>
+          <AppIcon name="check" size={18} color={theme.foregroundSubtle} />
+          <View style={styles.policyTexts}>
+            <Text style={styles.policyTitle}>Saved grants</Text>
+            <Text style={styles.policyNote}>Commands you saved for a project. Revoke any of them.</Text>
           </View>
           <AppIcon name="chevronRight" size={18} color={theme.foregroundSubtle} />
         </Pressable>

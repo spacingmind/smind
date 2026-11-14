@@ -12,6 +12,7 @@ import "@/components/settings/mcp-servers-section";
 import "@/components/settings/notifications-section";
 import "@/components/settings/plugins-section";
 import "@/components/settings/policy-section";
+import "@/components/settings/saved-grants-section";
 import "@/components/settings/automations-link-section";
 import "@/components/settings/profiles-section";
 import "@/components/settings/providers-section";
