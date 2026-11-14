@@ -21,63 +21,61 @@ import (
 //   - a bare program name on the list, spelled exactly (no path, no case
 //     variant, no wrapper peeled off), so `./make`, `Make` and `env make` do not;
 //   - no environment assignment, no redirect and no dynamic word;
-//   - arguments within that program's own constraints (plain words, no flag
-//     that loads or runs code).
+//   - arguments that are plain words (no `..`, `@` or `=`) or flags on that
+//     program's own short list: there is no "any arguments" form.
 //
 // Programs that run project-defined code (make, task, npm run, go test) are on
 // the list deliberately: a saved grant for `make build` is the feature, and a
 // project whose Makefile an agent can edit is a limit the plan states.
 
-// grantProg constrains one program's arguments.
+// grantProg constrains one program's arguments: every argument is either a
+// flag in okFlags (or a short flag with a number attached, -j4) or a plain
+// word. There is no "any arguments" form, so a flag nobody listed (an output
+// file, a plugin, a config, a program to run) is refused.
 type grantProg struct {
-	// verbs, when set, restricts the first argument to this set (a subcommand).
+	// verbs, when set, restricts the first argument to this set (a subcommand);
+	// the verb's own flags are okFlags[verb] when present, else okFlags[""].
 	verbs []string
-	// deny adds flags refused for this program on top of codeFlags.
-	deny []string
-	// okFlags are the only flags allowed after the verb when anyArgs is false;
-	// every other argument must be a plain word.
+	// okFlags are the flags allowed after the verb.
 	okFlags []string
-	// anyArgs allows any arguments except the denied flags (read-only tools).
-	anyArgs bool
 }
 
-var plainWord = regexp.MustCompile(`^[A-Za-z0-9_./][A-Za-z0-9_./:@,+~-]*$`)
-
-// codeFlags are long and Go-style flags that load or run other code or reach
-// outside the project; they are refused for every program on the list.
-var codeFlags = []string{"-exec", "--exec", "-toolexec", "-vettool", "-overlay", "--pre", "--compress-program", "--config", "--exec-path", "--ext-diff", "--textconv",
-	"--output", "--plugin", "--require", "--import", "--loader", "--eval", "--upload-pack", "--receive-pack", "--manifest-path", "--git-dir", "--work-tree", "--no-index", "--rootdir"}
+// plainWord is a path, a target, a script or a number: it starts with a letter,
+// digit, underscore, dot or slash and holds no `@` (a module version), `=`
+// (an assignment) or shell-significant character.
+var plainWord = regexp.MustCompile(`^[A-Za-z0-9_./][A-Za-z0-9_./:,+~-]*$`)
 
 var grantAllow = map[string]grantProg{
 	// build and test drivers: the target or script is a plain word
 	"make":  {okFlags: []string{"-j", "-k", "-s", "-n"}},
 	"task":  {},
-	"go":    {verbs: []string{"test", "build", "vet", "fmt", "list"}, okFlags: []string{"-v", "-race", "-short", "-count", "-run", "-cover", "-json", "-timeout", "-tags", "-l", "-d", "-w", "-m", "-f"}},
+	"go":    {verbs: []string{"test", "build", "vet", "fmt"}, okFlags: []string{"-v", "-race", "-short", "-count", "-run", "-cover", "-json", "-timeout", "-tags", "-n", "-x"}},
 	"cargo": {verbs: []string{"test", "build", "check", "clippy", "fmt", "doc"}, okFlags: []string{"-q", "-v", "--all", "--workspace", "--release", "--all-targets", "--all-features", "--check", "--no-run", "--lib", "--bins", "--tests"}},
 	"npm":   {verbs: []string{"test", "run", "t"}},
 	"pnpm":  {verbs: []string{"test", "run", "t"}},
-	"yarn":  {verbs: []string{"test", "run"}},
-	// test and lint tools: any plain arguments; -p and -c load plugins and config
-	"pytest":   {anyArgs: true, deny: []string{"-p", "-c"}},
-	"tsc":      {anyArgs: true},
-	"eslint":   {anyArgs: true, deny: []string{"-c"}},
-	"prettier": {anyArgs: true},
+	"yarn":  {verbs: []string{"test"}},
+	// test and lint tools: the few flags that only change what is printed or selected
+	"pytest":   {okFlags: []string{"-q", "-v", "-vv", "-vvv", "-x", "-s", "-k", "--tb", "--maxfail", "--lf", "--ff", "--collect-only", "-ra", "-rA"}},
+	"tsc":      {okFlags: []string{"--noEmit"}},
+	"eslint":   {},
+	"prettier": {okFlags: []string{"--check"}},
 	"vitest":   {verbs: []string{"run"}},
 	// read-only inspection (the floor already judges the paths they name)
-	"ls": {anyArgs: true}, "pwd": {anyArgs: true}, "cat": {anyArgs: true}, "head": {anyArgs: true}, "tail": {anyArgs: true}, "wc": {anyArgs: true},
-	"grep": {anyArgs: true}, "rg": {anyArgs: true}, "diff": {anyArgs: true}, "echo": {anyArgs: true},
-	"true": {anyArgs: true}, "which": {anyArgs: true}, "date": {anyArgs: true}, "stat": {anyArgs: true}, "file": {anyArgs: true}, "tree": {anyArgs: true},
-	// git: read-only subcommands only, and no global option before the verb
-	"git": {verbs: []string{"status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "describe", "shortlog"}, anyArgs: true},
-}
-
-// denied reports whether argument a is the flag d, `d=value`, or (for a short
-// flag) d with its value attached.
-func denied(a, d string) bool {
-	if a == d || strings.HasPrefix(a, d+"=") {
-		return true
-	}
-	return len(d) == 2 && !strings.HasPrefix(a, "--") && strings.HasPrefix(a, d) && len(a) > 2
+	"ls":   {okFlags: []string{"-l", "-a", "-la", "-al", "-lh", "-lah", "-1", "-R", "-h", "-d", "-t"}},
+	"pwd":  {},
+	"cat":  {okFlags: []string{"-n"}},
+	"head": {okFlags: []string{"-n"}},
+	"tail": {okFlags: []string{"-n"}},
+	"wc":   {okFlags: []string{"-l", "-w", "-c"}},
+	"grep": {okFlags: []string{"-n", "-i", "-w", "-l", "-c", "-v", "-F", "-E", "-r", "-R", "-H", "-h", "-s", "-A", "-B", "-C", "-m"}},
+	"rg":   {okFlags: []string{"-n", "-i", "-w", "-l", "-c", "-v", "-F", "-S", "-s", "-A", "-B", "-C", "-m", "--hidden", "--no-heading"}},
+	"diff": {okFlags: []string{"-u", "-q", "-r", "-w"}},
+	"echo": {},
+	"true": {},
+	// git: read-only subcommands only, no global option before the verb, and
+	// no flag that writes a file, runs a program or reaches outside the repo
+	"git": {verbs: []string{"status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "describe"}, okFlags: []string{"-s", "-b", "--short", "--branch", "--porcelain", "--stat",
+		"--name-only", "--name-status", "--cached", "--staged", "--oneline", "--graph", "--decorate", "--no-color", "-n", "-p", "--abbrev-ref", "--show-toplevel", "-U", "--summary", "--shortstat"}},
 }
 
 // segmentGrantable reports whether one command segment may be covered by a grant.
@@ -98,21 +96,11 @@ func segmentGrantable(s Segment, fs *floorSeg) bool {
 		return false
 	}
 	args := s.Argv[1:]
-	for _, a := range args {
-		for _, d := range slices.Concat(codeFlags, p.deny) {
-			if denied(a, d) {
-				return false
-			}
-		}
-	}
 	if len(p.verbs) > 0 {
 		if len(args) == 0 || !slices.Contains(p.verbs, args[0]) {
 			return false
 		}
 		args = args[1:]
-	}
-	if p.anyArgs {
-		return true
 	}
 	for _, a := range args {
 		switch {
@@ -120,11 +108,17 @@ func segmentGrantable(s Segment, fs *floorSeg) bool {
 			if !flagAllowed(a, p.okFlags) {
 				return false
 			}
-		case !plainWord.MatchString(a):
+		case !plainWord.MatchString(a) || hasParentComponent(a):
 			return false
 		}
 	}
 	return true
+}
+
+// hasParentComponent reports a `..` path component: the grant must not point a
+// plain command at a directory outside the project it was saved for.
+func hasParentComponent(a string) bool {
+	return slices.Contains(strings.Split(a, "/"), "..")
 }
 
 // flagAllowed reports whether flag (maybe `-count=1`, `-j4`) is one of ok.

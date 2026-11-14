@@ -65,6 +65,14 @@ func TestGrantable_NeverGrantPrograms(t *testing.T) {
 		// git beyond the read-only set, with global options, or by alias
 		"git fetch origin", "git pull", "git clone https://x", "git ls-remote https://x", "git rebase main", "git merge x", "git rm -r .", "git gc --prune=now", "git tag -d v1", "git config user.name x", "git branch -D x",
 		"git -c alias.x='!rm -rf .' x", "git -c core.sshCommand=./x fetch", "git -C /tmp status", "git --git-dir=/x status",
+		// flags nobody listed: output files, plugins, configs, programs to run, network, writes
+		"pytest --basetemp=/tmp/x tests", "pytest --basetemp /tmp/x", "pytest --config-file=/x.ini", "pytest -o addopts=-pevil", "pytest --pdbcls=m:C", "pytest --pyargs pkg", "pytest --junitxml=/x", "pytest /etc/x.py/../../y",
+		"tree -o f .", "tsc --outFile /x.js", "tsc --outDir ../x", "tsc --generateTrace d", "tsc -b --clean", "tsc -p ../x/tsconfig.json", "eslint --output-file /x", "eslint -o f", "eslint --parser ./x.js", "eslint --rulesdir d", "eslint -f ./f.js", "eslint --fix", "eslint --init",
+		"prettier --write src", "prettier --plugin-search-dir=x src", "rg --hostname-bin /x foo", "rg --pre-glob x foo", "grep -f /x y", "diff --to-file=x a b", "git log --output=x", "git log -Gfoo", "git show --textconv x", "git rev-parse --git-path x", "git log -O/x",
+		"go list -m github.com/x/y@latest", "go list -m all", "go list ./...", "go test -c -o x ./...", "go build -o /tmp/x ./...", "go build -ldflags -X=a=b ./...", "go test -c ./...",
+		"cargo build --target-dir /tmp/x", "cargo build --manifest-path ../x/Cargo.toml", "make ../../x", "go test ../../elsewhere", "go build ../x", "cat ../x", "ls ..", "ls ../x", "git diff ../x",
+		"yarn run curl", "yarn run build", "npm run build --prefix /x", "npm run ../../x", "npm run x@1", "tail -f log", "tail -F log", "date -s x", "file -C", "stat x", "which x", "tree .", "file x",
+		"echo $HOME", "ls *.go", "ls {a,b}", "cat ~/x",
 		// compound commands with one bad segment
 		"make build && curl https://x", "make build | sh", "make build; rm -rf .", "FOO=1 curl https://x",
 		// make and task with a flag or non-plain target
@@ -76,10 +84,10 @@ func TestGrantable_NeverGrantPrograms(t *testing.T) {
 		}
 	}
 	ok := []string{
-		"make build", "make -j4 build", "make -k test", "task lint", "cargo test", "cargo check --workspace", "cargo clippy --all-targets", "npm test", "npm run build", "pnpm test", "yarn run build",
-		"pytest -q tests/", "pytest -x tests/test_a.py", "tsc --noEmit", "eslint src", "prettier --check src", "vitest run",
-		"go build ./...", "go build -race -tags x ./cmd/...", "go fmt ./...", "go list ./...",
-		"ls -la", "pwd", "cat README.md", "head -n 5 README.md", "grep -rn todo src", "rg todo src", "git status", "git diff --stat", "git log --oneline -5", "git show HEAD", "git rev-parse HEAD",
+		"make build", "make -j4 build", "make -k test", "task lint", "task lint:go", "cargo test", "cargo check --workspace", "cargo clippy --all-targets", "npm test", "npm run build", "pnpm test", "yarn test",
+		"pytest -q tests/", "pytest -x tests/test_a.py", "pytest -k name tests", "tsc --noEmit", "eslint src", "prettier --check src", "vitest run",
+		"go build ./...", "go build -race -tags x ./cmd/...", "go fmt ./...", "go build -n ./...",
+		"ls -la", "pwd", "cat README.md", "head -n 5 README.md", "grep -n todo src", "rg todo src", "git status", "git status -s", "git diff --stat", "git log --oneline -n 5", "git show HEAD", "git rev-parse HEAD",
 		"make build && make test", "make build | cat", "go build ./... && ls",
 	}
 	for _, cmd := range ok {
