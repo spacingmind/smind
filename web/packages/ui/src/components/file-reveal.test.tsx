@@ -1,6 +1,6 @@
 import { act } from "react";
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { editorViewRegistry } from "@/components/code-mirror-editor";
 import { FileEditorPane } from "@/components/file-editor-pane";
@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe("file reveal", () => {
-  it("a request queued while loading selects the whole line once the file has loaded", async () => {
+  it("a request queued while loading puts the cursor on the line once the file has loaded", async () => {
     const tabKey = fileTabKey(TASK.ID, PATH);
     const client = await mount();
     act(() => useFileRevealStore.getState().request(tabKey, 3));
@@ -88,6 +88,19 @@ describe("file reveal", () => {
     expect(view().state.selection.main.from).toBe(ln.from);
     expect(view().state.selection.main.to).toBe(ln.from);
     expect(useFileRevealStore.getState().requests[tabKey]).toBeUndefined();
+  });
+
+  it("a request nobody consumed goes stale: a later open does not jump to the old line", async () => {
+    vi.useFakeTimers();
+    try {
+      const tabKey = fileTabKey(TASK.ID, PATH);
+      useFileRevealStore.getState().request(tabKey, 3);
+      vi.advanceTimersByTime(16_000);
+      expect(useFileRevealStore.getState().consume(tabKey)).toBeUndefined();
+      expect(useFileRevealStore.getState().requests[tabKey]).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("clamps a line beyond the end of the document to the last line", async () => {

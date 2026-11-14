@@ -121,6 +121,20 @@ describe("findTerminalLinks combined", () => {
   });
 });
 
+describe("findTerminalLinks on adversarial input", () => {
+  it("handles a very long run of closing parens in linear time and links nothing past the cap", () => {
+    const started = Date.now();
+    const out = findTerminalLinks("http://a" + ")".repeat(100_000));
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(out.filter((m) => m.kind === "url")).toEqual([]);
+  });
+
+  it("still trims an unbalanced closing paren on an ordinary URL", () => {
+    const urls = findTerminalLinks("(see https://example.com/a)").filter((m) => m.kind === "url");
+    expect(urls.map((m) => (m.kind === "url" ? m.url : ""))).toEqual(["https://example.com/a"]);
+  });
+});
+
 describe("activateTerminalLink", () => {
   it("runs only with Ctrl or Cmd held", () => {
     const run = vi.fn();

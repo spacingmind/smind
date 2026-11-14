@@ -277,6 +277,8 @@ export function TerminalPane({
   // one line, cleared on a timer, cleared again on unmount.
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const linkNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A file.stat that settles after unmount must not show a notice or arm a timer nobody clears.
+  const unmountedRef = useRef(false);
   // Sticky Ctrl/Shift/Alt of the touch key bar; the ref mirrors state for the onData closure.
   const [modifiers, setModifiers] = useState({ ctrl: false, shift: false, alt: false });
   const modifiersRef = useRef(modifiers);
@@ -597,6 +599,7 @@ export function TerminalPane({
   onOpenFileRef.current = onOpenFile;
 
   function showLinkNotice(): void {
+    if (unmountedRef.current) return;
     setLinkNotice(LINK_NOTICE_TEXT);
     if (linkNoticeTimer.current !== null) clearTimeout(linkNoticeTimer.current);
     linkNoticeTimer.current = setTimeout(() => setLinkNotice(null), LINK_NOTICE_MS);
@@ -634,7 +637,9 @@ export function TerminalPane({
   }, [handleLinkMatch, createTerminal]);
 
   useEffect(() => {
+    unmountedRef.current = false;
     return () => {
+      unmountedRef.current = true;
       if (linkNoticeTimer.current !== null) clearTimeout(linkNoticeTimer.current);
     };
   }, []);

@@ -582,8 +582,10 @@ function AppShell({
     return off;
   }, [events, selectedTask, allTasks, selectTask]);
 
-  function openFileTab(path: string) {
+  function openFileTab(path: string, forTaskId?: number) {
     if (!selectedTask) return;
+    // A terminal link resolves asynchronously (file.stat): if the person switched tasks meanwhile, the file belongs to the old task and must not open in the new one.
+    if (forTaskId !== undefined && forTaskId !== selectedTask.ID) return;
     // Implicit open (file-tree click, a tool-call's click-through): prefer
     // the side pane if the task already has one, but never yank a tab
     // already placed -- openTab's own "prefer" placement is exactly this
@@ -2055,7 +2057,7 @@ interface SplitPaneCallbacks {
   client: WsClient | null;
   connectionStatus: ConnectionStatus;
   events: ReturnType<typeof useDaemonEvents>;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, forTaskId?: number) => void;
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
@@ -2829,7 +2831,7 @@ function TabContent({
         // (openFileTab's "prefer" placement) and queues the reveal-at-line
         // request for the tab the editor pane will consume (DT3-A AC4).
         onOpenFile={(path, line, col) => {
-          onOpenFile(path);
+          onOpenFile(path, task.ID);
           if (line) useFileRevealStore.getState().request(fileTabKey(task.ID, path), line, col);
         }}
       />

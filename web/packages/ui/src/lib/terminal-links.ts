@@ -105,12 +105,20 @@ export function findTerminalLinks(lineText: string): TerminalLinkMatch[] {
 
 /** Trims trailing punctuation (and an unbalanced `)`), then enforces the parse-time rules: exact http/https protocol, no userinfo, length cap. */
 function trimUrl(raw: string): string | null {
-  let text = raw;
-  let trimmed = trimTrailing(text);
-  while (trimmed.endsWith(")") && (trimmed.match(/\)/g)?.length ?? 0) > (trimmed.match(/\(/g)?.length ?? 0)) {
-    trimmed = trimTrailing(trimmed.slice(0, -1));
+  // Bound the work first: the trimming loop below is quadratic on a long run of ")".
+  if (raw.length > MAX_URL_LENGTH + 64) return null;
+  let trimmed = trimTrailing(raw);
+  let open = 0;
+  let close = 0;
+  for (const ch of trimmed) {
+    if (ch === "(") open++;
+    else if (ch === ")") close++;
   }
-  text = trimmed;
+  while (trimmed.endsWith(")") && close > open) {
+    trimmed = trimTrailing(trimmed.slice(0, -1));
+    close--;
+  }
+  const text = trimmed;
   if (text.length === 0 || text.length > MAX_URL_LENGTH) return null;
 
   let url: URL;

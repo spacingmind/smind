@@ -171,10 +171,12 @@ export function TextEditorPane({
     const view = editorViewRef.current;
     // `mtime` is set only when a read has returned: `loading` is false on the very first render, before the read starts.
     if (!revealRequest || loading || mtime === null || !viewReady || !view) return;
-    useFileRevealStore.getState().consume(tabKey);
+    // consume() drops a stale request (older than its TTL) instead of returning it.
+    const taken = useFileRevealStore.getState().consume(tabKey);
+    if (!taken) return;
     const doc = view.state.doc;
-    const ln = doc.line(Math.min(Math.max(revealRequest.line, 1), doc.lines));
-    const pos = Math.min(ln.from + Math.max(revealRequest.col, 1) - 1, ln.to);
+    const ln = doc.line(Math.min(Math.max(taken.line, 1), doc.lines));
+    const pos = Math.min(ln.from + Math.max(taken.col, 1) - 1, ln.to);
     // The cursor on the line plus the editor's active-line band is the mark. A whole-line selection reads badly in dark
     // (the selection fill is pale under the pale text), so it is not used.
     view.dispatch({

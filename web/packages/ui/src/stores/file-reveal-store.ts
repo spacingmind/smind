@@ -6,7 +6,12 @@ export interface FileRevealRequest {
   col: number;
   /** Distinguishes two requests for the same tab, so a second click on an already-open tab re-triggers. */
   nonce: number;
+  /** When it was queued: a request nobody consumed (read failed, tab closed) goes stale instead of jumping a later open to an old line. */
+  at: number;
 }
+
+/** How long a queued request stays valid. */
+const REQUEST_TTL_MS = 15_000;
 
 let nextNonce = 0;
 
@@ -25,7 +30,7 @@ export const useFileRevealStore = create<{
 }>()((set, get) => ({
   requests: {},
   request: (tabKey, line, col = 1) =>
-    set((state) => ({ requests: { ...state.requests, [tabKey]: { line, col, nonce: ++nextNonce } } })),
+    set((state) => ({ requests: { ...state.requests, [tabKey]: { line, col, nonce: ++nextNonce, at: Date.now() } } })),
   consume: (tabKey) => {
     const pending = get().requests[tabKey];
     if (!pending) return undefined;
@@ -34,6 +39,6 @@ export const useFileRevealStore = create<{
       delete next[tabKey];
       return { requests: next };
     });
-    return pending;
+    return Date.now() - pending.at > REQUEST_TTL_MS ? undefined : pending;
   },
 }));
