@@ -12,6 +12,7 @@
 #
 # Usage: scripts/desktop-audit-build.sh [out-dir]   (default: $HOME/.smind/dogfood/desktop-audit)
 # Env:   AUDIT_ID  short lowercase word for the identifier suffix, scheme and product name (default: audit)
+#        CARGO_TARGET_DIR  share a Rust build cache
 #        DRY_RUN=1 write the override, print the derived identifier and stop before any build
 #
 # It refuses an AUDIT_ID that could collide with the real identifier or escape a path, and an
@@ -44,10 +45,11 @@ canon() {
 }
 out=$(canon "$out")
 home=$(canon "$HOME")
+apps=$(canon "${AUDIT_APPLICATIONS_DIR:-/Applications}") # overridable only so the test never has to aim at the real one
 for bad in \
   "$home/Library/Application Support/$real" "$home/Library/WebKit/$real" \
   "$home/Library/Caches/$real" "$home/Library/Logs/$real" \
-  "$home/.smind" "/Applications"; do
+  "$home/.smind" "$apps"; do
   case "$out/" in
     "$bad"/*)
       # the default out-dir lives under ~/.smind/dogfood, which is scratch, not the daemon home
@@ -95,7 +97,8 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=$goarch go build -buildvcs=false \
 
 (cd desktop && npm ci && npx tauri build --target "$target" --bundles app --config "$conf")
 
-app="desktop/src-tauri/target/$target/release/bundle/macos/sMind Audit.app"
+# CARGO_TARGET_DIR (if set) is honoured by cargo and by the copy below, so a cache can be shared.
+app="${CARGO_TARGET_DIR:-desktop/src-tauri/target}/$target/release/bundle/macos/sMind Audit.app"
 rm -rf "$out/sMind Audit.app"
 ditto "$app" "$out/sMind Audit.app"
 echo "built: $out/sMind Audit.app"

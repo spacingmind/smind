@@ -73,7 +73,9 @@ refused "refuses-under-real-app-data" "$home/Library/Application Support/$real/m
 refused "refuses-real-webkit" "$home/Library/WebKit/$real"
 refused "refuses-real-logs" "$home/Library/Logs/$real/audit"
 refused "refuses-real-caches" "$home/Library/Caches/$real"
-refused "refuses-applications" "/Applications/audit"
+# the applications directory is overridden so a broken guard can never write into the real /Applications
+mkdir -p "$work/Applications"
+refused "refuses-applications" "$work/Applications/audit" AUDIT_APPLICATIONS_DIR="$work/Applications"
 refused "refuses-real-smind-home" "$home/.smind"
 refused "refuses-under-real-smind-home" "$home/.smind/worktrees/x"
 
