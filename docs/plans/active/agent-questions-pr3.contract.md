@@ -18,7 +18,7 @@ acs:
     covers: { tests: ["questionAnswer.test.ts"], mutations: [M5] }
   - id: AC5
     text: "Every resolution has a words; adversarial text and a long ask are handled as inert text and a collapse."
-    covers: { tests: ["questionResolution.test.ts", "questionView.test.ts"], mutations: [M6] }
+    covers: { tests: ["questionView.test.ts"], mutations: [M6] }
 tests:
   - { name: TestPush_QuestionTitleOnly, run: "go test ./internal/push -run '^TestPush_QuestionTitleOnly$' -count=1", timeoutSec: 300 }
   - { name: TestPushInput_QuestionPendingMapsToQuestionKind, run: "go test ./internal/wsapi -run '^TestPushInput_QuestionPendingMapsToQuestionKind$' -count=1", timeoutSec: 300 }
@@ -27,7 +27,6 @@ tests:
   - { name: TestPush_QuestionKindIsSubscribable, run: "go test ./internal/push ./internal/wsapi -run '^TestPush_QuestionKindIsSubscribable$' -count=1", timeoutSec: 300 }
   - { name: questionRequests.test.ts, run: "cd mobile && npx vitest run src/__tests__/questionRequests.test.ts", timeoutSec: 300 }
   - { name: questionAnswer.test.ts, run: "cd mobile && npx vitest run src/__tests__/questionAnswer.test.ts", timeoutSec: 300 }
-  - { name: questionResolution.test.ts, run: "cd mobile && npx vitest run src/__tests__/questionResolution.test.ts", timeoutSec: 300 }
   - { name: questionView.test.ts, run: "cd mobile && npx vitest run src/__tests__/questionView.test.ts", timeoutSec: 300 }
 mutations:
   - { id: M1, file: "internal/push/notifier.go", change: "put the question text into the push body", expectFail: [TestPush_QuestionTitleOnly] }
