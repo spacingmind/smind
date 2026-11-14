@@ -457,12 +457,13 @@ mod tests {
         let state = ContextMenuState::default();
         let t0 = Instant::now();
         let first = state.arm(&[item("a", "A")], t0);
-        let second = state.arm(&[item("b", "B")], t0);
+        // Both menus carry an item "a": only the open id tells them apart.
+        let second = state.arm(&[item("a", "A"), item("b", "B")], t0);
         assert_ne!(first, second);
         // The first menu was replaced: its selection no longer reaches anyone.
         assert_eq!(state.resolve(&event_id(first, "a"), t0), None);
-        // An id the armed menu does not carry is ignored too (another menu's id under this open).
-        assert_eq!(state.resolve(&event_id(second, "a"), t0), None);
+        // An id the armed menu does not carry is ignored too.
+        assert_eq!(state.resolve(&event_id(second, "zzz"), t0), None);
         // The armed menu's own selection resolves once.
         assert_eq!(
             state.resolve(&event_id(second, "b"), t0),
