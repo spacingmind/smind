@@ -87,6 +87,8 @@ type floorSeg struct {
 	wrappers []string
 	cwd      string
 	pl       *platform
+	// viaSuffix marks a command judged as a later word of a runner's arguments.
+	viaSuffix bool
 }
 
 // name is the command name of the effective argv0 under the request's flavour; argv must be non-empty.

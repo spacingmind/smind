@@ -245,7 +245,28 @@ func shellFedHumanOnly(segs []*floorSeg, raw string) bool {
 	return bareShellFed(segs)
 }
 
-var shellNames = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true}
+// bareShellFed reports a shell with no -c and no script word in the command:
+// it reads its commands from stdin, a here-string or a pipe. It is the shared
+// half of the shell-fed rules (no-self-approve and the never-list).
+func bareShellFed(segs []*floorSeg) bool {
+	for _, fs := range segs {
+		if len(fs.argv) == 0 || !shellNames[fs.name()] {
+			continue
+		}
+		bare := true
+		for _, a := range fs.argv[1:] {
+			if a == "-c" || shortCluster(a, "c") || (!strings.HasPrefix(a, "-") && a != "-") {
+				bare = false
+			}
+		}
+		if bare {
+			return true
+		}
+	}
+	return false
+}
+
+var shellNames = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true, "csh": true, "tcsh": true}
 
 // transportNames speak to a socket or run a program that can: a human-only
 // method named in a command with one of them is a call, not a search.

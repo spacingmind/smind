@@ -58,7 +58,7 @@ func TestNeverList_Denied(t *testing.T) {
 		"su -c 'su -c \"rm -rf /\"'", "find . -exec sh -c 'rm -rf /' ;", "bash -c ':(){ :|:& };:'", "ssh h ':(){ :|:& };:'",
 		"echo ':(){ :|:& };:' | sh", "su -c 'diskutil eraseDisk JHFS+ X disk2'", "ssh h 'reboot'",
 		"su -c 'mv ~ /dev/null'", "ssh h mv /usr /tmp/x", "su -c 'dd if=/dev/zero of=/dev/sda'", "su -c 'echo x > /dev/sda'", "ssh h 'cat x > /dev/disk2'",
-		"sh <<EOF\nrm -rf /\nEOF", "echo ok && sh <<'X'\nmkfs /dev/sda\nX",
+		"sh <<EOF\nrm -rf /\nEOF", "fish -c 'rm -rf /'", "echo ok && sh <<'X'\nmkfs /dev/sda\nX",
 	}
 	for _, cmd := range cmds {
 		t.Run(cmd, func(t *testing.T) {
@@ -114,7 +114,7 @@ func TestNeverList_NearMissesAllowed(t *testing.T) {
 		"echo ':(){ :|:& };:'", "grep -rn ':(){' docs", "rg 'fork while fork' .", "git commit -m 'document the :(){ :|:& };: fork bomb'",
 		"cat > notes.md <<'EOF'\n:(){ :|:& };:\nEOF", "echo 'rm -rf /' > notes.txt", "echo 'rm -rf /'", "echo mkfs /dev/sda", "grep -rn 'rm -rf /' docs",
 		"git commit -m 'never run rm -rf ~'", "echo 'rm -rf ./build' | sh", "sh -c 'rm -rf ./build'", "su -c 'ls /'", "ssh host 'ls /etc'", "eval 'echo hi'",
-		"ssh host rm -rf ./build", "nsenter -t 1 ls", "sh -c 'echo reboot'", "echo reboot", "git log --grep=reboot", "go test -run TestReboot ./...",
+		"ssh host rm -rf ./build", "nsenter -t 1 ls", "ssh host systemctl status reboot", "ssh reboot", "ssh host -- ls halt", "systemctl list-units halt", "systemctl reboot --help x", "npm test -- 'fork while fork'", "go test -args 'a(){ a|a& }'", "sh -c 'echo reboot'", "echo reboot", "git log --grep=reboot", "go test -run TestReboot ./...",
 		"systemctl status sshd", "init", "shutdown --help", "cd /tmp && rm -rf *", "cd /home/dev/proj && rm -rf *", "systemctl restart nginx",
 		"rm -rf --preserve-root ./x", "hdparm -I /dev/sda", "nvme list", "badblocks /dev/sda",
 	}

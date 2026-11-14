@@ -49,8 +49,13 @@ func (fs *floorSeg) catastrophicDeep(depth int) bool {
 	}
 	args := fs.argv[1:]
 	// A script handed over as one word: `su -c 'rm -rf /'`, `eval 'mkfs /dev/sda'`.
-	for _, a := range args {
-		if strings.ContainsAny(a, " \t\n;&|") && fs.textCatastrophic(a, depth+1) {
+	nf := nonFlags(args)
+	for i, a := range args {
+		// One word is a script only where a script is expected: after -c, for eval,
+		// or as ssh's command word (`ssh host reboot`, not `ssh reboot`).
+		oneWord := (i > 0 && args[i-1] == "-c") || name == "eval" ||
+			(name == "ssh" && len(nf) == 2 && i == len(args)-1)
+		if (oneWord || strings.ContainsAny(a, " \t\n;&|")) && fs.textCatastrophic(a, depth+1) {
 			return true
 		}
 	}
@@ -65,6 +70,7 @@ func (fs *floorSeg) catastrophicDeep(depth int) bool {
 		sub := *fs
 		sub.argv = args[i:]
 		sub.seg.Redirects = nil
+		sub.viaSuffix = true
 		if sub.catastrophicDeep(depth + 1) {
 			return true
 		}
@@ -82,27 +88,6 @@ func (fs *floorSeg) textCatastrophic(text string, depth int) bool {
 			return true
 		}
 		cwd = sub.cwdAfter()
-	}
-	return false
-}
-
-// bareShellFed reports a shell with no -c and no script word in the command:
-// it reads its commands from stdin, a here-string or a pipe. It is the shared
-// half of the shell-fed rules (no-self-approve and the never-list).
-func bareShellFed(segs []*floorSeg) bool {
-	for _, fs := range segs {
-		if len(fs.argv) == 0 || !shellNames[fs.name()] {
-			continue
-		}
-		bare := true
-		for _, a := range fs.argv[1:] {
-			if a == "-c" || shortCluster(a, "c") || (!strings.HasPrefix(a, "-") && a != "-") {
-				bare = false
-			}
-		}
-		if bare {
-			return true
-		}
 	}
 	return false
 }
@@ -130,6 +115,7 @@ func shellFedCatastrophic(req Request, segs []*floorSeg, raw string) bool {
 		}
 	}
 	texts = append(texts, strings.Split(raw, "\n")...)
+	// The three-index slice bounds the range to the texts so far: the appends below are not re-read.
 	for _, t := range texts[:len(texts):len(texts)] {
 		if strings.Contains(t, `\n`) { // printf 'cmd\n' | sh
 			texts = append(texts, strings.Split(t, `\n`)...)
@@ -177,6 +163,7 @@ var windowsDiskCmds = map[string]bool{
 	"diskpart": true, "stop-computer": true, "restart-computer": true,
 }
 
+// powerCmds stop the machine, and with it the daemon and every other run.
 var powerCmds = map[string]bool{"shutdown": true, "reboot": true, "halt": true, "poweroff": true}
 
 // diskutilDestroys are the diskutil verbs that erase, format or repartition.
@@ -194,7 +181,7 @@ var partitioners = map[string]bool{
 // mkfsLike creates a filesystem or swap area on its target.
 func mkfsLike(name string) bool {
 	switch name {
-	case "mkfs", "mke2fs", "mkswap", "mkdosfs", "mkntfs", "newfs", "mkudffs", "mkreiserfs", "mkfs.ext4":
+	case "mkfs", "mke2fs", "mkswap", "mkdosfs", "mkntfs", "newfs", "mkudffs", "mkreiserfs":
 		return true
 	}
 	return strings.HasPrefix(name, "mkfs.") || strings.HasPrefix(name, "newfs_")
@@ -215,7 +202,9 @@ func (fs *floorSeg) catastrophic() bool {
 	lname := strings.ToLower(name)
 	switch {
 	case powerCmds[name]:
-		return !containsWord(args, "--help") && !containsWord(args, "--version") && !containsWord(args, "-c") && !containsWord(args, "--show")
+		// Judged only as the real command: after a runner (`ssh host reboot`) the word
+		// may be a host name or an argument.
+		return !fs.viaSuffix && !containsWord(args, "--help") && !containsWord(args, "--version") && !containsWord(args, "-c") && !containsWord(args, "--show")
 	case windowsDiskCmds[lname]:
 		return true
 	case mkfsLike(name):
@@ -272,15 +261,11 @@ func (fs *floorSeg) catastrophic() bool {
 			return true
 		}
 	case "systemctl", "loginctl":
-		for _, a := range nonFlags(args) {
-			switch a {
-			case "poweroff", "reboot", "halt", "kexec":
-				return true
-			}
-		}
+		w := nonFlags(args)
+		return !fs.viaSuffix && !containsWord(args, "--help") && len(w) > 0 && (w[0] == "poweroff" || w[0] == "reboot" || w[0] == "halt" || w[0] == "kexec")
 	case "init", "telinit":
 		w := nonFlags(args)
-		return len(w) > 0 && (w[0] == "0" || w[0] == "6")
+		return !fs.viaSuffix && len(w) > 0 && (w[0] == "0" || w[0] == "6")
 	case "format":
 		if fs.pl.windows {
 			for _, a := range args {
@@ -396,6 +381,7 @@ func (fs *floorSeg) rootLikeWord(w string) bool {
 	return ok && isRootLike(fs.req, resolved)
 }
 
+// posixSystemRoots are the top-level directories whose removal is never routine.
 var posixSystemRoots = []string{
 	"/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/opt", "/proc", "/root", "/sbin", "/srv", "/sys", "/usr", "/var",
 	"/home", "/Users", "/System", "/Library", "/Applications", "/Volumes", "/private",
@@ -431,7 +417,10 @@ func isRootLike(req Request, resolved string) bool {
 	return false
 }
 
+// posixBlockDevice names the block devices and raw memory a write must never reach.
 var posixBlockDevice = regexp.MustCompile(`^/dev/(sd[a-z]+\d*|hd[a-z]+\d*|vd[a-z]+\d*|xvd[a-z]+\d*|nvme\d+(n\d+(p\d+)?)?|mmcblk\d+(p\d+)?|r?disk\d+(s\d+)*|loop\d+|md\d+|dm-\d+|mapper/.+|sr\d+|nbd\d+|zram\d+|ram\d+|mtdblock\d+|mem|kmem|port)$`)
+
+// winBlockDevice names raw Windows disks and volumes (`\\.\PhysicalDrive0`); the splitter may eat one backslash.
 var winBlockDevice = regexp.MustCompile(`(?i)^[\\/]{1,2}[.?][\\/](physicaldrive\d+|harddisk\d+|[a-z]:|volume\{.*)$`)
 
 // isDevice reports a word that names a block device, directly or through a
@@ -450,7 +439,10 @@ func (fs *floorSeg) isDevice(w string) bool {
 	return ok && posixBlockDevice.MatchString(r)
 }
 
+// forkBombDef finds a shell function definition `name(){ body }`.
 var forkBombDef = regexp.MustCompile(`([^\s;&|(){}'"]+)\s*\(\s*\)\s*\{([^}]*)\}`)
+
+// forkWhileFork is perl's `fork while fork`.
 var forkWhileFork = regexp.MustCompile(`\bfork\s+while\s+fork\b`)
 
 // forkBomb reports a shell function that pipes itself into itself in the
@@ -470,15 +462,15 @@ func forkBomb(segs []*floorSeg, raw string) bool {
 	if !hit {
 		return false
 	}
+	// Only a command that can run the text counts: a shell, an interpreter, a
+	// runner, or the function definition itself (its word looks like `name(){`).
 	for _, fs := range segs {
 		if len(fs.argv) == 0 {
 			continue
 		}
-		switch fs.name() {
-		case "tee", "git", "gh", "sed":
-			continue
-		}
-		if !harmlessReaders[fs.name()] {
+		name := fs.name()
+		if shellNames[name] || commandRunners[name] || transportNames[name] || strings.HasPrefix(name, "python") ||
+			strings.Contains(fs.argv[0], "()") || name == "source" || name == "." {
 			return true
 		}
 	}
