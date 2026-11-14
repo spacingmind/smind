@@ -50,6 +50,8 @@ lands for both. Three PRs, each branched from `wave/desktop`, one at a time:
 8. Restart creates one new session, writes a dim separator line into the same xterm (the old output stays
    above it) and attaches to the new session. One click is one `terminal.create`; the button is disabled while
    pending and an error shows inline.
+8b. While a session is ended the cursor is hidden (DEC private mode 25), so the pane does not look live; Restart
+    shows it again, and a replayed ended session ends hidden even if its scrollback re-showed the cursor.
 9. If the old session is no longer retained, the pane says "Session ended; its output is no longer kept"
    and still offers Restart.
 
@@ -108,5 +110,8 @@ PR B: `terminal-restart.test.tsx` (8 tests) plus the existing terminal suites; w
 handler removed (shell-exit test), separator write removed, emulator reset removed, "no longer kept" branch removed.
 A first run of the ref-guard mutation SURVIVED (the test only used the disabled state); the test was strengthened (two clicks
 in one act) and the mutation then failed it. Frames: 12 (running, ended, restarted; light and dark; 1280 and 390), all opened.
+Cursor (PR B, supervisor nit): 3 tests (running session untouched; hidden on exit and restored by Restart; hidden after a replay
+whose scrollback re-showed it); two more mutations killed (effect disabled; hide-after-replay removed). Ended and restarted frames re-shot
+and opened: no block cursor while ended, the outline cursor is back after Restart.
 Not verified (PR A): a real daemon, the desktop webview (the `open_external` bridge is existing code), wrapped long lines
 (only the row under the pointer is scanned), mutation checks (the runs were not approved).
