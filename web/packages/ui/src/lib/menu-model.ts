@@ -27,6 +27,8 @@ export interface MenuItemEntry {
    * the label in parentheses.
    */
   note?: string;
+  /** An unavailable item that stays keyboard-reachable (its reason is the `note`): lib/menu-item-disabled.ts. Default: reachable exactly when it has a note and a test id. */
+  reachable?: boolean;
   /** The item opens a dialog: the in-page menu closes with no exit animation under it. */
   opensDialog?: boolean;
   /** Extra data-* attributes for the in-page item (tests and callers that disambiguate items). */

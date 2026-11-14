@@ -1,5 +1,8 @@
+import type { ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 import type { MenuEntry } from "@/lib/menu-model";
+import type { SpaceWithTasks, Task } from "@/lib/types";
+import type { TreeActionAvailability } from "@/lib/task-tree-actions";
 
 /**
  * The pure builders of the app's context menus (desktop-native-feel DT2 (a)/(b)). Each takes the state the
@@ -140,4 +143,133 @@ export function tabMenu(i: TabMenuInput): MenuEntry[] {
     }
   }
   return entries;
+}
+
+/**
+ * "Move to space" lists every other space in the task's workspace plus
+ * "Ungrouped" unless the task is already there (no self-move). It is omitted
+ * with no `spaces`/`onMoveTask` pair (SearchResults' flat list spans workspaces
+ * and doesn't offer the move) or nowhere to move to.
+ */
+export function taskRowMenu(
+  task: Task,
+  o: {
+    spaces?: SpaceWithTasks[];
+    onMoveTask?: (task: Task, spaceId: number | null) => void;
+    isPinned: boolean;
+    onTogglePin: (taskId: number) => void;
+    onMarkUnread: (taskId: number) => void;
+    onArchiveTask: (task: Task) => void;
+    /** Opens the New sub-task dialog; absent outside the tree provider (search results). */
+    onNewSubTask?: () => void;
+    /** PR-H11 tree actions; present only on rows in the tree view whose task has live descendants. */
+    tree?: { availability: TreeActionAvailability; onArchiveFinished: () => void; onStopTree: () => void };
+  },
+): MenuEntry[] {
+  const entries: MenuEntry[] = [];
+  if (o.onNewSubTask && !task.ArchivedAt) {
+    entries.push({
+      kind: "item",
+      id: "new-subtask",
+      testId: "sidebar-task-new-subtask-action",
+      label: "New sub-task…",
+      icon: <Icons.add />,
+      onSelect: o.onNewSubTask,
+      opensDialog: true,
+    });
+  }
+  if (o.tree) {
+    const { availability, onArchiveFinished, onStopTree } = o.tree;
+    entries.push(
+      {
+        kind: "item",
+        id: "archive-finished",
+        testId: "sidebar-task-archive-finished-action",
+        label: "Archive finished sub-tasks…",
+        icon: <Icons.archive />,
+        onSelect: onArchiveFinished,
+        opensDialog: true,
+        enabled: availability.archive.enabled,
+        reachable: true,
+        note: availability.archive.reason ?? undefined,
+      },
+      {
+        kind: "item",
+        id: "stop-tree",
+        testId: "sidebar-task-stop-tree-action",
+        label: "Stop all in tree…",
+        icon: <Icons.stop />,
+        onSelect: onStopTree,
+        opensDialog: true,
+        enabled: availability.stop.enabled,
+        reachable: true,
+        note: availability.stop.reason ?? undefined,
+      },
+    );
+  }
+  if (o.spaces && o.onMoveTask) {
+    const targets: { id: number | null; label: string }[] = [];
+    if (task.SpaceID !== null) targets.push({ id: null, label: "Ungrouped" });
+    for (const space of o.spaces) {
+      if (space.ID !== task.SpaceID) targets.push({ id: space.ID, label: space.Title });
+    }
+    const onMoveTask = o.onMoveTask;
+    if (targets.length > 0) {
+      entries.push({
+        kind: "submenu",
+        id: "move",
+        label: "Move to space",
+        icon: <Icons.space />,
+        testId: "sidebar-task-move-action",
+        children: targets.map((target) => ({
+          kind: "item" as const,
+          id: `move:${target.id ?? "ungrouped"}`,
+          label: target.label,
+          testId: "sidebar-task-move-target",
+          data: { "space-id": target.id ?? "ungrouped" },
+          onSelect: () => onMoveTask(task, target.id),
+        })),
+      });
+    }
+  }
+  entries.push(
+    {
+      kind: "item",
+      id: "pin",
+      testId: "sidebar-task-pin-action",
+      label: o.isPinned ? "Unpin" : "Pin",
+      icon: o.isPinned ? <Icons.unpin /> : <Icons.pin />,
+      onSelect: () => o.onTogglePin(task.ID),
+    },
+    {
+      kind: "item",
+      id: "mark-unread",
+      testId: "sidebar-task-mark-unread-action",
+      label: "Mark unread",
+      icon: <Icons.statusIdle />,
+      onSelect: () => o.onMarkUnread(task.ID),
+    },
+    {
+      kind: "item",
+      id: "archive",
+      testId: "sidebar-task-archive-action",
+      label: "Archive task",
+      icon: <Icons.archive />,
+      onSelect: () => o.onArchiveTask(task),
+      opensDialog: true,
+    },
+  );
+  return entries;
+}
+
+/** A workspace or space row's actions (the same items its ⋯ menu offers), as a model. Ids are slugs of the labels; `fadeOut` items keep the menu's exit animation, the others close it instantly because they open a dialog. */
+export function rowMenu(items: { label: string; icon: ReactNode; onSelect: () => void; fadeOut?: boolean }[]): MenuEntry[] {
+  return items.map((item) => ({
+    kind: "item" as const,
+    id: item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "item",
+    label: item.label,
+    icon: item.icon,
+    opensDialog: item.fadeOut !== true,
+    onSelect: item.onSelect,
+  }));
 }

@@ -55,7 +55,7 @@ export function MenuEntries({
           );
         }
         const enabled = entry.enabled !== false;
-        const reachable = !enabled && entry.note !== undefined && entry.testId !== undefined;
+        const reachable = !enabled && (entry.reachable ?? entry.note !== undefined) && entry.testId !== undefined;
         const data: Record<string, string | number> = {};
         for (const [k, v] of Object.entries(entry.data ?? {})) data[`data-${k}`] = v;
         return (
@@ -75,7 +75,6 @@ export function MenuEntries({
             }
           >
             {entry.icon}
-            {entry.icon ? " " : ""}
             {entry.label}
             {entry.note && (
               <span id={`${entry.testId}-reason`} className="ml-auto pl-2 text-ui-xs text-muted-foreground">
