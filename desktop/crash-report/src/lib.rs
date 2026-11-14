@@ -3,3 +3,4 @@
 //! Reports stay on this machine; this crate has no network code and spawns no process.
 
 pub mod redact;
+pub mod report;
