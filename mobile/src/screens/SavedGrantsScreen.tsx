@@ -54,8 +54,15 @@ export function SavedGrantsScreen({ conn }: { conn: RelayConnection }) {
     }
   }
 
+  return <SavedGrantsList rows={rows} error={error} onReload={reload} onRevoke={(row) => void onRevoke(row)} />;
+}
+
+/** The list itself, presentational: the screen feeds it rows; the frames feed it fixtures. */
+export function SavedGrantsList({ rows, error, onReload, onRevoke }: { rows: GrantRowView[]; error: string | null; onReload: () => void; onRevoke: (row: GrantRowView) => void }) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   return (
-    <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={false} onRefresh={reload} />}>
+    <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={false} onRefresh={onReload} />}>
       {error !== null ? (
         <Text style={styles.error} selectable>
           {`Couldn't revoke: ${error}`}
@@ -80,7 +87,7 @@ export function SavedGrantsScreen({ conn }: { conn: RelayConnection }) {
             {row.optInLine !== null ? <Text style={styles.muted}>{row.optInLine}</Text> : null}
             <Text style={styles.muted}>{row.usageLine}</Text>
             {row.hint !== '' ? <Text style={styles.muted}>{row.hint}</Text> : null}
-            {row.canRevoke ? <OutlineButton label="Revoke" tone="danger" onPress={() => void onRevoke(row)} style={styles.revoke} /> : null}
+            {row.canRevoke ? <OutlineButton label="Revoke" tone="danger" onPress={() => onRevoke(row)} style={styles.revoke} /> : null}
           </Card>
         ))
       )}

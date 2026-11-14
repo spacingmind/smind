@@ -55,7 +55,7 @@ export function GrantControl({
       </p>
       {needsOptIn && (
         <label htmlFor={optInId} className="flex items-start gap-2 text-ui-sm text-foreground">
-          <Checkbox id={optInId} data-testid="grant-optin" checked={optIn} disabled={disabled} onCheckedChange={(v) => setOptIn(v === true)} className="mt-0.5" />
+          <Checkbox id={optInId} data-testid="grant-optin" checked={optIn} disabled={disabled} onCheckedChange={(v) => setOptIn(v === true)} className="mt-0.5 border-foreground-muted" />
           <span className="whitespace-pre-wrap break-words">{offer.optInLabel || GRANT_OPT_IN_FALLBACK}</span>
         </label>
       )}

@@ -89,6 +89,7 @@ describe("SettingsScreen shell", () => {
       "settings-nav-providers",
       "settings-nav-usage",
       "settings-nav-permission-policy",
+      "settings-nav-saved-grants",
     ]);
   });
 

@@ -419,6 +419,8 @@ export const RULES: Record<string, DemoRule> = {
   "learning.proposals.prevalence": read({}),
   "learning.probe.list": read([]),
   "learning.jobs.list": read([]),
+  // the demo saves no grants (the scripted daemon offers none): the list is empty, saving and revoking are refused
+  "permission.grants.list": read({ grants: [] }),
   "policy.get": read({ enabled: false, valid: true, exists: false, rules: [] }),
   "policy.audit": read({ rows: [], next: 0 }),
   "steward.get": refused(),
@@ -474,6 +476,8 @@ export const REFUSED_METHODS = [
   "run.revealToolHeredoc",
   // the demo scripts no agent questions (ADR-0055): answering is refused like any other write
   "run.answerQuestion",
+  // no grant is ever offered in the demo, so nothing can be saved or revoked (saved grants)
+  "run.answerPermission", "permission.grants.revoke",
   "task.archive", "task.archiveFinished", "task.commit", "task.createPr", "task.move", "task.push", "task.restore", "task.retrySetup",
   "task.setBudget", "task.stage", "task.stopTree", "task.updateFromBase", "task.updatePr",
   "workspace.create", "workspace.delete", "workspace.setDefaultBase", "workspace.setScripts",
