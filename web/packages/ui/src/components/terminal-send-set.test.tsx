@@ -45,21 +45,17 @@ class FakeTerminalHandle implements TerminalHandle {
   selection = "";
   lastLines = "";
   writes: (string | Uint8Array)[] = [];
-  private dataCallback: ((data: string) => void) | null = null;
-  private resizeCallback: ((size: { cols: number; rows: number }) => void) | null = null;
 
   open(container: HTMLElement): void {
     this.opened = container;
   }
 
-  onData(callback: (data: string) => void): { dispose(): void } {
-    this.dataCallback = callback;
-    return { dispose: () => (this.dataCallback = null) };
+  onData(_callback: (data: string) => void): { dispose(): void } {
+    return { dispose: () => undefined };
   }
 
-  onResize(callback: (size: { cols: number; rows: number }) => void): { dispose(): void } {
-    this.resizeCallback = callback;
-    return { dispose: () => (this.resizeCallback = null) };
+  onResize(_callback: (size: { cols: number; rows: number }) => void): { dispose(): void } {
+    return { dispose: () => undefined };
   }
 
   write(data: string | Uint8Array): void {
