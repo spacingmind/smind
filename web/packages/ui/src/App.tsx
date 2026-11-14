@@ -65,6 +65,7 @@ import {
   defaultTabsForTask,
   prTab,
   fileTab,
+  fileTabKey,
   filePathFromTabKey,
   NewTabButton,
   pluginTab,
@@ -88,6 +89,7 @@ import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
+import { useFileRevealStore } from "@/stores/file-reveal-store";
 import { useTheme } from "@/hooks/use-theme";
 import type { ActionId } from "@/keyboard/actions";
 import { KeyboardProvider, useActionHandler, useActionRestriction, useKeyboard } from "@/keyboard/keyboard-provider";
@@ -2823,6 +2825,13 @@ function TabContent({
         tabKey={entry.key}
         active={active}
         connectionStatus={connectionStatus}
+        // A terminal link opens the file like the explorer's implicit open
+        // (openFileTab's "prefer" placement) and queues the reveal-at-line
+        // request for the tab the editor pane will consume (DT3-A AC4).
+        onOpenFile={(path, line, col) => {
+          onOpenFile(path);
+          if (line) useFileRevealStore.getState().request(fileTabKey(task.ID, path), line, col);
+        }}
       />
     ),
   };
