@@ -102,7 +102,7 @@ Mutations (each must fail the named test): newest-run rule replaced by "any run 
 ## Progress
 
 - [x] Item 1 verifier (script + 42 tests by peer-glm, CI wiring, `docs/release-verification.md`)
-- [ ] Item 2 CI-green gate
+- [ ] Item 2 CI-green gate (script by peer-glm, wiring + docs by the lead; PR open when checked)
 - [ ] Item 3 crash capture
 - [ ] Item 4 `requireSignedVersion`
 - [ ] Item 5 notarization prep
