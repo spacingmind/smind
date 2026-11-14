@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { formatBytes } from "@/lib/attachments/format";
 import { sameMentionRef, type MentionRef } from "@/lib/file-mention";
+import type { ContextChip } from "@/lib/send-set";
 import type { AttachmentLimits } from "@/lib/types";
 
 interface DraftBase {
@@ -54,9 +55,11 @@ const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const NONE: DraftAttachment[] = [];
 const NO_MENTIONS: MentionRef[] = [];
 const NO_TEXTS: string[] = [];
+const NO_CHIPS: ContextChip[] = [];
 
 let nextId = 0;
 let pastedImages = 0;
+let chipId = 0;
 
 function revoke(item: DraftAttachment): void {
   if (isDraftFile(item) && item.previewUrl) URL.revokeObjectURL(item.previewUrl);
@@ -99,6 +102,8 @@ interface ComposerAttachmentsState {
   pendingInserts: Record<string, MentionRef[]>;
   /** Prompt text waiting for the composer of that key to append it to its draft (never sent by itself). */
   pendingTexts: Record<string, string[]>;
+  /** The context chips of that key (DT3-D AC17): held out of the draft, sent at submit time. */
+  chips: Record<string, ContextChip[]>;
   add: (key: string, files: File[], limits: AttachmentLimits) => void;
   /** Adds a picked PR/issue (a duplicate of one already in the tray is ignored). */
   addForgeRef: (key: string, ref: Omit<DraftForgeRef, "localId" | "error">, limits: AttachmentLimits) => void;
@@ -113,6 +118,12 @@ interface ComposerAttachmentsState {
   queueText: (key: string, text: string) => void;
   /** Returns and clears the queued texts of `key`. */
   takeTexts: (key: string) => string[];
+  /** Adds a context chip (DT3-D AC14): a terminal text or a file reference, kept out of the draft text. */
+  addChip: (key: string, chip: Omit<ContextChip, "localId">) => void;
+  /** Removes one chip by its × or Backspace. */
+  removeChip: (key: string, localId: string) => void;
+  /** Drops every chip of `key` (after a successful send; a failed send keeps them). */
+  clearChips: (key: string) => void;
   clearMentions: (key: string) => void;
   remove: (key: string, localId: string, limits?: AttachmentLimits | null) => void;
   /** Drops the tray and revokes its object URLs (on unmount). */
@@ -132,6 +143,7 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
   mentions: {},
   pendingInserts: {},
   pendingTexts: {},
+  chips: {},
   add: (key, files, limits) => {
     if (files.length === 0) return;
     const added: DraftAttachment[] = files.map((file) => {
@@ -180,6 +192,20 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     set({ pendingTexts: rest });
     return held;
   },
+  addChip: (key, chip) => set({ chips: { ...get().chips, [key]: [...(get().chips[key] ?? NO_CHIPS), { ...chip, localId: `chip-${++chipId}` }] } }),
+  removeChip: (key, localId) => {
+    const held = get().chips[key];
+    if (!held?.some((c) => c.localId === localId)) return;
+    const { [key]: _gone, ...rest } = get().chips;
+    const left = held.filter((c) => c.localId !== localId);
+    if (left.length > 0) rest[key] = left;
+    set({ chips: rest });
+  },
+  clearChips: (key) => {
+    if (!get().chips[key]) return;
+    const { [key]: _gone, ...rest } = get().chips;
+    set({ chips: rest });
+  },
   clearMentions: (key) => {
     if (!get().mentions[key]) return;
     const { [key]: _gone, ...rest } = get().mentions;
@@ -196,9 +222,9 @@ export const useComposerAttachmentsStore = create<ComposerAttachmentsState>()((s
     set({ byKey: { ...get().byKey, [key]: next } });
   },
   clear: (key) => {
-    // Mentions are not cleared here: the chat tab unmounts whenever another tab is in front, while the draft TEXT (and
-    // so the `@path` tokens) survives. A mention is only sent while its token is still in the text, so a stale one is
-    // harmless; a send clears them (clearMentions).
+    // Mentions and chips are not cleared here: the chat tab unmounts whenever another tab is in front, while the
+    // draft TEXT (and so the `@path` tokens) and the chips (DT3-D AC17) must survive that. A mention is only sent
+    // while its token is still in the text, so a stale one is harmless; a send clears both (clearMentions, clearChips).
     const current = get().byKey[key];
     if (!current) return;
     current.forEach(revoke);
@@ -231,4 +257,9 @@ export function useDraftAttachments(key: string | null): DraftAttachment[] {
 /** The refs remembered for one key (a stable empty array when there are none). */
 export function useDraftMentions(key: string | null): MentionRef[] {
   return useComposerAttachmentsStore((s) => (key ? (s.mentions[key] ?? NO_MENTIONS) : NO_MENTIONS));
+}
+
+/** The context chips of one key (a stable empty array when there are none). */
+export function useContextChips(key: string | null): ContextChip[] {
+  return useComposerAttachmentsStore((s) => (key ? (s.chips[key] ?? NO_CHIPS) : NO_CHIPS));
 }

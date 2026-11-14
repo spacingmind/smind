@@ -1,4 +1,5 @@
 import { formatBytes } from "@/lib/attachments/format";
+import type { MentionRef } from "@/lib/file-mention";
 
 /** How much terminal text one send may add to the composer (DT3-C AC12). */
 export const SEND_CAP_BYTES = 16 * 1024;
@@ -51,4 +52,49 @@ export function buildTerminalBlock(body: string, label: string): { block: string
   const withOmitted = omittedBytes > 0 ? `${text}${text.endsWith("\n") || text === "" ? "" : "\n"}(${formatBytes(omittedBytes)} omitted)\n` : text;
   const header = `Terminal output, ${label}, ${formatBytes(shownBytes)}:`;
   return { block: fenceBlock(header, withOmitted), shownBytes, omittedBytes };
+}
+
+/** Which terminal text a chip holds: the live selection or the scrollback tail (DT3-D AC14). */
+export type TerminalBlockLabel = "selection" | "last 100 lines";
+
+/**
+ * What a terminal context chip shows (DT3-D AC14): the line count of the held text and the size that
+ * will actually go in (the clipped size), with "(cut)" when the cap dropped anything.
+ */
+export function terminalChipLabel(body: string, blockLabel: TerminalBlockLabel): string {
+  const n = body.split("\n").length;
+  const { shownBytes, omittedBytes } = buildTerminalBlock(body, blockLabel);
+  return `${blockLabel === "selection" ? "Terminal selection" : "Terminal output"} · ${n} ${n === 1 ? "line" : "lines"} · ${formatBytes(shownBytes)}${omittedBytes > 0 ? " (cut)" : ""}`;
+}
+
+/**
+ * What a file-reference context chip shows: the basename, the line range when it has one (`L3` alone or
+ * `L1–3`), and the referred text's size. The range dash is an EN DASH (U+2013), like the editor's labels.
+ */
+export function fileRefChipLabel(ref: MentionRef, bytes: number): string {
+  const name = ref.path.slice(ref.path.lastIndexOf("/") + 1);
+  const range = ref.line ? ` L${ref.line}${ref.endLine && ref.endLine > ref.line ? `–${ref.endLine}` : ""}` : "";
+  return `${name}${range} · ${formatBytes(bytes)}`;
+}
+
+/**
+ * One item of the composer's context chip tray (DT3-D AC14): a terminal text held out of the draft (its
+ * fenced block is built only at send time) or a file reference sent as a `file_ref` attachment.
+ */
+export type ContextChip = { localId: string; label: string } & (
+  | { kind: "terminal"; body: string; blockLabel: TerminalBlockLabel }
+  | { kind: "file_ref"; ref: MentionRef }
+);
+
+/**
+ * The outgoing prompt (DT3-D AC15): the typed text followed by one fenced block per terminal chip, in the
+ * order they were added, each after a blank line. File chips become attachments, not text, so they add
+ * nothing here; with no terminal chips the text goes out exactly as typed.
+ */
+export function appendChipBlocks(text: string, chips: readonly ContextChip[]): string {
+  const blocks = chips
+    .filter((chip): chip is Extract<ContextChip, { kind: "terminal" }> => chip.kind === "terminal")
+    .map((chip) => buildTerminalBlock(chip.body, chip.blockLabel).block);
+  if (blocks.length === 0) return text;
+  return `${text.trimEnd()}\n\n${blocks.join("\n\n")}`;
 }
