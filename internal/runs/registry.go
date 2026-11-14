@@ -1338,6 +1338,13 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 	if err != nil {
 		return "", "", fmt.Errorf("runs: permission request id: %w", err)
 	}
+	// The grant offer is the daemon's alone: one an adapter or an agent put on the
+	// request detail is dropped, so it can neither show a forged offer nor claim a class.
+	if detail != nil && detail.Grant != nil {
+		c := *detail
+		c.Grant = nil
+		detail = &c
+	}
 
 	// System runs (ADR-0026) never wait on a human: reject immediately,
 	// record the request/resolution pair, and publish no notification.
@@ -1403,7 +1410,7 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 	// The policy engine (ADR-0047) answers what a standing rule or the
 	// floor decides; only an `ask` (or an engine that is off) parks the
 	// request for a human, with the policy footprint on its detail.
-	optionID, denyReason, handled, detail, grantable := d.applyPolicy(requestID, summary, detail, options)
+	optionID, denyReason, handled, detail, grantClass := d.applyPolicy(requestID, summary, detail, options)
 	if handled {
 		if optionID == "" {
 			return "", "", fmt.Errorf("runs: policy denied permission request %q: no reject option offered: %+v", requestID, options)
@@ -1416,8 +1423,8 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 	// engine's plain, grantable `ask` into allow_once, after the floor and every
 	// rule; a request that qualifies and has no usable grant is offered one.
 	var grant *grantOffer
-	if grantable {
-		if grant = d.buildGrantOffer(detail, options); grant != nil {
+	if grantClass != "" {
+		if grant = d.buildGrantOffer(detail, options, grantClass); grant != nil {
 			if id, ok := d.applyGrant(requestID, summary, detail, options, grant); ok {
 				return id, "", nil
 			}
@@ -1460,7 +1467,7 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 			PermissionResolution: taskrunner.PermissionResolvedByHuman,
 		}
 		if answer.saveGrant && grant != nil {
-			if id := d.saveGrant(requestID, grant, answer.actor); id != 0 {
+			if id := d.saveGrant(requestID, grant, answer.actor, answer.runnerOptIn); id != 0 {
 				resolved.PermissionRuleID = fmt.Sprintf("grant-saved:%d", id)
 			}
 		}
@@ -1657,8 +1664,9 @@ type permissionAnswer struct {
 	reason   string
 	// saveGrant is a human's "allow always in this project" (RespondPermissionScoped,
 	// validated against the request's offer before it is sent); actor names who.
-	saveGrant bool
-	actor     string
+	saveGrant   bool
+	actor       string
+	runnerOptIn bool
 }
 
 // pendingPermission is one parked permission request: the channel its answer

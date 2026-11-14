@@ -926,6 +926,8 @@ CREATE TABLE IF NOT EXISTS permission_grants (
     command_display TEXT NOT NULL,
     folder TEXT NOT NULL DEFAULT '',
     mcp_fingerprint TEXT NOT NULL DEFAULT '',
+    class TEXT NOT NULL DEFAULT 'readonly',   -- 'readonly' | 'runner' (decided by the daemon, never the caller)
+    runner_opt_in INTEGER NOT NULL DEFAULT 0, -- the human's explicit opt-in to run project code; required for 'runner'
     created_at TIMESTAMP NOT NULL,
     expires_at TIMESTAMP NOT NULL,
     created_by TEXT NOT NULL DEFAULT '',

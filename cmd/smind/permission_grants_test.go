@@ -8,7 +8,7 @@ import (
 )
 
 func TestCLI_PermissionGrantsList(t *testing.T) {
-	calls := stubPermissionDaemon(t, map[string]any{"grants": []map[string]any{{"id": 4, "workspaceId": 2, "status": "active", "command": "make build\x1b[31m", "folder": "/repo", "expiresAt": "2026-12-15T00:00:00Z", "useCount": 3}}}, nil)
+	calls := stubPermissionDaemon(t, map[string]any{"grants": []map[string]any{{"id": 4, "workspaceId": 2, "status": "active", "class": "runner", "runnerOptIn": true, "command": "make build\x1b[31m", "folder": "/repo", "expiresAt": "2026-12-15T00:00:00Z", "useCount": 3}}}, nil)
 	var out, errb bytes.Buffer
 	if code := runPermission(context.Background(), []string{"grants", "ls", "--project", "2"}, &out, &errb); code != 0 {
 		t.Fatalf("code %d: %s", code, errb.String())
@@ -17,7 +17,7 @@ func TestCLI_PermissionGrantsList(t *testing.T) {
 	if c["method"] != "permission.grants.list" || c["workspaceId"] != int64(2) {
 		t.Errorf("call = %v", c)
 	}
-	if strings.Contains(out.String(), "\x1b") || !strings.Contains(out.String(), "make build") || !strings.Contains(out.String(), "active") {
+	if strings.Contains(out.String(), "\x1b") || !strings.Contains(out.String(), "make build") || !strings.Contains(out.String(), "active") || !strings.Contains(out.String(), "runner (opted in)") {
 		t.Errorf("stdout %q", out.String())
 	}
 }

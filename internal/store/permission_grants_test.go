@@ -233,3 +233,41 @@ func TestGrants_CapPerWorkspaceAndAuditRetention(t *testing.T) {
 		t.Fatalf("the newest row was pruned: %+v", rows[len(rows)-1])
 	}
 }
+
+// The store refuses a runner grant without the opt-in, never keeps an opt-in on a
+// read-only grant, and refuses an unknown class.
+func TestGrants_RunnerNeedsOptInInStore(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ws := grantWorkspaces(t, s, 1)[0]
+	g := sampleGrant(ws, "r1")
+	g.Class = "runner"
+	if _, err := s.SaveGrant(g); err != ErrRunnerNeedsOptIn {
+		t.Fatalf("a runner grant without the opt-in = %v", err)
+	}
+	g.RunnerOptIn = true
+	saved, err := s.SaveGrant(g)
+	if err != nil || saved.Class != "runner" || !saved.RunnerOptIn {
+		t.Fatalf("an opted-in runner grant = %+v, %v", saved, err)
+	}
+	ro := sampleGrant(ws, "r2")
+	ro.Class, ro.RunnerOptIn = "readonly", true
+	if saved, _ := s.SaveGrant(ro); saved.RunnerOptIn {
+		t.Fatal("an opt-in was kept on a read-only grant")
+	}
+	// An unset class means read-only, never runner.
+	def := sampleGrant(ws, "r3")
+	if saved, _ := s.SaveGrant(def); saved.Class != "readonly" {
+		t.Fatalf("default class = %q", saved.Class)
+	}
+	bad := sampleGrant(ws, "r4")
+	bad.Class = "admin"
+	if _, err := s.SaveGrant(bad); err == nil {
+		t.Fatal("an unknown class was stored")
+	}
+	// Re-saving a runner grant as read-only (or the reverse) replaces the class: the key is project + command.
+	g.Class, g.RunnerOptIn = "readonly", false
+	if saved, _ := s.SaveGrant(g); saved.Class != "readonly" || saved.RunnerOptIn {
+		t.Fatalf("re-save = %+v", saved)
+	}
+}

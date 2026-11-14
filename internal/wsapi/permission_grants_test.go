@@ -88,6 +88,9 @@ func TestWsapi_GrantListAndRevoke(t *testing.T) {
 	if len(list.Grants) != 2 {
 		t.Fatalf("grants = %s", b)
 	}
+	if !strings.Contains(string(b), `"class"`) || !strings.Contains(string(b), `"runnerOptIn"`) {
+		t.Errorf("the list does not carry the class and the opt-in: %s", b)
+	}
 	if strings.Contains(string(b), "commandSha") || strings.Contains(string(b), "commandLen") || strings.Contains(string(b), "mcpFingerprint") {
 		t.Errorf("the list leaks the match key: %s", b)
 	}

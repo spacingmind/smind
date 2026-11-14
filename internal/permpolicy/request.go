@@ -88,4 +88,9 @@ type Decision struct {
 	// an allow or a deny, a floor hit, an unparsed or truncated request, or a
 	// request that is not a Bash command.
 	Grantable bool
+	// GrantClass is "readonly" or "runner" when Grantable (grantable.go decides it
+	// from compiled lists; no caller supplies it), and "" otherwise. A readonly
+	// command only inspects; a runner command runs code the project defines and
+	// needs an explicit per-grant opt-in.
+	GrantClass string
 }

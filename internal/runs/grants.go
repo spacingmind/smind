@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -23,8 +24,13 @@ import (
 // GrantTTL is how long a saved grant lasts; a use does not renew it.
 const GrantTTL = 30 * 24 * time.Hour
 
-// GrantNote is shown on the card beside the always-allow control.
-const GrantNote = "Saves this exact command for this project for 30 days. It runs code defined in this project (a Makefile, script or test) that the agent can change later."
+// The card's words. A read-only grant needs nothing more; a runner grant needs
+// the human to tick GrantOptInLabel on that grant (decision 2026-11-15).
+const (
+	GrantNoteReadOnly = "Saves this exact read-only command for this project for 30 days."
+	GrantNoteRunner   = "This command runs code defined in this project (a Makefile, script or test) that the agent can change later. Saving it needs the extra opt-in."
+	GrantOptInLabel   = "Also allow running this project's code (the agent can change it)"
+)
 
 // maxGrantCommandBytes caps the raw command a grant can cover.
 const maxGrantCommandBytes = 2000
@@ -32,6 +38,13 @@ const maxGrantCommandBytes = 2000
 // ErrGrantNotOffered refuses scope "project" for a request that carried no offer
 // or for an option other than the offered allow_once.
 var ErrGrantNotOffered = errors.New("this request cannot be saved as an always-allow")
+
+// ErrGrantNeedsOptIn refuses a runner grant sent without the explicit opt-in; the
+// request stays parked. ErrGrantNoOptInNeeded refuses an opt-in on a read-only one.
+var (
+	ErrGrantNeedsOptIn    = errors.New("this command runs project code: saving it needs the explicit opt-in (allowProjectCode)")
+	ErrGrantNoOptInNeeded = errors.New("the project-code opt-in applies only to a command that runs project code")
+)
 
 // grantOffer is what a grantable pending request carries to its answer.
 type grantOffer struct {
@@ -43,6 +56,8 @@ type grantOffer struct {
 	workspaceID   int64
 	fingerprint   string
 	allowOptionID string
+	// class is the daemon's classification (readonly | runner) of the command.
+	class string
 }
 
 func (reg *Registry) grantNow() time.Time {
@@ -94,7 +109,10 @@ func boolInt(b bool) int {
 // checked), and the run, the request and the project all qualify. nil = no.
 // The same function runs at offer time and at use time, so a request that
 // stopped qualifying asks again.
-func (d runPermissionDecider) buildGrantOffer(detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) *grantOffer {
+func (d runPermissionDecider) buildGrantOffer(detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption, class string) *grantOffer {
+	if class != permpolicy.GrantReadOnly && class != permpolicy.GrantRunner {
+		return nil
+	}
 	// An attended run a human started only: no system run, seat, AutoAccept, and
 	// no run an agent, an orchestrator, a plugin, a child event or a paired host
 	// queued ("" is a run started from a human surface).
@@ -131,13 +149,17 @@ func (d runPermissionDecider) buildGrantOffer(detail *taskrunner.PermissionDetai
 	if display == "" {
 		display = detail.Command
 	}
-	return &grantOffer{sha: commandSHA(raw), length: len(raw), display: display, folder: ws.Path, project: ws.Title, workspaceID: task.WorkspaceID, fingerprint: fp, allowOptionID: allow}
+	return &grantOffer{sha: commandSHA(raw), length: len(raw), display: display, folder: ws.Path, project: ws.Title, workspaceID: task.WorkspaceID, fingerprint: fp, allowOptionID: allow, class: class}
 }
 
 // withGrantOffer copies detail and sets the offer the card shows.
 func withGrantOffer(detail *taskrunner.PermissionDetail, o *grantOffer) *taskrunner.PermissionDetail {
 	c := *detail
-	c.Grant = &taskrunner.GrantOffer{Command: o.display, Project: o.project, Folder: o.folder, ExpiresInDays: int(GrantTTL / (24 * time.Hour)), Note: GrantNote}
+	offer := &taskrunner.GrantOffer{Command: o.display, Project: o.project, Folder: o.folder, ExpiresInDays: int(GrantTTL / (24 * time.Hour)), Class: o.class, Note: GrantNoteReadOnly}
+	if o.class == permpolicy.GrantRunner {
+		offer.Note, offer.RequiresOptIn, offer.OptInLabel = GrantNoteRunner, true, GrantOptInLabel
+	}
+	c.Grant = offer
 	return &c
 }
 
@@ -150,6 +172,13 @@ func (d runPermissionDecider) applyGrant(requestID, summary string, detail *task
 		return "", false
 	}
 	if !found || g.RevokedAt != nil || g.CommandLen != o.length {
+		return "", false
+	}
+	// The class is re-decided now and must match what the grant was saved as, and a
+	// runner grant must carry its opt-in: a grant saved as read-only never covers a
+	// command that is a runner today, and a runner grant without the opt-in covers nothing.
+	if g.Class != o.class || (o.class == permpolicy.GrantRunner && !g.RunnerOptIn) {
+		skipClass(d, g, requestID, o)
 		return "", false
 	}
 	now := d.reg.grantNow()
@@ -177,12 +206,22 @@ func (d runPermissionDecider) applyGrant(requestID, summary string, detail *task
 	return o.allowOptionID, true
 }
 
+func skipClass(d runPermissionDecider, g store.PermissionGrant, requestID string, o *grantOffer) {
+	note := "stored class " + g.Class + ", the command is now " + o.class
+	if o.class == permpolicy.GrantRunner && !g.RunnerOptIn {
+		note = "a runner command with no opt-in on the grant"
+	}
+	if err := d.reg.st.NoteGrantSkip(store.GrantAuditRow{GrantID: g.ID, At: d.reg.grantNow(), Kind: store.GrantAuditSkippedClass, Actor: "daemon", RunID: d.r.id, RequestID: requestID, Note: note}); err != nil {
+		slog.Warn("permission grant audit failed", "err", err)
+	}
+}
+
 // saveGrant writes the grant a human's scope-project answer asked for. A write
 // failure is logged and the single allow still goes through.
-func (d runPermissionDecider) saveGrant(requestID string, o *grantOffer, actor string) int64 {
+func (d runPermissionDecider) saveGrant(requestID string, o *grantOffer, actor string, runnerOptIn bool) int64 {
 	now := d.reg.grantNow()
 	g, err := d.reg.st.SaveGrant(store.PermissionGrant{
-		WorkspaceID: o.workspaceID, CommandSHA: o.sha, CommandLen: o.length, CommandDisplay: truncateRunes(o.display, 500), Folder: o.folder, MCPFingerprint: o.fingerprint,
+		WorkspaceID: o.workspaceID, CommandSHA: o.sha, CommandLen: o.length, CommandDisplay: truncateRunes(o.display, 500), Folder: o.folder, MCPFingerprint: o.fingerprint, Class: o.class, RunnerOptIn: runnerOptIn,
 		CreatedAt: now, ExpiresAt: now.Add(GrantTTL), CreatedBy: actor, SourceRunID: d.r.id, SourceRequestID: requestID,
 	})
 	if err != nil {
@@ -205,9 +244,12 @@ func truncateRunes(s string, n int) string {
 // its allow_once option; anything else is ErrGrantNotOffered and the request
 // stays parked. actor names the human connection ("local", "device:<id>") for
 // the audit. An empty scope or "once" is exactly RespondPermission.
-func (reg *Registry) RespondPermissionScoped(runID, requestID, optionID, scope, actor string) error {
+func (reg *Registry) RespondPermissionScoped(runID, requestID, optionID, scope, actor string, runnerOptIn bool) error {
 	switch scope {
 	case "", "once":
+		if runnerOptIn {
+			return fmt.Errorf("runs: %w", ErrGrantNoOptInNeeded)
+		}
 		return reg.RespondPermission(runID, requestID, optionID)
 	case "project":
 	default:
@@ -227,8 +269,16 @@ func (reg *Registry) RespondPermissionScoped(runID, requestID, optionID, scope, 
 		r.mu.Unlock()
 		return fmt.Errorf("runs: permission request %q: %w", requestID, ErrGrantNotOffered)
 	}
+	switch {
+	case pp.grant.class == permpolicy.GrantRunner && !runnerOptIn:
+		r.mu.Unlock()
+		return fmt.Errorf("runs: permission request %q: %w", requestID, ErrGrantNeedsOptIn)
+	case pp.grant.class != permpolicy.GrantRunner && runnerOptIn:
+		r.mu.Unlock()
+		return fmt.Errorf("runs: permission request %q: %w", requestID, ErrGrantNoOptInNeeded)
+	}
 	select {
-	case pp.ch <- permissionAnswer{optionID: optionID, saveGrant: true, actor: strings.TrimSpace(actor)}:
+	case pp.ch <- permissionAnswer{optionID: optionID, saveGrant: true, actor: strings.TrimSpace(actor), runnerOptIn: runnerOptIn}:
 		delete(r.pendingPermissions, requestID)
 		r.mu.Unlock()
 		return nil

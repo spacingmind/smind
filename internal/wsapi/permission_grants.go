@@ -40,15 +40,18 @@ func handleRunAnswerPermission(reg *runs.Registry) handlerFunc {
 			RequestID string `json:"requestId"`
 			OptionID  string `json:"optionId"`
 			Scope     string `json:"scope"`
+			// AllowProjectCode is the human's explicit opt-in to saving a command that
+			// runs project code; the daemon decides whether the command needs it.
+			AllowProjectCode bool `json:"allowProjectCode"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("%s: invalid params: %w", m, err)
 		}
-		if p.Scope == "" || p.Scope == "once" {
+		if (p.Scope == "" || p.Scope == "once") && !p.AllowProjectCode {
 			return respond(ctx, rc, raw)
 		}
-		if err := reg.RespondPermissionScoped(p.RunID, p.RequestID, p.OptionID, p.Scope, inboxActor(rc)); err != nil {
-			if errors.Is(err, runs.ErrGrantNotOffered) {
+		if err := reg.RespondPermissionScoped(p.RunID, p.RequestID, p.OptionID, p.Scope, inboxActor(rc), p.AllowProjectCode); err != nil {
+			if errors.Is(err, runs.ErrGrantNotOffered) || errors.Is(err, runs.ErrGrantNeedsOptIn) || errors.Is(err, runs.ErrGrantNoOptInNeeded) {
 				return nil, &rpcCodeError{code: codeInvalid, msg: m + ": " + err.Error(), err: err}
 			}
 			return nil, fmt.Errorf("%s: %w", m, err)

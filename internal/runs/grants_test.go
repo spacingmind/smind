@@ -80,7 +80,11 @@ func (e *grantEnv) saveViaHuman(cmd string) store.PermissionGrant {
 	if imm != "" {
 		e.t.Fatalf("%q was answered without a human: %q", cmd, imm)
 	}
-	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local"); err != nil {
+	offer := e.lastRequestDetail().Grant
+	if offer == nil {
+		e.t.Fatalf("%q was not offered a grant", cmd)
+	}
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local", offer.RequiresOptIn); err != nil {
 		e.t.Fatalf("RespondPermissionScoped: %v", err)
 	}
 	if got := wait(); got != "allow-1" {
@@ -114,14 +118,14 @@ func TestGrants_OnlyHumanScopeProject(t *testing.T) {
 		t.Fatalf("answered without a human: %q", imm)
 	}
 	offer := e.lastRequestDetail().Grant
-	if offer == nil || offer.Command != "make build" || offer.ExpiresInDays != 30 || offer.Project != "W" || offer.Folder == "" || offer.Note != GrantNote {
+	if offer == nil || offer.Command != "make build" || offer.ExpiresInDays != 30 || offer.Project != "W" || offer.Folder == "" || offer.Note != GrantNoteRunner || offer.Class != "runner" || !offer.RequiresOptIn {
 		t.Fatalf("offer = %+v", offer)
 	}
 	// Nothing is saved until a human answers with scope project.
 	if l, _ := e.reg.st.ListGrants(0); len(l) != 0 {
 		t.Fatalf("a grant exists before any answer: %+v", l)
 	}
-	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "device:abc"); err != nil {
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "device:abc", true); err != nil {
 		t.Fatal(err)
 	}
 	wait()
@@ -143,16 +147,16 @@ func TestGrants_AnswerOnlyAllowOnceOfAnOfferedRequest(t *testing.T) {
 	d := grantDetail("make build")
 	d.GitRule = &taskrunner.GitRuleInfo{ID: "x", Class: "always-ask"}
 	_, reqID, wait := e.ask(d)
-	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local"); !errors.Is(err, ErrGrantNotOffered) {
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local", false); !errors.Is(err, ErrGrantNotOffered) {
 		t.Fatalf("scope project without an offer = %v", err)
 	}
 	e.answerOnce(reqID, wait)
 	// An offered request refuses scope project with the deny option, and stays parked.
 	_, reqID, wait = e.ask(grantDetail("make test"))
-	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "deny-1", "project", "local"); !errors.Is(err, ErrGrantNotOffered) {
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "deny-1", "project", "local", false); !errors.Is(err, ErrGrantNotOffered) {
 		t.Fatalf("scope project with deny = %v", err)
 	}
-	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "forever", "local"); err == nil {
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "forever", "local", false); err == nil {
 		t.Fatal("an unknown scope was accepted")
 	}
 	if pendingCount(e.r) != 1 {
@@ -401,7 +405,7 @@ func TestGrants_NeverOfferedForFloorDestructiveNetworkUnparsedQuestion(t *testin
 		if g := reqs[len(reqs)-1].PermissionDetail.Grant; g != nil {
 			t.Errorf("%q was offered a grant: %+v", cmd, g)
 		}
-		if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local"); !errors.Is(err, ErrGrantNotOffered) {
+		if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local", false); !errors.Is(err, ErrGrantNotOffered) {
 			t.Errorf("%q: scope project = %v, want refused", cmd, err)
 		}
 		_ = e.reg.RespondPermission(e.r.id, reqID, "deny-1")
@@ -439,14 +443,14 @@ func TestGrants_NotUnderAutoAcceptSeatSystemRemote(t *testing.T) {
 		e.r.mu.Lock()
 		e.r.origin = origin
 		e.r.mu.Unlock()
-		if o := e.d.buildGrantOffer(withPolicyFor(grantDetail(cmd)), allowDenyOptions); o != nil {
+		if o := e.d.buildGrantOffer(withPolicyFor(grantDetail(cmd)), allowDenyOptions, "runner"); o != nil {
 			t.Fatalf("a %q run built an offer", origin)
 		}
 	}
 	e.r.mu.Lock()
 	e.r.origin = store.ChatQueueSourceHuman
 	e.r.mu.Unlock()
-	if o := e.d.buildGrantOffer(withPolicyFor(grantDetail(cmd)), allowDenyOptions); o == nil {
+	if o := e.d.buildGrantOffer(withPolicyFor(grantDetail(cmd)), allowDenyOptions, "runner"); o == nil {
 		t.Fatal("a human-origin run built no offer")
 	}
 	e.r.mu.Lock()
@@ -456,14 +460,14 @@ func TestGrants_NotUnderAutoAcceptSeatSystemRemote(t *testing.T) {
 	e.r.mu.Lock()
 	e.r.purpose = "steward"
 	e.r.mu.Unlock()
-	if o := e.d.buildGrantOffer(withPolicyFor(grantDetail(cmd)), allowDenyOptions); o != nil {
+	if o := e.d.buildGrantOffer(withPolicyFor(grantDetail(cmd)), allowDenyOptions, "runner"); o != nil {
 		t.Fatal("a system run built an offer")
 	}
 	e.r.mu.Lock()
 	e.r.purpose = ""
 	e.r.perm.AutoAccept = true
 	e.r.mu.Unlock()
-	if o := e.d.buildGrantOffer(withPolicyFor(grantDetail(cmd)), allowDenyOptions); o != nil {
+	if o := e.d.buildGrantOffer(withPolicyFor(grantDetail(cmd)), allowDenyOptions, "runner"); o != nil {
 		t.Fatal("an AutoAccept run built an offer")
 	}
 }
@@ -532,6 +536,149 @@ func TestGrants_AskedAgainAfterEveryInvalidation(t *testing.T) {
 	imm, reqID, wait := e.ask(grantDetail("make build\t"))
 	if imm != "" {
 		t.Fatalf("mismatched: applied: %q", imm)
+	}
+	e.answerOnce(reqID, wait)
+}
+
+// --- the strict decision (2026-11-15): read-only by default, runners need a per-grant opt-in ---
+
+func TestGrants_ReadOnlyGrantNeedsNoOptIn(t *testing.T) {
+	t.Parallel()
+	e := newGrantEnv(t)
+	imm, reqID, wait := e.ask(grantDetail("git status"))
+	if imm != "" {
+		t.Fatalf("answered without a human: %q", imm)
+	}
+	offer := e.lastRequestDetail().Grant
+	if offer == nil || offer.Class != "readonly" || offer.RequiresOptIn || offer.OptInLabel != "" {
+		t.Fatalf("offer = %+v", offer)
+	}
+	// An opt-in sent for a read-only command is refused (it would mean nothing), and the request stays parked.
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local", true); !errors.Is(err, ErrGrantNoOptInNeeded) {
+		t.Fatalf("opt-in on a read-only grant = %v", err)
+	}
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local", false); err != nil {
+		t.Fatal(err)
+	}
+	wait()
+	l, _ := e.reg.st.ListGrants(0)
+	if len(l) != 1 || l[0].Class != "readonly" || l[0].RunnerOptIn {
+		t.Fatalf("grants = %+v", l)
+	}
+	if imm, _, _ := e.ask(grantDetail("git status")); imm != "allow-1" {
+		t.Fatalf("a saved read-only command asked again: %q", imm)
+	}
+}
+
+func TestGrants_RunnerGrantNeedsOptIn(t *testing.T) {
+	t.Parallel()
+	e := newGrantEnv(t)
+	_, reqID, wait := e.ask(grantDetail("make build"))
+	offer := e.lastRequestDetail().Grant
+	if offer == nil || offer.Class != "runner" || !offer.RequiresOptIn || offer.OptInLabel != GrantOptInLabel || offer.Note != GrantNoteRunner {
+		t.Fatalf("offer = %+v", offer)
+	}
+	// Without the opt-in: a clear error, the request stays parked, nothing is saved.
+	err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local", false)
+	if !errors.Is(err, ErrGrantNeedsOptIn) || !strings.Contains(err.Error(), "allowProjectCode") {
+		t.Fatalf("runner grant without the opt-in = %v", err)
+	}
+	if pendingCount(e.r) != 1 {
+		t.Fatal("a refused answer must leave the request parked")
+	}
+	if l, _ := e.reg.st.ListGrants(0); len(l) != 0 {
+		t.Fatalf("a grant was saved without the opt-in: %+v", l)
+	}
+	// An ordinary single allow is still possible, and saves nothing.
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "once", "local", false); err != nil {
+		t.Fatal(err)
+	}
+	wait()
+	if imm, reqID, wait := e.ask(grantDetail("make build")); imm != "" {
+		t.Fatalf("applied with no grant: %q", imm)
+	} else {
+		// With the opt-in the grant is saved as a runner grant carrying it.
+		if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local", true); err != nil {
+			t.Fatal(err)
+		}
+		wait()
+	}
+	l, _ := e.reg.st.ListGrants(0)
+	if len(l) != 1 || l[0].Class != "runner" || !l[0].RunnerOptIn {
+		t.Fatalf("grants = %+v", l)
+	}
+	if imm, _, _ := e.ask(grantDetail("make build")); imm != "allow-1" {
+		t.Fatalf("an opted-in runner grant asked again: %q", imm)
+	}
+}
+
+// The class and the opt-in are re-checked at use: a grant saved as read-only never
+// covers a command that is a runner now, and a runner grant without its opt-in covers nothing.
+func TestGrants_ClassAndOptInRecheckedAtUse(t *testing.T) {
+	t.Parallel()
+	e := newGrantEnv(t)
+	ws := e.workspaceID()
+	fp, err := mcpFingerprint(e.reg.st, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plant := func(cmd, class string, optIn bool) int64 {
+		g, err := e.reg.st.SaveGrant(store.PermissionGrant{WorkspaceID: ws, CommandSHA: commandSHA(cmd), CommandLen: len(cmd), CommandDisplay: cmd, MCPFingerprint: fp, Class: "readonly",
+			CreatedAt: e.now, ExpiresAt: e.now.Add(GrantTTL), CreatedBy: "local"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Set the class and flag directly, as a database edit or an old row could.
+		if _, err := e.reg.st.DB().Exec(`UPDATE permission_grants SET class = ?, runner_opt_in = ? WHERE id = ?`, class, optIn, g.ID); err != nil {
+			t.Fatal(err)
+		}
+		return g.ID
+	}
+	asked := func(cmd string) {
+		t.Helper()
+		imm, reqID, wait := e.ask(grantDetail(cmd))
+		if imm != "" {
+			t.Fatalf("%q was allowed by a grant whose class or opt-in does not cover it: %q", cmd, imm)
+		}
+		e.answerOnce(reqID, wait)
+	}
+	plant("make build", "readonly", false) // stored as read-only, the command is a runner now
+	asked("make build")
+	plant("make test", "runner", false) // a runner grant with no opt-in
+	asked("make test")
+	plant("git status", "runner", true) // stored as runner, the command is read-only now
+	asked("git status")
+	plant("make lint", "runner", true) // the control: a runner grant with its opt-in applies
+	if imm, _, _ := e.ask(grantDetail("make lint")); imm != "allow-1" {
+		t.Fatalf("a runner grant with its opt-in did not apply: %q", imm)
+	}
+}
+
+// The class is the daemon's: a Grant an adapter or an agent put on the request
+// detail is dropped, so it cannot claim read-only for a runner nor show a forged offer.
+func TestGrants_ClassIsNotTakenFromTheRequest(t *testing.T) {
+	t.Parallel()
+	e := newGrantEnv(t)
+	forged := grantDetail("make build")
+	forged.Grant = &taskrunner.GrantOffer{Command: "ls", Class: "readonly", RequiresOptIn: false, Note: "forged"}
+	_, reqID, wait := e.ask(forged)
+	offer := e.lastRequestDetail().Grant
+	if offer == nil || offer.Class != "runner" || !offer.RequiresOptIn || offer.Note == "forged" || offer.Command != "make build" {
+		t.Fatalf("offer = %+v, want the daemon's own runner offer", offer)
+	}
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local", false); !errors.Is(err, ErrGrantNeedsOptIn) {
+		t.Fatalf("a forged read-only class skipped the opt-in: %v", err)
+	}
+	e.answerOnce(reqID, wait)
+	// On a command that is never grantable the forged offer is stripped.
+	never := grantDetail("rm -rf build")
+	never.Grant = &taskrunner.GrantOffer{Command: "rm -rf build", Class: "readonly"}
+	_, reqID, wait = e.ask(never)
+	if g := e.lastRequestDetail().Grant; g != nil {
+		t.Fatalf("a forged offer survived on a never-grantable command: %+v", g)
+	}
+	if err := e.reg.RespondPermissionScoped(e.r.id, reqID, "allow-1", "project", "local", false); !errors.Is(err, ErrGrantNotOffered) {
+		t.Fatalf("scope project on a never-grantable command = %v", err)
 	}
 	e.answerOnce(reqID, wait)
 }

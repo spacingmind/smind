@@ -112,14 +112,14 @@ func withPolicy(detail *taskrunner.PermissionDetail, info taskrunner.PolicyInfo)
 // human path with detailOut, which carries the policy footprint when the
 // engine was on. An allow the provider gave no allow_once option for is an
 // ask: the engine never picks an "always" option.
-func (d runPermissionDecider) applyPolicy(requestID, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (optionID, denyReason string, handled bool, detailOut *taskrunner.PermissionDetail, grantable bool) {
+func (d runPermissionDecider) applyPolicy(requestID, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (optionID, denyReason string, handled bool, detailOut *taskrunner.PermissionDetail, grantClass string) {
 	engine := d.reg.getPolicyEngine()
 	if engine == nil {
-		return "", "", false, detail, false
+		return "", "", false, detail, ""
 	}
 	dec, on := engine.Evaluate(d.policyRequest(requestID, summary, detail))
 	if !on {
-		return "", "", false, detail, false
+		return "", "", false, detail, ""
 	}
 	info := taskrunner.PolicyInfo{RuleID: dec.RuleID, Why: dec.Why, Normalized: dec.Normalized, Action: string(dec.Action)}
 	if dec.RuleID == "" {
@@ -129,7 +129,7 @@ func (d runPermissionDecider) applyPolicy(requestID, summary string, detail *tas
 	case permpolicy.ActionAllow:
 		if id, ok := firstOptionByKind(options, "allow_once"); ok {
 			d.recordPolicyResolved(requestID, summary, withPolicy(detail, info), options, id, taskrunner.PermissionResolvedByPolicyAllow, dec.RuleID)
-			return id, "", true, detail, false
+			return id, "", true, detail, ""
 		}
 	case permpolicy.ActionDeny:
 		ruleID := dec.FloorID
@@ -140,13 +140,13 @@ func (d runPermissionDecider) applyPolicy(requestID, summary string, detail *tas
 		}
 		id, _ := firstOptionByKind(options, "reject_once", "reject_always")
 		if id == "" {
-			return "", "", true, detail, false
+			return "", "", true, detail, ""
 		}
 		d.recordPolicyResolved(requestID, summary, withPolicy(detail, info), options, id, taskrunner.PermissionResolvedByPolicyDeny, ruleID)
-		return id, reason, true, detail, false
+		return id, reason, true, detail, ""
 	}
 	info.Action = string(permpolicy.ActionAsk)
-	return "", "", false, withPolicy(detail, info), dec.Grantable && dec.Action == permpolicy.ActionAsk
+	return "", "", false, withPolicy(detail, info), grantClassOf(dec)
 }
 
 func (d runPermissionDecider) recordPolicyResolved(requestID, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption, optionID string, resolution taskrunner.PermissionResolution, ruleID string) {
@@ -164,4 +164,14 @@ func (d runPermissionDecider) recordPolicyResolved(requestID, summary string, de
 		PermissionResolution: resolution,
 		PermissionRuleID:     ruleID,
 	})
+}
+
+// grantClassOf is the class of a decision the engine ended at `ask` and called
+// grantable; "" for every other decision. Only the engine's own verdict counts:
+// a request's detail and a client's params cannot supply it.
+func grantClassOf(dec permpolicy.Decision) string {
+	if dec.Action == permpolicy.ActionAsk && dec.Grantable {
+		return dec.GrantClass
+	}
+	return ""
 }

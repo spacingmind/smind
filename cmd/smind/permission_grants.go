@@ -90,17 +90,19 @@ func runPermissionGrants(ctx context.Context, args []string, stdout, stderr io.W
 	}
 	var res struct {
 		Grants []struct {
-			ID         int64  `json:"id"`
-			Workspace  int64  `json:"workspaceId"`
-			Command    string `json:"command"`
-			Folder     string `json:"folder"`
-			CreatedAt  string `json:"createdAt"`
-			ExpiresAt  string `json:"expiresAt"`
-			CreatedBy  string `json:"createdBy"`
-			UseCount   int    `json:"useCount"`
-			Status     string `json:"status"`
-			RevokedBy  string `json:"revokedBy"`
-			LastUsedAt string `json:"lastUsedAt"`
+			ID          int64  `json:"id"`
+			Workspace   int64  `json:"workspaceId"`
+			Command     string `json:"command"`
+			Folder      string `json:"folder"`
+			CreatedAt   string `json:"createdAt"`
+			ExpiresAt   string `json:"expiresAt"`
+			CreatedBy   string `json:"createdBy"`
+			UseCount    int    `json:"useCount"`
+			Status      string `json:"status"`
+			Class       string `json:"class"`
+			RunnerOptIn bool   `json:"runnerOptIn"`
+			RevokedBy   string `json:"revokedBy"`
+			LastUsedAt  string `json:"lastUsedAt"`
 		} `json:"grants"`
 		Audit []struct {
 			At        string `json:"at"`
@@ -120,9 +122,9 @@ func runPermissionGrants(ctx context.Context, args []string, stdout, stderr io.W
 		return 0
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSTATUS\tPROJECT\tEXPIRES\tUSES\tCOMMAND (exact)\tFOLDER")
+	fmt.Fprintln(tw, "ID\tSTATUS\tCLASS\tPROJECT\tEXPIRES\tUSES\tCOMMAND (exact)\tFOLDER")
 	for _, g := range res.Grants {
-		fmt.Fprintf(tw, "%d\t%s\t%d\t%s\t%d\t%s\t%s\n", g.ID, g.Status, g.Workspace, g.ExpiresAt, g.UseCount, sanitizeForTerminal(g.Command), sanitizeForTerminal(g.Folder))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%d\t%s\t%d\t%s\t%s\n", g.ID, g.Status, grantClassLabel(g.Class, g.RunnerOptIn), g.Workspace, g.ExpiresAt, g.UseCount, sanitizeForTerminal(g.Command), sanitizeForTerminal(g.Folder))
 	}
 	_ = tw.Flush()
 	for _, r := range res.Audit {
@@ -137,4 +139,16 @@ func grantIDArg(pos []string) (int64, bool) {
 	}
 	id, err := strconv.ParseInt(pos[0], 10, 64)
 	return id, err == nil && id > 0
+}
+
+// grantClassLabel names a grant's class for the table: a runner grant says it was
+// opted in to running project code.
+func grantClassLabel(class string, optIn bool) string {
+	if class == "runner" {
+		if optIn {
+			return "runner (opted in)"
+		}
+		return "runner (NO opt-in: never applied)"
+	}
+	return "read-only"
 }

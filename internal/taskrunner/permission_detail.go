@@ -88,6 +88,14 @@ type GrantOffer struct {
 	// command runs project-defined code (a Makefile, a script, a test) that the
 	// agent can change later.
 	Note string `json:"note"`
+	// Class is "readonly" or "runner", decided by the daemon from its compiled
+	// lists (never taken from the request). RequiresOptIn is true for a runner:
+	// the grant is created only with an explicit extra opt-in ("Also allow
+	// running this project's code (the agent can change it)"), which the client
+	// sends as allowProjectCode on run.answerPermission.
+	Class         string `json:"class"`
+	RequiresOptIn bool   `json:"requiresOptIn"`
+	OptInLabel    string `json:"optInLabel,omitempty"`
 }
 
 // PolicyInfo is the policy engine's footprint on a permission request

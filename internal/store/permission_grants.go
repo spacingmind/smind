@@ -12,13 +12,18 @@ import (
 // of the exact RAW command; CommandDisplay is the redacted text a human saw,
 // never what is matched.
 type PermissionGrant struct {
-	ID              int64      `json:"id"`
-	WorkspaceID     int64      `json:"workspaceId"`
-	CommandSHA      string     `json:"-"`
-	CommandLen      int        `json:"-"`
-	CommandDisplay  string     `json:"command"`
-	Folder          string     `json:"folder"`
-	MCPFingerprint  string     `json:"-"`
+	ID             int64  `json:"id"`
+	WorkspaceID    int64  `json:"workspaceId"`
+	CommandSHA     string `json:"-"`
+	CommandLen     int    `json:"-"`
+	CommandDisplay string `json:"command"`
+	Folder         string `json:"folder"`
+	MCPFingerprint string `json:"-"`
+	// Class is "readonly" or "runner", decided by the daemon when the grant was
+	// offered. RunnerOptIn is the human's explicit, per-grant opt-in to running
+	// project code; a runner grant exists only with it.
+	Class           string     `json:"class"`
+	RunnerOptIn     bool       `json:"runnerOptIn"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	ExpiresAt       time.Time  `json:"expiresAt"`
 	CreatedBy       string     `json:"createdBy"`
@@ -37,6 +42,7 @@ const (
 	GrantAuditRevoked        = "revoked"
 	GrantAuditSkippedExpired = "skipped_expired"
 	GrantAuditSkippedVoid    = "skipped_void"
+	GrantAuditSkippedClass   = "skipped_class"
 )
 
 // GrantAuditRow is one audit line of a grant.
@@ -69,15 +75,18 @@ var ErrGrantLimit = errors.New("this project has the maximum number of saved gra
 // the use is refused and nothing is recorded.
 var ErrGrantInactive = errors.New("permission grant is not active")
 
+// ErrRunnerNeedsOptIn refuses to store a runner grant without the explicit opt-in.
+var ErrRunnerNeedsOptIn = errors.New("a grant for a command that runs project code needs the explicit opt-in")
+
 // ErrGrantNotFound reports a grant id that does not exist.
 var ErrGrantNotFound = errors.New("permission grant not found")
 
-const grantColumns = `id, workspace_id, command_sha, command_len, command_display, folder, mcp_fingerprint, created_at, expires_at,
+const grantColumns = `id, workspace_id, command_sha, command_len, command_display, folder, mcp_fingerprint, class, runner_opt_in, created_at, expires_at,
 	created_by, source_run_id, source_request_id, revoked_at, revoked_by, use_count, last_used_at`
 
 func scanGrant(r rowScanner) (PermissionGrant, error) {
 	var g PermissionGrant
-	err := r.Scan(&g.ID, &g.WorkspaceID, &g.CommandSHA, &g.CommandLen, &g.CommandDisplay, &g.Folder, &g.MCPFingerprint, &g.CreatedAt, &g.ExpiresAt,
+	err := r.Scan(&g.ID, &g.WorkspaceID, &g.CommandSHA, &g.CommandLen, &g.CommandDisplay, &g.Folder, &g.MCPFingerprint, &g.Class, &g.RunnerOptIn, &g.CreatedAt, &g.ExpiresAt,
 		&g.CreatedBy, &g.SourceRunID, &g.SourceRequestID, &g.RevokedAt, &g.RevokedBy, &g.UseCount, &g.LastUsedAt)
 	return g, err
 }
@@ -87,6 +96,18 @@ func scanGrant(r rowScanner) (PermissionGrant, error) {
 // expiry, or a repeat answer) replaces the row's scope fields and clears the
 // revocation and the use count; the audit rows of the old life stay.
 func (s *Store) SaveGrant(g PermissionGrant) (PermissionGrant, error) {
+	if g.Class == "" {
+		g.Class = "readonly"
+	}
+	if g.Class != "readonly" && g.Class != "runner" {
+		return PermissionGrant{}, fmt.Errorf("save permission grant: unknown class %q", g.Class)
+	}
+	if g.Class == "runner" && !g.RunnerOptIn {
+		return PermissionGrant{}, ErrRunnerNeedsOptIn
+	}
+	if g.Class == "readonly" {
+		g.RunnerOptIn = false // an opt-in means nothing on a read-only grant and is never stored
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return PermissionGrant{}, fmt.Errorf("save permission grant: %w", err)
@@ -101,12 +122,12 @@ func (s *Store) SaveGrant(g PermissionGrant) (PermissionGrant, error) {
 	case err != nil:
 		return PermissionGrant{}, fmt.Errorf("save permission grant: %w", err)
 	}
-	if _, err := tx.Exec(`INSERT INTO permission_grants (workspace_id, command_sha, command_len, command_display, folder, mcp_fingerprint, created_at, expires_at, created_by, source_run_id, source_request_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	if _, err := tx.Exec(`INSERT INTO permission_grants (workspace_id, command_sha, command_len, command_display, folder, mcp_fingerprint, class, runner_opt_in, created_at, expires_at, created_by, source_run_id, source_request_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id, command_sha) DO UPDATE SET command_len = excluded.command_len, command_display = excluded.command_display, folder = excluded.folder,
-			mcp_fingerprint = excluded.mcp_fingerprint, created_at = excluded.created_at, expires_at = excluded.expires_at, created_by = excluded.created_by,
+			mcp_fingerprint = excluded.mcp_fingerprint, class = excluded.class, runner_opt_in = excluded.runner_opt_in, created_at = excluded.created_at, expires_at = excluded.expires_at, created_by = excluded.created_by,
 			source_run_id = excluded.source_run_id, source_request_id = excluded.source_request_id, revoked_at = NULL, revoked_by = '', use_count = 0, last_used_at = NULL`,
-		g.WorkspaceID, g.CommandSHA, g.CommandLen, g.CommandDisplay, g.Folder, g.MCPFingerprint, g.CreatedAt.UTC(), g.ExpiresAt.UTC(), g.CreatedBy, g.SourceRunID, g.SourceRequestID); err != nil {
+		g.WorkspaceID, g.CommandSHA, g.CommandLen, g.CommandDisplay, g.Folder, g.MCPFingerprint, g.Class, g.RunnerOptIn, g.CreatedAt.UTC(), g.ExpiresAt.UTC(), g.CreatedBy, g.SourceRunID, g.SourceRequestID); err != nil {
 		return PermissionGrant{}, fmt.Errorf("save permission grant: %w", err)
 	}
 	out, err := scanGrant(tx.QueryRow(`SELECT `+grantColumns+` FROM permission_grants WHERE workspace_id = ? AND command_sha = ?`, g.WorkspaceID, g.CommandSHA))
