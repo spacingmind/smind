@@ -12,6 +12,7 @@ import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useTheme } from "@/hooks/use-theme";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
+import { findTerminalLinks, type TerminalLinkMatch } from "@/lib/terminal-links";
 import { encodeTerminalKey, hasPendingModifiers, resolvePendingModifierData, terminalKeyInput } from "@/lib/terminal-keys";
 import { loadTerminalScrollback } from "@/lib/terminal-prefs";
 import {
@@ -69,6 +70,15 @@ export interface TerminalHandle {
   find?: TerminalFindHandle;
   /** Whether the shell switched the cursor keys to application mode (SS3 arrows). Optional for the same reason setTheme is; absent means normal mode. */
   applicationCursorKeys?(): boolean;
+  /**
+   * Links terminal matches to a handler (DT3-A): a real xterm registers a
+   * link provider that runs lib/terminal-links over each rendered line and
+   * forwards a Ctrl/Cmd+click to the handler. Optional so the test fake
+   * doesn't need it -- a handle without it simply has no links, never dead
+   * clicks. `null` clears the handler; the returned disposable tears the
+   * provider down with it.
+   */
+  setLinkHandler?(handler: ((match: TerminalLinkMatch, event: MouseEvent) => void) | null): { dispose(): void };
   dispose(): void;
 }
 
@@ -105,6 +115,7 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
   term.loadAddon(fit);
   const search = new SearchAddon();
   term.loadAddon(search);
+  let linkHandler: ((match: TerminalLinkMatch, event: MouseEvent) => void) | null = null;
   return {
     open: (container) => term.open(container),
     onData: (callback) => term.onData(callback),
@@ -119,6 +130,42 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
     getSelection: () => term.getSelection(),
     applicationCursorKeys: () => term.modes.applicationCursorKeysMode,
     onSelectionChange: (callback) => term.onSelectionChange(callback),
+    setLinkHandler: (handler) => {
+      linkHandler = handler;
+      const provider = term.registerLinkProvider({
+        // Match indexes are character offsets in translateToString's line;
+        // wide/CJK characters occupy two cells, shifting xterm's 1-based
+        // cell columns slightly off the match (accepted -- the link's
+        // activate still carries the exact match). Wrapped lines are not
+        // joined either: only the wrapped row the pointer is on is scanned
+        // (accepted limitation).
+        provideLinks(y, callback) {
+          const line = term.buffer.active.getLine(y - 1);
+          if (!line) return callback(undefined);
+          const text = line.translateToString(true);
+          const matches = findTerminalLinks(text);
+          callback(
+            matches.length
+              ? matches.map((m) => ({
+                  range: { start: { x: m.start + 1, y }, end: { x: m.end, y } },
+                  text: m.text,
+                  decorations: { underline: true, pointerCursor: true },
+                  activate: (event: MouseEvent) => {
+                    if (event.ctrlKey || event.metaKey) linkHandler?.(m, event);
+                  },
+                  hover: () => {
+                    if (term.element) term.element.title = "Ctrl+click to open (Cmd+click on macOS)";
+                  },
+                  leave: () => {
+                    term.element?.removeAttribute("title");
+                  },
+                }))
+              : undefined,
+          );
+        },
+      });
+      return { dispose: () => provider.dispose() };
+    },
     find: {
       search: (query, direction) => {
         if (!query) {
