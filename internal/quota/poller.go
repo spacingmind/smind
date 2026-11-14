@@ -7,11 +7,13 @@ import (
 	"errors"
 	"log"
 	"math/rand/v2"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -258,10 +260,10 @@ func (p *Poller) RefreshAll(ctx context.Context, accountIDs []int64) []Result {
 	var wg sync.WaitGroup
 	for i, id := range accountIDs {
 		wg.Add(1)
-		go func() {
+		crash.Go("quota.refreshAll", func() {
 			defer wg.Done()
 			out[i] = p.Refresh(ctx, id)
-		}()
+		})
 	}
 	wg.Wait()
 	return out
@@ -351,7 +353,7 @@ func (p *Poller) request(ctx context.Context, id int64, forced bool) Result {
 	a.inflight = fl
 	a.mu.Unlock()
 
-	go p.run(id, a, fl, acc)
+	crash.Go("quota.fetch", func() { p.run(id, a, fl, acc) })
 	return p.wait(ctx, id, a, fl, fp)
 }
 
@@ -425,7 +427,8 @@ func (p *Poller) run(id int64, a *acct, fl *flight, acc accounts.Account) {
 // a bug in a fetcher cannot leave the flight open or the semaphore held.
 func (p *Poller) safeFetch(acc accounts.Account) (rep Report, err error) {
 	defer func() {
-		if recover() != nil {
+		if v := recover(); v != nil {
+			crash.Default().Record("quota.pollerFetch", v, debug.Stack())
 			log.Printf("quota: account %d fetch panicked", acc.ID)
 			rep, err = errorReport("error", p.clock()), &FetchError{msg: "error"}
 		}

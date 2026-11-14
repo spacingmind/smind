@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
+	"github.com/spacingmind/smind/internal/crash"
 )
 
 // IsolationOptions configures a run that must have no tools and no ambient
@@ -284,7 +285,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	)
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
-	go func() {
+	crash.Go("taskrunner.isolatedForward", func() {
 		defer close(forwardDone)
 		for msg := range updates {
 			if sys, ok := msg.(claudecode.SystemMessage); ok && sys.Subtype == "init" {
@@ -314,7 +315,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 				}
 			}
 		}
-	}()
+	})
 
 	result, err := client.Prompt(runCtx, prompt, updates)
 	<-forwardDone

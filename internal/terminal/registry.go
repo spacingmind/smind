@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -323,9 +324,9 @@ func (reg *Registry) Create(taskID int64, worktreePath string, extraEnv ...strin
 	reg.sessions[id] = s
 	reg.mu.Unlock()
 
-	go reg.readLoop(s)
-	go reg.waitLoop(s)
-	go reg.checkpointLoop(s)
+	crash.Go("terminal.readLoop", func() { reg.readLoop(s) })
+	crash.Go("terminal.waitLoop", func() { reg.waitLoop(s) })
+	crash.Go("terminal.checkpointLoop", func() { reg.checkpointLoop(s) })
 
 	return id, nil
 }
@@ -600,7 +601,7 @@ func (reg *Registry) Subscribe(id string) (<-chan Event, func(), error) {
 
 	out := make(chan Event)
 	done := make(chan struct{})
-	go relay(q, out, done)
+	crash.Go("terminal.relay", func() { relay(q, out, done) })
 
 	var once sync.Once
 	unsubscribe := func() {
@@ -733,10 +734,11 @@ func (reg *Registry) CloseAll() {
 	var wg sync.WaitGroup
 	for _, id := range ids {
 		wg.Add(1)
-		go func(id string) {
+		sid := id
+		crash.Go("terminal.close", func() {
 			defer wg.Done()
-			_ = reg.Close(id)
-		}(id)
+			_ = reg.Close(sid)
+		})
 	}
 	wg.Wait()
 }

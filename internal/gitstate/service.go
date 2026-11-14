@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -210,7 +211,7 @@ func (s *Service) startLoop(ctx context.Context, tick <-chan time.Time, every ti
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	go func() {
+	crash.Go("gitstate.heartbeatLoop", func() {
 		defer s.wg.Done()
 		if ticker != nil {
 			defer ticker.Stop()
@@ -225,7 +226,7 @@ func (s *Service) startLoop(ctx context.Context, tick <-chan time.Time, every ti
 				beat()
 			}
 		}
-	}()
+	})
 }
 
 // Stop (like Drop and Invalidate) is a no-op on a nil Service. It cancels in-flight git, stops timers and waits for every goroutine.
@@ -299,14 +300,14 @@ func (s *Service) List(workspaceID int64) ([]TaskGit, error) {
 	var wg sync.WaitGroup
 	for range listWorkers {
 		wg.Add(1)
-		go func() {
+		crash.Go("gitstate.listWorker", func() {
 			defer wg.Done()
 			for i := range jobs {
 				if g, err := s.Get(ids[i]); err == nil {
 					res[i] = &g
 				}
 			}
-		}()
+		})
 	}
 	for i := range ids {
 		jobs <- i
@@ -363,10 +364,10 @@ func (s *Service) Invalidate(taskID int64) {
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	go func() {
+	crash.Go("gitstate.invalidate", func() {
 		defer s.wg.Done()
 		s.InvalidateSync(taskID)
-	}()
+	})
 }
 
 // ForgeAuthChanged is called after the daemon host's forge login changed
@@ -676,7 +677,7 @@ func (s *Service) fetchDue(focused []int64) {
 			bases = append(bases, b)
 		}
 		sort.Strings(bases)
-		go s.fetch(ws, bases)
+		crash.Go("gitstate.fetch", func() { s.fetch(ws, bases) })
 	}
 }
 
