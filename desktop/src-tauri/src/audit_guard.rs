@@ -423,6 +423,10 @@ mod tests {
         assert_eq!(split_segments("/a/b/../c/./d"), ["a", "c", "d"]);
         assert_eq!(split_segments("/a//b/"), ["a", "b"]);
         assert_eq!(split_segments("/A/B"), ["a", "b"]);
+        // a verbatim prefix is removed (the form `canonicalize` returns on Windows); the text rule is the
+        // same on every platform
+        assert_eq!(split_segments("//?/C:/Users/x"), ["c:", "users", "x"]);
+        assert_eq!(split_segments("//?/UNC/srv/share/x"), ["srv", "share", "x"]);
         // `..` never climbs above the root
         assert_eq!(split_segments("/../../a"), ["a"]);
         if cfg!(windows) {
@@ -430,7 +434,6 @@ mod tests {
                 split_segments("C:\\Users\\x\\.smind\\..\\.smind\\z"),
                 ["c:", "users", "x", ".smind", "z"]
             );
-            assert_eq!(split_segments("//?/C:/Users/x"), ["c:", "users", "x"]);
         } else {
             // a backslash is an ordinary file name character off Windows
             assert_eq!(split_segments("/a\\b/c"), ["a\\b", "c"]);
