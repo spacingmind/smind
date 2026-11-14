@@ -37,13 +37,20 @@ A real-window audit of the macOS app, and the manual desktop-macos-app and deskt
 
 ## Progress
 
-- [ ] spec (this file)
-- [ ] script guards and `DRY_RUN`
-- [ ] test and Taskfile wiring
-- [ ] mutation table
-- [ ] run once on macOS (done by hand during the audit; re-run after the guards)
-- [ ] PR to `wave/desktop`
+- [x] spec (this file)
+- [x] script guards, `DRY_RUN`, `CARGO_TARGET_DIR`
+- [x] test and Taskfile wiring (`task test`, `task lint` shellcheck list)
+- [x] mutation table
+- [x] run once end to end on macOS after the guards
+- [ ] PR to `wave/desktop`, review, merge
 
 ## Validation
 
-Filled in when the PR is ready.
+- AC1, AC2, AC5: `override-has-derived-identity` (identifier `<real>.audit` and `<real>.second`, product name, scheme, dead updater endpoint, dry run stops before the build).
+- AC1: `committed-config-untouched` (git status of `tauri.conf.json` unchanged).
+- AC3: `refuses-bad-audit-id` for empty, `Audit`, `a.b`, `../x`, `a/b`, `1abc`, `a b` and a 26-character id (non-zero exit, nothing written, a refusal message).
+- AC4: `refuses-real-app-data-out-dir`, `refuses-under-real-app-data`, `refuses-real-webkit`, `refuses-real-logs`, `refuses-real-caches`, `refuses-applications` (the applications directory is overridden in the test so a broken guard can never write into the real one), `refuses-real-smind-home`, `refuses-under-real-smind-home`, `refuses-symlink-to-real-app-data`; allowed: an app-data sibling with another identifier and the default scratch place under `~/.smind/dogfood`.
+- AC6: both files are in the shellcheck list; the test runs in `task test`.
+- Mutations (each fails a named scenario): drop the id check; drop the out-dir refusal; identifier not derived; no canonicalisation (symlink and temp-dir aliases); dry run exits non-zero; scratch exemption widened to all of `~/.smind`; applications guard removed; WebKit guard removed. Two guards first survived in an earlier table (`/Applications`, which the mutated script then wrote into): that is why the test now overrides the applications directory.
+- End to end (macOS, Apple silicon): the script built `sMind Audit.app` with the shared Rust cache; `Info.plist` shows identifier `dev.spacingmind.desktop.audit`, name `sMind Audit`, scheme `smind-audit`. Launched earlier against an isolated daemon: it adopted it and logged no token.
+- Not verified: an Intel host; CI does not run the build (only the dry-run test and shellcheck).
