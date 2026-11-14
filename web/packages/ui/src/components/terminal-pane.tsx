@@ -63,6 +63,8 @@ export interface TerminalHandle {
   size?(): { cols: number; rows: number };
   /** Gives the terminal keyboard focus, so a freshly opened or re-activated terminal takes typing without a click first. Optional for the same reason setTheme is. */
   focus?(): void;
+  /** Clears the emulator (screen and scrollback) before an ended session's retained output is replayed into it, so a reconnect never shows that output twice. Optional for the same reason setTheme is. */
+  reset?(): void;
   /** Re-applies the terminal's chrome colors (background/foreground/cursor/selection) -- optional so FakeTerminalHandle (this file's own test suite) doesn't need to implement it; xterm.js's own `options.theme` setter triggers a redraw. */
   setTheme?(theme: ITheme): void;
   /** The currently selected text, for the Copy affordance (Item 20). Optional for the same reason setTheme is. */
@@ -126,6 +128,7 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
     write: (data) => term.write(data),
     fit: () => fit.fit(),
     focus: () => term.focus(),
+    reset: () => term.reset(),
     size: () => ({ cols: term.cols, rows: term.rows }),
     setTheme: (theme) => {
       term.options.theme = theme;
@@ -514,6 +517,7 @@ export function TerminalPane({
             // the daemon backfills then ends the stream. Only a replay
             // that fails (not our own abort) means the output is gone.
             if (prev) {
+              termRef.current?.reset?.();
               client!
                 .callStream<TerminalAttachResult>(
                   "terminal.attach",

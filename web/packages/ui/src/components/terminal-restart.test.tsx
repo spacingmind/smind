@@ -49,6 +49,7 @@ class FakeTerminalHandle implements TerminalHandle {
   disposed = false;
   fitCalls = 0;
   focusCalls = 0;
+  resets = 0;
   writes: (string | Uint8Array)[] = [];
   size?: () => { cols: number; rows: number };
   appCursor = false;
@@ -57,6 +58,10 @@ class FakeTerminalHandle implements TerminalHandle {
 
   focus(): void {
     this.focusCalls++;
+  }
+
+  reset(): void {
+    this.resets++;
   }
 
   applicationCursorKeys(): boolean {
@@ -150,6 +155,8 @@ describe("TerminalPane restart (DT3-B)", () => {
 
     const replay = client2.nth("terminal.attach", 0);
     expect(replay.params).toEqual({ terminalId: "term-1" });
+    // The emulator is cleared first so a reconnect never shows the retained output twice.
+    expect(fake.resets).toBe(1);
     // The replay never adopts the dead session: no binding, no create.
     expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
 
