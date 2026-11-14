@@ -12,16 +12,39 @@ const BIN: &str = env!("CARGO_BIN_EXE_smind-desktop");
 /// launch runs the app with an empty environment plus `vars` and a scratch HOME, returning
 /// (exit code, stderr, whether the scratch HOME is still empty).
 fn launch(vars: &[(&str, &str)]) -> (Option<i32>, String, bool) {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
     let home = tempfile::tempdir().unwrap();
-    let out = Command::new(BIN)
+    let mut child = Command::new(BIN)
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", "/usr/bin:/bin")
         .envs(vars.iter().copied())
-        .output()
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("the app binary starts");
+    // A broken guard would let the app start and keep running: give it a few seconds, then kill
+    // exactly this child and report no exit code, so the test fails instead of hanging.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let code = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status.code();
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_string(&mut stderr);
+    }
     let empty = std::fs::read_dir(home.path()).unwrap().next().is_none();
-    (out.status.code(), String::from_utf8_lossy(&out.stderr).into_owned(), empty)
+    (code, stderr, empty)
 }
 
 fn refused(vars: &[(&str, &str)], names: &str) {
