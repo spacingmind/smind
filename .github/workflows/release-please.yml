@@ -27,6 +27,10 @@
 # A local reference clone's release workflow, adapted to release-please already
 # owning tag/Release creation.
 #
+# Before anything is uploaded, `ci-gate` requires the `ci` job of this exact commit to be green
+# (scripts/ci-green-gate.mjs) and `publish` runs scripts/verify-release-artifacts.mjs over the
+# assembled set; see docs/release-verification.md.
+#
 # workflow_dispatch runs the exact same build+package+checksum steps as a
 # dry run: it never touches a Release, it only publishes the results as
 # workflow artifacts. Used to prove the pipeline out on a branch -- see
@@ -58,6 +62,50 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # The release commit's own CI must be green before anything is uploaded
+  # (docs/plans/active/desktop-release-hygiene.md, item 2). `release-please`
+  # and ci.yml both start on the same push, independently, so without this
+  # a release could publish from a red, still-running or never-run commit.
+  # The gate only blocks `publish` (builds run in parallel with it, so a red
+  # CI wastes a build but never an upload). On a workflow_dispatch dry run it
+  # runs with --dry-run: it reports WOULD PASS / WOULD REFUSE and never fails.
+  # No secret: gh reads the job's own token from GH_TOKEN, never printed.
+  ci-gate:
+    needs: release-please
+    if: |
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    # The script waits at most 10 min for the CI run to appear, then 40 min for it to finish
+    # (--grace/--timeout defaults), plus retries: 60 leaves the margin.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Require CI green on the release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+          IS_RELEASE: ${{ needs.release-please.outputs.release_created }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_RELEASE" = "true" ]; then
+            node scripts/ci-green-gate.mjs --repo "$REPO" --sha "$SHA" --tag "$RELEASE_TAG"
+          else
+            node scripts/ci-green-gate.mjs --repo "$REPO" --sha "$SHA" --dry-run
+          fi
 
   # Computes the version/commit to stamp into binaries, and gates every job
   # below on "this is either a real release, or a workflow_dispatch dry
@@ -284,9 +332,10 @@ jobs:
   # workflow_dispatch dry run, `release-please` is skipped, and by default
   # a skipped dependency would skip this job too.
   publish:
-    needs: [release-please, prepare, build-binaries, build-desktop-windows, build-desktop-macos]
+    needs: [release-please, ci-gate, prepare, build-binaries, build-desktop-windows, build-desktop-macos]
     if: |
       always() &&
+      (needs.release-please.outputs.release_created != 'true' || needs.ci-gate.result == 'success') &&
       needs.build-binaries.result == 'success' &&
       needs.build-desktop-windows.result == 'success' &&
       needs.build-desktop-macos.result == 'success'

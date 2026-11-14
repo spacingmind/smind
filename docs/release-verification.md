@@ -36,3 +36,62 @@ what the linker was told, and the checksums bind the bytes.
 
 `latest.json` is verified a second time, right after it is generated and before it
 is uploaded, so a manifest that disagrees with the assets is never published.
+
+## CI must be green on the release commit
+
+`release-please` and `ci.yml` both start on the same push to `develop`, independently.
+So that a release cannot publish from a red, still-running or never-run commit, the
+`ci-gate` job (`scripts/ci-green-gate.mjs`) asks the GitHub API whether the `ci` job
+of the `CI` workflow succeeded for exactly the release commit, and `publish` needs it.
+It only guards the upload: the builds run in parallel with it.
+
+What it decides, in order:
+
+| Situation | Result |
+|---|---|
+| The tag does not resolve to the commit under release (it moved) | refuse |
+| The tag does not exist | refuse |
+| No push run of `ci.yml` for that commit, after 10 minutes | refuse |
+| Several runs for the commit (a re-run, a manual dispatch) | the newest run decides; an older green run never rescues a newer red one |
+| The `ci` job is `queued` or `in_progress` | wait, up to 40 minutes, then refuse |
+| The `ci` job is `failure`, `cancelled`, `timed_out`, `skipped` or anything but `success` | refuse |
+| The run has no job named `ci` | refuse |
+| `success` | pass |
+| The GitHub API fails | retried twice, then refuse with exit 3 |
+
+A run for any other commit is ignored. There is no override flag.
+
+If the gate refuses, the tag and the (empty) GitHub Release that `release-please`
+created already exist; no asset, `latest.json`, container image or master fast-forward
+is published. To recover: fix the cause, then either re-run the failed jobs of the
+release run (the release outputs are preserved, so the gate is evaluated again), or cut
+a new release and delete the empty one.
+
+Limits, stated plainly:
+
+- Re-running only the `publish` job (or only some jobs) of a release run reuses the
+  earlier `ci-gate` result of that same run: it is not asked again. The gate was
+  evaluated against the same commit, but a CI result that changed afterwards (a
+  re-run of `ci` that now fails) is not seen. Re-run the whole workflow run, or the
+  failed jobs including `ci-gate`, when CI changed.
+- The gate script runs from the release commit itself (the job checks out the pushed
+  commit). The commit under release can therefore change the gate, the same way it
+  can change the workflow; both go through the same review and the same required `ci`
+  check as any other change. The gate is not a defence against a hostile commit
+  already on `develop`.
+- It trusts GitHub's report of the run and job state. It does not look at the other
+  workflows (`desktop-check`, `mobile-check`, the Windows suite): the `ci` job is the
+  repository's required check.
+- The workflow's wiring is pinned by `scripts/ci-green-gate-wiring.test.mjs` (no
+  `continue-on-error`, no swallowed exit, the exact invocation per branch, exact
+  permissions, `publish` needs the gate, release uploads only in `publish`), so a small
+  edit that neuters the gate fails CI.
+
+Try it without publishing anything, with your own `gh` login:
+
+```
+node scripts/ci-green-gate.mjs --dry-run --repo owner/name --sha <40-hex commit>
+```
+
+It prints `WOULD PASS: ...` or `WOULD REFUSE: ...`, never waits and exits 0. A
+`workflow_dispatch` run of `release-please.yml` runs the gate the same way.
