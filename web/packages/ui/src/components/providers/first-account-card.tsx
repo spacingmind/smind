@@ -24,10 +24,7 @@ export function FirstAccountCard({
   const connectable = credentialProviders(providers);
   return (
     <div data-testid="first-account-card" className="grid gap-3 p-6">
-      <h4 className="text-ui-lg font-medium">Connect your first account</h4>
-      <p className="text-ui-base text-muted-foreground">
-        Accounts let sMind route the /v1 proxy across your subscriptions and keys.
-      </p>
+      <h4 className="text-ui-lg font-medium">Connect an account so agents can sign in</h4>
       {connectable.length === 0 ? (
         <p className="text-ui-base text-muted-foreground">
           {settled ? "No providers available." : "Loading providers…"}
@@ -52,6 +49,9 @@ export function FirstAccountCard({
             {`${providerLabel(p.id, [p])} signs in through its own CLI.`}
           </p>
         ))}
+      <p className="text-ui-sm text-muted-foreground">
+        Advanced: accounts also let sMind route the /v1 proxy across your subscriptions and keys.
+      </p>
     </div>
   );
 }

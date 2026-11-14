@@ -87,6 +87,7 @@ function renderLogEvent(ev: RunLogEvent, idx: number, runId?: string): TimelineL
     }
     case 'done':
       return [{ key: `e${idx}`, role: '', text: `done (${ev.stopReason ?? ''})` }];
+    // question_request/question_resolved render through QuestionBoard the same way (ADR-0055).
     // permission_request/permission_resolved render through
     // PermissionBoard (Milestone 3 Item 2) -- summary plus tappable
     // option buttons while pending, resolved state after -- not as text

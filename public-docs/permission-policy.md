@@ -104,6 +104,14 @@ is a **deny** that names the rule id:
 | `no-real-home-tests` | tests that point `HOME` at your real home |
 | `no-add-all` | `git add -A`: stage named files, never the whole tree |
 | `no-self-approve` | an agent answering, approving or denying its own requests: `smind task approve\|deny\|answer`, `smind permission ...` (however wrapped, quoted or called by path), or a command that names a human-only daemon method such as `run.respondPermission` |
+| `no-catastrophic` | a catastrophic command: `rm -rf` of the filesystem root, your home or a system directory (`/`, `~`, `~/*`, `/etc`, `C:\`), formatting, zeroing or repartitioning a device (`mkfs`, `wipefs`, `dd of=/dev/…`, `diskutil eraseDisk`, `Format-Volume`), a fork bomb, a power-off (`shutdown`, `reboot`), however wrapped (`su -c`, `ssh host '…'`, `eval`, `echo '…' \| sh`) |
+
+`no-catastrophic` is deny-only and reads targets, not intentions: `rm -rf ./build`,
+`mkfs.ext4 disk.img` (a file image), `dd of=./disk.img`, `fdisk -l` and `gofmt -w` stay as
+they were. It cannot see a script the agent wrote and runs later, a program that runs a
+command from its own text (`python -c 'os.system(...)'`), a copy of `rm` renamed to
+something else (only `--no-preserve-root` is matched under any name), or a target fed on
+stdin (`find / | xargs rm -rf`, which still asks).
 
 `no-self-approve` narrows a hole and does not close it. The floor reads the
 command text, so it cannot see a script the agent wrote and runs later, a method
