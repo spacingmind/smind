@@ -42,11 +42,16 @@ lands for both. Three PRs, each branched from `wave/desktop`, one at a time:
 
 ### B. Restart an exited terminal
 
-7. When a terminal session has ended (closed or interrupted) the pane replays its retained output and
-   shows "Session ended" with a labelled **Restart terminal** button.
+7. When a terminal session has ended the pane shows its retained output and a labelled **Restart terminal**
+   button. Ended means: the session is reported closed or interrupted when the pane (re)connects, **or** the live
+   `terminal.attach` stream finishes (the shell exited). A stream that fails or is aborted (connection loss, tab
+   switch) is not an end. For a session found ended on connect the output is replayed through `terminal.attach`
+   (the daemon backfills the scrollback of a retained session, then ends the stream).
 8. Restart creates one new session, writes a dim separator line into the same xterm (the old output stays
    above it) and attaches to the new session. One click is one `terminal.create`; the button is disabled while
    pending and an error shows inline.
+8b. While a session is ended the cursor is hidden (DEC private mode 25), so the pane does not look live; Restart
+    shows it again, and a replayed ended session ends hidden even if its scrollback re-showed the cursor.
 9. If the old session is no longer retained, the pane says "Session ended; its output is no longer kept"
    and still offers Restart.
 
@@ -88,8 +93,8 @@ sizes, and the composer after a send. Desktop real-window frames only if the DT0
 ## Progress
 
 - [x] spec
-- [x] A: matchers, resolver, link provider, reveal store and editor scroll (PR A)
-- [ ] B: restart
+- [x] A: matchers, resolver, link provider, reveal store and editor scroll (PR A, #889)
+- [x] B: restart (PR B)
 - [ ] C: send set
 
 ## Validation
@@ -100,5 +105,13 @@ PR A: matcher, resolver, open-logic and reveal tests (`terminal-links.test.ts`, 
 all opened pairwise; a plain click opens nothing and Ctrl+click opens exactly one tab or one URL (browser popup count
 checked). The frames found two real bugs the unit tests missed (a reveal spent on the empty initial document; a reveal
 dropped when the lazy editor view appeared after the read), both fixed with tests. Two-axis review run before the PR (findings in the PR body).
-Not verified: a real daemon, the desktop webview (the `open_external` bridge is existing code), wrapped long lines
+PR B: `terminal-restart.test.tsx` (8 tests) plus the existing terminal suites; web 465 files / 5267 tests, mobile 116 / 1130,
+`tsc -b`, `vite build`. Mutations on committed code, all killed: restart ref guard removed (double-click test), stream-finish
+handler removed (shell-exit test), separator write removed, emulator reset removed, "no longer kept" branch removed.
+A first run of the ref-guard mutation SURVIVED (the test only used the disabled state); the test was strengthened (two clicks
+in one act) and the mutation then failed it. Frames: 12 (running, ended, restarted; light and dark; 1280 and 390), all opened.
+PR B follow-up (cursor while ended, supervisor nit): 3 tests (a running session never touches the cursor; hidden on exit and restored by
+Restart; hidden after a replay whose scrollback re-showed it); two mutations killed (cursor effect disabled; hide-after-replay removed).
+Ended and restarted frames re-shot and opened, light and dark at 1280 and 390: no block cursor while ended, the outline cursor is back after Restart.
+Not verified (PR A): a real daemon, the desktop webview (the `open_external` bridge is existing code), wrapped long lines
 (only the row under the pointer is scanned), mutation checks (the runs were not approved).
