@@ -2013,7 +2013,7 @@ func (reg *Registry) Subscribe(runID string) (<-chan Event, func(), error) {
 
 	out := make(chan Event)
 	done := make(chan struct{})
-	crash.Go("runs.relay", func() { relay(q, out, done) })
+	crash.Go("runs.subscribeRelay", func() { relay(q, out, done) })
 
 	var once sync.Once
 	unsubscribe := func() {
@@ -2102,7 +2102,7 @@ func (reg *Registry) storedSubscribe(runID string) (<-chan Event, func(), error)
 	q.closeQueue()
 	out := make(chan Event)
 	done := make(chan struct{})
-	crash.Go("runs.relay", func() { relay(q, out, done) })
+	crash.Go("runs.storedRelay", func() { relay(q, out, done) })
 	var once sync.Once
 	return out, func() {
 		once.Do(func() {

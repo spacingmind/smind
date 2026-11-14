@@ -69,7 +69,7 @@ func crashesJSON(s crash.Summary) doctorCrashesSummary {
 		NewestSite:   printable(s.NewestSite, 40),
 		NewestSource: printable(s.NewestSource, 40),
 		Refused:      s.Refused,
-		Err:          s.Err,
+		Err:          cleanLine(s.Err),
 	}
 }
 
@@ -184,7 +184,7 @@ func crashLine(prefix string, s crash.Summary, daemon bool) string {
 	case s.Refused:
 		return fmt.Sprintf("%s: %s is a link, so it was not read", prefix, s.Dir)
 	case s.Err != "":
-		return fmt.Sprintf("%s: %s could not be read: %s", prefix, s.Dir, s.Err)
+		return fmt.Sprintf("%s: %s could not be read: %s", prefix, s.Dir, cleanLine(s.Err))
 	case s.Count == 0:
 		if !daemon {
 			return ""
@@ -195,6 +195,17 @@ func crashLine(prefix string, s crash.Summary, daemon bool) string {
 			prefix, s.Count, s.Dir, s.Newest.UTC().Format(time.RFC3339),
 			printable(s.NewestSource, 40), printable(s.NewestSite, 40))
 	}
+}
+
+// cleanLine replaces control characters (an error string built from a hostile
+// file name or content must not move the cursor or recolour the terminal).
+func cleanLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '?'
+		}
+		return r
+	}, s)
 }
 
 // printable keeps only ASCII letters, digits and ._-: and replaces every

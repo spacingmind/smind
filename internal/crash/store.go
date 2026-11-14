@@ -15,13 +15,15 @@ import (
 )
 
 const (
-	crashPrefix  = "crash-"
-	crashSuffix  = ".json"
-	tmpPrefix    = ".tmp-crash-"
-	nameLayout   = "20060102T150405.000"
-	siteMaxRunes = 40
-	dirMode      = 0o700
-	fileMode     = 0o600
+	crashPrefix   = "crash-"
+	crashSuffix   = ".json"
+	tmpPrefix     = ".tmp-crash-"
+	nameLayout    = "20060102T150405.000"
+	siteMaxRunes  = 40
+	tmpMaxAge     = time.Minute
+	maxReportRead = 1 << 20 // doctor reads at most this much of a report
+	dirMode       = 0o700
+	fileMode      = 0o600
 )
 
 // store creates the directory, writes data to a temp file in it and renames
@@ -52,9 +54,17 @@ func (r *Recorder) store(data []byte, now time.Time, site string) (string, error
 			return "", err
 		}
 	}
-	final := filepath.Join(dir, crashName(now, r.cfg.Source, site))
+	// Two different panics at the same site in the same millisecond must not
+	// overwrite each other: take the first free name.
+	final := filepath.Join(dir, crashName(now, r.cfg.Source, site, 0))
+	for n := 1; n < 100; n++ {
+		if _, err := os.Lstat(final); os.IsNotExist(err) {
+			break
+		}
+		final = filepath.Join(dir, crashName(now, r.cfg.Source, site, n))
+	}
 	r.tmpSeq++
-	tmp := filepath.Join(dir, fmt.Sprintf("%s%d", tmpPrefix, r.tmpSeq))
+	tmp := filepath.Join(dir, fmt.Sprintf("%s%d-%d", tmpPrefix, os.Getpid(), r.tmpSeq))
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, fileMode)
 	if err != nil {
 		return "", err
@@ -95,7 +105,9 @@ func (r *Recorder) rotate(now time.Time) {
 			continue
 		}
 		n := e.Name()
-		if strings.HasPrefix(n, tmpPrefix) && info.ModTime().Before(now) {
+		// Another process (the CLI) may share this directory: only a temp file
+		// that has been lying around is a leftover.
+		if strings.HasPrefix(n, tmpPrefix) && info.ModTime().Before(now.Add(-tmpMaxAge)) {
 			os.Remove(filepath.Join(r.cfg.Dir, n))
 			continue
 		}
@@ -129,8 +141,12 @@ func isCrashName(name string) bool {
 	return strings.HasPrefix(name, crashPrefix) && strings.HasSuffix(name, crashSuffix)
 }
 
-func crashName(now time.Time, source, site string) string {
-	return fmt.Sprintf("%s%s-%s-%s%s", crashPrefix, now.UTC().Format(nameLayout), source, site, crashSuffix)
+func crashName(now time.Time, source, site string, n int) string {
+	suffix := ""
+	if n > 0 {
+		suffix = fmt.Sprintf("-%d", n)
+	}
+	return fmt.Sprintf("%s%s-%s-%s%s%s", crashPrefix, now.UTC().Format(nameLayout), source, site, suffix, crashSuffix)
 }
 
 func sanitizeSite(site string) string {
@@ -211,7 +227,7 @@ func List(dir string) Summary {
 	if t, ok := nameTimestamp(newest); ok {
 		s.Newest = t
 	}
-	data, err := readBounded(filepath.Join(dir, newest), 1<<20)
+	data, err := readNewest(filepath.Join(dir, newest))
 	if err != nil {
 		s.Err = err.Error()
 		return s
@@ -228,15 +244,23 @@ func List(dir string) Summary {
 	return s
 }
 
-// readBounded reads at most max bytes of a regular file: a planted huge file
-// must not make `smind doctor` allocate it.
-func readBounded(path string, max int64) ([]byte, error) {
+// readNewest reads at most maxReportRead bytes of a regular file. A planted
+// FIFO (which would block `smind doctor` forever) or link is refused: the
+// check is on Lstat, and the open follows nothing it has not checked.
+func readNewest(path string) ([]byte, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", filepath.Base(path))
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	return io.ReadAll(io.LimitReader(f, max))
+	return io.ReadAll(io.LimitReader(f, maxReportRead))
 }
 
 // DesktopDir returns the crashes directory of the desktop shell under the

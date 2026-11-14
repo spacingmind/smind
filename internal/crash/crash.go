@@ -121,7 +121,8 @@ func (r *Recorder) Record(site string, v any, stack []byte) (path string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if !r.allow(now) || r.deduped(site, stack, now) {
+	key := site + "\x00" + dedupeFrame(stack)
+	if !r.allow(now) || r.deduped(key, now) {
 		r.suppressed++
 		return ""
 	}
@@ -137,7 +138,7 @@ func (r *Recorder) Record(site string, v any, stack []byte) (path string) {
 		return ""
 	}
 	r.writeTimes = append(r.writeTimes, now)
-	r.lastSeen[site+"\x00"+dedupeFrame(stack)] = now
+	r.lastSeen[key] = now
 	r.pruneLastSeen(now)
 	r.suppressed = 0
 	return path
@@ -204,8 +205,8 @@ func (r *Recorder) allow(now time.Time) bool {
 
 // deduped reports whether the same panic (site + first frame outside
 // runtime and this package) was already written inside the window.
-func (r *Recorder) deduped(site string, stack []byte, now time.Time) bool {
-	t, ok := r.lastSeen[site+"\x00"+dedupeFrame(stack)]
+func (r *Recorder) deduped(key string, now time.Time) bool {
+	t, ok := r.lastSeen[key]
 	return ok && now.Sub(t) < r.cfg.DedupeWindow
 }
 
@@ -226,7 +227,7 @@ func (r *Recorder) buildReport(site string, v any, stack []byte, now time.Time) 
 		Arch:                runtime.GOARCH,
 		Time:                now.UTC().Format(time.RFC3339Nano),
 		Site:                site,
-		PanicType:           fmt.Sprintf("%T", v),
+		PanicType:           truncate(Redact(fmt.Sprintf("%T", v), r.cfg.Home, r.cfg.SmindHome), 200),
 		Stack:               Redact(string(stack), r.cfg.Home, r.cfg.SmindHome),
 		SuppressedSinceLast: r.suppressed,
 	}
@@ -243,52 +244,69 @@ func (r *Recorder) buildReport(site string, v any, stack []byte, now time.Time) 
 
 const stackTruncated = "\n...[stack truncated]"
 
-// marshalBounded marshals rep and, while it exceeds max bytes, cuts the
+// marshalBounded marshals rep and, while it exceeds limit bytes, cuts the
 // stack (keeping its head) and appends the truncation marker until it fits.
-func marshalBounded(rep report, max int) ([]byte, error) {
+func marshalBounded(rep report, limit int) ([]byte, error) {
 	data, err := json.Marshal(rep)
-	if err != nil || len(data) <= max {
+	if err != nil || len(data) <= limit {
 		return data, err
 	}
 	base, keep := rep.Stack, len(rep.Stack)
 	for {
-		keep -= len(data) - max + len(stackTruncated)
+		keep -= len(data) - limit + len(stackTruncated)
 		if keep < 0 {
 			keep = 0
 		}
 		rep.Stack = base[:keep] + stackTruncated
 		data, err = json.Marshal(rep)
-		if err != nil || len(data) <= max || keep == 0 {
+		if err != nil || len(data) <= limit || keep == 0 {
 			return data, err
 		}
 	}
 }
 
-// dedupeFrame returns the first stack frame outside runtime and this
-// package: the frame that identifies where the panic happened. File and
-// line rows are indented and skipped.
+// dedupeFrame returns the first stack frame outside runtime, this package and
+// the panic(...) frame itself (whose line carries the value's raw addresses):
+// the frame that identifies where the panic happened. File and line rows are
+// indented and skipped. Arguments are cut so addresses never reach the key.
 func dedupeFrame(stack []byte) string {
 	for _, line := range strings.Split(string(stack), "\n") {
 		if line == "" || line[0] == '\t' {
 			continue
 		}
-		if strings.HasPrefix(line, "goroutine ") || strings.HasPrefix(line, "created by ") || strings.HasPrefix(line, "runtime/") {
+		if strings.HasPrefix(line, "goroutine ") || strings.HasPrefix(line, "created by ") || strings.HasPrefix(line, "runtime/") ||
+			strings.HasPrefix(line, "runtime.") || strings.HasPrefix(line, "panic(") || strings.HasPrefix(line, "testing.") {
 			continue
 		}
-		if strings.Contains(line, "/internal/crash.") || strings.HasPrefix(line, "crash.") {
+		if isRecorderFrame(line) {
 			continue
+		}
+		if i := strings.LastIndex(line, "("); i > 0 {
+			line = line[:i]
 		}
 		return line
 	}
 	return ""
 }
 
-// truncate cuts s to at most max bytes without splitting a rune.
-func truncate(s string, max int) string {
-	if len(s) <= max {
+// isRecorderFrame reports whether a stack line is one of this package's own
+// recovery entry points (not a function that merely lives in a package named
+// crash, such as a test helper).
+func isRecorderFrame(line string) bool {
+	for _, fn := range [...]string{"internal/crash.Recover", "internal/crash.(*Recorder).", "internal/crash.RecordAndRepanic", "internal/crash.Go"} {
+		if strings.Contains(line, fn) {
+			return true
+		}
+	}
+	return false
+}
+
+// truncate cuts s to at most limit bytes without splitting a rune.
+func truncate(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	b := []byte(s[:max])
+	b := []byte(s[:limit])
 	for len(b) > 0 && !utf8.Valid(b) {
 		b = b[:len(b)-1]
 	}

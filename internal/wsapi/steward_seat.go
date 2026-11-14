@@ -275,7 +275,7 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 
 	if stewardGateUnknown(d.Gates) {
 		taskID := p.TaskID
-		crash.Go("wsapi.stewardRecheck", func() { h.recheck(id, taskID, lead, prof, sha) })
+		crash.Go("wsapi.stewardRecheckPasses", func() { h.recheck(id, taskID, lead, prof, sha) })
 		return reviewResult{ReviewID: id, TaskID: p.TaskID, CommitSHA: sha, Status: "pending"}, nil
 	}
 	return h.startSeat(id, lead, prof, d, dsha, sha)

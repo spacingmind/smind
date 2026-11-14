@@ -44,17 +44,31 @@ not read and not written: the recorder refuses to follow it.
 
 ## What is redacted
 
-The message and the stack are redacted before anything is written, and
-checked again before the file is placed in the directory:
+The message, the stack and the panic type are redacted before anything is
+written. The rules are applied again and again until the text stops changing
+(at most three passes), so the stored text is stable under redaction:
 
-- the home directory becomes `~` and the smind home becomes `$SMIND_HOME`;
-- any other user directory shape (`/Users/<name>/`, `/home/<name>/`,
+- the home directory becomes `~` and the smind home becomes `$SMIND_HOME`
+  (matched as whole path components, also in its symlink-resolved form);
+- any other user directory shape (`/Users/<name>/`, `/home/<name>/`, `/root`,
   `C:\Users\<name>\`) becomes `<user dir>`, with either separator;
-- secrets are replaced with `[redacted]`: `Bearer` tokens, `sk-` API keys,
-  GitHub tokens (`ghp_`, `gho_`, `ghs_`, `github_pat_`), cloud access keys
-  (`AKIA…`), JWT shapes, `token`/`secret`/`password`/`apikey` and similar
-  `key=value` or `key: value` pairs, passwords embedded in URLs, and long
-  hex or high-entropy runs.
+- secrets are replaced with `[redacted]`: `Bearer` and `Basic` credentials,
+  `sk-` API keys, GitHub tokens (`ghp_`, `gho_`, `ghs_`, `github_pat_`),
+  Slack, Google, GitLab, npm, Google OAuth and Stripe token shapes, cloud
+  access keys (`AKIA...`), JWT shapes, private-key blocks, URL passwords of any
+  scheme, `key=value`, `key: value` and `"key":"value"` pairs whose key names a
+  token, secret, password, passphrase, API key, authorization, cookie or
+  credential (a quoted value may contain spaces), hexadecimal runs of 32 or
+  more characters, and any 32-character-or-longer letters-and-digits run that
+  mixes upper case, lower case and digits.
+
+It cannot recognise a secret of a shape it does not know. Known gaps: a bare
+40-character cloud secret key that contains `/` or `+` is caught only when a
+key name labels it; a home directory outside `/Users`, `/home`, `/root` and
+`C:\Users` (a network share, `/Volumes/<disk>/...`) is replaced only when it is
+the current user's home. The stack holds function names, file paths and line
+numbers, and the messages of non-runtime panics are withheld entirely (below),
+so these gaps rarely matter in practice.
 
 ## What is withheld
 
@@ -72,7 +86,7 @@ paths and line numbers, not argument values.
 - one report is at most 64 KiB (the stack is cut with a marker);
 - the directory is capped at 2 MiB, oldest dropped first;
 - at most 10 reports a minute;
-- an identical panic (same site and top frame) within 5 minutes is not
+- an identical panic (same site and same panicking function) within 5 minutes is not
   written again; it is counted into `suppressedSinceLast` of the next
   report.
 
