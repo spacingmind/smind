@@ -4607,7 +4607,7 @@ checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 
 [[package]]
 name = "smind-daemon-client"
-version = "0.12.0"
+version = "0.20.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -4645,11 +4645,12 @@ dependencies = [
 
 [[package]]
 name = "smind-desktop"
-version = "0.12.0"
+version = "0.20.0"
 dependencies = [
  "base64 0.23.1",
  "flate2",
  "futures-util",
+ "libc",
  "log",
  "mac-notification-sys",
  "minisign",
