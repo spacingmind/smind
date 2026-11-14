@@ -82,4 +82,10 @@ type Decision struct {
 	Normalized string
 	Paths      []string
 	Segments   []SegmentDecision
+	// Grantable is true only on an `ask` the engine judged completely and for
+	// a plain reason (no rule matched, or a segment no allow rule covers) whose
+	// command may be covered by a saved grant (grantable.go). It is never set on
+	// an allow or a deny, a floor hit, an unparsed or truncated request, or a
+	// request that is not a Bash command.
+	Grantable bool
 }
