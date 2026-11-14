@@ -66,6 +66,15 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
+// jsdom doesn't implement Range's client-rect methods either; CodeMirror's
+// measure pass (scheduled by focus/scrollIntoView -- the file editor's
+// reveal-at-line effect does both) reaches Range.getClientRects through
+// its clientRectsFor. An empty list is exactly what the library treats as
+// "cannot measure" and falls back from, so no behavior is lost.
+if (!Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+}
+
 afterEach(() => {
   cleanup();
   // Persisted UI state (sidebar expansion, pins, ...) must not leak from one
