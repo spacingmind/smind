@@ -501,6 +501,12 @@
           "markdownDescription": "Enables the open_in_editor command without any pre-configured scope."
         },
         {
+          "description": "Enables the open_path_default command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-path-default",
+          "markdownDescription": "Enables the open_path_default command without any pre-configured scope."
+        },
+        {
           "description": "Enables the take_over_daemon command without any pre-configured scope.",
           "type": "string",
           "const": "allow-take-over-daemon",
@@ -673,6 +679,12 @@
           "type": "string",
           "const": "deny-open-in-editor",
           "markdownDescription": "Denies the open_in_editor command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_path_default command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-path-default",
+          "markdownDescription": "Denies the open_path_default command without any pre-configured scope."
         },
         {
           "description": "Denies the take_over_daemon command without any pre-configured scope.",

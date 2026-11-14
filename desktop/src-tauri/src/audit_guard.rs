@@ -291,11 +291,16 @@ mod tests {
         assert!(before.trim_end().ends_with("#[cfg(feature = \"audit-guard\")]"), "the call must be behind the feature");
     }
 
+    #[test]
+    fn audit_guard_is_not_a_default_feature() {
+        let cargo = include_str!("../Cargo.toml");
+        assert!(cargo.contains("\ndefault = []\n"), "audit-guard must not be a default feature");
+        assert!(!cargo.contains("default = [\"audit-guard\""), "audit-guard must not be a default feature");
+    }
+
     #[cfg(not(feature = "audit-guard"))]
     #[test]
     fn audit_guard_is_off_by_default() {
         assert!(!cfg!(feature = "audit-guard"));
-        let cargo = include_str!("../Cargo.toml");
-        assert!(cargo.contains("default = []"), "audit-guard must not be a default feature");
     }
 }
