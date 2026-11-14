@@ -72,6 +72,28 @@ lands for both. Three PRs, each branched from `wave/desktop`, one at a time:
     backticks in the text, so the block cannot be closed early by its own content.
 13. With no focused chat for the task the menu is not rendered.
 
+### D. Send set as context chips (follow-up to C)
+
+Found on the first run of C: terminal text landed in the composer as raw fenced text and the browser's spellchecker
+underlined code words red; and the terminal's trigger at 390 was a lone arrow icon in an empty bar.
+
+14. Every send-set item becomes a removable **context chip** in the composer's tray (the attachment pill's look),
+    not text in the draft: `Terminal output · 100 lines · 106 B ×`, `Terminal selection · 3 lines · 46 B ×`,
+    `handler.go L1–4 · 78 B ×`. Nothing raw is added to the textarea, so nothing is underlined.
+15. The fenced block is built **only at send time**: each terminal chip becomes one block (header with the shown
+    size, fence longer than any backtick run, the 16 KiB clip and its "(N KiB omitted)" line, all as in AC 11-12),
+    appended after the typed prompt separated by a blank line, in the order the chips were added. The prompt itself
+    is never changed in the draft.
+16. An editor chip (open file or selection) is sent as a `file_ref` attachment (`{path}` or `{path, line, endLine}`),
+    deduplicated against any `@path` token for the same reference; it replaces the `@path#Lx-Ly` token the editor
+    entries used to put in the draft. "Add to chat" from the Files/Diff panes is unchanged.
+17. Chips live in the composer store per task and chat, like the remembered mentions: they survive the chat tab being
+    unmounted (the usual case: the send menu is used from another tab), are removed by their ×, and are cleared
+    after a successful send; after a failed send they stay. A chip alone cannot be sent (the prompt text is still
+    required).
+18. The terminal's send trigger shows the visible label "Send to agent" at every width (also on the editor's, which
+    already did), with a matching tooltip and aria-label.
+
 ## Test scenarios
 
 A: `terminal-links.test.ts` (pure matchers: path/line/col, URL inside text, trailing punctuation, no
@@ -89,6 +111,15 @@ and reports the omitted bytes; fenceBlock uses a fence longer than the text's ba
 the focused chat's key; last 100 lines; over-cap cut with the omitted line and the cut size shown; no focused chat means no menu);
 `file-send-set.test.tsx` (Open file queues `{path}`; Selection queues `{path, line, endLine}` for the selected lines; empty selection
 disables it; without `file_ref` support the editor menu is not rendered).
+
+D: `context-chips-store.test.ts` (add/remove per key; survive `clear(key)` of the tray; cleared by `clearChips`; keyed per chat);
+`send-set.test.ts` additions (`terminalChipLabel` wording and line count; `appendChipBlocks(text, chips)` appends one fenced block per
+terminal chip after a blank line in order, applies the clip and fence rules, and returns the text unchanged with no chips);
+`context-chip-tray.test.tsx` (labels and sizes shown; × removes; Backspace on a focused chip removes; nothing rendered when empty);
+`composer-send-chips.test.tsx` (the textarea never contains the block; send passes typed text + blocks to onSubmit and clears the
+chips; a failed send keeps them; a file_ref chip is sent as a `file_ref` attachment and deduplicated against its `@` token;
+chips alone leave Send disabled); updated `use-send-text-to-chat`, `terminal-send-set`, `file-send-set` and `send-to-agent-menu` tests
+(chips instead of queued text or inserts; the trigger label is visible at every width).
 
 Frames (web, light and dark, 1280 and 390): link hover with hint, the not-a-file notice, the file open at
 a line, the ended pane with Restart and the restarted terminal with the separator, the terminal and editor Send menus with
@@ -110,6 +141,7 @@ sizes (open, one entry disabled), and the composer after a send. Desktop real-wi
 - [x] A: matchers, resolver, link provider, reveal store and editor scroll (PR A, #889)
 - [x] B: restart (PR B)
 - [x] C: send set (PR C)
+- [ ] D: send set as context chips (PR D)
 
 ## Validation
 
