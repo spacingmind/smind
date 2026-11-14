@@ -23,7 +23,11 @@ vi.mock("@/lib/platform", async (orig) => ({
   },
 }));
 
-const deliver = (open: number, id: string) => act(() => bridge.listener?.({ open, id }));
+type Sent = Array<{ kind: string; id?: string; children?: Sent }>;
+const flatIds = (list: Sent): string[] => list.flatMap((e) => (e.kind === "item" ? [e.id ?? ""] : e.kind === "submenu" ? flatIds(e.children ?? []) : []));
+/** The id the page actually sent for `id` in the nth show (ids go out as `m<n>.<id>`); an id the menu never sent stays as is. */
+const sentId = (call: number, id: string): string => flatIds((bridge.show.mock.calls[call]?.[0] ?? []) as Sent).find((s) => s.replace(/^m\d+\./, "") === id) ?? id;
+const deliver = (open: number, id: string, call: number = bridge.show.mock.calls.length - 1) => act(() => bridge.listener?.({ open, id: sentId(call, id) }));
 // The blink guard (claimNativeOpen) reads Date.now: tests that open twice move the clock between the opens.
 let clock = Date.now() + 10_000_000;
 const later = () => vi.spyOn(Date, "now").mockReturnValue((clock += 1000));
@@ -62,7 +66,7 @@ describe("AppContextMenu in the desktop build", () => {
     expect(bridge.show).toHaveBeenCalledTimes(1);
     const [entries, x, y] = bridge.show.mock.calls[0];
     expect([x, y]).toEqual([40, 70]);
-    expect(entries).toEqual([
+    expect(JSON.parse(JSON.stringify(entries).replace(/"id":"m\d+\./g, '"id":"'))).toEqual([
       { kind: "item", id: "a", label: "Alpha", enabled: true },
       { kind: "separator" },
       { kind: "item", id: "b", label: "Beta", enabled: false },
@@ -140,7 +144,7 @@ describe("AppContextMenu in the desktop build", () => {
     later();
     fireEvent.contextMenu(screen.getByTestId("r2"), { clientX: 2, clientY: 2 });
     await flush();
-    deliver(1, "a");
+    deliver(1, "a", 0);
     expect(first).not.toHaveBeenCalled();
     deliver(2, "a");
     expect(second).toHaveBeenCalledTimes(1);
@@ -221,6 +225,35 @@ describe("AppContextMenu in the desktop build", () => {
     registered();
     await flush();
     expect(order).toEqual(["listen", "show"]);
+  });
+
+  it("a late selection from menu A never runs menu B's handler, even with the same item id and before either open id is known", async () => {
+    const onA = vi.fn();
+    const onB = vi.fn();
+    bridge.show.mockImplementation(() => new Promise<number>(() => {})); // neither open resolves: both open ids stay unknown
+    render(
+      <>
+        <AppContextMenu entries={menu(onA)}>
+          <div data-testid="r1">1</div>
+        </AppContextMenu>
+        <AppContextMenu entries={menu(onB)}>
+          <div data-testid="r2">2</div>
+        </AppContextMenu>
+      </>,
+    );
+    fireEvent.contextMenu(screen.getByTestId("r1"), { clientX: 1, clientY: 1 });
+    await flush();
+    later();
+    fireEvent.contextMenu(screen.getByTestId("r2"), { clientX: 2, clientY: 2 });
+    await flush();
+    const aId = sentId(0, "a");
+    const bId = sentId(1, "a");
+    expect(aId).not.toBe(bId); // the same item id is sent under a different namespace per show
+    act(() => bridge.listener?.({ open: 1, id: aId })); // A's late selection
+    expect(onB).not.toHaveBeenCalled();
+    expect(onA).not.toHaveBeenCalled();
+    act(() => bridge.listener?.({ open: 2, id: bId }));
+    expect(onB).toHaveBeenCalledTimes(1);
   });
 
   it("a second open within a blink is ignored, and an empty model opens nothing", async () => {

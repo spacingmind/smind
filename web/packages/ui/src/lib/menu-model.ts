@@ -100,8 +100,10 @@ const MAX_NATIVE_LABEL = 100;
 
 /** A label safe for the native menu: control, bidi and zero-width characters out, whitespace collapsed, long text cut. */
 export function nativeLabel(raw: string): string {
+  // Mirrors the native side's refusal list (context_menu.rs `is_forbidden_char`): general categories Cc, Cf, Cs, Co, Cn,
+  // Zl, Zp, plus the blank-looking characters outside them. Each becomes a space; whitespace is then collapsed.
   const clean = raw
-    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, " ")
+    .replace(/[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}\u034F\u115F\u1160\u180E\u2800\u3164\uFFA0\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!clean) return "Untitled";

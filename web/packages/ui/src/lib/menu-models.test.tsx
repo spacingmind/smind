@@ -44,6 +44,7 @@ describe("menu model helpers", () => {
       item("b", { label: "x".repeat(300) }),
       item("c", { label: " \n\u200B " }),
       { kind: "submenu", id: "s", label: "Move\nto space", children: [item("d")] },
+      item("e", { label: "a\u3164b\u2800c\uFE0Fd\u{E0041}e\u034Ff" }),
     ]);
     const labels = entries.map((e) => (e.kind === "separator" ? "-" : e.label));
     expect(labels[0]).toBe("Fix the bug title");
@@ -51,6 +52,7 @@ describe("menu model helpers", () => {
     expect(labels[1].endsWith("…")).toBe(true);
     expect(labels[2]).toBe("Untitled");
     expect(labels[3]).toBe("Move to space");
+    expect(labels[4]).toBe("a b c d e f");
   });
 
   it("enabledIds lists only the enabled items, submenus included", () => {

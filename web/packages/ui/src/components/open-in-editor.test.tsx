@@ -78,7 +78,9 @@ const native: { show: ReturnType<typeof vi.fn>; deliver: (id: string) => void; l
   show: vi.fn(),
   listener: null,
   deliver(id) {
-    act(() => native.listener?.({ open: 1, id }));
+    const sent = (native.show.mock.calls.at(-1)?.[0] as Array<{ kind: string; id?: string; children?: Array<{ id?: string }> }> | undefined) ?? [];
+    const ids = sent.flatMap((e) => (e.kind === "item" ? [e.id ?? ""] : e.kind === "submenu" ? (e.children ?? []).map((c) => c.id ?? "") : []));
+    act(() => native.listener?.({ open: 1, id: ids.find((s) => s.replace(/^m\d+\./, "") === id) ?? id }));
   },
 };
 

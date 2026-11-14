@@ -92,20 +92,40 @@ fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
 }
 
-/// Characters that are not "control" to Rust but reorder or hide text: bidi embeddings, overrides and
-/// isolates, zero-width and word-joiner characters, the BOM, and the line and paragraph separators.
-fn is_invisible_format(c: char) -> bool {
-    matches!(c,
-        '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+/// Characters a label may not contain: by Unicode general category the controls (Cc), format characters
+/// (Cf: bidi marks, embeddings and isolates, zero-width characters, the BOM, tag characters), surrogates,
+/// private use and unassigned (Cs, Co, Cn), and the line and paragraph separators (Zl, Zp); plus the
+/// characters that render as blank or alter neighbours without being in those categories (Hangul fillers,
+/// the Braille blank, the Mongolian vowel separator, the combining grapheme joiner, variation selectors).
+/// Plain space (U+0020) is the one separator allowed.
+fn is_forbidden_char(c: char) -> bool {
+    use unicode_properties::{GeneralCategory as G, UnicodeGeneralCategory};
+    if c == ' ' {
+        return false;
+    }
+    matches!(
+        c.general_category(),
+        G::Control
+            | G::Format
+            | G::Surrogate
+            | G::PrivateUse
+            | G::Unassigned
+            | G::LineSeparator
+            | G::ParagraphSeparator
+    ) || matches!(c,
+        '\u{034F}' | '\u{115F}' | '\u{1160}' | '\u{180E}' | '\u{2800}' | '\u{3164}' | '\u{FFA0}'
+        | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}')
+}
+
+/// A character a person can see: not whitespace (any kind) and not forbidden.
+fn is_visible_char(c: char) -> bool {
+    !c.is_whitespace() && !is_forbidden_char(c)
 }
 
 fn valid_label(label: &str) -> bool {
-    !label.trim().is_empty()
-        && label.chars().count() <= MAX_LABEL_CHARS
-        && !label
-            .chars()
-            .any(|c| c.is_control() || is_invisible_format(c))
-        && label.chars().any(|c| !c.is_whitespace())
+    label.chars().count() <= MAX_LABEL_CHARS
+        && !label.chars().any(|c| is_forbidden_char(c) && c != ' ')
+        && label.chars().any(is_visible_char)
 }
 
 /// The label as the native menu shows it. Windows and GTK read `&` as a mnemonic marker, so a literal one is
@@ -219,7 +239,7 @@ impl ContextMenuState {
 
     /// Reserves the next open id without arming anything.
     fn next_open(&self) -> u64 {
-        let mut inner = self.inner.lock().expect("context menu state");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.next += 1;
         inner.next
     }
@@ -228,7 +248,8 @@ impl ContextMenuState {
     fn arm_with(&self, open: u64, entries: &[MenuEntry], now: Instant) {
         let mut ids = HashSet::new();
         item_ids(entries, &mut ids);
-        self.inner.lock().expect("context menu state").armed = Some(Armed { open, ids, at: now });
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).armed =
+            Some(Armed { open, ids, at: now });
     }
 
     /// Resolves a native menu event against the armed menu: Some only for the
@@ -236,7 +257,7 @@ impl ContextMenuState {
     /// any hit so a duplicate selection is ignored.
     pub fn resolve(&self, event: &str, now: Instant) -> Option<ContextMenuSelection> {
         let (open, id) = parse_event_id(event)?;
-        let mut inner = self.inner.lock().expect("context menu state");
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let armed = inner.armed.as_ref()?;
         if armed.open != open || !armed.ids.contains(id) || now.duration_since(armed.at) > ARMED_TTL
         {
@@ -536,18 +557,67 @@ mod tests {
     }
 
     #[test]
-    fn context_menu_labels_with_bidi_or_zero_width_characters_are_refused() {
-        for bad in [
-            "a\u{202E}b",
-            "a\u{200B}b",
-            "\u{FEFF}x",
-            "a\u{2066}b",
-            "a\u{2028}b",
-            "\u{200B}",
-        ] {
-            assert!(!valid_label(bad), "{bad:?} should be refused");
+    fn context_menu_label_table_per_character_class() {
+        let refused: &[(&str, &str)] = &[
+            ("Cc control", "a\nb"),
+            ("Cc tab", "a\tb"),
+            ("Cc DEL", "a\u{7F}b"),
+            ("Cc C1", "a\u{85}b"),
+            ("Cf bidi override", "a\u{202E}b"),
+            ("Cf bidi isolate", "a\u{2066}b"),
+            ("Cf bidi mark", "a\u{200F}b"),
+            ("Cf zero width space", "a\u{200B}b"),
+            ("Cf zero width joiner", "a\u{200D}b"),
+            ("Cf word joiner", "a\u{2060}b"),
+            ("Cf BOM", "\u{FEFF}x"),
+            ("Cf soft hyphen", "a\u{00AD}b"),
+            ("Cf tag character", "a\u{E0041}b"),
+            ("Cf Mongolian separator", "a\u{180E}b"),
+            ("Zl line separator", "a\u{2028}b"),
+            ("Zp paragraph separator", "a\u{2029}b"),
+            ("Co private use", "a\u{E000}b"),
+            ("Cn unassigned", "a\u{0378}b"),
+            ("Hangul filler 3164", "a\u{3164}b"),
+            ("Hangul filler 115F", "a\u{115F}b"),
+            ("Hangul filler FFA0", "a\u{FFA0}b"),
+            ("Braille blank", "a\u{2800}b"),
+            ("grapheme joiner", "a\u{034F}b"),
+            ("variation selector", "a\u{FE0F}b"),
+            ("variation selector supplement", "a\u{E0100}b"),
+            ("only invisible", "\u{200B}\u{2800}"),
+            ("only spaces", "   "),
+            ("only NBSP", "\u{00A0}\u{3000}"),
+            ("empty", ""),
+        ];
+        for (class, label) in refused {
+            assert!(!valid_label(label), "{class}: {label:?} should be refused");
         }
-        assert!(valid_label("Rename…"));
+        for ok in [
+            "Rename…",
+            "Fix the bug",
+            "Café",
+            "日本語",
+            "Move to space",
+            "a\u{00A0}b",
+        ] {
+            assert!(valid_label(ok), "{ok:?} should be accepted");
+        }
+        assert!(!valid_label(&"x".repeat(MAX_LABEL_CHARS + 1)));
+    }
+
+    #[test]
+    fn context_menu_state_survives_a_poisoned_lock() {
+        let state = std::sync::Arc::new(ContextMenuState::default());
+        let s2 = state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = s2.inner.lock().unwrap();
+            panic!("poison the lock");
+        })
+        .join();
+        assert!(state.inner.is_poisoned());
+        let t = Instant::now();
+        let open = state.arm(&[item("a", "A")], t);
+        assert!(state.resolve(&event_id(open, "a"), t).is_some());
     }
 
     #[test]

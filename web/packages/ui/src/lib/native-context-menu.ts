@@ -1,5 +1,5 @@
 import { desktop, isDesktop } from "@/lib/platform";
-import { toNative, type MenuEntry } from "@/lib/menu-model";
+import { toNative, type MenuEntry, type NativeMenuEntry } from "@/lib/menu-model";
 
 /**
  * The renderer side of the native context menu (DT2 (a)). `showNativeContextMenu` sends a menu model's
@@ -58,7 +58,14 @@ export async function showNativeContextMenu(
   opts: { onOpenChange?: (open: boolean) => void } = {},
 ): Promise<void> {
   if (!isDesktop) throw new Error("native context menus exist only in the desktop build");
-  const { entries: native, handlers } = toNative(entries);
+  const { entries: plain, handlers: plainHandlers } = toNative(entries);
+  // Every show gets its own id namespace: an id is only ever sent, and only ever matched, as `m<n>.<id>`. A late
+  // selection from an earlier menu (same item ids, e.g. a destructive item on another task) can then never match
+  // this menu's handlers, whatever the open id says while it is still unknown.
+  const prefix = `m${++showCount}.`;
+  const native = prefixIds(plain, prefix);
+  const handlers = new Map<string, () => void>();
+  for (const [id, run] of plainHandlers) handlers.set(prefix + id, run);
   disarm();
   await ensureListening();
   const mine: Armed = {
@@ -80,6 +87,16 @@ export async function showNativeContextMenu(
     opts.onOpenChange?.(false);
     throw err;
   }
+}
+
+let showCount = 0;
+
+function prefixIds(list: NativeMenuEntry[], prefix: string): NativeMenuEntry[] {
+  return list.map((e): NativeMenuEntry => {
+    if (e.kind === "item") return { ...e, id: prefix + e.id };
+    if (e.kind === "submenu") return { ...e, children: prefixIds(e.children, prefix) };
+    return e;
+  });
 }
 
 const REOPEN_MS = 100;
