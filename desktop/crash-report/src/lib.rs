@@ -4,3 +4,4 @@
 
 pub mod redact;
 pub mod report;
+pub mod store;
