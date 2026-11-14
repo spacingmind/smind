@@ -139,7 +139,7 @@ export function gate(opts, deps) {
     let waited = 0;
     let polls = 0;
     let phase = "run-lookup";
-    const elapsed = () => Math.max(deps.now() - startedAt, waited);
+    const elapsed = () => Math.max(deps.now() - startedAt, waited * 1000) / 1000;
     const outOfTime = (limit) => elapsed() >= limit || (o.interval === 0 && polls >= MAX_POLLS_AT_ZERO_INTERVAL);
     for (;;) {
       // Re-fetched every iteration: a re-run changes state, a newer run may appear.

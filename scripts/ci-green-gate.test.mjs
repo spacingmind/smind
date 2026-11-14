@@ -189,3 +189,163 @@ test("gate-tag-not-found-refuses", () => {
     assert.deepEqual(gh.calls(), [refOf(TAG)]); // refused before any polling
   });
 });
+
+test("gate-missing-run-refuses-after-grace", () => {
+  withGh({ [RUNS]: [runsList()] }, (gh) => {
+    const res = runGate(gh);
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, new RegExp(`^REFUSE: no ci\\.yml push run found for ${SHA}$`, "m"));
+  });
+});
+
+test("gate-in-progress-then-green-passes", () => {
+  withGh(
+    {
+      [RUNS]: [runsList(run({ status: "in_progress", conclusion: null }))],
+      [jobsOf(111)]: [jobsList(job({ status: "in_progress", conclusion: null })), jobsList(job())],
+    },
+    (gh) => {
+      const res = runGate(gh);
+      assert.equal(res.status, 0);
+      assert.match(res.stdout, /^PASS: ci job succeeded in run 111$/m);
+    }
+  );
+});
+
+test("gate-in-progress-timeout-refuses", () => {
+  withGh(
+    {
+      [RUNS]: [runsList(run({ status: "in_progress", conclusion: null }))],
+      [jobsOf(111)]: [jobsList(job({ status: "in_progress", conclusion: null }))],
+    },
+    (gh) => {
+      const res = runGate(gh);
+      assert.equal(res.status, 1);
+      assert.match(res.stdout, /^REFUSE: still running after 1s: ci job in_progress in run 111$/m);
+    }
+  );
+});
+
+test("gate-rerun-after-failure-passes", () => {
+  withGh(
+    {
+      [RUNS]: [
+        runsList(
+          run({ id: 110, conclusion: "failure", created_at: "2026-11-14T00:00:00Z" }),
+          run({ id: 111, created_at: "2026-11-14T01:00:00Z" })
+        ),
+      ],
+      [jobsOf(110)]: [jobsList(job({ conclusion: "failure" }))],
+      [jobsOf(111)]: [jobsList(job())],
+    },
+    (gh) => {
+      const res = runGate(gh);
+      assert.equal(res.status, 0);
+      assert.match(res.stdout, /^PASS: ci job succeeded in run 111$/m);
+      assert.ok(!gh.calls().includes(jobsOf(110)), "the older failed run must not be consulted");
+    }
+  );
+});
+
+test("gate-newest-run-wins-failure", () => {
+  withGh(
+    {
+      [RUNS]: [
+        runsList(
+          run({ id: 110, created_at: "2026-11-14T00:00:00Z" }),
+          run({ id: 111, conclusion: "failure", created_at: "2026-11-14T01:00:00Z" })
+        ),
+      ],
+      [jobsOf(110)]: [jobsList(job())],
+      [jobsOf(111)]: [jobsList(job({ conclusion: "failure" }))],
+    },
+    (gh) => {
+      const res = runGate(gh);
+      assert.equal(res.status, 1);
+      assert.match(res.stdout, /^REFUSE: ci job concluded failure in run 111$/m);
+    }
+  );
+});
+
+test("gate-other-sha-run-ignored", () => {
+  withGh({ [RUNS]: [runsList(run({ head_sha: OTHER_SHA }))] }, (gh) => {
+    const res = runGate(gh);
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, new RegExp(`^REFUSE: no ci\\.yml push run found for ${SHA}$`, "m"));
+  });
+});
+
+test("gate-job-missing-refuses", () => {
+  withGh({ [RUNS]: [runsList(run())], [jobsOf(111)]: [jobsList(job({ name: "build" }))] }, (gh) => {
+    const res = runGate(gh);
+    assert.equal(res.status, 1);
+    assert.match(res.stdout, /^REFUSE: no job named ci in run 111$/m);
+  });
+});
+
+test("gate-api-error-retries-then-passes", () => {
+  withGh(
+    {
+      [RUNS]: [{ __error: "gh: temporary (HTTP 502)", __exit: 1 }, runsList(run())],
+      [jobsOf(111)]: [jobsList(job())],
+    },
+    (gh) => {
+      const res = runGate(gh);
+      assert.equal(res.status, 0);
+      assert.match(res.stdout, /^PASS: ci job succeeded in run 111$/m);
+      assert.equal(gh.calls().filter((call) => call === RUNS).length, 2, "the runs call must be retried exactly once");
+    }
+  );
+});
+
+test("gate-api-error-persistent-refuses", () => {
+  withGh({ [RUNS]: [{ __error: "gh: sustained (HTTP 502)", __exit: 1 }] }, (gh) => {
+    const res = runGate(gh);
+    assert.equal(res.status, 3);
+    assert.match(res.stdout, /^REFUSE: GitHub API error: /m);
+  });
+});
+
+test("gate-dry-run-never-fails", () => {
+  withGh(red, (gh) => {
+    const res = runGate(gh, ["--dry-run"]);
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /^WOULD REFUSE: ci job concluded failure in run 111$/m);
+  });
+  withGh(green, (gh) => {
+    const res = runGate(gh, ["--dry-run"]);
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /^WOULD PASS: ci job succeeded in run 111$/m);
+  });
+});
+
+test("gate-dry-run-does-not-wait", () => {
+  withGh(
+    {
+      [RUNS]: [runsList(run({ status: "in_progress", conclusion: null }))],
+      [jobsOf(111)]: [jobsList(job({ status: "in_progress", conclusion: null }))],
+    },
+    (gh) => {
+      const res = runGate(gh, ["--dry-run"]);
+      assert.equal(res.status, 0);
+      assert.match(res.stdout, /^WOULD REFUSE: still running: ci job in_progress in run 111$/m);
+      assert.deepEqual(gh.calls(), [RUNS, jobsOf(111)], "one pass only, no polling");
+    }
+  );
+});
+
+test("gate-token-never-printed", () => {
+  withGh(red, (gh) => {
+    const res = runGate(gh);
+    assert.equal(res.status, 1);
+    assert.ok(!`${res.stdout}${res.stderr}`.includes("sekret-token-123"));
+  });
+  withGh(green, (gh) => {
+    const res = runGate(gh);
+    assert.equal(res.status, 0);
+    assert.ok(!`${res.stdout}${res.stderr}`.includes("sekret-token-123"));
+  });
+});
+
+test("gate-workflow-wiring", { skip: "pinned by the lead in the workflow PR" }, () => {});
+
