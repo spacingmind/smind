@@ -12,6 +12,9 @@ on:
     paths:
       - "desktop/src-tauri/**"
       - "desktop/daemon-client/**"
+      - "desktop/crash-report/**"
+      # the crash crate's golden redaction vectors are shared with the Go daemon
+      - "internal/crash/**"
       # daemon-client compiles relaypb (build.rs) and its tests `go run` the
       # relay harness
       - "internal/relay/**"
@@ -50,6 +53,7 @@ jobs:
           workspaces: |
             desktop/src-tauri
             desktop/daemon-client
+            desktop/crash-report
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -68,12 +72,20 @@ jobs:
         working-directory: desktop/src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: cargo clippy (crash report)
+        working-directory: desktop/crash-report
+        run: cargo clippy --all-targets -- -D warnings
+
       - name: cargo clippy (daemon client)
         working-directory: desktop/daemon-client
         run: cargo clippy --all-targets -- -D warnings
 
       - name: cargo test (desktop shell)
         working-directory: desktop/src-tauri
+        run: cargo test
+
+      - name: cargo test (crash report)
+        working-directory: desktop/crash-report
         run: cargo test
 
       - name: cargo test (daemon client)

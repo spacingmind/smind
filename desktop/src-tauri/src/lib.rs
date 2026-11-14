@@ -44,6 +44,8 @@ mod window_chrome;
 #[cfg(test)]
 mod capability_tests;
 #[cfg(test)]
+mod crash_wiring_tests;
+#[cfg(test)]
 mod real_daemon_test;
 #[cfg(all(test, unix))]
 mod daemon_survival_test;
@@ -84,6 +86,9 @@ pub fn run() {
     // The audit build refuses to start against the real daemon; first, before anything else runs.
     #[cfg(feature = "audit-guard")]
     audit_guard::enforce_or_exit();
+    // Local crash reports: the panic hook goes in before anything that can panic. It does no
+    // I/O (the directory is created by the first report) and never blocks startup.
+    smind_crash_report::install_default(env!("CARGO_PKG_VERSION"));
     let builder = tauri::Builder::default();
     // ADR-0023: updater plugin on macOS/Windows only; Linux (deb) has no
     // updater. Its JS-facing permissions are never granted.
