@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { GrantControl } from "@/components/permission/grant-control";
 import { DenyReasonField } from "@/components/permission/deny-reason-field";
 import { PermissionDetailView } from "@/components/permission/permission-detail";
 import { Alert } from "@/components/ui/alert";
@@ -20,6 +21,7 @@ export function OptionsCard({
   runId,
   pending,
   onRespond,
+  onAlwaysAllow,
 }: {
   runId: string;
   pending: PendingPermission;
@@ -29,6 +31,7 @@ export function OptionsCard({
     optionId: string,
     reason?: string,
   ) => Promise<void>;
+  onAlwaysAllow?: (runId: string, requestId: string, optionId: string, allowProjectCode: boolean) => Promise<void>;
 }) {
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [respondError, setRespondError] = useState<string | null>(null);
@@ -38,6 +41,10 @@ export function OptionsCard({
     ? pending.options.filter((o) => !o.kind.endsWith("_always"))
     : pending.options;
   const recommended = recommendedOptionId(options);
+  // The daemon offers "always allow in this project" only for a plain, grantable request, and
+  // never with a git rule; the control needs the single-allow option it would save.
+  const grantOffer = pending.detail?.gitRule ? undefined : pending.detail?.grant;
+  const allowOnce = options.find((o) => o.kind === "allow_once");
 
   async function handleClick(optionId: string, kind: string) {
     setRespondingTo(optionId);
@@ -92,6 +99,22 @@ export function OptionsCard({
             />
           ))}
         </div>
+        {grantOffer && allowOnce && onAlwaysAllow && (
+          <GrantControl
+            offer={grantOffer}
+            disabled={respondingTo !== null}
+            onSave={async (allowProjectCode) => {
+              setRespondingTo(allowOnce.id);
+              setRespondError(null);
+              try {
+                await onAlwaysAllow(runId, pending.requestId, allowOnce.id, allowProjectCode);
+              } catch (err) {
+                setRespondError(err instanceof Error ? err.message : String(err));
+                setRespondingTo(null);
+              }
+            }}
+          />
+        )}
         {options.some((o) => o.kind.startsWith("reject")) && (
           <DenyReasonField
             value={reason}
