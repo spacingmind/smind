@@ -50,8 +50,14 @@ fn launch(vars: &[(&str, &str)]) -> (Option<i32>, String, bool) {
 fn refused(vars: &[(&str, &str)], names: &str) {
     let (code, stderr, empty) = launch(vars);
     assert_eq!(code, Some(2), "{vars:?} must exit 2, stderr: {stderr}");
-    assert!(stderr.contains("smind audit build:"), "{vars:?}: no audit message: {stderr}");
-    assert!(stderr.contains(names), "{vars:?}: message must name {names}: {stderr}");
+    assert!(
+        stderr.contains("smind audit build:"),
+        "{vars:?}: no audit message: {stderr}"
+    );
+    assert!(
+        stderr.contains(names),
+        "{vars:?}: message must name {names}: {stderr}"
+    );
     assert!(empty, "{vars:?}: the app created files before refusing");
 }
 
@@ -62,7 +68,10 @@ fn refuses_with_no_environment() {
 
 #[test]
 fn refuses_without_a_scratch_home() {
-    refused(&[("SMIND_DAEMON_URL", "http://127.0.0.1:4719")], "SMIND_HOME");
+    refused(
+        &[("SMIND_DAEMON_URL", "http://127.0.0.1:4719")],
+        "SMIND_HOME",
+    );
 }
 
 #[test]
@@ -71,15 +80,30 @@ fn refuses_the_real_smind_home_even_with_a_scratch_home_env() {
     // the test process's own HOME is the real home on a developer machine and CI runner alike.
     let real = std::env::var("HOME").expect("HOME is set for the test process");
     let smind = format!("{real}/.smind");
-    refused(&[("SMIND_HOME", smind.as_str()), ("SMIND_DAEMON_URL", "http://127.0.0.1:4719")], "SMIND_HOME");
+    refused(
+        &[
+            ("SMIND_HOME", smind.as_str()),
+            ("SMIND_DAEMON_URL", "http://127.0.0.1:4719"),
+        ],
+        "SMIND_HOME",
+    );
 }
 
 #[test]
 fn refuses_without_a_daemon_url() {
-    refused(&[("SMIND_HOME", "/tmp/smind-audit-guard-test-home")], "SMIND_DAEMON_URL");
+    refused(
+        &[("SMIND_HOME", "/tmp/smind-audit-guard-test-home")],
+        "SMIND_DAEMON_URL",
+    );
 }
 
 #[test]
 fn refuses_the_real_daemon_port() {
-    refused(&[("SMIND_HOME", "/tmp/smind-audit-guard-test-home"), ("SMIND_DAEMON_URL", "http://127.0.0.1:4648")], "SMIND_DAEMON_URL");
+    refused(
+        &[
+            ("SMIND_HOME", "/tmp/smind-audit-guard-test-home"),
+            ("SMIND_DAEMON_URL", "http://127.0.0.1:4648"),
+        ],
+        "SMIND_DAEMON_URL",
+    );
 }
