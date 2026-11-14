@@ -7,17 +7,21 @@ import { CodeMirrorEditor } from "@/components/code-mirror-editor";
 import { FileEditorFindBar, FileFindModel } from "@/components/file-editor-find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { FilePreview, previewKind } from "@/components/file-preview";
+import { SendToAgentMenu, type SendEntry } from "@/components/send-to-agent-menu";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { fileTabKey } from "@/components/tab-registry";
+import { useAddToChat } from "@/hooks/use-add-to-chat";
 import { useFileRevealStore } from "@/stores/file-reveal-store";
 import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import { RpcError } from "@/lib/ws-client";
 import { hasBinaryExtension } from "@/lib/binary-extensions";
+import { formatBytes } from "@/lib/attachments/format";
+import { byteLength } from "@/lib/send-set";
 import type { FileReadResult, FileWriteResult, RunStatusEventPayload, Task } from "@/lib/types";
 
 
@@ -87,6 +91,10 @@ export function TextEditorPane({
   // State twin of the ref: the editor is lazy-loaded, so its view can appear after the file read -- a pending reveal must re-run then.
   const [viewReady, setViewReady] = useState(false);
   const { focused: findFocused, onFocus: onFindFocus, onBlur: onFindBlur } = usePaneFocusWithin();
+
+  // Send to agent (DT3-C): the `@path`/`@path#Lx-Ly` refs go through the
+  // same queue as "Add to chat", so the daemon's file_ref gate applies too.
+  const addToChat = useAddToChat(task.ID);
 
   // null for non-previewable files -- the Edit/Preview control doesn't
   // render at all in that case, never as a disabled dead button.
@@ -242,6 +250,33 @@ export function TextEditorPane({
     });
   }
 
+  /** The editor's "Send to agent" entries (DT3-C AC10): the file reference and the selected lines, sized at menu-open time. */
+  const getSendEntries = useCallback((): SendEntry[] => {
+    const view = editorViewRef.current;
+    const sel = view?.state.selection.main;
+    const selection = view && sel && !sel.empty ? view.state.doc.sliceString(sel.from, sel.to) : "";
+    let detail = "nothing selected";
+    let choose: SendEntry["onSelect"] = () => undefined;
+    if (selection !== "") {
+      const doc = view!.state.doc;
+      const startLine = doc.lineAt(sel!.from).number;
+      // A drag that ends at a line's very start stops before that line's content, so it names the previous one.
+      let endLine = doc.lineAt(sel!.to).number;
+      if (endLine > startLine && sel!.to === doc.line(endLine).from) endLine--;
+      detail = `${endLine > startLine ? `lines ${startLine}-${endLine}` : `line ${startLine}`}, ${formatBytes(byteLength(selection))}`;
+      choose = () => addToChat.add(endLine > startLine ? { path, line: startLine, endLine } : { path, line: startLine });
+    }
+    return [
+      {
+        id: "open-file",
+        label: "Open file",
+        detail: formatBytes(byteLength(content)),
+        onSelect: () => addToChat.add({ path }),
+      },
+      { id: "selection", label: "Selection", disabled: selection === "", detail, onSelect: choose },
+    ];
+  }, [addToChat, content, path]);
+
   // Reload: discard the buffer, re-read from disk (both banner states).
   function handleReload() {
     if (!client) return;
@@ -341,6 +376,7 @@ export function TextEditorPane({
                 </button>
               </div>
             )}
+            {addToChat.canAdd && <SendToAgentMenu testId="editor-send-menu" getEntries={getSendEntries} />}
             <Button type="button" variant="outline" size="sm" onClick={handleSave} disabled={saving || !dirty}>
               {saving ? "Saving…" : "Save"}
             </Button>
