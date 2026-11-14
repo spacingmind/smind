@@ -59,7 +59,41 @@ Fixtures are built into a temp dir by a helper (real `tar`/`zip`, tiny files); e
 
 Mutation table (each must make the named test fail; recorded in Validation): comparing the digest case-insensitively off, dropping the duplicate check, accepting a version prefix in the sidecar match, skipping the signature-equals-`.sig` comparison, dropping the `file:` comment check.
 
-## Decisions
+## Item 2: CI green on the release commit (gate)
+
+### How a release is chained today (checked 2026-11-15)
+
+`release-please.yml` and `ci.yml` both trigger on `push` to `develop`, independently and in parallel. `release-please` creates the tag and the GitHub Release (already public, empty); `build-*` jobs then build; `publish` uploads the assets and `latest.json`. Nothing in `publish` looks at CI, so a release can ship from a commit whose CI is red, still running, or never ran. Branch protection makes `ci` required for merging PRs, not for what happens after the push.
+
+### Decisions
+
+- A script, `scripts/ci-green-gate.mjs`, asks the GitHub API (through `gh api`, so tests use a fake `gh` on `PATH`) whether the `ci` job of the `CI` workflow (`ci.yml`) succeeded for exactly the release commit. The `ci` job is the repository's required check; the whole run is not used because `windows-terminal` in the same workflow is deliberately not required.
+- "Exactly": the run's `head_sha` must equal the full 40-hex commit under release, found with `event=push`; runs for any other sha are ignored. The tag must resolve (lightweight or annotated) to that same commit, else the tag moved after the workflow started and the gate refuses.
+- Several runs for the sha (a re-run keeps its run id and the jobs endpoint reports the latest attempt; a manual dispatch is a new run): the newest run by `created_at` decides, success or not. An older green run never masks a newer red one.
+- States: `ci` job `success` passes. `failure`, `cancelled`, `timed_out`, `skipped`, `neutral`, `action_required` refuse. `queued`/`in_progress`: poll until it ends or `--timeout` (default 40 min) passes, then refuse. No run yet: poll for `--grace` (default 10 min) in case the run is being created, then refuse. No `ci` job in the run: refuse. API errors are retried 3 times, then refuse with exit 3. There is no override flag: the way past a refusal is to fix CI and re-run the failed jobs of the release run (outputs are preserved), or cut a new release.
+- New job `ci-gate` in `release-please.yml`, after `release-please`, only on a real release (`release_created == 'true'`) and, in `--dry-run`, on `workflow_dispatch`. `publish` needs it and requires `result == 'success'` on a real release (the dry run, which has no real release, ignores the gate's verdict but the gate still runs and reports). Builds run in parallel with the gate: a red CI wastes a build but never an upload.
+- `--dry-run`: prints the verdict and `WOULD REFUSE: <reason>` or `WOULD PASS`, never waits, always exits 0 (except usage errors). It is how the gate is exercised locally (`node scripts/ci-green-gate.mjs --dry-run --repo owner/name --sha <sha>` with your own `gh` login) and from a branch dispatch.
+- The token is only read by `gh` from `GH_TOKEN` in the environment; the script never reads, prints or passes it on a command line. Job permissions: `contents: read`, `actions: read`.
+- What it cannot do: the GitHub Release and tag created by `release-please` before any asset is built stay public and empty if the gate refuses (the gate guards the upload, not the tag). Recovery steps are in `docs/release-verification.md`.
+
+### Acceptance criteria
+
+- AC1: a release proceeds to upload only when the `ci` job of the newest `ci.yml` push run for exactly the release sha succeeded.
+- AC2: a failed, cancelled, skipped or timed-out `ci` job, a run for a different sha only, no run after the grace, a still-running run after the timeout, a missing `ci` job, a moved tag, an unresolvable tag and a persistent API error each refuse (exit 1, or 3 for the API error) with the reason named.
+- AC3: a still-running run that turns green within the timeout passes; a re-run that turns a failed run green passes; an older green run does not rescue a newer red one.
+- AC4: `--dry-run` never exits non-zero for a verdict, never waits, and prints `WOULD PASS` / `WOULD REFUSE: <reason>`.
+- AC5: usage errors exit 2 (missing `--repo`/`--sha`, a sha that is not 40 hex).
+- AC6: the token never appears in output.
+- AC7: in `release-please.yml`, `publish` needs `ci-gate` and requires its success on a real release; `ci-gate` runs only on a real release or a dispatch and passes the commit and the tag. Pinned by a static test.
+- AC8: the failure modes and recovery are documented.
+
+### Named tests (`scripts/ci-green-gate.test.mjs`, fake `gh` fixture)
+
+`gate-green-passes`, `gate-failed-run-refuses`, `gate-cancelled-refuses`, `gate-skipped-job-refuses`, `gate-missing-run-refuses-after-grace`, `gate-in-progress-then-green-passes`, `gate-in-progress-timeout-refuses`, `gate-rerun-after-failure-passes`, `gate-newest-run-wins-failure`, `gate-other-sha-run-ignored`, `gate-job-missing-refuses`, `gate-tag-moved-refuses`, `gate-annotated-tag-resolves-and-passes`, `gate-tag-not-found-refuses`, `gate-api-error-retries-then-passes`, `gate-api-error-persistent-refuses`, `gate-bad-sha-usage-error`, `gate-missing-args-usage-error`, `gate-dry-run-never-fails`, `gate-dry-run-does-not-wait`, `gate-token-never-printed`, `gate-workflow-wiring`.
+
+Mutations (each must fail the named test): newest-run rule replaced by "any run succeeded" -> `gate-newest-run-wins-failure`; in-progress treated as pass -> `gate-in-progress-timeout-refuses`; sha filter dropped -> `gate-other-sha-run-ignored`; tag check skipped -> `gate-tag-moved-refuses`; `--dry-run` exit code follows the verdict -> `gate-dry-run-never-fails`; `ci-gate` removed from `publish.needs` -> `gate-workflow-wiring`.
+
+## Item 1 decisions
 
 - Node, `node:test`, no dependencies, like `desktop/scripts/*.mjs`; `tar` and `unzip` are invoked through `execFile` (never a shell) with fixed arguments, and member names are matched against a fixed path, never extracted to disk by name from the archive.
 - The sidecar version is read from the Go binary's embedded `-ldflags` build setting, because it works for every target without executing a foreign binary. Limit: it proves what the linker was told, not that a different binary was swapped in; the checksums bind the bytes.
