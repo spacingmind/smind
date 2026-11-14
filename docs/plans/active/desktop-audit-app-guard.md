@@ -42,13 +42,20 @@ Mutations (each must fail a named test): drop the home check; drop the URL port 
 
 ## Progress
 
-- [ ] spec (this file)
-- [ ] `audit_guard.rs`, the feature, the call in `run()`
-- [ ] integration test
-- [ ] build script passes the feature (after #891 is merged; merged into this branch, not rebased)
-- [ ] mutation table
-- [ ] PR to `wave/desktop`
+- [x] spec (this file)
+- [x] `audit_guard.rs`, the feature, the call in `run()`
+- [x] integration test (kills a child that a broken guard let start)
+- [x] mutation table
+- [ ] AC6: the build script passes `--features audit-guard` and its test pins it. Waits for #891 (the script) to merge into `wave/desktop`; it is then a second, small PR or commit on this branch after merging `wave/desktop` in (no stacking, no rebase).
+- [ ] PR to `wave/desktop`, review, merge
 
 ## Validation
 
-Filled in when the PR is ready.
+- AC1: `home_must_be_set`, `home_rejects_the_real_smind_home`, `home_rejects_under_the_real_smind_home`, `home_rejects_a_symlink_onto_the_real_home`, `home_rejects_the_env_home_dot_smind` (unit) and the launch tests `refuses_with_no_environment`, `refuses_without_a_scratch_home`, `refuses_the_real_smind_home_even_with_a_scratch_home_env` (the built binary, exit 2, message, no files created).
+- AC2: `url_must_be_set`, `url_rejects_garbage_and_other_schemes`, `url_needs_an_explicit_port`, `url_rejects_4648_and_4870`, `url_rejects_a_remote_host` and the launch tests `refuses_without_a_daemon_url`, `refuses_the_real_daemon_port`.
+- AC3: `home_allows_dogfood_under_the_real_home`, `home_allows_a_scratch_dir_elsewhere`, `url_allows_a_loopback_scratch_port`. (The passing path is not launched in a test: it would start the app.)
+- AC4: `run_enforces_the_guard_before_building_the_app` (source order and the feature gate).
+- AC5: `audit_guard_is_not_a_default_feature` (runs with and without the feature), `audit_guard_is_off_by_default`; `cargo test --lib` without the feature passes and does not build `libc` into the default graph (the dependency is optional and only the feature enables it).
+- AC6: pending, see Progress.
+- Mutations (13, each killed by a named test): drop the home check; drop the URL check; drop the real-port check; drop the loopback check; drop the explicit-port requirement; widen the dogfood exemption; no symlink resolution; skip `$HOME/.smind`; remove the call from `run()`; call it after the builder; make the feature a default feature; exit 0 instead of 2; remove the real-home lookup. The last one let the real app start and hang the launch test: the test now kills a child still running after 10 seconds.
+- Not verified: Windows and Linux (the feature is for the macOS audit build; the non-unix branch only returns no real home and was not compiled); an end-to-end run of a rebuilt audit app (waits for AC6).
