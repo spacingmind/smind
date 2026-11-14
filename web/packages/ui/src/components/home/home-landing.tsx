@@ -9,6 +9,7 @@ import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HomeIllustration } from "@/components/home/home-illustration";
+import { GetStartedCard } from "@/components/home/get-started-card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { COMPOSER_ACTION_BUTTON_CLASS, COMPOSER_CARD_CLASS } from "@/lib/composer-shell";
@@ -18,6 +19,7 @@ import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import { Icons } from "@/lib/icons";
 import { isDesktop } from "@/lib/platform";
+import { agentsReady } from "@/lib/readiness";
 import { OFFICE_SUGGESTED_PROMPTS } from "@/lib/suggested-prompts";
 import type { Chat, Task, Workspace } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -43,8 +45,9 @@ function titleFromPrompt(prompt: string): string {
   return title.length > MAX_TITLE_LENGTH ? `${title.slice(0, MAX_TITLE_LENGTH - 1)}…` : title;
 }
 
-function placeholderFor(connected: boolean, hasProjects: boolean): string {
+function placeholderFor(connected: boolean, hasProjects: boolean, readiness: "ready" | "none" | "unknown"): string {
   if (!connected) return "Not connected — reconnecting to the daemon…";
+  if (readiness === "none") return "Sign in to an agent to start a task";
   if (!hasProjects) return "Add a project to start a task";
   return "Describe a task for the agent…";
 }
@@ -89,11 +92,13 @@ export function HomeLanding({
   const { providersOrFallback: providers, settled: providersSettled } = useProviderCatalog();
   const profiles = useProfileList();
   const providerHealth = useProviderHealth();
+  // The daemon's own list once it answers; the fallback only after it failed or timed out.
+  const readiness = agentsReady(providers, providerHealth.health, providerHealth.rpcFailed);
   const lastRunConfig = useHomeRunConfigStore((s) => s.value);
   const configRef = useRef<RunConfigState | null>(null);
   const sendingRef = useRef(false);
 
-  const disabled = !connected || chosen === null || client === null;
+  const disabled = !connected || chosen === null || client === null || readiness === "none";
 
   useEffect(() => {
     if (!disabled) textareaRef.current?.focus();
@@ -175,6 +180,15 @@ export function HomeLanding({
             {!isDesktop && <p className="text-ui-sm text-foreground-muted">Start it with smind serve</p>}
           </div>
         )}
+        <GetStartedCard
+          connected={connected}
+          workspaces={workspaces}
+          providers={providers}
+          health={providerHealth.health}
+          rpcFailed={providerHealth.rpcFailed}
+          ensure={providerHealth.ensure}
+          onAddProject={onAddProject}
+        />
         <div className="-mb-3 rounded-t-2xl bg-muted/60 px-1.5 pb-4 pt-1.5">
           <Popover
             open={menuOpen}
@@ -258,7 +272,7 @@ export function HomeLanding({
               value={prompt}
               onChange={setPrompt}
               onSubmit={() => void submit()}
-              placeholder={placeholderFor(connected, workspaces.length > 0)}
+              placeholder={placeholderFor(connected, workspaces.length > 0, readiness)}
               disabled={disabled}
               className="rounded-none border-0 bg-transparent px-4 pb-1 pt-3.5 focus-visible:border-transparent focus-visible:ring-0"
             />
