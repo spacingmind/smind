@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { daemonArchiveNames, desktopAssetNames, verify } from "./verify-release-artifacts.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
+const cli = join(scriptDir, "verify-release-artifacts.mjs");
 const REPO = "spacingmind/smind";
 
 function daemonBinary(version) {
@@ -328,5 +329,161 @@ test("verify-minisig-wrong-file", () => {
   withRelease({}, (fx) => {
     rewriteMinisig(fx, "trusted comment: timestamp:1\tfile:other.txt\tversion:1.2.3");
     expectFailure(verifyOf(fx), "checksums-signature", "file:checksums.txt");
+  });
+});
+
+function rewriteLatest(fx, mutate) {
+  const path = join(fx.dist, "latest.json");
+  const manifest = JSON.parse(readFileSync(path, "utf8"));
+  mutate(manifest);
+  writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n");
+}
+
+test("verify-latest-wrong-version", () => {
+  withRelease({}, (fx) => {
+    rewriteLatest(fx, (m) => {
+      m.version = "0.0.1";
+    });
+    expectFailure(verifyOf(fx), "latest-json", /expected 1\.2\.3, found 0\.0\.1/);
+  });
+});
+
+test("verify-latest-missing-platform", () => {
+  withRelease({}, (fx) => {
+    rewriteLatest(fx, (m) => {
+      delete m.platforms["darwin-x86_64"];
+    });
+    expectFailure(verifyOf(fx), "latest-json", "missing platform darwin-x86_64");
+  });
+});
+
+test("verify-latest-wrong-url", () => {
+  withRelease({}, (fx) => {
+    rewriteLatest(fx, (m) => {
+      m.platforms["windows-x86_64"].url = "https://example.com/nope";
+    });
+    expectFailure(verifyOf(fx), "latest-json", /windows-x86_64 url: expected https:\/\/github\.com/);
+  });
+});
+
+test("verify-latest-asset-not-in-dist", () => {
+  withRelease({}, (fx) => {
+    rmSync(join(fx.dist, "smind-desktop-1.2.3-macos-arm64.app.tar.gz"));
+    expectFailure(verifyOf(fx), "latest-json", "asset smind-desktop-1.2.3-macos-arm64.app.tar.gz is not present in dist");
+  });
+});
+
+test("verify-latest-signature-mismatch", () => {
+  withRelease({}, (fx) => {
+    rewriteLatest(fx, (m) => {
+      m.platforms["darwin-aarch64"].signature = "not-the-sig-file-content";
+    });
+    expectFailure(verifyOf(fx), "latest-json", /signature: expected the content of/);
+  });
+});
+
+test("verify-latest-empty-signature", () => {
+  withRelease({}, (fx) => {
+    rewriteLatest(fx, (m) => {
+      m.platforms["darwin-x86_64"].signature = "";
+    });
+    expectFailure(verifyOf(fx), "latest-json", "signature is empty");
+  });
+});
+
+test("verify-latest-bad-pub-date", () => {
+  withRelease({}, (fx) => {
+    rewriteLatest(fx, (m) => {
+      m.pub_date = "not-a-timestamp";
+    });
+    expectFailure(verifyOf(fx), "latest-json", "pub_date");
+  });
+});
+
+test("verify-skip-latest-ignores-bad-manifest", () => {
+  withRelease({}, (fx) => {
+    writeFileSync(join(fx.dist, "latest.json"), "{ this is not json\n");
+    assert.deepEqual(verifyOf(fx, { skipLatest: true }), []);
+  });
+});
+
+test("verify-sidecar-version-mismatch-daemon", () => {
+  withRelease({}, (fx) => {
+    const name = `smind_${fx.version}_windows_amd64.zip`;
+    buildDaemonZip(join(fx.dist, name), "0.0.1");
+    expectFailure(verifyOf(fx), "sidecar-versions", `${name} smind.exe: embedded daemon version: expected 1.2.3, found 0.0.1`);
+  });
+});
+
+test("verify-sidecar-version-mismatch-app", () => {
+  withRelease({}, (fx) => {
+    buildAppTar(join(fx.dist, "smind-desktop-1.2.3-macos-arm64.app.tar.gz"), {
+      appVersion: fx.desktopVersion,
+      daemonVersion: "0.0.1",
+    });
+    expectFailure(
+      verifyOf(fx),
+      "sidecar-versions",
+      "smind-desktop-1.2.3-macos-arm64.app.tar.gz sMind.app/Contents/MacOS/smind: embedded daemon version"
+    );
+  });
+});
+
+test("verify-plist-version-mismatch", () => {
+  withRelease({}, (fx) => {
+    buildAppTar(join(fx.dist, "smind-desktop-1.2.3-macos-x86_64.app.tar.gz"), {
+      appVersion: "0.0.1",
+      daemonVersion: fx.version,
+    });
+    expectFailure(verifyOf(fx), "sidecar-versions", "Info.plist CFBundleShortVersionString: expected 1.2.3, found 0.0.1");
+  });
+});
+
+test("verify-sidecar-prefix-version-not-accepted", () => {
+  withRelease({ version: "0.20.0" }, (fx) => {
+    buildDaemonTar(join(fx.dist, "smind_0.20.0_linux_amd64.tar.gz"), "0.20.01");
+    expectFailure(verifyOf(fx), "sidecar-versions", "embedded daemon version: expected 0.20.0, found 0.20.01");
+  });
+});
+
+test("verify-reports-every-failure", () => {
+  withRelease({}, (fx) => {
+    setSourceVersion(fx, "desktop/package.json", "0.0.1");
+    rmSync(join(fx.dist, "checksums.txt.minisig"));
+    const failures = verifyOf(fx);
+    expectFailure(failures, "source-versions", "desktop/package.json");
+    expectFailure(failures, "checksums-signature", "checksums.txt.minisig");
+  });
+});
+
+test("verify-dry-run-dev-version-split", () => {
+  withRelease({ version: "0.20.0-dev+abc", desktopVersion: "0.20.0" }, (fx) => {
+    assert.deepEqual(verifyOf(fx), []);
+  });
+});
+
+test("verify-cli-exit-codes", () => {
+  withRelease({}, (fx) => {
+    const args = (tag) => [
+      cli,
+      "--dir", fx.dist,
+      "--version", fx.version,
+      "--tag", tag,
+      "--repo", fx.repo,
+      "--source-root", fx.src,
+    ];
+    const good = spawnSync(process.execPath, args(fx.tag));
+    assert.equal(good.status, 0, good.stderr.toString());
+    assert.match(good.stdout.toString(), /^ok source-versions$/m);
+    assert.match(good.stdout.toString(), /^ok latest-json$/m);
+    assert.match(good.stdout.toString(), /^ok sidecar-versions$/m);
+
+    const bad = spawnSync(process.execPath, args("v0.0.1"));
+    assert.equal(bad.status, 1);
+    assert.match(`${bad.stdout}${bad.stderr}`, /^tag: /m);
+
+    const usage = spawnSync(process.execPath, [cli]);
+    assert.equal(usage.status, 2);
+    assert.match(`${usage.stdout}${usage.stderr}`, /--dir/);
   });
 });

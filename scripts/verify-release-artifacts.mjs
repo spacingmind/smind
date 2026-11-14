@@ -21,6 +21,8 @@ export const CHECKS = [
   "desktop-assets",
   "checksums",
   "checksums-signature",
+  "latest-json",
+  "sidecar-versions",
 ];
 
 export const CHECK_DESCRIPTIONS = {
@@ -47,10 +49,14 @@ const NOT_CHECKED = [
 ];
 
 const DAEMON_ARCHIVE_RE = /^smind_.*_(linux|darwin|windows)_(amd64|arm64)\.(tar\.gz|zip)$/;
+const APP_TARBALL_RE = /^smind-desktop-.*\.app\.tar\.gz$/;
 const CHECKSUM_LINE_RE = /^([0-9a-f]{64})  (.+)$/;
 const CHECKSUM_EXTS = [".tar.gz", ".zip", ".exe", ".msi", ".dmg", ".sig"];
 const CARGO_VERSION_RE = /^version\s*=\s*"([^"]*)"/m;
 const TRUSTED_PREFIX = "trusted comment:";
+const VERSION_MARKER_RE = /internal\/version\.Version=([^ "\n\0]+)/g;
+const PLIST_SHORT_VERSION_RE = /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]*)<\/string>/;
+const MAX_BUFFER = 256 * 1024 * 1024;
 
 const SOURCE_JSON_FIELDS = [
   [".release-please-manifest.json", (o) => o["."], 'key "."'],
@@ -94,6 +100,25 @@ export function minisigTrustedFields(line) {
     .split("\t")
     .map((field) => field.trim())
     .filter((field) => field !== "");
+}
+
+// The updater asset each platform key of latest.json must point at.
+export function updaterAssets(desktopVersion) {
+  return {
+    "darwin-aarch64": `smind-desktop-${desktopVersion}-macos-arm64.app.tar.gz`,
+    "darwin-x86_64": `smind-desktop-${desktopVersion}-macos-x86_64.app.tar.gz`,
+    "windows-x86_64": `sMind_${desktopVersion}_x64-setup.exe`,
+  };
+}
+
+// Every -ldflags build-setting version stamp in a Go binary, latin1-decoded.
+export function versionMarkers(buffer) {
+  return [...buffer.toString("latin1").matchAll(VERSION_MARKER_RE)].map((m) => m[1]);
+}
+
+export function plistShortVersion(plistXml) {
+  const m = plistXml.match(PLIST_SHORT_VERSION_RE);
+  return m ? m[1] : null;
 }
 
 function oneLine(err) {
@@ -226,6 +251,103 @@ function checkChecksumsSignature({ dir, version, fail }) {
   }
 }
 
+function checkLatestJson({ dir, filesOf, tag, repo, desktopVersion, fail }) {
+  const text = readTextOrFail(join(dir, "latest.json"), fail, "latest.json in dist");
+  if (text === null) return;
+  let manifest;
+  try {
+    manifest = JSON.parse(text);
+  } catch (err) {
+    fail(`latest.json: cannot parse (${oneLine(err)})`);
+    return;
+  }
+  if (manifest?.version !== desktopVersion) {
+    fail(`latest.json version: expected ${desktopVersion}, found ${String(manifest?.version)}`);
+  }
+  const platforms = manifest?.platforms ?? {};
+  const assets = updaterAssets(desktopVersion);
+  for (const platform of Object.keys(assets)) {
+    if (!(platform in platforms)) fail(`latest.json: missing platform ${platform}`);
+  }
+  for (const platform of Object.keys(platforms)) {
+    if (!(platform in assets)) fail(`latest.json: unexpected platform ${platform}`);
+  }
+  const files = filesOf();
+  for (const [platform, asset] of Object.entries(assets)) {
+    const entry = platforms[platform];
+    if (!entry) continue; // already reported as a missing platform
+    const expectedUrl = `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(asset)}`;
+    if (entry.url !== expectedUrl) {
+      fail(`latest.json ${platform} url: expected ${expectedUrl}, found ${String(entry.url)}`);
+    }
+    if (!files.has(asset)) {
+      fail(`latest.json ${platform}: asset ${asset} is not present in dist`);
+      continue;
+    }
+    if (typeof entry.signature !== "string" || entry.signature.trim() === "") {
+      fail(`latest.json ${platform}: signature is empty`);
+      continue;
+    }
+    const sig = readTextOrFail(join(dir, `${asset}.sig`), fail, `${asset}.sig in dist`);
+    if (sig !== null && entry.signature !== sig.trim()) {
+      fail(`latest.json ${platform} signature: expected the content of ${asset}.sig, found a different value`);
+    }
+  }
+  if (typeof manifest?.pub_date !== "string" || Number.isNaN(Date.parse(manifest.pub_date))) {
+    fail(`latest.json pub_date: not a valid timestamp: ${String(manifest?.pub_date)}`);
+  }
+}
+
+// Extracts one fixed member name from an archive into memory. No shell, no
+// disk, and the member name is always a literal here -- never archive data.
+function readMember(archive, member, zip) {
+  return zip
+    ? execFileSync("unzip", ["-p", archive, member], { maxBuffer: MAX_BUFFER })
+    : execFileSync("tar", ["-xzOf", archive, member], { maxBuffer: MAX_BUFFER });
+}
+
+function checkEmbeddedVersion({ dir, version, fail }, archive, member, zip) {
+  let buffer;
+  try {
+    buffer = readMember(join(dir, archive), member, zip);
+  } catch (err) {
+    fail(`${archive}: cannot extract ${member}: ${oneLine(err)}`);
+    return;
+  }
+  const markers = versionMarkers(buffer);
+  if (markers.length === 0) fail(`${archive}: no internal/version.Version marker in ${member}`);
+  for (const marker of new Set(markers)) {
+    if (marker !== version) {
+      fail(`${archive} ${member}: embedded daemon version: expected ${version}, found ${marker}`);
+    }
+  }
+}
+
+function checkSidecarVersions(ctx) {
+  const { dir, filesOf, desktopVersion, fail } = ctx;
+  for (const name of [...filesOf()].sort()) {
+    if (!DAEMON_ARCHIVE_RE.test(name)) continue;
+    const zip = name.endsWith(".zip");
+    checkEmbeddedVersion(ctx, name, zip ? "smind.exe" : "smind", zip);
+  }
+  for (const name of [...filesOf()].sort()) {
+    if (!APP_TARBALL_RE.test(name)) continue;
+    let plist;
+    try {
+      plist = readMember(join(dir, name), "sMind.app/Contents/Info.plist", false).toString("utf8");
+    } catch (err) {
+      fail(`${name}: cannot extract sMind.app/Contents/Info.plist: ${oneLine(err)}`);
+      continue;
+    }
+    const short = plistShortVersion(plist);
+    if (short === null) fail(`${name}: no CFBundleShortVersionString string in sMind.app/Contents/Info.plist`);
+    else if (short !== desktopVersion) {
+      fail(`${name}: Info.plist CFBundleShortVersionString: expected ${desktopVersion}, found ${short}`);
+    }
+    checkEmbeddedVersion(ctx, name, "sMind.app/Contents/MacOS/smind", false);
+  }
+}
+
 const CHECK_FNS = {
   "source-versions": checkSourceVersions,
   tag: checkTag,
@@ -233,6 +355,8 @@ const CHECK_FNS = {
   "desktop-assets": checkDesktopAssets,
   checksums: checkChecksums,
   "checksums-signature": checkChecksumsSignature,
+  "latest-json": checkLatestJson,
+  "sidecar-versions": checkSidecarVersions,
 };
 
 // Runs every check and collects every failure as {check, message}; a check
