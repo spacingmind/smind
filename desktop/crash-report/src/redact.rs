@@ -4,6 +4,9 @@
 use std::path::Path;
 
 /// Removes home paths, other users' directories and secret shapes from `s`.
-pub fn redact(_s: &str, _home: Option<&Path>, _smind_home: Option<&Path>) -> String {
-    unimplemented!("step 1 of the brief")
+///
+/// STUB until the redaction port lands: it returns the input unchanged, so nothing that
+/// depends on real redaction may be asserted before then.
+pub fn redact(s: &str, _home: Option<&Path>, _smind_home: Option<&Path>) -> String {
+    s.to_string()
 }
