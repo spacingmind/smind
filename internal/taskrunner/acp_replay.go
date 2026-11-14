@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/crash"
 )
 
 // Errors of ReplayACPSession.
@@ -74,7 +75,7 @@ func (r *Runner) ReplayACPSession(ctx context.Context, provider Provider, sessio
 		over   bool
 	}
 	got := make(chan collected, 1)
-	go func() {
+	crash.Go("taskrunner.replayCollect", func() {
 		var c collected
 		var bytes int64
 		for u := range updates { // drained to the end so the client never blocks
@@ -95,7 +96,7 @@ func (r *Runner) ReplayACPSession(ctx context.Context, provider Provider, sessio
 			c.events = append(c.events, e)
 		}
 		got <- c
-	}()
+	})
 	_, loadErr := client.LoadSessionReplay(loadCtx, sessionID, cwd, updates)
 	c := <-got
 	switch {

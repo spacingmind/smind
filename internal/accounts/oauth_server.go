@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"syscall"
 	"time"
+
+	"github.com/spacingmind/smind/internal/crash"
 )
 
 // checkLoopbackAddr rejects any listen address that is not loopback-only:
@@ -124,14 +126,14 @@ func newCallbackServer(addr, path, providerLabel, state string) (*callbackServer
 	mux.HandleFunc(path, s.handleCallback)
 	s.httpServer = &http.Server{Handler: mux, ReadHeaderTimeout: callbackReadHeaderTimeout}
 
-	go func() {
+	crash.Go("accounts.oauthServe", func() {
 		// http.ErrServerClosed is the expected outcome of close's Shutdown
 		// call -- every other error would mean the listener died from
 		// under a still-in-flight login, which has nowhere useful to go
 		// but is not this goroutine's job to report (the caller's own
 		// wait times out instead).
 		_ = s.httpServer.Serve(s.listener)
-	}()
+	})
 
 	return s, nil
 }

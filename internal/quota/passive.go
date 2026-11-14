@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -695,7 +696,7 @@ func (p *Passive) dropPending(id int64) {
 func (p *Passive) startLocked() {
 	if !p.started {
 		p.started = true
-		go p.run()
+		crash.Go("quota.passiveRun", func() { p.run() })
 	}
 }
 

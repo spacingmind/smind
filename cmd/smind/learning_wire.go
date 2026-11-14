@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/learning/approval"
 	"github.com/spacingmind/smind/internal/learning/delivery"
 	"github.com/spacingmind/smind/internal/learning/executor"
@@ -285,7 +286,7 @@ func wireLearning(ctx context.Context, w learningWiring) (stop func()) {
 	}
 	w.API.SetLearning(deps)
 	probeSvc.Recover(ctx)
-	go probeSvc.Janitor(ctx)
+	crash.Go("smind.probeJanitor", func() { probeSvc.Janitor(ctx) })
 
 	var once sync.Once
 	return func() {

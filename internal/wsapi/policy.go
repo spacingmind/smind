@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -52,7 +53,7 @@ func startPolicySweeper(db *store.Store) *policySweeper {
 	s := &policySweeper{done: make(chan struct{})}
 	sweep := func() { _, _ = db.SweepPolicyAudit(time.Now().Add(-store.PolicyAuditRetention)) }
 	sweep()
-	go func() {
+	crash.Go("wsapi.policySweeper", func() {
 		t := time.NewTicker(policySweepPeriod)
 		defer t.Stop()
 		for {
@@ -63,7 +64,7 @@ func startPolicySweeper(db *store.Store) *policySweeper {
 				return
 			}
 		}
-	}()
+	})
 	return s
 }
 

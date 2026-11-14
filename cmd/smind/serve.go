@@ -239,7 +239,7 @@ func cmdServe(args []string) int {
 	srv.API().Pruner.Start(ctx)
 	// ADR-0053: runs that were running at an upgrade or interrupted by a crash
 	// never reached finish; collapse their rows to skeleton form now.
-	go srv.API().Runs.FinalizePending(ctx)
+	crash.Go("smind.finalizePending", func() { srv.API().Runs.FinalizePending(ctx) })
 	stopGitState := srv.API().StartGitState(ctx)
 
 	// ADR-0042: tidy install leftovers and re-validate enabled plugins.
@@ -258,12 +258,12 @@ func cmdServe(args []string) int {
 	})
 
 	for _, ln := range listeners {
-		go func() {
+		crash.Go("smind.serveListener", func() {
 			log.Printf("smind listening on http://%s", ln.Addr())
 			if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Fatalf("listen: %v", err)
 			}
-		}()
+		})
 	}
 
 	startRelayBridge(ctx, srv, hub)
@@ -387,9 +387,9 @@ func startRelayBridge(ctx context.Context, srv *server.Server, hub *bridge.Hub) 
 		log.Printf("relay bridge: keypair: %v (continuing without relay connectivity)", err)
 		return
 	}
-	go func() {
+	crash.Go("smind.relayBridge", func() {
 		if err := hub.Run(ctx, cfg, kp, srv.API()); err != nil {
 			log.Printf("relay bridge: %v", err)
 		}
-	}()
+	})
 }

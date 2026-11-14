@@ -8,6 +8,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/automation"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -148,10 +149,10 @@ func wireAutomations(ctx context.Context, db *store.Store, api *wsapi.API, wm *w
 	api.SetAutomations(eng)
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	go func() {
+	crash.Go("smind.automationRun", func() {
 		defer close(done)
 		eng.Run(ctx, automationTickPeriod)
-	}()
+	})
 	return func() {
 		cancel()
 		<-done

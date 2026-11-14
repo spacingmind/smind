@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -48,7 +49,7 @@ func newRequestLogWriter(db requestLogStore, queueSize int) *requestLogWriter {
 	}
 	w := &requestLogWriter{db: db, ch: make(chan store.RequestLog, queueSize)}
 	w.wg.Add(1)
-	go w.run()
+	crash.Go("server.requestLogWrite", func() { w.run() })
 	return w
 }
 

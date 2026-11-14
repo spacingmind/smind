@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/history/native"
 	"github.com/spacingmind/smind/internal/permpolicy"
@@ -1039,7 +1040,7 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 		}
 	}
 
-	go reg.drive(runCtx, r, runner)
+	crash.Go("runs.drive", func() { reg.drive(runCtx, r, runner) })
 	return nil
 }
 
@@ -1211,7 +1212,7 @@ func resolveChat(wm *workspace.Manager, taskID, chatID int64) (store.Chat, error
 func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runner) {
 	events := make(chan taskrunner.Event)
 	forwardDone := make(chan struct{})
-	go func() {
+	crash.Go("runs.forwardEvents", func() {
 		defer close(forwardDone)
 		for e := range events {
 			if e.Type == taskrunner.EventTypePermissionModeChanged {
@@ -1224,7 +1225,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 			}
 			reg.record(r, e)
 		}
-	}()
+	})
 
 	// No second "running" notification for the base: clients treat each
 	// run.status as a status change. A live run's base reaches the UI with
@@ -1996,7 +1997,7 @@ func (reg *Registry) Subscribe(runID string) (<-chan Event, func(), error) {
 
 	out := make(chan Event)
 	done := make(chan struct{})
-	go relay(q, out, done)
+	crash.Go("runs.relay", func() { relay(q, out, done) })
 
 	var once sync.Once
 	unsubscribe := func() {
@@ -2085,7 +2086,7 @@ func (reg *Registry) storedSubscribe(runID string) (<-chan Event, func(), error)
 	q.closeQueue()
 	out := make(chan Event)
 	done := make(chan struct{})
-	go relay(q, out, done)
+	crash.Go("runs.relay", func() { relay(q, out, done) })
 	var once sync.Once
 	return out, func() {
 		once.Do(func() {
@@ -2189,11 +2190,12 @@ func (reg *Registry) CloseAll() {
 			}
 			r.mu.Unlock()
 			wg.Add(1)
-			go func(r *run) {
+			rr := r
+			crash.Go("runs.stopRun", func() {
 				defer wg.Done()
-				_ = reg.Stop(r.id)
-				<-r.closedCh
-			}(r)
+				_ = reg.Stop(rr.id)
+				<-rr.closedCh
+			})
 		}
 		wg.Wait()
 	}

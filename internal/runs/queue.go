@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
@@ -678,7 +679,8 @@ func (reg *Registry) cancelQueuedItem(id int64, kind, reason string) {
 	// ADR-0041 B3: a cancelled follow-up may leave the subtree quiet. Async:
 	// this can run under deliverMu, which the notifier's delivery also takes.
 	if chat, err := reg.st.GetChat(item.ChatID); err == nil && !reg.closing.Load() {
-		go reg.evaluateChildNotifications(chat.TaskID)
+		taskID := chat.TaskID
+		crash.Go("runs.evaluateChildNotifications", func() { reg.evaluateChildNotifications(taskID) })
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/store"
@@ -212,11 +213,11 @@ func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.S
 		},
 	}
 	h.watches.Add(1)
-	go func() {
+	crash.Go("wsapi.stewardPassWatch", func() {
 		defer h.watches.Done()
 		defer h.forget(task.ID)
 		w.Run(h.ctx, h.watchPeriod)
-	}()
+	})
 	return nil
 }
 
