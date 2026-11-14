@@ -374,6 +374,24 @@ jobs:
             scripts/sign-checksums.sh dist "$VERSION"
           rm -f "$key" "$key.pub"
 
+      # One consistent set or nothing is uploaded (docs/plans/active/desktop-release-hygiene.md,
+      # item 1): versions in the source, the daemon archives, the desktop assets,
+      # checksums.txt and its signature, and the sidecar binaries must all agree.
+      # latest.json does not exist yet; it is verified below, before it is uploaded.
+      # On a dry run the daemon carries the -dev+<sha> version while the desktop
+      # app keeps the manifest version, hence the two version arguments.
+      - name: Verify release artifacts (before anything is uploaded)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG:-v$VERSION}"
+          desktop_version="$(jq -r '.["."]' .release-please-manifest.json)"
+          node scripts/verify-release-artifacts.mjs --dir dist --version "$VERSION" --tag "$tag" \
+            --repo "$REPO" --desktop-version "$desktop_version" --skip-latest
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: smind_${{ needs.prepare.outputs.version }}_release
@@ -428,6 +446,9 @@ jobs:
             --notes-file notes.md \
             --out latest.json
           jq -r '.platforms | to_entries[] | "\(.key): \(.value.url)"' latest.json
+          # A manifest that disagrees with the assets must never be published.
+          node ../scripts/verify-release-artifacts.mjs --dir . --version "${TAG#v}" --tag "$TAG" \
+            --repo "${{ github.repository }}" --source-root ..
           gh release upload "$TAG" latest.json --clobber --repo "${{ github.repository }}"
 
   # The container image (ADR-0031 D5 / P11). Built from the release's own linux
