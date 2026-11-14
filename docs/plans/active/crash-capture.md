@@ -1,0 +1,63 @@
+# Crash capture (DT1 item 3)
+
+Status: active (2026-11-15). Size: L (13): scope 3 (daemon, desktop shell, doctor), PRs 2, risk 3 (runs inside every request and every goroutine; writes files; redaction is a privacy promise), decisions 1, verification 3. Part of `desktop-release-hygiene.md` item 3. Two PRs: **3a** the Go side + `smind doctor` + docs (this plan is its first commit); **3b** the Rust panic hook in the desktop shell.
+
+## Why
+
+Today a panic in a daemon goroutine kills the whole daemon (every run, every connection) and leaves only whatever scrolled past on stderr; a handler panic is logged by `net/http` and lost. A panic in the desktop shell leaves nothing. Nothing is sent anywhere and nothing is kept, so "it crashed last night" cannot be investigated. This item records a small, redacted, bounded report on the machine itself and shows it in `smind doctor`. No third-party service, no upload, no network code.
+
+## Checked against `wave/desktop` (2026-11-15): what exists, what is dropped
+
+- `recover()` already exists in 11 places (`runs/observer.go`, `runs/delivery.go`, `server/proxy.go`, `quota/*`, `push/notifier.go`, `plugins/host/conn.go`, `learning/*`). Each keeps its own handling; the ones that run user-reachable code are routed through the crash recorder too. Not rewritten.
+- There is no panic hook in `desktop/src-tauri`, no crash directory, no doctor section. Nothing to drop.
+- `net/http` recovers a handler panic itself and logs it; the WebSocket dispatch (`wsapi/conn.go` `dispatch`) and every `go` statement do not recover.
+
+## Decisions
+
+- **Report** (one JSON file, schema 1, shared by Go and Rust): `{schema, source ("daemon"|"desktop-shell"), version, os, arch, time (UTC RFC 3339), site, panicType, message, messageWithheld, stack, suppressedSinceLast}`. `site` is a fixed label chosen in code (`wsapi.dispatch`, `runs.drive`, `http`, `desktop.main` ...), never derived from user input.
+- **Where**: daemon: `<smind home>/crashes/` (`config.Dir()`, so `SMIND_HOME` is honoured); desktop shell: `crashes/` under the app's data directory (3b). File name `crash-<UTC yyyymmddThhmmssmmm>-<source>-<site>.json`, the site sanitised to `[a-z0-9._-]`.
+- **Redaction** is applied to message and stack before anything is written, and the stored text is checked again (the same function) before the file is renamed into place:
+  - the home directory and the smind home become `~` and `$SMIND_HOME`; any other user directory shape (`/Users/<n>/`, `/home/<n>/`, `C:\Users\<n>\`) becomes `<user dir>`, both separators;
+  - secrets: `Bearer <tok>`, `sk-…`, `ghp_/gho_/ghs_/github_pat_…`, `AKIA…`, JWT shapes, `token|secret|password|passwd|apikey|api_key|authorization` followed by `=` or `:` and a value, URL userinfo, and any run of 32 or more hex or base64url characters, become `[redacted]`;
+  - **message withheld by default**: a panic value that is not a Go `runtime.Error` is recorded by type only (`messageWithheld: true`), because `panic(fmt.Sprintf(...))` and wrapped errors can carry prompt text, file contents or tokens. A `runtime.Error` message (`index out of range [5] with length 3`, `invalid memory address`, `nil map`) holds none of that and is kept, still redacted. The stack holds function names, files and line numbers only (Go prints arguments as hex).
+  - **Human decision to confirm**: withholding costs diagnostic detail for `panic("...")` and `panic(err)`; the stack identifies the site. Recommendation: keep the default; a flag to include messages is not added.
+- **Bounds**: a report is at most 64 KiB (the stack is cut with a marker); the newest 20 reports are kept, older ones deleted on each write; the directory is also capped at 2 MiB (oldest dropped first). Rate limit: at most 10 reports a minute; an identical (site + top frame) panic within 5 minutes is not written again but counted into `suppressedSinceLast` of the next report. A panic loop cannot fill the disk or stall the daemon.
+- **Permissions**: directory `0700`, files `0600` (written to a temp name with the same mode, then renamed). A crash directory that is a link (`fsutil.IsLink` on `Lstat`, so symlinks and Windows junctions) is not used and not followed. Windows keeps the platform default ACL, as everywhere else in the daemon.
+- **Never blocks, never crashes**: nothing runs at startup beyond storing the path; the directory is created on the first report. Every step of the recorder is itself guarded; a write failure (read-only disk, bad directory) is logged once per process line and swallowed. An uninitialised recorder (tests, CLI commands) is a no-op that still recovers.
+- **Where Go recovers** (the boundaries): the HTTP handler chain (a 500 for the caller when nothing was written yet), the WebSocket request dispatch (the caller gets an internal-error response, the connection lives), the run goroutines and the background loops of the daemon packages listed in AC4, through one helper `crash.Go(site, fn)` / `defer crash.Recover(site)`. A recovered goroutine ends; its own `defer`s (run finalisation, unlock) run first because recovery happens after unwinding to the wrapper. The recorder never restarts a loop.
+- **No network, no process spawn**: `internal/crash` imports neither `net`, `net/http` nor `os/exec` (a test reads the imports). The HTTP middleware lives in `internal/server`, the recorder stays free of it.
+- `smind doctor` gets a read-only "crashes" section: count, newest time and site, the directory, for the daemon and (when present) the desktop shell directory, and the sentence that nothing is uploaded. `--json` gets a `crashes` object. It never fails and never deletes.
+- No ADR: this is local diagnostics with no new architecture; the privacy rules above are the contract and live in the public page `docs/crash-reports.md`.
+
+## Acceptance criteria
+
+3a (Go + doctor + docs):
+
+- AC1: a panic in a goroutine started through `crash.Go` produces exactly one report file and the process (the test binary) keeps running; a panic in an HTTP handler produces a report and a 500; a panic in a WebSocket method produces a report and an error response while the connection stays usable.
+- AC2: redaction: no report contains the home directory, the smind home, another user's directory, or any secret shape in the table above; a non-runtime panic message is withheld, a runtime one kept.
+- AC3: bounds and permissions: 64 KiB per report, newest 20 kept, 2 MiB per directory, 10 per minute, identical panics suppressed and counted; `0700`/`0600` on Unix; a symlinked or junctioned crash directory is refused; a write failure never panics and never blocks.
+- AC4: the daemon's boundaries are covered: HTTP, WebSocket dispatch, and every `go` statement in `internal/runs`, `internal/wsapi`, `internal/taskrunner`, `internal/quota`, `internal/push`, `internal/gitstate`, `internal/terminal`, `internal/workspace`, `internal/server`, `internal/accounts` and `cmd/smind` (serve, automation, scratch, stall, learning wiring) is either `crash.Go`, has `defer crash.Recover`, or is on a short allow-list with a written reason (a goroutine that only sends `cmd.Wait()` to a channel, `go client.Close()`); a drift test enforces it for new code. The existing `recover()` sites in AC-listed packages also record.
+- AC5: `smind doctor` prints the crashes section (none / some / unreadable / refused link) and `--json` carries it; it reads files and creates nothing.
+- AC6: `internal/crash` imports no network or process package; `docs/crash-reports.md` states what is recorded, what is redacted and withheld, the bounds, where to find the files, how to delete them, and that nothing leaves the machine.
+
+3b (Rust shell, refined in that PR): a panic hook installed first in `run()` writes the same report (`source: "desktop-shell"`) to the app data directory with the same redaction, withholding (message kept only when the panic location is inside the standard library), bounds and permissions, chains to the previous hook, never panics itself, never blocks startup; a test that a panic on a spawned thread and on the main thread each produce a report.
+
+### Named tests
+
+`internal/crash`: `crash-go-panic-produces-report`, `crash-go-survives-and-runs-defers`, `crash-recover-helper-records`, `crash-redacts-home-dir`, `crash-redacts-smind-home`, `crash-redacts-other-user-dirs`, `crash-redacts-secret-shapes` (table: bearer, sk, ghp, github_pat, AKIA, jwt, key=value, userinfo URL, 40-hex), `crash-withholds-non-runtime-message`, `crash-keeps-runtime-error-message`, `crash-report-fields-and-schema`, `crash-caps-report-size`, `crash-keeps-newest-20`, `crash-caps-dir-size`, `crash-rate-limit`, `crash-dedupes-identical-panics`, `crash-perms-0700-0600`, `crash-refuses-link-dir`, `crash-write-failure-is-silent`, `crash-uninitialised-is-noop-and-recovers`, `crash-site-name-sanitised`, `crash-imports-no-network` (static), `crash-go-statements-covered` (AST drift test, allow-list with reasons).
+`internal/server`: `crash-http-handler-panic-recorded-500`, `crash-http-after-write-no-second-header`.
+`internal/wsapi`: `crash-ws-dispatch-panic-recorded-error-response`, `crash-ws-connection-survives-panic`.
+`cmd/smind`: `doctor-crashes-none`, `doctor-crashes-some`, `doctor-crashes-json`, `doctor-crashes-link-refused`, `doctor-crashes-does-not-write`, `serve-wires-crash-recorder` (the daemon start path calls `crash.Init` before listeners).
+
+### Mutation list (each must fail the named test; results go in Validation and the PR body)
+
+home redaction off -> `crash-redacts-home-dir`; secret table row dropped -> `crash-redacts-secret-shapes`; withhold rule off -> `crash-withholds-non-runtime-message`; keep-N off -> `crash-keeps-newest-20`; size cap off -> `crash-caps-report-size`; dir cap off -> `crash-caps-dir-size`; dedupe off -> `crash-dedupes-identical-panics`; rate limit off -> `crash-rate-limit`; mode `0600` -> `0644` -> `crash-perms-0700-0600`; link check off -> `crash-refuses-link-dir`; `recover()` removed from `crash.Go` -> `crash-go-panic-produces-report`; HTTP middleware not wired -> `crash-http-handler-panic-recorded-500`; ws dispatch recover removed -> `crash-ws-dispatch-panic-recorded-error-response`; `go` statement left bare -> `crash-go-statements-covered`; doctor ignores the directory -> `doctor-crashes-some`.
+
+## Progress
+
+- [ ] 3a: spec, `internal/crash`, wiring, doctor, docs
+- [ ] 3b: Rust panic hook
+
+## Validation
+
+(filled per PR)
