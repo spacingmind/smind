@@ -86,6 +86,10 @@ export type ContextChip = { localId: string; label: string } & (
   | { kind: "file_ref"; ref: MentionRef }
 );
 
+/** A chip without its store-assigned id: what `addChip` takes. Omit must distribute over the kinds -- a plain `Omit<ContextChip, "localId">` collapses the union. */
+type ChipWithoutId<T> = T extends { localId: string } ? Omit<T, "localId"> : never;
+export type ContextChipInput = ChipWithoutId<ContextChip>;
+
 /**
  * The outgoing prompt (DT3-D AC15): the typed text followed by one fenced block per terminal chip, in the
  * order they were added, each after a blank line. File chips become attachments, not text, so they add

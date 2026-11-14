@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import { formatBytes } from "@/lib/attachments/format";
 import { sameMentionRef, type MentionRef } from "@/lib/file-mention";
-import type { ContextChip } from "@/lib/send-set";
+import type { ContextChip, ContextChipInput } from "@/lib/send-set";
 import type { AttachmentLimits } from "@/lib/types";
 
 interface DraftBase {
@@ -119,7 +119,7 @@ interface ComposerAttachmentsState {
   /** Returns and clears the queued texts of `key`. */
   takeTexts: (key: string) => string[];
   /** Adds a context chip (DT3-D AC14): a terminal text or a file reference, kept out of the draft text. */
-  addChip: (key: string, chip: Omit<ContextChip, "localId">) => void;
+  addChip: (key: string, chip: ContextChipInput) => void;
   /** Removes one chip by its × or Backspace. */
   removeChip: (key: string, localId: string) => void;
   /** Drops every chip of `key` (after a successful send; a failed send keeps them). */
