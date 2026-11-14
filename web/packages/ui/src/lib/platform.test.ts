@@ -338,6 +338,49 @@ describe("editors (desktop-native-feel D4)", () => {
   });
 });
 
+describe("native context menu (desktop-native-feel DT2 a)", () => {
+  it("in a non-desktop build contextMenuShow rejects and the action subscription is a harmless no-op", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "");
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.contextMenuShow([{ kind: "item", id: "a", label: "A", enabled: true }], 1, 2)).rejects.toThrow(/unavailable/i);
+    expect(() => desktop.onContextMenuAction(() => {})()).not.toThrow();
+  });
+
+  it("contextMenuShow calls context_menu_show with the descriptors and the pointer, resolves with the open id and turns a plain-string refusal into an Error", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const entries = [{ kind: "item" as const, id: "a", label: "A", enabled: true }];
+    const invoke = vi.fn(async () => 3);
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.contextMenuShow(entries, 40, 70)).resolves.toBe(3);
+    expect(invoke).toHaveBeenCalledWith("context_menu_show", { entries, x: 40, y: 70 });
+
+    vi.resetModules();
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.reject("context menu has no item")) }));
+    const again = await import("@/lib/platform");
+    await expect(again.desktop.contextMenuShow(entries, 1, 1)).rejects.toThrow("context menu has no item");
+  });
+
+  it("onContextMenuAction listens to context-menu-action, hands the payload through and unsubscribes", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const unlisten = vi.fn();
+    let handler: ((e: { payload: unknown }) => void) | null = null;
+    const listen = vi.fn(async (_event: string, cb: (e: { payload: unknown }) => void) => {
+      handler = cb;
+      return unlisten;
+    });
+    vi.doMock("@tauri-apps/api/event", () => ({ listen }));
+    const { desktop } = await import("@/lib/platform");
+    const cb = vi.fn();
+    const off = desktop.onContextMenuAction(cb);
+    await vi.waitFor(() => expect(listen).toHaveBeenCalledWith("context-menu-action", expect.any(Function)));
+    handler!({ payload: { open: 2, id: "rename" } });
+    expect(cb).toHaveBeenCalledWith({ open: 2, id: "rename" });
+    off();
+    expect(unlisten).toHaveBeenCalled();
+  });
+});
+
 describe("window controls (desktop-native-feel D1)", () => {
   it("platform-window-controls-stub: in a non-desktop build the window API rejects and reports no OS", async () => {
     vi.stubEnv("VITE_SMIND_DESKTOP", "");
