@@ -35,9 +35,15 @@ Mutations (each fails a named scenario): drop `--features audit-guard` from the 
 - [x] script wiring and the smoke script
 - [x] tests and Taskfile wiring
 - [x] mutation table
-- [x] one real macOS build with the wiring passed its smoke step
+- [x] one real macOS build on this commit passed its own smoke step; the built app also starts with the scratch environment
 - [ ] PR to `wave/desktop`, review, merge
 
 ## Validation
 
-Filled in when the PR is ready.
+- AC1, AC2, AC4: `build-args-carry-the-guard-feature` in `scripts/desktop-audit-build_test.sh` (the dry run prints the exact tauri command line; it must carry `--features audit-guard`, `--bundles app` and the override `--config`; the real build runs the same array; the build runs the smoke; `Cargo.toml` keeps `default = []`; no workflow, Taskfile target or tauri config mentions `audit-guard`).
+- AC3: `scripts/desktop-audit-smoke_test.sh`: `passes-when-the-guard-refuses`, `fails-when-the-app-has-no-guard`, `fails-on-exit-zero`, `fails-on-exit-two-without-the-message`, `fails-when-the-app-writes-before-refusing`, `skips-cleanly-without-a-build`, the caller-environment probe, and the runaway-killed timing check.
+- AC5: both scripts and both tests are in the shellcheck list and `task test` (shellcheck at `-S style` clean).
+- AC6: a real macOS build with this script (Apple silicon, shared Rust cache) ended with `desktop-audit-smoke: ok, the built app refuses to start without a scratch daemon`; the same bundle then started and kept running with the scratch `SMIND_HOME` and a loopback `SMIND_DAEMON_URL` (the guard passes in the allowed case).
+- Mutations (11, each fails a named scenario): drop the feature flag; the real build ignores the printed array; remove the smoke call; smoke accepts any exit status; ignores the message; ignores files written; never kills a runaway; passes a running app; leaks the caller's environment; fails instead of skipping; a workflow mentioning `audit-guard`.
+- Full local suite on this commit: `cargo test` (default and `--features audit-guard`, with the real macOS `TMPDIR`), `cargo clippy --all-targets -- -D warnings` for both feature sets, `go test ./internal/hygiene/...`, shellcheck as in the Taskfile, both script tests.
+- Not verified: an Intel host; Windows and Linux for the build step (macOS only; the dry-run test runs anywhere with `jq`).
