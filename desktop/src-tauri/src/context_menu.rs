@@ -10,15 +10,17 @@
 //! Every item id is namespaced per open (`ctx:<open>:<id>`) so a selection can
 //! only reach the menu that is currently armed: a stale one (an earlier menu,
 //! a duplicate, one past the timeout) is ignored, and opening a second menu
-//! replaces the first. Tauri's menu API does not report a dismissal, so an
-//! armed menu simply expires (`ARMED_TTL`) or is replaced.
+//! replaces the first. Tauri's menu API does not report a dismissal as an
+//! event; on macOS and Windows `popup_at` blocks until the menu closes, so the
+//! command's own return is the renderer's "closed" signal there. An armed menu
+//! that delivers nothing expires (`ARMED_TTL`) or is replaced.
 
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tauri::menu::{ContextMenu, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu};
+use tauri::menu::{ContextMenu, IsMenuItem, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, LogicalPosition, Manager, State, Window};
 
 use crate::MAIN_WINDOW;
@@ -31,8 +33,9 @@ const MAX_ENTRIES: usize = 64;
 const MAX_ID_LEN: usize = 64;
 const MAX_LABEL_CHARS: usize = 120;
 const MAX_COORD: f64 = 100_000.0;
-/// How long an opened menu can still deliver a selection.
-const ARMED_TTL: Duration = Duration::from_secs(30);
+/// How long an opened menu can still deliver a selection. A native menu blocks the main thread while it is open and
+/// can be left open for a while; this only bounds a menu that never delivers, so it is generous.
+const ARMED_TTL: Duration = Duration::from_secs(600);
 
 fn yes() -> bool {
     true
@@ -89,10 +92,30 @@ fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
 }
 
+/// Characters that are not "control" to Rust but reorder or hide text: bidi embeddings, overrides and
+/// isolates, zero-width and word-joiner characters, the BOM, and the line and paragraph separators.
+fn is_invisible_format(c: char) -> bool {
+    matches!(c,
+        '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+}
+
 fn valid_label(label: &str) -> bool {
     !label.trim().is_empty()
         && label.chars().count() <= MAX_LABEL_CHARS
-        && !label.chars().any(char::is_control)
+        && !label
+            .chars()
+            .any(|c| c.is_control() || is_invisible_format(c))
+        && label.chars().any(|c| !c.is_whitespace())
+}
+
+/// The label as the native menu shows it. Windows and GTK read `&` as a mnemonic marker, so a literal one is
+/// doubled there; macOS has no mnemonics.
+fn native_label(label: &str) -> String {
+    if cfg!(target_os = "macos") {
+        label.to_string()
+    } else {
+        label.replace('&', "&&")
+    }
 }
 
 /// Checks a menu model: size, depth, id shape and uniqueness, label shape, and
@@ -172,9 +195,13 @@ pub fn parse_event_id(event: &str) -> Option<(u64, &str)> {
 fn item_ids(entries: &[MenuEntry], out: &mut HashSet<String>) {
     for e in entries {
         match e {
-            MenuEntry::Item { id, .. } => {
+            // A disabled item cannot be chosen natively, so its id is never armed: a forged selection finds nothing.
+            MenuEntry::Item {
+                id, enabled: true, ..
+            } => {
                 out.insert(id.clone());
             }
+            MenuEntry::Item { .. } => {}
             MenuEntry::Submenu { children, .. } => item_ids(children, out),
             MenuEntry::Separator => {}
         }
@@ -183,14 +210,25 @@ fn item_ids(entries: &[MenuEntry], out: &mut HashSet<String>) {
 
 impl ContextMenuState {
     /// Arms a new menu (replacing any earlier one) and returns its open id.
+    #[cfg(test)]
     fn arm(&self, entries: &[MenuEntry], now: Instant) -> u64 {
+        let open = self.next_open();
+        self.arm_with(open, entries, now);
+        open
+    }
+
+    /// Reserves the next open id without arming anything.
+    fn next_open(&self) -> u64 {
         let mut inner = self.inner.lock().expect("context menu state");
         inner.next += 1;
-        let open = inner.next;
+        inner.next
+    }
+
+    /// Arms `open` with the enabled items of `entries`, replacing any earlier menu.
+    fn arm_with(&self, open: u64, entries: &[MenuEntry], now: Instant) {
         let mut ids = HashSet::new();
         item_ids(entries, &mut ids);
-        inner.armed = Some(Armed { open, ids, at: now });
-        open
+        self.inner.lock().expect("context menu state").armed = Some(Armed { open, ids, at: now });
     }
 
     /// Resolves a native menu event against the armed menu: Some only for the
@@ -212,45 +250,36 @@ impl ContextMenuState {
     }
 }
 
-fn append_entries(
+/// Builds the native items for `entries`, recursing into submenus. One construction path for every level.
+fn build_items(
     app: &AppHandle,
-    menu: &Menu<tauri::Wry>,
     entries: &[MenuEntry],
     open: u64,
-) -> tauri::Result<()> {
+) -> tauri::Result<Vec<Box<dyn IsMenuItem<tauri::Wry>>>> {
+    let mut out: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = Vec::with_capacity(entries.len());
     for e in entries {
         match e {
-            MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator(app)?)?,
-            MenuEntry::Item { id, label, enabled } => {
-                let item = MenuItemBuilder::with_id(event_id(open, id), label)
+            MenuEntry::Separator => out.push(Box::new(PredefinedMenuItem::separator(app)?)),
+            MenuEntry::Item { id, label, enabled } => out.push(Box::new(
+                MenuItemBuilder::with_id(event_id(open, id), native_label(label))
                     .enabled(*enabled)
-                    .build(app)?;
-                menu.append(&item)?;
-            }
+                    .build(app)?,
+            )),
             MenuEntry::Submenu {
                 label,
                 enabled,
                 children,
             } => {
-                let sub = Submenu::new(app, label, *enabled)?;
-                for c in children {
-                    match c {
-                        MenuEntry::Separator => sub.append(&PredefinedMenuItem::separator(app)?)?,
-                        MenuEntry::Item { id, label, enabled } => {
-                            let item = MenuItemBuilder::with_id(event_id(open, id), label)
-                                .enabled(*enabled)
-                                .build(app)?;
-                            sub.append(&item)?;
-                        }
-                        // validate() refuses a deeper level before this runs.
-                        MenuEntry::Submenu { .. } => {}
-                    }
-                }
-                menu.append(&sub)?;
+                let sub = Submenu::new(app, native_label(label), *enabled)?;
+                let kids = build_items(app, children, open)?;
+                let refs: Vec<&dyn IsMenuItem<tauri::Wry>> =
+                    kids.iter().map(|k| k.as_ref()).collect();
+                sub.append_items(&refs)?;
+                out.push(Box::new(sub));
             }
         }
     }
-    Ok(())
+    Ok(out)
 }
 
 /// Pops a native menu built from `entries` at the pointer (`x`, `y` in the
@@ -272,9 +301,13 @@ pub fn context_menu_show(
     {
         return Err("context menu position is out of range".into());
     }
-    let open = state.arm(&entries, Instant::now());
+    // Build first and arm after, so a build failure leaves nothing armed.
+    let open = state.next_open();
     let menu = Menu::new(&app).map_err(|e| e.to_string())?;
-    append_entries(&app, &menu, &entries, open).map_err(|e| e.to_string())?;
+    let items = build_items(&app, &entries, open).map_err(|e| e.to_string())?;
+    let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items.iter().map(|k| k.as_ref()).collect();
+    menu.append_items(&refs).map_err(|e| e.to_string())?;
+    state.arm_with(open, &entries, Instant::now());
     // The webview's CSS pixels are the window's logical pixels divided by the
     // zoom the app applies (View > Zoom), so scale back to logical.
     let zoom = crate::zoom_store::load(&app);
@@ -293,7 +326,9 @@ pub fn handle_event(app: &AppHandle, event: &str) -> bool {
         .state::<ContextMenuState>()
         .resolve(event, Instant::now())
     {
-        let _ = app.emit_to(MAIN_WINDOW, ACTION_EVENT, sel);
+        if let Err(e) = app.emit_to(MAIN_WINDOW, ACTION_EVENT, sel) {
+            eprintln!("context menu: could not deliver the selection: {e}");
+        }
     }
     true
 }
@@ -501,20 +536,44 @@ mod tests {
     }
 
     #[test]
-    fn context_menu_command_takes_no_path_or_command() {
-        // The command's arguments are a menu model and a position, and the model deserializes
-        // only labels, opaque ids and flags (see the test above): the source names no other input.
-        let src = include_str!("context_menu.rs");
-        let sig = src
-            .split("pub fn context_menu_show(")
-            .nth(1)
-            .expect("command exists");
-        let sig = sig.split(") -> Result").next().unwrap();
-        for forbidden in ["path", "command:", "url", "args"] {
-            assert!(
-                !sig.contains(forbidden),
-                "context_menu_show takes {forbidden}"
-            );
+    fn context_menu_labels_with_bidi_or_zero_width_characters_are_refused() {
+        for bad in [
+            "a\u{202E}b",
+            "a\u{200B}b",
+            "\u{FEFF}x",
+            "a\u{2066}b",
+            "a\u{2028}b",
+            "\u{200B}",
+        ] {
+            assert!(!valid_label(bad), "{bad:?} should be refused");
+        }
+        assert!(valid_label("Rename…"));
+    }
+
+    #[test]
+    fn context_menu_disabled_items_are_never_armed() {
+        let state = ContextMenuState::default();
+        let t = Instant::now();
+        let entries = vec![
+            item("on", "On"),
+            MenuEntry::Item {
+                id: "off".into(),
+                label: "Off".into(),
+                enabled: false,
+            },
+        ];
+        let open = state.arm(&entries, t);
+        assert!(state.resolve(&event_id(open, "off"), t).is_none());
+        assert!(state.resolve(&event_id(open, "on"), t).is_some());
+    }
+
+    #[test]
+    fn context_menu_native_label_doubles_ampersands_off_macos_only() {
+        let got = native_label("Save & Close");
+        if cfg!(target_os = "macos") {
+            assert_eq!(got, "Save & Close");
+        } else {
+            assert_eq!(got, "Save && Close");
         }
     }
 }

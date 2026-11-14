@@ -316,14 +316,13 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )?)
         .build()?;
 
-    let mut help_builder = SubmenuBuilder::new(app, "Help")
-        .item(&MenuItem::with_id(
-            app,
-            ID_ABOUT,
-            "About sMind",
-            true,
-            None::<&str>,
-        )?);
+    let mut help_builder = SubmenuBuilder::new(app, "Help").item(&MenuItem::with_id(
+        app,
+        ID_ABOUT,
+        "About sMind",
+        true,
+        None::<&str>,
+    )?);
     if update_menu_location(std::env::consts::OS) == UpdateMenuLocation::HelpMenu {
         help_builder = help_builder.item(&MenuItem::with_id(
             app,
@@ -565,7 +564,13 @@ mod tests {
         assert_eq!(menu_action_for(ID_RUN_SETUP), None);
         assert_eq!(native_item_for("run-setup"), None);
         assert_eq!(RUN_SETUP_EVENT, "run-setup-requested");
-        let ids = [ID_ABOUT, ID_LOG_FOLDER, ID_GITHUB, ID_HELP_CHECK_UPDATES, ID_APP_CHECK_UPDATES];
+        let ids = [
+            ID_ABOUT,
+            ID_LOG_FOLDER,
+            ID_GITHUB,
+            ID_HELP_CHECK_UPDATES,
+            ID_APP_CHECK_UPDATES,
+        ];
         assert!(!ids.contains(&ID_RUN_SETUP));
     }
 
@@ -638,7 +643,11 @@ mod tests {
     fn app_menu_action_allowlist_is_native_only_and_rejects_unknown_ids() {
         for (name, item) in NATIVE_MENU_ACTIONS {
             assert_eq!(native_item_for(name), Some(*item));
-            assert_eq!(menu_action_for(item), None, "{name} must not be a renderer action");
+            assert_eq!(
+                menu_action_for(item),
+                None,
+                "{name} must not be a renderer action"
+            );
         }
         assert_eq!(native_item_for("tab.new"), None);
         assert_eq!(native_item_for("file-reload"), None);

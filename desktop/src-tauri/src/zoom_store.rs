@@ -12,7 +12,10 @@ use smind_daemon_client::zoom;
 const FILE_NAME: &str = "zoom.txt";
 
 fn state_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|dir| dir.join(FILE_NAME))
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join(FILE_NAME))
 }
 
 /// load reads the persisted zoom level, defaulting to 100% if there is

@@ -80,10 +80,19 @@ pub fn build(app: &AppHandle, cache: WorkspaceCache, proxy_url: Url) -> tauri::R
     } else {
         None
     };
-    Ok(Arc::new(Tray { state, ui, badge: Badge::new(WindowBadge(app.clone())) }))
+    Ok(Arc::new(Tray {
+        state,
+        ui,
+        badge: Badge::new(WindowBadge(app.clone())),
+    }))
 }
 
-fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: WorkspaceCache, proxy_url: Url) -> tauri::Result<TrayUi> {
+fn build_ui(
+    app: &AppHandle,
+    click_state: Arc<Mutex<Attention>>,
+    cache: WorkspaceCache,
+    proxy_url: Url,
+) -> tauri::Result<TrayUi> {
     let item = MenuItem::with_id(app, ID_ATTENTION, attention::label(0), false, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let open = MenuItem::with_id(app, ID_OPEN, "Open", true, None::<&str>)?;
@@ -96,7 +105,12 @@ fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: Workspac
         .tooltip(attention::label(0))
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button, button_state, .. } = event {
+            if let TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
                 if click_action(button, button_state) == ClickAction::ShowWindow {
                     show_main(tray.app_handle());
                 }
@@ -194,10 +208,22 @@ mod tests {
 
     #[test]
     fn tray_left_click_shows_the_window_not_the_menu() {
-        assert_eq!(click_action(MouseButton::Left, MouseButtonState::Up), ClickAction::ShowWindow);
-        assert_eq!(click_action(MouseButton::Left, MouseButtonState::Down), ClickAction::Ignore);
-        assert_eq!(click_action(MouseButton::Right, MouseButtonState::Up), ClickAction::Ignore);
-        assert_eq!(click_action(MouseButton::Middle, MouseButtonState::Up), ClickAction::Ignore);
+        assert_eq!(
+            click_action(MouseButton::Left, MouseButtonState::Up),
+            ClickAction::ShowWindow
+        );
+        assert_eq!(
+            click_action(MouseButton::Left, MouseButtonState::Down),
+            ClickAction::Ignore
+        );
+        assert_eq!(
+            click_action(MouseButton::Right, MouseButtonState::Up),
+            ClickAction::Ignore
+        );
+        assert_eq!(
+            click_action(MouseButton::Middle, MouseButtonState::Up),
+            ClickAction::Ignore
+        );
     }
 
     #[test]

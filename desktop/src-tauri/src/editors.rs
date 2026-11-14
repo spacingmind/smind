@@ -134,14 +134,22 @@ const MACOS_BUNDLES: &[(&str, &str, &str)] = &[
 /// `win_install_candidates`, so the built string is the same no matter
 /// which OS the code runs (and is tested) on.
 const WINDOWS_LOCATIONS: &[(&str, &str, &str, &str)] = &[
-    ("vscode", r"Microsoft VS Code\Code.exe", "code.exe", "VS Code"),
+    (
+        "vscode",
+        r"Microsoft VS Code\Code.exe",
+        "code.exe",
+        "VS Code",
+    ),
     ("cursor", r"cursor\Cursor.exe", "cursor.exe", "Cursor"),
     ("zed", r"Zed\Zed.exe", "zed.exe", "Zed"),
 ];
 
 /// Linux PATH command names: (id, command, label).
-const LINUX_NAMES: &[(&str, &str, &str)] =
-    &[("vscode", "code", "VS Code"), ("cursor", "cursor", "Cursor"), ("zed", "zed", "Zed")];
+const LINUX_NAMES: &[(&str, &str, &str)] = &[
+    ("vscode", "code", "VS Code"),
+    ("cursor", "cursor", "Cursor"),
+    ("zed", "zed", "Zed"),
+];
 
 /// Builds `<localappdata>\Programs\<subpath>` as a plain string with
 /// Windows separators (never `Path::join`, whose separator follows the
@@ -153,21 +161,35 @@ fn win_program_path(local_appdata: &Path, subpath: &str) -> String {
 
 /// `<root>\<subpath>` with Windows separators regardless of host OS.
 fn win_join(root: &Path, subpath: &str) -> String {
-    format!("{}\\{}", root.display().to_string().trim_end_matches(['\\', '/']), subpath)
+    format!(
+        "{}\\{}",
+        root.display().to_string().trim_end_matches(['\\', '/']),
+        subpath
+    )
 }
 
 /// Every place an editor's exe may live on Windows, in preference order:
 /// per-user install first, then the machine-wide roots.
 fn win_install_candidates(probe: &dyn EditorProbe, subpath: &str) -> Vec<String> {
-    let mut out: Vec<String> =
-        probe.local_appdata().map(|la| win_program_path(&la, subpath)).into_iter().collect();
-    out.extend(probe.program_files_dirs().iter().map(|pf| win_join(pf, subpath)));
+    let mut out: Vec<String> = probe
+        .local_appdata()
+        .map(|la| win_program_path(&la, subpath))
+        .into_iter()
+        .collect();
+    out.extend(
+        probe
+            .program_files_dirs()
+            .iter()
+            .map(|pf| win_join(pf, subpath)),
+    );
     out
 }
 
 /// The first install candidate that exists on disk.
 fn win_installed_path(probe: &dyn EditorProbe, subpath: &str) -> Option<String> {
-    win_install_candidates(probe, subpath).into_iter().find(|p| probe.path_exists(p))
+    win_install_candidates(probe, subpath)
+        .into_iter()
+        .find(|p| probe.path_exists(p))
 }
 
 fn file_manager_label(os: &str) -> &'static str {
@@ -189,7 +211,11 @@ pub fn detect_editors(os: &str, probe: &dyn EditorProbe) -> Vec<EditorInfo> {
     }];
     let editor = |found: bool, id: &str, label: &str, out: &mut Vec<EditorInfo>| {
         if found {
-            out.push(EditorInfo { id: id.to_string(), label: label.to_string(), kind: "editor" });
+            out.push(EditorInfo {
+                id: id.to_string(),
+                label: label.to_string(),
+                kind: "editor",
+            });
         }
     };
     match os {
@@ -197,14 +223,19 @@ pub fn detect_editors(os: &str, probe: &dyn EditorProbe) -> Vec<EditorInfo> {
             for (id, bundle, label) in MACOS_BUNDLES {
                 let found = probe.path_exists(&format!("/Applications/{bundle}.app"))
                     || probe.path_exists(
-                        &probe.home_dir().join(format!("Applications/{bundle}.app")).display().to_string(),
+                        &probe
+                            .home_dir()
+                            .join(format!("Applications/{bundle}.app"))
+                            .display()
+                            .to_string(),
                     );
                 editor(found, id, label, &mut out);
             }
         }
         "windows" => {
             for (id, subpath, exe, label) in WINDOWS_LOCATIONS {
-                let found = win_installed_path(probe, subpath).is_some() || probe.path_lookup(exe).is_some();
+                let found = win_installed_path(probe, subpath).is_some()
+                    || probe.path_lookup(exe).is_some();
                 editor(found, id, label, &mut out);
             }
         }
@@ -231,18 +262,31 @@ fn resolve_editor(os: &str, id: &str, probe: &dyn EditorProbe) -> Option<Launch>
             let app = if probe.path_exists(&format!("/Applications/{bundle}.app")) {
                 format!("/Applications/{bundle}.app")
             } else {
-                probe.home_dir().join(format!("Applications/{bundle}.app")).display().to_string()
+                probe
+                    .home_dir()
+                    .join(format!("Applications/{bundle}.app"))
+                    .display()
+                    .to_string()
             };
-            Some(Launch { program: "open".into(), prefix_args: vec!["-a".into(), app] })
+            Some(Launch {
+                program: "open".into(),
+                prefix_args: vec!["-a".into(), app],
+            })
         }
         "windows" => {
             let (_, subpath, exe, _) = WINDOWS_LOCATIONS.iter().find(|(e, _, _, _)| *e == id)?;
             let program = win_installed_path(probe, subpath).or_else(|| probe.path_lookup(exe))?;
-            Some(Launch { program, prefix_args: vec![] })
+            Some(Launch {
+                program,
+                prefix_args: vec![],
+            })
         }
         _ => {
             let (_, name, _) = LINUX_NAMES.iter().find(|(e, _, _)| *e == id)?;
-            Some(Launch { program: probe.path_lookup(name)?, prefix_args: vec![] })
+            Some(Launch {
+                program: probe.path_lookup(name)?,
+                prefix_args: vec![],
+            })
         }
     }
 }
@@ -251,7 +295,12 @@ fn resolve_editor(os: &str, id: &str, probe: &dyn EditorProbe) -> Option<Launch>
 /// is always exactly one argv element, never interpolated into another
 /// argument and never passed through a shell. `file-manager` only ever
 /// REVEALS -- it never opens (let alone executes) the target itself.
-pub fn build_argv(os: &str, id: &str, path: &str, probe: &dyn EditorProbe) -> Result<Vec<String>, String> {
+pub fn build_argv(
+    os: &str,
+    id: &str,
+    path: &str,
+    probe: &dyn EditorProbe,
+) -> Result<Vec<String>, String> {
     if id == FILE_MANAGER_ID {
         return Ok(match os {
             // `open -R` reveals in Finder without opening the file.
@@ -269,14 +318,17 @@ pub fn build_argv(os: &str, id: &str, path: &str, probe: &dyn EditorProbe) -> Re
                 let dir = if probe.is_dir(path) {
                     path.to_string()
                 } else {
-                    Path::new(path).parent().map(|p| p.display().to_string()).unwrap_or_else(|| path.to_string())
+                    Path::new(path)
+                        .parent()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| path.to_string())
                 };
                 vec!["xdg-open".into(), dir]
             }
         });
     }
-    let launch =
-        resolve_editor(os, id, probe).ok_or_else(|| format!("editor {id:?} is not installed on this machine"))?;
+    let launch = resolve_editor(os, id, probe)
+        .ok_or_else(|| format!("editor {id:?} is not installed on this machine"))?;
     let mut argv = vec![launch.program];
     argv.extend(launch.prefix_args);
     argv.push(path.to_string());
@@ -304,9 +356,15 @@ pub fn open_in_editor_argv(
         let allowlisted = matches!(editor_id, "vscode" | "cursor" | "zed");
         let known: Vec<&str> = detected.iter().map(|e| e.id.as_str()).collect();
         return Err(if allowlisted {
-            format!("{editor_id} is not installed on this machine (available: {})", known.join(", "))
+            format!(
+                "{editor_id} is not installed on this machine (available: {})",
+                known.join(", ")
+            )
         } else {
-            format!("unknown editor {editor_id:?} (available: {})", known.join(", "))
+            format!(
+                "unknown editor {editor_id:?} (available: {})",
+                known.join(", ")
+            )
         });
     }
     if raw_path.contains('\0') {
@@ -316,7 +374,9 @@ pub fn open_in_editor_argv(
     // `"/select,\"<path>\""` raw argument (see spawn_detached); a
     // embedded quote cannot be escaped there, so refuse it outright.
     if os == "windows" && editor_id == FILE_MANAGER_ID && raw_path.contains('"') {
-        return Err("the path contains a quote character, which Explorer cannot select".to_string());
+        return Err(
+            "the path contains a quote character, which Explorer cannot select".to_string(),
+        );
     }
     // Daemon paths are native to the host OS; they are used as given.
     if !Path::new(raw_path).is_absolute() {
@@ -335,7 +395,11 @@ pub fn open_in_editor_argv(
 /// Returns the raw argument to pass via `raw_arg`, `None` for every
 /// other argv.
 fn explorer_select_raw_arg(argv: &[String]) -> Option<String> {
-    if argv.len() == 2 && argv[0] == "explorer.exe" && argv[1].starts_with("/select,") && !argv[1].ends_with(",") {
+    if argv.len() == 2
+        && argv[0] == "explorer.exe"
+        && argv[1].starts_with("/select,")
+        && !argv[1].ends_with(",")
+    {
         let path = argv[1].strip_prefix("/select,")?;
         return Some(format!("/select,\"{path}\""));
     }
@@ -372,7 +436,9 @@ fn spawn_detached(argv: &[String]) -> Result<(), String> {
     if matches!(argv[0].as_str(), "open" | "xdg-open") {
         return run_and_report(cmd, &argv[0], OPENER_WAIT);
     }
-    let mut child = cmd.spawn().map_err(|e: io::Error| format!("couldn't launch {}: {e}", argv[0]))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e: io::Error| format!("couldn't launch {}: {e}", argv[0]))?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });
@@ -391,8 +457,12 @@ const OPENER_WAIT: Duration = Duration::from_secs(5);
 /// exited (what made `Command::output()` hang). A launcher still running
 /// at the deadline counts as launched; it is reaped when it exits.
 fn run_and_report(mut cmd: Command, name: &str, wait: Duration) -> Result<(), String> {
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e: io::Error| format!("couldn't launch {name}: {e}"))?;
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e: io::Error| format!("couldn't launch {name}: {e}"))?;
     let (err_tx, err_rx) = mpsc::channel::<Vec<u8>>();
     if let Some(mut stderr) = child.stderr.take() {
         std::thread::spawn(move || {
@@ -408,9 +478,15 @@ fn run_and_report(mut cmd: Command, name: &str, wait: Duration) -> Result<(), St
     match status_rx.recv_timeout(wait) {
         Ok(Ok(status)) if status.success() => Ok(()),
         Ok(Ok(status)) => {
-            let stderr = err_rx.recv_timeout(Duration::from_millis(500)).unwrap_or_default();
+            let stderr = err_rx
+                .recv_timeout(Duration::from_millis(500))
+                .unwrap_or_default();
             let detail = String::from_utf8_lossy(&stderr).trim().to_string();
-            Err(if detail.is_empty() { format!("{name} failed ({status})") } else { format!("{name} failed: {detail}") })
+            Err(if detail.is_empty() {
+                format!("{name} failed ({status})")
+            } else {
+                format!("{name} failed: {detail}")
+            })
         }
         Ok(Err(e)) => Err(format!("couldn't wait for {name}: {e}")),
         // Still running at the deadline: launched, not failed.
@@ -503,7 +579,10 @@ mod tests {
             self.local_appdata.clone()
         }
         fn path_lookup(&self, name: &str) -> Option<String> {
-            self.path.iter().find(|(n, _)| n == name).map(|(_, f)| f.clone())
+            self.path
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, f)| f.clone())
         }
     }
 
@@ -511,7 +590,10 @@ mod tests {
     const WIN_LOCAL: &str = r"C:\Users\test\AppData\Local";
 
     fn macos_probe() -> FakeProbe {
-        let mut p = FakeProbe { home: PathBuf::from(MACOS_HOME), ..FakeProbe::default() };
+        let mut p = FakeProbe {
+            home: PathBuf::from(MACOS_HOME),
+            ..FakeProbe::default()
+        };
         p = p.with("/Applications/Visual Studio Code.app");
         p.with("/Applications/Cursor.app")
     }
@@ -522,7 +604,10 @@ mod tests {
             ..FakeProbe::default()
         }
         .with(r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe")
-        .on_path("cursor.exe", r"C:\Users\test\AppData\Local\Programs\cursor\Cursor.exe")
+        .on_path(
+            "cursor.exe",
+            r"C:\Users\test\AppData\Local\Programs\cursor\Cursor.exe",
+        )
     }
 
     #[test]
@@ -545,18 +630,27 @@ mod tests {
                 self.0.local_appdata()
             }
             fn program_files_dirs(&self) -> Vec<PathBuf> {
-                vec![PathBuf::from(r"C:\Program Files"), PathBuf::from(r"C:\Program Files (x86)")]
+                vec![
+                    PathBuf::from(r"C:\Program Files"),
+                    PathBuf::from(r"C:\Program Files (x86)"),
+                ]
             }
             fn path_lookup(&self, n: &str) -> Option<String> {
                 self.0.path_lookup(n)
             }
         }
         let probe = SystemWide(
-            FakeProbe { local_appdata: Some(PathBuf::from(WIN_LOCAL)), ..FakeProbe::default() }
-                .with(r"C:\Program Files\Microsoft VS Code\Code.exe")
-                .with(r"C:\Program Files (x86)\Zed\Zed.exe"),
+            FakeProbe {
+                local_appdata: Some(PathBuf::from(WIN_LOCAL)),
+                ..FakeProbe::default()
+            }
+            .with(r"C:\Program Files\Microsoft VS Code\Code.exe")
+            .with(r"C:\Program Files (x86)\Zed\Zed.exe"),
         );
-        let ids: Vec<String> = detect_editors("windows", &probe).iter().map(|e| e.id.clone()).collect();
+        let ids: Vec<String> = detect_editors("windows", &probe)
+            .iter()
+            .map(|e| e.id.clone())
+            .collect();
         assert_eq!(ids, vec!["file-manager", "vscode", "zed"]);
         let argv = build_argv("windows", "vscode", r"C:\work", &probe).unwrap();
         assert_eq!(argv[0], r"C:\Program Files\Microsoft VS Code\Code.exe");
@@ -564,12 +658,18 @@ mod tests {
         assert_eq!(argv[0], r"C:\Program Files (x86)\Zed\Zed.exe");
         // A per-user install still wins over a machine-wide one.
         let both = SystemWide(
-            FakeProbe { local_appdata: Some(PathBuf::from(WIN_LOCAL)), ..FakeProbe::default() }
-                .with(r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe")
-                .with(r"C:\Program Files\Microsoft VS Code\Code.exe"),
+            FakeProbe {
+                local_appdata: Some(PathBuf::from(WIN_LOCAL)),
+                ..FakeProbe::default()
+            }
+            .with(r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe")
+            .with(r"C:\Program Files\Microsoft VS Code\Code.exe"),
         );
         let argv = build_argv("windows", "vscode", r"C:\work", &both).unwrap();
-        assert_eq!(argv[0], r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe");
+        assert_eq!(
+            argv[0],
+            r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe"
+        );
     }
 
     #[cfg(unix)]
@@ -580,7 +680,10 @@ mod tests {
         // The launcher exits 0 at once; a background child holds the pipe.
         cmd.args(["-c", "sleep 5 & exit 0"]);
         assert!(run_and_report(cmd, "sh", Duration::from_secs(3)).is_ok());
-        assert!(started.elapsed() < Duration::from_secs(3), "blocked on the inherited pipe");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "blocked on the inherited pipe"
+        );
     }
 
     #[cfg(unix)]
@@ -597,14 +700,20 @@ mod tests {
     }
 
     fn linux_probe() -> FakeProbe {
-        FakeProbe::default().on_path("code", "/usr/bin/code").on_path("zed", "/usr/bin/zed")
+        FakeProbe::default()
+            .on_path("code", "/usr/bin/code")
+            .on_path("zed", "/usr/bin/zed")
     }
 
     #[test]
     fn editors_list_only_allowlisted() {
         let macos = detect_editors("macos", &macos_probe());
         let ids: Vec<&str> = macos.iter().map(|e| e.id.as_str()).collect();
-        assert_eq!(ids, vec!["file-manager", "vscode", "cursor"], "only the allowlist, only what's detected");
+        assert_eq!(
+            ids,
+            vec!["file-manager", "vscode", "cursor"],
+            "only the allowlist, only what's detected"
+        );
         assert_eq!(macos[0].label, "Finder");
         assert_eq!(macos[0].kind, "fileManager");
         assert_eq!(macos.iter().filter(|e| e.kind == "editor").count(), 2);
@@ -612,16 +721,30 @@ mod tests {
         // A user-level bundle (~/Applications) counts too; Zed absent.
         // The expected string is built the same way the production code
         // builds it (Path::join), so the test holds on any host OS.
-        let user_app = Path::new(MACOS_HOME).join("Applications/Zed.app").display().to_string();
-        let user_only =
-            FakeProbe { home: PathBuf::from(MACOS_HOME), ..FakeProbe::default() }.with(&user_app);
-        let user_ids: Vec<String> = detect_editors("macos", &user_only).iter().map(|e| e.id.clone()).collect();
+        let user_app = Path::new(MACOS_HOME)
+            .join("Applications/Zed.app")
+            .display()
+            .to_string();
+        let user_only = FakeProbe {
+            home: PathBuf::from(MACOS_HOME),
+            ..FakeProbe::default()
+        }
+        .with(&user_app);
+        let user_ids: Vec<String> = detect_editors("macos", &user_only)
+            .iter()
+            .map(|e| e.id.clone())
+            .collect();
         assert_eq!(user_ids, vec!["file-manager", "zed"]);
         // And the launch names that user-level bundle, not /Applications.
         let argv = build_argv("macos", "zed", "/tmp/x", &user_only).unwrap();
         assert_eq!(
             argv,
-            vec!["open".to_string(), "-a".to_string(), user_app, "/tmp/x".to_string()]
+            vec![
+                "open".to_string(),
+                "-a".to_string(),
+                user_app,
+                "/tmp/x".to_string()
+            ]
         );
 
         let win = detect_editors("windows", &win_probe());
@@ -643,12 +766,12 @@ mod tests {
     #[test]
     fn open_in_editor_rejects_unknown_id() {
         let probe = macos_probe();
-        let err =
-            open_in_editor_argv(ConnectionKind::Local, "macos", "sublime", "/tmp/x", &probe).unwrap_err();
+        let err = open_in_editor_argv(ConnectionKind::Local, "macos", "sublime", "/tmp/x", &probe)
+            .unwrap_err();
         assert!(err.contains("unknown editor"), "{err}");
         // A known id that isn't installed on this machine is equally rejected.
-        let err =
-            open_in_editor_argv(ConnectionKind::Local, "macos", "zed", "/tmp/x", &probe).unwrap_err();
+        let err = open_in_editor_argv(ConnectionKind::Local, "macos", "zed", "/tmp/x", &probe)
+            .unwrap_err();
         assert!(err.contains("zed is not installed"), "{err}");
     }
 
@@ -656,19 +779,29 @@ mod tests {
     fn open_in_editor_rejects_relative_or_missing_path() {
         // Fixtures must be absolute on the host OS running the test:
         // "/no/such/dir" is not absolute on Windows.
-        let (os, probe, missing) =
-            if cfg!(windows) { ("windows", win_probe(), r"C:\no\such\dir") } else { ("macos", macos_probe(), "/no/such/dir") };
+        let (os, probe, missing) = if cfg!(windows) {
+            ("windows", win_probe(), r"C:\no\such\dir")
+        } else {
+            ("macos", macos_probe(), "/no/such/dir")
+        };
         let err = open_in_editor_argv(ConnectionKind::Local, os, "vscode", "relative/path", &probe)
             .unwrap_err();
         assert!(err.contains("not an absolute path"), "{err}");
 
         // A genuinely missing path.
-        let err = open_in_editor_argv(ConnectionKind::Local, os, "vscode", missing, &probe).unwrap_err();
+        let err =
+            open_in_editor_argv(ConnectionKind::Local, os, "vscode", missing, &probe).unwrap_err();
         assert!(err.contains("does not exist"), "{err}");
 
         // Same rules for the file manager.
-        let err = open_in_editor_argv(ConnectionKind::Local, os, FILE_MANAGER_ID, "readme.md", &probe)
-            .unwrap_err();
+        let err = open_in_editor_argv(
+            ConnectionKind::Local,
+            os,
+            FILE_MANAGER_ID,
+            "readme.md",
+            &probe,
+        )
+        .unwrap_err();
         assert!(err.contains("not an absolute path"), "{err}");
     }
 
@@ -676,9 +809,11 @@ mod tests {
     fn open_in_editor_rejects_non_local_connection() {
         let probe = macos_probe();
         for kind in [ConnectionKind::Url, ConnectionKind::Relay] {
-            let err =
-                open_in_editor_argv(kind, "macos", "vscode", "/tmp/x", &probe).unwrap_err();
-            assert!(err.contains("aren't on this machine"), "url/relay must be rejected: {err}");
+            let err = open_in_editor_argv(kind, "macos", "vscode", "/tmp/x", &probe).unwrap_err();
+            assert!(
+                err.contains("aren't on this machine"),
+                "url/relay must be rejected: {err}"
+            );
             // Rejected before any id/path work: even a garbage editor id
             // reports the connection problem, not the editor problem.
             let err =
@@ -696,13 +831,18 @@ mod tests {
         // even with spaces and non-ASCII, as one argv element.
         let spaced = r"C:\Users\test\My Répo\projekt";
         let probe = win_probe().dir(spaced);
-        let argv =
-            open_in_editor_argv(ConnectionKind::Local, "windows", FILE_MANAGER_ID, spaced, &probe)
-                .unwrap();
+        let argv = open_in_editor_argv(
+            ConnectionKind::Local,
+            "windows",
+            FILE_MANAGER_ID,
+            spaced,
+            &probe,
+        )
+        .unwrap();
         assert_eq!(argv, vec!["explorer.exe".to_string(), spaced.to_string()]);
 
-        let argv =
-            open_in_editor_argv(ConnectionKind::Local, "windows", "vscode", spaced, &probe).unwrap();
+        let argv = open_in_editor_argv(ConnectionKind::Local, "windows", "vscode", spaced, &probe)
+            .unwrap();
         assert_eq!(
             argv,
             vec![
@@ -714,10 +854,18 @@ mod tests {
         // A file is selected, not opened, with the path still one element.
         let file = r"C:\Users\test\My Répo\noté.md";
         let probe = probe.with(file);
-        let argv =
-            open_in_editor_argv(ConnectionKind::Local, "windows", FILE_MANAGER_ID, file, &probe)
-                .unwrap();
-        assert_eq!(argv, vec!["explorer.exe".to_string(), format!("/select,{file}")]);
+        let argv = open_in_editor_argv(
+            ConnectionKind::Local,
+            "windows",
+            FILE_MANAGER_ID,
+            file,
+            &probe,
+        )
+        .unwrap();
+        assert_eq!(
+            argv,
+            vec!["explorer.exe".to_string(), format!("/select,{file}")]
+        );
     }
 
     #[test]
@@ -742,7 +890,10 @@ mod tests {
         // Windows: the real .exe (never a .cmd/.bat), path as one element.
         let wp = r"C:\repo";
         let argv = build_argv("windows", "vscode", wp, &win_probe()).unwrap();
-        assert_eq!(argv[0], r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe");
+        assert_eq!(
+            argv[0],
+            r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe"
+        );
         assert_eq!(argv.last().unwrap(), wp);
         // Cursor came from the PATH lookup -- still an .exe.
         let argv = build_argv("windows", "cursor", wp, &win_probe()).unwrap();
@@ -763,7 +914,10 @@ mod tests {
     #[test]
     fn strip_verbatim_normalizes_windows_canonicalize_output() {
         assert_eq!(strip_verbatim(r"C:\repo"), r"C:\repo");
-        assert_eq!(strip_verbatim(r"\\?\C:\Users\test\repo"), r"C:\Users\test\repo");
+        assert_eq!(
+            strip_verbatim(r"\\?\C:\Users\test\repo"),
+            r"C:\Users\test\repo"
+        );
         assert_eq!(strip_verbatim(r"\\?\UNC\server\share"), r"\\server\share");
         // No prefix confusion: a path that merely starts with backslashes.
         assert_eq!(strip_verbatim(r"\\server\share"), r"\\server\share");
@@ -773,10 +927,19 @@ mod tests {
     fn explorer_select_raw_arg_quotes_the_path_inside_the_argument() {
         // A spaced path must become one raw argument with inner quotes.
         let argv = argv_from(&["explorer.exe", r"/select,C:\Program Files\x"]);
-        assert_eq!(explorer_select_raw_arg(&argv).as_deref(), Some("/select,\"C:\\Program Files\\x\""));
+        assert_eq!(
+            explorer_select_raw_arg(&argv).as_deref(),
+            Some("/select,\"C:\\Program Files\\x\"")
+        );
         // Any other argv shape is spawned conventionally.
-        assert_eq!(explorer_select_raw_arg(&argv_from(&["explorer.exe", r"C:\dir"])), None);
-        assert_eq!(explorer_select_raw_arg(&argv_from(&["code", r"/select,C:\x"])), None);
+        assert_eq!(
+            explorer_select_raw_arg(&argv_from(&["explorer.exe", r"C:\dir"])),
+            None
+        );
+        assert_eq!(
+            explorer_select_raw_arg(&argv_from(&["code", r"/select,C:\x"])),
+            None
+        );
         // A quote in the path can never reach this stage (rejected in
         // open_in_editor_argv).
         assert!(open_in_editor_argv(
@@ -797,8 +960,21 @@ mod tests {
     fn file_manager_only_reveals_never_opens_the_target() {
         // macOS: `open -R` reveals; plain `open <path>` (which would open
         // the file) must never be built.
-        let argv = build_argv("macos", FILE_MANAGER_ID, "/tmp/repo/evil.sh", &macos_probe()).unwrap();
-        assert_eq!(argv, vec!["open".to_string(), "-R".to_string(), "/tmp/repo/evil.sh".to_string()]);
+        let argv = build_argv(
+            "macos",
+            FILE_MANAGER_ID,
+            "/tmp/repo/evil.sh",
+            &macos_probe(),
+        )
+        .unwrap();
+        assert_eq!(
+            argv,
+            vec![
+                "open".to_string(),
+                "-R".to_string(),
+                "/tmp/repo/evil.sh".to_string()
+            ]
+        );
 
         // Windows file: explorer /select,<path> selects it; the file
         // itself is never explorer's argument (that would execute it).
@@ -808,11 +984,20 @@ mod tests {
         }
         .with(r"C:\repo\evil.exe");
         let argv = build_argv("windows", FILE_MANAGER_ID, r"C:\repo\evil.exe", &win).unwrap();
-        assert_eq!(argv, vec!["explorer.exe".to_string(), "/select,C:\\repo\\evil.exe".to_string()]);
+        assert_eq!(
+            argv,
+            vec![
+                "explorer.exe".to_string(),
+                "/select,C:\\repo\\evil.exe".to_string()
+            ]
+        );
         // Windows dir: the dir itself is opened (a dir cannot execute).
         let win_dir = win.dir(r"C:\repo");
         let argv = build_argv("windows", FILE_MANAGER_ID, r"C:\repo", &win_dir).unwrap();
-        assert_eq!(argv, vec!["explorer.exe".to_string(), r"C:\repo".to_string()]);
+        assert_eq!(
+            argv,
+            vec!["explorer.exe".to_string(), r"C:\repo".to_string()]
+        );
 
         // Linux file: xdg-open gets the PARENT dir, never the file.
         let linux = FakeProbe::default().dir("/tmp/repo");

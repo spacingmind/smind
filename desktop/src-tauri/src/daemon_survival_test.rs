@@ -43,19 +43,27 @@ use tokio_tungstenite::tungstenite::Message;
 const ROLE: &str = "SMIND_STUB_APP_ROLE";
 
 fn port_from_env() -> u16 {
-    let listen = std::env::var("SMIND_LISTEN").expect("the stub app never runs without SMIND_LISTEN (it must not touch :4648)");
+    let listen = std::env::var("SMIND_LISTEN")
+        .expect("the stub app never runs without SMIND_LISTEN (it must not touch :4648)");
     listen.rsplit(':').next().unwrap().parse().unwrap()
 }
 
 async fn healthz(port: u16) -> Option<Value> {
-    reqwest::get(format!("http://127.0.0.1:{port}/healthz")).await.ok()?.json().await.ok()
+    reqwest::get(format!("http://127.0.0.1:{port}/healthz"))
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()
 }
 
 /// The stub "app": launch (or re-find) the managed daemon, write what it saw
 /// to `$STUB_OUT`, then stay alive until killed.
 #[tokio::test]
 async fn daemon_survival_stub_app() {
-    let Ok(role) = std::env::var(ROLE) else { return };
+    let Ok(role) = std::env::var(ROLE) else {
+        return;
+    };
     let port = port_from_env();
     let base = PathBuf::from(std::env::var("STUB_BASE").unwrap());
     let layout = Layout::new(&base);
@@ -81,7 +89,11 @@ async fn daemon_survival_stub_app() {
         assert!(up, "the daemon did not come up");
         let pid = native::find_port_owner(port).unwrap().expect("port owner");
         assert_eq!(pid, child.id());
-        managed::save(&layout.state_path, &managed::take_over(pid, "stub", &layout.bin_path.display().to_string(), "now")).unwrap();
+        managed::save(
+            &layout.state_path,
+            &managed::take_over(pid, "stub", &layout.bin_path.display().to_string(), "now"),
+        )
+        .unwrap();
     }
     let record = managed::load(&layout.state_path);
     let owner = native::find_port_owner(port).unwrap();
@@ -111,17 +123,26 @@ impl Drop for Rig {
     fn drop(&mut self) {
         // Only the processes this test started, by pid / process group.
         if let Some(g) = self.stub_pgid {
-            let _ = Command::new("kill").args(["-KILL", "--", &format!("-{g}")]).status();
+            let _ = Command::new("kill")
+                .args(["-KILL", "--", &format!("-{g}")])
+                .status();
         }
         if let Some(p) = self.daemon_pid {
-            let _ = Command::new("kill").args(["-KILL", &p.to_string()]).status();
+            let _ = Command::new("kill")
+                .args(["-KILL", &p.to_string()])
+                .status();
         }
     }
 }
 
 fn launch_stub(rig: &mut Rig, role: &str) -> Child {
     let child = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "daemon_survival_test::daemon_survival_stub_app", "--nocapture", "--test-threads=1"])
+        .args([
+            "--exact",
+            "daemon_survival_test::daemon_survival_stub_app",
+            "--nocapture",
+            "--test-threads=1",
+        ])
         .env(ROLE, role)
         .env("STUB_BASE", &rig.base)
         .env("SMIND_HOME", rig._home.path())
@@ -151,15 +172,34 @@ async fn wait_seen(base: &Path, role: &str) -> Value {
 /// One request over a fresh /ws connection (a new client, like the
 /// relaunched app's webview); returns the terminal `result`.
 async fn rpc(rig: &Rig, method: &str, params: Value) -> Value {
-    let token = std::fs::read_to_string(&rig.token).unwrap().trim().to_string();
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{}/ws?token={token}", rig.port)).await.unwrap();
-    ws.send(Message::Text(json!({"id": "1", "method": method, "params": params}).to_string().into())).await.unwrap();
+    let token = std::fs::read_to_string(&rig.token)
+        .unwrap()
+        .trim()
+        .to_string();
+    let (mut ws, _) =
+        tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{}/ws?token={token}", rig.port))
+            .await
+            .unwrap();
+    ws.send(Message::Text(
+        json!({"id": "1", "method": method, "params": params})
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
     loop {
-        let msg = tokio::time::timeout(Duration::from_secs(10), ws.next()).await.expect("rpc timeout").unwrap().unwrap();
+        let msg = tokio::time::timeout(Duration::from_secs(10), ws.next())
+            .await
+            .expect("rpc timeout")
+            .unwrap()
+            .unwrap();
         if let Message::Text(t) = msg {
             let v: Value = serde_json::from_str(&t).unwrap();
             if v["id"] == "1" && v.get("event").is_none() {
-                assert!(v.get("error").is_none() || v["error"].is_null(), "{method}: {v}");
+                assert!(
+                    v.get("error").is_none() || v["error"].is_null(),
+                    "{method}: {v}"
+                );
                 return v["result"].clone();
             }
         }
@@ -172,7 +212,11 @@ async fn daemon_survives_app_update() {
         eprintln!("daemon_survives_app_update: SMIND_REAL_DAEMON_BIN not set; skipping");
         return;
     };
-    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     assert_ne!(port, 4648);
     let home = tempfile::tempdir().unwrap();
     let base_dir = tempfile::tempdir().unwrap();
@@ -187,10 +231,36 @@ async fn daemon_survives_app_update() {
     // A git repo for a workspace/task/terminal.
     let repo = base.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
-    for args in [vec!["init", "-q", "-b", "main"], vec!["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]] {
-        assert!(Command::new("git").args(&args).current_dir(&repo).status().unwrap().success());
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec![
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    ] {
+        assert!(Command::new("git")
+            .args(&args)
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success());
     }
-    let mut rig = Rig { token: home.path().join("token"), base, _home: home, _base_dir: base_dir, port, daemon_pid: None, stub_pgid: None };
+    let mut rig = Rig {
+        token: home.path().join("token"),
+        base,
+        _home: home,
+        _base_dir: base_dir,
+        port,
+        daemon_pid: None,
+        stub_pgid: None,
+    };
 
     // --- app 0.10.0 starts the managed daemon ---------------------------
     let _app_old = launch_stub(&mut rig, "old");
@@ -201,8 +271,18 @@ async fn daemon_survives_app_update() {
     assert_ne!(daemon_pid as u64, old["stubPid"].as_u64().unwrap());
 
     // Work in flight: a terminal running a long command in a real task.
-    let ws = rpc(&rig, "workspace.create", json!({"path": repo.display().to_string()})).await;
-    let task = rpc(&rig, "task.create", json!({"workspaceId": ws["ID"], "title": "survive"})).await;
+    let ws = rpc(
+        &rig,
+        "workspace.create",
+        json!({"path": repo.display().to_string()}),
+    )
+    .await;
+    let task = rpc(
+        &rig,
+        "task.create",
+        json!({"workspaceId": ws["ID"], "title": "survive"}),
+    )
+    .await;
     let task_id = task["ID"].as_i64().unwrap();
     let term = rpc(&rig, "terminal.create", json!({"taskId": task_id})).await;
     let term_id = term["terminalId"].as_str().unwrap().to_string();
@@ -222,29 +302,60 @@ async fn daemon_survives_app_update() {
 
     // --- the app update: kill the whole app group, swap the bundle ---------
     let pgid = rig.stub_pgid.take().unwrap();
-    assert!(Command::new("kill").args(["-KILL", "--", &format!("-{pgid}")]).status().unwrap().success());
+    assert!(Command::new("kill")
+        .args(["-KILL", "--", &format!("-{pgid}")])
+        .status()
+        .unwrap()
+        .success());
     tokio::time::sleep(Duration::from_millis(500)).await;
     std::fs::write(rig.base.join("smind.app/Contents/Info.plist.new"), "0.10.1").unwrap();
-    std::fs::rename(bundle.join("Contents/Info.plist.new"), bundle.join("Contents/Info.plist")).unwrap();
-    assert_eq!(std::fs::read_to_string(bundle.join("Contents/Info.plist")).unwrap(), "0.10.1");
-    assert!(native::is_pid_alive(daemon_pid), "the daemon outlived the app group's SIGKILL");
+    std::fs::rename(
+        bundle.join("Contents/Info.plist.new"),
+        bundle.join("Contents/Info.plist"),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("Contents/Info.plist")).unwrap(),
+        "0.10.1"
+    );
+    assert!(
+        native::is_pid_alive(daemon_pid),
+        "the daemon outlived the app group's SIGKILL"
+    );
 
     // --- relaunch (only the shell) ----------------------------------------
     let _app_new = launch_stub(&mut rig, "new");
     let new = wait_seen(&rig.base, "new").await;
-    assert_eq!(new["firstSightState"], "Managed", "the relaunched app adopts, not reinstalls: {new}");
-    assert_eq!(new["daemonPid"].as_u64().unwrap() as u32, daemon_pid, "same daemon pid");
+    assert_eq!(
+        new["firstSightState"], "Managed",
+        "the relaunched app adopts, not reinstalls: {new}"
+    );
+    assert_eq!(
+        new["daemonPid"].as_u64().unwrap() as u32,
+        daemon_pid,
+        "same daemon pid"
+    );
     assert_eq!(new["healthy"], true);
-    assert_eq!(native::find_port_owner(rig.port).unwrap(), Some(daemon_pid), "same port owner");
+    assert_eq!(
+        native::find_port_owner(rig.port).unwrap(),
+        Some(daemon_pid),
+        "same port owner"
+    );
 
     // The terminal opened before the update is still there and still runs.
     let listed = rpc(&rig, "terminal.list", json!({"taskId": task_id})).await;
-    assert!(listed.to_string().contains(&term_id), "terminal survived: {listed}");
+    assert!(
+        listed.to_string().contains(&term_id),
+        "terminal survived: {listed}"
+    );
     for _ in 0..200 {
         if after.exists() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert!(after.exists(), "the in-flight terminal command finished after the update");
+    assert!(
+        after.exists(),
+        "the in-flight terminal command finished after the update"
+    );
 }
