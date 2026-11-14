@@ -69,7 +69,7 @@ describe("file reveal", () => {
     const ln = view().state.doc.line(3);
     const selection = view().state.selection.main;
     expect(selection.from).toBe(ln.from);
-    expect(selection.to).toBe(ln.to);
+    expect(selection.to).toBe(ln.from);
     // Consumed: nothing left for the next mount.
     expect(useFileRevealStore.getState().requests[tabKey]).toBeUndefined();
   });
@@ -86,7 +86,7 @@ describe("file reveal", () => {
 
     const ln = view().state.doc.line(3);
     expect(view().state.selection.main.from).toBe(ln.from);
-    expect(view().state.selection.main.to).toBe(ln.to);
+    expect(view().state.selection.main.to).toBe(ln.from);
     expect(useFileRevealStore.getState().requests[tabKey]).toBeUndefined();
   });
 
@@ -102,7 +102,7 @@ describe("file reveal", () => {
     const ln = view().state.doc.line(view().state.doc.lines);
     const selection = view().state.selection.main;
     expect(selection.from).toBe(ln.from);
-    expect(selection.to).toBe(ln.to);
+    expect(selection.to).toBe(ln.from);
   });
 
   it("a second request on the already-open tab moves the selection", async () => {

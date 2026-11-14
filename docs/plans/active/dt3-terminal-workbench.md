@@ -32,7 +32,7 @@ lands for both. Three PRs, each branched from `wave/desktop`, one at a time:
    file; any error or a directory opens nothing and shows one quiet notice "Not a file in this task's
    workspace". No path is ever passed to a shell or an OS opener.
 4. **Open at a line.** A valid path opens the file tab (same placement as the explorer's implicit open) and
-   the editor scrolls to the line and marks it; a tab already open is revealed again on the next click. The
+   the editor scrolls to the line and puts the cursor on it (the active-line band is the mark; a whole-line selection is unreadable in dark); a tab already open is revealed again on the next click. The
    line request lives in a small store, not in the URL route.
 5. **URL links.** Only `http:` and `https:` URLs are linkified; the match is parsed with `URL`, rejected if
    it has user info or exceeds 2048 characters, and trailing punctuation (including an unbalanced `)`) is

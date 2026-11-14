@@ -175,9 +175,10 @@ export function TextEditorPane({
     const doc = view.state.doc;
     const ln = doc.line(Math.min(Math.max(revealRequest.line, 1), doc.lines));
     const pos = Math.min(ln.from + Math.max(revealRequest.col, 1) - 1, ln.to);
-    // Selecting the whole line is the visible mark; the cursor column is what scrollIntoView centers on.
+    // The cursor on the line plus the editor's active-line band is the mark. A whole-line selection reads badly in dark
+    // (the selection fill is pale under the pale text), so it is not used.
     view.dispatch({
-      selection: EditorSelection.range(ln.from, ln.to),
+      selection: EditorSelection.cursor(pos),
       effects: EditorView.scrollIntoView(pos, { y: "center" }),
     });
     view.focus();
