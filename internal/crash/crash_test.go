@@ -455,6 +455,18 @@ func TestCrashRefusesLinkDir(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Skipf("cannot create a symlink: %v", err)
 	}
+	if runtime.GOOS != "windows" {
+		// the target's own mode must survive: a chmod that follows the link
+		// would change it to 0700 before the link check ran
+		if err := os.Chmod(real, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if fi, err := os.Stat(real); err == nil && fi.Mode().Perm() != 0o755 {
+				t.Errorf("link target mode changed to %v: the link was followed", fi.Mode().Perm())
+			}
+		}()
+	}
 	r := New(testConfig(link))
 	if got := r.Record("link", "boom", []byte("test.Fn()\n")); got != "" {
 		t.Fatalf("report written through the link to %s", got)

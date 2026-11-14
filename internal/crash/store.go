@@ -3,6 +3,7 @@ package crash
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,20 +28,29 @@ const (
 // the file into place, then rotates. It is called with r.mu held.
 func (r *Recorder) store(data []byte, now time.Time, site string) (string, error) {
 	dir := r.cfg.Dir
-	if err := os.MkdirAll(dir, dirMode); err != nil {
-		return "", err
-	}
-	if runtime.GOOS != "windows" {
-		if err := os.Chmod(dir, dirMode); err != nil {
+	// Look before touching: MkdirAll and Chmod both follow a link, so the
+	// link check must come first or a planted link would get its target
+	// chmod'ed (and written into).
+	fi, err := os.Lstat(dir)
+	if os.IsNotExist(err) {
+		if err := os.MkdirAll(dir, dirMode); err != nil {
 			return "", err
 		}
+		fi, err = os.Lstat(dir)
 	}
-	fi, err := os.Lstat(dir)
 	if err != nil {
 		return "", err
 	}
 	if fsutil.IsLink(fi.Mode()) {
 		return "", errLinkDir
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("crash directory %s is not a directory", dir)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(dir, dirMode); err != nil {
+			return "", err
+		}
 	}
 	final := filepath.Join(dir, crashName(now, r.cfg.Source, site))
 	r.tmpSeq++
@@ -201,7 +211,7 @@ func List(dir string) Summary {
 	if t, ok := nameTimestamp(newest); ok {
 		s.Newest = t
 	}
-	data, err := os.ReadFile(filepath.Join(dir, newest))
+	data, err := readBounded(filepath.Join(dir, newest), 1<<20)
 	if err != nil {
 		s.Err = err.Error()
 		return s
@@ -216,6 +226,17 @@ func List(dir string) Summary {
 		s.Newest = t
 	}
 	return s
+}
+
+// readBounded reads at most max bytes of a regular file: a planted huge file
+// must not make `smind doctor` allocate it.
+func readBounded(path string, max int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, max))
 }
 
 // DesktopDir returns the crashes directory of the desktop shell under the
