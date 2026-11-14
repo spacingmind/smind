@@ -26,7 +26,9 @@ const vectorsFile = "testdata/redact_vectors.json"
 // and the Rust side fails until it is mirrored.
 func vectorInputs() []redactVector {
 	const home, smind = "/home/tester", "/home/tester/.smind"
-	v := func(name, in string) redactVector { return redactVector{Name: name, Input: in, Home: home, SmindHome: smind} }
+	v := func(name, in string) redactVector {
+		return redactVector{Name: name, Input: in, Home: home, SmindHome: smind}
+	}
 	return []redactVector{
 		v("home dir", "open /home/tester/code/x.go: no such file"),
 		v("smind home before home", "read /home/tester/.smind/token failed"),
