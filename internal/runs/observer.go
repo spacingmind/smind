@@ -2,7 +2,9 @@ package runs
 
 import (
 	"log/slog"
+	"runtime/debug"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/taskrunner"
 
@@ -74,6 +76,7 @@ func (reg *Registry) notifyObservers(f RunFinished) {
 		func() {
 			defer func() {
 				if v := recover(); v != nil {
+					crash.Default().Record("runs.observer", v, debug.Stack())
 					slog.Error("runs: observer panicked", "run", f.RunID, "panic", v)
 				}
 			}()
