@@ -6,6 +6,9 @@ import type { QuestionRequest } from '../questionAnswer';
 
 describe('isLongAsk', () => {
   it('collapses past 480 characters or 8 lines, the web card rule', () => {
+    expect([LONG_ASK_CHARS, LONG_ASK_LINES]).toEqual([480, 8]); // the web card's numbers, pinned
+    expect(isLongAsk('x'.repeat(480))).toBe(false);
+    expect(isLongAsk('x'.repeat(481))).toBe(true);
     expect(isLongAsk('x'.repeat(LONG_ASK_CHARS))).toBe(false);
     expect(isLongAsk('x'.repeat(LONG_ASK_CHARS + 1))).toBe(true);
     expect(isLongAsk(Array(LONG_ASK_LINES).fill('a').join('\n'))).toBe(false);
