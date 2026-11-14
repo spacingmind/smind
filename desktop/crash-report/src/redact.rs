@@ -4,6 +4,10 @@
 //! Go's `\b` is ASCII-only while Rust's is Unicode, so every `\b` in a Go
 //! pattern is written `(?-u:\b)` here; everything else is copied verbatim.
 
+// The statics below are fixed patterns, compiled eagerly by `warm_up` (called from `install`, outside
+// any panic hook) and checked by the golden test, so the hook path never compiles one.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use regex::{Captures, NoExpand, Regex};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -81,6 +85,25 @@ static PLAIN_SECRETS: [&LazyLock<Regex>; 9] = [
     &RE_JWT,
     &RE_HEX_RUN,
 ];
+
+/// Compiles every pattern now. `install` calls it before the panic hook exists: a panic inside
+/// a hook aborts the process, so no regex may be compiled for the first time inside one.
+pub fn warm_up() {
+    for re in PLAIN_SECRETS.iter() {
+        let _ = re.is_match("");
+    }
+    for re in [
+        &RE_UNIX_USER_DIR,
+        &RE_WINDOWS_USER,
+        &RE_KEY_VALUE,
+        &RE_AUTH_LINE,
+        &RE_SCHEME_CRED,
+        &RE_URL_USERINFO,
+        &RE_HIGH_ENTROPY,
+    ] {
+        let _ = re.is_match("");
+    }
+}
 
 /// Removes paths under the user's home and smind home, other users'
 /// directories, and secret shapes from `s`.
@@ -169,7 +192,7 @@ fn redact_paths(s: &str, home: Option<&Path>, smind_home: Option<&Path>) -> Stri
 fn resolved_path(path: &Path) -> Option<PathBuf> {
     static CACHE: LazyLock<Mutex<HashMap<PathBuf, Option<PathBuf>>>> =
         LazyLock::new(|| Mutex::new(HashMap::new()));
-    let mut cache = CACHE.lock().unwrap();
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(hit) = cache.get(path) {
         return hit.clone();
     }

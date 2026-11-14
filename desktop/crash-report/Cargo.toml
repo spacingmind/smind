@@ -13,3 +13,9 @@ regex = "1"
 
 [dev-dependencies]
 tempfile = "3"
+
+# A helper process for tests/hook.rs (the panic hook is process-global and the main thread is
+# not a test-harness thread). Never linked into the shell.
+[[bin]]
+name = "crash-child"
+path = "src/bin/crash_child.rs"

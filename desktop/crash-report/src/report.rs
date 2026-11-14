@@ -161,6 +161,7 @@ pub fn name_stamp(t: SystemTime) -> String {
     format!("{y:04}{mo:02}{d:02}T{h:02}{mi:02}{s:02}.{:03}", nanos / 1_000_000)
 }
 
+#[allow(clippy::expect_used)] // fixed patterns, compiled by `warm_up` before the hook exists
 static RUNTIME_MESSAGES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         r"^index out of bounds: the len is \d+ but the index is \d+$",
@@ -178,6 +179,12 @@ static RUNTIME_MESSAGES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .map(|p| Regex::new(p).expect("static pattern"))
     .collect()
 });
+
+/// Compiles the patterns used on the hook path (see `redact::warm_up`).
+pub fn warm_up() {
+    let _ = message_is_runtime("");
+    let _ = dedupe_frame("");
+}
 
 /// Whether a panic message is one of the fully static or number-only runtime
 /// messages and so may be kept (still redacted). Everything else may carry
@@ -197,6 +204,7 @@ const PANIC_MACHINERY: &[&str] = &[
     "__rust_",
 ];
 
+#[allow(clippy::expect_used)] // fixed pattern, compiled by `warm_up` before the hook exists
 static HASH_SUFFIX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"::h[0-9a-f]{16}$").expect("static pattern"));
 

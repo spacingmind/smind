@@ -193,7 +193,14 @@ impl Recorder {
     ) -> Value {
         let home = self.cfg.home.as_deref();
         let smind_home = self.cfg.smind_home.as_deref();
-        let mut rep = json!({
+        // A message is kept only when it is a fully static or number-only runtime
+        // message: any other panic message may carry prompt text, file contents or
+        // secrets, so it is recorded by type only.
+        let (message, withheld) = match message.filter(|m| report::message_is_runtime(m)) {
+            Some(msg) => (truncate(&redact(msg, home, smind_home), MSG_MAX_BYTES), false),
+            None => (String::new(), true),
+        };
+        json!({
             "schema": 1,
             "source": SOURCE,
             "version": self.cfg.version,
@@ -202,19 +209,11 @@ impl Recorder {
             "time": report::rfc3339_nano(now),
             "site": site,
             "panicType": truncate(&redact(panic_type, home, smind_home), PANIC_TYPE_MAX_BYTES),
-            "message": "",
-            "messageWithheld": true,
+            "message": message,
+            "messageWithheld": withheld,
             "stack": redact(stack, home, smind_home),
             "suppressedSinceLast": suppressed,
-        });
-        // A message is kept only when it is a fully static or number-only
-        // runtime message: any other panic message may carry prompt text, file
-        // contents or secrets, so it is recorded by type only.
-        if let Some(msg) = message.filter(|m| report::message_is_runtime(m)) {
-            rep["message"] = json!(truncate(&redact(msg, home, smind_home), MSG_MAX_BYTES));
-            rep["messageWithheld"] = json!(false);
-        }
-        rep
+        })
     }
 
     fn lock_state(&self) -> MutexGuard<'_, State> {
@@ -374,15 +373,15 @@ fn marshal_bounded(rep: &Value, limit: usize) -> Option<String> {
     if data.len() <= limit {
         return Some(data);
     }
-    let base = rep["stack"].as_str()?.to_string();
+    let base = rep.get("stack")?.as_str()?.to_string();
     let mut keep = base.len();
     loop {
         keep = keep.saturating_sub(data.len() - limit + STACK_TRUNCATED.len());
         while keep > 0 && !base.is_char_boundary(keep) {
             keep -= 1;
         }
-        let mut cut = rep.clone();
-        cut["stack"] = json!(format!("{}{}", &base[..keep], STACK_TRUNCATED));
+        let mut cut = rep.as_object()?.clone();
+        cut.insert("stack".to_string(), json!(format!("{}{}", base.get(..keep)?, STACK_TRUNCATED)));
         data = serde_json::to_string(&cut).ok()?;
         if data.len() <= limit || keep == 0 {
             return Some(data);
