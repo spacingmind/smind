@@ -934,16 +934,17 @@ export function TerminalPane({
           {linkNotice}
         </p>
       )}
+      {/* A slim row of its own: a floating button would sit on top of the output's first line at 390. */}
+      {send.canSend && (
+        <div className="flex justify-end border-b bg-terminal-bg px-2 py-0.5" data-testid="terminal-send-row">
+          <SendToAgentMenu testId="terminal-send-menu" getEntries={getSendEntries} />
+        </div>
+      )}
       <div data-testid="terminal-inset" className="relative min-h-0 flex-1 bg-terminal-bg p-2">
         {/* Inset lives on this wrapper, never on the fit host: FitAddon ignores the host's own padding. */}
         <div ref={containerRef} data-testid="terminal-container" className="terminal-xterm-shell h-full" />
-        {send.canSend && (
-          <div className="absolute top-1 right-2 z-10">
-            <SendToAgentMenu testId="terminal-send-menu" getEntries={getSendEntries} />
-          </div>
-        )}
         {findOpen && (
-          <div className="absolute top-11 right-3 z-10">
+          <div className="absolute top-2 right-3 z-10">
             <FindBar
               ref={findBarRef}
               query={findQuery}
