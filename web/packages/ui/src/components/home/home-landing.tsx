@@ -181,6 +181,7 @@ export function HomeLanding({
           </div>
         )}
         <GetStartedCard
+          connected={connected}
           workspaces={workspaces}
           providers={providers}
           health={providerHealth.health}

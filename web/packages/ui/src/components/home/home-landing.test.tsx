@@ -199,6 +199,11 @@ describe("HomeLanding", () => {
     expect(onRetryConnect).toHaveBeenCalledTimes(1);
   });
 
+  it("disconnected shows no Get started card (nothing can be checked)", () => {
+    renderHome({ connected: false, workspaces: [] });
+    expect(screen.queryByTestId("get-started-card")).toBeNull();
+  });
+
   it("connected, or disconnected without a cause, shows no notice", () => {
     const online = renderHome({ connectionError: "stale" });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

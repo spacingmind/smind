@@ -21,6 +21,7 @@ function projectName(w: Workspace): string {
  * visible mount, inside VisibleCard.
  */
 export function GetStartedCard({
+  connected = true,
   workspaces,
   providers,
   health,
@@ -28,6 +29,8 @@ export function GetStartedCard({
   ensure,
   onAddProject,
 }: {
+  /** False while the daemon is unreachable: no agent can be checked and the connection notice is the whole story, so the card hides. */
+  connected?: boolean;
   workspaces: Workspace[];
   providers: ProviderInfo[];
   health: Record<string, ProviderHealth | undefined>;
@@ -38,7 +41,7 @@ export function GetStartedCard({
   const dismissed = useGetStartedDismissedStore((s) => s.value);
   const ready = agentsReady(providers, health, rpcFailed);
   const hasProject = workspaces.length > 0;
-  if (dismissed || (ready === "ready" && hasProject)) return null;
+  if (!connected || dismissed || (ready === "ready" && hasProject)) return null;
   return (
     <VisibleCard
       workspaces={workspaces}
@@ -96,7 +99,7 @@ function VisibleCard({
           type="button"
           variant="ghost"
           size="sm"
-          className="ml-auto"
+          className="ml-auto max-sm:min-h-11"
           aria-label="Dismiss get started"
           onClick={() => dismiss(true)}
         >
@@ -118,11 +121,15 @@ function VisibleCard({
                   {`${providerLabel(p.id, [p])} - ${agentStatusLabel(agentStatus(health[p.id]))}`}
                 </span>
               ))}
+              {visibleProviders.length === 0 && missingCount > 0 && (
+                <span className="text-foreground-muted">No agent found on this machine</span>
+              )}
               {missingCount > 0 && <span className="text-foreground-muted">{`${missingCount} not installed`}</span>}
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
+                className="max-sm:min-h-11"
                 data-testid="get-started-open-providers"
                 onClick={() =>
                   window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "providers" } }))
@@ -145,6 +152,7 @@ function VisibleCard({
               type="button"
               variant="outline"
               size="sm"
+              className="max-sm:min-h-11"
               data-testid="get-started-add-project"
               onClick={onAddProject}
             >
