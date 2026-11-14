@@ -18,6 +18,7 @@ use smind_daemon_client::proxy::{ProxyState, Registry};
 use smind_daemon_client::Config;
 
 mod app_settings;
+mod audit_guard;
 mod assets;
 mod client_watch;
 mod commands;
@@ -80,6 +81,9 @@ fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The audit build refuses to start against the real daemon; first, before anything else runs.
+    #[cfg(feature = "audit-guard")]
+    audit_guard::enforce_or_exit();
     let builder = tauri::Builder::default();
     // ADR-0023: updater plugin on macOS/Windows only; Linux (deb) has no
     // updater. Its JS-facing permissions are never granted.
