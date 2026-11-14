@@ -2,7 +2,9 @@
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { ScratchSpaceGroup } from "@/components/settings/scratch-space-group";
 import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
+import { Button } from "@/components/ui/button";
 import { Icons } from "@/lib/icons";
+import { useGetStartedDismissedStore } from "@/stores/get-started-store";
 
 /**
  * Item 13's General section originally held the composer's two defaults
@@ -29,6 +31,23 @@ export function GeneralSection(_ctx: SettingsSectionContext) {
               Set a ★ default profile in <span className="font-medium text-foreground">Settings → Profiles</span> — a
               new task's composer starts from it.
             </>
+          }
+        />
+      </SettingsGroup>
+      <SettingsGroup title="Guides">
+        <SettingsRow
+          label="Get started guide"
+          description="Show the first-run checklist on the home screen again."
+          control={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="get-started-show-guide"
+              onClick={() => useGetStartedDismissedStore.getState().set(false)}
+            >
+              Show guide
+            </Button>
           }
         />
       </SettingsGroup>

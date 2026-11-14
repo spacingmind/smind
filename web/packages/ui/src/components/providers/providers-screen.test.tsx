@@ -181,8 +181,9 @@ describe("FirstAccountCard", () => {
     await flush();
 
     const card = screen.getByTestId("first-account-card");
-    expect(card).toHaveTextContent("Connect your first account");
-    expect(card).toHaveTextContent("Accounts let sMind route the /v1 proxy across your subscriptions and keys.");
+    expect(card).toHaveTextContent("Connect an account so agents can sign in");
+    expect(card).toHaveTextContent("Advanced: accounts also let sMind route the /v1 proxy across your subscriptions and keys.");
+    expect(card.textContent?.indexOf("Advanced:")).toBeGreaterThan(card.textContent?.indexOf("Add Kimi key") ?? -1);
     expect(screen.getByTestId("first-account-connect-claude-native")).toHaveTextContent("Connect Claude Code");
     expect(screen.getByTestId("first-account-connect-kimi")).toHaveTextContent("Add Kimi key");
     expect(card).toHaveTextContent("GLM signs in through its own CLI.");
