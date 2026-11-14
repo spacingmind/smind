@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Icons } from "@/lib/icons";
@@ -87,6 +87,12 @@ function VisibleCard({
     ensure();
   }, [ensure, providers.length]);
 
+  // One sentence for the agent step: each installed provider's status, then what is missing, joined with a middle dot.
+  const parts = visibleProviders.map((p) => `${providerLabel(p.id, [p])} - ${agentStatusLabel(agentStatus(health[p.id]))}`);
+  if (visibleProviders.length === 0 && missingCount > 0) parts.push("No agent is signed in");
+  if (missingCount > 0) parts.push(`${missingCount} not installed`);
+  const agentLine = parts.join(" · ");
+
   return (
     <section
       data-testid="get-started-card"
@@ -106,25 +112,13 @@ function VisibleCard({
           Dismiss
         </Button>
       </div>
-      <ol className="mt-1 flex flex-col gap-2">
-        <li className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-2 py-1">
-          <span className="font-medium">Sign in to an agent</span>
-          {ready === "ready" ? (
-            <span className="flex items-center gap-1 text-foreground-muted">
-              <Icons.check aria-hidden className="size-3.5" />
-              Done
-            </span>
-          ) : (
-            <>
-              {visibleProviders.map((p) => (
-                <span key={p.id} className="text-foreground-muted">
-                  {`${providerLabel(p.id, [p])} - ${agentStatusLabel(agentStatus(health[p.id]))}`}
-                </span>
-              ))}
-              {visibleProviders.length === 0 && missingCount > 0 && (
-                <span className="text-foreground-muted">No agent found on this machine</span>
-              )}
-              {missingCount > 0 && <span className="text-foreground-muted">{`${missingCount} not installed`}</span>}
+      <ol className="mt-2 flex flex-col gap-2">
+        <Step
+          done={ready === "ready"}
+          label="Sign in to an agent"
+          status={ready === "ready" ? "Done" : agentLine}
+          action={
+            ready === "ready" ? null : (
               <Button
                 type="button"
                 variant="outline"
@@ -137,30 +131,53 @@ function VisibleCard({
               >
                 Open Providers
               </Button>
-            </>
-          )}
-        </li>
-        <li className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-2 py-1">
-          <span className="font-medium">Add a project</span>
-          {hasProject ? (
-            <span className="flex items-center gap-1 text-foreground-muted">
-              <Icons.check aria-hidden className="size-3.5" />
-              {`Done - ${projectName(workspaces[0])}`}
-            </span>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="max-sm:min-h-11"
-              data-testid="get-started-add-project"
-              onClick={onAddProject}
-            >
-              Add a project
-            </Button>
-          )}
-        </li>
+            )
+          }
+        />
+        <Step
+          done={hasProject}
+          label="Add a project"
+          status={hasProject ? `Done - ${projectName(workspaces[0])}` : "No project yet"}
+          action={
+            hasProject ? null : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="max-sm:min-h-11"
+                data-testid="get-started-add-project"
+                onClick={onAddProject}
+              >
+                Add a project
+              </Button>
+            )
+          }
+        />
       </ol>
     </section>
+  );
+}
+
+/**
+ * One step as a small block: a status icon (check = done, empty circle = to do) and the label on line 1, the status
+ * text under it, then the action on its own line (8 px between steps, 12 px between the status text and the action).
+ */
+function Step({ done, label, status, action }: { done: boolean; label: string; status: string; action: ReactNode }) {
+  return (
+    <li className="flex flex-col gap-3 py-1">
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-2">
+          {done ? (
+            <Icons.check aria-hidden className="size-4 shrink-0 text-foreground-muted" />
+          ) : (
+            <Icons.circle aria-hidden className="size-4 shrink-0 text-foreground-muted" />
+          )}
+          <span className="font-medium">{label}</span>
+          <span className="sr-only">{done ? "(done)" : "(to do)"}</span>
+        </div>
+        <p className="pl-6 text-foreground-muted">{status}</p>
+      </div>
+      {action && <div className="pl-6">{action}</div>}
+    </li>
   );
 }

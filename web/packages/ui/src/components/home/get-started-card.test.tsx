@@ -74,6 +74,15 @@ describe("GetStartedCard", () => {
     expect(card).toHaveTextContent("Done - Alpha");
   });
 
+  it("none installed reads as one sentence and the steps are marked to do", () => {
+    const missing = { "claude-native": { ok: false, detail: '"claude" not found on PATH' } };
+    render(<GetStartedCard {...cardProps({ providers: [PROVIDERS[0]], health: missing, workspaces: [] })} />);
+    const card = screen.getByTestId("get-started-card");
+    expect(card).toHaveTextContent("No agent is signed in · 1 not installed");
+    expect(card).toHaveTextContent("(to do)");
+    expect(card).not.toHaveTextContent("(done)");
+  });
+
   it("a ready agent shows Done on the sign-in row while the project step stays open", () => {
     render(<GetStartedCard {...cardProps({ providers: [PROVIDERS[0]], health: { "claude-native": HEALTH["claude-native"] } })} />);
     const card = screen.getByTestId("get-started-card");
