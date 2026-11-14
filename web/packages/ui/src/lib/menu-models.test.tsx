@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { enabledIds, normalizeEntries, outline, toNative, type MenuEntry } from "@/lib/menu-model";
+import { enabledIds, normalizeEntries, outline, toNative, type MenuEntry, type MenuItemEntry } from "@/lib/menu-model";
 import { dirRowMenu, fileRowMenu, rowMenu, tabMenu, taskRowMenu, type FileRowMenuInput, type TabMenuInput } from "@/lib/menu-models";
 import type { Task } from "@/lib/types";
 
@@ -10,7 +10,7 @@ const noop = () => {};
 
 describe("menu model helpers", () => {
   const sep: MenuEntry = { kind: "separator" };
-  const item = (id: string, over: Partial<Extract<MenuEntry, { kind: "item" }>> = {}): MenuEntry => ({ kind: "item", id, label: id, onSelect: noop, ...over });
+  const item = (id: string, over: Partial<MenuItemEntry> = {}): MenuItemEntry => ({ kind: "item", id, label: id, onSelect: noop, ...over });
 
   it("normalizeEntries drops leading, trailing and doubled separators and empty submenus", () => {
     expect(outline(normalizeEntries([sep, item("a"), sep, sep, item("b"), sep]))).toEqual(["a", "-", "b"]);

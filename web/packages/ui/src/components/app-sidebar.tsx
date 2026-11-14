@@ -9,7 +9,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -99,7 +98,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FadeText } from "@/components/ui/fade-text";
-import { ignoreSelect, MENU_CLOSE_INSTANT, reachableDisabledProps } from "@/lib/menu-item-disabled";
+import { MENU_CLOSE_INSTANT } from "@/lib/menu-item-disabled";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -2699,7 +2698,7 @@ const DROPDOWN_PARTS: MenuParts = {
   Sub: DropdownMenuSub,
   SubTrigger: DropdownMenuSubTrigger,
   SubContent: DropdownMenuSubContent,
-  Separator: DropdownMenuSeparator as MenuParts["Separator"],
+  Separator: DropdownMenuSeparator,
 };
 
 /**

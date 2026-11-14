@@ -18,7 +18,7 @@ export interface MenuParts {
   Sub: ComponentType<{ children?: ReactNode }>;
   SubTrigger: ComponentType<{ children?: ReactNode; "data-testid"?: string }>;
   SubContent: ComponentType<{ children?: ReactNode }>;
-  Separator: ComponentType<Record<string, never>>;
+  Separator: ComponentType<{ className?: string }>;
 }
 
 /**

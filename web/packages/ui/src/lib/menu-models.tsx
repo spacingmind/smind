@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 import type { MenuEntry } from "@/lib/menu-model";
-import type { SpaceWithTasks, Task } from "@/lib/types";
+import type { Task } from "@/lib/types";
+import type { SpaceWithTasks } from "@/lib/workspace-tree";
 import type { TreeActionAvailability } from "@/lib/task-tree-actions";
 
 /**
@@ -132,7 +133,7 @@ export function tabMenu(i: TabMenuInput): MenuEntry[] {
   }
   if (i.canSplit) {
     entries.push({ kind: "separator" });
-    const splits: Array<[TabMenuSplitDirection, string, JSX.Element]> = [
+    const splits: Array<[TabMenuSplitDirection, string, ReactNode]> = [
       ["left", "Split left", <Icons.splitColumns key="l" />],
       ["right", "Split right", <Icons.splitColumns key="r" />],
       ["up", "Split up", <Icons.splitRows key="u" />],

@@ -22,7 +22,7 @@ export const CONTEXT_MENU_PARTS: MenuParts = {
   Sub: ContextMenuSub,
   SubTrigger: ContextMenuSubTrigger,
   SubContent: ContextMenuSubContent,
-  Separator: ContextMenuSeparator as MenuParts["Separator"],
+  Separator: ContextMenuSeparator,
 };
 
 /**

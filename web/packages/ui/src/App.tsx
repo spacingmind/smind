@@ -2523,7 +2523,7 @@ function DraggableTabTrigger({
       entries={tabMenu({
         kind: entry.kind,
         path: entry.path,
-        closable: entry.closable,
+        closable: entry.closable === true,
         hasOtherClosableTabs,
         hasClosableTabsToLeft,
         hasClosableTabsToRight,
