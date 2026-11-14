@@ -126,7 +126,7 @@ func newCallbackServer(addr, path, providerLabel, state string) (*callbackServer
 	mux.HandleFunc(path, s.handleCallback)
 	s.httpServer = &http.Server{Handler: mux, ReadHeaderTimeout: callbackReadHeaderTimeout}
 
-	crash.Go("accounts.oauthServe", func() {
+	crash.GoFatal("accounts.oauthServe", func() {
 		// http.ErrServerClosed is the expected outcome of close's Shutdown
 		// call -- every other error would mean the listener died from
 		// under a still-in-flight login, which has nowhere useful to go

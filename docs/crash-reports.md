@@ -113,13 +113,50 @@ Remove the crashes folder listed above, or any file in it. It is safe to do
 at any time: nothing depends on the reports, and the folder is recreated on
 the next recorded panic.
 
+## What happens after a panic
+
+Recording a panic does not always mean the daemon carries on; each goroutine
+has a written policy (`internal/crash/policy_table_test.go` lists every one
+with its reason, and a test fails when a new goroutine has none):
+
+- **Request-scoped work is contained.** A panic in a WebSocket method answers
+  that caller with a generic internal error and the connection lives; a panic in
+  an HTTP handler ends that one connection (what Go's HTTP server does anyway);
+  a panic while a run is being driven finishes that run as an error instead of
+  leaving it running; a panic in a run's event forwarder cancels the run so it
+  can finish; a panic in a connection's event pump closes that connection so the
+  client reconnects. One-shot usage and CLI lookups are contained, logged, and
+  leave the cached answer stale.
+- **Everything else still ends the process**, as it always did, after the
+  report is written: the listener, the relay bridge, the background loops, the
+  per-session pumps, and the workers that change state. A daemon that stayed up
+  but silently without its listener would be worse than a restart.
+- A contained panic is never silent: the daemon log gets one line naming the
+  place (never the panic text) and the report file.
+
 ## What a report cannot catch
 
 - a process killed outright by the operating system (no panic runs);
-- a stack overflow or an out-of-memory kill (the runtime dies before a
-  report can be written);
-- a panic on a goroutine that is not yet wrapped by the recorder;
+- Go runtime fatal errors, which are not panics and cannot be recovered:
+  out of memory, stack overflow, `fatal error: concurrent map writes`, and
+  "all goroutines are asleep - deadlock";
+- a panic before the recorder is set up at the start of `smind serve` (and in
+  every other `smind` command, which does not record at all);
+- an exit through `log.Fatal` or `os.Exit` (startup failures such as a port
+  already in use): nothing panicked, and the message is in the daemon log;
+- a panic inside a timer callback other than the two that change state (the
+  idle flush of run rows and the queue wake-up); those still end the process as
+  before, without a report;
+- a panic on a goroutine started by code outside the packages the recorder
+  covers (a drift test lists the covered packages);
 - a crash inside the native code of an external tool smind invokes.
+
+Stack traces carry the source paths of the machine that built the binary, not
+the machine it runs on. The generic user-directory rules (`/Users/<name>`,
+`/home/<name>`, `C:\Users\<name>`) also remove the build machine's user, but a
+build path outside those shapes would show. A release is not built with
+`-trimpath`: that flag makes Go leave the version stamp out of the binary's
+build settings, which the release artifact check reads.
 
 In those cases there is no report; the system log or the tool's own output
 is the only trace.

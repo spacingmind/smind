@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -40,7 +41,8 @@ type Config struct {
 // Recorder writes bounded, redacted crash reports. A nil Recorder is a
 // no-op that still recovers.
 type Recorder struct {
-	mu         sync.Mutex
+	mu         sync.Mutex // guards the state below, never held across disk I/O
+	ioMu       sync.Mutex // one writer at a time; a second concurrent report is dropped, not waited for
 	cfg        Config
 	writeTimes []time.Time          // accepted writes, for the rolling rate limit
 	lastSeen   map[string]time.Time // dedupe key -> time of the last accepted report
@@ -108,8 +110,15 @@ type report struct {
 }
 
 // Record writes one report and returns its path, or "" when nothing was
-// written (dropped by the rate limit or the dedupe window, or an error). It
-// never panics and never blocks beyond one small file write.
+// written (dropped by the rate limit, the dedupe window or because another
+// report is being written right now; or an error). It never panics. The state
+// lock is not held across disk I/O, and a second report arriving while one is
+// being written is dropped and counted rather than queued behind a slow disk;
+// the one goroutine that is writing still waits for its own small file write.
+//
+// A failed write counts like a successful one for the rate limit and the
+// dedupe window: a panic loop on a full or unwritable disk retries the whole
+// path at most MaxPerMinute times a minute, not on every panic.
 func (r *Recorder) Record(site string, v any, stack []byte) (path string) {
 	// Everything below runs on a panicking goroutine or worse; a failure to
 	// record must not become a second panic.
@@ -118,15 +127,29 @@ func (r *Recorder) Record(site string, v any, stack []byte) (path string) {
 		return ""
 	}
 	now := r.cfg.Now()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	key := site + "\x00" + dedupeFrame(stack)
+
+	r.mu.Lock()
 	if !r.allow(now) || r.deduped(key, now) {
 		r.suppressed++
+		r.mu.Unlock()
 		return ""
 	}
+	// Reserve the slot before the write: failures count too.
+	r.writeTimes = append(r.writeTimes, now)
+	r.lastSeen[key] = now
+	r.pruneLastSeen(now)
 	rep := r.buildReport(site, v, stack, now)
+	rep.SuppressedSinceLast = r.suppressed
+	r.mu.Unlock()
+
+	if !r.ioMu.TryLock() {
+		r.mu.Lock()
+		r.suppressed++
+		r.mu.Unlock()
+		return ""
+	}
+	defer r.ioMu.Unlock()
 	data, err := marshalBounded(rep, r.cfg.MaxFileBytes)
 	if err != nil {
 		logErr(err)
@@ -137,10 +160,9 @@ func (r *Recorder) Record(site string, v any, stack []byte) (path string) {
 		logErr(err)
 		return ""
 	}
-	r.writeTimes = append(r.writeTimes, now)
-	r.lastSeen[key] = now
-	r.pruneLastSeen(now)
+	r.mu.Lock()
 	r.suppressed = 0
+	r.mu.Unlock()
 	return path
 }
 
@@ -151,7 +173,7 @@ func (r *Recorder) Recover(site string) {
 	if v == nil || r == nil {
 		return
 	}
-	r.Record(site, v, debug.Stack())
+	logRecovered(site, r.Record(site, v, debug.Stack()))
 }
 
 // Recover is Recover on the process-default recorder. It recovers even when
@@ -163,8 +185,19 @@ func Recover(site string) {
 		return
 	}
 	if r := Default(); r != nil {
-		r.Record(site, v, debug.Stack())
+		logRecovered(site, r.Record(site, v, debug.Stack()))
 	}
+}
+
+// logRecovered says in the daemon log that a panic was contained, so a
+// swallowed panic is never silent. Only the site (a code constant) and the
+// report's file name are logged, never the panic value.
+func logRecovered(site, path string) {
+	if path == "" {
+		log.Printf("crash: recovered a panic in %s (no report written: rate limit, duplicate or write failure)", site)
+		return
+	}
+	log.Printf("crash: recovered a panic in %s; report %s", site, filepath.Base(path))
 }
 
 // RecordAndRepanic is for the daemon's main goroutine (`defer
@@ -182,11 +215,51 @@ func RecordAndRepanic(site string) {
 	panic(v)
 }
 
-// Go runs fn on a new goroutine with Recover(site) installed, so a panic in
-// fn ends that goroutine only.
+// Go runs fn on a new goroutine and CONTAINS a panic in it: the panic is
+// recorded and logged and only that goroutine ends. Use it only where losing
+// the goroutine is harmless or something else makes the loss visible (see
+// GoThen); a long-lived loop or server whose silent death would leave the
+// daemon half-alive must use GoFatal. Every call site is listed with its
+// policy and reason in coverage_test.go.
 func Go(site string, fn func()) {
 	go func() {
 		defer Recover(site)
+		fn()
+	}()
+}
+
+// GoThen is Go plus a compensating action: after the panic is recorded,
+// onPanic runs (its own panic is swallowed) so the failure shows up where a
+// user or a peer goroutine would otherwise wait forever: close a connection,
+// cancel and finish a run.
+func GoThen(site string, fn func(), onPanic func()) {
+	go func() {
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			if r := Default(); r != nil {
+				logRecovered(site, r.Record(site, v, debug.Stack()))
+			}
+			func() {
+				defer func() { _ = recover() }()
+				if onPanic != nil {
+					onPanic()
+				}
+			}()
+		}()
+		fn()
+	}()
+}
+
+// GoFatal runs fn on a new goroutine and records a panic in it, then lets the
+// process die as it always did: for the goroutines that are the daemon (the
+// listener, the relay bridge, background loops, per-session pumps) a contained
+// panic would leave a daemon that is up but silently without that part.
+func GoFatal(site string, fn func()) {
+	go func() {
+		defer RecordAndRepanic(site)
 		fn()
 	}()
 }
@@ -220,16 +293,15 @@ func (r *Recorder) pruneLastSeen(now time.Time) {
 
 func (r *Recorder) buildReport(site string, v any, stack []byte, now time.Time) report {
 	rep := report{
-		Schema:              1,
-		Source:              r.cfg.Source,
-		Version:             r.cfg.Version,
-		OS:                  runtime.GOOS,
-		Arch:                runtime.GOARCH,
-		Time:                now.UTC().Format(time.RFC3339Nano),
-		Site:                site,
-		PanicType:           truncate(Redact(fmt.Sprintf("%T", v), r.cfg.Home, r.cfg.SmindHome), 200),
-		Stack:               Redact(string(stack), r.cfg.Home, r.cfg.SmindHome),
-		SuppressedSinceLast: r.suppressed,
+		Schema:    1,
+		Source:    r.cfg.Source,
+		Version:   r.cfg.Version,
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		Time:      now.UTC().Format(time.RFC3339Nano),
+		Site:      site,
+		PanicType: truncate(Redact(fmt.Sprintf("%T", v), r.cfg.Home, r.cfg.SmindHome), 200),
+		Stack:     Redact(string(stack), r.cfg.Home, r.cfg.SmindHome),
 	}
 	// Only a runtime.Error message is kept ("nil map", "index out of range"):
 	// any other panic value may carry prompt text, file contents or secrets,

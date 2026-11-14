@@ -149,7 +149,7 @@ func wireAutomations(ctx context.Context, db *store.Store, api *wsapi.API, wm *w
 	api.SetAutomations(eng)
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	crash.Go("smind.automationRun", func() {
+	crash.GoFatal("smind.automationRun", func() {
 		defer close(done)
 		eng.Run(ctx, automationTickPeriod)
 	})

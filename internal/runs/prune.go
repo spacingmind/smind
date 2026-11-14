@@ -331,7 +331,7 @@ func (p *Pruner) reclaim(ctx context.Context) int64 {
 // Start runs the daily job until ctx ends: the first pass shortly after start,
 // then every 24 hours. Passes never overlap.
 func (p *Pruner) Start(ctx context.Context) {
-	crash.Go("runs.pruneLoop", func() {
+	crash.GoFatal("runs.pruneLoop", func() {
 		timer := time.NewTimer(p.startDelay)
 		defer timer.Stop()
 		for {

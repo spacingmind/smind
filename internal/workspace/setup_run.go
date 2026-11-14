@@ -119,7 +119,7 @@ func (m *Manager) startSetup(t store.Task, ws store.Workspace) {
 
 	env := setupEnv(ws, t)
 	timeout := m.worktreesSettings().SetupTimeout
-	crash.Go("workspace.setupRun", func() {
+	crash.GoFatal("workspace.setupRun", func() {
 		defer close(sr.done)
 		defer cancel()
 		tail, err := runScript(ctx, *t.WorktreePath, ws.SetupScript, env, timeout, setupLogCap)

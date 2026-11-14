@@ -176,7 +176,7 @@ func startFleetIdemSweeper(st *store.Store, now func() time.Time) (stop func()) 
 	}
 	done := make(chan struct{})
 	exited := make(chan struct{})
-	crash.Go("wsapi.fleetIdemSweeper", func() {
+	crash.GoFatal("wsapi.fleetIdemSweeper", func() {
 		defer close(exited)
 		sweep := func() { _, _ = st.SweepFleetIdem(now().Add(-wire.IdempotencyWindow)) }
 		sweep()

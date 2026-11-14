@@ -49,7 +49,7 @@ func newRequestLogWriter(db requestLogStore, queueSize int) *requestLogWriter {
 	}
 	w := &requestLogWriter{db: db, ch: make(chan store.RequestLog, queueSize)}
 	w.wg.Add(1)
-	crash.Go("server.requestLogWrite", func() { w.run() })
+	crash.GoFatal("server.requestLogWrite", func() { w.run() })
 	return w
 }
 

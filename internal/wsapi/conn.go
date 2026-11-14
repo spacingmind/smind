@@ -198,7 +198,10 @@ func (c *conn) serve(ctx context.Context) {
 			c.eventsBus.unregister(c.eventsSub)
 			c.eventsSub.close()
 		}()
-		crash.Go("wsapi.pumpEvents", func() { c.pumpEvents(connCtx, c.eventsSub) })
+		// If the event pump panics this connection's event stream would silently
+		// stop while the socket stays open: record it and close the connection, so
+		// the client sees the drop and reconnects (re-syncing from scratch).
+		crash.GoThen("wsapi.pumpEvents", func() { c.pumpEvents(connCtx, c.eventsSub) }, func() { _ = c.tr.Close() })
 	}
 
 	for {

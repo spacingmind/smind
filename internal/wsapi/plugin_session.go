@@ -382,7 +382,7 @@ func (s *pluginSession) subscription(method string, params json.RawMessage) (any
 		s.sub = newSubscriber()
 		bus.register(s.sub)
 		sub := s.sub
-		crash.Go("wsapi.pluginPump", func() { s.pump(sub) })
+		crash.GoFatal("wsapi.pluginPump", func() { s.pump(sub) })
 	}
 	if method == pluginRPCSubscibe {
 		return subscribeResult{Topics: s.sub.subscribe(p.Topics)}, nil

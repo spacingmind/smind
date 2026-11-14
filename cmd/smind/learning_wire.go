@@ -286,7 +286,7 @@ func wireLearning(ctx context.Context, w learningWiring) (stop func()) {
 	}
 	w.API.SetLearning(deps)
 	probeSvc.Recover(ctx)
-	crash.Go("smind.probeJanitor", func() { probeSvc.Janitor(ctx) })
+	crash.GoFatal("smind.probeJanitor", func() { probeSvc.Janitor(ctx) })
 
 	var once sync.Once
 	return func() {

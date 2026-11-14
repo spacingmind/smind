@@ -45,3 +45,35 @@ func TestCrashRunDrivePanicFinalisesRun(t *testing.T) {
 		t.Fatalf("report lost its site or leaked the panic text: %s", data)
 	}
 }
+
+// crash-run-forwarder-panic-finishes-run: a panic in drive's event forwarder
+// must not leave the run "running" with the runner blocked on its next send:
+// it is recorded, the run is cancelled, events are drained and the run ends.
+func TestCrashRunForwarderPanicFinishesRun(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "crashes")
+	crash.Init(crash.Config{Dir: dir, Source: "daemon", Version: "test", MaxPerMinute: 1000})
+	t.Cleanup(func() { crash.Init(crash.Config{}) })
+
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}), taskrunner.WithSessionStore(taskrunner.NewMemorySessionStore()))
+	reg := newTestRegistry(t, st)
+	reg.forwardHook = func(taskrunner.Event) { panic("SECRET-FORWARD-TEXT") }
+
+	runID, err := reg.Start(t.Context(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "my prompt", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the helper waits 5s then fails: a hung run (the bug) fails it. The
+	// terminal status is error or done depending on whether the fake agent
+	// finished before the cancel landed; "running" is the failure.
+	waitForTerminal(t, reg, runID)
+	files, _ := filepath.Glob(filepath.Join(dir, "crash-*.json"))
+	if len(files) != 1 {
+		t.Fatalf("reports = %d, want 1", len(files))
+	}
+	data, _ := os.ReadFile(files[0])
+	if !strings.Contains(string(data), `"site":"runs.forwardEvents"`) || strings.Contains(string(data), "SECRET-FORWARD-TEXT") {
+		t.Fatalf("report lost its site or leaked the panic text: %s", data)
+	}
+}

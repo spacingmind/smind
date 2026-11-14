@@ -83,6 +83,10 @@ type Registry struct {
 	// any run starts.
 	finishWG    sync.WaitGroup
 	finishStage func(stage string)
+	// forwardHook is a test hook (nil in production): drive's event forwarder
+	// calls it for every event before recording it, so a test can force a
+	// panic there.
+	forwardHook func(e taskrunner.Event)
 
 	providerQuota ProviderQuota // guarded by mu
 	// gateFn and failureHook: the picker gate wiring (cooldown_window.go), guarded by mu.
@@ -1227,9 +1231,16 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	}()
 	events := make(chan taskrunner.Event)
 	forwardDone := make(chan struct{})
-	crash.Go("runs.forwardEvents", func() {
+	// If this forwarder panics, nobody would drain events and the runner could
+	// block on its next send while the run sat "running" forever: record it,
+	// then cancel the run and drain what is still coming so the runner can end
+	// and drive finishes the run (as an error, since it was cancelled).
+	crash.GoThen("runs.forwardEvents", func() {
 		defer close(forwardDone)
 		for e := range events {
+			if reg.forwardHook != nil {
+				reg.forwardHook(e)
+			}
 			if e.Type == taskrunner.EventTypePermissionModeChanged {
 				reg.applyReportedMode(r, e.Text, e.Initial)
 				continue
@@ -1239,6 +1250,10 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 				continue
 			}
 			reg.record(r, e)
+		}
+	}, func() {
+		r.cancel() // set once at construction: no lock (the panic may have been inside one)
+		for range events {
 		}
 	})
 
@@ -2013,7 +2028,7 @@ func (reg *Registry) Subscribe(runID string) (<-chan Event, func(), error) {
 
 	out := make(chan Event)
 	done := make(chan struct{})
-	crash.Go("runs.subscribeRelay", func() { relay(q, out, done) })
+	crash.GoFatal("runs.subscribeRelay", func() { relay(q, out, done) })
 
 	var once sync.Once
 	unsubscribe := func() {
@@ -2102,7 +2117,7 @@ func (reg *Registry) storedSubscribe(runID string) (<-chan Event, func(), error)
 	q.closeQueue()
 	out := make(chan Event)
 	done := make(chan struct{})
-	crash.Go("runs.storedRelay", func() { relay(q, out, done) })
+	crash.GoFatal("runs.storedRelay", func() { relay(q, out, done) })
 	var once sync.Once
 	return out, func() {
 		once.Do(func() {
@@ -2207,7 +2222,7 @@ func (reg *Registry) CloseAll() {
 			r.mu.Unlock()
 			wg.Add(1)
 			rr := r
-			crash.Go("runs.stopRun", func() {
+			crash.GoFatal("runs.stopRun", func() {
 				defer wg.Done()
 				_ = reg.Stop(rr.id)
 				<-rr.closedCh

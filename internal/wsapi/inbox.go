@@ -119,7 +119,7 @@ func newInboxHost(db *store.Store, bus *eventBus, reg *runs.Registry, vals *vali
 			return ""
 		},
 	}
-	crash.Go("wsapi.inboxLoop", func() { h.loop() })
+	crash.GoFatal("wsapi.inboxLoop", func() { h.loop() })
 	return h
 }
 

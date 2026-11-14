@@ -106,7 +106,7 @@ func wireScratch(cfg config.Config, db *store.Store, wm *workspace.Manager) (opt
 func (w *scratchWiring) start(ctx context.Context, api scratchAPI, reg *runs.Registry) {
 	w.reg.Store(reg)
 	api.AttachScratch(w.mgr, w.live)
-	crash.Go("smind.scratchSweep", func() {
+	crash.GoFatal("smind.scratchSweep", func() {
 		w.sweep()
 		t := time.NewTicker(scratchSweepInterval)
 		defer t.Stop()

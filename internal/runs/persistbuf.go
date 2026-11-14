@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -94,7 +95,10 @@ func (reg *Registry) persist(r *run, seq int64, e Event) {
 		b.open, b.typ, b.seq = true, e.Type, seq
 		b.text.Reset()
 		if b.timer == nil {
-			b.timer = time.AfterFunc(persistIdle, func() { reg.idleFlush(r) })
+			b.timer = time.AfterFunc(persistIdle, func() {
+				defer crash.RecordAndRepanic("runs.idleFlush") // timer callback: recorded, then dies as before
+				reg.idleFlush(r)
+			})
 		} else {
 			b.timer.Reset(persistIdle)
 		}

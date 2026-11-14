@@ -154,7 +154,7 @@ func (n *usageNotifier) notify(id int64, fn func(int64)) {
 	}
 	n.running = true
 	n.mu.Unlock()
-	crash.Go("wsapi.usageDrain", func() { n.drain(fn) })
+	crash.GoFatal("wsapi.usageDrain", func() { n.drain(fn) })
 }
 
 func (n *usageNotifier) drain(fn func(int64)) {

@@ -225,7 +225,7 @@ func (s *validationSeat) request(ctx context.Context, rc *requestContext, raw js
 		Probe: s.probe, Stop: func() { s.stopTask(vtask.ID) },
 		Before: before, LeadSnapshot: func() (validation.Snapshot, error) { return validation.Take(context.Background(), *lead.WorktreePath) },
 	}
-	crash.Go("wsapi.validationWatch", func() {
+	crash.GoFatal("wsapi.validationWatch", func() {
 		defer s.forget(vtask.ID)
 		w.Run(s.ctx, s.watchPeriod)
 	})

@@ -324,9 +324,9 @@ func (reg *Registry) Create(taskID int64, worktreePath string, extraEnv ...strin
 	reg.sessions[id] = s
 	reg.mu.Unlock()
 
-	crash.Go("terminal.readLoop", func() { reg.readLoop(s) })
-	crash.Go("terminal.waitLoop", func() { reg.waitLoop(s) })
-	crash.Go("terminal.checkpointLoop", func() { reg.checkpointLoop(s) })
+	crash.GoFatal("terminal.readLoop", func() { reg.readLoop(s) })
+	crash.GoFatal("terminal.waitLoop", func() { reg.waitLoop(s) })
+	crash.GoFatal("terminal.checkpointLoop", func() { reg.checkpointLoop(s) })
 
 	return id, nil
 }
@@ -601,7 +601,7 @@ func (reg *Registry) Subscribe(id string) (<-chan Event, func(), error) {
 
 	out := make(chan Event)
 	done := make(chan struct{})
-	crash.Go("terminal.relay", func() { relay(q, out, done) })
+	crash.GoFatal("terminal.relay", func() { relay(q, out, done) })
 
 	var once sync.Once
 	unsubscribe := func() {
@@ -735,7 +735,7 @@ func (reg *Registry) CloseAll() {
 	for _, id := range ids {
 		wg.Add(1)
 		sid := id
-		crash.Go("terminal.close", func() {
+		crash.GoFatal("terminal.close", func() {
 			defer wg.Done()
 			_ = reg.Close(sid)
 		})

@@ -53,7 +53,7 @@ func startPolicySweeper(db *store.Store) *policySweeper {
 	s := &policySweeper{done: make(chan struct{})}
 	sweep := func() { _, _ = db.SweepPolicyAudit(time.Now().Add(-store.PolicyAuditRetention)) }
 	sweep()
-	crash.Go("wsapi.policySweeper", func() {
+	crash.GoFatal("wsapi.policySweeper", func() {
 		t := time.NewTicker(policySweepPeriod)
 		defer t.Stop()
 		for {

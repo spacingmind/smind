@@ -45,7 +45,7 @@ func wireStallAlert(ctx context.Context, db *store.Store, api *wsapi.API, minute
 	api.SetStalledSource(det.Current)
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	crash.Go("smind.stallDetector", func() {
+	crash.GoFatal("smind.stallDetector", func() {
 		defer close(done)
 		det.Run(ctx, stallTickPeriod(minutes))
 	})

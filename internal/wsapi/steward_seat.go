@@ -267,7 +267,7 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 		}
 		if stewardGateUnknown(d.Gates) {
 			taskID := p.TaskID
-			crash.Go("wsapi.stewardRecheck", func() { h.recheck(id, taskID, lead, prof, sha) })
+			crash.GoFatal("wsapi.stewardRecheck", func() { h.recheck(id, taskID, lead, prof, sha) })
 			return reviewResult{ReviewID: id, TaskID: p.TaskID, CommitSHA: sha, Status: "pending"}, nil
 		}
 		return h.startPasses(id, lead, d, dsha, sha, cfg)
@@ -275,7 +275,7 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 
 	if stewardGateUnknown(d.Gates) {
 		taskID := p.TaskID
-		crash.Go("wsapi.stewardRecheckPasses", func() { h.recheck(id, taskID, lead, prof, sha) })
+		crash.GoFatal("wsapi.stewardRecheckPasses", func() { h.recheck(id, taskID, lead, prof, sha) })
 		return reviewResult{ReviewID: id, TaskID: p.TaskID, CommitSHA: sha, Status: "pending"}, nil
 	}
 	return h.startSeat(id, lead, prof, d, dsha, sha)
@@ -426,7 +426,7 @@ func (h *stewardHost) startSeat(id int64, lead store.Task, prof store.AgentProfi
 		},
 	}
 	h.watches.Add(1)
-	crash.Go("wsapi.stewardSeatWatch", func() {
+	crash.GoFatal("wsapi.stewardSeatWatch", func() {
 		defer h.watches.Done()
 		defer h.forget(task.ID)
 		w.Run(h.ctx, h.watchPeriod)

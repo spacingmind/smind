@@ -145,7 +145,7 @@ func (reg *Registry) notifyBudgetReached(be *BudgetExceededError) {
 	reg.notifyQueueUpdated(target)
 	reg.armQueueWake()
 	if debounce <= 0 {
-		crash.Go("runs.deliverOne", func() { reg.deliverOne(target) })
+		crash.GoFatal("runs.deliverOne", func() { reg.deliverOne(target) })
 	}
 }
 

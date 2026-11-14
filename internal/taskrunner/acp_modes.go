@@ -176,7 +176,7 @@ func (r *Runner) maybeProbe(provider Provider, probe func(context.Context, Provi
 	r.acpModes[provider] = e
 	r.modeMu.Unlock()
 
-	crash.Go("taskrunner.acpModeProbe", func() {
+	crash.GoFatal("taskrunner.acpModeProbe", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), acpModeProbeTimeout)
 		defer cancel()
 		if err := probe(ctx, provider); err != nil {

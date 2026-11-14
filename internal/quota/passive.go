@@ -696,7 +696,7 @@ func (p *Passive) dropPending(id int64) {
 func (p *Passive) startLocked() {
 	if !p.started {
 		p.started = true
-		crash.Go("quota.passiveRun", func() { p.run() })
+		crash.GoFatal("quota.passiveRun", func() { p.run() })
 	}
 }
 

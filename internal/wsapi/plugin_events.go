@@ -150,6 +150,6 @@ func (a *API) WatchPlugins(ctx context.Context) func() {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	crash.Go("wsapi.pluginWatch", func() { defer close(done); a.pluginEvents.watch(ctx, 2*time.Second) })
+	crash.GoFatal("wsapi.pluginWatch", func() { defer close(done); a.pluginEvents.watch(ctx, 2*time.Second) })
 	return func() { cancel(); <-done }
 }

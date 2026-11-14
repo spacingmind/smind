@@ -285,7 +285,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 	)
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
-	crash.Go("taskrunner.isolatedForward", func() {
+	crash.GoFatal("taskrunner.isolatedForward", func() {
 		defer close(forwardDone)
 		for msg := range updates {
 			if sys, ok := msg.(claudecode.SystemMessage); ok && sys.Subtype == "init" {

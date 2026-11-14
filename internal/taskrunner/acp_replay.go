@@ -75,7 +75,7 @@ func (r *Runner) ReplayACPSession(ctx context.Context, provider Provider, sessio
 		over   bool
 	}
 	got := make(chan collected, 1)
-	crash.Go("taskrunner.replayCollect", func() {
+	crash.GoFatal("taskrunner.replayCollect", func() {
 		var c collected
 		var bytes int64
 		for u := range updates { // drained to the end so the client never blocks

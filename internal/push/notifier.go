@@ -133,7 +133,7 @@ func (n *Notifier) Start() {
 		return
 	}
 	n.started = true
-	crash.Go("push.run", func() { n.run() })
+	crash.GoFatal("push.run", func() { n.run() })
 }
 
 func (n *Notifier) run() {

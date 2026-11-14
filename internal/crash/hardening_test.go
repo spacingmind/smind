@@ -161,3 +161,51 @@ func TestCrashTmpFilesOfOthersKept(t *testing.T) {
 		t.Fatalf("an old leftover temp file was kept (err = %v)", err)
 	}
 }
+
+// crash-redact-user-dir-with-spaces: a Windows or macOS user name with spaces
+// is removed whole, not left half-visible.
+func TestCrashRedactUserDirWithSpaces(t *testing.T) {
+	cases := []struct {
+		in   string
+		gone []string
+		keep string
+	}{
+		{`C:\Users\Alice Smith\go\pkg\x.go:12 +0x1`, []string{"Alice", "Smith"}, `\go\pkg\x.go:12 +0x1`},
+		{`C:/Users/Alice Smith/go/x.go`, []string{"Alice", "Smith"}, `/go/x.go`},
+		{"/Users/Alice Smith/go/x.go:12 +0x1", []string{"Alice", "Smith"}, "/go/x.go:12 +0x1"},
+		{"/home/Jo Ann Marie/code/x.go", []string{"Jo", "Ann", "Marie"}, "/code/x.go"},
+		{"open /Users/bob: permission denied", []string{"bob"}, ": permission denied"},
+		{"/Users/Åsa Öberg/x.go", []string{"Åsa", "Öberg"}, "/x.go"},
+	}
+	for _, c := range cases {
+		got := Redact(c.in, "/nobody", "")
+		for _, g := range c.gone {
+			if strings.Contains(got, g) {
+				t.Errorf("Redact(%q) = %q: %q survived", c.in, got, g)
+			}
+		}
+		if !strings.Contains(got, c.keep) {
+			t.Errorf("Redact(%q) = %q: lost the rest of the path %q", c.in, got, c.keep)
+		}
+	}
+}
+
+// crash-redact-auth-scheme-credentials: an Authorization / Cookie value is
+// removed whole, whatever the scheme word is.
+func TestCrashRedactAuthSchemeCredentials(t *testing.T) {
+	for _, c := range []struct{ in, secret string }{
+		{"Authorization: Token abc123", "abc123"},
+		{"authorization: ApiKey k-123-zzz", "k-123-zzz"},
+		{`"Authorization": "Token abc123"`, "abc123"},
+		{"Proxy-Authorization: Digest username=u, response=xyz789", "xyz789"},
+		{"Authorization: Negotiate YIIabc123", "YIIabc123"},
+		{"Cookie: sid=abc123; theme=dark", "abc123"},
+		{"Set-Cookie: sid=abc123; Path=/", "abc123"},
+		{"retry with token abcdefghijklmnop", "abcdefghijklmnop"},
+		{"x-api-key: abc123def", "abc123def"},
+	} {
+		if got := Redact(c.in, "/nobody", ""); strings.Contains(got, c.secret) {
+			t.Errorf("Redact(%q) = %q: %q survived", c.in, got, c.secret)
+		}
+	}
+}

@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/spacingmind/smind/internal/crash"
 )
@@ -89,4 +91,60 @@ func crashJSON(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// eventPanicTransport panics when asked to send an event notification and
+// records that it was closed.
+type eventPanicTransport struct {
+	Transport
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (t *eventPanicTransport) Send(data []byte) error {
+	if strings.Contains(string(data), `"event"`) {
+		panic("SECRET-EVENT-TEXT")
+	}
+	return t.Transport.Send(data)
+}
+
+func (t *eventPanicTransport) Close() error {
+	t.once.Do(func() { close(t.closed) })
+	return t.Transport.Close()
+}
+
+// crash-ws-pump-panic-closes-connection: a panic in a connection's event pump
+// is recorded and the connection is closed, instead of the socket staying open
+// with its event stream silently dead.
+func TestCrashWSPumpPanicClosesConnection(t *testing.T) {
+	dir := crashDir(t)
+	client, server := newPipeTransportPair()
+	tr := &eventPanicTransport{Transport: server, closed: make(chan struct{})}
+	c := newConn(tr, map[string]handlerFunc{})
+	c.eventsBus = newEventBus()
+	c.eventsSub = newSubscriber()
+	c.eventsSub.subscribe([]string{"t"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.serve(ctx)
+	defer client.Close()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for !c.eventsBus.HasSubscribers("t") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	c.eventsBus.Publish(Event{Topic: "t", Payload: "x"})
+	select {
+	case <-tr.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection stayed open after its event pump panicked")
+	}
+	files := crashReports(t, dir)
+	if len(files) != 1 {
+		t.Fatalf("reports = %d, want 1", len(files))
+	}
+	data, _ := os.ReadFile(files[0])
+	if !strings.Contains(string(data), `"site":"wsapi.pumpEvents"`) || strings.Contains(string(data), "SECRET-EVENT-TEXT") {
+		t.Fatalf("report lost its site or leaked the panic text: %s", data)
+	}
 }

@@ -476,7 +476,8 @@ func (reg *Registry) armQueueWake() {
 		d = 0
 	}
 	reg.wakeTimer = time.AfterFunc(d, func() {
-		reg.DeliverQueued() // re-arms via its deferred armQueueWake
+		defer crash.RecordAndRepanic("runs.queueWake") // timer callback: recorded, then dies as before
+		reg.DeliverQueued()                            // re-arms via its deferred armQueueWake
 	})
 }
 
@@ -680,7 +681,7 @@ func (reg *Registry) cancelQueuedItem(id int64, kind, reason string) {
 	// this can run under deliverMu, which the notifier's delivery also takes.
 	if chat, err := reg.st.GetChat(item.ChatID); err == nil && !reg.closing.Load() {
 		taskID := chat.TaskID
-		crash.Go("runs.evaluateChildNotifications", func() { reg.evaluateChildNotifications(taskID) })
+		crash.GoFatal("runs.evaluateChildNotifications", func() { reg.evaluateChildNotifications(taskID) })
 	}
 }
 

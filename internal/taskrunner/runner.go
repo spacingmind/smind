@@ -652,7 +652,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		lastUsageUpdate acp.UsageUpdate
 		gotUsageUpdate  bool
 	)
-	crash.Go("taskrunner.forwardACPUpdates", func() {
+	crash.GoFatal("taskrunner.forwardACPUpdates", func() {
 		defer close(forwardDone)
 		for u := range updates {
 			if uu, ok := acp.ParseUsageUpdate(u); ok {
@@ -1141,7 +1141,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
-	crash.Go("taskrunner.forwardClaudeMessages", func() {
+	crash.GoFatal("taskrunner.forwardClaudeMessages", func() {
 		defer close(forwardDone)
 		forwardClaudeMessages(ctx, updates, events, func(msg claudecode.Message) {
 			probe.observe(msg)
@@ -1480,7 +1480,7 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 
 	updates := make(chan codex.Update)
 	forwardDone := make(chan struct{})
-	crash.Go("taskrunner.forwardCodexUpdates", func() {
+	crash.GoFatal("taskrunner.forwardCodexUpdates", func() {
 		defer close(forwardDone)
 		for u := range updates {
 			select {

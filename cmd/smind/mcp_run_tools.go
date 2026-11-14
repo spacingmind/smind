@@ -594,7 +594,7 @@ func mcpWaitAnyRun(ctx context.Context, client *wsclient.Client, runIDs []string
 	results := make(chan result, len(runIDs))
 	for _, id := range runIDs {
 		wg.Add(1)
-		crash.Go("smind.mcpWaitRuns", func() {
+		crash.GoFatal("smind.mcpWaitRuns", func() {
 			defer wg.Done()
 			out, err := mcpWaitOneRun(ctx, client, id, deadline, ignore)
 			results <- result{out, err}

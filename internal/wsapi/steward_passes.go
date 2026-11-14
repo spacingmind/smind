@@ -213,7 +213,7 @@ func (h *stewardHost) startPassSeat(id int64, axis steward.Axis, limits config.S
 		},
 	}
 	h.watches.Add(1)
-	crash.Go("wsapi.stewardPassWatch", func() {
+	crash.GoFatal("wsapi.stewardPassWatch", func() {
 		defer h.watches.Done()
 		defer h.forget(task.ID)
 		w.Run(h.ctx, h.watchPeriod)

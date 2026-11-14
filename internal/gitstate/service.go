@@ -211,7 +211,7 @@ func (s *Service) startLoop(ctx context.Context, tick <-chan time.Time, every ti
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	crash.Go("gitstate.heartbeatLoop", func() {
+	crash.GoFatal("gitstate.heartbeatLoop", func() {
 		defer s.wg.Done()
 		if ticker != nil {
 			defer ticker.Stop()
@@ -300,7 +300,7 @@ func (s *Service) List(workspaceID int64) ([]TaskGit, error) {
 	var wg sync.WaitGroup
 	for range listWorkers {
 		wg.Add(1)
-		crash.Go("gitstate.listWorker", func() {
+		crash.GoFatal("gitstate.listWorker", func() {
 			defer wg.Done()
 			for i := range jobs {
 				if g, err := s.Get(ids[i]); err == nil {
@@ -364,7 +364,7 @@ func (s *Service) Invalidate(taskID int64) {
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	crash.Go("gitstate.invalidate", func() {
+	crash.GoFatal("gitstate.invalidate", func() {
 		defer s.wg.Done()
 		s.InvalidateSync(taskID)
 	})
@@ -677,7 +677,7 @@ func (s *Service) fetchDue(focused []int64) {
 			bases = append(bases, b)
 		}
 		sort.Strings(bases)
-		crash.Go("gitstate.fetch", func() { s.fetch(ws, bases) })
+		crash.GoFatal("gitstate.fetch", func() { s.fetch(ws, bases) })
 	}
 }
 

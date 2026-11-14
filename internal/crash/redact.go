@@ -15,8 +15,11 @@ import (
 // messages are never stored at all); it cannot recognise a secret of an
 // unknown shape.
 var (
-	reUnixUserDir = regexp.MustCompile(`(?i)(?:/Users/|/home/)[^/\s]+|/root\b`)
-	reWindowsUser = regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][^\\/\s]+`)
+	// A user directory name may contain spaces ("C:\Users\Alice Smith"): take the
+	// whole component, words separated by single spaces, up to the next
+	// separator or any other character a name cannot hold.
+	reUnixUserDir = regexp.MustCompile(`(?i)(?:/Users/|/home/)[\p{L}\p{N}_.'+@-]+(?: [\p{L}\p{N}_.'+@-]+)*|/root\b`)
+	reWindowsUser = regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][\p{L}\p{N}_.'+@-]+(?: [\p{L}\p{N}_.'+@-]+)*`)
 	reBearer      = regexp.MustCompile(`(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+`)
 	reSK          = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}`)
 	reGitHubToken = regexp.MustCompile(`\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{16,}`)
@@ -25,7 +28,13 @@ var (
 	reJWT         = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*`)
 	// key = value, key: value and "key":"value" for a key that names a secret;
 	// the value is a quoted string (spaces allowed) or the rest of the word.
-	reKeyValue    = regexp.MustCompile(`(?i)(["']?[a-z0-9_-]*(?:token|secret|pass(?:word|wd|phrase)?|apikey|api[_-]key|authorization|cookie|credential|private[_-]?key)[a-z0-9_-]*["']?\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)`)
+	reKeyValue = regexp.MustCompile(`(?i)(["']?[a-z0-9_-]*(?:token|secret|pass(?:word|wd|phrase)?|apikey|api[_-]key|authorization|cookie|credential|private[_-]?key)[a-z0-9_-]*["']?\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)`)
+	// An Authorization or Cookie header carries a scheme word and then the
+	// credential ("Token abc", "Digest ...", "sid=1; other=2"): take the rest of
+	// the line, not just the first word.
+	reAuthLine = regexp.MustCompile(`(?i)(["']?(?:proxy-)?authorization["']?\s*[=:]\s*|\b(?:set-)?cookie["']?\s*[=:]\s*)[^\r\n]*`)
+	// A bare "<scheme> <credential>" for the schemes that name a credential type.
+	reSchemeCred  = regexp.MustCompile(`(?i)(\b(?:token|apikey|api-key|digest|negotiate|ntlm)\s+)[A-Za-z0-9._~+/=-]{12,}`)
 	reURLUserinfo = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@`)
 	reHexRun      = regexp.MustCompile(`\b[0-9a-fA-F]{32,}\b`)
 	reHighEntropy = regexp.MustCompile(`[A-Za-z0-9_-]{32,}`)
@@ -58,6 +67,8 @@ func redactOnce(s, home, smindHome string) string {
 	// survive a /Users/... match cut in the middle of the path.
 	s = reWindowsUser.ReplaceAllString(s, "<user dir>")
 	s = reUnixUserDir.ReplaceAllString(s, "<user dir>")
+	s = reAuthLine.ReplaceAllString(s, "${1}[redacted]")
+	s = reSchemeCred.ReplaceAllString(s, "${1}[redacted]")
 	for _, re := range rePlainSecrets {
 		s = re.ReplaceAllString(s, "[redacted]")
 	}

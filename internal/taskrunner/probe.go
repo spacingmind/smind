@@ -156,7 +156,7 @@ func (r *Runner) RunPromptProbe(ctx context.Context, taskID, chatID int64, provi
 	)
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
-	crash.Go("taskrunner.probeForward", func() {
+	crash.GoFatal("taskrunner.probeForward", func() {
 		defer close(forwardDone)
 		for msg := range updates {
 			if sys, ok := msg.(claudecode.SystemMessage); ok && sys.Subtype == "init" {
