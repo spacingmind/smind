@@ -1,6 +1,6 @@
 # Agent questions reach the human (ADR-0055)
 
-Status: **PR1 in review** (decisions D1-D10 accepted as recommended on 2026-11-09; ADR-0055 stays Proposed until the first implementation PRs land).
+Status: **PR1 and PR2 (ACP half) merged; PR3 (mobile card + push) in review** (decisions D1-D10 accepted as recommended on 2026-11-09; ADR-0055 stays Proposed until the first implementation PRs land).
 See [ADR-0055](../../decisions/0055-agent-questions-reach-the-human.md). Size: L (wsapi, inbox, events, UI on three surfaces, a table): each PR below with a
 validation contract (ADR-0045).
 
@@ -68,6 +68,50 @@ PR1 as built, and what it leaves for later (stated, not hidden):
 - 2026-11-09: Claude `AskUserQuestion` probe (Haiku, five scenarios, about USD 0.014); PR1 built: model, events, decider, RPCs, profile field, inbox item, MCP state, CLI, web card.
 - Earlier note: Code facts checked against `internal/taskrunner/permission.go`, `internal/runs/registry.go`, `internal/codex/client.go`,
   `internal/acp`, `internal/inbox`.
+
+## PR3: the mobile question card and the question push (this PR)
+
+Checked against `origin/develop` before writing. **Already shipped, dropped from PR3:** the web card, the inbox `question` kind in the daemon and in the mobile
+inbox types/row view (`mobile/src/inbox/view.ts`), `run.answerQuestion`/`run.pendingQuestions` and the human-only tables, the `question_request`/`question_resolved`
+events in `run.attach` and `run.logs`, `waiting_question` in the MCP tools, the web long-question collapse ("Show all"). **Not shipped, built here:** the mobile board
+and card, the mobile timeline marker, the `question` push kind (daemon and mobile), mobile wording for the `waiting_question` state.
+
+### Decisions
+
+- **M1 inline card, not a sheet.** The question is a card in the task transcript, exactly where the permission card sits (same `Card`, waiting tint, same
+  optimistic board pattern), because a run waits in that screen and a second modal stack would add a navigation path for the same answer. The inbox row and the
+  push already open the task. (A bottom sheet stays open to the Human.)
+- **M2 state comes from the event stream.** `QuestionBoard` (twin of `PermissionBoard`) is fed from `run.logs` history and every `run.attach` event; a
+  `question_resolved` event is authoritative over a local tap; a failed `run.answerQuestion` rolls the optimistic state back only if no event resolved it.
+- **M3 push is title-only (D7).** New kind `question`; the body is the fixed `An agent has a question`, never question text, a header or an option; the title is
+  the task title like every other kind. Deduped by request id. A resolved question sends nothing. A seat or system task never pushes (the existing `System` rule).
+- **M4 no new daemon state.** `waiting_question` is worded on mobile (label `Waiting for your answer`, same tone and attention rollup as `waiting_permission`);
+  the task tree does not emit it yet (stated limit from PR1), so today the word only appears if a later daemon sends it.
+- **M5 untrusted text.** Question, header, option label and description render in plain `<Text>` (selectable, no `Linking`, no markdown component), nothing is
+  preselected, Submit is disabled with the reason shown, and a long ask collapses behind "Show all".
+
+### Acceptance criteria (PR3)
+
+- AC3.1 A pending question on the task screen is a card with a header chip, the question text, options with descriptions, an "Other" field when allowed, a textarea for a text question, a note field and Submit/Decline; nothing is preselected.
+- AC3.2 Submit is disabled until every question has an answer and the card says why; the answer goes out as `run.answerQuestion` with `answers` (option ids and/or text, empty fields omitted); Decline sends `action: decline` and the trimmed note.
+- AC3.3 The card closes into a one-line marker from `question_resolved`, worded per resolution (answered, declined, timed out, refused secret, refused unsupported, repeat, profile decline, no human, provider cancellation, run ended, restart); an unknown resolution still renders as its raw word.
+- AC3.4 Adversarial agent text (markdown, a URL, an HTML tag, bidi/control characters already stripped by the daemon) renders as inert text: no link is tappable, no markdown is interpreted.
+- AC3.5 A question over 480 characters or 8 lines collapses behind "Show all" / "Show less"; the answer fields stay reachable.
+- AC3.6 The daemon sends a `question` push on `question.pending` with a fixed body and no question text, a registered device that did not subscribe to `question` gets none, a duplicate request id is sent once, and the seal/open round trip carries the new kind; mobile opens a `question` push on the task.
+- AC3.7 `waiting_question` reads "Waiting for your answer" and counts as waiting in the attention rollup.
+- AC3.8 Mobile and web suites pass; the web `stewardSafety`-style source scan and the mobile one stay green (no approve/merge/always-allow wording in the question sources).
+
+### Test scenarios (PR3)
+
+Go: `TestPush_QuestionTitleOnly`, `TestPush_QuestionKindIsSubscribable`, `TestPush_QuestionDedupedByRequestID`, `TestPushInput_QuestionPendingMapsToQuestionKind`, `TestPushInput_QuestionResolvedNeverNotifies`.
+Mobile (vitest): `questionRequests.test.ts` (board from history, live resolve beats tap, failed answer rolls back only without an event, double tap, unknown resolution, history pair lands resolved), `questionAnswer.test.ts` (draft validity, answers payload, empty fields omitted, decline note trimmed and rune-clamped, single/other exclusion, multi), `questionResolution.test.ts` (every resolution word), `questionCard.test.tsx` or a pure-view-model equivalent (no preselect, inert text, collapse threshold, submit-disabled reason), `pushQuestion.test.ts` (open and routing of kind `question`), `taskTree.test.ts` additions (waiting_question label/tone/rollup), `inboxView.test.ts` unchanged.
+Frames (390 light+dark, component-level, see Validation): single, multi, other, free text, adversarial, long collapsed and expanded, submit disabled with reason, submitting, resolved marker per outcome (answered, declined, timeout, refused secret, restart).
+
+### PR3 limits (stated up front)
+
+- No device and no daemon-driven question exist in the mobile smoke harness, so the frames are component-level (the real card on fixtures through the web target), not a daemon round trip.
+- An already registered device that stored an explicit kinds list does not receive `question` pushes until it re-registers (it does on the next app start with the new build, since `ALL_KINDS` grows).
+- `waiting_question` does not come from the task tree yet.
 
 ## Open items (from review, not in PR1)
 
