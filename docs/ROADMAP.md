@@ -241,6 +241,30 @@ Status as of v0.10.0 (2026-10-11):
       (`runsOutAt`) is out of scope. Design (Accepted):
       [ADR-0028](decisions/0028-account-usage-windows.md).
 
+## Next epics
+
+Planned work, grouped into eighteen epics. Each is a direction, not a date or a promise; the
+detail of an epic lives in its own plan under `docs/plans/active/` when it starts.
+
+- **E1 Safety and trust floor**: a firmer baseline for what an agent may do, and clearer proof of who approved it.
+- **E2 Agent questions and steering, finished**: agents ask the human and the human steers a running turn, on every surface.
+- **E3 Chat fork, retry and undo, finished**: branch a conversation, rerun a turn, and undo the files a turn wrote.
+- **E4 Provider adoptions**: effort levels, the auto-mode gate, proxy settings and the remaining Codex and ACP items.
+- **E5 UX flows**: guided first run, turn summaries, a working inbox, phone pairing, message search and ambient quota.
+- **E6 Workbench**: a terminal, an editor and a browser that agents and people can both use.
+- **E7 Sessions and history**: import earlier sessions and hand a conversation to another agent.
+- **E8 Orchestration quality**: better briefs, handoffs and review loops between Leads and Peers.
+- **E9 Dev process and CI health**: faster, steadier checks and fewer flaky tests.
+- **E10 Desktop and mobile distribution**: signing, notarization and store readiness.
+- **E11 Plugins**: the remaining plugin surfaces and their public docs.
+- **E12 Wire schema and shared clients**: one typed contract for the daemon, web and mobile clients.
+- **E13 Hosted app and relay**: parked.
+- **E14 Gateway and usage insight**: clearer proxy and usage reporting.
+- **E15 Resilience and attention**: recover from restarts and sleep, and surface what needs a person.
+- **E16 Automations v2**: scheduled and event-driven runs.
+- **E17 Office mode v2**: parked.
+- **E18 Git and forge**: pull request, branch and forge workflows beyond GitHub.
+
 ## Guiding principles
 
 1. **Dogfood-first** — each finished phase replaces a piece of a reference workbench in real use.
