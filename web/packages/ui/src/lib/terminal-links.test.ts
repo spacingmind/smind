@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { findTerminalLinks } from "@/lib/terminal-links";
+import { activateTerminalLink, findTerminalLinks } from "@/lib/terminal-links";
 
 /** The path matches of a line, for terser assertions. */
 function paths(line: string) {
@@ -118,5 +118,16 @@ describe("findTerminalLinks combined", () => {
       expect(matches[i]!.start).toBeGreaterThanOrEqual(matches[i - 1]!.end);
     }
     expect(matches[0]!.start).toBe(0);
+  });
+});
+
+describe("activateTerminalLink", () => {
+  it("runs only with Ctrl or Cmd held", () => {
+    const run = vi.fn();
+    activateTerminalLink({ ctrlKey: false, metaKey: false }, run);
+    expect(run).not.toHaveBeenCalled();
+    activateTerminalLink({ ctrlKey: true, metaKey: false }, run);
+    activateTerminalLink({ ctrlKey: false, metaKey: true }, run);
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });

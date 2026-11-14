@@ -140,3 +140,8 @@ function isPathToken(token: string): boolean {
   const extension = EXTENSION_RE.exec(token)?.[1];
   return extension !== undefined && /[A-Za-z]/.test(extension);
 }
+
+/** Opening a link needs Ctrl (or Cmd on macOS) held: a plain click only selects text, so an accidental click never opens anything (DT3-A AC2). */
+export function activateTerminalLink(event: { ctrlKey: boolean; metaKey: boolean }, run: () => void): void {
+  if (event.ctrlKey || event.metaKey) run();
+}

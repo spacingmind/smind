@@ -13,7 +13,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { openExternalUrl } from "@/lib/external-link";
-import { findTerminalLinks, type TerminalLinkMatch } from "@/lib/terminal-links";
+import { activateTerminalLink, findTerminalLinks, type TerminalLinkMatch } from "@/lib/terminal-links";
 import { resolveTerminalPath } from "@/lib/terminal-path";
 import { encodeTerminalKey, hasPendingModifiers, resolvePendingModifierData, terminalKeyInput } from "@/lib/terminal-keys";
 import { loadTerminalScrollback } from "@/lib/terminal-prefs";
@@ -152,9 +152,7 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
                   range: { start: { x: m.start + 1, y }, end: { x: m.end, y } },
                   text: m.text,
                   decorations: { underline: true, pointerCursor: true },
-                  activate: (event: MouseEvent) => {
-                    if (event.ctrlKey || event.metaKey) linkHandler?.(m, event);
-                  },
+                  activate: (event: MouseEvent) => activateTerminalLink(event, () => linkHandler?.(m, event)),
                   hover: () => {
                     if (term.element) term.element.title = "Ctrl+click to open (Cmd+click on macOS)";
                   },
