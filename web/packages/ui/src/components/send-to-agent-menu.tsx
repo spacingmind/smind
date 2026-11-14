@@ -39,11 +39,12 @@ export function SendToAgentMenu({ getEntries, testId }: { getEntries: () => Send
           variant="ghost"
           size="sm"
           aria-label="Send to agent"
+          title="Send to agent"
           data-testid={testId ?? "send-to-agent"}
           className="max-sm:min-h-11"
         >
           <Icons.send aria-hidden />
-          <span className="max-sm:sr-only">Send to agent</span>
+          <span>Send to agent</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
