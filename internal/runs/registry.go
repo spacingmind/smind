@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -1210,6 +1211,20 @@ func resolveChat(wm *workspace.Manager, taskID, chatID int64) (store.Chat, error
 }
 
 func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runner) {
+	// A panic anywhere below must not leave the run "running" forever (its
+	// queue slot, its tree's concurrency guard, its clients): record it, then
+	// finish the run as an error. Not when the panic came from finish itself:
+	// finish already started persisting the terminal state and a second call
+	// could double it.
+	finishing := false
+	defer func() {
+		if v := recover(); v != nil {
+			crash.Default().Record("runs.drive", v, debug.Stack())
+			if !finishing {
+				reg.finish(r, errors.New("the run stopped on an internal error"))
+			}
+		}
+	}()
 	events := make(chan taskrunner.Event)
 	forwardDone := make(chan struct{})
 	crash.Go("runs.forwardEvents", func() {
@@ -1281,6 +1296,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 		}
 	}
 	<-forwardDone
+	finishing = true
 	reg.finish(r, err)
 }
 
