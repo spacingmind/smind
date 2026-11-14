@@ -71,6 +71,10 @@ function VisibleCard({
   onAddProject?: () => void;
 }) {
   const dismiss = useGetStartedDismissedStore((s) => s.set);
+  // A fresh machine lacks most agent CLIs: list the ones that exist (signed out or still checking) and fold the rest into a count.
+  const missing = providers.filter((p) => agentStatus(health[p.id]) === "not-installed");
+  const visibleProviders = providers.filter((p) => agentStatus(health[p.id]) !== "not-installed");
+  const missingCount = missing.length;
 
   // The card usually mounts before provider.list answers; ensure() is a
   // single-flight no-op per already-tested id, so re-running it when the
@@ -109,12 +113,23 @@ function VisibleCard({
             </span>
           ) : (
             <>
-              {providers.map((p) => (
+              {visibleProviders.map((p) => (
                 <span key={p.id} className="text-foreground-muted">
                   {`${providerLabel(p.id, [p])} - ${agentStatusLabel(agentStatus(health[p.id]))}`}
                 </span>
               ))}
-              <span className="text-foreground-muted">Open Settings, then Providers</span>
+              {missingCount > 0 && <span className="text-foreground-muted">{`${missingCount} not installed`}</span>}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="get-started-open-providers"
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "providers" } }))
+                }
+              >
+                Open Providers
+              </Button>
             </>
           )}
         </li>

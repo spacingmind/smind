@@ -20,7 +20,7 @@ already knows (its own workspace list). Wire changes: none.
 
 1. **Get started card.** The home landing shows a "Get started" card above the composer while
    there is no project OR no ready provider; it is hidden when both are met. Rows are computed live:
-   *Sign in to an agent* (one status word per provider: Ready, Not installed, Signed out, Checking)
+   *Sign in to an agent* (one status word per installed provider: Ready, Sign-in needed, Checking; providers whose CLI is not installed fold into one "N not installed" count; an "Open Providers" button deep-links to Settings > Providers)
    and *Add a project* (opens the existing add-project dialog; "Done" with the project name once one
    exists).
 2. **No empty provider pre-selected.** When every provider has been tested and none is ready, the

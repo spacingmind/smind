@@ -160,7 +160,7 @@ describe("HomeLanding", () => {
     render(
       <HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={[]} onCreated={vi.fn()} />,
     );
-    expect(await screen.findByText("Claude Code - Not installed")).toBeInTheDocument();
+    expect(await screen.findByText(/\d+ not installed/)).toBeInTheDocument();
     expect(await screen.findByPlaceholderText("Sign in to an agent to start a task")).toBeInTheDocument();
     expect(screen.getByLabelText("Prompt")).toBeDisabled();
     expect(screen.getByTestId("home-send-button")).toBeDisabled();

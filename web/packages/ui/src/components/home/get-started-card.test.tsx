@@ -60,10 +60,16 @@ describe("GetStartedCard", () => {
     render(<GetStartedCard {...props} />);
     const card = screen.getByTestId("get-started-card");
     expect(card).toHaveTextContent("Sign in to an agent");
-    expect(card).toHaveTextContent("GLM - Not installed");
+    expect(card).toHaveTextContent("1 not installed");
+    expect(card).not.toHaveTextContent("GLM - ");
     expect(card).toHaveTextContent("Kimi - Sign-in needed");
     expect(card).toHaveTextContent("OpenCode - Checking");
-    expect(card).toHaveTextContent("Open Settings, then Providers");
+    const opened = vi.fn();
+    window.addEventListener("smind:open-settings", opened);
+    fireEvent.click(screen.getByTestId("get-started-open-providers"));
+    window.removeEventListener("smind:open-settings", opened);
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect((opened.mock.calls[0][0] as CustomEvent).detail).toEqual({ sectionId: "providers" });
     expect(card).toHaveTextContent("Add a project");
     expect(card).toHaveTextContent("Done - Alpha");
   });
