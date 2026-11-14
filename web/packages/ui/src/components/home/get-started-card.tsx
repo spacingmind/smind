@@ -106,8 +106,8 @@ function VisibleCard({
           Dismiss
         </Button>
       </div>
-      <ol className="mt-1 flex flex-col">
-        <li className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1">
+      <ol className="mt-1 flex flex-col gap-2">
+        <li className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-2 py-1">
           <span className="font-medium">Sign in to an agent</span>
           {ready === "ready" ? (
             <span className="flex items-center gap-1 text-foreground-muted">
@@ -140,7 +140,7 @@ function VisibleCard({
             </>
           )}
         </li>
-        <li className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1">
+        <li className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-2 py-1">
           <span className="font-medium">Add a project</span>
           {hasProject ? (
             <span className="flex items-center gap-1 text-foreground-muted">
