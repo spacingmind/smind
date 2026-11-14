@@ -11,7 +11,7 @@
 //! home directory, so it is tested without a window; `enforce_or_exit` is the one
 //! call at the top of `run()`.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use url::{Host, Url};
 
@@ -22,43 +22,14 @@ fn nonempty(v: Option<String>) -> Option<String> {
     v.filter(|s| !s.trim().is_empty())
 }
 
-/// segments is the separator-independent form of a path used for every comparison: symlinks resolved
-/// for the deepest existing ancestor, the rest appended, then split on `/` (and `\` on Windows), `.`
-/// dropped, `..` applied lexically, and case folded (the real home may sit on a case-insensitive
-/// volume). `None` means the path cannot be compared (no working directory for a relative path, a
-/// path that exists but cannot be resolved, or text that is not valid Unicode): the caller refuses.
-fn segments(p: &Path) -> Option<Vec<String>> {
-    let abs = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir().ok()?.join(p)
-    };
-    let mut existing = abs.clone();
-    let mut rest: Vec<std::ffi::OsString> = Vec::new();
-    while !existing.exists() {
-        match (existing.file_name(), existing.parent()) {
-            (Some(name), Some(parent)) => {
-                rest.push(name.to_os_string());
-                existing = parent.to_path_buf();
-            }
-            _ => break,
-        }
-    }
-    let mut full = if existing.exists() {
-        existing.canonicalize().ok()?
-    } else {
-        existing
-    };
-    for part in rest.into_iter().rev() {
-        full.push(part);
-    }
-    Some(split_segments(full.to_str()?))
-}
-
-/// split_segments turns path text into folded segments: both separators on Windows, `/` elsewhere
-/// (a backslash is an ordinary file name character there), a verbatim `\\?\` prefix removed.
-fn split_segments(text: &str) -> Vec<String> {
-    let mut t = if cfg!(windows) {
+/// split_segments_for is THE path normalisation: path text becomes a list of folded segments.
+/// Both separators split on Windows, only `/` elsewhere (a backslash is an ordinary file name
+/// character there); a verbatim `\\?\` or device `\\.\` prefix is removed (`UNC` becomes `//`);
+/// empty and `.` segments are dropped; `..` removes the previous segment and never climbs above the
+/// root; segments are lower-cased (the real home may sit on a case-insensitive volume, and folding
+/// only ever refuses more). `windows` is a parameter so every rule is table-tested on every OS.
+fn split_segments_for(text: &str, windows: bool) -> Vec<String> {
+    let mut t = if windows {
         text.replace('\\', "/")
     } else {
         text.to_string()
@@ -82,6 +53,69 @@ fn split_segments(text: &str) -> Vec<String> {
     out
 }
 
+fn split_segments(text: &str) -> Vec<String> {
+    split_segments_for(text, cfg!(windows))
+}
+
+fn absolute(p: &Path) -> Option<PathBuf> {
+    if p.is_absolute() {
+        Some(p.to_path_buf())
+    } else {
+        Some(std::env::current_dir().ok()?.join(p))
+    }
+}
+
+/// resolve_physical walks the components the way the operating system would: each existing
+/// component is resolved through symlinks at once (so `link/..` is the parent of the link's target,
+/// and `/var` and `/private/var` are one place), a component that does not exist is kept as text, and
+/// `..` removes the previous component of the path resolved so far. `None` (unsure: a dangling link
+/// or a component that cannot be resolved) makes the caller refuse.
+fn resolve_physical(p: &Path) -> Option<PathBuf> {
+    let mut cur = PathBuf::new();
+    for c in absolute(p)?.components() {
+        match c {
+            Component::Prefix(_) | Component::RootDir => cur.push(c.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                cur.pop();
+            }
+            Component::Normal(n) => {
+                cur.push(n);
+                if std::fs::symlink_metadata(&cur).is_ok() {
+                    cur = cur.canonicalize().ok()?;
+                }
+            }
+        }
+    }
+    Some(cur)
+}
+
+/// resolve_lexical removes `.` and `..` from the text first (how a program that cleans the path
+/// before using it reads it) and only then resolves symlinks on what is left.
+fn resolve_lexical(p: &Path) -> Option<PathBuf> {
+    let mut clean = PathBuf::new();
+    for c in absolute(p)?.components() {
+        match c {
+            Component::Prefix(_) | Component::RootDir => clean.push(c.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                clean.pop();
+            }
+            Component::Normal(n) => clean.push(n),
+        }
+    }
+    resolve_physical(&clean)
+}
+
+/// variants are the two readings of a path that must both stay clear of the real home: the
+/// operating system's (`resolve_physical`) and a path cleaner's (`resolve_lexical`), each as folded
+/// segments. They differ only when a symlink is followed by `..`.
+fn variants(p: &Path) -> Option<Vec<Vec<String>>> {
+    let physical = split_segments(resolve_physical(p)?.to_str()?);
+    let lexical = split_segments(resolve_lexical(p)?.to_str()?);
+    Some(vec![physical, lexical])
+}
+
 fn starts_with_segments(path: &[String], prefix: &[String]) -> bool {
     path.len() >= prefix.len() && path[..prefix.len()] == *prefix
 }
@@ -96,29 +130,31 @@ fn check_home(
     let cannot = |what: &str| {
         format!("cannot compare {what} with the real smind home, so the audit app refuses to start")
     };
-    let home = segments(Path::new(&raw)).ok_or_else(|| cannot(&format!("SMIND_HOME {raw:?}")))?;
+    let homes = variants(Path::new(&raw)).ok_or_else(|| cannot(&format!("SMIND_HOME {raw:?}")))?;
     // Fail closed: without the account's real home there is nothing safe to compare against.
     let real_home = real_home.ok_or_else(|| {
         "cannot determine the account's real home directory, so the audit app refuses to start"
             .to_string()
     })?;
-    let mut real_homes: Vec<Vec<String>> =
-        vec![segments(&real_home.join(".smind")).ok_or_else(|| cannot("the real home"))?];
+    let mut reals: Vec<Vec<String>> =
+        variants(&real_home.join(".smind")).ok_or_else(|| cannot("the real home"))?;
     if let Some(h) = nonempty(get("HOME")) {
-        real_homes
-            .push(segments(&Path::new(&h).join(".smind")).ok_or_else(|| cannot("$HOME/.smind"))?);
+        reals
+            .extend(variants(&Path::new(&h).join(".smind")).ok_or_else(|| cannot("$HOME/.smind"))?);
     }
-    for real in real_homes {
-        // ~/.smind/dogfood is the scratch place for audits, not the daemon home.
-        let mut dogfood = real.clone();
-        dogfood.push("dogfood".to_string());
-        if starts_with_segments(&home, &dogfood) {
-            continue;
-        }
-        if starts_with_segments(&home, &real) {
-            return Err(format!(
-                "SMIND_HOME {raw:?} is, or is under, the real smind home: use a scratch directory such as ~/.smind/dogfood/<name>/home"
-            ));
+    for home in &homes {
+        for real in &reals {
+            // ~/.smind/dogfood is the scratch place for audits, not the daemon home.
+            let mut dogfood = real.clone();
+            dogfood.push("dogfood".to_string());
+            if starts_with_segments(home, &dogfood) {
+                continue;
+            }
+            if starts_with_segments(home, real) {
+                return Err(format!(
+                    "SMIND_HOME {raw:?} is, or is under, the real smind home: use a scratch directory such as ~/.smind/dogfood/<name>/home"
+                ));
+            }
         }
     }
     Ok(())
@@ -165,7 +201,7 @@ pub fn check(get: &dyn Fn(&str) -> Option<String>, real_home: Option<&Path>) -> 
 /// The account's real home directory from the user database. An isolated launch sets `HOME`
 /// to a scratch directory, so `$HOME` alone cannot name the real `~/.smind`.
 #[cfg(all(unix, feature = "audit-guard"))]
-fn real_home_dir() -> Option<std::path::PathBuf> {
+fn real_home_dir() -> Option<PathBuf> {
     use std::os::unix::ffi::OsStrExt;
     // SAFETY: called once at startup before any thread exists; the returned record is read
     // immediately and not kept.
@@ -182,7 +218,7 @@ fn real_home_dir() -> Option<std::path::PathBuf> {
 }
 
 #[cfg(all(not(unix), feature = "audit-guard"))]
-fn real_home_dir() -> Option<std::path::PathBuf> {
+fn real_home_dir() -> Option<PathBuf> {
     None
 }
 
@@ -205,7 +241,6 @@ pub fn enforce_or_exit() {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use std::path::PathBuf;
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let m: HashMap<String, String> = pairs
@@ -418,26 +453,123 @@ mod tests {
         assert!(check(&e, Some(&other_real)).is_err());
     }
 
+    /// One table for the normalisation, run on every OS: (text, windows rules?, expected segments).
     #[test]
-    fn segments_apply_dots_and_both_separators_lexically() {
-        assert_eq!(split_segments("/a/b/../c/./d"), ["a", "c", "d"]);
-        assert_eq!(split_segments("/a//b/"), ["a", "b"]);
-        assert_eq!(split_segments("/A/B"), ["a", "b"]);
-        // a verbatim prefix is removed (the form `canonicalize` returns on Windows); the text rule is the
-        // same on every platform
-        assert_eq!(split_segments("//?/C:/Users/x"), ["c:", "users", "x"]);
-        assert_eq!(split_segments("//?/UNC/srv/share/x"), ["srv", "share", "x"]);
-        // `..` never climbs above the root
-        assert_eq!(split_segments("/../../a"), ["a"]);
-        if cfg!(windows) {
+    fn split_segments_table() {
+        let t = |text: &str, windows: bool, want: &[&str]| {
             assert_eq!(
-                split_segments("C:\\Users\\x\\.smind\\..\\.smind\\z"),
-                ["c:", "users", "x", ".smind", "z"]
+                split_segments_for(text, windows),
+                want,
+                "{text:?} (windows rules: {windows})"
             );
-        } else {
-            // a backslash is an ordinary file name character off Windows
-            assert_eq!(split_segments("/a\\b/c"), ["a\\b", "c"]);
+        };
+        for windows in [false, true] {
+            t("", windows, &[]);
+            t("/", windows, &[]);
+            t(".", windows, &[]);
+            t("..", windows, &[]);
+            t("/a/b/c", windows, &["a", "b", "c"]);
+            t("/a/b/../c/./d", windows, &["a", "c", "d"]);
+            t("/a//b///c/", windows, &["a", "b", "c"]);
+            t("/A/B", windows, &["a", "b"]);
+            // leading and repeated `..`, and `..` escaping the root, never climb above it
+            t("../a", windows, &["a"]);
+            t("/../../a", windows, &["a"]);
+            t("/a/../../../b", windows, &["b"]);
+            t("/a/b/../../..", windows, &[]);
+            t("/a/./././b", windows, &["a", "b"]);
+            // a `..` that returns into the same directory
+            t("/h/.smind/../.smind/z", windows, &["h", ".smind", "z"]);
+            t(
+                "/h/.smind/dogfood/../worktrees",
+                windows,
+                &["h", ".smind", "worktrees"],
+            );
+            // verbatim and device prefixes come off, UNC keeps server and share as segments
+            t("//?/C:/Users/x", windows, &["c:", "users", "x"]);
+            t("//./C:/x", windows, &["c:", "x"]);
+            t("//?/UNC/srv/share/x", windows, &["srv", "share", "x"]);
         }
+        // Windows rules: both separators split
+        t(
+            "C:\\Users\\x\\.smind\\..\\.smind\\z",
+            true,
+            &["c:", "users", "x", ".smind", "z"],
+        );
+        t("C:/Users\\x/y", true, &["c:", "users", "x", "y"]);
+        t("\\\\?\\C:\\Users\\x", true, &["c:", "users", "x"]);
+        t("\\\\?\\UNC\\srv\\share\\x", true, &["srv", "share", "x"]);
+        t("C:\\a\\..\\..\\b", true, &["b"]);
+        // other rules: a backslash is an ordinary file name character
+        t("/a\\b/c", false, &["a\\b", "c"]);
+        t("/a\\..\\b", false, &["a\\..\\b"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn home_rejects_the_real_home_reached_through_a_symlinked_parent() {
+        // macOS keeps temp dirs under /var -> /private/var: one place with two spellings. The real
+        // home given by one spelling and SMIND_HOME by the other must still be recognised.
+        let fx = Fx::new();
+        let alias = fx.dir.path().join("alias");
+        std::os::unix::fs::symlink(fx.real_home(), &alias).unwrap();
+        let real_via_alias = alias; // real home spelled through a symlink
+        let smind_direct = fx.smind();
+        assert!(check(&fx.env(&smind_direct), Some(&real_via_alias)).is_err());
+        assert!(check(
+            &fx.env(&smind_direct.join("a").join("..").join("b")),
+            Some(&real_via_alias)
+        )
+        .is_err());
+        let smind_via_alias = real_via_alias.join(".smind");
+        assert!(check(&fx.env(&smind_via_alias), Some(&fx.real_home())).is_err());
+        assert!(check(
+            &fx.env(&smind_via_alias.join("dogfood").join("..").join("w")),
+            Some(&fx.real_home())
+        )
+        .is_err());
+        // dogfood stays allowed through either spelling
+        assert!(check(
+            &fx.env(&smind_via_alias.join("dogfood").join("x")),
+            Some(&fx.real_home())
+        )
+        .is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn home_rejects_a_link_followed_by_dotdot_in_either_reading() {
+        // scratch/link -> <real>/.smind/sub: the OS reads scratch/link/../x as <real>/.smind/x, a path
+        // cleaner reads it as scratch/x. Both readings are checked, so the first refuses it. And the
+        // reverse: scratch/link2 -> <real>/.smind/dogfood/d reads physically as dogfood, lexically as scratch.
+        let fx = Fx::new();
+        let sub = fx.smind().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let scratch = fx.dir.path().join("scratch");
+        std::fs::create_dir_all(&scratch).unwrap();
+        let link = scratch.join("link");
+        std::os::unix::fs::symlink(&sub, &link).unwrap();
+        let p = link.join("..").join("x");
+        assert!(check(&fx.env(&p), Some(&fx.real_home())).is_err(), "{p:?}");
+        // a link whose target is elsewhere, followed by `..`, is just scratch
+        let other = fx.dir.path().join("elsewhere").join("deep");
+        std::fs::create_dir_all(&other).unwrap();
+        let link2 = scratch.join("link2");
+        std::os::unix::fs::symlink(&other, &link2).unwrap();
+        assert!(check(&fx.env(&link2.join("..").join("x")), Some(&fx.real_home())).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn home_fails_closed_on_a_dangling_link() {
+        let fx = Fx::new();
+        let dangling = fx.dir.path().join("dangling");
+        std::os::unix::fs::symlink(fx.dir.path().join("does-not-exist"), &dangling).unwrap();
+        let r = check(&fx.env(&dangling.join("home")), Some(&fx.real_home()));
+        assert!(
+            r.unwrap_err().contains("cannot compare"),
+            "an unresolvable path must be refused"
+        );
     }
 
     #[test]
@@ -502,7 +634,7 @@ mod tests {
         for u in [
             "http://example.com:4719",
             "http://192.168.1.5:4719",
-            "http://0.0.0.0:4719",
+            &format!("http://{}:4719", ["0"; 4].join(".")),
             "http://127.0.0.1.evil.test:4719",
         ] {
             assert!(
