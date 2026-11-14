@@ -145,3 +145,110 @@ func TestGrantable_EquivalentToDecideAsk(t *testing.T) {
 		}
 	}
 }
+
+
+// The allow-list is pinned: its exact contents are listed here, so adding a
+// program, a verb or a flag to grantAllow fails this test and needs a reviewed
+// edit of both. The behavioural table below it pins the near-misses that must
+// stay ungrantable even if someone loosens the data above.
+func TestGrantable_AllowListIsPinned(t *testing.T) {
+	t.Parallel()
+	type prog struct{ verbs, flags []string }
+	want := map[string]prog{
+		"make":     {nil, []string{"-j", "-k", "-s", "-n"}},
+		"task":     {nil, nil},
+		"go":       {[]string{"test", "build", "vet", "fmt"}, []string{"-v", "-race", "-short", "-count", "-run", "-cover", "-json", "-timeout", "-tags", "-n", "-x"}},
+		"cargo":    {[]string{"test", "build", "check", "clippy", "fmt", "doc"}, []string{"-q", "-v", "--all", "--workspace", "--release", "--all-targets", "--all-features", "--check", "--no-run", "--lib", "--bins", "--tests"}},
+		"npm":      {[]string{"test", "run", "t"}, nil},
+		"pnpm":     {[]string{"test", "run", "t"}, nil},
+		"yarn":     {[]string{"test"}, nil},
+		"pytest":   {nil, []string{"-q", "-v", "-vv", "-vvv", "-x", "-s", "-k", "--tb", "--maxfail", "--lf", "--ff", "--collect-only", "-ra", "-rA"}},
+		"tsc":      {nil, []string{"--noEmit"}},
+		"eslint":   {nil, nil},
+		"prettier": {nil, []string{"--check"}},
+		"vitest":   {[]string{"run"}, nil},
+		"ls":       {nil, []string{"-l", "-a", "-la", "-al", "-lh", "-lah", "-1", "-R", "-h", "-d", "-t"}},
+		"pwd":      {nil, nil},
+		"cat":      {nil, []string{"-n"}},
+		"head":     {nil, []string{"-n"}},
+		"tail":     {nil, []string{"-n"}},
+		"wc":       {nil, []string{"-l", "-w", "-c"}},
+		"grep":     {nil, []string{"-n", "-i", "-w", "-l", "-c", "-v", "-F", "-E", "-r", "-R", "-H", "-h", "-s", "-A", "-B", "-C", "-m"}},
+		"rg":       {nil, []string{"-n", "-i", "-w", "-l", "-c", "-v", "-F", "-S", "-s", "-A", "-B", "-C", "-m", "--hidden", "--no-heading"}},
+		"diff":     {nil, []string{"-u", "-q", "-r", "-w"}},
+		"echo":     {nil, nil},
+		"true":     {nil, nil},
+		"git": {[]string{"status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "describe"}, []string{"-s", "-b", "--short", "--branch", "--porcelain", "--stat",
+			"--name-only", "--name-status", "--cached", "--staged", "--oneline", "--graph", "--decorate", "--no-color", "-n", "-p", "--abbrev-ref", "--show-toplevel", "-U", "--summary", "--shortstat"}},
+	}
+	if len(grantAllow) != len(want) {
+		t.Errorf("grantAllow has %d programs, the pinned table %d", len(grantAllow), len(want))
+	}
+	for name, got := range grantAllow {
+		w, ok := want[name]
+		if !ok {
+			t.Errorf("program %q is on the allow-list but not in the pinned table", name)
+			continue
+		}
+		if !sameSet(got.verbs, w.verbs) {
+			t.Errorf("%s verbs = %v, pinned %v", name, got.verbs, w.verbs)
+		}
+		if !sameSet(got.okFlags, w.flags) {
+			t.Errorf("%s flags = %v, pinned %v", name, got.okFlags, w.flags)
+		}
+	}
+	for name := range want {
+		if _, ok := grantAllow[name]; !ok {
+			t.Errorf("pinned program %q left the allow-list", name)
+		}
+	}
+}
+
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := map[string]int{}
+	for _, x := range a {
+		m[x]++
+	}
+	for _, x := range b {
+		m[x]--
+	}
+	for _, v := range m {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// Near-misses of every listed program, and the programs that must never be
+// listed: each must stay ungrantable (a mutation that lists one fails here
+// through the data, and through the behaviour if the data test is loosened).
+func TestGrantable_NearMissesStayUngrantable(t *testing.T) {
+	t.Parallel()
+	pol := grantablePolicy(t)
+	never := []string{
+		// git: every verb that writes, reaches a remote or rewrites history
+		"git push", "git push origin main", "git push --force", "git commit -m x", "git commit --amend", "git reset --hard", "git reset HEAD~1", "git clean -fd", "git checkout main", "git checkout -- .", "git switch main",
+		"git config user.name x", "git remote add o x", "git remote -v", "git fetch", "git pull", "git rebase main", "git merge x", "git tag v1", "git tag -d v1", "git stash", "git stash pop", "git add .", "git rm x", "git mv a b",
+		"git branch", "git branch -D x", "git apply x.patch", "git am x", "git cherry-pick x", "git revert x", "git submodule update", "git worktree add x", "git gc", "git prune", "git init", "git clone x", "git bisect start", "git restore x", "git notes add",
+		// other programs that write, delete, fetch, run code or escalate
+		"rm x", "rm -rf x", "mv a b", "cp a b", "curl x", "wget x", "ssh h", "scp a h:b", "sh x", "bash x", "zsh x", "fish x", "dash x", "python x.py", "python3 x.py", "node x.js", "perl x.pl", "ruby x.rb", "php x.php", "docker ps", "kubectl get po", "sudo ls", "env ls", "xargs ls", "find .", "find . -delete", "sed -i s/a/b/ f", "sed s/a/b/ f", "awk 1 f", "tee f", "chmod x f", "chown a f", "ln -s a b", "tar x", "unzip x", "dd if=a of=b", "kill 1", "open x", "osascript x",
+		// path and case variants of listed programs
+		"./make", "/usr/bin/make build", "../make build", "~/bin/make build", "Make build", "MAKE build", "GIT status", "Git status", "./git status", "/usr/bin/git status", "LS", "Cat x", "./go build ./...", "GO build ./...", "make.exe build", "git.exe status",
+		// a listed program with a verb or flag that is not listed
+		"go run x", "go get x", "go install x", "go mod tidy", "go generate ./...", "go work sync", "go env -w X=1", "go clean -cache", "go test -exec x ./...", "go build -o x ./...", "go test -c ./...", "go vet -vettool=x ./...",
+		"cargo run", "cargo install x", "cargo publish", "cargo update", "cargo clean", "cargo add x", "cargo build --target-dir x",
+		"npm install", "npm exec x", "npm publish", "npm ci", "npm update", "npm init", "npm audit fix", "npm run build --prefix x", "pnpm add x", "pnpm dlx x", "pnpm exec x", "pnpm install", "yarn add x", "yarn run build", "yarn install",
+		"make -f x build", "make -C d build", "make -include x", "make FOO=1 build", "task -t x lint", "task --dir d lint", "pytest -p x", "pytest -c x", "pytest --basetemp=x", "pytest --rootdir=x", "pytest -o x=y", "tsc --outDir x", "tsc -b", "eslint --fix", "eslint -c x", "prettier --write x", "vitest watch", "vitest",
+		"ls -s", "ls --color=always", "cat -E x", "head -c 5 x", "tail -f x", "tail -F x", "wc -m x", "grep -f x y", "grep --include=x y", "grep -z y", "rg --pre x y", "rg --files", "rg --hostname-bin x y", "rg --replace x y", "diff --to-file=x a b", "diff -x x a b",
+		"git log -G x", "git log --output=x", "git diff --ext-diff", "git diff --no-index a b", "git show --textconv x", "git blame -C x", "git status --ignored", "git ls-files --others", "git describe --dirty",
+	}
+	for _, cmd := range never {
+		if d := Decide(dReq(t, cmd), pol); d.Grantable {
+			t.Errorf("%q is grantable (action %s reasons %q)", cmd, d.Action, d.Reasons)
+		}
+	}
+}
