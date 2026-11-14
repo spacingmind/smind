@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
@@ -593,11 +594,11 @@ func mcpWaitAnyRun(ctx context.Context, client *wsclient.Client, runIDs []string
 	results := make(chan result, len(runIDs))
 	for _, id := range runIDs {
 		wg.Add(1)
-		go func() {
+		crash.Go("smind.mcpWaitRuns", func() {
 			defer wg.Done()
 			out, err := mcpWaitOneRun(ctx, client, id, deadline, ignore)
 			results <- result{out, err}
-		}()
+		})
 	}
 	for range runIDs {
 		r := <-results

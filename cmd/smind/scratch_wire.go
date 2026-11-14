@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/scratch"
 	"github.com/spacingmind/smind/internal/store"
@@ -105,7 +106,7 @@ func wireScratch(cfg config.Config, db *store.Store, wm *workspace.Manager) (opt
 func (w *scratchWiring) start(ctx context.Context, api scratchAPI, reg *runs.Registry) {
 	w.reg.Store(reg)
 	api.AttachScratch(w.mgr, w.live)
-	go func() {
+	crash.Go("smind.scratchSweep", func() {
 		w.sweep()
 		t := time.NewTicker(scratchSweepInterval)
 		defer t.Stop()
@@ -117,7 +118,7 @@ func (w *scratchWiring) start(ctx context.Context, api scratchAPI, reg *runs.Reg
 				w.sweep()
 			}
 		}
-	}()
+	})
 }
 
 // sweep removes the closed tasks' dirs; logs carry counts only.
