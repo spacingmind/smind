@@ -441,16 +441,14 @@ mod tests {
         }
         pub fn now() -> SystemTime {
             let n = NANOS.with(|c| {
-                let v = c.get().unwrap_or_else(|| {
+                c.get().unwrap_or_else(|| {
                     let base = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .expect("clock after epoch")
                         .as_nanos() as u64;
                     c.set(Some(base));
                     base
-                });
-                c.set(Some(v));
-                v
+                })
             });
             UNIX_EPOCH + Duration::from_nanos(n)
         }
