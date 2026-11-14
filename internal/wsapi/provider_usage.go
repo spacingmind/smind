@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/quota"
 )
 
@@ -127,14 +128,14 @@ func handleProviderUsage(pu *quota.ProviderUsage, inst ProviderUsageInstances) h
 			var wg sync.WaitGroup
 			for i, in := range insts {
 				wg.Add(1)
-				go func() {
+				crash.Go("wsapi.providerUsageFetch", func() {
 					defer wg.Done()
 					if mode == "refresh" {
 						results[i] = pu.Refresh(waitCtx, in.ID)
 					} else {
 						results[i] = pu.Touch(waitCtx, in.ID)
 					}
-				}()
+				})
 			}
 			wg.Wait()
 		}

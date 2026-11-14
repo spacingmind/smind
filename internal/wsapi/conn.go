@@ -198,7 +198,7 @@ func (c *conn) serve(ctx context.Context) {
 			c.eventsBus.unregister(c.eventsSub)
 			c.eventsSub.close()
 		}()
-		go c.pumpEvents(connCtx, c.eventsSub)
+		crash.Go("wsapi.pumpEvents", func() { c.pumpEvents(connCtx, c.eventsSub) })
 	}
 
 	for {
@@ -219,7 +219,7 @@ func (c *conn) handleEnvelope(connCtx context.Context, env envelope) {
 	case env.Method == "task.cancel" && env.ID == "":
 		c.handleCancel(env.Params)
 	case env.Method != "" && env.ID != "":
-		go c.dispatch(connCtx, env)
+		crash.Go("wsapi.dispatch", func() { c.dispatch(connCtx, env) })
 	}
 }
 

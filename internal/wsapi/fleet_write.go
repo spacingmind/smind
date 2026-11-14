@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/fleet/serve"
 	"github.com/spacingmind/smind/internal/fleet/wire"
 	"github.com/spacingmind/smind/internal/runs"
@@ -175,7 +176,7 @@ func startFleetIdemSweeper(st *store.Store, now func() time.Time) (stop func()) 
 	}
 	done := make(chan struct{})
 	exited := make(chan struct{})
-	go func() {
+	crash.Go("wsapi.fleetIdemSweeper", func() {
 		defer close(exited)
 		sweep := func() { _, _ = st.SweepFleetIdem(now().Add(-wire.IdempotencyWindow)) }
 		sweep()
@@ -189,7 +190,7 @@ func startFleetIdemSweeper(st *store.Store, now func() time.Time) (stop func()) 
 				sweep()
 			}
 		}
-	}()
+	})
 	var once sync.Once
 	return func() {
 		once.Do(func() { close(done) })

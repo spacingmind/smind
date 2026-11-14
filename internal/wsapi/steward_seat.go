@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/steward"
@@ -265,14 +266,16 @@ func (h *stewardHost) startReview(ctx context.Context, p reviewParams) (reviewRe
 			return reviewResult{}, fmt.Errorf("%s: open the passes: %w", m, err)
 		}
 		if stewardGateUnknown(d.Gates) {
-			go h.recheck(id, p.TaskID, lead, prof, sha)
+			taskID := p.TaskID
+			crash.Go("wsapi.stewardRecheck", func() { h.recheck(id, taskID, lead, prof, sha) })
 			return reviewResult{ReviewID: id, TaskID: p.TaskID, CommitSHA: sha, Status: "pending"}, nil
 		}
 		return h.startPasses(id, lead, d, dsha, sha, cfg)
 	}
 
 	if stewardGateUnknown(d.Gates) {
-		go h.recheck(id, p.TaskID, lead, prof, sha)
+		taskID := p.TaskID
+		crash.Go("wsapi.stewardRecheck", func() { h.recheck(id, taskID, lead, prof, sha) })
 		return reviewResult{ReviewID: id, TaskID: p.TaskID, CommitSHA: sha, Status: "pending"}, nil
 	}
 	return h.startSeat(id, lead, prof, d, dsha, sha)
@@ -423,11 +426,11 @@ func (h *stewardHost) startSeat(id int64, lead store.Task, prof store.AgentProfi
 		},
 	}
 	h.watches.Add(1)
-	go func() {
+	crash.Go("wsapi.stewardSeatWatch", func() {
 		defer h.watches.Done()
 		defer h.forget(task.ID)
 		w.Run(h.ctx, h.watchPeriod)
-	}()
+	})
 	res.StewardTaskID, res.ChatID, res.RunID = task.ID, chat.ID, runID
 	return res, nil
 }
