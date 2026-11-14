@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -144,7 +145,7 @@ func (reg *Registry) notifyBudgetReached(be *BudgetExceededError) {
 	reg.notifyQueueUpdated(target)
 	reg.armQueueWake()
 	if debounce <= 0 {
-		go reg.deliverOne(target)
+		crash.GoFatal("runs.deliverOne", func() { reg.deliverOne(target) })
 	}
 }
 

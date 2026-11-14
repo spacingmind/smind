@@ -20,6 +20,7 @@ import (
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/automation"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/logging"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/providers"
@@ -41,6 +42,11 @@ import (
 // is the previous (pre-subcommand) main()'s entire body, unchanged except
 // for the SMIND_ACP_COMMAND hook below.
 func cmdServe(args []string) int {
+	// Before anything starts a goroutine: a panic anywhere in the daemon is
+	// recorded locally (redacted, never uploaded). The main goroutine's own
+	// panic is recorded and then still ends the process.
+	initCrash()
+	defer crash.RecordAndRepanic("serve")
 	if len(args) != 0 {
 		// Launch flags were removed (ADR-0031 D10): one documented place
 		// configures the daemon, the same for a terminal, a service and Docker.
@@ -233,7 +239,7 @@ func cmdServe(args []string) int {
 	srv.API().Pruner.Start(ctx)
 	// ADR-0053: runs that were running at an upgrade or interrupted by a crash
 	// never reached finish; collapse their rows to skeleton form now.
-	go srv.API().Runs.FinalizePending(ctx)
+	crash.GoFatal("smind.finalizePending", func() { srv.API().Runs.FinalizePending(ctx) })
 	stopGitState := srv.API().StartGitState(ctx)
 
 	// ADR-0042: tidy install leftovers and re-validate enabled plugins.
@@ -252,12 +258,12 @@ func cmdServe(args []string) int {
 	})
 
 	for _, ln := range listeners {
-		go func() {
+		crash.GoFatal("smind.serveListener", func() {
 			log.Printf("smind listening on http://%s", ln.Addr())
 			if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Fatalf("listen: %v", err)
 			}
-		}()
+		})
 	}
 
 	startRelayBridge(ctx, srv, hub)
@@ -381,9 +387,9 @@ func startRelayBridge(ctx context.Context, srv *server.Server, hub *bridge.Hub) 
 		log.Printf("relay bridge: keypair: %v (continuing without relay connectivity)", err)
 		return
 	}
-	go func() {
+	crash.GoFatal("smind.relayBridge", func() {
 		if err := hub.Run(ctx, cfg, kp, srv.API()); err != nil {
 			log.Printf("relay bridge: %v", err)
 		}
-	}()
+	})
 }
