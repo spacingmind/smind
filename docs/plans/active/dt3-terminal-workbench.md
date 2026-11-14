@@ -87,11 +87,18 @@ sizes, and the composer after a send. Desktop real-window frames only if the DT0
 
 ## Progress
 
-- [ ] spec
-- [ ] A: matchers, resolver, link provider, reveal store and editor scroll
+- [x] spec
+- [x] A: matchers, resolver, link provider, reveal store and editor scroll (PR A)
 - [ ] B: restart
 - [ ] C: send set
 
 ## Validation
 
-(filled in per PR)
+PR A: matcher, resolver, open-logic and reveal tests (`terminal-links.test.ts`, `terminal-path.test.ts`,
+`terminal-links-open.test.tsx`, `file-reveal.test.tsx`); web suite 464 files / 5259 tests, mobile 116 files / 1130 tests,
+`task lint`, tsc. Frames (web, light and dark, 1280 and 390: hover underline, not-a-file notice, file open at the line)
+all opened pairwise; a plain click opens nothing and Ctrl+click opens exactly one tab or one URL (browser popup count
+checked). The frames found two real bugs the unit tests missed (a reveal spent on the empty initial document; a reveal
+dropped when the lazy editor view appeared after the read), both fixed with tests. Two-axis review run before the PR (findings in the PR body).
+Not verified: a real daemon, the desktop webview (the `open_external` bridge is existing code), wrapped long lines
+(only the row under the pointer is scanned), mutation checks (the runs were not approved).
