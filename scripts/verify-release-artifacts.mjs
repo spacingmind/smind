@@ -389,7 +389,8 @@ function main(argv) {
     desktopVersion: args["desktop-version"] ?? args.version,
     sourceRoot: args["source-root"] ?? ".",
     skipLatest: args["skip-latest"],
-  });  if (failures.length === 0) {
+  });
+  if (failures.length === 0) {
     const ok = CHECKS.filter((c) => !(c === "latest-json" && args["skip-latest"]));
     for (const id of ok) process.stdout.write(`ok ${id}\n`);
     return 0;
