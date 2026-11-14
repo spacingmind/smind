@@ -72,9 +72,13 @@ function VisibleCard({
 }) {
   const dismiss = useGetStartedDismissedStore((s) => s.set);
 
+  // The card usually mounts before provider.list answers; ensure() is a
+  // single-flight no-op per already-tested id, so re-running it when the
+  // catalog arrives still tests each provider exactly once -- plain
+  // re-renders and a hidden card never call it.
   useEffect(() => {
     ensure();
-  }, [ensure]);
+  }, [ensure, providers.length]);
 
   return (
     <section

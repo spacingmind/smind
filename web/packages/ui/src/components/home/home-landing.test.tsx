@@ -8,6 +8,7 @@ import type { ProviderInfo, Task, Workspace } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 import { useHomeProjectStore } from "@/stores/home-project-store";
 import { useHomeRunConfigStore } from "@/stores/home-run-config-store";
+import { useGetStartedDismissedStore } from "@/stores/get-started-store";
 import { OFFICE_SUGGESTED_PROMPTS } from "@/lib/suggested-prompts";
 import { useInterfaceModeStore } from "@/stores/interface-mode-store";
 import { usePendingSendStore } from "@/stores/pending-send-store";
@@ -40,6 +41,7 @@ function fakeClient() {
   const task = { ID: 42, WorkspaceID: 2, Title: "Fix the bug" } as Task;
   const call = vi.fn<(method: string, _params?: unknown) => Promise<unknown>>(async (method: string) => {
     if (method === "provider.list") return { providers: PROVIDERS };
+    if (method === "provider.test") return { ok: true, detail: "ok" };
     if (method === "profile.list" || method === "run.list") return [];
     return task;
   });
@@ -77,6 +79,7 @@ describe("HomeLanding", () => {
     window.localStorage.clear();
     useHomeProjectStore.getState().reload();
     useHomeRunConfigStore.getState().reload();
+    useGetStartedDismissedStore.getState().reload();
     usePendingSendStore.setState({ entry: null });
   });
   afterEach(() => {
@@ -84,6 +87,7 @@ describe("HomeLanding", () => {
     window.localStorage.clear();
     useHomeProjectStore.getState().reload();
     useHomeRunConfigStore.getState().reload();
+    useGetStartedDismissedStore.getState().reload();
     usePendingSendStore.setState({ entry: null });
   });
 
@@ -143,6 +147,44 @@ describe("HomeLanding", () => {
     expect(screen.getByLabelText("Prompt")).toBeDisabled();
     expect(screen.getByPlaceholderText("Add a project to start a task")).toBeInTheDocument();
     expect(screen.getByTestId("home-send-button")).toBeDisabled();
+  });
+
+  it("no ready agent disables the composer with the sign-in placeholder and names the CLI", async () => {
+    const { call } = fakeClient();
+    call.mockImplementation(async (method: string) => {
+      if (method === "provider.list") return { providers: PROVIDERS };
+      if (method === "provider.test") return { ok: false, detail: '"claude" not found on PATH' };
+      if (method === "profile.list" || method === "run.list") return [];
+      return {};
+    });
+    render(
+      <HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={[]} onCreated={vi.fn()} />,
+    );
+    expect(await screen.findByText("Claude Code - Not installed")).toBeInTheDocument();
+    expect(await screen.findByPlaceholderText("Sign in to an agent to start a task")).toBeInTheDocument();
+    expect(screen.getByLabelText("Prompt")).toBeDisabled();
+    expect(screen.getByTestId("home-send-button")).toBeDisabled();
+  });
+
+  it("readiness unknown (provider.test pending) keeps the composer enabled once a project exists", async () => {
+    const { call } = fakeClient();
+    call.mockImplementation(async (method: string) => {
+      if (method === "provider.list") return { providers: PROVIDERS };
+      if (method === "provider.test") return new Promise(() => {});
+      if (method === "profile.list" || method === "run.list") return [];
+      return {};
+    });
+    render(
+      <HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={THREE} onCreated={vi.fn()} />,
+    );
+    await waitFor(() => expect(call).toHaveBeenCalledWith("provider.test", { provider: "claude-native" }));
+    expect(screen.getByLabelText("Prompt")).toBeEnabled();
+    expect(screen.getByPlaceholderText("Describe a task for the agent…")).toBeInTheDocument();
+  });
+
+  it("the get-started card disappears once an agent is ready and a project exists", async () => {
+    renderHome();
+    await waitFor(() => expect(screen.queryByTestId("get-started-card")).not.toBeInTheDocument());
   });
 
   it("disconnected with a cause shows the notice with Retry and the serve hint (AC1)", () => {
@@ -280,6 +322,7 @@ describe("HomeLanding effort chip", () => {
     window.localStorage.clear();
     useHomeProjectStore.getState().reload();
     useHomeRunConfigStore.getState().reload();
+    useGetStartedDismissedStore.getState().reload();
     usePendingSendStore.setState({ entry: null });
   });
   afterEach(() => {
@@ -287,6 +330,7 @@ describe("HomeLanding effort chip", () => {
     window.localStorage.clear();
     useHomeProjectStore.getState().reload();
     useHomeRunConfigStore.getState().reload();
+    useGetStartedDismissedStore.getState().reload();
     usePendingSendStore.setState({ entry: null });
   });
 
@@ -307,6 +351,7 @@ describe("HomeLanding effort chip", () => {
     const { call } = fakeClient();
     call.mockImplementation(async (method: string) => {
       if (method === "provider.list") return { providers: [{ id: "glm", label: "GLM", models: [{ id: "glm-5", label: "GLM 5" }] }] };
+      if (method === "provider.test") return { ok: true, detail: "ok" };
       return [];
     });
     useHomeRunConfigStore.getState().set({ baseAgentId: null, custom: false, provider: "glm", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" });
@@ -329,6 +374,7 @@ function attachClient(limits: AttachmentLimits | null, chats: Chat[] | Error = [
   const { call, task } = fakeClient();
   call.mockImplementation(async (method: string) => {
     if (method === "provider.list") return { providers: PROVIDERS };
+    if (method === "provider.test") return { ok: true, detail: "ok" };
     if (method === "daemon.info") return limits ? { attachments: limits } : {};
     if (method === "chat.list") {
       if (chats instanceof Error) throw chats;
@@ -347,6 +393,7 @@ describe("HomeLanding attachments", () => {
     window.localStorage.clear();
     useHomeProjectStore.getState().reload();
     useHomeRunConfigStore.getState().reload();
+    useGetStartedDismissedStore.getState().reload();
     usePendingSendStore.setState({ entry: null });
     useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
   });
@@ -355,6 +402,7 @@ describe("HomeLanding attachments", () => {
     window.localStorage.clear();
     useHomeProjectStore.getState().reload();
     useHomeRunConfigStore.getState().reload();
+    useGetStartedDismissedStore.getState().reload();
     usePendingSendStore.setState({ entry: null });
     useComposerAttachmentsStore.setState({ byKey: {}, mentions: {} });
   });
@@ -397,7 +445,11 @@ describe("HomeLanding attachments", () => {
 });
 
 describe("HomeLanding chip labels", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    useGetStartedDismissedStore.getState().reload();
+  });
 
   it("home_chip_labels_visible_below_sm", async () => {
     renderHome();
@@ -426,6 +478,7 @@ describe("HomeLanding office suggestions", () => {
     useInterfaceModeStore.getState().reload();
     useHomeProjectStore.getState().reload();
     useHomeRunConfigStore.getState().reload();
+    useGetStartedDismissedStore.getState().reload();
     usePendingSendStore.setState({ entry: null });
   });
   afterEach(() => {
