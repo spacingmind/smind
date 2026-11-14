@@ -131,16 +131,23 @@ fn walk(
                     return Err(format!("context menu item id {id:?} is duplicated"));
                 }
                 if !valid_label(label) {
-                    return Err("context menu item label is empty, too long or has control characters".into());
+                    return Err(
+                        "context menu item label is empty, too long or has control characters"
+                            .into(),
+                    );
                 }
                 *items += 1;
             }
-            MenuEntry::Submenu { label, children, .. } => {
+            MenuEntry::Submenu {
+                label, children, ..
+            } => {
                 if depth >= 1 {
                     return Err("context menu is nested deeper than one submenu".into());
                 }
                 if !valid_label(label) {
-                    return Err("context submenu label is empty, too long or has control characters".into());
+                    return Err(
+                        "context submenu label is empty, too long or has control characters".into(),
+                    );
                 }
                 walk(children, depth + 1, seen, count, items)?;
             }
@@ -193,11 +200,15 @@ impl ContextMenuState {
         let (open, id) = parse_event_id(event)?;
         let mut inner = self.inner.lock().expect("context menu state");
         let armed = inner.armed.as_ref()?;
-        if armed.open != open || !armed.ids.contains(id) || now.duration_since(armed.at) > ARMED_TTL {
+        if armed.open != open || !armed.ids.contains(id) || now.duration_since(armed.at) > ARMED_TTL
+        {
             return None;
         }
         inner.armed = None;
-        Some(ContextMenuSelection { open, id: id.to_string() })
+        Some(ContextMenuSelection {
+            open,
+            id: id.to_string(),
+        })
     }
 }
 
@@ -216,7 +227,11 @@ fn append_entries(
                     .build(app)?;
                 menu.append(&item)?;
             }
-            MenuEntry::Submenu { label, enabled, children } => {
+            MenuEntry::Submenu {
+                label,
+                enabled,
+                children,
+            } => {
                 let sub = Submenu::new(app, label, *enabled)?;
                 for c in children {
                     match c {
@@ -250,7 +265,11 @@ pub fn context_menu_show(
     y: f64,
 ) -> Result<u64, String> {
     validate(&entries)?;
-    if !(x.is_finite() && y.is_finite() && (0.0..=MAX_COORD).contains(&x) && (0.0..=MAX_COORD).contains(&y)) {
+    if !(x.is_finite()
+        && y.is_finite()
+        && (0.0..=MAX_COORD).contains(&x)
+        && (0.0..=MAX_COORD).contains(&y))
+    {
         return Err("context menu position is out of range".into());
     }
     let open = state.arm(&entries, Instant::now());
@@ -270,7 +289,10 @@ pub fn handle_event(app: &AppHandle, event: &str) -> bool {
     if parse_event_id(event).is_none() {
         return false;
     }
-    if let Some(sel) = app.state::<ContextMenuState>().resolve(event, Instant::now()) {
+    if let Some(sel) = app
+        .state::<ContextMenuState>()
+        .resolve(event, Instant::now())
+    {
         let _ = app.emit_to(MAIN_WINDOW, ACTION_EVENT, sel);
     }
     true
@@ -281,44 +303,108 @@ mod tests {
     use super::*;
 
     fn item(id: &str, label: &str) -> MenuEntry {
-        MenuEntry::Item { id: id.into(), label: label.into(), enabled: true }
+        MenuEntry::Item {
+            id: id.into(),
+            label: label.into(),
+            enabled: true,
+        }
     }
 
     #[test]
     fn context_menu_validate_table() {
-        let ok = vec![item("a", "Rename"), MenuEntry::Separator, item("b", "Delete")];
+        let ok = vec![
+            item("a", "Rename"),
+            MenuEntry::Separator,
+            item("b", "Delete"),
+        ];
         assert_eq!(validate(&ok), Ok(()));
 
         let long_label = "x".repeat(MAX_LABEL_CHARS + 1);
-        let many: Vec<MenuEntry> = (0..=MAX_ENTRIES).map(|i| item(&format!("i{i}"), "x")).collect();
+        let many: Vec<MenuEntry> = (0..=MAX_ENTRIES)
+            .map(|i| item(&format!("i{i}"), "x"))
+            .collect();
         let nested = vec![MenuEntry::Submenu {
             label: "More".into(),
             enabled: true,
-            children: vec![MenuEntry::Submenu { label: "Deeper".into(), enabled: true, children: vec![item("z", "z")] }],
+            children: vec![MenuEntry::Submenu {
+                label: "Deeper".into(),
+                enabled: true,
+                children: vec![item("z", "z")],
+            }],
         }];
         let cases: Vec<(&str, Vec<MenuEntry>, &str)> = vec![
             ("empty", vec![], "no item"),
-            ("only separators", vec![MenuEntry::Separator, MenuEntry::Separator], "no item"),
-            ("empty submenu only", vec![MenuEntry::Submenu { label: "S".into(), enabled: true, children: vec![] }], "no item"),
+            (
+                "only separators",
+                vec![MenuEntry::Separator, MenuEntry::Separator],
+                "no item",
+            ),
+            (
+                "empty submenu only",
+                vec![MenuEntry::Submenu {
+                    label: "S".into(),
+                    enabled: true,
+                    children: vec![],
+                }],
+                "no item",
+            ),
             ("too many", many, "more than"),
             ("too deep", nested, "deeper"),
-            ("duplicate id", vec![item("a", "A"), item("a", "B")], "duplicated"),
-            ("duplicate id across a submenu", vec![item("a", "A"), MenuEntry::Submenu { label: "S".into(), enabled: true, children: vec![item("a", "B")] }], "duplicated"),
+            (
+                "duplicate id",
+                vec![item("a", "A"), item("a", "B")],
+                "duplicated",
+            ),
+            (
+                "duplicate id across a submenu",
+                vec![
+                    item("a", "A"),
+                    MenuEntry::Submenu {
+                        label: "S".into(),
+                        enabled: true,
+                        children: vec![item("a", "B")],
+                    },
+                ],
+                "duplicated",
+            ),
             ("empty id", vec![item("", "A")], "not allowed"),
             ("bad id char", vec![item("a b", "A")], "not allowed"),
-            ("path-like id", vec![item("../etc/passwd", "A")], "not allowed"),
-            ("long id", vec![item(&"a".repeat(MAX_ID_LEN + 1), "A")], "not allowed"),
+            (
+                "path-like id",
+                vec![item("../etc/passwd", "A")],
+                "not allowed",
+            ),
+            (
+                "long id",
+                vec![item(&"a".repeat(MAX_ID_LEN + 1), "A")],
+                "not allowed",
+            ),
             ("empty label", vec![item("a", "  ")], "label"),
             ("long label", vec![item("a", &long_label)], "label"),
             ("control character", vec![item("a", "Re\nname")], "label"),
-            ("submenu control character", vec![MenuEntry::Submenu { label: "S\u{0}".into(), enabled: true, children: vec![item("a", "A")] }], "label"),
+            (
+                "submenu control character",
+                vec![MenuEntry::Submenu {
+                    label: "S\u{0}".into(),
+                    enabled: true,
+                    children: vec![item("a", "A")],
+                }],
+                "label",
+            ),
         ];
         for (name, entries, want) in cases {
             let err = validate(&entries).expect_err(name);
-            assert!(err.contains(want), "{name}: {err:?} does not mention {want:?}");
+            assert!(
+                err.contains(want),
+                "{name}: {err:?} does not mention {want:?}"
+            );
         }
         // A menu whose items are all disabled is still a menu (the in-page one shows them greyed).
-        let disabled = vec![MenuEntry::Item { id: "a".into(), label: "Close".into(), enabled: false }];
+        let disabled = vec![MenuEntry::Item {
+            id: "a".into(),
+            label: "Close".into(),
+            enabled: false,
+        }];
         assert_eq!(validate(&disabled), Ok(()));
     }
 
@@ -337,17 +423,31 @@ mod tests {
             r#"[{"kind":"open","id":"a","label":"A"}]"#,
             r#"[{"kind":"item","label":"A"}]"#,
         ] {
-            assert!(serde_json::from_str::<Vec<MenuEntry>>(bad).is_err(), "{bad} was accepted");
+            assert!(
+                serde_json::from_str::<Vec<MenuEntry>>(bad).is_err(),
+                "{bad} was accepted"
+            );
         }
     }
 
     #[test]
     fn context_menu_ids_are_namespaced_per_open_and_roundtrip() {
         assert_eq!(event_id(7, "task.rename"), "ctx:7:task.rename");
-        assert_eq!(parse_event_id("ctx:7:task.rename"), Some((7, "task.rename")));
+        assert_eq!(
+            parse_event_id("ctx:7:task.rename"),
+            Some((7, "task.rename"))
+        );
         // An id may itself contain colons: only the first separator splits.
         assert_eq!(parse_event_id("ctx:12:a:b"), Some((12, "a:b")));
-        for not in ["file-quit", "ctx:", "ctx:x:a", "ctx:7", "ctx::a", "xctx:1:a", ""] {
+        for not in [
+            "file-quit",
+            "ctx:",
+            "ctx:x:a",
+            "ctx:7",
+            "ctx::a",
+            "xctx:1:a",
+            "",
+        ] {
             assert_eq!(parse_event_id(not), None, "{not:?}");
         }
     }
@@ -364,20 +464,39 @@ mod tests {
         // An id the armed menu does not carry is ignored too (another menu's id under this open).
         assert_eq!(state.resolve(&event_id(second, "a"), t0), None);
         // The armed menu's own selection resolves once.
-        assert_eq!(state.resolve(&event_id(second, "b"), t0), Some(ContextMenuSelection { open: second, id: "b".into() }));
-        assert_eq!(state.resolve(&event_id(second, "b"), t0), None, "a duplicate selection is ignored");
+        assert_eq!(
+            state.resolve(&event_id(second, "b"), t0),
+            Some(ContextMenuSelection {
+                open: second,
+                id: "b".into()
+            })
+        );
+        assert_eq!(
+            state.resolve(&event_id(second, "b"), t0),
+            None,
+            "a duplicate selection is ignored"
+        );
     }
 
     #[test]
-    fn context_menu_selection_after_the_ttl_is_ignored_and_dismissal_leaves_nothing_armed_for_ever() {
+    fn context_menu_selection_after_the_ttl_is_ignored_and_dismissal_leaves_nothing_armed_for_ever()
+    {
         let state = ContextMenuState::default();
         let t0 = Instant::now();
         let open = state.arm(&[item("a", "A")], t0);
-        assert_eq!(state.resolve(&event_id(open, "a"), t0 + ARMED_TTL + Duration::from_secs(1)), None);
+        assert_eq!(
+            state.resolve(
+                &event_id(open, "a"),
+                t0 + ARMED_TTL + Duration::from_secs(1)
+            ),
+            None
+        );
         // Nothing was armed by a menu that never delivered; a fresh open starts clean.
         let again = state.arm(&[item("a", "A")], t0);
         assert!(again > open);
-        assert!(state.resolve(&event_id(again, "a"), t0 + Duration::from_secs(1)).is_some());
+        assert!(state
+            .resolve(&event_id(again, "a"), t0 + Duration::from_secs(1))
+            .is_some());
     }
 
     #[test]
@@ -385,10 +504,16 @@ mod tests {
         // The command's arguments are a menu model and a position, and the model deserializes
         // only labels, opaque ids and flags (see the test above): the source names no other input.
         let src = include_str!("context_menu.rs");
-        let sig = src.split("pub fn context_menu_show(").nth(1).expect("command exists");
+        let sig = src
+            .split("pub fn context_menu_show(")
+            .nth(1)
+            .expect("command exists");
         let sig = sig.split(") -> Result").next().unwrap();
         for forbidden in ["path", "command:", "url", "args"] {
-            assert!(!sig.contains(forbidden), "context_menu_show takes {forbidden}");
+            assert!(
+                !sig.contains(forbidden),
+                "context_menu_show takes {forbidden}"
+            );
         }
     }
 }
