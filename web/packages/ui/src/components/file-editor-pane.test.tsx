@@ -1,5 +1,6 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { describe, expect, it } from "vitest";
 
 import { editorViewRegistry } from "@/components/code-mirror-editor";
