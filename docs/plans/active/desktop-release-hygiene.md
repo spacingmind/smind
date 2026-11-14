@@ -81,4 +81,5 @@ Mutation table (each must make the named test fail; recorded in Validation): com
 - `actionlint .github/workflows/release-please.yml`: clean.
 - Mutations (each applied to the committed script, the named test failed, then restored): digest comparison off -> `verify-checksum-wrong-digest`; duplicate check off -> `verify-checksum-duplicate-entry`; prefix accepted in the sidecar match -> `verify-sidecar-prefix-version-not-accepted`; signature-equals-`.sig` comparison off -> `verify-latest-signature-mismatch`; `file:` comment check off -> `verify-minisig-wrong-file`.
 - Real Go binaries built with the release ldflags (linux/darwin host build and a windows/amd64 cross build) were confirmed to contain `internal/version.Version=<v>` in their build settings, the basis of AC7.
+- Run against the real published v0.20.0 assets (downloaded to a scratch dir, deleted afterwards): all 8 checks `ok`, so the naming and layout rules match what the pipeline produces today.
 - Not verified: a real release run (the workflow step runs only on `develop` pushes and dry-run dispatches; no dispatch was made from this branch).
