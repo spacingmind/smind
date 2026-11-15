@@ -143,4 +143,14 @@ describe("ComposerStatusChips", () => {
     const { container } = render(<ComposerStatusChips running={false} git={taskGit({ conflict: { state: "none", files: [], checkedAt: "" } })} onOpenDiff={() => {}} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("status-line-chips-are-28px-with-13px-text", () => {
+    render(<ComposerStatusChips running startedAt={new Date().toISOString()} otherRunningChat={{ id: 2, title: "Other" }} />);
+    for (const id of ["composer-working-chip", "composer-concurrency-chip"]) {
+      const chip = screen.getByTestId(id);
+      expect(chip.className, id).toContain("h-7");
+      expect(chip.className, id).toContain("text-ui-caption");
+      expect(chip.className, id).not.toContain("text-ui-sm");
+    }
+  });
 });
