@@ -46,3 +46,16 @@ GLM peers (step-by-step briefs, one commit per step, no push): **peer A** the st
 ## Not in PR 3
 
 The Settings UI (the plan's web PR B3), the provider table (PR 5), proxy authentication and the per-run socket (PR 3b), the permission gate (PR 4), a persistent profile, any wildcard allowlist.
+
+## PR 3: progress, deviations and validation
+
+Built as specified, with these deviations decided while building:
+
+- **No `browser.settings.updated` event.** A new bus topic needs entries in the relay and channel allowlists and nothing consumes it until the Settings UI PR, so the topic arrives with its consumer. A change still closes the workspace's browser session at once.
+- **The deny list is the daemon's own addresses**: the listen address and every `server.hostnames` entry on the same port (a wildcard bind denies the port everywhere, by the policy). The config names no other daemon listener (the relay and gRPC-web listeners are command-line flags of other commands), and a fleet-linked daemon's address is inside opaque link JSON and non-loopback anyway: it is unreachable unless the human allowlists it. The desktop proxy origin arrives with the desktop host (B4), which is the only thing that creates it.
+- **A name for `allow rm`**: the CLI matches a typed host against the stored canonical list case-insensitively and without a trailing dot; the daemon stays the only validator.
+- `browser.settings.get` and `.set` carry a fixed `note` (the rule for names: a host name must resolve to public addresses, an intranet host is added by IP literal).
+
+Staffing: the store table and methods (peer A) and the `smind browser` CLI with its human-only table row (peer B) were written by GLM peers (profile 8) from step-by-step briefs and reviewed and integrated by me; the kill switch, the three human-only RPCs, their table entries and drift tests, the gate hook, the allowlist wiring, the deny list, the golden and the end-to-end test are mine.
+
+Validation: store tests, config tests for the kill switch (file, environment, fail closed, read per call), RPC tests (human-only on every route, validation table, partial updates, session close, actor, kill switch, deny list, dark even when enabled, real-store end to end), CLI tests (refusal in an agent run, the full flow, status text, usage, case-insensitive match), mutations for each. Not verified: a real daemon's relay path for the three methods (the E2EE channel follows the saved-grants precedent but was not exercised); the Settings UI does not exist yet.
