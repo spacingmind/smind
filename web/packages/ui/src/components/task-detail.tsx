@@ -447,7 +447,7 @@ export function TaskDetailPane({
   const agentLabel = runConfigState ? agentChipLabel(runConfigState, profiles) : null;
 
   return (
-    <div className="relative flex h-full flex-col" {...dropZone.handlers}>
+    <div className="@container/chat relative flex h-full flex-col" {...dropZone.handlers}>
       {attachDraft.limits && <AttachmentDropOverlay active={dropZone.dragging} />}
       {/*
        * The task's title, branch and status live in the app header (and its
@@ -545,7 +545,7 @@ export function TaskDetailPane({
            * and only the chat tab gets it: files/diff/terminal render
            * their own full-width roots.
            */}
-          <div data-testid="run-log-column" className="mx-auto max-w-3xl">
+          <div data-testid="run-log-column" className="mx-auto max-w-3xl @[1100px]/chat:max-w-4xl">
             {chat.fork && (
               <ForkContext
                 chat={chat}
@@ -652,7 +652,7 @@ export function TaskDetailPane({
       {pendingRuns.length > 0 && (
         <div
           data-testid="pending-permission-dock"
-          className="mx-auto w-full max-w-3xl shrink-0 space-y-2 border-t border-border bg-background px-4 py-2 shadow-[0_-6px_10px_-8px_rgb(0_0_0/0.18)] md:border-t-0 md:bg-transparent md:shadow-none"
+          className="mx-auto w-full max-w-3xl @[1100px]/chat:max-w-4xl shrink-0 space-y-2 border-t border-border bg-background px-4 py-2 shadow-[0_-6px_10px_-8px_rgb(0_0_0/0.18)] md:border-t-0 md:bg-transparent md:shadow-none"
         >
           {pendingRuns.map((run) => (
             <Fragment key={run.id}>

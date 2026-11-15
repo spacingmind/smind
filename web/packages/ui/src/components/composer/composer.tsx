@@ -564,7 +564,7 @@ export function Composer({
   const showFocusHint = focusCombo !== null && canSend && !focused && draft.value === "" && attachItems.length === 0;
 
   return (
-    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
+    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl @[1100px]/chat:max-w-4xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
       <QueuedPrompts items={queuedItems} onCancel={onCancelQueued} />
 
       {/* Paseo's chip row above the card: the live-run chip and the diff
