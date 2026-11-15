@@ -26,7 +26,8 @@ const STDERR_LIMIT: usize = 8192;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(12);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const TUNNEL_DIED_AT_START: &str = "the SSH tunnel stopped right after it started; try again";
-const MISSING_SSH: &str = "ssh was not found on this computer: install the OpenSSH client and try again";
+const MISSING_SSH: &str =
+    "ssh was not found on this computer: install the OpenSSH client and try again";
 
 /// tunnel_args is the argv after the program: `--` ends options so a host can
 /// never be read as one (the host is also validated, never starting with `-`).
@@ -61,7 +62,10 @@ pub fn tunnel_args(target: &SshTarget, local_port: u16) -> Vec<String> {
         args.push(port.to_string());
     }
     args.push("-L".to_string());
-    args.push(format!("127.0.0.1:{local_port}:127.0.0.1:{}", target.daemon_port));
+    args.push(format!(
+        "127.0.0.1:{local_port}:127.0.0.1:{}",
+        target.daemon_port
+    ));
     args.push("--".to_string());
     args.push(target.host.clone());
     args
@@ -131,7 +135,11 @@ enum OwnerCheck {
 /// Windows the helper must work, so a failure refuses (`Unidentified`); on
 /// other platforms there is no helper and the tunnel falls back to the
 /// `/healthz` answer alone (`Unavailable`, the weaker check).
-fn classify_owner(found: std::io::Result<Vec<u32>>, child_pid: u32, fail_closed: bool) -> OwnerCheck {
+fn classify_owner(
+    found: std::io::Result<Vec<u32>>,
+    child_pid: u32,
+    fail_closed: bool,
+) -> OwnerCheck {
     match found {
         Ok(pids) if pids.is_empty() => OwnerCheck::Unidentified,
         Ok(pids) => match pids.iter().find(|pid| **pid != child_pid) {
@@ -190,12 +198,15 @@ fn verdict(owner: &OwnerCheck, reachable: bool, service: Option<&str>) -> Result
 }
 
 fn free_port() -> Result<u16, String> {
-    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("could not find a free local port: {e}"))?;
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("could not find a free local port: {e}"))?;
     Ok(listener.local_addr().map_err(|e| e.to_string())?.port())
 }
 
 /// capture drains the child's stderr on a thread, keeping the last 8 KiB.
-fn capture(mut stderr: std::process::ChildStderr) -> (Arc<Mutex<Vec<u8>>>, std::thread::JoinHandle<()>) {
+fn capture(
+    mut stderr: std::process::ChildStderr,
+) -> (Arc<Mutex<Vec<u8>>>, std::thread::JoinHandle<()>) {
     let buf = Arc::new(Mutex::new(Vec::new()));
     let sink = buf.clone();
     let handle = std::thread::spawn(move || {
@@ -251,13 +262,25 @@ impl SshTunnels {
     }
 
     fn start_lock(&self, id: &str) -> Arc<tokio::sync::Mutex<()>> {
-        self.start_locks.lock().unwrap().entry(id.to_string()).or_default().clone()
+        self.start_locks
+            .lock()
+            .unwrap()
+            .entry(id.to_string())
+            .or_default()
+            .clone()
     }
 
     /// watch_exit reports (once) when `tunnel`'s child exits by itself.
     fn watch_exit(&self, id: &str, tunnel: &Tunnel) {
-        let Some(hook) = self.exit_hook.lock().unwrap().clone() else { return };
-        let (child, stopped, url, id) = (tunnel.child.clone(), tunnel.stopped.clone(), tunnel.url(), id.to_string());
+        let Some(hook) = self.exit_hook.lock().unwrap().clone() else {
+            return;
+        };
+        let (child, stopped, url, id) = (
+            tunnel.child.clone(),
+            tunnel.stopped.clone(),
+            tunnel.url(),
+            id.to_string(),
+        );
         std::thread::spawn(move || loop {
             if stopped.load(Ordering::SeqCst) {
                 return;
@@ -298,7 +321,11 @@ impl SshTunnels {
         let target = target.validate()?;
         let local_port = free_port()?;
         let mut command = Command::new(&self.program);
-        command.args(tunnel_args(&target, local_port)).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+        command
+            .args(tunnel_args(&target, local_port))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -312,7 +339,11 @@ impl SshTunnels {
             }
         })?;
         let (stderr, reader) = capture(child.stderr.take().expect("stderr is piped"));
-        let tunnel = Tunnel { child: Arc::new(Mutex::new(child)), local_port, stopped: Arc::new(AtomicBool::new(false)) };
+        let tunnel = Tunnel {
+            child: Arc::new(Mutex::new(child)),
+            local_port,
+            stopped: Arc::new(AtomicBool::new(false)),
+        };
 
         let addr = SocketAddr::from(([127, 0, 0, 1], local_port));
         let deadline = Instant::now() + STARTUP_TIMEOUT;
@@ -333,12 +364,20 @@ impl SshTunnels {
             // picked port before ssh has authenticated still passes this
             // connect check; that residual window is closed by the
             // post-start owner + healthz check below.
-            if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() && tunnel.alive() {
+            if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
+                && tunnel.alive()
+            {
                 break;
             }
             if Instant::now() >= deadline {
-                let detail = String::from_utf8_lossy(&stderr.lock().unwrap()).trim().to_string();
-                return Err(if detail.is_empty() { "the SSH tunnel did not come up in time".to_string() } else { detail });
+                let detail = String::from_utf8_lossy(&stderr.lock().unwrap())
+                    .trim()
+                    .to_string();
+                return Err(if detail.is_empty() {
+                    "the SSH tunnel did not come up in time".to_string()
+                } else {
+                    detail
+                });
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -351,7 +390,9 @@ impl SshTunnels {
         // anyone, so liveness and ownership are checked AFTER it, closest to
         // use (a pid of a child that is still unreaped cannot be reused).
         if !tunnel.alive() {
-            return Err("the ssh process exited while the SSH tunnel was being verified".to_string());
+            return Err(
+                "the ssh process exited while the SSH tunnel was being verified".to_string(),
+            );
         }
         let child_pid = tunnel.child.lock().unwrap().id();
         let owner = classify_owner(port_owners(local_port), child_pid, OWNER_LOOKUP_FAIL_CLOSED);
@@ -382,7 +423,11 @@ impl SshTunnels {
 
 /// ensure_tunnel makes sure `conn` (an `ssh` connection) has a running
 /// tunnel and tells the proxy where its local end is.
-pub async fn ensure_tunnel(proxy: &ProxyState, tunnels: &SshTunnels, conn: &Connection) -> Result<(), String> {
+pub async fn ensure_tunnel(
+    proxy: &ProxyState,
+    tunnels: &SshTunnels,
+    conn: &Connection,
+) -> Result<(), String> {
     debug_assert_eq!(conn.kind, ConnectionKind::Ssh);
     let target = SshTarget::from_uri(&conn.base_url)?;
     let url = tunnels.start(&conn.id, &target).await?;
@@ -422,7 +467,9 @@ pub async fn add_ssh_connection(
     }
     let saved = {
         let mut registry = proxy.registry.lock().unwrap();
-        registry.add_ssh(label, &target).and_then(|conn| registry.save(path).map(|_| conn).map_err(|e| e.to_string()))
+        registry
+            .add_ssh(label, &target)
+            .and_then(|conn| registry.save(path).map(|_| conn).map_err(|e| e.to_string()))
     };
     match saved {
         Ok(conn) => {
@@ -450,8 +497,19 @@ pub async fn connections_add_ssh(
     ssh_port: Option<u16>,
     daemon_port: u16,
 ) -> Result<Connection, String> {
-    let target = SshTarget { host, ssh_port, daemon_port };
-    add_ssh_connection(&state.proxy, &state.ssh_tunnels, &state.connections_path, &label, &target).await
+    let target = SshTarget {
+        host,
+        ssh_port,
+        daemon_port,
+    };
+    add_ssh_connection(
+        &state.proxy,
+        &state.ssh_tunnels,
+        &state.connections_path,
+        &label,
+        &target,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -459,7 +517,11 @@ mod tests {
     use super::*;
 
     fn target() -> SshTarget {
-        SshTarget { host: "me@lab".into(), ssh_port: Some(2222), daemon_port: 4648 }
+        SshTarget {
+            host: "me@lab".into(),
+            ssh_port: Some(2222),
+            daemon_port: 4648,
+        }
     }
 
     #[test]
@@ -480,14 +542,26 @@ mod tests {
     #[test]
     fn owner_check_foreign_when_any_listener_is_not_ours() {
         // A wildcard/IPv6 squatter next to ssh's own listener, in either order.
-        assert_eq!(classify_owner(Ok(vec![7, 9]), 7, true), OwnerCheck::Foreign(9));
-        assert_eq!(classify_owner(Ok(vec![9, 7]), 7, true), OwnerCheck::Foreign(9));
+        assert_eq!(
+            classify_owner(Ok(vec![7, 9]), 7, true),
+            OwnerCheck::Foreign(9)
+        );
+        assert_eq!(
+            classify_owner(Ok(vec![9, 7]), 7, true),
+            OwnerCheck::Foreign(9)
+        );
     }
 
     #[test]
     fn owner_check_unidentified_when_nobody_is_found() {
-        assert_eq!(classify_owner(Ok(vec![]), 7, true), OwnerCheck::Unidentified);
-        assert_eq!(classify_owner(Ok(vec![]), 7, false), OwnerCheck::Unidentified);
+        assert_eq!(
+            classify_owner(Ok(vec![]), 7, true),
+            OwnerCheck::Unidentified
+        );
+        assert_eq!(
+            classify_owner(Ok(vec![]), 7, false),
+            OwnerCheck::Unidentified
+        );
     }
 
     #[test]
@@ -578,7 +652,13 @@ mod tests {
             ]
         );
         // No ssh port: no -p; the host is always last, after `--`.
-        let args = tunnel_args(&SshTarget { ssh_port: None, ..target() }, 1);
+        let args = tunnel_args(
+            &SshTarget {
+                ssh_port: None,
+                ..target()
+            },
+            1,
+        );
         assert!(!args.contains(&"-p".to_string()));
         assert_eq!(&args[args.len() - 2..], ["--", "me@lab"]);
     }
@@ -587,8 +667,14 @@ mod tests {
     async fn ssh_missing_binary_reports_clearly() {
         let dir = tempfile::tempdir().unwrap();
         let tunnels = SshTunnels::with_program(dir.path().join("no-such-ssh"));
-        let err = tunnels.start("ssh:me@lab:default:4648", &target()).await.unwrap_err();
-        assert_eq!(err, "ssh was not found on this computer: install the OpenSSH client and try again");
+        let err = tunnels
+            .start("ssh:me@lab:default:4648", &target())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            "ssh was not found on this computer: install the OpenSSH client and try again"
+        );
     }
 
     #[cfg(unix)]
@@ -629,7 +715,9 @@ mod tests {
         #[test]
         #[ignore]
         fn fake_ssh_listener() {
-            let Ok(argv) = std::env::var("FAKE_SSH_ARGV") else { return };
+            let Ok(argv) = std::env::var("FAKE_SSH_ARGV") else {
+                return;
+            };
             let argv = std::fs::read_to_string(argv).unwrap();
             let args: Vec<&str> = argv.lines().collect();
             let spec = args[args.iter().position(|a| *a == "-L").unwrap() + 1];
@@ -660,7 +748,10 @@ mod tests {
                         return;
                     }
                     // Lets a test hold start() inside its /healthz probe.
-                    if let Some(ms) = std::env::var("FAKE_SSH_HEALTHZ_DELAY_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+                    if let Some(ms) = std::env::var("FAKE_SSH_HEALTHZ_DELAY_MS")
+                        .ok()
+                        .and_then(|v| v.parse::<u64>().ok())
+                    {
                         std::thread::sleep(Duration::from_millis(ms));
                     }
                     let body = format!(
@@ -680,12 +771,20 @@ mod tests {
 
         fn proxy() -> Arc<ProxyState> {
             let local = url::Url::parse("http://127.0.0.1:4648").unwrap();
-            ProxyState::new("s".into(), Registry::new(&local), Box::new(crate::assets::EmbeddedAssets))
+            ProxyState::new(
+                "s".into(),
+                Registry::new(&local),
+                Box::new(crate::assets::EmbeddedAssets),
+            )
         }
 
         fn reachable(url: &str) -> bool {
             let port: u16 = url.rsplit(':').next().unwrap().parse().unwrap();
-            TcpStream::connect_timeout(&SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_millis(500)).is_ok()
+            TcpStream::connect_timeout(
+                &SocketAddr::from(([127, 0, 0, 1], port)),
+                Duration::from_millis(500),
+            )
+            .is_ok()
         }
 
         #[tokio::test]
@@ -697,7 +796,10 @@ mod tests {
             assert!(reachable(&url));
             let argv = std::fs::read_to_string(dir.path().join("argv.txt")).unwrap();
             let port = url.rsplit(':').next().unwrap();
-            assert!(argv.contains(&format!("127.0.0.1:{port}:127.0.0.1:4648")), "{argv}");
+            assert!(
+                argv.contains(&format!("127.0.0.1:{port}:127.0.0.1:4648")),
+                "{argv}"
+            );
             assert!(argv.ends_with("--\nme@lab\n"), "{argv}");
             // Asking again reuses the running tunnel.
             assert_eq!(tunnels.start(&id, &target()).await.unwrap(), url);
@@ -708,16 +810,32 @@ mod tests {
         #[tokio::test]
         async fn ssh_failure_carries_stderr_or_the_exit_code() {
             let dir = tempfile::tempdir().unwrap();
-            let denied = script(dir.path(), "denied", "echo 'me@lab: Permission denied (publickey).' >&2\nexit 255");
-            let err = SshTunnels::with_program(denied).start("x", &target()).await.unwrap_err();
+            let denied = script(
+                dir.path(),
+                "denied",
+                "echo 'me@lab: Permission denied (publickey).' >&2\nexit 255",
+            );
+            let err = SshTunnels::with_program(denied)
+                .start("x", &target())
+                .await
+                .unwrap_err();
             assert_eq!(err, "me@lab: Permission denied (publickey).");
             let silent = script(dir.path(), "silent", "exit 3");
-            let err = SshTunnels::with_program(silent).start("x", &target()).await.unwrap_err();
+            let err = SshTunnels::with_program(silent)
+                .start("x", &target())
+                .await
+                .unwrap_err();
             assert_eq!(err, "ssh exited with code 3");
             // Invalid targets never spawn anything.
             let never = SshTunnels::with_program(dir.path().join("never"));
-            let bad = SshTarget { host: "-oProxyCommand=x".into(), ..target() };
-            assert_eq!(never.start("x", &bad).await.unwrap_err(), "SSH host is invalid");
+            let bad = SshTarget {
+                host: "-oProxyCommand=x".into(),
+                ..target()
+            };
+            assert_eq!(
+                never.start("x", &bad).await.unwrap_err(),
+                "SSH host is invalid"
+            );
         }
 
         #[tokio::test]
@@ -726,13 +844,23 @@ mod tests {
             let path = dir.path().join("connections.json");
             let denied = script(dir.path(), "denied", "echo nope >&2\nexit 255");
             let p = proxy();
-            let err = add_ssh_connection(&p, &SshTunnels::with_program(denied), &path, "Lab", &target()).await.unwrap_err();
+            let err = add_ssh_connection(
+                &p,
+                &SshTunnels::with_program(denied),
+                &path,
+                "Lab",
+                &target(),
+            )
+            .await
+            .unwrap_err();
             assert_eq!(err, "nope");
             assert!(!path.exists());
             assert_eq!(p.registry.lock().unwrap().list().len(), 1);
 
             let tunnels = SshTunnels::with_program(fake_ssh(dir.path()));
-            let conn = add_ssh_connection(&p, &tunnels, &path, "Lab", &target()).await.unwrap();
+            let conn = add_ssh_connection(&p, &tunnels, &path, "Lab", &target())
+                .await
+                .unwrap();
             assert_eq!(conn.kind, ConnectionKind::Ssh);
             assert!(path.exists());
             assert_eq!(p.ssh_local(&conn.id), tunnels.local_url(&conn.id));
@@ -744,7 +872,9 @@ mod tests {
             let path = dir.path().join("connections.json");
             let p = proxy();
             let tunnels = SshTunnels::with_program(fake_ssh(dir.path()));
-            let conn = add_ssh_connection(&p, &tunnels, &path, "Lab", &target()).await.unwrap();
+            let conn = add_ssh_connection(&p, &tunnels, &path, "Lab", &target())
+                .await
+                .unwrap();
             let url = p.ssh_local(&conn.id).unwrap();
             assert!(reachable(&url));
 
@@ -758,7 +888,11 @@ mod tests {
         /// A fake ssh that takes `delay` seconds to "authenticate".
         fn slow_fake_ssh(dir: &Path, delay: &str) -> PathBuf {
             let fast = fake_ssh(dir);
-            script(dir, "slow-ssh", &format!("sleep {delay}\nexec '{}' \"$@\"", fast.display()))
+            script(
+                dir,
+                "slow-ssh",
+                &format!("sleep {delay}\nexec '{}' \"$@\"", fast.display()),
+            )
         }
 
         async fn wait_until(mut f: impl FnMut() -> bool) -> bool {
@@ -778,18 +912,28 @@ mod tests {
             let p = proxy();
             let tunnels = SshTunnels::with_program(fake_ssh(dir.path()));
             tunnels.bind_proxy(p.clone());
-            let conn = add_ssh_connection(&p, &tunnels, &path, "Lab", &target()).await.unwrap();
+            let conn = add_ssh_connection(&p, &tunnels, &path, "Lab", &target())
+                .await
+                .unwrap();
             assert!(p.ssh_local(&conn.id).is_some());
 
             tunnels.kill_for_test(&conn.id);
-            assert!(wait_until(|| p.ssh_local(&conn.id).is_none()).await, "the mapping outlived its ssh child");
+            assert!(
+                wait_until(|| p.ssh_local(&conn.id).is_none()).await,
+                "the mapping outlived its ssh child"
+            );
 
             // A mapping that already points elsewhere (a newer tunnel) is left alone.
-            let conn2 = add_ssh_connection(&p, &tunnels, &path, "Lab", &target()).await.unwrap();
+            let conn2 = add_ssh_connection(&p, &tunnels, &path, "Lab", &target())
+                .await
+                .unwrap();
             p.set_ssh_local(&conn2.id, "http://127.0.0.1:1".into());
             tunnels.kill_for_test(&conn2.id);
             tokio::time::sleep(Duration::from_millis(400)).await;
-            assert_eq!(p.ssh_local(&conn2.id).as_deref(), Some("http://127.0.0.1:1"));
+            assert_eq!(
+                p.ssh_local(&conn2.id).as_deref(),
+                Some("http://127.0.0.1:1")
+            );
         }
 
         #[tokio::test]
@@ -799,7 +943,11 @@ mod tests {
             let id = target().connection_id();
             let t = target();
             let (a, b) = tokio::join!(tunnels.start(&id, &t), tunnels.start(&id, &t));
-            assert_eq!(a.unwrap(), b.unwrap(), "the second start reused the first's tunnel");
+            assert_eq!(
+                a.unwrap(),
+                b.unwrap(),
+                "the second start reused the first's tunnel"
+            );
             assert_eq!(tunnels.tunnels.lock().unwrap().len(), 1);
         }
 
@@ -809,11 +957,19 @@ mod tests {
             let path = dir.path().join("connections.json");
             let p = proxy();
             let tunnels = SshTunnels::with_program(slow_fake_ssh(dir.path(), "0.4"));
-            let conn = p.registry.lock().unwrap().add_ssh("Lab", &target()).unwrap();
-            let (selected, _) = tokio::join!(crate::commands::select_connection(&p, &tunnels, &path, &conn.id), async {
-                tokio::time::sleep(Duration::from_millis(150)).await;
-                p.registry.lock().unwrap().remove(&conn.id).unwrap();
-            });
+            let conn = p
+                .registry
+                .lock()
+                .unwrap()
+                .add_ssh("Lab", &target())
+                .unwrap();
+            let (selected, _) = tokio::join!(
+                crate::commands::select_connection(&p, &tunnels, &path, &conn.id),
+                async {
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    p.registry.lock().unwrap().remove(&conn.id).unwrap();
+                }
+            );
             assert_eq!(selected.unwrap_err(), "this connection was removed");
             assert_eq!(tunnels.local_url(&conn.id), None);
             assert_eq!(p.ssh_local(&conn.id), None);
@@ -824,12 +980,22 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let p = proxy();
             let tunnels = SshTunnels::with_program(fake_ssh(dir.path()));
-            let conn = add_ssh_connection(&p, &tunnels, &dir.path().join("connections.json"), "Lab", &target()).await.unwrap();
+            let conn = add_ssh_connection(
+                &p,
+                &tunnels,
+                &dir.path().join("connections.json"),
+                "Lab",
+                &target(),
+            )
+            .await
+            .unwrap();
             let url = p.ssh_local(&conn.id).unwrap();
             assert!(reachable(&url));
             let unwritable = dir.path().join("a-directory");
             std::fs::create_dir(&unwritable).unwrap(); // writing a file over a directory fails
-            assert!(crate::commands::remove_connection(&p, &tunnels, &unwritable, &conn.id).is_err());
+            assert!(
+                crate::commands::remove_connection(&p, &tunnels, &unwritable, &conn.id).is_err()
+            );
             assert!(!reachable(&url), "the ssh child was stopped");
             assert_eq!(p.ssh_local(&conn.id), None);
         }
@@ -929,7 +1095,10 @@ mod tests {
             let slow = script(
                 dir.path(),
                 "slow-healthz-ssh",
-                &format!("FAKE_SSH_HEALTHZ_DELAY_MS=1200 exec '{}' \"$@\"", fast.display()),
+                &format!(
+                    "FAKE_SSH_HEALTHZ_DELAY_MS=1200 exec '{}' \"$@\"",
+                    fast.display()
+                ),
             );
             let tunnels = std::sync::Arc::new(SshTunnels::with_program(slow));
             let id = target().connection_id();
@@ -998,14 +1167,22 @@ mod tests {
             let path = dir.path().join("connections.json");
             let p = proxy();
             let tunnels = SshTunnels::with_program(fake_ssh(dir.path()));
-            let conn = add_ssh_connection(&p, &tunnels, &path, "Lab", &target()).await.unwrap();
+            let conn = add_ssh_connection(&p, &tunnels, &path, "Lab", &target())
+                .await
+                .unwrap();
             let first = p.ssh_local(&conn.id).unwrap();
 
             tunnels.kill_for_test(&conn.id);
-            assert_eq!(tunnels.local_url(&conn.id), None, "a dead child is noticed when asked");
+            assert_eq!(
+                tunnels.local_url(&conn.id),
+                None,
+                "a dead child is noticed when asked"
+            );
             assert!(!reachable(&first));
 
-            let selected = crate::commands::select_connection(&p, &tunnels, &path, &conn.id).await.unwrap();
+            let selected = crate::commands::select_connection(&p, &tunnels, &path, &conn.id)
+                .await
+                .unwrap();
             assert_eq!(selected.id, conn.id);
             assert_eq!(p.registry.lock().unwrap().current().id, conn.id);
             let second = p.ssh_local(&conn.id).unwrap();
@@ -1013,10 +1190,16 @@ mod tests {
 
             // A failing restart leaves the selection where it was.
             tunnels.stop_all();
-            let denied = script(dir.path(), "denied", "echo 'host key verification failed' >&2\nexit 255");
+            let denied = script(
+                dir.path(),
+                "denied",
+                "echo 'host key verification failed' >&2\nexit 255",
+            );
             let broken = SshTunnels::with_program(denied);
             p.registry.lock().unwrap().select("local").unwrap();
-            let err = crate::commands::select_connection(&p, &broken, &path, &conn.id).await.unwrap_err();
+            let err = crate::commands::select_connection(&p, &broken, &path, &conn.id)
+                .await
+                .unwrap_err();
             assert_eq!(err, "host key verification failed");
             assert_eq!(p.registry.lock().unwrap().current().id, "local");
         }

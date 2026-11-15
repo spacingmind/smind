@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { fileTabKey } from "@/components/tab-registry";
-import { useAddToChat } from "@/hooks/use-add-to-chat";
+import { useSendRefToChat } from "@/hooks/use-send-ref-to-chat";
 import { useFileRevealStore } from "@/stores/file-reveal-store";
 import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
@@ -92,9 +92,9 @@ export function TextEditorPane({
   const [viewReady, setViewReady] = useState(false);
   const { focused: findFocused, onFocus: onFindFocus, onBlur: onFindBlur } = usePaneFocusWithin();
 
-  // Send to agent (DT3-C): the `@path`/`@path#Lx-Ly` refs go through the
-  // same queue as "Add to chat", so the daemon's file_ref gate applies too.
-  const addToChat = useAddToChat(task.ID);
+  // Send to agent (DT3-D): the file reference and the selected lines go in as
+  // file_ref chips, so the daemon's file_ref gate applies as with "Add to chat".
+  const send = useSendRefToChat(task.ID);
 
   // null for non-previewable files -- the Edit/Preview control doesn't
   // render at all in that case, never as a disabled dead button.
@@ -250,7 +250,7 @@ export function TextEditorPane({
     });
   }
 
-  /** The editor's "Send to agent" entries (DT3-C AC10): the file reference and the selected lines, sized at menu-open time. */
+  /** The editor's "Send to agent" entries (DT3-C AC10, delivered as chips by DT3-D): the file reference and the selected lines, sized at menu-open time. */
   const getSendEntries = useCallback((): SendEntry[] => {
     const view = editorViewRef.current;
     const sel = view?.state.selection.main;
@@ -264,18 +264,18 @@ export function TextEditorPane({
       let endLine = doc.lineAt(sel!.to).number;
       if (endLine > startLine && sel!.to === doc.line(endLine).from) endLine--;
       detail = `${endLine > startLine ? `lines ${startLine}-${endLine}` : `line ${startLine}`}, ${formatBytes(byteLength(selection))}`;
-      choose = () => addToChat.add(endLine > startLine ? { path, line: startLine, endLine } : { path, line: startLine });
+      choose = () => send.sendRef(endLine > startLine ? { path, line: startLine, endLine } : { path, line: startLine }, byteLength(selection));
     }
     return [
       {
         id: "open-file",
         label: "Open file",
         detail: formatBytes(byteLength(content)),
-        onSelect: () => addToChat.add({ path }),
+        onSelect: () => send.sendRef({ path }, byteLength(content)),
       },
       { id: "selection", label: "Selection", disabled: selection === "", detail, onSelect: choose },
     ];
-  }, [addToChat, content, path]);
+  }, [send, content, path]);
 
   // Reload: discard the buffer, re-read from disk (both banner states).
   function handleReload() {
@@ -376,7 +376,7 @@ export function TextEditorPane({
                 </button>
               </div>
             )}
-            {addToChat.canAdd && <SendToAgentMenu testId="editor-send-menu" getEntries={getSendEntries} />}
+            {send.canSend && <SendToAgentMenu testId="editor-send-menu" getEntries={getSendEntries} />}
             <Button type="button" variant="outline" size="sm" onClick={handleSave} disabled={saving || !dirty}>
               {saving ? "Saving…" : "Save"}
             </Button>

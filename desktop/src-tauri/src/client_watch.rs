@@ -273,11 +273,20 @@ mod password_tests {
         let old = password_cell("relay:test-host@relay.example:7400", &old_key);
         old.set("typed-for-the-old-daemon".into());
         let same = password_cell("relay:test-host@relay.example:7400", &old_key);
-        assert!(same.is_set(), "the same daemon keeps its password across restarts of the loop");
+        assert!(
+            same.is_set(),
+            "the same daemon keeps its password across restarts of the loop"
+        );
         let other = password_cell("relay:test-host@relay.example:7400", &new_key);
-        assert!(!other.is_set(), "a different daemon key must start with no password");
+        assert!(
+            !other.is_set(),
+            "a different daemon key must start with no password"
+        );
         forget_password("relay:test-host@relay.example:7400");
-        assert!(!password_cell("relay:test-host@relay.example:7400", &old_key).is_set(), "removal forgets every key's password");
+        assert!(
+            !password_cell("relay:test-host@relay.example:7400", &old_key).is_set(),
+            "removal forgets every key's password"
+        );
         assert!(!old.is_set());
     }
 }

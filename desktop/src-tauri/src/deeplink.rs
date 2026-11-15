@@ -25,7 +25,10 @@ pub fn handle(app: &AppHandle, cache: WorkspaceCache, cfg: Config, proxy_url: Ur
     focus_only(app);
 
     match link {
-        DeepLink::WorkspaceTask { workspace_id, task_id } => {
+        DeepLink::WorkspaceTask {
+            workspace_id,
+            task_id,
+        } => {
             cache.insert(task_id, workspace_id);
             navigate(app, &cache, &proxy_url, task_id);
         }

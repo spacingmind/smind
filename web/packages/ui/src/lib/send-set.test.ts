@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTerminalBlock, byteLength, clipText, fenceBlock, SEND_CAP_BYTES } from "@/lib/send-set";
+import { appendChipBlocks, buildTerminalBlock, byteLength, clipText, fenceBlock, fileRefChipLabel, SEND_CAP_BYTES, terminalChipLabel, type ContextChip } from "@/lib/send-set";
 
 describe("send-set", () => {
   it("byteLength counts UTF-8 bytes, not code units", () => {
@@ -45,5 +45,49 @@ describe("send-set", () => {
     expect(block).toBe("Terminal output, selection, 5 B:\n```\nhello\n```");
     expect(shownBytes).toBe(5);
     expect(omittedBytes).toBe(0);
+  });
+
+  it("terminalChipLabel names the kind, counts the lines and states the shown size", () => {
+    expect(terminalChipLabel("hello", "selection")).toBe("Terminal selection · 1 line · 5 B");
+    expect(terminalChipLabel("one\ntwo", "last 100 lines")).toBe("Terminal output · 2 lines · 7 B");
+  });
+
+  it("terminalChipLabel says (cut) only when the cap dropped something", () => {
+    expect(terminalChipLabel("hello", "selection")).not.toContain("(cut)");
+    expect(terminalChipLabel(`${"a".repeat(SEND_CAP_BYTES)}extra`, "last 100 lines")).toMatch(/ \(cut\)$/);
+  });
+
+  it("fileRefChipLabel shows the basename, the line range (EN DASH) and the size", () => {
+    expect(fileRefChipLabel({ path: "src/handler.go" }, 78)).toBe("handler.go · 78 B");
+    expect(fileRefChipLabel({ path: "src/handler.go", line: 1, endLine: 4 }, 78)).toBe("handler.go L1–4 · 78 B");
+    expect(fileRefChipLabel({ path: "src/handler.go", line: 3 }, 12)).toBe("handler.go L3 · 12 B");
+    // An endLine equal to line is no range, and the dash is U+2013, not a hyphen.
+    expect(fileRefChipLabel({ path: "a.go", line: 2, endLine: 2 }, 5)).toBe("a.go L2 · 5 B");
+    expect(fileRefChipLabel({ path: "a.go", line: 1, endLine: 4 }, 5)).toContain("L1\u20134");
+  });
+
+  const terminalChip = (body: string): ContextChip => ({ localId: "chip-1", label: "x", kind: "terminal", body, blockLabel: "last 100 lines" });
+  const fileChip: ContextChip = { localId: "chip-2", label: "x", kind: "file_ref", ref: { path: "a.go" } };
+
+  it("appendChipBlocks returns the text unchanged with no terminal chips", () => {
+    expect(appendChipBlocks("plain", [])).toBe("plain");
+    expect(appendChipBlocks("plain", [fileChip])).toBe("plain");
+  });
+
+  it("appendChipBlocks appends one block per terminal chip, in order, after a blank line", () => {
+    const out = appendChipBlocks("look at this", [terminalChip("one"), fileChip, terminalChip("two")]);
+    const first = buildTerminalBlock("one", "last 100 lines").block;
+    const second = buildTerminalBlock("two", "last 100 lines").block;
+    expect(out).toBe(`look at this\n\n${first}\n\n${second}`);
+  });
+
+  it("appendChipBlocks trims the text's trailing newline once before the blank line", () => {
+    const out = appendChipBlocks("prompt\n", [terminalChip("one")]);
+    expect(out).toBe(`prompt\n\n${buildTerminalBlock("one", "last 100 lines").block}`);
+  });
+
+  it("appendChipBlocks fences a body that contains backticks longer than the run", () => {
+    const out = appendChipBlocks("prompt", [terminalChip("say ``` hi")]);
+    expect(out).toContain("\n````\nsay ``` hi\n````");
   });
 });

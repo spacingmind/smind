@@ -15,6 +15,17 @@ function close() {
 }
 
 describe("SendToAgentMenu (DT3-C)", () => {
+  it("the trigger shows its label at every width, with a matching tooltip and aria-label", () => {
+    render(<SendToAgentMenu getEntries={() => []} />);
+    const trigger = screen.getByTestId("send-to-agent");
+    expect(trigger.textContent).toContain("Send to agent");
+    expect(trigger).toHaveAttribute("aria-label", "Send to agent");
+    expect(trigger).toHaveAttribute("title", "Send to agent");
+    const label = trigger.querySelector("span");
+    expect(label?.className).not.toContain("sr-only");
+    expect(label).toHaveTextContent("Send to agent");
+  });
+
   it("shows each entry's size once open, and opening alone calls no onSelect", async () => {
     const selection = vi.fn();
     const last = vi.fn();

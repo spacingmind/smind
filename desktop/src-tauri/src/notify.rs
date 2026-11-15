@@ -219,7 +219,8 @@ mod macos {
             if !should_wait_for_click(current, MAX_CLICK_WAITERS) {
                 return None;
             }
-            match WAITERS.compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst) {
+            match WAITERS.compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst)
+            {
                 Ok(_) => return Some(Slot),
                 Err(actual) => current = actual,
             }
@@ -237,7 +238,12 @@ mod macos {
             let bundle_id = ctx.app.config().identifier.clone();
             let _ = set_application(&bundle_id);
             let wait = slot.is_some();
-            match Notification::new().title(&title).message(&body).wait_for_click(wait).send() {
+            match Notification::new()
+                .title(&title)
+                .message(&body)
+                .wait_for_click(wait)
+                .send()
+            {
                 Ok(NotificationResponse::Click) => navigate(&ctx, &target),
                 Ok(_) => {}
                 Err(_) => fallback::show(ctx, title, body),
@@ -247,14 +253,23 @@ mod macos {
     }
 }
 
-#[cfg(any(target_os = "macos", not(any(target_os = "windows", target_os = "linux"))))]
+#[cfg(any(
+    target_os = "macos",
+    not(any(target_os = "windows", target_os = "linux"))
+))]
 mod fallback {
     use tauri_plugin_notification::NotificationExt;
 
     use super::ClickContext;
 
     pub fn show(ctx: ClickContext, title: String, body: String) {
-        let _ = ctx.app.notification().builder().title(title).body(body).show();
+        let _ = ctx
+            .app
+            .notification()
+            .builder()
+            .title(title)
+            .body(body)
+            .show();
     }
 }
 
@@ -266,7 +281,10 @@ mod tests {
     fn click_waiters_are_capped() {
         let cap = 4;
         for outstanding in 0..cap {
-            assert!(should_wait_for_click(outstanding, cap), "{outstanding} outstanding is under the cap");
+            assert!(
+                should_wait_for_click(outstanding, cap),
+                "{outstanding} outstanding is under the cap"
+            );
         }
         assert!(!should_wait_for_click(cap, cap));
         assert!(!should_wait_for_click(cap + 10, cap));
