@@ -45,14 +45,26 @@ change: every event used below already exists (`permission.pending`, `question.p
    appears (already resolved) does nothing.
 4. The Rust watcher keeps the chat id and request id with each pending entry so the tray item opens the most recent card.
 
-### B. More kinds, dedupe, badge (PR B)
+### B. More kinds, fixed bodies, dedupe, badge, settings and consent (PR B)
 
-5. A `question.pending` raises an OS notification "sMind: a question for you" with a fixed body that never contains the
-   question text (the same rule as the mobile push); a run that ends with status `error` raises "sMind: run failed" with the
-   task title as body when it is known; `needs_continue` and `done` stay silent.
+5. A `question.pending` and a run that ends with status `error` join `permission.pending` as notification kinds. The text is
+   **fixed per kind and never contains prompt, question, command, error or task-title text** (the daemon's push kinds put
+   some of these on a lock screen; the desktop is stricter): permission "A run needs your approval" (the push notifier's own
+   fixed fallback), question "An agent has a question" (ADR-0055 D7), failure "Run failed". Titles: "sMind: permission needed",
+   "sMind: a question for you", "sMind: run failed". `needs_continue` and `done` stay silent. (Today the permission
+   notification shows the request's summary, i.e. a command; that goes.)
 6. Each (kind, request id or run id) notifies once: a redelivery after a reconnect is ignored (bounded memory).
 7. The Dock badge and tray count include waiting questions (`question.resolved` or the run ending clears them); failed runs
    are not counted. The tray label reads "N waiting for you".
+8. **Consent and per-kind switches.** The app never assumes notification permission: until the person turns desktop
+   notifications on, nothing is shown (the badge still counts). Settings > Notifications (desktop only) shows a "Turn on desktop
+   notifications" action that records the consent and sends one test notification (which is what makes macOS ask for its own
+   permission); three switches (permission, question, failure) default on and each turns its kind off; a kind that is off
+   shows nothing but still counts toward the badge. The values live in `app-settings.json` next to `onboardingCompleted`,
+   through the existing `app_settings_get/set` commands; one new allowlisted command `notify_test` sends the test banner. macOS is
+   the first target: Windows and Linux use the same logic through their existing notification code but are not verified here.
+   The OS-level permission cannot be read back through the plugin; if the person denied it in System Settings nothing shows and
+   the settings text says to check System Settings.
 
 ### C. Focus rules, coalescing, quiet while typing (PR C)
 
@@ -72,9 +84,11 @@ A: `route.rs` (`chat_route_url_with_card`, `fallback_route_has_a_kind_the_web_ac
 `card-focus.test.tsx` (permission card and question card each focus on a matching request even with the composer focused, ignore another
 request, consume once, expire when stale), `app` route test (opening the route opens the chat tab and queues the reveal),
 `attention.rs` (`most_recent_returns_chat_and_request`).
-B: `protocol.rs` (`question_pending_becomes_a_fixed_body_notification`, `failed_run_notification_uses_the_task_title`,
-`done_and_needs_continue_are_silent`), `attention.rs` (`questions_count_and_clear`, `failed_runs_are_not_counted`),
-`dedupe.rs` (`a_redelivery_notifies_once`, `the_memory_is_bounded`).
+B: `protocol.rs` (`permission_notification_has_a_fixed_body`, `question_pending_becomes_a_fixed_body_notification`,
+`failed_run_notification_has_a_fixed_body`, `no_notification_body_contains_event_text`, `done_and_needs_continue_are_silent`), `attention.rs` (`questions_count_and_clear`, `failed_runs_are_not_counted`),
+`dedupe.rs` (`a_redelivery_notifies_once`, `the_memory_is_bounded`), `app_settings.rs` (`notification_defaults_are_not_asked_and_kinds_on`, `patch_changes_only_the_named_fields`, `an_old_file_without_the_fields_loads`),
+`notify_policy.rs` (`nothing_shows_before_consent`, `an_off_kind_is_silent_but_counts`, `a_kind_on_with_consent_shows`), `capability_tests.rs` (the allowlist gains `allow-notify-test`),
+web `notifications-section.test.tsx` (the desktop group: consent action, three switches, test result, hidden in the browser build).
 C: `focus.rs` (`no_notification_when_focused_on_that_task`, `held_while_composer_focused_then_flushed_once`,
 `held_items_resolved_meanwhile_are_dropped`), `coalesce.rs` (`first_shows_rest_collapse`, `window_resets`, `summary_opens_the_latest`),
 `capability_tests.rs` (the allowlist includes the new command and nothing else), web `use-attention-report.test.ts` (reports on task,
@@ -88,7 +102,8 @@ and the PRs say so.
 ## Decisions
 
 - Route fallback: a task with no known chat opens its Files tab (a base kind that always exists) instead of a kind the web rejects.
-- The notification text for a question is fixed (no question text), for a failed run the task title only (no error text).
+- Notification text is fixed per kind, with no task title either (a task title is the first line of the prompt).
+- Consent is the app's own setting (default not asked); the OS permission is the OS's and is asked when the first notification is sent.
 - The web reports attention state through a new allowlisted IPC command rather than the shell guessing from the webview URL
   (the URL does not show the composer focus). Reversible: remove the command and the shell falls back to "no suppression".
 - Coalescing window 3 s; held-while-typing items are flushed once, not replayed.
