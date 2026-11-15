@@ -60,6 +60,7 @@ type humanOnlyCommand struct {
 var humanOnlyCLI = []humanOnlyCommand{
 	{path: []string{"task"}, verbs: []string{"approve", "deny", "answer"}, bare: true},
 	{path: []string{"permission"}},
+	{path: []string{"browser"}, verbs: []string{"enable", "disable", "allow", "clear"}},
 	{path: []string{"host"}, verbs: []string{"approve", "reject"}},
 	{path: []string{"relay", "devices"}, verbs: []string{"approve", "revoke"}},
 	{path: []string{"task", "chat"}, verbs: []string{"fork"}, bare: true},
