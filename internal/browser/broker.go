@@ -35,7 +35,7 @@ const (
 	// PrereqProxyAuth: the enforcing proxy requires a per-session
 	// Proxy-Authorization secret, answered by the daemon through CDP
 	// Fetch.authRequired, so no other local process can use it.
-	PrereqProxyAuth = false
+	PrereqProxyAuth = true // built in PR 3b-1: Proxy.authorized, Session.onAuthRequired
 	// PrereqRunSocket: the browser child talks to the daemon over a per-run
 	// local socket whose peer credentials (user and process ancestry) are
 	// checked, instead of a token that a same-user process can read.

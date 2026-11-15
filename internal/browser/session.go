@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"path"
 	"reflect"
 	"sort"
@@ -136,10 +137,12 @@ type Session struct {
 	snapRefs map[string]map[string]int64 // tab id -> ref ("e1") -> backend DOM node id, of the latest snapshot
 	navMu    sync.Mutex                  // one navigation at a time: a load waiter is per tab
 
-	lifecycle chan Event   // attach, detach, dialog, download: handled in order
-	requests  chan Event   // Fetch.requestPaused: handled by a bounded pool
-	qbytes    atomic.Int64 // bytes waiting in the two queues
-	maxQueued int64        // the budget for qbytes (a field so a test can lower it)
+	lifecycle    chan Event   // attach, detach, dialog, download: handled in order
+	authNoted    atomic.Bool  // the one notice about a refused credentials request
+	authErrNoted atomic.Bool  // the one notice about an unanswered challenge
+	requests     chan Event   // Fetch.requestPaused: handled by a bounded pool
+	qbytes       atomic.Int64 // bytes waiting in the two queues
+	maxQueued    int64        // the budget for qbytes (a field so a test can lower it)
 
 	closeOnce sync.Once
 }
@@ -429,7 +432,7 @@ func (s *Session) eventLoop() {
 				default:
 				}
 			}
-		case "Fetch.requestPaused":
+		case "Fetch.requestPaused", "Fetch.authRequired":
 			if s.qbytes.Add(int64(ev.size)) > s.maxQueued {
 				s.note("blocked", "request flood: the session was closed")
 				go s.Close()
@@ -462,6 +465,10 @@ func (s *Session) requestWorker() {
 		select {
 		case ev := <-s.requests:
 			s.qbytes.Add(-int64(ev.size))
+			if ev.Method == "Fetch.authRequired" {
+				s.onAuthRequired(ev)
+				continue
+			}
 			s.onRequestPaused(ev)
 		case <-s.cl.Done():
 			return
@@ -578,7 +585,7 @@ func (s *Session) onAttached(ev Event) {
 		params any
 		when   bool
 	}{
-		{"Fetch.enable", map[string]any{"patterns": []map[string]any{{"urlPattern": "*"}}}, true},
+		{"Fetch.enable", map[string]any{"patterns": []map[string]any{{"urlPattern": "*"}}, "handleAuthRequests": true}, true},
 		{"Target.setAutoAttach", autoAttachParams(), true}, // frames and workers of this target stay intercepted
 		{"Page.enable", nil, isPage},
 		{"Runtime.enable", nil, isPage},
@@ -597,6 +604,49 @@ func (s *Session) onAttached(ev Event) {
 	if ts != nil {
 		close(ts.ready)
 	}
+}
+
+// onAuthRequired answers an authentication challenge of any attached target.
+// The proxy's challenge (and only it: source Proxy AND the challenging origin is
+// OUR proxy) gets the session secret. A challenge from anything else, a web
+// site asking for credentials, a proxy at another address, is cancelled: the
+// secret never goes to a page's origin.
+func (s *Session) onAuthRequired(ev Event) {
+	var p struct {
+		RequestID     string `json:"requestId"`
+		AuthChallenge struct {
+			Source string `json:"source"`
+			Origin string `json:"origin"`
+		} `json:"authChallenge"`
+	}
+	if json.Unmarshal(ev.Params, &p) != nil || p.RequestID == "" {
+		return
+	}
+	ctx, cancel := s.bgCtx()
+	defer cancel()
+	resp := map[string]any{"response": "CancelAuth"}
+	if p.AuthChallenge.Source == "Proxy" && s.proxyOrigin(p.AuthChallenge.Origin) {
+		resp = map[string]any{"response": "ProvideCredentials", "username": proxyAuthUser, "password": s.proxy.Secret()}
+	} else if s.authNoted.CompareAndSwap(false, true) {
+		// Once per session: a page can raise challenges without limit, and must
+		// not push the agent's real refusal notices out.
+		s.note("blocked", "a page asked for credentials and was refused (further requests are cancelled without a notice)")
+	}
+	if err := s.cl.Call(ctx, ev.SessionID, "Fetch.continueWithAuth", map[string]any{"requestId": p.RequestID, "authChallengeResponse": resp}, nil); err != nil &&
+		!s.Closed() && s.authErrNoted.CompareAndSwap(false, true) {
+		// Once per session and never for a closing session: a page that aborts
+		// its 401 fetches must not push the agent's real notices out.
+		s.note("blocked", "a proxy or site challenge could not be answered (further failures are not reported)")
+	}
+}
+
+// proxyOrigin reports whether a challenge origin names this session's proxy.
+func (s *Session) proxyOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	return u.Host == s.proxy.Addr()
 }
 
 func (s *Session) onRequestPaused(ev Event) {
