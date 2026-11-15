@@ -93,9 +93,9 @@ describe("ProviderRail", () => {
       />,
     );
     // GLM, Kimi and an unknown ACP agent share the generic glyph: each shows its own initial instead
-    expect(screen.getByTestId("model-rail-initial-glm")).toHaveTextContent("G");
-    expect(screen.getByTestId("model-rail-initial-kimi")).toHaveTextContent("K");
-    expect(screen.getByTestId("model-rail-initial-my-acp")).toHaveTextContent("M");
+    expect(screen.getByTestId("model-rail-initial-glm")).toHaveTextContent("Gl");
+    expect(screen.getByTestId("model-rail-initial-kimi")).toHaveTextContent("Ki");
+    expect(screen.getByTestId("model-rail-initial-my-acp")).toHaveTextContent("My");
     // the initial is decoration: the tab keeps its accessible name
     expect(screen.getByTestId("model-provider-glm")).toHaveAttribute("aria-label", "GLM");
     expect(screen.getByTestId("model-rail-initial-glm")).toHaveAttribute("aria-hidden", "true");
@@ -108,12 +108,15 @@ describe("ProviderRail", () => {
     expect(screen.getByTestId("model-provider-claude-native").querySelector("svg")).not.toBeNull();
   });
 
-  it("providerInitial takes the first letter or digit, upper-cased, and is empty for a label without one", () => {
-    expect(providerInitial("glm")).toBe("G");
-    expect(providerInitial("  my-acp")).toBe("M");
-    expect(providerInitial("(work) claude")).toBe("W");
-    expect(providerInitial("7zip agent")).toBe("7");
-    expect(providerInitial("Émile")).toBe("É");
+  it("providerInitial takes the first two letters or digits, the first upper-cased, and is empty for a label without one", () => {
+    expect(providerInitial("glm")).toBe("Gl");
+    expect(providerInitial("Kimi")).toBe("Ki");
+    expect(providerInitial("OpenCode")).toBe("Op");
+    expect(providerInitial("  my-acp")).toBe("My");
+    expect(providerInitial("(work) claude")).toBe("Wo");
+    expect(providerInitial("7zip agent")).toBe("7z");
+    expect(providerInitial("Émile")).toBe("Ém");
+    expect(providerInitial("x")).toBe("X");
     expect(providerInitial("---")).toBe("");
     expect(providerInitial("")).toBe("");
   });
@@ -124,7 +127,7 @@ describe("ProviderRail", () => {
     expect(screen.getByTestId("model-provider-weird").querySelector("svg")).not.toBeNull();
   });
 
-  it("rail-initials-that-collide-take-two-letters", () => {
+  it("rail-initials-are-two-letters-so-similar-names-stay-apart", () => {
     const m = providerInitials([
       { id: "glm", label: "GLM" },
       { id: "kimi", label: "Kimi" },
@@ -134,7 +137,7 @@ describe("ProviderRail", () => {
       { id: "cursor", label: "Cursor" },
       { id: "x", label: "---" },
     ]);
-    expect(Object.fromEntries(m)).toEqual({ glm: "Gl", kimi: "K", github: "Gi", goose: "Go", cline: "Cl", cursor: "Cu", x: "" });
+    expect(Object.fromEntries(m)).toEqual({ glm: "Gl", kimi: "Ki", github: "Gi", goose: "Go", cline: "Cl", cursor: "Cu", x: "" });
     render(<ProviderRail providers={[{ id: "goose", label: "Goose" }, { id: "glm", label: "GLM" }]} selectedId="glm" onSelect={() => {}} />);
     expect(screen.getByTestId("model-rail-initial-goose")).toHaveTextContent("Go");
     expect(screen.getByTestId("model-rail-initial-glm")).toHaveTextContent("Gl");

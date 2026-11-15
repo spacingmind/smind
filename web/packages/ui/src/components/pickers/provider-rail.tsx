@@ -28,31 +28,24 @@ export interface ProviderRailHandle {
   focusSelected(): void;
 }
 
-/** The first letter or digit of a label, upper-cased ("GLM" -> "G", "my-acp" -> "M"); "" when it has none. */
-export function providerInitial(label: string): string {
-  const match = label.match(/[\p{L}\p{N}]/u);
-  return match ? match[0].toUpperCase() : "";
+/** The letters and digits of a label, in order ("my-acp" -> m, y, a, c, p). */
+function alnum(label: string): string[] {
+  return [...label.matchAll(/[\p{L}\p{N}]/gu)].map((m) => m[0]);
 }
 
 /**
- * The tile text of every provider: its initial, and the first two letters ("Gi", "Go") for the providers whose initials collide, so
- * "GitHub Copilot" and "Goose" are still told apart at a glance. Empty for a label with no letter or digit.
+ * The tile text of a provider without a brand mark: its first two letters, the first upper-cased ("Ki", "Op", "Go"); a label with a
+ * single letter or digit gives that one, one with none gives "". Two letters keep "GitHub Copilot", "Goose" and "GLM" apart.
  */
+export function providerInitial(label: string): string {
+  const chars = alnum(label);
+  if (chars.length === 0) return "";
+  return chars.length === 1 ? chars[0]!.toUpperCase() : chars[0]!.toUpperCase() + chars[1]!.toLowerCase();
+}
+
+/** The tile text of every provider, by id. */
 export function providerInitials(providers: { id: string; label: string }[]): Map<string, string> {
-  const one = new Map(providers.map((p) => [p.id, providerInitial(p.label)] as const));
-  const counts = new Map<string, number>();
-  for (const v of one.values()) counts.set(v, (counts.get(v) ?? 0) + 1);
-  const out = new Map<string, string>();
-  for (const p of providers) {
-    const initial = one.get(p.id) ?? "";
-    if (initial === "" || (counts.get(initial) ?? 0) < 2) {
-      out.set(p.id, initial);
-      continue;
-    }
-    const chars = [...p.label.matchAll(/[\p{L}\p{N}]/gu)].map((m) => m[0]);
-    out.set(p.id, chars.length > 1 ? chars[0]!.toUpperCase() + chars[1]!.toLowerCase() : initial);
-  }
-  return out;
+  return new Map(providers.map((p) => [p.id, providerInitial(p.label)] as const));
 }
 
 /**
