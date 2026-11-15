@@ -26,6 +26,7 @@ Delivery: ONE Rust PR (this plan, the ADR amendment, the shell) and ONE web PR a
 | Focus stealing: content makes the app grab focus repeatedly | The command only focuses a window for a task the page named, it is reachable only from the bundled UI (never from daemon or agent content, per ADR-0013), and it never raises `main` or any other window; stated limit: the bundled UI could call it without a gesture | `focus_only_the_requested_task_window` (source guard) |
 | `window.open` / link targets spawn an unmanaged window | `on_new_window` denies in task windows; navigation outside the loopback origin goes to the OS browser | `task_window_builder_denies_new_windows_and_guards_navigation` (source guard) |
 | Pool slot leak (a closed window keeps its slot, eventually blocking all opens) | The slot is released on the window's `Destroyed` event | `closing_a_window_releases_its_slot`, `the_destroyed_handler_releases_the_slot` (source guard) |
+| A task window uses the core window permissions to act on another window by label (`core:window:allow-close` etc. accept a target label, so a task window's page could minimise or close `main`) | Accepted residual: the caller is the bundled UI (trusted; daemon and agent content never gets IPC, ADR-0013), `main`'s close only hides it, and `main` already holds the same permissions toward task windows; the permissions are the minimum a drawn caption bar needs | none (stated limit) |
 | Layout restore replays a task window's route into `main` | Restore reads and writes the `main` label only (#914) | `a_task_window_never_writes_the_main_layout` |
 
 ## Acceptance criteria
@@ -57,4 +58,9 @@ macOS window tabbing (probe after Part 1, real window); per-window connection se
 
 ## Progress / Validation
 
-(filled in the PRs)
+### Rust PR
+
+- Peers: two GLM peers (profile peer-glm, no fallback to Sonnet needed): #644 wrote `windows.rs` (pool, registry, URL builder, 9 tests), #645 made the armed context menu remember the opening window (3 tests). I reviewed both diffs and ACCEPTED both as written; I wrote the capability files and their tests, the `window_open_task` command and builder, and the retargeting of `window_ready`, `window_set_theme` and the app-menu actions.
+- `cargo test` 228 pass, clippy `-D warnings`, fmt.
+- Mutations (committed code, each failed its named test): task glob widened to `*`, `allow-app-quit` added to the task list, proxy capability widened to task windows, pool cap changed, slot not released on destroy, `window.open` allowed, an existing window not focused, selection sent to `main`.
+- Not verified: everything on a real window (screen locked): that the glob matches the pool labels at runtime, the overlay title bar and vibrancy on a second window, the first-paint show, destroy-on-close, focus. Windows and Linux builds.
