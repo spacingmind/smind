@@ -145,7 +145,6 @@ func TestProxyForwardsAllowedHTTP(t *testing.T) {
 	var gotHost string
 	srv := newHitServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotHdr, gotHost = r.Header.Clone(), r.Host
-		w.Header().Set("Connection", "close")
 		fmt.Fprint(w, "hello from the app")
 	})
 	rig := newProxyRig(t, nil, proxyResolver, nil)
@@ -184,6 +183,7 @@ func TestProxyRefusesDeniedAndUnlistedTargets(t *testing.T) {
 		"daemon decimal ip":                    fmt.Sprintf("http://2130706433:%d/", rig.daemon.port),
 		"proxy itself":                         "http://" + rig.px.Addr() + "/",
 		"public host":                          "http://example.com/",
+		"public host with a secret query":      "http://example.com/a?token=SECRETVALUE#frag",
 		"public ip":                            "http://93.184.216.34/",
 		"metadata":                             "http://169.254.169.254/latest/meta-data",
 		"private range":                        "http://10.0.0.5:8080/",
