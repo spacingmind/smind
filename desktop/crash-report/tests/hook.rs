@@ -102,6 +102,29 @@ fn hook_write_failure_is_contained() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("outer"), "the default hook still printed");
 }
 
+// crash-rs-hook-survives-closed-stderr: `eprintln!` panics on a stderr that returns an error
+// (a closed pipe), and a panic inside a panic hook aborts the process.
+#[test]
+#[cfg(unix)]
+fn hook_survives_closed_stderr() {
+    use std::process::Stdio;
+    let d = tempfile::tempdir().unwrap();
+    let file = d.path().join("regular-file");
+    std::fs::write(&file, "x").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_crash-child"))
+        .arg("unwritable-slow")
+        .arg(d.path().join("unused"))
+        .arg(&file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stderr.take()); // the reader goes away: writes to the child's stderr now fail
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "the hook aborted on a closed stderr: {:?}", out.status);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("CHILD-SURVIVED"));
+}
+
 // crash-rs-install-does-no-io
 #[test]
 fn install_does_no_io() {
