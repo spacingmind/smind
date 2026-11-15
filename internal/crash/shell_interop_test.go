@@ -73,3 +73,26 @@ func TestCrashGoDesktopDirIdentifierMatchesTauriConf(t *testing.T) {
 		t.Fatalf("DesktopDir() = %q does not contain /%s/crashes: the shell would write somewhere doctor does not look", dir, conf.Identifier)
 	}
 }
+
+// crash-go-desktop-dir-rejects-relative-bases: a relative XDG_DATA_HOME or
+// APPDATA is ignored (the Rust crate applies the same rule), so the shell and
+// doctor never disagree about where the reports are.
+func TestCrashGoDesktopDirRejectsRelativeBases(t *testing.T) {
+	const id = "dev.spacingmind.desktop"
+	cases := []struct{ name, goos, home, appData, xdg, want string }{
+		{"linux xdg absolute", "linux", "/home/a", "", "/data/xdg", "/data/xdg/" + id + "/crashes"},
+		{"linux xdg relative falls back to home", "linux", "/home/a", "", "relative/xdg", "/home/a/.local/share/" + id + "/crashes"},
+		{"linux xdg dot falls back to home", "linux", "/home/a", "", ".", "/home/a/.local/share/" + id + "/crashes"},
+		{"linux no home and relative xdg", "linux", "", "", "relative", ""},
+		{"linux no home", "linux", "", "", "", ""},
+		{"darwin home", "darwin", "/Users/a", "", "", "/Users/a/Library/Application Support/" + id + "/crashes"},
+		{"darwin no home", "darwin", "", "", "", ""},
+		{"windows relative appdata", "windows", `C:\Users\a`, "AppData", "", ""},
+		{"windows no appdata", "windows", `C:\Users\a`, "", "", ""},
+	}
+	for _, c := range cases {
+		if got := filepath.ToSlash(desktopDirFrom(c.goos, c.home, c.appData, c.xdg)); got != c.want {
+			t.Errorf("%s: desktopDirFrom = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

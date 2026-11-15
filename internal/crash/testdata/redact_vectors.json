@@ -1,464 +1,818 @@
-[
-  {
-    "name": "home dir",
-    "input": "open /home/tester/code/x.go: no such file",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "open ~/code/x.go: no such file"
-  },
-  {
-    "name": "smind home before home",
-    "input": "read /home/tester/.smind/token failed",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "read $SMIND_HOME/token failed"
-  },
-  {
-    "name": "home with backslashes",
-    "input": "C:\\home\\tester\\x",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "C:~\\x"
-  },
-  {
-    "name": "home boundary sibling",
-    "input": "/home/testerson/x.go and /home/tester/y.go and /home/tester2/z.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/x.go and ~/y.go and \u003cuser dir\u003e/z.go"
-  },
-  {
-    "name": "home trailing dot",
-    "input": "see /home/tester.",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "see \u003cuser dir\u003e"
-  },
-  {
-    "name": "other unix user",
-    "input": "/Users/bob/go/pkg/mod/x.go:12 +0x1c",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/go/pkg/mod/x.go:12 +0x1c"
-  },
-  {
-    "name": "other linux user",
-    "input": "/home/alice/work/y.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/work/y.go"
-  },
-  {
-    "name": "root user",
-    "input": "/root/.cache/z",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/.cache/z"
-  },
-  {
-    "name": "rootfs not root",
-    "input": "/rootfs/etc",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "/rootfs/etc"
-  },
-  {
-    "name": "windows user",
-    "input": "C:\\Users\\carol\\AppData\\x.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e\\AppData\\x.go"
-  },
-  {
-    "name": "windows user slash",
-    "input": "C:/Users/carol/AppData/x.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/AppData/x.go"
-  },
-  {
-    "name": "windows user with space",
-    "input": "C:\\Users\\Alice Smith\\go\\pkg\\x.go:12 +0x1",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e\\go\\pkg\\x.go:12 +0x1"
-  },
-  {
-    "name": "mac user with space",
-    "input": "/Users/Alice Smith/go/x.go:12 +0x1",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/go/x.go:12 +0x1"
-  },
-  {
-    "name": "linux user three words",
-    "input": "/home/Jo Ann Marie/code/x.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/code/x.go"
-  },
-  {
-    "name": "user dir then colon",
-    "input": "open /Users/bob: permission denied",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "open \u003cuser dir\u003e: permission denied"
-  },
-  {
-    "name": "unicode user",
-    "input": "/Users/Åsa Öberg/x.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/x.go"
-  },
-  {
-    "name": "bearer",
-    "input": "Authorization failed for Bearer abcDEF123456.token_value",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "Authorization failed for [redacted]"
-  },
-  {
-    "name": "basic",
-    "input": "got Basic dXNlcjpwYXNzd29yZA== from proxy",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "got [redacted] from proxy"
-  },
-  {
-    "name": "sk key",
-    "input": "key sk-abcdefghij1234567890",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "key [redacted]"
-  },
-  {
-    "name": "github token",
-    "input": "token ghp_0123456789abcdef0123",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "token [redacted]"
-  },
-  {
-    "name": "github pat",
-    "input": "github_pat_11ABCDEFG0123456789_abcdefghij",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "[redacted]"
-  },
-  {
-    "name": "aws key",
-    "input": "AKIAABCDEFGHIJKLMNOP in env",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "[redacted] in env"
-  },
-  {
-    "name": "jwt",
-    "input": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "[redacted]"
-  },
-  {
-    "name": "slack",
-    "input": "token xoxb-1234567890-abcdefGHIJ",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "token [redacted]"
-  },
-  {
-    "name": "google api key",
-    "input": "key AIzaSyA1234567890abcdefghijklmnopqrstuv",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "key [redacted]"
-  },
-  {
-    "name": "gitlab",
-    "input": "glpat-abcdefghij1234567890",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "[redacted]"
-  },
-  {
-    "name": "npm",
-    "input": "npm_abcdefghijklmnopqrstuvwxyz0123456789",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "[redacted]"
-  },
-  {
-    "name": "google oauth",
-    "input": "ya29.a0AfH6SMBabcdefghijklmnop",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "[redacted]"
-  },
-  {
-    "name": "stripe",
-    "input": "sk_live_abcdefghijklmnop1234",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "[redacted]"
-  },
-  {
-    "name": "pem",
-    "input": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsecretbody\n-----END RSA PRIVATE KEY-----",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "[redacted]"
-  },
-  {
-    "name": "postgres url",
-    "input": "dial postgres://admin:hunter2@db.internal:5432/x",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "dial postgres://[redacted]@db.internal:5432/x"
-  },
-  {
-    "name": "https url userinfo",
-    "input": "GET https://user:pa55@example.com/x",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "GET https://[redacted]@example.com/x"
-  },
-  {
-    "name": "key equals value",
-    "input": "password=hunter2 and secret: s3cret",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "password=[redacted] and secret: [redacted]"
-  },
-  {
-    "name": "json authorization",
-    "input": "{\"authorization\":\"Bearer abcDEF123456\"}",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "{\"authorization\":[redacted]"
-  },
-  {
-    "name": "quoted password with spaces",
-    "input": "password: \"x y z-secret\"",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "password: [redacted]"
-  },
-  {
-    "name": "single quoted api key",
-    "input": "api_key='my secret value'",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "api_key=[redacted]"
-  },
-  {
-    "name": "env style",
-    "input": "DB_PASS=hunter2hunter2 FOO_TOKEN=abc123def",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "DB_PASS=[redacted] FOO_TOKEN=[redacted]"
-  },
-  {
-    "name": "auth token scheme",
-    "input": "Authorization: Token abc123",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "Authorization: [redacted]"
-  },
-  {
-    "name": "auth apikey scheme",
-    "input": "authorization: ApiKey k-123-zzz",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "authorization: [redacted]"
-  },
-  {
-    "name": "auth digest",
-    "input": "Proxy-Authorization: Digest username=u, response=xyz789",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "Proxy-Authorization: [redacted]"
-  },
-  {
-    "name": "cookie",
-    "input": "Cookie: sid=abc123; theme=dark",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "Cookie: [redacted]"
-  },
-  {
-    "name": "set-cookie",
-    "input": "Set-Cookie: sid=abc123; Path=/",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "Set-Cookie: [redacted]"
-  },
-  {
-    "name": "bare token scheme",
-    "input": "retry with token abcdefghijklmnop",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "retry with token [redacted]"
-  },
-  {
-    "name": "x-api-key",
-    "input": "x-api-key: abc123def",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "x-api-key: [redacted]"
-  },
-  {
-    "name": "hex run",
-    "input": "digest deadbeefdeadbeefdeadbeefdeadbeef",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "digest [redacted]"
-  },
-  {
-    "name": "short hex untouched",
-    "input": "addr 0x14000123456 and 0xdeadbeef",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "addr 0x14000123456 and 0xdeadbeef"
-  },
-  {
-    "name": "high entropy run",
-    "input": "id Abcdefghij0123456789ABCDEFGHijkl rest",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "id [redacted] rest"
-  },
-  {
-    "name": "long lowercase identifier untouched",
-    "input": "pkg.abcdefghijklmnopqrstuvwxyzabcdefghij",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "pkg.abcdefghijklmnopqrstuvwxyzabcdefghij"
-  },
-  {
-    "name": "clean stack untouched",
-    "input": "goroutine 7 [running]:\ngithub.com/spacingmind/smind/internal/wsapi.(*conn).dispatch.func1()\n\t/usr/local/go/src/runtime/panic.go:787 +0x130\n",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "goroutine 7 [running]:\ngithub.com/spacingmind/smind/internal/wsapi.(*conn).dispatch.func1()\n\t/usr/local/go/src/runtime/panic.go:787 +0x130\n"
-  },
-  {
-    "name": "path in quoted value",
-    "input": "token=\"/home/tester/.smind/x y\"",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "token=[redacted]"
-  },
-  {
-    "name": "nothing to do",
-    "input": "index out of range [5] with length 3",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "index out of range [5] with length 3"
-  },
-  {
-    "name": "user with parens",
-    "input": "C:\\Users\\jo(work)\\x.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e\\x.go"
-  },
-  {
-    "name": "user with tilde short name",
-    "input": "C:\\Users\\ALICEJ~1\\x.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e\\x.go"
-  },
-  {
-    "name": "user with dollar",
-    "input": "/Users/a$b/x.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/x.go"
-  },
-  {
-    "name": "unc profile not matched",
-    "input": "\\\\srv\\home\\alice\\x",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\\\\srv\\home\\alice\\x"
-  },
-  {
-    "name": "extended length prefix",
-    "input": "\\\\?\\C:\\Users\\carol\\x.go",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\\\\?\\\u003cuser dir\u003e\\x.go"
-  },
-  {
-    "name": "crlf lines",
-    "input": "open /Users/bob/x.go\r\npassword=hunter2\r\nnext line",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "open \u003cuser dir\u003e/x.go\r\npassword=[redacted]\r\nnext line"
-  },
-  {
-    "name": "tabs around key value",
-    "input": "token\t=\tabc123def456",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "token\t=\t[redacted]"
-  },
-  {
-    "name": "unicode space after key",
-    "input": "password=hunter two rest",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "password=[redacted] rest"
-  },
-  {
-    "name": "nbsp after bearer",
-    "input": "Bearer abcdefghij123",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "Bearer abcdefghij123"
-  },
-  {
-    "name": "build machine cargo path",
-    "input": "/Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.40.0/src/x.rs:12",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "\u003cuser dir\u003e/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.40.0/src/x.rs:12"
-  },
-  {
-    "name": "rustc std path",
-    "input": "/rustc/0123456789abcdef0123456789abcdef01234567/library/core/src/option.rs:1 +0x10",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "/rustc/[redacted]/library/core/src/option.rs:1 +0x10"
-  },
-  {
-    "name": "very long clean line",
-    "input": "a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c ",
-    "home": "/home/tester",
-    "smindHome": "/home/tester/.smind",
-    "want": "a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c "
-  },
-  {
-    "name": "empty home",
-    "input": "/home/tester/x and /Users/bob/y",
-    "home": "",
-    "smindHome": "",
-    "want": "\u003cuser dir\u003e/x and \u003cuser dir\u003e/y"
-  },
-  {
-    "name": "root home ignored",
-    "input": "/etc/passwd /home/tester",
-    "home": "/",
-    "smindHome": "",
-    "want": "/etc/passwd \u003cuser dir\u003e"
-  },
-  {
-    "name": "trailing slash home",
-    "input": "/home/tester/x",
-    "home": "/home/tester/",
-    "smindHome": "",
-    "want": "~/x"
-  }
-]
+{
+  "count": 88,
+  "coverage": [
+    {
+      "rule": "unix user dir",
+      "var": "reUnixUserDir",
+      "shape": "(?:/Users/|/home/)[A-Za-z]"
+    },
+    {
+      "rule": "root user",
+      "var": "reUnixUserDir",
+      "shape": "/root\\b"
+    },
+    {
+      "rule": "windows user dir",
+      "var": "reWindowsUser",
+      "shape": "[A-Za-z]:[\\\\/]Users[\\\\/][A-Za-z]"
+    },
+    {
+      "rule": "bearer",
+      "var": "reBearer",
+      "shape": "(?i)\\bbearer\\s"
+    },
+    {
+      "rule": "basic",
+      "var": "reBearer",
+      "shape": "(?i)\\bbasic\\s"
+    },
+    {
+      "rule": "sk key",
+      "var": "reSK",
+      "shape": "\\bsk-[A-Za-z0-9]{8}"
+    },
+    {
+      "rule": "github ghp",
+      "var": "reGitHubToken",
+      "shape": "\\bghp_"
+    },
+    {
+      "rule": "github gho",
+      "var": "reGitHubToken",
+      "shape": "\\bgho_"
+    },
+    {
+      "rule": "github ghs",
+      "var": "reGitHubToken",
+      "shape": "\\bghs_"
+    },
+    {
+      "rule": "github ghu",
+      "var": "reGitHubToken",
+      "shape": "\\bghu_"
+    },
+    {
+      "rule": "github ghr",
+      "var": "reGitHubToken",
+      "shape": "\\bghr_"
+    },
+    {
+      "rule": "github pat",
+      "var": "reGitHubPat",
+      "shape": "\\bgithub_pat_"
+    },
+    {
+      "rule": "aws AKIA",
+      "var": "reAWSKey",
+      "shape": "\\bAKIA[A-Z0-9]{16}"
+    },
+    {
+      "rule": "aws ASIA",
+      "var": "reAWSKey",
+      "shape": "\\bASIA[A-Z0-9]{16}"
+    },
+    {
+      "rule": "jwt",
+      "var": "reJWT",
+      "shape": "\\beyJ[A-Za-z0-9_-]{5}"
+    },
+    {
+      "rule": "key value",
+      "var": "reKeyValue",
+      "shape": "(?i)\\bpassword\\s*[=:]"
+    },
+    {
+      "rule": "key value quoted",
+      "var": "reKeyValue",
+      "shape": "(?i)api_key\\s*=\\s*'"
+    },
+    {
+      "rule": "authorization line",
+      "var": "reAuthLine",
+      "shape": "(?i)\\bauthorization\\s*[:=]"
+    },
+    {
+      "rule": "proxy-authorization line",
+      "var": "reAuthLine",
+      "shape": "(?i)proxy-authorization\\s*:"
+    },
+    {
+      "rule": "cookie line",
+      "var": "reAuthLine",
+      "shape": "(?i)^cookie\\s*:"
+    },
+    {
+      "rule": "set-cookie line",
+      "var": "reAuthLine",
+      "shape": "(?i)set-cookie\\s*:"
+    },
+    {
+      "rule": "scheme token",
+      "var": "reSchemeCred",
+      "shape": "(?i)\\btoken\\s+[A-Za-z0-9]{12}"
+    },
+    {
+      "rule": "scheme apikey",
+      "var": "reSchemeCred",
+      "shape": "(?i)\\bapikey\\s+[A-Za-z0-9]{12}"
+    },
+    {
+      "rule": "scheme api-key",
+      "var": "reSchemeCred",
+      "shape": "(?i)\\bapi-key\\s+[A-Za-z0-9]{12}"
+    },
+    {
+      "rule": "scheme digest",
+      "var": "reSchemeCred",
+      "shape": "(?i)\\bdigest\\s+[A-Za-z0-9]{12}"
+    },
+    {
+      "rule": "scheme negotiate",
+      "var": "reSchemeCred",
+      "shape": "(?i)\\bnegotiate\\s+[A-Za-z0-9]{12}"
+    },
+    {
+      "rule": "scheme ntlm",
+      "var": "reSchemeCred",
+      "shape": "(?i)\\bntlm\\s+[A-Za-z0-9]{12}"
+    },
+    {
+      "rule": "url userinfo",
+      "var": "reURLUserinfo",
+      "shape": "://[^/\\s:@]+:[^/\\s@]+@"
+    },
+    {
+      "rule": "hex run",
+      "var": "reHexRun",
+      "shape": "\\b[0-9a-f]{32}\\b"
+    },
+    {
+      "rule": "high entropy run",
+      "var": "reHighEntropy",
+      "shape": "[A-Za-z0-9_-]{32}"
+    },
+    {
+      "rule": "pem block",
+      "var": "rePEM",
+      "shape": "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    },
+    {
+      "rule": "vendor slack",
+      "var": "reVendorTokens",
+      "shape": "\\bxox[abprs]-"
+    },
+    {
+      "rule": "vendor google api key",
+      "var": "reVendorTokens",
+      "shape": "\\bAIza[0-9A-Za-z_-]{30}"
+    },
+    {
+      "rule": "vendor gitlab",
+      "var": "reVendorTokens",
+      "shape": "\\bglpat-"
+    },
+    {
+      "rule": "vendor npm",
+      "var": "reVendorTokens",
+      "shape": "\\bnpm_[A-Za-z0-9]{30}"
+    },
+    {
+      "rule": "vendor google oauth",
+      "var": "reVendorTokens",
+      "shape": "\\bya29\\."
+    },
+    {
+      "rule": "vendor stripe sk_live",
+      "var": "reVendorTokens",
+      "shape": "\\bsk_live_"
+    },
+    {
+      "rule": "vendor stripe sk_test",
+      "var": "reVendorTokens",
+      "shape": "\\bsk_test_"
+    },
+    {
+      "rule": "vendor stripe rk_live",
+      "var": "reVendorTokens",
+      "shape": "\\brk_live_"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "home dir",
+      "input": "open /home/tester/code/x.go: no such file",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "open ~/code/x.go: no such file"
+    },
+    {
+      "name": "smind home before home",
+      "input": "read /home/tester/.smind/token failed",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "read $SMIND_HOME/token failed"
+    },
+    {
+      "name": "home with backslashes",
+      "input": "C:\\home\\tester\\x",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "C:~\\x"
+    },
+    {
+      "name": "home boundary sibling",
+      "input": "/home/testerson/x.go and /home/tester/y.go and /home/tester2/z.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/x.go and ~/y.go and \u003cuser dir\u003e/z.go"
+    },
+    {
+      "name": "home trailing dot",
+      "input": "see /home/tester.",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "see \u003cuser dir\u003e"
+    },
+    {
+      "name": "other unix user",
+      "input": "/Users/bob/go/pkg/mod/x.go:12 +0x1c",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/go/pkg/mod/x.go:12 +0x1c"
+    },
+    {
+      "name": "other linux user",
+      "input": "/home/alice/work/y.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/work/y.go"
+    },
+    {
+      "name": "root user",
+      "input": "/root/.cache/z",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/.cache/z"
+    },
+    {
+      "name": "rootfs not root",
+      "input": "/rootfs/etc",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "/rootfs/etc"
+    },
+    {
+      "name": "windows user",
+      "input": "C:\\Users\\carol\\AppData\\x.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e\\AppData\\x.go"
+    },
+    {
+      "name": "windows user slash",
+      "input": "C:/Users/carol/AppData/x.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/AppData/x.go"
+    },
+    {
+      "name": "windows user with space",
+      "input": "C:\\Users\\Alice Smith\\go\\pkg\\x.go:12 +0x1",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e\\go\\pkg\\x.go:12 +0x1"
+    },
+    {
+      "name": "mac user with space",
+      "input": "/Users/Alice Smith/go/x.go:12 +0x1",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/go/x.go:12 +0x1"
+    },
+    {
+      "name": "linux user three words",
+      "input": "/home/Jo Ann Marie/code/x.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/code/x.go"
+    },
+    {
+      "name": "user dir then colon",
+      "input": "open /Users/bob: permission denied",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "open \u003cuser dir\u003e: permission denied"
+    },
+    {
+      "name": "unicode user",
+      "input": "/Users/Åsa Öberg/x.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/x.go"
+    },
+    {
+      "name": "bearer",
+      "input": "Authorization failed for Bearer abcDEF123456.token_value",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "Authorization failed for [redacted]"
+    },
+    {
+      "name": "basic",
+      "input": "got Basic dXNlcjpwYXNzd29yZA== from proxy",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "got [redacted] from proxy"
+    },
+    {
+      "name": "sk key",
+      "input": "key sk-abcdefghij1234567890",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "key [redacted]"
+    },
+    {
+      "name": "github token",
+      "input": "token ghp_0123456789abcdef0123",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "token [redacted]"
+    },
+    {
+      "name": "github pat",
+      "input": "github_pat_11ABCDEFG0123456789_abcdefghij",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "aws key",
+      "input": "AKIAABCDEFGHIJKLMNOP in env",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted] in env"
+    },
+    {
+      "name": "jwt",
+      "input": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "slack",
+      "input": "token xoxb-1234567890-abcdefGHIJ",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "token [redacted]"
+    },
+    {
+      "name": "google api key",
+      "input": "key AIzaSyA1234567890abcdefghijklmnopqrstuv",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "key [redacted]"
+    },
+    {
+      "name": "gitlab",
+      "input": "glpat-abcdefghij1234567890",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "npm",
+      "input": "npm_abcdefghijklmnopqrstuvwxyz0123456789",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "google oauth",
+      "input": "ya29.a0AfH6SMBabcdefghijklmnop",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "stripe",
+      "input": "sk_live_abcdefghijklmnop1234",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "pem",
+      "input": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAsecretbody\n-----END RSA PRIVATE KEY-----",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "postgres url",
+      "input": "dial postgres://admin:hunter2@db.internal:5432/x",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "dial postgres://[redacted]@db.internal:5432/x"
+    },
+    {
+      "name": "https url userinfo",
+      "input": "GET https://user:pa55@example.com/x",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "GET https://[redacted]@example.com/x"
+    },
+    {
+      "name": "key equals value",
+      "input": "password=hunter2 and secret: s3cret",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "password=[redacted] and secret: [redacted]"
+    },
+    {
+      "name": "json authorization",
+      "input": "{\"authorization\":\"Bearer abcDEF123456\"}",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "{\"authorization\":[redacted]"
+    },
+    {
+      "name": "quoted password with spaces",
+      "input": "password: \"x y z-secret\"",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "password: [redacted]"
+    },
+    {
+      "name": "single quoted api key",
+      "input": "api_key='my secret value'",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "api_key=[redacted]"
+    },
+    {
+      "name": "env style",
+      "input": "DB_PASS=hunter2hunter2 FOO_TOKEN=abc123def",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "DB_PASS=[redacted] FOO_TOKEN=[redacted]"
+    },
+    {
+      "name": "auth token scheme",
+      "input": "Authorization: Token abc123",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "Authorization: [redacted]"
+    },
+    {
+      "name": "auth apikey scheme",
+      "input": "authorization: ApiKey k-123-zzz",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "authorization: [redacted]"
+    },
+    {
+      "name": "auth digest",
+      "input": "Proxy-Authorization: Digest username=u, response=xyz789",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "Proxy-Authorization: [redacted]"
+    },
+    {
+      "name": "cookie",
+      "input": "Cookie: sid=abc123; theme=dark",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "Cookie: [redacted]"
+    },
+    {
+      "name": "set-cookie",
+      "input": "Set-Cookie: sid=abc123; Path=/",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "Set-Cookie: [redacted]"
+    },
+    {
+      "name": "bare token scheme",
+      "input": "retry with token abcdefghijklmnop",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "retry with token [redacted]"
+    },
+    {
+      "name": "x-api-key",
+      "input": "x-api-key: abc123def",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "x-api-key: [redacted]"
+    },
+    {
+      "name": "hex run",
+      "input": "digest deadbeefdeadbeefdeadbeefdeadbeef",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "digest [redacted]"
+    },
+    {
+      "name": "short hex untouched",
+      "input": "addr 0x14000123456 and 0xdeadbeef",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "addr 0x14000123456 and 0xdeadbeef"
+    },
+    {
+      "name": "high entropy run",
+      "input": "id Abcdefghij0123456789ABCDEFGHijkl rest",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "id [redacted] rest"
+    },
+    {
+      "name": "long lowercase identifier untouched",
+      "input": "pkg.abcdefghijklmnopqrstuvwxyzabcdefghij",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "pkg.abcdefghijklmnopqrstuvwxyzabcdefghij"
+    },
+    {
+      "name": "clean stack untouched",
+      "input": "goroutine 7 [running]:\ngithub.com/spacingmind/smind/internal/wsapi.(*conn).dispatch.func1()\n\t/usr/local/go/src/runtime/panic.go:787 +0x130\n",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "goroutine 7 [running]:\ngithub.com/spacingmind/smind/internal/wsapi.(*conn).dispatch.func1()\n\t/usr/local/go/src/runtime/panic.go:787 +0x130\n"
+    },
+    {
+      "name": "path in quoted value",
+      "input": "token=\"/home/tester/.smind/x y\"",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "token=[redacted]"
+    },
+    {
+      "name": "nothing to do",
+      "input": "index out of range [5] with length 3",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "index out of range [5] with length 3"
+    },
+    {
+      "name": "user with parens",
+      "input": "C:\\Users\\jo(work)\\x.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e\\x.go"
+    },
+    {
+      "name": "user with tilde short name",
+      "input": "C:\\Users\\ALICEJ~1\\x.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e\\x.go"
+    },
+    {
+      "name": "user with dollar",
+      "input": "/Users/a$b/x.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/x.go"
+    },
+    {
+      "name": "unc profile not matched",
+      "input": "\\\\srv\\home\\alice\\x",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\\\\srv\\home\\alice\\x"
+    },
+    {
+      "name": "extended length prefix",
+      "input": "\\\\?\\C:\\Users\\carol\\x.go",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\\\\?\\\u003cuser dir\u003e\\x.go"
+    },
+    {
+      "name": "crlf lines",
+      "input": "open /Users/bob/x.go\r\npassword=hunter2\r\nnext line",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "open \u003cuser dir\u003e/x.go\r\npassword=[redacted]\r\nnext line"
+    },
+    {
+      "name": "tabs around key value",
+      "input": "token\t=\tabc123def456",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "token\t=\t[redacted]"
+    },
+    {
+      "name": "unicode space after key",
+      "input": "password=hunter two rest",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "password=[redacted] rest"
+    },
+    {
+      "name": "nbsp after bearer",
+      "input": "Bearer abcdefghij123",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "build machine cargo path",
+      "input": "/Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.40.0/src/x.rs:12",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "\u003cuser dir\u003e/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.40.0/src/x.rs:12"
+    },
+    {
+      "name": "rustc std path",
+      "input": "/rustc/0123456789abcdef0123456789abcdef01234567/library/core/src/option.rs:1 +0x10",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "/rustc/[redacted]/library/core/src/option.rs:1 +0x10"
+    },
+    {
+      "name": "very long clean line",
+      "input": "a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c ",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c "
+    },
+    {
+      "name": "github oauth token",
+      "input": "token gho_0123456789abcdef0123",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "token [redacted]"
+    },
+    {
+      "name": "github server token",
+      "input": "ghs_0123456789abcdef0123 leaked",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted] leaked"
+    },
+    {
+      "name": "github user token",
+      "input": "x ghu_0123456789abcdef0123",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "x [redacted]"
+    },
+    {
+      "name": "github refresh token",
+      "input": "ghr_0123456789abcdef0123.",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]."
+    },
+    {
+      "name": "aws session key",
+      "input": "ASIAABCDEFGHIJKLMNOP in env",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted] in env"
+    },
+    {
+      "name": "stripe restricted key",
+      "input": "rk_live_abcdefghijklmnop1234",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "stripe test key",
+      "input": "sk_test_abcdefghijklmnop1234",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "negotiate scheme bare",
+      "input": "send negotiate YIIabcdef123456789",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "send negotiate [redacted]"
+    },
+    {
+      "name": "ntlm scheme bare",
+      "input": "send ntlm TlRMTVNTUAABAAAAB4IIAAAA",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "send ntlm [redacted]"
+    },
+    {
+      "name": "apikey scheme bare",
+      "input": "use apikey abcdefghijklmnop now",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "use apikey [redacted] now"
+    },
+    {
+      "name": "api-key scheme bare",
+      "input": "use api-key abcdefghijklmnop now",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "use api-key [redacted] now"
+    },
+    {
+      "name": "digest scheme bare",
+      "input": "use digest abcdefghijklmnop now",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "use digest [redacted] now"
+    },
+    {
+      "name": "authorization negotiate line",
+      "input": "Authorization: Negotiate YIIabcdef123456789",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "Authorization: [redacted]"
+    },
+    {
+      "name": "authorization ntlm line",
+      "input": "authorization: NTLM TlRMTVNTUAABAAAAB4IIAAAA",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "authorization: [redacted]"
+    },
+    {
+      "name": "three pass convergence",
+      "input": "token='a b'sk-abcdefghij1234",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "token=[redacted]"
+    },
+    {
+      "name": "three pass convergence with home",
+      "input": "token='a b'/home/tester/.smind/x",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "token=[redacted]"
+    },
+    {
+      "name": "non-ascii before ghp",
+      "input": "éghp_0123456789abcdef0123",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "é[redacted]"
+    },
+    {
+      "name": "non-ascii before sk",
+      "input": "ñsk-abcdefghij1234",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "ñ[redacted]"
+    },
+    {
+      "name": "non-ascii before akia",
+      "input": "üAKIAABCDEFGHIJKLMNOP",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "ü[redacted]"
+    },
+    {
+      "name": "non-ascii before bearer",
+      "input": "éBearer abcdefghij123",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "é[redacted]"
+    },
+    {
+      "name": "nbsp after basic",
+      "input": "Basic dXNlcjpwYXNzd29yZA==",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "ideographic space after bearer",
+      "input": "Bearer　abcdefghij123",
+      "home": "/home/tester",
+      "smindHome": "/home/tester/.smind",
+      "want": "[redacted]"
+    },
+    {
+      "name": "empty home",
+      "input": "/home/tester/x and /Users/bob/y",
+      "home": "",
+      "smindHome": "",
+      "want": "\u003cuser dir\u003e/x and \u003cuser dir\u003e/y"
+    },
+    {
+      "name": "root home ignored",
+      "input": "/etc/passwd /home/tester",
+      "home": "/",
+      "smindHome": "",
+      "want": "/etc/passwd \u003cuser dir\u003e"
+    },
+    {
+      "name": "trailing slash home",
+      "input": "/home/tester/x",
+      "home": "/home/tester/",
+      "smindHome": "",
+      "want": "~/x"
+    }
+  ]
+}
