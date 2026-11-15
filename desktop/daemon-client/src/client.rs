@@ -127,27 +127,46 @@ pub fn subscribe_resolved_message() -> serde_json::Value {
     })
 }
 
+/// QUESTION_SUBSCRIBE_ID identifies the separate question.* subscribe
+/// request.
+const QUESTION_SUBSCRIBE_ID: &str = "subscribe-question";
+
+/// subscribe_question_message subscribes to question.pending and
+/// question.resolved as a THIRD separate best-effort message (same
+/// reason as `subscribe_resolved_message`: an older daemon rejecting
+/// the unknown topics must not break the other subscriptions).
+pub fn subscribe_question_message() -> serde_json::Value {
+    serde_json::json!({
+        "id": QUESTION_SUBSCRIBE_ID,
+        "method": "events.subscribe",
+        "params": { "topics": ["question.pending", "question.resolved"] }
+    })
+}
+
 /// subscribe_messages is every subscribe request sent after connecting,
-/// in order: the original one, then the separate permission.resolved one.
+/// in order: the original one, then the separate permission.resolved
+/// and question.* ones.
 pub fn subscribe_messages() -> Vec<serde_json::Value> {
-    vec![subscribe_message(), subscribe_resolved_message()]
+    vec![subscribe_message(), subscribe_resolved_message(), subscribe_question_message()]
 }
 
 /// ClientEvent is what `run` hands to its callback: a notification to
 /// show, a run that just (re)started (clears that task's tray
-/// attention), a permission that was resolved, a run that ended, or a
-/// fresh connection (resets it).
+/// attention), a permission or question that was resolved, a run that
+/// ended, or a fresh connection (resets it).
 #[derive(Debug, PartialEq, Eq)]
 pub enum ClientEvent {
     Notification(protocol::Notification),
     RunRunning { task_id: i64 },
     RunEnded { task_id: i64 },
     PermissionResolved { request_id: String },
+    QuestionResolved { request_id: String },
     Reconnected,
 }
 
-/// attention_event maps a run.status / permission.resolved event to the
-/// ClientEvent the tray cares about (None for anything else).
+/// attention_event maps a run.status / permission.resolved /
+/// question.resolved event to the ClientEvent the tray cares about
+/// (None for anything else).
 fn attention_event(event: &protocol::EventNotification) -> Option<ClientEvent> {
     match event.topic.as_str() {
         "run.status" => {
@@ -161,6 +180,10 @@ fn attention_event(event: &protocol::EventNotification) -> Option<ClientEvent> {
         "permission.resolved" => {
             let p = protocol::permission_resolved(&event.payload)?;
             Some(ClientEvent::PermissionResolved { request_id: p.request_id })
+        }
+        "question.resolved" => {
+            let q = protocol::question_resolved(&event.payload)?;
+            Some(ClientEvent::QuestionResolved { request_id: q.request_id })
         }
         _ => None,
     }
@@ -229,7 +252,9 @@ async fn try_run_once(
     eprintln!("smind desktop: ws connected to {}", cfg.daemon_url);
     let (mut tx, mut rx) = ws.split();
 
-    let [sub, sub_resolved] = [subscribe_message(), subscribe_resolved_message()].map(|m| m.to_string());
+    let [sub, sub_resolved, sub_question] =
+        [subscribe_message(), subscribe_resolved_message(), subscribe_question_message()]
+            .map(|m| m.to_string());
     tx.send(Message::Text(sub.into()))
         .await
         .map_err(|e| format!("ws send subscribe: {e}"))?;
@@ -237,6 +262,7 @@ async fn try_run_once(
     // must not affect the subscription above. A send failure here means
     // the socket is gone, which the read loop below notices anyway.
     let _ = tx.send(Message::Text(sub_resolved.into())).await;
+    let _ = tx.send(Message::Text(sub_question.into())).await;
     eprintln!("smind desktop: subscribed to permission.pending, run.status");
     on_event(ClientEvent::Reconnected);
 
@@ -265,7 +291,11 @@ async fn try_run_once(
                                 let req = protocol::task_get_message(&req_id, n.task_id).to_string();
                                 let _ = tx.send(Message::Text(req.into())).await;
                                 on_event(ClientEvent::Notification(n));
-                            } else if let Some(ev) = attention_event(&event) {
+                            }
+                            // Two independent maps, not if/else: a run.status
+                            // error is BOTH a failure notification and a run
+                            // that ended (which clears the tray count).
+                            if let Some(ev) = attention_event(&event) {
                                 on_event(ev);
                             }
                         } else if let (Some(id), Some(result)) = (parsed.id, parsed.result) {
@@ -316,12 +346,15 @@ pub async fn run_over_relay(
                     return; // every RelayHandle sender dropped
                 }
                 if *status_rx.borrow() == crate::relay::client::Status::Connected {
-                    let [sub, sub_resolved] = [subscribe_message(), subscribe_resolved_message()].map(|m| m.to_string());
+                    let [sub, sub_resolved, sub_question] =
+                        [subscribe_message(), subscribe_resolved_message(), subscribe_question_message()]
+                            .map(|m| m.to_string());
                     if handle.send(sub.into_bytes()).await.is_err() {
                         return;
                     }
                     // Separate and best-effort, see `subscribe_resolved_message`.
                     let _ = handle.send(sub_resolved.into_bytes()).await;
+                    let _ = handle.send(sub_question.into_bytes()).await;
                     on_event(ClientEvent::Reconnected);
                 }
             }
@@ -357,7 +390,9 @@ async fn handle_relay_message(
             let req = protocol::task_get_message(&req_id, n.task_id).to_string();
             let _ = handle.send(req.into_bytes()).await;
             on_event(ClientEvent::Notification(n));
-        } else if let Some(ev) = attention_event(&event) {
+        }
+        // Two independent maps, not if/else: see `try_run_once`.
+        if let Some(ev) = attention_event(&event) {
             on_event(ev);
         }
     } else if let (Some(id), Some(result)) = (parsed.id, parsed.result) {
@@ -629,12 +664,26 @@ mod tests {
     #[test]
     fn subscribe_messages_put_permission_resolved_in_its_own_message() {
         let msgs = subscribe_messages();
-        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs.len(), 3);
         assert_eq!(msgs[0], subscribe_message());
         assert_eq!(msgs[0]["params"]["topics"], serde_json::json!(["permission.pending", "run.status"]));
         assert_eq!(msgs[1]["method"], "events.subscribe");
         assert_eq!(msgs[1]["params"]["topics"], serde_json::json!(["permission.resolved"]));
         assert_ne!(msgs[0]["id"], msgs[1]["id"]);
+        assert_ne!(msgs[0]["id"], msgs[2]["id"]);
+        assert_ne!(msgs[1]["id"], msgs[2]["id"]);
+    }
+
+    #[test]
+    fn subscribe_question_message_is_separate() {
+        let msg = subscribe_question_message();
+        assert_eq!(msg["method"], "events.subscribe");
+        assert_eq!(msg["params"]["topics"], serde_json::json!(["question.pending", "question.resolved"]));
+        assert_eq!(msg["id"], "subscribe-question");
+        // Not folded into the first (older daemons reject unknown topics,
+        // which must not break permission.pending/run.status).
+        let first = subscribe_message().to_string();
+        assert!(!first.contains("question"));
     }
 
     fn event(topic: &str, payload: serde_json::Value) -> protocol::EventNotification {
@@ -649,6 +698,19 @@ mod tests {
         assert_eq!(attention_event(&running), Some(ClientEvent::RunRunning { task_id: 5 }));
         let resolved = event("permission.resolved", serde_json::json!({"runId":"r","taskId":5,"requestId":"q","reason":"human"}));
         assert_eq!(attention_event(&resolved), Some(ClientEvent::PermissionResolved { request_id: "q".into() }));
+        let answered = event("question.resolved", serde_json::json!({"runId":"r","taskId":5,"chatId":7,"requestId":"q2","reason":"human"}));
+        assert_eq!(attention_event(&answered), Some(ClientEvent::QuestionResolved { request_id: "q2".into() }));
+    }
+
+    #[test]
+    fn a_failed_run_is_both_a_notification_and_a_run_ended() {
+        let failed = event(
+            "run.status",
+            serde_json::json!({"runId":"r","taskId":5,"chatId":7,"status":"error","err":"boom"}),
+        );
+        let n = protocol::notification_for(&failed).expect("failed run notifies");
+        assert_eq!(n.kind, protocol::NotifyKind::Failure);
+        assert_eq!(attention_event(&failed), Some(ClientEvent::RunEnded { task_id: 5 }));
     }
 
     type WsSeen = Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>;

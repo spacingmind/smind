@@ -28,6 +28,7 @@ describe("platform in a non-desktop build", () => {
     await expect(desktop.addSshConnection("x", { host: "h", sshPort: null, daemonPort: 4648 })).rejects.toThrow(/unavailable/i);
     await expect(desktop.appSettingsGet()).rejects.toThrow(/unavailable/i);
     await expect(desktop.appSettingsSet({ onboardingCompleted: true })).rejects.toThrow(/unavailable/i);
+    await expect(desktop.notifyTest()).rejects.toThrow(/unavailable/i);
     expect(() => desktop.onRunSetupRequested(() => {})()).not.toThrow();
     await expect(desktop.previewRelayLink("x")).rejects.toThrow(/unavailable/i);
     await expect(desktop.addRelayConnection("x", "y")).rejects.toThrow(/unavailable/i);
@@ -80,6 +81,8 @@ describe("platform in a desktop build", () => {
         case "app_update_check":
           return { kind: "upToDate", currentVersion: "0.7.0" };
         case "app_update_install":
+          return undefined;
+        case "notify_test":
           return undefined;
         default:
           throw new Error(`unexpected invoke command ${cmd}`);
@@ -135,6 +138,9 @@ describe("platform in a desktop build", () => {
     expect(invoke).toHaveBeenCalledWith("app_update_check");
     await desktop.appUpdateInstall();
     expect(invoke).toHaveBeenCalledWith("app_update_install");
+
+    await desktop.notifyTest();
+    expect(invoke).toHaveBeenCalledWith("notify_test");
   });
 
   it("maps the relay-link methods to their commands, wraps Rust's string errors, and announces a saved connection", async () => {
@@ -172,7 +178,7 @@ describe("platform in a desktop build", () => {
     vi.stubEnv("VITE_SMIND_DESKTOP", "1");
     const probe = { reachable: true, version: "0.12.0", service: "smind", authRequired: true, loopback: false, error: null };
     const ssh = { id: "ssh:homelab", kind: "ssh", label: "homelab", baseUrl: "http://127.0.0.1:50123" };
-    const settings = { onboardingCompleted: true, manageLocalDaemon: false };
+    const settings = { onboardingCompleted: true, manageLocalDaemon: false, notificationsOn: true, notifyPermission: true, notifyQuestion: true, notifyFailure: true };
     const invoke = vi.fn(async (cmd: string) => {
       switch (cmd) {
         case "connections_probe":

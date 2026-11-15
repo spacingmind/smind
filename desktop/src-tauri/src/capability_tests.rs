@@ -52,6 +52,7 @@ fn capability_allowlist_exact() {
         "allow-app-menu-action",
         "allow-context-menu-show",
         "allow-window-open-task",
+        "allow-notify-test",
         "core:window:allow-minimize",
         "core:window:allow-toggle-maximize",
         "core:window:allow-internal-toggle-maximize",
@@ -291,6 +292,7 @@ fn capability_task_window_has_no_main_only_command() {
         "allow-app-update-install",
         "allow-app-quit",
         "allow-app-menu-action",
+        "allow-notify-test",
     ] {
         assert!(
             !got.iter().any(|p| p == forbidden),

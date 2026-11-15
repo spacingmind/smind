@@ -82,6 +82,7 @@ fn main() {
             "app_quit",
             "app_menu_action",
             "context_menu_show",
+            "notify_test",
             "editors_list",
             "open_in_editor",
             "open_path_default",
