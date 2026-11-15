@@ -329,6 +329,71 @@ func TestSnapshotDeepNestingIsBoundedAndTruncated(t *testing.T) {
 	}
 }
 
+// unnamedChain builds an AX tree of n chained unnamed generic nodes starting
+// at the parentless root, ending in a named button leaf.
+func unnamedChain(n int) []any {
+	nodes := make([]any, 0, n+1)
+	for i := 0; i < n; i++ {
+		parent := ""
+		if i > 0 {
+			parent = fmt.Sprintf("g%d", i-1)
+		}
+		var children []string
+		if i < n-1 {
+			children = append(children, fmt.Sprintf("g%d", i+1))
+		} else {
+			children = append(children, "b")
+		}
+		nodes = append(nodes, axm(fmt.Sprintf("g%d", i), parent, "generic", "", int64(10+i), nil, children...))
+	}
+	nodes = append(nodes, axm("b", fmt.Sprintf("g%d", n-1), "button", "Go", 9000, nil))
+	return nodes
+}
+
+// A chain of unnamed generic nodes never grows the render depth: without the
+// per-level bound the walk would recurse through all of them unchecked.
+func TestSnapshotUnnamedChainIsBounded(t *testing.T) {
+	d := &domFake{tree: func() []any { return unnamedChain(3000) }}
+	s, _ := startHookedSession(t, d.hook)
+
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.Truncated || !strings.Contains(snap.Text, "[truncated:") {
+		t.Fatalf("the chain must be cut: truncated=%v text=%q", snap.Truncated, snap.Text)
+	}
+	if strings.Contains(snap.Text, "Go") {
+		t.Fatalf("the leaf under the cut must not be rendered: %q", snap.Text)
+	}
+}
+
+func TestSnapshotShortUnnamedChainStillRendersItsLeaf(t *testing.T) {
+	d := &domFake{tree: func() []any { return unnamedChain(50) }}
+	s, _ := startHookedSession(t, d.hook)
+
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Truncated {
+		t.Fatalf("a chain under the bound is not truncated: %+v", snap)
+	}
+	// Skipped generics pass their depth through: the leaf renders unindented.
+	found := false
+	for _, line := range strings.Split(snap.Text, "\n") {
+		if strings.HasPrefix(line, `- button "Go"`) {
+			found = true
+		}
+		if strings.HasPrefix(line, " ") && strings.Contains(line, "button") {
+			t.Fatalf("the leaf must render at depth 0: %q", line)
+		}
+	}
+	if !found {
+		t.Fatalf("the leaf must be rendered: %q", snap.Text)
+	}
+}
+
 func TestSnapshotHidesEverythingBelowAPasswordFieldAndEscapesQuotes(t *testing.T) {
 	hook := func(f *fakeCDP, c fakeCall) (any, string) {
 		switch c.Method {

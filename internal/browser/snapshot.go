@@ -21,6 +21,10 @@ const (
 	// maxSnapshotRequestDepth is the depth asked of the browser (ignored and
 	// generic wrappers count there, rendered levels are cut at maxSnapshotDepth).
 	maxSnapshotRequestDepth = 150
+	// maxSnapshotLevels bounds it by level, counting EVERY node: depth does
+	// not grow through skipped nodes (unnamed generic, ignored), so a long
+	// chain of those would otherwise recurse without limit.
+	maxSnapshotLevels = 400
 )
 
 // Snapshot is the rendered accessibility tree of one tab.
@@ -152,7 +156,7 @@ func (s *Session) Snapshot(ctx context.Context, tabID string) (Snapshot, error) 
 			break
 		}
 	}
-	r.visit(root, 0)
+	r.visit(root, 0, 0)
 	if r.full {
 		r.lines = append(r.lines, fmt.Sprintf("[truncated: %d more nodes not shown]", r.total-r.shown))
 	}
@@ -224,12 +228,12 @@ type snapRender struct {
 	full   bool
 }
 
-func (r *snapRender) visit(n *axNode, depth int) {
+func (r *snapRender) visit(n *axNode, depth, level int) {
 	if n == nil || r.seen[n.NodeID] {
 		return
 	}
 	r.seen[n.NodeID] = true
-	if depth > maxSnapshotDepth {
+	if depth > maxSnapshotDepth || level > maxSnapshotLevels {
 		r.total++ // counted in the truncation marker, never rendered, never descended into
 		r.full = true
 		return
@@ -269,7 +273,7 @@ func (r *snapRender) visit(n *axNode, depth int) {
 		childDepth = depth + 1
 	}
 	for _, id := range n.ChildIDs {
-		r.visit(r.byID[id], childDepth)
+		r.visit(r.byID[id], childDepth, level+1)
 	}
 }
 
