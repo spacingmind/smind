@@ -130,4 +130,5 @@ Mutations on committed code, all killed: consent check removed; a failed run cou
 `run.status` "stopped" also notifying; the per-kind switches enabled before consent; turning on no longer sending the test banner.
 Frames: 16 (light and dark, 1280 and 390; the settings group before consent, on, one kind off, test failure) all opened, with a mocked Tauri bridge.
 One finding fixed on the way: the dedupe ran before the consent check, so a request that stayed silent before consent could never notify later.
+Review fix: `notify_test` (no argument, skips the consent check by design) is rate-limited to one banner per 5 s per process (`notify_test.rs`, a time-injected `Limiter`, 4 tests; a refused call returns an error the settings UI shows, and does not extend the window); mutations killed: limiter never refusing, a refused call restarting the window, `asSentence` not capitalising or ending the sentence. Settings errors now show as padded sentences (`lib/as-sentence.ts`).
 Not verified: a real OS notification, macOS's own permission prompt, and the Windows/Linux paths (macOS compiled only); no real window.
