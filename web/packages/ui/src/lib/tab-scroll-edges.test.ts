@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { disambiguatedTitles, revealScrollLeft, TAB_REVEAL_PADDING_PX, tabScrollEdges } from "@/lib/tab-scroll-edges";
+import { disambiguatedParts, disambiguatedTitles, revealScrollLeft, TAB_REVEAL_PADDING_PX, tabScrollEdges } from "@/lib/tab-scroll-edges";
 
 describe("tabScrollEdges", () => {
   const cases: Array<[string, number, number, number, { start: boolean; end: boolean }]> = [
@@ -56,5 +56,15 @@ describe("disambiguatedTitles", () => {
       { key: "f", title: "Terminal" },
     ]);
     expect([...m.entries()]).toEqual([["a", "Chat"], ["b", "Diff"], ["c", "Chat 2"], ["d", "Chat 3"], ["e", "Terminal"], ["f", "Terminal 2"]]);
+  });
+});
+
+describe("disambiguatedParts", () => {
+  it("is the one source of the numbers: titles are derived from it", () => {
+    const entries = [{ key: "a", title: "Chat" }, { key: "b", title: "Chat" }, { key: "c", title: "Diff" }, { key: "d", title: "Chat" }];
+    const parts = disambiguatedParts(entries);
+    expect([...parts.entries()]).toEqual([["a", { base: "Chat", n: 1 }], ["b", { base: "Chat", n: 2 }], ["c", { base: "Diff", n: 1 }], ["d", { base: "Chat", n: 3 }]]);
+    const titles = disambiguatedTitles(entries);
+    for (const [k, { base, n }] of parts) expect(titles.get(k)).toBe(n === 1 ? base : `${base} ${n}`);
   });
 });

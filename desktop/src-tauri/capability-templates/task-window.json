@@ -5,7 +5,7 @@
   "local": false,
   "remote": {
     "urls": [
-      "http://127.0.0.1:*"
+      "__PROXY_ORIGIN__/*"
     ]
   },
   "windows": [

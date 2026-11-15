@@ -40,15 +40,26 @@ export function revealScrollLeft(input: {
   return Math.min(max, Math.max(0, next));
 }
 
-/** Titles for a menu where two tabs share one: the first keeps its title, later ones get " 2", " 3", ... in tab order (the strip itself is unchanged). */
-export function disambiguatedTitles(entries: ReadonlyArray<{ key: string; title: string }>): Map<string, string> {
+/**
+ * The numbered display title of every tab, as `{ base, n }`: when several tabs share a title (several chats all called
+ * "Chat") the first has n = 1 and later ones 2, 3, ... in tab order. The ONE function behind both the strip's chips and
+ * the overflow menu, so a chip and its menu row can never disagree about which "Chat" is which.
+ */
+export function disambiguatedParts(entries: ReadonlyArray<{ key: string; title: string }>): Map<string, { base: string; n: number }> {
   const seen = new Map<string, number>();
-  const out = new Map<string, string>();
+  const out = new Map<string, { base: string; n: number }>();
   for (const { key, title } of entries) {
     const n = (seen.get(title) ?? 0) + 1;
     seen.set(title, n);
-    out.set(key, n === 1 ? title : `${title} ${n}`);
+    out.set(key, { base: title, n });
   }
+  return out;
+}
+
+/** The same numbering as one string ("Chat", "Chat 2", ...), for places that cannot style the number apart (aria labels, tooltips). */
+export function disambiguatedTitles(entries: ReadonlyArray<{ key: string; title: string }>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [key, { base, n }] of disambiguatedParts(entries)) out.set(key, n === 1 ? base : `${base} ${n}`);
   return out;
 }
 
