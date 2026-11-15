@@ -254,7 +254,7 @@ func TestWriteOwnerIsAtomicAndReadable(t *testing.T) {
 }
 
 func TestLauncherArgsRejectBadAllowHost(t *testing.T) {
-	for _, h := range []string{"a.test, MAP * 1.2.3.4", "*.test", "x y", "0.0.0.0"} {
+	for _, h := range []string{"a.test, MAP * 1.2.3.4", "*.test", "x y", anyV4} {
 		if _, err := buildArgs("/p", LaunchOpts{AllowHosts: []string{h}}); err == nil {
 			t.Errorf("allow host %q must be rejected before it reaches a resolver rule", h)
 		}

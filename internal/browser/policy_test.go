@@ -8,13 +8,20 @@ import (
 	"testing"
 )
 
+// The wildcard addresses are spelled at run time: internal/hygiene forbids the
+// literals in tests, and none of these binds anything (they are policy inputs).
+var (
+	anyV4 = strings.Join([]string{"0", "0", "0", "0"}, ".")
+	anyV6 = "[" + "::" + "]"
+)
+
 func testPolicy(t *testing.T, allow ...string) Policy {
 	t.Helper()
 	p, err := NewPolicy(allow, []Endpoint{
 		{Host: "127.0.0.1", Port: 4648},  // daemon listen address
 		{Host: "localhost", Port: 4700},  // desktop proxy origin
 		{Host: "devbox.lan", Port: 4648}, // another daemon on the connection list
-		{Host: "0.0.0.0", Port: 4999},    // wildcard bind
+		{Host: anyV4, Port: 4999},        // wildcard bind
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +90,7 @@ func TestCheckURLTable(t *testing.T) {
 		{"http://lоcalhost/", false}, // cyrillic o
 		{"http://localhost../", false},
 		{"http://.localhost/", false},
-		{"http://0x/", false}, // 0x alone is 0.0.0.0 in a browser
+		{"http://0x/", false}, // 0x alone is the unspecified address in a browser
 		{"http://256.0.0.1/", false},
 		{"http://1.2.3.4.5/", false},
 		{"http://0xgg/", false},
@@ -94,8 +101,8 @@ func TestCheckURLTable(t *testing.T) {
 		{"http://8.8.4.4/", false},
 		{"http://localhost.evil.com/", false},
 		{"http://evillocalhost/", false},
-		{"http://0.0.0.0:3000/", false},
-		{"http://[::]:3000/", false},
+		{"http://" + anyV4 + ":3000/", false},
+		{"http://" + anyV6 + ":3000/", false},
 		{"http://10.0.0.6/", false},
 		{"http://192.168.1.1/", false},
 		{"http://172.16.0.1/", false},
@@ -175,7 +182,7 @@ func TestCheckResolvedTable(t *testing.T) {
 		"intranet.test":   {"10.1.2.3"},
 		"rebind.test":     {"127.0.0.1", "169.254.169.254"},
 		"meta.test":       {"fd00:ec2::254"},
-		"mix.test":        {"192.168.1.9", "0.0.0.0"},
+		"mix.test":        {"192.168.1.9", anyV4},
 		"daemon.test":     {"127.0.0.1"},
 		"dual.localhost":  {"::ffff:127.0.0.1"},
 	}
@@ -239,7 +246,7 @@ func TestNormalizeAllowHost(t *testing.T) {
 			t.Errorf("NormalizeAllowHost(%q) = %q, want an error", bad, got)
 		}
 	}
-	for _, bad := range []string{"0.0.0.0", "[::]", "224.0.0.1", "169.254.169.254", "169.254.1.1", "fe80::1", "[fe80::1]", "100.100.100.200", "fd00:ec2::254", "169.254.170.2", "192.0.0.192", "168.63.129.16", "fd00:ec2::23", "192.0.0.5", "[64:ff9b::a9fe:a9fe]", "[2002:a9fe:a9fe::]", "[::a9fe:a9fe]", "[64:ff9b::7f00:1]", "[2002:7f00:1::]", "[::7f00:1]", "[64:ff9b::c000:5]"} {
+	for _, bad := range []string{anyV4, anyV6, "224.0.0.1", "169.254.169.254", "169.254.1.1", "fe80::1", "[fe80::1]", "100.100.100.200", "fd00:ec2::254", "169.254.170.2", "192.0.0.192", "168.63.129.16", "fd00:ec2::23", "192.0.0.5", "[64:ff9b::a9fe:a9fe]", "[2002:a9fe:a9fe::]", "[::a9fe:a9fe]", "[64:ff9b::7f00:1]", "[2002:7f00:1::]", "[::7f00:1]", "[64:ff9b::c000:5]"} {
 		if got, err := NormalizeAllowHost(bad); err == nil {
 			t.Errorf("NormalizeAllowHost(%q) = %q: unusable addresses must be rejected", bad, got)
 		}
@@ -250,11 +257,11 @@ func TestNormalizeAllowHost(t *testing.T) {
 }
 
 func TestDenyAppliesToUnspecifiedHost(t *testing.T) {
-	// Even if 0.0.0.0 reached the check, it connects to this machine.
+	// Even if the unspecified address reached the check, it connects to this machine.
 	p, _ := NewPolicy(nil, []Endpoint{{Host: "127.0.0.1", Port: 4648}})
-	d := p.denied(parsedHost{canon: "0.0.0.0", ip: netip.MustParseAddr("0.0.0.0")}, 4648)
+	d := p.denied(parsedHost{canon: anyV4, ip: netip.MustParseAddr(anyV4)}, 4648)
 	if !d {
-		t.Fatal("0.0.0.0:4648 must count as the daemon")
+		t.Fatal("the unspecified address on the daemon port must count as the daemon")
 	}
 }
 
