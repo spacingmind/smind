@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { answerQuestion } from '../api';
-import type { QuestionAnswer, QuestionRequest } from '../questionAnswer';
+import { Draft, EMPTY_DRAFT, QuestionAnswer, QuestionRequest, submitPayload, toggleOption } from '../questionAnswer';
 import { answerToQuestion, feedQuestionEvent, QuestionBoard, showsCard } from '../questionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
 import { PairingOffer } from '../relay/pairing';
@@ -84,6 +84,21 @@ describe('QuestionBoard', () => {
     board.chooseFailed('rq-1', 'unknown option');
     expect(board.list()[0]).toMatchObject({ status: 'pending', error: 'unknown option' });
     expect(board.list()[0].resolution).toBeUndefined();
+  });
+
+  it('question-keeps-answers-after-failed-submit', () => {
+    const board = new QuestionBoard();
+    board.requestReceived('run-1', 'rq-1', REQ);
+    // The card's drafts are local state the board never touches: the pure helpers build the same payload before and
+    // after the failure.
+    const drafts: Record<string, Draft> = { q0: toggleOption(REQ.questions[0], EMPTY_DRAFT, 'o1') };
+    const payload = submitPayload(REQ.questions, drafts);
+    expect(payload).toEqual({ action: 'answer', answers: [{ questionId: 'q0', optionIds: ['o1'] }] });
+    board.choose('rq-1', payload!);
+    board.chooseFailed('rq-1', 'connection closed');
+    expect(board.list()[0]).toMatchObject({ status: 'pending', error: 'connection closed' });
+    expect(showsCard(board.list()[0])).toBe(true);
+    expect(submitPayload(REQ.questions, drafts)).toEqual(payload);
   });
 
   it('a failed answer does NOT roll back after an authoritative event resolved the request', () => {
