@@ -78,6 +78,7 @@ fn main() {
             "connections_select",
             "connections_get_current",
             "open_external",
+            "window_open_task",
             "app_quit",
             "app_menu_action",
             "context_menu_show",
