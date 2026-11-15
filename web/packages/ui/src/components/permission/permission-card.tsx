@@ -32,11 +32,14 @@ export function PermissionCard({
   runId,
   pending,
   onRespond,
+  onAlwaysAllow,
   onChat,
 }: {
   runId: string;
   pending: PendingPermission;
   onRespond: (runId: string, requestId: string, optionId: string, reason?: string) => Promise<void>;
+  /** Saves the request as a project grant too (only offered when the daemon sent `detail.grant`). */
+  onAlwaysAllow?: (runId: string, requestId: string, optionId: string, allowProjectCode: boolean) => Promise<void>;
   onChat: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -80,7 +83,7 @@ export function PermissionCard({
       {pending.plan ? (
         <PlanReviewCard runId={runId} pending={{ ...pending, plan: pending.plan }} onRespond={onRespond} onChat={onChat} />
       ) : (
-        <OptionsCard runId={runId} pending={pending} onRespond={onRespond} />
+        <OptionsCard runId={runId} pending={pending} onRespond={onRespond} onAlwaysAllow={onAlwaysAllow} />
       )}
     </div>
   );

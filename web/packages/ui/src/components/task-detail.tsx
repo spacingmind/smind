@@ -139,7 +139,7 @@ export function TaskDetailPane({
   // pills, subtree rollups. Never blocks the pane on load -- it renders
   // nothing until the lineage arrives.
   const lineage = useTaskLineage(client, task, events);
-  const { runs, error, submitPrompt, stopRun, respondPermission, answerQuestion, setPermissionMode, retryWithHigherEffort, loadFullHistory } = useRunTimeline(
+  const { runs, error, submitPrompt, stopRun, respondPermission, answerPermissionAlways, answerQuestion, setPermissionMode, retryWithHigherEffort, loadFullHistory } = useRunTimeline(
     client,
     task.ID,
     chat.ID,
@@ -666,7 +666,7 @@ export function TaskDetailPane({
           {pendingRuns.map((run) => (
             <Fragment key={run.id}>
               {run.pendingPermission && (
-                <PermissionCard runId={run.id} pending={run.pendingPermission} onRespond={respondPermission} onChat={focusComposer} />
+                <PermissionCard key={run.pendingPermission.requestId} runId={run.id} pending={run.pendingPermission} onRespond={respondPermission} onAlwaysAllow={answerPermissionAlways} onChat={focusComposer} />
               )}
               {run.pendingQuestion && liveQuestion(run) && (
                 <QuestionCard

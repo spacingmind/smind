@@ -99,6 +99,8 @@ export const queryKeys = {
   policyStatus: () => ["policy", "get"] as const,
   /** `policy.audit` (ADR-0047 §2.3): append-only newest-first rows, read when the policy page opens. */
   policyAudit: () => ["policy", "audit"] as const,
+  /** `permission.grants.list`: the saved "always allow in this project" grants; refetched on mount and after a revoke. */
+  permissionGrants: () => ["permission", "grants"] as const,
   /** `skill.list`: bundled skills and the active plugins' `<plugin>:<skill>` entries. */
   skillList: () => ["skill.list"] as const,
   /** `plugin.commands`: the prompt slash commands of the active plugins; refetched on `plugin.updated`. */

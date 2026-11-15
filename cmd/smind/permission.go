@@ -19,7 +19,13 @@ const cmdPermissionUsage = `usage: smind permission show --reveal [--index N] [-
        smind permission show --reveal [--index N] [--json] --run <runId> --call <toolCallId>
   prints the redacted heredoc body N (default 0) elided from a still-pending
   permission request, or from a recorded tool call (live or finished run).
-  "smind task permissions <runId>" lists pending requests and their heredocs.`
+  "smind task permissions <runId>" lists pending requests and their heredocs.
+       smind permission grants ls [--project <workspaceId>] [--json]
+       smind permission grants show <grantId> [--json]
+       smind permission grants revoke <grantId>
+  saved "allow always in this project" decisions: the exact command, project,
+  expiry, uses and status; revoke takes effect on the next request. A grant is
+  only ever created by a human answering a permission card.`
 
 func cmdPermission(args []string) int {
 	return runPermission(context.Background(), args, osStdout, osStderr)
@@ -28,6 +34,9 @@ func cmdPermission(args []string) int {
 // runPermission is cmdPermission with its environment injected. Exit codes:
 // 0 ok, 1 a daemon or call error, 2 usage.
 func runPermission(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "grants" {
+		return runPermissionGrants(ctx, args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || args[0] != "show" {
 		fmt.Fprintln(stderr, cmdPermissionUsage)
 		return 2

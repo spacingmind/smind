@@ -384,7 +384,8 @@ describe("QuestionCard: in-flight and failure states", () => {
     await flush();
 
     const card = screen.getByTestId("question-card");
-    expect(within(card).getByTestId("question-error")).toHaveTextContent("boom");
+    expect(within(card).getByTestId("question-error")).toHaveTextContent("Couldn't send the answer.");
+    expect(within(card).getByTestId("question-error-details")).toHaveTextContent("boom");
     expect(within(card).getByTestId("question-submit")).toBeEnabled();
     expect(within(card).getByTestId("question-decline")).toBeEnabled();
   });
@@ -398,11 +399,11 @@ describe("QuestionCard: in-flight and failure states", () => {
     fireEvent.click(screen.getByTestId("question-submit"));
     await flush();
 
-    // The error reads as a plain sentence with the detail on a second
-    // line, and sits after the fields, directly before Submit.
+    // The error reads as a plain, humanised sentence with the daemon's own text
+    // under Details, and sits after the fields, directly before Submit.
     const error = screen.getByTestId("question-error");
-    expect(error).toHaveTextContent("Could not send your answer. Try again.");
-    expect(error).toHaveTextContent("boom");
+    expect(error).toHaveTextContent("Couldn't send the answer.");
+    expect(screen.getByTestId("question-error-details")).toHaveTextContent("boom");
     const fields = screen.getByTestId("question-fields");
     const submit = screen.getByTestId("question-submit");
     expect(!!(fields.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);

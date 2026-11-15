@@ -46,6 +46,7 @@ function RootStack() {
           <Stack.Screen name="inbox" options={{ title: 'Inbox' }} />
           <Stack.Screen name="review/[id]" options={{ title: 'Review' }} />
           <Stack.Screen name="policy" options={{ title: 'Permission policy' }} />
+          <Stack.Screen name="grants" options={{ title: 'Saved grants' }} />
           <Stack.Screen name="automations" options={{ title: 'Automations' }} />
           <Stack.Screen name="automation/[id]" options={{ title: 'Automation' }} />
           <Stack.Screen name="task/[id]" options={({ route }) => ({ title: taskHeaderTitle(route.params as { id?: string; title?: string } | undefined) })} />

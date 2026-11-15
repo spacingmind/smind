@@ -56,7 +56,7 @@ import { withRunPrompt } from '../promptLine';
 import { taskHref } from '../navigation/routes';
 import { recallSelection } from '../newTaskPrefs';
 import { continueRun, isEchoOfOptimisticLine, sendFollowUpPrompt, RunTail } from '../followUpPrompt';
-import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
+import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission, respondToPermissionAlways } from '../permissionRequests';
 import { answerToQuestion, feedQuestionEvent, QuestionBoard, QuestionState, showsCard } from '../questionRequests';
 import type { QuestionAnswer } from '../questionAnswer';
 import { RelayConnection } from '../relay/RelayConnection';
@@ -605,6 +605,14 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
     [conn, questionBoard],
   );
 
+  const handlePermissionAlways = useCallback(
+    (requestId: string, allowProjectCode: boolean) => {
+      hapticFor('permission');
+      void respondToPermissionAlways(conn, board, requestId, allowProjectCode);
+    },
+    [conn, board],
+  );
+
   // Heredoc reveals: the redacted body of one elided marker, straight from the daemon (stable: both take only conn).
   const handlePermissionReveal = useCallback((requestId: string, index: number) => revealPermissionHeredoc(conn, requestId, index), [conn]);
   const handleToolReveal = useCallback((runId: string, toolCallId: string, index: number) => revealToolHeredoc(conn, runId, toolCallId, index), [conn]);
@@ -761,7 +769,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
         case 'meta':
           return <MetaLine text={item.text} />;
         case 'permission':
-          return <PermissionCard request={item.request} onRespond={handlePermissionTap} onReveal={handlePermissionReveal} />;
+          return <PermissionCard request={item.request} onRespond={handlePermissionTap} onReveal={handlePermissionReveal} onAlwaysAllow={handlePermissionAlways} />;
         case 'question':
           return showsCard(item.state) ? <QuestionCard state={item.state} onAnswer={handleQuestionAnswer} /> : <QuestionMarker state={item.state} />;
         case 'error':
@@ -770,7 +778,7 @@ export function TaskDetailScreen({ conn, taskId, chat: chatParam, title }: Props
           return <FooterBanner sentence={item.sentence} note={item.note} waiting={item.waiting} canContinue={item.canContinue} onContinue={handleContinue} />;
       }
     },
-    [expandedToolCalls, handleContinue, handlePermissionReveal, handlePermissionTap, handleQuestionAnswer, handleToolReveal, loadThumb, toggleExpanded],
+    [expandedToolCalls, handleContinue, handlePermissionAlways, handlePermissionReveal, handlePermissionTap, handleQuestionAnswer, handleToolReveal, loadThumb, toggleExpanded],
   );
 
   return (
