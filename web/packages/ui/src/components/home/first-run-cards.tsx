@@ -1,12 +1,34 @@
 import { useEffect } from "react";
 
-import { agentSummaryLine, openProvidersSettings } from "@/components/home/get-started-card";
+import { openProvidersSettings } from "@/components/home/get-started-card";
 import { Button } from "@/components/ui/button";
 import { Icons } from "@/lib/icons";
 import type { ProviderHealth } from "@/lib/model-browser";
 import { providerLabel } from "@/lib/provider-catalog";
 import { agentStatus, agentsReady } from "@/lib/readiness";
 import type { ProviderInfo } from "@/lib/types";
+
+/**
+ * The providers step's one short line while no agent is ready ("No agent is signed in · 9 need sign-in"): counts, never one name per
+ * provider (the Get started card lists them; here "Open Providers" carries the detail). "Checking your agents…" until a provider has answered.
+ */
+export function agentSummaryShort(providers: ProviderInfo[], health: Record<string, ProviderHealth | undefined>): string {
+  let needSignIn = 0;
+  let notInstalled = 0;
+  let checking = 0;
+  for (const p of providers) {
+    const status = agentStatus(health[p.id]);
+    if (status === "needs-sign-in") needSignIn++;
+    else if (status === "not-installed") notInstalled++;
+    else if (status === "checking") checking++;
+  }
+  if (providers.length === 0 || checking === providers.length) return "Checking your agents…";
+  const parts = ["No agent is signed in"];
+  if (needSignIn > 0) parts.push(needSignIn === 1 ? "1 needs sign-in" : `${needSignIn} need sign-in`);
+  if (notInstalled > 0) parts.push(`${notInstalled} not installed`);
+  if (checking > 0) parts.push(`${checking} still checking`);
+  return parts.join(" · ");
+}
 
 /**
  * The home screen of a machine with no project (docs/plans/active/home-and-sidebar-ui.md PR 3): the composer cannot be used yet, so
@@ -39,10 +61,10 @@ export function FirstRunCards({
   // Done (like the Get started block): one named agent reads "Agents ready · Claude Code", several read "2 agents ready".
   const doneLabel =
     readyAgents.length === 1 ? `Agents ready · ${providerLabel(readyAgents[0]!.id, [readyAgents[0]!])}` : `${readyAgents.length} agents ready`;
-  const providersStatus = agentSummaryLine(providers, health) || "Checking your agents…";
+  const providersStatus = agentSummaryShort(providers, health);
 
   return (
-    <section data-testid="first-run-cards" aria-label="Get started" className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+    <section data-testid="first-run-cards" aria-label="Get started" className="grid w-full grid-cols-1 items-start gap-3 sm:grid-cols-2">
       <article data-testid="first-run-card-project" className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
         <div className="flex items-center gap-2">
           <Icons.folder aria-hidden className="size-4 shrink-0 text-foreground-muted" />
@@ -58,17 +80,17 @@ export function FirstRunCards({
       </article>
       {ready === "ready" ? (
         <article data-testid="first-run-card-providers" data-state="done" className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center gap-2">
+          {/* One row: the check, the name, and Manage at the end; the card keeps its natural height (the grid does not stretch it). */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <Icons.check aria-hidden className="size-4 shrink-0 text-foreground-muted" />
             <h2 data-testid="first-run-providers-done" className="text-ui-base font-medium text-foreground">
               {doneLabel}
             </h2>
             <span className="sr-only">(done)</span>
+            <Button type="button" variant="link" className="ml-auto h-auto p-0 text-ui-base text-foreground-muted underline hover:text-foreground max-sm:min-h-11" data-testid="first-run-open-providers" onClick={openProvidersSettings}>
+              Manage
+            </Button>
           </div>
-          <div className="flex-1" />
-          <Button type="button" variant="link" className="h-auto self-start p-0 text-ui-base text-foreground-muted underline hover:text-foreground max-sm:min-h-11" data-testid="first-run-open-providers" onClick={openProvidersSettings}>
-            Manage
-          </Button>
         </article>
       ) : (
         <article data-testid="first-run-card-providers" data-state="todo" className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
