@@ -32,6 +32,8 @@ describe("the shell in a task window", () => {
     expect(app).toContain("isDesktop && !isTaskWindow && (\n        <DesktopDaemonBanner");
     expect(app).toContain("{isDesktop && !isTaskWindow && <DesktopUpdateDialogView");
     expect(app).toContain("showUpdateBadge={(isMobile || !sidebarOpen) && !isTaskWindow}");
+    const main = readFileSync("src/main.tsx", "utf8");
+    expect(main).toContain("const FirstRunGate = isDesktop && !isTaskWindow ? lazy(");
   });
 });
 
