@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
 
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
@@ -128,7 +127,6 @@ export function QuestionCard({
         Waiting for your response
       </span>
       {pending.request.truncated && <p className="text-ui-xs text-foreground-muted">Some of this text was shortened.</p>}
-      {error && <Alert variant="error" testId="question-error" description={error} />}
       {/* A long ask scrolls inside the card, so Submit and Decline stay on screen (phones). */}
       <div data-testid="question-fields" className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto">
         {questions.map((question) => (
@@ -155,6 +153,16 @@ export function QuestionCard({
           <p data-testid="question-submit-hint" className="text-ui-xs text-foreground-muted">
             Answer every question to submit.
           </p>
+        )}
+        {error && (
+          <div
+            role="alert"
+            data-testid="question-error"
+            className="flex flex-col gap-0.5 text-ui-sm"
+          >
+            <span className="text-destructive">Could not send your answer. Try again.</span>
+            <span className="text-foreground-muted break-words">{error}</span>
+          </div>
         )}
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -223,7 +231,7 @@ function QuestionField({
       {isLong ? (
         <>
           <legend>
-            <span className={`${expanded ? "block " : "line-clamp-8 "}whitespace-pre-wrap break-words`}>{question.text}</span>
+            <span className={`${expanded ? "block " : "line-clamp-8 "}text-ui-base whitespace-pre-wrap break-words`}>{question.text}</span>
           </legend>
           <Button
             type="button"
@@ -239,7 +247,7 @@ function QuestionField({
           </Button>
         </>
       ) : (
-        <legend className="whitespace-pre-wrap break-words">{question.text}</legend>
+        <legend className="text-ui-base whitespace-pre-wrap break-words">{question.text}</legend>
       )}
       {question.header && (
         <span className="inline-flex w-fit rounded-full border px-2 py-0.5 text-ui-xs text-foreground-muted">{question.header}</span>
@@ -259,7 +267,7 @@ function QuestionField({
                   className="mt-0.5 size-4 shrink-0"
                   onChange={() => toggleOption(option.id)}
                 />
-                <span className="whitespace-pre-wrap break-words">{option.label}</span>
+                <span className="text-ui-base whitespace-pre-wrap break-words">{option.label}</span>
               </span>
               {option.description && (
                 <span className="pl-6 text-ui-sm text-foreground-muted whitespace-pre-wrap break-words">{option.description}</span>
