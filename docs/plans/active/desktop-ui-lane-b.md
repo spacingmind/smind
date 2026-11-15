@@ -42,4 +42,8 @@ Dock recent items need an Objective-C `applicationDockMenu:` method on the app d
 
 ## Progress / Validation
 
-(filled per PR below)
+### PR 2a
+
+- AC1-AC3: `window_chrome::min_size_tests` (4 tests); `cargo test` 191 pass, clippy `-D warnings` and fmt clean.
+- Mutations (committed code, each failed its named test): `.min_inner_size` removed from the builder, `clamp_to_minimum` always returning None, the Resized handler no longer calling the clamp.
+- Not verified: AppKit/Windows enforcing the minimum while dragging, and a restored small frame being corrected on screen (the screen was locked, so no real-window frames); Windows and Linux unbuilt.
