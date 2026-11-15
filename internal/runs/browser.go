@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/spacingmind/smind/internal/browser"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -25,6 +26,33 @@ func (reg *Registry) SetBrowserGate(fn func(workspaceID int64) bool) {
 	reg.mu.Lock()
 	reg.browserGate = fn
 	reg.mu.Unlock()
+}
+
+// BrowserSettingsReader is the part of the store the workspace switch reads.
+type BrowserSettingsReader interface {
+	GetBrowserSettings(workspaceID int64) (store.BrowserSettings, error)
+}
+
+// StoreBrowserGate is the real workspace switch: the workspace's stored flag is
+// on and the daemon-wide kill switch is off, both read on every decision, an
+// unreadable setting meaning off.
+func StoreBrowserGate(settings BrowserSettingsReader, killSwitch func() bool) func(int64) bool {
+	return func(ws int64) bool {
+		if killSwitch() {
+			return false
+		}
+		s, err := settings.GetBrowserSettings(ws)
+		return err == nil && s.Enabled
+	}
+}
+
+// BrowserSwitchOn runs the installed workspace switch hook alone (without the
+// package dark gate): what the wiring decides for a workspace.
+func (reg *Registry) BrowserSwitchOn(workspaceID int64) bool {
+	reg.mu.Lock()
+	fn := reg.browserGate
+	reg.mu.Unlock()
+	return fn != nil && fn(workspaceID)
 }
 
 // BrowserAllowed reports whether runs of the workspace may use the browser:

@@ -4,9 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/config"
@@ -40,19 +45,35 @@ type browserHost struct {
 	mgr    *browser.Manager
 
 	// Hooks, defaulted by newBrowserHost and replaced by tests.
-	gate        func(workspaceID int64) bool
-	tokenOK     func(runID, token string) bool
-	live        func(runID string) bool
-	forgetToken func(runID string)
-	imagesRead  func(runID string) bool
-	allow       func(workspaceID int64) []string
-	deny        func() []browser.Endpoint
-	launcher    func() (browser.Launcher, error)
-	profileRoot string
+	settings browserSettingsStore
+	setMu    sync.Mutex // serialises browser.settings.set
+	// gateMu orders session creation against a settings change: a session is
+	// created under the read lock after re-checking the gates, and a change
+	// closes the workspace's session under the write lock, so a call that
+	// passed the gates before the change can never leave a session behind.
+	gateMu         sync.RWMutex
+	endAllSessions func()
+	startSession   func(ctx context.Context, cfg browser.Config) (*browser.Session, error)
+	killSwitch     func() bool
+	closeSession   func(workspaceID int64)
+	gate           func(workspaceID int64) bool
+	tokenOK        func(runID, token string) bool
+	live           func(runID string) bool
+	forgetToken    func(runID string)
+	imagesRead     func(runID string) bool
+	allow          func(workspaceID int64) []string
+	deny           func() ([]browser.Endpoint, error)
+	launcher       func() (browser.Launcher, error)
+	profileRoot    string
 }
 
 func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h := &browserHost{db: db, reg: reg, mgr: &browser.Manager{}}
+	h.startSession = h.mgr.Get
+	h.endAllSessions = h.mgr.CloseAll
+	h.settings = db
+	h.closeSession = func(ws int64) { h.mgr.Close(sessionKey(ws)) }
+	h.killSwitch = config.BrowserDisabled
 	h.gate = reg.BrowserAllowed
 	h.tokenOK = reg.CheckBrowserToken
 	h.live = reg.RunIsRunning
@@ -61,7 +82,13 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 		info, err := reg.ProviderCatalogForRun(runID)
 		return err == nil && imagesReadFrom(info.Images)
 	}
-	h.allow = func(int64) []string { return nil } // the per-workspace allowlist is a later PR: loopback only
+	h.allow = func(ws int64) []string {
+		s, err := h.settings.GetBrowserSettings(ws)
+		if err != nil {
+			return nil // an unreadable setting allows nothing beyond loopback
+		}
+		return s.AllowHosts
+	}
 	h.deny = daemonDeny
 	h.launcher = func() (browser.Launcher, error) {
 		p, err := browser.DetectChrome("")
@@ -73,7 +100,7 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h.profileRoot = filepath.Join(config.Dir(), "browser")
 	h.broker = browser.NewBroker(browser.BrokerConfig{
 		Session:      h.session,
-		CloseSession: func(ws int64) { h.mgr.Close(strconv.FormatInt(ws, 10)) },
+		CloseSession: func(ws int64) { h.mgr.Close(sessionKey(ws)) },
 		Record:       h.record,
 	})
 	return h
@@ -83,33 +110,96 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 // explicit "yes". "no" and "unknown" (and anything else) get the text note.
 func imagesReadFrom(images string) bool { return images == "yes" }
 
+// sessionKey names a workspace's browser session in the manager; every place
+// that starts or closes one uses it.
+func sessionKey(ws int64) string { return strconv.FormatInt(ws, 10) }
+
+// lookupListenHost resolves a hostname listen address (a variable so a test
+// can answer without DNS).
+var lookupListenHost = func(ctx context.Context, host string) ([]string, error) {
+	return net.DefaultResolver.LookupHost(ctx, host)
+}
+
 // daemonDeny reserves the daemon's own listen address: a page must never reach
 // its unauthenticated loopback endpoints. (The rest of the deny list, the
 // connection list, arrives with the settings PR.)
-func daemonDeny() []browser.Endpoint {
+func daemonDeny() ([]browser.Endpoint, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("browser: the daemon's configuration cannot be read, so its own address cannot be reserved: %w", err)
 	}
 	host, port, err := cfg.Server.ListenHostPort()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("browser: the daemon's listen address cannot be read: %w", err)
 	}
-	return []browser.Endpoint{{Host: host, Port: port}}
+	if host == "" {
+		host = "0.0.0.0" // ":4648" binds every address: the policy reserves the port everywhere
+	}
+	// The daemon also answers on loopback when it listens on a LAN address or a
+	// name (the loopback companion listener), and loopback is always allowed to
+	// a page: so the port is reserved on every loopback spelling, whatever the
+	// configured host.
+	out := []browser.Endpoint{
+		{Host: host, Port: port},
+		{Host: "127.0.0.1", Port: port}, {Host: "::1", Port: port}, {Host: "localhost", Port: port},
+	}
+	// A listen address that is a NAME (not an IP literal) binds whatever it
+	// resolves to: reserve those addresses too, or fail closed.
+	if net.ParseIP(strings.Trim(host, "[]")) == nil && host != "0.0.0.0" {
+		lctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		addrs, err := lookupListenHost(lctx, host)
+		if err != nil || len(addrs) == 0 {
+			return nil, fmt.Errorf("browser: the daemon's listen host %q cannot be resolved, so its addresses cannot be reserved: %v", host, err)
+		}
+		for _, a := range addrs {
+			if i := strings.IndexByte(a, '%'); i >= 0 {
+				a = a[:i] // an IPv6 zone is not part of the address
+			}
+			out = append(out, browser.Endpoint{Host: a, Port: port})
+		}
+	}
+	// The names the daemon is reached by (server.hostnames) are the same port.
+	for _, name := range cfg.Server.Hostnames {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, browser.Endpoint{Host: name, Port: port})
+		}
+	}
+	return out, nil
+}
+
+// workspaceSwitchOn is the registry's browser gate: the workspace's own switch
+// is on and the daemon-wide kill switch is off. Both are read on every decision.
+func (h *browserHost) workspaceSwitchOn(ws int64) bool {
+	return runs.StoreBrowserGate(h.settings, func() bool { return h.killSwitch() })(ws)
 }
 
 func (h *browserHost) session(ctx context.Context, run browser.Run) (*browser.Session, error) {
+	h.gateMu.RLock()
+	defer h.gateMu.RUnlock()
+	// Re-check inside the lock: browser.call checked the gates earlier, and a
+	// settings change (disable plus close) may have landed since.
+	if h.killSwitch() {
+		return nil, errors.New("the browser is disabled by the daemon's configuration")
+	}
+	if !h.gate(run.WorkspaceID) {
+		return nil, errors.New("the browser is not enabled for this workspace")
+	}
 	l, err := h.launcher()
 	if err != nil {
 		return nil, err // an *UnavailableError: the broker turns it into the plain install text
 	}
 	allow := h.allow(run.WorkspaceID)
-	pol, err := browser.NewPolicy(allow, h.deny())
+	deny, err := h.deny()
+	if err != nil {
+		return nil, err // fail closed: no session without the daemon's own address reserved
+	}
+	pol, err := browser.NewPolicy(allow, deny)
 	if err != nil {
 		return nil, err
 	}
-	return h.mgr.Get(ctx, browser.Config{
-		Workspace: strconv.FormatInt(run.WorkspaceID, 10),
+	return h.startSession(ctx, browser.Config{
+		Workspace: sessionKey(run.WorkspaceID),
 		Launcher:  l,
 		Launch:    browser.LaunchOpts{ProfileRoot: h.profileRoot, AllowHosts: allow},
 		Policy:    pol,
@@ -169,6 +259,11 @@ func (h *browserHost) call(ctx context.Context, rc *requestContext, raw json.Raw
 		return nil, forbidden(m + " is not available")
 	}
 	ws := task.WorkspaceID
+	if h.killSwitch() {
+		// The daemon-wide switch beats every workspace: end any browser now.
+		h.endAllSessions()
+		return nil, forbidden(m + ": the browser is disabled by the daemon's configuration")
+	}
 	if !h.gate(ws) {
 		return nil, forbidden(m + ": the browser is not enabled for this workspace")
 	}

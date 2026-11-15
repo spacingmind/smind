@@ -116,6 +116,11 @@ Usage:
   smind permission show --reveal [--index N] <requestId> | --run <runId> --call <toolCallId>
                                                            print one redacted heredoc body elided from a permission card or tool call (humans only)
 
+  smind browser <status|enable|disable|allow add <host>|allow rm <host>|clear> --workspace <id>
+                                                           the per-workspace agent browser switch and allowlist (humans only;
+                                                           only as strong as the local principal: a local connection that
+                                                           does not identify itself counts as the human)
+
   smind steward review|list|show|cancel                    ask for a read-only review of a task's head commit; read reviews (humans only; run "smind steward" for flags)
 
   smind push test [<device id prefix>]                    send a test notification to phones registered for push
