@@ -39,7 +39,8 @@ describe("tab reorder wiring (source pins on App.tsx)", () => {
   it("the chip uses the drag classes from the draggable's isDragging, and its hover controls obey the drag-active flag", () => {
     expect(app).toContain("const { listeners, setNodeRef, isDragging } = useDraggable({");
     expect(app).toContain("const drag = tabDragClasses({ isDragging, dragActive });");
-    expect(app).toContain('className={cn("group/tab max-w-48 gap-1.5", drag.chip)}');
+    // the chip keeps the strip's shrink-then-scroll sizing (wave) and adds the drag classes (this PR)
+    expect(app).toMatch(/className=\{cn\(\s*"group\/tab max-w-40 gap-1\.5[^"]*flex-\[0_1_10rem\][^"]*",\s*drag\.chip,\s*\)\}/);
     expect(app).toContain("drag.affordances ?? TAB_AFFORDANCE_REVEAL");
     expect(app).toContain("dragActive={isDragActive}");
   });
