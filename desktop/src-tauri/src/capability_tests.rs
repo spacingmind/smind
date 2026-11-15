@@ -5,8 +5,8 @@
 
 use serde_json::Value;
 
-const PROXY_CAPABILITY: &str = include_str!("../capabilities/proxy.json");
-const TASK_CAPABILITY: &str = include_str!("../capabilities/task-window.json");
+const PROXY_CAPABILITY: &str = include_str!("../capability-templates/proxy.json");
+const TASK_CAPABILITY: &str = include_str!("../capability-templates/task-window.json");
 const BUILD_RS: &str = include_str!("../build.rs");
 
 #[test]
@@ -84,8 +84,8 @@ fn capability_allowlist_exact() {
         .collect();
     assert_eq!(
         urls,
-        vec!["http://127.0.0.1:*"],
-        "grant is scoped to the loopback proxy only"
+        vec!["__PROXY_ORIGIN__/*"],
+        "grant is scoped to the proxy origin only (the template names it; `ipc_guard::install` writes the real origin in at launch)"
     );
 }
 
@@ -208,7 +208,7 @@ fn capability_task_window_scope_is_exactly_the_task_glob() {
     assert_eq!(cap["local"], Value::Bool(false));
     assert_eq!(
         cap["remote"]["urls"],
-        serde_json::json!(["http://127.0.0.1:*"])
+        serde_json::json!(["__PROXY_ORIGIN__/*"])
     );
     // Evaluate the pattern from the file against the labels: every pool label matches, `main` and look-alikes do not.
     let pattern = cap["windows"][0].as_str().unwrap();

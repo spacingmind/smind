@@ -1,6 +1,6 @@
 //! The six commands the bundled UI's connection picker calls (AC5),
 //! exposed only to the loopback proxy origin via
-//! `capabilities/proxy.json`. Every command validates its own input in
+//! `capability-templates/proxy.json`. Every command validates its own input in
 //! Rust (`Registry::add`/`remove`/`select` and `validate_base_url` do
 //! the real work; this module is just the Tauri-facing surface plus
 //! persistence and, for `connections_select`, restarting the
