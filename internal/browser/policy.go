@@ -375,6 +375,9 @@ var (
 	nat64Prefix    = netip.MustParsePrefix("64:ff9b::/96")
 	sixToFour      = netip.MustParsePrefix("2002::/16")
 	v4Compatible   = netip.MustParsePrefix("::/96")
+	siit           = netip.MustParsePrefix("::ffff:0:0:0/96") // IPv4-translated (RFC 2765)
+	nat64Local     = netip.MustParsePrefix("64:ff9b:1::/48")  // local-use NAT64 (RFC 8215): refused outright
+	teredo         = netip.MustParsePrefix("2001::/32")       // embeds an obfuscated IPv4: refused outright
 )
 
 // embeddedV4 returns the IPv4 address an IPv6 address carries (NAT64, 6to4,
@@ -390,6 +393,8 @@ func embeddedV4(a netip.Addr) (netip.Addr, bool) {
 	case sixToFour.Contains(a):
 		return netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}), true
 	case v4Compatible.Contains(a) && !a.IsUnspecified() && !a.IsLoopback():
+		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
+	case siit.Contains(a):
 		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
 	}
 	return netip.Addr{}, false
@@ -411,6 +416,9 @@ func sensitiveAddr(a netip.Addr) bool {
 		if a == m {
 			return true
 		}
+	}
+	if nat64Local.Contains(a) || teredo.Contains(a) {
+		return true
 	}
 	if e, ok := embeddedV4(a); ok {
 		return e.IsLoopback() || sensitiveAddr(e)
@@ -444,8 +452,42 @@ func (p Policy) CheckResolved(d Decision, addrs []netip.Addr) Decision {
 		if sensitiveAddr(a) {
 			return refuse("host %q resolves to a link-local, metadata, multicast or unspecified address", d.Host)
 		}
+		// An allowlisted NAME may only reach the public internet: its DNS is
+		// not ours, and a name that resolves to loopback, a private or CGNAT
+		// range is how an attacker-influenced record reaches the daemon's
+		// machine or the LAN. The person who really wants an intranet host adds
+		// its IP literal (an exact entry), never a name.
+		if internalAddr(a) {
+			return refuse("host %q resolves to a loopback, private or internal address; allow its IP address instead", d.Host)
+		}
 	}
 	return d
+}
+
+var internalPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"), // CGNAT
+	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking
+	netip.MustParsePrefix("240.0.0.0/4"),   // reserved
+	netip.MustParsePrefix("fec0::/10"),     // deprecated site-local (Go's IsPrivate covers only fc00::/7)
+}
+
+// internalAddr reports loopback, private (RFC 1918, unique-local), CGNAT and
+// other non-public ranges, including an IPv6 form that embeds one.
+func internalAddr(a netip.Addr) bool {
+	a = a.Unmap()
+	if a.IsLoopback() || a.IsPrivate() || a.IsUnspecified() {
+		return true
+	}
+	for _, pre := range internalPrefixes {
+		if pre.Contains(a) {
+			return true
+		}
+	}
+	if e, ok := embeddedV4(a); ok {
+		return internalAddr(e)
+	}
+	return false
 }
 
 // Check runs CheckURL and, for a named host, CheckResolved with the resolver.

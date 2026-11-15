@@ -20,6 +20,31 @@ import (
 // maxQueuedBytes bounds the events waiting in the session queues.
 const maxQueuedBytes int64 = 32 << 20
 
+// seenSet remembers up to max keys and reports each once; when full it starts
+// again, so a hostile page inventing targets cannot grow it or silence later
+// notices for good (the per-kind notice cap bounds what reaches the agent).
+type seenSet struct {
+	mu  sync.Mutex
+	m   map[string]struct{}
+	max int
+}
+
+func (s *seenSet) first(k string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[string]struct{}{}
+	}
+	if _, ok := s.m[k]; ok {
+		return false
+	}
+	if len(s.m) >= s.max {
+		s.m = map[string]struct{}{} // a rolling window: later targets are still reported
+	}
+	s.m[k] = struct{}{}
+	return true
+}
+
 // Session errors.
 var (
 	ErrSessionClosed    = errors.New("browser: the session is closed")
@@ -93,9 +118,10 @@ func (t *tabState) isReady() bool {
 // Session is one headless browser for one workspace. It enforces the URL
 // policy on every request, caps tabs, cancels dialogs and denies downloads.
 type Session struct {
-	cfg  Config
-	inst Instance
-	cl   *Client
+	cfg   Config
+	proxy *Proxy
+	inst  Instance
+	cl    *Client
 
 	mu      sync.Mutex
 	closed  bool
@@ -139,14 +165,37 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	if cfg.Resolver == nil {
 		cfg.Resolver = net.DefaultResolver
 	}
+	seen := &seenSet{max: 200}
+	var session atomic.Pointer[Session]
+	px, err := StartProxy(ProxyConfig{
+		Policy:   cfg.Policy,
+		Resolver: cfg.Resolver,
+		OnRefuse: func(target, reason string) {
+			// Browser background traffic is refused too: tell the agent once
+			// per target, never a flood.
+			if sess := session.Load(); sess != nil {
+				if !seen.first(target) {
+					return
+				}
+				sess.note("blocked", fmt.Sprintf("%s: %s", target, reason))
+			}
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy = px.Policy() // the proxy's own address is denied to the page too
+	cfg.Launch.ProxyAddr = px.Addr()
 	inst, err := cfg.Launcher.Launch(ctx, cfg.Launch)
 	if err != nil {
+		px.Close()
 		return nil, err
 	}
 	cl := NewClient(inst.Conn())
 	cl.SetWriteTimeout(cfg.CallTimeout)
 	s := &Session{
 		cfg:       cfg,
+		proxy:     px,
 		inst:      inst,
 		cl:        cl,
 		tabs:      map[string]*tabState{},
@@ -156,6 +205,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		lifecycle: make(chan Event, 256),
 		requests:  make(chan Event, requestQueue),
 	}
+	session.Store(s)
 	s.idle = time.AfterFunc(cfg.IdleTimeout, s.Close)
 	go s.eventLoop()
 	go s.lifecycleLoop()
@@ -227,6 +277,7 @@ func (s *Session) Close() {
 		s.mu.Unlock()
 		_ = s.inst.Close() // kill the browser first, then drop the connection
 		_ = s.cl.Close()
+		s.proxy.Close()
 		if s.cfg.OnClose != nil {
 			s.cfg.OnClose()
 		}
@@ -521,6 +572,13 @@ func (s *Session) checkRequest(ctx context.Context, raw, resourceType string) De
 }
 
 func (s *Session) checkURL(ctx context.Context, raw string) Decision {
+	d := s.cfg.Policy.CheckURL(raw)
+	if d.Allowed && d.loopbackName {
+		return d // RFC 6761: no DNS query for a page-chosen *.localhost name
+	}
+	if !d.Allowed || !d.NeedsResolve {
+		return d
+	}
 	return s.cfg.Policy.Check(ctx, raw, cachedResolver{s})
 }
 

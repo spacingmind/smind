@@ -173,7 +173,7 @@ func (f fakeResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Ad
 }
 
 func TestCheckResolvedTable(t *testing.T) {
-	p := testPolicy(t, "intranet.test", "rebind.test", "meta.test", "mix.test", "daemon.test", "nat64.test", "6to4.test", "compat.test", "azure.test", "proto.test")
+	p := testPolicy(t, "intranet.test", "rebind.test", "meta.test", "mix.test", "daemon.test", "nat64.test", "6to4.test", "compat.test", "azure.test", "proto.test", "siit.test", "public.test", "public6.test")
 	r := fakeResolver{
 		"localhost":       {"127.0.0.1", "::1"},
 		"app.localhost":   {"127.0.0.1"},
@@ -185,6 +185,14 @@ func TestCheckResolvedTable(t *testing.T) {
 		"mix.test":        {"192.168.1.9", anyV4},
 		"daemon.test":     {"127.0.0.1"},
 		"dual.localhost":  {"::ffff:127.0.0.1"},
+		"nat64.test":      {"64:ff9b::a9fe:a9fe"},
+		"6to4.test":       {"2002:a9fe:a9fe::1"},
+		"compat.test":     {"::a9fe:a9fe"},
+		"azure.test":      {"168.63.129.16"},
+		"proto.test":      {"192.0.0.9"},
+		"siit.test":       {"::ffff:0:a9fe:a9fe"},
+		"public.test":     {"93.184.216.34"},
+		"public6.test":    {"2606:4700::1111"},
 	}
 	cases := []struct {
 		url   string
@@ -195,7 +203,7 @@ func TestCheckResolvedTable(t *testing.T) {
 		{"http://dual.localhost:3000/", true},
 		{"http://evil.localhost:3000/", false},  // loopback name that resolves off loopback
 		{"http://mixed.localhost:3000/", false}, // one bad address is enough
-		{"http://intranet.test/", true},
+		{"http://intranet.test/", false},        // an allowlisted NAME may not resolve to a private range
 		{"http://rebind.test/", false},
 		{"http://meta.test/", false},
 		{"http://mix.test/", false},
@@ -204,8 +212,11 @@ func TestCheckResolvedTable(t *testing.T) {
 		{"http://compat.test/", false},
 		{"http://azure.test/", false},
 		{"http://proto.test/", false},
+		{"http://siit.test/", false},
 		{"http://daemon.test:4648/", false}, // resolves to the daemon address and port
-		{"http://daemon.test:4649/", true},
+		{"http://daemon.test:4649/", false}, // nor to loopback, whatever the port
+		{"http://public.test/", true},
+		{"http://public6.test/", true},
 		{"http://nosuch.localhost/", false}, // resolver error refuses
 		{"http://10.0.0.9/", false},
 	}
@@ -246,7 +257,7 @@ func TestNormalizeAllowHost(t *testing.T) {
 			t.Errorf("NormalizeAllowHost(%q) = %q, want an error", bad, got)
 		}
 	}
-	for _, bad := range []string{anyV4, anyV6, "224.0.0.1", "169.254.169.254", "169.254.1.1", "fe80::1", "[fe80::1]", "100.100.100.200", "fd00:ec2::254", "169.254.170.2", "192.0.0.192", "168.63.129.16", "fd00:ec2::23", "192.0.0.5", "[64:ff9b::a9fe:a9fe]", "[2002:a9fe:a9fe::]", "[::a9fe:a9fe]", "[64:ff9b::7f00:1]", "[2002:7f00:1::]", "[::7f00:1]", "[64:ff9b::c000:5]"} {
+	for _, bad := range []string{anyV4, anyV6, "224.0.0.1", "169.254.169.254", "169.254.1.1", "fe80::1", "[fe80::1]", "100.100.100.200", "fd00:ec2::254", "169.254.170.2", "192.0.0.192", "168.63.129.16", "fd00:ec2::23", "192.0.0.5", "[64:ff9b::a9fe:a9fe]", "[2002:a9fe:a9fe::]", "[::a9fe:a9fe]", "[64:ff9b::7f00:1]", "[2002:7f00:1::]", "[::7f00:1]", "[64:ff9b::c000:5]", "[::ffff:0:a9fe:a9fe]", "[64:ff9b:1::a9fe:a9fe]", "[2001:0:4136:e378:8000:63bf:3fff:fdd2]"} {
 		if got, err := NormalizeAllowHost(bad); err == nil {
 			t.Errorf("NormalizeAllowHost(%q) = %q: unusable addresses must be rejected", bad, got)
 		}
@@ -284,5 +295,38 @@ func TestDenyEntriesAreCanonicalised(t *testing.T) {
 		if _, err := NewPolicy(nil, []Endpoint{{Host: bad, Port: 80}}); err == nil {
 			t.Errorf("deny entry %q must be an error, never silently dropped or kept raw", bad)
 		}
+	}
+}
+
+func TestAllowlistedNameMustResolvePublic(t *testing.T) {
+	p := testPolicy(t, "corp.test")
+	for _, ip := range []string{"10.1.2.3", "172.16.0.9", "192.168.1.1", "100.64.0.1", "100.127.255.254", "127.0.0.1", "127.9.9.9", "0.1.2.3", "198.18.0.5", "240.0.0.1",
+		"::1", "fc00::1", "fd12:3456::1", "fec0::1", "fec0:0:0:1::5", "::ffff:10.0.0.1", "64:ff9b::a00:1", "2002:a00:1::", "::a00:1"} {
+		d := p.CheckURL("http://corp.test:3000/")
+		if !d.Allowed || !d.NeedsResolve {
+			t.Fatalf("setup: %+v", d)
+		}
+		if got := p.CheckResolved(d, []netip.Addr{netip.MustParseAddr(ip)}); got.Allowed {
+			t.Errorf("an allowlisted name resolving to %s must be refused", ip)
+		}
+	}
+	d := p.CheckURL("http://corp.test:3000/")
+	for _, ip := range []string{"93.184.216.34", "8.8.8.8", "2606:4700::1111"} {
+		if got := p.CheckResolved(d, []netip.Addr{netip.MustParseAddr(ip)}); !got.Allowed {
+			t.Errorf("a public address %s must be allowed: %s", ip, got.Reason)
+		}
+	}
+	// One internal address among public ones is enough to refuse.
+	if p.CheckResolved(d, []netip.Addr{netip.MustParseAddr("93.184.216.34"), netip.MustParseAddr("10.0.0.1")}).Allowed {
+		t.Error("a mixed answer must be refused")
+	}
+	// An IP-literal entry (the way to allow an intranet host) is unaffected.
+	lit := testPolicy(t, "10.0.0.5")
+	if !lit.CheckURL("http://10.0.0.5:3000/").Allowed {
+		t.Error("an exact IP-literal entry must keep working")
+	}
+	// The loopback names are loopback by definition.
+	if !testPolicy(t).CheckURL("http://app.localhost:3000/").Allowed {
+		t.Error("*.localhost stays allowed")
 	}
 }

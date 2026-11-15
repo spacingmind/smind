@@ -27,13 +27,17 @@ type fakeLauncher struct {
 	cdps  []*fakeCDP
 	t     *testing.T
 	hook  func(f *fakeCDP, c fakeCall) (any, string)
+	opts  LaunchOpts    // the options of the last Launch
 	gate  chan struct{} // when set, Launch waits for it (or its context)
 	// ignoreCtx makes Launch finish even if its context was cancelled, like a
 	// launch that was already past the point of no return.
 	ignoreCtx bool
 }
 
-func (l *fakeLauncher) Launch(ctx context.Context, _ LaunchOpts) (Instance, error) {
+func (l *fakeLauncher) Launch(ctx context.Context, o LaunchOpts) (Instance, error) {
+	l.mu.Lock()
+	l.opts = o
+	l.mu.Unlock()
 	if l.gate != nil {
 		select {
 		case <-l.gate:
