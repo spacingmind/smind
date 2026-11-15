@@ -1,14 +1,15 @@
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import type { Task } from "@/lib/types";
 
-/** The group-by-status view's five buckets (AC6, named directly by the plan's Decisions). */
-export type StatusGroupKey = "needs-attention" | "error" | "running" | "done" | "idle";
+/** The group-by-status view's six buckets, named directly by the plan's Decisions. */
+export type StatusGroupKey = "needs-attention" | "ready-to-review" | "error" | "running" | "done" | "idle";
 
 /** Display order: most urgent first, same "what costs the user most to miss" ordering lib/sidebar-signal.ts's REASON_PRECEDENCE already uses for a single row's dot. */
-export const STATUS_GROUP_ORDER: StatusGroupKey[] = ["needs-attention", "error", "running", "done", "idle"];
+export const STATUS_GROUP_ORDER: StatusGroupKey[] = ["needs-attention", "ready-to-review", "error", "running", "done", "idle"];
 
 export const STATUS_GROUP_LABELS: Record<StatusGroupKey, string> = {
   "needs-attention": "Needs you",
+  "ready-to-review": "Ready to review",
   error: "Error",
   running: "Running",
   done: "Done",
@@ -24,19 +25,21 @@ function hasReason(attention: TaskAttention, taskId: number, reason: AttentionRe
  * the tree view's dots already use (AC6: "derived from existing status and
  * attention data", no new daemon field).
  *
+ * `needs-attention` ("Needs you") is blocked on the person: a permission
+ * ask is a pending decision only they can make. `ready-to-review` is the
+ * softer unseen-result case: the run finished while nobody looked, nothing
+ * is blocked, so it must not add noise to the pinned section.
+ *
  * `error` keys off the latest run's status, not the attention reason of
  * the same name -- the attention reason clears the moment the task is
  * opened (useTaskAttention's "seen" logic), but a task whose last run
  * failed stays in the Error bucket regardless of whether anyone's looked
  * at it since; that's a fact about the run, not about the viewer.
- * `permission` and `finished`, by contrast, ARE about the viewer (a
- * pending decision or an unseen result), so they route to
- * "needs-attention" ahead of the coarser running/done buckets.
  */
 export function statusGroupForTask(taskId: number, attention: TaskAttention, runStatus: TaskRunStatus): StatusGroupKey {
   if (hasReason(attention, taskId, "permission")) return "needs-attention";
   if (runStatus.get(taskId) === "error") return "error";
-  if (hasReason(attention, taskId, "finished")) return "needs-attention";
+  if (hasReason(attention, taskId, "finished")) return "ready-to-review";
   if (runStatus.get(taskId) === "running") return "running";
   if (runStatus.get(taskId) === "done") return "done";
   return "idle";

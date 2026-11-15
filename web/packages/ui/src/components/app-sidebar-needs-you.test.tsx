@@ -34,6 +34,7 @@ const TASK: Task = {
 };
 
 const PERMISSION_ATTENTION: TaskAttention = new Map([[TASK.ID, new Set<AttentionReason>(["permission"])]]);
+const FINISHED_ATTENTION: TaskAttention = new Map([[TASK.ID, new Set<AttentionReason>(["finished"])]]);
 
 async function flush(): Promise<void> {
   await Promise.resolve();
@@ -97,6 +98,18 @@ describe("pinned Needs you section (AC9)", () => {
 
     expect(screen.queryByTestId("sidebar-needs-you-section")).not.toBeInTheDocument();
     fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "" } });
+    expect(await screen.findByTestId("sidebar-needs-you-section")).toBeInTheDocument();
+  });
+
+  it("pinned-needs-you-excludes-tasks-that-only-finished", async () => {
+    // An unseen finish is not blocked on the person: no pinned section.
+    const finished = await mountSidebar({ attention: FINISHED_ATTENTION });
+    expect(await screen.findByText("Fix the bug")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-needs-you-section")).not.toBeInTheDocument();
+    finished.unmount();
+
+    // A permission ask is: the section appears.
+    await mountSidebar({ attention: PERMISSION_ATTENTION });
     expect(await screen.findByTestId("sidebar-needs-you-section")).toBeInTheDocument();
   });
 

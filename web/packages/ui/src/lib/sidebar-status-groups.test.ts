@@ -35,10 +35,21 @@ describe("statusGroupForTask", () => {
     expect(statusGroupForTask(1, new Map(), runStatus)).toBe("error");
   });
 
-  it("an unseen finished run is 'needs-attention', not 'done'", () => {
+  it("an unseen finished run is 'ready-to-review', not 'done' and not 'needs-attention'", () => {
     const attention = attentionOf([[1, ["finished"]]]);
     const runStatus: TaskRunStatus = new Map([[1, "done"]]);
-    expect(statusGroupForTask(1, attention, runStatus)).toBe("needs-attention");
+    expect(statusGroupForTask(1, attention, runStatus)).toBe("ready-to-review");
+  });
+
+  it("finished-unseen-task-is-ready-to-review-not-needs-you", () => {
+    const finished = attentionOf([[1, ["finished"]]]);
+    expect(statusGroupForTask(1, finished, new Map())).toBe("ready-to-review");
+
+    const permission = attentionOf([[1, ["permission"]]]);
+    expect(statusGroupForTask(1, permission, new Map())).toBe("needs-attention");
+
+    const both = attentionOf([[1, ["permission", "finished"]]]);
+    expect(statusGroupForTask(1, both, new Map())).toBe("needs-attention");
   });
 
   it("a running task with no attention is 'running'", () => {
@@ -89,6 +100,24 @@ describe("groupTasksByStatus", () => {
     expect(groups.find((g) => g.key === "needs-attention")?.tasks.map((t) => t.ID)).toEqual([1]);
     expect(groups.find((g) => g.key === "error")?.tasks.map((t) => t.ID)).toEqual([2]);
     expect(groups.find((g) => g.key === "idle")?.tasks.map((t) => t.ID)).toEqual([5]);
+  });
+
+  it("status-bucket-order-puts-ready-to-review-second", () => {
+    const tasks = [task(1), task(2), task(3), task(4), task(5), task(6)];
+    const attention = attentionOf([
+      [1, ["permission"]],
+      [2, ["finished"]],
+    ]);
+    const runStatus: TaskRunStatus = new Map([
+      [3, "error"],
+      [4, "running"],
+      [5, "done"],
+    ]);
+
+    const groups = groupTasksByStatus(tasks, attention, runStatus);
+
+    expect(groups.map((g) => g.key)).toEqual(["needs-attention", "ready-to-review", "error", "running", "done", "idle"]);
+    expect(groups[1]).toEqual({ key: "ready-to-review", label: "Ready to review", tasks: [task(2)] });
   });
 
   it("omits a bucket entirely when nothing falls into it", () => {

@@ -935,9 +935,8 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-      // The task renders twice for permission/finished (the pinned "Needs you"
-      // section and the tree), once for error (not a needs-you reason); every
-      // copy carries the same marker.
+      // A permission ask renders the task twice (the pinned "Needs you"
+      // section and the tree); finished/error render it once.
       const dots = await screen.findAllByTestId("task-attention");
       for (const dot of dots) expect(dot).toHaveAttribute("data-attention-reason", reason);
       seen.set(reason, dots[0]!.getAttribute("data-status")!);
