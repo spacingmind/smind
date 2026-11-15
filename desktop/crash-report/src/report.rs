@@ -178,7 +178,10 @@ pub fn name_stamp(t: SystemTime) -> String {
     let n = unix_nanos(t);
     let nanos = n.rem_euclid(1_000_000_000) as u32;
     let (y, mo, d, h, mi, s) = utc_parts(n);
-    format!("{y:04}{mo:02}{d:02}T{h:02}{mi:02}{s:02}.{:03}", nanos / 1_000_000)
+    format!(
+        "{y:04}{mo:02}{d:02}T{h:02}{mi:02}{s:02}.{:03}",
+        nanos / 1_000_000
+    )
 }
 
 #[allow(clippy::expect_used)] // fixed patterns, compiled by `warm_up` before the hook exists
@@ -245,9 +248,17 @@ pub fn dedupe_frame(stack: &str) -> String {
         // goes through (`core::option::unwrap_failed`, `core::slice::index::...`): the same
         // frame for unrelated panics, so they cannot be the identity of one. A stripped build
         // has `<unknown>` frames; those are skipped too (such panics dedupe by site only).
-        if ["core::", "alloc::", "std::", "<core::", "<alloc::", "<std::", "<unknown>"]
-            .iter()
-            .any(|p| symbol.starts_with(p))
+        if [
+            "core::",
+            "alloc::",
+            "std::",
+            "<core::",
+            "<alloc::",
+            "<std::",
+            "<unknown>",
+        ]
+        .iter()
+        .any(|p| symbol.starts_with(p))
         {
             continue;
         }
@@ -295,23 +306,36 @@ mod tests {
                 "/Users/u/Library/Application Support/dev.spacingmind.desktop/crashes"
             ))
         );
-        assert_eq!(default_dir_from("macos", None, Some(appdata), Some(xdg)), None);
+        assert_eq!(
+            default_dir_from("macos", None, Some(appdata), Some(xdg)),
+            None
+        );
         assert_eq!(default_dir_from("macos", Some(""), None, None), None);
 
         assert_eq!(
             default_dir_from("windows", Some(home), Some(appdata), Some(xdg)),
             Some(PathBuf::from(appdata).join(IDENTIFIER).join("crashes"))
         );
-        assert_eq!(default_dir_from("windows", Some(home), None, Some(xdg)), None);
-        assert_eq!(default_dir_from("windows", Some(home), Some(""), None), None);
+        assert_eq!(
+            default_dir_from("windows", Some(home), None, Some(xdg)),
+            None
+        );
+        assert_eq!(
+            default_dir_from("windows", Some(home), Some(""), None),
+            None
+        );
 
         assert_eq!(
             default_dir_from("linux", Some(home), None, Some(xdg)),
-            Some(PathBuf::from("/home/u/data/dev.spacingmind.desktop/crashes"))
+            Some(PathBuf::from(
+                "/home/u/data/dev.spacingmind.desktop/crashes"
+            ))
         );
         assert_eq!(
             default_dir_from("linux", Some(home), Some(appdata), None),
-            Some(PathBuf::from("/Users/u/.local/share/dev.spacingmind.desktop/crashes"))
+            Some(PathBuf::from(
+                "/Users/u/.local/share/dev.spacingmind.desktop/crashes"
+            ))
         );
         assert_eq!(default_dir_from("linux", None, Some(appdata), None), None);
 
@@ -328,8 +352,14 @@ mod tests {
             default_dir_from(
                 std::env::consts::OS,
                 expected_home.as_deref(),
-                std::env::var("APPDATA").ok().filter(|s| !s.is_empty()).as_deref(),
-                std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()).as_deref(),
+                std::env::var("APPDATA")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .as_deref(),
+                std::env::var("XDG_DATA_HOME")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .as_deref(),
             )
         );
     }
@@ -409,9 +439,15 @@ mod tests {
         }
 
         // Anchored: a runtime shape wrapped in other text is not runtime.
-        assert!(!message_is_runtime("panic: index out of bounds: the len is 3 but the index is 7"));
-        assert!(!message_is_runtime("index out of bounds: the len is 3 but the index is 7!"));
-        assert!(!message_is_runtime("attempt to add with overflow in user.rs"));
+        assert!(!message_is_runtime(
+            "panic: index out of bounds: the len is 3 but the index is 7"
+        ));
+        assert!(!message_is_runtime(
+            "index out of bounds: the len is 3 but the index is 7!"
+        ));
+        assert!(!message_is_runtime(
+            "attempt to add with overflow in user.rs"
+        ));
     }
 
     #[test]
@@ -426,7 +462,8 @@ mod tests {
         assert_eq!(dedupe_frame(stack), "my_app::ui::panel::render");
 
         // Nothing outside the machinery: no key, no dedupe.
-        let machinery_only = "   0: smind_crash_report::hook\n   1: std::panicking::rust_panic_with_hook\n";
+        let machinery_only =
+            "   0: smind_crash_report::hook\n   1: std::panicking::rust_panic_with_hook\n";
         assert_eq!(dedupe_frame(machinery_only), "");
 
         // A hash suffix that is not exactly 16 hex chars is part of the symbol.
@@ -455,10 +492,17 @@ mod tests {
             d("linux", Some("/home/a"), None, Some("/data/xdg")),
             Some(PathBuf::from(format!("/data/xdg/{id}/crashes")))
         );
-        assert_eq!(d("windows", Some(r"C:\Users\a"), Some("AppData"), None), None);
+        assert_eq!(
+            d("windows", Some(r"C:\Users\a"), Some("AppData"), None),
+            None
+        );
         assert_eq!(
             d("windows", None, Some(r"C:\Users\a\AppData\Roaming"), None),
-            Some(Path::new(r"C:\Users\a\AppData\Roaming").join(id).join("crashes"))
+            Some(
+                Path::new(r"C:\Users\a\AppData\Roaming")
+                    .join(id)
+                    .join("crashes")
+            )
         );
         assert!(d("windows", None, Some(r"\\server\share\AppData"), None).is_some());
         assert_eq!(d("macos", None, None, None), None);
@@ -483,6 +527,9 @@ mod tests {
         let up = Some(r"C:\Users\x".to_string());
         assert_eq!(home_from(true, None, up.clone()), up);
         assert_eq!(home_from(false, None, up.clone()), None);
-        assert_eq!(home_from(true, Some("/h".into()), up), Some("/h".to_string()));
+        assert_eq!(
+            home_from(true, Some("/h".into()), up),
+            Some("/h".to_string())
+        );
     }
 }

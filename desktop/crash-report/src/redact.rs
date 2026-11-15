@@ -25,19 +25,20 @@ static RE_UNIX_USER_DIR: LazyLock<Regex> = LazyLock::new(|| {
 static RE_WINDOWS_USER: LazyLock<Regex> = LazyLock::new(|| {
     re(r#"(?i)[A-Za-z]:[\\/]Users[\\/][^\t\n\f\r /\\:*?"<>|]+(?: [^\t\n\f\r /\\:*?"<>|]+)*"#)
 });
-static RE_BEARER: LazyLock<Regex> =
-    LazyLock::new(|| re(r"(?i)(?-u:\b)(?:bearer|basic)[\t\n\f\r \x{00a0}\x{2000}-\x{200a}\x{202f}\x{205f}\x{3000}]+[A-Za-z0-9._~+/=-]+"));
-static RE_SK: LazyLock<Regex> =
-    LazyLock::new(|| re(r"(?-u:\b)sk-[A-Za-z0-9_-]{8,}"));
+static RE_BEARER: LazyLock<Regex> = LazyLock::new(|| {
+    re(
+        r"(?i)(?-u:\b)(?:bearer|basic)[\t\n\f\r \x{00a0}\x{2000}-\x{200a}\x{202f}\x{205f}\x{3000}]+[A-Za-z0-9._~+/=-]+",
+    )
+});
+static RE_SK: LazyLock<Regex> = LazyLock::new(|| re(r"(?-u:\b)sk-[A-Za-z0-9_-]{8,}"));
 static RE_GITHUB_TOKEN: LazyLock<Regex> =
     LazyLock::new(|| re(r"(?-u:\b)(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{16,}"));
 static RE_GITHUB_PAT: LazyLock<Regex> =
     LazyLock::new(|| re(r"(?-u:\b)github_pat_[A-Za-z0-9_]{16,}"));
 static RE_AWS_KEY: LazyLock<Regex> =
     LazyLock::new(|| re(r"(?-u:\b)(?:AKIA|ASIA)[A-Z0-9]{16}(?-u:\b)"));
-static RE_JWT: LazyLock<Regex> = LazyLock::new(|| {
-    re(r"(?-u:\b)eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*")
-});
+static RE_JWT: LazyLock<Regex> =
+    LazyLock::new(|| re(r"(?-u:\b)eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*"));
 static RE_KEY_VALUE: LazyLock<Regex> = LazyLock::new(|| {
     re(
         r#"(?i)(["']?[a-z0-9_-]*(?:token|secret|pass(?:word|wd|phrase)?|apikey|api[_-]key|authorization|cookie|credential|private[_-]?key)[a-z0-9_-]*["']?[\t\n\f\r ]*[=:][\t\n\f\r ]*)("[^"]*"|'[^']*'|[^\t\n\f\r ]+)"#,
@@ -53,17 +54,12 @@ static RE_SCHEME_CRED: LazyLock<Regex> = LazyLock::new(|| {
         r"(?i)((?-u:\b)(?:token|apikey|api-key|digest|negotiate|ntlm)[\t\n\f\r \x{00a0}\x{2000}-\x{200a}\x{202f}\x{205f}\x{3000}]+)[A-Za-z0-9._~+/=-]{12,}",
     )
 });
-static RE_URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
-    re(r"(?i)(?-u:\b)([a-z][a-z0-9+.-]*://)[^/\t\n\f\r :@]+:[^/\t\n\f\r @]+@")
-});
-static RE_HEX_RUN: LazyLock<Regex> =
-    LazyLock::new(|| re(r"(?-u:\b)[0-9a-fA-F]{32,}(?-u:\b)"));
-static RE_HIGH_ENTROPY: LazyLock<Regex> =
-    LazyLock::new(|| re(r"[A-Za-z0-9_-]{32,}"));
+static RE_URL_USERINFO: LazyLock<Regex> =
+    LazyLock::new(|| re(r"(?i)(?-u:\b)([a-z][a-z0-9+.-]*://)[^/\t\n\f\r :@]+:[^/\t\n\f\r @]+@"));
+static RE_HEX_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"(?-u:\b)[0-9a-fA-F]{32,}(?-u:\b)"));
+static RE_HIGH_ENTROPY: LazyLock<Regex> = LazyLock::new(|| re(r"[A-Za-z0-9_-]{32,}"));
 static RE_PEM: LazyLock<Regex> = LazyLock::new(|| {
-    re(
-        r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
-    )
+    re(r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)")
 });
 static RE_VENDOR_TOKENS: LazyLock<Regex> = LazyLock::new(|| {
     re(
@@ -143,18 +139,14 @@ fn redact_once(s: &str, home: Option<&Path>, smind_home: Option<&Path>) -> Strin
     // survive a /Users/... match cut in the middle of the path.
     s = RE_WINDOWS_USER.replace_all(&s, "<user dir>").into_owned();
     s = RE_UNIX_USER_DIR.replace_all(&s, "<user dir>").into_owned();
-    s = RE_AUTH_LINE
-        .replace_all(&s, "${1}[redacted]")
-        .into_owned();
+    s = RE_AUTH_LINE.replace_all(&s, "${1}[redacted]").into_owned();
     s = RE_SCHEME_CRED
         .replace_all(&s, "${1}[redacted]")
         .into_owned();
     for re in &PLAIN_SECRETS {
         s = re.replace_all(&s, NoExpand("[redacted]")).into_owned();
     }
-    s = RE_KEY_VALUE
-        .replace_all(&s, "${1}[redacted]")
-        .into_owned();
+    s = RE_KEY_VALUE.replace_all(&s, "${1}[redacted]").into_owned();
     s = RE_URL_USERINFO
         .replace_all(&s, "${1}[redacted]@")
         .into_owned();
@@ -233,7 +225,11 @@ fn replace_at_boundary(s: &str, path: &str, repl: &str) -> String {
             return out;
         };
         let end = i + path.len();
-        if rest.as_bytes().get(end).is_some_and(|&c| is_path_name_byte(c)) {
+        if rest
+            .as_bytes()
+            .get(end)
+            .is_some_and(|&c| is_path_name_byte(c))
+        {
             out.push_str(&rest[..end]);
             rest = &rest[end..];
             continue;
@@ -246,9 +242,7 @@ fn replace_at_boundary(s: &str, path: &str, repl: &str) -> String {
 
 /// Reports whether `c` would continue a path component name.
 fn is_path_name_byte(c: u8) -> bool {
-    c.is_ascii_alphanumeric()
-        || matches!(c, b'_' | b'-' | b'.' | b'%' | b'~')
-        || c >= 0x80
+    c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.' | b'%' | b'~') || c >= 0x80
 }
 
 /// Replaces a 32+ character mixed-case alphanumeric run (at least one digit,
@@ -288,20 +282,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path();
         let smind_home = home.join(".smind");
-        let red = |input: &str| {
-            redact(
-                input,
-                Some(home),
-                Some(smind_home.as_path()),
-            )
-        };
+        let red = |input: &str| redact(input, Some(home), Some(smind_home.as_path()));
         let cases = [
             (
                 format!("open {}/notes.txt: no such file", home.display()),
                 "open ~/notes.txt: no such file",
             ),
             (
-                format!("read {}\\notes.txt", home.display().to_string().replace('/', "\\")),
+                format!(
+                    "read {}\\notes.txt",
+                    home.display().to_string().replace('/', "\\")
+                ),
                 "read ~\\notes.txt",
             ),
             (
@@ -312,14 +303,21 @@ mod tests {
         for (input, want) in cases {
             let got = red(&input);
             assert_eq!(got, want, "input {input:?}");
-            assert!(!got.contains(&home.display().to_string()), "still contains the home: {got:?}");
+            assert!(
+                !got.contains(&home.display().to_string()),
+                "still contains the home: {got:?}"
+            );
         }
     }
 
     #[test]
     fn path_boundary_sibling_user() {
         assert_eq!(
-            r("/home/testerson/x.go and /home/tester/y.go and /home/tester2/z.go", "/home/tester", "/home/tester/.smind"),
+            r(
+                "/home/testerson/x.go and /home/tester/y.go and /home/tester2/z.go",
+                "/home/tester",
+                "/home/tester/.smind"
+            ),
             "<user dir>/x.go and ~/y.go and <user dir>/z.go"
         );
         assert_eq!(
@@ -331,11 +329,19 @@ mod tests {
     #[test]
     fn user_dir_with_spaces() {
         assert_eq!(
-            r("C:\\Users\\Alice Smith\\go\\pkg\\x.go:12 +0x1", "/home/tester", "/home/tester/.smind"),
+            r(
+                "C:\\Users\\Alice Smith\\go\\pkg\\x.go:12 +0x1",
+                "/home/tester",
+                "/home/tester/.smind"
+            ),
             "<user dir>\\go\\pkg\\x.go:12 +0x1"
         );
         assert_eq!(
-            r("/home/Jo Ann Marie/code/x.go", "/home/tester", "/home/tester/.smind"),
+            r(
+                "/home/Jo Ann Marie/code/x.go",
+                "/home/tester",
+                "/home/tester/.smind"
+            ),
             "<user dir>/code/x.go"
         );
     }
@@ -349,10 +355,17 @@ mod tests {
                 "Proxy-Authorization: [redacted]",
             ),
             ("Cookie: sid=abc123; theme=dark", "Cookie: [redacted]"),
-            ("retry with token abcdefghijklmnop", "retry with token [redacted]"),
+            (
+                "retry with token abcdefghijklmnop",
+                "retry with token [redacted]",
+            ),
         ];
         for (input, want) in cases {
-            assert_eq!(r(input, "/home/tester", "/home/tester/.smind"), want, "input {input:?}");
+            assert_eq!(
+                r(input, "/home/tester", "/home/tester/.smind"),
+                want,
+                "input {input:?}"
+            );
         }
     }
 
@@ -381,6 +394,9 @@ mod tests {
             strip_verbatim_prefix(PathBuf::from(r"\\?\UNC\srv\share\x")),
             PathBuf::from(r"\\srv\share\x")
         );
-        assert_eq!(strip_verbatim_prefix(PathBuf::from("/home/x")), PathBuf::from("/home/x"));
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from("/home/x")),
+            PathBuf::from("/home/x")
+        );
     }
 }

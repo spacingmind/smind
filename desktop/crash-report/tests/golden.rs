@@ -41,7 +41,11 @@ fn redaction_matches_golden_vectors() {
         .expect("`count` missing")
         .as_u64()
         .expect("`count` is not a number") as usize;
-    assert_eq!(count, list.len(), "the file's own count disagrees with its vectors");
+    assert_eq!(
+        count,
+        list.len(),
+        "the file's own count disagrees with its vectors"
+    );
     assert!(count >= 80, "expected the full vector set, got {count}");
 
     let mut names = HashSet::new();
@@ -49,7 +53,10 @@ fn redaction_matches_golden_vectors() {
     for (i, case) in list.iter().enumerate() {
         let what = format!("vector #{i}");
         let name = field(case, "name", &what);
-        assert!(names.insert(name.to_string()), "duplicate vector name {name:?}");
+        assert!(
+            names.insert(name.to_string()),
+            "duplicate vector name {name:?}"
+        );
         let input = field(case, "input", name);
         let home = field(case, "home", name);
         let smind_home = field(case, "smindHome", name);
@@ -87,7 +94,11 @@ fn golden_vectors_cover_every_rule() {
         .expect("`coverage` missing")
         .as_array()
         .expect("`coverage` is not a list");
-    assert!(coverage.len() >= 30, "coverage list is truncated: {}", coverage.len());
+    assert!(
+        coverage.len() >= 30,
+        "coverage list is truncated: {}",
+        coverage.len()
+    );
 
     let mut claimed = HashSet::new();
     for c in coverage {
@@ -105,7 +116,11 @@ fn golden_vectors_cover_every_rule() {
     // Go `reFooBar` -> Rust `RE_FOO_BAR` (acronyms stay together: `reURLUserinfo` ->
     // `RE_URL_USERINFO`, `reSK` -> `RE_SK`; `GitHub` is one word on the Rust side).
     let to_rust = |go: &str| -> String {
-        let chars: Vec<char> = go.trim_start_matches("re").replace("GitHub", "Github").chars().collect();
+        let chars: Vec<char> = go
+            .trim_start_matches("re")
+            .replace("GitHub", "Github")
+            .chars()
+            .collect();
         let mut out = String::from("RE_");
         for (i, &ch) in chars.iter().enumerate() {
             let prev_lower = i > 0 && chars[i - 1].is_ascii_lowercase();
@@ -126,7 +141,11 @@ fn golden_vectors_cover_every_rule() {
         .captures_iter(REDACT_RS)
         .map(|c| c[1].to_string())
         .collect();
-    assert!(rust_rules.len() >= 15, "found only {} rules in redact.rs", rust_rules.len());
+    assert!(
+        rust_rules.len() >= 15,
+        "found only {} rules in redact.rs",
+        rust_rules.len()
+    );
     for rule in &rust_rules {
         assert!(
             claimed_rust.contains(rule),

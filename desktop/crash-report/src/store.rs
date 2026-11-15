@@ -204,7 +204,10 @@ impl Recorder {
         // message: any other panic message may carry prompt text, file contents or
         // secrets, so it is recorded by type only.
         let (message, withheld) = match message.filter(|m| report::message_is_runtime(m)) {
-            Some(msg) => (truncate(&redact(msg, home, smind_home), MSG_MAX_BYTES), false),
+            Some(msg) => (
+                truncate(&redact(msg, home, smind_home), MSG_MAX_BYTES),
+                false,
+            ),
             None => (String::new(), true),
         };
         json!({
@@ -397,7 +400,10 @@ fn marshal_bounded(rep: &Value, limit: usize) -> Option<String> {
             keep -= 1;
         }
         let mut cut = rep.as_object()?.clone();
-        cut.insert("stack".to_string(), json!(format!("{}{}", base.get(..keep)?, STACK_TRUNCATED)));
+        cut.insert(
+            "stack".to_string(),
+            json!(format!("{}{}", base.get(..keep)?, STACK_TRUNCATED)),
+        );
         data = serde_json::to_string(&cut).ok()?;
         if data.len() <= limit || keep == 0 {
             return Some(data);
@@ -418,7 +424,11 @@ fn truncate(s: &str, limit: usize) -> String {
 }
 
 fn crash_name(now: SystemTime, site: &str, n: usize) -> String {
-    let suffix = if n > 0 { format!("-{n}") } else { String::new() };
+    let suffix = if n > 0 {
+        format!("-{n}")
+    } else {
+        String::new()
+    };
     format!(
         "{CRASH_PREFIX}{}-{SOURCE}-{site}{suffix}{CRASH_SUFFIX}",
         report::name_stamp(now)
@@ -520,9 +530,10 @@ mod tests {
             .expect("report written");
 
         let got = read_json(&path);
-        let golden: Value =
-            serde_json::from_str(include_str!("../../../internal/crash/testdata/desktop_shell_report.json"))
-                .expect("golden parses");
+        let golden: Value = serde_json::from_str(include_str!(
+            "../../../internal/crash/testdata/desktop_shell_report.json"
+        ))
+        .expect("golden parses");
         let got_keys: BTreeSet<&String> = got.as_object().unwrap().keys().collect();
         let want_keys: BTreeSet<&String> = golden.as_object().unwrap().keys().collect();
         assert_eq!(got_keys, want_keys, "key sets must match the daemon's");
@@ -599,7 +610,10 @@ mod tests {
         assert!(fs::metadata(&path).expect("stat").len() <= 400);
         let got = read_json(&path);
         let stack = got["stack"].as_str().unwrap();
-        assert!(stack.ends_with(STACK_TRUNCATED), "marker missing: {stack:?}");
+        assert!(
+            stack.ends_with(STACK_TRUNCATED),
+            "marker missing: {stack:?}"
+        );
         assert!(big.starts_with(stack.strip_suffix(STACK_TRUNCATED).unwrap()));
         assert_eq!(got["schema"], json!(1));
     }
@@ -612,7 +626,10 @@ mod tests {
         let r = Recorder::new(cfg);
         let mut paths = Vec::new();
         for i in 0..25 {
-            paths.push(r.record("desktop.thread", "&str", None, &stack(i)).expect("report"));
+            paths.push(
+                r.record("desktop.thread", "&str", None, &stack(i))
+                    .expect("report"),
+            );
             clock::advance(Duration::from_secs(1));
         }
         assert_eq!(crash_files(tmp.path()).len(), 20);
@@ -634,8 +651,13 @@ mod tests {
         let r = Recorder::new(cfg);
         let big = format!("{}\n", "y".repeat(1024));
         for i in 0..8 {
-            r.record("desktop.thread", "&str", None, &format!("{big}   1: my_app::f{i}\n"))
-                .expect("report");
+            r.record(
+                "desktop.thread",
+                "&str",
+                None,
+                &format!("{big}   1: my_app::f{i}\n"),
+            )
+            .expect("report");
             clock::advance(Duration::from_secs(1));
         }
         let files = crash_files(tmp.path());
@@ -655,15 +677,22 @@ mod tests {
         cfg.limits.max_per_minute = 3;
         let r = Recorder::new(cfg);
         for i in 0..3 {
-            r.record("desktop.thread", "&str", None, &stack(i)).expect("within the budget");
+            r.record("desktop.thread", "&str", None, &stack(i))
+                .expect("within the budget");
         }
-        assert!(r.record("desktop.thread", "&str", None, &stack(99)).is_none());
-        assert!(r.record("desktop.thread", "&str", None, &stack(98)).is_none());
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(99))
+            .is_none());
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(98))
+            .is_none());
         assert_eq!(crash_files(tmp.path()).len(), 3);
 
         // A minute later the budget is back.
         clock::advance(Duration::from_secs(61));
-        let path = r.record("desktop.thread", "&str", None, &stack(97)).expect("budget back");
+        let path = r
+            .record("desktop.thread", "&str", None, &stack(97))
+            .expect("budget back");
         let got = read_json(&path);
         assert_eq!(got["suppressedSinceLast"], json!(2));
         assert_eq!(crash_files(tmp.path()).len(), 4);
@@ -673,12 +702,18 @@ mod tests {
     fn dedupes_identical_panics() {
         let tmp = tempfile::tempdir().unwrap();
         let r = Recorder::new(test_cfg(tmp.path()));
-        assert!(r.record("desktop.thread", "&str", None, &stack(1)).is_some());
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(1))
+            .is_some());
         clock::advance(Duration::from_secs(1));
-        assert!(r.record("desktop.thread", "&str", None, &stack(1)).is_none());
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(1))
+            .is_none());
         clock::advance(Duration::from_secs(1));
         // The same frame elsewhere is a different panic.
-        let path = r.record("desktop.main", "&str", None, &stack(1)).expect("other site");
+        let path = r
+            .record("desktop.main", "&str", None, &stack(1))
+            .expect("other site");
         let got = read_json(&path);
         assert_eq!(got["suppressedSinceLast"], json!(1));
         assert_eq!(crash_files(tmp.path()).len(), 2);
@@ -693,7 +728,9 @@ mod tests {
         cfg.limits.max_per_minute = 3;
         let r = Recorder::new(cfg);
         for i in 0..10 {
-            assert!(r.record("desktop.thread", "&str", None, &stack(i)).is_none());
+            assert!(r
+                .record("desktop.thread", "&str", None, &stack(i))
+                .is_none());
         }
         let st = r.lock_state();
         assert_eq!(st.write_times.len(), 3, "exactly 3 attempts may be made");
@@ -709,10 +746,14 @@ mod tests {
         let r = Recorder::new(test_cfg(tmp.path()));
         let _io = r.io.lock().unwrap_or_else(|e| e.into_inner());
         let before = r.lock_state().suppressed;
-        assert!(r.record("desktop.thread", "&str", None, &stack(1)).is_none());
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(1))
+            .is_none());
         assert_eq!(r.lock_state().suppressed, before + 1);
         drop(_io);
-        assert!(r.record("desktop.thread", "&str", None, &stack(2)).is_some());
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(2))
+            .is_some());
     }
 
     #[cfg(unix)]
@@ -746,8 +787,13 @@ mod tests {
             return; // cannot create symlinks here; nothing to check
         }
         let r = Recorder::new(test_cfg(&link));
-        assert!(r.record("desktop.thread", "&str", None, &stack(1)).is_none());
-        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(1))
+            .is_none());
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
         let target_mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
         assert_eq!(target_mode, 0o755, "the link target must keep its mode");
         assert!(
@@ -762,9 +808,13 @@ mod tests {
         let plain = tmp.path().join("plain");
         fs::write(&plain, b"not a directory").unwrap();
         let r = Recorder::new(test_cfg(&plain));
-        assert!(r.record("desktop.thread", "&str", None, &stack(1)).is_none());
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(1))
+            .is_none());
         // A second failure is equally quiet, and the recorder keeps working.
-        assert!(r.record("desktop.thread", "&str", None, &stack(2)).is_none());
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(2))
+            .is_none());
         assert!(crash_files(tmp.path()).is_empty());
         assert_eq!(fs::read_to_string(&plain).unwrap(), "not a directory");
     }
@@ -783,8 +833,12 @@ mod tests {
         assert!(first.exists() && second.exists());
         let files = crash_files(tmp.path());
         assert_eq!(files.len(), 2);
-        assert!(files.iter().any(|n| n.ends_with("-desktop-shell-desktop.thread.json")));
-        assert!(files.iter().any(|n| n.ends_with("-desktop-shell-desktop.thread-1.json")));
+        assert!(files
+            .iter()
+            .any(|n| n.ends_with("-desktop-shell-desktop.thread.json")));
+        assert!(files
+            .iter()
+            .any(|n| n.ends_with("-desktop-shell-desktop.thread-1.json")));
         assert_ne!(
             read_json(&first)["stack"],
             read_json(&second)["stack"],
@@ -800,17 +854,28 @@ mod tests {
         let fresh = dir.join(".tmp-crash-9999-1");
         fs::write(&fresh, b"in flight").unwrap();
         let r = Recorder::new(test_cfg(&dir));
-        assert!(r.record("desktop.thread", "&str", None, &stack(1)).is_some());
-        assert!(fresh.exists(), "a fresh temp file of another writer is kept");
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(1))
+            .is_some());
+        assert!(
+            fresh.exists(),
+            "a fresh temp file of another writer is kept"
+        );
 
         let stale = dir.join(".tmp-crash-9999-2");
         fs::write(&stale, b"leftover").unwrap();
         let f = fs::OpenOptions::new().write(true).open(&stale).unwrap();
-        f.set_modified(SystemTime::now() - Duration::from_secs(120)).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(120))
+            .unwrap();
         drop(f);
         clock::advance(Duration::from_secs(1));
-        assert!(r.record("desktop.thread", "&str", None, &stack(2)).is_some());
-        assert!(!stale.exists(), "an old temp file is a leftover and removed");
+        assert!(r
+            .record("desktop.thread", "&str", None, &stack(2))
+            .is_some());
+        assert!(
+            !stale.exists(),
+            "an old temp file is a leftover and removed"
+        );
         assert!(fresh.exists());
     }
 }
