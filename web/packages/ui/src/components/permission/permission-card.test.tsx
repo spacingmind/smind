@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { optionVariant, recommendedOptionId } from "@/components/permission/permission-option-button";
+import { optionClassName, optionVariant, recommendedOptionId } from "@/components/permission/permission-option-button";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { PLAN_REVIEW_APPROVE, PLAN_REVIEW_REFUSE } from "@/components/permission/plan-review-card";
 import type { PendingPermission } from "@/hooks/use-run-timeline";
@@ -27,9 +27,11 @@ async function flush(): Promise<void> {
 }
 
 describe("optionVariant / recommendedOptionId", () => {
-  it("styles reject kinds as destructive regardless of position", () => {
-    expect(optionVariant("reject_once", false)).toBe("destructive");
-    expect(optionVariant("reject_always", true)).toBe("destructive");
+  it("reject kinds are outlined with destructive text", () => {
+    expect(optionVariant("reject_once", false)).toBe("outline");
+    expect(optionVariant("reject_always", true)).toBe("outline");
+    expect(optionClassName("reject_once")).toBe("text-destructive hover:text-destructive");
+    expect(optionClassName("allow_once")).toBe("");
   });
 
   it("styles the first allow-kind option as the recommended (primary) action", () => {
@@ -86,13 +88,45 @@ describe("PermissionCard: options variant", () => {
   // Item 21: touch targets need a stated minimum below the compact
   // breakpoint -- jsdom has no layout, so this asserts the class list
   // carries both the 44px compact rule and the `md:`-scoped revert to the
-  // original dense size, rather than a computed pixel height.
-  it("options carry the compact 44px touch-target class, reverting to the dense size at md:", () => {
+  // 32px desktop size, rather than a computed pixel height.
+  it("options carry the compact 44px touch-target class, reverting to the 32px size at md:", () => {
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
 
     const allow = screen.getByRole("button", { name: "Allow" });
     expect(allow.className).toContain("h-11");
-    expect(allow.className).toContain("md:h-6");
+    expect(allow.className).toContain("md:h-8");
+  });
+
+  // Desktop design review: Allow keeps the weight (first allow filled
+  // `approval`), Deny is present but quieter (outlined, destructive text)
+  // instead of two filled buttons of equal weight.
+  it("option-variants-allow-filled-deny-outline-destructive", () => {
+    render(
+      <PermissionCard
+        runId="run-1"
+        pending={pending({
+          options: [
+            { id: "allow-1", label: "Allow once", kind: "allow_once" },
+            { id: "deny-1", label: "Deny", kind: "reject_once" },
+            { id: "allow-2", label: "Allow for this session", kind: "allow_always" },
+          ],
+        })}
+        onRespond={vi.fn()}
+        onChat={vi.fn()}
+      />,
+    );
+
+    const firstAllow = screen.getByRole("button", { name: "Allow once" });
+    expect(firstAllow).toHaveAttribute("data-variant", "approval");
+    expect(firstAllow.className).not.toContain("text-destructive");
+
+    const deny = screen.getByRole("button", { name: "Deny" });
+    expect(deny).toHaveAttribute("data-variant", "outline");
+    expect(deny.className).toContain("text-destructive");
+
+    const secondAllow = screen.getByRole("button", { name: "Allow for this session" });
+    expect(secondAllow).toHaveAttribute("data-variant", "outline");
+    expect(secondAllow.className).not.toContain("text-destructive");
   });
 
   it("renders every option even when no kind is recognised", () => {
@@ -394,6 +428,6 @@ describe("PermissionCard: plan-review variant", () => {
   it("its actions carry the same compact touch-target class as the options variant (Item 21)", () => {
     render(<PermissionCard runId="run-1" pending={withPlan} onRespond={vi.fn()} onChat={vi.fn()} />);
     expect(screen.getByTestId("plan-review-approve").className).toContain("h-11");
-    expect(screen.getByTestId("plan-review-approve").className).toContain("md:h-6");
+    expect(screen.getByTestId("plan-review-approve").className).toContain("md:h-8");
   });
 });
