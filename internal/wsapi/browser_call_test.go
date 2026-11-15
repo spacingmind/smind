@@ -171,7 +171,12 @@ func TestBrowserHost_AFinishedRunEndsItsBrowserSession(t *testing.T) {
 	e := newIdentEnv(t, "hang")
 	rb := &recordingBroker{}
 	e.api.browser.broker = rb
+	var forgotten []string
+	e.api.browser.forgetToken = func(id string) { forgotten = append(forgotten, id) }
 	e.api.browser.OnRunFinished(runs.RunFinished{RunID: "run-x"})
+	if len(forgotten) != 1 || forgotten[0] != "run-x" {
+		t.Fatalf("a finished run's capability must be dropped: %v", forgotten)
+	}
 	if len(rb.ended) != 1 || rb.ended[0] != "run-x" {
 		t.Fatalf("a finished run must end its browser session: %v", rb.ended)
 	}

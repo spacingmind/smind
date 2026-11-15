@@ -43,6 +43,7 @@ type browserHost struct {
 	gate        func(workspaceID int64) bool
 	tokenOK     func(runID, token string) bool
 	live        func(runID string) bool
+	forgetToken func(runID string)
 	imagesRead  func(runID string) bool
 	allow       func(workspaceID int64) []string
 	deny        func() []browser.Endpoint
@@ -55,6 +56,7 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h.gate = reg.BrowserAllowed
 	h.tokenOK = reg.CheckBrowserToken
 	h.live = reg.RunIsRunning
+	h.forgetToken = reg.ForgetBrowserToken
 	h.imagesRead = func(runID string) bool {
 		info, err := reg.ProviderCatalogForRun(runID)
 		return err == nil && imagesReadFrom(info.Images)
@@ -127,7 +129,7 @@ func (h *browserHost) record(run browser.Run, rec browser.Record) {
 
 // OnRunFinished ends the browser session a finished run was using.
 func (h *browserHost) OnRunFinished(f runs.RunFinished) {
-	h.reg.ForgetBrowserToken(f.RunID)
+	h.forgetToken(f.RunID)
 	h.broker.EndRun(f.RunID)
 }
 
