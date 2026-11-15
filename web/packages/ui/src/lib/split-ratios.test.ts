@@ -27,6 +27,7 @@ describe("split ratios per workspace (D3)", () => {
     for (const bad of [0, 1, MIN_SPLIT_SIZE - 0.01, 1 - MIN_SPLIT_SIZE + 0.01, Number.NaN, Number.POSITIVE_INFINITY, -0.5]) {
       rememberSplitRatio(1, "horizontal", bad);
       expect(readSplitRatios(1), String(bad)).toBeUndefined();
+      expect(window.localStorage.getItem(STORAGE_KEYS.splitRatios), `${bad} must not be written`).toBeNull();
     }
     for (const good of [MIN_SPLIT_SIZE, 0.5, 1 - MIN_SPLIT_SIZE]) {
       expect(isValidSplitFraction(good)).toBe(true);
