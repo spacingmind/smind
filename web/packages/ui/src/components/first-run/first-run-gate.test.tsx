@@ -45,13 +45,13 @@ describe("first-run gate", () => {
     desk.appSettingsGet.mockReturnValue(new Promise((r) => (resolve = r)));
     const { container } = mount();
     expect(container).toBeEmptyDOMElement();
-    await act(async () => resolve({ onboardingCompleted: true, manageLocalDaemon: true }));
+    await act(async () => resolve({ onboardingCompleted: true, manageLocalDaemon: true, notificationsOn: null, notifyPermission: true, notifyQuestion: true, notifyFailure: true }));
     expect(screen.getByTestId("the-app")).toBeInTheDocument();
     expect(screen.queryByTestId("first-run")).toBeNull();
   });
 
   it("shows first-run when onboarding is pending, and Skip for now only dismisses it for the session", async () => {
-    desk.appSettingsGet.mockResolvedValue({ onboardingCompleted: false, manageLocalDaemon: false });
+    desk.appSettingsGet.mockResolvedValue({ onboardingCompleted: false, manageLocalDaemon: false, notificationsOn: null, notifyPermission: true, notifyQuestion: true, notifyFailure: true });
     mount();
     expect(await screen.findByTestId("first-run")).toBeInTheDocument();
     expect(screen.queryByTestId("the-app")).toBeNull();
@@ -69,7 +69,7 @@ describe("first-run gate", () => {
   });
 
   it("reopens first-run from the Help menu or a Settings request", async () => {
-    desk.appSettingsGet.mockResolvedValue({ onboardingCompleted: true, manageLocalDaemon: true });
+    desk.appSettingsGet.mockResolvedValue({ onboardingCompleted: true, manageLocalDaemon: true, notificationsOn: null, notifyPermission: true, notifyQuestion: true, notifyFailure: true });
     mount();
     await screen.findByTestId("the-app");
     await act(async () => runSetup());
@@ -84,7 +84,7 @@ describe("first-run gate", () => {
   });
 
   it("a Skip for now session dismissal leaves the Settings Finish setup entry working", async () => {
-    desk.appSettingsGet.mockResolvedValue({ onboardingCompleted: false, manageLocalDaemon: false });
+    desk.appSettingsGet.mockResolvedValue({ onboardingCompleted: false, manageLocalDaemon: false, notificationsOn: null, notifyPermission: true, notifyQuestion: true, notifyFailure: true });
     mount();
     await screen.findByTestId("first-run");
     await act(async () => {
