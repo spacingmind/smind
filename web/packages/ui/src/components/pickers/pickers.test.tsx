@@ -151,7 +151,7 @@ describe("AutoAcceptToggle", () => {
     render(<AutoAcceptToggle checked={false} onChange={onChange} variant="pill" />);
 
     const button = screen.getByTestId("composer-auto-accept");
-    expect(button).toHaveAttribute("aria-label", "Auto-accept");
+    expect(button).toHaveAttribute("aria-label", "Auto-accept: off");
     expect(button).toHaveAttribute("aria-pressed", "false");
     expect(button).toHaveAttribute("title", "Automatically approves every permission prompt from this agent.");
     fireEvent.click(button);
