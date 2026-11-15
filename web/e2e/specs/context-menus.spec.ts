@@ -66,3 +66,26 @@ test('CM-03 a chat tab opens its context menu: Close others is off with no other
   await frame(page, testInfo, 'c-tab-menu')
   await page.keyboard.press('Escape')
 })
+
+test('CM-04 a task that is unread offers Mark unread as off, with its reason', async ({ app }, testInfo) => {
+  const { page } = app
+  await app.openApp()
+  await app.openDrawer()
+  const row = page.getByTestId('sidebar-task-item').first()
+  const menu = page.getByTestId('sidebar-task-context-menu')
+  const markUnread = menu.getByTestId('sidebar-task-mark-unread-action')
+  await row.click({ button: 'right' })
+  await expect(menu).toBeVisible()
+  // Whether the fixture's first task starts unread differs by viewport, so make it unread if it is not, then look again.
+  if ((await markUnread.getAttribute('aria-disabled')) !== 'true') {
+    await markUnread.click()
+    await expect(menu).toHaveCount(0)
+    await row.click({ button: 'right' })
+    await expect(menu).toBeVisible()
+  }
+  await expect(markUnread).toHaveAttribute('aria-disabled', 'true')
+  await expect(markUnread).toContainText('already unread')
+  await expect(menu.getByTestId('sidebar-task-pin-action')).not.toHaveAttribute('aria-disabled', 'true')
+  await settled(menu)
+  await frame(page, testInfo, 'd-unread-task-menu')
+})
