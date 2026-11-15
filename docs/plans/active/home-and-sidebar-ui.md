@@ -45,10 +45,17 @@ GLM Peers first with step-by-step briefs, one Peer per PR; the Lead reviews each
 ## Progress
 
 - [x] spec (this file, first commit of PR 1)
-- [ ] PR 1 history notice
+- [x] PR 1 history notice (GLM peer task 643; reviewed and accepted)
 - [ ] PR 2 sidebar
 - [ ] PR 3 first-run home (after `develop` is merged into the wave branch)
 
 ## Validation
 
-Filled in by each PR.
+### PR 1
+- AC1-AC5: `no-notice-when-nothing-was-trimmed`, `notice-when-a-tool-result-has-the-omission-marker`, `notice-when-an-answer-has-the-omission-marker`, `notice-when-only-thinking-was-dropped`, `other-skeleton-reasons-still-show-their-note`, `run-was-trimmed-table`, `describe-history-source-thinking-copy`; full web suite passes, `tsc` clean.
+- Mutations (7, each killed by a named test): always show the note for `rebuild_not_requested`; never show it; marker ignored in tool inputs; marker ignored in answers; any thinking item counts as trimmed; the thinking copy never used; a loose marker pattern.
+- Frames: light and dark, 1280 and 390, a run with nothing trimmed (no notice) and the same run with an injected omission marker (notice with its action); 8 frames, luminance and no-overflow checks pass, every pair opened.
+- Not verified: a real skeleton run with a genuinely large tool result (the marker is injected into the attach result); the thinking-only copy in a frame; real-window desktop.
+
+### PR 2 and PR 3
+Filled in by those PRs.
