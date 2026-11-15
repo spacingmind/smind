@@ -105,7 +105,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/components/ui/toast";
 import { useLocalPathActions, type LocalPathActions } from "@/hooks/use-local-path-actions";
 import { useWindowState } from "@/hooks/use-window-state";
-import { desktopOS, isDesktop } from "@/lib/platform";
+import { desktop, desktopOS, isDesktop } from "@/lib/platform";
 import { TRAFFIC_LIGHT_CLUSTER_PX, hasTrafficLights, toggleZoneEndPx } from "@/lib/window-chrome";
 import {
   Sidebar,
@@ -1614,6 +1614,13 @@ function RowChevron({ open }: { open: boolean }) {
  */
 /** One entry of a workspace/space row menu. `fadeOut` keeps the menu's exit animation for items that do not open a dialog. */
 
+/** Desktop only: asks the shell for the task's own window (one per task; an existing one is focused). The shell's refusal (the window cap) is shown as is. */
+function openTaskInNewWindow(task: Task): void {
+  void desktop.windowOpenTask(task.ID).catch((err: unknown) => {
+    toast({ variant: "error", title: "Could not open a new window", description: err instanceof Error ? err.message : undefined });
+  });
+}
+
 function RowMenu({
   items,
   triggerProps,
@@ -2312,6 +2319,7 @@ const TaskRow = memo(function TaskRow({
     onMarkUnread,
     onArchiveTask,
     onNewSubTask: treeActions ? () => treeActions.onNewSubTask(task) : undefined,
+    onOpenInNewWindow: isDesktop ? () => openTaskInNewWindow(task) : undefined,
     tree: treeActions && treeAvailability
       ? {
           availability: treeAvailability,

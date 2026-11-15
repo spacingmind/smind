@@ -18,6 +18,7 @@ import { useShortcutLabel, withShortcut } from "@/keyboard/shortcut-label";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { openExternalUrl } from "@/lib/external-link";
 import { isDesktop } from "@/lib/platform";
+import { isTaskWindow } from "@/lib/task-window";
 import { Icons, type IconComponent } from "@/lib/icons";
 import { PendingProposalBadge } from "@/components/learning/pending-badge";
 import { InboxBadge } from "@/components/inbox/inbox-badge";
@@ -315,16 +316,19 @@ export function SidebarFooterActions({
               badge={<InboxBadge className="absolute -top-1 -right-1" />}
             />
           )}
-          <HostButton
-            connectionStatus={connectionStatus}
-            connectionStatusText={connectionStatusText}
-            providerHealth={providerHealth}
-            agentCount={agentCount}
-            onOpenSettings={onOpenSettings}
-          />
+          {!isTaskWindow && (
+            <HostButton
+              connectionStatus={connectionStatus}
+              connectionStatusText={connectionStatusText}
+              providerHealth={providerHealth}
+              agentCount={agentCount}
+              onOpenSettings={onOpenSettings}
+            />
+          )}
           <div data-testid="sidebar-footer-spacer" className="flex-1 group-data-[collapsible=icon]:hidden" />
           <HelpButton />
           <ThemeToggle withTooltip className={ICON_BUTTON_CLASS} />
+          {!isTaskWindow && (
           <FooterIconButton
             label="Settings"
             icon={Icons.settings}
@@ -333,6 +337,7 @@ export function SidebarFooterActions({
             onClick={() => onOpenSettings?.()}
             badge={<PendingProposalBadge className="absolute top-1 right-1" />}
           />
+          )}
         </div>
       </div>
     </TooltipProvider>

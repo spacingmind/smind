@@ -94,6 +94,19 @@ describe("parseRoute", () => {
   });
 });
 
+describe("the short task route (a task window's first URL)", () => {
+  it("parses #/task/<id> into a task-only route and round-trips it", () => {
+    expect(parseRoute("#/task/42")).toEqual({ workspaceId: 0, taskId: 42, tab: { kind: "default" } });
+    expect(parseRoute("/task/7")).toEqual({ workspaceId: 0, taskId: 7, tab: { kind: "default" } });
+    expect(formatRoute({ workspaceId: 0, taskId: 42, tab: { kind: "default" } })).toBe("#/task/42");
+    expect(parseRoute(formatRoute({ workspaceId: 0, taskId: 42, tab: { kind: "default" } }))).toEqual({ workspaceId: 0, taskId: 42, tab: { kind: "default" } });
+  });
+
+  it.each(["#/task/0", "#/task/-1", "#/task/1.5", "#/task/abc", "#/task/1e3", "#/task/ 5", "#/task/", "#/task/5/extra", "#/task/5/chat/1x"])("%s is not a route", (hash) => {
+    expect(parseRoute(hash)).toBeNull();
+  });
+});
+
 describe("formatRoute", () => {
   it("round-trips a base-kind route", () => {
     const route: Route = { workspaceId: 1, taskId: 42, tab: { kind: "terminal" } };

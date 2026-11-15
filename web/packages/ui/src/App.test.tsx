@@ -1289,6 +1289,23 @@ describe("App routing", () => {
     expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("mounting at the short task URL (a task window's first URL) selects that task", async () => {
+    window.location.hash = `#/task/${TASK_B.ID}`;
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+    respondChatList(socket, TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(
+      document.querySelector(`[data-testid="sidebar-task-row"][data-task-id="${TASK_B.ID}"]`),
+    ).toHaveAttribute("data-active", "true");
+    // The task was not left half-selected by an unknown route kind: no "Task not found".
+    expect(screen.queryByTestId("task-not-found")).toBeNull();
+  });
+
   it("selecting a task updates the URL, and switching tabs updates it again", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
