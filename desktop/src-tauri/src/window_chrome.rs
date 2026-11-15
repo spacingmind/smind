@@ -221,12 +221,43 @@ pub fn dismissed<R: Runtime>(app: &AppHandle<R>) {
     app.state::<ShowGate>().signal(Signal::Dismissed);
 }
 
-/// The bundled UI has painted its first frame.
+/// The bundled UI has painted its first frame. `main` goes through the launch gate; a task window (created hidden
+/// like `main`) is simply shown. Either way it acts on the CALLING window, never on another one.
 #[tauri::command]
-pub fn window_ready(app: AppHandle, gate: State<'_, ShowGate>) {
+pub fn window_ready(app: AppHandle, window: tauri::Window, gate: State<'_, ShowGate>) {
+    if window.label() != MAIN_WINDOW {
+        if let Some(win) = app.get_webview_window(window.label()) {
+            // Only the first paint shows it: a reload's repeated signal must not grab focus again.
+            if !win.is_visible().unwrap_or(false) {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }
+        return;
+    }
     if gate.signal(Signal::Ready) {
         reveal(&app);
     }
+}
+
+/// Fallback for a task window whose UI never reports a paint: show it anyway after [`READY_FALLBACK`]. It holds the
+/// window handle itself, not its label: if that window was destroyed and the slot rebuilt, the handle is dead and the
+/// timer does nothing to the new window (a label lookup would have shown it before its first paint).
+pub fn arm_task_fallback<R: Runtime>(win: tauri::WebviewWindow<R>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(READY_FALLBACK).await;
+        if !win.is_visible().unwrap_or(true) {
+            let _ = win.show();
+        }
+    });
+}
+
+/// The window an app-menu action should act on: the focused one, else `main`.
+pub fn focused_or_main<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::WebviewWindow<R>> {
+    app.webview_windows()
+        .into_values()
+        .find(|w| w.is_focused().unwrap_or(false))
+        .or_else(|| app.get_webview_window(MAIN_WINDOW))
 }
 
 /// Mirrors the UI's theme into the window: the native theme (macOS
@@ -236,6 +267,7 @@ pub fn window_ready(app: AppHandle, gate: State<'_, ShowGate>) {
 #[tauri::command]
 pub fn window_set_theme(
     app: AppHandle,
+    window: tauri::Window,
     preference: String,
     resolved: String,
 ) -> Result<(), String> {
@@ -248,7 +280,8 @@ pub fn window_set_theme(
         other => return Err(format!("window_set_theme: unknown preference {other:?}")),
     };
     save_surface(&app, surface);
-    if let Some(win) = app.get_webview_window(MAIN_WINDOW) {
+    // The calling window (main or a task window), never another one.
+    if let Some(win) = app.get_webview_window(window.label()) {
         win.set_theme(theme).map_err(|e| e.to_string())?;
         win.set_background_color(Some(surface.color()))
             .map_err(|e| e.to_string())?;
@@ -369,5 +402,60 @@ mod min_size_tests {
                 .contains("window_chrome::clamp_to_minimum("),
             "the Resized handler must call clamp_to_minimum"
         );
+    }
+}
+
+#[cfg(test)]
+mod multi_window_tests {
+    fn body<'a>(src: &'a str, start: &str) -> &'a str {
+        let rest = src
+            .split(start)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{start} exists"));
+        rest.split("\n}\n").next().unwrap()
+    }
+
+    #[test]
+    fn window_commands_use_the_calling_window() {
+        let src = include_str!("window_chrome.rs");
+        let ready = body(src, "pub fn window_ready(");
+        assert!(
+            ready.contains("window.label()"),
+            "window_ready must read the caller's label"
+        );
+        let theme = body(src, "pub fn window_set_theme(");
+        assert!(
+            theme.contains("window.label()"),
+            "window_set_theme must act on the calling window"
+        );
+        assert!(
+            !theme.contains("get_webview_window(MAIN_WINDOW)"),
+            "window_set_theme must not target main"
+        );
+    }
+
+    #[test]
+    fn app_menu_actions_target_the_focused_window_and_zoom_every_window() {
+        let menu = include_str!("menu.rs");
+        let native = body(menu, "fn handle_native(");
+        assert!(native.contains("focused_or_main(app)"));
+        assert!(native.contains("main.hide()"), "Hide stays on main");
+        let zoom = body(menu, "fn apply_zoom(");
+        assert!(
+            zoom.contains("webview_windows()"),
+            "zoom applies to every open window"
+        );
+    }
+
+    #[test]
+    fn app_wide_menu_events_are_never_broadcast() {
+        let menu = include_str!("menu.rs");
+        let handler = body(menu, "pub fn handle_event(");
+        assert!(handler.contains("emit_to(target.as_str(), \"menu-action\""));
+        assert!(
+            !handler.contains("app.emit(\"menu-action\""),
+            "a broadcast would run the action in every window"
+        );
+        assert!(!handler.contains("app.emit(\"app-update-check-requested\""));
     }
 }

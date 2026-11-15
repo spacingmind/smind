@@ -57,3 +57,16 @@ DEMO_FRAMES_DIR=<dir> bunx playwright test -c playwright.demo.config.ts -g DM-12
 ```
 
 Preview it by hand: `bun run --filter @smind/ui build:demo && bun run --filter @smind/ui preview:demo`, then open `http://127.0.0.1:4173/`.
+
+## Desktop-mode specs (mocked Tauri bridge)
+
+`specs/task-window-desktop-mode.spec.ts` frames and asserts the desktop build's multi-window UI without a real window. It needs the web UI built with the desktop flag and a daemon binary that embeds it, and a mocked Tauri bridge (the spec injects `window.__TAURI_INTERNALS__` with the window label `main` or `task-1`, records every `invoke`, and answers `window_open_task` with a label or a refusal). It is skipped unless `E2E_DESKTOP_MODE=1`:
+
+```sh
+cd web && VITE_SMIND_DESKTOP=1 bun run --filter '@smind/ui' build && cd .. && go build -o bin/smind-desktop-mode ./cmd/smind
+cd web/e2e && SMIND_BIN=$PWD/../../bin/smind-desktop-mode E2E_DESKTOP_MODE=1 E2E_FULL=1 TASK_WINDOW_FRAMES_DIR=/path/to/frames bunx playwright test specs/task-window-desktop-mode.spec.ts
+task build   # rebuild the normal web UI afterwards (the first command overwrote internal/server/dist)
+```
+
+The spec reads `desktop/src-tauri/capabilities/task-window.json` and asserts that a task window only invoked commands that file grants. macOS chrome is framed with a stand-in for the native vibrancy backdrop (a browser has none); the real window, native menus and the shell are not exercised.
+

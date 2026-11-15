@@ -396,6 +396,21 @@ describe("AppSidebar", () => {
     });
   });
 
+  describe("Open in new window (multi-window Part 1)", () => {
+    it("is not offered in the browser build", async () => {
+      const client = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
+      await screen.findByTestId("sidebar-task-pin-action");
+      expect(screen.queryByTestId("sidebar-task-open-in-new-window-action")).not.toBeInTheDocument();
+    });
+  });
+
   describe("pinned section (AC4)", () => {
     afterEach(() => {
       window.localStorage.clear();

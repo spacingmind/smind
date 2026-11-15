@@ -33,6 +33,7 @@ import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import { AppHeader } from "@/components/app-header";
 import { UpdateBadge } from "@/components/update-badge";
+import { isTaskWindow } from "@/lib/task-window";
 import { HomeLanding } from "@/components/home/home-landing";
 import { requestNewWorkspace } from "@/lib/app-events";
 import { useAppUpdate } from "@/lib/app-update";
@@ -290,6 +291,8 @@ function AppShell({
   const [settingsOpenNonce, setSettingsOpenNonce] = useState(0);
   useActionRestriction(activeView !== "workspace" ? SETTINGS_SAFE_ACTIONS : null);
   const openSettings = useCallback((sectionId?: string) => {
+    // A task window has no Settings: its connection, daemon and update sections need main-only commands.
+    if (isTaskWindow) return;
     setSettingsInitialSectionId(sectionId ?? null);
     setSettingsOpenNonce((n) => n + 1);
     setActiveView("settings");
@@ -921,7 +924,9 @@ function AppShell({
     const match = allTasks.find((t) => t.ID === pendingRoute.taskId);
     if (match) {
       selectTask(match);
-      if (pendingRoute.tab.kind === "file") {
+      if (pendingRoute.tab.kind === "default") {
+        // `#/task/<id>`: selecting the task is all there is to do; its default chat tab is seeded as for any selection.
+      } else if (pendingRoute.tab.kind === "file") {
         openTab(match.ID, fileTab(match.ID, pendingRoute.tab.path));
       } else if (pendingRoute.tab.kind === "chat") {
         // The matched task's chats may not have loaded yet (useTaskChats
@@ -1299,10 +1304,10 @@ function AppShell({
       headerActions={
         toggleInSidebar ? (
           <>
-            <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />
+            {!isTaskWindow && <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />}
             <SidebarTrigger className="text-foreground-muted hover:text-foreground" />
           </>
-        ) : windowToggle && sidebarOpen ? (
+        ) : windowToggle && sidebarOpen && !isTaskWindow ? (
           <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />
         ) : undefined
       }
@@ -1318,7 +1323,7 @@ function AppShell({
         connectionStatus={connectionStatus}
         sidebarPx={isMobile ? 0 : sidebarOpen ? sidebarWidth : SIDEBAR_ICON_WIDTH}
         showSidebarToggle={!toggleInSidebar && !windowToggle}
-        showUpdateBadge={isMobile || !sidebarOpen}
+        showUpdateBadge={(isMobile || !sidebarOpen) && !isTaskWindow}
         windowToggle={windowToggle}
         task={selectedTask}
         client={client}
@@ -1327,14 +1332,14 @@ function AppShell({
         updateState={appUpdate.state}
         onOpenUpdate={appUpdate.reopen}
       />
-      {isDesktop && (
+      {isDesktop && !isTaskWindow && (
         <DesktopDaemonBanner
           client={client}
           runsLoaded={runsLoaded}
           runningRuns={[...runningChatsByTask.values()].reduce((n, chats) => n + chats.size, 0)}
         />
       )}
-      {isDesktop && <DesktopUpdateDialogView update={appUpdate} />}
+      {isDesktop && !isTaskWindow && <DesktopUpdateDialogView update={appUpdate} />}
     </>
   );
 

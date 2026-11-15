@@ -186,6 +186,8 @@ describe("taskRowMenu", () => {
     ["a pinned task says Unpin (same id)", task(), { ...o, isPinned: true }, ["pin", "mark-unread", "archive"], ["pin", "mark-unread", "archive"]],
     ["in the tree provider: New sub-task first", task(), { ...o, onNewSubTask: noop }, ["new-subtask", "pin", "mark-unread", "archive"], ["new-subtask", "pin", "mark-unread", "archive"]],
     ["an archived task: New sub-task, Mark unread and Archive are off, Pin still works", task({ ArchivedAt: "2026-01-01T00:00:00Z" } as never), { ...o, onNewSubTask: noop }, ["new-subtask(off)", "pin", "mark-unread(off)", "archive(off)"], ["pin"]],
+    ["desktop build: Open in new window comes after New sub-task and before Pin", task(), { ...o, onNewSubTask: noop, onOpenInNewWindow: noop }, ["new-subtask", "open-in-new-window", "pin", "mark-unread", "archive"], ["new-subtask", "open-in-new-window", "pin", "mark-unread", "archive"]],
+    ["browser build (no handler): the item is absent", task(), { ...o, onNewSubTask: noop }, ["new-subtask", "pin", "mark-unread", "archive"], ["new-subtask", "pin", "mark-unread", "archive"]],
     ["an already unread task: Mark unread is off", task(), { ...o, isUnread: true }, ["pin", "mark-unread(off)", "archive"], ["pin", "archive"]],
     ["ungrouped task with spaces: move to each space", task(), { ...o, spaces, onMoveTask: noop }, ["move>[move:1,move:2]", "pin", "mark-unread", "archive"], ["move:1", "move:2", "pin", "mark-unread", "archive"]],
     ["task in space 1: Ungrouped and the other space", task({ SpaceID: 1 } as never), { ...o, spaces, onMoveTask: noop }, ["move>[move:ungrouped,move:2]", "pin", "mark-unread", "archive"], ["move:ungrouped", "move:2", "pin", "mark-unread", "archive"]],

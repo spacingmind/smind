@@ -376,7 +376,12 @@ pub fn handle_event(app: &AppHandle, id: &str) {
     // Renderer actions (D3.3): one event whose payload is the action id,
     // dispatched by the UI through the same registry a keystroke uses.
     if let Some(action) = menu_action_for(id) {
-        let _ = app.emit("menu-action", action);
+        // Only the focused window (else main) runs a menu action: with task windows open, a broadcast would run
+        // "new task" or "settings" in every window at once.
+        let target = crate::window_chrome::focused_or_main(app)
+            .map(|w| w.label().to_string())
+            .unwrap_or_else(|| MAIN_WINDOW.to_string());
+        let _ = app.emit_to(target.as_str(), "menu-action", action);
         return;
     }
 
@@ -385,7 +390,7 @@ pub fn handle_event(app: &AppHandle, id: &str) {
     // before the get_webview_window early return.
     if matches!(id, ID_APP_CHECK_UPDATES | ID_HELP_CHECK_UPDATES) {
         crate::show_main(app);
-        let _ = app.emit("app-update-check-requested", ());
+        let _ = app.emit_to(MAIN_WINDOW, "app-update-check-requested", ());
         return;
     }
 
@@ -401,17 +406,20 @@ pub fn handle_event(app: &AppHandle, id: &str) {
 
 /// The native-only items (everything `menu_action_for` does not claim).
 fn handle_native(app: &AppHandle, id: &str) {
-    let Some(win) = app.get_webview_window(MAIN_WINDOW) else {
+    let Some(main) = app.get_webview_window(MAIN_WINDOW) else {
         return;
     };
+    // Reload, Fullscreen, Minimize and Inspect act on the focused window (a task window has its own); Hide stays on
+    // `main` (tray identity). Zoom is app-wide and applies to every open window.
+    let win = crate::window_chrome::focused_or_main(app).unwrap_or_else(|| main.clone());
     match id {
         ID_RELOAD => {
             let _ = win.eval("window.location.reload()");
         }
         ID_QUIT => app.exit(0),
-        ID_ZOOM_IN => apply_zoom(app, &win, zoom::step_in),
-        ID_ZOOM_OUT => apply_zoom(app, &win, zoom::step_out),
-        ID_ZOOM_RESET => apply_zoom(app, &win, |_| zoom::DEFAULT),
+        ID_ZOOM_IN => apply_zoom(app, zoom::step_in),
+        ID_ZOOM_OUT => apply_zoom(app, zoom::step_out),
+        ID_ZOOM_RESET => apply_zoom(app, |_| zoom::DEFAULT),
         ID_FULLSCREEN => {
             let is_fullscreen = win.is_fullscreen().unwrap_or(false);
             let _ = win.set_fullscreen(!is_fullscreen);
@@ -431,7 +439,7 @@ fn handle_native(app: &AppHandle, id: &str) {
             let _ = win.minimize();
         }
         ID_HIDE => {
-            let _ = win.hide();
+            let _ = main.hide();
         }
         ID_APP_ABOUT => show_about(app),
         ID_APP_QUIT => app.exit(0),
@@ -499,10 +507,13 @@ fn menu_action_for(id: &str) -> Option<&'static str> {
     }
 }
 
-fn apply_zoom(app: &AppHandle, win: &tauri::WebviewWindow, step: impl FnOnce(f64) -> f64) {
+/// Steps the app-wide zoom level and applies it to every open window.
+fn apply_zoom(app: &AppHandle, step: impl FnOnce(f64) -> f64) {
     let current = zoom_store::load(app);
     let next = step(current);
-    let _ = win.set_zoom(next);
+    for win in app.webview_windows().values() {
+        let _ = win.set_zoom(next);
+    }
     zoom_store::save(app, next);
 }
 
