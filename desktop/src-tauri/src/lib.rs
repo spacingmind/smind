@@ -29,6 +29,8 @@ mod editors;
 mod lifecycle;
 mod menu;
 mod notify;
+mod notify_policy;
+mod notify_test;
 mod open_path;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod overlay_icon;
@@ -165,6 +167,7 @@ pub fn run() {
             commands::app_quit,
             menu::app_menu_action,
             context_menu::context_menu_show,
+            notify_test::notify_test,
             editors::editors_list,
             editors::open_in_editor,
             open_path::open_path_default,

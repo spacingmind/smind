@@ -15,11 +15,16 @@ use url::Url;
 use smind_daemon_client as dclient;
 use smind_daemon_client::proxy::{Connection, ConnectionKind, ProxyState};
 use smind_daemon_client::relay::client::RelayHandle;
-use smind_daemon_client::{relay, ClientEvent, Config, WorkspaceCache};
+use smind_daemon_client::{relay, ClientEvent, Config, NotifyKind, WorkspaceCache};
 
 use crate::notify;
+use crate::notify_policy;
 use crate::state::DesktopState;
 use crate::tray::Tray;
+
+/// DT5 B/AC6: how many distinct (kind, id) notifications the process
+/// remembers as already shown (FIFO-evicted past this).
+const DEDUPE_CAP: usize = 256;
 
 /// spawn starts the watcher against `cfg` (a plain dialable daemon,
 /// `local`/`url`-kind) and returns its task handle.
@@ -60,6 +65,13 @@ pub fn spawn_over_relay(
     })
 }
 
+/// DT5 B/AC7: whether a notification kind counts toward the tray's
+/// waiting-for-you badge: waiting permissions and questions do, a
+/// failed run does not (nothing is waiting on it).
+fn counts(kind: NotifyKind) -> bool {
+    matches!(kind, NotifyKind::Permission | NotifyKind::Question)
+}
+
 fn on_event(
     app: &AppHandle,
     tray: &Arc<Tray>,
@@ -69,22 +81,47 @@ fn on_event(
 ) {
     match event {
         ClientEvent::Notification(n) => {
-            let target = notify::Target {
-                task_id: n.task_id,
-                chat_id: n.chat_id,
-                request_id: Some(n.request_id.clone()),
-            };
-            tray.on_permission_pending(n.task_id, n.chat_id, &n.request_id);
-            let ctx = notify::ClickContext {
-                app: app.clone(),
-                cache: cache.clone(),
-                proxy_url: proxy_url.clone(),
-            };
-            notify::show(ctx, n.title, n.body, target);
+            use tauri::Manager;
+            let settings = *app.state::<DesktopState>().app_settings.lock().unwrap();
+            // DT5 B/AC7: a waiting question counts like a permission; a
+            // failed run does not. The count happens even when the banner
+            // is off or consent was never given (on_pending is idempotent
+            // by request id).
+            if counts(n.kind) {
+                tray.on_permission_pending(n.task_id, n.chat_id, &n.request_id);
+            }
+            // DT5 B/AC6: a redelivered (kind, id) -- the daemon replays
+            // still-pending requests after a reconnect -- shows once.
+            static DEDUPE: OnceLock<Mutex<dclient::dedupe::Dedupe>> = OnceLock::new();
+            let first_time = DEDUPE
+                .get_or_init(|| Mutex::new(dclient::dedupe::Dedupe::new(DEDUPE_CAP)))
+                .lock()
+                .unwrap()
+                .first_time(n.kind, &n.request_id);
+            if !first_time {
+                return;
+            }
+            // DT5 B/AC8: consent and the per-kind switch gate only the
+            // banner; the badge above is already updated.
+            if notify_policy::should_show(&settings, n.kind) {
+                let target = notify::Target {
+                    task_id: n.task_id,
+                    chat_id: n.chat_id,
+                    request_id: Some(n.request_id.clone()),
+                };
+                let ctx = notify::ClickContext {
+                    app: app.clone(),
+                    cache: cache.clone(),
+                    proxy_url: proxy_url.clone(),
+                };
+                notify::show(ctx, n.title, n.body, target);
+            }
         }
         ClientEvent::RunRunning { task_id } => tray.on_run_running(task_id),
         ClientEvent::RunEnded { task_id } => tray.on_run_ended(task_id),
         ClientEvent::PermissionResolved { request_id } => tray.on_permission_resolved(&request_id),
+        // Same by-request-id clear as a resolved permission (DT5 B/AC7).
+        ClientEvent::QuestionResolved { request_id } => tray.on_permission_resolved(&request_id),
         ClientEvent::Reconnected => tray.on_reconnected(),
     }
 }
@@ -264,8 +301,15 @@ pub fn spawn_initial(
 }
 
 #[cfg(test)]
-mod password_tests {
+mod tests {
     use super::*;
+
+    #[test]
+    fn failed_runs_are_not_counted() {
+        assert!(counts(NotifyKind::Permission));
+        assert!(counts(NotifyKind::Question));
+        assert!(!counts(NotifyKind::Failure), "a failed run has nothing waiting");
+    }
 
     #[test]
     fn a_new_daemon_key_under_the_same_connection_id_gets_no_password() {

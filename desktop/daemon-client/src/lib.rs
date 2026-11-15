@@ -18,4 +18,4 @@ pub use backoff::Backoff;
 pub use cache::WorkspaceCache;
 pub use client::ClientEvent;
 pub use config::{daemon_url, Config};
-pub use protocol::{Notification, ServerMessage};
+pub use protocol::{Notification, NotifyKind, ServerMessage};

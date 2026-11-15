@@ -11,11 +11,27 @@ use crate::state::DesktopState;
 
 pub const SETTINGS_FILE: &str = "app-settings.json";
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub onboarding_completed: bool,
     pub manage_local_daemon: bool,
+    /// DT5 B/AC8: desktop-notification consent. None = never asked
+    /// (nothing shows; the badge still counts).
+    #[serde(default)]
+    pub notifications_on: Option<bool>,
+    /// Per-kind switches; each defaults on so an old file without them
+    /// keeps notifying every kind once consent is given.
+    #[serde(default = "default_true")]
+    pub notify_permission: bool,
+    #[serde(default = "default_true")]
+    pub notify_question: bool,
+    #[serde(default = "default_true")]
+    pub notify_failure: bool,
 }
 
 /// A partial update: only the named fields change.
@@ -24,6 +40,10 @@ pub struct AppSettings {
 pub struct AppSettingsPatch {
     pub onboarding_completed: Option<bool>,
     pub manage_local_daemon: Option<bool>,
+    pub notifications_on: Option<bool>,
+    pub notify_permission: Option<bool>,
+    pub notify_question: Option<bool>,
+    pub notify_failure: Option<bool>,
 }
 
 impl AppSettings {
@@ -32,10 +52,18 @@ impl AppSettings {
     pub const FIRST_RUN: AppSettings = AppSettings {
         onboarding_completed: false,
         manage_local_daemon: true,
+        notifications_on: None,
+        notify_permission: true,
+        notify_question: true,
+        notify_failure: true,
     };
     const UPGRADED: AppSettings = AppSettings {
         onboarding_completed: true,
         manage_local_daemon: true,
+        notifications_on: None,
+        notify_permission: true,
+        notify_question: true,
+        notify_failure: true,
     };
 
     pub fn apply(self, patch: AppSettingsPatch) -> AppSettings {
@@ -46,6 +74,11 @@ impl AppSettings {
             manage_local_daemon: patch
                 .manage_local_daemon
                 .unwrap_or(self.manage_local_daemon),
+            // A patch sets consent; it cannot take it back to "never asked".
+            notifications_on: patch.notifications_on.or(self.notifications_on),
+            notify_permission: patch.notify_permission.unwrap_or(self.notify_permission),
+            notify_question: patch.notify_question.unwrap_or(self.notify_question),
+            notify_failure: patch.notify_failure.unwrap_or(self.notify_failure),
         }
     }
 }
@@ -190,7 +223,11 @@ mod tests {
             got,
             AppSettings {
                 onboarding_completed: true,
-                manage_local_daemon: true
+                manage_local_daemon: true,
+                notifications_on: None,
+                notify_permission: true,
+                notify_question: true,
+                notify_failure: true
             }
         );
         assert_eq!(load(&path(&dir)), got, "persisted");
@@ -204,7 +241,11 @@ mod tests {
             got,
             AppSettings {
                 onboarding_completed: true,
-                manage_local_daemon: true
+                manage_local_daemon: true,
+                notifications_on: None,
+                notify_permission: true,
+                notify_question: true,
+                notify_failure: true
             }
         );
         assert_eq!(load(&path(&dir)), got);
@@ -222,7 +263,11 @@ mod tests {
             first,
             AppSettings {
                 onboarding_completed: false,
-                manage_local_daemon: false
+                manage_local_daemon: false,
+                notifications_on: None,
+                notify_permission: true,
+                notify_question: true,
+                notify_failure: true
             }
         );
         save(&p, &first).unwrap();
@@ -234,7 +279,11 @@ mod tests {
             second,
             AppSettings {
                 onboarding_completed: true,
-                manage_local_daemon: false
+                manage_local_daemon: false,
+                notifications_on: None,
+                notify_permission: true,
+                notify_question: true,
+                notify_failure: true
             }
         );
         assert_eq!(
@@ -242,5 +291,45 @@ mod tests {
             AppSettings::FIRST_RUN
         );
         assert!(!p.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn notification_defaults_are_not_asked_and_kinds_on() {
+        assert_eq!(AppSettings::FIRST_RUN.notifications_on, None);
+        assert!(AppSettings::FIRST_RUN.notify_permission);
+        assert!(AppSettings::FIRST_RUN.notify_question);
+        assert!(AppSettings::FIRST_RUN.notify_failure);
+    }
+
+    #[test]
+    fn patch_changes_only_the_named_fields() {
+        let patched = AppSettings::FIRST_RUN.apply(AppSettingsPatch {
+            notify_question: Some(false),
+            ..Default::default()
+        });
+        assert!(!patched.notify_question);
+        assert!(patched.notify_permission, "an unnamed kind is untouched");
+        assert!(patched.notify_failure);
+        assert_eq!(patched.notifications_on, None, "consent is untouched");
+        assert_eq!(patched.onboarding_completed, AppSettings::FIRST_RUN.onboarding_completed);
+        assert_eq!(patched.manage_local_daemon, AppSettings::FIRST_RUN.manage_local_daemon);
+    }
+
+    #[test]
+    fn an_old_file_without_the_fields_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = path(&dir);
+        std::fs::write(
+            &p,
+            r#"{ "onboardingCompleted": true, "manageLocalDaemon": false }"#,
+        )
+        .unwrap();
+        let s = load(&p);
+        assert_eq!(s.notifications_on, None, "not asked");
+        assert!(s.notify_permission);
+        assert!(s.notify_question);
+        assert!(s.notify_failure);
+        assert_eq!(s.onboarding_completed, true);
+        assert_eq!(s.manage_local_daemon, false);
     }
 }
