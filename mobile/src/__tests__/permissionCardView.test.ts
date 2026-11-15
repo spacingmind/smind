@@ -14,10 +14,20 @@ describe('permissionCardView', () => {
     expect(resolvedCopy({ by: 'tap', optionKind: '' })).toBe('You answered this');
     expect(resolvedCopy({ by: 'tap', optionKind: undefined })).toBe('You answered this');
     expect(resolvedCopy({ by: 'tap' })).toBe('You answered this');
-    expect(resolvedCopy({ by: 'event' })).toBe('Resolved by the agent');
-    expect(resolvedCopy({ by: 'event', optionKind: 'reject' })).toBe('Resolved by the agent');
-    expect(resolvedCopy({})).toBe('Resolved by the agent');
-    expect(resolvedCopy({ optionKind: 'reject' })).toBe('Resolved by the agent');
+    // the daemon's resolved event overwrites a tap: a human reason still reads as the person's own answer
+    expect(resolvedCopy({ by: 'event', reason: 'human', optionKind: 'reject_once' })).toBe('You denied this');
+    expect(resolvedCopy({ by: 'event', reason: 'human', optionKind: 'allow_once' })).toBe('You allowed this');
+    expect(resolvedCopy({ by: 'event', reason: 'timeout', optionKind: 'reject_once' })).toBe('Timed out');
+    expect(resolvedCopy({ by: 'event', reason: 'policy_deny' })).toBe('Denied by policy');
+    expect(resolvedCopy({ by: 'event', reason: 'policy_allow' })).toBe('Allowed by policy');
+    expect(resolvedCopy({ by: 'event', reason: 'auto_accept' })).toBe('Auto-accepted');
+    expect(resolvedCopy({ by: 'event', reason: 'provider_cancellation' })).toBe('Cancelled by the agent');
+    // unknown reason, or an older daemon with none and no tap: plain "Resolved", never the raw wire text
+    expect(resolvedCopy({ by: 'event', reason: 'something_new' })).toBe('Resolved');
+    expect(resolvedCopy({ by: 'event' })).toBe('Resolved');
+    expect(resolvedCopy({ by: 'event', optionKind: 'reject' })).toBe('Resolved');
+    expect(resolvedCopy({})).toBe('Resolved');
+    expect(resolvedCopy({ optionKind: 'reject' })).toBe('Resolved');
   });
 
   it('resolved-copy-never-shows-an-option-id', () => {
@@ -25,12 +35,14 @@ describe('permissionCardView', () => {
     const ids = ['', 'deny-1', 'allow_once', 'reject-2', 'chosen:opt-9', undefined];
     for (const by of ['tap', 'event', undefined] as const) {
       for (const kind of kinds) {
-        const text = resolvedCopy({ by, optionKind: kind });
-        expect(text).not.toContain('?');
-        expect(text).not.toContain('chose');
-        for (const id of ids) {
-          if (!id) continue; // '' is "contained" in every string; the copy is built from no id at all
-          expect(text, `${text} vs ${id}`).not.toContain(id);
+        for (const reason of [undefined, 'human', 'timeout', 'deny-1', 'chose:deny-1']) {
+          const text = resolvedCopy({ by, optionKind: kind, reason });
+          expect(text).not.toContain('?');
+          expect(text).not.toContain('chose');
+          for (const id of ids) {
+            if (!id) continue; // '' is "contained" in every string; the copy is built from no id at all
+            expect(text, `${text} vs ${id}`).not.toContain(id);
+          }
         }
       }
     }

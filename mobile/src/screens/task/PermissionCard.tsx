@@ -119,6 +119,7 @@ export const PermissionCard = memo(function PermissionCard({
         <Text style={styles.resolved} selectable>
           {resolvedCopy({
             by: request.resolvedWith?.by,
+            reason: request.resolvedWith?.reason,
             optionKind: request.options.find((o) => o.id === request.resolvedWith?.optionId)?.kind,
           })}
         </Text>
