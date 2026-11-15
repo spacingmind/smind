@@ -50,14 +50,14 @@ async function resolveWorkspaceTree(client: FakeWsClient, workspace: Workspace, 
   await flush();
 }
 
-async function mountSidebar(props: Partial<Parameters<typeof AppSidebar>[0]> = {}) {
+async function mountSidebar(props: Partial<Parameters<typeof AppSidebar>[0]> = {}, tasks: Task[] = [TASK]) {
   const client = new FakeWsClient();
   const utils = render(
     <SidebarProvider>
       <AppSidebar client={client as never} selectedTaskId={null} {...props} />
     </SidebarProvider>,
   );
-  await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+  await resolveWorkspaceTree(client, WORKSPACE, [], tasks);
   await screen.findByTestId("sidebar-workspace-row");
   return { client, ...utils };
 }
@@ -111,6 +111,25 @@ describe("pinned Needs you section (AC9)", () => {
     // A permission ask is: the section appears.
     await mountSidebar({ attention: PERMISSION_ATTENTION });
     expect(await screen.findByTestId("sidebar-needs-you-section")).toBeInTheDocument();
+  });
+
+  it("pinned-section-absent-when-many-tasks-are-unseen-finishes-and-nothing-is-pending", async () => {
+    // The quiet-1 frame fixture: six tasks that all finished while nobody looked, no permission ask. They are
+    // "Ready to review" (status view), never "Needs you": a pinned section here would double the sidebar's length.
+    const many: Task[] = [1, 2, 3, 4, 5, 6].map((id) => ({ ...TASK, ID: id, Title: `Finished ${id}` }));
+    const finished: TaskAttention = new Map(many.map((t) => [t.ID, new Set<AttentionReason>(["finished"])]));
+    const quiet = await mountSidebar({ attention: finished }, many);
+    expect(await screen.findAllByText(/^Finished \d$/)).toHaveLength(6);
+    expect(screen.queryByTestId("sidebar-needs-you-section")).not.toBeInTheDocument();
+    quiet.unmount();
+
+    // One permission ask among them: the section lists exactly that one task, not the other five.
+    const mixed: TaskAttention = new Map(finished);
+    mixed.set(3, new Set<AttentionReason>(["permission"]));
+    await mountSidebar({ attention: mixed }, many);
+    const section = await screen.findByTestId("sidebar-needs-you-section");
+    expect(within(section).getAllByTestId("sidebar-task-row")).toHaveLength(1);
+    expect(within(section).getByText("Finished 3")).toBeInTheDocument();
   });
 
   it("pinned-needs-you-rows-select-the-same-task", async () => {
