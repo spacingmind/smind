@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { QUESTION_NOTE_HELPER, QUESTION_NOTE_LABEL, QUESTION_NOTE_PLACEHOLDER, humanizeQuestionError } from "@/lib/question-copy";
 import { Input } from "@/components/ui/input";
 import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
 import { useCardFocusStore } from "@/stores/card-focus-store";
@@ -152,13 +153,16 @@ export function QuestionCard({
       <div className="flex flex-col gap-2">
         <Input
           data-testid="question-decline-note"
-          aria-label="Note sent with a decline (optional)"
-          placeholder="Note for the agent (optional)"
+          aria-label={QUESTION_NOTE_LABEL}
+          placeholder={QUESTION_NOTE_PLACEHOLDER}
           value={note}
           maxLength={MAX_NOTE_CHARS}
           disabled={submitting}
           onChange={(e) => setNote(e.target.value)}
         />
+        <p data-testid="question-note-helper" className="text-ui-xs text-foreground-muted">
+          {QUESTION_NOTE_HELPER}
+        </p>
         {!submitting && !allAnswered && (
           <p data-testid="question-submit-hint" className="text-ui-xs text-foreground-muted">
             Answer every question to submit.
@@ -170,8 +174,11 @@ export function QuestionCard({
             data-testid="question-error"
             className="flex flex-col gap-0.5 text-ui-sm"
           >
-            <span className="text-destructive">Could not send your answer. Try again.</span>
-            <span className="text-foreground-muted break-words">{error}</span>
+            <span className="text-destructive">{humanizeQuestionError(error).text}</span>
+            <details data-testid="question-error-details" className="text-ui-sm text-foreground-muted">
+              <summary className="cursor-pointer">Details</summary>
+              <span className="whitespace-pre-wrap break-words">{error}</span>
+            </details>
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2">

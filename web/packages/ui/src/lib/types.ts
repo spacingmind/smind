@@ -836,6 +836,49 @@ export interface PermissionDetail {
    * normalised, heredoc-elided command it judged.
    */
   policy?: { ruleId?: string; why?: string; normalized?: string; action?: string };
+  /**
+   * Present only on a request the human may save as "always allow in this project"
+   * (saved grants, ADR-0055 section 8). The daemon decides it; the class is never
+   * the client's to assert. Absent on every other request (and always in the demo).
+   */
+  grant?: GrantOffer;
+}
+
+/** The scope of a saved grant, shown before the human chooses it: this exact command, in this project, for this long. */
+export interface GrantOffer {
+  /** The exact command, redacted and heredoc-elided, as the grant would cover it. */
+  command: string;
+  project: string;
+  folder: string;
+  expiresInDays: number;
+  /** "readonly" inspects only; "runner" runs code the project defines (make, npm run, go test, ...). Unknown values read as runner. */
+  class: "readonly" | "runner" | (string & {});
+  /** True for a runner: saving needs the explicit project-code opt-in below. */
+  requiresOptIn: boolean;
+  /** The opt-in's own words: "Also allow running this project's code (the agent can change it)". */
+  optInLabel?: string;
+  /** What saving means, in the daemon's words (class specific). */
+  note: string;
+}
+
+/** A saved grant as permission.grants.list returns it. */
+export interface SavedGrant {
+  id: number;
+  workspaceId: number;
+  /** The exact command (redacted). */
+  command: string;
+  folder: string;
+  class: "readonly" | "runner" | (string & {});
+  runnerOptIn: boolean;
+  createdAt: string;
+  expiresAt: string;
+  createdBy: string;
+  sourceRunId?: string;
+  revokedAt?: string;
+  revokedBy?: string;
+  useCount: number;
+  lastUsedAt?: string;
+  status: "active" | "expired" | "void" | "revoked" | (string & {});
 }
 
 // Params of a "permission_request" event task.prompt/run.attach emit

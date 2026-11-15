@@ -82,4 +82,15 @@ type Decision struct {
 	Normalized string
 	Paths      []string
 	Segments   []SegmentDecision
+	// Grantable is true only on an `ask` the engine judged completely and for
+	// a plain reason (no rule matched, or a segment no allow rule covers) whose
+	// command may be covered by a saved grant (grantable.go). It is never set on
+	// an allow or a deny, a floor hit, an unparsed or truncated request, or a
+	// request that is not a Bash command.
+	Grantable bool
+	// GrantClass is "readonly" or "runner" when Grantable (grantable.go decides it
+	// from compiled lists; no caller supplies it), and "" otherwise. A readonly
+	// command only inspects; a runner command runs code the project defines and
+	// needs an explicit per-grant opt-in.
+	GrantClass string
 }

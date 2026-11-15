@@ -16,6 +16,7 @@ import {
   feedPermissionEvent,
   PermissionBoard,
   respondToPermission,
+  respondToPermissionAlways,
   runeCount,
 } from '../permissionRequests';
 import { respondPermission } from '../api';
@@ -328,5 +329,55 @@ describe('PermissionBoard resolution reason', () => {
     expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny-1', by: 'event', reason: 'human' });
     board.resolvedEvent({ requestId: 'rq-1', optionId: 'deny-1' });
     expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny-1', by: 'event' });
+  });
+});
+
+describe('respondToPermissionAlways (scoped tap, fake connection)', () => {
+  const OFFER = { command: 'make build', project: 'smind', folder: '/repo', expiresInDays: 30, class: 'runner', requiresOptIn: true, note: 'n' };
+  const REQ_G = { ...REQ, requestId: 'perm-g', options: [{ id: 'deny', label: 'Deny', kind: 'reject_once' }, { id: 'allow', label: 'Allow', kind: 'allow_once' }], detail: { kind: 'execute', command: 'make build', grant: OFFER } };
+
+  it('sends run.answerPermission with scope project, the single-allow option the request offered, and the opt-in', async () => {
+    const { conn, calls } = fakeConnection(() => ({}));
+    const board = new PermissionBoard();
+    board.requestReceived('run-3', REQ_G);
+    await respondToPermissionAlways(conn, board, 'perm-g', true);
+    expect(calls).toEqual([['run.answerPermission', { runId: 'run-3', requestId: 'perm-g', optionId: 'allow', scope: 'project', allowProjectCode: true }]]);
+    expect(board.list()[0]).toMatchObject({ status: 'resolved', resolvedWith: { optionId: 'allow', by: 'tap' } });
+  });
+
+  it('a read-only save carries no allowProjectCode key', async () => {
+    const { conn, calls } = fakeConnection(() => ({}));
+    const board = new PermissionBoard();
+    board.requestReceived('run-3', REQ_G);
+    await respondToPermissionAlways(conn, board, 'perm-g', false);
+    expect(calls[0][1]).toEqual({ runId: 'run-3', requestId: 'perm-g', optionId: 'allow', scope: 'project' });
+  });
+
+  it('sends nothing for a git-rule request even if an offer is present', async () => {
+    const { conn, calls } = fakeConnection(() => ({}));
+    const board = new PermissionBoard();
+    board.requestReceived('run-3', { ...REQ_G, requestId: 'g', detail: { ...REQ_G.detail, gitRule: { id: 'x' } } });
+    await respondToPermissionAlways(conn, board, 'g', false);
+    expect(calls).toEqual([]);
+  });
+
+  it('sends nothing for a request with no offer or no single-allow option', async () => {
+    const { conn, calls } = fakeConnection(() => ({}));
+    const board = new PermissionBoard();
+    board.requestReceived('run-3', { ...REQ_G, requestId: 'a', detail: { kind: 'execute', command: 'x' } });
+    board.requestReceived('run-3', { ...REQ_G, requestId: 'b', options: [{ id: 'deny', label: 'Deny', kind: 'reject_once' }] });
+    await respondToPermissionAlways(conn, board, 'a', false);
+    await respondToPermissionAlways(conn, board, 'b', false);
+    expect(calls).toEqual([]);
+  });
+
+  it("rolls back when the daemon refuses (a runner without its opt-in) and shows the daemon's words", async () => {
+    const { conn } = fakeConnection(() => {
+      throw new Error('this command runs project code: saving it needs the explicit opt-in (allowProjectCode)');
+    });
+    const board = new PermissionBoard();
+    board.requestReceived('run-3', REQ_G);
+    await respondToPermissionAlways(conn, board, 'perm-g', false);
+    expect(board.list()[0]).toMatchObject({ status: 'pending', error: expect.stringContaining('explicit opt-in') });
   });
 });

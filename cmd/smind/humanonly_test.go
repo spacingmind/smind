@@ -14,6 +14,8 @@ var humanOnlyInvocations = [][]string{
 	{"task", "answer", "run-1", "req-1"},
 	{"permission", "show", "--reveal", "1"},
 	{"permission"},
+	{"permission", "grants", "ls"},
+	{"permission", "grants", "revoke", "3"},
 	{"--x", "task", "approve", "run-1"},
 	{"host", "approve", "laptop"},
 	{"host", "reject", "laptop"},

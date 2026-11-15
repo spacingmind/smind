@@ -698,6 +698,19 @@ var migrations = []migration{
 		},
 	},
 	{
+		// Saved grants (docs/plans/active/saved-grants.md): the class and the
+		// runner opt-in. The table is new in the same release as the columns, so
+		// schema.sql already carries them; this keeps a database made from an
+		// earlier build of the branch working.
+		name: "permission_grants_class",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "permission_grants", "class", "TEXT NOT NULL DEFAULT 'readonly'"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(db, "permission_grants", "runner_opt_in", "INTEGER NOT NULL DEFAULT 0")
+		},
+	},
+	{
 		// ADR-0055 D4: ACP elicitation is opt-in per profile, off for every
 		// profile that exists before it is set.
 		name: "profile_agent_questions",

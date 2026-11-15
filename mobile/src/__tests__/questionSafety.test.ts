@@ -11,6 +11,7 @@ const SOURCES = [
   'src/questionAnswer.ts',
   'src/questionRequests.ts',
   'src/questionView.ts',
+  'src/questionCopy.ts',
   'src/screens/task/QuestionCard.tsx',
   'src/screens/task/QuestionMarker.tsx',
 ].map((f) => ({ f, text: strip(readFileSync(join(ROOT, f), 'utf8')) }));
