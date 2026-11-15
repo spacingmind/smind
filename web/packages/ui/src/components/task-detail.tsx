@@ -585,7 +585,6 @@ export function TaskDetailPane({
                     providerLabels={providerLabels}
                     modelLabels={modelLabels}
                     isLatest={run.id === runs[runs.length - 1]?.id}
-                    disconnected={connectionStatus !== "connected"}
                     deliverables={deliverableCtx}
                     onLoadFullHistory={(r) => void loadFullHistory(r.id)}
                   />

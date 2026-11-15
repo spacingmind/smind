@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Icons } from "@/lib/icons";
 import { useTicker } from "@/hooks/use-ticker";
 
 import { RunProvenance, provenanceSha } from "@/components/timeline/run-provenance";
@@ -21,16 +20,16 @@ import { cn } from "@/lib/utils";
  * human duration, the model's human label, the compact cost, and -- for
  * an abnormal ending -- the sentence and a Continue/Retry button. All
  * wording is decided by describeRunFooter (see run-footer-model.ts); this
- * component only renders it, plus the two live tickers (the running
- * elapsed label and the relative age) that a pure view model can't own.
+ * component only renders it, plus the relative-age and rate-limit tickers
+ * a pure view model can't own. A live run renders nothing here -- its
+ * state lives in the one run-state line under the composer
+ * (chat-surface-ui decision 1).
  */
 export function RunFooter<T extends RunFooterRun>({
   run,
   providerLabels,
   modelLabels,
   isLatest = false,
-  waiting = false,
-  disconnected = false,
   onContinue,
   onRerun,
   failover,
@@ -43,10 +42,6 @@ export function RunFooter<T extends RunFooterRun>({
   modelLabels?: RunModelLabels;
   /** Continue/Retry are offered on the chat's latest run only. */
   isLatest?: boolean;
-  /** The live run is blocked on the user (an unanswered permission): the label says so instead of "Working…". */
-  waiting?: boolean;
-  /** The daemon connection is down, so a running run's state is unknown. */
-  disconnected?: boolean;
   /** Continue: re-submits with the prompt "Continue" on the run's own config (task-detail wires it). */
   onContinue?: (run: T) => void;
   /** Retry: the existing Re-run path, offered on a failed latest run. */
@@ -57,29 +52,29 @@ export function RunFooter<T extends RunFooterRun>({
   children?: ReactNode;
 }) {
   const running = run.status === "running";
-  const reconnecting = running && disconnected;
-  const waitingOnUser = running && waiting && !reconnecting;
   // The tickers only force a re-render; `now` is read fresh each render so an
-  // unrelated re-render never works from a stale tick. A running label ticks
-  // every second; an age label needs 30 s only in its first hour, then 5 min,
-  // and stops for good once it has become a plain date.
+  // unrelated re-render never works from a stale tick. An age label needs
+  // 30 s only in its first hour, then 5 min, and stops for good once it has
+  // become a plain date.
   const ageMs = run.finishedAt ? Date.now() - Date.parse(run.finishedAt) : NaN;
-  useTicker(running && !disconnected ? 1000 : null);
   useTicker(!running && ageMs >= 0 && ageMs < AGE_TICK_STOPS_MS ? (ageMs < HOUR_MS ? 30_000 : 300_000) : null);
   // A rate-limited footer with a reset still ahead re-evaluates once a minute (the sentence flips to "limit has reset"); no other footer owns this timer.
   useTicker(isRateLimitedRun(run) && hasFutureReset(run.failureResetAt, new Date()) ? MINUTE_TICK_MS : null);
   const now = new Date();
 
-  const modelLabel = running ? "" : resolveRunModelLabel(run, modelLabels, providerLabels?.[run.provider]);
+  // The live run's "Working…" line lives under the composer; the transcript footer only states how a run ended.
+  if (running) return null;
+
+  const modelLabel = resolveRunModelLabel(run, modelLabels, providerLabels?.[run.provider]);
   const view = describeRunFooter(run, { now, modelLabel });
   // With failover actions the buttons get their own row under the sentence (see below), so a wrapped line never starts with a segment dot.
-  const failoverRow = !running && view.action === "retry" && isLatest && failover !== undefined && hasFailoverActions(run, failover, now);
+  const failoverRow = view.action === "retry" && isLatest && failover !== undefined && hasFailoverActions(run, failover, now);
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
       <div
         role="group"
-        aria-label={reconnecting ? "Reconnecting" : waitingOnUser ? "Waiting for your response" : view.ariaLabel}
+        aria-label={view.ariaLabel}
         className={cn(
           "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-2 transition-opacity",
           view.kind === "done" &&
@@ -90,65 +85,47 @@ export function RunFooter<T extends RunFooterRun>({
         data-disposition={run.disposition}
         data-failure-kind={run.failureKind}
       >
-        {running ? (
-          <span className={cn(SEGMENT, "gap-1.5", (waitingOnUser || reconnecting) && "text-warning-text")}>
-            {waitingOnUser || reconnecting ? (
-              <StatusDot status="warning" />
-            ) : (
-              <Icons.spinner aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+        {view.sentence !== undefined && (
+          <span
+            className={cn(SEGMENT, "gap-1.5", view.tone === "warning" && "text-warning-text", view.tone === "danger" && "text-destructive")}
+          >
+            {view.tone !== "neutral" && <StatusDot status={view.tone === "danger" ? "danger" : "warning"} />}
+            <span data-testid="run-stop-reason" data-tone={view.tone}>
+              {view.sentence}
+            </span>
+            {view.action === "continue" && isLatest && onContinue && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                data-testid="run-continue"
+                className="ml-1"
+                onClick={() => onContinue(run)}
+              >
+                Continue
+              </Button>
             )}
-            {/* The static word is the polite live region; the ticking number is a timer (implicitly aria-live=off) so a screen reader is not read a new value every second. */}
-            <span role="status">{reconnecting ? "Reconnecting…" : waitingOnUser ? "Waiting for you…" : "Working…"}</span>
-            {view.duration && !reconnecting && (
-              <span role="timer" data-testid="run-working-elapsed">
-                {view.duration}
-              </span>
+            {view.action === "retry" && isLatest && onRerun && !failoverRow && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                data-testid="run-retry"
+                className="ml-1"
+                onClick={() => onRerun(run)}
+              >
+                Retry
+              </Button>
             )}
           </span>
-        ) : (
-          view.sentence !== undefined && (
-            <span
-              className={cn(SEGMENT, "gap-1.5", view.tone === "warning" && "text-warning-text", view.tone === "danger" && "text-destructive")}
-            >
-              {view.tone !== "neutral" && <StatusDot status={view.tone === "danger" ? "danger" : "warning"} />}
-              <span data-testid="run-stop-reason" data-tone={view.tone}>
-                {view.sentence}
-              </span>
-              {view.action === "continue" && isLatest && onContinue && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  data-testid="run-continue"
-                  className="ml-1"
-                  onClick={() => onContinue(run)}
-                >
-                  Continue
-                </Button>
-              )}
-              {view.action === "retry" && isLatest && onRerun && !failoverRow && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  data-testid="run-retry"
-                  className="ml-1"
-                  onClick={() => onRerun(run)}
-                >
-                  Retry
-                </Button>
-              )}
-            </span>
-          )
         )}
-        {!running && failover && <RunFailoverNotes run={run} failover={failover} segmentClass={SEGMENT} providerLabels={providerLabels} />}
-        {!running && view.model && (
+        {failover && <RunFailoverNotes run={run} failover={failover} segmentClass={SEGMENT} providerLabels={providerLabels} />}
+        {view.model && (
           <span data-testid="run-model" title={modelTitle(run)} className={cn(SEGMENT, "min-w-0")}>
             <span className="truncate">{view.model}</span>
           </span>
         )}
-        {/* While running the live "Working… 12s" label already carries the elapsed time. */}
-        {!running && view.duration && (
+        {view.duration && (
           <span data-testid="run-elapsed" title={view.durationTitle ?? undefined} className={SEGMENT}>
             {view.duration}
           </span>

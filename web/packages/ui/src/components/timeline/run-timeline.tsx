@@ -56,7 +56,6 @@ export const RunTimeline = memo(function RunTimeline({
   providerLabels,
   modelLabels,
   isLatest = false,
-  disconnected = false,
   deliverables,
   onLoadFullHistory,
 }: {
@@ -81,8 +80,6 @@ export const RunTimeline = memo(function RunTimeline({
   modelLabels?: RunModelLabels;
   /** Continue/Retry are offered on the chat's latest run only. */
   isLatest?: boolean;
-  /** The daemon connection is down: the run footer freezes its live state. */
-  disconnected?: boolean;
   /** What the deliverable cards under the answer need (client, task, local-path actions); omitted renders no cards. */
   deliverables?: DeliverableContext;
   /** ADR-0053: rebuild this run's full history from the provider's session; omitted leaves the note's sentence only. */
@@ -145,7 +142,7 @@ export const RunTimeline = memo(function RunTimeline({
 
         <RunErrorBox run={run} onRetry={onRetry} />
 
-        <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} waiting={Boolean(run.pendingPermission)} disconnected={disconnected} onContinue={onContinue} onRerun={onRerun} failover={failover}>
+        <RunFooter run={run} providerLabels={providerLabels} modelLabels={modelLabels} isLatest={isLatest} onContinue={onContinue} onRerun={onRerun} failover={failover}>
           <MessageActions group="run" className="ml-auto" data-testid="run-actions">
             <RunCopyMenu run={run} />
             {/* Re-running the same prompt cannot fix a human-action failure (a person must act first), so the icon hides for those. */}
