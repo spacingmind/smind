@@ -767,3 +767,37 @@ func TestProxyEarlyBytesAfterConnectReachUpstream(t *testing.T) {
 		t.Fatalf("bytes sent behind the CONNECT head must reach upstream: %v", got.Load())
 	}
 }
+
+// An upstream that sends headers and then stalls must not hold a connection
+// slot forever: the forward path has its own idle bound.
+func TestProxyStalledUpstreamBodyIsCutOff(t *testing.T) {
+	stall, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer stall.Close()
+	go func() {
+		for {
+			c, err := stall.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+				_, _ = bufio.NewReader(c).ReadString('\n')
+				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial")
+				time.Sleep(4 * time.Second) // never finishes the body
+			}()
+		}
+	}()
+	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.IOTimeout = 200 * time.Millisecond })
+	pu, _ := url.Parse("http://" + rig.px.Addr())
+	c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(pu), DisableKeepAlives: true}, Timeout: 3 * time.Second}
+	start := time.Now()
+	resp, err := c.Get("http://" + stall.Addr().String() + "/")
+	if err == nil {
+		defer resp.Body.Close()
+		_, err = io.ReadAll(resp.Body)
+	}
+	if err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("a stalled upstream body must be cut off by the proxy's own bound, not the client's: err=%v after %v", err, time.Since(start))
+	}
+}

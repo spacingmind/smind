@@ -47,6 +47,8 @@ type ProxyConfig struct {
 	MaxConns    int
 	DialTimeout time.Duration
 	TunnelIdle  time.Duration
+	// IOTimeout bounds any single read or write on the forward path (default 60 s).
+	IOTimeout time.Duration
 	// Dial opens the connection to a vetted IP:port (a test hook).
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// OnRefuse is told about each refused target (cleaned text, no page data).
@@ -83,6 +85,9 @@ func StartProxy(cfg ProxyConfig) (*Proxy, error) {
 	if cfg.TunnelIdle <= 0 {
 		cfg.TunnelIdle = DefaultProxyTunnelIdle
 	}
+	if cfg.IOTimeout <= 0 {
+		cfg.IOTimeout = proxyIOTimeout
+	}
 	if cfg.Dial == nil {
 		d := &net.Dialer{}
 		cfg.Dial = d.DialContext
@@ -110,7 +115,7 @@ func StartProxy(cfg ProxyConfig) (*Proxy, error) {
 			if err != nil {
 				return nil, err
 			}
-			return idleConn{c, proxyIOTimeout}, nil // a stalled upstream cannot hold a slot
+			return idleConn{c, p.cfg.IOTimeout}, nil // a stalled upstream cannot hold a slot
 		},
 	}
 	p.srv = &http.Server{
@@ -405,7 +410,7 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 		host += ":" + strconv.Itoa(d.Port)
 	}
 	rc := http.NewResponseController(w)
-	out, err := http.NewRequestWithContext(context.WithValue(r.Context(), pinKey{}, addrs), r.Method, "http://"+host+r.URL.RequestURI(), &idleBody{r: r.Body, rc: rc})
+	out, err := http.NewRequestWithContext(context.WithValue(r.Context(), pinKey{}, addrs), r.Method, "http://"+host+r.URL.RequestURI(), &idleBody{r: r.Body, rc: rc, idle: p.cfg.IOTimeout})
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -440,7 +445,7 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
-			_ = rc.SetWriteDeadline(time.Now().Add(proxyIOTimeout))
+			_ = rc.SetWriteDeadline(time.Now().Add(p.cfg.IOTimeout))
 			if _, werr := w.Write(buf[:n]); werr != nil {
 				return
 			}
@@ -457,12 +462,13 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 // idleBody gives the client's request body a read deadline that is renewed on
 // every read, so a client that stalls mid-body cannot hold a slot.
 type idleBody struct {
-	r  io.ReadCloser
-	rc *http.ResponseController
+	r    io.ReadCloser
+	rc   *http.ResponseController
+	idle time.Duration
 }
 
 func (b *idleBody) Read(p []byte) (int, error) {
-	_ = b.rc.SetReadDeadline(time.Now().Add(proxyIOTimeout))
+	_ = b.rc.SetReadDeadline(time.Now().Add(b.idle))
 	return b.r.Read(p)
 }
 
