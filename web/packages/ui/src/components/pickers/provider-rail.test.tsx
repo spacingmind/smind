@@ -13,7 +13,7 @@ describe("ProviderRail", () => {
   it("picker-lists-providers-in-a-rail", () => {
     render(<ProviderRail providers={PROVIDERS} selectedId="claude-native" onSelect={() => {}} />);
 
-    expect(screen.getByTestId("model-provider-rail")).toHaveAttribute("role", "tablist");
+    expect(screen.getByTestId("model-picker-rail")).toHaveAttribute("role", "tablist");
     expect(screen.getAllByRole("tab")).toHaveLength(3);
     expect(screen.getByTestId("model-provider-claude-native")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("model-provider-codex-native")).toHaveAttribute("aria-selected", "false");

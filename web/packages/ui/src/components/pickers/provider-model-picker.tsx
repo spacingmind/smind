@@ -20,7 +20,7 @@ import {
   type RowShellProps,
 } from "@/components/pickers/provider-model-picker-rows";
 import { pillTriggerClass } from "@/components/composer/pill-class";
-import { ProviderRail, type ProviderRailHandle } from "@/components/pickers/provider-rail";
+import { PROFILES_TAB_ID, ProviderRail, type ProviderRailHandle } from "@/components/pickers/provider-rail";
 import { cn } from "@/lib/utils";
 import { ProviderIcon } from "@/components/provider-icon";
 import { Button } from "@/components/ui/button";
@@ -298,6 +298,11 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
           notice: selection.kind === "loading" ? { kind: "loading" } : { kind: "error", message: selection.message },
         };
       }
+      // With the rail an unavailable provider is selectable (its reason shows above the search) but, unless it is the current
+      // one (whose model can still be re-picked), offers no model: it cannot be switched to.
+      if (railMode && provider?.unavailableReason && provider.id !== selectedProvider) {
+        return { kind: "entries", band: [], entries: [] };
+      }
       const rows = provider ? getProviderModelRows(provider) : [];
       if (normalizedQuery) {
         const matches = filterAndRankModelRows(rows, normalizedQuery);
@@ -327,6 +332,10 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
     if (all.kind === "searchResults") {
       return { kind: "entries", band: [], entries: modelEntries(all.rows, true) };
     }
+    // The rail's Profiles tab: every profile (the old root's band), no provider list (the rail is the provider list).
+    if (railMode) {
+      return { kind: "entries", band: hasProfiles ? bandEntries(profileRows, baseAgentId) : [], entries: [] };
+    }
     const entries: PickerEntry[] = [];
     if (visibleProviders.length > 0) {
       entries.push({ kind: "heading", key: "h-providers", label: "Providers" });
@@ -335,7 +344,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
       entries.push({ kind: "provider", key: `provider-${provider.id}`, provider });
     }
     return { kind: "entries", band: hasProfiles ? bandEntries(profileRows, baseAgentId) : [], entries };
-  }, [view, visibleProviders, normalizedQuery, query, searchFocused, profileRows, baseAgentId, hasProfiles, railMode]);
+  }, [view, visibleProviders, normalizedQuery, query, searchFocused, profileRows, baseAgentId, hasProfiles, railMode, selectedProvider]);
 
   // Popover height follows the browse layout of the view, not the search results, so typing doesn't resize it.
   const extraRows = useMemo(() => {
@@ -551,6 +560,12 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
   const inProviderView = view.kind === "provider";
   const searchingAll = railMode && normalizedQuery !== "";
   const selectRailProvider = (providerId: string) => {
+    if (providerId === PROFILES_TAB_ID) {
+      setView({ kind: "all" });
+      setQuery("");
+      setActiveIndex(0);
+      return;
+    }
     const p = visibleProviders.find((x) => x.id === providerId);
     if (!p) return;
     setView({ kind: "provider", providerId, providerLabel: p.label });
@@ -776,11 +791,12 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         data-testid="model-picker-popover"
         onOpenAutoFocus={focusInput}
       >
-        {railMode && view.kind === "provider" && (
+        {railMode && (
           <ProviderRail
             ref={railRef}
             providers={visibleProviders}
-            selectedId={view.providerId}
+            profilesTab={hasProfiles}
+            selectedId={view.kind === "provider" ? view.providerId : PROFILES_TAB_ID}
             onSelect={selectRailProvider}
           />
         )}

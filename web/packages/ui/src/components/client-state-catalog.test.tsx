@@ -167,7 +167,7 @@ describe("shared catalog / profile / health cache", () => {
     // Before the picker opens "Reviewer" is on screen once (the Settings row); inside it, a second time.
     expect(screen.getAllByText("Reviewer")).toHaveLength(1);
     fireEvent.click(screen.getByTestId("composer-model-picker"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     expect((await screen.findAllByText("Reviewer")).length).toBeGreaterThanOrEqual(2);
 
     // A rename and a delete (events from another tab or the CLI) reach them live too.
@@ -323,7 +323,7 @@ describe("shared catalog / profile / health cache", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
     fireEvent.click(screen.getByTestId("composer-model-picker"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
 
     for (const id of [1, 2]) {
       // The Agents row's metadata line and the picker row's summary: one function, one string.
