@@ -104,6 +104,16 @@ describe("desktop popover with the provider rail", () => {
     expect(screen.queryByTestId("model-row-glm:glm-5.3")).not.toBeInTheDocument(); // cannot be switched to
   });
 
+  it("the rail names a raw Go error by its short reason, the view keeps the raw text", () => {
+    const raw = '"glm" not found on PATH: exec: "glm": executable file not found in $PATH; config dir: /x/.glm [directory does not exist]';
+    renderPicker({ health: { glm: { ok: false, detail: raw } } });
+    const tab = screen.getByTestId("model-provider-glm");
+    expect(tab.getAttribute("aria-label")).not.toContain("config dir");
+    expect(tab.getAttribute("aria-label")).toContain("unavailable:");
+    fireEvent.click(tab);
+    expect(screen.getByTestId("model-provider-unavailable")).toHaveTextContent("config dir");
+  });
+
   it("the current provider stays pickable even when it is unavailable", () => {
     const onSelect = renderPicker({ health: { "claude-native": { ok: false, detail: "claude CLI not found" } } });
     expect(screen.getByTestId("model-provider-unavailable")).toHaveTextContent("claude CLI not found");

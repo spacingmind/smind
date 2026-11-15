@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX, typ
 
 import { Icons } from "@/lib/icons";
 import { providerLabel } from "@/lib/provider-catalog";
+import { formatProviderReason } from "@/lib/provider-reason";
 
 import {
   CreateProfileRow,
@@ -559,6 +560,11 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
 
   const inProviderView = view.kind === "provider";
   const searchingAll = railMode && normalizedQuery !== "";
+  // The rail's accessible name and tooltip carry the short reason (a raw Go error stays in the view's own notice).
+  const railProviders = useMemo(
+    () => visibleProviders.map((p) => ({ id: p.id, label: p.label, unavailableReason: p.unavailableReason ? formatProviderReason(p.unavailableReason) : undefined })),
+    [visibleProviders],
+  );
   const selectRailProvider = (providerId: string) => {
     if (providerId === PROFILES_TAB_ID) {
       setView({ kind: "all" });
@@ -794,7 +800,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         {railMode && (
           <ProviderRail
             ref={railRef}
-            providers={visibleProviders}
+            providers={railProviders}
             profilesTab={hasProfiles}
             selectedId={view.kind === "provider" ? view.providerId : PROFILES_TAB_ID}
             onSelect={selectRailProvider}
