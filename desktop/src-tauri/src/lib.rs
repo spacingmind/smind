@@ -49,6 +49,8 @@ mod real_daemon_test;
 pub mod updater;
 mod window_chrome;
 mod window_layout;
+#[allow(dead_code)]
+mod windows;
 mod zoom_store;
 
 use state::DesktopState;
