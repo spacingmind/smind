@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "source": "desktop-shell",
+  "version": "0.20.0",
+  "os": "darwin",
+  "arch": "arm64",
+  "time": "2026-11-15T01:02:03.004005006Z",
+  "site": "desktop.thread",
+  "panicType": "&str",
+  "message": "",
+  "messageWithheld": true,
+  "stack": "   0: smind_crash_report::hook\n   1: std::panicking::rust_panic_with_hook\n",
+  "suppressedSinceLast": 0
+}

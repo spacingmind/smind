@@ -4606,6 +4606,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 
 [[package]]
+name = "smind-crash-report"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde_json",
+]
+
+[[package]]
 name = "smind-daemon-client"
 version = "0.20.0"
 dependencies = [
@@ -4660,6 +4668,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "smind-crash-report",
  "smind-daemon-client",
  "tar",
  "tauri",

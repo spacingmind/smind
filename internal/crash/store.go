@@ -266,28 +266,35 @@ func readNewest(path string) ([]byte, error) {
 // DesktopDir returns the crashes directory of the desktop shell under the
 // platform's app-data location, or "" when the home cannot be found.
 func DesktopDir() string {
-	switch runtime.GOOS {
+	home, _ := os.UserHomeDir()
+	return desktopDirFrom(runtime.GOOS, home, os.Getenv("APPDATA"), os.Getenv("XDG_DATA_HOME"))
+}
+
+// desktopDirFrom is DesktopDir with its inputs. A relative APPDATA or
+// XDG_DATA_HOME is ignored (the XDG specification says the same): the shell's
+// working directory is not stable and not ours, so a relative base would put
+// reports somewhere no reader looks. The Rust crate applies the same rule.
+func desktopDirFrom(goos, home, appData, xdg string) string {
+	const id = "dev.spacingmind.desktop"
+	switch goos {
 	case "darwin":
-		home, err := os.UserHomeDir()
-		if err != nil {
+		if home == "" {
 			return ""
 		}
-		return filepath.Join(home, "Library", "Application Support", "dev.spacingmind.desktop", "crashes")
+		return filepath.Join(home, "Library", "Application Support", id, "crashes")
 	case "windows":
-		appData := os.Getenv("APPDATA")
-		if appData == "" {
+		if appData == "" || !filepath.IsAbs(appData) {
 			return ""
 		}
-		return filepath.Join(appData, "dev.spacingmind.desktop", "crashes")
+		return filepath.Join(appData, id, "crashes")
 	default:
-		base := os.Getenv("XDG_DATA_HOME")
-		if base == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
+		base := xdg
+		if base == "" || !filepath.IsAbs(base) {
+			if home == "" {
 				return ""
 			}
 			base = filepath.Join(home, ".local", "share")
 		}
-		return filepath.Join(base, "dev.spacingmind.desktop", "crashes")
+		return filepath.Join(base, id, "crashes")
 	}
 }
