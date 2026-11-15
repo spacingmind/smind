@@ -204,10 +204,20 @@ describe("useRevealActiveTab", () => {
 });
 
 describe("tab chips and the strip (source pins on App.tsx)", () => {
-  it("tabs are 160px chips that shrink to 64px (96px when active), the list fills the scroller, the overflow menu is conditional", async () => {
+  it("strip-chips-take-natural-width-when-there-is-room: basis auto, never a fixed 10rem basis that shrinks equally", async () => {
     const { readFileSync } = await import("node:fs");
     const app = readFileSync("src/App.tsx", "utf8");
-    expect(app).toContain("group-data-[variant=flat]/tabs-list:flex-[0_1_10rem]");
+    // A fixed 10rem basis made every chip shrink by the same amount against a wrapper sized to the chips' natural widths, so
+    // short titles were cut ("…hat 2") although the strip had free space. Basis auto keeps each chip at its own natural width.
+    expect(app).toContain("group-data-[variant=flat]/tabs-list:flex-[0_1_auto]");
+    expect(app).not.toContain("tabs-list:flex-[0_1_10rem]");
+    expect(app).toContain("group/tab max-w-40"); // the 160px cap stays
+  });
+
+  it("tabs are 160px chips at most that shrink to 64px (96px when active) only on overflow, the list fills the scroller, the overflow menu is conditional", async () => {
+    const { readFileSync } = await import("node:fs");
+    const app = readFileSync("src/App.tsx", "utf8");
+    expect(app).toContain("group-data-[variant=flat]/tabs-list:flex-[0_1_auto]");
     expect(app).toContain("group-data-[variant=flat]/tabs-list:min-w-16");
     expect(app).toContain("group-data-[variant=flat]/tabs-list:aria-selected:min-w-24");
     expect(app).toContain('<TabsList variant="flat" className="w-full">');
