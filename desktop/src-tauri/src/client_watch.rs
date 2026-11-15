@@ -20,14 +20,9 @@ use smind_daemon_client::{relay, ClientEvent, Config, NotifyKind, WorkspaceCache
 use crate::attention_focus;
 use crate::banner;
 use crate::coalesce;
-use crate::notify;
 use crate::notify_policy;
 use crate::state::DesktopState;
 use crate::tray::Tray;
-
-/// DT5 B/AC6: how many distinct (kind, id) notifications the process
-/// remembers as already shown (FIFO-evicted past this).
-const DEDUPE_CAP: usize = 256;
 
 /// spawn starts the watcher against `cfg` (a plain dialable daemon,
 /// `local`/`url`-kind) and returns its task handle.
@@ -35,14 +30,13 @@ pub fn spawn(
     app: &AppHandle,
     tray: Arc<Tray>,
     cache: WorkspaceCache,
-    proxy_url: Url,
     cfg: Config,
     auth: dclient::client::WatcherAuth,
 ) -> tauri::async_runtime::JoinHandle<()> {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         dclient::client::run_with_auth(cfg, auth, cache.clone(), move |event| {
-            on_event(&handle, &tray, &cache, &proxy_url, event)
+            on_event(&handle, &tray, event)
         })
         .await;
     })
@@ -56,13 +50,12 @@ pub fn spawn_over_relay(
     app: &AppHandle,
     tray: Arc<Tray>,
     cache: WorkspaceCache,
-    proxy_url: Url,
     relay_handle: RelayHandle,
 ) -> tauri::async_runtime::JoinHandle<()> {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         dclient::client::run_over_relay(relay_handle, cache.clone(), move |event| {
-            on_event(&handle, &tray, &cache, &proxy_url, event)
+            on_event(&handle, &tray, event)
         })
         .await;
     })
@@ -75,13 +68,7 @@ fn counts(kind: NotifyKind) -> bool {
     matches!(kind, NotifyKind::Permission | NotifyKind::Question)
 }
 
-fn on_event(
-    app: &AppHandle,
-    tray: &Arc<Tray>,
-    cache: &WorkspaceCache,
-    proxy_url: &Url,
-    event: ClientEvent,
-) {
+fn on_event(app: &AppHandle, tray: &Arc<Tray>, event: ClientEvent) {
     match event {
         ClientEvent::Notification(n) => {
             use tauri::Manager;
@@ -99,50 +86,30 @@ fn on_event(
             // kind off) is not remembered as "already shown" and can still
             // notify when it is redelivered after the person turns it on.
             if notify_policy::should_show(&settings, n.kind) {
-                // DT5 B/AC6: a redelivered (kind, id) -- the daemon replays
-                // still-pending requests after a reconnect -- shows once.
-                static DEDUPE: OnceLock<Mutex<dclient::dedupe::Dedupe>> = OnceLock::new();
-                let first_time = DEDUPE
-                    .get_or_init(|| Mutex::new(dclient::dedupe::Dedupe::new(DEDUPE_CAP)))
-                    .lock()
-                    .unwrap()
-                    .first_time(n.kind, &n.request_id);
-                if !first_time {
+                // DT5 B/AC6: a notification already SHOWN (the daemon
+                // replays still-pending requests after a reconnect) shows
+                // once. DT5 C: only a shown banner is remembered; one
+                // dropped or held for the focus rules is not, so it can
+                // still notify later.
+                if banner::already_shown(n.kind, &n.request_id) {
                     return;
                 }
-                let ctx = notify::ClickContext {
-                    app: app.clone(),
-                    cache: cache.clone(),
-                    proxy_url: proxy_url.clone(),
-                };
                 // DT5 C/AC10-12: the web app's focus report decides WHEN
                 // the banner shows (the text and consent were settled
                 // above): never over the task in front, held while the
                 // person types in another task, otherwise through the
                 // coalescer.
-                match attention_focus::decide(attention_focus::current(), n.task_id) {
-                    attention_focus::Decision::Drop => {}
-                    attention_focus::Decision::Hold => {
-                        attention_focus::hold(attention_focus::HeldItem {
-                            kind: n.kind,
-                            task_id: n.task_id,
-                            chat_id: n.chat_id,
-                            request_id: n.request_id.clone(),
-                            title: n.title.clone(),
-                            body: n.body.clone(),
-                        });
-                    }
-                    attention_focus::Decision::Show => banner::submit(
-                        ctx,
-                        coalesce::Item {
-                            task_id: n.task_id,
-                            chat_id: n.chat_id,
-                            request_id: n.request_id.clone(),
-                            title: n.title,
-                            body: n.body,
-                        },
-                    ),
-                }
+                attention_focus::route_notification(
+                    app,
+                    coalesce::Item {
+                        kind: n.kind,
+                        task_id: n.task_id,
+                        chat_id: n.chat_id,
+                        request_id: n.request_id,
+                        title: n.title,
+                        body: n.body,
+                    },
+                );
             }
         }
         ClientEvent::RunRunning { task_id } => tray.on_run_running(task_id),
@@ -150,7 +117,10 @@ fn on_event(
         ClientEvent::PermissionResolved { request_id } => tray.on_permission_resolved(&request_id),
         // Same by-request-id clear as a resolved permission (DT5 B/AC7).
         ClientEvent::QuestionResolved { request_id } => tray.on_permission_resolved(&request_id),
-        ClientEvent::Reconnected => tray.on_reconnected(),
+        ClientEvent::Reconnected => {
+            tray.on_reconnected();
+            attention_focus::on_reconnected(app);
+        }
     }
 }
 
@@ -197,7 +167,7 @@ fn activate(
     proxy: &Arc<ProxyState>,
     tray: Arc<Tray>,
     cache: WorkspaceCache,
-    proxy_url: Url,
+    _proxy_url: Url,
     conn: &Connection,
     connections_path: &Path,
 ) -> (
@@ -225,7 +195,7 @@ fn activate(
             }
             _ => dclient::client::WatcherAuth::default(),
         };
-        let client_task = spawn(app, tray, cache, proxy_url, Config { daemon_url }, auth);
+        let client_task = spawn(app, tray, cache, Config { daemon_url }, auth);
         return (Some(client_task), None);
     }
 
@@ -261,7 +231,7 @@ fn activate(
             };
             let (relay_handle, relay_task) = relay::client::spawn(pairing, options);
             proxy.set_relay(Some(relay_handle.clone()));
-            let client_task = spawn_over_relay(app, tray, cache, proxy_url, relay_handle);
+            let client_task = spawn_over_relay(app, tray, cache, relay_handle);
             (Some(client_task), Some(relay_task))
         }
         Ok(None) => {

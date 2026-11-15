@@ -6,6 +6,13 @@ import { desktop, isDesktop, type AttentionFocusReport } from "@/lib/platform";
 /** Rapid state changes collapse into one trailing report (DT5 C AC9). */
 const DEBOUNCE_MS = 100;
 
+/**
+ * While the window is focused the report is renewed this often even when
+ * nothing changed: the shell treats a report older than ~20 s as absent
+ * (fail open), so a dead or hung page never suppresses a banner for long.
+ */
+const HEARTBEAT_MS = 8000;
+
 const noop = (): void => {};
 
 /**
@@ -79,6 +86,12 @@ export function useAttentionReport(taskId: number | null): void {
       send({ taskId: taskIdRef.current, windowFocused: false, composerFocused: false });
     };
 
+    // Only a focused window needs to vouch for its state; an unfocused
+    // one is already "show everything".
+    const heartbeat = setInterval(() => {
+      if (windowFocused) send(current());
+    }, HEARTBEAT_MS);
+
     window.addEventListener("focus", onWindowFocus);
     window.addEventListener("blur", onWindowBlur);
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -96,6 +109,7 @@ export function useAttentionReport(taskId: number | null): void {
       document.removeEventListener("focusout", onFocusOut);
       window.removeEventListener("pagehide", onPageHide);
       if (timer !== null) clearTimeout(timer);
+      clearInterval(heartbeat);
     };
   }, []);
 

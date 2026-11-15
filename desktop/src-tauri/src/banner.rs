@@ -6,8 +6,46 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
+use tauri::Manager;
+
+use smind_daemon_client::dedupe::Dedupe;
+use smind_daemon_client::NotifyKind;
+
 use crate::coalesce::{self, Banner, Coalescer};
 use crate::notify::{self, ClickContext, Target};
+use crate::state::DesktopState;
+
+/// DT5 B/AC6, moved here by DT5 C: how many distinct (kind, id)
+/// notifications the process remembers as already SHOWN (FIFO-evicted
+/// past this). A notification is recorded when it is offered to the
+/// coalescer, never when it is dropped or held: a held or dropped
+/// request that is still pending must be able to notify later.
+const DEDUPE_CAP: usize = 256;
+
+static SHOWN: OnceLock<Mutex<Dedupe>> = OnceLock::new();
+
+fn shown() -> MutexGuard<'static, Dedupe> {
+    SHOWN
+        .get_or_init(|| Mutex::new(Dedupe::new(DEDUPE_CAP)))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// already_shown is whether a banner for this (kind, id) was already
+/// offered; it does not record anything.
+pub fn already_shown(kind: NotifyKind, id: &str) -> bool {
+    shown().has_seen(kind, id)
+}
+
+/// still_wanted_fn is the flush-time re-check: a queued permission or
+/// question is dropped when its request is no longer pending.
+fn still_wanted_fn(app: &tauri::AppHandle) -> impl Fn(&coalesce::Item) -> bool {
+    let app = app.clone();
+    move |item| {
+        let tray = app.state::<DesktopState>().tray.clone();
+        item.still_wanted(&|id| tray.is_pending(id))
+    }
+}
 
 /// The coalescing window (AC12).
 const WINDOW: Duration = Duration::from_secs(3);
@@ -31,9 +69,15 @@ fn locked(cell: &Mutex<Coalescer>) -> MutexGuard<'_, Coalescer> {
 /// back at once; an item that queued inside the open window schedules
 /// exactly one later flush.
 pub fn submit(ctx: ClickContext, item: coalesce::Item) {
+    // Recorded here, at the moment a banner is actually going out; a
+    // second submission of the same (kind, id) is silent.
+    if !shown().first_time(item.kind, &item.request_id) {
+        return;
+    }
+    let wanted = still_wanted_fn(&ctx.app);
     let banners = {
         let mut coalescer = locked(COALESCER.get_or_init(|| Mutex::new(Coalescer::new(WINDOW))));
-        coalescer.offer(Instant::now(), item)
+        coalescer.offer(Instant::now(), item, &wanted)
     };
     // offer returns an empty list exactly when the item queued inside
     // the open window (a due window flushes first and the item then
@@ -43,12 +87,13 @@ pub fn submit(ctx: ClickContext, item: coalesce::Item) {
         show(&ctx, banner);
     }
     if queued {
+        let wanted = still_wanted_fn(&ctx.app);
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(FLUSH_AFTER).await;
             let banner = {
                 let mut coalescer =
                     locked(COALESCER.get_or_init(|| Mutex::new(Coalescer::new(WINDOW))));
-                coalescer.flush_due(Instant::now())
+                coalescer.flush_due(Instant::now(), &wanted)
             };
             if let Some(banner) = banner {
                 show(&ctx, banner);

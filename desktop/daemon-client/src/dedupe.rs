@@ -24,6 +24,12 @@ impl Dedupe {
         }
     }
 
+    /// has_seen reports whether this (kind, id) was recorded, without
+    /// recording it (a dropped or held notification is not "shown").
+    pub fn has_seen(&self, kind: NotifyKind, id: &str) -> bool {
+        self.seen.contains(&(kind as u8, id.to_string()))
+    }
+
     /// first_time reports whether this (kind, id) has not been seen
     /// before, recording it as seen.
     pub fn first_time(&mut self, kind: NotifyKind, id: &str) -> bool {
@@ -44,6 +50,18 @@ impl Dedupe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn has_seen_does_not_record() {
+        let mut d = Dedupe::new(16);
+        assert!(!d.has_seen(NotifyKind::Permission, "req-1"));
+        assert!(
+            d.first_time(NotifyKind::Permission, "req-1"),
+            "asking did not consume the first time"
+        );
+        assert!(d.has_seen(NotifyKind::Permission, "req-1"));
+        assert!(!d.has_seen(NotifyKind::Question, "req-1"), "kind is part of the key");
+    }
 
     #[test]
     fn a_redelivery_notifies_once() {

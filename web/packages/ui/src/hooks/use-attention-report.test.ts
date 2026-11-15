@@ -151,4 +151,32 @@ describe("useAttentionReport", () => {
     flush();
     expect(attentionFocusReport).toHaveBeenCalledTimes(1);
   });
+
+  it("a focused window re-sends its state every 8 s even when unchanged", async () => {
+    const { attentionFocusReport } = mockPlatform(true);
+    await mountHook(7);
+    act(() => vi.advanceTimersByTime(8000));
+    expect(attentionFocusReport).toHaveBeenCalledTimes(2);
+    act(() => vi.advanceTimersByTime(8000));
+    expect(attentionFocusReport).toHaveBeenCalledTimes(3);
+    expect(attentionFocusReport).toHaveBeenLastCalledWith({ taskId: 7, windowFocused: true, composerFocused: false });
+  });
+
+  it("an unfocused window sends no heartbeat", async () => {
+    const { attentionFocusReport } = mockPlatform(true);
+    await mountHook(7);
+    act(() => window.dispatchEvent(new Event("blur")));
+    flush();
+    expect(attentionFocusReport).toHaveBeenCalledTimes(2);
+    act(() => vi.advanceTimersByTime(30000));
+    expect(attentionFocusReport).toHaveBeenCalledTimes(2);
+  });
+
+  it("unmount stops the heartbeat", async () => {
+    const { attentionFocusReport } = mockPlatform(true);
+    const { unmount } = await mountHook(7);
+    unmount();
+    act(() => vi.advanceTimersByTime(30000));
+    expect(attentionFocusReport).toHaveBeenCalledTimes(1);
+  });
 });
