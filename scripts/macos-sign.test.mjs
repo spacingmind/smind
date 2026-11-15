@@ -1,0 +1,402 @@
+// Tests for scripts/macos-sign/*.sh (docs/plans/active/desktop-notarization-prep.md, AC1-AC5).
+// The scripts call macOS tools by bare name, so a directory of fake tools goes first on PATH and
+// the real scripts run under `bash`. Each fake appends "<tool><US><arg>..." per call to
+// $FAKE_LOG; FAKE_* env knobs steer the fakes. Real tools (bash, base64, tar, mktemp, ...)
+// stay real so the script's own plumbing is exercised.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const SIGN = join(ROOT, "scripts", "macos-sign", "sign-notarize.sh");
+const VERIFY = join(ROOT, "scripts", "macos-sign", "verify.sh");
+const SCRIPTS_DIR = join(ROOT, "scripts", "macos-sign");
+const ENTITLEMENTS_DIR = join(ROOT, "desktop", "src-tauri", "entitlements");
+
+const IDENTITY = "Developer ID Application: Test Ltd (ABCDE12345)";
+const SECRETS = {
+  SMIND_MACOS_CERT_P12_BASE64: Buffer.from("P12-SECRET-BYTES").toString("base64"),
+  SMIND_MACOS_CERT_PASSWORD: "hunter2-p12-pass",
+  SMIND_MACOS_SIGN_IDENTITY: IDENTITY,
+  SMIND_NOTARY_KEY_P8_BASE64: Buffer.from("P8-SECRET-KEY-BYTES").toString("base64"),
+  SMIND_NOTARY_KEY_ID: "ABCDE12345",
+  SMIND_NOTARY_ISSUER: "12345678-1234-1234-1234-123456789abc",
+};
+const SECRET_VALUES = [
+  SECRETS.SMIND_MACOS_CERT_PASSWORD,
+  SECRETS.SMIND_MACOS_CERT_P12_BASE64,
+  SECRETS.SMIND_NOTARY_KEY_P8_BASE64,
+  "P12-SECRET-BYTES",
+  "P8-SECRET-KEY-BYTES",
+];
+
+// --- fakes ---------------------------------------------------------------------------------------------
+
+const withLog = (tool, body) =>
+  [
+    "#!/usr/bin/env bash",
+    "US=$(printf '\\037')",
+    "log() {",
+    `  local line="${tool}" a`,
+    '  for a in "$@"; do line+="$US$a"; done',
+    '  printf \'%s\\n\' "$line" >> "$FAKE_LOG"',
+    "}",
+    'log "$@"',
+    ...body,
+    "exit 0",
+  ].join("\n") + "\n";
+
+const EMPTY_PLIST_XML =
+  '<?xml version="1.0" encoding="UTF-8"?>\\n<plist version="1.0">\\n<dict/>\\n</plist>\\n';
+const JIT_PLIST_XML =
+  '<?xml version="1.0" encoding="UTF-8"?>\\n<plist version="1.0">\\n<dict>\\n' +
+  "<key>com.apple.security.cs.allow-jit</key>\\n<true/>\\n</dict>\\n</plist>\\n";
+
+const FAKES = {
+  uname: ["#!/usr/bin/env bash", 'if [ "${FAKE_UNAME:-}" = "Linux" ]; then echo "Linux"; else echo "Darwin"; fi'].join("\n") + "\n",
+
+  security: withLog("security", [
+    'case "$1" in',
+    '  create-keychain) touch "${@: -1}" ;;',
+    '  delete-keychain) rm -f "${@: -1}" ;;',
+    "  find-identity)",
+    '    if [ "${FAKE_NO_IDENTITY:-}" = "1" ]; then',
+    '      echo "  0 valid identities found"',
+    "    else",
+    '      echo "  1) ABC123 \\"${SMIND_MACOS_SIGN_IDENTITY:-' + IDENTITY + '}\\""',
+    "    fi",
+    "    ;;",
+    "esac",
+  ]),
+
+  codesign: withLog("codesign", [
+    'path="${@: -1}"',
+    'if [ "${1:-}" = "--verify" ]; then',
+    '  if [ "${FAKE_VERIFY_FAIL:-}" = "1" ]; then exit 1; fi',
+    "  exit 0",
+    "fi",
+    "dv=0",
+    "signing=0",
+    'for a in "$@"; do',
+    '  if [ "$a" = "-dv" ]; then dv=1; fi',
+    '  if [ "$a" = "--sign" ]; then signing=1; fi',
+    "done",
+    'if [ "$signing" = "1" ]; then exit 0; fi',
+    'if [ "$dv" = "1" ]; then',
+    "  exec 1>&2",
+    '  echo "Identifier=x"',
+    '  if [ "${FAKE_NO_AUTHORITY:-}" != "1" ]; then echo "Authority=' + IDENTITY + '"; fi',
+    '  if [ "${FAKE_ADHOC:-}" = "1" ]; then echo "Signature=adhoc"; fi',
+    '  team="ABCDE12345"',
+    '  case "$path" in',
+    '    */smind) if [ "${FAKE_TEAM_MISMATCH:-}" = "1" ]; then team="ZZZZZZZZZZ"; fi ;;',
+    "  esac",
+    '  if [ "${FAKE_ADHOC:-}" = "1" ]; then team="not set"; fi',
+    '  echo "TeamIdentifier=$team"',
+    '  flags="0x10000(runtime)"',
+    '  if [ "${FAKE_NO_RUNTIME:-}" = "1" ]; then flags="0x0(none)"; fi',
+    '  case "$path" in',
+    '    */smind) if [ "${FAKE_NO_RUNTIME_NESTED:-}" = "1" ]; then flags="0x0(none)"; fi ;;',
+    "  esac",
+    '  echo "flags=$flags"',
+    "  exit 0",
+    "fi",
+    'if [ "${1:-}" = "-d" ]; then',
+    '  if [ "${FAKE_ENT_MISMATCH:-}" = "1" ]; then printf \'' + JIT_PLIST_XML + "'",
+    '  else printf \'' + EMPTY_PLIST_XML + "'",
+    "  fi",
+    "  exit 0",
+    "fi",
+  ]),
+
+  xcrun: withLog("xcrun", [
+    'if [ "$1" = "notarytool" ] && [ "$2" = "submit" ]; then',
+    '  echo "{\\"id\\":\\"sub-123\\",\\"status\\":\\"${FAKE_NOTARY_STATUS:-Accepted}\\"}"',
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "notarytool" ] && [ "$2" = "log" ]; then',
+  '  echo \'{"issues":[]}\' > "$4"',
+    "  exit 0",
+    "fi",
+    'if [ "$1" = "stapler" ] && [ "$2" = "validate" ] && [ "${FAKE_STAPLE_FAIL:-}" = "1" ]; then',
+    "  exit 1",
+    "fi",
+  ]),
+
+  ditto: withLog("ditto", [
+    'if [ "$1" = "-c" ]; then',
+    '  touch "${@: -1}"',
+    "else",
+    '  cp -R "$1" "$2"',
+    "fi",
+  ]),
+
+  hdiutil: withLog("hdiutil", ['touch "${@: -1}"']),
+
+  spctl: withLog("spctl", ['if [ "${FAKE_SPCTL_FAIL:-}" = "1" ]; then exit 1; fi']),
+
+  plutil: [
+    "#!/usr/bin/env node",
+    'const fs = require("node:fs");',
+    "const a = process.argv.slice(2);",
+    'const out = (s) => process.stdout.write(s + "\\n");',
+    'if (a[0] === "-extract") {',
+    "  const key = a[1];",
+    "  const file = a[a.length - 1];",
+    "  let text;",
+    '  try { text = fs.readFileSync(file, "utf8"); } catch { process.exit(1); }',
+    "  const t = text.trim();",
+    '  if (t.startsWith("{")) {',
+    "    let v;",
+    "    try { v = JSON.parse(t)[key]; } catch { process.exit(1); }",
+    "    if (v === undefined || v === null) process.exit(1);",
+    "    out(String(v));",
+    "    process.exit(0);",
+    "  }",
+    '  const m = t.match(new RegExp("<key>" + key + "</key>[^<]*<string>([^<]*)</string>"));',
+    "  if (m) { out(m[1]); process.exit(0); }",
+    "  process.exit(1);",
+    "}",
+    'if (a[0] === "-p") {',
+    "  let t;",
+    '  try { t = a[1] === "-" ? fs.readFileSync(0, "utf8") : fs.readFileSync(a[1], "utf8"); } catch { process.exit(1); }',
+    "  t = t.trim();",
+    '  if (t === "") process.exit(1);',
+    '  const keys = [...t.matchAll(/<key>([^<]+)<\\/key>/g)].map((m) => m[1]);',
+    '  out("{");',
+    "  for (const k of keys) out('\"' + k + '\" => 1');",
+    '  out("}");',
+    "  process.exit(0);",
+    "}",
+    'if (a[0] === "-lint") process.exit(0);',
+    "process.exit(0);",
+  ].join("\n") + "\n",
+};
+
+// --- harness -------------------------------------------------------------------------------------------
+
+function makeFakeBin(dir) {
+  mkdirSync(dir);
+  for (const [name, src] of Object.entries(FAKES)) {
+    const p = join(dir, name);
+    writeFileSync(p, src);
+    chmodSync(p, 0o755);
+  }
+}
+
+const INFO_PLIST = [
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  "<plist version=\"1.0\">",
+  "<dict>",
+  "\t<key>CFBundleExecutable</key>",
+  "\t<string>smind-desktop</string>",
+  "</dict>",
+  "</plist>",
+].join("\n");
+
+function makeApp(dir) {
+  const app = join(dir, "sMind.app");
+  mkdirSync(join(app, "Contents", "MacOS"), { recursive: true });
+  writeFileSync(join(app, "Contents", "Info.plist"), INFO_PLIST);
+  writeFileSync(join(app, "Contents", "MacOS", "smind-desktop"), "");
+  writeFileSync(join(app, "Contents", "MacOS", "smind"), "");
+  return app;
+}
+
+function harness({ knobs = {}, omit = [], withSecrets = true } = {}) {
+  const tmp = mkdtempSync(join(tmpdir(), "smind-sign-test."));
+  const bin = join(tmp, "fakebin");
+  makeFakeBin(bin);
+  const mytmp = mkdtempSync(join(tmpdir(), "smind-sign-tmp."));
+  const logFile = join(tmp, "fake.log");
+  const env = {
+    PATH: bin + ":" + process.env.PATH,
+    HOME: tmp,
+    TMPDIR: mytmp,
+    FAKE_LOG: logFile,
+  };
+  if (withSecrets) Object.assign(env, SECRETS);
+  Object.assign(env, knobs);
+  for (const k of omit) delete env[k];
+  return {
+    tmp,
+    mytmp,
+    env,
+    run: (script, args) => spawnSync("bash", [script, ...args], { env, encoding: "utf8" }),
+    log: () => {
+      try {
+        return readFileSync(logFile, "utf8").split("\n").filter(Boolean).map((l) => l.split("\u001f"));
+      } catch {
+        return [];
+      }
+    },
+    cleanup: () => {
+      rmSync(tmp, { recursive: true, force: true });
+      rmSync(mytmp, { recursive: true, force: true });
+    },
+  };
+}
+
+function withHarness(opts, fn) {
+  const h = harness(opts);
+  try {
+    fn(h);
+  } finally {
+    h.cleanup();
+  }
+}
+
+function runSign(h, extraArgs = []) {
+  const app = makeApp(h.tmp);
+  const out = join(h.tmp, "out");
+  return { app, out, r: h.run(SIGN, ["--app", app, "--out", out, ...extraArgs]) };
+}
+
+const MISSING_SECRET_CASES = Object.keys(SECRETS).map((name) => ({ name, omit: [name] }));
+const BAD_SHAPE_CASES = [
+  { name: "identity", knobs: { SMIND_MACOS_SIGN_IDENTITY: "Apple Development: x" } },
+  { name: "key id", knobs: { SMIND_NOTARY_KEY_ID: "short" } },
+  { name: "issuer", knobs: { SMIND_NOTARY_ISSUER: "not-a-uuid" } },
+];
+const ALL_REFUSAL_CASES = [...MISSING_SECRET_CASES, ...BAD_SHAPE_CASES];
+
+const toolLines = (lines, tool) => lines.filter((f) => f[0] === tool);
+const flat = (f) => f.join(" ");
+
+function assertCleanedUp(h) {
+  const lines = h.log();
+  const created = toolLines(lines, "security").find((f) => f.includes("create-keychain"));
+  const deleted = toolLines(lines, "security").find((f) => f.includes("delete-keychain"));
+  assert.ok(created, "no security create-keychain call");
+  assert.ok(deleted, "no security delete-keychain call");
+  assert.equal(deleted[deleted.length - 1], created[created.length - 1], "wrong keychain deleted");
+  assert.ok(
+    readdirSync(h.mytmp).every((n) => !n.startsWith("smind-macos-sign.")),
+    "temp work dir left behind in TMPDIR",
+  );
+}
+
+// --- the secret gate (AC1) -----------------------------------------------------------------------------
+
+test("sign-refuses-without-each-secret", () => {
+  for (const { name, omit } of MISSING_SECRET_CASES) {
+    withHarness({ omit }, (h) => {
+      const r = h.run(SIGN, ["--app", makeApp(h.tmp), "--out", join(h.tmp, "out")]);
+      assert.equal(r.status, 3, `${name}: unexpected exit: ${r.stderr}`);
+      assert.ok(r.stderr.includes(name), `${name} not named in: ${r.stderr}`);
+      assert.deepEqual(h.log(), [], `${name}: a tool ran before the refusal`);
+    });
+  }
+});
+
+test("sign-refuses-a-bad-identity-shape", () => {
+  withHarness(BAD_SHAPE_CASES[0], (h) => {
+    const r = h.run(SIGN, ["--app", makeApp(h.tmp)]);
+    assert.equal(r.status, 3, r.stderr);
+    assert.deepEqual(h.log(), []);
+  });
+});
+
+test("sign-refuses-bad-key-id-and-issuer", () => {
+  for (const c of BAD_SHAPE_CASES.slice(1)) {
+    withHarness(c, (h) => {
+      const r = h.run(SIGN, ["--app", makeApp(h.tmp)]);
+      assert.equal(r.status, 3, `${c.name}: unexpected exit: ${r.stderr}`);
+      assert.deepEqual(h.log(), [], `${c.name}: a tool ran before the refusal`);
+    });
+  }
+});
+
+test("sign-refusal-names-variables-never-values", () => {
+  for (const c of ALL_REFUSAL_CASES) {
+    withHarness(c, (h) => {
+      const r = h.run(SIGN, ["--app", makeApp(h.tmp), "--out", join(h.tmp, "out")]);
+      assert.equal(r.status, 3, `${c.name}: unexpected exit: ${r.stderr}`);
+      const o = r.stdout + r.stderr;
+      for (const v of SECRET_VALUES) {
+        assert.ok(!o.includes(v), `${c.name}: refusal leaked a secret value`);
+      }
+    });
+  }
+});
+
+test("sign-refuses-before-any-tool-runs", () => {
+  for (const app of ["fixture", "missing"]) {
+    for (const c of ALL_REFUSAL_CASES) {
+      withHarness(c, (h) => {
+        const appArg = app === "fixture" ? makeApp(h.tmp) : join(h.tmp, "no", "such.app");
+        const r = h.run(SIGN, ["--app", appArg, "--out", join(h.tmp, "out")]);
+        assert.equal(r.status, 3, `${c.name} (${app}): unexpected exit: ${r.stderr}`);
+        assert.deepEqual(h.log(), [], `${c.name} (${app}): a tool ran before the refusal`);
+      });
+    }
+  }
+});
+
+test("sign-refuses-off-macos", () => {
+  withHarness({ knobs: { FAKE_UNAME: "Linux" } }, (h) => {
+    const r = h.run(SIGN, ["--app", makeApp(h.tmp), "--out", join(h.tmp, "out")]);
+    assert.equal(r.status, 3, r.stderr);
+    const tools = new Set(h.log().map((f) => f[0]));
+    assert.ok(!tools.has("codesign"), "codesign ran off macOS");
+    assert.ok(!tools.has("security"), "security ran off macOS");
+    assert.ok(!tools.has("xcrun"), "xcrun ran off macOS");
+  });
+});
+
+test("sign-check-mode-signs-nothing", () => {
+  withHarness({}, (h) => {
+    const r = h.run(SIGN, ["--check"]);
+    assert.equal(r.status, 0, r.stderr);
+    const sec = toolLines(h.log(), "security").map(flat);
+    assert.ok(sec.some((l) => l.includes("create-keychain")), sec.join("\n"));
+    assert.ok(sec.some((l) => l.includes("import")), sec.join("\n"));
+    assert.ok(sec.some((l) => l.includes("find-identity")), sec.join("\n"));
+    assert.deepEqual(toolLines(h.log(), "codesign"), [], "--check signed something");
+    assert.deepEqual(toolLines(h.log(), "xcrun"), [], "--check called xcrun");
+  });
+});
+
+// --- no leakage, cleanup (AC2) -------------------------------------------------------------------------
+
+test("sign-no-secret-in-output", () => {
+  withHarness({}, (h) => {
+    const { r } = runSign(h);
+    assert.equal(r.status, 0, r.stderr);
+    const o = r.stdout + r.stderr;
+    for (const v of SECRET_VALUES) {
+      assert.ok(!o.includes(v), `a secret value appeared in script output: ${v}`);
+    }
+  });
+});
+
+test("sign-cleans-up-keychain-and-temp-dir-on-success", () => {
+  withHarness({}, (h) => {
+    const { r } = runSign(h);
+    assert.equal(r.status, 0, r.stderr);
+    assertCleanedUp(h);
+  });
+});
+
+test("sign-cleans-up-on-notarization-failure", () => {
+  withHarness({ knobs: { FAKE_NOTARY_STATUS: "Invalid" } }, (h) => {
+    const { r } = runSign(h);
+    assert.notEqual(r.status, 0, "notarization failure must fail the script");
+    assertCleanedUp(h);
+  });
+});
