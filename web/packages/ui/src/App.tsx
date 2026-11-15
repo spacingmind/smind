@@ -2457,7 +2457,7 @@ function PaneTabStrip({
               data-testid="tab-scroller"
               className="min-w-0 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              {/* Chips: each tab is 160px at most and shrinks with its neighbours down to 64px; only then does the strip scroll. */}
+              {/* Chips: each tab takes its natural width (160px at most) while the strip has room; only when the total overflows do they shrink, down to 64px, and only then does the strip scroll. */}
               <TabsList variant="flat" className="w-full">
                 {tabs.map((entry, index) => (
                   <DraggableTabTrigger
@@ -2671,7 +2671,7 @@ function DraggableTabTrigger({
           data-testid={`workspace-tab-${entry.kind}`}
           data-tab-key={entry.key}
           className={cn(
-            "group/tab max-w-40 gap-1.5 group-data-[variant=flat]/tabs-list:min-w-16 group-data-[variant=flat]/tabs-list:flex-[0_1_10rem] group-data-[variant=flat]/tabs-list:aria-selected:min-w-24",
+            "group/tab max-w-40 gap-1.5 group-data-[variant=flat]/tabs-list:min-w-16 group-data-[variant=flat]/tabs-list:flex-[0_1_auto] group-data-[variant=flat]/tabs-list:aria-selected:min-w-24",
             drag.chip,
           )}
           {...listeners}
