@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"path"
 	"reflect"
 	"sort"
@@ -429,7 +430,7 @@ func (s *Session) eventLoop() {
 				default:
 				}
 			}
-		case "Fetch.requestPaused":
+		case "Fetch.requestPaused", "Fetch.authRequired":
 			if s.qbytes.Add(int64(ev.size)) > s.maxQueued {
 				s.note("blocked", "request flood: the session was closed")
 				go s.Close()
@@ -462,6 +463,10 @@ func (s *Session) requestWorker() {
 		select {
 		case ev := <-s.requests:
 			s.qbytes.Add(-int64(ev.size))
+			if ev.Method == "Fetch.authRequired" {
+				s.onAuthRequired(ev)
+				continue
+			}
 			s.onRequestPaused(ev)
 		case <-s.cl.Done():
 			return
@@ -578,7 +583,7 @@ func (s *Session) onAttached(ev Event) {
 		params any
 		when   bool
 	}{
-		{"Fetch.enable", map[string]any{"patterns": []map[string]any{{"urlPattern": "*"}}}, true},
+		{"Fetch.enable", map[string]any{"patterns": []map[string]any{{"urlPattern": "*"}}, "handleAuthRequests": true}, true},
 		{"Target.setAutoAttach", autoAttachParams(), true}, // frames and workers of this target stay intercepted
 		{"Page.enable", nil, isPage},
 		{"Runtime.enable", nil, isPage},
@@ -597,6 +602,42 @@ func (s *Session) onAttached(ev Event) {
 	if ts != nil {
 		close(ts.ready)
 	}
+}
+
+// onAuthRequired answers an authentication challenge of any attached target.
+// The proxy's challenge (and only it: source Proxy AND the challenging origin is
+// OUR proxy) gets the session secret. A challenge from anything else, a web
+// site asking for credentials, a proxy at another address, is cancelled: the
+// secret never goes to a page's origin.
+func (s *Session) onAuthRequired(ev Event) {
+	var p struct {
+		RequestID     string `json:"requestId"`
+		AuthChallenge struct {
+			Source string `json:"source"`
+			Origin string `json:"origin"`
+		} `json:"authChallenge"`
+	}
+	if json.Unmarshal(ev.Params, &p) != nil || p.RequestID == "" {
+		return
+	}
+	ctx, cancel := s.bgCtx()
+	defer cancel()
+	resp := map[string]any{"response": "CancelAuth"}
+	if p.AuthChallenge.Source == "Proxy" && s.proxyOrigin(p.AuthChallenge.Origin) {
+		resp = map[string]any{"response": "ProvideCredentials", "username": proxyAuthUser, "password": s.proxy.Secret()}
+	} else {
+		s.note("blocked", "a request asked for credentials and was refused")
+	}
+	_ = s.cl.Call(ctx, ev.SessionID, "Fetch.continueWithAuth", map[string]any{"requestId": p.RequestID, "authChallengeResponse": resp}, nil)
+}
+
+// proxyOrigin reports whether a challenge origin names this session's proxy.
+func (s *Session) proxyOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	return u.Host == s.proxy.Addr()
 }
 
 func (s *Session) onRequestPaused(ev Event) {

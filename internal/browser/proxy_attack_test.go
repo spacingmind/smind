@@ -17,7 +17,7 @@ import (
 // returns the whole response.
 func (r *proxyRig) raw(t *testing.T, req string) string {
 	t.Helper()
-	c, err := net.Dial("tcp", r.px.Addr())
+	c, err := r.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestProxyPipelinedAndSmuggledRequestsAreJudgedIndividually(t *testing.T) {
 		fmt.Fprint(w, "live")
 	})
 	rig := newProxyRig(t, nil, proxyResolver, nil)
-	c, err := net.Dial("tcp", rig.px.Addr())
+	c, err := rig.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestProxyHoldsSixtyFourConcurrentTunnels(t *testing.T) {
 		}
 		conns = append(conns, c)
 	}
-	c, err := net.Dial("tcp", rig.px.Addr())
+	c, err := rig.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestProxyHoldsSixtyFourConcurrentTunnels(t *testing.T) {
 func TestProxyIdleClientKeepAliveReleasesItsSlot(t *testing.T) {
 	live := newHitServer(t, nil)
 	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.MaxConns = 1; c.ClientIdle = 200 * time.Millisecond })
-	c, err := net.Dial("tcp", rig.px.Addr())
+	c, err := rig.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestProxyEmptyBodyIsNotSentChunked(t *testing.T) {
 func TestProxyReportsNoUpstreamReuseAcrossRequestsOnOneClientConnection(t *testing.T) {
 	live := newHitServer(t, nil)
 	rig := newProxyRig(t, nil, proxyResolver, nil)
-	c, err := net.Dial("tcp", rig.px.Addr())
+	c, err := rig.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +453,7 @@ func TestProxyEarlyUpstreamReplyWithAStalledClientBody(t *testing.T) {
 		fmt.Fprint(w, "second")
 	})
 	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.IOTimeout = 300 * time.Millisecond; c.MaxConns = 1 })
-	c, err := net.Dial("tcp", rig.px.Addr())
+	c, err := rig.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ func TestProxyCompletedPostKeepsTheClientConnectionAlive(t *testing.T) {
 		fmt.Fprintf(w, "got %d", len(b))
 	})
 	rig := newProxyRig(t, nil, proxyResolver, nil)
-	c, err := net.Dial("tcp", rig.px.Addr())
+	c, err := rig.dial()
 	if err != nil {
 		t.Fatal(err)
 	}

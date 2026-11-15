@@ -2,6 +2,11 @@ package browser
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -61,6 +66,13 @@ type ProxyConfig struct {
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// OnRefuse is told about each refused target (cleaned text, no page data).
 	OnRefuse func(target, reason string)
+	// Secret is the per-session Proxy-Authorization secret. Empty: a random
+	// 128-bit one is generated (the normal case; a test may pin it). The proxy
+	// serves nobody who does not present it.
+	Secret string
+	// AuthFailuresPerMinute cuts a client that fails authentication more often
+	// than this (default 20): the connection is closed without an answer.
+	AuthFailuresPerMinute int
 }
 
 // Proxy is a loopback HTTP proxy that enforces a Policy.
@@ -71,9 +83,17 @@ type Proxy struct {
 	srv    *http.Server
 	tr     *http.Transport
 
+	secretSum [sha256.Size]byte // sha256("smind:" + secret): what a valid credential hashes to
+	secret    string
+
 	mu     sync.Mutex
 	tunnel map[net.Conn]struct{}
 	closed bool
+
+	authMu       sync.Mutex
+	authWindow   time.Time
+	authFailures int
+	authNoted    bool
 }
 
 type pinKey struct{}
@@ -106,12 +126,24 @@ func StartProxy(cfg ProxyConfig) (*Proxy, error) {
 		d := &net.Dialer{}
 		cfg.Dial = d.DialContext
 	}
+	if cfg.AuthFailuresPerMinute <= 0 {
+		cfg.AuthFailuresPerMinute = 20
+	}
+	if cfg.Secret == "" {
+		var b [16]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			return nil, fmt.Errorf("browser: proxy secret: %w", err)
+		}
+		cfg.Secret = hex.EncodeToString(b[:])
+	}
 	raw, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("browser: proxy listen: %w", err)
 	}
 	port := raw.Addr().(*net.TCPAddr).Port
-	p := &Proxy{cfg: cfg, tunnel: map[net.Conn]struct{}{}}
+	p := &Proxy{cfg: cfg, tunnel: map[net.Conn]struct{}{}, secret: cfg.Secret}
+	p.secretSum = sha256.Sum256([]byte(proxyAuthUser + ":" + cfg.Secret))
+	p.cfg.Secret = "" // one copy, unexported: nothing that prints the config can show it
 	p.policy = cfg.Policy
 	p.policy.Deny = append(append([]Endpoint(nil), cfg.Policy.Deny...), Endpoint{Host: "127.0.0.1", Port: port})
 	p.ln = &limitListener{Listener: raw, sem: make(chan struct{}, cfg.MaxConns)}
@@ -141,6 +173,57 @@ func StartProxy(cfg ProxyConfig) (*Proxy, error) {
 	}
 	go func() { _ = p.srv.Serve(p.ln) }()
 	return p, nil
+}
+
+// proxyAuthUser is the fixed user name of the proxy credential; the secret is
+// the password.
+const proxyAuthUser = "smind"
+
+// Secret is the per-session credential the session hands to the browser
+// through CDP (Fetch.authRequired). It is never logged, never in an argument
+// list, and not in the profile.
+func (p *Proxy) Secret() string { return p.secret }
+
+// String and GoString keep the secret out of any formatted output of a Proxy.
+func (p *Proxy) String() string   { return "browser.Proxy(" + p.ln.Addr().String() + ")" }
+func (p *Proxy) GoString() string { return p.String() }
+
+// authorized reports whether the request carries the valid credential. Both
+// sides are hashed first so the comparison is constant time whatever the
+// length of what the client sent.
+func (p *Proxy) authorized(r *http.Request) bool {
+	h := r.Header.Get("Proxy-Authorization")
+	scheme, rest, ok := strings.Cut(h, " ")
+	if !ok || !strings.EqualFold(scheme, "Basic") {
+		return false
+	}
+	dec, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rest))
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256(dec)
+	return subtle.ConstantTimeCompare(sum[:], p.secretSum[:]) == 1
+}
+
+// authFailure counts a failed attempt and reports whether the client is over
+// the limit (then it is cut, and the agent is told once).
+func (p *Proxy) authFailure() (cut bool) {
+	now := time.Now()
+	p.authMu.Lock()
+	if now.Sub(p.authWindow) > time.Minute {
+		p.authWindow, p.authFailures = now, 0
+	}
+	p.authFailures++
+	cut = p.authFailures > p.cfg.AuthFailuresPerMinute
+	first := cut && !p.authNoted
+	if first {
+		p.authNoted = true
+	}
+	p.authMu.Unlock()
+	if first && p.cfg.OnRefuse != nil {
+		p.cfg.OnRefuse("proxy", "requests without the proxy credential were refused and cut")
+	}
+	return cut
 }
 
 // Addr is the proxy's host:port, for --proxy-server.
@@ -257,6 +340,23 @@ func (p *Proxy) refuseWith(w http.ResponseWriter, code int, target, reason strin
 }
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
+	// Authentication comes first, before the target is even parsed: nothing a
+	// process without the session secret sends reaches the policy, the resolver
+	// or a dial.
+	if !p.authorized(r) {
+		if p.authFailure() {
+			if hj, ok := w.(http.Hijacker); ok {
+				if c, _, err := hj.Hijack(); err == nil {
+					_ = c.Close()
+					return
+				}
+			}
+		}
+		w.Header().Set("Proxy-Authenticate", `Basic realm="smind"`)
+		w.Header().Set("Connection", "close")
+		http.Error(w, "proxy authentication required", http.StatusProxyAuthRequired)
+		return
+	}
 	if r.Method == http.MethodConnect {
 		p.handleConnect(w, r)
 		return

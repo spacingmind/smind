@@ -934,3 +934,101 @@ func TestSessionWorksInTheTabItNavigated(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func authRequired(f *fakeCDP, session, id, source, origin string) {
+	f.event(session, "Fetch.authRequired", map[string]any{
+		"requestId": id, "resourceType": "Document",
+		"request":       map[string]any{"url": "http://localhost:3000/"},
+		"authChallenge": map[string]any{"source": source, "origin": origin, "scheme": "basic", "realm": "smind"},
+	})
+}
+
+func TestSessionFetchEnableHandlesAuthRequests(t *testing.T) {
+	_, l := startTestSession(t, nil)
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	calls := f.callsFor("Fetch.enable")
+	if len(calls) != 1 || calls[0].Params["handleAuthRequests"] != true {
+		t.Fatalf("Fetch.enable must ask for auth requests (or the proxy challenge would stall every request): %+v", calls)
+	}
+}
+
+func TestSessionProxyChallengeAnsweredWithTheSecretAndOthersCancelled(t *testing.T) {
+	s, l := startTestSession(t, nil)
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	secret := s.proxy.Secret()
+	origin := "http://" + s.proxy.Addr()
+
+	authRequired(f, "S1", "a-proxy", "Proxy", origin)
+	authRequired(f, "S1", "a-server", "Server", "http://localhost:3000")
+	authRequired(f, "S1", "a-server-same-origin-as-proxy", "Server", origin) // a page cannot borrow the proxy's origin as a Server challenge
+	authRequired(f, "S1", "a-other-proxy", "Proxy", "http://127.0.0.1:1")
+	authRequired(f, "S1", "a-https-proxy-origin", "Proxy", "https://"+s.proxy.Addr())
+	authRequired(f, "S1", "a-empty", "Proxy", "")
+	got := f.waitCall("Fetch.continueWithAuth", 6)
+	byID := map[string]fakeCall{}
+	for _, c := range got {
+		byID[c.Params["requestId"].(string)] = c
+		if c.SessionID != "S1" {
+			t.Errorf("answered on the wrong session: %+v", c)
+		}
+	}
+	resp := func(id string) map[string]any {
+		c, ok := byID[id]
+		if !ok {
+			t.Fatalf("no answer for %s", id)
+		}
+		return c.Params["authChallengeResponse"].(map[string]any)
+	}
+	pr := resp("a-proxy")
+	if pr["response"] != "ProvideCredentials" || pr["username"] != "smind" || pr["password"] != secret {
+		t.Fatalf("the proxy challenge gets the credential: %v", pr)
+	}
+	for _, id := range []string{"a-server", "a-server-same-origin-as-proxy", "a-other-proxy", "a-https-proxy-origin", "a-empty"} {
+		r := resp(id)
+		if r["response"] != "CancelAuth" || r["password"] != nil || r["username"] != nil {
+			t.Errorf("%s must be cancelled with no credential: %v", id, r)
+		}
+	}
+	for _, c := range f.callsFor("Fetch.continueWithAuth") {
+		if c.Params["requestId"] != "a-proxy" && strings.Contains(fmt.Sprint(c.Params), secret) {
+			t.Fatalf("the secret went to a non-proxy challenge: %+v", c)
+		}
+	}
+	for _, n := range s.DrainNotices() {
+		if strings.Contains(n.Detail, secret) {
+			t.Fatalf("a notice shows the secret: %+v", n)
+		}
+	}
+}
+
+// A worker target is intercepted too, so its proxy challenge arrives on its own session.
+func TestSessionProxyChallengeOnAWorkerTarget(t *testing.T) {
+	s, l := startTestSession(t, nil)
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	attach(f, "W1", "W1T", "worker")
+	f.waitCall("Runtime.runIfWaitingForDebugger", 2)
+	authRequired(f, "W1", "w-proxy", "Proxy", "http://"+s.proxy.Addr())
+	got := f.waitCall("Fetch.continueWithAuth", 1)
+	if got[0].SessionID != "W1" || got[0].Params["authChallengeResponse"].(map[string]any)["password"] != s.proxy.Secret() {
+		t.Fatalf("worker challenge: %+v", got[0])
+	}
+	if n := len(f.callsFor("Fetch.enable")); n != 2 {
+		t.Fatalf("the worker target enables Fetch with auth handling too: %d", n)
+	}
+	for _, c := range f.callsFor("Fetch.enable") {
+		if c.Params["handleAuthRequests"] != true {
+			t.Fatalf("Fetch.enable without auth handling: %+v", c)
+		}
+	}
+}
+
+// The secret is not in the browser's command line (the launcher options carry no secret).
+func TestSessionSecretNotInLaunchOptions(t *testing.T) {
+	s, l := startTestSession(t, nil)
+	if strings.Contains(fmt.Sprintf("%+v", l.opts), s.proxy.Secret()) {
+		t.Fatal("the proxy secret reached the launch options")
+	}
+}
