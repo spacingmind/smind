@@ -36,6 +36,7 @@ var goAllowList = map[string]string{
 	"internal/workspace/setup_unix.go:runScript":    "only forwards Wait's result to a channel",
 	"internal/workspace/setup_windows.go:runScript": "only forwards Wait's result to a channel",
 	"cmd/smind/mcp.go:cmdMcpServe":                  "only forwards srv.Run's result to a channel",
+	"cmd/smind/mcp_browser.go:cmdMcpBrowser":        "only forwards srv.Run's result to a channel (same as cmdMcpServe)",
 	"cmd/smind/task_wait.go:runTaskWait":            "a CLI command, not the daemon",
 }
 
