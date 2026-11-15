@@ -28,6 +28,10 @@ Status: active (2026-11-15). Five small PRs on `wave/desktop`, one at a time: C,
 - Reuse `run.answerPermission` through a new `useAnswerPermissionAlways` in `use-inbox.ts`, mirroring `useRespondPermission` (one place per surface, same wire).
 - Mobile: no change (see Problem).
 
+## PR A: terminal surface matches the pane
+
+AC: the terminal background and cursor accent are the pane surface (`--panel`, what `bg-panel` paints), light and dark. Decision: the `--terminal-bg` token keeps its reference-parity value (the token test forbids dark overrides, and plugins read it); the terminal resolves `--color-panel` instead. Test: `lib/terminal-theme.test.ts`, `terminal-pane.test.tsx` (wrapper class `bg-panel`). Validation: frames light/dark 1280/390 (inset == pane colour asserted); tabs e2e specs on 4 projects.
+
 ## Progress / Validation
 
 (filled in per PR)
