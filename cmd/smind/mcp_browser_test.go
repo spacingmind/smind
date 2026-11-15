@@ -266,7 +266,7 @@ func TestBrowserMCP_SchemasAreStrict(t *testing.T) {
 // TestBrowserMCP_ForwardsToTheSocket: every tool is exactly one
 // socket round trip carrying {tool, args}, with the args the typed
 // input marshals to -- nothing added, nothing renamed.
-func TestBrowserMCP_ForwardsToBrowserCall(t *testing.T) {
+func TestBrowserMCP_ForwardsToTheSocket(t *testing.T) {
 	cs, calls, _ := browserSession(t)
 	ctx := context.Background()
 	for _, c := range []struct {
@@ -366,7 +366,7 @@ func TestBrowserMCP_ConvertsTextAndImageResults(t *testing.T) {
 // TestBrowserMCP_SocketErrorIsAToolError: a daemon refusal becomes a tool
 // error carrying the daemon's message, labelled with the tool's own name --
 // not a protocol error.
-func TestBrowserMCP_DaemonErrorIsAToolError(t *testing.T) {
+func TestBrowserMCP_SocketErrorIsAToolError(t *testing.T) {
 	cs, _, setReply := browserSession(t)
 	setReply(fakeBrowserReply{errMsg: "host example.net is not allowed by the policy"})
 	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
