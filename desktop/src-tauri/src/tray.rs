@@ -120,14 +120,21 @@ fn build_ui(
             Some(MenuAction::Open) => show_main(app),
             Some(MenuAction::Quit) => app.exit(0),
             Some(MenuAction::Attention) => {
-                let most_recent = click_state.lock().unwrap().most_recent_task();
-                if let Some(task_id) = most_recent {
+                let most_recent = click_state.lock().unwrap().most_recent();
+                if let Some(pending) = most_recent {
                     let ctx = ClickContext {
                         app: app.clone(),
                         cache: cache.clone(),
                         proxy_url: proxy_url.clone(),
                     };
-                    notify::navigate_to_task(&ctx, task_id);
+                    notify::navigate(
+                        &ctx,
+                        &notify::Target {
+                            task_id: pending.task_id,
+                            chat_id: pending.chat_id,
+                            request_id: Some(pending.request_id),
+                        },
+                    );
                 }
             }
             None => {}
@@ -138,10 +145,10 @@ fn build_ui(
 }
 
 impl Tray {
-    pub fn on_permission_pending(&self, task_id: i64, request_id: &str) {
+    pub fn on_permission_pending(&self, task_id: i64, chat_id: i64, request_id: &str) {
         let count = {
             let mut state = self.state.lock().unwrap();
-            state.on_pending(task_id, request_id);
+            state.on_pending(task_id, chat_id, request_id);
             state.count()
         };
         self.refresh(count);

@@ -69,13 +69,18 @@ fn on_event(
 ) {
     match event {
         ClientEvent::Notification(n) => {
-            tray.on_permission_pending(n.task_id, &n.request_id);
+            let target = notify::Target {
+                task_id: n.task_id,
+                chat_id: n.chat_id,
+                request_id: Some(n.request_id.clone()),
+            };
+            tray.on_permission_pending(n.task_id, n.chat_id, &n.request_id);
             let ctx = notify::ClickContext {
                 app: app.clone(),
                 cache: cache.clone(),
                 proxy_url: proxy_url.clone(),
             };
-            notify::show(ctx, n.title, n.body, n.task_id);
+            notify::show(ctx, n.title, n.body, target);
         }
         ClientEvent::RunRunning { task_id } => tray.on_run_running(task_id),
         ClientEvent::RunEnded { task_id } => tray.on_run_ended(task_id),

@@ -31,13 +31,15 @@ pub struct EventNotification {
 }
 
 /// PermissionPending is the payload of permission.pending events:
-/// {runId, taskId, requestId, summary, options}.
+/// {runId, taskId, chatId, requestId, summary, options}.
 #[derive(Debug, Deserialize)]
 pub struct PermissionPending {
     #[serde(rename = "runId")]
     pub run_id: String,
     #[serde(rename = "taskId")]
     pub task_id: i64,
+    #[serde(default, rename = "chatId")]
+    pub chat_id: i64,
     #[serde(rename = "requestId")]
     pub request_id: String,
     pub summary: String,
@@ -82,12 +84,14 @@ pub fn run_status(payload: &serde_json::Value) -> Option<RunStatus> {
 /// carries the source task so the click handler can look up its
 /// workspaceId (see `crate::cache::WorkspaceCache`) and build a route;
 /// request_id feeds the tray's attention count (`crate::attention`),
-/// which dedupes by it.
+/// which dedupes by it. chat_id names the chat tab the request's card
+/// lives in (0 = unknown, from a daemon payload without a chatId).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Notification {
     pub title: String,
     pub body: String,
     pub task_id: i64,
+    pub chat_id: i64,
     pub request_id: String,
 }
 
@@ -154,6 +158,7 @@ pub fn notification_for(event: &EventNotification) -> Option<Notification> {
                 title: "sMind: permission needed".to_string(),
                 body: p.summary,
                 task_id: p.task_id,
+                chat_id: p.chat_id,
                 request_id: p.request_id,
             })
         }
@@ -165,7 +170,7 @@ pub fn notification_for(event: &EventNotification) -> Option<Notification> {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = r#"{"event":{"topic":"permission.pending","seq":3,"payload":{"runId":"run_1","taskId":42,"requestId":"req_9","summary":"Run `cargo test` in task 42?","options":[{"id":"allow","name":"Allow","kind":"allow"}]}}}"#;
+    const SAMPLE: &str = r#"{"event":{"topic":"permission.pending","seq":3,"payload":{"runId":"run_1","taskId":42,"chatId":7,"requestId":"req_9","summary":"Run `cargo test` in task 42?","options":[{"id":"allow","name":"Allow","kind":"allow"}]}}}"#;
 
     #[test]
     fn permission_resolved_payload_decodes() {
@@ -194,7 +199,18 @@ mod tests {
         assert_eq!(n.title, "sMind: permission needed");
         assert_eq!(n.body, "Run `cargo test` in task 42?");
         assert_eq!(n.task_id, 42);
+        assert_eq!(n.chat_id, 7);
         assert_eq!(n.request_id, "req_9");
+    }
+
+    #[test]
+    fn notification_without_chat_id_defaults_to_zero() {
+        let msg = parse_server_message(
+            r#"{"event":{"topic":"permission.pending","seq":4,"payload":{"runId":"run_1","taskId":42,"requestId":"req_9","summary":"s"}}}"#,
+        )
+        .unwrap();
+        let n = notification_for(msg.event.as_ref().unwrap()).unwrap();
+        assert_eq!(n.chat_id, 0);
     }
 
     #[test]
