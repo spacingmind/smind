@@ -10,8 +10,14 @@ use std::collections::VecDeque;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use serde::Deserialize;
+use tauri::{AppHandle, State};
 
 use smind_daemon_client::NotifyKind;
+
+use crate::banner;
+use crate::coalesce;
+use crate::notify::ClickContext;
+use crate::state::DesktopState;
 
 /// The web app's attention state (AC9), exactly as the IPC command
 /// receives it: the task in front (null when none), whether the window
@@ -150,6 +156,51 @@ pub fn current() -> Option<FocusReport> {
 /// hold parks a notification while the person types.
 pub fn hold(item: HeldItem) {
     locked(HELD.get_or_init(|| Mutex::new(Held::new(HELD_CAP)))).push(item);
+}
+
+/// attention_focus_report is the web app's attention report (AC9):
+/// store it, then apply its consequences -- items held for a task that
+/// just came to the front are dropped, and the moment typing stops
+/// (the composer or the window lost focus) the hold list flushes once,
+/// dropping requests that resolved meanwhile and coalescing the rest
+/// like fresh banners.
+#[tauri::command]
+pub fn attention_focus_report(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    report: FocusReport,
+) -> Result<(), String> {
+    validate(&report)?;
+    *locked(LAST_REPORT.get_or_init(|| Mutex::new(None))) = Some(report);
+    if report.window_focused {
+        if let Some(task_id) = report.task_id {
+            locked(HELD.get_or_init(|| Mutex::new(Held::new(HELD_CAP)))).drop_task(task_id);
+        }
+    }
+    if report.window_focused && report.composer_focused {
+        return Ok(());
+    }
+    let wanted = {
+        let mut held = locked(HELD.get_or_init(|| Mutex::new(Held::new(HELD_CAP))));
+        held.take_wanted(|id| state.tray.is_pending(id))
+    };
+    for item in wanted {
+        banner::submit(
+            ClickContext {
+                app: app.clone(),
+                cache: state.cache.clone(),
+                proxy_url: state.proxy_url.clone(),
+            },
+            coalesce::Item {
+                task_id: item.task_id,
+                chat_id: item.chat_id,
+                request_id: item.request_id,
+                title: item.title,
+                body: item.body,
+            },
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

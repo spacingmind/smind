@@ -17,6 +17,9 @@ use smind_daemon_client::proxy::{Connection, ConnectionKind, ProxyState};
 use smind_daemon_client::relay::client::RelayHandle;
 use smind_daemon_client::{relay, ClientEvent, Config, NotifyKind, WorkspaceCache};
 
+use crate::attention_focus;
+use crate::banner;
+use crate::coalesce;
 use crate::notify;
 use crate::notify_policy;
 use crate::state::DesktopState;
@@ -107,17 +110,40 @@ fn on_event(
                 if !first_time {
                     return;
                 }
-                let target = notify::Target {
-                    task_id: n.task_id,
-                    chat_id: n.chat_id,
-                    request_id: Some(n.request_id.clone()),
-                };
                 let ctx = notify::ClickContext {
                     app: app.clone(),
                     cache: cache.clone(),
                     proxy_url: proxy_url.clone(),
                 };
-                notify::show(ctx, n.title, n.body, target);
+                // DT5 C/AC10-12: the web app's focus report decides WHEN
+                // the banner shows (the text and consent were settled
+                // above): never over the task in front, held while the
+                // person types in another task, otherwise through the
+                // coalescer.
+                match attention_focus::decide(attention_focus::current(), n.task_id) {
+                    attention_focus::Decision::Drop => return,
+                    attention_focus::Decision::Hold => {
+                        attention_focus::hold(attention_focus::HeldItem {
+                            kind: n.kind,
+                            task_id: n.task_id,
+                            chat_id: n.chat_id,
+                            request_id: n.request_id.clone(),
+                            title: n.title.clone(),
+                            body: n.body.clone(),
+                        });
+                        return;
+                    }
+                    attention_focus::Decision::Show => banner::submit(
+                        ctx,
+                        coalesce::Item {
+                            task_id: n.task_id,
+                            chat_id: n.chat_id,
+                            request_id: n.request_id.clone(),
+                            title: n.title,
+                            body: n.body,
+                        },
+                    ),
+                }
             }
         }
         ClientEvent::RunRunning { task_id } => tray.on_run_running(task_id),

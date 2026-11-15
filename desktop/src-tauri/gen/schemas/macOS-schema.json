@@ -381,6 +381,12 @@
           "markdownDescription": "Enables the app_update_install command without any pre-configured scope."
         },
         {
+          "description": "Enables the attention_focus_report command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-attention-focus-report",
+          "markdownDescription": "Enables the attention_focus_report command without any pre-configured scope."
+        },
+        {
           "description": "Enables the connection_version command without any pre-configured scope.",
           "type": "string",
           "const": "allow-connection-version",
@@ -571,6 +577,12 @@
           "type": "string",
           "const": "deny-app-update-install",
           "markdownDescription": "Denies the app_update_install command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the attention_focus_report command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-attention-focus-report",
+          "markdownDescription": "Denies the attention_focus_report command without any pre-configured scope."
         },
         {
           "description": "Denies the connection_version command without any pre-configured scope.",

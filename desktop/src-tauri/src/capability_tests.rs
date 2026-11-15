@@ -51,6 +51,7 @@ fn capability_allowlist_exact() {
         "allow-app-menu-action",
         "allow-context-menu-show",
         "allow-notify-test",
+        "allow-attention-focus-report",
         "core:window:allow-minimize",
         "core:window:allow-toggle-maximize",
         "core:window:allow-internal-toggle-maximize",
