@@ -360,6 +360,23 @@ pub fn run() {
                 // Windows drops the taskbar overlay when the hidden window's
                 // button is re-created; put it back when the window returns.
                 tauri::WindowEvent::Focused(true) => badge_tray.reapply_badge(),
+                // A size saved before the minimum existed is restored as is; put it back at once.
+                tauri::WindowEvent::Resized(size) => {
+                    // Windows reports a minimised window as 0x0: leave it alone.
+                    if size.width == 0
+                        || size.height == 0
+                        || close_win.is_minimized().unwrap_or(false)
+                    {
+                        return;
+                    }
+                    let scale = close_win.scale_factor().unwrap_or(1.0);
+                    let logical = size.to_logical::<f64>(scale);
+                    if let Some((w, h)) =
+                        window_chrome::clamp_to_minimum(logical.width, logical.height)
+                    {
+                        let _ = close_win.set_size(tauri::LogicalSize::new(w, h));
+                    }
+                }
                 _ => {}
             });
 
