@@ -3261,19 +3261,27 @@ describe("App tab strip (app-header-and-tabs TB)", () => {
     expect(icon.getAttribute("class")).not.toContain("square-terminal");
   });
 
-  it("TB-AC5 active tab scrolled into view on activeKey change", async () => {
+  it("TB-AC5 the active tab is revealed in the strip on activeKey change (with clear space for the edge fade)", async () => {
     await setup();
-    const scrollIntoView = vi.fn();
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = scrollIntoView;
+    const scroller = screen.getByTestId("tab-scroller");
+    // jsdom has no layout: a 250px-wide viewport onto a 1000px strip, tabs laid out 100px apart from the strip's left edge.
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, get: () => 250 });
+    Object.defineProperty(scroller, "scrollWidth", { configurable: true, get: () => 1000 });
+    const rectOf = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this === scroller) return { left: 0, right: 250, top: 0, bottom: 28, width: 250, height: 28, x: 0, y: 0, toJSON() {} } as DOMRect;
+      if (this.getAttribute("role") === "tab") {
+        const left = 900 - scroller.scrollLeft;
+        return { left, right: left + 100, top: 0, bottom: 28, width: 100, height: 28, x: left, y: 0, toJSON() {} } as DOMRect;
+      }
+      return rectOf.call(this);
+    };
     try {
       await openBaseTab("Diff");
-      expect(scrollIntoView).toHaveBeenCalledWith({ inline: "nearest", block: "nearest" });
-      const target = scrollIntoView.mock.contexts.at(-1) as HTMLElement;
-      expect(target).toHaveAttribute("role", "tab");
-      expect(target).toHaveAttribute("aria-selected", "true");
+      // The tab sits at 900..1000 of a 1000px strip seen through 250px: scrolled to the end (max 750), not left under the fade.
+      expect(scroller.scrollLeft).toBe(750);
     } finally {
-      Element.prototype.scrollIntoView = original;
+      HTMLElement.prototype.getBoundingClientRect = rectOf;
     }
   });
 

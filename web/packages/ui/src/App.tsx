@@ -54,6 +54,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHand
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TabOverflowMenu } from "@/components/tab-overflow-menu";
+import { useRevealActiveTab } from "@/hooks/use-reveal-active-tab";
 import { useScrollEdges } from "@/hooks/use-scroll-edges";
 import {
   TAB_KINDS,
@@ -2338,12 +2339,7 @@ function PaneTabStrip({
   // Keeps the active tab visible when the strip overflows (TB-AC5).
   const tabScrollerRef = useRef<HTMLDivElement>(null);
   const edges = useScrollEdges(tabScrollerRef);
-  useEffect(() => {
-    const active = tabScrollerRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
-    if (active && typeof active.scrollIntoView === "function") {
-      active.scrollIntoView({ inline: "nearest", block: "nearest" });
-    }
-  }, [activeKey]);
+  useRevealActiveTab(tabScrollerRef, activeKey);
 
   return (
     <div

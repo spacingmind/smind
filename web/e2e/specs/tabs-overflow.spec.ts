@@ -35,11 +35,30 @@ async function newChat(page: Page) {
 }
 
 const scroller = (page: Page) => page.getByTestId('tab-scroller')
-const scrollTo = (page: Page, x: 'start' | 'middle' | 'end') =>
-  scroller(page).evaluate((el, target) => {
-    const max = el.scrollWidth - el.clientWidth
-    el.scrollLeft = target === 'start' ? 0 : target === 'end' ? max : max / 2
-  }, x)
+/** Activates the nth tab through the overflow menu (how a person reaches an off-screen tab; a direct click would let the browser scroll it into view first). */
+async function activateViaMenu(page: Page, index: number) {
+  await page.getByTestId('tab-overflow-button').click()
+  await page.getByTestId('tab-overflow-item').nth(index).click()
+  await expect(page.locator('[role="menu"]')).toHaveCount(0)
+}
+
+/** The active chip's whole box is inside the strip's visible area, with the edge fades' clear space where a fade shows. */
+async function expectActiveFullyVisible(page: Page) {
+  await expect
+    .poll(async () => {
+      const fadeStart = (await page.getByTestId('tab-fade-start').count()) > 0 ? 16 : 0
+      const fadeEnd = (await page.getByTestId('tab-fade-end').count()) > 0 ? 16 : 0
+      return scroller(page).evaluate(
+        (el, [fs, fe]) => {
+          const box = el.getBoundingClientRect()
+          const r = el.querySelector('[role="tab"][aria-selected="true"]')!.getBoundingClientRect()
+          return r.left >= box.left + (fs as number) - 0.5 && r.right <= box.right - (fe as number) + 0.5
+        },
+        [fadeStart, fadeEnd],
+      )
+    })
+    .toBe(true)
+}
 
 test('TO-01 a few tabs sit at their natural width with no fades and no overflow button', async ({ app }, testInfo) => {
   const { page } = app
@@ -64,6 +83,8 @@ test('TO-02 many tabs shrink to 64px then scroll, with fades and an overflow men
   const scrolls = () => scroller(page).evaluate((el) => el.scrollWidth > el.clientWidth + 1)
   for (let i = 0; i < 40 && !(await scrolls()); i++) await newChat(page)
   expect(await scrolls(), 'the strip overflowed').toBe(true)
+  // A few more, so there is room to scroll (the loop stops at the first pixel of overflow): about seven chips' worth.
+  for (let i = 0; i < 7; i++) await newChat(page)
   // The last chat is active and scrolled into view before the test scrolls the strip itself.
   await expect(tabs.last()).toHaveAttribute('aria-selected', 'true')
 
@@ -77,17 +98,23 @@ test('TO-02 many tabs shrink to 64px then scroll, with fades and an overflow men
   expect(overflowing).toBe(true)
   await expect(page.getByTestId('tab-overflow-button')).toBeVisible()
 
-  await scrollTo(page, 'start')
+  // Activating a tab reveals it: the active chip is FULLY inside the visible strip, clear of the edge fades, wherever it sits.
+  const count = await tabs.count()
+  await activateViaMenu(page, 0)
+  await expectActiveFullyVisible(page)
   await expect(page.getByTestId('tab-fade-start')).toHaveCount(0)
   await expect(page.getByTestId('tab-fade-end')).toBeVisible()
   await frame(page, testInfo, 'b-overflow-at-start')
 
-  await scrollTo(page, 'middle')
+  // A tab several from the end: off-screen from the start, with more tabs still beyond it.
+  await activateViaMenu(page, count - 6)
+  await expectActiveFullyVisible(page)
   await expect(page.getByTestId('tab-fade-start')).toBeVisible()
   await expect(page.getByTestId('tab-fade-end')).toBeVisible()
   await frame(page, testInfo, 'c-overflow-in-the-middle')
 
-  await scrollTo(page, 'end')
+  await activateViaMenu(page, count - 1)
+  await expectActiveFullyVisible(page)
   await expect(page.getByTestId('tab-fade-start')).toBeVisible()
   await expect(page.getByTestId('tab-fade-end')).toHaveCount(0)
   await frame(page, testInfo, 'd-overflow-at-the-end')

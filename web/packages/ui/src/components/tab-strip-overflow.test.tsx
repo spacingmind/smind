@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TabOverflowMenu } from "@/components/tab-overflow-menu";
 import type { TabEntry } from "@/components/tab-registry";
+import { useRevealActiveTab } from "@/hooks/use-reveal-active-tab";
 import { useScrollEdges } from "@/hooks/use-scroll-edges";
 import { useRef } from "react";
 
@@ -99,6 +100,59 @@ describe("TabOverflowMenu", () => {
   it("the button is named for assistive tech", () => {
     render(<TabOverflowMenu tabs={TABS} activeKey={null} onActivate={() => {}} />);
     expect(screen.getByRole("button", { name: "More tabs" })).toBeInTheDocument();
+  });
+});
+
+describe("TabOverflowMenu titles", () => {
+  it("numbers identical titles so the rows can be told apart", async () => {
+    const chats = [tab("c1", "Chat"), tab("c2", "Chat"), tab("c3", "Chat"), tab("t1", "Diff")];
+    render(<TabOverflowMenu tabs={chats} activeKey="c3" onActivate={() => {}} />);
+    fireEvent.pointerDown(screen.getByTestId("tab-overflow-button"), { button: 0, ctrlKey: false });
+    const items = await screen.findAllByTestId("tab-overflow-item");
+    expect(items.map((i) => i.textContent?.trim())).toEqual(["Chat", "Chat 2", "Chat 3", "Diff"]);
+  });
+});
+
+describe("useRevealActiveTab", () => {
+  function Strip({ geometry, active }: { geometry: { scrollLeft: number }; active: string }) {
+    const ref = useRef<HTMLDivElement>(null);
+    useRevealActiveTab(ref, active);
+    return (
+      <div
+        data-testid="strip"
+        ref={(el) => {
+          (ref as { current: HTMLDivElement | null }).current = el;
+          if (!el) return;
+          Object.defineProperty(el, "scrollLeft", { configurable: true, get: () => geometry.scrollLeft, set: (v: number) => (geometry.scrollLeft = v) });
+          Object.defineProperty(el, "clientWidth", { configurable: true, get: () => 300 });
+          Object.defineProperty(el, "scrollWidth", { configurable: true, get: () => 1200 });
+          el.getBoundingClientRect = () => ({ left: 0, right: 300, top: 0, bottom: 28, width: 300, height: 28, x: 0, y: 0, toJSON() {} }) as DOMRect;
+        }}
+      >
+        {["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"].map((key, index) => (
+          <div
+            key={key}
+            role="tab"
+            aria-selected={key === active}
+            ref={(el) => {
+              if (el) el.getBoundingClientRect = () => ({ left: index * 100 - geometry.scrollLeft, right: index * 100 + 100 - geometry.scrollLeft, top: 0, bottom: 28, width: 100, height: 28, x: 0, y: 0, toJSON() {} }) as DOMRect;
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  it("leaves the active chip fully inside the strip with clear space for the fade, in either direction", () => {
+    const geometry = { scrollLeft: 0 };
+    const { rerender } = render(<Strip geometry={geometry} active="a" />);
+    rerender(<Strip geometry={geometry} active="e" />); // chip at 400..500, view 0..300
+    expect(geometry.scrollLeft).toBe(500 - 300 + 20);
+    const chipRight = 500 - geometry.scrollLeft;
+    expect(chipRight).toBeLessThanOrEqual(300 - 20);
+    rerender(<Strip geometry={geometry} active="b" />); // chip at 100..200, view now 220..520
+    expect(geometry.scrollLeft).toBe(100 - 20);
+    expect(100 - geometry.scrollLeft).toBeGreaterThanOrEqual(20);
   });
 });
 

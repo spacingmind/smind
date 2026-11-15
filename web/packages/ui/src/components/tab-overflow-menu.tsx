@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { TabLabel, type TabEntry } from "@/components/tab-registry";
 import { Icons } from "@/lib/icons";
+import { disambiguatedTitles } from "@/lib/tab-scroll-edges";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,6 +18,8 @@ export function TabOverflowMenu({
   activeKey: string | null;
   onActivate: (key: string) => void;
 }) {
+  // Several chats are all called "Chat": the menu numbers the repeats (the strip's own titles are unchanged).
+  const titles = disambiguatedTitles(tabs);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -45,7 +48,7 @@ export function TabOverflowMenu({
               if (el && entry.key === activeKey) el.scrollIntoView?.({ block: "nearest" });
             }}
           >
-            <TabLabel entry={entry} />
+            <TabLabel entry={{ ...entry, title: titles.get(entry.key) ?? entry.title }} />
             {entry.key === activeKey && <Icons.check aria-hidden data-testid="tab-overflow-current" className="ml-auto size-3.5 shrink-0" />}
           </DropdownMenuItem>
         ))}
