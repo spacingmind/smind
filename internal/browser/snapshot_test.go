@@ -291,3 +291,40 @@ func TestSnapshotCleansPageText(t *testing.T) {
 		t.Fatalf("bidi and zero-width characters must be stripped: %q", snap.Text)
 	}
 }
+
+// A page can nest nodes without limit: the walk is depth-bounded (a stack
+// overflow would take the whole daemon down) and the marker says it truncated.
+func TestSnapshotDeepNestingIsBoundedAndTruncated(t *testing.T) {
+	const depth = 3000
+	nodes := make([]any, 0, depth)
+	for i := 0; i < depth; i++ {
+		n := map[string]any{"nodeId": fmt.Sprint(i), "role": map[string]any{"value": "group"}, "name": map[string]any{"value": "n"}}
+		if i > 0 {
+			n["parentId"] = fmt.Sprint(i - 1)
+		}
+		if i < depth-1 {
+			n["childIds"] = []string{fmt.Sprint(i + 1)}
+		}
+		nodes = append(nodes, n)
+	}
+	l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
+		if c.Method == "Accessibility.getFullAXTree" {
+			return map[string]any{"nodes": nodes}, ""
+		}
+		return defaultHook(f, c)
+	}}
+	s, err := Start(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, CallTimeout: 20 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	sn, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sn.Truncated || !strings.Contains(sn.Text, "[truncated:") || sn.Nodes > maxSnapshotDepth+2 {
+		t.Fatalf("a deeply nested tree must be cut: truncated=%v nodes=%d", sn.Truncated, sn.Nodes)
+	}
+}

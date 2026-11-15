@@ -81,6 +81,21 @@ func defaultHook(f *fakeCDP, c fakeCall) (any, string) {
 		return map[string]any{"loaderId": "L1", "frameId": "F1"}, ""
 	case "Target.getTargetInfo":
 		return map[string]any{"targetInfo": map[string]any{"targetId": c.Params["targetId"], "url": "http://localhost:3000/", "title": "Home"}}, ""
+	case "DOM.getDocument":
+		return map[string]any{"root": map[string]any{"nodeId": 1}}, ""
+	case "DOM.querySelectorAll":
+		return map[string]any{"nodeIds": []int{}}, ""
+	case "Accessibility.getFullAXTree":
+		return map[string]any{"nodes": []any{
+			map[string]any{"nodeId": "1", "role": map[string]any{"value": "RootWebArea"}, "name": map[string]any{"value": "Home"}, "childIds": []string{"2"}},
+			map[string]any{"nodeId": "2", "parentId": "1", "role": map[string]any{"value": "button"}, "name": map[string]any{"value": "Go"}, "backendDOMNodeId": 7},
+		}}, ""
+	case "Page.getFrameTree":
+		return map[string]any{"frameTree": map[string]any{"frame": map[string]any{"id": "F1"}}}, ""
+	case "Page.createIsolatedWorld":
+		return map[string]any{"executionContextId": 5}, ""
+	case "Runtime.evaluate":
+		return map[string]any{"result": map[string]any{"value": true}}, ""
 	case "Target.getTargets":
 		return map[string]any{"targetInfos": []any{
 			map[string]any{"targetId": "T1", "type": "page", "url": "http://localhost:3000/", "title": "Home"},

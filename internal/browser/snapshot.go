@@ -15,6 +15,9 @@ const (
 	MaxSnapshotNodes = 1200
 	MaxSnapshotChars = 40000
 	maxPasswordScan  = 100
+	// maxSnapshotDepth bounds the recursion: a hostile page can nest nodes
+	// without limit, and a Go stack overflow is fatal for the whole daemon.
+	maxSnapshotDepth = 100
 )
 
 // Snapshot is the rendered accessibility tree of one tab.
@@ -218,6 +221,11 @@ func (r *snapRender) visit(n *axNode, depth int) {
 		return
 	}
 	r.seen[n.NodeID] = true
+	if depth > maxSnapshotDepth {
+		r.total++ // counted in the truncation marker, never rendered, never descended into
+		r.full = true
+		return
+	}
 	role := cleanText(n.Role.str(), 200)
 	skip := n.Ignored || ((role == "none" || role == "generic" || role == "InlineTextBox" || role == "LineBreak") && cleanText(n.Name.str(), 200) == "")
 	if !skip {
