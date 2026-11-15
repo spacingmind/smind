@@ -221,6 +221,9 @@ func (h *browserHost) settingsSet(_ context.Context, rc *requestContext, raw jso
 	cur.UpdatedBy = inboxActor(rc)
 	cur.UpdatedAt = time.Now().UTC()
 	if err := h.settings.SaveBrowserSettings(cur); err != nil {
+		if _, gerr := h.settings.GetWorkspace(p.WorkspaceID); gerr != nil {
+			return nil, &rpcCodeError{code: codeNotFound, msg: m + ": unknown workspace " + strconv.FormatInt(p.WorkspaceID, 10)}
+		}
 		return nil, fmt.Errorf("%s: %w", m, err)
 	}
 	// The new policy applies at once: a running browser never keeps an old one.

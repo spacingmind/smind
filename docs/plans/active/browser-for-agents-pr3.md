@@ -57,6 +57,8 @@ Built as specified, with these deviations decided while building:
 - **Deny list fails closed and keeps the loopback companions**: a listen address that is not loopback still denies that port on 127.0.0.1, localhost and ::1; an unreadable config is an error and the call is refused. Host names are capped at 253 characters and labels at 63.
 - **Relay**: the three settings methods are wrapped so only a local (non-relay) connection reaches them, in addition to `refuseAgent`.
 - **Kill switch environment parsing**: `SMIND_BROWSER_DISABLED` is ON unless it is an explicit 0/false/off/no/n/f; the environment never turns off a file's `disabled: true`; a config that cannot be read fails closed.
+- **`--workspace` is required** on the CLI (no current-directory default): an explicit target for a security switch. Not done from P3-AC9: the fleet host audit has no entry (relay connections are refused by `browserLocalOnly`, which is stricter than the saved-grants precedent).
+- **Stated limits (review findings, not fixed here)**: the kill switch closes a live session at the next `browser.call` or the idle close, not at once; a call racing a settings change can run once under the old settings; `data.clear` ends the session (ephemeral profiles go with it) and does not sweep profiles orphaned by a crash; `allow rm` cannot remove a stored entry that no longer passes validation (edit by replacing the list).
 - **The `browser` CLI row is `bare`** on the human-only table, so a renamed binary or `go run` cannot slip past the floor.
 - `browser.settings.get` and `.set` carry a fixed `note` (the rule for names: a host name must resolve to public addresses, an intranet host is added by IP literal).
 
