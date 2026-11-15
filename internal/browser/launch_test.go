@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -264,5 +265,18 @@ func TestBrowserEnvDropsSecrets(t *testing.T) {
 	got := strings.Join(browserEnv([]string{"PATH=/bin", "HOME=/h", "SMIND_TOKEN=secret", "ANTHROPIC_API_KEY=k", "LANG=C"}), " ")
 	if strings.Contains(got, "secret") || strings.Contains(got, "ANTHROPIC") || !strings.Contains(got, "PATH=/bin") {
 		t.Fatalf("env: %q", got)
+	}
+}
+
+func TestLaunchFailsWhenTheOwnerFileCannotBeWritten(t *testing.T) {
+	old := ownerWriter
+	ownerWriter = func(string) error { return errors.New("disk full") }
+	defer func() { ownerWriter = old }()
+	profiles := t.TempDir()
+	if _, err := (ChromeLauncher{Path: "/bin/true"}).Launch(context.Background(), LaunchOpts{ProfileRoot: profiles}); err == nil {
+		t.Fatal("a launch without an owner file could be swept while live: it must fail")
+	}
+	if left, _ := filepath.Glob(filepath.Join(profiles, "smind-browser-*")); len(left) != 0 {
+		t.Fatalf("a failed launch leaves no profile dir: %v", left)
 	}
 }

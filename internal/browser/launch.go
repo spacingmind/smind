@@ -138,7 +138,7 @@ func (l ChromeLauncher) Launch(ctx context.Context, o LaunchOpts) (Instance, err
 	if err != nil {
 		return nil, fmt.Errorf("browser: profile dir: %w", err)
 	}
-	if err := writeOwner(dir); err != nil {
+	if err := ownerWriter(dir); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("browser: profile owner file: %w", err)
 	}
@@ -164,6 +164,9 @@ const profilePrefix = "smind-browser-"
 // staleAfter is how old a profile dir with no readable owner must be before a
 // sweep removes it (a dir being created has no owner for a moment).
 const staleAfter = time.Minute
+
+// ownerWriter is writeOwner; a var so a test can make it fail.
+var ownerWriter = writeOwner
 
 // writeOwner records who owns a profile dir, atomically (write + rename), so a
 // concurrent sweep never reads a half-written file.
