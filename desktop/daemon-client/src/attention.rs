@@ -1,8 +1,10 @@
-//! The tray's "pending approvals" state machine (quick-wins AC4): which
-//! tasks currently have an unresolved `permission.pending`.
+//! The tray's "waiting for you" state machine: which tasks currently
+//! have an unresolved `permission.pending` or `question.pending`
+//! (quick-wins AC4, DT5 B/AC7).
 //!
-//! An entry clears on the daemon's `permission.resolved` event (by
-//! request id; a daemon that predates it never sends one), when its run
+//! An entry clears on the daemon's `permission.resolved` or
+//! `question.resolved` event (both by request id, through the same
+//! clear; a daemon that predates them never sends one), when its run
 //! transitions back to "running" or ends -- the same signals
 //! `web/packages/ui/src/hooks/use-task-attention.ts` uses to clear its
 //! own permission badge -- or on a fresh reconnect, which resets the
@@ -37,9 +39,9 @@ impl Attention {
         Self::default()
     }
 
-    /// on_pending records a still-unresolved permission request. A
-    /// repeat of the same requestId (e.g. redelivered after a reconnect)
-    /// does not grow the count.
+    /// on_pending records a still-unresolved permission or question
+    /// request. A repeat of the same requestId (e.g. redelivered after a
+    /// reconnect) does not grow the count.
     pub fn on_pending(&mut self, task_id: i64, chat_id: i64, request_id: &str) {
         if !self.task_of.contains_key(request_id) {
             self.order.push(request_id.to_string());
@@ -109,9 +111,9 @@ impl Attention {
 /// label formats the tray tooltip/menu text for a pending count.
 pub fn label(count: usize) -> String {
     match count {
-        0 => "No approvals waiting".to_string(),
-        1 => "1 approval waiting".to_string(),
-        n => format!("{n} approvals waiting"),
+        0 => "Nothing waiting for you".to_string(),
+        1 => "1 waiting for you".to_string(),
+        n => format!("{n} waiting for you"),
     }
 }
 
@@ -226,8 +228,29 @@ mod tests {
 
     #[test]
     fn tray_label_formatting() {
-        assert_eq!(label(0), "No approvals waiting");
-        assert_eq!(label(1), "1 approval waiting");
-        assert_eq!(label(5), "5 approvals waiting");
+        assert_eq!(label(0), "Nothing waiting for you");
+        assert_eq!(label(1), "1 waiting for you");
+        assert_eq!(label(5), "5 waiting for you");
+    }
+
+    #[test]
+    fn questions_count_and_clear() {
+        let mut a = Attention::new();
+        a.on_pending(3, 9, "question-1");
+        assert_eq!(a.count(), 1, "a waiting question counts");
+        // question.resolved routes to the same by-request-id clear as
+        // permission.resolved.
+        a.on_permission_resolved("question-1");
+        assert_eq!(a.count(), 0);
+    }
+
+    #[test]
+    fn run_ended_clears_a_question_entry() {
+        let mut a = Attention::new();
+        a.on_pending(3, 9, "question-1");
+        a.on_pending(4, 10, "perm-1");
+        a.on_run_ended(3);
+        assert_eq!(a.count(), 1);
+        assert_eq!(a.most_recent(), Some(PendingRef { task_id: 4, chat_id: 10, request_id: "perm-1".to_string() }));
     }
 }
