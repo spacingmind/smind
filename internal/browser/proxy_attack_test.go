@@ -529,3 +529,30 @@ func TestIdleBodyCloseWithoutEOFClearsTheDeadline(t *testing.T) {
 		t.Fatal("the body did not reach EOF")
 	}
 }
+
+// A POST whose body was read to the end keeps the client connection alive.
+func TestProxyCompletedPostKeepsTheClientConnectionAlive(t *testing.T) {
+	live := newHitServer(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		fmt.Fprintf(w, "got %d", len(b))
+	})
+	rig := newProxyRig(t, nil, proxyResolver, nil)
+	c, err := net.Dial("tcp", rig.px.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(4 * time.Second))
+	br := bufio.NewReader(c)
+	for i := 0; i < 2; i++ {
+		fmt.Fprintf(c, "POST http://127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nhello", live.port)
+		resp, err := http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatalf("request %d on the same connection: %v", i+1, err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		if resp.Close || string(b) != "got 5" {
+			t.Fatalf("request %d: close=%v body=%q (a completed body must not force Connection: close)", i+1, resp.Close, b)
+		}
+	}
+}
