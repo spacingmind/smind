@@ -613,7 +613,9 @@ describe("App", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
+    // The task now renders twice (the pinned Needs-you section and the tree);
+    // either copy's badge proves the attention dot.
+    expect(screen.getAllByTestId("task-attention").length).toBeGreaterThan(0);
   });
 });
 
@@ -637,7 +639,7 @@ describe("App live events", () => {
     pushNotification(socket, "run.status", { runId: "run-live", taskId: TASK_B.ID, status: "done" });
     await flush();
 
-    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
+    expect(screen.getAllByTestId("task-attention").length).toBeGreaterThan(0);
     expect(socket.sent.length).toBe(sentBefore);
   });
 
@@ -656,7 +658,7 @@ describe("App live events", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
+    expect(screen.getAllByTestId("task-attention").length).toBeGreaterThan(0);
   });
 
   it("a task.status notification updates the status shown in the sidebar row's hover card live", async () => {
@@ -1287,6 +1289,23 @@ describe("App routing", () => {
       document.querySelector(`[data-testid="sidebar-task-row"][data-task-id="${TASK_B.ID}"]`),
     ).toHaveAttribute("data-active", "true");
     expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("mounting at the short task URL (a task window's first URL) selects that task", async () => {
+    window.location.hash = `#/task/${TASK_B.ID}`;
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+    respondChatList(socket, TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(
+      document.querySelector(`[data-testid="sidebar-task-row"][data-task-id="${TASK_B.ID}"]`),
+    ).toHaveAttribute("data-active", "true");
+    // The task was not left half-selected by an unknown route kind: no "Task not found".
+    expect(screen.queryByTestId("task-not-found")).toBeNull();
   });
 
   it("selecting a task updates the URL, and switching tabs updates it again", async () => {
@@ -3240,9 +3259,13 @@ describe("App tab strip (app-header-and-tabs TB)", () => {
   it("TB-AC3 plus button is the next sibling after the tab scroller in the same row", async () => {
     await setup();
     const scroller = screen.getByTestId("tab-scroller");
-    expect(scroller.nextElementSibling).toBe(screen.getByTestId("tabs-new-tab"));
-    expect(scroller.parentElement).toBe(screen.getByTestId("tabs-new-tab").parentElement);
-    expect(scroller.className).toContain("flex-initial");
+    // The scroller sits in a relative wrapper (it carries the edge fades) that is the row's child; with no overflow nothing
+    // (no overflow menu) sits between the wrapper and "+".
+    const wrapper = scroller.parentElement!;
+    expect(wrapper.nextElementSibling).toBe(screen.getByTestId("tabs-new-tab"));
+    expect(wrapper.parentElement).toBe(screen.getByTestId("tabs-new-tab").parentElement);
+    expect(wrapper.className).toContain("flex-initial");
+    expect(wrapper.className).toContain("min-w-0");
     expect(scroller.className).toContain("min-w-0");
     expect(screen.getByTestId("tabs-new-tab").className).toContain("shrink-0");
   });
@@ -3257,19 +3280,27 @@ describe("App tab strip (app-header-and-tabs TB)", () => {
     expect(icon.getAttribute("class")).not.toContain("square-terminal");
   });
 
-  it("TB-AC5 active tab scrolled into view on activeKey change", async () => {
+  it("TB-AC5 the active tab is revealed in the strip on activeKey change (with clear space for the edge fade)", async () => {
     await setup();
-    const scrollIntoView = vi.fn();
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = scrollIntoView;
+    const scroller = screen.getByTestId("tab-scroller");
+    // jsdom has no layout: a 250px-wide viewport onto a 1000px strip, tabs laid out 100px apart from the strip's left edge.
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, get: () => 250 });
+    Object.defineProperty(scroller, "scrollWidth", { configurable: true, get: () => 1000 });
+    const rectOf = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this === scroller) return { left: 0, right: 250, top: 0, bottom: 28, width: 250, height: 28, x: 0, y: 0, toJSON() {} } as DOMRect;
+      if (this.getAttribute("role") === "tab") {
+        const left = 900 - scroller.scrollLeft;
+        return { left, right: left + 100, top: 0, bottom: 28, width: 100, height: 28, x: left, y: 0, toJSON() {} } as DOMRect;
+      }
+      return rectOf.call(this);
+    };
     try {
       await openBaseTab("Diff");
-      expect(scrollIntoView).toHaveBeenCalledWith({ inline: "nearest", block: "nearest" });
-      const target = scrollIntoView.mock.contexts.at(-1) as HTMLElement;
-      expect(target).toHaveAttribute("role", "tab");
-      expect(target).toHaveAttribute("aria-selected", "true");
+      // The tab sits at 900..1000 of a 1000px strip seen through 250px: scrolled to the end (max 750), not left under the fade.
+      expect(scroller.scrollLeft).toBe(750);
     } finally {
-      Element.prototype.scrollIntoView = original;
+      HTMLElement.prototype.getBoundingClientRect = rectOf;
     }
   });
 

@@ -105,7 +105,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/components/ui/toast";
 import { useLocalPathActions, type LocalPathActions } from "@/hooks/use-local-path-actions";
 import { useWindowState } from "@/hooks/use-window-state";
-import { desktopOS, isDesktop } from "@/lib/platform";
+import { desktop, desktopOS, isDesktop } from "@/lib/platform";
 import { TRAFFIC_LIGHT_CLUSTER_PX, hasTrafficLights, toggleZoneEndPx } from "@/lib/window-chrome";
 import {
   Sidebar,
@@ -530,6 +530,9 @@ export function AppSidebar({
     () => groupTasksByStatus(viewTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
     [viewTasks, attention, runStatus],
   );
+  // The pinned "Needs you" section (AC9) lists the status view's
+  // needs-attention bucket in the default view too.
+  const needsYouTasks = useMemo(() => statusGroups.find((g) => g.key === "needs-attention")?.tasks ?? [], [statusGroups]);
   const { permission: notificationPermission } = useNotificationPermission();
   const { enabled: notificationSoundEnabled } = useNotificationSoundPreference();
   const openNotifiedTask = useCallback(
@@ -1015,6 +1018,14 @@ export function AppSidebar({
                       onArchiveTask={archiveTask}
                     />
                   )}
+                  {!searching && groupMode !== "status" && needsYouTasks.length > 0 && (
+                    <NeedsYouSection
+                      tasks={needsYouTasks}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={archiveTask}
+                    />
+                  )}
                   {!searching && pinnedTasks.length > 0 && (
                     <PinnedSection
                       tasks={pinnedTasks}
@@ -1359,6 +1370,63 @@ function PinnedSection({
 }
 
 /**
+ * The pinned "Needs you" section (AC9): the tasks currently in the
+ * needs-attention bucket, flattened above the workspaces in the default
+ * tree view -- same TaskRows as everywhere else, so a row here is the same
+ * row, with the same selection, as under its workspace (the task stays in
+ * the tree too). Not rendered while searching; the status view keeps its
+ * own bucket. Whether the section is collapsed is persisted like
+ * PinnedSection's (sidebar-polish S8, id `needs-you`).
+ */
+function NeedsYouSection({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  tasks: Task[];
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  const [open, toggleOpen] = useNodeOpen("needs-you");
+  const { active, rowProps } = useRowActive();
+
+  return (
+    <SidebarMenuItem data-testid="sidebar-needs-you-section">
+      <div {...rowProps}>
+        <SidebarMenuButton
+          onClick={toggleOpen}
+          aria-expanded={open}
+          data-testid="sidebar-needs-you-section-header"
+          className="rounded-lg"
+        >
+          <Icons.inbox className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+          <FadeText
+            data-testid="container-title"
+            className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
+          >
+            Needs you
+          </FadeText>
+          <RowChevron open={open} />
+        </SidebarMenuButton>
+      </div>
+      {open && (
+        <ContainerContent kind="pinned">
+          <TaskRows
+            tasks={tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            emptyText=""
+            onArchiveTask={onArchiveTask}
+          />
+        </ContainerContent>
+      )}
+    </SidebarMenuItem>
+  );
+}
+
+/**
  * The group-by-status view (AC6): one collapsible bucket per
  * lib/sidebar-status-groups.ts group, each rendering its tasks through the
  * same TaskRows the tree view uses -- replaces the workspace/space tree
@@ -1613,6 +1681,13 @@ function RowChevron({ open }: { open: boolean }) {
  * is how the row learns its menu is open so it stays mounted.
  */
 /** One entry of a workspace/space row menu. `fadeOut` keeps the menu's exit animation for items that do not open a dialog. */
+
+/** Desktop only: asks the shell for the task's own window (one per task; an existing one is focused). The shell's refusal (the window cap) is shown as is. */
+function openTaskInNewWindow(task: Task): void {
+  void desktop.windowOpenTask(task.ID).catch((err: unknown) => {
+    toast({ variant: "error", title: "Could not open a new window", description: err instanceof Error ? err.message : undefined });
+  });
+}
 
 function RowMenu({
   items,
@@ -2312,6 +2387,7 @@ const TaskRow = memo(function TaskRow({
     onMarkUnread,
     onArchiveTask,
     onNewSubTask: treeActions ? () => treeActions.onNewSubTask(task) : undefined,
+    onOpenInNewWindow: isDesktop ? () => openTaskInNewWindow(task) : undefined,
     tree: treeActions && treeAvailability
       ? {
           availability: treeAvailability,
@@ -2492,7 +2568,7 @@ const TaskRow = memo(function TaskRow({
                   {git?.diff && git.diff.files > 0 && (
                     <span
                       data-testid="sidebar-task-diffstat"
-                      className="shrink-0 text-ui-xs tabular-nums @max-[14rem]/sb:hidden"
+                      className="shrink-0 text-ui-xs tabular-nums @max-[18rem]/sb:hidden"
                       title={`${git.diff.files} changed, +${git.diff.insertions} -${git.diff.deletions}`}
                     >
                       <span className={git.diff.insertions === 0 ? "text-muted-foreground" : "text-success"}>+{git.diff.insertions}</span>{" "}
@@ -2500,7 +2576,7 @@ const TaskRow = memo(function TaskRow({
                     </span>
                   )}
                   {git && (
-                    <span className="@max-[14rem]/sb:hidden">
+                    <span className="@max-[18rem]/sb:hidden">
                       <SidebarGitGlyph git={git} />
                     </span>
                   )}

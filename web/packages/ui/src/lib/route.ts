@@ -23,7 +23,9 @@ export interface Route {
   tab:
     | { kind: Exclude<TabKind, "file" | "chat" | "plugin"> }
     | { kind: "file"; path: string }
-    | { kind: "chat"; chatId: number; requestId?: string };
+    | { kind: "chat"; chatId: number; requestId?: string }
+    /** `#/task/<id>`: just the task, no tab (a task window's first URL); its default chat tab is seeded as usual. */
+    | { kind: "default" };
 }
 
 const BASE_KINDS: readonly Exclude<TabKind, "file" | "chat" | "plugin">[] = ["files", "diff", "terminal", "pr"];
@@ -42,6 +44,11 @@ export function parseRoute(hash: string): Route | null {
   // query is read separately and only `card` is honoured, and only for a chat.
   const [routePart, queryPart] = hash.replace(/^#/, "").split("?", 2) as [string, string?];
   const segments = routePart.split("/").filter((s) => s !== "");
+  // `#/task/<id>`: the short route a task window opens at (workspace is not needed to restore a task).
+  if (segments.length === 2 && segments[0] === "task") {
+    const id = Number(segments[1]);
+    return Number.isInteger(id) && id > 0 && /^\d+$/.test(segments[1]!) ? { workspaceId: 0, taskId: id, tab: { kind: "default" } } : null;
+  }
   // ["workspace", id, "task", id, kind, ...path-or-chatId?]
   if (segments.length < 5) return null;
   const [workspaceLabel, workspaceIdRaw, taskLabel, taskIdRaw, kindRaw, ...rest] = segments;
@@ -75,6 +82,7 @@ export function parseRoute(hash: string): Route | null {
 
 /** The inverse of {@link parseRoute}: a Route back into a `#/...` string. */
 export function formatRoute(route: Route): string {
+  if (route.tab.kind === "default") return `#/task/${route.taskId}`;
   const base = `#/workspace/${route.workspaceId}/task/${route.taskId}`;
   if (route.tab.kind === "file") {
     const encoded = route.tab.path.split("/").map(encodeURIComponent).join("/");

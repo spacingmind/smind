@@ -105,6 +105,7 @@ export function PromptTextarea({
         else if (ref) ref.current = node;
       }}
       aria-label={label}
+      data-composer-input=""
       rows={rows}
       value={value}
       placeholder={placeholder}

@@ -19,8 +19,11 @@ use smind_daemon_client::Config;
 
 mod app_settings;
 mod assets;
+mod attention_focus;
 mod audit_guard;
+mod banner;
 mod client_watch;
+mod coalesce;
 mod commands;
 mod context_menu;
 mod daemon_manager;
@@ -191,6 +194,7 @@ pub fn run() {
             menu::app_menu_action,
             context_menu::context_menu_show,
             notify_test::notify_test,
+            attention_focus::attention_focus_report,
             editors::editors_list,
             editors::open_in_editor,
             open_path::open_path_default,

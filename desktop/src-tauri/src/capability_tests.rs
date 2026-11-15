@@ -53,6 +53,7 @@ fn capability_allowlist_exact() {
         "allow-context-menu-show",
         "allow-window-open-task",
         "allow-notify-test",
+        "allow-attention-focus-report",
         "core:window:allow-minimize",
         "core:window:allow-toggle-maximize",
         "core:window:allow-internal-toggle-maximize",

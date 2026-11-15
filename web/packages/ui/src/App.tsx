@@ -33,6 +33,7 @@ import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import { AppHeader } from "@/components/app-header";
 import { UpdateBadge } from "@/components/update-badge";
+import { isTaskWindow } from "@/lib/task-window";
 import { HomeLanding } from "@/components/home/home-landing";
 import { requestNewWorkspace } from "@/lib/app-events";
 import { useAppUpdate } from "@/lib/app-update";
@@ -53,6 +54,9 @@ import { tabMenu } from "@/lib/menu-models";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabOverflowMenu } from "@/components/tab-overflow-menu";
+import { useRevealActiveTab } from "@/hooks/use-reveal-active-tab";
+import { useScrollEdges } from "@/hooks/use-scroll-edges";
 import {
   TAB_KINDS,
   baseTabForKind,
@@ -93,6 +97,7 @@ import { KeyboardProvider, useActionHandler, useActionRestriction, useKeyboard }
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
+import { useAttentionReport } from "@/hooks/use-attention-report";
 import { focusSettingsTarget } from "@/lib/failure-class";
 import { useTaskChats } from "@/hooks/use-task-chats";
 import { useUnreadTasks } from "@/hooks/use-unread-tasks";
@@ -289,6 +294,8 @@ function AppShell({
   const [settingsOpenNonce, setSettingsOpenNonce] = useState(0);
   useActionRestriction(activeView !== "workspace" ? SETTINGS_SAFE_ACTIONS : null);
   const openSettings = useCallback((sectionId?: string) => {
+    // A task window has no Settings: its connection, daemon and update sections need main-only commands.
+    if (isTaskWindow) return;
     setSettingsInitialSectionId(sectionId ?? null);
     setSettingsOpenNonce((n) => n + 1);
     setActiveView("settings");
@@ -387,6 +394,11 @@ function AppShell({
     [treeLoaded, allTasks],
   );
   const { unread, markUnread } = useUnreadTasks(attention, selectedTask?.ID ?? null, liveTaskIds);
+
+  // DT5 C AC9: tells the desktop shell what is in front and what has focus,
+  // so it knows when a notification banner may show (a no-op in a browser
+  // build). Unconditional: the rules of hooks.
+  useAttentionReport(selectedTask?.ID ?? null);
 
   // AC2: the tab title mirrors the sidebar's own unread count live -- a
   // plain effect, not a ref, since document.title has no React-owned
@@ -915,7 +927,9 @@ function AppShell({
     const match = allTasks.find((t) => t.ID === pendingRoute.taskId);
     if (match) {
       selectTask(match);
-      if (pendingRoute.tab.kind === "file") {
+      if (pendingRoute.tab.kind === "default") {
+        // `#/task/<id>`: selecting the task is all there is to do; its default chat tab is seeded as for any selection.
+      } else if (pendingRoute.tab.kind === "file") {
         openTab(match.ID, fileTab(match.ID, pendingRoute.tab.path));
       } else if (pendingRoute.tab.kind === "chat") {
         // The matched task's chats may not have loaded yet (useTaskChats
@@ -1293,10 +1307,10 @@ function AppShell({
       headerActions={
         toggleInSidebar ? (
           <>
-            <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />
+            {!isTaskWindow && <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />}
             <SidebarTrigger className="text-foreground-muted hover:text-foreground" />
           </>
-        ) : windowToggle && sidebarOpen ? (
+        ) : windowToggle && sidebarOpen && !isTaskWindow ? (
           <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />
         ) : undefined
       }
@@ -1312,7 +1326,7 @@ function AppShell({
         connectionStatus={connectionStatus}
         sidebarPx={isMobile ? 0 : sidebarOpen ? sidebarWidth : SIDEBAR_ICON_WIDTH}
         showSidebarToggle={!toggleInSidebar && !windowToggle}
-        showUpdateBadge={isMobile || !sidebarOpen}
+        showUpdateBadge={(isMobile || !sidebarOpen) && !isTaskWindow}
         windowToggle={windowToggle}
         task={selectedTask}
         client={client}
@@ -1321,14 +1335,14 @@ function AppShell({
         updateState={appUpdate.state}
         onOpenUpdate={appUpdate.reopen}
       />
-      {isDesktop && (
+      {isDesktop && !isTaskWindow && (
         <DesktopDaemonBanner
           client={client}
           runsLoaded={runsLoaded}
           runningRuns={[...runningChatsByTask.values()].reduce((n, chats) => n + chats.size, 0)}
         />
       )}
-      {isDesktop && <DesktopUpdateDialogView update={appUpdate} />}
+      {isDesktop && !isTaskWindow && <DesktopUpdateDialogView update={appUpdate} />}
     </>
   );
 
@@ -2335,12 +2349,8 @@ function PaneTabStrip({
   // (aria-selected, not data-state: ContextMenuTrigger asChild overwrites the trigger's data-state.)
   // Keeps the active tab visible when the strip overflows (TB-AC5).
   const tabScrollerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const active = tabScrollerRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
-    if (active && typeof active.scrollIntoView === "function") {
-      active.scrollIntoView({ inline: "nearest", block: "nearest" });
-    }
-  }, [activeKey]);
+  const edges = useScrollEdges(tabScrollerRef);
+  useRevealActiveTab(tabScrollerRef, activeKey);
 
   return (
     <div
@@ -2375,12 +2385,14 @@ function PaneTabStrip({
       >
         <div className="flex h-9 shrink-0 items-center gap-1 border-b px-1">
           {tabs.length > 0 && (
+            <div className="relative min-w-0 flex-initial">
             <div
               ref={tabScrollerRef}
               data-testid="tab-scroller"
-              className="min-w-0 flex-initial overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="min-w-0 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              <TabsList variant="flat" className="w-max">
+              {/* Chips: each tab is 160px at most and shrinks with its neighbours down to 64px; only then does the strip scroll. */}
+              <TabsList variant="flat" className="w-full">
                 {tabs.map((entry, index) => (
                   <DraggableTabTrigger
                     key={entry.key}
@@ -2401,7 +2413,12 @@ function PaneTabStrip({
                 ))}
               </TabsList>
             </div>
+            {/* Edge fades: the side that has more tabs beyond it. Instant (no transition), never in the way of the pointer. */}
+            {edges.start && <div aria-hidden data-testid="tab-fade-start" className="pointer-events-none absolute inset-y-0 left-0 w-4 bg-gradient-to-r from-panel to-transparent" />}
+            {edges.end && <div aria-hidden data-testid="tab-fade-end" className="pointer-events-none absolute inset-y-0 right-0 w-4 bg-gradient-to-l from-panel to-transparent" />}
+            </div>
           )}
+          {(edges.start || edges.end) && <TabOverflowMenu tabs={tabs} activeKey={activeKey} onActivate={onActivate} />}
           <NewTabButton
             onOpen={(kind) => onOpenBase(kind, { pane: paneId })}
             chats={reopenableChats(chats, openChatIds)}
@@ -2577,7 +2594,7 @@ function DraggableTabTrigger({
           ref={setNodeRef}
           value={entry.key}
           data-testid={`workspace-tab-${entry.kind}`}
-          className="group/tab max-w-48 gap-1.5"
+          className="group/tab max-w-40 gap-1.5 group-data-[variant=flat]/tabs-list:min-w-16 group-data-[variant=flat]/tabs-list:flex-[0_1_10rem] group-data-[variant=flat]/tabs-list:aria-selected:min-w-24"
           {...listeners}
         >
           <TabLabel entry={entry} />

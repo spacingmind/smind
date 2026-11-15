@@ -83,6 +83,7 @@ fn main() {
             "app_menu_action",
             "context_menu_show",
             "notify_test",
+            "attention_focus_report",
             "editors_list",
             "open_in_editor",
             "open_path_default",

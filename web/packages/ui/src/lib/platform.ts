@@ -191,6 +191,18 @@ export type NativeMenuActionId =
   | "check-updates"
   | "quit";
 
+/**
+ * What the web app tells the shell about its own attention state (DT5 C AC9):
+ * which task is in front, whether the window is focused and whether a prompt
+ * box has focus. Sent only when the tuple changes; the shell keeps it in
+ * memory only.
+ */
+export interface AttentionFocusReport {
+  taskId: number | null;
+  windowFocused: boolean;
+  composerFocused: boolean;
+}
+
 /** The commands `capability-templates/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
 export interface DesktopApi {
   listConnections(): Promise<Connection[]>;
@@ -207,6 +219,11 @@ export interface DesktopApi {
   appSettingsSet(patch: Partial<AppSettings>): Promise<AppSettings>;
   /** Sends one test notification (`notify_test`): what makes macOS show its own permission prompt; rejects with Rust's error text. */
   notifyTest(): Promise<void>;
+  /**
+   * Tells the shell which task is in front, whether the window is focused and whether a prompt box has focus
+   * (`attention_focus_report`): the shell uses it to decide when a notification banner may show; rejects with Rust's error text.
+   */
+  attentionFocusReport(report: AttentionFocusReport): Promise<void>;
   /** The native Help menu's "Run Setup Again…" (`run-setup-requested`): reopens first-run without touching saved connections. */
   onRunSetupRequested(cb: () => void): () => void;
   /** Validates a pasted relay pairing link in Rust and returns only its non-secret fields; saves nothing. Rejects with Rust's error text (which never contains the link). */
@@ -233,6 +250,8 @@ export interface DesktopApi {
    * refuses the model. Use `lib/native-context-menu.ts`, not this, from a component.
    */
   contextMenuShow(entries: NativeMenuEntry[], x: number, y: number): Promise<number>;
+  /** Opens the task in its own window, or focuses the one it already has (`window_open_task`: one integer, Rust picks the label and builds the URL). Resolves with the window label; rejects with a plain message (e.g. the 8-window cap). */
+  windowOpenTask(taskId: number): Promise<string>;
   /** Subscribes to native context-menu selections (`context-menu-action`: the open id and the chosen item id). */
   onContextMenuAction(cb: (selection: { open: number; id: string }) => void): Promise<() => void>;
   /** Runs a native-only app-menu item (`app_menu_action`) -- what the header app menu uses on Windows/Linux, where the native menu bar isn't drawn. */
@@ -340,6 +359,7 @@ function unavailable(): DesktopApi {
     appSettingsGet: () => reject(),
     appSettingsSet: () => reject(),
     notifyTest: () => reject(),
+    attentionFocusReport: () => reject(),
     onRunSetupRequested: () => () => {},
     previewRelayLink: () => reject(),
     addRelayConnection: () => reject(),
@@ -363,6 +383,7 @@ function unavailable(): DesktopApi {
     // The browser stub never fires: there is no native menu there.
     onMenuAction: () => () => {},
     contextMenuShow: () => reject(),
+    windowOpenTask: () => reject(),
     onContextMenuAction: () => Promise.resolve(() => {}),
     editorsList: () => reject(),
     openInEditor: () => reject(),
@@ -462,6 +483,14 @@ function realDesktopApi(): DesktopApi {
       const invoke = await loadInvoke();
       try {
         await invoke("notify_test");
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    async attentionFocusReport(report) {
+      const invoke = await loadInvoke();
+      try {
+        await invoke("attention_focus_report", { report });
       } catch (err) {
         throw asError(err);
       }
@@ -571,6 +600,14 @@ function realDesktopApi(): DesktopApi {
       const invoke = await loadInvoke();
       try {
         return await invoke<number>("context_menu_show", { entries, x, y });
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    async windowOpenTask(taskId) {
+      const invoke = await loadInvoke();
+      try {
+        return await invoke<string>("window_open_task", { taskId });
       } catch (err) {
         throw asError(err);
       }
