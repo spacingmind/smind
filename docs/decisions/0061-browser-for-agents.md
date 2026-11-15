@@ -127,6 +127,20 @@ Residual risks, stated: the allowlisted loopback pages are the human's own apps 
 - Screenshots in tool results are a new content type for the MCP child; providers that cannot read images get a text note.
 - Codex-native runs never see the browser; the settings screen says so.
 
+## Amendments
+
+### 2026-11-15: sub-decisions taken at implementation time (the 12 decisions above are unchanged)
+
+Human decisions recorded after the headless CDP client and URL policy were built (the first implementation PR) and reviewed:
+
+1. **An enforcing proxy closes the non-Fetch channels.** Measured on a real Chrome: the Fetch domain never sees WebSocket handshakes, so a page on an allowed host could reach a denied loopback port (including the daemon's) with `new WebSocket`; `Network.setBlockedURLs` did not stop it. Section 5's "host-resolver rules ... so subresource requests obey it too" is therefore supplemented, not replaced: the headless host launches the browser with `--proxy-server` pointing at an in-process proxy in the daemon, with an empty bypass list. All schemes (http, https, WebSocket, WebTransport where it falls back) go through that one policy check; the proxy resolves names itself, refuses sensitive addresses and dials the vetted IP, which also closes DNS rebinding. TLS is tunnelled, never intercepted. Fetch interception stays for document and subresource logging.
+2. **The daemon gates every tool call (section 10).** Calls are held and approved inside the daemon, independent of the provider's permission mode, because a provider in an auto-accept mode never asks. The read tools are grantable once per run; every acting tool asks; `browser_open` may be granted for the current run on its card. No grant outlives its run and none is saved across runs. Provider-native prompts and `mcp:smind-browser.<tool>` policy rules remain a second layer.
+3. **The enable method keeps the ADR-0056 limit.** The switch is as human-only as the RPC principal is today (an unidentified local connection counts as the human); the human-only RPC tables, the policy floor and the CLI refusal apply, and the Settings text states the limit. If ADR-0056 is later accepted, the enable RPC joins its decision with no rework.
+4. **Allowlist.** Loopback plus exact hosts the human adds (decision 9 as written); an allowlist entry that is link-local, metadata, multicast or unspecified, or an IPv6 form that embeds one, is refused at entry and at resolution. This tightens section 5, which would have allowed a typed metadata literal.
+5. **No browser data channel other than the pipe.** The browser is driven over `--remote-debugging-pipe`: there is no DevTools TCP port for another local process to attach to.
+
+Design and tests: `docs/plans/active/browser-for-agents-designs.md`.
+
 ## Cross-references
 
 - ADR-0013 (desktop bundled UI, IPC scope and the origin guard), ADR-0018 (agent MCP servers), ADR-0019 (provider-native permission modes), ADR-0055 (saved grants), ADR-0056 (human-only RPC principal).

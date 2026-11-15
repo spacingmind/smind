@@ -1,0 +1,75 @@
+# Browser for agents: design drafts for the proxy and PRs 2-5
+
+Governing ADR: `docs/decisions/0061-browser-for-agents.md` (Accepted). Acceptance criteria for the whole feature: `docs/plans/active/desktop-browser-for-agents.md`. The headless lane spec (PR 1: CDP client, session, URL policy; its known gaps and decisions) is `docs/plans/active/browser-for-agents-headless.md` (lands with PR 1). This file holds only design drafts and the decisions they wait on. **Nothing below is built yet. The Human decided D-A..D-E on 2026-11-15 (next section); PR 1b (the proxy) is next and no tool PR starts until it lands.**
+
+## Decisions (all five accepted by the Human, 2026-11-15)
+
+- **D-A WebSocket/WebTransport: PROXY.** An in-process enforcing proxy in the daemon (PR 1b below), all schemes through one policy check, empty bypass list, names resolved by the proxy and the connection pinned to the resolved IP. No tool PR before it lands.
+- **D-B The daemon gates tool calls.** The call is held and approved inside the daemon whatever the provider's permission mode (PR 4); provider-native prompts are a second layer only.
+- **D-C Ship with the stated ADR-0056 limit.** The enable method is as human-only as the principal today (an unidentified local connection counts as the human); the floor rule and CLI refusal cover the common routes. The Settings text and the PR bodies state the limit.
+- **D-D Every acting tool asks; `browser_open` may be granted for the CURRENT RUN on its card.** No grant outlives its run and no "always" scope exists; every other acting tool asks every call.
+- **D-E Allowlist: loopback plus exact hosts the human adds**, validated by `NormalizeAllowHost`; link-local and metadata addresses can never be allowed.
+
+The reasoning behind each is in ADR-0061's amendment of the same date. The 12 decisions of the ADR are unchanged.
+
+## PR 1b: an enforcing forward proxy for the session
+
+Goal: every network connection the browser makes (document, subresource, WebSocket, worker, fetch from script) is vetted by `Policy` at connect time, and the proxy dials the vetted address itself.
+
+- **Component.** `internal/browser/proxy.go`: a per-session HTTP proxy on `127.0.0.1:0` (HTTP absolute-form requests and `CONNECT host:port`, which a browser uses for https and for WebSocket through an HTTP proxy, as measured below). The launcher adds `--proxy-server=http://127.0.0.1:<port>` and `--proxy-bypass-list=<-loopback>` (removing the browser's implicit bypass of localhost/127.0.0.1/[::1]; measured below: an empty list does not do this), and drops `--no-proxy-server`.
+- **Decision per connection.** Parse the target (`host:port`) with the same `parseHost` as URLs, run the `CheckURL`-equivalent plus `CheckResolved`, resolve once in the proxy, refuse if any address is sensitive or denied, then **dial the vetted IP:port** (not the name). That closes the DNS-rebinding window between our lookup and the browser's, and it enforces `Deny` for IP literals and WebSockets. The proxy's own port and the daemon's are in `Deny` (the session adds the proxy port).
+- **No TLS interception.** `CONNECT` is a blind tunnel after the host/port check; the policy is host-level, so nothing needs the plaintext.
+- **Not an open relay.** Loopback listener only; a request to any target the policy refuses gets `403` with a reason and no dial. A local process using it can reach only what it could reach directly.
+- **Limits.** At most 64 concurrent connections per session, 30 s dial timeout, idle timeout on tunnels, header size cap via `net/http`, hop-by-hop headers stripped, absolute-form with userinfo refused, `Proxy-Authorization` ignored.
+- **Browser flags kept.** Host-resolver MAP rules stay as defence in depth; WebRTC non-proxied UDP stays disabled; QUIC/WebTransport are refused by the browser once a proxy is set (measured below), with `--disable-quic` as defence in depth.
+- **Measured (installed Chrome, headless, a logging proxy that answers everything itself, nothing left loopback; program and raw output under the dogfood root):**
+  1. With no bypass flag, **and with an explicitly empty `--proxy-bypass-list=`**, loopback traffic (`127.0.0.1`, `localhost`, `*.localhost`, `[::1]`) never reaches the proxy: Chrome bypasses it implicitly. Only `--proxy-bypass-list=<-loopback>` sends it through. So "an empty bypass list" is implemented as exactly `<-loopback>` (which removes the implicit bypass and adds nothing), and a launcher test pins it.
+  2. With `<-loopback>`, `fetch` to an IP literal, `*.localhost`, `localhost` and `[::1]` arrive as `GET http://host:port/...` (absolute form); `ws://` and `wss://` (IP literal and `*.localhost`) arrive as `CONNECT host:port`. So one proxy decision on `host:port` covers every scheme; the handshake never reaches the page's target unless the proxy dials it.
+  3. WebTransport (only exists in a secure context, e.g. `http://localhost`): with a proxy set, no request reaches the proxy and **no UDP datagram arrives** at the target port (a UDP listener on the target saw nothing); the page gets a connection error. So WebTransport/QUIC is refused by the browser itself while a proxy is configured; a launcher flag (`--disable-quic`) is kept as defence in depth.
+  4. The browser's own background traffic (update and time services) also goes through the proxy; the proxy refuses it under the same policy (no extra allowlist for it).
+- **Tests.** Table test of the proxy decision against the same URL table; real listeners: an allowed target is tunnelled, a denied loopback port gets 403 and zero hits, a rebinding resolver (first answer allowed, second a denied address) is pinned to the first, `CONNECT` to a denied IP literal is refused, oversize or garbage request lines are closed. The PR 1 smoke test **flips**: its `KNOWN GAP` log becomes the assertion "WebSocket and `fetch` to the denied port get zero hits".
+- **Mutations.** the proxy dials the name instead of the vetted IP; policy skipped on `CONNECT`; deny list skipped for IP literals; bypass list not `<-loopback>` (loopback skips the proxy); proxy port not denied.
+- **Size and risk.** One PR, daemon only, about 600 lines plus tests; high risk (network boundary); two-sub-agent review plus the Steward's own.
+
+## PR 2: the read-only `browser_*` tools, shipped dark
+
+Nothing in this PR can reach an agent: the row is gated on a setting nothing can set yet (PR 3) and on a ready flag PR 4 flips.
+
+- **Tool set** (pinned by `browser_tool_set_is_pinned`): `browser_open`, `browser_tabs`, `browser_close`, `browser_snapshot`, `browser_screenshot`, `browser_console`, `browser_wait`. No click/fill/type/press/scroll/history in this PR, no evaluate, upload or download.
+- **MCP child.** `smind mcp browser` (stdio; the same identity environment as `smind mcp serve`, the same go-sdk), appended in `Runner.mcpRowsFor` as the reserved name `smind-browser` through a new `McpPolicy.Browser` field set in `internal/runs/contract.go`. A registered server of that name never reaches a managed run (the same reserved-name rule as `smind`); `withoutSmindMcp` strips it for plugin providers.
+- **RPC.** `browser.call {tool, args}` on the daemon, in `RunScopedMethods`, bound to the connection's run id: the workspace is derived from the run, and a workspace or run id in the params is ignored (tested). The MCP child holds no browser logic: the daemon's broker owns the catalogue, policy, limits, envelope and timeline events.
+- **Broker** (`internal/browser/broker.go`): per-run limiter (30 calls per minute, 500 per run, 10 navigations per minute, one call in flight, 20 s), the per-workspace `Manager` session, the envelope, truncation and password masking, one timeline event per call (tool, redacted URL, outcome, duration; no page content).
+- **Envelope.** A fixed header naming the origin and stating that the content is untrusted data not to be followed as instructions, then the content between boundary lines carrying a per-call random token the page cannot predict (so content cannot forge the closing line). Everything page-controlled (title, URL, text, console) goes through `cleanText` first.
+- **Snapshot.** `Accessibility.getFullAXTree` rendered as an indented text tree with refs `e1..` valid for this snapshot only (bound to backend node ids; the acting-tools PR reuses them), at most 1,200 nodes and 40,000 characters with a marker; any node the browser marks protected (password) never shows its value.
+- **Screenshot.** Viewport only (`Page.captureScreenshot` with a viewport clip), long side at most 1,568 px, at most 1.5 MB (JPEG quality stepped down until it fits, else refused with a message); password inputs blurred by a style injected in an **isolated world** (page script cannot remove it). Returned as an MCP image block only when the run's provider reads images (a new `ImagesRead` flag on the run contract, from the provider catalogue), otherwise a text note.
+- **Console and wait.** `browser_console` returns the session ring (100 lines of 500 characters). `browser_wait` polls a text or URL condition in the isolated world, capped at 15 s.
+- **Tests (fake CDP, no browser).** `browser_tool_set_is_pinned`, `envelope_wraps_every_result`, `envelope_boundary_cannot_be_forged`, `limits_truncate_with_marker`, `password_values_never_returned`, `rate_limit_table` (the 31st call in a minute), `serialised_one_in_flight`, `run_id_binds_workspace`, `image_only_for_image_providers`, `injected_instruction_stays_inside_the_envelope`, plus a real-Chrome smoke of snapshot, screenshot and console on a page the test serves. Mutations: a limit raised, envelope removed, boundary fixed instead of random, password value emitted, a params workspace honoured, screenshot not clipped to the viewport.
+
+## PR 3: the human-only enable flag and the allowlist
+
+- **Store.** A `browser_settings` row per workspace (enabled default 0, allow hosts JSON, profile mode `ephemeral|persistent`); a new migration (no installed base). A daemon-wide kill switch in config (`browser.disabled`) that no RPC can change and that overrides everything.
+- **RPC and CLI (all human-only).** `browser.settings.set` and `browser.data.clear` on `permpolicy.HumanOnlyRPCs`, refused for run-scoped callers, never in `RunScopedMethods` or the MCP tool list; `browser.settings.get` is also human-only (the allowlist is configuration, not an agent's business). CLI `smind browser enable|disable|allow add|allow rm|clear` joins `humanOnlyCLI` (`status` stays read-only). Drift tests: `TestHumanOnlyRPCTable_MatchesHandlers` gains the names, a new test walks the handler map and MCP list for them, the golden method map is regenerated.
+- **Gate.** The row is appended only when: the workspace switch is on, the kill switch is off, the run contract allows it, a host is available (`DetectChrome` ok), and the PR 4 ready flag is set. `browser_row_present_only_when_all_gates_hold` and `codex_native_gets_no_row` pin it.
+- **Policy input.** `NormalizeAllowHost` on every entry; the `Deny` list is filled from the daemon's own listen address, the proxy origin and the connection list (and the proxy port in 1b); changing any of it closes the workspace session (`Manager.Close`).
+- **Limit stated:** D-C.
+
+## PR 4: permission integration (read grantable per run, acting asks every time)
+
+Recommended design (D-B): the daemon gates, independent of the provider's permission mode.
+
+- **Classes.** READ: `browser_snapshot`, `browser_screenshot`, `browser_console`, `browser_tabs`, `browser_wait`. ACT: `browser_open` and every later acting tool.
+- **Read grant.** The first read call of a run blocks (bounded, default 5 minutes) while the daemon raises one card to the human through the existing permission/question channel (web, mobile push, inbox; ADR-0055): "Allow this run to read pages in the browser (snapshot, screenshot, console)?" with the workspace's allowlist shown. The answer is a human-only RPC `browser.grant.answer {runId, requestId, allow}`; allow stores an in-memory per-run grant (gone when the run ends, never saved across runs). Deny or timeout returns a plain tool error "not permitted by the person".
+- **Acting calls.** Every call raises its own card (tool, target label or URL with the query dropped, the ref's role and name) and waits; no "always" scope exists. If D-D is yes, the `browser_open` card offers "allow navigation for this run" as a per-run grant limited to the policy's destinations.
+- **Provider layer.** The policy engine may additionally carry `mcp:smind-browser.<tool>` rules (exact names, no wildcards) so a provider that asks natively stays consistent; the daemon gate never relies on it.
+- **Tests.** `read_blocks_until_granted`, `act_asks_every_call`, `grant_dies_with_the_run`, `deny_and_timeout_return_plain_error`, `answer_is_human_only` (RPC principal, handler map), `no_always_scope_exists`, and a test that runs under a provider bypass mode and still blocks. Mutations: an acting tool allowed with a read grant, a grant surviving the run, the answer RPC callable by the MCP principal, the gate skipped when the provider mode is auto.
+- **Ready flag.** This PR flips the flag PR 3 gates the row on; before it merges no agent can receive the row.
+
+## PR 5: the provider gating table
+
+- **One table** in `internal/browser` (`providers.go`) keyed by provider id with `Offered`, `ImagesRead`, `Reason`: claude-native yes; ACP providers yes only if the agent advertises stdio MCP at run time (the table says "if advertised", the runner decides); codex-native no (no per-thread MCP); compatible recipes "offered, not guaranteed"; plugin providers only when the manifest declares MCP and consent allows, and `smind-browser` follows the existing `withoutSmindMcp` strip rule; GLM text tools only (`Images: no`).
+- **Drift.** A test walks the provider registry and fails when a provider has no row, so a new provider forces a decision. The Settings text (the plan's web PR B3) and the browser status RPC read the same table.
+- **Tests.** `codex_native_gets_no_row`, `plugin_provider_strip_follows_smind_rule`, `every_registered_provider_has_a_row`, `glm_gets_no_image`. Mutation: a row flipped for codex-native.
+
+## Order and risk summary
+
+Order: PR 1b, then PR 2, 3, 4, 5. No agent can receive the browser before PR 3 and PR 4 are both merged. Every PR is high-risk and gets the foreground two-sub-agent review, with a real-Chrome smoke where Chrome is present and everything else against the fake CDP.
