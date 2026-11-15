@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (DRAFT, 2026-11-15). Docs only: nothing in this ADR is implemented. The decisions it raises are listed at the end, each with a recommendation; they go to the Human through the Supervisor before any implementation PR starts. Acceptance criteria for the implementation PRs are in `docs/plans/active/desktop-browser-for-agents.md`.
+Accepted (2026-11-15). Human decision 2026-11-15: all 12 decisions listed at the end are accepted as recommended. Implementation is staged (headless first, then the desktop host) and each step is its own PR against `docs/plans/active/desktop-browser-for-agents.md`; the browser stays OFF by default and human-only to enable. Nothing in this ADR is implemented yet.
 
 ## Context
 
@@ -17,7 +17,7 @@ What exists today (read from the daemon code, not assumed):
 - Tool results never carry images anywhere in `cmd/smind` today.
 - The desktop shell (ADR-0013) serves its bundled UI from a loopback proxy and grants IPC to that origin only (the origin guard, amendment from the IPC origin guard PR). The desktop app is a client of the daemon, and may be connected to a remote daemon.
 
-## Decision (draft)
+## Decision
 
 ### 1. A daemon broker exposing `browser_*` MCP tools
 
@@ -105,7 +105,7 @@ MCP tool calls are not auto-allowed (ADR-0019), and this ADR does not change tha
 
 Residual risks, stated: the allowlisted loopback pages are the human's own apps and are trusted as far as the human trusts them (an app under test can still prompt-inject the agent); a webview cannot filter subresource requests, so a page on the allowlist can make requests to other loopback ports (the same as any local page); the headless host depends on the system browser's own sandbox; screenshots can still show sensitive content of the app under test.
 
-## Decisions raised (recommendation each, for the Human via the Supervisor)
+## Decisions raised (all accepted as recommended, 2026-11-15)
 
 1. **Ship the browser at all, behind OFF-by-default and human-only enable?** Recommend yes, with the policy in this ADR as the minimum.
 2. **Headless driver:** Node sidecar with Playwright, or a Go client of the Chrome DevTools Protocol. Recommend the Go CDP client: no Node runtime requirement on the daemon machine, one binary, and the tool surface here is small; revisit if Playwright's auto-waiting proves necessary.
