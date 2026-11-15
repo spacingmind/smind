@@ -477,17 +477,29 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     expect(stat).toHaveTextContent("2 files +2 −1");
   });
 
-  // jsdom has no layout: assert the classes that keep the counts on one line and stack the header below sm.
-  it("keeps the diff counts on one line and stacks the header on narrow widths", async () => {
+  // jsdom has no layout: assert the classes (the real-browser check is the frames script, which measures the boxes).
+  it("keeps the diff counts on one line", async () => {
     const client = new FakeWsClient();
     render(<DiffViewerPane client={client} task={TASK} />);
     await resolveFilesAndDiffs(client);
     client.nth("task.diff", 0).resolve({ diff: WHOLE_DIFF });
     await flush();
-
     expect(screen.getByTestId("diff-stat")).toHaveClass("whitespace-nowrap");
-    const header = screen.getByTestId("diff-viewer-pane").querySelector('[data-slot="pane-header"]');
-    expect(header).toHaveClass("flex-col", "sm:flex-row");
+  });
+
+  it("diff-header-stacks-by-pane-width-not-viewport: the pane is the container, the actions wrap when it is narrow", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    const pane = screen.getByTestId("diff-viewer-pane");
+    const header = pane.querySelector('[data-slot="pane-header"]') as HTMLElement;
+    // the pane is a query container and the header switches to one row only when the PANE is wide (40rem), not by viewport breakpoint
+    expect(pane.className).toContain("@container/diff");
+    expect(header).toHaveClass("flex-col", "@[40rem]/diff:flex-row", "@[40rem]/diff:items-center");
+    expect(header.className).not.toMatch(/(^|\s)sm:flex-row/);
+    // below that width the action slot may wrap (and shrink) instead of overflowing under the title
+    const actions = header.lastElementChild as HTMLElement;
+    expect(actions).toHaveClass("max-@[40rem]/diff:flex-wrap", "max-@[40rem]/diff:shrink");
   });
 
   it("renders every changed file in the whole-diff view", async () => {

@@ -390,10 +390,12 @@ export function DiffViewerPane({
   const isEmpty = files !== null && files.length === 0;
 
   return (
-    <div className="flex h-full flex-col" data-testid="diff-viewer-pane">
+    // A container, not the viewport, decides the header's layout: a split pane can be ~300 px wide inside a 1280 px window.
+    <div className="@container/diff flex h-full flex-col" data-testid="diff-viewer-pane">
       <PaneHeader
         title="Diff"
-        className="flex-col items-stretch sm:flex-row sm:items-center"
+        className="flex-col items-stretch @[40rem]/diff:flex-row @[40rem]/diff:items-center"
+        actionsClassName="max-@[40rem]/diff:flex-wrap max-@[40rem]/diff:shrink"
         subtitle={
           <span
             className="whitespace-nowrap"
