@@ -1,14 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
-	"net/http"
-	"net/http/httptest"
+	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"sort"
@@ -17,29 +18,46 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/spacingmind/smind/internal/wsclient"
+	"github.com/spacingmind/smind/internal/browser/runsock"
 )
 
 // Test harness for the browser MCP child: no daemon, no browser -- the
-// seven tools are wired to a wsapi stand-in that records every request
-// and answers with a test-chosen envelope, so the tests pin exactly what
-// the child puts on the wire and exactly how it converts what comes back.
+// seven tools are wired to a unix-socket stand-in that records every request
+// line and answers with a test-chosen reply, so the tests pin exactly what the
+// child puts on the wire and exactly how it converts what comes back.
 
-// fakeBrowserReply is what the fake daemon answers one RPC with: either a
-// result payload or an error message.
+// fakeBrowserReply is what the fake socket answers one request with: either a
+// result payload or an error text.
 type fakeBrowserReply struct {
-	result any    // the wsapi result payload
-	errMsg string // non-empty: the envelope carries this rpc error
+	result any    // the envelope
+	errMsg string // non-empty: the reply carries this error
 }
 
-// fakeBrowserDaemon is a wsapi stand-in shaped like the validator tests'
-// fakeVerdictDaemon: it records every request (fakeDaemonCall) and answers
-// each with the reply the test last installed.
-func fakeBrowserDaemon(t *testing.T) (*httptest.Server, <-chan fakeDaemonCall, func(fakeBrowserReply)) {
+// fakeSocketCall is one request line the fake socket received.
+type fakeSocketCall struct {
+	raw    string // the exact line (without its newline)
+	tool   string
+	args   map[string]any
+	fields []string // the top-level keys, sorted
+}
+
+// fakeBrowserSocket serves a short-path unix socket. It records every request
+// and answers each with the reply the test last installed.
+func fakeBrowserSocket(t *testing.T) (string, <-chan fakeSocketCall, func(fakeBrowserReply)) {
 	t.Helper()
-	calls := make(chan fakeDaemonCall, 32)
+	dir, err := os.MkdirTemp("", "bs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	path := filepath.Join(dir, "s.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	calls := make(chan fakeSocketCall, 32)
 	var mu sync.Mutex
 	reply := fakeBrowserReply{result: map[string]any{"content": []any{}, "isError": false}}
 	setReply := func(r fakeBrowserReply) {
@@ -47,54 +65,51 @@ func fakeBrowserDaemon(t *testing.T) (*httptest.Server, <-chan fakeDaemonCall, f
 		defer mu.Unlock()
 		reply = r
 	}
-	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := up.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer ws.Close()
+	go func() {
 		for {
-			_, data, err := ws.ReadMessage()
+			conn, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			var env struct {
-				ID     string          `json:"id"`
-				Method string          `json:"method"`
-				Params json.RawMessage `json:"params"`
-			}
-			if err := json.Unmarshal(data, &env); err != nil || env.ID == "" {
-				continue
-			}
-			var call fakeDaemonCall
-			call.method = env.Method
-			_ = json.Unmarshal(env.Params, &call.params)
-			calls <- call
-			mu.Lock()
-			ans := reply
-			mu.Unlock()
-			var out []byte
-			if ans.errMsg != "" {
-				out, _ = json.Marshal(map[string]any{"id": env.ID, "error": map[string]any{"message": ans.errMsg}})
-			} else {
-				out, _ = json.Marshal(map[string]any{"id": env.ID, "result": ans.result})
-			}
-			if err := ws.WriteMessage(websocket.TextMessage, out); err != nil {
-				return
-			}
+			go func() {
+				defer conn.Close()
+				line, err := bufio.NewReader(conn).ReadString('\n')
+				if err != nil {
+					return
+				}
+				line = strings.TrimSuffix(line, "\n")
+				var raw map[string]json.RawMessage
+				_ = json.Unmarshal([]byte(line), &raw)
+				call := fakeSocketCall{raw: line}
+				for k := range raw {
+					call.fields = append(call.fields, k)
+				}
+				sort.Strings(call.fields)
+				_ = json.Unmarshal(raw["tool"], &call.tool)
+				_ = json.Unmarshal(raw["args"], &call.args)
+				calls <- call
+				mu.Lock()
+				ans := reply
+				mu.Unlock()
+				var out []byte
+				if ans.errMsg != "" {
+					out, _ = json.Marshal(map[string]any{"error": ans.errMsg})
+				} else {
+					out, _ = json.Marshal(map[string]any{"result": ans.result})
+				}
+				_, _ = conn.Write(append(out, '\n'))
+			}()
 		}
-	}))
-	t.Cleanup(srv.Close)
-	return srv, calls, setReply
+	}()
+	return path, calls, setReply
 }
 
-// browserSessionOver wires a browser-child MCP session whose tools talk
-// to the given wsclient.
-func browserSessionOver(t *testing.T, client *wsclient.Client) *mcp.ClientSession {
+// browserSessionOver wires a browser-child MCP session whose tools talk to the
+// given caller.
+func browserSessionOver(t *testing.T, call browserCaller) *mcp.ClientSession {
 	t.Helper()
 	t1, t2 := mcp.NewInMemoryTransports()
-	if _, err := newBrowserMCPServer(client, "tok-1").Connect(context.Background(), t1, nil); err != nil {
+	if _, err := newBrowserMCPServer(call).Connect(context.Background(), t1, nil); err != nil {
 		t.Fatal(err)
 	}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil).Connect(context.Background(), t2, nil)
@@ -105,17 +120,12 @@ func browserSessionOver(t *testing.T, client *wsclient.Client) *mcp.ClientSessio
 	return cs
 }
 
-// browserSession is a browser-child session over the fake daemon, plus
-// the daemon's recorded calls and reply setter.
-func browserSession(t *testing.T) (*mcp.ClientSession, <-chan fakeDaemonCall, func(fakeBrowserReply)) {
+// browserSession is a browser-child session over the fake socket, plus the
+// socket's recorded calls and reply setter.
+func browserSession(t *testing.T) (*mcp.ClientSession, <-chan fakeSocketCall, func(fakeBrowserReply)) {
 	t.Helper()
-	srv, calls, setReply := fakeBrowserDaemon(t)
-	client, err := wsclient.Dial(context.Background(), strings.TrimPrefix(srv.URL, "http://"), "tok")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
-	return browserSessionOver(t, client), calls, setReply
+	path, calls, setReply := fakeBrowserSocket(t)
+	return browserSessionOver(t, socketBrowserCaller(path)), calls, setReply
 }
 
 // browserCatalogue is the pinned seven-tool catalogue, sorted.
@@ -253,8 +263,8 @@ func TestBrowserMCP_SchemasAreStrict(t *testing.T) {
 	}
 }
 
-// TestBrowserMCP_ForwardsToBrowserCall: every tool is exactly one
-// browser.call round trip carrying {tool, args}, with the args the typed
+// TestBrowserMCP_ForwardsToTheSocket: every tool is exactly one
+// socket round trip carrying {tool, args}, with the args the typed
 // input marshals to -- nothing added, nothing renamed.
 func TestBrowserMCP_ForwardsToBrowserCall(t *testing.T) {
 	cs, calls, _ := browserSession(t)
@@ -283,21 +293,14 @@ func TestBrowserMCP_ForwardsToBrowserCall(t *testing.T) {
 		}
 		select {
 		case got := <-calls:
-			if got.method != "browser.call" {
-				t.Fatalf("%s: daemon method = %s, want browser.call", c.tool, got.method)
+			if got.tool != c.tool {
+				t.Fatalf("%s: the socket saw tool %q", c.tool, got.tool)
 			}
-			if got.params["tool"] != c.tool {
-				t.Fatalf("%s: daemon params = %v, want tool %q", c.tool, got.params, c.tool)
+			if !reflect.DeepEqual(got.fields, []string{"args", "tool"}) {
+				t.Fatalf("%s: a request carries exactly tool and args (no token, no run, no method): %v in %s", c.tool, got.fields, got.raw)
 			}
-			if got.params["token"] != "tok-1" {
-				t.Fatalf("%s: the run's browser capability must ride every call: %v", c.tool, got.params)
-			}
-			args, ok := got.params["args"].(map[string]any)
-			if !ok {
-				t.Fatalf("%s: daemon args = %T, want a JSON object", c.tool, got.params["args"])
-			}
-			if !reflect.DeepEqual(args, c.want) {
-				t.Fatalf("%s: daemon args = %v, want exactly %v", c.tool, args, c.want)
+			if !reflect.DeepEqual(got.args, c.want) {
+				t.Fatalf("%s: socket args = %v, want exactly %v", c.tool, got.args, c.want)
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatalf("%s: the daemon never saw the call", c.tool)
@@ -360,9 +363,9 @@ func TestBrowserMCP_ConvertsTextAndImageResults(t *testing.T) {
 	}
 }
 
-// TestBrowserMCP_DaemonErrorIsAToolError: an RPC-level daemon rejection
-// becomes a tool error carrying the daemon's message, labelled with the
-// tool's own name (callWS) -- not a protocol error.
+// TestBrowserMCP_SocketErrorIsAToolError: a daemon refusal becomes a tool
+// error carrying the daemon's message, labelled with the tool's own name --
+// not a protocol error.
 func TestBrowserMCP_DaemonErrorIsAToolError(t *testing.T) {
 	cs, _, setReply := browserSession(t)
 	setReply(fakeBrowserReply{errMsg: "host example.net is not allowed by the policy"})
@@ -385,11 +388,12 @@ func TestBrowserMCP_DaemonErrorIsAToolError(t *testing.T) {
 	}
 }
 
-// TestBrowserMCP_RequiresRunID: without SMIND_RUN_ID the child refuses
-// (exit 1) before dialing anything -- a browser belongs to a run, never
+// TestBrowserMCP_RequiresTheSocket: without SMIND_BROWSER_SOCKET the child
+// refuses (exit 1) before doing anything -- a browser belongs to a run, never
 // to whoever happens to start the process.
-func TestBrowserMCP_RequiresRunID(t *testing.T) {
-	t.Setenv("SMIND_RUN_ID", "")
+func TestBrowserMCP_RequiresTheSocket(t *testing.T) {
+	t.Setenv("SMIND_BROWSER_SOCKET", "")
+	t.Setenv("SMIND_RUN_ID", "run-1")
 	t.Setenv("SMIND_HOME", t.TempDir())
 
 	r, w, err := os.Pipe()
@@ -403,22 +407,15 @@ func TestBrowserMCP_RequiresRunID(t *testing.T) {
 	os.Stderr = old
 	out, _ := io.ReadAll(r)
 
-	if code != 1 {
-		t.Fatalf("cmdMcpBrowser without SMIND_RUN_ID = %d, want 1", code)
-	}
-	if !strings.Contains(string(out), "SMIND_RUN_ID is required") {
-		t.Fatalf("stderr = %q, want the SMIND_RUN_ID refusal", out)
-	}
-	if strings.Contains(string(out), "daemon") {
-		t.Errorf("stderr = %q: the refusal came after a dial attempt; the run id check must come first", out)
+	if code != 1 || !strings.Contains(string(out), "SMIND_BROWSER_SOCKET is required") {
+		t.Fatalf("a child without its socket must fail closed: code=%d %q", code, out)
 	}
 }
 
 // TestBrowserMCP_NoArguments: the child takes no arguments, exactly like
 // `mcp serve`.
 func TestBrowserMCP_NoArguments(t *testing.T) {
-	t.Setenv("SMIND_RUN_ID", "run-1")
-	t.Setenv("SMIND_HOME", t.TempDir())
+	t.Setenv("SMIND_BROWSER_SOCKET", "/nonexistent/s.sock")
 	if code := cmdMcpBrowser([]string{"extra"}); code != 2 {
 		t.Fatalf("cmdMcpBrowser with an argument = %d, want 2 (usage)", code)
 	}
@@ -444,21 +441,77 @@ func TestBrowserMCP_NotInTheSmindServerCatalogue(t *testing.T) {
 	}
 }
 
-func TestBrowserMCP_RequiresTheBrowserToken(t *testing.T) {
-	t.Setenv("SMIND_RUN_ID", "run-1")
-	t.Setenv("SMIND_BROWSER_TOKEN", "")
-	t.Setenv("SMIND_HOME", t.TempDir())
-	r, w, err := os.Pipe()
+// A socket that closes without a reply (the daemon refusing this process, or the
+// run having ended) is a tool error that says so; an unreachable socket is one too.
+func TestBrowserMCP_RefusedOrMissingSocketIsAToolError(t *testing.T) {
+	dir, err := os.MkdirTemp("", "bs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := os.Stderr
-	os.Stderr = w
-	code := cmdMcpBrowser(nil)
-	w.Close()
-	os.Stderr = old
-	out, _ := io.ReadAll(r)
-	if code != 1 || !strings.Contains(string(out), "SMIND_BROWSER_TOKEN is required") || strings.Contains(string(out), "daemon") {
-		t.Fatalf("a child without its capability must fail closed before dialling: code=%d %q", code, out)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	path := filepath.Join(dir, "s.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close() // a refusal: closed with no reply
+		}
+	}()
+	cs := browserSessionOver(t, socketBrowserCaller(path))
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "browser_tabs"})
+	if err != nil || !res.IsError || !strings.Contains(mcpToolErrorText(res), "this process is not part of the run") {
+		t.Fatalf("a refused connection: err=%v res=%+v", err, res)
+	}
+	cs2 := browserSessionOver(t, socketBrowserCaller(filepath.Join(dir, "gone.sock")))
+	res, err = cs2.CallTool(context.Background(), &mcp.CallToolParams{Name: "browser_tabs"})
+	if err != nil || !res.IsError || !strings.Contains(mcpToolErrorText(res), "not reachable") {
+		t.Fatalf("a missing socket: err=%v res=%+v", err, res)
+	}
+}
+
+// The child against the REAL hub and the kernel's real peer credentials: this
+// process is the run's root, so its call is served; the daemon-side handler sees
+// exactly the tool and args the child sent.
+func TestBrowserMCP_ThroughARealHub(t *testing.T) {
+	dir, err := os.MkdirTemp("", "bs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	hub, err := runsock.NewSystemHub(filepath.Join(dir, "sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(hub.CloseAll)
+	var mu sync.Mutex
+	var seen []runsock.Request
+	path, err := hub.Open("run-1", os.Getpid(), func(_ context.Context, req runsock.Request) (any, error) {
+		mu.Lock()
+		seen = append(seen, req)
+		mu.Unlock()
+		return browserCallResult{Content: []browserContent{{Type: "text", Text: "ok " + req.Tool}}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := browserSessionOver(t, socketBrowserCaller(path))
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "browser_open", Arguments: map[string]any{"url": "http://127.0.0.1:1/x"}})
+	if err != nil || res.IsError || len(res.Content) != 1 {
+		t.Fatalf("a call through the hub: err=%v res=%+v", err, res)
+	}
+	if tc, ok := res.Content[0].(*mcp.TextContent); !ok || tc.Text != "ok browser_open" {
+		t.Fatalf("content: %+v", res.Content[0])
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 || seen[0].Tool != "browser_open" || !strings.Contains(string(seen[0].Args), "http://127.0.0.1:1/x") {
+		t.Fatalf("the daemon side saw: %+v", seen)
 	}
 }

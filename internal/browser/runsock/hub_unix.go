@@ -4,8 +4,6 @@ package runsock
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -21,9 +19,6 @@ const (
 	// maxSockPath keeps a unix socket path under the smallest platform limit
 	// (104 bytes on macOS, 108 on Linux) with room to spare.
 	maxSockPath = 100
-	// maxConnsPerRun bounds the live connections of one run's socket.
-	maxConnsPerRun = 8
-	sockSuffix     = ".sock"
 )
 
 // HubConfig configures a Hub.
@@ -139,11 +134,6 @@ func sweepStale(dir string) {
 		}
 		_ = os.Remove(filepath.Join(dir, e.Name()))
 	}
-}
-
-func sockName(runID string) string {
-	sum := sha256.Sum256([]byte(runID))
-	return hex.EncodeToString(sum[:6]) + sockSuffix
 }
 
 // socketPath picks the directory for runID's socket: Dir, or the fallback when
@@ -299,12 +289,5 @@ func (h *Hub) checkPeer(rs *runSock, conn net.Conn) string {
 	if err != nil {
 		return "peer credentials unreadable"
 	}
-	if int64(pc.UID) != int64(h.cfg.UID) {
-		return "another user"
-	}
-	ok, err := InTree(h.cfg.Tree, pc.PID, rs.root, rs.rootStart)
-	if err != nil || !ok {
-		return "not a process of this run"
-	}
-	return ""
+	return checkCred(pc, true, h.cfg.UID, h.cfg.Tree, rs.root, rs.rootStart)
 }

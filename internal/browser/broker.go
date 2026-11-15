@@ -39,7 +39,7 @@ const (
 	// PrereqRunSocket: the browser child talks to the daemon over a per-run
 	// local socket whose peer credentials (user and process ancestry) are
 	// checked, instead of a token that a same-user process can read.
-	PrereqRunSocket = false
+	PrereqRunSocket = true // built in PR 3b-2: internal/browser/runsock, the per-run socket and its peer check
 )
 
 // ToolNames is the whole catalogue of this version. There is deliberately no

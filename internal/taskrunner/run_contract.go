@@ -42,13 +42,15 @@ type McpPolicy struct {
 // BrowserPolicy grants a run the browser tools' MCP entry.
 type BrowserPolicy struct {
 	// Env is the entry's environment (run identity, SMIND_HOME). Policy, not
-	// content: never log. It does not carry the capability token: that is
-	// issued by Issue only when the row is actually handed to the agent.
+	// content: never log. It carries no secret: the row's only credential is the
+	// run's own process tree, checked by the daemon on the socket's peer.
 	Env map[string]string
-	// Issue mints the run's capability token (nil: none) and Revoke drops it.
-	// The runner calls Issue only at a delivery point (a row that really goes
-	// to the provider) and Revoke if the provider then did not take the row.
-	Issue  func() string
+	// Socket opens the run's browser socket, bound to the agent process rooted
+	// at rootPID, and returns its path (nil or an error: no row). The runner
+	// calls it only at a delivery point (a row that really goes to the
+	// provider); Revoke closes the socket if the provider then did not take the
+	// row.
+	Socket func(rootPID int) (string, error)
 	Revoke func()
 }
 

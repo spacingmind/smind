@@ -284,15 +284,19 @@ func (r *Runner) smindBinaryPath() string {
 // one, every row named "smind" is removed (reserved name) and, for an
 // orchestration seat, the built-in stdio entry is appended.
 func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.McpServer, error) {
-	return r.mcpRowsForDelivery(ctx, workspaceID, true)
+	// The Claude CLI's process id is not known when its rows are built (the SDK
+	// starts the CLI later and does not report it), so this path gets no browser
+	// row: a browser needs the run's root process to bind its socket to.
+	return r.mcpRowsForDelivery(ctx, workspaceID, true, 0)
 }
 
 // mcpRowsForDelivery is mcpRowsFor for a caller that knows whether the rows
 // will really be handed to the agent. With deliver false the browser row is
 // not built at all (a codex-native run takes no per-run MCP rows, a plugin
-// provider never gets smind's own): no row, and no capability token minted for
-// a row nobody will receive.
-func (r *Runner) mcpRowsForDelivery(ctx context.Context, workspaceID int64, deliver bool) ([]store.McpServer, error) {
+// provider never gets smind's own): no row, and no browser socket opened for a
+// row nobody will receive. rootPID is the agent process the run's browser socket
+// is bound to; 0 (unknown) builds no browser row: never a weaker check.
+func (r *Runner) mcpRowsForDelivery(ctx context.Context, workspaceID int64, deliver bool, rootPID int) ([]store.McpServer, error) {
 	rows, err := r.mcpServersForWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
@@ -323,15 +327,18 @@ func (r *Runner) mcpRowsForDelivery(ctx context.Context, workspaceID int64, deli
 			Args: string(args), Env: string(envJSON), Enabled: true,
 		})
 	}
-	if policy.Browser != nil && deliver {
+	if policy.Browser != nil && deliver && rootPID > 0 && policy.Browser.Socket != nil {
+		sock, serr := policy.Browser.Socket(rootPID)
+		if serr != nil || sock == "" {
+			// No socket, no browser (logged by the host that failed): the run goes on without it.
+			return out, nil
+		}
 		args, _ := json.Marshal([]string{"mcp", "browser"})
 		env := map[string]string{}
 		for k, v := range policy.Browser.Env {
 			env[k] = v
 		}
-		if policy.Browser.Issue != nil {
-			env["SMIND_BROWSER_TOKEN"] = policy.Browser.Issue()
-		}
+		env["SMIND_BROWSER_SOCKET"] = sock
 		envJSON, err := json.Marshal(env)
 		if err != nil {
 			return nil, fmt.Errorf("smind-browser mcp env: %w", err)

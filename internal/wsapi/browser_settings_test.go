@@ -287,20 +287,18 @@ func TestBrowserSettings_EachLayerRefusesOnItsOwn(t *testing.T) {
 
 func errOf(_ any, err error) error { return err }
 
-func TestExactlyOneBrowserMethodIsRunScoped(t *testing.T) {
+// No browser method is run-scoped any more (the child uses its run's socket),
+// and every browser method on the websocket is human-only.
+func TestNoBrowserMethodIsRunScopedAndAllAreHumanOnly(t *testing.T) {
 	e := newProcEnv(t)
-	var scoped []string
 	for _, m := range RunScopedMethods {
 		if strings.HasPrefix(m, "browser.") {
-			scoped = append(scoped, m)
+			t.Errorf("%s is run-scoped: no browser method may be reachable by an identified run", m)
 		}
 	}
-	if len(scoped) != 1 || scoped[0] != "browser.call" {
-		t.Fatalf("browser.call is the only run-scoped browser method: %v", scoped)
-	}
 	for m := range e.api.hs {
-		if strings.HasPrefix(m, "browser.") && m != "browser.call" && !slices.Contains(permpolicy.HumanOnlyRPCs, m) {
-			t.Errorf("%s is a browser method that is neither browser.call nor on the human-only table", m)
+		if strings.HasPrefix(m, "browser.") && !slices.Contains(permpolicy.HumanOnlyRPCs, m) {
+			t.Errorf("%s is a browser method that is not on the human-only table", m)
 		}
 	}
 }
@@ -494,19 +492,19 @@ func TestBrowser_DarkEvenWhenEnabled(t *testing.T) {
 	if e.api.Runs.BrowserAllowed(task.WorkspaceID) {
 		t.Fatal("the registry must still answer no while browser.GateReady is false")
 	}
-	ws := e.identified(t)
-	e.api.browser.tokenOK = func(string, string) bool { return true }
-	wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"}), "not enabled for this workspace")
+	if _, err := callRunJSON(t, e.api.browser, e.runID, task.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "not enabled for this workspace") {
+		t.Fatalf("dark even when enabled: %v", err)
+	}
 }
 
 func TestBrowserCall_KillSwitchRefusesWithItsOwnMessage(t *testing.T) {
 	t.Parallel()
 	e := newIdentEnv(t, "hang")
-	ws := e.identified(t)
-	e.api.browser.tokenOK = func(string, string) bool { return true }
 	e.api.browser.gate = func(int64) bool { return true } // every other gate open
 	e.api.browser.killSwitch = func() bool { return true }
-	wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"}), "disabled by the daemon's configuration")
+	if _, err := callRunJSON(t, e.api.browser, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "disabled by the daemon's configuration") {
+		t.Fatalf("kill switch refusal: %v", err)
+	}
 }
 
 func TestDenyListCoversTheDaemonsOwnAddresses(t *testing.T) {
@@ -627,20 +625,22 @@ func TestBrowserSettings_AllowAddPastTheCapIsRefused(t *testing.T) {
 func TestBrowserCall_KillSwitchFlipEndsLiveSessionsAtTheNextCall(t *testing.T) {
 	t.Parallel()
 	e := newIdentEnv(t, "hang")
-	ws := e.identified(t)
 	h := e.api.browser
-	h.tokenOK = func(string, string) bool { return true }
 	h.gate = func(int64) bool { return true }
 	ended := 0
 	h.endAllSessions = func() { ended++ }
 	h.killSwitch = func() bool { return false }
 	h.launcher = func() (browser.Launcher, error) { return nil, &browser.UnavailableError{InstallStep: "x"} }
-	wantOK(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"}), "call before the flip")
+	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err != nil {
+		t.Fatalf("call before the flip: %v", err)
+	}
 	if ended != 0 {
 		t.Fatal("nothing is ended while the switch is off")
 	}
 	h.killSwitch = func() bool { return true }
-	wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"}), "disabled by the daemon's configuration")
+	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "disabled by the daemon's configuration") {
+		t.Fatalf("after the flip: %v", err)
+	}
 	if ended != 1 {
 		t.Fatalf("the flip must end every live session at the next call: ended=%d", ended)
 	}

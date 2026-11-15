@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"time"
 )
 
@@ -71,7 +70,15 @@ func decodeRequest(line []byte) (Request, error) {
 // serveConn answers requests on conn until it closes, a request is bad, the
 // connection idles out, or ctx ends. It never reads before the caller has
 // checked the peer.
-func serveConn(ctx context.Context, conn net.Conn, handle Handler) {
+// deadlineConn is what serveConn needs: a net.Conn on unix sockets, an emulation
+// on Windows pipes.
+type deadlineConn interface {
+	io.ReadWriteCloser
+	SetReadDeadline(time.Time) error
+	SetWriteDeadline(time.Time) error
+}
+
+func serveConn(ctx context.Context, conn deadlineConn, handle Handler) {
 	defer conn.Close()
 	br := bufio.NewReaderSize(conn, MaxRequestBytes+2)
 	for {

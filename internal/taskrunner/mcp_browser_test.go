@@ -3,6 +3,7 @@ package taskrunner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -13,6 +14,12 @@ import (
 
 func browserEnv() map[string]string {
 	return map[string]string{"SMIND_HOME": "/home/x", "SMIND_RUN_ID": "run-1"}
+}
+
+// socketPolicy is a browser policy whose Socket records the root pid it was
+// opened for and returns a fixed path.
+func socketPolicy(root *int) *BrowserPolicy {
+	return &BrowserPolicy{Env: browserEnv(), Socket: func(pid int) (string, error) { *root = pid; return "/run/sock/x.sock", nil }}
 }
 
 func TestMcpRowsFor_BrowserRowOnlyWithBrowserPolicy(t *testing.T) {
@@ -32,9 +39,13 @@ func TestMcpRowsFor_BrowserRowOnlyWithBrowserPolicy(t *testing.T) {
 			}
 		}
 	}
-	got, err := r.mcpRowsFor(policyCtx(&McpPolicy{Browser: &BrowserPolicy{Env: browserEnv()}}), 1)
+	var root int
+	got, err := r.mcpRowsForDelivery(policyCtx(&McpPolicy{Browser: socketPolicy(&root)}), 1, true, 4242)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if root != 4242 {
+		t.Fatalf("the socket is opened for the agent process: %d", root)
 	}
 	if !reflect.DeepEqual(names(got), []string{"a", "smind-browser"}) {
 		t.Fatalf("names = %v", names(got))
@@ -44,8 +55,16 @@ func TestMcpRowsFor_BrowserRowOnlyWithBrowserPolicy(t *testing.T) {
 	_ = json.Unmarshal([]byte(row.Args), &args)
 	var env map[string]string
 	_ = json.Unmarshal([]byte(row.Env), &env)
-	if row.Transport != "stdio" || row.Command != "/opt/smind" || !reflect.DeepEqual(args, []string{"mcp", "browser"}) || env["SMIND_RUN_ID"] != "run-1" || !row.Enabled {
+	if row.Transport != "stdio" || row.Command != "/opt/smind" || !reflect.DeepEqual(args, []string{"mcp", "browser"}) || env["SMIND_RUN_ID"] != "run-1" || env["SMIND_BROWSER_SOCKET"] != "/run/sock/x.sock" || !row.Enabled {
 		t.Fatalf("the browser row: %+v", row)
+	}
+	if _, has := env["SMIND_BROWSER_TOKEN"]; has {
+		t.Fatalf("no token exists any more: %v", env)
+	}
+	for k, v := range env {
+		if strings.Contains(strings.ToLower(k), "token") || strings.Contains(strings.ToLower(k), "secret") || strings.Contains(v, "tok") {
+			t.Fatalf("the row's env must carry no secret: %s=%s", k, v)
+		}
 	}
 }
 
@@ -68,7 +87,8 @@ func TestMcpRowsFor_ReservedBrowserNameNeverReachesAnyRun(t *testing.T) {
 			}
 		}
 	}
-	got, _ := r.mcpRowsFor(policyCtx(&McpPolicy{Browser: &BrowserPolicy{Env: browserEnv()}}), 1)
+	var root2 int
+	got, _ := r.mcpRowsForDelivery(policyCtx(&McpPolicy{Browser: socketPolicy(&root2)}), 1, true, 4242)
 	n := 0
 	for _, row := range got {
 		if row.Name == "smind-browser" {
@@ -91,46 +111,52 @@ func TestWithoutSmindMcp_StripsTheBrowserRowForPluginProviders(t *testing.T) {
 	}
 }
 
-type tokenSpy struct{ issued, revoked int }
+type socketSpy struct{ opened, revoked, root int }
 
-func (s *tokenSpy) policy() *McpPolicy {
+func (s *socketSpy) policy() *McpPolicy {
 	return &McpPolicy{BrowserOnly: true, Browser: &BrowserPolicy{
 		Env:    browserEnv(),
-		Issue:  func() string { s.issued++; return "tok-issued" },
+		Socket: func(pid int) (string, error) { s.opened++; s.root = pid; return "/run/sock/x.sock", nil },
 		Revoke: func() { s.revoked++ },
 	}}
 }
 
-func TestBrowserCapabilityIsIssuedOnlyWhereTheRowIsDelivered(t *testing.T) {
+func TestBrowserSocketIsOpenedOnlyWhereTheRowIsDelivered(t *testing.T) {
 	t.Parallel()
 	r := policyRunner()
-	// A delivery point: the row carries the freshly issued capability, once.
-	spy := &tokenSpy{}
-	p := spy.policy()
-	got, err := r.mcpRowsFor(policyCtx(p), 1)
+	// A delivery point with a known agent process: the row, the socket opened once for that pid.
+	spy := &socketSpy{}
+	got, err := r.mcpRowsForDelivery(policyCtx(spy.policy()), 1, true, 777)
 	if err != nil || len(got) != 1 {
 		t.Fatalf("rows = %+v, err %v", got, err)
 	}
-	var env map[string]string
-	_ = json.Unmarshal([]byte(got[0].Env), &env)
-	if spy.issued != 1 || env["SMIND_BROWSER_TOKEN"] != "tok-issued" || env["SMIND_RUN_ID"] != "run-1" {
-		t.Fatalf("issued %d, env %v", spy.issued, env)
+	if spy.opened != 1 || spy.root != 777 {
+		t.Fatalf("opened %d times for pid %d", spy.opened, spy.root)
 	}
-	if _, leaked := p.Browser.Env["SMIND_BROWSER_TOKEN"]; leaked {
-		t.Fatal("the capability must not be written into the policy's own env map")
+	// A path that delivers nothing (codex-native, a plugin provider): no row, no socket.
+	spy2 := &socketSpy{}
+	got, err = r.mcpRowsForDelivery(policyCtx(spy2.policy()), 1, false, 777)
+	if err != nil || len(got) != 0 || spy2.opened != 0 {
+		t.Fatalf("a row nobody will receive must not be built or opened for: rows=%v opened=%d err=%v", names(got), spy2.opened, err)
 	}
-	// A path that delivers nothing (codex-native, a plugin provider): no row, no capability.
-	spy2 := &tokenSpy{}
-	got, err = r.mcpRowsForDelivery(policyCtx(spy2.policy()), 1, false)
-	if err != nil || len(got) != 0 || spy2.issued != 0 {
-		t.Fatalf("a row nobody will receive must not be built or minted for: rows=%v issued=%d err=%v", names(got), spy2.issued, err)
+	// An agent whose process id is unknown (the Claude CLI path): no row, no socket: never a weaker check.
+	spy3 := &socketSpy{}
+	got, err = r.mcpRowsFor(policyCtx(spy3.policy()), 1)
+	if err != nil || len(got) != 0 || spy3.opened != 0 {
+		t.Fatalf("no known agent process means no browser row and no socket: rows=%v opened=%d err=%v", names(got), spy3.opened, err)
+	}
+	// A socket that cannot be created: the run goes on without the row.
+	bad := &McpPolicy{BrowserOnly: true, Browser: &BrowserPolicy{Env: browserEnv(), Socket: func(int) (string, error) { return "", errors.New("no dir") }}}
+	got, err = r.mcpRowsForDelivery(policyCtx(bad), 1, true, 777)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("a failed socket means no row and no error: rows=%v err=%v", names(got), err)
 	}
 	if browserRowDelivered(true) || !browserRowDelivered(false) {
 		t.Fatal("a plugin provider never gets the browser row, an ordinary provider does")
 	}
 }
 
-func TestBrowserCapabilityIsRevokedWhenTheProviderSkipsTheRow(t *testing.T) {
+func TestBrowserSocketIsClosedWhenTheProviderSkipsTheRow(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
 		inactive, unresolved []string
@@ -142,13 +168,13 @@ func TestBrowserCapabilityIsRevokedWhenTheProviderSkipsTheRow(t *testing.T) {
 		"browser unresolved": {nil, []string{"smind-browser (command \"/opt/smind\" not found in PATH)"}, 1},
 		"a lookalike name":   {[]string{"smind-browser-2", "my-smind-browser"}, nil, 0},
 	} {
-		spy := &tokenSpy{}
+		spy := &socketSpy{}
 		revokeBrowserIfSkipped(policyCtx(spy.policy()), tc.inactive, tc.unresolved)
 		if spy.revoked != tc.revoked {
 			t.Errorf("%s: revoked %d, want %d", name, spy.revoked, tc.revoked)
 		}
 	}
-	spy := &tokenSpy{}
+	spy := &socketSpy{}
 	revokeBrowserAll(policyCtx(spy.policy()))
 	if spy.revoked != 1 {
 		t.Fatal("revokeBrowserAll must revoke")

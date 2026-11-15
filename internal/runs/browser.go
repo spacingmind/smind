@@ -2,9 +2,7 @@ package runs
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"github.com/spacingmind/smind/internal/browser"
@@ -86,59 +84,58 @@ func (reg *Registry) withBrowserPolicy(ctx context.Context, r *run) context.Cont
 		cp := *c.Mcp
 		c.Mcp = &cp
 	}
-	// The capability is NOT minted here: the runner issues it only when the row
-	// is really handed to the agent (not for codex-native, a plugin provider, or
-	// a row the agent skipped), so a token never exists for a row nobody got.
-	runID := r.id
+	// The socket is NOT opened here: the runner opens it only when the row is
+	// really handed to the agent, with the agent's process id (not for codex-native,
+	// a plugin provider, a provider with no known process, or a row the agent
+	// skipped), so no socket exists for a row nobody got.
+	runID, taskID := r.id, r.taskID
 	c.Mcp.Browser = &taskrunner.BrowserPolicy{
-		Env:    reg.mcpBaseEnv(r),
-		Issue:  func() string { return reg.issueBrowserToken(runID) },
-		Revoke: func() { reg.ForgetBrowserToken(runID) },
+		Env: reg.mcpBaseEnv(r),
+		Socket: func(rootPID int) (string, error) {
+			reg.mu.Lock()
+			bs := reg.browserSockets
+			reg.mu.Unlock()
+			if bs == nil {
+				return "", errors.New("runs: no browser socket host is installed")
+			}
+			return bs.OpenBrowserSocket(runID, taskID, rootPID)
+		},
+		Revoke: func() { reg.closeBrowserSocket(runID) },
 	}
 	return taskrunner.WithRunContract(ctx, c)
 }
 
-// issueBrowserToken mints and stores the capability of one run.
-func (reg *Registry) issueBrowserToken(runID string) string {
-	tok := newBrowserToken()
+// BrowserSockets opens and closes the per-run browser sockets (the daemon's
+// socket host implements it).
+type BrowserSockets interface {
+	// OpenBrowserSocket creates the run's socket, bound to the agent process
+	// rooted at rootPID, and returns its path.
+	OpenBrowserSocket(runID string, taskID int64, rootPID int) (string, error)
+	CloseBrowserSocket(runID string)
+}
+
+// SetBrowserSockets installs the socket host. Without it no run gets the row.
+func (reg *Registry) SetBrowserSockets(bs BrowserSockets) {
 	reg.mu.Lock()
-	if reg.browserTokens == nil {
-		reg.browserTokens = map[string]string{}
+	reg.browserSockets = bs
+	reg.mu.Unlock()
+}
+
+// BrowserSocketHost returns the installed socket host (nil if none): the
+// daemon wiring test checks it is the browser host.
+func (reg *Registry) BrowserSocketHost() BrowserSockets {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	return reg.browserSockets
+}
+
+func (reg *Registry) closeBrowserSocket(runID string) {
+	reg.mu.Lock()
+	bs := reg.browserSockets
+	reg.mu.Unlock()
+	if bs != nil {
+		bs.CloseBrowserSocket(runID)
 	}
-	reg.browserTokens[runID] = tok
-	reg.mu.Unlock()
-	return tok
-}
-
-// BrowserTokenEnv is the environment variable that carries a run's browser
-// capability to its `smind-browser` MCP child (and nowhere else: it is in the
-// row's env, not in the agent's own environment).
-const BrowserTokenEnv = "SMIND_BROWSER_TOKEN"
-
-func newBrowserToken() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("runs: no randomness for the browser token: " + err.Error())
-	}
-	return hex.EncodeToString(b[:])
-}
-
-// CheckBrowserToken reports whether tok is the capability minted for runID
-// when its browser row was built. Run ids are guessable (run.list is an agent
-// method) and session.identify proves nothing, so browser.call needs this
-// proof as well: only the run's own MCP child holds it. Constant time.
-func (reg *Registry) CheckBrowserToken(runID, tok string) bool {
-	reg.mu.Lock()
-	want, ok := reg.browserTokens[runID]
-	reg.mu.Unlock()
-	return ok && tok != "" && subtle.ConstantTimeCompare([]byte(want), []byte(tok)) == 1
-}
-
-// ForgetBrowserToken drops a finished run's capability.
-func (reg *Registry) ForgetBrowserToken(runID string) {
-	reg.mu.Lock()
-	delete(reg.browserTokens, runID)
-	reg.mu.Unlock()
 }
 
 // RunIsRunning reports whether the run exists and is still running.
