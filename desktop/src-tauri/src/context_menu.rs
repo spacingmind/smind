@@ -23,8 +23,6 @@ use serde::{Deserialize, Serialize};
 use tauri::menu::{ContextMenu, IsMenuItem, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, LogicalPosition, Manager, State, Window};
 
-use crate::MAIN_WINDOW;
-
 /// The event the bundled UI listens to (`platform.ts` `onContextMenuAction`).
 pub const ACTION_EVENT: &str = "context-menu-action";
 
@@ -71,6 +69,7 @@ struct Armed {
     open: u64,
     ids: HashSet<String>,
     at: Instant,
+    label: String,
 }
 
 #[derive(Default)]
@@ -232,8 +231,14 @@ impl ContextMenuState {
     /// Arms a new menu (replacing any earlier one) and returns its open id.
     #[cfg(test)]
     fn arm(&self, entries: &[MenuEntry], now: Instant) -> u64 {
+        self.arm_for(entries, now, "main")
+    }
+
+    /// Arms a new menu opened by the window `label`, replacing any earlier one.
+    #[cfg(test)]
+    fn arm_for(&self, entries: &[MenuEntry], now: Instant, label: &str) -> u64 {
         let open = self.next_open();
-        self.arm_with(open, entries, now);
+        self.arm_with(open, entries, now, label);
         open
     }
 
@@ -245,17 +250,22 @@ impl ContextMenuState {
     }
 
     /// Arms `open` with the enabled items of `entries`, replacing any earlier menu.
-    fn arm_with(&self, open: u64, entries: &[MenuEntry], now: Instant) {
+    fn arm_with(&self, open: u64, entries: &[MenuEntry], now: Instant, label: &str) {
         let mut ids = HashSet::new();
         item_ids(entries, &mut ids);
-        self.inner.lock().unwrap_or_else(|e| e.into_inner()).armed =
-            Some(Armed { open, ids, at: now });
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).armed = Some(Armed {
+            open,
+            ids,
+            at: now,
+            label: label.to_string(),
+        });
     }
 
-    /// Resolves a native menu event against the armed menu: Some only for the
-    /// armed open, a known item id and within the TTL; the menu is disarmed on
-    /// any hit so a duplicate selection is ignored.
-    pub fn resolve(&self, event: &str, now: Instant) -> Option<ContextMenuSelection> {
+    /// Resolves a native menu event against the armed menu: Some (the opening
+    /// window's label, the selection) only for the armed open, a known item id
+    /// and within the TTL; the menu is disarmed on any hit so a duplicate
+    /// selection is ignored.
+    pub fn resolve(&self, event: &str, now: Instant) -> Option<(String, ContextMenuSelection)> {
         let (open, id) = parse_event_id(event)?;
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let armed = inner.armed.as_ref()?;
@@ -263,11 +273,15 @@ impl ContextMenuState {
         {
             return None;
         }
+        let label = armed.label.clone();
         inner.armed = None;
-        Some(ContextMenuSelection {
-            open,
-            id: id.to_string(),
-        })
+        Some((
+            label,
+            ContextMenuSelection {
+                open,
+                id: id.to_string(),
+            },
+        ))
     }
 }
 
@@ -328,7 +342,7 @@ pub fn context_menu_show(
     let items = build_items(&app, &entries, open).map_err(|e| e.to_string())?;
     let refs: Vec<&dyn IsMenuItem<tauri::Wry>> = items.iter().map(|k| k.as_ref()).collect();
     menu.append_items(&refs).map_err(|e| e.to_string())?;
-    state.arm_with(open, &entries, Instant::now());
+    state.arm_with(open, &entries, Instant::now(), window.label());
     // The webview's CSS pixels are the window's logical pixels divided by the
     // zoom the app applies (View > Zoom), so scale back to logical.
     let zoom = crate::zoom_store::load(&app);
@@ -343,11 +357,11 @@ pub fn handle_event(app: &AppHandle, event: &str) -> bool {
     if parse_event_id(event).is_none() {
         return false;
     }
-    if let Some(sel) = app
+    if let Some((label, sel)) = app
         .state::<ContextMenuState>()
         .resolve(event, Instant::now())
     {
-        if let Err(e) = app.emit_to(MAIN_WINDOW, ACTION_EVENT, sel) {
+        if let Err(e) = app.emit_to(label.as_str(), ACTION_EVENT, sel) {
             eprintln!("context menu: could not deliver the selection: {e}");
         }
     }
@@ -522,7 +536,7 @@ mod tests {
         assert_eq!(state.resolve(&event_id(second, "zzz"), t0), None);
         // The armed menu's own selection resolves once.
         assert_eq!(
-            state.resolve(&event_id(second, "b"), t0),
+            state.resolve(&event_id(second, "b"), t0).map(|(_, s)| s),
             Some(ContextMenuSelection {
                 open: second,
                 id: "b".into()
