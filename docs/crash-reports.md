@@ -65,7 +65,7 @@ written. The rules are applied again and again until the text stops changing
 It cannot recognise a secret of a shape it does not know. Known gaps: a bare
 40-character cloud secret key that contains `/` or `+` is caught only when a
 key name labels it; a home directory outside `/Users`, `/home`, `/root` and
-`C:\Users` (a network share, `/Volumes/<disk>/...`) is replaced only when it is
+`C:\Users` (a network share such as `\\server\home\alice`, `/Volumes/<disk>/...`) is replaced only when it is
 the current user's home. The stack holds function names, file paths and line
 numbers, and the messages of non-runtime panics are withheld entirely (below),
 so these gaps rarely matter in practice.
@@ -112,6 +112,55 @@ information as a `crashes` object for scripts.
 Remove the crashes folder listed above, or any file in it. It is safe to do
 at any time: nothing depends on the reports, and the folder is recreated on
 the next recorded panic.
+
+## The desktop shell
+
+The desktop app records its own panics the same way, from a panic hook installed
+as the first thing the app does (`desktop/crash-report`). It writes the same
+report (`source` is `desktop-shell`; `site` is `desktop.main` for the main thread
+and `desktop.thread` for any other, never a thread name or panic text) into the
+folder listed above, with the same limits, permissions and refusal of a linked
+folder, and `smind doctor` lists it. Differences worth knowing:
+
+- The message of a Rust panic is kept only when it is one of a short list of
+  fixed or number-only runtime messages (`index out of bounds: the len is 3 but
+  the index is 5`, arithmetic overflow, `unwrap()` on a `None`, a `RefCell`
+  already borrowed, `capacity overflow`). Everything else, including `unwrap()` on
+  an `Err` (which prints the error's debug text) and every `panic!` or `expect`
+  with its own text, is withheld: the type is recorded, the message is not.
+- The hook records and then lets Rust carry on as it would have (the default
+  message still prints, a main-thread panic still ends the app). It does not
+  restart anything or keep the app alive.
+- A panic inside a panic hook aborts the process in Rust, so the recorder is
+  written so that nothing on its path can panic (the crate denies `unwrap`,
+  `expect`, indexing and `panic!` outside tests, and compiles its fixed patterns
+  before the hook is set). Installing the hook does no disk access.
+- The redaction rules are the daemon's, tested against one shared file of cases
+  (`internal/crash/testdata/redact_vectors.json`) in Go and in Rust.
+- The hook does a small amount of disk work on the panicking thread (creating
+  the folder on the first report, one file write, deleting old reports); installing
+  it does none. A hung disk can therefore stall the one thread that is reporting.
+- Not caught: `std::process::abort`, a stack overflow, a signal or the system
+  killing the app (the hook never runs), a crash in the web view or other native
+  code, a panic before the hook is set at the start of `run()`. (A build with
+  `panic = "abort"` would still be caught: the hook runs before the abort; the
+  shell does not use it.)
+- Capturing the backtrace resolves symbols and redaction runs over it (the raw
+  stack is cut to 256 KiB first, the report to 64 KiB): bounded, a few
+  milliseconds, not zero.
+- A hook installed later by another component replaces ours (the shell installs
+  ours before anything else; a later `std::panic::set_hook` that does not call the
+  previous hook would switch recording off). A panic that is caught afterwards
+  (`catch_unwind`, or a task runtime that contains it) still writes a report, within
+  the rate limit, even though the app carries on.
+- Fatal signals (a segmentation fault, `SIGKILL`) and a stack overflow produce no
+  report: the hook never runs.
+- If no usable application data directory can be found (no home directory, or
+  only a relative `XDG_DATA_HOME`/`APPDATA`, which is ignored), the shell prints one
+  line to stderr and records nothing.
+- On Windows the home directory is read from `USERPROFILE` when `HOME` is not set,
+  and the `\\?\` prefix that Windows adds to resolved paths is ignored when
+  matching it.
 
 ## What happens after a panic
 
