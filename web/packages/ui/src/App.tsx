@@ -1941,18 +1941,18 @@ function ShellCommands({
   const { preference, setPreference } = useTheme();
   const pr = useTaskGit(selectedTask?.ID ?? null)?.pr;
 
-  const taskCommands = useMemo<Command[]>(
-    () =>
-      tasks.map((task) => ({
-        id: `task-${task.ID}`,
-        group: "Tasks",
-        title: task.Title,
-        subtitle: task.Branch ?? undefined,
-        keywords: [task.Status],
-        run: () => onSelectTask(task),
-      })),
-    [tasks, onSelectTask],
-  );
+  const taskCommands = useMemo<Command[]>(() => {
+    const projectNames = new Map(workspaces.map((ws) => [ws.ID, ws.Title || ws.Path]));
+    return tasks.map((task) => ({
+      id: `task-${task.ID}`,
+      group: "Tasks",
+      title: task.Title,
+      // The project the task belongs to, not its branch slug; the slug stays searchable as a keyword.
+      subtitle: projectNames.get(task.WorkspaceID),
+      keywords: [task.Status, ...(task.Branch ? [task.Branch] : [])],
+      run: () => onSelectTask(task),
+    }));
+  }, [tasks, workspaces, onSelectTask]);
   useCommands("shell:tasks", 0, taskCommands);
 
   const workspaceCommands = useMemo<Command[]>(
