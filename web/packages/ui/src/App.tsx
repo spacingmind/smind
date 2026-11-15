@@ -54,6 +54,9 @@ import { tabMenu } from "@/lib/menu-models";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabOverflowMenu } from "@/components/tab-overflow-menu";
+import { useRevealActiveTab } from "@/hooks/use-reveal-active-tab";
+import { useScrollEdges } from "@/hooks/use-scroll-edges";
 import {
   TAB_KINDS,
   baseTabForKind,
@@ -2340,12 +2343,8 @@ function PaneTabStrip({
   // (aria-selected, not data-state: ContextMenuTrigger asChild overwrites the trigger's data-state.)
   // Keeps the active tab visible when the strip overflows (TB-AC5).
   const tabScrollerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const active = tabScrollerRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
-    if (active && typeof active.scrollIntoView === "function") {
-      active.scrollIntoView({ inline: "nearest", block: "nearest" });
-    }
-  }, [activeKey]);
+  const edges = useScrollEdges(tabScrollerRef);
+  useRevealActiveTab(tabScrollerRef, activeKey);
 
   return (
     <div
@@ -2380,12 +2379,14 @@ function PaneTabStrip({
       >
         <div className="flex h-9 shrink-0 items-center gap-1 border-b px-1">
           {tabs.length > 0 && (
+            <div className="relative min-w-0 flex-initial">
             <div
               ref={tabScrollerRef}
               data-testid="tab-scroller"
-              className="min-w-0 flex-initial overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="min-w-0 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              <TabsList variant="flat" className="w-max">
+              {/* Chips: each tab is 160px at most and shrinks with its neighbours down to 64px; only then does the strip scroll. */}
+              <TabsList variant="flat" className="w-full">
                 {tabs.map((entry, index) => (
                   <DraggableTabTrigger
                     key={entry.key}
@@ -2406,7 +2407,12 @@ function PaneTabStrip({
                 ))}
               </TabsList>
             </div>
+            {/* Edge fades: the side that has more tabs beyond it. Instant (no transition), never in the way of the pointer. */}
+            {edges.start && <div aria-hidden data-testid="tab-fade-start" className="pointer-events-none absolute inset-y-0 left-0 w-4 bg-gradient-to-r from-panel to-transparent" />}
+            {edges.end && <div aria-hidden data-testid="tab-fade-end" className="pointer-events-none absolute inset-y-0 right-0 w-4 bg-gradient-to-l from-panel to-transparent" />}
+            </div>
           )}
+          {(edges.start || edges.end) && <TabOverflowMenu tabs={tabs} activeKey={activeKey} onActivate={onActivate} />}
           <NewTabButton
             onOpen={(kind) => onOpenBase(kind, { pane: paneId })}
             chats={reopenableChats(chats, openChatIds)}
@@ -2582,7 +2588,7 @@ function DraggableTabTrigger({
           ref={setNodeRef}
           value={entry.key}
           data-testid={`workspace-tab-${entry.kind}`}
-          className="group/tab max-w-48 gap-1.5"
+          className="group/tab max-w-40 gap-1.5 group-data-[variant=flat]/tabs-list:min-w-16 group-data-[variant=flat]/tabs-list:flex-[0_1_10rem] group-data-[variant=flat]/tabs-list:aria-selected:min-w-24"
           {...listeners}
         >
           <TabLabel entry={entry} />

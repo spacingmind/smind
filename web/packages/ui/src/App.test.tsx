@@ -3257,9 +3257,13 @@ describe("App tab strip (app-header-and-tabs TB)", () => {
   it("TB-AC3 plus button is the next sibling after the tab scroller in the same row", async () => {
     await setup();
     const scroller = screen.getByTestId("tab-scroller");
-    expect(scroller.nextElementSibling).toBe(screen.getByTestId("tabs-new-tab"));
-    expect(scroller.parentElement).toBe(screen.getByTestId("tabs-new-tab").parentElement);
-    expect(scroller.className).toContain("flex-initial");
+    // The scroller sits in a relative wrapper (it carries the edge fades) that is the row's child; with no overflow nothing
+    // (no overflow menu) sits between the wrapper and "+".
+    const wrapper = scroller.parentElement!;
+    expect(wrapper.nextElementSibling).toBe(screen.getByTestId("tabs-new-tab"));
+    expect(wrapper.parentElement).toBe(screen.getByTestId("tabs-new-tab").parentElement);
+    expect(wrapper.className).toContain("flex-initial");
+    expect(wrapper.className).toContain("min-w-0");
     expect(scroller.className).toContain("min-w-0");
     expect(screen.getByTestId("tabs-new-tab").className).toContain("shrink-0");
   });
@@ -3274,19 +3278,27 @@ describe("App tab strip (app-header-and-tabs TB)", () => {
     expect(icon.getAttribute("class")).not.toContain("square-terminal");
   });
 
-  it("TB-AC5 active tab scrolled into view on activeKey change", async () => {
+  it("TB-AC5 the active tab is revealed in the strip on activeKey change (with clear space for the edge fade)", async () => {
     await setup();
-    const scrollIntoView = vi.fn();
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = scrollIntoView;
+    const scroller = screen.getByTestId("tab-scroller");
+    // jsdom has no layout: a 250px-wide viewport onto a 1000px strip, tabs laid out 100px apart from the strip's left edge.
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, get: () => 250 });
+    Object.defineProperty(scroller, "scrollWidth", { configurable: true, get: () => 1000 });
+    const rectOf = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this === scroller) return { left: 0, right: 250, top: 0, bottom: 28, width: 250, height: 28, x: 0, y: 0, toJSON() {} } as DOMRect;
+      if (this.getAttribute("role") === "tab") {
+        const left = 900 - scroller.scrollLeft;
+        return { left, right: left + 100, top: 0, bottom: 28, width: 100, height: 28, x: left, y: 0, toJSON() {} } as DOMRect;
+      }
+      return rectOf.call(this);
+    };
     try {
       await openBaseTab("Diff");
-      expect(scrollIntoView).toHaveBeenCalledWith({ inline: "nearest", block: "nearest" });
-      const target = scrollIntoView.mock.contexts.at(-1) as HTMLElement;
-      expect(target).toHaveAttribute("role", "tab");
-      expect(target).toHaveAttribute("aria-selected", "true");
+      // The tab sits at 900..1000 of a 1000px strip seen through 250px: scrolled to the end (max 750), not left under the fade.
+      expect(scroller.scrollLeft).toBe(750);
     } finally {
-      Element.prototype.scrollIntoView = original;
+      HTMLElement.prototype.getBoundingClientRect = rectOf;
     }
   });
 
