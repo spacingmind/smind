@@ -118,7 +118,8 @@ Usage:
 
   smind browser <status|enable|disable|allow add <host>|allow rm <host>|clear> --workspace <id>
                                                            the per-workspace agent browser switch and allowlist (humans only;
-                                                           as human-only as the local principal: ADR-0056 limit)
+                                                           only as strong as the local principal: a local connection that
+                                                           does not identify itself counts as the human)
 
   smind steward review|list|show|cancel                    ask for a read-only review of a task's head commit; read reviews (humans only; run "smind steward" for flags)
 
