@@ -195,6 +195,9 @@ func (c *Client) Close() error {
 // Call sends a method (sessionID empty for the browser target) and decodes
 // the result into out when out is non-nil. The context bounds the wait.
 func (c *Client) Call(ctx context.Context, sessionID, method string, params, out any) error {
+	if err := ctx.Err(); err != nil {
+		return err // an expired context sends nothing
+	}
 	var raw json.RawMessage
 	if params != nil {
 		b, err := json.Marshal(params)

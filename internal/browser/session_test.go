@@ -28,6 +28,9 @@ type fakeLauncher struct {
 	t     *testing.T
 	hook  func(f *fakeCDP, c fakeCall) (any, string)
 	gate  chan struct{} // when set, Launch waits for it (or its context)
+	// ignoreCtx makes Launch finish even if its context was cancelled, like a
+	// launch that was already past the point of no return.
+	ignoreCtx bool
 }
 
 func (l *fakeLauncher) Launch(ctx context.Context, _ LaunchOpts) (Instance, error) {
@@ -35,7 +38,10 @@ func (l *fakeLauncher) Launch(ctx context.Context, _ LaunchOpts) (Instance, erro
 		select {
 		case <-l.gate:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			if !l.ignoreCtx {
+				return nil, ctx.Err()
+			}
+			<-l.gate
 		}
 	}
 	f := newFakeCDP(l.t, l.hook)
@@ -721,21 +727,36 @@ func TestManagerCloseDuringStartLeavesNothingRunning(t *testing.T) {
 		t.Fatal("nothing may be left running")
 	}
 
-	// Same for the lifetime of a launch that already finished but is not yet registered: CloseAll.
-	l2 := &fakeLauncher{t: t, hook: defaultHook, gate: make(chan struct{})}
+	// A launch that cannot be cancelled and finishes after CloseAll: the
+	// session it produced is closed, never registered.
+	l2 := &fakeLauncher{t: t, hook: defaultHook, gate: make(chan struct{}), ignoreCtx: true}
 	cfg.Launcher = l2
 	go func() { _, err := m.Get(context.Background(), cfg); errc <- err }()
 	time.Sleep(50 * time.Millisecond)
 	m.CloseAll()
-	if err := <-errc; err == nil {
-		t.Fatal("CloseAll during start must cancel the start")
+	close(l2.gate)
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("CloseAll during start must not return a live session")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Get did not return")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		l2.mu.Lock()
+		ok := len(l2.insts) == 1 && l2.insts[0].closed.Load()
+		l2.mu.Unlock()
+		if ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	l2.mu.Lock()
 	defer l2.mu.Unlock()
-	for _, inst := range l2.insts {
-		if !inst.closed.Load() {
-			t.Fatal("an instance was left running")
-		}
+	if len(l2.insts) != 1 || !l2.insts[0].closed.Load() || m.Active() != 0 {
+		t.Fatal("the instance started during CloseAll was left running")
 	}
 }
 
