@@ -1,6 +1,6 @@
 # Browser for agents: design drafts for the proxy and PRs 2-5
 
-Governing ADR: `docs/decisions/0061-browser-for-agents.md` (Accepted). Acceptance criteria for the whole feature: `docs/plans/active/desktop-browser-for-agents.md`. The headless lane spec (PR 1: CDP client, session, URL policy; its known gaps and decisions) is `docs/plans/active/browser-for-agents-headless.md` (lands with PR 1). This file holds only design drafts and the decisions they wait on. **Nothing below is built yet. The Human decided D-A..D-E on 2026-11-15 (next section); PR 1b (the proxy) is next and no tool PR starts until it lands.**
+Governing ADR: `docs/decisions/0061-browser-for-agents.md` (Accepted). Acceptance criteria for the whole feature: `docs/plans/active/desktop-browser-for-agents.md`. The headless lane spec (PR 1: CDP client, session, URL policy; its known gaps and decisions) is `docs/plans/active/browser-for-agents-headless.md` (lands with PR 1). This file holds only design drafts and the decisions they wait on. **The Human decided D-A..D-E on 2026-11-15 (next section). PR 1b (the proxy) is built (see its Progress and Validation below); nothing else here is built, and no tool PR starts until 1b lands.**
 
 ## Decisions (all five accepted by the Human, 2026-11-15)
 
@@ -20,7 +20,7 @@ Goal: every network connection the browser makes (document, subresource, WebSock
 - **Decision per connection.** Parse the target (`host:port`) with the same `parseHost` as URLs, run the `CheckURL`-equivalent plus `CheckResolved`, resolve once in the proxy, refuse if any address is sensitive or denied, then **dial the vetted IP:port** (not the name). That closes the DNS-rebinding window between our lookup and the browser's, and it enforces `Deny` for IP literals and WebSockets. The proxy's own port and the daemon's are in `Deny` (the session adds the proxy port).
 - **No TLS interception.** `CONNECT` is a blind tunnel after the host/port check; the policy is host-level, so nothing needs the plaintext.
 - **Not an open relay.** Loopback listener only; a request to any target the policy refuses gets `403` with a reason and no dial. A local process using it can reach only what it could reach directly.
-- **Limits.** At most 64 concurrent connections per session, 30 s dial timeout, idle timeout on tunnels, header size cap via `net/http`, hop-by-hop headers stripped, absolute-form with userinfo refused, `Proxy-Authorization` ignored.
+- **Limits.** At most 64 concurrent connections per session, a 10 s dial timeout per vetted address (so a blackholed first address does not use up the next one's budget; amended from the draft's 30 s), a 5-minute tunnel idle timeout on one shared clock for both directions (an upload-only tunnel stays alive while the client sends; a silent one is closed on both sides), a 60 s bound on any single read or write on the forward path, a 64 KB cap on upstream response headers, header size cap via `net/http`, hop-by-hop headers stripped, absolute-form with userinfo refused, `Proxy-Authorization` ignored.
 - **Browser flags kept.** Host-resolver MAP rules stay as defence in depth; WebRTC non-proxied UDP stays disabled; QUIC/WebTransport are refused by the browser once a proxy is set (measured below), with `--disable-quic` as defence in depth.
 - **Measured (installed Chrome, headless, a logging proxy that answers everything itself, nothing left loopback; program and raw output under the dogfood root):**
   1. With no bypass flag, **and with an explicitly empty `--proxy-bypass-list=`**, loopback traffic (`127.0.0.1`, `localhost`, `*.localhost`, `[::1]`) never reaches the proxy: Chrome bypasses it implicitly. Only `--proxy-bypass-list=<-loopback>` sends it through. So "an empty bypass list" is implemented as exactly `<-loopback>` (which removes the implicit bypass and adds nothing), and a launcher test pins it.
@@ -73,3 +73,17 @@ Recommended design (D-B): the daemon gates, independent of the provider's permis
 ## Order and risk summary
 
 Order: PR 1b, then PR 2, 3, 4, 5. No agent can receive the browser before PR 3 and PR 4 are both merged. Every PR is high-risk and gets the foreground two-sub-agent review, with a real-Chrome smoke where Chrome is present and everything else against the fake CDP.
+
+## PR 1b: progress and validation
+
+Built as designed, with these decisions made while building (all from the measurements and the two reviews):
+
+- **Bypass rules exactly `<-loopback>`**; measured on the installed Chrome that it also removes the implicit bypass of link-local and private addresses (a page `fetch` and `ws://` to `169.254.169.254` and `[fe80::1]` reached the proxy), so one policy check covers them. The smoke asserts the proxy refused the link-local target.
+- **`localhost` and `*.localhost` are not sent to DNS** (RFC 6761): the proxy dials `127.0.0.1` and `::1` directly. A page-chosen name cannot leave the machine as a DNS query, and no resolver can disagree. `CheckResolved` for such a name still exists (policy table tests) but the proxy and the session's Fetch check do not call it.
+- **Every connection re-vets and re-dials**: no upstream connection reuse (`DisableKeepAlives`), the vetted address is carried in the request context, redirects are not followed (the browser follows them and each hop is vetted again).
+- **Proxy refusals are reported once per target** (query and userinfo removed, sanitised, a rolling window of 200 targets), because the browser's own background requests (update and time services) are also refused and must not flood the agent's notices. A set of Chrome flags quiets most of that traffic; the rest is refused and reported once.
+- **More sensitive IPv6 forms**: IPv4-translated `::ffff:0:0:0/96`, local-use NAT64 `64:ff9b:1::/48` and Teredo `2001::/32` are refused (allowlist entry and resolved name).
+- **Accepted residual (D-C style, for the Steward to confirm):** the proxy listens on loopback without authentication, so any local process can use it to reach what the policy allows. That is no more than the process could reach directly, but it is an egress path if the agent's shell runs under a localhost-only network sandbox. Closing it means a per-session `Proxy-Authorization` secret answered through CDP `Fetch.authRequired`; not built.
+- WebSocket and WebTransport: refused as measured (CONNECT, and no UDP datagram under a proxy); `--disable-quic` is kept as defence in depth.
+
+Validation: `go test -race` on the package, the real-Chrome smoke (the page's WebSockets, `wss`, fetches, a link-local fetch and a WebTransport attempt: zero hits on the denied port and zero UDP datagrams, with the proxy's refusals observed first), `task test` with `TMPDIR` outside the daemon home, `GOOS=windows`/`linux` vet. Not verified: Linux and Windows Chrome were not measured; the Windows pipe/Job Object path is unchanged and still unrun.
