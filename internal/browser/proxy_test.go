@@ -178,16 +178,15 @@ func TestProxyForwardsAllowedHTTP(t *testing.T) {
 func TestProxyRefusesDeniedAndUnlistedTargets(t *testing.T) {
 	rig := newProxyRig(t, []string{"intranet.test"}, proxyResolver, nil)
 	cases := map[string]string{
-		"daemon port":                          fmt.Sprintf("http://127.0.0.1:%d/api/token", rig.daemon.port),
-		"daemon by name":                       fmt.Sprintf("http://localhost:%d/api/token", rig.daemon.port),
-		"daemon decimal ip":                    fmt.Sprintf("http://2130706433:%d/", rig.daemon.port),
-		"proxy itself":                         "http://" + rig.px.Addr() + "/",
-		"public host":                          "http://example.com/",
-		"public host with a secret query":      "http://example.com/a?token=SECRETVALUE#frag",
-		"public ip":                            "http://93.184.216.34/",
-		"metadata":                             "http://169.254.169.254/latest/meta-data",
-		"private range":                        "http://10.0.0.5:8080/",
-		"loopback name resolving off loopback": "http://evil.localhost/",
+		"daemon port":                     fmt.Sprintf("http://127.0.0.1:%d/api/token", rig.daemon.port),
+		"daemon by name":                  fmt.Sprintf("http://localhost:%d/api/token", rig.daemon.port),
+		"daemon decimal ip":               fmt.Sprintf("http://2130706433:%d/", rig.daemon.port),
+		"proxy itself":                    "http://" + rig.px.Addr() + "/",
+		"public host":                     "http://example.com/",
+		"public host with a secret query": "http://example.com/a?token=SECRETVALUE#frag",
+		"public ip":                       "http://93.184.216.34/",
+		"metadata":                        "http://169.254.169.254/latest/meta-data",
+		"private range":                   "http://10.0.0.5:8080/",
 	}
 	for name, target := range cases {
 		code, _ := rig.get(t, target)
@@ -304,8 +303,8 @@ func TestProxyRebindingIsPinned(t *testing.T) {
 	// Lookup 1 is loopback (allowed); every later lookup would be the daemon's
 	// address on the daemon's port space or a metadata address.
 	res := &seqResolver{answers: [][]string{{"127.0.0.1"}, {"169.254.169.254"}}}
-	rig := newProxyRig(t, nil, res, nil)
-	code, _ := rig.get(t, fmt.Sprintf("http://app.localhost:%d/", srv.port))
+	rig := newProxyRig(t, []string{"app.test"}, res, nil)
+	code, _ := rig.get(t, fmt.Sprintf("http://app.test:%d/", srv.port))
 	if code != 200 {
 		t.Fatalf("first request: %d", code)
 	}
@@ -313,11 +312,11 @@ func TestProxyRebindingIsPinned(t *testing.T) {
 		t.Fatalf("the connection must be dialled to the vetted IP, not the name: %v", got)
 	}
 	// The name now rebinds: the very next connection re-resolves and is refused.
-	code, _ = rig.get(t, fmt.Sprintf("http://app.localhost:%d/", srv.port))
+	code, _ = rig.get(t, fmt.Sprintf("http://app.test:%d/", srv.port))
 	if code != http.StatusForbidden || srv.hits.Load() != 1 || len(rig.dials.list()) != 1 {
 		t.Fatalf("after rebinding: %d hits=%d dials=%v", code, srv.hits.Load(), rig.dials.list())
 	}
-	status, _, _ := rig.connect(t, fmt.Sprintf("app.localhost:%d", srv.port))
+	status, _, _ := rig.connect(t, fmt.Sprintf("app.test:%d", srv.port))
 	if !strings.Contains(status, "403") || len(rig.dials.list()) != 1 {
 		t.Fatalf("CONNECT after rebinding: %q dials=%v", status, rig.dials.list())
 	}
@@ -341,7 +340,13 @@ func TestProxyMixedAndSensitiveResolutionsAreRefused(t *testing.T) {
 }
 
 func TestProxyMalformedRequestsAreRefused(t *testing.T) {
+	live := newHitServer(t, nil)
 	rig := newProxyRig(t, nil, proxyResolver, nil)
+	defer func() {
+		if live.hits.Load() != 0 || len(rig.dials.list()) != 0 {
+			t.Errorf("a malformed request must never be forwarded: hits=%d dials=%v", live.hits.Load(), rig.dials.list())
+		}
+	}()
 	raw := func(req string) string {
 		c, err := net.Dial("tcp", rig.px.Addr())
 		if err != nil {
@@ -357,10 +362,10 @@ func TestProxyMalformedRequestsAreRefused(t *testing.T) {
 		"https absolute form":  "GET https://localhost/ HTTP/1.1\r\nHost: localhost\r\n\r\n",
 		"ftp":                  "GET ftp://localhost/ HTTP/1.1\r\nHost: localhost\r\n\r\n",
 		"origin form":          "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
-		"upgrade over plain":   fmt.Sprintf("GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", rig.daemon.port+1),
+		"upgrade over plain":   fmt.Sprintf("GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", live.port),
 		"connect without port": "CONNECT localhost HTTP/1.1\r\nHost: localhost\r\n\r\n",
-		"backslash host":       "GET http://localhost\\@127.0.0.1/ HTTP/1.1\r\nHost: x\r\n\r\n",
-		"userinfo":             "GET http://user:pw@127.0.0.1:1/ HTTP/1.1\r\nHost: x\r\n\r\n",
+		"backslash host":       fmt.Sprintf("GET http://localhost\\@127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\n\r\n", live.port),
+		"userinfo":             fmt.Sprintf("GET http://user:pw@127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\n\r\n", live.port),
 	} {
 		resp := raw(req)
 		if !strings.HasPrefix(resp, "HTTP/1.1 4") && !strings.HasPrefix(resp, "HTTP/1.1 501") {
@@ -577,5 +582,188 @@ func TestProxyRefusesAnUpgradeOverAPlainRequest(t *testing.T) {
 	line, _ := bufio.NewReader(c).ReadString('\n')
 	if !strings.Contains(line, "501") || srv.hits.Load() != 0 {
 		t.Fatalf("an upgrade must arrive as CONNECT (and be vetted there): %q hits=%d", strings.TrimSpace(line), srv.hits.Load())
+	}
+}
+
+func TestProxyLoopbackNamesNeedNoDNS(t *testing.T) {
+	srv := newHitServer(t, nil)
+	res := &countingResolver{}
+	rig := newProxyRig(t, nil, res, nil)
+	for _, host := range []string{"localhost", "app.localhost", "a.b.localhost"} {
+		if code, _ := rig.get(t, fmt.Sprintf("http://%s:%d/", host, srv.port)); code != 200 {
+			t.Errorf("%s: %d", host, code)
+		}
+		if status, _, _ := rig.connect(t, fmt.Sprintf("%s:%d", host, srv.port)); !strings.Contains(status, "200") {
+			t.Errorf("CONNECT %s: %q", host, status)
+		}
+	}
+	if res.calls.Load() != 0 {
+		t.Fatalf("a page-chosen *.localhost name must never be sent to DNS (it could leave the machine): %d lookups", res.calls.Load())
+	}
+	for _, a := range rig.dials.list() {
+		if !strings.HasPrefix(a, "127.0.0.1:") && !strings.HasPrefix(a, "[::1]:") {
+			t.Errorf("loopback names are dialled on loopback only: %s", a)
+		}
+	}
+}
+
+type countingResolver struct{ calls atomic.Int64 }
+
+func (c *countingResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	c.calls.Add(1)
+	return nil, fmt.Errorf("must not be called")
+}
+
+// A silent client behind a silent upstream: the tunnel is closed on BOTH sides
+// at the idle timeout and its slot is released.
+func TestProxyIdleTunnelReleasesItsSlot(t *testing.T) {
+	quiet, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer quiet.Close()
+	go func() {
+		for {
+			c, err := quiet.Accept()
+			if err != nil {
+				return
+			}
+			_ = c // held open, never speaks
+		}
+	}()
+	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.MaxConns = 1; c.TunnelIdle = 150 * time.Millisecond })
+	status, c, _ := rig.connect(t, quiet.Addr().String())
+	if !strings.Contains(status, "200") {
+		t.Fatal(status)
+	}
+	// The client stays silent too. Both sides must be closed by the proxy, and
+	// the only slot freed: a new tunnel works afterwards.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if status2, c2, _ := rig.connect(t, quiet.Addr().String()); strings.Contains(status2, "200") {
+			_ = c2.Close()
+			_ = c.SetWriteDeadline(time.Now().Add(time.Second))
+			if _, err := c.Write([]byte("x")); err == nil {
+				// a write may succeed once into a closing socket; the read must now see EOF
+				_ = c.SetReadDeadline(time.Now().Add(time.Second))
+				if _, err := c.Read(make([]byte, 1)); err == nil {
+					t.Fatal("the idle tunnel's client side must be closed")
+				}
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("an idle tunnel must release its connection slot")
+}
+
+// A tunnel the client only writes to stays alive while the client sends, even
+// though the upstream is silent (one shared activity clock).
+func TestProxyUploadKeepsTheTunnelAlive(t *testing.T) {
+	sink, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer sink.Close()
+	var got atomic.Int64
+	go func() {
+		for {
+			c, err := sink.Accept()
+			if err != nil {
+				return
+			}
+			go func() { n, _ := io.Copy(io.Discard, c); got.Add(n) }()
+		}
+	}()
+	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.TunnelIdle = 300 * time.Millisecond })
+	status, c, _ := rig.connect(t, sink.Addr().String())
+	if !strings.Contains(status, "200") {
+		t.Fatal(status)
+	}
+	for i := 0; i < 8; i++ { // 8 x 100 ms = more than twice the idle timeout
+		if _, err := c.Write([]byte("data")); err != nil {
+			t.Fatalf("the tunnel was closed while the client was sending (write %d): %v", i, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for got.Load() < 32 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got.Load() != 32 {
+		t.Fatalf("upstream received %d bytes, want 32", got.Load())
+	}
+}
+
+func TestProxyClosedTunnelReleasesItsSlot(t *testing.T) {
+	sink, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer sink.Close()
+	go func() {
+		for {
+			c, err := sink.Accept()
+			if err != nil {
+				return
+			}
+			go func() { defer c.Close(); _, _ = io.Copy(io.Discard, c) }()
+		}
+	}()
+	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.MaxConns = 2 })
+	for round := 0; round < 6; round++ {
+		status, c, _ := rig.connect(t, sink.Addr().String())
+		if !strings.Contains(status, "200") {
+			t.Fatalf("round %d: %q (slots must be released when a tunnel closes)", round, status)
+		}
+		_ = c.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestProxyUpstreamWithABadStatusIs502(t *testing.T) {
+	bad, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer bad.Close()
+	go func() {
+		for {
+			c, err := bad.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+				_, _ = bufio.NewReader(c).ReadString('\n')
+				_, _ = io.WriteString(c, "HTTP/1.1 099 Nope\r\nContent-Length: 0\r\n\r\n")
+			}()
+		}
+	}()
+	rig := newProxyRig(t, nil, proxyResolver, nil)
+	code, _ := rig.get(t, "http://"+bad.Addr().String()+"/")
+	if code != http.StatusBadGateway {
+		t.Fatalf("an unusable upstream status must be a clean 502, got %d", code)
+	}
+}
+
+func TestProxyEarlyBytesAfterConnectReachUpstream(t *testing.T) {
+	var got atomic.Value
+	sink, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer sink.Close()
+	go func() {
+		c, err := sink.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		b := make([]byte, 5)
+		_, _ = io.ReadFull(c, b)
+		got.Store(string(b))
+	}()
+	rig := newProxyRig(t, nil, proxyResolver, nil)
+	c, err := net.Dial("tcp", rig.px.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	// The client sends data in the same packet as the CONNECT head.
+	fmt.Fprintf(c, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\nHELLO", sink.Addr(), sink.Addr())
+	deadline := time.Now().Add(3 * time.Second)
+	for got.Load() == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got.Load() != "HELLO" {
+		t.Fatalf("bytes sent behind the CONNECT head must reach upstream: %v", got.Load())
 	}
 }

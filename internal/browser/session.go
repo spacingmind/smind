@@ -20,9 +20,9 @@ import (
 // maxQueuedBytes bounds the events waiting in the session queues.
 const maxQueuedBytes int64 = 32 << 20
 
-// seenSet remembers up to max keys; first reports true once per key and
-// false for everything after the set is full (a hostile page inventing
-// targets cannot grow it).
+// seenSet remembers up to max keys and reports each once; when full it starts
+// again, so a hostile page inventing targets cannot grow it or silence later
+// notices for good (the per-kind notice cap bounds what reaches the agent).
 type seenSet struct {
 	mu  sync.Mutex
 	m   map[string]struct{}
@@ -35,8 +35,11 @@ func (s *seenSet) first(k string) bool {
 	if s.m == nil {
 		s.m = map[string]struct{}{}
 	}
-	if _, ok := s.m[k]; ok || len(s.m) >= s.max {
+	if _, ok := s.m[k]; ok {
 		return false
+	}
+	if len(s.m) >= s.max {
+		s.m = map[string]struct{}{} // a rolling window: later targets are still reported
 	}
 	s.m[k] = struct{}{}
 	return true
@@ -569,6 +572,13 @@ func (s *Session) checkRequest(ctx context.Context, raw, resourceType string) De
 }
 
 func (s *Session) checkURL(ctx context.Context, raw string) Decision {
+	d := s.cfg.Policy.CheckURL(raw)
+	if d.Allowed && d.loopbackName {
+		return d // RFC 6761: no DNS query for a page-chosen *.localhost name
+	}
+	if !d.Allowed || !d.NeedsResolve {
+		return d
+	}
 	return s.cfg.Policy.Check(ctx, raw, cachedResolver{s})
 }
 

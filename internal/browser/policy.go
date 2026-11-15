@@ -375,6 +375,9 @@ var (
 	nat64Prefix    = netip.MustParsePrefix("64:ff9b::/96")
 	sixToFour      = netip.MustParsePrefix("2002::/16")
 	v4Compatible   = netip.MustParsePrefix("::/96")
+	siit           = netip.MustParsePrefix("::ffff:0:0:0/96") // IPv4-translated (RFC 2765)
+	nat64Local     = netip.MustParsePrefix("64:ff9b:1::/48")  // local-use NAT64 (RFC 8215): refused outright
+	teredo         = netip.MustParsePrefix("2001::/32")       // embeds an obfuscated IPv4: refused outright
 )
 
 // embeddedV4 returns the IPv4 address an IPv6 address carries (NAT64, 6to4,
@@ -390,6 +393,8 @@ func embeddedV4(a netip.Addr) (netip.Addr, bool) {
 	case sixToFour.Contains(a):
 		return netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}), true
 	case v4Compatible.Contains(a) && !a.IsUnspecified() && !a.IsLoopback():
+		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
+	case siit.Contains(a):
 		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
 	}
 	return netip.Addr{}, false
@@ -411,6 +416,9 @@ func sensitiveAddr(a netip.Addr) bool {
 		if a == m {
 			return true
 		}
+	}
+	if nat64Local.Contains(a) || teredo.Contains(a) {
+		return true
 	}
 	if e, ok := embeddedV4(a); ok {
 		return e.IsLoopback() || sensitiveAddr(e)

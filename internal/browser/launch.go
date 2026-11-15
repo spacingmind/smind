@@ -20,8 +20,9 @@ type LaunchOpts struct {
 	// uses the system temp dir. A profile is never shared between sessions.
 	ProfileRoot string
 	// AllowHosts are the exact hosts the person added (each is validated with
-	// NormalizeAllowHost); everything else that needs name resolution is
-	// mapped to nothing by the browser itself.
+	// NormalizeAllowHost). The proxy is the enforcement point; the browser's
+	// host-resolver rules built from this list are a residual defence: under a
+	// proxy the browser does not resolve page names itself.
 	AllowHosts []string
 	// ProxyAddr is the loopback host:port of the enforcing proxy (StartProxy).
 	// It is required: a browser is never launched with a direct network path.
@@ -53,7 +54,8 @@ const defaultHeapMB = 512
 // proxy: every connection (WebSocket included) goes through the policy.
 func buildArgs(profileDir string, o LaunchOpts) ([]string, error) {
 	host, port, err := net.SplitHostPort(o.ProxyAddr)
-	if err != nil || (host != "127.0.0.1" && host != "[::1]" && host != "::1") || port == "" {
+	pn, perr := strconv.Atoi(port)
+	if err != nil || (host != "127.0.0.1" && host != "::1") || perr != nil || pn < 1 || pn > 65535 {
 		return nil, fmt.Errorf("browser: the proxy address %q must be a loopback host:port", o.ProxyAddr)
 	}
 	heap := o.HeapMB

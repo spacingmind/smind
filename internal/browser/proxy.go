@@ -1,17 +1,18 @@
 package browser
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,11 +31,13 @@ import (
 // Proxy limits (ADR-0061 section 8 and the proxy design).
 const (
 	DefaultProxyMaxConns    = 64
-	DefaultProxyDialTimeout = 10 * time.Second
+	DefaultProxyDialTimeout = 10 * time.Second // per address
+	proxyIOTimeout          = 60 * time.Second // forward path: no read or write may stall longer
 	DefaultProxyTunnelIdle  = 5 * time.Minute
 	proxyHeaderTimeout      = 10 * time.Second
 	proxyResponseTimeout    = 30 * time.Second
 	proxyMaxHeaderBytes     = 32 << 10
+	proxyMaxRespHeader      = 64 << 10
 )
 
 // ProxyConfig configures a Proxy. Policy is required; the rest default.
@@ -96,13 +99,18 @@ func StartProxy(cfg ProxyConfig) (*Proxy, error) {
 	// The transport dials the address the policy vetted (carried in the
 	// context), never the name in the URL, and never reuses a connection.
 	p.tr = &http.Transport{
-		Proxy:                 nil,
-		DisableKeepAlives:     true,
-		DisableCompression:    true,
-		ResponseHeaderTimeout: proxyResponseTimeout,
+		Proxy:                  nil,
+		DisableKeepAlives:      true,
+		DisableCompression:     true,
+		ResponseHeaderTimeout:  proxyResponseTimeout,
+		MaxResponseHeaderBytes: proxyMaxRespHeader,
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			addrs, _ := ctx.Value(pinKey{}).([]string)
-			return p.dialAny(ctx, addrs)
+			c, err := p.dialAny(ctx, addrs)
+			if err != nil {
+				return nil, err
+			}
+			return idleConn{c, proxyIOTimeout}, nil // a stalled upstream cannot hold a slot
 		},
 	}
 	p.srv = &http.Server{
@@ -110,7 +118,7 @@ func StartProxy(cfg ProxyConfig) (*Proxy, error) {
 		ReadHeaderTimeout: proxyHeaderTimeout,
 		MaxHeaderBytes:    proxyMaxHeaderBytes,
 		IdleTimeout:       30 * time.Second,
-		ErrorLog:          nil,
+		ErrorLog:          log.New(io.Discard, "", 0),
 	}
 	go func() { _ = p.srv.Serve(p.ln) }()
 	return p, nil
@@ -162,8 +170,15 @@ func (p *Proxy) vet(ctx context.Context, rawURL string) (addrs []string, d Decis
 		return nil, d
 	}
 	var ips []netip.Addr
-	if d.NeedsResolve {
-		found, err := p.cfg.Resolver.LookupNetIP(ctx, "ip", d.Host)
+	if d.loopbackName {
+		// RFC 6761: localhost and *.localhost are loopback by definition. No DNS
+		// query for a page-chosen name (it could leave the machine), and no
+		// resolver to disagree.
+		ips = []netip.Addr{netip.MustParseAddr("127.0.0.1"), netip.MustParseAddr("::1")}
+	} else if d.NeedsResolve {
+		lctx, cancel := context.WithTimeout(ctx, p.cfg.DialTimeout)
+		defer cancel()
+		found, err := p.cfg.Resolver.LookupNetIP(lctx, "ip", d.Host)
 		if err != nil {
 			return nil, refuse("host %q did not resolve", d.Host)
 		}
@@ -188,16 +203,18 @@ func (p *Proxy) dialAny(ctx context.Context, addrs []string) (net.Conn, error) {
 	if len(addrs) == 0 {
 		return nil, errors.New("browser: no vetted address to dial")
 	}
-	dctx, cancel := context.WithTimeout(ctx, p.cfg.DialTimeout)
-	defer cancel()
 	var last error
 	for _, a := range addrs {
+		// Each address gets its own timeout, so a blackholed first address does
+		// not use up the budget of the next.
+		dctx, cancel := context.WithTimeout(ctx, p.cfg.DialTimeout)
 		c, err := p.cfg.Dial(dctx, "tcp", a)
+		cancel()
 		if err == nil {
 			return c, nil
 		}
 		last = err
-		if dctx.Err() != nil {
+		if ctx.Err() != nil {
 			break
 		}
 	}
@@ -251,37 +268,79 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		_ = up.Close()
 		return
 	}
-	if !p.track(client) || !p.track(up) {
+	okClient, okUp := p.track(client), p.track(up)
+	defer p.untrack(client)
+	defer p.untrack(up)
+	if !okClient || !okUp {
 		_ = client.Close()
 		_ = up.Close()
 		return
 	}
-	defer p.untrack(client)
-	defer p.untrack(up)
 	_, _ = io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
-	p.pipe(client, rw.Reader, up)
+	var early []byte // bytes the client already sent behind the CONNECT head
+	if n := rw.Reader.Buffered(); n > 0 {
+		early, _ = rw.Reader.Peek(n)
+		early = append([]byte(nil), early...)
+	}
+	p.pipe(client, early, up)
 }
 
-// pipe copies both ways until both directions end or a side is idle too long.
-func (p *Proxy) pipe(client net.Conn, clientBuffered *bufio.Reader, up net.Conn) {
+// pipe copies both ways until both directions end or the tunnel has moved no
+// data in either direction for TunnelIdle (one shared clock: an upload-only
+// tunnel is alive while the client sends, a silent one is closed on both sides).
+// An error, a timeout included, closes both connections; a clean EOF half-closes.
+func (p *Proxy) pipe(client net.Conn, early []byte, up net.Conn) {
 	idle := p.cfg.TunnelIdle
-	cc, uc := idleConn{client, idle}, idleConn{up, idle}
+	var last atomic.Int64
+	last.Store(time.Now().UnixNano())
+	touch := func() { last.Store(time.Now().UnixNano()) }
+	expired := func() bool { return time.Since(time.Unix(0, last.Load())) >= idle }
+
 	var wg sync.WaitGroup
 	wg.Add(2)
-	cp := func(dst, src net.Conn, from io.Reader) {
+	var once sync.Once
+	closeBoth := func() { once.Do(func() { _ = client.Close(); _ = up.Close() }) }
+	cp := func(dst, src net.Conn, pre []byte) {
 		defer wg.Done()
-		_, _ = io.Copy(dst, from)
-		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = cw.CloseWrite()
-		} else {
-			_ = dst.Close()
+		if len(pre) > 0 {
+			if _, err := dst.Write(pre); err != nil {
+				closeBoth()
+				return
+			}
+			touch()
+		}
+		buf := make([]byte, 32<<10)
+		for {
+			_ = src.SetReadDeadline(time.Now().Add(idle))
+			n, err := src.Read(buf)
+			if n > 0 {
+				_ = dst.SetWriteDeadline(time.Now().Add(idle))
+				if _, werr := dst.Write(buf[:n]); werr != nil {
+					closeBoth()
+					return
+				}
+				touch()
+			}
+			if err == nil {
+				continue
+			}
+			if ne, ok := err.(net.Error); ok && ne.Timeout() && !expired() {
+				continue // the other direction is moving: the tunnel is alive
+			}
+			if err == io.EOF {
+				if cw, ok := dst.(interface{ CloseWrite() error }); ok {
+					_ = cw.CloseWrite()
+					return
+				}
+			}
+			closeBoth()
+			return
 		}
 	}
-	go cp(uc, cc, clientBuffered) // client -> upstream (the buffered reader also holds anything already read)
-	go cp(cc, uc, uc)             // upstream -> client
+	go cp(up, client, early)
+	go cp(client, up, nil)
 	wg.Wait()
-	_ = client.Close()
-	_ = up.Close()
+	closeBoth()
 }
 
 // idleConn closes a connection that moves no data for idle.
@@ -345,7 +404,8 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 	if d.Port != 80 {
 		host += ":" + strconv.Itoa(d.Port)
 	}
-	out, err := http.NewRequestWithContext(context.WithValue(r.Context(), pinKey{}, addrs), r.Method, "http://"+host+r.URL.RequestURI(), r.Body)
+	rc := http.NewResponseController(w)
+	out, err := http.NewRequestWithContext(context.WithValue(r.Context(), pinKey{}, addrs), r.Method, "http://"+host+r.URL.RequestURI(), &idleBody{r: r.Body, rc: rc})
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -364,6 +424,10 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 999 {
+		http.Error(w, "upstream sent an unusable status", http.StatusBadGateway)
+		return
+	}
 	stripHopByHop(resp.Header)
 	for k, vs := range resp.Header {
 		for _, v := range vs {
@@ -376,6 +440,7 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
+			_ = rc.SetWriteDeadline(time.Now().Add(proxyIOTimeout))
 			if _, werr := w.Write(buf[:n]); werr != nil {
 				return
 			}
@@ -388,6 +453,20 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// idleBody gives the client's request body a read deadline that is renewed on
+// every read, so a client that stalls mid-body cannot hold a slot.
+type idleBody struct {
+	r  io.ReadCloser
+	rc *http.ResponseController
+}
+
+func (b *idleBody) Read(p []byte) (int, error) {
+	_ = b.rc.SetReadDeadline(time.Now().Add(proxyIOTimeout))
+	return b.r.Read(p)
+}
+
+func (b *idleBody) Close() error { return b.r.Close() }
 
 // limitListener caps concurrent connections: one over the limit is told 503
 // and closed.
@@ -406,9 +485,11 @@ func (l *limitListener) Accept() (net.Conn, error) {
 		case l.sem <- struct{}{}:
 			return &limitConn{Conn: c, release: func() { <-l.sem }}, nil
 		default:
-			_ = c.SetWriteDeadline(time.Now().Add(time.Second))
-			_, _ = io.WriteString(c, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
-			_ = c.Close()
+			go func() { // a slow client must not stall the accept loop
+				_ = c.SetWriteDeadline(time.Now().Add(time.Second))
+				_, _ = io.WriteString(c, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+				_ = c.Close()
+			}()
 		}
 	}
 }

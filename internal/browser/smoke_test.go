@@ -75,9 +75,11 @@ var a = document.createElement("a"); a.href = "/file.bin"; a.download = "../../e
 try { new WebSocket("ws://127.0.0.1:%d/ws"); new WebSocket("ws://localhost:%d/ws"); new WebSocket("wss://127.0.0.1:%d/ws"); } catch (e) {}
 fetch("http://127.0.0.1:%d/f", {mode: "no-cors"}).catch(function () {});
 fetch("http://localhost:%d/f", {mode: "no-cors"}).catch(function () {});
+fetch("http://169.254.169.254:%d/f", {mode: "no-cors"}).catch(function () {});
+try { new WebSocket("ws://169.254.169.254:%d/ws"); new WebSocket("ws://[fe80::1]:%d/ws"); } catch (e) {}
 try { new WebTransport("https://127.0.0.1:%d/wt").ready.catch(function () {}); } catch (e) {}
 console.log("loaded");
-</script>`, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, udpPort)
+</script>`, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, udpPort)
 	})
 	mux.HandleFunc("/file.bin", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="evil.bin"`)
@@ -165,9 +167,34 @@ console.log("loaded");
 	t.Logf("tabs open: %d, popups refused: %d", len(tabs), kinds["popup_refused"])
 
 	// The page opened WebSockets (ws and wss, by IP literal and by name) and
-	// fetches to the denied daemon port, and a WebTransport to a UDP port. The
-	// proxy sees all of them (Fetch interception cannot see a WebSocket) and
-	// none reaches its target.
+	// fetches to the denied daemon port, to a link-local address, and a
+	// WebTransport to a UDP port. The proxy sees all of them (Fetch
+	// interception cannot see a WebSocket); positive evidence first: wait until
+	// the proxy has refused each, then assert nothing reached its target.
+	wantRefused := []string{
+		fmt.Sprintf("127.0.0.1:%d", daemonPort), fmt.Sprintf("localhost:%d", daemonPort), // CONNECT: the WebSockets
+		fmt.Sprintf("169.254.169.254:%d", daemonPort), // link-local: proves <-loopback> also removed that implicit bypass
+	}
+	seen := map[string]bool{}
+	for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); {
+		for _, n := range notes {
+			for _, w := range wantRefused {
+				if strings.Contains(n.Detail, w) {
+					seen[w] = true
+				}
+			}
+		}
+		if len(seen) == len(wantRefused) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+		notes = append(notes, s.DrainNotices()...)
+	}
+	for _, w := range wantRefused {
+		if !seen[w] {
+			t.Errorf("the proxy never reported refusing %s: the page's connection did not reach it", w)
+		}
+	}
 	if n := daemonHits.Load(); n != 0 {
 		t.Errorf("the denied daemon port was reached %d times by page WebSockets or fetches", n)
 	}
