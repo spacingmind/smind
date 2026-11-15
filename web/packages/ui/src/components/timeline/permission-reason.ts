@@ -16,9 +16,9 @@ import type { PermissionResolutionReason } from "@/lib/types";
  * could -- see
  * docs/plans/active/claude-native-permission-cancellation.md). A reason
  * this build has never heard of has no entry here, and
- * `permissionResolutionLabel` renders it as its raw text in the neutral
- * tone; a payload with no reason at all (an older server) is the only
- * case left with no badge.
+ * `permissionResolutionLabel` reads it as "Resolved" in the neutral
+ * tone, never the raw wire text; a payload with no reason at all (an
+ * older server) is the only case left with no badge.
  */
 export const PERMISSION_REASON_LABEL: Partial<Record<PermissionResolutionReason, { label: string; status: StatusBadgeStatus }>> = {
   human: { label: "You approved", status: "success" },
@@ -38,8 +38,8 @@ function isRejection(optionKind: string | undefined): boolean {
 /**
  * The label for a resolved permission row. Same as PERMISSION_REASON_LABEL, except that a person who
  * chose a reject option reads "You denied", not "You approved" (reason `human` only says a person decided).
- * A reason this build has never heard of renders as its raw text in the neutral tone, never a crash;
- * only a missing reason (an older server payload) returns undefined -- no badge.
+ * A reason this build has never heard of reads "Resolved" in the neutral tone -- never its raw wire
+ * text and never a crash; only a missing reason (an older server payload) returns undefined -- no badge.
  */
 export function permissionResolutionLabel(item: {
   reason?: PermissionResolutionReason;
@@ -47,5 +47,5 @@ export function permissionResolutionLabel(item: {
 }): { label: string; status: StatusBadgeStatus } | undefined {
   if (!item.reason) return undefined;
   if (item.reason === "human" && isRejection(item.optionKind)) return { label: "You denied", status: "warning" };
-  return PERMISSION_REASON_LABEL[item.reason] ?? { label: item.reason, status: "neutral" };
+  return PERMISSION_REASON_LABEL[item.reason] ?? { label: "Resolved", status: "neutral" };
 }

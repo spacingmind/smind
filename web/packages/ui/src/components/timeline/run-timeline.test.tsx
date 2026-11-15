@@ -247,7 +247,7 @@ describe("RunTimeline", () => {
     expect(row).not.toHaveTextContent("Timed out");
   });
 
-  it("renders a resolved permission with a reason this build has never heard of without crashing, and no reason label", () => {
+  it("renders a resolved permission with a reason this build has never heard of as Resolved, never the raw text", () => {
     expect(() =>
       render(
         <ul>
@@ -260,6 +260,8 @@ describe("RunTimeline", () => {
 
     const row = screen.getByTestId("timeline-permission");
     expect(row).toHaveTextContent("Permission resolved");
+    expect(row).toHaveTextContent("Resolved");
+    expect(row).not.toHaveTextContent("some_future_reason");
     expect(row).not.toHaveTextContent("You approved");
     expect(row).not.toHaveTextContent("Auto-approved");
     expect(row).not.toHaveTextContent("Timed out");
