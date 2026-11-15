@@ -132,6 +132,21 @@ describe("TabLabel numbers (the strip's chips and the overflow menu share one fu
     for (const t of container.querySelectorAll("[data-tab-title]")) expect(t.className).toContain("truncate");
   });
 
+  it("long-title-keeps-its-number-and-cuts-from-the-start", () => {
+    const long = "A very long chat title that cannot fit in a narrow chip";
+    const { container } = render(<TabLabel entry={tab("c11", long)} number={11} />);
+    const title = container.querySelector("[data-tab-title]") as HTMLElement;
+    const number = container.querySelector("[data-tab-number]") as HTMLElement;
+    expect(number).toHaveTextContent("11");
+    expect(number.className).toContain("shrink-0"); // never shrinks, so it is never cut
+    // the cut is from the start: right-to-left box (ellipsis on the left), text-overflow via truncate, characters isolated
+    expect(title.getAttribute("dir")).toBe("rtl");
+    expect(title.className).toContain("truncate");
+    expect(title.className).toContain("min-w-0");
+    expect(title.querySelector("bdi")).toHaveTextContent(long); // the full text stays in the DOM, in reading order
+    expect(title.nextElementSibling).toBe(number); // the number follows the title
+  });
+
   it("strip-and-menu-call-the-same-numbering-function", () => {
     const app = readFileSync(resolve(__dirname, "../App.tsx"), "utf8");
     const menu = readFileSync(resolve(__dirname, "./tab-overflow-menu.tsx"), "utf8");
