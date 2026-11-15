@@ -127,9 +127,15 @@ pub fn proxy_capabilities(proxy: &ProxyOrigin) -> [String; 2] {
 /// class gets no IPC: nothing sensitive becomes reachable. An unknown permission in a template makes `add_capability`
 /// panic while it holds the authority lock, which poisons it; that is not caught here on purpose (a caught panic would
 /// leave every later IPC call panicking). The templates are pinned against the real ACL by the tests below instead.
+///
+/// Exactly once per app: `add_capability` only ever ADDS (it never replaces), so a second call with another port would
+/// leave the first origin valid in the ACL. A second call is a programming error and panics (fails loud at launch).
 pub fn install<R: Runtime, M: Manager<R>>(app: &M, port: u16) {
     let proxy = ProxyOrigin::new(port);
-    app.manage(proxy);
+    assert!(
+        app.manage(proxy),
+        "ipc_guard::install called twice: capabilities accumulate, the first origin would stay valid"
+    );
     for json in proxy_capabilities(&proxy) {
         if let Err(err) = app.add_capability(json) {
             log::error!("could not add the proxy-origin capability, the window gets no IPC: {err}");
@@ -468,10 +474,46 @@ mod tests {
                 "exempt command {name} is not in the handler list"
             );
             assert!(
-                !reason.trim().is_empty(),
-                "exempt command {name} needs a reason"
+                reason_ok(reason),
+                "exempt command {name} needs a real reason, got {reason:?}"
             );
         }
+    }
+
+    /// A reason is a sentence, not a placeholder.
+    fn reason_ok(reason: &str) -> bool {
+        let r = reason.trim().to_lowercase();
+        r.len() >= 25
+            && r.split_whitespace().count() >= 4
+            && !["todo", "tbd", "fixme", "placeholder", "xxx", "n/a"]
+                .iter()
+                .any(|p| r.starts_with(p))
+    }
+
+    #[test]
+    fn reason_format_rejects_placeholders() {
+        for bad in [
+            "",
+            "   ",
+            "TODO",
+            "todo: later",
+            "tbd",
+            "n/a",
+            "because",
+            "needed for x",
+        ] {
+            assert!(!reason_ok(bad), "{bad:?} must not pass as a reason");
+        }
+        assert!(reason_ok(
+            "reads no window state and is called before any webview exists"
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "called twice")]
+    fn install_twice_is_refused() {
+        let app = acl_app();
+        install(&app, PORT + 1);
     }
 
     // ---- the real ACL: the compiled manifest, the real templates added the way setup adds them ----
