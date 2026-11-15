@@ -127,7 +127,7 @@ type Session struct {
 	closed   bool
 	tabs     map[string]*tabState // by target id
 	notices  []Notice
-	console  []string
+	console  []consoleLine
 	idle     *time.Timer
 	loads    map[string]chan struct{} // load waiters by cdp session id
 	dns      map[string]dnsEntry
@@ -337,21 +337,80 @@ func (s *Session) DrainNotices() []Notice {
 	return out
 }
 
-// Console returns the recent console lines, oldest first.
+// consoleLine is one console line and the browser session (tab) it came from.
+type consoleLine struct{ sess, text string }
+
+// Console returns the recent console lines of every tab, oldest first.
 func (s *Session) Console() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]string(nil), s.console...)
+	out := make([]string, 0, len(s.console))
+	for _, l := range s.console {
+		out = append(out, l.text)
+	}
+	return out
 }
 
-func (s *Session) addConsole(line string) {
+func (s *Session) addConsole(sessID, line string) {
 	line = cleanText(line, maxConsoleLineLen)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.console) >= maxConsoleLines {
 		s.console = s.console[1:]
 	}
-	s.console = append(s.console, line)
+	s.console = append(s.console, consoleLine{sess: sessID, text: line})
+}
+
+// ConsoleOf returns the recent console lines of one tab only (the tab's own
+// CDP session), oldest first: a result labelled with that tab's origin must
+// carry that tab's output and nothing else.
+func (s *Session) ConsoleOf(tabID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.tabs[tabID]
+	if t == nil {
+		return nil
+	}
+	var out []string
+	for _, l := range s.console {
+		if l.sess == t.sessionID {
+			out = append(out, l.text)
+		}
+	}
+	return out
+}
+
+// TabInfo is the sanitised URL and title of one tab.
+func (s *Session) TabInfo(ctx context.Context, tabID string) (Tab, error) {
+	ctx, cancel, err := s.begin(ctx)
+	if err != nil {
+		return Tab{}, err
+	}
+	defer cancel()
+	t, err := s.tabFor(tabID)
+	if err != nil {
+		return Tab{}, err
+	}
+	return s.tabInfo(ctx, t.targetID)
+}
+
+// OpenInNewTab opens a tab inside the pool and navigates it: for a second
+// run sharing the workspace's browser, so it never takes over another run's tab.
+func (s *Session) OpenInNewTab(ctx context.Context, rawURL string) (Tab, error) {
+	// The policy first: a refused URL must not even cost a tab.
+	if d := s.checkURL(ctx, rawURL); !d.Allowed {
+		return Tab{}, fmt.Errorf("%w: %s", ErrNavigationDenied, d.Reason)
+	}
+	nt, err := s.NewTab(ctx)
+	if err != nil {
+		return Tab{}, err
+	}
+	t, err := s.Navigate(ctx, nt.ID, rawURL)
+	if err != nil {
+		_ = s.CloseTab(ctx, nt.ID)
+		return Tab{}, err
+	}
+	return t, nil
 }
 
 func (s *Session) eventLoop() {
@@ -681,7 +740,7 @@ func (s *Session) onConsole(ev Event) {
 				parts = append(parts, a.Description)
 			}
 		}
-		s.addConsole(p.Type + ": " + strings.Join(parts, " "))
+		s.addConsole(ev.SessionID, p.Type+": "+strings.Join(parts, " "))
 	case "Runtime.exceptionThrown":
 		var p struct {
 			ExceptionDetails struct {
@@ -689,7 +748,7 @@ func (s *Session) onConsole(ev Event) {
 			} `json:"exceptionDetails"`
 		}
 		if json.Unmarshal(ev.Params, &p) == nil {
-			s.addConsole("exception: " + p.ExceptionDetails.Text)
+			s.addConsole(ev.SessionID, "exception: "+p.ExceptionDetails.Text)
 		}
 	}
 }

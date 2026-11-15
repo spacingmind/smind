@@ -97,7 +97,7 @@ type Broker struct {
 
 	mu    sync.Mutex
 	runs  map[string]*runState
-	owner map[int64]string // workspace -> the run that last used its session
+	users map[int64]map[string]struct{} // workspace -> live runs using its session
 	// ended remembers the most recent finished runs, so a late call of a run
 	// that already ended cannot recreate its counters or start a session.
 	ended      map[string]struct{}
@@ -112,6 +112,10 @@ type runState struct {
 	calls []time.Time
 	navs  []time.Time
 	busy  chan struct{} // capacity 1: one call in flight
+	tab   string        // the run's own tab (target id), "" before its first browser_open
+	// refusal records written in the current minute (see shouldRecord).
+	refusals   []time.Time
+	suppressed bool
 }
 
 // NewBroker returns a broker. Session is required.
@@ -122,7 +126,7 @@ func NewBroker(cfg BrokerConfig) *Broker {
 	if cfg.CallTimeout <= 0 {
 		cfg.CallTimeout = DefaultCallTimeout
 	}
-	return &Broker{cfg: cfg, runs: map[string]*runState{}, owner: map[int64]string{}, ended: map[string]struct{}{}}
+	return &Broker{cfg: cfg, runs: map[string]*runState{}, users: map[int64]map[string]struct{}{}, ended: map[string]struct{}{}}
 }
 
 // state returns the run's counters, or nil for a run that already ended.
@@ -153,10 +157,13 @@ func (b *Broker) EndRun(runID string) {
 		}
 	}
 	var closeWS []int64
-	for ws, r := range b.owner {
-		if r == runID {
-			closeWS = append(closeWS, ws)
-			delete(b.owner, ws)
+	for ws, set := range b.users {
+		if _, ok := set[runID]; ok {
+			delete(set, runID)
+			if len(set) == 0 { // the last live run of the workspace: its browser goes
+				closeWS = append(closeWS, ws)
+				delete(b.users, ws)
+			}
 		}
 	}
 	b.mu.Unlock()
@@ -178,14 +185,17 @@ func (b *Broker) Call(ctx context.Context, run Run, tool string, args json.RawMe
 	start := b.cfg.Now()
 	res, url, outcome := b.call(ctx, run, tool, args)
 	if b.cfg.Record != nil {
-		b.cfg.Record(run, Record{Tool: cleanText(tool, 40), URL: recordTarget(url), Outcome: outcome, Duration: b.cfg.Now().Sub(start)})
+		rec := Record{Tool: cleanText(tool, 40), URL: recordTarget(url), Outcome: outcome, Duration: b.cfg.Now().Sub(start)}
+		for _, r := range b.recordsFor(run, rec) {
+			b.cfg.Record(run, r)
+		}
 	}
 	return res
 }
 
 func (b *Broker) call(ctx context.Context, run Run, tool string, raw json.RawMessage) (Result, string, string) {
 	if !knownTool(tool) {
-		return errResult("unknown browser tool %q", cleanText(tool, 40)), "", "error"
+		return errResult("unknown browser tool %q", cleanText(tool, 40)), "", "refused: unknown tool"
 	}
 	in, err := decodeToolArgs(tool, raw)
 	if err != nil {
@@ -215,14 +225,18 @@ func (b *Broker) call(ctx context.Context, run Run, tool string, raw json.RawMes
 		return errResult("browser limit reached (%s)", name), "", "limit: " + name
 	}
 
-	// The owner is recorded BEFORE the session is requested, so another run's
-	// end in the same workspace cannot close a session this call is starting.
+	// The run is counted as a user BEFORE the session is requested, so another
+	// run's end in the same workspace cannot close a session this call is
+	// starting: the session closes when the LAST live run using it ends.
 	b.mu.Lock()
 	if _, gone := b.ended[run.ID]; gone {
 		b.mu.Unlock()
 		return errResult("this run has ended: the browser is no longer available to it"), "", "refused: run ended"
 	}
-	b.owner[run.WorkspaceID] = run.ID
+	if b.users[run.WorkspaceID] == nil {
+		b.users[run.WorkspaceID] = map[string]struct{}{}
+	}
+	b.users[run.WorkspaceID][run.ID] = struct{}{}
 	b.mu.Unlock()
 	sess, err := b.cfg.Session(cctx, run)
 	if err != nil {
@@ -232,10 +246,11 @@ func (b *Broker) call(ctx context.Context, run Run, tool string, raw json.RawMes
 		}
 		return errResult("browser unavailable: %v", err), "", "error"
 	}
-	// The run may have ended while the session was starting: do not leave it behind.
+	// The run may have ended while the session was starting: do not leave it
+	// behind if no other live run uses it.
 	b.mu.Lock()
 	_, gone := b.ended[run.ID]
-	orphan := gone && b.owner[run.WorkspaceID] == ""
+	orphan := gone && len(b.users[run.WorkspaceID]) == 0
 	b.mu.Unlock()
 	if gone {
 		if orphan && b.cfg.CloseSession != nil {
@@ -243,7 +258,7 @@ func (b *Broker) call(ctx context.Context, run Run, tool string, raw json.RawMes
 		}
 		return errResult("this run has ended: the browser is no longer available to it"), "", "refused: run ended"
 	}
-	return b.exec(cctx, run, sess, tool, in)
+	return b.exec(cctx, run, st, sess, tool, in)
 }
 
 // admit applies the rate limits and counts the call; it returns the name of
@@ -350,83 +365,109 @@ func decodeToolArgs(tool string, raw json.RawMessage) (toolArgs, error) {
 
 // exec runs an admitted, validated call. It returns the result, the page URL
 // when known (for the timeline) and the outcome.
-func (b *Broker) exec(ctx context.Context, run Run, sess *Session, tool string, a toolArgs) (Result, string, string) {
+func (b *Broker) exec(ctx context.Context, run Run, st *runState, sess *Session, tool string, a toolArgs) (Result, string, string) {
 	fail := func(err error) (Result, string, string) {
 		if errors.Is(err, ErrNavigationDenied) {
 			return errResult("%v", err), a.URL, "refused: " + cleanText(strings.TrimPrefix(err.Error(), ErrNavigationDenied.Error()+": "), 120)
 		}
 		return errResult("%s: %v", tool, err), a.URL, "error"
 	}
+	// Every tool but open works in THIS run's own tab; a tab argument may only
+	// name it. Runs of one workspace share one browser but never each other's tabs.
+	ownTab := func() (string, error) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if st.tab == "" {
+			return "", errors.New("no page is open: use browser_open first")
+		}
+		if a.Tab != "" && a.Tab != st.tab {
+			return "", errors.New("that tab does not belong to this run")
+		}
+		return st.tab, nil
+	}
+	setTab := func(id string) { st.mu.Lock(); st.tab = id; st.mu.Unlock() }
 	switch tool {
 	case "browser_open":
-		tab, err := sess.Navigate(ctx, "", a.URL)
+		st.mu.Lock()
+		cur := st.tab
+		st.mu.Unlock()
+		var tab Tab
+		var err error
+		if cur != "" {
+			tab, err = sess.Navigate(ctx, cur, a.URL)
+			if err != nil && strings.Contains(err.Error(), "no such tab") {
+				cur = "" // the run's tab is gone: open another
+			}
+		}
+		if cur == "" {
+			if b.sharedWithOthers(run) {
+				tab, err = sess.OpenInNewTab(ctx, a.URL)
+			} else {
+				tab, err = sess.Navigate(ctx, "", a.URL)
+			}
+		}
 		if err != nil {
 			return fail(err)
 		}
+		setTab(tab.ID)
 		body := fmt.Sprintf("tab %s\ntitle: %s\nurl: %s", tab.ID, tab.Title, tab.URL)
 		return b.page(sess, tab.URL, body), tab.URL, "ok"
 	case "browser_tabs":
-		tabs, err := sess.Tabs(ctx)
+		st.mu.Lock()
+		cur := st.tab
+		st.mu.Unlock()
+		if cur == "" {
+			return Result{Content: []Content{{Type: "text", Text: envelopeWithNotices("(no page)", "no tabs are open", sess.DrainNotices())}}}, "", "ok"
+		}
+		t, err := sess.TabInfo(ctx, cur)
 		if err != nil {
 			return fail(err)
 		}
-		var sb strings.Builder
-		for i, t := range tabs {
-			mark := " "
-			if i == 0 {
-				mark = "*"
-			}
-			fmt.Fprintf(&sb, "%s tab %s \"%s\" %s\n", mark, t.ID, t.Title, t.URL)
-		}
-		if len(tabs) == 0 {
-			sb.WriteString("no tabs are open")
-		}
-		origin := "(no page)"
-		if len(tabs) > 0 {
-			origin = originOf(tabs[0].URL)
-		}
-		return Result{Content: []Content{{Type: "text", Text: envelopeWithNotices(origin, strings.TrimRight(sb.String(), "\n"), sess.DrainNotices())}}}, "", "ok"
+		line := fmt.Sprintf("* tab %s \"%s\" %s", t.ID, t.Title, t.URL)
+		return b.page(sess, t.URL, line), t.URL, "ok"
 	case "browser_close":
-		id := a.Tab
-		if id == "" {
-			tabs, err := sess.Tabs(ctx)
-			if err != nil {
-				return fail(err)
-			}
-			if len(tabs) == 0 {
-				return errResult("browser_close: no tab is open"), "", "error"
-			}
-			id = tabs[0].ID
+		id, err := ownTab()
+		if err != nil {
+			return errResult("browser_close: %v", err), "", "error"
 		}
 		if err := sess.CloseTab(ctx, id); err != nil {
 			return fail(err)
 		}
+		setTab("")
 		return Result{Content: []Content{{Type: "text", Text: "tab closed"}}}, "", "ok"
 	case "browser_snapshot":
-		sn, err := sess.Snapshot(ctx, a.Tab)
+		id, err := ownTab()
+		if err != nil {
+			return errResult("browser_snapshot: %v", err), "", "error"
+		}
+		sn, err := sess.Snapshot(ctx, id)
 		if err != nil {
 			return fail(err)
 		}
 		return b.page(sess, sn.URL, "title: "+sn.Title+"\nurl: "+sn.URL+"\n"+cleanLines(sn.Text, 600)), sn.URL, "ok"
 	case "browser_screenshot":
-		shot, err := sess.Screenshot(ctx, a.Tab)
+		id, err := ownTab()
+		if err != nil {
+			return errResult("browser_screenshot: %v", err), "", "error"
+		}
+		shot, err := sess.Screenshot(ctx, id)
 		if err != nil {
 			return fail(err)
 		}
-		tabs, _ := sess.Tabs(ctx)
-		cur := ""
-		if len(tabs) > 0 {
-			cur = tabs[0].URL
-		}
+		info, _ := sess.TabInfo(ctx, id) // the tab that was captured
 		meta := fmt.Sprintf("screenshot of the viewport, %dx%d, %d bytes", shot.Width, shot.Height, len(shot.Data))
 		if !run.ImagesRead {
-			return b.page(sess, cur, meta+". This provider cannot read images, so the image is not returned: use browser_snapshot."), cur, "ok"
+			return b.page(sess, info.URL, meta+". This provider cannot read images, so the image is not returned: use browser_snapshot."), info.URL, "ok"
 		}
-		res := b.page(sess, cur, meta)
+		res := b.page(sess, info.URL, meta)
 		res.Content = append(res.Content, Content{Type: "image", MimeType: shot.Mime, Data: base64.StdEncoding.EncodeToString(shot.Data)})
-		return res, cur, "ok"
+		return res, info.URL, "ok"
 	case "browser_console":
-		lines := sess.Console()
+		id, err := ownTab()
+		if err != nil {
+			return errResult("browser_console: %v", err), "", "error"
+		}
+		lines := sess.ConsoleOf(id)
 		if len(lines) > maxConsoleOut {
 			lines = lines[len(lines)-maxConsoleOut:]
 		}
@@ -434,14 +475,15 @@ func (b *Broker) exec(ctx context.Context, run Run, sess *Session, tool string, 
 		if len(lines) > 0 {
 			body = cleanLines(strings.Join(lines, "\n"), 500)
 		}
-		cur := ""
-		if tabs, err := sess.Tabs(ctx); err == nil && len(tabs) > 0 {
-			cur = tabs[0].URL
-		}
-		return b.page(sess, cur, body), cur, "ok"
+		info, _ := sess.TabInfo(ctx, id)
+		return b.page(sess, info.URL, body), info.URL, "ok"
 	case "browser_wait":
+		id, err := ownTab()
+		if err != nil {
+			return errResult("browser_wait: %v", err), "", "error"
+		}
 		d := time.Duration(a.Seconds) * time.Second
-		found, cur, err := sess.WaitFor(ctx, "", a.Text, a.URL, d)
+		found, cur, err := sess.WaitFor(ctx, id, a.Text, a.URL, d)
 		if err != nil {
 			return fail(err)
 		}
@@ -452,6 +494,19 @@ func (b *Broker) exec(ctx context.Context, run Run, sess *Session, tool string, 
 		return b.page(sess, cur, body), cur, "ok"
 	}
 	return errResult("unknown browser tool"), "", "error"
+}
+
+// sharedWithOthers reports whether another live run uses this workspace's
+// browser right now.
+func (b *Broker) sharedWithOthers(run Run) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for id := range b.users[run.WorkspaceID] {
+		if id != run.ID {
+			return true
+		}
+	}
+	return false
 }
 
 // page wraps page-derived text in the envelope and appends the session's
@@ -501,6 +556,42 @@ func newToken() string {
 		panic("browser: no randomness for the envelope token: " + err.Error())
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// maxRefusalRecords is how many refusals (unknown tool, bad arguments, a
+// limit) one run may write to its timeline per minute; further ones are
+// summarised by a single line, so an agent cannot flood the timeline with them.
+const maxRefusalRecords = 10
+
+func isRefusal(outcome string) bool {
+	return strings.HasPrefix(outcome, "refused:") || strings.HasPrefix(outcome, "limit:")
+}
+
+// recordsFor decides what reaches the timeline for one call: every outcome
+// that reached the browser, but at most maxRefusalRecords refusals a minute
+// and then one "further refusals suppressed" line.
+func (b *Broker) recordsFor(run Run, rec Record) []Record {
+	if !isRefusal(rec.Outcome) {
+		return []Record{rec}
+	}
+	st := b.state(run.ID)
+	if st == nil {
+		return nil // an ended run has no timeline to write to
+	}
+	now := b.cfg.Now()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.refusals = prune(st.refusals, now)
+	if len(st.refusals) < maxRefusalRecords {
+		st.refusals = append(st.refusals, now)
+		st.suppressed = false
+		return []Record{rec}
+	}
+	if st.suppressed {
+		return nil
+	}
+	st.suppressed = true
+	return []Record{{Outcome: "further refusals suppressed (more than 10 a minute)"}}
 }
 
 // recordTarget is what the run timeline shows of a URL: only its origin. A
