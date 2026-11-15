@@ -81,10 +81,16 @@ The composer is shared with the mobile web target through the same chips in some
 
 - [x] spec (this file)
 - [x] decisions answered by the Human (2026-11-15: all 11 as recommended)
-- [ ] E-a (in progress 2026-11-15: GLM peers 649 = status line under the composer + footer, 650 = chips/type/width; tool-row collapse (AC2) is a third step after both land; branch `smind/dtui-e-a-chat-surface`)
+- [x] E-a: status line under the composer (GLM peer 649), chip state text / 28 px / 13 px / 896 px column (GLM peer 650), finished-run tool-row folding (Lead); one PR from `smind/dtui-e-a-chat-surface`
 - [ ] E-b
 - [ ] E-c
 
 ## Validation
 
-Filled in when each PR is ready.
+### E-a
+- AC1: `run-state-shown-once-under-the-composer`, `run-state-keeps-live-region-and-timer`, `transcript-footer-only-states-an-ended-run`, `status-line-chips-are-28px-with-13px-text`. AC2: `finished-run-collapses-three-or-more-tool-rows`, `most-detailed-level-never-collapses`, `live-run-never-collapses`, `find-open-never-collapses`, the default-level test, and a RunTimeline test ("Ran 3 tools"). AC3: `auto-accept-chip-states-on-or-off-in-text`, `chip-state-never-by-colour-alone`. AC4: `chips-are-28px-with-13px-text-on-desktop`. AC5: `column-widens-only-from-1100px` (also measured: 768 px at 1280, 896 px at 1600). Full web suite 5568 passed, `tsc` clean.
+- Mutations (each killed by a named test): footer shows a live run again; status line moved back above the card; timer or status role dropped; chip text without the state; same icon for both states; chip text back to 12 px or height to 24 px; status chips back to 12 px; column widening at 700 px; auto collapsing a live run, collapsing at the detailed level, collapsing two rows, default level detailed, find not expanding, RunTimeline ignoring `finished`, summary wording reverted.
+- Frames: see `~/.smind/dogfood/dt-ui-e-a/` (README): waiting (real), working/live/tools (patched websocket results), idle at 1280/390/1600; every pair opened.
+- Decision 3 detail: the existing header control gets a third level, `auto` (default), cycling auto, detailed, overview; a stored `detailed` or `overview` keeps its meaning. Chat Find turns `auto` into `detailed` while it is open (it walks the rendered DOM, so folded rows would be missed).
+- Not done in E-a: the task header meta and the other small texts of decision 10 (only the composer chips, pills and the status line moved to 13 px). Not verified: real-window desktop; a real multi-tool run (the tool rows and the running state in the frames are injected).
+
