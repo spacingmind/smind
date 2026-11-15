@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -90,10 +91,12 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		days = cfg.Runs.HistoryRetentionDays
 	}
 	home, _ := os.UserHomeDir()
-	findings := doctor.ProviderRetention(doctor.Env{
+	denv := doctor.Env{
 		SmindHome: config.Dir(), Home: home, Getenv: os.Getenv,
 		ReadFile: os.ReadFile, ReadDir: os.ReadDir, RetentionDays: days,
-	})
+		ManagedSettings: claudeManagedSettingsPaths(),
+	}
+	findings := append(doctor.ProviderRetention(denv), doctor.ClaudeAutoMode(denv)...)
 	if findings == nil {
 		findings = []doctor.Finding{}
 	}
@@ -226,4 +229,16 @@ func printable(s string, max int) string {
 		}
 	}
 	return b.String()
+}
+
+// claudeManagedSettingsPaths are where Claude Code reads machine-wide managed settings; doctor only reads them.
+func claudeManagedSettingsPaths() []string {
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{"/Library/Application Support/ClaudeCode/managed-settings.json"}
+	case "windows":
+		return []string{`C:\Program Files\ClaudeCode\managed-settings.json`}
+	default:
+		return []string{"/etc/claude-code/managed-settings.json"}
+	}
 }

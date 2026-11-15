@@ -23,18 +23,18 @@ So: the init frame carries the real mode in a top-level `permissionMode` string,
 ## Acceptance criteria
 
 1. On the Claude `system`/`init` frame the runner reads `permissionMode` and compares it with the mode it requested for this run.
-2. A request for an auto-approving mode (`AutoApproves` in the catalog: `auto`, `bypassPermissions`) that the CLI reports as anything else produces ONE session note on the run ("Claude started in <real> instead of <requested>; ...") naming the likely cause and the fix, and a `permission_mode_changed` event carrying the real mode, so the mode chip shows the truth. A mismatch on a non-auto mode produces the event and a shorter note.
-3. A reported mode MORE permissive than requested (for example `bypassPermissions` when `default` was asked) produces the same note with a warning level and the event; smind never lowers or raises the mode itself.
+2. A request for an auto-approving mode (`AutoApproves` in the catalog: `auto`, `bypassPermissions`) that the CLI reports as anything else produces ONE session note on the run ("Claude started in <real> instead of <requested>; ...") naming the likely cause (the settings key) and the fix. A mismatch on a non-auto mode produces a shorter note. **Amended during implementation:** no `permission_mode_changed` event is sent, see AC6.
+3. A reported mode MORE permissive than requested (for example `bypassPermissions` when `default` was asked) produces a note that starts with "Warning:"; smind never lowers or raises the mode itself.
 4. A match, a missing field (an older CLI) and a malformed field produce nothing and never fail the run. Resumed turns (a second init on the same chat) note once per run, not per frame.
-5. `smind doctor` gains a read-only check `claude.auto_mode` that reads the Claude settings files smind already inspects for retention (user, project of the working directory is not read; managed and `CLAUDE_CONFIG_DIR` roots) for `permissions.disableAutoMode` and `permissions.disableBypassPermissionsMode`, and reports each as a warning with the fix. It makes no model call and writes nothing.
-6. The run's stored `permission_mode` is NOT rewritten by the note (the run requested what it requested); only the live event and the display change.
+5. `smind doctor` gains a read-only check (`ClaudeAutoMode`, findings `claude.disableAutoMode` and `claude.disableBypassPermissionsMode`) that reads each Claude config root's `settings.json` and `settings.local.json` (the same roots as the retention check) and the machine-wide managed settings file for `permissions.disableAutoMode` / `permissions.disableBypassPermissionsMode` set to "disable", and reports each as a warning naming the key and the file, with the fix. A project's own `.claude` in a working directory is not read. It makes no model call and writes nothing.
+6. The run's stored `permission_mode` is NOT rewritten (the run requested what it requested). Reading the code showed why an event is the wrong channel: `applyReportedMode` in `internal/runs` stores the reported mode on the run, and a retry or failover re-sends the run's own stored mode, so a "more permissive than requested" report would escalate the retry. The note therefore says that the mode shown for the run is the one requested. Showing the real mode in the chip needs a separate observed-mode field and is left as a follow-up for the Human to decide.
 7. No secret, path or settings content is put in the note: it names the key (`permissions.disableAutoMode`), never the file's contents.
 
 ## Named tests
 
-- `internal/taskrunner`: `TestInitFrameModeMismatchNotesOnce` (auto requested, fake CLI reports default: one note, one `permission_mode_changed` with `default`), `TestInitFrameModeMatchIsSilent`, `TestInitFrameModeMissingOrMalformedIsSilent`, `TestInitFrameMorePermissiveWarns`, `TestInitFrameModeNoteNeverRewritesStoredMode`.
-- `internal/taskrunner/fakeclaude`: reports `permissionMode` on init (the requested one, or a downgraded one when `FAKECLAUDE_DOWNGRADE_MODE` is set); this is how the tests above drive it. A fake never replaces the probe: the probe table above is the evidence for the real field name and value.
-- `internal/doctor`: `TestClaudeAutoModeDisabledWarns`, `TestClaudeAutoModeAbsentIsOK`, `TestClaudeAutoModeReadsManagedAndConfigDirRoots`, `TestClaudeAutoModeNeverWrites`.
+- `internal/taskrunner`: `TestClaudeModeMismatchNote` (table), `TestClaudeModeNoteNamesNoPathOrContent`, `TestInitFrameModeMismatchNotesOnce` (also asserts no `permission_mode_changed`), `TestInitFrameModeMatchIsSilent`, `TestInitFrameModeMissingOrMalformedIsSilent`, `TestInitFrameMorePermissiveWarns`, `TestInitFrameModeCheckDefaultsToAcceptEdits`.
+- `internal/taskrunner/fakeclaude`: the `mode-init` scenario reports `permissionMode` on init (the requested one, or what `FAKE_CLAUDE_REPORTED_MODE` says); this is how the tests above drive it. A fake never replaces the probe: the probe table above is the evidence for the real field name and value.
+- `internal/doctor`: `TestClaudeAutoModeDisabledWarns`, `TestClaudeAutoModeBypassKeyWarnsSeparately`, `TestClaudeAutoModeAbsentIsSilent`, `TestClaudeAutoModeReadsManagedAndConfigDirRoots`, `TestClaudeAutoModeNeverWrites`.
 - Web (only if the chip needs it): the existing `permission_mode_changed` handling is reused; a test that the chip shows the real mode after the event.
 - Live check at the end: the same probe row (auto plus `disableAutoMode`) against a real run through an isolated daemon, Haiku pinned, expecting the note once.
 
@@ -48,7 +48,7 @@ So: the init frame carries the real mode in a top-level `permissionMode` string,
 ## Progress
 
 - [x] Probe on the real CLI (Haiku only, five calls, about USD 0.038): the field and the downgrade are real.
-- [ ] PR 1: runner detection, fake CLI, tests. PR 2: `smind doctor` check.
+- [x] Runner detection, fake CLI, doctor check and tests in one PR (the spec said two; they are small and share one review).
 
 ## Validation
 

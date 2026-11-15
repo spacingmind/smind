@@ -31,6 +31,12 @@ const ScenarioEnv = "FAKE_CLAUDE_SCENARIO"
 // directory holds only the last one and only for the echo-args scenario).
 const ArgvLogEnv = "FAKE_CLAUDE_ARGV_LOG"
 
+// ReportedModeEnv, when set, is the `permissionMode` the "mode-init" scenario
+// reports on its init frame instead of echoing the requested one ("-" omits
+// the field, "#" reports a number): how a test plays a CLI that silently
+// downgraded (or raised) the mode.
+const ReportedModeEnv = "FAKE_CLAUDE_REPORTED_MODE"
+
 // ArgvSep separates the arguments on an ArgvLogEnv line.
 const ArgvSep = "\x1f"
 
@@ -479,6 +485,44 @@ func Run() {
 				{"name": "broken", "status": "failed"},
 			},
 		})
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"role":    "assistant",
+				"content": []map[string]any{{"type": "text", "text": "ok"}},
+			},
+		})
+		writeLine(map[string]any{
+			"type":       "result",
+			"subtype":    "success",
+			"session_id": "sess-1",
+			"result":     "ok",
+		})
+
+	case "mode-init":
+		// An init system message carrying `permissionMode` the way the real
+		// CLI does (probed 2026-11-15): the mode this spawn was asked for
+		// (--permission-mode), unless ReportedModeEnv overrides it. "-" omits
+		// the field and "#" reports a number (a malformed value).
+		stdin.Scan() // consume the prompt line
+		reported := os.Getenv(ReportedModeEnv)
+		if reported == "" {
+			for i, a := range os.Args[1:] {
+				if a == "--permission-mode" && i+2 < len(os.Args) {
+					reported = os.Args[i+2]
+				}
+			}
+		}
+		initMsg := map[string]any{"type": "system", "subtype": "init", "session_id": "sess-1"}
+		switch reported {
+		case "-":
+		case "#":
+			initMsg["permissionMode"] = 7
+		default:
+			initMsg["permissionMode"] = reported
+		}
+		writeLine(initMsg)
 		writeLine(map[string]any{
 			"type":       "assistant",
 			"session_id": "sess-1",
