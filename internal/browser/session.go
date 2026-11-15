@@ -123,16 +123,17 @@ type Session struct {
 	inst  Instance
 	cl    *Client
 
-	mu      sync.Mutex
-	closed  bool
-	tabs    map[string]*tabState // by target id
-	notices []Notice
-	console []string
-	idle    *time.Timer
-	loads   map[string]chan struct{} // load waiters by cdp session id
-	dns     map[string]dnsEntry
-	tabSeq  int
-	navMu   sync.Mutex // one navigation at a time: a load waiter is per tab
+	mu       sync.Mutex
+	closed   bool
+	tabs     map[string]*tabState // by target id
+	notices  []Notice
+	console  []string
+	idle     *time.Timer
+	loads    map[string]chan struct{} // load waiters by cdp session id
+	dns      map[string]dnsEntry
+	tabSeq   int
+	snapRefs map[string]map[string]int64 // tab id -> ref ("e1") -> backend DOM node id, of the latest snapshot
+	navMu    sync.Mutex                  // one navigation at a time: a load waiter is per tab
 
 	lifecycle chan Event   // attach, detach, dialog, download: handled in order
 	requests  chan Event   // Fetch.requestPaused: handled by a bounded pool
@@ -201,6 +202,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		tabs:      map[string]*tabState{},
 		loads:     map[string]chan struct{}{},
 		dns:       map[string]dnsEntry{},
+		snapRefs:  map[string]map[string]int64{},
 		maxQueued: maxQueuedBytes,
 		lifecycle: make(chan Event, 256),
 		requests:  make(chan Event, requestQueue),
