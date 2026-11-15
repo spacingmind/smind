@@ -65,6 +65,7 @@ Status 2026-11-15: **spec only.** Code starts from a fresh `origin/develop` afte
 ## Progress
 
 - 2026-11-15: spec written, develop checked. No code.
+- 2026-11-15: PR 2 (docs gates). Differences from the spec text: (1) plans (`docs/plans/`) are not scanned by B3 at all, not baselined, because they cite files that were later moved by nature and churn when a plan moves to `completed/`; committed ADRs are baselined (30 findings, file + path, no line number so edits above do not churn it); (2) `internal/pkg.Symbol` and `file.go:12-20,30` / `file.go:Symbol` forms are understood (the package directory or file must exist); (3) the local-path gate ignores repo paths that merely contain `home/` and treats `/home/smind` (the homelab service account) and `/home/user`, `/Users/you` style names as placeholders; (4) there is no separate landing source in the repo, so B1's set is README, CONTRIBUTING, CHANGELOG, SECURITY, CODE_OF_CONDUCT, `public-docs/`, `docs-site/` pages and committed ADRs. Fixed on the way: one real account name in ADR-0018 (now `/home/<user>/...`) and a stale package name in the roadmap. Product list: 7 digests; none of the repo's public text contained any of them (the gate is armed for the next one).
 
 ## Validation
 
