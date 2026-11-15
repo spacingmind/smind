@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/config"
@@ -40,19 +41,25 @@ type browserHost struct {
 	mgr    *browser.Manager
 
 	// Hooks, defaulted by newBrowserHost and replaced by tests.
-	gate        func(workspaceID int64) bool
-	tokenOK     func(runID, token string) bool
-	live        func(runID string) bool
-	forgetToken func(runID string)
-	imagesRead  func(runID string) bool
-	allow       func(workspaceID int64) []string
-	deny        func() []browser.Endpoint
-	launcher    func() (browser.Launcher, error)
-	profileRoot string
+	settings     browserSettingsStore
+	killSwitch   func() bool
+	closeSession func(workspaceID int64)
+	gate         func(workspaceID int64) bool
+	tokenOK      func(runID, token string) bool
+	live         func(runID string) bool
+	forgetToken  func(runID string)
+	imagesRead   func(runID string) bool
+	allow        func(workspaceID int64) []string
+	deny         func() []browser.Endpoint
+	launcher     func() (browser.Launcher, error)
+	profileRoot  string
 }
 
 func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h := &browserHost{db: db, reg: reg, mgr: &browser.Manager{}}
+	h.settings = db
+	h.closeSession = func(ws int64) { h.mgr.Close(strconv.FormatInt(ws, 10)) }
+	h.killSwitch = config.BrowserDisabled
 	h.gate = reg.BrowserAllowed
 	h.tokenOK = reg.CheckBrowserToken
 	h.live = reg.RunIsRunning
@@ -61,7 +68,13 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 		info, err := reg.ProviderCatalogForRun(runID)
 		return err == nil && imagesReadFrom(info.Images)
 	}
-	h.allow = func(int64) []string { return nil } // the per-workspace allowlist is a later PR: loopback only
+	h.allow = func(ws int64) []string {
+		s, err := h.settings.GetBrowserSettings(ws)
+		if err != nil {
+			return nil // an unreadable setting allows nothing beyond loopback
+		}
+		return s.AllowHosts
+	}
 	h.deny = daemonDeny
 	h.launcher = func() (browser.Launcher, error) {
 		p, err := browser.DetectChrome("")
@@ -95,7 +108,24 @@ func daemonDeny() []browser.Endpoint {
 	if err != nil {
 		return nil
 	}
-	return []browser.Endpoint{{Host: host, Port: port}}
+	out := []browser.Endpoint{{Host: host, Port: port}}
+	// The names the daemon is reached by (server.hostnames) are the same port.
+	for _, name := range cfg.Server.Hostnames {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, browser.Endpoint{Host: name, Port: port})
+		}
+	}
+	return out
+}
+
+// workspaceSwitchOn is the registry's browser gate: the workspace's own switch
+// is on and the daemon-wide kill switch is off. Both are read on every decision.
+func (h *browserHost) workspaceSwitchOn(ws int64) bool {
+	if h.killSwitch() {
+		return false
+	}
+	s, err := h.settings.GetBrowserSettings(ws)
+	return err == nil && s.Enabled
 }
 
 func (h *browserHost) session(ctx context.Context, run browser.Run) (*browser.Session, error) {
@@ -169,6 +199,11 @@ func (h *browserHost) call(ctx context.Context, rc *requestContext, raw json.Raw
 		return nil, forbidden(m + " is not available")
 	}
 	ws := task.WorkspaceID
+	if h.killSwitch() {
+		// The daemon-wide switch beats every workspace: end any browser now.
+		h.mgr.CloseAll()
+		return nil, forbidden(m + ": the browser is disabled by the daemon's configuration")
+	}
 	if !h.gate(ws) {
 		return nil, forbidden(m + ": the browser is not enabled for this workspace")
 	}
