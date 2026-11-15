@@ -1,0 +1,10 @@
+# Code owners. With "Require review from Code Owners" enabled on the protected branches, a change to any
+# path below needs an owner's approval. The signing paths matter most: a manual run of the signing
+# workflow executes the workflow file and scripts/macos-sign/*.sh of the ref it is started from, so these
+# files decide what can see the Apple credentials (ADR-0060, decision 9, docs/desktop-macos-signing.md).
+/.github/workflows/ @lounguyen68
+/.github/CODEOWNERS @lounguyen68
+/scripts/macos-sign/ @lounguyen68
+/scripts/macos-sign.test.mjs @lounguyen68
+/scripts/macos-sign-workflow.test.mjs @lounguyen68
+/desktop/src-tauri/entitlements/ @lounguyen68

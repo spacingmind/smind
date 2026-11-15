@@ -74,11 +74,33 @@ jobs:
       matrix:
         arch: [arm64, x86_64]
     steps:
+      # Full history and tags: the release's tag must be shown to sit on develop.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+          fetch-depth: 0
 
-      - name: Download the release's macOS app
+      # The baseline for the next reviewer of the Environment: what this run's scripts and workflow were.
+      - name: Record the dispatched commit
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "Signing run from commit $SHA. A reviewer approving the next run diffs the dispatched commit against the last APPROVED one: git diff <that sha> <new sha> -- .github/workflows scripts/macos-sign desktop/src-tauri/entitlements" >> "$GITHUB_STEP_SUMMARY"
+
+      # Everything from here to the signing step runs WITHOUT any secret in its environment. A release
+      # is only signed if it is a real published release of ours: not a draft, not a prerelease, its tag
+      # on develop, and (below) its app tarball listed in a checksums.txt that carries OUR signature.
+      - name: Check the release is a published stable release on develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          scripts/macos-sign/check-release.sh --tag "$TAG" --repo "$REPO"
+
+      - name: Download the release's macOS app and its signed checksums
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
@@ -86,16 +108,26 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          case "$TAG" in
-            v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::the tag must look like v1.2.3"; exit 1 ;;
-          esac
           mkdir -p work/in work/out
           gh release download "$TAG" --repo "$REPO" --dir work/in \
-            --pattern "smind-desktop-*-macos-${ARCH}.app.tar.gz"
+            --pattern "smind-desktop-*-macos-${ARCH}.app.tar.gz" \
+            --pattern checksums.txt --pattern checksums.txt.minisig
           n="$(find work/in -maxdepth 1 -name '*.app.tar.gz' | wc -l)"
           [ "$n" -eq 1 ] || { echo "::error::expected exactly one app tarball, found $n"; exit 1; }
-          tar -xzf work/in/*.app.tar.gz -C work/in
+          asset="$(basename "$(find work/in -maxdepth 1 -name '*.app.tar.gz')")"
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      - name: Prove the app is ours (signed checksums, no secrets here)
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          node scripts/macos-sign/provenance.mjs --dir work/in --asset "$ASSET" --tag "$TAG"
+
+      - name: Unpack the proven app
+        run: |
+          set -euo pipefail
+          tar -xzf "work/in/$ASSET" -C work/in
           test -d work/in/sMind.app
 
       # The ONLY step that sees the secrets, and only as environment variables.

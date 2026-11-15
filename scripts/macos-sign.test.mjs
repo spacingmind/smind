@@ -741,6 +741,88 @@ test("verify-checks-frameworks", () => {
   }
 });
 
+// An inherited xtrace (SHELLOPTS=xtrace, `bash -x`) would print every command with its expanded
+// secrets: lib.sh switches it off before anything runs.
+test("sign-inherited-xtrace-never-prints-secrets", () => {
+  for (const how of ["SHELLOPTS", "bash-x"]) {
+    withHarness({}, (h) => {
+      const app = makeApp(h.tmp);
+      const env = { ...h.env, PS4: "+TRACE ", ...(how === "SHELLOPTS" ? { SHELLOPTS: "xtrace" } : {}) };
+      const args = how === "bash-x" ? ["-x", SIGN] : [SIGN];
+      const r = spawnSync("bash", [...args, "--app", app, "--out", join(h.tmp, "out")], { env, encoding: "utf8" });
+      assert.equal(r.status, 0, `${how}: ${r.stderr.slice(0, 500)}`);
+      const everything = r.stdout + r.stderr;
+      for (const secret of [SECRETS.SMIND_MACOS_CERT_PASSWORD, SECRETS.SMIND_MACOS_CERT_P12_BASE64, SECRETS.SMIND_NOTARY_KEY_P8_BASE64, "P12-SECRET-BYTES", "P8-SECRET-KEY-BYTES"]) {
+        assert.ok(!everything.includes(secret), `${how}: a secret value was printed`);
+      }
+    });
+  }
+});
+
+test("sign-the-keychain-import-allows-only-codesign", () => {
+  withHarness({}, (h) => {
+    const { r } = runSign(h);
+    assert.equal(r.status, 0, r.stderr);
+    const imp = toolLines(h.log(), "security").find((f) => f.includes("import"));
+    assert.ok(imp, "no security import call");
+    const allowed = imp.filter((a, i) => imp[i - 1] === "-T");
+    assert.deepEqual(allowed, ["/usr/bin/codesign"], flat(imp));
+  });
+});
+
+for (const [sig, code] of [["HUP", 129], ["QUIT", 131]]) {
+  test(`sign-${sig.toLowerCase()}-signal-still-cleans-up`, async () => {
+    const h = harness({ knobs: { FAKE_NOTARY_SLEEP: "30" } });
+    try {
+      const app = makeApp(h.tmp);
+      const child = spawn("bash", [SIGN, "--app", app, "--out", join(h.tmp, "out")], { env: h.env, stdio: "ignore" });
+      const exited = new Promise((res) => child.on("exit", (c, s) => res({ c, s })));
+      const deadline = Date.now() + 20000;
+      while (!h.log().some((f) => f[0] === "xcrun" && f.includes("submit"))) {
+        if (Date.now() > deadline) throw new Error("never reached notarization");
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      child.kill(`SIG${sig}`);
+      const { c } = await exited;
+      await new Promise((r) => setTimeout(r, 500));
+      assertCleanedUp(h);
+      assert.equal(c, code, `exit status for ${sig}`);
+    } finally {
+      h.cleanup();
+    }
+  });
+}
+
+test("sign-refuses-installed-app-paths-unless-forced", () => {
+  withHarness({}, (h) => {
+    for (const args of [
+      ["--app", "/Applications/sMind.app"],
+      ["--app", makeApp(h.tmp), "--out", "/Applications/out"],
+      ["--app", makeApp(h.tmp), "--dmg", "/Applications/x.dmg"],
+      ["--app", makeApp(h.tmp), "--updater-tarball", "/Applications/x.app.tar.gz"],
+    ]) {
+      const r = h.run(SIGN, args);
+      assert.equal(r.status, 3, `${args.join(" ")}: ${r.stderr}`);
+      assert.match(r.stderr, /Applications folder/);
+      assert.equal(signCalls(h).length, 0);
+    }
+    // with the explicit flag the check steps aside (the app path then fails on its own for not existing)
+    const r = h.run(SIGN, ["--app", "/Applications/NoSuchApp.app", "--force-installed"]);
+    assert.doesNotMatch(r.stderr, /Applications folder/);
+  });
+});
+
+test("sign-option-values-that-look-like-options-are-refused", () => {
+  withHarness({}, (h) => {
+    for (const opt of ["--app", "--out", "--dmg", "--updater-tarball"]) {
+      const r = h.run(SIGN, [opt, "--check"]);
+      assert.equal(r.status, 2, `${opt}: ${r.stderr}`);
+      assert.match(r.stderr, /not an option/);
+    }
+    assert.deepEqual(h.log(), []);
+  });
+});
+
 test("verify-passes-a-good-app", () => {
   withHarness({}, (h) => {
     const { r } = runVerify(h);
@@ -809,7 +891,8 @@ test("scripts-never-enable-xtrace", () => {
       .join("\n");
     assert.ok(!code.includes("set -x"), `${f} enables xtrace`);
     assert.ok(!code.includes("bash -x"), `${f} runs bash -x`);
-    assert.ok(!code.includes("xtrace"), `${f} mentions xtrace outside a comment`);
+    // switching it OFF is the point (an inherited xtrace must not print secrets); enabling never
+    assert.ok(!/set\s+-[a-z]*x/.test(code) && !/set\s+-o\s+xtrace/.test(code), `${f} enables xtrace`);
   }
 });
 

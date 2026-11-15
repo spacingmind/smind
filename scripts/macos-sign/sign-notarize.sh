@@ -6,12 +6,13 @@
 # desktop-notarization-prep.md, ADR-0060 draft).
 #
 # usage: sign-notarize.sh --app <sMind.app> [--out <dir>] [--dmg <out.dmg>] [--updater-tarball <out.app.tar.gz>]
-#                         [--entitlements-app <file>] [--entitlements-sidecar <file>] | --check
+#                         [--entitlements-app <file>] [--entitlements-sidecar <file>] [--force-installed] | --check
 #   --check   only the gate: secrets present, certificate imports, identity found; signs nothing
 #
 # Order (inside out, never --deep): the frameworks in Contents/Frameworks and the other executables
 # in Contents/MacOS (the sidecar), then the main executable's bundle; a bundle with any other kind of
-# nested code (Helpers, XPCServices, PlugIns, Library/LaunchServices) is refused, not half-signed; verify; zip; notarize and wait; fail with the log unless Accepted; staple.
+# nested code (Helpers, XPCServices, PlugIns, Library/LaunchServices) is refused, not half-signed;
+# verify; zip; notarize and wait; fail with the log unless Accepted; staple.
 # With --dmg the stapled app goes into a dmg that is signed, notarized and stapled too. With
 # --updater-tarball the stapled app is packed for the updater: the caller must then re-sign that
 # tarball with the updater key (`tauri signer sign`), the old .sig no longer matches.
@@ -20,8 +21,12 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/macos-sign/lib.sh
 . "$here/lib.sh"
 
-need() { [ -n "${2:-}" ] || { printf 'macos-sign: %s needs a value\n' "$1" >&2; exit 2; }; }
-app="" out="" dmg="" tarball="" check=0
+# an option value is a non-empty path that does not look like another option
+need() {
+  [ -n "${2:-}" ] || { printf 'macos-sign: %s needs a value\n' "$1" >&2; exit 2; }
+  case "$2" in -*) printf 'macos-sign: %s needs a path, not an option (%s)\n' "$1" "$2" >&2; exit 2 ;; esac
+}
+app="" out="" dmg="" tarball="" check=0 FORCE_INSTALLED=0
 ent_app="$here/../../desktop/src-tauri/entitlements/app.entitlements"
 ent_sidecar="$here/../../desktop/src-tauri/entitlements/sidecar.entitlements"
 while [ $# -gt 0 ]; do
@@ -33,6 +38,7 @@ while [ $# -gt 0 ]; do
     --entitlements-app) need "$1" "${2:-}"; ent_app="$2"; shift 2 ;;
     --entitlements-sidecar) need "$1" "${2:-}"; ent_sidecar="$2"; shift 2 ;;
     --check) check=1; shift ;;
+    --force-installed) FORCE_INSTALLED=1; shift ;;
     -h|--help) sed -n '2,/^set -/{/^set -/!p;}' "$0"; exit 0 ;;
     *) printf 'macos-sign: unknown argument %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -50,12 +56,16 @@ if [ "$check" -eq 1 ]; then
 fi
 
 [ -n "$app" ] || { printf 'macos-sign: --app is required\n' >&2; exit 2; }
+refuse_installed "$app" "--app"
+[ -z "$out" ] || refuse_installed "$out" "--out"
+[ -z "$dmg" ] || refuse_installed "$dmg" "--dmg"
+[ -z "$tarball" ] || refuse_installed "$tarball" "--updater-tarball"
 [ -d "$app" ] && [ ! -L "$app" ] || die "--app is not a directory (or is a link): $app"
 case "$app" in *.app) ;; *) die "--app must be a .app bundle" ;; esac
 [ -f "$ent_app" ] || die "entitlements file not found: $ent_app"
 [ -f "$ent_sidecar" ] || die "entitlements file not found: $ent_sidecar"
 [ -n "$out" ] || out="$(dirname "$app")"
-mkdir -p "$out"
+mkdir -p -- "$out"
 
 sign() { # sign <entitlements|""> <path>
   local ent="$1" path="$2"

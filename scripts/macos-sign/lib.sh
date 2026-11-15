@@ -11,6 +11,11 @@
 #  - the signing keychain is a temporary one, never the login keychain, and is deleted on exit;
 #  - nothing is signed with `--deep` and nothing is sent anywhere except the notarization
 #    submission itself.
+# An inherited xtrace (`bash -x`, SHELLOPTS=xtrace, a verbose PS4, BASH_XTRACEFD) would print every
+# command with its expanded secrets: switch it off before anything runs, and never switch it on.
+set +o xtrace
+set +o verbose
+unset BASH_XTRACEFD PS4
 set -euo pipefail
 umask 077
 
@@ -53,6 +58,18 @@ require_secrets() {
   [ -n "$(printf '%s' "$SMIND_NOTARY_KEY_P8_BASE64" | base64 -d 2>/dev/null | head -c 1)" ] || refuse "SMIND_NOTARY_KEY_P8_BASE64 is not valid, non-empty base64"
 }
 
+# Refuses a path under an Applications folder (the real installed app is /Applications/sMind.app):
+# signing replaces the bundle's signature in place, and the scripts must not be pointed at what the
+# user is running. `--force-installed` is the explicit override, set by the caller as FORCE_INSTALLED=1.
+refuse_installed() { # <path> <what>
+  local p="$1" dir
+  if dir="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)"; then :; else dir="$(dirname "$p")"; fi
+  case "$dir/$(basename "$p")" in
+    /Applications/*|/System/Applications/*|"${HOME:-/nonexistent}"/Applications/*|/Users/*/Applications/*)
+      [ "${FORCE_INSTALLED:-0}" = "1" ] || refuse "$2 is under an Applications folder (an installed app): pass --force-installed to sign it in place on purpose" ;;
+  esac
+}
+
 WORK=""
 KEYCHAIN=""
 
@@ -74,6 +91,8 @@ init_work() {
   trap cleanup EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  trap 'exit 131' QUIT
 }
 
 # Imports the signing certificate into a temporary keychain and checks the identity is there.
@@ -91,8 +110,9 @@ setup_keychain() {
   security create-keychain -p "$kcpw" "$KEYCHAIN"
   security set-keychain-settings -lut 3600 "$KEYCHAIN"
   security unlock-keychain -p "$kcpw" "$KEYCHAIN"
+  # only codesign may use the imported key (not the `security` tool itself)
   security import "$p12" -P "$SMIND_MACOS_CERT_PASSWORD" -f pkcs12 -t cert -k "$KEYCHAIN" \
-    -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+    -T /usr/bin/codesign >/dev/null
   rm -f "$p12"
   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kcpw" "$KEYCHAIN" >/dev/null
   # captured first: `grep -q` at the end of a pipeline under pipefail fails on a large listing

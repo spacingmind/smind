@@ -27,6 +27,17 @@ Store them in the GitHub Environment `macos-signing` (Settings, Environments). N
 
 Then set the repository variable `MACOS_SIGNING_ENABLED` to `true` (Settings, Secrets and variables, Variables, a repository variable: the gate job cannot see the Environment). Without it the `gate` job says so and the signing job does not run; with it but without a secret, the signing job stops at once and names the missing variable (it cannot reach Apple without all six). The signing job also runs only from `develop`.
 
+### Settings checklist (do it once, after the first merge, and re-check after any change to the repository's rules)
+
+- [ ] Environment `macos-signing`: deployment branches = **selected branches**, only `develop`; required reviewer = you, **Prevent self-review** on; admins cannot bypass; no wait-timer needed.
+- [ ] Branch protection on `develop`: pull request required, **Require review from Code Owners** on (`.github/CODEOWNERS` already lists the signing paths), no bypass for admins or bots.
+- [ ] Secrets only in the Environment, none at repository or organisation level; the repository variable `MACOS_SIGNING_ENABLED` unset until you mean to sign.
+- [ ] No other workflow sets `environment: macos-signing` (a test enforces this in the repository; check Actions settings for "Allow all actions" changes too).
+- [ ] Before approving any run: `git diff <last approved commit> <dispatched commit> -- .github/workflows scripts/macos-sign desktop/src-tauri/entitlements` is empty or fully understood. Every run writes its commit to the run summary: that is the next baseline. For the first run the baseline is the merge commit of the change that added this workflow.
+- [ ] Never approve a run you did not start, and never a run started by automation.
+
+What the job refuses to sign: a release that is a draft, a prerelease, not a stable `vX.Y.Z`, or whose tag is not on `develop`, and any app tarball that is not listed in the release's `checksums.txt` signed with the updater key committed in `tauri.conf.json` (the release workflow makes that signature; a release someone created by hand cannot carry it). Those checks run before any secret is present.
+
 ## 3. Try it locally first
 
 On a Mac, with the six values in your environment (a shell session, not a file in the repository):
@@ -37,7 +48,7 @@ scripts/macos-sign/sign-notarize.sh --app path/to/sMind.app --out out --dmg out/
 scripts/macos-sign/verify.sh --app path/to/sMind.app --dmg out/sMind.dmg
 ```
 
-The script creates a temporary keychain and deletes it when it exits; it never touches your login keychain. The `.p12` password is passed to `security import` on its command line (the tool has no other way), and the random temporary-keychain password goes to `security create-keychain`, `unlock-keychain` and `set-key-partition-list` the same way, so they are visible in `ps` to other users of that machine for a moment: do this on your own machine or a single-user runner. `base64 -d` needs macOS 13 or later.
+The scripts refuse an `--app`, `--out`, `--dmg` or tarball path under an Applications folder (the installed app is `/Applications/sMind.app`) unless you pass `--force-installed`; sign a copy. The script creates a temporary keychain and deletes it when it exits; it never touches your login keychain. The `.p12` password is passed to `security import` on its command line (the tool has no other way), and the random temporary-keychain password goes to `security create-keychain`, `unlock-keychain` and `set-key-partition-list` the same way, so they are visible in `ps` to other users of that machine for a moment: do this on your own machine or a single-user runner. `base64 -d` needs macOS 13 or later.
 
 ## 4. Run it in CI
 
