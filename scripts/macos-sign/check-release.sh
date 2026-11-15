@@ -20,7 +20,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 refuse() { echo "check-release: REFUSED: $*" >&2; exit 1; }
-[ -n "$tag" ] && [ -n "$repo" ] || { echo "check-release: --tag and --repo are required" >&2; exit 2; }
+if [ -z "$tag" ] || [ -z "$repo" ]; then echo "check-release: --tag and --repo are required" >&2; exit 2; fi
 grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' <<<"$tag" || refuse "the tag is not a stable vX.Y.Z"
 info="$(gh release view "$tag" --repo "$repo" --json isDraft,isPrerelease,tagName)" || refuse "no such release"
 jq -e '.isDraft == false' >/dev/null <<<"$info" || refuse "the release is a draft"

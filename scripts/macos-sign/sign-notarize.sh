@@ -60,7 +60,7 @@ refuse_installed "$app" "--app"
 [ -z "$out" ] || refuse_installed "$out" "--out"
 [ -z "$dmg" ] || refuse_installed "$dmg" "--dmg"
 [ -z "$tarball" ] || refuse_installed "$tarball" "--updater-tarball"
-[ -d "$app" ] && [ ! -L "$app" ] || die "--app is not a directory (or is a link): $app"
+if [ ! -d "$app" ] || [ -L "$app" ]; then die "--app is not a directory (or is a link): $app"; fi
 case "$app" in *.app) ;; *) die "--app must be a .app bundle" ;; esac
 [ -f "$ent_app" ] || die "entitlements file not found: $ent_app"
 [ -f "$ent_sidecar" ] || die "entitlements file not found: $ent_sidecar"
