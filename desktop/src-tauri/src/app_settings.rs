@@ -311,8 +311,14 @@ mod tests {
         assert!(patched.notify_permission, "an unnamed kind is untouched");
         assert!(patched.notify_failure);
         assert_eq!(patched.notifications_on, None, "consent is untouched");
-        assert_eq!(patched.onboarding_completed, AppSettings::FIRST_RUN.onboarding_completed);
-        assert_eq!(patched.manage_local_daemon, AppSettings::FIRST_RUN.manage_local_daemon);
+        assert_eq!(
+            patched.onboarding_completed,
+            AppSettings::FIRST_RUN.onboarding_completed
+        );
+        assert_eq!(
+            patched.manage_local_daemon,
+            AppSettings::FIRST_RUN.manage_local_daemon
+        );
     }
 
     #[test]

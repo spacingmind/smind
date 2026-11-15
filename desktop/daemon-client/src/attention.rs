@@ -217,12 +217,20 @@ mod tests {
         a.on_pending(2, 8, "req-2");
         assert_eq!(
             a.most_recent(),
-            Some(PendingRef { task_id: 2, chat_id: 8, request_id: "req-2".to_string() })
+            Some(PendingRef {
+                task_id: 2,
+                chat_id: 8,
+                request_id: "req-2".to_string()
+            })
         );
         a.on_permission_resolved("req-2");
         assert_eq!(
             a.most_recent(),
-            Some(PendingRef { task_id: 1, chat_id: 7, request_id: "req-1".to_string() })
+            Some(PendingRef {
+                task_id: 1,
+                chat_id: 7,
+                request_id: "req-1".to_string()
+            })
         );
     }
 
@@ -251,6 +259,13 @@ mod tests {
         a.on_pending(4, 10, "perm-1");
         a.on_run_ended(3);
         assert_eq!(a.count(), 1);
-        assert_eq!(a.most_recent(), Some(PendingRef { task_id: 4, chat_id: 10, request_id: "perm-1".to_string() }));
+        assert_eq!(
+            a.most_recent(),
+            Some(PendingRef {
+                task_id: 4,
+                chat_id: 10,
+                request_id: "perm-1".to_string()
+            })
+        );
     }
 }

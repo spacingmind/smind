@@ -17,7 +17,11 @@ pub struct Dedupe {
 
 impl Dedupe {
     pub fn new(cap: usize) -> Self {
-        Self { seen: HashSet::new(), order: VecDeque::new(), cap }
+        Self {
+            seen: HashSet::new(),
+            order: VecDeque::new(),
+            cap,
+        }
     }
 
     /// first_time reports whether this (kind, id) has not been seen
@@ -45,7 +49,10 @@ mod tests {
     fn a_redelivery_notifies_once() {
         let mut d = Dedupe::new(16);
         assert!(d.first_time(NotifyKind::Permission, "req-1"));
-        assert!(!d.first_time(NotifyKind::Permission, "req-1"), "a redelivery is silent");
+        assert!(
+            !d.first_time(NotifyKind::Permission, "req-1"),
+            "a redelivery is silent"
+        );
         assert!(d.first_time(NotifyKind::Permission, "req-2"));
         assert!(!d.first_time(NotifyKind::Permission, "req-2"));
     }
@@ -65,9 +72,23 @@ mod tests {
         for id in ["id-1", "id-2", "id-3", "id-4", "id-5"] {
             d.first_time(NotifyKind::Permission, id);
         }
-        assert!(d.seen.len() <= 3, "the set stays at the cap: {}", d.seen.len());
-        assert!(d.order.len() <= 3, "the queue stays at the cap: {}", d.order.len());
-        assert!(!d.first_time(NotifyKind::Permission, "id-5"), "the newest is still remembered");
-        assert!(d.first_time(NotifyKind::Permission, "id-1"), "the oldest was evicted and notifies again");
+        assert!(
+            d.seen.len() <= 3,
+            "the set stays at the cap: {}",
+            d.seen.len()
+        );
+        assert!(
+            d.order.len() <= 3,
+            "the queue stays at the cap: {}",
+            d.order.len()
+        );
+        assert!(
+            !d.first_time(NotifyKind::Permission, "id-5"),
+            "the newest is still remembered"
+        );
+        assert!(
+            d.first_time(NotifyKind::Permission, "id-1"),
+            "the oldest was evicted and notifies again"
+        );
     }
 }

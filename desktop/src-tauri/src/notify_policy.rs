@@ -22,25 +22,41 @@ mod tests {
     use super::*;
 
     fn consented() -> AppSettings {
-        AppSettings::FIRST_RUN
-            .apply(AppSettingsPatch { notifications_on: Some(true), ..Default::default() })
+        AppSettings::FIRST_RUN.apply(AppSettingsPatch {
+            notifications_on: Some(true),
+            ..Default::default()
+        })
     }
 
     #[test]
     fn nothing_shows_before_consent() {
         let not_asked = AppSettings::FIRST_RUN;
-        let refused = AppSettings::FIRST_RUN
-            .apply(AppSettingsPatch { notifications_on: Some(false), ..Default::default() });
-        for kind in [NotifyKind::Permission, NotifyKind::Question, NotifyKind::Failure] {
-            assert!(!should_show(&not_asked, kind), "{kind:?}: not asked shows nothing");
-            assert!(!should_show(&refused, kind), "{kind:?}: a refusal shows nothing");
+        let refused = AppSettings::FIRST_RUN.apply(AppSettingsPatch {
+            notifications_on: Some(false),
+            ..Default::default()
+        });
+        for kind in [
+            NotifyKind::Permission,
+            NotifyKind::Question,
+            NotifyKind::Failure,
+        ] {
+            assert!(
+                !should_show(&not_asked, kind),
+                "{kind:?}: not asked shows nothing"
+            );
+            assert!(
+                !should_show(&refused, kind),
+                "{kind:?}: a refusal shows nothing"
+            );
         }
     }
 
     #[test]
     fn an_off_kind_is_silent_but_counts() {
-        let off = consented()
-            .apply(AppSettingsPatch { notify_question: Some(false), ..Default::default() });
+        let off = consented().apply(AppSettingsPatch {
+            notify_question: Some(false),
+            ..Default::default()
+        });
         assert!(!should_show(&off, NotifyKind::Question));
         assert!(should_show(&off, NotifyKind::Permission));
         assert!(should_show(&off, NotifyKind::Failure));

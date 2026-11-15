@@ -90,20 +90,23 @@ fn on_event(
             if counts(n.kind) {
                 tray.on_permission_pending(n.task_id, n.chat_id, &n.request_id);
             }
-            // DT5 B/AC6: a redelivered (kind, id) -- the daemon replays
-            // still-pending requests after a reconnect -- shows once.
-            static DEDUPE: OnceLock<Mutex<dclient::dedupe::Dedupe>> = OnceLock::new();
-            let first_time = DEDUPE
-                .get_or_init(|| Mutex::new(dclient::dedupe::Dedupe::new(DEDUPE_CAP)))
-                .lock()
-                .unwrap()
-                .first_time(n.kind, &n.request_id);
-            if !first_time {
-                return;
-            }
             // DT5 B/AC8: consent and the per-kind switch gate only the
-            // banner; the badge above is already updated.
+            // banner; the badge above is already updated. Checked BEFORE the
+            // dedupe so a request that stayed silent (no consent yet, or its
+            // kind off) is not remembered as "already shown" and can still
+            // notify when it is redelivered after the person turns it on.
             if notify_policy::should_show(&settings, n.kind) {
+                // DT5 B/AC6: a redelivered (kind, id) -- the daemon replays
+                // still-pending requests after a reconnect -- shows once.
+                static DEDUPE: OnceLock<Mutex<dclient::dedupe::Dedupe>> = OnceLock::new();
+                let first_time = DEDUPE
+                    .get_or_init(|| Mutex::new(dclient::dedupe::Dedupe::new(DEDUPE_CAP)))
+                    .lock()
+                    .unwrap()
+                    .first_time(n.kind, &n.request_id);
+                if !first_time {
+                    return;
+                }
                 let target = notify::Target {
                     task_id: n.task_id,
                     chat_id: n.chat_id,
@@ -308,7 +311,10 @@ mod tests {
     fn failed_runs_are_not_counted() {
         assert!(counts(NotifyKind::Permission));
         assert!(counts(NotifyKind::Question));
-        assert!(!counts(NotifyKind::Failure), "a failed run has nothing waiting");
+        assert!(
+            !counts(NotifyKind::Failure),
+            "a failed run has nothing waiting"
+        );
     }
 
     #[test]
