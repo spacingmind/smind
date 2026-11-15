@@ -198,6 +198,16 @@ fn handle(mut stream: TcpStream, routes: &HashMap<String, Vec<u8>>, log: &Mutex<
 /// only `pubkey`, the local `endpoint` and the insecure-transport flag
 /// (HTTP to 127.0.0.1) replaced.
 pub fn test_app(pubkey: &str, endpoint: &str) -> App<MockRuntime> {
+    test_app_with(pubkey, endpoint, None)
+}
+
+/// [`test_app`], optionally overriding `requireSignedVersion` (only the test that shows why the
+/// flag matters turns it off; everything else runs with the committed value).
+pub fn test_app_with(
+    pubkey: &str,
+    endpoint: &str,
+    require_signed_version: Option<bool>,
+) -> App<MockRuntime> {
     let mut context = mock_context(noop_assets());
     context.package_info_mut().version = RUNNING.parse().unwrap();
     // Start from the committed `plugins.updater` so the tests run with the
@@ -208,6 +218,9 @@ pub fn test_app(pubkey: &str, endpoint: &str) -> App<MockRuntime> {
     updater["pubkey"] = pubkey.into();
     updater["endpoints"] = serde_json::json!([endpoint]);
     updater["dangerousInsecureTransportProtocol"] = true.into();
+    if let Some(v) = require_signed_version {
+        updater["requireSignedVersion"] = v.into();
+    }
     context
         .config_mut()
         .plugins
@@ -428,6 +441,50 @@ mod tests {
             .expect("check");
         let err = refused(feed, app).await;
         assert!(err.to_lowercase().contains("signed for version"));
+    }
+
+    /// updater-signed-version AC2: the committed config has `requireSignedVersion`, so a signature
+    /// that carries no signed version is refused at download (nothing is installed).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn signature_without_a_signed_version_is_refused() {
+        let key = TestKey::generate();
+        let artifact = app_tarball("new");
+        let feed = Feed::serve_release(&Release {
+            signature: key.sign(&artifact, None),
+            ..release(&key, "0.10.1", artifact.clone())
+        });
+        let app = test_app(&key.pubkey(), &feed.latest_url());
+        let state = app.state::<UpdateState>();
+        check_with(builder(&app), RUNNING, &state)
+            .await
+            .expect("check");
+        let err = refused(feed, app).await;
+        assert!(
+            err.contains("does not specify the version"),
+            "expected the plugin's missing-signed-version error, got: {err}"
+        );
+    }
+
+    /// AC4: why the flag matters. With it off, the same versionless signature is accepted: a
+    /// crafted feed can pair any announced version with an older release's signature.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn without_the_flag_a_versionless_signature_is_accepted() {
+        let key = TestKey::generate();
+        let artifact = app_tarball("new");
+        let feed = Feed::serve_release(&Release {
+            signature: key.sign(&artifact, None),
+            ..release(&key, "0.10.1", artifact.clone())
+        });
+        let app = test_app_with(&key.pubkey(), &feed.latest_url(), Some(false));
+        let state = app.state::<UpdateState>();
+        check_with(builder(&app), RUNNING, &state)
+            .await
+            .expect("check");
+        let update = state.pending.take().unwrap();
+        update
+            .download(|_, _| {}, || {})
+            .await
+            .expect("accepted when requireSignedVersion is off");
     }
 
     #[tokio::test(flavor = "multi_thread")]

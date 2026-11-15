@@ -11,11 +11,25 @@ import { buildLatestJson } from "./gen-latest-json.mjs";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const cli = join(scriptDir, "gen-latest-json.mjs");
 
+// A .sig file the shape the Tauri CLI writes: base64 of the 4-line minisign
+// signature text, whose trusted comment carries version:<version> (version
+// null = a signature WITHOUT a signed version).
+function fakeSig(version, file = "asset") {
+  const lines = [
+    "untrusted comment: test signature",
+    "RWQ" + "A".repeat(20),
+    "trusted comment: timestamp:1700000000\tfile:" + file + (version === null ? "" : "\tversion:" + version),
+    "GLOBALSIG" + "B".repeat(20),
+    "",
+  ];
+  return Buffer.from(lines.join("\n")).toString("base64") + "\n";
+}
+
 function files() {
   return {
-    "darwin-aarch64": { asset: "smind-desktop-1.2.3-macos-arm64.app.tar.gz", signature: "sig-arm64\n" },
-    "darwin-x86_64": { asset: "smind-desktop-1.2.3-macos-x86_64.app.tar.gz", signature: "sig-x64\n" },
-    "windows-x86_64": { asset: "sMind_1.2.3_x64-setup.exe", signature: "sig-win\n" },
+    "darwin-aarch64": { asset: "smind-desktop-1.2.3-macos-arm64.app.tar.gz", signature: fakeSig("1.2.3") },
+    "darwin-x86_64": { asset: "smind-desktop-1.2.3-macos-x86_64.app.tar.gz", signature: fakeSig("1.2.3") },
+    "windows-x86_64": { asset: "sMind_1.2.3_x64-setup.exe", signature: fakeSig("1.2.3") },
   };
 }
 
@@ -56,9 +70,9 @@ test("latest-json-urls-per-arch", () => {
 
 test("latest-json-signature-is-file-content-trimmed", () => {
   const f = files();
-  f["darwin-aarch64"].signature = "  sig-arm64 \n";
+  f["darwin-aarch64"].signature = "  " + fakeSig("1.2.3").trim() + " \n";
   const m = buildLatestJson({ ...base, files: f });
-  assert.equal(m.platforms["darwin-aarch64"].signature, "sig-arm64");
+  assert.equal(m.platforms["darwin-aarch64"].signature, fakeSig("1.2.3").trim());
 });
 
 test("latest-json-missing-sig-fails", () => {
@@ -111,11 +125,11 @@ test("latest-json-url-encodes-asset-names", () => {
 function fixtureDir(version = "1.2.3") {
   const dir = mkdtempSync(join(tmpdir(), "gen-latest-json-"));
   writeFileSync(join(dir, `smind-desktop-${version}-macos-arm64.app.tar.gz`), "a");
-  writeFileSync(join(dir, `smind-desktop-${version}-macos-arm64.app.tar.gz.sig`), "sig-arm64\n");
+  writeFileSync(join(dir, `smind-desktop-${version}-macos-arm64.app.tar.gz.sig`), fakeSig(version));
   writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz`), "a");
-  writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz.sig`), "sig-x64\n");
+  writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz.sig`), fakeSig(version));
   writeFileSync(join(dir, `sMind_${version}_x64-setup.exe`), "a");
-  writeFileSync(join(dir, `sMind_${version}_x64-setup.exe.sig`), "sig-win\n");
+  writeFileSync(join(dir, `sMind_${version}_x64-setup.exe.sig`), fakeSig(version));
   return dir;
 }
 
@@ -145,7 +159,7 @@ test("latest-json-cli-writes-file", () => {
     ], { stdio: "pipe" });
     const m = JSON.parse(readFileSync(out, "utf8"));
     assert.equal(m.version, "1.2.3");
-    assert.equal(m.platforms["darwin-aarch64"].signature, "sig-arm64");
+    assert.equal(m.platforms["darwin-aarch64"].signature, fakeSig("1.2.3").trim());
     assert.match(m.platforms["windows-x86_64"].url, /sMind_1\.2\.3_x64-setup\.exe$/);
 
     // Missing sig: non-zero exit, no output file.
@@ -184,6 +198,140 @@ test("latest-json-asset-version-mismatch-fails", () => {
     assert.notEqual(r.status, 0);
     assert.match(r.stderr.toString(), /does not contain the requested version "1\.2\.4"/);
     assert.ok(!existsSync(out), "no output file on version mismatch");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("latest-json-refuses-a-signature-without-a-signed-version", () => {
+  const f = files();
+  f["windows-x86_64"].signature = fakeSig(null);
+  assert.throws(
+    () => buildLatestJson({ ...base, files: f }),
+    (err) => err.message.includes("windows-x86_64") && err.message.includes("signed version")
+  );
+});
+
+test("latest-json-refuses-a-signed-version-that-differs", () => {
+  const f = files();
+  f["darwin-x86_64"].signature = fakeSig("1.2.2");
+  assert.throws(
+    () => buildLatestJson({ ...base, files: f }),
+    (err) => err.message.includes("darwin-x86_64") && err.message.includes("1.2.2") && err.message.includes("1.2.3")
+  );
+});
+
+test("latest-json-accepts-v-prefixed-signed-version", () => {
+  const f = files();
+  f["darwin-aarch64"].signature = fakeSig("v1.2.3");
+  const m = buildLatestJson({ ...base, files: f });
+  assert.equal(m.platforms["darwin-aarch64"].signature, fakeSig("v1.2.3").trim());
+});
+
+test("latest-json-refuses-an-undecodable-signature", () => {
+  const f = files();
+  f["darwin-aarch64"].signature = "!!!not-base64!!!";
+  assert.throws(
+    () => buildLatestJson({ ...base, files: f }),
+    (err) => err.message.includes("darwin-aarch64") && err.message.includes("base64")
+  );
+});
+
+test("latest-json-refuses-a-signature-without-a-trusted-comment", () => {
+  const f = files();
+  f["windows-x86_64"].signature =
+    Buffer.from("untrusted comment: x\nRWQ" + "A".repeat(20) + "\n").toString("base64") + "\n";
+  assert.throws(
+    () => buildLatestJson({ ...base, files: f }),
+    (err) => err.message.includes("windows-x86_64") && err.message.includes("trusted comment")
+  );
+});
+
+// the updater plugin reads exactly line 3, `trusted comment: `, tab-split, untrimmed: a signature it
+// would not read a version from must not pass here either
+function rawSig(lines) {
+  return Buffer.from(lines.join("\n")).toString("base64") + "\n";
+}
+
+test("latest-json-refuses-a-version-field-the-plugin-would-not-read", () => {
+  for (const comment of [
+    "trusted comment: timestamp:1\tfile:f\t version:1.2.3", // leading space: the plugin does not trim
+    "trusted comment:timestamp:1\tfile:f\tversion:1.2.3", // no space after the colon
+    "trusted comment: timestamp:1\tfile:f\tx-version:1.2.3",
+  ]) {
+    const f = files();
+    f["darwin-aarch64"].signature = rawSig(["untrusted comment: x", "RWQAAAA", comment, "GLOBAL", ""]);
+    assert.throws(() => buildLatestJson({ ...base, files: f }), /darwin-aarch64/, comment);
+  }
+});
+
+test("latest-json-reads-only-the-third-line", () => {
+  const f = files();
+  // a trusted-comment-looking line BEFORE the real third line (which is versionless): a reader that
+  // takes the first such line instead of line 3 would accept this
+  f["darwin-aarch64"].signature = rawSig([
+    "untrusted comment: x",
+    "trusted comment: timestamp:1\tversion:1.2.3",
+    "trusted comment: timestamp:1\tfile:f",
+    "GLOBAL",
+    "",
+  ]);
+  assert.throws(() => buildLatestJson({ ...base, files: f }), /signed version/);
+});
+
+// the updater plugin reads lines with Rust str::lines(), which strips \r
+test("latest-json-accepts-a-crlf-signature", () => {
+  const f = files();
+  const crlf = Buffer.from(Buffer.from(fakeSig("1.2.3").trim(), "base64").toString("utf8").replaceAll("\n", "\r\n")).toString("base64");
+  f["darwin-aarch64"].signature = crlf + "\n";
+  assert.doesNotThrow(() => buildLatestJson({ ...base, files: f }));
+});
+
+// trim_start_matches('v') strips EVERY leading v
+test("latest-json-accepts-a-vv-prefixed-signed-version", () => {
+  const f = files();
+  f["darwin-aarch64"].signature = fakeSig("vvv1.2.3"); // three: normalizeVersion strips one itself
+  assert.doesNotThrow(() => buildLatestJson({ ...base, files: f }));
+});
+
+// The real v0.20.0 updater signatures (public release assets, committed under scripts/testdata/
+// real-v0.20.0/ so the claim "every release carries its signed version" is reproducible here).
+test("latest-json-real-v0.20.0-signatures-are-accepted", () => {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "../../scripts/testdata/real-v0.20.0");
+  const sig = (n) => readFileSync(join(dir, n), "utf8");
+  const m = buildLatestJson({
+    version: "0.20.0",
+    tag: "v0.20.0",
+    repo: "spacingmind/smind",
+    notes: "",
+    pubDate: "2026-11-14T00:00:00Z",
+    files: {
+      "darwin-aarch64": { asset: "smind-desktop-0.20.0-macos-arm64.app.tar.gz", signature: sig("smind-desktop-0.20.0-macos-arm64.app.tar.gz.sig") },
+      "darwin-x86_64": { asset: "smind-desktop-0.20.0-macos-x86_64.app.tar.gz", signature: sig("smind-desktop-0.20.0-macos-x86_64.app.tar.gz.sig") },
+      "windows-x86_64": { asset: "sMind_0.20.0_x64-setup.exe", signature: sig("sMind_0.20.0_x64-setup.exe.sig") },
+    },
+  });
+  assert.equal(m.version, "0.20.0");
+  // the same files against the wrong manifest version are refused
+  assert.throws(() => buildLatestJson({ ...base, version: "0.20.1", tag: "v0.20.1", files: { "darwin-aarch64": { asset: "x.app.tar.gz", signature: sig("smind-desktop-0.20.0-macos-arm64.app.tar.gz.sig") }, "darwin-x86_64": { asset: "y", signature: sig("smind-desktop-0.20.0-macos-x86_64.app.tar.gz.sig") }, "windows-x86_64": { asset: "z", signature: sig("sMind_0.20.0_x64-setup.exe.sig") } } }), /signed for version "0\.20\.0"/);
+});
+
+test("latest-json-cli-refuses-and-writes-nothing-for-a-versionless-signature", () => {
+  const dir = fixtureDir();
+  try {
+    writeFileSync(join(dir, "smind-desktop-1.2.3-macos-arm64.app.tar.gz.sig"), fakeSig(null));
+    const out = join(dir, "latest.json");
+    const r = spawnSync(process.execPath, [
+      cli,
+      "--dir", dir,
+      "--version", "1.2.3",
+      "--tag", "v1.2.3",
+      "--repo", "spacingmind/smind",
+      "--out", out,
+    ]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr.toString(), /signed version/);
+    assert.ok(!existsSync(out), "no output file for a versionless signature");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
