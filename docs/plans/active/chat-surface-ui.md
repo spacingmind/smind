@@ -82,7 +82,7 @@ The composer is shared with the mobile web target through the same chips in some
 - [x] spec (this file)
 - [x] decisions answered by the Human (2026-11-15: all 11 as recommended)
 - [x] E-a: status line under the composer (GLM peer 649), chip state text / 28 px / 13 px / 896 px column (GLM peer 650), finished-run tool-row folding (Lead); one PR from `smind/dtui-e-a-chat-surface`
-- [ ] E-b
+- [ ] E-b (started 2026-11-15, `smind/dtui-e-b-model-picker`). Design: the rail exists on the DESKTOP popover only (the mobile sheet keeps its root list and drill-down unchanged), when more than one provider is visible; there the root list and the Back button are gone (the rail replaces them), the right column is the selected provider's models, and typing searches ALL providers (the search results view) while the rail keeps its selection; ArrowLeft or Backspace on an empty search moves focus to the rail, ArrowUp/Down inside the rail select the neighbour, Tab goes rail -> search -> list; a provider without a ready account stays in the rail with a warning dot, its reason in the accessible name and tooltip, and its view shows the reason; the popover is 25 rem wide and capped at 400 px so a pending card stays partly visible. Also folded in: the header detail control reads "Detail: Auto" with a chevron (the transcript detail level), not a bare "Auto". Staffing: a GLM peer writes the rail component and the header label; the Lead integrates the rail into the picker and its tests.
 - [ ] E-c
 
 ## Validation
