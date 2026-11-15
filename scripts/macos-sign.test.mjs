@@ -400,3 +400,149 @@ test("sign-cleans-up-on-notarization-failure", () => {
     assertCleanedUp(h);
   });
 });
+
+// --- signing order and flags (AC3) ---------------------------------------------------------------------
+
+const signCalls = (h) => toolLines(h.log(), "codesign").filter((f) => f.includes("--sign"));
+
+test("sign-nested-code-before-app", () => {
+  withHarness({}, (h) => {
+    const { r } = runSign(h);
+    assert.equal(r.status, 0, r.stderr);
+    const calls = signCalls(h);
+    const nested = calls.findIndex((f) => f[f.length - 1].endsWith("/Contents/MacOS/smind"));
+    const app = calls.findIndex((f) => f[f.length - 1].endsWith(".app"));
+    assert.ok(nested !== -1, "the sidecar was not signed");
+    assert.ok(app !== -1, "the app bundle was not signed");
+    assert.ok(nested < app, `sidecar signed after the app:\n${calls.map(flat).join("\n")}`);
+  });
+});
+
+test("sign-every-codesign-has-runtime-and-timestamp", () => {
+  withHarness({}, (h) => {
+    const dmg = join(h.tmp, "out", "sMind.dmg");
+    const { r } = runSign(h, ["--dmg", dmg]);
+    assert.equal(r.status, 0, r.stderr);
+    const calls = signCalls(h);
+    assert.ok(calls.length >= 3, calls.map(flat).join("\n"));
+    for (const f of calls) {
+      assert.ok(f.includes("--timestamp"), `no --timestamp: ${flat(f)}`);
+      if (f[f.length - 1].endsWith(".dmg")) continue;
+      assert.ok(f.includes("--options") && f.includes("runtime"), `no hardened runtime: ${flat(f)}`);
+    }
+  });
+});
+
+test("sign-never-deep", () => {
+  withHarness({}, (h) => {
+    const { r } = runSign(h, ["--dmg", join(h.tmp, "out", "sMind.dmg"), "--updater-tarball", join(h.tmp, "out", "sMind.app.tar.gz")]);
+    assert.equal(r.status, 0, r.stderr);
+    const deep = toolLines(h.log(), "codesign").filter((f) => f.includes("--deep"));
+    assert.deepEqual(deep, [], `codesign used --deep:\n${deep.map(flat).join("\n")}`);
+  });
+});
+
+test("sign-passes-the-entitlements", () => {
+  withHarness({}, (h) => {
+    const { r } = runSign(h);
+    assert.equal(r.status, 0, r.stderr);
+    const entOf = (f) => {
+      const i = f.indexOf("--entitlements");
+      return i === -1 ? null : f[i + 1];
+    };
+    const sidecar = signCalls(h).find((f) => f[f.length - 1].endsWith("/Contents/MacOS/smind"));
+    const app = signCalls(h).find((f) => f[f.length - 1].endsWith(".app"));
+    assert.ok(sidecar && entOf(sidecar)?.endsWith("sidecar.entitlements"), flat(sidecar ?? []));
+    assert.ok(app && entOf(app)?.endsWith("app.entitlements"), flat(app ?? []));
+  });
+});
+
+// --- notarization (AC4) --------------------------------------------------------------------------------
+
+test("sign-notarization-not-accepted-fails-and-fetches-log", () => {
+  withHarness({ knobs: { FAKE_NOTARY_STATUS: "Invalid" } }, (h) => {
+    const { out, r } = runSign(h);
+    assert.notEqual(r.status, 0, "a non-Accepted notarization must fail the script");
+    assert.ok((r.stdout + r.stderr).includes("Invalid"), r.stdout + r.stderr);
+    assert.ok(
+      toolLines(h.log(), "xcrun").some((f) => f.includes("notarytool") && f.includes("log") && f.includes("sub-123")),
+      "the notarization log was not fetched",
+    );
+    assert.ok(existsSync(join(out, "notarization-log-app.json")), "notarization-log-app.json missing");
+  });
+});
+
+test("sign-staples-only-after-accepted", () => {
+  withHarness({}, (h) => {
+    const { r } = runSign(h);
+    assert.equal(r.status, 0, r.stderr);
+    const lines = h.log();
+    const submit = lines.findIndex((f) => f[0] === "xcrun" && f.includes("notarytool") && f.includes("submit"));
+    const staple = lines.findIndex((f) => f[0] === "xcrun" && f.includes("stapler"));
+    assert.ok(submit !== -1, "no notarization submit");
+    assert.ok(staple !== -1, "no stapler call");
+    assert.ok(submit < staple, "stapled before notarization was accepted");
+  });
+  withHarness({ knobs: { FAKE_NOTARY_STATUS: "Invalid" } }, (h) => {
+    const { r } = runSign(h);
+    assert.notEqual(r.status, 0);
+    assert.deepEqual(toolLines(h.log(), "xcrun").filter((f) => f.includes("stapler")), [], "stapled despite rejection");
+  });
+});
+
+test("sign-key-by-file-path", () => {
+  withHarness({}, (h) => {
+    const { r } = runSign(h);
+    assert.equal(r.status, 0, r.stderr);
+    const submit = toolLines(h.log(), "xcrun").find((f) => f.includes("notarytool") && f.includes("submit"));
+    assert.ok(submit, "no notarytool submit");
+    const i = submit.indexOf("--key");
+    assert.ok(i !== -1, flat(submit));
+    const keyPath = submit[i + 1];
+    assert.ok(keyPath.includes("AuthKey.p8"), `key not passed by file path: ${keyPath}`);
+    for (const v of SECRET_VALUES) assert.ok(!keyPath.includes(v), "key bytes on the command line");
+    for (const flag of ["--key-id", "--issuer", "--wait"]) {
+      assert.ok(submit.includes(flag), `${flag} missing: ${flat(submit)}`);
+    }
+  });
+});
+
+test("sign-dmg-is-signed-notarized-stapled", () => {
+  withHarness({}, (h) => {
+    const dmg = join(h.tmp, "out", "sMind.dmg");
+    const { r } = runSign(h, ["--dmg", dmg]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(existsSync(dmg), "no dmg was produced");
+    const lines = h.log();
+    assert.ok(toolLines(lines, "hdiutil").some((f) => f.includes("create")), "no hdiutil create");
+    assert.ok(signCalls(h).some((f) => f[f.length - 1] === dmg), "the dmg was not signed");
+    const submits = toolLines(lines, "xcrun").filter((f) => f.includes("notarytool") && f.includes("submit"));
+    assert.equal(submits.length, 2, `expected app+dmg submissions:\n${submits.map(flat).join("\n")}`);
+    assert.ok(
+      toolLines(lines, "xcrun").some((f) => f.includes("stapler") && f.includes("staple") && f[f.length - 1] === dmg),
+      "the dmg was not stapled",
+    );
+  });
+});
+
+test("sign-updater-tarball-warns-to-resign", () => {
+  withHarness({}, (h) => {
+    const tb = join(h.tmp, "out", "sMind.app.tar.gz");
+    const { r } = runSign(h, ["--updater-tarball", tb]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(existsSync(tb), "no updater tarball was produced");
+    assert.ok(r.stdout.includes("re-sign"), r.stdout);
+    assert.ok(r.stdout.includes("updater key"), r.stdout);
+  });
+});
+
+test("sign-rejects-app-that-is-a-link", () => {
+  withHarness({}, (h) => {
+    const app = makeApp(h.tmp);
+    const link = join(h.tmp, "link.app");
+    symlinkSync(app, link);
+    const r = h.run(SIGN, ["--app", link, "--out", join(h.tmp, "out")]);
+    assert.notEqual(r.status, 0, "a symlinked --app must be rejected");
+    assert.deepEqual(toolLines(h.log(), "codesign"), [], "a link was signed");
+  });
+});
