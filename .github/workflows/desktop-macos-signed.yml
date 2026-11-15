@@ -1,0 +1,168 @@
+# DISABLED SKELETON (docs/plans/active/desktop-notarization-prep.md, ADR-0060 draft). It does
+# nothing until the Human has an Apple Developer account, has added the six SMIND_* secrets to the
+# protected Environment `macos-signing`, and has set the repository variable
+# MACOS_SIGNING_ENABLED to `true`. Without the variable the `gate` job says why and the signing job is
+# skipped; without a secret, sign-notarize.sh refuses and names the variable.
+#
+# What it does when enabled: takes the already-published, ad-hoc-signed macOS app of a release tag,
+# signs it with the Developer ID certificate (hardened runtime, committed entitlements, the Go
+# sidecar first), notarizes it, staples it, verifies the result with scripts/macos-sign/verify.sh,
+# and uploads the verified app, dmg and updater tarball as WORKFLOW ARTIFACTS ONLY. It publishes
+# nothing and does not touch the release; the tarball must still be re-signed with the updater key
+# and attached by hand until the Human decides how this joins the release workflow (ADR-0060,
+# decision 1). Release wiring is deliberately not part of this file.
+#
+# The Environment `macos-signing` MUST restrict deployment to the protected branch(es) the workflow is
+# released from and require a reviewer: a dispatch runs the workflow file and scripts/macos-sign/*.sh
+# of the dispatched ref, so without that policy anyone with write access could dispatch a branch whose
+# script prints the secrets (docs/desktop-macos-signing.md, ADR-0060 decision 6).
+#
+# Secret handling: dispatch only (a workflow_dispatch needs write access, so no secret ever reaches
+# a pull request or a fork); `contents: read`; the secrets are exposed only as `env:` of the one step
+# that needs them, never interpolated into a script; a protected Environment adds a human approval
+# and a branch policy.
+name: desktop-macos-signed
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose macOS app to sign and notarize (for example v0.21.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-macos-signed
+  cancel-in-progress: false
+
+jobs:
+  # The master switch. This job has no environment, so it can read the repository variable but NOT
+  # the Environment's secrets: whether all six secrets exist is checked inside the signing job by
+  # scripts/macos-sign/sign-notarize.sh, which refuses (exit 3) naming any missing variable.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          SWITCH: ${{ vars.MACOS_SIGNING_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$SWITCH" != "true" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::macOS signing is off: the repository variable MACOS_SIGNING_ENABLED is not 'true'"
+            exit 0
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+  sign:
+    needs: gate
+    # develop only: the Environment's deployment-branch policy is what really enforces this (a branch
+    # can edit this file); the condition keeps an accidental dispatch from another ref cheap.
+    if: needs.gate.outputs.enabled == 'true' && github.ref == 'refs/heads/develop'
+    runs-on: macos-latest
+    environment: macos-signing
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    steps:
+      # Full history and tags: the release's tag must be shown to sit on develop.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # The baseline for the next reviewer of the Environment: what this run's scripts and workflow were.
+      - name: Record the dispatched commit
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "Signing run from commit $SHA. A reviewer approving the next run diffs the dispatched commit against the last APPROVED one: git diff <that sha> <new sha> -- .github/workflows scripts/macos-sign desktop/src-tauri/entitlements" >> "$GITHUB_STEP_SUMMARY"
+
+      # Everything from here to the signing step runs WITHOUT any secret in its environment. A release
+      # is only signed if it is a real published release of ours: not a draft, not a prerelease, its tag
+      # on develop, and (below) its app tarball listed in a checksums.txt that carries OUR signature.
+      - name: Check the release is a published stable release on develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          scripts/macos-sign/check-release.sh --tag "$TAG" --repo "$REPO"
+
+      - name: Download the release's macOS app and its signed checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          ARCH: ${{ matrix.arch }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p work/in work/out
+          gh release download "$TAG" --repo "$REPO" --dir work/in \
+            --pattern "smind-desktop-*-macos-${ARCH}.app.tar.gz" \
+            --pattern checksums.txt --pattern checksums.txt.minisig
+          n="$(find work/in -maxdepth 1 -name '*.app.tar.gz' | wc -l)"
+          [ "$n" -eq 1 ] || { echo "::error::expected exactly one app tarball, found $n"; exit 1; }
+          asset="$(basename "$(find work/in -maxdepth 1 -name '*.app.tar.gz')")"
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      - name: Prove the app is ours (signed checksums, no secrets here)
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          node scripts/macos-sign/provenance.mjs --dir work/in --asset "$ASSET" --tag "$TAG"
+
+      - name: Unpack the proven app
+        run: |
+          set -euo pipefail
+          tar -xzf "work/in/$ASSET" -C work/in
+          test -d work/in/sMind.app
+
+      # The ONLY step that sees the secrets, and only as environment variables.
+      - name: Sign, notarize and staple
+        env:
+          SMIND_MACOS_CERT_P12_BASE64: ${{ secrets.SMIND_MACOS_CERT_P12_BASE64 }}
+          SMIND_MACOS_CERT_PASSWORD: ${{ secrets.SMIND_MACOS_CERT_PASSWORD }}
+          SMIND_MACOS_SIGN_IDENTITY: ${{ secrets.SMIND_MACOS_SIGN_IDENTITY }}
+          SMIND_NOTARY_KEY_P8_BASE64: ${{ secrets.SMIND_NOTARY_KEY_P8_BASE64 }}
+          SMIND_NOTARY_KEY_ID: ${{ secrets.SMIND_NOTARY_KEY_ID }}
+          SMIND_NOTARY_ISSUER: ${{ secrets.SMIND_NOTARY_ISSUER }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          scripts/macos-sign/sign-notarize.sh \
+            --app work/in/sMind.app \
+            --out work/out \
+            --dmg "work/out/smind-desktop-signed-macos-${ARCH}.dmg" \
+            --updater-tarball "work/out/smind-desktop-signed-macos-${ARCH}.app.tar.gz"
+
+      - name: Verify the signed result
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          scripts/macos-sign/verify.sh --app work/in/sMind.app \
+            --dmg "work/out/smind-desktop-signed-macos-${ARCH}.dmg"
+
+      # Artifacts of this run only: nothing is attached to the release (see the header).
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smind-desktop-signed-macos-${{ matrix.arch }}
+          path: |
+            work/out/*.dmg
+            work/out/*.app.tar.gz
+            work/out/notarization-log-*.json
+          if-no-files-found: error
+          retention-days: 7
