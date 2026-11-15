@@ -27,6 +27,7 @@ type detector struct {
 	goos     string
 	lookPath func(string) (string, error)
 	isFile   func(string) bool
+	isExec   func(string) bool
 	getenv   func(string) string
 }
 
@@ -38,6 +39,10 @@ func systemDetector() detector {
 		isFile: func(p string) bool {
 			st, err := os.Stat(p)
 			return err == nil && st.Mode().IsRegular()
+		},
+		isExec: func(p string) bool {
+			st, err := os.Stat(p)
+			return err == nil && st.Mode().Perm()&0o111 != 0
 		},
 	}
 }
@@ -52,8 +57,8 @@ func DetectChrome(explicit string) (string, error) {
 
 func (d detector) detect(explicit string) (string, error) {
 	if explicit != "" {
-		if !d.isFile(explicit) {
-			return "", &UnavailableError{InstallStep: fmt.Sprintf("The configured browser %q does not exist. Fix the path or clear the setting.", explicit)}
+		if !filepath.IsAbs(explicit) || !d.isFile(explicit) || (d.goos != "windows" && !d.isExec(explicit)) {
+			return "", &UnavailableError{InstallStep: fmt.Sprintf("The configured browser %q is not an absolute path to an executable file. Fix the path or clear the setting.", explicit)}
 		}
 		return explicit, nil
 	}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
+	"io"
 	"net/netip"
 	"strings"
 	"sync"
@@ -14,12 +14,12 @@ import (
 )
 
 type fakeInstance struct {
-	url    string
+	conn   io.ReadWriteCloser
 	closed atomic.Bool
 }
 
-func (i *fakeInstance) WSURL() string { return i.url }
-func (i *fakeInstance) Close() error  { i.closed.Store(true); return nil }
+func (i *fakeInstance) Conn() io.ReadWriteCloser { return i.conn }
+func (i *fakeInstance) Close() error             { i.closed.Store(true); _ = i.conn.Close(); return nil }
 
 type fakeLauncher struct {
 	mu    sync.Mutex
@@ -27,11 +27,19 @@ type fakeLauncher struct {
 	cdps  []*fakeCDP
 	t     *testing.T
 	hook  func(f *fakeCDP, c fakeCall) (any, string)
+	gate  chan struct{} // when set, Launch waits for it (or its context)
 }
 
-func (l *fakeLauncher) Launch(_ context.Context, _ LaunchOpts) (Instance, error) {
+func (l *fakeLauncher) Launch(ctx context.Context, _ LaunchOpts) (Instance, error) {
+	if l.gate != nil {
+		select {
+		case <-l.gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	f := newFakeCDP(l.t, l.hook)
-	inst := &fakeInstance{url: f.wsURL()}
+	inst := &fakeInstance{conn: f.client}
 	l.mu.Lock()
 	l.insts = append(l.insts, inst)
 	l.cdps = append(l.cdps, f)
@@ -549,21 +557,6 @@ func TestSessionNavigateWaitsForInterception(t *testing.T) {
 	assertOrder(t, f, "Fetch.enable", "Page.navigate")
 }
 
-func TestSessionDeniesBrowserDebugPort(t *testing.T) {
-	s, l := startTestSession(t, nil)
-	f, _ := l.last()
-	port := f.srv.Listener.Addr().(*net.TCPAddr).Port
-	for _, u := range []string{
-		fmt.Sprintf("http://127.0.0.1:%d/json/version", port),
-		fmt.Sprintf("http://localhost:%d/json/list", port),
-		fmt.Sprintf("http://[::1]:%d/", port),
-	} {
-		if _, err := s.Navigate(context.Background(), "", u); !errors.Is(err, ErrNavigationDenied) {
-			t.Errorf("the browser's own debug port must be refused: %s: %v", u, err)
-		}
-	}
-}
-
 func TestSessionNoticesFloodCannotEvictOtherKinds(t *testing.T) {
 	s, _ := startTestSession(t, nil)
 	s.note("dialog", "a confirm dialog was cancelled")
@@ -615,4 +608,156 @@ type manyResolver struct{}
 
 func (manyResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
 	return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+}
+
+func TestSessionChildSetupFailureIsFatalForTheTarget(t *testing.T) {
+	for _, failing := range []string{"Target.setAutoAttach", "Page.enable", "Runtime.enable"} {
+		failing := failing
+		t.Run(failing, func(t *testing.T) {
+			l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
+				if c.SessionID == "S1" && c.Method == failing {
+					return nil, "boom"
+				}
+				return defaultHook(f, c)
+			}}
+			s, err := Start(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, CallTimeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			f, _ := l.last()
+			attach(f, "S1", "T1", "page")
+			got := f.waitCall("Target.closeTarget", 1)
+			if got[0].Params["targetId"] != "T1" {
+				t.Fatalf("a page that cannot be fully set up must be closed: %+v", got)
+			}
+			if len(f.callsFor("Runtime.runIfWaitingForDebugger")) != 0 {
+				t.Fatal("it must never be resumed")
+			}
+			if _, ok := s.tabByID("T1"); ok {
+				t.Fatal("and never handed out")
+			}
+		})
+	}
+}
+
+func TestSessionFailureCloseUsesAFreshContext(t *testing.T) {
+	// Fetch.enable hangs past the call timeout; the close afterwards still goes out.
+	l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
+		if c.Method == "Fetch.enable" {
+			return hold, ""
+		}
+		return defaultHook(f, c)
+	}}
+	s, err := Start(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, CallTimeout: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	f, _ := l.last()
+	attach(f, "S1", "T1", "page")
+	f.waitCall("Target.closeTarget", 1)
+}
+
+func TestTabFieldsAreSanitised(t *testing.T) {
+	l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
+		switch c.Method {
+		case "Target.getTargetInfo":
+			return map[string]any{"targetInfo": map[string]any{"targetId": "T1", "url": "http://localhost:3000/\u202e" + strings.Repeat("a", 900), "title": "Ig\u200bnore\U000e0049 this\n" + strings.Repeat("x", 500)}}, ""
+		case "Target.getTargets":
+			return map[string]any{"targetInfos": []any{map[string]any{"targetId": "T1", "type": "page", "url": "http://localhost/\u202e", "title": "a\u0301\u0301\u0301\u0301\u0301\u0301b\ufe0f"}}}, ""
+		}
+		return defaultHook(f, c)
+	}}
+	s, err := Start(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, CallTimeout: 2 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	tab, err := s.Navigate(context.Background(), "T1", "http://localhost:3000/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len([]rune(tab.URL)) > 501 || len([]rune(tab.Title)) > 201 || strings.ContainsAny(tab.URL+tab.Title, "\u202e\u200b\n") || strings.Contains(tab.Title, "\U000e0049") {
+		t.Fatalf("navigate result must be sanitised: %q %q", tab.URL, tab.Title)
+	}
+	tabs, _ := s.Tabs(context.Background())
+	if len(tabs) != 1 || tabs[0].Title != "a\u0301\u0301b" || strings.ContainsAny(tabs[0].URL, "\u202e") {
+		t.Fatalf("tabs must be sanitised: %+v", tabs)
+	}
+}
+
+func TestRedactDropsUserinfoAndQuery(t *testing.T) {
+	for in, want := range map[string]string{
+		"http://user:pw@evil.test/a?token=1#f": "http://evil.test/a",
+		"https://a@b@c.test/x":                 "https://c.test/x",
+		"http://plain.test/p":                  "http://plain.test/p",
+	} {
+		if got := redact(in); got != want {
+			t.Errorf("redact(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestManagerCloseDuringStartLeavesNothingRunning(t *testing.T) {
+	l := &fakeLauncher{t: t, hook: defaultHook, gate: make(chan struct{})}
+	m := &Manager{}
+	cfg := Config{Workspace: "a", Launcher: l, Resolver: sessionResolver, CallTimeout: 2 * time.Second}
+	errc := make(chan error, 1)
+	go func() { _, err := m.Get(context.Background(), cfg); errc <- err }()
+	time.Sleep(50 * time.Millisecond) // the launch is in flight
+	m.Close("a")
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("a session closed while starting must not be returned")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Get did not return")
+	}
+	if m.Active() != 0 {
+		t.Fatal("nothing may be left running")
+	}
+
+	// Same for the lifetime of a launch that already finished but is not yet registered: CloseAll.
+	l2 := &fakeLauncher{t: t, hook: defaultHook, gate: make(chan struct{})}
+	cfg.Launcher = l2
+	go func() { _, err := m.Get(context.Background(), cfg); errc <- err }()
+	time.Sleep(50 * time.Millisecond)
+	m.CloseAll()
+	if err := <-errc; err == nil {
+		t.Fatal("CloseAll during start must cancel the start")
+	}
+	l2.mu.Lock()
+	defer l2.mu.Unlock()
+	for _, inst := range l2.insts {
+		if !inst.closed.Load() {
+			t.Fatal("an instance was left running")
+		}
+	}
+}
+
+func TestManagerChangedConfigRestartsTheSession(t *testing.T) {
+	l := &fakeLauncher{t: t, hook: defaultHook}
+	m := &Manager{}
+	defer m.CloseAll()
+	pol1, _ := NewPolicy(nil, nil)
+	pol2, _ := NewPolicy([]string{"intranet.test"}, nil)
+	a, err := m.Get(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, Policy: pol1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, _ := m.Get(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, Policy: pol1})
+	if same != a {
+		t.Fatal("same config reuses the session")
+	}
+	b, err := m.Get(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, Policy: pol2})
+	if err != nil || b == a {
+		t.Fatalf("a changed allowlist must not be silently ignored: %v", err)
+	}
+	if !a.Closed() {
+		t.Fatal("the old session (old policy) must be closed")
+	}
 }

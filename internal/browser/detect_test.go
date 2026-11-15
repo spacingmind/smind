@@ -10,6 +10,7 @@ func fakeDetector(goos string, files map[string]bool, path map[string]string) de
 	return detector{
 		goos:   goos,
 		isFile: func(p string) bool { return files[p] },
+		isExec: func(p string) bool { return !strings.HasSuffix(p, "/not-exec") },
 		lookPath: func(n string) (string, error) {
 			if p, ok := path[n]; ok {
 				return p, nil
@@ -27,15 +28,17 @@ func fakeDetector(goos string, files map[string]bool, path map[string]string) de
 
 func TestDetectChrome(t *testing.T) {
 	const mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-	d := fakeDetector("darwin", map[string]bool{mac: true, "/custom/chrome": true}, nil)
+	d := fakeDetector("darwin", map[string]bool{mac: true, "/custom/chrome": true, "/custom/not-exec": true}, nil)
 	if p, err := d.detect(""); err != nil || p != mac {
 		t.Fatalf("standard location: %q %v", p, err)
 	}
 	if p, err := d.detect("/custom/chrome"); err != nil || p != "/custom/chrome" {
 		t.Fatalf("explicit path: %q %v", p, err)
 	}
-	if _, err := d.detect("/missing/chrome"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("a bad explicit path must not fall back silently: %v", err)
+	for _, bad := range []string{"/missing/chrome", "chrome", "./chrome", "/custom/not-exec"} {
+		if _, err := d.detect(bad); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("explicit path %q must be refused, not fall back silently: %v", bad, err)
+		}
 	}
 	l := fakeDetector("linux", nil, map[string]string{"chromium-browser": "/opt/bin/chromium-browser"})
 	if p, err := l.detect(""); err != nil || p != "/opt/bin/chromium-browser" {

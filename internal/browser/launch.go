@@ -2,8 +2,8 @@ package browser
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,8 +28,9 @@ type LaunchOpts struct {
 
 // Instance is a running browser reachable over the DevTools protocol.
 type Instance interface {
-	// WSURL is the browser-level websocket endpoint.
-	WSURL() string
+	// Conn is the DevTools pipe pair: there is no TCP port for another local
+	// process to attach to.
+	Conn() io.ReadWriteCloser
 	// Close kills the whole browser process tree and removes an ephemeral
 	// profile. It is idempotent.
 	Close() error
@@ -60,11 +61,13 @@ func buildArgs(profileDir string, o LaunchOpts) ([]string, error) {
 	}
 	return []string{
 		"--headless=new",
-		"--remote-debugging-port=0",
+		"--remote-debugging-pipe",
 		"--user-data-dir=" + profileDir,
 		"--host-resolver-rules=" + strings.Join(rules, ", "),
 		"--js-flags=--max-old-space-size=" + strconv.Itoa(heap),
 		"--no-proxy-server",
+		"--use-mock-keychain",
+		"--password-store=basic",
 		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 		"--no-first-run",
 		"--no-default-browser-check",
@@ -85,50 +88,57 @@ type ChromeLauncher struct {
 }
 
 type chromeInstance struct {
-	wsURL      string
+	conn       io.ReadWriteCloser
 	cmd        *exec.Cmd
+	kill       func()
 	profileDir string
-	remove     bool
 	once       sync.Once
 	exited     chan struct{}
 }
 
-func (i *chromeInstance) WSURL() string { return i.wsURL }
+func (i *chromeInstance) Conn() io.ReadWriteCloser { return i.conn }
 
+// Close kills the whole process tree (always, even if the leader already
+// exited: its children may not have) and removes the profile. Idempotent.
 func (i *chromeInstance) Close() error {
 	i.once.Do(func() {
-		select {
-		case <-i.exited: // already gone and reaped: its pid may be reused
-		default:
-			killTree(i.cmd)
-		}
+		_ = i.conn.Close() // the browser also quits on EOF of its pipe
+		i.kill()
 		select {
 		case <-i.exited:
 		case <-time.After(5 * time.Second):
 		}
-		if i.remove {
-			for n := 0; n < 20; n++ { // files can stay busy for a moment after the kill
-				if err := os.RemoveAll(i.profileDir); err == nil {
-					break
-				}
-				time.Sleep(50 * time.Millisecond)
+		for n := 0; n < 20; n++ { // files can stay busy for a moment after the kill
+			if err := os.RemoveAll(i.profileDir); err == nil {
+				break
 			}
+			time.Sleep(50 * time.Millisecond)
 		}
 	})
 	return nil
 }
 
-// Launch starts the browser and waits for its DevToolsActivePort file.
+const ownerFile = ".smind-owner"
+
+var sweepOnce sync.Map // profile root -> *sync.Once
+
+// Launch starts the browser. Readiness is the first protocol call: a browser
+// that dies early closes its pipe and that call fails.
 func (l ChromeLauncher) Launch(ctx context.Context, o LaunchOpts) (Instance, error) {
 	if l.Path == "" {
 		return nil, &UnavailableError{InstallStep: installStep("")}
 	}
+	once, _ := sweepOnce.LoadOrStore(o.ProfileRoot, &sync.Once{})
+	once.(*sync.Once).Do(func() { SweepStaleProfiles(o.ProfileRoot) })
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// A fresh, private profile per session; it is removed on Close.
-	dir, err := os.MkdirTemp(o.ProfileRoot, "smind-browser-")
+	dir, err := os.MkdirTemp(o.ProfileRoot, profilePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("browser: profile dir: %w", err)
 	}
-	remove := true
+	_ = os.WriteFile(filepath.Join(dir, ownerFile), []byte(strconv.Itoa(os.Getpid())), 0o600)
 	args, err := buildArgs(dir, o)
 	if err != nil {
 		_ = os.RemoveAll(dir)
@@ -136,50 +146,39 @@ func (l ChromeLauncher) Launch(ctx context.Context, o LaunchOpts) (Instance, err
 	}
 	cmd := exec.Command(l.Path, args...)
 	cmd.Env = browserEnv(os.Environ())
-	configureProcess(cmd)
-	if err := cmd.Start(); err != nil {
-		if remove {
-			_ = os.RemoveAll(dir)
-		}
+	conn, kill, err := startBrowser(cmd)
+	if err != nil {
+		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("browser: start %s: %w", filepath.Base(l.Path), err)
 	}
-	inst := &chromeInstance{cmd: cmd, profileDir: dir, remove: remove, exited: make(chan struct{})}
+	inst := &chromeInstance{conn: conn, cmd: cmd, kill: kill, profileDir: dir, exited: make(chan struct{})}
 	go func() { _ = cmd.Wait(); close(inst.exited) }()
-
-	ws, err := waitDevToolsPort(ctx, dir, inst.exited)
-	if err != nil {
-		_ = inst.Close()
-		return nil, err
-	}
-	inst.wsURL = ws
 	return inst, nil
 }
 
-func waitDevToolsPort(ctx context.Context, dir string, exited <-chan struct{}) (string, error) {
-	deadline := time.NewTimer(20 * time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(50 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		if b, err := os.ReadFile(filepath.Join(dir, "DevToolsActivePort")); err == nil {
-			lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-			if len(lines) >= 2 {
-				port, perr := strconv.Atoi(strings.TrimSpace(lines[0]))
-				path := strings.TrimSpace(lines[1])
-				if perr == nil && port > 0 && strings.HasPrefix(path, "/devtools/") {
-					return fmt.Sprintf("ws://127.0.0.1:%d%s", port, path), nil
-				}
-			}
+const profilePrefix = "smind-browser-"
+
+// SweepStaleProfiles removes profile directories left by a daemon that died
+// without closing its sessions: those whose owner process is gone.
+func SweepStaleProfiles(root string) {
+	if root == "" {
+		root = os.TempDir()
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), profilePrefix) {
+			continue
 		}
-		select {
-		case <-exited:
-			return "", errors.New("browser: the browser exited before it was ready")
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-deadline.C:
-			return "", errors.New("browser: the browser did not become ready in 20 seconds")
-		case <-tick.C:
+		dir := filepath.Join(root, e.Name())
+		b, err := os.ReadFile(filepath.Join(dir, ownerFile))
+		pid, perr := strconv.Atoi(strings.TrimSpace(string(b)))
+		if err == nil && perr == nil && (pid == os.Getpid() || processAlive(pid)) {
+			continue
 		}
+		_ = os.RemoveAll(dir)
 	}
 }
 

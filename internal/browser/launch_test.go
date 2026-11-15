@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -19,7 +20,9 @@ func TestLauncherArgs(t *testing.T) {
 	joined := strings.Join(args, "\n")
 	for _, want := range []string{
 		"--headless=new",
-		"--remote-debugging-port=0",
+		"--remote-debugging-pipe",
+		"--use-mock-keychain",
+		"--password-store=basic",
 		"--user-data-dir=/p/profile",
 		"--js-flags=--max-old-space-size=256",
 		"--no-proxy-server",
@@ -43,7 +46,7 @@ func TestLauncherArgs(t *testing.T) {
 			t.Errorf("rules %q miss %q", rules, ex)
 		}
 	}
-	for _, bad := range []string{"--no-sandbox", "--remote-allow-origins", "--disable-web-security", "--remote-debugging-address", "--allow-file-access"} {
+	for _, bad := range []string{"--no-sandbox", "--remote-allow-origins", "--disable-web-security", "--remote-debugging-address", "--remote-debugging-port", "--allow-file-access"} {
 		if strings.Contains(joined, bad) {
 			t.Errorf("argument %s must never be used", bad)
 		}
@@ -54,9 +57,11 @@ func TestLauncherArgs(t *testing.T) {
 	}
 }
 
-// fakeChrome writes a script that behaves like a browser for the launcher: it
-// publishes DevToolsActivePort in its user-data-dir and records its pid.
-func fakeChrome(t *testing.T, root string, ready bool) string {
+// fakeChrome writes a script that behaves like a browser for the launcher.
+// echo: it copies fd 3 (what the browser reads) to fd 4 (what it writes),
+// proving the pipe wiring; otherwise it ignores its pipe and sleeps. Either
+// way it records its pid next to the profile dir.
+func fakeChrome(t *testing.T, root string, echo bool) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fake browser")
@@ -65,10 +70,11 @@ func fakeChrome(t *testing.T, root string, ready bool) string {
 for a in "$@"; do case "$a" in --user-data-dir=*) d="${a#--user-data-dir=}";; esac; done
 echo $$ > "$d.pid"
 `
-	if ready {
-		body += "printf '12345\\n/devtools/browser/abc\\n' > \"$d/DevToolsActivePort\"\n"
+	if echo {
+		body += "cat <&3 >&4\n"
+	} else {
+		body += "sleep 60\n"
 	}
-	body += "sleep 60\n"
 	p := filepath.Join(root, "fake-chrome")
 	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
@@ -76,32 +82,62 @@ echo $$ > "$d.pid"
 	return p
 }
 
-func TestLauncherReadsDevToolsActivePort(t *testing.T) {
+func profileAndPid(t *testing.T, profiles string) (dir string, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		entries, _ := filepath.Glob(filepath.Join(profiles, "smind-browser-*"))
+		dir, pid = "", 0
+		for _, e := range entries {
+			if strings.HasSuffix(e, ".pid") {
+				b, _ := os.ReadFile(e)
+				pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+			} else {
+				dir = e
+			}
+		}
+		if dir != "" && pid != 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("no profile dir and pid file in %s", profiles)
+	return
+}
+
+func TestLauncherPipeRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	script := fakeChrome(t, root, true)
 	profiles := filepath.Join(root, "profiles")
 	_ = os.Mkdir(profiles, 0o700)
-	inst, err := ChromeLauncher{Path: script}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles})
+	inst, err := ChromeLauncher{Path: fakeChrome(t, root, true)}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inst.WSURL() != "ws://127.0.0.1:12345/devtools/browser/abc" {
-		t.Fatalf("ws url %q", inst.WSURL())
+	defer inst.Close()
+	dir, _ := profileAndPid(t, profiles)
+	if _, err := os.Stat(filepath.Join(dir, "DevToolsActivePort")); !os.IsNotExist(err) {
+		t.Fatal("there must be no DevToolsActivePort: nothing listens")
 	}
-	entries, _ := filepath.Glob(filepath.Join(profiles, "smind-browser-*"))
-	var dir, pidFile string
-	for _, e := range entries {
-		if strings.HasSuffix(e, ".pid") {
-			pidFile = e
-		} else {
-			dir = e
-		}
+	conn := inst.Conn()
+	if _, err := conn.Write([]byte("{\"id\":1,\"result\":{}}\x00")); err != nil {
+		t.Fatal(err)
 	}
-	if dir == "" || pidFile == "" {
-		t.Fatalf("expected a profile dir and a pid file, got %v", entries)
+	buf := make([]byte, 64)
+	n, err := conn.Read(buf)
+	if err != nil || string(buf[:n]) != "{\"id\":1,\"result\":{}}\x00" {
+		t.Fatalf("round trip over fd 3/4: %q %v", buf[:n], err)
 	}
-	b, _ := os.ReadFile(pidFile)
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+}
+
+func TestLauncherCloseKillsTreeAndRemovesProfile(t *testing.T) {
+	root := t.TempDir()
+	profiles := filepath.Join(root, "profiles")
+	_ = os.Mkdir(profiles, 0o700)
+	inst, err := ChromeLauncher{Path: fakeChrome(t, root, false)}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, pid := profileAndPid(t, profiles)
 	if err := inst.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -118,27 +154,70 @@ func TestLauncherReadsDevToolsActivePort(t *testing.T) {
 	_ = inst.Close() // idempotent
 }
 
-func TestLauncherFailsWhenBrowserNeverReady(t *testing.T) {
+func TestLauncherKillsTheGroupEvenAfterTheLeaderExited(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups")
+	}
 	root := t.TempDir()
-	script := fakeChrome(t, root, false)
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
 	profiles := filepath.Join(root, "profiles")
 	_ = os.Mkdir(profiles, 0o700)
-	if _, err := (ChromeLauncher{Path: script}).Launch(ctx, LaunchOpts{ProfileRoot: profiles}); err == nil {
-		t.Fatal("want an error when the endpoint never appears")
+	// The leader exits at once but leaves a grandchild (a renderer) behind.
+	script := filepath.Join(root, "leaves-a-child")
+	body := "#!/bin/sh\nfor a in \"$@\"; do case \"$a\" in --user-data-dir=*) d=\"${a#--user-data-dir=}\";; esac; done\nsleep 60 &\necho $! > \"$d.pid\"\nexit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	left, _ := filepath.Glob(filepath.Join(profiles, "smind-browser-*"))
-	for _, l := range left {
-		if !strings.HasSuffix(l, ".pid") {
-			t.Fatalf("a failed launch must not leave a profile dir: %v", left)
-		}
+	inst, err := ChromeLauncher{Path: script}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, child := profileAndPid(t, profiles)
+	select {
+	case <-inst.(*chromeInstance).exited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the leader should have exited")
+	}
+	if !processAlive(child) {
+		t.Fatal("test setup: the grandchild must be alive")
+	}
+	_ = inst.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for processAlive(child) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if processAlive(child) {
+		t.Fatal("Close must kill the process group after the leader exited")
 	}
 }
 
-func TestLauncherWithoutPathIsUnavailable(t *testing.T) {
-	if _, err := (ChromeLauncher{}).Launch(context.Background(), LaunchOpts{}); err == nil {
-		t.Fatal("no path must fail")
+func TestSweepStaleProfiles(t *testing.T) {
+	root := t.TempDir()
+	dead := exec.Command("true")
+	_ = dead.Run()
+	deadPid := dead.Process.Pid
+	mk := func(name, owner string) string {
+		d := filepath.Join(root, name)
+		_ = os.Mkdir(d, 0o700)
+		if owner != "" {
+			_ = os.WriteFile(filepath.Join(d, ownerFile), []byte(owner), 0o600)
+		}
+		return d
+	}
+	stale := mk("smind-browser-stale", strconv.Itoa(deadPid))
+	noOwner := mk("smind-browser-noowner", "")
+	garbage := mk("smind-browser-garbage", "nope")
+	live := mk("smind-browser-live", strconv.Itoa(os.Getpid()))
+	other := mk("unrelated", strconv.Itoa(deadPid))
+	SweepStaleProfiles(root)
+	for _, gone := range []string{stale, noOwner, garbage} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("%s must be swept", gone)
+		}
+	}
+	for _, kept := range []string{live, other} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s must be kept", kept)
+		}
 	}
 }
 

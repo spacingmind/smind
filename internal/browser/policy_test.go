@@ -23,7 +23,7 @@ func testPolicy(t *testing.T, allow ...string) Policy {
 }
 
 func TestCheckURLTable(t *testing.T) {
-	p := testPolicy(t, "10.0.0.5", "intranet.test", "169.254.169.254", "8.8.8.8")
+	p := testPolicy(t, "10.0.0.5", "intranet.test", "8.8.8.8")
 	cases := []struct {
 		url   string
 		allow bool
@@ -109,8 +109,8 @@ func TestCheckURLTable(t *testing.T) {
 		{"http://10.0.0.5:3000/", true},
 		{"http://intranet.test/", true},
 		{"http://INTRANET.test./", true},
-		{"http://sub.intranet.test/", false},              // exact only, no subdomain
-		{"http://169.254.169.254/latest/meta-data", true}, // typed exactly by the person
+		{"http://sub.intranet.test/", false},               // exact only, no subdomain
+		{"http://169.254.169.254/latest/meta-data", false}, // metadata can never be allowlisted
 		{"http://8.8.8.8/", true},
 		// the daemon, the proxy, other daemons: never, whatever the allowlist
 		{"http://127.0.0.1:4648/api/token", false},
@@ -234,7 +234,7 @@ func TestNormalizeAllowHost(t *testing.T) {
 			t.Errorf("NormalizeAllowHost(%q) = %q, want an error", bad, got)
 		}
 	}
-	for _, bad := range []string{"0.0.0.0", "[::]", "224.0.0.1"} {
+	for _, bad := range []string{"0.0.0.0", "[::]", "224.0.0.1", "169.254.169.254", "169.254.1.1", "fe80::1", "[fe80::1]", "100.100.100.200", "fd00:ec2::254", "169.254.170.2", "192.0.0.192"} {
 		if got, err := NormalizeAllowHost(bad); err == nil {
 			t.Errorf("NormalizeAllowHost(%q) = %q: unusable addresses must be rejected", bad, got)
 		}
@@ -250,5 +250,27 @@ func TestDenyAppliesToUnspecifiedHost(t *testing.T) {
 	d := p.denied(parsedHost{canon: "0.0.0.0", ip: netip.MustParseAddr("0.0.0.0")}, 4648)
 	if !d {
 		t.Fatal("0.0.0.0:4648 must count as the daemon")
+	}
+}
+
+func TestDenyEntriesAreCanonicalised(t *testing.T) {
+	for _, host := range []string{"127.1", "0177.0.0.1", "0x7f.1", "2130706433", "[::ffff:7f00:1]", "::ffff:127.0.0.1", "LOCALHOST.", "127.0.0.1"} {
+		p, err := NewPolicy(nil, []Endpoint{{Host: host, Port: 4648}})
+		if err != nil {
+			t.Fatalf("%q: %v", host, err)
+		}
+		for _, u := range []string{"http://127.0.0.1:4648/", "http://localhost:4648/", "http://[::1]:4648/", "http://2130706433:4648/"} {
+			if p.CheckURL(u).Allowed {
+				t.Errorf("deny entry %q must deny %s", host, u)
+			}
+		}
+		if !p.CheckURL("http://127.0.0.1:4649/").Allowed {
+			t.Errorf("deny entry %q must not deny another port", host)
+		}
+	}
+	for _, bad := range []string{"a b", "fe80::1%eth0", "[::1", "1.2.3.4.5", "256.1.1.1", "%7f.1", ""} {
+		if _, err := NewPolicy(nil, []Endpoint{{Host: bad, Port: 80}}); err == nil {
+			t.Errorf("deny entry %q must be an error, never silently dropped or kept raw", bad)
+		}
 	}
 }

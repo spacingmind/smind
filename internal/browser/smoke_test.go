@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -92,6 +94,18 @@ console.log("loaded");
 		t.Fatal(err)
 	}
 	defer s.Close()
+
+	// Nothing may listen: no DevToolsActivePort, and no TCP listener in the browser's process group.
+	if dirs, _ := filepath.Glob(filepath.Join(profiles, "smind-browser-*", "DevToolsActivePort")); len(dirs) != 0 {
+		t.Errorf("DevToolsActivePort exists: %v", dirs)
+	}
+	if lsof, err := exec.LookPath("lsof"); err == nil {
+		pid := launched.(*chromeInstance).cmd.Process.Pid
+		out, _ := exec.Command(lsof, "-nP", "-a", "-g", strconv.Itoa(pid), "-iTCP", "-sTCP:LISTEN").CombinedOutput()
+		if strings.Contains(string(out), "LISTEN") {
+			t.Errorf("the browser must not listen on TCP:\n%s", out)
+		}
+	}
 
 	tab, err := s.Navigate(ctx, "", base+"/")
 	if err != nil {

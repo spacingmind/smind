@@ -1,15 +1,24 @@
 package browser
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
-	"time"
-
-	"github.com/gorilla/websocket"
+	"sync/atomic"
 )
+
+// The browser is driven over a pipe pair (--remote-debugging-pipe), never a
+// TCP port: no other local process can attach to it. Messages are JSON
+// objects each terminated by a NUL byte.
+const maxMessageBytes = 8 << 20 // one CDP message (a screenshot is ~2 MB base64)
+
+// maxEventBytes bounds undelivered events held for the consumer (a var so a
+// test can lower it).
+var maxEventBytes int64 = 32 << 20
 
 // CDPError is an error response from the browser.
 type CDPError struct {
@@ -27,7 +36,12 @@ type Event struct {
 	Method    string
 	SessionID string
 	Params    json.RawMessage
+	size      int
 }
+
+// ErrOverflow is the reason a connection is dropped when the consumer cannot
+// keep up with the browser's events (fail closed).
+var ErrOverflow = errors.New("browser: too many undelivered events")
 
 type cdpMessage struct {
 	ID        int64           `json:"id,omitempty"`
@@ -46,11 +60,13 @@ type cdpResult struct {
 	err error
 }
 
-// Client is a Chrome DevTools Protocol client over one websocket with
+// Client is a Chrome DevTools Protocol client over one pipe pair with
 // flattened sessions. It is safe for concurrent use.
 type Client struct {
-	conn    *websocket.Conn
+	conn    io.ReadWriteCloser
+	br      *bufio.Reader
 	writeMu sync.Mutex
+	queued  atomic.Int64 // bytes of events not yet released by the consumer
 
 	mu      sync.Mutex
 	nextID  int64
@@ -62,24 +78,43 @@ type Client struct {
 	done   chan struct{}
 }
 
-// DialCDP connects to a browser websocket URL. Events are delivered in order
-// on Events(); the consumer must keep draining it.
-func DialCDP(ctx context.Context, wsURL string) (*Client, error) {
-	d := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
-	conn, _, err := d.DialContext(ctx, wsURL, nil) // no Origin header: the browser refuses cross-origin pages
-	if err != nil {
-		return nil, fmt.Errorf("browser: dial devtools: %w", err)
-	}
-	conn.SetReadLimit(64 << 20)
+// NewClient speaks CDP over conn (the browser's pipe pair). Events are
+// delivered in order on Events(); the consumer must keep draining it and call
+// release for each one.
+func NewClient(conn io.ReadWriteCloser) *Client {
 	c := &Client{
 		conn:    conn,
+		br:      bufio.NewReaderSize(conn, 64<<10),
 		pending: map[int64]chan cdpResult{},
 		events:  make(chan Event, 256),
 		done:    make(chan struct{}),
 	}
 	go c.readLoop()
-	return c, nil
+	return c
 }
+
+// readMessage reads one NUL-terminated message, refusing one over the limit.
+func (c *Client) readMessage() ([]byte, error) {
+	var msg []byte
+	for {
+		chunk, err := c.br.ReadSlice(0)
+		msg = append(msg, chunk...)
+		if len(msg) > maxMessageBytes+1 {
+			return nil, errors.New("browser: a devtools message is too large")
+		}
+		switch err {
+		case nil:
+			return msg[:len(msg)-1], nil
+		case bufio.ErrBufferFull:
+			continue
+		default:
+			return nil, err
+		}
+	}
+}
+
+// release tells the client the consumer is done with an event's bytes.
+func (c *Client) release(ev Event) { c.queued.Add(-int64(ev.size)) }
 
 // Events returns the event stream; it is closed when the connection ends.
 func (c *Client) Events() <-chan Event { return c.events }
@@ -94,7 +129,7 @@ func (c *Client) readLoop() {
 		close(c.events)
 	}()
 	for {
-		_, data, err := c.conn.ReadMessage()
+		data, err := c.readMessage()
 		if err != nil {
 			readErr = err
 			return
@@ -119,8 +154,12 @@ func (c *Client) readLoop() {
 			continue
 		}
 		if m.Method != "" {
+			if c.queued.Add(int64(len(data))) > maxEventBytes {
+				readErr = ErrOverflow
+				return
+			}
 			select {
-			case c.events <- Event{Method: m.Method, SessionID: m.SessionID, Params: m.Params}:
+			case c.events <- Event{Method: m.Method, SessionID: m.SessionID, Params: m.Params, size: len(data)}:
 			case <-c.done:
 				return
 			}
@@ -176,9 +215,12 @@ func (c *Client) Call(ctx context.Context, sessionID, method string, params, out
 	c.mu.Unlock()
 
 	msg, _ := json.Marshal(cdpMessage{ID: id, Method: method, Params: raw, SessionID: sessionID})
+	if len(msg) > maxMessageBytes {
+		c.drop(id)
+		return errors.New("browser: request too large")
+	}
 	c.writeMu.Lock()
-	_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	err := c.conn.WriteMessage(websocket.TextMessage, msg)
+	_, err := c.conn.Write(append(msg, 0))
 	c.writeMu.Unlock()
 	if err != nil {
 		c.drop(id)

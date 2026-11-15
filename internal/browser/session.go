@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"net/url"
 	"path"
-	"strconv"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 )
+
+// maxQueuedBytes bounds the events waiting in the session queues.
+var maxQueuedBytes int64 = 32 << 20
 
 // Session errors.
 var (
@@ -104,8 +107,9 @@ type Session struct {
 	tabSeq  int
 	navMu   sync.Mutex // one navigation at a time: a load waiter is per tab
 
-	lifecycle chan Event // attach, detach, dialog, download: handled in order
-	requests  chan Event // Fetch.requestPaused: handled by a bounded pool
+	lifecycle chan Event   // attach, detach, dialog, download: handled in order
+	requests  chan Event   // Fetch.requestPaused: handled by a bounded pool
+	qbytes    atomic.Int64 // bytes waiting in the two queues
 
 	closeOnce sync.Once
 }
@@ -137,15 +141,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	cl, err := DialCDP(ctx, inst.WSURL())
-	if err != nil {
-		_ = inst.Close()
-		return nil, err
-	}
-	// The browser's own debug port is on loopback: a page must never reach it.
-	if ep, ok := debugEndpoint(inst.WSURL()); ok {
-		cfg.Policy.Deny = append(append([]Endpoint(nil), cfg.Policy.Deny...), ep)
-	}
+	cl := NewClient(inst.Conn())
 	s := &Session{
 		cfg:       cfg,
 		inst:      inst,
@@ -177,20 +173,6 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	return s, nil
 }
 
-// debugEndpoint extracts the browser's DevTools host and port from its
-// websocket URL so the policy can refuse it.
-func debugEndpoint(wsURL string) (Endpoint, bool) {
-	u, err := url.Parse(wsURL)
-	if err != nil {
-		return Endpoint{}, false
-	}
-	port, err := strconv.Atoi(u.Port())
-	if err != nil || port < 1 {
-		return Endpoint{}, false
-	}
-	return Endpoint{Host: "127.0.0.1", Port: port}, true
-}
-
 // cleanText makes page-controlled text safe to hand to the agent: control,
 // format (bidi, zero width, tag characters), private-use and line-separator
 // characters are dropped, and it is cut to max runes.
@@ -199,12 +181,22 @@ func cleanText(s string, max int) string {
 		s = s[:4*max] // bound the work before touching runes
 	}
 	out := make([]rune, 0, len(s))
+	marks := 0
 	for _, r := range s {
 		if r == '\t' || r == '\n' || r == '\r' {
 			r = ' '
 		}
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Co, r) || r == 0x2028 || r == 0x2029 || r == 0xFFFD {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Co, r) || r == 0x2028 || r == 0x2029 || r == 0xFFFD ||
+			(r >= 0xFE00 && r <= 0xFE0F) || (r >= 0xE0100 && r <= 0xE01EF) {
 			continue
+		}
+		if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) { // a flood of combining marks hides text
+			marks++
+			if marks > 2 {
+				continue
+			}
+		} else {
+			marks = 0
 		}
 		out = append(out, r)
 		if len(out) >= max {
@@ -306,6 +298,7 @@ func (s *Session) addConsole(line string) {
 
 func (s *Session) eventLoop() {
 	for ev := range s.cl.Events() {
+		s.cl.release(ev)
 		switch ev.Method {
 		case "Runtime.consoleAPICalled", "Runtime.exceptionThrown":
 			s.onConsole(ev)
@@ -320,6 +313,11 @@ func (s *Session) eventLoop() {
 				}
 			}
 		case "Fetch.requestPaused":
+			if s.qbytes.Add(int64(ev.size)) > maxQueuedBytes {
+				s.note("blocked", "request flood: the session was closed")
+				go s.Close()
+				continue
+			}
 			select {
 			case s.requests <- ev:
 			default:
@@ -329,6 +327,10 @@ func (s *Session) eventLoop() {
 				go s.Close()
 			}
 		case "Target.attachedToTarget", "Target.detachedFromTarget", "Page.javascriptDialogOpening", "Browser.downloadWillBegin":
+			if s.qbytes.Add(int64(ev.size)) > maxQueuedBytes {
+				go s.Close()
+				continue
+			}
 			select {
 			case s.lifecycle <- ev:
 			default:
@@ -342,6 +344,7 @@ func (s *Session) requestWorker() {
 	for {
 		select {
 		case ev := <-s.requests:
+			s.qbytes.Add(-int64(ev.size))
 			s.onRequestPaused(ev)
 		case <-s.cl.Done():
 			return
@@ -355,6 +358,7 @@ func (s *Session) lifecycleLoop() {
 	for {
 		select {
 		case ev := <-s.lifecycle:
+			s.qbytes.Add(-int64(ev.size))
 			s.onEvent(ev)
 		case <-s.cl.Done():
 			return
@@ -439,21 +443,38 @@ func (s *Session) onAttached(ev Event) {
 		s.tabs[p.TargetInfo.TargetID] = ts
 		s.mu.Unlock()
 	}
-	// Policy first: nothing of this target runs before Fetch is on.
-	if err := s.cl.Call(ctx, p.SessionID, "Fetch.enable", map[string]any{"patterns": []map[string]any{{"urlPattern": "*"}}}, nil); err != nil {
-		// Without interception the target must not run at all.
+	// Policy first: nothing of this target runs before Fetch is on, and a
+	// target that cannot be fully set up is never resumed (and a page is
+	// closed, on a fresh context: the one above may be spent).
+	fail := func() {
 		if isPage {
 			s.mu.Lock()
 			delete(s.tabs, p.TargetInfo.TargetID)
 			s.mu.Unlock()
-			_ = s.cl.Call(ctx, "", "Target.closeTarget", map[string]any{"targetId": p.TargetInfo.TargetID}, nil)
+			fctx, fcancel := s.bgCtx()
+			defer fcancel()
+			_ = s.cl.Call(fctx, "", "Target.closeTarget", map[string]any{"targetId": p.TargetInfo.TargetID}, nil)
 		}
-		return
 	}
-	_ = s.cl.Call(ctx, p.SessionID, "Target.setAutoAttach", autoAttachParams(), nil)
-	if isPage {
-		_ = s.cl.Call(ctx, p.SessionID, "Page.enable", nil, nil)
-		_ = s.cl.Call(ctx, p.SessionID, "Runtime.enable", nil, nil)
+	steps := []struct {
+		method string
+		params any
+		when   bool
+	}{
+		{"Fetch.enable", map[string]any{"patterns": []map[string]any{{"urlPattern": "*"}}}, true},
+		{"Target.setAutoAttach", autoAttachParams(), true}, // frames and workers of this target stay intercepted
+		{"Page.enable", nil, isPage},
+		{"Runtime.enable", nil, isPage},
+	}
+	for _, st := range steps {
+		if !st.when {
+			continue
+		}
+		if err := s.cl.Call(ctx, p.SessionID, st.method, st.params, nil); err != nil {
+			s.note("blocked", fmt.Sprintf("a target could not be set up (%s) and was not started", st.method))
+			fail()
+			return
+		}
 	}
 	resume()
 	if ts != nil {
@@ -479,7 +500,7 @@ func (s *Session) onRequestPaused(ev Event) {
 		_ = s.cl.Call(ctx, ev.SessionID, "Fetch.continueRequest", map[string]any{"requestId": p.RequestID}, nil)
 		return
 	}
-	s.note("blocked", fmt.Sprintf("%s: %s", redact(p.Request.URL), d.Reason))
+	s.note("blocked", fmt.Sprintf("%s: %s", redact(p.Request.URL), cleanText(d.Reason, 200)))
 	_ = s.cl.Call(ctx, ev.SessionID, "Fetch.failRequest", map[string]any{"requestId": p.RequestID, "errorReason": "BlockedByClient"}, nil)
 }
 
@@ -533,6 +554,16 @@ func (c cachedResolver) LookupNetIP(ctx context.Context, network, host string) (
 func redact(u string) string {
 	if i := strings.IndexAny(u, "?#"); i >= 0 {
 		u = u[:i]
+	}
+	if i := strings.Index(u, "://"); i >= 0 {
+		rest := u[i+3:]
+		end := strings.IndexByte(rest, '/')
+		if end < 0 {
+			end = len(rest)
+		}
+		if at := strings.LastIndexByte(rest[:end], '@'); at >= 0 {
+			u = u[:i+3] + rest[at+1:]
+		}
 	}
 	return cleanText(u, 200)
 }
@@ -737,7 +768,14 @@ func (s *Session) tabInfo(ctx context.Context, targetID string) (Tab, error) {
 	if err := s.cl.Call(ctx, "", "Target.getTargetInfo", map[string]any{"targetId": targetID}, &r); err != nil {
 		return Tab{}, err
 	}
-	return Tab{ID: targetID, URL: r.TargetInfo.URL, Title: r.TargetInfo.Title}, nil
+	return cleanTab(Tab{ID: targetID, URL: r.TargetInfo.URL, Title: r.TargetInfo.Title}), nil
+}
+
+// cleanTab sanitises the page-controlled fields before they leave the package.
+func cleanTab(t Tab) Tab {
+	t.URL = cleanText(t.URL, 500)
+	t.Title = cleanText(t.Title, 200)
+	return t
 }
 
 // Tabs lists the pages of the session.
@@ -761,7 +799,7 @@ func (s *Session) Tabs(ctx context.Context) ([]Tab, error) {
 	var out []Tab
 	for _, ti := range r.TargetInfos {
 		if _, ok := s.tabByID(ti.TargetID); ok && ti.Type == "page" {
-			out = append(out, Tab{ID: ti.TargetID, URL: ti.URL, Title: ti.Title})
+			out = append(out, cleanTab(Tab{ID: ti.TargetID, URL: ti.URL, Title: ti.Title}))
 		}
 	}
 	return out, nil
@@ -793,7 +831,13 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sessions map[string]*Session
-	starting map[string]bool
+	keys     map[string]string
+	starting map[string]*startState
+}
+
+type startState struct {
+	cancel context.CancelFunc
+	closed bool
 }
 
 func (m *Manager) limit() int {
@@ -803,18 +847,49 @@ func (m *Manager) limit() int {
 	return DefaultMaxSessions
 }
 
-// Get returns the workspace's running session or starts one.
+// cfgKey identifies the parts of a Config a running session was built from; a
+// changed policy or launch setting must not be silently ignored.
+func cfgKey(c Config) string {
+	var allow []string
+	for h := range c.Policy.AllowHosts {
+		allow = append(allow, h)
+	}
+	sort.Strings(allow)
+	var deny []string
+	for _, d := range c.Policy.Deny {
+		deny = append(deny, fmt.Sprintf("%s:%d", d.Host, d.Port))
+	}
+	sort.Strings(deny)
+	la := append([]string(nil), c.Launch.AllowHosts...)
+	sort.Strings(la)
+	return fmt.Sprintf("%q|%q|%q|%d|%s|%d", allow, deny, la, c.Launch.HeapMB, c.Launch.ProfileRoot, c.MaxTabs)
+}
+
+// Get returns the workspace's running session or starts one. If the running
+// session was built from a different policy or launch configuration it is
+// closed and a new one is started.
 func (m *Manager) Get(ctx context.Context, cfg Config) (*Session, error) {
+	key := cfgKey(cfg)
 	m.mu.Lock()
 	if m.sessions == nil {
 		m.sessions = map[string]*Session{}
-		m.starting = map[string]bool{}
+		m.keys = map[string]string{}
+		m.starting = map[string]*startState{}
 	}
+	var stale *Session
 	if s := m.sessions[cfg.Workspace]; s != nil && !s.Closed() {
-		m.mu.Unlock()
-		return s, nil
+		if m.keys[cfg.Workspace] == key {
+			m.mu.Unlock()
+			return s, nil
+		}
+		stale = s
 	}
-	if m.starting[cfg.Workspace] {
+	m.mu.Unlock()
+	if stale != nil {
+		stale.Close()
+	}
+	m.mu.Lock()
+	if m.starting[cfg.Workspace] != nil {
 		m.mu.Unlock()
 		return nil, errors.New("browser: the session for this workspace is still starting")
 	}
@@ -828,14 +903,17 @@ func (m *Manager) Get(ctx context.Context, cfg Config) (*Session, error) {
 		m.mu.Unlock()
 		return nil, ErrTooManySessions
 	}
-	m.starting[cfg.Workspace] = true
+	sctx, cancel := context.WithCancel(ctx)
+	st := &startState{cancel: cancel}
+	m.starting[cfg.Workspace] = st
 	m.mu.Unlock()
+	defer cancel()
 
 	var started *Session
 	userClose := cfg.OnClose
 	cfg.OnClose = func() {
 		m.mu.Lock()
-		if m.sessions[cfg.Workspace] == started {
+		if started != nil && m.sessions[cfg.Workspace] == started {
 			delete(m.sessions, cfg.Workspace)
 		}
 		m.mu.Unlock()
@@ -843,34 +921,49 @@ func (m *Manager) Get(ctx context.Context, cfg Config) (*Session, error) {
 			userClose()
 		}
 	}
-	s, err := Start(ctx, cfg)
+	s, err := Start(sctx, cfg)
 	m.mu.Lock()
 	delete(m.starting, cfg.Workspace)
-	if err == nil && !s.Closed() {
+	closedMeanwhile := st.closed
+	if err == nil && !closedMeanwhile && !s.Closed() {
 		started = s
 		m.sessions[cfg.Workspace] = s
+		m.keys[cfg.Workspace] = key
 	}
 	m.mu.Unlock()
+	if err == nil && closedMeanwhile {
+		s.Close()
+		return nil, errors.New("browser: the session was closed while it was starting")
+	}
 	return s, err
 }
 
-// Close ends one workspace's session (a run ended, the human stopped it, the
-// switch was turned off).
+// Close ends one workspace's session, or the one still starting (a run
+// ended, the human stopped it, the switch was turned off).
 func (m *Manager) Close(workspace string) {
 	m.mu.Lock()
 	s := m.sessions[workspace]
+	if st := m.starting[workspace]; st != nil {
+		st.closed = true
+		st.cancel()
+	}
 	m.mu.Unlock()
 	if s != nil {
 		s.Close()
 	}
 }
 
-// CloseAll ends every session (daemon shutdown).
+// CloseAll ends every session, those still starting included (daemon
+// shutdown).
 func (m *Manager) CloseAll() {
 	m.mu.Lock()
 	var all []*Session
 	for _, s := range m.sessions {
 		all = append(all, s)
+	}
+	for _, st := range m.starting {
+		st.closed = true
+		st.cancel()
 	}
 	m.mu.Unlock()
 	for _, s := range all {

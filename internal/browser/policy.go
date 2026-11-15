@@ -64,11 +64,15 @@ func NewPolicy(allow []string, deny []Endpoint) (Policy, error) {
 		if d.Port < 1 || d.Port > 65535 {
 			return Policy{}, fmt.Errorf("browser: deny endpoint %q has no valid port", d.Host)
 		}
-		h := strings.ToLower(strings.TrimSuffix(d.Host, "."))
-		if a, err := netip.ParseAddr(strings.Trim(h, "[]")); err == nil {
-			h = a.Unmap().String()
+		raw := d.Host
+		if strings.Contains(raw, ":") && !strings.HasPrefix(raw, "[") {
+			raw = "[" + raw + "]" // a bare IPv6 literal
 		}
-		p.Deny = append(p.Deny, Endpoint{Host: h, Port: d.Port})
+		h, _, err := parseHost(raw) // 127.1, octal, hex and mapped forms canonicalise; garbage is an error
+		if err != nil {
+			return Policy{}, fmt.Errorf("browser: deny endpoint %q: %w", d.Host, err)
+		}
+		p.Deny = append(p.Deny, Endpoint{Host: h.canon, Port: d.Port})
 	}
 	return p, nil
 }
@@ -100,8 +104,8 @@ func NormalizeAllowHost(s string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("browser: allowlist entry %q: %w", s, err)
 	}
-	if h.ip.IsValid() && (h.ip.IsUnspecified() || h.ip.IsMulticast()) {
-		return "", fmt.Errorf("browser: allowlist entry %q is not a usable host address", s)
+	if h.ip.IsValid() && sensitiveAddr(h.ip) {
+		return "", fmt.Errorf("browser: allowlist entry %q is a link-local, metadata, multicast or unspecified address and cannot be allowed", s)
 	}
 	return h.canon, nil
 }
@@ -365,6 +369,20 @@ var metadataAddrs = []netip.Addr{
 	netip.MustParseAddr("fd00:ec2::254"),
 }
 
+// sensitiveAddr reports addresses that are never reachable, even by an exact
+// allowlist entry: unspecified, multicast, link-local and cloud metadata.
+func sensitiveAddr(a netip.Addr) bool {
+	if a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsInterfaceLocalMulticast() {
+		return true
+	}
+	for _, m := range metadataAddrs {
+		if a == m {
+			return true
+		}
+	}
+	return false
+}
+
 // CheckResolved vets the addresses a named host resolved to. d must be an
 // allowed decision with NeedsResolve set.
 func (p Policy) CheckResolved(d Decision, addrs []netip.Addr) Decision {
@@ -388,13 +406,8 @@ func (p Policy) CheckResolved(d Decision, addrs []netip.Addr) Decision {
 			}
 			continue
 		}
-		if a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsInterfaceLocalMulticast() {
-			return refuse("host %q resolves to a link-local, multicast or unspecified address", d.Host)
-		}
-		for _, m := range metadataAddrs {
-			if a == m {
-				return refuse("host %q resolves to a metadata address", d.Host)
-			}
+		if sensitiveAddr(a) {
+			return refuse("host %q resolves to a link-local, metadata, multicast or unspecified address", d.Host)
 		}
 	}
 	return d

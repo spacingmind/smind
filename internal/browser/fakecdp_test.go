@@ -1,29 +1,27 @@
 package browser
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
-// fakeCDP is a scripted DevTools endpoint: handlers answer methods, and the
-// test pushes events. Every received call is recorded.
+// fakeCDP is a scripted DevTools endpoint over an in-memory pipe pair:
+// handlers answer methods, and the test pushes events. Every received call is
+// recorded.
 type fakeCDP struct {
 	t      *testing.T
-	srv    *httptest.Server
+	client io.ReadWriteCloser // the end a Client uses
+	server io.ReadWriteCloser
 	mu     sync.Mutex
-	conn   *websocket.Conn
 	calls  []fakeCall
 	handle func(f *fakeCDP, c fakeCall) (result any, errMsg string)
 	wmu    sync.Mutex
-	ready  chan struct{}
 }
 
 type fakeCall struct {
@@ -33,81 +31,80 @@ type fakeCall struct {
 	Params    map[string]any
 }
 
+type pipeEnd struct {
+	r *io.PipeReader
+	w *io.PipeWriter
+}
+
+func (p pipeEnd) Read(b []byte) (int, error)  { return p.r.Read(b) }
+func (p pipeEnd) Write(b []byte) (int, error) { return p.w.Write(b) }
+func (p pipeEnd) Close() error                { _ = p.r.Close(); return p.w.Close() }
+
 func newFakeCDP(t *testing.T, handle func(f *fakeCDP, c fakeCall) (any, string)) *fakeCDP {
-	f := &fakeCDP{t: t, handle: handle, ready: make(chan struct{})}
-	up := websocket.Upgrader{}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := up.Upgrade(w, r, nil)
+	c2sR, c2sW := io.Pipe()
+	s2cR, s2cW := io.Pipe()
+	f := &fakeCDP{t: t, handle: handle, client: pipeEnd{s2cR, c2sW}, server: pipeEnd{c2sR, s2cW}}
+	go f.serve()
+	t.Cleanup(func() { _ = f.server.Close(); _ = f.client.Close() })
+	return f
+}
+
+func (f *fakeCDP) serve() {
+	br := bufio.NewReader(f.server)
+	for {
+		data, err := br.ReadBytes(0)
 		if err != nil {
 			return
 		}
-		f.mu.Lock()
-		f.conn = conn
-		f.mu.Unlock()
-		close(f.ready)
-		for {
-			_, data, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-			var m struct {
-				ID        int64          `json:"id"`
-				Method    string         `json:"method"`
-				SessionID string         `json:"sessionId"`
-				Params    map[string]any `json:"params"`
-			}
-			if json.Unmarshal(data, &m) != nil {
-				continue
-			}
-			call := fakeCall{ID: m.ID, Method: m.Method, SessionID: m.SessionID, Params: m.Params}
-			f.mu.Lock()
-			f.calls = append(f.calls, call)
-			f.mu.Unlock()
-			var res any = map[string]any{}
-			errMsg := ""
-			if f.handle != nil {
-				res, errMsg = f.handle(f, call)
-				if res == nil && errMsg == "" {
-					res = map[string]any{}
-				}
-			}
-			if res == hold {
-				continue // never answered, for timeout tests
-			}
-			resp := map[string]any{"id": m.ID, "sessionId": m.SessionID}
-			if errMsg != "" {
-				resp["error"] = map[string]any{"code": -32000, "message": errMsg}
-			} else {
-				resp["result"] = res
-			}
-			f.send(resp)
+		data = data[:len(data)-1]
+		var m struct {
+			ID        int64          `json:"id"`
+			Method    string         `json:"method"`
+			SessionID string         `json:"sessionId"`
+			Params    map[string]any `json:"params"`
 		}
-	}))
-	t.Cleanup(f.srv.Close)
-	return f
+		if json.Unmarshal(data, &m) != nil {
+			continue
+		}
+		call := fakeCall{ID: m.ID, Method: m.Method, SessionID: m.SessionID, Params: m.Params}
+		f.mu.Lock()
+		f.calls = append(f.calls, call)
+		f.mu.Unlock()
+		var res any = map[string]any{}
+		errMsg := ""
+		if f.handle != nil {
+			res, errMsg = f.handle(f, call)
+			if res == nil && errMsg == "" {
+				res = map[string]any{}
+			}
+		}
+		if res == hold {
+			continue // never answered, for timeout tests
+		}
+		resp := map[string]any{"id": m.ID, "sessionId": m.SessionID}
+		if errMsg != "" {
+			resp["error"] = map[string]any{"code": -32000, "message": errMsg}
+		} else {
+			resp["result"] = res
+		}
+		f.send(resp)
+	}
 }
 
 var hold = &struct{ x int }{}
 
-func (f *fakeCDP) wsURL() string { return "ws" + strings.TrimPrefix(f.srv.URL, "http") }
-
 func (f *fakeCDP) send(v any) {
-	<-f.ready
+	b, _ := json.Marshal(v)
 	f.wmu.Lock()
 	defer f.wmu.Unlock()
-	_ = f.conn.WriteJSON(v)
+	_, _ = f.server.Write(append(b, 0))
 }
 
 func (f *fakeCDP) event(sessionID, method string, params any) {
 	f.send(map[string]any{"method": method, "sessionId": sessionID, "params": params})
 }
 
-func (f *fakeCDP) closeConn() {
-	<-f.ready
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	_ = f.conn.Close()
-}
+func (f *fakeCDP) closeConn() { _ = f.server.Close() }
 
 func (f *fakeCDP) callsFor(method string) []fakeCall {
 	f.mu.Lock()
@@ -145,16 +142,13 @@ func TestCDPCallEventAndErrors(t *testing.T) {
 		}
 		return nil, ""
 	})
-	c, err := DialCDP(context.Background(), f.wsURL())
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := NewClient(f.client)
 	defer c.Close()
 	var v struct{ Product string }
 	if err := c.Call(context.Background(), "", "Browser.getVersion", nil, &v); err != nil || v.Product != "Fake/1" {
 		t.Fatalf("call: %v %+v", err, v)
 	}
-	err = c.Call(context.Background(), "S1", "Bad.method", map[string]any{"a": 1}, nil)
+	err := c.Call(context.Background(), "S1", "Bad.method", map[string]any{"a": 1}, nil)
 	var ce *CDPError
 	if !asCDPError(err, &ce) || ce.Message != "no such method" {
 		t.Fatalf("error response: %v", err)
@@ -183,10 +177,7 @@ func asCDPError(err error, target **CDPError) bool {
 
 func TestCDPCallTimeout(t *testing.T) {
 	f := newFakeCDP(t, func(f *fakeCDP, c fakeCall) (any, string) { return hold, "" })
-	c, err := DialCDP(context.Background(), f.wsURL())
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := NewClient(f.client)
 	defer c.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
@@ -203,10 +194,7 @@ func TestCDPCallTimeout(t *testing.T) {
 
 func TestCDPConnectionLossFailsPending(t *testing.T) {
 	f := newFakeCDP(t, func(f *fakeCDP, c fakeCall) (any, string) { return hold, "" })
-	c, err := DialCDP(context.Background(), f.wsURL())
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := NewClient(f.client)
 	errc := make(chan error, 1)
 	go func() { errc <- c.Call(context.Background(), "", "Slow.call", nil, nil) }()
 	f.waitCall("Slow.call", 1)
@@ -226,5 +214,34 @@ func TestCDPConnectionLossFailsPending(t *testing.T) {
 	}
 	if err := c.Call(context.Background(), "", "X", nil, nil); err != ErrClosed {
 		t.Fatalf("call after loss: %v", err)
+	}
+}
+
+func TestCDPOversizeMessageDropsTheConnection(t *testing.T) {
+	f := newFakeCDP(t, nil)
+	c := NewClient(f.client)
+	defer c.Close()
+	go f.send(map[string]any{"method": "Big.event", "params": map[string]any{"x": strings.Repeat("a", maxMessageBytes+10)}})
+	select {
+	case <-c.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("a message over the limit must end the connection")
+	}
+}
+
+func TestCDPEventBacklogDropsTheConnection(t *testing.T) {
+	old := maxEventBytes
+	maxEventBytes = 1 << 10
+	defer func() { maxEventBytes = old }()
+	f := newFakeCDP(t, nil)
+	c := NewClient(f.client) // nobody drains Events(): a slow consumer
+	defer c.Close()
+	for i := 0; i < 50; i++ {
+		go f.event("", "Spam.event", map[string]any{"x": strings.Repeat("a", 100)})
+	}
+	select {
+	case <-c.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("an unbounded event backlog must end the connection")
 	}
 }
