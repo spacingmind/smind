@@ -309,7 +309,7 @@ describe("daemon-section (desktop build)", () => {
 });
 
 describe("daemon-section with manageLocalDaemon=false (ADR-0031 D7)", () => {
-  const OFF = { onboardingCompleted: true, manageLocalDaemon: false };
+  const OFF = { onboardingCompleted: true, manageLocalDaemon: false, notificationsOn: null, notifyPermission: true, notifyQuestion: true, notifyFailure: true };
 
   it("with manageLocalDaemon=false the daemon section disables install/update/restart/take-over", async () => {
     const scenarios: Array<{ status: Record<string, unknown>; testids: string[] }> = [
@@ -366,7 +366,7 @@ describe("daemon-section with manageLocalDaemon=false (ADR-0031 D7)", () => {
   it("offers Run setup again, labelled Finish setup while onboarding is pending", async () => {
     await renderSection({
       daemonStatus: vi.fn(() => Promise.resolve(baseStatus())),
-      appSettingsGet: vi.fn(() => Promise.resolve({ onboardingCompleted: false, manageLocalDaemon: false })),
+      appSettingsGet: vi.fn(() => Promise.resolve({ onboardingCompleted: false, manageLocalDaemon: false, notificationsOn: null, notifyPermission: true, notifyQuestion: true, notifyFailure: true })),
     });
     expect(screen.getByTestId("connection-run-setup")).toHaveTextContent("Finish setup");
   });

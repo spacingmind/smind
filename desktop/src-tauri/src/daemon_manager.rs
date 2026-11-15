@@ -1717,6 +1717,10 @@ mod tests {
     const ONBOARDED: AppSettings = AppSettings {
         onboarding_completed: true,
         manage_local_daemon: true,
+        notifications_on: None,
+        notify_permission: true,
+        notify_question: true,
+        notify_failure: true,
     };
 
     #[test]
@@ -1724,6 +1728,10 @@ mod tests {
         let pending = AppSettings {
             onboarding_completed: false,
             manage_local_daemon: true,
+            notifications_on: None,
+            notify_permission: true,
+            notify_question: true,
+            notify_failure: true,
         };
         for state in [
             ManagedState::NotRunning,
@@ -1743,6 +1751,10 @@ mod tests {
         let off = AppSettings {
             onboarding_completed: true,
             manage_local_daemon: false,
+            notifications_on: None,
+            notify_permission: true,
+            notify_question: true,
+            notify_failure: true,
         };
         assert_eq!(
             startup_decision(
