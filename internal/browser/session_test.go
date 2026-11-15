@@ -1080,24 +1080,41 @@ func TestSessionServerChallengeFloodDoesNotStarveTheProxyChallenge(t *testing.T)
 	}
 }
 
-// A challenge that cannot be answered (the pipe is gone) is reported once, and
-// not at all for a closed session.
+// A challenge the browser refuses to continue (an error reply) is reported
+// once, not once per challenge, and the session stays open.
 func TestSessionUnansweredChallengeNoticeIsOnce(t *testing.T) {
-	s, l := startTestSession(t, func(c *Config) { c.CallTimeout = 300 * time.Millisecond })
+	l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
+		if c.Method == "Fetch.continueWithAuth" {
+			return nil, "No such request"
+		}
+		return defaultHook(f, c)
+	}}
+	pol, err := NewPolicy(nil, []Endpoint{{Host: "127.0.0.1", Port: 4648}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := Start(context.Background(), Config{Workspace: "ws1", Launcher: l, Policy: pol, Resolver: sessionResolver, IdleTimeout: time.Minute, CallTimeout: 2 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
 	f, _ := l.last()
 	attachReady(t, f, "S1", "T1", 1)
-	f.closeConn() // every call from now on fails
 	for i := 0; i < 20; i++ {
 		authRequired(f, "S1", fmt.Sprintf("x%d", i), "Server", "http://localhost:3000")
 	}
-	time.Sleep(500 * time.Millisecond)
+	f.waitCall("Fetch.continueWithAuth", 20)
+	time.Sleep(100 * time.Millisecond)
 	n := 0
 	for _, no := range s.DrainNotices() {
 		if strings.Contains(no.Detail, "could not be answered") {
 			n++
 		}
 	}
-	if n > 1 {
-		t.Fatalf("at most one notice for unanswered challenges, got %d", n)
+	if n != 1 {
+		t.Fatalf("exactly one notice for 20 unanswerable challenges, got %d", n)
+	}
+	if s.Closed() {
+		t.Fatal("the session stays open")
 	}
 }
