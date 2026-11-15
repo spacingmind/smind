@@ -485,6 +485,21 @@ describe("task row width priority (PR2: the title keeps its width)", () => {
   });
 });
 
+describe("selection fill (PR2: the selected row is a rounded inset fill)", () => {
+  it("selected-row-is-a-rounded-inset-fill: the selected wrapper is rounded-lg bg-selected, unselected is not filled", async () => {
+    await mountSidebar([makeTask(1, "First"), makeTask(2, "Second")], { selectedTaskId: 1 });
+
+    const selected = taskItem(1);
+    expect(selected.className).toContain("rounded-lg");
+    expect(selected.className).toContain("bg-selected");
+    expect(selected.className).not.toContain("bg-hover");
+
+    const unselected = taskItem(2);
+    expect(unselected.className).toContain("rounded-lg");
+    expect(unselected.className).not.toContain("bg-selected");
+  });
+});
+
 describe("container rows (S5)", () => {
 
   it("workspace and space actions are not mounted at idle and mount on hover", async () => {
