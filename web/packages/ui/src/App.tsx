@@ -1,3 +1,4 @@
+import { disambiguatedParts } from "@/lib/tab-scroll-edges";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
@@ -2350,6 +2351,8 @@ function PaneTabStrip({
   // Keeps the active tab visible when the strip overflows (TB-AC5).
   const tabScrollerRef = useRef<HTMLDivElement>(null);
   const edges = useScrollEdges(tabScrollerRef);
+  // Chats that share a title are numbered by the same function the "More tabs" menu uses.
+  const tabParts = useMemo(() => disambiguatedParts(tabs), [tabs]);
   useRevealActiveTab(tabScrollerRef, activeKey);
 
   return (
@@ -2397,6 +2400,7 @@ function PaneTabStrip({
                   <DraggableTabTrigger
                     key={entry.key}
                     entry={entry}
+                    number={tabParts.get(entry.key)?.n}
                     paneId={paneId}
                     showMoveAffordance={showMoveAffordance}
                     onSplit={onSplit}
@@ -2490,6 +2494,7 @@ const TAB_AFFORDANCE_REVEAL =
  */
 function DraggableTabTrigger({
   entry,
+  number,
   paneId,
   showMoveAffordance,
   onSplit,
@@ -2504,6 +2509,8 @@ function DraggableTabTrigger({
   hasClosableTabsToRight,
 }: {
   entry: TabEntry;
+  /** The repeat number of a tab whose title another tab in the strip shares; the same numbering the overflow menu shows. */
+  number?: number;
   paneId: string;
   showMoveAffordance: boolean;
   onSplit: (key: string, direction: SplitDirection) => void;
@@ -2597,7 +2604,7 @@ function DraggableTabTrigger({
           className="group/tab max-w-40 gap-1.5 group-data-[variant=flat]/tabs-list:min-w-16 group-data-[variant=flat]/tabs-list:flex-[0_1_10rem] group-data-[variant=flat]/tabs-list:aria-selected:min-w-24"
           {...listeners}
         >
-          <TabLabel entry={entry} />
+          <TabLabel entry={entry} number={number} />
           {/*
            * Split/close float over the tab's right edge (no reserved slot, so tabs
            * sit tight) and appear on hover, keyboard focus within, or while active.

@@ -3,7 +3,9 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TabOverflowMenu } from "@/components/tab-overflow-menu";
-import type { TabEntry } from "@/components/tab-registry";
+import { TabLabel, type TabEntry } from "@/components/tab-registry";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useRevealActiveTab } from "@/hooks/use-reveal-active-tab";
 import { useScrollEdges } from "@/hooks/use-scroll-edges";
 import { useRef } from "react";
@@ -109,7 +111,36 @@ describe("TabOverflowMenu titles", () => {
     render(<TabOverflowMenu tabs={chats} activeKey="c3" onActivate={() => {}} />);
     fireEvent.pointerDown(screen.getByTestId("tab-overflow-button"), { button: 0, ctrlKey: false });
     const items = await screen.findAllByTestId("tab-overflow-item");
-    expect(items.map((i) => i.textContent?.trim())).toEqual(["Chat", "Chat 2", "Chat 3", "Diff"]);
+    // The number is its own element (the chip keeps it when the title is cut); the title text is the base title.
+    expect(items.map((i) => i.querySelector("[data-tab-title]")?.textContent)).toEqual(["Chat", "Chat", "Chat", "Diff"]);
+    expect(items.map((i) => i.querySelector("[data-tab-number]")?.textContent ?? null)).toEqual([null, "2", "3", null]);
+  });
+});
+
+describe("TabLabel numbers (the strip's chips and the overflow menu share one function)", () => {
+  it("chip-shows-the-repeat-number-in-its-own-non-shrinking-span", () => {
+    const { container } = render(
+      <div>
+        <TabLabel entry={tab("c1", "Chat")} number={1} />
+        <TabLabel entry={tab("c2", "Chat")} number={2} />
+      </div>,
+    );
+    const numbers = container.querySelectorAll("[data-tab-number]");
+    expect(numbers).toHaveLength(1); // the first keeps its plain title
+    expect(numbers[0]).toHaveTextContent("2");
+    expect(numbers[0].className).toContain("shrink-0"); // never cut: the title (min-w-0 truncate) shrinks first
+    for (const t of container.querySelectorAll("[data-tab-title]")) expect(t.className).toContain("truncate");
+  });
+
+  it("strip-and-menu-call-the-same-numbering-function", () => {
+    const app = readFileSync(resolve(__dirname, "../App.tsx"), "utf8");
+    const menu = readFileSync(resolve(__dirname, "./tab-overflow-menu.tsx"), "utf8");
+    expect(app).toContain("disambiguatedParts(tabs)");
+    expect(app).toContain("number={tabParts.get(entry.key)?.n}");
+    expect(menu).toContain("disambiguatedParts(tabs)");
+    expect(menu).toContain("number={parts.get(entry.key)?.n}");
+    // and neither re-derives numbers by itself
+    expect(app).not.toMatch(/`\$\{[a-z.]*title\} \$\{/);
   });
 });
 
