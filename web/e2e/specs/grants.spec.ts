@@ -182,7 +182,9 @@ test('G-03 the daemon refusing a save shows its words and leaves the card usable
   await expect(page.getByTestId('grant-control')).toBeVisible()
   b.failNext('run.answerPermission: this request cannot be saved as an always-allow')
   await page.getByTestId('grant-save').click()
-  await expect(page.getByTestId('pending-permission')).toContainText('respond failed: run.answerPermission: this request cannot be saved')
+  // the Lane A card words a failed answer as a sentence, the daemon's own text on the line below it
+  await expect(page.getByTestId('permission-respond-error')).toContainText('Could not send your answer')
+  await expect(page.getByTestId('permission-respond-error')).toContainText('run.answerPermission: this request cannot be saved')
   await expect(page.getByTestId('grant-save')).toBeEnabled()
   await frame(page, testInfo, 'd-save-refused')
 })
