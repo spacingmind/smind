@@ -482,7 +482,8 @@ mod tests {
             "plugins.updater.requireSignedVersion must stay true"
         );
         assert!(
-            updater.get("allowDowngrades").is_none() || updater["allowDowngrades"] == Value::Bool(false),
+            updater.get("allowDowngrades").is_none()
+                || updater["allowDowngrades"] == Value::Bool(false),
             "allowDowngrades must never be enabled"
         );
     }
