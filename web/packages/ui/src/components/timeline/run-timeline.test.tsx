@@ -183,7 +183,8 @@ describe("RunTimeline", () => {
     render(
       <ul>
         <RunTimeline
-          run={run([{ type: "chunk", text: "the trimmed answer" }], { history: { source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true } })}
+          // The trailing chunk carries the daemon's omission marker (U+2026), so this skeleton really is trimmed.
+          run={run([{ type: "chunk", text: "the trimmed answer" }, { type: "chunk", text: "\n…[8192 bytes omitted]…\n" }], { history: { source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true } })}
           onLoadFullHistory={vi.fn()}
         />
       </ul>,
@@ -247,7 +248,7 @@ describe("RunTimeline", () => {
     expect(row).not.toHaveTextContent("Timed out");
   });
 
-  it("renders a resolved permission with a reason this build has never heard of without crashing, and no reason label", () => {
+  it("renders a resolved permission with a reason this build has never heard of as Resolved, never the raw text", () => {
     expect(() =>
       render(
         <ul>
@@ -260,6 +261,8 @@ describe("RunTimeline", () => {
 
     const row = screen.getByTestId("timeline-permission");
     expect(row).toHaveTextContent("Permission resolved");
+    expect(row).toHaveTextContent("Resolved");
+    expect(row).not.toHaveTextContent("some_future_reason");
     expect(row).not.toHaveTextContent("You approved");
     expect(row).not.toHaveTextContent("Auto-approved");
     expect(row).not.toHaveTextContent("Timed out");

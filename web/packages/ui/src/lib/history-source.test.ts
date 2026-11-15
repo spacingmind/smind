@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { describeHistorySource } from "@/lib/history-source";
+import { describeHistorySource, runWasTrimmed } from "@/lib/history-source";
+import type { TimelineItem } from "@/hooks/use-run-timeline";
 
 const skeleton = (reason: string, canLoadFull?: boolean) => ({ source: "skeleton" as const, reason, canLoadFull });
+
+const text = (kind: "assistant" | "user" | "thinking", text: string): TimelineItem => ({ kind, id: `${kind}-1`, text });
+
+const tool = (payload: { input?: unknown; result?: unknown }): TimelineItem => ({ kind: "tool_call", id: "tool-1", toolCallId: "t1", status: "success", ...payload });
 
 describe("describeHistorySource", () => {
   it("renders every skeletonReason the daemon sends with its exact sentence and tone", () => {
@@ -87,5 +92,48 @@ describe("describeHistorySource", () => {
       message: "Full history, rebuilt from the provider's session.",
       canLoad: false,
     });
+  });
+
+  it("describe-history-source-thinking-copy", () => {
+    expect(describeHistorySource(skeleton("rebuild_not_requested", true), "thinking")).toEqual({
+      tone: "info",
+      message: "Showing a summary: the agent's reasoning was not kept.",
+      canLoad: true,
+    });
+    expect(describeHistorySource(skeleton("rebuild_not_requested", false), "thinking").canLoad).toBe(false);
+    expect(describeHistorySource(skeleton("rebuild_not_requested", true), "output").message).toBe("Showing a summary: large tool output was trimmed.");
+    expect(describeHistorySource(skeleton("rebuild_not_requested", true), null).message).toBe("Showing a summary: large tool output was trimmed.");
+    expect(describeHistorySource(skeleton("rebuild_not_requested", true)).message).toBe("Showing a summary: large tool output was trimmed.");
+    // Only rebuild_not_requested rewords itself: every other reason keeps its exact sentence whatever trim says.
+    expect(describeHistorySource(skeleton("excerpt_pruned", true), "thinking").message).toBe("Showing a summary: large tool output was removed after the retention period.");
+    expect(describeHistorySource(skeleton("native_session_missing"), "output").message).toBe("Showing a summary: the provider's session file is no longer there.");
+  });
+});
+
+describe("runWasTrimmed", () => {
+  it("run-was-trimmed-table", () => {
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+
+    const cases: readonly [string, readonly TimelineItem[] | undefined, "output" | "thinking" | null][] = [
+      ["no items at all", undefined, null],
+      ["an empty list", [], null],
+      ["a plain assistant text", [text("assistant", "the answer")], null],
+      ["a tool result string with the omission marker", [tool({ result: "head\n…[8192 bytes omitted]…\ntail" })], "output"],
+      ["the marker inside a tool input object", [tool({ input: { command: "cat big.log", stdout: "…[4096 bytes omitted]…" } })], "output"],
+      ["the marker in an assistant text", [text("assistant", "…[2048 bytes omitted]…")], "output"],
+      ["the marker in a user text", [text("user", "…[2048 bytes omitted]…")], "output"],
+      ["a thinking item with no text and nothing else", [text("thinking", "")], "thinking"],
+      ["a thinking item with text kept", [text("thinking", "so the plan is")], null],
+      ["a marker alongside dropped thinking", [text("thinking", ""), text("assistant", "…[2048 bytes omitted]…")], "output"],
+      ["dropped thinking before a later marker", [text("thinking", ""), tool({ result: "…[2048 bytes omitted]…" })], "output"],
+      ["a lookalike marker without the ellipses", [text("assistant", "head [100 bytes omitted] tail"), tool({ result: "[100 bytes omitted]" })], null],
+    ];
+    for (const [name, items, expected] of cases) {
+      expect(runWasTrimmed(items), name).toBe(expected);
+    }
+
+    // A circular tool result makes JSON.stringify throw; the scan must return, not raise.
+    expect(runWasTrimmed([tool({ result: circular })])).toBe(null);
   });
 });

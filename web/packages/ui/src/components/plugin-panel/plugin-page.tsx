@@ -4,10 +4,9 @@ import { DesktopWindowControls } from "@/components/desktop-window-controls";
 import { PluginPanelPane } from "@/components/plugin-panel/plugin-panel-pane";
 import { Button } from "@/components/ui/button";
 import { findPanel, usePluginPanelsQuery } from "@/hooks/use-plugin-panels";
-import { useWindowState } from "@/hooks/use-window-state";
+import { usePageLeftInset } from "@/hooks/use-page-chrome";
 import { Icons } from "@/lib/icons";
-import { desktopOS, isDesktop } from "@/lib/platform";
-import { headerLeftInsetPx } from "@/lib/window-chrome";
+import { isDesktop } from "@/lib/platform";
 
 const BASE_PADDING_PX = 8;
 
@@ -31,8 +30,7 @@ export function PluginPage({
 }) {
   const panels = usePluginPanelsQuery();
   const panel = panels.data ? findPanel(panels.data.panels, pluginId, panelId) : undefined;
-  const { fullscreen } = useWindowState();
-  const leftInset = isDesktop ? headerLeftInsetPx(desktopOS, fullscreen, 0) : 0;
+  const leftInset = usePageLeftInset();
   const headerStyle = leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined;
 
   // Once only: a re-render while still gone must not navigate again.

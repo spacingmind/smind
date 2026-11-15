@@ -111,3 +111,27 @@ describe("SettingsScreen desktop chrome", () => {
     Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1024 });
   });
 });
+
+describe("SettingsScreen beside the kept app sidebar (DT-UI B 2b)", () => {
+  it("on macOS the sidebar strip is the plain back row, not the empty traffic-light strip, when the sidebar is kept", async () => {
+    mockPlatform({ desktop: true, os: "macos" });
+    const { SettingsScreen } = await import("@/components/settings/settings-screen");
+    const { PageChromeContext } = await import("@/hooks/use-page-chrome");
+    renderWithClientProp(
+      <PageChromeContext.Provider value={{ sidebarKept: true }}>
+        <SettingsScreen client={null} events={null} onNavigateBack={() => {}} />
+      </PageChromeContext.Provider>,
+    );
+    const top = screen.getByTestId("settings-sidebar-top");
+    expect(top).toContainElement(screen.getByTestId("settings-back-button"));
+    expect(top).not.toHaveAttribute("data-tauri-drag-region");
+  });
+
+  it("without the kept sidebar (the page covers the window) the empty strip clears the traffic lights, as before", async () => {
+    mockPlatform({ desktop: true, os: "macos" });
+    await renderScreen();
+    const top = screen.getByTestId("settings-sidebar-top");
+    expect(top).not.toContainElement(screen.getByTestId("settings-back-button"));
+  });
+});
+

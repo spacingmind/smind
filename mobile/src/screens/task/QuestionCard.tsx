@@ -23,6 +23,7 @@ import {
   submitPayload,
   toggleOption,
 } from '../../questionAnswer';
+import { errorCopy } from '../../permissionCardView';
 import { clampRunes } from '../../permissionRequests';
 import type { QuestionState } from '../../questionRequests';
 import { COLLAPSED_LINES, isLongAsk } from '../../questionView';
@@ -47,6 +48,7 @@ export const QuestionCard = memo(function QuestionCard({
   const questions = state.request.questions;
   const sending = state.status === 'resolved'; // this device's answer is in flight; an event (not a tap) closes the card
   const blocked = sending ? 'Sending your answer…' : submitBlockedReason(questions, drafts);
+  const error = state.error !== null ? errorCopy(state.error) : null;
 
   return (
     <Card style={styles.card}>
@@ -79,6 +81,16 @@ export const QuestionCard = memo(function QuestionCard({
           {blocked}
         </Text>
       ) : null}
+      {error !== null ? (
+        <View style={styles.errorField}>
+          <Text style={styles.error} selectable>
+            {error.headline}
+          </Text>
+          <Text style={styles.errorDetail} selectable>
+            {error.detail}
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.actions}>
         <UiHost>
           <Button
@@ -94,11 +106,6 @@ export const QuestionCard = memo(function QuestionCard({
         </UiHost>
         <TextButton label="Decline" disabled={sending} onPress={() => onAnswer(state.requestId, declinePayload(note))} />
       </View>
-      {state.error !== null ? (
-        <Text style={styles.error} selectable>
-          Couldn't send the answer: {state.error}
-        </Text>
-      ) : null}
     </Card>
   );
 });
@@ -233,6 +240,8 @@ function makeStyles(theme: AppTheme) {
     multiline: { minHeight: 88, textAlignVertical: 'top' },
     actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.spacing[2] },
     button: { height: 44 },
+    errorField: { gap: theme.spacing[1] },
     error: { ...theme.type.small, color: theme.status.danger },
+    errorDetail: { ...theme.type.small, color: theme.foregroundSubtle },
   });
 }

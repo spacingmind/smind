@@ -37,3 +37,68 @@ html[data-desktop-os="macos"] [data-slot="sidebar-inset"] {
 html[data-desktop-os="macos"] [data-settings-sidebar] {
   background: color-mix(in srgb, var(--sidebar) 72%, transparent);
 }
+
+/*
+ * DT-UI B (native pass). Everything below is desktop-build only, like the rest of this file.
+ *
+ * Inactive window (macOS convention): while the window is not the key window the sidebar selection loses half
+ * its strength and the sidebar's icons dim. `html[data-window-active]` is kept by
+ * lib/window-active.ts.
+ */
+html[data-desktop-os][data-window-active="false"] {
+  --selected: rgba(13, 13, 13, 0.025);
+}
+
+html[data-desktop-os][data-window-active="false"].dark {
+  --selected: rgba(255, 255, 255, 0.05);
+}
+
+html[data-desktop-os][data-window-active="false"] [data-slot="sidebar-inner"] svg {
+  opacity: 0.6;
+}
+
+/*
+ * Reduce motion: the system setting removes the UI's own transitions and animations (the sidebar width, menus,
+ * fades). A spinner keeps turning, since it is the only sign that work is going on.
+ */
+@media (prefers-reduced-motion: reduce) {
+  html[data-desktop-os] *:not(.animate-spin),
+  html[data-desktop-os] *:not(.animate-spin)::before,
+  html[data-desktop-os] *:not(.animate-spin)::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Increased contrast: stronger borders and secondary text in both themes. The values are chosen so secondary text
+ * reaches 7:1 on the app surfaces (checked by lib/desktop-native-pass.test.ts).
+ */
+@media (prefers-contrast: more) {
+  html[data-desktop-os] {
+    --muted-foreground: oklch(0.36 0 0);
+    --border: rgba(13, 13, 13, 0.4);
+    --sidebar-border: rgba(13, 13, 13, 0.4);
+    --input: rgba(13, 13, 13, 0.4);
+  }
+  html[data-desktop-os].dark {
+    --muted-foreground: oklch(0.84 0 0);
+    --border: rgba(255, 255, 255, 0.4);
+    --sidebar-border: rgba(255, 255, 255, 0.4);
+    --input: rgba(255, 255, 255, 0.4);
+  }
+}
+
+/*
+ * Reduce transparency: the sidebar paints its plain surface instead of the tint over the native vibrancy. (AppKit
+ * itself turns the vibrancy view solid under the same system setting; this covers the web layer on top of it.)
+ */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-desktop-os="macos"] [data-slot="sidebar-inner"],
+  html[data-desktop-os="macos"] [data-settings-sidebar] {
+    background: var(--sidebar);
+  }
+}
+

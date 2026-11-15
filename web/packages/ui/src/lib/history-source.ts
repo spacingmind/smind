@@ -1,3 +1,4 @@
+import type { TimelineItem } from "@/hooks/use-run-timeline";
 import type { RunHistorySource } from "@/lib/types";
 
 /** What a run's `history` carries (run.attach/run.logs historySource, skeletonReason, canLoadFull) -- the shape RunEntry.history stores. */
@@ -43,17 +44,61 @@ const SKELETON_ROWS: Record<string, SkeletonRow> = {
 
 const UNKNOWN_ROW: SkeletonRow = { tone: "info", message: "Showing a summary of this run." };
 
+/** rebuild_not_requested's copy when the only thing the skeleton dropped is the reasoning text. */
+const REASONING_NOT_KEPT = "Showing a summary: the agent's reasoning was not kept.";
+
 const REBUILT_NOTE: HistorySourceNote = { tone: "info", message: "Full history, rebuilt from the provider's session.", canLoad: false };
+
+/** What the daemon dropped from a skeleton's rows: a trimmed payload, or reasoning that was not kept at all. */
+export type TrimKind = "output" | "thinking";
+
+/** The exact marker the daemon writes inside a head+tail trim (internal/runs/skeleton.go), ellipsis U+2026. */
+const OMITTED_BYTES = /…\[\d+ bytes omitted\]…/;
+
+/** JSON of a tool payload, false when the value cannot be stringified (a circular object) -- one unreadable item must not sink the scan. */
+function toolPayloadHasMarker(value: unknown): boolean {
+  try {
+    return OMITTED_BYTES.test(JSON.stringify(value ?? ""));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a skeleton's rows are missing anything, judged from the rows
+ * themselves: a marker inside an answer, a user message, a tool input or a
+ * tool result means a payload was trimmed ("output"); a thinking item with
+ * no text at all means the reasoning was not kept ("thinking"). A marker
+ * wins over reasoning: one trimmed payload names the larger loss.
+ */
+export function runWasTrimmed(items: readonly TimelineItem[] | undefined): TrimKind | null {
+  if (!items) return null;
+  let thinkingDropped = false;
+  for (const item of items) {
+    if (item.kind === "assistant" || item.kind === "user") {
+      if (OMITTED_BYTES.test(item.text)) return "output";
+    } else if (item.kind === "tool_call") {
+      if (toolPayloadHasMarker(item.input) || toolPayloadHasMarker(item.result)) return "output";
+    } else if (item.kind === "thinking" && item.text === "") {
+      thinkingDropped = true;
+    }
+  }
+  return thinkingDropped ? "thinking" : null;
+}
 
 /**
  * The note a run's history state renders. Callers show no banner at all for
  * source "full" (or no history) -- this function describes the two states
  * that do get one: a trimmed summary (keyed by skeletonReason) and a
- * successful rebuild.
+ * successful rebuild. `trim` (runWasTrimmed's answer for the same run)
+ * switches the rebuild_not_requested copy: that reason alone only means
+ * nobody asked for the full history, so what the note names is what the
+ * rows actually lost.
  */
-export function describeHistorySource(info: HistorySourceInfo): HistorySourceNote {
+export function describeHistorySource(info: HistorySourceInfo, trim?: TrimKind | null): HistorySourceNote {
   if (info.source === "rebuilt") return REBUILT_NOTE;
   const row = info.reason !== undefined ? SKELETON_ROWS[info.reason] : undefined;
   const chosen = row ?? UNKNOWN_ROW;
-  return { tone: chosen.tone, message: chosen.message, canLoad: chosen.loadable === true && info.canLoadFull === true };
+  const message = info.reason === "rebuild_not_requested" && trim === "thinking" ? REASONING_NOT_KEPT : chosen.message;
+  return { tone: chosen.tone, message, canLoad: chosen.loadable === true && info.canLoadFull === true };
 }
