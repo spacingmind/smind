@@ -13,7 +13,9 @@ fn crash_shell_installs_first_in_run() {
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with("//"))
-        .find(|l| *l != "#[cfg(feature = \"audit-guard\")]" && *l != "audit_guard::enforce_or_exit();")
+        .find(|l| {
+            *l != "#[cfg(feature = \"audit-guard\")]" && *l != "audit_guard::enforce_or_exit();"
+        })
         .expect("run() has a first statement");
     assert!(
         first.starts_with("smind_crash_report::install_default("),
