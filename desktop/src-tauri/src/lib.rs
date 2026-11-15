@@ -26,6 +26,7 @@ mod context_menu;
 mod daemon_manager;
 mod deeplink;
 mod editors;
+mod ipc_guard;
 mod lifecycle;
 mod menu;
 mod notify;
@@ -90,6 +91,13 @@ fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         builder = builder.level_for(target, log::LevelFilter::Warn);
     }
     builder.build()
+}
+
+/// The app's compiled context (its configuration, assets and ACL manifest). The one place `generate_context!` is
+/// expanded: a second expansion in the same crate defines the embedded Info.plist symbol twice, so tests that need the real
+/// ACL call this instead.
+pub(crate) fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -163,7 +171,7 @@ pub fn run() {
         // tauri-plugin-single-instance's deep-link feature (registered
         // above), which is why single-instance is set up first.
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(ipc_guard::guarded(tauri::generate_handler![
             commands::connections_list,
             commands::connections_add,
             commands::connections_add_relay,
@@ -197,7 +205,7 @@ pub fn run() {
             window_chrome::window_set_theme,
             updater::app_update_check,
             updater::app_update_install,
-        ])
+        ]))
         .setup(|app| {
             // Resolve the user's login-shell PATH in the background so the
             // managed daemon can find `claude`/`npx` (a GUI app's own PATH is
@@ -249,6 +257,8 @@ pub fn run() {
                     proxy_port::load(&proxy_port_path),
                 ))?;
             proxy_port::save(&proxy_port_path, port);
+            // The calling origin every command is checked against, and the exact-origin capabilities (ADR-0013).
+            ipc_guard::install(app, port);
             tauri::async_runtime::spawn(server_fut);
 
             let proxy_url: Url = format!("http://127.0.0.1:{port}")
@@ -477,7 +487,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("error while building smind desktop")
         .run(lifecycle::handle_run_event);
 }
