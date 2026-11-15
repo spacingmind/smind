@@ -79,6 +79,8 @@ const FAKES = {
     '      echo "  0 valid identities found"',
     "    else",
     '      echo "  1) ABC123 \\"${SMIND_MACOS_SIGN_IDENTITY:-' + IDENTITY + '}\\""',
+    // a long listing after the match, like a keychain with many identities
+    "      yes '  2) FFFF \"Some Other Identity\"' | head -n 30000",
     "    fi",
     "    ;;",
     "esac",
@@ -98,8 +100,6 @@ const FAKES = {
     "done",
     'if [ "$signing" = "1" ]; then exit 0; fi',
     "if [ \"$dv\" = \"1\" ]; then",
-    // one single write: verify.sh pipes this into `grep -q` under pipefail, and a second write
-    // after grep exited would SIGPIPE the fake and fail the pipeline spuriously
     "  NL=$'\\n'",
     '  d="Identifier=x"',
     '  if [ "${FAKE_NO_AUTHORITY:-}" != "1" ]; then d="$d${NL}Authority=' + IDENTITY + '"; fi',
@@ -116,7 +116,11 @@ const FAKES = {
     '    */smind) if [ "${FAKE_NO_RUNTIME_NESTED:-}" = "1" ]; then flags="0x0(none)"; fi ;;',
     "  esac",
     '  d="$d${NL}flags=$flags"',
+    // The real codesign prints a long listing; the details line a script greps for comes first and
+    // the noise after it, so a `| grep -q` under pipefail (grep exits at the first match, the
+    // writer gets SIGPIPE) fails here exactly as it did against real apps.
     '  printf \'%s\\n\' "$d" >&2',
+    "  yes 'CodeDirectory noise line that real codesign prints and nobody greps for' | head -n 30000 >&2",
     "  exit 0",
     "fi",
     'if [ "${1:-}" = "-d" ]; then',

@@ -44,18 +44,22 @@ ents_signed() {
 }
 ents_file() { plutil -p "$1" | tr -d '[:space:]'; }
 
-team_of() { codesign -dv --verbose=4 "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p' | head -1; }
-details() { codesign -dv --verbose=4 "$1" 2>&1; }
+details() { codesign -dv --verbose=4 "$1" 2>&1 || true; }
+# `grep -q` in a pipeline under `set -o pipefail` is a trap: grep exits at the first match, the
+# writer gets SIGPIPE, and the whole pipeline then "fails" on a large output (found by running this
+# script against real signed apps). So the output is captured first and searched as a here-string.
+has() { local out; out="$(details "$1")"; grep -Eq -- "$2" <<<"$out"; }
+team_of() { local out; out="$(details "$1")"; sed -n 's/^TeamIdentifier=//p' <<<"$out" | head -1 || true; }
 
 exe_name="$(plutil -extract CFBundleExecutable raw -o - "$app/Contents/Info.plist")"
 if codesign --verify --strict --verbose=2 "$app" >/dev/null 2>&1; then ok "app: strict signature verifies"; else bad "app: strict signature does not verify"; fi
-if details "$app" | grep -q '^Signature=adhoc'; then bad "app: ad-hoc signature (not Developer ID)"; else ok "app: not ad hoc"; fi
-if details "$app" | grep -q '^Authority=Developer ID Application:'; then ok "app: Developer ID Application authority"; else bad "app: no Developer ID Application authority"; fi
+if has "$app" '^Signature=adhoc'; then bad "app: ad-hoc signature (not Developer ID)"; else ok "app: not ad hoc"; fi
+if has "$app" '^Authority=Developer ID Application:'; then ok "app: Developer ID Application authority"; else bad "app: no Developer ID Application authority"; fi
 app_team="$(team_of "$app")"
 if [ -n "$app_team" ] && [ "$app_team" != "not set" ]; then ok "app: team $app_team"; else bad "app: no Team ID"; fi
 
 check_runtime() { # <label> <path>
-  if details "$2" | grep -Eq 'flags=0x[0-9a-f]+\(.*runtime.*\)'; then ok "$1: hardened runtime"; else bad "$1: hardened runtime flag missing"; fi
+  if has "$2" 'flags=0x[0-9a-f]+\(.*runtime.*\)'; then ok "$1: hardened runtime"; else bad "$1: hardened runtime flag missing"; fi
 }
 check_runtime app "$app"
 for f in "$app"/Contents/MacOS/*; do

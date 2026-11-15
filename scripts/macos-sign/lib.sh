@@ -46,8 +46,8 @@ require_secrets() {
     "Developer ID Application: "*) ;;
     *) refuse "SMIND_MACOS_SIGN_IDENTITY must be a \"Developer ID Application: ...\" identity (a distribution outside the App Store is signed with that certificate type)" ;;
   esac
-  printf '%s' "$SMIND_NOTARY_KEY_ID" | grep -Eq '^[A-Z0-9]{10}$' || refuse "SMIND_NOTARY_KEY_ID is not a 10-character key id"
-  printf '%s' "$SMIND_NOTARY_ISSUER" | grep -Eqi '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' || refuse "SMIND_NOTARY_ISSUER is not a UUID"
+  grep -Eq '^[A-Z0-9]{10}$' <<<"$SMIND_NOTARY_KEY_ID" || refuse "SMIND_NOTARY_KEY_ID is not a 10-character key id"
+  grep -Eqi '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' <<<"$SMIND_NOTARY_ISSUER" || refuse "SMIND_NOTARY_ISSUER is not a UUID"
   printf '%s' "$SMIND_MACOS_CERT_P12_BASE64" | base64 -d >/dev/null 2>&1 || refuse "SMIND_MACOS_CERT_P12_BASE64 is not valid base64"
   printf '%s' "$SMIND_NOTARY_KEY_P8_BASE64" | base64 -d >/dev/null 2>&1 || refuse "SMIND_NOTARY_KEY_P8_BASE64 is not valid base64"
 }
@@ -81,7 +81,7 @@ init_work() {
 # local users in `ps` for that moment, so this is meant for a single-user CI runner or the
 # Human's own machine.
 setup_keychain() {
-  local kcpw p12
+  local kcpw p12 identities
   KEYCHAIN="$WORK/signing.keychain-db"
   kcpw="$(head -c 24 /dev/urandom | base64)"
   p12="$WORK/cert.p12"
@@ -93,7 +93,9 @@ setup_keychain() {
     -T /usr/bin/codesign -T /usr/bin/security >/dev/null
   rm -f "$p12"
   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kcpw" "$KEYCHAIN" >/dev/null
-  if ! security find-identity -v -p codesigning "$KEYCHAIN" | grep -qF -- "$SMIND_MACOS_SIGN_IDENTITY"; then
+  # captured first: `grep -q` at the end of a pipeline under pipefail fails on a large listing
+  identities="$(security find-identity -v -p codesigning "$KEYCHAIN")"
+  if ! grep -qF -- "$SMIND_MACOS_SIGN_IDENTITY" <<<"$identities"; then
     die "the signing identity is not in the imported certificate (or it has expired): check SMIND_MACOS_SIGN_IDENTITY against the .p12"
   fi
   say "signing identity found in a temporary keychain"
