@@ -66,16 +66,31 @@ change: every event used below already exists (`permission.pending`, `question.p
    The OS-level permission cannot be read back through the plugin; if the person denied it in System Settings nothing shows and
    the settings text says to check System Settings.
 
-### C. Focus rules, coalescing, quiet while typing (PR C)
+### C. Focus rules, coalescing, quiet while typing, badge check (PR C)
 
-8. The web app reports its attention state to the shell (new desktop IPC command `attention_focus_report`, allowlisted in the
-   capability file and its exact-allowlist test; it is not a daemon method): the task in front, whether the window is focused,
-   whether the composer has focus.
-9. No notification while the window is focused on that task (the badge still updates).
-10. While the window is focused and the composer has focus, notifications are held (badge still updates) and delivered once,
-    coalesced, when the composer or the window loses focus, if still pending.
-11. A burst coalesces: the first notification of a 3-second window shows at once; the rest of the window collapse into one
-    "N more need you" notification at the end; clicking it opens the most recent card.
+Numbering continues after B (AC 5-8). Nothing here changes what a notification says (fixed text, B) or who may see one
+(consent and per-kind switches, B); it decides *when* a banner shows. The badge never depends on any of it.
+
+9. **The web app reports its attention state to the shell.** One new desktop IPC command `attention_focus_report`
+   `{ taskId: number | null, windowFocused: boolean, composerFocused: boolean }`, allowlisted in `capabilities/proxy.json`, declared in
+   `build.rs`, and added on purpose to the exact-allowlist test; it is not a daemon method. The web sends it only when the
+   tuple changes (task in front, window focus or blur, composer focus or blur), with rapid changes collapsed into one trailing
+   report (100 ms), and sends `windowFocused: false` when the page hides or unloads. The shell keeps it in memory only, validates it
+   (`taskId` null or positive) and treats "no report yet" as "nothing focused" (no suppression: a missing report must never
+   hide a banner). Nothing is sent in the browser build.
+10. **No banner while the window is focused on that task.** A notification whose task is the task in front, with the window
+    focused, shows nothing (a failed run on that task included). The badge still counts it.
+11. **Quiet while typing.** While the window is focused **and** the composer has focus, a banner for another task is held
+    (bounded to 32; the oldest is dropped). Held items are delivered once, together, when the composer or the window loses
+    focus; an item whose request was resolved meanwhile (a permission or question no longer pending) is dropped, a failure is
+    not (it has no pending state). Items held for the task that then comes to the front are dropped too.
+12. **Coalescing.** The first banner of a 3-second window shows at once. Banners that arrive inside the window are queued; when
+    the window ends one queued banner is shown as itself, two or more become **one** banner "sMind: N things need you" with the
+    fixed body "Open sMind to see what is waiting.", whose click opens the most recent card. The next banner after the flush
+    starts a new window. Held items flushed under AC 11 go through the same coalescer.
+13. **Badge check.** The Dock badge and the tray count equal the waiting permissions plus questions at every moment,
+    independent of focus, holding, consent and the per-kind switches; it clears at zero and keeps the existing retry on a
+    failed OS call. (Verified, not rebuilt: it already counts both since B; this adds the test that pins it.)
 
 ## Test scenarios
 
@@ -89,15 +104,17 @@ B: `protocol.rs` (`permission_notification_has_a_fixed_body`, `question_pending_
 `dedupe.rs` (`a_redelivery_notifies_once`, `the_memory_is_bounded`), `app_settings.rs` (`notification_defaults_are_not_asked_and_kinds_on`, `patch_changes_only_the_named_fields`, `an_old_file_without_the_fields_loads`),
 `notify_policy.rs` (`nothing_shows_before_consent`, `an_off_kind_is_silent_but_counts`, `a_kind_on_with_consent_shows`), `capability_tests.rs` (the allowlist gains `allow-notify-test`),
 web `notifications-section.test.tsx` (the desktop group: consent action, three switches, test result, hidden in the browser build).
-C: `focus.rs` (`no_notification_when_focused_on_that_task`, `held_while_composer_focused_then_flushed_once`,
-`held_items_resolved_meanwhile_are_dropped`), `coalesce.rs` (`first_shows_rest_collapse`, `window_resets`, `summary_opens_the_latest`),
-`capability_tests.rs` (the allowlist includes the new command and nothing else), web `use-attention-report.test.ts` (reports on task,
-focus and composer-focus changes; no report storm).
+C: `attention_focus.rs` (`no_banner_when_focused_on_that_task`, `a_banner_for_another_task_shows`, `no_report_means_no_suppression`,
+`held_while_the_composer_is_focused`, `held_items_flush_once_when_the_composer_loses_focus`, `held_items_resolved_meanwhile_are_dropped`,
+`a_held_failure_is_not_dropped`, `the_held_list_is_bounded`, `the_command_rejects_a_non_positive_task_id`),
+`coalesce.rs` (`first_shows_rest_collapse`, `one_queued_item_shows_as_itself`, `the_window_restarts_after_a_flush`,
+`the_summary_targets_the_latest`, `the_summary_text_is_fixed`, time-injected), `attention.rs` (`badge_count_is_waiting_permissions_plus_questions`,
+`the_count_clears_at_zero`), `capability_tests.rs` (the allowlist gains `allow-attention-focus-report`), web `use-attention-report.test.ts`
+(reports on a task change, window focus and blur, composer focus and blur; an identical state is not re-sent; rapid changes collapse to one
+trailing report; a page hide reports window unfocused; a no-op in the browser build) and a `platform.test.ts` case for the bridge method.
 
-Frames (web, light and dark, 1280 and 390): the permission card and the question card focused after a click-through (the
-focus ring) with the composer focused beforehand. Real-window frames and a real OS notification are not part of this plan's
-checks: the screen may be locked and the OS owns the banner; the Rust logic is covered by unit tests and the web half by frames,
-and the PRs say so.
+Frames: PR C has no new UI (the reporter has no visible state), so it carries no frames; the logic is covered by the unit tests above
+and the PR says so. A real-window run (focus, typing, a real banner) is not possible here (the OS owns the banner, and the screen may be locked).
 
 ## Decisions
 
@@ -107,13 +124,14 @@ and the PRs say so.
 - The web reports attention state through a new allowlisted IPC command rather than the shell guessing from the webview URL
   (the URL does not show the composer focus). Reversible: remove the command and the shell falls back to "no suppression".
 - Coalescing window 3 s; held-while-typing items are flushed once, not replayed.
+- Focus state is memory-only in the shell, and a missing report means no suppression (fail open: a banner is never hidden by a bug).
 
 ## Progress
 
 - [x] spec
 - [x] A: click-through to the exact card (PR A)
 - [ ] B: questions and failed runs, dedupe, badge
-- [ ] C: focus rules, coalescing, quiet while typing
+- [ ] C: focus rules, coalescing, quiet while typing, badge check (PR C)
 
 ## Validation
 
