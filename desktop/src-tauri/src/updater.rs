@@ -468,6 +468,25 @@ mod tests {
         );
     }
 
+    /// updater-signed-version AC1: the updater only trusts a signature that carries the version
+    /// it was signed for, and never downgrades by config. Without the flag a versionless
+    /// signature skips the announced-vs-signed version check (docs/plans/active/
+    /// desktop-require-signed-version.md).
+    #[test]
+    fn updater_config_requires_signed_version() {
+        let conf: Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json parses");
+        let updater = &conf["plugins"]["updater"];
+        assert_eq!(
+            updater["requireSignedVersion"],
+            Value::Bool(true),
+            "plugins.updater.requireSignedVersion must stay true"
+        );
+        assert!(
+            updater.get("allowDowngrades").is_none() || updater["allowDowngrades"] == Value::Bool(false),
+            "allowDowngrades must never be enabled"
+        );
+    }
+
     #[test]
     fn create_updater_artifacts_opt_in_only() {
         let conf: Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json parses");
