@@ -16,6 +16,7 @@ export function PaneHeader({
   title,
   subtitle,
   actions,
+  actionsClassName,
   className,
   testId,
 }: {
@@ -25,6 +26,8 @@ export function PaneHeader({
   subtitle?: ReactNode;
   /** The right-aligned action slot -- buttons, toggles, status text. */
   actions?: ReactNode;
+  /** Extra classes for the action slot (the Diff header lets it wrap in a narrow pane). */
+  actionsClassName?: string;
   className?: string;
   testId?: string;
 }) {
@@ -40,7 +43,7 @@ export function PaneHeader({
           <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm text-foreground-muted", title && "mt-0.5")}>{subtitle}</div>
         )}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className={cn("flex shrink-0 items-center gap-2", actionsClassName)}>{actions}</div>}
     </div>
   );
 }
