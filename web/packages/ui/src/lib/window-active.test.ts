@@ -37,6 +37,16 @@ describe("trackWindowActive", () => {
     stop();
   });
 
+  it("reads the focus after the event, not during it: a blur that is followed by focus inside the page stays active", () => {
+    const stop = trackWindowActive();
+    hasFocus = false; // the instant of the blur event: focus is between elements
+    window.dispatchEvent(new Event("blur"));
+    hasFocus = true; // focus has landed in an iframe by the next tick
+    vi.runAllTimers();
+    expect(document.documentElement.dataset.windowActive).toBe("true");
+    stop();
+  });
+
   it("starts inactive when the window is not focused, and the cleanup removes the attribute and the listeners", () => {
     hasFocus = false;
     const stop = trackWindowActive();

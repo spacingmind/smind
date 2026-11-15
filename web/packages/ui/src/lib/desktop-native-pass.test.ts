@@ -31,7 +31,10 @@ function declared(block: string, selector: RegExp, name: string): string {
 describe("desktop native pass CSS", () => {
   it.each(["prefers-reduced-motion: reduce", "prefers-contrast: more", "prefers-reduced-transparency: reduce"])("%s is handled, and only in the desktop build", (query) => {
     const block = mediaBlock(query);
-    for (const selector of block.match(/^\s*html[^{,]*/gm) ?? []) expect(selector).toContain("[data-desktop-os");
+    // Every selector of every rule in the block, whatever it starts with.
+    const selectors = [...block.slice(block.indexOf("{") + 1).matchAll(/([^{}@]+)\{/g)].flatMap((m) => m[1]!.split(",").map((x) => x.trim()).filter(Boolean));
+    expect(selectors.length).toBeGreaterThan(0);
+    for (const selector of selectors) expect(selector, selector).toContain("[data-desktop-os");
   });
 
   it("reduced motion keeps spinners turning", () => {
