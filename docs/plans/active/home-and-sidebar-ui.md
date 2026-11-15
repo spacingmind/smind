@@ -59,7 +59,7 @@ GLM Peers first with step-by-step briefs, one Peer per PR; the Lead reviews each
 
 ### PR 2
 - AC6-AC11: the named tests above plus `pinned-needs-you-excludes-tasks-that-only-finished` and the bucket-split table in `sidebar-status-groups.test.ts`; full web suite 5473 passed, `tsc` clean. No mobile file reads these buckets.
-- Frames: pinned section, selection from the section, collapsed section and status view, light and dark, web 1280 and 390 (the 390 sidebar is the drawer); 20 frames, luminance and no-overflow pass, every pair opened. The quiet state (no pending ask: no pinned section) was framed before the bucket split and is unit-tested after it.
+- Frames: pinned section, selection from the section, collapsed section and status view, light and dark, web 1280 and 390 (the 390 sidebar is the drawer); 24 frames, luminance and no-overflow pass, every pair opened. The quiet state (six unseen finishes, no pending ask: no pinned section; all seen: none) was re-framed on the final code after the bucket split, and `pinned-section-absent-when-many-tasks-are-unseen-finishes-and-nothing-is-pending` pins it (mutations feeding the section from the ready bucket, from needs-attention plus ready, or routing finishes to needs-attention each fail it).
 - Mutations: see the PR body.
 - Not verified: real-window desktop; long-title rows with a diffstat in frames (unit-tested).
 
