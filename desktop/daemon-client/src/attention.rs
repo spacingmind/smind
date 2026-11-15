@@ -19,6 +19,17 @@ pub struct Attention {
     /// same requestId does not push a second entry (see `on_pending`).
     order: Vec<String>,
     task_of: HashMap<String, i64>,
+    chat_of: HashMap<String, i64>,
+}
+
+/// What the tray's attention item opens: the task, the chat whose tab
+/// holds the request's card, and the request id itself (the `?card=`
+/// the web route carries).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingRef {
+    pub task_id: i64,
+    pub chat_id: i64,
+    pub request_id: String,
 }
 
 impl Attention {
@@ -29,11 +40,12 @@ impl Attention {
     /// on_pending records a still-unresolved permission request. A
     /// repeat of the same requestId (e.g. redelivered after a reconnect)
     /// does not grow the count.
-    pub fn on_pending(&mut self, task_id: i64, request_id: &str) {
+    pub fn on_pending(&mut self, task_id: i64, chat_id: i64, request_id: &str) {
         if !self.task_of.contains_key(request_id) {
             self.order.push(request_id.to_string());
         }
         self.task_of.insert(request_id.to_string(), task_id);
+        self.chat_of.insert(request_id.to_string(), chat_id);
     }
 
     /// on_permission_resolved clears exactly the request that was
@@ -41,6 +53,7 @@ impl Attention {
     pub fn on_permission_resolved(&mut self, request_id: &str) {
         if self.task_of.remove(request_id).is_some() {
             self.order.retain(|rid| rid != request_id);
+            self.chat_of.remove(request_id);
         }
     }
 
@@ -51,6 +64,8 @@ impl Attention {
         let task_of = &self.task_of;
         self.order.retain(|rid| task_of.get(rid) != Some(&task_id));
         self.task_of.retain(|_, tid| *tid != task_id);
+        let task_of = &self.task_of;
+        self.chat_of.retain(|rid, _| task_of.contains_key(rid));
     }
 
     /// on_run_ended clears a task's entries when its run stopped, failed
@@ -65,16 +80,29 @@ impl Attention {
     pub fn reset(&mut self) {
         self.order.clear();
         self.task_of.clear();
+        self.chat_of.clear();
     }
 
     pub fn count(&self) -> usize {
         self.order.len()
     }
 
-    /// most_recent_task is the task whose permission arrived last --
-    /// what clicking the tray's attention item opens.
+    /// most_recent is the request whose permission arrived last -- what
+    /// clicking the tray's attention item opens (task, chat and request).
+    pub fn most_recent(&self) -> Option<PendingRef> {
+        self.order.last().and_then(|rid| {
+            Some(PendingRef {
+                task_id: self.task_of.get(rid).copied()?,
+                chat_id: self.chat_of.get(rid).copied().unwrap_or(0),
+                request_id: rid.clone(),
+            })
+        })
+    }
+
+    /// most_recent_task is most_recent's task id alone, for callers that
+    /// only navigate to the task.
     pub fn most_recent_task(&self) -> Option<i64> {
-        self.order.last().and_then(|rid| self.task_of.get(rid).copied())
+        self.most_recent().map(|p| p.task_id)
     }
 }
 
@@ -95,25 +123,25 @@ mod tests {
     fn pending_counts_up() {
         let mut a = Attention::new();
         assert_eq!(a.count(), 0);
-        a.on_pending(1, "req-1");
+        a.on_pending(1, 7, "req-1");
         assert_eq!(a.count(), 1);
-        a.on_pending(2, "req-2");
+        a.on_pending(2, 8, "req-2");
         assert_eq!(a.count(), 2);
     }
 
     #[test]
     fn duplicate_request_id_counted_once() {
         let mut a = Attention::new();
-        a.on_pending(1, "req-1");
-        a.on_pending(1, "req-1");
+        a.on_pending(1, 7, "req-1");
+        a.on_pending(1, 7, "req-1");
         assert_eq!(a.count(), 1);
     }
 
     #[test]
     fn run_running_clears_its_task_only() {
         let mut a = Attention::new();
-        a.on_pending(1, "req-1");
-        a.on_pending(2, "req-2");
+        a.on_pending(1, 7, "req-1");
+        a.on_pending(2, 8, "req-2");
         a.on_run_running(1);
         assert_eq!(a.count(), 1);
         assert_eq!(a.most_recent_task(), Some(2));
@@ -122,8 +150,8 @@ mod tests {
     #[test]
     fn resolved_clears_only_that_request() {
         let mut a = Attention::new();
-        a.on_pending(1, "req-1");
-        a.on_pending(1, "req-2");
+        a.on_pending(1, 7, "req-1");
+        a.on_pending(1, 8, "req-2");
         a.on_permission_resolved("req-1");
         assert_eq!(a.count(), 1);
         assert_eq!(a.most_recent_task(), Some(1));
@@ -134,7 +162,7 @@ mod tests {
     #[test]
     fn resolved_for_unknown_request_is_a_noop() {
         let mut a = Attention::new();
-        a.on_pending(1, "req-1");
+        a.on_pending(1, 7, "req-1");
         a.on_permission_resolved("nope");
         assert_eq!(a.count(), 1);
     }
@@ -142,8 +170,8 @@ mod tests {
     #[test]
     fn run_ended_clears_its_task_only() {
         let mut a = Attention::new();
-        a.on_pending(1, "req-1");
-        a.on_pending(2, "req-2");
+        a.on_pending(1, 7, "req-1");
+        a.on_pending(2, 8, "req-2");
         a.on_run_ended(2);
         assert_eq!(a.count(), 1);
         assert_eq!(a.most_recent_task(), Some(1));
@@ -152,8 +180,8 @@ mod tests {
     #[test]
     fn most_recent_task_falls_back_after_resolve() {
         let mut a = Attention::new();
-        a.on_pending(1, "req-1");
-        a.on_pending(2, "req-2");
+        a.on_pending(1, 7, "req-1");
+        a.on_pending(2, 8, "req-2");
         a.on_permission_resolved("req-2");
         assert_eq!(a.most_recent_task(), Some(1));
     }
@@ -161,8 +189,8 @@ mod tests {
     #[test]
     fn reset_clears_everything() {
         let mut a = Attention::new();
-        a.on_pending(1, "req-1");
-        a.on_pending(2, "req-2");
+        a.on_pending(1, 7, "req-1");
+        a.on_pending(2, 8, "req-2");
         a.reset();
         assert_eq!(a.count(), 0);
         assert_eq!(a.most_recent_task(), None);
@@ -171,12 +199,29 @@ mod tests {
     #[test]
     fn most_recent_task_is_latest_arrival() {
         let mut a = Attention::new();
-        a.on_pending(1, "req-1");
-        a.on_pending(2, "req-2");
-        a.on_pending(3, "req-3");
+        a.on_pending(1, 7, "req-1");
+        a.on_pending(2, 8, "req-2");
+        a.on_pending(3, 9, "req-3");
         assert_eq!(a.most_recent_task(), Some(3));
         a.on_run_running(3);
         assert_eq!(a.most_recent_task(), Some(2));
+    }
+
+    #[test]
+    fn most_recent_returns_chat_and_request() {
+        let mut a = Attention::new();
+        assert_eq!(a.most_recent(), None);
+        a.on_pending(1, 7, "req-1");
+        a.on_pending(2, 8, "req-2");
+        assert_eq!(
+            a.most_recent(),
+            Some(PendingRef { task_id: 2, chat_id: 8, request_id: "req-2".to_string() })
+        );
+        a.on_permission_resolved("req-2");
+        assert_eq!(
+            a.most_recent(),
+            Some(PendingRef { task_id: 1, chat_id: 7, request_id: "req-1".to_string() })
+        );
     }
 
     #[test]

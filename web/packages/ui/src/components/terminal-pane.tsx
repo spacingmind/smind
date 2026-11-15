@@ -6,14 +6,18 @@ import "@xterm/xterm/css/xterm.css";
 
 import { FindBar, type FindBarHandle } from "@/components/find/find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
+import { SendToAgentMenu, type SendEntry } from "@/components/send-to-agent-menu";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { TerminalKeyBar, type TerminalModifier } from "@/components/terminal-key-bar";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
+import { useSendTextToChat } from "@/hooks/use-send-text-to-chat";
 import { useTheme } from "@/hooks/use-theme";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
+import { formatBytes } from "@/lib/attachments/format";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { openExternalUrl } from "@/lib/external-link";
+import { buildTerminalBlock } from "@/lib/send-set";
 import { activateTerminalLink, findTerminalLinks, type TerminalLinkMatch } from "@/lib/terminal-links";
 import { resolveTerminalPath } from "@/lib/terminal-path";
 import { encodeTerminalKey, hasPendingModifiers, resolvePendingModifierData, terminalKeyInput } from "@/lib/terminal-keys";
@@ -71,6 +75,8 @@ export interface TerminalHandle {
   getSelection?(): string;
   /** Fires whenever the selection changes, so Copy can be disabled when there's nothing to copy. A handle that can't report this leaves Copy enabled -- a silent no-op beats a permanently-dead button. */
   onSelectionChange?(callback: () => void): { dispose(): void };
+  /** The last `count` non-empty lines of the scrollback, for the "Send to agent" menu's Last-100-lines entry (DT3-C). Optional for the same reason setTheme is -- a handle without it simply disables that entry. */
+  getLastLines?(count: number): string;
   /** Find over the scrollback (AC3, `@xterm/addon-search`). Optional so FakeTerminalHandle (this file's own test suite) doesn't need it -- a handle without `find` never shows the Find affordance at all, never a dead shortcut. */
   find?: TerminalFindHandle;
   /** Whether the shell switched the cursor keys to application mode (SS3 arrows). Optional for the same reason setTheme is; absent means normal mode. */
@@ -134,6 +140,13 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
       term.options.theme = theme;
     },
     getSelection: () => term.getSelection(),
+    getLastLines: (count) => {
+      const buffer = term.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+      while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+      return lines.slice(-count).join("\n");
+    },
     applicationCursorKeys: () => term.modes.applicationCursorKeysMode,
     onSelectionChange: (callback) => term.onSelectionChange(callback),
     setLinkHandler: (handler) => {
@@ -315,6 +328,11 @@ export function TerminalPane({
   const [findResult, setFindResult] = useState<TerminalFindResult>({ resultIndex: -1, resultCount: 0 });
   const findBarRef = useRef<FindBarHandle>(null);
   const { focused: findFocused, onFocus: onFindFocus, onBlur: onFindBlur } = usePaneFocusWithin();
+
+  // Send to agent (DT3-C): read at menu-open time (SendToAgentMenu's
+  // getEntries below), never captured here -- the selection and the
+  // scrollback are only fresh at the moment the menu is opened.
+  const send = useSendTextToChat(task.ID);
 
   // Read at data-arrival time rather than captured by the attach closure,
   // which is created once per session and would otherwise pin whichever
@@ -713,6 +731,28 @@ export function TerminalPane({
   }, []);
   useActionHandler("pane.find", openFind, { enabled: findFocused, menuFallback: true });
 
+  /** The terminal's "Send to agent" entries (DT3-C AC10): read the selection and the scrollback tail only when the menu opens, so the shown sizes are fresh. */
+  const getSendEntries = useCallback((): SendEntry[] => {
+    const selection = termRef.current?.getSelection?.() ?? "";
+    const last = termRef.current?.getLastLines?.(100) ?? "";
+    return [
+      {
+        id: "selection",
+        label: "Selection",
+        disabled: selection === "",
+        detail: selection === "" ? "nothing selected" : formatBytes(buildTerminalBlock(selection, "selection").shownBytes),
+        onSelect: () => send.sendText(selection, "selection", "Terminal selection"),
+      },
+      {
+        id: "last-100",
+        label: "Last 100 lines",
+        disabled: last === "",
+        detail: last === "" ? "no output" : formatBytes(buildTerminalBlock(last, "last 100 lines").shownBytes),
+        onSelect: () => send.sendText(last, "last 100 lines", "Terminal output"),
+      },
+    ];
+  }, [send]);
+
   useEffect(() => {
     if (findOpen) findBarRef.current?.focus();
   }, [findOpen]);
@@ -893,6 +933,12 @@ export function TerminalPane({
         <p data-testid="terminal-link-notice" className="px-3 py-1 text-ui-sm text-foreground-subtle">
           {linkNotice}
         </p>
+      )}
+      {/* A slim row of its own: a floating button would sit on top of the output's first line at 390. */}
+      {send.canSend && (
+        <div className="flex justify-end border-b bg-terminal-bg px-2 py-0.5" data-testid="terminal-send-row">
+          <SendToAgentMenu testId="terminal-send-menu" getEntries={getSendEntries} />
+        </div>
       )}
       <div data-testid="terminal-inset" className="relative min-h-0 flex-1 bg-terminal-bg p-2">
         {/* Inset lives on this wrapper, never on the fit host: FitAddon ignores the host's own padding. */}

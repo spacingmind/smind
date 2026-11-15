@@ -5,9 +5,11 @@
 
 use url::Url;
 
-/// The tab kind a notification/tray/deep-link click navigates to -- the
-/// base "task" tab, matching `route.ts`'s own base kinds.
-pub const DEFAULT_KIND: &str = "task";
+/// The tab kind a notification/tray/deep-link click navigates to when no
+/// chat is known -- the base "files" tab, one of `route.ts`'s own base
+/// kinds (a tab kind like the removed "task" would make the web
+/// `parseRoute` reject the route, leaving the click focus-only).
+pub const DEFAULT_KIND: &str = "files";
 
 /// task_route_hash builds the `#/workspace/<ws>/task/<id>/<kind>` fragment.
 pub fn task_route_hash(workspace_id: i64, task_id: i64, kind: &str) -> String {
@@ -20,6 +22,27 @@ pub fn task_route_url(daemon_url: &Url, workspace_id: i64, task_id: i64, kind: &
     let mut base = daemon_url.as_str().trim_end_matches('/').to_string();
     base.push('/');
     base.push_str(&task_route_hash(workspace_id, task_id, kind));
+    base
+}
+
+/// card_route_hash builds the `#/workspace/<ws>/task/<id>/chat/<chatId>`
+/// fragment, with `?card=<requestId>` when a request id is given -- the
+/// exact card a pending permission/question lives at.
+pub fn card_route_hash(workspace_id: i64, task_id: i64, chat_id: i64, request_id: Option<&str>) -> String {
+    let mut hash = format!("#/workspace/{workspace_id}/task/{task_id}/chat/{chat_id}");
+    if let Some(id) = request_id.filter(|id| !id.is_empty()) {
+        hash.push_str("?card=");
+        hash.extend(url::form_urlencoded::byte_serialize(id.as_bytes()));
+    }
+    hash
+}
+
+/// card_route_url builds the full `<daemonUrl>/#/workspace/.../chat/...`
+/// URL the webview should navigate to, joining like task_route_url.
+pub fn card_route_url(daemon_url: &Url, workspace_id: i64, task_id: i64, chat_id: i64, request_id: Option<&str>) -> String {
+    let mut base = daemon_url.as_str().trim_end_matches('/').to_string();
+    base.push('/');
+    base.push_str(&card_route_hash(workspace_id, task_id, chat_id, request_id));
     base
 }
 
@@ -61,16 +84,16 @@ mod tests {
 
     #[test]
     fn hash_shape_matches_route_ts() {
-        assert_eq!(task_route_hash(3, 42, "task"), "#/workspace/3/task/42/task");
         assert_eq!(task_route_hash(3, 42, "files"), "#/workspace/3/task/42/files");
+        assert_eq!(task_route_hash(3, 42, "diff"), "#/workspace/3/task/42/diff");
     }
 
     #[test]
     fn url_joins_daemon_base() {
         let base = Url::parse("http://127.0.0.1:4648").unwrap();
         assert_eq!(
-            task_route_url(&base, 3, 42, "task"),
-            "http://127.0.0.1:4648/#/workspace/3/task/42/task"
+            task_route_url(&base, 3, 42, "files"),
+            "http://127.0.0.1:4648/#/workspace/3/task/42/files"
         );
     }
 
@@ -78,9 +101,47 @@ mod tests {
     fn url_joins_with_trailing_slash_base() {
         let base = Url::parse("http://127.0.0.1:4648/").unwrap();
         assert_eq!(
-            task_route_url(&base, 3, 42, "task"),
-            "http://127.0.0.1:4648/#/workspace/3/task/42/task"
+            task_route_url(&base, 3, 42, "files"),
+            "http://127.0.0.1:4648/#/workspace/3/task/42/files"
         );
+    }
+
+    #[test]
+    fn chat_route_url_with_card() {
+        let base = Url::parse("http://127.0.0.1:4648").unwrap();
+        assert_eq!(
+            card_route_url(&base, 3, 42, 7, Some("req_9")),
+            "http://127.0.0.1:4648/#/workspace/3/task/42/chat/7?card=req_9"
+        );
+    }
+
+    #[test]
+    fn chat_route_without_request_has_no_query() {
+        let base = Url::parse("http://127.0.0.1:4648").unwrap();
+        assert_eq!(
+            card_route_url(&base, 3, 42, 7, None),
+            "http://127.0.0.1:4648/#/workspace/3/task/42/chat/7"
+        );
+        assert_eq!(
+            card_route_url(&base, 3, 42, 7, Some("")),
+            "http://127.0.0.1:4648/#/workspace/3/task/42/chat/7"
+        );
+    }
+
+    #[test]
+    fn request_id_is_percent_encoded() {
+        assert_eq!(
+            card_route_hash(3, 42, 7, Some("a b&c")),
+            "#/workspace/3/task/42/chat/7?card=a+b%26c"
+        );
+    }
+
+    #[test]
+    fn fallback_route_has_a_kind_the_web_accepts() {
+        let base = Url::parse("http://127.0.0.1:4648").unwrap();
+        let url = task_route_url(&base, 3, 42, DEFAULT_KIND);
+        assert!(url.ends_with("/files"), "{url}");
+        assert!(["files", "diff", "terminal", "pr"].contains(&DEFAULT_KIND));
     }
 
     #[test]

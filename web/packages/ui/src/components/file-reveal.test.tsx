@@ -1,5 +1,6 @@
 import { act } from "react";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { editorViewRegistry } from "@/components/code-mirror-editor";

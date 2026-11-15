@@ -69,13 +69,18 @@ fn on_event(
 ) {
     match event {
         ClientEvent::Notification(n) => {
-            tray.on_permission_pending(n.task_id, &n.request_id);
+            let target = notify::Target {
+                task_id: n.task_id,
+                chat_id: n.chat_id,
+                request_id: Some(n.request_id.clone()),
+            };
+            tray.on_permission_pending(n.task_id, n.chat_id, &n.request_id);
             let ctx = notify::ClickContext {
                 app: app.clone(),
                 cache: cache.clone(),
                 proxy_url: proxy_url.clone(),
             };
-            notify::show(ctx, n.title, n.body, n.task_id);
+            notify::show(ctx, n.title, n.body, target);
         }
         ClientEvent::RunRunning { task_id } => tray.on_run_running(task_id),
         ClientEvent::RunEnded { task_id } => tray.on_run_ended(task_id),
@@ -268,11 +273,20 @@ mod password_tests {
         let old = password_cell("relay:test-host@relay.example:7400", &old_key);
         old.set("typed-for-the-old-daemon".into());
         let same = password_cell("relay:test-host@relay.example:7400", &old_key);
-        assert!(same.is_set(), "the same daemon keeps its password across restarts of the loop");
+        assert!(
+            same.is_set(),
+            "the same daemon keeps its password across restarts of the loop"
+        );
         let other = password_cell("relay:test-host@relay.example:7400", &new_key);
-        assert!(!other.is_set(), "a different daemon key must start with no password");
+        assert!(
+            !other.is_set(),
+            "a different daemon key must start with no password"
+        );
         forget_password("relay:test-host@relay.example:7400");
-        assert!(!password_cell("relay:test-host@relay.example:7400", &old_key).is_set(), "removal forgets every key's password");
+        assert!(
+            !password_cell("relay:test-host@relay.example:7400", &old_key).is_set(),
+            "removal forgets every key's password"
+        );
         assert!(!old.is_set());
     }
 }

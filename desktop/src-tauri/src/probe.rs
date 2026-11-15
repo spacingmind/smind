@@ -35,7 +35,14 @@ struct Healthz {
 
 impl ProbeResult {
     fn unreachable(loopback: bool, error: impl Into<String>) -> Self {
-        ProbeResult { reachable: false, version: None, service: None, auth_required: false, loopback, error: Some(error.into()) }
+        ProbeResult {
+            reachable: false,
+            version: None,
+            service: None,
+            auth_required: false,
+            loopback,
+            error: Some(error.into()),
+        }
     }
 }
 
@@ -77,7 +84,9 @@ pub async fn probe(raw_url: &str) -> ProbeResult {
         Ok(url) => without_userinfo(url),
         // validate_base_url echoes what was typed, which may hold a password
         // or a pairing secret: report only the reason.
-        Err(e) if e.contains("relay pairing link") || e.contains("must not contain credentials") => {
+        Err(e)
+            if e.contains("relay pairing link") || e.contains("must not contain credentials") =>
+        {
             return ProbeResult::unreachable(false, e)
         }
         Err(_) => return ProbeResult::unreachable(false, "not a valid http(s) daemon URL"),
@@ -85,7 +94,11 @@ pub async fn probe(raw_url: &str) -> ProbeResult {
     let loopback = is_loopback_host(&base);
     let mut url = base;
     url.set_path("/healthz");
-    let client = match reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(PROBE_TIMEOUT).build() {
+    let client = match reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(PROBE_TIMEOUT)
+        .build()
+    {
         Ok(c) => c,
         Err(_) => return ProbeResult::unreachable(loopback, "could not start the request"),
     };
@@ -104,7 +117,8 @@ pub async fn probe(raw_url: &str) -> ProbeResult {
         service: body.as_ref().and_then(|h| h.service.clone()),
         auth_required: body.as_ref().is_some_and(|h| h.auth_required),
         loopback,
-        error: (!status.is_success()).then(|| format!("the address answered HTTP {}", status.as_u16())),
+        error: (!status.is_success())
+            .then(|| format!("the address answered HTTP {}", status.as_u16())),
     }
 }
 
@@ -128,7 +142,9 @@ pub(crate) mod test_support {
         let log = seen.clone();
         std::thread::spawn(move || {
             for reply in replies {
-                let Ok((mut sock, _)) = listener.accept() else { return };
+                let Ok((mut sock, _)) = listener.accept() else {
+                    return;
+                };
                 let mut buf = vec![0u8; 8192];
                 let mut got = 0;
                 // Read until the headers (and a short JSON body) have arrived.
@@ -140,7 +156,10 @@ pub(crate) mod test_support {
                         let len = text[..i]
                             .to_ascii_lowercase()
                             .lines()
-                            .find_map(|l| l.strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                            .find_map(|l| {
+                                l.strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
                             .unwrap_or(0);
                         got >= i + 4 + len
                     });
@@ -148,7 +167,9 @@ pub(crate) mod test_support {
                         break;
                     }
                 }
-                log.lock().unwrap().push(String::from_utf8_lossy(&buf[..got]).to_string());
+                log.lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&buf[..got]).to_string());
                 let _ = sock.write_all(reply.as_bytes());
             }
         });
@@ -171,11 +192,20 @@ mod tests {
 
     #[tokio::test]
     async fn connections_probe_reports_reachable_version_service_and_auth() {
-        let (url, seen) = stub(vec![leak(ok_json(r#"{"status":"ok","service":"smind","version":"0.11.1","authRequired":true}"#))]);
+        let (url, seen) = stub(vec![leak(ok_json(
+            r#"{"status":"ok","service":"smind","version":"0.11.1","authRequired":true}"#,
+        ))]);
         let got = probe(&format!("{url}/some/path?x=1")).await;
         assert_eq!(
             got,
-            ProbeResult { reachable: true, version: Some("0.11.1".into()), service: Some("smind".into()), auth_required: true, loopback: true, error: None }
+            ProbeResult {
+                reachable: true,
+                version: Some("0.11.1".into()),
+                service: Some("smind".into()),
+                auth_required: true,
+                loopback: true,
+                error: None
+            }
         );
         let req = seen.lock().unwrap()[0].clone();
         assert!(req.starts_with("GET /healthz "), "{req}");
@@ -183,14 +213,18 @@ mod tests {
 
     #[tokio::test]
     async fn connections_probe_rejects_non_smind_healthz() {
-        let (url, _) = stub(vec![leak(ok_json(r#"{"service":"nginx","version":"1.0"}"#))]);
+        let (url, _) = stub(vec![leak(ok_json(
+            r#"{"service":"nginx","version":"1.0"}"#,
+        ))]);
         let got = probe(&url).await;
         assert!(got.reachable);
         assert_eq!(got.service.as_deref(), Some("nginx"));
         assert!(!got.auth_required);
 
         // Not JSON at all: reachable, no service.
-        let (url, _) = stub(vec!["HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi"]);
+        let (url, _) = stub(vec![
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi",
+        ]);
         let got = probe(&url).await;
         assert!(got.reachable);
         assert_eq!(got.service, None);
@@ -199,28 +233,44 @@ mod tests {
     #[tokio::test]
     async fn connections_probe_unreachable_is_not_an_error() {
         // A port nothing listens on.
-        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let got = connections_probe(format!("http://127.0.0.1:{port}")).await.expect("never Err");
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let got = connections_probe(format!("http://127.0.0.1:{port}"))
+            .await
+            .expect("never Err");
         assert!(!got.reachable);
         assert!(got.loopback);
         let err = got.error.expect("an explanation");
         assert!(!err.contains("127.0.0.1"), "{err}");
 
-        let creds = connections_probe("http://user:hunter2@127.0.0.1:1".to_string()).await.unwrap();
+        let creds = connections_probe("http://user:hunter2@127.0.0.1:1".to_string())
+            .await
+            .unwrap();
         assert!(!creds.reachable);
-        assert_eq!(creds.error.as_deref(), Some("a daemon URL must not contain credentials"));
+        assert_eq!(
+            creds.error.as_deref(),
+            Some("a daemon URL must not contain credentials")
+        );
 
-        let bad = connections_probe("ftp://user:hunter2@host".to_string()).await.unwrap();
+        let bad = connections_probe("ftp://user:hunter2@host".to_string())
+            .await
+            .unwrap();
         assert!(!bad.reachable);
         assert!(!bad.error.unwrap().contains("hunter2"));
-        let link = connections_probe("https://relay.example/#offer=abc".to_string()).await.unwrap();
+        let link = connections_probe("https://relay.example/#offer=abc".to_string())
+            .await
+            .unwrap();
         assert!(link.error.unwrap().contains("relay pairing link"));
     }
 
     #[tokio::test]
     async fn oversized_healthz_body_is_not_smind() {
         let filler = "x".repeat(200 * 1024);
-        let body: &'static str = Box::leak(format!(r#"{{"service":"smind","pad":"{filler}"}}"#).into_boxed_str());
+        let body: &'static str =
+            Box::leak(format!(r#"{{"service":"smind","pad":"{filler}"}}"#).into_boxed_str());
         let (url, _) = stub(vec![leak(ok_json(body))]);
         let got = probe(&url).await;
         assert!(got.reachable);

@@ -49,6 +49,7 @@ fn capability_allowlist_exact() {
         "allow-app-update-install",
         "allow-app-quit",
         "allow-app-menu-action",
+        "allow-context-menu-show",
         "core:window:allow-minimize",
         "core:window:allow-toggle-maximize",
         "core:window:allow-internal-toggle-maximize",

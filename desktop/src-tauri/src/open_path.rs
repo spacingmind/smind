@@ -21,8 +21,8 @@ use crate::state::DesktopState;
 /// bat cmd ps1 sh msi dmg jar lnk url desktop scr`), scripts, and `html`/`svg` (a browser with file access) are
 /// refused by default.
 pub const ALLOWED_EXTENSIONS: [&str; 19] = [
-    "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf", "csv", "txt", "md", "png", "jpg",
-    "jpeg", "gif", "webp",
+    "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf", "csv", "txt",
+    "md", "png", "jpg", "jpeg", "gif", "webp",
 ];
 
 /// The refusals, as the UI shows them. None carries a path.
@@ -72,7 +72,9 @@ impl OpenProbe for RealOpenProbe {
     fn is_regular_file(&self, path: &str) -> bool {
         // symlink_metadata: a link is not a regular file even if its target is (the path is already canonical,
         // so a link here means something raced in after the canonicalize).
-        std::fs::symlink_metadata(path).map(|m| m.file_type().is_file()).unwrap_or(false)
+        std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_file())
+            .unwrap_or(false)
     }
 }
 
@@ -108,10 +110,20 @@ fn is_not_relative(rel: &str, windows: bool) -> bool {
 }
 
 fn components(path: &str, windows: bool) -> Vec<String> {
-    let norm = if windows { path.replace('\\', "/") } else { path.to_string() };
+    let norm = if windows {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
     norm.split('/')
         .filter(|c| !c.is_empty())
-        .map(|c| if windows { c.to_ascii_lowercase() } else { c.to_string() })
+        .map(|c| {
+            if windows {
+                c.to_ascii_lowercase()
+            } else {
+                c.to_string()
+            }
+        })
         .collect()
 }
 
@@ -235,7 +247,10 @@ mod tests {
 
     impl OpenProbe for Fake {
         fn canonicalize(&self, path: &str) -> Result<String, std::io::ErrorKind> {
-            self.canon.get(path).cloned().ok_or(std::io::ErrorKind::NotFound)
+            self.canon
+                .get(path)
+                .cloned()
+                .ok_or(std::io::ErrorKind::NotFound)
         }
         fn is_regular_file(&self, path: &str) -> bool {
             self.files.iter().any(|f| f == path)
@@ -257,7 +272,11 @@ mod tests {
         for ext in ALLOWED_EXTENSIONS {
             let p = format!("{ROOT}/out/report.{ext}");
             let fake = unix().file(&p);
-            assert_eq!(open(&fake, &format!("out/report.{ext}")), Ok(p.clone()), "{ext}");
+            assert_eq!(
+                open(&fake, &format!("out/report.{ext}")),
+                Ok(p.clone()),
+                "{ext}"
+            );
         }
         // case-insensitive extension
         let fake = unix().file(&format!("{ROOT}/Q3.PDF"));
@@ -276,7 +295,11 @@ mod tests {
             .file("/home/u/wt-evil/sib.pdf");
         assert_eq!(open(&fake, "../secret.pdf"), Err(Refusal::Outside));
         assert_eq!(open(&fake, "x/../../y.pdf"), Err(Refusal::Outside));
-        assert_eq!(open(&fake, "sib.pdf"), Err(Refusal::Outside), "a sibling sharing the root's prefix is outside");
+        assert_eq!(
+            open(&fake, "sib.pdf"),
+            Err(Refusal::Outside),
+            "a sibling sharing the root's prefix is outside"
+        );
         for rel in ["/etc/passwd.txt", "/x.pdf", "/home/u/secret.pdf"] {
             assert_eq!(open(&fake, rel), Err(Refusal::BadPath), "{rel}");
         }
@@ -287,10 +310,14 @@ mod tests {
     #[test]
     fn open_path_default_symlink_escape() {
         // inside-looking name, canonical target elsewhere
-        let fake = unix().link(&format!("{ROOT}/evil.pdf"), "/etc/shadow.pdf").file("/etc/shadow.pdf");
+        let fake = unix()
+            .link(&format!("{ROOT}/evil.pdf"), "/etc/shadow.pdf")
+            .file("/etc/shadow.pdf");
         assert_eq!(open(&fake, "evil.pdf"), Err(Refusal::Outside));
         // a link that stayed inside is fine
-        let fake = unix().link(&format!("{ROOT}/alias.pdf"), &format!("{ROOT}/real.pdf")).file(&format!("{ROOT}/real.pdf"));
+        let fake = unix()
+            .link(&format!("{ROOT}/alias.pdf"), &format!("{ROOT}/real.pdf"))
+            .file(&format!("{ROOT}/real.pdf"));
         assert_eq!(open(&fake, "alias.pdf"), Ok(format!("{ROOT}/real.pdf")));
         // a root that is itself reached through a link compares canonical to canonical
         let fake = Fake::default()
@@ -299,46 +326,75 @@ mod tests {
             .link("/tmp/wt-link/a.pdf", "/data/wt/a.pdf")
             .file("/data/wt/a.pdf");
         assert_eq!(
-            resolve_openable(ConnectionKind::Local, "linux", "/tmp/wt-link", "a.pdf", &fake),
+            resolve_openable(
+                ConnectionKind::Local,
+                "linux",
+                "/tmp/wt-link",
+                "a.pdf",
+                &fake
+            ),
             Ok("/data/wt/a.pdf".to_string())
         );
     }
 
     #[test]
     fn open_path_default_directory_and_app_bundle() {
-        let fake = unix().dir(&format!("{ROOT}/sub")).dir(&format!("{ROOT}/Tool.app")).dir(&format!("{ROOT}/folder.pdf"));
+        let fake = unix()
+            .dir(&format!("{ROOT}/sub"))
+            .dir(&format!("{ROOT}/Tool.app"))
+            .dir(&format!("{ROOT}/folder.pdf"));
         assert_eq!(open(&fake, "sub"), Err(Refusal::NotAFile));
         assert_eq!(open(&fake, "Tool.app"), Err(Refusal::NotAFile));
-        assert_eq!(open(&fake, "folder.pdf"), Err(Refusal::NotAFile), "a directory named like an allowed file");
+        assert_eq!(
+            open(&fake, "folder.pdf"),
+            Err(Refusal::NotAFile),
+            "a directory named like an allowed file"
+        );
     }
 
     #[test]
     fn open_path_default_extension_not_allow_listed() {
         let refused = [
-            "exe", "app", "command", "bat", "cmd", "ps1", "sh", "msi", "dmg", "jar", "lnk", "url", "desktop", "scr",
-            "html", "svg", "htm", "js", "py", "pif", "com", "vbs", "reg", "dll", "so", "docm", "xlsm", "zip", "",
+            "exe", "app", "command", "bat", "cmd", "ps1", "sh", "msi", "dmg", "jar", "lnk", "url",
+            "desktop", "scr", "html", "svg", "htm", "js", "py", "pif", "com", "vbs", "reg", "dll",
+            "so", "docm", "xlsm", "zip", "",
         ];
         for ext in refused {
-            let name = if ext.is_empty() { "report".to_string() } else { format!("report.{ext}") };
+            let name = if ext.is_empty() {
+                "report".to_string()
+            } else {
+                format!("report.{ext}")
+            };
             let fake = unix().file(&format!("{ROOT}/{name}"));
             assert_eq!(open(&fake, &name), Err(Refusal::NotAllowed), "{name}");
             let upper = format!("{ROOT}/{}", name.to_uppercase());
             let fake = unix().file(&upper);
-            assert_eq!(open(&fake, &name.to_uppercase()), Err(Refusal::NotAllowed), "{name} upper");
+            assert_eq!(
+                open(&fake, &name.to_uppercase()),
+                Err(Refusal::NotAllowed),
+                "{name} upper"
+            );
         }
         // a double extension is judged by its last one, and a bare dotfile has none
-        let fake = unix().file(&format!("{ROOT}/a.pdf.exe")).file(&format!("{ROOT}/.pdf")).file(&format!("{ROOT}/a.exe.pdf"));
+        let fake = unix()
+            .file(&format!("{ROOT}/a.pdf.exe"))
+            .file(&format!("{ROOT}/.pdf"))
+            .file(&format!("{ROOT}/a.exe.pdf"));
         assert_eq!(open(&fake, "a.pdf.exe"), Err(Refusal::NotAllowed));
         assert_eq!(open(&fake, ".pdf"), Err(Refusal::NotAllowed));
         assert_eq!(open(&fake, "a.exe.pdf"), Ok(format!("{ROOT}/a.exe.pdf")));
         // the extension is taken from the canonical target, not the name the agent chose
-        let fake = unix().link(&format!("{ROOT}/pretty.pdf"), &format!("{ROOT}/run.sh")).file(&format!("{ROOT}/run.sh"));
+        let fake = unix()
+            .link(&format!("{ROOT}/pretty.pdf"), &format!("{ROOT}/run.sh"))
+            .file(&format!("{ROOT}/run.sh"));
         assert_eq!(open(&fake, "pretty.pdf"), Err(Refusal::NotAllowed));
     }
 
     #[test]
     fn open_path_default_unc_on_windows() {
-        let win = |root: &str, rel: &str, fake: &Fake| resolve_openable(ConnectionKind::Local, "windows", root, rel, fake);
+        let win = |root: &str, rel: &str, fake: &Fake| {
+            resolve_openable(ConnectionKind::Local, "windows", root, rel, fake)
+        };
         let fake = Fake::default();
         // a UNC root, a UNC rel, forward-slash UNC, device and verbatim-UNC spellings: refused before any probe
         for (root, rel) in [
@@ -360,22 +416,39 @@ mod tests {
         assert_eq!(win(r"C:\wt", r"j\a.pdf", &fake), Err(Refusal::Network));
         // the local verbatim form is not a share, and a drive-relative or rooted rel is refused
         let fake = Fake::default().dir(r"C:\wt").file(r"C:\wt\out\A.PDF");
-        assert_eq!(win(r"C:\wt", r"out\A.PDF", &fake), Ok(r"C:\wt\out\A.PDF".to_string()));
+        assert_eq!(
+            win(r"C:\wt", r"out\A.PDF", &fake),
+            Ok(r"C:\wt\out\A.PDF".to_string())
+        );
         assert!(!is_unc_or_device(r"\\?\C:\wt\a.pdf"));
         assert!(is_unc_or_device(r"\\?\unc\s\x"));
         for rel in [r"C:a.pdf", r"C:\a.pdf", r"\a.pdf", "/a.pdf"] {
             assert_eq!(win(r"C:\wt", rel, &fake), Err(Refusal::BadPath), "{rel}");
         }
         // Windows paths compare case-insensitively and with either separator
-        let fake = Fake::default().dir(r"C:\Work\WT").link(r"C:\Work\WT\a.pdf", r"c:\work\wt\A.pdf").file(r"c:\work\wt\A.pdf");
-        assert_eq!(win(r"C:\Work\WT", "a.pdf", &fake), Ok(r"c:\work\wt\A.pdf".to_string()));
+        let fake = Fake::default()
+            .dir(r"C:\Work\WT")
+            .link(r"C:\Work\WT\a.pdf", r"c:\work\wt\A.pdf")
+            .file(r"c:\work\wt\A.pdf");
+        assert_eq!(
+            win(r"C:\Work\WT", "a.pdf", &fake),
+            Ok(r"c:\work\wt\A.pdf".to_string())
+        );
     }
 
     #[test]
     fn open_path_default_remote_daemon() {
         let fake = unix().file(&format!("{ROOT}/a.pdf"));
-        for kind in [ConnectionKind::Url, ConnectionKind::Relay, ConnectionKind::Ssh] {
-            assert_eq!(resolve_openable(kind, "linux", ROOT, "a.pdf", &fake), Err(Refusal::Remote), "{kind:?}");
+        for kind in [
+            ConnectionKind::Url,
+            ConnectionKind::Relay,
+            ConnectionKind::Ssh,
+        ] {
+            assert_eq!(
+                resolve_openable(kind, "linux", ROOT, "a.pdf", &fake),
+                Err(Refusal::Remote),
+                "{kind:?}"
+            );
         }
         assert!(resolve_openable(ConnectionKind::Local, "linux", ROOT, "a.pdf", &fake).is_ok());
     }
@@ -385,25 +458,52 @@ mod tests {
         let fake = unix().file(&format!("{ROOT}/a.pdf"));
         assert_eq!(open(&fake, "a\0.pdf"), Err(Refusal::BadPath));
         assert_eq!(open(&fake, ""), Err(Refusal::BadPath));
-        assert_eq!(resolve_openable(ConnectionKind::Local, "linux", "", "a.pdf", &fake), Err(Refusal::BadPath));
-        assert_eq!(resolve_openable(ConnectionKind::Local, "linux", "/home/u/a\0b", "a.pdf", &fake), Err(Refusal::BadPath));
+        assert_eq!(
+            resolve_openable(ConnectionKind::Local, "linux", "", "a.pdf", &fake),
+            Err(Refusal::BadPath)
+        );
+        assert_eq!(
+            resolve_openable(
+                ConnectionKind::Local,
+                "linux",
+                "/home/u/a\0b",
+                "a.pdf",
+                &fake
+            ),
+            Err(Refusal::BadPath)
+        );
         assert_eq!(open(&fake, "gone.pdf"), Err(Refusal::Missing));
         // a root that does not resolve
-        assert_eq!(resolve_openable(ConnectionKind::Local, "linux", "/nope", "a.pdf", &fake), Err(Refusal::BadPath));
+        assert_eq!(
+            resolve_openable(ConnectionKind::Local, "linux", "/nope", "a.pdf", &fake),
+            Err(Refusal::BadPath)
+        );
     }
 
     #[test]
     fn open_path_default_error_text_has_no_path() {
         let all = [
-            Refusal::Remote, Refusal::BadPath, Refusal::Network, Refusal::Outside, Refusal::NotAFile, Refusal::NotAllowed,
-            Refusal::Missing, Refusal::NoApp,
+            Refusal::Remote,
+            Refusal::BadPath,
+            Refusal::Network,
+            Refusal::Outside,
+            Refusal::NotAFile,
+            Refusal::NotAllowed,
+            Refusal::Missing,
+            Refusal::NoApp,
         ];
         for r in all {
             let m = r.message();
-            assert!(!m.contains('/') && !m.contains('\\') && !m.contains(':'), "{m}");
+            assert!(
+                !m.contains('/') && !m.contains('\\') && !m.contains(':'),
+                "{m}"
+            );
             assert!(m.len() < 80, "{m}");
         }
-        assert_eq!(Refusal::NoApp.message(), "No application is set to open this file type");
+        assert_eq!(
+            Refusal::NoApp.message(),
+            "No application is set to open this file type"
+        );
     }
 
     #[test]
@@ -414,7 +514,10 @@ mod tests {
         assert!(!inside("/a/b", "/a/b/../c.pdf", false));
         assert!(!inside("", "/a.pdf", false));
         assert!(inside(r"C:\A\B", r"c:/a/b/c.pdf", true));
-        assert!(!inside("/A/B", "/a/b/c.pdf", false), "unix paths are case-sensitive");
+        assert!(
+            !inside("/A/B", "/a/b/c.pdf", false),
+            "unix paths are case-sensitive"
+        );
     }
 
     /// The real probe on a real directory: a file opens, a `..` escape, a directory and a bad extension do not.
@@ -428,7 +531,15 @@ mod tests {
         std::fs::create_dir(root.join("dir.pdf")).unwrap();
         std::fs::write(tmp.path().join("secret.pdf"), b"%PDF-1.4").unwrap();
         let root_s = root.to_str().unwrap();
-        let go = |rel: &str| resolve_openable(ConnectionKind::Local, std::env::consts::OS, root_s, rel, &RealOpenProbe);
+        let go = |rel: &str| {
+            resolve_openable(
+                ConnectionKind::Local,
+                std::env::consts::OS,
+                root_s,
+                rel,
+                &RealOpenProbe,
+            )
+        };
         let sep = std::path::MAIN_SEPARATOR;
         assert!(go(&format!("out{sep}a.PDF")).is_ok());
         assert_eq!(go(&format!("..{sep}secret.pdf")), Err(Refusal::Outside));
@@ -454,7 +565,13 @@ mod tests {
             eprintln!("skipped: cannot create a symlink here");
             return;
         }
-        let r = resolve_openable(ConnectionKind::Local, std::env::consts::OS, root.to_str().unwrap(), "evil.pdf", &RealOpenProbe);
+        let r = resolve_openable(
+            ConnectionKind::Local,
+            std::env::consts::OS,
+            root.to_str().unwrap(),
+            "evil.pdf",
+            &RealOpenProbe,
+        );
         assert_eq!(r, Err(Refusal::Outside));
     }
 }

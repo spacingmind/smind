@@ -18,10 +18,11 @@ use smind_daemon_client::proxy::{ProxyState, Registry};
 use smind_daemon_client::Config;
 
 mod app_settings;
-mod audit_guard;
 mod assets;
+mod audit_guard;
 mod client_watch;
 mod commands;
+mod context_menu;
 mod daemon_manager;
 mod deeplink;
 mod editors;
@@ -38,17 +39,17 @@ mod state;
 mod tray;
 // `pub` (hidden) so the updater e2e integration test (tests/updater_e2e.rs)
 // can drive the same cores the commands call.
-#[doc(hidden)]
-pub mod updater;
-mod window_chrome;
 #[cfg(test)]
 mod capability_tests;
 #[cfg(test)]
 mod crash_wiring_tests;
-#[cfg(test)]
-mod real_daemon_test;
 #[cfg(all(test, unix))]
 mod daemon_survival_test;
+#[cfg(test)]
+mod real_daemon_test;
+#[doc(hidden)]
+pub mod updater;
+mod window_chrome;
 mod zoom_store;
 
 use state::DesktopState;
@@ -71,7 +72,13 @@ fn app_log_level(debug_build: bool) -> log::LevelFilter {
 }
 
 /// Dependencies that log request lines and frames below WARN even at DEBUG.
-const QUIET_TARGETS: [&str; 5] = ["tungstenite", "tokio_tungstenite", "hyper_util", "reqwest", "tao"];
+const QUIET_TARGETS: [&str; 5] = [
+    "tungstenite",
+    "tokio_tungstenite",
+    "hyper_util",
+    "reqwest",
+    "tao",
+];
 
 fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let mut builder = tauri_plugin_log::Builder::new().level(app_log_level(cfg!(debug_assertions)));
@@ -162,6 +169,7 @@ pub fn run() {
             commands::open_external,
             commands::app_quit,
             menu::app_menu_action,
+            context_menu::context_menu_show,
             editors::editors_list,
             editors::open_in_editor,
             open_path::open_path_default,
@@ -221,9 +229,11 @@ pub fn run() {
             // webview keys localStorage by origin, so a port that changes on
             // every launch would reset every UI preference on every launch.
             let proxy_port_path = proxy_port::path_in(&app.path().app_data_dir()?);
-            let (port, server_fut) = tauri::async_runtime::block_on(
-                dclient::proxy::serve_preferring(proxy_state.clone(), proxy_port::load(&proxy_port_path)),
-            )?;
+            let (port, server_fut) =
+                tauri::async_runtime::block_on(dclient::proxy::serve_preferring(
+                    proxy_state.clone(),
+                    proxy_port::load(&proxy_port_path),
+                ))?;
             proxy_port::save(&proxy_port_path, port);
             tauri::async_runtime::spawn(server_fut);
 
@@ -242,6 +252,7 @@ pub fn run() {
             // D1/D2.1: per-platform chrome, created hidden and shown
             // when the UI reports its first paint (or after the fallback).
             app.manage(window_chrome::ShowGate::default());
+            app.manage(context_menu::ContextMenuState::default());
             let builder = WebviewWindowBuilder::new(
                 app,
                 MAIN_WINDOW,
@@ -406,9 +417,13 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state = handle.state::<DesktopState>();
-                    match ssh_tunnel::ensure_tunnel(&state.proxy, &state.ssh_tunnels, &initial_conn).await {
+                    match ssh_tunnel::ensure_tunnel(&state.proxy, &state.ssh_tunnels, &initial_conn)
+                        .await
+                    {
                         Ok(()) => client_watch::restart(&handle, &state, &initial_conn),
-                        Err(e) => log::warn!("ssh tunnel for {:?} did not start: {e}", initial_conn.label),
+                        Err(e) => {
+                            log::warn!("ssh tunnel for {:?} did not start: {e}", initial_conn.label)
+                        }
                     }
                 });
             }
@@ -465,8 +480,16 @@ mod optional_integration_tests {
 
     #[test]
     fn a_failed_shortcut_registration_is_reported_not_propagated() {
-        assert!(note_unavailable("global shortcut", "Ctrl+Shift+S", Ok::<(), String>(())));
-        assert!(!note_unavailable("global shortcut", "Ctrl+Shift+S", Err("already registered")));
+        assert!(note_unavailable(
+            "global shortcut",
+            "Ctrl+Shift+S",
+            Ok::<(), String>(())
+        ));
+        assert!(!note_unavailable(
+            "global shortcut",
+            "Ctrl+Shift+S",
+            Err("already registered")
+        ));
     }
 }
 
@@ -479,7 +502,10 @@ mod file_drop_tests {
     #[test]
     fn main_window_leaves_html5_file_drops_to_the_webview() {
         let src = include_str!("lib.rs");
-        let builder = src.split("WebviewWindowBuilder::new(").nth(1).expect("main window builder");
+        let builder = src
+            .split("WebviewWindowBuilder::new(")
+            .nth(1)
+            .expect("main window builder");
         let chain = builder.split(".build()?").next().expect("builder chain");
         assert!(
             chain.contains(".disable_drag_drop_handler()"),
@@ -503,7 +529,10 @@ mod log_level_tests {
     #[test]
     fn the_request_line_loggers_are_silenced() {
         for target in ["tungstenite", "hyper_util", "reqwest"] {
-            assert!(QUIET_TARGETS.contains(&target), "{target} must be capped at WARN");
+            assert!(
+                QUIET_TARGETS.contains(&target),
+                "{target} must be capped at WARN"
+            );
         }
     }
 }
