@@ -247,6 +247,37 @@ test("latest-json-refuses-a-signature-without-a-trusted-comment", () => {
   );
 });
 
+// the updater plugin reads exactly line 3, `trusted comment: `, tab-split, untrimmed: a signature it
+// would not read a version from must not pass here either
+function rawSig(lines) {
+  return Buffer.from(lines.join("\n")).toString("base64") + "\n";
+}
+
+test("latest-json-refuses-a-version-field-the-plugin-would-not-read", () => {
+  for (const comment of [
+    "trusted comment: timestamp:1\tfile:f\t version:1.2.3", // leading space: the plugin does not trim
+    "trusted comment:timestamp:1\tfile:f\tversion:1.2.3", // no space after the colon
+    "trusted comment: timestamp:1\tfile:f\tx-version:1.2.3",
+  ]) {
+    const f = files();
+    f["darwin-aarch64"].signature = rawSig(["untrusted comment: x", "RWQAAAA", comment, "GLOBAL", ""]);
+    assert.throws(() => buildLatestJson({ ...base, files: f }), /darwin-aarch64/, comment);
+  }
+});
+
+test("latest-json-reads-only-the-third-line", () => {
+  const f = files();
+  // a trusted-comment-looking line in the UNTRUSTED comment, with the real third line versionless
+  f["darwin-aarch64"].signature = rawSig([
+    "untrusted comment: x",
+    "RWQAAAA",
+    "trusted comment: timestamp:1\tfile:f",
+    "trusted comment: timestamp:1\tversion:1.2.3",
+    "",
+  ]);
+  assert.throws(() => buildLatestJson({ ...base, files: f }), /signed version/);
+});
+
 test("latest-json-cli-refuses-and-writes-nothing-for-a-versionless-signature", () => {
   const dir = fixtureDir();
   try {

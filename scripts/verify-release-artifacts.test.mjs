@@ -366,6 +366,37 @@ test("verify-updater-signature-wrong-version", () => {
   });
 });
 
+function rawSig(lines) {
+  return Buffer.from(lines.join("\n")).toString("base64") + "\n";
+}
+
+// the updater plugin reads exactly line 3, `trusted comment: `, tab-split, untrimmed
+test("verify-updater-signature-version-field-the-plugin-would-not-read", () => {
+  withRelease({}, (fx) => {
+    const asset = `smind-desktop-${fx.desktopVersion}-macos-arm64.app.tar.gz`;
+    const sig = rawSig(["untrusted comment: x", "RWQAAAA", `trusted comment: timestamp:1\tfile:${asset}\t version:${fx.desktopVersion}`, "GLOBAL", ""]);
+    replaceUpdaterSig(fx, "darwin-aarch64", asset, sig);
+    expectFailure(verifyOf(fx), "updater-signatures", asset);
+  });
+});
+
+test("verify-updater-signature-reads-only-the-third-line", () => {
+  withRelease({}, (fx) => {
+    const asset = `smind-desktop-${fx.desktopVersion}-macos-x86_64.app.tar.gz`;
+    const sig = rawSig(["untrusted comment: x", "RWQAAAA", `trusted comment: timestamp:1\tfile:${asset}`, `trusted comment: timestamp:1\tversion:${fx.desktopVersion}`, ""]);
+    replaceUpdaterSig(fx, "darwin-x86_64", asset, sig);
+    expectFailure(verifyOf(fx), "updater-signatures", asset);
+  });
+});
+
+test("verify-updater-signature-v-prefix-accepted", () => {
+  withRelease({}, (fx) => {
+    const asset = `sMind_${fx.desktopVersion}_x64-setup.exe`;
+    replaceUpdaterSig(fx, "windows-x86_64", asset, fakeSig(`v${fx.desktopVersion}`, asset));
+    assert.deepEqual(verifyOf(fx).filter((f) => f.check === "updater-signatures"), []);
+  });
+});
+
 test("verify-updater-signature-undecodable", () => {
   withRelease({}, (fx) => {
     const asset = `sMind_${fx.desktopVersion}_x64-setup.exe`;

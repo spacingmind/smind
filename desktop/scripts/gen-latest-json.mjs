@@ -30,15 +30,18 @@ export function signedVersionOf(signature) {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
     throw new Error("not a base64 minisign signature");
   }
-  const lines = Buffer.from(b64, "base64").toString("utf8").split("\n");
-  const line = lines.find((l) => l.startsWith("trusted comment:"));
-  if (line === undefined) {
+  // Exactly what the updater plugin reads: the THIRD line, which must start `trusted comment: `
+  // (with the space), split on tabs, no trimming, the field that starts `version:`. Anything
+  // the plugin would not read as a signed version is not one here (a field with a leading space
+  // would pass a trimming reader and be refused by the plugin). Keep in sync with the same function
+  // in scripts/verify-release-artifacts.mjs.
+  const line = Buffer.from(b64, "base64").toString("utf8").split("\n")[2];
+  if (line === undefined || !line.startsWith("trusted comment: ")) {
     throw new Error("the signature has no trusted comment");
   }
   const field = line
-    .slice("trusted comment:".length)
+    .slice("trusted comment: ".length)
     .split("\t")
-    .map((f) => f.trim())
     .find((f) => f.startsWith("version:"));
   if (field === undefined) {
     throw new Error(
@@ -72,7 +75,7 @@ export function buildLatestJson({ version, tag, repo, notes, pubDate, files }) {
     }
     if (normalizeVersion(signed) !== normalized) {
       throw new Error(
-        `signature for platform "${platform}" was signed for version "${signed}" but the manifest version is "${normalized}": the updater would refuse it (or, without requireSignedVersion, install the wrong release)`
+        `signature for platform "${platform}" was signed for version "${signed}" but the manifest version is "${normalized}": the updater would refuse it`
       );
     }
     platforms[platform] = {

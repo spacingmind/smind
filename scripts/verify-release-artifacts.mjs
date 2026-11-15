@@ -302,15 +302,14 @@ function checkSidecarVersions(ctx) {
 export function signedVersionOf(signature) {
   const b64 = String(signature).trim();
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) throw new Error("not a base64 minisign signature");
-  const line = Buffer.from(b64, "base64")
-    .toString("utf8")
-    .split("\n")
-    .find((l) => l.startsWith("trusted comment:"));
-  if (line === undefined) throw new Error("no trusted comment");
+  // Exactly what the updater plugin reads: the THIRD line, starting `trusted comment: `, split on
+  // tabs, no trimming, the field starting `version:`. Keep in sync with the same function in
+  // desktop/scripts/gen-latest-json.mjs.
+  const line = Buffer.from(b64, "base64").toString("utf8").split("\n")[2];
+  if (line === undefined || !line.startsWith("trusted comment: ")) throw new Error("no trusted comment");
   const field = line
-    .slice("trusted comment:".length)
+    .slice("trusted comment: ".length)
     .split("\t")
-    .map((f) => f.trim())
     .find((f) => f.startsWith("version:"));
   if (field === undefined) throw new Error("no signed version in the trusted comment");
   return field.slice("version:".length);
@@ -328,7 +327,8 @@ function checkUpdaterSignatures({ dir, desktopVersion, fail }) {
       fail(`${asset}.sig: ${oneLine(err)} (the updater's requireSignedVersion would refuse this release)`);
       continue;
     }
-    if (signed !== desktopVersion) {
+    // the plugin strips a leading `v` before comparing as semver
+    if (signed.replace(/^v/, "") !== desktopVersion) {
       fail(`${asset}.sig signed version: expected ${desktopVersion}, found ${signed}`);
     }
   }
