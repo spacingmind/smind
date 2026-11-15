@@ -65,13 +65,52 @@ pub fn permission_resolved(payload: &serde_json::Value) -> Option<PermissionReso
     serde_json::from_value(payload.clone()).ok()
 }
 
-/// RunStatus is the payload of run.status events:
-/// {runId, taskId, status, stopReason, err} -- only the fields this
-/// client needs (see internal/wsapi/events.go's runStatusPayload).
+/// QuestionPending is the payload of question.pending events (ADR-0055):
+/// {runId, taskId, chatId, requestId, request} -- only the fields this
+/// client needs; the request text itself is deliberately not carried
+/// into any notification (DT5 B: fixed bodies).
 #[derive(Debug, Deserialize)]
-pub struct RunStatus {
+pub struct QuestionPending {
+    #[serde(rename = "runId")]
+    pub run_id: String,
     #[serde(rename = "taskId")]
     pub task_id: i64,
+    #[serde(default, rename = "chatId")]
+    pub chat_id: i64,
+    #[serde(rename = "requestId")]
+    pub request_id: String,
+}
+
+/// question_pending decodes a question.pending event's payload.
+pub fn question_pending(payload: &serde_json::Value) -> Option<QuestionPending> {
+    serde_json::from_value(payload.clone()).ok()
+}
+
+/// QuestionResolved is the payload of question.resolved events:
+/// {runId, taskId, chatId, requestId, reason} -- only the request id
+/// matters here (the clear is by request id, like permission.resolved).
+#[derive(Debug, Deserialize)]
+pub struct QuestionResolved {
+    #[serde(rename = "requestId")]
+    pub request_id: String,
+}
+
+/// question_resolved decodes a question.resolved event's payload.
+pub fn question_resolved(payload: &serde_json::Value) -> Option<QuestionResolved> {
+    serde_json::from_value(payload.clone()).ok()
+}
+
+/// RunStatus is the payload of run.status events:
+/// {runId, taskId, chatId, status, stopReason, err} -- only the fields
+/// this client needs (see internal/wsapi/events.go's runStatusPayload).
+#[derive(Debug, Deserialize)]
+pub struct RunStatus {
+    #[serde(default, rename = "runId")]
+    pub run_id: String,
+    #[serde(rename = "taskId")]
+    pub task_id: i64,
+    #[serde(default, rename = "chatId")]
+    pub chat_id: i64,
     pub status: String,
 }
 
@@ -80,19 +119,66 @@ pub fn run_status(payload: &serde_json::Value) -> Option<RunStatus> {
     serde_json::from_value(payload.clone()).ok()
 }
 
-/// Notification is the OS-notification-ready form of an event. task_id
-/// carries the source task so the click handler can look up its
-/// workspaceId (see `crate::cache::WorkspaceCache`) and build a route;
-/// request_id feeds the tray's attention count (`crate::attention`),
-/// which dedupes by it. chat_id names the chat tab the request's card
-/// lives in (0 = unknown, from a daemon payload without a chatId).
+/// NotifyKind is which attention event a notification is for. The
+/// notification text is fixed per kind (DT5 B/AC5): an OS banner can be
+/// read from a lock screen, so it never carries prompt, question,
+/// command, error or task-title text from the event payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotifyKind {
+    Permission,
+    Question,
+    Failure,
+}
+
+impl NotifyKind {
+    pub fn fixed_title(self) -> &'static str {
+        match self {
+            NotifyKind::Permission => "sMind: permission needed",
+            NotifyKind::Question => "sMind: a question for you",
+            NotifyKind::Failure => "sMind: run failed",
+        }
+    }
+
+    pub fn fixed_body(self) -> &'static str {
+        match self {
+            NotifyKind::Permission => "A run needs your approval",
+            NotifyKind::Question => "An agent has a question",
+            NotifyKind::Failure => "Run failed",
+        }
+    }
+}
+
+/// Notification is the OS-notification-ready form of an event: a kind
+/// with its FIXED title/body (never derived from the payload), plus
+/// task_id (the source task, so the click handler can look up its
+/// workspaceId -- see `crate::cache::WorkspaceCache` -- and build a
+/// route), request_id and chat_id. For Permission/Question request_id
+/// is the request id and feeds the tray's attention count
+/// (`crate::attention`), which dedupes by it; for Failure it carries
+/// the RUN id, used only as the dedupe/click key. chat_id names the
+/// chat tab the request's card lives in (0 = unknown, from a daemon
+/// payload without a chatId).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Notification {
+    pub kind: NotifyKind,
     pub title: String,
     pub body: String,
     pub task_id: i64,
     pub chat_id: i64,
     pub request_id: String,
+}
+
+impl Notification {
+    fn fixed(kind: NotifyKind, task_id: i64, chat_id: i64, request_id: String) -> Self {
+        Self {
+            kind,
+            title: kind.fixed_title().to_string(),
+            body: kind.fixed_body().to_string(),
+            task_id,
+            chat_id,
+            request_id,
+        }
+    }
 }
 
 /// TaskGetResult is the subset of task.get's result (a store.Task,
@@ -148,19 +234,28 @@ pub fn permission_pending(payload: &serde_json::Value) -> Option<PermissionPendi
     serde_json::from_value(payload.clone()).ok()
 }
 
-/// notification_for turns a permission.pending payload into an OS
-/// notification's title/body. Returns None for other topics.
+/// notification_for turns an attention event into an OS notification
+/// with FIXED per-kind text (see `NotifyKind`): permission.pending,
+/// question.pending, and run.status with status exactly "error". For a
+/// failed run the notification's request_id carries the RUN id (the
+/// dedupe/click key). Returns None for everything else, including
+/// run.status done/running/stopped -- those are not attention.
 pub fn notification_for(event: &EventNotification) -> Option<Notification> {
     match event.topic.as_str() {
         "permission.pending" => {
             let p = permission_pending(&event.payload)?;
-            Some(Notification {
-                title: "sMind: permission needed".to_string(),
-                body: p.summary,
-                task_id: p.task_id,
-                chat_id: p.chat_id,
-                request_id: p.request_id,
-            })
+            Some(Notification::fixed(NotifyKind::Permission, p.task_id, p.chat_id, p.request_id))
+        }
+        "question.pending" => {
+            let q = question_pending(&event.payload)?;
+            Some(Notification::fixed(NotifyKind::Question, q.task_id, q.chat_id, q.request_id))
+        }
+        "run.status" => {
+            let rs = run_status(&event.payload)?;
+            if rs.status != "error" {
+                return None;
+            }
+            Some(Notification::fixed(NotifyKind::Failure, rs.task_id, rs.chat_id, rs.run_id))
         }
         _ => None,
     }
@@ -196,11 +291,103 @@ mod tests {
     fn notification_from_pending() {
         let msg = parse_server_message(SAMPLE).unwrap();
         let n = notification_for(msg.event.as_ref().unwrap()).unwrap();
+        assert_eq!(n.kind, NotifyKind::Permission);
         assert_eq!(n.title, "sMind: permission needed");
-        assert_eq!(n.body, "Run `cargo test` in task 42?");
+        assert_eq!(n.body, "A run needs your approval");
         assert_eq!(n.task_id, 42);
         assert_eq!(n.chat_id, 7);
         assert_eq!(n.request_id, "req_9");
+    }
+
+    #[test]
+    fn permission_notification_has_a_fixed_body() {
+        let msg = parse_server_message(
+            r#"{"event":{"topic":"permission.pending","seq":3,"payload":{"runId":"run_1","taskId":42,"chatId":7,"requestId":"req_9","summary":"Run `rm -rf x`?"}}}"#,
+        )
+        .unwrap();
+        let n = notification_for(msg.event.as_ref().unwrap()).unwrap();
+        assert_eq!(n.title, "sMind: permission needed");
+        assert_eq!(n.body, "A run needs your approval");
+        // "rm" appears inside the fixed word "permission"; the body is what
+        // must never carry the command.
+        assert!(!n.body.contains("rm"), "body must not carry the command");
+    }
+
+    #[test]
+    fn question_pending_becomes_a_fixed_body_notification() {
+        let msg = parse_server_message(
+            r#"{"event":{"topic":"question.pending","seq":5,"payload":{"runId":"run_2","taskId":43,"chatId":8,"requestId":"req_10","request":{"question":"secret question","schema":null}}}}"#,
+        )
+        .unwrap();
+        let n = notification_for(msg.event.as_ref().unwrap()).unwrap();
+        assert_eq!(n.kind, NotifyKind::Question);
+        assert_eq!(n.title, "sMind: a question for you");
+        assert_eq!(n.body, "An agent has a question");
+        assert!(!n.body.contains("secret"), "body must not carry the question text");
+        assert!(!n.title.contains("secret"));
+        assert_eq!(n.task_id, 43);
+        assert_eq!(n.chat_id, 8);
+        assert_eq!(n.request_id, "req_10");
+    }
+
+    #[test]
+    fn failed_run_notification_has_a_fixed_body() {
+        let msg = parse_server_message(
+            r#"{"event":{"topic":"run.status","seq":7,"payload":{"runId":"run_err","taskId":9,"chatId":4,"status":"error","err":"token sk-123 leaked"}}}"#,
+        )
+        .unwrap();
+        let n = notification_for(msg.event.as_ref().unwrap()).unwrap();
+        assert_eq!(n.kind, NotifyKind::Failure);
+        assert_eq!(n.title, "sMind: run failed");
+        assert_eq!(n.body, "Run failed");
+        assert!(!n.body.contains("sk-"), "body must not carry the error text");
+        assert!(!n.title.contains("sk-"));
+        assert_eq!(n.task_id, 9);
+        assert_eq!(n.chat_id, 4);
+        assert_eq!(n.request_id, "run_err", "Failure's request_id carries the run id");
+    }
+
+    #[test]
+    fn no_notification_body_contains_event_text() {
+        let marker = "MARKER-qz7w3";
+        let cases = [
+            (
+                "permission.pending",
+                serde_json::json!({"runId":marker,"taskId":1,"chatId":1,"requestId":"r","summary":marker,"options":[{"id":marker}]}),
+                NotifyKind::Permission,
+            ),
+            (
+                "question.pending",
+                serde_json::json!({"runId":marker,"taskId":1,"chatId":1,"requestId":"r","request":{"question":marker}}),
+                NotifyKind::Question,
+            ),
+            (
+                "run.status",
+                serde_json::json!({"runId":"r","taskId":1,"chatId":1,"status":"error","err":marker,"stopReason":marker,"failureKind":marker}),
+                NotifyKind::Failure,
+            ),
+        ];
+        for (topic, payload, kind) in cases {
+            let ev = EventNotification { topic: topic.to_string(), seq: 1, payload };
+            let n = notification_for(&ev).unwrap_or_else(|| panic!("{topic} became a notification"));
+            assert_eq!(n.kind, kind, "{topic}");
+            assert!(!n.title.contains(marker), "{topic}: title leaked event text");
+            assert!(!n.body.contains(marker), "{topic}: body leaked event text");
+        }
+    }
+
+    #[test]
+    fn done_and_needs_continue_are_silent() {
+        for status in ["done", "running", "stopped", "needs-continue"] {
+            let msg = parse_server_message(&format!(
+                r#"{{"event":{{"topic":"run.status","seq":1,"payload":{{"runId":"r","taskId":5,"status":"{status}"}}}}}}"#
+            ))
+            .unwrap();
+            assert!(
+                notification_for(msg.event.as_ref().unwrap()).is_none(),
+                "status {status} must stay silent"
+            );
+        }
     }
 
     #[test]

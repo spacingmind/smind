@@ -2,23 +2,26 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { HistorySourceNote } from "@/components/timeline/history-source-note";
-import type { RunEntry } from "@/hooks/use-run-timeline";
+import type { RunEntry, TimelineItem } from "@/hooks/use-run-timeline";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
-function entry(history: RunEntry["history"]): RunEntry {
-  return { id: "r1", provider: "claude-native", prompt: "p", status: "done", startedAt: "2026-11-01T09:59:00Z", items: [], permissionMode: "", autoAccept: false, thinkingLevel: "", history };
+function entry(history: RunEntry["history"], items: RunEntry["items"] = []): RunEntry {
+  return { id: "r1", provider: "claude-native", prompt: "p", status: "done", startedAt: "2026-11-01T09:59:00Z", items, permissionMode: "", autoAccept: false, thinkingLevel: "", history };
 }
+
+/** One row the daemon trimmed head+tail: the marker internal/runs/skeleton.go writes, ellipsis U+2026. */
+const trimmedToolResult: TimelineItem[] = [{ kind: "tool_call", id: "tool-1", toolCallId: "t1", status: "success", result: "head\n…[8192 bytes omitted]…\ntail" }];
 
 const WARNING_REASONS = ["native_session_missing", "slice_not_found", "format_drift", "rebuild_failed"];
 
 describe("HistorySourceNote", () => {
   it("a loadable skeleton shows the trimmed sentence and a Load full history button that hands the run back", () => {
     const onLoad = vi.fn();
-    const run = entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true });
+    const run = entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true }, trimmedToolResult);
     render(<HistorySourceNote run={run} onLoad={onLoad} />);
     expect(screen.getByTestId("history-source-note").textContent).toContain("Showing a summary: large tool output was trimmed.");
     expect(screen.getByTestId("history-source-note").getAttribute("data-tone")).toBe("info");
@@ -27,7 +30,7 @@ describe("HistorySourceNote", () => {
   });
 
   it("while loading it says Loading full history… and offers no button", () => {
-    render(<HistorySourceNote run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true, loading: true })} onLoad={vi.fn()} />);
+    render(<HistorySourceNote run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true, loading: true }, trimmedToolResult)} onLoad={vi.fn()} />);
     expect(screen.getByTestId("history-source-note").textContent).toContain("Loading full history…");
     expect(screen.getByTestId("history-loading")).toBeTruthy();
     expect(screen.queryByTestId("history-load-full")).toBeNull();
@@ -50,7 +53,7 @@ describe("HistorySourceNote", () => {
   });
 
   it("a skeleton that cannot be rebuilt shows the sentence only (never a disabled button)", () => {
-    render(<HistorySourceNote run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: false })} onLoad={vi.fn()} />);
+    render(<HistorySourceNote run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: false }, trimmedToolResult)} onLoad={vi.fn()} />);
     expect(screen.getByTestId("history-source-note").textContent).toContain("Showing a summary: large tool output was trimmed.");
     expect(screen.queryByTestId("history-load-full")).toBeNull();
   });
@@ -61,10 +64,67 @@ describe("HistorySourceNote", () => {
     rerender(<HistorySourceNote run={entry({ source: "full" })} />);
     expect(container.querySelector('[data-testid="history-source-note"]')).toBeNull();
   });
+
+  it("no-notice-when-nothing-was-trimmed", () => {
+    const { container } = render(
+      <HistorySourceNote
+        run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true }, [
+          { kind: "assistant", id: "assistant-1", text: "the whole answer" },
+          { kind: "tool_call", id: "tool-1", toolCallId: "t1", status: "success", result: "the whole result" },
+          { kind: "thinking", id: "thinking-1", text: "the reasoning, kept" },
+        ])}
+        onLoad={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('[data-testid="history-source-note"]')).toBeNull();
+    expect(container.querySelector('[data-testid="history-load-full"]')).toBeNull();
+  });
+
+  it("notice-when-a-tool-result-has-the-omission-marker", () => {
+    render(<HistorySourceNote run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true }, trimmedToolResult)} onLoad={vi.fn()} />);
+    expect(screen.getByTestId("history-source-note").textContent).toContain("Showing a summary: large tool output was trimmed.");
+    expect(screen.getByTestId("history-load-full")).toBeTruthy();
+  });
+
+  it("notice-when-an-answer-has-the-omission-marker", () => {
+    render(
+      <HistorySourceNote
+        run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true }, [{ kind: "assistant", id: "assistant-1", text: "head\n…[2048 bytes omitted]…\ntail" }])}
+        onLoad={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("history-source-note").textContent).toContain("Showing a summary: large tool output was trimmed.");
+    expect(screen.getByTestId("history-load-full")).toBeTruthy();
+  });
+
+  it("notice-when-only-thinking-was-dropped", () => {
+    render(
+      <HistorySourceNote
+        run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true }, [
+          { kind: "assistant", id: "assistant-1", text: "the whole answer" },
+          { kind: "thinking", id: "thinking-1", text: "" },
+        ])}
+        onLoad={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("history-source-note").textContent).toContain("Showing a summary: the agent's reasoning was not kept.");
+    expect(screen.getByTestId("history-load-full")).toBeTruthy();
+  });
+
+  it("other-skeleton-reasons-still-show-their-note", () => {
+    const plain = [{ kind: "assistant", id: "assistant-1", text: "the whole answer" }] as RunEntry["items"];
+    const { container, rerender } = render(
+      <HistorySourceNote run={entry({ source: "skeleton", reason: "excerpt_pruned", canLoadFull: true }, plain)} onLoad={vi.fn()} />,
+    );
+    expect(screen.getByTestId("history-source-note").textContent).toContain("Showing a summary: large tool output was removed after the retention period.");
+    rerender(<HistorySourceNote run={entry({ source: "skeleton", reason: "native_session_missing" }, plain)} onLoad={vi.fn()} />);
+    expect(screen.getByTestId("history-source-note").textContent).toContain("Showing a summary: the provider's session file is no longer there.");
+    expect(container.querySelector('[data-testid="history-source-note"]')).not.toBeNull();
+  });
 });
 
 describe("HistorySourceNote confirm before starting the agent (ADR-0053)", () => {
-  const acp = () => entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true, loadStartsAgent: true });
+  const acp = () => entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true, loadStartsAgent: true }, trimmedToolResult);
 
   it("the button opens the confirm dialog and sends nothing", () => {
     const onLoad = vi.fn();
@@ -111,7 +171,7 @@ describe("HistorySourceNote confirm before starting the agent (ADR-0053)", () =>
 
   it("a run without loadStartsAgent loads straight away, no dialog", () => {
     const onLoad = vi.fn();
-    render(<HistorySourceNote run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true })} onLoad={onLoad} />);
+    render(<HistorySourceNote run={entry({ source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true }, trimmedToolResult)} onLoad={onLoad} />);
     fireEvent.click(screen.getByTestId("history-load-full"));
     expect(screen.queryByTestId("history-load-confirm")).toBeNull();
     expect(onLoad).toHaveBeenCalledTimes(1);

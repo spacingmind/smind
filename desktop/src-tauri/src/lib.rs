@@ -29,6 +29,8 @@ mod editors;
 mod lifecycle;
 mod menu;
 mod notify;
+mod notify_policy;
+mod notify_test;
 mod open_path;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod overlay_icon;
@@ -48,6 +50,7 @@ mod real_daemon_test;
 #[doc(hidden)]
 pub mod updater;
 mod window_chrome;
+mod window_layout;
 mod zoom_store;
 
 use state::DesktopState;
@@ -165,6 +168,7 @@ pub fn run() {
             commands::app_quit,
             menu::app_menu_action,
             context_menu::context_menu_show,
+            notify_test::notify_test,
             editors::editors_list,
             editors::open_in_editor,
             open_path::open_path_default,
@@ -238,6 +242,15 @@ pub fn run() {
             let initial_url: Url = format!("http://127.0.0.1:{port}/?k={secret}")
                 .parse()
                 .expect("smind desktop: initial URL is well-formed");
+            // PR (c): the task and tab that were open at the last quit come back (same connection only).
+            let initial_url = {
+                let connection = proxy_state.registry.lock().unwrap().current().id.clone();
+                let layout_path = app.path().app_data_dir()?.join(window_layout::FILE_NAME);
+                match window_layout::load(&layout_path, MAIN_WINDOW, &connection) {
+                    Some(fragment) => window_layout::with_fragment(initial_url, &fragment),
+                    None => initial_url,
+                }
+            };
 
             // AC3: navigation is restricted to the proxy's own origin --
             // any other URL (an http(s) link inside the bundled UI, e.g.
@@ -360,6 +373,23 @@ pub fn run() {
                 // Windows drops the taskbar overlay when the hidden window's
                 // button is re-created; put it back when the window returns.
                 tauri::WindowEvent::Focused(true) => badge_tray.reapply_badge(),
+                // A size saved before the minimum existed is restored as is; put it back at once.
+                tauri::WindowEvent::Resized(size) => {
+                    // Windows reports a minimised window as 0x0: leave it alone.
+                    if size.width == 0
+                        || size.height == 0
+                        || close_win.is_minimized().unwrap_or(false)
+                    {
+                        return;
+                    }
+                    let scale = close_win.scale_factor().unwrap_or(1.0);
+                    let logical = size.to_logical::<f64>(scale);
+                    if let Some((w, h)) =
+                        window_chrome::clamp_to_minimum(logical.width, logical.height)
+                    {
+                        let _ = close_win.set_size(tauri::LogicalSize::new(w, h));
+                    }
+                }
                 _ => {}
             });
 

@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const LOCAL = { id: "local", kind: "local" as const, label: "Local", baseUrl: "http://127.0.0.1:4648" };
-const SETTINGS = { onboardingCompleted: true, manageLocalDaemon: true };
+const SETTINGS = { onboardingCompleted: true, manageLocalDaemon: true, notificationsOn: null, notifyPermission: true, notifyQuestion: true, notifyFailure: true };
 const STATUS = { platform: "macos", reachable: false, managedState: "notRunning", localService: null };
 const PROBE_OK = { reachable: true, version: "0.12.0", service: "smind", authRequired: false, loopback: false, error: null };
 
@@ -398,7 +398,7 @@ describe("connections-section (desktop build)", () => {
   });
 
   it("says Finish setup while onboarding is still pending", async () => {
-    await renderManage(STATUS, { onboardingCompleted: false, manageLocalDaemon: false });
+    await renderManage(STATUS, { onboardingCompleted: false, manageLocalDaemon: false, notificationsOn: null, notifyPermission: true, notifyQuestion: true, notifyFailure: true });
     expect(screen.getByTestId("connection-run-setup")).toHaveTextContent("Finish setup");
   });
   });

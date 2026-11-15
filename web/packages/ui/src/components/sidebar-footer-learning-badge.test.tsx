@@ -7,7 +7,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { learningDaemon, learningStatus } from "@/test/learning-test-client";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 
-vi.mock("@/keyboard/keyboard-provider", () => ({ useKeyboard: () => ({ runAction: vi.fn() }) }));
+vi.mock("@/keyboard/keyboard-provider", () => ({ useKeyboard: () => ({ runAction: vi.fn(), bindings: [], isMac: false }) }));
 
 describe("sidebar Settings button", () => {
   it("carries the pending-proposals dot only while a proposal is pending", async () => {

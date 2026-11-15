@@ -1,17 +1,58 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { daemonArchiveNames, desktopAssetNames, verify } from "./verify-release-artifacts.mjs";
+import { daemonArchiveNames, desktopAssetNames, signedVersionOf, verify, verifyMinisign } from "./verify-release-artifacts.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const cli = join(scriptDir, "verify-release-artifacts.mjs");
 const REPO = "spacingmind/smind";
+
+// Real minisign signatures, made here with a throwaway Ed25519 key in the format `tauri signer sign`
+// writes (prehashed "ED": the signature is over BLAKE2b-512 of the data, the global signature over
+// the signature and the trusted comment), so the verifier's cryptographic check runs for real.
+function newKey() {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  return { privateKey, raw: publicKey.export({ format: "der", type: "spki" }).subarray(-32), keyId: Buffer.from("0123456789abcdef", "hex") };
+}
+const TEST_KEY = newKey();
+const OTHER_KEY = { ...newKey(), keyId: Buffer.from("fedcba9876543210", "hex") };
+
+function tauriPubkey(key = TEST_KEY) {
+  const bin = Buffer.concat([Buffer.from("Ed"), key.keyId, key.raw]);
+  return Buffer.from(`untrusted comment: minisign public key: TEST\n${bin.toString("base64")}\n`).toString("base64");
+}
+
+function minisignText(data, comment, key = TEST_KEY) {
+  const hash = createHash("blake2b512").update(data).digest();
+  const sig = cryptoSign(null, hash, key.privateKey);
+  const global = cryptoSign(null, Buffer.concat([sig, Buffer.from(comment)]), key.privateKey);
+  return [
+    "untrusted comment: signature from tauri secret key",
+    Buffer.concat([Buffer.from("ED"), key.keyId, sig]).toString("base64"),
+    `trusted comment: ${comment}`,
+    global.toString("base64"),
+    "",
+  ].join("\n");
+}
+
+// The .sig file for `data`, whose trusted comment names `file` and the signed `version` (null = no
+// version field, like a signature made before the CLI recorded versions).
+function fakeSig(data, version, file = "asset", key = TEST_KEY) {
+  const comment = `timestamp:1700000000\tfile:${file}` + (version === null ? "" : `\tversion:${version}`);
+  return Buffer.from(minisignText(data, comment, key)).toString("base64") + "\n";
+}
+
+// What the Tauri CLI writes in the trusted comment's file: field for each updater asset: the
+// installer keeps its name, both macOS tarballs are `sMind.app.tar.gz` (checked on the real v0.20.0
+// signatures), so the file field cannot tell the two architectures apart: only the cryptographic
+// check can.
+const sigFileField = (asset) => (asset.endsWith(".app.tar.gz") ? "sMind.app.tar.gz" : asset);
 
 function daemonBinary(version) {
   return Buffer.from(
@@ -85,7 +126,10 @@ function makeRelease(root, { version = "1.2.3", desktopVersion = version } = {})
   mkdirSync(dist);
   writeFileSync(join(src, ".release-please-manifest.json"), JSON.stringify({ ".": desktopVersion }, null, 2) + "\n");
   writeFileSync(join(src, "desktop/package.json"), JSON.stringify({ version: desktopVersion }, null, 2) + "\n");
-  writeFileSync(join(src, "desktop/src-tauri/tauri.conf.json"), JSON.stringify({ version: desktopVersion }, null, 2) + "\n");
+  writeFileSync(
+    join(src, "desktop/src-tauri/tauri.conf.json"),
+    JSON.stringify({ version: desktopVersion, plugins: { updater: { pubkey: tauriPubkey() } } }, null, 2) + "\n"
+  );
   for (const rel of ["desktop/src-tauri/Cargo.toml", "desktop/daemon-client/Cargo.toml"]) {
     writeFileSync(join(src, rel), `[package]\nname = "x"\nversion = "${desktopVersion}" # x-release-please-version\n`);
   }
@@ -95,10 +139,16 @@ function makeRelease(root, { version = "1.2.3", desktopVersion = version } = {})
     else buildDaemonTar(join(dist, name), version);
   }
   for (const name of desktopAssetNames(desktopVersion)) {
-    if (name.endsWith(".sig")) writeFileSync(join(dist, name), `sig-${name.replace(/\.sig$/, "")}\n`);
+    if (name.endsWith(".sig")) continue; // signed below, over the artifact's bytes
     else if (name.endsWith(".app.tar.gz")) {
       buildAppTar(join(dist, name), { appVersion: desktopVersion, daemonVersion: version });
     } else writeFileSync(join(dist, name), `dummy ${name}\n`);
+  }
+
+  for (const name of desktopAssetNames(desktopVersion)) {
+    if (!name.endsWith(".sig")) continue;
+    const asset = name.replace(/\.sig$/, "");
+    writeFileSync(join(dist, name), fakeSig(readFileSync(join(dist, asset)), desktopVersion, sigFileField(asset)));
   }
 
   writeChecksums(dist);
@@ -111,6 +161,9 @@ function makeRelease(root, { version = "1.2.3", desktopVersion = version } = {})
       "Zml4dHVyZS1zZWNvbmQtZml4dHVyZQ==\n"
   );
   const asset = (n) => `https://github.com/${REPO}/releases/download/${tag}/${encodeURIComponent(n)}`;
+  const arm64 = `smind-desktop-${desktopVersion}-macos-arm64.app.tar.gz`;
+  const x64 = `smind-desktop-${desktopVersion}-macos-x86_64.app.tar.gz`;
+  const exe = `sMind_${desktopVersion}_x64-setup.exe`;
   writeFileSync(
     join(dist, "latest.json"),
     JSON.stringify(
@@ -119,18 +172,9 @@ function makeRelease(root, { version = "1.2.3", desktopVersion = version } = {})
         notes: "",
         pub_date: "2026-11-14T00:00:00Z",
         platforms: {
-          "darwin-aarch64": {
-            signature: `sig-smind-desktop-${desktopVersion}-macos-arm64.app.tar.gz`,
-            url: asset(`smind-desktop-${desktopVersion}-macos-arm64.app.tar.gz`),
-          },
-          "darwin-x86_64": {
-            signature: `sig-smind-desktop-${desktopVersion}-macos-x86_64.app.tar.gz`,
-            url: asset(`smind-desktop-${desktopVersion}-macos-x86_64.app.tar.gz`),
-          },
-          "windows-x86_64": {
-            signature: `sig-sMind_${desktopVersion}_x64-setup.exe`,
-            url: asset(`sMind_${desktopVersion}_x64-setup.exe`),
-          },
+          "darwin-aarch64": { signature: readFileSync(join(dist, `${arm64}.sig`), "utf8").trim(), url: asset(arm64) },
+          "darwin-x86_64": { signature: readFileSync(join(dist, `${x64}.sig`), "utf8").trim(), url: asset(x64) },
+          "windows-x86_64": { signature: readFileSync(join(dist, `${exe}.sig`), "utf8").trim(), url: asset(exe) },
         },
       },
       null,
@@ -330,6 +374,166 @@ test("verify-minisig-wrong-file", () => {
     rewriteMinisig(fx, "trusted comment: timestamp:1\tfile:other.txt\tversion:1.2.3");
     expectFailure(verifyOf(fx), "checksums-signature", "file:checksums.txt");
   });
+});
+
+// A valid signature (by the committed test key) over the asset's current bytes, for `version`.
+function signedBy(fx, asset, version, key = TEST_KEY) {
+  return fakeSig(readFileSync(join(fx.dist, asset)), version, sigFileField(asset), key);
+}
+
+function replaceUpdaterSig(fx, platform, asset, signature) {
+  writeFileSync(join(fx.dist, `${asset}.sig`), signature);
+  writeChecksums(fx.dist);
+  rewriteLatest(fx, (m) => {
+    m.platforms[platform].signature = signature.trim();
+  });
+}
+
+test("verify-updater-signature-without-version", () => {
+  withRelease({}, (fx) => {
+    const asset = `smind-desktop-${fx.desktopVersion}-macos-arm64.app.tar.gz`;
+    replaceUpdaterSig(fx, "darwin-aarch64", asset, signedBy(fx, asset, null));
+    const failures = verifyOf(fx);
+    expectFailure(failures, "updater-signatures", asset);
+    assert.deepEqual(failures.map((f) => f.check), ["updater-signatures"]);
+  });
+});
+
+test("verify-updater-signature-wrong-version", () => {
+  withRelease({ version: "0.20.0" }, (fx) => {
+    const asset = `smind-desktop-${fx.desktopVersion}-macos-x86_64.app.tar.gz`;
+    replaceUpdaterSig(fx, "darwin-x86_64", asset, signedBy(fx, asset, "0.19.0"));
+    expectFailure(verifyOf(fx), "updater-signatures", /expected 0\.20\.0, found 0\.19\.0/);
+  });
+});
+
+function rawSig(lines) {
+  return Buffer.from(lines.join("\n")).toString("base64") + "\n";
+}
+
+// the updater plugin reads exactly line 3, `trusted comment: `, tab-split, untrimmed
+test("verify-updater-signature-version-field-the-plugin-would-not-read", () => {
+  withRelease({}, (fx) => {
+    const asset = `smind-desktop-${fx.desktopVersion}-macos-arm64.app.tar.gz`;
+    const sig = rawSig(["untrusted comment: x", "RWQAAAA", `trusted comment: timestamp:1\tfile:${asset}\t version:${fx.desktopVersion}`, "GLOBAL", ""]);
+    replaceUpdaterSig(fx, "darwin-aarch64", asset, sig);
+    expectFailure(verifyOf(fx), "updater-signatures", asset);
+  });
+});
+
+test("verify-updater-signature-reads-only-the-third-line", () => {
+  withRelease({}, (fx) => {
+    const asset = `smind-desktop-${fx.desktopVersion}-macos-x86_64.app.tar.gz`;
+    // a trusted-comment-looking line BEFORE the real third line (versionless)
+    const sig = rawSig(["untrusted comment: x", `trusted comment: timestamp:1\tversion:${fx.desktopVersion}`, `trusted comment: timestamp:1\tfile:${asset}`, "GLOBAL", ""]);
+    replaceUpdaterSig(fx, "darwin-x86_64", asset, sig);
+    expectFailure(verifyOf(fx), "updater-signatures", asset);
+  });
+});
+
+test("verify-updater-signature-v-prefix-accepted", () => {
+  withRelease({}, (fx) => {
+    const asset = `sMind_${fx.desktopVersion}_x64-setup.exe`;
+    replaceUpdaterSig(fx, "windows-x86_64", asset, signedBy(fx, asset, `v${fx.desktopVersion}`));
+    assert.deepEqual(verifyOf(fx).filter((f) => f.check === "updater-signatures"), []);
+  });
+});
+
+test("verify-updater-signature-undecodable", () => {
+  withRelease({}, (fx) => {
+    const asset = `sMind_${fx.desktopVersion}_x64-setup.exe`;
+    replaceUpdaterSig(fx, "windows-x86_64", asset, "!!!\n");
+    expectFailure(verifyOf(fx), "updater-signatures", /base64/);
+  });
+});
+
+// verify-updater-signature-for-another-artifact: the other macOS architecture's .sig has the same
+// version and the same trusted-comment file name, so only the cryptographic check can see that it
+// is not this tarball's signature (the client would only fail at install time otherwise).
+test("verify-updater-signature-for-another-artifact", () => {
+  withRelease({}, (fx) => {
+    const arm = `smind-desktop-${fx.desktopVersion}-macos-arm64.app.tar.gz`;
+    const x64 = `smind-desktop-${fx.desktopVersion}-macos-x86_64.app.tar.gz`;
+    replaceUpdaterSig(fx, "darwin-aarch64", arm, readFileSync(join(fx.dist, `${x64}.sig`), "utf8"));
+    const failures = verifyOf(fx);
+    expectFailure(failures, "updater-signatures", /does not verify for .*arm64.*signature does not match the artifact/);
+    assert.deepEqual(failures.map((f) => f.check), ["updater-signatures"]);
+  });
+});
+
+test("verify-updater-signature-by-another-key", () => {
+  withRelease({}, (fx) => {
+    const asset = `sMind_${fx.desktopVersion}_x64-setup.exe`;
+    replaceUpdaterSig(fx, "windows-x86_64", asset, signedBy(fx, asset, fx.desktopVersion, OTHER_KEY));
+    expectFailure(verifyOf(fx), "updater-signatures", /different key/);
+  });
+});
+
+test("verify-updater-signature-altered-trusted-comment", () => {
+  withRelease({}, (fx) => {
+    const asset = `sMind_${fx.desktopVersion}_x64-setup.exe`;
+    // a valid signature, then its signed version rewritten to the right one: the global
+    // signature no longer covers the comment
+    const old = signedBy(fx, asset, "0.0.1");
+    const text = Buffer.from(old.trim(), "base64").toString("utf8").replace("version:0.0.1", `version:${fx.desktopVersion}`);
+    replaceUpdaterSig(fx, "windows-x86_64", asset, Buffer.from(text).toString("base64") + "\n");
+    expectFailure(verifyOf(fx), "updater-signatures", /not covered by the signature/);
+  });
+});
+
+// the plugin reads lines with Rust str::lines(), which strips \r: a CRLF .sig is a good signature
+test("verify-updater-signature-crlf-is-accepted", () => {
+  withRelease({}, (fx) => {
+    const asset = `sMind_${fx.desktopVersion}_x64-setup.exe`;
+    const lf = Buffer.from(signedBy(fx, asset, fx.desktopVersion).trim(), "base64").toString("utf8");
+    replaceUpdaterSig(fx, "windows-x86_64", asset, Buffer.from(lf.replaceAll("\n", "\r\n")).toString("base64") + "\n");
+    assert.deepEqual(verifyOf(fx).filter((f) => f.check === "updater-signatures"), []);
+  });
+});
+
+// trim_start_matches('v') strips EVERY leading v
+test("verify-updater-signature-vv-prefix-accepted", () => {
+  withRelease({}, (fx) => {
+    const asset = `smind-desktop-${fx.desktopVersion}-macos-arm64.app.tar.gz`;
+    replaceUpdaterSig(fx, "darwin-aarch64", asset, signedBy(fx, asset, `vv${fx.desktopVersion}`));
+    assert.deepEqual(verifyOf(fx).filter((f) => f.check === "updater-signatures"), []);
+  });
+});
+
+test("verify-updater-signature-needs-the-committed-public-key", () => {
+  withRelease({}, (fx) => {
+    writeFileSync(join(fx.src, "desktop/src-tauri/tauri.conf.json"), JSON.stringify({ version: fx.desktopVersion }) + "\n");
+    expectFailure(verifyOf(fx), "updater-signatures", /no plugins\.updater\.pubkey/);
+  });
+});
+
+// Real data, v0.20.0 (public release assets, committed under scripts/testdata/real-v0.20.0/): the
+// verifier's minisign verification agrees with a real `tauri signer sign` signature, and the real
+// updater signatures carry what the scripts expect. The artifacts are too large to commit: the
+// checksums.txt and its signature stand in for the cryptographic proof; the three real .sig files
+// prove the trusted-comment shape (macOS tarballs both say file:sMind.app.tar.gz).
+const real = (n) => join(scriptDir, "testdata/real-v0.20.0", n);
+
+test("verify-real-checksums-signature-verifies-and-tampering-does-not", () => {
+  const pub = readFileSync(real("updater-pubkey.txt"), "utf8").trim();
+  const data = readFileSync(real("checksums.txt"));
+  const sig = readFileSync(real("checksums.txt.minisig"), "utf8");
+  assert.equal(verifyMinisign(data, sig, pub, { plain: true }), null);
+  assert.match(verifyMinisign(Buffer.concat([data, Buffer.from("x")]), sig, pub, { plain: true }), /does not match the artifact/);
+  assert.match(verifyMinisign(data, sig.replace("version:0.20.0", "version:0.19.0"), pub, { plain: true }), /not covered by the signature/);
+});
+
+test("verify-real-updater-signatures-parse", () => {
+  for (const n of ["sMind_0.20.0_x64-setup.exe.sig", "smind-desktop-0.20.0-macos-arm64.app.tar.gz.sig", "smind-desktop-0.20.0-macos-x86_64.app.tar.gz.sig"]) {
+    const sig = readFileSync(real(n), "utf8");
+    assert.equal(signedVersionOf(sig), "0.20.0", n);
+    // and the same signature with CRLF line endings, as the plugin would read it
+    const crlf = Buffer.from(Buffer.from(sig.trim(), "base64").toString("utf8").replaceAll("\n", "\r\n")).toString("base64");
+    assert.equal(signedVersionOf(crlf), "0.20.0", `${n} (CRLF)`);
+  }
+  // the two macOS signatures name the same file: why the file field cannot pin the architecture
+  const f = (n) => Buffer.from(readFileSync(real(n), "utf8").trim(), "base64").toString("utf8").split("\n")[2].split("\t")[1];
+  assert.equal(f("smind-desktop-0.20.0-macos-arm64.app.tar.gz.sig"), f("smind-desktop-0.20.0-macos-x86_64.app.tar.gz.sig"));
 });
 
 function rewriteLatest(fx, mutate) {

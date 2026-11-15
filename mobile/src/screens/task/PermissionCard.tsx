@@ -2,16 +2,18 @@
 // Options are @expo/ui Buttons in ONE UiHost row (expo-ui: native controls
 // tinted by the Host); variants come from the pure permissionButtonVariants.
 // Reject options use TextButton (frozen primitive: its own Host + label colour).
-// A pending request with a reject option also offers the optional deny reason
-// (a small multi-line TextInput under the buttons: two lines at rest, growing
-// to three, then scrolling, with a used/max counter near the cap); only the
-// reject tap carries it -- dispatchPermissionTap keeps the two-argument call
-// for the rest.
+// A pending request with a reject option also offers the optional deny reason,
+// behind a TextButton ("Deny with reason"): the multi-line TextInput (two lines
+// at rest, growing to three, then scrolling, with a used/max counter near the
+// cap) appears only while the toggle is open, its text survives a collapse, and
+// only the reject tap carries it -- dispatchPermissionTap keeps the
+// two-argument call for the rest.
 
 import { memo, useMemo, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button } from '@expo/ui';
 import { HeredocReveal } from '../../api';
+import { errorCopy, resolvedCopy, showReasonField, showReasonToggle } from '../../permissionCardView';
 import { PermissionRequestState, clampRunes, denyReasonCounter, dispatchPermissionTap } from '../../permissionRequests';
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -37,6 +39,7 @@ export const PermissionCard = memo(function PermissionCard({
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const variants = useMemo(() => permissionButtonVariants(request.options), [request.options]);
   const [reason, setReason] = useState('');
+  const [reasonOpen, setReasonOpen] = useState(false);
   const [reasonContentHeight, setReasonContentHeight] = useState(0);
   const counter = denyReasonCounter(reason);
   // The field grows with its text: two body lines at rest, capped at three
@@ -45,8 +48,8 @@ export const PermissionCard = memo(function PermissionCard({
   const reasonMinHeight = theme.type.body.lineHeight * 2 + reasonVerticalPadding;
   const reasonMaxHeight = theme.type.body.lineHeight * 3 + reasonVerticalPadding;
   const reasonHeight = Math.min(Math.max(reasonContentHeight + reasonVerticalPadding, reasonMinHeight), reasonMaxHeight);
-  const chosen = request.options.find((o) => o.id === request.resolvedWith?.optionId)?.label ?? request.resolvedWith?.optionId ?? '?';
   const hasReject = request.options.some((o) => o.kind.startsWith('reject'));
+  const error = request.error !== null ? errorCopy(request.error) : null;
   return (
     <Card style={styles.card}>
       <Text style={styles.summary} selectable>
@@ -56,6 +59,16 @@ export const PermissionCard = memo(function PermissionCard({
       {/* The body is only revealable while the request is pending (the daemon refuses afterwards). */}
       {onReveal && request.status === 'pending' && request.detail?.heredocs ? (
         <HeredocRevealToggles refs={request.detail.heredocs} reveal={(i) => onReveal(request.requestId, i)} />
+      ) : null}
+      {error !== null ? (
+        <View style={styles.errorField}>
+          <Text style={styles.error} selectable>
+            {error.headline}
+          </Text>
+          <Text style={styles.errorDetail} selectable>
+            {error.detail}
+          </Text>
+        </View>
       ) : null}
       {request.status === 'pending' ? (
         <>
@@ -74,8 +87,11 @@ export const PermissionCard = memo(function PermissionCard({
                 </UiHost>
               ),
             )}
+            {showReasonToggle(hasReject) ? (
+              <TextButton label={reasonOpen ? 'Hide reason' : 'Deny with reason'} onPress={() => setReasonOpen((open) => !open)} />
+            ) : null}
           </View>
-          {hasReject ? (
+          {showReasonField({ hasReject, expanded: reasonOpen }) ? (
             <View style={styles.reasonField}>
               <Text style={styles.reasonLabel}>{REASON_LABEL}</Text>
               <TextInput
@@ -101,15 +117,13 @@ export const PermissionCard = memo(function PermissionCard({
         </>
       ) : (
         <Text style={styles.resolved} selectable>
-          {request.resolvedWith?.by === 'tap' ? 'chosen: ' : 'resolved: '}
-          {chosen}
+          {resolvedCopy({
+            by: request.resolvedWith?.by,
+            reason: request.resolvedWith?.reason,
+            optionKind: request.options.find((o) => o.id === request.resolvedWith?.optionId)?.kind,
+          })}
         </Text>
       )}
-      {request.error !== null ? (
-        <Text style={styles.error} selectable>
-          Couldn't respond: {request.error}
-        </Text>
-      ) : null}
     </Card>
   );
 });
@@ -136,6 +150,8 @@ function makeStyles(theme: AppTheme) {
     reasonCounter: { ...theme.type.small, color: theme.foregroundSubtle, alignSelf: 'flex-end' },
     reasonCounterAtLimit: { color: theme.status.danger },
     resolved: { ...theme.type.small, color: theme.status.success },
+    errorField: { gap: theme.spacing[1] },
     error: { ...theme.type.small, color: theme.status.danger },
+    errorDetail: { ...theme.type.small, color: theme.foregroundSubtle },
   });
 }

@@ -21,6 +21,7 @@ Exit 0: consistent. Exit 1: at least one `<check-id>: <message>` line. Exit 2: u
 | `desktop-assets` | the dmgs, updater tarballs and `.sig` files, the Windows installer and msi for the desktop version, no stray one |
 | `checksums` | `checksums.txt` lists every release file once, with the right SHA-256 |
 | `checksums-signature` | `checksums.txt.minisig` has the minisign shape and its signed comment names this file and version |
+| `updater-signatures` | the three updater `.sig` files carry `version:<desktop version>` in their signed comment (the updater's `requireSignedVersion`) and verify, with the public key committed in `tauri.conf.json`, over the artifact next to them: a `.sig` copied from another asset fails |
 | `latest-json` | the updater manifest points at assets that exist, carries their signatures, and the desktop version |
 | `sidecar-versions` | every daemon binary, and the daemon inside each macOS app tarball, embeds this version; the app's `Info.plist` has the desktop version |
 
@@ -95,3 +96,23 @@ node scripts/ci-green-gate.mjs --dry-run --repo owner/name --sha <40-hex commit>
 
 It prints `WOULD PASS: ...` or `WOULD REFUSE: ...`, never waits and exits 0. A
 `workflow_dispatch` run of `release-please.yml` runs the gate the same way.
+
+## Updater signatures must carry their version
+
+The desktop app is built with `plugins.updater.requireSignedVersion: true`: the
+updater refuses a download whose signature does not say which version it was
+signed for, and refuses one signed for a different version than `latest.json`
+announced. So a release whose updater signatures lack the `version:` field in
+their signed comment (the Tauri CLI writes it) could not be installed by any app
+built with the flag. `gen-latest-json.mjs` and the `updater-signatures` check stop
+that release before anything is uploaded. If one of them refuses: re-sign the
+updater artifacts with the Tauri CLI of the pinned version (the signed comment
+should read `timestamp:...<TAB>file:...<TAB>version:X.Y.Z`) and re-run; do not
+turn the flag off to get a release out, because that re-opens the rollback hole.
+
+The claim "every release carries its signed version" can be re-checked at any time against a
+published release: download it into an empty directory (`gh release download v0.20.0 --dir dir`)
+and run `node scripts/verify-release-artifacts.mjs --dir dir --version 0.20.0 --tag v0.20.0 --repo
+spacingmind/smind`; `updater-signatures` must say `ok`. The real v0.20.0 signatures and
+`checksums.txt` with its signature are also committed under `scripts/testdata/real-v0.20.0/` and
+read by the tests, so the check does not depend on the network.

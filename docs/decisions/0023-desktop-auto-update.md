@@ -157,6 +157,22 @@ daemon is swapped in.
   the release has installers but no updates, and the `publish` job fails
   rather than succeeding quietly.
 
+## Amendment (2026-11): the signed version is required
+
+`latest.json` is not signed, and the artifact signature alone does not say which
+release it belongs to. The updater plugin compares the version in the signature's
+signed comment with the version `latest.json` announced, but only when the
+signature carries one. `plugins.updater.requireSignedVersion` is now `true`, so a
+signature without a signed version is refused instead of skipping the check; a
+crafted feed can no longer pair a newer version number with an older release's
+valid signature. This only tightens what the updater accepts. The release flow
+(`desktop/scripts/gen-latest-json.mjs` and the `updater-signatures` check of
+`scripts/verify-release-artifacts.mjs`) refuses to publish a release whose
+updater signatures lack the signed version, because apps with the flag would
+refuse it. The same check also verifies each updater signature, with the public key committed in `tauri.conf.json`, over the artifact it sits next to, so a `.sig` copied from another asset (the two macOS tarballs carry the same version and the same `file:sMind.app.tar.gz`) is stopped before publishing instead of failing on a client.
+
+**An inherent limit.** The flag binds the announced version to the signed artifact; it does not make `latest.json` trustworthy. A genuine, signed, *older* release that is still newer than the version an app has installed can be re-served by an attacker who controls the feed (announced version and signature of that older release agree), and the app will install it: an installed 0.18 can be steered to a real 0.19 instead of 0.20. Closing that needs a signed manifest or a version floor shipped inside the app, neither of which exists. What we do instead: the feed is fetched over TLS from the project's own GitHub release, every release is verified before it is published, a release known to be bad is superseded by a newer one rather than deleted, and the app only ever moves forward (it never installs a version not newer than the running one: `allowDowngrades` stays off and is pinned by a test). A release with a security fix should therefore say so in its notes and, if needed, raise the minimum by shipping the next release quickly. Plan: `docs/plans/active/desktop-require-signed-version.md`.
+
 ## Cross-references
 
 - `docs/decisions/0013-desktop-bundled-ui.md`: scoped IPC bridge (decision 2)

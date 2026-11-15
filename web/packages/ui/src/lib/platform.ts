@@ -104,6 +104,14 @@ export interface DaemonStatus {
 export interface AppSettings {
   onboardingCompleted: boolean;
   manageLocalDaemon: boolean;
+  /** Desktop-notification consent (DT5 B AC8): `null` = the person was never asked; a patch can only set it to `true` or `false`. */
+  notificationsOn: boolean | null;
+  /** Whether a pending permission request raises an OS notification (default on). */
+  notifyPermission: boolean;
+  /** Whether a waiting question raises an OS notification (default on). */
+  notifyQuestion: boolean;
+  /** Whether a failed run raises an OS notification (default on). */
+  notifyFailure: boolean;
 }
 
 /** What `connections_probe(url)` learned about a daemon URL, without saving anything (ADR-0031 D7 (b)). */
@@ -197,6 +205,8 @@ export interface DesktopApi {
   /** Reads/patches `app-settings.json` (`app_settings_get`/`app_settings_set`); a patch only changes the fields it names and the result is what is now stored. */
   appSettingsGet(): Promise<AppSettings>;
   appSettingsSet(patch: Partial<AppSettings>): Promise<AppSettings>;
+  /** Sends one test notification (`notify_test`): what makes macOS show its own permission prompt; rejects with Rust's error text. */
+  notifyTest(): Promise<void>;
   /** The native Help menu's "Run Setup Again…" (`run-setup-requested`): reopens first-run without touching saved connections. */
   onRunSetupRequested(cb: () => void): () => void;
   /** Validates a pasted relay pairing link in Rust and returns only its non-secret fields; saves nothing. Rejects with Rust's error text (which never contains the link). */
@@ -329,6 +339,7 @@ function unavailable(): DesktopApi {
     addSshConnection: () => reject(),
     appSettingsGet: () => reject(),
     appSettingsSet: () => reject(),
+    notifyTest: () => reject(),
     onRunSetupRequested: () => () => {},
     previewRelayLink: () => reject(),
     addRelayConnection: () => reject(),
@@ -443,6 +454,14 @@ function realDesktopApi(): DesktopApi {
       const invoke = await loadInvoke();
       try {
         return await invoke<AppSettings>("app_settings_set", { patch });
+      } catch (err) {
+        throw asError(err);
+      }
+    },
+    async notifyTest() {
+      const invoke = await loadInvoke();
+      try {
+        await invoke("notify_test");
       } catch (err) {
         throw asError(err);
       }
