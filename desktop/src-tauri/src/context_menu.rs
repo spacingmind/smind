@@ -550,6 +550,62 @@ mod tests {
     }
 
     #[test]
+    fn context_menu_selection_goes_to_the_window_that_opened_it() {
+        let state = ContextMenuState::default();
+        let t = Instant::now();
+        let open = state.arm_for(&[item("a", "A")], t, "task-2");
+        assert_eq!(
+            state.resolve(&event_id(open, "a"), t),
+            Some((
+                "task-2".to_string(),
+                ContextMenuSelection {
+                    open,
+                    id: "a".into()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn context_menu_a_second_open_replaces_the_first_windows_menu() {
+        let state = ContextMenuState::default();
+        let t = Instant::now();
+        let first = state.arm_for(&[item("a", "A")], t, "task-2");
+        let second = state.arm_for(&[item("a", "A")], t, "main");
+        // The first menu was replaced: its selection reaches nobody, not even its own window.
+        assert_eq!(state.resolve(&event_id(first, "a"), t), None);
+        assert_eq!(
+            state.resolve(&event_id(second, "a"), t),
+            Some((
+                "main".to_string(),
+                ContextMenuSelection {
+                    open: second,
+                    id: "a".into()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn context_menu_handle_event_never_targets_a_fixed_window() {
+        let src = include_str!("context_menu.rs");
+        let start = src
+            .find("pub fn handle_event")
+            .expect("handle_event exists");
+        let rest = &src[start..];
+        let end = rest.find("\n}\n").expect("handle_event body is closed");
+        let body = &rest[..end];
+        assert!(
+            body.contains("emit_to(label"),
+            "handle_event must deliver the selection to the window that opened the menu"
+        );
+        assert!(
+            !body.contains("MAIN_WINDOW"),
+            "handle_event must not name a fixed window label"
+        );
+    }
+
+    #[test]
     fn context_menu_selection_after_the_ttl_is_ignored_and_dismissal_leaves_nothing_armed_for_ever()
     {
         let state = ContextMenuState::default();
