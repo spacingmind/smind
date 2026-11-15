@@ -131,7 +131,7 @@ and the PR says so. A real-window run (focus, typing, a real banner) is not poss
 - [x] spec
 - [x] A: click-through to the exact card (PR A)
 - [x] B: fixed bodies, questions and failed runs, dedupe, badge, consent and switches (PR B)
-- [ ] C: focus rules, coalescing, quiet while typing, badge check (PR C)
+- [x] C: focus rules, coalescing, quiet while typing, badge check (PR C)
 
 ## Validation
 
@@ -150,3 +150,11 @@ Frames: 16 (light and dark, 1280 and 390; the settings group before consent, on,
 One finding fixed on the way: the dedupe ran before the consent check, so a request that stayed silent before consent could never notify later.
 Review fix: `notify_test` (no argument, skips the consent check by design) is rate-limited to one banner per 5 s per process (`notify_test.rs`, a time-injected `Limiter`, 4 tests; a refused call returns an error the settings UI shows, and does not extend the window); mutations killed: limiter never refusing, a refused call restarting the window, `asSentence` not capitalising or ending the sentence. Settings errors now show as padded sentences (`lib/as-sentence.ts`).
 Not verified: a real OS notification, macOS's own permission prompt, and the Windows/Linux paths (macOS compiled only); no real window.
+
+PR C: `attention_focus.rs` (11 tests), `coalesce.rs` (7, time-injected), `attention.rs` (badge count, clears at zero, `contains`), `capability_tests.rs` (allowlist gains
+`allow-attention-focus-report`), web `use-attention-report.test.ts` (11), `composer-focus.test.ts`, `platform.test.ts`; daemon-client `cargo test --lib` (320), src-tauri
+`cargo test --lib` (231), web 488 files / 5473 tests, `tsc -b`, `vite build`; `cargo clippy --all-targets -- -D warnings` clean in both crates, `cargo fmt --check` clean in src-tauri.
+Mutations on committed code, all killed: the focused-window condition dropped from the "own task" rule; a held failure treated as droppable; the hold list not dropping its oldest;
+the summary aimed at the first instead of the latest item; no report treated as hold (fail closed); the browser-build guard removed; the unchanged-state skip removed; pagehide
+reporting the window as focused. No frames: PR C has no visible UI. Not verified: a real window and a real OS banner (focus, typing, coalescing end to end); Windows and Linux
+(macOS compiled only).
