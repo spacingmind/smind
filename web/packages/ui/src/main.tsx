@@ -10,6 +10,7 @@ import { desktopOS, isDesktop } from "@/lib/platform";
 import { applyStoredPluginTheme } from "@/lib/plugin-theme";
 import { installDesktopContextMenu } from "@/lib/desktop-context-menu";
 import { installDesktopWebviewDefaults } from "@/lib/desktop-webview";
+import { trackWindowActive } from "@/lib/window-active";
 import { IS_DEMO } from "@/demo/flag";
 import { landOnLiveTask } from "@/demo/land";
 import "@/index.css";
@@ -29,6 +30,8 @@ if (IS_DEMO) landOnLiveTask();
 
 // Desktop build only: scopes desktop-chrome.css's per-OS rules.
 if (desktopOS) document.documentElement.dataset.desktopOs = desktopOS;
+// Desktop build only: the window-active flag desktop-chrome.css dims the sidebar selection with.
+if (desktopOS) trackWindowActive();
 
 // D2 (desktop-native-feel plan): the webview zoom guard and the
 // context-menu policy -- each a no-op in the browser build.
