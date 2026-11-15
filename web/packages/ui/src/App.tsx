@@ -2528,6 +2528,7 @@ function DraggableTabTrigger({
         hasClosableTabsToLeft,
         hasClosableTabsToRight,
         canSplit: isMovableKind(entry.kind) && showMoveAffordance,
+        canArchiveChat: entry.chatId !== undefined,
         onClose: () => onClose(entry.key),
         onCloseOthers: () => onCloseOthers(entry.key),
         onCloseLeft: () => onCloseLeft(entry.key),
