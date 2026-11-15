@@ -80,7 +80,7 @@ const FAKES = {
     "    else",
     '      echo "  1) ABC123 \\"${SMIND_MACOS_SIGN_IDENTITY:-' + IDENTITY + '}\\""',
     // a long listing after the match, like a keychain with many identities
-    "      yes '  2) FFFF \"Some Other Identity\"' | head -n 30000",
+    "      printf '  2) FFFF \"Some Other Identity\"\\n%.0s' $(seq 1 30000)",
     "    fi",
     "    ;;",
     "esac",
@@ -120,7 +120,9 @@ const FAKES = {
     // the noise after it, so a `| grep -q` under pipefail (grep exits at the first match, the
     // writer gets SIGPIPE) fails here exactly as it did against real apps.
     '  printf \'%s\\n\' "$d" >&2',
-    "  yes 'CodeDirectory noise line that real codesign prints and nobody greps for' | head -n 30000 >&2",
+    // printed by the fake's own process (a builtin printf), like the real tool, so the fake itself is
+    // killed by SIGPIPE when the reader has gone: its exit status is then 141, as real codesign's is
+    "  printf 'CodeDirectory noise line that real codesign prints and nobody greps for\\n%.0s' $(seq 1 30000) >&2",
     "  exit 0",
     "fi",
     'if [ "${1:-}" = "-d" ]; then',
