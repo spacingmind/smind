@@ -190,6 +190,12 @@ impl Tray {
         self.refresh(count);
     }
 
+    /// is_pending is whether a request id is still waiting (DT5 C/AC11:
+    /// held banners are dropped when their request resolved meanwhile).
+    pub fn is_pending(&self, request_id: &str) -> bool {
+        self.state.lock().unwrap().contains(request_id)
+    }
+
     /// Re-applies the shown badge (see `Badge::reapply`).
     pub fn reapply_badge(&self) {
         self.badge.reapply();

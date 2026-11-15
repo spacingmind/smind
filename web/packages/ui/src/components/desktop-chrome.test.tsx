@@ -54,6 +54,7 @@ function mockPlatform(opts: { desktop: boolean; os: DesktopOS | null }) {
       getCurrentConnection: reject,
       connectionVersion: reject,
       daemonStatus: reject,
+      attentionFocusReport: () => Promise.resolve(),
       onDaemonProgress: () => () => {},
       onMenuAction: () => () => {},
       appUpdateCheck: () => Promise.resolve({ kind: "unsupported" }),
