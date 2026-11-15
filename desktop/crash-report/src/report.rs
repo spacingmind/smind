@@ -398,8 +398,9 @@ mod tests {
         // Epoch and a leap-year date in February.
         assert_eq!(rfc3339_nano(UNIX_EPOCH), "1970-01-01T00:00:00Z");
         assert_eq!(name_stamp(UNIX_EPOCH), "19700101T000000.000");
-        let t = at(1_740_960_000, 999_999_999); // 2025-03-03T00:00:00Z, past the 2024 leap day
-        assert_eq!(rfc3339_nano(t), "2025-03-03T00:00:00.999999999Z");
+        // 999_999_900 ns (a multiple of 100: see above), the largest fraction Windows can hold
+        let t = at(1_740_960_000, 999_999_900); // 2025-03-03T00:00:00Z, past the 2024 leap day
+        assert_eq!(rfc3339_nano(t), "2025-03-03T00:00:00.9999999Z");
         assert_eq!(name_stamp(t), "20250303T000000.999");
 
         // One second before the epoch still formats as a civil date.
