@@ -137,6 +137,7 @@ describe("TabLabel numbers (the strip's chips and the overflow menu share one fu
     const menu = readFileSync(resolve(__dirname, "./tab-overflow-menu.tsx"), "utf8");
     expect(app).toContain("disambiguatedParts(tabs)");
     expect(app).toContain("number={tabParts.get(entry.key)?.n}");
+    expect(app).toContain("<TabLabel entry={entry} number={number} />"); // the chip hands it on to the label
     expect(menu).toContain("disambiguatedParts(tabs)");
     expect(menu).toContain("number={parts.get(entry.key)?.n}");
     // and neither re-derives numbers by itself
