@@ -347,7 +347,7 @@ func TestScreenshotCapturesJPEGAndAnOverCapReplyIsAPlainError(t *testing.T) {
 	huge := &shotRig{vw: 200, vh: 100}
 	huge.png = func(w, h int) string { return strings.Repeat("A", maxMessageBytes+4096) }
 	s2, _ := newShotSession(t, huge)
-	if _, err := s2.Screenshot(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "too large") {
+	if _, err := s2.Screenshot(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "too large to return") {
 		t.Fatalf("an over-cap screenshot reply must be a plain error: %v", err)
 	}
 	if s2.Closed() {
