@@ -90,6 +90,7 @@ import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
 import { useFileRevealStore } from "@/stores/file-reveal-store";
+import { useCardFocusStore } from "@/stores/card-focus-store";
 import { useTheme } from "@/hooks/use-theme";
 import type { ActionId } from "@/keyboard/actions";
 import { KeyboardProvider, useActionHandler, useActionRestriction, useKeyboard } from "@/keyboard/keyboard-provider";
@@ -926,7 +927,12 @@ function AppShell({
         if (chats === null) return;
         const wantedChatId = pendingRoute.tab.chatId;
         const targetChat = chats.find((c) => c.ID === wantedChatId);
-        if (targetChat) openTab(match.ID, chatTab(match.ID, targetChat));
+        if (targetChat) {
+          openTab(match.ID, chatTab(match.ID, targetChat));
+          // A `?card=` deep link (a notification click-through) asks the
+          // matching permission/question card to take focus once it mounts.
+          if (pendingRoute.tab.requestId) useCardFocusStore.getState().request(pendingRoute.tab.requestId);
+        }
       } else if (pendingRoute.tab.kind === "pr") {
         openTab(match.ID, prTab(match.ID));
       } else {
