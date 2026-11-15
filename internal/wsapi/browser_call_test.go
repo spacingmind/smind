@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/browser/runsock"
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -251,6 +253,9 @@ func TestBrowserHost_AFinishedRunEndsItsSocketAndBrowserSession(t *testing.T) {
 // process is the run's root, so it is in the tree; the call runs through the
 // shared core, and a run whose gate closes is refused with an error reply.
 func TestBrowserHost_EndToEndThroughARealSocket(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the browser's per-run socket is not offered on Windows")
+	}
 	e := newIdentEnv(t, "hang")
 	h := e.api.browser
 	dir, err := os.MkdirTemp("", "rs")
@@ -309,4 +314,20 @@ func TestBrowserWiring_RegistrySocketHostIsTheBrowserHost(t *testing.T) {
 	if e.api.Runs.BrowserSocketHost() != runs.BrowserSockets(e.api.browser) {
 		t.Fatal("the registry must open run sockets through the browser host")
 	}
+}
+
+// Building the API never touches the disk for the browser: the socket directory
+// is created on the first Open only, so tests (and daemons that never run a
+// browser) cannot create or sweep anything in a real home, and the test home is
+// a temp directory, never the developer's ~/.smind.
+func TestBrowserHostConstructionTouchesNoDiskAndTheTestHomeIsNotTheRealOne(t *testing.T) {
+	e := newProcEnv(t)
+	home := config.Dir()
+	if real, err := os.UserHomeDir(); err == nil && strings.HasPrefix(home, filepath.Join(real, ".smind")) {
+		t.Fatalf("the test home is the developer's real home: %s", home)
+	}
+	if _, err := os.Lstat(filepath.Join(home, "browser", "sock")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("constructing the API created the socket directory: %v", err)
+	}
+	_ = e
 }

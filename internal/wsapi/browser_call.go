@@ -187,7 +187,7 @@ func (h *browserHost) workspaceSwitchOn(ws int64) bool {
 func (h *browserHost) session(ctx context.Context, run browser.Run) (*browser.Session, error) {
 	h.gateMu.RLock()
 	defer h.gateMu.RUnlock()
-	// Re-check inside the lock: browser.call checked the gates earlier, and a
+	// Re-check inside the lock: callRun checked the gates earlier, and a
 	// settings change (disable plus close) may have landed since.
 	if h.killSwitch() {
 		return nil, errors.New("the browser is disabled by the daemon's configuration")

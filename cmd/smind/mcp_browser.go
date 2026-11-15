@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -50,7 +51,7 @@ type browserWaitInput struct {
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty" jsonschema:"optional wait budget in seconds, from 1 to 15"`
 }
 
-// browserCallResult is the daemon's browser.call envelope: an untrusted
+// browserCallResult is the daemon's browser call envelope: an untrusted
 // content list plus the error flag.
 type browserCallResult struct {
 	Content []browserContent `json:"content"`
@@ -66,7 +67,7 @@ type browserContent struct {
 }
 
 // newBrowserMCPServer builds the browser child's whole catalogue:
-// exactly the seven tools below, each a forwarder of browser.call.
+// exactly the seven tools below, each a forwarder to the run's browser socket.
 func newBrowserMCPServer(call browserCaller) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    browserMCPName,
@@ -129,7 +130,7 @@ func registerBrowserTools(srv *mcp.Server, call browserCaller) {
 }
 
 // addBrowserTool registers one browser tool whose handler forwards its
-// typed input verbatim to the daemon's browser.call. A nil schema (tools
+// typed input verbatim to the run's browser socket. A nil schema (tools
 // with no inputs) is left unset so the go-sdk infers it -- a typed nil
 // *jsonschema.Schema in the any field would defeat that inference.
 func addBrowserTool[In any](srv *mcp.Server, call browserCaller, name, description string, schema *jsonschema.Schema, readonly bool) {
@@ -180,9 +181,13 @@ func socketBrowserCaller(path string) browserCaller {
 			return browserCallResult{}, fmt.Errorf("the run's browser socket is not reachable: %w", err)
 		}
 		defer conn.Close()
-		if dl, ok := ctx.Deadline(); ok {
-			_ = conn.SetDeadline(dl)
+		// A call never waits without bound: the caller's deadline, or two minutes
+		// (the broker's own budget per call is 20 seconds).
+		dl, ok := ctx.Deadline()
+		if !ok {
+			dl = time.Now().Add(2 * time.Minute)
 		}
+		_ = conn.SetDeadline(dl)
 		stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 		defer stop()
 		if _, err := conn.Write(append(req, '\n')); err != nil {
@@ -193,9 +198,12 @@ func socketBrowserCaller(path string) browserCaller {
 			if ctx.Err() != nil {
 				return browserCallResult{}, ctx.Err()
 			}
+			if errors.Is(err, runsock.ErrResponseTooLarge) {
+				return browserCallResult{}, errors.New("the daemon sent a reply that is too large")
+			}
 			// A closed connection with no reply is the daemon's refusal of this
-			// process (not part of the run) or the end of the run.
-			return browserCallResult{}, errors.New("the daemon closed the browser socket without a reply (this process is not part of the run, or the run ended)")
+			// process (not part of the run's process tree) or the end of the run.
+			return browserCallResult{}, errors.New("the browser is not available for this agent: the daemon cannot verify the caller (this process is not in the run's process tree, or the run ended)")
 		}
 		if resp.Error != "" {
 			return browserCallResult{}, errors.New(resp.Error)

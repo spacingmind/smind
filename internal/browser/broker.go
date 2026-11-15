@@ -23,7 +23,7 @@ import (
 
 // GateReady is the dark switch of the browser tools. While it is false no run
 // ever receives the `smind-browser` row and the daemon refuses every
-// `browser.call`, whatever else is configured (the workspace switch and the
+// browser call, whatever else is configured (the workspace switch and the
 // permission gate land in later PRs). The PR that adds the daemon-side
 // permission gate flips it, and only that PR.
 const GateReady = false
@@ -67,7 +67,7 @@ type Content struct {
 	Data     string `json:"data,omitempty"` // base64, images only
 }
 
-// Result is what browser.call returns. An error result carries only
+// Result is what a browser call returns (the envelope sent over the run's socket). An error result carries only
 // daemon-authored text: a reason from the policy, the limiter or the session.
 type Result struct {
 	Content []Content `json:"content"`

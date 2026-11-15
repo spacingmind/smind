@@ -586,7 +586,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	}
 
 	// A plugin provider never gets smind's own rows, the browser's included: do
-	// not even build (and mint a capability for) a row that is about to be dropped.
+	// not even build (and open a socket for) a row that is about to be dropped.
 	rows, err := r.mcpRowsForDelivery(ctx, workspaceID, browserRowDelivered(haveSpec && spec.Plugin != ""), client.PID())
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
@@ -603,7 +603,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
 	// The agent may not take a stdio row (transport not advertised): then the
-	// capability minted for it must not stay valid.
+	// socket opened for it must not stay open.
 	revokeBrowserIfSkipped(ctx, inactive, unresolved)
 	if len(states) > 0 {
 		select {

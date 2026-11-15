@@ -56,8 +56,17 @@ type Hub struct {
 	mu       sync.Mutex
 	runs     map[string]*runSock
 	closed   bool
+	prepared bool   // the socket directory was verified and swept
 	fallback string // the verified fallback directory, "" until first needed
 }
+
+// closeWait bounds how long closing a run's socket waits for in-flight handlers
+// (a variable so a test can shorten it): a handler that ignores its context must
+// never stall the run's end, or every other run's Open and Close behind the lock.
+var closeWait = 3 * time.Second
+
+// maxPending bounds the connections of one run whose peer check has not finished.
+const maxPending = 32
 
 type runSock struct {
 	id        string
@@ -70,7 +79,8 @@ type runSock struct {
 	cancel    context.CancelFunc
 
 	mu      sync.Mutex
-	conns   map[net.Conn]struct{}
+	conns   map[net.Conn]struct{} // CHECKED connections only
+	pending chan struct{}         // slots for connections still being checked
 	done    chan struct{}
 	refused atomic.Int64 // refused connections (counted; the first is logged)
 }
@@ -88,9 +98,7 @@ func (h *Hub) Refusals(runID string) int64 {
 	return rs.refused.Load()
 }
 
-// NewHub prepares the socket directory (refusing a wrong owner, mode or type),
-// and removes sockets a crashed daemon left behind: no run survives a restart.
-func NewHub(cfg HubConfig) (*Hub, error) {
+func newHub(cfg HubConfig) (*Hub, error) {
 	if cfg.Peers == nil || cfg.Tree == nil {
 		return nil, errors.New("runsock: a peer reader and a process tree are required")
 	}
@@ -99,25 +107,53 @@ func NewHub(cfg HubConfig) (*Hub, error) {
 	}
 	if cfg.FallbackDir == "" {
 		// Keyed on this daemon's own socket directory: two daemons of one user
-		// (a dogfood daemon next to the real one) must not sweep each other's sockets.
+		// (a dogfood daemon next to the real one) must not share a fallback.
 		sum := sha256.Sum256([]byte(cfg.Dir))
 		cfg.FallbackDir = filepath.Join("/tmp", fmt.Sprintf("smind-%d-%s", cfg.UID, hex.EncodeToString(sum[:4])))
 	}
-	if err := prepareDir(cfg.Dir, cfg.UID, cfg.Lstat); err != nil {
-		return nil, err
-	}
-	sweepStale(cfg.Dir)
 	return &Hub{cfg: cfg, runs: map[string]*runSock{}}, nil
 }
 
-// NewSystemHub is NewHub with the platform's readers and the current user. It
-// fails where the platform cannot read a peer's credentials, so a platform
-// without them delivers no browser at all rather than a weaker check.
+// prepare verifies the socket directory (refusing a wrong owner, mode or type,
+// logged: a refused directory means no browser) and removes sockets a crashed
+// daemon left behind (only those that no longer accept a connection). Under h.mu.
+func (h *Hub) prepare() error {
+	if h.prepared {
+		return nil
+	}
+	if err := prepareDir(h.cfg.Dir, h.cfg.UID, h.cfg.Lstat); err != nil {
+		log.Printf("browser: the socket directory was refused, so no run gets the browser: %v", err)
+		return err
+	}
+	sweepStale(h.cfg.Dir)
+	h.prepared = true
+	return nil
+}
+
+// NewHub prepares the socket directory now. A failure is returned.
+func NewHub(cfg HubConfig) (*Hub, error) {
+	h, err := newHub(cfg)
+	if err != nil {
+		return nil, err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.prepare(); err != nil {
+		return nil, err
+	}
+	return h, nil
+}
+
+// NewSystemHub is NewHub with the platform's readers and the current user, but
+// LAZY: it touches no disk until the first Open, so a daemon (or a test) that
+// never opens a browser socket never creates or sweeps anything. It fails where
+// the platform cannot read a peer's credentials, so a platform without them
+// delivers no browser at all rather than a weaker check.
 func NewSystemHub(dir string) (*Hub, error) {
 	if !platformSupported {
 		return nil, ErrPeerUnsupported
 	}
-	return NewHub(HubConfig{Dir: dir, UID: os.Getuid(), Peers: SystemPeerReader(), Tree: SystemProcTree()})
+	return newHub(HubConfig{Dir: dir, UID: os.Getuid(), Peers: SystemPeerReader(), Tree: SystemProcTree()})
 }
 
 // prepareDir creates dir (0700) and verifies it: a real directory, owned by uid,
@@ -146,7 +182,9 @@ func prepareDir(dir string, uid int, lstat func(string) (fs.FileInfo, error)) er
 	return nil
 }
 
-// sweepStale removes leftover sockets: only files this package names (*.sock).
+// sweepStale removes leftover sockets: only files this package names (*.sock),
+// and only those that no longer accept a connection (a second daemon on the same
+// directory must not delete a live daemon's sockets).
 func sweepStale(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -156,7 +194,12 @@ func sweepStale(dir string) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), sockSuffix) {
 			continue
 		}
-		_ = os.Remove(filepath.Join(dir, e.Name()))
+		path := filepath.Join(dir, e.Name())
+		if c, err := net.DialTimeout("unix", path, 250*time.Millisecond); err == nil {
+			_ = c.Close() // somebody is listening: not stale
+			continue
+		}
+		_ = os.Remove(path)
 	}
 }
 
@@ -197,6 +240,9 @@ func (h *Hub) Open(runID string, rootPID int, handle Handler) (string, error) {
 	if h.closed {
 		return "", errors.New("runsock: the hub is closed")
 	}
+	if err := h.prepare(); err != nil {
+		return "", err
+	}
 	path, err := h.socketPath(runID)
 	if err != nil {
 		return "", err
@@ -222,7 +268,7 @@ func (h *Hub) Open(runID string, rootPID int, handle Handler) (string, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rs := &runSock{id: runID, path: path, ln: ln, root: rootPID, rootStart: start, handle: handle,
-		ctx: ctx, cancel: cancel, conns: map[net.Conn]struct{}{}, done: make(chan struct{})}
+		ctx: ctx, cancel: cancel, conns: map[net.Conn]struct{}{}, pending: make(chan struct{}, maxPending), done: make(chan struct{})}
 	h.runs[runID] = rs
 	go h.accept(rs)
 	return path, nil
@@ -260,7 +306,10 @@ func (rs *runSock) close() {
 		_ = c.Close()
 	}
 	rs.mu.Unlock()
-	<-rs.done
+	select {
+	case <-rs.done:
+	case <-time.After(closeWait): // a handler that ignores its context cannot stall the run's end
+	}
 }
 
 func (h *Hub) refuse(rs *runSock, conn net.Conn, reason string) {
@@ -292,27 +341,37 @@ func (h *Hub) accept(rs *runSock) {
 			}
 			continue
 		}
-		rs.mu.Lock()
-		if len(rs.conns) >= maxConnsPerRun || rs.ctx.Err() != nil {
-			rs.mu.Unlock()
-			h.refuse(rs, conn, "too many connections")
+		select {
+		case rs.pending <- struct{}{}:
+		default:
+			h.refuse(rs, conn, "too many unchecked connections")
 			continue
 		}
-		rs.conns[conn] = struct{}{}
-		rs.mu.Unlock()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// The check comes FIRST, before any slot is taken: an unauthenticated
+			// flood only ever holds a bounded number of short-lived pending slots,
+			// and can never use up the run's connection slots.
+			reason := h.checkPeer(rs, conn)
+			<-rs.pending
+			if reason != "" {
+				h.refuse(rs, conn, reason)
+				return
+			}
+			rs.mu.Lock()
+			if len(rs.conns) >= maxConnsPerRun || rs.ctx.Err() != nil {
+				rs.mu.Unlock()
+				h.refuse(rs, conn, "too many connections")
+				return
+			}
+			rs.conns[conn] = struct{}{}
+			rs.mu.Unlock()
 			defer func() {
 				rs.mu.Lock()
 				delete(rs.conns, conn)
 				rs.mu.Unlock()
 			}()
-			// The check, before a single byte is read.
-			if reason := h.checkPeer(rs, conn); reason != "" {
-				h.refuse(rs, conn, reason)
-				return
-			}
 			serveConn(rs.ctx, conn, rs.handle)
 		}()
 	}

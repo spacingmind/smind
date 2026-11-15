@@ -115,10 +115,21 @@ func serveConn(ctx context.Context, conn deadlineConn, handle Handler) {
 	}
 }
 
-// ReadResponse reads one reply line (used by the child and by tests).
+// MaxResponseBytes bounds one reply line the child will read: a rogue or broken
+// server cannot make the child buffer without limit.
+const MaxResponseBytes = 32 << 20
+
+// ErrResponseTooLarge: a reply line over MaxResponseBytes.
+var ErrResponseTooLarge = errors.New("runsock: the reply is too large")
+
+// ReadResponse reads one reply line, at most MaxResponseBytes (used by the child
+// and by tests; one reply per connection use).
 func ReadResponse(r io.Reader) (Response, error) {
-	br := bufio.NewReaderSize(r, 1<<20)
+	br := bufio.NewReaderSize(io.LimitReader(r, MaxResponseBytes+1), 1<<16)
 	line, err := br.ReadBytes('\n')
+	if len(line) > MaxResponseBytes {
+		return Response{}, ErrResponseTooLarge
+	}
 	if err != nil {
 		return Response{}, err
 	}

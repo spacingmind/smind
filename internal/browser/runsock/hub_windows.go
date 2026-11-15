@@ -21,9 +21,16 @@ import (
 // connection the client's pid (GetNamedPipeClientProcessId) goes through the same
 // decision as on unix (checkCred): a process of the run's tree, unchanged root.
 //
-// This file is written for Windows and compile-checked from another platform. It
-// has NOT been run on Windows in the lane that added it: its first real run is the
-// Windows CI job and a manual run (see docs/plans/active/browser-for-agents-pr3b2.md).
+// **DISABLED.** NewSystemHub refuses to build a hub on Windows (windowsHubEnabled is
+// false), so no socket exists and no browser row is delivered on Windows. The
+// parent-chain walk below is spoofable on Windows: a same-user outsider can create
+// a process with PROC_THREAD_ATTRIBUTE_PARENT_PROCESS naming the run's agent as its
+// parent (it needs PROCESS_CREATE_PROCESS on that process), so PPID says
+// "descendant". The check the design wants on Windows is Job Object membership
+// (IsProcessInJob against the run's kill-on-close job), which cannot be spoofed
+// that way and is not yet plumbed to this package. Until it is, the code stays
+// compile-checked and unwired. It has never been run on Windows (no CI job here
+// runs this package; a manual Windows run is the only verification there will be).
 // It deviates from the plan's Job Object membership check: the run's job handle is
 // not plumbed to this package, so the tree is the same parent-chain walk as on unix
 // (ProcTree over a toolhelp snapshot); a process whose parent exited is not found
@@ -32,6 +39,14 @@ import (
 // another instance of the pipe's name (FILE_FLAG_FIRST_PIPE_INSTANCE protects only
 // the first) and the child does not authenticate the server end: the same-user
 // rebinding of the unix socket path, inherent to the same-uid model.
+
+// windowsHubEnabled is the explicit switch that keeps the Windows hub off until a
+// Job Object membership check exists (see the file comment). Do not flip it
+// without that check, a test, and a manual Windows run.
+const windowsHubEnabled = false
+
+// ErrWindowsUnsupported: the browser's per-run socket is not offered on Windows yet.
+var ErrWindowsUnsupported = errors.New("runsock: the browser is not offered on Windows until the run's job membership can be checked")
 
 const maxPipeInstances = 8
 
@@ -62,6 +77,9 @@ type pipeRun struct {
 // NewSystemHub builds the hub of this process. The directory argument is the
 // unix socket directory and is not used on Windows (pipes live in a kernel namespace).
 func NewSystemHub(_ string) (*Hub, error) {
+	if !windowsHubEnabled {
+		return nil, ErrWindowsUnsupported
+	}
 	tok := windows.GetCurrentProcessToken()
 	u, err := tok.GetTokenUser()
 	if err != nil {
@@ -112,14 +130,14 @@ func (h *Hub) Open(runID string, rootPID int, handle Handler) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("runsock: the run's root process cannot be read: %w", err)
 	}
+	h.Close(runID) // a second Open replaces the first; the old pipe is closed OUTSIDE the lock
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
 		return "", errors.New("runsock: the hub is closed")
 	}
-	if old := h.runs[runID]; old != nil {
-		old.close()
-		delete(h.runs, runID)
+	if h.runs[runID] != nil {
+		return "", errors.New("runsock: this run's pipe is being opened elsewhere")
 	}
 	name := pipeName(runID)
 	first, err := h.newInstance(name, true) // fails if the name is taken: no squatting

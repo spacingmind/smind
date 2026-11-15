@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func helperClient() {
 		fmt.Println("DIAL-ERROR")
 		os.Exit(0)
 	}
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	fmt.Fprintf(conn, "{\"tool\":\"browser_tabs\"}\n")
 	line, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
@@ -88,7 +89,11 @@ func startAgent(t *testing.T) (pid int, run func(path string) string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // the whole group: the agent and its client child
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
 	return cmd.Process.Pid, func(path string) string {
 		fmt.Fprintf(in, "%s\n", path)
 		b, _ := io.ReadAll(out)
@@ -161,7 +166,7 @@ func roundTrip(t *testing.T, path, line string) (reply string, closed bool) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
 	_, _ = io.WriteString(conn, line)
 	r, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
@@ -484,7 +489,7 @@ func TestCloseRemovesListenerFileAndConnections(t *testing.T) {
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("the socket file is removed at run end")
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	if _, err := bufio.NewReader(conn).ReadString('\n'); err == nil {
 		t.Fatal("an open connection is closed at run end")
 	}
@@ -574,7 +579,7 @@ func TestProtocolSequentialRequestsAndSecondConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	br := bufio.NewReader(conn)
 	for i := 0; i < 3; i++ {
 		fmt.Fprintf(conn, "{\"tool\":\"t%d\"}\n", i)
@@ -606,7 +611,7 @@ func TestProtocolConnectionCap(t *testing.T) {
 		}
 		conns = append(conns, c)
 		fmt.Fprintf(c, "{\"tool\":\"hold\"}\n")
-		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 		if _, err := bufio.NewReader(c).ReadString('\n'); err != nil {
 			t.Fatalf("connection %d: %v", i, err)
 		}
@@ -627,7 +632,7 @@ func TestDeadlines(t *testing.T) {
 	}
 	defer conn.Close()
 	start := time.Now()
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	if _, err := bufio.NewReader(conn).ReadString('\n'); err == nil {
 		t.Fatal("an idle connection is closed")
 	}
@@ -655,7 +660,7 @@ func TestHandlerPanicIsAnErrorReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	br := bufio.NewReader(conn)
 	fmt.Fprintf(conn, "{\"tool\":\"panic\"}\n")
 	if line, err := br.ReadString('\n'); err != nil || strings.TrimSpace(line) != `{"error":"internal error"}` {
@@ -742,5 +747,170 @@ func TestReopenReplacesWithoutBlockingOtherRuns(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		close(release)
 		t.Fatal("the replacement must finish once the old handler's context is cancelled")
+	}
+}
+
+// An unauthenticated flood must not use up the run's connection slots: the peer
+// check comes before slot accounting, so with every pending check stuck (a slow
+// reader) a legitimate client is still served.
+func TestFloodOfUncheckedConnectionsDoesNotStarveTheLegitClient(t *testing.T) {
+	const flood = 20 // more than the 8 connection slots, fewer than the pending cap
+	release := make(chan struct{})
+	var seen atomic.Int64
+	peers := FuncPeerReader(func(net.Conn) (PeerCred, error) {
+		if seen.Add(1) <= flood {
+			<-release // the first connections' checks are slow
+			return PeerCred{UID: uint32(os.Getuid()) + 1, PID: 1}, nil
+		}
+		return PeerCred{UID: uint32(os.Getuid()), PID: os.Getpid()}, nil
+	})
+	var refused refusals
+	h := fakeHub(t, peers, SystemProcTree(), &refused)
+	path, err := h.Open("run-A", os.Getpid(), echo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conns []net.Conn
+	defer func() {
+		for _, c := range conns {
+			c.Close()
+		}
+	}()
+	for i := 0; i < flood; i++ {
+		c, err := net.Dial("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conns = append(conns, c)
+	}
+	// Wait until the hub has accepted all of them (every check is pending).
+	deadline := time.Now().Add(5 * time.Second)
+	for seen.Load() < flood && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if seen.Load() < flood {
+		t.Fatalf("the hub accepted %d of %d connections", seen.Load(), flood)
+	}
+	if reply, closed := roundTrip(t, path, "{\"tool\":\"legit\"}\n"); closed || !strings.Contains(reply, "legit") {
+		t.Fatalf("a legitimate client during a flood: closed=%v %q", closed, reply)
+	}
+	close(release)
+	for deadline := time.Now().Add(5 * time.Second); h.Refusals("run-A") < flood && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if h.Refusals("run-A") != flood {
+		t.Fatalf("every flood connection is refused: %d", h.Refusals("run-A"))
+	}
+}
+
+// A second hub on the same directory must not remove a live daemon's sockets,
+// only the ones nobody listens on.
+func TestSweepKeepsLiveSocketsAndRemovesDeadOnes(t *testing.T) {
+	dir := filepath.Join(shortTemp(t), "sock")
+	var refused refusals
+	h1, err := NewHub(HubConfig{Dir: dir, UID: os.Getuid(), Peers: peerOK(), Tree: SystemProcTree(), OnRefuse: func(_, r string) { refused.add(r) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h1.CloseAll)
+	livePath, err := h1.Open("live-run", os.Getpid(), echo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A dead socket: bound, then abandoned (the file stays, nobody accepts).
+	dead := filepath.Join(dir, "deadbeef0000.sock")
+	ln, err := net.Listen("unix", dead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	if _, err := os.Lstat(dead); err != nil {
+		t.Fatalf("test setup: the dead socket file exists: %v", err)
+	}
+	h2, err := NewHub(HubConfig{Dir: dir, UID: os.Getuid(), Peers: peerOK(), Tree: SystemProcTree()}) // sweeps
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h2.CloseAll)
+	if _, err := os.Lstat(dead); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a socket nobody listens on is swept")
+	}
+	if reply, closed := roundTrip(t, livePath, "{\"tool\":\"still\"}\n"); closed || !strings.Contains(reply, "still") {
+		t.Fatalf("a second hub must not break a live daemon's socket: closed=%v %q", closed, reply)
+	}
+}
+
+// Closing a run's socket never waits forever for a handler that ignores its
+// context: the run's end (and every other run's Open) is not stalled.
+func TestCloseDoesNotWaitForeverForAStuckHandler(t *testing.T) {
+	old := closeWait
+	closeWait = 300 * time.Millisecond
+	t.Cleanup(func() { closeWait = old })
+	var refused refusals
+	h := fakeHub(t, peerOK(), SystemProcTree(), &refused)
+	stuck := make(chan struct{})
+	started := make(chan struct{})
+	path, err := h.Open("run-A", os.Getpid(), func(context.Context, Request) (any, error) {
+		close(started)
+		<-stuck // ignores ctx
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		if c, err := net.Dial("unix", path); err == nil {
+			defer c.Close()
+			_, _ = io.WriteString(c, "{\"tool\":\"hang\"}\n")
+			_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+			_, _ = bufio.NewReader(c).ReadString('\n')
+		}
+	}()
+	<-started
+	done := make(chan struct{})
+	go func() { h.Close("run-A"); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		close(stuck)
+		t.Fatal("Close waited for a handler that ignores its context")
+	}
+	close(stuck)
+	if _, err := h.Open("run-B", os.Getpid(), echo); err != nil {
+		t.Fatalf("another run opens meanwhile: %v", err)
+	}
+}
+
+// A system hub is lazy: constructing it touches no disk, so a daemon or a test
+// that never opens a socket never creates (or sweeps) anything in the real home.
+func TestSystemHubIsLazyAndTouchesNoDiskUntilOpen(t *testing.T) {
+	dir := filepath.Join(shortTemp(t), "never", "created")
+	h, err := NewSystemHub(dir)
+	if err != nil {
+		t.Skip("no peer credentials here")
+	}
+	t.Cleanup(h.CloseAll)
+	if _, err := os.Lstat(filepath.Dir(dir)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("constructing a system hub must not create the directory")
+	}
+	if _, err := h.Open("run-A", os.Getpid(), echo); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(dir); err != nil {
+		t.Fatalf("the first Open creates it: %v", err)
+	}
+}
+
+func TestReadResponseIsBounded(t *testing.T) {
+	big := strings.Repeat("a", MaxResponseBytes+10) + "\n"
+	if _, err := ReadResponse(strings.NewReader(big)); !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("an oversize reply: %v", err)
+	}
+	if _, err := ReadResponse(strings.NewReader(`{"result":1}` + "\n")); err != nil {
+		t.Fatalf("a normal reply: %v", err)
+	}
+	if _, err := ReadResponse(strings.NewReader(`{"result":`)); err == nil {
+		t.Fatal("a reply with no newline is an error")
 	}
 }

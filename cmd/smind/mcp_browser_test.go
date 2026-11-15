@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -46,6 +47,7 @@ type fakeSocketCall struct {
 // and answers each with the reply the test last installed.
 func fakeBrowserSocket(t *testing.T) (string, <-chan fakeSocketCall, func(fakeBrowserReply)) {
 	t.Helper()
+	skipWithoutUnixSockets(t)
 	dir, err := os.MkdirTemp("", "bs")
 	if err != nil {
 		t.Fatal(err)
@@ -444,6 +446,7 @@ func TestBrowserMCP_NotInTheSmindServerCatalogue(t *testing.T) {
 // A socket that closes without a reply (the daemon refusing this process, or the
 // run having ended) is a tool error that says so; an unreachable socket is one too.
 func TestBrowserMCP_RefusedOrMissingSocketIsAToolError(t *testing.T) {
+	skipWithoutUnixSockets(t)
 	dir, err := os.MkdirTemp("", "bs")
 	if err != nil {
 		t.Fatal(err)
@@ -466,7 +469,7 @@ func TestBrowserMCP_RefusedOrMissingSocketIsAToolError(t *testing.T) {
 	}()
 	cs := browserSessionOver(t, socketBrowserCaller(path))
 	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "browser_tabs"})
-	if err != nil || !res.IsError || !strings.Contains(mcpToolErrorText(res), "this process is not part of the run") {
+	if err != nil || !res.IsError || !strings.Contains(mcpToolErrorText(res), "the daemon cannot verify the caller") {
 		t.Fatalf("a refused connection: err=%v res=%+v", err, res)
 	}
 	cs2 := browserSessionOver(t, socketBrowserCaller(filepath.Join(dir, "gone.sock")))
@@ -480,6 +483,7 @@ func TestBrowserMCP_RefusedOrMissingSocketIsAToolError(t *testing.T) {
 // process is the run's root, so its call is served; the daemon-side handler sees
 // exactly the tool and args the child sent.
 func TestBrowserMCP_ThroughARealHub(t *testing.T) {
+	skipWithoutUnixSockets(t)
 	dir, err := os.MkdirTemp("", "bs")
 	if err != nil {
 		t.Fatal(err)
@@ -513,5 +517,14 @@ func TestBrowserMCP_ThroughARealHub(t *testing.T) {
 	defer mu.Unlock()
 	if len(seen) != 1 || seen[0].Tool != "browser_open" || !strings.Contains(string(seen[0].Args), "http://127.0.0.1:1/x") {
 		t.Fatalf("the daemon side saw: %+v", seen)
+	}
+}
+
+// skipWithoutUnixSockets skips a test that talks over a unix socket: on Windows
+// the browser is not offered (its run socket is a pipe that is switched off).
+func skipWithoutUnixSockets(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the browser's per-run socket is not offered on Windows")
 	}
 }

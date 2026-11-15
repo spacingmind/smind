@@ -12,7 +12,7 @@ import (
 
 // The browser tools (ADR-0061) reach a run only through the reserved
 // `smind-browser` MCP row. Whether a run gets it is decided here, once, when
-// the run starts, and the daemon re-checks the same gate on every browser.call.
+// the run starts, and the daemon re-checks the same gate on every browser call.
 
 // browserGateReady mirrors browser.GateReady (false while the browser is dark);
 // a variable so a test can open it.

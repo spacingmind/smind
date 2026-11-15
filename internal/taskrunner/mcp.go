@@ -482,7 +482,7 @@ func useStrictMcp(c RunContract) bool { return c.Mcp != nil && !c.Mcp.BrowserOnl
 // provider: a plugin provider never gets it.
 func browserRowDelivered(pluginProvider bool) bool { return !pluginProvider }
 
-// revokeBrowserAll drops the run's browser capability (the provider took none
+// revokeBrowserAll closes the run's browser socket (the provider took none
 // of the rows).
 func revokeBrowserAll(ctx context.Context) {
 	if p := RunContractFrom(ctx).Mcp; p != nil && p.Browser != nil && p.Browser.Revoke != nil {

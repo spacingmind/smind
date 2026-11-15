@@ -34,11 +34,11 @@ func TestSystemProcTreeThisProcess(t *testing.T) {
 // waitGone polls until the kernel forgets the reaped child.
 func waitGone(t *testing.T, tree ProcTree, pid int) {
 	t.Helper()
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 100; i++ { // up to 5 s: a loaded or -race machine reaps slowly
 		if _, err := tree.Info(pid); errors.Is(err, ErrNoProcess) {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 	t.Errorf("Info(%d) still succeeds after Wait, want ErrNoProcess", pid)
 }
