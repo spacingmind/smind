@@ -660,12 +660,16 @@ test("sign-staples-the-app-before-it-is-packed", () => {
 
 test("sign-every-codesign-uses-the-temporary-keychain", () => {
   withHarness({}, (h) => {
-    const { r } = runSign(h, ["--dmg", join(h.tmp, "out", "sMind.dmg")]);
+    // with a framework too: that goes through the other codesign branch (no entitlements)
+    const app = makeApp(h.tmp);
+    mkdirSync(join(app, "Contents", "Frameworks", "Thing.framework"), { recursive: true });
+    const r = h.run(SIGN, ["--app", app, "--out", join(h.tmp, "out"), "--dmg", join(h.tmp, "out", "sMind.dmg")]);
     assert.equal(r.status, 0, r.stderr);
     const created = toolLines(h.log(), "security").find((f) => f.includes("create-keychain"));
     const keychain = created[created.length - 1];
     const calls = signCalls(h);
-    assert.ok(calls.length >= 3);
+    assert.ok(calls.some((f) => f[f.length - 1].endsWith("Thing.framework")), "the framework was not signed");
+    assert.ok(calls.length >= 4);
     for (const f of calls) {
       const at = f.indexOf("--keychain");
       assert.ok(at !== -1 && f[at + 1] === keychain, `a codesign does not use the temporary keychain: ${flat(f)}`);
