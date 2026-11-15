@@ -36,4 +36,9 @@ Terminal colour (rank 12), tab drag between windows (multi-window Part 2), a tab
 
 ## Progress / Validation
 
-(filled per PR)
+### PR D1
+
+- AC1-AC5: `tab-scroll-edges.test.ts` (8 cases), `tab-strip-overflow.test.tsx` (fades per scroll position, the overflow menu lists every tab, marks and activates, brings the current tab into view, the chip classes as source pins), the existing App tab tests (TB-AC3 updated for the wrapper), and Playwright `tabs-overflow.spec.ts` TO-01/TO-02 (real built daemon; chips 64-160 px with the active at least 96, the strip scrolls only after that, fades at start/middle/end, the menu activates a tab) on light/dark at 1280 and 390, plus `tabs`, `narrow`, `routing` and `context-menus` specs unchanged and green (72).
+- Frames, light and dark, 1280 and 390, every pair opened: a few tabs, overflowing at the start, in the middle, at the end, the overflow menu. The fades toggle instantly (no transition), so there is no mid-fade frame to capture.
+- Mutations (committed code, each failed its named test): the list back to `w-max`, the end fade never hiding, the overflow button always shown, a menu choice doing nothing, the current-tab marker removed. One mutation (an early return in `tabScrollEdges`) survived because it was redundant; the code was simplified instead.
+- Not verified: real-window frames (screen locked); a drag or the tab context menu while the strip scrolls (D2 and unchanged here); Windows/Linux.
