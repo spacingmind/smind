@@ -33,6 +33,12 @@ A second `WebviewWindowBuilder` with a unique label (`task-<id>` or `win-<n>`), 
 7. **Other entry points.** "Open in new window" in the task row context menu (a new item in `taskRowMenu`, desktop-only, beside Pin), a modifier-click on a task row, and a `File > New Window` menu item. The context-menu model already supports a desktop-only item the same way Reveal does (absent otherwise).
 8. **Relay/remote connections.** The proxy and `connections_select` are app-wide, not per window: a second window shows the same selected connection. Per-window connection selection is out of scope and should stay out.
 
+### Probe procedure (Part 2, unlocked screen only)
+
+A throwaway build, never committed: the audit build (`scripts/desktop-audit-build.sh`, own identifier and scratch daemon, fake agent, no model calls) from a scratch worktree with a small patch: a real title per task window (`sMind - task N`) and `tabbing_identifier("smind-probe-tasks")` on the task windows; an environment switch also puts `main` in the group (risk 3). Two passes (task windows only, then main included), each saving full-screen shots at: main only; three windows untabbed; after Window > Merge All Windows; after Move Tab to New Window and a resize; after closing a task window and hiding and reopening `main`.
+
+Record one line each: R1 whether the native tab bar overlaps, pushes or double-draws over the 48 px header and the vibrancy; R2 traffic-light placement in the group, after a resize and after a tab is moved out; R3 (main included) what hide-on-close does to a grouped window; R4 the three Window-menu items and the tab titles; R5 restore after Cmd+Q (expected: untabbed); R6 whether the native bar over the in-app workspace tab strip is confusing; R7 the verdict: ship (size S), ship with a named chrome adjustment, or leave windows untabbed. The probe refuses to launch while the screen is locked.
+
 ### Cost
 
 - Rust: new `windows.rs` (open/focus/destroy, label pool), ~6 call sites changed from `MAIN_WINDOW` to a resolved label, one new allowlisted command `window_open_task(task_id)` taking an integer only (no URL from the webview: Rust builds the URL), capability glob + test. About 1 PR, M size.
