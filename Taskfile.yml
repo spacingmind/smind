@@ -102,7 +102,7 @@ tasks:
       - sh scripts/install_test.sh
       - sh scripts/task_setup_test.sh
       - sh scripts/desktop-audit-build_test.sh
-      - sh scripts/desktop-audit-smoke_test.sh
+      - sh scripts/desktop-audit-smoke_test.sh scripts/macos-sign/lib.sh scripts/macos-sign/sign-notarize.sh scripts/macos-sign/verify.sh
 
   docs:cli:
     desc: Regenerate the CLI summary blocks of public-docs/cli-reference.md from smind --help
