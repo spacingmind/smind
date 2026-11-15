@@ -383,7 +383,8 @@ test("verify-updater-signature-version-field-the-plugin-would-not-read", () => {
 test("verify-updater-signature-reads-only-the-third-line", () => {
   withRelease({}, (fx) => {
     const asset = `smind-desktop-${fx.desktopVersion}-macos-x86_64.app.tar.gz`;
-    const sig = rawSig(["untrusted comment: x", "RWQAAAA", `trusted comment: timestamp:1\tfile:${asset}`, `trusted comment: timestamp:1\tversion:${fx.desktopVersion}`, ""]);
+    // a trusted-comment-looking line BEFORE the real third line (versionless)
+    const sig = rawSig(["untrusted comment: x", `trusted comment: timestamp:1\tversion:${fx.desktopVersion}`, `trusted comment: timestamp:1\tfile:${asset}`, "GLOBAL", ""]);
     replaceUpdaterSig(fx, "darwin-x86_64", asset, sig);
     expectFailure(verifyOf(fx), "updater-signatures", asset);
   });

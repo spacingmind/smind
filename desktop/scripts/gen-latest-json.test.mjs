@@ -267,12 +267,13 @@ test("latest-json-refuses-a-version-field-the-plugin-would-not-read", () => {
 
 test("latest-json-reads-only-the-third-line", () => {
   const f = files();
-  // a trusted-comment-looking line in the UNTRUSTED comment, with the real third line versionless
+  // a trusted-comment-looking line BEFORE the real third line (which is versionless): a reader that
+  // takes the first such line instead of line 3 would accept this
   f["darwin-aarch64"].signature = rawSig([
     "untrusted comment: x",
-    "RWQAAAA",
-    "trusted comment: timestamp:1\tfile:f",
     "trusted comment: timestamp:1\tversion:1.2.3",
+    "trusted comment: timestamp:1\tfile:f",
+    "GLOBAL",
     "",
   ]);
   assert.throws(() => buildLatestJson({ ...base, files: f }), /signed version/);
