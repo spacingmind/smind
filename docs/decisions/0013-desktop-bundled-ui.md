@@ -188,6 +188,18 @@ Origin allowlist, no new endpoints — and the desktop app ships a
 - Relay pairing keys, if Rust-side (recommended), never enter the
   webview; admission auth stays exactly as ADR-0011 defines it.
 
+## Amendment 2026-11-15: task windows (capability scope)
+
+Human decision (via the Supervisor): the desktop app may open a task in its own window, one window per task. The scoped IPC bridge of section 2 widens in exactly one way, and keeps its character:
+
+- **A second capability, not a wider first one.** `capabilities/proxy.json` stays scoped to `"windows": ["main"]` with its exact allowlist. A new `capabilities/task-window.json` grants a task window an explicit, smaller list under `"windows": ["task-*"]`, scoped to the same loopback proxy origin (`remote.urls` unchanged, `local: false`). The pattern is the only glob in either capability and matches only the fixed pool labels `task-1` .. `task-8`; no other window can carry such a label because only Rust creates windows and only from that pool.
+- **What a task window may call:** window controls (minimize, toggle-maximize, close, drag, is-maximized, is-fullscreen, theme), the first-paint signal and theme mirror (acting on the calling window), `open_external`, `editors_list`, `open_in_editor`, `open_path_default`, the read-only `connections_get_current`, `context_menu_show`, event listen/unlisten, and the new `window_open_task`. **What it may not call:** every connection mutation (`connections_add*`, `connections_remove`, `connections_select`, `connections_relay_set_password`, probes and previews), `app_settings_*`, every daemon lifecycle command (`daemon_*`, `take_over_daemon`), the updater, `app_quit`, `app_menu_action`. Only `main` keeps those.
+- **The new command takes an integer.** `window_open_task(task_id)` accepts one positive integer. Rust builds the URL itself from the loopback proxy origin and the per-launch secret and chooses the label from the pool; the page supplies no URL, label, path or option.
+- **Identity stays with `main`:** tray, Dock and badge, the single-instance focus, the notification click target and deep-link navigation, and the hide-to-tray close behaviour. Task windows are destroyed on close.
+- **The exact-list capability test pins both capabilities** (`capability_tests.rs`): the two lists, the single glob, the loopback-only remote scope, and that no main-only command appears in the task list.
+
+Consequences: a task window is the same bundled UI on the same origin, so it shares `localStorage` and the proxy with `main`; the web side makes a task window never reach for the main-only commands (no connection picker, no daemon banner, no update badge). Threat model and tests: `docs/plans/active/desktop-multi-window.md`.
+
 ## Cross-references
 
 - `docs/decisions/0012-desktop-thin-client.md` — superseded in part.
