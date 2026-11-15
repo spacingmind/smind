@@ -131,3 +131,9 @@ Rust: `route_fragment_table` (valid shapes; query dropped; wrong prefix, non-num
 - Mutations (committed code, each failed its named test): Archive always on, Mark unread ignoring unread, New sub-task always on, Archive chat always on, Reveal ignoring the folder, Reveal in diff always on, Close others always on, the native layer arming disabled items.
 - Not verified: no real-window frames of the native menu (screen locked); the archived-task rules apply to task rows outside the archived list (that list has its own row component and actions).
 
+### PR (c)
+
+- AC12-AC16: `window_layout` tests (10): route shape table (valid shapes, query dropped, 17 rejected shapes incl. traversal, another origin, too long), round trip, other connection, a quit with no route, corrupt/missing/invalid-on-load file, other labels kept, the secret query kept, and two source guards (the exit handler saves; the initial URL is built with the saved fragment). `cargo test` 196 pass, clippy `-D warnings` and fmt clean.
+- Mutations (committed code, each failed its named test): host check removed, connection ignored on load, a `None` save keeping the entry, the query kept, no length cap, the exit handler not saving, the launch ignoring the saved route.
+- Not verified: that the real webview reports its hash in `WebviewWindow::url()` at `ExitRequested` and that Cmd+Q, tray Quit and Dock Quit all raise it (needs a real window; the screen was locked); Windows and Linux. No web change, so no web frames.
+
