@@ -145,9 +145,9 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		if i > 0 {
 			fmt.Fprintln(stdout)
 		}
-		fmt.Fprintf(stdout, "[%s] %s: %s\n", f.Level, f.Provider, f.Message)
+		fmt.Fprintf(stdout, "[%s] %s: %s\n", f.Level, f.Provider, cleanLine(f.Message))
 		if f.Level == doctor.LevelWarn && f.Fix != "" {
-			fmt.Fprintf(stdout, "  fix: %s\n", f.Fix)
+			fmt.Fprintf(stdout, "  fix: %s\n", cleanLine(f.Fix))
 		}
 	}
 	fmt.Fprintln(stdout)

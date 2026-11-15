@@ -22,19 +22,21 @@ func TestClaudeModeMismatchNote(t *testing.T) {
 		requested string
 		raw       json.RawMessage
 		want      []string // substrings; nil = no note
+		notWant   []string
 	}{
-		{"auto honoured is silent", "auto", initFrame(`,"permissionMode":"auto"`), nil},
-		{"missing field (older CLI) is silent", "auto", initFrame(``), nil},
-		{"number is silent", "auto", initFrame(`,"permissionMode":7`), nil},
-		{"null is silent", "auto", initFrame(`,"permissionMode":null`), nil},
-		{"empty string is silent", "auto", initFrame(`,"permissionMode":""`), nil},
-		{"not JSON is silent", "auto", json.RawMessage(`not json`), nil},
-		{"empty request is silent", "", initFrame(`,"permissionMode":"default"`), nil},
-		{"auto downgraded to default", "auto", initFrame(`,"permissionMode":"default"`), []string{"Manual", "Auto mode", "permissions.disableAutoMode", "The mode shown for this run is the one requested"}},
-		{"bypass downgraded to default", "bypassPermissions", initFrame(`,"permissionMode":"default"`), []string{"permissions.disableBypassPermissionsMode"}},
-		{"acceptEdits downgraded to default", "acceptEdits", initFrame(`,"permissionMode":"default"`), []string{"Manual", "Accept File Edits"}},
-		{"more permissive than requested warns", "default", initFrame(`,"permissionMode":"bypassPermissions"`), []string{"Warning:", "Bypass", "smind did not change the mode"}},
-		{"unknown mode is reported, never as more permissive", "auto", initFrame(`,"permissionMode":"futureMode"`), []string{`"futureMode"`}},
+		{"auto honoured is silent", "auto", initFrame(`,"permissionMode":"auto"`), nil, nil},
+		{"missing field (older CLI) is silent", "auto", initFrame(``), nil, nil},
+		{"number is silent", "auto", initFrame(`,"permissionMode":7`), nil, nil},
+		{"null is silent", "auto", initFrame(`,"permissionMode":null`), nil, nil},
+		{"empty string is silent", "auto", initFrame(`,"permissionMode":""`), nil, nil},
+		{"not JSON is silent", "auto", json.RawMessage(`not json`), nil, nil},
+		{"empty request is silent", "", initFrame(`,"permissionMode":"default"`), nil, nil},
+		{"auto downgraded to default", "auto", initFrame(`,"permissionMode":"default"`), []string{"Manual", "Auto mode", "permissions.disableAutoMode", "The mode shown for this run is the one requested"}, nil},
+		{"bypass downgraded to default", "bypassPermissions", initFrame(`,"permissionMode":"default"`), []string{"permissions.disableBypassPermissionsMode"}, nil},
+		{"acceptEdits downgraded to default", "acceptEdits", initFrame(`,"permissionMode":"default"`), []string{"Manual", "Accept File Edits"}, nil},
+		{"more permissive than requested warns", "default", initFrame(`,"permissionMode":"bypassPermissions"`), []string{"Warning:", "Bypass", "smind did not change the mode"}, nil},
+		{"unknown mode is reported, never echoed, never as more permissive", "auto", initFrame(`,"permissionMode":"futureMode"`), []string{"does not know"}, []string{"futureMode", "Warning:"}},
+		{"a hostile mode string is not echoed", "auto", initFrame(`,"permissionMode":"\u001b[31mEVIL\n` + strings.Repeat("x", 5000) + `"`), []string{"does not know"}, []string{"EVIL", "\u001b", "xxxxxxxx"}},
 	}
 	for _, c := range cases {
 		c := c
@@ -52,8 +54,10 @@ func TestClaudeModeMismatchNote(t *testing.T) {
 					t.Fatalf("note %q lacks %q", got, w)
 				}
 			}
-			if c.name == "unknown mode is reported, never as more permissive" && strings.Contains(got, "Warning:") {
-				t.Fatalf("an unranked mode must not warn as more permissive: %q", got)
+			for _, w := range c.notWant {
+				if strings.Contains(got, w) {
+					t.Fatalf("note %q must not contain %q", got, w)
+				}
 			}
 		})
 	}
@@ -114,6 +118,13 @@ func TestInitFrameModeMismatchNotesOnce(t *testing.T) {
 		if e.Type == EventTypePermissionModeChanged {
 			t.Fatalf("a mode mismatch must not emit %v (registry persists it and retries would re-send it)", e)
 		}
+	}
+}
+
+func TestInitFrameModeTwoInitFramesNoteOnce(t *testing.T) {
+	t.Setenv(fakeclaude.RepeatInitEnv, "1")
+	if notes := modeNotes(runModeInit(t, "default", ClaudeModeAuto)); len(notes) != 1 {
+		t.Fatalf("mode notes = %v, want exactly one for two init frames in one spawn", notes)
 	}
 }
 

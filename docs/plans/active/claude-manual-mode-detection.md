@@ -32,10 +32,10 @@ So: the init frame carries the real mode in a top-level `permissionMode` string,
 
 ## Named tests
 
-- `internal/taskrunner`: `TestClaudeModeMismatchNote` (table), `TestClaudeModeNoteNamesNoPathOrContent`, `TestInitFrameModeMismatchNotesOnce` (also asserts no `permission_mode_changed`), `TestInitFrameModeMatchIsSilent`, `TestInitFrameModeMissingOrMalformedIsSilent`, `TestInitFrameMorePermissiveWarns`, `TestInitFrameModeCheckDefaultsToAcceptEdits`.
+- `internal/taskrunner`: `TestClaudeModeMismatchNote` (table), `TestClaudeModeNoteNamesNoPathOrContent`, `TestInitFrameModeMismatchNotesOnce` (also asserts no `permission_mode_changed`), `TestInitFrameModeMatchIsSilent`, `TestInitFrameModeMissingOrMalformedIsSilent`, `TestInitFrameMorePermissiveWarns`, `TestInitFrameModeCheckDefaultsToAcceptEdits`, `TestInitFrameModeTwoInitFramesNoteOnce`. The note fires once per CLI spawn (each resumed or forked turn spawns a new CLI with its own init frame), so a chat the CLI keeps downgrading repeats it on each turn: accepted, it is the truth each time. A reported mode this build does not know is never echoed (it comes from the CLI).
 - `internal/taskrunner/fakeclaude`: the `mode-init` scenario reports `permissionMode` on init (the requested one, or what `FAKE_CLAUDE_REPORTED_MODE` says); this is how the tests above drive it. A fake never replaces the probe: the probe table above is the evidence for the real field name and value.
-- `internal/doctor`: `TestClaudeAutoModeDisabledWarns`, `TestClaudeAutoModeBypassKeyWarnsSeparately`, `TestClaudeAutoModeAbsentIsSilent`, `TestClaudeAutoModeReadsManagedAndConfigDirRoots`, `TestClaudeAutoModeNeverWrites`.
-- Web (only if the chip needs it): the existing `permission_mode_changed` handling is reused; a test that the chip shows the real mode after the event.
+- `internal/doctor`: `TestClaudeAutoModeDisabledWarns`, `TestClaudeAutoModeBypassKeyWarnsSeparately`, `TestClaudeAutoModeAbsentIsSilent`, `TestClaudeAutoModeReadsManagedAndConfigDirRoots`. (The check has no write path at all: `Env` offers no write hook, so a never-writes test would be vacuous and is not included.) `cmd/smind`: `TestDoctorOutputStripsControlBytes`, `TestClaudeManagedSettingsPathsAreAbsolute`.
+- Web: none. No event is sent (AC6), so the chip is unchanged; showing the real mode is the follow-up named in AC6.
 - Live check at the end: the same probe row (auto plus `disableAutoMode`) against a real run through an isolated daemon, Haiku pinned, expecting the note once.
 
 ## Decisions

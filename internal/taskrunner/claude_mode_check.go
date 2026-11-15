@@ -38,7 +38,8 @@ func claudeModeWord(mode string) string {
 	if w, ok := claudeModeWords[mode]; ok {
 		return w
 	}
-	return fmt.Sprintf("%q", mode)
+	// A mode this build does not know is never echoed: the init frame is the CLI's, not ours.
+	return "a mode this version of smind does not know"
 }
 
 // claudeModeMismatchNote compares the mode a run asked the CLI for with the

@@ -245,15 +245,3 @@ func TestClaudeAutoModeReadsManagedAndConfigDirRoots(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
-
-func TestClaudeAutoModeNeverWrites(t *testing.T) {
-	f := newFS()
-	f.write("/home/u/.claude/settings.json", `{"permissions":{"disableAutoMode":"disable"}}`)
-	before := f.files["/home/u/.claude/settings.json"]
-	env := f.env(30, nil)
-	// Env has no write hook at all; the check can only read. The file must be untouched either way.
-	ClaudeAutoMode(env)
-	if f.files["/home/u/.claude/settings.json"] != before || len(f.files) != 1 {
-		t.Fatalf("settings changed: %+v", f.files)
-	}
-}

@@ -37,6 +37,9 @@ const ArgvLogEnv = "FAKE_CLAUDE_ARGV_LOG"
 // downgraded (or raised) the mode.
 const ReportedModeEnv = "FAKE_CLAUDE_REPORTED_MODE"
 
+// RepeatInitEnv, when set, makes the "mode-init" scenario emit its init frame twice.
+const RepeatInitEnv = "FAKE_CLAUDE_REPEAT_INIT"
+
 // ArgvSep separates the arguments on an ArgvLogEnv line.
 const ArgvSep = "\x1f"
 
@@ -523,6 +526,9 @@ func Run() {
 			initMsg["permissionMode"] = reported
 		}
 		writeLine(initMsg)
+		if os.Getenv(RepeatInitEnv) != "" {
+			writeLine(initMsg) // a second init frame inside one spawn
+		}
 		writeLine(map[string]any{
 			"type":       "assistant",
 			"session_id": "sess-1",
