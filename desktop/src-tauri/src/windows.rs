@@ -165,7 +165,9 @@ mod tests {
         let url = task_url(&origin, hostile, 7);
         assert_eq!(url.query(), Some("k=%26%23%2F+x"));
         assert_eq!(
-            url.query_pairs().collect::<Vec<_>>(),
+            url.query_pairs()
+                .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                .collect::<Vec<_>>(),
             vec![("k".to_string(), hostile.to_string())]
         );
         assert_eq!(url.fragment(), Some("/task/7"));
