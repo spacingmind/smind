@@ -626,6 +626,11 @@ mod tests {
         let install = body
             .find("ipc_guard::install(app, port)")
             .expect("setup installs the proxy origin and capabilities");
+        let line_start = body[..install].rfind('\n').map_or(0, |n| n + 1);
+        assert!(
+            !body[line_start..install].contains("//"),
+            "the install call must not be commented out"
+        );
         let window = body
             .find("WebviewWindowBuilder::new(")
             .expect("setup builds the main window");
