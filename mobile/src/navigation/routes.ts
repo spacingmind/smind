@@ -88,6 +88,9 @@ export const INBOX_HREF = '/inbox' as const;
 // The permission policy screen (ADR-0049): one static page, no params.
 export const POLICY_HREF = '/policy' as const;
 
+// The saved grants screen ("allow always in this project" decisions): one static page, no params.
+export const GRANTS_HREF = '/grants' as const;
+
 // The read-only steward review (S3b): one review by id; `task` (optional) is the review's task id.
 export function reviewHref(reviewId: number, taskId?: number | null): { pathname: '/review/[id]'; params: { id: string; task?: string } } {
   const params: { id: string; task?: string } = { id: String(reviewId) };

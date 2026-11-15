@@ -2,7 +2,7 @@
 
 import { Stack, useRouter } from 'expo-router';
 import { useConnectionOrNull } from '../src/connection/ConnectionProvider';
-import { HOSTS_HREF, POLICY_HREF, reviewHref, taskHref } from '../src/navigation/routes';
+import { GRANTS_HREF, HOSTS_HREF, POLICY_HREF, reviewHref, taskHref } from '../src/navigation/routes';
 import { InboxScreen } from '../src/screens/InboxScreen';
 
 export default function InboxRoute() {
@@ -18,6 +18,7 @@ export default function InboxRoute() {
         onOpenHosts={(hostId) => router.push({ pathname: HOSTS_HREF, params: hostId ? { focus: hostId } : {} })}
         onOpenReview={(id, taskId) => router.push(reviewHref(id, taskId))}
         onOpenPolicy={() => router.push(POLICY_HREF)}
+        onOpenGrants={() => router.push(GRANTS_HREF)}
       />
     </>
   );

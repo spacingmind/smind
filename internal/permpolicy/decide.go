@@ -243,6 +243,8 @@ func evaluateRules(d Decision, req Request, pol *Policy, segs []Segment, units [
 	}
 	if n == 0 {
 		d.Reasons = []string{"no rule matched"}
+		d.GrantClass = bashUnitsGrantClass(req, units)
+		d.Grantable = d.GrantClass != ""
 		return d
 	}
 	for i, u := range units {
@@ -252,6 +254,8 @@ func evaluateRules(d Decision, req Request, pol *Policy, segs []Segment, units [
 				text = fmt.Sprintf("segment %d (%s)", i, u.seg.Raw)
 			}
 			d.Reasons = []string{text + " is not covered by an allow rule"}
+			d.GrantClass = bashUnitsGrantClass(req, units)
+			d.Grantable = d.GrantClass != ""
 			return d
 		}
 	}
@@ -286,6 +290,29 @@ func evaluateRules(d Decision, req Request, pol *Policy, segs []Segment, units [
 	d.Action, d.RuleID, d.Why = ActionAllow, strings.Join(ids, ","), covered[0].Why
 	d.Reasons = []string{"allowed by rule " + d.RuleID}
 	return d
+}
+
+// bashUnitsGrantClass is grantClass over the units of a Bash request ("" = never
+// grantable); a request with a unit that is not a command segment (a file tool)
+// is never grantable.
+func bashUnitsGrantClass(req Request, units []unit) string {
+	// A heredoc body is text the card elides and the grant would have to store;
+	// any `<<` keeps the command out of grants (conservative: a here-string too).
+	if strings.Contains(req.Command, "<<") {
+		return ""
+	}
+	segs := make([]Segment, 0, len(units))
+	cwd := req.Cwd
+	if cwd == "" {
+		cwd = req.Worktree
+	}
+	for _, u := range units {
+		if u.seg == nil {
+			return ""
+		}
+		segs = append(segs, *u.seg)
+	}
+	return grantClass(req, segs, cwd)
 }
 
 // matchRule reports whether one rule fits one unit. A field a rule leaves

@@ -571,6 +571,13 @@ interface TimelineState {
    */
   respondPermission: (runId: string, requestId: string, optionId: string, reason?: string) => Promise<void>;
   /**
+   * Allows this request AND saves it as an "always allow in this project" grant
+   * (run.answerPermission with scope "project"). allowProjectCode is the explicit
+   * opt-in a command that runs project code needs; the daemon decides whether it
+   * does, and refuses (leaving the request pending) when it is missing.
+   */
+  answerPermissionAlways: (runId: string, requestId: string, optionId: string, allowProjectCode: boolean) => Promise<void>;
+  /**
    * Answers runId's pending question requestId (run.answerQuestion,
    * ADR-0055), from this connection. Never clears pendingQuestion itself:
    * the subsequent "question_resolved" event does that, whichever
@@ -1229,6 +1236,14 @@ export function useRunTimeline(
     [client],
   );
 
+  const answerPermissionAlways = useCallback(
+    async (runId: string, requestId: string, optionId: string, allowProjectCode: boolean) => {
+      if (!client) throw new Error("not connected");
+      await client.call("run.answerPermission", { runId, requestId, optionId, scope: "project", ...(allowProjectCode ? { allowProjectCode: true } : {}) });
+    },
+    [client],
+  );
+
   const answerQuestion = useCallback(
     async (runId: string, requestId: string, answer: QuestionAnswer) => {
       if (!client) throw new Error("not connected");
@@ -1298,5 +1313,5 @@ export function useRunTimeline(
     [client],
   );
 
-  return { runs, error, submitPrompt, stopRun, respondPermission, answerQuestion, setPermissionMode, retryWithHigherEffort, loadFullHistory };
+  return { runs, error, submitPrompt, stopRun, respondPermission, answerPermissionAlways, answerQuestion, setPermissionMode, retryWithHigherEffort, loadFullHistory };
 }

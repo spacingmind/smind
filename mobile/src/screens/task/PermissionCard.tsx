@@ -22,6 +22,7 @@ import { Card } from '../../ui/Card';
 import { TextButton } from '../../ui/TextButton';
 import { UiHost } from '../../ui/UiHost';
 import { HeredocReveal as HeredocRevealToggles } from './HeredocReveal';
+import { GrantControl } from './GrantControl';
 import { PermissionPolicyLine } from './PermissionPolicyLine';
 
 const REASON_LABEL = 'Reason for denying (optional)';
@@ -30,9 +31,12 @@ export const PermissionCard = memo(function PermissionCard({
   request,
   onRespond,
   onReveal,
+  onAlwaysAllow,
 }: {
   request: PermissionRequestState;
   onRespond: (requestId: string, optionId: string, reason?: string) => void;
+  /** Saves the request as a project grant too; offered only when the daemon sent `detail.grant`. */
+  onAlwaysAllow?: (requestId: string, allowProjectCode: boolean) => void;
   onReveal?: (requestId: string, index: number) => Promise<HeredocReveal>;
 }) {
   const theme = useAppTheme();
@@ -91,6 +95,9 @@ export const PermissionCard = memo(function PermissionCard({
               <TextButton label={reasonOpen ? 'Hide reason' : 'Deny with reason'} onPress={() => setReasonOpen((open) => !open)} />
             ) : null}
           </View>
+          {request.detail?.grant && !request.detail.gitRule && onAlwaysAllow && request.options.some((o) => o.kind === 'allow_once') ? (
+            <GrantControl offer={request.detail.grant} busy={false} onSave={(allowProjectCode) => onAlwaysAllow(request.requestId, allowProjectCode)} />
+          ) : null}
           {showReasonField({ hasReject, expanded: reasonOpen }) ? (
             <View style={styles.reasonField}>
               <Text style={styles.reasonLabel}>{REASON_LABEL}</Text>
