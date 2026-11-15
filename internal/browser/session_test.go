@@ -390,7 +390,7 @@ func TestSessionIdleClose(t *testing.T) {
 	})
 	_, inst := l.last()
 	deadline := time.Now().Add(2 * time.Second)
-	for !s.Closed() && time.Now().Before(deadline) {
+	for !(s.Closed() && inst.closed.Load() && closedHook.Load()) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if !s.Closed() || !inst.closed.Load() || !closedHook.Load() {
@@ -432,7 +432,7 @@ func TestSessionClosesWhenConnectionDrops(t *testing.T) {
 	f, inst := l.last()
 	f.closeConn()
 	deadline := time.Now().Add(2 * time.Second)
-	for !s.Closed() && time.Now().Before(deadline) {
+	for !(s.Closed() && inst.closed.Load()) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if !s.Closed() || !inst.closed.Load() {
