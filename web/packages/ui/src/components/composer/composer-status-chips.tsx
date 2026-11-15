@@ -17,8 +17,8 @@ export function formatCompactCount(n: number): string {
 }
 
 /**
- * The task's diff stat as a compact chip above the input card
- * (web-ui-dogfood-polish Item 5): additions green, deletions red, and a
+ * The task's diff stat as a compact chip in the status row under the input
+ * card (web-ui-dogfood-polish Item 5): additions green, deletions red, and a
  * click jumps to the task's Diff tab. The numbers are the task's
  * `TaskGit.diff` (ADR-0039), handed in by the parent.
  */
