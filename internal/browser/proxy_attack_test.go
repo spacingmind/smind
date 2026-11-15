@@ -435,3 +435,97 @@ func TestProxyClientCloseFreesTheSlotWithinTheGrace(t *testing.T) {
 	}
 	t.Fatal("a closed client must not pin a slot for the whole idle timeout")
 }
+
+// The upstream answers a POST early while the client has stalled mid-body. The
+// proxy must say the connection ends with that response and must not hang
+// draining the stalled client: the response is delivered, the exchange ends
+// within the IO window, and the connection slot is free again.
+func TestProxyEarlyUpstreamReplyWithAStalledClientBody(t *testing.T) {
+	live := newHitServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" { // answers without reading the body, then streams
+			for i := 0; i < 12; i++ {
+				fmt.Fprintf(w, "data: %d\n\n", i)
+				w.(http.Flusher).Flush()
+				time.Sleep(100 * time.Millisecond)
+			}
+			return
+		}
+		fmt.Fprint(w, "second")
+	})
+	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.IOTimeout = 300 * time.Millisecond; c.MaxConns = 1 })
+	c, err := net.Dial("tcp", rig.px.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+	// A 100000-byte body of which only 100 bytes are ever sent.
+	fmt.Fprintf(c, "POST http://127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\n\r\n%s", live.port, strings.Repeat("a", 100))
+	br := bufio.NewReader(c)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("the early answer must reach the client without waiting for its body: %v", err)
+	}
+	if !resp.Close {
+		t.Fatalf("an early answer with an unfinished request body must carry Connection: close: %+v", resp.Header)
+	}
+	start := time.Now()
+	_, _ = io.ReadAll(resp.Body)
+	if time.Since(start) > 3*time.Second {
+		t.Fatalf("the exchange must end within the IO window, not hold the handler: %v", time.Since(start))
+	}
+	// The only slot is free again: a fresh connection works.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if st := status(rig.raw(t, fmt.Sprintf("GET http://127.0.0.1:%d/second HTTP/1.1\r\nHost: x\r\n\r\n", live.port))); st == "200" {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("the connection slot was never released")
+}
+
+type countingDeadliner struct{ calls []time.Time }
+
+func (c *countingDeadliner) SetReadDeadline(t time.Time) error {
+	c.calls = append(c.calls, t)
+	return nil
+}
+
+func TestBodyGuardIgnoresChangesOnceTheHandlerIsDone(t *testing.T) {
+	cd := &countingDeadliner{}
+	g := &bodyGuard{rc: cd}
+	body := &idleBody{r: io.NopCloser(strings.NewReader("abc")), g: g, idle: time.Minute}
+	buf := make([]byte, 2)
+	_, _ = body.Read(buf)
+	if len(cd.calls) != 1 || cd.calls[0].IsZero() {
+		t.Fatalf("a read sets a deadline: %v", cd.calls)
+	}
+	g.finish()
+	if len(cd.calls) != 2 || !cd.calls[1].IsZero() {
+		t.Fatalf("finish clears once: %v", cd.calls)
+	}
+	// The transport reads and closes after the handler returned: nothing may reach the connection.
+	_, _ = body.Read(buf)
+	_ = body.Close()
+	g.finish()
+	if len(cd.calls) != 2 {
+		t.Fatalf("a late Read/Close must not change the next request's deadline: %v", cd.calls)
+	}
+}
+
+// Close without reading to EOF (the transport abandons the body) still clears
+// the deadline: a long response must not be cut by a deadline nobody renews.
+func TestIdleBodyCloseWithoutEOFClearsTheDeadline(t *testing.T) {
+	cd := &countingDeadliner{}
+	g := &bodyGuard{rc: cd}
+	body := &idleBody{r: io.NopCloser(strings.NewReader("abcdef")), g: g, idle: time.Minute}
+	_, _ = body.Read(make([]byte, 2)) // not at EOF
+	_ = body.Close()
+	if len(cd.calls) != 2 || cd.calls[0].IsZero() || !cd.calls[1].IsZero() {
+		t.Fatalf("Close must clear the deadline the last Read set: %v", cd.calls)
+	}
+	if body.eof.Load() {
+		t.Fatal("the body did not reach EOF")
+	}
+}

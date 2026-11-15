@@ -458,9 +458,13 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 		host += ":" + strconv.Itoa(d.Port)
 	}
 	rc := http.NewResponseController(w)
+	guard := &bodyGuard{rc: rc}
+	defer guard.finish()
 	var body io.ReadCloser = http.NoBody // an empty body stays empty: no chunked encoding, no deadline set
+	var ib *idleBody
 	if r.Body != nil && r.Body != http.NoBody {
-		body = &idleBody{r: r.Body, rc: rc, idle: p.cfg.IOTimeout}
+		ib = &idleBody{r: r.Body, g: guard, idle: p.cfg.IOTimeout}
+		body = ib
 	}
 	out, err := http.NewRequestWithContext(context.WithValue(r.Context(), pinKey{}, addrs), r.Method, "http://"+host+r.URL.RequestURI(), body)
 	if err != nil {
@@ -487,6 +491,13 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stripHopByHop(resp.Header)
+	if ib != nil && !ib.eof.Load() {
+		// The upstream answered before the client finished its body. We will not
+		// read the rest, so the connection cannot be reused: say so, which also
+		// stops net/http from trying to drain the unread body (a stalled client
+		// would hold the handler there).
+		w.Header().Set("Connection", "close")
+	}
 	for k, vs := range resp.Header {
 		for _, v := range vs {
 			w.Header().Add(k, v)
@@ -512,28 +523,64 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// deadliner is the part of http.ResponseController the body guard needs.
+type deadliner interface{ SetReadDeadline(time.Time) error }
+
+// bodyGuard serialises read-deadline changes on the client's connection and
+// refuses them once the handler is finished: a late Read or Close from the
+// transport (the upstream answered early, with the request body unfinished)
+// must not clobber the deadline of the NEXT request on a keep-alive connection.
+type bodyGuard struct {
+	mu   sync.Mutex
+	done bool
+	rc   deadliner
+}
+
+func (g *bodyGuard) set(t time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.done {
+		_ = g.rc.SetReadDeadline(t)
+	}
+}
+
+// finish clears the deadline one last time and blocks every later change.
+func (g *bodyGuard) finish() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.done {
+		_ = g.rc.SetReadDeadline(time.Time{})
+		g.done = true
+	}
+}
+
 // idleBody gives the client's request body a read deadline that is renewed on
-// every read, so a client that stalls mid-body cannot hold a slot.
+// every read, so a client that stalls mid-body cannot hold a slot. (A client
+// that drips one byte per window renews it forever: a known low, see the plan.)
 type idleBody struct {
 	r    io.ReadCloser
-	rc   *http.ResponseController
+	g    *bodyGuard
 	idle time.Duration
+	eof  atomic.Bool // the client's body was read to its end
 }
 
 func (b *idleBody) Read(p []byte) (int, error) {
-	_ = b.rc.SetReadDeadline(time.Now().Add(b.idle))
+	b.g.set(time.Now().Add(b.idle))
 	n, err := b.r.Read(p)
+	if err == io.EOF {
+		b.eof.Store(true)
+	}
 	if err != nil {
 		// The body is over (or broken): the deadline must not outlive it, or the
 		// server's background read would time out and cancel the request context
 		// of a long response (SSE, long poll, a big download).
-		_ = b.rc.SetReadDeadline(time.Time{})
+		b.g.set(time.Time{})
 	}
 	return n, err
 }
 
 func (b *idleBody) Close() error {
-	_ = b.rc.SetReadDeadline(time.Time{})
+	b.g.set(time.Time{})
 	return b.r.Close()
 }
 

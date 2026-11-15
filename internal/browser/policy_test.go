@@ -301,7 +301,7 @@ func TestDenyEntriesAreCanonicalised(t *testing.T) {
 func TestAllowlistedNameMustResolvePublic(t *testing.T) {
 	p := testPolicy(t, "corp.test")
 	for _, ip := range []string{"10.1.2.3", "172.16.0.9", "192.168.1.1", "100.64.0.1", "100.127.255.254", "127.0.0.1", "127.9.9.9", "0.1.2.3", "198.18.0.5", "240.0.0.1",
-		"::1", "fc00::1", "fd12:3456::1", "::ffff:10.0.0.1", "64:ff9b::a00:1", "2002:a00:1::", "::a00:1"} {
+		"::1", "fc00::1", "fd12:3456::1", "fec0::1", "fec0:0:0:1::5", "::ffff:10.0.0.1", "64:ff9b::a00:1", "2002:a00:1::", "::a00:1"} {
 		d := p.CheckURL("http://corp.test:3000/")
 		if !d.Allowed || !d.NeedsResolve {
 			t.Fatalf("setup: %+v", d)

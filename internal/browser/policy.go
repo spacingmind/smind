@@ -469,6 +469,7 @@ var internalPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("100.64.0.0/10"), // CGNAT
 	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking
 	netip.MustParsePrefix("240.0.0.0/4"),   // reserved
+	netip.MustParsePrefix("fec0::/10"),     // deprecated site-local (Go's IsPrivate covers only fc00::/7)
 }
 
 // internalAddr reports loopback, private (RFC 1918, unique-local), CGNAT and
