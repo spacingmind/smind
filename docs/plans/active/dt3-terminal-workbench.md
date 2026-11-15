@@ -141,7 +141,7 @@ sizes (open, one entry disabled), and the composer after a send. Desktop real-wi
 - [x] A: matchers, resolver, link provider, reveal store and editor scroll (PR A, #889)
 - [x] B: restart (PR B)
 - [x] C: send set (PR C)
-- [ ] D: send set as context chips (PR D)
+- [x] D: send set as context chips (PR D)
 
 ## Validation
 
@@ -169,3 +169,10 @@ Frames (28, light and dark, 1280 and 390: both menus open, one entry disabled, t
 The frames found a layout flaw (a floating button covered the first output line at 390), fixed with a slim row of its own.
 Note: in the dev server (StrictMode) a text queued while the chat tab is unmounted is lost on remount; production builds are fine
 (frames were taken on a production build). Not verified: a real daemon, the desktop webview, `file_ref` against a real daemon.
+
+PR D: `context-chips-store.test.ts`, `send-set.test.ts` additions, `context-chip-tray.test.tsx`, `composer-send-chips.test.tsx`,
+`use-send-ref-to-chat.test.tsx` and the updated send-set tests; web 474 files / 5319 tests, `tsc -b`, `vite build`. Mutations on
+committed code, all killed: blocks no longer appended at send; chip-ref dedupe removed; chips cleared before a failed send;
+chips dropped by the tray's clear(key); the trigger label hidden below sm. Frames (light and dark, 1280 and 390: both menus with the
+visible label, the composer holding the chips and a typed prompt with no raw text) all opened.
+Not verified: a real daemon, the desktop webview, `file_ref` against a real daemon; a chip alone cannot send (by design).
