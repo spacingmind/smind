@@ -24,9 +24,12 @@ Option 1, untrack and ignore, over option 2 (keep them tracked and add a CI "is 
 ## Progress
 
 - [x] spec (this file)
-- [ ] untrack, ignore, README
-- [ ] clean-build run
+- [x] untrack, ignore, README
+- [x] clean-build run
 
 ## Validation
 
-Filled in when the PR is ready.
+- AC1, AC4: `git ls-files desktop/src-tauri/gen` is empty; `desktop/src-tauri/.gitignore` ignores `/gen/schemas`; `desktop/README.md` documents it. Test `TestGeneratedTauriSchemasAreIgnoredAndUntracked` (internal/hygiene) passes; mutations: re-tracking a generated file fails it, removing the ignore rule fails it.
+- AC2: deleted `gen/` and ran `cargo check` in `src-tauri` on macOS: it regenerated `acl-manifests.json`, `capabilities.json`, `desktop-schema.json` and `macOS-schema.json` and `git status` stayed clean. (`linux-schema.json` and the Windows schema exist only when built on those platforms, which is itself why tracking them churned.)
+- AC3: `cargo test --lib capability` (6 tests) passes with no `gen/` present.
+- Not verified: a Windows or Linux build from a clean tree (reasoned from the same `tauri-build` behaviour and from the Tauri template, which ignores the same path).
