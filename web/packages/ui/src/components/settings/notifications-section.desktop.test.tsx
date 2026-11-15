@@ -43,6 +43,7 @@ async function renderSection(opts: { desktop?: boolean; settings?: Record<string
       return Promise.resolve(current);
     }),
     notifyTest: vi.fn(() => Promise.resolve()),
+    attentionFocusReport: vi.fn(() => Promise.resolve()),
   };
   vi.doMock("@/lib/platform", () => ({
     isDesktop: build,

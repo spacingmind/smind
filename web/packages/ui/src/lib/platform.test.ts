@@ -29,6 +29,7 @@ describe("platform in a non-desktop build", () => {
     await expect(desktop.appSettingsGet()).rejects.toThrow(/unavailable/i);
     await expect(desktop.appSettingsSet({ onboardingCompleted: true })).rejects.toThrow(/unavailable/i);
     await expect(desktop.notifyTest()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.attentionFocusReport({ taskId: null, windowFocused: true, composerFocused: false })).rejects.toThrow(/unavailable/i);
     expect(() => desktop.onRunSetupRequested(() => {})()).not.toThrow();
     await expect(desktop.previewRelayLink("x")).rejects.toThrow(/unavailable/i);
     await expect(desktop.addRelayConnection("x", "y")).rejects.toThrow(/unavailable/i);
@@ -83,6 +84,7 @@ describe("platform in a desktop build", () => {
         case "app_update_install":
           return undefined;
         case "notify_test":
+        case "attention_focus_report":
           return undefined;
         default:
           throw new Error(`unexpected invoke command ${cmd}`);
@@ -141,6 +143,11 @@ describe("platform in a desktop build", () => {
 
     await desktop.notifyTest();
     expect(invoke).toHaveBeenCalledWith("notify_test");
+
+    await desktop.attentionFocusReport({ taskId: 7, windowFocused: true, composerFocused: false });
+    expect(invoke).toHaveBeenCalledWith("attention_focus_report", {
+      report: { taskId: 7, windowFocused: true, composerFocused: false },
+    });
   });
 
   it("maps the relay-link methods to their commands, wraps Rust's string errors, and announces a saved connection", async () => {
