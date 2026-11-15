@@ -406,7 +406,10 @@ mod min_size_tests {
 #[cfg(test)]
 mod multi_window_tests {
     fn body<'a>(src: &'a str, start: &str) -> &'a str {
-        let rest = src.split(start).nth(1).unwrap_or_else(|| panic!("{start} exists"));
+        let rest = src
+            .split(start)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{start} exists"));
         rest.split("\n}\n").next().unwrap()
     }
 
@@ -414,10 +417,19 @@ mod multi_window_tests {
     fn window_commands_use_the_calling_window() {
         let src = include_str!("window_chrome.rs");
         let ready = body(src, "pub fn window_ready(");
-        assert!(ready.contains("window.label()"), "window_ready must read the caller's label");
+        assert!(
+            ready.contains("window.label()"),
+            "window_ready must read the caller's label"
+        );
         let theme = body(src, "pub fn window_set_theme(");
-        assert!(theme.contains("window.label()"), "window_set_theme must act on the calling window");
-        assert!(!theme.contains("get_webview_window(MAIN_WINDOW)"), "window_set_theme must not target main");
+        assert!(
+            theme.contains("window.label()"),
+            "window_set_theme must act on the calling window"
+        );
+        assert!(
+            !theme.contains("get_webview_window(MAIN_WINDOW)"),
+            "window_set_theme must not target main"
+        );
     }
 
     #[test]
@@ -427,7 +439,9 @@ mod multi_window_tests {
         assert!(native.contains("focused_or_main(app)"));
         assert!(native.contains("main.hide()"), "Hide stays on main");
         let zoom = body(menu, "fn apply_zoom(");
-        assert!(zoom.contains("webview_windows()"), "zoom applies to every open window");
+        assert!(
+            zoom.contains("webview_windows()"),
+            "zoom applies to every open window"
+        );
     }
 }
-

@@ -192,7 +192,8 @@ fn perms_of(cap: &str) -> Vec<String> {
 fn capability_proxy_stays_main_only() {
     let cap: Value = serde_json::from_str(PROXY_CAPABILITY).expect("proxy.json parses");
     assert_eq!(cap["windows"], serde_json::json!(["main"]));
-    let default: Value = serde_json::from_str(include_str!("../capabilities/default.json")).expect("default.json parses");
+    let default: Value = serde_json::from_str(include_str!("../capabilities/default.json"))
+        .expect("default.json parses");
     assert_eq!(default["windows"], serde_json::json!(["main"]));
 }
 
@@ -203,7 +204,10 @@ fn capability_task_window_scope_is_exactly_the_task_glob() {
     let cap: Value = serde_json::from_str(TASK_CAPABILITY).expect("task-window.json parses");
     assert_eq!(cap["windows"], serde_json::json!(["task-*"]));
     assert_eq!(cap["local"], Value::Bool(false));
-    assert_eq!(cap["remote"]["urls"], serde_json::json!(["http://127.0.0.1:*"]));
+    assert_eq!(
+        cap["remote"]["urls"],
+        serde_json::json!(["http://127.0.0.1:*"])
+    );
     // The pattern matches the pool labels and nothing the shell can create besides them.
     for i in 0..crate::windows::MAX_TASK_WINDOWS {
         assert!(crate::windows::pool_label(i).starts_with("task-"));
@@ -241,7 +245,10 @@ fn capability_task_window_allowlist_exact() {
     .map(|s| s.to_string())
     .collect();
     want.sort();
-    assert_eq!(got, want, "task-window.json permissions changed: update this test deliberately");
+    assert_eq!(
+        got, want,
+        "task-window.json permissions changed: update this test deliberately"
+    );
     for p in &got {
         assert!(!p.contains('*'), "wildcard permission {p}");
         assert!(!p.ends_with(":default"), "default permission set {p}");
@@ -277,7 +284,10 @@ fn capability_task_window_has_no_main_only_command() {
         "allow-app-quit",
         "allow-app-menu-action",
     ] {
-        assert!(!got.iter().any(|p| p == forbidden), "{forbidden} must stay main-only");
+        assert!(
+            !got.iter().any(|p| p == forbidden),
+            "{forbidden} must stay main-only"
+        );
     }
 }
 
@@ -285,9 +295,14 @@ fn capability_task_window_has_no_main_only_command() {
 #[test]
 fn capability_task_window_grants_match_build_rs_commands() {
     for p in perms_of(TASK_CAPABILITY) {
-        let Some(cmd) = p.strip_prefix("allow-") else { continue };
+        let Some(cmd) = p.strip_prefix("allow-") else {
+            continue;
+        };
         let cmd = cmd.replace('-', "_");
-        assert!(BUILD_RS.contains(&format!("\"{cmd}\"")), "{p} has no `{cmd}` in build.rs");
+        assert!(
+            BUILD_RS.contains(&format!("\"{cmd}\"")),
+            "{p} has no `{cmd}` in build.rs"
+        );
     }
 }
 
@@ -297,4 +312,3 @@ fn window_open_task_is_declared_and_registered() {
     assert!(BUILD_RS.contains("\"window_open_task\""));
     assert!(include_str!("lib.rs").contains("windows::window_open_task"));
 }
-

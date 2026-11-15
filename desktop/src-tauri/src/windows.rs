@@ -4,6 +4,17 @@
 //! maps it onto the fixed label pool `task-1..=task-8`, and builds each task
 //! window's URL itself from the proxy origin and the per-launch secret. No
 //! page string ever reaches a label, a capability glob or a URL.
+//!
+//! One window per task: opening a task that already has a window focuses it.
+//! Task windows use the standard chrome, deny `window.open`, keep the
+//! navigation guard, and are DESTROYED on close (the hide-to-tray handler is
+//! `main`'s alone); closing frees the pool slot. See
+//! `docs/plans/active/desktop-multi-window.md` and the ADR-0013 amendment.
+
+use tauri::webview::{NewWindowResponse, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, State, Window, WindowEvent};
+
+use crate::state::DesktopState;
 
 pub const TASK_LABEL_PREFIX: &str = "task-";
 
@@ -96,6 +107,7 @@ impl TaskWindows {
     }
 
     /// The label of the window currently holding `task_id`, if any.
+    #[allow(dead_code)] // read by tests and by later per-task routing
     pub fn label_for(&self, task_id: i64) -> Option<String> {
         let slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         slots
@@ -103,6 +115,83 @@ impl TaskWindows {
             .position(|slot| *slot == Some(task_id))
             .map(pool_label)
     }
+}
+
+/// Brings an existing task window forward. It touches only that window.
+fn focus_window(win: &tauri::WebviewWindow) {
+    let _ = win.unminimize();
+    let _ = win.show();
+    let _ = win.set_focus();
+}
+
+fn create_task_window(
+    app: &AppHandle,
+    desktop: &DesktopState,
+    label: &str,
+    task_id: i64,
+) -> Result<(), String> {
+    let url = task_url(&desktop.proxy_url, &desktop.proxy.secret, task_id);
+    let nav_origin = desktop.proxy_url.origin();
+    let builder = WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::External(url))
+        .title("sMind")
+        .inner_size(1100.0, 740.0)
+        // Same as main: OS file drops reach the page as HTML5 drops (ADR-0038).
+        .disable_drag_drop_handler()
+        // Same navigation guard as main: only the loopback origin navigates; links open in the OS browser.
+        .on_navigation(move |url| {
+            if url.origin() == nav_origin {
+                true
+            } else {
+                let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                false
+            }
+        })
+        // No unmanaged windows: `window.open` and target=_blank are refused.
+        .on_new_window(|_url, _features| NewWindowResponse::Deny);
+    let win = crate::window_chrome::configure(builder, crate::window_chrome::load_surface(app))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let _ = win.set_zoom(crate::zoom_store::load(app));
+    // Task windows are destroyed on close (no CloseRequested handler here); the slot is freed when they are gone.
+    let release_app = app.clone();
+    let release_label = label.to_string();
+    win.on_window_event(move |event| {
+        if let WindowEvent::Destroyed = event {
+            if let Some(registry) = release_app.try_state::<TaskWindows>() {
+                registry.release(&release_label);
+            }
+        }
+    });
+    crate::window_chrome::arm_task_fallback(app, label.to_string());
+    Ok(())
+}
+
+/// Opens (or focuses) the window for `task_id`. The page supplies one integer: Rust picks the label from the pool and
+/// builds the URL. Returns the window's label.
+#[tauri::command]
+pub fn window_open_task(
+    app: AppHandle,
+    _window: Window,
+    registry: State<'_, TaskWindows>,
+    desktop: State<'_, DesktopState>,
+    task_id: i64,
+) -> Result<String, String> {
+    let (label, is_new) = match registry.acquire(task_id)? {
+        Acquired::Existing(label) => (label, false),
+        Acquired::New(label) => (label, true),
+    };
+    if !is_new {
+        if let Some(win) = app.get_webview_window(&label) {
+            focus_window(&win);
+            return Ok(label);
+        }
+        // The slot claims a window the OS no longer has: rebuild it in the same slot.
+    }
+    if let Err(e) = create_task_window(&app, &desktop, &label, task_id) {
+        registry.release(&label);
+        return Err(e);
+    }
+    Ok(label)
 }
 
 #[cfg(test)]
@@ -230,5 +319,93 @@ mod tests {
         assert!(pool.acquire(0).is_err());
         assert!(pool.acquire(-5).is_err());
         assert_eq!(pool.acquire(1), Ok(new("task-1")));
+    }
+
+    fn body<'a>(src: &'a str, start: &str) -> &'a str {
+        let rest = src
+            .split(start)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{start} exists"));
+        rest.split("\n}\n").next().unwrap()
+    }
+
+    #[test]
+    fn task_window_builder_denies_new_windows_and_guards_navigation() {
+        let src = include_str!("windows.rs");
+        let create = body(src, "fn create_task_window(");
+        assert!(create.contains(".on_new_window(|_url, _features| NewWindowResponse::Deny)"));
+        assert!(create.contains(".on_navigation("));
+        assert!(create.contains("url.origin() == nav_origin"));
+        assert!(create.contains(".disable_drag_drop_handler()"));
+        assert!(create.contains("window_chrome::configure("));
+    }
+
+    #[test]
+    fn the_destroyed_handler_releases_the_slot() {
+        let create = body(include_str!("windows.rs"), "fn create_task_window(");
+        assert!(create.contains("WindowEvent::Destroyed"));
+        assert!(create.contains("registry.release(&release_label)"));
+        assert!(
+            !create.contains("prevent_close"),
+            "task windows destroy on close"
+        );
+    }
+
+    #[test]
+    fn focus_only_the_requested_task_window() {
+        let src = include_str!("windows.rs");
+        let command = body(src, "pub fn window_open_task(");
+        assert!(
+            !command.contains("MAIN_WINDOW"),
+            "the command never touches main"
+        );
+        assert!(command.contains("get_webview_window(&label)"));
+        let focus = body(src, "fn focus_window(");
+        assert!(focus.contains("win.set_focus()"));
+    }
+
+    #[test]
+    fn the_command_takes_an_integer_and_nothing_else_from_the_page() {
+        let src = include_str!("windows.rs");
+        let sig = src
+            .split("pub fn window_open_task(")
+            .nth(1)
+            .unwrap()
+            .split(") -> Result")
+            .next()
+            .unwrap();
+        assert!(sig.contains("task_id: i64"));
+        for forbidden in ["url:", "label:", "String", "path", "title"] {
+            assert!(
+                !sig.contains(forbidden),
+                "window_open_task must not take {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn main_window_still_hides_on_close_and_task_windows_do_not() {
+        let lib = include_str!("lib.rs");
+        assert!(
+            lib.contains("api.prevent_close();"),
+            "main keeps hide-to-tray"
+        );
+        assert!(!include_str!("windows.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap()
+            .contains("prevent_close"));
+    }
+
+    #[test]
+    fn a_task_window_never_writes_the_main_layout() {
+        let layout = include_str!("window_layout.rs");
+        let save = body(layout, "pub fn save_main(");
+        assert!(save.contains("get_webview_window(MAIN_WINDOW)"));
+        assert!(
+            save.matches("MAIN_WINDOW").count() >= 2,
+            "both the lookup and the stored label are main"
+        );
+        assert!(!save.contains("label()"));
     }
 }

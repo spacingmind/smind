@@ -49,8 +49,6 @@ mod real_daemon_test;
 pub mod updater;
 mod window_chrome;
 mod window_layout;
-// Wired by window_open_task in the next step.
-#[allow(dead_code)]
 mod windows;
 mod zoom_store;
 
@@ -178,6 +176,7 @@ pub fn run() {
             daemon_manager::daemon_restart,
             daemon_manager::take_over_daemon,
             daemon_manager::connection_version,
+            windows::window_open_task,
             window_chrome::window_ready,
             window_chrome::window_set_theme,
             updater::app_update_check,
@@ -261,6 +260,7 @@ pub fn run() {
             // when the UI reports its first paint (or after the fallback).
             app.manage(window_chrome::ShowGate::default());
             app.manage(context_menu::ContextMenuState::default());
+            app.manage(windows::TaskWindows::default());
             let builder = WebviewWindowBuilder::new(
                 app,
                 MAIN_WINDOW,
