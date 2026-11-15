@@ -50,6 +50,7 @@ describe("SettingsScreen compact nav", () => {
     expect(screen.getByTestId("settings-sidebar")).toHaveClass("w-12");
     for (const section of listSettingsSections()) {
       const button = screen.getByTestId(`settings-nav-${section.id}`);
+      expect(button).toHaveAttribute("aria-label", section.label); // not only the title: screen readers read the label
       expect(button).toHaveAccessibleName(section.label);
       expect(button).toHaveAttribute("title", section.label);
       expect(button).not.toHaveTextContent(section.label);
