@@ -563,6 +563,27 @@ describe("AppSidebar", () => {
       expect(within(groups[0]!).getByText("Fix the bug")).toBeInTheDocument();
     });
 
+    it("status-bucket-is-labelled-needs-you: the first bucket's rendered header reads 'Needs you'", async () => {
+      const client = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar
+            client={client as never}
+            selectedTaskId={null}
+            attention={new Map([[TASK.ID, new Set<AttentionReason>(["permission"])]])}
+          />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      await screen.findByTestId("sidebar-workspace-row");
+
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-status"));
+
+      const groups = screen.getAllByTestId("sidebar-status-group");
+      expect(groups[0]).toHaveAttribute("data-status-group", "needs-attention");
+      expect(within(groups[0]!).getByTestId("sidebar-status-group-header")).toHaveTextContent("Needs you");
+    });
+
     it("collapsing a status group's header hides its rows", async () => {
       const client = new FakeWsClient();
       render(

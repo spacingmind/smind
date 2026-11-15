@@ -8,7 +8,7 @@ export type StatusGroupKey = "needs-attention" | "error" | "running" | "done" | 
 export const STATUS_GROUP_ORDER: StatusGroupKey[] = ["needs-attention", "error", "running", "done", "idle"];
 
 export const STATUS_GROUP_LABELS: Record<StatusGroupKey, string> = {
-  "needs-attention": "Needs attention",
+  "needs-attention": "Needs you",
   error: "Error",
   running: "Running",
   done: "Done",

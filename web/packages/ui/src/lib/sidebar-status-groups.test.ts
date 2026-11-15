@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { groupTasksByStatus, statusGroupForTask } from "@/lib/sidebar-status-groups";
+import { groupTasksByStatus, statusGroupForTask, STATUS_GROUP_LABELS } from "@/lib/sidebar-status-groups";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import type { Task } from "@/lib/types";
 
@@ -58,6 +58,18 @@ describe("statusGroupForTask", () => {
   it("a stopped run with no attention is 'idle', not 'error'", () => {
     const runStatus: TaskRunStatus = new Map([[1, "stopped"]]);
     expect(statusGroupForTask(1, new Map(), runStatus)).toBe("idle");
+  });
+});
+
+describe("status-bucket-is-labelled-needs-you", () => {
+  it("the needs-attention bucket's label is 'Needs you'", () => {
+    expect(STATUS_GROUP_LABELS["needs-attention"]).toBe("Needs you");
+  });
+
+  it("groupTasksByStatus carries that label on the bucket it renders", () => {
+    const attention = attentionOf([[1, ["permission"]]]);
+    const groups = groupTasksByStatus([task(1)], attention, new Map());
+    expect(groups.find((g) => g.key === "needs-attention")?.label).toBe("Needs you");
   });
 });
 
