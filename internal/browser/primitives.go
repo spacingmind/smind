@@ -13,6 +13,12 @@ import (
 // tab when id is empty. It never creates a tab.
 func (s *Session) tabFor(id string) (*tabState, error) {
 	if id == "" {
+		s.mu.Lock()
+		cur := s.tabs[s.current]
+		s.mu.Unlock()
+		if cur != nil && cur.isReady() {
+			return cur, nil // the tab the agent is working in
+		}
 		t, ok := s.firstTab()
 		if !ok {
 			return nil, errors.New("browser: no page is open: use browser_open first")

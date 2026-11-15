@@ -367,6 +367,9 @@ func TestSessionNavigateRefusedNeverSent(t *testing.T) {
 }
 
 func TestSessionNavigateCreatesTabAndReportsNavigationError(t *testing.T) {
+	old := initialTabWait
+	initialTabWait = 50 * time.Millisecond
+	defer func() { initialTabWait = old }()
 	l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
 		if c.Method == "Target.createTarget" {
 			go attach(f, "S9", "T-new", "page")
@@ -892,5 +895,42 @@ func TestCfgKeyCoversLauncherAndTimeouts(t *testing.T) {
 	}
 	if cfgKey(a) != cfgKey(Config{Workspace: "other", Launcher: ChromeLauncher{Path: "/a"}}) {
 		t.Error("the workspace name is not part of the key")
+	}
+}
+
+// The browser's own blank page may be armed a moment after the first
+// navigation is asked for: that navigation uses it (no second tab), and later
+// calls keep working in the same tab.
+func TestSessionFirstNavigationWaitsForTheInitialTab(t *testing.T) {
+	s, l := startTestSession(t, nil)
+	f, _ := l.last()
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		attach(f, "S1", "T1", "page")
+	}()
+	tab, err := s.Navigate(context.Background(), "", "http://localhost:3000/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tab.ID != "T1" || len(f.callsFor("Target.createTarget")) != 0 {
+		t.Fatalf("the initial tab must be reused, not a second one opened: %+v createTarget=%d", tab, len(f.callsFor("Target.createTarget")))
+	}
+}
+
+func TestSessionWorksInTheTabItNavigated(t *testing.T) {
+	s, l := startTestSession(t, nil)
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	attachReady(t, f, "S2", "T2", 2)
+	if _, err := s.Navigate(context.Background(), "T2", "http://localhost:3000/"); err != nil {
+		t.Fatal(err)
+	}
+	tab, err := s.tabFor("")
+	if err != nil || tab.targetID != "T2" {
+		t.Fatalf("the tab the agent navigated is the current one, not the oldest: %v %v", tab, err)
+	}
+	tabs, err := s.Tabs(context.Background())
+	if err != nil || len(tabs) == 0 {
+		t.Fatal(err)
 	}
 }
