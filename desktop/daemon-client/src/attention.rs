@@ -89,6 +89,12 @@ impl Attention {
         self.order.len()
     }
 
+    /// contains is whether that request id is still pending (DT5 C/AC11:
+    /// a held banner whose request was resolved meanwhile is dropped).
+    pub fn contains(&self, request_id: &str) -> bool {
+        self.task_of.contains_key(request_id)
+    }
+
     /// most_recent is the request whose permission arrived last -- what
     /// clicking the tray's attention item opens (task, chat and request).
     pub fn most_recent(&self) -> Option<PendingRef> {
@@ -250,6 +256,34 @@ mod tests {
         // permission.resolved.
         a.on_permission_resolved("question-1");
         assert_eq!(a.count(), 0);
+    }
+
+    #[test]
+    fn badge_count_is_waiting_permissions_plus_questions() {
+        let mut a = Attention::new();
+        a.on_pending(1, 7, "perm-1");
+        a.on_pending(2, 8, "question-1");
+        assert_eq!(a.count(), 2, "a permission and a question both count");
+        a.on_permission_resolved("perm-1");
+        assert_eq!(a.count(), 1);
+    }
+
+    #[test]
+    fn the_count_clears_at_zero() {
+        let mut a = Attention::new();
+        a.on_pending(1, 7, "perm-1");
+        a.on_permission_resolved("perm-1");
+        assert_eq!(a.count(), 0, "resolving the last waiting item clears the badge");
+    }
+
+    #[test]
+    fn contains_follows_pending_and_resolved() {
+        let mut a = Attention::new();
+        assert!(!a.contains("perm-1"));
+        a.on_pending(1, 7, "perm-1");
+        assert!(a.contains("perm-1"));
+        a.on_permission_resolved("perm-1");
+        assert!(!a.contains("perm-1"));
     }
 
     #[test]

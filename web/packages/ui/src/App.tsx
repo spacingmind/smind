@@ -97,6 +97,7 @@ import { KeyboardProvider, useActionHandler, useActionRestriction, useKeyboard }
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
+import { useAttentionReport } from "@/hooks/use-attention-report";
 import { focusSettingsTarget } from "@/lib/failure-class";
 import { useTaskChats } from "@/hooks/use-task-chats";
 import { useUnreadTasks } from "@/hooks/use-unread-tasks";
@@ -393,6 +394,11 @@ function AppShell({
     [treeLoaded, allTasks],
   );
   const { unread, markUnread } = useUnreadTasks(attention, selectedTask?.ID ?? null, liveTaskIds);
+
+  // DT5 C AC9: tells the desktop shell what is in front and what has focus,
+  // so it knows when a notification banner may show (a no-op in a browser
+  // build). Unconditional: the rules of hooks.
+  useAttentionReport(selectedTask?.ID ?? null);
 
   // AC2: the tab title mirrors the sidebar's own unread count live -- a
   // plain effect, not a ref, since document.title has no React-owned
