@@ -47,7 +47,7 @@ GLM Peers first with step-by-step briefs, one Peer per PR; the Lead reviews each
 - [x] spec (this file, first commit of PR 1)
 - [x] PR 1 history notice (GLM peer task 643; reviewed and accepted)
 - [x] PR 2 sidebar (GLM peer task 646; reviewed and accepted)
-- [ ] PR 3 first-run home (after `develop` is merged into the wave branch)
+- [x] PR 3 first-run home (develop merged into the wave branch via #931; PR open 2026-11-15)
 
 ## Validation
 
@@ -64,4 +64,6 @@ GLM Peers first with step-by-step briefs, one Peer per PR; the Lead reviews each
 - Not verified: real-window desktop; long-title rows with a diffstat in frames (unit-tested).
 
 ### PR 3
-Filled in by that PR.
+- AC12-AC16: `zero-projects-shows-two-action-cards-and-no-composer`, `add-a-project-card-opens-the-add-project-flow`, `set-up-providers-card-opens-providers-settings`, `first-project-brings-the-composer-back`, `cards-are-buttons-with-text-labels`, `no-import-card-yet`, plus: a workspace list that has not arrived shows the composer (no flash), a disconnected daemon shows no cards, the readiness sentence matches the Get started card, `ensure` once, no dead button without a handler.
+- Design notes: the cards replace the Get started card and the composer while no project exists (they are the same two steps, so both on screen would repeat each other); the actions are the Get started card's own (`onAddProject`, the Settings -> Providers navigation, the readiness sentence), shared through two exported helpers; App tells the landing when the first workspace list has arrived (`workspacesLoaded`) so a returning user never sees the cards flash.
+- Frames and mutations: see the PR body.
