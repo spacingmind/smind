@@ -15,16 +15,15 @@ import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/status-badg
 import { useFleetHosts } from "@/hooks/use-fleet-hosts";
 import { useInboxActions, useInboxCount, useInboxList, useInboxRequest, useRespondPermission } from "@/hooks/use-inbox";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useWindowState } from "@/hooks/use-window-state";
+import { usePageLeftInset } from "@/hooks/use-page-chrome";
 import { Icons } from "@/lib/icons";
 import { queryKeys } from "@/lib/query-keys";
 import type { WorkspaceWithTree } from "@/lib/workspace-tree";
 import { canSnoozeOrResolve, groupInbox, inboxAnnouncement, SNOOZE_OPTIONS, type InboxItem } from "@/lib/inbox-types";
-import { desktopOS, isDesktop } from "@/lib/platform";
+import { isDesktop } from "@/lib/platform";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { openFailureSettings } from "@/lib/failure-class";
-import { headerLeftInsetPx } from "@/lib/window-chrome";
 
 const BASE_PADDING_PX = 8;
 
@@ -95,7 +94,6 @@ export function InboxScreen({
   const fleetHosts = useFleetHosts();
   const hostAlias = (hostId: string) => fleetHosts.data?.hosts.find((h) => h.hostId === hostId)?.alias;
   const narrow = useIsMobile();
-  const { fullscreen } = useWindowState();
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -181,7 +179,7 @@ export function InboxScreen({
     }
   };
 
-  const leftInset = isDesktop ? headerLeftInsetPx(desktopOS, fullscreen, 0) : 0;
+  const leftInset = usePageLeftInset();
   const headerStyle = leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined;
 
   return (

@@ -26,6 +26,7 @@ import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
 import { DesktopUpdateDialogView } from "@/components/desktop-update-dialog";
 import { DesktopUnreachable } from "@/components/desktop-unreachable";
 import { InboxScreen } from "@/components/inbox/inbox-screen";
+import { PageChromeContext } from "@/hooks/use-page-chrome";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
@@ -506,10 +507,12 @@ function AppShell({
   const closeMobileSidebarRef = useRef<(() => void) | null>(null);
   const selectTaskFromSidebar = useCallback(
     (task: Task) => {
+      // With the sidebar kept beside a full-page view (Settings, Inbox, ...), a click on a task leaves that view.
+      closeSettings();
       selectTask(task);
       closeMobileSidebarRef.current?.();
     },
-    [selectTask],
+    [closeSettings, selectTask],
   );
 
   // UAT A-11: a task made through the New task dialog lands with the composer
@@ -1512,8 +1515,10 @@ function AppShell({
   );
 
   const settingsOpen = activeView === "settings";
-  // Settings and the inbox both cover the shell: it is hidden and inert behind either.
-  const shellCovered = activeView !== "workspace";
+  // A full-page view is open. Below the mobile breakpoint it covers the whole shell (hidden and inert behind it); on
+  // desktop widths it sits beside the sidebar, so only the content region is hidden and inert.
+  const viewOpen = activeView !== "workspace";
+  const shellCovered = viewOpen && isMobile;
   // Stable identities: ShellCommands memoizes its palette entries on them.
   const selectTaskFromPalette = useCallback(
     (task: Task) => {
@@ -1544,6 +1549,55 @@ function AppShell({
       openPluginPanel(panel);
     },
     [closeSettings, openPluginPanel],
+  );
+  // Full-page views (Settings, Inbox, Automations, plugin pages). On desktop widths they are drawn INSIDE the shell,
+  // in the content region beside the sidebar, so the sidebar stays usable and the traffic lights never sit over a
+  // page; below the mobile breakpoint they cover the whole window as before.
+  const pageInShell = !isMobile;
+  const pageCover = (
+    <PageChromeContext.Provider value={{ sidebarKept: pageInShell }}>
+      {activeView === "inbox" && (
+        <div className="absolute inset-0 z-40">
+          <InboxScreen
+            onNavigateBack={closeSettings}
+            onOpenSettings={(id) => openSettings(id)}
+            onOpenTask={(taskId) => {
+              closeSettings();
+              void jumpToTask(taskId);
+            }}
+          />
+        </div>
+      )}
+      {activeView === "automations" && (
+        <div className="absolute inset-0 z-40">
+          <AutomationsPage onNavigateBack={closeSettings} closeSettings={closeSettings} />
+        </div>
+      )}
+      {activeView === "plugin" && pluginPage && (
+        // ADR-0042: a plugin panel as a full page -- the surface for
+        // sidebar panels and any panel opened with no task selected.
+        <div className="absolute inset-0 z-40">
+          <PluginPage
+            pluginId={pluginPage.pluginId}
+            panelId={pluginPage.panelId}
+            onNavigateBack={closeSettings}
+          />
+        </div>
+      )}
+      {settingsOpen && (
+        // No background here: on macOS the settings sidebar is a vibrancy
+        // surface and the screen paints its own opaque panes.
+        <div className="absolute inset-0 z-40">
+          <SettingsScreen
+            key={settingsOpenNonce}
+            client={client}
+            events={events}
+            onNavigateBack={closeSettings}
+            initialSectionId={settingsInitialSectionId ?? undefined}
+          />
+        </div>
+      )}
+    </PageChromeContext.Provider>
   );
   const shellElement = (
     <SidebarProvider
@@ -1662,8 +1716,11 @@ function AppShell({
               {...sidebarResize}
             />
           )}
-          <SidebarInset className={cn("h-full min-w-0 flex-1 bg-sidebar", !isMobile && !lightsBar && SHELL_FRAME_INSET_CLASS)}>
-            {contentPanelElement}
+          <SidebarInset className={cn("relative h-full min-w-0 flex-1 bg-sidebar", !isMobile && !lightsBar && SHELL_FRAME_INSET_CLASS)}>
+            <div data-testid="content-region" className={cn("h-full min-w-0", viewOpen && "invisible")} inert={viewOpen} aria-hidden={viewOpen || undefined}>
+              {contentPanelElement}
+            </div>
+            {pageCover}
           </SidebarInset>
         </div>
       )}
@@ -1710,47 +1767,7 @@ function AppShell({
         >
           {shellElement}
         </div>
-        {activeView === "inbox" && (
-          <div className="absolute inset-0 z-40">
-            <InboxScreen
-              onNavigateBack={closeSettings}
-              onOpenSettings={(id) => openSettings(id)}
-              onOpenTask={(taskId) => {
-                closeSettings();
-                void jumpToTask(taskId);
-              }}
-            />
-          </div>
-        )}
-        {activeView === "automations" && (
-          <div className="absolute inset-0 z-40">
-            <AutomationsPage onNavigateBack={closeSettings} closeSettings={closeSettings} />
-          </div>
-        )}
-        {activeView === "plugin" && pluginPage && (
-          // ADR-0042: a plugin panel as a full page -- the surface for
-          // sidebar panels and any panel opened with no task selected.
-          <div className="absolute inset-0 z-40">
-            <PluginPage
-              pluginId={pluginPage.pluginId}
-              panelId={pluginPage.panelId}
-              onNavigateBack={closeSettings}
-            />
-          </div>
-        )}
-        {settingsOpen && (
-          // No background here: on macOS the settings sidebar is a vibrancy
-          // surface and the screen paints its own opaque panes.
-          <div className="absolute inset-0 z-40">
-            <SettingsScreen
-              key={settingsOpenNonce}
-              client={client}
-              events={events}
-              onNavigateBack={closeSettings}
-              initialSectionId={settingsInitialSectionId ?? undefined}
-            />
-          </div>
-        )}
+        {!pageInShell && pageCover}
         {/* AC2: the shortcuts overlay rides above every view, Settings included
             (it is a portal, so it must not sit inside the hidden shell wrapper). */}
         <ShortcutsOverlay
