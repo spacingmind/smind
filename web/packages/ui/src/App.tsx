@@ -1,3 +1,4 @@
+import { readSplitRatios, rememberSplitRatio } from "@/lib/split-ratios";
 import { disambiguatedParts } from "@/lib/tab-scroll-edges";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
@@ -389,7 +390,19 @@ function AppShell({
     closeTabsToLeft,
     closeTabsToRight,
     renameTab,
-  } = useTaskTabs();
+  } = useTaskTabs({
+    // D3: split ratios are remembered per workspace; the hook knows tasks, so the task's workspace is looked up here.
+    splitRatios: {
+      forTask: (taskId) => {
+        const workspaceId = allTasks.find((t) => t.ID === taskId)?.WorkspaceID;
+        return workspaceId === undefined ? undefined : readSplitRatios(workspaceId);
+      },
+      remember: (taskId, direction, firstFraction) => {
+        const workspaceId = allTasks.find((t) => t.ID === taskId)?.WorkspaceID;
+        if (workspaceId !== undefined) rememberSplitRatio(workspaceId, direction, firstFraction);
+      },
+    },
+  });
   const queryClient = useDaemonQueryClient();
   const events = useDaemonEvents(client, queryClient);
   const { attention, runStatus, rateLimit, runningChatsByTask, loaded: runsLoaded } = useTaskAttention(client, selectedTask?.ID ?? null, events);
