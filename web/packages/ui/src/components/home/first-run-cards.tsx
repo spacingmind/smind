@@ -66,7 +66,7 @@ export function FirstRunCards({
             <span className="sr-only">(done)</span>
           </div>
           <div className="flex-1" />
-          <Button type="button" variant="link" className="h-auto self-start p-0 text-ui-base max-sm:min-h-11" data-testid="first-run-open-providers" onClick={openProvidersSettings}>
+          <Button type="button" variant="link" className="h-auto self-start p-0 text-ui-base text-foreground-muted underline hover:text-foreground max-sm:min-h-11" data-testid="first-run-open-providers" onClick={openProvidersSettings}>
             Manage
           </Button>
         </article>
