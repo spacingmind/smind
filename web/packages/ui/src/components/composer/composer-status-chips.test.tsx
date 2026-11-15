@@ -50,18 +50,43 @@ describe("ComposerStatusChips", () => {
     expect(removed).toHaveClass("text-destructive");
   });
 
-  it("says it is waiting for the user, with a static dot, while a permission is unanswered (U26)", () => {
+  it("says it is waiting for the user, with a warning dot, while a permission is unanswered (U26)", () => {
     const { rerender } = render(<ComposerStatusChips running />);
-    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working");
-    expect(screen.getByTestId("composer-working-chip").querySelector("span")).toHaveClass("animate-pulse");
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working…");
     rerender(<ComposerStatusChips running waiting />);
     const chip = screen.getByTestId("composer-working-chip");
-    expect(chip).toHaveTextContent("Waiting for you");
+    expect(chip).toHaveTextContent("Waiting for you…");
     expect(chip).not.toHaveTextContent("Working");
-    expect(chip.querySelector("span")).not.toHaveClass("animate-pulse");
+    expect(chip.querySelector("[data-status='warning']")).not.toBeNull();
     // waiting without a live run shows nothing
     rerender(<ComposerStatusChips running={false} waiting />);
     expect(screen.queryByTestId("composer-working-chip")).not.toBeInTheDocument();
+  });
+
+  it("run-state-keeps-live-region-and-timer", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-23T10:00:00Z"));
+    const { rerender } = render(<ComposerStatusChips running startedAt="2026-10-23T09:59:30Z" />);
+
+    const chip = screen.getByTestId("composer-working-chip");
+    expect(chip).toHaveAttribute("role", "status");
+    expect(chip).toHaveTextContent("Working…");
+    const elapsed = screen.getByTestId("run-working-elapsed");
+    expect(elapsed).toHaveAttribute("role", "timer");
+    expect(elapsed).toHaveTextContent("30s");
+    // The ticking number is a timer (aria-live off); only the static word is a live region.
+    act(() => {
+      vi.advanceTimersByTime(12_000);
+    });
+    expect(screen.getByTestId("run-working-elapsed")).toHaveTextContent("42s");
+
+    rerender(<ComposerStatusChips running waiting startedAt="2026-10-23T09:59:30Z" />);
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Waiting for you…");
+
+    rerender(<ComposerStatusChips running reconnecting startedAt="2026-10-23T09:59:30Z" />);
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Reconnecting…");
+    expect(screen.queryByTestId("run-working-elapsed")).toBeNull();
+    vi.useRealTimers();
   });
 
   it("renders the concurrency chip beside Working and calls onJumpToChat", () => {

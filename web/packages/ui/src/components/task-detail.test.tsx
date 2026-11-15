@@ -129,8 +129,9 @@ describe("TaskDetailPane", () => {
     client.emit("run.attach", 0, "chunk", { text: "partial " });
     await flush();
     expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("partial");
-    expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "running");
-    expect(within(screen.getByTestId("run-meta")).getByRole("status")).toHaveTextContent(/^Working…/);
+    // While the run is live the transcript footer shows nothing; the state lives under the composer.
+    expect(screen.queryByTestId("run-meta")).toBeNull();
+    expect(screen.getAllByText(/^Working…$/)).toHaveLength(1);
 
     client.emit("run.attach", 0, "chunk", { text: "and more" });
     await flush();
@@ -139,6 +140,21 @@ describe("TaskDetailPane", () => {
     client.nth("run.attach", 0).resolve({ runId: "run-1", stopReason: "end_turn" });
     await flush();
     expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "done");
+  });
+
+  it("run-state-shown-once-under-the-composer", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    // Exactly one run-state element on screen while the run is live...
+    const working = screen.getAllByText(/^Working…$/);
+    expect(working).toHaveLength(1);
+    // ...and in DOM order it comes after the composer card (anchored under it).
+    const card = screen.getByTestId("composer-card");
+    expect(working[0].compareDocumentPosition(card) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 
   it("shows the chat timeline rail once two runs overflow a wide pane", async () => {
@@ -361,7 +377,9 @@ describe("TaskDetailPane", () => {
     expect(startIdx).toBeLessThan(attachIdx);
 
     expect(screen.getByTestId("run-entry")).toBeInTheDocument();
-    expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "running");
+    // The optimistic running entry has no footer; its state is the composer's status line.
+    expect(screen.queryByTestId("run-meta")).toBeNull();
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working…");
   });
 
   it("a rapid double-switch (A -> B -> A) discards task B's now-stale fetch instead of letting it overwrite the re-selected task A view", async () => {
