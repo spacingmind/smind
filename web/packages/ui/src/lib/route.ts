@@ -63,8 +63,8 @@ export function parseRoute(hash: string): Route | null {
   if (kindRaw === "chat") {
     const chatId = Number(rest[0]);
     if (rest.length !== 1 || !Number.isFinite(chatId)) return null;
-    const card = queryPart === undefined ? undefined : new URLSearchParams(queryPart).get("card");
-    const requestId = card !== null && card !== "" && card.length <= MAX_CARD_ID_CHARS ? card : undefined;
+    const card = queryPart === undefined ? null : new URLSearchParams(queryPart).get("card");
+    const requestId = card && card.length <= MAX_CARD_ID_CHARS ? card : undefined;
     return requestId === undefined
       ? { workspaceId, taskId, tab: { kind: "chat", chatId } }
       : { workspaceId, taskId, tab: { kind: "chat", chatId, requestId } };
