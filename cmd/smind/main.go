@@ -264,7 +264,8 @@ Usage:
                                                            print one redacted heredoc body elided from a permission card or tool call (humans only)
 
   smind browser <status|enable|disable|allow add <host>|allow rm <host>|clear> --workspace <id>
-                                                           the per-workspace agent browser switch and allowlist (humans only)
+                                                           the per-workspace agent browser switch and allowlist (humans only;
+                                                           as human-only as the local principal: ADR-0056 limit)
 
   smind steward review|list|show|cancel                    ask for a read-only review of a task's head commit; read reviews (humans only; run "smind steward" for flags)
 

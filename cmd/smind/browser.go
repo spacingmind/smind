@@ -6,13 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 )
 
 // cmdBrowserUsage is printed on any argument error in cmdBrowser.
-const cmdBrowserUsage = "usage: smind browser <status|enable|disable|allow add <host>|allow rm <host>|clear> --workspace <id> [--json]"
+const cmdBrowserUsage = "usage: smind browser <status|enable|disable|allow add <host>|allow rm <host>|clear> --workspace <id> [--json]\n(human-only; as human-only as the local principal: an unidentified local connection counts as the human, ADR-0056)"
 
 // browserSettings is the shared result of browser.settings.get and .set.
 type browserSettings struct {
@@ -35,7 +34,7 @@ func cmdBrowser(args []string) int {
 // runBrowser is cmdBrowser with its environment injected. Exit codes: 0 ok,
 // 1 a daemon or call error, 2 usage.
 func runBrowser(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if os.Getenv("SMIND_RUN_ID") != "" {
+	if inAgentRun() {
 		fmt.Fprintln(stderr, "smind browser: this command is for the person, not for an agent run")
 		return 1
 	}

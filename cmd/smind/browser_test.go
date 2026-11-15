@@ -45,24 +45,36 @@ func browserSettingsReply(enabled bool, hosts []string, extra ...func(map[string
 	return s
 }
 
-func TestBrowserCLI_RefusesWithRunID(t *testing.T) {
-	t.Setenv("SMIND_RUN_ID", "run-1")
-	dialled := false
-	old := policyDial
-	policyDial = func(context.Context) (wsCaller, func(), error) {
-		dialled = true
-		return nil, func() {}, fmt.Errorf("dialled")
-	}
-	t.Cleanup(func() { policyDial = old })
-	var out, errb bytes.Buffer
-	if code := runBrowser(context.Background(), []string{"enable", "--workspace", "7"}, &out, &errb); code != 1 {
-		t.Fatalf("code %d, want 1", code)
-	}
-	if dialled {
-		t.Error("the daemon was dialled inside an agent run")
-	}
-	if !strings.Contains(errb.String(), "is for the person, not for an agent run") || out.Len() != 0 {
-		t.Errorf("stdout %q stderr %q", out.String(), errb.String())
+func TestBrowserCLI_RefusesInAnAgentRun(t *testing.T) {
+	for _, env := range []string{"SMIND_RUN_ID", "SMIND_AGENT_RUN"} {
+		for _, verb := range []string{"status", "enable", "disable", "clear", "allow"} {
+			t.Run(env+"/"+verb, func(t *testing.T) {
+				t.Setenv("SMIND_RUN_ID", "")
+				t.Setenv("SMIND_AGENT_RUN", "")
+				t.Setenv(env, "run-1")
+				dialled := false
+				old := policyDial
+				policyDial = func(context.Context) (wsCaller, func(), error) {
+					dialled = true
+					return nil, func() {}, fmt.Errorf("dialled")
+				}
+				t.Cleanup(func() { policyDial = old })
+				var out, errb bytes.Buffer
+				args := []string{verb, "--workspace", "7"}
+				if verb == "allow" {
+					args = []string{"allow", "add", "a.test", "--workspace", "7"}
+				}
+				if code := runBrowser(context.Background(), args, &out, &errb); code != 1 {
+					t.Fatalf("code %d, want 1", code)
+				}
+				if dialled {
+					t.Error("the daemon was dialled inside an agent run")
+				}
+				if !strings.Contains(errb.String(), "is for the person, not for an agent run") || out.Len() != 0 {
+					t.Errorf("stdout %q stderr %q", out.String(), errb.String())
+				}
+			})
+		}
 	}
 }
 
