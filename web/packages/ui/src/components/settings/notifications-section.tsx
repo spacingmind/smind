@@ -12,6 +12,7 @@ import { useNotificationPermission, type NotificationPermissionState } from "@/h
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { desktop, isDesktop } from "@/lib/platform";
 import { playNotificationSound } from "@/lib/notification-sound";
+import { asSentence } from "@/lib/as-sentence";
 import { Icons } from "@/lib/icons";
 
 /** Mirrors General's former copy for this toggle -- moved here per the web-sidebar-attention plan (AC3), not duplicated: general-section.tsx no longer renders it. */
@@ -240,13 +241,13 @@ function DesktopNotificationsSection() {
         )}
 
         {testError && (
-          <div className="px-4 pb-3">
-            <FormError message={testError} testId="desktop-notify-error" />
+          <div className="px-4 py-3">
+            <FormError message={asSentence(testError)} testId="desktop-notify-error" />
           </div>
         )}
         {error && (
-          <div className="px-4 pb-3">
-            <FormError message={error} testId="desktop-notify-settings-error" />
+          <div className="px-4 py-3">
+            <FormError message={asSentence(error)} testId="desktop-notify-settings-error" />
           </div>
         )}
       </SettingsGroup>

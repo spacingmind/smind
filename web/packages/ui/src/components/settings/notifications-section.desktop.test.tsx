@@ -97,7 +97,7 @@ describe("notifications-section (desktop build)", () => {
     await flush();
 
     expect(api.appSettingsSet).toHaveBeenCalledWith({ notificationsOn: true });
-    expect(screen.getByTestId("desktop-notify-error")).toHaveTextContent("notifications are not permitted for sMind");
+    expect(screen.getByTestId("desktop-notify-error")).toHaveTextContent("Notifications are not permitted for sMind.");
     // Consent is recorded regardless: the on-row's actions are showing.
     expect(screen.getByText("Desktop notifications are on")).toBeInTheDocument();
     expect(screen.getByTestId("desktop-notify-disable")).toBeInTheDocument();
