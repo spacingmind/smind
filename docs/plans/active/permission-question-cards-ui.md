@@ -37,13 +37,19 @@ Mutations (each must fail a named test): put the nested Alert back; make the rea
 
 ## Progress
 
-- [ ] spec (this file)
-- [ ] web cards (peer, GLM)
-- [ ] mobile card (peer, GLM)
-- [ ] frames, light and dark, web 1280 and 390, mobile 390
-- [ ] mutations, full suites, review
+- [x] spec (this file)
+- [x] web cards (peer, GLM, task 637; reviewed and accepted)
+- [x] mobile card (peer, GLM, task 638; reviewed and accepted, then fixed by the Lead: the resolved copy follows the daemon's reason)
+- [x] frames, light and dark, web 1280 and 390 (48 frames, luminance and no-overflow checks pass) and mobile 390 (smoke stage `97-permission-cards`)
+- [x] mutations, full suites
 - [ ] PR to `wave/desktop`
 
 ## Validation
 
-Filled in when the PR is ready.
+- AC1-AC5 (web): the named tests listed above all exist in `permission-card.test.tsx`, `question-card.test.tsx` and `permission-reason.test.ts` (the waiting-badge scenario is the existing "carries the confirmation-tone waiting badge" test, kept unchanged); full web suite 477 files, 5379 tests pass; `tsc` clean.
+- AC6-AC7 (mobile): `permissionCardView.test.ts` (copy by kind and by reason, never an option id, plain error, reason field and toggle rules), `permissionRequests.test.ts` (the event keeps its reason after a tap), `questionRequests.test.ts` (answers kept after a failed submit); full mobile suite 117 files, 1137 tests pass; `tsc` clean. The card components have no render tests on mobile, so "hidden until pressed" is pinned through the pure rule plus the smoke stage below.
+- AC8: web frames `~/.smind/dogfood/dt-ui-a-cards/frames` (f01-f07, light and dark, 1280 and 390; every pair opened) and mobile frames `~/.smind/dogfood/dt-ui-a-cards/mobile`; the mobile smoke stage asserts the field is absent before the toggle, the text survives a collapse and re-open, and that Deny reads "You denied this" with no option id.
+- Bug found by the mobile smoke run and fixed in this PR: the daemon's resolved event overwrote `by: 'tap'`, so a person's own Deny read "Resolved by the agent"; the event's reason is now kept and the copy follows it.
+- AC9: `task lint`, `go test ./internal/hygiene/...`, both suites above.
+- Mutations (each killed by a named test): web: reason field always rendered, toggle without a reject option, reason cleared on collapse, reason sent with an allow, plain error sentence dropped, reject rendered filled, reject without destructive text, desktop buttons back to 24 px, waiting badge removed, nested alert back, unknown reason shown raw, question error not above the buttons; mobile (pure rules): resolved copy falling back to an option id, a deny reading allow, an event read as a tap, reason field always shown or shown without a reject option, toggle without a reject option, raw error headline.
+- Not verified: the mobile question card frames and any failed-answer frame on mobile; a real device; real-window desktop frames (the screen was locked); the `approval` variant's tint is unchanged, so the Allow/Deny weight difference is the tint versus an outlined, destructive-text button.
