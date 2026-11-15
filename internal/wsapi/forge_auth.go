@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -134,7 +135,7 @@ func (f *forgeAuth) readLocked(ctx context.Context) (forge.AuthStatus, error) {
 	if fl == nil {
 		fl = &statusFlight{done: make(chan struct{})}
 		f.flight = fl
-		go f.read(fl)
+		crash.GoFatal("wsapi.forgeRead", func() { f.read(fl) })
 	}
 	f.mu.Unlock()
 	select {

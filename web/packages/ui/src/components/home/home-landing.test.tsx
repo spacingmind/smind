@@ -143,10 +143,10 @@ describe("HomeLanding", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     offline.unmount();
 
+    // No project: the composer is not rendered at all (the first-run cards stand in, see first-run-cards.test.tsx).
     renderHome({ workspaces: [] });
-    expect(screen.getByLabelText("Prompt")).toBeDisabled();
-    expect(screen.getByPlaceholderText("Add a project to start a task")).toBeInTheDocument();
-    expect(screen.getByTestId("home-send-button")).toBeDisabled();
+    expect(screen.queryByLabelText("Prompt")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("home-send-button")).not.toBeInTheDocument();
   });
 
   it("no ready agent disables the composer with the sign-in placeholder and names the CLI", async () => {
@@ -158,7 +158,7 @@ describe("HomeLanding", () => {
       return {};
     });
     render(
-      <HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={[]} onCreated={vi.fn()} />,
+      <HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={THREE} onCreated={vi.fn()} />,
     );
     expect(await screen.findByText(/\d+ not installed/)).toBeInTheDocument();
     expect(await screen.findByPlaceholderText("Sign in to an agent to start a task")).toBeInTheDocument();
@@ -509,5 +509,46 @@ describe("HomeLanding office suggestions", () => {
     expect((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value).toBe(OFFICE_SUGGESTED_PROMPTS[1]);
     expect(createCalls(call)).toHaveLength(0);
     expect(call.mock.calls.map(([m]) => m)).not.toContain("run.start");
+  });
+
+  describe("first run: no project registered (plan PR 3)", () => {
+    it("zero-projects-shows-two-action-cards-and-no-composer", () => {
+      renderHome({ workspaces: [] });
+      const cards = screen.getByTestId("first-run-cards");
+      expect(within(cards).getByTestId("first-run-card-project")).toHaveTextContent("Add a project");
+      expect(within(cards).getByTestId("first-run-card-providers")).toHaveTextContent("Set up providers");
+      expect(screen.queryByTestId("home-composer")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Prompt")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("home-project-chip")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("get-started-card")).not.toBeInTheDocument(); // the cards replace it, not stack on it
+    });
+
+    it("first-project-brings-the-composer-back", () => {
+      const { rerender, call } = renderHome({ workspaces: [] });
+      expect(screen.getByTestId("first-run-cards")).toBeInTheDocument();
+      rerender(<HomeLanding client={{ call, callStream: vi.fn() } as unknown as WsClientLike} connected workspaces={[ws(1, "Alpha")]} onCreated={vi.fn()} />);
+      expect(screen.queryByTestId("first-run-cards")).not.toBeInTheDocument();
+      expect(screen.getByTestId("home-composer")).toBeInTheDocument();
+      expect(screen.getByLabelText("Prompt")).toBeInTheDocument();
+    });
+
+    it("a workspace list that has not arrived yet shows the composer, not the cards (no flash for a returning user)", () => {
+      renderHome({ workspaces: [], workspacesLoaded: false });
+      expect(screen.queryByTestId("first-run-cards")).not.toBeInTheDocument();
+      expect(screen.getByTestId("home-composer")).toBeInTheDocument();
+    });
+
+    it("a disconnected daemon shows no cards (the connection notice is the story)", () => {
+      renderHome({ workspaces: [], connected: false, connectionError: "Can't reach the daemon" });
+      expect(screen.queryByTestId("first-run-cards")).not.toBeInTheDocument();
+      expect(screen.getByTestId("home-connection-notice")).toBeInTheDocument();
+    });
+
+    it("the Add a project card runs the same handler the Get started row runs", () => {
+      const onAddProject = vi.fn();
+      renderHome({ workspaces: [], onAddProject });
+      fireEvent.click(screen.getByTestId("first-run-add-project"));
+      expect(onAddProject).toHaveBeenCalledTimes(1);
+    });
   });
 });

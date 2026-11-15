@@ -37,10 +37,11 @@ function resolveCssColor(varName: string): string {
  * theme" finding).
  */
 const TERMINAL_THEME_TOKENS = {
-  background: "--color-terminal-bg",
+  // The pane around the terminal paints `bg-panel`; the terminal draws on that same surface (the --terminal-bg token keeps the reference value for plugins).
+  background: "--color-panel",
   foreground: "--color-terminal-fg",
   cursor: "--color-terminal-cursor",
-  cursorAccent: "--color-terminal-cursor-accent",
+  cursorAccent: "--color-panel",
   selectionBackground: "--color-terminal-selection",
   selectionInactiveBackground: "--color-terminal-selection-inactive",
   black: "--color-terminal-black",

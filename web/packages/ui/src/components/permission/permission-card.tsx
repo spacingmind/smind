@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { OptionsCard } from "@/components/permission/options-card";
 import { PlanReviewCard } from "@/components/permission/plan-review-card";
+import { useCardFocusStore } from "@/stores/card-focus-store";
 import type { PendingPermission } from "@/hooks/use-run-timeline";
 
 /** True when the currently focused element is a text input the user could be mid-keystroke in -- the composer's textarea, chiefly. */
@@ -47,6 +48,15 @@ export function PermissionCard({
     if (isTextEntryFocused()) return;
     ref.current?.focus();
   }, [pending.requestId]);
+
+  // A notification click-through (`?card=` route): unlike the mount focus
+  // above, this takes focus even while a text field has it -- the click
+  // was an explicit action, not an ambient arrival.
+  const focusRequest = useCardFocusStore((s) => s.requests[pending.requestId]);
+  useEffect(() => {
+    if (!focusRequest) return;
+    if (useCardFocusStore.getState().consume(pending.requestId)) ref.current?.focus();
+  }, [focusRequest, pending.requestId]);
 
   return (
     <div

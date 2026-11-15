@@ -80,10 +80,19 @@ pub fn build(app: &AppHandle, cache: WorkspaceCache, proxy_url: Url) -> tauri::R
     } else {
         None
     };
-    Ok(Arc::new(Tray { state, ui, badge: Badge::new(WindowBadge(app.clone())) }))
+    Ok(Arc::new(Tray {
+        state,
+        ui,
+        badge: Badge::new(WindowBadge(app.clone())),
+    }))
 }
 
-fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: WorkspaceCache, proxy_url: Url) -> tauri::Result<TrayUi> {
+fn build_ui(
+    app: &AppHandle,
+    click_state: Arc<Mutex<Attention>>,
+    cache: WorkspaceCache,
+    proxy_url: Url,
+) -> tauri::Result<TrayUi> {
     let item = MenuItem::with_id(app, ID_ATTENTION, attention::label(0), false, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let open = MenuItem::with_id(app, ID_OPEN, "Open", true, None::<&str>)?;
@@ -96,7 +105,12 @@ fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: Workspac
         .tooltip(attention::label(0))
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button, button_state, .. } = event {
+            if let TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
                 if click_action(button, button_state) == ClickAction::ShowWindow {
                     show_main(tray.app_handle());
                 }
@@ -106,14 +120,21 @@ fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: Workspac
             Some(MenuAction::Open) => show_main(app),
             Some(MenuAction::Quit) => app.exit(0),
             Some(MenuAction::Attention) => {
-                let most_recent = click_state.lock().unwrap().most_recent_task();
-                if let Some(task_id) = most_recent {
+                let most_recent = click_state.lock().unwrap().most_recent();
+                if let Some(pending) = most_recent {
                     let ctx = ClickContext {
                         app: app.clone(),
                         cache: cache.clone(),
                         proxy_url: proxy_url.clone(),
                     };
-                    notify::navigate_to_task(&ctx, task_id);
+                    notify::navigate(
+                        &ctx,
+                        &notify::Target {
+                            task_id: pending.task_id,
+                            chat_id: pending.chat_id,
+                            request_id: Some(pending.request_id),
+                        },
+                    );
                 }
             }
             None => {}
@@ -124,10 +145,10 @@ fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: Workspac
 }
 
 impl Tray {
-    pub fn on_permission_pending(&self, task_id: i64, request_id: &str) {
+    pub fn on_permission_pending(&self, task_id: i64, chat_id: i64, request_id: &str) {
         let count = {
             let mut state = self.state.lock().unwrap();
-            state.on_pending(task_id, request_id);
+            state.on_pending(task_id, chat_id, request_id);
             state.count()
         };
         self.refresh(count);
@@ -169,6 +190,12 @@ impl Tray {
         self.refresh(count);
     }
 
+    /// is_pending is whether a request id is still waiting (DT5 C/AC11:
+    /// held banners are dropped when their request resolved meanwhile).
+    pub fn is_pending(&self, request_id: &str) -> bool {
+        self.state.lock().unwrap().contains(request_id)
+    }
+
     /// Re-applies the shown badge (see `Badge::reapply`).
     pub fn reapply_badge(&self) {
         self.badge.reapply();
@@ -194,10 +221,22 @@ mod tests {
 
     #[test]
     fn tray_left_click_shows_the_window_not_the_menu() {
-        assert_eq!(click_action(MouseButton::Left, MouseButtonState::Up), ClickAction::ShowWindow);
-        assert_eq!(click_action(MouseButton::Left, MouseButtonState::Down), ClickAction::Ignore);
-        assert_eq!(click_action(MouseButton::Right, MouseButtonState::Up), ClickAction::Ignore);
-        assert_eq!(click_action(MouseButton::Middle, MouseButtonState::Up), ClickAction::Ignore);
+        assert_eq!(
+            click_action(MouseButton::Left, MouseButtonState::Up),
+            ClickAction::ShowWindow
+        );
+        assert_eq!(
+            click_action(MouseButton::Left, MouseButtonState::Down),
+            ClickAction::Ignore
+        );
+        assert_eq!(
+            click_action(MouseButton::Right, MouseButtonState::Up),
+            ClickAction::Ignore
+        );
+        assert_eq!(
+            click_action(MouseButton::Middle, MouseButtonState::Up),
+            ClickAction::Ignore
+        );
     }
 
     #[test]

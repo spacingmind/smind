@@ -155,7 +155,8 @@ describe("PermissionCard with a grant offer", () => {
     const onAlwaysAllow = vi.fn().mockRejectedValue(new Error("this command runs project code: saving it needs the explicit opt-in"));
     render(<PermissionCard runId="r" pending={pending(READONLY)} onRespond={vi.fn()} onAlwaysAllow={onAlwaysAllow} onChat={vi.fn()} />);
     fireEvent.click(screen.getByTestId("grant-save"));
-    await waitFor(() => expect(screen.getByTestId("pending-permission")).toHaveTextContent("respond failed: this command runs project code"));
+    await waitFor(() => expect(screen.getByTestId("permission-respond-error")).toHaveTextContent("this command runs project code"));
+    expect(screen.getByTestId("permission-respond-error")).toHaveTextContent("Could not send your answer");
     expect(screen.getByTestId("grant-save")).toBeEnabled();
   });
 });

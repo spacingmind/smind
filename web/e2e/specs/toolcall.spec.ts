@@ -6,7 +6,11 @@ test('A-10 an Edit tool call expands to an inline diff, not raw JSON', async ({ 
   const { page } = app
   await app.openApp()
   await app.openTask('idle-done')
+  // a finished run's tool rows are folded into "Ran N tools" (chat surface E-a): open the group first
+  const group = page.getByTestId('tool-group-toggle').first()
   const toggle = page.getByTestId('tool-call-toggle').filter({ hasText: 'retry.go' }).first()
+  await expect(group.or(toggle)).toBeVisible() // the timeline has loaded: either the folded row or the call itself
+  if (await group.isVisible()) await group.click()
   await toggle.scrollIntoViewIfNeeded()
   await toggle.click()
   const main = page.getByTestId('app-main-content')

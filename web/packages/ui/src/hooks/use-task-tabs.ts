@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { chatTab, chatTabKey, isLegacyTaskTab, type TabEntry, type TabKind } from "@/components/tab-registry";
 import { prTabTaskId, writePRTabState } from "@/lib/pr-tab-state";
@@ -11,17 +11,20 @@ import {
   collectAllTabs,
   DEFAULT_PANE_ID,
   detachTabFromTree,
+  findGroupById,
   findPaneById,
   findPaneContainingTab,
   focusPaneInLayout,
   focusTabInLayout,
   MAX_TREE_DEPTH,
   moveTabToPaneInLayout,
+  reorderTabInLayout,
   normalizeLayout,
   resizeSplitInLayout,
   splitPaneEmptyInLayout,
   splitPaneInLayout,
   updatePaneInTree,
+  type SplitRatios,
   type TaskLayout,
 } from "@/lib/split-tree";
 
@@ -56,6 +59,14 @@ function recordClosedTabs(keys: readonly string[]): void {
     const taskId = prTabTaskId(key);
     if (taskId !== null) writePRTabState(taskId, "opted-out");
   }
+}
+
+/** D3: where the hook reads a workspace's remembered starting ratio and reports a ratio a person just set (the hook knows tasks, not workspaces). */
+export interface UseTaskTabsOptions {
+  splitRatios?: {
+    forTask(taskId: number): SplitRatios | undefined;
+    remember(taskId: number, direction: "horizontal" | "vertical", firstFraction: number): void;
+  };
 }
 
 /** Maps smind's own up/down `SplitDirection` naming to the tree's top/bottom vocabulary (`splitPaneInLayout`'s `position`). */
@@ -198,7 +209,10 @@ function evictOverflow(map: Map<number, TaskLayout>): Map<number, TaskLayout> {
  * tab must not stop a run or close a terminal session", not anything
  * this hook does.
  */
-export function useTaskTabs() {
+export function useTaskTabs(options: UseTaskTabsOptions = {}) {
+  // Read through a ref so the callbacks below stay referentially stable whatever the caller passes.
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
   const [tabsByTask, setTabsByTaskState] = useState<Map<number, TaskLayout>>(() => readPersisted());
 
   const setTabsByTask = useCallback(
@@ -315,6 +329,7 @@ export function useTaskTabs() {
               position: "right",
               createNodeId,
               maxTreeDepth: MAX_TREE_DEPTH,
+              ratios: optionsRef.current.splitRatios?.forTask(taskId),
             });
             if (split) {
               targetLayout = split.layout;
@@ -500,6 +515,22 @@ export function useTaskTabs() {
     [setTabsByTask],
   );
 
+  /** Moves a tab to another slot of its own pane (`toIndex` is the insertion slot in the current order). A no-op when nothing would change. */
+  const reorderTab = useCallback(
+    (taskId: number, key: string, paneId: PaneId, toIndex: number): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const reordered = reorderTabInLayout({ layout, paneId, tabKey: key, toIndex });
+        if (!reordered) return prev;
+        const next = new Map(prev);
+        next.set(taskId, reordered);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
   /** Splits targetPaneId in `direction`, carrying `key`'s tab into the freshly created pane. A no-op past `MAX_TREE_DEPTH`, or if the tab/pane can't be found. */
   const splitTab = useCallback(
     (taskId: number, key: string, targetPaneId: string, direction: SplitDirection): void => {
@@ -513,6 +544,7 @@ export function useTaskTabs() {
           position: SPLIT_DIRECTION_TO_POSITION[direction],
           createNodeId,
           maxTreeDepth: MAX_TREE_DEPTH,
+          ratios: optionsRef.current.splitRatios?.forTask(taskId),
         });
         if (!result) return prev; // depth cap hit, or tab/pane not found -- silent no-op, per the plan's Item 3 Acceptance Criteria
         const next = new Map(prev);
@@ -529,8 +561,13 @@ export function useTaskTabs() {
       setTabsByTask((prev) => {
         const layout = prev.get(taskId);
         if (!layout) return prev;
+        const resized = resizeSplitInLayout({ layout, groupId, sizes });
+        // D3: a person's resize of a two-pane group is the workspace's next starting ratio for that direction. Idempotent, so safe inside a state updater.
+        const group = findGroupById(resized.root, groupId);
+        const first = group?.sizes[0];
+        if (group && group.children.length === 2 && first !== undefined) optionsRef.current.splitRatios?.remember(taskId, group.direction, first);
         const next = new Map(prev);
-        next.set(taskId, resizeSplitInLayout({ layout, groupId, sizes }));
+        next.set(taskId, resized);
         return next;
       });
     },
@@ -582,6 +619,7 @@ export function useTaskTabs() {
           position: SPLIT_DIRECTION_TO_POSITION[direction],
           createNodeId,
           maxTreeDepth: MAX_TREE_DEPTH,
+          ratios: optionsRef.current.splitRatios?.forTask(taskId),
         });
         if (!result) return prev;
         const next = new Map(prev);
@@ -626,6 +664,7 @@ export function useTaskTabs() {
     closeTab,
     activate,
     moveTab,
+    reorderTab,
     splitTab,
     resizeGroup,
     focusPane,

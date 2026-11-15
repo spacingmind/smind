@@ -1,5 +1,6 @@
 import { act } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TAB_KINDS, fileTabKey } from "@/components/tab-registry";
@@ -127,7 +128,11 @@ describe("PDF preview in the file tab", () => {
   it("text_files_still_open_in_the_editor_without_a_stat", async () => {
     const client = new FakeWsClient();
     render(<FileEditorPane client={client} task={TASK} path="notes.md" />);
-    expect(client.calls.map((c) => c.method)).toEqual(["file.read"]);
+    // The pane reads the text itself; a stat is the binary router's job. (daemon.info/events.subscribe
+    // are the daemon provider's own calls, see render-with-daemon.)
+    const methods = client.calls.map((c) => c.method);
+    expect(methods).toContain("file.read");
+    expect(methods).not.toContain("file.stat");
   });
 
   it("mismatch_never_reaches_viewer", async () => {

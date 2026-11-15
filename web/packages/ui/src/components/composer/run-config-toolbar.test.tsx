@@ -306,12 +306,12 @@ describe("RunConfigToolbar with a provider instance", () => {
   it("lists the instance and a custom ACP provider in the composer picker next to the built-ins", async () => {
     renderToolbar({ providers: [...SERVED_PROVIDERS, WORK, CUSTOM_ACP] });
     fireEvent.click(screen.getByTestId("composer-model-picker"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["model-provider-claude-native", "model-provider-glm", "model-provider-claude-work", "model-provider-my-acp"]);
-    expect(screen.getByTestId("model-provider-claude-work")).toHaveTextContent("Claude work");
-    // The unknown ACP provider wears the generic provider icon, never a throw or a blank.
-    expect(screen.getByTestId("model-provider-my-acp").querySelector("svg")).not.toBeNull();
+    expect(screen.getByTestId("model-provider-claude-work")).toHaveAttribute("aria-label", "Claude work");
+    // The unknown ACP provider has no brand mark: the rail shows its initial, never a throw or a blank.
+    expect(screen.getByTestId("model-rail-initial-my-acp")).toHaveTextContent(/\S/);
   });
 
   it("picking the instance keeps the Thinking control (its runner is claude-native) and the base's modes", async () => {

@@ -11,12 +11,14 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/store"
@@ -221,7 +223,8 @@ func (p *proxy) observe(resp quota.Response) {
 		return
 	}
 	defer func() {
-		if recover() != nil {
+		if v := recover(); v != nil {
+			crash.Default().Record("server.quotaObserve", v, debug.Stack())
 			log.Printf("proxy: quota observer panicked; ignored")
 		}
 	}()

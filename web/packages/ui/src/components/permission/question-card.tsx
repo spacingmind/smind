@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { QUESTION_NOTE_HELPER, QUESTION_NOTE_LABEL, QUESTION_NOTE_PLACEHOLDER, humanizeQuestionError } from "@/lib/question-copy";
 import { Input } from "@/components/ui/input";
 import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
+import { useCardFocusStore } from "@/stores/card-focus-store";
 import type { PendingQuestion } from "@/hooks/use-run-timeline";
 import type { Question, QuestionAnswer, QuestionAnswerItem } from "@/lib/types";
 
@@ -90,6 +90,15 @@ export function QuestionCard({
     ref.current?.focus();
   }, [pending.requestId]);
 
+  // A notification click-through (`?card=` route): unlike the mount focus
+  // above, this takes focus even while a text field has it -- the click
+  // was an explicit action, not an ambient arrival.
+  const focusRequest = useCardFocusStore((s) => s.requests[pending.requestId]);
+  useEffect(() => {
+    if (!focusRequest) return;
+    if (useCardFocusStore.getState().consume(pending.requestId)) ref.current?.focus();
+  }, [focusRequest, pending.requestId]);
+
   const questions = pending.request.questions;
   const allAnswered = questions.every((q) => isAnswered(q, drafts[q.id] ?? EMPTY_DRAFT));
 
@@ -129,21 +138,6 @@ export function QuestionCard({
         Waiting for your response
       </span>
       {pending.request.truncated && <p className="text-ui-xs text-foreground-muted">Some of this text was shortened.</p>}
-      {error && (
-        <Alert
-          variant="error"
-          testId="question-error"
-          description={
-            <>
-              <span>{humanizeQuestionError(error).text}</span>
-              <details data-testid="question-error-details" className="mt-1 text-ui-xs text-foreground-muted">
-                <summary className="cursor-pointer">Details</summary>
-                <span className="whitespace-pre-wrap break-words">{error}</span>
-              </details>
-            </>
-          }
-        />
-      )}
       {/* A long ask scrolls inside the card, so Submit and Decline stay on screen (phones). */}
       <div data-testid="question-fields" className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto">
         {questions.map((question) => (
@@ -173,6 +167,19 @@ export function QuestionCard({
           <p data-testid="question-submit-hint" className="text-ui-xs text-foreground-muted">
             Answer every question to submit.
           </p>
+        )}
+        {error && (
+          <div
+            role="alert"
+            data-testid="question-error"
+            className="flex flex-col gap-0.5 text-ui-sm"
+          >
+            <span className="text-destructive">{humanizeQuestionError(error).text}</span>
+            <details data-testid="question-error-details" className="text-ui-sm text-foreground-muted">
+              <summary className="cursor-pointer">Details</summary>
+              <span className="whitespace-pre-wrap break-words">{error}</span>
+            </details>
+          </div>
         )}
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -241,7 +248,7 @@ function QuestionField({
       {isLong ? (
         <>
           <legend>
-            <span className={`${expanded ? "block " : "line-clamp-8 "}whitespace-pre-wrap break-words`}>{question.text}</span>
+            <span className={`${expanded ? "block " : "line-clamp-8 "}text-ui-base whitespace-pre-wrap break-words`}>{question.text}</span>
           </legend>
           <Button
             type="button"
@@ -257,7 +264,7 @@ function QuestionField({
           </Button>
         </>
       ) : (
-        <legend className="whitespace-pre-wrap break-words">{question.text}</legend>
+        <legend className="text-ui-base whitespace-pre-wrap break-words">{question.text}</legend>
       )}
       {question.header && (
         <span className="inline-flex w-fit rounded-full border px-2 py-0.5 text-ui-xs text-foreground-muted">{question.header}</span>
@@ -277,7 +284,7 @@ function QuestionField({
                   className="mt-0.5 size-4 shrink-0"
                   onChange={() => toggleOption(option.id)}
                 />
-                <span className="whitespace-pre-wrap break-words">{option.label}</span>
+                <span className="text-ui-base whitespace-pre-wrap break-words">{option.label}</span>
               </span>
               {option.description && (
                 <span className="pl-6 text-ui-sm text-foreground-muted whitespace-pre-wrap break-words">{option.description}</span>

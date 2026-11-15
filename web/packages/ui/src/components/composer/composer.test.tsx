@@ -121,7 +121,7 @@ async function settleSelect(): Promise<void> {
 async function openPickerRoot(): Promise<void> {
   await settleSelect();
   openPicker();
-  fireEvent.click(await screen.findByTestId("model-picker-back"));
+  { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
 }
 
 /** Picks `modelId` ("" = the provider's default row) under `providerId`: opens the picker, drills into the provider if the root is showing, clicks the row. */
@@ -357,18 +357,19 @@ describe("Composer", () => {
     expect(stops).toEqual(["run-7", "run-7"]);
   });
 
-  it("freezes Stop and hides the Working chip while disconnected, and restores them on reconnect (U14)", () => {
+  it("freezes Stop while disconnected and the status line says Reconnecting… with no timer, and restores on reconnect (U14)", () => {
     const { rerender } = renderComposer({ runningRunId: "run-7", connected: true });
     expect(screen.getByTestId("chat-stop-button")).toBeEnabled();
-    expect(screen.getByTestId("composer-working-chip")).toBeTruthy();
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working…");
 
     rerender({ runningRunId: "run-7", connected: false });
     expect(screen.getByTestId("chat-stop-button")).toBeDisabled();
-    expect(screen.queryByTestId("composer-working-chip")).toBeNull();
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Reconnecting…");
+    expect(screen.queryByTestId("run-working-elapsed")).toBeNull();
 
     rerender({ runningRunId: "run-7", connected: true });
     expect(screen.getByTestId("chat-stop-button")).toBeEnabled();
-    expect(screen.getByTestId("composer-working-chip")).toBeTruthy();
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working…");
   });
 
   it("does not lose the text when the submit fails", async () => {
@@ -403,8 +404,8 @@ describe("Composer", () => {
 
     // The popover opens on the current provider's view; Back reaches the root with both providers.
     await openPickerRoot();
-    expect(await screen.findByTestId("model-provider-claude-native")).toHaveTextContent("Claude Code");
-    expect(screen.getByTestId("model-provider-glm")).toHaveTextContent("GLM");
+    expect(await screen.findByTestId("model-provider-claude-native")).toHaveAttribute("aria-label", "Claude Code");
+    expect(screen.getByTestId("model-provider-glm")).toHaveAttribute("aria-label", "GLM");
 
     // Item 5: no visible <label> text in the card's toolbar.
     expect(screen.queryByText("Provider")).not.toBeInTheDocument();
@@ -684,9 +685,9 @@ describe("Composer", () => {
       await flush();
 
       const row = screen.getByTestId("model-provider-glm");
-      expect(row).toHaveAttribute("aria-disabled", "true");
-      expect(row).toHaveTextContent('"glm" not found on PATH');
-      expect(screen.getByTestId("model-provider-claude-native")).not.toHaveAttribute("aria-disabled");
+      expect(row).toHaveAttribute("data-unavailable", "true");
+      expect(row.getAttribute("aria-label")).toContain('"glm" not found on PATH');
+      expect(screen.getByTestId("model-provider-claude-native")).not.toHaveAttribute("data-unavailable");
       expect(tests()).toHaveLength(2);
     });
 
@@ -1550,10 +1551,10 @@ describe("Composer redesign (composer-redesign plan)", () => {
     expect(screen.queryByTestId("composer-status-chips")).not.toBeInTheDocument();
 
     rerender({ runningRunId: "run-1" });
-    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working");
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working…");
 
     rerender({ runningRunId: "run-1", waitingOnUser: true });
-    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Waiting for you");
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Waiting for you…");
   });
 
   it("diff-stat chip compact-formats thousands and opens the diff", () => {

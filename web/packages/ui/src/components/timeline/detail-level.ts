@@ -7,17 +7,30 @@ import type { TimelineItem, TimelineToolCallItem } from "@/hooks/use-run-timelin
  * `toolCallDetailLevel` (`audit-workbench.md` §2). `overview` collapses a run
  * of consecutive tool calls into one row so a long agentic stretch reads
  * as "it did twelve things" rather than twelve cards of scrollback.
+ * `auto` (the default) does that only for a FINISHED run with three or more
+ * consecutive tool calls: a live run keeps showing each tool as it happens.
+ * `detailed` always shows every row.
  */
-export type DetailLevel = "detailed" | "overview";
+export type DetailLevel = "auto" | "detailed" | "overview";
+
+/** The header control cycles auto, detailed, overview. */
+export const NEXT_DETAIL_LEVEL: Record<DetailLevel, DetailLevel> = { auto: "detailed", detailed: "overview", overview: "auto" };
+export const DETAIL_LEVEL_LABELS: Record<DetailLevel, string> = { auto: "Auto", detailed: "Detailed", overview: "Overview" };
+export const DETAIL_LEVEL_TITLES: Record<DetailLevel, string> = {
+  auto: "Finished runs fold three or more tool calls in a row; click to show every tool call",
+  detailed: "Every tool call is shown; click to collapse runs of tool calls",
+  overview: "Runs of tool calls are collapsed; click to fold only finished runs",
+};
 
 const STORAGE_KEY = "smind:tool-call-detail-level";
 
 function readStored(): DetailLevel {
-  if (typeof window === "undefined") return "detailed";
+  if (typeof window === "undefined") return "auto";
   try {
-    return window.localStorage.getItem(STORAGE_KEY) === "overview" ? "overview" : "detailed";
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    return stored === "overview" || stored === "detailed" ? stored : "auto";
   } catch {
-    return "detailed";
+    return "auto";
   }
 }
 
@@ -48,23 +61,34 @@ export type TimelineGroup =
   | { kind: "item"; id: string; item: TimelineItem }
   | { kind: "tool-group"; id: string; items: TimelineToolCallItem[] };
 
-/** Runs shorter than this stay as individual cards -- collapsing a single call into a "1 tool call" row hides it behind a click for nothing. */
+/** Overview: runs shorter than this stay as individual cards -- collapsing a single call into a "1 tool call" row hides it behind a click for nothing. */
 const MIN_GROUP = 2;
+
+/** Auto: a finished run's tool rows collapse from this many in a row (two stay readable inline). */
+export const MIN_AUTO_GROUP = 3;
+
+export interface GroupOptions {
+  /** The run has ended. `auto` never collapses a live run. */
+  finished?: boolean;
+}
 
 /**
  * Groups a transcript for rendering at the given detail level. Pure, and
  * identity-preserving for the `detailed` case's items, so the memoized
  * rows keep bailing out (see TimelineRow).
  */
-export function groupTimeline(items: TimelineItem[], level: DetailLevel): TimelineGroup[] {
-  if (level === "detailed") return items.map((item) => ({ kind: "item", id: item.id, item }));
+export function groupTimeline(items: TimelineItem[], level: DetailLevel, options: GroupOptions = {}): TimelineGroup[] {
+  if (level === "detailed" || (level === "auto" && options.finished !== true)) {
+    return items.map((item) => ({ kind: "item", id: item.id, item }));
+  }
+  const minGroup = level === "auto" ? MIN_AUTO_GROUP : MIN_GROUP;
 
   const groups: TimelineGroup[] = [];
   let run: TimelineToolCallItem[] = [];
 
   const flush = () => {
     if (run.length === 0) return;
-    if (run.length < MIN_GROUP) {
+    if (run.length < minGroup) {
       for (const item of run) groups.push({ kind: "item", id: item.id, item });
     } else {
       groups.push({ kind: "tool-group", id: `group-${run[0]!.id}`, items: run });
@@ -75,7 +99,7 @@ export function groupTimeline(items: TimelineItem[], level: DetailLevel): Timeli
   for (const item of items) {
     // Overview is the quiet view: events this build can't classify (a raw ACP kind, an unknown
     // wire type) are debugging aids, shown in Detailed only.
-    if (item.kind === "unknown") continue;
+    if (item.kind === "unknown" && level === "overview") continue;
     if (item.kind === "tool_call") {
       run.push(item);
       continue;

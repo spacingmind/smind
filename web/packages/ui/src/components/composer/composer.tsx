@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Clipboa
 
 import { Icons } from "@/lib/icons";
 import { AttachmentTray } from "@/components/composer/attachment-tray";
+import { ContextChipTray } from "@/components/composer/context-chip-tray";
 import { AttachMenu, type ForgeKind } from "@/components/composer/attach-menu";
 import { ForgePicker } from "@/components/composer/forge-picker";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
@@ -13,13 +14,14 @@ import { useFileMention } from "@/components/composer/use-file-mention";
 import { useSlashCommand } from "@/components/composer/use-slash-command";
 import { usePendingSendStore } from "@/stores/pending-send-store";
 import { useComposerInsertStore } from "@/stores/composer-insert-store";
-import { formatMentionToken, mentionedRefs } from "@/lib/file-mention";
+import { formatMentionToken, mentionedRefs, sameMentionRef } from "@/lib/file-mention";
 import { supportsKind } from "@/lib/attachments/kinds";
+import { appendChipBlocks } from "@/lib/send-set";
 import { profileIdFor } from "@/lib/run-profile";
 import { useAttachmentDraft } from "@/components/composer/use-attachment-draft";
 import { attachmentErrorMessage } from "@/lib/attachments/errors";
 import { encodeAttachment } from "@/lib/attachments/encode";
-import { isDraftFile, useComposerAttachmentsStore, type DraftAttachment } from "@/stores/composer-attachments-store";
+import { isDraftFile, useComposerAttachmentsStore, useContextChips, type DraftAttachment } from "@/stores/composer-attachments-store";
 import { cn } from "@/lib/utils";
 
 import { ComposerStatusChips } from "@/components/composer/composer-status-chips";
@@ -78,7 +80,8 @@ export function composerPlaceholder({
  * one rounded card whose top is the autogrowing prompt textarea (two rows
  * at rest) and whose bottom edge is the toolbar -- icon+label run-config
  * pills on the left, the icon-only Send/Stop cluster on the right -- with
- * the status chips (Working, diff stat) above the card. The only
+ * the run-state line (Working…, elapsed, diff stat) directly under the
+ * card. The only
  * affordances shown are ones that work: the Attach button and tray exist
  * only when the daemon reports attachment support (`daemon.info`), and
  * there are no mic or voice buttons until those features exist.
@@ -99,6 +102,7 @@ export function Composer({
   boundProvider,
   connected,
   runningRunId,
+  runStartedAt = null,
   waitingOnUser = false,
   git,
   onOpenDiff,
@@ -129,6 +133,8 @@ export function Composer({
   connected: boolean;
   /** The task's currently-running run, or null. Drives Stop, "Send now", and the queue placeholder. */
   runningRunId: string | null;
+  /** The live run's startedAt (ISO): what the status line's elapsed timer counts from. */
+  runStartedAt?: string | null;
   /** The live run holds an unanswered permission request: the status chip reads "Waiting for you". */
   waitingOnUser?: boolean;
   /** The task's git/PR state (useTaskGit) for the chips above the card -- each chip omitted when it does not apply. */
@@ -265,6 +271,9 @@ export function Composer({
   const running = runningRunId !== null;
 
   const { limits: attachLimits, key: attachKey, items: attachItems, hasError: attachHasError } = attach;
+  // The send set's context chips (DT3-D AC17): they live with the draft per key, never touch the
+  // draft text itself, and are turned into blocks/attachments only inside `send`.
+  const chips = useContextChips(attachKey);
 
   // "Add to chat" from the Diff, Files and PR panes: append each queued token after a space and remember the ref, so the
   // next send carries it as a `file_ref`; then each queued text (the PR panel's quoted thread/check) after a blank line,
@@ -306,7 +315,12 @@ export function Composer({
         // No await without items: a plain prompt must reach onSubmit in the same tick.
         const encoded = attachItems.length > 0 ? await Promise.all(attachItems.map(encodeAttachment)) : [];
         // Only mentions whose `@path` is still in the prompt are sent: the daemon dedupes against the text.
-        const refs = mentionedRefs(text, (attachKey && useComposerAttachmentsStore.getState().mentions[attachKey]) || []);
+        // File-ref chips join them (deduped: a chip for a ref whose `@` token is already in the prompt adds nothing).
+        const chipRefs = chips.flatMap((c) => (c.kind === "file_ref" ? [c.ref] : []));
+        const refs = [...mentionedRefs(text, (attachKey && useComposerAttachmentsStore.getState().mentions[attachKey]) || [])];
+        for (const r of chipRefs) if (!refs.some((o) => sameMentionRef(o, r))) refs.push(r);
+        // The terminal chips' fenced blocks are built only now (DT3-D AC15): the draft itself never holds them.
+        const outgoing = appendChipBlocks(text, chips);
         const attachments: AttachmentRequest[] | undefined =
           encoded.length + refs.length > 0 ? [...encoded, ...refs.map((r): AttachmentRequest => ({ kind: "file_ref", ...r }))] : undefined;
         const previews: AttachmentMeta[] | undefined =
@@ -316,7 +330,7 @@ export function Composer({
           ];
         const result = await onSubmit(
           provider,
-          text,
+          outgoing,
           { permissionMode, autoAccept },
           reasoningLevels(provider, model, providers)?.some((l) => l.id === thinkingLevel) && thinkingLevel ? thinkingLevel : undefined,
           whenBusy,
@@ -328,6 +342,7 @@ export function Composer({
         // The optimistic run entry now owns the thumbnails' object URLs, so the tray lets go without revoking.
         if (attachKey && attachItems.length > 0) useComposerAttachmentsStore.getState().release(attachKey, attachItems.map((i) => i.localId));
         if (attachKey) useComposerAttachmentsStore.getState().clearMentions(attachKey);
+        if (attachKey && chips.length > 0) useComposerAttachmentsStore.getState().clearChips(attachKey);
         if (result.kind === "queued") onQueued?.();
         return true;
       } catch (err) {
@@ -337,7 +352,7 @@ export function Composer({
         setSubmitting(false);
       }
     },
-    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, providers, profileId, onQueued, attachItems, attachKey, attachLimits],
+    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, providers, profileId, onQueued, attachItems, attachKey, attachLimits, chips],
   );
 
   // A plain submit always hands the prompt to the daemon's queue whenBusy
@@ -553,19 +568,8 @@ export function Composer({
   const showFocusHint = focusCombo !== null && canSend && !focused && draft.value === "" && attachItems.length === 0;
 
   return (
-    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
+    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl @[1100px]/chat:max-w-4xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
       <QueuedPrompts items={queuedItems} onCancel={onCancelQueued} />
-
-      {/* Paseo's chip row above the card: the live-run chip and the diff
-          stat -- real data only, nothing when neither applies. */}
-      <ComposerStatusChips
-        running={running && connected}
-        waiting={waitingOnUser}
-        git={git}
-        onOpenDiff={onOpenDiff}
-        otherRunningChat={otherRunningChat}
-        onJumpToChat={onJumpToChat}
-      />
 
       {/*
        * The input card (Item 5): one rounded surface whose top is the
@@ -598,6 +602,7 @@ export function Composer({
           />
         )}
         {slashState.open && <SlashCommandPopover rows={slashState.rows} activeIndex={slashState.activeIndex} onPick={slashState.pick} onHover={slashState.setActive} status={slashState.rpcStatus} />}
+        <ContextChipTray chips={chips} onRemove={(id) => attachKey && useComposerAttachmentsStore.getState().removeChip(attachKey, id)} />
         {attachLimits && <AttachmentTray items={attachItems} onRemove={attach.remove} />}
         {showImageHint && (
           <p data-testid="attachment-image-hint" className="px-4 pt-2 text-ui-xs text-foreground-muted">
@@ -789,6 +794,24 @@ export function Composer({
           </div>
         </RunConfigToolbar>
       </div>
+
+      {/*
+       * The run-state line (chat-surface-ui decision 1): the one place a
+       * live run's state shows, anchored directly under the card so it
+       * stays on screen while the transcript scrolls. The diff stat, PR
+       * and conflicts chips share the row -- real data only, nothing when
+       * none applies.
+       */}
+      <ComposerStatusChips
+        running={running}
+        reconnecting={running && !connected}
+        startedAt={runStartedAt}
+        waiting={waitingOnUser}
+        git={git}
+        onOpenDiff={onOpenDiff}
+        otherRunningChat={otherRunningChat}
+        onJumpToChat={onJumpToChat}
+      />
     </form>
   );
 }

@@ -15,9 +15,12 @@ use url::Url;
 use smind_daemon_client as dclient;
 use smind_daemon_client::proxy::{Connection, ConnectionKind, ProxyState};
 use smind_daemon_client::relay::client::RelayHandle;
-use smind_daemon_client::{relay, ClientEvent, Config, WorkspaceCache};
+use smind_daemon_client::{relay, ClientEvent, Config, NotifyKind, WorkspaceCache};
 
-use crate::notify;
+use crate::attention_focus;
+use crate::banner;
+use crate::coalesce;
+use crate::notify_policy;
 use crate::state::DesktopState;
 use crate::tray::Tray;
 
@@ -27,14 +30,13 @@ pub fn spawn(
     app: &AppHandle,
     tray: Arc<Tray>,
     cache: WorkspaceCache,
-    proxy_url: Url,
     cfg: Config,
     auth: dclient::client::WatcherAuth,
 ) -> tauri::async_runtime::JoinHandle<()> {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         dclient::client::run_with_auth(cfg, auth, cache.clone(), move |event| {
-            on_event(&handle, &tray, &cache, &proxy_url, event)
+            on_event(&handle, &tray, event)
         })
         .await;
     })
@@ -48,39 +50,77 @@ pub fn spawn_over_relay(
     app: &AppHandle,
     tray: Arc<Tray>,
     cache: WorkspaceCache,
-    proxy_url: Url,
     relay_handle: RelayHandle,
 ) -> tauri::async_runtime::JoinHandle<()> {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         dclient::client::run_over_relay(relay_handle, cache.clone(), move |event| {
-            on_event(&handle, &tray, &cache, &proxy_url, event)
+            on_event(&handle, &tray, event)
         })
         .await;
     })
 }
 
-fn on_event(
-    app: &AppHandle,
-    tray: &Arc<Tray>,
-    cache: &WorkspaceCache,
-    proxy_url: &Url,
-    event: ClientEvent,
-) {
+/// DT5 B/AC7: whether a notification kind counts toward the tray's
+/// waiting-for-you badge: waiting permissions and questions do, a
+/// failed run does not (nothing is waiting on it).
+fn counts(kind: NotifyKind) -> bool {
+    matches!(kind, NotifyKind::Permission | NotifyKind::Question)
+}
+
+fn on_event(app: &AppHandle, tray: &Arc<Tray>, event: ClientEvent) {
     match event {
         ClientEvent::Notification(n) => {
-            tray.on_permission_pending(n.task_id, &n.request_id);
-            let ctx = notify::ClickContext {
-                app: app.clone(),
-                cache: cache.clone(),
-                proxy_url: proxy_url.clone(),
-            };
-            notify::show(ctx, n.title, n.body, n.task_id);
+            use tauri::Manager;
+            let settings = *app.state::<DesktopState>().app_settings.lock().unwrap();
+            // DT5 B/AC7: a waiting question counts like a permission; a
+            // failed run does not. The count happens even when the banner
+            // is off or consent was never given (on_pending is idempotent
+            // by request id).
+            if counts(n.kind) {
+                tray.on_permission_pending(n.task_id, n.chat_id, &n.request_id);
+            }
+            // DT5 B/AC8: consent and the per-kind switch gate only the
+            // banner; the badge above is already updated. Checked BEFORE the
+            // dedupe so a request that stayed silent (no consent yet, or its
+            // kind off) is not remembered as "already shown" and can still
+            // notify when it is redelivered after the person turns it on.
+            if notify_policy::should_show(&settings, n.kind) {
+                // DT5 B/AC6: a notification already SHOWN (the daemon
+                // replays still-pending requests after a reconnect) shows
+                // once. DT5 C: only a shown banner is remembered; one
+                // dropped or held for the focus rules is not, so it can
+                // still notify later.
+                if banner::already_shown(n.kind, &n.request_id) {
+                    return;
+                }
+                // DT5 C/AC10-12: the web app's focus report decides WHEN
+                // the banner shows (the text and consent were settled
+                // above): never over the task in front, held while the
+                // person types in another task, otherwise through the
+                // coalescer.
+                attention_focus::route_notification(
+                    app,
+                    coalesce::Item {
+                        kind: n.kind,
+                        task_id: n.task_id,
+                        chat_id: n.chat_id,
+                        request_id: n.request_id,
+                        title: n.title,
+                        body: n.body,
+                    },
+                );
+            }
         }
         ClientEvent::RunRunning { task_id } => tray.on_run_running(task_id),
         ClientEvent::RunEnded { task_id } => tray.on_run_ended(task_id),
         ClientEvent::PermissionResolved { request_id } => tray.on_permission_resolved(&request_id),
-        ClientEvent::Reconnected => tray.on_reconnected(),
+        // Same by-request-id clear as a resolved permission (DT5 B/AC7).
+        ClientEvent::QuestionResolved { request_id } => tray.on_permission_resolved(&request_id),
+        ClientEvent::Reconnected => {
+            tray.on_reconnected();
+            attention_focus::on_reconnected(app);
+        }
     }
 }
 
@@ -127,7 +167,7 @@ fn activate(
     proxy: &Arc<ProxyState>,
     tray: Arc<Tray>,
     cache: WorkspaceCache,
-    proxy_url: Url,
+    _proxy_url: Url,
     conn: &Connection,
     connections_path: &Path,
 ) -> (
@@ -155,7 +195,7 @@ fn activate(
             }
             _ => dclient::client::WatcherAuth::default(),
         };
-        let client_task = spawn(app, tray, cache, proxy_url, Config { daemon_url }, auth);
+        let client_task = spawn(app, tray, cache, Config { daemon_url }, auth);
         return (Some(client_task), None);
     }
 
@@ -191,7 +231,7 @@ fn activate(
             };
             let (relay_handle, relay_task) = relay::client::spawn(pairing, options);
             proxy.set_relay(Some(relay_handle.clone()));
-            let client_task = spawn_over_relay(app, tray, cache, proxy_url, relay_handle);
+            let client_task = spawn_over_relay(app, tray, cache, relay_handle);
             (Some(client_task), Some(relay_task))
         }
         Ok(None) => {
@@ -259,8 +299,18 @@ pub fn spawn_initial(
 }
 
 #[cfg(test)]
-mod password_tests {
+mod tests {
     use super::*;
+
+    #[test]
+    fn failed_runs_are_not_counted() {
+        assert!(counts(NotifyKind::Permission));
+        assert!(counts(NotifyKind::Question));
+        assert!(
+            !counts(NotifyKind::Failure),
+            "a failed run has nothing waiting"
+        );
+    }
 
     #[test]
     fn a_new_daemon_key_under_the_same_connection_id_gets_no_password() {
@@ -268,11 +318,20 @@ mod password_tests {
         let old = password_cell("relay:test-host@relay.example:7400", &old_key);
         old.set("typed-for-the-old-daemon".into());
         let same = password_cell("relay:test-host@relay.example:7400", &old_key);
-        assert!(same.is_set(), "the same daemon keeps its password across restarts of the loop");
+        assert!(
+            same.is_set(),
+            "the same daemon keeps its password across restarts of the loop"
+        );
         let other = password_cell("relay:test-host@relay.example:7400", &new_key);
-        assert!(!other.is_set(), "a different daemon key must start with no password");
+        assert!(
+            !other.is_set(),
+            "a different daemon key must start with no password"
+        );
         forget_password("relay:test-host@relay.example:7400");
-        assert!(!password_cell("relay:test-host@relay.example:7400", &old_key).is_set(), "removal forgets every key's password");
+        assert!(
+            !password_cell("relay:test-host@relay.example:7400", &old_key).is_set(),
+            "removal forgets every key's password"
+        );
         assert!(!old.is_set());
     }
 }

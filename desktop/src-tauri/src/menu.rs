@@ -316,14 +316,13 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )?)
         .build()?;
 
-    let mut help_builder = SubmenuBuilder::new(app, "Help")
-        .item(&MenuItem::with_id(
-            app,
-            ID_ABOUT,
-            "About sMind",
-            true,
-            None::<&str>,
-        )?);
+    let mut help_builder = SubmenuBuilder::new(app, "Help").item(&MenuItem::with_id(
+        app,
+        ID_ABOUT,
+        "About sMind",
+        true,
+        None::<&str>,
+    )?);
     if update_menu_location(std::env::consts::OS) == UpdateMenuLocation::HelpMenu {
         help_builder = help_builder.item(&MenuItem::with_id(
             app,
@@ -370,10 +369,19 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 /// handle_event dispatches one menu item click by id. Called from
 /// `App::on_menu_event`.
 pub fn handle_event(app: &AppHandle, id: &str) {
+    // DT2 (a): a native context-menu selection is forwarded to the renderer, never run here.
+    if crate::context_menu::handle_event(app, id) {
+        return;
+    }
     // Renderer actions (D3.3): one event whose payload is the action id,
     // dispatched by the UI through the same registry a keystroke uses.
     if let Some(action) = menu_action_for(id) {
-        let _ = app.emit("menu-action", action);
+        // Only the focused window (else main) runs a menu action: with task windows open, a broadcast would run
+        // "new task" or "settings" in every window at once.
+        let target = crate::window_chrome::focused_or_main(app)
+            .map(|w| w.label().to_string())
+            .unwrap_or_else(|| MAIN_WINDOW.to_string());
+        let _ = app.emit_to(target.as_str(), "menu-action", action);
         return;
     }
 
@@ -382,7 +390,7 @@ pub fn handle_event(app: &AppHandle, id: &str) {
     // before the get_webview_window early return.
     if matches!(id, ID_APP_CHECK_UPDATES | ID_HELP_CHECK_UPDATES) {
         crate::show_main(app);
-        let _ = app.emit("app-update-check-requested", ());
+        let _ = app.emit_to(MAIN_WINDOW, "app-update-check-requested", ());
         return;
     }
 
@@ -398,17 +406,20 @@ pub fn handle_event(app: &AppHandle, id: &str) {
 
 /// The native-only items (everything `menu_action_for` does not claim).
 fn handle_native(app: &AppHandle, id: &str) {
-    let Some(win) = app.get_webview_window(MAIN_WINDOW) else {
+    let Some(main) = app.get_webview_window(MAIN_WINDOW) else {
         return;
     };
+    // Reload, Fullscreen, Minimize and Inspect act on the focused window (a task window has its own); Hide stays on
+    // `main` (tray identity). Zoom is app-wide and applies to every open window.
+    let win = crate::window_chrome::focused_or_main(app).unwrap_or_else(|| main.clone());
     match id {
         ID_RELOAD => {
             let _ = win.eval("window.location.reload()");
         }
         ID_QUIT => app.exit(0),
-        ID_ZOOM_IN => apply_zoom(app, &win, zoom::step_in),
-        ID_ZOOM_OUT => apply_zoom(app, &win, zoom::step_out),
-        ID_ZOOM_RESET => apply_zoom(app, &win, |_| zoom::DEFAULT),
+        ID_ZOOM_IN => apply_zoom(app, zoom::step_in),
+        ID_ZOOM_OUT => apply_zoom(app, zoom::step_out),
+        ID_ZOOM_RESET => apply_zoom(app, |_| zoom::DEFAULT),
         ID_FULLSCREEN => {
             let is_fullscreen = win.is_fullscreen().unwrap_or(false);
             let _ = win.set_fullscreen(!is_fullscreen);
@@ -428,7 +439,7 @@ fn handle_native(app: &AppHandle, id: &str) {
             let _ = win.minimize();
         }
         ID_HIDE => {
-            let _ = win.hide();
+            let _ = main.hide();
         }
         ID_APP_ABOUT => show_about(app),
         ID_APP_QUIT => app.exit(0),
@@ -496,10 +507,13 @@ fn menu_action_for(id: &str) -> Option<&'static str> {
     }
 }
 
-fn apply_zoom(app: &AppHandle, win: &tauri::WebviewWindow, step: impl FnOnce(f64) -> f64) {
+/// Steps the app-wide zoom level and applies it to every open window.
+fn apply_zoom(app: &AppHandle, step: impl FnOnce(f64) -> f64) {
     let current = zoom_store::load(app);
     let next = step(current);
-    let _ = win.set_zoom(next);
+    for win in app.webview_windows().values() {
+        let _ = win.set_zoom(next);
+    }
     zoom_store::save(app, next);
 }
 
@@ -561,7 +575,13 @@ mod tests {
         assert_eq!(menu_action_for(ID_RUN_SETUP), None);
         assert_eq!(native_item_for("run-setup"), None);
         assert_eq!(RUN_SETUP_EVENT, "run-setup-requested");
-        let ids = [ID_ABOUT, ID_LOG_FOLDER, ID_GITHUB, ID_HELP_CHECK_UPDATES, ID_APP_CHECK_UPDATES];
+        let ids = [
+            ID_ABOUT,
+            ID_LOG_FOLDER,
+            ID_GITHUB,
+            ID_HELP_CHECK_UPDATES,
+            ID_APP_CHECK_UPDATES,
+        ];
         assert!(!ids.contains(&ID_RUN_SETUP));
     }
 
@@ -634,7 +654,11 @@ mod tests {
     fn app_menu_action_allowlist_is_native_only_and_rejects_unknown_ids() {
         for (name, item) in NATIVE_MENU_ACTIONS {
             assert_eq!(native_item_for(name), Some(*item));
-            assert_eq!(menu_action_for(item), None, "{name} must not be a renderer action");
+            assert_eq!(
+                menu_action_for(item),
+                None,
+                "{name} must not be a renderer action"
+            );
         }
         assert_eq!(native_item_for("tab.new"), None);
         assert_eq!(native_item_for("file-reload"), None);

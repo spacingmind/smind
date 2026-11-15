@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/steward"
 	"github.com/spacingmind/smind/internal/store"
@@ -362,11 +363,11 @@ func newStewardObserver(h *stewardHost, db *store.Store) *stewardObserver {
 		host: h,
 		db:   db,
 		trigger: steward.NewAutoTrigger(configSteward, func(taskID int64) {
-			go func() {
+			crash.GoFatal("wsapi.stewardAutoReview", func() {
 				if _, err := h.startReview(context.Background(), reviewParams{TaskID: taskID, Trigger: steward.TriggerAuto}); err != nil {
 					slog.Warn("steward auto review", "task", taskID, "err", err)
 				}
-			}()
+			})
 		}),
 	}
 }

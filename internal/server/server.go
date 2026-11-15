@@ -165,7 +165,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("/debug/pprof/", http.NotFoundHandler())
 	}
 	mux.Handle("/", webUI())
-	return s.direct.guard(mux)
+	return recoverPanics(s.direct.guard(mux))
 }
 
 // Addr returns the configured listen address (127.0.0.1:4648 by default).

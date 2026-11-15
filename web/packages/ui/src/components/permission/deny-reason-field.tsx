@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 
 import { clampRunes, denyReasonCounter } from "@/lib/deny-reason";
 import { cn } from "@/lib/utils";
@@ -15,16 +15,24 @@ export function DenyReasonField({
   onChange,
   disabled,
   testId = "permission-deny-reason",
+  autoFocus = false,
 }: {
   value: string;
   onChange: (next: string) => void;
   disabled?: boolean;
   testId?: string;
+  autoFocus?: boolean;
 }) {
   const id = useId();
   const counterId = `${id}-counter`;
   const ref = useRef<HTMLTextAreaElement>(null);
   const counter = denyReasonCounter(value);
+
+  // The field mounts only when its toggle reveals it, so a mount-time
+  // focus lands the cursor in the box the moment it appears.
+  useEffect(() => {
+    if (autoFocus) ref.current?.focus();
+  }, [autoFocus]);
 
   useLayoutEffect(() => {
     const el = ref.current;

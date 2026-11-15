@@ -37,6 +37,8 @@ export function AutoAcceptToggle({
       </label>
     );
   }
+  // The visible state (on/off) lives in the text and the icon, never colour alone.
+  const label = `${AUTO_ACCEPT_LABEL}: ${checked ? "on" : "off"}`;
   return (
     <Button
       type="button"
@@ -47,11 +49,11 @@ export function AutoAcceptToggle({
       data-testid={testId ?? "composer-auto-accept"}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      aria-label="Auto-accept"
+      aria-label={label}
       className={cn(pillTriggerClass(showLabel), checked ? "text-warning-text hover:text-warning-text" : "text-foreground-muted")}
     >
-      <Icons.checkAll aria-hidden className="shrink-0" />
-      <span className={showLabel ? undefined : "max-sm:hidden"}>{AUTO_ACCEPT_LABEL}</span>
+      {checked ? <Icons.checkAll aria-hidden className="shrink-0" /> : <Icons.dash aria-hidden className="shrink-0" />}
+      <span className={showLabel ? undefined : "max-sm:hidden"}>{label}</span>
     </Button>
   );
 }

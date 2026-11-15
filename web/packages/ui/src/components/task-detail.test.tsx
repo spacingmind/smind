@@ -129,8 +129,9 @@ describe("TaskDetailPane", () => {
     client.emit("run.attach", 0, "chunk", { text: "partial " });
     await flush();
     expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("partial");
-    expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "running");
-    expect(within(screen.getByTestId("run-meta")).getByRole("status")).toHaveTextContent(/^Working…/);
+    // While the run is live the transcript footer shows nothing; the state lives under the composer.
+    expect(screen.queryByTestId("run-meta")).toBeNull();
+    expect(screen.getAllByText(/^Working…$/)).toHaveLength(1);
 
     client.emit("run.attach", 0, "chunk", { text: "and more" });
     await flush();
@@ -139,6 +140,21 @@ describe("TaskDetailPane", () => {
     client.nth("run.attach", 0).resolve({ runId: "run-1", stopReason: "end_turn" });
     await flush();
     expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "done");
+  });
+
+  it("run-state-shown-once-under-the-composer", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    // Exactly one run-state element on screen while the run is live...
+    const working = screen.getAllByText(/^Working…$/);
+    expect(working).toHaveLength(1);
+    // ...and in DOM order it comes after the composer card (anchored under it).
+    const card = screen.getByTestId("composer-card");
+    expect(working[0].compareDocumentPosition(card) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 
   it("shows the chat timeline rail once two runs overflow a wide pane", async () => {
@@ -361,7 +377,9 @@ describe("TaskDetailPane", () => {
     expect(startIdx).toBeLessThan(attachIdx);
 
     expect(screen.getByTestId("run-entry")).toBeInTheDocument();
-    expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "running");
+    // The optimistic running entry has no footer; its state is the composer's status line.
+    expect(screen.queryByTestId("run-meta")).toBeNull();
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working…");
   });
 
   it("a rapid double-switch (A -> B -> A) discards task B's now-stale fetch instead of letting it overwrite the re-selected task A view", async () => {
@@ -775,14 +793,14 @@ describe("TaskDetailPane", () => {
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
     // Opens on the current provider's view; Back lists the providers.
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
       "model-provider-claude-native",
       "model-provider-glm",
       "model-provider-codex-native",
     ]);
-    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["Claude Code", "GLM", "Codex"]);
+    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual(["Claude Code", "GLM", "Codex"]);
   });
 
   it("falls back to the built-in four-provider list when provider.list rejects (catalog labels), and the form still submits", async () => {
@@ -795,10 +813,10 @@ describe("TaskDetailPane", () => {
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
     // Opens on the current provider's view; Back lists the providers.
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["model-provider-claude-native", "model-provider-codex-native", "model-provider-glm", "model-provider-kimi"]);
-    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["Claude Code", "Codex", "GLM", "Kimi"]);
+    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual(["Claude Code", "Codex", "GLM", "Kimi"]);
     fireEvent.click(rows[0]);
     fireEvent.click(await screen.findByTestId("model-row-claude-native:"));
 
@@ -1217,7 +1235,7 @@ describe("run-config pill (run-config IA)", () => {
     expect(screen.queryByTestId("task-run-config-pill")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(await screen.findByTestId("model-provider-glm"));
     fireEvent.click(await screen.findByTestId("model-row-glm:"));
     await flush();
@@ -1248,7 +1266,7 @@ describe("run-config pill (run-config IA)", () => {
     await flush();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(await screen.findByTestId("model-profile-row-1"));
     await flush();
 

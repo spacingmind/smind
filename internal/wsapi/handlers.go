@@ -13,6 +13,7 @@ import (
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/history/native"
@@ -2629,10 +2630,10 @@ func testProviderCLI(cmd []string) providerTestResult {
 		err  error
 	}
 	done := make(chan lookupResult, 1)
-	go func() {
+	crash.Go("wsapi.providerCLILookup", func() {
 		path, err := exec.LookPath(cmd[0])
 		done <- lookupResult{path: path, err: err}
-	}()
+	})
 	select {
 	case r := <-done:
 		if r.err != nil {

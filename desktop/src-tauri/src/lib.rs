@@ -19,14 +19,22 @@ use smind_daemon_client::Config;
 
 mod app_settings;
 mod assets;
+mod attention_focus;
+mod audit_guard;
+mod banner;
 mod client_watch;
+mod coalesce;
 mod commands;
+mod context_menu;
 mod daemon_manager;
 mod deeplink;
 mod editors;
+pub mod ipc_guard;
 mod lifecycle;
 mod menu;
 mod notify;
+mod notify_policy;
+mod notify_test;
 mod open_path;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod overlay_icon;
@@ -37,15 +45,19 @@ mod state;
 mod tray;
 // `pub` (hidden) so the updater e2e integration test (tests/updater_e2e.rs)
 // can drive the same cores the commands call.
-#[doc(hidden)]
-pub mod updater;
-mod window_chrome;
 #[cfg(test)]
 mod capability_tests;
 #[cfg(test)]
-mod real_daemon_test;
+mod crash_wiring_tests;
 #[cfg(all(test, unix))]
 mod daemon_survival_test;
+#[cfg(test)]
+mod real_daemon_test;
+#[doc(hidden)]
+pub mod updater;
+mod window_chrome;
+mod window_layout;
+mod windows;
 mod zoom_store;
 
 use state::DesktopState;
@@ -68,7 +80,13 @@ fn app_log_level(debug_build: bool) -> log::LevelFilter {
 }
 
 /// Dependencies that log request lines and frames below WARN even at DEBUG.
-const QUIET_TARGETS: [&str; 5] = ["tungstenite", "tokio_tungstenite", "hyper_util", "reqwest", "tao"];
+const QUIET_TARGETS: [&str; 5] = [
+    "tungstenite",
+    "tokio_tungstenite",
+    "hyper_util",
+    "reqwest",
+    "tao",
+];
 
 fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let mut builder = tauri_plugin_log::Builder::new().level(app_log_level(cfg!(debug_assertions)));
@@ -78,8 +96,21 @@ fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     builder.build()
 }
 
+/// The app's compiled context (its configuration, assets and ACL manifest). The one place `generate_context!` is
+/// expanded: a second expansion in the same crate defines the embedded Info.plist symbol twice, so tests that need the real
+/// ACL call this instead.
+pub fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The audit build refuses to start against the real daemon; first, before anything else runs.
+    #[cfg(feature = "audit-guard")]
+    audit_guard::enforce_or_exit();
+    // Local crash reports: the panic hook goes in before anything that can panic. It does no
+    // I/O (the directory is created by the first report) and never blocks startup.
+    smind_crash_report::install_default(env!("CARGO_PKG_VERSION"));
     let builder = tauri::Builder::default();
     // ADR-0023: updater plugin on macOS/Windows only; Linux (deb) has no
     // updater. Its JS-facing permissions are never granted.
@@ -117,7 +148,15 @@ pub fn run() {
         // previously-saved native frame back to an undecorated window
         // (D1), leaving two sets of caption buttons.
         .plugin(
+            // Task windows are NOT tracked: their labels are reusable pool slots, so a saved frame (or a maximised or
+            // fullscreen flag) would reopen an unrelated task in the last occupant's state.
             tauri_plugin_window_state::Builder::default()
+                .with_denylist(
+                    &windows::window_state_denylist()
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                )
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         - tauri_plugin_window_state::StateFlags::VISIBLE
@@ -135,7 +174,7 @@ pub fn run() {
         // tauri-plugin-single-instance's deep-link feature (registered
         // above), which is why single-instance is set up first.
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(ipc_guard::guarded(tauri::generate_handler![
             commands::connections_list,
             commands::connections_add,
             commands::connections_add_relay,
@@ -153,6 +192,9 @@ pub fn run() {
             commands::open_external,
             commands::app_quit,
             menu::app_menu_action,
+            context_menu::context_menu_show,
+            notify_test::notify_test,
+            attention_focus::attention_focus_report,
             editors::editors_list,
             editors::open_in_editor,
             open_path::open_path_default,
@@ -162,11 +204,12 @@ pub fn run() {
             daemon_manager::daemon_restart,
             daemon_manager::take_over_daemon,
             daemon_manager::connection_version,
+            windows::window_open_task,
             window_chrome::window_ready,
             window_chrome::window_set_theme,
             updater::app_update_check,
             updater::app_update_install,
-        ])
+        ]))
         .setup(|app| {
             // Resolve the user's login-shell PATH in the background so the
             // managed daemon can find `claude`/`npx` (a GUI app's own PATH is
@@ -212,10 +255,14 @@ pub fn run() {
             // webview keys localStorage by origin, so a port that changes on
             // every launch would reset every UI preference on every launch.
             let proxy_port_path = proxy_port::path_in(&app.path().app_data_dir()?);
-            let (port, server_fut) = tauri::async_runtime::block_on(
-                dclient::proxy::serve_preferring(proxy_state.clone(), proxy_port::load(&proxy_port_path)),
-            )?;
+            let (port, server_fut) =
+                tauri::async_runtime::block_on(dclient::proxy::serve_preferring(
+                    proxy_state.clone(),
+                    proxy_port::load(&proxy_port_path),
+                ))?;
             proxy_port::save(&proxy_port_path, port);
+            // The calling origin every command is checked against, and the exact-origin capabilities (ADR-0013).
+            ipc_guard::install(app, port);
             tauri::async_runtime::spawn(server_fut);
 
             let proxy_url: Url = format!("http://127.0.0.1:{port}")
@@ -224,6 +271,15 @@ pub fn run() {
             let initial_url: Url = format!("http://127.0.0.1:{port}/?k={secret}")
                 .parse()
                 .expect("smind desktop: initial URL is well-formed");
+            // PR (c): the task and tab that were open at the last quit come back (same connection only).
+            let initial_url = {
+                let connection = proxy_state.registry.lock().unwrap().current().id.clone();
+                let layout_path = app.path().app_data_dir()?.join(window_layout::FILE_NAME);
+                match window_layout::load(&layout_path, MAIN_WINDOW, &connection) {
+                    Some(fragment) => window_layout::with_fragment(initial_url, &fragment),
+                    None => initial_url,
+                }
+            };
 
             // AC3: navigation is restricted to the proxy's own origin --
             // any other URL (an http(s) link inside the bundled UI, e.g.
@@ -233,6 +289,8 @@ pub fn run() {
             // D1/D2.1: per-platform chrome, created hidden and shown
             // when the UI reports its first paint (or after the fallback).
             app.manage(window_chrome::ShowGate::default());
+            app.manage(context_menu::ContextMenuState::default());
+            app.manage(windows::TaskWindows::default());
             let builder = WebviewWindowBuilder::new(
                 app,
                 MAIN_WINDOW,
@@ -345,6 +403,23 @@ pub fn run() {
                 // Windows drops the taskbar overlay when the hidden window's
                 // button is re-created; put it back when the window returns.
                 tauri::WindowEvent::Focused(true) => badge_tray.reapply_badge(),
+                // A size saved before the minimum existed is restored as is; put it back at once.
+                tauri::WindowEvent::Resized(size) => {
+                    // Windows reports a minimised window as 0x0: leave it alone.
+                    if size.width == 0
+                        || size.height == 0
+                        || close_win.is_minimized().unwrap_or(false)
+                    {
+                        return;
+                    }
+                    let scale = close_win.scale_factor().unwrap_or(1.0);
+                    let logical = size.to_logical::<f64>(scale);
+                    if let Some((w, h)) =
+                        window_chrome::clamp_to_minimum(logical.width, logical.height)
+                    {
+                        let _ = close_win.set_size(tauri::LogicalSize::new(w, h));
+                    }
+                }
                 _ => {}
             });
 
@@ -397,9 +472,13 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let state = handle.state::<DesktopState>();
-                    match ssh_tunnel::ensure_tunnel(&state.proxy, &state.ssh_tunnels, &initial_conn).await {
+                    match ssh_tunnel::ensure_tunnel(&state.proxy, &state.ssh_tunnels, &initial_conn)
+                        .await
+                    {
                         Ok(()) => client_watch::restart(&handle, &state, &initial_conn),
-                        Err(e) => log::warn!("ssh tunnel for {:?} did not start: {e}", initial_conn.label),
+                        Err(e) => {
+                            log::warn!("ssh tunnel for {:?} did not start: {e}", initial_conn.label)
+                        }
                     }
                 });
             }
@@ -412,7 +491,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("error while building smind desktop")
         .run(lifecycle::handle_run_event);
 }
@@ -456,8 +535,16 @@ mod optional_integration_tests {
 
     #[test]
     fn a_failed_shortcut_registration_is_reported_not_propagated() {
-        assert!(note_unavailable("global shortcut", "Ctrl+Shift+S", Ok::<(), String>(())));
-        assert!(!note_unavailable("global shortcut", "Ctrl+Shift+S", Err("already registered")));
+        assert!(note_unavailable(
+            "global shortcut",
+            "Ctrl+Shift+S",
+            Ok::<(), String>(())
+        ));
+        assert!(!note_unavailable(
+            "global shortcut",
+            "Ctrl+Shift+S",
+            Err("already registered")
+        ));
     }
 }
 
@@ -470,7 +557,10 @@ mod file_drop_tests {
     #[test]
     fn main_window_leaves_html5_file_drops_to_the_webview() {
         let src = include_str!("lib.rs");
-        let builder = src.split("WebviewWindowBuilder::new(").nth(1).expect("main window builder");
+        let builder = src
+            .split("WebviewWindowBuilder::new(")
+            .nth(1)
+            .expect("main window builder");
         let chain = builder.split(".build()?").next().expect("builder chain");
         assert!(
             chain.contains(".disable_drag_drop_handler()"),
@@ -494,7 +584,10 @@ mod log_level_tests {
     #[test]
     fn the_request_line_loggers_are_silenced() {
         for target in ["tungstenite", "hyper_util", "reqwest"] {
-            assert!(QUIET_TARGETS.contains(&target), "{target} must be capped at WARN");
+            assert!(
+                QUIET_TARGETS.contains(&target),
+                "{target} must be capped at WARN"
+            );
         }
     }
 }

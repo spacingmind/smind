@@ -123,7 +123,7 @@ const REASONS: Array<[ProviderGate, string]> = [
 ];
 
 beforeEach(() => {
-  mobile.value = false;
+  mobile.value = true; // the sheet keeps the root provider list (the desktop popover has the rail)
 });
 
 describe("picker gates: provider rows", () => {

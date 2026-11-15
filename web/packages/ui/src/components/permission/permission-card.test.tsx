@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { optionVariant, recommendedOptionId } from "@/components/permission/permission-option-button";
+import { optionClassName, optionVariant, recommendedOptionId } from "@/components/permission/permission-option-button";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { PLAN_REVIEW_APPROVE, PLAN_REVIEW_REFUSE } from "@/components/permission/plan-review-card";
 import type { PendingPermission } from "@/hooks/use-run-timeline";
@@ -19,14 +19,19 @@ function pending(overrides: Partial<PendingPermission> = {}): PendingPermission 
 }
 
 async function flush(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 describe("optionVariant / recommendedOptionId", () => {
-  it("styles reject kinds as destructive regardless of position", () => {
-    expect(optionVariant("reject_once", false)).toBe("destructive");
-    expect(optionVariant("reject_always", true)).toBe("destructive");
+  it("reject kinds are outlined with destructive text", () => {
+    expect(optionVariant("reject_once", false)).toBe("outline");
+    expect(optionVariant("reject_always", true)).toBe("outline");
+    expect(optionClassName("reject_once")).toBe("text-destructive hover:text-destructive");
+    expect(optionClassName("allow_once")).toBe("");
   });
 
   it("styles the first allow-kind option as the recommended (primary) action", () => {
@@ -83,13 +88,45 @@ describe("PermissionCard: options variant", () => {
   // Item 21: touch targets need a stated minimum below the compact
   // breakpoint -- jsdom has no layout, so this asserts the class list
   // carries both the 44px compact rule and the `md:`-scoped revert to the
-  // original dense size, rather than a computed pixel height.
-  it("options carry the compact 44px touch-target class, reverting to the dense size at md:", () => {
+  // 32px desktop size, rather than a computed pixel height.
+  it("options carry the compact 44px touch-target class, reverting to the 32px size at md:", () => {
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
 
     const allow = screen.getByRole("button", { name: "Allow" });
     expect(allow.className).toContain("h-11");
-    expect(allow.className).toContain("md:h-6");
+    expect(allow.className).toContain("md:h-8");
+  });
+
+  // Desktop design review: Allow keeps the weight (first allow filled
+  // `approval`), Deny is present but quieter (outlined, destructive text)
+  // instead of two filled buttons of equal weight.
+  it("option-variants-allow-filled-deny-outline-destructive", () => {
+    render(
+      <PermissionCard
+        runId="run-1"
+        pending={pending({
+          options: [
+            { id: "allow-1", label: "Allow once", kind: "allow_once" },
+            { id: "deny-1", label: "Deny", kind: "reject_once" },
+            { id: "allow-2", label: "Allow for this session", kind: "allow_always" },
+          ],
+        })}
+        onRespond={vi.fn()}
+        onChat={vi.fn()}
+      />,
+    );
+
+    const firstAllow = screen.getByRole("button", { name: "Allow once" });
+    expect(firstAllow).toHaveAttribute("data-variant", "approval");
+    expect(firstAllow.className).not.toContain("text-destructive");
+
+    const deny = screen.getByRole("button", { name: "Deny" });
+    expect(deny).toHaveAttribute("data-variant", "outline");
+    expect(deny.className).toContain("text-destructive");
+
+    const secondAllow = screen.getByRole("button", { name: "Allow for this session" });
+    expect(secondAllow).toHaveAttribute("data-variant", "outline");
+    expect(secondAllow.className).not.toContain("text-destructive");
   });
 
   it("renders every option even when no kind is recognised", () => {
@@ -187,6 +224,7 @@ describe("PermissionCard: options variant", () => {
     const onRespond = vi.fn().mockResolvedValue(undefined);
     const { unmount } = render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
 
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
     fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "  use the staged schema instead  " } });
     fireEvent.click(screen.getByRole("button", { name: "Deny" }));
     await flush();
@@ -197,6 +235,7 @@ describe("PermissionCard: options variant", () => {
     onRespond.mockClear();
     unmount();
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
     fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "   " } });
     fireEvent.click(screen.getByRole("button", { name: "Deny" }));
     await flush();
@@ -206,12 +245,14 @@ describe("PermissionCard: options variant", () => {
 
   it("deny_reason_at_limit_refuses_more_text", () => {
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
     fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "x".repeat(600) } });
     expect(screen.getByTestId("permission-deny-reason")).toHaveValue("x".repeat(500));
   });
 
   it("deny_reason_counts_runes_not_utf16", () => {
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
     // 499 x plus one emoji is 501 UTF-16 units but 500 runes -- the daemon's unit.
     const atLimit = "x".repeat(499) + "😀";
     const field = screen.getByTestId("permission-deny-reason");
@@ -225,6 +266,7 @@ describe("PermissionCard: options variant", () => {
 
   it("deny_reason_counter_from_400", () => {
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
     const field = screen.getByTestId("permission-deny-reason");
     fireEvent.change(field, { target: { value: "x".repeat(399) } });
     expect(screen.queryByTestId("permission-deny-reason-counter")).toBeNull();
@@ -236,6 +278,7 @@ describe("PermissionCard: options variant", () => {
 
   it("deny_reason_textarea_grows_to_three_lines", () => {
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
     const field = screen.getByTestId("permission-deny-reason") as HTMLTextAreaElement;
     expect(field.tagName).toBe("TEXTAREA");
     expect(field).toHaveAttribute("rows", "2");
@@ -254,11 +297,81 @@ describe("PermissionCard: options variant", () => {
     const onRespond = vi.fn().mockResolvedValue(undefined);
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
 
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
     fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "not for allow to see" } });
     fireEvent.click(screen.getByRole("button", { name: "Allow" }));
     await flush();
     expect(onRespond).toHaveBeenCalledTimes(1);
     expect(onRespond).toHaveBeenCalledWith("run-1", "req-1", "allow-1");
+  });
+
+  it("permission-card-has-no-nested-alert", () => {
+    const { container } = render(
+      <PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(container.querySelector('[data-testid="pending-permission"] [role="alert"]')).toBeNull();
+  });
+
+  it("deny-reason-collapsed-until-requested", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    const toggle = screen.getByTestId("permission-deny-with-reason");
+    expect(screen.queryByTestId("permission-deny-reason")).toBeNull();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("permission-deny-reason")).toBeInTheDocument();
+    expect(screen.getByTestId("permission-deny-with-reason")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("deny-reason-text-survives-collapse", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    const toggle = screen.getByTestId("permission-deny-with-reason");
+    fireEvent.click(toggle);
+    fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "deploy after the migration" } });
+    fireEvent.click(toggle);
+    expect(screen.queryByTestId("permission-deny-reason")).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("permission-deny-reason")).toHaveValue("deploy after the migration");
+  });
+
+  it("deny-with-reason-absent-without-reject-option", () => {
+    render(
+      <PermissionCard
+        runId="run-1"
+        pending={pending({
+          options: [
+            { id: "allow-1", label: "Allow once", kind: "allow_once" },
+            { id: "allow-2", label: "Allow for this session", kind: "allow_always" },
+          ],
+        })}
+        onRespond={vi.fn()}
+        onChat={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("permission-deny-with-reason")).toBeNull();
+    expect(screen.queryByTestId("permission-deny-reason")).toBeNull();
+  });
+
+  it("respond-failure-shows-plain-sentence-and-keeps-reason", async () => {
+    const onRespond = vi.fn().mockRejectedValue(new Error("boom"));
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
+    fireEvent.change(screen.getByTestId("permission-deny-reason"), { target: { value: "wrong schema" } });
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    await flush();
+
+    const alert = screen.getByTestId("permission-respond-error");
+    expect(alert).toHaveTextContent("Could not send your answer. Try again.");
+    expect(alert).toHaveTextContent("boom");
+    expect(screen.getByRole("button", { name: "Allow" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+
+    // Collapse and re-open: the typed reason is still there.
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
+    fireEvent.click(screen.getByTestId("permission-deny-with-reason"));
+    expect(screen.getByTestId("permission-deny-reason")).toHaveValue("wrong schema");
   });
 
   it("old_onRespond_callers_unchanged", async () => {
@@ -315,6 +428,6 @@ describe("PermissionCard: plan-review variant", () => {
   it("its actions carry the same compact touch-target class as the options variant (Item 21)", () => {
     render(<PermissionCard runId="run-1" pending={withPlan} onRespond={vi.fn()} onChat={vi.fn()} />);
     expect(screen.getByTestId("plan-review-approve").className).toContain("h-11");
-    expect(screen.getByTestId("plan-review-approve").className).toContain("md:h-6");
+    expect(screen.getByTestId("plan-review-approve").className).toContain("md:h-8");
   });
 });

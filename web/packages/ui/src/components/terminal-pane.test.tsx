@@ -203,7 +203,7 @@ describe("TerminalPane", () => {
     const wrapper = screen.getByTestId("terminal-inset");
     expect(host.parentElement).toBe(wrapper);
     expect(wrapper.className).toContain("p-2");
-    expect(wrapper.className).toContain("bg-terminal-bg");
+    expect(wrapper.className).toContain("bg-panel");
     expect(host.className).not.toMatch(/(^|\s)p[xytrbl]?-/);
   });
 
@@ -535,7 +535,10 @@ describe("TerminalPane", () => {
       client2.nth("terminal.list", 0).resolve([sessionStatus({ ID: "term-1", Status: "interrupted" })]);
       await flush();
 
-      expect(client2.calls.some((c) => c.method === "terminal.attach")).toBe(false);
+      // DT3-B: the retained scrollback of the interrupted session is now
+      // replayed through terminal.attach (never adopted -- no create, no
+      // binding); the pane still renders the distinct interrupted state.
+      expect(client2.nth("terminal.attach", 0).params).toEqual({ terminalId: "term-1" });
       expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
       expect(screen.getByTestId("terminal-ended")).toHaveTextContent("session ended: daemon restarted");
       expect(screen.queryByTestId("terminal-error")).not.toBeInTheDocument();

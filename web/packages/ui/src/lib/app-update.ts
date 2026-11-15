@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { desktop, isDesktop, type AppUpdateCheck, type AppUpdateProgress } from "@/lib/platform";
+import { isTaskWindow } from "@/lib/task-window";
 
 /** The `available` variant of `AppUpdateCheck`, the only one the UI ever shows. */
 export interface AppUpdateInfo {
@@ -94,6 +95,8 @@ export function pendingUpdate(state: AppUpdateState): AppUpdateInfo | null {
  * install progress events, and the confirm/dismiss actions the dialog calls.
  */
 export function useAppUpdate() {
+  // A task window has no updater permission (ADR-0013 amendment): it never checks, listens or installs.
+  const updatesActive = isDesktop && !isTaskWindow;
   const [state, dispatch] = useReducer(appUpdateReducer, initialAppUpdateState);
   const dismissedRef = useRef<Set<string>>(new Set());
   // A ref, not effect deps: the launch check runs exactly once per session,
@@ -122,23 +125,23 @@ export function useAppUpdate() {
   }, []);
 
   useEffect(() => {
-    if (!isDesktop || launchedRef.current) return;
+    if (!updatesActive || launchedRef.current) return;
     launchedRef.current = true;
     runCheck(false);
   }, [runCheck]);
 
   useEffect(() => {
-    if (!isDesktop) return;
+    if (!updatesActive) return;
     return desktop.onAppUpdateCheckRequested(() => runCheck(true));
   }, [runCheck]);
 
   useEffect(() => {
-    if (!isDesktop) return;
+    if (!updatesActive) return;
     return desktop.onAppUpdateProgress((progress) => dispatch({ type: "progress", progress }));
   }, []);
 
   const confirm = useCallback(() => {
-    if (!isDesktop) return;
+    if (!updatesActive) return;
     dispatch({ type: "confirm" });
     desktop
       .appUpdateInstall()

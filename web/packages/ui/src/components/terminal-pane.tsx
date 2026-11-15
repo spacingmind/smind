@@ -6,12 +6,20 @@ import "@xterm/xterm/css/xterm.css";
 
 import { FindBar, type FindBarHandle } from "@/components/find/find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
+import { SendToAgentMenu, type SendEntry } from "@/components/send-to-agent-menu";
 import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { TerminalKeyBar, type TerminalModifier } from "@/components/terminal-key-bar";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
+import { useSendTextToChat } from "@/hooks/use-send-text-to-chat";
 import { useTheme } from "@/hooks/use-theme";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
+import { formatBytes } from "@/lib/attachments/format";
 import type { ConnectionStatus } from "@/lib/reconnect";
+import { openExternalUrl } from "@/lib/external-link";
+import { buildTerminalBlock } from "@/lib/send-set";
+import { activateTerminalLink, findTerminalLinks, type TerminalLinkMatch } from "@/lib/terminal-links";
+import { resolveTerminalPath } from "@/lib/terminal-path";
 import { encodeTerminalKey, hasPendingModifiers, resolvePendingModifierData, terminalKeyInput } from "@/lib/terminal-keys";
 import { loadTerminalScrollback } from "@/lib/terminal-prefs";
 import {
@@ -59,16 +67,29 @@ export interface TerminalHandle {
   size?(): { cols: number; rows: number };
   /** Gives the terminal keyboard focus, so a freshly opened or re-activated terminal takes typing without a click first. Optional for the same reason setTheme is. */
   focus?(): void;
+  /** Clears the emulator (screen and scrollback) before an ended session's retained output is replayed into it, so a reconnect never shows that output twice. Optional for the same reason setTheme is. */
+  reset?(): void;
   /** Re-applies the terminal's chrome colors (background/foreground/cursor/selection) -- optional so FakeTerminalHandle (this file's own test suite) doesn't need to implement it; xterm.js's own `options.theme` setter triggers a redraw. */
   setTheme?(theme: ITheme): void;
   /** The currently selected text, for the Copy affordance (Item 20). Optional for the same reason setTheme is. */
   getSelection?(): string;
   /** Fires whenever the selection changes, so Copy can be disabled when there's nothing to copy. A handle that can't report this leaves Copy enabled -- a silent no-op beats a permanently-dead button. */
   onSelectionChange?(callback: () => void): { dispose(): void };
+  /** The last `count` non-empty lines of the scrollback, for the "Send to agent" menu's Last-100-lines entry (DT3-C). Optional for the same reason setTheme is -- a handle without it simply disables that entry. */
+  getLastLines?(count: number): string;
   /** Find over the scrollback (AC3, `@xterm/addon-search`). Optional so FakeTerminalHandle (this file's own test suite) doesn't need it -- a handle without `find` never shows the Find affordance at all, never a dead shortcut. */
   find?: TerminalFindHandle;
   /** Whether the shell switched the cursor keys to application mode (SS3 arrows). Optional for the same reason setTheme is; absent means normal mode. */
   applicationCursorKeys?(): boolean;
+  /**
+   * Links terminal matches to a handler (DT3-A): a real xterm registers a
+   * link provider that runs lib/terminal-links over each rendered line and
+   * forwards a Ctrl/Cmd+click to the handler. Optional so the test fake
+   * doesn't need it -- a handle without it simply has no links, never dead
+   * clicks. `null` clears the handler; the returned disposable tears the
+   * provider down with it.
+   */
+  setLinkHandler?(handler: ((match: TerminalLinkMatch, event: MouseEvent) => void) | null): { dispose(): void };
   dispose(): void;
 }
 
@@ -105,6 +126,7 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
   term.loadAddon(fit);
   const search = new SearchAddon();
   term.loadAddon(search);
+  let linkHandler: ((match: TerminalLinkMatch, event: MouseEvent) => void) | null = null;
   return {
     open: (container) => term.open(container),
     onData: (callback) => term.onData(callback),
@@ -112,13 +134,55 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
     write: (data) => term.write(data),
     fit: () => fit.fit(),
     focus: () => term.focus(),
+    reset: () => term.reset(),
     size: () => ({ cols: term.cols, rows: term.rows }),
     setTheme: (theme) => {
       term.options.theme = theme;
     },
     getSelection: () => term.getSelection(),
+    getLastLines: (count) => {
+      const buffer = term.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+      while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+      return lines.slice(-count).join("\n");
+    },
     applicationCursorKeys: () => term.modes.applicationCursorKeysMode,
     onSelectionChange: (callback) => term.onSelectionChange(callback),
+    setLinkHandler: (handler) => {
+      linkHandler = handler;
+      const provider = term.registerLinkProvider({
+        // Match indexes are character offsets in translateToString's line;
+        // wide/CJK characters occupy two cells, shifting xterm's 1-based
+        // cell columns slightly off the match (accepted -- the link's
+        // activate still carries the exact match). Wrapped lines are not
+        // joined either: only the wrapped row the pointer is on is scanned
+        // (accepted limitation).
+        provideLinks(y, callback) {
+          const line = term.buffer.active.getLine(y - 1);
+          if (!line) return callback(undefined);
+          const text = line.translateToString(true);
+          const matches = findTerminalLinks(text);
+          callback(
+            matches.length
+              ? matches.map((m) => ({
+                  range: { start: { x: m.start + 1, y }, end: { x: m.end, y } },
+                  text: m.text,
+                  decorations: { underline: true, pointerCursor: true },
+                  activate: (event: MouseEvent) => activateTerminalLink(event, () => linkHandler?.(m, event)),
+                  hover: () => {
+                    if (term.element) term.element.title = "Ctrl+click to open (Cmd+click on macOS)";
+                  },
+                  leave: () => {
+                    term.element?.removeAttribute("title");
+                  },
+                }))
+              : undefined,
+          );
+        },
+      });
+      return { dispose: () => provider.dispose() };
+    },
     find: {
       search: (query, direction) => {
         if (!query) {
@@ -138,6 +202,10 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
 
 /** How long a container's size must go quiet before fit() re-runs -- see the ResizeObserver effect below. */
 const RESIZE_DEBOUNCE_MS = 100;
+
+/** How long the quiet not-a-file notice stays up (DT3-A AC3). */
+const LINK_NOTICE_MS = 4000;
+const LINK_NOTICE_TEXT = "Not a file in this task's workspace";
 
 function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64);
@@ -191,6 +259,7 @@ export function TerminalPane({
   active = true,
   connectionStatus = "connected",
   createTerminal = createRealTerminal,
+  onOpenFile,
 }: {
   client: WsClientLike | null;
   task: Task;
@@ -202,6 +271,8 @@ export function TerminalPane({
   connectionStatus?: ConnectionStatus;
   /** Overridable for tests -- see TerminalHandle's doc comment. Defaults to a real xterm.js + FitAddon instance. */
   createTerminal?: (options: { scrollback: number }) => TerminalHandle;
+  /** Opens a matched terminal path after the client filter and a successful file.stat (DT3-A). Optional: a pane without it shows URL links only. */
+  onOpenFile?: (path: string, line?: number, col?: number) => void;
 }) {
   const key = tabKey ?? `${task.ID}:terminal`;
   const { resolved } = useTheme();
@@ -210,15 +281,37 @@ export function TerminalPane({
   const termRef = useRef<TerminalHandle | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
+  // The current session effect's attach(), read by handleRestart (DT3-B
+  // AC8) -- a restart attaches into the live session's wiring without
+  // re-running the whole list/create effect.
+  const attachRef = useRef<((id: string) => void) | null>(null);
+  const restartingRef = useRef(false);
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [endedStatus, setEndedStatus] = useState<"interrupted" | "closed" | null>(null);
+  // The old session's scrollback is gone (DT3-B AC9): the pane says so
+  // next to the Restart button instead of silently showing an empty shell.
+  const [outputGone, setOutputGone] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   // Copy is disabled only when the handle can actually report "nothing is
   // selected" -- a handle without onSelectionChange leaves it enabled, so
   // the button is never permanently dead (see TerminalHandle).
   const [hasSelection, setHasSelection] = useState(false);
   const [selectionReportable, setSelectionReportable] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
+  // The quiet "not a file in this task's workspace" notice (DT3-A AC3):
+  // one line, cleared on a timer, cleared again on unmount.
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  const linkNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A file.stat that settles after unmount must not show a notice or arm a timer nobody clears.
+  const unmountedRef = useRef(false);
+  // An ended session must not look live: the block cursor is hidden (DEC mode 25) while it is ended and restored on restart.
+  const cursorHiddenRef = useRef(false);
+  const setCursorHidden = useCallback((hidden: boolean) => {
+    if (cursorHiddenRef.current === hidden) return;
+    cursorHiddenRef.current = hidden;
+    termRef.current?.write(hidden ? "\x1b[?25l" : "\x1b[?25h");
+  }, []);
   // Sticky Ctrl/Shift/Alt of the touch key bar; the ref mirrors state for the onData closure.
   const [modifiers, setModifiers] = useState({ ctrl: false, shift: false, alt: false });
   const modifiersRef = useRef(modifiers);
@@ -235,6 +328,11 @@ export function TerminalPane({
   const [findResult, setFindResult] = useState<TerminalFindResult>({ resultIndex: -1, resultCount: 0 });
   const findBarRef = useRef<FindBarHandle>(null);
   const { focused: findFocused, onFocus: onFindFocus, onBlur: onFindBlur } = usePaneFocusWithin();
+
+  // Send to agent (DT3-C): read at menu-open time (SendToAgentMenu's
+  // getEntries below), never captured here -- the selection and the
+  // scrollback are only fresh at the moment the menu is opened.
+  const send = useSendTextToChat(task.ID);
 
   // Read at data-arrival time rather than captured by the attach closure,
   // which is created once per session and would otherwise pin whichever
@@ -347,6 +445,7 @@ export function TerminalPane({
   useEffect(() => {
     setError(null);
     setEndedStatus(null);
+    setOutputGone(false);
     setTerminalId(null);
     terminalIdRef.current = null;
 
@@ -393,6 +492,14 @@ export function TerminalPane({
           },
           { signal: session.controller.signal },
         )
+        .then(() => {
+          // The stream resolving means the session itself ended (the
+          // daemon returns the terminal result when the shell exits); a
+          // rejection (abort, lost connection) is not an end. A restart's
+          // attach has since superseded this id -- don't mark it ended.
+          if (session.cancelled || terminalIdRef.current !== id) return;
+          setEndedStatus("closed");
+        })
         .catch(() => {
           // Either our own detach (unmount/task switch, the expected
           // path) or the session closing server-side -- neither needs
@@ -401,6 +508,7 @@ export function TerminalPane({
           // output, which is visible in the terminal itself.
         });
     }
+    attachRef.current = attach;
 
     client
       .call<TerminalSessionStatus[]>("terminal.list", { taskId: task.ID })
@@ -428,6 +536,38 @@ export function TerminalPane({
             attach(prev.ID);
           } else {
             setEndedStatus(prev?.Status === "interrupted" ? "interrupted" : "closed");
+            // A session found ended on connect still has its retained
+            // scrollback server-side (closedRetentionCap): replay it into
+            // the terminal without binding or adopting the session --
+            // the daemon backfills then ends the stream. Only a replay
+            // that fails (not our own abort) means the output is gone.
+            if (prev) {
+              termRef.current?.reset?.();
+              client!
+                .callStream<TerminalAttachResult>(
+                  "terminal.attach",
+                  { terminalId: prev.ID },
+                  (event, params) => {
+                    if (session.cancelled) return;
+                    if (event === "data") {
+                      termRef.current?.write(base64ToBytes((params as TerminalDataEventParams).data));
+                    }
+                  },
+                  { signal: session.controller.signal },
+                )
+                .then(() => {
+                  // The replayed scrollback may end with the old shell's own "show cursor": hide it again afterwards.
+                  if (!session.cancelled) {
+                    cursorHiddenRef.current = false;
+                    setCursorHidden(true);
+                  }
+                })
+                .catch(() => {
+                  if (!session.cancelled) setOutputGone(true);
+                });
+            } else {
+              setOutputGone(true);
+            }
           }
           return;
         }
@@ -462,6 +602,7 @@ export function TerminalPane({
       session.cancelled = true;
       session.controller.abort();
       if (sessionRef.current === session) sessionRef.current = null;
+      attachRef.current = null;
     };
   }, [client, key, task.ID]);
 
@@ -531,11 +672,86 @@ export function TerminalPane({
     return () => disposable?.dispose();
   }, [createTerminal]);
 
+  // Terminal links (DT3-A): one Ctrl/Cmd+click handler for the provider
+  // registered by setLinkHandler. Kept stable across App re-renders via a
+  // ref -- App passes a fresh onOpenFile closure every render, and
+  // re-registering the provider each time would churn xterm's hover state.
+  const onOpenFileRef = useRef(onOpenFile);
+  onOpenFileRef.current = onOpenFile;
+
+  function showLinkNotice(): void {
+    if (unmountedRef.current) return;
+    setLinkNotice(LINK_NOTICE_TEXT);
+    if (linkNoticeTimer.current !== null) clearTimeout(linkNoticeTimer.current);
+    linkNoticeTimer.current = setTimeout(() => setLinkNotice(null), LINK_NOTICE_MS);
+  }
+
+  const handleLinkMatch = useCallback(
+    (match: TerminalLinkMatch): void => {
+      if (match.kind === "url") {
+        // The matcher only yields http(s), but this check is what stands
+        // between arbitrary text and the system browser, so it stays.
+        if (!/^https?:\/\//i.test(match.url)) return;
+        openExternalUrl(match.url);
+        return;
+      }
+      const rel = resolveTerminalPath(match.path, task.WorktreePath);
+      if (!rel || !client) {
+        showLinkNotice();
+        return;
+      }
+      // Daemon authority (AC3): only a successful stat -- a regular file
+      // in the task's worktree -- opens anything; an error is the notice.
+      client
+        .call("file.stat", { taskId: task.ID, path: rel })
+        .then(() => {
+          onOpenFileRef.current?.(rel, match.line, match.col);
+        })
+        .catch(() => showLinkNotice());
+    },
+    [client, task],
+  );
+
+  useEffect(() => {
+    const disposable = termRef.current?.setLinkHandler?.(handleLinkMatch);
+    return () => disposable?.dispose();
+  }, [handleLinkMatch, createTerminal]);
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      if (linkNoticeTimer.current !== null) clearTimeout(linkNoticeTimer.current);
+    };
+  }, []);
+
   const openFind = useCallback(() => {
     if (!termRef.current?.find) return;
     setFindOpen(true);
   }, []);
   useActionHandler("pane.find", openFind, { enabled: findFocused, menuFallback: true });
+
+  /** The terminal's "Send to agent" entries (DT3-C AC10): read the selection and the scrollback tail only when the menu opens, so the shown sizes are fresh. */
+  const getSendEntries = useCallback((): SendEntry[] => {
+    const selection = termRef.current?.getSelection?.() ?? "";
+    const last = termRef.current?.getLastLines?.(100) ?? "";
+    return [
+      {
+        id: "selection",
+        label: "Selection",
+        disabled: selection === "",
+        detail: selection === "" ? "nothing selected" : formatBytes(buildTerminalBlock(selection, "selection").shownBytes),
+        onSelect: () => send.sendText(selection, "selection", "Terminal selection"),
+      },
+      {
+        id: "last-100",
+        label: "Last 100 lines",
+        disabled: last === "",
+        detail: last === "" ? "no output" : formatBytes(buildTerminalBlock(last, "last 100 lines").shownBytes),
+        onSelect: () => send.sendText(last, "last 100 lines", "Terminal output"),
+      },
+    ];
+  }, [send]);
 
   useEffect(() => {
     if (findOpen) findBarRef.current?.focus();
@@ -599,6 +815,39 @@ export function TerminalPane({
     }
   }
 
+  /**
+   * Restart an ended session (DT3-B AC8): one terminal.create into the
+   * same xterm -- a dim separator line keeps the old output above the
+   * new shell -- then attach through the live session's own attach()
+   * wiring, without re-running the list/create effect.
+   */
+  useEffect(() => {
+    setCursorHidden(endedStatus !== null);
+  }, [endedStatus, setCursorHidden]);
+
+  function handleRestart() {
+    if (restartingRef.current || !client) return;
+    restartingRef.current = true;
+    setRestarting(true);
+    setError(null);
+    client
+      .call<TerminalCreateResult>("terminal.create", { taskId: task.ID })
+      .then(({ terminalId: id }) => {
+        if (unmountedRef.current || !attachRef.current) return;
+        termRef.current?.write("\r\n\x1b[2m--- restarted ---\x1b[0m\r\n");
+        setEndedStatus(null);
+        setOutputGone(false);
+        attachRef.current(id);
+      })
+      .catch((err: unknown) => {
+        if (!unmountedRef.current) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        restartingRef.current = false;
+        if (!unmountedRef.current) setRestarting(false);
+      });
+  }
+
   function clearModifiers() {
     modifiersRef.current = { ctrl: false, shift: false, alt: false };
     setModifiers(modifiersRef.current);
@@ -635,10 +884,26 @@ export function TerminalPane({
       {(endedStatus || !terminalId) && (
         <p
           data-testid="terminal-status"
-          className="border-b px-3 py-1 text-ui-sm text-foreground-subtle"
+          className="flex flex-wrap items-center gap-2 border-b px-3 py-1 text-ui-sm text-foreground-subtle"
           title={terminalId ?? undefined}
         >
           {endedStatus ? `session ${endedStatus}` : "starting terminal…"}
+          {endedStatus && (
+            <>
+              {outputGone && <span data-testid="terminal-output-gone">Its output is no longer kept.</span>}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="max-sm:min-h-11"
+                data-testid="terminal-restart"
+                disabled={restarting}
+                onClick={handleRestart}
+              >
+                Restart terminal
+              </Button>
+            </>
+          )}
         </p>
       )}
       {connectionStatus === "reconnecting" && (
@@ -664,7 +929,18 @@ export function TerminalPane({
           paste failed: {pasteError}
         </p>
       )}
-      <div data-testid="terminal-inset" className="relative min-h-0 flex-1 bg-terminal-bg p-2">
+      {linkNotice && (
+        <p data-testid="terminal-link-notice" className="px-3 py-1 text-ui-sm text-foreground-subtle">
+          {linkNotice}
+        </p>
+      )}
+      {/* A slim row of its own: a floating button would sit on top of the output's first line at 390. */}
+      {send.canSend && (
+        <div className="flex justify-end border-b bg-panel px-2 py-0.5" data-testid="terminal-send-row">
+          <SendToAgentMenu testId="terminal-send-menu" getEntries={getSendEntries} />
+        </div>
+      )}
+      <div data-testid="terminal-inset" className="relative min-h-0 flex-1 bg-panel p-2">
         {/* Inset lives on this wrapper, never on the fit host: FitAddon ignores the host's own padding. */}
         <div ref={containerRef} data-testid="terminal-container" className="terminal-xterm-shell h-full" />
         {findOpen && (

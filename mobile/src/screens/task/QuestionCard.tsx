@@ -80,6 +80,7 @@ export const QuestionCard = memo(function QuestionCard({
           {blocked}
         </Text>
       ) : null}
+      {state.error !== null ? <ErrorLine raw={state.error} /> : null}
       <View style={styles.actions}>
         <UiHost>
           <Button
@@ -95,7 +96,6 @@ export const QuestionCard = memo(function QuestionCard({
         </UiHost>
         <OutlineButton label="Decline" disabled={sending} onPress={() => onAnswer(state.requestId, declinePayload(note))} />
       </View>
-      {state.error !== null ? <ErrorLine raw={state.error} /> : null}
     </Card>
   );
 });

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements of the bundled Go daemon (Contents/MacOS/smind) under the hardened runtime
+  (ADR-0060 draft). Empty to start: the daemon is a static CGO_ENABLED=0 binary; it spawns
+  agent CLIs, a shell and ptys, which the hardened runtime does not restrict for the parent.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

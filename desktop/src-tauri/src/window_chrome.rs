@@ -15,7 +15,7 @@
 //!
 //! The window-control permissions the UI uses (minimize, toggle-maximize,
 //! close, start-dragging, is-maximized, is-fullscreen) are Tauri core
-//! `core:window:allow-*` grants in `capabilities/proxy.json`; `close`
+//! `core:window:allow-*` grants in `capability-templates/proxy.json`; `close`
 //! raises `CloseRequested`, so the drawn close button reuses the
 //! hide-to-tray handler in `lib.rs` rather than quitting.
 
@@ -28,6 +28,22 @@ use tauri::webview::WebviewWindowBuilder;
 use tauri::{AppHandle, Manager, Runtime, State, Theme};
 
 use crate::MAIN_WINDOW;
+
+/// The smallest the main window can be (logical pixels). The width stays above the web UI's mobile breakpoint
+/// (768 px, `hooks/use-mobile.ts`): below it the sidebar becomes a sheet and the header loses the drawn window
+/// chrome, which is not a layout a desktop window should fall into. The height keeps the composer, the header
+/// and a few rows of the sidebar on screen.
+pub const MIN_WINDOW: (f64, f64) = (800.0, 520.0);
+
+/// `Some(size)` when a logical size is below [`MIN_WINDOW`], the size to put the window back to. The OS enforces
+/// the minimum while the user drags, but a size saved by a build that had no minimum is restored by the
+/// window-state plugin and may be smaller; the shell applies this on every resize so it is corrected at once.
+pub fn clamp_to_minimum(width: f64, height: f64) -> Option<(f64, f64)> {
+    if width >= MIN_WINDOW.0 && height >= MIN_WINDOW.1 {
+        return None;
+    }
+    Some((width.max(MIN_WINDOW.0), height.max(MIN_WINDOW.1)))
+}
 
 /// How long a window may stay hidden waiting for the UI's "painted"
 /// signal before it is shown anyway.
@@ -146,7 +162,10 @@ pub fn configure<'a, R: Runtime, M: Manager<R>>(
     surface: Surface,
 ) -> WebviewWindowBuilder<'a, R, M> {
     // D2.1: hidden with a matching background until the UI has painted.
-    let builder = builder.visible(false).background_color(surface.color());
+    let builder = builder
+        .visible(false)
+        .background_color(surface.color())
+        .min_inner_size(MIN_WINDOW.0, MIN_WINDOW.1);
 
     #[cfg(target_os = "macos")]
     let builder = {
@@ -202,12 +221,43 @@ pub fn dismissed<R: Runtime>(app: &AppHandle<R>) {
     app.state::<ShowGate>().signal(Signal::Dismissed);
 }
 
-/// The bundled UI has painted its first frame.
+/// The bundled UI has painted its first frame. `main` goes through the launch gate; a task window (created hidden
+/// like `main`) is simply shown. Either way it acts on the CALLING window, never on another one.
 #[tauri::command]
-pub fn window_ready(app: AppHandle, gate: State<'_, ShowGate>) {
+pub fn window_ready(app: AppHandle, window: tauri::Window, gate: State<'_, ShowGate>) {
+    if window.label() != MAIN_WINDOW {
+        if let Some(win) = app.get_webview_window(window.label()) {
+            // Only the first paint shows it: a reload's repeated signal must not grab focus again.
+            if !win.is_visible().unwrap_or(false) {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }
+        return;
+    }
     if gate.signal(Signal::Ready) {
         reveal(&app);
     }
+}
+
+/// Fallback for a task window whose UI never reports a paint: show it anyway after [`READY_FALLBACK`]. It holds the
+/// window handle itself, not its label: if that window was destroyed and the slot rebuilt, the handle is dead and the
+/// timer does nothing to the new window (a label lookup would have shown it before its first paint).
+pub fn arm_task_fallback<R: Runtime>(win: tauri::WebviewWindow<R>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(READY_FALLBACK).await;
+        if !win.is_visible().unwrap_or(true) {
+            let _ = win.show();
+        }
+    });
+}
+
+/// The window an app-menu action should act on: the focused one, else `main`.
+pub fn focused_or_main<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::WebviewWindow<R>> {
+    app.webview_windows()
+        .into_values()
+        .find(|w| w.is_focused().unwrap_or(false))
+        .or_else(|| app.get_webview_window(MAIN_WINDOW))
 }
 
 /// Mirrors the UI's theme into the window: the native theme (macOS
@@ -217,6 +267,7 @@ pub fn window_ready(app: AppHandle, gate: State<'_, ShowGate>) {
 #[tauri::command]
 pub fn window_set_theme(
     app: AppHandle,
+    window: tauri::Window,
     preference: String,
     resolved: String,
 ) -> Result<(), String> {
@@ -229,7 +280,8 @@ pub fn window_set_theme(
         other => return Err(format!("window_set_theme: unknown preference {other:?}")),
     };
     save_surface(&app, surface);
-    if let Some(win) = app.get_webview_window(MAIN_WINDOW) {
+    // The calling window (main or a task window), never another one.
+    if let Some(win) = app.get_webview_window(window.label()) {
         win.set_theme(theme).map_err(|e| e.to_string())?;
         win.set_background_color(Some(surface.color()))
             .map_err(|e| e.to_string())?;
@@ -290,5 +342,120 @@ mod tests {
             css.contains(&hex(Surface::DARK_RGB)),
             "dark --background in index.css no longer matches Surface::DARK_RGB"
         );
+    }
+}
+
+#[cfg(test)]
+mod min_size_tests {
+    use super::*;
+
+    #[test]
+    fn the_minimum_width_keeps_the_desktop_layout() {
+        // hooks/use-mobile.ts flips to the sheet sidebar below 768 CSS px.
+        assert!(MIN_WINDOW.0 >= 768.0);
+        assert!(MIN_WINDOW.1 >= 480.0);
+    }
+
+    #[test]
+    fn clamp_to_minimum_table() {
+        let (w, h) = MIN_WINDOW;
+        type Case = (f64, f64, Option<(f64, f64)>);
+        let cases: &[Case] = &[
+            (1280.0, 800.0, None),
+            (w, h, None),
+            (w - 1.0, 800.0, Some((w, 800.0))),
+            (1280.0, h - 1.0, Some((1280.0, h))),
+            (300.0, 200.0, Some((w, h))),
+            (0.0, 0.0, Some((w, h))),
+        ];
+        for (cw, ch, want) in cases {
+            assert_eq!(clamp_to_minimum(*cw, *ch), *want, "{cw}x{ch}");
+        }
+    }
+
+    #[test]
+    fn the_main_window_builder_sets_the_minimum() {
+        let src = include_str!("window_chrome.rs");
+        let configure = src
+            .split("pub fn configure<")
+            .nth(1)
+            .expect("configure exists");
+        let body = configure.split("\n}\n").next().expect("configure body");
+        assert!(
+            body.contains(".min_inner_size(MIN_WINDOW.0, MIN_WINDOW.1)"),
+            "configure must set the window minimum"
+        );
+    }
+
+    #[test]
+    fn the_shell_applies_the_clamp_on_resize() {
+        let src = include_str!("lib.rs");
+        let handler = src
+            .split("tauri::WindowEvent::Resized(")
+            .nth(1)
+            .expect("the main window handles Resized");
+        assert!(
+            handler
+                .split("_ => {}")
+                .next()
+                .unwrap()
+                .contains("window_chrome::clamp_to_minimum("),
+            "the Resized handler must call clamp_to_minimum"
+        );
+    }
+}
+
+#[cfg(test)]
+mod multi_window_tests {
+    fn body<'a>(src: &'a str, start: &str) -> &'a str {
+        let rest = src
+            .split(start)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{start} exists"));
+        rest.split("\n}\n").next().unwrap()
+    }
+
+    #[test]
+    fn window_commands_use_the_calling_window() {
+        let src = include_str!("window_chrome.rs");
+        let ready = body(src, "pub fn window_ready(");
+        assert!(
+            ready.contains("window.label()"),
+            "window_ready must read the caller's label"
+        );
+        let theme = body(src, "pub fn window_set_theme(");
+        assert!(
+            theme.contains("window.label()"),
+            "window_set_theme must act on the calling window"
+        );
+        assert!(
+            !theme.contains("get_webview_window(MAIN_WINDOW)"),
+            "window_set_theme must not target main"
+        );
+    }
+
+    #[test]
+    fn app_menu_actions_target_the_focused_window_and_zoom_every_window() {
+        let menu = include_str!("menu.rs");
+        let native = body(menu, "fn handle_native(");
+        assert!(native.contains("focused_or_main(app)"));
+        assert!(native.contains("main.hide()"), "Hide stays on main");
+        let zoom = body(menu, "fn apply_zoom(");
+        assert!(
+            zoom.contains("webview_windows()"),
+            "zoom applies to every open window"
+        );
+    }
+
+    #[test]
+    fn app_wide_menu_events_are_never_broadcast() {
+        let menu = include_str!("menu.rs");
+        let handler = body(menu, "pub fn handle_event(");
+        assert!(handler.contains("emit_to(target.as_str(), \"menu-action\""));
+        assert!(
+            !handler.contains("app.emit(\"menu-action\""),
+            "a broadcast would run the action in every window"
+        );
+        assert!(!handler.contains("app.emit(\"app-update-check-requested\""));
     }
 }

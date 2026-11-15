@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements of sMind.app under the hardened runtime (ADR-0060 draft). Deliberately EMPTY to
+  start: the app is not sandboxed, loads no third-party dylibs and its web view runs in the
+  system's own processes, so none of the runtime exceptions is known to be needed. If the first
+  signed build misbehaves under the hardened runtime, add ONLY the exception its failure names
+  (candidates: com.apple.security.cs.allow-jit, com.apple.security.cs.allow-unsigned-executable-memory,
+  com.apple.security.cs.disable-library-validation) and record why in the ADR.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

@@ -47,7 +47,10 @@ struct BadgeState {
 
 impl<S: BadgeSetter> Badge<S> {
     pub fn new(setter: S) -> Self {
-        Self { setter, state: Mutex::new(BadgeState::default()) }
+        Self {
+            setter,
+            state: Mutex::new(BadgeState::default()),
+        }
     }
 
     pub fn update(&self, count: usize) {
@@ -56,7 +59,10 @@ impl<S: BadgeSetter> Badge<S> {
         if st.shown == count {
             return;
         }
-        if self.setter.set(if count > 0 { Some(count as i64) } else { None }) {
+        if self
+            .setter
+            .set(if count > 0 { Some(count as i64) } else { None })
+        {
             st.shown = count;
         }
     }
@@ -107,9 +113,19 @@ impl BadgeSetter for WindowBadge {
 /// re-launched from Finder) while running -- show the main window again,
 /// even when it was hidden by the close button or minimized.
 pub fn handle_run_event(app: &AppHandle, event: RunEvent) {
+    // Cmd+Q, tray Quit, Dock Quit: the open task and tab are stored before the window goes (window_layout.rs).
+    if matches!(event, RunEvent::ExitRequested { .. }) {
+        crate::window_layout::save_main(app);
+    }
     #[cfg(target_os = "macos")]
-    if let RunEvent::Reopen { has_visible_windows, .. } = event {
-        log::info!("dock reopen (has_visible_windows={has_visible_windows}): showing the main window");
+    if let RunEvent::Reopen {
+        has_visible_windows,
+        ..
+    } = event
+    {
+        log::info!(
+            "dock reopen (has_visible_windows={has_visible_windows}): showing the main window"
+        );
         if let Some(win) = app.get_webview_window(MAIN_WINDOW) {
             let _ = win.unminimize();
             let _ = win.show();

@@ -29,6 +29,23 @@ export interface SplitGroup {
 
 export type SplitNode = { kind: "pane"; pane: SplitPane } | { kind: "group"; group: SplitGroup };
 
+/**
+ * A remembered starting ratio per split direction (D3 of docs/plans/active/desktop-tabs.md): the fraction the FIRST child (the left
+ * pane of a horizontal split, the top pane of a vertical one) takes when a NEW two-pane group is created. Absent = the 50/50 default.
+ */
+export interface SplitRatios {
+  horizontal?: number;
+  vertical?: number;
+}
+
+/** The sizes of a freshly created two-pane group: the remembered ratio for its direction (clamped to MIN_SPLIT_SIZE), else 50/50. */
+export function startingSizes(direction: "horizontal" | "vertical", ratios: SplitRatios | undefined): [number, number] {
+  const first = ratios?.[direction];
+  if (first === undefined || !Number.isFinite(first)) return [0.5, 0.5];
+  const [a, b] = clampNormalizedSizes([first, 1 - first]);
+  return [a ?? 0.5, b ?? 0.5];
+}
+
 export interface TaskLayout {
   root: SplitNode;
   focusedPaneId: string | null;
@@ -430,6 +447,14 @@ function updateGroupSizesInTree(root: SplitNode, input: { groupId: string; sizes
   });
 }
 
+/** The group with `groupId` anywhere in the tree, or null. */
+export function findGroupById(root: SplitNode, groupId: string): SplitGroup | null {
+  const path = findGroupPathById(root, groupId);
+  if (!path) return null;
+  const node = getNodeAtPath(root, path);
+  return node.kind === "group" ? node.group : null;
+}
+
 export function updatePaneInTree(
   root: SplitNode,
   input: { paneId: string; updater: (pane: SplitPane) => SplitPane },
@@ -455,6 +480,7 @@ function insertSplitInternal(input: {
   tabKey: string;
   position: "left" | "right" | "top" | "bottom";
   createNodeId: (prefix: "pane" | "group") => string;
+  ratios?: SplitRatios;
 }): InsertSplitInternalResult {
   const direction = input.position === "left" || input.position === "right" ? "horizontal" : "vertical";
   const insertAfter = input.position === "right" || input.position === "bottom";
@@ -499,7 +525,7 @@ function insertSplitInternal(input: {
     id: input.createNodeId("group"),
     direction,
     children: insertAfter ? [targetNode, newPaneNode] : [newPaneNode, targetNode],
-    sizes: [0.5, 0.5],
+    sizes: startingSizes(direction, input.ratios),
   });
 
   return {
@@ -685,8 +711,9 @@ export function insertSplit(
   tabKey: string,
   position: "left" | "right" | "top" | "bottom",
   createNodeId: (prefix: "pane" | "group") => string,
+  ratios?: SplitRatios,
 ): SplitNode {
-  return insertSplitInternal({ root, targetPaneId, tabKey, position, createNodeId }).root;
+  return insertSplitInternal({ root, targetPaneId, tabKey, position, createNodeId, ratios }).root;
 }
 
 export function removePaneFromTree(root: SplitNode, paneId: string): SplitNode {
@@ -761,6 +788,8 @@ export function splitPaneInLayout(input: {
   position: "left" | "right" | "top" | "bottom";
   createNodeId: (prefix: "pane" | "group") => string;
   maxTreeDepth: number;
+  /** The workspace's remembered starting ratio for a NEW group (D3); extending an existing same-direction group is unchanged. */
+  ratios?: SplitRatios;
 }): { layout: TaskLayout; paneId: string } | null {
   const layout = input.layout;
   if (!findPaneById(layout.root, input.targetPaneId)) {
@@ -776,6 +805,7 @@ export function splitPaneInLayout(input: {
     tabKey: input.tabKey,
     position: input.position,
     createNodeId: input.createNodeId,
+    ratios: input.ratios,
   });
   if (getTreeDepth(result.root) > input.maxTreeDepth) {
     return null;
@@ -793,6 +823,8 @@ export function splitPaneEmptyInLayout(input: {
   position: "left" | "right" | "top" | "bottom";
   createNodeId: (prefix: "pane" | "group") => string;
   maxTreeDepth: number;
+  /** The workspace's remembered starting ratio for a NEW group (D3). */
+  ratios?: SplitRatios;
 }): { layout: TaskLayout; paneId: string } | null {
   const layout = input.layout;
   if (!findPaneById(layout.root, input.targetPaneId)) {
@@ -829,7 +861,7 @@ export function splitPaneEmptyInLayout(input: {
       id: input.createNodeId("group"),
       direction,
       children: insertAfter ? [targetNode, newPaneNode] : [newPaneNode, targetNode],
-      sizes: [0.5, 0.5],
+      sizes: startingSizes(direction, input.ratios),
     });
     nextRoot = replaceNodeAtPath(layout.root, targetPath, () => newGroup);
   }
@@ -871,6 +903,29 @@ export function moveTabToPaneInLayout(input: {
       focusTabKey: input.tabKey,
     }),
     focusedPaneId: input.toPaneId,
+  };
+}
+
+/**
+ * Reorders a tab within its own pane: `toIndex` is the insertion slot in the CURRENT tab list (0 = before the first tab,
+ * `tabs.length` = after the last), the way a drop indicator between two tabs reads. Returns null when nothing would
+ * change (unknown pane or tab, or dropped where it already is).
+ */
+export function reorderTabInLayout(input: { layout: TaskLayout; paneId: string; tabKey: string; toIndex: number }): TaskLayout | null {
+  const pane = findPaneById(input.layout.root, input.paneId);
+  if (!pane) return null;
+  const from = pane.tabs.findIndex((t) => t.key === input.tabKey);
+  if (from === -1) return null;
+  const slot = Math.max(0, Math.min(pane.tabs.length, Math.trunc(input.toIndex)));
+  // Removing the tab shifts every later slot down by one.
+  const to = slot > from ? slot - 1 : slot;
+  if (to === from) return null;
+  const tabs = pane.tabs.slice();
+  const [moved] = tabs.splice(from, 1);
+  tabs.splice(to, 0, moved!);
+  return {
+    root: updatePaneInTree(input.layout.root, { paneId: input.paneId, updater: (p) => ({ ...p, tabs }) }),
+    focusedPaneId: input.layout.focusedPaneId,
   };
 }
 

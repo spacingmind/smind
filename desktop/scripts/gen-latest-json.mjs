@@ -20,6 +20,37 @@ export function normalizeVersion(version) {
   return v;
 }
 
+// The version a minisign signature was made for: the `version:` field of its trusted comment (the
+// Tauri CLI writes `timestamp:..\tfile:..\tversion:X.Y.Z`). A .sig file is the base64 of the
+// four-line minisign signature text. The updater plugin checks the signature cryptographically at
+// install time; this reads the signed comment so a release the updater would refuse
+// (`requireSignedVersion`) is stopped before it is published.
+export function signedVersionOf(signature) {
+  const b64 = String(signature).trim();
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
+    throw new Error("not a base64 minisign signature");
+  }
+  // Exactly what the updater plugin reads: the THIRD line, which must start `trusted comment: `
+  // (with the space), split on tabs, no trimming, the field that starts `version:`. Anything
+  // the plugin would not read as a signed version is not one here (a field with a leading space
+  // would pass a trimming reader and be refused by the plugin). Keep in sync with the same function
+  // in scripts/verify-release-artifacts.mjs.
+  const line = Buffer.from(b64, "base64").toString("utf8").split(/\r?\n/)[2]; // Rust str::lines() strips \r too
+  if (line === undefined || !line.startsWith("trusted comment: ")) {
+    throw new Error("the signature has no trusted comment");
+  }
+  const field = line
+    .slice("trusted comment: ".length)
+    .split("\t")
+    .find((f) => f.startsWith("version:"));
+  if (field === undefined) {
+    throw new Error(
+      "the signature carries no signed version (the updater's requireSignedVersion would refuse it): re-sign it with the Tauri CLI"
+    );
+  }
+  return field.slice("version:".length);
+}
+
 export function buildLatestJson({ version, tag, repo, notes, pubDate, files }) {
   const normalized = normalizeVersion(version);
   const platforms = {};
@@ -34,6 +65,18 @@ export function buildLatestJson({ version, tag, repo, notes, pubDate, files }) {
     if (signature === "") {
       throw new Error(
         `empty signature for platform "${platform}": the .sig file content is required`
+      );
+    }
+    let signed;
+    try {
+      signed = signedVersionOf(signature);
+    } catch (err) {
+      throw new Error(`signature for platform "${platform}": ${err.message}`);
+    }
+    // the plugin strips every leading `v` (trim_start_matches) before comparing as semver
+    if (normalizeVersion(signed.replace(/^v+/, "")) !== normalized) {
+      throw new Error(
+        `signature for platform "${platform}" was signed for version "${signed}" but the manifest version is "${normalized}": the updater would refuse it`
       );
     }
     platforms[platform] = {

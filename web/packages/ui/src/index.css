@@ -1149,3 +1149,10 @@ html[data-desktop-os] body {
 [role="tab"][aria-selected="false"]:focus-within [data-tab-title] {
   mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
 }
+
+/* A tab being dragged along or between strips (App.tsx sets the flag for the whole drag): the grabbing cursor everywhere,
+   since the pointer is over other elements while the tab is held. */
+html[data-tab-dragging="true"],
+html[data-tab-dragging="true"] * {
+  cursor: grabbing !important;
+}

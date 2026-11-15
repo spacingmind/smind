@@ -9,7 +9,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -84,19 +83,14 @@ import { SetupBadge } from "@/components/task-setup";
 import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { AppContextMenu } from "@/components/ui/app-context-menu";
+import { MenuEntries, type MenuParts } from "@/components/ui/menu-entries";
+import { rowMenu, taskRowMenu, workspaceRowItems, type RowMenuItem } from "@/lib/menu-models";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -104,14 +98,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FadeText } from "@/components/ui/fade-text";
-import { ignoreSelect, MENU_CLOSE_INSTANT, reachableDisabledProps } from "@/lib/menu-item-disabled";
+import { MENU_CLOSE_INSTANT } from "@/lib/menu-item-disabled";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/components/ui/toast";
 import { useLocalPathActions, type LocalPathActions } from "@/hooks/use-local-path-actions";
 import { useWindowState } from "@/hooks/use-window-state";
-import { desktopOS, isDesktop } from "@/lib/platform";
+import { desktop, desktopOS, isDesktop } from "@/lib/platform";
 import { TRAFFIC_LIGHT_CLUSTER_PX, hasTrafficLights, toggleZoneEndPx } from "@/lib/window-chrome";
 import {
   Sidebar,
@@ -536,6 +530,9 @@ export function AppSidebar({
     () => groupTasksByStatus(viewTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
     [viewTasks, attention, runStatus],
   );
+  // The pinned "Needs you" section (AC9) lists the status view's
+  // needs-attention bucket in the default view too.
+  const needsYouTasks = useMemo(() => statusGroups.find((g) => g.key === "needs-attention")?.tasks ?? [], [statusGroups]);
   const { permission: notificationPermission } = useNotificationPermission();
   const { enabled: notificationSoundEnabled } = useNotificationSoundPreference();
   const openNotifiedTask = useCallback(
@@ -1021,6 +1018,14 @@ export function AppSidebar({
                       onArchiveTask={archiveTask}
                     />
                   )}
+                  {!searching && groupMode !== "status" && needsYouTasks.length > 0 && (
+                    <NeedsYouSection
+                      tasks={needsYouTasks}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={archiveTask}
+                    />
+                  )}
                   {!searching && pinnedTasks.length > 0 && (
                     <PinnedSection
                       tasks={pinnedTasks}
@@ -1365,6 +1370,63 @@ function PinnedSection({
 }
 
 /**
+ * The pinned "Needs you" section (AC9): the tasks currently in the
+ * needs-attention bucket, flattened above the workspaces in the default
+ * tree view -- same TaskRows as everywhere else, so a row here is the same
+ * row, with the same selection, as under its workspace (the task stays in
+ * the tree too). Not rendered while searching; the status view keeps its
+ * own bucket. Whether the section is collapsed is persisted like
+ * PinnedSection's (sidebar-polish S8, id `needs-you`).
+ */
+function NeedsYouSection({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  tasks: Task[];
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  const [open, toggleOpen] = useNodeOpen("needs-you");
+  const { active, rowProps } = useRowActive();
+
+  return (
+    <SidebarMenuItem data-testid="sidebar-needs-you-section">
+      <div {...rowProps}>
+        <SidebarMenuButton
+          onClick={toggleOpen}
+          aria-expanded={open}
+          data-testid="sidebar-needs-you-section-header"
+          className="rounded-lg"
+        >
+          <Icons.inbox className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+          <FadeText
+            data-testid="container-title"
+            className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
+          >
+            Needs you
+          </FadeText>
+          <RowChevron open={open} />
+        </SidebarMenuButton>
+      </div>
+      {open && (
+        <ContainerContent kind="pinned">
+          <TaskRows
+            tasks={tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            emptyText=""
+            onArchiveTask={onArchiveTask}
+          />
+        </ContainerContent>
+      )}
+    </SidebarMenuItem>
+  );
+}
+
+/**
  * The group-by-status view (AC6): one collapsible bucket per
  * lib/sidebar-status-groups.ts group, each rendering its tasks through the
  * same TaskRows the tree view uses -- replaces the workspace/space tree
@@ -1619,7 +1681,13 @@ function RowChevron({ open }: { open: boolean }) {
  * is how the row learns its menu is open so it stays mounted.
  */
 /** One entry of a workspace/space row menu. `fadeOut` keeps the menu's exit animation for items that do not open a dialog. */
-type RowMenuItem = { label: string; icon: ReactNode; onSelect: () => void; fadeOut?: boolean };
+
+/** Desktop only: asks the shell for the task's own window (one per task; an existing one is focused). The shell's refusal (the window cap) is shown as is. */
+function openTaskInNewWindow(task: Task): void {
+  void desktop.windowOpenTask(task.ID).catch((err: unknown) => {
+    toast({ variant: "error", title: "Could not open a new window", description: err instanceof Error ? err.message : undefined });
+  });
+}
 
 function RowMenu({
   items,
@@ -1651,6 +1719,7 @@ function RowMenu({
         {items.map((item) => (
           <DropdownMenuItem
             key={item.label}
+            disabled={item.enabled === false}
             onSelect={() => {
               if (item.fadeOut !== true) setInstantClose(true);
               item.onSelect();
@@ -1724,28 +1793,14 @@ function WorkspaceItem({
   const flat = workspace.spaces.length === 0;
   const { attention, runStatus } = useRowSignal();
   const aggregate = aggregateStatus(workspaceTasks(workspace), attention, runStatus);
-  const items: RowMenuItem[] = [
-    { label: "Add task", icon: <Icons.add />, onSelect: () => onAddTask(null) },
-    { label: "Add space", icon: <Icons.add />, onSelect: onAddSpace },
-    ...(localPathActions
-      ? [
-          {
-            label: localPathActions.revealLabel,
-            icon: <Icons.folderOpen />,
-            onSelect: () => localPathActions.reveal(workspace.Path),
-            fadeOut: true,
-          },
-          ...localPathActions.editors.map((editor) => ({
-            label: `Open in ${editor.label}`,
-            icon: <Icons.externalLink />,
-            onSelect: () => localPathActions.open(editor.id, workspace.Path),
-            fadeOut: true,
-          })),
-        ]
-      : []),
-    { label: "Worktree settings", icon: <Icons.terminal />, onSelect: onEditScripts },
-    { label: "Delete workspace", icon: <Icons.delete />, onSelect: onDeleteWorkspace },
-  ];
+  const items = workspaceRowItems({
+    path: workspace.Path,
+    localPathActions,
+    onAddTask: () => onAddTask(null),
+    onAddSpace,
+    onEditScripts,
+    onDeleteWorkspace,
+  });
 
   const { active, rowProps, setMenuOpen } = useRowActive();
   const [contextInstantClose, setContextInstantClose] = useState(false);
@@ -1766,7 +1821,12 @@ function WorkspaceItem({
   };
   return (
     <SidebarMenuItem>
-      <ContextMenu onOpenChange={(open) => open && setContextInstantClose(false)}>
+      <AppContextMenu
+        entries={rowMenu(items)}
+        onOpenChange={(open) => open && setContextInstantClose(false)}
+        onDialogSelect={() => setContextInstantClose(true)}
+        contentProps={{ "data-testid": "sidebar-workspace-context-menu", className: contextInstantClose ? MENU_CLOSE_INSTANT : undefined }}
+      >
         {/*
           * The hover/focus scope is this wrapper -- the header line only --
           * not the li, which also contains the workspace's whole subtree.
@@ -1775,7 +1835,6 @@ function WorkspaceItem({
           * header pushes it out (the li is its containing block). Space
           * headers pin just beneath it (top-8 = this header's h-8).
           */}
-        <ContextMenuTrigger asChild>
           <div className="sticky top-0 z-20 bg-sidebar" {...rowProps}>
             <SidebarMenuButton
               onClick={onRowClick}
@@ -1834,25 +1893,7 @@ function WorkspaceItem({
               )}
             </RowActions>
           </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent
-          data-testid="sidebar-workspace-context-menu"
-          className={contextInstantClose ? MENU_CLOSE_INSTANT : undefined}
-        >
-          {items.map((item) => (
-            <ContextMenuItem
-              key={item.label}
-              onSelect={() => {
-                if (item.fadeOut !== true) setContextInstantClose(true);
-                item.onSelect();
-              }}
-            >
-              {item.icon}
-              {item.label}
-            </ContextMenuItem>
-          ))}
-        </ContextMenuContent>
-      </ContextMenu>
+      </AppContextMenu>
       {expanded && (
         <ContainerContent kind="workspace">
           {flat ? (
@@ -2337,14 +2378,16 @@ const TaskRow = memo(function TaskRow({
   const hideForActions = active && "@max-[14rem]/sb:invisible";
   const treeActions = useContext(TreeActionsContext);
   const treeAvailability = treeActions?.availability.get(task.ID);
-  const menuEntries = taskMenuEntries(task, {
+  const menuEntries = taskRowMenu(task, {
     spaces,
     onMoveTask,
     isPinned: isTaskPinned,
+    isUnread,
     onTogglePin,
     onMarkUnread,
     onArchiveTask,
     onNewSubTask: treeActions ? () => treeActions.onNewSubTask(task) : undefined,
+    onOpenInNewWindow: isDesktop ? () => openTaskInNewWindow(task) : undefined,
     tree: treeActions && treeAvailability
       ? {
           availability: treeAvailability,
@@ -2373,8 +2416,12 @@ const TaskRow = memo(function TaskRow({
     .filter(Boolean)
     .join(", ");
   return (
-    <ContextMenu onOpenChange={setMenuOpen}>
-      <ContextMenuTrigger asChild>
+    <AppContextMenu
+      entries={menuEntries}
+      onOpenChange={setMenuOpen}
+      onDialogSelect={() => setInstantClose(true)}
+      contentProps={{ "data-testid": "sidebar-task-context-menu", className: instantClose ? MENU_CLOSE_INSTANT : undefined }}
+    >
         <div
           data-testid="sidebar-task-item"
           data-task-id={task.ID}
@@ -2521,7 +2568,7 @@ const TaskRow = memo(function TaskRow({
                   {git?.diff && git.diff.files > 0 && (
                     <span
                       data-testid="sidebar-task-diffstat"
-                      className="shrink-0 text-ui-xs tabular-nums @max-[14rem]/sb:hidden"
+                      className="shrink-0 text-ui-xs tabular-nums @max-[18rem]/sb:hidden"
                       title={`${git.diff.files} changed, +${git.diff.insertions} -${git.diff.deletions}`}
                     >
                       <span className={git.diff.insertions === 0 ? "text-muted-foreground" : "text-success"}>+{git.diff.insertions}</span>{" "}
@@ -2529,7 +2576,7 @@ const TaskRow = memo(function TaskRow({
                     </span>
                   )}
                   {git && (
-                    <span className="@max-[14rem]/sb:hidden">
+                    <span className="@max-[18rem]/sb:hidden">
                       <SidebarGitGlyph git={git} />
                     </span>
                   )}
@@ -2571,17 +2618,13 @@ const TaskRow = memo(function TaskRow({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className={instantClose ? MENU_CLOSE_INSTANT : undefined}>
-                  <TaskMenuItems entries={menuEntries} parts={DROPDOWN_PARTS} onDialogSelect={() => setInstantClose(true)} />
+                  <MenuEntries entries={menuEntries} parts={DROPDOWN_PARTS} onDialogSelect={() => setInstantClose(true)} />
                 </DropdownMenuContent>
               </DropdownMenu>
             </span>
           )}
         </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent data-testid="sidebar-task-context-menu" className={instantClose ? MENU_CLOSE_INSTANT : undefined}>
-        <TaskMenuItems entries={menuEntries} parts={CONTEXT_PARTS} onDialogSelect={() => setInstantClose(true)} />
-      </ContextMenuContent>
-    </ContextMenu>
+    </AppContextMenu>
   );
 });
 
@@ -2711,148 +2754,14 @@ function TaskRows({
   return <>{nodes.map((node) => renderNode(node, rootPad))}</>;
 }
 
-/**
- * One task's menu, defined once and rendered by BOTH the ⋯ dropdown and the
- * right-click context menu (sidebar-polish S6) so the two can never offer
- * different items or call different handlers -- the same approach
- * WorkspaceItem already takes with its `items`.
- */
-type TaskMenuEntry =
-  | { kind: "move"; targets: { id: number | null; label: string }[]; onMove: (spaceId: number | null) => void }
-  | {
-      kind: "item";
-      testId: string;
-      label: string;
-      icon: ReactNode;
-      onSelect: () => void;
-      /** Unavailable but still focusable: the reason is `mutedNote` (see lib/menu-item-disabled.ts). */
-      disabled?: boolean;
-      mutedNote?: string;
-      /** Opening a dialog: the menu closes instantly rather than fading out under it. */
-      opensDialog?: boolean;
-    };
 
-/**
- * "Move to space" lists every other space in the task's workspace plus
- * "Ungrouped" unless the task is already there (no self-move). It is omitted
- * with no `spaces`/`onMoveTask` pair (SearchResults' flat list spans workspaces
- * and doesn't offer the move) or nowhere to move to.
- */
-function taskMenuEntries(
-  task: Task,
-  o: {
-    spaces?: SpaceWithTasks[];
-    onMoveTask?: (task: Task, spaceId: number | null) => void;
-    isPinned: boolean;
-    onTogglePin: (taskId: number) => void;
-    onMarkUnread: (taskId: number) => void;
-    onArchiveTask: (task: Task) => void;
-    /** Opens the New sub-task dialog; absent outside the tree provider (search results). */
-    onNewSubTask?: () => void;
-    /** PR-H11 tree actions; present only on rows in the tree view whose task has live descendants. */
-    tree?: { availability: TreeActionAvailability; onArchiveFinished: () => void; onStopTree: () => void };
-  },
-): TaskMenuEntry[] {
-  const entries: TaskMenuEntry[] = [];
-  if (o.onNewSubTask && !task.ArchivedAt) {
-    entries.push({
-      kind: "item",
-      testId: "sidebar-task-new-subtask-action",
-      label: "New sub-task…",
-      icon: <Icons.add />,
-      onSelect: o.onNewSubTask,
-      opensDialog: true,
-    });
-  }
-  if (o.tree) {
-    const { availability, onArchiveFinished, onStopTree } = o.tree;
-    entries.push(
-      {
-        kind: "item",
-        testId: "sidebar-task-archive-finished-action",
-        label: "Archive finished sub-tasks…",
-        icon: <Icons.archive />,
-        onSelect: onArchiveFinished,
-        opensDialog: true,
-        disabled: !availability.archive.enabled,
-        mutedNote: availability.archive.reason ?? undefined,
-      },
-      {
-        kind: "item",
-        testId: "sidebar-task-stop-tree-action",
-        label: "Stop all in tree…",
-        icon: <Icons.stop />,
-        onSelect: onStopTree,
-        opensDialog: true,
-        disabled: !availability.stop.enabled,
-        mutedNote: availability.stop.reason ?? undefined,
-      },
-    );
-  }
-  if (o.spaces && o.onMoveTask) {
-    const targets: { id: number | null; label: string }[] = [];
-    if (task.SpaceID !== null) targets.push({ id: null, label: "Ungrouped" });
-    for (const space of o.spaces) {
-      if (space.ID !== task.SpaceID) targets.push({ id: space.ID, label: space.Title });
-    }
-    const onMoveTask = o.onMoveTask;
-    if (targets.length > 0) entries.push({ kind: "move", targets, onMove: (spaceId) => onMoveTask(task, spaceId) });
-  }
-  entries.push(
-    {
-      kind: "item",
-      testId: "sidebar-task-pin-action",
-      label: o.isPinned ? "Unpin" : "Pin",
-      icon: o.isPinned ? <Icons.unpin /> : <Icons.pin />,
-      onSelect: () => o.onTogglePin(task.ID),
-    },
-    {
-      kind: "item",
-      testId: "sidebar-task-mark-unread-action",
-      label: "Mark unread",
-      icon: <Icons.statusIdle />,
-      onSelect: () => o.onMarkUnread(task.ID),
-    },
-    {
-      kind: "item",
-      testId: "sidebar-task-archive-action",
-      label: "Archive task",
-      icon: <Icons.archive />,
-      onSelect: () => o.onArchiveTask(task),
-      opensDialog: true,
-    },
-  );
-  return entries;
-}
-
-/** The Radix wrappers one menu flavour renders with; dropdown and context menus share every prop used below. */
-interface MenuParts {
-  Item: ComponentType<{
-    onSelect?: (event: Event) => void;
-    children?: ReactNode;
-    className?: string;
-    "aria-disabled"?: boolean;
-    "aria-describedby"?: string;
-    "data-testid"?: string;
-    "data-space-id"?: string | number;
-  }>;
-  Sub: ComponentType<{ children?: ReactNode }>;
-  SubTrigger: ComponentType<{ children?: ReactNode; "data-testid"?: string }>;
-  SubContent: ComponentType<{ children?: ReactNode }>;
-}
-
+/** The dropdown flavour of `MenuParts`: the same model the context menu draws renders in the ⋯ menu. */
 const DROPDOWN_PARTS: MenuParts = {
-  Item: DropdownMenuItem,
+  Item: DropdownMenuItem as MenuParts["Item"],
   Sub: DropdownMenuSub,
   SubTrigger: DropdownMenuSubTrigger,
   SubContent: DropdownMenuSubContent,
-};
-
-const CONTEXT_PARTS: MenuParts = {
-  Item: ContextMenuItem,
-  Sub: ContextMenuSub,
-  SubTrigger: ContextMenuSubTrigger,
-  SubContent: ContextMenuSubContent,
+  Separator: DropdownMenuSeparator,
 };
 
 /**
@@ -2866,61 +2775,3 @@ function modalDialogOpen(): boolean {
   return typeof document !== "undefined" && document.querySelector('[role="dialog"]') !== null;
 }
 
-function TaskMenuItems({
-  entries,
-  parts,
-  onDialogSelect,
-}: {
-  entries: TaskMenuEntry[];
-  parts: MenuParts;
-  /** Called when an entry that opens a dialog is chosen, before the menu closes. */
-  onDialogSelect?: () => void;
-}) {
-  const { Item, Sub, SubTrigger, SubContent } = parts;
-  return (
-    <>
-      {entries.map((entry) =>
-        entry.kind === "move" ? (
-          <Sub key="move">
-            <SubTrigger data-testid="sidebar-task-move-action">
-              <Icons.space /> Move to space
-            </SubTrigger>
-            <SubContent>
-              {entry.targets.map((target) => (
-                <Item
-                  key={target.id ?? "ungrouped"}
-                  data-testid="sidebar-task-move-target"
-                  data-space-id={target.id ?? "ungrouped"}
-                  onSelect={() => entry.onMove(target.id)}
-                >
-                  {target.label}
-                </Item>
-              ))}
-            </SubContent>
-          </Sub>
-        ) : (
-          <Item
-            key={entry.testId}
-            data-testid={entry.testId}
-            {...(entry.disabled ? reachableDisabledProps(`${entry.testId}-reason`) : {})}
-            onSelect={
-              entry.disabled
-                ? ignoreSelect
-                : () => {
-                    if (entry.opensDialog) onDialogSelect?.();
-                    entry.onSelect();
-                  }
-            }
-          >
-            {entry.icon} {entry.label}
-            {entry.mutedNote && (
-              <span id={`${entry.testId}-reason`} className="ml-auto pl-2 text-ui-xs text-muted-foreground">
-                {entry.mutedNote}
-              </span>
-            )}
-          </Item>
-        ),
-      )}
-    </>
-  );
-}

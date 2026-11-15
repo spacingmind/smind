@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/quota"
 )
 
@@ -153,7 +154,7 @@ func (n *usageNotifier) notify(id int64, fn func(int64)) {
 	}
 	n.running = true
 	n.mu.Unlock()
-	go n.drain(fn)
+	crash.GoFatal("wsapi.usageDrain", func() { n.drain(fn) })
 }
 
 func (n *usageNotifier) drain(fn func(int64)) {
@@ -278,14 +279,14 @@ func handleAccountUsage(p *quota.Poller, reg *accounts.Registry, passive Passive
 			var wg sync.WaitGroup
 			for i, acc := range accs {
 				wg.Add(1)
-				go func() {
+				crash.Go("wsapi.usageFetch", func() {
 					defer wg.Done()
 					if mode == "refresh" {
 						results[i] = p.Refresh(waitCtx, acc.ID)
 					} else {
 						results[i] = p.Touch(waitCtx, acc.ID)
 					}
-				}()
+				})
 			}
 			wg.Wait()
 		}

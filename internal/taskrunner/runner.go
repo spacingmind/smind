@@ -19,6 +19,7 @@ import (
 	"github.com/spacingmind/smind/internal/claudecli"
 	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/scratch"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -651,7 +652,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		lastUsageUpdate acp.UsageUpdate
 		gotUsageUpdate  bool
 	)
-	go func() {
+	crash.GoFatal("taskrunner.forwardACPUpdates", func() {
 		defer close(forwardDone)
 		for u := range updates {
 			if uu, ok := acp.ParseUsageUpdate(u); ok {
@@ -675,7 +676,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 			case <-ctx.Done():
 			}
 		}
-	}()
+	})
 
 	// ADR-0026 section 5: the learned-skill index rides on the FIRST prompt
 	// of an agent session only: a resumed session already has it in
@@ -1122,6 +1123,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	cliExited := false
 	defer func() {
 		if cliExited {
+			// not under crash.Go: a Close that cannot reach user code
 			go client.Close()
 			return
 		}
@@ -1139,7 +1141,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
-	go func() {
+	crash.GoFatal("taskrunner.forwardClaudeMessages", func() {
 		defer close(forwardDone)
 		forwardClaudeMessages(ctx, updates, events, func(msg claudecode.Message) {
 			probe.observe(msg)
@@ -1177,7 +1179,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 				}
 			}
 		})
-	}()
+	})
 
 	result, err := r.claudePrompt(ctx, client, prompt, updates, events)
 	<-forwardDone
@@ -1478,7 +1480,7 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 
 	updates := make(chan codex.Update)
 	forwardDone := make(chan struct{})
-	go func() {
+	crash.GoFatal("taskrunner.forwardCodexUpdates", func() {
 		defer close(forwardDone)
 		for u := range updates {
 			select {
@@ -1486,7 +1488,7 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 			case <-ctx.Done():
 			}
 		}
-	}()
+	})
 
 	prompt, images := r.attachmentsFor(ctx, provider, prompt, true, events)
 	var codexOpts []codex.PromptOption

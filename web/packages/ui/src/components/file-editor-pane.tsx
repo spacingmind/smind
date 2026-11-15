@@ -1,21 +1,27 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "@/lib/icons";
-import type { EditorView } from "@codemirror/view";
+import { EditorSelection } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 
 import { CodeMirrorEditor } from "@/components/code-mirror-editor";
 import { FileEditorFindBar, FileFindModel } from "@/components/file-editor-find-bar";
 import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { FilePreview, previewKind } from "@/components/file-preview";
+import { SendToAgentMenu, type SendEntry } from "@/components/send-to-agent-menu";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { fileTabKey } from "@/components/tab-registry";
+import { useSendRefToChat } from "@/hooks/use-send-ref-to-chat";
+import { useFileRevealStore } from "@/stores/file-reveal-store";
 import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import { RpcError } from "@/lib/ws-client";
 import { hasBinaryExtension } from "@/lib/binary-extensions";
+import { formatBytes } from "@/lib/attachments/format";
+import { byteLength } from "@/lib/send-set";
 import type { FileReadResult, FileWriteResult, RunStatusEventPayload, Task } from "@/lib/types";
 
 
@@ -82,7 +88,13 @@ export function TextEditorPane({
   // the moment `pane.find` fires, never needing a render of its own.
   const findModel = useMemo(() => new FileFindModel(), []);
   const editorViewRef = useRef<EditorView | null>(null);
+  // State twin of the ref: the editor is lazy-loaded, so its view can appear after the file read -- a pending reveal must re-run then.
+  const [viewReady, setViewReady] = useState(false);
   const { focused: findFocused, onFocus: onFindFocus, onBlur: onFindBlur } = usePaneFocusWithin();
+
+  // Send to agent (DT3-D): the file reference and the selected lines go in as
+  // file_ref chips, so the daemon's file_ref gate applies as with "Add to chat".
+  const send = useSendRefToChat(task.ID);
 
   // null for non-previewable files -- the Edit/Preview control doesn't
   // render at all in that case, never as a disabled dead button.
@@ -157,6 +169,31 @@ export function TextEditorPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, task.ID, path, applyRead]);
 
+  // Terminal-link reveals (DT3-A AC4): consume a queued line request once
+  // the file has actually loaded and the editor view exists. The store
+  // selector returns a fresh object per request (new nonce), so a second
+  // click on an already-open tab re-triggers this effect; `loading` in the
+  // deps re-runs it when the read finishes after the request was queued.
+  const revealRequest = useFileRevealStore((state) => state.requests[tabKey]);
+  useEffect(() => {
+    const view = editorViewRef.current;
+    // `mtime` is set only when a read has returned: `loading` is false on the very first render, before the read starts.
+    if (!revealRequest || loading || mtime === null || !viewReady || !view) return;
+    // consume() drops a stale request (older than its TTL) instead of returning it.
+    const taken = useFileRevealStore.getState().consume(tabKey);
+    if (!taken) return;
+    const doc = view.state.doc;
+    const ln = doc.line(Math.min(Math.max(taken.line, 1), doc.lines));
+    const pos = Math.min(ln.from + Math.max(taken.col, 1) - 1, ln.to);
+    // The cursor on the line plus the editor's active-line band is the mark. A whole-line selection reads badly in dark
+    // (the selection fill is pale under the pale text), so it is not used.
+    view.dispatch({
+      selection: EditorSelection.cursor(pos),
+      effects: EditorView.scrollIntoView(pos, { y: "center" }),
+    });
+    view.focus();
+  }, [revealRequest, loading, mtime, viewReady, tabKey]);
+
   const setContent = useCallback((next: string) => {
     setContentState(next);
   }, []);
@@ -212,6 +249,33 @@ export function TextEditorPane({
       // conflict/saveError are already surfaced via state; nothing more to do here.
     });
   }
+
+  /** The editor's "Send to agent" entries (DT3-C AC10, delivered as chips by DT3-D): the file reference and the selected lines, sized at menu-open time. */
+  const getSendEntries = useCallback((): SendEntry[] => {
+    const view = editorViewRef.current;
+    const sel = view?.state.selection.main;
+    const selection = view && sel && !sel.empty ? view.state.doc.sliceString(sel.from, sel.to) : "";
+    let detail = "nothing selected";
+    let choose: SendEntry["onSelect"] = () => undefined;
+    if (selection !== "") {
+      const doc = view!.state.doc;
+      const startLine = doc.lineAt(sel!.from).number;
+      // A drag that ends at a line's very start stops before that line's content, so it names the previous one.
+      let endLine = doc.lineAt(sel!.to).number;
+      if (endLine > startLine && sel!.to === doc.line(endLine).from) endLine--;
+      detail = `${endLine > startLine ? `lines ${startLine}-${endLine}` : `line ${startLine}`}, ${formatBytes(byteLength(selection))}`;
+      choose = () => send.sendRef(endLine > startLine ? { path, line: startLine, endLine } : { path, line: startLine }, byteLength(selection));
+    }
+    return [
+      {
+        id: "open-file",
+        label: "Open file",
+        detail: formatBytes(byteLength(content)),
+        onSelect: () => send.sendRef({ path }, byteLength(content)),
+      },
+      { id: "selection", label: "Selection", disabled: selection === "", detail, onSelect: choose },
+    ];
+  }, [send, content, path]);
 
   // Reload: discard the buffer, re-read from disk (both banner states).
   function handleReload() {
@@ -312,6 +376,7 @@ export function TextEditorPane({
                 </button>
               </div>
             )}
+            {send.canSend && <SendToAgentMenu testId="editor-send-menu" getEntries={getSendEntries} />}
             <Button type="button" variant="outline" size="sm" onClick={handleSave} disabled={saving || !dirty}>
               {saving ? "Saving…" : "Save"}
             </Button>
@@ -367,6 +432,7 @@ export function TextEditorPane({
                 findExtension={findModel.extension}
                 onViewReady={(view) => {
                   editorViewRef.current = view;
+                  setViewReady(view !== null);
                 }}
               />
               <FileEditorFindBar model={findModel} editor={editorViewRef} focused={findFocused} />

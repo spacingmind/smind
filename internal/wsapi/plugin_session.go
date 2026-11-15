@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/learning/redact"
 	"github.com/spacingmind/smind/internal/plugins/host"
 )
@@ -380,7 +381,8 @@ func (s *pluginSession) subscription(method string, params json.RawMessage) (any
 		}
 		s.sub = newSubscriber()
 		bus.register(s.sub)
-		go s.pump(s.sub)
+		sub := s.sub
+		crash.GoFatal("wsapi.pluginPump", func() { s.pump(sub) })
 	}
 	if method == pluginRPCSubscibe {
 		return subscribeResult{Topics: s.sub.subscribe(p.Topics)}, nil

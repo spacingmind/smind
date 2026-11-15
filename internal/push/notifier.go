@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/spacingmind/smind/internal/crash"
 )
 
 // Notification kinds (ADR-0040 §4). KindTest is only ever sent by the test
@@ -130,7 +133,7 @@ func (n *Notifier) Start() {
 		return
 	}
 	n.started = true
-	go n.run()
+	crash.GoFatal("push.run", func() { n.run() })
 }
 
 func (n *Notifier) run() {
@@ -148,7 +151,8 @@ func (n *Notifier) run() {
 // safeNotify keeps a panic in one delivery from killing the daemon.
 func (n *Notifier) safeNotify(in Input) {
 	defer func() {
-		if recover() != nil {
+		if v := recover(); v != nil {
+			crash.Default().Record("push.notify", v, debug.Stack())
 			n.d.Logf("push: notifier panic recovered")
 		}
 	}()

@@ -1,0 +1,35 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "task-window",
+  "description": "IPC for a task window (ADR-0013 amendment 2026-11-15, one window per task): a deliberately smaller list than the main window's. A task window can drive its own window (minimize/maximize/close/drag, read maximized/fullscreen state, report first paint, mirror the theme), open links, reveal a path or open it in an allowlisted editor or default application, read the current connection (read-only), show a native context menu, listen to events, and open another task in its own window. It can NOT change connections, settings or relay passwords, manage or update the daemon or the app, quit, or run app-menu actions: those stay with the main window. Scoped to the loopback proxy origin only.",
+  "local": false,
+  "remote": {
+    "urls": [
+      "__PROXY_ORIGIN__/*"
+    ]
+  },
+  "windows": [
+    "task-*"
+  ],
+  "permissions": [
+    "allow-open-external",
+    "allow-editors-list",
+    "allow-open-in-editor",
+    "allow-open-path-default",
+    "allow-connections-get-current",
+    "allow-window-ready",
+    "allow-window-set-theme",
+    "allow-window-open-task",
+    "allow-context-menu-show",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-is-maximized",
+    "core:window:allow-is-fullscreen",
+    "core:window:allow-theme",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

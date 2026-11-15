@@ -12,6 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/spacingmind/smind/internal/crash"
 )
 
 func stubDoctor(t *testing.T, result any, dialErr error) {
@@ -152,5 +155,135 @@ func TestDoctorUsage(t *testing.T) {
 	code, _, errOut := runDoctorCmd("--bogus")
 	if code != 2 || !strings.Contains(errOut, "smind doctor") {
 		t.Fatalf("code %d err %q", code, errOut)
+	}
+}
+
+// desktopHome isolates the desktop app-data location so DesktopDir points
+// inside the test's temp dirs on every platform.
+func desktopHome(t *testing.T) string {
+	t.Helper()
+	d := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", d)
+	t.Setenv("APPDATA", d)
+	return d
+}
+
+// recordCrashes writes one real report per site, one second apart, so the
+// newest report is always the last site.
+func recordCrashes(t *testing.T, dir string, sites ...string) {
+	t.Helper()
+	now := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	rec := crash.New(crash.Config{
+		Dir: dir, Source: "daemon", Home: "/home/x", SmindHome: "/home/x/.smind",
+		Now: func() time.Time { now = now.Add(time.Second); return now },
+	})
+	for _, site := range sites {
+		if rec.Record(site, "boom", []byte("x.Fn()\n")) == "" {
+			t.Fatalf("record %q wrote nothing", site)
+		}
+	}
+}
+
+func TestDoctorCrashesNone(t *testing.T) {
+	_, smindHome := doctorHome(t)
+	desktopHome(t)
+	stubDoctor(t, nil, errors.New("down"))
+	code, out, _ := runDoctorCmd()
+	want := "crashes: none recorded (daemon: " + filepath.Join(smindHome, "crashes") + ")"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("code %d out %q", code, out)
+	}
+	if strings.Contains(out, "desktop crashes:") {
+		t.Fatalf("desktop line printed with no reports: %q", out)
+	}
+}
+
+func TestDoctorCrashesSome(t *testing.T) {
+	_, smindHome := doctorHome(t)
+	desktopHome(t)
+	dir := filepath.Join(smindHome, "crashes")
+	recordCrashes(t, dir, "wsapi.dispatch", "runs.drive")
+	stubDoctor(t, nil, errors.New("down"))
+	code, out, _ := runDoctorCmd()
+	want := "crashes: 2 recorded in " + dir + "; newest 2026-11-14T10:00:02Z (daemon, runs.drive). Reports stay on this machine and are never uploaded."
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("code %d out %q", code, out)
+	}
+}
+
+func TestDoctorCrashesJSON(t *testing.T) {
+	_, smindHome := doctorHome(t)
+	desktopHome(t)
+	recordCrashes(t, filepath.Join(smindHome, "crashes"), "wsapi.dispatch", "runs.drive")
+	stubDoctor(t, doctorSessions{Runs: 3, WithRef: 2, Readable: 1, Gone: 1}, nil)
+	code, out, _ := runDoctorCmd("--json")
+	var top map[string]json.RawMessage
+	if code != 0 || json.Unmarshal([]byte(out), &top) != nil {
+		t.Fatalf("code %d out %q", code, out)
+	}
+	for _, key := range []string{"findings", "sessions", "crashes"} {
+		if _, ok := top[key]; !ok {
+			t.Fatalf("key %q missing in %s", key, out)
+		}
+	}
+	var crashes struct {
+		Daemon struct {
+			Dir        string `json:"dir"`
+			Count      int    `json:"count"`
+			Newest     string `json:"newest"`
+			NewestSite string `json:"newestSite"`
+		} `json:"daemon"`
+	}
+	if err := json.Unmarshal(top["crashes"], &crashes); err != nil {
+		t.Fatal(err)
+	}
+	if crashes.Daemon.Count != 2 || crashes.Daemon.NewestSite != "runs.drive" ||
+		crashes.Daemon.Newest != "2026-11-14T10:00:02Z" ||
+		crashes.Daemon.Dir != filepath.Join(smindHome, "crashes") {
+		t.Fatalf("crashes %+v", crashes)
+	}
+}
+
+func TestDoctorCrashesLinkRefused(t *testing.T) {
+	_, smindHome := doctorHome(t)
+	desktopHome(t)
+	target := t.TempDir()
+	recordCrashes(t, target, "wsapi.dispatch")
+	link := filepath.Join(smindHome, "crashes")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	stubDoctor(t, nil, errors.New("down"))
+	code, out, _ := runDoctorCmd()
+	if code != 0 || !strings.Contains(out, "crashes: "+link+" is a link, so it was not read") {
+		t.Fatalf("code %d out %q", code, out)
+	}
+	if strings.Contains(out, "recorded in") {
+		t.Fatalf("count shown for a linked directory: %q", out)
+	}
+}
+
+func TestDoctorCrashesDoesNotWrite(t *testing.T) {
+	_, smindHome := doctorHome(t)
+	desktopHome(t)
+	stubDoctor(t, nil, errors.New("down"))
+	runDoctorCmd()
+	runDoctorCmd("--json")
+	if _, err := os.Lstat(filepath.Join(smindHome, "crashes")); !os.IsNotExist(err) {
+		t.Fatalf("doctor created the crashes directory: %v", err)
+	}
+}
+
+func TestDoctorCrashesPrintableSite(t *testing.T) {
+	_, smindHome := doctorHome(t)
+	desktopHome(t)
+	recordCrashes(t, filepath.Join(smindHome, "crashes"), "wsapi.\ndispatch\x1b[31m")
+	stubDoctor(t, nil, errors.New("down"))
+	_, out, _ := runDoctorCmd()
+	if strings.Contains(out, "\x1b") || strings.Contains(out, "\ndispatch") {
+		t.Fatalf("control byte from the site reached the output: %q", out)
+	}
+	if !strings.Contains(out, "wsapi.?dispatch") {
+		t.Fatalf("site not passed through printable: %q", out)
 	}
 }

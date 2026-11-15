@@ -1,10 +1,13 @@
 import { PrChip } from "@/components/git/pr-chip";
 import { type DiffStat } from "@/lib/diff-stat";
 import { Icons } from "@/lib/icons";
+import { StatusDot } from "@/components/ui/status-dot";
+import { useTicker } from "@/hooks/use-ticker";
+import { formatDuration } from "@/components/timeline/run-footer-model";
 import type { TaskGit } from "@/lib/types";
 
 const CHIP_CLASS =
-  "flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-input-border bg-surface px-3 text-ui-sm text-foreground-muted";
+  "flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-input-border bg-surface px-3 text-ui-caption text-foreground-muted";
 
 /** 33500 -> "33.5k", 940 -> "940": Paseo's compact diff-stat numbers, so a big refactor doesn't widen the chip. */
 export function formatCompactCount(n: number): string {
@@ -14,8 +17,8 @@ export function formatCompactCount(n: number): string {
 }
 
 /**
- * The task's diff stat as a compact chip above the input card
- * (web-ui-dogfood-polish Item 5): additions green, deletions red, and a
+ * The task's diff stat as a compact chip in the status row under the input
+ * card (web-ui-dogfood-polish Item 5): additions green, deletions red, and a
  * click jumps to the task's Diff tab. The numbers are the task's
  * `TaskGit.diff` (ADR-0039), handed in by the parent.
  */
@@ -74,23 +77,31 @@ function ConcurrencyChip({ chat, onJump }: { chat: { id: number; title: string }
 }
 
 /**
- * Paseo's chip row above the composer: a "Working" chip while the chat has a
- * live run, the diff-stat chip when the task has changes and there is a
- * Diff tab to jump to, the PR chip, and a conflicts chip. Only real data --
+ * The run-state line under the composer card (the one place a live run's
+ * state lives, per chat-surface-ui decision 1): a polite "Working…" live
+ * region with the elapsed timer beside it -- the same wording, dot and
+ * spinner the transcript footer used while a run was live -- followed by
+ * the diff-stat chip, the PR chip and a conflicts chip. Only real data --
  * the run state is the same `runningRunId` that drives Stop, the rest is
  * the task's `TaskGit` -- and the row renders nothing when none applies.
  */
 export function ComposerStatusChips({
   running,
   waiting = false,
+  reconnecting = false,
+  startedAt = null,
   git,
   onOpenDiff,
   otherRunningChat,
   onJumpToChat,
 }: {
   running: boolean;
-  /** The live run is blocked on the user (an unanswered permission): the chip says so, like the timeline footer. */
+  /** The live run is blocked on the user (an unanswered permission): the label says so, like the transcript footer did. */
   waiting?: boolean;
+  /** The daemon connection is down, so the running run's state is unknown: "Reconnecting…", and no timer. */
+  reconnecting?: boolean;
+  /** The live run's startedAt (ISO): what the elapsed timer counts from. */
+  startedAt?: string | null;
   /** Another chat of this task with a live run (shared worktree) -- renders the concurrency chip. */
   otherRunningChat?: { id: number; title: string } | null;
   /** Jumps to otherRunningChat's tab. */
@@ -109,15 +120,34 @@ export function ComposerStatusChips({
   const showDiff = hasChanges && onOpenDiff !== undefined;
   const showConflicts = git?.conflict?.state === "conflicts" && onOpenDiff !== undefined;
   const showOther = otherRunningChat !== null && otherRunningChat !== undefined;
+  const startedMs = startedAt ? Date.parse(startedAt) : NaN;
+  const showElapsed = running && !reconnecting && Number.isFinite(startedMs);
+  useTicker(running ? 1000 : null);
   if (!running && !showDiff && !git?.pr && !showConflicts && !showOther) return null;
   return (
     <div data-testid="composer-status-chips" className="flex flex-wrap items-center gap-2">
       {running && (
-        <span role="status" data-testid="composer-working-chip" data-waiting={waiting || undefined} className={`${CHIP_CLASS}${waiting ? " text-warning-text" : ""}`}>
-          {/* Static while waiting: nothing is progressing, so nothing pulses. */}
-          <span aria-hidden className={`size-2 rounded-full ${waiting ? "bg-warning" : "animate-pulse bg-primary"}`} />
-          {waiting ? "Waiting for you" : "Working"}
-        </span>
+        <>
+          {/* The static word is the polite live region; the ticking number is a timer (implicitly aria-live=off) so a screen reader is not read a new value every second. */}
+          <span
+            role="status"
+            data-testid="composer-working-chip"
+            data-waiting={waiting || undefined}
+            className={`${CHIP_CLASS}${waiting || reconnecting ? " text-warning-text" : ""}`}
+          >
+            {waiting || reconnecting ? (
+              <StatusDot status="warning" />
+            ) : (
+              <Icons.spinner aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+            )}
+            {reconnecting ? "Reconnecting…" : waiting ? "Waiting for you…" : "Working…"}
+          </span>
+          {showElapsed && (
+            <span role="timer" data-testid="run-working-elapsed" className="text-ui-caption text-foreground-muted">
+              {formatDuration(Date.now() - startedMs)}
+            </span>
+          )}
+        </>
       )}
       {showOther && <ConcurrencyChip chat={otherRunningChat} onJump={() => onJumpToChat?.(otherRunningChat.id)} />}
       {showDiff && <DiffStatChip stat={diffStat} onOpenDiff={onOpenDiff} />}

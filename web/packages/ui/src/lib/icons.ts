@@ -92,6 +92,7 @@ import {
   Menu,
   MessageSquare,
   MessageSquarePlus,
+  Minus,
   Monitor,
   Moon,
   Network,
@@ -129,6 +130,7 @@ import {
   TriangleAlert,
   Undo2,
   Upload,
+  UserCog,
   Users,
   WandSparkles,
   Wrench,
@@ -150,6 +152,8 @@ export const Icons = {
   close: X,
   check: Check,
   checkAll: CheckCheck,
+  /** Auto-accept off (the composer pill's state marker; checkAll is on). */
+  dash: Minus,
   copy: Copy,
   paste: ClipboardPaste,
   edit: Pencil,
@@ -251,6 +255,8 @@ export const Icons = {
 
   // --- agents / models
   agent: Bot,
+  /** The model picker rail's Profiles entry (every saved profile across providers): not a provider, so not the generic agent glyph. */
+  profiles: UserCog,
   /** A provider with no brand mark of its own (a providers.custom ACP agent, an id the catalog has not described). */
   providerGeneric: Blocks,
   /** A provider recipe (the Add-from-recipe catalog row). */

@@ -28,6 +28,8 @@ describe("platform in a non-desktop build", () => {
     await expect(desktop.addSshConnection("x", { host: "h", sshPort: null, daemonPort: 4648 })).rejects.toThrow(/unavailable/i);
     await expect(desktop.appSettingsGet()).rejects.toThrow(/unavailable/i);
     await expect(desktop.appSettingsSet({ onboardingCompleted: true })).rejects.toThrow(/unavailable/i);
+    await expect(desktop.notifyTest()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.attentionFocusReport({ taskId: null, windowFocused: true, composerFocused: false })).rejects.toThrow(/unavailable/i);
     expect(() => desktop.onRunSetupRequested(() => {})()).not.toThrow();
     await expect(desktop.previewRelayLink("x")).rejects.toThrow(/unavailable/i);
     await expect(desktop.addRelayConnection("x", "y")).rejects.toThrow(/unavailable/i);
@@ -80,6 +82,9 @@ describe("platform in a desktop build", () => {
         case "app_update_check":
           return { kind: "upToDate", currentVersion: "0.7.0" };
         case "app_update_install":
+          return undefined;
+        case "notify_test":
+        case "attention_focus_report":
           return undefined;
         default:
           throw new Error(`unexpected invoke command ${cmd}`);
@@ -135,6 +140,14 @@ describe("platform in a desktop build", () => {
     expect(invoke).toHaveBeenCalledWith("app_update_check");
     await desktop.appUpdateInstall();
     expect(invoke).toHaveBeenCalledWith("app_update_install");
+
+    await desktop.notifyTest();
+    expect(invoke).toHaveBeenCalledWith("notify_test");
+
+    await desktop.attentionFocusReport({ taskId: 7, windowFocused: true, composerFocused: false });
+    expect(invoke).toHaveBeenCalledWith("attention_focus_report", {
+      report: { taskId: 7, windowFocused: true, composerFocused: false },
+    });
   });
 
   it("maps the relay-link methods to their commands, wraps Rust's string errors, and announces a saved connection", async () => {
@@ -172,7 +185,7 @@ describe("platform in a desktop build", () => {
     vi.stubEnv("VITE_SMIND_DESKTOP", "1");
     const probe = { reachable: true, version: "0.12.0", service: "smind", authRequired: true, loopback: false, error: null };
     const ssh = { id: "ssh:homelab", kind: "ssh", label: "homelab", baseUrl: "http://127.0.0.1:50123" };
-    const settings = { onboardingCompleted: true, manageLocalDaemon: false };
+    const settings = { onboardingCompleted: true, manageLocalDaemon: false, notificationsOn: true, notifyPermission: true, notifyQuestion: true, notifyFailure: true };
     const invoke = vi.fn(async (cmd: string) => {
       switch (cmd) {
         case "connections_probe":
@@ -335,6 +348,72 @@ describe("editors (desktop-native-feel D4)", () => {
 
     const { desktop } = await import("@/lib/platform");
     await expect(desktop.openInEditor("vscode", "/tmp/gone")).rejects.toThrow("path does not exist: /tmp/gone");
+  });
+});
+
+describe("window_open_task (multi-window Part 1)", () => {
+  it("in a non-desktop build windowOpenTask rejects", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "");
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.windowOpenTask(5)).rejects.toThrow(/unavailable/i);
+  });
+
+  it("calls window_open_task with the task id only, resolves with the label, and turns a plain-string refusal into an Error", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const invoke = vi.fn(async () => "task-3");
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.windowOpenTask(42)).resolves.toBe("task-3");
+    expect(invoke).toHaveBeenCalledWith("window_open_task", { taskId: 42 });
+
+    vi.resetModules();
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.reject("too many task windows open (8); close one first")) }));
+    const again = await import("@/lib/platform");
+    await expect(again.desktop.windowOpenTask(9)).rejects.toThrow("too many task windows open (8)");
+  });
+});
+
+describe("native context menu (desktop-native-feel DT2 a)", () => {
+  it("in a non-desktop build contextMenuShow rejects and the action subscription is a harmless no-op", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "");
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.contextMenuShow([{ kind: "item", id: "a", label: "A", enabled: true }], 1, 2)).rejects.toThrow(/unavailable/i);
+    const off = await desktop.onContextMenuAction(() => {});
+    expect(() => off()).not.toThrow();
+  });
+
+  it("contextMenuShow calls context_menu_show with the descriptors and the pointer, resolves with the open id and turns a plain-string refusal into an Error", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const entries = [{ kind: "item" as const, id: "a", label: "A", enabled: true }];
+    const invoke = vi.fn(async () => 3);
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.contextMenuShow(entries, 40, 70)).resolves.toBe(3);
+    expect(invoke).toHaveBeenCalledWith("context_menu_show", { entries, x: 40, y: 70 });
+
+    vi.resetModules();
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.reject("context menu has no item")) }));
+    const again = await import("@/lib/platform");
+    await expect(again.desktop.contextMenuShow(entries, 1, 1)).rejects.toThrow("context menu has no item");
+  });
+
+  it("onContextMenuAction listens to context-menu-action, hands the payload through and unsubscribes", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const unlisten = vi.fn();
+    let handler: ((e: { payload: unknown }) => void) | null = null;
+    const listen = vi.fn(async (_event: string, cb: (e: { payload: unknown }) => void) => {
+      handler = cb;
+      return unlisten;
+    });
+    vi.doMock("@tauri-apps/api/event", () => ({ listen }));
+    const { desktop } = await import("@/lib/platform");
+    const cb = vi.fn();
+    const off = await desktop.onContextMenuAction(cb);
+    expect(listen).toHaveBeenCalledWith("context-menu-action", expect.any(Function));
+    handler!({ payload: { open: 2, id: "rename" } });
+    expect(cb).toHaveBeenCalledWith({ open: 2, id: "rename" });
+    off();
+    expect(unlisten).toHaveBeenCalled();
   });
 });
 

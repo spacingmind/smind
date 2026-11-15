@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spacingmind/smind/internal/attach"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/gate"
 	"github.com/spacingmind/smind/internal/history/native"
 	"github.com/spacingmind/smind/internal/permpolicy"
@@ -81,6 +83,10 @@ type Registry struct {
 	// any run starts.
 	finishWG    sync.WaitGroup
 	finishStage func(stage string)
+	// forwardHook is a test hook (nil in production): drive's event forwarder
+	// calls it for every event before recording it, so a test can force a
+	// panic there.
+	forwardHook func(e taskrunner.Event)
 
 	providerQuota ProviderQuota // guarded by mu
 	// gateFn and failureHook: the picker gate wiring (cooldown_window.go), guarded by mu.
@@ -1042,7 +1048,7 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 		}
 	}
 
-	go reg.drive(runCtx, r, runner)
+	crash.Go("runs.drive", func() { reg.drive(runCtx, r, runner) })
 	return nil
 }
 
@@ -1212,11 +1218,32 @@ func resolveChat(wm *workspace.Manager, taskID, chatID int64) (store.Chat, error
 }
 
 func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runner) {
+	// A panic anywhere below must not leave the run "running" forever (its
+	// queue slot, its tree's concurrency guard, its clients): record it, then
+	// finish the run as an error. Not when the panic came from finish itself:
+	// finish already started persisting the terminal state and a second call
+	// could double it.
+	finishing := false
+	defer func() {
+		if v := recover(); v != nil {
+			crash.Default().Record("runs.drive", v, debug.Stack())
+			if !finishing {
+				reg.finish(r, errors.New("the run stopped on an internal error"))
+			}
+		}
+	}()
 	events := make(chan taskrunner.Event)
 	forwardDone := make(chan struct{})
-	go func() {
+	// If this forwarder panics, nobody would drain events and the runner could
+	// block on its next send while the run sat "running" forever: record it,
+	// then cancel the run and drain what is still coming so the runner can end
+	// and drive finishes the run (as an error, since it was cancelled).
+	crash.GoThen("runs.forwardEvents", func() {
 		defer close(forwardDone)
 		for e := range events {
+			if reg.forwardHook != nil {
+				reg.forwardHook(e)
+			}
 			if e.Type == taskrunner.EventTypePermissionModeChanged {
 				reg.applyReportedMode(r, e.Text, e.Initial)
 				continue
@@ -1227,7 +1254,11 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 			}
 			reg.record(r, e)
 		}
-	}()
+	}, func() {
+		r.cancel() // set once at construction: no lock (the panic may have been inside one)
+		for range events {
+		}
+	})
 
 	// No second "running" notification for the base: clients treat each
 	// run.status as a status change. A live run's base reaches the UI with
@@ -1283,6 +1314,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 		}
 	}
 	<-forwardDone
+	finishing = true
 	reg.finish(r, err)
 }
 
@@ -2032,7 +2064,7 @@ func (reg *Registry) Subscribe(runID string) (<-chan Event, func(), error) {
 
 	out := make(chan Event)
 	done := make(chan struct{})
-	go relay(q, out, done)
+	crash.GoFatal("runs.subscribeRelay", func() { relay(q, out, done) })
 
 	var once sync.Once
 	unsubscribe := func() {
@@ -2121,7 +2153,7 @@ func (reg *Registry) storedSubscribe(runID string) (<-chan Event, func(), error)
 	q.closeQueue()
 	out := make(chan Event)
 	done := make(chan struct{})
-	go relay(q, out, done)
+	crash.GoFatal("runs.storedRelay", func() { relay(q, out, done) })
 	var once sync.Once
 	return out, func() {
 		once.Do(func() {
@@ -2225,11 +2257,12 @@ func (reg *Registry) CloseAll() {
 			}
 			r.mu.Unlock()
 			wg.Add(1)
-			go func(r *run) {
+			rr := r
+			crash.GoFatal("runs.stopRun", func() {
 				defer wg.Done()
-				_ = reg.Stop(r.id)
-				<-r.closedCh
-			}(r)
+				_ = reg.Stop(rr.id)
+				<-rr.closedCh
+			})
 		}
 		wg.Wait()
 	}

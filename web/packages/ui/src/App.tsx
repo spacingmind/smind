@@ -1,3 +1,5 @@
+import { readSplitRatios, rememberSplitRatio } from "@/lib/split-ratios";
+import { disambiguatedParts } from "@/lib/tab-scroll-edges";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
@@ -26,12 +28,14 @@ import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
 import { DesktopUpdateDialogView } from "@/components/desktop-update-dialog";
 import { DesktopUnreachable } from "@/components/desktop-unreachable";
 import { InboxScreen } from "@/components/inbox/inbox-screen";
+import { PageChromeContext } from "@/hooks/use-page-chrome";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import { AppHeader } from "@/components/app-header";
 import { UpdateBadge } from "@/components/update-badge";
+import { isTaskWindow } from "@/lib/task-window";
 import { HomeLanding } from "@/components/home/home-landing";
 import { requestNewWorkspace } from "@/lib/app-events";
 import { useAppUpdate } from "@/lib/app-update";
@@ -47,16 +51,15 @@ import { TerminalTabReaper } from "@/hooks/use-terminal-tab-reaper";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { AppContextMenu } from "@/components/ui/app-context-menu";
+import { tabMenu } from "@/lib/menu-models";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { reorderIndicatorX, reorderSlotAtX, tabDragClasses } from "@/lib/tab-reorder";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabOverflowMenu } from "@/components/tab-overflow-menu";
+import { useRevealActiveTab } from "@/hooks/use-reveal-active-tab";
+import { useScrollEdges } from "@/hooks/use-scroll-edges";
 import {
   TAB_KINDS,
   baseTabForKind,
@@ -65,6 +68,7 @@ import {
   defaultTabsForTask,
   prTab,
   fileTab,
+  fileTabKey,
   filePathFromTabKey,
   NewTabButton,
   pluginTab,
@@ -88,12 +92,15 @@ import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useFocusedChatStore } from "@/stores/focused-chat-store";
+import { useFileRevealStore } from "@/stores/file-reveal-store";
+import { useCardFocusStore } from "@/stores/card-focus-store";
 import { useTheme } from "@/hooks/use-theme";
 import type { ActionId } from "@/keyboard/actions";
 import { KeyboardProvider, useActionHandler, useActionRestriction, useKeyboard } from "@/keyboard/keyboard-provider";
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
+import { useAttentionReport } from "@/hooks/use-attention-report";
 import { focusSettingsTarget } from "@/lib/failure-class";
 import { useTaskChats } from "@/hooks/use-task-chats";
 import { useUnreadTasks } from "@/hooks/use-unread-tasks";
@@ -132,6 +139,28 @@ interface DraggedTabData {
   tabKey: string;
   sourcePaneId: string;
   kind: TabKind;
+}
+
+/**
+ * Whether a dragged tab's center is over its OWN pane's tab strip, and if so the insertion slot and where to draw the
+ * indicator. Measured from the DOM at the moment of the move (the strip is the pane's `tab-scroller`, widened by a few
+ * pixels vertically to the whole 36px row); a drag over another pane's strip is not a reorder.
+ */
+function reorderHit(paneId: string, tabKey: string, x: number, y: number): { paneId: string; slot: number; x: number; top: number; height: number; noop: boolean } | null {
+  const scroller = document.querySelector<HTMLElement>(`[data-pane-id="${paneId.replace(/"/g, "")}"] [data-testid="tab-scroller"]`);
+  if (!scroller) return null;
+  const box = scroller.getBoundingClientRect();
+  if (x < box.left || x > box.right || y < box.top - 4 || y > box.bottom + 4) return null;
+  const spans = Array.from(scroller.querySelectorAll<HTMLElement>('[role="tab"]')).map((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right };
+  });
+  const slot = reorderSlotAtX(spans, x);
+  const at = reorderIndicatorX(spans, slot);
+  if (at === null) return null;
+  // The slots next to the held tab itself would not move it: no indicator there (a bar beside the held chip suggests a move).
+  const from = Array.from(scroller.querySelectorAll<HTMLElement>('[role="tab"]')).findIndex((el) => el.getAttribute("data-tab-key") === tabKey);
+  return { paneId, slot, x: at, top: box.top, height: box.height, noop: from !== -1 && (slot === from || slot === from + 1) };
 }
 
 /** Maps a drop's edge zone (`SplitDropZonePosition`, minus `"center"`) to `use-task-tabs.ts`'s own up/down `SplitDirection` naming. */
@@ -262,6 +291,8 @@ function AppShell({
   // that already fetches it) so the shell can walk it for task.prev/next.
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [allWorkspaces, setAllWorkspaces] = useState<Workspace[]>([]);
+  // False until the sidebar's first workspace list arrives: [] before that must not read as "no project" on the home screen.
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   // Set once AppSidebar's first workspace/space/task fetch resolves --
   // the signal that "the tree came back empty/without this task" means
   // the task is really gone, not merely not-loaded-yet. Without it, a
@@ -290,6 +321,8 @@ function AppShell({
   const [settingsOpenNonce, setSettingsOpenNonce] = useState(0);
   useActionRestriction(activeView !== "workspace" ? SETTINGS_SAFE_ACTIONS : null);
   const openSettings = useCallback((sectionId?: string) => {
+    // A task window has no Settings: its connection, daemon and update sections need main-only commands.
+    if (isTaskWindow) return;
     setSettingsInitialSectionId(sectionId ?? null);
     setSettingsOpenNonce((n) => n + 1);
     setActiveView("settings");
@@ -346,6 +379,7 @@ function AppShell({
     closeTab,
     activate,
     moveTab,
+    reorderTab,
     splitTab,
     resizeGroup,
     focusPane,
@@ -356,7 +390,19 @@ function AppShell({
     closeTabsToLeft,
     closeTabsToRight,
     renameTab,
-  } = useTaskTabs();
+  } = useTaskTabs({
+    // D3: split ratios are remembered per workspace; the hook knows tasks, so the task's workspace is looked up here.
+    splitRatios: {
+      forTask: (taskId) => {
+        const workspaceId = allTasks.find((t) => t.ID === taskId)?.WorkspaceID;
+        return workspaceId === undefined ? undefined : readSplitRatios(workspaceId);
+      },
+      remember: (taskId, direction, firstFraction) => {
+        const workspaceId = allTasks.find((t) => t.ID === taskId)?.WorkspaceID;
+        if (workspaceId !== undefined) rememberSplitRatio(workspaceId, direction, firstFraction);
+      },
+    },
+  });
   const queryClient = useDaemonQueryClient();
   const events = useDaemonEvents(client, queryClient);
   const { attention, runStatus, rateLimit, runningChatsByTask, loaded: runsLoaded } = useTaskAttention(client, selectedTask?.ID ?? null, events);
@@ -388,6 +434,11 @@ function AppShell({
     [treeLoaded, allTasks],
   );
   const { unread, markUnread } = useUnreadTasks(attention, selectedTask?.ID ?? null, liveTaskIds);
+
+  // DT5 C AC9: tells the desktop shell what is in front and what has focus,
+  // so it knows when a notification banner may show (a no-op in a browser
+  // build). Unconditional: the rules of hooks.
+  useAttentionReport(selectedTask?.ID ?? null);
 
   // AC2: the tab title mirrors the sidebar's own unread count live -- a
   // plain effect, not a ref, since document.title has no React-owned
@@ -508,10 +559,12 @@ function AppShell({
   const closeMobileSidebarRef = useRef<(() => void) | null>(null);
   const selectTaskFromSidebar = useCallback(
     (task: Task) => {
+      // With the sidebar kept beside a full-page view (Settings, Inbox, ...), a click on a task leaves that view.
+      closeSettings();
       selectTask(task);
       closeMobileSidebarRef.current?.();
     },
-    [selectTask],
+    [closeSettings, selectTask],
   );
 
   // UAT A-11: a task made through the New task dialog lands with the composer
@@ -580,8 +633,10 @@ function AppShell({
     return off;
   }, [events, selectedTask, allTasks, selectTask]);
 
-  function openFileTab(path: string) {
+  function openFileTab(path: string, forTaskId?: number) {
     if (!selectedTask) return;
+    // A terminal link resolves asynchronously (file.stat): if the person switched tasks meanwhile, the file belongs to the old task and must not open in the new one.
+    if (forTaskId !== undefined && forTaskId !== selectedTask.ID) return;
     // Implicit open (file-tree click, a tool-call's click-through): prefer
     // the side pane if the task already has one, but never yank a tab
     // already placed -- openTab's own "prefer" placement is exactly this
@@ -761,6 +816,8 @@ function AppShell({
   const [dragOverPaneId, setDragOverPaneId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<SplitDropZonePosition | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
+  /** A tab dragged along its own strip: the pane, the insertion slot, and where the drop indicator is drawn (viewport pixels). */
+  const [reorderTarget, setReorderTarget] = useState<{ paneId: string; slot: number; x: number; top: number; height: number; noop: boolean } | null>(null);
 
   /** Which pane's "+" menu the `tab.new` keyboard action popped open, if any -- see PaneTabStrip's NewTabButton. */
   const [openNewTabPaneId, setOpenNewTabPaneId] = useState<string | null>(null);
@@ -777,10 +834,20 @@ function AppShell({
     setIsDragActive(true);
   }, []);
 
+  // The grabbing cursor for the whole drag (index.css reads the flag): the pointer is over other elements while a tab is held.
+  useEffect(() => {
+    if (!isDragActive) return;
+    document.documentElement.dataset.tabDragging = "true";
+    return () => {
+      delete document.documentElement.dataset.tabDragging;
+    };
+  }, [isDragActive]);
+
   const handleDragCancel = useCallback(() => {
     setIsDragActive(false);
     setDragOverPaneId(null);
     setDropPosition(null);
+    setReorderTarget(null);
   }, []);
 
   /**
@@ -795,6 +862,18 @@ function AppShell({
     const overPaneId = event.over ? String(event.over.id) : null;
     const overRect = event.over?.rect;
     const translatedRect = event.active.rect.current.translated;
+    // A tab dragged along its OWN strip reorders: the pane-drop preview is off and a 4px indicator marks the slot.
+    const dragged = event.active.data.current as DraggedTabData | undefined;
+    if (dragged && translatedRect) {
+      const hit = reorderHit(dragged.sourcePaneId, dragged.tabKey, translatedRect.left + translatedRect.width / 2, translatedRect.top + translatedRect.height / 2);
+      if (hit) {
+        setReorderTarget(hit);
+        setDragOverPaneId(null);
+        setDropPosition(null);
+        return;
+      }
+    }
+    setReorderTarget(null);
     if (!overPaneId || !overRect || !translatedRect) {
       setDragOverPaneId(null);
       setDropPosition(null);
@@ -820,9 +899,15 @@ function AppShell({
       const data = event.active.data.current as DraggedTabData | undefined;
       const targetPaneId = dragOverPaneId;
       const position = dropPosition;
+      const reorder = reorderTarget;
       setIsDragActive(false);
       setDragOverPaneId(null);
       setDropPosition(null);
+      setReorderTarget(null);
+      if (data && reorder && selectedTask) {
+        reorderTab(selectedTask.ID, data.tabKey, reorder.paneId, reorder.slot);
+        return;
+      }
       if (!data || !targetPaneId || !position || !selectedTask) return;
       if (position === "center") {
         moveTab(selectedTask.ID, data.tabKey, targetPaneId);
@@ -834,7 +919,7 @@ function AppShell({
       if (!isMovableKind(data.kind)) return;
       splitTab(selectedTask.ID, data.tabKey, targetPaneId, DROP_POSITION_TO_SPLIT_DIRECTION[position]);
     },
-    [dragOverPaneId, dropPosition, selectedTask, moveTab, splitTab],
+    [dragOverPaneId, dropPosition, reorderTarget, selectedTask, moveTab, reorderTab, splitTab],
   );
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
@@ -912,7 +997,9 @@ function AppShell({
     const match = allTasks.find((t) => t.ID === pendingRoute.taskId);
     if (match) {
       selectTask(match);
-      if (pendingRoute.tab.kind === "file") {
+      if (pendingRoute.tab.kind === "default") {
+        // `#/task/<id>`: selecting the task is all there is to do; its default chat tab is seeded as for any selection.
+      } else if (pendingRoute.tab.kind === "file") {
         openTab(match.ID, fileTab(match.ID, pendingRoute.tab.path));
       } else if (pendingRoute.tab.kind === "chat") {
         // The matched task's chats may not have loaded yet (useTaskChats
@@ -922,7 +1009,12 @@ function AppShell({
         if (chats === null) return;
         const wantedChatId = pendingRoute.tab.chatId;
         const targetChat = chats.find((c) => c.ID === wantedChatId);
-        if (targetChat) openTab(match.ID, chatTab(match.ID, targetChat));
+        if (targetChat) {
+          openTab(match.ID, chatTab(match.ID, targetChat));
+          // A `?card=` deep link (a notification click-through) asks the
+          // matching permission/question card to take focus once it mounts.
+          if (pendingRoute.tab.requestId) useCardFocusStore.getState().request(pendingRoute.tab.requestId);
+        }
       } else if (pendingRoute.tab.kind === "pr") {
         openTab(match.ID, prTab(match.ID));
       } else {
@@ -1271,6 +1363,7 @@ function AppShell({
       onTasksChange={setAllTasks}
       onWorkspacesChange={(workspaces) => {
         setAllWorkspaces(workspaces);
+        setWorkspacesLoaded(true);
         setTreeLoaded(true);
       }}
       onOpenSettings={openSettings}
@@ -1285,10 +1378,10 @@ function AppShell({
       headerActions={
         toggleInSidebar ? (
           <>
-            <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />
+            {!isTaskWindow && <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />}
             <SidebarTrigger className="text-foreground-muted hover:text-foreground" />
           </>
-        ) : windowToggle && sidebarOpen ? (
+        ) : windowToggle && sidebarOpen && !isTaskWindow ? (
           <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />
         ) : undefined
       }
@@ -1304,7 +1397,7 @@ function AppShell({
         connectionStatus={connectionStatus}
         sidebarPx={isMobile ? 0 : sidebarOpen ? sidebarWidth : SIDEBAR_ICON_WIDTH}
         showSidebarToggle={!toggleInSidebar && !windowToggle}
-        showUpdateBadge={isMobile || !sidebarOpen}
+        showUpdateBadge={(isMobile || !sidebarOpen) && !isTaskWindow}
         windowToggle={windowToggle}
         task={selectedTask}
         client={client}
@@ -1313,14 +1406,14 @@ function AppShell({
         updateState={appUpdate.state}
         onOpenUpdate={appUpdate.reopen}
       />
-      {isDesktop && (
+      {isDesktop && !isTaskWindow && (
         <DesktopDaemonBanner
           client={client}
           runsLoaded={runsLoaded}
           runningRuns={[...runningChatsByTask.values()].reduce((n, chats) => n + chats.size, 0)}
         />
       )}
-      {isDesktop && <DesktopUpdateDialogView update={appUpdate} />}
+      {isDesktop && !isTaskWindow && <DesktopUpdateDialogView update={appUpdate} />}
     </>
   );
 
@@ -1347,6 +1440,7 @@ function AppShell({
         connectionDetail={connectCause?.raw}
         onRetryConnect={retryConnect}
         workspaces={allWorkspaces}
+        workspacesLoaded={workspacesLoaded}
         onCreated={selectTaskFromSidebar}
         onAddProject={requestNewWorkspace}
       />
@@ -1480,6 +1574,15 @@ function AppShell({
                 openNewTabPaneId={openNewTabPaneId}
                 onOpenNewTabPaneIdChange={setOpenNewTabPaneId}
               />
+              {reorderTarget && !reorderTarget.noop && (
+                <div
+                  aria-hidden
+                  data-testid="tab-drop-indicator"
+                  data-slot={reorderTarget.slot}
+                  className="pointer-events-none fixed z-50 w-1 rounded-full bg-primary"
+                  style={{ left: reorderTarget.x - 2, top: reorderTarget.top, height: reorderTarget.height }}
+                />
+              )}
             </DndContext>
           )}
         </div>
@@ -1507,8 +1610,10 @@ function AppShell({
   );
 
   const settingsOpen = activeView === "settings";
-  // Settings and the inbox both cover the shell: it is hidden and inert behind either.
-  const shellCovered = activeView !== "workspace";
+  // A full-page view is open. Below the mobile breakpoint it covers the whole shell (hidden and inert behind it); on
+  // desktop widths it sits beside the sidebar, so only the content region is hidden and inert.
+  const viewOpen = activeView !== "workspace";
+  const shellCovered = viewOpen && isMobile;
   // Stable identities: ShellCommands memoizes its palette entries on them.
   const selectTaskFromPalette = useCallback(
     (task: Task) => {
@@ -1539,6 +1644,55 @@ function AppShell({
       openPluginPanel(panel);
     },
     [closeSettings, openPluginPanel],
+  );
+  // Full-page views (Settings, Inbox, Automations, plugin pages). On desktop widths they are drawn INSIDE the shell,
+  // in the content region beside the sidebar, so the sidebar stays usable and the traffic lights never sit over a
+  // page; below the mobile breakpoint they cover the whole window as before.
+  const pageInShell = !isMobile;
+  const pageCover = (
+    <PageChromeContext.Provider value={{ sidebarKept: pageInShell }}>
+      {activeView === "inbox" && (
+        <div className="absolute inset-0 z-40">
+          <InboxScreen
+            onNavigateBack={closeSettings}
+            onOpenSettings={(id) => openSettings(id)}
+            onOpenTask={(taskId) => {
+              closeSettings();
+              void jumpToTask(taskId);
+            }}
+          />
+        </div>
+      )}
+      {activeView === "automations" && (
+        <div className="absolute inset-0 z-40">
+          <AutomationsPage onNavigateBack={closeSettings} closeSettings={closeSettings} />
+        </div>
+      )}
+      {activeView === "plugin" && pluginPage && (
+        // ADR-0042: a plugin panel as a full page -- the surface for
+        // sidebar panels and any panel opened with no task selected.
+        <div className="absolute inset-0 z-40">
+          <PluginPage
+            pluginId={pluginPage.pluginId}
+            panelId={pluginPage.panelId}
+            onNavigateBack={closeSettings}
+          />
+        </div>
+      )}
+      {settingsOpen && (
+        // No background here: on macOS the settings sidebar is a vibrancy
+        // surface and the screen paints its own opaque panes.
+        <div className="absolute inset-0 z-40">
+          <SettingsScreen
+            key={settingsOpenNonce}
+            client={client}
+            events={events}
+            onNavigateBack={closeSettings}
+            initialSectionId={settingsInitialSectionId ?? undefined}
+          />
+        </div>
+      )}
+    </PageChromeContext.Provider>
   );
   const shellElement = (
     <SidebarProvider
@@ -1657,8 +1811,11 @@ function AppShell({
               {...sidebarResize}
             />
           )}
-          <SidebarInset className={cn("h-full min-w-0 flex-1 bg-sidebar", !isMobile && !lightsBar && SHELL_FRAME_INSET_CLASS)}>
-            {contentPanelElement}
+          <SidebarInset className={cn("relative h-full min-w-0 flex-1 bg-sidebar", !isMobile && !lightsBar && SHELL_FRAME_INSET_CLASS)}>
+            <div data-testid="content-region" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", viewOpen && "invisible")} inert={viewOpen} aria-hidden={viewOpen || undefined}>
+              {contentPanelElement}
+            </div>
+            {pageCover}
           </SidebarInset>
         </div>
       )}
@@ -1705,47 +1862,7 @@ function AppShell({
         >
           {shellElement}
         </div>
-        {activeView === "inbox" && (
-          <div className="absolute inset-0 z-40">
-            <InboxScreen
-              onNavigateBack={closeSettings}
-              onOpenSettings={(id) => openSettings(id)}
-              onOpenTask={(taskId) => {
-                closeSettings();
-                void jumpToTask(taskId);
-              }}
-            />
-          </div>
-        )}
-        {activeView === "automations" && (
-          <div className="absolute inset-0 z-40">
-            <AutomationsPage onNavigateBack={closeSettings} closeSettings={closeSettings} />
-          </div>
-        )}
-        {activeView === "plugin" && pluginPage && (
-          // ADR-0042: a plugin panel as a full page -- the surface for
-          // sidebar panels and any panel opened with no task selected.
-          <div className="absolute inset-0 z-40">
-            <PluginPage
-              pluginId={pluginPage.pluginId}
-              panelId={pluginPage.panelId}
-              onNavigateBack={closeSettings}
-            />
-          </div>
-        )}
-        {settingsOpen && (
-          // No background here: on macOS the settings sidebar is a vibrancy
-          // surface and the screen paints its own opaque panes.
-          <div className="absolute inset-0 z-40">
-            <SettingsScreen
-              key={settingsOpenNonce}
-              client={client}
-              events={events}
-              onNavigateBack={closeSettings}
-              initialSectionId={settingsInitialSectionId ?? undefined}
-            />
-          </div>
-        )}
+        {!pageInShell && pageCover}
         {/* AC2: the shortcuts overlay rides above every view, Settings included
             (it is a portal, so it must not sit inside the hidden shell wrapper). */}
         <ShortcutsOverlay
@@ -1824,18 +1941,18 @@ function ShellCommands({
   const { preference, setPreference } = useTheme();
   const pr = useTaskGit(selectedTask?.ID ?? null)?.pr;
 
-  const taskCommands = useMemo<Command[]>(
-    () =>
-      tasks.map((task) => ({
-        id: `task-${task.ID}`,
-        group: "Tasks",
-        title: task.Title,
-        subtitle: task.Branch ?? undefined,
-        keywords: [task.Status],
-        run: () => onSelectTask(task),
-      })),
-    [tasks, onSelectTask],
-  );
+  const taskCommands = useMemo<Command[]>(() => {
+    const projectNames = new Map(workspaces.map((ws) => [ws.ID, ws.Title || ws.Path]));
+    return tasks.map((task) => ({
+      id: `task-${task.ID}`,
+      group: "Tasks",
+      title: task.Title,
+      // The project the task belongs to, not its branch slug; the slug stays searchable as a keyword.
+      subtitle: projectNames.get(task.WorkspaceID),
+      keywords: [task.Status, ...(task.Branch ? [task.Branch] : [])],
+      run: () => onSelectTask(task),
+    }));
+  }, [tasks, workspaces, onSelectTask]);
   useCommands("shell:tasks", 0, taskCommands);
 
   const workspaceCommands = useMemo<Command[]>(
@@ -2053,7 +2170,7 @@ interface SplitPaneCallbacks {
   client: WsClient | null;
   connectionStatus: ConnectionStatus;
   events: ReturnType<typeof useDaemonEvents>;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, forTaskId?: number) => void;
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
@@ -2267,7 +2384,7 @@ function PaneTabStrip({
   client: WsClient | null;
   connectionStatus: ConnectionStatus;
   events: ReturnType<typeof useDaemonEvents>;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, forTaskId?: number) => void;
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
@@ -2313,12 +2430,10 @@ function PaneTabStrip({
   // (aria-selected, not data-state: ContextMenuTrigger asChild overwrites the trigger's data-state.)
   // Keeps the active tab visible when the strip overflows (TB-AC5).
   const tabScrollerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const active = tabScrollerRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
-    if (active && typeof active.scrollIntoView === "function") {
-      active.scrollIntoView({ inline: "nearest", block: "nearest" });
-    }
-  }, [activeKey]);
+  const edges = useScrollEdges(tabScrollerRef);
+  // Chats that share a title are numbered by the same function the "More tabs" menu uses.
+  const tabParts = useMemo(() => disambiguatedParts(tabs), [tabs]);
+  useRevealActiveTab(tabScrollerRef, activeKey);
 
   return (
     <div
@@ -2353,17 +2468,21 @@ function PaneTabStrip({
       >
         <div className="flex h-9 shrink-0 items-center gap-1 border-b px-1">
           {tabs.length > 0 && (
+            <div className="relative min-w-0 flex-initial">
             <div
               ref={tabScrollerRef}
               data-testid="tab-scroller"
-              className="min-w-0 flex-initial overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="min-w-0 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              <TabsList variant="flat" className="w-max">
+              {/* Chips: each tab takes its natural width (160px at most) while the strip has room; only when the total overflows do they shrink, down to 64px, and only then does the strip scroll. */}
+              <TabsList variant="flat" className="w-full">
                 {tabs.map((entry, index) => (
                   <DraggableTabTrigger
                     key={entry.key}
                     entry={entry}
+                    number={tabParts.get(entry.key)?.n}
                     paneId={paneId}
+                    dragActive={isDragActive}
                     showMoveAffordance={showMoveAffordance}
                     onSplit={onSplit}
                     onClose={onClose}
@@ -2379,7 +2498,12 @@ function PaneTabStrip({
                 ))}
               </TabsList>
             </div>
+            {/* Edge fades: the side that has more tabs beyond it. Instant (no transition), never in the way of the pointer. */}
+            {edges.start && <div aria-hidden data-testid="tab-fade-start" className="pointer-events-none absolute inset-y-0 left-0 w-4 bg-gradient-to-r from-panel to-transparent" />}
+            {edges.end && <div aria-hidden data-testid="tab-fade-end" className="pointer-events-none absolute inset-y-0 right-0 w-4 bg-gradient-to-l from-panel to-transparent" />}
+            </div>
           )}
+          {(edges.start || edges.end) && <TabOverflowMenu tabs={tabs} activeKey={activeKey} onActivate={onActivate} />}
           <NewTabButton
             onOpen={(kind) => onOpenBase(kind, { pane: paneId })}
             chats={reopenableChats(chats, openChatIds)}
@@ -2451,7 +2575,9 @@ const TAB_AFFORDANCE_REVEAL =
  */
 function DraggableTabTrigger({
   entry,
+  number,
   paneId,
+  dragActive,
   showMoveAffordance,
   onSplit,
   onClose,
@@ -2465,7 +2591,11 @@ function DraggableTabTrigger({
   hasClosableTabsToRight,
 }: {
   entry: TabEntry;
+  /** The repeat number of a tab whose title another tab in the strip shares; the same numbering the overflow menu shows. */
+  number?: number;
   paneId: string;
+  /** Some tab (this or another) is being dragged: the dragged chip dims, and no chip shows hover controls. */
+  dragActive: boolean;
   showMoveAffordance: boolean;
   onSplit: (key: string, direction: SplitDirection) => void;
   onClose: (key: string) => void;
@@ -2501,10 +2631,11 @@ function DraggableTabTrigger({
   // `getByRole("tab", ...)` lookups (verified: it did, in this file's own
   // existing tests). Only `listeners` (the pointer handlers that actually
   // start a drag) are spread here.
-  const { listeners, setNodeRef } = useDraggable({
+  const { listeners, setNodeRef, isDragging } = useDraggable({
     id: entry.key,
     data: { tabKey: entry.key, sourcePaneId: paneId, kind: entry.kind } satisfies DraggedTabData,
   });
+  const drag = tabDragClasses({ isDragging, dragActive });
 
   if (renaming) {
     return (
@@ -2520,16 +2651,49 @@ function DraggableTabTrigger({
   }
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
+    <AppContextMenu
+      entries={tabMenu({
+        kind: entry.kind,
+        path: entry.path,
+        closable: entry.closable === true,
+        hasOtherClosableTabs,
+        hasClosableTabsToLeft,
+        hasClosableTabsToRight,
+        canSplit: isMovableKind(entry.kind) && showMoveAffordance,
+        canArchiveChat: entry.chatId !== undefined,
+        onClose: () => onClose(entry.key),
+        onCloseOthers: () => onCloseOthers(entry.key),
+        onCloseLeft: () => onCloseLeft(entry.key),
+        onCloseRight: () => onCloseRight(entry.key),
+        onRename: () => setRenaming(true),
+        onArchiveChat: () => onArchiveChat(entry),
+        onSplit: (direction) => onSplit(entry.key, direction),
+      })}
+      contentProps={{
+        "data-testid": "workspace-tab-context-menu",
+        "data-tab-key": entry.key,
+        // Radix's own dismiss-time focus restoration would otherwise move
+        // focus to whatever it considers "the trigger" right as this
+        // menu closes -- for Rename specifically, that trigger element
+        // has just been replaced by the rename <input>, so restoring
+        // focus there yanks it right back off. The explicit rAF-deferred
+        // focus above is what actually focuses the input; this only
+        // stops Radix's own attempt from fighting it.
+        onCloseAutoFocus: (e: Event) => e.preventDefault(),
+      }}
+    >
         <TabsTrigger
           ref={setNodeRef}
           value={entry.key}
           data-testid={`workspace-tab-${entry.kind}`}
-          className="group/tab max-w-48 gap-1.5"
+          data-tab-key={entry.key}
+          className={cn(
+            "group/tab max-w-40 gap-1.5 group-data-[variant=flat]/tabs-list:min-w-16 group-data-[variant=flat]/tabs-list:flex-[0_1_auto] group-data-[variant=flat]/tabs-list:aria-selected:min-w-24",
+            drag.chip,
+          )}
           {...listeners}
         >
-          <TabLabel entry={entry} />
+          <TabLabel entry={entry} number={number} />
           {/*
            * Split/close float over the tab's right edge (no reserved slot, so tabs
            * sit tight) and appear on hover, keyboard focus within, or while active.
@@ -2543,7 +2707,7 @@ function DraggableTabTrigger({
           />
           <span
             data-testid="workspace-tab-affordances"
-            className={cn("absolute inset-y-0 right-1 flex items-center gap-0.5", TAB_AFFORDANCE_REVEAL)}
+            className={cn("absolute inset-y-0 right-1 flex items-center gap-0.5", drag.affordances ?? TAB_AFFORDANCE_REVEAL)}
           >
       {isMovableKind(entry.kind) && showMoveAffordance && (
         <DropdownMenu>
@@ -2614,96 +2778,7 @@ function DraggableTabTrigger({
       )}
           </span>
         </TabsTrigger>
-      </ContextMenuTrigger>
-      <ContextMenuContent
-        data-testid="workspace-tab-context-menu"
-        data-tab-key={entry.key}
-        // Radix's own dismiss-time focus restoration would otherwise move
-        // focus to whatever it considers "the trigger" right as this
-        // menu closes -- for Rename specifically, that trigger element
-        // has just been replaced by the rename <input>, so restoring
-        // focus there yanks it right back off. The explicit rAF-deferred
-        // focus above is what actually focuses the input; this only
-        // stops Radix's own attempt from fighting it.
-        onCloseAutoFocus={(e) => e.preventDefault()}
-      >
-        <ContextMenuItem
-          disabled={!entry.closable}
-          onSelect={() => onClose(entry.key)}
-          data-testid="workspace-tab-menu-close"
-        >
-          Close
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!hasOtherClosableTabs}
-          onSelect={() => onCloseOthers(entry.key)}
-          data-testid="workspace-tab-menu-close-others"
-        >
-          Close others
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!hasClosableTabsToLeft}
-          onSelect={() => onCloseLeft(entry.key)}
-          data-testid="workspace-tab-menu-close-left"
-        >
-          Close to the left
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!hasClosableTabsToRight}
-          onSelect={() => onCloseRight(entry.key)}
-          data-testid="workspace-tab-menu-close-right"
-        >
-          Close to the right
-        </ContextMenuItem>
-        {(entry.kind === "terminal" || entry.kind === "chat" || (entry.kind === "file" && entry.path)) && (
-          <ContextMenuSeparator />
-        )}
-        {(entry.kind === "terminal" || entry.kind === "chat") && (
-          <ContextMenuItem onSelect={() => setRenaming(true)} data-testid="workspace-tab-menu-rename">
-            <Icons.edit />
-            Rename
-          </ContextMenuItem>
-        )}
-        {entry.kind === "chat" && (
-          <ContextMenuItem onSelect={() => onArchiveChat(entry)} data-testid="workspace-tab-menu-archive-chat">
-            <Icons.archive />
-            Archive chat
-          </ContextMenuItem>
-        )}
-        {entry.kind === "file" && entry.path && (
-          <ContextMenuItem
-            onSelect={() => {
-              void navigator.clipboard?.writeText(entry.path!).catch(() => {});
-            }}
-            data-testid="workspace-tab-menu-copy-path"
-          >
-            <Icons.copy />
-            Copy path
-          </ContextMenuItem>
-        )}
-        {isMovableKind(entry.kind) && showMoveAffordance && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem onSelect={() => onSplit(entry.key, "left")} data-testid="workspace-tab-menu-split-left">
-              <Icons.splitColumns />
-              Split left
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => onSplit(entry.key, "right")} data-testid="workspace-tab-menu-split-right">
-              <Icons.splitColumns />
-              Split right
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => onSplit(entry.key, "up")} data-testid="workspace-tab-menu-split-up">
-              <Icons.splitRows />
-              Split up
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => onSplit(entry.key, "down")} data-testid="workspace-tab-menu-split-down">
-              <Icons.splitRows />
-              Split down
-            </ContextMenuItem>
-          </>
-        )}
-      </ContextMenuContent>
-    </ContextMenu>
+    </AppContextMenu>
   );
 }
 
@@ -2754,7 +2829,7 @@ function TabContent({
   /** Whether this tab is the one in front -- only the force-mounted terminal panes can be rendered while false. */
   active: boolean;
   connectionStatus: ConnectionStatus;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, forTaskId?: number) => void;
   onOpenFileToSide: (path: string) => void;
   onRevealInDiff: () => void;
   /** Brings this pane's Files tab forward (the deliverable cards' "+ N more files"). */
@@ -2823,6 +2898,13 @@ function TabContent({
         tabKey={entry.key}
         active={active}
         connectionStatus={connectionStatus}
+        // A terminal link opens the file like the explorer's implicit open
+        // (openFileTab's "prefer" placement) and queues the reveal-at-line
+        // request for the tab the editor pane will consume (DT3-A AC4).
+        onOpenFile={(path, line, col) => {
+          onOpenFile(path, task.ID);
+          if (line) useFileRevealStore.getState().request(fileTabKey(task.ID, path), line, col);
+        }}
       />
     ),
   };

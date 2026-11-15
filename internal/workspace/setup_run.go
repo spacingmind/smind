@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -118,7 +119,7 @@ func (m *Manager) startSetup(t store.Task, ws store.Workspace) {
 
 	env := setupEnv(ws, t)
 	timeout := m.worktreesSettings().SetupTimeout
-	go func() {
+	crash.GoFatal("workspace.setupRun", func() {
 		defer close(sr.done)
 		defer cancel()
 		tail, err := runScript(ctx, *t.WorktreePath, ws.SetupScript, env, timeout, setupLogCap)
@@ -139,7 +140,7 @@ func (m *Manager) startSetup(t store.Task, ws store.Workspace) {
 		if hook != nil {
 			hook(t.ID)
 		}
-	}()
+	})
 }
 
 // cancelSetup kills task id's running setup (if any) and waits for its

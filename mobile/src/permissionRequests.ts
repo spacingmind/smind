@@ -64,7 +64,7 @@ export interface PermissionRequestState {
   detail?: PermissionDetail;
   status: 'pending' | 'resolved';
   /** Set when status is resolved: which option won, and whether by this device's own tap or by an authoritative event. */
-  resolvedWith?: { optionId: string; by: 'tap' | 'event' };
+  resolvedWith?: { optionId: string; by: 'tap' | 'event'; /** An event's own reason (human, timeout, policy_allow, ...): what resolved it, which `by` cannot say once the event overwrote a tap. */ reason?: string };
   /** Inline error from a failed run.respondPermission (cleared on the next attempt or resolution). */
   error: string | null;
 }
@@ -95,7 +95,7 @@ export class PermissionBoard {
     const req = this.requests.get(params.requestId);
     if (!req) return;
     req.status = 'resolved';
-    req.resolvedWith = { optionId: params.optionId, by: 'event' };
+    req.resolvedWith = { optionId: params.optionId, by: 'event', ...(params.reason ? { reason: params.reason } : {}) };
     req.error = null;
     this.onChange();
   }

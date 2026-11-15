@@ -31,14 +31,14 @@ export function GrantControl({
   const optInId = useId();
   const blocked = needsOptIn && !optIn;
   return (
-    <div data-testid="grant-control" data-grant-class={offer.class} className="flex w-full min-w-0 flex-col gap-2 rounded-lg border bg-card p-2">
+    <div data-testid="grant-control" data-grant-class={offer.class} className="flex w-full min-w-0 flex-col gap-2 border-t border-border pt-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-ui-sm font-medium text-foreground">{GRANT_BUTTON_LABEL}</span>
+        <span className="text-ui-base font-medium text-foreground">{GRANT_BUTTON_LABEL}</span>
         <StatusBadge status={needsOptIn ? "warning" : "neutral"} data-testid="grant-class">
           {grantClassLabel(offer.class)}
         </StatusBadge>
       </div>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-ui-sm">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-ui-base">
         <dt className="text-foreground-muted">Command</dt>
         <dd data-testid="grant-command" className="min-w-0 font-mono whitespace-pre-wrap break-all text-foreground">
           {offer.command}
@@ -51,11 +51,11 @@ export function GrantControl({
         <dt className="text-foreground-muted">Lasts</dt>
         <dd data-testid="grant-expiry" className="text-foreground">{`${offer.expiresInDays} days, or until you revoke it`}</dd>
       </dl>
-      <p data-testid="grant-note" className="text-ui-sm text-foreground-muted whitespace-pre-wrap break-words">
+      <p data-testid="grant-note" className="text-ui-base text-foreground-muted whitespace-pre-wrap break-words">
         {offer.note}
       </p>
       {needsOptIn && (
-        <label htmlFor={optInId} className="flex items-start gap-2 text-ui-sm text-foreground">
+        <label htmlFor={optInId} className="flex items-start gap-2 text-ui-base text-foreground">
           <Checkbox id={optInId} data-testid="grant-optin" checked={optIn} disabled={disabled} onCheckedChange={(v) => setOptIn(v === true)} className="mt-0.5 border-foreground-muted" />
           <span className="whitespace-pre-wrap break-words">{offer.optInLabel || GRANT_OPT_IN_FALLBACK}</span>
         </label>
@@ -65,7 +65,7 @@ export function GrantControl({
           {GRANT_BUTTON_LABEL}
         </Button>
         {blocked && !disabled && (
-          <span data-testid="grant-hint" className="text-ui-xs text-foreground-muted">
+          <span data-testid="grant-hint" className="text-ui-sm text-foreground-muted">
             {GRANT_NEEDS_OPT_IN_HINT}
           </span>
         )}

@@ -12,10 +12,13 @@ import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { openUsageModal } from "@/hooks/use-usage-modal";
+import type { ActionId } from "@/keyboard/actions";
 import { useKeyboard } from "@/keyboard/keyboard-provider";
+import { useShortcutLabel, withShortcut } from "@/keyboard/shortcut-label";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { openExternalUrl } from "@/lib/external-link";
 import { isDesktop } from "@/lib/platform";
+import { isTaskWindow } from "@/lib/task-window";
 import { Icons, type IconComponent } from "@/lib/icons";
 import { PendingProposalBadge } from "@/components/learning/pending-badge";
 import { InboxBadge } from "@/components/inbox/inbox-badge";
@@ -56,16 +59,20 @@ function FooterIconButton({
   testId,
   onClick,
   badge,
+  action,
 }: {
   label: string;
   icon: IconComponent;
   testId: string;
   onClick: () => void;
+  /** The keyboard action this button also triggers: its live shortcut is appended to the tooltip. */
+  action?: ActionId;
   /** A quiet indicator pinned to the button's top-right corner. */
   badge?: ReactNode;
 }) {
+  const shortcut = useShortcutLabel(action);
   return (
-    <FooterTooltip label={label}>
+    <FooterTooltip label={withShortcut(label, shortcut)}>
       <Button
         variant="ghost"
         size="icon-sm"
@@ -309,23 +316,28 @@ export function SidebarFooterActions({
               badge={<InboxBadge className="absolute -top-1 -right-1" />}
             />
           )}
-          <HostButton
-            connectionStatus={connectionStatus}
-            connectionStatusText={connectionStatusText}
-            providerHealth={providerHealth}
-            agentCount={agentCount}
-            onOpenSettings={onOpenSettings}
-          />
+          {!isTaskWindow && (
+            <HostButton
+              connectionStatus={connectionStatus}
+              connectionStatusText={connectionStatusText}
+              providerHealth={providerHealth}
+              agentCount={agentCount}
+              onOpenSettings={onOpenSettings}
+            />
+          )}
           <div data-testid="sidebar-footer-spacer" className="flex-1 group-data-[collapsible=icon]:hidden" />
           <HelpButton />
           <ThemeToggle withTooltip className={ICON_BUTTON_CLASS} />
+          {!isTaskWindow && (
           <FooterIconButton
             label="Settings"
             icon={Icons.settings}
             testId="sidebar-settings-button"
+            action="settings.open"
             onClick={() => onOpenSettings?.()}
             badge={<PendingProposalBadge className="absolute top-1 right-1" />}
           />
+          )}
         </div>
       </div>
     </TooltipProvider>
