@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, type KeyboardEvent } from "react";
 
-import { ProviderIcon } from "@/components/provider-icon";
+import { ProviderIcon, useHasBrandMark } from "@/components/provider-icon";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
@@ -28,11 +28,50 @@ export interface ProviderRailHandle {
   focusSelected(): void;
 }
 
+/** The letters and digits of a label, in order ("my-acp" -> m, y, a, c, p). */
+function alnum(label: string): string[] {
+  return [...label.matchAll(/[\p{L}\p{N}]/gu)].map((m) => m[0]);
+}
+
+/**
+ * The tile text of a provider without a brand mark: its first two letters, the first upper-cased ("Ki", "Op", "Go"); a label with a
+ * single letter or digit gives that one, one with none gives "". Two letters keep "GitHub Copilot", "Goose" and "GLM" apart.
+ */
+export function providerInitial(label: string): string {
+  const chars = alnum(label);
+  if (chars.length === 0) return "";
+  return chars.length === 1 ? chars[0]!.toUpperCase() : chars[0]!.toUpperCase() + chars[1]!.toLowerCase();
+}
+
+/** The tile text of every provider, by id. */
+export function providerInitials(providers: { id: string; label: string }[]): Map<string, string> {
+  return new Map(providers.map((p) => [p.id, providerInitial(p.label)] as const));
+}
+
+/**
+ * A provider with a brand mark keeps it; one without (GLM, Kimi, a custom ACP agent: they all share one generic glyph) gets its
+ * initial in a small tile, so the rail's tabs can be told apart without hovering. The accessible name is on the tab, not here.
+ */
+function RailGlyph({ provider, initial }: { provider: string; initial: string }) {
+  const branded = useHasBrandMark(provider);
+  if (branded || initial === "") return <ProviderIcon provider={provider} />;
+  return (
+    <span
+      aria-hidden
+      data-testid={`model-rail-initial-${provider}`}
+      className="flex h-4 min-w-4 items-center justify-center rounded bg-foreground-muted/20 px-0.5 text-ui-xs leading-none font-semibold"
+    >
+      {initial}
+    </span>
+  );
+}
+
 export const ProviderRail = forwardRef<ProviderRailHandle, ProviderRailProps>(function ProviderRail(
   { providers, profilesTab = false, selectedId, onSelect },
   ref,
 ) {
   const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const initials = providerInitials(providers);
 
   const focusSelected = useCallback(() => {
     buttonRefs.current.get(selectedId)?.focus();
@@ -119,7 +158,7 @@ export const ProviderRail = forwardRef<ProviderRailHandle, ProviderRailProps>(fu
               reason && "opacity-60",
             )}
           >
-            <ProviderIcon provider={provider.id} />
+            <RailGlyph provider={provider.id} initial={initials.get(provider.id) ?? ""} />
             {reason && (
               <StatusDot
                 status="warning"

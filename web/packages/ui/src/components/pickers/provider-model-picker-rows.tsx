@@ -366,6 +366,24 @@ export function EmptyState({ query }: { query: string }) {
   );
 }
 
+/**
+ * The models area of a provider that cannot start a run (no account, not installed): instead of a blank list, one line and the way
+ * forward. The button opens Settings -> Providers on that provider (the same navigation as the header gear and the Get started card's
+ * "Open Providers"); it is absent where the picker has no such navigation (a Settings form).
+ */
+export function UnavailableEmpty({ label, onOpenProviders }: { label: string; onOpenProviders?: () => void }) {
+  return (
+    <div data-testid="model-provider-empty" className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+      <p className="text-ui-base text-foreground-muted">{`Sign in to ${label} to see its models`}</p>
+      {onOpenProviders && (
+        <Button type="button" variant="outline" size="sm" data-testid="model-provider-open-providers" onClick={onOpenProviders}>
+          Open Providers
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function UnavailableNotice({ reason }: { reason: string }) {
   return (
     <p data-testid="model-provider-unavailable" title={reason} className="px-3 pb-2 text-ui-sm text-foreground-muted">

@@ -123,6 +123,33 @@ describe("desktop popover with the provider rail", () => {
     expect(screen.queryByTestId("model-provider-unavailable")).not.toBeInTheDocument();
   });
 
+  it("unavailable-provider-view-offers-sign-in-and-open-providers: one line and a button instead of a blank list", () => {
+    const onOpenProviderSettings = vi.fn();
+    renderPicker({ health: { glm: { ok: false, detail: "No account" } }, onOpenProviderSettings });
+    fireEvent.click(screen.getByTestId("model-provider-glm"));
+    const empty = screen.getByTestId("model-provider-empty");
+    expect(empty).toHaveTextContent("Sign in to GLM to see its models");
+    expect(screen.getByTestId("model-provider-unavailable")).toHaveTextContent("No account"); // the reason stays above
+    fireEvent.click(screen.getByTestId("model-provider-open-providers"));
+    expect(onOpenProviderSettings).toHaveBeenCalledExactlyOnceWith("glm");
+    expect(screen.queryByTestId("model-picker-popover")).not.toBeInTheDocument(); // the picker closes on the way out
+  });
+
+  it("the unavailable view has no button where the picker cannot navigate (a Settings form)", () => {
+    renderPicker({ health: { glm: { ok: false, detail: "No account" } } });
+    fireEvent.click(screen.getByTestId("model-provider-glm"));
+    expect(screen.getByTestId("model-provider-empty")).toHaveTextContent("Sign in to GLM to see its models");
+    expect(screen.queryByTestId("model-provider-open-providers")).not.toBeInTheDocument();
+  });
+
+  it("an available provider and the current unavailable provider show models, not the sign-in line", () => {
+    renderPicker({ health: { "claude-native": { ok: false, detail: "claude CLI not found" } } });
+    expect(screen.queryByTestId("model-provider-empty")).not.toBeInTheDocument(); // the current provider keeps its models
+    fireEvent.click(screen.getByTestId("model-provider-glm"));
+    expect(screen.queryByTestId("model-provider-empty")).not.toBeInTheDocument();
+    expect(screen.getByTestId("model-row-glm:glm-5.3")).toBeInTheDocument();
+  });
+
   it("the current provider stays pickable even when it is unavailable", () => {
     const onSelect = renderPicker({ health: { "claude-native": { ok: false, detail: "claude CLI not found" } } });
     expect(screen.getByTestId("model-provider-unavailable")).toHaveTextContent("claude CLI not found");

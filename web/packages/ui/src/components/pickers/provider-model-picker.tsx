@@ -15,6 +15,7 @@ import {
   ProviderNotice,
   ProviderRow,
   SectionHeading,
+  UnavailableEmpty,
   UnavailableNotice,
   type ModelRowAction,
   type PickerProfileRow,
@@ -131,7 +132,8 @@ type BodyState =
       entries: PickerEntry[];
       notice?: { kind: "loading" } | { kind: "error"; message: string };
     }
-  | { kind: "empty"; query: string };
+  | { kind: "empty"; query: string }
+  | { kind: "unavailable"; providerId: string; label: string };
 
 function isDisabledRow(row: PickerRow): boolean {
   return row.kind === "provider" && !!row.provider.unavailableReason;
@@ -302,7 +304,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
       // With the rail an unavailable provider is selectable (its reason shows above the search) but, unless it is the current
       // one (whose model can still be re-picked), offers no model: it cannot be switched to.
       if (railMode && provider?.unavailableReason && provider.id !== selectedProvider) {
-        return { kind: "entries", band: [], entries: [] };
+        return { kind: "unavailable", providerId: provider.id, label: provider.label };
       }
       const rows = provider ? getProviderModelRows(provider) : [];
       if (normalizedQuery) {
@@ -699,6 +701,18 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
       <div id={listId} role="listbox" aria-label="Models" className="min-h-0 flex-1 overflow-y-auto">
         {body.kind === "empty" ? (
           <EmptyState query={body.query} />
+        ) : body.kind === "unavailable" ? (
+          <UnavailableEmpty
+            label={body.label}
+            onOpenProviders={
+              onOpenProviderSettings
+                ? () => {
+                    changeOpen(false);
+                    onOpenProviderSettings(body.providerId);
+                  }
+                : undefined
+            }
+          />
         ) : (
           <>
             {body.band.length > 0 && (
