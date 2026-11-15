@@ -113,6 +113,10 @@ impl BadgeSetter for WindowBadge {
 /// re-launched from Finder) while running -- show the main window again,
 /// even when it was hidden by the close button or minimized.
 pub fn handle_run_event(app: &AppHandle, event: RunEvent) {
+    // Cmd+Q, tray Quit, Dock Quit: the open task and tab are stored before the window goes (window_layout.rs).
+    if matches!(event, RunEvent::ExitRequested { .. }) {
+        crate::window_layout::save_main(app);
+    }
     #[cfg(target_os = "macos")]
     if let RunEvent::Reopen {
         has_visible_windows,

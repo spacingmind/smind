@@ -48,6 +48,7 @@ mod real_daemon_test;
 #[doc(hidden)]
 pub mod updater;
 mod window_chrome;
+mod window_layout;
 mod zoom_store;
 
 use state::DesktopState;
@@ -238,6 +239,15 @@ pub fn run() {
             let initial_url: Url = format!("http://127.0.0.1:{port}/?k={secret}")
                 .parse()
                 .expect("smind desktop: initial URL is well-formed");
+            // PR (c): the task and tab that were open at the last quit come back (same connection only).
+            let initial_url = {
+                let connection = proxy_state.registry.lock().unwrap().current().id.clone();
+                let layout_path = app.path().app_data_dir()?.join(window_layout::FILE_NAME);
+                match window_layout::load(&layout_path, MAIN_WINDOW, &connection) {
+                    Some(fragment) => window_layout::with_fragment(initial_url, &fragment),
+                    None => initial_url,
+                }
+            };
 
             // AC3: navigation is restricted to the proxy's own origin --
             // any other URL (an http(s) link inside the bundled UI, e.g.
