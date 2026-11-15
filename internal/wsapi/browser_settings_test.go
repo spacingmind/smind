@@ -213,6 +213,28 @@ func TestBrowserSettings_HostLengthCaps(t *testing.T) {
 	}
 }
 
+// Each layer holds on its own: the handler refuses a run-scoped context even
+// when it is local, and the REGISTERED handler refuses a non-local one that is
+// not run-scoped (a relay connection).
+func TestBrowserSettings_EachLayerRefusesOnItsOwn(t *testing.T) {
+	h, fs, _ := settingsHost(t)
+	raw := json.RawMessage(`{"workspaceId":1,"enabled":true}`)
+	for name, fn := range map[string]handlerFunc{"get": h.settingsGet, "set": h.settingsSet, "clear": h.dataClear} {
+		if _, err := fn(context.Background(), &requestContext{local: true, runScoped: true}, raw); err == nil {
+			t.Errorf("%s: a local run-scoped context must be refused by the handler itself", name)
+		}
+	}
+	if len(fs.rows) != 0 {
+		t.Fatal("nothing stored")
+	}
+	e := newProcEnv(t)
+	for _, m := range browserSettingsMethods {
+		if _, err := e.api.hs[m](context.Background(), &requestContext{local: false}, raw); err == nil || !strings.Contains(err.Error(), "only available on this machine") {
+			t.Errorf("%s registered without the local-only wrapper: %v", m, err)
+		}
+	}
+}
+
 func TestExactlyOneBrowserMethodIsRunScoped(t *testing.T) {
 	e := newProcEnv(t)
 	var scoped []string
