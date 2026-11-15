@@ -235,7 +235,7 @@ func TestPluginCall_NoPluginToPlugin(t *testing.T) {
 	if rpcErr == nil || rpcErr.Code != host.ErrCodeForbidden {
 		t.Fatalf("alpha -> beta plugin.call = %+v, want forbidden", rpcErr)
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond) // sleep-ok: negative window, beta must NOT have been reached or restarted in this time
 	after, ok := e.api.plugins.ProcessStatus("beta")
 	if !ok || after.State != host.StateRunning || after.PID != before.PID || after.Restarts != 0 {
 		t.Fatalf("beta was reached: %+v -> %+v", before, after)

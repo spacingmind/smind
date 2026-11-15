@@ -146,7 +146,7 @@ func TestInboxChanged_CoalescedOnPermissionVerdictStall(t *testing.T) {
 		for time.Now().Before(deadline) && n.Load() < want {
 			time.Sleep(10 * time.Millisecond)
 		}
-		time.Sleep(inboxDebounce * 3) // anything extra would show up now
+		time.Sleep(inboxDebounce * 3) // sleep-ok: negative window, any extra inbox.changed would show up within three debounce periods
 		if got := n.Load(); got != want {
 			t.Fatalf("inbox.changed count = %d, want %d", got, want)
 		}
@@ -202,7 +202,7 @@ func TestInboxChanged_CoalescedOnStewardUpdated(t *testing.T) {
 		for time.Now().Before(deadline) && n.Load() < want {
 			time.Sleep(10 * time.Millisecond)
 		}
-		time.Sleep(inboxDebounce * 3) // anything extra would show up now
+		time.Sleep(inboxDebounce * 3) // sleep-ok: negative window, any extra inbox.changed would show up within three debounce periods
 		if got := n.Load(); got != want {
 			t.Fatalf("inbox.changed count = %d, want %d", got, want)
 		}

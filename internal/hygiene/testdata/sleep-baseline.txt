@@ -1,0 +1,10 @@
+# Fixed time.Sleep calls (not in a poll loop, no sleep-ok) per timing-test file. The ratchet only shrinks: fix a test, then lower or delete its line.
+internal/server/direct_test.go 1
+internal/wsapi/forge_auth_test.go 1
+internal/wsapi/forge_token_sinks_test.go 1
+internal/wsapi/plugin_call_test.go 1
+internal/wsapi/plugin_call_unix_test.go 1
+internal/wsapi/plugin_provider_test.go 1
+internal/wsapi/plugin_settings_test.go 1
+internal/wsapi/provider_usage_test.go 1
+internal/wsapi/task_tree_actions_test.go 1

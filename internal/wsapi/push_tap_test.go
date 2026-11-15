@@ -142,7 +142,7 @@ func TestSetPushDisabledInstallsNoTap(t *testing.T) {
 	t.Parallel()
 	api, s, n := newTapAPI(t, false, false)
 	api.bus.Publish(permEvent(1))
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond) // sleep-ok: negative window, a disabled push must send nothing
 	if s.count() != 0 {
 		t.Fatal("disabled push sent a message")
 	}
@@ -154,7 +154,7 @@ func TestSetPushDisabledInstallsNoTap(t *testing.T) {
 	}
 	// Not started: an enqueue sits in the queue and is never delivered.
 	n.Enqueue(push.Input{Kind: push.KindPermission, Key: "x", TaskID: 1})
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond) // sleep-ok: negative window, a notifier that was never started must deliver nothing
 	if s.count() != 0 {
 		t.Fatal("notifier was started")
 	}

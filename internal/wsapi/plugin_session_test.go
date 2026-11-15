@@ -443,7 +443,7 @@ func TestEventsObserve_OnlyAllowlistedTopics(t *testing.T) {
 	e.api.bus.Publish(Event{Topic: TopicChatQueueUpdated, Payload: map[string]any{"items": []string{"prompt text"}}})
 	e.api.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: 7}})
 	got := e.waitPushed(t, "obs", "event", 1)
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // sleep-ok: negative window, the unsubscribed and filtered events must not arrive
 	got = append(got, e.drainMethod(t, "obs", "event")...)
 	if len(got) != 1 {
 		t.Fatalf("only the subscribed allowlisted topic is delivered: %d events", len(got))
@@ -616,7 +616,7 @@ func TestEventsObserve_StalledPluginDoesNotDelayOthers(t *testing.T) {
 	go func() {
 		_, _ = e.api.plugins.CallProcess(context.Background(), "stuck", "stall", map[string]any{"ms": 3000})
 	}()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond) // sleep-ok: gives the stall RPC time to begin; a late start weakens the scenario, it cannot fail it
 
 	// 600 KB in all: far more than a pipe buffer (64 KiB), while a drain of the
 	// 256 queued events stays well under the 1 MiB frame cap.
