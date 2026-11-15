@@ -132,7 +132,15 @@ pub fn run() {
         // previously-saved native frame back to an undecorated window
         // (D1), leaving two sets of caption buttons.
         .plugin(
+            // Task windows are NOT tracked: their labels are reusable pool slots, so a saved frame (or a maximised or
+            // fullscreen flag) would reopen an unrelated task in the last occupant's state.
             tauri_plugin_window_state::Builder::default()
+                .with_denylist(
+                    &windows::window_state_denylist()
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                )
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         - tauri_plugin_window_state::StateFlags::VISIBLE

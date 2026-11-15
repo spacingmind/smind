@@ -240,15 +240,14 @@ pub fn window_ready(app: AppHandle, window: tauri::Window, gate: State<'_, ShowG
     }
 }
 
-/// Fallback for a task window whose UI never reports a paint: show it anyway after [`READY_FALLBACK`].
-pub fn arm_task_fallback<R: Runtime>(app: &AppHandle<R>, label: String) {
-    let app = app.clone();
+/// Fallback for a task window whose UI never reports a paint: show it anyway after [`READY_FALLBACK`]. It holds the
+/// window handle itself, not its label: if that window was destroyed and the slot rebuilt, the handle is dead and the
+/// timer does nothing to the new window (a label lookup would have shown it before its first paint).
+pub fn arm_task_fallback<R: Runtime>(win: tauri::WebviewWindow<R>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(READY_FALLBACK).await;
-        if let Some(win) = app.get_webview_window(&label) {
-            if !win.is_visible().unwrap_or(true) {
-                let _ = win.show();
-            }
+        if !win.is_visible().unwrap_or(true) {
+            let _ = win.show();
         }
     });
 }

@@ -26,6 +26,12 @@ pub fn pool_label(index: usize) -> String {
     format!("{TASK_LABEL_PREFIX}{}", index + 1)
 }
 
+/// Labels the window-state plugin must not track: every pool slot. A slot is reused by unrelated tasks, so restoring the
+/// last occupant's size, position, maximised or fullscreen state would be wrong, and it would override the default size.
+pub fn window_state_denylist() -> Vec<String> {
+    (0..MAX_TASK_WINDOWS).map(pool_label).collect()
+}
+
 /// The inverse of [`pool_label`]: the slot index of an exact pool label, or
 /// `None` for anything else (`main`, `task-0`, `task-9`, `task-01`, any
 /// padding or trailing characters).
@@ -128,8 +134,13 @@ impl TaskWindows {
     }
 }
 
-/// Brings an existing task window forward. It touches only that window.
+/// Brings an existing task window forward. It touches only that window. A window that has not painted yet is still
+/// hidden: it is left alone (showing it now would be a blank window) because `window_ready` shows and focuses it at
+/// its first paint anyway.
 fn focus_window(win: &tauri::WebviewWindow) {
+    if !win.is_visible().unwrap_or(false) {
+        return;
+    }
     let _ = win.unminimize();
     let _ = win.show();
     let _ = win.set_focus();
@@ -174,7 +185,8 @@ fn create_task_window(
             }
         }
     });
-    crate::window_chrome::arm_task_fallback(app, label.to_string());
+    // The fallback holds THIS window, not its label: a timer from an old window must never show a rebuilt one early.
+    crate::window_chrome::arm_task_fallback(win);
     Ok(())
 }
 
@@ -414,11 +426,16 @@ mod tests {
             lib.contains("api.prevent_close();"),
             "main keeps hide-to-tray"
         );
-        assert!(!include_str!("windows.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap()
-            .contains("prevent_close"));
+        // Look at the function body itself: the first `#[cfg(test)]` in this file sits inside the impl, before it.
+        let create = body(include_str!("windows.rs"), "fn create_task_window(");
+        assert!(
+            !create.contains("prevent_close"),
+            "a task window must not hide on close"
+        );
+        assert!(
+            !create.contains("CloseRequested"),
+            "a task window has no close handler: it is destroyed"
+        );
     }
 
     #[test]
@@ -463,5 +480,52 @@ mod tests {
             ready.contains("is_visible()"),
             "a repeated ready signal must not steal focus again"
         );
+    }
+
+    #[test]
+    fn window_state_does_not_track_pool_slots() {
+        let deny = window_state_denylist();
+        assert_eq!(deny.len(), MAX_TASK_WINDOWS);
+        for i in 0..MAX_TASK_WINDOWS {
+            assert!(
+                deny.contains(&pool_label(i)),
+                "{} must be denied",
+                pool_label(i)
+            );
+        }
+        assert!(
+            !deny.iter().any(|l| l == "main"),
+            "main keeps its saved frame"
+        );
+        let lib = include_str!("lib.rs");
+        assert!(lib.contains(".with_denylist("));
+        assert!(lib.contains("windows::window_state_denylist()"));
+    }
+
+    #[test]
+    fn an_unpainted_task_window_is_not_shown_by_a_second_open() {
+        let focus = body(include_str!("windows.rs"), "fn focus_window(");
+        let guard = focus.find("is_visible()").expect("focus checks visibility");
+        let show = focus.find("win.show()").expect("focus shows");
+        assert!(guard < show, "visibility is checked before show()");
+    }
+
+    #[test]
+    fn the_fallback_timer_holds_the_window_not_its_label() {
+        let chrome = include_str!("window_chrome.rs");
+        let sig = chrome
+            .split("pub fn arm_task_fallback")
+            .nth(1)
+            .unwrap()
+            .split('{')
+            .next()
+            .unwrap();
+        assert!(
+            sig.contains("WebviewWindow"),
+            "arm_task_fallback takes the window handle"
+        );
+        assert!(!sig.contains("label"), "no label: a rebuilt slot reuses it");
+        let create = body(include_str!("windows.rs"), "fn create_task_window(");
+        assert!(create.contains("arm_task_fallback(win)"));
     }
 }
