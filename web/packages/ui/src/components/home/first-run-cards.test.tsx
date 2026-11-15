@@ -59,12 +59,69 @@ describe("FirstRunCards", () => {
     expect(section).not.toHaveTextContent(/import/i);
   });
 
-  it("the providers card shows the same readiness sentence as the Get started card, and Done wording once an agent is signed in", () => {
-    const { unmount } = renderCards({ health: { "claude-native": { ok: false, detail: "not found on PATH" }, glm: { ok: false, detail: "no account" } } });
-    expect(screen.getByTestId("first-run-providers-status").textContent).toMatch(/not installed|signed out|No agent/i);
-    unmount();
-    renderCards({ health: { "claude-native": { ok: true, detail: "ok" } } });
-    expect(screen.getByTestId("first-run-providers-status")).toHaveTextContent("An agent is signed in");
+  describe("the providers step per state", () => {
+    const READY = { ok: true, detail: "ok" };
+    const SIGNED_OUT = { ok: false, detail: "no account" };
+    const MISSING = { ok: false, detail: '"x" not found on PATH' };
+    const THREE: ProviderInfo[] = [...PROVIDERS, { id: "codex-native", label: "Codex", models: [] }];
+
+    it("providers-card-when-ready-shows-done-with-the-agent-name-and-a-quiet-manage-link", () => {
+      renderCards({ health: { "claude-native": READY, glm: SIGNED_OUT } });
+      const card = screen.getByTestId("first-run-card-providers");
+      expect(card).toHaveAttribute("data-state", "done");
+      expect(screen.getByTestId("first-run-providers-done")).toHaveTextContent("Agents ready · Claude Code");
+      expect(card).not.toHaveTextContent(/Set up providers/);
+      expect(card).not.toHaveTextContent(/Open Providers/);
+      expect(card.querySelector("svg")?.getAttribute("class")).toContain("lucide-check"); // the check icon, as in the Get started block
+      const manage = within(card).getByRole("button", { name: "Manage" });
+      expect(manage.className).toContain("underline-offset-4"); // the quiet link variant
+      expect(manage.className).not.toContain("bg-primary");
+      expect(card).toHaveTextContent("(done)"); // for assistive tech, like the Get started step
+    });
+
+    it("several ready agents read as a count", () => {
+      renderCards({ providers: THREE, health: { "claude-native": READY, glm: READY, "codex-native": SIGNED_OUT } });
+      expect(screen.getByTestId("first-run-providers-done")).toHaveTextContent("2 agents ready");
+    });
+
+    it("Manage runs the same Settings -> Providers navigation the to-do card's button runs", () => {
+      const seen: unknown[] = [];
+      const listener = (e: Event) => seen.push((e as CustomEvent).detail);
+      window.addEventListener("smind:open-settings", listener);
+      try {
+        renderCards({ health: { "claude-native": READY } });
+        fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+        expect(seen).toEqual([{ sectionId: "providers" }]);
+      } finally {
+        window.removeEventListener("smind:open-settings", listener);
+      }
+    });
+
+    it("done leaves Add a project as the one primary action", () => {
+      renderCards({ health: { "claude-native": READY } });
+      expect(screen.getByTestId("first-run-add-project").className).toContain("bg-primary");
+    });
+
+    it.each([
+      ["signed out", { "claude-native": SIGNED_OUT, glm: SIGNED_OUT }, /Sign-in needed/],
+      ["not installed", { "claude-native": MISSING, glm: MISSING }, /not installed|No agent/],
+    ])("%s keeps the Set up providers card with its sentence and its outline button, and no primary Add a project", (_name, health, sentence) => {
+      renderCards({ health });
+      const card = screen.getByTestId("first-run-card-providers");
+      expect(card).toHaveAttribute("data-state", "todo");
+      expect(card).toHaveTextContent("Set up providers");
+      expect(screen.getByTestId("first-run-providers-status").textContent).toMatch(sentence);
+      const open = within(card).getByRole("button", { name: "Open Providers" });
+      expect(open.className).not.toContain("bg-primary");
+      expect(screen.queryByTestId("first-run-providers-done")).not.toBeInTheDocument();
+      expect(screen.getByTestId("first-run-add-project").className).not.toContain("bg-primary");
+    });
+
+    it("while the agents are still being checked the card stays to-do (never done early)", () => {
+      renderCards({ health: {} });
+      expect(screen.getByTestId("first-run-card-providers")).toHaveAttribute("data-state", "todo");
+      expect(screen.getByTestId("first-run-providers-status")).toHaveTextContent(/Checking|Checking/);
+    });
   });
 
   it("checks the providers once on mount (ensure), never on a plain re-render", () => {
