@@ -525,6 +525,12 @@
           "markdownDescription": "Enables the take_over_daemon command without any pre-configured scope."
         },
         {
+          "description": "Enables the window_open_task command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-window-open-task",
+          "markdownDescription": "Enables the window_open_task command without any pre-configured scope."
+        },
+        {
           "description": "Enables the window_ready command without any pre-configured scope.",
           "type": "string",
           "const": "allow-window-ready",
@@ -715,6 +721,12 @@
           "type": "string",
           "const": "deny-take-over-daemon",
           "markdownDescription": "Denies the take_over_daemon command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the window_open_task command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-window-open-task",
+          "markdownDescription": "Denies the window_open_task command without any pre-configured scope."
         },
         {
           "description": "Denies the window_ready command without any pre-configured scope.",

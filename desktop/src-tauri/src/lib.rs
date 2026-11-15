@@ -53,6 +53,7 @@ mod real_daemon_test;
 pub mod updater;
 mod window_chrome;
 mod window_layout;
+mod windows;
 mod zoom_store;
 
 use state::DesktopState;
@@ -136,7 +137,15 @@ pub fn run() {
         // previously-saved native frame back to an undecorated window
         // (D1), leaving two sets of caption buttons.
         .plugin(
+            // Task windows are NOT tracked: their labels are reusable pool slots, so a saved frame (or a maximised or
+            // fullscreen flag) would reopen an unrelated task in the last occupant's state.
             tauri_plugin_window_state::Builder::default()
+                .with_denylist(
+                    &windows::window_state_denylist()
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                )
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         - tauri_plugin_window_state::StateFlags::VISIBLE
@@ -183,6 +192,7 @@ pub fn run() {
             daemon_manager::daemon_restart,
             daemon_manager::take_over_daemon,
             daemon_manager::connection_version,
+            windows::window_open_task,
             window_chrome::window_ready,
             window_chrome::window_set_theme,
             updater::app_update_check,
@@ -266,6 +276,7 @@ pub fn run() {
             // when the UI reports its first paint (or after the fallback).
             app.manage(window_chrome::ShowGate::default());
             app.manage(context_menu::ContextMenuState::default());
+            app.manage(windows::TaskWindows::default());
             let builder = WebviewWindowBuilder::new(
                 app,
                 MAIN_WINDOW,
