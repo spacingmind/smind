@@ -279,6 +279,43 @@ test("latest-json-reads-only-the-third-line", () => {
   assert.throws(() => buildLatestJson({ ...base, files: f }), /signed version/);
 });
 
+// the updater plugin reads lines with Rust str::lines(), which strips \r
+test("latest-json-accepts-a-crlf-signature", () => {
+  const f = files();
+  const crlf = Buffer.from(Buffer.from(fakeSig("1.2.3").trim(), "base64").toString("utf8").replaceAll("\n", "\r\n")).toString("base64");
+  f["darwin-aarch64"].signature = crlf + "\n";
+  assert.doesNotThrow(() => buildLatestJson({ ...base, files: f }));
+});
+
+// trim_start_matches('v') strips EVERY leading v
+test("latest-json-accepts-a-vv-prefixed-signed-version", () => {
+  const f = files();
+  f["darwin-aarch64"].signature = fakeSig("vv1.2.3");
+  assert.doesNotThrow(() => buildLatestJson({ ...base, files: f }));
+});
+
+// The real v0.20.0 updater signatures (public release assets, committed under scripts/testdata/
+// real-v0.20.0/ so the claim "every release carries its signed version" is reproducible here).
+test("latest-json-real-v0.20.0-signatures-are-accepted", () => {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "../../scripts/testdata/real-v0.20.0");
+  const sig = (n) => readFileSync(join(dir, n), "utf8");
+  const m = buildLatestJson({
+    version: "0.20.0",
+    tag: "v0.20.0",
+    repo: "spacingmind/smind",
+    notes: "",
+    pubDate: "2026-11-14T00:00:00Z",
+    files: {
+      "darwin-aarch64": { asset: "smind-desktop-0.20.0-macos-arm64.app.tar.gz", signature: sig("smind-desktop-0.20.0-macos-arm64.app.tar.gz.sig") },
+      "darwin-x86_64": { asset: "smind-desktop-0.20.0-macos-x86_64.app.tar.gz", signature: sig("smind-desktop-0.20.0-macos-x86_64.app.tar.gz.sig") },
+      "windows-x86_64": { asset: "sMind_0.20.0_x64-setup.exe", signature: sig("sMind_0.20.0_x64-setup.exe.sig") },
+    },
+  });
+  assert.equal(m.version, "0.20.0");
+  // the same files against the wrong manifest version are refused
+  assert.throws(() => buildLatestJson({ ...base, version: "0.20.1", tag: "v0.20.1", files: { "darwin-aarch64": { asset: "x.app.tar.gz", signature: sig("smind-desktop-0.20.0-macos-arm64.app.tar.gz.sig") }, "darwin-x86_64": { asset: "y", signature: sig("smind-desktop-0.20.0-macos-x86_64.app.tar.gz.sig") }, "windows-x86_64": { asset: "z", signature: sig("sMind_0.20.0_x64-setup.exe.sig") } } }), /signed for version "0\.20\.0"/);
+});
+
 test("latest-json-cli-refuses-and-writes-nothing-for-a-versionless-signature", () => {
   const dir = fixtureDir();
   try {

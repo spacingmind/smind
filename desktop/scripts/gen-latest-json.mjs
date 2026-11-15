@@ -35,7 +35,7 @@ export function signedVersionOf(signature) {
   // the plugin would not read as a signed version is not one here (a field with a leading space
   // would pass a trimming reader and be refused by the plugin). Keep in sync with the same function
   // in scripts/verify-release-artifacts.mjs.
-  const line = Buffer.from(b64, "base64").toString("utf8").split("\n")[2];
+  const line = Buffer.from(b64, "base64").toString("utf8").split(/\r?\n/)[2]; // Rust str::lines() strips \r too
   if (line === undefined || !line.startsWith("trusted comment: ")) {
     throw new Error("the signature has no trusted comment");
   }
@@ -73,7 +73,8 @@ export function buildLatestJson({ version, tag, repo, notes, pubDate, files }) {
     } catch (err) {
       throw new Error(`signature for platform "${platform}": ${err.message}`);
     }
-    if (normalizeVersion(signed) !== normalized) {
+    // the plugin strips every leading `v` (trim_start_matches) before comparing as semver
+    if (normalizeVersion(signed.replace(/^v+/, "")) !== normalized) {
       throw new Error(
         `signature for platform "${platform}" was signed for version "${signed}" but the manifest version is "${normalized}": the updater would refuse it`
       );
