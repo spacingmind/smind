@@ -24,10 +24,9 @@ import { listSettingsSections } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useWindowState } from "@/hooks/use-window-state";
-import { desktopOS, isDesktop } from "@/lib/platform";
+import { usePageLeftInset, usePageSidebarKept } from "@/hooks/use-page-chrome";
+import { isDesktop } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import { headerLeftInsetPx } from "@/lib/window-chrome";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClient } from "@/lib/ws-client";
 import { Icons } from "@/lib/icons";
@@ -217,8 +216,8 @@ export function SettingsScreen({
     </SectionTitleInHeaderProvider>
   );
   const dragRegion = isDesktop ? "deep" : undefined;
-  const { fullscreen } = useWindowState();
-  const leftInset = isDesktop ? headerLeftInsetPx(desktopOS, fullscreen, 0) : 0;
+  const leftInset = usePageLeftInset();
+  const sidebarKept = usePageSidebarKept();
   const headerStyle = leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined;
 
   if (narrow && view === "list") {
@@ -315,7 +314,7 @@ export function SettingsScreen({
             macOS traffic lights, the back row sits under it. Browser: no title
             bar to clear, so the back row takes that h-12 row itself and lines
             up with the content header across the divider. */}
-        {isDesktop ? (
+        {isDesktop && !sidebarKept ? (
           <>
             <div className="h-12 shrink-0" data-testid="settings-sidebar-top" data-tauri-drag-region={dragRegion} />
             <div className="shrink-0 px-2 pb-1">{backToApp}</div>
