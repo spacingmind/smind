@@ -176,6 +176,8 @@ export function taskRowMenu(
     onArchiveTask: (task: Task) => void;
     /** Opens the New sub-task dialog; absent outside the tree provider (search results). */
     onNewSubTask?: () => void;
+    /** Desktop build only (absent in a browser): opens this task in its own window, or focuses the one it has. */
+    onOpenInNewWindow?: () => void;
     /** PR-H11 tree actions; present only on rows in the tree view whose task has live descendants. */
     tree?: { availability: TreeActionAvailability; onArchiveFinished: () => void; onStopTree: () => void };
   },
@@ -194,6 +196,16 @@ export function taskRowMenu(
       enabled: !archived,
       reachable: true,
       note: archived ? "archived" : undefined,
+    });
+  }
+  if (o.onOpenInNewWindow) {
+    entries.push({
+      kind: "item",
+      id: "open-in-new-window",
+      testId: "sidebar-task-open-in-new-window-action",
+      label: "Open in new window",
+      icon: <Icons.openToSide />,
+      onSelect: o.onOpenInNewWindow,
     });
   }
   if (o.tree) {
