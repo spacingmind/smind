@@ -17,6 +17,7 @@ import {
   focusTabInLayout,
   MAX_TREE_DEPTH,
   moveTabToPaneInLayout,
+  reorderTabInLayout,
   normalizeLayout,
   resizeSplitInLayout,
   splitPaneEmptyInLayout,
@@ -500,6 +501,22 @@ export function useTaskTabs() {
     [setTabsByTask],
   );
 
+  /** Moves a tab to another slot of its own pane (`toIndex` is the insertion slot in the current order). A no-op when nothing would change. */
+  const reorderTab = useCallback(
+    (taskId: number, key: string, paneId: PaneId, toIndex: number): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const reordered = reorderTabInLayout({ layout, paneId, tabKey: key, toIndex });
+        if (!reordered) return prev;
+        const next = new Map(prev);
+        next.set(taskId, reordered);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
   /** Splits targetPaneId in `direction`, carrying `key`'s tab into the freshly created pane. A no-op past `MAX_TREE_DEPTH`, or if the tab/pane can't be found. */
   const splitTab = useCallback(
     (taskId: number, key: string, targetPaneId: string, direction: SplitDirection): void => {
@@ -626,6 +643,7 @@ export function useTaskTabs() {
     closeTab,
     activate,
     moveTab,
+    reorderTab,
     splitTab,
     resizeGroup,
     focusPane,

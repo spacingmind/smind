@@ -52,6 +52,7 @@ import { AppContextMenu } from "@/components/ui/app-context-menu";
 import { tabMenu } from "@/lib/menu-models";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { reorderIndicatorX, reorderSlotAtX } from "@/lib/tab-reorder";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TAB_KINDS,
@@ -131,6 +132,26 @@ interface DraggedTabData {
   tabKey: string;
   sourcePaneId: string;
   kind: TabKind;
+}
+
+/**
+ * Whether a dragged tab's center is over its OWN pane's tab strip, and if so the insertion slot and where to draw the
+ * indicator. Measured from the DOM at the moment of the move (the strip is the pane's `tab-scroller`, widened by a few
+ * pixels vertically to the whole 36px row); a drag over another pane's strip is not a reorder.
+ */
+function reorderHit(paneId: string, x: number, y: number): { paneId: string; slot: number; x: number; top: number; height: number } | null {
+  const scroller = document.querySelector<HTMLElement>(`[data-pane-id="${paneId.replace(/"/g, "")}"] [data-testid="tab-scroller"]`);
+  if (!scroller) return null;
+  const box = scroller.getBoundingClientRect();
+  if (x < box.left || x > box.right || y < box.top - 4 || y > box.bottom + 4) return null;
+  const spans = Array.from(scroller.querySelectorAll<HTMLElement>('[role="tab"]')).map((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right };
+  });
+  const slot = reorderSlotAtX(spans, x);
+  const at = reorderIndicatorX(spans, slot);
+  if (at === null) return null;
+  return { paneId, slot, x: at, top: box.top, height: box.height };
 }
 
 /** Maps a drop's edge zone (`SplitDropZonePosition`, minus `"center"`) to `use-task-tabs.ts`'s own up/down `SplitDirection` naming. */
@@ -345,6 +366,7 @@ function AppShell({
     closeTab,
     activate,
     moveTab,
+    reorderTab,
     splitTab,
     resizeGroup,
     focusPane,
@@ -764,6 +786,8 @@ function AppShell({
   const [dragOverPaneId, setDragOverPaneId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<SplitDropZonePosition | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
+  /** A tab dragged along its own strip: the pane, the insertion slot, and where the drop indicator is drawn (viewport pixels). */
+  const [reorderTarget, setReorderTarget] = useState<{ paneId: string; slot: number; x: number; top: number; height: number } | null>(null);
 
   /** Which pane's "+" menu the `tab.new` keyboard action popped open, if any -- see PaneTabStrip's NewTabButton. */
   const [openNewTabPaneId, setOpenNewTabPaneId] = useState<string | null>(null);
@@ -784,6 +808,7 @@ function AppShell({
     setIsDragActive(false);
     setDragOverPaneId(null);
     setDropPosition(null);
+    setReorderTarget(null);
   }, []);
 
   /**
@@ -798,6 +823,18 @@ function AppShell({
     const overPaneId = event.over ? String(event.over.id) : null;
     const overRect = event.over?.rect;
     const translatedRect = event.active.rect.current.translated;
+    // A tab dragged along its OWN strip reorders: the pane-drop preview is off and a 4px indicator marks the slot.
+    const dragged = event.active.data.current as DraggedTabData | undefined;
+    if (dragged && translatedRect) {
+      const hit = reorderHit(dragged.sourcePaneId, translatedRect.left + translatedRect.width / 2, translatedRect.top + translatedRect.height / 2);
+      if (hit) {
+        setReorderTarget(hit);
+        setDragOverPaneId(null);
+        setDropPosition(null);
+        return;
+      }
+    }
+    setReorderTarget(null);
     if (!overPaneId || !overRect || !translatedRect) {
       setDragOverPaneId(null);
       setDropPosition(null);
@@ -823,9 +860,15 @@ function AppShell({
       const data = event.active.data.current as DraggedTabData | undefined;
       const targetPaneId = dragOverPaneId;
       const position = dropPosition;
+      const reorder = reorderTarget;
       setIsDragActive(false);
       setDragOverPaneId(null);
       setDropPosition(null);
+      setReorderTarget(null);
+      if (data && reorder && selectedTask) {
+        reorderTab(selectedTask.ID, data.tabKey, reorder.paneId, reorder.slot);
+        return;
+      }
       if (!data || !targetPaneId || !position || !selectedTask) return;
       if (position === "center") {
         moveTab(selectedTask.ID, data.tabKey, targetPaneId);
@@ -837,7 +880,7 @@ function AppShell({
       if (!isMovableKind(data.kind)) return;
       splitTab(selectedTask.ID, data.tabKey, targetPaneId, DROP_POSITION_TO_SPLIT_DIRECTION[position]);
     },
-    [dragOverPaneId, dropPosition, selectedTask, moveTab, splitTab],
+    [dragOverPaneId, dropPosition, reorderTarget, selectedTask, moveTab, reorderTab, splitTab],
   );
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
@@ -1488,6 +1531,15 @@ function AppShell({
                 openNewTabPaneId={openNewTabPaneId}
                 onOpenNewTabPaneIdChange={setOpenNewTabPaneId}
               />
+              {reorderTarget && (
+                <div
+                  aria-hidden
+                  data-testid="tab-drop-indicator"
+                  data-slot={reorderTarget.slot}
+                  className="pointer-events-none fixed z-50 w-1 rounded-full bg-primary"
+                  style={{ left: reorderTarget.x - 2, top: reorderTarget.top, height: reorderTarget.height }}
+                />
+              )}
             </DndContext>
           )}
         </div>
