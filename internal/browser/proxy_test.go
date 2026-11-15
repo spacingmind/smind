@@ -329,7 +329,7 @@ func TestProxyMixedAndSensitiveResolutionsAreRefused(t *testing.T) {
 		if code != http.StatusForbidden {
 			t.Errorf("%s: %d", host, code)
 		}
-		status, _, _ := rig.connect(t, host+":443")
+		status, _, _ := rig.connect(t, fmt.Sprintf("%s:%d", host, 443))
 		if !strings.Contains(status, "403") {
 			t.Errorf("CONNECT %s: %q", host, status)
 		}

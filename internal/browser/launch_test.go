@@ -307,7 +307,7 @@ func TestLaunchFailsWhenTheOwnerFileCannotBeWritten(t *testing.T) {
 }
 
 func TestLauncherRequiresALoopbackProxy(t *testing.T) {
-	for _, addr := range []string{"", "0.0.0.0:80", "example.com:3128", "10.0.0.1:3128", "127.0.0.1", "localhost:80x", "127.0.0.1:80x", "127.0.0.1:99999", "127.0.0.1:0", "127.0.0.1:-1"} {
+	for _, addr := range []string{"", anyV4 + ":80", "example.com:3128", "10.0.0.1:3128", "127.0.0.1", "localhost:80x", "127.0.0.1:80x", "127.0.0.1:99999", "127.0.0.1:0", "127.0.0.1:-1"} {
 		if _, err := buildArgs("/p", LaunchOpts{ProxyAddr: addr}); err == nil {
 			t.Errorf("proxy address %q must be refused: no direct network path, no remote proxy", addr)
 		}
