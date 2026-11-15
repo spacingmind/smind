@@ -18,4 +18,6 @@ Tabs are draggable through one `DndContext` (`useDraggable` per tab, a `useDropp
 Keyboard reorder, dragging a tab to a specific slot in ANOTHER pane's strip, drag reorder in the narrow layout.
 
 ## Validation
-(filled below)
+- AC1-AC5: `reorderTabInLayout` table (13 cases), `reorderSlotAtX`/`reorderIndicatorX` tables, `tab-reorder-wiring.test.tsx` (4 pins), Playwright `tabs-reorder.spec.ts` TR-01/TR-02 on light and dark 1280 (the narrow runs are skipped by design: the compact layout has no drag-and-drop) with `tabs.spec.ts`: 20 passed, 4 skipped. Transition frames, light and dark, every pair opened: drag started, over with the indicator, after the drop.
+- Mutations (committed code, each failed a named test): the slot flipped to the right half, the removal shift missing, the drop not reordering, the pane preview left on during a reorder, and the indicator not rendered (this one first survived the unit tests, which now pin the render; the e2e spec also kills it).
+- Not verified: real-window frames (screen locked); a drag across panes or onto another pane's strip (unchanged code, existing behaviour); touch drag; Windows and Linux.

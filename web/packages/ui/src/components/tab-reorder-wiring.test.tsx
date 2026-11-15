@@ -26,7 +26,7 @@ describe("tab reorder wiring (source pins on App.tsx)", () => {
 
   it("cancelling a drag clears the reorder target, and the indicator is a 4px bar", () => {
     expect(app.split("const handleDragCancel = useCallback(")[1]!.split("}, [])")[0]).toContain("setReorderTarget(null)");
-    expect(app).toContain('data-testid="tab-drop-indicator"');
+    expect(app).toMatch(/\{reorderTarget && \(\s*<div[^>]*data-testid="tab-drop-indicator"/);
     expect(app).toContain("pointer-events-none fixed z-50 w-1 rounded-full bg-primary");
   });
 
