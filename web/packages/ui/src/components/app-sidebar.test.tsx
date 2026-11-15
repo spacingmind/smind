@@ -935,9 +935,12 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-      const dot = await screen.findByTestId("task-attention");
-      expect(dot).toHaveAttribute("data-attention-reason", reason);
-      seen.set(reason, dot.getAttribute("data-status")!);
+      // The task renders twice for permission/finished (the pinned "Needs you"
+      // section and the tree), once for error (not a needs-you reason); every
+      // copy carries the same marker.
+      const dots = await screen.findAllByTestId("task-attention");
+      for (const dot of dots) expect(dot).toHaveAttribute("data-attention-reason", reason);
+      seen.set(reason, dots[0]!.getAttribute("data-status")!);
       unmount();
     }
 
@@ -1132,7 +1135,9 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     );
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-    fireEvent.click(await screen.findByText("Fix the bug"));
+    // The task appears twice (pinned "Needs you" section + the tree); clicking
+    // either copy selects the same task.
+    fireEvent.click((await screen.findAllByText("Fix the bug"))[0]!);
     expect(onSelectTask).toHaveBeenCalledWith(TASK);
   });
 });

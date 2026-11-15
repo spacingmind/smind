@@ -530,6 +530,9 @@ export function AppSidebar({
     () => groupTasksByStatus(viewTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
     [viewTasks, attention, runStatus],
   );
+  // The pinned "Needs you" section (AC9) lists the status view's
+  // needs-attention bucket in the default view too.
+  const needsYouTasks = useMemo(() => statusGroups.find((g) => g.key === "needs-attention")?.tasks ?? [], [statusGroups]);
   const { permission: notificationPermission } = useNotificationPermission();
   const { enabled: notificationSoundEnabled } = useNotificationSoundPreference();
   const openNotifiedTask = useCallback(
@@ -1015,6 +1018,14 @@ export function AppSidebar({
                       onArchiveTask={archiveTask}
                     />
                   )}
+                  {!searching && groupMode !== "status" && needsYouTasks.length > 0 && (
+                    <NeedsYouSection
+                      tasks={needsYouTasks}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={archiveTask}
+                    />
+                  )}
                   {!searching && pinnedTasks.length > 0 && (
                     <PinnedSection
                       tasks={pinnedTasks}
@@ -1350,6 +1361,63 @@ function PinnedSection({
             selectedTaskId={selectedTaskId}
             onSelectTask={onSelectTask}
             emptyText="No pinned tasks"
+            onArchiveTask={onArchiveTask}
+          />
+        </ContainerContent>
+      )}
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The pinned "Needs you" section (AC9): the tasks currently in the
+ * needs-attention bucket, flattened above the workspaces in the default
+ * tree view -- same TaskRows as everywhere else, so a row here is the same
+ * row, with the same selection, as under its workspace (the task stays in
+ * the tree too). Not rendered while searching; the status view keeps its
+ * own bucket. Whether the section is collapsed is persisted like
+ * PinnedSection's (sidebar-polish S8, id `needs-you`).
+ */
+function NeedsYouSection({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  tasks: Task[];
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  const [open, toggleOpen] = useNodeOpen("needs-you");
+  const { active, rowProps } = useRowActive();
+
+  return (
+    <SidebarMenuItem data-testid="sidebar-needs-you-section">
+      <div {...rowProps}>
+        <SidebarMenuButton
+          onClick={toggleOpen}
+          aria-expanded={open}
+          data-testid="sidebar-needs-you-section-header"
+          className="rounded-lg"
+        >
+          <Icons.inbox className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+          <FadeText
+            data-testid="container-title"
+            className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
+          >
+            Needs you
+          </FadeText>
+          <RowChevron open={open} />
+        </SidebarMenuButton>
+      </div>
+      {open && (
+        <ContainerContent kind="pinned">
+          <TaskRows
+            tasks={tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            emptyText=""
             onArchiveTask={onArchiveTask}
           />
         </ContainerContent>
