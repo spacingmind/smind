@@ -290,6 +290,8 @@ function AppShell({
   // that already fetches it) so the shell can walk it for task.prev/next.
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [allWorkspaces, setAllWorkspaces] = useState<Workspace[]>([]);
+  // False until the sidebar's first workspace list arrives: [] before that must not read as "no project" on the home screen.
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   // Set once AppSidebar's first workspace/space/task fetch resolves --
   // the signal that "the tree came back empty/without this task" means
   // the task is really gone, not merely not-loaded-yet. Without it, a
@@ -1348,6 +1350,7 @@ function AppShell({
       onTasksChange={setAllTasks}
       onWorkspacesChange={(workspaces) => {
         setAllWorkspaces(workspaces);
+        setWorkspacesLoaded(true);
         setTreeLoaded(true);
       }}
       onOpenSettings={openSettings}
@@ -1424,6 +1427,7 @@ function AppShell({
         connectionDetail={connectCause?.raw}
         onRetryConnect={retryConnect}
         workspaces={allWorkspaces}
+        workspacesLoaded={workspacesLoaded}
         onCreated={selectTaskFromSidebar}
         onAddProject={requestNewWorkspace}
       />
