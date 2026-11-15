@@ -32,40 +32,72 @@ pub struct ClickContext {
     pub proxy_url: Url,
 }
 
-/// show displays an OS notification for `task_id`, wiring up a click
+/// Where a notification/tray click goes: the task, the chat whose tab
+/// holds the pending card (0 = unknown, fall back to the task's Files
+/// tab), and the request id the card is keyed by.
+#[derive(Clone, Debug)]
+pub struct Target {
+    pub task_id: i64,
+    pub chat_id: i64,
+    pub request_id: Option<String>,
+}
+
+impl Target {
+    pub fn task(task_id: i64) -> Self {
+        Self { task_id, chat_id: 0, request_id: None }
+    }
+}
+
+/// show displays an OS notification for `target`, wiring up a click
 /// handler on the platforms that support one.
-pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
+pub fn show(ctx: ClickContext, title: String, body: String, target: Target) {
     #[cfg(target_os = "windows")]
-    windows::show(ctx, title, body, task_id);
+    windows::show(ctx, title, body, target);
     #[cfg(target_os = "linux")]
-    linux::show(ctx, title, body, task_id);
+    linux::show(ctx, title, body, target);
     #[cfg(target_os = "macos")]
-    macos::show(ctx, title, body, task_id);
+    macos::show(ctx, title, body, target);
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     fallback::show(ctx, title, body);
 }
 
-/// navigate_to_task is the platform-independent click reaction: focus
-/// the main window and, if the task's workspace id has been resolved by
-/// then, navigate to its route -- if not, AC3 says to still focus the
-/// window. Dispatched via `run_on_main_thread` since the OS notification
+/// route_for picks the URL a click on `target` navigates to once its
+/// workspace id is known: the exact chat card when a chat is known, the
+/// terminal-independent Files fallback otherwise.
+pub fn route_for(proxy_url: &Url, workspace_id: i64, target: &Target) -> String {
+    if target.chat_id > 0 {
+        route::card_route_url(proxy_url, workspace_id, target.task_id, target.chat_id, target.request_id.as_deref())
+    } else {
+        route::task_route_url(proxy_url, workspace_id, target.task_id, route::DEFAULT_KIND)
+    }
+}
+
+/// navigate is the platform-independent click reaction: focus the main
+/// window and, if the task's workspace id has been resolved by then,
+/// navigate to its route -- if not, AC3 says to still focus the window.
+/// Dispatched via `run_on_main_thread` since the OS notification
 /// callback fires on its own thread, not the app's main thread. Also
 /// reused by the tray's attention item (AC4): same navigation, different
 /// trigger.
-pub fn navigate_to_task(ctx: &ClickContext, task_id: i64) {
+pub fn navigate(ctx: &ClickContext, target: &Target) {
     let app = ctx.app.clone();
     let cache = ctx.cache.clone();
     let proxy_url = ctx.proxy_url.clone();
+    let target = target.clone();
     let _ = ctx.app.run_on_main_thread(move || {
         use tauri::Manager;
-        log::info!("notification click: task {task_id}, workspace {:?}", cache.get(task_id));
+        log::info!(
+            "notification click: task {}, workspace {:?}",
+            target.task_id,
+            cache.get(target.task_id)
+        );
         let Some(win) = app.get_webview_window(MAIN_WINDOW) else {
             return;
         };
         let _ = win.show();
         let _ = win.set_focus();
-        if let Some(workspace_id) = cache.get(task_id) {
-            let url = route::task_route_url(&proxy_url, workspace_id, task_id, route::DEFAULT_KIND);
+        if let Some(workspace_id) = cache.get(target.task_id) {
+            let url = route_for(&proxy_url, workspace_id, &target);
             if let Ok(url) = url.parse() {
                 let _ = win.navigate(url);
             }
@@ -73,18 +105,24 @@ pub fn navigate_to_task(ctx: &ClickContext, task_id: i64) {
     });
 }
 
+/// navigate_to_task is `navigate` for a task with no known chat or
+/// request -- the deep-link path (AC6).
+pub fn navigate_to_task(ctx: &ClickContext, task_id: i64) {
+    navigate(ctx, &Target::task(task_id));
+}
+
 #[cfg(target_os = "windows")]
 mod windows {
     use tauri_winrt_notification::Toast;
 
-    use super::{navigate_to_task, ClickContext};
+    use super::{navigate, ClickContext, Target};
 
-    pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
+    pub fn show(ctx: ClickContext, title: String, body: String, target: Target) {
         let toast = Toast::new(Toast::POWERSHELL_APP_ID)
             .title(&title)
             .text1(&body)
             .on_activated(move |_action| {
-                navigate_to_task(&ctx, task_id);
+                navigate(&ctx, &target);
                 Ok(())
             });
         // Toast::show()'s activation handler must outlive the call or
@@ -103,13 +141,13 @@ mod windows {
 mod linux {
     use notify_rust::Notification;
 
-    use super::{navigate_to_task, ClickContext};
+    use super::{navigate, ClickContext, Target};
 
     /// notify-rust's own reserved action key for "closed without an
     /// action" -- not a click.
     const CLOSED: &str = "__closed";
 
-    pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
+    pub fn show(ctx: ClickContext, title: String, body: String, target: Target) {
         let shown = Notification::new()
             .summary(&title)
             .body(&body)
@@ -124,7 +162,7 @@ mod linux {
         std::thread::spawn(move || {
             handle.wait_for_action(|action| {
                 if action != CLOSED {
-                    navigate_to_task(&ctx, task_id);
+                    navigate(&ctx, &target);
                 }
             });
         });
@@ -162,7 +200,7 @@ mod macos {
 
     use mac_notification_sys::{set_application, Notification, NotificationResponse};
 
-    use super::{fallback, navigate_to_task, should_wait_for_click, ClickContext, MAX_CLICK_WAITERS};
+    use super::{fallback, navigate, should_wait_for_click, ClickContext, Target, MAX_CLICK_WAITERS};
 
     static WAITERS: AtomicUsize = AtomicUsize::new(0);
 
@@ -188,10 +226,10 @@ mod macos {
         }
     }
 
-    pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
+    pub fn show(ctx: ClickContext, title: String, body: String, target: Target) {
         let slot = try_reserve();
         if slot.is_none() {
-            log::info!("notification for task {task_id}: {MAX_CLICK_WAITERS} click waiters already outstanding, sending without click-to-navigate");
+            log::info!("notification for task {}: {MAX_CLICK_WAITERS} click waiters already outstanding, sending without click-to-navigate", target.task_id);
         }
         std::thread::spawn(move || {
             // Attribute the notification to this app (default would be
@@ -200,7 +238,7 @@ mod macos {
             let _ = set_application(&bundle_id);
             let wait = slot.is_some();
             match Notification::new().title(&title).message(&body).wait_for_click(wait).send() {
-                Ok(NotificationResponse::Click) => navigate_to_task(&ctx, task_id),
+                Ok(NotificationResponse::Click) => navigate(&ctx, &target),
                 Ok(_) => {}
                 Err(_) => fallback::show(ctx, title, body),
             }
@@ -233,5 +271,31 @@ mod tests {
         assert!(!should_wait_for_click(cap, cap));
         assert!(!should_wait_for_click(cap + 10, cap));
         assert!(!should_wait_for_click(0, 0), "a zero cap never waits");
+    }
+
+    #[test]
+    fn route_for_uses_the_card_route_with_a_chat() {
+        let base = Url::parse("http://127.0.0.1:4648").unwrap();
+        let target = Target { task_id: 42, chat_id: 7, request_id: Some("req_9".to_string()) };
+        assert_eq!(route_for(&base, 3, &target), "http://127.0.0.1:4648/#/workspace/3/task/42/chat/7?card=req_9");
+    }
+
+    #[test]
+    fn route_for_falls_back_to_the_files_route_without_a_chat() {
+        let base = Url::parse("http://127.0.0.1:4648").unwrap();
+        assert_eq!(route_for(&base, 3, &Target::task(42)), "http://127.0.0.1:4648/#/workspace/3/task/42/files");
+        assert_eq!(
+            route_for(&base, 3, &Target { task_id: 42, chat_id: 0, request_id: Some("req_9".to_string()) }),
+            "http://127.0.0.1:4648/#/workspace/3/task/42/files"
+        );
+    }
+
+    #[test]
+    fn route_for_carries_the_request_id() {
+        let base = Url::parse("http://127.0.0.1:4648").unwrap();
+        let with = Target { task_id: 42, chat_id: 7, request_id: Some("req 9".to_string()) };
+        assert!(route_for(&base, 3, &with).ends_with("?card=req+9"), "{}", route_for(&base, 3, &with));
+        let without = Target { task_id: 42, chat_id: 7, request_id: None };
+        assert_eq!(route_for(&base, 3, &without), "http://127.0.0.1:4648/#/workspace/3/task/42/chat/7");
     }
 }
