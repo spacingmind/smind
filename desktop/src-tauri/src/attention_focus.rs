@@ -155,7 +155,9 @@ pub fn current() -> Option<FocusReport> {
 
 /// hold parks a notification while the person types.
 pub fn hold(item: HeldItem) {
-    locked(HELD.get_or_init(|| Mutex::new(Held::new(HELD_CAP)))).push(item);
+    let mut held = locked(HELD.get_or_init(|| Mutex::new(Held::new(HELD_CAP))));
+    held.push(item);
+    log::debug!("smind desktop: banner held ({} waiting)", held.len());
 }
 
 /// attention_focus_report is the web app's attention report (AC9):
@@ -182,6 +184,9 @@ pub fn attention_focus_report(
     }
     let wanted = {
         let mut held = locked(HELD.get_or_init(|| Mutex::new(Held::new(HELD_CAP))));
+        if held.is_empty() {
+            return Ok(());
+        }
         held.take_wanted(|id| state.tray.is_pending(id))
     };
     for item in wanted {

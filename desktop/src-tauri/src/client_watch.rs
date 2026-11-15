@@ -121,7 +121,7 @@ fn on_event(
                 // person types in another task, otherwise through the
                 // coalescer.
                 match attention_focus::decide(attention_focus::current(), n.task_id) {
-                    attention_focus::Decision::Drop => return,
+                    attention_focus::Decision::Drop => {}
                     attention_focus::Decision::Hold => {
                         attention_focus::hold(attention_focus::HeldItem {
                             kind: n.kind,
@@ -131,7 +131,6 @@ fn on_event(
                             title: n.title.clone(),
                             body: n.body.clone(),
                         });
-                        return;
                     }
                     attention_focus::Decision::Show => banner::submit(
                         ctx,
