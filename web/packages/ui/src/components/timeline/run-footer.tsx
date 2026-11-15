@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Icons } from "@/lib/icons";
+import { useTicker } from "@/hooks/use-ticker";
 
 import { RunProvenance, provenanceSha } from "@/components/timeline/run-provenance";
 import { Button } from "@/components/ui/button";
@@ -196,12 +197,3 @@ function modelTitle(run: RunFooterRun): string | undefined {
 const SEGMENT =
   "flex items-center sm:before:mr-2 sm:before:text-foreground-subtle sm:before:content-['·'] sm:first:before:content-none";
 
-/** Re-renders every `intervalMs` while mounted (null = off). */
-function useTicker(intervalMs: number | null): void {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (intervalMs === null) return;
-    const id = setInterval(() => setTick((n) => n + 1), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-}
