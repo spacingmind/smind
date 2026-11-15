@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -112,12 +113,12 @@ func TestBrowserSettingsMethodsAreHumanOnly(t *testing.T) {
 				}
 			}
 		}
-		if _, err := h(context.Background(), &requestContext{runScoped: true}, json.RawMessage(`{"workspaceId":1}`)); err == nil {
-			t.Errorf("%s accepted a run-scoped caller", m)
-		}
-		if _, err := h(context.Background(), nil, json.RawMessage(`{"workspaceId":1}`)); err == nil {
-			t.Errorf("%s accepted a nil context", m)
-		}
+		// A workspace that exists and params the method accepts, so only the guards refuse.
+		wsID := e.task.WorkspaceID
+		_, err := h(context.Background(), &requestContext{runScoped: true}, validBrowserParams(m, wsID))
+		wantRefusal(t, m+" run-scoped", err, "")
+		_, err = h(context.Background(), nil, validBrowserParams(m, wsID))
+		wantRefusal(t, m+" nil context", err, "")
 	}
 }
 
@@ -215,30 +216,76 @@ func TestBrowserSettings_HostLengthCaps(t *testing.T) {
 	}
 }
 
-// Each layer holds on its own: the handler refuses a run-scoped context even
-// when it is local, and the REGISTERED handler refuses a non-local one that is
-// not run-scoped (a relay connection).
-func TestBrowserSettings_EachLayerRefusesOnItsOwn(t *testing.T) {
-	h, fs, _ := settingsHost(t)
-	raw := json.RawMessage(`{"workspaceId":1,"enabled":true}`)
-	for name, fn := range map[string]handlerFunc{"get": h.settingsGet, "set": h.settingsSet, "clear": h.dataClear} {
-		if _, err := fn(context.Background(), nil, raw); err == nil {
-			t.Errorf("%s: the raw handler accepted a nil context", name)
-		}
-		if _, err := fn(context.Background(), &requestContext{local: true, runScoped: true}, raw); err == nil {
-			t.Errorf("%s: a local run-scoped context must be refused by the handler itself", name)
-		}
-	}
-	if len(fs.rows) != 0 {
-		t.Fatal("nothing stored")
-	}
-	e := newProcEnv(t)
-	for _, m := range browserSettingsMethods {
-		if _, err := e.api.hs[m](context.Background(), &requestContext{local: false}, raw); err == nil || !strings.Contains(err.Error(), "only available on this machine") {
-			t.Errorf("%s registered without the local-only wrapper: %v", m, err)
-		}
+// wantRefusal asserts the EXACT refusal: the forbidden code and the message,
+// not merely a non-nil error (a validation or not-found error would otherwise
+// satisfy a test whose guard had been removed).
+func wantRefusal(t *testing.T, what string, err error, msg string) {
+	t.Helper()
+	var re *rpcCodeError
+	if !errors.As(err, &re) || re.code != codeForbidden || !strings.Contains(re.msg, msg) {
+		t.Errorf("%s: got %v, want code %q containing %q", what, err, codeForbidden, msg)
 	}
 }
+
+// validBrowserParams are params each method ACCEPTS from a human for a workspace
+// that exists, so that without its guard the call would succeed (and change
+// something): the refusal under test is then the only thing stopping it.
+func validBrowserParams(method string, ws int64) json.RawMessage {
+	switch method {
+	case "browser.settings.set":
+		return json.RawMessage(fmt.Sprintf(`{"workspaceId":%d,"enabled":true,"allowAdd":["a.test"]}`, ws))
+	default:
+		return json.RawMessage(fmt.Sprintf(`{"workspaceId":%d}`, ws))
+	}
+}
+
+// Each layer holds on its own: the handler refuses a nil or run-scoped context
+// even when it is local, and the REGISTERED handler refuses a non-local one
+// that is not run-scoped (a relay connection). Every call here would SUCCEED
+// without the guard under test.
+func TestBrowserSettings_EachLayerRefusesOnItsOwn(t *testing.T) {
+	h, fs, closed := settingsHost(t)
+	fs.rows[1] = store.BrowserSettings{WorkspaceID: 1, Enabled: false, AllowHosts: []string{"keep.test"}, ProfileMode: "ephemeral", UpdatedBy: "seed"}
+	before := fs.rows[1]
+	raw := map[string]handlerFunc{"browser.settings.get": h.settingsGet, "browser.settings.set": h.settingsSet, "browser.data.clear": h.dataClear}
+	// Control: a human local context succeeds for the same params, so a refusal below is the guard.
+	for m, fn := range raw {
+		if _, err := fn(context.Background(), settingsHumanRC, validBrowserParams(m, 1)); err != nil {
+			t.Fatalf("%s: the control call by a human must succeed: %v", m, err)
+		}
+	}
+	fs.rows[1] = before // undo the control's change
+	*closed = nil
+	for m, fn := range raw {
+		wantRefusal(t, m+" nil context", errOf(fn(context.Background(), nil, validBrowserParams(m, 1))), "is not available to agents")
+		wantRefusal(t, m+" local+runScoped", errOf(fn(context.Background(), &requestContext{local: true, runScoped: true}, validBrowserParams(m, 1))), "is not available to agents")
+	}
+	if !reflect.DeepEqual(fs.rows[1], before) || len(*closed) != 0 {
+		t.Fatalf("a refused call must leave the store and the session alone: %+v closed=%v", fs.rows[1], *closed)
+	}
+
+	// The registered handlers, real store: a relay-like context (not local, not run-scoped).
+	e := newProcEnv(t)
+	ws := e.task.WorkspaceID
+	for _, m := range browserSettingsMethods {
+		_, err := e.api.hs[m](context.Background(), &requestContext{local: false}, validBrowserParams(m, ws))
+		wantRefusal(t, m+" registered, not local", err, "only available on this machine")
+		if _, err := e.api.hs[m](context.Background(), settingsHumanRC, validBrowserParams(m, ws)); err != nil {
+			t.Fatalf("%s registered: the control call by a local human must succeed: %v", m, err)
+		}
+	}
+	if err := e.db.DeleteBrowserSettings(ws); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range browserSettingsMethods {
+		_, _ = e.api.hs[m](context.Background(), &requestContext{local: false}, validBrowserParams(m, ws))
+	}
+	if got, _ := e.db.GetBrowserSettings(ws); got.Enabled || len(got.AllowHosts) != 0 {
+		t.Fatalf("a relay-like call changed the store: %+v", got)
+	}
+}
+
+func errOf(_ any, err error) error { return err }
 
 func TestExactlyOneBrowserMethodIsRunScoped(t *testing.T) {
 	e := newProcEnv(t)
