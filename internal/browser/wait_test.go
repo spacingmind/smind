@@ -163,3 +163,112 @@ func TestWaitRejectsBadArguments(t *testing.T) {
 		t.Fatalf("a rejected wait must touch nothing: %d calls", n)
 	}
 }
+
+// navWaitHook answers the isolated-world dance with a new context id per
+// world (worlds []int64), optional recreate failures (worldErrs, by call
+// number), and per-evaluate answers (evals, by call number).
+func navWaitHook(worlds map[int]int64, worldErrs map[int]string, evals map[int]any) func(f *fakeCDP, c fakeCall) (any, string) {
+	return func(f *fakeCDP, c fakeCall) (any, string) {
+		switch c.Method {
+		case "Page.getFrameTree":
+			return map[string]any{"frameTree": map[string]any{"frame": map[string]any{"id": "F1"}}}, ""
+		case "Page.createIsolatedWorld":
+			n := len(f.callsFor("Page.createIsolatedWorld"))
+			if msg, ok := worldErrs[n]; ok {
+				return nil, msg
+			}
+			return map[string]any{"executionContextId": worlds[n]}, ""
+		case "Runtime.evaluate":
+			n := len(f.callsFor("Runtime.evaluate"))
+			switch v := evals[n].(type) {
+			case string:
+				return nil, v
+			case bool:
+				return map[string]any{"result": map[string]any{"value": v}}, ""
+			}
+			return nil, "unexpected evaluate"
+		}
+		return defaultHook(f, c)
+	}
+}
+
+func TestWaitSurvivesNavigationDuringWait(t *testing.T) {
+	s, f := startHookedSession(t, navWaitHook(
+		map[int]int64{1: 5, 2: 6},
+		nil,
+		map[int]any{1: "Cannot find context with specified id", 2: true},
+	))
+	lowerPollInterval(t, 5*time.Millisecond)
+
+	found, _, err := s.WaitFor(context.Background(), "", "after nav", "", 2*time.Second)
+	if err != nil || !found {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	if n := len(f.callsFor("Page.createIsolatedWorld")); n != 2 {
+		t.Fatalf("the world must be recreated once after the navigation, not %d times", n)
+	}
+	evals := f.callsFor("Runtime.evaluate")
+	if len(evals) != 2 {
+		t.Fatalf("evaluate calls: %d", len(evals))
+	}
+	if got := evals[1].Params["contextId"]; got != float64(6) {
+		t.Fatalf("the evaluate after the recreate must run in the new world: contextId=%v", got)
+	}
+}
+
+func TestWaitKeepsPollingWhenTheWorldCannotBeRecreatedYet(t *testing.T) {
+	s, f := startHookedSession(t, navWaitHook(
+		map[int]int64{1: 5, 3: 6},
+		map[int]string{2: "No frame with given id found"},
+		map[int]any{1: "Execution context was destroyed", 2: "Execution context was destroyed", 3: true},
+	))
+	lowerPollInterval(t, 5*time.Millisecond)
+
+	found, _, err := s.WaitFor(context.Background(), "", "slow nav", "", 2*time.Second)
+	if err != nil || !found {
+		t.Fatalf("a mid-navigation recreate failure is not an error: found=%v err=%v", found, err)
+	}
+	if n := len(f.callsFor("Page.createIsolatedWorld")); n != 3 {
+		t.Fatalf("it must keep trying to recreate the world, calls=%d", n)
+	}
+}
+
+func TestWaitOtherEvaluateErrorsStillFail(t *testing.T) {
+	s, _ := startHookedSession(t, navWaitHook(
+		map[int]int64{1: 5},
+		nil,
+		map[int]any{1: "Internal error"},
+	))
+	lowerPollInterval(t, 5*time.Millisecond)
+
+	found, _, err := s.WaitFor(context.Background(), "", "x", "", time.Second)
+	if err == nil || found || !strings.Contains(err.Error(), "Internal error") {
+		t.Fatalf("an unrelated evaluate error must surface: found=%v err=%v", found, err)
+	}
+}
+
+func TestWaitURLMatchesTheFullURL(t *testing.T) {
+	long := "http://localhost:3000/" + strings.Repeat("a", 700) + "/needle"
+	s, f := startHookedSession(t, func(f *fakeCDP, c fakeCall) (any, string) {
+		if c.Method == "Target.getTargetInfo" {
+			return map[string]any{"targetInfo": map[string]any{"targetId": "T1", "url": long, "title": "Home"}}, ""
+		}
+		return defaultHook(f, c)
+	})
+
+	found, url, err := s.WaitFor(context.Background(), "", "", "/needle", time.Second)
+	if err != nil || !found {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	// The needle sits past the display copy's 500-rune cut: it can only have
+	// matched the raw URL.
+	if n := len([]rune(url)); n > 501 {
+		t.Fatalf("the caller still gets the cleaned display copy, got %d runes", n)
+	}
+	if strings.Contains(url, "needle") {
+		t.Fatalf("the raw url must never leave the package: %q", url)
+	}
+	if n := len(f.callsFor("Runtime.evaluate")); n != 0 {
+		t.Fatalf("url mode must not run page script, %d evaluates", n)
+	}
+}

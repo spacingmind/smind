@@ -49,6 +49,36 @@ func (s *Session) isolatedContext(ctx context.Context, t *tabState) (int64, erro
 	return w.ExecutionContextID, nil
 }
 
+// isContextGone reports whether err is the browser saying the execution
+// context a Runtime.evaluate targeted no longer exists: a page-driven
+// navigation destroys the isolated world the wait was polling in.
+func isContextGone(err error) bool {
+	var ce *CDPError
+	if !errors.As(err, &ce) {
+		return false
+	}
+	m := strings.ToLower(ce.Message)
+	return strings.Contains(m, "cannot find context") ||
+		strings.Contains(m, "execution context was destroyed") ||
+		strings.Contains(m, "context with specified id")
+}
+
+// rawTabURL returns the tab's URL exactly as the browser reports it. Waits
+// match needles against it, not against tabInfo's display copy (cleaned and
+// cut to 500 runes, which can hide the very text being waited for); callers
+// are still only ever handed the display copy.
+func (s *Session) rawTabURL(ctx context.Context, t *tabState) (string, error) {
+	var r struct {
+		TargetInfo struct {
+			URL string `json:"url"`
+		} `json:"targetInfo"`
+	}
+	if err := s.tabCall(ctx, t, "Target.getTargetInfo", map[string]any{"targetId": t.targetID}, &r); err != nil {
+		return "", err
+	}
+	return r.TargetInfo.URL, nil
+}
+
 // evalIncludes runs the text search in the isolated world. The needle is
 // JSON-encoded, never concatenated into the expression.
 func (s *Session) evalIncludes(ctx context.Context, t *tabState, evalCtx int64, text string) (bool, error) {
@@ -107,17 +137,31 @@ func (s *Session) WaitFor(ctx context.Context, tabID, text, urlContains string, 
 		if text != "" {
 			found, err = s.evalIncludes(ctx, tab, evalCtx, text)
 			if err != nil {
-				return false, "", err
-			}
-			if found {
+				if !isContextGone(err) {
+					return false, "", err
+				}
+				// The isolated world died with a navigation: recreate it and
+				// keep polling. While the page is still mid-navigation even
+				// the recreate can fail; that only means "not yet" — the
+				// deadline or a cancelled context ends the wait, nothing else.
+				if n, nerr := s.isolatedContext(ctx, tab); nerr == nil {
+					evalCtx = n
+				} else if ctx.Err() != nil {
+					return false, "", ctx.Err()
+				}
+			} else if found {
 				return true, urlNow(), nil
 			}
 		} else {
-			info, err := s.tabInfo(ctx, tab.targetID)
+			raw, err := s.rawTabURL(ctx, tab)
 			if err != nil {
 				return false, "", err
 			}
-			if strings.Contains(info.URL, urlContains) {
+			if strings.Contains(raw, urlContains) {
+				info, err := s.tabInfo(ctx, tab.targetID)
+				if err != nil {
+					return false, "", err
+				}
 				return true, info.URL, nil
 			}
 		}
