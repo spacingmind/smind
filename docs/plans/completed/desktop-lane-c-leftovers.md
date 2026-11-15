@@ -1,8 +1,10 @@
 # Desktop Lane C leftovers (inbox grant control, terminal surface, palette subtitle, settings type scale, chat density)
 
-Status: active (2026-11-15). Five small PRs on `wave/desktop`, one at a time: C, A, B, D, E. Only C is HIGH-RISK (permission UI).
+Status: completed (2026-11-15). Five small PRs on `wave/desktop`, one at a time: C, A, B, D, E. Only C was HIGH-RISK (permission UI); C is dropped (below).
 
-## PR C: the inbox permission card offers "Always allow in this project"
+## PR C: the inbox permission card offers "Always allow in this project" (DROPPED)
+
+**Dropped by the Human decision of 2026-11-15:** saved grants stay in the task view only. ADR-0045 ("no always-allow shortcut on the inbox card") and `inbox-safety.test.ts` are unchanged; nothing from this section shipped. The criteria below are kept only as the record of what was proposed.
 
 ### Problem
 
@@ -32,6 +34,19 @@ Status: active (2026-11-15). Five small PRs on `wave/desktop`, one at a time: C,
 
 AC: the terminal background and cursor accent are the pane surface (`--panel`, what `bg-panel` paints), light and dark. Decision: the `--terminal-bg` token keeps its reference-parity value (the token test forbids dark overrides, and plugins read it); the terminal resolves `--color-panel` instead. Test: `lib/terminal-theme.test.ts`, `terminal-pane.test.tsx` (wrapper class `bg-panel`). Validation: frames light/dark 1280/390 (inset == pane colour asserted); tabs e2e specs on 4 projects.
 
+## PR B: the palette's task subtitle is the project name
+
+AC: a Tasks row's subtitle is its workspace title (path when untitled), never the branch slug; the slug stays a search keyword. Test: `App.test.tsx` "a task row's subtitle is its project name, not the branch slug, and the slug still finds it" (fails when the subtitle is reverted to the branch). Shipped in #939.
+
+## D: settings type scale (audit, no change)
+
+Measured, nothing off: the settings source uses only `text-ui-base`, `text-ui-sm`, `text-ui-lg` and `text-ui-settings-title`, no raw sizes. Computed sizes across all 15 sections at 1280 are 14, 12, 24, 10 and 16 px, every one a token step; the nav items are 14 px, the same as the app sidebar's task rows (group labels 12 px, page title 24 px). Not type scale, noted for later: General's content column is narrow while Providers' is wide, and Settings shows the app sidebar and the settings nav side by side (two 256 px columns).
+
+## E: chat density (measured, no change)
+
+At 1280x800: the text column is 768 px in a 1023 px pane (E-a widens it to 896 px only from 1100 px panes, decision 11 of `chat-surface-ui.md`), the composer is 736 px, the header and the prompt are 14 px, the chips 13 px, and the gap from the last message's meta line to the composer is 33 px. The empty band in a short chat is the composer pinned to the bottom, which decision 11 calls expected. Nothing left after E-a.
+
 ## Progress / Validation
 
-(filled in per PR)
+- A: #937 merged. B: #939 merged. C: dropped (Human decision). D and E: audited, no change, results above. Frames and measurements were kept as local scratch material, not committed.
+- Every acceptance criterion of the shipped items is confirmed in its PR body (unit, frames light and dark at 1280 and 390, local e2e); the not-verified items (Windows and desktop shells) stay CI-only. This plan is complete.
