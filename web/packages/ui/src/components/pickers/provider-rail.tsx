@@ -46,7 +46,7 @@ function RailGlyph({ provider, label }: { provider: string; label: string }) {
     <span
       aria-hidden
       data-testid={`model-rail-initial-${provider}`}
-      className="flex size-4 items-center justify-center rounded bg-foreground-muted/20 text-[10px] leading-none font-semibold"
+      className="flex size-4 items-center justify-center rounded bg-foreground-muted/20 text-ui-xs leading-none font-semibold"
     >
       {initial}
     </span>
