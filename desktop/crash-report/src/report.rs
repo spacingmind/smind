@@ -28,6 +28,22 @@ pub fn default_dir_from(
     fn nonempty(s: Option<&str>) -> Option<&str> {
         s.filter(|s| !s.is_empty())
     }
+    // A relative APPDATA / XDG_DATA_HOME is ignored (the XDG specification says the same, and the
+    // Go side, `desktopDirFrom`, applies the same rule): the shell's working directory is not
+    // stable, so a relative base would put reports where nothing looks. Judged by the target OS,
+    // not the host's.
+    fn absolute(os: &str, p: &str) -> bool {
+        if os == "windows" {
+            let mut b = p.bytes();
+            p.starts_with("\\\\")
+                || matches!(
+                    (b.next(), b.next(), b.next()),
+                    (Some(d), Some(b':'), Some(b'\\' | b'/')) if d.is_ascii_alphabetic()
+                )
+        } else {
+            p.starts_with('/')
+        }
+    }
     match os {
         "macos" => {
             let home = nonempty(home)?;
@@ -40,11 +56,11 @@ pub fn default_dir_from(
             )
         }
         "windows" => {
-            let appdata = nonempty(appdata)?;
+            let appdata = nonempty(appdata).filter(|p| absolute(os, p))?;
             Some(Path::new(appdata).join(IDENTIFIER).join("crashes"))
         }
         _ => {
-            let base = match nonempty(xdg) {
+            let base = match nonempty(xdg).filter(|p| absolute(os, p)) {
                 Some(xdg) => PathBuf::from(xdg),
                 None => Path::new(nonempty(home)?).join(".local").join("share"),
             };
@@ -420,6 +436,32 @@ mod tests {
         );
         // No frames at all.
         assert_eq!(dedupe_frame(""), "");
+    }
+
+    #[test]
+    fn default_dir_ignores_relative_bases() {
+        let id = IDENTIFIER;
+        let d = |os, home, appdata, xdg| default_dir_from(os, home, appdata, xdg);
+        assert_eq!(
+            d("linux", Some("/home/a"), None, Some("relative/xdg")),
+            Some(PathBuf::from(format!("/home/a/.local/share/{id}/crashes")))
+        );
+        assert_eq!(
+            d("linux", Some("/home/a"), None, Some(".")),
+            Some(PathBuf::from(format!("/home/a/.local/share/{id}/crashes")))
+        );
+        assert_eq!(d("linux", None, None, Some("relative")), None);
+        assert_eq!(
+            d("linux", Some("/home/a"), None, Some("/data/xdg")),
+            Some(PathBuf::from(format!("/data/xdg/{id}/crashes")))
+        );
+        assert_eq!(d("windows", Some(r"C:\Users\a"), Some("AppData"), None), None);
+        assert_eq!(
+            d("windows", None, Some(r"C:\Users\a\AppData\Roaming"), None),
+            Some(Path::new(r"C:\Users\a\AppData\Roaming").join(id).join("crashes"))
+        );
+        assert!(d("windows", None, Some(r"\\server\share\AppData"), None).is_some());
+        assert_eq!(d("macos", None, None, None), None);
     }
 
     #[test]

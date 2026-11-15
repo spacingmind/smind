@@ -145,6 +145,19 @@ folder, and `smind doctor` lists it. Differences worth knowing:
   code, a panic before the hook is set at the start of `run()`. (A build with
   `panic = "abort"` would still be caught: the hook runs before the abort; the
   shell does not use it.)
+- Capturing the backtrace resolves symbols and redaction runs over it (the raw
+  stack is cut to 256 KiB first, the report to 64 KiB): bounded, a few
+  milliseconds, not zero.
+- A hook installed later by another component replaces ours (the shell installs
+  ours before anything else; a later `std::panic::set_hook` that does not call the
+  previous hook would switch recording off). A panic that is caught afterwards
+  (`catch_unwind`, or a task runtime that contains it) still writes a report, within
+  the rate limit, even though the app carries on.
+- Fatal signals (a segmentation fault, `SIGKILL`) and a stack overflow produce no
+  report: the hook never runs.
+- If no usable application data directory can be found (no home directory, or
+  only a relative `XDG_DATA_HOME`/`APPDATA`, which is ignored), the shell prints one
+  line to stderr and records nothing.
 - On Windows the home directory is read from `USERPROFILE` when `HOME` is not set,
   and the `\\?\` prefix that Windows adds to resolved paths is ignored when
   matching it.

@@ -135,3 +135,10 @@ fn install_does_no_io() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("CHILD-INSTALLED exists=false"));
     assert!(!dir.exists(), "install created the directory");
 }
+
+// crash-rs-install-default-without-a-directory-says-so: no derivable directory is an error,
+// never a silent no-op (install_default prints the line).
+#[test]
+fn install_default_without_a_directory_is_an_error() {
+    assert!(smind_crash_report::install_default_with(None, "x").is_err());
+}

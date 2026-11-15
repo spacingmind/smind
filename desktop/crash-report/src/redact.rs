@@ -26,7 +26,7 @@ static RE_WINDOWS_USER: LazyLock<Regex> = LazyLock::new(|| {
     re(r#"(?i)[A-Za-z]:[\\/]Users[\\/][^\t\n\f\r /\\:*?"<>|]+(?: [^\t\n\f\r /\\:*?"<>|]+)*"#)
 });
 static RE_BEARER: LazyLock<Regex> =
-    LazyLock::new(|| re(r"(?i)(?-u:\b)(?:bearer|basic)[\t\n\f\r ]+[A-Za-z0-9._~+/=-]+"));
+    LazyLock::new(|| re(r"(?i)(?-u:\b)(?:bearer|basic)[\t\n\f\r \x{00a0}\x{2000}-\x{200a}\x{202f}\x{205f}\x{3000}]+[A-Za-z0-9._~+/=-]+"));
 static RE_SK: LazyLock<Regex> =
     LazyLock::new(|| re(r"(?-u:\b)sk-[A-Za-z0-9_-]{8,}"));
 static RE_GITHUB_TOKEN: LazyLock<Regex> =
@@ -50,7 +50,7 @@ static RE_AUTH_LINE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static RE_SCHEME_CRED: LazyLock<Regex> = LazyLock::new(|| {
     re(
-        r"(?i)((?-u:\b)(?:token|apikey|api-key|digest|negotiate|ntlm)[\t\n\f\r ]+)[A-Za-z0-9._~+/=-]{12,}",
+        r"(?i)((?-u:\b)(?:token|apikey|api-key|digest|negotiate|ntlm)[\t\n\f\r \x{00a0}\x{2000}-\x{200a}\x{202f}\x{205f}\x{3000}]+)[A-Za-z0-9._~+/=-]{12,}",
     )
 });
 static RE_URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {

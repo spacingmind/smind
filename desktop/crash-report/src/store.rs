@@ -84,7 +84,8 @@ struct State {
 }
 
 /// Writes bounded, redacted crash reports; [`Recorder::record`] never panics
-/// and never blocks.
+/// and never waits behind another report. It does real work on the calling
+/// thread (redaction, one file write, rotation): bounded, not zero.
 pub struct Recorder {
     cfg: Config,
     state: Mutex<State>,
@@ -133,7 +134,7 @@ impl Recorder {
         let window = self.cfg.limits.dedupe_window.as_nanos() as i128;
         let key = format!("{site}\0{}", report::dedupe_frame(stack));
 
-        let report;
+        let suppressed;
         {
             let mut st = self.lock_state();
             st.write_times
@@ -153,8 +154,11 @@ impl Recorder {
             st.last_seen.insert(key, now);
             st.last_seen
                 .retain(|_, &mut t| now_n - report::unix_nanos(t) < window);
-            report = self.build_report(site, panic_type, message, stack, now, st.suppressed);
+            suppressed = st.suppressed;
         }
+        // Redaction (up to three passes over a stack of at most 256 KiB) runs outside the state
+        // lock: another thread's panic must not wait for it.
+        let report = self.build_report(site, panic_type, message, stack, now, suppressed);
 
         // One writer at a time; a second concurrent report is dropped and
         // counted, never queued behind a slow disk.

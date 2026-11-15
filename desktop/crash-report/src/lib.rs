@@ -2,9 +2,13 @@
 //! `internal/crash` (docs/plans/active/crash-capture.md and crash-capture-desktop.md).
 //! Reports stay on this machine; this crate has no network code and spawns no process.
 //!
-//! [`install`] stores the configuration and sets a panic hook; it does no I/O. The hook records
-//! the panic (the directory is created by the first report), then calls the hook that was installed before it, so the default message, Tauri's own handling
-//! and any test harness keep working.
+//! [`install`] stores the configuration and sets a panic hook; installing does no disk I/O. The
+//! hook records the panic (the directory is created by the first report), then calls the hook
+//! that was installed before it, so the default message, Tauri's own handling and any test
+//! harness keep working. The hook does real work on the panicking thread: it captures a
+//! backtrace (which resolves symbols), redacts it and writes one small file. That is bounded
+//! (the stack is cut before redaction, the report is capped, a second report arriving meanwhile
+//! is dropped), not zero.
 
 // A panic inside a panic hook aborts the process, so the code the hook runs must not be able to
 // panic: these lints are the guard (tests are exempt; the static regexes are validated by the
@@ -62,16 +66,29 @@ pub fn install(cfg: Config) {
 
 /// [`install`] for the shell: the reports go to the app data crashes directory
 /// ([`report::default_dir`]); `smind_home` for redaction is `$SMIND_HOME` or `~/.smind`.
-/// Does nothing when no home directory can be found.
+/// When no usable directory can be derived (no home directory, only relative bases) nothing is
+/// installed and one line says so on stderr: a shell that silently records nothing would look
+/// like a shell that never crashes.
 pub fn install_default(version: &str) {
-    let Some(dir) = report::default_dir() else {
-        return;
-    };
+    if install_default_with(report::default_dir(), version).is_err() {
+        // `eprintln!` panics on a closed stderr; this runs at startup but keep the rule: write
+        // and ignore the result.
+        let _ = std::io::Write::write_all(
+            &mut std::io::stderr(),
+            b"smind-crash-report: no usable application data directory (is HOME set?); crash reports are off\n",
+        );
+    }
+}
+
+/// [`install_default`] with the directory given: `Err` when there is none.
+pub fn install_default_with(dir: Option<PathBuf>, version: &str) -> Result<(), &'static str> {
+    let dir = dir.ok_or("no usable application data directory")?;
     let mut cfg = Config::new(dir, version);
     cfg.smind_home = std::env::var_os("SMIND_HOME")
         .map(PathBuf::from)
         .or_else(|| cfg.home.as_ref().map(|h| h.join(".smind")));
     install(cfg);
+    Ok(())
 }
 
 fn record_from_hook(info: &PanicHookInfo<'_>) {
