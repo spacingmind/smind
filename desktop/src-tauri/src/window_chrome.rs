@@ -29,6 +29,22 @@ use tauri::{AppHandle, Manager, Runtime, State, Theme};
 
 use crate::MAIN_WINDOW;
 
+/// The smallest the main window can be (logical pixels). The width stays above the web UI's mobile breakpoint
+/// (768 px, `hooks/use-mobile.ts`): below it the sidebar becomes a sheet and the header loses the drawn window
+/// chrome, which is not a layout a desktop window should fall into. The height keeps the composer, the header
+/// and a few rows of the sidebar on screen.
+pub const MIN_WINDOW: (f64, f64) = (800.0, 520.0);
+
+/// `Some(size)` when a logical size is below [`MIN_WINDOW`], the size to put the window back to. The OS enforces
+/// the minimum while the user drags, but a size saved by a build that had no minimum is restored by the
+/// window-state plugin and may be smaller; the shell applies this on every resize so it is corrected at once.
+pub fn clamp_to_minimum(width: f64, height: f64) -> Option<(f64, f64)> {
+    if width >= MIN_WINDOW.0 && height >= MIN_WINDOW.1 {
+        return None;
+    }
+    Some((width.max(MIN_WINDOW.0), height.max(MIN_WINDOW.1)))
+}
+
 /// How long a window may stay hidden waiting for the UI's "painted"
 /// signal before it is shown anyway.
 pub const READY_FALLBACK: Duration = Duration::from_secs(3);
@@ -146,7 +162,10 @@ pub fn configure<'a, R: Runtime, M: Manager<R>>(
     surface: Surface,
 ) -> WebviewWindowBuilder<'a, R, M> {
     // D2.1: hidden with a matching background until the UI has painted.
-    let builder = builder.visible(false).background_color(surface.color());
+    let builder = builder
+        .visible(false)
+        .background_color(surface.color())
+        .min_inner_size(MIN_WINDOW.0, MIN_WINDOW.1);
 
     #[cfg(target_os = "macos")]
     let builder = {
@@ -289,6 +308,49 @@ mod tests {
         assert!(
             css.contains(&hex(Surface::DARK_RGB)),
             "dark --background in index.css no longer matches Surface::DARK_RGB"
+        );
+    }
+}
+
+#[cfg(test)]
+mod min_size_tests {
+    use super::*;
+
+    #[test]
+    fn the_minimum_width_keeps_the_desktop_layout() {
+        // hooks/use-mobile.ts flips to the sheet sidebar below 768 CSS px.
+        assert!(MIN_WINDOW.0 >= 768.0);
+        assert!(MIN_WINDOW.1 >= 480.0);
+    }
+
+    #[test]
+    fn clamp_to_minimum_table() {
+        let (w, h) = MIN_WINDOW;
+        type Case = (f64, f64, Option<(f64, f64)>);
+        let cases: &[Case] = &[
+            (1280.0, 800.0, None),
+            (w, h, None),
+            (w - 1.0, 800.0, Some((w, 800.0))),
+            (1280.0, h - 1.0, Some((1280.0, h))),
+            (300.0, 200.0, Some((w, h))),
+            (0.0, 0.0, Some((w, h))),
+        ];
+        for (cw, ch, want) in cases {
+            assert_eq!(clamp_to_minimum(*cw, *ch), *want, "{cw}x{ch}");
+        }
+    }
+
+    #[test]
+    fn the_main_window_builder_sets_the_minimum() {
+        let src = include_str!("window_chrome.rs");
+        let configure = src
+            .split("pub fn configure<")
+            .nth(1)
+            .expect("configure exists");
+        let body = configure.split("\n}\n").next().expect("configure body");
+        assert!(
+            body.contains(".min_inner_size(MIN_WINDOW.0, MIN_WINDOW.1)"),
+            "configure must set the window minimum"
         );
     }
 }
