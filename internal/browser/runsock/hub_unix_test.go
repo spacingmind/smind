@@ -914,3 +914,30 @@ func TestReadResponseIsBounded(t *testing.T) {
 		t.Fatal("a reply with no newline is an error")
 	}
 }
+
+// A reply with no end must not be buffered without limit: the bounded reader
+// gives up (an infinite stream returns an error instead of exhausting memory).
+func TestReadResponseDoesNotBufferAnEndlessReply(t *testing.T) {
+	done := make(chan error, 1)
+	go func() {
+		_, err := ReadResponse(endless{})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("an endless reply is an error")
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("an endless reply was buffered without limit")
+	}
+}
+
+type endless struct{}
+
+func (endless) Read(b []byte) (int, error) {
+	for i := range b {
+		b[i] = 'a'
+	}
+	return len(b), nil
+}
