@@ -1,6 +1,6 @@
 # macOS signing and notarization: the runbook
 
-This is for the person who owns the Apple Developer account. **Nothing here has been run against Apple**; the scripts and the workflow are prepared and tested only with fake tools. The decisions behind it are in `docs/decisions/0060-desktop-macos-signing-and-notarization.md` (Proposed): read it first.
+**Status (2026-11-15): the project is not enrolled in the Apple Developer Program for now, so none of this is switched on and the app stays ad-hoc signed and un-notarized.** This is for the person who will own the Apple Developer account, if and when there is one. **Nothing here has been run against Apple**; the scripts and the workflow are prepared and tested only with fake tools. The decisions behind it are in `docs/decisions/0060-desktop-macos-signing-and-notarization.md` (Proposed): read it first.
 
 ## 1. What to get
 

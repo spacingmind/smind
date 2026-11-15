@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — 2026-11-15.** Supersedes the part of ADR-0023 decision 2 that says "Apple notarization ... stay out of scope"; the rest of ADR-0023 (the Tauri updater and its minisign signatures) stands unchanged. Everything that can be prepared without an Apple Developer account is prepared (scripts, entitlements, a disabled workflow, a runbook: `docs/plans/active/desktop-notarization-prep.md`) and **none of it has been run against Apple**. The account is the Human's money and identity decision, so every choice under [Decisions for the Human](#decisions-for-the-human) carries a recommendation and nothing is switched on before the Human answers.
+**Proposed — 2026-11-15. The Human decided on 2026-11-15 NOT to enrol in the Apple Developer Program for now: this ADR stays Proposed, decisions 1 to 9 below are recorded as pending the Human's account decision, the workflow stays off (default-off, no secrets exist), and the macOS app stays ad-hoc signed and un-notarized (a Gatekeeper prompt on first run, as today; the README and the runbook say so). The scripts and the workflow skeleton ship so that enabling signing later is a settings change, not a project.** Supersedes the part of ADR-0023 decision 2 that says "Apple notarization ... stay out of scope"; the rest of ADR-0023 (the Tauri updater and its minisign signatures) stands unchanged. Everything that can be prepared without an Apple Developer account is prepared (scripts, entitlements, a disabled workflow, a runbook: `docs/plans/active/desktop-notarization-prep.md`) and **none of it has been run against Apple**. The account is the Human's money and identity decision, so every choice under [Decisions for the Human](#decisions-for-the-human) carries a recommendation and nothing is switched on before the Human answers.
 
 ## Context
 
@@ -34,6 +34,8 @@ The scripts serve both A and B: `verify.sh` is the read-only gate that runs afte
 - `docs/desktop-macos-signing.md`: the Human's runbook.
 
 ## Decisions for the Human
+
+All nine are **pending the Human's account decision** (2026-11-15: not enrolling for now). The recommendations stand for the day the account exists; nothing below is acted on before then.
 
 | # | Decision | Recommendation |
 |---|---|---|

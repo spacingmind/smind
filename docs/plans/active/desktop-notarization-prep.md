@@ -2,6 +2,10 @@
 
 Status: active (2026-11-15). Size: M (7): scope 3 (scripts, workflow skeleton, ADR draft), PRs 1, risk 3 (handles signing credentials; a CI workflow that can see secrets), decisions 8 (all in the ADR draft, each with a recommendation), verification 3 (nothing can run against Apple). **HIGH-RISK** (secret handling, release path): two fresh-context reviews and a Supervisor second read.
 
+## Human decision (2026-11-15)
+
+Not enrolling in the Apple Developer Program for now. ADR-0060 stays Proposed with decisions 1 to 9 pending the account decision; the workflow stays default-off; the scripts ship; the app stays un-notarized. The repository settings checklist (Environment policy, code-owner reviews, secrets) is the Human's list, to be done only if signing is ever enabled.
+
 ## What this is, and what it is not
 
 Everything that can be prepared without the Apple Developer account, and nothing that needs it. The account (USD 99 a year, a legal entity, the certificate and an API key) is the Human's money and identity call; **nothing in this PR has been run against Apple and no script will run without the Human's secrets**. It supersedes ADR-0023's "Apple notarization stays out of scope" with a Proposed ADR (0060), prepares the scripts, and adds a CI workflow that is disabled until the Human turns it on.
