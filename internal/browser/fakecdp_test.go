@@ -218,18 +218,69 @@ func TestCDPConnectionLossFailsPending(t *testing.T) {
 	}
 }
 
-func TestCDPOversizeMessageDropsTheConnection(t *testing.T) {
+// A page must not be able to end its own session by making the browser send a
+// huge message: an over-cap reply fails only the call it answers, an over-cap
+// event is dropped, and the connection lives on.
+func TestCDPOverCapReplyFailsOnlyThatCall(t *testing.T) {
+	f := newFakeCDP(t, func(f *fakeCDP, c fakeCall) (any, string) {
+		if c.Method == "Accessibility.getFullAXTree" {
+			return map[string]any{"nodes": strings.Repeat("a", maxMessageBytes+4096)}, ""
+		}
+		return map[string]any{"ok": true}, ""
+	})
+	c := NewClient(f.client)
+	defer c.Close()
+	err := c.Call(context.Background(), "", "Accessibility.getFullAXTree", nil, nil)
+	if !errors.Is(err, ErrReplyTooLarge) {
+		t.Fatalf("an over-cap reply must fail its call with ErrReplyTooLarge, got %v", err)
+	}
+	select {
+	case <-c.Done():
+		t.Fatalf("the connection must survive an over-cap reply: %v", c.Err())
+	default:
+	}
+	var out struct{ OK bool }
+	if err := c.Call(context.Background(), "", "Browser.getVersion", nil, &out); err != nil || !out.OK {
+		t.Fatalf("the next call must work: %v %+v", err, out)
+	}
+}
+
+func TestCDPOverCapEventIsDroppedAndTheConnectionLives(t *testing.T) {
 	f := newFakeCDP(t, nil)
 	c := NewClient(f.client)
 	defer c.Close()
-	go f.send(map[string]any{"method": "Big.event", "params": map[string]any{"x": strings.Repeat("a", maxMessageBytes+10)}})
+	go f.send(map[string]any{"method": "Runtime.consoleAPICalled", "params": map[string]any{"x": strings.Repeat("a", maxMessageBytes+10)}})
+	go f.event("S1", "Page.loadEventFired", map[string]any{"timestamp": 1})
+	select {
+	case ev := <-c.Events():
+		if ev.Method != "Page.loadEventFired" {
+			t.Fatalf("the over-cap event must be dropped, the next one delivered: %+v", ev)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event after an over-cap one was never delivered")
+	}
 	select {
 	case <-c.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("a message over the limit must end the connection")
+		t.Fatalf("the connection must survive an over-cap event: %v", c.Err())
+	default:
 	}
-	if err := c.Err(); err == nil || !strings.Contains(err.Error(), "too large") {
-		t.Fatalf("the connection must end because of the SIZE limit, got %v", err)
+}
+
+func TestCDPAbsurdMessageDropsTheConnection(t *testing.T) {
+	old := maxDiscardBytes
+	maxDiscardBytes = 1 << 20
+	defer func() { maxDiscardBytes = old }()
+	f := newFakeCDP(t, nil)
+	c := NewClient(f.client)
+	defer c.Close()
+	go f.send(map[string]any{"method": "Big.event", "params": map[string]any{"x": strings.Repeat("a", maxMessageBytes+(2<<20))}})
+	select {
+	case <-c.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("a message beyond the discard bound must end the connection")
+	}
+	if err := c.Err(); err == nil || !strings.Contains(err.Error(), "far too large") {
+		t.Fatalf("reason: %v", err)
 	}
 }
 

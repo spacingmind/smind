@@ -246,6 +246,22 @@ func (r *Runner) mcpServersForWorkspace(workspaceID int64) ([]store.McpServer, e
 // smindMcpName is the reserved name of the built-in orchestration server.
 const smindMcpName = "smind"
 
+// browserMcpName is the reserved name of the built-in browser server
+// (ADR-0061). Unlike smindMcpName it is reserved for EVERY run: a registered
+// server of that name never reaches any run, managed or not, so only the
+// daemon can ever offer the browser tools.
+const browserMcpName = "smind-browser"
+
+func withoutName(rows []store.McpServer, name string) []store.McpServer {
+	out := make([]store.McpServer, 0, len(rows))
+	for _, row := range rows {
+		if row.Name != name {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // WithSmindBinary sets the executable the built-in orchestration MCP entry
 // runs (`<path> mcp serve`). Default: the daemon's own binary
 // (os.Executable, resolved lazily), falling back to "smind".
@@ -268,11 +284,20 @@ func (r *Runner) smindBinaryPath() string {
 // one, every row named "smind" is removed (reserved name) and, for an
 // orchestration seat, the built-in stdio entry is appended.
 func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.McpServer, error) {
+	return r.mcpRowsForDelivery(ctx, workspaceID, true)
+}
+
+// mcpRowsForDelivery is mcpRowsFor for a caller that knows whether the rows
+// will really be handed to the agent. With deliver false the browser row is
+// not built at all (a codex-native run takes no per-run MCP rows, a plugin
+// provider never gets smind's own): no row, and no capability token minted for
+// a row nobody will receive.
+func (r *Runner) mcpRowsForDelivery(ctx context.Context, workspaceID int64, deliver bool) ([]store.McpServer, error) {
 	rows, err := r.mcpServersForWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	rows = withHookMcp(ctx, rows)
+	rows = withoutName(withHookMcp(ctx, rows), browserMcpName)
 	policy := RunContractFrom(ctx).Mcp
 	if policy == nil {
 		return rows, nil
@@ -295,6 +320,24 @@ func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.Mcp
 		}
 		out = append(out, store.McpServer{
 			Name: smindMcpName, Transport: "stdio", Command: r.smindBinaryPath(),
+			Args: string(args), Env: string(envJSON), Enabled: true,
+		})
+	}
+	if policy.Browser != nil && deliver {
+		args, _ := json.Marshal([]string{"mcp", "browser"})
+		env := map[string]string{}
+		for k, v := range policy.Browser.Env {
+			env[k] = v
+		}
+		if policy.Browser.Issue != nil {
+			env["SMIND_BROWSER_TOKEN"] = policy.Browser.Issue()
+		}
+		envJSON, err := json.Marshal(env)
+		if err != nil {
+			return nil, fmt.Errorf("smind-browser mcp env: %w", err)
+		}
+		out = append(out, store.McpServer{
+			Name: browserMcpName, Transport: "stdio", Command: r.smindBinaryPath(),
 			Args: string(args), Env: string(envJSON), Enabled: true,
 		})
 	}
@@ -420,4 +463,35 @@ func claudeFailedMcpServers(raw json.RawMessage) []string {
 	}
 	sort.Strings(failed)
 	return failed
+}
+
+// useStrictMcp says whether a claude run hides every MCP server but the
+// daemon's own (--strict-mcp-config). A managed run does; a policy that exists
+// only to carry the browser grant (BrowserOnly) must not: it would hide the
+// person's own servers from a run that never asked for a managed tool set.
+func useStrictMcp(c RunContract) bool { return c.Mcp != nil && !c.Mcp.BrowserOnly }
+
+// browserRowDelivered says whether the browser row can reach the agent of a
+// provider: a plugin provider never gets it.
+func browserRowDelivered(pluginProvider bool) bool { return !pluginProvider }
+
+// revokeBrowserAll drops the run's browser capability (the provider took none
+// of the rows).
+func revokeBrowserAll(ctx context.Context) {
+	if p := RunContractFrom(ctx).Mcp; p != nil && p.Browser != nil && p.Browser.Revoke != nil {
+		p.Browser.Revoke()
+	}
+}
+
+// revokeBrowserIfSkipped drops it when the provider skipped the browser row
+// (names are the servers it left inactive or unresolved).
+func revokeBrowserIfSkipped(ctx context.Context, names ...[]string) {
+	for _, list := range names {
+		for _, n := range list {
+			if n == browserMcpName || strings.HasPrefix(n, browserMcpName+" ") {
+				revokeBrowserAll(ctx)
+				return
+			}
+		}
+	}
 }

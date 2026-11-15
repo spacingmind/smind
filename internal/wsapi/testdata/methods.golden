@@ -18,6 +18,7 @@ automation.memory.clear
 automation.memory.get
 automation.resume
 automation.update
+browser.call
 chat.archive
 chat.create
 chat.fork

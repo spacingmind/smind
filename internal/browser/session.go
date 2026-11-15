@@ -123,16 +123,18 @@ type Session struct {
 	inst  Instance
 	cl    *Client
 
-	mu      sync.Mutex
-	closed  bool
-	tabs    map[string]*tabState // by target id
-	notices []Notice
-	console []string
-	idle    *time.Timer
-	loads   map[string]chan struct{} // load waiters by cdp session id
-	dns     map[string]dnsEntry
-	tabSeq  int
-	navMu   sync.Mutex // one navigation at a time: a load waiter is per tab
+	mu       sync.Mutex
+	closed   bool
+	tabs     map[string]*tabState // by target id
+	notices  []Notice
+	console  []consoleLine
+	idle     *time.Timer
+	loads    map[string]chan struct{} // load waiters by cdp session id
+	dns      map[string]dnsEntry
+	tabSeq   int
+	current  string                      // target id of the tab the agent works in ("" until the first navigation)
+	snapRefs map[string]map[string]int64 // tab id -> ref ("e1") -> backend DOM node id, of the latest snapshot
+	navMu    sync.Mutex                  // one navigation at a time: a load waiter is per tab
 
 	lifecycle chan Event   // attach, detach, dialog, download: handled in order
 	requests  chan Event   // Fetch.requestPaused: handled by a bounded pool
@@ -201,6 +203,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		tabs:      map[string]*tabState{},
 		loads:     map[string]chan struct{}{},
 		dns:       map[string]dnsEntry{},
+		snapRefs:  map[string]map[string]int64{},
 		maxQueued: maxQueuedBytes,
 		lifecycle: make(chan Event, 256),
 		requests:  make(chan Event, requestQueue),
@@ -334,21 +337,80 @@ func (s *Session) DrainNotices() []Notice {
 	return out
 }
 
-// Console returns the recent console lines, oldest first.
+// consoleLine is one console line and the browser session (tab) it came from.
+type consoleLine struct{ sess, text string }
+
+// Console returns the recent console lines of every tab, oldest first.
 func (s *Session) Console() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]string(nil), s.console...)
+	out := make([]string, 0, len(s.console))
+	for _, l := range s.console {
+		out = append(out, l.text)
+	}
+	return out
 }
 
-func (s *Session) addConsole(line string) {
+func (s *Session) addConsole(sessID, line string) {
 	line = cleanText(line, maxConsoleLineLen)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.console) >= maxConsoleLines {
 		s.console = s.console[1:]
 	}
-	s.console = append(s.console, line)
+	s.console = append(s.console, consoleLine{sess: sessID, text: line})
+}
+
+// ConsoleOf returns the recent console lines of one tab only (the tab's own
+// CDP session), oldest first: a result labelled with that tab's origin must
+// carry that tab's output and nothing else.
+func (s *Session) ConsoleOf(tabID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.tabs[tabID]
+	if t == nil {
+		return nil
+	}
+	var out []string
+	for _, l := range s.console {
+		if l.sess == t.sessionID {
+			out = append(out, l.text)
+		}
+	}
+	return out
+}
+
+// TabInfo is the sanitised URL and title of one tab.
+func (s *Session) TabInfo(ctx context.Context, tabID string) (Tab, error) {
+	ctx, cancel, err := s.begin(ctx)
+	if err != nil {
+		return Tab{}, err
+	}
+	defer cancel()
+	t, err := s.tabFor(tabID)
+	if err != nil {
+		return Tab{}, err
+	}
+	return s.tabInfo(ctx, t.targetID)
+}
+
+// OpenInNewTab opens a tab inside the pool and navigates it: for a second
+// run sharing the workspace's browser, so it never takes over another run's tab.
+func (s *Session) OpenInNewTab(ctx context.Context, rawURL string) (Tab, error) {
+	// The policy first: a refused URL must not even cost a tab.
+	if d := s.checkURL(ctx, rawURL); !d.Allowed {
+		return Tab{}, fmt.Errorf("%w: %s", ErrNavigationDenied, d.Reason)
+	}
+	nt, err := s.NewTab(ctx)
+	if err != nil {
+		return Tab{}, err
+	}
+	t, err := s.Navigate(ctx, nt.ID, rawURL)
+	if err != nil {
+		_ = s.CloseTab(ctx, nt.ID)
+		return Tab{}, err
+	}
+	return t, nil
 }
 
 func (s *Session) eventLoop() {
@@ -678,7 +740,7 @@ func (s *Session) onConsole(ev Event) {
 				parts = append(parts, a.Description)
 			}
 		}
-		s.addConsole(p.Type + ": " + strings.Join(parts, " "))
+		s.addConsole(ev.SessionID, p.Type+": "+strings.Join(parts, " "))
 	case "Runtime.exceptionThrown":
 		var p struct {
 			ExceptionDetails struct {
@@ -686,7 +748,7 @@ func (s *Session) onConsole(ev Event) {
 			} `json:"exceptionDetails"`
 		}
 		if json.Unmarshal(ev.Params, &p) == nil {
-			s.addConsole("exception: " + p.ExceptionDetails.Text)
+			s.addConsole(ev.SessionID, "exception: "+p.ExceptionDetails.Text)
 		}
 	}
 }
@@ -748,6 +810,34 @@ func (s *Session) newTab(ctx context.Context) (Tab, error) {
 	return Tab{ID: r.TargetID, URL: "about:blank"}, nil
 }
 
+// initialTabWait is how long the first navigation waits for the browser's own
+// blank page to be armed before it opens a second tab (a var for tests).
+var initialTabWait = 2 * time.Second
+
+// waitInitialTab waits for the page the browser starts with, but only until no
+// page has ever been seen: once the agent has had a tab, a missing one means
+// it was closed and a new one is opened at once.
+func (s *Session) waitInitialTab(ctx context.Context) (*tabState, bool) {
+	s.mu.Lock()
+	seen := s.tabSeq > 0
+	s.mu.Unlock()
+	if seen {
+		return nil, false
+	}
+	deadline := time.Now().Add(initialTabWait)
+	for time.Now().Before(deadline) {
+		if t, ok := s.firstTab(); ok {
+			return t, true
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	return nil, false
+}
+
 // Navigate loads url in tab tabID (the first tab, created if none, when
 // tabID is empty). The URL is checked before anything is sent; a refused URL
 // never reaches the browser. Every request the page then makes, redirect hops
@@ -765,7 +855,9 @@ func (s *Session) Navigate(ctx context.Context, tabID, rawURL string) (Tab, erro
 	}
 	var t *tabState
 	if tabID == "" {
-		if ft, ok := s.firstTab(); ok {
+		if ft, err := s.tabFor(""); err == nil {
+			t = ft
+		} else if ft, ok := s.waitInitialTab(ctx); ok {
 			t = ft
 		} else {
 			nt, err := s.newTab(ctx)
@@ -780,6 +872,9 @@ func (s *Session) Navigate(ctx context.Context, tabID, rawURL string) (Tab, erro
 	} else if t, _ = s.tabByID(tabID); t == nil {
 		return Tab{}, fmt.Errorf("browser: no such tab %q", tabID)
 	}
+	s.mu.Lock()
+	s.current = t.targetID
+	s.mu.Unlock()
 	loaded := make(chan struct{}, 1)
 	s.mu.Lock()
 	s.loads[t.sessionID] = loaded
@@ -862,6 +957,16 @@ func (s *Session) Tabs(ctx context.Context) ([]Tab, error) {
 	for _, ti := range r.TargetInfos {
 		if _, ok := s.tabByID(ti.TargetID); ok && ti.Type == "page" {
 			out = append(out, cleanTab(Tab{ID: ti.TargetID, URL: ti.URL, Title: ti.Title}))
+		}
+	}
+	// The tab the agent works in comes first: the broker marks it as current.
+	s.mu.Lock()
+	cur := s.current
+	s.mu.Unlock()
+	for i, t := range out {
+		if t.ID == cur && i > 0 {
+			out[0], out[i] = out[i], out[0]
+			break
 		}
 	}
 	return out, nil
