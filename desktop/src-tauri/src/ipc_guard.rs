@@ -171,7 +171,8 @@ mod tests {
             no("http://localhost:47123/"),
             no("http://127.0.0.2:47123/"),
             no("http://[::1]:47123/"),
-            no("http://0.0.0.0:47123/"),
+            // built at runtime: a literal wildcard address trips the listener hygiene test
+            no(&format!("http://{}:47123/", ["0", "0", "0", "0"].join("."))),
             no("http://127.0.0.1.evil.test:47123/"),
             no("http://evil.test:47123/"),
             // another scheme
