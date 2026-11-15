@@ -613,7 +613,9 @@ describe("App", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
+    // The task now renders twice (the pinned Needs-you section and the tree);
+    // either copy's badge proves the attention dot.
+    expect(screen.getAllByTestId("task-attention").length).toBeGreaterThan(0);
   });
 });
 
@@ -637,7 +639,7 @@ describe("App live events", () => {
     pushNotification(socket, "run.status", { runId: "run-live", taskId: TASK_B.ID, status: "done" });
     await flush();
 
-    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
+    expect(screen.getAllByTestId("task-attention").length).toBeGreaterThan(0);
     expect(socket.sent.length).toBe(sentBefore);
   });
 
@@ -656,7 +658,7 @@ describe("App live events", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
+    expect(screen.getAllByTestId("task-attention").length).toBeGreaterThan(0);
   });
 
   it("a task.status notification updates the status shown in the sidebar row's hover card live", async () => {
