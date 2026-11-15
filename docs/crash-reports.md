@@ -65,7 +65,7 @@ written. The rules are applied again and again until the text stops changing
 It cannot recognise a secret of a shape it does not know. Known gaps: a bare
 40-character cloud secret key that contains `/` or `+` is caught only when a
 key name labels it; a home directory outside `/Users`, `/home`, `/root` and
-`C:\Users` (a network share, `/Volumes/<disk>/...`) is replaced only when it is
+`C:\Users` (a network share such as `\\server\home\alice`, `/Volumes/<disk>/...`) is replaced only when it is
 the current user's home. The stack holds function names, file paths and line
 numbers, and the messages of non-runtime panics are withheld entirely (below),
 so these gaps rarely matter in practice.
@@ -137,9 +137,17 @@ folder, and `smind doctor` lists it. Differences worth knowing:
   before the hook is set). Installing the hook does no disk access.
 - The redaction rules are the daemon's, tested against one shared file of cases
   (`internal/crash/testdata/redact_vectors.json`) in Go and in Rust.
-- Not caught: an abort or `panic = "abort"` build, a stack overflow, a crash in
-  the web view or other native code, a panic before the hook is set at the start
-  of `run()`.
+- The hook does a small amount of disk work on the panicking thread (creating
+  the folder on the first report, one file write, deleting old reports); installing
+  it does none. A hung disk can therefore stall the one thread that is reporting.
+- Not caught: `std::process::abort`, a stack overflow, a signal or the system
+  killing the app (the hook never runs), a crash in the web view or other native
+  code, a panic before the hook is set at the start of `run()`. (A build with
+  `panic = "abort"` would still be caught: the hook runs before the abort; the
+  shell does not use it.)
+- On Windows the home directory is read from `USERPROFILE` when `HOME` is not set,
+  and the `\\?\` prefix that Windows adds to resolved paths is ignored when
+  matching it.
 
 ## What happens after a panic
 
