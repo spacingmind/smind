@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ProviderRail, type ProviderRailHandle } from "@/components/pickers/provider-rail";
+import { ProviderRail, providerInitial, type ProviderRailHandle } from "@/components/pickers/provider-rail";
 
 const PROVIDERS = [
   { id: "claude-native", label: "Claude" },
@@ -77,5 +77,50 @@ describe("ProviderRail", () => {
     // Still selectable: its view explains why there is no account.
     fireEvent.click(glm);
     expect(onSelect).toHaveBeenCalledWith("glm-native");
+  });
+
+  it("rail-provider-without-a-brand-mark-gets-its-initial", () => {
+    render(
+      <ProviderRail
+        providers={[
+          { id: "claude-native", label: "Claude Code" },
+          { id: "glm", label: "GLM" },
+          { id: "kimi", label: "Kimi" },
+          { id: "my-acp", label: "my acp agent" },
+        ]}
+        selectedId="glm"
+        onSelect={() => {}}
+      />,
+    );
+    // GLM, Kimi and an unknown ACP agent share the generic glyph: each shows its own initial instead
+    expect(screen.getByTestId("model-rail-initial-glm")).toHaveTextContent("G");
+    expect(screen.getByTestId("model-rail-initial-kimi")).toHaveTextContent("K");
+    expect(screen.getByTestId("model-rail-initial-my-acp")).toHaveTextContent("M");
+    // the initial is decoration: the tab keeps its accessible name
+    expect(screen.getByTestId("model-provider-glm")).toHaveAttribute("aria-label", "GLM");
+    expect(screen.getByTestId("model-rail-initial-glm")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("rail-branded-provider-keeps-its-mark", () => {
+    render(<ProviderRail providers={[{ id: "claude-native", label: "Claude Code" }, { id: "codex-native", label: "Codex" }]} selectedId="claude-native" onSelect={() => {}} />);
+    expect(screen.queryByTestId("model-rail-initial-claude-native")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("model-rail-initial-codex-native")).not.toBeInTheDocument();
+    expect(screen.getByTestId("model-provider-claude-native").querySelector("svg")).not.toBeNull();
+  });
+
+  it("providerInitial takes the first letter or digit, upper-cased, and is empty for a label without one", () => {
+    expect(providerInitial("glm")).toBe("G");
+    expect(providerInitial("  my-acp")).toBe("M");
+    expect(providerInitial("(work) claude")).toBe("W");
+    expect(providerInitial("7zip agent")).toBe("7");
+    expect(providerInitial("Émile")).toBe("É");
+    expect(providerInitial("---")).toBe("");
+    expect(providerInitial("")).toBe("");
+  });
+
+  it("a label without a letter falls back to the generic glyph, not an empty tile", () => {
+    render(<ProviderRail providers={[{ id: "weird", label: "---" }, { id: "glm", label: "GLM" }]} selectedId="glm" onSelect={() => {}} />);
+    expect(screen.queryByTestId("model-rail-initial-weird")).not.toBeInTheDocument();
+    expect(screen.getByTestId("model-provider-weird").querySelector("svg")).not.toBeNull();
   });
 });

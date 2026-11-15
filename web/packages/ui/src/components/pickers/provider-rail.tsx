@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, type KeyboardEvent } from "react";
 
-import { ProviderIcon } from "@/components/provider-icon";
+import { ProviderIcon, useHasBrandMark } from "@/components/provider-icon";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,31 @@ export interface ProviderRailProps {
 
 export interface ProviderRailHandle {
   focusSelected(): void;
+}
+
+/** The first letter or digit of a label, upper-cased ("GLM" -> "G", "my-acp" -> "M"); "" when it has none. */
+export function providerInitial(label: string): string {
+  const match = label.match(/[\p{L}\p{N}]/u);
+  return match ? match[0].toUpperCase() : "";
+}
+
+/**
+ * A provider with a brand mark keeps it; one without (GLM, Kimi, a custom ACP agent: they all share one generic glyph) gets its
+ * initial in a small tile, so the rail's tabs can be told apart without hovering. The accessible name is on the tab, not here.
+ */
+function RailGlyph({ provider, label }: { provider: string; label: string }) {
+  const branded = useHasBrandMark(provider);
+  const initial = providerInitial(label);
+  if (branded || initial === "") return <ProviderIcon provider={provider} />;
+  return (
+    <span
+      aria-hidden
+      data-testid={`model-rail-initial-${provider}`}
+      className="flex size-4 items-center justify-center rounded bg-foreground-muted/20 text-[10px] leading-none font-semibold"
+    >
+      {initial}
+    </span>
+  );
 }
 
 export const ProviderRail = forwardRef<ProviderRailHandle, ProviderRailProps>(function ProviderRail(
@@ -119,7 +144,7 @@ export const ProviderRail = forwardRef<ProviderRailHandle, ProviderRailProps>(fu
               reason && "opacity-60",
             )}
           >
-            <ProviderIcon provider={provider.id} />
+            <RailGlyph provider={provider.id} label={provider.label} />
             {reason && (
               <StatusDot
                 status="warning"
