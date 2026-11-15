@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { baseTabForKind, chatTab, fileTab, pluginTab, pluginTabKey } from "@/components/tab-registry";
 import { useTaskTabs } from "@/hooks/use-task-tabs";
+import { readSplitRatios, rememberSplitRatio } from "@/lib/split-ratios";
 import { collectAllPanes, DEFAULT_PANE_ID, findPaneById, findPaneContainingTab, type SplitNode } from "@/lib/split-tree";
 import { STORAGE_KEYS } from "@/lib/storage";
 
@@ -880,5 +881,98 @@ describe("updateChatTabTitle", () => {
     act(() => result.current.updateChatTabTitle(1, 999, "Renamed"));
 
     expect(result.current.tabsByTask.get(1)).toBe(before);
+  });
+});
+
+describe("split ratios per workspace (D3)", () => {
+  /** Two workspaces: tasks 1 and 2 in workspace 10, task 3 in workspace 20; the same wiring App.tsx uses. */
+  const WORKSPACE_OF: Record<number, number> = { 1: 10, 2: 10, 3: 20 };
+  const options = {
+    splitRatios: {
+      forTask: (taskId: number) => readSplitRatios(WORKSPACE_OF[taskId]!),
+      remember: (taskId: number, direction: "horizontal" | "vertical", first: number) => rememberSplitRatio(WORKSPACE_OF[taskId]!, direction, first),
+    },
+  };
+  const seed = (hook: ReturnType<typeof renderHook<ReturnType<typeof useTaskTabs>, unknown>>, taskId: number) => {
+    act(() => {
+      hook.result.current.ensureTaskChats(taskId, [{ ID: taskId, Title: "Chat" }]);
+      hook.result.current.openTab(taskId, fileTab(taskId, "a.ts"));
+    });
+  };
+  const splitRight = (hook: ReturnType<typeof renderHook<ReturnType<typeof useTaskTabs>, unknown>>, taskId: number) =>
+    act(() => hook.result.current.splitTab(taskId, `${taskId}:file:a.ts`, DEFAULT_PANE_ID, "right"));
+  const rootSizes = (hook: ReturnType<typeof renderHook<ReturnType<typeof useTaskTabs>, unknown>>, taskId: number): number[] => {
+    const root = hook.result.current.tabsByTask.get(taskId)!.root;
+    return root.kind === "group" ? root.group.sizes : [];
+  };
+  const rootGroupId = (hook: ReturnType<typeof renderHook<ReturnType<typeof useTaskTabs>, unknown>>, taskId: number): string => {
+    const root = hook.result.current.tabsByTask.get(taskId)!.root;
+    return root.kind === "group" ? root.group.id : "";
+  };
+
+  it("a person's resize in one task is the next split's starting ratio in the same workspace, and only there", () => {
+    const hook = renderHook(() => useTaskTabs(options));
+    seed(hook, 1);
+    splitRight(hook, 1);
+    expect(rootSizes(hook, 1)).toEqual([0.5, 0.5]); // nothing remembered yet
+    act(() => hook.result.current.resizeGroup(1, rootGroupId(hook, 1), [0.7, 0.3]));
+    expect(readSplitRatios(10)).toEqual({ horizontal: 0.7 });
+
+    // another task of the same workspace starts at 70/30; a task of another workspace stays 50/50
+    seed(hook, 2);
+    splitRight(hook, 2);
+    expect(rootSizes(hook, 2)[0]).toBeCloseTo(0.7);
+    seed(hook, 3);
+    splitRight(hook, 3);
+    expect(rootSizes(hook, 3)).toEqual([0.5, 0.5]);
+  });
+
+  it("existing-task-layout-is-not-changed-by-a-remembered-ratio: task 1's own layout keeps what its person set", () => {
+    const hook = renderHook(() => useTaskTabs(options));
+    seed(hook, 1);
+    splitRight(hook, 1);
+    act(() => hook.result.current.resizeGroup(1, rootGroupId(hook, 1), [0.8, 0.2]));
+    seed(hook, 2);
+    act(() => hook.result.current.resizeGroup(1, rootGroupId(hook, 1), [0.6, 0.4])); // later change
+    expect(rootSizes(hook, 1)[0]).toBeCloseTo(0.6);
+    expect(readSplitRatios(10)).toEqual({ horizontal: 0.6 }); // the latest set value is the one remembered
+    const reloaded = renderHook(() => useTaskTabs(options));
+    expect((reloaded.result.current.tabsByTask.get(1)!.root as { kind: "group"; group: { sizes: number[] } }).group.sizes[0]).toBeCloseTo(0.6);
+  });
+
+  it("only-a-two-pane-resize-is-remembered: a three-pane group's handle does not write a ratio", () => {
+    const hook = renderHook(() => useTaskTabs(options));
+    seed(hook, 1);
+    splitRight(hook, 1);
+    const paneId = otherPaneId(hook.result.current.tabsByTask.get(1)!.root)!;
+    act(() => hook.result.current.openTab(1, fileTab(1, "b.ts"), { pane: paneId }));
+    act(() => hook.result.current.splitTab(1, "1:file:b.ts", paneId, "right")); // a third pane in the same group
+    const root = hook.result.current.tabsByTask.get(1)!.root;
+    expect(root.kind === "group" && root.group.children.length).toBe(3);
+    act(() => hook.result.current.resizeGroup(1, rootGroupId(hook, 1), [0.5, 0.3, 0.2]));
+    expect(readSplitRatios(10)).toBeUndefined();
+  });
+
+  it("a vertical group remembers its own direction and a palette split (an empty pane) uses it", () => {
+    const hook = renderHook(() => useTaskTabs(options));
+    seed(hook, 1);
+    act(() => hook.result.current.splitTab(1, "1:file:a.ts", DEFAULT_PANE_ID, "down"));
+    act(() => hook.result.current.resizeGroup(1, rootGroupId(hook, 1), [0.35, 0.65]));
+    expect(readSplitRatios(10)).toEqual({ vertical: 0.35 });
+    seed(hook, 2);
+    act(() => hook.result.current.splitPaneEmpty(2, DEFAULT_PANE_ID, "down"));
+    expect(rootSizes(hook, 2)[0]).toBeCloseTo(0.35);
+    seed(hook, 3);
+    act(() => hook.result.current.splitPaneEmpty(3, DEFAULT_PANE_ID, "right")); // horizontal: not remembered in this workspace
+    expect(rootSizes(hook, 3)).toEqual([0.5, 0.5]);
+  });
+
+  it("without the option the hook behaves exactly as before (50/50, nothing written)", () => {
+    const hook = renderHook(() => useTaskTabs());
+    seed(hook, 1);
+    splitRight(hook, 1);
+    act(() => hook.result.current.resizeGroup(1, rootGroupId(hook, 1), [0.7, 0.3]));
+    expect(window.localStorage.getItem("smind:split-ratios")).toBeNull();
+    expect(rootSizes(hook, 1)[0]).toBeCloseTo(0.7);
   });
 });
