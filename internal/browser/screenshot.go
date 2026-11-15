@@ -10,7 +10,6 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
-	"image/png"
 	"math"
 	"strings"
 )
@@ -81,24 +80,31 @@ func (s *Session) Screenshot(ctx context.Context, tabID string) (Shot, error) {
 			Data string `json:"data"`
 		}
 		err := s.tabCall(ctx, tab, "Page.captureScreenshot", map[string]any{
-			"format": "png",
+			// JPEG, not PNG: a noisy page makes a PNG reply bigger than the message
+			// cap. The daemon decodes, paints over the password fields and encodes
+			// again at the caps below.
+			"format":  "jpeg",
+			"quality": 90,
 			"clip": map[string]any{
 				"x": vp.PageX, "y": vp.PageY, "width": vp.ClientWidth, "height": vp.ClientHeight, "scale": scale,
 			},
 			"captureBeyondViewport": false,
 		}, &shot)
 		if err != nil {
+			if errors.Is(err, ErrReplyTooLarge) {
+				return nil, errors.New("browser: the screenshot is too large to return; use browser_snapshot")
+			}
 			return nil, err
 		}
 		raw, err := base64.StdEncoding.DecodeString(shot.Data)
 		if err != nil {
 			return nil, errors.New("browser: the browser returned an unreadable screenshot")
 		}
-		cfg, err := png.DecodeConfig(bytes.NewReader(raw))
+		cfg, err := jpeg.DecodeConfig(bytes.NewReader(raw))
 		if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > maxShotPixels || cfg.Height > maxShotPixels {
 			return nil, errors.New("browser: the browser returned a screenshot of unusable size")
 		}
-		src, err := png.Decode(bytes.NewReader(raw))
+		src, err := jpeg.Decode(bytes.NewReader(raw))
 		if err != nil {
 			return nil, errors.New("browser: the browser returned an unreadable screenshot")
 		}
@@ -132,8 +138,8 @@ func (s *Session) Screenshot(ctx context.Context, tabID string) (Shot, error) {
 	sx, sy := float64(img.Bounds().Dx())/vp.ClientWidth, float64(img.Bounds().Dy())/vp.ClientHeight
 	for _, q := range boxes {
 		r := image.Rect(
-			int(math.Floor(q.minX*sx))-passwordPadPx, int(math.Floor(q.minY*sy))-passwordPadPx,
-			int(math.Ceil(q.maxX*sx))+passwordPadPx, int(math.Ceil(q.maxY*sy))+passwordPadPx,
+			clampPx(math.Floor(q.minX*sx))-passwordPadPx, clampPx(math.Floor(q.minY*sy))-passwordPadPx,
+			clampPx(math.Ceil(q.maxX*sx))+passwordPadPx, clampPx(math.Ceil(q.maxY*sy))+passwordPadPx,
 		).Intersect(img.Bounds())
 		if !r.Empty() {
 			draw.Draw(img, r, &image.Uniform{color.RGBA{0x80, 0x80, 0x80, 0xff}}, image.Point{}, draw.Src)
@@ -203,4 +209,19 @@ func (s *Session) passwordBoxes(ctx context.Context, tab *tabState) ([]box, erro
 		out = append(out, bx)
 	}
 	return out, nil
+}
+
+// clampPx converts a float coordinate to an int safely: NaN becomes 0 and
+// anything beyond +-1e6 is clamped (an int conversion of NaN or Inf is
+// implementation-defined, and the geometry comes from the page's layout).
+func clampPx(f float64) int {
+	switch {
+	case f != f:
+		return 0
+	case f > 1e6:
+		return 1_000_000
+	case f < -1e6:
+		return -1_000_000
+	}
+	return int(f)
 }

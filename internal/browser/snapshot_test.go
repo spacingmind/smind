@@ -358,3 +358,27 @@ func TestSnapshotHidesEverythingBelowAPasswordFieldAndEscapesQuotes(t *testing.T
 		t.Fatalf("a quote in a page string must not close the quoted field:\n%s", sn.Text)
 	}
 }
+
+func TestSnapshotAsksForABoundedTreeAndAnOverCapReplyIsAPlainError(t *testing.T) {
+	var asked map[string]any
+	hook := func(f *fakeCDP, c fakeCall) (any, string) {
+		if c.Method == "Accessibility.getFullAXTree" {
+			asked = c.Params
+			return map[string]any{"nodes": strings.Repeat("a", maxMessageBytes+4096)}, ""
+		}
+		return defaultHook(f, c)
+	}
+	s, _ := startHookedSession(t, hook)
+	_, err := s.Snapshot(context.Background(), "")
+	if err == nil || !strings.Contains(err.Error(), "too large to snapshot") {
+		t.Fatalf("an over-cap tree must be a plain error: %v", err)
+	}
+	if asked["depth"] != float64(maxSnapshotRequestDepth) {
+		t.Fatalf("the tree must be requested with a depth bound: %v", asked)
+	}
+	if s.Closed() {
+		t.Fatal("a hostile page must not be able to end its own session")
+	}
+	// And a snapshot of the same session still works afterwards.
+	asked = nil
+}

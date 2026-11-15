@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -97,25 +99,62 @@ func NewClient(conn io.ReadWriteCloser) *Client {
 	return c
 }
 
-// readMessage reads one NUL-terminated message, refusing one over the limit.
-func (c *Client) readMessage() ([]byte, error) {
+// ErrReplyTooLarge is the error of a call whose reply was over the message
+// cap. Only that call fails: the reply is discarded as it is read and the
+// connection (and the session on it) lives on. A page must not be able to end
+// its own browser session, and so make every retry launch a new browser, by
+// producing a huge accessibility tree or a huge console line.
+var ErrReplyTooLarge = errors.New("browser: the browser's reply was too large")
+
+// maxDiscardBytes bounds how much of one over-cap message is read and thrown
+// away before the connection is dropped after all (a var for tests).
+var maxDiscardBytes = 256 << 20
+
+// oversize is what is left of a message over the cap: its first bytes, enough
+// to see the call id it answers.
+type oversize struct{ prefix []byte }
+
+// readMessage reads one NUL-terminated message. A message over
+// maxMessageBytes is not held in memory: only its prefix is kept, the rest is
+// discarded as it arrives, and it is reported as an *oversize (nil error).
+func (c *Client) readMessage() ([]byte, *oversize, error) {
 	var msg []byte
+	var over *oversize
+	discarded := 0
 	for {
 		chunk, err := c.br.ReadSlice(0)
-		msg = append(msg, chunk...)
-		if len(msg) > maxMessageBytes+1 {
-			return nil, errors.New("browser: a devtools message is too large")
+		switch {
+		case over != nil:
+			discarded += len(chunk)
+			if discarded > maxDiscardBytes {
+				return nil, nil, errors.New("browser: a devtools message is far too large")
+			}
+		case len(msg)+len(chunk) > maxMessageBytes+1:
+			p := append(msg, chunk...)
+			if len(p) > 96 {
+				p = p[:96]
+			}
+			over = &oversize{prefix: append([]byte(nil), p...)}
+			msg = nil
+			discarded = len(chunk)
+		default:
+			msg = append(msg, chunk...)
 		}
 		switch err {
 		case nil:
-			return msg[:len(msg)-1], nil
+			if over != nil {
+				return nil, over, nil
+			}
+			return msg[:len(msg)-1], nil, nil
 		case bufio.ErrBufferFull:
 			continue
 		default:
-			return nil, err
+			return nil, nil, err
 		}
 	}
 }
+
+var leadingID = regexp.MustCompile(`^\{"id":(\d+)`)
 
 // ErrWriteTimeout is why a connection is dropped when a write to the browser
 // does not complete: one wedged browser must not block every caller.
@@ -152,10 +191,25 @@ func (c *Client) readLoop() {
 		close(c.events)
 	}()
 	for {
-		data, err := c.readMessage()
+		data, over, err := c.readMessage()
 		if err != nil {
 			readErr = err
 			return
+		}
+		if over != nil {
+			// Fail the one call this reply answered; an event this big is dropped.
+			if m := leadingID.FindSubmatch(over.prefix); m != nil {
+				if id, perr := strconv.ParseInt(string(m[1]), 10, 64); perr == nil {
+					c.mu.Lock()
+					ch := c.pending[id]
+					delete(c.pending, id)
+					c.mu.Unlock()
+					if ch != nil {
+						ch <- cdpResult{err: ErrReplyTooLarge}
+					}
+				}
+			}
+			continue
 		}
 		var m cdpMessage
 		if json.Unmarshal(data, &m) != nil {

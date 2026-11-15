@@ -18,6 +18,9 @@ const (
 	// maxSnapshotDepth bounds the recursion: a hostile page can nest nodes
 	// without limit, and a Go stack overflow is fatal for the whole daemon.
 	maxSnapshotDepth = 100
+	// maxSnapshotRequestDepth is the depth asked of the browser (ignored and
+	// generic wrappers count there, rendered levels are cut at maxSnapshotDepth).
+	maxSnapshotRequestDepth = 150
 )
 
 // Snapshot is the rendered accessibility tree of one tab.
@@ -127,7 +130,12 @@ func (s *Session) Snapshot(ctx context.Context, tabID string) (Snapshot, error) 
 	var tree struct {
 		Nodes []axNode `json:"nodes"`
 	}
-	if err := s.tabCall(ctx, tab, "Accessibility.getFullAXTree", nil, &tree); err != nil {
+	// A bounded tree: a page can have an unbounded one (and an over-cap reply
+	// must not cost the session, see ErrReplyTooLarge).
+	if err := s.tabCall(ctx, tab, "Accessibility.getFullAXTree", map[string]any{"depth": maxSnapshotRequestDepth}, &tree); err != nil {
+		if errors.Is(err, ErrReplyTooLarge) {
+			return Snapshot{}, errors.New("browser: the page's accessibility tree is too large to snapshot (over 8 MB); use browser_wait for a specific text, or a smaller page")
+		}
 		return Snapshot{}, err
 	}
 	if len(tree.Nodes) == 0 {

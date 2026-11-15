@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"math/rand"
 	"strings"
 	"testing"
@@ -87,7 +89,16 @@ func (r *shotRig) hook(f *fakeCDP, c fakeCall) (any, string) {
 		if r.wrongSize {
 			w, h = 100, 100
 		}
-		return map[string]any{"data": r.png(w, h)}, ""
+		data := r.png(w, h)
+		if c.Params["format"] == "jpeg" { // the fake renders PNG; hand back what was asked for
+			raw, _ := base64.StdEncoding.DecodeString(data)
+			if im, err := png.Decode(bytes.NewReader(raw)); err == nil {
+				var b bytes.Buffer
+				_ = jpeg.Encode(&b, im, &jpeg.Options{Quality: 95})
+				data = base64.StdEncoding.EncodeToString(b.Bytes())
+			}
+		}
+		return map[string]any{"data": data}, ""
 	}
 	return defaultHook(f, c)
 }
@@ -180,7 +191,7 @@ func TestScreenshotIsClippedToTheViewport(t *testing.T) {
 	if clip["x"] != 30.0 || clip["y"] != 1200.0 || clip["width"] != 800.0 || clip["height"] != 600.0 {
 		t.Fatalf("the capture must be the visible viewport: %v", clip)
 	}
-	if p["captureBeyondViewport"] != false || p["format"] != "png" {
+	if p["captureBeyondViewport"] != false || p["format"] != "jpeg" {
 		t.Fatalf("params: %v", p)
 	}
 }
@@ -219,7 +230,12 @@ func TestScreenshotSizeCapStepsQualityThenRefuses(t *testing.T) {
 
 	// Sizes at the first and last quality, to place the cap between them.
 	raw, _ := base64.StdEncoding.DecodeString(noisePNG(t, 300, 300))
-	src, _ := png.Decode(bytes.NewReader(raw))
+	pimg, _ := png.Decode(bytes.NewReader(raw))
+	var j95 bytes.Buffer
+	_ = jpeg.Encode(&j95, pimg, &jpeg.Options{Quality: 95}) // what the fake browser hands back
+	dec, _ := jpeg.Decode(&j95)
+	src := image.NewRGBA(dec.Bounds()) // the daemon paints on RGBA, so sizes are measured on RGBA
+	draw.Draw(src, src.Bounds(), dec, dec.Bounds().Min, draw.Src)
 	size := func(q int) int {
 		var b bytes.Buffer
 		_ = jpeg.Encode(&b, src, &jpeg.Options{Quality: q})
@@ -314,5 +330,39 @@ func TestScreenshotAndSnapshotRefuseWhenThereAreTooManyPasswordInputs(t *testing
 	}
 	if _, err := s.Snapshot(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "more than") {
 		t.Fatalf("nor the snapshot: %v", err)
+	}
+}
+
+func TestScreenshotCapturesJPEGAndAnOverCapReplyIsAPlainError(t *testing.T) {
+	rig := &shotRig{vw: 200, vh: 100}
+	rig.png = func(w, h int) string { return solidPNG(t, w, h, color.RGBA{9, 9, 9, 255}) }
+	s, f := newShotSession(t, rig)
+	if _, err := s.Screenshot(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if p := f.callsFor("Page.captureScreenshot")[0].Params; p["format"] != "jpeg" {
+		t.Fatalf("the capture must be a JPEG (a PNG of a noisy page can exceed the message cap): %v", p)
+	}
+	// An over-cap reply is a plain tool error and the session survives it.
+	huge := &shotRig{vw: 200, vh: 100}
+	huge.png = func(w, h int) string { return strings.Repeat("A", maxMessageBytes+4096) }
+	s2, _ := newShotSession(t, huge)
+	if _, err := s2.Screenshot(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("an over-cap screenshot reply must be a plain error: %v", err)
+	}
+	if s2.Closed() {
+		t.Fatal("the session must survive an over-cap reply")
+	}
+}
+
+func TestClampPx(t *testing.T) {
+	nan := math.NaN()
+	for in, want := range map[float64]int{0: 0, 1.9: 1, -1.9: -1, 1e9: 1_000_000, -1e9: -1_000_000, math.Inf(1): 1_000_000, math.Inf(-1): -1_000_000} {
+		if got := clampPx(in); got != want {
+			t.Errorf("clampPx(%v) = %d, want %d", in, got, want)
+		}
+	}
+	if clampPx(nan) != 0 {
+		t.Error("NaN must be 0")
 	}
 }
