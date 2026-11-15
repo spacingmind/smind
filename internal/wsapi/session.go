@@ -31,6 +31,7 @@ type runIdentity struct {
 // in cmd/smind keeps it in step with the MCP tool sources.
 var RunScopedMethods = []string{
 	"account.usage",
+	"browser.call",
 	"chat.create", "chat.list", "chat.queueCancel", "chat.queueList",
 	"profile.get", "profile.list",
 	"provider.list",
