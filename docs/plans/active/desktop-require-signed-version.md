@@ -55,12 +55,16 @@ flag removed from `tauri.conf.json` -> `updater_config_requires_signed_version` 
 
 ## Progress
 
-- [ ] spec
-- [ ] config flag + Rust tests
-- [ ] `gen-latest-json.mjs` check
-- [ ] verifier check
-- [ ] docs
+- [x] spec
+- [x] config flag + Rust tests
+- [x] `gen-latest-json.mjs` check (logic: lead; fixtures and tests: peer-glm 641)
+- [x] verifier check (logic: lead; fixtures and tests: peer-glm 641)
+- [x] docs (ADR-0023 amendment, desktop-auto-update, release-verification)
 
 ## Validation
 
-(filled as the PR lands)
+- Hermetic updater tests (`cargo test --offline`, macOS): `updater_config_requires_signed_version` and the 15 `updater_e2e` tests pass, including `signature_without_a_signed_version_is_refused` (refused with the plugin's "does not specify the version" error, nothing installed) and `without_the_flag_a_versionless_signature_is_accepted` (the same signature is accepted with the flag overridden off).
+- `node --test scripts/*.test.mjs desktop/scripts/*.test.mjs`: 97 pass.
+- Real data: all 36 updater signatures of v0.11.0 to v0.20.0 carry `version:<release>`; the v0.20.0 release asset set passes `verify-release-artifacts.mjs` including the new `updater-signatures` check (all 9 checks ok).
+- Mutations (each on a committed file, the named test failed, restored): flag removed from `tauri.conf.json` (`updater_config_requires_signed_version`, `signature_without_a_signed_version_is_refused`); `allowDowngrades: true` added (`updater_config_requires_signed_version`); gen-latest-json signed-version comparison dropped (`latest-json-refuses-a-signed-version-that-differs`); its missing-version rejection dropped (`latest-json-refuses-a-signature-without-a-signed-version` and the CLI test); the verifier's version comparison dropped (`verify-updater-signature-wrong-version`); the verifier accepting a versionless signature (`verify-updater-signature-without-version`). A first attempt at the last mutation survived because the mutation itself returned a wrong version; redone as "accept the versionless case".
+- Not verified: a real in-app update from a published release to the next with the flag on (needs the next release; two flag-off releases exist); the Windows updater path (the hermetic e2e is macOS and Windows in CI, run locally on macOS only); `cargo fmt --check` of the whole shell fails on `notify.rs`, pre-existing and not touched here (only the files this PR changed were formatted).

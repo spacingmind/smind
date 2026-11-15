@@ -157,6 +157,20 @@ daemon is swapped in.
   the release has installers but no updates, and the `publish` job fails
   rather than succeeding quietly.
 
+## Amendment (2026-11): the signed version is required
+
+`latest.json` is not signed, and the artifact signature alone does not say which
+release it belongs to. The updater plugin compares the version in the signature's
+signed comment with the version `latest.json` announced, but only when the
+signature carries one. `plugins.updater.requireSignedVersion` is now `true`, so a
+signature without a signed version is refused instead of skipping the check; a
+crafted feed can no longer pair a newer version number with an older release's
+valid signature. This only tightens what the updater accepts. The release flow
+(`desktop/scripts/gen-latest-json.mjs` and the `updater-signatures` check of
+`scripts/verify-release-artifacts.mjs`) refuses to publish a release whose
+updater signatures lack the signed version, because apps with the flag would
+refuse it. Plan: `docs/plans/active/desktop-require-signed-version.md`.
+
 ## Cross-references
 
 - `docs/decisions/0013-desktop-bundled-ui.md`: scoped IPC bridge (decision 2)
