@@ -26,7 +26,7 @@ describe("tab reorder wiring (source pins on App.tsx)", () => {
 
   it("cancelling a drag clears the reorder target, and the indicator is a 4px bar", () => {
     expect(app.split("const handleDragCancel = useCallback(")[1]!.split("}, [])")[0]).toContain("setReorderTarget(null)");
-    expect(app).toMatch(/\{reorderTarget && \(\s*<div[^>]*data-testid="tab-drop-indicator"/);
+    expect(app).toMatch(/\{reorderTarget && !reorderTarget\.noop && \(\s*<div[^>]*data-testid="tab-drop-indicator"/);
     expect(app).toContain("pointer-events-none fixed z-50 w-1 rounded-full bg-primary");
   });
 
@@ -49,6 +49,12 @@ describe("tab reorder wiring (source pins on App.tsx)", () => {
     expect(app).toContain("delete document.documentElement.dataset.tabDragging");
     const css = readFileSync("src/index.css", "utf8");
     expect(css).toContain('html[data-tab-dragging="true"] * {\n  cursor: grabbing !important;');
+  });
+
+  it("the slots beside the held tab (which would not move it) show no indicator", () => {
+    const hit = app.split("function reorderHit(")[1]!.split("\n}\n")[0]!;
+    expect(hit).toContain("noop: from !== -1 && (slot === from || slot === from + 1)");
+    expect(app).toContain("data-tab-key={entry.key}\n");
   });
 });
 

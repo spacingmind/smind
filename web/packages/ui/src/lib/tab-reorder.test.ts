@@ -51,7 +51,7 @@ describe("tabDragClasses", () => {
   });
   it("while any drag is active no chip reveals its hover controls; otherwise the normal reveal applies", () => {
     for (const isDragging of [true, false]) {
-      expect(tabDragClasses({ isDragging, dragActive: true }).affordances).toBe("pointer-events-none opacity-0");
+      expect(tabDragClasses({ isDragging, dragActive: true }).affordances).toBe("pointer-events-none opacity-0 transition-none");
     }
     expect(tabDragClasses({ isDragging: false, dragActive: false }).affordances).toBeNull();
   });

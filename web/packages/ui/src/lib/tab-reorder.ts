@@ -33,7 +33,7 @@ export function tabDragClasses(state: { isDragging: boolean; dragActive: boolean
   return {
     chip: state.isDragging ? "opacity-50 cursor-grabbing" : "",
     // null = use the normal reveal-on-hover classes.
-    affordances: state.dragActive ? "pointer-events-none opacity-0" : null,
+    affordances: state.dragActive ? "pointer-events-none opacity-0 transition-none" : null,
   };
 }
 

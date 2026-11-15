@@ -45,6 +45,8 @@ test('TR-01 dragging a tab along its strip shows the indicator and reorders it; 
   const held = page.getByTestId('workspace-tab-terminal')
   await expect(held).toHaveCSS('opacity', '0.5')
   await expect(page.locator('html')).toHaveAttribute('data-tab-dragging', 'true')
+  // Beside the held chip nothing would move: no indicator yet.
+  await expect(page.getByTestId('tab-drop-indicator')).toHaveCount(0)
   expect(await page.evaluate(() => getComputedStyle(document.body).cursor)).toBe('grabbing')
   await frame(page, testInfo, 'a-drag-started')
   // Over the left half of the Diff tab: the indicator marks the slot before it.
