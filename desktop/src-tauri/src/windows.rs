@@ -5,8 +5,6 @@
 //! window's URL itself from the proxy origin and the per-launch secret. No
 //! page string ever reaches a label, a capability glob or a URL.
 
-#![allow(dead_code)] // wired by window_open_task in the next step
-
 pub const TASK_LABEL_PREFIX: &str = "task-";
 
 pub const MAX_TASK_WINDOWS: usize = 8;

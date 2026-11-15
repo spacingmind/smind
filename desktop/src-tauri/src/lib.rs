@@ -49,6 +49,7 @@ mod real_daemon_test;
 pub mod updater;
 mod window_chrome;
 mod window_layout;
+// Wired by window_open_task in the next step.
 #[allow(dead_code)]
 mod windows;
 mod zoom_store;
