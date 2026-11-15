@@ -927,3 +927,27 @@ func TestJoiningRunNeverLosesItsSessionToALeavingRun(t *testing.T) {
 		t.Fatalf("a joining run must ask for its session only after the leaving run's close finished: %v", order)
 	}
 }
+
+// A run that joins after another run decided it was the last one must keep its
+// session: the leave is re-checked under the workspace lock.
+func TestALeavingRunRechecksWhoIsStillUsingTheSession(t *testing.T) {
+	rig := newBrokerRig(t, nil)
+	if res := rig.callAs(runA, "browser_open", map[string]any{"url": "http://localhost:3000/"}); res.IsError {
+		t.Fatal(text(res))
+	}
+	paused, resume := make(chan struct{}), make(chan struct{})
+	rig.b.afterLeaveHook = func() { close(paused); <-resume }
+	done := make(chan struct{})
+	go func() { rig.b.EndRun(runA.ID); close(done) }()
+	<-paused // A has decided it is the last user
+	if res := rig.callAs(runB, "browser_open", map[string]any{"url": "http://localhost:3000/"}); res.IsError {
+		t.Fatalf("B joins: %s", text(res))
+	}
+	close(resume)
+	<-done
+	rig.mu.Lock()
+	defer rig.mu.Unlock()
+	if len(rig.closed) != 0 {
+		t.Fatalf("a run that joined meanwhile must not lose its session: closed %v", rig.closed)
+	}
+}

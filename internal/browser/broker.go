@@ -118,6 +118,8 @@ type Broker struct {
 	// wsMu serialises "a run joins a workspace session" against "the last run
 	// leaves it", per workspace.
 	wsMu map[int64]*sync.Mutex
+	// afterLeaveHook is nil in production (see EndRun).
+	afterLeaveHook func()
 	// ended remembers the most recent finished runs, so a late call of a run
 	// that already ended cannot recreate its counters or start a session.
 	ended      map[string]struct{}
@@ -202,6 +204,9 @@ func (b *Broker) EndRun(runID string) {
 		}
 	}
 	b.mu.Unlock()
+	if b.afterLeaveHook != nil {
+		b.afterLeaveHook() // test seam: runs between deciding to leave and taking the workspace lock
+	}
 	var tab string
 	if st != nil {
 		st.mu.Lock()

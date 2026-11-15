@@ -3,7 +3,9 @@ package taskrunner
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -175,5 +177,21 @@ func TestStrictMcpConfigIsNotTurnedOnByTheBrowserGrantAlone(t *testing.T) {
 		if got := useStrictMcp(tc.c); got != tc.want {
 			t.Errorf("%s: useStrictMcp = %v, want %v", name, got, tc.want)
 		}
+	}
+}
+
+// The claude launch path asks useStrictMcp, not "is there a policy".
+func TestClaudeLaunchUsesUseStrictMcp(t *testing.T) {
+	t.Parallel()
+	src, err := os.ReadFile("runner.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := strings.Index(string(src), "opts = append(opts, claudecode.WithStrictMCPConfig())")
+	if i < 0 {
+		t.Fatal("the strict-config option is gone from the claude launch path")
+	}
+	if !strings.Contains(string(src)[max(0, i-400):i], "useStrictMcp(contract)") {
+		t.Fatal("the strict-config option must be gated by useStrictMcp, so a browser-only grant does not hide the person's own MCP servers")
 	}
 }
