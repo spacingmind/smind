@@ -2810,7 +2810,7 @@ describe("App drag-to-split (Item 8)", { timeout: 20_000 }, () => {
 });
 
 describe("App settings view (dogfood Item 4)", () => {
-  it("opening settings hides the shell (inert, aria-hidden) but keeps the task pane mounted", async () => {
+  it("opening settings keeps the sidebar usable and hides only the content region (inert, aria-hidden); the task pane stays mounted", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -2824,28 +2824,71 @@ describe("App settings view (dogfood Item 4)", () => {
 
     const paneBefore = screen.getByTestId("primary-pane");
     const shell = screen.getByTestId("app-shell");
+    const region = screen.getByTestId("content-region");
     expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
-    expect(shell).not.toHaveAttribute("inert");
+    expect(region).not.toHaveAttribute("inert");
 
     fireEvent.click(screen.getByTestId("sidebar-settings-button"));
     await flush();
-    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
-    // Same DOM node: the task pane (and any live chat stream in it) was not
-    // unmounted, only hidden and made unreachable.
+    const settings = screen.getByTestId("settings-screen");
+    expect(settings).toBeInTheDocument();
+    // Same DOM node: the task pane (and any live chat stream in it) was not unmounted, only hidden and made unreachable.
     expect(paneBefore.isConnected).toBe(true);
-    expect(shell).toHaveAttribute("inert");
-    expect(shell).toHaveAttribute("aria-hidden", "true");
-    expect(shell).toHaveClass("invisible");
-    // The shell is a sibling of the screen, not its ancestor.
-    expect(shell.contains(screen.getByTestId("settings-screen"))).toBe(false);
+    expect(region).toHaveAttribute("inert");
+    expect(region).toHaveAttribute("aria-hidden", "true");
+    expect(region).toHaveClass("invisible");
+    // The page sits INSIDE the shell, beside the sidebar: the shell and the sidebar stay live.
+    expect(shell).not.toHaveAttribute("inert");
+    expect(shell).not.toHaveClass("invisible");
+    expect(shell.contains(settings)).toBe(true);
+    expect(region.contains(settings)).toBe(false);
+    expect(screen.getByTestId("sidebar-content")).not.toHaveAttribute("inert");
 
     fireEvent.click(screen.getByTestId("settings-back-button"));
     await flush();
     expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
     expect(screen.getByTestId("primary-pane")).toBe(paneBefore);
-    expect(shell).not.toHaveAttribute("inert");
-    expect(shell).not.toHaveAttribute("aria-hidden");
-    expect(shell).not.toHaveClass("invisible");
+    expect(region).not.toHaveAttribute("inert");
+    expect(region).not.toHaveAttribute("aria-hidden");
+    expect(region).not.toHaveClass("invisible");
+  });
+
+  it("a click on a task in the sidebar leaves the open page and selects the task", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    clickTaskRow(TASK);
+    await flush();
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    expect(screen.getByTestId("content-region")).not.toHaveAttribute("inert");
+  });
+
+  it("below the mobile breakpoint the page still covers the whole shell (hidden, inert)", async () => {
+    const realWidth = window.innerWidth;
+    const realMatchMedia = window.matchMedia;
+    window.innerWidth = 500;
+    window.matchMedia = ((query: string) => ({ matches: /max-width/.test(query), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, onchange: null })) as typeof window.matchMedia;
+    try {
+      const socket = new FakeSocket();
+      const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+      render(<App connect={connect} />);
+      await resolveSidebar(socket);
+      const shell = screen.getByTestId("app-shell");
+      // The compact layout keeps its sidebar in a sheet: open Settings through the palette-free route the App exposes.
+      fireEvent.keyDown(document.body, { key: ",", ctrlKey: true });
+      await flush();
+      expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+      expect(shell).toHaveAttribute("inert");
+      expect(shell).toHaveClass("invisible");
+      expect(shell.contains(screen.getByTestId("settings-screen"))).toBe(false);
+    } finally {
+      window.innerWidth = realWidth;
+      window.matchMedia = realMatchMedia;
+    }
   });
 
   it("Back restores the previous task/tab and sidebar state", async () => {

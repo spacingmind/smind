@@ -26,8 +26,8 @@ describe("permissionResolutionLabel", () => {
     expect(permissionResolutionLabel({ reason: "policy_deny" })).toEqual({ label: "Denied by policy", status: "warning" });
   });
 
-  it("unknown permission resolution renders as text", () => {
-    expect(permissionResolutionLabel({ reason: "frobnicated" })).toEqual({ label: "frobnicated", status: "neutral" });
+  it("unknown-resolution-reason-reads-resolved", () => {
+    expect(permissionResolutionLabel({ reason: "frobnicated" })).toEqual({ label: "Resolved", status: "neutral" });
   });
 
   it("a missing reason still has no badge, and a human rejection reads denied", () => {
