@@ -793,14 +793,14 @@ describe("TaskDetailPane", () => {
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
     // Opens on the current provider's view; Back lists the providers.
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
       "model-provider-claude-native",
       "model-provider-glm",
       "model-provider-codex-native",
     ]);
-    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["Claude Code", "GLM", "Codex"]);
+    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual(["Claude Code", "GLM", "Codex"]);
   });
 
   it("falls back to the built-in four-provider list when provider.list rejects (catalog labels), and the form still submits", async () => {
@@ -813,10 +813,10 @@ describe("TaskDetailPane", () => {
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
     // Opens on the current provider's view; Back lists the providers.
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["model-provider-claude-native", "model-provider-codex-native", "model-provider-glm", "model-provider-kimi"]);
-    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["Claude Code", "Codex", "GLM", "Kimi"]);
+    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual(["Claude Code", "Codex", "GLM", "Kimi"]);
     fireEvent.click(rows[0]);
     fireEvent.click(await screen.findByTestId("model-row-claude-native:"));
 
@@ -1235,7 +1235,7 @@ describe("run-config pill (run-config IA)", () => {
     expect(screen.queryByTestId("task-run-config-pill")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(await screen.findByTestId("model-provider-glm"));
     fireEvent.click(await screen.findByTestId("model-row-glm:"));
     await flush();
@@ -1266,7 +1266,7 @@ describe("run-config pill (run-config IA)", () => {
     await flush();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(await screen.findByTestId("model-profile-row-1"));
     await flush();
 

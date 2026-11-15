@@ -121,7 +121,7 @@ async function settleSelect(): Promise<void> {
 async function openPickerRoot(): Promise<void> {
   await settleSelect();
   openPicker();
-  fireEvent.click(await screen.findByTestId("model-picker-back"));
+  { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
 }
 
 /** Picks `modelId` ("" = the provider's default row) under `providerId`: opens the picker, drills into the provider if the root is showing, clicks the row. */
@@ -404,8 +404,8 @@ describe("Composer", () => {
 
     // The popover opens on the current provider's view; Back reaches the root with both providers.
     await openPickerRoot();
-    expect(await screen.findByTestId("model-provider-claude-native")).toHaveTextContent("Claude Code");
-    expect(screen.getByTestId("model-provider-glm")).toHaveTextContent("GLM");
+    expect(await screen.findByTestId("model-provider-claude-native")).toHaveAttribute("aria-label", "Claude Code");
+    expect(screen.getByTestId("model-provider-glm")).toHaveAttribute("aria-label", "GLM");
 
     // Item 5: no visible <label> text in the card's toolbar.
     expect(screen.queryByText("Provider")).not.toBeInTheDocument();
@@ -685,9 +685,9 @@ describe("Composer", () => {
       await flush();
 
       const row = screen.getByTestId("model-provider-glm");
-      expect(row).toHaveAttribute("aria-disabled", "true");
-      expect(row).toHaveTextContent('"glm" not found on PATH');
-      expect(screen.getByTestId("model-provider-claude-native")).not.toHaveAttribute("aria-disabled");
+      expect(row).toHaveAttribute("data-unavailable", "true");
+      expect(row.getAttribute("aria-label")).toContain('"glm" not found on PATH');
+      expect(screen.getByTestId("model-provider-claude-native")).not.toHaveAttribute("data-unavailable");
       expect(tests()).toHaveLength(2);
     });
 
