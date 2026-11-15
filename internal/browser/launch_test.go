@@ -13,8 +13,10 @@ import (
 	"time"
 )
 
+const testProxy = "127.0.0.1:9"
+
 func TestLauncherArgs(t *testing.T) {
-	args, err := buildArgs("/p/profile", LaunchOpts{AllowHosts: []string{"intranet.test"}, HeapMB: 256})
+	args, err := buildArgs("/p/profile", LaunchOpts{AllowHosts: []string{"intranet.test"}, HeapMB: 256, ProxyAddr: testProxy})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +28,8 @@ func TestLauncherArgs(t *testing.T) {
 		"--password-store=basic",
 		"--user-data-dir=/p/profile",
 		"--js-flags=--max-old-space-size=256",
-		"--no-proxy-server",
+		"--proxy-server=http://" + testProxy,
+		"--disable-quic",
 		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 	} {
 		if !strings.Contains(joined, want) {
@@ -47,12 +50,29 @@ func TestLauncherArgs(t *testing.T) {
 			t.Errorf("rules %q miss %q", rules, ex)
 		}
 	}
+	// The bypass list is exactly "<-loopback>": an empty list leaves loopback
+	// direct (measured on Chrome), which would skip the policy.
+	foundBypass := false
+	for _, a := range args {
+		if strings.HasPrefix(a, "--proxy-bypass-list") {
+			foundBypass = true
+			if a != "--proxy-bypass-list=<-loopback>" {
+				t.Errorf("bypass list must be exactly <-loopback>, got %q", a)
+			}
+		}
+		if a == "--no-proxy-server" {
+			t.Error("a browser must never be launched without the proxy")
+		}
+	}
+	if !foundBypass {
+		t.Error("the bypass list argument is missing")
+	}
 	for _, bad := range []string{"--no-sandbox", "--remote-allow-origins", "--disable-web-security", "--remote-debugging-address", "--remote-debugging-port", "--allow-file-access"} {
 		if strings.Contains(joined, bad) {
 			t.Errorf("argument %s must never be used", bad)
 		}
 	}
-	def, _ := buildArgs("/p", LaunchOpts{})
+	def, _ := buildArgs("/p", LaunchOpts{ProxyAddr: testProxy})
 	if strings.Contains(strings.Join(def, " "), "max-old-space-size=0") {
 		t.Fatal("a zero heap must fall back to the default cap")
 	}
@@ -110,7 +130,7 @@ func TestLauncherPipeRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	profiles := filepath.Join(root, "profiles")
 	_ = os.Mkdir(profiles, 0o700)
-	inst, err := ChromeLauncher{Path: fakeChrome(t, root, true)}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles})
+	inst, err := ChromeLauncher{Path: fakeChrome(t, root, true)}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles, ProxyAddr: testProxy})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +154,7 @@ func TestLauncherCloseKillsTreeAndRemovesProfile(t *testing.T) {
 	root := t.TempDir()
 	profiles := filepath.Join(root, "profiles")
 	_ = os.Mkdir(profiles, 0o700)
-	inst, err := ChromeLauncher{Path: fakeChrome(t, root, false)}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles})
+	inst, err := ChromeLauncher{Path: fakeChrome(t, root, false)}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles, ProxyAddr: testProxy})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +188,7 @@ func TestLauncherKillsTheGroupEvenAfterTheLeaderExited(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	inst, err := ChromeLauncher{Path: script}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles})
+	inst, err := ChromeLauncher{Path: script}.Launch(context.Background(), LaunchOpts{ProfileRoot: profiles, ProxyAddr: testProxy})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +275,7 @@ func TestWriteOwnerIsAtomicAndReadable(t *testing.T) {
 
 func TestLauncherArgsRejectBadAllowHost(t *testing.T) {
 	for _, h := range []string{"a.test, MAP * 1.2.3.4", "*.test", "x y", anyV4} {
-		if _, err := buildArgs("/p", LaunchOpts{AllowHosts: []string{h}}); err == nil {
+		if _, err := buildArgs("/p", LaunchOpts{AllowHosts: []string{h}, ProxyAddr: testProxy}); err == nil {
 			t.Errorf("allow host %q must be rejected before it reaches a resolver rule", h)
 		}
 	}
@@ -277,11 +297,24 @@ func TestLaunchFailsWhenTheOwnerFileCannotBeWritten(t *testing.T) {
 	if err != nil {
 		t.Skip("no true binary")
 	}
-	if inst, err := (ChromeLauncher{Path: truePath}).Launch(context.Background(), LaunchOpts{ProfileRoot: profiles}); err == nil {
+	if inst, err := (ChromeLauncher{Path: truePath}).Launch(context.Background(), LaunchOpts{ProfileRoot: profiles, ProxyAddr: testProxy}); err == nil {
 		_ = inst.Close()
 		t.Fatal("a launch without an owner file could be swept while live: it must fail")
 	}
 	if left, _ := filepath.Glob(filepath.Join(profiles, "smind-browser-*")); len(left) != 0 {
 		t.Fatalf("a failed launch leaves no profile dir: %v", left)
+	}
+}
+
+func TestLauncherRequiresALoopbackProxy(t *testing.T) {
+	for _, addr := range []string{"", "0.0.0.0:80", "example.com:3128", "10.0.0.1:3128", "127.0.0.1", "localhost:80x"} {
+		if _, err := buildArgs("/p", LaunchOpts{ProxyAddr: addr}); err == nil {
+			t.Errorf("proxy address %q must be refused: no direct network path, no remote proxy", addr)
+		}
+	}
+	for _, addr := range []string{"127.0.0.1:3128", "[::1]:3128"} {
+		if _, err := buildArgs("/p", LaunchOpts{ProxyAddr: addr}); err != nil {
+			t.Errorf("%s: %v", addr, err)
+		}
 	}
 }

@@ -1,0 +1,433 @@
+package browser
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/netip"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// The enforcing proxy (ADR-0061 amendment 2026-11-15). Every network
+// connection the browser makes goes through it, whatever the scheme: http as an
+// absolute-form request, https, WebSocket and the rest as CONNECT host:port
+// (measured on Chrome). Fetch interception cannot see WebSocket handshakes, so
+// this is the one place that makes the policy true for all of them.
+//
+// One decision per connection: the target is parsed by the same code as a URL,
+// checked against the Policy, its name is resolved HERE, every resolved
+// address is vetted, and the connection is dialled to the vetted IP, never to
+// the name (a name that rebinds afterwards cannot redirect an open connection).
+// TLS is tunnelled, never intercepted.
+
+// Proxy limits (ADR-0061 section 8 and the proxy design).
+const (
+	DefaultProxyMaxConns    = 64
+	DefaultProxyDialTimeout = 10 * time.Second
+	DefaultProxyTunnelIdle  = 5 * time.Minute
+	proxyHeaderTimeout      = 10 * time.Second
+	proxyResponseTimeout    = 30 * time.Second
+	proxyMaxHeaderBytes     = 32 << 10
+)
+
+// ProxyConfig configures a Proxy. Policy is required; the rest default.
+type ProxyConfig struct {
+	Policy      Policy
+	Resolver    Resolver // nil: the system resolver
+	MaxConns    int
+	DialTimeout time.Duration
+	TunnelIdle  time.Duration
+	// Dial opens the connection to a vetted IP:port (a test hook).
+	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// OnRefuse is told about each refused target (cleaned text, no page data).
+	OnRefuse func(target, reason string)
+}
+
+// Proxy is a loopback HTTP proxy that enforces a Policy.
+type Proxy struct {
+	cfg    ProxyConfig
+	policy Policy
+	ln     *limitListener
+	srv    *http.Server
+	tr     *http.Transport
+
+	mu     sync.Mutex
+	tunnel map[net.Conn]struct{}
+	closed bool
+}
+
+type pinKey struct{}
+
+// StartProxy listens on 127.0.0.1:0. The proxy's own address is added to the
+// policy's deny list, so a page cannot talk to the proxy as a URL.
+func StartProxy(cfg ProxyConfig) (*Proxy, error) {
+	if cfg.Resolver == nil {
+		cfg.Resolver = net.DefaultResolver
+	}
+	if cfg.MaxConns <= 0 {
+		cfg.MaxConns = DefaultProxyMaxConns
+	}
+	if cfg.DialTimeout <= 0 {
+		cfg.DialTimeout = DefaultProxyDialTimeout
+	}
+	if cfg.TunnelIdle <= 0 {
+		cfg.TunnelIdle = DefaultProxyTunnelIdle
+	}
+	if cfg.Dial == nil {
+		d := &net.Dialer{}
+		cfg.Dial = d.DialContext
+	}
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("browser: proxy listen: %w", err)
+	}
+	port := raw.Addr().(*net.TCPAddr).Port
+	p := &Proxy{cfg: cfg, tunnel: map[net.Conn]struct{}{}}
+	p.policy = cfg.Policy
+	p.policy.Deny = append(append([]Endpoint(nil), cfg.Policy.Deny...), Endpoint{Host: "127.0.0.1", Port: port})
+	p.ln = &limitListener{Listener: raw, sem: make(chan struct{}, cfg.MaxConns)}
+	// The transport dials the address the policy vetted (carried in the
+	// context), never the name in the URL, and never reuses a connection.
+	p.tr = &http.Transport{
+		Proxy:                 nil,
+		DisableKeepAlives:     true,
+		DisableCompression:    true,
+		ResponseHeaderTimeout: proxyResponseTimeout,
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			addrs, _ := ctx.Value(pinKey{}).([]string)
+			return p.dialAny(ctx, addrs)
+		},
+	}
+	p.srv = &http.Server{
+		Handler:           http.HandlerFunc(p.handle),
+		ReadHeaderTimeout: proxyHeaderTimeout,
+		MaxHeaderBytes:    proxyMaxHeaderBytes,
+		IdleTimeout:       30 * time.Second,
+		ErrorLog:          nil,
+	}
+	go func() { _ = p.srv.Serve(p.ln) }()
+	return p, nil
+}
+
+// Addr is the proxy's host:port, for --proxy-server.
+func (p *Proxy) Addr() string { return p.ln.Addr().String() }
+
+// Policy is the session policy plus the proxy's own endpoint in the deny list.
+func (p *Proxy) Policy() Policy { return p.policy }
+
+// Close stops the listener and closes every open connection and tunnel.
+func (p *Proxy) Close() {
+	p.mu.Lock()
+	p.closed = true
+	conns := make([]net.Conn, 0, len(p.tunnel))
+	for c := range p.tunnel {
+		conns = append(conns, c)
+	}
+	p.mu.Unlock()
+	_ = p.srv.Close()
+	for _, c := range conns {
+		_ = c.Close()
+	}
+	p.tr.CloseIdleConnections()
+}
+
+func (p *Proxy) track(c net.Conn) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return false
+	}
+	p.tunnel[c] = struct{}{}
+	return true
+}
+
+func (p *Proxy) untrack(c net.Conn) {
+	p.mu.Lock()
+	delete(p.tunnel, c)
+	p.mu.Unlock()
+}
+
+// vet is the single policy check, shared by every scheme: it returns the
+// vetted addresses (as ip:port strings) the connection may be dialled to.
+func (p *Proxy) vet(ctx context.Context, rawURL string) (addrs []string, d Decision) {
+	d = p.policy.CheckURL(rawURL)
+	if !d.Allowed {
+		return nil, d
+	}
+	var ips []netip.Addr
+	if d.NeedsResolve {
+		found, err := p.cfg.Resolver.LookupNetIP(ctx, "ip", d.Host)
+		if err != nil {
+			return nil, refuse("host %q did not resolve", d.Host)
+		}
+		if d = p.policy.CheckResolved(d, found); !d.Allowed {
+			return nil, d
+		}
+		ips = found
+	} else {
+		ip, err := netip.ParseAddr(d.Host)
+		if err != nil {
+			return nil, refuse("host %q is not an address", d.Host)
+		}
+		ips = []netip.Addr{ip}
+	}
+	for _, ip := range ips {
+		addrs = append(addrs, net.JoinHostPort(ip.Unmap().String(), strconv.Itoa(d.Port)))
+	}
+	return addrs, d
+}
+
+func (p *Proxy) dialAny(ctx context.Context, addrs []string) (net.Conn, error) {
+	if len(addrs) == 0 {
+		return nil, errors.New("browser: no vetted address to dial")
+	}
+	dctx, cancel := context.WithTimeout(ctx, p.cfg.DialTimeout)
+	defer cancel()
+	var last error
+	for _, a := range addrs {
+		c, err := p.cfg.Dial(dctx, "tcp", a)
+		if err == nil {
+			return c, nil
+		}
+		last = err
+		if dctx.Err() != nil {
+			break
+		}
+	}
+	return nil, last
+}
+
+func (p *Proxy) refuseWith(w http.ResponseWriter, code int, target, reason string) {
+	reason = cleanText(reason, 200)
+	if p.cfg.OnRefuse != nil {
+		p.cfg.OnRefuse(redact(target), reason) // no query, no userinfo, sanitised
+	}
+	http.Error(w, "refused by the browser policy: "+reason, code)
+}
+
+func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodConnect {
+		p.handleConnect(w, r)
+		return
+	}
+	p.handleForward(w, r)
+}
+
+func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
+	target := r.RequestURI
+	if _, _, err := net.SplitHostPort(target); err != nil {
+		http.Error(w, "CONNECT needs host:port", http.StatusBadRequest)
+		return
+	}
+	addrs, d := p.vet(r.Context(), "http://"+target+"/")
+	if !d.Allowed {
+		p.refuseWith(w, http.StatusForbidden, target, d.Reason)
+		return
+	}
+	up, err := p.dialAny(r.Context(), addrs)
+	if err != nil {
+		code := http.StatusBadGateway
+		if errors.Is(err, context.DeadlineExceeded) {
+			code = http.StatusGatewayTimeout
+		}
+		http.Error(w, "could not connect", code)
+		return
+	}
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		_ = up.Close()
+		http.Error(w, "no hijack", http.StatusInternalServerError)
+		return
+	}
+	client, rw, err := hj.Hijack()
+	if err != nil {
+		_ = up.Close()
+		return
+	}
+	if !p.track(client) || !p.track(up) {
+		_ = client.Close()
+		_ = up.Close()
+		return
+	}
+	defer p.untrack(client)
+	defer p.untrack(up)
+	_, _ = io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
+	p.pipe(client, rw.Reader, up)
+}
+
+// pipe copies both ways until both directions end or a side is idle too long.
+func (p *Proxy) pipe(client net.Conn, clientBuffered *bufio.Reader, up net.Conn) {
+	idle := p.cfg.TunnelIdle
+	cc, uc := idleConn{client, idle}, idleConn{up, idle}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	cp := func(dst, src net.Conn, from io.Reader) {
+		defer wg.Done()
+		_, _ = io.Copy(dst, from)
+		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
+		} else {
+			_ = dst.Close()
+		}
+	}
+	go cp(uc, cc, clientBuffered) // client -> upstream (the buffered reader also holds anything already read)
+	go cp(cc, uc, uc)             // upstream -> client
+	wg.Wait()
+	_ = client.Close()
+	_ = up.Close()
+}
+
+// idleConn closes a connection that moves no data for idle.
+type idleConn struct {
+	net.Conn
+	idle time.Duration
+}
+
+func (c idleConn) Read(b []byte) (int, error) {
+	_ = c.Conn.SetReadDeadline(time.Now().Add(c.idle))
+	return c.Conn.Read(b)
+}
+
+func (c idleConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return c.Conn.Close()
+}
+
+func (c idleConn) Write(b []byte) (int, error) {
+	_ = c.Conn.SetWriteDeadline(time.Now().Add(c.idle))
+	return c.Conn.Write(b)
+}
+
+var hopByHop = []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade"}
+
+func stripHopByHop(h http.Header) {
+	for _, tok := range strings.Split(h.Get("Connection"), ",") {
+		if t := strings.TrimSpace(tok); t != "" {
+			h.Del(t)
+		}
+	}
+	for _, k := range hopByHop {
+		h.Del(k)
+	}
+}
+
+// handleForward serves an absolute-form http request (the only plain request
+// a browser sends to a proxy).
+func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
+	raw := r.RequestURI
+	if !strings.HasPrefix(strings.ToLower(raw), "http://") {
+		// https and ws(s) arrive as CONNECT; anything else is not proxied.
+		p.refuseWith(w, http.StatusBadRequest, raw, "only http:// requests and CONNECT are proxied")
+		return
+	}
+	if r.Header.Get("Upgrade") != "" {
+		p.refuseWith(w, http.StatusNotImplemented, raw, "an upgrade must arrive as CONNECT")
+		return
+	}
+	addrs, d := p.vet(r.Context(), raw)
+	if !d.Allowed {
+		p.refuseWith(w, http.StatusForbidden, raw, d.Reason)
+		return
+	}
+	host := d.Host
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if d.Port != 80 {
+		host += ":" + strconv.Itoa(d.Port)
+	}
+	out, err := http.NewRequestWithContext(context.WithValue(r.Context(), pinKey{}, addrs), r.Method, "http://"+host+r.URL.RequestURI(), r.Body)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	out.Header = r.Header.Clone()
+	stripHopByHop(out.Header)
+	out.Host = host
+	out.ContentLength = r.ContentLength
+	resp, err := p.tr.RoundTrip(out)
+	if err != nil {
+		code := http.StatusBadGateway
+		if errors.Is(err, context.DeadlineExceeded) {
+			code = http.StatusGatewayTimeout
+		}
+		http.Error(w, "upstream error", code)
+		return
+	}
+	defer resp.Body.Close()
+	stripHopByHop(resp.Header)
+	for k, vs := range resp.Header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	fl, _ := w.(http.Flusher)
+	buf := make([]byte, 32<<10)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+		if rerr != nil {
+			return
+		}
+	}
+}
+
+// limitListener caps concurrent connections: one over the limit is told 503
+// and closed.
+type limitListener struct {
+	net.Listener
+	sem chan struct{}
+}
+
+func (l *limitListener) Accept() (net.Conn, error) {
+	for {
+		c, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		select {
+		case l.sem <- struct{}{}:
+			return &limitConn{Conn: c, release: func() { <-l.sem }}, nil
+		default:
+			_ = c.SetWriteDeadline(time.Now().Add(time.Second))
+			_, _ = io.WriteString(c, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+			_ = c.Close()
+		}
+	}
+}
+
+type limitConn struct {
+	net.Conn
+	once    sync.Once
+	release func()
+}
+
+func (c *limitConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return c.Conn.Close()
+}
+
+func (c *limitConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(c.release)
+	return err
+}

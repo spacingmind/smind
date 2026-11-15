@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,9 @@ type LaunchOpts struct {
 	// NormalizeAllowHost); everything else that needs name resolution is
 	// mapped to nothing by the browser itself.
 	AllowHosts []string
+	// ProxyAddr is the loopback host:port of the enforcing proxy (StartProxy).
+	// It is required: a browser is never launched with a direct network path.
+	ProxyAddr string
 	// HeapMB caps the JS heap of every renderer (0 uses a safe default).
 	HeapMB int
 }
@@ -45,8 +49,13 @@ type Launcher interface {
 const defaultHeapMB = 512
 
 // buildArgs is the pinned command line. There is deliberately no
-// --no-sandbox, no remote-allow-origins and no proxy.
+// --no-sandbox and no remote-allow-origins, and no way to launch without the
+// proxy: every connection (WebSocket included) goes through the policy.
 func buildArgs(profileDir string, o LaunchOpts) ([]string, error) {
+	host, port, err := net.SplitHostPort(o.ProxyAddr)
+	if err != nil || (host != "127.0.0.1" && host != "[::1]" && host != "::1") || port == "" {
+		return nil, fmt.Errorf("browser: the proxy address %q must be a loopback host:port", o.ProxyAddr)
+	}
 	heap := o.HeapMB
 	if heap <= 0 {
 		heap = defaultHeapMB
@@ -65,7 +74,12 @@ func buildArgs(profileDir string, o LaunchOpts) ([]string, error) {
 		"--user-data-dir=" + profileDir,
 		"--host-resolver-rules=" + strings.Join(rules, ", "),
 		"--js-flags=--max-old-space-size=" + strconv.Itoa(heap),
-		"--no-proxy-server",
+		"--proxy-server=http://" + o.ProxyAddr,
+		// Exactly "<-loopback>": it removes the browser's implicit bypass of
+		// localhost, 127.0.0.1 and [::1] and adds nothing. An empty list leaves
+		// loopback direct (measured), which would skip the policy.
+		"--proxy-bypass-list=<-loopback>",
+		"--disable-quic", // defence in depth: WebTransport is already refused under a proxy
 		"--use-mock-keychain",
 		"--password-store=basic",
 		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
@@ -77,6 +91,14 @@ func buildArgs(profileDir string, o LaunchOpts) ([]string, error) {
 		"--disable-component-update",
 		"--disable-default-apps",
 		"--disable-breakpad",
+		"--disable-client-side-phishing-detection",
+		"--disable-domain-reliability",
+		"--metrics-recording-only",
+		"--no-pings",
+		// Quiet the browser's own background traffic (time sync, optimization
+		// hints, account and update services): the proxy refuses it anyway, but
+		// the agent should not be told about requests the page never made.
+		"--disable-features=NetworkTimeServiceQuerying,OptimizationHints,OptimizationGuideModelDownloading,Translate,MediaRouter,AutofillServerCommunication,GCM,PrivacySandboxSettings4",
 		"--mute-audio",
 		"about:blank",
 	}, nil

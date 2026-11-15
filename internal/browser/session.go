@@ -20,6 +20,28 @@ import (
 // maxQueuedBytes bounds the events waiting in the session queues.
 const maxQueuedBytes int64 = 32 << 20
 
+// seenSet remembers up to max keys; first reports true once per key and
+// false for everything after the set is full (a hostile page inventing
+// targets cannot grow it).
+type seenSet struct {
+	mu  sync.Mutex
+	m   map[string]struct{}
+	max int
+}
+
+func (s *seenSet) first(k string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[string]struct{}{}
+	}
+	if _, ok := s.m[k]; ok || len(s.m) >= s.max {
+		return false
+	}
+	s.m[k] = struct{}{}
+	return true
+}
+
 // Session errors.
 var (
 	ErrSessionClosed    = errors.New("browser: the session is closed")
@@ -93,9 +115,10 @@ func (t *tabState) isReady() bool {
 // Session is one headless browser for one workspace. It enforces the URL
 // policy on every request, caps tabs, cancels dialogs and denies downloads.
 type Session struct {
-	cfg  Config
-	inst Instance
-	cl   *Client
+	cfg   Config
+	proxy *Proxy
+	inst  Instance
+	cl    *Client
 
 	mu      sync.Mutex
 	closed  bool
@@ -139,14 +162,37 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	if cfg.Resolver == nil {
 		cfg.Resolver = net.DefaultResolver
 	}
+	seen := &seenSet{max: 200}
+	var session atomic.Pointer[Session]
+	px, err := StartProxy(ProxyConfig{
+		Policy:   cfg.Policy,
+		Resolver: cfg.Resolver,
+		OnRefuse: func(target, reason string) {
+			// Browser background traffic is refused too: tell the agent once
+			// per target, never a flood.
+			if sess := session.Load(); sess != nil {
+				if !seen.first(target) {
+					return
+				}
+				sess.note("blocked", fmt.Sprintf("%s: %s", target, reason))
+			}
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy = px.Policy() // the proxy's own address is denied to the page too
+	cfg.Launch.ProxyAddr = px.Addr()
 	inst, err := cfg.Launcher.Launch(ctx, cfg.Launch)
 	if err != nil {
+		px.Close()
 		return nil, err
 	}
 	cl := NewClient(inst.Conn())
 	cl.SetWriteTimeout(cfg.CallTimeout)
 	s := &Session{
 		cfg:       cfg,
+		proxy:     px,
 		inst:      inst,
 		cl:        cl,
 		tabs:      map[string]*tabState{},
@@ -156,6 +202,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		lifecycle: make(chan Event, 256),
 		requests:  make(chan Event, requestQueue),
 	}
+	session.Store(s)
 	s.idle = time.AfterFunc(cfg.IdleTimeout, s.Close)
 	go s.eventLoop()
 	go s.lifecycleLoop()
@@ -227,6 +274,7 @@ func (s *Session) Close() {
 		s.mu.Unlock()
 		_ = s.inst.Close() // kill the browser first, then drop the connection
 		_ = s.cl.Close()
+		s.proxy.Close()
 		if s.cfg.OnClose != nil {
 			s.cfg.OnClose()
 		}
