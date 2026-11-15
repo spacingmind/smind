@@ -1,8 +1,7 @@
-import { useId, useState } from "react";
+import { useId } from "react";
 
-import { SyncDialog, syncTitle } from "@/components/git/sync-dialog";
+import { syncTitle } from "@/components/git/sync-dialog";
 import type { SyncMode } from "@/components/git/sync-model";
-import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useTaskGit } from "@/hooks/use-task-git";
 import { Icons } from "@/lib/icons";
@@ -60,40 +59,5 @@ export function SyncMenuItems({ taskId, onOpen }: { taskId: number; onOpen: (mod
         );
       })}
     </>
-  );
-}
-
-/**
- * The Diff header's Push / Update buttons, next to `<PrAction>` and in its compact style: a disabled one keeps the
- * daemon's sentence as its tooltip. Below `md` the Diff header uses the "…" menu instead (see `SyncMenuItems`).
- */
-export function SyncButtons({ taskId }: { taskId: number }) {
-  const entries = useSyncEntries(taskId);
-  const [mode, setMode] = useState<SyncMode | null>(null);
-  const [lastMode, setLastMode] = useState<SyncMode>("push");
-  if (entries.length === 0) return null;
-  const open = (m: SyncMode) => {
-    setLastMode(m);
-    setMode(m);
-  };
-  return (
-    <div className="flex items-center gap-2" data-testid="sync-buttons">
-      {entries.map((entry) => (
-        <span key={entry.mode} title={entry.reason}>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={!entry.enabled}
-            onClick={() => open(entry.mode)}
-            data-testid={`sync-button-${entry.mode}`}
-            aria-label={entry.reason ? `${entry.label}. ${entry.reason}` : undefined}
-          >
-            {entry.label}
-          </Button>
-        </span>
-      ))}
-      <SyncDialog taskId={taskId} mode={lastMode} open={mode !== null} onOpenChange={(next) => !next && setMode(null)} />
-    </div>
   );
 }

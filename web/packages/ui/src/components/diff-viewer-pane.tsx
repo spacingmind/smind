@@ -8,7 +8,7 @@ import { DiffHeaderMenu } from "@/components/diff-header-menu";
 import { DiffRender, type DiffAnnotation, type DiffOutputFormat } from "@/components/diff-render";
 import { FileStatusMarker } from "@/components/file-status-marker";
 import { PrAction } from "@/components/git/pr-action";
-import { SyncButtons } from "@/components/git/sync-actions";
+import { GitActionsMenu } from "@/components/git/git-actions-menu";
 import { SyncDialog } from "@/components/git/sync-dialog";
 import type { SyncMode } from "@/components/git/sync-model";
 import { CommentComposer, ReviewAnnotationFrame, ReviewComments, ReviewDraftCard, type PendingComment } from "@/components/review-comments";
@@ -447,11 +447,10 @@ export function DiffViewerPane({
                   { value: "side-by-side", label: "Side by side" },
                 ]}
               />
-              <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={refreshAll}>
-                Refresh
+              <Button type="button" variant="ghost" size="icon-sm" aria-label="Refresh diff" title="Refresh" data-testid="diff-refresh" disabled={!client || loading} onClick={refreshAll}>
+                <Icons.refresh aria-hidden />
               </Button>
-              <SyncButtons taskId={task.ID} />
-              <PrAction taskId={task.ID} workspaceId={task.WorkspaceID} title={task.Title} />
+              <GitActionsMenu taskId={task.ID} workspaceId={task.WorkspaceID} title={task.Title} />
             </>
           )
         }
