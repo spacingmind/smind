@@ -428,12 +428,21 @@ mod tests {
         );
         // Look at the function body itself: the first `#[cfg(test)]` in this file sits inside the impl, before it.
         let create = body(include_str!("windows.rs"), "fn create_task_window(");
+        let code: String = create
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            !create.contains("prevent_close"),
+            code.contains("WindowEvent::Destroyed"),
+            "the body was found, so the checks below are not vacuous"
+        );
+        assert!(
+            !code.contains("prevent_close"),
             "a task window must not hide on close"
         );
         assert!(
-            !create.contains("CloseRequested"),
+            !code.contains("CloseRequested"),
             "a task window has no close handler: it is destroyed"
         );
     }
