@@ -20,6 +20,34 @@ export function normalizeVersion(version) {
   return v;
 }
 
+// The version a minisign signature was made for: the `version:` field of its trusted comment (the
+// Tauri CLI writes `timestamp:..\tfile:..\tversion:X.Y.Z`). A .sig file is the base64 of the
+// four-line minisign signature text. The updater plugin checks the signature cryptographically at
+// install time; this reads the signed comment so a release the updater would refuse
+// (`requireSignedVersion`) is stopped before it is published.
+export function signedVersionOf(signature) {
+  const b64 = String(signature).trim();
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
+    throw new Error("not a base64 minisign signature");
+  }
+  const lines = Buffer.from(b64, "base64").toString("utf8").split("\n");
+  const line = lines.find((l) => l.startsWith("trusted comment:"));
+  if (line === undefined) {
+    throw new Error("the signature has no trusted comment");
+  }
+  const field = line
+    .slice("trusted comment:".length)
+    .split("\t")
+    .map((f) => f.trim())
+    .find((f) => f.startsWith("version:"));
+  if (field === undefined) {
+    throw new Error(
+      "the signature carries no signed version (the updater's requireSignedVersion would refuse it): re-sign it with the Tauri CLI"
+    );
+  }
+  return field.slice("version:".length);
+}
+
 export function buildLatestJson({ version, tag, repo, notes, pubDate, files }) {
   const normalized = normalizeVersion(version);
   const platforms = {};
@@ -34,6 +62,17 @@ export function buildLatestJson({ version, tag, repo, notes, pubDate, files }) {
     if (signature === "") {
       throw new Error(
         `empty signature for platform "${platform}": the .sig file content is required`
+      );
+    }
+    let signed;
+    try {
+      signed = signedVersionOf(signature);
+    } catch (err) {
+      throw new Error(`signature for platform "${platform}": ${err.message}`);
+    }
+    if (normalizeVersion(signed) !== normalized) {
+      throw new Error(
+        `signature for platform "${platform}" was signed for version "${signed}" but the manifest version is "${normalized}": the updater would refuse it (or, without requireSignedVersion, install the wrong release)`
       );
     }
     platforms[platform] = {

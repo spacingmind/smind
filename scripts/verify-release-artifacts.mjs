@@ -24,6 +24,8 @@ export const CHECK_DESCRIPTIONS = {
     'checksums.txt lines are "<64 lowercase hex>  <name>"; every *.tar.gz *.zip *.exe *.msi *.dmg *.sig file in dist is listed exactly once and each digest equals the file\'s sha256',
   "checksums-signature":
     "checksums.txt.minisig exists, has the 4-line minisign shape, and its trusted comment names file:checksums.txt and version:<version>",
+  "updater-signatures":
+    "the three updater .sig files (two macOS app tarballs, the Windows installer) each carry version:<--desktop-version> in the signed trusted comment, as the updater's requireSignedVersion demands",
   "latest-json":
     "latest.json: version equals --desktop-version, exactly the three updater platforms, urls match tag/repo, each asset is in dist with its .sig content as signature, pub_date parses",
   "sidecar-versions":
@@ -294,6 +296,44 @@ function checkSidecarVersions(ctx) {
   }
 }
 
+// The version a minisign signature (a .sig file: base64 of the four-line signature text) was made
+// for: the `version:` field of its trusted comment. The cryptographic check is the updater's and
+// sign-checksums.sh's; this reads the signed comment.
+export function signedVersionOf(signature) {
+  const b64 = String(signature).trim();
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) throw new Error("not a base64 minisign signature");
+  const line = Buffer.from(b64, "base64")
+    .toString("utf8")
+    .split("\n")
+    .find((l) => l.startsWith("trusted comment:"));
+  if (line === undefined) throw new Error("no trusted comment");
+  const field = line
+    .slice("trusted comment:".length)
+    .split("\t")
+    .map((f) => f.trim())
+    .find((f) => f.startsWith("version:"));
+  if (field === undefined) throw new Error("no signed version in the trusted comment");
+  return field.slice("version:".length);
+}
+
+function checkUpdaterSignatures({ dir, desktopVersion, fail }) {
+  const assets = Object.values(updaterAssets(desktopVersion));
+  for (const asset of assets) {
+    const sig = readTextOrFail(join(dir, `${asset}.sig`), fail, `${asset}.sig in dist`);
+    if (sig === null) continue;
+    let signed;
+    try {
+      signed = signedVersionOf(sig);
+    } catch (err) {
+      fail(`${asset}.sig: ${oneLine(err)} (the updater's requireSignedVersion would refuse this release)`);
+      continue;
+    }
+    if (signed !== desktopVersion) {
+      fail(`${asset}.sig signed version: expected ${desktopVersion}, found ${signed}`);
+    }
+  }
+}
+
 const CHECK_FNS = {
   "source-versions": checkSourceVersions,
   tag: ({ tag, version, fail }) => {
@@ -303,6 +343,7 @@ const CHECK_FNS = {
   "desktop-assets": checkDesktopAssets,
   checksums: checkChecksums,
   "checksums-signature": checkChecksumsSignature,
+  "updater-signatures": checkUpdaterSignatures,
   "latest-json": checkLatestJson,
   "sidecar-versions": checkSidecarVersions,
 };
