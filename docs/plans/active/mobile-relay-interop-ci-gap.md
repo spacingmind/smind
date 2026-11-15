@@ -38,8 +38,9 @@ So a new interop suite would duplicate coverage. The gap is when it runs.
 ## Progress
 
 - [x] Inventory of what exists (this document).
-- [ ] PR: filter, comment, shell test.
+- [x] PR: filter, comment, shell test (`scripts/mobile-check-filter_test.sh`, wired into `task test`).
 
 ## Validation
 
-(filled in per PR)
+- AC1: the filter is `^(mobile/|internal/relay/|internal/wsapi/|internal/push/|\.github/workflows/mobile-check\.yml$)`, with the reason in the workflow's header comment. AC2: `mobile-check-filter` checks 6 paths that must run and 9 that must not (including `internal/inbox/`, `internal/store/`, look-alike prefixes `internal/wsapiextra/` and `mobilex/`); dropping `internal/wsapi/` from the workflow makes it fail. The docs-only path still reports success at once (the job's other steps are gated on `relevant`, unchanged). AC3: one filter, in this workflow only; `desktop-check` has its own paths for its own client and is left alone. AC4: the integration job's duration on the last two runs where it executed was 87 s and 107 s on a hosted runner, so a wsapi-only PR adds under two minutes; no narrowing needed. AC5: no product code.
+- Not verified: the workflow itself running on a wsapi-only PR (the next such PR is the evidence); the filter is exercised as a regular expression, not by Actions.

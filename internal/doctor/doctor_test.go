@@ -201,3 +201,47 @@ func TestEnvVarsPickTheRoot(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestClaudeAutoModeDisabledWarns(t *testing.T) {
+	f := newFS()
+	f.write("/home/u/.claude/settings.json", `{"permissions":{"disableAutoMode":"disable","allow":["Bash(ls)"]}}`)
+	g := one(t, ClaudeAutoMode(f.env(30, nil)), "claude.disableAutoMode")
+	if g.Level != LevelWarn || !strings.Contains(g.Message, "permissions.disableAutoMode") || !strings.Contains(g.Message, "/home/u/.claude/settings.json") || !strings.Contains(g.Fix, "never changes") {
+		t.Fatalf("got %+v", g)
+	}
+	if strings.Contains(g.Message, "Bash(ls)") {
+		t.Fatalf("a finding must not echo other settings: %+v", g)
+	}
+}
+
+func TestClaudeAutoModeBypassKeyWarnsSeparately(t *testing.T) {
+	f := newFS()
+	f.write("/home/u/.claude/settings.local.json", `{"permissions":{"disableBypassPermissionsMode":"disable"}}`)
+	got := ClaudeAutoMode(f.env(30, nil))
+	g := one(t, got, "claude.disableBypassPermissionsMode")
+	if len(got) != 1 || g.Level != LevelWarn {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestClaudeAutoModeAbsentIsSilent(t *testing.T) {
+	f := newFS()
+	f.write("/home/u/.claude/settings.json", `{"cleanupPeriodDays": 90, "permissions":{"disableAutoMode":"enable","disableBypassPermissionsMode":true}}`)
+	f.write("/home/u/.claude/settings.local.json", `not json`)
+	if got := ClaudeAutoMode(f.env(30, nil)); len(got) != 0 {
+		t.Fatalf("a missing, non-disable, non-string or unreadable setting must give no finding, got %+v", got)
+	}
+}
+
+func TestClaudeAutoModeReadsManagedAndConfigDirRoots(t *testing.T) {
+	f := newFS()
+	f.write("/custom/claude/settings.json", `{"permissions":{"disableAutoMode":"disable"}}`)
+	f.write("/smind/providers/inst/claude/settings.json", `{"permissions":{"disableAutoMode":"disable"}}`)
+	f.write("/etc/managed.json", `{"permissions":{"disableBypassPermissionsMode":"disable"}}`)
+	env := f.env(30, map[string]string{"CLAUDE_CONFIG_DIR": "/custom/claude"})
+	env.ManagedSettings = []string{"/etc/managed.json", "/etc/missing.json"}
+	got := ClaudeAutoMode(env)
+	if len(byID(got, "claude.disableAutoMode")) != 2 || len(byID(got, "claude.disableBypassPermissionsMode")) != 1 || len(got) != 3 {
+		t.Fatalf("got %+v", got)
+	}
+}
