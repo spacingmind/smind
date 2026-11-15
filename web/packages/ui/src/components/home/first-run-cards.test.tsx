@@ -97,20 +97,37 @@ describe("FirstRunCards", () => {
       }
     });
 
+    it("the signed-out line is a short summary, never one name per provider", () => {
+      renderCards({ health: { "claude-native": SIGNED_OUT, glm: SIGNED_OUT } });
+      const text = screen.getByTestId("first-run-providers-status").textContent ?? "";
+      expect(text).not.toContain("Claude Code");
+      expect(text).not.toContain("GLM");
+      expect(text.length).toBeLessThan(60);
+    });
+
+    it("done: no stretching spacer, Manage sits in the same row as the name, the grid does not stretch the card", () => {
+      renderCards({ health: { "claude-native": READY } });
+      const card = screen.getByTestId("first-run-card-providers");
+      expect(card.innerHTML).not.toContain("flex-1");
+      expect(screen.getByTestId("first-run-providers-done").parentElement).toContainElement(screen.getByTestId("first-run-open-providers"));
+      expect(screen.getByTestId("first-run-cards").className).toContain("items-start");
+    });
+
     it("done leaves Add a project as the one primary action", () => {
       renderCards({ health: { "claude-native": READY } });
       expect(screen.getByTestId("first-run-add-project").className).toContain("bg-primary");
     });
 
     it.each([
-      ["signed out", { "claude-native": SIGNED_OUT, glm: SIGNED_OUT }, /Sign-in needed/],
-      ["not installed", { "claude-native": MISSING, glm: MISSING }, /not installed|No agent/],
+      ["signed out", { "claude-native": SIGNED_OUT, glm: SIGNED_OUT }, "No agent is signed in · 2 need sign-in"],
+      ["not installed", { "claude-native": MISSING, glm: MISSING }, "No agent is signed in · 2 not installed"],
+      ["mixed", { "claude-native": SIGNED_OUT, glm: MISSING }, "No agent is signed in · 1 needs sign-in · 1 not installed"],
     ])("%s keeps the Set up providers card with its sentence and its outline button, and no primary Add a project", (_name, health, sentence) => {
       renderCards({ health });
       const card = screen.getByTestId("first-run-card-providers");
       expect(card).toHaveAttribute("data-state", "todo");
       expect(card).toHaveTextContent("Set up providers");
-      expect(screen.getByTestId("first-run-providers-status").textContent).toMatch(sentence);
+      expect(screen.getByTestId("first-run-providers-status").textContent).toBe(sentence);
       const open = within(card).getByRole("button", { name: "Open Providers" });
       expect(open.className).not.toContain("bg-primary");
       expect(screen.queryByTestId("first-run-providers-done")).not.toBeInTheDocument();
