@@ -28,14 +28,14 @@ func fakeDetector(goos string, files map[string]bool, path map[string]string) de
 
 func TestDetectChrome(t *testing.T) {
 	const mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-	d := fakeDetector("darwin", map[string]bool{mac: true, "/custom/chrome": true, "/custom/not-exec": true}, nil)
+	d := fakeDetector("darwin", map[string]bool{mac: true, "/custom/chrome": true, "/custom/not-exec": true, "rel/chrome": true, "chrome": true}, nil)
 	if p, err := d.detect(""); err != nil || p != mac {
 		t.Fatalf("standard location: %q %v", p, err)
 	}
 	if p, err := d.detect("/custom/chrome"); err != nil || p != "/custom/chrome" {
 		t.Fatalf("explicit path: %q %v", p, err)
 	}
-	for _, bad := range []string{"/missing/chrome", "chrome", "./chrome", "/custom/not-exec"} {
+	for _, bad := range []string{"/missing/chrome", "chrome", "rel/chrome", "./chrome", "/custom/not-exec"} {
 		if _, err := d.detect(bad); !errors.Is(err, ErrUnavailable) {
 			t.Fatalf("explicit path %q must be refused, not fall back silently: %v", bad, err)
 		}

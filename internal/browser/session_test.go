@@ -782,3 +782,20 @@ func TestManagerChangedConfigRestartsTheSession(t *testing.T) {
 		t.Fatal("the old session (old policy) must be closed")
 	}
 }
+
+func TestSessionRequestBacklogClosesTheSession(t *testing.T) {
+	old := maxQueuedBytes
+	maxQueuedBytes = 1
+	defer func() { maxQueuedBytes = old }()
+	s, l := startTestSession(t, nil)
+	f, inst := l.last()
+	attachReady(t, f, "S1", "T1", 1) // lifecycle events also count, so this may already trip it
+	f.event("S1", "Fetch.requestPaused", map[string]any{"requestId": "r", "request": map[string]any{"url": "http://localhost/"}})
+	deadline := time.Now().Add(2 * time.Second)
+	for !(s.Closed() && inst.closed.Load()) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !s.Closed() {
+		t.Fatal("a backlog over the byte budget must close the session, not let requests through unchecked")
+	}
+}
