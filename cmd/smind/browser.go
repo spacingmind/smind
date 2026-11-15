@@ -120,16 +120,21 @@ func runBrowser(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			return code
 		}
 		hosts := cur.AllowHosts
+		// The daemon stores hosts canonical (lower case, no trailing dot), so a
+		// host typed as "Intranet.Test." must find the stored "intranet.test".
+		same := func(h string) bool {
+			return strings.EqualFold(strings.TrimSuffix(h, "."), strings.TrimSuffix(host, "."))
+		}
 		if allowVerb == "add" {
-			if !slices.Contains(hosts, host) {
+			if !slices.ContainsFunc(hosts, same) {
 				hosts = append(hosts, host)
 			}
 		} else {
-			if !slices.Contains(hosts, host) {
+			if !slices.ContainsFunc(hosts, same) {
 				fmt.Fprintln(stderr, "smind browser allow rm: host not in the allowlist")
 				return 1
 			}
-			hosts = slices.DeleteFunc(slices.Clone(hosts), func(h string) bool { return h == host })
+			hosts = slices.DeleteFunc(slices.Clone(hosts), same)
 		}
 		var res browserSettings
 		if code, ok := browserCall(ctx, call, "allow "+allowVerb, "browser.settings.set", map[string]any{"workspaceId": id, "allowHosts": hosts}, &res, a.bools["--json"], stdout, stderr); !ok {

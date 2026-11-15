@@ -271,3 +271,34 @@ func TestBrowserCLI_PassesTheDaemonsRefusalThrough(t *testing.T) {
 		t.Errorf("stderr %q, want the daemon's refusal text", errb.String())
 	}
 }
+
+func TestBrowserCLI_AllowRmFindsTheCanonicalHost(t *testing.T) {
+	t.Setenv("SMIND_RUN_ID", "")
+	settings := browserSettingsReply(true, []string{"intranet.test", "10.0.0.5"})
+	var lastSet []string
+	stubBrowserDaemon(t, func(method string, params map[string]any) (any, error) {
+		switch method {
+		case "browser.settings.get":
+			return settings, nil
+		case "browser.settings.set":
+			lastSet, _ = params["allowHosts"].([]string)
+			settings["allowHosts"] = params["allowHosts"]
+			return settings, nil
+		}
+		return nil, fmt.Errorf("unknown method %s", method)
+	})
+	var out, errb bytes.Buffer
+	run := func(args ...string) int {
+		out.Reset()
+		errb.Reset()
+		return runBrowser(context.Background(), args, &out, &errb)
+	}
+	// Adding a host that is already stored under its canonical spelling does not duplicate it.
+	if code := run("allow", "add", "INTRANET.test.", "--workspace", "1"); code != 0 || len(lastSet) != 2 {
+		t.Fatalf("add of an existing host (different spelling): code %d, sent %v, stderr %q", code, lastSet, errb.String())
+	}
+	// Removing by a different spelling finds the stored canonical host.
+	if code := run("allow", "rm", "Intranet.Test.", "--workspace", "1"); code != 0 || len(lastSet) != 1 || lastSet[0] != "10.0.0.5" {
+		t.Fatalf("rm by another spelling: code %d, sent %v, stderr %q", code, lastSet, errb.String())
+	}
+}

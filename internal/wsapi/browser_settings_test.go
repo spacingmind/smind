@@ -380,3 +380,35 @@ func TestDenyListCoversTheDaemonsOwnAddresses(t *testing.T) {
 		t.Error("another loopback port stays allowed")
 	}
 }
+
+// The whole path with the real store and the real wiring: the human-only
+// handlers write the table, the gate reads it, and the browser is still dark.
+func TestBrowserSettings_RealStoreEndToEnd(t *testing.T) {
+	e := newProcEnv(t)
+	ws := e.task.WorkspaceID
+	rc := &requestContext{local: true}
+	params := func(v map[string]any) json.RawMessage { b, _ := json.Marshal(v); return b }
+	if _, err := e.api.hs["browser.settings.set"](context.Background(), rc, params(map[string]any{"workspaceId": ws, "enabled": true, "allowHosts": []string{"Intranet.Test", "10.0.0.5"}})); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.db.GetBrowserSettings(ws)
+	if err != nil || !got.Enabled || !slices.Equal(got.AllowHosts, []string{"intranet.test", "10.0.0.5"}) || got.UpdatedBy != "local" {
+		t.Fatalf("stored: %+v %v", got, err)
+	}
+	if !e.api.browser.workspaceSwitchOn(ws) || !slices.Equal(e.api.browser.allow(ws), []string{"intranet.test", "10.0.0.5"}) {
+		t.Fatal("the gate hook and the allowlist read the real store")
+	}
+	if e.api.Runs.BrowserAllowed(ws) {
+		t.Fatal("still dark: browser.GateReady is false")
+	}
+	res, err := e.api.hs["browser.settings.get"](context.Background(), rc, params(map[string]any{"workspaceId": ws}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := res.(browserSettingsView); !v.Enabled || v.Available {
+		t.Fatalf("get: %+v", v)
+	}
+	if _, err := e.api.hs["browser.settings.set"](context.Background(), rc, params(map[string]any{"workspaceId": ws + 999, "enabled": true})); err == nil {
+		t.Fatal("a workspace that does not exist is refused by the real store too")
+	}
+}
