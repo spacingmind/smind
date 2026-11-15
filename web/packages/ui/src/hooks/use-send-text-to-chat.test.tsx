@@ -10,7 +10,7 @@ import { useFocusedChatStore } from "@/stores/focused-chat-store";
 const store = () => useComposerAttachmentsStore.getState();
 
 beforeEach(() => {
-  useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {}, pendingTexts: {} });
+  useComposerAttachmentsStore.setState({ byKey: {}, mentions: {}, pendingInserts: {}, pendingTexts: {}, chips: {} });
   useFocusedChatStore.setState({ byTask: { 1: 10 }, revealRequest: null });
 });
 afterEach(() => {
@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe("useSendTextToChat", () => {
-  it("queues exactly one text under the focused chat's draft key and offers Open chat", async () => {
+  it("adds exactly one terminal chip under the focused chat's draft key, queues no text, and offers Open chat", async () => {
     const { result } = renderHook(() => useSendTextToChat(1), {
       wrapper: ({ children }) => (
         <>
@@ -30,10 +30,13 @@ describe("useSendTextToChat", () => {
     });
     expect(result.current.canSend).toBe(true);
 
-    act(() => result.current.sendText("Terminal output, selection, 12 B:\n```\nhi\n```", "Terminal selection"));
+    act(() => result.current.sendText("hello world!", "selection", "Terminal selection"));
     const key = attachmentDraftKey(1, 10);
-    expect(store().pendingTexts[key]).toHaveLength(1);
-    expect(store().pendingTexts[key]![0]).toContain("Terminal output, selection, 12 B:");
+    const chips = store().chips[key] ?? [];
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toMatchObject({ kind: "terminal", body: "hello world!", blockLabel: "selection", label: "Terminal selection · 1 line · 12 B" });
+    // The raw text never goes near the draft's pending queue.
+    expect(store().pendingTexts).toEqual({});
     // Nothing is sent, and the toast offers the jump to the chat.
     expect(await screen.findByText("Added to chat")).toBeTruthy();
     act(() => screen.getByText("Open chat").click());
@@ -45,7 +48,8 @@ describe("useSendTextToChat", () => {
     const { result } = renderHook(() => useSendTextToChat(1));
     expect(result.current.canSend).toBe(false);
 
-    act(() => result.current.sendText("anything", "Terminal selection"));
+    act(() => result.current.sendText("anything", "selection", "Terminal selection"));
+    expect(store().chips).toEqual({});
     expect(store().pendingTexts).toEqual({});
   });
 });

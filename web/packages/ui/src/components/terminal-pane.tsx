@@ -741,14 +741,14 @@ export function TerminalPane({
         label: "Selection",
         disabled: selection === "",
         detail: selection === "" ? "nothing selected" : formatBytes(buildTerminalBlock(selection, "selection").shownBytes),
-        onSelect: () => send.sendText(buildTerminalBlock(selection, "selection").block, "Terminal selection"),
+        onSelect: () => send.sendText(selection, "selection", "Terminal selection"),
       },
       {
         id: "last-100",
         label: "Last 100 lines",
         disabled: last === "",
         detail: last === "" ? "no output" : formatBytes(buildTerminalBlock(last, "last 100 lines").shownBytes),
-        onSelect: () => send.sendText(buildTerminalBlock(last, "last 100 lines").block, "Terminal output"),
+        onSelect: () => send.sendText(last, "last 100 lines", "Terminal output"),
       },
     ];
   }, [send]);
