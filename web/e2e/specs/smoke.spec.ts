@@ -46,6 +46,9 @@ test('J04/J06/J07 smoke: workspaces, new task with the UAT agent, prompt, timeli
   await expect(main).toContainText(/retry backoff/i)
   await expect(main.locator('table').first()).toBeVisible()
   await expect(main.locator('pre').first()).toBeVisible()
+  // a finished run with five tool calls folds into one "Ran 5 tools" row (chat surface E-a); opening it shows the five calls
+  await expect(page.getByTestId('timeline-tool-group')).toContainText('Ran 5 tools')
+  await page.getByTestId('tool-group-toggle').click()
   await expect(page.getByTestId('tool-call-toggle')).toHaveCount(5)
   await expect(main).toContainText(/failure|failed/i)
 })

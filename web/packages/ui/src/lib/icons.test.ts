@@ -36,6 +36,7 @@ describe("icon registry", () => {
         "connections": "Network",
         "copy": "Copy",
         "credentials": "KeyRound",
+        "dash": "Minus",
         "defaultAgent": "Star",
         "delete": "Trash2",
         "diff": "GitCompare",

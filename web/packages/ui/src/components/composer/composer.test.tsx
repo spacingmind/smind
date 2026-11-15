@@ -357,18 +357,19 @@ describe("Composer", () => {
     expect(stops).toEqual(["run-7", "run-7"]);
   });
 
-  it("freezes Stop and hides the Working chip while disconnected, and restores them on reconnect (U14)", () => {
+  it("freezes Stop while disconnected and the status line says Reconnecting… with no timer, and restores on reconnect (U14)", () => {
     const { rerender } = renderComposer({ runningRunId: "run-7", connected: true });
     expect(screen.getByTestId("chat-stop-button")).toBeEnabled();
-    expect(screen.getByTestId("composer-working-chip")).toBeTruthy();
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working…");
 
     rerender({ runningRunId: "run-7", connected: false });
     expect(screen.getByTestId("chat-stop-button")).toBeDisabled();
-    expect(screen.queryByTestId("composer-working-chip")).toBeNull();
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Reconnecting…");
+    expect(screen.queryByTestId("run-working-elapsed")).toBeNull();
 
     rerender({ runningRunId: "run-7", connected: true });
     expect(screen.getByTestId("chat-stop-button")).toBeEnabled();
-    expect(screen.getByTestId("composer-working-chip")).toBeTruthy();
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working…");
   });
 
   it("does not lose the text when the submit fails", async () => {
@@ -1550,10 +1551,10 @@ describe("Composer redesign (composer-redesign plan)", () => {
     expect(screen.queryByTestId("composer-status-chips")).not.toBeInTheDocument();
 
     rerender({ runningRunId: "run-1" });
-    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working");
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working…");
 
     rerender({ runningRunId: "run-1", waitingOnUser: true });
-    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Waiting for you");
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Waiting for you…");
   });
 
   it("diff-stat chip compact-formats thousands and opens the diff", () => {

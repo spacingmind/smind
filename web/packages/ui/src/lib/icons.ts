@@ -92,6 +92,7 @@ import {
   Menu,
   MessageSquare,
   MessageSquarePlus,
+  Minus,
   Monitor,
   Moon,
   Network,
@@ -150,6 +151,8 @@ export const Icons = {
   close: X,
   check: Check,
   checkAll: CheckCheck,
+  /** Auto-accept off (the composer pill's state marker; checkAll is on). */
+  dash: Minus,
   copy: Copy,
   paste: ClipboardPaste,
   edit: Pencil,

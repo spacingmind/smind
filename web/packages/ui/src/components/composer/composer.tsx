@@ -80,7 +80,8 @@ export function composerPlaceholder({
  * one rounded card whose top is the autogrowing prompt textarea (two rows
  * at rest) and whose bottom edge is the toolbar -- icon+label run-config
  * pills on the left, the icon-only Send/Stop cluster on the right -- with
- * the status chips (Working, diff stat) above the card. The only
+ * the run-state line (Working…, elapsed, diff stat) directly under the
+ * card. The only
  * affordances shown are ones that work: the Attach button and tray exist
  * only when the daemon reports attachment support (`daemon.info`), and
  * there are no mic or voice buttons until those features exist.
@@ -101,6 +102,7 @@ export function Composer({
   boundProvider,
   connected,
   runningRunId,
+  runStartedAt = null,
   waitingOnUser = false,
   git,
   onOpenDiff,
@@ -131,6 +133,8 @@ export function Composer({
   connected: boolean;
   /** The task's currently-running run, or null. Drives Stop, "Send now", and the queue placeholder. */
   runningRunId: string | null;
+  /** The live run's startedAt (ISO): what the status line's elapsed timer counts from. */
+  runStartedAt?: string | null;
   /** The live run holds an unanswered permission request: the status chip reads "Waiting for you". */
   waitingOnUser?: boolean;
   /** The task's git/PR state (useTaskGit) for the chips above the card -- each chip omitted when it does not apply. */
@@ -564,19 +568,8 @@ export function Composer({
   const showFocusHint = focusCombo !== null && canSend && !focused && draft.value === "" && attachItems.length === 0;
 
   return (
-    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
+    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl @[1100px]/chat:max-w-4xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
       <QueuedPrompts items={queuedItems} onCancel={onCancelQueued} />
-
-      {/* Paseo's chip row above the card: the live-run chip and the diff
-          stat -- real data only, nothing when neither applies. */}
-      <ComposerStatusChips
-        running={running && connected}
-        waiting={waitingOnUser}
-        git={git}
-        onOpenDiff={onOpenDiff}
-        otherRunningChat={otherRunningChat}
-        onJumpToChat={onJumpToChat}
-      />
 
       {/*
        * The input card (Item 5): one rounded surface whose top is the
@@ -801,6 +794,24 @@ export function Composer({
           </div>
         </RunConfigToolbar>
       </div>
+
+      {/*
+       * The run-state line (chat-surface-ui decision 1): the one place a
+       * live run's state shows, anchored directly under the card so it
+       * stays on screen while the transcript scrolls. The diff stat, PR
+       * and conflicts chips share the row -- real data only, nothing when
+       * none applies.
+       */}
+      <ComposerStatusChips
+        running={running}
+        reconnecting={running && !connected}
+        startedAt={runStartedAt}
+        waiting={waitingOnUser}
+        git={git}
+        onOpenDiff={onOpenDiff}
+        otherRunningChat={otherRunningChat}
+        onJumpToChat={onJumpToChat}
+      />
     </form>
   );
 }

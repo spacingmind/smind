@@ -265,7 +265,7 @@ describe("detail level", () => {
     expect(screen.queryAllByTestId("timeline-tool-call")).toHaveLength(0);
     const group = screen.getByTestId("timeline-tool-group");
     expect(group).toHaveAttribute("data-count", "3");
-    expect(group).toHaveTextContent("3 tool calls");
+    expect(group).toHaveTextContent("Ran 3 tools");
 
     // Expanding the group reveals the individual cards.
     fireEvent.click(screen.getByTestId("tool-group-toggle"));
@@ -274,6 +274,24 @@ describe("detail level", () => {
     rerender(
       <ul>
         <RunTimeline run={run(threeCalls)} detailLevel="detailed" />
+      </ul>,
+    );
+    expect(screen.queryByTestId("timeline-tool-group")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("timeline-tool-call")).toHaveLength(3);
+  });
+
+  it("auto level folds a FINISHED run's three tool rows into 'Ran 3 tools' and never a live run's", () => {
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={run(threeCalls, { status: "done" })} detailLevel="auto" />
+      </ul>,
+    );
+    expect(screen.getByTestId("timeline-tool-group")).toHaveTextContent("Ran 3 tools");
+    expect(screen.queryAllByTestId("timeline-tool-call")).toHaveLength(0);
+
+    rerender(
+      <ul>
+        <RunTimeline run={run(threeCalls, { status: "running" })} detailLevel="auto" />
       </ul>,
     );
     expect(screen.queryByTestId("timeline-tool-group")).not.toBeInTheDocument();

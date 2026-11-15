@@ -118,34 +118,19 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("run-model")).toHaveTextContent("claude-native");
   });
 
-  it("a running run shows Working… with a live elapsed time", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2024-01-01T00:00:00Z"));
-    try {
-      render(
-        <ul>
-          <RunTimeline run={run([], { status: "running", finishedAt: undefined })} />
-        </ul>,
-      );
-      expect(within(screen.getByTestId("run-meta")).getByRole("status")).toHaveTextContent("Working…");
-      expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "running");
-      // After 12 fake seconds the label ticks up to 12s.
-      act(() => {
-        vi.advanceTimersByTime(12_000);
-      });
-      expect(screen.getByTestId("run-working-elapsed")).toHaveTextContent("12s");
-      // The ticking number is a timer (aria-live off); only the static word is a live region.
-      expect(screen.getByTestId("run-working-elapsed")).toHaveAttribute("role", "timer");
-      expect(within(screen.getByTestId("run-meta")).getByRole("status")).toHaveTextContent(/^Working…$/);
-      expect(screen.getByTestId("run-meta")).toHaveAttribute("aria-label", "Working");
-      // No model segment while running.
-      expect(screen.queryByTestId("run-model")).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
+  it("a running run shows no footer state in the transcript (it lives under the composer)", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([], { status: "running", finishedAt: undefined })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-footer")).toBeNull();
+    expect(screen.queryByTestId("run-meta")).toBeNull();
+    expect(screen.queryByText(/^Working…$/)).toBeNull();
+    expect(screen.queryByTestId("run-working-elapsed")).toBeNull();
   });
 
-  it("a running run blocked on a permission says it is waiting for the user, not Working…", () => {
+  it("a running run blocked on a permission shows no footer state either", () => {
     render(
       <ul>
         <RunTimeline
@@ -157,11 +142,8 @@ describe("RunTimeline", () => {
         />
       </ul>,
     );
-    const meta = screen.getByTestId("run-meta");
-    expect(within(meta).getByRole("status")).toHaveTextContent("Waiting for you…");
-    expect(meta).toHaveAttribute("aria-label", "Waiting for your response");
-    expect(meta.textContent).not.toContain("Working");
-    expect(within(meta).getByTestId("run-working-elapsed")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-footer")).toBeNull();
+    expect(screen.queryByText(/Waiting for you/)).toBeNull();
   });
 
   it.each([
@@ -566,7 +548,8 @@ describe("RunTimeline", () => {
       </ul>,
     );
     expect(screen.queryByTestId("run-rerun")).toBeNull();
-    expect(screen.getByTestId("run-copy-button")).toBeInTheDocument();
+    // The footer (and its hover action bar with it) shows nothing while the run is live.
+    expect(screen.queryByTestId("run-copy-button")).toBeNull();
     unmount();
     render(
       <ul>
@@ -704,7 +687,7 @@ describe("RunTimeline borderless chrome", () => {
     });
   }
 
-  it("run footer is dimmed when finished and full strength when running or errored", () => {
+  it("run footer is dimmed when finished and full strength when errored; absent while running", () => {
     const dimmed = (status: RunEntry["status"]) => {
       const { unmount } = render(
         <ul>
@@ -720,9 +703,17 @@ describe("RunTimeline borderless chrome", () => {
     expect(done).toContain("opacity-70");
     expect(done).toContain("group-hover/answer:opacity-100");
     expect(done).toContain("group-has-[:focus-visible]/answer:opacity-100");
-    for (const status of ["running", "error", "stopped"] as const) {
+    for (const status of ["error", "stopped"] as const) {
       expect(dimmed(status)).not.toContain("opacity-70");
     }
+    // A live run has no footer at all (its state lives under the composer).
+    const { unmount } = render(
+      <ul>
+        <RunTimeline run={run([], { status: "running", finishedAt: undefined })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-meta")).toBeNull();
+    unmount();
   });
 });
 
