@@ -10,6 +10,8 @@ import { expect, test } from '../fixtures/test'
 async function frame(page: Page, testInfo: TestInfo, name: string) {
   const dir = process.env.PAGE_FRAMES_DIR
   if (!dir) return
+  // Narrow: the drawer sheet is closing under the page; frame the settled page.
+  if ((testInfo.project.use.viewport?.width ?? 1280) < 768) await expect(page.getByTestId('sidebar-quick-actions')).toBeHidden()
   fs.mkdirSync(dir, { recursive: true })
   await page.screenshot({ path: path.join(dir, `${name}-${testInfo.project.name}.png`) })
 }

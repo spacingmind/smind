@@ -1717,7 +1717,7 @@ function AppShell({
             />
           )}
           <SidebarInset className={cn("relative h-full min-w-0 flex-1 bg-sidebar", !isMobile && !lightsBar && SHELL_FRAME_INSET_CLASS)}>
-            <div data-testid="content-region" className={cn("h-full min-w-0", viewOpen && "invisible")} inert={viewOpen} aria-hidden={viewOpen || undefined}>
+            <div data-testid="content-region" className={cn("flex min-h-0 min-w-0 flex-1 flex-col", viewOpen && "invisible")} inert={viewOpen} aria-hidden={viewOpen || undefined}>
               {contentPanelElement}
             </div>
             {pageCover}
