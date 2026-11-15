@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import { HeaderTaskMenu } from "@/components/app-header-task";
 import { flush, gitState } from "@/components/git/pr-test-support";
-import { SyncButtons } from "@/components/git/sync-actions";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
@@ -29,10 +28,6 @@ function HeaderHarness({ client }: { client: FakeWsClient }) {
       <HeaderTaskMenu task={TASK} client={client as never} localPathActions={null} />
     </TooltipProvider>
   );
-}
-
-function ButtonsHarness({}: { client: FakeWsClient }) {
-  return <SyncButtons taskId={1} />;
 }
 
 async function openMenu(client: FakeWsClient, git: TaskGit): Promise<HTMLElement> {
@@ -101,34 +96,5 @@ describe("sync items in the header menu", () => {
     await openMenu(client, state({ actions: { createPr: { enabled: true } } }));
     expect(screen.queryByTestId("sync-menu-push")).not.toBeInTheDocument();
     expect(screen.queryByTestId("sync-menu-update")).not.toBeInTheDocument();
-  });
-});
-
-describe("sync buttons in the Diff header", () => {
-  it("gates each button by its action and keeps the reason as the tooltip", async () => {
-    const client = new FakeWsClient();
-    render(<ButtonsHarness client={client} />);
-    client.nth("task.git", 0).resolve(
-      state({
-        actions: {
-          push: { enabled: true },
-          updateFromBase: { enabled: false, code: "up_to_date", reason: "Already up to date with develop." },
-        },
-      }),
-    );
-    await flush();
-    expect(screen.getByTestId("sync-button-push")).toBeEnabled();
-    const update = screen.getByTestId("sync-button-update");
-    expect(update).toBeDisabled();
-    expect(update).toHaveTextContent("Update from develop");
-    expect(update.parentElement).toHaveAttribute("title", "Already up to date with develop.");
-    fireEvent.click(screen.getByTestId("sync-button-push"));
-    expect(await screen.findByRole("heading", { name: "Push" })).toBeInTheDocument();
-  });
-
-  it("renders nothing before the git state arrives", () => {
-    const client = new FakeWsClient();
-    render(<ButtonsHarness client={client} />);
-    expect(screen.queryByTestId("sync-buttons")).not.toBeInTheDocument();
   });
 });

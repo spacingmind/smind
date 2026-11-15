@@ -45,6 +45,8 @@ export const STORAGE_KEYS = {
   dismissedDaemonNotices: "smind:dismissed-daemon-notices",
   /** Interface mode (ADR-0049): the bare string "office", anything else reads as coding; see lib/interface-mode.ts. */
   interfaceMode: "smind:interface-mode",
+  /** Per workspace, the starting ratio of a new split per direction (D3); see lib/split-ratios.ts. */
+  splitRatios: "smind:split-ratios",
 } as const;
 
 /**
