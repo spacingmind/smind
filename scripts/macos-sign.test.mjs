@@ -97,23 +97,26 @@ const FAKES = {
     '  if [ "$a" = "--sign" ]; then signing=1; fi',
     "done",
     'if [ "$signing" = "1" ]; then exit 0; fi',
-    'if [ "$dv" = "1" ]; then',
-    "  exec 1>&2",
-    '  echo "Identifier=x"',
-    '  if [ "${FAKE_NO_AUTHORITY:-}" != "1" ]; then echo "Authority=' + IDENTITY + '"; fi',
-    '  if [ "${FAKE_ADHOC:-}" = "1" ]; then echo "Signature=adhoc"; fi',
+    "if [ \"$dv\" = \"1\" ]; then",
+    // one single write: verify.sh pipes this into `grep -q` under pipefail, and a second write
+    // after grep exited would SIGPIPE the fake and fail the pipeline spuriously
+    "  NL=$'\\n'",
+    '  d="Identifier=x"',
+    '  if [ "${FAKE_NO_AUTHORITY:-}" != "1" ]; then d="$d${NL}Authority=' + IDENTITY + '"; fi',
+    '  if [ "${FAKE_ADHOC:-}" = "1" ]; then d="$d${NL}Signature=adhoc"; fi',
     '  team="ABCDE12345"',
     '  case "$path" in',
     '    */smind) if [ "${FAKE_TEAM_MISMATCH:-}" = "1" ]; then team="ZZZZZZZZZZ"; fi ;;',
     "  esac",
     '  if [ "${FAKE_ADHOC:-}" = "1" ]; then team="not set"; fi',
-    '  echo "TeamIdentifier=$team"',
+    '  d="$d${NL}TeamIdentifier=$team"',
     '  flags="0x10000(runtime)"',
     '  if [ "${FAKE_NO_RUNTIME:-}" = "1" ]; then flags="0x0(none)"; fi',
     '  case "$path" in',
     '    */smind) if [ "${FAKE_NO_RUNTIME_NESTED:-}" = "1" ]; then flags="0x0(none)"; fi ;;',
     "  esac",
-    '  echo "flags=$flags"',
+    '  d="$d${NL}flags=$flags"',
+    '  printf \'%s\\n\' "$d" >&2',
     "  exit 0",
     "fi",
     'if [ "${1:-}" = "-d" ]; then',
@@ -545,4 +548,101 @@ test("sign-rejects-app-that-is-a-link", () => {
     assert.notEqual(r.status, 0, "a symlinked --app must be rejected");
     assert.deepEqual(toolLines(h.log(), "codesign"), [], "a link was signed");
   });
+});
+
+// --- the verify gate (AC5) -----------------------------------------------------------------------------
+
+function runVerify(h, extraArgs = []) {
+  const app = makeApp(h.tmp);
+  return { app, r: h.run(VERIFY, ["--app", app, ...extraArgs]) };
+}
+
+const failLines = (r) => r.stdout.split("\n").filter((l) => l.startsWith("FAIL"));
+
+function assertFailsWith(h, knobs, text) {
+  withHarness({ knobs }, (h2) => {
+    const { r } = runVerify(h2);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok(
+      failLines(r).some((l) => l.toLowerCase().includes(text)),
+      `no FAIL line mentioning '${text}':\n${r.stdout}`,
+    );
+  });
+}
+
+test("verify-passes-a-good-app", () => {
+  withHarness({}, (h) => {
+    const { r } = runVerify(h);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes("FAIL"), r.stdout);
+    for (const line of r.stdout.split("\n").filter(Boolean)) {
+      assert.ok(line.startsWith("ok"), line);
+    }
+  });
+});
+
+test("verify-fails-adhoc", () => assertFailsWith(null, { FAKE_ADHOC: "1" }, "ad-hoc"));
+test("verify-fails-without-developer-id", () => assertFailsWith(null, { FAKE_NO_AUTHORITY: "1" }, "authority"));
+test("verify-fails-without-runtime", () => assertFailsWith(null, { FAKE_NO_RUNTIME: "1" }, "runtime"));
+test("verify-fails-nested-without-runtime", () => assertFailsWith(null, { FAKE_NO_RUNTIME_NESTED: "1" }, "smind"));
+test("verify-fails-team-mismatch", () => assertFailsWith(null, { FAKE_TEAM_MISMATCH: "1" }, "team"));
+test("verify-fails-entitlements-mismatch", () => assertFailsWith(null, { FAKE_ENT_MISMATCH: "1" }, "entitlements"));
+test("verify-fails-gatekeeper-rejection", () => assertFailsWith(null, { FAKE_SPCTL_FAIL: "1" }, "gatekeeper"));
+test("verify-fails-without-staple", () => assertFailsWith(null, { FAKE_STAPLE_FAIL: "1" }, "stapled"));
+
+test("verify-dmg-checks", () => {
+  withHarness({}, (h) => {
+    const dmg = join(h.tmp, "sMind.dmg");
+    writeFileSync(dmg, "dmg-bytes");
+    const { r } = runVerify(h, ["--dmg", dmg]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const dmgOk = r.stdout.split("\n").filter((l) => l.startsWith("ok") && l.includes("dmg:"));
+    assert.ok(dmgOk.length >= 3, r.stdout);
+  });
+  withHarness({ knobs: { FAKE_SPCTL_FAIL: "1" } }, (h) => {
+    const dmg = join(h.tmp, "sMind.dmg");
+    writeFileSync(dmg, "dmg-bytes");
+    const { r } = runVerify(h, ["--dmg", dmg]);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok(failLines(r).some((l) => l.includes("dmg:")), r.stdout);
+  });
+});
+
+test("verify-needs-no-secrets", () => {
+  withHarness({ withSecrets: false }, (h) => {
+    const { r } = runVerify(h);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes("FAIL"), r.stdout);
+  });
+});
+
+// --- static checks (AC2, entitlements files) -----------------------------------------------------------
+
+test("scripts-never-enable-xtrace", () => {
+  const files = readdirSync(SCRIPTS_DIR).filter((f) => f.endsWith(".sh"));
+  assert.ok(files.length >= 3, files.join(", "));
+  for (const f of files) {
+    const code = readFileSync(join(SCRIPTS_DIR, f), "utf8")
+      .split("\n")
+      .map((l) => l.replace(/#.*/, ""))
+      .join("\n");
+    assert.ok(!code.includes("set -x"), `${f} enables xtrace`);
+    assert.ok(!code.includes("bash -x"), `${f} runs bash -x`);
+    assert.ok(!code.includes("xtrace"), `${f} mentions xtrace outside a comment`);
+  }
+});
+
+test("entitlements-files-are-valid-plists", () => {
+  const files = readdirSync(ENTITLEMENTS_DIR).filter((f) => f.endsWith(".entitlements"));
+  assert.equal(files.length, 2, files.join(", "));
+  for (const f of files) {
+    const text = readFileSync(join(ENTITLEMENTS_DIR, f), "utf8");
+    assert.ok(text.trimStart().startsWith("<?xml"), `${f} is not XML`);
+    assert.ok(text.includes("<plist"), `${f} has no plist`);
+    assert.ok(text.includes("<dict/>"), `${f} is not an empty dict`);
+    const lint = spawnSync("plutil", ["-lint", join(ENTITLEMENTS_DIR, f)], { encoding: "utf8" });
+    if (!(lint.error && lint.error.code === "ENOENT")) {
+      assert.equal(lint.status, 0, `${f}: ${lint.stdout}${lint.stderr}`);
+    }
+  }
 });
