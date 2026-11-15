@@ -936,11 +936,11 @@ export function TerminalPane({
       )}
       {/* A slim row of its own: a floating button would sit on top of the output's first line at 390. */}
       {send.canSend && (
-        <div className="flex justify-end border-b bg-terminal-bg px-2 py-0.5" data-testid="terminal-send-row">
+        <div className="flex justify-end border-b bg-panel px-2 py-0.5" data-testid="terminal-send-row">
           <SendToAgentMenu testId="terminal-send-menu" getEntries={getSendEntries} />
         </div>
       )}
-      <div data-testid="terminal-inset" className="relative min-h-0 flex-1 bg-terminal-bg p-2">
+      <div data-testid="terminal-inset" className="relative min-h-0 flex-1 bg-panel p-2">
         {/* Inset lives on this wrapper, never on the fit host: FitAddon ignores the host's own padding. */}
         <div ref={containerRef} data-testid="terminal-container" className="terminal-xterm-shell h-full" />
         {findOpen && (
