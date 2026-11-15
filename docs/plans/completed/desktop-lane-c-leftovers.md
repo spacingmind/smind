@@ -1,6 +1,6 @@
 # Desktop Lane C leftovers (inbox grant control, terminal surface, palette subtitle, settings type scale, chat density)
 
-Status: active (2026-11-15). Five small PRs on `wave/desktop`, one at a time: C, A, B, D, E. Only C was HIGH-RISK (permission UI); C is dropped (below).
+Status: completed (2026-11-15). Five small PRs on `wave/desktop`, one at a time: C, A, B, D, E. Only C was HIGH-RISK (permission UI); C is dropped (below).
 
 ## PR C: the inbox permission card offers "Always allow in this project" (DROPPED)
 
