@@ -138,6 +138,7 @@ type Session struct {
 	navMu    sync.Mutex                  // one navigation at a time: a load waiter is per tab
 
 	lifecycle chan Event   // attach, detach, dialog, download: handled in order
+	authNoted atomic.Bool  // the one notice about a refused credentials request
 	requests  chan Event   // Fetch.requestPaused: handled by a bounded pool
 	qbytes    atomic.Int64 // bytes waiting in the two queues
 	maxQueued int64        // the budget for qbytes (a field so a test can lower it)
@@ -625,10 +626,14 @@ func (s *Session) onAuthRequired(ev Event) {
 	resp := map[string]any{"response": "CancelAuth"}
 	if p.AuthChallenge.Source == "Proxy" && s.proxyOrigin(p.AuthChallenge.Origin) {
 		resp = map[string]any{"response": "ProvideCredentials", "username": proxyAuthUser, "password": s.proxy.Secret()}
-	} else {
-		s.note("blocked", "a request asked for credentials and was refused")
+	} else if s.authNoted.CompareAndSwap(false, true) {
+		// Once per session: a page can raise challenges without limit, and must
+		// not push the agent's real refusal notices out.
+		s.note("blocked", "a page asked for credentials and was refused (further requests are cancelled without a notice)")
 	}
-	_ = s.cl.Call(ctx, ev.SessionID, "Fetch.continueWithAuth", map[string]any{"requestId": p.RequestID, "authChallengeResponse": resp}, nil)
+	if err := s.cl.Call(ctx, ev.SessionID, "Fetch.continueWithAuth", map[string]any{"requestId": p.RequestID, "authChallengeResponse": resp}, nil); err != nil {
+		s.note("blocked", "a proxy or site challenge could not be answered")
+	}
 }
 
 // proxyOrigin reports whether a challenge origin names this session's proxy.

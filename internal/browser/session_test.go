@@ -1032,3 +1032,23 @@ func TestSessionSecretNotInLaunchOptions(t *testing.T) {
 		t.Fatal("the proxy secret reached the launch options")
 	}
 }
+
+// A page can raise any number of credential challenges: one notice, and the agent's other notices survive.
+func TestSessionRefusedChallengeNoticeIsOnce(t *testing.T) {
+	s, l := startTestSession(t, nil)
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	for i := 0; i < 30; i++ {
+		authRequired(f, "S1", fmt.Sprintf("a%d", i), "Server", "http://localhost:3000")
+	}
+	f.waitCall("Fetch.continueWithAuth", 30)
+	n := 0
+	for _, no := range s.DrainNotices() {
+		if strings.Contains(no.Detail, "asked for credentials") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("one notice for 30 refused challenges, got %d", n)
+	}
+}

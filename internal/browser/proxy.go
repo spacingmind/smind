@@ -70,8 +70,10 @@ type ProxyConfig struct {
 	// 128-bit one is generated (the normal case; a test may pin it). The proxy
 	// serves nobody who does not present it.
 	Secret string
-	// AuthFailuresPerMinute cuts a client that fails authentication more often
-	// than this (default 20): the connection is closed without an answer.
+	// AuthFailuresPerMinute cuts a client that presents a WRONG credential more
+	// often than this (default 20): the connection is closed without an answer. A
+	// request with no credential at all is never cut (the browser's first request
+	// has none) and always gets the 407.
 	AuthFailuresPerMinute int
 }
 
@@ -221,7 +223,7 @@ func (p *Proxy) authFailure() (cut bool) {
 	}
 	p.authMu.Unlock()
 	if first && p.cfg.OnRefuse != nil {
-		p.cfg.OnRefuse("proxy", "requests without the proxy credential were refused and cut")
+		p.cfg.OnRefuse("proxy", "requests with a wrong proxy credential were refused and cut")
 	}
 	return cut
 }
@@ -344,7 +346,11 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	// process without the session secret sends reaches the policy, the resolver
 	// or a dial.
 	if !p.authorized(r) {
-		if p.authFailure() {
+		// Only a request that PRESENTS a wrong credential counts toward the cut.
+		// The browser's first request on a fresh connection carries none (it has
+		// no credential cached yet) and must always get the 407 that makes it ask,
+		// so another local process can never lock the browser out by spamming.
+		if r.Header.Get("Proxy-Authorization") != "" && p.authFailure() {
 			if hj, ok := w.(http.Hijacker); ok {
 				if c, _, err := hj.Hijack(); err == nil {
 					_ = c.Close()

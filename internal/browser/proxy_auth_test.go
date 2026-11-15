@@ -114,9 +114,9 @@ func TestProxyAuth_UpstreamNeverSeesTheSecret(t *testing.T) {
 	}
 }
 
-func TestProxyAuth_FloodIsCutAndNotedOnce(t *testing.T) {
+func TestProxyAuth_WrongCredentialFloodIsCutAndNotedOnce(t *testing.T) {
 	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.AuthFailuresPerMinute = 3 })
-	req := "GET http://localhost/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+	req := "GET http://localhost/ HTTP/1.1\r\nHost: x\r\n" + basic("smind:wrong") + "Connection: close\r\n\r\n"
 	var answered, cut int
 	for i := 0; i < 10; i++ {
 		if resp := rawNoAuth(t, rig, req); strings.HasPrefix(resp, "HTTP/1.1 407") {
@@ -130,20 +130,39 @@ func TestProxyAuth_FloodIsCutAndNotedOnce(t *testing.T) {
 	if answered != 3 || cut != 7 {
 		t.Fatalf("3 answered with 407 then cut: answered=%d cut=%d", answered, cut)
 	}
-	// A client with the credential is still served (the cut is per failure count, not a lockout of the real browser).
-	if resp := rig.raw(t, "GET http://localhost/ HTTP/1.1\r\nHost: x\r\n\r\n"); strings.HasPrefix(resp, "HTTP/1.1 407") {
-		t.Fatalf("the authenticated browser must not be locked out: %s", resp)
+	if resp := rig.raw(t, "GET http://localhost/ HTTP/1.1\r\nHost: x\r\n\r\n"); strings.HasPrefix(resp, "HTTP/1.1 407") || resp == "" {
+		t.Fatalf("the authenticated browser must not be cut: %q", resp)
 	}
 	rig.mu.Lock()
 	defer rig.mu.Unlock()
 	n := 0
 	for _, r := range rig.refuse {
-		if strings.Contains(r, "proxy credential") {
+		if strings.Contains(r, "wrong proxy credential") {
 			n++
 		}
 	}
 	if n != 1 {
 		t.Fatalf("the flood is noted once: %d in %v", n, rig.refuse)
+	}
+}
+
+// Another local process spamming wrong credentials must not stop the browser's
+// FIRST request (which carries no credential) from getting the 407 that makes it
+// ask for the credential: that request is never cut.
+func TestProxyAuth_SpamCannotLockTheBrowserOut(t *testing.T) {
+	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.AuthFailuresPerMinute = 2 })
+	bad := "GET http://localhost/ HTTP/1.1\r\nHost: x\r\n" + basic("smind:wrong") + "Connection: close\r\n\r\n"
+	for i := 0; i < 12; i++ {
+		_ = rawNoAuth(t, rig, bad)
+	}
+	first := "GET http://localhost/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n" // no credential yet
+	if resp := rawNoAuth(t, rig, first); !strings.HasPrefix(resp, "HTTP/1.1 407") || !strings.Contains(resp, "Proxy-Authenticate") {
+		t.Fatalf("a credential-less first request must still get the challenge after a spam: %q", resp)
+	}
+	for i := 0; i < 30; i++ { // and a credential-less flood is never cut either
+		if resp := rawNoAuth(t, rig, first); !strings.HasPrefix(resp, "HTTP/1.1 407") {
+			t.Fatalf("request %d without a credential was cut: %q", i, resp)
+		}
 	}
 }
 
