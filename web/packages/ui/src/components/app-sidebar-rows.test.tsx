@@ -447,6 +447,44 @@ describe("task row, single line (S4)", () => {
   });
 });
 
+describe("task row width priority (PR2: the title keeps its width)", () => {
+  async function mountWithGit() {
+    const { client, ...utils } = await mountSidebar([makeTask(1, "Dirty")]);
+    client.nth("task.gitList", 0).resolve({
+      items: [gitItem(1, "b1", 2, 7, 3, { origin: { published: false }, commits: { sinceFork: 1 } })],
+    });
+    await flush();
+    return { client, ...utils };
+  }
+
+  it("row-secondary-parts-hide-below-18rem: the diffstat and the glyph wrapper drop at 18rem, not 14rem", async () => {
+    await mountWithGit();
+
+    const diffstat = within(taskItem(1)).getByTestId("sidebar-task-diffstat");
+    expect(diffstat.className).toContain("@max-[18rem]/sb:hidden");
+    expect(diffstat.className).not.toContain("@max-[14rem]/sb:hidden");
+
+    const glyphWrapper = within(taskItem(1)).getByTestId("sidebar-git-glyph").parentElement!;
+    expect(glyphWrapper.className).toContain("@max-[18rem]/sb:hidden");
+    expect(glyphWrapper.className).not.toContain("@max-[14rem]/sb:hidden");
+  });
+
+  it("row-title-keeps-priority-over-the-diffstat: the title may shrink, only the diffstat can be dropped", async () => {
+    await mountWithGit();
+
+    const item = taskItem(1);
+    // The title's wrapper is the one flexible element on the line.
+    const titleWrapper = within(item).getByTestId("task-title").parentElement!;
+    expect(titleWrapper.className).toContain("min-w-0");
+    expect(titleWrapper.className).toContain("flex-1");
+
+    const diffstat = within(item).getByTestId("sidebar-task-diffstat");
+    expect(diffstat.className).toContain("shrink-0");
+    expect(diffstat.className).not.toContain("flex-1");
+    expect(diffstat.className).not.toContain("min-w-0");
+  });
+});
+
 describe("container rows (S5)", () => {
 
   it("workspace and space actions are not mounted at idle and mount on hover", async () => {

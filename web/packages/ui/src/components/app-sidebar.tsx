@@ -2492,7 +2492,7 @@ const TaskRow = memo(function TaskRow({
                   {git?.diff && git.diff.files > 0 && (
                     <span
                       data-testid="sidebar-task-diffstat"
-                      className="shrink-0 text-ui-xs tabular-nums @max-[14rem]/sb:hidden"
+                      className="shrink-0 text-ui-xs tabular-nums @max-[18rem]/sb:hidden"
                       title={`${git.diff.files} changed, +${git.diff.insertions} -${git.diff.deletions}`}
                     >
                       <span className={git.diff.insertions === 0 ? "text-muted-foreground" : "text-success"}>+{git.diff.insertions}</span>{" "}
@@ -2500,7 +2500,7 @@ const TaskRow = memo(function TaskRow({
                     </span>
                   )}
                   {git && (
-                    <span className="@max-[14rem]/sb:hidden">
+                    <span className="@max-[18rem]/sb:hidden">
                       <SidebarGitGlyph git={git} />
                     </span>
                   )}
