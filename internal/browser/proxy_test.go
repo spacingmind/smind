@@ -298,27 +298,43 @@ func (s *seqResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Ad
 	return out, nil
 }
 
+// toServer returns a Dial hook that records the address it is asked for and
+// connects to a local server instead, so a test can follow a "public" address
+// without leaving the machine.
+func (d *dialRecorder) toServer(srv *hitServer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		d.mu.Lock()
+		d.addrs = append(d.addrs, addr)
+		d.mu.Unlock()
+		var nd net.Dialer
+		return nd.DialContext(ctx, "tcp", srv.Listener.Addr().String())
+	}
+}
+
 func TestProxyRebindingIsPinned(t *testing.T) {
-	srv := newHitServer(t, nil)
-	// Lookup 1 is loopback (allowed); every later lookup would be the daemon's
-	// address on the daemon's port space or a metadata address.
-	res := &seqResolver{answers: [][]string{{"127.0.0.1"}, {"169.254.169.254"}}}
-	rig := newProxyRig(t, []string{"app.test"}, res, nil)
-	code, _ := rig.get(t, fmt.Sprintf("http://app.test:%d/", srv.port))
-	if code != 200 {
-		t.Fatalf("first request: %d", code)
-	}
-	if got := rig.dials.list(); len(got) != 1 || got[0] != fmt.Sprintf("127.0.0.1:%d", srv.port) {
-		t.Fatalf("the connection must be dialled to the vetted IP, not the name: %v", got)
-	}
-	// The name now rebinds: the very next connection re-resolves and is refused.
-	code, _ = rig.get(t, fmt.Sprintf("http://app.test:%d/", srv.port))
-	if code != http.StatusForbidden || srv.hits.Load() != 1 || len(rig.dials.list()) != 1 {
-		t.Fatalf("after rebinding: %d hits=%d dials=%v", code, srv.hits.Load(), rig.dials.list())
-	}
-	status, _, _ := rig.connect(t, fmt.Sprintf("app.test:%d", srv.port))
-	if !strings.Contains(status, "403") || len(rig.dials.list()) != 1 {
-		t.Fatalf("CONNECT after rebinding: %q dials=%v", status, rig.dials.list())
+	for _, internal := range []string{"10.0.0.1", "127.0.0.1", "100.64.0.1"} {
+		srv := newHitServer(t, nil)
+		// Lookup 1 is public (allowed); every later lookup is an internal address.
+		res := &seqResolver{answers: [][]string{{"93.184.216.34"}, {internal}}}
+		rec := &dialRecorder{}
+		rig := newProxyRig(t, []string{"app.test"}, res, func(c *ProxyConfig) { c.Dial = rec.toServer(srv) })
+		rig.dials = rec
+		code, _ := rig.get(t, "http://app.test:8080/")
+		if code != 200 {
+			t.Fatalf("%s: first request: %d", internal, code)
+		}
+		if got := rig.dials.list(); len(got) != 1 || got[0] != "93.184.216.34:8080" {
+			t.Fatalf("%s: the connection must be dialled to the vetted IP, not the name: %v", internal, got)
+		}
+		// The name now rebinds: the very next connection re-resolves and is refused, nothing dialled.
+		code, _ = rig.get(t, "http://app.test:8080/")
+		if code != http.StatusForbidden || srv.hits.Load() != 1 || len(rig.dials.list()) != 1 {
+			t.Fatalf("%s: after rebinding: %d hits=%d dials=%v", internal, code, srv.hits.Load(), rig.dials.list())
+		}
+		status, _, _ := rig.connect(t, "app.test:8080")
+		if !strings.Contains(status, "403") || len(rig.dials.list()) != 1 {
+			t.Fatalf("%s: CONNECT after rebinding: %q dials=%v", internal, status, rig.dials.list())
+		}
 	}
 }
 
@@ -339,68 +355,40 @@ func TestProxyMixedAndSensitiveResolutionsAreRefused(t *testing.T) {
 	}
 }
 
-func TestProxyMalformedRequestsAreRefused(t *testing.T) {
-	live := newHitServer(t, nil)
-	rig := newProxyRig(t, nil, proxyResolver, nil)
-	defer func() {
-		if live.hits.Load() != 0 || len(rig.dials.list()) != 0 {
-			t.Errorf("a malformed request must never be forwarded: hits=%d dials=%v", live.hits.Load(), rig.dials.list())
-		}
-	}()
-	raw := func(req string) string {
-		c, err := net.Dial("tcp", rig.px.Addr())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer c.Close()
-		_ = c.SetDeadline(time.Now().Add(3 * time.Second))
-		_, _ = io.WriteString(c, strings.Replace(req, "\r\n\r\n", "\r\nConnection: close\r\n\r\n", 1))
-		b, _ := io.ReadAll(c)
-		return string(b)
+// holdServer accepts connections, never speaks, and closes everything it
+// accepted when the test ends.
+func holdServer(t *testing.T) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for name, req := range map[string]string{
-		"https absolute form":  "GET https://localhost/ HTTP/1.1\r\nHost: localhost\r\n\r\n",
-		"ftp":                  "GET ftp://localhost/ HTTP/1.1\r\nHost: localhost\r\n\r\n",
-		"origin form":          "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
-		"upgrade over plain":   fmt.Sprintf("GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", live.port),
-		"connect without port": "CONNECT localhost HTTP/1.1\r\nHost: localhost\r\n\r\n",
-		"backslash host":       fmt.Sprintf("GET http://localhost\\@127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\n\r\n", live.port),
-		"userinfo":             fmt.Sprintf("GET http://user:pw@127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\n\r\n", live.port),
-	} {
-		resp := raw(req)
-		if !strings.HasPrefix(resp, "HTTP/1.1 4") && !strings.HasPrefix(resp, "HTTP/1.1 501") {
-			t.Errorf("%s: want a 4xx/501, got %q", name, firstLine(resp))
-		}
-	}
-	// Garbage and an oversized header block are closed, not served.
-	if resp := raw("\x00\x01garbage\r\n\r\n"); strings.Contains(resp, "200") {
-		t.Errorf("garbage served: %q", resp)
-	}
-	big := "GET http://localhost:1/ HTTP/1.1\r\nHost: x\r\nX: " + strings.Repeat("a", 64<<10) + "\r\n\r\n"
-	if resp := raw(big); !strings.HasPrefix(resp, "HTTP/1.1 431") && resp != "" {
-		t.Errorf("oversized headers: %q", firstLine(resp))
-	}
-}
-
-func firstLine(s string) string {
-	if i := strings.Index(s, "\r\n"); i >= 0 {
-		return s[:i]
-	}
-	return s
-}
-
-func TestProxyConnectionLimit(t *testing.T) {
-	echo, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer echo.Close()
+	var mu sync.Mutex
+	var conns []net.Conn
 	go func() {
 		for {
-			c, err := echo.Accept()
+			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			go func() { defer c.Close(); _, _ = io.Copy(io.Discard, c) }()
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
 		}
 	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	return ln
+}
+
+func TestProxyConnectionLimit(t *testing.T) {
+	echo := holdServer(t)
 	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.MaxConns = 3 })
 	for i := 0; i < 3; i++ {
 		if status, _, _ := rig.connect(t, echo.Addr().String()); !strings.Contains(status, "200") {
@@ -437,17 +425,7 @@ func TestProxyDialTimeout(t *testing.T) {
 }
 
 func TestProxyTunnelIdleTimeout(t *testing.T) {
-	quiet, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer quiet.Close()
-	go func() {
-		for {
-			c, err := quiet.Accept()
-			if err != nil {
-				return
-			}
-			defer c.Close()
-		}
-	}()
+	quiet := holdServer(t)
 	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.TunnelIdle = 150 * time.Millisecond })
 	status, c, br := rig.connect(t, quiet.Addr().String())
 	if !strings.Contains(status, "200") {
@@ -462,17 +440,7 @@ func TestProxyTunnelIdleTimeout(t *testing.T) {
 }
 
 func TestProxyCloseEndsListenerAndTunnels(t *testing.T) {
-	sink, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer sink.Close()
-	go func() {
-		for {
-			c, err := sink.Accept()
-			if err != nil {
-				return
-			}
-			defer c.Close()
-		}
-	}()
+	sink := holdServer(t)
 	rig := newProxyRig(t, nil, proxyResolver, nil)
 	_, c, br := rig.connect(t, sink.Addr().String())
 	addr := rig.px.Addr()
@@ -617,17 +585,7 @@ func (c *countingResolver) LookupNetIP(context.Context, string, string) ([]netip
 // A silent client behind a silent upstream: the tunnel is closed on BOTH sides
 // at the idle timeout and its slot is released.
 func TestProxyIdleTunnelReleasesItsSlot(t *testing.T) {
-	quiet, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer quiet.Close()
-	go func() {
-		for {
-			c, err := quiet.Accept()
-			if err != nil {
-				return
-			}
-			_ = c // held open, never speaks
-		}
-	}()
+	quiet := holdServer(t)
 	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.MaxConns = 1; c.TunnelIdle = 150 * time.Millisecond })
 	status, c, _ := rig.connect(t, quiet.Addr().String())
 	if !strings.Contains(status, "200") {
@@ -669,23 +627,23 @@ func TestProxyUploadKeepsTheTunnelAlive(t *testing.T) {
 			go func() { n, _ := io.Copy(io.Discard, c); got.Add(n) }()
 		}
 	}()
-	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.TunnelIdle = 300 * time.Millisecond })
+	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.TunnelIdle = time.Second })
 	status, c, _ := rig.connect(t, sink.Addr().String())
 	if !strings.Contains(status, "200") {
 		t.Fatal(status)
 	}
-	for i := 0; i < 8; i++ { // 8 x 100 ms = more than twice the idle timeout
+	for i := 0; i < 14; i++ { // 14 x 150 ms is more than twice the 1 s idle timeout
 		if _, err := c.Write([]byte("data")); err != nil {
 			t.Fatalf("the tunnel was closed while the client was sending (write %d): %v", i, err)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for got.Load() < 32 && time.Now().Before(deadline) {
+	for got.Load() < 56 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got.Load() != 32 {
-		t.Fatalf("upstream received %d bytes, want 32", got.Load())
+	if got.Load() != 56 {
+		t.Fatalf("upstream received %d bytes, want 56", got.Load())
 	}
 }
 

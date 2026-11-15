@@ -76,7 +76,7 @@ func buildArgs(profileDir string, o LaunchOpts) ([]string, error) {
 		"--user-data-dir=" + profileDir,
 		"--host-resolver-rules=" + strings.Join(rules, ", "),
 		"--js-flags=--max-old-space-size=" + strconv.Itoa(heap),
-		"--proxy-server=http://" + o.ProxyAddr,
+		"--proxy-server=http://" + net.JoinHostPort(host, port), // brackets for IPv6
 		// Exactly "<-loopback>": it removes the browser's implicit bypass of
 		// localhost, 127.0.0.1 and [::1] and adds nothing. An empty list leaves
 		// loopback direct (measured), which would skip the policy.

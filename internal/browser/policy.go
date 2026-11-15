@@ -452,8 +452,41 @@ func (p Policy) CheckResolved(d Decision, addrs []netip.Addr) Decision {
 		if sensitiveAddr(a) {
 			return refuse("host %q resolves to a link-local, metadata, multicast or unspecified address", d.Host)
 		}
+		// An allowlisted NAME may only reach the public internet: its DNS is
+		// not ours, and a name that resolves to loopback, a private or CGNAT
+		// range is how an attacker-influenced record reaches the daemon's
+		// machine or the LAN. The person who really wants an intranet host adds
+		// its IP literal (an exact entry), never a name.
+		if internalAddr(a) {
+			return refuse("host %q resolves to a loopback, private or internal address; allow its IP address instead", d.Host)
+		}
 	}
 	return d
+}
+
+var internalPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"), // CGNAT
+	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking
+	netip.MustParsePrefix("240.0.0.0/4"),   // reserved
+}
+
+// internalAddr reports loopback, private (RFC 1918, unique-local), CGNAT and
+// other non-public ranges, including an IPv6 form that embeds one.
+func internalAddr(a netip.Addr) bool {
+	a = a.Unmap()
+	if a.IsLoopback() || a.IsPrivate() || a.IsUnspecified() {
+		return true
+	}
+	for _, pre := range internalPrefixes {
+		if pre.Contains(a) {
+			return true
+		}
+	}
+	if e, ok := embeddedV4(a); ok {
+		return internalAddr(e)
+	}
+	return false
 }
 
 // Check runs CheckURL and, for a named host, CheckResolved with the resolver.

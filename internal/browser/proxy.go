@@ -47,6 +47,14 @@ type ProxyConfig struct {
 	MaxConns    int
 	DialTimeout time.Duration
 	TunnelIdle  time.Duration
+	// HalfCloseGrace is how long a tunnel may stay open after one side closed its
+	// end (default 10 s): a browser that is done closes fully, and an upstream that
+	// never answers the close must not hold the slot for the whole idle timeout.
+	HalfCloseGrace time.Duration
+	// ClientIdle closes a browser-to-proxy keep-alive connection that has sent
+	// no request for this long (default 5 s), so idle pooled sockets cannot hold
+	// the connection cap.
+	ClientIdle time.Duration
 	// IOTimeout bounds any single read or write on the forward path (default 60 s).
 	IOTimeout time.Duration
 	// Dial opens the connection to a vetted IP:port (a test hook).
@@ -85,6 +93,12 @@ func StartProxy(cfg ProxyConfig) (*Proxy, error) {
 	if cfg.TunnelIdle <= 0 {
 		cfg.TunnelIdle = DefaultProxyTunnelIdle
 	}
+	if cfg.HalfCloseGrace <= 0 {
+		cfg.HalfCloseGrace = 10 * time.Second
+	}
+	if cfg.ClientIdle <= 0 {
+		cfg.ClientIdle = 5 * time.Second
+	}
 	if cfg.IOTimeout <= 0 {
 		cfg.IOTimeout = proxyIOTimeout
 	}
@@ -122,7 +136,7 @@ func StartProxy(cfg ProxyConfig) (*Proxy, error) {
 		Handler:           http.HandlerFunc(p.handle),
 		ReadHeaderTimeout: proxyHeaderTimeout,
 		MaxHeaderBytes:    proxyMaxHeaderBytes,
-		IdleTimeout:       30 * time.Second,
+		IdleTimeout:       cfg.ClientIdle,
 		ErrorLog:          log.New(io.Discard, "", 0),
 	}
 	go func() { _ = p.srv.Serve(p.ln) }()
@@ -226,6 +240,14 @@ func (p *Proxy) dialAny(ctx context.Context, addrs []string) (net.Conn, error) {
 	return nil, last
 }
 
+// reportFailure tells the agent about a connection that was allowed but failed
+// (nothing listens, a timeout), once per target through OnRefuse's dedup.
+func (p *Proxy) reportFailure(target, reason string) {
+	if p.cfg.OnRefuse != nil {
+		p.cfg.OnRefuse(redact(target), reason)
+	}
+}
+
 func (p *Proxy) refuseWith(w http.ResponseWriter, code int, target, reason string) {
 	reason = cleanText(reason, 200)
 	if p.cfg.OnRefuse != nil {
@@ -242,9 +264,29 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	p.handleForward(w, r)
 }
 
+// validConnectTarget accepts only a bare host and a numeric port in 1..65535:
+// no path, query, fragment, userinfo, backslash or whitespace, and no empty
+// port (SplitHostPort alone accepts "127.0.0.1/x:9" and "host:").
+func validConnectTarget(t string) bool {
+	if t == "" || strings.ContainsAny(t, "/?#@\\ \t\r\n") {
+		return false
+	}
+	host, port, err := net.SplitHostPort(t)
+	if err != nil || host == "" || port == "" {
+		return false
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535
+}
+
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	target := r.RequestURI
-	if _, _, err := net.SplitHostPort(target); err != nil {
+	if !validConnectTarget(target) {
 		http.Error(w, "CONNECT needs host:port", http.StatusBadRequest)
 		return
 	}
@@ -259,6 +301,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			code = http.StatusGatewayTimeout
 		}
+		p.reportFailure(target, "could not connect to that address")
 		http.Error(w, "could not connect", code)
 		return
 	}
@@ -301,12 +344,14 @@ func (p *Proxy) pipe(client net.Conn, early []byte, up net.Conn) {
 	touch := func() { last.Store(time.Now().UnixNano()) }
 	expired := func() bool { return time.Since(time.Unix(0, last.Load())) >= idle }
 
-	var wg sync.WaitGroup
+	var wg, wgDone sync.WaitGroup
 	wg.Add(2)
+	wgDone.Add(2)
 	var once sync.Once
 	closeBoth := func() { once.Do(func() { _ = client.Close(); _ = up.Close() }) }
 	cp := func(dst, src net.Conn, pre []byte) {
 		defer wg.Done()
+		defer wgDone.Done()
 		if len(pre) > 0 {
 			if _, err := dst.Write(pre); err != nil {
 				closeBoth()
@@ -335,6 +380,9 @@ func (p *Proxy) pipe(client net.Conn, early []byte, up net.Conn) {
 			if err == io.EOF {
 				if cw, ok := dst.(interface{ CloseWrite() error }); ok {
 					_ = cw.CloseWrite()
+					// The other direction may still finish, but not forever.
+					grace := time.AfterFunc(p.cfg.HalfCloseGrace, closeBoth)
+					go func() { wgDone.Wait(); grace.Stop() }()
 					return
 				}
 			}
@@ -410,7 +458,11 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 		host += ":" + strconv.Itoa(d.Port)
 	}
 	rc := http.NewResponseController(w)
-	out, err := http.NewRequestWithContext(context.WithValue(r.Context(), pinKey{}, addrs), r.Method, "http://"+host+r.URL.RequestURI(), &idleBody{r: r.Body, rc: rc, idle: p.cfg.IOTimeout})
+	var body io.ReadCloser = http.NoBody // an empty body stays empty: no chunked encoding, no deadline set
+	if r.Body != nil && r.Body != http.NoBody {
+		body = &idleBody{r: r.Body, rc: rc, idle: p.cfg.IOTimeout}
+	}
+	out, err := http.NewRequestWithContext(context.WithValue(r.Context(), pinKey{}, addrs), r.Method, "http://"+host+r.URL.RequestURI(), body)
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -425,6 +477,7 @@ func (p *Proxy) handleForward(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			code = http.StatusGatewayTimeout
 		}
+		p.reportFailure(raw, "could not connect to that address")
 		http.Error(w, "upstream error", code)
 		return
 	}
@@ -469,10 +522,20 @@ type idleBody struct {
 
 func (b *idleBody) Read(p []byte) (int, error) {
 	_ = b.rc.SetReadDeadline(time.Now().Add(b.idle))
-	return b.r.Read(p)
+	n, err := b.r.Read(p)
+	if err != nil {
+		// The body is over (or broken): the deadline must not outlive it, or the
+		// server's background read would time out and cancel the request context
+		// of a long response (SSE, long poll, a big download).
+		_ = b.rc.SetReadDeadline(time.Time{})
+	}
+	return n, err
 }
 
-func (b *idleBody) Close() error { return b.r.Close() }
+func (b *idleBody) Close() error {
+	_ = b.rc.SetReadDeadline(time.Time{})
+	return b.r.Close()
+}
 
 // limitListener caps concurrent connections: one over the limit is told 503
 // and closed.
