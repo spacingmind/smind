@@ -344,6 +344,28 @@ describe("editors (desktop-native-feel D4)", () => {
   });
 });
 
+describe("window_open_task (multi-window Part 1)", () => {
+  it("in a non-desktop build windowOpenTask rejects", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "");
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.windowOpenTask(5)).rejects.toThrow(/unavailable/i);
+  });
+
+  it("calls window_open_task with the task id only, resolves with the label, and turns a plain-string refusal into an Error", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const invoke = vi.fn(async () => "task-3");
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.windowOpenTask(42)).resolves.toBe("task-3");
+    expect(invoke).toHaveBeenCalledWith("window_open_task", { taskId: 42 });
+
+    vi.resetModules();
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.reject("too many task windows open (8); close one first")) }));
+    const again = await import("@/lib/platform");
+    await expect(again.desktop.windowOpenTask(9)).rejects.toThrow("too many task windows open (8)");
+  });
+});
+
 describe("native context menu (desktop-native-feel DT2 a)", () => {
   it("in a non-desktop build contextMenuShow rejects and the action subscription is a harmless no-op", async () => {
     vi.stubEnv("VITE_SMIND_DESKTOP", "");
