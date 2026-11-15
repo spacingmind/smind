@@ -1147,6 +1147,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		baseline = h.UsageTotals
 	}
 
+	modeChecked := false // written only by the forwarder goroutine below
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
 	crash.GoFatal("taskrunner.forwardClaudeMessages", func() {
@@ -1169,6 +1170,15 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 					handle.Provider, handle.SessionID = provider, w.SessionID
 					handle.Fork = nil // the fork (if any) happened: this is the child's own session now
 					r.sessionStore.Set(chatID, handle)
+				}
+				// E1.2: the CLI starts in Manual without a word when it
+				// cannot honour the requested mode; its init frame says
+				// what it really chose. One note per run, nothing stored.
+				if !modeChecked {
+					modeChecked = true
+					if note := claudeModeMismatchNote(mode, sys.Raw); note != "" {
+						r.sendSessionNote(ctx, events, note)
+					}
 				}
 				// The CLI tolerates a failing MCP server and runs on
 				// without it; surface that, naming servers only.

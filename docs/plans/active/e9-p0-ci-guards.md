@@ -65,6 +65,7 @@ Status 2026-11-15: **spec only.** Code starts from a fresh `origin/develop` afte
 ## Progress
 
 - 2026-11-15: spec written, develop checked. No code.
+- 2026-11-15: PR 1 (sleep guard). Two refinements to A1/A6 found while measuring with a real AST scan: (1) the guard counts only `time.Sleep` calls that are not inside a `for`/`range` loop of their function, because a sleep inside a loop is the step of a poll-with-deadline (a condition wait), not a fixed guess; the loop-less count on `develop` was 20 (wsapi 19, server 1), not 70; (2) "convert the five worst files" became "bring the five worst files to zero baseline": `account_usage_test.go` (3 gated with started/released channels), `inbox_test.go`, `push_tap_test.go`, `plugin_session_test.go` and `plugin_hooks_test.go` (negative windows now carry `sleep-ok` with a reason). `plugin_call_test.go`'s "wait until the cap is held" sleep could not be converted (a probe call takes one of the four slots and starves the scenario; there is no in-flight count to poll), so it stays in the baseline. Baseline now: 9 files, 1 each (was 20 sleeps in 14 files).
 
 ## Validation
 

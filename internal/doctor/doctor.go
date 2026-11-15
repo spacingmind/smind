@@ -38,6 +38,8 @@ type Env struct {
 	ReadFile      func(string) ([]byte, error)
 	ReadDir       func(string) ([]os.DirEntry, error)
 	RetentionDays int
+	// ManagedSettings are the machine-wide Claude Code settings files (managed policy), read-only candidates for ClaudeAutoMode.
+	ManagedSettings []string
 }
 
 // ProviderRetention inspects every Claude Code and Codex config root that
