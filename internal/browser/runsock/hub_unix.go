@@ -4,15 +4,20 @@ package runsock
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 const (
@@ -27,7 +32,7 @@ type HubConfig struct {
 	// symlink, owned by UID, mode 0700) or the Hub is refused.
 	Dir string
 	// FallbackDir is used when a socket path under Dir would be too long
-	// (default "/tmp/smind-<uid>").
+	// (default "/tmp/smind-<uid>-<hash of Dir>").
 	FallbackDir string
 	// UID is the daemon's user id: the only user a peer may be.
 	UID int
@@ -62,9 +67,23 @@ type runSock struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 
-	mu    sync.Mutex
-	conns map[net.Conn]struct{}
-	done  chan struct{}
+	mu      sync.Mutex
+	conns   map[net.Conn]struct{}
+	done    chan struct{}
+	refused atomic.Int64 // refused connections (counted; the first is logged)
+}
+
+// Refusals reports how many connections to the run's socket were refused (0 for
+// an unknown run). The first refusal of a run is logged with its fixed reason;
+// the rest are only counted, so a flood cannot fill a log.
+func (h *Hub) Refusals(runID string) int64 {
+	h.mu.Lock()
+	rs := h.runs[runID]
+	h.mu.Unlock()
+	if rs == nil {
+		return 0
+	}
+	return rs.refused.Load()
 }
 
 // NewHub prepares the socket directory (refusing a wrong owner, mode or type),
@@ -77,7 +96,10 @@ func NewHub(cfg HubConfig) (*Hub, error) {
 		cfg.Lstat = os.Lstat
 	}
 	if cfg.FallbackDir == "" {
-		cfg.FallbackDir = filepath.Join("/tmp", fmt.Sprintf("smind-%d", cfg.UID))
+		// Keyed on this daemon's own socket directory: two daemons of one user
+		// (a dogfood daemon next to the real one) must not sweep each other's sockets.
+		sum := sha256.Sum256([]byte(cfg.Dir))
+		cfg.FallbackDir = filepath.Join("/tmp", fmt.Sprintf("smind-%d-%s", cfg.UID, hex.EncodeToString(sum[:4])))
 	}
 	if err := prepareDir(cfg.Dir, cfg.UID, cfg.Lstat); err != nil {
 		return nil, err
@@ -167,6 +189,7 @@ func (h *Hub) Open(runID string, rootPID int, handle Handler) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("runsock: the run's root process cannot be read: %w", err)
 	}
+	h.Close(runID) // a second Open replaces the first; the old one is closed OUTSIDE the lock (its connections may be mid-call)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
@@ -176,9 +199,8 @@ func (h *Hub) Open(runID string, rootPID int, handle Handler) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if old := h.runs[runID]; old != nil {
-		old.close()
-		delete(h.runs, runID)
+	if h.runs[runID] != nil {
+		return "", errors.New("runsock: this run's socket is being opened elsewhere")
 	}
 	_ = os.Remove(path) // our own leftover (the directory is ours alone)
 	ln, err := net.Listen("unix", path)
@@ -240,6 +262,9 @@ func (rs *runSock) close() {
 }
 
 func (h *Hub) refuse(rs *runSock, conn net.Conn, reason string) {
+	if rs.refused.Add(1) == 1 {
+		log.Printf("browser: refused a connection to run %s's socket (%s); further refusals are counted, not logged", rs.id, reason)
+	}
 	if h.cfg.OnRefuse != nil {
 		h.cfg.OnRefuse(rs.id, reason)
 	}
@@ -253,7 +278,17 @@ func (h *Hub) accept(rs *runSock) {
 	for {
 		conn, err := rs.ln.Accept()
 		if err != nil {
-			return
+			if rs.ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				return
+			}
+			// A transient failure (descriptors exhausted): back off and keep
+			// listening, or the socket file would stay behind dead.
+			select {
+			case <-rs.ctx.Done():
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+			continue
 		}
 		rs.mu.Lock()
 		if len(rs.conns) >= maxConnsPerRun || rs.ctx.Err() != nil {

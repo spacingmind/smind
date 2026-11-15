@@ -11,7 +11,7 @@ func treeOf(root int, rootStart uint64) ProcTree {
 		case root:
 			return ProcInfo{PPID: 1, Start: rootStart}, nil
 		case 600: // a child of the root
-			return ProcInfo{PPID: root, Start: 6}, nil
+			return ProcInfo{PPID: root, Start: 60}, nil
 		case 700: // a stranger
 			return ProcInfo{PPID: 1, Start: 7}, nil
 		}

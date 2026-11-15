@@ -30,9 +30,12 @@ func TestInTreeTable(t *testing.T) {
 		300: {PPID: 2, Start: 1300},
 		// a loop
 		400: {PPID: 401, Start: 1400},
-		401: {PPID: 400, Start: 1401},
+		401: {PPID: 400, Start: 1400},
 		// the root of the deep chains below
 		500: {PPID: 1, Start: 1500},
+		// a child whose recorded parent pid now belongs to a YOUNGER process (a recycled pid)
+		700: {PPID: 701, Start: 1700},
+		701: {PPID: 100, Start: 1900},
 		// a process whose parent is missing from the tree
 		600: {PPID: 601, Start: 1600},
 	}
@@ -59,6 +62,7 @@ func TestInTreeTable(t *testing.T) {
 		{"chain too deep (65 hops)", 565, 500, 1500, false, true},
 		{"chain at max depth (64 hops)", 564, 500, 1500, true, false},
 		{"vanished mid-walk", 600, 100, 1100, false, true},
+		{"the parent started after its child (recycled pid), even though its chain reaches the root", 700, 100, 1100, false, false},
 		{"root start mismatch", 101, 100, 9999, false, false},
 		{"peer non-positive", 0, 100, 1100, false, false},
 		{"peer negative", -5, 100, 1100, false, false},

@@ -242,7 +242,7 @@ func TestServerCheckTable(t *testing.T) {
 				if peerErr != nil {
 					return ProcInfo{}, peerErr
 				}
-				return ProcInfo{PPID: peerParent, Start: 5}, nil
+				return ProcInfo{PPID: peerParent, Start: 80}, nil
 			}
 			return ProcInfo{}, ErrNoProcess
 		})
@@ -633,5 +633,114 @@ func TestDeadlines(t *testing.T) {
 	}
 	if time.Since(start) > 2*time.Second {
 		t.Fatal("the idle deadline applies")
+	}
+}
+
+// A handler that panics gets an error reply, the connection survives, and the
+// daemon does not crash.
+func TestHandlerPanicIsAnErrorReply(t *testing.T) {
+	var refused refusals
+	h := fakeHub(t, peerOK(), SystemProcTree(), &refused)
+	path, err := h.Open("run-A", os.Getpid(), func(_ context.Context, req Request) (any, error) {
+		if req.Tool == "panic" {
+			panic("boom")
+		}
+		return "ok", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	br := bufio.NewReader(conn)
+	fmt.Fprintf(conn, "{\"tool\":\"panic\"}\n")
+	if line, err := br.ReadString('\n'); err != nil || strings.TrimSpace(line) != `{"error":"internal error"}` {
+		t.Fatalf("a panic is an error reply: %q %v", line, err)
+	}
+	fmt.Fprintf(conn, "{\"tool\":\"fine\"}\n")
+	if line, err := br.ReadString('\n'); err != nil || !strings.Contains(line, `"ok"`) {
+		t.Fatalf("the connection survives: %q %v", line, err)
+	}
+}
+
+// Refusals are counted per run (and the first is logged), so they are not silent.
+func TestRefusalsAreCounted(t *testing.T) {
+	var refused refusals
+	h := fakeHub(t, FuncPeerReader(func(net.Conn) (PeerCred, error) { return PeerCred{}, errors.New("no creds") }), SystemProcTree(), &refused)
+	path, err := h.Open("run-A", os.Getpid(), echo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		roundTrip(t, path, "{\"tool\":\"x\"}\n")
+	}
+	if got := h.Refusals("run-A"); got != 5 {
+		t.Fatalf("refusals counted: %d", got)
+	}
+	if h.Refusals("unknown") != 0 {
+		t.Fatal("an unknown run has none")
+	}
+}
+
+// The default fallback directory is keyed on this daemon's own socket directory,
+// so two daemons of one user never share (or sweep) a fallback.
+func TestDefaultFallbackDirIsPerDaemon(t *testing.T) {
+	mk := func() *Hub {
+		h, err := NewHub(HubConfig{Dir: filepath.Join(shortTemp(t), "sock"), UID: os.Getuid(), Peers: SystemPeerReader(), Tree: SystemProcTree()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	a, b := mk(), mk()
+	if a.cfg.FallbackDir == b.cfg.FallbackDir || !strings.HasPrefix(a.cfg.FallbackDir, "/tmp/smind-") {
+		t.Fatalf("fallback dirs: %q %q", a.cfg.FallbackDir, b.cfg.FallbackDir)
+	}
+}
+
+// Replacing a run's socket closes the old one without holding up other runs.
+func TestReopenReplacesWithoutBlockingOtherRuns(t *testing.T) {
+	var refused refusals
+	h := fakeHub(t, peerOK(), SystemProcTree(), &refused)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	pathA, err := h.Open("run-A", os.Getpid(), func(ctx context.Context, _ Request) (any, error) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return "late", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { // not roundTrip: it may Fatal, and this is not the test goroutine
+		if c, err := net.Dial("unix", pathA); err == nil {
+			defer c.Close()
+			_, _ = io.WriteString(c, "{\"tool\":\"slow\"}\n")
+			_ = c.SetReadDeadline(time.Now().Add(4 * time.Second))
+			_, _ = bufio.NewReader(c).ReadString('\n')
+		}
+	}()
+	<-started
+	done := make(chan error, 1)
+	go func() { _, err := h.Open("run-A", os.Getpid(), echo); done <- err }()
+	// Another run is not held up while run A's replacement waits for its busy handler.
+	if _, err := h.Open("run-B", os.Getpid(), echo); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("the replacement must finish once the old handler's context is cancelled")
 	}
 }

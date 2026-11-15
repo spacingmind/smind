@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"time"
 )
 
@@ -67,9 +68,6 @@ func decodeRequest(line []byte) (Request, error) {
 	return req, nil
 }
 
-// serveConn answers requests on conn until it closes, a request is bad, the
-// connection idles out, or ctx ends. It never reads before the caller has
-// checked the peer.
 // deadlineConn is what serveConn needs: a net.Conn on unix sockets, an emulation
 // on Windows pipes.
 type deadlineConn interface {
@@ -78,6 +76,9 @@ type deadlineConn interface {
 	SetWriteDeadline(time.Time) error
 }
 
+// serveConn answers requests on conn until it closes, a request is bad, the
+// connection idles out, or ctx ends. It never reads before the caller has
+// checked the peer.
 func serveConn(ctx context.Context, conn deadlineConn, handle Handler) {
 	defer conn.Close()
 	br := bufio.NewReaderSize(conn, MaxRequestBytes+2)
@@ -95,7 +96,7 @@ func serveConn(ctx context.Context, conn deadlineConn, handle Handler) {
 			return
 		}
 		out := Response{}
-		if res, herr := handle(ctx, req); herr != nil {
+		if res, herr := safeHandle(ctx, handle, req); herr != nil {
 			out.Error = herr.Error()
 		} else {
 			out.Result = res
@@ -129,4 +130,16 @@ func ReadResponse(r io.Reader) (Response, error) {
 		return Response{}, err
 	}
 	return Response{Result: out.Result, Error: out.Error}, nil
+}
+
+// safeHandle runs the handler and turns a panic into an error reply: a crafted
+// request must never take the daemon down.
+func safeHandle(ctx context.Context, handle Handler, req Request) (res any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("browser: a socket handler panicked: %v", r)
+			res, err = nil, errors.New("internal error")
+		}
+	}()
+	return handle(ctx, req)
 }

@@ -63,12 +63,20 @@ func InTree(tree ProcTree, peer, root int, rootStart uint64) (bool, error) {
 			// peer is not under root.
 			return false, nil
 		}
+		child := info
 		cur = info.PPID
 		info, err = tree.Info(cur)
 		if err != nil {
 			// A process vanished mid-walk; its recorded ancestry is now
 			// unverifiable.
 			return false, err
+		}
+		if info.Start > child.Start {
+			// A parent cannot have started after its child: the pid was reused
+			// by a younger process after the real parent exited (Windows never
+			// reparents), so this chain does not lead to the process that
+			// actually created the child.
+			return false, nil
 		}
 	}
 	return false, errors.New("runsock: process tree too deep")

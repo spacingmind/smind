@@ -27,7 +27,11 @@ import (
 // It deviates from the plan's Job Object membership check: the run's job handle is
 // not plumbed to this package, so the tree is the same parent-chain walk as on unix
 // (ProcTree over a toolhelp snapshot); a process whose parent exited is not found
-// and is refused (fail closed).
+// and is refused (fail closed), and a parent that started AFTER its child (a
+// recycled pid) is refused. Stated residual: a same-user process can create
+// another instance of the pipe's name (FILE_FLAG_FIRST_PIPE_INSTANCE protects only
+// the first) and the child does not authenticate the server end: the same-user
+// rebinding of the unix socket path, inherent to the same-uid model.
 
 const maxPipeInstances = 8
 
@@ -159,12 +163,20 @@ func (pr *pipeRun) close() {
 	if c, err := dialPipe(pr.name, 500*time.Millisecond); err == nil {
 		_ = c.Close()
 	}
+	// Close the connections OUTSIDE the lock: a close can wait on a pending read.
 	pr.mu.Lock()
+	conns := make([]*pipeConn, 0, len(pr.conns))
 	for c := range pr.conns {
-		_ = c.Close()
+		conns = append(conns, c)
 	}
 	pr.mu.Unlock()
-	<-pr.done
+	for _, c := range conns {
+		_ = c.Close()
+	}
+	select {
+	case <-pr.done:
+	case <-time.After(3 * time.Second): // never hang the daemon on a stuck pipe
+	}
 }
 
 func (h *Hub) accept(pr *pipeRun, inst windows.Handle) {
@@ -264,8 +276,11 @@ func (c *pipeConn) Write(b []byte) (int, error) {
 
 func (c *pipeConn) Close() error {
 	c.once.Do(func() {
+		// Cancel any read another goroutine is blocked in (CancelIoEx reaches
+		// synchronous I/O of any thread), so the disconnect and close cannot wait
+		// on it. No FlushFileBuffers: it waits for the peer to read.
+		_ = windows.CancelIoEx(c.h, nil)
 		if c.server {
-			_ = windows.FlushFileBuffers(c.h)
 			_ = windows.DisconnectNamedPipe(c.h)
 		}
 		_ = windows.CloseHandle(c.h)
