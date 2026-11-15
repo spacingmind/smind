@@ -41,12 +41,16 @@ html[data-desktop-os="macos"] [data-settings-sidebar] {
 /*
  * DT-UI B (native pass). Everything below is desktop-build only, like the rest of this file.
  *
- * Inactive window (macOS convention): while the window is not the key window the sidebar selection loses its
- * strength (it reads as the hover tint) and the sidebar's icons dim. `html[data-window-active]` is kept by
+ * Inactive window (macOS convention): while the window is not the key window the sidebar selection loses half
+ * its strength and the sidebar's icons dim. `html[data-window-active]` is kept by
  * lib/window-active.ts.
  */
 html[data-desktop-os][data-window-active="false"] {
-  --selected: var(--hover);
+  --selected: rgba(13, 13, 13, 0.025);
+}
+
+html[data-desktop-os][data-window-active="false"].dark {
+  --selected: rgba(255, 255, 255, 0.05);
 }
 
 html[data-desktop-os][data-window-active="false"] [data-slot="sidebar-inner"] svg {

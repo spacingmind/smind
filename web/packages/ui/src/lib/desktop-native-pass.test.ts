@@ -62,7 +62,9 @@ describe("desktop native pass CSS", () => {
   });
 
   it("the inactive-window rule dims the selection and the sidebar icons, keyed on the window-active flag", () => {
-    expect(css).toMatch(/html\[data-desktop-os\]\[data-window-active="false"\]\s*\{\s*--selected: var\(--hover\);/);
+    // Half the strength of the active selection in each theme (light 0.05 -> 0.025, dark 0.1 -> 0.05).
+    expect(css).toMatch(/html\[data-desktop-os\]\[data-window-active="false"\]\s*\{\s*--selected: rgba\(13, 13, 13, 0\.025\);/);
+    expect(css).toMatch(/\[data-window-active="false"\]\.dark\s*\{\s*--selected: rgba\(255, 255, 255, 0\.05\);/);
     expect(css).toMatch(/\[data-window-active="false"\] \[data-slot="sidebar-inner"\] svg\s*\{\s*opacity: 0\.6;/);
   });
 });
