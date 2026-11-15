@@ -111,10 +111,14 @@ and the PRs say so.
 ## Progress
 
 - [x] spec
-- [ ] A: click-through to the exact card
+- [x] A: click-through to the exact card (PR A)
 - [ ] B: questions and failed runs, dedupe, badge
 - [ ] C: focus rules, coalescing, quiet while typing
 
 ## Validation
 
-(filled in per PR)
+PR A: `route.rs` (card route, fallback kind, percent-encoding), `protocol.rs` and `attention.rs` (chat id), `notify.rs` (`route_for`), `route.test.ts`,
+`card-focus.test.tsx`; daemon-client `cargo test` (305 + doc/integration tests), src-tauri `cargo test --lib` (177), web 471 files / 5305 tests, `tsc -b`,
+`vite build`. Mutations on committed code, all killed: stale-request check removed; card focus made to respect a focused text field; overlong card id
+accepted; fallback kind back to `task`; `route_for` never using the card route. Frames: 16 (light and dark, 1280 and 390) all opened.
+Not verified: a real OS notification and a real click (no real-window run); Windows and Linux click handlers (the same `navigate` path, compiled for macOS only).
