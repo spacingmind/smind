@@ -436,6 +436,24 @@ test("sign-every-codesign-has-runtime-and-timestamp", () => {
   });
 });
 
+// Frameworks (none today) are signed first, with the runtime and a timestamp, and without the
+// app's entitlements; this branch has no other test, the fixture app has none.
+test("sign-frameworks-are-signed-with-runtime-and-timestamp-before-the-app", () => {
+  withHarness({}, (h) => {
+    const app = makeApp(h.tmp);
+    mkdirSync(join(app, "Contents", "Frameworks", "Thing.framework"), { recursive: true });
+    const r = h.run(SIGN, ["--app", app, "--out", join(h.tmp, "out")]);
+    assert.equal(r.status, 0, r.stderr);
+    const calls = signCalls(h);
+    const fwAt = calls.findIndex((f) => f[f.length - 1].endsWith("Thing.framework"));
+    const appAt = calls.findIndex((f) => f[f.length - 1].endsWith("sMind.app"));
+    assert.ok(fwAt !== -1 && appAt !== -1 && fwAt < appAt, calls.map(flat).join("\n"));
+    const fw = calls[fwAt];
+    assert.ok(fw.includes("--timestamp") && fw.includes("--options") && fw.includes("runtime"), flat(fw));
+    assert.ok(!fw.includes("--entitlements"), flat(fw));
+  });
+});
+
 test("sign-never-deep", () => {
   withHarness({}, (h) => {
     const { r } = runSign(h, ["--dmg", join(h.tmp, "out", "sMind.dmg"), "--updater-tarball", join(h.tmp, "out", "sMind.app.tar.gz")]);
@@ -586,7 +604,17 @@ test("verify-fails-without-developer-id", () => assertFailsWith(null, { FAKE_NO_
 test("verify-fails-without-runtime", () => assertFailsWith(null, { FAKE_NO_RUNTIME: "1" }, "runtime"));
 test("verify-fails-nested-without-runtime", () => assertFailsWith(null, { FAKE_NO_RUNTIME_NESTED: "1" }, "smind"));
 test("verify-fails-team-mismatch", () => assertFailsWith(null, { FAKE_TEAM_MISMATCH: "1" }, "team"));
-test("verify-fails-entitlements-mismatch", () => assertFailsWith(null, { FAKE_ENT_MISMATCH: "1" }, "entitlements"));
+// both the app's and the sidecar's entitlements are compared: each must produce its own FAIL line
+// (a check dropped for one of them must not hide behind the other)
+test("verify-fails-entitlements-mismatch", () => {
+  withHarness({ knobs: { FAKE_ENT_MISMATCH: "1" } }, (h) => {
+    const { r } = runVerify(h);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    const lines = failLines(r).map((l) => l.toLowerCase());
+    assert.ok(lines.some((l) => l.includes("app: entitlements")), r.stdout);
+    assert.ok(lines.some((l) => l.includes("sidecar smind: entitlements")), r.stdout);
+  });
+});
 test("verify-fails-gatekeeper-rejection", () => assertFailsWith(null, { FAKE_SPCTL_FAIL: "1" }, "gatekeeper"));
 test("verify-fails-without-staple", () => assertFailsWith(null, { FAKE_STAPLE_FAIL: "1" }, "stapled"));
 
