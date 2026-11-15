@@ -35,18 +35,38 @@ export function providerInitial(label: string): string {
 }
 
 /**
+ * The tile text of every provider: its initial, and the first two letters ("Gi", "Go") for the providers whose initials collide, so
+ * "GitHub Copilot" and "Goose" are still told apart at a glance. Empty for a label with no letter or digit.
+ */
+export function providerInitials(providers: { id: string; label: string }[]): Map<string, string> {
+  const one = new Map(providers.map((p) => [p.id, providerInitial(p.label)] as const));
+  const counts = new Map<string, number>();
+  for (const v of one.values()) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const out = new Map<string, string>();
+  for (const p of providers) {
+    const initial = one.get(p.id) ?? "";
+    if (initial === "" || (counts.get(initial) ?? 0) < 2) {
+      out.set(p.id, initial);
+      continue;
+    }
+    const chars = [...p.label.matchAll(/[\p{L}\p{N}]/gu)].map((m) => m[0]);
+    out.set(p.id, chars.length > 1 ? chars[0]!.toUpperCase() + chars[1]!.toLowerCase() : initial);
+  }
+  return out;
+}
+
+/**
  * A provider with a brand mark keeps it; one without (GLM, Kimi, a custom ACP agent: they all share one generic glyph) gets its
  * initial in a small tile, so the rail's tabs can be told apart without hovering. The accessible name is on the tab, not here.
  */
-function RailGlyph({ provider, label }: { provider: string; label: string }) {
+function RailGlyph({ provider, initial }: { provider: string; initial: string }) {
   const branded = useHasBrandMark(provider);
-  const initial = providerInitial(label);
   if (branded || initial === "") return <ProviderIcon provider={provider} />;
   return (
     <span
       aria-hidden
       data-testid={`model-rail-initial-${provider}`}
-      className="flex size-4 items-center justify-center rounded bg-foreground-muted/20 text-ui-xs leading-none font-semibold"
+      className="flex h-4 min-w-4 items-center justify-center rounded bg-foreground-muted/20 px-0.5 text-ui-xs leading-none font-semibold"
     >
       {initial}
     </span>
@@ -58,6 +78,7 @@ export const ProviderRail = forwardRef<ProviderRailHandle, ProviderRailProps>(fu
   ref,
 ) {
   const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const initials = providerInitials(providers);
 
   const focusSelected = useCallback(() => {
     buttonRefs.current.get(selectedId)?.focus();
@@ -144,7 +165,7 @@ export const ProviderRail = forwardRef<ProviderRailHandle, ProviderRailProps>(fu
               reason && "opacity-60",
             )}
           >
-            <RailGlyph provider={provider.id} label={provider.label} />
+            <RailGlyph provider={provider.id} initial={initials.get(provider.id) ?? ""} />
             {reason && (
               <StatusDot
                 status="warning"

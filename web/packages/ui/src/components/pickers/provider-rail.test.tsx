@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ProviderRail, providerInitial, type ProviderRailHandle } from "@/components/pickers/provider-rail";
+import { ProviderRail, providerInitial, providerInitials, type ProviderRailHandle } from "@/components/pickers/provider-rail";
 
 const PROVIDERS = [
   { id: "claude-native", label: "Claude" },
@@ -122,5 +122,21 @@ describe("ProviderRail", () => {
     render(<ProviderRail providers={[{ id: "weird", label: "---" }, { id: "glm", label: "GLM" }]} selectedId="glm" onSelect={() => {}} />);
     expect(screen.queryByTestId("model-rail-initial-weird")).not.toBeInTheDocument();
     expect(screen.getByTestId("model-provider-weird").querySelector("svg")).not.toBeNull();
+  });
+
+  it("rail-initials-that-collide-take-two-letters", () => {
+    const m = providerInitials([
+      { id: "glm", label: "GLM" },
+      { id: "kimi", label: "Kimi" },
+      { id: "github", label: "GitHub Copilot" },
+      { id: "goose", label: "Goose" },
+      { id: "cline", label: "Cline" },
+      { id: "cursor", label: "Cursor" },
+      { id: "x", label: "---" },
+    ]);
+    expect(Object.fromEntries(m)).toEqual({ glm: "Gl", kimi: "K", github: "Gi", goose: "Go", cline: "Cl", cursor: "Cu", x: "" });
+    render(<ProviderRail providers={[{ id: "goose", label: "Goose" }, { id: "glm", label: "GLM" }]} selectedId="glm" onSelect={() => {}} />);
+    expect(screen.getByTestId("model-rail-initial-goose")).toHaveTextContent("Go");
+    expect(screen.getByTestId("model-rail-initial-glm")).toHaveTextContent("Gl");
   });
 });
