@@ -100,6 +100,8 @@ where
 {
     move |invoke: Invoke<R>| {
         if let Err(reason) = check(&invoke) {
+            // the command name only: the URL can carry the desktop key
+            log::warn!("ipc refused: {}", invoke.message.command());
             invoke.resolver.reject(reason);
             return true;
         }
@@ -121,20 +123,16 @@ pub fn proxy_capabilities(proxy: &ProxyOrigin) -> [String; 2] {
 }
 
 /// install manages the proxy origin and adds the exact-origin capabilities. It runs in `setup`, once the proxy port is
-/// known and before the first window is built. If a capability cannot be added the failure is logged and the app starts
-/// with no IPC for that window class: nothing sensitive becomes reachable (fails closed).
+/// known and before the first window is built. A capability that cannot be added (an `Err`) is logged and that window
+/// class gets no IPC: nothing sensitive becomes reachable. An unknown permission in a template makes `add_capability`
+/// panic while it holds the authority lock, which poisons it; that is not caught here on purpose (a caught panic would
+/// leave every later IPC call panicking). The templates are pinned against the real ACL by the tests below instead.
 pub fn install<R: Runtime, M: Manager<R>>(app: &M, port: u16) {
     let proxy = ProxyOrigin::new(port);
     app.manage(proxy);
     for json in proxy_capabilities(&proxy) {
-        // `add_capability` resolves the permissions against the compiled ACL and panics (rather than errors) on an unknown
-        // one: catch it, so a bad template costs the window its IPC instead of crashing the app at launch.
-        let added =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.add_capability(json)));
-        match added {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => log::error!("smind desktop: could not add the proxy-origin capability, the window gets no IPC: {err}"),
-            Err(_) => log::error!("smind desktop: the proxy-origin capability did not resolve, the window gets no IPC"),
+        if let Err(err) = app.add_capability(json) {
+            log::error!("could not add the proxy-origin capability, the window gets no IPC: {err}");
         }
     }
 }
@@ -255,11 +253,9 @@ mod tests {
                 "the placeholder is replaced"
             );
             assert!(!json.contains("127.0.0.1:*"), "no wildcard port");
-            let parsed: tauri::utils::acl::capability::CapabilityFile =
+            let _parsed: tauri::utils::acl::capability::CapabilityFile =
                 json.parse().expect("parses as a capability");
-            let _ = parsed;
         }
-        assert_eq!(proxy_capabilities(&proxy()).len(), 2);
     }
 
     // ---- every command passes through the one guard ----
@@ -476,12 +472,6 @@ mod tests {
                 "exempt command {name} needs a reason"
             );
         }
-        // the guarded set is everything else: with EXEMPT empty, that is the whole handler
-        let guarded_count = names
-            .iter()
-            .filter(|n| !EXEMPT.iter().any(|(e, _)| e == n))
-            .count();
-        assert_eq!(guarded_count + EXEMPT.len(), names.len());
     }
 
     // ---- the real ACL: the compiled manifest, the real templates added the way setup adds them ----
@@ -617,6 +607,11 @@ mod tests {
             1,
             "one handler list, so no command can bypass the guard"
         );
+        assert_eq!(
+            lib.matches(".invoke_handler(").count(),
+            1,
+            "a later invoke_handler would replace the guarded one"
+        );
     }
 
     #[test]
@@ -639,15 +634,5 @@ mod tests {
             install < window,
             "the origin and the exact-origin capabilities must exist before any window"
         );
-    }
-
-    #[test]
-    fn exempt_list_needs_a_reason() {
-        for (name, reason) in EXEMPT {
-            assert!(
-                !reason.trim().is_empty(),
-                "exempt command {name} needs a reason"
-            );
-        }
     }
 }

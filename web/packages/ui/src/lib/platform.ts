@@ -191,7 +191,7 @@ export type NativeMenuActionId =
   | "check-updates"
   | "quit";
 
-/** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
+/** The commands `capability-templates/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
 export interface DesktopApi {
   listConnections(): Promise<Connection[]>;
   /** Saved entries whose `kind` this build does not understand (written by a newer app version): id/label/kind only, never `baseUrl`. */
@@ -298,7 +298,7 @@ export interface WindowState {
 /**
  * Window controls for the drawn chrome (desktop-native-feel D1). Backed by
  * Tauri core `core:window:allow-*` permissions scoped to exactly these
- * operations in `capabilities/proxy.json`. `close` raises the window's
+ * operations in `capability-templates/proxy.json`. `close` raises the window's
  * close-request, which the shell turns into hide-to-tray -- it never
  * quits or destroys.
  */

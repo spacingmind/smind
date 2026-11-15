@@ -15,7 +15,7 @@
 //!
 //! The window-control permissions the UI uses (minimize, toggle-maximize,
 //! close, start-dragging, is-maximized, is-fullscreen) are Tauri core
-//! `core:window:allow-*` grants in `capabilities/proxy.json`; `close`
+//! `core:window:allow-*` grants in `capability-templates/proxy.json`; `close`
 //! raises `CloseRequested`, so the drawn close button reuses the
 //! hide-to-tray handler in `lib.rs` rather than quitting.
 

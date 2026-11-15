@@ -68,8 +68,13 @@ The exempt list (`EXEMPT`) is empty. Every plugin permission is absent from both
 - [x] templates and the capability tests
 - [x] drift and table tests, mutations
 - [x] ADR-0013 amendment text
-- [ ] two-axis review (HIGH-RISK), PR
+- [x] two-axis review (HIGH-RISK), findings below
+- [ ] Supervisor second read, merge
 
 ## Validation
 
-Filled in when the PR is ready.
+- Tests: `cargo test` (266 passed, default features and `--features audit-guard`, real macOS TMPDIR), `cargo clippy --all-targets -- -D warnings` for both feature sets, `go test ./internal/hygiene/...`. `ipc_guard` and `capability_` tests: 30.
+- Mutations (each killed by a named test): guard removed from the handler, `verdict` always Ok, fail-open on a missing origin, fail-open on an unreadable URL, a fixed origin instead of call-time, a different port/host/scheme/userinfo accepted, `install` not adding the capabilities, `install` commented out in `run()`, the capability URL widened back to `127.0.0.1:*`, a command registered without a grant or a `build.rs` entry, an exemption without a reason.
+- Review (code-review skill, two fresh-context agents). Standards: no hard violations; fixed the dead `let _ = parsed`, two tautological asserts, the duplicate exempt test, added a refusal log (command name only). Spec/attack: no bypass of the exact-origin rule found (URL normalisation, subframes, ordering, fail-open paths, races tried). Fixed: `catch_unwind` removed (a caught panic left the authority lock poisoned), a pin that `lib.rs` has exactly one `invoke_handler`, ADR overclaim about `core:*` tests corrected, stale comments.
+- Not fixed here, follow-ups: `on_navigation` (main and task windows) hands any non-proxy URL to the OS opener without a scheme check (pre-existing; `open_external` restricts to http/https); the main window lacks `on_new_window` deny; `on_navigation` compares origins without the userinfo rule (self-lockout only).
+- Not verified: a real launch of the app (mock runtime with the real compiled ACL only); Linux/Windows runtime behaviour.
