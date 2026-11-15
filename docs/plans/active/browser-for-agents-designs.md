@@ -1,16 +1,18 @@
 # Browser for agents: design drafts for the proxy and PRs 2-5
 
-Governing ADR: `docs/decisions/0061-browser-for-agents.md` (Accepted). Acceptance criteria for the whole feature: `docs/plans/active/desktop-browser-for-agents.md`. The headless lane spec (PR 1: CDP client, session, URL policy; its known gaps and decisions) is `docs/plans/active/browser-for-agents-headless.md` (lands with PR 1). This file holds only design drafts and the decisions they wait on. **Nothing below is built, and neither the proxy PR nor PR 2 starts until the Human decides D-A.**
+Governing ADR: `docs/decisions/0061-browser-for-agents.md` (Accepted). Acceptance criteria for the whole feature: `docs/plans/active/desktop-browser-for-agents.md`. The headless lane spec (PR 1: CDP client, session, URL policy; its known gaps and decisions) is `docs/plans/active/browser-for-agents-headless.md` (lands with PR 1). This file holds only design drafts and the decisions they wait on. **Nothing below is built yet. The Human decided D-A..D-E on 2026-11-15 (next section); PR 1b (the proxy) is next and no tool PR starts until it lands.**
 
-## Decisions the Human or Steward must make before the code PRs
+## Decisions (all five accepted by the Human, 2026-11-15)
 
-- **D-A WebSocket/WebTransport (the open gap): enforcing proxy, or accept and document the gap.** Recommendation: **proxy**, as PR 1b, before any tool PR. Click/fill make the gap practical to exploit: a page on an allowed loopback host can reach the daemon's own port with `new WebSocket` (measured on a real Chrome in PR 1). Accepting the gap means the ADR's headline guarantee ("never the daemon's own port") is false for page script, and the Settings text must say so.
-- **D-B Where the tool gate lives.** The ADR says MCP calls reach the provider's own permission mode (ADR-0019). Under a provider auto-accept or bypass mode the provider never asks, so a policy rule on `mcp:smind-browser.<tool>` is never consulted. Recommendation: **the daemon gates the call itself** (see PR 4), so "acting tools ask every time" holds in every provider mode. Provider-native prompts then become a second layer, not the only one.
-- **D-C The enable method is only as human-only as the principal.** ADR-0056 is still Proposed: an unidentified local connection counts as the human, so an agent with a shell could call `browser.settings.set` on its own workspace. The floor rule and CLI refusal (the same tables as saved grants) cover the common routes, not all. Recommendation: ship with that stated limit (as saved grants did), because the switch only unlocks a policy-limited browser; if the Human wants it closed, the enable RPC joins whatever ADR-0056 decides (second-channel confirmation) with no rework.
-- **D-D `browser_open` asks every time?** `open` is an acting tool (it navigates) and an agent can do nothing without it, so a prompt per navigation will be heavy. Recommendation: acting tools ask every time **except** that the human may grant `browser_open` for the run on the same card (destinations are already limited by the policy); every other acting tool stays ask-every-time. The lane brief says every acting tool asks every time, so this needs a yes.
-- **D-E Allowlist scope in v1.** Brief: "loopback only as in the ADR". ADR section 5 and decision 9 also allow exact hosts the human adds. Recommendation: implement the ADR (loopback default plus human-added exact hosts, validated by `NormalizeAllowHost`, never link-local or metadata addresses).
+- **D-A WebSocket/WebTransport: PROXY.** An in-process enforcing proxy in the daemon (PR 1b below), all schemes through one policy check, empty bypass list, names resolved by the proxy and the connection pinned to the resolved IP. No tool PR before it lands.
+- **D-B The daemon gates tool calls.** The call is held and approved inside the daemon whatever the provider's permission mode (PR 4); provider-native prompts are a second layer only.
+- **D-C Ship with the stated ADR-0056 limit.** The enable method is as human-only as the principal today (an unidentified local connection counts as the human); the floor rule and CLI refusal cover the common routes. The Settings text and the PR bodies state the limit.
+- **D-D Every acting tool asks; `browser_open` may be granted for the CURRENT RUN on its card.** No grant outlives its run and no "always" scope exists; every other acting tool asks every call.
+- **D-E Allowlist: loopback plus exact hosts the human adds**, validated by `NormalizeAllowHost`; link-local and metadata addresses can never be allowed.
 
-## PR 1b (if D-A is "proxy"): an enforcing forward proxy for the session
+The reasoning behind each is in ADR-0061's amendment of the same date. The 12 decisions of the ADR are unchanged.
+
+## PR 1b: an enforcing forward proxy for the session
 
 Goal: every network connection the browser makes (document, subresource, WebSocket, worker, fetch from script) is vetted by `Policy` at connect time, and the proxy dials the vetted address itself.
 
@@ -20,6 +22,7 @@ Goal: every network connection the browser makes (document, subresource, WebSock
 - **Not an open relay.** Loopback listener only; a request to any target the policy refuses gets `403` with a reason and no dial. A local process using it can reach only what it could reach directly.
 - **Limits.** At most 64 concurrent connections per session, 30 s dial timeout, idle timeout on tunnels, header size cap via `net/http`, hop-by-hop headers stripped, absolute-form with userinfo refused, `Proxy-Authorization` ignored.
 - **Browser flags kept.** Host-resolver MAP rules stay as defence in depth; WebRTC non-proxied UDP stays disabled; QUIC/WebTransport are expected to be off once a proxy is set (to be measured; if not, `--disable-quic`).
+- **Measure first.** Before writing the proxy, measure on the installed Chrome: (1) that `--proxy-bypass-list=<-loopback>` (or an explicit empty list) sends loopback through the proxy, (2) that `ws://` and `wss://` arrive as `CONNECT`, (3) what a WebTransport/QUIC attempt does with a proxy set, (4) whether `*.localhost` and IP literals reach the proxy. The results go in this section.
 - **Tests.** Table test of the proxy decision against the same URL table; real listeners: an allowed target is tunnelled, a denied loopback port gets 403 and zero hits, a rebinding resolver (first answer allowed, second a denied address) is pinned to the first, `CONNECT` to a denied IP literal is refused, oversize or garbage request lines are closed. The PR 1 smoke test **flips**: its `KNOWN GAP` log becomes the assertion "WebSocket and `fetch` to the denied port get zero hits".
 - **Mutations.** the proxy dials the name instead of the vetted IP; policy skipped on `CONNECT`; deny list skipped for IP literals; bypass list not cleared (loopback skips the proxy); proxy port not denied.
 - **Size and risk.** One PR, daemon only, about 600 lines plus tests; high risk (network boundary); two-sub-agent review plus the Steward's own.
@@ -65,4 +68,4 @@ Recommended design (D-B): the daemon gates, independent of the provider's permis
 
 ## Order and risk summary
 
-If D-A is proxy: PR 1b, then PR 2, 3, 4, 5. If accept-gap: PR 2, 3, 4, 5, with the gap stated in the Settings text and the ADR amended. In both cases no agent can receive the browser before PR 3 and PR 4 are both merged. Every PR is high-risk and gets the foreground two-sub-agent review, with a real-Chrome smoke where Chrome is present and everything else against the fake CDP.
+Order: PR 1b, then PR 2, 3, 4, 5. No agent can receive the browser before PR 3 and PR 4 are both merged. Every PR is high-risk and gets the foreground two-sub-agent review, with a real-Chrome smoke where Chrome is present and everything else against the fake CDP.
