@@ -53,22 +53,33 @@ func (reg *Registry) withBrowserPolicy(ctx context.Context, r *run) context.Cont
 	}
 	c := taskrunner.RunContractFrom(ctx)
 	if c.Mcp == nil {
-		c.Mcp = &taskrunner.McpPolicy{}
+		c.Mcp = &taskrunner.McpPolicy{BrowserOnly: true}
 	} else {
 		cp := *c.Mcp
 		c.Mcp = &cp
 	}
-	env := reg.mcpBaseEnv(r)
+	// The capability is NOT minted here: the runner issues it only when the row
+	// is really handed to the agent (not for codex-native, a plugin provider, or
+	// a row the agent skipped), so a token never exists for a row nobody got.
+	runID := r.id
+	c.Mcp.Browser = &taskrunner.BrowserPolicy{
+		Env:    reg.mcpBaseEnv(r),
+		Issue:  func() string { return reg.issueBrowserToken(runID) },
+		Revoke: func() { reg.ForgetBrowserToken(runID) },
+	}
+	return taskrunner.WithRunContract(ctx, c)
+}
+
+// issueBrowserToken mints and stores the capability of one run.
+func (reg *Registry) issueBrowserToken(runID string) string {
 	tok := newBrowserToken()
-	env[BrowserTokenEnv] = tok
 	reg.mu.Lock()
 	if reg.browserTokens == nil {
 		reg.browserTokens = map[string]string{}
 	}
-	reg.browserTokens[r.id] = tok
+	reg.browserTokens[runID] = tok
 	reg.mu.Unlock()
-	c.Mcp.Browser = &taskrunner.BrowserPolicy{Env: env}
-	return taskrunner.WithRunContract(ctx, c)
+	return tok
 }
 
 // BrowserTokenEnv is the environment variable that carries a run's browser

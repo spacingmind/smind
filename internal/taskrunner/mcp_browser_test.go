@@ -88,3 +88,70 @@ func TestWithoutSmindMcp_StripsTheBrowserRowForPluginProviders(t *testing.T) {
 		t.Fatalf("a plugin provider gets neither built-in server: %v", names(got))
 	}
 }
+
+type tokenSpy struct{ issued, revoked int }
+
+func (s *tokenSpy) policy() *McpPolicy {
+	return &McpPolicy{BrowserOnly: true, Browser: &BrowserPolicy{
+		Env:    browserEnv(),
+		Issue:  func() string { s.issued++; return "tok-issued" },
+		Revoke: func() { s.revoked++ },
+	}}
+}
+
+func TestBrowserCapabilityIsIssuedOnlyWhereTheRowIsDelivered(t *testing.T) {
+	t.Parallel()
+	r := policyRunner()
+	// A delivery point: the row carries the freshly issued capability, once.
+	spy := &tokenSpy{}
+	p := spy.policy()
+	got, err := r.mcpRowsFor(policyCtx(p), 1)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("rows = %+v, err %v", got, err)
+	}
+	var env map[string]string
+	_ = json.Unmarshal([]byte(got[0].Env), &env)
+	if spy.issued != 1 || env["SMIND_BROWSER_TOKEN"] != "tok-issued" || env["SMIND_RUN_ID"] != "run-1" {
+		t.Fatalf("issued %d, env %v", spy.issued, env)
+	}
+	if _, leaked := p.Browser.Env["SMIND_BROWSER_TOKEN"]; leaked {
+		t.Fatal("the capability must not be written into the policy's own env map")
+	}
+	// A path that delivers nothing (codex-native, a plugin provider): no row, no capability.
+	spy2 := &tokenSpy{}
+	got, err = r.mcpRowsForDelivery(policyCtx(spy2.policy()), 1, false)
+	if err != nil || len(got) != 0 || spy2.issued != 0 {
+		t.Fatalf("a row nobody will receive must not be built or minted for: rows=%v issued=%d err=%v", names(got), spy2.issued, err)
+	}
+	if browserRowDelivered(true) || !browserRowDelivered(false) {
+		t.Fatal("a plugin provider never gets the browser row, an ordinary provider does")
+	}
+}
+
+func TestBrowserCapabilityIsRevokedWhenTheProviderSkipsTheRow(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		inactive, unresolved []string
+		revoked              int
+	}{
+		"nothing skipped":    {nil, nil, 0},
+		"another server":     {[]string{"other"}, []string{"third (command \"x\" not found in PATH)"}, 0},
+		"browser inactive":   {[]string{"smind-browser"}, nil, 1},
+		"browser unresolved": {nil, []string{"smind-browser (command \"/opt/smind\" not found in PATH)"}, 1},
+		"a lookalike name":   {[]string{"smind-browser-2", "my-smind-browser"}, nil, 0},
+	} {
+		spy := &tokenSpy{}
+		revokeBrowserIfSkipped(policyCtx(spy.policy()), tc.inactive, tc.unresolved)
+		if spy.revoked != tc.revoked {
+			t.Errorf("%s: revoked %d, want %d", name, spy.revoked, tc.revoked)
+		}
+	}
+	spy := &tokenSpy{}
+	revokeBrowserAll(policyCtx(spy.policy()))
+	if spy.revoked != 1 {
+		t.Fatal("revokeBrowserAll must revoke")
+	}
+	// No policy, no panic.
+	revokeBrowserAll(context.Background())
+	revokeBrowserIfSkipped(context.Background(), []string{"smind-browser"})
+}

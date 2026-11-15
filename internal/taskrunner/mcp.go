@@ -284,6 +284,15 @@ func (r *Runner) smindBinaryPath() string {
 // one, every row named "smind" is removed (reserved name) and, for an
 // orchestration seat, the built-in stdio entry is appended.
 func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.McpServer, error) {
+	return r.mcpRowsForDelivery(ctx, workspaceID, true)
+}
+
+// mcpRowsForDelivery is mcpRowsFor for a caller that knows whether the rows
+// will really be handed to the agent. With deliver false the browser row is
+// not built at all (a codex-native run takes no per-run MCP rows, a plugin
+// provider never gets smind's own): no row, and no capability token minted for
+// a row nobody will receive.
+func (r *Runner) mcpRowsForDelivery(ctx context.Context, workspaceID int64, deliver bool) ([]store.McpServer, error) {
 	rows, err := r.mcpServersForWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
@@ -314,11 +323,14 @@ func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.Mcp
 			Args: string(args), Env: string(envJSON), Enabled: true,
 		})
 	}
-	if policy.Browser != nil {
+	if policy.Browser != nil && deliver {
 		args, _ := json.Marshal([]string{"mcp", "browser"})
-		env := policy.Browser.Env
-		if env == nil {
-			env = map[string]string{}
+		env := map[string]string{}
+		for k, v := range policy.Browser.Env {
+			env[k] = v
+		}
+		if policy.Browser.Issue != nil {
+			env["SMIND_BROWSER_TOKEN"] = policy.Browser.Issue()
 		}
 		envJSON, err := json.Marshal(env)
 		if err != nil {
@@ -451,4 +463,29 @@ func claudeFailedMcpServers(raw json.RawMessage) []string {
 	}
 	sort.Strings(failed)
 	return failed
+}
+
+// browserRowDelivered says whether the browser row can reach the agent of a
+// provider: a plugin provider never gets it.
+func browserRowDelivered(pluginProvider bool) bool { return !pluginProvider }
+
+// revokeBrowserAll drops the run's browser capability (the provider took none
+// of the rows).
+func revokeBrowserAll(ctx context.Context) {
+	if p := RunContractFrom(ctx).Mcp; p != nil && p.Browser != nil && p.Browser.Revoke != nil {
+		p.Browser.Revoke()
+	}
+}
+
+// revokeBrowserIfSkipped drops it when the provider skipped the browser row
+// (names are the servers it left inactive or unresolved).
+func revokeBrowserIfSkipped(ctx context.Context, names ...[]string) {
+	for _, list := range names {
+		for _, n := range list {
+			if n == browserMcpName || strings.HasPrefix(n, browserMcpName+" ") {
+				revokeBrowserAll(ctx)
+				return
+			}
+		}
+	}
 }

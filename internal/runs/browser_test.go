@@ -68,10 +68,16 @@ func TestBrowserPolicy_RowOnlyWhenAllGatesHold(t *testing.T) {
 	if env["SMIND_RUN_ID"] != "run-9" || env["SMIND_HOME"] != "/daemon/home" {
 		t.Fatalf("env: %v", env)
 	}
+	if !c.Mcp.BrowserOnly {
+		t.Fatal("a policy created for the browser alone says so")
+	}
+	if _, ok := env[BrowserTokenEnv]; ok || reg.CheckBrowserToken("run-9", "x") {
+		t.Fatal("no capability exists until the runner issues it at a delivery point")
+	}
+	tok := c.Mcp.Browser.Issue()
 	if c.Mcp.Orchestration {
 		t.Fatal("the browser grant must not switch orchestration on")
 	}
-	tok := env[BrowserTokenEnv]
 	if len(tok) != 32 {
 		t.Fatalf("a 128-bit capability is minted into the row's env: %q", tok)
 	}
@@ -86,8 +92,13 @@ func TestBrowserPolicy_RowOnlyWhenAllGatesHold(t *testing.T) {
 	// A second run gets its own capability, and a finished run's is gone.
 	r2 := &run{id: "run-10", taskID: task.ID, chatID: 3}
 	c2 := taskrunner.RunContractFrom(reg.withBrowserPolicy(context.Background(), r2))
-	if c2.Mcp.Browser.Env[BrowserTokenEnv] == tok || reg.CheckBrowserToken("run-9", c2.Mcp.Browser.Env[BrowserTokenEnv]) {
+	tok2 := c2.Mcp.Browser.Issue()
+	if tok2 == tok || reg.CheckBrowserToken("run-9", tok2) || !reg.CheckBrowserToken("run-10", tok2) {
 		t.Fatal("capabilities are per run")
+	}
+	c2.Mcp.Browser.Revoke() // a provider that skipped the row
+	if reg.CheckBrowserToken("run-10", tok2) {
+		t.Fatal("a revoked capability must stop verifying")
 	}
 	reg.ForgetBrowserToken("run-9")
 	if reg.CheckBrowserToken("run-9", tok) {

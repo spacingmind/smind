@@ -34,13 +34,22 @@ type McpPolicy struct {
 	// (`smind mcp browser`, ADR-0061). Nothing sets it while the browser gate
 	// is dark.
 	Browser *BrowserPolicy
+	// BrowserOnly marks a policy created only to carry the browser grant (the
+	// run had no other MCP policy): it says nothing about orchestration.
+	BrowserOnly bool
 }
 
 // BrowserPolicy grants a run the browser tools' MCP entry.
 type BrowserPolicy struct {
 	// Env is the entry's environment (run identity, SMIND_HOME). Policy, not
-	// content: never log.
+	// content: never log. It does not carry the capability token: that is
+	// issued by Issue only when the row is actually handed to the agent.
 	Env map[string]string
+	// Issue mints the run's capability token (nil: none) and Revoke drops it.
+	// The runner calls Issue only at a delivery point (a row that really goes
+	// to the provider) and Revoke if the provider then did not take the row.
+	Issue  func() string
+	Revoke func()
 }
 
 type runContractKey struct{}
