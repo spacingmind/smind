@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { describeHistorySource } from "@/lib/history-source";
+import { describeHistorySource, runWasTrimmed } from "@/lib/history-source";
 import { Icons } from "@/lib/icons";
 import type { RunEntry } from "@/hooks/use-run-timeline";
 
@@ -20,7 +20,12 @@ export function HistorySourceNote({ run, onLoad }: { run: RunEntry; onLoad?: (ru
   const [confirming, setConfirming] = useState(false);
   const history = run.history;
   if (!history || history.source === "full") return null;
-  const note = describeHistorySource(history);
+  const trim = runWasTrimmed(run.items);
+  // rebuild_not_requested only says nobody asked for the full history: when
+  // the rows show nothing was dropped, there is nothing to explain -- and no
+  // "Load full history" to offer (it stays reachable from the run's menu).
+  if (history.source === "skeleton" && history.reason === "rebuild_not_requested" && trim === null) return null;
+  const note = describeHistorySource(history, trim);
   const loading = history.loading === true;
   return (
     <div

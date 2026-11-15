@@ -183,7 +183,8 @@ describe("RunTimeline", () => {
     render(
       <ul>
         <RunTimeline
-          run={run([{ type: "chunk", text: "the trimmed answer" }], { history: { source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true } })}
+          // The trailing chunk carries the daemon's omission marker (U+2026), so this skeleton really is trimmed.
+          run={run([{ type: "chunk", text: "the trimmed answer" }, { type: "chunk", text: "\n…[8192 bytes omitted]…\n" }], { history: { source: "skeleton", reason: "rebuild_not_requested", canLoadFull: true } })}
           onLoadFullHistory={vi.fn()}
         />
       </ul>,
