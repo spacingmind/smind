@@ -81,7 +81,9 @@ The composer is shared with the mobile web target through the same chips in some
 
 - [x] spec (this file)
 - [x] decisions answered by the Human (2026-11-15: all 11 as recommended)
-- [ ] E-a, E-b, E-c
+- [ ] E-a (in progress 2026-11-15: GLM peers 649 = status line under the composer + footer, 650 = chips/type/width; tool-row collapse (AC2) is a third step after both land; branch `smind/dtui-e-a-chat-surface`)
+- [ ] E-b
+- [ ] E-c
 
 ## Validation
 
