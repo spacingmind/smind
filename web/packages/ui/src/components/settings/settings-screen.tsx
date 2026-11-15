@@ -51,6 +51,27 @@ const WIDE_SECTION_IDS = new Set([
 /** Sections whose tables need even more room than max-w-3xl gives at 1280 -- their page gets max-w-5xl. */
 const EXTRA_WIDE_SECTION_IDS = new Set(["shortcuts"]);
 
+/** Below this width of the settings screen itself (not the window: the app sidebar sits beside it) the section nav shrinks to an icon rail, so the content column keeps room to read. 256 (nav) + 464 (content). */
+export const COMPACT_NAV_BELOW_PX = 720;
+
+/** A callback ref for the screen's root plus whether its width is under `threshold`. Without ResizeObserver (jsdom) it stays false. */
+function useCompactBelow(threshold: number): [(el: HTMLElement | null) => void, boolean] {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const apply = (width: number) => setCompact(width > 0 && width < threshold);
+    apply(el.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[entries.length - 1]?.contentRect.width;
+      if (width !== undefined) apply(width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el, threshold]);
+  return [setEl, compact];
+}
+
 /**
  * The scrolling grouped section nav, shared by both layouts: the desktop
  * sidebar (`variant="sidebar"`, compact h-8 rows with an active highlight)
@@ -67,9 +88,10 @@ function SettingsNav({
   sections: ReturnType<typeof listSettingsSections>;
   activeId: string | null;
   onSelect: (id: string) => void;
-  variant: "sidebar" | "list";
+  variant: "sidebar" | "list" | "rail";
 }) {
   const list = variant === "list";
+  const rail = variant === "rail";
   return (
     <ul className="flex flex-col gap-0.5">
       {sections.map((section, index) => {
@@ -84,7 +106,8 @@ function SettingsNav({
               // read as one of its members; a divider ends the group.
               <li role="separator" className={cn("my-1 h-px bg-border", list ? "mx-3" : "mx-2")} />
             )}
-            {firstOfGroup && (
+            {firstOfGroup && rail && <li role="separator" className="mx-2 my-1 h-px bg-border" />}
+            {firstOfGroup && !rail && (
               <li
                 aria-hidden="true"
                 className={cn("text-ui-sm font-medium text-foreground-subtle", list ? "px-3 pt-3 pb-1" : "px-2.5 pt-4 pb-1")}
@@ -96,17 +119,20 @@ function SettingsNav({
               <button
                 type="button"
                 aria-current={section.id === activeId}
+                aria-label={rail ? section.label : undefined}
+                title={rail ? section.label : undefined}
                 data-testid={`settings-nav-${section.id}`}
                 onClick={() => onSelect(section.id)}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-lg text-left text-ui-base text-foreground hover:bg-hover",
-                  list ? "h-11 px-3" : "h-8 px-2.5",
+                  rail ? "relative size-8 justify-center px-0" : list ? "h-11 px-3" : "h-8 px-2.5",
                   !list && section.id === activeId && "bg-selected font-medium",
                 )}
               >
                 {section.icon}
-                {section.label}
-                {(section.badge || list) && (
+                {!rail && section.label}
+                {rail && section.badge && <span className="absolute top-0.5 right-0.5">{section.badge}</span>}
+                {!rail && (section.badge || list) && (
                   <span className="ml-auto flex items-center gap-2">
                     {section.badge}
                     {list && <Icons.chevronRight className="size-4 text-foreground-subtle" />}
@@ -171,6 +197,7 @@ export function SettingsScreen({
     () => sections.find((s) => s.id === initialSectionId)?.id ?? sections[0]?.id ?? null,
   );
   const narrow = useIsMobile();
+  const [screenRef, compact] = useCompactBelow(COMPACT_NAV_BELOW_PX);
   // Initial "detail" (not derived from `narrow`, which is false on the
   // very first render -- useIsMobile only settles inside an effect), so a
   // deep link lands on its section's detail once the narrow layout kicks
@@ -303,11 +330,24 @@ export function SettingsScreen({
       Back to app
     </Button>
   );
+  const backToAppRail = (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label="Back to app"
+      title="Back to app"
+      className="size-8 rounded-lg bg-muted/60 hover:bg-muted"
+      data-testid="settings-back-button"
+      onClick={onNavigateBack}
+    >
+      <Icons.back className="size-3.5" />
+    </Button>
+  );
 
   return (
-    <div className="flex h-full min-h-0 w-full" data-testid="settings-screen">
+    <div ref={screenRef} className="flex h-full min-h-0 w-full" data-testid="settings-screen" data-nav={compact ? "rail" : "full"}>
       <aside
-        className="flex w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground"
+        className={cn("flex shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground", compact ? "w-12" : "w-64")}
         data-settings-sidebar
         data-testid="settings-sidebar"
       >
@@ -318,19 +358,19 @@ export function SettingsScreen({
         {isDesktop ? (
           <>
             <div className="h-12 shrink-0" data-testid="settings-sidebar-top" data-tauri-drag-region={dragRegion} />
-            <div className="shrink-0 px-2 pb-1">{backToApp}</div>
+            <div className={cn("shrink-0 pb-1", compact ? "flex justify-center px-1" : "px-2")}>{compact ? backToAppRail : backToApp}</div>
           </>
         ) : (
-          <div className="flex h-12 shrink-0 items-center px-2" data-testid="settings-sidebar-top">
-            {backToApp}
+          <div className={cn("flex h-12 shrink-0 items-center", compact ? "justify-center px-1" : "px-2")} data-testid="settings-sidebar-top">
+            {compact ? backToAppRail : backToApp}
           </div>
         )}
-        <nav aria-label="Settings sections" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        <nav aria-label="Settings sections" className={cn("min-h-0 flex-1 overflow-y-auto pb-3", compact ? "flex flex-col items-center px-1" : "px-2")}>
           <SettingsNav
             sections={sections}
             activeId={activeId}
             onSelect={setActiveId}
-            variant="sidebar"
+            variant={compact ? "rail" : "sidebar"}
           />
         </nav>
       </aside>
