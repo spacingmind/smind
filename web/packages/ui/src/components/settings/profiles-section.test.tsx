@@ -363,7 +363,7 @@ describe("profiles-section model field (ADR-0025)", () => {
     fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Other" } });
     // Pick GLM, its model, a non-default mode and auto-accept...
     fireEvent.click(screen.getByTestId("profile-form-provider"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(screen.getByTestId("model-provider-glm"));
     fireEvent.click(screen.getByTestId("model-row-glm:glm-5.3"));
     await flush();
@@ -379,7 +379,7 @@ describe("profiles-section model field (ADR-0025)", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
     fireEvent.click(screen.getByTestId("profile-form-provider"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(screen.getByTestId("model-provider-claude-native"));
     fireEvent.click(screen.getByTestId("model-row-claude-native:"));
     await flush();
@@ -699,7 +699,7 @@ describe("profile editor with a provider instance", () => {
     await flush();
     fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Work login" } });
     fireEvent.click(screen.getByTestId("profile-form-provider"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(screen.getByTestId("model-provider-claude-work"));
     fireEvent.click(screen.getByTestId("model-row-claude-work:"));
     await flush();
@@ -732,7 +732,7 @@ describe("profile editor reasoning level for codex-native", () => {
     await flush();
     fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Codex deep" } });
     fireEvent.click(screen.getByTestId("profile-form-provider"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(screen.getByTestId("model-provider-codex-native"));
     fireEvent.click(screen.getByTestId("model-row-codex-native:m-wide"));
     await flush();
@@ -753,7 +753,7 @@ describe("profile editor reasoning level for codex-native", () => {
     await flush();
     fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Switcher" } });
     fireEvent.click(screen.getByTestId("profile-form-provider"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(screen.getByTestId("model-provider-codex-native"));
     fireEvent.click(screen.getByTestId("model-row-codex-native:m-wide"));
     await flush();
@@ -761,7 +761,7 @@ describe("profile editor reasoning level for codex-native", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Extra high" }));
     await flush();
     fireEvent.click(screen.getByTestId("profile-form-provider"));
-    fireEvent.click(await screen.findByTestId("model-picker-back"));
+    { const profilesTab = screen.queryByTestId("model-profiles-tab"); if (profilesTab) fireEvent.click(profilesTab); }
     fireEvent.click(screen.getByTestId("model-provider-claude-native"));
     fireEvent.click(screen.getByTestId("model-row-claude-native:"));
     await flush();

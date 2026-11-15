@@ -495,7 +495,8 @@ export function TaskDetailPane({
               data-level={detailLevel}
               onClick={() => setDetailLevel(NEXT_DETAIL_LEVEL[detailLevel])}
             >
-              {DETAIL_LEVEL_LABELS[detailLevel]}
+              Detail: {DETAIL_LEVEL_LABELS[detailLevel]}
+              <Icons.chevronDown aria-hidden className="size-3 opacity-60" />
             </Button>
           ) : undefined
         }

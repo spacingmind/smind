@@ -84,7 +84,7 @@ function searchInput(): HTMLInputElement {
 }
 
 beforeEach(() => {
-  mobile.value = false;
+  mobile.value = true; // the sheet keeps the root provider list (the desktop popover has the rail, see the rail describe)
 });
 
 describe("model picker", () => {
@@ -213,10 +213,9 @@ describe("model picker", () => {
     expect(screen.getByTestId("model-row-glm:glm-4.6")).toBeInTheDocument();
   });
 
-  it("Arrow keys and Enter select, Left goes back, Escape closes", () => {
+  it("Arrow keys and Enter select, Left goes back (the sheet's root list)", () => {
     const { onSelect } = renderPicker();
     open();
-    expect(searchInput()).toHaveFocus();
     // Provider view: Create profile (0), Default (1), Opus (2), Sonnet (3). The highlight starts on the current selection.
     expect(screen.getByTestId("model-row-claude-native:opus-5-5")).toHaveAttribute("data-active", "true");
     fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
@@ -247,9 +246,15 @@ describe("model picker", () => {
     fireEvent.change(searchInput(), { target: { value: "g" } });
     fireEvent.keyDown(searchInput(), { key: "Backspace" });
     expect(screen.queryByText("Providers")).not.toBeInTheDocument();
+  });
 
+  it("picker-closes-on-escape: Escape closes the desktop popover", () => {
+    mobile.value = false;
+    renderPicker();
+    open();
+    expect(screen.getByTestId("model-picker-popover")).toBeInTheDocument();
     fireEvent.keyDown(searchInput(), { key: "Escape" });
-    expect(screen.queryByTestId("model-search-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("model-picker-popover")).not.toBeInTheDocument();
   });
 
   it("renders a bottom sheet below the md breakpoint", () => {
@@ -285,6 +290,7 @@ describe("model picker", () => {
   });
 
   it("popover height follows the row count", () => {
+    mobile.value = false; // the desktop popover
     // Claude view: 3 model rows + heading + create row + models heading = 6 -> 80 + 240.
     renderPicker();
     open();
@@ -293,6 +299,7 @@ describe("model picker", () => {
   });
 
   it("popover height grows with profiles in the view", () => {
+    mobile.value = false; // the desktop popover
     const two = [
       { id: "1", name: "A", summary: "", provider: "claude-native", model: "opus-5-5" },
       { id: "2", name: "B", summary: "", provider: "claude-native", model: "sonnet-5-5" },
@@ -394,6 +401,7 @@ describe("model picker", () => {
   });
 
   it("row action buttons keep search focus and never leave the arrow walk", () => {
+    mobile.value = false; // the desktop popover
     renderPicker();
     open();
     const plus = screen.getByTestId("model-create-profile-claude-native-sonnet-5-5");
@@ -524,14 +532,20 @@ describe("model picker", () => {
   });
 
   it("Back keeps the search input focused for arrows and typing", () => {
-    renderPicker();
-    open();
-    const back = screen.getByTestId("model-picker-back");
-    expect(fireEvent.mouseDown(back)).toBe(false);
-    expect(fireEvent.pointerDown(back)).toBe(false);
-    act(() => screen.getByTestId("model-profiles-edit").focus());
-    fireEvent.click(back);
-    expect(searchInput()).toHaveFocus();
+    const original = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q === "(pointer: fine)" })) as typeof window.matchMedia; // a desktop-class sheet
+    try {
+      renderPicker();
+      open();
+      const back = screen.getByTestId("model-picker-back");
+      expect(fireEvent.mouseDown(back)).toBe(false);
+      expect(fireEvent.pointerDown(back)).toBe(false);
+      act(() => screen.getByTestId("model-profiles-edit").focus());
+      fireEvent.click(back);
+      expect(searchInput()).toHaveFocus();
+    } finally {
+      window.matchMedia = original;
+    }
   });
 
   it("an empty result while a provider is loading says Loading…, not no matches", () => {
@@ -576,6 +590,7 @@ describe("model picker", () => {
   });
 
   it("popover height counts the bound-chat note", () => {
+    mobile.value = false; // the desktop popover
     renderPicker({ boundProvider: "glm", selectedProvider: "glm", selectedModel: "" });
     open();
     // 3 glm rows + heading + create + models heading + note = 7 -> 360.
@@ -583,6 +598,7 @@ describe("model picker", () => {
   });
 
   it("desktop autofocuses search", () => {
+    mobile.value = false; // the desktop popover
     renderPicker();
     open();
     expect(searchInput()).toHaveFocus();
@@ -659,6 +675,7 @@ describe("model picker", () => {
     }
 
     it("uses its own testid, fills the width and opens downwards", () => {
+      mobile.value = false;
       renderField();
       const trigger = screen.getByTestId("profile-form-provider");
       expect(trigger).toHaveTextContent("Opus 5.5");
