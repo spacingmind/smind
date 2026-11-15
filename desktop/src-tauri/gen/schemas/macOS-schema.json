@@ -459,6 +459,12 @@
           "markdownDescription": "Enables the connections_unsupported command without any pre-configured scope."
         },
         {
+          "description": "Enables the context_menu_show command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-context-menu-show",
+          "markdownDescription": "Enables the context_menu_show command without any pre-configured scope."
+        },
+        {
           "description": "Enables the daemon_install command without any pre-configured scope.",
           "type": "string",
           "const": "allow-daemon-install",
@@ -637,6 +643,12 @@
           "type": "string",
           "const": "deny-connections-unsupported",
           "markdownDescription": "Denies the connections_unsupported command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the context_menu_show command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-context-menu-show",
+          "markdownDescription": "Denies the context_menu_show command without any pre-configured scope."
         },
         {
           "description": "Denies the daemon_install command without any pre-configured scope.",

@@ -36,12 +36,28 @@ mod tests {
     #[test]
     fn sidecar_placeholder_name() {
         let win = "x86_64-pc-windows-msvc";
-        assert_eq!(name("windows", "debug", win), Some(PathBuf::from("binaries/smind-x86_64-pc-windows-msvc.exe")));
-        assert_eq!(name("macos", "debug", "aarch64-apple-darwin"), Some(PathBuf::from("binaries/smind-aarch64-apple-darwin")));
-        assert_eq!(name("windows", "release", win), None, "release never writes a placeholder");
+        assert_eq!(
+            name("windows", "debug", win),
+            Some(PathBuf::from("binaries/smind-x86_64-pc-windows-msvc.exe"))
+        );
+        assert_eq!(
+            name("macos", "debug", "aarch64-apple-darwin"),
+            Some(PathBuf::from("binaries/smind-aarch64-apple-darwin"))
+        );
+        assert_eq!(
+            name("windows", "release", win),
+            None,
+            "release never writes a placeholder"
+        );
         assert_eq!(name("macos", "release", "aarch64-apple-darwin"), None);
         assert_eq!(name("linux", "debug", "x86_64-unknown-linux-gnu"), None);
-        assert_eq!(super::sidecar_path("windows", win), Some(PathBuf::from("binaries/smind-x86_64-pc-windows-msvc.exe")));
-        assert_eq!(super::sidecar_path("linux", "x86_64-unknown-linux-gnu"), None);
+        assert_eq!(
+            super::sidecar_path("windows", win),
+            Some(PathBuf::from("binaries/smind-x86_64-pc-windows-msvc.exe"))
+        );
+        assert_eq!(
+            super::sidecar_path("linux", "x86_64-unknown-linux-gnu"),
+            None
+        );
     }
 }
