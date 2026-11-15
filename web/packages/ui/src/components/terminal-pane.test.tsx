@@ -203,7 +203,7 @@ describe("TerminalPane", () => {
     const wrapper = screen.getByTestId("terminal-inset");
     expect(host.parentElement).toBe(wrapper);
     expect(wrapper.className).toContain("p-2");
-    expect(wrapper.className).toContain("bg-terminal-bg");
+    expect(wrapper.className).toContain("bg-panel");
     expect(host.className).not.toMatch(/(^|\s)p[xytrbl]?-/);
   });
 
