@@ -13,6 +13,20 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const cli = join(scriptDir, "verify-release-artifacts.mjs");
 const REPO = "spacingmind/smind";
 
+// A .sig file the shape the Tauri CLI writes: base64 of the 4-line minisign
+// signature text, whose trusted comment carries version:<version> (version
+// null = a signature WITHOUT a signed version).
+function fakeSig(version, file = "asset") {
+  const lines = [
+    "untrusted comment: test signature",
+    "RWQ" + "A".repeat(20),
+    "trusted comment: timestamp:1700000000\tfile:" + file + (version === null ? "" : "\tversion:" + version),
+    "GLOBALSIG" + "B".repeat(20),
+    "",
+  ];
+  return Buffer.from(lines.join("\n")).toString("base64") + "\n";
+}
+
 function daemonBinary(version) {
   return Buffer.from(
     `junk\0-ldflags="-X github.com/spacingmind/smind/internal/version.Version=${version} -X x"\0junk`,
@@ -95,7 +109,7 @@ function makeRelease(root, { version = "1.2.3", desktopVersion = version } = {})
     else buildDaemonTar(join(dist, name), version);
   }
   for (const name of desktopAssetNames(desktopVersion)) {
-    if (name.endsWith(".sig")) writeFileSync(join(dist, name), `sig-${name.replace(/\.sig$/, "")}\n`);
+    if (name.endsWith(".sig")) writeFileSync(join(dist, name), fakeSig(desktopVersion, name.replace(/\.sig$/, "")));
     else if (name.endsWith(".app.tar.gz")) {
       buildAppTar(join(dist, name), { appVersion: desktopVersion, daemonVersion: version });
     } else writeFileSync(join(dist, name), `dummy ${name}\n`);
@@ -111,6 +125,9 @@ function makeRelease(root, { version = "1.2.3", desktopVersion = version } = {})
       "Zml4dHVyZS1zZWNvbmQtZml4dHVyZQ==\n"
   );
   const asset = (n) => `https://github.com/${REPO}/releases/download/${tag}/${encodeURIComponent(n)}`;
+  const arm64 = `smind-desktop-${desktopVersion}-macos-arm64.app.tar.gz`;
+  const x64 = `smind-desktop-${desktopVersion}-macos-x86_64.app.tar.gz`;
+  const exe = `sMind_${desktopVersion}_x64-setup.exe`;
   writeFileSync(
     join(dist, "latest.json"),
     JSON.stringify(
@@ -119,18 +136,9 @@ function makeRelease(root, { version = "1.2.3", desktopVersion = version } = {})
         notes: "",
         pub_date: "2026-11-14T00:00:00Z",
         platforms: {
-          "darwin-aarch64": {
-            signature: `sig-smind-desktop-${desktopVersion}-macos-arm64.app.tar.gz`,
-            url: asset(`smind-desktop-${desktopVersion}-macos-arm64.app.tar.gz`),
-          },
-          "darwin-x86_64": {
-            signature: `sig-smind-desktop-${desktopVersion}-macos-x86_64.app.tar.gz`,
-            url: asset(`smind-desktop-${desktopVersion}-macos-x86_64.app.tar.gz`),
-          },
-          "windows-x86_64": {
-            signature: `sig-sMind_${desktopVersion}_x64-setup.exe`,
-            url: asset(`sMind_${desktopVersion}_x64-setup.exe`),
-          },
+          "darwin-aarch64": { signature: fakeSig(desktopVersion, arm64).trim(), url: asset(arm64) },
+          "darwin-x86_64": { signature: fakeSig(desktopVersion, x64).trim(), url: asset(x64) },
+          "windows-x86_64": { signature: fakeSig(desktopVersion, exe).trim(), url: asset(exe) },
         },
       },
       null,
@@ -329,6 +337,40 @@ test("verify-minisig-wrong-file", () => {
   withRelease({}, (fx) => {
     rewriteMinisig(fx, "trusted comment: timestamp:1\tfile:other.txt\tversion:1.2.3");
     expectFailure(verifyOf(fx), "checksums-signature", "file:checksums.txt");
+  });
+});
+
+function replaceUpdaterSig(fx, platform, asset, signature) {
+  writeFileSync(join(fx.dist, `${asset}.sig`), signature);
+  writeChecksums(fx.dist);
+  rewriteLatest(fx, (m) => {
+    m.platforms[platform].signature = signature.trim();
+  });
+}
+
+test("verify-updater-signature-without-version", () => {
+  withRelease({}, (fx) => {
+    const asset = `smind-desktop-${fx.desktopVersion}-macos-arm64.app.tar.gz`;
+    replaceUpdaterSig(fx, "darwin-aarch64", asset, fakeSig(null, asset));
+    const failures = verifyOf(fx);
+    expectFailure(failures, "updater-signatures", asset);
+    assert.deepEqual(failures.map((f) => f.check), ["updater-signatures"]);
+  });
+});
+
+test("verify-updater-signature-wrong-version", () => {
+  withRelease({ version: "0.20.0" }, (fx) => {
+    const asset = `smind-desktop-${fx.desktopVersion}-macos-x86_64.app.tar.gz`;
+    replaceUpdaterSig(fx, "darwin-x86_64", asset, fakeSig("0.19.0", asset));
+    expectFailure(verifyOf(fx), "updater-signatures", /expected 0\.20\.0, found 0\.19\.0/);
+  });
+});
+
+test("verify-updater-signature-undecodable", () => {
+  withRelease({}, (fx) => {
+    const asset = `sMind_${fx.desktopVersion}_x64-setup.exe`;
+    replaceUpdaterSig(fx, "windows-x86_64", asset, "!!!\n");
+    expectFailure(verifyOf(fx), "updater-signatures", /base64/);
   });
 });
 

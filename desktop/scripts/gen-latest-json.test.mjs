@@ -11,11 +11,25 @@ import { buildLatestJson } from "./gen-latest-json.mjs";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const cli = join(scriptDir, "gen-latest-json.mjs");
 
+// A .sig file the shape the Tauri CLI writes: base64 of the 4-line minisign
+// signature text, whose trusted comment carries version:<version> (version
+// null = a signature WITHOUT a signed version).
+function fakeSig(version, file = "asset") {
+  const lines = [
+    "untrusted comment: test signature",
+    "RWQ" + "A".repeat(20),
+    "trusted comment: timestamp:1700000000\tfile:" + file + (version === null ? "" : "\tversion:" + version),
+    "GLOBALSIG" + "B".repeat(20),
+    "",
+  ];
+  return Buffer.from(lines.join("\n")).toString("base64") + "\n";
+}
+
 function files() {
   return {
-    "darwin-aarch64": { asset: "smind-desktop-1.2.3-macos-arm64.app.tar.gz", signature: "sig-arm64\n" },
-    "darwin-x86_64": { asset: "smind-desktop-1.2.3-macos-x86_64.app.tar.gz", signature: "sig-x64\n" },
-    "windows-x86_64": { asset: "sMind_1.2.3_x64-setup.exe", signature: "sig-win\n" },
+    "darwin-aarch64": { asset: "smind-desktop-1.2.3-macos-arm64.app.tar.gz", signature: fakeSig("1.2.3") },
+    "darwin-x86_64": { asset: "smind-desktop-1.2.3-macos-x86_64.app.tar.gz", signature: fakeSig("1.2.3") },
+    "windows-x86_64": { asset: "sMind_1.2.3_x64-setup.exe", signature: fakeSig("1.2.3") },
   };
 }
 
@@ -56,9 +70,9 @@ test("latest-json-urls-per-arch", () => {
 
 test("latest-json-signature-is-file-content-trimmed", () => {
   const f = files();
-  f["darwin-aarch64"].signature = "  sig-arm64 \n";
+  f["darwin-aarch64"].signature = "  " + fakeSig("1.2.3").trim() + " \n";
   const m = buildLatestJson({ ...base, files: f });
-  assert.equal(m.platforms["darwin-aarch64"].signature, "sig-arm64");
+  assert.equal(m.platforms["darwin-aarch64"].signature, fakeSig("1.2.3").trim());
 });
 
 test("latest-json-missing-sig-fails", () => {
@@ -111,11 +125,11 @@ test("latest-json-url-encodes-asset-names", () => {
 function fixtureDir(version = "1.2.3") {
   const dir = mkdtempSync(join(tmpdir(), "gen-latest-json-"));
   writeFileSync(join(dir, `smind-desktop-${version}-macos-arm64.app.tar.gz`), "a");
-  writeFileSync(join(dir, `smind-desktop-${version}-macos-arm64.app.tar.gz.sig`), "sig-arm64\n");
+  writeFileSync(join(dir, `smind-desktop-${version}-macos-arm64.app.tar.gz.sig`), fakeSig(version));
   writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz`), "a");
-  writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz.sig`), "sig-x64\n");
+  writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz.sig`), fakeSig(version));
   writeFileSync(join(dir, `sMind_${version}_x64-setup.exe`), "a");
-  writeFileSync(join(dir, `sMind_${version}_x64-setup.exe.sig`), "sig-win\n");
+  writeFileSync(join(dir, `sMind_${version}_x64-setup.exe.sig`), fakeSig(version));
   return dir;
 }
 
@@ -145,7 +159,7 @@ test("latest-json-cli-writes-file", () => {
     ], { stdio: "pipe" });
     const m = JSON.parse(readFileSync(out, "utf8"));
     assert.equal(m.version, "1.2.3");
-    assert.equal(m.platforms["darwin-aarch64"].signature, "sig-arm64");
+    assert.equal(m.platforms["darwin-aarch64"].signature, fakeSig("1.2.3").trim());
     assert.match(m.platforms["windows-x86_64"].url, /sMind_1\.2\.3_x64-setup\.exe$/);
 
     // Missing sig: non-zero exit, no output file.
@@ -184,6 +198,71 @@ test("latest-json-asset-version-mismatch-fails", () => {
     assert.notEqual(r.status, 0);
     assert.match(r.stderr.toString(), /does not contain the requested version "1\.2\.4"/);
     assert.ok(!existsSync(out), "no output file on version mismatch");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("latest-json-refuses-a-signature-without-a-signed-version", () => {
+  const f = files();
+  f["windows-x86_64"].signature = fakeSig(null);
+  assert.throws(
+    () => buildLatestJson({ ...base, files: f }),
+    (err) => err.message.includes("windows-x86_64") && err.message.includes("signed version")
+  );
+});
+
+test("latest-json-refuses-a-signed-version-that-differs", () => {
+  const f = files();
+  f["darwin-x86_64"].signature = fakeSig("1.2.2");
+  assert.throws(
+    () => buildLatestJson({ ...base, files: f }),
+    (err) => err.message.includes("darwin-x86_64") && err.message.includes("1.2.2") && err.message.includes("1.2.3")
+  );
+});
+
+test("latest-json-accepts-v-prefixed-signed-version", () => {
+  const f = files();
+  f["darwin-aarch64"].signature = fakeSig("v1.2.3");
+  const m = buildLatestJson({ ...base, files: f });
+  assert.equal(m.platforms["darwin-aarch64"].signature, fakeSig("v1.2.3").trim());
+});
+
+test("latest-json-refuses-an-undecodable-signature", () => {
+  const f = files();
+  f["darwin-aarch64"].signature = "!!!not-base64!!!";
+  assert.throws(
+    () => buildLatestJson({ ...base, files: f }),
+    (err) => err.message.includes("darwin-aarch64") && err.message.includes("base64")
+  );
+});
+
+test("latest-json-refuses-a-signature-without-a-trusted-comment", () => {
+  const f = files();
+  f["windows-x86_64"].signature =
+    Buffer.from("untrusted comment: x\nRWQ" + "A".repeat(20) + "\n").toString("base64") + "\n";
+  assert.throws(
+    () => buildLatestJson({ ...base, files: f }),
+    (err) => err.message.includes("windows-x86_64") && err.message.includes("trusted comment")
+  );
+});
+
+test("latest-json-cli-refuses-and-writes-nothing-for-a-versionless-signature", () => {
+  const dir = fixtureDir();
+  try {
+    writeFileSync(join(dir, "smind-desktop-1.2.3-macos-arm64.app.tar.gz.sig"), fakeSig(null));
+    const out = join(dir, "latest.json");
+    const r = spawnSync(process.execPath, [
+      cli,
+      "--dir", dir,
+      "--version", "1.2.3",
+      "--tag", "v1.2.3",
+      "--repo", "spacingmind/smind",
+      "--out", out,
+    ]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr.toString(), /signed version/);
+    assert.ok(!existsSync(out), "no output file for a versionless signature");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
