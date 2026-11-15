@@ -376,8 +376,10 @@ mod tests {
     #[test]
     fn rfc3339_nano_and_name_stamp() {
         // 1794704523 = 2026-11-15T01:02:03Z, the golden report's time.
-        let t = at(1_794_704_523, 4_005_006);
-        assert_eq!(rfc3339_nano(t), "2026-11-15T01:02:03.004005006Z");
+        // 4_005_100 ns, not 4_005_006: Windows' SystemTime counts in 100 ns steps, so a finer
+        // value is not representable there (it failed on the Windows runner)
+        let t = at(1_794_704_523, 4_005_100);
+        assert_eq!(rfc3339_nano(t), "2026-11-15T01:02:03.0040051Z");
         assert_eq!(name_stamp(t), "20261115T010203.004");
 
         // No fraction when the nanoseconds are zero, milliseconds padded.
