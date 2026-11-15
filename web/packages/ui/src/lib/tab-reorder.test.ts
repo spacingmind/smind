@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { reorderIndicatorX, reorderSlotAtX } from "@/lib/tab-reorder";
+import { reorderIndicatorX, reorderSlotAtX, tabDragClasses } from "@/lib/tab-reorder";
 
 // Three 100px tabs with 4px gaps: [0,100] [104,204] [208,308].
 const spans = [
@@ -41,3 +41,19 @@ describe("reorderIndicatorX", () => {
     expect(reorderIndicatorX([], 0)).toBeNull();
   });
 });
+
+describe("tabDragClasses", () => {
+  it("the dragged chip dims and shows the grabbing cursor; others do not", () => {
+    const dragged = tabDragClasses({ isDragging: true, dragActive: true });
+    expect(dragged.chip.split(" ")).toEqual(expect.arrayContaining(["opacity-50", "cursor-grabbing"]));
+    expect(tabDragClasses({ isDragging: false, dragActive: true }).chip).toBe("");
+    expect(tabDragClasses({ isDragging: false, dragActive: false }).chip).toBe("");
+  });
+  it("while any drag is active no chip reveals its hover controls; otherwise the normal reveal applies", () => {
+    for (const isDragging of [true, false]) {
+      expect(tabDragClasses({ isDragging, dragActive: true }).affordances).toBe("pointer-events-none opacity-0");
+    }
+    expect(tabDragClasses({ isDragging: false, dragActive: false }).affordances).toBeNull();
+  });
+});
+

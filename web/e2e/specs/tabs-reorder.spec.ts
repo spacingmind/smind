@@ -41,6 +41,11 @@ test('TR-01 dragging a tab along its strip shows the indicator and reorders it; 
   await page.mouse.move(from.x, from.y)
   await page.mouse.down()
   await page.mouse.move(from.x - 20, from.y, { steps: 4 }) // past the 8px activation distance
+  // Feedback on the held chip: dimmed, grabbing cursor for the whole drag; and no chip reveals its hover controls.
+  const held = page.getByTestId('workspace-tab-terminal')
+  await expect(held).toHaveCSS('opacity', '0.5')
+  await expect(page.locator('html')).toHaveAttribute('data-tab-dragging', 'true')
+  expect(await page.evaluate(() => getComputedStyle(document.body).cursor)).toBe('grabbing')
   await frame(page, testInfo, 'a-drag-started')
   // Over the left half of the Diff tab: the indicator marks the slot before it.
   await page.mouse.move(diff.box.x + 8, diff.y, { steps: 10 })
@@ -50,10 +55,16 @@ test('TR-01 dragging a tab along its strip shows the indicator and reorders it; 
   const ibox = await indicator.boundingBox()
   expect(ibox!.width).toBeCloseTo(4, 0)
   expect(Math.abs(ibox!.x + ibox!.width / 2 - diff.box.x)).toBeLessThan(8)
+  // The hovered target keeps its label readable: its split and close controls stay hidden while dragging.
+  const hiddenControls = await page.getByTestId('workspace-tab-affordances').evaluateAll((els) => els.map((e) => getComputedStyle(e).opacity))
+  expect(hiddenControls.length).toBeGreaterThan(0)
+  for (const opacity of hiddenControls) expect(opacity).toBe('0')
   await frame(page, testInfo, 'b-drag-over-indicator')
   await page.mouse.up()
   await expect(indicator).toHaveCount(0)
   await expect.poll(() => order(page)).toEqual(['chat', 'terminal', 'diff', 'files'])
+  await expect(page.locator('html')).not.toHaveAttribute('data-tab-dragging', 'true')
+  await expect(page.getByTestId('workspace-tab-terminal')).toHaveCSS('opacity', '1')
   await frame(page, testInfo, 'c-after-drop')
 
   await page.reload()

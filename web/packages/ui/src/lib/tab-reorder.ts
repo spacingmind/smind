@@ -23,3 +23,17 @@ export function reorderIndicatorX(spans: readonly TabSpan[], slot: number): numb
   if (slot >= spans.length) return spans[spans.length - 1]!.right;
   return (spans[slot - 1]!.right + spans[slot]!.left) / 2;
 }
+
+/**
+ * Classes for a tab chip while tabs are being dragged. The chip being dragged dims (so the drag has feedback on the
+ * thing held) and shows the grabbing cursor; while ANY tab drag is active no chip reveals its hover controls (split,
+ * close), so the label stays readable and the insertion bar is the only cue at the drop target.
+ */
+export function tabDragClasses(state: { isDragging: boolean; dragActive: boolean }): { chip: string; affordances: string | null } {
+  return {
+    chip: state.isDragging ? "opacity-50 cursor-grabbing" : "",
+    // null = use the normal reveal-on-hover classes.
+    affordances: state.dragActive ? "pointer-events-none opacity-0" : null,
+  };
+}
+

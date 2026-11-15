@@ -53,7 +53,7 @@ import { AppContextMenu } from "@/components/ui/app-context-menu";
 import { tabMenu } from "@/lib/menu-models";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
-import { reorderIndicatorX, reorderSlotAtX } from "@/lib/tab-reorder";
+import { reorderIndicatorX, reorderSlotAtX, tabDragClasses } from "@/lib/tab-reorder";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TAB_KINDS,
@@ -806,6 +806,15 @@ function AppShell({
   const handleDragStart = useCallback(() => {
     setIsDragActive(true);
   }, []);
+
+  // The grabbing cursor for the whole drag (index.css reads the flag): the pointer is over other elements while a tab is held.
+  useEffect(() => {
+    if (!isDragActive) return;
+    document.documentElement.dataset.tabDragging = "true";
+    return () => {
+      delete document.documentElement.dataset.tabDragging;
+    };
+  }, [isDragActive]);
 
   const handleDragCancel = useCallback(() => {
     setIsDragActive(false);
@@ -2443,6 +2452,7 @@ function PaneTabStrip({
                     key={entry.key}
                     entry={entry}
                     paneId={paneId}
+                    dragActive={isDragActive}
                     showMoveAffordance={showMoveAffordance}
                     onSplit={onSplit}
                     onClose={onClose}
@@ -2531,6 +2541,7 @@ const TAB_AFFORDANCE_REVEAL =
 function DraggableTabTrigger({
   entry,
   paneId,
+  dragActive,
   showMoveAffordance,
   onSplit,
   onClose,
@@ -2545,6 +2556,8 @@ function DraggableTabTrigger({
 }: {
   entry: TabEntry;
   paneId: string;
+  /** Some tab (this or another) is being dragged: the dragged chip dims, and no chip shows hover controls. */
+  dragActive: boolean;
   showMoveAffordance: boolean;
   onSplit: (key: string, direction: SplitDirection) => void;
   onClose: (key: string) => void;
@@ -2580,10 +2593,11 @@ function DraggableTabTrigger({
   // `getByRole("tab", ...)` lookups (verified: it did, in this file's own
   // existing tests). Only `listeners` (the pointer handlers that actually
   // start a drag) are spread here.
-  const { listeners, setNodeRef } = useDraggable({
+  const { listeners, setNodeRef, isDragging } = useDraggable({
     id: entry.key,
     data: { tabKey: entry.key, sourcePaneId: paneId, kind: entry.kind } satisfies DraggedTabData,
   });
+  const drag = tabDragClasses({ isDragging, dragActive });
 
   if (renaming) {
     return (
@@ -2634,7 +2648,7 @@ function DraggableTabTrigger({
           ref={setNodeRef}
           value={entry.key}
           data-testid={`workspace-tab-${entry.kind}`}
-          className="group/tab max-w-48 gap-1.5"
+          className={cn("group/tab max-w-48 gap-1.5", drag.chip)}
           {...listeners}
         >
           <TabLabel entry={entry} />
@@ -2651,7 +2665,7 @@ function DraggableTabTrigger({
           />
           <span
             data-testid="workspace-tab-affordances"
-            className={cn("absolute inset-y-0 right-1 flex items-center gap-0.5", TAB_AFFORDANCE_REVEAL)}
+            className={cn("absolute inset-y-0 right-1 flex items-center gap-0.5", drag.affordances ?? TAB_AFFORDANCE_REVEAL)}
           >
       {isMovableKind(entry.kind) && showMoveAffordance && (
         <DropdownMenu>

@@ -35,4 +35,20 @@ describe("tab reorder wiring (source pins on App.tsx)", () => {
     expect(hit).toContain('[data-pane-id="${paneId.replace(');
     expect(hit).toContain("reorderSlotAtX(spans, x)");
   });
+
+  it("the chip uses the drag classes from the draggable's isDragging, and its hover controls obey the drag-active flag", () => {
+    expect(app).toContain("const { listeners, setNodeRef, isDragging } = useDraggable({");
+    expect(app).toContain("const drag = tabDragClasses({ isDragging, dragActive });");
+    expect(app).toContain('className={cn("group/tab max-w-48 gap-1.5", drag.chip)}');
+    expect(app).toContain("drag.affordances ?? TAB_AFFORDANCE_REVEAL");
+    expect(app).toContain("dragActive={isDragActive}");
+  });
+
+  it("a drag sets the grabbing-cursor flag on the root element and index.css reads it", () => {
+    expect(app).toContain('document.documentElement.dataset.tabDragging = "true"');
+    expect(app).toContain("delete document.documentElement.dataset.tabDragging");
+    const css = readFileSync("src/index.css", "utf8");
+    expect(css).toContain('html[data-tab-dragging="true"] * {\n  cursor: grabbing !important;');
+  });
 });
+
