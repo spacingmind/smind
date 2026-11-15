@@ -37,10 +37,12 @@ change: every event used below already exists (`permission.pending`, `question.p
    builder (a deep link has no chat or request, so it uses the fallback).
 2. The web `parseRoute` accepts `chat/<chatId>?card=<requestId>` (a chat route with an optional request id; any other
    shape of query is ignored, and `formatRoute` of a route with a request id round-trips it).
-3. Opening such a route opens the chat tab, then asks the matching card to reveal itself: a small store (like the file
-   reveal store) holds `{chatId, requestId}`; the permission card or question card whose request id matches scrolls into view,
-   takes focus on its container (visible focus ring, no animation) and the request is consumed; a stale request expires; a card
-   for another request is untouched; if the request is already resolved nothing happens.
+3. Opening such a route opens the chat tab, then asks the matching card to take focus: a small store keyed by request id
+   (like the file reveal store) holds the request; the permission card or question card whose request id matches focuses its
+   container (visible focus ring, no animation) and consumes the request, **even when a text field has focus** (the card's own
+   mount focus skips that case; a click on a notification is an explicit action). The pending card is pinned above the composer,
+   so no scrolling is needed. A card for another request is untouched; a stale request expires; a request whose card never
+   appears (already resolved) does nothing.
 4. The Rust watcher keeps the chat id and request id with each pending entry so the tray item opens the most recent card.
 
 ### B. More kinds, dedupe, badge (PR B)
@@ -67,8 +69,8 @@ change: every event used below already exists (`permission.pending`, `question.p
 
 A: `route.rs` (`chat_route_url_with_card`, `fallback_route_has_a_kind_the_web_accepts`, deep link and tray use the builder),
 `route.test.ts` (`parses chat route with card`, `ignores unknown query`, `round-trips the request id`),
-`card-reveal.test.tsx` (permission card and question card each reveal on a matching request, ignore another request, consume
-once, expire when stale, do nothing for a resolved request), `app` route test (opening the route opens the chat tab and queues the reveal),
+`card-focus.test.tsx` (permission card and question card each focus on a matching request even with the composer focused, ignore another
+request, consume once, expire when stale), `app` route test (opening the route opens the chat tab and queues the reveal),
 `attention.rs` (`most_recent_returns_chat_and_request`).
 B: `protocol.rs` (`question_pending_becomes_a_fixed_body_notification`, `failed_run_notification_uses_the_task_title`,
 `done_and_needs_continue_are_silent`), `attention.rs` (`questions_count_and_clear`, `failed_runs_are_not_counted`),
@@ -79,7 +81,7 @@ C: `focus.rs` (`no_notification_when_focused_on_that_task`, `held_while_composer
 focus and composer-focus changes; no report storm).
 
 Frames (web, light and dark, 1280 and 390): the permission card and the question card focused after a click-through (the
-focus ring), a resolved request (nothing focused). Real-window frames and a real OS notification are not part of this plan's
+focus ring) with the composer focused beforehand. Real-window frames and a real OS notification are not part of this plan's
 checks: the screen may be locked and the OS owns the banner; the Rust logic is covered by unit tests and the web half by frames,
 and the PRs say so.
 
