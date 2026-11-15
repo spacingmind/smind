@@ -62,23 +62,33 @@ impl ProxyOrigin {
 pub const REFUSED: &str =
     "command refused: the calling window is not showing the sMind proxy origin";
 
-/// check is the whole command-level rule for one invocation.
-fn check<R: Runtime>(invoke: &Invoke<R>) -> Result<(), String> {
-    let command = invoke.message.command();
+/// verdict is the whole command-level rule as a pure function: the command name, the managed proxy origin (if any) and the
+/// calling webview's current URL (or the failure to read it). Anything but an exempt command from the proxy origin refuses.
+fn verdict<E>(
+    command: &str,
+    proxy: Option<ProxyOrigin>,
+    url: Result<Url, E>,
+) -> Result<(), String> {
     if EXEMPT.iter().any(|(name, _)| *name == command) {
         return Ok(());
     }
-    let webview = invoke.message.webview_ref();
     // Fail closed: no managed origin, an unreadable URL or a different origin all refuse.
-    let proxy = webview
-        .try_state::<ProxyOrigin>()
-        .ok_or_else(|| REFUSED.to_string())?;
-    let url = webview.url().map_err(|_| REFUSED.to_string())?;
+    let proxy = proxy.ok_or_else(|| REFUSED.to_string())?;
+    let url = url.map_err(|_| REFUSED.to_string())?;
     if proxy.matches(&url) {
         Ok(())
     } else {
         Err(REFUSED.to_string())
     }
+}
+
+/// check reads the invocation's webview at call time and applies [`verdict`].
+fn check<R: Runtime>(invoke: &Invoke<R>) -> Result<(), String> {
+    let webview = invoke.message.webview_ref();
+    let proxy = webview
+        .try_state::<ProxyOrigin>()
+        .map(|state| *state.inner());
+    verdict(invoke.message.command(), proxy, webview.url())
 }
 
 /// guarded wraps an invoke handler (the `generate_handler!` list) so every command passes [`check`] first. A refused call
@@ -567,6 +577,29 @@ mod tests {
                 "{cmd} must not reach a task window"
             );
         }
+    }
+
+    #[test]
+    fn verdict_fails_closed_on_every_missing_piece() {
+        let ok: Result<Url, ()> = Ok(url("http://127.0.0.1:47123/"));
+        assert_eq!(verdict("open_external", Some(proxy()), ok.clone()), Ok(()));
+        assert_eq!(
+            verdict("open_external", None, ok),
+            Err(REFUSED.to_string()),
+            "no managed origin"
+        );
+        let unreadable: Result<Url, ()> = Err(());
+        assert_eq!(
+            verdict("open_external", Some(proxy()), unreadable),
+            Err(REFUSED.to_string()),
+            "unreadable URL"
+        );
+        let other: Result<Url, ()> = Ok(url("http://127.0.0.1:47124/"));
+        assert_eq!(
+            verdict("open_external", Some(proxy()), other),
+            Err(REFUSED.to_string()),
+            "other port"
+        );
     }
 
     // ---- run() wires both layers ----
