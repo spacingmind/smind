@@ -629,7 +629,7 @@ func TestTaskSend_LoopStopped_VisibleReason(t *testing.T) {
 	if !strings.Contains(last, "loop stopped") || !strings.Contains(last, "loopy") {
 		t.Fatalf("the stop has a visible reason: %s", last)
 	}
-	time.Sleep(500 * time.Millisecond) // nothing more may start
+	time.Sleep(500 * time.Millisecond) // sleep-ok: negative window, nothing more may start after the limiter stops the loop
 	rows, _ := e.db.ListRunsByTask(e.task.ID, 50)
 	n := 0
 	for _, r := range rows {
