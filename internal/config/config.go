@@ -90,8 +90,9 @@ const DefaultRunHistoryBudgetMB = 64
 
 // Env overrides for the daemon diagnostics and run history budget.
 const (
-	// EnvBrowserDisabled set to 1/true/on/yes/y/t/enabled turns the agent
-	// browser kill switch on (browser.disabled in config.yaml does the same).
+	// EnvBrowserDisabled turns the agent browser kill switch on with any value
+	// except an explicit 0/false/off/no (browser.disabled in config.yaml does the
+	// same, and the environment can never turn the file's switch off).
 	EnvBrowserDisabled = "SMIND_BROWSER_DISABLED"
 	// EnvPprof set to 1/true/on/yes/y/t/enabled turns debug.pprof on.
 	EnvPprof = "SMIND_PPROF"
@@ -750,8 +751,11 @@ func applyEnv(cfg *Config) {
 		cfg.Push.ExpoAccessToken = v
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvBrowserDisabled)); v != "" {
+		// A kill switch: any value that is not an explicit "no" turns it ON, so a
+		// typo ("disabled", "ture", "2") can never leave the browser running.
 		switch strings.ToLower(v) {
-		case "1", "true", "on", "yes", "y", "t", "enabled":
+		case "0", "false", "off", "no", "n", "f":
+		default:
 			cfg.Browser.Disabled = true
 		}
 	}

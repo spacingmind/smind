@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -110,34 +109,22 @@ func runBrowser(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			fmt.Fprintf(stdout, "browser %s for workspace %d\n", browserOnOff(verb == "enable"), id)
 		}
 		if verb == "enable" {
+			if !res.Available {
+				fmt.Fprintln(stdout, "The browser tools are not yet offered to agents in this version; the setting is stored.")
+			}
 			fmt.Fprintln(stdout, "The switch is as human-only as the daemon's local principal: an unidentified local connection counts as the human (ADR-0056).")
 		}
 		return 0
 	case "allow":
-		host := a.pos[0]
-		var cur browserSettings
-		if code, ok := browserCall(ctx, call, "allow "+allowVerb, "browser.settings.get", map[string]any{"workspaceId": id}, &cur, false, stdout, stderr); !ok {
-			return code
-		}
-		hosts := cur.AllowHosts
-		// The daemon stores hosts canonical (lower case, no trailing dot), so a
-		// host typed as "Intranet.Test." must find the stored "intranet.test".
-		same := func(h string) bool {
-			return strings.EqualFold(strings.TrimSuffix(h, "."), strings.TrimSuffix(host, "."))
-		}
-		if allowVerb == "add" {
-			if !slices.ContainsFunc(hosts, same) {
-				hosts = append(hosts, host)
-			}
-		} else {
-			if !slices.ContainsFunc(hosts, same) {
-				fmt.Fprintln(stderr, "smind browser allow rm: host not in the allowlist")
-				return 1
-			}
-			hosts = slices.DeleteFunc(slices.Clone(hosts), same)
+		// The daemon applies the change atomically under its own lock (no client-side
+		// read-modify-write: two commands at once must not drop a host) and matches
+		// hosts by their canonical form (case, trailing dot).
+		param := "allowAdd"
+		if allowVerb == "rm" {
+			param = "allowRemove"
 		}
 		var res browserSettings
-		if code, ok := browserCall(ctx, call, "allow "+allowVerb, "browser.settings.set", map[string]any{"workspaceId": id, "allowHosts": hosts}, &res, a.bools["--json"], stdout, stderr); !ok {
+		if code, ok := browserCall(ctx, call, "allow "+allowVerb, "browser.settings.set", map[string]any{"workspaceId": id, param: []string{a.pos[0]}}, &res, a.bools["--json"], stdout, stderr); !ok {
 			return code
 		}
 		if !a.bools["--json"] {

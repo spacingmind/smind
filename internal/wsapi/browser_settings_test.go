@@ -131,6 +131,88 @@ func TestBrowserSettingsMethodsRefusedForAnIdentifiedConnection(t *testing.T) {
 	}
 }
 
+// A relay connection (not local) never reaches the settings handlers, even
+// when it carries no device id and so looks unidentified.
+func TestBrowserSettingsRefusedOverTheRelay(t *testing.T) {
+	t.Parallel()
+	h, fs, closed := settingsHost(t)
+	for name, fn := range map[string]handlerFunc{
+		"browser.settings.get": browserLocalOnly("browser.settings.get", h.settingsGet),
+		"browser.settings.set": browserLocalOnly("browser.settings.set", h.settingsSet),
+		"browser.data.clear":   browserLocalOnly("browser.data.clear", h.dataClear),
+	} {
+		for _, rc := range []*requestContext{{local: false}, nil} {
+			if _, err := fn(context.Background(), rc, json.RawMessage(`{"workspaceId":1,"enabled":true}`)); err == nil || !strings.Contains(err.Error(), "only available on this machine") {
+				t.Errorf("%s over the relay: %v", name, err)
+			}
+		}
+	}
+	if len(fs.rows) != 0 || len(*closed) != 0 {
+		t.Error("a relay call must change nothing")
+	}
+}
+
+func TestBrowserSettings_AllowAddAndRemoveAreAtomicAndCanonical(t *testing.T) {
+	t.Parallel()
+	h, fs, _ := settingsHost(t)
+	if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"allowHosts":["intranet.test","10.0.0.5"]}`); err != nil {
+		t.Fatal(err)
+	}
+	// An existing host under another spelling is not duplicated.
+	if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"allowAdd":["INTRANET.test."]}`); err != nil || len(fs.rows[1].AllowHosts) != 2 {
+		t.Fatalf("add of an existing host: %v %v", err, fs.rows[1].AllowHosts)
+	}
+	// Remove finds the stored canonical host by any spelling.
+	if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"allowRemove":["Intranet.Test."]}`); err != nil || !slices.Equal(fs.rows[1].AllowHosts, []string{"10.0.0.5"}) {
+		t.Fatalf("remove by another spelling: %v %v", err, fs.rows[1].AllowHosts)
+	}
+	// Removing a host that is not there is refused and changes nothing.
+	if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"allowRemove":["gone.test"]}`); err == nil || !strings.Contains(err.Error(), "not in the allowlist") {
+		t.Fatalf("remove of a missing host: %v", err)
+	}
+	// A replacement and an increment together are ambiguous.
+	if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"allowHosts":[],"allowAdd":["a.test"]}`); err == nil {
+		t.Fatal("allowHosts with allowAdd must be refused")
+	}
+	// A bad host in allowAdd stores nothing.
+	if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"allowAdd":["*"]}`); err == nil || !slices.Equal(fs.rows[1].AllowHosts, []string{"10.0.0.5"}) {
+		t.Fatalf("wildcard add: %v %v", err, fs.rows[1].AllowHosts)
+	}
+}
+
+func TestBrowserSettings_ConcurrentAddsLoseNothing(t *testing.T) {
+	h, fs, _ := settingsHost(t)
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := setCall(h, settingsHumanRC, fmt.Sprintf(`{"workspaceId":1,"allowAdd":["h%d.test"]}`, i)); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if n := len(fs.rows[1].AllowHosts); n != 20 {
+		t.Fatalf("%d hosts stored, want 20 (a concurrent add was lost)", n)
+	}
+}
+
+func TestBrowserSettings_HostLengthCaps(t *testing.T) {
+	t.Parallel()
+	h, fs, _ := settingsHost(t)
+	long := strings.Repeat("a", 64) + ".test"
+	huge := strings.Repeat(strings.Repeat("a", 60)+".", 5) + "test"
+	for _, bad := range []string{long, huge} {
+		if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"allowAdd":["`+bad+`"]}`); err == nil {
+			t.Errorf("%d-char host must be refused", len(bad))
+		}
+	}
+	if len(fs.rows) != 0 {
+		t.Error("nothing stored")
+	}
+}
+
 func TestExactlyOneBrowserMethodIsRunScoped(t *testing.T) {
 	e := newProcEnv(t)
 	var scoped []string
@@ -358,7 +440,10 @@ func TestDenyListCoversTheDaemonsOwnAddresses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  listen: 127.0.0.1:4700\n  hostnames: [daemon.example.test]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := daemonDeny()
+	got, err := daemonDeny()
+	if err != nil {
+		t.Fatal(err)
+	}
 	has := func(host string, port int) bool {
 		for _, e := range got {
 			if e.Host == host && e.Port == port {
@@ -381,6 +466,35 @@ func TestDenyListCoversTheDaemonsOwnAddresses(t *testing.T) {
 	}
 	if !pol.CheckURL("http://localhost:4701/").Allowed {
 		t.Error("another loopback port stays allowed")
+	}
+}
+
+// A daemon listening on a LAN address still shields its loopback companions.
+func TestDenyListLoopbackCompanionsAndUnreadableConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SMIND_HOME", dir)
+	t.Setenv("SMIND_BROWSER_DISABLED", "")
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  listen: 192.168.1.5:4700\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := daemonDeny()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, err := browser.NewPolicy(nil, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"http://127.0.0.1:4700/", "http://localhost:4700/", "http://[::1]:4700/"} {
+		if pol.CheckURL(u).Allowed {
+			t.Errorf("%s must be refused", u)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server: [unbalanced\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := daemonDeny(); err == nil {
+		t.Error("an unreadable config must be an error (fail closed)")
 	}
 }
 

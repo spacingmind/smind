@@ -35,13 +35,13 @@ func TestBrowserKillSwitch_FromTheFileAndTheEnvironment(t *testing.T) {
 		t.Fatal("browser.disabled: true must switch it on")
 	}
 	browserHome(t, "")
-	for _, v := range []string{"1", "true", "ON", "yes", "enabled"} {
+	for _, v := range []string{"1", "true", "ON", "yes", "enabled", "disabled", "ture", "2", "yes please"} {
 		t.Setenv(EnvBrowserDisabled, v)
 		if !BrowserDisabled() {
 			t.Fatalf("%s=%s must switch it on", EnvBrowserDisabled, v)
 		}
 	}
-	for _, v := range []string{"0", "false", "off", "no", "banana"} {
+	for _, v := range []string{"0", "false", "OFF", "no", "n", "f"} {
 		t.Setenv(EnvBrowserDisabled, v)
 		if BrowserDisabled() {
 			t.Fatalf("%s=%s must not switch it on", EnvBrowserDisabled, v)

@@ -85,6 +85,9 @@ func NormalizeAllowHost(s string) (string, error) {
 	if s == "" {
 		return "", errors.New("browser: empty allowlist host")
 	}
+	if len(s) > 253 {
+		return "", fmt.Errorf("browser: allowlist entry is longer than 253 characters")
+	}
 	if strings.ContainsAny(s, "*/@?# \\") || strings.Contains(s, "://") {
 		return "", fmt.Errorf("browser: allowlist entry %q must be one exact host, no scheme, wildcard, path or userinfo", s)
 	}
@@ -150,6 +153,11 @@ func parseHost(raw string) (parsedHost, bool, error) {
 		return parsedHost{}, false, errors.New("empty host label")
 	}
 	labels := strings.Split(h, ".")
+	for _, l := range labels {
+		if len(l) > 63 {
+			return parsedHost{}, false, errors.New("a host label is longer than 63 characters")
+		}
+	}
 	if numericLabel(labels[len(labels)-1]) {
 		a, err := parseIPv4(labels)
 		if err != nil {

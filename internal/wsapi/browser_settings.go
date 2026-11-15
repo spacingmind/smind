@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -157,12 +158,21 @@ func (h *browserHost) settingsSet(_ context.Context, rc *requestContext, raw jso
 	var p struct {
 		WorkspaceID int64     `json:"workspaceId"`
 		Enabled     *bool     `json:"enabled"`
-		AllowHosts  *[]string `json:"allowHosts"`
+		AllowHosts  *[]string `json:"allowHosts"`  // the full replacement list
+		AllowAdd    []string  `json:"allowAdd"`    // hosts to add (applied atomically with the rest)
+		AllowRemove []string  `json:"allowRemove"` // hosts to remove (each must be on the list)
 		ProfileMode *string   `json:"profileMode"`
 	}
 	if err := h.workspaceParam(m, raw, &p, func() int64 { return p.WorkspaceID }); err != nil {
 		return nil, err
 	}
+	if p.AllowHosts != nil && (len(p.AllowAdd) > 0 || len(p.AllowRemove) > 0) {
+		return nil, settingsInvalid(m, "give allowHosts (a replacement) or allowAdd/allowRemove, not both")
+	}
+	// One writer at a time: the read-modify-write below must not interleave
+	// with another human's (a lost "disable" would silently re-enable).
+	h.setMu.Lock()
+	defer h.setMu.Unlock()
 	cur, err := h.settings.GetBrowserSettings(p.WorkspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", m, err)
@@ -172,6 +182,24 @@ func (h *browserHost) settingsSet(_ context.Context, rc *requestContext, raw jso
 	}
 	if p.AllowHosts != nil {
 		hosts, err := normalizeAllowHosts(*p.AllowHosts)
+		if err != nil {
+			return nil, settingsInvalid(m, "%v", err)
+		}
+		cur.AllowHosts = hosts
+	}
+	if len(p.AllowRemove) > 0 || len(p.AllowAdd) > 0 {
+		hosts := slices.Clone(cur.AllowHosts)
+		for _, raw := range p.AllowRemove {
+			h1, err := browser.NormalizeAllowHost(raw)
+			if err != nil {
+				return nil, settingsInvalid(m, "%v", err)
+			}
+			if !slices.Contains(hosts, h1) {
+				return nil, settingsInvalid(m, "host not in the allowlist: %s", h1)
+			}
+			hosts = slices.DeleteFunc(hosts, func(x string) bool { return x == h1 })
+		}
+		hosts, err := normalizeAllowHosts(append(hosts, p.AllowAdd...))
 		if err != nil {
 			return nil, settingsInvalid(m, "%v", err)
 		}
@@ -215,6 +243,19 @@ func (h *browserHost) dataClear(_ context.Context, rc *requestContext, raw json.
 	// "clear the data" is "end the session now".
 	h.closeWorkspace(p.WorkspaceID)
 	return struct{}{}, nil
+}
+
+// browserLocalOnly refuses a settings call on any connection that is not the local
+// /ws one: a paired phone is not a place to widen what an agent's browser may
+// reach (ADR-0061 decision 12: no browser UI on mobile). The Settings UI of the
+// desktop and web apps is a local connection.
+func browserLocalOnly(method string, h handlerFunc) handlerFunc {
+	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		if rc == nil || !rc.local {
+			return nil, &rpcCodeError{code: codeForbidden, msg: method + " is only available on this machine, not over the relay"}
+		}
+		return h(ctx, rc, raw)
+	}
 }
 
 // closeWorkspace ends the workspace's browser session, if it has one.

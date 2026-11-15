@@ -393,9 +393,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["session.identify"] = handleSessionIdentify(reg)
 	browserH := newBrowserHost(db, reg)
 	hs["browser.call"] = browserH.call
-	hs["browser.settings.get"] = browserH.settingsGet
-	hs["browser.settings.set"] = browserH.settingsSet
-	hs["browser.data.clear"] = browserH.dataClear
+	hs["browser.settings.get"] = browserLocalOnly("browser.settings.get", browserH.settingsGet)
+	hs["browser.settings.set"] = browserLocalOnly("browser.settings.set", browserH.settingsSet)
+	hs["browser.data.clear"] = browserLocalOnly("browser.data.clear", browserH.dataClear)
 	reg.SetBrowserGate(browserH.workspaceSwitchOn)
 	reg.AddObserver(browserH)
 	inboxH := newInboxHost(db, bus, reg, newValidationService(db, bus), stalled, fleetInboxPairs(db, configFleetEnabled))

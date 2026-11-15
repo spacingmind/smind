@@ -77,9 +77,20 @@ func TestBrowserCLI_Flow(t *testing.T) {
 			if e, ok := params["enabled"]; ok {
 				settings["enabled"] = e
 			}
-			if h, ok := params["allowHosts"]; ok {
-				settings["allowHosts"] = h
+			hosts, _ := settings["allowHosts"].([]string)
+			if h, ok := params["allowAdd"].([]string); ok {
+				hosts = append(append([]string{}, hosts...), h...)
 			}
+			if h, ok := params["allowRemove"].([]string); ok {
+				var keep []string
+				for _, x := range hosts {
+					if x != h[0] {
+						keep = append(keep, x)
+					}
+				}
+				hosts = keep
+			}
+			settings["allowHosts"] = hosts
 			return settings, nil
 		case "browser.data.clear":
 			return map[string]any{}, nil
@@ -116,18 +127,16 @@ func TestBrowserCLI_Flow(t *testing.T) {
 		t.Errorf("clear stdout %q", s)
 	}
 
-	// The whole session, call by call: allow add/rm must send the FULL list.
+	// The whole session, call by call: allow add/rm send ONE host each and the daemon
+	// applies it atomically (no client-side read-modify-write).
 	want := []struct {
 		method string
 		params map[string]any
 	}{
 		{"browser.settings.set", map[string]any{"workspaceId": int64(7), "enabled": true}},
-		{"browser.settings.get", map[string]any{"workspaceId": int64(7)}},
-		{"browser.settings.set", map[string]any{"workspaceId": int64(7), "allowHosts": []string{"a.test"}}},
-		{"browser.settings.get", map[string]any{"workspaceId": int64(7)}},
-		{"browser.settings.set", map[string]any{"workspaceId": int64(7), "allowHosts": []string{"a.test", "b.test"}}},
-		{"browser.settings.get", map[string]any{"workspaceId": int64(7)}},
-		{"browser.settings.set", map[string]any{"workspaceId": int64(7), "allowHosts": []string{"b.test"}}},
+		{"browser.settings.set", map[string]any{"workspaceId": int64(7), "allowAdd": []string{"a.test"}}},
+		{"browser.settings.set", map[string]any{"workspaceId": int64(7), "allowAdd": []string{"b.test"}}},
+		{"browser.settings.set", map[string]any{"workspaceId": int64(7), "allowRemove": []string{"a.test"}}},
 		{"browser.settings.get", map[string]any{"workspaceId": int64(7)}},
 		{"browser.settings.set", map[string]any{"workspaceId": int64(7), "enabled": false}},
 		{"browser.data.clear", map[string]any{"workspaceId": int64(7)}},
@@ -235,13 +244,10 @@ func TestBrowserCLI_Usage(t *testing.T) {
 	}
 }
 
-func TestBrowserCLI_AllowRmMissingHost(t *testing.T) {
+func TestBrowserCLI_AllowRmMissingHostShowsTheDaemonsRefusal(t *testing.T) {
 	t.Setenv("SMIND_RUN_ID", "")
 	calls := stubBrowserDaemon(t, func(method string, _ map[string]any) (any, error) {
-		if method != "browser.settings.get" {
-			return nil, fmt.Errorf("unexpected method %s", method)
-		}
-		return browserSettingsReply(true, []string{"a.test"}), nil
+		return nil, fmt.Errorf("browser.settings.set: host not in the allowlist: b.test")
 	})
 	var out, errb bytes.Buffer
 	if code := runBrowser(context.Background(), []string{"allow", "rm", "b.test", "--workspace", "7"}, &out, &errb); code != 1 {
@@ -250,8 +256,8 @@ func TestBrowserCLI_AllowRmMissingHost(t *testing.T) {
 	if !strings.Contains(errb.String(), "host not in the allowlist") {
 		t.Errorf("stderr %q", errb.String())
 	}
-	if len(*calls) != 1 {
-		t.Errorf("%d calls, want only the get: %+v", len(*calls), *calls)
+	if len(*calls) != 1 || (*calls)[0]["allowRemove"] == nil {
+		t.Errorf("want one allowRemove call: %+v", *calls)
 	}
 }
 
@@ -269,36 +275,5 @@ func TestBrowserCLI_PassesTheDaemonsRefusalThrough(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), `"bad host" is not a valid host`) {
 		t.Errorf("stderr %q, want the daemon's refusal text", errb.String())
-	}
-}
-
-func TestBrowserCLI_AllowRmFindsTheCanonicalHost(t *testing.T) {
-	t.Setenv("SMIND_RUN_ID", "")
-	settings := browserSettingsReply(true, []string{"intranet.test", "10.0.0.5"})
-	var lastSet []string
-	stubBrowserDaemon(t, func(method string, params map[string]any) (any, error) {
-		switch method {
-		case "browser.settings.get":
-			return settings, nil
-		case "browser.settings.set":
-			lastSet, _ = params["allowHosts"].([]string)
-			settings["allowHosts"] = params["allowHosts"]
-			return settings, nil
-		}
-		return nil, fmt.Errorf("unknown method %s", method)
-	})
-	var out, errb bytes.Buffer
-	run := func(args ...string) int {
-		out.Reset()
-		errb.Reset()
-		return runBrowser(context.Background(), args, &out, &errb)
-	}
-	// Adding a host that is already stored under its canonical spelling does not duplicate it.
-	if code := run("allow", "add", "INTRANET.test.", "--workspace", "1"); code != 0 || len(lastSet) != 2 {
-		t.Fatalf("add of an existing host (different spelling): code %d, sent %v, stderr %q", code, lastSet, errb.String())
-	}
-	// Removing by a different spelling finds the stored canonical host.
-	if code := run("allow", "rm", "Intranet.Test.", "--workspace", "1"); code != 0 || len(lastSet) != 1 || lastSet[0] != "10.0.0.5" {
-		t.Fatalf("rm by another spelling: code %d, sent %v, stderr %q", code, lastSet, errb.String())
 	}
 }
