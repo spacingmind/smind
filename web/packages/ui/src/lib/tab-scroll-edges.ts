@@ -8,9 +8,8 @@ export interface TabScrollEdges {
   end: boolean;
 }
 
-/** Which edges of a horizontally scrolling tab strip have more content beyond them. Both are false when it does not scroll. */
+/** Which edges of a horizontally scrolling tab strip have more content beyond them. Both are false when it does not scroll (nothing is beyond either edge). */
 export function tabScrollEdges(scrollLeft: number, clientWidth: number, scrollWidth: number): TabScrollEdges {
-  if (scrollWidth - clientWidth <= EDGE_EPSILON_PX) return { start: false, end: false };
   return {
     start: scrollLeft > EDGE_EPSILON_PX,
     end: scrollLeft + clientWidth < scrollWidth - EDGE_EPSILON_PX,
