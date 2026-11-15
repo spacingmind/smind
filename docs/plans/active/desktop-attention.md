@@ -112,7 +112,7 @@ and the PRs say so.
 
 - [x] spec
 - [x] A: click-through to the exact card (PR A)
-- [ ] B: questions and failed runs, dedupe, badge
+- [x] B: fixed bodies, questions and failed runs, dedupe, badge, consent and switches (PR B)
 - [ ] C: focus rules, coalescing, quiet while typing
 
 ## Validation
@@ -122,3 +122,12 @@ PR A: `route.rs` (card route, fallback kind, percent-encoding), `protocol.rs` an
 `vite build`. Mutations on committed code, all killed: stale-request check removed; card focus made to respect a focused text field; overlong card id
 accepted; fallback kind back to `task`; `route_for` never using the card route. Frames: 16 (light and dark, 1280 and 390) all opened.
 Not verified: a real OS notification and a real click (no real-window run); Windows and Linux click handlers (the same `navigate` path, compiled for macOS only).
+
+PR B: `protocol.rs` (fixed-body tests incl. the table test with a marker in every free-text field), `client.rs` (the separate question subscription), `attention.rs`,
+`dedupe.rs`, `app_settings.rs`, `notify_policy.rs`, `client_watch.rs` (`failed_runs_are_not_counted`), web `notifications-section.desktop.test.tsx`;
+daemon-client `cargo test` (317 lib tests plus integration), src-tauri `cargo test --lib` (193), web 480 files / 5406 tests, `tsc -b`, `vite build`.
+Mutations on committed code, all killed: consent check removed; a failed run counted toward the badge; the dedupe always "first time"; the dedupe never evicting;
+`run.status` "stopped" also notifying; the per-kind switches enabled before consent; turning on no longer sending the test banner.
+Frames: 16 (light and dark, 1280 and 390; the settings group before consent, on, one kind off, test failure) all opened, with a mocked Tauri bridge.
+One finding fixed on the way: the dedupe ran before the consent check, so a request that stayed silent before consent could never notify later.
+Not verified: a real OS notification, macOS's own permission prompt, and the Windows/Linux paths (macOS compiled only); no real window.

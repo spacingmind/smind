@@ -257,7 +257,7 @@ function DesktopNotificationsSection() {
 registerSettingsSection({
   id: "notifications",
   label: "Notifications",
-  description: "Browser notifications and sounds.",
+  description: isDesktop ? "When sMind may show a banner for something that needs you." : "Browser notifications and sounds.",
   // Ungrouped, so it sorts with General/Appearance above every group heading.
   order: 110,
   icon: <Icons.notifications aria-hidden className="size-3.5" />,
