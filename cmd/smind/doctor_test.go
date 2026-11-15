@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -285,5 +286,40 @@ func TestDoctorCrashesPrintableSite(t *testing.T) {
 	}
 	if !strings.Contains(out, "wsapi.?dispatch") {
 		t.Fatalf("site not passed through printable: %q", out)
+	}
+}
+
+func TestDoctorWarnsAboutDisabledAutoModeAndStripsControlBytes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a control byte cannot be part of a Windows file name")
+	}
+	doctorHome(t)
+	dir := filepath.Join(t.TempDir(), "cfg\x1b[31mred")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"cleanupPeriodDays":90,"permissions":{"disableAutoMode":"disable"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stubDoctor(t, nil, errors.New("down"))
+	code, out, _ := runDoctorCmd()
+	if code != 0 || !strings.Contains(out, "permissions.disableAutoMode") {
+		t.Fatalf("code %d out %q", code, out)
+	}
+	if strings.ContainsRune(out, 0x1b) {
+		t.Fatalf("doctor output carries an escape byte: %q", out)
+	}
+}
+
+func TestClaudeManagedSettingsPathsAreAbsolute(t *testing.T) {
+	got := claudeManagedSettingsPaths()
+	if len(got) == 0 {
+		t.Fatal("no managed settings path")
+	}
+	for _, p := range got {
+		if !strings.HasSuffix(p, "managed-settings.json") || !(strings.HasPrefix(p, "/") || strings.Contains(p, `:\`)) {
+			t.Fatalf("path %q is not an absolute managed-settings.json path", p)
+		}
 	}
 }
