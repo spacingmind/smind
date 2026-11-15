@@ -849,3 +849,12 @@ func TestPageStringsCannotStartALineWithAMarker(t *testing.T) {
 		t.Fatalf("exactly the two real boundary lines: %d in %q", starts, out)
 	}
 }
+
+// PR 4 may flip GateReady only when both transport hardenings (PR 3b) are done
+// and marked so in code. This test is that checklist: it fails the moment the
+// gate is opened without them.
+func TestGateReadyRequiresBothPrerequisites(t *testing.T) {
+	if GateReady && !(PrereqProxyAuth && PrereqRunSocket) {
+		t.Fatalf("browser.GateReady is true but the prerequisites are not done: proxy authentication=%v, per-run socket with peer credentials=%v (Human decision 2026-11-16)", PrereqProxyAuth, PrereqRunSocket)
+	}
+}
