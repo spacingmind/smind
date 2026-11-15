@@ -14,14 +14,13 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { useAutomationActions, useAutomations } from "@/hooks/use-automations";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { useLastDefined } from "@/hooks/use-last-defined";
-import { useWindowState } from "@/hooks/use-window-state";
+import { usePageLeftInset } from "@/hooks/use-page-chrome";
 import { automationState, fireOutcomeText, formatLocal, formatUtc, signalSummary } from "@/lib/automation-format";
 import type { AutomationAuditRow, AutomationView } from "@/lib/automation-types";
 import { Icons } from "@/lib/icons";
-import { desktopOS, isDesktop } from "@/lib/platform";
+import { isDesktop } from "@/lib/platform";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
-import { headerLeftInsetPx } from "@/lib/window-chrome";
 
 /** Tailwind `p-2`, which an inline `paddingLeft` replaces (see InboxScreen). */
 const BASE_PADDING_PX = 8;
@@ -114,8 +113,7 @@ export function AutomationsPage({ onNavigateBack, closeSettings }: { onNavigateB
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onNavigateBack]);
 
-  const { fullscreen } = useWindowState();
-  const leftInset = isDesktop ? headerLeftInsetPx(desktopOS, fullscreen, 0) : 0;
+  const leftInset = usePageLeftInset();
   const headerStyle = leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined;
 
   return (

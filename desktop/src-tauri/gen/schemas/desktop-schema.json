@@ -495,6 +495,12 @@
           "markdownDescription": "Enables the editors_list command without any pre-configured scope."
         },
         {
+          "description": "Enables the notify_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-notify-test",
+          "markdownDescription": "Enables the notify_test command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_external command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-external",
@@ -679,6 +685,12 @@
           "type": "string",
           "const": "deny-editors-list",
           "markdownDescription": "Denies the editors_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the notify_test command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-notify-test",
+          "markdownDescription": "Denies the notify_test command without any pre-configured scope."
         },
         {
           "description": "Denies the open_external command without any pre-configured scope.",

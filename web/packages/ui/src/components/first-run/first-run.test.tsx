@@ -78,7 +78,7 @@ async function type(el: HTMLElement, value: string) {
 beforeEach(() => {
   vi.resetAllMocks();
   desk.onDaemonProgress.mockReturnValue(() => {});
-  desk.appSettingsSet.mockResolvedValue({ onboardingCompleted: true, manageLocalDaemon: false });
+  desk.appSettingsSet.mockResolvedValue({ onboardingCompleted: true, manageLocalDaemon: false, notificationsOn: null, notifyPermission: true, notifyQuestion: true, notifyFailure: true });
   desk.selectConnection.mockResolvedValue(NEW_CONN);
   desk.daemonInstall.mockResolvedValue({ ...FREE, reachable: true, managedState: "managed", localService: "smind" });
 });

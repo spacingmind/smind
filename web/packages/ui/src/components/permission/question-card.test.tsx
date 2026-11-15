@@ -388,4 +388,30 @@ describe("QuestionCard: in-flight and failure states", () => {
     expect(within(card).getByTestId("question-submit")).toBeEnabled();
     expect(within(card).getByTestId("question-decline")).toBeEnabled();
   });
+
+  it("question-error-sits-above-submit-and-keeps-drafts", async () => {
+    const onAnswer = vi.fn().mockRejectedValue(new Error("boom"));
+    render(<QuestionCard runId="run-1" pending={pendingQuestion()} onAnswer={onAnswer} />);
+
+    answerAll(screen.getByTestId("question-card"));
+    fireEvent.change(screen.getByTestId("question-other-q2"), { target: { value: "cron jobs" } });
+    fireEvent.click(screen.getByTestId("question-submit"));
+    await flush();
+
+    // The error reads as a plain sentence with the detail on a second
+    // line, and sits after the fields, directly before Submit.
+    const error = screen.getByTestId("question-error");
+    expect(error).toHaveTextContent("Could not send your answer. Try again.");
+    expect(error).toHaveTextContent("boom");
+    const fields = screen.getByTestId("question-fields");
+    const submit = screen.getByTestId("question-submit");
+    expect(!!(fields.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(!!(error.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    // Every draft survives the failure and Submit is usable again.
+    expect(screen.getByTestId("question-option-q1-prod")).toBeChecked();
+    expect(screen.getByTestId("question-other-q2")).toHaveValue("cron jobs");
+    expect(screen.getByTestId("question-text-q3")).toHaveValue("thanks");
+    expect(submit).toBeEnabled();
+  });
 });

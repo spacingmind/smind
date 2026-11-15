@@ -44,7 +44,11 @@ pub struct Target {
 
 impl Target {
     pub fn task(task_id: i64) -> Self {
-        Self { task_id, chat_id: 0, request_id: None }
+        Self {
+            task_id,
+            chat_id: 0,
+            request_id: None,
+        }
     }
 }
 
@@ -66,7 +70,13 @@ pub fn show(ctx: ClickContext, title: String, body: String, target: Target) {
 /// terminal-independent Files fallback otherwise.
 pub fn route_for(proxy_url: &Url, workspace_id: i64, target: &Target) -> String {
     if target.chat_id > 0 {
-        route::card_route_url(proxy_url, workspace_id, target.task_id, target.chat_id, target.request_id.as_deref())
+        route::card_route_url(
+            proxy_url,
+            workspace_id,
+            target.task_id,
+            target.chat_id,
+            target.request_id.as_deref(),
+        )
     } else {
         route::task_route_url(proxy_url, workspace_id, target.task_id, route::DEFAULT_KIND)
     }
@@ -200,7 +210,9 @@ mod macos {
 
     use mac_notification_sys::{set_application, Notification, NotificationResponse};
 
-    use super::{fallback, navigate, should_wait_for_click, ClickContext, Target, MAX_CLICK_WAITERS};
+    use super::{
+        fallback, navigate, should_wait_for_click, ClickContext, Target, MAX_CLICK_WAITERS,
+    };
 
     static WAITERS: AtomicUsize = AtomicUsize::new(0);
 
@@ -294,16 +306,34 @@ mod tests {
     #[test]
     fn route_for_uses_the_card_route_with_a_chat() {
         let base = Url::parse("http://127.0.0.1:4648").unwrap();
-        let target = Target { task_id: 42, chat_id: 7, request_id: Some("req_9".to_string()) };
-        assert_eq!(route_for(&base, 3, &target), "http://127.0.0.1:4648/#/workspace/3/task/42/chat/7?card=req_9");
+        let target = Target {
+            task_id: 42,
+            chat_id: 7,
+            request_id: Some("req_9".to_string()),
+        };
+        assert_eq!(
+            route_for(&base, 3, &target),
+            "http://127.0.0.1:4648/#/workspace/3/task/42/chat/7?card=req_9"
+        );
     }
 
     #[test]
     fn route_for_falls_back_to_the_files_route_without_a_chat() {
         let base = Url::parse("http://127.0.0.1:4648").unwrap();
-        assert_eq!(route_for(&base, 3, &Target::task(42)), "http://127.0.0.1:4648/#/workspace/3/task/42/files");
         assert_eq!(
-            route_for(&base, 3, &Target { task_id: 42, chat_id: 0, request_id: Some("req_9".to_string()) }),
+            route_for(&base, 3, &Target::task(42)),
+            "http://127.0.0.1:4648/#/workspace/3/task/42/files"
+        );
+        assert_eq!(
+            route_for(
+                &base,
+                3,
+                &Target {
+                    task_id: 42,
+                    chat_id: 0,
+                    request_id: Some("req_9".to_string())
+                }
+            ),
             "http://127.0.0.1:4648/#/workspace/3/task/42/files"
         );
     }
@@ -311,9 +341,24 @@ mod tests {
     #[test]
     fn route_for_carries_the_request_id() {
         let base = Url::parse("http://127.0.0.1:4648").unwrap();
-        let with = Target { task_id: 42, chat_id: 7, request_id: Some("req 9".to_string()) };
-        assert!(route_for(&base, 3, &with).ends_with("?card=req+9"), "{}", route_for(&base, 3, &with));
-        let without = Target { task_id: 42, chat_id: 7, request_id: None };
-        assert_eq!(route_for(&base, 3, &without), "http://127.0.0.1:4648/#/workspace/3/task/42/chat/7");
+        let with = Target {
+            task_id: 42,
+            chat_id: 7,
+            request_id: Some("req 9".to_string()),
+        };
+        assert!(
+            route_for(&base, 3, &with).ends_with("?card=req+9"),
+            "{}",
+            route_for(&base, 3, &with)
+        );
+        let without = Target {
+            task_id: 42,
+            chat_id: 7,
+            request_id: None,
+        };
+        assert_eq!(
+            route_for(&base, 3, &without),
+            "http://127.0.0.1:4648/#/workspace/3/task/42/chat/7"
+        );
     }
 }

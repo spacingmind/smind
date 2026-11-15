@@ -94,7 +94,7 @@ describe('PermissionBoard (event/reducer behavior)', () => {
     });
     expect(board.list()[0]).toMatchObject({
       status: 'resolved',
-      resolvedWith: { optionId: 'deny', by: 'event' },
+      resolvedWith: { optionId: 'deny', by: 'event', reason: 'auto_safe' },
       error: null,
     });
   });
@@ -108,7 +108,7 @@ describe('PermissionBoard (event/reducer behavior)', () => {
       optionId: 'deny', // a timeout landed first server-side
       reason: 'timeout',
     });
-    expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny', by: 'event' });
+    expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny', by: 'event', reason: 'timeout' });
   });
 
   it('a request+resolved pair from run.logs history renders directly resolved, never interactive', () => {
@@ -120,7 +120,7 @@ describe('PermissionBoard (event/reducer behavior)', () => {
     const reqs = board.list();
     expect(reqs).toHaveLength(1);
     expect(reqs[0].status).toBe('resolved');
-    expect(reqs[0].resolvedWith).toEqual({ optionId: 'allow', by: 'event' });
+    expect(reqs[0].resolvedWith).toEqual({ optionId: 'allow', by: 'event', reason: 'human' });
   });
 
   it('a permission_resolved for an unknown requestId is ignored, not crashed on', () => {
@@ -197,7 +197,7 @@ describe('respondToPermission (tap flow, fake connection)', () => {
 
     await respondToPermission(conn, board, 'perm-1', 'allow');
     expect(calls).toEqual([]);
-    expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny', by: 'event' });
+    expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny', by: 'event', reason: 'human' });
   });
 });
 
@@ -316,5 +316,17 @@ describe('deny reason', () => {
       ['perm-1', 'always'],
       ['perm-1', 'odd'],
     ]);
+  });
+});
+
+describe('PermissionBoard resolution reason', () => {
+  it('resolved-event-after-a-tap-keeps-the-events-reason', () => {
+    const board = new PermissionBoard();
+    board.requestReceived('run-1', { requestId: 'rq-1', summary: 'Run it', options: [{ id: 'deny-1', label: 'Deny', kind: 'reject_once' }] });
+    board.choose('rq-1', 'deny-1');
+    board.resolvedEvent({ requestId: 'rq-1', optionId: 'deny-1', reason: 'human' });
+    expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny-1', by: 'event', reason: 'human' });
+    board.resolvedEvent({ requestId: 'rq-1', optionId: 'deny-1' });
+    expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny-1', by: 'event' });
   });
 });
