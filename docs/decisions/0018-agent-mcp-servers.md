@@ -15,7 +15,7 @@ are historical).
 smind spawns three kinds of agent backend from `internal/taskrunner.Runner`:
 ACP (GLM/Kimi, `internal/acp`), Claude Code native (`claude-agent-sdk-go`,
 vendored at `refs/../claude-agent-sdk-go` / locally cloned at
-`/home/longnp/Coding/personal/claude-agent-sdk-go`), and Codex native
+`/home/<user>/.../claude-agent-sdk-go`), and Codex native
 (`internal/codex`). None of them can hand the spawned agent an MCP server
 today:
 
