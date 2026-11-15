@@ -360,6 +360,15 @@ mod tests {
             "the command never touches main"
         );
         assert!(command.contains("get_webview_window(&label)"));
+        assert!(
+            command.contains("focus_window(&win)"),
+            "an existing task window is brought forward"
+        );
+        let before_create = command.split("create_task_window(").next().unwrap();
+        assert!(
+            before_create.contains("focus_window(&win)"),
+            "focus happens instead of creating a second window"
+        );
         let focus = body(src, "fn focus_window(");
         assert!(focus.contains("win.set_focus()"));
     }
