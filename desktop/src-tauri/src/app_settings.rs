@@ -295,10 +295,11 @@ mod tests {
 
     #[test]
     fn notification_defaults_are_not_asked_and_kinds_on() {
-        assert_eq!(AppSettings::FIRST_RUN.notifications_on, None);
-        assert!(AppSettings::FIRST_RUN.notify_permission);
-        assert!(AppSettings::FIRST_RUN.notify_question);
-        assert!(AppSettings::FIRST_RUN.notify_failure);
+        let defaults = AppSettings::FIRST_RUN;
+        assert_eq!(defaults.notifications_on, None);
+        assert!(defaults.notify_permission);
+        assert!(defaults.notify_question);
+        assert!(defaults.notify_failure);
     }
 
     #[test]
@@ -335,7 +336,7 @@ mod tests {
         assert!(s.notify_permission);
         assert!(s.notify_question);
         assert!(s.notify_failure);
-        assert_eq!(s.onboarding_completed, true);
-        assert_eq!(s.manage_local_daemon, false);
+        assert!(s.onboarding_completed);
+        assert!(!s.manage_local_daemon);
     }
 }

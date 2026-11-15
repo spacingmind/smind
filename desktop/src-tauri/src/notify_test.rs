@@ -3,7 +3,7 @@
 //! first notification is what makes macOS ask for its own permission,
 //! so it deliberately does not check the consent setting itself.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, State};
@@ -40,14 +40,17 @@ impl Limiter {
     }
 }
 
+/// Locks the limiter, taking the guard even from a poisoned mutex: the limiter holds only a timestamp, so a panic
+/// elsewhere must not turn every later call into a panic of its own.
+fn locked(limiter: &Mutex<Limiter>) -> MutexGuard<'_, Limiter> {
+    limiter.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[tauri::command]
 pub fn notify_test(app: AppHandle, state: State<'_, DesktopState>) -> Result<(), String> {
     static LIMITER: OnceLock<Mutex<Limiter>> = OnceLock::new();
-    let allowed = LIMITER
-        .get_or_init(|| Mutex::new(Limiter::new(TEST_WINDOW)))
-        .lock()
-        .unwrap()
-        .allow(Instant::now());
+    let allowed =
+        locked(LIMITER.get_or_init(|| Mutex::new(Limiter::new(TEST_WINDOW)))).allow(Instant::now());
     if !allowed {
         return Err("A test notification was just sent. Wait a few seconds and try again.".into());
     }
@@ -98,6 +101,31 @@ mod tests {
         assert!(
             l.allow(t0 + Duration::from_secs(5)),
             "still measured from the last allowed call"
+        );
+    }
+
+    #[test]
+    fn a_poisoned_lock_still_limits() {
+        let t0 = Instant::now();
+        let limiter = Mutex::new(Limiter::new(Duration::from_secs(5)));
+        // Poison it: a thread panics while holding the guard.
+        std::thread::scope(|scope| {
+            let result = scope
+                .spawn(|| {
+                    let _guard = limiter.lock().unwrap();
+                    panic!("poison the limiter");
+                })
+                .join();
+            assert!(result.is_err());
+        });
+        assert!(limiter.is_poisoned());
+        assert!(
+            locked(&limiter).allow(t0),
+            "a poisoned lock does not panic the next call"
+        );
+        assert!(
+            !locked(&limiter).allow(t0 + Duration::from_secs(1)),
+            "and it still limits"
         );
     }
 

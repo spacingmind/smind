@@ -6,7 +6,7 @@
 
 use smind_daemon_client::NotifyKind;
 
-use crate::app_settings::{AppSettings, AppSettingsPatch};
+use crate::app_settings::AppSettings;
 
 pub fn should_show(settings: &AppSettings, kind: NotifyKind) -> bool {
     settings.notifications_on == Some(true)
@@ -20,6 +20,7 @@ pub fn should_show(settings: &AppSettings, kind: NotifyKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_settings::AppSettingsPatch;
 
     fn consented() -> AppSettings {
         AppSettings::FIRST_RUN.apply(AppSettingsPatch {
