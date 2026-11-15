@@ -9,6 +9,7 @@ import {
   getTreeDepth,
   moveTabToPaneInLayout,
   normalizeLayout,
+  reorderTabInLayout,
   removeTabFromTree,
   splitPaneInLayout,
   type SplitNode,
@@ -311,3 +312,42 @@ describe("getTreeDepth", () => {
     expect(collectAllPanes(root)).toHaveLength(5);
   });
 });
+
+describe("reorderTabInLayout", () => {
+  const keys = (layout: TaskLayout | null, paneId = "primary") => collectAllPanes(layout!.root).find((p) => p.id === paneId)!.tabs.map((t) => t.key);
+  const base = (): TaskLayout => ({ root: pane("primary", [tab("a"), tab("b"), tab("c"), tab("d")], "b"), focusedPaneId: "primary" });
+  // slot = the insertion slot in the CURRENT order (0 before the first tab ... 4 after the last).
+  const cases: Array<[string, string, number, string[] | null]> = [
+    ["move the last tab to the front", "d", 0, ["d", "a", "b", "c"]],
+    ["move the first tab to the end", "a", 4, ["b", "c", "d", "a"]],
+    ["move a tab one slot to the right (slot after the next tab)", "b", 3, ["a", "c", "b", "d"]],
+    ["move a tab one slot to the left", "c", 1, ["a", "c", "b", "d"]],
+    ["dropped before itself: nothing changes", "b", 1, null],
+    ["dropped after itself: nothing changes", "b", 2, null],
+    ["a slot past the end clamps to the end", "a", 99, ["b", "c", "d", "a"]],
+    ["a negative slot clamps to the start", "d", -3, ["d", "a", "b", "c"]],
+    ["an unknown tab is ignored", "zzz", 0, null],
+  ];
+  it.each(cases)("%s", (_name, tabKey, toIndex, want) => {
+    const result = reorderTabInLayout({ layout: base(), paneId: "primary", tabKey, toIndex });
+    if (want === null) expect(result).toBeNull();
+    else expect(keys(result)).toEqual(want);
+  });
+
+  it("keeps the active tab and the focused pane, and leaves other panes alone", () => {
+    const layout: TaskLayout = {
+      root: group("g", "horizontal", [pane("left", [tab("a"), tab("b")], "b"), pane("right", [tab("x"), tab("y")], "x")], [0.5, 0.5]),
+      focusedPaneId: "right",
+    };
+    const result = reorderTabInLayout({ layout, paneId: "left", tabKey: "b", toIndex: 0 })!;
+    expect(keys(result, "left")).toEqual(["b", "a"]);
+    expect(keys(result, "right")).toEqual(["x", "y"]);
+    expect(collectAllPanes(result.root).find((p) => p.id === "left")!.activeKey).toBe("b");
+    expect(result.focusedPaneId).toBe("right");
+  });
+
+  it("an unknown pane is ignored", () => {
+    expect(reorderTabInLayout({ layout: base(), paneId: "nope", tabKey: "a", toIndex: 2 })).toBeNull();
+  });
+});
+

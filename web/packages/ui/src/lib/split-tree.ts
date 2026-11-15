@@ -874,6 +874,29 @@ export function moveTabToPaneInLayout(input: {
   };
 }
 
+/**
+ * Reorders a tab within its own pane: `toIndex` is the insertion slot in the CURRENT tab list (0 = before the first tab,
+ * `tabs.length` = after the last), the way a drop indicator between two tabs reads. Returns null when nothing would
+ * change (unknown pane or tab, or dropped where it already is).
+ */
+export function reorderTabInLayout(input: { layout: TaskLayout; paneId: string; tabKey: string; toIndex: number }): TaskLayout | null {
+  const pane = findPaneById(input.layout.root, input.paneId);
+  if (!pane) return null;
+  const from = pane.tabs.findIndex((t) => t.key === input.tabKey);
+  if (from === -1) return null;
+  const slot = Math.max(0, Math.min(pane.tabs.length, Math.trunc(input.toIndex)));
+  // Removing the tab shifts every later slot down by one.
+  const to = slot > from ? slot - 1 : slot;
+  if (to === from) return null;
+  const tabs = pane.tabs.slice();
+  const [moved] = tabs.splice(from, 1);
+  tabs.splice(to, 0, moved!);
+  return {
+    root: updatePaneInTree(input.layout.root, { paneId: input.paneId, updater: (p) => ({ ...p, tabs }) }),
+    focusedPaneId: input.layout.focusedPaneId,
+  };
+}
+
 export function focusPaneInLayout(input: { layout: TaskLayout; paneId: string }): TaskLayout | null {
   const pane = findPaneById(input.layout.root, input.paneId);
   if (!pane) {
