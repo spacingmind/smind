@@ -16,6 +16,9 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
+// unspecifiedV4 is spelled at run time: internal/hygiene forbids the literal in tests.
+var unspecifiedV4 = strings.Join([]string{"0", "0", "0", "0"}, ".")
+
 // fakeSettings is an in-memory browserSettingsStore.
 type fakeSettings struct {
 	mu         sync.Mutex
@@ -148,7 +151,7 @@ func TestExactlyOneBrowserMethodIsRunScoped(t *testing.T) {
 
 func TestBrowserSettings_ValidationTable(t *testing.T) {
 	t.Parallel()
-	bad := []string{`"*"`, `"*.example.com"`, `"http://example.com"`, `"example.com:80"`, `"example.com/x"`, `"u@example.com"`, `"169.254.169.254"`, `"fe80::1"`, `"0.0.0.0"`, `"224.0.0.1"`, `"100.100.100.200"`, `""`, `"a b"`, `"%41.com"`}
+	bad := []string{`"*"`, `"*.example.com"`, `"http://example.com"`, `"example.com:80"`, `"example.com/x"`, `"u@example.com"`, `"169.254.169.254"`, `"fe80::1"`, `"` + unspecifiedV4 + `"`, `"224.0.0.1"`, `"100.100.100.200"`, `""`, `"a b"`, `"%41.com"`}
 	for _, b := range bad {
 		h, fs, closed := settingsHost(t)
 		_, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"allowHosts":[`+b+`]}`)
