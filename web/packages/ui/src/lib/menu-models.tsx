@@ -93,6 +93,8 @@ export interface TabMenuInput {
   hasClosableTabsToRight: boolean;
   /** The kind can be moved to another pane (isMovableKind) AND the layout offers moving (more than one tab or pane). */
   canSplit: boolean;
+  /** The chat tab has a chat to archive (a tab without a chat id has nothing to act on: Archive chat is then disabled). */
+  canArchiveChat: boolean;
   onClose: () => void;
   onCloseOthers: () => void;
   onCloseLeft: () => void;
@@ -116,7 +118,16 @@ export function tabMenu(i: TabMenuInput): MenuEntry[] {
     entries.push({ kind: "item", id: "rename", label: "Rename", icon: <Icons.edit />, testId: "workspace-tab-menu-rename", onSelect: i.onRename });
   }
   if (i.kind === "chat") {
-    entries.push({ kind: "item", id: "archive-chat", label: "Archive chat", icon: <Icons.archive />, testId: "workspace-tab-menu-archive-chat", onSelect: i.onArchiveChat });
+    entries.push({
+      kind: "item",
+      id: "archive-chat",
+      label: "Archive chat",
+      icon: <Icons.archive />,
+      testId: "workspace-tab-menu-archive-chat",
+      enabled: i.canArchiveChat,
+      note: i.canArchiveChat ? undefined : "no chat yet",
+      onSelect: i.onArchiveChat,
+    });
   }
   const path = i.path;
   if (i.kind === "file" && path) {
@@ -158,6 +169,8 @@ export function taskRowMenu(
     spaces?: SpaceWithTasks[];
     onMoveTask?: (task: Task, spaceId: number | null) => void;
     isPinned: boolean;
+    /** The task is already marked unread (or has an unread marker): Mark unread has nothing to do. */
+    isUnread?: boolean;
     onTogglePin: (taskId: number) => void;
     onMarkUnread: (taskId: number) => void;
     onArchiveTask: (task: Task) => void;
@@ -168,7 +181,8 @@ export function taskRowMenu(
   },
 ): MenuEntry[] {
   const entries: MenuEntry[] = [];
-  if (o.onNewSubTask && !task.ArchivedAt) {
+  const archived = Boolean(task.ArchivedAt);
+  if (o.onNewSubTask) {
     entries.push({
       kind: "item",
       id: "new-subtask",
@@ -177,6 +191,9 @@ export function taskRowMenu(
       icon: <Icons.add />,
       onSelect: o.onNewSubTask,
       opensDialog: true,
+      enabled: !archived,
+      reachable: true,
+      note: archived ? "archived" : undefined,
     });
   }
   if (o.tree) {
@@ -248,6 +265,9 @@ export function taskRowMenu(
       testId: "sidebar-task-mark-unread-action",
       label: "Mark unread",
       icon: <Icons.statusIdle />,
+      enabled: !archived && o.isUnread !== true,
+      reachable: true,
+      note: archived ? "archived" : o.isUnread === true ? "already unread" : undefined,
       onSelect: () => o.onMarkUnread(task.ID),
     },
     {
@@ -256,6 +276,9 @@ export function taskRowMenu(
       testId: "sidebar-task-archive-action",
       label: "Archive task",
       icon: <Icons.archive />,
+      enabled: !archived,
+      reachable: true,
+      note: archived ? "already archived" : undefined,
       onSelect: () => o.onArchiveTask(task),
       opensDialog: true,
     },
@@ -263,14 +286,54 @@ export function taskRowMenu(
   return entries;
 }
 
+/** An item of a workspace or space row menu. */
+export interface RowMenuItem {
+  label: string;
+  icon: ReactNode;
+  onSelect: () => void;
+  /** Items that do not open a dialog keep the menu's exit animation. */
+  fadeOut?: boolean;
+  /** False greys the item out (with `note` as the reason). Default true. */
+  enabled?: boolean;
+  note?: string;
+}
+
+/** The workspace row's items (its ⋯ menu and its context menu share them). Reveal and Open-in-editor exist only on the desktop app's local daemon, and need the workspace to have a folder. */
+export function workspaceRowItems(i: {
+  path: string;
+  localPathActions: { revealLabel: string; editors: { id: string; label: string }[]; reveal: (path: string) => void; open: (editorId: string, path: string) => void } | null;
+  onAddTask: () => void;
+  onAddSpace: () => void;
+  onEditScripts: () => void;
+  onDeleteWorkspace: () => void;
+}): RowMenuItem[] {
+  const pa = i.localPathActions;
+  const hasFolder = i.path.trim() !== "";
+  const folder = { enabled: hasFolder, note: hasFolder ? undefined : "no folder" };
+  return [
+    { label: "Add task", icon: <Icons.add />, onSelect: i.onAddTask },
+    { label: "Add space", icon: <Icons.add />, onSelect: i.onAddSpace },
+    ...(pa
+      ? [
+          { label: pa.revealLabel, icon: <Icons.folderOpen />, onSelect: () => pa.reveal(i.path), fadeOut: true, ...folder },
+          ...pa.editors.map((editor) => ({ label: `Open in ${editor.label}`, icon: <Icons.externalLink />, onSelect: () => pa.open(editor.id, i.path), fadeOut: true, ...folder })),
+        ]
+      : []),
+    { label: "Worktree settings", icon: <Icons.terminal />, onSelect: i.onEditScripts },
+    { label: "Delete workspace", icon: <Icons.delete />, onSelect: i.onDeleteWorkspace },
+  ];
+}
+
 /** A workspace or space row's actions (the same items its ⋯ menu offers), as a model. Ids are positional (`item-<n>`), so two rows with the same label never collide; `fadeOut` items keep the menu's exit animation, the others close it instantly because they open a dialog. */
-export function rowMenu(items: { label: string; icon: ReactNode; onSelect: () => void; fadeOut?: boolean }[]): MenuEntry[] {
+export function rowMenu(items: RowMenuItem[]): MenuEntry[] {
   return items.map((item, index) => ({
     kind: "item" as const,
     id: `item-${index}`,
     label: item.label,
     icon: item.icon,
     opensDialog: item.fadeOut !== true,
+    enabled: item.enabled,
+    note: item.note,
     onSelect: item.onSelect,
   }));
 }

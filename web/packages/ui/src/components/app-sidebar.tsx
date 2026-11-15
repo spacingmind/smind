@@ -85,7 +85,7 @@ import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppContextMenu } from "@/components/ui/app-context-menu";
 import { MenuEntries, type MenuParts } from "@/components/ui/menu-entries";
-import { rowMenu, taskRowMenu } from "@/lib/menu-models";
+import { rowMenu, taskRowMenu, workspaceRowItems, type RowMenuItem } from "@/lib/menu-models";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1613,7 +1613,6 @@ function RowChevron({ open }: { open: boolean }) {
  * is how the row learns its menu is open so it stays mounted.
  */
 /** One entry of a workspace/space row menu. `fadeOut` keeps the menu's exit animation for items that do not open a dialog. */
-type RowMenuItem = { label: string; icon: ReactNode; onSelect: () => void; fadeOut?: boolean };
 
 function RowMenu({
   items,
@@ -1645,6 +1644,7 @@ function RowMenu({
         {items.map((item) => (
           <DropdownMenuItem
             key={item.label}
+            disabled={item.enabled === false}
             onSelect={() => {
               if (item.fadeOut !== true) setInstantClose(true);
               item.onSelect();
@@ -1718,28 +1718,14 @@ function WorkspaceItem({
   const flat = workspace.spaces.length === 0;
   const { attention, runStatus } = useRowSignal();
   const aggregate = aggregateStatus(workspaceTasks(workspace), attention, runStatus);
-  const items: RowMenuItem[] = [
-    { label: "Add task", icon: <Icons.add />, onSelect: () => onAddTask(null) },
-    { label: "Add space", icon: <Icons.add />, onSelect: onAddSpace },
-    ...(localPathActions
-      ? [
-          {
-            label: localPathActions.revealLabel,
-            icon: <Icons.folderOpen />,
-            onSelect: () => localPathActions.reveal(workspace.Path),
-            fadeOut: true,
-          },
-          ...localPathActions.editors.map((editor) => ({
-            label: `Open in ${editor.label}`,
-            icon: <Icons.externalLink />,
-            onSelect: () => localPathActions.open(editor.id, workspace.Path),
-            fadeOut: true,
-          })),
-        ]
-      : []),
-    { label: "Worktree settings", icon: <Icons.terminal />, onSelect: onEditScripts },
-    { label: "Delete workspace", icon: <Icons.delete />, onSelect: onDeleteWorkspace },
-  ];
+  const items = workspaceRowItems({
+    path: workspace.Path,
+    localPathActions,
+    onAddTask: () => onAddTask(null),
+    onAddSpace,
+    onEditScripts,
+    onDeleteWorkspace,
+  });
 
   const { active, rowProps, setMenuOpen } = useRowActive();
   const [contextInstantClose, setContextInstantClose] = useState(false);
@@ -2321,6 +2307,7 @@ const TaskRow = memo(function TaskRow({
     spaces,
     onMoveTask,
     isPinned: isTaskPinned,
+    isUnread,
     onTogglePin,
     onMarkUnread,
     onArchiveTask,

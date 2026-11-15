@@ -1,10 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { enabledIds, normalizeEntries, outline, toNative, type MenuEntry, type MenuItemEntry } from "@/lib/menu-model";
-import { dirRowMenu, fileRowMenu, rowMenu, tabMenu, taskRowMenu, type FileRowMenuInput, type TabMenuInput } from "@/lib/menu-models";
+import { dirRowMenu, fileRowMenu, rowMenu, tabMenu, taskRowMenu, workspaceRowItems, type FileRowMenuInput, type TabMenuInput } from "@/lib/menu-models";
 import type { Task } from "@/lib/types";
 
 const noop = () => {};
+
+/**
+ * The web fallback and the native menu must agree: the native descriptors carry exactly the model's enabled flags
+ * (by item id, submenus included, after the per-show namespace is stripped), and only enabled items have a handler.
+ */
+function expectNativeAgrees(menu: MenuEntry[]): void {
+  const flags = (list: readonly MenuEntry[]): Array<[string, boolean]> =>
+    list.flatMap((e): Array<[string, boolean]> => (e.kind === "item" ? [[e.id, e.enabled !== false]] : e.kind === "submenu" ? flags(e.children) : []));
+  const nativeFlags = (list: ReturnType<typeof toNative>["entries"]): Array<[string, boolean]> =>
+    list.flatMap((e): Array<[string, boolean]> => (e.kind === "item" ? [[e.id, e.enabled]] : e.kind === "submenu" ? nativeFlags(e.children) : []));
+  const { entries, handlers } = toNative(menu);
+  expect(nativeFlags(entries)).toEqual(flags(normalizeEntries(menu)));
+  expect([...handlers.keys()].sort()).toEqual([...enabledIds(menu)].sort());
+}
 
 // ---- helpers ---------------------------------------------------------------------------------------------
 
@@ -77,6 +91,7 @@ describe("fileRowMenu", () => {
     const menu = fileRowMenu({ ...base, ...over });
     expect(outline(menu)).toEqual(wantOutline);
     expect(enabledIds(menu)).toEqual(wantEnabled);
+    expectNativeAgrees(menu);
   });
 
   it("the Reveal and Open-in-editor handlers get the absolute path under the workspace root", () => {
@@ -106,11 +121,13 @@ describe("tabMenu", () => {
     hasClosableTabsToLeft: true,
     hasClosableTabsToRight: true,
     canSplit: true,
+    canArchiveChat: true,
     onClose: noop, onCloseOthers: noop, onCloseLeft: noop, onCloseRight: noop, onRename: noop, onArchiveChat: noop, onSplit: noop,
   };
   const SPLITS = ["split-left", "split-right", "split-up", "split-down"];
   const cases: Array<[string, Partial<TabMenuInput>, string[], string[]]> = [
     ["a chat tab with neighbours", {}, ["close", "close-others", "close-left", "close-right", "-", "rename", "archive-chat", "-", ...SPLITS], ["close", "close-others", "close-left", "close-right", "rename", "archive-chat", ...SPLITS]],
+    ["a chat tab with no chat id: Archive chat is off", { canArchiveChat: false }, ["close", "close-others", "close-left", "close-right", "-", "rename", "archive-chat(off)", "-", ...SPLITS], ["close", "close-others", "close-left", "close-right", "rename", ...SPLITS]],
     ["a chat tab that is not closable and alone", { closable: false, hasOtherClosableTabs: false, hasClosableTabsToLeft: false, hasClosableTabsToRight: false, canSplit: false }, ["close(off)", "close-others(off)", "close-left(off)", "close-right(off)", "-", "rename", "archive-chat"], ["rename", "archive-chat"]],
     ["the leftmost tab: nothing to the left", { hasClosableTabsToLeft: false }, ["close", "close-others", "close-left(off)", "close-right", "-", "rename", "archive-chat", "-", ...SPLITS], ["close", "close-others", "close-right", "rename", "archive-chat", ...SPLITS]],
     ["a terminal tab: rename, no archive", { kind: "terminal" }, ["close", "close-others", "close-left", "close-right", "-", "rename", "-", ...SPLITS], ["close", "close-others", "close-left", "close-right", "rename", ...SPLITS]],
@@ -122,6 +139,7 @@ describe("tabMenu", () => {
     const menu = tabMenu({ ...base, ...over });
     expect(outline(normalizeEntries(menu))).toEqual(wantOutline);
     expect(enabledIds(menu)).toEqual(wantEnabled);
+    expectNativeAgrees(menu);
   });
 
   it("each item calls its own handler", () => {
@@ -167,7 +185,8 @@ describe("taskRowMenu", () => {
     ["a plain task in search results: pin, mark unread, archive", task(), { ...o }, ["pin", "mark-unread", "archive"], ["pin", "mark-unread", "archive"]],
     ["a pinned task says Unpin (same id)", task(), { ...o, isPinned: true }, ["pin", "mark-unread", "archive"], ["pin", "mark-unread", "archive"]],
     ["in the tree provider: New sub-task first", task(), { ...o, onNewSubTask: noop }, ["new-subtask", "pin", "mark-unread", "archive"], ["new-subtask", "pin", "mark-unread", "archive"]],
-    ["an archived task offers no New sub-task", task({ ArchivedAt: "2026-01-01T00:00:00Z" } as never), { ...o, onNewSubTask: noop }, ["pin", "mark-unread", "archive"], ["pin", "mark-unread", "archive"]],
+    ["an archived task: New sub-task, Mark unread and Archive are off, Pin still works", task({ ArchivedAt: "2026-01-01T00:00:00Z" } as never), { ...o, onNewSubTask: noop }, ["new-subtask(off)", "pin", "mark-unread(off)", "archive(off)"], ["pin"]],
+    ["an already unread task: Mark unread is off", task(), { ...o, isUnread: true }, ["pin", "mark-unread(off)", "archive"], ["pin", "archive"]],
     ["ungrouped task with spaces: move to each space", task(), { ...o, spaces, onMoveTask: noop }, ["move>[move:1,move:2]", "pin", "mark-unread", "archive"], ["move:1", "move:2", "pin", "mark-unread", "archive"]],
     ["task in space 1: Ungrouped and the other space", task({ SpaceID: 1 } as never), { ...o, spaces, onMoveTask: noop }, ["move>[move:ungrouped,move:2]", "pin", "mark-unread", "archive"], ["move:ungrouped", "move:2", "pin", "mark-unread", "archive"]],
     ["an ungrouped task with no spaces: nowhere to move, no Move submenu", task(), { ...o, spaces: [] as never, onMoveTask: noop }, ["pin", "mark-unread", "archive"], ["pin", "mark-unread", "archive"]],
@@ -179,6 +198,7 @@ describe("taskRowMenu", () => {
     const menu = taskRowMenu(t, opts);
     expect(outline(menu)).toEqual(wantOutline);
     expect(enabledIds(menu)).toEqual(wantEnabled);
+    expectNativeAgrees(menu);
   });
 
   it("a disabled tree action stays reachable with its reason as the note", () => {
@@ -191,5 +211,29 @@ describe("taskRowMenu", () => {
     const label = (pinned: boolean) => taskRowMenu(task(), { ...o, isPinned: pinned }).find((e) => e.kind === "item" && e.id === "pin");
     expect(label(false)).toMatchObject({ label: "Pin" });
     expect(label(true)).toMatchObject({ label: "Unpin" });
+  });
+});
+
+// ---- workspace row (sidebar) -------------------------------------------------------------------------------------
+
+describe("workspaceRowItems", () => {
+  const local = { revealLabel: "Reveal in Finder", editors: [{ id: "zed", label: "Zed" }], reveal: noop, open: noop };
+  const base: { path: string; localPathActions: typeof local | null; onAddTask: () => void; onAddSpace: () => void; onEditScripts: () => void; onDeleteWorkspace: () => void } = { path: "/work/alpha", localPathActions: null, onAddTask: noop, onAddSpace: noop, onEditScripts: noop, onDeleteWorkspace: noop };
+  const cases: Array<[string, Partial<typeof base>, string[], string[]]> = [
+    ["a browser or remote workspace: no Reveal or editors", {}, ["item-0", "item-1", "item-2", "item-3"], ["item-0", "item-1", "item-2", "item-3"]],
+    ["the desktop app on its local daemon: Reveal and the editors", { localPathActions: local }, ["item-0", "item-1", "item-2", "item-3", "item-4", "item-5"], ["item-0", "item-1", "item-2", "item-3", "item-4", "item-5"]],
+    ["a workspace with no folder: Reveal and the editors are off", { path: "  ", localPathActions: local }, ["item-0", "item-1", "item-2(off)", "item-3(off)", "item-4", "item-5"], ["item-0", "item-1", "item-4", "item-5"]],
+  ];
+  it.each(cases)("%s", (_name, over, wantOutline, wantEnabled) => {
+    const menu = rowMenu(workspaceRowItems({ ...base, ...over }));
+    expect(outline(menu)).toEqual(wantOutline);
+    expect(enabledIds(menu)).toEqual(wantEnabled);
+    expectNativeAgrees(menu);
+  });
+
+  it("labels follow the actions in order and a disabled item keeps its reason", () => {
+    const items = workspaceRowItems({ ...base, path: "", localPathActions: local });
+    expect(items.map((i) => i.label)).toEqual(["Add task", "Add space", "Reveal in Finder", "Open in Zed", "Worktree settings", "Delete workspace"]);
+    expect(items[2]).toMatchObject({ enabled: false, note: "no folder" });
   });
 });
