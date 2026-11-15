@@ -47,6 +47,7 @@ pub fn install(cfg: Config) {
         // Compile every regex now, outside any hook (a panic in a hook aborts the process).
         redact::warm_up();
         report::warm_up();
+        redact::prime(cfg.home.as_deref(), cfg.smind_home.as_deref());
         let rec = Arc::new(Recorder::new(cfg));
         *RECORDER.lock().unwrap_or_else(|e| e.into_inner()) = Some(rec);
         HOOK.call_once(|| {

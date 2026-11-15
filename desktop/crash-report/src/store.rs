@@ -20,6 +20,9 @@ use crate::report;
 pub const SOURCE: &str = "desktop-shell";
 
 const MSG_MAX_BYTES: usize = 300;
+/// The raw backtrace is cut to this before redaction runs (it runs on the panicking thread, and a
+/// very deep stack must not make three regex passes take seconds); the report is cut to 64 KiB later.
+const MAX_RAW_STACK_BYTES: usize = 256 * 1024;
 const PANIC_TYPE_MAX_BYTES: usize = 200;
 const STACK_TRUNCATED: &str = "\n...[stack truncated]";
 const CRASH_PREFIX: &str = "crash-";
@@ -64,7 +67,7 @@ impl Config {
         Config {
             dir: dir.into(),
             version: version.into(),
-            home: std::env::var_os("HOME").map(PathBuf::from),
+            home: report::home_from_env().map(PathBuf::from),
             smind_home: None,
             now: SystemTime::now,
             limits: Limits::default(),
@@ -211,7 +214,7 @@ impl Recorder {
             "panicType": truncate(&redact(panic_type, home, smind_home), PANIC_TYPE_MAX_BYTES),
             "message": message,
             "messageWithheld": withheld,
-            "stack": redact(stack, home, smind_home),
+            "stack": redact(truncate(stack, MAX_RAW_STACK_BYTES).as_str(), home, smind_home),
             "suppressedSinceLast": suppressed,
         })
     }
@@ -277,6 +280,10 @@ impl Recorder {
             }
         }
 
+        if fs::symlink_metadata(&final_path).is_ok() {
+            // 100 reports in one millisecond: never overwrite one.
+            return Err(io::Error::other("no free report name"));
+        }
         let seq = {
             let mut st = self.lock_state();
             st.tmp_seq += 1;
@@ -362,7 +369,12 @@ impl Recorder {
 fn log_err() {
     static LOGGED: AtomicBool = AtomicBool::new(false);
     if !LOGGED.swap(true, Ordering::SeqCst) {
-        eprintln!("smind-crash-report: could not record a crash report");
+        // `eprintln!` PANICS when stderr fails (a closed pipe), and a panic inside a panic hook
+        // aborts the process: write and ignore the result instead.
+        let _ = io::Write::write_all(
+            &mut io::stderr(),
+            b"smind-crash-report: could not record a crash report\n",
+        );
     }
 }
 

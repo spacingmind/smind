@@ -4,74 +4,71 @@
 //! Go's `\b` is ASCII-only while Rust's is Unicode, so every `\b` in a Go
 //! pattern is written `(?-u:\b)` here; everything else is copied verbatim.
 
-// The statics below are fixed patterns, compiled eagerly by `warm_up` (called from `install`, outside
-// any panic hook) and checked by the golden test, so the hook path never compiles one.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 use regex::{Captures, NoExpand, Regex};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
+/// Compiles one of this module's fixed patterns. They are compiled eagerly by `warm_up` (called
+/// from `install`, outside any panic hook) and checked by the golden test, so the hook path never
+/// compiles one; the one `expect` lives here, not module-wide.
+#[allow(clippy::expect_used)]
+fn re(pattern: &str) -> Regex {
+    Regex::new(pattern).expect("fixed pattern")
+}
+
 static RE_UNIX_USER_DIR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)(?:/Users/|/home/)[\p{L}\p{N}_.'+@-]+(?: [\p{L}\p{N}_.'+@-]+)*|/root(?-u:\b)",
+    re(
+        r#"(?i)(?:/Users/|/home/)[^\t\n\f\r /\\:*?"<>|]+(?: [^\t\n\f\r /\\:*?"<>|]+)*|/root(?-u:\b)"#,
     )
-    .unwrap()
 });
 static RE_WINDOWS_USER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)[A-Za-z]:[\\/]Users[\\/][\p{L}\p{N}_.'+@-]+(?: [\p{L}\p{N}_.'+@-]+)*")
-        .unwrap()
+    re(r#"(?i)[A-Za-z]:[\\/]Users[\\/][^\t\n\f\r /\\:*?"<>|]+(?: [^\t\n\f\r /\\:*?"<>|]+)*"#)
 });
 static RE_BEARER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(?-u:\b)(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+").unwrap());
+    LazyLock::new(|| re(r"(?i)(?-u:\b)(?:bearer|basic)[\t\n\f\r ]+[A-Za-z0-9._~+/=-]+"));
 static RE_SK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?-u:\b)sk-[A-Za-z0-9_-]{8,}").unwrap());
+    LazyLock::new(|| re(r"(?-u:\b)sk-[A-Za-z0-9_-]{8,}"));
 static RE_GITHUB_TOKEN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?-u:\b)(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{16,}").unwrap());
+    LazyLock::new(|| re(r"(?-u:\b)(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{16,}"));
 static RE_GITHUB_PAT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?-u:\b)github_pat_[A-Za-z0-9_]{16,}").unwrap());
+    LazyLock::new(|| re(r"(?-u:\b)github_pat_[A-Za-z0-9_]{16,}"));
 static RE_AWS_KEY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?-u:\b)(?:AKIA|ASIA)[A-Z0-9]{16}(?-u:\b)").unwrap());
+    LazyLock::new(|| re(r"(?-u:\b)(?:AKIA|ASIA)[A-Z0-9]{16}(?-u:\b)"));
 static RE_JWT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?-u:\b)eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*").unwrap()
+    re(r"(?-u:\b)eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*")
 });
 static RE_KEY_VALUE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)(["']?[a-z0-9_-]*(?:token|secret|pass(?:word|wd|phrase)?|apikey|api[_-]key|authorization|cookie|credential|private[_-]?key)[a-z0-9_-]*["']?\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)"#,
+    re(
+        r#"(?i)(["']?[a-z0-9_-]*(?:token|secret|pass(?:word|wd|phrase)?|apikey|api[_-]key|authorization|cookie|credential|private[_-]?key)[a-z0-9_-]*["']?[\t\n\f\r ]*[=:][\t\n\f\r ]*)("[^"]*"|'[^']*'|[^\t\n\f\r ]+)"#,
     )
-    .unwrap()
 });
 static RE_AUTH_LINE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)(["']?(?:proxy-)?authorization["']?\s*[=:]\s*|(?-u:\b)(?:set-)?cookie["']?\s*[=:]\s*)[^\r\n]*"#,
+    re(
+        r#"(?i)(["']?(?:proxy-)?authorization["']?[\t\n\f\r ]*[=:][\t\n\f\r ]*|(?-u:\b)(?:set-)?cookie["']?[\t\n\f\r ]*[=:][\t\n\f\r ]*)[^\r\n]*"#,
     )
-    .unwrap()
 });
 static RE_SCHEME_CRED: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)((?-u:\b)(?:token|apikey|api-key|digest|negotiate|ntlm)\s+)[A-Za-z0-9._~+/=-]{12,}",
+    re(
+        r"(?i)((?-u:\b)(?:token|apikey|api-key|digest|negotiate|ntlm)[\t\n\f\r ]+)[A-Za-z0-9._~+/=-]{12,}",
     )
-    .unwrap()
 });
 static RE_URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(?-u:\b)([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@").unwrap()
+    re(r"(?i)(?-u:\b)([a-z][a-z0-9+.-]*://)[^/\t\n\f\r :@]+:[^/\t\n\f\r @]+@")
 });
 static RE_HEX_RUN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?-u:\b)[0-9a-fA-F]{32,}(?-u:\b)").unwrap());
+    LazyLock::new(|| re(r"(?-u:\b)[0-9a-fA-F]{32,}(?-u:\b)"));
 static RE_HIGH_ENTROPY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[A-Za-z0-9_-]{32,}").unwrap());
+    LazyLock::new(|| re(r"[A-Za-z0-9_-]{32,}"));
 static RE_PEM: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
+    re(
         r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
     )
-    .unwrap()
 });
 static RE_VENDOR_TOKENS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
+    re(
         r"(?-u:\b)xox[abprs]-[A-Za-z0-9-]{8,}|(?-u:\b)AIza[0-9A-Za-z_-]{30,}|(?-u:\b)glpat-[A-Za-z0-9_-]{16,}|(?-u:\b)npm_[A-Za-z0-9]{30,}|(?-u:\b)ya29\.[A-Za-z0-9._-]{20,}|(?-u:\b)[sr]k_(?:live|test)_[A-Za-z0-9]{12,}",
     )
-    .unwrap()
 });
 
 static PLAIN_SECRETS: [&LazyLock<Regex>; 9] = [
@@ -85,6 +82,25 @@ static PLAIN_SECRETS: [&LazyLock<Regex>; 9] = [
     &RE_JWT,
     &RE_HEX_RUN,
 ];
+
+fn strip_verbatim_prefix(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        p
+    }
+}
+
+/// Resolves the home paths now (`fs::canonicalize` can be slow on a network home), so the first
+/// report does not do that lookup inside the panic hook. `install` calls it.
+pub fn prime(home: Option<&Path>, smind_home: Option<&Path>) {
+    for p in [home, smind_home].into_iter().flatten() {
+        let _ = resolved_path(p);
+    }
+}
 
 /// Compiles every pattern now. `install` calls it before the panic hook exists: a panic inside
 /// a hook aborts the process, so no regex may be compiled for the first time inside one.
@@ -196,7 +212,9 @@ fn resolved_path(path: &Path) -> Option<PathBuf> {
     if let Some(hit) = cache.get(path) {
         return hit.clone();
     }
-    let real = std::fs::canonicalize(path).ok();
+    // On Windows canonicalize returns `\\?\C:\...` (or `\\?\UNC\server\share`), a form no backtrace
+    // prints: strip the prefix so the plain form of the resolved path is matched.
+    let real = std::fs::canonicalize(path).ok().map(strip_verbatim_prefix);
     cache.insert(path.to_path_buf(), real.clone());
     real
 }
@@ -256,8 +274,8 @@ fn redact_high_entropy_run(run: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::redact;
-    use std::path::Path;
+    use super::{redact, strip_verbatim_prefix};
+    use std::path::{Path, PathBuf};
 
     fn r(s: &str, home: &str, smind_home: &str) -> String {
         let home = (!home.is_empty()).then_some(Path::new(home));
@@ -351,5 +369,18 @@ mod tests {
         let twice = r(&once, "/home/tester", "/home/tester/.smind");
         assert_eq!(once, twice);
         assert_eq!(once, "token=[redacted] y and Authorization: [redacted]");
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped() {
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\C:\Users\x")),
+            PathBuf::from(r"C:\Users\x")
+        );
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\UNC\srv\share\x")),
+            PathBuf::from(r"\\srv\share\x")
+        );
+        assert_eq!(strip_verbatim_prefix(PathBuf::from("/home/x")), PathBuf::from("/home/x"));
     }
 }

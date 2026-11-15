@@ -357,6 +357,90 @@
     "want": "index out of range [5] with length 3"
   },
   {
+    "name": "user with parens",
+    "input": "C:\\Users\\jo(work)\\x.go",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "\u003cuser dir\u003e\\x.go"
+  },
+  {
+    "name": "user with tilde short name",
+    "input": "C:\\Users\\ALICEJ~1\\x.go",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "\u003cuser dir\u003e\\x.go"
+  },
+  {
+    "name": "user with dollar",
+    "input": "/Users/a$b/x.go",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "\u003cuser dir\u003e/x.go"
+  },
+  {
+    "name": "unc profile not matched",
+    "input": "\\\\srv\\home\\alice\\x",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "\\\\srv\\home\\alice\\x"
+  },
+  {
+    "name": "extended length prefix",
+    "input": "\\\\?\\C:\\Users\\carol\\x.go",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "\\\\?\\\u003cuser dir\u003e\\x.go"
+  },
+  {
+    "name": "crlf lines",
+    "input": "open /Users/bob/x.go\r\npassword=hunter2\r\nnext line",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "open \u003cuser dir\u003e/x.go\r\npassword=[redacted]\r\nnext line"
+  },
+  {
+    "name": "tabs around key value",
+    "input": "token\t=\tabc123def456",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "token\t=\t[redacted]"
+  },
+  {
+    "name": "unicode space after key",
+    "input": "password=hunter two rest",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "password=[redacted] rest"
+  },
+  {
+    "name": "nbsp after bearer",
+    "input": "Bearer abcdefghij123",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "Bearer abcdefghij123"
+  },
+  {
+    "name": "build machine cargo path",
+    "input": "/Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.40.0/src/x.rs:12",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "\u003cuser dir\u003e/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.40.0/src/x.rs:12"
+  },
+  {
+    "name": "rustc std path",
+    "input": "/rustc/0123456789abcdef0123456789abcdef01234567/library/core/src/option.rs:1 +0x10",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "/rustc/[redacted]/library/core/src/option.rs:1 +0x10"
+  },
+  {
+    "name": "very long clean line",
+    "input": "a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c ",
+    "home": "/home/tester",
+    "smindHome": "/home/tester/.smind",
+    "want": "a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c a.b.c "
+  },
+  {
     "name": "empty home",
     "input": "/home/tester/x and /Users/bob/y",
     "home": "",

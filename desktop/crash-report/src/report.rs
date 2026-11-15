@@ -68,14 +68,18 @@ fn env_nonempty(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
 }
 
-fn home_from_env() -> Option<String> {
-    if let Some(home) = env_nonempty("HOME") {
-        return Some(home);
-    }
-    if cfg!(windows) {
-        return env_nonempty("USERPROFILE");
-    }
-    None
+/// The home directory from the environment: `HOME`, and on Windows (where only
+/// `USERPROFILE` is normally set) that.
+pub(crate) fn home_from_env() -> Option<String> {
+    home_from(
+        cfg!(windows),
+        env_nonempty("HOME"),
+        env_nonempty("USERPROFILE"),
+    )
+}
+
+fn home_from(windows: bool, home: Option<String>, userprofile: Option<String>) -> Option<String> {
+    home.or(if windows { userprofile } else { None })
 }
 
 /// `os` in Go's vocabulary (`darwin`, not `macos`) so one reader handles the
@@ -219,6 +223,16 @@ pub fn dedupe_frame(stack: &str) -> String {
             continue;
         };
         if PANIC_MACHINERY.iter().any(|m| symbol.contains(m)) {
+            continue;
+        }
+        // The `#[cold]` helpers of the standard library that every `unwrap`/`expect`/index panic
+        // goes through (`core::option::unwrap_failed`, `core::slice::index::...`): the same
+        // frame for unrelated panics, so they cannot be the identity of one. A stripped build
+        // has `<unknown>` frames; those are skipped too (such panics dedupe by site only).
+        if ["core::", "alloc::", "std::", "<core::", "<alloc::", "<std::", "<unknown>"]
+            .iter()
+            .any(|p| symbol.starts_with(p))
+        {
             continue;
         }
         return HASH_SUFFIX.replace(symbol, "").into_owned();
@@ -406,5 +420,27 @@ mod tests {
         );
         // No frames at all.
         assert_eq!(dedupe_frame(""), "");
+    }
+
+    #[test]
+    fn dedupe_frame_skips_std_cold_helpers() {
+        // every unwrap/expect/index panic goes through the same std helper frame: it must not
+        // be the identity of the panic (two unrelated unwraps are two panics)
+        let a = "   0: smind_crash_report::hook\n   1: core::option::unwrap_failed\n   \
+                 2: my_app::ui::panel::render\n";
+        let b = "   0: smind_crash_report::hook\n   1: core::option::unwrap_failed\n   \
+                 2: my_app::tray::update\n";
+        assert_eq!(dedupe_frame(a), "my_app::ui::panel::render");
+        assert_eq!(dedupe_frame(b), "my_app::tray::update");
+        let stripped = "   0: <unknown>\n   1: <unknown>\n";
+        assert_eq!(dedupe_frame(stripped), "");
+    }
+
+    #[test]
+    fn home_falls_back_to_userprofile_on_windows_only() {
+        let up = Some(r"C:\Users\x".to_string());
+        assert_eq!(home_from(true, None, up.clone()), up);
+        assert_eq!(home_from(false, None, up.clone()), None);
+        assert_eq!(home_from(true, Some("/h".into()), up), Some("/h".to_string()));
     }
 }

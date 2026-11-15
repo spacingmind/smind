@@ -18,8 +18,8 @@ var (
 	// A user directory name may contain spaces ("C:\Users\Alice Smith"): take the
 	// whole component, words separated by single spaces, up to the next
 	// separator or any other character a name cannot hold.
-	reUnixUserDir = regexp.MustCompile(`(?i)(?:/Users/|/home/)[\p{L}\p{N}_.'+@-]+(?: [\p{L}\p{N}_.'+@-]+)*|/root\b`)
-	reWindowsUser = regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][\p{L}\p{N}_.'+@-]+(?: [\p{L}\p{N}_.'+@-]+)*`)
+	reUnixUserDir = regexp.MustCompile(`(?i)(?:/Users/|/home/)[^\s/\\:*?"<>|]+(?: [^\s/\\:*?"<>|]+)*|/root\b`)
+	reWindowsUser = regexp.MustCompile(`(?i)[A-Za-z]:[\\/]Users[\\/][^\s/\\:*?"<>|]+(?: [^\s/\\:*?"<>|]+)*`)
 	reBearer      = regexp.MustCompile(`(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+`)
 	reSK          = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}`)
 	reGitHubToken = regexp.MustCompile(`\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{16,}`)

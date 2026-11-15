@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +82,18 @@ func vectorInputs() []redactVector {
 		v("clean stack untouched", "goroutine 7 [running]:\ngithub.com/spacingmind/smind/internal/wsapi.(*conn).dispatch.func1()\n\t/usr/local/go/src/runtime/panic.go:787 +0x130\n"),
 		v("path in quoted value", `token="/home/tester/.smind/x y"`),
 		v("nothing to do", "index out of range [5] with length 3"),
+		v("user with parens", `C:\Users\jo(work)\x.go`),
+		v("user with tilde short name", `C:\Users\ALICEJ~1\x.go`),
+		v("user with dollar", "/Users/a$b/x.go"),
+		v("unc profile not matched", `\\srv\home\alice\x`),
+		v("extended length prefix", `\\?\C:\Users\carol\x.go`),
+		v("crlf lines", "open /Users/bob/x.go\r\npassword=hunter2\r\nnext line"),
+		v("tabs around key value", "token\t=\tabc123def456"),
+		v("unicode space after key", "password=hunter\u2003two rest"),
+		v("nbsp after bearer", "Bearer\u00a0abcdefghij123"),
+		v("build machine cargo path", "/Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.40.0/src/x.rs:12"),
+		v("rustc std path", "/rustc/0123456789abcdef0123456789abcdef01234567/library/core/src/option.rs:1 +0x10"),
+		v("very long clean line", strings.Repeat("a.b.c ", 400)),
 		{Name: "empty home", Input: "/home/tester/x and /Users/bob/y", Home: "", SmindHome: ""},
 		{Name: "root home ignored", Input: "/etc/passwd /home/tester", Home: "/", SmindHome: ""},
 		{Name: "trailing slash home", Input: "/home/tester/x", Home: "/home/tester/", SmindHome: ""},
