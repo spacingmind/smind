@@ -542,11 +542,11 @@ func TestProtocolClosedSet(t *testing.T) {
 		"bad json":            "{not json}\n",
 		"no tool":             "{\"args\":{}}\n",
 		"empty tool":          "{\"tool\":\"\"}\n",
-		"huge tool name":      "{\"tool\":\"" + strings.Repeat("a", MaxToolNameBytes+1) + "\"}\n",
+		"huge tool name":      "{\"tool\":\"" + strings.Repeat("a", 65) + "\"}\n",
 		"trailing data":       "{\"tool\":\"browser_tabs\"} {\"tool\":\"x\"}\n",
 		"array":               "[\"browser_tabs\"]\n",
-		"oversize line":       "{\"tool\":\"browser_open\",\"args\":{\"url\":\"" + strings.Repeat("a", MaxRequestBytes) + "\"}}\n",
-		"oversize no newline": strings.Repeat("a", MaxRequestBytes+100),
+		"oversize line":       "{\"tool\":\"browser_open\",\"args\":{\"url\":\"" + strings.Repeat("a", 16<<10) + "\"}}\n",
+		"oversize no newline": strings.Repeat("a", 16<<10+100),
 	}
 	for name, line := range bad {
 		if reply, closed := roundTrip(t, path, line); !closed {
@@ -557,7 +557,7 @@ func TestProtocolClosedSet(t *testing.T) {
 		t.Fatalf("a bad request never reaches the handler: %+v", *calls)
 	}
 	// The biggest legal request is served.
-	pad := strings.Repeat("a", MaxRequestBytes-60)
+	pad := strings.Repeat("a", 16<<10-60)
 	if reply, closed := roundTrip(t, path, "{\"tool\":\"browser_tabs\",\"args\":{\"p\":\""+pad+"\"}}\n"); closed || !strings.Contains(reply, `"result"`) {
 		t.Fatalf("a request just under the cap is served: closed=%v %.80q", closed, reply)
 	}
@@ -598,7 +598,8 @@ func TestProtocolConnectionCap(t *testing.T) {
 			c.Close()
 		}
 	}()
-	for i := 0; i < maxConnsPerRun; i++ {
+	const cap = 8 // the documented per-run connection cap, not the constant under test
+	for i := 0; i < cap; i++ {
 		c, err := net.Dial("unix", path)
 		if err != nil {
 			t.Fatal(err)
