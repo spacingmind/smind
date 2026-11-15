@@ -20,6 +20,7 @@ import {
   type RowShellProps,
 } from "@/components/pickers/provider-model-picker-rows";
 import { pillTriggerClass } from "@/components/composer/pill-class";
+import { ProviderRail, type ProviderRailHandle } from "@/components/pickers/provider-rail";
 import { cn } from "@/lib/utils";
 import { ProviderIcon } from "@/components/provider-icon";
 import { Button } from "@/components/ui/button";
@@ -47,7 +48,10 @@ import { StatusDot } from "@/components/ui/status-dot";
 // Combined provider + model picker (docs/plans/completed/model-picker-reference-parity.md),
 // a port of Paseo's combined-model-selector / model-browser: opens on the
 // current provider's view, root = Profiles band + Providers drill-down, search
-// at both levels. Popover on desktop, bottom Sheet below md.
+// at both levels. Popover on desktop, bottom Sheet below md. On the desktop
+// popover with more than one provider a rail of provider icons replaces the root
+// list and the Back button (chat-surface-ui decision 6): the rail picks the
+// provider whose models fill the right column, and typing searches every provider.
 
 export type { PickerProfileRow };
 
@@ -182,6 +186,12 @@ function modelEntries(rows: ModelRow[], qualified: boolean): PickerEntry[] {
   return rows.map((row) => ({ kind: "model", key: `model-${row.key}`, row, qualified }));
 }
 
+/** The rail needs a provider selected: the first one that can start a run, else the first. */
+function railFallbackView(providers: BrowserProvider[]): ModelBrowserView {
+  const pick = providers.find((p) => !p.unavailableReason) ?? providers[0]!;
+  return { kind: "provider", providerId: pick.id, providerLabel: pick.label };
+}
+
 /** A stable empty list (a fresh `[]` default per render would re-run every memo keyed on it). */
 const NO_PROFILE_ROWS: PickerProfileRow[] = [];
 
@@ -224,6 +234,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
   const [view, setView] = useState<ModelBrowserView>({ kind: "all" });
   const [inputFocused, setInputFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const railRef = useRef<ProviderRailHandle>(null);
 
   const visibleProviders = useMemo(
     () => (boundProvider ? providers.filter((p) => p.id === boundProvider) : providers),
@@ -245,7 +256,9 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
   const selectedGate = gated(selectedRow?.gate ?? selectedProviderEntry?.gate);
   const baseTitle = resolveTriggerTitle(triggerArgs);
   const title = selectedGate ? `${baseTitle} — ${gateReasonText(selectedGate, now)}` : baseTitle;
-  const canGoBack = view.kind === "provider" && visibleProviders.length > 1;
+  // The rail (desktop popover, several providers) stands in for the root list: no Back, the view is always a provider's.
+  const railMode = !isMobile && visibleProviders.length > 1;
+  const canGoBack = view.kind === "provider" && visibleProviders.length > 1 && !railMode;
   const hasProfiles = onApplyProfile !== undefined;
   const normalizedQuery = query.trim().toLowerCase();
   // On the sheet the keyboard covers the list, so focusing an empty search shows every model (Paseo searchAllOnFocus).
@@ -265,14 +278,16 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
       }
       setQuery("");
       setActiveIndex(0);
-      setView(resolveInitialModelBrowserView({ providers: visibleProviders, selectedProvider }));
+      const initial = resolveInitialModelBrowserView({ providers: visibleProviders, selectedProvider });
+      setView(railMode && initial.kind === "all" ? railFallbackView(visibleProviders) : initial);
       onOpen?.();
     },
-    [visibleProviders, selectedProvider, onOpen],
+    [visibleProviders, selectedProvider, onOpen, railMode],
   );
 
   const body = useMemo<BodyState>(() => {
-    if (view.kind === "provider") {
+    // With the rail, typing searches every provider (the results are qualified rows), the rail keeps its selection.
+    if (view.kind === "provider" && !(railMode && normalizedQuery)) {
       const provider = visibleProviders.find((p) => p.id === view.providerId);
       const selection = provider?.modelSelection;
       if (selection?.kind === "loading" || selection?.kind === "error") {
@@ -320,7 +335,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
       entries.push({ kind: "provider", key: `provider-${provider.id}`, provider });
     }
     return { kind: "entries", band: hasProfiles ? bandEntries(profileRows, baseAgentId) : [], entries };
-  }, [view, visibleProviders, normalizedQuery, query, searchFocused, profileRows, baseAgentId, hasProfiles]);
+  }, [view, visibleProviders, normalizedQuery, query, searchFocused, profileRows, baseAgentId, hasProfiles, railMode]);
 
   // Popover height follows the browse layout of the view, not the search results, so typing doesn't resize it.
   const extraRows = useMemo(() => {
@@ -329,6 +344,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
     if (!hasProfiles) return 1 + (boundProvider ? 1 : 0);
     return 1 + (baseAgentId !== null ? 1 : 0) + Math.max(profiles.length, 1) + 1 + (boundProvider ? 1 : 0);
   }, [view, profileRows, baseAgentId, boundProvider, hasProfiles]);
+  // Capped at DESKTOP_PROVIDER_VIEW_MAX_HEIGHT (decision 7): it opens upward over the transcript, so a pending card stays partly visible.
   const popoverHeight = resolveDesktopFixedHeight(view, visibleProviders, extraRows);
 
   // Arrow keys walk the rows that can be activated; headings, health-disabled providers and row action buttons are skipped.
@@ -380,6 +396,10 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
         onClearCooldown?.(providerId);
         return;
       case "pick_provider":
+        if (railMode) {
+          railRef.current?.focusSelected();
+          return;
+        }
         setView({ kind: "all" });
         setQuery("");
         setActiveIndex(0);
@@ -521,10 +541,22 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
     } else if ((e.key === "ArrowLeft" || e.key === "Backspace") && query === "" && canGoBack) {
       e.preventDefault();
       goBack();
+    } else if ((e.key === "ArrowLeft" || e.key === "Backspace") && query === "" && railMode) {
+      // The rail is to the left of the search: step into it.
+      e.preventDefault();
+      railRef.current?.focusSelected();
     }
   };
 
   const inProviderView = view.kind === "provider";
+  const searchingAll = railMode && normalizedQuery !== "";
+  const selectRailProvider = (providerId: string) => {
+    const p = visibleProviders.find((x) => x.id === providerId);
+    if (!p) return;
+    setView({ kind: "provider", providerId, providerLabel: p.label });
+    setQuery("");
+    setActiveIndex(0);
+  };
   const viewProvider = view.kind === "provider" ? visibleProviders.find((p) => p.id === view.providerId) : undefined;
   const boundLabel = boundProvider ? providerLabel(boundProvider, providers.filter((p) => p.id === boundProvider)) : null;
 
@@ -592,8 +624,8 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
   const content = (
     <>
       <PickerHeader
-        title={view.kind === "provider" ? view.providerLabel : "Select model"}
-        providerId={view.kind === "provider" ? view.providerId : undefined}
+        title={searchingAll ? "All providers" : view.kind === "provider" ? view.providerLabel : "Select model"}
+        providerId={view.kind === "provider" && !searchingAll ? view.providerId : undefined}
         onBack={canGoBack ? goBack : undefined}
         onProviderSettings={
           view.kind === "provider" && onOpenProviderSettings
@@ -632,7 +664,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
           onBlur={() => setInputFocused(false)}
           onKeyDown={onKeyDown}
           aria-label="Search models"
-          placeholder={inProviderView ? "Search models…" : "Search all models…"}
+          placeholder={inProviderView && !railMode ? "Search models…" : "Search all models…"}
           data-testid="model-search-input"
           role="combobox"
           aria-expanded
@@ -739,12 +771,20 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
       <PopoverContent
         side={variant === "field" ? "bottom" : "top"}
         align="start"
-        className="flex w-[22rem] flex-col rounded-xl bg-menu p-0 overflow-hidden"
+        className={cn("flex flex-col rounded-xl bg-menu p-0 overflow-hidden", railMode ? "w-[25rem] flex-row" : "w-[22rem]")}
         style={{ height: `min(${popoverHeight}px, var(--radix-popover-content-available-height))` }}
         data-testid="model-picker-popover"
         onOpenAutoFocus={focusInput}
       >
-        {content}
+        {railMode && view.kind === "provider" && (
+          <ProviderRail
+            ref={railRef}
+            providers={visibleProviders}
+            selectedId={view.providerId}
+            onSelect={selectRailProvider}
+          />
+        )}
+        {railMode ? <div className="flex min-h-0 min-w-0 flex-1 flex-col">{content}</div> : content}
       </PopoverContent>
     </Popover>
   );
