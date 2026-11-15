@@ -17,7 +17,7 @@ import (
 )
 
 // maxQueuedBytes bounds the events waiting in the session queues.
-var maxQueuedBytes int64 = 32 << 20
+const maxQueuedBytes int64 = 32 << 20
 
 // Session errors.
 var (
@@ -110,6 +110,7 @@ type Session struct {
 	lifecycle chan Event   // attach, detach, dialog, download: handled in order
 	requests  chan Event   // Fetch.requestPaused: handled by a bounded pool
 	qbytes    atomic.Int64 // bytes waiting in the two queues
+	maxQueued int64        // the budget for qbytes (a field so a test can lower it)
 
 	closeOnce sync.Once
 }
@@ -149,6 +150,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		tabs:      map[string]*tabState{},
 		loads:     map[string]chan struct{}{},
 		dns:       map[string]dnsEntry{},
+		maxQueued: maxQueuedBytes,
 		lifecycle: make(chan Event, 256),
 		requests:  make(chan Event, requestQueue),
 	}
@@ -313,7 +315,7 @@ func (s *Session) eventLoop() {
 				}
 			}
 		case "Fetch.requestPaused":
-			if s.qbytes.Add(int64(ev.size)) > maxQueuedBytes {
+			if s.qbytes.Add(int64(ev.size)) > s.maxQueued {
 				s.note("blocked", "request flood: the session was closed")
 				go s.Close()
 				continue
@@ -327,7 +329,7 @@ func (s *Session) eventLoop() {
 				go s.Close()
 			}
 		case "Target.attachedToTarget", "Target.detachedFromTarget", "Page.javascriptDialogOpening", "Browser.downloadWillBegin":
-			if s.qbytes.Add(int64(ev.size)) > maxQueuedBytes {
+			if s.qbytes.Add(int64(ev.size)) > s.maxQueued {
 				go s.Close()
 				continue
 			}

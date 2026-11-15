@@ -784,12 +784,10 @@ func TestManagerChangedConfigRestartsTheSession(t *testing.T) {
 }
 
 func TestSessionRequestBacklogClosesTheSession(t *testing.T) {
-	old := maxQueuedBytes
-	maxQueuedBytes = 1
-	defer func() { maxQueuedBytes = old }()
 	s, l := startTestSession(t, nil)
 	f, inst := l.last()
-	attachReady(t, f, "S1", "T1", 1) // lifecycle events also count, so this may already trip it
+	attachReady(t, f, "S1", "T1", 1)
+	s.maxQueued = 1
 	f.event("S1", "Fetch.requestPaused", map[string]any{"requestId": "r", "request": map[string]any{"url": "http://localhost/"}})
 	deadline := time.Now().Add(2 * time.Second)
 	for !(s.Closed() && inst.closed.Load()) && time.Now().Before(deadline) {
