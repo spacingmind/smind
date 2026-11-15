@@ -159,6 +159,10 @@ func TestProxyForwardsAllowedHTTP(t *testing.T) {
 	if gotHost != fmt.Sprintf("127.0.0.1:%d", srv.port) {
 		t.Fatalf("host header %q", gotHost)
 	}
+	// No connection is reused: a second request dials again, through the policy.
+	if code, _ := rig.get(t, fmt.Sprintf("http://127.0.0.1:%d/again", srv.port)); code != 200 || len(rig.dials.list()) != 2 {
+		t.Fatalf("every request must be vetted and dialled afresh: dials %v", rig.dials.list())
+	}
 	// By name: resolved by the proxy, dialled to the vetted IP.
 	code, _ = rig.get(t, fmt.Sprintf("http://localhost:%d/", srv.port))
 	if code != 200 {
@@ -199,6 +203,11 @@ func TestProxyRefusesDeniedAndUnlistedTargets(t *testing.T) {
 	}
 	rig.mu.Lock()
 	defer rig.mu.Unlock()
+	for _, r := range rig.refuse {
+		if strings.Contains(r, "SECRETVALUE") || strings.Contains(r, "frag") {
+			t.Fatalf("a refusal notice must not carry the query or fragment: %q", r)
+		}
+	}
 	if len(rig.refuse) != len(cases) {
 		t.Fatalf("every refusal is reported once: %d of %d", len(rig.refuse), len(cases))
 	}
@@ -466,6 +475,8 @@ func TestProxyCloseEndsListenerAndTunnels(t *testing.T) {
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	if _, err := br.ReadByte(); err == nil {
 		t.Fatal("Close must end open tunnels")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("Close left the tunnel open")
 	}
 	if conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
 		_ = conn.Close()
@@ -552,3 +563,19 @@ func TestSessionStartFailureStopsTheProxy(t *testing.T) {
 type launcherFunc func(ctx context.Context, o LaunchOpts) (Instance, error)
 
 func (f launcherFunc) Launch(ctx context.Context, o LaunchOpts) (Instance, error) { return f(ctx, o) }
+
+func TestProxyRefusesAnUpgradeOverAPlainRequest(t *testing.T) {
+	srv := newHitServer(t, nil)
+	rig := newProxyRig(t, nil, proxyResolver, nil)
+	c, err := net.Dial("tcp", rig.px.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+	fmt.Fprintf(c, "GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: close, Upgrade\r\n\r\n", srv.port)
+	line, _ := bufio.NewReader(c).ReadString('\n')
+	if !strings.Contains(line, "501") || srv.hits.Load() != 0 {
+		t.Fatalf("an upgrade must arrive as CONNECT (and be vetted there): %q hits=%d", strings.TrimSpace(line), srv.hits.Load())
+	}
+}
