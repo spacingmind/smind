@@ -183,3 +183,42 @@ func TestSchemaHasBrowserSettings(t *testing.T) {
 		s.Close()
 	}
 }
+
+// A database written before browser_settings existed (the table is absent, the
+// rest is the previous schema) opens with the new code: the table appears and
+// the old rows are untouched.
+func TestSchemaOlderDatabaseGainsBrowserSettings(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "older.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := browserSettingsWorkspace(t, s)
+	if _, err := s.db.Exec(`DROP TABLE browser_settings`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'browser_settings'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("the older database must not have the table: %d %v", n, err)
+	}
+	s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("opening the older database: %v", err)
+	}
+	defer s.Close()
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'browser_settings'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("browser_settings must exist after Open: %d %v", n, err)
+	}
+	if w, err := s.GetWorkspace(ws); err != nil || w.Title != "W" {
+		t.Fatalf("old data intact: %+v %v", w, err)
+	}
+	if got, err := s.GetBrowserSettings(ws); err != nil || got.Enabled {
+		t.Fatalf("a workspace of the older database is off: %+v %v", got, err)
+	}
+	if err := s.SaveBrowserSettings(BrowserSettings{WorkspaceID: ws, Enabled: true, AllowHosts: []string{"a.test"}, ProfileMode: "ephemeral", UpdatedBy: "local", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("the new table is usable: %v", err)
+	}
+}

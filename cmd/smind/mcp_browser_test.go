@@ -151,6 +151,14 @@ func TestBrowserMCP_ToolSetIsPinned(t *testing.T) {
 			t.Errorf("%s ReadOnlyHint = %v, want %v", tool.Name, tool.Annotations, want)
 		}
 	}
+	// The settings surface is human-only: no tool of the child may reach it.
+	for _, name := range got {
+		for _, bad := range []string{"settings", "enable", "disable", "allow", "data", "clear"} {
+			if strings.Contains(name, bad) {
+				t.Errorf("tool %q looks like the human-only browser settings surface", name)
+			}
+		}
+	}
 	for _, forbidden := range []string{
 		"browser_evaluate", "browser_upload", "browser_download", "browser_click",
 		"browser_fill", "browser_type", "browser_press", "browser_scroll",

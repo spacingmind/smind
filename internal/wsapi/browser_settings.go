@@ -262,4 +262,8 @@ func browserLocalOnly(method string, h handlerFunc) handlerFunc {
 }
 
 // closeWorkspace ends the workspace's browser session, if it has one.
-func (h *browserHost) closeWorkspace(ws int64) { h.closeSession(ws) }
+func (h *browserHost) closeWorkspace(ws int64) {
+	h.gateMu.Lock()
+	defer h.gateMu.Unlock()
+	h.closeSession(ws)
+}

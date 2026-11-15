@@ -110,6 +110,53 @@ func TestBrowserPolicy_RowOnlyWhenAllGatesHold(t *testing.T) {
 	}
 }
 
+// The REAL store-backed switch (the one the daemon installs), with the package
+// gate opened for the test only: the row exists exactly when the workspace flag
+// is on and the kill switch is off.
+func TestBrowserPolicy_StoreBackedSwitch(t *testing.T) {
+	reg, r, task := browserFixture(t)
+	withGate(t, true)
+	kill := false
+	reg.SetBrowserGate(StoreBrowserGate(reg.st, func() bool { return kill }))
+	hasRow := func() bool {
+		c := taskrunner.RunContractFrom(reg.withBrowserPolicy(context.Background(), r))
+		return c.Mcp != nil && c.Mcp.Browser != nil
+	}
+	save := func(on bool) {
+		t.Helper()
+		if err := reg.st.SaveBrowserSettings(store.BrowserSettings{WorkspaceID: task.WorkspaceID, Enabled: on, AllowHosts: []string{}, ProfileMode: "ephemeral", UpdatedBy: "local", UpdatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if hasRow() {
+		t.Fatal("no row in the store: no browser")
+	}
+	save(true)
+	if !hasRow() {
+		t.Fatal("flag on, kill switch off, an ordinary run: the row must be present")
+	}
+	kill = true
+	if hasRow() {
+		t.Fatal("the kill switch beats the workspace flag")
+	}
+	kill = false
+	save(false)
+	if hasRow() {
+		t.Fatal("flag off: no browser")
+	}
+	save(true)
+	if !hasRow() {
+		t.Fatal("flag back on")
+	}
+	// A deleted workspace: the row cascades away and the run gets nothing.
+	if err := reg.st.DeleteWorkspace(task.WorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if hasRow() || reg.BrowserSwitchOn(task.WorkspaceID) {
+		t.Fatal("a deleted workspace has no browser")
+	}
+}
+
 func TestRunIsRunning(t *testing.T) {
 	t.Parallel()
 	wm, st := newTestWorkspaceManager(t)

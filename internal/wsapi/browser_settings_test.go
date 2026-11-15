@@ -3,6 +3,7 @@ package wsapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/permpolicy"
@@ -220,6 +222,9 @@ func TestBrowserSettings_EachLayerRefusesOnItsOwn(t *testing.T) {
 	h, fs, _ := settingsHost(t)
 	raw := json.RawMessage(`{"workspaceId":1,"enabled":true}`)
 	for name, fn := range map[string]handlerFunc{"get": h.settingsGet, "set": h.settingsSet, "clear": h.dataClear} {
+		if _, err := fn(context.Background(), nil, raw); err == nil {
+			t.Errorf("%s: the raw handler accepted a nil context", name)
+		}
 		if _, err := fn(context.Background(), &requestContext{local: true, runScoped: true}, raw); err == nil {
 			t.Errorf("%s: a local run-scoped context must be refused by the handler itself", name)
 		}
@@ -354,11 +359,13 @@ func TestBrowserSettings_SetClosesTheSessionAndRecordsTheActor(t *testing.T) {
 	if v.UpdatedBy != "local" || fs.rows[2].UpdatedBy != "local" || v.UpdatedAt == nil {
 		t.Fatalf("the actor and time are recorded: %+v", v)
 	}
+	// The relay never reaches the handler (browserLocalOnly), so this only pins
+	// how the actor string is derived for a context that carries a device id.
 	if _, err := setCall(h, &requestContext{deviceID: "phone-1"}, `{"workspaceId":2,"enabled":false}`); err != nil {
 		t.Fatal(err)
 	}
 	if fs.rows[2].UpdatedBy != "device:phone-1" {
-		t.Fatalf("a paired device is recorded as such: %q", fs.rows[2].UpdatedBy)
+		t.Fatalf("the actor derivation for a device id: %q", fs.rows[2].UpdatedBy)
 	}
 }
 
@@ -549,5 +556,181 @@ func TestBrowserSettings_RealStoreEndToEnd(t *testing.T) {
 	}
 	if _, err := e.api.hs["browser.settings.set"](context.Background(), rc, params(map[string]any{"workspaceId": ws + 999, "enabled": true})); err == nil {
 		t.Fatal("a workspace that does not exist is refused by the real store too")
+	}
+}
+
+func TestBrowserSettings_AllowAddPastTheCapIsRefused(t *testing.T) {
+	t.Parallel()
+	h, fs, _ := settingsHost(t)
+	for i := 0; i < maxAllowHosts; i++ {
+		if _, err := setCall(h, settingsHumanRC, fmt.Sprintf(`{"workspaceId":1,"allowAdd":["h%d.test"]}`, i)); err != nil {
+			t.Fatalf("add %d: %v", i, err)
+		}
+	}
+	if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"allowAdd":["extra.test"]}`); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("the add past the cap must be refused: %v", err)
+	}
+	if len(fs.rows[1].AllowHosts) != maxAllowHosts {
+		t.Fatalf("a refused add leaves the list as it was: %d", len(fs.rows[1].AllowHosts))
+	}
+}
+
+// Flipping the kill switch while a session is live: the next browser.call ends
+// every session before it refuses.
+func TestBrowserCall_KillSwitchFlipEndsLiveSessionsAtTheNextCall(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	ws := e.identified(t)
+	h := e.api.browser
+	h.tokenOK = func(string, string) bool { return true }
+	h.gate = func(int64) bool { return true }
+	ended := 0
+	h.endAllSessions = func() { ended++ }
+	h.killSwitch = func() bool { return false }
+	h.launcher = func() (browser.Launcher, error) { return nil, &browser.UnavailableError{InstallStep: "x"} }
+	wantOK(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"}), "call before the flip")
+	if ended != 0 {
+		t.Fatal("nothing is ended while the switch is off")
+	}
+	h.killSwitch = func() bool { return true }
+	wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"}), "disabled by the daemon's configuration")
+	if ended != 1 {
+		t.Fatalf("the flip must end every live session at the next call: ended=%d", ended)
+	}
+}
+
+// A call that passed the gates in browser.call must not create a session once
+// a disable landed: session() re-checks inside gateMu, and the settings change
+// closes the workspace under the write lock, after any session being created.
+func TestBrowserHost_SessionCreationRechecksAndOrdersAgainstASettingsChange(t *testing.T) {
+	h, fs, closed := settingsHost(t)
+	h.gate = func(ws int64) bool { return h.workspaceSwitchOn(ws) }
+	h.allow = func(int64) []string { return nil }
+	h.deny = func() ([]browser.Endpoint, error) { return nil, nil }
+	h.launcher = func() (browser.Launcher, error) { return nil, nil }
+	started := make(chan struct{})
+	release := make(chan struct{})
+	startCalls := 0
+	h.startSession = func(context.Context, browser.Config) (*browser.Session, error) {
+		startCalls++
+		close(started)
+		<-release // the session is "starting": a settings change arrives now
+		return nil, errors.New("fake: no real browser")
+	}
+	if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"enabled":true}`); err != nil {
+		t.Fatal(err)
+	}
+	*closed = nil
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = h.session(context.Background(), browser.Run{ID: "r", WorkspaceID: 1})
+	}()
+	<-started
+	setDone := make(chan error, 1)
+	go func() {
+		_, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"enabled":false}`)
+		setDone <- err
+	}()
+	// The change cannot close the workspace while a session is being created.
+	select {
+	case <-setDone:
+		t.Fatal("the settings change closed the workspace while a session was starting (it would miss that session)")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	<-done
+	if err := <-setDone; err != nil {
+		t.Fatal(err)
+	}
+	if len(*closed) != 1 {
+		t.Fatalf("the change closes the workspace after the session was created: %v", *closed)
+	}
+	// Now disabled: a call that already passed browser.call's gate check is refused at creation.
+	before := startCalls
+	if _, err := h.session(context.Background(), browser.Run{ID: "r", WorkspaceID: 1}); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("creation for a disabled workspace must be refused: %v", err)
+	}
+	if startCalls != before {
+		t.Fatal("no session may be started for a disabled workspace")
+	}
+	// And the kill switch, set after the flag, is re-checked too.
+	if _, err := setCall(h, settingsHumanRC, `{"workspaceId":1,"enabled":true}`); err != nil {
+		t.Fatal(err)
+	}
+	h.killSwitch = func() bool { return true }
+	if _, err := h.session(context.Background(), browser.Run{ID: "r", WorkspaceID: 1}); err == nil || !strings.Contains(err.Error(), "disabled by the daemon") {
+		t.Fatalf("kill switch at creation: %v", err)
+	}
+	_ = fs
+}
+
+func TestDenyListResolvesAHostnameListenAddress(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SMIND_HOME", dir)
+	t.Setenv("SMIND_BROWSER_DISABLED", "")
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  listen: daemon.example.test:4700\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := lookupListenHost
+	t.Cleanup(func() { lookupListenHost = old })
+	lookupListenHost = func(_ context.Context, host string) ([]string, error) {
+		if host != "daemon.example.test" {
+			t.Errorf("resolving %q", host)
+		}
+		return []string{"192.168.7.7", "fe80::1%en0"}, nil
+	}
+	got, err := daemonDeny()
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(host string) bool {
+		for _, e := range got {
+			if e.Host == host && e.Port == 4700 {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("daemon.example.test") || !has("192.168.7.7") || !has("fe80::1") || !has("127.0.0.1") {
+		t.Fatalf("the listen name, its resolved addresses (no zone) and the loopback forms are reserved: %+v", got)
+	}
+	// An unresolvable listen name fails closed.
+	lookupListenHost = func(context.Context, string) ([]string, error) { return nil, errors.New("no such host") }
+	if _, err := daemonDeny(); err == nil {
+		t.Fatal("an unresolvable listen host must be an error")
+	}
+}
+
+// The wiring in server.go: the registry's installed hook is the store-backed
+// switch, driven here through the real handlers, the real store and the real
+// config kill switch.
+func TestBrowserWiring_RegistryHookFollowsTheStoreAndTheKillSwitch(t *testing.T) {
+	e := newProcEnv(t)
+	ws := e.task.WorkspaceID
+	rc := &requestContext{local: true}
+	set := func(on bool) {
+		t.Helper()
+		b, _ := json.Marshal(map[string]any{"workspaceId": ws, "enabled": on})
+		if _, err := e.api.hs["browser.settings.set"](context.Background(), rc, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if e.api.Runs.BrowserSwitchOn(ws) {
+		t.Fatal("no row: off")
+	}
+	set(true)
+	if !e.api.Runs.BrowserSwitchOn(ws) {
+		t.Fatal("the flag set through the human-only RPC must reach the registry hook")
+	}
+	t.Setenv("SMIND_BROWSER_DISABLED", "1")
+	if e.api.Runs.BrowserSwitchOn(ws) {
+		t.Fatal("the kill switch beats the flag in the installed hook")
+	}
+	t.Setenv("SMIND_BROWSER_DISABLED", "")
+	set(false)
+	if e.api.Runs.BrowserSwitchOn(ws) {
+		t.Fatal("flag off: off")
 	}
 }

@@ -396,7 +396,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["browser.settings.get"] = browserLocalOnly("browser.settings.get", browserH.settingsGet)
 	hs["browser.settings.set"] = browserLocalOnly("browser.settings.set", browserH.settingsSet)
 	hs["browser.data.clear"] = browserLocalOnly("browser.data.clear", browserH.dataClear)
-	reg.SetBrowserGate(browserH.workspaceSwitchOn)
+	reg.SetBrowserGate(runs.StoreBrowserGate(db, func() bool { return browserH.killSwitch() }))
 	reg.AddObserver(browserH)
 	inboxH := newInboxHost(db, bus, reg, newValidationService(db, bus), stalled, fleetInboxPairs(db, configFleetEnabled))
 	// The inbox's review rows come from the steward reviews: one current
