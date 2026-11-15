@@ -22,6 +22,7 @@ mod assets;
 mod attention_focus;
 mod audit_guard;
 mod client_watch;
+mod coalesce;
 mod commands;
 mod context_menu;
 mod daemon_manager;
