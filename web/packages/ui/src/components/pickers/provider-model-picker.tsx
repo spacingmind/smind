@@ -664,7 +664,7 @@ export function ProviderModelPicker(props: ProviderModelPickerProps): JSX.Elemen
           {boundNotice ?? `Bound to ${boundLabel} — start a new chat to switch providers`}
         </p>
       )}
-      {viewProvider?.unavailableReason && <UnavailableNotice reason={viewProvider.unavailableReason} />}
+      {viewProvider?.unavailableReason && !searchingAll && <UnavailableNotice reason={viewProvider.unavailableReason} />}
       <div className="border-b px-3 pb-2">
         <input
           ref={inputRef}

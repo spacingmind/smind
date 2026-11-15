@@ -111,7 +111,16 @@ describe("desktop popover with the provider rail", () => {
     expect(tab.getAttribute("aria-label")).not.toContain("config dir");
     expect(tab.getAttribute("aria-label")).toContain("unavailable:");
     fireEvent.click(tab);
-    expect(screen.getByTestId("model-provider-unavailable")).toHaveTextContent("config dir");
+    const notice = screen.getByTestId("model-provider-unavailable");
+    expect(notice).not.toHaveTextContent("config dir"); // short text in the notice too
+    expect(notice.getAttribute("title")).toContain("config dir"); // the raw error one hover away
+  });
+
+  it("searching all providers hides the selected provider's unavailable notice", () => {
+    renderPicker({ health: { "claude-native": { ok: false, detail: "claude CLI not found" } } });
+    expect(screen.getByTestId("model-provider-unavailable")).toBeInTheDocument();
+    fireEvent.change(search(), { target: { value: "glm" } });
+    expect(screen.queryByTestId("model-provider-unavailable")).not.toBeInTheDocument();
   });
 
   it("the current provider stays pickable even when it is unavailable", () => {

@@ -368,8 +368,8 @@ export function EmptyState({ query }: { query: string }) {
 
 export function UnavailableNotice({ reason }: { reason: string }) {
   return (
-    <p data-testid="model-provider-unavailable" className="px-3 pb-2 text-ui-sm text-foreground-muted">
-      {reason}
+    <p data-testid="model-provider-unavailable" title={reason} className="px-3 pb-2 text-ui-sm text-foreground-muted">
+      {formatProviderReason(reason)}
     </p>
   );
 }
