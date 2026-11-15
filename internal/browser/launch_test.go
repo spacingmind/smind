@@ -12,7 +12,10 @@ import (
 )
 
 func TestLauncherArgs(t *testing.T) {
-	args := buildArgs("/p/profile", LaunchOpts{AllowHosts: []string{"intranet.test"}, HeapMB: 256})
+	args, err := buildArgs("/p/profile", LaunchOpts{AllowHosts: []string{"intranet.test"}, HeapMB: 256})
+	if err != nil {
+		t.Fatal(err)
+	}
 	joined := strings.Join(args, "\n")
 	for _, want := range []string{
 		"--headless=new",
@@ -20,6 +23,7 @@ func TestLauncherArgs(t *testing.T) {
 		"--user-data-dir=/p/profile",
 		"--js-flags=--max-old-space-size=256",
 		"--no-proxy-server",
+		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %s in %v", want, args)
@@ -44,7 +48,8 @@ func TestLauncherArgs(t *testing.T) {
 			t.Errorf("argument %s must never be used", bad)
 		}
 	}
-	if strings.Contains(strings.Join(buildArgs("/p", LaunchOpts{}), " "), "max-old-space-size=0") {
+	def, _ := buildArgs("/p", LaunchOpts{})
+	if strings.Contains(strings.Join(def, " "), "max-old-space-size=0") {
 		t.Fatal("a zero heap must fall back to the default cap")
 	}
 }
@@ -134,5 +139,20 @@ func TestLauncherFailsWhenBrowserNeverReady(t *testing.T) {
 func TestLauncherWithoutPathIsUnavailable(t *testing.T) {
 	if _, err := (ChromeLauncher{}).Launch(context.Background(), LaunchOpts{}); err == nil {
 		t.Fatal("no path must fail")
+	}
+}
+
+func TestLauncherArgsRejectBadAllowHost(t *testing.T) {
+	for _, h := range []string{"a.test, MAP * 1.2.3.4", "*.test", "x y", "0.0.0.0"} {
+		if _, err := buildArgs("/p", LaunchOpts{AllowHosts: []string{h}}); err == nil {
+			t.Errorf("allow host %q must be rejected before it reaches a resolver rule", h)
+		}
+	}
+}
+
+func TestBrowserEnvDropsSecrets(t *testing.T) {
+	got := strings.Join(browserEnv([]string{"PATH=/bin", "HOME=/h", "SMIND_TOKEN=secret", "ANTHROPIC_API_KEY=k", "LANG=C"}), " ")
+	if strings.Contains(got, "secret") || strings.Contains(got, "ANTHROPIC") || !strings.Contains(got, "PATH=/bin") {
+		t.Fatalf("env: %q", got)
 	}
 }

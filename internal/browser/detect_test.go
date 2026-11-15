@@ -48,9 +48,7 @@ func TestDetectChrome(t *testing.T) {
 			t.Fatalf("%s: none found must be ErrUnavailable with the install step, got %v", goos, err)
 		}
 	}
-	w := fakeDetector("windows", map[string]bool{`C:\Program Files/Google/Chrome/Application/chrome.exe`: true}, nil)
-	_ = w // path separators differ per host; the windows list itself is exercised below
-	if len(w.locations()) == 0 {
+	if len(fakeDetector("windows", nil, nil).locations()) == 0 {
 		t.Fatal("windows must list locations from ProgramFiles")
 	}
 }

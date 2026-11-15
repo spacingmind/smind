@@ -151,37 +151,6 @@ func TestCheckURLDefaultPorts(t *testing.T) {
 	}
 }
 
-func TestCheckURLRedirectChain(t *testing.T) {
-	p := testPolicy(t)
-	chain := []struct {
-		url   string
-		allow bool
-	}{
-		{"http://localhost:3000/login", true},
-		{"http://localhost:3000/app", true},
-		{"http://127.0.0.1:4648/api/token", false}, // a hop to the daemon
-		{"http://localhost:3000/never", true},
-	}
-	reached := 0
-	for _, hop := range chain {
-		if !p.CheckURL(hop.url).Allowed {
-			if hop.allow {
-				t.Fatalf("hop %q should be allowed", hop.url)
-			}
-			break
-		}
-		reached++
-	}
-	if reached != 2 {
-		t.Fatalf("the chain must stop at the refused hop, reached %d", reached)
-	}
-	for _, bad := range []string{"file:///etc/passwd", "http://example.com/", "http://169.254.169.254/"} {
-		if p.CheckURL(bad).Allowed {
-			t.Fatalf("redirect hop %q must be refused", bad)
-		}
-	}
-}
-
 type fakeResolver map[string][]string
 
 func (f fakeResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, error) {
@@ -265,7 +234,21 @@ func TestNormalizeAllowHost(t *testing.T) {
 			t.Errorf("NormalizeAllowHost(%q) = %q, want an error", bad, got)
 		}
 	}
+	for _, bad := range []string{"0.0.0.0", "[::]", "224.0.0.1"} {
+		if got, err := NormalizeAllowHost(bad); err == nil {
+			t.Errorf("NormalizeAllowHost(%q) = %q: unusable addresses must be rejected", bad, got)
+		}
+	}
 	if _, err := NewPolicy(nil, []Endpoint{{Host: "x", Port: 0}}); err == nil || !strings.Contains(err.Error(), "port") {
 		t.Fatal("a deny endpoint without a port must be rejected")
+	}
+}
+
+func TestDenyAppliesToUnspecifiedHost(t *testing.T) {
+	// Even if 0.0.0.0 reached the check, it connects to this machine.
+	p, _ := NewPolicy(nil, []Endpoint{{Host: "127.0.0.1", Port: 4648}})
+	d := p.denied(parsedHost{canon: "0.0.0.0", ip: netip.MustParseAddr("0.0.0.0")}, 4648)
+	if !d {
+		t.Fatal("0.0.0.0:4648 must count as the daemon")
 	}
 }

@@ -18,14 +18,9 @@ type LaunchOpts struct {
 	// ProfileRoot is the directory a fresh user-data-dir is made under; ""
 	// uses the system temp dir. A profile is never shared between sessions.
 	ProfileRoot string
-	// Persistent keeps the profile dir after Close (a later, human-chosen mode;
-	// the default is ephemeral and the dir is removed).
-	Persistent bool
-	// ProfileDir, when set, is used as the user-data-dir instead of a fresh
-	// one (only for Persistent).
-	ProfileDir string
-	// AllowHosts are the exact hosts the person added; everything else that
-	// needs name resolution is mapped to nothing by the browser itself.
+	// AllowHosts are the exact hosts the person added (each is validated with
+	// NormalizeAllowHost); everything else that needs name resolution is
+	// mapped to nothing by the browser itself.
 	AllowHosts []string
 	// HeapMB caps the JS heap of every renderer (0 uses a safe default).
 	HeapMB int
@@ -50,14 +45,18 @@ const defaultHeapMB = 512
 
 // buildArgs is the pinned command line. There is deliberately no
 // --no-sandbox, no remote-allow-origins and no proxy.
-func buildArgs(profileDir string, o LaunchOpts) []string {
+func buildArgs(profileDir string, o LaunchOpts) ([]string, error) {
 	heap := o.HeapMB
 	if heap <= 0 {
 		heap = defaultHeapMB
 	}
 	rules := []string{"MAP * ~NOTFOUND", "EXCLUDE localhost", "EXCLUDE *.localhost", "EXCLUDE 127.0.0.1", "EXCLUDE [::1]"}
 	for _, h := range o.AllowHosts {
-		rules = append(rules, "EXCLUDE "+h)
+		n, err := NormalizeAllowHost(h) // never a comma, space or wildcard in a rule
+		if err != nil {
+			return nil, err
+		}
+		rules = append(rules, "EXCLUDE "+n)
 	}
 	return []string{
 		"--headless=new",
@@ -66,6 +65,7 @@ func buildArgs(profileDir string, o LaunchOpts) []string {
 		"--host-resolver-rules=" + strings.Join(rules, ", "),
 		"--js-flags=--max-old-space-size=" + strconv.Itoa(heap),
 		"--no-proxy-server",
+		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--disable-extensions",
@@ -76,7 +76,7 @@ func buildArgs(profileDir string, o LaunchOpts) []string {
 		"--disable-breakpad",
 		"--mute-audio",
 		"about:blank",
-	}
+	}, nil
 }
 
 // ChromeLauncher launches a system Chrome, Chromium or Edge.
@@ -97,7 +97,11 @@ func (i *chromeInstance) WSURL() string { return i.wsURL }
 
 func (i *chromeInstance) Close() error {
 	i.once.Do(func() {
-		killTree(i.cmd)
+		select {
+		case <-i.exited: // already gone and reaped: its pid may be reused
+		default:
+			killTree(i.cmd)
+		}
 		select {
 		case <-i.exited:
 		case <-time.After(5 * time.Second):
@@ -119,19 +123,19 @@ func (l ChromeLauncher) Launch(ctx context.Context, o LaunchOpts) (Instance, err
 	if l.Path == "" {
 		return nil, &UnavailableError{InstallStep: installStep("")}
 	}
-	dir := o.ProfileDir
-	remove := false
-	if dir == "" || !o.Persistent {
-		d, err := os.MkdirTemp(o.ProfileRoot, "smind-browser-")
-		if err != nil {
-			return nil, fmt.Errorf("browser: profile dir: %w", err)
-		}
-		dir, remove = d, !o.Persistent
-	} else if err := os.MkdirAll(dir, 0o700); err != nil {
+	// A fresh, private profile per session; it is removed on Close.
+	dir, err := os.MkdirTemp(o.ProfileRoot, "smind-browser-")
+	if err != nil {
 		return nil, fmt.Errorf("browser: profile dir: %w", err)
 	}
-	_ = os.Remove(filepath.Join(dir, "DevToolsActivePort"))
-	cmd := exec.Command(l.Path, buildArgs(dir, o)...)
+	remove := true
+	args, err := buildArgs(dir, o)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	cmd := exec.Command(l.Path, args...)
+	cmd.Env = browserEnv(os.Environ())
 	configureProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		if remove {
@@ -177,4 +181,18 @@ func waitDevToolsPort(ctx context.Context, dir string, exited <-chan struct{}) (
 		case <-tick.C:
 		}
 	}
+}
+
+// browserEnv passes the browser only what it needs, never the daemon's
+// secrets and tokens.
+func browserEnv(env []string) []string {
+	keep := map[string]bool{"PATH": true, "HOME": true, "TMPDIR": true, "TEMP": true, "TMP": true, "LANG": true, "LC_ALL": true,
+		"DISPLAY": true, "XDG_RUNTIME_DIR": true, "SYSTEMROOT": true, "USERPROFILE": true, "LOCALAPPDATA": true, "APPDATA": true}
+	var out []string
+	for _, kv := range env {
+		if k, _, ok := strings.Cut(kv, "="); ok && keep[strings.ToUpper(k)] {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

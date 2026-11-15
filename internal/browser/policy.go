@@ -100,6 +100,9 @@ func NormalizeAllowHost(s string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("browser: allowlist entry %q: %w", s, err)
 	}
+	if h.ip.IsValid() && (h.ip.IsUnspecified() || h.ip.IsMulticast()) {
+		return "", fmt.Errorf("browser: allowlist entry %q is not a usable host address", s)
+	}
 	return h.canon, nil
 }
 
@@ -343,7 +346,8 @@ func (p Policy) denied(h parsedHost, port int) bool {
 			}
 			continue
 		}
-		if loopbackEntry && h.ip.IsLoopback() {
+		// 0.0.0.0 and :: connect to the local machine: same as loopback.
+		if loopbackEntry && (h.ip.IsLoopback() || h.ip.IsUnspecified()) {
 			return true
 		}
 		if err == nil && ea == h.ip {

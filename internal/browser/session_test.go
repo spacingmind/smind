@@ -3,6 +3,9 @@ package browser
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -120,10 +123,10 @@ func TestSessionBlocksRefusedRequestAndContinuesAllowed(t *testing.T) {
 	s, l := startTestSession(t, nil)
 	f, _ := l.last()
 	attachReady(t, f, "S1", "T1", 1)
-	// Fetch.enable precedes the resume.
 	if len(f.callsFor("Fetch.enable")) != 1 {
 		t.Fatal("Fetch.enable must be called on the new target")
 	}
+	assertOrder(t, f, "Fetch.enable", "Runtime.runIfWaitingForDebugger")
 	paused := func(id, url, typ string) {
 		f.event("S1", "Fetch.requestPaused", map[string]any{"requestId": id, "resourceType": typ, "request": map[string]any{"url": url}})
 	}
@@ -175,6 +178,26 @@ func TestSessionBlocksRefusedRequestAndContinuesAllowed(t *testing.T) {
 	}
 }
 
+func assertOrder(t *testing.T, f *fakeCDP, first, second string) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fi, si := -1, -1
+	for i, c := range f.calls {
+		if c.Method == first && fi < 0 {
+			fi = i
+		}
+		if c.Method == second && si < 0 {
+			si = i
+		}
+	}
+	if fi < 0 || si < 0 || fi > si {
+		t.Fatalf("%s must be sent before %s (indices %d, %d)", first, second, fi, si)
+	}
+}
+
+// Each hop of a redirect chain is a separate paused request and is judged on
+// its own URL; the real-Chrome smoke covers a server-sent redirect.
 func TestSessionRedirectHopRefused(t *testing.T) {
 	_, l := startTestSession(t, nil)
 	f, _ := l.last()
@@ -502,4 +525,94 @@ type failingLauncher struct{}
 
 func (failingLauncher) Launch(context.Context, LaunchOpts) (Instance, error) {
 	return nil, &UnavailableError{InstallStep: "install"}
+}
+
+func TestSessionNavigateWaitsForInterception(t *testing.T) {
+	l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
+		switch c.Method {
+		case "Target.createTarget":
+			go attach(f, "S9", "T-new", "page")
+		case "Fetch.enable":
+			time.Sleep(150 * time.Millisecond) // a slow browser: the tab exists but is not armed yet
+		}
+		return defaultHook(f, c)
+	}}
+	s, err := Start(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, CallTimeout: 3 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.Navigate(context.Background(), "", "http://localhost:3000/"); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := l.last()
+	assertOrder(t, f, "Fetch.enable", "Page.navigate")
+}
+
+func TestSessionDeniesBrowserDebugPort(t *testing.T) {
+	s, l := startTestSession(t, nil)
+	f, _ := l.last()
+	port := f.srv.Listener.Addr().(*net.TCPAddr).Port
+	for _, u := range []string{
+		fmt.Sprintf("http://127.0.0.1:%d/json/version", port),
+		fmt.Sprintf("http://localhost:%d/json/list", port),
+		fmt.Sprintf("http://[::1]:%d/", port),
+	} {
+		if _, err := s.Navigate(context.Background(), "", u); !errors.Is(err, ErrNavigationDenied) {
+			t.Errorf("the browser's own debug port must be refused: %s: %v", u, err)
+		}
+	}
+}
+
+func TestSessionNoticesFloodCannotEvictOtherKinds(t *testing.T) {
+	s, _ := startTestSession(t, nil)
+	s.note("dialog", "a confirm dialog was cancelled")
+	for i := 0; i < 500; i++ {
+		s.note("blocked", fmt.Sprintf("u%d", i))
+	}
+	var dialog, blocked int
+	for _, n := range s.DrainNotices() {
+		switch n.Kind {
+		case "dialog":
+			dialog++
+		case "blocked":
+			blocked++
+		}
+	}
+	if dialog != 1 || blocked != maxNoticesPerKind {
+		t.Fatalf("dialog=%d blocked=%d", dialog, blocked)
+	}
+}
+
+func TestCleanTextStripsInvisibleAndControl(t *testing.T) {
+	in := "a\u202eb\u200bc\U000e0041d\u2028e\x00f\x7fg\th"
+	if got := cleanText(in, 100); got != "abcdefg h" {
+		t.Fatalf("got %q", got)
+	}
+	if got := cleanText(strings.Repeat("x", 5000), 10); got != strings.Repeat("x", 10)+"…" {
+		t.Fatalf("cap: %q", got)
+	}
+	if safeFileName("../../a\u202e/b\\evil.sh") != "evil.sh" || safeFileName("") != "(unnamed)" {
+		t.Fatal("file name")
+	}
+}
+
+func TestSessionDNSCacheIsBounded(t *testing.T) {
+	s, _ := startTestSession(t, func(c *Config) { c.Resolver = manyResolver{} })
+	r := cachedResolver{s}
+	for i := 0; i < 3*maxDNSEntries; i++ {
+		_, _ = r.LookupNetIP(context.Background(), "ip", fmt.Sprintf("h%d.localhost", i))
+	}
+	s.mu.Lock()
+	n := len(s.dns)
+	s.mu.Unlock()
+	if n > maxDNSEntries {
+		t.Fatalf("dns cache grew to %d", n)
+	}
+}
+
+type manyResolver struct{}
+
+func (manyResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
 }

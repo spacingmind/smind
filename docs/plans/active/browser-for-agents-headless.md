@@ -25,7 +25,7 @@ Decisions made inside the ADR (no new architecture): Go CDP client over a flatte
 - P1-AC1 `CheckURL` is one pure function over a `Policy`: http/https only (`about:blank` exact is the only other URL), userinfo refused, backslash, whitespace, control characters, `%` in the host and non-ASCII hosts refused, the host normalised the way a browser parses it (decimal, octal, hex, short dotted IPv4, trailing dot, IPv6, IPv4-mapped IPv6) before it is compared. Loopback (`localhost`, `*.localhost`, 127.0.0.0/8, `::1`) is allowed on any port; any other host only if its exact normalised text is in `Policy.AllowHosts`; private, link-local and metadata addresses are refused unless the exact IP literal was added. `Policy.Deny` (the daemon's listen address and port, the desktop proxy origin, other listed daemon ports) is refused whatever the allowlist, and a wildcard bind or loopback entry denies that port on every loopback form.
 - P1-AC2 `CheckResolved` checks the addresses a named host resolves to: every address must be loopback, or the name was allowlisted and the address is not link-local, metadata or unspecified; a loopback-named host that resolves off loopback is refused; `Policy.Deny` applies to the resolved address and port. A resolver error refuses.
 - P1-AC3 `DetectChrome` finds a system Chrome/Chromium/Edge from an explicit path, then the standard install locations and PATH names; none found returns `ErrUnavailable` carrying the install step. It never runs an installer or fetches anything.
-- P1-AC4 The CDP client multiplexes calls and events over one websocket, flattened sessions, per-call timeout and context cancel, error responses surface as `*CDPError`, connection loss fails every pending call.
+- P1-AC4 The CDP client multiplexes calls and events over one websocket, flattened sessions, the caller's context bounds each call (the session applies the 20 s call timeout), error responses surface as `*CDPError`, connection loss fails every pending call.
 - P1-AC5 The launcher starts the browser headless with a fresh user-data-dir, `--remote-debugging-port=0` (the port is read from `DevToolsActivePort`), no `--no-sandbox`, host-resolver rules that map everything outside loopback and the allowlist to nothing, a JS heap cap, and kills the whole process group on close; the profile dir is removed on close when ephemeral.
 - P1-AC6 The session enforces the policy on every request of every attached target (document, subresource, worker, iframe) through `Fetch.requestPaused`, which fires on each redirect hop, and fails refused requests with `BlockedByClient`; the refusal is recorded as a notice.
 - P1-AC7 Popups and new windows are tabs in a pool of at most 3 per session; one beyond is closed and reported. No OS window.
@@ -52,15 +52,24 @@ Decisions made inside the ADR (no new architecture): Go CDP client over a flatte
 - `launch.go`: drop the host-resolver rules -> `TestLauncherArgs`; add `--no-sandbox` -> `TestLauncherArgs`.
 - `session.go`: do not deny downloads -> `TestSessionDownloadDeniedAndReported`.
 
+## Known gaps (found by review and measured against a real Chrome, PR 1)
+
+- **WebSocket bypasses the Fetch interception.** A page on an allowed host can open `ws://127.0.0.1:<denied port>`; measured: the denied listener received both handshakes. `Network.setBlockedURLs` (both parameter forms) did not stop it in the measured Chrome. The same applies to WebRTC/WebTransport to IP literals (WebRTC non-proxied UDP is disabled by flag). The sound fix is an in-process enforcing forward proxy (`--proxy-server` with the implicit loopback bypass removed) that applies `CheckURL`/`CheckResolved` at CONNECT/request time and dials the vetted address itself; it also closes the DNS-rebinding gap between our lookup and the browser's. That adds a component the ADR does not describe: **a decision for the Human/Steward before PR 2 lands.** Nothing in PR 1 is reachable by an agent.
+- Allowlisted names may resolve to private ranges (only link-local, multicast, unspecified and known metadata addresses are refused for a resolved name).
+- Popup pool and `beforeunload` cancel are verified against the fake only: headless Chrome's popup blocker stopped script `window.open` in the smoke.
+- Windows process-tree kill (`taskkill /T`) is not verified.
+
 ## Decisions
 
 - Resolved-address policy for an allowlisted name: its addresses may be private or public but never link-local, metadata or unspecified (a name cannot be pointed at the metadata service by rebinding even when the human allowlisted it). An IP literal the human typed exactly is allowed as typed (ADR section 5).
 - The policy takes a `Deny` list as input; PR 3 fills it from the daemon's listen address, the proxy origin and the connection list.
+- The browser's own DevTools port is added to the deny list at session start (a page must never reach it); the browser gets a minimal environment (no daemon secrets); allowlisted IP literals must not be unspecified or multicast.
+- Console collection is a deliberate pull-forward from PR 2 (it needs `Runtime.enable` on attach).
 - No `evaluate`, upload or download surface exists anywhere in the package.
 
 ## Progress
 
-- [ ] PR 1 open
+- [x] PR 1 open (CDP client, session, policy)
 - [ ] PR 2
 - [ ] PR 3
 - [ ] PR 4

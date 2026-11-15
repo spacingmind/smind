@@ -45,15 +45,16 @@ func TestRealChromeSmoke(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<!doctype html><title>Smoke</title><body>
+		fmt.Fprintf(w, `<!doctype html><title>Smoke</title><body>
 <img src="http://10.255.255.1/leak.png">
 <script>
 console.log(confirm("really?"));
 alert("hi");
 for (let i = 0; i < 6; i++) window.open("/popup" + i);
 var a = document.createElement("a"); a.href = "/file.bin"; a.download = "../../evil.bin"; document.body.appendChild(a); a.click();
+try { new WebSocket("ws://127.0.0.1:%d/ws"); new WebSocket("ws://localhost:%d/ws"); } catch (e) {}
 console.log("loaded");
-</script>`)
+</script>`, daemonPort, daemonPort)
 	})
 	mux.HandleFunc("/file.bin", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="evil.bin"`)
@@ -128,14 +129,20 @@ console.log("loaded");
 	}
 	t.Logf("tabs open: %d, popups refused: %d", len(tabs), kinds["popup_refused"])
 
+	// KNOWN GAP (see the plan, "Known gaps"): the Fetch domain does not see
+	// WebSocket handshakes and Network.setBlockedURLs did not stop them in the
+	// measured Chrome, so a page on an allowed host can open a WebSocket to a
+	// denied loopback port. Logged, not asserted, until the enforcing proxy lands.
+	wsHits := daemonHits.Load()
+	t.Logf("KNOWN GAP: daemon hits from page WebSockets: %d", wsHits)
 	// A redirect into the daemon, and a redirect to file:, never get through.
 	for _, path := range []string{"/redir", "/redir-file"} {
 		if _, err := s.Navigate(ctx, tabs[0].ID, base+path); err == nil {
 			t.Errorf("%s must fail", path)
 		}
 	}
-	if daemonHits.Load() != 0 {
-		t.Fatalf("the daemon was reached %d times through a redirect", daemonHits.Load())
+	if daemonHits.Load() != wsHits {
+		t.Fatalf("the daemon was reached %d times through a redirect", daemonHits.Load()-wsHits)
 	}
 	if _, err := s.Navigate(ctx, tabs[0].ID, "https://example.com/"); err == nil {
 		t.Error("a public host must be refused before it is sent")
