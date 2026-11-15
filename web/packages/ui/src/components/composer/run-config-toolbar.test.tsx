@@ -310,8 +310,8 @@ describe("RunConfigToolbar with a provider instance", () => {
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["model-provider-claude-native", "model-provider-glm", "model-provider-claude-work", "model-provider-my-acp"]);
     expect(screen.getByTestId("model-provider-claude-work")).toHaveAttribute("aria-label", "Claude work");
-    // The unknown ACP provider wears the generic provider icon, never a throw or a blank.
-    expect(screen.getByTestId("model-provider-my-acp").querySelector("svg")).not.toBeNull();
+    // The unknown ACP provider has no brand mark: the rail shows its initial, never a throw or a blank.
+    expect(screen.getByTestId("model-rail-initial-my-acp")).toHaveTextContent(/\S/);
   });
 
   it("picking the instance keeps the Thinking control (its runner is claude-native) and the base's modes", async () => {
