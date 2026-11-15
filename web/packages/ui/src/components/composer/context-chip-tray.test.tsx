@@ -31,9 +31,33 @@ describe("ContextChipTray (DT3-D)", () => {
   it("the close button removes its chip by id", () => {
     const onRemove = vi.fn();
     render(<ContextChipTray chips={CHIPS} onRemove={onRemove} />);
-    fireEvent.click(screen.getByRole("button", { name: "Remove Terminal selection · 3 lines · 14 B" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove terminal selection" }));
     expect(onRemove).toHaveBeenCalledWith("chip-1");
     expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it("the remove control is always visible, keyboard reachable and 24px", () => {
+    render(<ContextChipTray chips={CHIPS} onRemove={() => {}} />);
+    for (const close of screen.getAllByTestId("context-chip-close")) {
+      // No hover-only styling: nothing hides it, so touch and keyboard users always see it.
+      expect(close.className).not.toMatch(/opacity-0|hidden|invisible/);
+      expect(close.getAttribute("tabindex")).not.toBe("-1");
+      expect(close.className).toMatch(/\bsize-6\b/);
+    }
+  });
+
+  it("the remove control names what it removes, per kind", () => {
+    const chips: ContextChip[] = [
+      CHIPS[0]!,
+      { localId: "chip-3", kind: "terminal", body: "x", blockLabel: "last 100 lines", label: "Terminal output · 1 line · 1 B" },
+      CHIPS[1]!,
+    ];
+    render(<ContextChipTray chips={chips} onRemove={() => {}} />);
+    expect(screen.getAllByTestId("context-chip-close").map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Remove terminal selection",
+      "Remove terminal output",
+      "Remove file reference",
+    ]);
   });
 
   it("Backspace on a focused chip removes it", () => {

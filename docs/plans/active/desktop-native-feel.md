@@ -43,13 +43,22 @@ Real window: frames of each native menu with `screencapture -l` from the isolate
 
 ### Acceptance criteria
 
-- AC9 The native app menu items whose action cannot run are disabled and re-enabled as the renderer's state changes: Close Tab and Find with no workspace tab or pane, Close Tab on a tab that is not closable, Toggle Sidebar never disabled, New Tab with no workspace open, Reload while a connection is not ready, and so on, from ONE table (item id, the state it needs). The renderer reports a small state snapshot (`app_menu_set_state`, an allowlisted command, booleans only) on change; Rust applies it to the existing `MenuItem`s.
-- AC10 Every context menu's enabled flags come from the same pure model functions as AC3 and are table-tested per menu (no task selected, no run, run finished, tab not closable, no other tabs, remote connection hides reveal and open-in-editor, ...).
-- AC11 The snapshot cannot enable a native item the table does not allow: unknown keys are ignored, the table decides, and a stale snapshot after a window closes is dropped.
+- AC9 (deferred, not in this PR) The native APP menu's enable/disable snapshot (`app_menu_set_state`) is a separate piece with its own IPC command; the Steward's brief for this PR is the context menus, so it moves to a later PR if the Supervisor still wants it.
+- AC10 Every context menu's enabled flags come from the same pure model functions as AC3 and are table-tested per menu. An item that stays visible but cannot run is DISABLED (and, where a reason helps, keeps it as a note: the in-page menu shows it and keeps the item keyboard-reachable; the native label carries it in parentheses). The rules:
+  - Task row: Archive task is off for an archived task ("already archived"); Mark unread is off for an archived task or one that is already unread; New sub-task (tree provider only) is off for an archived task ("archived") instead of vanishing; Pin and Move to space stay as they were (Move is absent, not disabled, when there is nowhere to move to); the tree actions keep their availability and reasons.
+  - Tab: Close, Close others, Close to the left and right are off when they would close nothing; Archive chat is off for a chat tab with no chat id ("no chat yet"), where it used to do nothing.
+  - File row: Reveal in diff is off for an unchanged file; Open to side is off without a handler (both unchanged).
+  - Workspace row (sidebar): Reveal and Open in editor (desktop on its local daemon only) are off when the workspace has no folder ("no folder"). The row's items now come from one pure builder (`workspaceRowItems`) that both its context menu and its more menu use; the more menu greys disabled items too.
+- AC11 The web fallback and the native menu agree: for every table row the native descriptors carry exactly the model's enabled flags, only enabled items have a handler, and the in-page menu is disabled exactly where the model says (a render test over each menu's states).
 
 ### Named tests
 
-Rust: `menu_state_table_*` (one per item), `app_menu_set_state_ignores_unknown_keys`. Web: one table-driven test per menu (app menu snapshot builder and the five context menus): `app-menu-state.test.ts`, `menu-models.test.ts`.
+Web: one table-driven test per menu in `lib/menu-models.test.tsx` (`taskRowMenu`, `tabMenu`, `fileRowMenu`, `workspaceRowItems`; each row also runs `expectNativeAgrees`), and `lib/menu-models.render.test.tsx` (the in-page menu is disabled exactly where the model says, for each menu in its disabling states). No Rust change in this PR.
+
+### Decisions (b)
+
+- Not every item gets a disabled state: Pin, Add task, Add space, Worktree settings and Delete workspace can always run, so they never carry a flag a test would have to invent. Items that are absent when they cannot apply (Add to chat without a handler, the Split items when the tab cannot move, Move to space with nowhere to go) stay absent, as the in-page menus have always done.
+- "No run" and "no worktree" from the brief: a task row has no menu item that needs a run, and the only items that need a folder are Reveal and Open in editor, which exist on the workspace row.
 
 ## PR (c): layout per window on Cmd+Q (later; needs a decision)
 
@@ -88,3 +97,10 @@ Open question for the Supervisor before it is specified: where a window's layout
 - No native-side gesture or rate limit: the popup is modal on macOS and Windows, so one menu is open at a time, and the page-side 100 ms guard is a courtesy, not a security control. On Linux the popup is asynchronous (the command may return before the menu closes), so "closed" is reported early there and the TTL is the bound; Linux is unverified.
 - The armed state is not cleared on navigation or reload: an armed menu delivers until its selection, the next open or the 600 s TTL. Selections are matched on the open id AND on a per-show id namespace (`m<n>.<id>`), so a late selection from an earlier menu cannot run a later menu's handler.
 - The label rule is the Unicode general category (Cc, Cf, Cs, Co, Cn, Zl, Zp) plus the blank-looking characters outside those categories (Hangul fillers, Braille blank, combining grapheme joiner, variation selectors); the renderer strips the same set, so an emoji title loses only its variation selector.
+
+### PR (b)
+
+- AC10: `menu-models.test.tsx` tables for `taskRowMenu` (archived, already unread, tree actions), `tabMenu` (no chat id, nothing to close), `fileRowMenu` (unchanged, no handler), `workspaceRowItems` (no folder). AC11: each row runs `expectNativeAgrees`; `menu-models.render.test.tsx` checks the in-page menu per state; e2e CM-04 (light and dark, 1280 and 390, pairs opened).
+- Mutations (committed code, each failed its named test): Archive always on, Mark unread ignoring unread, New sub-task always on, Archive chat always on, Reveal ignoring the folder, Reveal in diff always on, Close others always on, the native layer arming disabled items.
+- Not verified: no real-window frames of the native menu (screen locked); the archived-task rules apply to task rows outside the archived list (that list has its own row component and actions).
+

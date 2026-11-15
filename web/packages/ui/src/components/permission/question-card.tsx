@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
+import { useCardFocusStore } from "@/stores/card-focus-store";
 import type { PendingQuestion } from "@/hooks/use-run-timeline";
 import type { Question, QuestionAnswer, QuestionAnswerItem } from "@/lib/types";
 
@@ -87,6 +88,15 @@ export function QuestionCard({
     if (isTextEntryFocused()) return;
     ref.current?.focus();
   }, [pending.requestId]);
+
+  // A notification click-through (`?card=` route): unlike the mount focus
+  // above, this takes focus even while a text field has it -- the click
+  // was an explicit action, not an ambient arrival.
+  const focusRequest = useCardFocusStore((s) => s.requests[pending.requestId]);
+  useEffect(() => {
+    if (!focusRequest) return;
+    if (useCardFocusStore.getState().consume(pending.requestId)) ref.current?.focus();
+  }, [focusRequest, pending.requestId]);
 
   const questions = pending.request.questions;
   const allAnswered = questions.every((q) => isAnswered(q, drafts[q.id] ?? EMPTY_DRAFT));
