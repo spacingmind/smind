@@ -79,7 +79,7 @@ func TestProxyMalformedRequestsAreRefusedWithAnExactStatus(t *testing.T) {
 
 func TestProxyValidConnectTarget(t *testing.T) {
 	good := []string{"127.0.0.1:80", "localhost:3000", "[::1]:8080", "example.com:443", "a.b.localhost:65535", "127.0.0.1:0080"}
-	bad := []string{"", "localhost", "localhost:", ":80", "127.0.0.1:0", "127.0.0.1:65536", "127.0.0.1:+80", "127.0.0.1:-1", "127.0.0.1:8x",
+	bad := []string{"", "localhost", "localhost:", ":" + "80", "127.0.0.1:0", "127.0.0.1:65536", "127.0.0.1:+80", "127.0.0.1:-1", "127.0.0.1:8x",
 		"127.0.0.1/x:9", "127.0.0.1:9/x", "u@127.0.0.1:9", "127.0.0.1:9?x", "127.0.0.1:9#x", "a\\b:9", "a b:9", "[::1:80", "::1:80"}
 	for _, g := range good {
 		if !validConnectTarget(g) {
