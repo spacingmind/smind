@@ -3240,9 +3240,13 @@ describe("App tab strip (app-header-and-tabs TB)", () => {
   it("TB-AC3 plus button is the next sibling after the tab scroller in the same row", async () => {
     await setup();
     const scroller = screen.getByTestId("tab-scroller");
-    expect(scroller.nextElementSibling).toBe(screen.getByTestId("tabs-new-tab"));
-    expect(scroller.parentElement).toBe(screen.getByTestId("tabs-new-tab").parentElement);
-    expect(scroller.className).toContain("flex-initial");
+    // The scroller sits in a relative wrapper (it carries the edge fades) that is the row's child; with no overflow nothing
+    // (no overflow menu) sits between the wrapper and "+".
+    const wrapper = scroller.parentElement!;
+    expect(wrapper.nextElementSibling).toBe(screen.getByTestId("tabs-new-tab"));
+    expect(wrapper.parentElement).toBe(screen.getByTestId("tabs-new-tab").parentElement);
+    expect(wrapper.className).toContain("flex-initial");
+    expect(wrapper.className).toContain("min-w-0");
     expect(scroller.className).toContain("min-w-0");
     expect(screen.getByTestId("tabs-new-tab").className).toContain("shrink-0");
   });
