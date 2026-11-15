@@ -314,8 +314,13 @@ func TestLauncherRequiresALoopbackProxy(t *testing.T) {
 		}
 	}
 	for _, addr := range []string{"127.0.0.1:3128", "[::1]:3128"} {
-		if _, err := buildArgs("/p", LaunchOpts{ProxyAddr: addr}); err != nil {
+		args, err := buildArgs("/p", LaunchOpts{ProxyAddr: addr})
+		if err != nil {
 			t.Errorf("%s: %v", addr, err)
+			continue
+		}
+		if !strings.Contains(strings.Join(args, "\n"), "--proxy-server=http://"+addr+"\n") {
+			t.Errorf("the proxy URL must bracket an IPv6 host: %q", args)
 		}
 	}
 }

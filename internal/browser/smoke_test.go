@@ -44,6 +44,12 @@ func TestRealChromeSmoke(t *testing.T) {
 	}))
 	defer daemon.Close()
 	daemonPort := daemon.Listener.Addr().(*net.TCPAddr).Port
+	// A second reserved port, so wss:// can be told apart from ws:// by target.
+	daemon2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		daemonHits.Add(1)
+	}))
+	defer daemon2.Close()
+	daemon2Port := daemon2.Listener.Addr().(*net.TCPAddr).Port
 
 	// A UDP listener on loopback: WebTransport/QUIC must send it nothing.
 	udp, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -72,14 +78,14 @@ console.log(confirm("really?"));
 alert("hi");
 for (let i = 0; i < 6; i++) window.open("/popup" + i);
 var a = document.createElement("a"); a.href = "/file.bin"; a.download = "../../evil.bin"; document.body.appendChild(a); a.click();
-try { new WebSocket("ws://127.0.0.1:%d/ws"); new WebSocket("ws://localhost:%d/ws"); new WebSocket("wss://127.0.0.1:%d/ws"); } catch (e) {}
+try { new WebSocket("ws://127.0.0.1:%d/ws"); new WebSocket("ws://localhost:%d/ws"); new WebSocket("ws://sock.localhost:%d/ws"); new WebSocket("wss://127.0.0.1:%d/ws"); } catch (e) {}
 fetch("http://127.0.0.1:%d/f", {mode: "no-cors"}).catch(function () {});
 fetch("http://localhost:%d/f", {mode: "no-cors"}).catch(function () {});
 fetch("http://169.254.169.254:%d/f", {mode: "no-cors"}).catch(function () {});
 try { new WebSocket("ws://169.254.169.254:%d/ws"); new WebSocket("ws://[fe80::1]:%d/ws"); } catch (e) {}
 try { new WebTransport("https://127.0.0.1:%d/wt").ready.catch(function () {}); } catch (e) {}
 console.log("loaded");
-</script>`, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, udpPort)
+</script>`, daemonPort, daemonPort, daemonPort, daemon2Port, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, udpPort)
 	})
 	mux.HandleFunc("/file.bin", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="evil.bin"`)
@@ -97,7 +103,7 @@ console.log("loaded");
 	defer srv.Close()
 	base := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
 
-	pol, err := NewPolicy(nil, []Endpoint{{Host: "127.0.0.1", Port: daemonPort}})
+	pol, err := NewPolicy(nil, []Endpoint{{Host: "127.0.0.1", Port: daemonPort}, {Host: "127.0.0.1", Port: daemon2Port}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,15 +177,26 @@ console.log("loaded");
 	// WebTransport to a UDP port. The proxy sees all of them (Fetch
 	// interception cannot see a WebSocket); positive evidence first: wait until
 	// the proxy has refused each, then assert nothing reached its target.
+	// Each target is matched by its exact notice form: a WebSocket reaches the
+	// proxy as CONNECT, so its notice starts with host:port; a fetch arrives in
+	// absolute form, so its notice starts with http://. One cannot stand in for
+	// the other.
 	wantRefused := []string{
-		fmt.Sprintf("127.0.0.1:%d", daemonPort), fmt.Sprintf("localhost:%d", daemonPort), // CONNECT: the WebSockets
-		fmt.Sprintf("169.254.169.254:%d", daemonPort), // link-local: proves <-loopback> also removed that implicit bypass
+		fmt.Sprintf("127.0.0.1:%d:", daemonPort),          // ws://127.0.0.1
+		fmt.Sprintf("localhost:%d:", daemonPort),          // ws://localhost
+		fmt.Sprintf("sock.localhost:%d:", daemonPort),     // ws://sock.localhost
+		fmt.Sprintf("127.0.0.1:%d:", daemon2Port),         // wss://127.0.0.1
+		fmt.Sprintf("http://127.0.0.1:%d/f:", daemonPort), // fetch by IP
+		fmt.Sprintf("http://localhost:%d/f:", daemonPort), // fetch by name
+		fmt.Sprintf("169.254.169.254:%d:", daemonPort),    // ws:// to link-local: <-loopback> also removed that implicit bypass
+		fmt.Sprintf("http://169.254.169.254:%d/f:", daemonPort),
+		fmt.Sprintf("[fe80::1]:%d:", daemonPort),
 	}
 	seen := map[string]bool{}
 	for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); {
 		for _, n := range notes {
 			for _, w := range wantRefused {
-				if strings.Contains(n.Detail, w) {
+				if strings.HasPrefix(n.Detail, w) {
 					seen[w] = true
 				}
 			}
