@@ -290,7 +290,7 @@ test("latest-json-accepts-a-crlf-signature", () => {
 // trim_start_matches('v') strips EVERY leading v
 test("latest-json-accepts-a-vv-prefixed-signed-version", () => {
   const f = files();
-  f["darwin-aarch64"].signature = fakeSig("vv1.2.3");
+  f["darwin-aarch64"].signature = fakeSig("vvv1.2.3"); // three: normalizeVersion strips one itself
   assert.doesNotThrow(() => buildLatestJson({ ...base, files: f }));
 });
 
