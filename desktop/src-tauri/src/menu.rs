@@ -376,7 +376,12 @@ pub fn handle_event(app: &AppHandle, id: &str) {
     // Renderer actions (D3.3): one event whose payload is the action id,
     // dispatched by the UI through the same registry a keystroke uses.
     if let Some(action) = menu_action_for(id) {
-        let _ = app.emit("menu-action", action);
+        // Only the focused window (else main) runs a menu action: with task windows open, a broadcast would run
+        // "new task" or "settings" in every window at once.
+        let target = crate::window_chrome::focused_or_main(app)
+            .map(|w| w.label().to_string())
+            .unwrap_or_else(|| MAIN_WINDOW.to_string());
+        let _ = app.emit_to(target.as_str(), "menu-action", action);
         return;
     }
 
@@ -385,7 +390,7 @@ pub fn handle_event(app: &AppHandle, id: &str) {
     // before the get_webview_window early return.
     if matches!(id, ID_APP_CHECK_UPDATES | ID_HELP_CHECK_UPDATES) {
         crate::show_main(app);
-        let _ = app.emit("app-update-check-requested", ());
+        let _ = app.emit_to(MAIN_WINDOW, "app-update-check-requested", ());
         return;
     }
 

@@ -12,7 +12,7 @@
 //! `docs/plans/active/desktop-multi-window.md` and the ADR-0013 amendment.
 
 use tauri::webview::{NewWindowResponse, WebviewWindowBuilder};
-use tauri::{AppHandle, Manager, State, Window, WindowEvent};
+use tauri::{AppHandle, Manager, State, WindowEvent};
 
 use crate::state::DesktopState;
 
@@ -23,7 +23,7 @@ pub const MAX_TASK_WINDOWS: usize = 8;
 /// The label of pool slot `index`: `task-1` for `0`..`task-8` for `7`.
 /// Callers only pass indexes below `MAX_TASK_WINDOWS`, so this never panics.
 pub fn pool_label(index: usize) -> String {
-    format!("task-{}", index + 1)
+    format!("{TASK_LABEL_PREFIX}{}", index + 1)
 }
 
 /// The inverse of [`pool_label`]: the slot index of an exact pool label, or
@@ -99,15 +99,26 @@ impl TaskWindows {
         }
     }
 
-    /// Free the slot of a closed window. Any other label does nothing.
-    pub fn release(&self, label: &str) {
+    /// Free the slot of a closed window. Any other label does nothing. `window_alive` says whether the OS still has a
+    /// window under this label: a late `Destroyed` event for an OLD window must not free a slot that a rebuilt window
+    /// under the same label now holds, and a failed build must not free the slot of a window that is still there.
+    pub fn release_if_gone(&self, label: &str, window_alive: bool) {
+        if window_alive {
+            return;
+        }
         if let Some(i) = label_index(label) {
             self.slots.lock().unwrap_or_else(|e| e.into_inner())[i] = None;
         }
     }
 
+    /// Unconditional release (tests and pure callers that know the window is gone).
+    #[cfg(test)]
+    pub fn release(&self, label: &str) {
+        self.release_if_gone(label, false);
+    }
+
     /// The label of the window currently holding `task_id`, if any.
-    #[allow(dead_code)] // read by tests and by later per-task routing
+    #[cfg(test)]
     pub fn label_for(&self, task_id: i64) -> Option<String> {
         let slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         slots
@@ -158,7 +169,8 @@ fn create_task_window(
     win.on_window_event(move |event| {
         if let WindowEvent::Destroyed = event {
             if let Some(registry) = release_app.try_state::<TaskWindows>() {
-                registry.release(&release_label);
+                let alive = release_app.get_webview_window(&release_label).is_some();
+                registry.release_if_gone(&release_label, alive);
             }
         }
     });
@@ -171,7 +183,6 @@ fn create_task_window(
 #[tauri::command]
 pub fn window_open_task(
     app: AppHandle,
-    _window: Window,
     registry: State<'_, TaskWindows>,
     desktop: State<'_, DesktopState>,
     task_id: i64,
@@ -188,7 +199,7 @@ pub fn window_open_task(
         // The slot claims a window the OS no longer has: rebuild it in the same slot.
     }
     if let Err(e) = create_task_window(&app, &desktop, &label, task_id) {
-        registry.release(&label);
+        registry.release_if_gone(&label, app.get_webview_window(&label).is_some());
         return Err(e);
     }
     Ok(label)
@@ -344,7 +355,11 @@ mod tests {
     fn the_destroyed_handler_releases_the_slot() {
         let create = body(include_str!("windows.rs"), "fn create_task_window(");
         assert!(create.contains("WindowEvent::Destroyed"));
-        assert!(create.contains("registry.release(&release_label)"));
+        assert!(create.contains("registry.release_if_gone(&release_label, alive)"));
+        assert!(
+            create.contains("get_webview_window(&release_label).is_some()"),
+            "a stale Destroyed must not free a rebuilt window's slot"
+        );
         assert!(
             !create.contains("prevent_close"),
             "task windows destroy on close"
@@ -416,5 +431,37 @@ mod tests {
             "both the lookup and the stored label are main"
         );
         assert!(!save.contains("label()"));
+    }
+
+    #[test]
+    fn a_late_destroyed_event_does_not_free_a_rebuilt_windows_slot() {
+        let pool = TaskWindows::default();
+        assert_eq!(pool.acquire(5), Ok(new("task-1")));
+        // The old window is gone and the slot was rebuilt for the same task; the old window's Destroyed arrives late
+        // while a window is alive under the label: nothing is freed.
+        pool.release_if_gone("task-1", true);
+        assert_eq!(pool.label_for(5).as_deref(), Some("task-1"));
+        assert_eq!(pool.acquire(6), Ok(new("task-2")));
+        // Once no window is alive under the label, the same call frees it.
+        pool.release_if_gone("task-1", false);
+        assert_eq!(pool.label_for(5), None);
+    }
+
+    #[test]
+    fn a_failed_build_with_a_live_window_keeps_the_slot() {
+        let pool = TaskWindows::default();
+        assert_eq!(pool.acquire(5), Ok(new("task-1")));
+        pool.release_if_gone("task-1", true); // the failure branch saw the window still alive
+        assert_eq!(pool.acquire(5), Ok(existing("task-1")));
+    }
+
+    #[test]
+    fn window_ready_for_a_task_window_only_shows_a_hidden_one() {
+        let src = include_str!("window_chrome.rs");
+        let ready = body(src, "pub fn window_ready(");
+        assert!(
+            ready.contains("is_visible()"),
+            "a repeated ready signal must not steal focus again"
+        );
     }
 }

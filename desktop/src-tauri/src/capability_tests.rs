@@ -208,11 +208,19 @@ fn capability_task_window_scope_is_exactly_the_task_glob() {
         cap["remote"]["urls"],
         serde_json::json!(["http://127.0.0.1:*"])
     );
-    // The pattern matches the pool labels and nothing the shell can create besides them.
+    // Evaluate the pattern from the file against the labels: every pool label matches, `main` and look-alikes do not.
+    let pattern = cap["windows"][0].as_str().unwrap();
+    let prefix = pattern.strip_suffix('*').expect("a trailing-star glob");
+    assert!(!prefix.contains('*') && prefix == crate::windows::TASK_LABEL_PREFIX);
     for i in 0..crate::windows::MAX_TASK_WINDOWS {
-        assert!(crate::windows::pool_label(i).starts_with("task-"));
+        assert!(crate::windows::pool_label(i).starts_with(prefix));
     }
-    assert!(!"main".starts_with("task-"));
+    for other in ["main", "tauri-1", "xtask-1", "Task-1"] {
+        assert!(
+            !other.starts_with(prefix),
+            "{other} must not match the task-window glob"
+        );
+    }
 }
 
 /// The task-window permission list is exact and hand-reviewed, like the main window's.

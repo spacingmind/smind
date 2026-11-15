@@ -227,8 +227,11 @@ pub fn dismissed<R: Runtime>(app: &AppHandle<R>) {
 pub fn window_ready(app: AppHandle, window: tauri::Window, gate: State<'_, ShowGate>) {
     if window.label() != MAIN_WINDOW {
         if let Some(win) = app.get_webview_window(window.label()) {
-            let _ = win.show();
-            let _ = win.set_focus();
+            // Only the first paint shows it: a reload's repeated signal must not grab focus again.
+            if !win.is_visible().unwrap_or(false) {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
         }
         return;
     }
@@ -443,5 +446,17 @@ mod multi_window_tests {
             zoom.contains("webview_windows()"),
             "zoom applies to every open window"
         );
+    }
+
+    #[test]
+    fn app_wide_menu_events_are_never_broadcast() {
+        let menu = include_str!("menu.rs");
+        let handler = body(menu, "pub fn handle_event(");
+        assert!(handler.contains("emit_to(target.as_str(), \"menu-action\""));
+        assert!(
+            !handler.contains("app.emit(\"menu-action\""),
+            "a broadcast would run the action in every window"
+        );
+        assert!(!handler.contains("app.emit(\"app-update-check-requested\""));
     }
 }

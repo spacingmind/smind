@@ -198,6 +198,8 @@ Human decision (via the Supervisor): the desktop app may open a task in its own 
 - **Identity stays with `main`:** tray, Dock and badge, the single-instance focus, the notification click target and deep-link navigation, and the hide-to-tray close behaviour. Task windows are destroyed on close.
 - **The exact-list capability test pins both capabilities** (`capability_tests.rs`): the two lists, the single glob, the loopback-only remote scope, and that no main-only command appears in the task list.
 
+Two residuals are accepted and stated: the core window permissions a drawn caption bar needs accept a target label, so a task window's page could minimise or close `main` (the page is the bundled UI, never daemon or agent content, and `main`'s close only hides it); and `core:event:allow-listen` lets a task window hear app-wide events, so events that must not run in every window (the menu action, the update-check request) are emitted to one window, never broadcast.
+
 Consequences: a task window is the same bundled UI on the same origin, so it shares `localStorage` and the proxy with `main`; the web side makes a task window never reach for the main-only commands (no connection picker, no daemon banner, no update badge). Threat model and tests: `docs/plans/active/desktop-multi-window.md`.
 
 ## Cross-references
