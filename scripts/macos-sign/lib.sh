@@ -1,0 +1,113 @@
+# shellcheck shell=bash
+# Shared by sign-notarize.sh and verify.sh (docs/plans/active/desktop-notarization-prep.md,
+# ADR-0060 draft). Sourced, never run.
+#
+# The rules every script here keeps:
+#  - nothing runs without the secrets: a missing variable is a refusal (exit 3) that names the
+#    VARIABLE, never a value, before any tool is invoked;
+#  - no secret is echoed, logged, written under a predictable name or passed through `set -x`
+#    (the scripts never enable xtrace); secrets live in env vars and in 0600 files in a private
+#    temp dir that is removed on exit, including the temporary keychain;
+#  - the signing keychain is a temporary one, never the login keychain, and is deleted on exit;
+#  - nothing is signed with `--deep` and nothing is sent anywhere except the notarization
+#    submission itself.
+set -euo pipefail
+umask 077
+
+# The Human's Apple credentials. The names are the contract with the workflow's secrets.
+SMIND_SIGN_REQUIRED_VARS=(
+  SMIND_MACOS_CERT_P12_BASE64   # the "Developer ID Application" certificate + private key, .p12, base64
+  SMIND_MACOS_CERT_PASSWORD     # the .p12 export password
+  SMIND_MACOS_SIGN_IDENTITY     # e.g. "Developer ID Application: Example Ltd (ABCDE12345)"
+  SMIND_NOTARY_KEY_P8_BASE64    # an App Store Connect API key (.p8), base64
+  SMIND_NOTARY_KEY_ID           # its 10-character key id
+  SMIND_NOTARY_ISSUER           # the issuer id (a UUID)
+)
+
+die() { printf 'macos-sign: %s\n' "$*" >&2; exit 1; }
+refuse() { printf 'macos-sign: refusing to run: %s\n' "$*" >&2; exit 3; }
+say() { printf 'macos-sign: %s\n' "$*"; }
+
+require_darwin() {
+  [ "$(uname -s)" = "Darwin" ] || refuse "this needs macOS (codesign, notarytool, stapler)"
+}
+
+# Refuses, before any tool runs, unless every secret is set and has the right shape. Prints
+# variable names only.
+require_secrets() {
+  local v missing=()
+  for v in "${SMIND_SIGN_REQUIRED_VARS[@]}"; do
+    [ -n "${!v:-}" ] || missing+=("$v")
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    refuse "missing secret environment variable(s): ${missing[*]}. Nothing was run: signing and notarization need the Human's Apple Developer credentials (docs/desktop-macos-signing.md)"
+  fi
+  case "$SMIND_MACOS_SIGN_IDENTITY" in
+    "Developer ID Application: "*) ;;
+    *) refuse "SMIND_MACOS_SIGN_IDENTITY must be a \"Developer ID Application: ...\" identity (a distribution outside the App Store is signed with that certificate type)" ;;
+  esac
+  printf '%s' "$SMIND_NOTARY_KEY_ID" | grep -Eq '^[A-Z0-9]{10}$' || refuse "SMIND_NOTARY_KEY_ID is not a 10-character key id"
+  printf '%s' "$SMIND_NOTARY_ISSUER" | grep -Eqi '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' || refuse "SMIND_NOTARY_ISSUER is not a UUID"
+  printf '%s' "$SMIND_MACOS_CERT_P12_BASE64" | base64 -d >/dev/null 2>&1 || refuse "SMIND_MACOS_CERT_P12_BASE64 is not valid base64"
+  printf '%s' "$SMIND_NOTARY_KEY_P8_BASE64" | base64 -d >/dev/null 2>&1 || refuse "SMIND_NOTARY_KEY_P8_BASE64 is not valid base64"
+}
+
+WORK=""
+KEYCHAIN=""
+
+cleanup() {
+  local rc=$?
+  if [ -n "$KEYCHAIN" ]; then
+    security delete-keychain "$KEYCHAIN" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$WORK" ] && [ -d "$WORK" ]; then
+    rm -rf "$WORK"
+  fi
+  return "$rc"
+}
+
+# Creates the private work dir (0700) and the cleanup trap.
+init_work() {
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/smind-macos-sign.XXXXXX")"
+  chmod 700 "$WORK"
+  trap cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+}
+
+# Imports the signing certificate into a temporary keychain and checks the identity is there.
+# Sets KEYCHAIN. The keychain password is random and never printed. The .p12 password is passed
+# to `security import` on its command line (the tool offers no other way): it is visible to other
+# local users in `ps` for that moment, so this is meant for a single-user CI runner or the
+# Human's own machine.
+setup_keychain() {
+  local kcpw p12
+  KEYCHAIN="$WORK/signing.keychain-db"
+  kcpw="$(head -c 24 /dev/urandom | base64)"
+  p12="$WORK/cert.p12"
+  printf '%s' "$SMIND_MACOS_CERT_P12_BASE64" | base64 -d > "$p12"
+  security create-keychain -p "$kcpw" "$KEYCHAIN"
+  security set-keychain-settings -lut 3600 "$KEYCHAIN"
+  security unlock-keychain -p "$kcpw" "$KEYCHAIN"
+  security import "$p12" -P "$SMIND_MACOS_CERT_PASSWORD" -f pkcs12 -t cert -k "$KEYCHAIN" \
+    -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+  rm -f "$p12"
+  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kcpw" "$KEYCHAIN" >/dev/null
+  if ! security find-identity -v -p codesigning "$KEYCHAIN" | grep -qF -- "$SMIND_MACOS_SIGN_IDENTITY"; then
+    die "the signing identity is not in the imported certificate (or it has expired): check SMIND_MACOS_SIGN_IDENTITY against the .p12"
+  fi
+  say "signing identity found in a temporary keychain"
+}
+
+# Writes the notarization API key to a 0600 file and sets NOTARY_KEY_FILE.
+setup_notary_key() {
+  NOTARY_KEY_FILE="$WORK/AuthKey.p8"
+  printf '%s' "$SMIND_NOTARY_KEY_P8_BASE64" | base64 -d > "$NOTARY_KEY_FILE"
+  chmod 600 "$NOTARY_KEY_FILE"
+}
+
+# notarytool with the API key (the key goes by file path, the ids by argument: neither is a secret
+# by itself).
+notary() {
+  xcrun notarytool "$@" --key "$NOTARY_KEY_FILE" --key-id "$SMIND_NOTARY_KEY_ID" --issuer "$SMIND_NOTARY_ISSUER"
+}
