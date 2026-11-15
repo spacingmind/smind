@@ -11,6 +11,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/permpolicy"
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -143,5 +144,32 @@ func TestBrowserCall_ImagesAreReadOnlyWhereTheCatalogueSaysSo(t *testing.T) {
 	}
 	if e.api.browser.imagesRead("no-such-run") {
 		t.Fatal("an unknown run reads no images")
+	}
+}
+
+func TestImagesReadFrom(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]bool{"yes": true, "no": false, "unknown": false, "": false, "YES": false, "true": false} {
+		if got := imagesReadFrom(in); got != want {
+			t.Errorf("imagesReadFrom(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+type recordingBroker struct{ ended []string }
+
+func (b *recordingBroker) Call(context.Context, browser.Run, string, json.RawMessage) browser.Result {
+	return browser.Result{}
+}
+func (b *recordingBroker) EndRun(id string) { b.ended = append(b.ended, id) }
+
+func TestBrowserHost_AFinishedRunEndsItsBrowserSession(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	rb := &recordingBroker{}
+	e.api.browser.broker = rb
+	e.api.browser.OnRunFinished(runs.RunFinished{RunID: "run-x"})
+	if len(rb.ended) != 1 || rb.ended[0] != "run-x" {
+		t.Fatalf("a finished run must end its browser session: %v", rb.ended)
 	}
 }

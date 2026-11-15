@@ -26,10 +26,17 @@ import (
 // browserCallMethods lists the browser RPCs; a test walks it.
 var browserCallMethods = []string{"browser.call"}
 
+// brokerAPI is the part of the broker the host drives (an interface so a test
+// can see what the host asks of it).
+type brokerAPI interface {
+	Call(ctx context.Context, run browser.Run, tool string, args json.RawMessage) browser.Result
+	EndRun(runID string)
+}
+
 type browserHost struct {
 	db     *store.Store
 	reg    *runs.Registry
-	broker *browser.Broker
+	broker brokerAPI
 	mgr    *browser.Manager
 
 	// Hooks, defaulted by newBrowserHost and replaced by tests.
@@ -46,7 +53,7 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h.gate = reg.BrowserAllowed
 	h.imagesRead = func(runID string) bool {
 		info, err := reg.ProviderCatalogForRun(runID)
-		return err == nil && info.Images == "yes" // "no" and "unknown" cannot read images
+		return err == nil && imagesReadFrom(info.Images)
 	}
 	h.allow = func(int64) []string { return nil } // the per-workspace allowlist is a later PR: loopback only
 	h.deny = daemonDeny
@@ -65,6 +72,10 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	})
 	return h
 }
+
+// imagesReadFrom says whether a provider catalogue entry reads images: only an
+// explicit "yes". "no" and "unknown" (and anything else) get the text note.
+func imagesReadFrom(images string) bool { return images == "yes" }
 
 // daemonDeny reserves the daemon's own listen address: a page must never reach
 // its unauthenticated loopback endpoints. (The rest of the deny list, the

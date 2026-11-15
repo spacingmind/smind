@@ -536,3 +536,11 @@ func (c *Content) safeData() string {
 	}
 	return c.Data
 }
+
+// The browser is dark in this PR. The PR that adds the daemon-side permission
+// gate flips browser.GateReady and updates this test, and only that PR.
+func TestGateIsDarkUntilThePermissionGatePR(t *testing.T) {
+	if GateReady {
+		t.Fatal("browser.GateReady must stay false until the daemon-side permission gate exists")
+	}
+}
