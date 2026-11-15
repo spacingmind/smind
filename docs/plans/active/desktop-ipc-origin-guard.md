@@ -64,10 +64,10 @@ The exempt list (`EXEMPT`) is empty. Every plugin permission is absent from both
 ## Progress
 
 - [x] spec (this file, first commit)
-- [ ] `ipc_guard.rs`: matcher, state, wrapper, runtime capabilities
-- [ ] templates and the capability tests
-- [ ] drift and table tests, mutations
-- [ ] ADR-0013 amendment text
+- [x] `ipc_guard.rs`: matcher, state, pure verdict, wrapper, runtime capabilities
+- [x] templates and the capability tests
+- [x] drift and table tests, mutations
+- [x] ADR-0013 amendment text
 - [ ] two-axis review (HIGH-RISK), PR
 
 ## Validation
