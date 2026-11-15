@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/spacingmind/smind/internal/fsutil"
 )
 
 const (
@@ -132,7 +134,7 @@ func prepareDir(dir string, uid int, lstat func(string) (fs.FileInfo, error)) er
 	if err != nil {
 		return fmt.Errorf("runsock: socket directory: %w", err)
 	}
-	if info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() {
+	if fsutil.IsLink(info.Mode()) || !info.IsDir() {
 		return fmt.Errorf("runsock: %s is not a plain directory", dir)
 	}
 	if info.Mode().Perm() != 0o700 {
