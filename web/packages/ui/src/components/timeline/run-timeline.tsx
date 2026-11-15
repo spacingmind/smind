@@ -86,7 +86,7 @@ export const RunTimeline = memo(function RunTimeline({
   onLoadFullHistory?: (run: RunEntry) => void;
 } & TimelineRowContext) {
   const items = run.status === "error" ? withoutErrorEcho(run.items, run.err) : run.items;
-  const groups = groupTimeline(items, detailLevel);
+  const groups = groupTimeline(items, detailLevel, { finished: run.status !== "running" });
 
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="flex flex-col gap-2">

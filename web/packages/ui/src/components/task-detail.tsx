@@ -21,7 +21,13 @@ import { QuestionCard } from "@/components/permission/question-card";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useClearProviderCooldown, activeCooldownUntil } from "@/hooks/use-clear-provider-cooldown";
 import { useProfileList } from "@/hooks/use-profiles";
-import { detailLevelChangesView, useDetailLevel } from "@/components/timeline/detail-level";
+import {
+  DETAIL_LEVEL_LABELS,
+  DETAIL_LEVEL_TITLES,
+  NEXT_DETAIL_LEVEL,
+  detailLevelChangesView,
+  useDetailLevel,
+} from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import type { DeliverableContext } from "@/components/timeline/deliverable-card";
 import { useLocalPathActions } from "@/hooks/use-local-path-actions";
@@ -275,8 +281,11 @@ export function TaskDetailPane({
   const chatFind = useChatFind(follow.ref, `${itemCount}:${textLength}`);
 
   const [detailLevel, setDetailLevel] = useDetailLevel();
+  // Chat Find walks the rendered DOM: tool rows folded into a summary are not in it, so while Find is open the automatic
+  // collapse is off and a match inside a tool call is found (an explicit Overview stays as the user chose it).
+  const renderedLevel = detailLevel === "auto" && chatFind.open ? "detailed" : detailLevel;
   // The control only shows when it has something to reveal (or to undo): on an error-only run it was an unexplained button.
-  const showDetailToggle = useMemo(() => detailLevel === "overview" || detailLevelChangesView(runs ?? []), [detailLevel, runs]);
+  const showDetailToggle = useMemo(() => detailLevel !== "auto" || detailLevelChangesView(runs ?? []), [detailLevel, runs]);
 
   // App.tsx re-creates its openFileTab closure on every render, which
   // would defeat TimelineRow's memo if passed straight through. Pinning
@@ -481,12 +490,12 @@ export function TaskDetailPane({
               type="button"
               variant="ghost"
               size="xs"
-              title={detailLevel === "overview" ? "Show every tool call" : "Collapse runs of tool calls"}
+              title={DETAIL_LEVEL_TITLES[detailLevel]}
               data-testid="detail-level-toggle"
-              aria-pressed={detailLevel === "overview"}
-              onClick={() => setDetailLevel(detailLevel === "overview" ? "detailed" : "overview")}
+              data-level={detailLevel}
+              onClick={() => setDetailLevel(NEXT_DETAIL_LEVEL[detailLevel])}
             >
-              {detailLevel === "overview" ? "Overview" : "Detailed"}
+              {DETAIL_LEVEL_LABELS[detailLevel]}
             </Button>
           ) : undefined
         }
@@ -572,7 +581,7 @@ export function TaskDetailPane({
                   <RunTimeline
                     key={run.id}
                     run={run}
-                    detailLevel={detailLevel}
+                    detailLevel={renderedLevel}
                     worktreePath={task.WorktreePath ?? undefined}
                     onOpenFile={openFile}
                     onRetry={canRetryWithHigherEffort(run, providers) ? retryWithHigherEffort : undefined}

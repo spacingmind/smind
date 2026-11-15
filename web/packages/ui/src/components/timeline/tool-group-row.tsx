@@ -18,7 +18,7 @@ export function groupStatus(items: TimelineToolCallItem[]): StatusDotStatus {
   return "success";
 }
 
-/** A run of consecutive tool calls collapsed into one row (`overview` detail level). */
+/** A run of consecutive tool calls collapsed into one row (the `overview` level, and `auto` for a finished run). */
 export function ToolGroupRow({ items, worktreePath, onOpenFile }: { items: TimelineToolCallItem[] } & TimelineRowContext) {
   const [open, setOpen] = useState(false);
   const names = [...new Set(items.map((i) => i.toolName).filter((n): n is string => !!n))];
@@ -35,7 +35,7 @@ export function ToolGroupRow({ items, worktreePath, onOpenFile }: { items: Timel
         >
           <Icons.chevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
           <Icons.toolGroup className="size-3 shrink-0" />
-          <span className="shrink-0 font-medium text-foreground">{items.length} tool calls</span>
+          <span className="shrink-0 font-medium text-foreground">Ran {items.length} tools</span>
           {names.length > 0 && (
             <span className="min-w-0 flex-1 truncate">{names.join(", ")}</span>
           )}
