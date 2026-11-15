@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -123,6 +124,22 @@ console.log("loaded");
 		t.Fatal(err)
 	}
 	defer s.Close()
+
+	// Another local process (a curl) talking to the proxy port without the
+	// session secret is refused before anything else happens.
+	{
+		pc, err := net.Dial("tcp", s.proxy.Addr())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = pc.SetDeadline(time.Now().Add(5 * time.Second))
+		fmt.Fprintf(pc, "GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", daemonPort)
+		reply, _ := io.ReadAll(pc)
+		pc.Close()
+		if !strings.HasPrefix(string(reply), "HTTP/1.1 407") || strings.Contains(string(reply), s.proxy.Secret()) {
+			t.Errorf("a direct request to the proxy without the secret must get a bare 407: %q", reply)
+		}
+	}
 
 	// Nothing may listen: no DevToolsActivePort, and no TCP listener in the browser's process group.
 	if dirs, _ := filepath.Glob(filepath.Join(profiles, "smind-browser-*", "DevToolsActivePort")); len(dirs) != 0 {

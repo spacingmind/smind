@@ -3,6 +3,7 @@ package browser
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -91,10 +92,43 @@ func newProxyRig(t *testing.T, allow []string, res Resolver, mut func(*ProxyConf
 	return r
 }
 
+const proxyTestUser = "smind"
+
+// authConn is a client connection that authenticates like the browser does: it
+// adds the Proxy-Authorization header after the request line of each Write (the
+// first line only, so a request smuggled inside a body stays byte for byte).
+type authConn struct {
+	net.Conn
+	hdr string
+}
+
+func (c authConn) Write(b []byte) (int, error) {
+	const eol = "HTTP/1.1\r\n"
+	s := string(b)
+	if i := strings.Index(s, eol); i >= 0 && !strings.Contains(s[:i], "\n") {
+		out := s[:i+len(eol)] + c.hdr + s[i+len(eol):]
+		if _, err := c.Conn.Write([]byte(out)); err != nil {
+			return 0, err
+		}
+		return len(b), nil
+	}
+	return c.Conn.Write(b)
+}
+
+// dial opens an authenticated client connection to the proxy.
+func (r *proxyRig) dial() (net.Conn, error) {
+	c, err := net.Dial("tcp", r.px.Addr())
+	if err != nil {
+		return nil, err
+	}
+	cred := base64.StdEncoding.EncodeToString([]byte(proxyTestUser + ":" + r.px.Secret()))
+	return authConn{Conn: c, hdr: "Proxy-Authorization: Basic " + cred + "\r\n"}, nil
+}
+
 // get does a proxied GET the way a browser sends it (absolute form).
 func (r *proxyRig) get(t *testing.T, target string) (int, string) {
 	t.Helper()
-	pu, _ := url.Parse("http://" + r.px.Addr())
+	pu, _ := url.Parse("http://" + proxyTestUser + ":" + r.px.Secret() + "@" + r.px.Addr())
 	c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(pu), DisableKeepAlives: true}, Timeout: 5 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := c.Get(target)
@@ -109,7 +143,7 @@ func (r *proxyRig) get(t *testing.T, target string) (int, string) {
 // connect opens a CONNECT tunnel; it returns the status line and the conn.
 func (r *proxyRig) connect(t *testing.T, target string) (string, net.Conn, *bufio.Reader) {
 	t.Helper()
-	c, err := net.Dial("tcp", r.px.Addr())
+	c, err := r.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +429,7 @@ func TestProxyConnectionLimit(t *testing.T) {
 			t.Fatalf("tunnel %d: %q", i, status)
 		}
 	}
-	c, err := net.Dial("tcp", rig.px.Addr())
+	c, err := rig.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +502,7 @@ func TestProxyStreamsAndStripsResponseHopByHop(t *testing.T) {
 		}
 	})
 	rig := newProxyRig(t, nil, proxyResolver, nil)
-	pu, _ := url.Parse("http://" + rig.px.Addr())
+	pu, _ := url.Parse("http://" + proxyTestUser + ":" + rig.px.Secret() + "@" + rig.px.Addr())
 	c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(pu), DisableKeepAlives: true}, Timeout: 5 * time.Second}
 	resp, err := c.Get(fmt.Sprintf("http://127.0.0.1:%d/", srv.port))
 	if err != nil {
@@ -540,7 +574,7 @@ func (f launcherFunc) Launch(ctx context.Context, o LaunchOpts) (Instance, error
 func TestProxyRefusesAnUpgradeOverAPlainRequest(t *testing.T) {
 	srv := newHitServer(t, nil)
 	rig := newProxyRig(t, nil, proxyResolver, nil)
-	c, err := net.Dial("tcp", rig.px.Addr())
+	c, err := rig.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +744,7 @@ func TestProxyEarlyBytesAfterConnectReachUpstream(t *testing.T) {
 		got.Store(string(b))
 	}()
 	rig := newProxyRig(t, nil, proxyResolver, nil)
-	c, err := net.Dial("tcp", rig.px.Addr())
+	c, err := rig.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +781,7 @@ func TestProxyStalledUpstreamBodyIsCutOff(t *testing.T) {
 		}
 	}()
 	rig := newProxyRig(t, nil, proxyResolver, func(c *ProxyConfig) { c.IOTimeout = 200 * time.Millisecond })
-	pu, _ := url.Parse("http://" + rig.px.Addr())
+	pu, _ := url.Parse("http://" + proxyTestUser + ":" + rig.px.Secret() + "@" + rig.px.Addr())
 	c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(pu), DisableKeepAlives: true}, Timeout: 3 * time.Second}
 	start := time.Now()
 	resp, err := c.Get("http://" + stall.Addr().String() + "/")
