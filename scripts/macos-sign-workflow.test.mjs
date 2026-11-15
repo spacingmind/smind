@@ -38,16 +38,20 @@ test("workflow-is-dispatch-only-and-gated", () => {
   const perms = workflow.match(/^permissions:\n((?:\s{2}\S.*\n)+)/m);
   assert.ok(perms, "top-level permissions block");
   assert.deepEqual(perms[1].trim().split("\n").map((l) => l.trim()), ["contents: read"]);
-  // the switch and the secrets are checked in a gate job; the signing job needs it and is protected
+  // the master switch is a repository variable checked in a gate job; the signing job needs it, runs
+  // only from develop (the Environment's branch policy is the enforcing control; this is the cheap
+  // second one) and is protected by the Environment
   assert.match(workflow, /vars\.MACOS_SIGNING_ENABLED/);
   const sign = workflow.slice(workflow.indexOf("\n  sign:"));
   assert.match(sign, /needs: gate/);
-  assert.match(sign, /if: needs\.gate\.outputs\.enabled == 'true'/);
+  assert.match(sign, /if: needs\.gate\.outputs\.enabled == 'true' && github\.ref == 'refs\/heads\/develop'/);
   assert.match(sign, /environment: macos-signing/);
-  for (const name of ["SMIND_MACOS_CERT_P12_BASE64", "SMIND_MACOS_CERT_PASSWORD", "SMIND_MACOS_SIGN_IDENTITY", "SMIND_NOTARY_KEY_P8_BASE64", "SMIND_NOTARY_KEY_ID", "SMIND_NOTARY_ISSUER"]) {
-    const gate = workflow.slice(workflow.indexOf("\n  gate:"), workflow.indexOf("\n  sign:"));
-    assert.match(gate, new RegExp(`secrets\\.${name} != ''`), `the gate checks ${name} exists`);
-  }
+  // The gate job has no environment, so it cannot read the Environment's secrets: a secret check
+  // there would always be false and the workflow could never run (found in review). The existence
+  // of the six secrets is checked by sign-notarize.sh inside the signing job.
+  const gate = workflow.slice(workflow.indexOf("\n  gate:"), workflow.indexOf("\n  sign:"));
+  assert.doesNotMatch(gate, /secrets\./, "the gate job cannot see Environment secrets; do not test them there");
+  assert.doesNotMatch(gate, /environment:/, "the gate holds no secrets and needs no approval");
   // nothing here can publish: no release upload/creation, no write permission anywhere
   assert.doesNotMatch(code.join("\n"), /gh release (upload|create|edit)|contents:\s*write|packages:\s*write|id-token:\s*write/);
 });
@@ -68,6 +72,16 @@ test("workflow-secrets-only-in-env-never-in-run", () => {
   assert.match(stepsWithSecrets[0], /scripts\/macos-sign\/sign-notarize\.sh/);
   // no xtrace anywhere in the workflow
   assert.doesNotMatch(code.join("\n"), /set -x|set -o xtrace|bash -x/);
+});
+
+// Whatever job reads the secrets must be in the Environment that holds them: a job without it sees
+// empty secrets (a silent failure), and the Environment is also where the approval and the branch
+// policy live.
+test("workflow-job-with-secrets-has-the-environment", () => {
+  const jobs = code.join("\n").split(/\n  (?=[a-z][a-z-]*:\n)/).slice(1);
+  const withSecrets = jobs.filter((j) => /secrets\.SMIND_/.test(j));
+  assert.equal(withSecrets.length, 1, "exactly one job reads secrets");
+  assert.match(withSecrets[0], /\n    environment: macos-signing\n/);
 });
 
 test("workflow-actions-are-pinned", () => {

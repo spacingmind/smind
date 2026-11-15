@@ -9,8 +9,9 @@
 #                         [--entitlements-app <file>] [--entitlements-sidecar <file>] | --check
 #   --check   only the gate: secrets present, certificate imports, identity found; signs nothing
 #
-# Order (inside out, never --deep): every nested Mach-O (the sidecar, frameworks), then the main
-# executable's bundle; verify; zip; notarize and wait; fail with the log unless Accepted; staple.
+# Order (inside out, never --deep): the frameworks in Contents/Frameworks and the other executables
+# in Contents/MacOS (the sidecar), then the main executable's bundle; a bundle with any other kind of
+# nested code (Helpers, XPCServices, PlugIns, Library/LaunchServices) is refused, not half-signed; verify; zip; notarize and wait; fail with the log unless Accepted; staple.
 # With --dmg the stapled app goes into a dmg that is signed, notarized and stapled too. With
 # --updater-tarball the stapled app is packed for the updater: the caller must then re-sign that
 # tarball with the updater key (`tauri signer sign`), the old .sig no longer matches.
@@ -19,19 +20,20 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/macos-sign/lib.sh
 . "$here/lib.sh"
 
+need() { [ -n "${2:-}" ] || { printf 'macos-sign: %s needs a value\n' "$1" >&2; exit 2; }; }
 app="" out="" dmg="" tarball="" check=0
 ent_app="$here/../../desktop/src-tauri/entitlements/app.entitlements"
 ent_sidecar="$here/../../desktop/src-tauri/entitlements/sidecar.entitlements"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --app) app="${2:?--app needs a path}"; shift 2 ;;
-    --out) out="${2:?--out needs a path}"; shift 2 ;;
-    --dmg) dmg="${2:?--dmg needs a path}"; shift 2 ;;
-    --updater-tarball) tarball="${2:?--updater-tarball needs a path}"; shift 2 ;;
-    --entitlements-app) ent_app="${2:?}"; shift 2 ;;
-    --entitlements-sidecar) ent_sidecar="${2:?}"; shift 2 ;;
+    --app) need "$1" "${2:-}"; app="$2"; shift 2 ;;
+    --out) need "$1" "${2:-}"; out="$2"; shift 2 ;;
+    --dmg) need "$1" "${2:-}"; dmg="$2"; shift 2 ;;
+    --updater-tarball) need "$1" "${2:-}"; tarball="$2"; shift 2 ;;
+    --entitlements-app) need "$1" "${2:-}"; ent_app="$2"; shift 2 ;;
+    --entitlements-sidecar) need "$1" "${2:-}"; ent_sidecar="$2"; shift 2 ;;
     --check) check=1; shift ;;
-    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -/{/^set -/!p;}' "$0"; exit 0 ;;
     *) printf 'macos-sign: unknown argument %s\n' "$1" >&2; exit 2 ;;
   esac
 done
@@ -66,6 +68,12 @@ sign() { # sign <entitlements|""> <path>
   fi
 }
 
+# Nested code this script does not know how to order is refused rather than left unsigned (an
+# unsigned nested binary is exactly what makes Apple reject the notarization, after a long wait).
+for d in Helpers XPCServices PlugIns Library/LaunchServices Library/LoginItems; do
+  [ ! -e "$app/Contents/$d" ] || die "the bundle has Contents/$d: nested code this script does not sign (extend it and its tests first)"
+done
+
 exe_name="$(plutil -extract CFBundleExecutable raw -o - "$app/Contents/Info.plist")"
 [ -n "$exe_name" ] || die "the app has no CFBundleExecutable"
 
@@ -90,14 +98,17 @@ notarize() { # notarize <path-to-zip-or-dmg> <label>
   local file="$1" label="$2" result id status
   result="$WORK/notary-$label.json"
   say "submitting $label to Apple (waiting; up to 30 minutes)"
-  notary submit "$file" --wait --timeout 30m --output-format json > "$result" || true
+  local raw="$WORK/notary-$label.out" rc=0
+  notary submit "$file" --wait --timeout 30m --output-format json > "$raw" 2>"$WORK/notary-$label.err" || rc=$?
+  # notarytool may print progress text before the JSON object: keep from the first line that is `{`
+  sed -n '/^{/,$p' "$raw" > "$result"
   id="$(plutil -extract id raw -o - "$result" 2>/dev/null || true)"
   status="$(plutil -extract status raw -o - "$result" 2>/dev/null || true)"
   if [ "$status" != "Accepted" ]; then
     if [ -n "$id" ]; then
       notary log "$id" "$out/notarization-log-$label.json" >/dev/null 2>&1 || true
     fi
-    die "notarization of $label ended as '${status:-unknown}' (submission ${id:-none}); the log, if Apple returned one, is $out/notarization-log-$label.json"
+    die "notarization of $label ended as '${status:-unknown}' (notarytool exit status $rc, submission ${id:-none}); the log, if Apple returned one, is $out/notarization-log-$label.json"
   fi
   say "$label notarized (submission $id)"
 }

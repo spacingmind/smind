@@ -37,19 +37,20 @@ require_darwin() {
 require_secrets() {
   local v missing=()
   for v in "${SMIND_SIGN_REQUIRED_VARS[@]}"; do
-    [ -n "${!v:-}" ] || missing+=("$v")
+    # empty or only whitespace counts as missing
+    [ -n "$(printf '%s' "${!v:-}" | tr -d '[:space:]')" ] || missing+=("$v")
   done
   if [ "${#missing[@]}" -gt 0 ]; then
     refuse "missing secret environment variable(s): ${missing[*]}. Nothing was run: signing and notarization need the Human's Apple Developer credentials (docs/desktop-macos-signing.md)"
   fi
-  case "$SMIND_MACOS_SIGN_IDENTITY" in
-    "Developer ID Application: "*) ;;
-    *) refuse "SMIND_MACOS_SIGN_IDENTITY must be a \"Developer ID Application: ...\" identity (a distribution outside the App Store is signed with that certificate type)" ;;
-  esac
+  # the full certificate name: "Developer ID Application: <name> (<10-character team id>)"
+  grep -Eq '^Developer ID Application: .+ \([A-Z0-9]{10}\)$' <<<"$SMIND_MACOS_SIGN_IDENTITY" \
+    || refuse "SMIND_MACOS_SIGN_IDENTITY must be the full \"Developer ID Application: <name> (<TEAMID>)\" certificate name (a distribution outside the App Store is signed with that certificate type)"
   grep -Eq '^[A-Z0-9]{10}$' <<<"$SMIND_NOTARY_KEY_ID" || refuse "SMIND_NOTARY_KEY_ID is not a 10-character key id"
   grep -Eqi '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' <<<"$SMIND_NOTARY_ISSUER" || refuse "SMIND_NOTARY_ISSUER is not a UUID"
-  printf '%s' "$SMIND_MACOS_CERT_P12_BASE64" | base64 -d >/dev/null 2>&1 || refuse "SMIND_MACOS_CERT_P12_BASE64 is not valid base64"
-  printf '%s' "$SMIND_NOTARY_KEY_P8_BASE64" | base64 -d >/dev/null 2>&1 || refuse "SMIND_NOTARY_KEY_P8_BASE64 is not valid base64"
+  # (`base64 -d` needs macOS 13 or later; older macOS spells it -D)
+  [ -n "$(printf '%s' "$SMIND_MACOS_CERT_P12_BASE64" | base64 -d 2>/dev/null | head -c 1)" ] || refuse "SMIND_MACOS_CERT_P12_BASE64 is not valid, non-empty base64"
+  [ -n "$(printf '%s' "$SMIND_NOTARY_KEY_P8_BASE64" | base64 -d 2>/dev/null | head -c 1)" ] || refuse "SMIND_NOTARY_KEY_P8_BASE64 is not valid, non-empty base64"
 }
 
 WORK=""
@@ -77,9 +78,10 @@ init_work() {
 
 # Imports the signing certificate into a temporary keychain and checks the identity is there.
 # Sets KEYCHAIN. The keychain password is random and never printed. The .p12 password is passed
-# to `security import` on its command line (the tool offers no other way): it is visible to other
-# local users in `ps` for that moment, so this is meant for a single-user CI runner or the
-# Human's own machine.
+# to `security import` on its command line (the tool offers no other way), and the random keychain
+# password to create-keychain, unlock-keychain and set-key-partition-list: both are visible to other
+# local users in `ps` for that moment, so this is meant for a single-user CI runner or the Human's
+# own machine.
 setup_keychain() {
   local kcpw p12 identities
   KEYCHAIN="$WORK/signing.keychain-db"
@@ -96,7 +98,7 @@ setup_keychain() {
   # captured first: `grep -q` at the end of a pipeline under pipefail fails on a large listing
   identities="$(security find-identity -v -p codesigning "$KEYCHAIN")"
   if ! grep -qF -- "$SMIND_MACOS_SIGN_IDENTITY" <<<"$identities"; then
-    die "the signing identity is not in the imported certificate (or it has expired): check SMIND_MACOS_SIGN_IDENTITY against the .p12"
+    die "the signing identity is not among the valid identities of the imported certificate: check SMIND_MACOS_SIGN_IDENTITY against the .p12, that it has not expired, and that the .p12 carries the Developer ID certificate chain (the check lists VALID identities only)"
   fi
   say "signing identity found in a temporary keychain"
 }

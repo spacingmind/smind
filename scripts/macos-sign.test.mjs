@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -80,7 +80,7 @@ const FAKES = {
     "    else",
     '      echo "  1) ABC123 \\"${SMIND_MACOS_SIGN_IDENTITY:-' + IDENTITY + '}\\""',
     // a long listing after the match, like a keychain with many identities
-    "      printf '  2) FFFF \"Some Other Identity\"\\n%.0s' $(seq 1 30000)",
+    "      printf '  2) FFFF \"Some Other Identity\"\\n%.0s' $(seq 1 4000)",
     "    fi",
     "    ;;",
     "esac",
@@ -107,6 +107,7 @@ const FAKES = {
     '  team="ABCDE12345"',
     '  case "$path" in',
     '    */smind) if [ "${FAKE_TEAM_MISMATCH:-}" = "1" ]; then team="ZZZZZZZZZZ"; fi ;;',
+    '    *.framework) if [ "${FAKE_TEAM_MISMATCH_FRAMEWORK:-}" = "1" ]; then team="ZZZZZZZZZZ"; fi ;;',
     "  esac",
     '  if [ "${FAKE_ADHOC:-}" = "1" ]; then team="not set"; fi',
     '  d="$d${NL}TeamIdentifier=$team"',
@@ -114,6 +115,7 @@ const FAKES = {
     '  if [ "${FAKE_NO_RUNTIME:-}" = "1" ]; then flags="0x0(none)"; fi',
     '  case "$path" in',
     '    */smind) if [ "${FAKE_NO_RUNTIME_NESTED:-}" = "1" ]; then flags="0x0(none)"; fi ;;',
+    '    *.framework) if [ "${FAKE_NO_RUNTIME_FRAMEWORK:-}" = "1" ]; then flags="0x0(none)"; fi ;;',
     "  esac",
     '  d="$d${NL}flags=$flags"',
     // The real codesign prints a long listing; the details line a script greps for comes first and
@@ -122,7 +124,7 @@ const FAKES = {
     '  printf \'%s\\n\' "$d" >&2',
     // printed by the fake's own process (a builtin printf), like the real tool, so the fake itself is
     // killed by SIGPIPE when the reader has gone: its exit status is then 141, as real codesign's is
-    "  printf 'CodeDirectory noise line that real codesign prints and nobody greps for\\n%.0s' $(seq 1 30000) >&2",
+    "  printf 'CodeDirectory noise line that real codesign prints and nobody greps for\\n%.0s' $(seq 1 4000) >&2",
     "  exit 0",
     "fi",
     'if [ "${1:-}" = "-d" ]; then',
@@ -135,6 +137,9 @@ const FAKES = {
 
   xcrun: withLog("xcrun", [
     'if [ "$1" = "notarytool" ] && [ "$2" = "submit" ]; then',
+    // real notarytool prints progress text on stdout before the JSON object under --wait
+    '  if [ "${FAKE_NOTARY_NOISE:-}" = "1" ]; then echo "Conducting pre-submission checks for app.zip and initiating connection to the Apple notary service..."; echo "Successfully uploaded file"; fi',
+    '  if [ -n "${FAKE_NOTARY_SLEEP:-}" ]; then sleep "$FAKE_NOTARY_SLEEP"; fi',
     '  echo "{\\"id\\":\\"sub-123\\",\\"status\\":\\"${FAKE_NOTARY_STATUS:-Accepted}\\"}"',
     "  exit 0",
     "fi",
@@ -593,6 +598,144 @@ function assertFailsWith(h, knobs, text) {
     );
   });
 }
+
+test("sign-refuses-a-whitespace-only-secret", () => {
+  for (const name of Object.keys(SECRETS)) {
+    withHarness({ knobs: { [name]: "   \n " } }, (h) => {
+      const r = h.run(SIGN, ["--app", makeApp(h.tmp)]);
+      assert.equal(r.status, 3, `${name}: ${r.stderr}`);
+      assert.ok(r.stderr.includes(name), r.stderr);
+      assert.deepEqual(h.log(), [], `${name}: a tool ran`);
+    });
+  }
+});
+
+test("sign-refuses-a-prefix-only-identity", () => {
+  for (const identity of ["Developer ID Application: ", "Developer ID Application: Test Ltd", "Developer ID Application: Test Ltd (short)"]) {
+    withHarness({ knobs: { SMIND_MACOS_SIGN_IDENTITY: identity } }, (h) => {
+      const r = h.run(SIGN, ["--app", makeApp(h.tmp)]);
+      assert.equal(r.status, 3, `${identity}: ${r.stderr}`);
+      assert.deepEqual(h.log(), []);
+    });
+  }
+});
+
+test("sign-missing-option-value-exits-2", () => {
+  withHarness({}, (h) => {
+    for (const opt of ["--app", "--out", "--dmg", "--updater-tarball", "--entitlements-app", "--entitlements-sidecar"]) {
+      const r = h.run(SIGN, [opt]);
+      assert.equal(r.status, 2, `${opt}: ${r.stderr}`);
+      assert.ok(r.stderr.includes("needs a value"), r.stderr);
+    }
+    assert.deepEqual(h.log(), []);
+  });
+});
+
+test("help-prints-the-comment-and-no-code", () => {
+  withHarness({}, (h) => {
+    for (const script of [SIGN, VERIFY]) {
+      const r = h.run(script, ["--help"]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.ok(r.stdout.length > 100);
+      for (const l of r.stdout.split("\n").filter(Boolean)) {
+        assert.ok(l.startsWith("#"), `--help printed a code line: ${l}`);
+      }
+    }
+  });
+});
+
+test("sign-staples-the-app-before-it-is-packed", () => {
+  withHarness({}, (h) => {
+    const { app, r } = runSign(h, ["--dmg", join(h.tmp, "out", "sMind.dmg"), "--updater-tarball", join(h.tmp, "out", "sMind.app.tar.gz")]);
+    assert.equal(r.status, 0, r.stderr);
+    const log = h.log();
+    const staple = log.findIndex((f) => f[0] === "xcrun" && f.includes("staple") && f[f.length - 1] === app);
+    const stage = log.findIndex((f) => f[0] === "ditto" && f[1] !== "-c" && f[1] === app);
+    const dmg = log.findIndex((f) => f[0] === "hdiutil");
+    assert.ok(staple !== -1, "the app is never stapled");
+    assert.ok(stage !== -1 && staple < stage, `the dmg stage is copied from the app before it is stapled: ${log.map(flat).join("\n")}`);
+    assert.ok(dmg !== -1 && staple < dmg);
+  });
+});
+
+test("sign-every-codesign-uses-the-temporary-keychain", () => {
+  withHarness({}, (h) => {
+    const { r } = runSign(h, ["--dmg", join(h.tmp, "out", "sMind.dmg")]);
+    assert.equal(r.status, 0, r.stderr);
+    const created = toolLines(h.log(), "security").find((f) => f.includes("create-keychain"));
+    const keychain = created[created.length - 1];
+    const calls = signCalls(h);
+    assert.ok(calls.length >= 3);
+    for (const f of calls) {
+      const at = f.indexOf("--keychain");
+      assert.ok(at !== -1 && f[at + 1] === keychain, `a codesign does not use the temporary keychain: ${flat(f)}`);
+    }
+  });
+});
+
+test("sign-parses-notarytool-output-with-progress-text", () => {
+  withHarness({ knobs: { FAKE_NOTARY_NOISE: "1" } }, (h) => {
+    const { r } = runSign(h);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.ok(r.stdout.includes("notarized"), r.stdout);
+  });
+});
+
+test("sign-notarization-failure-reports-the-exit-status", () => {
+  withHarness({ knobs: { FAKE_NOTARY_STATUS: "Invalid" } }, (h) => {
+    const { r } = runSign(h);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /notarytool exit status \d+/);
+  });
+});
+
+test("sign-refuses-bundles-with-nested-code-it-does-not-sign", () => {
+  for (const dir of ["Helpers", "XPCServices", "PlugIns", "Library/LaunchServices"]) {
+    withHarness({}, (h) => {
+      const app = makeApp(h.tmp);
+      mkdirSync(join(app, "Contents", dir), { recursive: true });
+      const r = h.run(SIGN, ["--app", app, "--out", join(h.tmp, "out")]);
+      assert.notEqual(r.status, 0, dir);
+      assert.ok(r.stderr.includes(dir), r.stderr);
+      assert.equal(signCalls(h).length, 0, `${dir}: something was signed`);
+    });
+  }
+});
+
+// A TERM while notarization is waiting must still delete the keychain and the temp dir (the EXIT trap
+// runs for the signal handlers `exit 143`).
+test("sign-term-signal-still-cleans-up", async () => {
+  const h = harness({ knobs: { FAKE_NOTARY_SLEEP: "30" } });
+  try {
+    const app = makeApp(h.tmp);
+    const child = spawn("bash", [SIGN, "--app", app, "--out", join(h.tmp, "out")], { env: h.env, stdio: "ignore" });
+    const exited = new Promise((res) => child.on("exit", (code, sig) => res({ code, sig })));
+    const deadline = Date.now() + 20000;
+    while (!h.log().some((f) => f[0] === "xcrun" && f.includes("submit"))) {
+      if (Date.now() > deadline) throw new Error("the script never reached the notarization step");
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    child.kill("SIGTERM");
+    await exited;
+    // the fake's `sleep` child may still run for a moment: the script's own cleanup is what is asserted
+    await new Promise((r) => setTimeout(r, 500));
+    assertCleanedUp(h);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("verify-checks-frameworks", () => {
+  for (const knob of ["FAKE_NO_RUNTIME_FRAMEWORK", "FAKE_TEAM_MISMATCH_FRAMEWORK"]) {
+    withHarness({ knobs: { [knob]: "1" } }, (h) => {
+      const app = makeApp(h.tmp);
+      mkdirSync(join(app, "Contents", "Frameworks", "Thing.framework"), { recursive: true });
+      const r = h.run(VERIFY, ["--app", app]);
+      assert.equal(r.status, 1, `${knob}: ${r.stdout}${r.stderr}`);
+      assert.ok(failLines(r).some((l) => l.includes("framework Thing.framework")), r.stdout);
+    });
+  }
+});
 
 test("verify-passes-a-good-app", () => {
   withHarness({}, (h) => {

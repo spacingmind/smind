@@ -17,16 +17,17 @@ bad() { printf 'FAIL %s\n' "$*"; fail=1; }
 
 [ "$(uname -s)" = "Darwin" ] || { echo "macos-sign: refusing to run: this needs macOS" >&2; exit 3; }
 
+need() { [ -n "${2:-}" ] || { echo "macos-sign: $1 needs a value" >&2; exit 2; }; }
 app="" dmg=""
 ent_app="$here/../../desktop/src-tauri/entitlements/app.entitlements"
 ent_sidecar="$here/../../desktop/src-tauri/entitlements/sidecar.entitlements"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --app) app="${2:?}"; shift 2 ;;
-    --dmg) dmg="${2:?}"; shift 2 ;;
-    --entitlements-app) ent_app="${2:?}"; shift 2 ;;
-    --entitlements-sidecar) ent_sidecar="${2:?}"; shift 2 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    --app) need "$1" "${2:-}"; app="$2"; shift 2 ;;
+    --dmg) need "$1" "${2:-}"; dmg="$2"; shift 2 ;;
+    --entitlements-app) need "$1" "${2:-}"; ent_app="$2"; shift 2 ;;
+    --entitlements-sidecar) need "$1" "${2:-}"; ent_sidecar="$2"; shift 2 ;;
+    -h|--help) sed -n '2,/^set -/{/^set -/!p;}' "$0"; exit 0 ;;
     *) echo "macos-sign: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -62,6 +63,14 @@ check_runtime() { # <label> <path>
   if has "$2" 'flags=0x[0-9a-f]+\(.*runtime.*\)'; then ok "$1: hardened runtime"; else bad "$1: hardened runtime flag missing"; fi
 }
 check_runtime app "$app"
+for f in "$app"/Contents/Frameworks/*; do
+  [ -e "$f" ] || continue
+  name="framework $(basename "$f")"
+  if codesign --verify --strict "$f" >/dev/null 2>&1; then ok "$name: signature verifies"; else bad "$name: signature does not verify"; fi
+  check_runtime "$name" "$f"
+  t="$(team_of "$f")"
+  if [ "$t" = "$app_team" ]; then ok "$name: same team"; else bad "$name: team '$t' differs from the app's '$app_team'"; fi
+done
 for f in "$app"/Contents/MacOS/*; do
   [ -f "$f" ] || continue
   [ "$(basename "$f")" = "$exe_name" ] && continue
