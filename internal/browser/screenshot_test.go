@@ -366,3 +366,13 @@ func TestClampPx(t *testing.T) {
 		t.Error("NaN must be 0")
 	}
 }
+
+func TestScreenshotRefusesAnImageWhoseAreaIsOverTheBoundBeforeDecoding(t *testing.T) {
+	// 3000 x 3000 is within the per-side bound but 9 million pixels in area.
+	rig := &shotRig{vw: 3000, vh: 3000}
+	rig.png = func(w, h int) string { return solidPNG(t, 3000, 3000, color.RGBA{1, 2, 3, 255}) }
+	s, _ := newShotSession(t, rig)
+	if _, err := s.Screenshot(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "unusable size") {
+		t.Fatalf("an image over the area bound must be refused: %v", err)
+	}
+}

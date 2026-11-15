@@ -19,6 +19,7 @@ const (
 	MaxShotLongSide = 1568
 	MaxShotBytes    = 1_500_000 // 1.5 MB
 	maxShotPixels   = 4096      // a sanity bound on what the browser hands back
+	maxShotArea     = 8_000_000 // and on width x height, checked before the image is decoded
 	passwordPadPx   = 4
 )
 
@@ -101,7 +102,7 @@ func (s *Session) Screenshot(ctx context.Context, tabID string) (Shot, error) {
 			return nil, errors.New("browser: the browser returned an unreadable screenshot")
 		}
 		cfg, err := jpeg.DecodeConfig(bytes.NewReader(raw))
-		if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > maxShotPixels || cfg.Height > maxShotPixels {
+		if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > maxShotPixels || cfg.Height > maxShotPixels || cfg.Width*cfg.Height > maxShotArea {
 			return nil, errors.New("browser: the browser returned a screenshot of unusable size")
 		}
 		src, err := jpeg.Decode(bytes.NewReader(raw))

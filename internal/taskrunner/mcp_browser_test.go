@@ -155,3 +155,25 @@ func TestBrowserCapabilityIsRevokedWhenTheProviderSkipsTheRow(t *testing.T) {
 	revokeBrowserAll(context.Background())
 	revokeBrowserIfSkipped(context.Background(), []string{"smind-browser"})
 }
+
+// A policy that exists only to carry the browser grant must not turn on strict
+// MCP config: that would hide the person's own servers from a claude run that
+// never asked for a managed tool set.
+func TestStrictMcpConfigIsNotTurnedOnByTheBrowserGrantAlone(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		c    RunContract
+		want bool
+	}{
+		"no policy":                 {RunContract{}, false},
+		"instructions only":         {RunContract{Instructions: "x"}, false},
+		"browser grant alone":       {RunContract{Mcp: &McpPolicy{BrowserOnly: true, Browser: &BrowserPolicy{}}}, false},
+		"managed (peer, no tools)":  {RunContract{Mcp: &McpPolicy{}}, true},
+		"orchestration seat":        {RunContract{Mcp: &McpPolicy{Orchestration: true}}, true},
+		"managed seat plus browser": {RunContract{Mcp: &McpPolicy{Orchestration: true, Browser: &BrowserPolicy{}}}, true},
+	} {
+		if got := useStrictMcp(tc.c); got != tc.want {
+			t.Errorf("%s: useStrictMcp = %v, want %v", name, got, tc.want)
+		}
+	}
+}

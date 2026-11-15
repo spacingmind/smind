@@ -607,7 +607,8 @@ func TestBrokerRunEndingWhileItsSessionStartsLeavesNothingBehind(t *testing.T) {
 		rigp = r
 		inner := c.Session
 		c.Session = func(ctx context.Context, run Run) (*Session, error) {
-			rigp.b.EndRun(run.ID) // the run ends while the browser is starting
+			go rigp.b.EndRun(run.ID) // the run ends (from another goroutine, as an observer would) while the browser starts
+			time.Sleep(60 * time.Millisecond)
 			return inner(ctx, run)
 		}
 	})
@@ -676,14 +677,17 @@ func TestTimeoutSecondsZeroMeansTheDefault(t *testing.T) {
 // S2) and reports a different origin per tab.
 func twoTabRig(t *testing.T) (*brokerRig, *fakeCDP) {
 	t.Helper()
+	createdTabs := 0
 	l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
 		switch c.Method {
 		case "Target.createTarget":
-			go attach(f, "S2", "T2", "page")
-			return map[string]any{"targetId": "T2"}, ""
+			createdTabs++
+			id := fmt.Sprintf("T%d", createdTabs+1)
+			go attach(f, fmt.Sprintf("S%d", createdTabs+1), id, "page")
+			return map[string]any{"targetId": id}, ""
 		case "Target.getTargetInfo":
 			url, title := "http://a.localhost:3000/", "Page A"
-			if c.Params["targetId"] == "T2" {
+			if c.Params["targetId"] != "T1" {
 				url, title = "http://b.localhost:3000/b", "Page B"
 			}
 			return map[string]any{"targetInfo": map[string]any{"targetId": c.Params["targetId"], "url": url, "title": title}}, ""
@@ -791,6 +795,9 @@ func TestRefusalRecordsAreCappedPerMinute(t *testing.T) {
 	rig.mu.Lock()
 	n, last := len(rig.records), rig.records[len(rig.records)-1]
 	rig.mu.Unlock()
+	if last.Tool == "" {
+		t.Fatalf("the summary record names itself (no empty tool in the timeline line): %+v", last)
+	}
 	if n != maxRefusalRecords+1 || !strings.Contains(last.Outcome, "further refusals suppressed") {
 		t.Fatalf("at most %d refusal records a minute and then one summary line: got %d, last %+v", maxRefusalRecords, n, last)
 	}
@@ -856,5 +863,67 @@ func TestPageStringsCannotStartALineWithAMarker(t *testing.T) {
 func TestGateReadyRequiresBothPrerequisites(t *testing.T) {
 	if GateReady && !(PrereqProxyAuth && PrereqRunSocket) {
 		t.Fatalf("browser.GateReady is true but the prerequisites are not done: proxy authentication=%v, per-run socket with peer credentials=%v (Human decision 2026-11-16)", PrereqProxyAuth, PrereqRunSocket)
+	}
+}
+
+var runC = Run{ID: "run-C", WorkspaceID: 7}
+var runD = Run{ID: "run-D", WorkspaceID: 7}
+
+// A finished run's tab must not stay in the 3-tab pool while other runs live,
+// or ended runs would fill it and the next run would get "tab limit".
+func TestAnEndedRunFreesItsTabWhileOthersRemain(t *testing.T) {
+	rig, f := twoTabRig(t)
+	for _, r := range []Run{runA, runB, runC} {
+		if res := rig.callAs(r, "browser_open", map[string]any{"url": "http://b.localhost:3000/b"}); res.IsError {
+			t.Fatalf("%s: %s", r.ID, text(res))
+		}
+	}
+	if res := rig.callAs(runD, "browser_open", map[string]any{"url": "http://b.localhost:3000/b"}); !res.IsError || !strings.Contains(text(res), "tab limit") {
+		t.Fatalf("the pool is full with three live runs: %s", text(res))
+	}
+	rig.b.EndRun(runA.ID)
+	if got := f.callsFor("Target.closeTarget"); len(got) != 1 || got[0].Params["targetId"] != "T1" {
+		t.Fatalf("the ended run's own tab is closed, and only that one: %+v", got)
+	}
+	if res := rig.callAs(runD, "browser_open", map[string]any{"url": "http://b.localhost:3000/b"}); res.IsError {
+		t.Fatalf("a run that starts after another ended must find a free tab: %s", text(res))
+	}
+	rig.mu.Lock()
+	defer rig.mu.Unlock()
+	if len(rig.closed) != 0 {
+		t.Fatal("the session is not closed while other runs live")
+	}
+}
+
+// The last run leaving and a run joining at the same moment: the leave is
+// decided under the workspace lock, so the joiner never holds a session that is
+// closed under it (its Session() call comes strictly after the close).
+func TestJoiningRunNeverLosesItsSessionToALeavingRun(t *testing.T) {
+	var order []string
+	var omu sync.Mutex
+	note := func(s string) { omu.Lock(); order = append(order, s); omu.Unlock() }
+	var rig *brokerRig
+	rig = newBrokerRig(t, func(c *BrokerConfig, r *brokerRig) {
+		inner := c.Session
+		c.Session = func(ctx context.Context, run Run) (*Session, error) {
+			note("session:" + run.ID)
+			return inner(ctx, run)
+		}
+		c.CloseSession = func(ws int64) { note("close"); time.Sleep(150 * time.Millisecond); note("closed") }
+	})
+	_ = rig
+	if res := rig.callAs(runA, "browser_open", map[string]any{"url": "http://localhost:3000/"}); res.IsError {
+		t.Fatal(text(res))
+	}
+	done := make(chan struct{})
+	go func() { rig.b.EndRun(runA.ID); close(done) }()
+	time.Sleep(30 * time.Millisecond) // EndRun is inside CloseSession now
+	rig.callAs(runB, "browser_open", map[string]any{"url": "http://localhost:3000/"})
+	<-done
+	omu.Lock()
+	defer omu.Unlock()
+	want := []string{"session:run-A", "close", "closed", "session:run-B"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("a joining run must ask for its session only after the leaving run's close finished: %v", order)
 	}
 }

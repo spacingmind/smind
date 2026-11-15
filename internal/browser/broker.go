@@ -28,6 +28,20 @@ import (
 // permission gate flips it, and only that PR.
 const GateReady = false
 
+// The two hard prerequisites of opening the gate (Human decision 2026-11-16,
+// ADR-0061 amendment). Each is flipped to true by the PR that builds it
+// (PR 3b), and GateReady may become true only when both are: a test enforces it.
+const (
+	// PrereqProxyAuth: the enforcing proxy requires a per-session
+	// Proxy-Authorization secret, answered by the daemon through CDP
+	// Fetch.authRequired, so no other local process can use it.
+	PrereqProxyAuth = false
+	// PrereqRunSocket: the browser child talks to the daemon over a per-run
+	// local socket whose peer credentials (user and process ancestry) are
+	// checked, instead of a token that a same-user process can read.
+	PrereqRunSocket = false
+)
+
 // ToolNames is the whole catalogue of this version. There is deliberately no
 // evaluate, upload, download or acting tool.
 var ToolNames = []string{
@@ -98,6 +112,12 @@ type Broker struct {
 	mu    sync.Mutex
 	runs  map[string]*runState
 	users map[int64]map[string]struct{} // workspace -> live runs using its session
+	// sessions is the session each workspace's runs last used, so an ending run
+	// can close its own tab without starting a browser.
+	sessions map[int64]*Session
+	// wsMu serialises "a run joins a workspace session" against "the last run
+	// leaves it", per workspace.
+	wsMu map[int64]*sync.Mutex
 	// ended remembers the most recent finished runs, so a late call of a run
 	// that already ended cannot recreate its counters or start a session.
 	ended      map[string]struct{}
@@ -126,7 +146,19 @@ func NewBroker(cfg BrokerConfig) *Broker {
 	if cfg.CallTimeout <= 0 {
 		cfg.CallTimeout = DefaultCallTimeout
 	}
-	return &Broker{cfg: cfg, runs: map[string]*runState{}, users: map[int64]map[string]struct{}{}, ended: map[string]struct{}{}}
+	return &Broker{cfg: cfg, runs: map[string]*runState{}, users: map[int64]map[string]struct{}{}, sessions: map[int64]*Session{}, wsMu: map[int64]*sync.Mutex{}, ended: map[string]struct{}{}}
+}
+
+// wsLock returns the workspace's join/leave lock.
+func (b *Broker) wsLock(ws int64) *sync.Mutex {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	m := b.wsMu[ws]
+	if m == nil {
+		m = &sync.Mutex{}
+		b.wsMu[ws] = m
+	}
+	return m
 }
 
 // state returns the run's counters, or nil for a run that already ended.
@@ -147,6 +179,7 @@ func (b *Broker) state(runID string) *runState {
 // EndRun forgets a finished run's counters and ends the session it was using.
 func (b *Broker) EndRun(runID string) {
 	b.mu.Lock()
+	st := b.runs[runID]
 	delete(b.runs, runID)
 	if _, dup := b.ended[runID]; !dup {
 		b.ended[runID] = struct{}{}
@@ -156,21 +189,50 @@ func (b *Broker) EndRun(runID string) {
 			b.endedOrder = b.endedOrder[1:]
 		}
 	}
-	var closeWS []int64
+	type leave struct {
+		ws   int64
+		sess *Session
+		last bool
+	}
+	var leaves []leave
 	for ws, set := range b.users {
 		if _, ok := set[runID]; ok {
 			delete(set, runID)
-			if len(set) == 0 { // the last live run of the workspace: its browser goes
-				closeWS = append(closeWS, ws)
-				delete(b.users, ws)
-			}
+			leaves = append(leaves, leave{ws: ws, sess: b.sessions[ws], last: len(set) == 0})
 		}
 	}
 	b.mu.Unlock()
-	if b.cfg.CloseSession != nil {
-		for _, ws := range closeWS {
-			b.cfg.CloseSession(ws)
+	var tab string
+	if st != nil {
+		st.mu.Lock()
+		tab = st.tab
+		st.mu.Unlock()
+	}
+	for _, l := range leaves {
+		mu := b.wsLock(l.ws)
+		mu.Lock()
+		// Decided under the workspace lock: a run that joined in the meantime
+		// keeps the session (it registered as a user before asking for it).
+		b.mu.Lock()
+		stillEmpty := len(b.users[l.ws]) == 0
+		if stillEmpty {
+			delete(b.users, l.ws)
+			delete(b.sessions, l.ws)
 		}
+		b.mu.Unlock()
+		switch {
+		case stillEmpty:
+			if b.cfg.CloseSession != nil {
+				b.cfg.CloseSession(l.ws)
+			}
+		case tab != "" && l.sess != nil:
+			// Other runs remain: free the ended run's tab (the pool has 3), or
+			// finished runs would fill it and starve the live ones.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = l.sess.CloseTab(ctx, tab)
+			cancel()
+		}
+		mu.Unlock()
 	}
 }
 
@@ -228,9 +290,14 @@ func (b *Broker) call(ctx context.Context, run Run, tool string, raw json.RawMes
 	// The run is counted as a user BEFORE the session is requested, so another
 	// run's end in the same workspace cannot close a session this call is
 	// starting: the session closes when the LAST live run using it ends.
+	// Joining the workspace's session is one step under the workspace lock, so a
+	// run ending at the same moment sees this run as a user and keeps the session.
+	wsl := b.wsLock(run.WorkspaceID)
+	wsl.Lock()
 	b.mu.Lock()
 	if _, gone := b.ended[run.ID]; gone {
 		b.mu.Unlock()
+		wsl.Unlock()
 		return errResult("this run has ended: the browser is no longer available to it"), "", "refused: run ended"
 	}
 	if b.users[run.WorkspaceID] == nil {
@@ -240,24 +307,31 @@ func (b *Broker) call(ctx context.Context, run Run, tool string, raw json.RawMes
 	b.mu.Unlock()
 	sess, err := b.cfg.Session(cctx, run)
 	if err != nil {
+		wsl.Unlock()
 		var ue *UnavailableError
 		if errors.As(err, &ue) {
 			return errResult("%s", ue.Error()), "", "error"
 		}
 		return errResult("browser unavailable: %v", err), "", "error"
 	}
-	// The run may have ended while the session was starting: do not leave it
-	// behind if no other live run uses it.
 	b.mu.Lock()
+	b.sessions[run.WorkspaceID] = sess
 	_, gone := b.ended[run.ID]
 	orphan := gone && len(b.users[run.WorkspaceID]) == 0
+	if orphan {
+		delete(b.sessions, run.WorkspaceID)
+	}
 	b.mu.Unlock()
 	if gone {
+		// The run ended while its session was starting: do not leave it behind
+		// if no other live run uses it.
 		if orphan && b.cfg.CloseSession != nil {
 			b.cfg.CloseSession(run.WorkspaceID)
 		}
+		wsl.Unlock()
 		return errResult("this run has ended: the browser is no longer available to it"), "", "refused: run ended"
 	}
+	wsl.Unlock()
 	return b.exec(cctx, run, st, sess, tool, in)
 }
 
@@ -591,7 +665,7 @@ func (b *Broker) recordsFor(run Run, rec Record) []Record {
 		return nil
 	}
 	st.suppressed = true
-	return []Record{{Outcome: "further refusals suppressed (more than 10 a minute)"}}
+	return []Record{{Tool: "(refusals)", Outcome: "further refusals suppressed (more than 10 a minute)"}}
 }
 
 // recordTarget is what the run timeline shows of a URL: only its origin. A

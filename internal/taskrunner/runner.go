@@ -981,7 +981,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
 	}
-	if contract := RunContractFrom(ctx); contract.Mcp != nil {
+	if contract := RunContractFrom(ctx); useStrictMcp(contract) {
 		// A managed run sees only the daemon's registered servers (+ smind
 		// for orchestration seats): strict mode hides user-level servers
 		// (e.g. a personal `smind` in ~/.claude.json), so a Peer cannot

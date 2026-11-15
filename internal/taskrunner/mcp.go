@@ -465,6 +465,12 @@ func claudeFailedMcpServers(raw json.RawMessage) []string {
 	return failed
 }
 
+// useStrictMcp says whether a claude run hides every MCP server but the
+// daemon's own (--strict-mcp-config). A managed run does; a policy that exists
+// only to carry the browser grant (BrowserOnly) must not: it would hide the
+// person's own servers from a run that never asked for a managed tool set.
+func useStrictMcp(c RunContract) bool { return c.Mcp != nil && !c.Mcp.BrowserOnly }
+
 // browserRowDelivered says whether the browser row can reach the agent of a
 // provider: a plugin provider never gets it.
 func browserRowDelivered(pluginProvider bool) bool { return !pluginProvider }
