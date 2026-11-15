@@ -246,6 +246,22 @@ func (r *Runner) mcpServersForWorkspace(workspaceID int64) ([]store.McpServer, e
 // smindMcpName is the reserved name of the built-in orchestration server.
 const smindMcpName = "smind"
 
+// browserMcpName is the reserved name of the built-in browser server
+// (ADR-0061). Unlike smindMcpName it is reserved for EVERY run: a registered
+// server of that name never reaches any run, managed or not, so only the
+// daemon can ever offer the browser tools.
+const browserMcpName = "smind-browser"
+
+func withoutName(rows []store.McpServer, name string) []store.McpServer {
+	out := make([]store.McpServer, 0, len(rows))
+	for _, row := range rows {
+		if row.Name != name {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // WithSmindBinary sets the executable the built-in orchestration MCP entry
 // runs (`<path> mcp serve`). Default: the daemon's own binary
 // (os.Executable, resolved lazily), falling back to "smind".
@@ -272,7 +288,7 @@ func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.Mcp
 	if err != nil {
 		return nil, err
 	}
-	rows = withHookMcp(ctx, rows)
+	rows = withoutName(withHookMcp(ctx, rows), browserMcpName)
 	policy := RunContractFrom(ctx).Mcp
 	if policy == nil {
 		return rows, nil
@@ -295,6 +311,21 @@ func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.Mcp
 		}
 		out = append(out, store.McpServer{
 			Name: smindMcpName, Transport: "stdio", Command: r.smindBinaryPath(),
+			Args: string(args), Env: string(envJSON), Enabled: true,
+		})
+	}
+	if policy.Browser != nil {
+		args, _ := json.Marshal([]string{"mcp", "browser"})
+		env := policy.Browser.Env
+		if env == nil {
+			env = map[string]string{}
+		}
+		envJSON, err := json.Marshal(env)
+		if err != nil {
+			return nil, fmt.Errorf("smind-browser mcp env: %w", err)
+		}
+		out = append(out, store.McpServer{
+			Name: browserMcpName, Transport: "stdio", Command: r.smindBinaryPath(),
 			Args: string(args), Env: string(envJSON), Enabled: true,
 		})
 	}

@@ -30,6 +30,17 @@ type McpPolicy struct {
 	// Env is the built-in entry's environment (run identity, SMIND_HOME).
 	// Ignored when Orchestration is false. Policy, not content: never log.
 	Env map[string]string
+	// Browser, when set, adds the reserved `smind-browser` stdio entry
+	// (`smind mcp browser`, ADR-0061). Nothing sets it while the browser gate
+	// is dark.
+	Browser *BrowserPolicy
+}
+
+// BrowserPolicy grants a run the browser tools' MCP entry.
+type BrowserPolicy struct {
+	// Env is the entry's environment (run identity, SMIND_HOME). Policy, not
+	// content: never log.
+	Env map[string]string
 }
 
 type runContractKey struct{}

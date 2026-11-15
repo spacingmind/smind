@@ -88,6 +88,10 @@ type Registry struct {
 	// panic there.
 	forwardHook func(e taskrunner.Event)
 
+	// browserGate answers "may a run of this workspace get the browser?" (the
+	// workspace switch, a later PR); nil means no. Guarded by mu.
+	browserGate func(workspaceID int64) bool
+
 	providerQuota ProviderQuota // guarded by mu
 	// gateFn and failureHook: the picker gate wiring (cooldown_window.go), guarded by mu.
 	gateFn      func(provider string, now time.Time) *gate.Gate
@@ -1283,6 +1287,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 		} else {
 			ctx = reg.withDelivery(ctx, r)
 			ctx = reg.withRunContract(ctx, r)
+			ctx = reg.withBrowserPolicy(ctx, r)
 			ctx = taskrunner.WithElicitation(ctx, reg.elicitationEnabled(r))
 			if pa, ok := r.promptAttachments(); ok {
 				ctx = taskrunner.WithPromptAttachments(ctx, pa)
