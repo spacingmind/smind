@@ -1,6 +1,6 @@
 # Desktop chat surface: running status, composer chips, model picker, diff toolbar, density
 
-Status: draft for review (2026-11-15). Docs only: no code starts until the Human answers the decisions below and the cards, shell and sidebar lanes have landed (they share the web package and its stores). Size: L (7): scope 2 (several web components, one shared composer), PRs 3, risk 1 (UI, no wire change), decisions 2 (eleven design choices below), verification 2 (light and dark frames, real window).
+Status: decided (2026-11-15). **Human decision 2026-11-15: all 11 decisions as recommended.** Docs only: no code starts until the cards, shell and sidebar lanes have landed (they share the web package and its stores). Size: L (7): scope 2 (several web components, one shared composer), PRs 3, risk 1 (UI, no wire change), decisions 2 (eleven design choices below), verification 2 (light and dark frames, real window).
 
 ## Why
 
@@ -16,7 +16,7 @@ Three PRs, each with one owner scope so they never edit the same file:
 
 Not in scope: the permission and question cards (shipped), the sidebar and tabs, the desktop shell, mobile (it has its own composer and no diff pane), any daemon or wire change.
 
-## Open decisions (each with a recommendation)
+## Decisions (each with its recommendation; all taken as recommended by the Human on 2026-11-15)
 
 ### Running-turn status (E-a)
 
@@ -80,7 +80,7 @@ The composer is shared with the mobile web target through the same chips in some
 ## Progress
 
 - [x] spec (this file)
-- [ ] decisions answered by the Human
+- [x] decisions answered by the Human (2026-11-15: all 11 as recommended)
 - [ ] E-a, E-b, E-c
 
 ## Validation
