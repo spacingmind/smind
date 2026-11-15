@@ -101,6 +101,7 @@ export function Composer({
   boundProvider,
   connected,
   runningRunId,
+  runStartedAt = null,
   waitingOnUser = false,
   git,
   onOpenDiff,
@@ -131,6 +132,8 @@ export function Composer({
   connected: boolean;
   /** The task's currently-running run, or null. Drives Stop, "Send now", and the queue placeholder. */
   runningRunId: string | null;
+  /** The live run's startedAt (ISO): what the status line's elapsed timer counts from. */
+  runStartedAt?: string | null;
   /** The live run holds an unanswered permission request: the status chip reads "Waiting for you". */
   waitingOnUser?: boolean;
   /** The task's git/PR state (useTaskGit) for the chips above the card -- each chip omitted when it does not apply. */

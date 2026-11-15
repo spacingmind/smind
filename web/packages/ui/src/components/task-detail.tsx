@@ -680,6 +680,7 @@ export function TaskDetailPane({
         boundProvider={chat.Provider}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
+        runStartedAt={runningRun?.startedAt ?? null}
         waitingOnUser={!!(runningRun?.pendingPermission || (runningRun && liveQuestion(runningRun)))}
         git={git}
         onOpenDiff={onOpenDiffTab}
