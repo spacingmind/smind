@@ -273,7 +273,12 @@ func TestLaunchFailsWhenTheOwnerFileCannotBeWritten(t *testing.T) {
 	ownerWriter = func(string) error { return errors.New("disk full") }
 	defer func() { ownerWriter = old }()
 	profiles := t.TempDir()
-	if _, err := (ChromeLauncher{Path: "/bin/true"}).Launch(context.Background(), LaunchOpts{ProfileRoot: profiles}); err == nil {
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		t.Skip("no true binary")
+	}
+	if inst, err := (ChromeLauncher{Path: truePath}).Launch(context.Background(), LaunchOpts{ProfileRoot: profiles}); err == nil {
+		_ = inst.Close()
 		t.Fatal("a launch without an owner file could be swept while live: it must fail")
 	}
 	if left, _ := filepath.Glob(filepath.Join(profiles, "smind-browser-*")); len(left) != 0 {
