@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -124,14 +124,14 @@ describe("DiffViewerPane", () => {
     render(<DiffViewerPane client={client} task={TASK} />);
     await resolveFilesAndDiffs(client);
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh diff" }));
     await flush();
     expect(client.calls.filter((c) => c.method === "task.files")).toHaveLength(2);
   });
 
   it("disables the Refresh control and issues no request when there is no client", () => {
     render(<DiffViewerPane client={null} task={TASK} />);
-    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh diff" })).toBeDisabled();
   });
 });
 
@@ -278,6 +278,39 @@ describe("DiffViewerPane commit bar", () => {
   });
 });
 
+describe("DiffViewerPane header (chat-surface-ui E-c)", () => {
+  it("diff-header-has-two-segmented-view-controls, a Refresh icon button and one git control", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    client.nth("task.git", 0).resolve({
+      taskId: TASK.ID,
+      untrusted: false,
+      computedAt: "2026-01-01T00:00:00Z",
+      origin: { published: true },
+      actions: { push: { enabled: true }, updateFromBase: { enabled: true }, createPr: { enabled: true }, updatePr: { enabled: false, reason: "no PR" } },
+    } satisfies TaskGit);
+    await flush();
+
+    // two segmented controls, two options each
+    const view = screen.getByTestId("diff-view-toggle");
+    const format = screen.getByTestId("diff-format-toggle");
+    expect(view).toHaveAttribute("role", "group");
+    expect(format).toHaveAttribute("role", "group");
+    expect(within(view).getAllByRole("button").map((b) => b.textContent)).toEqual(["By file", "Whole diff"]);
+    expect(within(format).getAllByRole("button").map((b) => b.textContent)).toEqual(["Unified", "Side by side"]);
+    // Refresh is an icon button with a name, no text label
+    const refresh = screen.getByTestId("diff-refresh");
+    expect(refresh).toHaveAccessibleName("Refresh diff");
+    expect(refresh.textContent).toBe("");
+    // one git control: a primary button and a menu, not three equal buttons
+    expect(screen.getAllByTestId("git-primary-action")).toHaveLength(1);
+    expect(screen.queryByTestId("sync-button-push")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sync-button-update")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("create-pr-button")).not.toBeInTheDocument();
+  });
+});
+
 describe("DiffViewerPane Create PR", () => {
   async function renderWithGit(git: Partial<TaskGit> | null) {
     const client = new FakeWsClient();
@@ -293,21 +326,21 @@ describe("DiffViewerPane Create PR", () => {
 
   it("mounts the PR action in the header and opens the preview dialog instead of calling task.createPr", async () => {
     const client = await renderWithGit({ actions: enabled });
-    fireEvent.click(screen.getByTestId("create-pr-button"));
+    fireEvent.click(screen.getByTestId("git-primary-action"));
     await flush();
     expect(client.nth("task.prPreview", 0).params).toEqual({ taskId: TASK.ID });
     expect(client.calls.some((c) => c.method === "task.createPr")).toBe(false);
     expect(screen.getByTestId("create-pr-dialog")).toBeInTheDocument();
   });
 
-  it("disables Create PR while the task's git state is unknown", async () => {
+  it("shows no git control while the task's git state is unknown (no dead button)", async () => {
     await renderWithGit(null);
-    expect(screen.getByTestId("create-pr-button")).toBeDisabled();
+    expect(screen.queryByTestId("git-actions")).not.toBeInTheDocument();
   });
 
-  it("disables the Create PR control when there is no client", () => {
+  it("shows no git control when there is no client", () => {
     render(<DiffViewerPane client={null} task={TASK} />);
-    expect(screen.getByTestId("create-pr-button")).toBeDisabled();
+    expect(screen.queryByTestId("git-actions")).not.toBeInTheDocument();
   });
 });
 
