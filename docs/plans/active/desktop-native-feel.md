@@ -97,3 +97,10 @@ Open question for the Supervisor before it is specified: where a window's layout
 - No native-side gesture or rate limit: the popup is modal on macOS and Windows, so one menu is open at a time, and the page-side 100 ms guard is a courtesy, not a security control. On Linux the popup is asynchronous (the command may return before the menu closes), so "closed" is reported early there and the TTL is the bound; Linux is unverified.
 - The armed state is not cleared on navigation or reload: an armed menu delivers until its selection, the next open or the 600 s TTL. Selections are matched on the open id AND on a per-show id namespace (`m<n>.<id>`), so a late selection from an earlier menu cannot run a later menu's handler.
 - The label rule is the Unicode general category (Cc, Cf, Cs, Co, Cn, Zl, Zp) plus the blank-looking characters outside those categories (Hangul fillers, Braille blank, combining grapheme joiner, variation selectors); the renderer strips the same set, so an emoji title loses only its variation selector.
+
+### PR (b)
+
+- AC10: `menu-models.test.tsx` tables for `taskRowMenu` (archived, already unread, tree actions), `tabMenu` (no chat id, nothing to close), `fileRowMenu` (unchanged, no handler), `workspaceRowItems` (no folder). AC11: each row runs `expectNativeAgrees`; `menu-models.render.test.tsx` checks the in-page menu per state; e2e CM-04 (light and dark, 1280 and 390, pairs opened).
+- Mutations (committed code, each failed its named test): Archive always on, Mark unread ignoring unread, New sub-task always on, Archive chat always on, Reveal ignoring the folder, Reveal in diff always on, Close others always on, the native layer arming disabled items.
+- Not verified: no real-window frames of the native menu (screen locked); the archived-task rules apply to task rows outside the archived list (that list has its own row component and actions).
+
