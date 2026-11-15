@@ -353,4 +353,21 @@ mod min_size_tests {
             "configure must set the window minimum"
         );
     }
+
+    #[test]
+    fn the_shell_applies_the_clamp_on_resize() {
+        let src = include_str!("lib.rs");
+        let handler = src
+            .split("tauri::WindowEvent::Resized(")
+            .nth(1)
+            .expect("the main window handles Resized");
+        assert!(
+            handler
+                .split("_ => {}")
+                .next()
+                .unwrap()
+                .contains("window_chrome::clamp_to_minimum("),
+            "the Resized handler must call clamp_to_minimum"
+        );
+    }
 }
