@@ -22,7 +22,7 @@ Named tests: `no-notice-when-nothing-was-trimmed`, `notice-when-a-tool-result-ha
 ## PR 2: the sidebar rows (rank 5)
 
 1. **The title keeps its width.** The diffstat and the git glyph are dropped by a container query below 14 rem; the 256 px default sidebar is wider than that, so the title is cut first. Change: the row's secondary parts (diffstat, git glyph) hide below 18 rem and the title gets `min-w-0 flex-1` priority; below 18 rem the diffstat stays reachable in the hover card and the tooltip. No second line (it would make rows taller than the 32 px the list is built on).
-2. **A visible "Needs you" group.** Today the grouped view's first bucket is called "Needs attention" and exists only in the status view. Changes: rename the bucket label to "Needs you" (permission asks and unseen finishes are both things only the person can clear); and in the default workspace view show a pinned "Needs you" section above the workspaces, only while at least one task is in that bucket, listing those tasks (a task appears there and under its workspace, the same row, the same selection). It uses the existing `groupTasksByStatus` and the existing attention data; no new daemon field. The status view keeps all five buckets.
+2. **A visible "Needs you" group.** Today the grouped view's first bucket is called "Needs attention" and exists only in the status view. Changes: rename the bucket label to "Needs you" (a permission ask is a pending decision only the person can make; an unseen finish is split into its own "Ready to review" bucket, because frames showed it filling the pinned section with rows of green dots); and in the default workspace view show a pinned "Needs you" section above the workspaces, only while at least one task is in that bucket, listing those tasks (a task appears there and under its workspace, the same row, the same selection). It uses the existing `groupTasksByStatus` and the existing attention data; no new daemon field. The status view keeps all buckets, now six: needs-attention, ready-to-review, error, running, done, idle. Deviation from the first draft, recorded here: the pinned section lists permission asks only.
 3. **Selection.** The selected row is already a rounded (`rounded-lg`) fill inside the sidebar's row inset, and the active-hover fill is a lighter token; the review's complaint was the fill reading as a flat bar. Change: none to geometry; pin it with a test (rounded, inset from both edges, `bg-selected`) and check it in frames; inactive-window dimming belongs to the native pass, not here.
 Acceptance criteria: AC6 at the default width a title that fits without the diffstat is not truncated; AC7 below 18 rem the diffstat and glyph are hidden and the title is not; AC8 "Needs you" is the label of the first status bucket; AC9 the workspace view shows a pinned "Needs you" section only when a task needs the person, with rows identical to the tree's; AC10 selecting a row from the pinned section selects the same task; AC11 the selected row keeps its rounded inset fill.
 Named tests: `row-title-keeps-priority-over-the-diffstat`, `row-secondary-parts-hide-below-18rem`, `status-bucket-is-labelled-needs-you`, `pinned-needs-you-appears-only-when-a-task-needs-the-person`, `pinned-needs-you-rows-select-the-same-task`, `pinned-section-hidden-while-searching`, `selected-row-is-a-rounded-inset-fill`. Mutations: restore the 14 rem breakpoint; always render the pinned section; drop a task from its workspace when it is pinned; rename the label back.
@@ -46,7 +46,7 @@ GLM Peers first with step-by-step briefs, one Peer per PR; the Lead reviews each
 
 - [x] spec (this file, first commit of PR 1)
 - [x] PR 1 history notice (GLM peer task 643; reviewed and accepted)
-- [ ] PR 2 sidebar
+- [x] PR 2 sidebar (GLM peer task 646; reviewed and accepted)
 - [ ] PR 3 first-run home (after `develop` is merged into the wave branch)
 
 ## Validation
@@ -57,5 +57,11 @@ GLM Peers first with step-by-step briefs, one Peer per PR; the Lead reviews each
 - Frames: light and dark, 1280 and 390, a run with nothing trimmed (no notice) and the same run with an injected omission marker (notice with its action); 8 frames, luminance and no-overflow checks pass, every pair opened.
 - Not verified: a real skeleton run with a genuinely large tool result (the marker is injected into the attach result); the thinking-only copy in a frame; real-window desktop.
 
-### PR 2 and PR 3
-Filled in by those PRs.
+### PR 2
+- AC6-AC11: the named tests above plus `pinned-needs-you-excludes-tasks-that-only-finished` and the bucket-split table in `sidebar-status-groups.test.ts`; full web suite 5473 passed, `tsc` clean. No mobile file reads these buckets.
+- Frames: pinned section, selection from the section, collapsed section and status view, light and dark, web 1280 and 390 (the 390 sidebar is the drawer); 20 frames, luminance and no-overflow pass, every pair opened. The quiet state (no pending ask: no pinned section) was framed before the bucket split and is unit-tested after it.
+- Mutations: see the PR body.
+- Not verified: real-window desktop; long-title rows with a diffstat in frames (unit-tested).
+
+### PR 3
+Filled in by that PR.
