@@ -1,5 +1,5 @@
 //! The panic hook, end to end. The hook is process-global, so each scenario runs in the
-//! `crash-child` helper process (src/bin/crash_child.rs), on a real main thread.
+//! `crash-child` helper process (src/helpers/crash_child.rs), on a real main thread.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

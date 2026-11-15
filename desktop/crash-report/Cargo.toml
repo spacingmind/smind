@@ -18,4 +18,4 @@ tempfile = "3"
 # not a test-harness thread). Never linked into the shell.
 [[bin]]
 name = "crash-child"
-path = "src/bin/crash_child.rs"
+path = "src/helpers/crash_child.rs"
