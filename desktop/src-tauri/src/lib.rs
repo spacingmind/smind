@@ -19,6 +19,7 @@ use smind_daemon_client::Config;
 
 mod app_settings;
 mod assets;
+mod attention_focus;
 mod audit_guard;
 mod client_watch;
 mod commands;
