@@ -499,7 +499,7 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     expect(header.className).not.toMatch(/(^|\s)sm:flex-row/);
     // below that width the action slot may wrap (and shrink) instead of overflowing under the title
     const actions = header.lastElementChild as HTMLElement;
-    expect(actions).toHaveClass("max-@[40rem]/diff:flex-wrap", "max-@[40rem]/diff:shrink");
+    expect(actions).toHaveClass("@max-[40rem]/diff:flex-wrap", "@max-[40rem]/diff:shrink");
   });
 
   it("renders every changed file in the whole-diff view", async () => {

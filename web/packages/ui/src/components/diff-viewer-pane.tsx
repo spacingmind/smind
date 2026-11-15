@@ -395,7 +395,7 @@ export function DiffViewerPane({
       <PaneHeader
         title="Diff"
         className="flex-col items-stretch @[40rem]/diff:flex-row @[40rem]/diff:items-center"
-        actionsClassName="max-@[40rem]/diff:flex-wrap max-@[40rem]/diff:shrink"
+        actionsClassName="@max-[40rem]/diff:flex-wrap @max-[40rem]/diff:shrink"
         subtitle={
           <span
             className="whitespace-nowrap"
