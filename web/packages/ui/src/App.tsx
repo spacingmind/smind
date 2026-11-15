@@ -1,3 +1,4 @@
+import { disambiguatedParts } from "@/lib/tab-scroll-edges";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icons } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
@@ -2413,6 +2414,8 @@ function PaneTabStrip({
   // Keeps the active tab visible when the strip overflows (TB-AC5).
   const tabScrollerRef = useRef<HTMLDivElement>(null);
   const edges = useScrollEdges(tabScrollerRef);
+  // Chats that share a title are numbered by the same function the "More tabs" menu uses.
+  const tabParts = useMemo(() => disambiguatedParts(tabs), [tabs]);
   useRevealActiveTab(tabScrollerRef, activeKey);
 
   return (
@@ -2460,6 +2463,7 @@ function PaneTabStrip({
                   <DraggableTabTrigger
                     key={entry.key}
                     entry={entry}
+                    number={tabParts.get(entry.key)?.n}
                     paneId={paneId}
                     dragActive={isDragActive}
                     showMoveAffordance={showMoveAffordance}
@@ -2554,6 +2558,7 @@ const TAB_AFFORDANCE_REVEAL =
  */
 function DraggableTabTrigger({
   entry,
+  number,
   paneId,
   dragActive,
   showMoveAffordance,
@@ -2569,6 +2574,8 @@ function DraggableTabTrigger({
   hasClosableTabsToRight,
 }: {
   entry: TabEntry;
+  /** The repeat number of a tab whose title another tab in the strip shares; the same numbering the overflow menu shows. */
+  number?: number;
   paneId: string;
   /** Some tab (this or another) is being dragged: the dragged chip dims, and no chip shows hover controls. */
   dragActive: boolean;
@@ -2669,7 +2676,7 @@ function DraggableTabTrigger({
           )}
           {...listeners}
         >
-          <TabLabel entry={entry} />
+          <TabLabel entry={entry} number={number} />
           {/*
            * Split/close float over the tab's right edge (no reserved slot, so tabs
            * sit tight) and appear on hover, keyboard focus within, or while active.

@@ -230,7 +230,7 @@ export function filePathFromTabKey(key: string): string {
  * the strip stays a dumb `map` over TabEntry and the vocabulary of what a
  * tab *looks* like stays next to the vocabulary of what a tab *is*.
  */
-export function TabLabel({ entry }: { entry: TabEntry }) {
+export function TabLabel({ entry, number }: { entry: TabEntry; number?: number }) {
   const dirty = useBufferDirty(entry.key);
   // Output arrived on a terminal you weren't looking at (Item 20). Only
   // meaningful for terminal tabs; the store is keyed by tab key, so
@@ -248,7 +248,15 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
       ) : (
         <KindIcon aria-hidden data-testid="tab-icon" data-icon={entry.kind} className="size-3.5 shrink-0 opacity-70" />
       )}
-      <span data-tab-title className="min-w-0 truncate">{entry.title}</span>
+      {/* Too narrow: the title is cut from its START ("…t 11"), so the end of a title (and the number after it) stays readable.
+          dir=rtl moves the ellipsis to the start; <bdi> keeps the characters in their own left-to-right order. */}
+      <span data-tab-title dir="rtl" className="min-w-0 truncate text-left">
+        <bdi>{entry.title}</bdi>
+      </span>
+      {number !== undefined && number > 1 && (
+        // The repeat number never shrinks away: when the chip is too narrow the title is cut, the number stays.
+        <span data-tab-number className="shrink-0 tabular-nums opacity-70">{number}</span>
+      )}
       {dirty && (
         <span
           data-testid="tab-dirty-marker"
