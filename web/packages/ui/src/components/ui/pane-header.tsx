@@ -17,6 +17,7 @@ export function PaneHeader({
   subtitle,
   actions,
   className,
+  actionsClassName,
   testId,
 }: {
   /** The pane's title -- usually a short string, but a ReactNode so a pane can compose in a dirty-marker or similar inline element (see file-editor-pane.tsx). Omit it for a metadata-only row (task-detail: the app header already names the task). */
@@ -26,6 +27,8 @@ export function PaneHeader({
   /** The right-aligned action slot -- buttons, toggles, status text. */
   actions?: ReactNode;
   className?: string;
+  /** Extra classes for the action slot (a pane that stacks its header below a container width also lets the actions wrap there). */
+  actionsClassName?: string;
   testId?: string;
 }) {
   return (
@@ -40,7 +43,7 @@ export function PaneHeader({
           <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm text-foreground-muted", title && "mt-0.5")}>{subtitle}</div>
         )}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className={cn("flex shrink-0 items-center gap-2", actionsClassName)}>{actions}</div>}
     </div>
   );
 }

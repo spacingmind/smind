@@ -54,6 +54,10 @@ interface FileState {
 export const DRAFT_COMMIT_PROMPT =
   "Draft a Conventional Commits message for the currently staged changes (`git diff --cached`). Reply with the message only in a fenced block; do not commit.";
 
+/** The Diff header's layout rule: one row from a 560 px pane up, stacked (with wrapping controls) below. */
+export const DIFF_HEADER_CLASS = "flex-col items-stretch @[560px]/diff:flex-row @[560px]/diff:items-center";
+export const DIFF_HEADER_ACTIONS_CLASS = "flex-wrap @[560px]/diff:flex-nowrap";
+
 /**
  * A per-file review-and-commit surface for a task (ADR 0006): the task's
  * changed files (task.files) as a collapsible list, each rendering its own
@@ -390,10 +394,12 @@ export function DiffViewerPane({
   const isEmpty = files !== null && files.length === 0;
 
   return (
-    <div className="flex h-full flex-col" data-testid="diff-viewer-pane">
+    <div className="@container/diff flex h-full flex-col" data-testid="diff-viewer-pane">
       <PaneHeader
         title="Diff"
-        className="flex-col items-stretch sm:flex-row sm:items-center"
+        // Stacked (title over controls, controls wrap) until the PANE is wide enough for one row: a container query, never the viewport, because a split pane can be ~300 px inside a 1280 px window.
+        className={DIFF_HEADER_CLASS}
+        actionsClassName={DIFF_HEADER_ACTIONS_CLASS}
         subtitle={
           <span
             className="whitespace-nowrap"
@@ -845,7 +851,7 @@ function SegmentedToggle<T extends string>({
       aria-label={label}
       data-testid={testId}
       data-value={value}
-      className="flex h-7 items-center rounded-lg border border-input-border p-0.5"
+      className="flex h-7 shrink-0 items-center whitespace-nowrap rounded-lg border border-input-border p-0.5"
     >
       {options.map((option) => (
         <button

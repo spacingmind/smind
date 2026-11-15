@@ -71,6 +71,25 @@ async function resolveFilesAndDiffs(
 }
 
 describe("DiffViewerPane", () => {
+  it("header-stacks-by-pane-width: the header is a container query on the pane, never the viewport, and the controls wrap when stacked", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    const pane = screen.getByTestId("diff-viewer-pane");
+    expect(pane.className).toContain("@container/diff");
+    const header = pane.querySelector('[data-slot="pane-header"]') as HTMLElement;
+    // Stacked by default, one row only from a 560 px pane (not the viewport's sm: breakpoint).
+    expect(header.className).toContain("flex-col");
+    expect(header.className).toContain("@[560px]/diff:flex-row");
+    expect(header.className).not.toMatch(/(^|\s)sm:/);
+    const actions = screen.getByTestId("diff-view-toggle").parentElement as HTMLElement;
+    expect(actions.className).toContain("flex-wrap");
+    expect(actions.className).toContain("@[560px]/diff:flex-nowrap");
+    // A segmented control never squeezes itself (that is what clipped its labels).
+    expect(screen.getByTestId("diff-view-toggle").className).toContain("shrink-0");
+    expect(screen.getByTestId("diff-format-toggle").className).toContain("shrink-0");
+  });
+
   it("fetches task.files on mount and renders one collapsible entry per file with its own task.fileDiff", async () => {
     const client = new FakeWsClient();
     render(<DiffViewerPane client={client} task={TASK} />);
@@ -510,7 +529,7 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
     expect(stat).toHaveTextContent("2 files +2 −1");
   });
 
-  // jsdom has no layout: assert the classes that keep the counts on one line and stack the header below sm.
+  // jsdom has no layout: assert the classes that keep the counts on one line and stack the header below a 560 px pane.
   it("keeps the diff counts on one line and stacks the header on narrow widths", async () => {
     const client = new FakeWsClient();
     render(<DiffViewerPane client={client} task={TASK} />);
@@ -520,7 +539,7 @@ describe("DiffViewerPane review v2 (Item 19)", () => {
 
     expect(screen.getByTestId("diff-stat")).toHaveClass("whitespace-nowrap");
     const header = screen.getByTestId("diff-viewer-pane").querySelector('[data-slot="pane-header"]');
-    expect(header).toHaveClass("flex-col", "sm:flex-row");
+    expect(header).toHaveClass("flex-col", "@[560px]/diff:flex-row");
   });
 
   it("renders every changed file in the whole-diff view", async () => {
