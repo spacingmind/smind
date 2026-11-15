@@ -9,6 +9,10 @@ async function frame(page: Page, testInfo: TestInfo, name: string) {
   const dir = process.env.TAB_FRAMES_DIR
   if (!dir) return
   fs.mkdirSync(dir, { recursive: true })
+  // Frame the settled state: hover colour transitions finished.
+  await page.evaluate(() =>
+    Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))),
+  )
   await page.screenshot({ path: path.join(dir, `${name}-${testInfo.project.name}.png`) })
 }
 
@@ -61,6 +65,15 @@ test('TR-01 dragging a tab along its strip shows the indicator and reorders it; 
   const hiddenControls = await page.getByTestId('workspace-tab-affordances').evaluateAll((els) => els.map((e) => getComputedStyle(e).opacity))
   expect(hiddenControls.length).toBeGreaterThan(0)
   for (const opacity of hiddenControls) expect(opacity).toBe('0')
+  // ...and its label is not clipped or covered: the whole text fits and nothing paints over it.
+  const label = page.getByTestId('workspace-tab-diff').locator('[data-tab-title]')
+  expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5)).toBe(true)
+  const probe = await page.getByTestId('workspace-tab-diff').evaluate((chip) => {
+    const t = chip.querySelector('[data-tab-title]')!.getBoundingClientRect()
+    const top = document.elementFromPoint(t.left + t.width - 2, t.top + t.height / 2)
+    return { covered: !(top && chip.querySelector('[data-tab-title]')!.contains(top)), topTag: top?.tagName, topTestId: top?.getAttribute('data-testid') }
+  })
+  expect(probe, JSON.stringify(probe)).toMatchObject({ covered: false })
   await frame(page, testInfo, 'b-drag-over-indicator')
   await page.mouse.up()
   await expect(indicator).toHaveCount(0)
