@@ -26,7 +26,7 @@ mod context_menu;
 mod daemon_manager;
 mod deeplink;
 mod editors;
-mod ipc_guard;
+pub mod ipc_guard;
 mod lifecycle;
 mod menu;
 mod notify;
@@ -96,7 +96,7 @@ fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// The app's compiled context (its configuration, assets and ACL manifest). The one place `generate_context!` is
 /// expanded: a second expansion in the same crate defines the embedded Info.plist symbol twice, so tests that need the real
 /// ACL call this instead.
-pub(crate) fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+pub fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
