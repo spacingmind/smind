@@ -3,6 +3,14 @@
 ## [0.21.0](https://github.com/spacingmind/smind/compare/v0.20.0...v0.21.0) (2026-11-15)
 
 
+### ⚠ BREAKING CHANGES
+
+* **permissions:** an agent run can no longer answer, approve or deny requests, or edit profiles, from its own shell. When `SMIND_AGENT_RUN` or `SMIND_RUN_ID` is set, the CLI refuses `smind task approve|deny|answer`, `smind permission ...`, `smind host approve|reject`, `smind relay devices approve|revoke`, `smind profile add|edit` and `smind profile seed ... --apply`. The compiled-in floor rule `no-self-approve` denies the same commands however they are wrapped, and no `policy.yaml` rule can allow them. Scripts that did this from an agent shell must hand the step to a human ([#863](https://github.com/spacingmind/smind/issues/863), [#878](https://github.com/spacingmind/smind/issues/878)).
+* **permpolicy:** a new compiled-in floor rule `no-catastrophic` denies recursive deletes of the root, the home or top-level system directories, formatting or zeroing a device, fork bombs, and power-off, including inside command runners. A `policy.yaml` allow rule cannot override it ([#884](https://github.com/spacingmind/smind/issues/884)).
+* **desktop:** desktop notifications stay off until you turn them on in Settings > Notifications. Permission notifications now use fixed text and no longer show the command ([#909](https://github.com/spacingmind/smind/issues/909)).
+* **desktop:** the native IPC bridge answers only to the app's own origin. A page loaded from any other origin in a desktop window gets no native commands ([#922](https://github.com/spacingmind/smind/issues/922)).
+* **desktop:** apps from this release on refuse an update whose signature does not carry its version (`requireSignedVersion`). Every release since v0.11.0 carries it, so installed apps are unaffected ([#913](https://github.com/spacingmind/smind/issues/913)).
+
 ### Features
 
 * **browser:** CDP client, headless session and URL policy for the agent browser (ADR-0061, PR 1) ([#936](https://github.com/spacingmind/smind/issues/936)) ([3fc1c06](https://github.com/spacingmind/smind/commit/3fc1c063761a88e3e8d8ea26f7194c96864822a1))
