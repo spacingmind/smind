@@ -569,6 +569,39 @@ mod tests {
         }
     }
 
+    // ---- run() wires both layers ----
+
+    #[test]
+    fn run_wraps_the_whole_handler_in_the_guard() {
+        let lib = include_str!("lib.rs");
+        assert!(
+            lib.contains(".invoke_handler(ipc_guard::guarded(tauri::generate_handler!["),
+            "run() must wrap generate_handler! in ipc_guard::guarded"
+        );
+        assert_eq!(
+            lib.matches("generate_handler![").count(),
+            1,
+            "one handler list, so no command can bypass the guard"
+        );
+    }
+
+    #[test]
+    fn run_installs_the_origin_before_the_first_window() {
+        let lib = include_str!("lib.rs");
+        let run = lib.find("pub fn run()").expect("run() exists");
+        let body = &lib[run..];
+        let install = body
+            .find("ipc_guard::install(app, port)")
+            .expect("setup installs the proxy origin and capabilities");
+        let window = body
+            .find("WebviewWindowBuilder::new(")
+            .expect("setup builds the main window");
+        assert!(
+            install < window,
+            "the origin and the exact-origin capabilities must exist before any window"
+        );
+    }
+
     #[test]
     fn exempt_list_needs_a_reason() {
         for (name, reason) in EXEMPT {
