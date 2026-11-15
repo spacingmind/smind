@@ -119,8 +119,8 @@ export const ProviderRail = forwardRef<ProviderRailHandle, ProviderRailProps>(fu
           aria-selected={selectedId === PROFILES_TAB_ID}
           tabIndex={selectedId === PROFILES_TAB_ID ? 0 : -1}
           data-testid="model-profiles-tab"
-          aria-label="Profiles"
-          title="Profiles"
+          aria-label="Profiles, all providers"
+          title="Profiles (all providers)"
           onClick={() => onSelect(PROFILES_TAB_ID)}
           onKeyDown={(event) => onKeyDown(event, 0)}
           className={cn(
@@ -128,7 +128,7 @@ export const ProviderRail = forwardRef<ProviderRailHandle, ProviderRailProps>(fu
             selectedId === PROFILES_TAB_ID ? "bg-selected text-foreground" : "text-foreground-muted hover:bg-hover hover:text-foreground",
           )}
         >
-          <Icons.agent aria-hidden className="size-4" />
+          <Icons.profiles aria-hidden className="size-4" />
         </button>
       )}
       {providers.map((provider, providerIndex) => {

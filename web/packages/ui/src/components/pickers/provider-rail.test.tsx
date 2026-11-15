@@ -142,4 +142,23 @@ describe("ProviderRail", () => {
     expect(screen.getByTestId("model-rail-initial-goose")).toHaveTextContent("Go");
     expect(screen.getByTestId("model-rail-initial-glm")).toHaveTextContent("Gl");
   });
+
+  it("rail-profiles-tab-has-its-own-icon-and-name: not the generic provider glyph, and named as the all-providers entry", () => {
+    render(
+      <ProviderRail
+        providers={[{ id: "claude-native", label: "Claude Code" }, { id: "glm", label: "GLM" }]}
+        profilesTab
+        selectedId="claude-native"
+        onSelect={() => {}}
+      />,
+    );
+    const tab = screen.getByTestId("model-profiles-tab");
+    expect(tab).toHaveAttribute("aria-label", "Profiles, all providers");
+    expect(tab).toHaveAttribute("title", "Profiles (all providers)");
+    // its glyph is the registry's `profiles` icon (UserCog), never the Bot that stands for an unbranded agent
+    expect(tab.querySelector("svg")?.getAttribute("class")).toContain("lucide-user-cog");
+    expect(tab.querySelector("svg")?.getAttribute("class")).not.toContain("lucide-bot");
+    // providers keep theirs: the unbranded one shows its initials, not a glyph
+    expect(screen.getByTestId("model-rail-initial-glm")).toBeInTheDocument();
+  });
 });

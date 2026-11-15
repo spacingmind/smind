@@ -8,6 +8,22 @@ import { agentStatus, agentStatusLabel, agentsReady } from "@/lib/readiness";
 import type { ProviderInfo, Workspace } from "@/lib/types";
 import { useGetStartedDismissedStore } from "@/stores/get-started-store";
 
+/** The Providers action of the Get started card and of the first-run cards: opens Settings on the Providers section. */
+export function openProvidersSettings(): void {
+  window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "providers" } }));
+}
+
+/** One sentence for the agent step: each installed provider's status, then what is missing, joined with a middle dot. */
+export function agentSummaryLine(providers: ProviderInfo[], health: Record<string, ProviderHealth | undefined>): string {
+  // A fresh machine lacks most agent CLIs: list the ones that exist (signed out or still checking) and fold the rest into a count.
+  const missingCount = providers.filter((p) => agentStatus(health[p.id]) === "not-installed").length;
+  const visibleProviders = providers.filter((p) => agentStatus(health[p.id]) !== "not-installed");
+  const parts = visibleProviders.map((p) => `${providerLabel(p.id, [p])} - ${agentStatusLabel(agentStatus(health[p.id]))}`);
+  if (visibleProviders.length === 0 && missingCount > 0) parts.push("No agent is signed in");
+  if (missingCount > 0) parts.push(`${missingCount} not installed`);
+  return parts.join(" · ");
+}
+
 function projectName(w: Workspace): string {
   return w.Title || w.Path.split("/").filter(Boolean).pop() || w.Path;
 }
@@ -74,11 +90,6 @@ function VisibleCard({
   onAddProject?: () => void;
 }) {
   const dismiss = useGetStartedDismissedStore((s) => s.set);
-  // A fresh machine lacks most agent CLIs: list the ones that exist (signed out or still checking) and fold the rest into a count.
-  const missing = providers.filter((p) => agentStatus(health[p.id]) === "not-installed");
-  const visibleProviders = providers.filter((p) => agentStatus(health[p.id]) !== "not-installed");
-  const missingCount = missing.length;
-
   // The card usually mounts before provider.list answers; ensure() is a
   // single-flight no-op per already-tested id, so re-running it when the
   // catalog arrives still tests each provider exactly once -- plain
@@ -87,11 +98,7 @@ function VisibleCard({
     ensure();
   }, [ensure, providers.length]);
 
-  // One sentence for the agent step: each installed provider's status, then what is missing, joined with a middle dot.
-  const parts = visibleProviders.map((p) => `${providerLabel(p.id, [p])} - ${agentStatusLabel(agentStatus(health[p.id]))}`);
-  if (visibleProviders.length === 0 && missingCount > 0) parts.push("No agent is signed in");
-  if (missingCount > 0) parts.push(`${missingCount} not installed`);
-  const agentLine = parts.join(" · ");
+  const agentLine = agentSummaryLine(providers, health);
 
   return (
     <section
@@ -125,9 +132,7 @@ function VisibleCard({
                 size="sm"
                 className="max-sm:min-h-11"
                 data-testid="get-started-open-providers"
-                onClick={() =>
-                  window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "providers" } }))
-                }
+                onClick={openProvidersSettings}
               >
                 Open Providers
               </Button>

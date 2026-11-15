@@ -87,6 +87,7 @@ describe("icon registry", () => {
         "play": "Play",
         "plugin": "Puzzle",
         "preview": "Eye",
+        "profiles": "UserCog",
         "providerGeneric": "Blocks",
         "pullRequest": "GitPullRequest",
         "push": "Upload",

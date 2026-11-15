@@ -9,6 +9,7 @@ import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HomeIllustration } from "@/components/home/home-illustration";
+import { FirstRunCards } from "@/components/home/first-run-cards";
 import { GetStartedCard } from "@/components/home/get-started-card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
@@ -60,6 +61,7 @@ export function HomeLanding({
   connectionDetail,
   onRetryConnect,
   workspaces,
+  workspacesLoaded = true,
   onCreated,
   onAddProject,
 }: {
@@ -72,6 +74,8 @@ export function HomeLanding({
   /** Re-runs the daemon connection (App.tsx) -- the notice's Retry. */
   onRetryConnect?: () => void;
   workspaces: Workspace[];
+  /** False until the sidebar's first workspace list has arrived: an empty list before that is not "no project" and must not flash the first-run cards. */
+  workspacesLoaded?: boolean;
   onCreated: (task: Task) => void;
   onAddProject?: () => void;
 }) {
@@ -99,9 +103,11 @@ export function HomeLanding({
   const sendingRef = useRef(false);
 
   const disabled = !connected || chosen === null || client === null || readiness === "none";
+  // No project registered (and the list is known): the composer cannot work, so the two unblocking steps are the page.
+  const firstRun = connected && workspacesLoaded && workspaces.length === 0;
 
   useEffect(() => {
-    if (!disabled) textareaRef.current?.focus();
+    if (!disabled) textareaRef.current?.focus(); // no textarea in the first-run state
     // Focus once on mount only; later enabling must not steal focus from the project menu.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -180,6 +186,16 @@ export function HomeLanding({
             {!isDesktop && <p className="text-ui-sm text-foreground-muted">Start it with smind serve</p>}
           </div>
         )}
+        {firstRun ? (
+          <FirstRunCards
+            providers={providers}
+            health={providerHealth.health}
+            rpcFailed={providerHealth.rpcFailed}
+            ensure={providerHealth.ensure}
+            onAddProject={onAddProject}
+          />
+        ) : (
+          <>
         <GetStartedCard
           connected={connected}
           workspaces={workspaces}
@@ -351,6 +367,8 @@ export function HomeLanding({
               </Button>
             ))}
           </div>
+        )}
+          </>
         )}
         {error && (
           <p role="alert" className="mt-2 text-ui-sm text-destructive">
