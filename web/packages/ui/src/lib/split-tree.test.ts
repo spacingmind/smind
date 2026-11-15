@@ -11,7 +11,10 @@ import {
   normalizeLayout,
   reorderTabInLayout,
   removeTabFromTree,
+  resizeSplitInLayout,
+  splitPaneEmptyInLayout,
   splitPaneInLayout,
+  startingSizes,
   type SplitNode,
   type TaskLayout,
 } from "@/lib/split-tree";
@@ -351,3 +354,54 @@ describe("reorderTabInLayout", () => {
   });
 });
 
+
+describe("remembered starting ratios (D3)", () => {
+  const onePane = (): TaskLayout => {
+    const t = tab("t1");
+    return { root: pane("primary", [t], t.key), focusedPaneId: "primary" };
+  };
+  const split = (position: "left" | "right" | "top" | "bottom", ratios?: { horizontal?: number; vertical?: number }) =>
+    splitPaneInLayout({ layout: onePane(), tabKey: "t1", targetPaneId: "primary", position, createNodeId: makeCreateNodeId(), maxTreeDepth: 5, ratios })!.layout.root;
+  const sizesOf = (root: SplitNode): number[] => (root.kind === "group" ? root.group.sizes : []);
+
+  it("startingSizes: the remembered first-child fraction for the direction, clamped, else 50/50", () => {
+    expect(startingSizes("horizontal", undefined)).toEqual([0.5, 0.5]);
+    expect(startingSizes("horizontal", {})).toEqual([0.5, 0.5]);
+    expect(startingSizes("horizontal", { vertical: 0.3 })).toEqual([0.5, 0.5]); // the other direction's ratio is not used
+    const [a, b] = startingSizes("vertical", { vertical: 0.3 });
+    expect(a).toBeCloseTo(0.3);
+    expect(b).toBeCloseTo(0.7);
+    const [lo, hi] = startingSizes("horizontal", { horizontal: 0.01 }); // below MIN_SPLIT_SIZE: clamped
+    expect(lo).toBeCloseTo(0.1);
+    expect(hi).toBeCloseTo(0.9);
+    expect(startingSizes("horizontal", { horizontal: Number.NaN })).toEqual([0.5, 0.5]);
+  });
+
+  it("next-split-in-the-workspace-starts-at-the-remembered-ratio: the first child (left or top) takes it whichever pane is new", () => {
+    const right = sizesOf(split("right", { horizontal: 0.7 }));
+    expect(right[0]).toBeCloseTo(0.7);
+    expect(right[1]).toBeCloseTo(0.3);
+    const left = sizesOf(split("left", { horizontal: 0.7 })); // the new pane is first: it takes the 0.7
+    expect(left[0]).toBeCloseTo(0.7);
+    const bottom = sizesOf(split("bottom", { vertical: 0.4, horizontal: 0.9 })); // vertical split uses the vertical ratio
+    expect(bottom[0]).toBeCloseTo(0.4);
+    expect(sizesOf(split("right"))).toEqual([0.5, 0.5]); // nothing remembered: unchanged
+  });
+
+  it("an empty-pane split (the palette's split) uses the remembered ratio too", () => {
+    const r = splitPaneEmptyInLayout({ layout: onePane(), targetPaneId: "primary", position: "right", createNodeId: makeCreateNodeId(), maxTreeDepth: 5, ratios: { horizontal: 0.65 } })!;
+    expect(sizesOf(r.layout.root)[0]).toBeCloseTo(0.65);
+  });
+
+  it("existing-task-layout-is-not-changed-by-a-remembered-ratio: extending a same-direction group and resizing ignore it", () => {
+    const first = splitPaneInLayout({ layout: onePane(), tabKey: "t1", targetPaneId: "primary", position: "right", createNodeId: makeCreateNodeId(), maxTreeDepth: 5 })!;
+    const groupId = first.layout.root.kind === "group" ? first.layout.root.group.id : "";
+    const resized = resizeSplitInLayout({ layout: first.layout, groupId, sizes: [0.8, 0.2] });
+    expect(sizesOf(resized.root)[0]).toBeCloseTo(0.8);
+    // a third pane in the same direction halves the target pane; the remembered ratio is for NEW groups only
+    const t2 = tab("t2");
+    const withT2: TaskLayout = { root: group("g", "horizontal", [pane("primary", [tab("t1")]), pane("p2", [t2], t2.key)], [0.5, 0.5]), focusedPaneId: "p2" };
+    const extended = splitPaneInLayout({ layout: withT2, tabKey: "t2", targetPaneId: "p2", position: "right", createNodeId: makeCreateNodeId(), maxTreeDepth: 5, ratios: { horizontal: 0.9 } })!;
+    expect(sizesOf(extended.layout.root).map((n) => +n.toFixed(2))).toEqual([0.5, 0.25, 0.25]);
+  });
+});

@@ -8,7 +8,7 @@ import { DiffHeaderMenu } from "@/components/diff-header-menu";
 import { DiffRender, type DiffAnnotation, type DiffOutputFormat } from "@/components/diff-render";
 import { FileStatusMarker } from "@/components/file-status-marker";
 import { PrAction } from "@/components/git/pr-action";
-import { SyncButtons } from "@/components/git/sync-actions";
+import { GitActionsMenu } from "@/components/git/git-actions-menu";
 import { SyncDialog } from "@/components/git/sync-dialog";
 import type { SyncMode } from "@/components/git/sync-model";
 import { CommentComposer, ReviewAnnotationFrame, ReviewComments, ReviewDraftCard, type PendingComment } from "@/components/review-comments";
@@ -390,10 +390,12 @@ export function DiffViewerPane({
   const isEmpty = files !== null && files.length === 0;
 
   return (
-    <div className="flex h-full flex-col" data-testid="diff-viewer-pane">
+    // A container, not the viewport, decides the header's layout: a split pane can be ~300 px wide inside a 1280 px window.
+    <div className="@container/diff flex h-full flex-col" data-testid="diff-viewer-pane">
       <PaneHeader
         title="Diff"
-        className="flex-col items-stretch sm:flex-row sm:items-center"
+        className="flex-col items-stretch @[40rem]/diff:flex-row @[40rem]/diff:items-center"
+        actionsClassName="@max-[40rem]/diff:flex-wrap @max-[40rem]/diff:shrink"
         subtitle={
           <span
             className="whitespace-nowrap"
@@ -447,11 +449,10 @@ export function DiffViewerPane({
                   { value: "side-by-side", label: "Side by side" },
                 ]}
               />
-              <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={refreshAll}>
-                Refresh
+              <Button type="button" variant="ghost" size="icon-sm" aria-label="Refresh diff" title="Refresh" data-testid="diff-refresh" disabled={!client || loading} onClick={refreshAll}>
+                <Icons.refresh aria-hidden />
               </Button>
-              <SyncButtons taskId={task.ID} />
-              <PrAction taskId={task.ID} workspaceId={task.WorkspaceID} title={task.Title} />
+              <GitActionsMenu taskId={task.ID} workspaceId={task.WorkspaceID} title={task.Title} />
             </>
           )
         }

@@ -1042,6 +1042,27 @@ describe("App command palette", () => {
     expect(titles).toContain("Cycle theme");
   });
 
+  it("a task row's subtitle is its project name, not the branch slug, and the slug still finds it", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [{ ...TASK_A, Branch: "smind/task-slug-xyz" }, TASK_B]);
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+
+    const row = screen.getAllByTestId("command-palette-row").find((r) => r.textContent?.includes(TASK_A.Title));
+    expect(row).toBeDefined();
+    expect(row).toHaveTextContent(WORKSPACE.Title);
+    expect(row).not.toHaveTextContent("smind/task-slug-xyz");
+
+    fireEvent.change(screen.getByTestId("command-palette-input"), { target: { value: "task-slug-xyz" } });
+    await flush();
+    expect(rowTitles()).toContain(TASK_A.Title);
+  });
+
   it("typing 'open settings' finds the Open settings command first and running it opens Settings (B-04)", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
