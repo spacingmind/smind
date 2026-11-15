@@ -365,20 +365,55 @@ var metadataAddrs = []netip.Addr{
 	netip.MustParseAddr("169.254.169.254"),
 	netip.MustParseAddr("169.254.170.2"),
 	netip.MustParseAddr("100.100.100.200"),
-	netip.MustParseAddr("192.0.0.192"),
+	netip.MustParseAddr("168.63.129.16"),
 	netip.MustParseAddr("fd00:ec2::254"),
+	netip.MustParseAddr("fd00:ec2::23"),
+}
+
+var (
+	ietfProtocolV4 = netip.MustParsePrefix("192.0.0.0/24")
+	nat64Prefix    = netip.MustParsePrefix("64:ff9b::/96")
+	sixToFour      = netip.MustParsePrefix("2002::/16")
+	v4Compatible   = netip.MustParsePrefix("::/96")
+)
+
+// embeddedV4 returns the IPv4 address an IPv6 address carries (NAT64, 6to4,
+// IPv4-compatible), which a gateway would translate to.
+func embeddedV4(a netip.Addr) (netip.Addr, bool) {
+	if !a.Is6() {
+		return netip.Addr{}, false
+	}
+	b := a.As16()
+	switch {
+	case nat64Prefix.Contains(a):
+		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
+	case sixToFour.Contains(a):
+		return netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}), true
+	case v4Compatible.Contains(a) && !a.IsUnspecified() && !a.IsLoopback():
+		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
+	}
+	return netip.Addr{}, false
 }
 
 // sensitiveAddr reports addresses that are never reachable, even by an exact
-// allowlist entry: unspecified, multicast, link-local and cloud metadata.
+// allowlist entry: unspecified, multicast, link-local, cloud metadata, the
+// IETF protocol block 192.0.0.0/24, and an IPv6 address that embeds one of
+// those (or loopback) in a form a translator would deliver.
 func sensitiveAddr(a netip.Addr) bool {
+	a = a.Unmap()
 	if a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsMulticast() || a.IsInterfaceLocalMulticast() {
+		return true
+	}
+	if a.Is4() && ietfProtocolV4.Contains(a) {
 		return true
 	}
 	for _, m := range metadataAddrs {
 		if a == m {
 			return true
 		}
+	}
+	if e, ok := embeddedV4(a); ok {
+		return e.IsLoopback() || sensitiveAddr(e)
 	}
 	return false
 }

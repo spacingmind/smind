@@ -102,8 +102,8 @@ func (i *chromeInstance) Conn() io.ReadWriteCloser { return i.conn }
 // exited: its children may not have) and removes the profile. Idempotent.
 func (i *chromeInstance) Close() error {
 	i.once.Do(func() {
-		_ = i.conn.Close() // the browser also quits on EOF of its pipe
-		i.kill()
+		i.kill() // kill first: a wedged browser must not be able to hold Close on its pipe
+		_ = i.conn.Close()
 		select {
 		case <-i.exited:
 		case <-time.After(5 * time.Second):
@@ -138,7 +138,10 @@ func (l ChromeLauncher) Launch(ctx context.Context, o LaunchOpts) (Instance, err
 	if err != nil {
 		return nil, fmt.Errorf("browser: profile dir: %w", err)
 	}
-	_ = os.WriteFile(filepath.Join(dir, ownerFile), []byte(strconv.Itoa(os.Getpid())), 0o600)
+	if err := writeOwner(dir); err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, fmt.Errorf("browser: profile owner file: %w", err)
+	}
 	args, err := buildArgs(dir, o)
 	if err != nil {
 		_ = os.RemoveAll(dir)
@@ -158,9 +161,29 @@ func (l ChromeLauncher) Launch(ctx context.Context, o LaunchOpts) (Instance, err
 
 const profilePrefix = "smind-browser-"
 
+// staleAfter is how old a profile dir with no readable owner must be before a
+// sweep removes it (a dir being created has no owner for a moment).
+const staleAfter = time.Minute
+
+// writeOwner records who owns a profile dir, atomically (write + rename), so a
+// concurrent sweep never reads a half-written file.
+func writeOwner(dir string) error {
+	tmp := filepath.Join(dir, ownerFile+".tmp")
+	body := fmt.Sprintf("%d %d", os.Getpid(), time.Now().UnixNano())
+	if err := os.WriteFile(tmp, []byte(body), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, ownerFile))
+}
+
 // SweepStaleProfiles removes profile directories left by a daemon that died
-// without closing its sessions: those whose owner process is gone.
+// without closing its sessions: those whose owner process is gone, or that
+// have no readable owner and are older than a minute.
 func SweepStaleProfiles(root string) {
+	sweepStale(root, time.Now())
+}
+
+func sweepStale(root string, now time.Time) {
 	if root == "" {
 		root = os.TempDir()
 	}
@@ -174,8 +197,21 @@ func SweepStaleProfiles(root string) {
 		}
 		dir := filepath.Join(root, e.Name())
 		b, err := os.ReadFile(filepath.Join(dir, ownerFile))
-		pid, perr := strconv.Atoi(strings.TrimSpace(string(b)))
-		if err == nil && perr == nil && (pid == os.Getpid() || processAlive(pid)) {
+		fields := strings.Fields(string(b))
+		var pid int
+		var perr error = os.ErrInvalid
+		if err == nil && len(fields) > 0 {
+			pid, perr = strconv.Atoi(fields[0])
+		}
+		if perr == nil {
+			if pid == os.Getpid() || processAlive(pid) {
+				continue
+			}
+			_ = os.RemoveAll(dir)
+			continue
+		}
+		// No readable owner: only old dirs are stale, a new one is being created.
+		if st, serr := os.Stat(dir); serr == nil && now.Sub(st.ModTime()) < staleAfter {
 			continue
 		}
 		_ = os.RemoveAll(dir)

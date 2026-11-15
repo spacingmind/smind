@@ -37,7 +37,6 @@ func startBrowser(cmd *exec.Cmd) (io.ReadWriteCloser, func(), error) {
 	}
 	cmd.ExtraFiles = []*os.File{toR, fromW}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // own group: the whole tree can be killed
-	hardenProc(cmd.SysProcAttr)
 	err = cmd.Start()
 	_ = toR.Close() // the child's ends
 	_ = fromW.Close()

@@ -60,7 +60,7 @@ func startBrowser(cmd *exec.Cmd) (io.ReadWriteCloser, func(), error) {
 func processAlive(pid int) bool {
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return false
+		return err == windows.ERROR_ACCESS_DENIED // it exists, we may just not open it
 	}
 	_ = windows.CloseHandle(h)
 	return true

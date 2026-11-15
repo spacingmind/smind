@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -227,6 +228,9 @@ func TestCDPOversizeMessageDropsTheConnection(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("a message over the limit must end the connection")
 	}
+	if err := c.Err(); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("the connection must end because of the SIZE limit, got %v", err)
+	}
 }
 
 func TestCDPEventBacklogDropsTheConnection(t *testing.T) {
@@ -243,5 +247,69 @@ func TestCDPEventBacklogDropsTheConnection(t *testing.T) {
 	case <-c.Done():
 	case <-time.After(3 * time.Second):
 		t.Fatal("an unbounded event backlog must end the connection")
+	}
+}
+
+func TestCDPLargeValidMessageThroughThePipe(t *testing.T) {
+	// Bigger than the 64 KB read buffer (ReadSlice returns ErrBufferFull), smaller than the cap.
+	big := strings.Repeat("b", 3<<20)
+	f := newFakeCDP(t, func(f *fakeCDP, c fakeCall) (any, string) {
+		return map[string]any{"data": big}, ""
+	})
+	c := NewClient(f.client)
+	defer c.Close()
+	var out struct{ Data string }
+	if err := c.Call(context.Background(), "", "Page.captureScreenshot", nil, &out); err != nil || out.Data != big {
+		t.Fatalf("a valid 3 MB message must arrive intact: err=%v len=%d", err, len(out.Data))
+	}
+	f.event("S", "Big.event", map[string]any{"x": big})
+	select {
+	case ev := <-c.Events():
+		if ev.size < len(big) {
+			t.Fatalf("event size %d", ev.size)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("large event not delivered")
+	}
+}
+
+// wedgedConn accepts reads that never return and writes that block until closed.
+type wedgedConn struct{ closed chan struct{} }
+
+func (w *wedgedConn) Read([]byte) (int, error)  { <-w.closed; return 0, io.EOF }
+func (w *wedgedConn) Write([]byte) (int, error) { <-w.closed; return 0, io.ErrClosedPipe }
+func (w *wedgedConn) Close() error {
+	select {
+	case <-w.closed:
+	default:
+		close(w.closed)
+	}
+	return nil
+}
+
+func TestCDPWedgedWriteClosesTheConnection(t *testing.T) {
+	c := NewClient(&wedgedConn{closed: make(chan struct{})})
+	c.SetWriteTimeout(100 * time.Millisecond)
+	errc := make(chan error, 2)
+	for i := 0; i < 2; i++ { // the second caller waits behind the wedged writer
+		go func() { errc <- c.Call(context.Background(), "", "X.y", nil, nil) }()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errc:
+			if err == nil {
+				t.Fatal("a wedged write must fail the call")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("one wedged browser must not block every caller regardless of ctx")
+		}
+	}
+	select {
+	case <-c.Done():
+	default:
+		t.Fatal("the connection must be closed")
+	}
+	if !errors.Is(c.Err(), ErrWriteTimeout) {
+		t.Fatalf("reason: %v", c.Err())
 	}
 }

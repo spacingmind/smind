@@ -797,3 +797,81 @@ func TestSessionRequestBacklogClosesTheSession(t *testing.T) {
 		t.Fatal("a backlog over the byte budget must close the session, not let requests through unchecked")
 	}
 }
+
+func TestManagerConcurrentGetStartsOneBrowser(t *testing.T) {
+	l := &fakeLauncher{t: t, hook: defaultHook}
+	m := &Manager{Max: 4}
+	defer m.CloseAll()
+	cfg := Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, CallTimeout: 2 * time.Second}
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = m.Get(context.Background(), cfg)
+		}()
+	}
+	wg.Wait()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.insts) != 1 {
+		t.Fatalf("concurrent Gets for one workspace must launch one browser, launched %d", len(l.insts))
+	}
+}
+
+func TestManagerRestartRacingCloseAllLeavesNothing(t *testing.T) {
+	for round := 0; round < 20; round++ {
+		l := &fakeLauncher{t: t, hook: defaultHook}
+		m := &Manager{Max: 4}
+		pol1, _ := NewPolicy(nil, nil)
+		pol2, _ := NewPolicy([]string{"a.test"}, nil)
+		base := Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, CallTimeout: 2 * time.Second, Policy: pol1}
+		if _, err := m.Get(context.Background(), base); err != nil {
+			t.Fatal(err)
+		}
+		changed := base
+		changed.Policy = pol2
+		var wg sync.WaitGroup
+		wg.Add(3)
+		go func() { defer wg.Done(); _, _ = m.Get(context.Background(), changed) }()
+		go func() { defer wg.Done(); _, _ = m.Get(context.Background(), changed) }()
+		go func() { defer wg.Done(); m.CloseAll() }()
+		wg.Wait()
+		m.CloseAll() // a Get that won the race registered its session after the first CloseAll
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && !allClosed(l) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if !allClosed(l) || m.Active() != 0 {
+			t.Fatalf("round %d: a browser was left running", round)
+		}
+	}
+}
+
+func allClosed(l *fakeLauncher) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, i := range l.insts {
+		if !i.closed.Load() {
+			return false
+		}
+	}
+	return true
+}
+
+func TestCfgKeyCoversLauncherAndTimeouts(t *testing.T) {
+	a := Config{Workspace: "w", Launcher: ChromeLauncher{Path: "/a"}}
+	for name, b := range map[string]Config{
+		"launcher":    {Workspace: "w", Launcher: ChromeLauncher{Path: "/b"}},
+		"idle":        {Workspace: "w", Launcher: ChromeLauncher{Path: "/a"}, IdleTimeout: time.Hour},
+		"call":        {Workspace: "w", Launcher: ChromeLauncher{Path: "/a"}, CallTimeout: time.Hour},
+		"profileRoot": {Workspace: "w", Launcher: ChromeLauncher{Path: "/a"}, Launch: LaunchOpts{ProfileRoot: "/x"}},
+	} {
+		if cfgKey(a) == cfgKey(b) {
+			t.Errorf("a changed %s must change the key", name)
+		}
+	}
+	if cfgKey(a) != cfgKey(Config{Workspace: "other", Launcher: ChromeLauncher{Path: "/a"}}) {
+		t.Error("the workspace name is not part of the key")
+	}
+}

@@ -166,7 +166,7 @@ func (f fakeResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Ad
 }
 
 func TestCheckResolvedTable(t *testing.T) {
-	p := testPolicy(t, "intranet.test", "rebind.test", "meta.test", "mix.test", "daemon.test")
+	p := testPolicy(t, "intranet.test", "rebind.test", "meta.test", "mix.test", "daemon.test", "nat64.test", "6to4.test", "compat.test", "azure.test", "proto.test")
 	r := fakeResolver{
 		"localhost":       {"127.0.0.1", "::1"},
 		"app.localhost":   {"127.0.0.1"},
@@ -192,6 +192,11 @@ func TestCheckResolvedTable(t *testing.T) {
 		{"http://rebind.test/", false},
 		{"http://meta.test/", false},
 		{"http://mix.test/", false},
+		{"http://nat64.test/", false},
+		{"http://6to4.test/", false},
+		{"http://compat.test/", false},
+		{"http://azure.test/", false},
+		{"http://proto.test/", false},
 		{"http://daemon.test:4648/", false}, // resolves to the daemon address and port
 		{"http://daemon.test:4649/", true},
 		{"http://nosuch.localhost/", false}, // resolver error refuses
@@ -234,7 +239,7 @@ func TestNormalizeAllowHost(t *testing.T) {
 			t.Errorf("NormalizeAllowHost(%q) = %q, want an error", bad, got)
 		}
 	}
-	for _, bad := range []string{"0.0.0.0", "[::]", "224.0.0.1", "169.254.169.254", "169.254.1.1", "fe80::1", "[fe80::1]", "100.100.100.200", "fd00:ec2::254", "169.254.170.2", "192.0.0.192"} {
+	for _, bad := range []string{"0.0.0.0", "[::]", "224.0.0.1", "169.254.169.254", "169.254.1.1", "fe80::1", "[fe80::1]", "100.100.100.200", "fd00:ec2::254", "169.254.170.2", "192.0.0.192", "168.63.129.16", "fd00:ec2::23", "192.0.0.5", "[64:ff9b::a9fe:a9fe]", "[2002:a9fe:a9fe::]", "[::a9fe:a9fe]", "[64:ff9b::7f00:1]", "[2002:7f00:1::]", "[::7f00:1]", "[64:ff9b::c000:5]"} {
 		if got, err := NormalizeAllowHost(bad); err == nil {
 			t.Errorf("NormalizeAllowHost(%q) = %q: unusable addresses must be rejected", bad, got)
 		}

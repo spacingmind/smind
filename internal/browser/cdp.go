@@ -9,6 +9,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // The browser is driven over a pipe pair (--remote-debugging-pipe), never a
@@ -68,6 +69,8 @@ type Client struct {
 	writeMu sync.Mutex
 	queued  atomic.Int64 // bytes of events not yet released by the consumer
 
+	writeTimeout time.Duration // guarded by writeMu
+
 	mu      sync.Mutex
 	nextID  int64
 	pending map[int64]chan cdpResult
@@ -83,11 +86,12 @@ type Client struct {
 // release for each one.
 func NewClient(conn io.ReadWriteCloser) *Client {
 	c := &Client{
-		conn:    conn,
-		br:      bufio.NewReaderSize(conn, 64<<10),
-		pending: map[int64]chan cdpResult{},
-		events:  make(chan Event, 256),
-		done:    make(chan struct{}),
+		conn:         conn,
+		writeTimeout: 20 * time.Second,
+		br:           bufio.NewReaderSize(conn, 64<<10),
+		pending:      map[int64]chan cdpResult{},
+		events:       make(chan Event, 256),
+		done:         make(chan struct{}),
 	}
 	go c.readLoop()
 	return c
@@ -111,6 +115,25 @@ func (c *Client) readMessage() ([]byte, error) {
 			return nil, err
 		}
 	}
+}
+
+// ErrWriteTimeout is why a connection is dropped when a write to the browser
+// does not complete: one wedged browser must not block every caller.
+var ErrWriteTimeout = errors.New("browser: write to the browser timed out")
+
+// SetWriteTimeout bounds how long one write may take before the connection is
+// closed (default 20 s).
+func (c *Client) SetWriteTimeout(d time.Duration) {
+	c.writeMu.Lock()
+	c.writeTimeout = d
+	c.writeMu.Unlock()
+}
+
+// Err is why the connection ended, nil while it is up or after a plain Close.
+func (c *Client) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lostErr
 }
 
 // release tells the client the consumer is done with an event's bytes.
@@ -223,7 +246,9 @@ func (c *Client) Call(ctx context.Context, sessionID, method string, params, out
 		return errors.New("browser: request too large")
 	}
 	c.writeMu.Lock()
+	wd := time.AfterFunc(c.writeTimeout, func() { c.fail(ErrWriteTimeout) }) // closing the conn unblocks the write
 	_, err := c.conn.Write(append(msg, 0))
+	wd.Stop()
 	c.writeMu.Unlock()
 	if err != nil {
 		c.drop(id)

@@ -190,34 +190,65 @@ func TestLauncherKillsTheGroupEvenAfterTheLeaderExited(t *testing.T) {
 	}
 }
 
+// deadPid returns the pid of a process that has exited, portably: the test
+// binary itself, started so it runs no tests.
+func deadPid(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return cmd.Process.Pid
+}
+
 func TestSweepStaleProfiles(t *testing.T) {
 	root := t.TempDir()
-	dead := exec.Command("true")
-	_ = dead.Run()
-	deadPid := dead.Process.Pid
-	mk := func(name, owner string) string {
+	dead := strconv.Itoa(deadPid(t))
+	mk := func(name, owner string, age time.Duration) string {
 		d := filepath.Join(root, name)
 		_ = os.Mkdir(d, 0o700)
 		if owner != "" {
 			_ = os.WriteFile(filepath.Join(d, ownerFile), []byte(owner), 0o600)
 		}
+		old := time.Now().Add(-age)
+		_ = os.Chtimes(d, old, old)
 		return d
 	}
-	stale := mk("smind-browser-stale", strconv.Itoa(deadPid))
-	noOwner := mk("smind-browser-noowner", "")
-	garbage := mk("smind-browser-garbage", "nope")
-	live := mk("smind-browser-live", strconv.Itoa(os.Getpid()))
-	other := mk("unrelated", strconv.Itoa(deadPid))
+	stale := mk("smind-browser-stale", dead+" 123", 0) // dead owner: stale however new
+	oldNoOwner := mk("smind-browser-oldnoowner", "", 2*time.Minute)
+	oldGarbage := mk("smind-browser-oldgarbage", "nope", 2*time.Minute)
+	newNoOwner := mk("smind-browser-newnoowner", "", 0) // being created right now by a launch
+	newGarbage := mk("smind-browser-newgarbage", "nope", 10*time.Second)
+	live := mk("smind-browser-live", strconv.Itoa(os.Getpid())+" 456", 2*time.Hour)
+	other := mk("unrelated", dead, 2*time.Hour)
 	SweepStaleProfiles(root)
-	for _, gone := range []string{stale, noOwner, garbage} {
+	for _, gone := range []string{stale, oldNoOwner, oldGarbage} {
 		if _, err := os.Stat(gone); !os.IsNotExist(err) {
 			t.Errorf("%s must be swept", gone)
 		}
 	}
-	for _, kept := range []string{live, other} {
+	for _, kept := range []string{newNoOwner, newGarbage, live, other} {
 		if _, err := os.Stat(kept); err != nil {
-			t.Errorf("%s must be kept", kept)
+			t.Errorf("%s must be kept (a live or brand-new profile is never swept)", kept)
 		}
+	}
+}
+
+func TestWriteOwnerIsAtomicAndReadable(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeOwner(dir); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, ownerFile))
+	f := strings.Fields(string(b))
+	if err != nil || len(f) != 2 || f[0] != strconv.Itoa(os.Getpid()) {
+		t.Fatalf("owner file: %q %v", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ownerFile+".tmp")); !os.IsNotExist(err) {
+		t.Fatal("the temp file must be renamed away")
+	}
+	if err := writeOwner(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("a failed owner write must be an error (the launch fails on it)")
 	}
 }
 

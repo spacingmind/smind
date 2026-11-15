@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"path"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -143,6 +144,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		return nil, err
 	}
 	cl := NewClient(inst.Conn())
+	cl.SetWriteTimeout(cfg.CallTimeout)
 	s := &Session{
 		cfg:       cfg,
 		inst:      inst,
@@ -223,8 +225,8 @@ func (s *Session) Close() {
 			s.idle.Stop()
 		}
 		s.mu.Unlock()
+		_ = s.inst.Close() // kill the browser first, then drop the connection
 		_ = s.cl.Close()
-		_ = s.inst.Close()
 		if s.cfg.OnClose != nil {
 			s.cfg.OnClose()
 		}
@@ -850,7 +852,7 @@ func (m *Manager) limit() int {
 }
 
 // cfgKey identifies the parts of a Config a running session was built from; a
-// changed policy or launch setting must not be silently ignored.
+// changed policy, browser binary or limit must not be silently ignored.
 func cfgKey(c Config) string {
 	var allow []string
 	for h := range c.Policy.AllowHosts {
@@ -864,12 +866,29 @@ func cfgKey(c Config) string {
 	sort.Strings(deny)
 	la := append([]string(nil), c.Launch.AllowHosts...)
 	sort.Strings(la)
-	return fmt.Sprintf("%q|%q|%q|%d|%s|%d", allow, deny, la, c.Launch.HeapMB, c.Launch.ProfileRoot, c.MaxTabs)
+	return fmt.Sprintf("%q|%q|%q|%d|%s|%d|%v|%v|%s", allow, deny, la, c.Launch.HeapMB, c.Launch.ProfileRoot, c.MaxTabs, c.IdleTimeout, c.CallTimeout, launcherKey(c.Launcher))
 }
+
+// launcherKey identifies a launcher: a value launcher (the browser path) by
+// its contents, a pointer by identity (never read through, it may be in use).
+func launcherKey(l Launcher) string {
+	if l == nil {
+		return "nil"
+	}
+	if reflect.TypeOf(l).Kind() == reflect.Pointer {
+		return fmt.Sprintf("%T@%p", l, l)
+	}
+	return fmt.Sprintf("%T:%+v", l, l)
+}
+
+// ErrClosedWhileStarting is returned when a session was closed before Get
+// could hand it out.
+var ErrClosedWhileStarting = errors.New("browser: the session was closed while it was starting")
 
 // Get returns the workspace's running session or starts one. If the running
 // session was built from a different policy or launch configuration it is
-// closed and a new one is started.
+// replaced: the new start is registered in the same lock hold that notices
+// the staleness, so a concurrent Get or CloseAll always sees it.
 func (m *Manager) Get(ctx context.Context, cfg Config) (*Session, error) {
 	key := cfgKey(cfg)
 	m.mu.Lock()
@@ -878,6 +897,10 @@ func (m *Manager) Get(ctx context.Context, cfg Config) (*Session, error) {
 		m.keys = map[string]string{}
 		m.starting = map[string]*startState{}
 	}
+	if m.starting[cfg.Workspace] != nil {
+		m.mu.Unlock()
+		return nil, errors.New("browser: the session for this workspace is still starting")
+	}
 	var stale *Session
 	if s := m.sessions[cfg.Workspace]; s != nil && !s.Closed() {
 		if m.keys[cfg.Workspace] == key {
@@ -885,15 +908,7 @@ func (m *Manager) Get(ctx context.Context, cfg Config) (*Session, error) {
 			return s, nil
 		}
 		stale = s
-	}
-	m.mu.Unlock()
-	if stale != nil {
-		stale.Close()
-	}
-	m.mu.Lock()
-	if m.starting[cfg.Workspace] != nil {
-		m.mu.Unlock()
-		return nil, errors.New("browser: the session for this workspace is still starting")
+		delete(m.sessions, cfg.Workspace) // it no longer counts: it is being replaced
 	}
 	live := len(m.starting)
 	for _, x := range m.sessions {
@@ -902,6 +917,9 @@ func (m *Manager) Get(ctx context.Context, cfg Config) (*Session, error) {
 		}
 	}
 	if live >= m.limit() {
+		if stale != nil {
+			m.sessions[cfg.Workspace] = stale // nothing changed
+		}
 		m.mu.Unlock()
 		return nil, ErrTooManySessions
 	}
@@ -910,6 +928,10 @@ func (m *Manager) Get(ctx context.Context, cfg Config) (*Session, error) {
 	m.starting[cfg.Workspace] = st
 	m.mu.Unlock()
 	defer cancel()
+
+	if stale != nil {
+		stale.Close()
+	}
 
 	var started *Session
 	userClose := cfg.OnClose
@@ -927,17 +949,21 @@ func (m *Manager) Get(ctx context.Context, cfg Config) (*Session, error) {
 	m.mu.Lock()
 	delete(m.starting, cfg.Workspace)
 	closedMeanwhile := st.closed
-	if err == nil && !closedMeanwhile && !s.Closed() {
+	usable := err == nil && !closedMeanwhile && !s.Closed()
+	if usable {
 		started = s
 		m.sessions[cfg.Workspace] = s
 		m.keys[cfg.Workspace] = key
 	}
 	m.mu.Unlock()
-	if err == nil && closedMeanwhile {
-		s.Close()
-		return nil, errors.New("browser: the session was closed while it was starting")
+	switch {
+	case err != nil:
+		return nil, err
+	case !usable:
+		s.Close() // idempotent; never hand out a closed session
+		return nil, ErrClosedWhileStarting
 	}
-	return s, err
+	return s, nil
 }
 
 // Close ends one workspace's session, or the one still starting (a run
