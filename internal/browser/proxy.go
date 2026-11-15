@@ -39,7 +39,7 @@ const (
 	DefaultProxyDialTimeout = 10 * time.Second // per address
 	proxyIOTimeout          = 60 * time.Second // forward path: no read or write may stall longer
 	DefaultProxyTunnelIdle  = 5 * time.Minute
-	proxyHeaderTimeout      = 10 * time.Second
+	proxyHeaderTimeout      = 2 * time.Second // before authentication: a silent local client must not hold a slot long
 	proxyResponseTimeout    = 30 * time.Second
 	proxyMaxHeaderBytes     = 32 << 10
 	proxyMaxRespHeader      = 64 << 10

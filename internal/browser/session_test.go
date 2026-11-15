@@ -1052,3 +1052,52 @@ func TestSessionRefusedChallengeNoticeIsOnce(t *testing.T) {
 		t.Fatalf("one notice for 30 refused challenges, got %d", n)
 	}
 }
+
+// A page that raises a flood of Server challenges does not starve the proxy
+// challenge: they share the worker pool and the queue, which is bounded well
+// above this flood, and every event is answered (the proxy one with the credential).
+func TestSessionServerChallengeFloodDoesNotStarveTheProxyChallenge(t *testing.T) {
+	s, l := startTestSession(t, nil)
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	const flood = 300
+	for i := 0; i < flood; i++ {
+		authRequired(f, "S1", fmt.Sprintf("srv%d", i), "Server", "http://localhost:3000")
+	}
+	authRequired(f, "S1", "the-proxy-one", "Proxy", "http://"+s.proxy.Addr())
+	got := f.waitCall("Fetch.continueWithAuth", flood+1)
+	var proxied bool
+	for _, c := range got {
+		if c.Params["requestId"] == "the-proxy-one" {
+			proxied = c.Params["authChallengeResponse"].(map[string]any)["password"] == s.proxy.Secret()
+		}
+	}
+	if !proxied {
+		t.Fatal("the proxy challenge was not answered with the credential behind a flood")
+	}
+	if s.Closed() {
+		t.Fatal("a challenge flood below the queue bound must not close the session")
+	}
+}
+
+// A challenge that cannot be answered (the pipe is gone) is reported once, and
+// not at all for a closed session.
+func TestSessionUnansweredChallengeNoticeIsOnce(t *testing.T) {
+	s, l := startTestSession(t, func(c *Config) { c.CallTimeout = 300 * time.Millisecond })
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	f.closeConn() // every call from now on fails
+	for i := 0; i < 20; i++ {
+		authRequired(f, "S1", fmt.Sprintf("x%d", i), "Server", "http://localhost:3000")
+	}
+	time.Sleep(500 * time.Millisecond)
+	n := 0
+	for _, no := range s.DrainNotices() {
+		if strings.Contains(no.Detail, "could not be answered") {
+			n++
+		}
+	}
+	if n > 1 {
+		t.Fatalf("at most one notice for unanswered challenges, got %d", n)
+	}
+}

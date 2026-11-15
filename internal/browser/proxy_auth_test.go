@@ -1,12 +1,16 @@
 package browser
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -23,6 +27,32 @@ func rawNoAuth(t *testing.T, r *proxyRig, req string) string {
 	_, _ = io.WriteString(c, req)
 	b, _ := io.ReadAll(c)
 	return string(b)
+}
+
+// rawNoAuthErr is rawNoAuth that also reports how the read ended: nil is a clean
+// EOF (the proxy closed the connection), anything else is a timeout or a reset.
+func rawNoAuthErr(t *testing.T, r *proxyRig, req string) (string, error) {
+	t.Helper()
+	c, err := net.Dial("tcp", r.px.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+	_, _ = io.WriteString(c, req)
+	b, rerr := io.ReadAll(c)
+	return string(b), rerr
+}
+
+// authCountingResolver counts lookups: authentication must run before any resolve.
+type authCountingResolver struct {
+	inner Resolver
+	n     atomic.Int64
+}
+
+func (c *authCountingResolver) LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error) {
+	c.n.Add(1)
+	return c.inner.LookupNetIP(ctx, network, host)
 }
 
 func basic(userPass string) string {
@@ -52,6 +82,12 @@ func TestProxyAuth_Table(t *testing.T) {
 		{"not base64", "Proxy-Authorization: Basic !!!\r\n", "407"},
 		{"the raw secret, no scheme", "Proxy-Authorization: " + sec + "\r\n", "407"},
 		{"plain Authorization instead", "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("smind:"+sec)) + "\r\n", "407"},
+		{"duplicate headers, wrong first", basic("smind:wrong") + basic("smind:"+sec), "407"},
+		{"duplicate headers, right first (the sender holds the secret)", basic("smind:"+sec) + basic("smind:wrong"), "200"},
+		{"lowercase header name (canonicalised by the parser)", "proxy-authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("smind:"+sec)) + "\r\n", "200"},
+		{"several spaces after the scheme", "Proxy-Authorization: Basic    " + base64.StdEncoding.EncodeToString([]byte("smind:"+sec)) + "\r\n", "200"},
+		{"a tab instead of the space", "Proxy-Authorization: Basic\t" + base64.StdEncoding.EncodeToString([]byte("smind:"+sec)) + "\r\n", "407"},
+		{"no space after Basic", "Proxy-Authorization: Basic" + base64.StdEncoding.EncodeToString([]byte("smind:"+sec)) + "\r\n", "407"},
 		{"right secret", basic("smind:" + sec), "200"},
 		{"scheme is case-insensitive", "Proxy-Authorization: bAsIc " + base64.StdEncoding.EncodeToString([]byte("smind:"+sec)) + "\r\n", "200"},
 	}
@@ -84,17 +120,32 @@ func TestProxyAuth_Table(t *testing.T) {
 
 // Nothing an unauthenticated client sends reaches the policy, the resolver or a dial.
 func TestProxyAuth_UnauthenticatedNeverReachesTheDial(t *testing.T) {
-	rig := newProxyRig(t, nil, proxyResolver, nil)
+	res := &authCountingResolver{inner: proxyResolver}
+	rig := newProxyRig(t, nil, res, nil)
 	live := newHitServer(t, nil)
 	for _, req := range []string{
 		fmt.Sprintf("GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", live.port),
 		fmt.Sprintf("CONNECT 127.0.0.1:%d HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", live.port),
 		"GET http://localhost/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+		"GET http://app.example.test/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", // a name that WOULD be resolved
+		"CONNECT app.example.test:443 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+		"CONNECT 127.0.0.1/x:9 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", // a target validConnectTarget refuses: still a 407, not a 400
 	} {
-		_ = rawNoAuth(t, rig, req)
+		resp := rawNoAuth(t, rig, req)
+		if !strings.HasPrefix(resp, "HTTP/1.1 407") {
+			t.Errorf("unauthenticated request must get 407 before anything is parsed: %q", resp)
+		}
+	}
+	if n := res.n.Load(); n != 0 {
+		t.Fatalf("an unauthenticated client caused %d resolver lookups", n)
 	}
 	if got := rig.dials.list(); len(got) != 0 || live.hits.Load() != 0 {
 		t.Fatalf("an unauthenticated client caused a dial: %v hits=%d", got, live.hits.Load())
+	}
+	rig.mu.Lock()
+	defer rig.mu.Unlock()
+	if len(rig.refuse) != 0 {
+		t.Fatalf("the policy was consulted for an unauthenticated client (refusals recorded): %v", rig.refuse)
 	}
 }
 
@@ -119,12 +170,15 @@ func TestProxyAuth_WrongCredentialFloodIsCutAndNotedOnce(t *testing.T) {
 	req := "GET http://localhost/ HTTP/1.1\r\nHost: x\r\n" + basic("smind:wrong") + "Connection: close\r\n\r\n"
 	var answered, cut int
 	for i := 0; i < 10; i++ {
-		if resp := rawNoAuth(t, rig, req); strings.HasPrefix(resp, "HTTP/1.1 407") {
+		start := time.Now()
+		resp, err := rawNoAuthErr(t, rig, req)
+		switch {
+		case strings.HasPrefix(resp, "HTTP/1.1 407"):
 			answered++
-		} else if resp == "" {
-			cut++
-		} else {
-			t.Fatalf("unexpected answer: %q", resp)
+		case resp == "" && err == nil && time.Since(start) < time.Second:
+			cut++ // the proxy closed the connection at once: a clean EOF, not a timeout or a reset
+		default:
+			t.Fatalf("request %d: neither a 407 nor a clean immediate close: %q err=%v after %v", i, resp, err, time.Since(start))
 		}
 	}
 	if answered != 3 || cut != 7 {
@@ -190,5 +244,41 @@ func TestProxyAuth_PinnedSecret(t *testing.T) {
 	}
 	if resp := rig.raw(t, "GET http://localhost/ HTTP/1.1\r\nHost: x\r\n\r\n"); strings.HasPrefix(resp, "HTTP/1.1 407") {
 		t.Fatalf("the pinned secret authenticates: %s", resp)
+	}
+}
+
+// A request pipelined behind an authenticated one on the same connection is
+// authenticated on its own: nothing is "logged in" per connection.
+func TestProxyAuth_PipelinedSecondRequestNeedsItsOwnCredential(t *testing.T) {
+	rig := newProxyRig(t, nil, proxyResolver, nil)
+	live := newHitServer(t, nil)
+	cred := basic("smind:" + rig.px.Secret())
+	first := fmt.Sprintf("GET http://127.0.0.1:%d/a HTTP/1.1\r\nHost: x\r\n%s\r\n", live.port, cred)
+	second := fmt.Sprintf("GET http://127.0.0.1:%d/b HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", live.port) // no credential
+	resp := rawNoAuth(t, rig, first+second)
+	i200, i407 := strings.Index(resp, "HTTP/1.1 200"), strings.Index(resp, "HTTP/1.1 407")
+	if i200 < 0 || i407 < 0 || i407 < i200 {
+		t.Fatalf("the first request is served and the pipelined second one without a credential is refused:\n%s", resp)
+	}
+	if live.hits.Load() != 1 {
+		t.Fatalf("only the authenticated request reached the target: %d hits", live.hits.Load())
+	}
+}
+
+// Before authentication a silent or slow client is dropped quickly, so a local
+// process cannot hold the proxy's connection slots with half-sent requests.
+func TestProxyAuth_SilentClientIsDroppedBeforeAuthentication(t *testing.T) {
+	rig := newProxyRig(t, nil, proxyResolver, nil)
+	c, err := net.Dial("tcp", rig.px.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_, _ = io.WriteString(c, "GET http://localhost/ HTTP/1.1\r\nHost: x\r\n") // never finished
+	start := time.Now()
+	_ = c.SetReadDeadline(time.Now().Add(6 * time.Second))
+	_, rerr := io.ReadAll(c)
+	if d := time.Since(start); d > 4*time.Second || rerr != nil && !errors.Is(rerr, io.EOF) && !strings.Contains(rerr.Error(), "reset") {
+		t.Fatalf("a half-sent request must be dropped within the header timeout (%v, %v)", d, rerr)
 	}
 }

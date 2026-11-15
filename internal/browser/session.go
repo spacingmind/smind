@@ -137,11 +137,12 @@ type Session struct {
 	snapRefs map[string]map[string]int64 // tab id -> ref ("e1") -> backend DOM node id, of the latest snapshot
 	navMu    sync.Mutex                  // one navigation at a time: a load waiter is per tab
 
-	lifecycle chan Event   // attach, detach, dialog, download: handled in order
-	authNoted atomic.Bool  // the one notice about a refused credentials request
-	requests  chan Event   // Fetch.requestPaused: handled by a bounded pool
-	qbytes    atomic.Int64 // bytes waiting in the two queues
-	maxQueued int64        // the budget for qbytes (a field so a test can lower it)
+	lifecycle    chan Event   // attach, detach, dialog, download: handled in order
+	authNoted    atomic.Bool  // the one notice about a refused credentials request
+	authErrNoted atomic.Bool  // the one notice about an unanswered challenge
+	requests     chan Event   // Fetch.requestPaused: handled by a bounded pool
+	qbytes       atomic.Int64 // bytes waiting in the two queues
+	maxQueued    int64        // the budget for qbytes (a field so a test can lower it)
 
 	closeOnce sync.Once
 }
@@ -631,8 +632,11 @@ func (s *Session) onAuthRequired(ev Event) {
 		// not push the agent's real refusal notices out.
 		s.note("blocked", "a page asked for credentials and was refused (further requests are cancelled without a notice)")
 	}
-	if err := s.cl.Call(ctx, ev.SessionID, "Fetch.continueWithAuth", map[string]any{"requestId": p.RequestID, "authChallengeResponse": resp}, nil); err != nil {
-		s.note("blocked", "a proxy or site challenge could not be answered")
+	if err := s.cl.Call(ctx, ev.SessionID, "Fetch.continueWithAuth", map[string]any{"requestId": p.RequestID, "authChallengeResponse": resp}, nil); err != nil &&
+		!s.Closed() && s.authErrNoted.CompareAndSwap(false, true) {
+		// Once per session and never for a closing session: a page that aborts
+		// its 401 fetches must not push the agent's real notices out.
+		s.note("blocked", "a proxy or site challenge could not be answered (further failures are not reported)")
 	}
 }
 
