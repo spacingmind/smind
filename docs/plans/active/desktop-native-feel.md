@@ -60,9 +60,36 @@ Web: one table-driven test per menu in `lib/menu-models.test.tsx` (`taskRowMenu`
 - Not every item gets a disabled state: Pin, Add task, Add space, Worktree settings and Delete workspace can always run, so they never carry a flag a test would have to invent. Items that are absent when they cannot apply (Add to chat without a handler, the Split items when the tab cannot move, Move to space with nowhere to go) stay absent, as the in-page menus have always done.
 - "No run" and "no worktree" from the brief: a task row has no menu item that needs a run, and the only items that need a folder are Reveal and Open in editor, which exist on the workspace row.
 
-## PR (c): layout per window on Cmd+Q (later; needs a decision)
+## PR (c): the open task and tab come back after Cmd+Q (single window)
 
-Open question for the Supervisor before it is specified: where a window's layout lives (the daemon, which also serves the web build; the Tauri store file; or the renderer's `localStorage`). It touches architecture (a new persisted state and who owns it), so no spec or code until it is decided.
+Scope set by the Supervisor: the single-window part only (no new window code, no capability change, no new IPC command). Multi-window is a pending Human decision (spike #903).
+
+### What already persists, and the gap
+
+- Per-task tab and split layouts are in the webview's `localStorage` (`smind:task-tabs`, plus sidebar width, collapse state, pins, unread, drafts); the proxy port is kept across launches (`proxy_port.rs`) so the origin, and with it that storage, is stable. Window size, position and maximised state are restored per window label by `tauri_plugin_window_state`.
+- The ACTIVE task and tab live only in the URL hash (`#/workspace/<w>/task/<t>/<tab>`, `lib/route.ts`); the web writes it on every selection and restores from it (`pendingRoute`). The shell opens the main window at `http://127.0.0.1:<port>/?k=<secret>` with no hash, so after a quit and relaunch the app opens on the home screen, not on the task and tab that were open. That is the gap.
+- On Cmd+Q (menu, tray Quit, Dock Quit) the shell calls `app.exit(0)` (or the OS asks to quit): Tauri raises `RunEvent::ExitRequested` while the window and its webview are still alive.
+
+### Design (shell only)
+
+On `ExitRequested` the shell reads the main webview's own current URL, keeps only a validated route fragment, and stores it with the connection id and the window label in `window-layout.json` in the app data dir. At launch it appends that fragment to the main window's initial URL when the current connection is the same one. The web's existing hash restore does the rest, so there is no web change. It reuses the hash route the web already writes, so no second representation of "where I was" exists.
+
+### Acceptance criteria
+
+- AC12 On quit the shell saves, for window label `main`, the route fragment of the webview's current URL and the id of the current connection. A quit with no task selected (no route in the URL) clears the saved entry, so the app reopens on the home screen.
+- AC13 At launch the main window's initial URL carries the saved fragment when the saved connection id equals the current connection's; with a different or missing connection, a missing, unreadable or corrupt file, or a fragment that fails validation, the URL is unchanged (home screen, as today).
+- AC14 Only a strict route shape is stored and replayed: `/workspace/<digits>/task/<digits>/<kind>[/<path-or-id>]`, at most 400 characters of `[A-Za-z0-9._~%/-]`, with any `?query` (a notification's `card=`) dropped, so a stale card-focus request is never replayed. Anything else is discarded on save and on load.
+- AC15 Nothing else changes: no new IPC command, no capability or allowlist change, no new window, no change to the web build. The file is keyed by window label so a later multi-window change can add labels without a migration; only `main` is read or written now.
+- AC16 A kill, crash or power loss saves nothing (only a quit does); the previous saved entry stays.
+
+### Named tests
+
+Rust: `route_fragment_table` (valid shapes; query dropped; wrong prefix, non-numeric ids, traversal, control characters, too long, empty), `save_then_load_round_trips_for_the_same_connection`, `a_different_connection_does_not_restore`, `a_quit_with_no_route_clears_the_entry`, `corrupt_or_missing_file_restores_nothing`, `other_labels_are_left_alone_when_main_saves`, `apply_fragment_keeps_the_secret_query`, `the_exit_handler_saves_before_exit` (source guard on `lifecycle::handle_run_event`), `the_initial_url_is_built_with_the_saved_fragment` (source guard in `lib.rs`).
+
+### Decisions (c)
+
+- Why the shell and not the web: the web already restores from a hash, so the missing piece is only that a relaunch starts with no hash; writing it from the shell needs no IPC and no capability. A web-side `localStorage` "last route" would also work, but WebKit writes `localStorage` asynchronously, so the last navigation before Cmd+Q can be lost; reading the live URL at `ExitRequested` cannot.
+- A restored task that was archived or deleted while the app was closed shows the web's existing "Task not found" state (the same as opening a stale link); not changed here.
 
 ## PR (d): spike (write-up only)
 
