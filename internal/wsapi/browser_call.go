@@ -41,6 +41,8 @@ type browserHost struct {
 
 	// Hooks, defaulted by newBrowserHost and replaced by tests.
 	gate        func(workspaceID int64) bool
+	tokenOK     func(runID, token string) bool
+	live        func(runID string) bool
 	imagesRead  func(runID string) bool
 	allow       func(workspaceID int64) []string
 	deny        func() []browser.Endpoint
@@ -51,6 +53,8 @@ type browserHost struct {
 func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h := &browserHost{db: db, reg: reg, mgr: &browser.Manager{}}
 	h.gate = reg.BrowserAllowed
+	h.tokenOK = reg.CheckBrowserToken
+	h.live = reg.RunIsRunning
 	h.imagesRead = func(runID string) bool {
 		info, err := reg.ProviderCatalogForRun(runID)
 		return err == nil && imagesReadFrom(info.Images)
@@ -122,7 +126,10 @@ func (h *browserHost) record(run browser.Run, rec browser.Record) {
 }
 
 // OnRunFinished ends the browser session a finished run was using.
-func (h *browserHost) OnRunFinished(f runs.RunFinished) { h.broker.EndRun(f.RunID) }
+func (h *browserHost) OnRunFinished(f runs.RunFinished) {
+	h.reg.ForgetBrowserToken(f.RunID)
+	h.broker.EndRun(f.RunID)
+}
 
 // close ends every browser session (daemon shutdown).
 func (h *browserHost) close() { h.mgr.CloseAll() }
@@ -133,13 +140,27 @@ func (h *browserHost) call(ctx context.Context, rc *requestContext, raw json.Raw
 		return nil, forbidden(m + " is only available to an agent run")
 	}
 	var p struct {
-		Tool string          `json:"tool"`
-		Args json.RawMessage `json:"args"`
+		Tool  string          `json:"tool"`
+		Args  json.RawMessage `json:"args"`
+		Token string          `json:"token"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields() // no runId or workspace beside tool and args
 	if err := dec.Decode(&p); err != nil {
 		return nil, &rpcCodeError{code: codeInvalid, msg: m + ": invalid params"}
+	}
+	if rc.ident.runID == "" {
+		return nil, forbidden(m + " is only available to an identified run")
+	}
+	// A run id alone proves nothing (session.identify takes any running id and
+	// run.list shows them): the caller must hold the capability minted for that
+	// run when its browser row was built, which only its own MCP child has.
+	// A run that got no browser row has none, so system runs are refused here too.
+	if !h.tokenOK(rc.ident.runID, p.Token) {
+		return nil, forbidden(m + ": this run has no browser")
+	}
+	if !h.live(rc.ident.runID) {
+		return nil, forbidden(m + ": the run has ended")
 	}
 	task, err := h.db.GetTask(rc.ident.taskID)
 	if err != nil {

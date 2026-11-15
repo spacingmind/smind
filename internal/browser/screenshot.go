@@ -76,39 +76,64 @@ func (s *Session) Screenshot(ctx context.Context, tabID string) (Shot, error) {
 	}
 	scale := math.Min(1, float64(MaxShotLongSide)/math.Max(vp.ClientWidth, vp.ClientHeight))
 
-	var shot struct {
-		Data string `json:"data"`
+	capture := func(scale float64) (image.Image, error) {
+		var shot struct {
+			Data string `json:"data"`
+		}
+		err := s.tabCall(ctx, tab, "Page.captureScreenshot", map[string]any{
+			"format": "png",
+			"clip": map[string]any{
+				"x": vp.PageX, "y": vp.PageY, "width": vp.ClientWidth, "height": vp.ClientHeight, "scale": scale,
+			},
+			"captureBeyondViewport": false,
+		}, &shot)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := base64.StdEncoding.DecodeString(shot.Data)
+		if err != nil {
+			return nil, errors.New("browser: the browser returned an unreadable screenshot")
+		}
+		cfg, err := png.DecodeConfig(bytes.NewReader(raw))
+		if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > maxShotPixels || cfg.Height > maxShotPixels {
+			return nil, errors.New("browser: the browser returned a screenshot of unusable size")
+		}
+		src, err := png.Decode(bytes.NewReader(raw))
+		if err != nil {
+			return nil, errors.New("browser: the browser returned an unreadable screenshot")
+		}
+		return src, nil
 	}
-	err = s.tabCall(ctx, tab, "Page.captureScreenshot", map[string]any{
-		"format": "png",
-		"clip": map[string]any{
-			"x": vp.PageX, "y": vp.PageY, "width": vp.ClientWidth, "height": vp.ClientHeight, "scale": scale,
-		},
-		"captureBeyondViewport": false,
-	}, &shot)
+	src, err := capture(scale)
 	if err != nil {
 		return Shot{}, err
 	}
-	raw, err := base64.StdEncoding.DecodeString(shot.Data)
-	if err != nil {
-		return Shot{}, errors.New("browser: the browser returned an unreadable screenshot")
+	// The image is the viewport times the clip scale times the device pixel
+	// ratio. On a display with a ratio above 1 it is larger than assumed: capture
+	// again at the corrected scale. If the size is still not what was asked for,
+	// refuse: the redaction rectangles could not be placed with confidence.
+	target := scale // the size the image must have: viewport times this
+	sizeRatio := func(im image.Image) (float64, float64) {
+		return float64(im.Bounds().Dx()) / (vp.ClientWidth * target), float64(im.Bounds().Dy()) / (vp.ClientHeight * target)
 	}
-	cfg, err := png.DecodeConfig(bytes.NewReader(raw))
-	if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > maxShotPixels || cfg.Height > maxShotPixels {
-		return Shot{}, errors.New("browser: the browser returned a screenshot of unusable size")
+	if rw, rh := sizeRatio(src); rw > 1.02 && math.Abs(rw-rh) < 0.02 {
+		if src, err = capture(target / rw); err != nil {
+			return Shot{}, err
+		}
 	}
-	src, err := png.Decode(bytes.NewReader(raw))
-	if err != nil {
-		return Shot{}, errors.New("browser: the browser returned an unreadable screenshot")
+	if rw, rh := sizeRatio(src); math.Abs(rw-1) > 0.02 || math.Abs(rh-1) > 0.02 {
+		return Shot{}, errors.New("browser: screenshot refused, the captured size is not the requested viewport size")
 	}
 	img := image.NewRGBA(src.Bounds())
 	draw.Draw(img, img.Bounds(), src, src.Bounds().Min, draw.Src)
 
-	// Quads are in viewport CSS pixels; the image is the viewport at `scale`.
+	// Quads are in viewport CSS pixels; the image is the viewport scaled to
+	// whatever size was actually delivered.
+	sx, sy := float64(img.Bounds().Dx())/vp.ClientWidth, float64(img.Bounds().Dy())/vp.ClientHeight
 	for _, q := range boxes {
 		r := image.Rect(
-			int(math.Floor(q.minX*scale))-passwordPadPx, int(math.Floor(q.minY*scale))-passwordPadPx,
-			int(math.Ceil(q.maxX*scale))+passwordPadPx, int(math.Ceil(q.maxY*scale))+passwordPadPx,
+			int(math.Floor(q.minX*sx))-passwordPadPx, int(math.Floor(q.minY*sy))-passwordPadPx,
+			int(math.Ceil(q.maxX*sx))+passwordPadPx, int(math.Ceil(q.maxY*sy))+passwordPadPx,
 		).Intersect(img.Bounds())
 		if !r.Empty() {
 			draw.Draw(img, r, &image.Uniform{color.RGBA{0x80, 0x80, 0x80, 0xff}}, image.Point{}, draw.Src)
@@ -146,8 +171,9 @@ func (s *Session) passwordBoxes(ctx context.Context, tab *tabState) ([]box, erro
 	if err := s.tabCall(ctx, tab, "DOM.querySelectorAll", map[string]any{"nodeId": doc.Root.NodeID, "selector": "input[type=password i]"}, &q); err != nil {
 		return nil, err
 	}
-	if len(q.NodeIDs) > 100 {
-		q.NodeIDs = q.NodeIDs[:100]
+	if len(q.NodeIDs) > maxPasswordScan {
+		// A page can add decoy inputs ahead of the real one: never cover only some.
+		return nil, fmt.Errorf("the page has more than %d password inputs", maxPasswordScan)
 	}
 	var out []box
 	for _, id := range q.NodeIDs {

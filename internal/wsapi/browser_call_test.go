@@ -56,21 +56,22 @@ func TestBrowserCall_DaemonRechecksTheGateOnEveryCall(t *testing.T) {
 	t.Parallel()
 	e := newIdentEnv(t, "hang")
 	ws := e.identified(t)
+	e.api.browser.tokenOK = func(string, string) bool { return true } // this test is about the gate
 	// The browser is dark by default (gate closed, no workspace switch): a child that somehow runs is refused.
-	wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs"}), "not enabled for this workspace")
+	wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"}), "not enabled for this workspace")
 	// Open for this test only: it now reaches the broker.
 	e.api.browser.gate = func(int64) bool { return true }
 	e.api.browser.launcher = func() (browser.Launcher, error) {
 		return nil, &browser.UnavailableError{InstallStep: "Install Chromium."}
 	}
-	resp := callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs"})
+	resp := callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"})
 	wantOK(t, resp, "browser.call with the gate open")
 	if !strings.Contains(string(resp.Result), "no browser installed") {
 		t.Fatalf("the plain install text is the answer when there is no browser: %s", resp.Result)
 	}
 	// And closed again: refused again, per call.
 	e.api.browser.gate = func(int64) bool { return false }
-	wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs"}), "not enabled for this workspace")
+	wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"}), "not enabled for this workspace")
 }
 
 func TestBrowserCall_ArgsCannotChooseRunOrWorkspace(t *testing.T) {
@@ -79,15 +80,16 @@ func TestBrowserCall_ArgsCannotChooseRunOrWorkspace(t *testing.T) {
 	ws := e.identified(t)
 	var sessions atomic.Int32
 	e.api.browser.gate = func(int64) bool { return true }
+	e.api.browser.tokenOK = func(string, string) bool { return true }
 	e.api.browser.launcher = func() (browser.Launcher, error) {
 		sessions.Add(1)
 		return nil, &browser.UnavailableError{InstallStep: "x"}
 	}
 	// A runId or workspace beside tool/args is an invalid request.
 	for _, params := range []map[string]any{
-		{"tool": "browser_tabs", "runId": "another"},
-		{"tool": "browser_tabs", "workspaceId": 99},
-		{"tool": "browser_tabs", "args": map[string]any{}, "workspace": "x"},
+		{"tool": "browser_tabs", "token": "t", "runId": "another"},
+		{"tool": "browser_tabs", "token": "t", "workspaceId": 99},
+		{"tool": "browser_tabs", "token": "t", "args": map[string]any{}, "workspace": "x"},
 	} {
 		resp := callWS(t, ws, "browser.call", params)
 		if resp.Error == nil || resp.Error.Code != codeInvalid {
@@ -96,7 +98,7 @@ func TestBrowserCall_ArgsCannotChooseRunOrWorkspace(t *testing.T) {
 	}
 	// Inside args they are unknown arguments, refused before any session starts.
 	for _, args := range []map[string]any{{"runId": "another"}, {"workspaceId": 99}, {"workspace": "x"}} {
-		resp := callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "args": args})
+		resp := callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t", "args": args})
 		wantOK(t, resp, "browser.call with a foreign argument")
 		if !strings.Contains(string(resp.Result), `"isError":true`) || !strings.Contains(string(resp.Result), "unknown argument") {
 			t.Fatalf("args %v: %s", args, resp.Result)
@@ -112,8 +114,9 @@ func TestBrowserCall_RecordsOnTheRunTimelineAndEndsWithTheRun(t *testing.T) {
 	e := newIdentEnv(t, "hang")
 	ws := e.identified(t)
 	e.api.browser.gate = func(int64) bool { return true }
+	e.api.browser.tokenOK = func(string, string) bool { return true }
 	e.api.browser.launcher = func() (browser.Launcher, error) { return nil, &browser.UnavailableError{InstallStep: "x"} }
-	callWS(t, ws, "browser.call", map[string]any{"tool": "browser_open", "args": map[string]any{"url": "http://localhost:3000/a?token=SECRET"}})
+	callWS(t, ws, "browser.call", map[string]any{"tool": "browser_open", "token": "t", "args": map[string]any{"url": "http://localhost:3000/a?token=SECRET"}})
 	deadline := time.Now().Add(3 * time.Second)
 	var note string
 	for time.Now().Before(deadline) && note == "" {
@@ -171,5 +174,36 @@ func TestBrowserHost_AFinishedRunEndsItsBrowserSession(t *testing.T) {
 	e.api.browser.OnRunFinished(runs.RunFinished{RunID: "run-x"})
 	if len(rb.ended) != 1 || rb.ended[0] != "run-x" {
 		t.Fatalf("a finished run must end its browser session: %v", rb.ended)
+	}
+}
+
+// A run id proves nothing (session.identify takes any running id): browser.call
+// also needs the capability minted for that run, and a run that ended is refused.
+func TestBrowserCall_NeedsTheRunsOwnCapabilityAndALiveRun(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	ws := e.identified(t)
+	e.api.browser.gate = func(int64) bool { return true }
+	e.api.browser.launcher = func() (browser.Launcher, error) { return nil, &browser.UnavailableError{InstallStep: "x"} }
+	// No capability was minted for this run (it got no browser row): refused whatever it sends.
+	for _, tok := range []string{"", "guess", "00000000000000000000000000000000"} {
+		wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": tok}), "this run has no browser")
+	}
+	// With the right capability but a run that is no longer running: refused.
+	e.api.browser.tokenOK = func(string, string) bool { return true }
+	e.api.browser.live = func(string) bool { return false }
+	wantForbidden(t, callWS(t, ws, "browser.call", map[string]any{"tool": "browser_tabs", "token": "t"}), "the run has ended")
+	// And the real registry check agrees with what the host asks.
+	if e.api.Runs.CheckBrowserToken(e.runID, "anything") {
+		t.Fatal("the registry must not verify a token it never minted")
+	}
+}
+
+func TestBrowserCall_RunMustBeIdentifiedWithARunID(t *testing.T) {
+	e := newProcEnv(t)
+	// A run-scoped context with an empty identity (the shape a plugin session builds) is refused.
+	_, err := e.api.hs["browser.call"](context.Background(), &requestContext{runScoped: true}, json.RawMessage(`{"tool":"browser_tabs","token":"t"}`))
+	if err == nil || !strings.Contains(err.Error(), "identified run") {
+		t.Fatalf("an empty run identity must be refused: %v", err)
 	}
 }

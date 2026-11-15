@@ -2,6 +2,9 @@ package runs
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/spacingmind/smind/internal/browser"
@@ -55,8 +58,54 @@ func (reg *Registry) withBrowserPolicy(ctx context.Context, r *run) context.Cont
 		cp := *c.Mcp
 		c.Mcp = &cp
 	}
-	c.Mcp.Browser = &taskrunner.BrowserPolicy{Env: reg.mcpBaseEnv(r)}
+	env := reg.mcpBaseEnv(r)
+	tok := newBrowserToken()
+	env[BrowserTokenEnv] = tok
+	reg.mu.Lock()
+	if reg.browserTokens == nil {
+		reg.browserTokens = map[string]string{}
+	}
+	reg.browserTokens[r.id] = tok
+	reg.mu.Unlock()
+	c.Mcp.Browser = &taskrunner.BrowserPolicy{Env: env}
 	return taskrunner.WithRunContract(ctx, c)
+}
+
+// BrowserTokenEnv is the environment variable that carries a run's browser
+// capability to its `smind-browser` MCP child (and nowhere else: it is in the
+// row's env, not in the agent's own environment).
+const BrowserTokenEnv = "SMIND_BROWSER_TOKEN"
+
+func newBrowserToken() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("runs: no randomness for the browser token: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// CheckBrowserToken reports whether tok is the capability minted for runID
+// when its browser row was built. Run ids are guessable (run.list is an agent
+// method) and session.identify proves nothing, so browser.call needs this
+// proof as well: only the run's own MCP child holds it. Constant time.
+func (reg *Registry) CheckBrowserToken(runID, tok string) bool {
+	reg.mu.Lock()
+	want, ok := reg.browserTokens[runID]
+	reg.mu.Unlock()
+	return ok && tok != "" && subtle.ConstantTimeCompare([]byte(want), []byte(tok)) == 1
+}
+
+// ForgetBrowserToken drops a finished run's capability.
+func (reg *Registry) ForgetBrowserToken(runID string) {
+	reg.mu.Lock()
+	delete(reg.browserTokens, runID)
+	reg.mu.Unlock()
+}
+
+// RunIsRunning reports whether the run exists and is still running.
+func (reg *Registry) RunIsRunning(runID string) bool {
+	r, err := reg.get(runID)
+	return err == nil && r.requireRunning("browser") == nil
 }
 
 // NoteRunEvent appends a one-line note to a live run's timeline (the browser

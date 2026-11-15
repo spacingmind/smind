@@ -180,12 +180,12 @@ func (s *Session) passwordBackendNodes(ctx context.Context, t *tabState) (map[in
 	if err := s.tabCall(ctx, t, "DOM.querySelectorAll", map[string]any{"nodeId": doc.Root.NodeID, "selector": "input[type=password i]"}, &sel); err != nil {
 		return nil, fmt.Errorf("browser: password scan (DOM.querySelectorAll): %w", err)
 	}
-	n := len(sel.NodeIDs)
-	if n > maxPasswordScan {
-		n = maxPasswordScan
+	if len(sel.NodeIDs) > maxPasswordScan {
+		// A page can add decoy inputs ahead of the real one: never cover only some.
+		return nil, fmt.Errorf("browser: password scan: the page has more than %d password inputs", maxPasswordScan)
 	}
-	set := make(map[int64]bool, n)
-	for _, id := range sel.NodeIDs[:n] {
+	set := make(map[int64]bool, len(sel.NodeIDs))
+	for _, id := range sel.NodeIDs {
 		var d struct {
 			Node struct {
 				BackendNodeID int64 `json:"backendNodeId"`
@@ -253,6 +253,9 @@ func (r *snapRender) visit(n *axNode, depth int) {
 			}
 		}
 	}
+	if n.BackendDOMNodeID != 0 && r.pw[n.BackendDOMNodeID] {
+		return // nothing below a password field is shown: its text children could echo it
+	}
 	childDepth := depth
 	if !skip {
 		childDepth = depth + 1
@@ -276,13 +279,13 @@ func (r *snapRender) line(n *axNode, role, ref string, depth int) string {
 		b.WriteString(" (password)")
 	} else if name := cleanText(n.Name.str(), 200); name != "" {
 		b.WriteString(" \"")
-		b.WriteString(name)
+		b.WriteString(quoteEscape(name))
 		b.WriteString("\"")
 	}
 	if !pw && snapshotValueRoles[role] {
 		if v := cleanText(n.Value.str(), 200); v != "" {
 			b.WriteString(" value=\"")
-			b.WriteString(v)
+			b.WriteString(quoteEscape(v))
 			b.WriteString("\"")
 		}
 	}
@@ -296,4 +299,10 @@ func (r *snapRender) line(n *axNode, role, ref string, depth int) string {
 		b.WriteString(ref)
 	}
 	return b.String()
+}
+
+// quoteEscape keeps a page string from closing the quoted field it is printed
+// in (and so from appending fake ` + "`ref=e9`" + ` or state markers to a line).
+func quoteEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s)
 }

@@ -48,6 +48,8 @@ func noisePNG(t *testing.T, w, h int) string {
 type shotRig struct {
 	vw, vh, px, py float64
 	boxes          [][]float64 // border quads of the password inputs
+	dpr            float64     // device pixel ratio of the fake display (0 means 1)
+	wrongSize      bool        // always answer a 100x100 image, whatever was asked
 	boxErr         string
 	queryErr       string
 	png            func(w, h int) string
@@ -76,8 +78,15 @@ func (r *shotRig) hook(f *fakeCDP, c fakeCall) (any, string) {
 		return map[string]any{"cssVisualViewport": map[string]any{"pageX": r.px, "pageY": r.py, "clientWidth": r.vw, "clientHeight": r.vh}}, ""
 	case "Page.captureScreenshot":
 		clip := c.Params["clip"].(map[string]any)
-		w := int(clip["width"].(float64) * clip["scale"].(float64))
-		h := int(clip["height"].(float64) * clip["scale"].(float64))
+		d := r.dpr
+		if d == 0 {
+			d = 1
+		}
+		w := int(clip["width"].(float64) * clip["scale"].(float64) * d)
+		h := int(clip["height"].(float64) * clip["scale"].(float64) * d)
+		if r.wrongSize {
+			w, h = 100, 100
+		}
 		return map[string]any{"data": r.png(w, h)}, ""
 	}
 	return defaultHook(f, c)
@@ -243,5 +252,67 @@ func TestScreenshotRejectsAnUnusableCapture(t *testing.T) {
 	s2, _ := newShotSession(t, rig2)
 	if _, err := s2.Screenshot(context.Background(), ""); err == nil {
 		t.Fatal("no viewport must be an error")
+	}
+}
+
+func TestScreenshotOnAHighDPRDisplayIsRecapturedAndRedactedInPlace(t *testing.T) {
+	rig := &shotRig{vw: 400, vh: 200, dpr: 2, boxes: [][]float64{{50, 60, 150, 60, 150, 90, 50, 90}}}
+	rig.png = func(w, h int) string { return solidPNG(t, w, h, color.RGBA{0, 0, 255, 255}) }
+	s, f := newShotSession(t, rig)
+	shot, err := s.Screenshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	caps := f.callsFor("Page.captureScreenshot")
+	if len(caps) != 2 {
+		t.Fatalf("an image twice the expected size must be captured again at the corrected scale: %d captures", len(caps))
+	}
+	if sc := caps[1].Params["clip"].(map[string]any)["scale"]; sc != 0.5 {
+		t.Fatalf("second capture scale %v, want 0.5", sc)
+	}
+	if shot.Width != 400 || shot.Height != 200 {
+		t.Fatalf("the delivered image must be the viewport size, got %dx%d", shot.Width, shot.Height)
+	}
+	img := decodeJPEG(t, shot.Data)
+	if !near(img.At(100, 75), 128, 128, 128, 25) || !near(img.At(5, 5), 0, 0, 255, 40) {
+		t.Fatal("the redaction must still be on the password field")
+	}
+}
+
+func TestScreenshotRefusedWhenTheCapturedSizeIsNotWhatWasAskedFor(t *testing.T) {
+	rig := &shotRig{vw: 400, vh: 200, wrongSize: true, boxes: [][]float64{{50, 60, 150, 60, 150, 90, 50, 90}}}
+	rig.png = func(w, h int) string { return solidPNG(t, w, h, color.RGBA{0, 0, 255, 255}) }
+	s, _ := newShotSession(t, rig)
+	if _, err := s.Screenshot(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "not the requested viewport size") {
+		t.Fatalf("a size the redaction cannot be placed on must be refused: %v", err)
+	}
+}
+
+func TestScreenshotAndSnapshotRefuseWhenThereAreTooManyPasswordInputs(t *testing.T) {
+	ids := make([]int, maxPasswordScan+1)
+	for i := range ids {
+		ids[i] = 10 + i
+	}
+	// screenshot
+	rig := &shotRig{vw: 100, vh: 100}
+	rig.png = func(w, h int) string { return solidPNG(t, w, h, color.RGBA{1, 1, 1, 255}) }
+	l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
+		if c.Method == "DOM.querySelectorAll" {
+			return map[string]any{"nodeIds": ids}, ""
+		}
+		return rig.hook(f, c)
+	}}
+	s, err := Start(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, CallTimeout: 5e9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	if _, err := s.Screenshot(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "more than") {
+		t.Fatalf("decoy inputs must not make the screenshot cover only some: %v", err)
+	}
+	if _, err := s.Snapshot(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "more than") {
+		t.Fatalf("nor the snapshot: %v", err)
 	}
 }

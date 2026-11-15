@@ -71,6 +71,57 @@ func TestBrowserPolicy_RowOnlyWhenAllGatesHold(t *testing.T) {
 	if c.Mcp.Orchestration {
 		t.Fatal("the browser grant must not switch orchestration on")
 	}
+	tok := env[BrowserTokenEnv]
+	if len(tok) != 32 {
+		t.Fatalf("a 128-bit capability is minted into the row's env: %q", tok)
+	}
+	if !reg.CheckBrowserToken("run-9", tok) {
+		t.Fatal("the minted capability must verify for its run")
+	}
+	for _, bad := range [][2]string{{"run-9", ""}, {"run-9", tok + "0"}, {"run-9", "x"}, {"another-run", tok}, {"", tok}} {
+		if reg.CheckBrowserToken(bad[0], bad[1]) {
+			t.Fatalf("%v must not verify", bad)
+		}
+	}
+	// A second run gets its own capability, and a finished run's is gone.
+	r2 := &run{id: "run-10", taskID: task.ID, chatID: 3}
+	c2 := taskrunner.RunContractFrom(reg.withBrowserPolicy(context.Background(), r2))
+	if c2.Mcp.Browser.Env[BrowserTokenEnv] == tok || reg.CheckBrowserToken("run-9", c2.Mcp.Browser.Env[BrowserTokenEnv]) {
+		t.Fatal("capabilities are per run")
+	}
+	reg.ForgetBrowserToken("run-9")
+	if reg.CheckBrowserToken("run-9", tok) {
+		t.Fatal("a finished run's capability must stop verifying")
+	}
+	// A system run is never minted one.
+	if reg.CheckBrowserToken("run-sys", "anything") {
+		t.Fatal("no capability for a run that got no browser")
+	}
+}
+
+func TestRunIsRunning(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	reg := newTestRegistry(t, st)
+	runID, err := reg.Start(context.Background(), wm, newTestRunner(wm), task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, reg, runID, StatusRunning, 5*time.Second)
+	if !reg.RunIsRunning(runID) {
+		t.Fatal("a running run is running")
+	}
+	if reg.RunIsRunning("nope") {
+		t.Fatal("an unknown run is not running")
+	}
+	if err := reg.Stop(runID); err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, reg, runID, StatusStopped, 5*time.Second)
+	if reg.RunIsRunning(runID) {
+		t.Fatal("a stopped run is not running")
+	}
 }
 
 func TestBrowserPolicy_KeepsAndDoesNotMutateAnExistingContract(t *testing.T) {

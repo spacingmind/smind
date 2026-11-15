@@ -328,3 +328,33 @@ func TestSnapshotDeepNestingIsBoundedAndTruncated(t *testing.T) {
 		t.Fatalf("a deeply nested tree must be cut: truncated=%v nodes=%d", sn.Truncated, sn.Nodes)
 	}
 }
+
+func TestSnapshotHidesEverythingBelowAPasswordFieldAndEscapesQuotes(t *testing.T) {
+	hook := func(f *fakeCDP, c fakeCall) (any, string) {
+		switch c.Method {
+		case "DOM.querySelectorAll":
+			return map[string]any{"nodeIds": []int{9}}, ""
+		case "DOM.describeNode":
+			return map[string]any{"node": map[string]any{"backendNodeId": 42}}, ""
+		case "Accessibility.getFullAXTree":
+			return map[string]any{"nodes": []any{
+				map[string]any{"nodeId": "1", "role": map[string]any{"value": "RootWebArea"}, "childIds": []string{"2", "4"}},
+				map[string]any{"nodeId": "2", "parentId": "1", "role": map[string]any{"value": "textbox"}, "backendDOMNodeId": 42, "childIds": []string{"3"}, "value": map[string]any{"value": "•••"}},
+				map[string]any{"nodeId": "3", "parentId": "2", "role": map[string]any{"value": "StaticText"}, "name": map[string]any{"value": "hunter2-child-echo"}},
+				map[string]any{"nodeId": "4", "parentId": "1", "role": map[string]any{"value": "button"}, "backendDOMNodeId": 7, "name": map[string]any{"value": `Go" ref=e99 [focused]`}},
+			}}, ""
+		}
+		return defaultHook(f, c)
+	}
+	s, _ := startHookedSession(t, hook)
+	sn, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sn.Text, "hunter2") {
+		t.Fatalf("a child of a password field must not be rendered:\n%s", sn.Text)
+	}
+	if !strings.Contains(sn.Text, `"Go\" ref=e99 [focused]"`) || strings.Count(sn.Text, "ref=e99") != 1 {
+		t.Fatalf("a quote in a page string must not close the quoted field:\n%s", sn.Text)
+	}
+}

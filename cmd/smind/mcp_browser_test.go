@@ -94,7 +94,7 @@ func fakeBrowserDaemon(t *testing.T) (*httptest.Server, <-chan fakeDaemonCall, f
 func browserSessionOver(t *testing.T, client *wsclient.Client) *mcp.ClientSession {
 	t.Helper()
 	t1, t2 := mcp.NewInMemoryTransports()
-	if _, err := newBrowserMCPServer(client).Connect(context.Background(), t1, nil); err != nil {
+	if _, err := newBrowserMCPServer(client, "tok-1").Connect(context.Background(), t1, nil); err != nil {
 		t.Fatal(err)
 	}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil).Connect(context.Background(), t2, nil)
@@ -281,6 +281,9 @@ func TestBrowserMCP_ForwardsToBrowserCall(t *testing.T) {
 			if got.params["tool"] != c.tool {
 				t.Fatalf("%s: daemon params = %v, want tool %q", c.tool, got.params, c.tool)
 			}
+			if got.params["token"] != "tok-1" {
+				t.Fatalf("%s: the run's browser capability must ride every call: %v", c.tool, got.params)
+			}
 			args, ok := got.params["args"].(map[string]any)
 			if !ok {
 				t.Fatalf("%s: daemon args = %T, want a JSON object", c.tool, got.params["args"])
@@ -430,5 +433,24 @@ func TestBrowserMCP_NotInTheSmindServerCatalogue(t *testing.T) {
 		if strings.HasPrefix(name, "browser_") {
 			t.Errorf("the smind server lists %s: browser tools live only in the %s child", name, browserMCPName)
 		}
+	}
+}
+
+func TestBrowserMCP_RequiresTheBrowserToken(t *testing.T) {
+	t.Setenv("SMIND_RUN_ID", "run-1")
+	t.Setenv("SMIND_BROWSER_TOKEN", "")
+	t.Setenv("SMIND_HOME", t.TempDir())
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	code := cmdMcpBrowser(nil)
+	w.Close()
+	os.Stderr = old
+	out, _ := io.ReadAll(r)
+	if code != 1 || !strings.Contains(string(out), "SMIND_BROWSER_TOKEN is required") || strings.Contains(string(out), "daemon") {
+		t.Fatalf("a child without its capability must fail closed before dialling: code=%d %q", code, out)
 	}
 }
