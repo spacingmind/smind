@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -71,44 +72,57 @@ func TestBrowserPolicy_RowOnlyWhenAllGatesHold(t *testing.T) {
 	if !c.Mcp.BrowserOnly {
 		t.Fatal("a policy created for the browser alone says so")
 	}
-	if _, ok := env[BrowserTokenEnv]; ok || reg.CheckBrowserToken("run-9", "x") {
-		t.Fatal("no capability exists until the runner issues it at a delivery point")
-	}
-	tok := c.Mcp.Browser.Issue()
 	if c.Mcp.Orchestration {
 		t.Fatal("the browser grant must not switch orchestration on")
 	}
-	if len(tok) != 32 {
-		t.Fatalf("a 128-bit capability is minted into the row's env: %q", tok)
-	}
-	if !reg.CheckBrowserToken("run-9", tok) {
-		t.Fatal("the minted capability must verify for its run")
-	}
-	for _, bad := range [][2]string{{"run-9", ""}, {"run-9", tok + "0"}, {"run-9", "x"}, {"another-run", tok}, {"", tok}} {
-		if reg.CheckBrowserToken(bad[0], bad[1]) {
-			t.Fatalf("%v must not verify", bad)
+	// No secret in the row's env, and no socket exists until the runner opens
+	// it at a delivery point with the agent's process id.
+	for k := range env {
+		if strings.Contains(strings.ToLower(k), "token") || strings.Contains(strings.ToLower(k), "secret") {
+			t.Fatalf("the row's env carries a secret: %s", k)
 		}
 	}
-	// A second run gets its own capability, and a finished run's is gone.
+	fake := &fakeSockets{paths: map[string]string{}}
+	if _, err := c.Mcp.Browser.Socket(4242); err == nil {
+		t.Fatal("without a socket host no socket can be opened")
+	}
+	reg.SetBrowserSockets(fake)
+	if len(fake.opened) != 0 {
+		t.Fatal("nothing is opened before the runner delivers the row")
+	}
+	path, err := c.Mcp.Browser.Socket(4242)
+	if err != nil || path == "" || len(fake.opened) != 1 || fake.opened[0] != (sockOpen{runID: "run-9", taskID: task.ID, root: 4242}) {
+		t.Fatalf("the socket is opened for this run and task with the agent's pid: %v %q %v", fake.opened, path, err)
+	}
+	// A second run gets its own socket; revoking one closes only it.
 	r2 := &run{id: "run-10", taskID: task.ID, chatID: 3}
 	c2 := taskrunner.RunContractFrom(reg.withBrowserPolicy(context.Background(), r2))
-	tok2 := c2.Mcp.Browser.Issue()
-	if tok2 == tok || reg.CheckBrowserToken("run-9", tok2) || !reg.CheckBrowserToken("run-10", tok2) {
-		t.Fatal("capabilities are per run")
+	if _, err := c2.Mcp.Browser.Socket(4343); err != nil {
+		t.Fatal(err)
 	}
 	c2.Mcp.Browser.Revoke() // a provider that skipped the row
-	if reg.CheckBrowserToken("run-10", tok2) {
-		t.Fatal("a revoked capability must stop verifying")
-	}
-	reg.ForgetBrowserToken("run-9")
-	if reg.CheckBrowserToken("run-9", tok) {
-		t.Fatal("a finished run's capability must stop verifying")
-	}
-	// A system run is never minted one.
-	if reg.CheckBrowserToken("run-sys", "anything") {
-		t.Fatal("no capability for a run that got no browser")
+	if !slices.Equal(fake.closed, []string{"run-10"}) {
+		t.Fatalf("revoking run-10 closes only its socket: %v", fake.closed)
 	}
 }
+
+type sockOpen struct {
+	runID  string
+	taskID int64
+	root   int
+}
+
+type fakeSockets struct {
+	paths  map[string]string
+	opened []sockOpen
+	closed []string
+}
+
+func (f *fakeSockets) OpenBrowserSocket(runID string, taskID int64, root int) (string, error) {
+	f.opened = append(f.opened, sockOpen{runID, taskID, root})
+	return "/sock/" + runID, nil
+}
+func (f *fakeSockets) CloseBrowserSocket(runID string) { f.closed = append(f.closed, runID) }
 
 // The REAL store-backed switch (the one the daemon installs), with the package
 // gate opened for the test only: the row exists exactly when the workspace flag

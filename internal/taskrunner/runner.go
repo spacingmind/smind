@@ -48,6 +48,9 @@ type acpBackend interface {
 	PromptUsage(sessionID string) (acp.PromptUsage, bool)
 	// InstanceID identifies the agent process behind this client.
 	InstanceID() string
+	// PID is the agent process's id, the root of the run's process tree (0:
+	// unknown, and then the run gets no browser).
+	PID() int
 	Close() error
 }
 
@@ -583,8 +586,8 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	}
 
 	// A plugin provider never gets smind's own rows, the browser's included: do
-	// not even build (and mint a capability for) a row that is about to be dropped.
-	rows, err := r.mcpRowsForDelivery(ctx, workspaceID, browserRowDelivered(haveSpec && spec.Plugin != ""))
+	// not even build (and open a socket for) a row that is about to be dropped.
+	rows, err := r.mcpRowsForDelivery(ctx, workspaceID, browserRowDelivered(haveSpec && spec.Plugin != ""), client.PID())
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
@@ -600,7 +603,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
 	// The agent may not take a stdio row (transport not advertised): then the
-	// capability minted for it must not stay valid.
+	// socket opened for it must not stay open.
 	revokeBrowserIfSkipped(ctx, inactive, unresolved)
 	if len(states) > 0 {
 		select {
@@ -1475,7 +1478,7 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 		r.sendSessionNote(ctx, events, "orchestration tools cannot be added or removed for codex-native runs (process-wide MCP config): the seat's tool policy is not enforced")
 	}
 	// A codex-native run takes no per-run MCP rows: the browser row is neither built nor announced.
-	if rows, err := r.mcpRowsForDelivery(ctx, workspaceID, false); err != nil {
+	if rows, err := r.mcpRowsForDelivery(ctx, workspaceID, false, 0); err != nil {
 		return fmt.Errorf("taskrunner: codex mcp servers: %w", err)
 	} else if len(rows) > 0 {
 		names := make([]string, len(rows))

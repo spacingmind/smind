@@ -557,6 +557,15 @@ func New(command []string, opts ...Option) (*Client, error) {
 // of InstanceID as a possible counter restart.
 func (c *Client) InstanceID() string { return c.instanceID }
 
+// PID is the process id of the agent this Client spawned (0 when it is not
+// running). The daemon uses it as the root of the run's process tree.
+func (c *Client) PID() int {
+	if c.conn == nil || c.conn.cmd == nil || c.conn.cmd.Process == nil {
+		return 0
+	}
+	return c.conn.cmd.Process.Pid
+}
+
 func newInstanceID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:]) // never fails (Go 1.24+ crashes instead)

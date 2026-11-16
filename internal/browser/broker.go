@@ -23,7 +23,7 @@ import (
 
 // GateReady is the dark switch of the browser tools. While it is false no run
 // ever receives the `smind-browser` row and the daemon refuses every
-// `browser.call`, whatever else is configured (the workspace switch and the
+// browser call, whatever else is configured (the workspace switch and the
 // permission gate land in later PRs). The PR that adds the daemon-side
 // permission gate flips it, and only that PR.
 const GateReady = false
@@ -39,7 +39,7 @@ const (
 	// PrereqRunSocket: the browser child talks to the daemon over a per-run
 	// local socket whose peer credentials (user and process ancestry) are
 	// checked, instead of a token that a same-user process can read.
-	PrereqRunSocket = false
+	PrereqRunSocket = true // built in PR 3b-2: internal/browser/runsock, the per-run socket and its peer check
 )
 
 // ToolNames is the whole catalogue of this version. There is deliberately no
@@ -67,7 +67,7 @@ type Content struct {
 	Data     string `json:"data,omitempty"` // base64, images only
 }
 
-// Result is what browser.call returns. An error result carries only
+// Result is what a browser call returns (the envelope sent over the run's socket). An error result carries only
 // daemon-authored text: a reason from the policy, the limiter or the session.
 type Result struct {
 	Content []Content `json:"content"`

@@ -91,8 +91,8 @@ type Registry struct {
 	// browserGate answers "may a run of this workspace get the browser?" (the
 	// workspace switch, a later PR); nil means no. Guarded by mu.
 	browserGate func(workspaceID int64) bool
-	// browserTokens: run id -> the capability its browser MCP child holds. Guarded by mu.
-	browserTokens map[string]string
+	// browserSockets opens the per-run browser sockets (nil: no run gets the row). Guarded by mu.
+	browserSockets BrowserSockets
 
 	providerQuota ProviderQuota // guarded by mu
 	// gateFn and failureHook: the picker gate wiring (cooldown_window.go), guarded by mu.
