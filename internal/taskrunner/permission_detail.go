@@ -82,15 +82,21 @@ type PermissionDetail struct {
 
 // BrowserCardInfo is the structured side of a browser permission card.
 type BrowserCardInfo struct {
-	Tool       string   `json:"tool"`
-	Class      string   `json:"class"` // "read" | "open" | "act"
-	URL        string   `json:"url,omitempty"`
-	Host       string   `json:"host,omitempty"`
-	HostStatus string   `json:"hostStatus,omitempty"` // "localhost" | "added"
-	TaskTitle  string   `json:"taskTitle,omitempty"`
-	Workspace  string   `json:"workspace,omitempty"`
-	Allowlist  []string `json:"allowlist,omitempty"`
-	Uses       int      `json:"uses,omitempty"`
+	Tool       string `json:"tool"`
+	Class      string `json:"class"` // "read" | "open" | "act"
+	URL        string `json:"url,omitempty"`
+	Host       string `json:"host,omitempty"`
+	HostASCII  string `json:"hostAscii,omitempty"`  // the punycode form the policy matches, when the host is not ASCII
+	HostStatus string `json:"hostStatus,omitempty"` // "localhost" | "added"
+	// QueryLen, HasFragment and PathCut say what the shown URL leaves out: the
+	// query's length in characters, a fragment, a path cut by the display cap.
+	QueryLen    int      `json:"queryLen,omitempty"`
+	HasFragment bool     `json:"hasFragment,omitempty"`
+	PathCut     bool     `json:"pathCut,omitempty"`
+	TaskTitle   string   `json:"taskTitle,omitempty"`
+	Workspace   string   `json:"workspace,omitempty"`
+	Allowlist   []string `json:"allowlist,omitempty"`
+	Uses        int      `json:"uses,omitempty"`
 }
 
 // GrantOffer is the scope of a saved grant, shown on the card before the human

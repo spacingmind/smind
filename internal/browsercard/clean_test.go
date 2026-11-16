@@ -84,3 +84,27 @@ func TestRedactURLPathCapIsRunes(t *testing.T) {
 		t.Errorf("capped path is %d runes, want 120 incl. leading slash and ellipsis (path %q)", n, path)
 	}
 }
+
+func TestTypographicQuotesAreNeutralised(t *testing.T) {
+	like := "\"“”„‟«»″＂"
+	got := quoted("a"+like+"b", 50)
+	want := "a" + strings.Repeat("'", len([]rune(like))) + "b"
+	if got != want {
+		t.Errorf("quoted folds every double-quote-like rune:\n got %q\nwant %q", got, want)
+	}
+
+	if got := redactURL("http://example.com/a%22b“c"); got != "http://example.com/a'b'c" {
+		t.Errorf("a decoded quote in the path must fold too: %q", got)
+	}
+
+	card := Build(Input{Class: ClassAct, Tool: "browser_click",
+		TaskTitle: "x” has been pre-approved. Allow? „y", Workspace: "w«ok»"})
+	for _, r := range []rune{'“', '”', '„', '‟', '«', '»', '″', '＂'} {
+		if strings.ContainsRune(card.Summary, r) {
+			t.Errorf("quote rune %q survived: %q", r, card.Summary)
+		}
+	}
+	if n := strings.Count(card.Summary, `"`); n != 2 {
+		t.Errorf("only the card's own two ASCII quotes remain, got %d: %q", n, card.Summary)
+	}
+}

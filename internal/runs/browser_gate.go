@@ -279,9 +279,10 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 		options = append(options, taskrunner.PermissionOption{ID: o.ID, Label: o.Name, Kind: o.Kind})
 	}
 	detail := &taskrunner.PermissionDetail{Kind: "browser", Browser: &taskrunner.BrowserCardInfo{
-		Tool: card.Info.Tool, Class: card.Info.Class, URL: card.Info.URL, Host: card.Info.Host,
+		Tool: card.Info.Tool, Class: card.Info.Class, URL: card.Info.URL, Host: card.Info.Host, HostASCII: card.Info.HostASCII,
 		HostStatus: card.Info.HostStatus, TaskTitle: card.Info.TaskTitle, Workspace: card.Info.Workspace,
 		Allowlist: card.Info.Allowlist, Uses: card.Info.Uses,
+		QueryLen: card.Info.QueryLen, HasFragment: card.Info.HasFragment, PathCut: card.Info.PathCut,
 	}}
 
 	var timedOut bool

@@ -417,7 +417,7 @@ func TestGate_OneCardAtATimePerRun(t *testing.T) {
 
 func TestGate_CardsCarryNoQueryOrUserinfoAndTheTimelineNoPageContent(t *testing.T) {
 	reg, r, runID := gateRun(t, "")
-	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_open", URL: "http://user:PW@localhost:3000/app?token=SECRET#frag", HostStatus: "localhost"})
+	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_open", URL: "http://user:PW@localhost:3000/app?token=SECRET#FRAGVALUE", HostStatus: "localhost"})
 	answer(t, reg, runID, id, "allow_run")
 	wantNil(t, ch)
 	reqs, resolved := permEvents(r)
@@ -425,7 +425,7 @@ func TestGate_CardsCarryNoQueryOrUserinfoAndTheTimelineNoPageContent(t *testing.
 		t.Fatalf("one card, one answer: %d %d", len(reqs), len(resolved))
 	}
 	b, _ := json.Marshal(reqs[0])
-	for _, bad := range []string{"SECRET", "PW", "user:", "frag"} {
+	for _, bad := range []string{"SECRET", "PW", "user:", "FRAGVALUE"} {
 		if strings.Contains(string(b), bad) {
 			t.Fatalf("the card carries %q: %s", bad, b)
 		}
@@ -684,4 +684,38 @@ func TestGate_ASeatFloorNeverAdmitsABrowserCall(t *testing.T) {
 			}
 		})
 	}
+}
+
+// What the shown URL leaves out is signalled on the card the person answers, the
+// close card has its own wording, and the open grant's label states its scope.
+func TestGate_TheOpenCardSignalsWhatItHidesAndTheCloseCardIsItsOwn(t *testing.T) {
+	reg, r, runID := gateRun(t, "")
+	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_open", URL: "https://allowed.test/x?data=SECRETVALUE#frag", HostStatus: "added"})
+	reqs, _ := permEvents(r)
+	card := reqs[len(reqs)-1]
+	if !strings.Contains(card.PermissionSummary, "(+query, 16 characters)") || !strings.Contains(card.PermissionSummary, "(+fragment)") {
+		t.Fatalf("the card must say a query and a fragment are there: %q", card.PermissionSummary)
+	}
+	if b := card.PermissionDetail.Browser; b.QueryLen != 16 || !b.HasFragment {
+		t.Fatalf("detail: %+v", b)
+	}
+	var label string
+	for _, o := range card.PermissionOptions {
+		if o.ID == "allow_run" {
+			label = o.Label
+		}
+	}
+	if !strings.Contains(label, "any page the browser policy allows") || !strings.Contains(label, "closing tabs") {
+		t.Fatalf("the open grant says what it covers: %q", label)
+	}
+	answer(t, reg, runID, id, "allow_once")
+	wantNil(t, ch)
+	ch2, id2 := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_close"})
+	reqs, _ = permEvents(r)
+	closeCard := reqs[len(reqs)-1]
+	if !strings.HasPrefix(closeCard.PermissionSummary, "Close a browser tab?") || strings.Contains(closeCard.PermissionSummary, "Open") || strings.Contains(closeCard.PermissionSummary, "not on your list") {
+		t.Fatalf("the close card has its own wording: %q", closeCard.PermissionSummary)
+	}
+	answer(t, reg, runID, id2, "allow_once")
+	wantNil(t, ch2)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 )
 
 type Class string
@@ -33,9 +34,12 @@ type Option struct {
 }
 
 type Info struct {
-	Tool, Class, URL, Host, HostStatus, TaskTitle, Workspace string
-	Allowlist                                                []string
-	Uses                                                     int
+	Tool, Class, URL, Host, HostASCII, HostStatus, TaskTitle, Workspace string
+	Allowlist                                                           []string
+	Uses                                                                int
+	QueryLen                                                            int  // runes of the raw query, 0 if none
+	HasFragment                                                         bool // the raw URL carried a fragment
+	PathCut                                                             bool // the path was cut by the display cap
 }
 
 type Card struct {
@@ -57,10 +61,11 @@ func Build(in Input) Card {
 			allowlist = append(allowlist, c)
 		}
 	}
+	facts := urlFactsOf(in.URL)
 	return Card{
-		Summary: summary(in, tool, taskTitle, workspace, allowlist),
+		Summary: summary(in, tool, taskTitle, workspace, allowlist, facts),
 		Options: optionsFor(in.Class),
-		Info:    info(in, tool, taskTitle, workspace, allowlist),
+		Info:    info(in, tool, taskTitle, workspace, allowlist, facts),
 	}
 }
 
@@ -77,7 +82,7 @@ func optionsFor(class Class) []Option {
 	case ClassOpen:
 		return []Option{
 			allowOnce,
-			{ID: "allow_run", Name: "Allow browser_open for this run", Kind: "allow_once"},
+			{ID: "allow_run", Name: "Allow opening any page the browser policy allows (localhost and your added hosts) and closing tabs, for this run", Kind: "allow_once"},
 			deny,
 		}
 	default:
@@ -93,7 +98,7 @@ const daemonCheck = " (daemon check)"
 // 500 runes with the marker).
 const summaryBodyMax = 480
 
-func summary(in Input, tool, taskTitle, workspace string, allowlist []string) string {
+func summary(in Input, tool, taskTitle, workspace string, allowlist []string, facts urlFacts) string {
 	var body string
 	switch in.Class {
 	case ClassRead:
@@ -101,13 +106,17 @@ func summary(in Input, tool, taskTitle, workspace string, allowlist []string) st
 			`Let this run read browser pages? "%s" wants to use the browser in %s (read-only: tabs, snapshot, screenshot, console, wait). It can reach this computer's localhost and: %s. Page text is untrusted.`,
 			taskTitle, workspace, hostsText(allowlist))
 	case ClassOpen:
+		if in.Tool == "browser_close" {
+			body = fmt.Sprintf(`Close a browser tab? "%s" in %s.`, taskTitle, workspace)
+			break
+		}
 		body = fmt.Sprintf(
-			`Open %s in the browser? (%s) "%s" in %s has used the browser %d times.`,
-			redactURL(in.URL), hostStatusText(in.HostStatus), taskTitle, workspace, in.Uses)
+			`Open %s%s in the browser? (%s) "%s" in %s has used the browser %d times.`,
+			redactURL(in.URL), markersText(facts), hostStatusText(in.HostStatus), taskTitle, workspace, in.Uses)
 	default:
 		target := "the current page"
 		if in.URL != "" {
-			target = redactURL(in.URL)
+			target = redactURL(in.URL) + markersText(facts)
 		}
 		body = fmt.Sprintf(
 			`Allow %s on %s? "%s" in %s. Asked every time.`,
@@ -116,14 +125,62 @@ func summary(in Input, tool, taskTitle, workspace string, allowlist []string) st
 	return cleanText(body, summaryBodyMax) + daemonCheck
 }
 
+// urlFacts is what the card tells about the parts of the URL it never shows.
+type urlFacts struct {
+	queryLen    int
+	hasFragment bool
+	pathCut     bool
+}
+
+// urlFactsOf measures the raw URL: content stays hidden, only its presence
+// (and the query's length) is signalled. A parse failure leaves all zero.
+func urlFactsOf(raw string) urlFacts {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return urlFacts{}
+	}
+	return urlFacts{
+		queryLen:    utf8.RuneCountInString(u.RawQuery),
+		hasFragment: u.Fragment != "",
+		pathCut:     utf8.RuneCountInString(cleanText(u.Path, len(u.Path))) > 120,
+	}
+}
+
+// markersText sits right after the redacted URL so a query, a fragment or a
+// cut path is never silently dropped from what the person approves.
+func markersText(f urlFacts) string {
+	var b strings.Builder
+	if f.queryLen > 0 {
+		fmt.Fprintf(&b, " (+query, %d characters)", f.queryLen)
+	}
+	if f.hasFragment {
+		b.WriteString(" (+fragment)")
+	}
+	if f.pathCut {
+		b.WriteString(" (path cut)")
+	}
+	return b.String()
+}
+
 func hostsText(hosts []string) string {
 	if len(hosts) == 0 {
 		return "no other hosts"
 	}
-	if len(hosts) <= 5 {
-		return cleanText(strings.Join(hosts, ", "), 150)
+	// Whole hosts only: a host cut mid-way could read as another host. The
+	// first host always shows, even alone over the limit.
+	text := hosts[0]
+	shown := 1
+	for _, h := range hosts[1:] {
+		if utf8.RuneCountInString(text)+2+utf8.RuneCountInString(h) > 150 {
+			break
+		}
+		text += ", " + h
+		shown++
 	}
-	return fmt.Sprintf("%s +%d more", cleanText(strings.Join(hosts[:5], ", "), 150), len(hosts)-5)
+	if hidden := len(hosts) - shown; hidden > 0 {
+		return fmt.Sprintf("%s +%d more", text, hidden)
+	}
+	return text
 }
 
 func hostStatusText(status string) string {
@@ -137,24 +194,35 @@ func hostStatusText(status string) string {
 	}
 }
 
-func info(in Input, tool, taskTitle, workspace string, allowlist []string) Info {
-	cardURL := ""
-	host := ""
-	if in.URL != "" {
-		cardURL = redactURL(in.URL)
-		if u, err := url.Parse(cardURL); err == nil && u.Host != "" {
-			host = u.Host
-		}
-	}
-	return Info{
+func info(in Input, tool, taskTitle, workspace string, allowlist []string, facts urlFacts) Info {
+	i := Info{
 		Tool:       tool,
 		Class:      string(in.Class),
-		URL:        cardURL,
-		Host:       host,
 		HostStatus: in.HostStatus,
 		TaskTitle:  taskTitle,
 		Workspace:  workspace,
 		Allowlist:  allowlist,
 		Uses:       in.Uses,
 	}
+	if in.Tool == "browser_close" {
+		return i
+	}
+	i.QueryLen = facts.queryLen
+	i.HasFragment = facts.hasFragment
+	i.PathCut = facts.pathCut
+	if in.URL != "" {
+		i.URL = redactURL(in.URL)
+		if u, err := url.Parse(in.URL); err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+			i.Host = cleanText(u.Host, 120)
+			i.HostASCII = asciiHostOf(i.Host)
+		}
+	}
+	return i
+}
+
+// asciiHostOf is the canonical form the policy matches on, empty when the
+// host is already ASCII (or has no valid punycode form).
+func asciiHostOf(host string) string {
+	_, ascii := hostDisplay(host)
+	return ascii
 }
