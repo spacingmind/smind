@@ -66,11 +66,12 @@ the agent tool's.
 ## Which agents can use it
 
 Agents that smind runs through the Agent Client Protocol (for example GLM and
-the other providers run that way) can use it. **Claude Code runs cannot yet:**
-the browser needs the process id of the Claude CLI, and the Claude SDK bundled
-with this version of smind does not report it; a later release that updates the
-SDK turns it on. Codex-native runs and plugin providers never get it. On
-**Windows the browser is not offered**.
+the other providers run that way) and Claude Code runs can use it. Codex-native
+runs and plugin providers never get it. On **Windows the browser is not
+offered**. An agent that starts its tools from a process outside its own process
+tree (a tool server that was already running, a sandbox with its own process
+namespace) cannot reach the browser: the call fails with "the browser is not
+available for this agent".
 
 ## What it does not protect against
 
