@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -134,7 +135,7 @@ func TestGate_LiveDenyRefusesBeforeACardAndBeatsTheAllowlist(t *testing.T) {
 		t.Fatalf("another loopback port stays allowed: %v", err)
 	}
 	// A listener that appears AFTER the first call is refused at once.
-	live = append(live, browser.Endpoint{Host: "0.0.0.0", Port: 3000})
+	live = append(live, browser.Endpoint{Host: unspecifiedV4, Port: 3000})
 	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_open", `{"url":"http://localhost:3000/"}`); err == nil {
 		t.Fatal("a listener registered after the first call is refused at the next one")
 	}
@@ -246,7 +247,7 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := listeners.Register(dir, "grpcweb", "[::]:41001"); err != nil {
+	if _, err := listeners.Register(dir, "grpcweb", net.JoinHostPort("::", "41001")); err != nil {
 		t.Fatal(err)
 	}
 	fleet := fakeFleet{
@@ -290,7 +291,9 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 	}
 	// A removed listener drops off (after the cache window); a dead process's file is ignored.
 	rm()
-	time.Sleep(liveDenyTTL + 50*time.Millisecond)
+	for deadline := time.Now().Add(5 * time.Second); has(s.Endpoints(), "127.0.0.1", 41000) && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond) // sleep-ok: polling past the half-second cache window
+	}
 	if has(s.Endpoints(), "127.0.0.1", 41000) {
 		t.Fatal("a removed listener is no longer denied")
 	}
@@ -301,7 +304,7 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 	}
 	// A store failure leaves the listener files in force (s2's dead-process pass
 	// removed the old files, so register again).
-	if _, err := listeners.Register(dir, "grpcweb", "[::]:41001"); err != nil {
+	if _, err := listeners.Register(dir, "grpcweb", net.JoinHostPort("::", "41001")); err != nil {
 		t.Fatal(err)
 	}
 	s3 := newLiveDenySource(dir, fakeFleet{err: errors.New("db closed")})
