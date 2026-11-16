@@ -221,7 +221,9 @@ func missingPaths(root, file, md string) []string {
 				continue
 			}
 			// `internal/pkg.Symbol` names a Go symbol: the package directory must exist ("internal/pkg.Type.Method" too).
-			if m := symbolRe.FindString(clean); m != "" && !strings.Contains(filepath.Base(clean[:len(clean)-len(m)]), ".") {
+			// Only Go package paths (cmd/, internal/) name symbols; `mobile/App.tsx` is a file, never `mobile/App` + `.tsx`.
+			isGoPkg := strings.HasPrefix(clean, "cmd/") || strings.HasPrefix(clean, "internal/")
+			if m := symbolRe.FindString(clean); m != "" && isGoPkg && !strings.Contains(filepath.Base(clean[:len(clean)-len(m)]), ".") {
 				if pkg := clean[:len(clean)-len(m)]; pathExists(root, file, pkg) {
 					continue
 				}
@@ -233,11 +235,45 @@ func missingPaths(root, file, md string) []string {
 }
 
 func pathExists(root, file, clean string) bool {
-	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(clean))); err == nil {
-		return true
+	return existsExactCase(root, filepath.FromSlash(clean)) ||
+		existsExactCase(root, filepath.Join(filepath.Dir(filepath.FromSlash(file)), filepath.FromSlash(clean)))
+}
+
+// existsExactCase reports whether rel exists under root with exactly this
+// spelling. os.Stat alone is case-insensitive on the default macOS and Windows
+// file systems, so `mobile/App` would match `mobile/app` there and fail only on
+// Linux CI.
+func existsExactCase(root, rel string) bool {
+	rel = filepath.Clean(rel)
+	if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+		return false
 	}
-	_, err := os.Stat(filepath.Join(root, filepath.Dir(filepath.FromSlash(file)), filepath.FromSlash(clean)))
-	return err == nil
+	dir := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "." {
+			continue
+		}
+		if part == ".." {
+			dir = filepath.Dir(dir)
+			continue
+		}
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			return false
+		}
+		found := false
+		for _, e := range ents {
+			if e.Name() == part {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+		dir = filepath.Join(dir, part)
+	}
+	return true
 }
 
 // baselineKey drops the line number so a finding survives edits above it: "file: <what>".
@@ -432,5 +468,21 @@ func TestDocsPathBaselineCanOnlyShrink(t *testing.T) {
 	}
 	if baselineKey("docs/a.md:12: `p/q` does not exist") != baselineKey("docs/a.md:99: `p/q` does not exist") {
 		t.Error("the baseline key must not depend on the line number")
+	}
+}
+
+// TestPathExistsIsCaseExact pins the Linux behaviour on case-insensitive file
+// systems: a differently cased path does not exist, and a non-Go path is never
+// read as a package plus a symbol.
+func TestPathExistsIsCaseExact(t *testing.T) {
+	root := repoRoot(t)
+	if !existsExactCase(root, filepath.FromSlash("mobile/app")) {
+		t.Fatal("mobile/app should exist")
+	}
+	if existsExactCase(root, filepath.FromSlash("mobile/App")) {
+		t.Fatal("mobile/App must not match mobile/app")
+	}
+	if got := missingPaths(root, "README.md", "see `mobile/App.tsx`\n"); len(got) != 1 {
+		t.Fatalf("`mobile/App.tsx` must be a missing path, got %v", got)
 	}
 }

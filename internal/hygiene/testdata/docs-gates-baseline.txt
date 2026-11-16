@@ -22,6 +22,7 @@ docs/decisions/0031-homelab-cli-distribution.md: `.github/workflows/docker.yml` 
 docs/decisions/0031-homelab-cli-distribution.md: `docker/base/Dockerfile` does not exist
 docs/decisions/0031-homelab-cli-distribution.md: `docker/base/rootfs/usr/local/bin/reference-docker-entrypoint` does not exist
 docs/decisions/0031-homelab-cli-distribution.md: `docs/docker.md` does not exist
+docs/decisions/0036-mobile-expo-router-native-stack.md: `mobile/App.tsx` does not exist
 docs/decisions/0044-automations.md: `docs/plans/active/stalled-tree-alert.md` does not exist
 docs/decisions/0051-web-demo-mode-and-app-spacingmind-com.md: `scripts/check-demo-build.mjs` does not exist
 docs/decisions/0051-web-demo-mode-and-app-spacingmind-com.md: `web/packages/demo` does not exist
