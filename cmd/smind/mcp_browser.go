@@ -196,7 +196,13 @@ func socketBrowserCaller(path string) browserCaller {
 		stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 		defer stop()
 		if _, err := conn.Write(append(req, '\n')); err != nil {
-			return browserCallResult{}, fmt.Errorf("the run's browser socket refused the request: %w", err)
+			if ctx.Err() != nil {
+				return browserCallResult{}, ctx.Err()
+			}
+			// The daemon refuses a caller by closing the connection with no
+			// reply; when that close wins the race with this write, the write
+			// fails (broken pipe, reset) instead of the read. Same refusal.
+			return browserCallResult{}, errBrowserCallerRefused
 		}
 		resp, err := runsock.ReadResponse(conn)
 		if err != nil {
@@ -208,7 +214,7 @@ func socketBrowserCaller(path string) browserCaller {
 			}
 			// A closed connection with no reply is the daemon's refusal of this
 			// process (not part of the run's process tree) or the end of the run.
-			return browserCallResult{}, errors.New("the browser is not available for this agent: the daemon cannot verify the caller (this process is not in the run's process tree, or the run ended)")
+			return browserCallResult{}, errBrowserCallerRefused
 		}
 		if resp.Error != "" {
 			return browserCallResult{}, errors.New(resp.Error)
@@ -221,6 +227,11 @@ func socketBrowserCaller(path string) browserCaller {
 		return out, nil
 	}
 }
+
+// errBrowserCallerRefused is the child's text for a connection the daemon
+// closed with no reply: its refusal of this process (not part of the run's
+// process tree) or the end of the run.
+var errBrowserCallerRefused = errors.New("the browser is not available for this agent: the daemon cannot verify the caller (this process is not in the run's process tree, or the run ended)")
 
 // browserResultToMCP converts the daemon's envelope to an MCP result:
 // text stays text, images are base64-decoded into image content, and
