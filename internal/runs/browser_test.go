@@ -116,11 +116,16 @@ type fakeSockets struct {
 	paths  map[string]string
 	opened []sockOpen
 	closed []string
+	bound  []int
 }
 
 func (f *fakeSockets) OpenBrowserSocket(runID string, taskID int64, root int) (string, error) {
 	f.opened = append(f.opened, sockOpen{runID, taskID, root})
 	return "/sock/" + runID, nil
+}
+func (f *fakeSockets) OpenBrowserSocketPending(runID string, taskID int64) (string, func(int) error, error) {
+	f.opened = append(f.opened, sockOpen{runID, taskID, 0})
+	return "/sock/" + runID, func(pid int) error { f.bound = append(f.bound, pid); return nil }, nil
 }
 func (f *fakeSockets) CloseBrowserSocket(runID string) { f.closed = append(f.closed, runID) }
 

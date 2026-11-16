@@ -437,7 +437,7 @@ func TestBrowserSettings_GetShowsStateAndTheLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := res.(browserSettingsView)
-	if !v.Enabled || !slices.Equal(v.AllowHosts, []string{"x.test"}) || v.Available != browser.GateReady || v.Available || v.Note == "" || v.KillSwitch {
+	if !v.Enabled || !slices.Equal(v.AllowHosts, []string{"x.test"}) || !v.Available || v.Note == "" || v.KillSwitch {
 		t.Fatalf("view: %+v", v)
 	}
 	h.killSwitch = func() bool { return true }
@@ -472,28 +472,27 @@ func TestKillSwitch_BeatsTheWorkspaceSwitch(t *testing.T) {
 	}
 }
 
-// With the flag on, the kill switch off, and every host allowed, nothing an
-// agent can reach changes while the gate is dark.
-func TestBrowser_DarkEvenWhenEnabled(t *testing.T) {
+// The browser is off unless the workspace flag is on (the default), whatever
+// the package gate says: the registry and callRun both read the real store.
+func TestBrowser_OffUnlessTheWorkspaceFlagIsOn(t *testing.T) {
 	t.Parallel()
 	e := newIdentEnv(t, "hang")
-	fs := newFakeSettings(1)
 	task, err := e.db.GetTask(e.seatTask.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fs.workspaces[task.WorkspaceID] = true
-	fs.rows[task.WorkspaceID] = store.BrowserSettings{WorkspaceID: task.WorkspaceID, Enabled: true, AllowHosts: []string{"a.test"}}
-	e.api.browser.settings = fs
 	e.api.browser.killSwitch = func() bool { return false }
-	if !e.api.browser.workspaceSwitchOn(task.WorkspaceID) {
-		t.Fatal("test setup: the workspace switch is on")
-	}
 	if e.api.Runs.BrowserAllowed(task.WorkspaceID) {
-		t.Fatal("the registry must still answer no while browser.GateReady is false")
+		t.Fatal("no stored flag: off")
 	}
 	if _, err := callRunJSON(t, e.api.browser, e.runID, task.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "not enabled for this workspace") {
-		t.Fatalf("dark even when enabled: %v", err)
+		t.Fatalf("off by default: %v", err)
+	}
+	if err := e.db.SaveBrowserSettings(store.BrowserSettings{WorkspaceID: task.WorkspaceID, Enabled: true, AllowHosts: []string{}, ProfileMode: "ephemeral", UpdatedBy: "local", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if !e.api.Runs.BrowserAllowed(task.WorkspaceID) {
+		t.Fatal("flag on, kill switch off, package gate open: the registry allows it")
 	}
 }
 
@@ -589,14 +588,14 @@ func TestBrowserSettings_RealStoreEndToEnd(t *testing.T) {
 	if !e.api.browser.workspaceSwitchOn(ws) || !slices.Equal(e.api.browser.allow(ws), []string{"intranet.test", "10.0.0.5"}) {
 		t.Fatal("the gate hook and the allowlist read the real store")
 	}
-	if e.api.Runs.BrowserAllowed(ws) {
-		t.Fatal("still dark: browser.GateReady is false")
+	if !e.api.Runs.BrowserAllowed(ws) {
+		t.Fatal("the flag set through the human-only RPC opens the registry's gate")
 	}
 	res, err := e.api.hs["browser.settings.get"](context.Background(), rc, params(map[string]any{"workspaceId": ws}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := res.(browserSettingsView); !v.Enabled || v.Available {
+	if v := res.(browserSettingsView); !v.Enabled || !v.Available {
 		t.Fatalf("get: %+v", v)
 	}
 	if _, err := e.api.hs["browser.settings.set"](context.Background(), rc, params(map[string]any{"workspaceId": ws + 999, "enabled": true})); err == nil {
@@ -627,6 +626,7 @@ func TestBrowserCall_KillSwitchFlipEndsLiveSessionsAtTheNextCall(t *testing.T) {
 	e := newIdentEnv(t, "hang")
 	h := e.api.browser
 	h.gate = func(int64) bool { return true }
+	admitAllPermits(h) // this test is about something else than the permission gate
 	ended := 0
 	h.endAllSessions = func() { ended++ }
 	h.killSwitch = func() bool { return false }

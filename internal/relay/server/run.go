@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -16,10 +17,16 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/spacingmind/smind/internal/config"
+	listenerfiles "github.com/spacingmind/smind/internal/listeners"
 )
 
 // Config controls a standalone relay process.
 type Config struct {
+	// ListenersDir, when set, is where this relay records the addresses it listens
+	// on (internal/listeners), so a page the agent browser loads can be refused
+	// access to them. Empty: nothing is recorded (tests and harnesses leave it
+	// empty so they never write into a developer's real smind home).
+	ListenersDir string
 	// Listen address, e.g. ":7400" ("" means DefaultListenAddr).
 	ListenAddr string
 	// GRPCWebListenAddr is the address the same RPCs are additionally
@@ -164,6 +171,19 @@ func Run(ctx context.Context, cfg Config) error {
 		webLis, err = net.Listen("tcp", cfg.GRPCWebListenAddr)
 		if err != nil {
 			return fmt.Errorf("relay: listen %s: %w", cfg.GRPCWebListenAddr, err)
+		}
+	}
+
+	// Record both addresses for the agent browser's deny list (any smind
+	// process's listener is a place a page must never reach).
+	for name, l := range map[string]net.Listener{"relay": lis, "grpcweb": webLis} {
+		if cfg.ListenersDir == "" {
+			break
+		}
+		rm, lerr := listenerfiles.Register(cfg.ListenersDir, name, l.Addr().String())
+		defer rm() // a working remove even on error: the in-memory entry and the retry end with the relay
+		if lerr != nil {
+			log.Printf("relay: listener file for %s not written: %v", name, lerr)
 		}
 	}
 

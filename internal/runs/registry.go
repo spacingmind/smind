@@ -93,6 +93,10 @@ type Registry struct {
 	browserGate func(workspaceID int64) bool
 	// browserSockets opens the per-run browser sockets (nil: no run gets the row). Guarded by mu.
 	browserSockets BrowserSockets
+	// bgRuns is the per-run state of the browser permission gate (grants, denial
+	// limiter), keyed by run id. Guarded by bgMu.
+	bgMu   sync.Mutex
+	bgRuns map[string]*browserRunState
 
 	providerQuota ProviderQuota // guarded by mu
 	// gateFn and failureHook: the picker gate wiring (cooldown_window.go), guarded by mu.
@@ -1342,6 +1346,22 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 type runPermissionDecider struct {
 	reg *Registry
 	r   *run
+
+	// browser marks the daemon's own browser gate card (ADR-0061): the provider's
+	// permission mode must not answer it (no AutoAccept shortcut), the policy
+	// engine was already consulted by the gate, and no saved "always" grant exists
+	// for it. timeout, when set, replaces the registry's permission timeout, and
+	// timedOut (when set) is told whether the wait ended by timeout.
+	browser  bool
+	timeout  time.Duration
+	timedOut *bool
+}
+
+func (d runPermissionDecider) waitFor() time.Duration {
+	if d.timeout > 0 {
+		return d.timeout
+	}
+	return d.reg.getPermissionTimeout()
 }
 
 func (d runPermissionDecider) Decide(ctx context.Context, summary string, options []taskrunner.PermissionOption) (string, error) {
@@ -1427,7 +1447,7 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 	// A remote run (ADR-0048) never takes this shortcut: the callee's
 	// policy floor and standing rules must see every request, defence in
 	// depth on top of StartWhenBusy forcing AutoAccept off.
-	if d.r.getPerm().AutoAccept && d.r.origin != store.ChatQueueSourceRemote {
+	if !d.browser && d.r.getPerm().AutoAccept && d.r.origin != store.ChatQueueSourceRemote {
 		if optionID, ok := firstOptionByKind(options, "allow_once", "allow_always"); ok {
 			d.reg.record(d.r, taskrunner.Event{
 				Type:                taskrunner.EventTypePermissionRequest,
@@ -1449,7 +1469,11 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 	// The policy engine (ADR-0047) answers what a standing rule or the
 	// floor decides; only an `ask` (or an engine that is off) parks the
 	// request for a human, with the policy footprint on its detail.
-	optionID, denyReason, handled, detail, grantClass := d.applyPolicy(requestID, summary, detail, options)
+	var optionID, denyReason, grantClass string
+	var handled bool
+	if !d.browser { // the browser gate consulted the engine itself, with the right tool name
+		optionID, denyReason, handled, detail, grantClass = d.applyPolicy(requestID, summary, detail, options)
+	}
 	if handled {
 		if optionID == "" {
 			return "", "", fmt.Errorf("runs: policy denied permission request %q: no reject option offered: %+v", requestID, options)
@@ -1488,7 +1512,7 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 		PermissionDetail:    detail,
 	})
 
-	timer := time.NewTimer(d.reg.getPermissionTimeout())
+	timer := time.NewTimer(d.waitFor())
 	defer timer.Stop()
 
 	select {
@@ -1531,6 +1555,9 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 		// channel nobody will read from again (same reasoning as the
 		// ctx.Done()/d.r.ctx.Done() cases below).
 		d.abandon(requestID)
+		if d.timedOut != nil {
+			*d.timedOut = true
+		}
 		optionID, ok := firstOptionByKind(options, "reject_once", "reject_always")
 		if !ok {
 			return "", "", fmt.Errorf("runs: permission request %q timed out with no reject option offered: %+v", requestID, options)

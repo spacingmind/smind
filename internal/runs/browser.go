@@ -100,6 +100,15 @@ func (reg *Registry) withBrowserPolicy(ctx context.Context, r *run) context.Cont
 			}
 			return bs.OpenBrowserSocket(runID, taskID, rootPID)
 		},
+		OpenPending: func() (string, func(int) error, error) {
+			reg.mu.Lock()
+			bs := reg.browserSockets
+			reg.mu.Unlock()
+			if bs == nil {
+				return "", nil, errors.New("runs: no browser socket host is installed")
+			}
+			return bs.OpenBrowserSocketPending(runID, taskID)
+		},
 		Revoke: func() { reg.closeBrowserSocket(runID) },
 	}
 	return taskrunner.WithRunContract(ctx, c)
@@ -111,6 +120,10 @@ type BrowserSockets interface {
 	// OpenBrowserSocket creates the run's socket, bound to the agent process
 	// rooted at rootPID, and returns its path.
 	OpenBrowserSocket(runID string, taskID int64, rootPID int) (string, error)
+	// OpenBrowserSocketPending creates the socket before the agent process exists
+	// (the Claude CLI path); bind attaches it to the process once it runs. A
+	// connection before bind is refused.
+	OpenBrowserSocketPending(runID string, taskID int64) (path string, bind func(rootPID int) error, err error)
 	CloseBrowserSocket(runID string)
 }
 

@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -115,6 +116,7 @@ func parseRelayServeFlags(args []string, stderr io.Writer) (server.Config, int) 
 		MaxDevicesPerHost: *maxDevices,
 		TLSCertFile:       *tlsCert,
 		TLSKeyFile:        *tlsKey,
+		ListenersDir:      filepath.Join(config.Dir(), "listeners"),
 	}, 0
 }
 

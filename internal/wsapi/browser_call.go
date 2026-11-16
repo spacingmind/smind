@@ -16,6 +16,7 @@ import (
 	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/browser/runsock"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -61,6 +62,14 @@ type browserHost struct {
 	deny           func() ([]browser.Endpoint, error)
 	launcher       func() (browser.Launcher, error)
 	profileRoot    string
+	// The permission gate and its bookkeeping (hooks so a test can drive them).
+	permit       func(ctx context.Context, call runs.BrowserCall) error
+	revokeGrants func(workspaceID int64)
+	revokeAll    func()
+	forgetRun    func(runID string)
+	liveDeny     func(ctx context.Context) ([]browser.Endpoint, error)
+	// stopWatch ends the kill-switch watcher (nil when none runs).
+	stopWatch chan struct{}
 	// socks hosts the per-run sockets; nil when the socket directory could not
 	// be prepared (then no run gets a browser row).
 	socks browserSockHub
@@ -70,6 +79,7 @@ type browserHost struct {
 // test can see what the host asks of it).
 type browserSockHub interface {
 	Open(runID string, rootPID int, h runsock.Handler) (string, error)
+	OpenPending(runID string, h runsock.Handler) (string, func(rootPID int) error, error)
 	Close(runID string)
 	CloseAll()
 }
@@ -95,6 +105,11 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 		return s.AllowHosts
 	}
 	h.deny = daemonDeny
+	h.permit = reg.BrowserGate
+	h.revokeGrants = reg.RevokeBrowserGrants
+	h.revokeAll = reg.RevokeAllBrowserGrants
+	h.forgetRun = reg.ForgetBrowserRun
+	h.liveDeny = newLiveDenySource(filepath.Join(config.Dir(), "listeners"), db).EndpointsContext
 	h.launcher = func() (browser.Launcher, error) {
 		p, err := browser.DetectChrome("")
 		if err != nil {
@@ -103,6 +118,7 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 		return browser.ChromeLauncher{Path: p}, nil
 	}
 	h.profileRoot = filepath.Join(config.Dir(), "browser")
+	h.startKillSwitchWatch(killSwitchWatchEvery, config.BrowserDisabled)
 	if hub, err := runsock.NewSystemHub(filepath.Join(config.Dir(), "browser", "sock")); err != nil {
 		log.Printf("browser: no per-run socket host, so no run gets the browser: %v", err)
 	} else {
@@ -199,12 +215,7 @@ func (h *browserHost) session(ctx context.Context, run browser.Run) (*browser.Se
 	if err != nil {
 		return nil, err // an *UnavailableError: the broker turns it into the plain install text
 	}
-	allow := h.allow(run.WorkspaceID)
-	deny, err := h.deny()
-	if err != nil {
-		return nil, err // fail closed: no session without the daemon's own address reserved
-	}
-	pol, err := browser.NewPolicy(allow, deny)
+	pol, allow, err := h.policyFor(ctx, run.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +225,31 @@ func (h *browserHost) session(ctx context.Context, run browser.Run) (*browser.Se
 		Launch:    browser.LaunchOpts{ProfileRoot: h.profileRoot, AllowHosts: allow},
 		Policy:    pol,
 	})
+}
+
+// policyFor builds the workspace's navigation policy: the stored allowlist, the
+// daemon's own addresses (fail closed when they cannot be read), and the live
+// deny source (other listeners, linked daemons). It returns the allowlist too.
+func (h *browserHost) policyFor(ctx context.Context, ws int64) (browser.Policy, []string, error) {
+	allow := h.allow(ws)
+	deny, err := h.deny()
+	if err != nil {
+		return browser.Policy{}, nil, err // fail closed: no session without the daemon's own address reserved
+	}
+	pol, err := browser.NewPolicy(allow, deny)
+	if err != nil {
+		return browser.Policy{}, nil, err
+	}
+	if h.liveDeny != nil {
+		if _, lerr := h.liveDeny(ctx); lerr != nil {
+			// The reserved set cannot be read: no session and no call (and the policy
+			// below also refuses every address), never "no entries".
+			return browser.Policy{}, nil, lerr
+		}
+		live := h.liveDeny
+		pol = pol.WithLiveDeny(func() ([]browser.Endpoint, error) { return live(context.Background()) })
+	}
+	return pol, allow, nil
 }
 
 // record puts one line per call in the run's timeline: the tool, the redacted
@@ -230,11 +266,61 @@ func (h *browserHost) record(run browser.Run, rec browser.Record) {
 // OnRunFinished ends the browser session a finished run was using.
 func (h *browserHost) OnRunFinished(f runs.RunFinished) {
 	h.CloseBrowserSocket(f.RunID)
+	if h.forgetRun != nil {
+		h.forgetRun(f.RunID) // the run's grants and denial limiter die with it
+	}
 	h.broker.EndRun(f.RunID)
+}
+
+// killSwitchWatchEvery is how often the kill switch is polled (a variable so a
+// test can shorten it): a grant must not outlive the switch just because no call
+// happened to observe it.
+var killSwitchWatchEvery = 2 * time.Second
+
+// startKillSwitchWatch ends every browser session and drops every grant as soon
+// as the kill switch is seen ON, on the transition and not only when a call
+// notices. Stated limit: a flip ON and back OFF between two polls, with no call
+// and no settings write in between, is not seen (the next call and the settings
+// change paths still revoke).
+func (h *browserHost) startKillSwitchWatch(every time.Duration, killed func() bool) {
+	if every <= 0 || h.stopWatch != nil {
+		return
+	}
+	stop := make(chan struct{})
+	h.stopWatch = stop
+	crash.Go("wsapi.browserKillSwitchWatch", func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		prev := false
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+			}
+			on := killed()
+			if on {
+				if !prev {
+					h.endAllSessions()
+				}
+				if h.revokeAll != nil {
+					h.revokeAll() // every tick while it is on: a grant answered meanwhile dies too
+				}
+			}
+			prev = on
+		}
+	})
 }
 
 // close ends every browser session and socket (daemon shutdown).
 func (h *browserHost) close() {
+	if h.stopWatch != nil {
+		select {
+		case <-h.stopWatch:
+		default:
+			close(h.stopWatch)
+		}
+	}
 	if h.socks != nil {
 		h.socks.CloseAll()
 	}
@@ -249,6 +335,17 @@ func (h *browserHost) OpenBrowserSocket(runID string, taskID int64, rootPID int)
 		return "", errors.New("browser: no socket host")
 	}
 	return h.socks.Open(runID, rootPID, func(ctx context.Context, req runsock.Request) (any, error) {
+		return h.callRun(ctx, runID, taskID, req.Tool, req.Args)
+	})
+}
+
+// OpenBrowserSocketPending creates the run's socket before its agent process
+// exists (the Claude CLI path); bind attaches it to the process later.
+func (h *browserHost) OpenBrowserSocketPending(runID string, taskID int64) (string, func(rootPID int) error, error) {
+	if h.socks == nil {
+		return "", nil, errors.New("browser: no socket host")
+	}
+	return h.socks.OpenPending(runID, func(ctx context.Context, req runsock.Request) (any, error) {
 		return h.callRun(ctx, runID, taskID, req.Tool, req.Args)
 	})
 }
@@ -273,13 +370,78 @@ func (h *browserHost) callRun(ctx context.Context, runID string, taskID int64, t
 	}
 	ws := task.WorkspaceID
 	if h.killSwitch() {
-		// The daemon-wide switch beats every workspace: end any browser now.
+		// The daemon-wide switch beats every workspace: end any browser now,
+		// and every grant with it.
 		h.endAllSessions()
+		if h.revokeAll != nil {
+			h.revokeAll()
+		}
 		return browser.Result{}, errors.New("browser: the browser is disabled by the daemon's configuration")
 	}
 	if !h.gate(ws) {
+		if h.revokeGrants != nil {
+			h.revokeGrants(ws)
+		}
+		return browser.Result{}, errors.New("browser: the browser is not enabled for this workspace")
+	}
+	if err := h.permission(ctx, runID, ws, tool, args); err != nil {
+		return browser.Result{}, err
+	}
+	// The gate may have held the call for a person: the switches are read again
+	// after the answer, so one turned off meanwhile ends the call.
+	if h.killSwitch() {
+		h.endAllSessions()
+		if h.revokeAll != nil {
+			h.revokeAll()
+		}
+		return browser.Result{}, errors.New("browser: the browser is disabled by the daemon's configuration")
+	}
+	if !h.gate(ws) {
+		if h.revokeGrants != nil {
+			h.revokeGrants(ws)
+		}
 		return browser.Result{}, errors.New("browser: the browser is not enabled for this workspace")
 	}
 	run := browser.Run{ID: runID, WorkspaceID: ws, ImagesRead: h.imagesRead(runID)}
 	return h.broker.Call(ctx, run, tool, args), nil
+}
+
+// permission is the daemon-side gate (ADR-0061 section 10): admitted now,
+// refused, or held for a person. A browser_open whose URL the workspace policy
+// would refuse is refused here with the policy's reason and raises no card.
+func (h *browserHost) permission(ctx context.Context, runID string, ws int64, tool string, args json.RawMessage) error {
+	if h.permit == nil {
+		return errors.New("browser: no permission gate is installed")
+	}
+	call := runs.BrowserCall{RunID: runID, Tool: tool}
+	pol, allow, err := h.policyFor(ctx, ws)
+	if err != nil {
+		return err
+	}
+	call.Allowlist = allow
+	if tool == "browser_open" {
+		var a struct {
+			URL string `json:"url"`
+		}
+		if json.Unmarshal(args, &a) != nil || a.URL == "" {
+			return nil // the broker refuses the malformed call itself; nothing to ask about
+		}
+		d := pol.CheckURL(a.URL)
+		if !d.Allowed {
+			return errors.New("browser: " + d.Reason)
+		}
+		call.URL = a.URL
+		call.HostStatus = "localhost"
+		if h2, herr := browser.NormalizeAllowHost(d.Host); herr == nil {
+			for _, a := range allow {
+				if n, nerr := browser.NormalizeAllowHost(a); nerr == nil && n == h2 {
+					call.HostStatus = "added"
+				}
+			}
+		}
+	}
+	if err := h.permit(ctx, call); err != nil {
+		return errors.New("browser: " + strings.TrimPrefix(err.Error(), "browser permission refused: "))
+	}
+	return nil
 }

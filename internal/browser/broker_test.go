@@ -570,14 +570,6 @@ func (c *Content) safeData() string {
 	return c.Data
 }
 
-// The browser is dark in this PR. The PR that adds the daemon-side permission
-// gate flips browser.GateReady and updates this test, and only that PR.
-func TestGateIsDarkUntilThePermissionGatePR(t *testing.T) {
-	if GateReady {
-		t.Fatal("browser.GateReady must stay false until the daemon-side permission gate exists")
-	}
-}
-
 func TestBrokerRefusesALateCallOfAnEndedRun(t *testing.T) {
 	rig := newBrokerRig(t, nil)
 	rig.open(t)
@@ -857,12 +849,16 @@ func TestPageStringsCannotStartALineWithAMarker(t *testing.T) {
 	}
 }
 
-// PR 4 may flip GateReady only when both transport hardenings (PR 3b) are done
-// and marked so in code. This test is that checklist: it fails the moment the
-// gate is opened without them.
-func TestGateReadyRequiresBothPrerequisites(t *testing.T) {
+// A TRIPWIRE, not a proof: it compares three hand-set constants, so it only stops
+// someone from opening GateReady while a prerequisite flag still says false. It
+// proves nothing about what each prerequisite does; that is covered by real tests:
+// the authenticated proxy (internal/browser: TestProxyAuth_* and the real-Chrome
+// smoke's 407 check; TestSession*Challenge* for the CDP side) and the per-run socket
+// and its peer check (internal/browser/runsock: TestServer*, TestInTreeTable,
+// TestHub_*), plus the gate itself (internal/runs: TestGate_*).
+func TestGateMayBeOpenOnlyWhileBothPrerequisiteFlagsAreTrue(t *testing.T) {
 	if GateReady && !(PrereqProxyAuth && PrereqRunSocket) {
-		t.Fatalf("browser.GateReady is true but the prerequisites are not done: proxy authentication=%v, per-run socket with peer credentials=%v (Human decision 2026-11-16)", PrereqProxyAuth, PrereqRunSocket)
+		t.Fatalf("browser.GateReady is true but a prerequisite flag is false: proxy authentication=%v, per-run socket with peer credentials=%v (Human decision 2026-11-16)", PrereqProxyAuth, PrereqRunSocket)
 	}
 }
 

@@ -3,6 +3,7 @@ package taskrunner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -297,6 +298,43 @@ func (r *Runner) mcpRowsFor(ctx context.Context, workspaceID int64) ([]store.Mcp
 // row nobody will receive. rootPID is the agent process the run's browser socket
 // is bound to; 0 (unknown) builds no browser row: never a weaker check.
 func (r *Runner) mcpRowsForDelivery(ctx context.Context, workspaceID int64, deliver bool, rootPID int) ([]store.McpServer, error) {
+	var open func(*BrowserPolicy) (string, error)
+	if deliver && rootPID > 0 {
+		open = func(b *BrowserPolicy) (string, error) {
+			if b.Socket == nil {
+				return "", errNoBrowserSocket
+			}
+			return b.Socket(rootPID)
+		}
+	}
+	return r.mcpRowsWith(ctx, workspaceID, open)
+}
+
+var errNoBrowserSocket = errors.New("taskrunner: no browser socket opener")
+
+// mcpRowsPending is mcpRowsFor for an agent whose process does not exist yet when
+// its rows are built (the Claude CLI, started later by the SDK): the browser
+// row's socket is created UNBOUND and bind(pid) attaches it to the agent's
+// process once it runs. bind is nil when no browser row was built. A connection
+// before bind is refused by the daemon.
+func (r *Runner) mcpRowsPending(ctx context.Context, workspaceID int64) (rows []store.McpServer, bind func(rootPID int) error, err error) {
+	rows, err = r.mcpRowsWith(ctx, workspaceID, func(b *BrowserPolicy) (string, error) {
+		if b.OpenPending == nil {
+			return "", errNoBrowserSocket
+		}
+		path, bd, perr := b.OpenPending()
+		if perr != nil {
+			return "", perr
+		}
+		bind = bd
+		return path, nil
+	})
+	return rows, bind, err
+}
+
+// mcpRowsWith builds the run's rows; openSocket (nil: no browser row) opens the
+// run's browser socket when a browser row is to be delivered.
+func (r *Runner) mcpRowsWith(ctx context.Context, workspaceID int64, openSocket func(*BrowserPolicy) (string, error)) ([]store.McpServer, error) {
 	rows, err := r.mcpServersForWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
@@ -327,8 +365,8 @@ func (r *Runner) mcpRowsForDelivery(ctx context.Context, workspaceID int64, deli
 			Args: string(args), Env: string(envJSON), Enabled: true,
 		})
 	}
-	if policy.Browser != nil && deliver && rootPID > 0 && policy.Browser.Socket != nil {
-		sock, serr := policy.Browser.Socket(rootPID)
+	if policy.Browser != nil && openSocket != nil {
+		sock, serr := openSocket(policy.Browser)
 		if serr != nil || sock == "" {
 			// No socket, no browser (logged by the host that failed): the run goes on without it.
 			return out, nil

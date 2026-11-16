@@ -69,20 +69,20 @@ var closeWait = 3 * time.Second
 const maxPending = 32
 
 type runSock struct {
-	id        string
-	path      string
-	ln        net.Listener
-	root      int
-	rootStart uint64
-	handle    Handler
-	ctx       context.Context
-	cancel    context.CancelFunc
+	id     string
+	path   string
+	ln     net.Listener
+	handle Handler
+	ctx    context.Context
+	cancel context.CancelFunc
 
-	mu      sync.Mutex
-	conns   map[net.Conn]struct{} // CHECKED connections only
-	pending chan struct{}         // slots for connections still being checked
-	done    chan struct{}
-	refused atomic.Int64 // refused connections (counted; the first is logged)
+	mu        sync.Mutex
+	root      int                   // the run's root process; 0 until bound (OpenPending)
+	rootStart uint64                // its start time, recorded when it was bound
+	conns     map[net.Conn]struct{} // CHECKED connections only
+	pending   chan struct{}         // slots for connections still being checked
+	done      chan struct{}
+	refused   atomic.Int64 // refused connections (counted; the first is logged)
 }
 
 // Refusals reports how many connections to the run's socket were refused (0 for
@@ -234,31 +234,70 @@ func (h *Hub) Open(runID string, rootPID int, handle Handler) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("runsock: the run's root process cannot be read: %w", err)
 	}
+	path, _, err := h.open(runID, rootPID, start, handle)
+	return path, err
+}
+
+// OpenPending creates the socket of a run BEFORE its agent process exists (the
+// Claude CLI is started by the SDK after the run's MCP config is written). The
+// socket refuses every connection until bind(pid) attaches it to the process
+// (whose start time is recorded then); bind works once.
+func (h *Hub) OpenPending(runID string, handle Handler) (path string, bind func(rootPID int) error, err error) {
+	if runID == "" || handle == nil {
+		return "", nil, errors.New("runsock: a run and a handler are required")
+	}
+	path, rs, err := h.open(runID, 0, 0, handle)
+	if err != nil {
+		return "", nil, err
+	}
+	return path, func(rootPID int) error { return rs.bind(h.cfg.Tree, rootPID) }, nil
+}
+
+// bind attaches a pending socket to the agent process, once.
+func (rs *runSock) bind(tree ProcTree, rootPID int) error {
+	if rootPID <= 1 {
+		return errors.New("runsock: the agent's process id is unknown")
+	}
+	start, err := StartOf(tree, rootPID)
+	if err != nil {
+		return fmt.Errorf("runsock: the agent's process cannot be read: %w", err)
+	}
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.root != 0 {
+		return errors.New("runsock: the socket is already bound")
+	}
+	rs.root, rs.rootStart = rootPID, start
+	return nil
+}
+
+// open is Open and OpenPending: root 0 means unbound.
+func (h *Hub) open(runID string, root int, rootStart uint64, handle Handler) (string, *runSock, error) {
 	h.Close(runID) // a second Open replaces the first; the old one is closed OUTSIDE the lock (its connections may be mid-call)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
-		return "", errors.New("runsock: the hub is closed")
+		return "", nil, errors.New("runsock: the hub is closed")
 	}
 	if err := h.prepare(); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	path, err := h.socketPath(runID)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if h.runs[runID] != nil {
-		return "", errors.New("runsock: this run's socket is being opened elsewhere")
+		return "", nil, errors.New("runsock: this run's socket is being opened elsewhere")
 	}
 	_ = os.Remove(path) // our own leftover (the directory is ours alone)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		return "", fmt.Errorf("runsock: listen: %w", err)
+		return "", nil, fmt.Errorf("runsock: listen: %w", err)
 	}
-	fail := func(e error) (string, error) {
+	fail := func(e error) (string, *runSock, error) {
 		_ = ln.Close()
 		_ = os.Remove(path)
-		return "", e
+		return "", nil, e
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		return fail(fmt.Errorf("runsock: socket mode: %w", err))
@@ -267,11 +306,11 @@ func (h *Hub) Open(runID string, rootPID int, handle Handler) (string, error) {
 		return fail(errors.New("runsock: the socket is not a 0600 socket"))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	rs := &runSock{id: runID, path: path, ln: ln, root: rootPID, rootStart: start, handle: handle,
+	rs := &runSock{id: runID, path: path, ln: ln, root: root, rootStart: rootStart, handle: handle,
 		ctx: ctx, cancel: cancel, conns: map[net.Conn]struct{}{}, pending: make(chan struct{}, maxPending), done: make(chan struct{})}
 	h.runs[runID] = rs
 	go h.accept(rs)
-	return path, nil
+	return path, rs, nil
 }
 
 // Close closes a run's socket, its connections and removes the file.
@@ -385,5 +424,11 @@ func (h *Hub) checkPeer(rs *runSock, conn net.Conn) string {
 	if err != nil {
 		return "peer credentials unreadable"
 	}
-	return checkCred(pc, true, h.cfg.UID, h.cfg.Tree, rs.root, rs.rootStart)
+	rs.mu.Lock()
+	root, rootStart := rs.root, rs.rootStart
+	rs.mu.Unlock()
+	if root == 0 {
+		return "the run's process is not bound yet"
+	}
+	return checkCred(pc, true, h.cfg.UID, h.cfg.Tree, root, rootStart)
 }

@@ -31,8 +31,9 @@ import (
 // fakeBrowserReply is what the fake socket answers one request with: either a
 // result payload or an error text.
 type fakeBrowserReply struct {
-	result any    // the envelope
-	errMsg string // non-empty: the reply carries this error
+	result any           // the envelope
+	errMsg string        // non-empty: the reply carries this error
+	delay  time.Duration // how long the socket holds the call before answering (a held permission card)
 }
 
 // fakeSocketCall is one request line the fake socket received.
@@ -93,6 +94,9 @@ func fakeBrowserSocket(t *testing.T) (string, <-chan fakeSocketCall, func(fakeBr
 				mu.Lock()
 				ans := reply
 				mu.Unlock()
+				if ans.delay > 0 {
+					time.Sleep(ans.delay) // sleep-ok: the point of the test is a call held for a while
+				}
 				var out []byte
 				if ans.errMsg != "" {
 					out, _ = json.Marshal(map[string]any{"error": ans.errMsg})
@@ -526,5 +530,28 @@ func skipWithoutUnixSockets(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the browser's per-run socket is not offered on Windows")
+	}
+}
+
+// A call held for a permission answer outlasts the default deadline's SHORT
+// settings and is cut by a shorter one: the child's deadline is what keeps a held
+// call alive, and it defaults to runsock.ChildCallDeadline.
+func TestBrowserMCP_AHeldCallSurvivesTheDefaultDeadlineButNotAShorterOne(t *testing.T) {
+	if childCallDeadline != runsock.ChildCallDeadline {
+		t.Fatalf("the child's default deadline is runsock.ChildCallDeadline: %v vs %v", childCallDeadline, runsock.ChildCallDeadline)
+	}
+	old := childCallDeadline
+	t.Cleanup(func() { childCallDeadline = old })
+	path, _, setReply := fakeBrowserSocket(t)
+	setReply(fakeBrowserReply{result: browserCallResult{Content: []browserContent{{Type: "text", Text: "held then approved"}}}, delay: time.Second})
+	call := socketBrowserCaller(path)
+	childCallDeadline = 5 * time.Second
+	res, err := call(context.Background(), "browser_tabs", struct{}{})
+	if err != nil || len(res.Content) != 1 || res.Content[0].Text != "held then approved" {
+		t.Fatalf("a call held for a second succeeds under a long deadline: %v %+v", err, res)
+	}
+	childCallDeadline = 200 * time.Millisecond
+	if _, err := call(context.Background(), "browser_tabs", struct{}{}); err == nil {
+		t.Fatal("a deadline shorter than the hold cuts the call")
 	}
 }

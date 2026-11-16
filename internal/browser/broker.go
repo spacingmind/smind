@@ -21,12 +21,12 @@ import (
 // as untrusted data between boundary lines carrying a per-call random token,
 // and never executed, evaluated or fed to another tool.
 
-// GateReady is the dark switch of the browser tools. While it is false no run
-// ever receives the `smind-browser` row and the daemon refuses every
-// browser call, whatever else is configured (the workspace switch and the
-// permission gate land in later PRs). The PR that adds the daemon-side
-// permission gate flips it, and only that PR.
-const GateReady = false
+// GateReady is the product switch of the browser tools. While it was false no
+// run ever received the `smind-browser` row. PR 4 flipped it, together with the
+// daemon-side permission gate (internal/runs BrowserGate); it is still only
+// reachable through the human-only per-workspace switch (default OFF) and the
+// daemon kill switch, and every call passes the permission gate.
+const GateReady = true
 
 // The two hard prerequisites of opening the gate (Human decision 2026-11-16,
 // ADR-0061 amendment). Each is flipped to true by the PR that builds it
