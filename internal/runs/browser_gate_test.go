@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/browsercard"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -397,4 +398,19 @@ func TestGate_TheGrantIsATimelineLine(t *testing.T) {
 		}
 	}
 	t.Fatal("the grant must be a line of the run's timeline")
+}
+
+// Grants never cover the act class (any future acting tool asks every call):
+// even a run holding both grants has none for it.
+func TestGate_NoGrantEverCoversTheActClass(t *testing.T) {
+	st := &browserRunState{read: true, open: true}
+	if st.grants(browsercard.ClassAct) {
+		t.Fatal("an acting tool is never covered by a grant")
+	}
+	if st.grants("unknown-class") {
+		t.Fatal("an unknown class is never covered")
+	}
+	if !st.grants(browsercard.ClassRead) || !st.grants(browsercard.ClassOpen) {
+		t.Fatal("test setup: read and open are covered")
+	}
 }
