@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -328,10 +329,23 @@ func TestUsage_TouchRespectsTTL(t *testing.T) {
 
 func TestUsage_RefreshWaitsAndReturns(t *testing.T) {
 	h := newUsageHarness(t, 2)
+	// Both fetches are held open until each has started: "refresh" must wait for them, not return early.
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
 	h.fetcher.fn = func(ctx context.Context, a accounts.Account) (quota.Report, error) {
-		time.Sleep(30 * time.Millisecond)
+		started <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return quota.Report{}, ctx.Err()
+		}
 		return usageFetcherDefault(), nil
 	}
+	go func() {
+		<-started
+		<-started
+		close(release)
+	}()
 	res := h.mustDirect(usageParams("refresh"))
 	if h.fetcher.Calls() != 2 {
 		t.Fatalf("calls = %d, want 2", h.fetcher.Calls())
@@ -508,16 +522,33 @@ func TestUsage_ReconnectRelistCachedZeroCalls(t *testing.T) {
 
 func TestUsage_TenClientsBurstOneCall(t *testing.T) {
 	h := newUsageHarness(t, 1)
-	h.fetcher.fn = func(context.Context, accounts.Account) (quota.Report, error) {
-		time.Sleep(150 * time.Millisecond)
+	// The one fetch is held open until it has started and all ten clients have been launched, so the burst overlaps it.
+	started := make(chan struct{}, 10)
+	release := make(chan struct{})
+	var entered atomic.Int32
+	h.fetcher.fn = func(ctx context.Context, _ accounts.Account) (quota.Report, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return quota.Report{}, ctx.Err()
+		}
 		return usageFetcherDefault(), nil
 	}
+	go func() {
+		<-started
+		for entered.Load() < 10 {
+			runtime.Gosched()
+		}
+		close(release)
+	}()
 	var wg sync.WaitGroup
 	errs := make(chan error, 10)
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			entered.Add(1)
 			res, err := h.direct(usageParams("touch"), false)
 			if err == nil && res.Reports[0].Report == nil {
 				err = errors.New("no report")
@@ -658,8 +689,13 @@ func TestUsage_TopicSubscribable(t *testing.T) {
 func TestUsage_AccountRemovedEventFlow(t *testing.T) {
 	h := newUsageHarness(t, 2)
 	gate := make(chan struct{})
+	held := make(chan struct{}, 1) // account 1's fetch has started and is waiting on the gate
 	h.fetcher.fn = func(ctx context.Context, a accounts.Account) (quota.Report, error) {
 		if a.ID == h.ids[0] {
+			select {
+			case held <- struct{}{}:
+			default:
+			}
 			select {
 			case <-gate:
 			case <-ctx.Done():
@@ -683,7 +719,11 @@ func TestUsage_AccountRemovedEventFlow(t *testing.T) {
 		t.Fatalf("usage event account = %d", u.AccountID)
 	}
 	sendRequest(t, c.ws, "t", "account.usage", usageParams("touch", h.ids[0]))
-	time.Sleep(100 * time.Millisecond) // let the fetch start
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("account 1's fetch never started")
+	}
 	if err := h.reg.Delete(h.ids[0]); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
