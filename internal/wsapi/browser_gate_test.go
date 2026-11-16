@@ -485,3 +485,32 @@ func TestBrowserE2E_AHeldCallIsAnsweredThroughTheRealRegistry(t *testing.T) {
 		t.Fatalf("after the switch is off: %+v", r)
 	}
 }
+
+// The gate may hold a call for a person: if the workspace switch or the kill
+// switch goes off while it is held, the call ends instead of running.
+func TestGate_SwitchesAreReadAgainAfterTheGateReturns(t *testing.T) {
+	t.Parallel()
+	e, h, _ := gateHost(t)
+	rb := &recordingBroker{}
+	h.broker = rb
+	h.permit = func(context.Context, runs.BrowserCall) error {
+		h.gate = func(int64) bool { return false } // turned off while the card was open
+		return nil
+	}
+	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "not enabled for this workspace") {
+		t.Fatalf("workspace switch off meanwhile: %v", err)
+	}
+	h.gate = func(int64) bool { return true }
+	ended := 0
+	h.endAllSessions = func() { ended++ }
+	h.permit = func(context.Context, runs.BrowserCall) error {
+		h.killSwitch = func() bool { return true }
+		return nil
+	}
+	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "disabled by the daemon") || ended != 1 {
+		t.Fatalf("kill switch on meanwhile: %v ended=%d", err, ended)
+	}
+	if rb.calls != 0 {
+		t.Fatal("the broker ran a call whose switch went off while it was held")
+	}
+}

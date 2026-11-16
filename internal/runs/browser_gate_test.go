@@ -569,3 +569,22 @@ func TestGate_OnceAndDenialAreTimelineLines(t *testing.T) {
 		t.Fatalf("timeline lines: once=%v refused=%v", once, no)
 	}
 }
+
+// A run that has ended raises no card: it is refused (and no grant state is
+// created for it).
+func TestGate_AnEndedRunRaisesNoCard(t *testing.T) {
+	reg, r, runID := startedRun(t, taskrunner.PermissionSettings{}) // a finished run
+	err := noCard(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+	if err == nil || !strings.Contains(err.Error(), "has ended") {
+		t.Fatalf("an ended run: %v", err)
+	}
+	reg.bgMu.Lock()
+	n := len(reg.bgRuns)
+	reg.bgMu.Unlock()
+	if n != 0 {
+		t.Fatal("a refused call for an ended run must not create gate state (a leak)")
+	}
+	if err := noCard(t, reg, r, BrowserCall{RunID: "no-such-run", Tool: "browser_tabs"}); err == nil {
+		t.Fatal("an unknown run is refused")
+	}
+}
