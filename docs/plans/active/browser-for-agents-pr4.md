@@ -2,7 +2,9 @@
 
 Governing: ADR-0061 section 10 and amendments (decisions D-B and D-D of 2026-11-15, the two prerequisites of 2026-11-16). PR 1 to 3b are merged: the CDP client and URL policy, the enforcing authenticated proxy, the read tools behind the broker, the human-only enable flag and allowlist, the per-run socket with peer credentials. Both prerequisites (`PrereqProxyAuth`, `PrereqRunSocket`) are true. **This PR is the one that makes the browser reachable by an agent**: it flips `browser.GateReady` to true, and it is the only PR that may.
 
-**Status: spec only. No code is written until the Supervisor/Human answers the two open decisions below** (the Claude CLI path and Windows). Size when it starts: L (8) — scope 2, PRs 1, risk 3, decisions 1, verification 1. HIGH-RISK: foreground two-sub-agent review (standards, attack), then the Steward's own, mutations, and a real-daemon end-to-end before the flip is accepted.
+**Human decisions 2026-11-16 (recorded in ADR-0061 amendment 10):** (1) Claude-native browser: option (a), an upstream `Client.PID()` in `claude-agent-sdk-go` (separate PR in that repo, tagged v0.4.3 for this change only by the Supervisor), then smind pins v0.4.3 and the claude path binds an unbound socket to the CLI's pid; (2) Windows: option (a), not offered in the first release, the hub keeps refusing, the Job Object membership check goes on the later list. After PR 4 the browser lane stops: no PR 5 and no new work; a state note lists what is left.
+
+**Status (superseded by "PR 4: progress, deviations and validation" at the end): spec only. No code is written until the Supervisor/Human answers the two open decisions below** (the Claude CLI path and Windows). Size when it starts: L (8) — scope 2, PRs 1, risk 3, decisions 1, verification 1. HIGH-RISK: foreground two-sub-agent review (standards, attack), then the Steward's own, mutations, and a real-daemon end-to-end before the flip is accepted.
 
 ## Open decisions (they block the start; my recommendation first)
 
@@ -118,12 +120,21 @@ The Settings UI (web PR B3), the desktop host and its indicator and stop control
 
 ## Progress
 
-- [ ] decisions 1 and 2 answered
-- [ ] deny-list items built and tested
-- [ ] gate, grants, cards, timeouts
-- [ ] Claude path (if (a))
-- [ ] flip, reviews, end to end, frames
+- [x] decisions 1 and 2 answered (Human, 2026-11-16)
+- [x] deny-list items built and tested (listener files, live deny, fleet links)
+- [x] gate, grants, cards, timeouts
+- [x] Claude path (pending socket + bind), active once smind pins SDK v0.4.3
+- [x] flip
+- [ ] frames, real-daemon live run (see the progress section)
 
-## Validation
+## PR 4: progress, deviations and validation
 
-Filled when built.
+Built as specified, with these deviations decided while building:
+
+- **The gate lives in `runs.Registry.BrowserGate`** (called by `browserHost.callRun` through a hook) and reuses the run's ordinary permission machinery (`runPermissionDecider`): the card is a normal pending request (inbox, web, desktop and mobile cards, `run.respondPermission`, human-only). Three flags on the decider keep it from becoming a loophole: the AutoAccept shortcut is skipped, the policy engine is not asked again (the gate asked it with the right tool name first), and no saved "always" grant is offered. A new `PermissionDetail.Kind = "browser"` with a `Browser` block carries the structured card; its text comes from `internal/browsercard` (a peer wrote it).
+- **Claude path:** `BrowserPolicy.OpenPending` opens the socket before the CLI exists; `bind(pid)` runs right after the client starts. `Runner.claudeReportsPID` is a reflection check of the SDK's `Client` for a `PID` method, so smind builds against an SDK with or without it and the claude browser turns on exactly when the pinned SDK can report the pid. With SDK v0.4.2 (the current pin) the claude path still gets no browser; bumping to v0.4.3 once it is tagged activates it (a one-line `go.mod` change; the SDK PR is a separate PR in that repo and is not merged or tagged by this lane).
+- **The URL pre-check** for `browser_open` uses the workspace policy with the live deny list and refuses with the policy's reason and no card; a name that needs DNS resolution is checked by the proxy at connect time as before.
+- **Listener files** (`internal/listeners`, a peer wrote it): `serve.go` registers each daemon listener, the OAuth callback registers for the life of a login, `smind relay` registers its native and gRPC-web listeners. The desktop proxy origin is not registered (the desktop host does not exist in this lane). Test packages that start such listeners pin `SMIND_HOME` to a temp directory.
+- **Not done:** the four card states' light/dark frames at 1280 and 390 (the cards use the existing generic permission card renderer, which shows the summary and the options; a richer renderer for `Kind: "browser"` is future UI work), and the live real-provider run (Layer B), which needs the Human's go. Layer A is covered by `TestBrowserE2E_AHeldCallIsAnsweredThroughTheRealRegistry` (real registry, real hub and kernel credentials, real broker without Chrome) and the unit tests below.
+
+Validation: gate (`internal/runs/browser_gate_test.go`: read grant covers five tools for one run only, allow once, open asks every call and its grant covers close only, unknown tool raises no card, policy deny/allow/ask, AutoAccept does not satisfy it, no answer refuses after the cap and is not a denial, grants die with the run/switch/kill switch, three denials pause cards, one card at a time, no query or userinfo in a card, no saved always option, the grant on the timeline); host (`internal/wsapi/browser_gate_test.go`: every call asks the gate first, a refusal never reaches the broker, a refused URL raises no card, live deny and fleet links beat the allowlist and a late listener is refused at once, switches drop grants, a finished run forgets them, the child deadline outlasts a held call, only a human answers a card, the end to end); listener files; Claude path (`internal/taskrunner/claude_browser_test.go`); the hub's `OpenPending`/`bind`. Not verified: Windows (not offered), the live run, the frames, the SDK v0.4.3 path against a real `claude` binary (no SDK with `PID` is pinned yet).

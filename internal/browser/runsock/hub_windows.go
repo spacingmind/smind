@@ -152,6 +152,11 @@ func (h *Hub) Open(runID string, rootPID int, handle Handler) (string, error) {
 	return name, nil
 }
 
+// OpenPending is not offered on Windows (the hub is switched off).
+func (h *Hub) OpenPending(string, Handler) (string, func(int) error, error) {
+	return "", nil, ErrWindowsUnsupported
+}
+
 // Close ends a run's pipe and its connections.
 func (h *Hub) Close(runID string) {
 	h.mu.Lock()

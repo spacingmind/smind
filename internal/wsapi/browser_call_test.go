@@ -153,6 +153,13 @@ func (f *fakeHub) Open(runID string, rootPID int, h runsock.Handler) (string, er
 	f.openedRun, f.openedRoot, f.handler = runID, rootPID, h
 	return "/sock/" + runID, nil
 }
+func (f *fakeHub) OpenPending(runID string, h runsock.Handler) (string, func(int) error, error) {
+	if f.err != nil {
+		return "", nil, f.err
+	}
+	f.openedRun, f.handler = runID, h
+	return "/sock/" + runID, func(pid int) error { f.openedRoot = pid; return nil }, nil
+}
 func (f *fakeHub) Close(runID string) { f.closed = append(f.closed, runID) }
 func (f *fakeHub) CloseAll()          { f.closedAll = true }
 
@@ -222,9 +229,13 @@ func TestImagesReadFrom(t *testing.T) {
 	}
 }
 
-type recordingBroker struct{ ended []string }
+type recordingBroker struct {
+	ended []string
+	calls int
+}
 
 func (b *recordingBroker) Call(context.Context, browser.Run, string, json.RawMessage) browser.Result {
+	b.calls++
 	return browser.Result{}
 }
 func (b *recordingBroker) EndRun(id string) { b.ended = append(b.ended, id) }

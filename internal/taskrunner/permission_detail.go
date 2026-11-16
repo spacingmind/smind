@@ -74,6 +74,23 @@ type PermissionDetail struct {
 	// "allow always in this project" (docs/plans/active/saved-grants.md): the
 	// exact scope the saved choice would cover. Absent for everything else.
 	Grant *GrantOffer `json:"grant,omitempty"`
+	// Browser is set (Kind "browser") on the card the daemon raises for an agent's
+	// browser tool call (ADR-0061 section 10): what the call is, in text that
+	// carries no query, userinfo or page content.
+	Browser *BrowserCardInfo `json:"browser,omitempty"`
+}
+
+// BrowserCardInfo is the structured side of a browser permission card.
+type BrowserCardInfo struct {
+	Tool       string   `json:"tool"`
+	Class      string   `json:"class"` // "read" | "open" | "act"
+	URL        string   `json:"url,omitempty"`
+	Host       string   `json:"host,omitempty"`
+	HostStatus string   `json:"hostStatus,omitempty"` // "localhost" | "added"
+	TaskTitle  string   `json:"taskTitle,omitempty"`
+	Workspace  string   `json:"workspace,omitempty"`
+	Allowlist  []string `json:"allowlist,omitempty"`
+	Uses       int      `json:"uses,omitempty"`
 }
 
 // GrantOffer is the scope of a saved grant, shown on the card before the human

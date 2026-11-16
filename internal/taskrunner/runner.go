@@ -22,6 +22,7 @@ import (
 	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/scratch"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -361,11 +362,18 @@ type Runner struct {
 	// close Job Object. Nil means "the SDK's own defaults" (tests that
 	// point newClaudeClient at a fake CLI).
 	claudeLaunch func() (cliPath string, env []string, err error)
+
+	// claudeReportsPID says whether the Claude client can report its CLI's
+	// process id (the SDK's Client.PID, v0.4.3+). Only then does a claude run get a
+	// browser row: its socket is bound to that process. Defaults to a check of
+	// the real client type; tests set it for a fake.
+	claudeReportsPID bool
 }
 
 // New returns a Runner backed by wm.
 func New(wm *workspace.Manager, opts ...Option) *Runner {
 	r := &Runner{
+		claudeReportsPID:   claudeClientReportsPID(),
 		wm:                 wm,
 		acpSessions:        map[int64]*acpSessionState{},
 		acpModes:           map[Provider]acpModeCacheEntry{},
@@ -980,7 +988,16 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		opts = append(opts, claudecode.WithDisallowedTools(tools...))
 	}
 
-	rows, err := r.mcpRowsFor(ctx, workspaceID)
+	// The Claude CLI's process does not exist yet when its rows are built, so its
+	// browser socket is opened unbound and bound to the CLI's pid below; an SDK
+	// that cannot report the pid builds no browser row (never a weaker check).
+	var bindBrowser func(rootPID int) error
+	var rows []store.McpServer
+	if r.claudeReportsPID {
+		rows, bindBrowser, err = r.mcpRowsPending(ctx, workspaceID)
+	} else {
+		rows, err = r.mcpRowsFor(ctx, workspaceID)
+	}
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
 	}
@@ -1127,7 +1144,21 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 
 	client, resumed, err := r.newClaudeClientWithResume(ctx, provider, chatID, worktreePath, opts, events)
 	if err != nil {
+		revokeBrowserAll(ctx) // the socket opened for the row of an agent that never started
 		return fmt.Errorf("taskrunner: spawn claude code agent: %w", scrubError(err, r.providerSecretValues(provider)))
+	}
+	if bindBrowser != nil {
+		// Attach the run's browser socket to the CLI's process tree. No pid, or a
+		// refused bind: close the socket so the row (already in the CLI's MCP
+		// config) fails plainly instead of being reachable by anyone.
+		pid := 0
+		if p, ok := client.(interface{ PID() int }); ok {
+			pid = p.PID()
+		}
+		if berr := bindBrowser(pid); berr != nil {
+			revokeBrowserAll(ctx)
+			r.sendSessionNote(ctx, events, "the browser could not be bound to this agent, so its browser tools will not work in this run")
+		}
 	}
 	// After a CLI exit the process is gone, but Close (cmd.Wait) can still block
 	// on a grandchild holding stderr open: do not hold the run's end for it.

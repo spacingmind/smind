@@ -181,11 +181,12 @@ func socketBrowserCaller(path string) browserCaller {
 			return browserCallResult{}, fmt.Errorf("the run's browser socket is not reachable: %w", err)
 		}
 		defer conn.Close()
-		// A call never waits without bound: the caller's deadline, or two minutes
-		// (the broker's own budget per call is 20 seconds).
+		// A call never waits without bound: the caller's deadline, or
+		// runsock.ChildCallDeadline (it covers a call held for a person's answer at
+		// the daemon's permission gate, then the broker's own 20-second budget).
 		dl, ok := ctx.Deadline()
 		if !ok {
-			dl = time.Now().Add(2 * time.Minute)
+			dl = time.Now().Add(runsock.ChildCallDeadline)
 		}
 		_ = conn.SetDeadline(dl)
 		stop := context.AfterFunc(ctx, func() { _ = conn.Close() })

@@ -51,7 +51,12 @@ type BrowserPolicy struct {
 	// provider); Revoke closes the socket if the provider then did not take the
 	// row.
 	Socket func(rootPID int) (string, error)
-	Revoke func()
+	// OpenPending opens the run's socket BEFORE the agent process exists (the
+	// Claude CLI path) and returns its path and a bind function that attaches it
+	// to the agent's pid once the process runs; a connection before bind is
+	// refused. Nil: this host cannot do that, and then such an agent gets no browser.
+	OpenPending func() (path string, bind func(rootPID int) error, err error)
+	Revoke      func()
 }
 
 type runContractKey struct{}

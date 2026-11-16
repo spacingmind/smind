@@ -1,8 +1,12 @@
 package accounts
 
 import (
+	"path/filepath"
+
 	"errors"
 	"fmt"
+	"github.com/spacingmind/smind/internal/config"
+	listenerfiles "github.com/spacingmind/smind/internal/listeners"
 	"net"
 	"os"
 	"syscall"
@@ -154,3 +158,29 @@ type fakeListener struct {
 }
 
 func (f fakeListener) Addr() net.Addr { return f.addr }
+
+// The callback listener is recorded for the agent browser's deny list for exactly
+// the lifetime of a login: present while open, gone after close.
+func TestCallbackServerIsRecordedOnlyWhileItIsOpen(t *testing.T) {
+	dir := filepath.Join(config.Dir(), "listeners")
+	s, err := newCallbackServer("127.0.0.1:0", "/callback", "Test", "st")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := s.listener.Addr().String()
+	has := func() bool {
+		for _, e := range listenerfiles.Read(dir, listenerfiles.ProcessAlive) {
+			if e.Addr == addr && e.Name == "oauth-callback" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has() {
+		t.Fatal("an open callback listener must be on the browser's deny list")
+	}
+	s.close()
+	if has() {
+		t.Fatal("a closed callback listener must not stay recorded")
+	}
+}

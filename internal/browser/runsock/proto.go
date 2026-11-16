@@ -115,6 +115,11 @@ func serveConn(ctx context.Context, conn deadlineConn, handle Handler) {
 	}
 }
 
+// ChildCallDeadline is how long the browser child waits for one call: the
+// daemon's permission hold (120 s, then a refusal) plus the broker's own call
+// budget with room to spare. A test in wsapi keeps it above both.
+const ChildCallDeadline = 150 * time.Second
+
 // MaxResponseBytes bounds one reply line the child will read: a rogue or broken
 // server cannot make the child buffer without limit.
 const MaxResponseBytes = 32 << 20

@@ -53,7 +53,7 @@ type browserSettingsView struct {
 	AllowHosts      []string   `json:"allowHosts"`
 	ProfileMode     string     `json:"profileMode"`
 	KillSwitch      bool       `json:"killSwitch"`
-	Available       bool       `json:"available"` // browser.GateReady: false while the tools are dark
+	Available       bool       `json:"available"` // browser.GateReady: the tools are offered to agents (still off per workspace by default)
 	ChromeInstalled bool       `json:"chromeInstalled"`
 	InstallStep     string     `json:"installStep,omitempty"`
 	Note            string     `json:"note"`
@@ -228,6 +228,9 @@ func (h *browserHost) settingsSet(_ context.Context, rc *requestContext, raw jso
 	}
 	// The new policy applies at once: a running browser never keeps an old one.
 	h.closeWorkspace(p.WorkspaceID)
+	if !cur.Enabled && h.revokeGrants != nil {
+		h.revokeGrants(p.WorkspaceID) // the grants the person gave end with the switch
+	}
 	return h.view(cur), nil
 }
 

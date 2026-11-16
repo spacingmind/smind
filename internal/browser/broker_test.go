@@ -570,11 +570,15 @@ func (c *Content) safeData() string {
 	return c.Data
 }
 
-// The browser is dark in this PR. The PR that adds the daemon-side permission
-// gate flips browser.GateReady and updates this test, and only that PR.
-func TestGateIsDarkUntilThePermissionGatePR(t *testing.T) {
-	if GateReady {
-		t.Fatal("browser.GateReady must stay false until the daemon-side permission gate exists")
+// The gate is open (the daemon-side permission gate exists, PR 4) and only
+// because both transport prerequisites are done. The workspace switch stays off
+// by default, so nothing is reachable until a person turns it on.
+func TestGateIsOpenOnlyWithBothPrerequisites(t *testing.T) {
+	if !GateReady {
+		t.Fatal("browser.GateReady is true once the permission gate exists (PR 4)")
+	}
+	if !PrereqProxyAuth || !PrereqRunSocket {
+		t.Fatalf("the gate is open but a prerequisite is not done: proxy auth=%v run socket=%v", PrereqProxyAuth, PrereqRunSocket)
 	}
 }
 

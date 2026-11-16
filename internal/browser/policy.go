@@ -31,6 +31,12 @@ type Policy struct {
 	// (see NormalizeAllowHost). Wildcards do not exist.
 	AllowHosts map[string]bool
 	Deny       []Endpoint
+	// LiveDeny, when set, is asked for more reserved endpoints at every
+	// decision: the addresses other smind listeners (any process) are bound to
+	// right now, some of which exist only for a moment (an OAuth callback). An
+	// entry that does not parse is ignored (the static Deny list is validated
+	// by NewPolicy; a live entry must never make a decision fail open or panic).
+	LiveDeny func() []Endpoint
 }
 
 // Decision is the verdict on a URL. NeedsResolve means the URL names a host
@@ -61,20 +67,54 @@ func NewPolicy(allow []string, deny []Endpoint) (Policy, error) {
 		p.AllowHosts[h] = true
 	}
 	for _, d := range deny {
-		if d.Port < 1 || d.Port > 65535 {
-			return Policy{}, fmt.Errorf("browser: deny endpoint %q has no valid port", d.Host)
-		}
-		raw := d.Host
-		if strings.Contains(raw, ":") && !strings.HasPrefix(raw, "[") {
-			raw = "[" + raw + "]" // a bare IPv6 literal
-		}
-		h, _, err := parseHost(raw) // 127.1, octal, hex and mapped forms canonicalise; garbage is an error
+		e, err := canonEndpoint(d)
 		if err != nil {
-			return Policy{}, fmt.Errorf("browser: deny endpoint %q: %w", d.Host, err)
+			return Policy{}, err
 		}
-		p.Deny = append(p.Deny, Endpoint{Host: h.canon, Port: d.Port})
+		p.Deny = append(p.Deny, e)
 	}
 	return p, nil
+}
+
+// canonEndpoint validates one reserved endpoint and returns its canonical form.
+func canonEndpoint(d Endpoint) (Endpoint, error) {
+	if d.Port < 1 || d.Port > 65535 {
+		return Endpoint{}, fmt.Errorf("browser: deny endpoint %q has no valid port", d.Host)
+	}
+	raw := d.Host
+	if strings.Contains(raw, ":") && !strings.HasPrefix(raw, "[") {
+		raw = "[" + raw + "]" // a bare IPv6 literal
+	}
+	h, _, err := parseHost(raw) // 127.1, octal, hex and mapped forms canonicalise; garbage is an error
+	if err != nil {
+		return Endpoint{}, fmt.Errorf("browser: deny endpoint %q: %w", d.Host, err)
+	}
+	return Endpoint{Host: h.canon, Port: d.Port}, nil
+}
+
+// WithLiveDeny returns the policy with a live source of reserved endpoints.
+func (p Policy) WithLiveDeny(fn func() []Endpoint) Policy {
+	p.LiveDeny = fn
+	return p
+}
+
+// endpoints is the static deny list plus the live one (canonicalised, bad
+// entries dropped).
+func (p Policy) endpoints() []Endpoint {
+	if p.LiveDeny == nil {
+		return p.Deny
+	}
+	live := p.LiveDeny()
+	if len(live) == 0 {
+		return p.Deny
+	}
+	out := append([]Endpoint(nil), p.Deny...)
+	for _, d := range live {
+		if e, err := canonEndpoint(d); err == nil {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // NormalizeAllowHost validates one allowlist entry: a bare host (a name or an
@@ -343,7 +383,7 @@ func (p Policy) CheckURL(raw string) Decision {
 
 // denied reports whether the target is one of the reserved endpoints.
 func (p Policy) denied(h parsedHost, port int) bool {
-	for _, e := range p.Deny {
+	for _, e := range p.endpoints() {
 		if e.Port != port {
 			continue
 		}

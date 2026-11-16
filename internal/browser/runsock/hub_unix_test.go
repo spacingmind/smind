@@ -941,3 +941,69 @@ func (endless) Read(b []byte) (int, error) {
 	}
 	return len(b), nil
 }
+
+// The Claude CLI path: the socket exists before the agent process does and
+// refuses everything until it is bound to the agent's pid.
+func TestHub_OpenPendingRefusesBeforeBindAndServesAfter(t *testing.T) {
+	var refused refusals
+	h := fakeHub(t, peerOK(), SystemProcTree(), &refused)
+	path, bind, err := h.OpenPending("run-A", echo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, closed := roundTrip(t, path, "{\"tool\":\"x\"}\n"); !closed {
+		t.Fatal("an unbound socket must refuse every connection")
+	}
+	if h.Refusals("run-A") != 1 {
+		t.Fatalf("the refusal is counted: %d", h.Refusals("run-A"))
+	}
+	if err := bind(os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+	if reply, closed := roundTrip(t, path, "{\"tool\":\"after\"}\n"); closed || !strings.Contains(reply, "after") {
+		t.Fatalf("after bind the same peer is served: closed=%v %q", closed, reply)
+	}
+	if err := bind(os.Getpid()); err == nil {
+		t.Fatal("bind works once")
+	}
+}
+
+func TestHub_BindWithAnUnreadablePidFailsClosed(t *testing.T) {
+	var refused refusals
+	h := fakeHub(t, peerOK(), SystemProcTree(), &refused)
+	path, bind, err := h.OpenPending("run-A", echo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Skip("no 'true'")
+	}
+	for _, pid := range []int{0, 1, -4, cmd.Process.Pid} { // unknown, init, negative, an exited process
+		if err := bind(pid); err == nil {
+			t.Fatalf("bind(%d) must fail", pid)
+		}
+	}
+	if _, closed := roundTrip(t, path, "{\"tool\":\"x\"}\n"); !closed {
+		t.Fatal("a socket whose bind failed stays closed to everyone")
+	}
+}
+
+// A bound pending socket applies the same tree check as Open.
+func TestHub_BoundPendingSocketRefusesOutsideTheTree(t *testing.T) {
+	h := realHub(t)
+	pid, run := startAgent(t)
+	path, bind, err := h.OpenPending("run-A", echo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bind(pid); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(path); !strings.HasPrefix(got, `{"result"`) {
+		t.Fatalf("the agent's own child is served: %q", got)
+	}
+	if _, closed := roundTrip(t, path, "{\"tool\":\"x\"}\n"); !closed {
+		t.Fatal("this process is outside the bound agent's tree")
+	}
+}

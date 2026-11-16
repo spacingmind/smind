@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/spacingmind/smind/internal/config"
+	listenerfiles "github.com/spacingmind/smind/internal/listeners"
 )
 
 // Config controls a standalone relay process.
@@ -164,6 +166,16 @@ func Run(ctx context.Context, cfg Config) error {
 		webLis, err = net.Listen("tcp", cfg.GRPCWebListenAddr)
 		if err != nil {
 			return fmt.Errorf("relay: listen %s: %w", cfg.GRPCWebListenAddr, err)
+		}
+	}
+
+	// Record both addresses for the agent browser's deny list (any smind
+	// process's listener is a place a page must never reach).
+	for name, l := range map[string]net.Listener{"relay": lis, "grpcweb": webLis} {
+		if rm, lerr := listenerfiles.Register(filepath.Join(config.Dir(), "listeners"), name, l.Addr().String()); lerr != nil {
+			log.Printf("relay: listener file for %s not written: %v", name, lerr)
+		} else {
+			defer rm()
 		}
 	}
 
