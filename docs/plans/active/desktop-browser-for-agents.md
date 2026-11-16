@@ -57,3 +57,42 @@ Extension points: a separate reserved row appended in `Runner.mcpRowsFor` (`inte
 ## Not in these PRs
 
 `browser_evaluate`, uploads, downloads, a mobile browser view, a persistent shared profile, wildcard allowlists, codex-native support.
+
+## State at stop (2026-11-16)
+
+The browser lane stopped here by Human decision ("finish that task, then stop"). No browser work is in flight; nothing is half-done. This plan stays in `active/` because the items below are open. Per-PR detail is in `browser-for-agents-pr3.md`, `-pr3b2.md`, `-pr4.md`, `-headless.md`, `-designs.md` and ADR-0061 (amendments included).
+
+### Merged
+
+- PR 1 (broker, policy, limits, human-only enable), PR 1b, PR 2 (headless host), PR 3, PR 3b-1 (#958), PR 3b-2 (#960): the per-run socket, the stdio child, the host, the allowlist and kill switch.
+- PR 4 (#962): the daemon-side permission gate. `browser.GateReady` is true. Decision order: tool classification, human policy rules on `mcp:smind-browser.<tool>`, denial limiter, per-run grants (read grant, open grant; acting tools never grantable), otherwise a held call and a card with no auto-accept shortcut. Live deny list from listener files, in-process listeners and fleet links, fail-closed. Kill-switch watcher. Claude path with an unbound socket bound to the CLI pid.
+- SDK: `Client.PID()` in `spacingmind/claude-agent-sdk-go` (#32), tagged v0.4.3, pinned by smind.
+- Spec PRs #959 and #961.
+
+The per-workspace switch is OFF by default and human-only, so nothing is reachable until a person turns it on (`smind browser enable`).
+
+### Left
+
+- **PR 5**: the provider gating table (which providers get `browser_*`, per the Provider reach table above, with the strip rule for plugin providers).
+- **Pre-flip checklist items NOT done** (the flip is safe only because the switch is off by default):
+  - a live run with a real model (Layer B; needs the Human's go);
+  - card frames for the four states at 1280 and 390, light and dark (cards use the generic permission card; a richer renderer for `Kind: "browser"` is future UI work);
+  - the Claude path against a real `claude` binary (only the real SDK client against a fake CLI is tested);
+  - the desktop proxy origin on the deny list (the desktop host does not exist in this lane);
+  - Linux CI evidence of the peer credentials (`SO_PEERCRED` path; only macOS ran);
+  - Windows: Job-Object membership check and pipe server-end authentication. Windows is NOT offered in the first release (the hub refuses there).
+- **Settings UI PR B3** (toggle, allowlist, indicator, web) and **persistent profiles**.
+- **Observed items from the reviews** not fixed: grants are not dropped when only the socket closes; a fleet peer addressed by DNS name is denied by name only.
+
+### Human decisions recorded
+
+- 2026-11-16 (1): Claude-native browser via an upstream SDK change exposing the CLI pid (`Client.PID()`), merged and tagged v0.4.3 for that change only.
+- 2026-11-16 (2): Windows is not offered in the first release; the hub keeps refusing on Windows; the Job-Object check goes on the later list.
+- 2026-11-16 (3): after PR 4 merges the lane stops (no PR 5, no new work).
+- ADR-0056 Human decision C: any process in the run's tree is an unidentified local connection.
+
+### Known residuals
+
+- ADR-0056: a shell-capable agent can answer a card through the websocket; the cards protect against the model, not against an agent attacking the daemon.
+- Listener-file protection of OTHER processes is best effort against the agent's own shell (files are not authenticated).
+- Same-uid file-descriptor delegation to a local peer is not prevented (the credential check identifies the connecting process, not who holds the descriptor).

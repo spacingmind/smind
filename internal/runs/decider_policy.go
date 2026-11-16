@@ -36,6 +36,8 @@ func (d runPermissionDecider) policyRequest(requestID, summary string, detail *t
 		RequestID: requestID,
 	}
 	switch {
+	case detail != nil && detail.Kind == "browser" && detail.Browser != nil:
+		req.Tool = "mcp:smind-browser." + detail.Browser.Tool
 	case detail != nil && detail.Kind == "execute":
 		req.Tool = "Bash"
 		// The engine judges the RAW command. detail.Command is the elided

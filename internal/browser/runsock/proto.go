@@ -1,0 +1,161 @@
+package runsock
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log"
+	"time"
+)
+
+// The wire protocol of a run's browser socket: newline-delimited JSON, one
+// request per line, one reply per request, one request in flight per connection.
+// The socket can call exactly one thing (a browser tool of the run it belongs
+// to), so there is no method name: the request names a tool and its arguments,
+// nothing else. Unknown fields, a missing tool, malformed JSON or a line over
+// MaxRequestBytes close the connection.
+
+const (
+	// MaxRequestBytes is the longest request line (a tool call is a few hundred
+	// bytes). Replies are not capped here: the broker's own caps apply.
+	MaxRequestBytes = 16 << 10
+	// MaxToolNameBytes bounds the tool name.
+	MaxToolNameBytes = 64
+)
+
+// The deadlines are variables so a test can shorten them.
+var (
+	idleTimeout  = 5 * time.Minute
+	writeTimeout = 30 * time.Second
+)
+
+// Request is one browser tool call.
+type Request struct {
+	Tool string          `json:"tool"`
+	Args json.RawMessage `json:"args,omitempty"`
+}
+
+// Response is the reply: the handler's result, or an error text.
+type Response struct {
+	Result any    `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+// Handler runs one request for the run the socket belongs to. The run and the
+// workspace are bound by whoever created the socket: nothing in a request can
+// name another.
+type Handler func(ctx context.Context, req Request) (any, error)
+
+var errBadRequest = errors.New("runsock: bad request")
+
+// decodeRequest parses one request line strictly.
+func decodeRequest(line []byte) (Request, error) {
+	var req Request
+	dec := json.NewDecoder(bytes.NewReader(line))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return Request{}, errBadRequest
+	}
+	if dec.More() { // trailing data after the object
+		return Request{}, errBadRequest
+	}
+	if req.Tool == "" || len(req.Tool) > MaxToolNameBytes {
+		return Request{}, errBadRequest
+	}
+	return req, nil
+}
+
+// deadlineConn is what serveConn needs: a net.Conn on unix sockets, an emulation
+// on Windows pipes.
+type deadlineConn interface {
+	io.ReadWriteCloser
+	SetReadDeadline(time.Time) error
+	SetWriteDeadline(time.Time) error
+}
+
+// serveConn answers requests on conn until it closes, a request is bad, the
+// connection idles out, or ctx ends. It never reads before the caller has
+// checked the peer.
+func serveConn(ctx context.Context, conn deadlineConn, handle Handler) {
+	defer conn.Close()
+	br := bufio.NewReaderSize(conn, MaxRequestBytes+2)
+	for {
+		_ = conn.SetReadDeadline(time.Now().Add(idleTimeout))
+		line, err := br.ReadSlice('\n')
+		if err != nil { // EOF, idle timeout, a line over the cap (ErrBufferFull), a reset
+			return
+		}
+		if len(line) > MaxRequestBytes+1 { // the line plus its newline
+			return
+		}
+		req, err := decodeRequest(line)
+		if err != nil {
+			return
+		}
+		out := Response{}
+		if res, herr := safeHandle(ctx, handle, req); herr != nil {
+			out.Error = herr.Error()
+		} else {
+			out.Result = res
+		}
+		b, merr := json.Marshal(out)
+		if merr != nil {
+			b, _ = json.Marshal(Response{Error: "the reply could not be encoded"})
+		}
+		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		if _, werr := conn.Write(append(b, '\n')); werr != nil {
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+// ChildCallDeadline is how long the browser child waits for one call: the
+// daemon's permission hold (120 s, then a refusal) plus the broker's own call
+// budget with room to spare. A test in wsapi keeps it above both.
+const ChildCallDeadline = 150 * time.Second
+
+// MaxResponseBytes bounds one reply line the child will read: a rogue or broken
+// server cannot make the child buffer without limit.
+const MaxResponseBytes = 32 << 20
+
+// ErrResponseTooLarge: a reply line over MaxResponseBytes.
+var ErrResponseTooLarge = errors.New("runsock: the reply is too large")
+
+// ReadResponse reads one reply line, at most MaxResponseBytes (used by the child
+// and by tests; one reply per connection use).
+func ReadResponse(r io.Reader) (Response, error) {
+	br := bufio.NewReaderSize(io.LimitReader(r, MaxResponseBytes+1), 1<<16)
+	line, err := br.ReadBytes('\n')
+	if len(line) > MaxResponseBytes {
+		return Response{}, ErrResponseTooLarge
+	}
+	if err != nil {
+		return Response{}, err
+	}
+	var out struct {
+		Result json.RawMessage `json:"result"`
+		Error  string          `json:"error"`
+	}
+	if err := json.Unmarshal(line, &out); err != nil {
+		return Response{}, err
+	}
+	return Response{Result: out.Result, Error: out.Error}, nil
+}
+
+// safeHandle runs the handler and turns a panic into an error reply: a crafted
+// request must never take the daemon down.
+func safeHandle(ctx context.Context, handle Handler, req Request) (res any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("browser: a socket handler panicked: %v", r)
+			res, err = nil, errors.New("internal error")
+		}
+	}()
+	return handle(ctx, req)
+}

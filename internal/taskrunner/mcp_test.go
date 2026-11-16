@@ -831,6 +831,7 @@ type scrubStubACP struct {
 
 func (scrubStubACP) Initialize(context.Context) error { return nil }
 func (scrubStubACP) Close() error                     { return nil }
+func (scrubStubACP) PID() int                         { return 0 }
 func (scrubStubACP) SupportsMcpStdio() bool           { return true }
 func (scrubStubACP) SupportsMcpHttp() bool            { return true }
 func (scrubStubACP) SupportsMcpSSE() bool             { return true }

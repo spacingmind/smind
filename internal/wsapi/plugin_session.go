@@ -87,7 +87,7 @@ var PluginCapabilityTable = map[string][]PluginMethod{
 var pluginNeverPrefixes = []string{
 	"plugin.", "provider.", "account.", "relay.", "push.", "learning.", "terminal.",
 	"forge.", "automation.", "settings.", "permission.", "device.", "auth.", "fs.", "file.",
-	"usage.", "scratch.", "daemon.",
+	"usage.", "scratch.", "daemon.", "browser.",
 }
 
 var pluginNeverMethods = []string{

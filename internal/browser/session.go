@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"path"
 	"reflect"
 	"sort"
@@ -19,6 +20,31 @@ import (
 
 // maxQueuedBytes bounds the events waiting in the session queues.
 const maxQueuedBytes int64 = 32 << 20
+
+// seenSet remembers up to max keys and reports each once; when full it starts
+// again, so a hostile page inventing targets cannot grow it or silence later
+// notices for good (the per-kind notice cap bounds what reaches the agent).
+type seenSet struct {
+	mu  sync.Mutex
+	m   map[string]struct{}
+	max int
+}
+
+func (s *seenSet) first(k string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[string]struct{}{}
+	}
+	if _, ok := s.m[k]; ok {
+		return false
+	}
+	if len(s.m) >= s.max {
+		s.m = map[string]struct{}{} // a rolling window: later targets are still reported
+	}
+	s.m[k] = struct{}{}
+	return true
+}
 
 // Session errors.
 var (
@@ -93,25 +119,30 @@ func (t *tabState) isReady() bool {
 // Session is one headless browser for one workspace. It enforces the URL
 // policy on every request, caps tabs, cancels dialogs and denies downloads.
 type Session struct {
-	cfg  Config
-	inst Instance
-	cl   *Client
+	cfg   Config
+	proxy *Proxy
+	inst  Instance
+	cl    *Client
 
-	mu      sync.Mutex
-	closed  bool
-	tabs    map[string]*tabState // by target id
-	notices []Notice
-	console []string
-	idle    *time.Timer
-	loads   map[string]chan struct{} // load waiters by cdp session id
-	dns     map[string]dnsEntry
-	tabSeq  int
-	navMu   sync.Mutex // one navigation at a time: a load waiter is per tab
+	mu       sync.Mutex
+	closed   bool
+	tabs     map[string]*tabState // by target id
+	notices  []Notice
+	console  []consoleLine
+	idle     *time.Timer
+	loads    map[string]chan struct{} // load waiters by cdp session id
+	dns      map[string]dnsEntry
+	tabSeq   int
+	current  string                      // target id of the tab the agent works in ("" until the first navigation)
+	snapRefs map[string]map[string]int64 // tab id -> ref ("e1") -> backend DOM node id, of the latest snapshot
+	navMu    sync.Mutex                  // one navigation at a time: a load waiter is per tab
 
-	lifecycle chan Event   // attach, detach, dialog, download: handled in order
-	requests  chan Event   // Fetch.requestPaused: handled by a bounded pool
-	qbytes    atomic.Int64 // bytes waiting in the two queues
-	maxQueued int64        // the budget for qbytes (a field so a test can lower it)
+	lifecycle    chan Event   // attach, detach, dialog, download: handled in order
+	authNoted    atomic.Bool  // the one notice about a refused credentials request
+	authErrNoted atomic.Bool  // the one notice about an unanswered challenge
+	requests     chan Event   // Fetch.requestPaused: handled by a bounded pool
+	qbytes       atomic.Int64 // bytes waiting in the two queues
+	maxQueued    int64        // the budget for qbytes (a field so a test can lower it)
 
 	closeOnce sync.Once
 }
@@ -139,23 +170,48 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	if cfg.Resolver == nil {
 		cfg.Resolver = net.DefaultResolver
 	}
+	seen := &seenSet{max: 200}
+	var session atomic.Pointer[Session]
+	px, err := StartProxy(ProxyConfig{
+		Policy:   cfg.Policy,
+		Resolver: cfg.Resolver,
+		OnRefuse: func(target, reason string) {
+			// Browser background traffic is refused too: tell the agent once
+			// per target, never a flood.
+			if sess := session.Load(); sess != nil {
+				if !seen.first(target) {
+					return
+				}
+				sess.note("blocked", fmt.Sprintf("%s: %s", target, reason))
+			}
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy = px.Policy() // the proxy's own address is denied to the page too
+	cfg.Launch.ProxyAddr = px.Addr()
 	inst, err := cfg.Launcher.Launch(ctx, cfg.Launch)
 	if err != nil {
+		px.Close()
 		return nil, err
 	}
 	cl := NewClient(inst.Conn())
 	cl.SetWriteTimeout(cfg.CallTimeout)
 	s := &Session{
 		cfg:       cfg,
+		proxy:     px,
 		inst:      inst,
 		cl:        cl,
 		tabs:      map[string]*tabState{},
 		loads:     map[string]chan struct{}{},
 		dns:       map[string]dnsEntry{},
+		snapRefs:  map[string]map[string]int64{},
 		maxQueued: maxQueuedBytes,
 		lifecycle: make(chan Event, 256),
 		requests:  make(chan Event, requestQueue),
 	}
+	session.Store(s)
 	s.idle = time.AfterFunc(cfg.IdleTimeout, s.Close)
 	go s.eventLoop()
 	go s.lifecycleLoop()
@@ -227,6 +283,7 @@ func (s *Session) Close() {
 		s.mu.Unlock()
 		_ = s.inst.Close() // kill the browser first, then drop the connection
 		_ = s.cl.Close()
+		s.proxy.Close()
 		if s.cfg.OnClose != nil {
 			s.cfg.OnClose()
 		}
@@ -283,21 +340,80 @@ func (s *Session) DrainNotices() []Notice {
 	return out
 }
 
-// Console returns the recent console lines, oldest first.
+// consoleLine is one console line and the browser session (tab) it came from.
+type consoleLine struct{ sess, text string }
+
+// Console returns the recent console lines of every tab, oldest first.
 func (s *Session) Console() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]string(nil), s.console...)
+	out := make([]string, 0, len(s.console))
+	for _, l := range s.console {
+		out = append(out, l.text)
+	}
+	return out
 }
 
-func (s *Session) addConsole(line string) {
+func (s *Session) addConsole(sessID, line string) {
 	line = cleanText(line, maxConsoleLineLen)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.console) >= maxConsoleLines {
 		s.console = s.console[1:]
 	}
-	s.console = append(s.console, line)
+	s.console = append(s.console, consoleLine{sess: sessID, text: line})
+}
+
+// ConsoleOf returns the recent console lines of one tab only (the tab's own
+// CDP session), oldest first: a result labelled with that tab's origin must
+// carry that tab's output and nothing else.
+func (s *Session) ConsoleOf(tabID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.tabs[tabID]
+	if t == nil {
+		return nil
+	}
+	var out []string
+	for _, l := range s.console {
+		if l.sess == t.sessionID {
+			out = append(out, l.text)
+		}
+	}
+	return out
+}
+
+// TabInfo is the sanitised URL and title of one tab.
+func (s *Session) TabInfo(ctx context.Context, tabID string) (Tab, error) {
+	ctx, cancel, err := s.begin(ctx)
+	if err != nil {
+		return Tab{}, err
+	}
+	defer cancel()
+	t, err := s.tabFor(tabID)
+	if err != nil {
+		return Tab{}, err
+	}
+	return s.tabInfo(ctx, t.targetID)
+}
+
+// OpenInNewTab opens a tab inside the pool and navigates it: for a second
+// run sharing the workspace's browser, so it never takes over another run's tab.
+func (s *Session) OpenInNewTab(ctx context.Context, rawURL string) (Tab, error) {
+	// The policy first: a refused URL must not even cost a tab.
+	if d := s.checkURL(ctx, rawURL); !d.Allowed {
+		return Tab{}, fmt.Errorf("%w: %s", ErrNavigationDenied, d.Reason)
+	}
+	nt, err := s.NewTab(ctx)
+	if err != nil {
+		return Tab{}, err
+	}
+	t, err := s.Navigate(ctx, nt.ID, rawURL)
+	if err != nil {
+		_ = s.CloseTab(ctx, nt.ID)
+		return Tab{}, err
+	}
+	return t, nil
 }
 
 func (s *Session) eventLoop() {
@@ -316,7 +432,7 @@ func (s *Session) eventLoop() {
 				default:
 				}
 			}
-		case "Fetch.requestPaused":
+		case "Fetch.requestPaused", "Fetch.authRequired":
 			if s.qbytes.Add(int64(ev.size)) > s.maxQueued {
 				s.note("blocked", "request flood: the session was closed")
 				go s.Close()
@@ -349,6 +465,10 @@ func (s *Session) requestWorker() {
 		select {
 		case ev := <-s.requests:
 			s.qbytes.Add(-int64(ev.size))
+			if ev.Method == "Fetch.authRequired" {
+				s.onAuthRequired(ev)
+				continue
+			}
 			s.onRequestPaused(ev)
 		case <-s.cl.Done():
 			return
@@ -465,7 +585,7 @@ func (s *Session) onAttached(ev Event) {
 		params any
 		when   bool
 	}{
-		{"Fetch.enable", map[string]any{"patterns": []map[string]any{{"urlPattern": "*"}}}, true},
+		{"Fetch.enable", map[string]any{"patterns": []map[string]any{{"urlPattern": "*"}}, "handleAuthRequests": true}, true},
 		{"Target.setAutoAttach", autoAttachParams(), true}, // frames and workers of this target stay intercepted
 		{"Page.enable", nil, isPage},
 		{"Runtime.enable", nil, isPage},
@@ -484,6 +604,49 @@ func (s *Session) onAttached(ev Event) {
 	if ts != nil {
 		close(ts.ready)
 	}
+}
+
+// onAuthRequired answers an authentication challenge of any attached target.
+// The proxy's challenge (and only it: source Proxy AND the challenging origin is
+// OUR proxy) gets the session secret. A challenge from anything else, a web
+// site asking for credentials, a proxy at another address, is cancelled: the
+// secret never goes to a page's origin.
+func (s *Session) onAuthRequired(ev Event) {
+	var p struct {
+		RequestID     string `json:"requestId"`
+		AuthChallenge struct {
+			Source string `json:"source"`
+			Origin string `json:"origin"`
+		} `json:"authChallenge"`
+	}
+	if json.Unmarshal(ev.Params, &p) != nil || p.RequestID == "" {
+		return
+	}
+	ctx, cancel := s.bgCtx()
+	defer cancel()
+	resp := map[string]any{"response": "CancelAuth"}
+	if p.AuthChallenge.Source == "Proxy" && s.proxyOrigin(p.AuthChallenge.Origin) {
+		resp = map[string]any{"response": "ProvideCredentials", "username": proxyAuthUser, "password": s.proxy.Secret()}
+	} else if s.authNoted.CompareAndSwap(false, true) {
+		// Once per session: a page can raise challenges without limit, and must
+		// not push the agent's real refusal notices out.
+		s.note("blocked", "a page asked for credentials and was refused (further requests are cancelled without a notice)")
+	}
+	if err := s.cl.Call(ctx, ev.SessionID, "Fetch.continueWithAuth", map[string]any{"requestId": p.RequestID, "authChallengeResponse": resp}, nil); err != nil &&
+		!s.Closed() && s.authErrNoted.CompareAndSwap(false, true) {
+		// Once per session and never for a closing session: a page that aborts
+		// its 401 fetches must not push the agent's real notices out.
+		s.note("blocked", "a proxy or site challenge could not be answered (further failures are not reported)")
+	}
+}
+
+// proxyOrigin reports whether a challenge origin names this session's proxy.
+func (s *Session) proxyOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	return u.Host == s.proxy.Addr()
 }
 
 func (s *Session) onRequestPaused(ev Event) {
@@ -521,6 +684,13 @@ func (s *Session) checkRequest(ctx context.Context, raw, resourceType string) De
 }
 
 func (s *Session) checkURL(ctx context.Context, raw string) Decision {
+	d := s.cfg.Policy.CheckURL(raw)
+	if d.Allowed && d.loopbackName {
+		return d // RFC 6761: no DNS query for a page-chosen *.localhost name
+	}
+	if !d.Allowed || !d.NeedsResolve {
+		return d
+	}
 	return s.cfg.Policy.Check(ctx, raw, cachedResolver{s})
 }
 
@@ -620,7 +790,7 @@ func (s *Session) onConsole(ev Event) {
 				parts = append(parts, a.Description)
 			}
 		}
-		s.addConsole(p.Type + ": " + strings.Join(parts, " "))
+		s.addConsole(ev.SessionID, p.Type+": "+strings.Join(parts, " "))
 	case "Runtime.exceptionThrown":
 		var p struct {
 			ExceptionDetails struct {
@@ -628,7 +798,7 @@ func (s *Session) onConsole(ev Event) {
 			} `json:"exceptionDetails"`
 		}
 		if json.Unmarshal(ev.Params, &p) == nil {
-			s.addConsole("exception: " + p.ExceptionDetails.Text)
+			s.addConsole(ev.SessionID, "exception: "+p.ExceptionDetails.Text)
 		}
 	}
 }
@@ -690,6 +860,34 @@ func (s *Session) newTab(ctx context.Context) (Tab, error) {
 	return Tab{ID: r.TargetID, URL: "about:blank"}, nil
 }
 
+// initialTabWait is how long the first navigation waits for the browser's own
+// blank page to be armed before it opens a second tab (a var for tests).
+var initialTabWait = 2 * time.Second
+
+// waitInitialTab waits for the page the browser starts with, but only until no
+// page has ever been seen: once the agent has had a tab, a missing one means
+// it was closed and a new one is opened at once.
+func (s *Session) waitInitialTab(ctx context.Context) (*tabState, bool) {
+	s.mu.Lock()
+	seen := s.tabSeq > 0
+	s.mu.Unlock()
+	if seen {
+		return nil, false
+	}
+	deadline := time.Now().Add(initialTabWait)
+	for time.Now().Before(deadline) {
+		if t, ok := s.firstTab(); ok {
+			return t, true
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	return nil, false
+}
+
 // Navigate loads url in tab tabID (the first tab, created if none, when
 // tabID is empty). The URL is checked before anything is sent; a refused URL
 // never reaches the browser. Every request the page then makes, redirect hops
@@ -707,7 +905,9 @@ func (s *Session) Navigate(ctx context.Context, tabID, rawURL string) (Tab, erro
 	}
 	var t *tabState
 	if tabID == "" {
-		if ft, ok := s.firstTab(); ok {
+		if ft, err := s.tabFor(""); err == nil {
+			t = ft
+		} else if ft, ok := s.waitInitialTab(ctx); ok {
 			t = ft
 		} else {
 			nt, err := s.newTab(ctx)
@@ -722,6 +922,9 @@ func (s *Session) Navigate(ctx context.Context, tabID, rawURL string) (Tab, erro
 	} else if t, _ = s.tabByID(tabID); t == nil {
 		return Tab{}, fmt.Errorf("browser: no such tab %q", tabID)
 	}
+	s.mu.Lock()
+	s.current = t.targetID
+	s.mu.Unlock()
 	loaded := make(chan struct{}, 1)
 	s.mu.Lock()
 	s.loads[t.sessionID] = loaded
@@ -804,6 +1007,16 @@ func (s *Session) Tabs(ctx context.Context) ([]Tab, error) {
 	for _, ti := range r.TargetInfos {
 		if _, ok := s.tabByID(ti.TargetID); ok && ti.Type == "page" {
 			out = append(out, cleanTab(Tab{ID: ti.TargetID, URL: ti.URL, Title: ti.Title}))
+		}
+	}
+	// The tab the agent works in comes first: the broker marks it as current.
+	s.mu.Lock()
+	cur := s.current
+	s.mu.Unlock()
+	for i, t := range out {
+		if t.ID == cur && i > 0 {
+			out[0], out[i] = out[i], out[0]
+			break
 		}
 	}
 	return out, nil

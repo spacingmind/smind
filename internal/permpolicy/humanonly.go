@@ -22,6 +22,9 @@ var HumanOnlyRPCs = []string{
 	"run.answerPermission",
 	"permission.grants.list",
 	"permission.grants.revoke",
+	"browser.settings.get",
+	"browser.settings.set",
+	"browser.data.clear",
 	"run.answerQuestion",
 	"inbox.resolve",
 	"permission.revealHeredoc",
@@ -57,6 +60,9 @@ type humanOnlyCommand struct {
 var humanOnlyCLI = []humanOnlyCommand{
 	{path: []string{"task"}, verbs: []string{"approve", "deny", "answer"}, bare: true},
 	{path: []string{"permission"}},
+	// bare: a renamed copy of the binary, `go run` or a script must not slip past the floor
+	// (the verbs make the pair nearly unique among command lines). The verb comes first.
+	{path: []string{"browser"}, verbs: []string{"enable", "disable", "allow", "clear"}, bare: true},
 	{path: []string{"host"}, verbs: []string{"approve", "reject"}},
 	{path: []string{"relay", "devices"}, verbs: []string{"approve", "revoke"}},
 	{path: []string{"task", "chat"}, verbs: []string{"fork"}, bare: true},

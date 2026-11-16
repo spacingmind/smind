@@ -49,7 +49,7 @@ func TestMcp_Usage(t *testing.T) {
 		if code != 2 {
 			t.Errorf("run(%v) = %d, want 2 (stderr = %q)", args, code, stderr)
 		}
-		if !contains(stderr, "usage: smind mcp <serve|add|ls|rm|enable|disable>") {
+		if !contains(stderr, "usage: smind mcp <serve|browser|add|ls|rm|enable|disable>") {
 			t.Errorf("run(%v) stderr = %q, want the usage line", args, stderr)
 		}
 	}

@@ -50,11 +50,12 @@ func errPluginLaunchBypass(provider Provider, plugin string) error {
 	return fmt.Errorf("provider %q (plugin %s): the generic launch env is not used for plugin providers", provider, plugin)
 }
 
-// withoutSmindMcp drops smind's built-in orchestration server from rows.
+// withoutSmindMcp drops smind's built-in servers (orchestration and browser)
+// from rows: a plugin provider gets neither.
 func withoutSmindMcp(rows []store.McpServer) []store.McpServer {
 	out := make([]store.McpServer, 0, len(rows))
 	for _, row := range rows {
-		if row.Name != smindMcpName {
+		if row.Name != smindMcpName && row.Name != browserMcpName {
 			out = append(out, row)
 		}
 	}

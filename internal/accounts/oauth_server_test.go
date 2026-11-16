@@ -1,8 +1,12 @@
 package accounts
 
 import (
+	"path/filepath"
+
 	"errors"
 	"fmt"
+	"github.com/spacingmind/smind/internal/config"
+	listenerfiles "github.com/spacingmind/smind/internal/listeners"
 	"net"
 	"os"
 	"syscall"
@@ -154,3 +158,57 @@ type fakeListener struct {
 }
 
 func (f fakeListener) Addr() net.Addr { return f.addr }
+
+// The callback listener is recorded for the agent browser's deny list for exactly
+// the lifetime of a login: present while open, gone after close.
+func TestCallbackServerIsRecordedOnlyWhileItIsOpen(t *testing.T) {
+	dir := filepath.Join(config.Dir(), "listeners")
+	s, err := newCallbackServer("127.0.0.1:0", "/callback", "Test", "st")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := s.listener.Addr().String()
+	has := func() bool {
+		entries, _ := listenerfiles.Read(dir, listenerfiles.ProcessAlive)
+		for _, e := range entries {
+			if e.Addr == addr && e.Name == "oauth-callback" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has() {
+		t.Fatal("an open callback listener must be on the browser's deny list")
+	}
+	s.close()
+	if has() {
+		t.Fatal("a closed callback listener must not stay recorded")
+	}
+}
+
+// A failed registration (the listeners directory is unwritable: a regular file
+// sits where it should be) still returns a working remove: closing the callback
+// server leaves no in-memory entry and no refresh goroutine behind.
+func TestCallbackServerCloseEndsAFailedRegistration(t *testing.T) {
+	dir := filepath.Join(config.Dir(), "listeners")
+	_ = os.RemoveAll(dir)
+	if err := os.WriteFile(dir, nil, 0o600); err != nil { // a file where the directory should be
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(dir) })
+	before := len(listenerfiles.Local())
+	s, err := newCallbackServer("127.0.0.1:0", "/callback", "Test", "st")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.unregister == nil {
+		t.Fatal("the remove function must be kept even when the registration failed")
+	}
+	if got := len(listenerfiles.Local()); got != before+1 {
+		t.Fatalf("a failed file write still leaves the in-memory entry while the listener is open: %d -> %d", before, got)
+	}
+	s.close()
+	if got := len(listenerfiles.Local()); got != before {
+		t.Fatalf("close must remove the in-memory entry of a failed registration: %d -> %d", before, got)
+	}
+}
