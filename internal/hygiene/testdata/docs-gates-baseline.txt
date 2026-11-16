@@ -1,0 +1,33 @@
+# Findings that existed before the docs gates. Two-way ratchet: a new finding fails, a fixed one fails until its line is deleted.
+# docs/release-model-review.md is a dated report of the release setup of its day, so it cites since-removed files; the ADRs are history.
+docs/decisions/0007-relay-architecture.md: `cmd/relay` does not exist
+docs/decisions/0007-relay-architecture.md: `docs/plans/active/relay-e2ee-mobile.md` does not exist
+docs/decisions/0007-relay-architecture.md: `docs/research/codmon-chat-server-notes.md` does not exist
+docs/decisions/0008-structured-run-events.md: `docs/plans/active/smind-dogfood.md` does not exist
+docs/decisions/0008-structured-run-events.md: `docs/plans/active/ui-redesign-parity.md` does not exist
+docs/decisions/0009-lifecycle-event-topics.md: `docs/plans/active/ui-redesign-parity.md` does not exist
+docs/decisions/0009-lifecycle-event-topics.md: `docs/plans/active/ui-redesign-parity/gap-matrix.md` does not exist
+docs/decisions/0010-preserve-unknown-acp-event-kinds.md: `docs/plans/active/ui-redesign-parity.md` does not exist
+docs/decisions/0011-relay-admission-auth.md: `docs/plans/active/relay-e2ee-mobile.md` does not exist
+docs/decisions/0013-desktop-bundled-ui.md: `desktop/src/daemon/daemon-manager.ts` does not exist
+docs/decisions/0015-account-management-rpcs.md: `docs/plans/active/providers-settings.md` does not exist
+docs/decisions/0019-provider-native-permission-modes.md: `internal/taskrunner/policy.go` does not exist
+docs/decisions/0019-provider-native-permission-modes.md: `web/packages/ui/src/lib/approval-policies.ts` does not exist
+docs/decisions/0020-run-usage-from-agent-events.md: `internal/runtime/executor/claude_executor_execute.go` does not exist
+docs/decisions/0021-per-chat-prompt-queue.md: `docs/subsystems/subagent.md` does not exist
+docs/decisions/0023-desktop-auto-update.md: `desktop/src-tauri/capabilities/proxy.json` does not exist
+docs/decisions/0028-account-usage-windows.md: `docs/plans/active/settings-fullscreen.md` does not exist
+docs/decisions/0031-homelab-cli-distribution.md: `.github/workflows/deploy-relay.yml` does not exist
+docs/decisions/0031-homelab-cli-distribution.md: `.github/workflows/docker.yml` does not exist
+docs/decisions/0031-homelab-cli-distribution.md: `docker/base/Dockerfile` does not exist
+docs/decisions/0031-homelab-cli-distribution.md: `docker/base/rootfs/usr/local/bin/reference-docker-entrypoint` does not exist
+docs/decisions/0031-homelab-cli-distribution.md: `docs/docker.md` does not exist
+docs/decisions/0036-mobile-expo-router-native-stack.md: `mobile/App.tsx` does not exist
+docs/decisions/0044-automations.md: `docs/plans/active/stalled-tree-alert.md` does not exist
+docs/decisions/0051-web-demo-mode-and-app-spacingmind-com.md: `scripts/check-demo-build.mjs` does not exist
+docs/decisions/0051-web-demo-mode-and-app-spacingmind-com.md: `web/packages/demo` does not exist
+docs/decisions/0051-web-demo-mode-and-app-spacingmind-com.md: `web/packages/ui/dist-demo/` does not exist
+docs/decisions/0052-hosted-web-app-and-official-relay.md: `public-docs/web-ui.md` does not exist
+docs/decisions/0054-steward-two-axis-review.md: `docs/CONTRIBUTING.md` does not exist
+docs/release-model-review.md: `.github/workflows/sync-develop.yml` does not exist
+docs/release-model-review.md: `scripts/check-release-metadata.sh` does not exist
