@@ -200,12 +200,65 @@ func TestGate_OpenAsksEveryCallUnlessGrantedAndGrantCoversCloseOnly(t *testing.T
 	wantErr(t, ch2, "the person said no")
 }
 
-func TestGate_UnknownToolRaisesNoCard(t *testing.T) {
+// A tool the gate has no class for FAILS CLOSED: it is an acting tool, asked every
+// call and never grantable; a name that is not a plain tool name is refused with no
+// card at all.
+func TestGate_UnknownToolAsksEveryCallAndIsNeverGrantable(t *testing.T) {
 	reg, r, runID := gateRun(t, "")
-	for _, tool := range []string{"browser_evaluate", "browser_click", "", "browser_open2", "smind"} {
-		if err := noCard(t, reg, r, BrowserCall{RunID: runID, Tool: tool}); err != nil {
-			t.Fatalf("an unknown tool %q is left to the broker, no card: %v", tool, err)
+	for i := 0; i < 2; i++ { // asked every call
+		ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_click"})
+		if id == "" {
+			t.Fatal("an unknown tool must ask (fail closed)")
 		}
+		reqs, _ := permEvents(r)
+		for _, o := range reqs[len(reqs)-1].PermissionOptions {
+			if o.ID == "allow_run" {
+				t.Fatalf("an acting tool is never grantable: %+v", o)
+			}
+		}
+		answer(t, reg, runID, id, "allow_once")
+		wantNil(t, ch)
+	}
+	if reg.BrowserGranted(runID, "browser_click") {
+		t.Fatal("no grant exists for an acting tool")
+	}
+	// A read or open grant never admits it.
+	chR, idR := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+	answer(t, reg, runID, idR, "allow_run")
+	wantNil(t, chR)
+	chO, idO := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_open", URL: "http://localhost/"})
+	answer(t, reg, runID, idO, "allow_run")
+	wantNil(t, chO)
+	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_evaluate"})
+	if id == "" {
+		t.Fatal("with both grants held an unknown tool still asks")
+	}
+	answer(t, reg, runID, id, "deny")
+	wantErr(t, ch, "the person said no")
+	// A malformed name is refused outright (no card, no hang).
+	for _, bad := range []string{"", "Browser_Open", "browser open", "browser_open ", "../x", strings.Repeat("a", 65), "1tool", "tool\n"} {
+		if err := noCard(t, reg, r, BrowserCall{RunID: runID, Tool: bad}); err == nil || !strings.Contains(err.Error(), "not a browser tool name") {
+			t.Fatalf("%q must be refused with no card: %v", bad, err)
+		}
+	}
+}
+
+// An answer applied after a revoke is void: a revoke fired between the answer and
+// its application leaves no grant behind (the epoch check and the write are one
+// critical section).
+func TestGate_ARevokeJustBeforeTheAnswerIsAppliedVoidsIt(t *testing.T) {
+	reg, r, runID := gateRun(t, "")
+	task, err := reg.st.GetTask(r.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	browserBeforeApplyHook = func() { reg.RevokeBrowserGrants(task.WorkspaceID) }
+	t.Cleanup(func() { browserBeforeApplyHook = nil })
+	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+	answer(t, reg, runID, id, "allow_run")
+	wantErr(t, ch, "switched off while the question was open")
+	if reg.BrowserGranted(runID, "browser_tabs") {
+		t.Fatal("no grant may exist after a revoke that preceded the application of the answer")
 	}
 }
 
@@ -586,5 +639,49 @@ func TestGate_AnEndedRunRaisesNoCard(t *testing.T) {
 	}
 	if err := noCard(t, reg, r, BrowserCall{RunID: "no-such-run", Tool: "browser_tabs"}); err == nil {
 		t.Fatal("an unknown run is refused")
+	}
+}
+
+// A system run (validators, learning, ...) never waits on a person: the gate
+// refuses at once and raises no card.
+func TestGate_ASystemRunNeverWaitsForAPerson(t *testing.T) {
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	reg := newTestRegistry(t, st)
+	runID, err := reg.Start(context.Background(), wm, newTestRunner(wm), task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "", WithPurpose("reflect"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, reg, runID, StatusRunning, 5*time.Second)
+	t.Cleanup(func() { _ = reg.Stop(runID) })
+	r, _ := reg.get(runID)
+	err = noCard(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+	if err == nil || !errors.Is(err, ErrBrowserRefused) {
+		t.Fatalf("a system run is refused at once: %v", err)
+	}
+	if reg.BrowserGranted(runID, "browser_tabs") {
+		t.Fatal("no grant for a system run")
+	}
+}
+
+// A daemon-owned seat's floor never admits a browser call, whatever it says
+// about shells and reads: an allow-everything floor still refuses, and no card is
+// parked.
+func TestGate_ASeatFloorNeverAdmitsABrowserCall(t *testing.T) {
+	for name, floor := range map[string]func(string, []string) (bool, string){
+		"floor denies": denyAllFloor("the seat has no shell"),
+		"floor allows": func(string, []string) (bool, string) { return true, "everything is fine" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			reg, r, runID := gateRun(t, "")
+			reg.SetSeatSource(func(int64) (SeatSpec, bool) { return SeatSpec{Floor: floor}, true })
+			err := noCard(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+			if err == nil || !errors.Is(err, ErrBrowserRefused) {
+				t.Fatalf("a seat run must be refused with no card: %v", err)
+			}
+			if reg.BrowserGranted(runID, "browser_tabs") {
+				t.Fatal("no grant for a seat")
+			}
+		})
 	}
 }

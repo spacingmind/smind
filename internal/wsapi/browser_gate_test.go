@@ -514,3 +514,39 @@ func TestGate_SwitchesAreReadAgainAfterTheGateReturns(t *testing.T) {
 		t.Fatal("the broker ran a call whose switch went off while it was held")
 	}
 }
+
+// The kill switch drops every grant and ends every session on the TRANSITION, not
+// only when some call notices; a grant answered while it is on dies at the next
+// tick too. (A flip on and back off between two polls with no call is not seen:
+// stated in the plan.)
+func TestKillSwitchWatch_RevokesOnTheTransition(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	on := false
+	revoked, ended := 0, 0
+	h := &browserHost{
+		revokeAll:      func() { mu.Lock(); revoked++; mu.Unlock() },
+		endAllSessions: func() { mu.Lock(); ended++; mu.Unlock() },
+	}
+	h.startKillSwitchWatch(10*time.Millisecond, func() bool { mu.Lock(); defer mu.Unlock(); return on })
+	t.Cleanup(func() { close(h.stopWatch) })
+	time.Sleep(60 * time.Millisecond) // sleep-ok: the watcher must NOT act while the switch stays off
+	mu.Lock()
+	if revoked != 0 || ended != 0 {
+		mu.Unlock()
+		t.Fatalf("nothing happens while the switch is off: revoked=%d ended=%d", revoked, ended)
+	}
+	on = true
+	mu.Unlock()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) { // sleep-ok: polling
+		mu.Lock()
+		done := revoked >= 3 && ended == 1
+		mu.Unlock()
+		if done {
+			return
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	t.Fatalf("the transition ends the sessions once and keeps revoking while on: revoked=%d ended=%d", revoked, ended)
+}

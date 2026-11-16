@@ -67,6 +67,8 @@ type browserHost struct {
 	revokeAll    func()
 	forgetRun    func(runID string)
 	liveDeny     func() []browser.Endpoint
+	// stopWatch ends the kill-switch watcher (nil when none runs).
+	stopWatch chan struct{}
 	// socks hosts the per-run sockets; nil when the socket directory could not
 	// be prepared (then no run gets a browser row).
 	socks browserSockHub
@@ -115,6 +117,7 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 		return browser.ChromeLauncher{Path: p}, nil
 	}
 	h.profileRoot = filepath.Join(config.Dir(), "browser")
+	h.startKillSwitchWatch(killSwitchWatchEvery, config.BrowserDisabled)
 	if hub, err := runsock.NewSystemHub(filepath.Join(config.Dir(), "browser", "sock")); err != nil {
 		log.Printf("browser: no per-run socket host, so no run gets the browser: %v", err)
 	} else {
@@ -262,8 +265,55 @@ func (h *browserHost) OnRunFinished(f runs.RunFinished) {
 	h.broker.EndRun(f.RunID)
 }
 
+// killSwitchWatchEvery is how often the kill switch is polled (a variable so a
+// test can shorten it): a grant must not outlive the switch just because no call
+// happened to observe it.
+var killSwitchWatchEvery = 2 * time.Second
+
+// startKillSwitchWatch ends every browser session and drops every grant as soon
+// as the kill switch is seen ON, on the transition and not only when a call
+// notices. Stated limit: a flip ON and back OFF between two polls, with no call
+// and no settings write in between, is not seen (the next call and the settings
+// change paths still revoke).
+func (h *browserHost) startKillSwitchWatch(every time.Duration, killed func() bool) {
+	if every <= 0 || h.stopWatch != nil {
+		return
+	}
+	stop := make(chan struct{})
+	h.stopWatch = stop
+	go func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		prev := false
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+			}
+			on := killed()
+			if on {
+				if !prev {
+					h.endAllSessions()
+				}
+				if h.revokeAll != nil {
+					h.revokeAll() // every tick while it is on: a grant answered meanwhile dies too
+				}
+			}
+			prev = on
+		}
+	}()
+}
+
 // close ends every browser session and socket (daemon shutdown).
 func (h *browserHost) close() {
+	if h.stopWatch != nil {
+		select {
+		case <-h.stopWatch:
+		default:
+			close(h.stopWatch)
+		}
+	}
 	if h.socks != nil {
 		h.socks.CloseAll()
 	}

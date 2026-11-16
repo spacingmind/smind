@@ -59,6 +59,21 @@ func browserClass(tool string) (c browsercard.Class, ok bool) {
 	return "", false
 }
 
+// validToolName reports whether name is a plain tool name (lower-case letters,
+// digits and underscores, 1 to 64 characters, starting with a letter).
+func validToolName(name string) bool {
+	if name == "" || len(name) > 64 || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // BrowserCall describes one call the gate judges.
 type BrowserCall struct {
 	RunID      string
@@ -179,7 +194,14 @@ func refused(format string, a ...any) error {
 func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 	class, known := browserClass(call.Tool)
 	if !known {
-		return nil // the broker refuses an unknown tool; no card is raised for it
+		// A tool the gate has no class for FAILS CLOSED: it is an acting tool (asked
+		// every call, never grantable), and a name that is not a plain tool name is
+		// refused outright. The broker refuses a tool it does not offer anyway; this
+		// only makes sure nothing the broker might ever run is admitted unasked.
+		if !validToolName(call.Tool) {
+			return refused("not a browser tool name")
+		}
+		class = browsercard.ClassAct
 	}
 	r, err := reg.get(call.RunID)
 	if err != nil || r.requireRunning("browser") != nil {
@@ -278,55 +300,61 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 		return refused("no one answered the permission request; ask again later if it is still needed")
 	}
 
+	// The epoch check and the effect of the answer (a grant, a use, a denial) happen
+	// in ONE critical section: a revoke is serialised before or after it, never
+	// between the check and the write, so an answer taken across a revoke can never
+	// leave a grant behind.
+	if browserBeforeApplyHook != nil {
+		browserBeforeApplyHook()
+	}
+	now := time.Now()
+	var note string
+	var verdict error
 	st.mu.Lock()
-	if st.epoch != epoch {
+	switch {
+	case st.epoch != epoch:
 		// A switch (the workspace's or the kill switch) was turned off while the
 		// card was open: whatever was answered is void.
-		st.mu.Unlock()
-		return refused("the browser was switched off while the question was open")
-	}
-	st.mu.Unlock()
-
-	switch optionID {
-	case "allow_once":
-		st.mu.Lock()
+		verdict = refused("the browser was switched off while the question was open")
+	case optionID == "allow_once":
 		st.uses++
-		st.mu.Unlock()
-		_ = reg.NoteRunEvent(call.RunID, fmt.Sprintf("browser: %s allowed once", call.Tool))
-		return nil
-	case "allow_run":
-		st.mu.Lock()
+		note = fmt.Sprintf("browser: %s allowed once", call.Tool)
+	case optionID == "allow_run" && (class == browsercard.ClassRead || class == browsercard.ClassOpen):
 		if class == browsercard.ClassRead {
 			st.read = true
-		} else if class == browsercard.ClassOpen {
+		} else {
 			st.open = true
 		}
 		st.uses++
-		st.mu.Unlock()
 		what := "read access"
 		if class == browsercard.ClassOpen {
 			what = "opening pages"
 		}
-		_ = reg.NoteRunEvent(call.RunID, fmt.Sprintf("browser: %s granted for this run", what))
-		return nil
-	}
-
-	// Anything else is a refusal by the person.
-	now := time.Now()
-	st.mu.Lock()
-	keep := st.denials[:0]
-	for _, t := range st.denials {
-		if now.Sub(t) < browserDenyWindow {
-			keep = append(keep, t)
+		note = fmt.Sprintf("browser: %s granted for this run", what)
+	default:
+		// Anything else (a deny, or a grant for a class that has none) is a refusal.
+		keep := st.denials[:0]
+		for _, t := range st.denials {
+			if now.Sub(t) < browserDenyWindow {
+				keep = append(keep, t)
+			}
 		}
-	}
-	st.denials = append(keep, now)
-	if len(st.denials) >= browserDenyLimit {
-		st.blockedUntil = now.Add(browserDenyPause)
-		st.blockedWhy = "the person declined; do not ask again for now"
-		st.denials = nil
+		st.denials = append(keep, now)
+		if len(st.denials) >= browserDenyLimit {
+			st.blockedUntil = now.Add(browserDenyPause)
+			st.blockedWhy = "the person declined; do not ask again for now"
+			st.denials = nil
+		}
+		note = fmt.Sprintf("browser: %s refused by the person", call.Tool)
+		verdict = refused("the person said no")
 	}
 	st.mu.Unlock()
-	_ = reg.NoteRunEvent(call.RunID, fmt.Sprintf("browser: %s refused by the person", call.Tool))
-	return refused("the person said no")
+	if note != "" {
+		_ = reg.NoteRunEvent(call.RunID, note)
+	}
+	return verdict
 }
+
+// browserBeforeApplyHook is a test seam: it runs after the card was answered and
+// before the answer is applied (a revoke fired here must void the answer).
+var browserBeforeApplyHook func()
