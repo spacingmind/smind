@@ -245,6 +245,7 @@ func TestHumanOnlyCLI_Table(t *testing.T) {
 	for args, want := range map[string]bool{
 		"task approve 1": true, "task deny 1": true, "task answer 1": true, "permission show": true,
 		"permission": true, "--x task approve 1": true, "host approve h": true, "host reject h": true,
+		"browser enable --workspace 1": true, "browser disable --workspace 1": true, "browser allow add x": true, "browser allow rm x": true, "browser clear": true, "browser status": false,
 		"task chat fork 1 --at r": true, "profile add --name x": true, "profile edit 3": true, "profile seed roles --apply": true, "profile seed roles": false, "profile seed roles --check": false, "profile ls": false, "task chat ls 1": false, "task chat new 1": false, "relay devices approve d": true, "relay devices revoke d": true, "host ls": false, "relay devices ls": false, "relay status": false,
 		"task ls": false, "task permissions 1": false, "status": false, "": false, "task": false,
 	} {

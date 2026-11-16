@@ -31,6 +31,14 @@ type Policy struct {
 	// (see NormalizeAllowHost). Wildcards do not exist.
 	AllowHosts map[string]bool
 	Deny       []Endpoint
+	// LiveDeny, when set, is asked for more reserved endpoints at every
+	// decision: the addresses other smind listeners (any process) are bound to
+	// right now, some of which exist only for a moment (an OAuth callback). An
+	// entry that does not parse is ignored (the static Deny list is validated
+	// by NewPolicy; a live entry must never make a decision fail open or panic).
+	// An ERROR from it fails CLOSED: every address is refused, because the
+	// reserved set cannot be known.
+	LiveDeny func() ([]Endpoint, error)
 }
 
 // Decision is the verdict on a URL. NeedsResolve means the URL names a host
@@ -61,20 +69,57 @@ func NewPolicy(allow []string, deny []Endpoint) (Policy, error) {
 		p.AllowHosts[h] = true
 	}
 	for _, d := range deny {
-		if d.Port < 1 || d.Port > 65535 {
-			return Policy{}, fmt.Errorf("browser: deny endpoint %q has no valid port", d.Host)
-		}
-		raw := d.Host
-		if strings.Contains(raw, ":") && !strings.HasPrefix(raw, "[") {
-			raw = "[" + raw + "]" // a bare IPv6 literal
-		}
-		h, _, err := parseHost(raw) // 127.1, octal, hex and mapped forms canonicalise; garbage is an error
+		e, err := canonEndpoint(d)
 		if err != nil {
-			return Policy{}, fmt.Errorf("browser: deny endpoint %q: %w", d.Host, err)
+			return Policy{}, err
 		}
-		p.Deny = append(p.Deny, Endpoint{Host: h.canon, Port: d.Port})
+		p.Deny = append(p.Deny, e)
 	}
 	return p, nil
+}
+
+// canonEndpoint validates one reserved endpoint and returns its canonical form.
+func canonEndpoint(d Endpoint) (Endpoint, error) {
+	if d.Port < 1 || d.Port > 65535 {
+		return Endpoint{}, fmt.Errorf("browser: deny endpoint %q has no valid port", d.Host)
+	}
+	raw := d.Host
+	if strings.Contains(raw, ":") && !strings.HasPrefix(raw, "[") {
+		raw = "[" + raw + "]" // a bare IPv6 literal
+	}
+	h, _, err := parseHost(raw) // 127.1, octal, hex and mapped forms canonicalise; garbage is an error
+	if err != nil {
+		return Endpoint{}, fmt.Errorf("browser: deny endpoint %q: %w", d.Host, err)
+	}
+	return Endpoint{Host: h.canon, Port: d.Port}, nil
+}
+
+// WithLiveDeny returns the policy with a live source of reserved endpoints.
+func (p Policy) WithLiveDeny(fn func() ([]Endpoint, error)) Policy {
+	p.LiveDeny = fn
+	return p
+}
+
+// endpoints is the static deny list plus the live one (canonicalised, bad
+// entries dropped).
+func (p Policy) endpoints() (eps []Endpoint, ok bool) {
+	if p.LiveDeny == nil {
+		return p.Deny, true
+	}
+	live, err := p.LiveDeny()
+	if err != nil {
+		return nil, false
+	}
+	if len(live) == 0 {
+		return p.Deny, true
+	}
+	out := append([]Endpoint(nil), p.Deny...)
+	for _, d := range live {
+		if e, err := canonEndpoint(d); err == nil {
+			out = append(out, e)
+		}
+	}
+	return out, true
 }
 
 // NormalizeAllowHost validates one allowlist entry: a bare host (a name or an
@@ -84,6 +129,9 @@ func NormalizeAllowHost(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "", errors.New("browser: empty allowlist host")
+	}
+	if len(s) > 253 {
+		return "", fmt.Errorf("browser: allowlist entry is longer than 253 characters")
 	}
 	if strings.ContainsAny(s, "*/@?# \\") || strings.Contains(s, "://") {
 		return "", fmt.Errorf("browser: allowlist entry %q must be one exact host, no scheme, wildcard, path or userinfo", s)
@@ -150,6 +198,11 @@ func parseHost(raw string) (parsedHost, bool, error) {
 		return parsedHost{}, false, errors.New("empty host label")
 	}
 	labels := strings.Split(h, ".")
+	for _, l := range labels {
+		if len(l) > 63 {
+			return parsedHost{}, false, errors.New("a host label is longer than 63 characters")
+		}
+	}
 	if numericLabel(labels[len(labels)-1]) {
 		a, err := parseIPv4(labels)
 		if err != nil {
@@ -335,7 +388,11 @@ func (p Policy) CheckURL(raw string) Decision {
 
 // denied reports whether the target is one of the reserved endpoints.
 func (p Policy) denied(h parsedHost, port int) bool {
-	for _, e := range p.Deny {
+	eps, ok := p.endpoints()
+	if !ok {
+		return true // the live reserved set cannot be read: refuse everything
+	}
+	for _, e := range eps {
 		if e.Port != port {
 			continue
 		}
@@ -375,6 +432,9 @@ var (
 	nat64Prefix    = netip.MustParsePrefix("64:ff9b::/96")
 	sixToFour      = netip.MustParsePrefix("2002::/16")
 	v4Compatible   = netip.MustParsePrefix("::/96")
+	siit           = netip.MustParsePrefix("::ffff:0:0:0/96") // IPv4-translated (RFC 2765)
+	nat64Local     = netip.MustParsePrefix("64:ff9b:1::/48")  // local-use NAT64 (RFC 8215): refused outright
+	teredo         = netip.MustParsePrefix("2001::/32")       // embeds an obfuscated IPv4: refused outright
 )
 
 // embeddedV4 returns the IPv4 address an IPv6 address carries (NAT64, 6to4,
@@ -390,6 +450,8 @@ func embeddedV4(a netip.Addr) (netip.Addr, bool) {
 	case sixToFour.Contains(a):
 		return netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}), true
 	case v4Compatible.Contains(a) && !a.IsUnspecified() && !a.IsLoopback():
+		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
+	case siit.Contains(a):
 		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
 	}
 	return netip.Addr{}, false
@@ -411,6 +473,9 @@ func sensitiveAddr(a netip.Addr) bool {
 		if a == m {
 			return true
 		}
+	}
+	if nat64Local.Contains(a) || teredo.Contains(a) {
+		return true
 	}
 	if e, ok := embeddedV4(a); ok {
 		return e.IsLoopback() || sensitiveAddr(e)
@@ -444,8 +509,42 @@ func (p Policy) CheckResolved(d Decision, addrs []netip.Addr) Decision {
 		if sensitiveAddr(a) {
 			return refuse("host %q resolves to a link-local, metadata, multicast or unspecified address", d.Host)
 		}
+		// An allowlisted NAME may only reach the public internet: its DNS is
+		// not ours, and a name that resolves to loopback, a private or CGNAT
+		// range is how an attacker-influenced record reaches the daemon's
+		// machine or the LAN. The person who really wants an intranet host adds
+		// its IP literal (an exact entry), never a name.
+		if internalAddr(a) {
+			return refuse("host %q resolves to a loopback, private or internal address; allow its IP address instead", d.Host)
+		}
 	}
 	return d
+}
+
+var internalPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"), // CGNAT
+	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking
+	netip.MustParsePrefix("240.0.0.0/4"),   // reserved
+	netip.MustParsePrefix("fec0::/10"),     // deprecated site-local (Go's IsPrivate covers only fc00::/7)
+}
+
+// internalAddr reports loopback, private (RFC 1918, unique-local), CGNAT and
+// other non-public ranges, including an IPv6 form that embeds one.
+func internalAddr(a netip.Addr) bool {
+	a = a.Unmap()
+	if a.IsLoopback() || a.IsPrivate() || a.IsUnspecified() {
+		return true
+	}
+	for _, pre := range internalPrefixes {
+		if pre.Contains(a) {
+			return true
+		}
+	}
+	if e, ok := embeddedV4(a); ok {
+		return internalAddr(e)
+	}
+	return false
 }
 
 // Check runs CheckURL and, for a named host, CheckResolved with the resolver.

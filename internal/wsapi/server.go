@@ -93,6 +93,7 @@ type API struct {
 	Terminals *terminal.Registry
 
 	automations *automationHost
+	browser     *browserHost
 	inbox       *inboxHost
 	policySweep *policySweeper
 	// fleetAuditSweep stops the fleet audit sweeper, fleetWallSweep the
@@ -174,6 +175,7 @@ func (a *API) Close() {
 	}
 	a.StopPlugins()
 	a.git.Stop()
+	a.browser.close()
 	a.Runs.CloseAll()
 	a.Terminals.CloseAll()
 }
@@ -389,6 +391,13 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	}
 	reg.AddObserver(newStewardObserver(stewardH, db))
 	hs["session.identify"] = handleSessionIdentify(reg)
+	browserH := newBrowserHost(db, reg)
+	hs["browser.settings.get"] = browserLocalOnly("browser.settings.get", browserH.settingsGet)
+	hs["browser.settings.set"] = browserLocalOnly("browser.settings.set", browserH.settingsSet)
+	hs["browser.data.clear"] = browserLocalOnly("browser.data.clear", browserH.dataClear)
+	reg.SetBrowserSockets(browserH)
+	reg.SetBrowserGate(runs.StoreBrowserGate(db, func() bool { return browserH.killSwitch() }))
+	reg.AddObserver(browserH)
 	inboxH := newInboxHost(db, bus, reg, newValidationService(db, bus), stalled, fleetInboxPairs(db, configFleetEnabled))
 	// The inbox's review rows come from the steward reviews: one current
 	// (newest, finished) review per live task, with only the fields the
@@ -504,7 +513,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	pluginReg.bindPanels(panelDeclarations(pluginMgr))
 	reg.SetLaunchHooks(pluginHooks{pluginMgr})
 	reg.AddObserver(pluginHooks{pluginMgr})
-	api := &API{gate: gs, inbox: inboxH, policySweep: policySweep, automations: automations, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Pruner: pruner, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}, wm: wm, runner: runner}
+	api := &API{gate: gs, inbox: inboxH, policySweep: policySweep, automations: automations, browser: browserH, plugins: pluginMgr, pluginEvents: pluginEv, Runs: reg, Pruner: pruner, Terminals: treg, hs: hs, admit: admit, bus: bus, stalled: stalled, info: info, learning: learning, github: gh, forgeAuth: fauth, git: gitSvc, focus: focus, prFocus: prFocus, conns: map[*websocket.Conn]struct{}{}, wm: wm, runner: runner}
 	api.authorize = func(r *http.Request) bool {
 		return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 	}

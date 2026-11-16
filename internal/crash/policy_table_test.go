@@ -25,6 +25,7 @@ var goSitePolicy = map[string]sitePolicy{
 	"quota.providerFetch":              {"contain", "one-shot provider usage fetch: a panic leaves the cached usage stale; logged"},
 	"quota.refreshAll":                 {"contain", "one-shot refresh fan-out: a panic leaves the cached usage stale; logged"},
 	"wsapi.usageFetch":                 {"contain", "one-shot usage fetch behind a request: a panic leaves the cache stale; logged"},
+	"wsapi.browserKillSwitchWatch":     {"contain", "polls the kill switch every two seconds: a panic stops the watcher, and the per-call and settings-change revocations still apply; logged"},
 	"wsapi.providerUsageFetch":         {"contain", "one-shot provider usage fetch behind a request: a panic leaves the cache stale; logged"},
 	"wsapi.providerCLILookup":          {"contain", "one-shot provider CLI lookup behind a cache: a panic leaves the answer unset; logged"},
 	"wsapi.pumpEvents":                 {"contain+compensate", "closes the connection, so the client sees the drop instead of a silently dead event stream"},

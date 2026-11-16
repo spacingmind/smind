@@ -53,3 +53,10 @@ So: the init frame carries the real mode in a top-level `permissionMode` string,
 ## Validation
 
 (filled in per PR)
+
+### Lane C state at wind-down (2026-11-15)
+
+- Done: this spec's code and tests are in #950 (E1.2), the interop filter in #951, the Lane C leftovers (terminal surface #937, palette subtitle #939, plan results #944) and the tabbing probe procedure (#943). #950 and #951 merged on 2026-11-15 after the 0.21.0 tag. The observed-mode chip field (AC6 follow-up) is NOT built: it is on the Human list.
+- Next: nothing queued. The window-tabbing probe (spike plan, Part 2) still needs an UNLOCKED screen: the kit is under `~/.smind/dogfood/window-tabbing/` (`probe.patch`, `build.sh`, `up.sh`, `probe.sh`, `down.sh`, `checklist.md`; its `src/` scratch worktree was removed, re-create it with the first lines of `checklist.md` before `build.sh`).
+- Local branches (all pushed except this note): `lane-c-e1-2-mode` (#950), `lane-c-mobile-check-filter` (#951), `lane-c-e12-specs`, `lane-c-diff-header` (pushed, no PR, superseded by #941), `lane-c-tabbing-probe-doc`, `lane-c-plan-results`, `lane-c-terminal-surface`, `lane-c-palette-subtitle`, `lane-c-settings-type` (empty), and `lane-c-wind-down` (this note, unpushed).
+- Scratch material (not in the repo): `~/.smind/dogfood/lane-c-{a,b,d,e,f,g}/` (frames, READMEs), `e1-2-probe/`, `e1-2-live/`, `window-tabbing/`. Nothing half-done is uncommitted.

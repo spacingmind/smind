@@ -46,6 +46,7 @@ agent is doing and what it costs.
 - [Writing a plugin](plugins-authoring.md): the manifest reference, capabilities, hooks, RPCs and a worked example.
 - [Automations](automations.md): start a task on a schedule or when a workflow fails.
 - [Connected hosts](hosts.md): pair two daemons and choose which direction works.
+- [The agent browser](browser.md): let an agent open and read pages on your machine, per workspace, with a permission card for each step.
 
 ## How the docs are organised
 

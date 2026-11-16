@@ -28,10 +28,28 @@ type Config struct {
 	Automations   AutomationsConfig   `yaml:"automations"`
 	Validation    ValidationConfig    `yaml:"validation"`
 	Steward       StewardConfig       `yaml:"steward"`
+	Browser       BrowserConfig       `yaml:"browser"`
 	Fleet         FleetConfig         `yaml:"fleet"`
 	Log           LogConfig           `yaml:"log"`
 	Runs          RunsConfig          `yaml:"runs"`
 	Debug         DebugConfig         `yaml:"debug"`
+}
+
+// BrowserConfig is the daemon-wide side of the agent browser (ADR-0061).
+type BrowserConfig struct {
+	// Disabled is the kill switch: while true no workspace can use the agent
+	// browser, whatever its own switch says, and no RPC can change it (only this
+	// file or SMIND_BROWSER_DISABLED). Default false. It is read on every
+	// decision, so setting it takes effect without a restart.
+	Disabled bool `yaml:"disabled"`
+}
+
+// BrowserDisabled reports whether the browser kill switch is on. It reads the
+// configuration each time and FAILS CLOSED: a config file that cannot be read
+// or parsed counts as "disabled".
+func BrowserDisabled() bool {
+	cfg, err := Load()
+	return err != nil || cfg.Browser.Disabled
 }
 
 // RunsConfig tunes how much run history the daemon keeps in memory.
@@ -72,6 +90,10 @@ const DefaultRunHistoryBudgetMB = 64
 
 // Env overrides for the daemon diagnostics and run history budget.
 const (
+	// EnvBrowserDisabled turns the agent browser kill switch on with any value
+	// except an explicit 0/false/off/no (browser.disabled in config.yaml does the
+	// same, and the environment can never turn the file's switch off).
+	EnvBrowserDisabled = "SMIND_BROWSER_DISABLED"
 	// EnvPprof set to 1/true/on/yes/y/t/enabled turns debug.pprof on.
 	EnvPprof = "SMIND_PPROF"
 	// EnvRunHistoryBudgetMB overrides runs.historyBudgetMB (a positive integer).
@@ -633,6 +655,7 @@ func LoadFile(path string) (Config, error) {
 		// Fail closed: an unreadable config.yaml may hold learning.enabled:
 		// false, so it must not leave the default (on) in effect.
 		cfg.Learning.Enabled = false
+		cfg.Browser.Disabled = true
 		return cfg, fmt.Errorf("read config: %w", err)
 	}
 	if err == nil {
@@ -642,6 +665,7 @@ func LoadFile(path string) (Config, error) {
 			// Fail closed, as for an unreadable file: a typo must not
 			// switch learning on.
 			cfg.Learning.Enabled = false
+			cfg.Browser.Disabled = true
 			return cfg, fmt.Errorf("parse config %s: %w", path, err)
 		}
 	}
@@ -725,6 +749,15 @@ func applyEnv(cfg *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvExpoAccessToken)); v != "" {
 		cfg.Push.ExpoAccessToken = v
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvBrowserDisabled)); v != "" {
+		// A kill switch: any value that is not an explicit "no" turns it ON, so a
+		// typo ("disabled", "ture", "2") can never leave the browser running.
+		switch strings.ToLower(v) {
+		case "0", "false", "off", "no", "n", "f":
+		default:
+			cfg.Browser.Disabled = true
+		}
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvPprof)); v != "" {
 		switch strings.ToLower(v) {

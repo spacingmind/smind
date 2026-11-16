@@ -67,6 +67,12 @@ func (d runPermissionDecider) applySeatFloor(requestID, summary string, detail *
 		}
 	}
 	allow, reason := spec.Floor(tool, paths)
+	if d.browser {
+		// A daemon-owned seat has no browser (its floor was written for shells and
+		// reads of its scratch): whatever the floor says, a browser card is never
+		// admitted by it.
+		allow, reason = false, "a seat has no browser"
+	}
 	if allow {
 		if id, ok := firstOptionByKind(options, "allow_once"); ok {
 			d.recordPolicyResolved(requestID, summary, withPolicy(detail, taskrunner.PolicyInfo{RuleID: stewardSeatFloor, Why: reason, Action: "allow"}), options, id, taskrunner.PermissionResolvedByPolicyAllow, stewardSeatFloor)

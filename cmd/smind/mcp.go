@@ -21,7 +21,7 @@ import (
 // (add|ls|rm|enable|disable), which manage the daemon-global mcp_servers
 // registry runs are handed (internal/mcpservers.Registry) -- unrelated
 // registries sharing one command-group name, matching resolved decision 8.
-const cmdMcpUsage = "usage: smind mcp <serve|add|ls|rm|enable|disable> ..."
+const cmdMcpUsage = "usage: smind mcp <serve|browser|add|ls|rm|enable|disable> ..."
 
 // cmdMcp dispatches the `smind mcp` command group.
 func cmdMcp(args []string) int {
@@ -32,6 +32,8 @@ func cmdMcp(args []string) int {
 	switch args[0] {
 	case "serve":
 		return cmdMcpServe(args[1:])
+	case "browser":
+		return cmdMcpBrowser(args[1:])
 	case "add":
 		return cmdMcpAdd(args[1:])
 	case "ls":

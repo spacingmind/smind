@@ -22,6 +22,7 @@ import (
 	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/scratch"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -48,6 +49,9 @@ type acpBackend interface {
 	PromptUsage(sessionID string) (acp.PromptUsage, bool)
 	// InstanceID identifies the agent process behind this client.
 	InstanceID() string
+	// PID is the agent process's id, the root of the run's process tree (0:
+	// unknown, and then the run gets no browser).
+	PID() int
 	Close() error
 }
 
@@ -358,11 +362,18 @@ type Runner struct {
 	// close Job Object. Nil means "the SDK's own defaults" (tests that
 	// point newClaudeClient at a fake CLI).
 	claudeLaunch func() (cliPath string, env []string, err error)
+
+	// claudeReportsPID says whether the Claude client can report its CLI's
+	// process id (the SDK's Client.PID, v0.4.3+). Only then does a claude run get a
+	// browser row: its socket is bound to that process. Defaults to a check of
+	// the real client type; tests set it for a fake.
+	claudeReportsPID bool
 }
 
 // New returns a Runner backed by wm.
 func New(wm *workspace.Manager, opts ...Option) *Runner {
 	r := &Runner{
+		claudeReportsPID:   claudeClientReportsPID(),
 		wm:                 wm,
 		acpSessions:        map[int64]*acpSessionState{},
 		acpModes:           map[Provider]acpModeCacheEntry{},
@@ -582,7 +593,9 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, scrubError(err, r.providerSecretValues(provider)))
 	}
 
-	rows, err := r.mcpRowsFor(ctx, workspaceID)
+	// A plugin provider never gets smind's own rows, the browser's included: do
+	// not even build (and open a socket for) a row that is about to be dropped.
+	rows, err := r.mcpRowsForDelivery(ctx, workspaceID, browserRowDelivered(haveSpec && spec.Plugin != ""), client.PID())
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
@@ -594,8 +607,12 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	}
 	mcpWire, inactive, unresolved, states, err := acpMcpServers(rows, client, r.lookPathFunc())
 	if err != nil {
+		revokeBrowserAll(ctx)
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
+	// The agent may not take a stdio row (transport not advertised): then the
+	// socket opened for it must not stay open.
+	revokeBrowserIfSkipped(ctx, inactive, unresolved)
 	if len(states) > 0 {
 		select {
 		case events <- Event{Type: EventTypeMcpServers, McpServers: states}:
@@ -971,11 +988,20 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		opts = append(opts, claudecode.WithDisallowedTools(tools...))
 	}
 
-	rows, err := r.mcpRowsFor(ctx, workspaceID)
+	// The Claude CLI's process does not exist yet when its rows are built, so its
+	// browser socket is opened unbound and bound to the CLI's pid below; an SDK
+	// that cannot report the pid builds no browser row (never a weaker check).
+	var bindBrowser func(rootPID int) error
+	var rows []store.McpServer
+	if r.claudeReportsPID {
+		rows, bindBrowser, err = r.mcpRowsPending(ctx, workspaceID)
+	} else {
+		rows, err = r.mcpRowsFor(ctx, workspaceID)
+	}
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
 	}
-	if contract := RunContractFrom(ctx); contract.Mcp != nil {
+	if contract := RunContractFrom(ctx); useStrictMcp(contract) {
 		// A managed run sees only the daemon's registered servers (+ smind
 		// for orchestration seats): strict mode hides user-level servers
 		// (e.g. a personal `smind` in ~/.claude.json), so a Peer cannot
@@ -989,6 +1015,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		}
 		mcpConfig, err := claudeMcpConfig(rows)
 		if err != nil {
+			revokeBrowserAll(ctx)
 			return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
 		}
 		if mcpConfig != "" {
@@ -997,6 +1024,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 			// string, which would be visible in the process argv (ps).
 			path, cleanup, err := writeClaudeMcpConfigFile(mcpConfig)
 			if err != nil {
+				revokeBrowserAll(ctx)
 				return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
 			}
 			defer cleanup()
@@ -1116,7 +1144,21 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 
 	client, resumed, err := r.newClaudeClientWithResume(ctx, provider, chatID, worktreePath, opts, events)
 	if err != nil {
+		revokeBrowserAll(ctx) // the socket opened for the row of an agent that never started
 		return fmt.Errorf("taskrunner: spawn claude code agent: %w", scrubError(err, r.providerSecretValues(provider)))
+	}
+	if bindBrowser != nil {
+		// Attach the run's browser socket to the CLI's process tree. No pid, or a
+		// refused bind: close the socket so the row (already in the CLI's MCP
+		// config) fails plainly instead of being reachable by anyone.
+		pid := 0
+		if p, ok := client.(interface{ PID() int }); ok {
+			pid = p.PID()
+		}
+		if berr := bindBrowser(pid); berr != nil {
+			revokeBrowserAll(ctx)
+			r.sendSessionNote(ctx, events, "the browser could not be bound to this agent, so its browser tools will not work in this run")
+		}
 	}
 	// After a CLI exit the process is gone, but Close (cmd.Wait) can still block
 	// on a grandchild holding stderr open: do not hold the run's end for it.
@@ -1463,10 +1505,11 @@ func (r *Runner) runCodexNative(ctx context.Context, provider Provider, chatID, 
 	if len(LaunchEditsFrom(ctx).Env) > 0 {
 		r.sendSessionNote(ctx, events, "plugin env not applied: codex-native runs take no per-run environment")
 	}
-	if RunContractFrom(ctx).Mcp != nil {
+	if m := RunContractFrom(ctx).Mcp; m != nil && !m.BrowserOnly {
 		r.sendSessionNote(ctx, events, "orchestration tools cannot be added or removed for codex-native runs (process-wide MCP config): the seat's tool policy is not enforced")
 	}
-	if rows, err := r.mcpRowsFor(ctx, workspaceID); err != nil {
+	// A codex-native run takes no per-run MCP rows: the browser row is neither built nor announced.
+	if rows, err := r.mcpRowsForDelivery(ctx, workspaceID, false, 0); err != nil {
 		return fmt.Errorf("taskrunner: codex mcp servers: %w", err)
 	} else if len(rows) > 0 {
 		names := make([]string, len(rows))
