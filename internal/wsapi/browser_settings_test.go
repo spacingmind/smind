@@ -626,6 +626,7 @@ func TestBrowserCall_KillSwitchFlipEndsLiveSessionsAtTheNextCall(t *testing.T) {
 	e := newIdentEnv(t, "hang")
 	h := e.api.browser
 	h.gate = func(int64) bool { return true }
+	admitAllPermits(h) // this test is about something else than the permission gate
 	ended := 0
 	h.endAllSessions = func() { ended++ }
 	h.killSwitch = func() bool { return false }

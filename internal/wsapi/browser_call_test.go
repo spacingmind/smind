@@ -76,6 +76,7 @@ func TestBrowserCall_DaemonRechecksTheGateOnEveryCall(t *testing.T) {
 	}
 	// Open for this test only: it now reaches the broker.
 	h.gate = func(int64) bool { return true }
+	admitAllPermits(h) // this test is about something else than the permission gate
 	h.launcher = func() (browser.Launcher, error) {
 		return nil, &browser.UnavailableError{InstallStep: "Install Chromium."}
 	}
@@ -90,6 +91,7 @@ func TestBrowserCall_DaemonRechecksTheGateOnEveryCall(t *testing.T) {
 	}
 	// An ended run is refused, and an unknown task.
 	h.gate = func(int64) bool { return true }
+	admitAllPermits(h) // this test is about something else than the permission gate
 	h.live = func(string) bool { return false }
 	if _, err := callRunJSON(t, h, e.runID, tid, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "the run has ended") {
 		t.Fatalf("an ended run: %v", err)
@@ -110,6 +112,7 @@ func TestBrowserHost_TheSocketHandlerIsBoundToItsRun(t *testing.T) {
 	h.socks = hub
 	var sessions atomic.Int32
 	h.gate = func(int64) bool { return true }
+	admitAllPermits(h) // this test is about something else than the permission gate
 	h.launcher = func() (browser.Launcher, error) {
 		sessions.Add(1)
 		return nil, &browser.UnavailableError{InstallStep: "x"}
@@ -183,6 +186,7 @@ func TestBrowserCall_RecordsOnTheRunTimeline(t *testing.T) {
 	e := newIdentEnv(t, "hang")
 	h := e.api.browser
 	h.gate = func(int64) bool { return true }
+	admitAllPermits(h) // this test is about something else than the permission gate
 	h.launcher = func() (browser.Launcher, error) { return nil, &browser.UnavailableError{InstallStep: "x"} }
 	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_open", `{"url":"http://localhost:3000/a?token=SECRET"}`); err != nil {
 		t.Fatal(err)
@@ -282,6 +286,7 @@ func TestBrowserHost_EndToEndThroughARealSocket(t *testing.T) {
 	h.socks = hub
 	open := true
 	h.gate = func(int64) bool { return open }
+	admitAllPermits(h) // this test is about something else than the permission gate
 	h.launcher = func() (browser.Launcher, error) {
 		return nil, &browser.UnavailableError{InstallStep: "Install Chromium."}
 	}
@@ -341,4 +346,10 @@ func TestBrowserHostConstructionTouchesNoDiskAndTheTestHomeIsNotTheRealOne(t *te
 		t.Fatalf("constructing the API created the socket directory: %v", err)
 	}
 	_ = e
+}
+
+// admitAllPermits replaces the real permission gate with one that admits every
+// call: for tests about the call path itself (the gate has its own tests).
+func admitAllPermits(h *browserHost) {
+	h.permit = func(context.Context, runs.BrowserCall) error { return nil }
 }
