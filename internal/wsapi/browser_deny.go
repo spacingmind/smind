@@ -1,6 +1,7 @@
 package wsapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -53,6 +54,14 @@ func newLiveDenySource(dir string, fleet fleetLinkReader) *liveDenySource {
 // caller fails CLOSED. The listeners THIS process registered come from memory,
 // so they are reserved even when their files were deleted.
 func (s *liveDenySource) Endpoints() ([]browser.Endpoint, error) {
+	return s.EndpointsContext(context.Background())
+}
+
+// EndpointsContext is Endpoints whose waiters (callers that find a refresh in
+// flight) leave when ctx ends. The refresh itself always completes and always
+// releases its waiters (deferred), even if it panics: a stuck flight would
+// deadlock every later decision.
+func (s *liveDenySource) EndpointsContext(ctx context.Context) ([]browser.Endpoint, error) {
 	for {
 		s.mu.Lock()
 		if !s.at.IsZero() && time.Since(s.at) < liveDenyTTL {
@@ -60,26 +69,42 @@ func (s *liveDenySource) Endpoints() ([]browser.Endpoint, error) {
 			s.mu.Unlock()
 			return eps, err
 		}
-		if s.flight != nil { // another goroutine is refreshing: wait for it, then re-check
+		if s.flight != nil { // another goroutine is refreshing: wait for it (or for ctx), then re-check
 			wait := s.flight
 			s.mu.Unlock()
-			<-wait
-			continue
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
-		s.flight = make(chan struct{})
-		flight := s.flight
-		s.mu.Unlock()
+		return s.refreshAsLeader()
+	}
+}
 
-		// The reads happen OUTSIDE the lock, by exactly one goroutine at a time.
-		eps, err := s.refresh()
-
+// refreshAsLeader runs the one refresh; it is entered with s.mu held and
+// releases it. The flight is closed and cleared in a defer.
+func (s *liveDenySource) refreshAsLeader() (eps []browser.Endpoint, err error) {
+	flight := make(chan struct{})
+	s.flight = flight
+	s.mu.Unlock()
+	defer func() {
 		s.mu.Lock()
-		s.cached, s.cachedEr, s.at = eps, err, time.Now()
+		if r := recover(); r != nil {
+			// A panic in the refresh fails CLOSED (an error, never "no entries") and
+			// still releases the waiters; the next call tries again.
+			eps, err = nil, fmt.Errorf("the daemon's listener records cannot be read: internal error")
+			s.cached, s.cachedEr, s.at = eps, err, time.Time{}
+		} else {
+			s.cached, s.cachedEr, s.at = eps, err, time.Now()
+		}
 		s.flight = nil
 		s.mu.Unlock()
 		close(flight)
-		return eps, err
-	}
+	}()
+	// The reads happen OUTSIDE the lock, by exactly one goroutine at a time.
+	return s.refresh()
 }
 
 func endpointOf(e listeners.Entry) (browser.Endpoint, bool) {

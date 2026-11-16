@@ -52,9 +52,13 @@ the agent tool's.
 - **Reading** (tabs, page text, screenshot, console, wait): the first read raises
   a card. **Allow reads for this run** lets that run read for the rest of the run;
   **Allow once** covers one call.
-- **Opening a page** asks every time and shows the address without its query:
-  **Allow once**, or **Allow `browser_open` for this run** (which also covers
-  closing a tab).
+- **Opening a page** asks every time and shows the address without its query or
+  fragment, and always says when they are there: `(+query, N characters)` and
+  `(+fragment)`, and `(path cut)` when a long path is shortened. The options are
+  **Allow once**, or **Allow opening any page the browser policy allows (localhost
+  and your added hosts) and closing tabs, for this run**: that second option lets
+  the agent open any such page, with any query, for the rest of the run.
+  Closing a tab has its own card ("Close a browser tab?").
 - Nothing is saved across runs and there is no "always". Turning the workspace
   switch off ends the grants.
 - Saying no three times in a minute pauses further cards for five minutes, so an
@@ -83,20 +87,15 @@ available for this agent".
   the daemon token private, and do not let an agent you do not trust run shell
   commands.
 - **The list of places the browser must never reach is best effort against the
-  agent's own shell.** The daemon, the login callback and a relay or web
-  listener started as another smind process each leave a small record under
-  your smind home (`listeners/`); a shell running as you can delete or change
-  those files. The daemon and a login callback in the daemon's own process are
-  also remembered in memory and cannot be removed that way; every smind process
-  rewrites its own record every few seconds, and an unreadable directory makes
-  the browser refuse; but a record deleted for a few seconds, in a process other
-  than the daemon, is briefly not protected.
-
-- A program running as you on the same machine can do what you can: it can read
-  the daemon token. The browser is a convenience for a project you trust, not a
-  sandbox for hostile code.
-- The agent's own shell, running as you, can reach the same places a person's
-  shell can.
+  agent's own shell, for listeners of other smind processes.** The daemon and a
+  login callback in the daemon's own process are remembered in memory and cannot
+  be unreserved by touching files. A relay or web listener started as another
+  smind process leaves a small record under your smind home (`listeners/`) that
+  its process rewrites every few seconds and also repairs if something is put in
+  its place; a shell running as you can still delete or change such a record, so
+  that port can be unprotected for a few seconds until it heals. An unreadable
+  or flooded `listeners/` directory makes the browser refuse.
 - The kill switch: set `browser.disabled: true` in `config.yaml` (or
-  `SMIND_BROWSER_DISABLED=1`) and the browser is off for every workspace and any
-  open session ends at the next call.
+  `SMIND_BROWSER_DISABLED=1`) and the browser is off for every workspace: open
+  sessions end and every grant is dropped within about two seconds, and any call
+  made meanwhile is refused.

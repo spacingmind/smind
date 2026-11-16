@@ -104,7 +104,7 @@ func TestTypographicQuotesAreNeutralised(t *testing.T) {
 			t.Errorf("quote rune %q survived: %q", r, card.Summary)
 		}
 	}
-	if n := strings.Count(card.Summary, `"`); n != 2 {
-		t.Errorf("only the card's own two ASCII quotes remain, got %d: %q", n, card.Summary)
+	if n := strings.Count(card.Summary, `"`); n != 4 {
+		t.Errorf("only the card's own four ASCII quotes (title and workspace) remain, got %d: %q", n, card.Summary)
 	}
 }

@@ -50,20 +50,56 @@ func cleanText(s string, max int) string {
 	return out
 }
 
-// neutraliseDaemonCheck rewrites every case-insensitive "(daemon check)" to
-// "daemon check", so only the suffix the daemon itself appends can carry it.
+// neutraliseDaemonCheck rewrites every "(daemon check" (the opening is enough: a
+// forged marker needs no closing parenthesis to pass for the real one), compared
+// case-insensitively and with fullwidth letters and parentheses folded to ASCII,
+// to "daemon check". Letters that merely LOOK like Latin ones (a Cyrillic "а") are
+// not folded: the neutralisation is of the exact marker and its width/case
+// variants, and is visual-only otherwise (documented).
 func neutraliseDaemonCheck(s string) string {
+	rs := []rune(s)
 	var b strings.Builder
-	for i := 0; i < len(s); {
-		if s[i] == '(' && i+len(daemonCheckMarker) <= len(s) && strings.EqualFold(s[i:i+len(daemonCheckMarker)], daemonCheckMarker) {
-			b.WriteString("daemon check")
-			i += len(daemonCheckMarker)
-			continue
+	for i := 0; i < len(rs); {
+		if foldWidth(rs[i]) == '(' {
+			if n := matchMarker(rs[i:]); n > 0 {
+				b.WriteString("daemon check")
+				i += n
+				continue
+			}
 		}
-		b.WriteByte(s[i])
+		b.WriteRune(rs[i])
 		i++
 	}
 	return b.String()
+}
+
+// foldWidth maps fullwidth ASCII (U+FF01..U+FF5E) to ASCII, leaving every other
+// rune alone.
+func foldWidth(r rune) rune {
+	if r >= 0xFF01 && r <= 0xFF5E {
+		return r - 0xFF01 + 0x21
+	}
+	return r
+}
+
+// matchMarker returns the rune length of a "(daemon check" opening at the start
+// of rs (an optional closing parenthesis, folded the same way, is included), or 0.
+func matchMarker(rs []rune) int {
+	const open = "(daemon check"
+	want := []rune(open)
+	if len(rs) < len(want) {
+		return 0
+	}
+	for k, w := range want {
+		if unicode.ToLower(foldWidth(rs[k])) != w {
+			return 0
+		}
+	}
+	n := len(want)
+	if n < len(rs) && foldWidth(rs[n]) == ')' {
+		n++
+	}
+	return n
 }
 
 // redactURL reduces a raw URL to scheme://host/path, dropping userinfo,
@@ -79,6 +115,9 @@ func redactURL(raw string) string {
 		path = "/"
 	}
 	display, _ := hostDisplay(cleanText(u.Host, 120))
+	if utf8.RuneCountInString(u.Host) > 120 {
+		display += " (name cut)" // the shown host is NOT the whole name: say so
+	}
 	return u.Scheme + "://" + display + path
 }
 

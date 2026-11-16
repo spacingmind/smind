@@ -200,15 +200,24 @@ func TestGate_OpenAsksEveryCallUnlessGrantedAndGrantCoversCloseOnly(t *testing.T
 	wantErr(t, ch2, "the person said no")
 }
 
-// A tool the gate has no class for FAILS CLOSED: it is an acting tool, asked every
-// call and never grantable; a name that is not a plain tool name is refused with no
-// card at all.
-func TestGate_UnknownToolAsksEveryCallAndIsNeverGrantable(t *testing.T) {
+// A name that is not in the browser's catalogue is refused BEFORE any card (the
+// broker would refuse it anyway); a malformed name too. A tool the catalogue
+// offers but the gate has no class for (a FUTURE acting tool) is asked every call
+// and never grantable: that is exercised by adding a name to the catalogue here.
+func TestGate_NamesOutsideTheCatalogueAreRefusedAndAFutureActingToolAsksEveryCall(t *testing.T) {
 	reg, r, runID := gateRun(t, "")
+	for _, bad := range []string{"browser_foo", "browser_click", "browser_evaluate", "", "Browser_Open", "browser open", "browser_open ", "../x", strings.Repeat("a", 65), "1tool", "tool\n"} {
+		if err := noCard(t, reg, r, BrowserCall{RunID: runID, Tool: bad}); err == nil || !strings.Contains(err.Error(), "not a browser tool") {
+			t.Fatalf("%q must be refused with no card: %v", bad, err)
+		}
+	}
+	old := browser.ToolNames
+	browser.ToolNames = append(append([]string(nil), old...), "browser_future_click")
+	t.Cleanup(func() { browser.ToolNames = old })
 	for i := 0; i < 2; i++ { // asked every call
-		ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_click"})
+		ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_future_click"})
 		if id == "" {
-			t.Fatal("an unknown tool must ask (fail closed)")
+			t.Fatal("a future acting tool must ask (fail closed)")
 		}
 		reqs, _ := permEvents(r)
 		for _, o := range reqs[len(reqs)-1].PermissionOptions {
@@ -219,28 +228,22 @@ func TestGate_UnknownToolAsksEveryCallAndIsNeverGrantable(t *testing.T) {
 		answer(t, reg, runID, id, "allow_once")
 		wantNil(t, ch)
 	}
-	if reg.BrowserGranted(runID, "browser_click") {
+	if reg.BrowserGranted(runID, "browser_future_click") {
 		t.Fatal("no grant exists for an acting tool")
 	}
-	// A read or open grant never admits it.
+	// Read and open grants never admit it.
 	chR, idR := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
 	answer(t, reg, runID, idR, "allow_run")
 	wantNil(t, chR)
 	chO, idO := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_open", URL: "http://localhost/"})
 	answer(t, reg, runID, idO, "allow_run")
 	wantNil(t, chO)
-	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_evaluate"})
+	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_future_click"})
 	if id == "" {
-		t.Fatal("with both grants held an unknown tool still asks")
+		t.Fatal("with both grants held a future acting tool still asks")
 	}
 	answer(t, reg, runID, id, "deny")
 	wantErr(t, ch, "the person said no")
-	// A malformed name is refused outright (no card, no hang).
-	for _, bad := range []string{"", "Browser_Open", "browser open", "browser_open ", "../x", strings.Repeat("a", 65), "1tool", "tool\n"} {
-		if err := noCard(t, reg, r, BrowserCall{RunID: runID, Tool: bad}); err == nil || !strings.Contains(err.Error(), "not a browser tool name") {
-			t.Fatalf("%q must be refused with no card: %v", bad, err)
-		}
-	}
 }
 
 // An answer applied after a revoke is void: a revoke fired between the answer and

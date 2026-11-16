@@ -67,7 +67,7 @@ type browserHost struct {
 	revokeGrants func(workspaceID int64)
 	revokeAll    func()
 	forgetRun    func(runID string)
-	liveDeny     func() ([]browser.Endpoint, error)
+	liveDeny     func(ctx context.Context) ([]browser.Endpoint, error)
 	// stopWatch ends the kill-switch watcher (nil when none runs).
 	stopWatch chan struct{}
 	// socks hosts the per-run sockets; nil when the socket directory could not
@@ -109,7 +109,7 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h.revokeGrants = reg.RevokeBrowserGrants
 	h.revokeAll = reg.RevokeAllBrowserGrants
 	h.forgetRun = reg.ForgetBrowserRun
-	h.liveDeny = newLiveDenySource(filepath.Join(config.Dir(), "listeners"), db).Endpoints
+	h.liveDeny = newLiveDenySource(filepath.Join(config.Dir(), "listeners"), db).EndpointsContext
 	h.launcher = func() (browser.Launcher, error) {
 		p, err := browser.DetectChrome("")
 		if err != nil {
@@ -215,7 +215,7 @@ func (h *browserHost) session(ctx context.Context, run browser.Run) (*browser.Se
 	if err != nil {
 		return nil, err // an *UnavailableError: the broker turns it into the plain install text
 	}
-	pol, allow, err := h.policyFor(run.WorkspaceID)
+	pol, allow, err := h.policyFor(ctx, run.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +230,7 @@ func (h *browserHost) session(ctx context.Context, run browser.Run) (*browser.Se
 // policyFor builds the workspace's navigation policy: the stored allowlist, the
 // daemon's own addresses (fail closed when they cannot be read), and the live
 // deny source (other listeners, linked daemons). It returns the allowlist too.
-func (h *browserHost) policyFor(ws int64) (browser.Policy, []string, error) {
+func (h *browserHost) policyFor(ctx context.Context, ws int64) (browser.Policy, []string, error) {
 	allow := h.allow(ws)
 	deny, err := h.deny()
 	if err != nil {
@@ -241,12 +241,13 @@ func (h *browserHost) policyFor(ws int64) (browser.Policy, []string, error) {
 		return browser.Policy{}, nil, err
 	}
 	if h.liveDeny != nil {
-		if _, lerr := h.liveDeny(); lerr != nil {
+		if _, lerr := h.liveDeny(ctx); lerr != nil {
 			// The reserved set cannot be read: no session and no call (and the policy
 			// below also refuses every address), never "no entries".
 			return browser.Policy{}, nil, lerr
 		}
-		pol = pol.WithLiveDeny(h.liveDeny)
+		live := h.liveDeny
+		pol = pol.WithLiveDeny(func() ([]browser.Endpoint, error) { return live(context.Background()) })
 	}
 	return pol, allow, nil
 }
@@ -413,7 +414,7 @@ func (h *browserHost) permission(ctx context.Context, runID string, ws int64, to
 		return errors.New("browser: no permission gate is installed")
 	}
 	call := runs.BrowserCall{RunID: runID, Tool: tool}
-	pol, allow, err := h.policyFor(ws)
+	pol, allow, err := h.policyFor(ctx, ws)
 	if err != nil {
 		return err
 	}

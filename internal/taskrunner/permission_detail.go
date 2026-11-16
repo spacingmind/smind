@@ -95,8 +95,10 @@ type BrowserCardInfo struct {
 	PathCut     bool     `json:"pathCut,omitempty"`
 	TaskTitle   string   `json:"taskTitle,omitempty"`
 	Workspace   string   `json:"workspace,omitempty"`
-	Allowlist   []string `json:"allowlist,omitempty"`
-	Uses        int      `json:"uses,omitempty"`
+	Allowlist   []string `json:"allowlist,omitempty"` // the first 20 whole hosts
+	// AllowlistTotal is how many hosts the workspace allows (Allowlist may be shorter).
+	AllowlistTotal int `json:"allowlistTotal,omitempty"`
+	Uses           int `json:"uses,omitempty"`
 }
 
 // GrantOffer is the scope of a saved grant, shown on the card before the human

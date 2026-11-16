@@ -35,7 +35,8 @@ type Option struct {
 
 type Info struct {
 	Tool, Class, URL, Host, HostASCII, HostStatus, TaskTitle, Workspace string
-	Allowlist                                                           []string
+	Allowlist                                                           []string // the first 20 hosts, whole
+	AllowlistTotal                                                      int      // how many hosts the workspace allows
 	Uses                                                                int
 	QueryLen                                                            int  // runes of the raw query, 0 if none
 	HasFragment                                                         bool // the raw URL carried a fragment
@@ -52,12 +53,11 @@ func Build(in Input) Card {
 	tool := cleanText(in.Tool, 64)
 	taskTitle := quoted(in.TaskTitle, 60)
 	workspace := quoted(in.Workspace, 60)
+	// EVERY host is cleaned (a valid host is up to 253 characters, never cut) so the
+	// card's text counts the true total; Info.Allowlist carries the first 20.
 	allowlist := make([]string, 0, len(in.Allowlist))
 	for _, h := range in.Allowlist {
-		if len(allowlist) == 20 {
-			break
-		}
-		if c := cleanText(h, 120); c != "" {
+		if c := cleanText(h, 253); c != "" {
 			allowlist = append(allowlist, c)
 		}
 	}
@@ -103,15 +103,15 @@ func summary(in Input, tool, taskTitle, workspace string, allowlist []string, fa
 	switch in.Class {
 	case ClassRead:
 		body = fmt.Sprintf(
-			`Let this run read browser pages? "%s" wants to use the browser in %s (read-only: tabs, snapshot, screenshot, console, wait). It can reach this computer's localhost and: %s. Page text is untrusted.`,
+			`Let this run read browser pages? "%s" wants to use the browser in "%s" (read-only: tabs, snapshot, screenshot, console, wait). It can reach this computer's localhost and: %s. Page text is untrusted.`,
 			taskTitle, workspace, hostsText(allowlist))
 	case ClassOpen:
 		if in.Tool == "browser_close" {
-			body = fmt.Sprintf(`Close a browser tab? "%s" in %s.`, taskTitle, workspace)
+			body = fmt.Sprintf(`Close a browser tab? "%s" in "%s".`, taskTitle, workspace)
 			break
 		}
 		body = fmt.Sprintf(
-			`Open %s%s in the browser? (%s) "%s" in %s has used the browser %d times.`,
+			`Open %s%s in the browser? (%s) "%s" in "%s" has used the browser %d times.`,
 			redactURL(in.URL), markersText(facts), hostStatusText(in.HostStatus), taskTitle, workspace, in.Uses)
 	default:
 		target := "the current page"
@@ -119,7 +119,7 @@ func summary(in Input, tool, taskTitle, workspace string, allowlist []string, fa
 			target = redactURL(in.URL) + markersText(facts)
 		}
 		body = fmt.Sprintf(
-			`Allow %s on %s? "%s" in %s. Asked every time.`,
+			`Allow %s on %s? "%s" in "%s". Asked every time.`,
 			tool, target, taskTitle, workspace)
 	}
 	return cleanText(body, summaryBodyMax) + daemonCheck
@@ -196,13 +196,14 @@ func hostStatusText(status string) string {
 
 func info(in Input, tool, taskTitle, workspace string, allowlist []string, facts urlFacts) Info {
 	i := Info{
-		Tool:       tool,
-		Class:      string(in.Class),
-		HostStatus: in.HostStatus,
-		TaskTitle:  taskTitle,
-		Workspace:  workspace,
-		Allowlist:  allowlist,
-		Uses:       in.Uses,
+		Tool:           tool,
+		Class:          string(in.Class),
+		HostStatus:     in.HostStatus,
+		TaskTitle:      taskTitle,
+		Workspace:      workspace,
+		Allowlist:      firstHosts(allowlist, 20),
+		AllowlistTotal: len(allowlist),
+		Uses:           in.Uses,
 	}
 	if in.Tool == "browser_close" {
 		return i
@@ -225,4 +226,12 @@ func info(in Input, tool, taskTitle, workspace string, allowlist []string, facts
 func asciiHostOf(host string) string {
 	_, ascii := hostDisplay(host)
 	return ascii
+}
+
+// firstHosts returns up to n whole hosts.
+func firstHosts(hosts []string, n int) []string {
+	if len(hosts) <= n {
+		return hosts
+	}
+	return hosts[:n]
 }

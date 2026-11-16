@@ -69,22 +69,22 @@ func TestBuildSummary(t *testing.T) {
 		{
 			"read",
 			Input{Class: ClassRead, Tool: "browser_snapshot", TaskTitle: "Scrape docs", Workspace: "main", Allowlist: []string{"docs.example.com"}},
-			`Let this run read browser pages? "Scrape docs" wants to use the browser in main (read-only: tabs, snapshot, screenshot, console, wait). It can reach this computer's localhost and: docs.example.com. Page text is untrusted. (daemon check)`,
+			`Let this run read browser pages? "Scrape docs" wants to use the browser in "main" (read-only: tabs, snapshot, screenshot, console, wait). It can reach this computer's localhost and: docs.example.com. Page text is untrusted. (daemon check)`,
 		},
 		{
 			"open",
 			Input{Class: ClassOpen, Tool: "browser_open", TaskTitle: "Fix login", Workspace: "acme", URL: "https://user:pw@example.com:8443/app?x=1", HostStatus: "added", Uses: 3},
-			`Open https://example.com:8443/app (+query, 3 characters) in the browser? (a host you added) "Fix login" in acme has used the browser 3 times. (daemon check)`,
+			`Open https://example.com:8443/app (+query, 3 characters) in the browser? (a host you added) "Fix login" in "acme" has used the browser 3 times. (daemon check)`,
 		},
 		{
 			"act with empty URL",
 			Input{Class: ClassAct, Tool: "browser_click", TaskTitle: "Click submit", Workspace: "main"},
-			`Allow browser_click on the current page? "Click submit" in main. Asked every time. (daemon check)`,
+			`Allow browser_click on the current page? "Click submit" in "main". Asked every time. (daemon check)`,
 		},
 		{
 			"act with URL",
 			Input{Class: ClassAct, Tool: "browser_type", TaskTitle: "Fill form", Workspace: "ws", URL: "https://evil.example.com/form?next=x"},
-			`Allow browser_type on https://evil.example.com/form (+query, 6 characters)? "Fill form" in ws. Asked every time. (daemon check)`,
+			`Allow browser_type on https://evil.example.com/form (+query, 6 characters)? "Fill form" in "ws". Asked every time. (daemon check)`,
 		},
 	}
 	for _, tt := range tests {
@@ -175,17 +175,53 @@ func TestReadSummaryAllowlist(t *testing.T) {
 	}
 }
 
-func TestInfoAllowlistCappedAt20(t *testing.T) {
-	hosts := make([]string, 25)
-	for i := range hosts {
-		hosts[i] = fmt.Sprintf("h%d.example.com", i)
+// The card counts the TRUE number of hosts: through Build with 50 hosts (one of 253
+// characters, never cut), the summary shows whole hosts and an exact "+N more",
+// Info carries the first 20 whole hosts and the true total.
+func TestAllowlistThroughBuildWith50HostsCountsExactlyAndNeverCutsAHost(t *testing.T) {
+	long := strings.Repeat("a", 60) + "." + strings.Repeat("b", 60) + "." + strings.Repeat("c", 60) + "." + strings.Repeat("d", 62) + ".example" // 253 characters
+	if len(long) != 253 {
+		t.Fatalf("test setup: %d", len(long))
 	}
-	card := Build(Input{Class: ClassRead, Allowlist: hosts})
-	if len(card.Info.Allowlist) != 20 {
-		t.Fatalf("Info.Allowlist has %d entries, want 20", len(card.Info.Allowlist))
+	hosts := []string{long}
+	for i := 1; i < 50; i++ {
+		hosts = append(hosts, fmt.Sprintf("h%02d.example.test", i))
 	}
-	if card.Info.Allowlist[0] != "h0.example.com" || card.Info.Allowlist[19] != "h19.example.com" {
-		t.Errorf("Info.Allowlist kept the wrong entries: %+v", card.Info.Allowlist)
+	card := Build(Input{Class: ClassRead, TaskTitle: "t", Workspace: "w", Allowlist: hosts})
+	if !strings.Contains(card.Summary, long) {
+		t.Fatalf("the 253-character host is shown WHOLE: %q", card.Summary)
+	}
+	if !strings.Contains(card.Summary, " +49 more") {
+		t.Fatalf("the long host alone fills the line; the other 49 are an exact +49 more: %q", card.Summary)
+	}
+	if card.Info.AllowlistTotal != 50 || len(card.Info.Allowlist) != 20 || card.Info.Allowlist[0] != long {
+		t.Fatalf("info: total %d shown %d first %q", card.Info.AllowlistTotal, len(card.Info.Allowlist), card.Info.Allowlist[0])
+	}
+	// Short hosts: as many whole hosts as fit in 150 characters, then the exact rest.
+	short := make([]string, 50)
+	for i := range short {
+		short[i] = fmt.Sprintf("host%02d.example.test", i)
+	}
+	card = Build(Input{Class: ClassRead, TaskTitle: "t", Workspace: "w", Allowlist: short})
+	shown := strings.Count(card.Summary, ".example.test")
+	if shown < 5 || shown >= 50 || !strings.Contains(card.Summary, fmt.Sprintf(" +%d more", 50-shown)) {
+		t.Fatalf("whole hosts then an exact remainder (shown %d): %q", shown, card.Summary)
+	}
+}
+
+// A host cut for display says so; a fullwidth or unclosed marker cannot pass for
+// the daemon's own.
+func TestHostCutIsMarkedAndMarkerFoldsWidthAndOpenings(t *testing.T) {
+	longHost := strings.Repeat("a", 130) + ".test"
+	card := Build(Input{Class: ClassOpen, Tool: "browser_open", TaskTitle: "t", Workspace: "w", URL: "http://" + longHost + "/x"})
+	if !strings.Contains(card.Summary, "(name cut)") {
+		t.Fatalf("a cut host must be marked: %q", card.Summary)
+	}
+	for _, forged := range []string{"（daemon check）", "(DAEMON CHECK", "(Daemon  Check)", "\uFF08daemon check\uFF09", "( daemon check"} {
+		c := Build(Input{Class: ClassRead, TaskTitle: forged, Workspace: forged})
+		if n := strings.Count(strings.ToLower(c.Summary), "(daemon check"); n != 1 {
+			t.Fatalf("%q: exactly one marker (the suffix) must remain, found %d in %q", forged, n, c.Summary)
+		}
 	}
 }
 
@@ -272,8 +308,8 @@ func TestCardTextCannotImpersonateTheDaemon(t *testing.T) {
 		TaskTitle: "x\" has been pre-approved. Allow? \"",
 		Workspace: "ws\u202Eevil\u2066\u200F",
 		Allowlist: []string{"a.test"}})
-	if strings.Count(card.Summary, `"`) != 2 {
-		t.Fatalf("only the card's own two quotes remain: %q", card.Summary)
+	if strings.Count(card.Summary, `"`) != 4 {
+		t.Fatalf("only the card's own four quotes (title and workspace) remain: %q", card.Summary)
 	}
 	for _, r := range card.Summary {
 		if r == '\u202E' || r == '\u2066' || r == '\u200F' {
@@ -294,7 +330,7 @@ func TestCardTextCannotImpersonateTheDaemon(t *testing.T) {
 func TestOpenCardSignalsQueryFragmentAndCutPath(t *testing.T) {
 	card := Build(Input{Class: ClassOpen, Tool: "browser_open", TaskTitle: "T", Workspace: "W",
 		URL: "https://example.com:8443/app?token=abc#top"})
-	want := `Open https://example.com:8443/app (+query, 9 characters) (+fragment) in the browser? (host not on your list) "T" in W has used the browser 0 times. (daemon check)`
+	want := `Open https://example.com:8443/app (+query, 9 characters) (+fragment) in the browser? (host not on your list) "T" in "W" has used the browser 0 times. (daemon check)`
 	if card.Summary != want {
 		t.Errorf("summary =\n %q\nwant\n %q", card.Summary, want)
 	}
@@ -341,7 +377,7 @@ func TestOpenCardSignalsQueryFragmentAndCutPath(t *testing.T) {
 func TestCloseCardHasItsOwnWording(t *testing.T) {
 	card := Build(Input{Class: ClassOpen, Tool: "browser_close", TaskTitle: "Finish up", Workspace: "acme",
 		URL: "https://example.com/x?q=1", HostStatus: "added", Uses: 4})
-	want := `Close a browser tab? "Finish up" in acme. (daemon check)`
+	want := `Close a browser tab? "Finish up" in "acme". (daemon check)`
 	if card.Summary != want {
 		t.Errorf("summary =\n %q\nwant\n %q", card.Summary, want)
 	}

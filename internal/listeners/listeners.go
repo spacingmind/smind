@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -102,6 +103,10 @@ func Register(dir, name, addr string) (remove func(), err error) {
 	// (or caller) reconfiguring refreshEvery.
 	interval := refreshEvery
 	go func() {
+		// A panic in the refresh must never take the daemon down (this package
+		// cannot import internal/crash without a cycle): contain it and stop this
+		// registration's refresh; the in-memory entry stays.
+		defer func() { _ = recover() }()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -111,13 +116,9 @@ func Register(dir, name, addr string) (remove func(), err error) {
 			case <-ticker.C:
 				// healMu spans the whole check-and-rewrite so remove cannot
 				// delete the file while a rewrite is in flight.
-				healMu.Lock()
-				if stopped {
-					healMu.Unlock()
+				if healOnce(&healMu, &stopped, dir, file, data) {
 					return
 				}
-				heal(dir, file, data)
-				healMu.Unlock()
 			}
 		}
 	}()
@@ -169,12 +170,30 @@ func writeEntryFile(dir, file string, data []byte) error {
 
 // heal re-creates dir and file when the file is missing, its content no
 // longer equals the entry, or the directory is gone.
+// healPanicHook is a test seam: set, it runs at the start of every heal.
+var healPanicHook atomic.Pointer[func()]
+
 func heal(dir, file string, data []byte) {
+	if h := healPanicHook.Load(); h != nil {
+		(*h)()
+	}
 	if entryFileMatches(file, data) {
 		return
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
+	}
+	// Something that is not a regular file may sit where the record belongs (an
+	// agent shell can mkdir or mkfifo or symlink there so the rename fails for
+	// ever): remove it, without following it, and only this one path inside dir.
+	if filepath.Dir(file) == filepath.Clean(dir) {
+		if info, err := os.Lstat(file); err == nil && !info.Mode().IsRegular() {
+			if info.IsDir() {
+				_ = os.RemoveAll(file) // does not follow symlinks inside
+			} else {
+				_ = os.Remove(file) // a symlink or FIFO or device: the link itself, never its target
+			}
+		}
 	}
 	_ = writeEntryFile(dir, file, data)
 }
@@ -304,4 +323,17 @@ func randomSuffix() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// healOnce runs one check-and-rewrite under mu and reports whether the
+// registration was stopped. The unlock is deferred, so a panic in heal can never
+// leave mu locked (remove takes it).
+func healOnce(mu *sync.Mutex, stopped *bool, dir, file string, data []byte) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	if *stopped {
+		return true
+	}
+	heal(dir, file, data)
+	return false
 }

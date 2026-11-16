@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/browsercard"
 	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -198,9 +200,13 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 		// every call, never grantable), and a name that is not a plain tool name is
 		// refused outright. The broker refuses a tool it does not offer anyway; this
 		// only makes sure nothing the broker might ever run is admitted unasked.
-		if !validToolName(call.Tool) {
-			return refused("not a browser tool name")
+		if !validToolName(call.Tool) || !slices.Contains(browser.ToolNames, call.Tool) {
+			// Not a tool the browser offers: refused BEFORE any card (a person is never
+			// asked about something the broker would refuse anyway).
+			return refused("not a browser tool")
 		}
+		// A tool the browser offers but this gate has no class for (a future acting
+		// tool added to the catalogue): an acting tool, asked every call.
 		class = browsercard.ClassAct
 	}
 	r, err := reg.get(call.RunID)
@@ -281,7 +287,7 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 	detail := &taskrunner.PermissionDetail{Kind: "browser", Browser: &taskrunner.BrowserCardInfo{
 		Tool: card.Info.Tool, Class: card.Info.Class, URL: card.Info.URL, Host: card.Info.Host, HostASCII: card.Info.HostASCII,
 		HostStatus: card.Info.HostStatus, TaskTitle: card.Info.TaskTitle, Workspace: card.Info.Workspace,
-		Allowlist: card.Info.Allowlist, Uses: card.Info.Uses,
+		Allowlist: card.Info.Allowlist, AllowlistTotal: card.Info.AllowlistTotal, Uses: card.Info.Uses,
 		QueryLen: card.Info.QueryLen, HasFragment: card.Info.HasFragment, PathCut: card.Info.PathCut,
 	}}
 

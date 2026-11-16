@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -128,8 +129,13 @@ func newCallbackServer(addr, path, providerLabel, state string) (*callbackServer
 	s := &callbackServer{listener: listener, result: make(chan callbackResult, 1), providerLabel: providerLabel, state: state}
 	// The callback listener exists only for one login: record its address for the
 	// agent browser's deny list while it is open (a page must never reach it).
-	if rm, lerr := listenerfiles.Register(filepath.Join(config.Dir(), "listeners"), "oauth-callback", listener.Addr().String()); lerr == nil {
-		s.unregister = rm
+	// Register returns a working remove EVEN ON ERROR (the entry then lives in
+	// memory and a goroutine keeps trying to publish it): always keep it, so close
+	// ends both.
+	rm, lerr := listenerfiles.Register(filepath.Join(config.Dir(), "listeners"), "oauth-callback", listener.Addr().String())
+	s.unregister = rm
+	if lerr != nil {
+		log.Printf("oauth callback listener record for %s not written: %v", listener.Addr(), lerr)
 	}
 
 	mux := http.NewServeMux()

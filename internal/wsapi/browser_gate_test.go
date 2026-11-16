@@ -125,7 +125,7 @@ func TestGate_LiveDenyRefusesBeforeACardAndBeatsTheAllowlist(t *testing.T) {
 	e, h, rp := gateHost(t)
 	h.allow = func(int64) []string { return []string{"10.1.2.3"} }
 	live := []browser.Endpoint{{Host: "127.0.0.1", Port: 41234}, {Host: "10.1.2.3", Port: 8088}}
-	h.liveDeny = func() ([]browser.Endpoint, error) { return live, nil }
+	h.liveDeny = func(context.Context) ([]browser.Endpoint, error) { return live, nil }
 	for _, u := range []string{"http://localhost:41234/", "http://127.0.0.1:41234/x", "http://10.1.2.3:8088/"} {
 		if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_open", `{"url":"`+u+`"}`); err == nil {
 			t.Fatalf("%s is on the live deny list", u)
@@ -590,7 +590,7 @@ func TestLiveDeny_UnreadableDirectoryFailsClosedAndLocalListenersSurviveDeletion
 	}
 	// The host refuses a session and a call, not just the URLs.
 	e, h, _ := gateHost(t)
-	h.liveDeny = s.Endpoints
+	h.liveDeny = s.EndpointsContext
 	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "listener records cannot be read") {
 		t.Fatalf("a call with an unreadable listener directory: %v", err)
 	}
@@ -643,4 +643,53 @@ func TestLiveDeny_RefreshIsSingleFlight(t *testing.T) {
 	if reads != 1 {
 		t.Fatalf("50 concurrent decisions read the directory %d times, want exactly one refresh", reads)
 	}
+}
+
+// A panic in the refresh must not wedge every later decision: it fails closed once,
+// releases its waiters, and the next call works. A waiter whose context ends leaves
+// instead of waiting for the refresh.
+func TestLiveDeny_APanicingRefreshReleasesTheFlightAndWaitersHonourContext(t *testing.T) {
+	dir := t.TempDir()
+	s := newLiveDenySource(dir, nil)
+	rm, err := listeners.Register(dir, "relay", "127.0.0.1:43997")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rm()
+	// 1. A panic in the refresh: an error (fail closed), no deadlock, then recovery.
+	panics := true
+	s.alive = func(int) bool {
+		if panics {
+			panic("boom")
+		}
+		return true
+	}
+	if _, err := s.Endpoints(); err == nil {
+		t.Fatal("a panicking refresh must fail closed with an error")
+	}
+	panics = false
+	done := make(chan error, 1)
+	go func() { _, err := s.Endpoints(); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the refresh after a panic works: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a panic in the refresh left the flight set: every later call deadlocks")
+	}
+	// 2. A waiter leaves with its context while a refresh is stuck.
+	time.Sleep(liveDenyTTL + 50*time.Millisecond) // sleep-ok: past the cache window so the next call refreshes
+	block := make(chan struct{})
+	started := make(chan struct{})
+	s.alive = func(int) bool { close(started); <-block; return true }
+	go func() { _, _ = s.Endpoints() }() // the leader, stuck in alive()
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := s.EndpointsContext(ctx); err == nil || time.Since(start) > 3*time.Second {
+		t.Fatalf("a waiter must leave when its context ends: %v after %v", err, time.Since(start))
+	}
+	close(block)
 }

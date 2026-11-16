@@ -221,10 +221,12 @@ func cmdServe(args []string) int {
 		listeners = append(listeners, ln)
 		// Record the address for the agent browser's deny list (a page must never
 		// reach it); removed when the daemon stops.
-		if rm, lerr := listenerfiles.Register(filepath.Join(config.Dir(), "listeners"), "daemon", ln.Addr().String()); lerr != nil {
+		// Register returns a working remove even on error (the entry then lives in
+		// memory and the record is retried): always defer it.
+		rm, lerr := listenerfiles.Register(filepath.Join(config.Dir(), "listeners"), "daemon", ln.Addr().String())
+		defer rm()
+		if lerr != nil {
 			log.Printf("listener file for %s not written: %v", ln.Addr(), lerr)
-		} else {
-			defer rm()
 		}
 	}
 	if !cfg.Server.ListenIsLoopback() {

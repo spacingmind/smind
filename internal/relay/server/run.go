@@ -180,10 +180,10 @@ func Run(ctx context.Context, cfg Config) error {
 		if cfg.ListenersDir == "" {
 			break
 		}
-		if rm, lerr := listenerfiles.Register(cfg.ListenersDir, name, l.Addr().String()); lerr != nil {
+		rm, lerr := listenerfiles.Register(cfg.ListenersDir, name, l.Addr().String())
+		defer rm() // a working remove even on error: the in-memory entry and the retry end with the relay
+		if lerr != nil {
 			log.Printf("relay: listener file for %s not written: %v", name, lerr)
-		} else {
-			defer rm()
 		}
 	}
 
