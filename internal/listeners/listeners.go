@@ -109,6 +109,11 @@ func Read(dir string, alive func(pid int) bool) []Entry {
 }
 
 func readEntry(file string) (Entry, bool) {
+	// Only a regular file is opened: a FIFO or a device planted by another process
+	// must never make a reader block, and a symlink is not followed.
+	if info, err := os.Lstat(file); err != nil || !info.Mode().IsRegular() {
+		return Entry{}, false
+	}
 	f, err := os.Open(file)
 	if err != nil {
 		return Entry{}, false

@@ -65,11 +65,12 @@ the agent tool's.
 
 ## Which agents can use it
 
-Agents run through the Agent Client Protocol (for example GLM and the other
-providers smind runs that way) and Claude Code runs can use it when the Claude
-SDK bundled with your smind reports its process (from the version that adds that,
-which this page describes). Codex-native runs and plugin providers never get it.
-On **Windows the browser is not offered**.
+Agents that smind runs through the Agent Client Protocol (for example GLM and
+the other providers run that way) can use it. **Claude Code runs cannot yet:**
+the browser needs the process id of the Claude CLI, and the Claude SDK bundled
+with this version of smind does not report it; a later release that updates the
+SDK turns it on. Codex-native runs and plugin providers never get it. On
+**Windows the browser is not offered**.
 
 ## What it does not protect against
 

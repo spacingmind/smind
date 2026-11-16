@@ -112,8 +112,8 @@ func assertSummaryShape(t *testing.T, summary, taskTitle, workspace string) {
 	if strings.ContainsAny(summary, "\n\r") {
 		t.Errorf("summary contains a newline: %q", summary)
 	}
-	if n := utf8.RuneCountInString(summary); n > 300 {
-		t.Errorf("summary is %d runes, want <= 300", n)
+	if n := utf8.RuneCountInString(summary); n > 500 {
+		t.Errorf("summary is %d runes, want <= 500", n)
 	}
 }
 
@@ -129,16 +129,19 @@ func TestSummaryHugeInputs(t *testing.T) {
 			URL:       "https://example.com/p?" + long,
 			Uses:      9,
 		})
-		// Under huge inputs the tail marker may be truncated by the 300-rune
-		// cap; what must hold is the cap itself and the one-line shape.
+		// Under huge inputs the cap and the one-line shape hold, and the daemon's
+		// marker stays at the end.
 		if card.Summary == "" {
 			t.Fatalf("class %v: summary is empty", class)
 		}
 		if strings.ContainsAny(card.Summary, "\n\r") {
 			t.Errorf("class %v: summary contains a newline: %q", class, card.Summary)
 		}
-		if n := utf8.RuneCountInString(card.Summary); n > 300 {
-			t.Errorf("class %v: summary is %d runes, want <= 300", class, n)
+		if !strings.HasSuffix(card.Summary, "(daemon check)") {
+			t.Errorf("class %v: the marker must survive huge inputs: ...%q", class, card.Summary[len(card.Summary)-40:])
+		}
+		if n := utf8.RuneCountInString(card.Summary); n > 500 {
+			t.Errorf("class %v: summary is %d runes, want <= 500", class, n)
 		}
 	}
 }
@@ -259,5 +262,31 @@ func TestInfoHost(t *testing.T) {
 	notWeb := Build(Input{Class: ClassAct, Tool: "browser_click", URL: "javascript:alert(1)"})
 	if notWeb.Info.Host != "" {
 		t.Errorf("non-web URL: Info.Host = %q, want empty", notWeb.Info.Host)
+	}
+}
+
+// Text a person reads to decide must not be able to fake the card: quotes in a
+// title are neutralised, and bidirectional/format characters are dropped.
+func TestCardTextCannotImpersonateTheDaemon(t *testing.T) {
+	card := Build(Input{Class: ClassRead, Tool: "browser_tabs",
+		TaskTitle: "x\" has been pre-approved. Allow? \"",
+		Workspace: "ws\u202Eevil\u2066\u200F",
+		Allowlist: []string{"a.test"}})
+	if strings.Count(card.Summary, `"`) != 2 {
+		t.Fatalf("only the card's own two quotes remain: %q", card.Summary)
+	}
+	for _, r := range card.Summary {
+		if r == '\u202E' || r == '\u2066' || r == '\u200F' {
+			t.Fatalf("a bidi/format character survived: %q", card.Summary)
+		}
+	}
+	if !strings.HasSuffix(card.Summary, "(daemon check)") {
+		t.Fatalf("marker: %q", card.Summary)
+	}
+	// Long title and workspace plus five long hosts cannot push the hosts note or the marker off.
+	long := strings.Repeat("h", 200)
+	card = Build(Input{Class: ClassRead, TaskTitle: long, Workspace: long, Allowlist: []string{long, long, long, long, long, long, long}})
+	if !strings.HasSuffix(card.Summary, "(daemon check)") || utf8.RuneCountInString(card.Summary) > 500 {
+		t.Fatalf("the marker stays and the summary stays capped: %d runes: %q", utf8.RuneCountInString(card.Summary), card.Summary)
 	}
 }

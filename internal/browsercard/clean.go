@@ -14,7 +14,10 @@ func cleanText(s string, max int) string {
 	var b strings.Builder
 	pendingSpace := false
 	for _, r := range s {
-		if r == '\u2028' || r == '\u2029' || (unicode.IsControl(r) && !unicode.IsSpace(r)) {
+		// Control characters, line/paragraph separators and every format character
+		// (Cf: bidirectional overrides and isolates, zero-width joiners) are dropped:
+		// none belongs in a line a person reads to decide.
+		if r == '\u2028' || r == '\u2029' || unicode.Is(unicode.Cf, r) || (unicode.IsControl(r) && !unicode.IsSpace(r)) {
 			continue
 		}
 		if unicode.IsSpace(r) {
@@ -50,5 +53,11 @@ func redactURL(raw string) string {
 	if path == "" {
 		path = "/"
 	}
-	return u.Scheme + "://" + u.Host + path
+	return u.Scheme + "://" + cleanText(u.Host, 120) + path
+}
+
+// quoted is cleanText for text that is shown inside double quotes: a double quote
+// in it would end the quote early and let a title pose as the card's own words.
+func quoted(s string, max int) string {
+	return strings.ReplaceAll(cleanText(s, max), `"`, "'")
 }

@@ -203,26 +203,59 @@ func TestGate_ChildDeadlineOutlastsAHeldCall(t *testing.T) {
 	}
 }
 
-// Only a human can answer the card: the answer RPCs are human-only and not
-// reachable by an identified run (an agent cannot approve its own card).
+// Only a human can answer the card: a REAL card is pending, an identified run
+// connection (what an agent's MCP child or shell can be) is refused by the
+// dispatcher for every answer method, the card stays pending, and the human's own
+// connection answers it.
 func TestGate_OnlyAHumanAnswersACard(t *testing.T) {
-	e := newProcEnv(t)
-	for _, m := range []string{"run.respondPermission", "run.answerPermission"} {
-		h, ok := e.api.hs[m]
-		if !ok {
-			continue
-		}
-		if _, err := h(context.Background(), &requestContext{runScoped: true}, json.RawMessage(`{"runId":"x","requestId":"y","optionId":"allow_run"}`)); err == nil {
-			t.Errorf("%s accepted a run-scoped caller", m)
-		}
-		for _, scoped := range RunScopedMethods {
-			if scoped == m {
-				t.Errorf("%s is run-scoped: an agent could answer its own card", m)
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	e.api.browser.gate = func(int64) bool { return true }
+	res := make(chan error, 1)
+	go func() {
+		res <- e.api.Runs.BrowserGate(context.Background(), runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
+	}()
+	var reqID string
+	for deadline := time.Now().Add(10 * time.Second); reqID == "" && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		for _, p := range e.api.Runs.PendingPermissions() {
+			if p.RunID == e.runID && p.Detail != nil && p.Detail.Kind == "browser" {
+				reqID = p.RequestID
 			}
 		}
 	}
-	if _, ok := e.api.hs["run.respondPermission"]; !ok {
-		t.Fatal("run.respondPermission is the answer path of the browser card")
+	if reqID == "" {
+		t.Fatal("no card was raised")
+	}
+	agent := e.identified(t)
+	for _, m := range []string{"run.respondPermission", "run.answerPermission"} {
+		resp := callWS(t, agent, m, map[string]any{"runId": e.runID, "requestId": reqID, "optionId": "allow_run"})
+		if resp.Error == nil || resp.Error.Code != "forbidden" {
+			t.Fatalf("%s over an identified run connection: %+v / %+v, want forbidden", m, resp.Result, resp.Error)
+		}
+	}
+	if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("the agent's connection approved its own card")
+	}
+	stillPending := false
+	for _, p := range e.api.Runs.PendingPermissions() {
+		if p.RequestID == reqID {
+			stillPending = true
+		}
+	}
+	if !stillPending {
+		t.Fatal("the card must stay pending after the refused answers")
+	}
+	// The human's own (unidentified) connection answers it.
+	if resp := callWS(t, e.admin, "run.respondPermission", map[string]any{"runId": e.runID, "requestId": reqID, "optionId": "allow_run"}); resp.Error != nil {
+		t.Fatalf("the human's answer: %+v", resp.Error)
+	}
+	select {
+	case err := <-res:
+		if err != nil {
+			t.Fatalf("the human's answer admits the call: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the held call never finished")
 	}
 }
 

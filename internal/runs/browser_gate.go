@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spacingmind/smind/internal/browsercard"
@@ -31,6 +32,11 @@ const (
 	browserDenyWindow = time.Minute
 	browserDenyLimit  = 3
 	browserDenyPause  = 5 * time.Minute
+	// browserTimeoutPause: after a card nobody answered, no new card for this long.
+	browserTimeoutPause = 30 * time.Second
+	// browserMaxWaiters bounds the calls of one run waiting on its card (the running
+	// one included).
+	browserMaxWaiters = 4
 )
 
 // readTools are admitted together by one per-run read grant.
@@ -67,12 +73,18 @@ type BrowserCall struct {
 // switch and the kill switch, and is never persisted.
 type browserRunState struct {
 	workspaceID int64
-	ask         sync.Mutex // one card at a time per run
+	// ask is a one-slot semaphore: one card at a time per run, and a queued call
+	// leaves when its context ends (a mutex would hold it for a whole card). waiters
+	// bounds how many calls may queue behind it.
+	ask     chan struct{}
+	waiters atomic.Int32
 
 	mu           sync.Mutex
+	epoch        uint64 // bumped by every revoke: an answer taken before one is void
 	read, open   bool
 	denials      []time.Time
 	blockedUntil time.Time
+	blockedWhy   string // what the agent is told while blockedUntil is in the future
 	uses         int
 }
 
@@ -84,7 +96,7 @@ func (reg *Registry) browserRun(runID string, workspaceID int64) *browserRunStat
 	}
 	s := reg.bgRuns[runID]
 	if s == nil {
-		s = &browserRunState{workspaceID: workspaceID}
+		s = &browserRunState{workspaceID: workspaceID, ask: make(chan struct{}, 1)}
 		reg.bgRuns[runID] = s
 	}
 	return s
@@ -106,6 +118,7 @@ func (reg *Registry) RevokeBrowserGrants(workspaceID int64) {
 		if s.workspaceID == workspaceID {
 			s.mu.Lock()
 			s.read, s.open = false, false
+			s.epoch++
 			s.mu.Unlock()
 		}
 	}
@@ -118,6 +131,7 @@ func (reg *Registry) RevokeAllBrowserGrants() {
 	for _, s := range reg.bgRuns {
 		s.mu.Lock()
 		s.read, s.open = false, false
+		s.epoch++
 		s.mu.Unlock()
 	}
 }
@@ -168,8 +182,8 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 		return nil // the broker refuses an unknown tool; no card is raised for it
 	}
 	r, err := reg.get(call.RunID)
-	if err != nil {
-		return refused("the run is not known")
+	if err != nil || r.requireRunning("browser") != nil {
+		return refused("the run is not known or has ended")
 	}
 	task, err := reg.st.GetTask(r.taskID)
 	if err != nil {
@@ -197,7 +211,7 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 	st.mu.Lock()
 	if time.Now().Before(st.blockedUntil) {
 		st.mu.Unlock()
-		return refused("the person declined; do not ask again for now")
+		return refused("%s", st.blockedWhy)
 	}
 	if st.grants(class) {
 		st.uses++
@@ -206,13 +220,23 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 	}
 	st.mu.Unlock()
 
-	// 3. Hold the call and raise a card; one card at a time per run.
-	st.ask.Lock()
-	defer st.ask.Unlock()
+	// 3. Hold the call and raise a card; one card at a time per run, a bounded
+	// queue behind it, and a call whose context ends leaves the queue.
+	if st.waiters.Add(1) > browserMaxWaiters {
+		st.waiters.Add(-1)
+		return refused("too many browser calls are waiting for an answer")
+	}
+	defer st.waiters.Add(-1)
+	select {
+	case st.ask <- struct{}{}:
+	case <-ctx.Done():
+		return refused("the call ended while it waited for an earlier question")
+	}
+	defer func() { <-st.ask }()
 	st.mu.Lock()
 	if time.Now().Before(st.blockedUntil) {
 		st.mu.Unlock()
-		return refused("the person declined; do not ask again for now")
+		return refused("%s", st.blockedWhy)
 	}
 	if st.grants(class) { // another call's card granted it while this one waited
 		st.uses++
@@ -220,6 +244,7 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 		return nil
 	}
 	uses := st.uses
+	epoch := st.epoch
 	st.mu.Unlock()
 
 	ws, _ := reg.st.GetWorkspace(task.WorkspaceID)
@@ -241,17 +266,33 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 	d.timeout, d.timedOut = browserGateWait, &timedOut
 	optionID, _, derr := d.decide(ctx, card.Summary, detail, options, false)
 	if derr != nil {
-		return refused("the permission request ended (%v)", derr)
+		return refused("the permission request ended")
 	}
 	if timedOut {
-		return refused("no one answered the permission request; ask again if it is still needed")
+		// Nobody is there: do not raise another card at once (an agent could
+		// otherwise spam an empty room); the next call after the pause asks again.
+		st.mu.Lock()
+		st.blockedUntil = time.Now().Add(browserTimeoutPause)
+		st.blockedWhy = "no one answered a moment ago; try again later"
+		st.mu.Unlock()
+		return refused("no one answered the permission request; ask again later if it is still needed")
 	}
+
+	st.mu.Lock()
+	if st.epoch != epoch {
+		// A switch (the workspace's or the kill switch) was turned off while the
+		// card was open: whatever was answered is void.
+		st.mu.Unlock()
+		return refused("the browser was switched off while the question was open")
+	}
+	st.mu.Unlock()
 
 	switch optionID {
 	case "allow_once":
 		st.mu.Lock()
 		st.uses++
 		st.mu.Unlock()
+		_ = reg.NoteRunEvent(call.RunID, fmt.Sprintf("browser: %s allowed once", call.Tool))
 		return nil
 	case "allow_run":
 		st.mu.Lock()
@@ -282,8 +323,10 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 	st.denials = append(keep, now)
 	if len(st.denials) >= browserDenyLimit {
 		st.blockedUntil = now.Add(browserDenyPause)
+		st.blockedWhy = "the person declined; do not ask again for now"
 		st.denials = nil
 	}
 	st.mu.Unlock()
+	_ = reg.NoteRunEvent(call.RunID, fmt.Sprintf("browser: %s refused by the person", call.Tool))
 	return refused("the person said no")
 }

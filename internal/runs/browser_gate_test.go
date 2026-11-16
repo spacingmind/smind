@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/browsercard"
+	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -86,9 +91,40 @@ func noCard(t *testing.T, reg *Registry, r *run, call BrowserCall) error {
 	}
 }
 
+// gateRun starts a RUNNING run (a hanging fake agent: the gate refuses a run that
+// has ended) with the policy engine installed ("" = an empty policy file).
 func gateRun(t *testing.T, policy string) (*Registry, *run, string) {
 	t.Helper()
-	reg, r, runID, _ := policyRun(t, taskrunner.PermissionSettings{}, policy, true)
+	return gateRunWith(t, taskrunner.PermissionSettings{}, policy)
+}
+
+func gateRunWith(t *testing.T, perm taskrunner.PermissionSettings, policy string) (*Registry, *run, string) {
+	t.Helper()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	reg := newTestRegistry(t, st)
+	n := &pendingCounter{resolvedRecorder: newResolvedRecorder()}
+	reg.SetNotifier(n)
+	path := filepath.Join(t.TempDir(), "policy.yaml")
+	if policy != "" {
+		if err := os.WriteFile(path, []byte(policy), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg.SetPolicyEngine(permpolicy.NewEngine(permpolicy.Options{
+		Path: path, Enabled: func() bool { return true }, Audit: reg.st,
+		Home: t.TempDir(), SmindHome: t.TempDir(),
+	}))
+	runID, err := reg.Start(context.Background(), wm, newTestRunner(wm), task.ID, 0, taskrunner.ProviderGLM, "hi", perm, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, reg, runID, StatusRunning, 5*time.Second)
+	t.Cleanup(func() { _ = reg.Stop(runID) })
+	r, err := reg.get(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return reg, r, runID
 }
 
@@ -205,7 +241,7 @@ func TestGate_PolicyDenyAllowAskRules(t *testing.T) {
 }
 
 func TestGate_AutoAcceptAndTheProviderModeDoNotSatisfyIt(t *testing.T) {
-	reg, r, runID, _ := policyRun(t, taskrunner.PermissionSettings{AutoAccept: true}, "", true)
+	reg, r, runID := gateRunWith(t, taskrunner.PermissionSettings{AutoAccept: true}, "")
 	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
 	if id == "" {
 		t.Fatal("an auto-accepting run still gets a card: the daemon's gate is independent of the provider's mode")
@@ -227,14 +263,20 @@ func TestGate_NobodyAnswersRefusesAfterTheCap(t *testing.T) {
 	if reg.BrowserGranted(runID, "browser_tabs") {
 		t.Fatal("a timeout grants nothing")
 	}
-	// A timeout is not a denial: it does not feed the limiter.
-	for i := 0; i < 4; i++ {
-		c, i2 := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
-		if i2 == "" {
-			t.Fatal("timeouts never block further cards")
-		}
-		wantErr(t, c, "no one answered")
+	// A timeout is not a denial (it does not feed that limiter), but nobody is
+	// there: no new card at once, a short pause, then it asks again.
+	if err := noCard(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"}); err == nil || !strings.Contains(err.Error(), "no one answered a moment ago") {
+		t.Fatalf("right after an unanswered card the call is refused with no new card: %v", err)
 	}
+	st := reg.browserRun(runID, 0)
+	st.mu.Lock()
+	st.blockedUntil = time.Now().Add(-time.Second) // the pause is over
+	st.mu.Unlock()
+	c, i2 := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+	if i2 == "" {
+		t.Fatal("after the pause it asks again")
+	}
+	wantErr(t, c, "no one answered")
 }
 
 func TestGate_GrantsDieWithTheRunTheSwitchAndTheKillSwitch(t *testing.T) {
@@ -412,5 +454,118 @@ func TestGate_NoGrantEverCoversTheActClass(t *testing.T) {
 	}
 	if !st.grants(browsercard.ClassRead) || !st.grants(browsercard.ClassOpen) {
 		t.Fatal("test setup: read and open are covered")
+	}
+}
+
+// A switch turned off while a card is open voids the answer: no grant is
+// resurrected after the revoke, and the call is refused.
+func TestGate_AnAnswerTakenAcrossARevokeIsVoid(t *testing.T) {
+	reg, r, runID := gateRun(t, "")
+	task, err := reg.st.GetTask(r.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+	reg.RevokeBrowserGrants(task.WorkspaceID) // the person turned the workspace switch off
+	answer(t, reg, runID, id, "allow_run")
+	wantErr(t, ch, "switched off while the question was open")
+	if reg.BrowserGranted(runID, "browser_tabs") {
+		t.Fatal("a grant answered across a revoke must not exist")
+	}
+	// The kill switch the same way.
+	ch2, id2 := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_snapshot"})
+	reg.RevokeAllBrowserGrants()
+	answer(t, reg, runID, id2, "allow_once")
+	wantErr(t, ch2, "switched off while the question was open")
+}
+
+// A queued call leaves when its context ends (it does not sit behind an earlier
+// card for the whole hold), and the queue is bounded.
+func TestGate_QueuedCallsLeaveWithTheirContextAndTheQueueIsBounded(t *testing.T) {
+	reg, r, runID := gateRun(t, "")
+	_, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"}) // holds the slot
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := reg.BrowserGate(ctx, BrowserCall{RunID: runID, Tool: "browser_snapshot"})
+	if err == nil || !strings.Contains(err.Error(), "waited for an earlier question") || time.Since(start) > 3*time.Second {
+		t.Fatalf("a queued call whose context ends leaves at once: %v after %v", err, time.Since(start))
+	}
+	if pendingCount(r) != 1 {
+		t.Fatalf("it raised no card of its own: %d pending", pendingCount(r))
+	}
+	// The queue is bounded: with the slot busy, calls beyond the cap are refused immediately.
+	var wg sync.WaitGroup
+	results := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c, cancel2 := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			defer cancel2()
+			results <- reg.BrowserGate(c, BrowserCall{RunID: runID, Tool: "browser_console"})
+		}()
+	}
+	wg.Wait()
+	close(results)
+	tooMany := 0
+	for e := range results {
+		if e != nil && strings.Contains(e.Error(), "too many browser calls are waiting") {
+			tooMany++
+		}
+	}
+	if tooMany == 0 {
+		t.Fatal("calls beyond the waiter cap must be refused at once")
+	}
+	answer(t, reg, runID, id, "deny")
+}
+
+// Every tool the broker offers is classified by the gate: a tool added to the
+// broker without a class would otherwise run with no card.
+func TestGate_EveryBrokerToolIsClassified(t *testing.T) {
+	for _, tool := range browser.ToolNames {
+		if _, ok := browserClass(tool); !ok {
+			t.Errorf("the broker offers %s but the gate has no class for it (it would run with no card)", tool)
+		}
+	}
+}
+
+// The grant shows on the timeline for allow-once and denial too, with no URL.
+func TestGate_OnceAndDenialAreTimelineLines(t *testing.T) {
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	reg := newTestRegistry(t, st)
+	runID, err := reg.Start(context.Background(), wm, newTestRunner(wm), task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, reg, runID, StatusRunning, 5*time.Second)
+	t.Cleanup(func() { _ = reg.Stop(runID) })
+	r, _ := reg.get(runID)
+	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_snapshot"})
+	answer(t, reg, runID, id, "allow_once")
+	wantNil(t, ch)
+	ch2, id2 := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_open", URL: "http://localhost/?q=SECRET"})
+	answer(t, reg, runID, id2, "deny")
+	wantErr(t, ch2, "the person said no")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var once, no bool
+	for _, e := range r.history {
+		if e.Type != taskrunner.EventTypeSessionNote {
+			continue
+		}
+		if strings.Contains(e.Text, "browser_snapshot allowed once") {
+			once = true
+		}
+		if strings.Contains(e.Text, "browser_open refused by the person") {
+			no = true
+		}
+		if strings.Contains(e.Text, "SECRET") {
+			t.Fatalf("a note leaks the query: %q", e.Text)
+		}
+	}
+	if !once || !no {
+		t.Fatalf("timeline lines: once=%v refused=%v", once, no)
 	}
 }

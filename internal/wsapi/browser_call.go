@@ -330,6 +330,21 @@ func (h *browserHost) callRun(ctx context.Context, runID string, taskID int64, t
 	if err := h.permission(ctx, runID, ws, tool, args); err != nil {
 		return browser.Result{}, err
 	}
+	// The gate may have held the call for a person: the switches are read again
+	// after the answer, so one turned off meanwhile ends the call.
+	if h.killSwitch() {
+		h.endAllSessions()
+		if h.revokeAll != nil {
+			h.revokeAll()
+		}
+		return browser.Result{}, errors.New("browser: the browser is disabled by the daemon's configuration")
+	}
+	if !h.gate(ws) {
+		if h.revokeGrants != nil {
+			h.revokeGrants(ws)
+		}
+		return browser.Result{}, errors.New("browser: the browser is not enabled for this workspace")
+	}
 	run := browser.Run{ID: runID, WorkspaceID: ws, ImagesRead: h.imagesRead(runID)}
 	return h.broker.Call(ctx, run, tool, args), nil
 }

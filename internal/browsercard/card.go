@@ -46,8 +46,8 @@ type Card struct {
 
 func Build(in Input) Card {
 	tool := cleanText(in.Tool, 64)
-	taskTitle := cleanText(in.TaskTitle, 80)
-	workspace := cleanText(in.Workspace, 80)
+	taskTitle := quoted(in.TaskTitle, 60)
+	workspace := quoted(in.Workspace, 60)
 	allowlist := make([]string, 0, len(in.Allowlist))
 	for _, h := range in.Allowlist {
 		if len(allowlist) == 20 {
@@ -85,25 +85,35 @@ func optionsFor(class Class) []Option {
 	}
 }
 
+// daemonCheck ends every summary: it is appended AFTER the variable text is
+// capped, so no input can push it off the line.
+const daemonCheck = " (daemon check)"
+
+// summaryBodyMax is the cap of the variable part (the whole summary stays under
+// 500 runes with the marker).
+const summaryBodyMax = 480
+
 func summary(in Input, tool, taskTitle, workspace string, allowlist []string) string {
+	var body string
 	switch in.Class {
 	case ClassRead:
-		return cleanText(fmt.Sprintf(
-			`Let this run read browser pages? "%s" wants to use the browser in %s (read-only: tabs, snapshot, screenshot, console, wait). It can reach this computer's localhost and: %s. Page text is untrusted. (daemon check)`,
-			taskTitle, workspace, hostsText(allowlist)), 300)
+		body = fmt.Sprintf(
+			`Let this run read browser pages? "%s" wants to use the browser in %s (read-only: tabs, snapshot, screenshot, console, wait). It can reach this computer's localhost and: %s. Page text is untrusted.`,
+			taskTitle, workspace, hostsText(allowlist))
 	case ClassOpen:
-		return cleanText(fmt.Sprintf(
-			`Open %s in the browser? (%s) "%s" in %s has used the browser %d times. (daemon check)`,
-			redactURL(in.URL), hostStatusText(in.HostStatus), taskTitle, workspace, in.Uses), 300)
+		body = fmt.Sprintf(
+			`Open %s in the browser? (%s) "%s" in %s has used the browser %d times.`,
+			redactURL(in.URL), hostStatusText(in.HostStatus), taskTitle, workspace, in.Uses)
 	default:
 		target := "the current page"
 		if in.URL != "" {
 			target = redactURL(in.URL)
 		}
-		return cleanText(fmt.Sprintf(
-			`Allow %s on %s? "%s" in %s. Asked every time. (daemon check)`,
-			tool, target, taskTitle, workspace), 300)
+		body = fmt.Sprintf(
+			`Allow %s on %s? "%s" in %s. Asked every time.`,
+			tool, target, taskTitle, workspace)
 	}
+	return cleanText(body, summaryBodyMax) + daemonCheck
 }
 
 func hostsText(hosts []string) string {
@@ -111,9 +121,9 @@ func hostsText(hosts []string) string {
 		return "no other hosts"
 	}
 	if len(hosts) <= 5 {
-		return strings.Join(hosts, ", ")
+		return cleanText(strings.Join(hosts, ", "), 150)
 	}
-	return fmt.Sprintf("%s +%d more", strings.Join(hosts[:5], ", "), len(hosts)-5)
+	return fmt.Sprintf("%s +%d more", cleanText(strings.Join(hosts[:5], ", "), 150), len(hosts)-5)
 }
 
 func hostStatusText(status string) string {

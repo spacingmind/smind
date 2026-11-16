@@ -22,6 +22,11 @@ import (
 
 // Config controls a standalone relay process.
 type Config struct {
+	// ListenersDir, when set, is where this relay records the addresses it listens
+	// on (internal/listeners), so a page the agent browser loads can be refused
+	// access to them. Empty: nothing is recorded (tests and harnesses leave it
+	// empty so they never write into a developer's real smind home).
+	ListenersDir string
 	// Listen address, e.g. ":7400" ("" means DefaultListenAddr).
 	ListenAddr string
 	// GRPCWebListenAddr is the address the same RPCs are additionally
@@ -172,7 +177,10 @@ func Run(ctx context.Context, cfg Config) error {
 	// Record both addresses for the agent browser's deny list (any smind
 	// process's listener is a place a page must never reach).
 	for name, l := range map[string]net.Listener{"relay": lis, "grpcweb": webLis} {
-		if rm, lerr := listenerfiles.Register(filepath.Join(config.Dir(), "listeners"), name, l.Addr().String()); lerr != nil {
+		if cfg.ListenersDir == "" {
+			break
+		}
+		if rm, lerr := listenerfiles.Register(cfg.ListenersDir, name, l.Addr().String()); lerr != nil {
 			log.Printf("relay: listener file for %s not written: %v", name, lerr)
 		} else {
 			defer rm()

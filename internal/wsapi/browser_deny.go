@@ -48,10 +48,14 @@ func newLiveDenySource(dir string, fleet fleetLinkReader) *liveDenySource {
 // Endpoints returns the current live reserved endpoints.
 func (s *liveDenySource) Endpoints() []browser.Endpoint {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.at.IsZero() && time.Since(s.at) < liveDenyTTL {
-		return s.cached
+		cached := s.cached
+		s.mu.Unlock()
+		return cached
 	}
+	s.mu.Unlock()
+	// The reads happen OUTSIDE the lock: a slow filesystem or store must not stall
+	// every decision behind it (the result is cached for half a second).
 	var out []browser.Endpoint
 	for _, e := range listeners.Read(s.dir, s.alive) {
 		host, portStr, err := net.SplitHostPort(e.Addr)
@@ -68,7 +72,9 @@ func (s *liveDenySource) Endpoints() []browser.Endpoint {
 		out = append(out, browser.Endpoint{Host: host, Port: port})
 	}
 	out = append(out, s.fleetEndpoints()...)
+	s.mu.Lock()
 	s.cached, s.at = out, time.Now()
+	s.mu.Unlock()
 	return out
 }
 
