@@ -16,6 +16,7 @@ import (
 	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/browser/runsock"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -286,7 +287,7 @@ func (h *browserHost) startKillSwitchWatch(every time.Duration, killed func() bo
 	}
 	stop := make(chan struct{})
 	h.stopWatch = stop
-	go func() {
+	crash.Go("wsapi.browserKillSwitchWatch", func() {
 		t := time.NewTicker(every)
 		defer t.Stop()
 		prev := false
@@ -307,7 +308,7 @@ func (h *browserHost) startKillSwitchWatch(every time.Duration, killed func() bo
 			}
 			prev = on
 		}
-	}()
+	})
 }
 
 // close ends every browser session and socket (daemon shutdown).
