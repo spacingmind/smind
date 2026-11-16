@@ -217,9 +217,9 @@ func TestHostCutIsMarkedAndMarkerFoldsWidthAndOpenings(t *testing.T) {
 	if !strings.Contains(card.Summary, "(name cut)") {
 		t.Fatalf("a cut host must be marked: %q", card.Summary)
 	}
-	for _, forged := range []string{"（daemon check）", "(DAEMON CHECK", "(Daemon  Check)", "\uFF08daemon check\uFF09", "( daemon check"} {
+	for _, forged := range []string{"（daemon check）", "(DAEMON CHECK", "(Daemon  Check)", "\uFF08daemon check\uFF09", "( daemon check", "(\uFF44\uFF41\uFF45\uFF4D\uFF4F\uFF4E check)", "\uFF08\uFF24\uFF41\uFF45\uFF4D\uFF4F\uFF4E\u3000\uFF43\uFF48\uFF45\uFF43\uFF4B"} {
 		c := Build(Input{Class: ClassRead, TaskTitle: forged, Workspace: forged})
-		if n := strings.Count(strings.ToLower(c.Summary), "(daemon check"); n != 1 {
+		if n := strings.Count(strings.ToLower(strings.Map(foldWidth, c.Summary)), "(daemon check"); n != 1 {
 			t.Fatalf("%q: exactly one marker (the suffix) must remain, found %d in %q", forged, n, c.Summary)
 		}
 	}
