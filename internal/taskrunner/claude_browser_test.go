@@ -200,9 +200,46 @@ func TestClaudePath_ASpawnFailureClosesThePendingSocket(t *testing.T) {
 	}
 }
 
-// The real SDK type is checked by reflection: with the pinned SDK either answer
-// is fine, but the check must not panic and must agree with a direct call when
-// the method exists.
-func TestClaudeClientReportsPIDIsAReflectionCheck(t *testing.T) {
-	_ = claudeClientReportsPID()
+// The pinned SDK reports the CLI's pid, so a runner built with New turns the
+// claude path's browser on (the compile-time assertion in claude_pid.go guards the
+// method; this guards the default).
+func TestClaudeRunnerReportsPIDWithThePinnedSDK(t *testing.T) {
+	t.Parallel()
+	if !New(nil).claudeReportsPID {
+		t.Fatal("with the SDK pinned at v0.4.3 or later the claude path binds the browser socket to the CLI's pid")
+	}
+}
+
+// The REAL client (the SDK's own, started against the fake CLI) reports a pid that
+// is the CLI process, through the same type assertion the runner uses.
+func TestClaudePath_TheRealClientReportsItsCLIsPID(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "")
+	r := claudeNativeRunner(t, wm)
+	inner := r.newClaudeClient
+	got := make(chan int, 1)
+	r.newClaudeClient = func(wt string, opts ...claudecode.Option) (claudeBackend, error) {
+		c, err := inner(wt, opts...)
+		if err != nil {
+			return nil, err
+		}
+		if p, ok := c.(interface{ PID() int }); ok {
+			got <- p.PID()
+		} else {
+			got <- -1
+		}
+		return c, nil
+	}
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", testClaudeModel, events)
+	}()
+	_ = drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	if pid := <-got; pid <= 1 {
+		t.Fatalf("the real client's PID() = %d, want the CLI's process id", pid)
+	}
 }
