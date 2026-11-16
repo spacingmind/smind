@@ -953,3 +953,17 @@ CREATE TABLE IF NOT EXISTS permission_grant_audit (
     note TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_permission_grant_audit_grant ON permission_grant_audit(grant_id, id);
+
+-- browser_settings: the per-workspace agent-browser switch and allowlist
+-- (ADR-0061). One row per workspace; no row means OFF with an empty
+-- allowlist. allow_hosts is a JSON array of canonical hosts. Additive:
+-- CREATE TABLE IF NOT EXISTS applies it to existing databases on the next
+-- Open.
+CREATE TABLE IF NOT EXISTS browser_settings (
+    workspace_id INTEGER PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+    enabled      INTEGER NOT NULL DEFAULT 0,
+    allow_hosts  TEXT NOT NULL DEFAULT '[]',
+    profile_mode TEXT NOT NULL DEFAULT 'ephemeral',
+    updated_at   TIMESTAMP NOT NULL,
+    updated_by   TEXT NOT NULL DEFAULT ''
+);

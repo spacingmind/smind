@@ -74,6 +74,31 @@ type PermissionDetail struct {
 	// "allow always in this project" (docs/plans/active/saved-grants.md): the
 	// exact scope the saved choice would cover. Absent for everything else.
 	Grant *GrantOffer `json:"grant,omitempty"`
+	// Browser is set (Kind "browser") on the card the daemon raises for an agent's
+	// browser tool call (ADR-0061 section 10): what the call is, in text that
+	// carries no query, userinfo or page content.
+	Browser *BrowserCardInfo `json:"browser,omitempty"`
+}
+
+// BrowserCardInfo is the structured side of a browser permission card.
+type BrowserCardInfo struct {
+	Tool       string `json:"tool"`
+	Class      string `json:"class"` // "read" | "open" | "act"
+	URL        string `json:"url,omitempty"`
+	Host       string `json:"host,omitempty"`
+	HostASCII  string `json:"hostAscii,omitempty"`  // the punycode form the policy matches, when the host is not ASCII
+	HostStatus string `json:"hostStatus,omitempty"` // "localhost" | "added"
+	// QueryLen, HasFragment and PathCut say what the shown URL leaves out: the
+	// query's length in characters, a fragment, a path cut by the display cap.
+	QueryLen    int      `json:"queryLen,omitempty"`
+	HasFragment bool     `json:"hasFragment,omitempty"`
+	PathCut     bool     `json:"pathCut,omitempty"`
+	TaskTitle   string   `json:"taskTitle,omitempty"`
+	Workspace   string   `json:"workspace,omitempty"`
+	Allowlist   []string `json:"allowlist,omitempty"` // the first 20 whole hosts
+	// AllowlistTotal is how many hosts the workspace allows (Allowlist may be shorter).
+	AllowlistTotal int `json:"allowlistTotal,omitempty"`
+	Uses           int `json:"uses,omitempty"`
 }
 
 // GrantOffer is the scope of a saved grant, shown on the card before the human

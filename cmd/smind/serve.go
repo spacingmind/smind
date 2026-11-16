@@ -21,6 +21,7 @@ import (
 	"github.com/spacingmind/smind/internal/automation"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/crash"
+	listenerfiles "github.com/spacingmind/smind/internal/listeners"
 	"github.com/spacingmind/smind/internal/logging"
 	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/providers"
@@ -218,6 +219,15 @@ func cmdServe(args []string) int {
 			log.Fatalf("listen: %v", err)
 		}
 		listeners = append(listeners, ln)
+		// Record the address for the agent browser's deny list (a page must never
+		// reach it); removed when the daemon stops.
+		// Register returns a working remove even on error (the entry then lives in
+		// memory and the record is retried): always defer it.
+		rm, lerr := listenerfiles.Register(filepath.Join(config.Dir(), "listeners"), "daemon", ln.Addr().String())
+		defer rm()
+		if lerr != nil {
+			log.Printf("listener file for %s not written: %v", ln.Addr(), lerr)
+		}
 	}
 	if !cfg.Server.ListenIsLoopback() {
 		var bound []string

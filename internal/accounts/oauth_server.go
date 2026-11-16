@@ -5,12 +5,16 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/crash"
+	listenerfiles "github.com/spacingmind/smind/internal/listeners"
 )
 
 // checkLoopbackAddr rejects any listen address that is not loopback-only:
@@ -92,6 +96,8 @@ type callbackServer struct {
 	// state is the login's expected state; only a request carrying it is
 	// delivered on result.
 	state string
+	// unregister removes the listener-file record of this listener (nil: none).
+	unregister func()
 }
 
 // newCallbackServer binds addr synchronously and starts serving path on it
@@ -121,6 +127,16 @@ func newCallbackServer(addr, path, providerLabel, state string) (*callbackServer
 	}
 
 	s := &callbackServer{listener: listener, result: make(chan callbackResult, 1), providerLabel: providerLabel, state: state}
+	// The callback listener exists only for one login: record its address for the
+	// agent browser's deny list while it is open (a page must never reach it).
+	// Register returns a working remove EVEN ON ERROR (the entry then lives in
+	// memory and a goroutine keeps trying to publish it): always keep it, so close
+	// ends both.
+	rm, lerr := listenerfiles.Register(filepath.Join(config.Dir(), "listeners"), "oauth-callback", listener.Addr().String())
+	s.unregister = rm
+	if lerr != nil {
+		log.Printf("oauth callback listener record for %s not written: %v", listener.Addr(), lerr)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, s.handleCallback)
@@ -182,6 +198,9 @@ func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 // LoginCoordinator.Login calls it from a defer so every exit path (success,
 // timeout, ctx cancellation) tears the listener down the same way.
 func (s *callbackServer) close() {
+	if s.unregister != nil {
+		s.unregister()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), callbackShutdownTimeout)
 	defer cancel()
 	_ = s.httpServer.Shutdown(ctx)

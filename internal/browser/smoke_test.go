@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,30 @@ func TestRealChromeSmoke(t *testing.T) {
 	}))
 	defer daemon.Close()
 	daemonPort := daemon.Listener.Addr().(*net.TCPAddr).Port
+	// A second reserved port, so wss:// can be told apart from ws:// by target.
+	daemon2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		daemonHits.Add(1)
+	}))
+	defer daemon2.Close()
+	daemon2Port := daemon2.Listener.Addr().(*net.TCPAddr).Port
+
+	// A UDP listener on loopback: WebTransport/QUIC must send it nothing.
+	udp, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+	udpPort := udp.LocalAddr().(*net.UDPAddr).Port
+	var udpDatagrams atomic.Int64
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			if _, _, err := udp.ReadFrom(buf); err != nil {
+				return
+			}
+			udpDatagrams.Add(1)
+		}
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -54,9 +79,14 @@ console.log(confirm("really?"));
 alert("hi");
 for (let i = 0; i < 6; i++) window.open("/popup" + i);
 var a = document.createElement("a"); a.href = "/file.bin"; a.download = "../../evil.bin"; document.body.appendChild(a); a.click();
-try { new WebSocket("ws://127.0.0.1:%d/ws"); new WebSocket("ws://localhost:%d/ws"); } catch (e) {}
+try { new WebSocket("ws://127.0.0.1:%d/ws"); new WebSocket("ws://localhost:%d/ws"); new WebSocket("ws://sock.localhost:%d/ws"); new WebSocket("wss://127.0.0.1:%d/ws"); } catch (e) {}
+fetch("http://127.0.0.1:%d/f", {mode: "no-cors"}).catch(function () {});
+fetch("http://localhost:%d/f", {mode: "no-cors"}).catch(function () {});
+fetch("http://169.254.169.254:%d/f", {mode: "no-cors"}).catch(function () {});
+try { new WebSocket("ws://169.254.169.254:%d/ws"); new WebSocket("ws://[fe80::1]:%d/ws"); } catch (e) {}
+try { new WebTransport("https://127.0.0.1:%d/wt").ready.catch(function () {}); } catch (e) {}
 console.log("loaded");
-</script>`, daemonPort, daemonPort)
+</script>`, daemonPort, daemonPort, daemonPort, daemon2Port, daemonPort, daemonPort, daemonPort, daemonPort, daemonPort, udpPort)
 	})
 	mux.HandleFunc("/file.bin", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="evil.bin"`)
@@ -74,7 +104,7 @@ console.log("loaded");
 	defer srv.Close()
 	base := strings.Replace(srv.URL, "127.0.0.1", "localhost", 1)
 
-	pol, err := NewPolicy(nil, []Endpoint{{Host: "127.0.0.1", Port: daemonPort}})
+	pol, err := NewPolicy(nil, []Endpoint{{Host: "127.0.0.1", Port: daemonPort}, {Host: "127.0.0.1", Port: daemon2Port}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +124,22 @@ console.log("loaded");
 		t.Fatal(err)
 	}
 	defer s.Close()
+
+	// Another local process (a curl) talking to the proxy port without the
+	// session secret is refused before anything else happens.
+	{
+		pc, err := net.Dial("tcp", s.proxy.Addr())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = pc.SetDeadline(time.Now().Add(5 * time.Second))
+		fmt.Fprintf(pc, "GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", daemonPort)
+		reply, _ := io.ReadAll(pc)
+		pc.Close()
+		if !strings.HasPrefix(string(reply), "HTTP/1.1 407") || strings.Contains(string(reply), s.proxy.Secret()) {
+			t.Errorf("a direct request to the proxy without the secret must get a bare 407: %q", reply)
+		}
+	}
 
 	// Nothing may listen: no DevToolsActivePort, and no TCP listener in the browser's process group.
 	if dirs, _ := filepath.Glob(filepath.Join(profiles, "smind-browser-*", "DevToolsActivePort")); len(dirs) != 0 {
@@ -143,20 +189,60 @@ console.log("loaded");
 	}
 	t.Logf("tabs open: %d, popups refused: %d", len(tabs), kinds["popup_refused"])
 
-	// KNOWN GAP (see the plan, "Known gaps"): the Fetch domain does not see
-	// WebSocket handshakes and Network.setBlockedURLs did not stop them in the
-	// measured Chrome, so a page on an allowed host can open a WebSocket to a
-	// denied loopback port. Logged, not asserted, until the enforcing proxy lands.
-	wsHits := daemonHits.Load()
-	t.Logf("KNOWN GAP: daemon hits from page WebSockets: %d", wsHits)
+	// The page opened WebSockets (ws and wss, by IP literal and by name) and
+	// fetches to the denied daemon port, to a link-local address, and a
+	// WebTransport to a UDP port. The proxy sees all of them (Fetch
+	// interception cannot see a WebSocket); positive evidence first: wait until
+	// the proxy has refused each, then assert nothing reached its target.
+	// Each target is matched by its exact notice form: a WebSocket reaches the
+	// proxy as CONNECT, so its notice starts with host:port; a fetch arrives in
+	// absolute form, so its notice starts with http://. One cannot stand in for
+	// the other.
+	wantRefused := []string{
+		fmt.Sprintf("127.0.0.1:%d:", daemonPort),          // ws://127.0.0.1
+		fmt.Sprintf("localhost:%d:", daemonPort),          // ws://localhost
+		fmt.Sprintf("sock.localhost:%d:", daemonPort),     // ws://sock.localhost
+		fmt.Sprintf("127.0.0.1:%d:", daemon2Port),         // wss://127.0.0.1
+		fmt.Sprintf("http://127.0.0.1:%d/f:", daemonPort), // fetch by IP
+		fmt.Sprintf("http://localhost:%d/f:", daemonPort), // fetch by name
+		fmt.Sprintf("169.254.169.254:%d:", daemonPort),    // ws:// to link-local: <-loopback> also removed that implicit bypass
+		fmt.Sprintf("http://169.254.169.254:%d/f:", daemonPort),
+		fmt.Sprintf("[fe80::1]:%d:", daemonPort),
+	}
+	seen := map[string]bool{}
+	for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); {
+		for _, n := range notes {
+			for _, w := range wantRefused {
+				if strings.HasPrefix(n.Detail, w) {
+					seen[w] = true
+				}
+			}
+		}
+		if len(seen) == len(wantRefused) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+		notes = append(notes, s.DrainNotices()...)
+	}
+	for _, w := range wantRefused {
+		if !seen[w] {
+			t.Errorf("the proxy never reported refusing %s: the page's connection did not reach it", w)
+		}
+	}
+	if n := daemonHits.Load(); n != 0 {
+		t.Errorf("the denied daemon port was reached %d times by page WebSockets or fetches", n)
+	}
+	if n := udpDatagrams.Load(); n != 0 {
+		t.Errorf("WebTransport sent %d datagrams: it must be refused under the proxy", n)
+	}
 	// A redirect into the daemon, and a redirect to file:, never get through.
 	for _, path := range []string{"/redir", "/redir-file"} {
 		if _, err := s.Navigate(ctx, tabs[0].ID, base+path); err == nil {
 			t.Errorf("%s must fail", path)
 		}
 	}
-	if daemonHits.Load() != wsHits {
-		t.Fatalf("the daemon was reached %d times through a redirect", daemonHits.Load()-wsHits)
+	if daemonHits.Load() != 0 {
+		t.Fatalf("the daemon was reached %d times through a redirect", daemonHits.Load())
 	}
 	if _, err := s.Navigate(ctx, tabs[0].ID, "https://example.com/"); err == nil {
 		t.Error("a public host must be refused before it is sent")

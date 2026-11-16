@@ -72,7 +72,7 @@ export const SIDEBAR_GROUPS = [
   },
   {
     title: 'Agents',
-    slugs: ['orchestration', 'automations', 'validator-and-review', 'steward-review', 'permission-policy', 'scripting-and-permissions', 'plugins', 'plugins-authoring'],
+    slugs: ['orchestration', 'automations', 'validator-and-review', 'steward-review', 'permission-policy', 'browser', 'scripting-and-permissions', 'plugins', 'plugins-authoring'],
   },
   { title: 'Hosts and devices', slugs: ['hosts', 'mobile-and-relay'] },
   { title: 'Operate and reference', slugs: ['running-the-daemon', 'troubleshooting', 'configuration', 'cli-reference'] },

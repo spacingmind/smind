@@ -1,0 +1,449 @@
+package browser
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+// startHookedSession starts a session on a fake CDP answered by hook and
+// attaches one ready tab (T1 on session S1).
+func startHookedSession(t *testing.T, hook func(f *fakeCDP, c fakeCall) (any, string)) (*Session, *fakeCDP) {
+	t.Helper()
+	l := &fakeLauncher{t: t, hook: hook}
+	pol, err := NewPolicy(nil, []Endpoint{{Host: "127.0.0.1", Port: 4648}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := Start(context.Background(), Config{Workspace: "ws1", Launcher: l, Policy: pol, Resolver: sessionResolver, IdleTimeout: time.Minute, CallTimeout: 2 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	return s, f
+}
+
+// domFake answers the DOM password scan and the AX tree of a snapshot.
+type domFake struct {
+	queryErr      string
+	passwordNodes []int64         // nodeIds DOM.querySelectorAll returns
+	backendByNode map[int64]int64 // DOM.describeNode: nodeId -> backendNodeId
+	tree          func() []any    // Accessibility.getFullAXTree nodes
+}
+
+func (d *domFake) hook(f *fakeCDP, c fakeCall) (any, string) {
+	switch c.Method {
+	case "DOM.getDocument":
+		return map[string]any{"root": map[string]any{"nodeId": 1}}, ""
+	case "DOM.querySelectorAll":
+		if d.queryErr != "" {
+			return nil, d.queryErr
+		}
+		return map[string]any{"nodeIds": d.passwordNodes}, ""
+	case "DOM.describeNode":
+		id := int64(c.Params["nodeId"].(float64))
+		return map[string]any{"node": map[string]any{"backendNodeId": d.backendByNode[id]}}, ""
+	case "Accessibility.getFullAXTree":
+		return map[string]any{"nodes": d.tree()}, ""
+	}
+	return defaultHook(f, c)
+}
+
+// axv is the {type, value} wrapper of an AX property.
+func axv(v string) map[string]any { return map[string]any{"type": "string", "value": v} }
+
+// axm builds one AX node for the fake tree.
+func axm(id, parent, role, name string, backend int64, props map[string]any, children ...string) map[string]any {
+	m := map[string]any{
+		"nodeId":           id,
+		"parentId":         parent,
+		"role":             axv(role),
+		"name":             axv(name),
+		"backendDOMNodeId": backend,
+		"childIds":         children,
+	}
+	if len(props) > 0 {
+		ps := make([]any, 0, len(props))
+		for k, v := range props {
+			ps = append(ps, map[string]any{"name": k, "value": map[string]any{"value": v}})
+		}
+		m["properties"] = ps
+	}
+	return m
+}
+
+func TestSnapshotRendersTree(t *testing.T) {
+	link := axm("l", "r", "link", "Docs", 10, map[string]any{"focused": true, "url": "http://evil.test/x"})
+	st := axm("st", "h", "StaticText", "Hello world", 3, nil)
+	h := axm("h", "r", "heading", "Welcome", 2, map[string]any{"level": 2}, "st")
+	tb := axm("tb", "r", "textbox", "Search", 20, map[string]any{"required": true})
+	tb["value"] = axv("q=1")
+	cb := axm("cb", "r", "checkbox", "Subscribe", 21, map[string]any{"checked": "mixed"})
+	gen := axm("g", "r", "generic", "", 4, nil, "b")
+	btn := axm("b", "g", "button", "Go", 22, nil)
+	root := axm("r", "", "WebArea", "Home", 1, nil, "h", "l", "tb", "cb", "g")
+	d := &domFake{tree: func() []any { return []any{root, h, st, link, tb, cb, gen, btn} }}
+	s, _ := startHookedSession(t, d.hook)
+
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{
+		`- WebArea "Home"`,
+		`  - heading "Welcome" [level=2]`,
+		`    - text "Hello world"`,
+		`  - link "Docs" [focused] ref=e1`,
+		`  - textbox "Search" value="q=1" [required] ref=e2`,
+		`  - checkbox "Subscribe" [checked=mixed] ref=e3`,
+		`  - button "Go" ref=e4`,
+	}, "\n")
+	if snap.Text != want {
+		t.Fatalf("rendered tree:\n%s\nwant:\n%s", snap.Text, want)
+	}
+	if snap.URL != "http://localhost:3000/" || snap.Title != "Home" {
+		t.Fatalf("url/title: %q %q", snap.URL, snap.Title)
+	}
+	if snap.Nodes != 7 || snap.TotalNodes != 7 || snap.Truncated {
+		t.Fatalf("counts: %+v", snap)
+	}
+	if refs := s.refsFor("T1"); !reflect.DeepEqual(refs, map[string]int64{"e1": 10, "e2": 20, "e3": 21, "e4": 22}) {
+		t.Fatalf("refs: %v", refs)
+	}
+	if strings.Contains(snap.Text, "evil.test") {
+		t.Fatal("the url property must never be printed")
+	}
+}
+
+func TestSnapshotRefsPerSnapshot(t *testing.T) {
+	rootA := axm("r", "", "WebArea", "Home", 1, nil, "l")
+	link := axm("l", "r", "link", "Docs", 10, nil)
+	rootB := axm("r", "", "WebArea", "Home", 1, nil, "b1", "b2")
+	b1 := axm("b1", "r", "button", "One", 30, nil)
+	b2 := axm("b2", "r", "button", "Two", 31, nil)
+	cur := []any{rootA, link}
+	d := &domFake{tree: func() []any { return cur }}
+	s, _ := startHookedSession(t, d.hook)
+
+	if _, err := s.Snapshot(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if refs := s.refsFor("T1"); !reflect.DeepEqual(refs, map[string]int64{"e1": 10}) {
+		t.Fatalf("first snapshot refs: %v", refs)
+	}
+	cur = []any{rootB, b1, b2}
+	if _, err := s.Snapshot(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if refs := s.refsFor("T1"); !reflect.DeepEqual(refs, map[string]int64{"e1": 30, "e2": 31}) {
+		t.Fatalf("the second snapshot must replace the refs, got %v", refs)
+	}
+}
+
+func TestSnapshotLimitsTruncateWithMarker(t *testing.T) {
+	t.Run("node cap", func(t *testing.T) {
+		const n = 2000
+		ids := make([]string, 0, n-1)
+		nodes := make([]any, 0, n)
+		for i := 0; i < n-1; i++ {
+			id := fmt.Sprintf("b%d", i)
+			ids = append(ids, id)
+		}
+		nodes = append(nodes, axm("r", "", "WebArea", "P", 1, nil, ids...))
+		for i, id := range ids {
+			nodes = append(nodes, axm(id, "r", "button", id, int64(1000+i), nil))
+		}
+		d := &domFake{tree: func() []any { return nodes }}
+		s, _ := startHookedSession(t, d.hook)
+
+		snap, err := s.Snapshot(context.Background(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snap.Nodes != MaxSnapshotNodes || snap.TotalNodes != n || !snap.Truncated {
+			t.Fatalf("counts: %+v", snap)
+		}
+		lines := strings.Split(snap.Text, "\n")
+		if len(lines) != MaxSnapshotNodes+1 {
+			t.Fatalf("lines: %d", len(lines))
+		}
+		if want := "[truncated: 800 more nodes not shown]"; lines[len(lines)-1] != want {
+			t.Fatalf("marker: %q want %q", lines[len(lines)-1], want)
+		}
+		if refs := s.refsFor("T1"); len(refs) != MaxSnapshotNodes-1 {
+			t.Fatalf("only rendered nodes get refs, got %d", len(refs))
+		}
+	})
+	t.Run("char cap", func(t *testing.T) {
+		const n = 300
+		long := strings.Repeat("x", 190)
+		ids := make([]string, 0, n)
+		nodes := make([]any, 0, n+1)
+		for i := 0; i < n; i++ {
+			ids = append(ids, fmt.Sprintf("b%d", i))
+		}
+		nodes = append(nodes, axm("r", "", "WebArea", "P", 1, nil, ids...))
+		for i, id := range ids {
+			nodes = append(nodes, axm(id, "r", "button", long, int64(1000+i), nil))
+		}
+		d := &domFake{tree: func() []any { return nodes }}
+		s, _ := startHookedSession(t, d.hook)
+
+		snap, err := s.Snapshot(context.Background(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !snap.Truncated || snap.Nodes >= n+1 || snap.TotalNodes != n+1 {
+			t.Fatalf("counts: %+v", snap)
+		}
+		lines := strings.Split(snap.Text, "\n")
+		if want := fmt.Sprintf("[truncated: %d more nodes not shown]", snap.TotalNodes-snap.Nodes); lines[len(lines)-1] != want {
+			t.Fatalf("marker: %q want %q", lines[len(lines)-1], want)
+		}
+		if body := strings.Join(lines[:len(lines)-1], "\n"); len(body) > MaxSnapshotChars {
+			t.Fatalf("rendered text is %d chars, over the cap", len(body))
+		}
+	})
+}
+
+func TestSnapshotPasswordValueNeverReturned(t *testing.T) {
+	t.Run("value and name hidden", func(t *testing.T) {
+		pw := axm("pw", "r", "textbox", "Password", 55, map[string]any{"required": true})
+		pw["value"] = axv("hunter2")
+		root := axm("r", "", "WebArea", "Home", 1, nil, "pw")
+		d := &domFake{
+			passwordNodes: []int64{7},
+			backendByNode: map[int64]int64{7: 55},
+			tree:          func() []any { return []any{root, pw} },
+		}
+		s, _ := startHookedSession(t, d.hook)
+
+		snap, err := s.Snapshot(context.Background(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(snap.Text, "hunter2") {
+			t.Fatal("a password value must never be rendered")
+		}
+		if strings.Contains(snap.Text, "Password") {
+			t.Fatal("a password field's name must never be rendered")
+		}
+		if !strings.Contains(snap.Text, "- textbox (password)") {
+			t.Fatalf("the field must be marked: %s", snap.Text)
+		}
+		if refs := s.refsFor("T1"); !reflect.DeepEqual(refs, map[string]int64{"e1": 55}) {
+			t.Fatalf("the field keeps an actionable ref: %v", refs)
+		}
+	})
+	t.Run("scan error fails closed", func(t *testing.T) {
+		root := axm("r", "", "WebArea", "Home", 1, nil)
+		d := &domFake{queryErr: "boom", tree: func() []any { return []any{root} }}
+		s, f := startHookedSession(t, d.hook)
+
+		if _, err := s.Snapshot(context.Background(), ""); err == nil {
+			t.Fatal("a failed password scan must fail the snapshot")
+		}
+		if len(f.callsFor("Accessibility.getFullAXTree")) != 0 {
+			t.Fatal("no tree may be fetched when the password scan failed")
+		}
+	})
+}
+
+func TestSnapshotNeverIncludesLinkURLs(t *testing.T) {
+	link := axm("l", "r", "link", "Docs", 10, map[string]any{"url": "http://evil.test/x?token=1", "focused": true})
+	root := axm("r", "", "WebArea", "Home", 1, nil, "l")
+	d := &domFake{tree: func() []any { return []any{root, link} }}
+	s, _ := startHookedSession(t, d.hook)
+
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(snap.Text, "evil.test") || strings.Contains(snap.Text, "http") {
+		t.Fatalf("a link url must never be printed: %s", snap.Text)
+	}
+	if !strings.Contains(snap.Text, `- link "Docs" [focused] ref=e1`) {
+		t.Fatalf("the link itself renders: %s", snap.Text)
+	}
+}
+
+func TestSnapshotCleansPageText(t *testing.T) {
+	tb := axm("tb", "r", "textbox", "a\u202eb\u200bc\nd", 20, nil)
+	tb["value"] = axv("v\u202e")
+	st := axm("st", "r", "StaticText", "keep\u200bdrop", 3, nil)
+	root := axm("r", "", "WebArea", "Home", 1, nil, "tb", "st")
+	d := &domFake{tree: func() []any { return []any{root, tb, st} }}
+	s, _ := startHookedSession(t, d.hook)
+
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snap.Text, `textbox "abc d" value="v"`) || !strings.Contains(snap.Text, `text "keepdrop"`) {
+		t.Fatalf("names and values must be cleaned: %s", snap.Text)
+	}
+	if strings.ContainsAny(snap.Text, "\u202e\u200b") {
+		t.Fatalf("bidi and zero-width characters must be stripped: %q", snap.Text)
+	}
+}
+
+// A page can nest nodes without limit: the walk is depth-bounded (a stack
+// overflow would take the whole daemon down) and the marker says it truncated.
+func TestSnapshotDeepNestingIsBoundedAndTruncated(t *testing.T) {
+	const depth = 3000
+	nodes := make([]any, 0, depth)
+	for i := 0; i < depth; i++ {
+		n := map[string]any{"nodeId": fmt.Sprint(i), "role": map[string]any{"value": "group"}, "name": map[string]any{"value": "n"}}
+		if i > 0 {
+			n["parentId"] = fmt.Sprint(i - 1)
+		}
+		if i < depth-1 {
+			n["childIds"] = []string{fmt.Sprint(i + 1)}
+		}
+		nodes = append(nodes, n)
+	}
+	l := &fakeLauncher{t: t, hook: func(f *fakeCDP, c fakeCall) (any, string) {
+		if c.Method == "Accessibility.getFullAXTree" {
+			return map[string]any{"nodes": nodes}, ""
+		}
+		return defaultHook(f, c)
+	}}
+	s, err := Start(context.Background(), Config{Workspace: "w", Launcher: l, Resolver: sessionResolver, CallTimeout: 20 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	f, _ := l.last()
+	attachReady(t, f, "S1", "T1", 1)
+	sn, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sn.Truncated || !strings.Contains(sn.Text, "[truncated:") || sn.Nodes > maxSnapshotDepth+2 {
+		t.Fatalf("a deeply nested tree must be cut: truncated=%v nodes=%d", sn.Truncated, sn.Nodes)
+	}
+}
+
+// unnamedChain builds an AX tree of n chained unnamed generic nodes starting
+// at the parentless root, ending in a named button leaf.
+func unnamedChain(n int) []any {
+	nodes := make([]any, 0, n+1)
+	for i := 0; i < n; i++ {
+		parent := ""
+		if i > 0 {
+			parent = fmt.Sprintf("g%d", i-1)
+		}
+		var children []string
+		if i < n-1 {
+			children = append(children, fmt.Sprintf("g%d", i+1))
+		} else {
+			children = append(children, "b")
+		}
+		nodes = append(nodes, axm(fmt.Sprintf("g%d", i), parent, "generic", "", int64(10+i), nil, children...))
+	}
+	nodes = append(nodes, axm("b", fmt.Sprintf("g%d", n-1), "button", "Go", 9000, nil))
+	return nodes
+}
+
+// A chain of unnamed generic nodes never grows the render depth: without the
+// per-level bound the walk would recurse through all of them unchecked.
+func TestSnapshotUnnamedChainIsBounded(t *testing.T) {
+	d := &domFake{tree: func() []any { return unnamedChain(3000) }}
+	s, _ := startHookedSession(t, d.hook)
+
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.Truncated || !strings.Contains(snap.Text, "[truncated:") {
+		t.Fatalf("the chain must be cut: truncated=%v text=%q", snap.Truncated, snap.Text)
+	}
+	if strings.Contains(snap.Text, "Go") {
+		t.Fatalf("the leaf under the cut must not be rendered: %q", snap.Text)
+	}
+}
+
+func TestSnapshotShortUnnamedChainStillRendersItsLeaf(t *testing.T) {
+	d := &domFake{tree: func() []any { return unnamedChain(50) }}
+	s, _ := startHookedSession(t, d.hook)
+
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Truncated {
+		t.Fatalf("a chain under the bound is not truncated: %+v", snap)
+	}
+	// Skipped generics pass their depth through: the leaf renders unindented.
+	found := false
+	for _, line := range strings.Split(snap.Text, "\n") {
+		if strings.HasPrefix(line, `- button "Go"`) {
+			found = true
+		}
+		if strings.HasPrefix(line, " ") && strings.Contains(line, "button") {
+			t.Fatalf("the leaf must render at depth 0: %q", line)
+		}
+	}
+	if !found {
+		t.Fatalf("the leaf must be rendered: %q", snap.Text)
+	}
+}
+
+func TestSnapshotHidesEverythingBelowAPasswordFieldAndEscapesQuotes(t *testing.T) {
+	hook := func(f *fakeCDP, c fakeCall) (any, string) {
+		switch c.Method {
+		case "DOM.querySelectorAll":
+			return map[string]any{"nodeIds": []int{9}}, ""
+		case "DOM.describeNode":
+			return map[string]any{"node": map[string]any{"backendNodeId": 42}}, ""
+		case "Accessibility.getFullAXTree":
+			return map[string]any{"nodes": []any{
+				map[string]any{"nodeId": "1", "role": map[string]any{"value": "RootWebArea"}, "childIds": []string{"2", "4"}},
+				map[string]any{"nodeId": "2", "parentId": "1", "role": map[string]any{"value": "textbox"}, "backendDOMNodeId": 42, "childIds": []string{"3"}, "value": map[string]any{"value": "•••"}},
+				map[string]any{"nodeId": "3", "parentId": "2", "role": map[string]any{"value": "StaticText"}, "name": map[string]any{"value": "hunter2-child-echo"}},
+				map[string]any{"nodeId": "4", "parentId": "1", "role": map[string]any{"value": "button"}, "backendDOMNodeId": 7, "name": map[string]any{"value": `Go" ref=e99 [focused]`}},
+			}}, ""
+		}
+		return defaultHook(f, c)
+	}
+	s, _ := startHookedSession(t, hook)
+	sn, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sn.Text, "hunter2") {
+		t.Fatalf("a child of a password field must not be rendered:\n%s", sn.Text)
+	}
+	if !strings.Contains(sn.Text, `"Go\" ref=e99 [focused]"`) || strings.Count(sn.Text, "ref=e99") != 1 {
+		t.Fatalf("a quote in a page string must not close the quoted field:\n%s", sn.Text)
+	}
+}
+
+func TestSnapshotAsksForABoundedTreeAndAnOverCapReplyIsAPlainError(t *testing.T) {
+	var asked map[string]any
+	hook := func(f *fakeCDP, c fakeCall) (any, string) {
+		if c.Method == "Accessibility.getFullAXTree" {
+			asked = c.Params
+			return map[string]any{"nodes": strings.Repeat("a", maxMessageBytes+4096)}, ""
+		}
+		return defaultHook(f, c)
+	}
+	s, _ := startHookedSession(t, hook)
+	_, err := s.Snapshot(context.Background(), "")
+	if err == nil || !strings.Contains(err.Error(), "too large to snapshot") {
+		t.Fatalf("an over-cap tree must be a plain error: %v", err)
+	}
+	if asked["depth"] != float64(maxSnapshotRequestDepth) {
+		t.Fatalf("the tree must be requested with a depth bound: %v", asked)
+	}
+	if s.Closed() {
+		t.Fatal("a hostile page must not be able to end its own session")
+	}
+	// And a snapshot of the same session still works afterwards.
+	asked = nil
+}

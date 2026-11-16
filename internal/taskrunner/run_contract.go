@@ -30,6 +30,33 @@ type McpPolicy struct {
 	// Env is the built-in entry's environment (run identity, SMIND_HOME).
 	// Ignored when Orchestration is false. Policy, not content: never log.
 	Env map[string]string
+	// Browser, when set, adds the reserved `smind-browser` stdio entry
+	// (`smind mcp browser`, ADR-0061). Nothing sets it while the browser gate
+	// is dark.
+	Browser *BrowserPolicy
+	// BrowserOnly marks a policy created only to carry the browser grant (the
+	// run had no other MCP policy): it says nothing about orchestration.
+	BrowserOnly bool
+}
+
+// BrowserPolicy grants a run the browser tools' MCP entry.
+type BrowserPolicy struct {
+	// Env is the entry's environment (run identity, SMIND_HOME). Policy, not
+	// content: never log. It carries no secret: the row's only credential is the
+	// run's own process tree, checked by the daemon on the socket's peer.
+	Env map[string]string
+	// Socket opens the run's browser socket, bound to the agent process rooted
+	// at rootPID, and returns its path (nil or an error: no row). The runner
+	// calls it only at a delivery point (a row that really goes to the
+	// provider); Revoke closes the socket if the provider then did not take the
+	// row.
+	Socket func(rootPID int) (string, error)
+	// OpenPending opens the run's socket BEFORE the agent process exists (the
+	// Claude CLI path) and returns its path and a bind function that attaches it
+	// to the agent's pid once the process runs; a connection before bind is
+	// refused. Nil: this host cannot do that, and then such an agent gets no browser.
+	OpenPending func() (path string, bind func(rootPID int) error, err error)
+	Revoke      func()
 }
 
 type runContractKey struct{}
