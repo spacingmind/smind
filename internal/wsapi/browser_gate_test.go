@@ -125,7 +125,7 @@ func TestGate_LiveDenyRefusesBeforeACardAndBeatsTheAllowlist(t *testing.T) {
 	e, h, rp := gateHost(t)
 	h.allow = func(int64) []string { return []string{"10.1.2.3"} }
 	live := []browser.Endpoint{{Host: "127.0.0.1", Port: 41234}, {Host: "10.1.2.3", Port: 8088}}
-	h.liveDeny = func() []browser.Endpoint { return live }
+	h.liveDeny = func() ([]browser.Endpoint, error) { return live, nil }
 	for _, u := range []string{"http://localhost:41234/", "http://127.0.0.1:41234/x", "http://10.1.2.3:8088/"} {
 		if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_open", `{"url":"`+u+`"}`); err == nil {
 			t.Fatalf("%s is on the live deny list", u)
@@ -299,7 +299,10 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 		}
 		return false
 	}
-	got := s.Endpoints()
+	got, gerr := s.Endpoints()
+	if gerr != nil {
+		t.Fatal(gerr)
+	}
 	for _, want := range []struct {
 		host string
 		port int
@@ -316,7 +319,7 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol = pol.WithLiveDeny(func() []browser.Endpoint { return got })
+	pol = pol.WithLiveDeny(func() ([]browser.Endpoint, error) { return got, nil })
 	for _, u := range []string{"http://127.0.0.1:41000/", "http://localhost:41001/", "http://[::1]:41001/", "http://10.9.9.9/", "https://peer.example.test:7443/"} {
 		if pol.CheckURL(u).Allowed {
 			t.Errorf("%s must be refused (the deny list beats the allowlist)", u)
@@ -324,16 +327,21 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 	}
 	// A removed listener drops off (after the cache window); a dead process's file is ignored.
 	rm()
-	for deadline := time.Now().Add(5 * time.Second); has(s.Endpoints(), "127.0.0.1", 41000) && time.Now().Before(deadline); {
+	for deadline := time.Now().Add(5 * time.Second); has(epsOf(s), "127.0.0.1", 41000) && time.Now().Before(deadline); {
 		time.Sleep(20 * time.Millisecond) // sleep-ok: polling past the half-second cache window
 	}
-	if has(s.Endpoints(), "127.0.0.1", 41000) {
+	if has(epsOf(s), "127.0.0.1", 41000) {
 		t.Fatal("a removed listener is no longer denied")
 	}
+	// A file of another (dead) process is ignored; this process's own listeners
+	// still come from memory, and the fleet entries remain.
+	if err := os.WriteFile(filepath.Join(dir, "999999-ghost-aaaaaaaa.json"), []byte(`{"name":"ghost","addr":"127.0.0.1:42000","pid":999999}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	s2 := newLiveDenySource(dir, fleet)
-	s2.alive = func(int) bool { return false }
-	if eps := s2.Endpoints(); len(eps) != 2 || has(eps, "::", 41001) {
-		t.Fatalf("a dead process's listener files are ignored (only fleet entries remain): %+v", eps)
+	s2.alive = func(pid int) bool { return pid == os.Getpid() }
+	if eps := epsOf(s2); has(eps, "127.0.0.1", 42000) || !has(eps, "::", 41001) || len(eps) != 3 {
+		t.Fatalf("a dead process's listener file is ignored, this process's listener and the fleet entries stay: %+v", eps)
 	}
 	// A store failure leaves the listener files in force (s2's dead-process pass
 	// removed the old files, so register again).
@@ -341,7 +349,7 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s3 := newLiveDenySource(dir, fakeFleet{err: errors.New("db closed")})
-	if eps := s3.Endpoints(); !has(eps, "::", 41001) {
+	if eps := epsOf(s3); !has(eps, "::", 41001) {
 		t.Fatalf("listener files still apply without the store: %+v", eps)
 	}
 }
@@ -549,4 +557,90 @@ func TestKillSwitchWatch_RevokesOnTheTransition(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	t.Fatalf("the transition ends the sessions once and keeps revoking while on: revoked=%d ended=%d", revoked, ended)
+}
+
+// epsOf is Endpoints without the error, for assertions about the entries.
+func epsOf(s *liveDenySource) []browser.Endpoint {
+	eps, _ := s.Endpoints()
+	return eps
+}
+
+// An unreadable or flooded listener directory FAILS CLOSED: no session and no
+// call (never "no entries"), the policy refuses every address, and this
+// process's own listeners stay reserved from memory even when their files are
+// deleted.
+func TestLiveDeny_UnreadableDirectoryFailsClosedAndLocalListenersSurviveDeletion(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := newLiveDenySource(file, nil) // a regular file where the directory should be
+	if _, err := s.Endpoints(); err == nil {
+		t.Fatal("an unreadable listener directory must be an error")
+	}
+	pol, err := browser.NewPolicy(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol = pol.WithLiveDeny(s.Endpoints)
+	for _, u := range []string{"http://localhost:3000/", "http://127.0.0.1:8080/x"} {
+		if pol.CheckURL(u).Allowed {
+			t.Fatalf("%s must be refused while the reserved set cannot be read", u)
+		}
+	}
+	// The host refuses a session and a call, not just the URLs.
+	e, h, _ := gateHost(t)
+	h.liveDeny = s.Endpoints
+	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "listener records cannot be read") {
+		t.Fatalf("a call with an unreadable listener directory: %v", err)
+	}
+	// This process's own listeners come from memory: deleting the file changes nothing.
+	dir := t.TempDir()
+	rm, err := listeners.Register(dir, "oauth-callback", "127.0.0.1:43999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rm()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	s2 := newLiveDenySource(dir, nil)
+	eps, err := s2.Endpoints()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ep := range eps {
+		if ep.Host == "127.0.0.1" && ep.Port == 43999 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a listener registered by this process stays reserved after its file and directory were deleted: %+v", eps)
+	}
+}
+
+// Many concurrent decisions trigger ONE refresh (single flight), not one per caller.
+func TestLiveDeny_RefreshIsSingleFlight(t *testing.T) {
+	dir := t.TempDir()
+	var reads int32
+	var mu sync.Mutex
+	s := newLiveDenySource(dir, nil)
+	s.alive = func(int) bool { mu.Lock(); reads++; mu.Unlock(); return true }
+	rm, err := listeners.Register(dir, "relay", "127.0.0.1:43998")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rm()
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, _ = s.Endpoints() }()
+	}
+	wg.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if reads != 1 {
+		t.Fatalf("50 concurrent decisions read the directory %d times, want exactly one refresh", reads)
+	}
 }

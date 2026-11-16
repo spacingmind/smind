@@ -32,7 +32,8 @@ func TestRun_RecordsItsListenersWhileItRuns(t *testing.T) {
 	want := map[string]string{"relay": native.Addr().String(), "grpcweb": web.Addr().String()}
 	got := map[string]string{}
 	for deadline := time.Now().Add(15 * time.Second); len(got) < 2 && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-		for _, e := range listeners.Read(listenersDir, listeners.ProcessAlive) {
+		entries, _ := listeners.Read(listenersDir, listeners.ProcessAlive)
+		for _, e := range entries {
 			got[e.Name] = e.Addr
 		}
 	}
@@ -47,7 +48,7 @@ func TestRun_RecordsItsListenersWhileItRuns(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("Run did not stop")
 	}
-	if left := listeners.Read(listenersDir, listeners.ProcessAlive); len(left) != 0 {
+	if left, _ := listeners.Read(listenersDir, listeners.ProcessAlive); len(left) != 0 {
 		t.Fatalf("a stopped relay leaves no listener record: %+v", left)
 	}
 }

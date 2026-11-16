@@ -66,7 +66,7 @@ type browserHost struct {
 	revokeGrants func(workspaceID int64)
 	revokeAll    func()
 	forgetRun    func(runID string)
-	liveDeny     func() []browser.Endpoint
+	liveDeny     func() ([]browser.Endpoint, error)
 	// stopWatch ends the kill-switch watcher (nil when none runs).
 	stopWatch chan struct{}
 	// socks hosts the per-run sockets; nil when the socket directory could not
@@ -240,6 +240,11 @@ func (h *browserHost) policyFor(ws int64) (browser.Policy, []string, error) {
 		return browser.Policy{}, nil, err
 	}
 	if h.liveDeny != nil {
+		if _, lerr := h.liveDeny(); lerr != nil {
+			// The reserved set cannot be read: no session and no call (and the policy
+			// below also refuses every address), never "no entries".
+			return browser.Policy{}, nil, lerr
+		}
 		pol = pol.WithLiveDeny(h.liveDeny)
 	}
 	return pol, allow, nil

@@ -75,6 +75,23 @@ available for this agent".
 
 ## What it does not protect against
 
+- **The cards protect against the model, not against a shell-capable agent that
+  attacks the daemon.** Any process in the run's own process tree (the agent's
+  shell, anything it starts) can talk to the daemon without saying who it is,
+  and smind treats such a connection as you, exactly as for every other
+  permission card: it could answer a card through the daemon's websocket. Keep
+  the daemon token private, and do not let an agent you do not trust run shell
+  commands.
+- **The list of places the browser must never reach is best effort against the
+  agent's own shell.** The daemon, the login callback and a relay or web
+  listener started as another smind process each leave a small record under
+  your smind home (`listeners/`); a shell running as you can delete or change
+  those files. The daemon and a login callback in the daemon's own process are
+  also remembered in memory and cannot be removed that way; every smind process
+  rewrites its own record every few seconds, and an unreadable directory makes
+  the browser refuse; but a record deleted for a few seconds, in a process other
+  than the daemon, is briefly not protected.
+
 - A program running as you on the same machine can do what you can: it can read
   the daemon token. The browser is a convenience for a project you trust, not a
   sandbox for hostile code.

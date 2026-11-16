@@ -2,6 +2,7 @@ package wsapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/url"
 	"strconv"
@@ -36,45 +37,98 @@ type liveDenySource struct {
 	fleet fleetLinkReader
 	alive func(pid int) bool
 
-	mu     sync.Mutex
-	at     time.Time
-	cached []browser.Endpoint
+	mu       sync.Mutex
+	at       time.Time
+	cached   []browser.Endpoint
+	cachedEr error
+	flight   chan struct{} // non-nil while one refresh runs: callers wait for it (single flight)
 }
 
 func newLiveDenySource(dir string, fleet fleetLinkReader) *liveDenySource {
 	return &liveDenySource{dir: dir, fleet: fleet, alive: listeners.ProcessAlive}
 }
 
-// Endpoints returns the current live reserved endpoints.
-func (s *liveDenySource) Endpoints() []browser.Endpoint {
-	s.mu.Lock()
-	if !s.at.IsZero() && time.Since(s.at) < liveDenyTTL {
-		cached := s.cached
+// Endpoints returns the current live reserved endpoints. An error means the
+// listener records cannot be read (an unreadable or flooded directory): the
+// caller fails CLOSED. The listeners THIS process registered come from memory,
+// so they are reserved even when their files were deleted.
+func (s *liveDenySource) Endpoints() ([]browser.Endpoint, error) {
+	for {
+		s.mu.Lock()
+		if !s.at.IsZero() && time.Since(s.at) < liveDenyTTL {
+			eps, err := s.cached, s.cachedEr
+			s.mu.Unlock()
+			return eps, err
+		}
+		if s.flight != nil { // another goroutine is refreshing: wait for it, then re-check
+			wait := s.flight
+			s.mu.Unlock()
+			<-wait
+			continue
+		}
+		s.flight = make(chan struct{})
+		flight := s.flight
 		s.mu.Unlock()
-		return cached
+
+		// The reads happen OUTSIDE the lock, by exactly one goroutine at a time.
+		eps, err := s.refresh()
+
+		s.mu.Lock()
+		s.cached, s.cachedEr, s.at = eps, err, time.Now()
+		s.flight = nil
+		s.mu.Unlock()
+		close(flight)
+		return eps, err
 	}
-	s.mu.Unlock()
-	// The reads happen OUTSIDE the lock: a slow filesystem or store must not stall
-	// every decision behind it (the result is cached for half a second).
+}
+
+func endpointOf(e listeners.Entry) (browser.Endpoint, bool) {
+	host, portStr, err := net.SplitHostPort(e.Addr)
+	if err != nil {
+		return browser.Endpoint{}, false
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return browser.Endpoint{}, false
+	}
+	if host == "" {
+		host = "0.0.0.0" // bound on every address: the port is reserved everywhere
+	}
+	return browser.Endpoint{Host: host, Port: port}, true
+}
+
+func (s *liveDenySource) refresh() ([]browser.Endpoint, error) {
 	var out []browser.Endpoint
-	for _, e := range listeners.Read(s.dir, s.alive) {
-		host, portStr, err := net.SplitHostPort(e.Addr)
-		if err != nil {
-			continue
+	for _, e := range listeners.Local() { // this process's own listeners, from memory
+		if ep, ok := endpointOf(e); ok {
+			out = append(out, ep)
 		}
-		port, err := strconv.Atoi(portStr)
-		if err != nil {
-			continue
+	}
+	files, err := listeners.Read(s.dir, s.alive)
+	if err != nil {
+		// Keep what is known for the log line, but the caller must refuse.
+		return out, fmt.Errorf("the daemon's listener records cannot be read: %w", err)
+	}
+	for _, e := range files {
+		if ep, ok := endpointOf(e); ok {
+			out = append(out, ep)
 		}
-		if host == "" {
-			host = "0.0.0.0" // bound on every address: the port is reserved everywhere
-		}
-		out = append(out, browser.Endpoint{Host: host, Port: port})
 	}
 	out = append(out, s.fleetEndpoints()...)
-	s.mu.Lock()
-	s.cached, s.at = out, time.Now()
-	s.mu.Unlock()
+	return dedupeEndpoints(out), nil
+}
+
+// dedupeEndpoints drops repeats (this process's listeners come from memory AND
+// from their own files).
+func dedupeEndpoints(in []browser.Endpoint) []browser.Endpoint {
+	seen := make(map[browser.Endpoint]bool, len(in))
+	out := in[:0:0]
+	for _, e := range in {
+		if !seen[e] {
+			seen[e] = true
+			out = append(out, e)
+		}
+	}
 	return out
 }
 

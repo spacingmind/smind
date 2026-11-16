@@ -36,7 +36,9 @@ type Policy struct {
 	// right now, some of which exist only for a moment (an OAuth callback). An
 	// entry that does not parse is ignored (the static Deny list is validated
 	// by NewPolicy; a live entry must never make a decision fail open or panic).
-	LiveDeny func() []Endpoint
+	// An ERROR from it fails CLOSED: every address is refused, because the
+	// reserved set cannot be known.
+	LiveDeny func() ([]Endpoint, error)
 }
 
 // Decision is the verdict on a URL. NeedsResolve means the URL names a host
@@ -93,20 +95,23 @@ func canonEndpoint(d Endpoint) (Endpoint, error) {
 }
 
 // WithLiveDeny returns the policy with a live source of reserved endpoints.
-func (p Policy) WithLiveDeny(fn func() []Endpoint) Policy {
+func (p Policy) WithLiveDeny(fn func() ([]Endpoint, error)) Policy {
 	p.LiveDeny = fn
 	return p
 }
 
 // endpoints is the static deny list plus the live one (canonicalised, bad
 // entries dropped).
-func (p Policy) endpoints() []Endpoint {
+func (p Policy) endpoints() (eps []Endpoint, ok bool) {
 	if p.LiveDeny == nil {
-		return p.Deny
+		return p.Deny, true
 	}
-	live := p.LiveDeny()
+	live, err := p.LiveDeny()
+	if err != nil {
+		return nil, false
+	}
 	if len(live) == 0 {
-		return p.Deny
+		return p.Deny, true
 	}
 	out := append([]Endpoint(nil), p.Deny...)
 	for _, d := range live {
@@ -114,7 +119,7 @@ func (p Policy) endpoints() []Endpoint {
 			out = append(out, e)
 		}
 	}
-	return out
+	return out, true
 }
 
 // NormalizeAllowHost validates one allowlist entry: a bare host (a name or an
@@ -383,7 +388,11 @@ func (p Policy) CheckURL(raw string) Decision {
 
 // denied reports whether the target is one of the reserved endpoints.
 func (p Policy) denied(h parsedHost, port int) bool {
-	for _, e := range p.endpoints() {
+	eps, ok := p.endpoints()
+	if !ok {
+		return true // the live reserved set cannot be read: refuse everything
+	}
+	for _, e := range eps {
 		if e.Port != port {
 			continue
 		}

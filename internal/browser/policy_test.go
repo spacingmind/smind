@@ -330,3 +330,28 @@ func TestAllowlistedNameMustResolvePublic(t *testing.T) {
 		t.Error("*.localhost stays allowed")
 	}
 }
+
+// A LiveDeny that fails refuses EVERY address (the reserved set cannot be known);
+// one that returns bad entries ignores them; one that works adds to the static list.
+func TestPolicyLiveDenyFailsClosed(t *testing.T) {
+	t.Parallel()
+	pol, err := NewPolicy([]string{"intranet.test"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := pol.WithLiveDeny(func() ([]Endpoint, error) { return nil, errors.New("directory unreadable") })
+	for _, u := range []string{"http://localhost:3000/", "http://127.0.0.1:1/", "http://intranet.test/", "http://[::1]:9/"} {
+		if failing.CheckURL(u).Allowed {
+			t.Errorf("%s must be refused when the live reserved set cannot be read", u)
+		}
+	}
+	bad := pol.WithLiveDeny(func() ([]Endpoint, error) {
+		return []Endpoint{{Host: "not a host !", Port: 5}, {Host: "127.0.0.1", Port: 0}, {Host: "127.0.0.1", Port: 8123}}, nil
+	})
+	if !bad.CheckURL("http://localhost:3000/").Allowed {
+		t.Error("bad live entries are ignored; another port stays allowed")
+	}
+	if bad.CheckURL("http://localhost:8123/").Allowed {
+		t.Error("the one valid live entry is reserved")
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func aliveYes(int) bool { return true }
@@ -53,7 +54,10 @@ func TestRegisterThenRead(t *testing.T) {
 	}
 	defer remove()
 
-	got := Read(dir, aliveYes)
+	got, err := Read(dir, aliveYes)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
 	if len(got) != 1 {
 		t.Fatalf("Read() returned %d entries, want 1: %+v", len(got), got)
 	}
@@ -95,10 +99,13 @@ func TestReadIgnoresDeadAndRemovesTheirFile(t *testing.T) {
 	writeEntry(t, dir, "9999-live-dddddddd.json", Entry{Name: "live2", Addr: "127.0.0.1:4", PID: 9999})
 
 	calls := make(map[int]int)
-	got := Read(dir, func(pid int) bool {
+	got, err := Read(dir, func(pid int) bool {
 		calls[pid]++
 		return pid == 9999
 	})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
 
 	if len(got) != 2 {
 		t.Fatalf("Read() returned %d entries, want 2: %+v", len(got), got)
@@ -152,7 +159,11 @@ func TestReadIgnoresMalformed(t *testing.T) {
 			} else {
 				writeFile(t, dir, tc.file, tc.data)
 			}
-			if got := Read(dir, aliveYes); len(got) != 0 {
+			got, err := Read(dir, aliveYes)
+			if err != nil {
+				t.Fatalf("Read() error = %v", err)
+			}
+			if len(got) != 0 {
 				t.Fatalf("Read() = %+v, want no entries", got)
 			}
 		})
@@ -168,14 +179,84 @@ func mustJSON(t *testing.T, e Entry) []byte {
 	return data
 }
 
-func TestReadCapsFileCount(t *testing.T) {
+// More live valid entries than any honest run has, or more directory entries than
+// the scan bound, is a FLOOD (real records could hide behind planted ones): Read
+// fails closed with an error instead of returning a sorted prefix.
+func TestReadFailsClosedOnAFlood(t *testing.T) {
 	dir := t.TempDir()
-	for i := 1; i <= 300; i++ {
+	for i := 1; i <= maxEntries; i++ {
 		writeEntry(t, dir, fmt.Sprintf("%03d-p-aaaaaaaa.json", i), Entry{Name: "p", Addr: "127.0.0.1:80", PID: i})
 	}
-	got := Read(dir, aliveYes)
-	if len(got) != 256 {
-		t.Fatalf("Read() returned %d entries, want 256", len(got))
+	if got, err := Read(dir, aliveYes); err != nil || len(got) != maxEntries {
+		t.Fatalf("exactly the cap is fine: %d %v", len(got), err)
+	}
+	writeEntry(t, dir, "999-p-aaaaaaaa.json", Entry{Name: "p", Addr: "127.0.0.1:80", PID: 999})
+	if _, err := Read(dir, aliveYes); err == nil {
+		t.Fatal("one live entry more than the cap must be an error (fail closed)")
+	}
+	junk := t.TempDir()
+	for i := 0; i <= maxDirEntries; i++ {
+		if err := os.WriteFile(filepath.Join(junk, fmt.Sprintf("%05d.txt", i)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Read(junk, aliveYes); err == nil {
+		t.Fatal("more directory entries than the scan bound must be an error (fail closed)")
+	}
+}
+
+// Junk files that sort ahead of the real entries are skipped without counting
+// toward the valid-entry cap, so they cannot hide entries this process wrote.
+func TestReadFindsRealEntriesBehind300JunkFiles(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < 300; i++ {
+		writeFile(t, dir, fmt.Sprintf("%04d.json", i), []byte("junk"))
+	}
+	var removes []func()
+	for _, name := range []string{"daemon", "relay", "grpcweb"} {
+		remove, err := Register(dir, name, "127.0.0.1:4648")
+		if err != nil {
+			t.Fatalf("Register(%s) error = %v", name, err)
+		}
+		removes = append(removes, remove)
+	}
+	for _, remove := range removes {
+		defer remove()
+	}
+
+	got, err := Read(dir, aliveYes)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("Read() returned %d entries, want 3: %+v", len(got), got)
+	}
+	for _, name := range []string{"daemon", "grpcweb", "relay"} {
+		found := false
+		for _, e := range got {
+			if e.Name == name {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no entry named %q in %+v", name, got)
+		}
+	}
+}
+
+// A directory Read cannot list (here: a regular file) is an error; a missing
+// directory is not.
+func TestReadReturnsErrorForAnUnreadableDir(t *testing.T) {
+	base := t.TempDir()
+	notADir := filepath.Join(base, "file")
+	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got, err := Read(notADir, aliveYes); err == nil {
+		t.Errorf("Read(regular file) = (%+v, nil), want an error", got)
+	}
+	if got, err := Read(filepath.Join(base, "nope"), aliveYes); err != nil || got != nil {
+		t.Errorf("Read(missing dir) = (%+v, %v), want (nil, nil)", got, err)
 	}
 }
 
@@ -188,7 +269,11 @@ func TestRegisterRejectsABadAddrAndReturnsANoopRemove(t *testing.T) {
 		}
 		remove() // no-op, must not panic
 	}
-	if got := Read(dir, aliveYes); got != nil {
+	got, err := Read(dir, aliveYes)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if got != nil {
 		t.Errorf("Read() = %+v, want nil", got)
 	}
 }
@@ -237,7 +322,11 @@ func TestAtomicNoPartialFileVisible(t *testing.T) {
 				return
 			default:
 			}
-			for _, e := range Read(dir, aliveYes) {
+			got, err := Read(dir, aliveYes)
+			if err != nil {
+				t.Errorf("Read() error = %v", err)
+			}
+			for _, e := range got {
 				if e.PID != os.Getpid() || !validAddr(e.Addr) || e.Name == "" {
 					t.Errorf("Read() returned an incomplete entry: %+v", e)
 				}
@@ -269,7 +358,10 @@ func TestNameSanitised(t *testing.T) {
 	}
 	defer remove()
 
-	got := Read(dir, aliveYes)
+	got, err := Read(dir, aliveYes)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
 	if len(got) != 1 || got[0].Name != "a-b----c" {
 		t.Fatalf("Read() = %+v, want one entry named %q", got, "a-b----c")
 	}
@@ -287,15 +379,164 @@ func TestNameSanitised(t *testing.T) {
 		t.Fatalf("Register(long) error = %v", err)
 	}
 	defer longRemove()
-	if long := Read(dir, aliveYes); len(long) != 2 || len(long[1].Name) != maxNameLen {
+	long, err := Read(dir, aliveYes)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if len(long) != 2 || len(long[1].Name) != maxNameLen {
 		t.Fatalf("Read() = %+v, want a second entry with a %d-char name", long, maxNameLen)
 	}
 }
 
 func TestMissingDirReadsNothing(t *testing.T) {
-	got := Read(filepath.Join(t.TempDir(), "nope"), aliveYes)
+	got, err := Read(filepath.Join(t.TempDir(), "nope"), aliveYes)
+	if err != nil {
+		t.Fatalf("Read(missing dir) error = %v, want nil", err)
+	}
 	if got != nil {
 		t.Fatalf("Read() = %+v, want nil", got)
+	}
+}
+
+func setRefreshEvery(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := refreshEvery
+	refreshEvery = d
+	t.Cleanup(func() { refreshEvery = old })
+}
+
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond) // sleep-ok: polling
+	}
+	t.Fatal(msg)
+}
+
+func TestLocalListsWhatThisProcessRegisteredAndForgetsOnRemove(t *testing.T) {
+	dir := t.TempDir()
+	removeDaemon, err := Register(dir, "daemon", "127.0.0.1:4648")
+	if err != nil {
+		t.Fatalf("Register(daemon) error = %v", err)
+	}
+	removeRelay, err := Register(dir, "relay", "127.0.0.1:4649")
+	if err != nil {
+		t.Fatalf("Register(relay) error = %v", err)
+	}
+
+	got := Local()
+	if len(got) != 2 {
+		t.Fatalf("Local() = %+v, want 2 entries", got)
+	}
+	if got[0].Name != "daemon" || got[0].Addr != "127.0.0.1:4648" || got[0].PID != os.Getpid() {
+		t.Errorf("Local()[0] = %+v, want the daemon entry", got[0])
+	}
+	if got[1].Name != "relay" || got[1].Addr != "127.0.0.1:4649" {
+		t.Errorf("Local()[1] = %+v, want the relay entry", got[1])
+	}
+
+	removeDaemon()
+	if left := Local(); len(left) != 1 || left[0].Name != "relay" {
+		t.Errorf("Local() after remove = %+v, want only relay", left)
+	}
+	removeRelay()
+	if left := Local(); len(left) != 0 {
+		t.Errorf("Local() after removes = %+v, want none", left)
+	}
+}
+
+func TestRegisterSelfHealsADeletedFile(t *testing.T) {
+	setRefreshEvery(t, 20*time.Millisecond)
+	dir := t.TempDir()
+	remove, err := Register(dir, "daemon", "127.0.0.1:4648")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	defer remove()
+
+	names := fileNames(t, dir)
+	if len(names) != 1 {
+		t.Fatalf("%d files, want 1: %v", len(names), names)
+	}
+	if err := os.Remove(filepath.Join(dir, names[0])); err != nil {
+		t.Fatalf("remove entry file: %v", err)
+	}
+	waitFor(t, 5*time.Second, func() bool {
+		got, err := Read(dir, aliveYes)
+		return err == nil && len(got) == 1 && got[0].Name == "daemon"
+	}, "deleted entry file was not recreated within 5s")
+}
+
+func TestRegisterSelfHealsADeletedDirectory(t *testing.T) {
+	setRefreshEvery(t, 20*time.Millisecond)
+	dir := filepath.Join(t.TempDir(), "listeners")
+	remove, err := Register(dir, "daemon", "127.0.0.1:4648")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	defer remove()
+
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove dir: %v", err)
+	}
+	waitFor(t, 5*time.Second, func() bool {
+		got, err := Read(dir, aliveYes)
+		return err == nil && len(got) == 1 && got[0].Name == "daemon"
+	}, "deleted listener directory was not recreated within 5s")
+}
+
+func TestRemoveStopsTheRefresh(t *testing.T) {
+	setRefreshEvery(t, 20*time.Millisecond)
+	dir := t.TempDir()
+	remove, err := Register(dir, "daemon", "127.0.0.1:4648")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	names := fileNames(t, dir)
+	if len(names) != 1 {
+		t.Fatalf("%d files, want 1: %v", len(names), names)
+	}
+	file := filepath.Join(dir, names[0])
+	remove()
+	remove() // must be safe to call twice
+	_ = os.Remove(file)
+
+	// With refreshEvery = 20ms a live refresh goroutine would rewrite the file
+	// well within 300ms.
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("entry file reappeared after remove (stat err = %v)", err)
+		}
+		time.Sleep(10 * time.Millisecond) // sleep-ok: polling
+	}
+}
+
+func TestLocalEntryExistsEvenWhenTheFileCouldNotBeWritten(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	remove, err := Register(filepath.Join(blocker, "listeners"), "daemon", "127.0.0.1:4648")
+	if err == nil {
+		remove()
+		t.Fatal("Register(under a regular file) err = nil, want error")
+	}
+
+	got := Local()
+	if len(got) != 1 || got[0].Name != "daemon" || got[0].Addr != "127.0.0.1:4648" || got[0].PID != os.Getpid() {
+		t.Fatalf("Local() = %+v, want the registered daemon entry", got)
+	}
+
+	remove() // must be safe even though the file was never written
+	remove() // twice is fine
+	if left := Local(); len(left) != 0 {
+		t.Errorf("Local() after remove = %+v, want none", left)
 	}
 }
 

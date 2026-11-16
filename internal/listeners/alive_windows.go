@@ -3,6 +3,8 @@
 package listeners
 
 import (
+	"errors"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -18,7 +20,12 @@ func ProcessAlive(pid int) bool {
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return false
+		// ERROR_INVALID_PARAMETER means no such process. Access denied means
+		// the process exists but belongs to another user or a service, and any
+		// other unexpected error is doubt: a listener file of a live service
+		// must not be deleted on a doubt, so both are alive (the unix
+		// equivalent treats EPERM as alive too).
+		return !errors.Is(err, windows.ERROR_INVALID_PARAMETER)
 	}
 	defer windows.CloseHandle(h)
 	var code uint32

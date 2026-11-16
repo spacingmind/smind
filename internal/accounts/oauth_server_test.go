@@ -169,7 +169,8 @@ func TestCallbackServerIsRecordedOnlyWhileItIsOpen(t *testing.T) {
 	}
 	addr := s.listener.Addr().String()
 	has := func() bool {
-		for _, e := range listenerfiles.Read(dir, listenerfiles.ProcessAlive) {
+		entries, _ := listenerfiles.Read(dir, listenerfiles.ProcessAlive)
+		for _, e := range entries {
 			if e.Addr == addr && e.Name == "oauth-callback" {
 				return true
 			}
