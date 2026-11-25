@@ -424,7 +424,7 @@ func TestEventsObserve_OnlyAllowlistedTopics(t *testing.T) {
 	if _, rerr := e.hostCall(t, "obs", "events.subscribe", map[string]any{"topics": []string{TopicTaskDeleted}}); rerr != nil {
 		t.Fatalf("subscribe: %v", rerr)
 	}
-	e.api.pluginEvents.changed("obs") // the status notice, delivered late: not subscribed, so never arrives
+	e.api.pluginEvents.changed("obs") // a plugin.updated (and any mcp/profile diff) the plugin did not subscribe to: never arrives
 	e.api.bus.Publish(Event{Topic: TopicAccountUpdated, Payload: map[string]any{"x": 1}})
 	e.api.bus.Publish(Event{Topic: TopicChatQueueUpdated, Payload: map[string]any{"items": []string{"prompt text"}}})
 	e.api.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: 7}})
@@ -459,6 +459,32 @@ func TestEventsObserve_OnlyAllowlistedTopics(t *testing.T) {
 	_, rerr := e.hostCall(t, "obs", "events.subscribe", map[string]any{"topics": []string{TopicTaskArchived, TopicAccountUpdated}})
 	if rerr == nil {
 		t.Error("a list with one forbidden topic must fail")
+	}
+	// Nothing partial was left behind by the refused requests: the forbidden topics still never arrive.
+	// (The plugin is now subscribed to every allowlisted topic, so an allowlisted event such as a late
+	// plugin.updated is legitimate here; only the forbidden topics are asserted.)
+	e.api.bus.Publish(Event{Topic: TopicAccountUpdated, Payload: map[string]any{"x": 2}})
+	e.api.bus.Publish(Event{Topic: TopicChatQueueUpdated, Payload: map[string]any{"items": []string{"prompt text"}}})
+	e.api.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: 8}}) // marker: FIFO, so the forbidden ones would be ahead of it
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		var sawMarker bool
+		for _, p := range e.drainMethod(t, "obs", "event") {
+			var n eventNotification
+			if err := json.Unmarshal(p.Params, &n); err != nil {
+				t.Fatalf("event: %v", err)
+			}
+			if n.Topic == TopicAccountUpdated || n.Topic == TopicChatQueueUpdated {
+				t.Fatalf("a refused request left a subscription behind: %s delivered", n.Topic)
+			}
+			sawMarker = sawMarker || n.Topic == TopicTaskDeleted
+		}
+		if sawMarker {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the marker event never arrived")
+		}
+		time.Sleep(10 * time.Millisecond) // sleep-ok: poll for the marker, the assertion above is on content
 	}
 }
 

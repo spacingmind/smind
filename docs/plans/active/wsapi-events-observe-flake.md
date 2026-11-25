@@ -13,6 +13,8 @@ Size S. Test-only fix; the diagnosis shows no product bug.
 
 Check delivery first, with the plugin subscribed to the one topic under test (`task.deleted`), and run the refusal loop afterwards. Regression: the status notice is injected by hand (`pluginEvents.changed`) after the subscribe, so the late notice is no longer timing: it must not arrive. A second test pins the premise (a subscriber of `plugin.updated` does receive the notice).
 
+Scope note: the diagnosis is the observed second event (`plugin.updated`); it is not an exhaustive audit of every async publisher. With the plugin subscribed to `task.deleted` alone, only a second `task.deleted` could break the assertion, and nothing in the test env publishes one. The refusal half keeps its original strength: after the loop and the mixed request, forbidden topics are published and must never arrive (a marker event orders the check).
+
 ## Validation
 
 See the PR body.
