@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { useBrowserSettings, useClearBrowserData, useSetBrowserSettings } from "@/hooks/use-browser-settings";
 import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import {
+  daemonSentence,
   BROWSER_RESIDUAL_LOCAL,
   BROWSER_RESIDUAL_SHELL,
   BROWSER_RESIDUAL_WINDOWS,
@@ -22,7 +23,7 @@ import { Icons } from "@/lib/icons";
 
 /** The message of a failed call, as the daemon worded it. */
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return daemonSentence(error instanceof Error ? error.message : String(error));
 }
 
 /**
@@ -65,7 +66,11 @@ function BrowserSection() {
   const switchPending = set.isPending && set.variables !== undefined && "enabled" in set.variables;
 
   async function change(c: Parameters<typeof set.mutateAsync>[0]): Promise<void> {
-    await set.mutateAsync(c);
+    try {
+      await set.mutateAsync(c);
+    } catch (e) {
+      throw new Error(messageOf(e)); // the allowlist editor shows exactly this text under the input
+    }
   }
 
   return (
@@ -210,11 +215,16 @@ function BrowserSection() {
           </SettingsGroup>
 
           <SettingsGroup title="Profile" description="Each session starts with a fresh profile that is removed when the session ends." testId="browser-profile">
-            <SettingsRow
-              label="Ephemeral profile"
-              description="Cookies and logins do not outlive a session. A persistent profile is not available yet."
-              control={
-                <div className="flex flex-wrap items-center gap-2">
+            {/* A container query on the card, not the viewport: beside each other only where the text keeps a readable column. */}
+            <div className="@container/profile" data-testid="browser-profile-row">
+              <div className="flex flex-col gap-3 px-4 py-3 @2xl/profile:flex-row @2xl/profile:items-center @2xl/profile:justify-between">
+                <div className="min-w-0 @2xl/profile:flex-1" data-testid="browser-profile-text">
+                  <p className="text-ui-base text-foreground">Ephemeral profile</p>
+                  <p className="text-ui-sm text-foreground-muted">
+                    Cookies and logins do not outlive a session. A persistent profile is not available yet.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 @2xl/profile:shrink-0">
                   {live && (
                     <Button
                       type="button"
@@ -244,14 +254,13 @@ function BrowserSection() {
                     Clear browser data
                   </Button>
                 </div>
-              }
-            >
+              </div>
               {clear.error && (
-                <p role="alert" data-testid="browser-clear-error" className="text-ui-sm text-destructive">
+                <p role="alert" data-testid="browser-clear-error" className="px-4 pb-3 text-ui-sm text-destructive">
                   {messageOf(clear.error)}
                 </p>
               )}
-            </SettingsRow>
+            </div>
           </SettingsGroup>
 
           <SettingsGroup

@@ -17,3 +17,12 @@ export const BROWSER_RESIDUAL_SHELL_KEY = "protect against the model, not agains
 /** (c) The Windows statement; the per-provider statements come from the daemon's reach table. */
 export const BROWSER_RESIDUAL_WINDOWS = "On Windows the browser is not offered.";
 export const BROWSER_RESIDUAL_WINDOWS_KEY = "On Windows the browser is not offered";
+
+/**
+ * The daemon words a refusal as "<rpc method>: <package>: <sentence>" (e.g. `browser.settings.set: browser: allowlist
+ * entry "*.x" must be one exact host...`). The person reads the sentence: the leading method and package labels are
+ * internal and are dropped; everything after them is the daemon's text, unchanged.
+ */
+export function daemonSentence(message: string): string {
+  return message.replace(/^browser\.(?:settings\.(?:get|set)|data\.clear): /, "").replace(/^browser: /, "");
+}

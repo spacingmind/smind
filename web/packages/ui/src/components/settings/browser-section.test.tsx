@@ -12,6 +12,7 @@ import {
   BROWSER_RESIDUAL_WINDOWS_KEY,
 } from "@/lib/browser-settings-text";
 import { BROWSER_SETTINGS_POLL_MS } from "@/hooks/use-browser-settings";
+import { daemonSentence } from "@/lib/browser-settings-text";
 import { RpcError } from "@/lib/ws-client";
 import { browserDaemon, browserView } from "@/test/browser-test-client";
 import { renderWithDaemon } from "@/test/render-with-daemon";
@@ -104,6 +105,7 @@ describe("browser section", () => {
 
   it("adds and removes hosts through allowAdd / allowRemove and shows the daemon's refusal verbatim (AC4)", async () => {
     const s = stateful({ enabled: true }, (h) => (h.includes("*") ? `browser: allowlist entry "${h}" must be one exact host` : null));
+    // the stateful daemon words it like the real one: "browser.settings.set: browser: allowlist entry ..."
     const d = renderSection(s.handler);
     await ready();
     const input = screen.getByTestId("browser-allow-input");
@@ -113,6 +115,8 @@ describe("browser section", () => {
     fireEvent.change(input, { target: { value: "*.example.com" } });
     fireEvent.click(screen.getByTestId("browser-allow-add"));
     await waitFor(() => expect(screen.getByTestId("browser-allow-error")).toHaveTextContent('must be one exact host'));
+    // the daemon's sentence only: no method or package label in front of it
+    expect(screen.getByTestId("browser-allow-error").textContent).toBe('allowlist entry "*.example.com" must be one exact host');
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(input).toHaveValue("*.example.com");
     fireEvent.click(screen.getByRole("button", { name: "Remove intranet.example" }));
@@ -195,6 +199,27 @@ describe("browser section", () => {
     expect(within(reach).getByText("no MCP here")).toBeInTheDocument();
   });
 
+  it("strips only the daemon's method and package labels", () => {
+    expect(daemonSentence('browser.settings.set: browser: allowlist entry "*.x" must be one exact host')).toBe('allowlist entry "*.x" must be one exact host');
+    expect(daemonSentence("browser.settings.set: at most 50 hosts may be allowed (51 given)")).toBe("at most 50 hosts may be allowed (51 given)");
+    expect(daemonSentence("browser.settings.get: workspace is read-only")).toBe("workspace is read-only");
+    expect(daemonSentence("browser.data.clear: not available")).toBe("not available");
+    expect(daemonSentence("something else: entirely")).toBe("something else: entirely");
+    expect(daemonSentence("the browser: still here")).toBe("the browser: still here");
+  });
+
+  it("the profile card lays its buttons out by the CARD's width: stacked under the text until it is wide (container query, not the viewport)", async () => {
+    renderSection(stateful({ sessionLive: true }).handler);
+    await ready();
+    const row = screen.getByTestId("browser-profile-row");
+    expect(row.className).toContain("@container/profile");
+    const flex = row.firstElementChild as HTMLElement;
+    expect(flex.className).toContain("flex-col");
+    expect(flex.className).toContain("@2xl/profile:flex-row");
+    expect(flex.className).not.toMatch(/(^|\s)(sm|md|lg):flex-row/); // never keyed to the viewport
+    expect(screen.getByTestId("browser-profile-text").className).toContain("min-w-0");
+  });
+
   it("the live line is a polite status region", async () => {
     renderSection(stateful({ sessionLive: true }).handler);
     await ready();
@@ -224,7 +249,7 @@ describe("browser section", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(BROWSER_SETTINGS_POLL_MS + 100);
       });
-      await waitFor(() => expect(screen.getByTestId("browser-stale")).toHaveTextContent("may be out of date: browser.settings.get: daemon is restarting"));
+      await waitFor(() => expect(screen.getByTestId("browser-stale")).toHaveTextContent("may be out of date: daemon is restarting"));
       expect(screen.getByTestId("browser-switch")).toHaveAttribute("aria-checked", "true"); // the last good view stays
     } finally {
       vi.useRealTimers();

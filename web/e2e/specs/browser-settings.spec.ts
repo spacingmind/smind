@@ -178,6 +178,8 @@ test("BS-02 an allowlist host can be added and removed, and an invalid one shows
     await page.getByTestId('browser-allow-add').click()
     const err = page.getByTestId('browser-allow-error')
     await expect(err).toContainText('must be one exact host, no scheme, wildcard, path or userinfo')
+    await expect(err).not.toContainText('browser.settings.set') // the daemon's sentence, without its internal method and package labels
+    expect(((await err.textContent()) ?? '').startsWith('allowlist entry "*.example.com"')).toBe(true)
     await expect(input).toHaveAttribute('aria-invalid', 'true')
     await expect(input).toHaveValue('*.example.com') // what was typed is kept
     await expect(page.getByTestId('browser-allow-list').getByText('example.com')).toHaveCount(0)
@@ -253,6 +255,10 @@ test('BS-F3 frames: a live session, the kill switch and no browser installed', a
   await expect(page.getByTestId('browser-live')).toContainText('In use now')
   await expect(page.getByTestId('browser-end-session')).toBeVisible()
   const heightLive = (await page.getByTestId('browser-access').boundingBox())?.height ?? 0
+  // the Profile card's text must keep a readable column next to the two buttons (it was squeezed to one word per line)
+  const textBox = await page.getByTestId('browser-profile-text').boundingBox()
+  expect(textBox?.width ?? 0, 'the profile text column').toBeGreaterThanOrEqual(240)
+  expect(textBox?.height ?? 999, 'the profile text is not one word per line').toBeLessThanOrEqual(90)
   await frame(page, testInfo, '05-live')
   await page.getByTestId('browser-end-session').click()
   await expect(page.getByTestId('browser-live')).toHaveCount(0, { timeout: 10_000 }) // the next 3 s poll re-reads the view
@@ -269,4 +275,17 @@ test('BS-F3 frames: a live session, the kill switch and no browser installed', a
   await expect(page.getByTestId('browser-no-chrome')).toContainText('No browser installed')
   await expect(page.getByTestId('browser-install-step')).toContainText('brew install --cask chromium')
   await frame(page, testInfo, '07-chrome-missing')
+})
+
+test('BS-F4 frames: the live Profile card at a mid width keeps its text readable (the card, not the viewport, decides the layout)', async ({ app }, testInfo) => {
+  test.skip(app.narrow, 'a 700 px window is a mid width; the narrow projects are covered by BS-F3')
+  const { page } = app
+  await stubBrowser(page, { enabled: true, allowHosts: ['intranet.example'], sessionLive: true })
+  await page.setViewportSize({ width: 700, height: 900 })
+  await openSection(app)
+  await expect(page.getByTestId('browser-live')).toBeVisible()
+  const textBox = await page.getByTestId('browser-profile-text').boundingBox()
+  expect(textBox?.width ?? 0, 'the profile text column at 700 px').toBeGreaterThanOrEqual(240)
+  expect(textBox?.height ?? 999).toBeLessThanOrEqual(90)
+  await frame(page, testInfo, '08-live-700')
 })
