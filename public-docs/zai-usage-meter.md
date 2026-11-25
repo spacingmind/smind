@@ -1,7 +1,7 @@
 ---
 title: Z.AI usage meter
 description: See the 5-hour and weekly windows of a Z.AI GLM coding plan, and let a used-up window hold work back.
-summary: "This page explains the Z.AI usage meter in sMind by Spacing Mind: plan windows for a Z.AI provider instance on the Usage page and the provider's detail page, how often smind calls Z.AI, which settings turn it off and how a used-up window acts like a rate-limit cooldown. It is for people who run GLM through a Z.AI coding plan."
+summary: "This page explains the Z.AI usage meter in sMind: plan windows for a Z.AI provider instance on the Usage page and the provider's detail page, how often smind calls Z.AI, which settings turn it off and how a used-up window acts like a rate-limit cooldown. It is for people who run GLM through a Z.AI coding plan."
 order: 23
 ---
 

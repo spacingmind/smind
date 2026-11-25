@@ -1,7 +1,7 @@
 ---
 title: Hosts
 description: Pair this smind with other machines running smind, decide what each may do, and manage them from Settings or a phone.
-summary: "This page explains connected hosts in sMind by Spacing Mind (a preview feature): pairing another machine's smind with this one, what the Hosts page shows, how the two directions of a pairing are switched on separately, and what a phone can and cannot do. It is for people who run smind on more than one computer."
+summary: "This page explains connected hosts in sMind (a preview feature): pairing another machine's smind with this one, what the Hosts page shows, how the two directions of a pairing are switched on separately, and what a phone can and cannot do. It is for people who run smind on more than one computer."
 order: 18
 ---
 

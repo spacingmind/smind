@@ -5,14 +5,14 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const SITE_URL = 'https://docs.spacingmind.com'
-export const SITE_NAME = 'sMind by Spacing Mind'
+export const SITE_NAME = 'sMind'
 export const SITE_SUMMARY =
-  'sMind by Spacing Mind is a self-hosted platform for running coding agents: one Go binary with a web app, desktop app, command line and mobile access.'
+  'sMind is an AI Agent Orchestration Platform: one Go binary with a web app, desktop app, command line and mobile access.'
 export const REPO_URL = 'https://github.com/spacingmind/smind'
 export const OG_IMAGE_URL = SITE_URL + '/og-card.png'
 export const OG_IMAGE_WIDTH = 1200
 export const OG_IMAGE_HEIGHT = 630
-export const OG_IMAGE_ALT = 'sMind by Spacing Mind: space for your agents, free for you'
+export const OG_IMAGE_ALT = 'sMind: space for your agents, free for you'
 
 export const AI_CRAWLERS = [
   'GPTBot',

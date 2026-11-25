@@ -1,7 +1,7 @@
 ---
 title: Providers
 description: Log in to the coding-agent providers smind runs, and choose each provider's config directory.
-summary: "This page explains the coding-agent providers sMind by Spacing Mind runs (Claude Code, Codex, GLM, Kimi, OpenCode, GitHub Copilot, Cline, Goose and Cursor), including login and each provider's config directory. It is for anyone setting up accounts."
+summary: "This page explains the coding-agent providers sMind runs (Claude Code, Codex, GLM, Kimi, OpenCode, GitHub Copilot, Cline, Goose and Cursor), including login and each provider's config directory. It is for anyone setting up accounts."
 order: 3
 ---
 

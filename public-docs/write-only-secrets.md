@@ -1,7 +1,7 @@
 ---
 title: Write-only secrets
 description: How smind stores a provider key you type once, and what it never shows again.
-summary: "This page explains write-only secrets in sMind by Spacing Mind: how a provider key is stored and referenced, what you can see afterwards (a set flag and a short fingerprint), where it is used and what it does not protect against. It is for people who add keys to provider instances."
+summary: "This page explains write-only secrets in sMind: how a provider key is stored and referenced, what you can see afterwards (a set flag and a short fingerprint), where it is used and what it does not protect against. It is for people who add keys to provider instances."
 order: 20
 ---
 
