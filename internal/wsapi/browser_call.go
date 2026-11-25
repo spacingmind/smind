@@ -67,6 +67,7 @@ type browserHost struct {
 	revokeGrants func(workspaceID int64)
 	revokeAll    func()
 	forgetRun    func(runID string)
+	dropGrants   func(runID string)
 	liveDeny     func(ctx context.Context) ([]browser.Endpoint, error)
 	// stopWatch ends the kill-switch watcher (nil when none runs).
 	stopWatch chan struct{}
@@ -109,6 +110,7 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h.revokeGrants = reg.RevokeBrowserGrants
 	h.revokeAll = reg.RevokeAllBrowserGrants
 	h.forgetRun = reg.ForgetBrowserRun
+	h.dropGrants = reg.DropBrowserRunGrants
 	h.liveDeny = newLiveDenySource(filepath.Join(config.Dir(), "listeners"), db).EndpointsContext
 	h.launcher = func() (browser.Launcher, error) {
 		p, err := browser.DetectChrome("")
@@ -354,6 +356,11 @@ func (h *browserHost) OpenBrowserSocketPending(runID string, taskID int64) (stri
 func (h *browserHost) CloseBrowserSocket(runID string) {
 	if h.socks != nil {
 		h.socks.Close(runID)
+	}
+	// The run's grants end with its socket, not only with the run: a card answered
+	// after the close must not leave a grant for whatever connects next.
+	if h.dropGrants != nil {
+		h.dropGrants(runID)
 	}
 }
 

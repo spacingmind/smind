@@ -126,6 +126,25 @@ func (reg *Registry) ForgetBrowserRun(runID string) {
 	reg.bgMu.Unlock()
 }
 
+// DropBrowserRunGrants ends one run's grants when ONLY its browser socket closed
+// (the MCP child exited, or the socket was revoked): the read and open grants go
+// and every card answer taken before now is void (the epoch). The denial limiter,
+// the use count and the one-card-at-a-time slot stay: only the run's end forgets
+// them, so a socket re-created for the same run does not hand the agent a fresh
+// denial budget. A run with no gate state has nothing to drop.
+func (reg *Registry) DropBrowserRunGrants(runID string) {
+	reg.bgMu.Lock()
+	s := reg.bgRuns[runID]
+	reg.bgMu.Unlock()
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.read, s.open = false, false
+	s.epoch++
+	s.mu.Unlock()
+}
+
 // RevokeBrowserGrants drops the grants of every run of one workspace (the
 // workspace switch was turned off).
 func (reg *Registry) RevokeBrowserGrants(workspaceID int64) {
@@ -322,7 +341,7 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 	case st.epoch != epoch:
 		// A switch (the workspace's or the kill switch) was turned off while the
 		// card was open: whatever was answered is void.
-		verdict = refused("the browser was switched off while the question was open")
+		verdict = refused("the browser was switched off while the question was open (or the run's browser connection closed)")
 	case optionID == "allow_once":
 		st.uses++
 		note = fmt.Sprintf("browser: %s allowed once", call.Tool)

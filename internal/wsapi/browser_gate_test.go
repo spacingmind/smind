@@ -693,3 +693,76 @@ func TestLiveDeny_APanicingRefreshReleasesTheFlightAndWaitersHonourContext(t *te
 	}
 	close(block)
 }
+
+// pendingBrowserCard waits for the run's browser card and returns its request id.
+func pendingBrowserCard(t *testing.T, e *identEnv) string {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		for _, p := range e.api.Runs.PendingPermissions() {
+			if p.RunID == e.runID && p.Detail != nil && p.Detail.Kind == "browser" {
+				return p.RequestID
+			}
+		}
+	}
+	t.Fatal("no card was raised")
+	return ""
+}
+
+// Closing the run's socket (the single path run end and revoke both use) ends the
+// run's grants even though the run itself goes on.
+func TestClosingTheSocketDropsTheRunsGrants(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	res := make(chan error, 1)
+	go func() {
+		res <- e.api.Runs.BrowserGate(context.Background(), runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
+	}()
+	if err := e.api.Runs.RespondPermission(e.runID, pendingBrowserCard(t, e), "allow_run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-res; err != nil {
+		t.Fatal(err)
+	}
+	if !e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("the read grant was given")
+	}
+	e.api.browser.CloseBrowserSocket(e.runID)
+	if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("closing the run's socket must end its grants")
+	}
+	if !e.api.Runs.RunIsRunning(e.runID) {
+		t.Fatal("the run itself goes on")
+	}
+}
+
+// A card held for a run whose socket closes: the call ends with the socket's
+// context, the card leaves the inbox, and an answer taken before the close leaves
+// no grant.
+func TestClosingTheSocketEndsAHeldCard(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	ctx, cancel := context.WithCancel(context.Background()) // the socket's context
+	res := make(chan error, 1)
+	go func() {
+		res <- e.api.Runs.BrowserGate(ctx, runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
+	}()
+	pendingBrowserCard(t, e)
+	e.api.browser.CloseBrowserSocket(e.runID)
+	cancel()
+	select {
+	case err := <-res:
+		if err == nil {
+			t.Fatal("the held call must not be admitted")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the held call never ended")
+	}
+	for _, p := range e.api.Runs.PendingPermissions() {
+		if p.RunID == e.runID && p.Detail != nil && p.Detail.Kind == "browser" {
+			t.Fatalf("the card %s stays pending after the socket closed", p.RequestID)
+		}
+	}
+	if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("no grant results")
+	}
+}
