@@ -94,12 +94,13 @@ describe("PermissionCard: options variant", () => {
   // breakpoint -- jsdom has no layout, so this asserts the class list
   // carries both the 44px compact rule and the `md:`-scoped revert to the
   // 32px desktop size, rather than a computed pixel height.
-  it("options carry the compact 44px touch-target class, reverting to the 32px size at md:", () => {
+  it("options keep the compact 44px touch-target MINIMUM, reverting to 32px at md: (a minimum, so a long label can grow the button)", () => {
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
 
     const allow = screen.getByRole("button", { name: "Allow" });
-    expect(allow.className).toContain("h-11");
-    expect(allow.className).toContain("md:h-8");
+    expect(allow.className).toContain("min-h-11");
+    expect(allow.className).toContain("md:min-h-8");
+    expect(allow.className).toContain("h-auto");
   });
 
   // Desktop design review: Allow keeps the weight (first allow filled
@@ -485,7 +486,8 @@ describe("browser security cards", () => {
       expect(button.className).toContain("whitespace-normal");
       expect(button.className).toContain("max-w-full");
       expect(button.className).toContain("h-auto");
-      expect(button.className).not.toMatch(/(^|\s)h-(8|11)(\s|$)/); // the old fixed heights are gone
+      expect(button.className).not.toMatch(/(^|\s)(md:)?h-(8|11)(\s|$)/); // the old fixed heights are gone, at both breakpoints
+      expect(button.className).toContain("md:h-auto");
       expect(button.className).not.toMatch(/(^|\s)whitespace-nowrap(\s|$)/);
       unmount();
     }

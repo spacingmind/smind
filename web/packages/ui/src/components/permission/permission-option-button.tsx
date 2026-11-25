@@ -27,7 +27,7 @@ export const COMPACT_TOUCH_BUTTON_CLASS = "h-11 px-3 text-ui-base md:h-8 md:px-3
  * hosts), for this run"), but every permission option gets the layout.
  */
 export const WRAPPING_OPTION_CLASS =
-  "h-auto min-h-11 max-w-full whitespace-normal py-1.5 text-left md:min-h-8 md:py-1";
+  "h-auto min-h-11 max-w-full whitespace-normal py-1.5 text-left md:h-auto md:min-h-8 md:py-1";
 
 /**
  * The Button variant one option renders with, from its ACP `kind`
