@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 export const SITE_URL = 'https://docs.spacingmind.com'
 export const SITE_NAME = 'sMind by Spacing Mind'
 export const SITE_SUMMARY =
-  'sMind by Spacing Mind is a self-hosted AI Agent Orchestration Platform: one Go binary with a web app, desktop app, command line and mobile access.'
+  'sMind by Spacing Mind is an AI Agent Orchestration Platform: one Go binary with a web app, desktop app, command line and mobile access.'
 export const REPO_URL = 'https://github.com/spacingmind/smind'
 export const OG_IMAGE_URL = SITE_URL + '/og-card.png'
 export const OG_IMAGE_WIDTH = 1200
