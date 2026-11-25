@@ -220,3 +220,13 @@ func TestResolverSharesOneLookupPerName(t *testing.T) {
 		t.Fatalf("lookup ran %d times, want exactly 1 shared by all callers", calls.Load())
 	}
 }
+
+func TestResolverUnmapsIPv4MappedAnswers(t *testing.T) {
+	t.Parallel()
+	r := newNameResolver(func(context.Context, string) ([]string, error) { return []string{"::ffff:192.0.2.9"}, nil })
+	r.wait, r.timeout = 200*time.Millisecond, time.Second
+	got, err := r.Addrs([]string{"peer.example"})
+	if err != nil || len(got["peer.example"]) != 1 || got["peer.example"][0] != "192.0.2.9" {
+		t.Fatalf("got %v, %v; want the plain IPv4 address", got, err)
+	}
+}

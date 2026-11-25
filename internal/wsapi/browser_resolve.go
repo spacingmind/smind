@@ -165,7 +165,7 @@ func validAddrs(in []string) []string {
 		if err != nil {
 			continue
 		}
-		out = append(out, a.WithZone("").String())
+		out = append(out, a.Unmap().WithZone("").String()) // an IPv4-mapped answer is denied as the IPv4 address
 	}
 	return out
 }

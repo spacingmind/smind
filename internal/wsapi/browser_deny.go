@@ -22,7 +22,11 @@ import (
 //   - every smind listener of any process: each registers a small file under
 //     <home>/listeners (internal/listeners), live only while it listens (an OAuth
 //     callback exists for one login), dead processes' files are ignored;
-//   - the direct address of every fleet-linked daemon (a paired peer's URL).
+//   - the direct address of every fleet-linked daemon (a paired peer's URL). A
+//     peer addressed by a DNS NAME is denied by the name AND by every address the
+//     name resolves to (browser_resolve.go): re-resolved at every refresh, the last
+//     good answer served when a lookup is slow or fails, and a name that never
+//     resolved makes the whole read fail closed.
 //
 // The deny list beats the allowlist: a human cannot allow these.
 
@@ -37,6 +41,8 @@ type liveDenySource struct {
 	dir   string
 	fleet fleetLinkReader
 	alive func(pid int) bool
+	// resolver turns a linked peer's DNS name into addresses (nil: names are denied by name only).
+	resolver *nameResolver
 
 	mu       sync.Mutex
 	at       time.Time
@@ -46,7 +52,7 @@ type liveDenySource struct {
 }
 
 func newLiveDenySource(dir string, fleet fleetLinkReader) *liveDenySource {
-	return &liveDenySource{dir: dir, fleet: fleet, alive: listeners.ProcessAlive}
+	return &liveDenySource{dir: dir, fleet: fleet, alive: listeners.ProcessAlive, resolver: newNameResolver(nil)}
 }
 
 // Endpoints returns the current live reserved endpoints. An error means the
@@ -139,7 +145,12 @@ func (s *liveDenySource) refresh() ([]browser.Endpoint, error) {
 			out = append(out, ep)
 		}
 	}
-	out = append(out, s.fleetEndpoints()...)
+	fleet, ferr := s.fleetEndpoints()
+	out = append(out, fleet...)
+	if ferr != nil {
+		// Keep what is known (the names included) for the log line, but the caller must refuse.
+		return dedupeEndpoints(out), ferr
+	}
 	return dedupeEndpoints(out), nil
 }
 
@@ -160,13 +171,13 @@ func dedupeEndpoints(in []browser.Endpoint) []browser.Endpoint {
 // fleetEndpoints are the direct addresses of linked daemons. A store error
 // yields nothing here (the listener files still apply); the deny list is a
 // floor, and an unreadable store is already a broken daemon.
-func (s *liveDenySource) fleetEndpoints() []browser.Endpoint {
+func (s *liveDenySource) fleetEndpoints() ([]browser.Endpoint, error) {
 	if s.fleet == nil {
-		return nil
+		return nil, nil
 	}
 	hosts, err := s.fleet.ListFleetHosts()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	var out []browser.Endpoint
 	for _, h := range hosts {
@@ -180,7 +191,36 @@ func (s *liveDenySource) fleetEndpoints() []browser.Endpoint {
 			}
 		}
 	}
-	return out
+	return s.withResolvedAddresses(out)
+}
+
+// withResolvedAddresses adds, for every endpoint named by a DNS name, one entry per
+// address the name resolves to (same port), keeping the name entry too. IP-literal
+// hosts are not resolved. A name that has never resolved is an error (fail closed).
+func (s *liveDenySource) withResolvedAddresses(eps []browser.Endpoint) ([]browser.Endpoint, error) {
+	if s.resolver == nil {
+		return eps, nil
+	}
+	var names []string
+	for _, e := range eps {
+		if net.ParseIP(e.Host) == nil {
+			names = append(names, e.Host)
+		}
+	}
+	if len(names) == 0 {
+		return eps, nil
+	}
+	addrs, err := s.resolver.Addrs(names)
+	if err != nil {
+		return eps, fmt.Errorf("a linked daemon's address cannot be resolved, so the browser refuses until it can: %w", err)
+	}
+	out := append([]browser.Endpoint(nil), eps...)
+	for _, e := range eps {
+		for _, ip := range addrs[e.Host] {
+			out = append(out, browser.Endpoint{Host: ip, Port: e.Port})
+		}
+	}
+	return out, nil
 }
 
 // transportEndpoint extracts host and port from a stored link transport's url

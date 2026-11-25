@@ -291,6 +291,7 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 		},
 	}
 	s := newLiveDenySource(dir, fleet)
+	s.resolver = nil // this test is about the files and the stored links: names by name only (resolution has its own tests)
 	has := func(eps []browser.Endpoint, host string, port int) bool {
 		for _, e := range eps {
 			if e.Host == host && e.Port == port {
@@ -339,6 +340,7 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s2 := newLiveDenySource(dir, fleet)
+	s2.resolver = nil
 	s2.alive = func(pid int) bool { return pid == os.Getpid() }
 	if eps := epsOf(s2); has(eps, "127.0.0.1", 42000) || !has(eps, "::", 41001) || len(eps) != 3 {
 		t.Fatalf("a dead process's listener file is ignored, this process's listener and the fleet entries stay: %+v", eps)
