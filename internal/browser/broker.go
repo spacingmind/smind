@@ -241,6 +241,11 @@ func (b *Broker) EndRun(runID string) {
 	}
 }
 
+// AgentReason is an error's text as the AGENT should read it: the package's own "browser: " label
+// is dropped (the tool name already says where it came from: "browser_open: address X is not
+// allowed", not "browser_open: browser: address X ..."). The reason itself is unchanged.
+func AgentReason(err error) string { return strings.TrimPrefix(err.Error(), "browser: ") }
+
 func errResult(format string, a ...any) Result {
 	return Result{IsError: true, Content: []Content{{Type: "text", Text: cleanText(fmt.Sprintf(format, a...), 400)}}}
 }
@@ -266,7 +271,7 @@ func (b *Broker) call(ctx context.Context, run Run, tool string, raw json.RawMes
 	}
 	in, err := decodeToolArgs(tool, raw)
 	if err != nil {
-		return errResult("%s: %v", tool, err), "", "refused: bad arguments"
+		return errResult("%s: %s", tool, AgentReason(err)), "", "refused: bad arguments"
 	}
 
 	st := b.state(run.ID)
@@ -317,7 +322,7 @@ func (b *Broker) call(ctx context.Context, run Run, tool string, raw json.RawMes
 		if errors.As(err, &ue) {
 			return errResult("%s", ue.Error()), "", "error"
 		}
-		return errResult("browser unavailable: %v", err), "", "error"
+		return errResult("browser unavailable: %s", AgentReason(err)), "", "error"
 	}
 	b.mu.Lock()
 	b.sessions[run.WorkspaceID] = sess
@@ -447,9 +452,9 @@ func decodeToolArgs(tool string, raw json.RawMessage) (toolArgs, error) {
 func (b *Broker) exec(ctx context.Context, run Run, st *runState, sess *Session, tool string, a toolArgs) (Result, string, string) {
 	fail := func(err error) (Result, string, string) {
 		if errors.Is(err, ErrNavigationDenied) {
-			return errResult("%v", err), a.URL, "refused: " + cleanText(strings.TrimPrefix(err.Error(), ErrNavigationDenied.Error()+": "), 120)
+			return errResult("%s", AgentReason(err)), a.URL, "refused: " + cleanText(strings.TrimPrefix(err.Error(), ErrNavigationDenied.Error()+": "), 120)
 		}
-		return errResult("%s: %v", tool, err), a.URL, "error"
+		return errResult("%s: %s", tool, AgentReason(err)), a.URL, "error"
 	}
 	// Every tool but open works in THIS run's own tab; a tab argument may only
 	// name it. Runs of one workspace share one browser but never each other's tabs.
@@ -507,7 +512,7 @@ func (b *Broker) exec(ctx context.Context, run Run, st *runState, sess *Session,
 	case "browser_close":
 		id, err := ownTab()
 		if err != nil {
-			return errResult("browser_close: %v", err), "", "error"
+			return errResult("browser_close: %s", AgentReason(err)), "", "error"
 		}
 		if err := sess.CloseTab(ctx, id); err != nil {
 			return fail(err)
@@ -517,7 +522,7 @@ func (b *Broker) exec(ctx context.Context, run Run, st *runState, sess *Session,
 	case "browser_snapshot":
 		id, err := ownTab()
 		if err != nil {
-			return errResult("browser_snapshot: %v", err), "", "error"
+			return errResult("browser_snapshot: %s", AgentReason(err)), "", "error"
 		}
 		sn, err := sess.Snapshot(ctx, id)
 		if err != nil {
@@ -527,7 +532,7 @@ func (b *Broker) exec(ctx context.Context, run Run, st *runState, sess *Session,
 	case "browser_screenshot":
 		id, err := ownTab()
 		if err != nil {
-			return errResult("browser_screenshot: %v", err), "", "error"
+			return errResult("browser_screenshot: %s", AgentReason(err)), "", "error"
 		}
 		shot, err := sess.Screenshot(ctx, id)
 		if err != nil {
@@ -544,7 +549,7 @@ func (b *Broker) exec(ctx context.Context, run Run, st *runState, sess *Session,
 	case "browser_console":
 		id, err := ownTab()
 		if err != nil {
-			return errResult("browser_console: %v", err), "", "error"
+			return errResult("browser_console: %s", AgentReason(err)), "", "error"
 		}
 		lines := sess.ConsoleOf(id)
 		if len(lines) > maxConsoleOut {
@@ -559,7 +564,7 @@ func (b *Broker) exec(ctx context.Context, run Run, st *runState, sess *Session,
 	case "browser_wait":
 		id, err := ownTab()
 		if err != nil {
-			return errResult("browser_wait: %v", err), "", "error"
+			return errResult("browser_wait: %s", AgentReason(err)), "", "error"
 		}
 		d := time.Duration(a.Seconds) * time.Second
 		found, cur, err := sess.WaitFor(ctx, id, a.Text, a.URL, d)

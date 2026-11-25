@@ -806,7 +806,8 @@ export interface GitRule {
  * params and run.logs entries alike). Every field but `kind` is optional.
  */
 export interface PermissionDetail {
-  kind: "write" | "edit" | "execute" | "other";
+  /** "browser" is the daemon's own check before an agent uses the browser (ADR-0061): its card has no recommended option. */
+  kind: "write" | "edit" | "execute" | "other" | "browser";
   path?: string;
   newBytes?: number;
   newLines?: number;

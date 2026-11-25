@@ -147,6 +147,12 @@ type Session struct {
 	qbytes       atomic.Int64 // bytes waiting in the two queues
 	maxQueued    int64        // the budget for qbytes (a field so a test can lower it)
 
+	pages        pageTargets         // host:port of every request a page made (pageinit.go)
+	refusedSeen  seenSet             // targets already reported to the agent
+	armed        map[string]struct{} // refusals waiting out the grace (under mu)
+	unattributed atomic.Int64        // proxy refusals no page asked for: counted, never reported
+	grace        time.Duration       // how long a refusal waits for the page request that names it (a field so a test can shorten it)
+
 	closeOnce sync.Once
 }
 
@@ -173,19 +179,16 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	if cfg.Resolver == nil {
 		cfg.Resolver = net.DefaultResolver
 	}
-	seen := &seenSet{max: 200}
 	var session atomic.Pointer[Session]
 	px, err := startProxy(ProxyConfig{
 		Policy:   cfg.Policy,
 		Resolver: cfg.Resolver,
 		OnRefuse: func(target, reason string) {
-			// Browser background traffic is refused too: tell the agent once
-			// per target, never a flood.
+			// The proxy also refuses the browser's own background traffic. The agent is
+			// told once per target, and only about a target a page asked for
+			// (pageinit.go): never a flood, never the browser's own noise.
 			if sess := session.Load(); sess != nil {
-				if !seen.first(target) {
-					return
-				}
-				sess.note("blocked", fmt.Sprintf("%s: %s", target, reason))
+				sess.refused(target, reason)
 			}
 		},
 	})
@@ -202,17 +205,19 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	cl := NewClient(inst.Conn())
 	cl.SetWriteTimeout(cfg.CallTimeout)
 	s := &Session{
-		cfg:       cfg,
-		proxy:     px,
-		inst:      inst,
-		cl:        cl,
-		tabs:      map[string]*tabState{},
-		loads:     map[string]chan struct{}{},
-		dns:       map[string]dnsEntry{},
-		snapRefs:  map[string]map[string]int64{},
-		maxQueued: maxQueuedBytes,
-		lifecycle: make(chan Event, 256),
-		requests:  make(chan Event, requestQueue),
+		cfg:         cfg,
+		proxy:       px,
+		inst:        inst,
+		cl:          cl,
+		tabs:        map[string]*tabState{},
+		loads:       map[string]chan struct{}{},
+		dns:         map[string]dnsEntry{},
+		snapRefs:    map[string]map[string]int64{},
+		maxQueued:   maxQueuedBytes,
+		refusedSeen: seenSet{max: 200},
+		grace:       pageAttributionGrace,
+		lifecycle:   make(chan Event, 256),
+		requests:    make(chan Event, requestQueue),
 	}
 	session.Store(s)
 	s.idle = time.AfterFunc(cfg.IdleTimeout, s.Close)
@@ -435,6 +440,8 @@ func (s *Session) eventLoop() {
 				default:
 				}
 			}
+		case "Network.requestWillBeSent", "Network.webSocketCreated":
+			s.notePageRequest(ev)
 		case "Fetch.requestPaused", "Fetch.authRequired":
 			if s.qbytes.Add(int64(ev.size)) > s.maxQueued {
 				s.note("blocked", "request flood: the session was closed")
@@ -603,6 +610,11 @@ func (s *Session) onAttached(ev Event) {
 			return
 		}
 	}
+	// The Network domain only NAMES what a page requests (pageinit.go: a WebSocket reaches the
+	// proxy and nothing else); a target that cannot enable it is still started, its refusals then
+	// count as unattributed. Before the target runs: no request of it can precede the domain.
+	// maxPostDataSize 0: request bodies are never carried in the events (only the URL is read).
+	_ = s.cl.Call(ctx, p.SessionID, "Network.enable", map[string]any{"maxPostDataSize": 0}, nil)
 	resume()
 	if ts != nil {
 		close(ts.ready)
@@ -663,6 +675,7 @@ func (s *Session) onRequestPaused(ev Event) {
 	if json.Unmarshal(ev.Params, &p) != nil || p.RequestID == "" {
 		return
 	}
+	s.pages.add(hostPortOrEmpty(p.Request.URL))
 	ctx, cancel := s.bgCtx()
 	defer cancel()
 	d := s.checkRequest(ctx, p.Request.URL, p.ResourceType)
@@ -1234,4 +1247,94 @@ func (m *Manager) Active() int {
 		}
 	}
 	return n
+}
+
+func hostPortOrEmpty(raw string) string {
+	hp, _ := hostPortOf(raw)
+	return hp
+}
+
+// notePageRequest remembers the target a page named in a Network event.
+func (s *Session) notePageRequest(ev Event) {
+	var p struct {
+		URL     string `json:"url"`
+		Request struct {
+			URL string `json:"url"`
+		} `json:"request"`
+	}
+	if json.Unmarshal(ev.Params, &p) != nil {
+		return
+	}
+	if p.URL != "" {
+		s.pages.add(hostPortOrEmpty(p.URL))
+	}
+	if p.Request.URL != "" {
+		s.pages.add(hostPortOrEmpty(p.Request.URL))
+	}
+}
+
+// refused handles one refusal by the proxy: it becomes a notice (once per target) only
+// when a page asked for that target; otherwise it is counted as unattributed. The CDP
+// event that names the page's request can trail the refusal, so a miss is checked again
+// after a short grace.
+func (s *Session) refused(target, reason string) {
+	key, ok := hostPortOf(target)
+	if !ok && !strings.Contains(target, "://") {
+		// Not a request target at all (the proxy's own "wrong credential" notice): nothing a
+		// page could have named, so nothing to attribute. Reported like before.
+		if s.refusedSeen.first(target) {
+			s.note("blocked", fmt.Sprintf("%s: %s", target, reason))
+		}
+		return
+	}
+	report := func() {
+		if !s.refusedSeen.first(target) {
+			return
+		}
+		s.note("blocked", fmt.Sprintf("%s: %s", target, reason))
+	}
+	if ok && s.pages.has(key) {
+		report()
+		return
+	}
+	// One timer per target at a time: a flood of the browser's own refusals arms 200 at most.
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	if s.armed == nil {
+		s.armed = map[string]struct{}{}
+	}
+	if _, dup := s.armed[target]; dup {
+		s.mu.Unlock()
+		return
+	}
+	s.armed[target] = struct{}{}
+	s.mu.Unlock()
+	time.AfterFunc(s.grace, func() {
+		s.mu.Lock()
+		delete(s.armed, target)
+		closed := s.closed
+		s.mu.Unlock()
+		if closed {
+			return
+		}
+		if ok && s.pages.has(key) {
+			report()
+			return
+		}
+		s.unattributed.Add(1)
+	})
+}
+
+// Unattributed is how many proxy refusals no page asked for (the browser's own
+// background requests): they are never reported to the agent.
+func (s *Session) Unattributed() int64 { return s.unattributed.Load() }
+
+// peekNotices is the pending notices without clearing them (tests).
+func (s *Session) peekNotices() []Notice {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Notice(nil), s.notices...)
 }
