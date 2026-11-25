@@ -61,6 +61,8 @@ function BrowserSection() {
 
   const data = view.data;
   const live = data?.sessionLive === true;
+  // Only a change of the switch itself marks the switch busy (an allowlist add or remove has its own busy state).
+  const switchPending = set.isPending && set.variables !== undefined && "enabled" in set.variables;
 
   async function change(c: Parameters<typeof set.mutateAsync>[0]): Promise<void> {
     await set.mutateAsync(c);
@@ -100,6 +102,9 @@ function BrowserSection() {
         </div>
       )}
 
+      {data && view.isError && (
+        <Alert variant="warning" testId="browser-stale" description={`Could not refresh this view, so what is shown may be out of date: ${messageOf(view.error)}`} />
+      )}
       {data && (
         <>
           {data.killSwitch && (
@@ -133,16 +138,16 @@ function BrowserSection() {
 
           <SettingsGroup
             title="Browser access"
-            description="Lets an agent in this workspace open and read pages on this machine. It is off until you turn it on, and only you can: an agent cannot."
+            description="Lets an agent in this workspace open and read pages on this machine. It is off until you turn it on, and the daemon refuses an agent's own request to change it. Read the limits below."
             testId="browser-access"
           >
             <SettingsRow
               label="Let agents use a browser in this workspace"
               description={
                 <>
-                  Default off. Each use still asks you with a permission card.
+                  Default off. Each use asks you with a permission card, unless you allowed it for that run.
                   {/* Always one line, so a run starting or ending never moves the page: the badge or the plain "not in use" text. */}
-                  <span className="mt-1.5 flex h-5 items-center" data-testid="browser-live-line">
+                  <span className="mt-1.5 flex h-5 items-center" data-testid="browser-live-line" role="status" aria-live="polite" aria-atomic="true">
                     {live ? (
                       <StatusBadge status="running" dot data-testid="browser-live">
                         In use now
@@ -156,14 +161,14 @@ function BrowserSection() {
               control={
                 <div className="flex items-center gap-2">
                   <span data-testid="browser-switch-state" className="text-ui-sm text-foreground-muted">
-                    {data.killSwitch ? `${data.enabled ? "On" : "Off"}, not in effect` : data.enabled ? "On" : "Off"}
+                    {data.killSwitch || !data.chromeInstalled || !data.available ? `${data.enabled ? "On" : "Off"}, not in effect` : data.enabled ? "On" : "Off"}
                   </span>
                   <Switch
                     aria-label="Let agents use a browser in this workspace"
                     data-testid="browser-switch"
                     checked={data.enabled}
-                    disabled={data.killSwitch || set.isPending}
-                    aria-busy={set.isPending}
+                    disabled={data.killSwitch || switchPending}
+                    aria-busy={switchPending}
                     onCheckedChange={(next) => {
                       setSwitchError(null);
                       change({ enabled: next }).catch((e: unknown) => setSwitchError(messageOf(e)));
@@ -190,11 +195,12 @@ function BrowserSection() {
 
           <SettingsGroup
             title="Allowed hosts"
-            description="Besides this machine's own localhost, an agent's browser may reach only the exact hosts you add here."
+            description="Besides this machine's own localhost, an agent's browser may reach only the exact hosts you add here. Changing the list ends a running browser session."
             testId="browser-allowlist"
           >
             <div className="px-4 py-3">
               <BrowserAllowlistEditor
+                key={workspace.ID /* a draft typed for one workspace must never reach another */}
                 hosts={data.allowHosts}
                 note={data.note}
                 onAdd={(host) => change({ allowAdd: [host] })}
@@ -210,12 +216,31 @@ function BrowserSection() {
               control={
                 <div className="flex flex-wrap items-center gap-2">
                   {live && (
-                    <Button type="button" variant="outline" size="sm" data-testid="browser-end-session" disabled={clear.isPending} onClick={() => clear.mutate()}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid="browser-end-session"
+                      disabled={clear.isPending}
+                      onClick={() => {
+                        clear.reset();
+                        clear.mutate();
+                      }}
+                    >
                       <Icons.close aria-hidden className="size-3.5" />
-                      End session
+                      End session (interrupts the agent)
                     </Button>
                   )}
-                  <Button type="button" variant="outline" size="sm" data-testid="browser-clear" onClick={() => setClearing(true)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-testid="browser-clear"
+                    onClick={() => {
+                      clear.reset();
+                      setClearing(true);
+                    }}
+                  >
                     Clear browser data
                   </Button>
                 </div>

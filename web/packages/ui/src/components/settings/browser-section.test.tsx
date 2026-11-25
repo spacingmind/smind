@@ -2,7 +2,7 @@ import { act } from "react";
 import fs from "node:fs";
 import path from "node:path";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/browser-section";
@@ -11,6 +11,7 @@ import {
   BROWSER_RESIDUAL_SHELL_KEY,
   BROWSER_RESIDUAL_WINDOWS_KEY,
 } from "@/lib/browser-settings-text";
+import { BROWSER_SETTINGS_POLL_MS } from "@/hooks/use-browser-settings";
 import { RpcError } from "@/lib/ws-client";
 import { browserDaemon, browserView } from "@/test/browser-test-client";
 import { renderWithDaemon } from "@/test/render-with-daemon";
@@ -98,7 +99,7 @@ describe("browser section", () => {
     fireEvent.click(screen.getByTestId("browser-switch"));
     await waitFor(() => expect(screen.getByTestId("browser-switch-error")).toHaveTextContent("workspace is read-only"));
     expect(screen.getByTestId("browser-switch")).toHaveAttribute("aria-checked", "false");
-    expect(d.calls.length).toBeGreaterThan(0);
+    expect(writes(d)).toEqual([{ method: "browser.settings.set", params: { workspaceId: 1, enabled: true } }]);
   });
 
   it("adds and removes hosts through allowAdd / allowRemove and shows the daemon's refusal verbatim (AC4)", async () => {
@@ -194,20 +195,80 @@ describe("browser section", () => {
     expect(within(reach).getByText("no MCP here")).toBeInTheDocument();
   });
 
-  it("switching workspace reads that workspace's view and sends its id", async () => {
+  it("the live line is a polite status region", async () => {
+    renderSection(stateful({ sessionLive: true }).handler);
+    await ready();
+    const line = screen.getByTestId("browser-live-line");
+    expect(line).toHaveAttribute("role", "status");
+    expect(line).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("On says not in effect when no browser is installed or the version does not offer it", async () => {
+    renderSection(stateful({ enabled: true, chromeInstalled: false }).handler);
+    await ready();
+    expect(screen.getByTestId("browser-switch-state")).toHaveTextContent("On, not in effect");
+  });
+
+  it("a failed refresh keeps the view but says it may be out of date", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let fail = false;
+      const s = stateful({ enabled: true });
+      renderSection((m, p) => {
+        if (m === "browser.settings.get" && fail) throw new RpcError("browser.settings.get: daemon is restarting", "unavailable");
+        return s.handler(m, p);
+      });
+      await ready();
+      expect(screen.queryByTestId("browser-stale")).toBeNull();
+      fail = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(BROWSER_SETTINGS_POLL_MS + 100);
+      });
+      await waitFor(() => expect(screen.getByTestId("browser-stale")).toHaveTextContent("may be out of date: browser.settings.get: daemon is restarting"));
+      expect(screen.getByTestId("browser-switch")).toHaveAttribute("aria-checked", "true"); // the last good view stays
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the first read failing shows the error with Retry that reads again", async () => {
+    let fail = true;
+    const s = stateful();
     const d = renderSection((m, p) => {
-      if (m === "browser.settings.get") return browserView({ workspaceId: (p as { workspaceId: number }).workspaceId });
-      if (m === "browser.settings.set") return browserView({ workspaceId: (p as { workspaceId: number }).workspaceId, enabled: true });
+      if (m === "browser.settings.get" && fail) throw new RpcError("browser.settings.get: daemon is restarting", "unavailable");
+      return s.handler(m, p);
+    });
+    await waitFor(() => expect(screen.getByTestId("browser-load-error")).toHaveTextContent("daemon is restarting"));
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await ready();
+    expect(d.calls.filter((c) => c.method === "browser.settings.get").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("with the kill switch on an add still sends allowAdd (the list is kept while it is off)", async () => {
+    const d = renderSection(stateful({ killSwitch: true }).handler);
+    await ready();
+    fireEvent.change(screen.getByTestId("browser-allow-input"), { target: { value: "intranet.example" } });
+    fireEvent.click(screen.getByTestId("browser-allow-add"));
+    await waitFor(() => expect(writes(d)).toEqual([{ method: "browser.settings.set", params: { workspaceId: 1, allowAdd: ["intranet.example"] } }]));
+  });
+
+  it("a draft typed for one workspace is gone after switching, and a change goes to the workspace shown", async () => {
+    const d = renderSection((m, p) => {
+      const id = (p as { workspaceId?: number } | undefined)?.workspaceId ?? 1;
+      if (m === "browser.settings.get") return browserView({ workspaceId: id, allowHosts: id === 2 ? ["b.example"] : [] });
+      if (m === "browser.settings.set") return browserView({ workspaceId: id, enabled: true });
       return undefined;
     });
     await ready();
-    expect(d.calls.find((c) => c.method === "browser.settings.get")?.params).toEqual({ workspaceId: 1 });
+    fireEvent.change(screen.getByTestId("browser-allow-input"), { target: { value: "10.0.0.5" } });
     await act(async () => {
       fireEvent.keyDown(screen.getByTestId("browser-workspace-select"), { key: "Enter" });
     });
-    // Radix select in jsdom: pick the second workspace through its option.
-    const option = await screen.findByRole("option", { name: "beta" });
-    fireEvent.click(option);
-    await waitFor(() => expect(d.calls.some((c) => c.method === "browser.settings.get" && (c.params as { workspaceId: number }).workspaceId === 2)).toBe(true));
+    fireEvent.click(await screen.findByRole("option", { name: "beta" }));
+    await waitFor(() => expect(within(screen.getByTestId("browser-allow-list")).getByText("b.example")).toBeInTheDocument());
+    expect(screen.getByTestId("browser-allow-input")).toHaveValue("");
+    fireEvent.click(screen.getByTestId("browser-switch"));
+    await waitFor(() => expect(writes(d)).toEqual([{ method: "browser.settings.set", params: { workspaceId: 2, enabled: true } }]));
   });
 });

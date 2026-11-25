@@ -86,6 +86,17 @@ async function stubBrowser(page: Page, initial: Partial<View>) {
   return { calls, set: (over: Partial<View>) => (view = { ...view, ...over }) }
 }
 
+/** True when neither the document nor the section nor any scrolling ancestor of it scrolls sideways (the app scrolls inside its own panes). */
+const noSideScroll = (page: Page) =>
+  page.evaluate(() => {
+    const section = document.querySelector('[data-testid="settings-section-browser"]') as HTMLElement | null
+    if (!section) return false
+    for (let el: HTMLElement | null = section; el; el = el.parentElement) {
+      if (el.scrollWidth > el.clientWidth + 1) return false
+    }
+    return document.documentElement.scrollWidth <= document.documentElement.clientWidth
+  })
+
 async function frame(page: Page, testInfo: TestInfo, name: string) {
   const luminance = await page.evaluate(() => {
     const rgb = getComputedStyle(document.body).backgroundColor.match(/\d+(\.\d+)?/g)?.map(Number) ?? [0, 0, 0]
@@ -93,8 +104,7 @@ async function frame(page: Page, testInfo: TestInfo, name: string) {
   })
   if (testInfo.project.use.colorScheme === 'dark') expect(luminance, 'dark frame: page background').toBeLessThan(0.35)
   else expect(luminance, 'light frame: page background').toBeGreaterThan(0.65)
-  const overflow = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }))
-  expect(overflow.scroll, 'no horizontal scroll').toBeLessThanOrEqual(overflow.client)
+  expect(await noSideScroll(page), 'the section and its scrolling panes do not scroll sideways').toBe(true)
   const dir = process.env.BROWSER_FRAMES_DIR
   if (!dir) return
   fs.mkdirSync(dir, { recursive: true })
@@ -112,6 +122,8 @@ async function openSection(app: App) {
   await app.openApp()
   await app.page.evaluate(() => window.dispatchEvent(new CustomEvent('smind:open-settings', { detail: { sectionId: 'browser' } })))
   await expect(app.page.getByTestId('settings-section-browser')).toBeVisible()
+  // the section opens on the first workspace of the tree: the specs below (and the reset) assume it is alpha
+  await expect(app.page.getByTestId('browser-workspace-select')).toContainText('alpha')
 }
 
 /** Puts the first workspace's browser settings back to the defaults (the worker's daemon is shared by every spec). */
@@ -193,7 +205,7 @@ test('BS-03 the residual text matches the public page and the providers list com
 test('BS-04 the section does not overflow and the clear-data dialog asks first', async ({ app }) => {
   const { page } = app
   await openSection(app)
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  expect(await noSideScroll(page)).toBe(true)
   await page.getByTestId('browser-clear').click()
   await expect(page.getByTestId('browser-clear-dialog')).toBeVisible()
   await page.getByTestId('browser-clear-dialog').getByRole('button', { name: 'Cancel' }).click()

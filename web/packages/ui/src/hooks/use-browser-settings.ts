@@ -50,6 +50,10 @@ export function useSetBrowserSettings(workspaceId: number | null) {
   const { client } = useDaemonConnection();
   const queryClient = useQueryClient();
   return useMutation({
+    // A poll already in flight would resolve AFTER the answer below and put the older view back: cancel it first.
+    onMutate: async () => {
+      if (workspaceId !== null) await queryClient.cancelQueries({ queryKey: queryKeys.browserSettings(workspaceId) });
+    },
     mutationFn: async (change: BrowserSettingsChange): Promise<BrowserSettingsView> => {
       if (workspaceId === null) throw new Error("no workspace");
       const view = await requireClient(client).call<BrowserSettingsView>("browser.settings.set", { workspaceId, ...change });
@@ -66,6 +70,9 @@ export function useClearBrowserData(workspaceId: number | null) {
   const { client } = useDaemonConnection();
   const queryClient = useQueryClient();
   return useMutation({
+    onMutate: async () => {
+      if (workspaceId !== null) await queryClient.cancelQueries({ queryKey: queryKeys.browserSettings(workspaceId) });
+    },
     mutationFn: async (): Promise<void> => {
       if (workspaceId === null) throw new Error("no workspace");
       await requireClient(client).call("browser.data.clear", { workspaceId });

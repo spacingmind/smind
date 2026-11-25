@@ -78,10 +78,11 @@ export function BrowserAllowlistEditor({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-col gap-2 sm:flex-row" aria-busy={adding || undefined}>
+      <div className="flex flex-col gap-2 sm:flex-row">
         <Input
           aria-label="Host to allow"
           aria-invalid={error?.place === "add" || undefined}
+          aria-busy={adding || undefined}
           data-testid="browser-allow-input"
           type="text"
           autoComplete="off"
@@ -100,6 +101,7 @@ export function BrowserAllowlistEditor({
           size="sm"
           type="button"
           data-testid="browser-allow-add"
+          aria-busy={adding || undefined}
           disabled={disabled || adding || full || !trimmed}
           onClick={() => void submit()}
         >
@@ -133,7 +135,7 @@ export function BrowserAllowlistEditor({
                 className="shrink-0"
                 aria-label={`Remove ${host}`}
                 aria-busy={removing === host || undefined}
-                disabled={disabled || removing === host}
+                disabled={disabled || adding || removing !== null}
                 onClick={() => void remove(host)}
               >
                 <Icons.delete aria-hidden />

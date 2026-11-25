@@ -122,7 +122,8 @@ describe("browser allowlist editor", () => {
     fireEvent.click(add);
     expect(input).toBeDisabled();
     expect(add).toBeDisabled();
-    expect(input.parentElement).toHaveAttribute("aria-busy", "true");
+    expect(input).toHaveAttribute("aria-busy", "true");
+    expect(add).toHaveAttribute("aria-busy", "true");
 
     pending.resolve();
     await waitFor(() => expect(input).not.toBeDisabled());

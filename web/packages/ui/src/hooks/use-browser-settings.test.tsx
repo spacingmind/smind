@@ -1,6 +1,6 @@
 import { act } from "react";
 import { waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   BROWSER_SETTINGS_POLL_MS,
@@ -33,13 +33,59 @@ describe("browser settings hooks", () => {
     expect(methods(d).filter((m) => m.startsWith("browser."))).toEqual([]);
   });
 
-  it("normalises null lists and polls on the documented interval", async () => {
+  it("normalises null lists", async () => {
     const d = browserDaemon(() => ({ ...browserView(), allowHosts: null, providers: null }));
     const { result } = renderHookWithDaemon(() => useBrowserSettings(1), d, { initialProps: undefined });
     await waitFor(() => expect(result.current.data).toBeDefined());
     expect(result.current.data?.allowHosts).toEqual([]);
     expect(result.current.data?.providers).toEqual([]);
+  });
+
+  it("re-reads the view every BROWSER_SETTINGS_POLL_MS while mounted, and never without a workspace", async () => {
     expect(BROWSER_SETTINGS_POLL_MS).toBe(3000);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const d = browserDaemon(() => browserView());
+      renderHookWithDaemon(() => ({ on: useBrowserSettings(1), off: useBrowserSettings(null) }), d, { initialProps: undefined });
+      const gets = () => d.calls.filter((c) => c.method === "browser.settings.get").length;
+      await waitFor(() => expect(gets()).toBe(1));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(BROWSER_SETTINGS_POLL_MS + 100);
+      });
+      await waitFor(() => expect(gets()).toBe(2));
+      expect(d.calls.every((c) => c.method !== "browser.settings.get" || (c.params as { workspaceId: number }).workspaceId === 1)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a poll still in flight when a change is answered cannot put the older view back", async () => {
+    let release: (v: unknown) => void = () => {};
+    let held = false;
+    const d = browserDaemon((m, p) => {
+      if (m === "browser.settings.get") {
+        if (held) return new Promise((r) => (release = r)); // the slow poll answers with the OLD view
+        return browserView({ enabled: false });
+      }
+      if (m === "browser.settings.set") return browserView({ enabled: (p as { enabled: boolean }).enabled });
+      return undefined;
+    });
+    const { result } = renderHookWithDaemon(() => ({ get: useBrowserSettings(1), set: useSetBrowserSettings(1) }), d, { initialProps: undefined });
+    await waitFor(() => expect(result.current.get.data?.enabled).toBe(false));
+    held = true;
+    await act(async () => {
+      void result.current.get.refetch(); // a poll starts and hangs
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await result.current.set.mutateAsync({ enabled: true });
+    });
+    await act(async () => {
+      release(browserView({ enabled: false })); // the stale answer arrives after the change
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.get.data?.enabled).toBe(true);
   });
 
   it("sends exactly the fields of one change and writes the answered view into the cache", async () => {
