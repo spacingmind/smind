@@ -130,7 +130,7 @@ function BrowserSection() {
               title="No browser installed"
               description={
                 <>
-                  <span className="block">smind never downloads one. Until a browser is installed the browser tools are not offered to agents.</span>
+                  <span className="block">sMind never downloads one. Until a browser is installed the browser tools are not offered to agents.</span>
                   {data.installStep && (
                     <span data-testid="browser-install-step" className="mt-1 block break-words">
                       {data.installStep}
@@ -265,7 +265,7 @@ function BrowserSection() {
 
           <SettingsGroup
             title="Which agents get the browser"
-            description="Decided by smind per agent, not by the agent: an agent without the browser is told so, with the reason."
+            description="Decided by sMind per agent, not by the agent: an agent without the browser is told so, with the reason."
             testId="browser-reach"
           >
             <div className="px-4 py-3">

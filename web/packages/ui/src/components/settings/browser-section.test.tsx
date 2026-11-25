@@ -98,7 +98,7 @@ describe("browser section", () => {
     await ready();
     refuse = true;
     fireEvent.click(screen.getByTestId("browser-switch"));
-    await waitFor(() => expect(screen.getByTestId("browser-switch-error")).toHaveTextContent("workspace is read-only"));
+    await waitFor(() => expect(screen.getByTestId("browser-switch-error")).toHaveTextContent("Workspace is read-only."));
     expect(screen.getByTestId("browser-switch")).toHaveAttribute("aria-checked", "false");
     expect(writes(d)).toEqual([{ method: "browser.settings.set", params: { workspaceId: 1, enabled: true } }]);
   });
@@ -116,7 +116,7 @@ describe("browser section", () => {
     fireEvent.click(screen.getByTestId("browser-allow-add"));
     await waitFor(() => expect(screen.getByTestId("browser-allow-error")).toHaveTextContent('must be one exact host'));
     // the daemon's sentence only: no method or package label in front of it
-    expect(screen.getByTestId("browser-allow-error").textContent).toBe('allowlist entry "*.example.com" must be one exact host');
+    expect(screen.getByTestId("browser-allow-error").textContent).toBe('Allowlist entry "*.example.com" must be one exact host.');
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(input).toHaveValue("*.example.com");
     fireEvent.click(screen.getByRole("button", { name: "Remove intranet.example" }));
@@ -199,13 +199,20 @@ describe("browser section", () => {
     expect(within(reach).getByText("no MCP here")).toBeInTheDocument();
   });
 
-  it("strips only the daemon's method and package labels", () => {
-    expect(daemonSentence('browser.settings.set: browser: allowlist entry "*.x" must be one exact host')).toBe('allowlist entry "*.x" must be one exact host');
-    expect(daemonSentence("browser.settings.set: at most 50 hosts may be allowed (51 given)")).toBe("at most 50 hosts may be allowed (51 given)");
-    expect(daemonSentence("browser.settings.get: workspace is read-only")).toBe("workspace is read-only");
-    expect(daemonSentence("browser.data.clear: not available")).toBe("not available");
-    expect(daemonSentence("something else: entirely")).toBe("something else: entirely");
-    expect(daemonSentence("the browser: still here")).toBe("the browser: still here");
+  it("strips the method and package labels, capitalises the first letter and ends with a full stop", () => {
+    const table: [string, string][] = [
+      ['browser.settings.set: browser: allowlist entry "*.x" must be one exact host', 'Allowlist entry "*.x" must be one exact host.'],
+      ["browser.settings.set: at most 50 hosts may be allowed (51 given)", "At most 50 hosts may be allowed (51 given)."],
+      ["browser.settings.get: workspace is read-only", "Workspace is read-only."],
+      ["browser.data.clear: not available.", "Not available."],
+      ["something else: entirely", "Something else: entirely."],
+      ["the browser: still here", "The browser: still here."],
+      ["Already a sentence!", "Already a sentence!"],
+      ["Is it?", "Is it?"],
+      ["  padded  ", "Padded."],
+      ["", ""],
+    ];
+    for (const [raw, want] of table) expect(daemonSentence(raw), raw).toBe(want);
   });
 
   it("the profile card lays its buttons out by the CARD's width: stacked under the text until it is wide (container query, not the viewport)", async () => {
@@ -249,7 +256,7 @@ describe("browser section", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(BROWSER_SETTINGS_POLL_MS + 100);
       });
-      await waitFor(() => expect(screen.getByTestId("browser-stale")).toHaveTextContent("may be out of date: daemon is restarting"));
+      await waitFor(() => expect(screen.getByTestId("browser-stale")).toHaveTextContent("may be out of date: Daemon is restarting."));
       expect(screen.getByTestId("browser-switch")).toHaveAttribute("aria-checked", "true"); // the last good view stays
     } finally {
       vi.useRealTimers();
@@ -263,7 +270,7 @@ describe("browser section", () => {
       if (m === "browser.settings.get" && fail) throw new RpcError("browser.settings.get: daemon is restarting", "unavailable");
       return s.handler(m, p);
     });
-    await waitFor(() => expect(screen.getByTestId("browser-load-error")).toHaveTextContent("daemon is restarting"));
+    await waitFor(() => expect(screen.getByTestId("browser-load-error")).toHaveTextContent("Daemon is restarting."));
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await ready();

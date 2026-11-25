@@ -43,7 +43,7 @@ const (
 )
 
 const (
-	whyACP      = "an ACP agent takes the browser only if it advertises MCP support; smind cannot tell in advance"
+	whyACP      = "an ACP agent takes the browser only if it advertises MCP support; sMind cannot tell in advance"
 	whyEndpoint = "this agent runs against a compatible endpoint; whether the model behind it calls MCP tools is up to that model"
 	whyNoMCP    = "this agent cannot take MCP servers"
 	// whyCodexAppServer names the harness, so an instance of another provider made
@@ -71,7 +71,7 @@ var browserReach = map[string]ReachRow{
 	IDCursor:       reachACP,
 
 	ReachClassCustomACP: {Reach: ReachConditional, Mechanism: "session/new mcpServers", Why: whyACP, Images: "unknown"},
-	ReachClassPlugin:    {Reach: ReachNo, Mechanism: "none", Why: "a plugin provider never receives smind's own MCP servers", Images: "unknown"},
+	ReachClassPlugin:    {Reach: ReachNo, Mechanism: "none", Why: "a plugin provider never receives sMind's own MCP servers", Images: "unknown"},
 	ReachClassInstance:  {Reach: ReachConditional, Mechanism: "the launch path of the provider it extends", Why: whyEndpoint, Images: "unknown"},
 }
 
@@ -132,7 +132,7 @@ func resolveReach(spec Spec) ReachRow {
 	if spec.Custom && spec.Runner == RunnerACP {
 		return browserReach[ReachClassCustomACP]
 	}
-	return ReachRow{Reach: ReachNo, Mechanism: "none", Why: "smind has no browser entry for this provider", Images: "unknown"}
+	return ReachRow{Reach: ReachNo, Mechanism: "none", Why: "sMind has no browser entry for this provider", Images: "unknown"}
 }
 
 // BrowserImages is the image capability the browser uses for spec: the row's

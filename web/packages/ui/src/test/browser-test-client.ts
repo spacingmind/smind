@@ -35,7 +35,7 @@ export function browserView(partial: Partial<BrowserSettingsView> = {}): Browser
     note: "A host name may only resolve to public addresses; to allow an intranet or local-network host, add its IP address instead. Loopback (localhost, 127.0.0.1, ::1) is always allowed and needs no entry.",
     providers: [
       { id: "claude-native", label: "Claude Code", reach: "yes", images: "yes" },
-      { id: "glm", label: "GLM", reach: "conditional", why: "an ACP agent takes the browser only if it advertises MCP support; smind cannot tell in advance; GLM cannot read images, so only the text tools are useful", images: "no" },
+      { id: "glm", label: "GLM", reach: "conditional", why: "an ACP agent takes the browser only if it advertises MCP support; sMind cannot tell in advance; GLM cannot read images, so only the text tools are useful", images: "no" },
       { id: "codex-native", label: "Codex", reach: "no", why: "Codex takes no per-run MCP servers", images: "yes" },
     ],
     sessionLive: false,

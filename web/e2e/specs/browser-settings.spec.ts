@@ -28,8 +28,8 @@ const NOTE =
   'A host name may only resolve to public addresses; to allow an intranet or local-network host, add its IP address instead. Loopback (localhost, 127.0.0.1, ::1) is always allowed and needs no entry.'
 const PROVIDERS: View['providers'] = [
   { id: 'claude-native', label: 'Claude Code', reach: 'yes', images: 'yes' },
-  { id: 'glm', label: 'GLM', reach: 'conditional', why: 'an ACP agent takes the browser only if it advertises MCP support; smind cannot tell in advance; GLM cannot read images, so only the text tools are useful', images: 'no' },
-  { id: 'opencode', label: 'OpenCode', reach: 'conditional', why: 'an ACP agent takes the browser only if it advertises MCP support; smind cannot tell in advance', images: 'yes' },
+  { id: 'glm', label: 'GLM', reach: 'conditional', why: 'an ACP agent takes the browser only if it advertises MCP support; sMind cannot tell in advance; GLM cannot read images, so only the text tools are useful', images: 'no' },
+  { id: 'opencode', label: 'OpenCode', reach: 'conditional', why: 'an ACP agent takes the browser only if it advertises MCP support; sMind cannot tell in advance', images: 'yes' },
   { id: 'codex-native', label: 'Codex', reach: 'no', why: 'Codex takes no per-run MCP servers', images: 'yes' },
 ]
 const baseView = (over: Partial<View> = {}): View => ({
@@ -179,7 +179,7 @@ test("BS-02 an allowlist host can be added and removed, and an invalid one shows
     const err = page.getByTestId('browser-allow-error')
     await expect(err).toContainText('must be one exact host, no scheme, wildcard, path or userinfo')
     await expect(err).not.toContainText('browser.settings.set') // the daemon's sentence, without its internal method and package labels
-    expect(((await err.textContent()) ?? '').startsWith('allowlist entry "*.example.com"')).toBe(true)
+    expect(((await err.textContent()) ?? '').startsWith('Allowlist entry "*.example.com"')).toBe(true)
     await expect(input).toHaveAttribute('aria-invalid', 'true')
     await expect(input).toHaveValue('*.example.com') // what was typed is kept
     await expect(page.getByTestId('browser-allow-list').getByText('example.com')).toHaveCount(0)
