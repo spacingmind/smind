@@ -45,14 +45,20 @@ Finding 3 (the double prompt), 6 (cost reporting), 8 (the GLM timeline icon); an
 
 ## Progress
 
-- [ ] Spec committed (this file)
-- [ ] Daemon: flags, page-initiator rule, snapshot, refusal text, close-card wording
-- [ ] Web card: wrapping options, no recommended on browser cards
-- [ ] Mobile: no filled primary, long labels
-- [ ] Tests, full e2e matrix, real-Chrome smoke
-- [ ] Frames, contact sheet, README, pairs opened
-- [ ] Reviews, mutations
+- [x] Spec committed (this file)
+- [x] Daemon: flags, page-initiator rule, snapshot, refusal text, close-card wording
+- [x] Web card: wrapping options, no recommended on browser cards
+- [x] Mobile: no filled primary, long labels (not verified on a device)
+- [x] Tests, full e2e matrix, real-Chrome smoke
+- [x] Frames, contact sheet, README, every pair opened
+- [x] Reviews, mutations
 
 ## Validation
 
-(filled in when the work is done)
+- AC1: `permission-card.test.tsx` (classes), `browser-cards.spec.ts` BC-open/close/read/long at four projects (every option inside the card, nothing clipped, no sideways scroll, the long labels take several lines). AC2: `TestCloseCardHasItsOwnWording`. AC3: `permission-card.test.tsx` (no approval variant, `recommendedOptionId` by kind, other cards unchanged), e2e (`data-variant` is not `approval`), mobile `permissionButtons.test.ts`. AC4: mobile `permissionLabels.test.ts`, 121 mobile test files (1173 tests) and `tsc` pass; **the native wrapping of a long label was NOT observed on a device or simulator**.
+- AC5: measured on Chrome 158 (the installed Google Chrome, headless): the start-up pre-connect to `www.google.com` is removed by `PreconnectToSearch`; a Gaia `ListAccounts` request to `accounts.google.com` stays under about forty candidate features and switches, so the page-initiator rule carries it. The real-Chrome smoke (`SMIND_BROWSER_SMOKE=1`) passes with no `google.com` notice, every page-caused refusal (fetches, WebSockets by name and by IP literal, link-local, reserved ports) still reported, and one refusal kept from the agent. Tests: `TestHostPortOf`, `TestRefusalNobodyAskedForIsCountedNotReported`, `TestRefusalOfATargetAPageRequestedIsReportedOnce`, `TestRefusalWaitsForThePageRequestThatNamesIt`, `TestFetchRequestNamesItsTarget`, `TestNetworkIsEnabledBeforeATargetRuns`, `TestProxyCredentialNoticeIsNeverFiltered`, `TestRepeatedUnattributedRefusalsArmOneTimer`, `TestPageTargetsEvictOldestOneAtATime`, `TestBuildArgsSilencesBackgroundNetworking`.
+- AC6: `TestSnapshotDropsRenderOnlyNodesAndCountsWhatRemains`, `TestSnapshotBudgetIsNotSpentOnRenderOnlyNodes`, `TestSnapshotLongStaticTextIsReadableToItsEnd`. AC7: `TestAgentSeesNoRepeatedBrowserLabelInARefusal`, `TestBrowserForwardDropsTheDaemonsBrowserLabel`. AC8: frames in `~/.smind/dogfood/browser-live-findings/` (README lists the 16 pairs opened). AC9: the smoke above.
+- Reviews (two fresh sub-agents, standards+spec and attack). Accepted and fixed: the proxy's own "wrong credential" notice was filtered by the new rule (regression: now never filtered); long paragraphs lost their tail once InlineTextBox was dropped (StaticText cap 2000); one timer per refused target and none after close; oldest-first eviction of the page-target set instead of a wipe; `Network.enable` without post data; the mobile wide button also stretches; plan wording and test names corrected; the grace test proves it waited. Documented, not changed: connection hints (`<link rel=preconnect>`), a service worker's own script fetch and a late page event are counted, not reported; a page can unlock the notice for a host it requested itself.
+- Mutations on committed files, each failing a named test (committed first, restored with `git checkout`, tree verified clean): `PreconnectToSearch` removed, the page-target check removed, the WebSocket event not recorded, the Fetch URL not recorded, `Network.enable` removed, InlineTextBox printed again, `AgentReason` not applied, the child not stripping, the close card keeping the open label, the recommended action given back to a browser card, the wrapping class removed, the mobile browser primary restored; and after the review round the credential notice filtered again, a timer per refusal, the set wiped when full, the StaticText cap back to 200.
+- Verified: go vet, `GOOS=windows go vet ./...`, go tests for `internal/browser`, `browsercard`, `runs`, `cmd/smind`, `hygiene`, `crash`; the full web vitest suite (5736 passed) and `tsc -b`; mobile `tsc` and vitest; the docs-site tests; the full e2e matrix locally (`E2E_FULL=1 --grep-invert @flaky --workers=2`): 267 passed, 41 skipped, 0 failed, including the 16 browser-card tests.
+- Not verified: the mobile layout on a device; a run with a real model (this item changes no model-facing behaviour except the refusal and snapshot text, covered by tests and the Chrome smoke).
