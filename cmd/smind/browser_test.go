@@ -221,6 +221,35 @@ func TestBrowserCLI_StatusText(t *testing.T) {
 	}
 }
 
+func TestBrowserCLI_StatusNamesAgentsWithoutTheBrowser(t *testing.T) {
+	t.Setenv("SMIND_RUN_ID", "")
+	reply := browserSettingsReply(true, []string{}, func(s map[string]any) {
+		s["providers"] = []map[string]any{
+			{"id": "claude-native", "label": "Claude Code", "reach": "yes"},
+			{"id": "codex-native", "label": "Codex", "reach": "no", "why": "Codex takes no per-run MCP servers"},
+			{"id": "kimi", "label": "Kimi", "reach": "conditional"},
+		}
+	})
+	stubBrowserDaemon(t, func(string, map[string]any) (any, error) { return reply, nil })
+	for _, verb := range []string{"status", "enable"} {
+		var out, errb bytes.Buffer
+		if code := runBrowser(context.Background(), []string{verb, "--workspace", "7"}, &out, &errb); code != 0 {
+			t.Fatalf("%s: code %d: %s", verb, code, errb.String())
+		}
+		for _, want := range []string{
+			`no browser for: Codex ("the browser is not available for this agent")`,
+			"offered, not guaranteed (the agent or its model may not use it): Kimi",
+		} {
+			if !strings.Contains(out.String(), want+"\n") {
+				t.Errorf("%s stdout %q, want line %q", verb, out.String(), want)
+			}
+		}
+		if strings.Contains(out.String(), "Claude Code") {
+			t.Errorf("%s: an agent with the browser is not listed as without it: %q", verb, out.String())
+		}
+	}
+}
+
 func TestBrowserCLI_Usage(t *testing.T) {
 	t.Setenv("SMIND_RUN_ID", "")
 	calls := stubBrowserDaemon(t, func(string, map[string]any) (any, error) {

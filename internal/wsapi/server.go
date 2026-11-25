@@ -392,6 +392,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	reg.AddObserver(newStewardObserver(stewardH, db))
 	hs["session.identify"] = handleSessionIdentify(reg)
 	browserH := newBrowserHost(db, reg)
+	if runner != nil {
+		browserH.reachList = runner.BrowserReachList
+	}
 	hs["browser.settings.get"] = browserLocalOnly("browser.settings.get", browserH.settingsGet)
 	hs["browser.settings.set"] = browserLocalOnly("browser.settings.set", browserH.settingsSet)
 	hs["browser.data.clear"] = browserLocalOnly("browser.data.clear", browserH.dataClear)
