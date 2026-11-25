@@ -61,10 +61,12 @@ type browserHost struct {
 	imagesRead     func(runID string) bool
 	providerSpec   func(runID string) (providers.Spec, error)
 	reachList      func() []providers.BrowserReachEntry
-	allow          func(workspaceID int64) []string
-	deny           func() ([]browser.Endpoint, error)
-	launcher       func() (browser.Launcher, error)
-	profileRoot    string
+	// sessionLive says whether the workspace has a running browser session (the settings view).
+	sessionLive func(workspaceID int64) bool
+	allow       func(workspaceID int64) []string
+	deny        func() ([]browser.Endpoint, error)
+	launcher    func() (browser.Launcher, error)
+	profileRoot string
 	// The permission gate and its bookkeeping (hooks so a test can drive them).
 	permit       func(ctx context.Context, call runs.BrowserCall) error
 	revokeGrants func(workspaceID int64)
@@ -92,6 +94,7 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h.startSession = h.mgr.Get
 	h.endAllSessions = h.mgr.CloseAll
 	h.settings = db
+	h.sessionLive = func(ws int64) bool { return h.mgr.Live(sessionKey(ws)) }
 	h.closeSession = func(ws int64) { h.mgr.Close(sessionKey(ws)) }
 	h.killSwitch = config.BrowserDisabled
 	h.gate = reg.BrowserAllowed

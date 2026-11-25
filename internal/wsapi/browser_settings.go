@@ -61,8 +61,10 @@ type browserSettingsView struct {
 	// Providers is what each agent gets: the browser reach table (a provider with
 	// reach "no" gets no browser tools and is told so).
 	Providers []providers.BrowserReachEntry `json:"providers"`
-	UpdatedAt *time.Time                    `json:"updatedAt,omitempty"`
-	UpdatedBy string                        `json:"updatedBy,omitempty"`
+	// SessionLive: this workspace has a running browser session (an agent is using it now).
+	SessionLive bool       `json:"sessionLive"`
+	UpdatedAt   *time.Time `json:"updatedAt,omitempty"`
+	UpdatedBy   string     `json:"updatedBy,omitempty"`
 }
 
 func (h *browserHost) view(bs store.BrowserSettings) browserSettingsView {
@@ -74,6 +76,9 @@ func (h *browserHost) view(bs store.BrowserSettings) browserSettingsView {
 		v.AllowHosts = []string{}
 	}
 	v.Providers = []providers.BrowserReachEntry{}
+	if h.sessionLive != nil {
+		v.SessionLive = h.sessionLive(bs.WorkspaceID)
+	}
 	if h.reachList != nil {
 		v.Providers = h.reachList()
 	}
