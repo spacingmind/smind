@@ -417,6 +417,28 @@ func TestPluginSession_CannotAnswerPermissions(t *testing.T) {
 
 func TestEventsObserve_OnlyAllowlistedTopics(t *testing.T) {
 	e := newProcEnv(t, procPlugin{id: "obs", caps: `["events.observe"]`, mode: "report"})
+	// Delivery is checked FIRST, while the plugin is subscribed to the one topic under test. The plugin's
+	// process-status notice (a plugin.updated, published asynchronously after it reaches "running", an
+	// allowlisted topic) is a legitimate event for anyone subscribed to plugin.updated: subscribing to every
+	// allowlisted topic before this check made the notice a second event whenever it landed late.
+	if _, rerr := e.hostCall(t, "obs", "events.subscribe", map[string]any{"topics": []string{TopicTaskDeleted}}); rerr != nil {
+		t.Fatalf("subscribe: %v", rerr)
+	}
+	e.api.pluginEvents.changed("obs") // the status notice, delivered late: not subscribed, so never arrives
+	e.api.bus.Publish(Event{Topic: TopicAccountUpdated, Payload: map[string]any{"x": 1}})
+	e.api.bus.Publish(Event{Topic: TopicChatQueueUpdated, Payload: map[string]any{"items": []string{"prompt text"}}})
+	e.api.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: 7}})
+	got := e.waitPushed(t, "obs", "event", 1)
+	time.Sleep(50 * time.Millisecond) // sleep-ok: negative window, the unsubscribed and filtered events must not arrive
+	got = append(got, e.drainMethod(t, "obs", "event")...)
+	if len(got) != 1 {
+		t.Fatalf("only the subscribed allowlisted topic is delivered: %d events", len(got))
+	}
+	var n eventNotification
+	if err := json.Unmarshal(got[0].Params, &n); err != nil || n.Topic != TopicTaskDeleted || n.Seq != 1 {
+		t.Fatalf("event: %+v %v", n, err)
+	}
+
 	// Every topic the daemon knows that is not allowlisted is refused.
 	for topic := range knownTopics {
 		_, rerr := e.hostCall(t, "obs", "events.subscribe", map[string]any{"topics": []string{topic}})
@@ -438,18 +460,19 @@ func TestEventsObserve_OnlyAllowlistedTopics(t *testing.T) {
 	if rerr == nil {
 		t.Error("a list with one forbidden topic must fail")
 	}
+}
 
-	e.api.bus.Publish(Event{Topic: TopicAccountUpdated, Payload: map[string]any{"x": 1}})
-	e.api.bus.Publish(Event{Topic: TopicChatQueueUpdated, Payload: map[string]any{"items": []string{"prompt text"}}})
-	e.api.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: 7}})
-	got := e.waitPushed(t, "obs", "event", 1)
-	time.Sleep(50 * time.Millisecond) // sleep-ok: negative window, the unsubscribed and filtered events must not arrive
-	got = append(got, e.drainMethod(t, "obs", "event")...)
-	if len(got) != 1 {
-		t.Fatalf("only the subscribed allowlisted topic is delivered: %d events", len(got))
+// The status notice IS an event for a plugin that asked for plugin.updated: the premise the test above
+// no longer depends on (deterministic: the notice is published by hand, no timing involved).
+func TestEventsObserve_StatusNoticeReachesASubscriberOfPluginUpdated(t *testing.T) {
+	e := newProcEnv(t, procPlugin{id: "obs", caps: `["events.observe"]`, mode: "report"})
+	if _, rerr := e.hostCall(t, "obs", "events.subscribe", map[string]any{"topics": []string{TopicPluginUpdated}}); rerr != nil {
+		t.Fatalf("subscribe: %v", rerr)
 	}
+	e.api.pluginEvents.changed("obs")
+	got := e.waitPushed(t, "obs", "event", 1)
 	var n eventNotification
-	if err := json.Unmarshal(got[0].Params, &n); err != nil || n.Topic != TopicTaskDeleted || n.Seq != 1 {
+	if err := json.Unmarshal(got[0].Params, &n); err != nil || n.Topic != TopicPluginUpdated {
 		t.Fatalf("event: %+v %v", n, err)
 	}
 }
