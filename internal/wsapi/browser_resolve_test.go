@@ -132,7 +132,8 @@ func TestResolverHungLookupDoesNotBlockTheCallPath(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	})
-	r.wait, r.timeout = 50*time.Millisecond, 200*time.Millisecond
+	// The lookup timeout is far above the asserted bound: only the wait bound can end the call early.
+	r.wait, r.timeout = 50*time.Millisecond, 5*time.Second
 
 	if _, err := r.Addrs([]string{"hung.example"}); err != nil {
 		t.Fatalf("fast first Addrs: %v", err)
