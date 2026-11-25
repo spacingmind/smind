@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
+	"github.com/spacingmind/smind/internal/providers"
 )
 
 // pidClaude wraps a real (fake-CLI) client and reports a pid, like the SDK's
@@ -241,5 +242,55 @@ func TestClaudePath_TheRealClientReportsItsCLIsPID(t *testing.T) {
 	}
 	if pid := <-got; pid <= 1 {
 		t.Fatalf("the real client's PID() = %d, want the CLI's process id", pid)
+	}
+}
+
+// The reach table decides the claude path too: a claude-harness provider the table
+// says no to (an instance that takes no MCP servers) opens no socket and builds no
+// row; an instance the table offers does.
+func TestClaudePath_ReachTableDecidesTheSocket(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		spec       providers.Spec
+		wantOpened int
+	}{
+		"no MCP servers: no socket": {providers.Spec{ID: "cc-nomcp", Extends: providers.IDClaudeNative, NoMCPServers: true}, 0},
+		"offered instance: socket":  {providers.Spec{ID: "cc-inst", Extends: providers.IDClaudeNative}, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			wm, task := newTestTask(t, "")
+			reg := providers.New()
+			if err := reg.Register(tc.spec); err != nil {
+				t.Fatal(err)
+			}
+			r := claudeNativeRunner(t, wm)
+			r.registry = reg
+			r.claudeReportsPID = true
+			inner := r.newClaudeClient
+			r.newClaudeClient = func(wt string, opts ...claudecode.Option) (claudeBackend, error) {
+				c, err := inner(wt, opts...)
+				if err != nil {
+					return nil, err
+				}
+				return pidClaude{claudeBackend: c, pid: 4242}, nil
+			}
+			spy := &pendingSpy{}
+			ctx := WithRunContract(context.Background(), RunContract{Mcp: spy.policy()})
+			events := make(chan Event)
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- r.RunPrompt(ctx, task.ID, task.ID, Provider(tc.spec.ID), "hi", nil, PermissionSettings{}, "", testClaudeModel, events)
+			}()
+			_ = drainEvents(events)
+			if err := <-errCh; err != nil {
+				t.Fatalf("RunPrompt() error = %v", err)
+			}
+			spy.mu.Lock()
+			defer spy.mu.Unlock()
+			if spy.opened != tc.wantOpened {
+				t.Fatalf("socket opened %d times, want %d", spy.opened, tc.wantOpened)
+			}
+		})
 	}
 }

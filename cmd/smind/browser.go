@@ -30,11 +30,9 @@ type browserSettings struct {
 
 // browserProvider is one agent's browser reach from the daemon's table.
 type browserProvider struct {
-	ID     string `json:"id"`
-	Label  string `json:"label"`
-	Reach  string `json:"reach"`
-	Why    string `json:"why"`
-	Images string `json:"images"`
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Reach string `json:"reach"`
 }
 
 // printBrowserReach says which agents get the browser tools and which do not.

@@ -104,6 +104,13 @@ func BrowserReachOf(spec Spec) ReachRow {
 }
 
 func resolveReach(spec Spec) ReachRow {
+	// A base that cannot take the row stays no, whatever recipe is named: nothing
+	// ties a Recipe id to the base it is set on.
+	if spec.Extends != "" && IsBuiltin(spec.Extends) && browserReach[spec.Extends].Reach == ReachNo {
+		row := browserReach[spec.Extends]
+		row.Images = "unknown"
+		return row
+	}
 	if spec.Recipe != "" {
 		if row, ok := recipeReach[spec.Recipe]; ok {
 			return row
@@ -114,10 +121,6 @@ func resolveReach(spec Spec) ReachRow {
 		// cannot take the row stays no; otherwise the instance class row applies
 		// (offered, not guaranteed, images unknown: the model that would read a
 		// screenshot is not the base's).
-		if row, ok := browserReach[spec.Extends]; ok && IsBuiltin(spec.Extends) && row.Reach == ReachNo {
-			row.Images = "unknown"
-			return row
-		}
 		return browserReach[ReachClassInstance]
 	}
 	if row, ok := browserReach[spec.ID]; ok && IsBuiltin(spec.ID) {

@@ -80,9 +80,9 @@ the agent tool's.
 | Cline | offered if the agent advertises MCP support | unknown |
 | Goose | offered if the agent advertises MCP support | unknown |
 | Cursor | offered if the agent advertises MCP support | unknown |
-| providers you add yourself under `providers.custom` | offered, not guaranteed | no |
-| compatible-endpoint providers made from a recipe | offered, not guaranteed: the model behind the endpoint decides whether it calls the tools | no |
-| plugin providers | never | no |
+| providers you add yourself under `providers.custom` | offered, not guaranteed | unknown |
+| compatible-endpoint providers made from a recipe | offered, not guaranteed: the model behind the endpoint decides whether it calls the tools | unknown |
+| plugin providers | never | none |
 
 A screenshot reaches the agent as an image only when smind knows the agent
 reads images; when it is unknown or no, the agent gets a text note and works

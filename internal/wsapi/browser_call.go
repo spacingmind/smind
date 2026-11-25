@@ -410,8 +410,12 @@ func (h *browserHost) callRun(ctx context.Context, runID string, taskID int64, t
 	if err := h.permission(ctx, runID, ws, tool, args); err != nil {
 		return browser.Result{}, err
 	}
-	// The gate may have held the call for a person: the switches are read again
-	// after the answer, so one turned off meanwhile ends the call.
+	// The gate may have held the call for a person: the switches (and the
+	// provider's reach) are read again after the answer, so one turned off
+	// meanwhile ends the call.
+	if err := h.providerOffered(runID); err != nil {
+		return browser.Result{}, err
+	}
 	if h.killSwitch() {
 		h.endAllSessions()
 		if h.revokeAll != nil {

@@ -103,6 +103,7 @@ func TestBrowserReachResolution(t *testing.T) {
 		{"a plain instance uses the instance class row", Spec{ID: "my-oc", Extends: IDOpenCode}, ReachConditional},
 		{"an instance of a no provider stays no", Spec{ID: "my-codex", Extends: IDCodexNative}, ReachNo},
 		{"a custom ACP entry uses the custom class row", Spec{ID: "mine", Custom: true, Runner: RunnerACP}, ReachConditional},
+		{"a recipe cannot lift a no base", Spec{ID: "x", Extends: IDCodexNative, Custom: true, Recipe: "deepseek"}, ReachNo},
 		{"an unknown provider is no", Spec{ID: "nobody"}, ReachNo},
 		{"a plugin id wins over a built-in id", Spec{ID: IDClaudeNative, Plugin: "p"}, ReachNo},
 	} {
@@ -159,16 +160,27 @@ func TestBrowserDocsNameEveryNoProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(doc)
+	rowOf := func(label string) string {
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, "| "+label+" |") {
+				return line
+			}
+		}
+		return ""
+	}
 	for _, id := range BuiltinIDs() {
 		s, ok := New().Get(id)
 		if !ok {
 			t.Fatalf("%s: built-in id missing from the registry", id)
 		}
-		if BrowserReachOf(s).Reach != ReachNo {
+		// Every built-in has a table row in the doc, and a no row says no.
+		row := rowOf(s.Label)
+		if row == "" {
+			t.Errorf("public-docs/browser.md has no table row for %s (%q)", id, s.Label)
 			continue
 		}
-		if !strings.Contains(text, s.Label) {
-			t.Errorf("public-docs/browser.md does not name %s by its label %q", id, s.Label)
+		if BrowserReachOf(s).Reach == ReachNo && !strings.HasPrefix(strings.TrimPrefix(row, "| "+s.Label+" | "), "no |") {
+			t.Errorf("public-docs/browser.md row for %s must say no: %q", id, row)
 		}
 	}
 	if !strings.Contains(text, "the browser is not available for this agent") {
@@ -189,6 +201,29 @@ func TestReachTableNeverWidensTheOldRule(t *testing.T) {
 		oldRule := s.ID != IDCodexNative && s.Plugin == "" && !s.NoMCPServers
 		if got := BrowserReachOf(s).Offered(); got && !oldRule {
 			t.Errorf("%s: the table offers the browser where the old rule did not", s.ID)
+		}
+		// Whatever is built on it (an instance, with any recipe) never gets more than its base.
+		if oldRule {
+			continue
+		}
+		for _, rc := range Recipes() {
+			inst := Spec{ID: "i-" + rc.ID, Extends: s.ID, Custom: true, Recipe: rc.ID, Runner: s.Runner}
+			if BrowserReachOf(inst).Offered() {
+				t.Errorf("instance of %s with recipe %s is offered the browser, its base is not", s.ID, rc.ID)
+			}
+		}
+		if BrowserReachOf(Spec{ID: "i", Extends: s.ID, Custom: true, Runner: s.Runner}).Offered() {
+			t.Errorf("a plain instance of %s is offered the browser, its base is not", s.ID)
+		}
+	}
+	// A plugin provider and an agent without MCP servers are never offered, as built-ins or instances.
+	for _, s := range []Spec{
+		{ID: "p/a", Plugin: "p", Runner: RunnerACP},
+		{ID: "p/b", Plugin: "p", Extends: IDOpenCode},
+		{ID: "n", Extends: IDOpenCode, NoMCPServers: true},
+	} {
+		if BrowserReachOf(s).Offered() {
+			t.Errorf("%+v is offered the browser", s)
 		}
 	}
 }

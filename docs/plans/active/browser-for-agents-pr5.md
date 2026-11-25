@@ -28,7 +28,7 @@ type ReachRow struct {
 - `(ReachRow).Offered()` is Yes or Conditional. `BrowserImages(spec)` is the effective image capability: the row's `Images` when set, `unknown` for an instance, else `spec.Images`; the broker reads images only for `"yes"` (unknown = no images, as already pinned by `imagesReadFrom`).
 - `BrowserUnavailableMessage(spec)` is the text for a provider without the browser: `the browser is not available for this agent (<label>): <why>`.
 
-Initial rows (evidence in `desktop-browser-for-agents.md`, "Provider reach"): claude-native yes (`--mcp-config`, CLI pid); codex-native no (no per-thread MCP); glm yes, images no; kimi, opencode, copilot, cline, goose, cursor conditional (ACP `session/new`; images as in the catalogue); class custom-acp conditional, images unknown; class plugin no; recipes whose harness is `claude-code` conditional with images unknown, `codex-app-server` no, `acp` conditional.
+Initial rows (evidence in `desktop-browser-for-agents.md`, "Provider reach"): claude-native yes (`--mcp-config`, CLI pid); codex-native no (no per-thread MCP); glm conditional (an ACP agent), images no; kimi, opencode, copilot, cline, goose, cursor conditional (ACP `session/new`; images as in the catalogue); class custom-acp conditional, images unknown; class plugin no; recipes whose harness is `claude-code` conditional with images unknown, `codex-app-server` no, `acp` conditional.
 
 ## Acceptance criteria
 
@@ -37,7 +37,7 @@ Initial rows (evidence in `desktop-browser-for-agents.md`, "Provider reach"): cl
 - AC3 The runner builds the browser row only when `BrowserReachOf(spec).Offered()`, on the ACP path and the claude path; codex-native builds none (unchanged). No socket is opened for a provider that is No.
 - AC4 Images: a provider whose effective images are not `"yes"` (including every instance and every `unknown`) gets the text note for a screenshot, never an image block; claude-native (yes) and opencode (yes) get the image.
 - AC5 At call time the daemon refuses a run whose provider is not offered with `the browser is not available for this agent (<label>): <why>`, before the permission gate, so no card is raised for it and the agent does not read a generic "daemon closed the socket".
-- AC6 `smind browser enable` and `smind browser status`, the settings view (`browser.settings.get`, a new `providers` list of `{id, label, reach, why}`), and `public-docs/browser.md` name what a provider without a row or with `no` gets, and list the providers that cannot use it. The settings list is produced from the table (a test pins that it matches).
+- AC6 `smind browser enable` and `smind browser status`, the settings view (`browser.settings.get`, a new `providers` list of `{id, label, reach, why, images}`), and `public-docs/browser.md` name what a provider without a row or with `no` gets, and list the providers that cannot use it. The settings list is produced from the table (a test pins that it matches).
 - AC7 Nothing widens: with the table in place, no provider that did not get the row before gets it (`TestReachTableNeverWidensTheOldRule`: the set of registered built-in providers with the row equals the pre-change set).
 
 ## Named tests
