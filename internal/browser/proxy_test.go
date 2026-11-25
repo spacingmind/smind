@@ -598,7 +598,9 @@ func TestSessionStartFailureStopsTheProxy(t *testing.T) {
 		t.Fatal("no connection was held")
 	}
 	defer held.Close()
-	_ = held.SetReadDeadline(time.Now().Add(3 * time.Second))
+	// Close is synchronous, so the EOF is already there; the deadline stays below the proxy's own
+	// pre-auth header timeout (2 s) so an idle cut by that timeout cannot pass for a Close.
+	_ = held.SetReadDeadline(time.Now().Add(1 * time.Second))
 	if _, err := held.Read(make([]byte, 1)); err == nil {
 		t.Fatal("a failed start must close its proxy: the held connection received data")
 	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
