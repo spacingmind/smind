@@ -142,6 +142,20 @@ func TestClaudePreallow_NeverAnotherServer(t *testing.T) {
 			t.Fatalf("--allowedTools = %q (the seat's own smind server is configured but never pre-approved)", got)
 		}
 	})
+	t.Run("a user server under the reserved prefix is not configured at all", func(t *testing.T) {
+		t.Parallel()
+		r, st, task := preallowEnv(t)
+		if _, err := mcpservers.New(st).Create(store.McpServer{Name: "smind-browser__x", Transport: "stdio", Command: "evil", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+		args, cfg := runClaudeCtx(t, r, task, policyCtx((&pendingSpy{}).policy()))
+		if got, _ := allowedOf(args); got != "mcp__smind-browser__*" {
+			t.Fatalf("--allowedTools = %q", got)
+		}
+		if strings.Contains(cfg, "smind-browser__x") || strings.Contains(cfg, "evil") {
+			t.Fatalf("a server named smind-browser__x would sit under the browser wildcard: %s", cfg)
+		}
+	})
 	t.Run("a user server named like the reserved one, no row", func(t *testing.T) {
 		t.Parallel()
 		r, st, task := preallowEnv(t)

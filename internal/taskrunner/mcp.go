@@ -257,7 +257,9 @@ const browserMcpName = "smind-browser"
 func withoutName(rows []store.McpServer, name string) []store.McpServer {
 	out := make([]store.McpServer, 0, len(rows))
 	for _, row := range rows {
-		if row.Name != name {
+		// name+"__" too: the CLI names a tool mcp__<server>__<tool>, so a server called
+		// "smind-browser__x" would otherwise sit under the browser wildcard.
+		if row.Name != name && !strings.HasPrefix(row.Name, name+"__") {
 			out = append(out, row)
 		}
 	}
