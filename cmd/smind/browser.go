@@ -15,16 +15,43 @@ const cmdBrowserUsage = "usage: smind browser <status|enable|disable|allow add <
 
 // browserSettings is the shared result of browser.settings.get and .set.
 type browserSettings struct {
-	WorkspaceID     int64    `json:"workspaceId"`
-	Enabled         bool     `json:"enabled"`
-	AllowHosts      []string `json:"allowHosts"`
-	ProfileMode     string   `json:"profileMode"`
-	KillSwitch      bool     `json:"killSwitch"`
-	Available       bool     `json:"available"`
-	ChromeInstalled bool     `json:"chromeInstalled"`
-	InstallStep     string   `json:"installStep"`
-	UpdatedAt       string   `json:"updatedAt"`
-	UpdatedBy       string   `json:"updatedBy"`
+	WorkspaceID     int64             `json:"workspaceId"`
+	Enabled         bool              `json:"enabled"`
+	AllowHosts      []string          `json:"allowHosts"`
+	ProfileMode     string            `json:"profileMode"`
+	KillSwitch      bool              `json:"killSwitch"`
+	Available       bool              `json:"available"`
+	ChromeInstalled bool              `json:"chromeInstalled"`
+	InstallStep     string            `json:"installStep"`
+	UpdatedAt       string            `json:"updatedAt"`
+	UpdatedBy       string            `json:"updatedBy"`
+	Providers       []browserProvider `json:"providers"`
+}
+
+// browserProvider is one agent's browser reach from the daemon's table.
+type browserProvider struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Reach string `json:"reach"`
+}
+
+// printBrowserReach says which agents get the browser tools and which do not.
+func printBrowserReach(w io.Writer, ps []browserProvider) {
+	var no, maybe []string
+	for _, p := range ps {
+		switch p.Reach {
+		case "no":
+			no = append(no, p.Label)
+		case "conditional":
+			maybe = append(maybe, p.Label)
+		}
+	}
+	if len(no) > 0 {
+		fmt.Fprintf(w, "no browser for: %s (\"the browser is not available for this agent\")\n", strings.Join(no, ", "))
+	}
+	if len(maybe) > 0 {
+		fmt.Fprintf(w, "offered, not guaranteed (the agent or its model may not use it): %s\n", strings.Join(maybe, ", "))
+	}
 }
 
 func cmdBrowser(args []string) int {
@@ -112,6 +139,7 @@ func runBrowser(ctx context.Context, args []string, stdout, stderr io.Writer) in
 				fmt.Fprintln(stdout, "The browser tools are not yet offered to agents in this version; the setting is stored.")
 			}
 			fmt.Fprintln(stdout, "The switch is as human-only as the daemon's local principal: an unidentified local connection counts as the human (ADR-0056).")
+			printBrowserReach(stdout, res.Providers)
 		}
 		return 0
 	case "allow":
@@ -180,6 +208,7 @@ func printBrowserStatus(w io.Writer, s *browserSettings) {
 	if !s.ChromeInstalled {
 		fmt.Fprintf(w, "no browser installed: %s\n", s.InstallStep)
 	}
+	printBrowserReach(w, s.Providers)
 }
 
 // browserOnOff names the switch state.

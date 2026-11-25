@@ -75,13 +75,33 @@ the agent tool's.
 
 ## Which agents can use it
 
-Agents that smind runs through the Agent Client Protocol (for example GLM and
-the other providers run that way) and Claude Code runs can use it. Codex-native
-runs and plugin providers never get it. On **Windows the browser is not
-offered**. An agent that starts its tools from a process outside its own process
-tree (a tool server that was already running, a sandbox with its own process
-namespace) cannot reach the browser: the call fails with "the browser is not
-available for this agent".
+| Agent | Browser | Screenshots |
+| --- | --- | --- |
+| Claude Code | yes | yes |
+| Codex | no | no |
+| GLM | offered, text only | no |
+| Kimi | offered if the agent advertises MCP support | unknown |
+| OpenCode | offered if the agent advertises MCP support | yes |
+| GitHub Copilot | offered if the agent advertises MCP support | unknown |
+| Cline | offered if the agent advertises MCP support | unknown |
+| Goose | offered if the agent advertises MCP support | unknown |
+| Cursor | offered if the agent advertises MCP support | unknown |
+| providers you add yourself under `providers.custom` | offered, not guaranteed | unknown |
+| compatible-endpoint providers made from a recipe (all but the one listed next) | offered, not guaranteed: the model behind the endpoint decides whether it calls the tools | unknown |
+| OpenAI Responses-compatible URL | no: this recipe runs on the Codex app-server, which takes no per-run MCP servers | none |
+| a provider that extends another (an instance, with no recipe) | offered, not guaranteed, unless the provider it extends has no browser; this also holds when it extends a provider you added yourself | unknown |
+| plugin providers | never | none |
+
+A screenshot reaches the agent as an image only when smind knows the agent
+reads images; when it is unknown or no, the agent gets a text note and works
+from the page text.
+
+An agent without the browser is told
+"the browser is not available for this agent" with the reason, and gets no
+browser tools. On **Windows the browser is not offered**. An agent that starts
+its tools from a process outside its own process tree (a tool server that was
+already running, a sandbox with its own process namespace) cannot reach the
+browser: the call fails with "the browser is not available for this agent".
 
 ## What it does not protect against
 
