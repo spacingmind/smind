@@ -41,7 +41,10 @@ export const PermissionCard = memo(function PermissionCard({
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const variants = useMemo(() => permissionButtonVariants(request.options), [request.options]);
+  const variants = useMemo(
+    () => permissionButtonVariants(request.options, request.detail?.kind),
+    [request.options, request.detail?.kind],
+  );
   const [reason, setReason] = useState('');
   const [reasonOpen, setReasonOpen] = useState(false);
   const [reasonContentHeight, setReasonContentHeight] = useState(0);
