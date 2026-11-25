@@ -72,12 +72,21 @@ Settings UI (B3), persistent profiles, the live-model run, desktop host, Windows
 
 ## Progress
 
-- [ ] Spec committed (this file)
-- [ ] Table and drift tests
-- [ ] Wiring (runner, call time, images)
-- [ ] Settings view, CLI and public text
-- [ ] Reviews, mutations, full test run
+- [x] Spec committed (this file)
+- [x] Table and drift tests (`internal/providers/browser_reach.go`, `browser_reach_test.go`)
+- [x] Wiring: runner (ACP and claude paths), call time (before the gate and again after a card), images
+- [x] Settings view (`providers` list, with `images`), CLI status/enable text, `public-docs/browser.md`
+- [x] Two-sub-agent review (standards, attack), mutations, full test run
 
 ## Validation
 
-(filled in when the work is done)
+- AC1: `TestBrowserReachDriftEveryProviderHasARow`, `TestBrowserReachNoStaleRows`, `TestBrowserReachRecipeHarnessConsistent` (all pass; deleting the kimi row fails the drift test).
+- AC2: `TestBrowserReachResolution` (10 cases plus "a recipe cannot lift a no base", found by the attack review).
+- AC3: `TestBrowserRowOnlyForOfferedProviders` (decision table) and `TestClaudePath_ReachTableDecidesTheSocket` (a claude-harness instance without MCP servers opens no socket; an offered one does). The ACP path call site is covered by the decision table only: no runner-level ACP test was added.
+- AC4: `TestBrowserImagesInstanceIsUnknown`, `TestImagesReadFollowsReachTable`.
+- AC5: `TestCallRunRefusesProviderWithoutTheBrowser` (no card raised), `TestCallRunRechecksTheProviderAfterTheCard`.
+- AC6: `TestBrowserSettingsListsProviders`, `TestBrowserCLI_StatusNamesAgentsWithoutTheBrowser`, `TestBrowserDocsNameEveryNoProvider` (checks the doc's table rows).
+- AC7: `TestReachTableNeverWidensTheOldRule` (built-ins, instances with every recipe, plugin and no-MCP specs).
+- Mutations (committed files, each fails a named test): row deleted, plugin row yes, `NoMCPServers` check removed, instance images inherited, call-time refusal removed, post-card re-check removed, `browserRowDelivered` ignoring the table, claude path ignoring the table, codex row yes, a recipe lifting a no base.
+- Reviews: standards and attack sub-agents; accepted and fixed: recipe row beating a no base (display only), no provider re-check after the card, missing claude-path wiring test, weak AC7 and docs tests, doc and plan wording. Left: no ACP runner-level wiring test.
+- Not verified: a live run with a real model, Windows CI.
