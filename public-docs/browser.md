@@ -1,7 +1,7 @@
 ---
 title: The agent browser
 description: Let an agent open and read pages on your own machine, with a per-workspace switch, an allowlist and a permission card for every step.
-summary: "This page explains the agent browser in sMind by Spacing Mind: what an agent can do with it, how you turn it on for one workspace, which addresses it can and cannot reach, the permission cards you answer, which agents can use it, and what it does not protect against. It is for people who want an agent to look at a page their project serves."
+summary: "This page explains the agent browser in sMind: what an agent can do with it, how you turn it on for one workspace, which addresses it can and cannot reach, the permission cards you answer, which agents can use it, and what it does not protect against. It is for people who want an agent to look at a page their project serves."
 order: 26
 ---
 

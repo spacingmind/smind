@@ -1,7 +1,7 @@
 ---
 title: Why a provider or model is greyed out
 description: What the Signed out, Plan used up, Cooling down, Not in plan and Unsupported labels in the provider and model picker mean, which ones block you and which only warn.
-summary: "This page explains the gate reasons in the provider and model picker of sMind by Spacing Mind: the five reasons, the way out each one offers, the difference between a hard gate that blocks a send and an advisory gate that only warns, and how a Lead or automation sees the same refusal. It is for people who pick providers and models by hand and for people who script agents."
+summary: "This page explains the gate reasons in the provider and model picker of sMind: the five reasons, the way out each one offers, the difference between a hard gate that blocks a send and an advisory gate that only warns, and how a Lead or automation sees the same refusal. It is for people who pick providers and models by hand and for people who script agents."
 order: 24
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: Provider recipes
 description: Add a Claude Code or Codex login for another vendor's compatible endpoint from a built-in template.
-summary: "This page explains provider recipes in sMind by Spacing Mind: built-in templates that create a provider instance for a vendor such as Z.AI, DeepSeek, OpenRouter or a local model server, and how to use Add from recipe in Settings. It is for people who want to run an agent against an endpoint other than the first-party ones."
+summary: "This page explains provider recipes in sMind: built-in templates that create a provider instance for a vendor such as Z.AI, DeepSeek, OpenRouter or a local model server, and how to use Add from recipe in Settings. It is for people who want to run an agent against an endpoint other than the first-party ones."
 order: 19
 ---
 

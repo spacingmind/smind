@@ -1,7 +1,7 @@
 ---
 title: Permission policy
 description: Answer routine agent permission requests from a file you write, with a fixed floor that no rule can lift.
-summary: "This page explains the standing permission policy in sMind by Spacing Mind: the smind policy commands, the policy file and how a request is decided, the built-in floor of always-denied commands with its rule ids, and notes for Windows. It is for people who want routine permission prompts answered from rules they wrote."
+summary: "This page explains the standing permission policy in sMind: the smind policy commands, the policy file and how a request is decided, the built-in floor of always-denied commands with its rule ids, and notes for Windows. It is for people who want routine permission prompts answered from rules they wrote."
 order: 22
 ---
 

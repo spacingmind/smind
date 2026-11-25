@@ -1,7 +1,7 @@
 ---
 title: The Steward review seat
 description: Ask a read-only agent seat for a second opinion on a finished task's head commit, read its verdict and gates in the inbox, and set its limits.
-summary: "This page explains the Steward review in sMind by Spacing Mind: what the review seat reads and cannot do, the objective gates the daemon checks itself, the ACCEPTED, CHANGES and BLOCKED verdicts, the review card in the inbox, the smind steward commands and the limits that keep it cheap. It is for people who run a Lead and want a second look at a finished task before they merge."
+summary: "This page explains the Steward review in sMind: what the review seat reads and cannot do, the objective gates the daemon checks itself, the ACCEPTED, CHANGES and BLOCKED verdicts, the review card in the inbox, the smind steward commands and the limits that keep it cheap. It is for people who run a Lead and want a second look at a finished task before they merge."
 order: 25
 ---
 
