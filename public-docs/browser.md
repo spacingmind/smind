@@ -36,8 +36,9 @@ ends.
   A linked daemon you addressed by a DNS name is refused by that name and by
   every address the name resolves to (looked up again every few seconds, and an
   address it moved away from stays refused for a minute). If such a name cannot
-  be resolved at all, the browser refuses every page until it can: unlink that
-  daemon or fix its name to continue.
+  be resolved at all, or the list of your linked daemons cannot be read, the
+  browser refuses every page until it can: unlink that daemon or fix its name to
+  continue.
 - Hosts you add by name or address: `smind browser allow add intranet.example
   --workspace 7` (one exact host, no wildcards, no ports; `smind browser allow rm`
   removes it). A host name you add must resolve to a public address; to allow a
