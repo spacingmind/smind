@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.22.0](https://github.com/spacingmind/smind/compare/v0.21.0...v0.22.0) (2026-11-25)
+
+
+### Features
+
+* **browser:** a per-run socket with a peer-credential check replaces the token (PR 3b-2) ([#960](https://github.com/spacingmind/smind/issues/960)) ([718e3d9](https://github.com/spacingmind/smind/commit/718e3d92d78215deba46356101aacb09bf8e67fd))
+* **browser:** an enforcing proxy for every browser connection, WebSocket included (ADR-0061, PR 1b) ([#949](https://github.com/spacingmind/smind/issues/949)) ([35a1768](https://github.com/spacingmind/smind/commit/35a176897cea368e1aa476ed69e7216f63067282))
+* **browser:** human-only enable flag and per-workspace allowlist (PR 3) ([#957](https://github.com/spacingmind/smind/issues/957)) ([ce9ca74](https://github.com/spacingmind/smind/commit/ce9ca744d6b46575fa43996704a701c46dce60be))
+* **browser:** land the browser-for-agents wave (ADR-0061 PRs 1b-4, off by default) ([2a241cd](https://github.com/spacingmind/smind/commit/2a241cd4aafef466d56d56fc8c0bf3ba5234df0f))
+* **browser:** per-session proxy authentication through CDP Fetch.authRequired (PR 3b-1) ([#958](https://github.com/spacingmind/smind/issues/958)) ([f8531d7](https://github.com/spacingmind/smind/commit/f8531d744103d58481fc6373c09d232b2f1d0785))
+* **browser:** pre-allow the browser tools on the Claude path (one card per call) ([#974](https://github.com/spacingmind/smind/issues/974)) ([e1be669](https://github.com/spacingmind/smind/commit/e1be669c9f64cf532d33759dab0ae12ce85ae610))
+* **browser:** the daemon-side permission gate opens the browser (PR 4) ([#962](https://github.com/spacingmind/smind/issues/962)) ([620e7f2](https://github.com/spacingmind/smind/commit/620e7f2c25ebb19b9a350840ce9f708e894994b8))
+* **browser:** the provider reach table decides who gets the browser (PR 5) ([#969](https://github.com/spacingmind/smind/issues/969)) ([8b34f4c](https://github.com/spacingmind/smind/commit/8b34f4ca4d73714a933f009b75ccd566e912eb72))
+* **browser:** the read-only browser tools, shipped dark (ADR-0061, PR 2) ([#955](https://github.com/spacingmind/smind/issues/955)) ([760f04e](https://github.com/spacingmind/smind/commit/760f04eca5c2d8d262d91a278316d253bf77820a))
+* **taskrunner:** note when Claude starts in a different permission mode than requested (E1.2) ([#950](https://github.com/spacingmind/smind/issues/950)) ([cf6f3d3](https://github.com/spacingmind/smind/commit/cf6f3d3df2ed8ac6da148194dcd19110de26b7b8))
+* **web:** Settings -&gt; Browser, the per-workspace switch, allowlist and limits (PR B3) ([#971](https://github.com/spacingmind/smind/issues/971)) ([60e7b22](https://github.com/spacingmind/smind/commit/60e7b224fcb217b6efb6b71f116d60af1bb8e8eb))
+
+
+### Bug Fixes
+
+* **browser:** a refusal that closes before the child's write reads as a refusal ([#964](https://github.com/spacingmind/smind/issues/964)) ([2138b83](https://github.com/spacingmind/smind/commit/2138b8340ece5fcd3ef60abbe68275036c3cc170))
+* **browser:** grants end with the run's socket; fleet peers named by DNS are denied by address (PR 6) ([#970](https://github.com/spacingmind/smind/issues/970)) ([8e39da2](https://github.com/spacingmind/smind/commit/8e39da2e55b9f50f95ca1917d57e2289b6f1d198))
+* **browser:** live-run findings: wrapping card options, neutral browser cards, quiet browser noise, a lean snapshot, plain refusals ([#973](https://github.com/spacingmind/smind/issues/973)) ([d9a4175](https://github.com/spacingmind/smind/commit/d9a41750a9db3ed131dc87acf017e7c7d6811a78))
+
 ## [0.21.0](https://github.com/spacingmind/smind/compare/v0.20.0...v0.21.0) (2026-11-15)
 
 
