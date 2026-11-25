@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -477,7 +478,6 @@ func TestProxyCloseEndsListenerAndTunnels(t *testing.T) {
 	sink := holdServer(t)
 	rig := newProxyRig(t, nil, proxyResolver, nil)
 	_, c, br := rig.connect(t, sink.Addr().String())
-	addr := rig.px.Addr()
 	rig.px.Close()
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	if _, err := br.ReadByte(); err == nil {
@@ -485,9 +485,37 @@ func TestProxyCloseEndsListenerAndTunnels(t *testing.T) {
 	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		t.Fatal("Close left the tunnel open")
 	}
-	if conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
-		_ = conn.Close()
-		t.Fatal("Close must stop the listener")
+	assertListenerClosed(t, rig.px.ln, "Close must stop the listener")
+}
+
+// assertListenerClosed proves a listener is closed by asking the LISTENER, never by dialling its old
+// address: once a port is released another listener of the package (parallel tests) can be handed the
+// same ephemeral port, and a dial to it then succeeds for the wrong reason (a CI flake). Accept on a
+// closed listener returns net.ErrClosed at once; on a listener still open it would block (or return a
+// connection), which fails the test.
+func assertListenerClosed(t *testing.T, ln net.Listener, msg string) {
+	t.Helper()
+	type result struct {
+		c   net.Conn
+		err error
+	}
+	got := make(chan result, 1)
+	go func() {
+		c, err := ln.Accept()
+		got <- result{c, err}
+	}()
+	select {
+	case r := <-got:
+		if r.c != nil {
+			_ = r.c.Close()
+			t.Fatalf("%s: the listener accepted a connection", msg)
+		}
+		if !errors.Is(r.err, net.ErrClosed) {
+			t.Fatalf("%s: Accept returned %v, want net.ErrClosed", msg, r.err)
+		}
+	case <-time.After(3 * time.Second):
+		_ = ln.Close() // release the blocked Accept
+		t.Fatalf("%s: the listener is still open (Accept blocked)", msg)
 	}
 }
 
@@ -544,26 +572,37 @@ func TestSessionStartsAProxyAndDeniesItToThePage(t *testing.T) {
 	if d := s.cfg.Policy.CheckURL(fmt.Sprintf("http://localhost:%d/", port)); d.Allowed {
 		t.Fatal("the proxy's own port must be denied to the page")
 	}
-	addr := s.proxy.Addr()
+	px := s.proxy
 	s.Close()
-	if conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
-		_ = conn.Close()
-		t.Fatal("closing the session must stop its proxy")
-	}
+	assertListenerClosed(t, px.ln, "closing the session must stop its proxy")
 }
 
 func TestSessionStartFailureStopsTheProxy(t *testing.T) {
-	var addr string
+	// While the proxy certainly is ours (inside the launcher) hold a connection to it. After the failed
+	// start that connection must be closed by the proxy: evidence about the proxy itself, where a dial to
+	// its old address afterwards could reach another test's listener (a reused ephemeral port).
+	var held net.Conn
 	fl := launcherFunc(func(ctx context.Context, o LaunchOpts) (Instance, error) {
-		addr = o.ProxyAddr
+		c, err := net.Dial("tcp", o.ProxyAddr)
+		if err != nil {
+			t.Errorf("the proxy must be up while the browser launches: %v", err)
+		} else {
+			held = c
+		}
 		return nil, fmt.Errorf("no browser")
 	})
 	if _, err := Start(context.Background(), Config{Workspace: "w", Launcher: fl}); err == nil {
 		t.Fatal("want error")
 	}
-	if conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
-		_ = conn.Close()
-		t.Fatal("a failed start must not leave its proxy listening")
+	if held == nil {
+		t.Fatal("no connection was held")
+	}
+	defer held.Close()
+	_ = held.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := held.Read(make([]byte, 1)); err == nil {
+		t.Fatal("a failed start must close its proxy: the held connection received data")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("a failed start must not leave its proxy serving: the held connection stayed open")
 	}
 }
 
