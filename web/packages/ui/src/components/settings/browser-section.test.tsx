@@ -261,11 +261,20 @@ describe("browser section", () => {
       return undefined;
     });
     await ready();
+    const choose = async (name: string) => {
+      await act(async () => {
+        fireEvent.keyDown(screen.getByTestId("browser-workspace-select"), { key: "Enter" });
+      });
+      fireEvent.click(await screen.findByRole("option", { name }));
+    };
+    // Visit beta once so its view is CACHED: switching back to it later keeps the editor mounted (no loading gap
+    // to unmount it), which is exactly when a draft typed for another workspace would survive without the key.
+    await choose("beta");
+    await waitFor(() => expect(within(screen.getByTestId("browser-allow-list")).getByText("b.example")).toBeInTheDocument());
+    await choose("alpha");
+    await waitFor(() => expect(screen.getByTestId("browser-allow-empty")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("browser-allow-input"), { target: { value: "10.0.0.5" } });
-    await act(async () => {
-      fireEvent.keyDown(screen.getByTestId("browser-workspace-select"), { key: "Enter" });
-    });
-    fireEvent.click(await screen.findByRole("option", { name: "beta" }));
+    await choose("beta");
     await waitFor(() => expect(within(screen.getByTestId("browser-allow-list")).getByText("b.example")).toBeInTheDocument());
     expect(screen.getByTestId("browser-allow-input")).toHaveValue("");
     fireEvent.click(screen.getByTestId("browser-switch"));
