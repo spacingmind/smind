@@ -7,8 +7,8 @@
 <p align="center"><strong>Space for your agents, free for you.</strong></p>
 
 <p align="center">
-  A self-hosted platform that runs coding agents, each task in its own git
-  worktree, on your own provider accounts.
+  A self-hosted AI Agent Orchestration Platform: each task runs in its own
+  git worktree, on your own provider accounts.
 </p>
 
 <p align="center">
