@@ -18,6 +18,7 @@ import { PermissionRequestState, clampRunes, denyReasonCounter, dispatchPermissi
 import { AppTheme } from '../../theme';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { permissionButtonVariants } from '../../transcript/permissionButtons';
+import { isLongOptionLabel } from '../../transcript/permissionLabels';
 import { Card } from '../../ui/Card';
 import { TextButton } from '../../ui/TextButton';
 import { UiHost } from '../../ui/UiHost';
@@ -80,20 +81,33 @@ export const PermissionCard = memo(function PermissionCard({
       {request.status === 'pending' ? (
         <>
           <View style={styles.options}>
-            {request.options.map((opt, i) =>
-              variants[i] === 'text' ? (
-                <TextButton key={opt.id} label={opt.label} onPress={() => dispatchPermissionTap(onRespond, request.requestId, opt.id, opt.kind, reason)} />
+            {request.options.map((opt, i) => {
+              // A long label gets its own full-width row; the button then grows
+              // past the fixed height instead of being pinned to it. minHeight
+              // is not in @expo/ui's UniversalStyle, so it rides the UiHost.
+              const long = isLongOptionLabel(opt.label);
+              const onPress = () => dispatchPermissionTap(onRespond, request.requestId, opt.id, opt.kind, reason);
+              if (variants[i] === 'text') {
+                return long ? (
+                  <View key={opt.id} style={styles.optionWide}>
+                    <TextButton label={opt.label} onPress={onPress} />
+                  </View>
+                ) : (
+                  <TextButton key={opt.id} label={opt.label} onPress={onPress} />
+                );
+              }
+              return long ? (
+                <View key={opt.id} style={styles.optionWide}>
+                  <UiHost style={styles.buttonWide}>
+                    <Button label={opt.label} variant={variants[i]} onPress={onPress} />
+                  </UiHost>
+                </View>
               ) : (
                 <UiHost key={opt.id}>
-                  <Button
-                    label={opt.label}
-                    variant={variants[i]}
-                    onPress={() => dispatchPermissionTap(onRespond, request.requestId, opt.id, opt.kind, reason)}
-                    style={styles.button}
-                  />
+                  <Button label={opt.label} variant={variants[i]} onPress={onPress} style={styles.button} />
                 </UiHost>
-              ),
-            )}
+              );
+            })}
             {showReasonToggle(hasReject) ? (
               <TextButton label={reasonOpen ? 'Hide reason' : 'Deny with reason'} onPress={() => setReasonOpen((open) => !open)} />
             ) : null}
@@ -143,7 +157,9 @@ function makeStyles(theme: AppTheme) {
     card: { backgroundColor: theme.waiting.surface, gap: theme.spacing[3] },
     summary: { ...theme.type.body, color: theme.foreground },
     options: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.spacing[2] },
+    optionWide: { width: '100%' },
     button: { height: 44 },
+    buttonWide: { minHeight: 44 },
     reasonField: { gap: theme.spacing[1.5] },
     reasonLabel: { ...theme.type.label, color: theme.foregroundSubtle },
     reasonInput: {
