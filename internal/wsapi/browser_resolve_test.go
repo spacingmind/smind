@@ -136,12 +136,12 @@ func TestResolverReresolvesEveryRefreshAndKeepsOldAddressesForTheRetentionWindow
 // reserve the port everywhere), so the name has no good answer.
 func TestResolverIgnoresUnspecifiedAddresses(t *testing.T) {
 	t.Parallel()
-	r := newNameResolver(func(context.Context, string) ([]string, error) { return []string{"0.0.0.0", "::"}, nil })
+	r := newNameResolver(func(context.Context, string) ([]string, error) { return []string{unspecifiedV4, "::"}, nil })
 	r.wait, r.timeout = 100*time.Millisecond, time.Second
 	if got, err := r.Addrs([]string{"sink.example"}); err == nil {
 		t.Fatalf("an answer of only unspecified addresses is no answer: %v", got)
 	}
-	r2 := newNameResolver(func(context.Context, string) ([]string, error) { return []string{"0.0.0.0", "192.0.2.4"}, nil })
+	r2 := newNameResolver(func(context.Context, string) ([]string, error) { return []string{unspecifiedV4, "192.0.2.4"}, nil })
 	r2.wait, r2.timeout = 100*time.Millisecond, time.Second
 	got, err := r2.Addrs([]string{"sink.example"})
 	if err != nil || !slices.Equal(got["sink.example"], []string{"192.0.2.4"}) {

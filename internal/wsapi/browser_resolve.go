@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/spacingmind/smind/internal/crash"
 )
 
 // DNS resolution for the browser's live deny list (the browser-for-agents PR 6
@@ -112,7 +114,7 @@ func (r *nameResolver) Addrs(names []string) (map[string][]string, error) {
 		done := make(chan struct{})
 		r.flights[name] = done
 		waits = append(waits, done)
-		go r.lookupOne(name, done)
+		crash.Go("wsapi.browserResolve", func() { r.lookupOne(name, done) })
 	}
 	r.mu.Unlock()
 
