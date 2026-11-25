@@ -267,6 +267,28 @@ func TestCallRunRefusesProviderWithoutTheBrowser(t *testing.T) {
 	}
 }
 
+// A provider removed while its card is open ends the call when the card is answered.
+func TestCallRunRechecksTheProviderAfterTheCard(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	h := e.api.browser
+	h.gate = func(int64) bool { return true }
+	h.providerSpec = func(string) (providers.Spec, error) {
+		return providers.Spec{ID: "claude-native", Label: "Claude Code", Runner: providers.RunnerClaude}, nil
+	}
+	h.permit = func(context.Context, runs.BrowserCall) error {
+		// The person answers; meanwhile the provider became one without the browser.
+		h.providerSpec = func(string) (providers.Spec, error) { return providers.Spec{}, errors.New("removed") }
+		return nil
+	}
+	h.launcher = func() (browser.Launcher, error) {
+		return nil, &browser.UnavailableError{InstallStep: "Install Chromium."}
+	}
+	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "not available for this agent") {
+		t.Fatalf("a provider gone after the card must end the call: %v", err)
+	}
+}
+
 func TestImagesReadFollowsReachTable(t *testing.T) {
 	t.Parallel()
 	e := newIdentEnv(t, "hang")
