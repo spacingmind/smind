@@ -14,16 +14,18 @@ Governing: ADR-0061 sections 5 and 10 and the two "observed items from the revie
 - AC3 The denial limiter, `uses` and run state are NOT deleted by a socket close alone (only run end forgets them): a socket that is closed and re-created for the same run id does not give the agent a fresh denial budget.
 - AC4 Every fleet link whose transport host is a DNS name adds, besides the name entry, one entry per resolved address (same port). IP-literal hosts are not resolved.
 - AC5 Resolution failure: when a name has never resolved successfully and the lookup fails or times out, the live deny source returns an error (the browser fails CLOSED, as for an unreadable listener directory). When a name resolved before, the last good answer is served together with the name; a failure never drops entries.
-- AC6 No rebinding hole: the name is re-resolved at every live-deny refresh (the refresh is already cached for 500 ms), and the previous good answer is kept for one more refresh, so an address the name moved away from is still denied once more.
+- AC6 No rebinding hole: the name is re-resolved at every live-deny refresh (the refresh is already cached for 500 ms), and an address the name moved away from stays denied for 60 s (the retention window; the review found that "one more refresh" is about a second, too short for a rotating record).
 - AC7 The call path is never blocked by a hung resolver: lookups run in the background, bounded by a timeout (2 s); a refresh waits at most 250 ms for them and then serves the last good answer plus the name (or the error of AC5). Concurrent refreshes share one lookup per name.
 - AC8 Nothing is added to the wire, RPC or store.
+- AC9 (from the attack review) A socket that REPLACES another for the same run id (`OpenBrowserSocket`, `OpenBrowserSocketPending`) inherits none of the old socket's grants; a call whose context ended while it waited behind an earlier card raises no card.
+- AC10 (from the attack review) Answers that are not addresses are ignored: an unspecified address (`0.0.0.0`, `::`, a sinkholed name) would reserve the port on every address, so it is no answer; a lookup that panics is a failed lookup; a joined pending lookup does not make a call wait when an answer exists; names no longer linked are forgotten.
 
 ## Named tests
 
 - `internal/runs/browser_gate_test.go`: `TestDropBrowserRunGrantsEndsGrantsAndVoidsAnswers`, `TestDropBrowserRunKeepsTheDenialLimiter`.
-- `internal/wsapi/browser_call_test.go`: `TestClosingTheSocketDropsTheRunsGrants` (real hub, a grant given, the socket closed, the gate asks again), `TestClosingTheSocketEndsAHeldCard`.
-- `internal/wsapi/browser_resolve_test.go`: `TestResolverAddsResolvedAddressesAndKeepsTheName`, `TestResolverIPLiteralIsNotResolved`, `TestResolverFailureWithoutAGoodAnswerFailsClosed`, `TestResolverFailureServesTheLastGoodAnswer`, `TestResolverReresolvesEveryRefreshAndKeepsThePreviousAnswerOnce`, `TestResolverHungLookupDoesNotBlockTheCallPath`, `TestResolverSharesOneLookupPerName`.
-- `internal/wsapi/browser_deny_test.go`: `TestFleetPeerByNameIsDeniedByAddress` (end to end through the policy: a URL with the peer's IP is refused).
+- `internal/wsapi/browser_gate_test.go`: `TestClosingTheSocketDropsTheRunsGrants`, `TestClosingTheSocketEndsAHeldCard` (an answer taken after the close leaves no grant), `TestOpeningAReplacementSocketDropsTheRunsGrants`; `internal/runs/browser_gate_test.go`: `TestGate_ACancelledCallRaisesNoCard`.
+- `internal/wsapi/browser_resolve_test.go`: `TestResolverReturnsResolvedAddressesSortedWithoutZones`, `TestResolverEmptyInputStartsNoLookup`, `TestResolverFailureWithoutAGoodAnswerFailsClosed`, `TestResolverFailureServesTheLastGoodAnswer`, `TestResolverReresolvesEveryRefreshAndKeepsOldAddressesForTheRetentionWindow`, `TestResolverHungLookupDoesNotBlockTheCallPath`, `TestResolverSharesOneLookupPerName`, `TestResolverIgnoresUnspecifiedAddresses`, `TestResolverPanickingLookupIsAFailure`, `TestResolverDoesNotWaitForAPendingLookupWhenAnAnswerExists`, `TestResolverForgetsNamesThatAreNoLongerAsked`, `TestResolverUnmapsIPv4MappedAnswers`.
+- `internal/wsapi/browser_deny_test.go`: `TestFleetPeerByNameIsDeniedByAddress` (end to end through the policy: a URL with the peer's IP is refused and the name entry is kept), `TestFleetPeerByIPLiteralIsNotResolved`, `TestFleetPeerNameThatNeverResolvedFailsClosed`, `TestFleetPeerNameKeepsTheLastGoodAnswerWhenTheLookupFails`.
 
 ## Mutations (committed files, each must fail a named test)
 
@@ -34,15 +36,17 @@ Governing: ADR-0061 sections 5 and 10 and the two "observed items from the revie
 - The name entry dropped -> `TestResolverAddsResolvedAddressesAndKeepsTheName`.
 - A failed first lookup serving "no entries" -> `TestResolverFailureWithoutAGoodAnswerFailsClosed`.
 - A failed lookup dropping the last good answer -> `TestResolverFailureServesTheLastGoodAnswer`.
-- The previous answer not kept -> `TestResolverReresolvesEveryRefreshAndKeepsThePreviousAnswerOnce`.
+- The retention window ignored -> `TestResolverReresolvesEveryRefreshAndKeepsOldAddressesForTheRetentionWindow`.
+- Unspecified addresses kept, the panic not recovered, the state not pruned, a joined lookup waited for -> `TestResolverIgnoresUnspecifiedAddresses`, `TestResolverPanickingLookupIsAFailure`, `TestResolverForgetsNamesThatAreNoLongerAsked`, `TestResolverDoesNotWaitForAPendingLookupWhenAnAnswerExists`.
+- The drop made a no-op / removed from the replacement path -> `TestClosingTheSocketDropsTheRunsGrants`, `TestOpeningAReplacementSocketDropsTheRunsGrants`.
 - The refresh waiting for the lookup without a bound -> `TestResolverHungLookupDoesNotBlockTheCallPath`.
 
 ## Decisions
 
 1. The socket close drops grants and voids answers but keeps the run's denial limiter and use count (AC3): only run end forgets them.
 2. Resolution lives in a small helper in `internal/wsapi` next to the deny source (`browser_resolve.go`), with an injectable lookup function for tests; it uses the system resolver (`net.DefaultResolver.LookupHost`).
-3. The "short TTL" is the existing 500 ms live-deny cache: every refresh re-resolves, nothing is cached longer than that except the last good answer and the one before it.
-4. A name that has never resolved fails the whole live deny read (fail closed): a linked peer whose DNS is broken makes the browser refuse until it resolves. This is the Steward's stated rule; the cost is stated in the PR.
+3. The "short TTL" is the existing 500 ms live-deny cache: every refresh re-resolves; an address stays denied for 60 s after it was last returned.
+4. A name that has never resolved fails the whole live deny read (fail closed): a linked peer whose DNS is broken (a name that only resolves over a VPN that is off, say) makes the browser refuse for every run until it resolves or the link is removed. This is the Steward's stated rule; the escape (unlink the peer or fix its name) is in `public-docs/browser.md`. A first lookup slower than 250 ms gives one transient refusal at start-up.
 
 ## Not in this PR
 
@@ -54,11 +58,14 @@ Linux CI evidence for the peer-credential path (item 2 of the resumed lane, no c
 
 ## Progress
 
-- [ ] Spec committed (this file)
-- [ ] (a) grants dropped with the socket
-- [ ] (b) resolver and deny source
-- [ ] Reviews, mutations, full test run
+- [x] Spec committed (this file)
+- [x] (a) grants dropped with the socket (and with a replacing socket)
+- [x] (b) resolver and deny source
+- [x] Reviews, mutations, full test run
 
 ## Validation
 
-(filled in when the work is done)
+- AC1 to AC10: the named tests above pass (`go test ./internal/runs ./internal/wsapi`, resolver and deny tests also under `-race -count=3`).
+- Mutations on committed files, each failing a named test: grant drop removed, epoch not bumped, drop deleting the run state, resolved addresses not added, name entry dropped, first failed lookup serving no entries, a failed lookup dropping the last good answer, the retention window ignored, an unbounded wait, a literal resolved, unspecified kept, panic not recovered, state not pruned, join waiting although an answer exists, the replacement drop removed.
+- Reviews: two fresh sub-agents (standards+spec, attack). Accepted and fixed: the AC2 test did not go through the close; an old address was only kept for about a second (now 60 s); a sinkholed name denied a port everywhere; replacement sockets kept grants; a cancelled call could raise a card; a flaky sharing test; the resolver ignored a panic, kept removed names and made every refresh wait on a pending lookup; test names. Left, by design: the fail-closed error for a never-resolved peer name (documented with its escape); no cap on concurrent lookups (one per linked name, bounded by the number of links the person made).
+- Not verified: a real DNS server or a fleet link over a real name (lookups are faked); Windows CI; a live-model run.
