@@ -265,11 +265,13 @@ type fakeFleet struct {
 	hosts []store.FleetHost
 	links map[string][]store.FleetLink
 	err   error
+	// linkErr fails ListFleetLinks.
+	linkErr error
 }
 
 func (f fakeFleet) ListFleetHosts() ([]store.FleetHost, error) { return f.hosts, f.err }
 func (f fakeFleet) ListFleetLinks(id string) ([]store.FleetLink, error) {
-	return f.links[id], nil
+	return f.links[id], f.linkErr
 }
 
 // The live deny source: every smind listener file (live processes only) and the
@@ -291,6 +293,7 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 		},
 	}
 	s := newLiveDenySource(dir, fleet)
+	s.resolver = nil // this test is about the files and the stored links: names by name only (resolution has its own tests)
 	has := func(eps []browser.Endpoint, host string, port int) bool {
 		for _, e := range eps {
 			if e.Host == host && e.Port == port {
@@ -339,6 +342,7 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s2 := newLiveDenySource(dir, fleet)
+	s2.resolver = nil
 	s2.alive = func(pid int) bool { return pid == os.Getpid() }
 	if eps := epsOf(s2); has(eps, "127.0.0.1", 42000) || !has(eps, "::", 41001) || len(eps) != 3 {
 		t.Fatalf("a dead process's listener file is ignored, this process's listener and the fleet entries stay: %+v", eps)
@@ -350,7 +354,10 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 	}
 	s3 := newLiveDenySource(dir, fakeFleet{err: errors.New("db closed")})
 	if eps := epsOf(s3); !has(eps, "::", 41001) {
-		t.Fatalf("listener files still apply without the store: %+v", eps)
+		t.Fatalf("listener files are still reported for the log line when the store fails: %+v", eps)
+	}
+	if _, err := s3.Endpoints(); err == nil {
+		t.Fatal("an unreadable fleet store fails the read closed")
 	}
 }
 
@@ -692,4 +699,173 @@ func TestLiveDeny_APanicingRefreshReleasesTheFlightAndWaitersHonourContext(t *te
 		t.Fatalf("a waiter must leave when its context ends: %v after %v", err, time.Since(start))
 	}
 	close(block)
+}
+
+// pendingBrowserCard waits for the run's browser card and returns its request id.
+func pendingBrowserCard(t *testing.T, e *identEnv) string {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		for _, p := range e.api.Runs.PendingPermissions() {
+			if p.RunID == e.runID && p.Detail != nil && p.Detail.Kind == "browser" {
+				return p.RequestID
+			}
+		}
+	}
+	t.Fatal("no card was raised")
+	return ""
+}
+
+// Closing the run's socket (the single path run end and revoke both use) ends the
+// run's grants even though the run itself goes on.
+func TestClosingTheSocketDropsTheRunsGrants(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	res := make(chan error, 1)
+	go func() {
+		res <- e.api.Runs.BrowserGate(context.Background(), runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
+	}()
+	if err := e.api.Runs.RespondPermission(e.runID, pendingBrowserCard(t, e), "allow_run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-res; err != nil {
+		t.Fatal(err)
+	}
+	if !e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("the read grant was given")
+	}
+	e.api.browser.CloseBrowserSocket(e.runID)
+	if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("closing the run's socket must end its grants")
+	}
+	if !e.api.Runs.RunIsRunning(e.runID) {
+		t.Fatal("the run itself goes on")
+	}
+}
+
+// A card held for a run whose socket closes: the call ends with the socket's
+// context, the card leaves the inbox, and an answer taken before the close leaves
+// no grant.
+func TestClosingTheSocketEndsAHeldCard(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	ctx, cancel := context.WithCancel(context.Background()) // the socket's context
+	res := make(chan error, 1)
+	go func() {
+		res <- e.api.Runs.BrowserGate(ctx, runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
+	}()
+	reqID := pendingBrowserCard(t, e)
+	e.api.browser.CloseBrowserSocket(e.runID)
+	// The person answers an instant later (their answer was already on its way):
+	// with the grant gone and the epoch moved on, it must leave no grant.
+	_ = e.api.Runs.RespondPermission(e.runID, reqID, "allow_run")
+	cancel()
+	select {
+	case err := <-res:
+		if err == nil {
+			t.Fatal("the held call must not be admitted")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the held call never ended")
+	}
+	for _, p := range e.api.Runs.PendingPermissions() {
+		if p.RunID == e.runID && p.Detail != nil && p.Detail.Kind == "browser" {
+			t.Fatalf("the card %s stays pending after the socket closed", p.RequestID)
+		}
+	}
+	if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("no grant results")
+	}
+}
+
+// A socket that replaces another for the same run id inherits none of its grants.
+func TestOpeningAReplacementSocketDropsTheRunsGrants(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	res := make(chan error, 1)
+	go func() {
+		res <- e.api.Runs.BrowserGate(context.Background(), runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
+	}()
+	if err := e.api.Runs.RespondPermission(e.runID, pendingBrowserCard(t, e), "allow_run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-res; err != nil {
+		t.Fatal(err)
+	}
+	if !e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("granted")
+	}
+	// Both open paths replace without going through CloseBrowserSocket.
+	if _, err := e.api.browser.OpenBrowserSocket(e.runID, e.seatTask.ID, 4242); err == nil {
+		defer e.api.browser.CloseBrowserSocket(e.runID)
+	}
+	if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("a replacement socket must not inherit the read grant")
+	}
+}
+
+// replacingHub is a socket hub whose Open "closes the old socket" at the point the
+// real hub does (inside Open): it lets a test act in that window.
+type replacingHub struct {
+	inOpen func()
+}
+
+func (h *replacingHub) Open(runID string, rootPID int, _ runsock.Handler) (string, error) {
+	if h.inOpen != nil {
+		h.inOpen()
+	}
+	return "/x/y.sock", nil
+}
+func (h *replacingHub) OpenPending(runID string, _ runsock.Handler) (string, func(int) error, error) {
+	if h.inOpen != nil {
+		h.inOpen()
+	}
+	return "/x/y.sock", func(int) error { return nil }, nil
+}
+func (h *replacingHub) Close(string) {}
+func (h *replacingHub) CloseAll()    {}
+
+// A call raised on the OLD socket after the drop and before the hub closed it (the
+// hub closes it only inside Open) and answered afterwards must not leave a grant on
+// the new socket: the host drops again once Open returned.
+func TestReplacementSocketVoidsAnAnswerTakenDuringOpen(t *testing.T) {
+	t.Parallel()
+	for name, open := range map[string]func(h *browserHost, runID string, taskID int64) error{
+		"Open": func(h *browserHost, runID string, taskID int64) error {
+			_, err := h.OpenBrowserSocket(runID, taskID, 4242)
+			return err
+		},
+		"OpenPending": func(h *browserHost, runID string, taskID int64) error {
+			_, _, err := h.OpenBrowserSocketPending(runID, taskID)
+			return err
+		},
+	} {
+		open := open
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e := newIdentEnv(t, "hang")
+			res := make(chan error, 1)
+			var reqID string
+			e.api.browser.socks = &replacingHub{inOpen: func() {
+				go func() {
+					res <- e.api.Runs.BrowserGate(context.Background(), runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
+				}()
+				reqID = pendingBrowserCard(t, e) // the card exists before Open returns
+			}}
+			if err := open(e.api.browser, e.runID, e.seatTask.ID); err != nil {
+				t.Fatal(err)
+			}
+			_ = e.api.Runs.RespondPermission(e.runID, reqID, "allow_run") // answered after the replacement
+			select {
+			case err := <-res:
+				if err == nil {
+					t.Fatal("the answer taken across the replacement must not admit the call")
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("the held call never ended")
+			}
+			if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+				t.Fatal("the new socket inherited a grant given to a call of the old one")
+			}
+		})
+	}
 }

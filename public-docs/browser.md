@@ -33,6 +33,12 @@ ends.
 - Your own machine (`localhost`) on any port, except the addresses smind itself
   listens on: the daemon, its relay and web listeners, a login callback while a
   login is open, and the address of any daemon you linked.
+  A linked daemon you addressed by a DNS name is refused by that name and by
+  every address the name resolves to (looked up again every few seconds, and an
+  address it moved away from stays refused for a minute). If such a name cannot
+  be resolved at all, or the list of your linked daemons cannot be read, the
+  browser refuses every page until it can: unlink that daemon or fix its name to
+  continue.
 - Hosts you add by name or address: `smind browser allow add intranet.example
   --workspace 7` (one exact host, no wildcards, no ports; `smind browser allow rm`
   removes it). A host name you add must resolve to a public address; to allow a
@@ -60,7 +66,8 @@ the agent tool's.
   the agent open any such page, with any query, for the rest of the run.
   Closing a tab has its own card ("Close a browser tab?").
 - Nothing is saved across runs and there is no "always". Turning the workspace
-  switch off ends the grants.
+  switch off ends the grants, and so does the run's browser connection closing
+  while the run goes on.
 - Saying no three times in a minute pauses further cards for five minutes, so an
   agent cannot nag you.
 - Permission modes of the agent's own tool never answer these cards, including

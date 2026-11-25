@@ -72,6 +72,7 @@ type browserHost struct {
 	revokeGrants func(workspaceID int64)
 	revokeAll    func()
 	forgetRun    func(runID string)
+	dropGrants   func(runID string)
 	liveDeny     func(ctx context.Context) ([]browser.Endpoint, error)
 	// stopWatch ends the kill-switch watcher (nil when none runs).
 	stopWatch chan struct{}
@@ -116,6 +117,7 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h.revokeGrants = reg.RevokeBrowserGrants
 	h.revokeAll = reg.RevokeAllBrowserGrants
 	h.forgetRun = reg.ForgetBrowserRun
+	h.dropGrants = reg.DropBrowserRunGrants
 	h.liveDeny = newLiveDenySource(filepath.Join(config.Dir(), "listeners"), db).EndpointsContext
 	h.launcher = func() (browser.Launcher, error) {
 		p, err := browser.DetectChrome("")
@@ -341,9 +343,15 @@ func (h *browserHost) OpenBrowserSocket(runID string, taskID int64, rootPID int)
 	if h.socks == nil {
 		return "", errors.New("browser: no socket host")
 	}
-	return h.socks.Open(runID, rootPID, func(ctx context.Context, req runsock.Request) (any, error) {
+	h.dropRunGrants(runID) // a socket that replaces another for this run id inherits no grant
+	path, err := h.socks.Open(runID, rootPID, func(ctx context.Context, req runsock.Request) (any, error) {
 		return h.callRun(ctx, runID, taskID, req.Tool, req.Args)
 	})
+	// The hub closes the OLD socket only inside Open: a call held on it could have been
+	// answered between the drop above and that close, and its grant would land on the
+	// new socket. Dropping again once Open returned voids it (the epoch moves on).
+	h.dropRunGrants(runID)
+	return path, err
 }
 
 // OpenBrowserSocketPending creates the run's socket before its agent process
@@ -352,15 +360,28 @@ func (h *browserHost) OpenBrowserSocketPending(runID string, taskID int64) (stri
 	if h.socks == nil {
 		return "", nil, errors.New("browser: no socket host")
 	}
-	return h.socks.OpenPending(runID, func(ctx context.Context, req runsock.Request) (any, error) {
+	h.dropRunGrants(runID) // a socket that replaces another for this run id inherits no grant
+	path, bind, err := h.socks.OpenPending(runID, func(ctx context.Context, req runsock.Request) (any, error) {
 		return h.callRun(ctx, runID, taskID, req.Tool, req.Args)
 	})
+	h.dropRunGrants(runID) // see OpenBrowserSocket: the old socket closed inside OpenPending
+	return path, bind, err
 }
 
 // CloseBrowserSocket closes the run's socket and its connections.
 func (h *browserHost) CloseBrowserSocket(runID string) {
 	if h.socks != nil {
 		h.socks.Close(runID)
+	}
+	// The run's grants end with its socket, not only with the run: a card answered
+	// after the close must not leave a grant for whatever connects next.
+	h.dropRunGrants(runID)
+}
+
+// dropRunGrants ends the run's grants (nil hook: none to drop).
+func (h *browserHost) dropRunGrants(runID string) {
+	if h.dropGrants != nil {
+		h.dropGrants(runID)
 	}
 }
 

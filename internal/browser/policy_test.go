@@ -355,3 +355,35 @@ func TestPolicyLiveDenyFailsClosed(t *testing.T) {
 		t.Error("the one valid live entry is reserved")
 	}
 }
+
+func TestCanonicalHost(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		in, canon string
+		name, bad bool
+	}{
+		{"127.1", "127.0.0.1", false, false},
+		{"0x7f.0.0.2", "127.0.0.2", false, false},
+		{"0177.0.0.1", "127.0.0.1", false, false},
+		{"2130706433", "127.0.0.1", false, false},
+		{"::1", "::1", false, false},
+		{"[::1]", "::1", false, false},
+		{"::ffff:192.0.2.9", "192.0.2.9", false, false},
+		{"Peer.Example.", "peer.example", true, false},
+		{"bücher.example", "xn--bcher-kva.example", true, false},
+		{"bad!host", "", false, true},
+		{"", "", false, true},
+		{"a..b", "", false, true},
+	} {
+		got, isName, err := CanonicalHost(tc.in)
+		if tc.bad {
+			if err == nil {
+				t.Errorf("CanonicalHost(%q) = %q, want an error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.canon || isName != tc.name {
+			t.Errorf("CanonicalHost(%q) = %q, %v, %v; want %q, %v", tc.in, got, isName, err, tc.canon, tc.name)
+		}
+	}
+}
