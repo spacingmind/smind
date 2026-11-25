@@ -18,6 +18,9 @@ import (
 	"unicode"
 )
 
+// startProxy is StartProxy; a test replaces it to see the proxy a session starts.
+var startProxy = StartProxy
+
 // maxQueuedBytes bounds the events waiting in the session queues.
 const maxQueuedBytes int64 = 32 << 20
 
@@ -172,7 +175,7 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 	}
 	seen := &seenSet{max: 200}
 	var session atomic.Pointer[Session]
-	px, err := StartProxy(ProxyConfig{
+	px, err := startProxy(ProxyConfig{
 		Policy:   cfg.Policy,
 		Resolver: cfg.Resolver,
 		OnRefuse: func(target, reason string) {
