@@ -46,6 +46,9 @@ const (
 	whyACP      = "an ACP agent takes the browser only if it advertises MCP support; smind cannot tell in advance"
 	whyEndpoint = "this agent runs against a compatible endpoint; whether the model behind it calls MCP tools is up to that model"
 	whyNoMCP    = "this agent cannot take MCP servers"
+	// whyCodexAppServer names the harness, so an instance of another provider made
+	// from a Codex-harness recipe is told the real reason.
+	whyCodexAppServer = "this runs on the Codex app-server harness, which takes no per-run MCP servers"
 )
 
 var (
@@ -69,7 +72,7 @@ var browserReach = map[string]ReachRow{
 
 	ReachClassCustomACP: {Reach: ReachConditional, Mechanism: "session/new mcpServers", Why: whyACP, Images: "unknown"},
 	ReachClassPlugin:    {Reach: ReachNo, Mechanism: "none", Why: "a plugin provider never receives smind's own MCP servers", Images: "unknown"},
-	ReachClassInstance:  {Reach: ReachConditional, Mechanism: "inherited from the provider it extends", Why: whyEndpoint, Images: "unknown"},
+	ReachClassInstance:  {Reach: ReachConditional, Mechanism: "the launch path of the provider it extends", Why: whyEndpoint, Images: "unknown"},
 }
 
 // recipeReach is keyed by compatible-recipe id (recipes.yaml). A recipe's harness
@@ -85,7 +88,7 @@ var recipeReach = map[string]ReachRow{
 	"lm-studio":                     reachRecipe,
 	"litellm":                       reachRecipe,
 	"anthropic-compatible":          reachRecipe,
-	"openai-responses-compatible":   {Reach: ReachNo, Mechanism: "none", Why: "Codex takes no per-run MCP servers", Images: "unknown"},
+	"openai-responses-compatible":   {Reach: ReachNo, Mechanism: "none", Why: whyCodexAppServer, Images: "unknown"},
 	"chat-completions-via-opencode": {Reach: ReachConditional, Mechanism: "session/new mcpServers", Why: whyACP, Images: "unknown"},
 }
 
@@ -117,10 +120,10 @@ func resolveReach(spec Spec) ReachRow {
 		}
 	}
 	if spec.Extends != "" {
-		// An instance is the base's code against its own endpoint: a base that
-		// cannot take the row stays no; otherwise the instance class row applies
-		// (offered, not guaranteed, images unknown: the model that would read a
-		// screenshot is not the base's).
+		// An instance with no (known) recipe: a no base was handled above; every
+		// other base (a built-in, or another custom entry) gets the FIXED instance
+		// class row (offered, not guaranteed, images unknown: the model that would
+		// read a screenshot is not the base's), not the base's own row.
 		return browserReach[ReachClassInstance]
 	}
 	if row, ok := browserReach[spec.ID]; ok && IsBuiltin(spec.ID) {

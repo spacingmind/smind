@@ -252,7 +252,7 @@ func TestCallRunRefusesProviderWithoutTheBrowser(t *testing.T) {
 	}
 	// An unreadable provider fails closed with a plain message.
 	h.providerSpec = func(string) (providers.Spec, error) { return providers.Spec{}, errors.New("gone") }
-	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "not available for this agent") {
+	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "the browser is not available for this agent (unknown provider): ") {
 		t.Fatalf("an unreadable provider: %v", err)
 	}
 	// An offered provider goes on to the gate.
@@ -297,13 +297,13 @@ func TestImagesReadFollowsReachTable(t *testing.T) {
 		spec providers.Spec
 		want bool
 	}{
-		"claude-native yes":        {providers.Spec{ID: "claude-native", Runner: providers.RunnerClaude, Images: "yes"}, true},
-		"opencode yes":             {providers.Spec{ID: "opencode", Runner: providers.RunnerACP, Images: "yes"}, true},
-		"glm no":                   {providers.Spec{ID: "glm", Runner: providers.RunnerACP, Images: "no"}, false},
-		"kimi unknown":             {providers.Spec{ID: "kimi", Runner: providers.RunnerACP, Images: "unknown"}, false},
-		"instance inherits yes":    {providers.Spec{ID: "my-glm", Extends: "claude-native", Runner: providers.RunnerClaude, Images: "yes"}, false},
-		"recipe instance inherits": {providers.Spec{ID: "ds", Extends: "claude-native", Recipe: "deepseek", Runner: providers.RunnerClaude, Images: "yes"}, false},
-		"custom acp empty":         {providers.Spec{ID: "mine", Custom: true, Runner: providers.RunnerACP}, false},
+		"claude-native yes":                 {providers.Spec{ID: "claude-native", Runner: providers.RunnerClaude, Images: "yes"}, true},
+		"opencode yes":                      {providers.Spec{ID: "opencode", Runner: providers.RunnerACP, Images: "yes"}, true},
+		"glm no":                            {providers.Spec{ID: "glm", Runner: providers.RunnerACP, Images: "no"}, false},
+		"kimi unknown":                      {providers.Spec{ID: "kimi", Runner: providers.RunnerACP, Images: "unknown"}, false},
+		"instance of a yes base is unknown": {providers.Spec{ID: "my-glm", Extends: "claude-native", Runner: providers.RunnerClaude, Images: "yes"}, false},
+		"recipe instance is unknown":        {providers.Spec{ID: "ds", Extends: "claude-native", Recipe: "deepseek", Runner: providers.RunnerClaude, Images: "yes"}, false},
+		"custom acp empty":                  {providers.Spec{ID: "mine", Custom: true, Runner: providers.RunnerACP}, false},
 	} {
 		h.providerSpec = func(string) (providers.Spec, error) { return c.spec, nil }
 		if got := h.imagesRead(e.runID); got != c.want {

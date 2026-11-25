@@ -81,7 +81,9 @@ the agent tool's.
 | Goose | offered if the agent advertises MCP support | unknown |
 | Cursor | offered if the agent advertises MCP support | unknown |
 | providers you add yourself under `providers.custom` | offered, not guaranteed | unknown |
-| compatible-endpoint providers made from a recipe | offered, not guaranteed: the model behind the endpoint decides whether it calls the tools | unknown |
+| compatible-endpoint providers made from a recipe (all but the one listed next) | offered, not guaranteed: the model behind the endpoint decides whether it calls the tools | unknown |
+| OpenAI Responses-compatible URL | no: this recipe runs on the Codex app-server, which takes no per-run MCP servers | none |
+| a provider that extends another (an instance, with no recipe) | offered, not guaranteed, unless the provider it extends has no browser; this also holds when it extends a provider you added yourself | unknown |
 | plugin providers | never | none |
 
 A screenshot reaches the agent as an image only when smind knows the agent

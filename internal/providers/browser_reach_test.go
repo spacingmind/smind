@@ -183,47 +183,99 @@ func TestBrowserDocsNameEveryNoProvider(t *testing.T) {
 			t.Errorf("public-docs/browser.md row for %s must say no: %q", id, row)
 		}
 	}
+	// Every recipe has a table row (its own, or the shared recipe row), and a recipe
+	// whose row is no has its OWN row saying no.
+	const sharedRecipeRow = "| compatible-endpoint providers made from a recipe"
+	for _, rc := range Recipes() {
+		if recipeReach[rc.ID].Reach == ReachNo {
+			row := rowOf(rc.Label)
+			if row == "" || !strings.HasPrefix(strings.TrimPrefix(row, "| "+rc.Label+" | "), "no") {
+				t.Errorf("public-docs/browser.md needs its own row saying no for recipe %s (%q): %q", rc.ID, rc.Label, row)
+			}
+			continue
+		}
+		if !strings.Contains(text, sharedRecipeRow) {
+			t.Errorf("public-docs/browser.md has no shared recipe row for %s", rc.ID)
+		}
+	}
+	// The three class rows, each with the wording of its table row.
+	for key, prefix := range map[string]string{
+		ReachClassCustomACP: "| providers you add yourself under `providers.custom` | offered",
+		ReachClassPlugin:    "| plugin providers | never",
+		ReachClassInstance:  "| a provider that extends another (an instance, with no recipe) | offered",
+	} {
+		if !strings.Contains(text, prefix) {
+			t.Errorf("public-docs/browser.md has no row for %s starting %q", key, prefix)
+		}
+	}
 	if !strings.Contains(text, "the browser is not available for this agent") {
 		t.Error(`public-docs/browser.md does not contain "the browser is not available for this agent"`)
 	}
 }
 
-// TestReachTableNeverWidensTheOldRule pins AC7: before the table, every built-in
-// provider got the browser row except codex-native (and a plugin provider, and an
-// agent that takes no MCP servers). The table must not offer it to anything else.
+// TestReachTableNeverWidensTheOldRule pins AC7. Before the table every built-in
+// provider got the browser row except codex-native. The EXACT set the table offers
+// is written out here, so widening or narrowing it is a deliberate test edit.
 func TestReachTableNeverWidensTheOldRule(t *testing.T) {
 	t.Parallel()
+	want := map[string]bool{IDClaudeNative: true, IDGLM: true, IDKimi: true, IDOpenCode: true, IDCopilot: true, IDCline: true, IDGoose: true, IDCursor: true}
 	reg := New()
+	got := map[string]bool{}
 	for _, s := range reg.List() {
-		if !IsBuiltin(s.ID) {
-			continue
-		}
-		oldRule := s.ID != IDCodexNative && s.Plugin == "" && !s.NoMCPServers
-		if got := BrowserReachOf(s).Offered(); got && !oldRule {
-			t.Errorf("%s: the table offers the browser where the old rule did not", s.ID)
-		}
-		// Whatever is built on it (an instance, with any recipe) never gets more than its base.
-		if oldRule {
-			continue
-		}
-		for _, rc := range Recipes() {
-			inst := Spec{ID: "i-" + rc.ID, Extends: s.ID, Custom: true, Recipe: rc.ID, Runner: s.Runner}
-			if BrowserReachOf(inst).Offered() {
-				t.Errorf("instance of %s with recipe %s is offered the browser, its base is not", s.ID, rc.ID)
-			}
-		}
-		if BrowserReachOf(Spec{ID: "i", Extends: s.ID, Custom: true, Runner: s.Runner}).Offered() {
-			t.Errorf("a plain instance of %s is offered the browser, its base is not", s.ID)
+		if IsBuiltin(s.ID) && BrowserReachOf(s).Offered() {
+			got[s.ID] = true
 		}
 	}
-	// A plugin provider and an agent without MCP servers are never offered, as built-ins or instances.
-	for _, s := range []Spec{
+	for id := range got {
+		if !want[id] {
+			t.Errorf("%s is offered the browser and is not in the expected set", id)
+		}
+	}
+	for id := range want {
+		if !got[id] {
+			t.Errorf("%s is expected to be offered the browser and is not", id)
+		}
+	}
+	// What is built on a provider never gets more than the provider: an instance of
+	// codex-native with any recipe or none, of a custom ACP entry that takes no MCP
+	// servers, and a plugin provider or no-MCP agent in any form.
+	custom := Spec{ID: "mine", Custom: true, Runner: RunnerACP, NoMCPServers: true}
+	no := []Spec{
+		{ID: "i", Extends: IDCodexNative, Custom: true, Runner: RunnerCodex},
+		{ID: "ic", Extends: "mine", Custom: true, Runner: RunnerACP, NoMCPServers: true},
+		custom,
 		{ID: "p/a", Plugin: "p", Runner: RunnerACP},
 		{ID: "p/b", Plugin: "p", Extends: IDOpenCode},
 		{ID: "n", Extends: IDOpenCode, NoMCPServers: true},
-	} {
+	}
+	for _, rc := range Recipes() {
+		no = append(no, Spec{ID: "ir-" + rc.ID, Extends: IDCodexNative, Custom: true, Recipe: rc.ID, Runner: RunnerCodex})
+	}
+	for _, s := range no {
 		if BrowserReachOf(s).Offered() {
 			t.Errorf("%+v is offered the browser", s)
 		}
+	}
+	// An instance of a custom ACP entry that DOES take MCP servers is offered, as the entry is.
+	if !BrowserReachOf(Spec{ID: "ic2", Extends: "mine", Custom: true, Runner: RunnerACP}).Offered() {
+		t.Error("an instance of an offered custom ACP entry should be offered (not guaranteed)")
+	}
+}
+
+// An instance of another provider made from the Codex-harness recipe is told the
+// recipe's harness as the reason, not "Codex takes no per-run MCP servers" about a
+// provider that is not Codex.
+func TestBrowserReachRecipeHarnessReason(t *testing.T) {
+	t.Parallel()
+	spec := Spec{ID: "cc-resp", Label: "Claude via responses", Extends: IDClaudeNative, Custom: true, Recipe: "openai-responses-compatible", Runner: RunnerClaude}
+	row := BrowserReachOf(spec)
+	if row.Reach != ReachNo {
+		t.Fatalf("reach = %s, want no", row.Reach)
+	}
+	if !strings.Contains(row.Why, "Codex app-server harness") || strings.Contains(row.Why, "Codex takes") {
+		t.Errorf("why = %q: must name the recipe's harness", row.Why)
+	}
+	if msg := BrowserUnavailableMessage(spec); !strings.HasPrefix(msg, "the browser is not available for this agent (Claude via responses): ") {
+		t.Errorf("message = %q", msg)
 	}
 }

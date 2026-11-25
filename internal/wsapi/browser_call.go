@@ -366,7 +366,7 @@ func (h *browserHost) CloseBrowserSocket(runID string) {
 func (h *browserHost) providerOffered(runID string) error {
 	spec, err := h.providerSpec(runID)
 	if err != nil {
-		return errors.New("browser: the browser is not available for this agent: its provider is unknown")
+		return errors.New("browser: the browser is not available for this agent (unknown provider): smind cannot read which provider this run uses")
 	}
 	if !providers.BrowserReachOf(spec).Offered() {
 		return errors.New("browser: " + providers.BrowserUnavailableMessage(spec))
