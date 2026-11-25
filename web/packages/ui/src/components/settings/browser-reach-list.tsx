@@ -40,16 +40,19 @@ export function BrowserReachList({ providers }: { providers: BrowserProviderReac
             <h4 className="text-ui-sm font-medium text-foreground">
               {title} ({entries.length})
             </h4>
-            <ul className="flex flex-col gap-1">
+            <ul className="mt-1.5 flex flex-col gap-2.5">
               {entries.map((provider) => (
                 <li key={provider.id} className="flex flex-col">
                   <span className="min-w-0 break-words text-ui-base text-foreground">{provider.label}</span>
                   {provider.why ? (
-                    <span className="min-w-0 break-words text-ui-sm text-foreground-muted">{provider.why}</span>
+                    <span className="min-w-0 break-words text-ui-sm text-foreground-muted first-letter:uppercase">{provider.why}</span>
                   ) : null}
-                  <span className="min-w-0 break-words text-ui-sm text-foreground-muted">
-                    {SCREENSHOT_STATEMENTS[provider.images]}
-                  </span>
+                  {/* An agent without the browser gets no screenshots at all: saying so would be noise. */}
+                  {provider.reach !== "no" && (
+                    <span className="min-w-0 break-words text-ui-sm text-foreground-muted">
+                      {SCREENSHOT_STATEMENTS[provider.images]}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

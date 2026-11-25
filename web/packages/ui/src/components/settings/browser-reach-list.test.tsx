@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { BrowserReachList } from "@/components/settings/browser-reach-list";
@@ -39,13 +39,14 @@ describe("browser reach list", () => {
     expect(screen.getByText(WHY_NO)).toBeInTheDocument();
   });
 
-  it("states screenshots from images for every entry", () => {
+  it("states screenshots from images for every entry that gets the browser, and not for one that does not", () => {
     render(<BrowserReachList providers={providers} />);
 
     expect(screen.getAllByText("Screenshots: yes")).toHaveLength(1);
     expect(screen.getAllByText("Screenshots: unknown, text tools only")).toHaveLength(1);
-    expect(screen.getAllByText("Screenshots: no, text tools only")).toHaveLength(2);
-    expect(screen.getAllByText(/^Screenshots:/)).toHaveLength(providers.length);
+    expect(screen.getAllByText("Screenshots: no, text tools only")).toHaveLength(1);
+    expect(screen.getAllByText(/^Screenshots:/)).toHaveLength(providers.length - 1);
+    expect(within(screen.getByTestId("browser-reach-no")).queryByText(/Screenshots:/)).toBeNull();
   });
 
   it("does not render an empty group", () => {
