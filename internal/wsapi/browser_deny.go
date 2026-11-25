@@ -168,22 +168,23 @@ func dedupeEndpoints(in []browser.Endpoint) []browser.Endpoint {
 	return out
 }
 
-// fleetEndpoints are the direct addresses of linked daemons. A store error
-// yields nothing here (the listener files still apply); the deny list is a
-// floor, and an unreadable store is already a broken daemon.
+// fleetEndpoints are the direct addresses of linked daemons. A store error FAILS
+// CLOSED (an error: the browser refuses), like an unresolvable peer name: a deny
+// list that silently lacks the linked daemons is a hole, and the listener files
+// alone are not the whole floor.
 func (s *liveDenySource) fleetEndpoints() ([]browser.Endpoint, error) {
 	if s.fleet == nil {
 		return nil, nil
 	}
 	hosts, err := s.fleet.ListFleetHosts()
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("the linked daemons cannot be read, so the browser refuses until they can: %w", err)
 	}
 	var out []browser.Endpoint
 	for _, h := range hosts {
 		links, err := s.fleet.ListFleetLinks(h.HostID)
 		if err != nil {
-			continue
+			return out, fmt.Errorf("the links of a linked daemon cannot be read, so the browser refuses until they can: %w", err)
 		}
 		for _, l := range links {
 			if e, ok := transportEndpoint(l.TransportJSON); ok {
@@ -198,24 +199,34 @@ func (s *liveDenySource) fleetEndpoints() ([]browser.Endpoint, error) {
 // address the name resolves to (same port), keeping the name entry too. IP-literal
 // hosts are not resolved. A name that has never resolved is an error (fail closed).
 func (s *liveDenySource) withResolvedAddresses(eps []browser.Endpoint) ([]browser.Endpoint, error) {
-	if s.resolver == nil {
-		return eps, nil
-	}
+	// Every host is canonicalised the way the policy compares it first: an IP literal
+	// in any form (127.1, octal, hex, mapped) becomes its canonical address and is
+	// never resolved; a name is lower-cased and, when internationalised, converted
+	// to punycode before it is resolved and denied. A host that is neither is an
+	// error (the entry is never dropped silently).
+	canon := make([]browser.Endpoint, 0, len(eps))
 	var names []string
+	isName := map[string]bool{}
 	for _, e := range eps {
-		if net.ParseIP(e.Host) == nil {
-			names = append(names, e.Host)
+		h, name, err := browser.CanonicalHost(e.Host)
+		if err != nil {
+			return eps, fmt.Errorf("a linked daemon's address is not a host smind can compare, so the browser refuses until it is fixed: %w", err)
+		}
+		canon = append(canon, browser.Endpoint{Host: h, Port: e.Port})
+		if name && !isName[h] {
+			isName[h] = true
+			names = append(names, h)
 		}
 	}
-	if len(names) == 0 {
-		return eps, nil
+	if s.resolver == nil || len(names) == 0 {
+		return canon, nil
 	}
 	addrs, err := s.resolver.Addrs(names)
 	if err != nil {
-		return eps, fmt.Errorf("a linked daemon's address cannot be resolved, so the browser refuses until it can: %w", err)
+		return canon, fmt.Errorf("a linked daemon's address cannot be resolved, so the browser refuses until it can: %w", err)
 	}
-	out := append([]browser.Endpoint(nil), eps...)
-	for _, e := range eps {
+	out := append([]browser.Endpoint(nil), canon...)
+	for _, e := range canon {
 		for _, ip := range addrs[e.Host] {
 			out = append(out, browser.Endpoint{Host: ip, Port: e.Port})
 		}

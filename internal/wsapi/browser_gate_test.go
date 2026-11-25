@@ -265,11 +265,13 @@ type fakeFleet struct {
 	hosts []store.FleetHost
 	links map[string][]store.FleetLink
 	err   error
+	// linkErr fails ListFleetLinks.
+	linkErr error
 }
 
 func (f fakeFleet) ListFleetHosts() ([]store.FleetHost, error) { return f.hosts, f.err }
 func (f fakeFleet) ListFleetLinks(id string) ([]store.FleetLink, error) {
-	return f.links[id], nil
+	return f.links[id], f.linkErr
 }
 
 // The live deny source: every smind listener file (live processes only) and the
@@ -352,7 +354,10 @@ func TestLiveDeny_ListenerFilesAndFleetLinks(t *testing.T) {
 	}
 	s3 := newLiveDenySource(dir, fakeFleet{err: errors.New("db closed")})
 	if eps := epsOf(s3); !has(eps, "::", 41001) {
-		t.Fatalf("listener files still apply without the store: %+v", eps)
+		t.Fatalf("listener files are still reported for the log line when the store fails: %+v", eps)
+	}
+	if _, err := s3.Endpoints(); err == nil {
+		t.Fatal("an unreadable fleet store fails the read closed")
 	}
 }
 
@@ -795,5 +800,72 @@ func TestOpeningAReplacementSocketDropsTheRunsGrants(t *testing.T) {
 	}
 	if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
 		t.Fatal("a replacement socket must not inherit the read grant")
+	}
+}
+
+// replacingHub is a socket hub whose Open "closes the old socket" at the point the
+// real hub does (inside Open): it lets a test act in that window.
+type replacingHub struct {
+	inOpen func()
+}
+
+func (h *replacingHub) Open(runID string, rootPID int, _ runsock.Handler) (string, error) {
+	if h.inOpen != nil {
+		h.inOpen()
+	}
+	return "/x/y.sock", nil
+}
+func (h *replacingHub) OpenPending(runID string, _ runsock.Handler) (string, func(int) error, error) {
+	if h.inOpen != nil {
+		h.inOpen()
+	}
+	return "/x/y.sock", func(int) error { return nil }, nil
+}
+func (h *replacingHub) Close(string) {}
+func (h *replacingHub) CloseAll()    {}
+
+// A call raised on the OLD socket after the drop and before the hub closed it (the
+// hub closes it only inside Open) and answered afterwards must not leave a grant on
+// the new socket: the host drops again once Open returned.
+func TestReplacementSocketVoidsAnAnswerTakenDuringOpen(t *testing.T) {
+	t.Parallel()
+	for name, open := range map[string]func(h *browserHost, runID string, taskID int64) error{
+		"Open": func(h *browserHost, runID string, taskID int64) error {
+			_, err := h.OpenBrowserSocket(runID, taskID, 4242)
+			return err
+		},
+		"OpenPending": func(h *browserHost, runID string, taskID int64) error {
+			_, _, err := h.OpenBrowserSocketPending(runID, taskID)
+			return err
+		},
+	} {
+		open := open
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e := newIdentEnv(t, "hang")
+			res := make(chan error, 1)
+			var reqID string
+			e.api.browser.socks = &replacingHub{inOpen: func() {
+				go func() {
+					res <- e.api.Runs.BrowserGate(context.Background(), runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
+				}()
+				reqID = pendingBrowserCard(t, e) // the card exists before Open returns
+			}}
+			if err := open(e.api.browser, e.runID, e.seatTask.ID); err != nil {
+				t.Fatal(err)
+			}
+			_ = e.api.Runs.RespondPermission(e.runID, reqID, "allow_run") // answered after the replacement
+			select {
+			case err := <-res:
+				if err == nil {
+					t.Fatal("the answer taken across the replacement must not admit the call")
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("the held call never ended")
+			}
+			if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+				t.Fatal("the new socket inherited a grant given to a call of the old one")
+			}
+		})
 	}
 }

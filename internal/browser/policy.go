@@ -12,6 +12,8 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+
+	"golang.org/x/net/idna"
 )
 
 // Endpoint is a host and port that is never reachable whatever the allowlist
@@ -92,6 +94,34 @@ func canonEndpoint(d Endpoint) (Endpoint, error) {
 		return Endpoint{}, fmt.Errorf("browser: deny endpoint %q: %w", d.Host, err)
 	}
 	return Endpoint{Host: h.canon, Port: d.Port}, nil
+}
+
+// CanonicalHost canonicalises a host the way the policy compares it, for a caller
+// that must decide whether to resolve it: an IP literal in ANY form a browser
+// parses (127.1, octal, hex, mapped, bracketed IPv6) comes back as its canonical
+// address with isName false (never resolve it); a DNS name comes back lower-cased
+// and, when it has non-ASCII labels, in its punycode form, with isName true. A
+// host that is neither is an error: the caller must not drop it silently.
+func CanonicalHost(raw string) (canon string, isName bool, err error) {
+	h := raw
+	if strings.Contains(h, ":") && !strings.HasPrefix(h, "[") {
+		h = "[" + h + "]" // a bare IPv6 literal
+	}
+	for i := 0; i < len(h); i++ {
+		if h[i] >= 0x80 { // an internationalised name: the DNS and the browser use the punycode form
+			ascii, ierr := idna.Lookup.ToASCII(h)
+			if ierr != nil {
+				return "", false, fmt.Errorf("browser: host %q is not a valid name: %w", raw, ierr)
+			}
+			h = ascii
+			break
+		}
+	}
+	p, _, perr := parseHost(h)
+	if perr != nil {
+		return "", false, fmt.Errorf("browser: host %q: %w", raw, perr)
+	}
+	return p.canon, p.name, nil
 }
 
 // WithLiveDeny returns the policy with a live source of reserved endpoints.

@@ -3,6 +3,7 @@ package wsapi
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -142,6 +143,89 @@ func TestFleetPeerNameKeepsTheLastGoodAnswerWhenTheLookupFails(t *testing.T) {
 		}
 		if err != nil || !hasEndpoint(eps, "203.0.113.7", 7443) || !hasEndpoint(eps, "peer.example.test", 7443) {
 			t.Fatalf("mode %d: %+v %v: the last good answer and the name stay", m, eps, err)
+		}
+	}
+}
+
+func denyFleetByURLs(urls ...string) fakeFleet {
+	var links []store.FleetLink
+	for _, u := range urls {
+		links = append(links, store.FleetLink{HostID: "h1", TransportJSON: `{"kind":"direct","url":"` + u + `"}`})
+	}
+	return fakeFleet{hosts: []store.FleetHost{{HostID: "h1"}}, links: map[string][]store.FleetLink{"h1": links}}
+}
+
+// Stored hosts that are not plain names are canonicalised like the policy does:
+// 127.1 and hex forms are denied as the address they are (never resolved), and an
+// internationalised name is resolved and denied in its punycode form.
+func TestFleetPeerNonCanonicalHostsAreCanonicalised(t *testing.T) {
+	t.Parallel()
+	var looked sync.Map
+	s := newLiveDenySource(t.TempDir(), denyFleetByURLs("wss://127.1:7441/ws", "wss://0x7f.0.0.2:7442/ws", "wss://b\u00fccher.example:7443/ws"))
+	s.resolver = fastResolver(func(_ context.Context, name string) ([]string, error) {
+		looked.Store(name, true)
+		return []string{"203.0.113.9"}, nil
+	})
+	eps, err := s.Endpoints()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		host string
+		port int
+	}{{"127.0.0.1", 7441}, {"127.0.0.2", 7442}, {"xn--bcher-kva.example", 7443}, {"203.0.113.9", 7443}} {
+		if !hasEndpoint(eps, want.host, want.port) {
+			t.Errorf("%s:%d missing: %+v", want.host, want.port, eps)
+		}
+	}
+	if _, ok := looked.Load("127.0.0.1"); ok {
+		t.Error("a non-canonical IPv4 literal must never be resolved as a name")
+	}
+	if _, ok := looked.Load("xn--bcher-kva.example"); !ok {
+		t.Error("the internationalised name is resolved in its punycode form")
+	}
+}
+
+// A stored host smind cannot compare fails the read closed instead of being dropped.
+func TestFleetPeerUncomparableHostFailsClosed(t *testing.T) {
+	t.Parallel()
+	s := newLiveDenySource(t.TempDir(), denyFleetByURLs("wss://bad!host:7443/ws"))
+	s.resolver = fastResolver(func(context.Context, string) ([]string, error) { return []string{"203.0.113.9"}, nil })
+	if _, err := s.Endpoints(); err == nil {
+		t.Fatal("a linked host that cannot be canonicalised must refuse the browser, not vanish from the deny list")
+	}
+}
+
+// A name that answers only unspecified addresses keeps its name entry and does not
+// take the browser down.
+func TestFleetPeerSinkholedNameKeepsTheBrowserWorking(t *testing.T) {
+	t.Parallel()
+	s := newLiveDenySource(t.TempDir(), denyFleetByName("peer.example.test"))
+	s.resolver = fastResolver(func(context.Context, string) ([]string, error) { return []string{unspecifiedV4}, nil })
+	eps, err := s.Endpoints()
+	if err != nil {
+		t.Fatalf("a sinkholed peer name must not fail the read: %v", err)
+	}
+	if !hasEndpoint(eps, "peer.example.test", 7443) || hasEndpoint(eps, unspecifiedV4, 7443) {
+		t.Fatalf("the name is denied, the unspecified address is not: %+v", eps)
+	}
+}
+
+// Store errors fail closed too, as an unresolvable name does.
+func TestFleetStoreErrorsFailClosed(t *testing.T) {
+	t.Parallel()
+	for name, f := range map[string]fakeFleet{
+		"hosts": {err: errors.New("db closed")},
+		"host links": func() fakeFleet {
+			f := denyFleetByName("peer.example.test")
+			f.linkErr = errors.New("db closed")
+			return f
+		}(),
+	} {
+		s := newLiveDenySource(t.TempDir(), f)
+		s.resolver = fastResolver(func(context.Context, string) ([]string, error) { return []string{"203.0.113.9"}, nil })
+		if _, err := s.Endpoints(); err == nil {
+			t.Errorf("%s: an unreadable store must refuse the browser", name)
 		}
 	}
 }

@@ -341,9 +341,14 @@ func (h *browserHost) OpenBrowserSocket(runID string, taskID int64, rootPID int)
 		return "", errors.New("browser: no socket host")
 	}
 	h.dropRunGrants(runID) // a socket that replaces another for this run id inherits no grant
-	return h.socks.Open(runID, rootPID, func(ctx context.Context, req runsock.Request) (any, error) {
+	path, err := h.socks.Open(runID, rootPID, func(ctx context.Context, req runsock.Request) (any, error) {
 		return h.callRun(ctx, runID, taskID, req.Tool, req.Args)
 	})
+	// The hub closes the OLD socket only inside Open: a call held on it could have been
+	// answered between the drop above and that close, and its grant would land on the
+	// new socket. Dropping again once Open returned voids it (the epoch moves on).
+	h.dropRunGrants(runID)
+	return path, err
 }
 
 // OpenBrowserSocketPending creates the run's socket before its agent process
@@ -353,9 +358,11 @@ func (h *browserHost) OpenBrowserSocketPending(runID string, taskID int64) (stri
 		return "", nil, errors.New("browser: no socket host")
 	}
 	h.dropRunGrants(runID) // a socket that replaces another for this run id inherits no grant
-	return h.socks.OpenPending(runID, func(ctx context.Context, req runsock.Request) (any, error) {
+	path, bind, err := h.socks.OpenPending(runID, func(ctx context.Context, req runsock.Request) (any, error) {
 		return h.callRun(ctx, runID, taskID, req.Tool, req.Args)
 	})
+	h.dropRunGrants(runID) // see OpenBrowserSocket: the old socket closed inside OpenPending
+	return path, bind, err
 }
 
 // CloseBrowserSocket closes the run's socket and its connections.

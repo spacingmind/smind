@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -149,8 +150,9 @@ func (r *nameResolver) Addrs(names []string) (map[string][]string, error) {
 			return nil, fmt.Errorf("cannot resolve %s", name)
 		}
 		served := append([]string(nil), st.addrs...)
+		latest := familiesOf(st.addrs)
 		for a, at := range st.seen {
-			if now.Sub(at) < r.retention {
+			if !retired(now, at, r.retention, a, latest) {
 				served = append(served, a)
 			}
 		}
@@ -178,9 +180,12 @@ func (r *nameResolver) lookupOne(name string, done chan struct{}) {
 		return // a failure leaves the stored state untouched
 	}
 	valid := validAddrs(addrs)
-	if len(valid) == 0 {
-		return
+	if len(valid) == 0 && len(addrs) == 0 {
+		return // an empty answer says nothing: keep what is known
 	}
+	// A non-empty answer of only unspecified addresses (a sinkholed name, a VPN that
+	// is down) IS a resolution, with no usable address: the name entry still denies,
+	// and the browser is not taken down for it.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	st := r.state[name]
@@ -195,13 +200,38 @@ func (r *nameResolver) lookupOne(name string, done chan struct{}) {
 	for _, a := range valid {
 		st.seen[a] = now
 	}
+	st.addrs = valid
+	st.have = true
+	fams := familiesOf(valid)
 	for a, at := range st.seen {
-		if now.Sub(at) >= r.retention {
+		if retired(now, at, r.retention, a, fams) {
 			delete(st.seen, a)
 		}
 	}
-	st.addrs = valid
-	st.have = true
+}
+
+// familiesOf says which address families an answer holds (4 and 6).
+func familiesOf(addrs []string) map[int]bool {
+	fams := map[int]bool{}
+	for _, s := range addrs {
+		fams[familyOf(s)] = true
+	}
+	return fams
+}
+
+func familyOf(addr string) int {
+	if strings.Contains(addr, ":") {
+		return 6
+	}
+	return 4
+}
+
+// retired says whether an address last seen at `at` may stop being served: only
+// when it is older than the retention window AND the latest answer holds its
+// family. An answer without a family (an A-only answer after A+AAAA: the AAAA
+// lookup may have been lost, not removed) cannot retire that family's addresses.
+func retired(now, at time.Time, retention time.Duration, addr string, latest map[int]bool) bool {
+	return now.Sub(at) >= retention && latest[familyOf(addr)]
 }
 
 // safeLookup runs the lookup; a panic in it is a failed lookup, never a crashed daemon.

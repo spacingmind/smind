@@ -132,20 +132,73 @@ func TestResolverReresolvesEveryRefreshAndKeepsOldAddressesForTheRetentionWindow
 	}
 }
 
-// A sinkholed name answers 0.0.0.0: that is no address (a deny entry for it would
-// reserve the port everywhere), so the name has no good answer.
+// A sinkholed name answers 0.0.0.0: that is no usable address (a deny entry for it
+// would reserve the port everywhere) but it IS a resolution, so the name is
+// resolved with zero addresses and does not take the browser down.
 func TestResolverIgnoresUnspecifiedAddresses(t *testing.T) {
 	t.Parallel()
 	r := newNameResolver(func(context.Context, string) ([]string, error) { return []string{unspecifiedV4, "::"}, nil })
 	r.wait, r.timeout = 100*time.Millisecond, time.Second
-	if got, err := r.Addrs([]string{"sink.example"}); err == nil {
-		t.Fatalf("an answer of only unspecified addresses is no answer: %v", got)
+	got, err := r.Addrs([]string{"sink.example"})
+	if err != nil || len(got["sink.example"]) != 0 {
+		t.Fatalf("got %v, %v; want the name resolved with no addresses", got, err)
 	}
 	r2 := newNameResolver(func(context.Context, string) ([]string, error) { return []string{unspecifiedV4, "192.0.2.4"}, nil })
 	r2.wait, r2.timeout = 100*time.Millisecond, time.Second
-	got, err := r2.Addrs([]string{"sink.example"})
+	got, err = r2.Addrs([]string{"sink.example"})
 	if err != nil || !slices.Equal(got["sink.example"], []string{"192.0.2.4"}) {
 		t.Fatalf("got %v, %v; want only the real address", got, err)
+	}
+	// An EMPTY answer says nothing: with no earlier answer the name stays unresolved.
+	r3 := newNameResolver(func(context.Context, string) ([]string, error) { return nil, nil })
+	r3.wait, r3.timeout = 100*time.Millisecond, time.Second
+	if _, err := r3.Addrs([]string{"empty.example"}); err == nil {
+		t.Fatal("an empty answer is no answer")
+	}
+}
+
+// A degraded answer (one family lost, with no error) must not shrink the served
+// set: an A-only answer after A+AAAA keeps the IPv6 address past the retention
+// window, and it is retired only once an answer that holds IPv6 again omits it.
+func TestResolverPartialAnswerDoesNotShrinkTheServedSet(t *testing.T) {
+	t.Parallel()
+	var step atomic.Int32
+	r := newNameResolver(func(context.Context, string) ([]string, error) {
+		switch step.Load() {
+		case 0:
+			return []string{"192.0.2.1", "2001:db8::1"}, nil
+		case 1:
+			return []string{"192.0.2.1"}, nil // the AAAA answer was lost
+		}
+		return []string{"192.0.2.1", "2001:db8::2"}, nil // a complete answer without the old IPv6
+	})
+	r.wait, r.timeout = 100*time.Millisecond, time.Second
+	clock := time.Unix(1_800_000_000, 0)
+	var mu sync.Mutex
+	r.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
+	advance := func(d time.Duration) { mu.Lock(); clock = clock.Add(d); mu.Unlock() }
+	ask := func() []string {
+		t.Helper()
+		got, err := r.Addrs([]string{"peer.example"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got["peer.example"]
+	}
+	if got := ask(); !slices.Equal(got, []string{"192.0.2.1", "2001:db8::1"}) {
+		t.Fatalf("complete answer = %v", got)
+	}
+	step.Store(1)
+	advance(r.retention + time.Minute) // far past the window, with an A-only answer
+	if got := ask(); !slices.Equal(got, []string{"192.0.2.1", "2001:db8::1"}) {
+		t.Fatalf("an A-only answer must not retire the IPv6 address: %v", got)
+	}
+	step.Store(2)
+	advance(time.Second)
+	// A complete answer that holds IPv6 again, without the old IPv6 address, which is
+	// older than the window: it is retired now.
+	if got := ask(); !slices.Equal(got, []string{"192.0.2.1", "2001:db8::2"}) {
+		t.Fatalf("a complete answer holding IPv6 retires the aged old address: %v", got)
 	}
 }
 
