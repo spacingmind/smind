@@ -1,4 +1,4 @@
-# Browser for agents: pre-allow the browser's tools on the Claude path, and the proxy-test flake
+# Browser for agents: pre-allow the browser's tools on the Claude path
 
 Human decisions 2026-11-25 (ADR-0061 amendment 11). Two independent items in one PR; HIGH-RISK (it changes the permission configuration the Claude CLI is launched with).
 
@@ -28,32 +28,14 @@ The rule widened to `mcp__*`; the rule added with no row; the rule added for an 
 
 One Haiku run on the real `claude` binary in a dogfood daemon (own `SMIND_HOME` and port, rules as in the live-run plan, at most USD 0.05): the CLI's own prompt is gone, the daemon's cards still appear. Otherwise reported as not verified.
 
-## 2. The flake: `TestSessionStartFailureStopsTheProxy`
-
-CI run 45568952075 failed it: after the session closed, the test dialled the proxy's OLD port, and another test in the package (parallel) had taken that ephemeral port, so the dial succeeded. Dialling a port after closing its listener is not evidence about the listener. Fix: assert on the listener/proxy state, never on a reused port.
-
-- AC8 The three proxy tests that dial an address after closing (`TestProxyCloseEndsListenerAndTunnels`, the session-close test, `TestSessionStartFailureStopsTheProxy`) no longer dial a closed port: a helper asserts the listener is closed through the listener itself (`Accept` returns `net.ErrClosed` at once, never blocks); the start-failure test holds a connection to the proxy from inside the launcher and requires that connection to be closed by the proxy after the failed start.
-- AC9 The whole of `internal/browser`, `internal/browser/runsock`, `internal/listeners` and the browser tests of `internal/wsapi` are audited for the same pattern (a dial or request to a port after its listener was closed). Unix-socket dials after close are path-based (a path is unique per run and not reused by another listener) and are not this class; they are listed in the audit below, not changed.
-- AC10 Proof: the changed tests pass `-race -count=50` while the rest of the package runs alongside (`t.Parallel`), and a mutation (the listener not closed by `Close`) fails each of them.
-
-### Audit
-
-Searched `internal/browser`, `internal/listeners`, `internal/wsapi` (test files) for `net.Dial`, `net.DialTimeout`, `DialContext`; `internal/browser/runsock` read separately.
-
-- TCP dial after close (the flake class), fixed: `TestProxyCloseEndsListenerAndTunnels`, the session-close test (`TestSessionStartsAProxyAndDeniesItToThePage`) and `TestSessionStartFailureStopsTheProxy` in `proxy_test.go`. They now ask the closed proxy's listener (`assertListenerClosed`: `Accept` must return `net.ErrClosed`), and the start-failure test holds a connection opened inside the launcher and requires the proxy to close it (read deadline under the proxy's own 2 s header timeout, so an idle cut cannot pass for a Close).
-- Dials to a LIVE proxy or server (`proxy_test.go` rig/hit servers, `proxy_auth_test.go`, `smoke_test.go`): not the class; nothing released first.
-- `runsock` unix-socket dials after close: path-based, no ephemeral port to be reused; not changed. `internal/listeners`, `internal/wsapi`: no dial-after-close sites.
-
 ## Progress
 
 - [x] Spec and ADR amendment committed (this file)
 - [x] Pre-allow and its tests
-- [x] Flake fix and audit, 50 runs under -race
 - [x] public-docs, mutations; reviews and live check below
 
 ## Validation
 
-- Flake: the three tests pass `-race -count=50` while the rest of the package runs in a second process; with `Close` not stopping the server all three fail (committed file, restored, tree clean).
 - Pre-allow mutations (all restored, tree clean): rule widened to `mcp__*`, unbound check removed, name-only row match, wiring removed: each fails a named `TestClaudePreallow*`. Passing `true` instead of `bindBrowser != nil` is equivalent (rows only hold the browser row when bound), kept as defence in depth.
 - Live Haiku check: not verified (see the PR).
 - Reviews (two fresh sub-agents, standards and attack). Accepted and fixed: a server registered as `smind-browser__x` (tool `mcp__smind-browser__x__t`) would sit under the wildcard, so any name under that prefix is now never configured (`TestClaudePreallow_NeverAnotherServer`, mutation fails it); the vacuous non-claude test was renamed to what it checks. The CLI-precedence question is answered below with evidence and closed with strict mode.
