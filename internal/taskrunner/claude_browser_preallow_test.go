@@ -35,6 +35,9 @@ func TestClaudePreallow_OnlyTheBrowserWildcardForARunWithTheRow(t *testing.T) {
 	if !ok || got != "mcp__smind-browser__*" {
 		t.Fatalf("--allowedTools = %q (present %v), want exactly mcp__smind-browser__*; argv %q", got, ok, args)
 	}
+	if !argPresent(args, "--strict-mcp-config") {
+		t.Fatalf("a pre-allowed run must load only the daemon's MCP config (nothing from a project .mcp.json or user scope may answer to the reserved name): %q", args)
+	}
 	if strings.Count(strings.Join(args, "\x00"), "--allowedTools") != 1 {
 		t.Fatalf("one --allowedTools flag only: %q", args)
 	}
@@ -247,4 +250,25 @@ func runClaudeProviderCtx(t *testing.T, r *Runner, task store.Task, provider str
 	}
 	content, _ := os.ReadFile(filepath.Join(*task.WorktreePath, "mcp-config-content"))
 	return strings.Split(string(data), "\n"), string(content)
+}
+
+func argPresent(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// No pre-allow, no change to how the run loads MCP servers: a browser-only run without the row keeps
+// the user's own servers (strict mode is never added on its own).
+func TestClaudePreallow_StrictOnlyWithThePreallow(t *testing.T) {
+	t.Parallel()
+	r, _, task := preallowEnv(t)
+	r.claudeReportsPID = false // the SDK cannot say the pid: no row, no pre-allow
+	args, _ := runClaudeCtx(t, r, task, policyCtx((&pendingSpy{}).policy()))
+	if _, ok := allowedOf(args); ok || argPresent(args, "--strict-mcp-config") {
+		t.Fatalf("no row: no pre-allow and no strict mode: %q", args)
+	}
 }
