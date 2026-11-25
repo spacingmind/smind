@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -477,7 +478,7 @@ func TestProxyCloseEndsListenerAndTunnels(t *testing.T) {
 	sink := holdServer(t)
 	rig := newProxyRig(t, nil, proxyResolver, nil)
 	_, c, br := rig.connect(t, sink.Addr().String())
-	addr := rig.px.Addr()
+	ln := rig.px.ln.Listener
 	rig.px.Close()
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	if _, err := br.ReadByte(); err == nil {
@@ -485,8 +486,7 @@ func TestProxyCloseEndsListenerAndTunnels(t *testing.T) {
 	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		t.Fatal("Close left the tunnel open")
 	}
-	if conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
-		_ = conn.Close()
+	if !listenerStopped(ln) {
 		t.Fatal("Close must stop the listener")
 	}
 }
@@ -544,27 +544,51 @@ func TestSessionStartsAProxyAndDeniesItToThePage(t *testing.T) {
 	if d := s.cfg.Policy.CheckURL(fmt.Sprintf("http://localhost:%d/", port)); d.Allowed {
 		t.Fatal("the proxy's own port must be denied to the page")
 	}
-	addr := s.proxy.Addr()
+	ln := s.proxy.ln.Listener
 	s.Close()
-	if conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
-		_ = conn.Close()
+	if !listenerStopped(ln) {
 		t.Fatal("closing the session must stop its proxy")
 	}
 }
 
 func TestSessionStartFailureStopsTheProxy(t *testing.T) {
-	var addr string
+	// Capture the proxy Start creates and check its listener directly: dialing
+	// the freed address is not a test, because another test's listener can take
+	// the ephemeral port.
+	var px *Proxy
+	orig := startProxy
+	startProxy = func(c ProxyConfig) (*Proxy, error) {
+		p, err := orig(c)
+		px = p
+		return p, err
+	}
+	t.Cleanup(func() { startProxy = orig })
 	fl := launcherFunc(func(ctx context.Context, o LaunchOpts) (Instance, error) {
-		addr = o.ProxyAddr
 		return nil, fmt.Errorf("no browser")
 	})
 	if _, err := Start(context.Background(), Config{Workspace: "w", Launcher: fl}); err == nil {
 		t.Fatal("want error")
 	}
-	if conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
-		_ = conn.Close()
+	if px == nil {
+		t.Fatal("Start must have started a proxy before launching")
+	}
+	if !listenerStopped(px.ln.Listener) {
 		t.Fatal("a failed start must not leave its proxy listening")
 	}
+}
+
+// listenerStopped reports whether ln was closed: Accept on a closed listener
+// fails at once with net.ErrClosed, an open one times out.
+func listenerStopped(ln net.Listener) bool {
+	if d, ok := ln.(interface{ SetDeadline(time.Time) error }); ok {
+		_ = d.SetDeadline(time.Now().Add(200 * time.Millisecond))
+	}
+	c, err := ln.Accept()
+	if err == nil {
+		_ = c.Close()
+		return false
+	}
+	return errors.Is(err, net.ErrClosed)
 }
 
 type launcherFunc func(ctx context.Context, o LaunchOpts) (Instance, error)

@@ -24,13 +24,13 @@ its data. These commands are for people only; an agent running a task cannot use
 them. A local program that talks to the daemon without saying who it is counts as
 you, so keep the daemon's token private.
 
-A system Chrome, Chromium or Edge must be installed (smind never downloads one).
+A system Chrome, Chromium or Edge must be installed (sMind never downloads one).
 The browser runs headless with a fresh profile that is removed when the session
 ends.
 
 ## Where it can go
 
-- Your own machine (`localhost`) on any port, except the addresses smind itself
+- Your own machine (`localhost`) on any port, except the addresses sMind itself
   listens on: the daemon, its relay and web listeners, a login callback while a
   login is open, and the address of any daemon you linked.
   A linked daemon you addressed by a DNS name is refused by that name and by
@@ -51,8 +51,8 @@ inside a labelled envelope: an instruction written on a page is not followed.
 
 ## The permission cards
 
-smind asks you, in the app and on your phone like any other permission request,
-before the agent uses the browser. The card says it is smind's own check, not
+sMind asks you, in the app and on your phone like any other permission request,
+before the agent uses the browser. The card says it is sMind's own check, not
 the agent tool's.
 
 - **Reading** (tabs, page text, screenshot, console, wait): the first read raises
@@ -75,7 +75,7 @@ the agent tool's.
   agent cannot nag you.
 - Permission modes of the agent's own tool never answer these cards, including
   auto-accept. A rule in your permission policy for `mcp:smind-browser.<tool>`
-  can allow or refuse a tool; with no rule smind asks.
+  can allow or refuse a tool; with no rule sMind asks.
 
 ## Which agents can use it
 
@@ -96,7 +96,7 @@ the agent tool's.
 | a provider that extends another (an instance, with no recipe) | offered, not guaranteed, unless the provider it extends has no browser; this also holds when it extends a provider you added yourself | unknown |
 | plugin providers | never | none |
 
-A screenshot reaches the agent as an image only when smind knows the agent
+A screenshot reaches the agent as an image only when sMind knows the agent
 reads images; when it is unknown or no, the agent gets a text note and works
 from the page text.
 
@@ -112,15 +112,15 @@ browser: the call fails with "the browser is not available for this agent".
 - **The cards protect against the model, not against a shell-capable agent that
   attacks the daemon.** Any process in the run's own process tree (the agent's
   shell, anything it starts) can talk to the daemon without saying who it is,
-  and smind treats such a connection as you, exactly as for every other
+  and sMind treats such a connection as you, exactly as for every other
   permission card: it could answer a card through the daemon's websocket. Keep
   the daemon token private, and do not let an agent you do not trust run shell
   commands.
 - **The list of places the browser must never reach is best effort against the
-  agent's own shell, for listeners of other smind processes.** The daemon and a
+  agent's own shell, for listeners of other sMind processes.** The daemon and a
   login callback in the daemon's own process are remembered in memory and cannot
   be unreserved by touching files. A relay or web listener started as another
-  smind process leaves a small record under your smind home (`listeners/`) that
+  sMind process leaves a small record under your sMind home (`listeners/`) that
   its process rewrites every few seconds and also repairs if something is put in
   its place; a shell running as you can still delete or change such a record, so
   that port can be unprotected for a few seconds until it heals. An unreadable
