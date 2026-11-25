@@ -169,13 +169,14 @@ function BrowserSection() {
                 </p>
               )}
             </SettingsRow>
-            <SettingsRow label="What this does not protect against">
-              <div className="flex flex-col gap-2 text-ui-sm text-foreground-muted" data-testid="browser-residual">
+            <div className="flex flex-col gap-2 px-4 py-3" data-testid="browser-residual">
+              <p className="text-ui-base text-foreground">What this does not protect against</p>
+              <div className="flex flex-col gap-2 text-ui-sm text-foreground-muted">
                 <p data-testid="browser-residual-local">{BROWSER_RESIDUAL_LOCAL}</p>
                 <p data-testid="browser-residual-shell">{BROWSER_RESIDUAL_SHELL}</p>
                 <p data-testid="browser-residual-windows">{BROWSER_RESIDUAL_WINDOWS}</p>
               </div>
-            </SettingsRow>
+            </div>
           </SettingsGroup>
 
           <SettingsGroup

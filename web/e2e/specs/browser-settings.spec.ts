@@ -98,7 +98,14 @@ async function frame(page: Page, testInfo: TestInfo, name: string) {
   const dir = process.env.BROWSER_FRAMES_DIR
   if (!dir) return
   fs.mkdirSync(dir, { recursive: true })
-  await page.screenshot({ path: path.join(dir, `${name}-${testInfo.project.name}.png`), fullPage: true })
+  // The app scrolls inside its own panes, so a plain full-page shot cuts the section off: grow the viewport until the
+  // whole section is on screen, shoot it, and put the viewport back.
+  const vp = page.viewportSize() as { width: number; height: number }
+  await page.setViewportSize({ width: vp.width, height: 3200 })
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(0)))))
+  const bottom = await page.evaluate(() => Math.ceil((document.querySelector('[data-testid="settings-section-browser"]') as HTMLElement).getBoundingClientRect().bottom))
+  await page.screenshot({ path: path.join(dir, `${name}-${testInfo.project.name}.png`), clip: { x: 0, y: 0, width: vp.width, height: Math.min(3200, bottom + 48) } })
+  await page.setViewportSize(vp)
 }
 
 async function openSection(app: App) {
