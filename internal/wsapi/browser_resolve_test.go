@@ -176,13 +176,21 @@ func TestResolverDoesNotWaitForAPendingLookupWhenAnAnswerExists(t *testing.T) {
 		}
 		return []string{"192.0.2.3"}, nil
 	})
-	r.wait, r.timeout = 2*time.Second, 5*time.Second
+	r.wait, r.timeout = 50*time.Millisecond, 5*time.Second
 	if _, err := r.Addrs([]string{"peer.example"}); err != nil {
 		t.Fatal(err)
 	}
 	slow.Store(true)
 	if _, err := r.Addrs([]string{"peer.example"}); err != nil { // starts the slow lookup, waits for it (<= wait)
 		t.Fatal(err)
+	}
+	r.wait = time.Second // a long wait: joining the pending lookup must not use it
+	start := time.Now()
+	if _, err := r.Addrs([]string{"peer.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Fatalf("a call that joined a pending lookup waited %v although an answer exists", d)
 	}
 }
 
