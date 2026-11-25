@@ -90,7 +90,7 @@ Not exercised, stated: Codex (no row by the reach table; a live turn costs money
 6. **Cost reporting:** a stopped run records no usage and no cost (`cost n/a`); a GLM run's cost shows "partial". The budget chip handled both without error.
 7. **Primary action styling:** "Allow once" is drawn as the recommended (green) action on a security card.
 8. **Timeline for GLM:** tool rows show the generic "other" kind for the browser tools (Claude's show the globe icon).
-9. **Message prefix:** a refusal reads "browser_open: browser: address 100.117.11.67 is not allowed ...": the repeated "browser" label (the same one the Settings UI now strips) is also what the agent sees.
+9. **Message prefix:** a refusal reads "browser_open: browser: address <tunnel address> is not allowed ...": the repeated "browser" label (the same one the Settings UI now strips) is also what the agent sees.
 10. **Not verified here:** a non-loopback allowed host loading; Linux and Windows runs.
 
 ## Spend log
