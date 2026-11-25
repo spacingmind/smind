@@ -825,3 +825,33 @@ func TestBrowserSettingsListsProviders(t *testing.T) {
 		t.Errorf("no provider source must serialise as [], got %s", raw)
 	}
 }
+
+// The view says whether the workspace has a running browser session (the Settings
+// indicator), and says false when no host source is wired.
+func TestBrowserSettingsViewReportsSessionLive(t *testing.T) {
+	t.Parallel()
+	h, _, _ := settingsHost(t)
+	get := func() browserSettingsView {
+		res, err := h.settingsGet(context.Background(), settingsHumanRC, json.RawMessage(`{"workspaceId":1}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.(browserSettingsView)
+	}
+	if get().SessionLive {
+		t.Fatal("no session source: not live")
+	}
+	live := map[int64]bool{1: true}
+	h.sessionLive = func(ws int64) bool { return live[ws] }
+	if !get().SessionLive {
+		t.Fatal("workspace 1 has a session")
+	}
+	live[1] = false
+	if get().SessionLive {
+		t.Fatal("the session ended")
+	}
+	raw, _ := json.Marshal(get())
+	if !strings.Contains(string(raw), `"sessionLive":false`) {
+		t.Fatalf("the field is always present: %s", raw)
+	}
+}

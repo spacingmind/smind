@@ -90,6 +90,7 @@ describe("SettingsScreen shell", () => {
       "settings-nav-usage",
       "settings-nav-permission-policy",
       "settings-nav-saved-grants",
+      "settings-nav-browser",
     ]);
   });
 

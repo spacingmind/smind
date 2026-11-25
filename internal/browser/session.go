@@ -1212,6 +1212,14 @@ func (m *Manager) CloseAll() {
 	}
 }
 
+// Live reports whether the workspace has a running session.
+func (m *Manager) Live(workspace string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.sessions[workspace]
+	return s != nil && !s.Closed()
+}
+
 // Active reports how many sessions are running.
 func (m *Manager) Active() int {
 	m.mu.Lock()
