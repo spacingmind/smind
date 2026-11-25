@@ -82,13 +82,18 @@ Persistent profiles, a richer permission-card renderer (`Kind: "browser"` cards 
 
 ## Progress
 
-- [ ] Spec committed (this file)
-- [ ] Daemon `sessionLive`
-- [ ] Hook, editor, reach list, section, icons, registry
-- [ ] Unit tests, e2e specs, full e2e matrix
-- [ ] Frames, README, contact sheet, every pair opened
-- [ ] Reviews, mutations
+- [x] Spec committed (this file)
+- [x] Daemon `sessionLive` (`Manager.Live`, settings view field)
+- [x] Hook, editor, reach list, section, registry (no new icon names: `Icons.web`, `Icons.close`, `Icons.delete` already exist)
+- [x] Unit tests, e2e specs, full e2e matrix
+- [x] Frames, README, contact sheet, every pair opened (`~/.smind/dogfood/browser-settings-ui/`, not committed)
+- [x] Reviews, mutations
 
 ## Validation
 
-(filled in when the work is done)
+- AC1 to AC10: `browser-section.test.tsx` (19 tests), `browser-allowlist-editor.test.tsx`, `browser-reach-list.test.tsx`, `use-browser-settings.test.tsx`, the nav entry in `settings-screen.test.tsx`; e2e `BS-01` to `BS-04` on the real daemon and `BS-F1` to `BS-F3` (stubbed states) at the four default and full-matrix projects. AC11: no mobile files or shared strings changed, so no mobile suite.
+- Go: `TestManagerLive`, `TestBrowserSettingsViewReportsSessionLive`.
+- Review round (two fresh sub-agents, standards+spec and attack/security), all accepted and fixed: the allowlist editor is keyed by workspace (a draft typed for one workspace can never reach another; load-bearing only when the other view is cached, so the test visits it first); an in-flight poll is cancelled before a change is applied (it could put the older view back); the live line is a polite status region; the pending state is on the control that started it and only the switch's own change marks the switch busy; a failed refresh says the view may be out of date; "On" says "not in effect" when the browser is not installed or not offered, as for the kill switch; honest copy (the daemon refuses an agent's own request; each use asks unless allowed for the run; changing the list ends a running session; "End session (interrupts the agent)"); stale errors reset when the dialog or End session is used; the poll test now really polls (fake timers); the e2e overflow check covers the section and its scrolling panes; the demo refuses the three RPCs (coverage guard).
+- Mutations on committed files, each failing a named test: switch sending the opposite value, add sending allowRemove, a generic error text, the cap not enforced, the kill switch leaving the switch enabled, the live indicator shown while not live, a residual paragraph removed, a hard-coded provider label, the poll removed, the in-flight poll not cancelled, the editor not keyed by workspace, the live line not a status region, "not in effect" ignoring a missing browser, the stale banner removed.
+- Frames: light and dark at 1280 and 390 for off, on-empty, on-with-hosts, invalid host, live, kill switch, no browser installed, plus two real-daemon frames; each asserts luminance and no sideways scroll in the section or its scrolling panes; every pair opened by hand.
+- Not verified: a run really using the browser (the live state is a stubbed view; the Go field is unit-tested); the desktop shell and the relay-refusal path in a browser; Windows.
