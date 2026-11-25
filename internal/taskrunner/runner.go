@@ -1010,7 +1010,8 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		// (agent-writable) or user-scope server must not be able to ride it. Strict mode loads only the
 		// daemon's --mcp-config, so nothing else can answer to the reserved name (evidence in
 		// browser-claude-preallow.md). Cost: this run does not see servers from the CLI's own files.
-		opts = append(opts, claudecode.WithStrictMCPConfig())
+		onlyDaemonMcp := claudecode.WithStrictMCPConfig()
+		opts = append(opts, onlyDaemonMcp)
 	}
 	if contract := RunContractFrom(ctx); useStrictMcp(contract) {
 		// A managed run sees only the daemon's registered servers (+ smind
