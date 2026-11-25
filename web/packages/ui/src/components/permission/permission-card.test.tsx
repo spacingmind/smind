@@ -1,7 +1,12 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { optionClassName, optionVariant, recommendedOptionId } from "@/components/permission/permission-option-button";
+import {
+  optionClassName,
+  optionVariant,
+  recommendedOptionId,
+  WRAPPING_OPTION_CLASS,
+} from "@/components/permission/permission-option-button";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { PLAN_REVIEW_APPROVE, PLAN_REVIEW_REFUSE } from "@/components/permission/plan-review-card";
 import type { PendingPermission } from "@/hooks/use-run-timeline";
@@ -429,5 +434,60 @@ describe("PermissionCard: plan-review variant", () => {
     render(<PermissionCard runId="run-1" pending={withPlan} onRespond={vi.fn()} onChat={vi.fn()} />);
     expect(screen.getByTestId("plan-review-approve").className).toContain("h-11");
     expect(screen.getByTestId("plan-review-approve").className).toContain("md:h-8");
+  });
+});
+
+const LONG_GRANT = "Allow opening any page the browser policy allows (localhost and your added hosts) and closing tabs, for this run";
+const CLOSE_GRANT = "Allow closing tabs, and opening any page the browser policy allows (localhost and your added hosts), for this run";
+
+function browserCard(label = LONG_GRANT): PendingPermission {
+  return pending({
+    summary: 'Open http://127.0.0.1:4751/ in the browser? (localhost) "task" in "ws" has used the browser 0 times. (daemon check)',
+    detail: { kind: "browser" },
+    options: [
+      { id: "allow_once", label: "Allow once", kind: "allow_once" },
+      { id: "allow_run", label: label, kind: "allow_once" },
+      { id: "deny", label: "Deny", kind: "reject_once" },
+    ],
+  });
+}
+
+describe("browser security cards", () => {
+  it("no option of a browser card is the recommended (approval) action; Deny stays quiet", () => {
+    render(<PermissionCard runId="run-1" pending={browserCard()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    const card = screen.getByTestId("pending-permission");
+    expect(within(card).getByRole("button", { name: "Allow once" })).toHaveAttribute("data-variant", "outline");
+    expect(within(card).getByRole("button", { name: LONG_GRANT })).toHaveAttribute("data-variant", "outline");
+    expect(within(card).getByRole("button", { name: "Deny" })).toHaveAttribute("data-variant", "outline");
+    expect(card.querySelector('[data-variant="approval"]')).toBeNull();
+  });
+
+  it("recommendedOptionId is undefined for a browser card and unchanged for every other kind", () => {
+    const options = [
+      { id: "a", label: "Allow once", kind: "allow_once" },
+      { id: "d", label: "Deny", kind: "reject_once" },
+    ];
+    expect(recommendedOptionId(options, "browser")).toBeUndefined();
+    expect(recommendedOptionId(options, "execute")).toBe("a");
+    expect(recommendedOptionId(options, undefined)).toBe("a");
+  });
+
+  it("any other card keeps the recommended action", () => {
+    render(<PermissionCard runId="run-1" pending={pending({ detail: { kind: "execute", command: "ls" } as PendingPermission["detail"] })} onRespond={vi.fn()} onChat={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Allow" })).toHaveAttribute("data-variant", "approval");
+  });
+
+  it("a long option label wraps: no fixed height, no nowrap, never wider than its row (open and close grants)", () => {
+    for (const label of [LONG_GRANT, CLOSE_GRANT]) {
+      const { unmount } = render(<PermissionCard runId="run-1" pending={browserCard(label)} onRespond={vi.fn()} onChat={vi.fn()} />);
+      const button = screen.getByRole("button", { name: label });
+      for (const cls of WRAPPING_OPTION_CLASS.split(" ")) expect(button.className, cls).toContain(cls);
+      expect(button.className).toContain("whitespace-normal");
+      expect(button.className).toContain("max-w-full");
+      expect(button.className).toContain("h-auto");
+      expect(button.className).not.toMatch(/(^|\s)h-(8|11)(\s|$)/); // the old fixed heights are gone
+      expect(button.className).not.toMatch(/(^|\s)whitespace-nowrap(\s|$)/);
+      unmount();
+    }
   });
 });
