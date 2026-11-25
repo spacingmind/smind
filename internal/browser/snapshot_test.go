@@ -500,3 +500,24 @@ func TestSnapshotBudgetIsNotSpentOnRenderOnlyNodes(t *testing.T) {
 		t.Fatalf("counts: %+v", snap)
 	}
 }
+
+// A long paragraph is readable to its end: the InlineTextBox fragments that used to carry the tail are gone,
+// so the StaticText name itself has a larger cap (other names stay at 200).
+func TestSnapshotLongStaticTextIsReadableToItsEnd(t *testing.T) {
+	long := strings.Repeat("word ", 130) + "THE-END" // about 660 characters
+	st := axm("st", "r", "StaticText", long, 3, nil)
+	btn := axm("b", "r", "button", strings.Repeat("x", 300), 4, nil)
+	root := axm("r", "", "WebArea", "Home", 1, nil, "st", "b")
+	d := &domFake{tree: func() []any { return []any{root, st, btn} }}
+	s, _ := startHookedSession(t, d.hook)
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snap.Text, "THE-END") {
+		t.Fatalf("the tail of the paragraph is missing:\n%s", snap.Text)
+	}
+	if strings.Contains(snap.Text, strings.Repeat("x", 250)) {
+		t.Fatal("a button name is still cut at 200 characters")
+	}
+}

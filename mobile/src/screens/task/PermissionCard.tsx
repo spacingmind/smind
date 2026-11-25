@@ -159,7 +159,7 @@ function makeStyles(theme: AppTheme) {
     options: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: theme.spacing[2] },
     optionWide: { width: '100%' },
     button: { height: 44 },
-    buttonWide: { minHeight: 44 },
+    buttonWide: { minHeight: 44, alignSelf: 'stretch', width: '100%' },
     reasonField: { gap: theme.spacing[1.5] },
     reasonLabel: { ...theme.type.label, color: theme.foregroundSubtle },
     reasonInput: {

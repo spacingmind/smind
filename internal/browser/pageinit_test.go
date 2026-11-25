@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -84,14 +85,72 @@ func TestRefusalOfATargetAPageRequestedIsReportedOnce(t *testing.T) {
 // The CDP event that names the request can trail the proxy's refusal: a refusal waits a moment.
 func TestRefusalWaitsForThePageRequestThatNamesIt(t *testing.T) {
 	s, l := startTestSession(t, nil)
-	s.grace = 400 * time.Millisecond
+	s.grace = 300 * time.Millisecond
 	f, _ := l.last()
 	attachReady(t, f, "S1", "T1", 1)
 	s.refused("late.example:443", "not allowed") // the refusal first
+	time.Sleep(40 * time.Millisecond)            // sleep-ok: inside the grace
+	if n := len(s.peekNotices()); n != 0 {
+		t.Fatalf("nothing is reported before the grace is over: %d", n)
+	}
 	f.event("S1", "Network.requestWillBeSent", map[string]any{"request": map[string]any{"url": "https://late.example/x"}})
 	waitUntil(t, "the notice after the event", func() bool { return len(s.peekNotices()) == 1 })
 	if s.Unattributed() != 0 {
 		t.Fatal("a refusal named within the grace is a page's")
+	}
+}
+
+// The proxy's own notice about a wrong credential is not a request target: nothing to attribute,
+// and the agent still hears it (once).
+func TestProxyCredentialNoticeIsNeverFiltered(t *testing.T) {
+	s, _ := startTestSession(t, nil)
+	s.refused("proxy", "requests with a wrong proxy credential were refused and cut")
+	s.refused("proxy", "requests with a wrong proxy credential were refused and cut")
+	n := s.peekNotices()
+	if len(n) != 1 || n[0].Kind != "blocked" || s.Unattributed() != 0 {
+		t.Fatalf("notices %+v, unattributed %d", n, s.Unattributed())
+	}
+}
+
+// A flood of the same refused target arms one timer, not one per refusal, and is counted once.
+func TestRepeatedUnattributedRefusalsArmOneTimer(t *testing.T) {
+	s, _ := startTestSession(t, nil)
+	s.grace = 60 * time.Millisecond
+	for i := 0; i < 50; i++ {
+		s.refused("spam.example:443", "not allowed")
+	}
+	waitUntil(t, "counted once", func() bool { return s.Unattributed() == 1 })
+	time.Sleep(120 * time.Millisecond) // sleep-ok: nothing more may arrive
+	if s.Unattributed() != 1 {
+		t.Fatalf("one target, one count: %d", s.Unattributed())
+	}
+	s.mu.Lock()
+	left := len(s.armed)
+	s.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("a finished timer leaves nothing armed: %d", left)
+	}
+}
+
+// A page cannot push its own target out by repeating it, and a flood of distinct hosts ages the OLDEST
+// targets out one at a time instead of wiping the set.
+func TestPageTargetsEvictOldestOneAtATime(t *testing.T) {
+	t.Parallel()
+	var p pageTargets
+	p.add("keep.example:443")
+	for i := 0; i < pageTargetsMax-1; i++ {
+		p.add(fmt.Sprintf("h%d.example:443", i))
+		p.add("keep.example:443") // repeating a known target changes nothing
+	}
+	if !p.has("keep.example:443") || !p.has("h0.example:443") {
+		t.Fatal("a full set still holds everything added so far")
+	}
+	p.add("one-more.example:443") // the set is full: only the oldest goes
+	if p.has("keep.example:443") {
+		t.Fatal("the oldest target is evicted first")
+	}
+	if !p.has("h0.example:443") || !p.has("one-more.example:443") {
+		t.Fatal("one eviction, not a wipe")
 	}
 }
 

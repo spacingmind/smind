@@ -144,10 +144,11 @@ type Session struct {
 	qbytes       atomic.Int64 // bytes waiting in the two queues
 	maxQueued    int64        // the budget for qbytes (a field so a test can lower it)
 
-	pages        pageTargets   // host:port of every request a page made (pageinit.go)
-	refusedSeen  seenSet       // targets already reported to the agent
-	unattributed atomic.Int64  // proxy refusals no page asked for: counted, never reported
-	grace        time.Duration // how long a refusal waits for the page request that names it (a field so a test can shorten it)
+	pages        pageTargets         // host:port of every request a page made (pageinit.go)
+	refusedSeen  seenSet             // targets already reported to the agent
+	armed        map[string]struct{} // refusals waiting out the grace (under mu)
+	unattributed atomic.Int64        // proxy refusals no page asked for: counted, never reported
+	grace        time.Duration       // how long a refusal waits for the page request that names it (a field so a test can shorten it)
 
 	closeOnce sync.Once
 }
@@ -609,7 +610,8 @@ func (s *Session) onAttached(ev Event) {
 	// The Network domain only NAMES what a page requests (pageinit.go: a WebSocket reaches the
 	// proxy and nothing else); a target that cannot enable it is still started, its refusals then
 	// count as unattributed. Before the target runs: no request of it can precede the domain.
-	_ = s.cl.Call(ctx, p.SessionID, "Network.enable", nil, nil)
+	// maxPostDataSize 0: request bodies are never carried in the events (only the URL is read).
+	_ = s.cl.Call(ctx, p.SessionID, "Network.enable", map[string]any{"maxPostDataSize": 0}, nil)
 	resume()
 	if ts != nil {
 		close(ts.ready)
@@ -1266,6 +1268,14 @@ func (s *Session) notePageRequest(ev Event) {
 // after a short grace.
 func (s *Session) refused(target, reason string) {
 	key, ok := hostPortOf(target)
+	if !ok && !strings.Contains(target, "://") {
+		// Not a request target at all (the proxy's own "wrong credential" notice): nothing a
+		// page could have named, so nothing to attribute. Reported like before.
+		if s.refusedSeen.first(target) {
+			s.note("blocked", fmt.Sprintf("%s: %s", target, reason))
+		}
+		return
+	}
 	report := func() {
 		if !s.refusedSeen.first(target) {
 			return
@@ -1276,7 +1286,29 @@ func (s *Session) refused(target, reason string) {
 		report()
 		return
 	}
+	// One timer per target at a time: a flood of the browser's own refusals arms 200 at most.
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	if s.armed == nil {
+		s.armed = map[string]struct{}{}
+	}
+	if _, dup := s.armed[target]; dup {
+		s.mu.Unlock()
+		return
+	}
+	s.armed[target] = struct{}{}
+	s.mu.Unlock()
 	time.AfterFunc(s.grace, func() {
+		s.mu.Lock()
+		delete(s.armed, target)
+		closed := s.closed
+		s.mu.Unlock()
+		if closed {
+			return
+		}
 		if ok && s.pages.has(key) {
 			report()
 			return

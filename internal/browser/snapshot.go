@@ -220,6 +220,19 @@ func (s *Session) passwordBackendNodes(ctx context.Context, t *tabState) (map[in
 // carried InlineTextBox lines that duplicated it and ate the 40,000 characters).
 var renderOnlyRoles = map[string]bool{"InlineTextBox": true, "LineBreak": true}
 
+// snapshotNameCap is how many characters of a node's name are printed. Page text lives in
+// StaticText nodes: with the InlineTextBox fragments gone there is no other place to read the
+// tail of a long paragraph, so those get a larger cap (the 40,000-character budget still bounds
+// the whole snapshot); every other name stays at 200.
+func snapshotNameCap(role string) int {
+	if role == "StaticText" {
+		return maxStaticTextName
+	}
+	return 200
+}
+
+const maxStaticTextName = 2000
+
 // snapRender walks the AX tree depth-first and builds the text, counting
 // every rendered-candidate node even after a limit stopped the rendering.
 type snapRender struct {
@@ -296,7 +309,7 @@ func (r *snapRender) line(n *axNode, role, ref string, depth int) string {
 	b.WriteString(display)
 	if pw {
 		b.WriteString(" (password)")
-	} else if name := cleanText(n.Name.str(), 200); name != "" {
+	} else if name := cleanText(n.Name.str(), snapshotNameCap(role)); name != "" {
 		b.WriteString(" \"")
 		b.WriteString(quoteEscape(name))
 		b.WriteString("\"")
