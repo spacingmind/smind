@@ -460,6 +460,8 @@ export const RULES: Record<string, DemoRule> = {
 export const REFUSED_METHODS = [
   "account.add", "account.oauthComplete", "account.oauthStart", "account.remove",
   "automation.delete", "automation.fire", "automation.memory.clear",
+  // the agent browser (ADR-0061) is a local-only, human-only setting of a real daemon: the demo has none
+  "browser.data.clear", "browser.settings.get", "browser.settings.set",
   "file.readRange",
   "fleet.host.add", "fleet.host.approve", "fleet.host.disable_reverse", "fleet.host.enable_reverse", "fleet.host.grant", "fleet.host.invite",
   "fleet.host.labels", "fleet.host.reject", "fleet.host.rename", "fleet.host.revoke", "fleet.host.rm",
