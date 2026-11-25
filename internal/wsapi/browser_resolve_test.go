@@ -5,12 +5,13 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-func TestResolverAddsResolvedAddressesAndKeepsTheName(t *testing.T) {
+func TestResolverReturnsResolvedAddressesSortedWithoutZones(t *testing.T) {
 	t.Parallel()
 	r := newNameResolver(func(ctx context.Context, host string) ([]string, error) {
 		return []string{"192.0.2.7", "2001:db8::7%eth0"}, nil
@@ -27,7 +28,7 @@ func TestResolverAddsResolvedAddressesAndKeepsTheName(t *testing.T) {
 	}
 }
 
-func TestResolverIPLiteralIsNotResolved(t *testing.T) {
+func TestResolverEmptyInputStartsNoLookup(t *testing.T) {
 	t.Parallel()
 	// IP literals are filtered by the caller, so the helper has no literal
 	// special-casing: this pins the empty-input contract, which starts nothing.
@@ -92,7 +93,7 @@ func TestResolverFailureServesTheLastGoodAnswer(t *testing.T) {
 	}
 }
 
-func TestResolverReresolvesEveryRefreshAndKeepsThePreviousAnswerOnce(t *testing.T) {
+func TestResolverReresolvesEveryRefreshAndKeepsOldAddressesForTheRetentionWindow(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32
 	r := newNameResolver(func(ctx context.Context, host string) ([]string, error) {
@@ -102,23 +103,105 @@ func TestResolverReresolvesEveryRefreshAndKeepsThePreviousAnswerOnce(t *testing.
 		return []string{"192.0.2.2"}, nil
 	})
 	r.wait, r.timeout = 50*time.Millisecond, 200*time.Millisecond
+	clock := time.Unix(1_800_000_000, 0)
+	var mu sync.Mutex
+	r.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
+	advance := func(d time.Duration) { mu.Lock(); clock = clock.Add(d); mu.Unlock() }
 
-	want := [][]string{
-		{"192.0.2.1"},              // the first answer
-		{"192.0.2.1", "192.0.2.2"}, // the previous answer kept one refresh
-		{"192.0.2.2"},              // the older answer dropped after the second newer one
+	steps := []struct {
+		advance time.Duration
+		want    []string
+	}{
+		{0, []string{"192.0.2.1"}},                                        // the first answer
+		{time.Second, []string{"192.0.2.1", "192.0.2.2"}},                 // the old address is kept inside the window
+		{r.retention - 2*time.Second, []string{"192.0.2.1", "192.0.2.2"}}, // still inside it (59 s after it was last seen)
+		{2 * time.Second, []string{"192.0.2.2"}},                          // past the window: only the current answer
 	}
-	for i, want := range want {
+	for i, st := range steps {
+		advance(st.advance)
 		got, err := r.Addrs([]string{"peer.example"})
 		if err != nil {
 			t.Fatalf("Addrs call %d: %v", i+1, err)
 		}
-		if !slices.Equal(got["peer.example"], want) {
-			t.Fatalf("Addrs call %d = %q, want %q", i+1, got["peer.example"], want)
+		if !slices.Equal(got["peer.example"], st.want) {
+			t.Fatalf("Addrs call %d = %q, want %q", i+1, got["peer.example"], st.want)
 		}
 	}
-	if calls.Load() != 3 {
-		t.Fatalf("lookup ran %d times, want one per Addrs call (3)", calls.Load())
+	if calls.Load() != 4 {
+		t.Fatalf("lookup ran %d times, want one per Addrs call (4)", calls.Load())
+	}
+}
+
+// A sinkholed name answers 0.0.0.0: that is no address (a deny entry for it would
+// reserve the port everywhere), so the name has no good answer.
+func TestResolverIgnoresUnspecifiedAddresses(t *testing.T) {
+	t.Parallel()
+	r := newNameResolver(func(context.Context, string) ([]string, error) { return []string{"0.0.0.0", "::"}, nil })
+	r.wait, r.timeout = 100*time.Millisecond, time.Second
+	if got, err := r.Addrs([]string{"sink.example"}); err == nil {
+		t.Fatalf("an answer of only unspecified addresses is no answer: %v", got)
+	}
+	r2 := newNameResolver(func(context.Context, string) ([]string, error) { return []string{"0.0.0.0", "192.0.2.4"}, nil })
+	r2.wait, r2.timeout = 100*time.Millisecond, time.Second
+	got, err := r2.Addrs([]string{"sink.example"})
+	if err != nil || !slices.Equal(got["sink.example"], []string{"192.0.2.4"}) {
+		t.Fatalf("got %v, %v; want only the real address", got, err)
+	}
+}
+
+// A lookup that panics is a failed lookup, not a crashed daemon.
+func TestResolverPanickingLookupIsAFailure(t *testing.T) {
+	t.Parallel()
+	r := newNameResolver(func(context.Context, string) ([]string, error) { panic("boom") })
+	r.wait, r.timeout = 100*time.Millisecond, time.Second
+	if _, err := r.Addrs([]string{"peer.example"}); err == nil {
+		t.Fatal("a panicking lookup with no earlier answer must fail closed")
+	}
+}
+
+// A name that already has a good answer does not make a call wait for a lookup
+// that is still pending (a slow resolver must not tax every refresh).
+func TestResolverDoesNotWaitForAPendingLookupWhenAnAnswerExists(t *testing.T) {
+	t.Parallel()
+	var slow atomic.Bool
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	r := newNameResolver(func(ctx context.Context, _ string) ([]string, error) {
+		if slow.Load() {
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return nil, errors.New("slow")
+		}
+		return []string{"192.0.2.3"}, nil
+	})
+	r.wait, r.timeout = 2*time.Second, 5*time.Second
+	if _, err := r.Addrs([]string{"peer.example"}); err != nil {
+		t.Fatal(err)
+	}
+	slow.Store(true)
+	if _, err := r.Addrs([]string{"peer.example"}); err != nil { // starts the slow lookup, waits for it (<= wait)
+		t.Fatal(err)
+	}
+}
+
+// Names no longer asked for are forgotten.
+func TestResolverForgetsNamesThatAreNoLongerAsked(t *testing.T) {
+	t.Parallel()
+	r := newNameResolver(func(context.Context, string) ([]string, error) { return []string{"192.0.2.8"}, nil })
+	r.wait, r.timeout = 100*time.Millisecond, time.Second
+	if _, err := r.Addrs([]string{"a.example", "b.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Addrs([]string{"a.example"}); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	_, kept := r.state["b.example"]
+	r.mu.Unlock()
+	if kept {
+		t.Fatal("a removed link's name must not stay in the resolver state")
 	}
 }
 
@@ -192,16 +275,14 @@ func TestResolverSharesOneLookupPerName(t *testing.T) {
 	for i := 0; i < callers; i++ {
 		<-ready
 	}
-	deadline := time.Now().Add(time.Second)
-	for calls.Load() != 1 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	// Release the blocked lookup only once every other caller has joined it.
+	deadline := time.Now().Add(5 * time.Second)
+	for (r.joins.Load() != callers-1 || calls.Load() != 1) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond) // sleep-ok: polling for the callers to join
 	}
-	if calls.Load() != 1 {
-		t.Fatalf("lookup ran %d times, want 1", calls.Load())
+	if r.joins.Load() != callers-1 || calls.Load() != 1 {
+		t.Fatalf("joins %d lookups %d, want %d joins of one lookup", r.joins.Load(), calls.Load(), callers-1)
 	}
-	// Every caller has signalled it is about to call Addrs; give them a moment
-	// to reach the in-flight lookup before it unblocks.
-	time.Sleep(50 * time.Millisecond)
 	close(release)
 	want := []string{"192.0.2.5"}
 	for i := 0; i < callers; i++ {

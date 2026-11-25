@@ -748,8 +748,11 @@ func TestClosingTheSocketEndsAHeldCard(t *testing.T) {
 	go func() {
 		res <- e.api.Runs.BrowserGate(ctx, runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
 	}()
-	pendingBrowserCard(t, e)
+	reqID := pendingBrowserCard(t, e)
 	e.api.browser.CloseBrowserSocket(e.runID)
+	// The person answers an instant later (their answer was already on its way):
+	// with the grant gone and the epoch moved on, it must leave no grant.
+	_ = e.api.Runs.RespondPermission(e.runID, reqID, "allow_run")
 	cancel()
 	select {
 	case err := <-res:
@@ -766,5 +769,31 @@ func TestClosingTheSocketEndsAHeldCard(t *testing.T) {
 	}
 	if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
 		t.Fatal("no grant results")
+	}
+}
+
+// A socket that replaces another for the same run id inherits none of its grants.
+func TestOpeningAReplacementSocketDropsTheRunsGrants(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	res := make(chan error, 1)
+	go func() {
+		res <- e.api.Runs.BrowserGate(context.Background(), runs.BrowserCall{RunID: e.runID, Tool: "browser_tabs"})
+	}()
+	if err := e.api.Runs.RespondPermission(e.runID, pendingBrowserCard(t, e), "allow_run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-res; err != nil {
+		t.Fatal(err)
+	}
+	if !e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("granted")
+	}
+	// Both open paths replace without going through CloseBrowserSocket.
+	if _, err := e.api.browser.OpenBrowserSocket(e.runID, e.seatTask.ID, 4242); err == nil {
+		defer e.api.browser.CloseBrowserSocket(e.runID)
+	}
+	if e.api.Runs.BrowserGranted(e.runID, "browser_tabs") {
+		t.Fatal("a replacement socket must not inherit the read grant")
 	}
 }

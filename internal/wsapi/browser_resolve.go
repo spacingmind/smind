@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,10 +21,15 @@ type lookupFunc func(ctx context.Context, host string) ([]string, error)
 
 // resolvedName is the stored state of one name, guarded by nameResolver.mu.
 type resolvedName struct {
-	addrs []string // the last good answer
-	prev  []string // the good answer before it
-	have  bool     // any good answer ever
+	addrs []string             // the last good answer
+	seen  map[string]time.Time // every address of a good answer, when it was last seen
+	have  bool                 // any good answer ever
 }
+
+// resolveRetention is how long an address a name moved away from is still served:
+// a peer behind a rotating record, or one that re-addressed, stays denied on its
+// old address for a minute.
+const resolveRetention = 60 * time.Second
 
 // nameResolver turns DNS names into the addresses the live deny list serves
 // alongside the name. Lookups run in the background bounded by timeout, so a
@@ -35,8 +41,16 @@ type nameResolver struct {
 	// settable by tests after construction.
 	timeout time.Duration
 	wait    time.Duration
+	// retention is how long an old address stays served (default resolveRetention);
+	// now is the clock (tests replace it).
+	retention time.Duration
+	now       func() time.Time
 
 	lookup lookupFunc
+
+	// joins counts calls that joined a lookup already in flight (a test seam: it lets
+	// a test release a blocked lookup only once every caller has joined it).
+	joins atomic.Int32
 
 	mu      sync.Mutex
 	state   map[string]*resolvedName
@@ -50,17 +64,19 @@ func newNameResolver(lookup lookupFunc) *nameResolver {
 		}
 	}
 	return &nameResolver{
-		timeout: 2 * time.Second,
-		wait:    250 * time.Millisecond,
-		lookup:  lookup,
-		state:   make(map[string]*resolvedName),
-		flights: make(map[string]chan struct{}),
+		timeout:   2 * time.Second,
+		wait:      250 * time.Millisecond,
+		retention: resolveRetention,
+		now:       time.Now,
+		lookup:    lookup,
+		state:     make(map[string]*resolvedName),
+		flights:   make(map[string]chan struct{}),
 	}
 }
 
-// Addrs returns, per name, the sorted unique union of the last two good
-// answers (the current one and the one before it): an address the name moved
-// away from is served one more refresh. Every call re-resolves: a lookup with
+// Addrs returns, per name, the sorted unique union of the latest good answer and
+// every address a good answer held within the retention window: an address the
+// name moved away from stays served for a minute. Every call re-resolves: a lookup with
 // no flight in progress is started (concurrent callers share it); one already
 // in flight is joined. Addrs waits at most r.wait for them, then builds the
 // result from the stored state — lookups that finish later still update it.
@@ -84,7 +100,13 @@ func (r *nameResolver) Addrs(names []string) (map[string][]string, error) {
 	waits := make([]<-chan struct{}, 0, len(unique))
 	for _, name := range unique {
 		if done, ok := r.flights[name]; ok {
-			waits = append(waits, done)
+			r.joins.Add(1)
+			// Joined, not started: a name that already has a good answer does not
+			// make this call wait for a lookup that is still pending (a slow
+			// resolver would otherwise cost every refresh the full wait).
+			if st := r.state[name]; st == nil || !st.have {
+				waits = append(waits, done)
+			}
 			continue
 		}
 		done := make(chan struct{})
@@ -111,13 +133,26 @@ func (r *nameResolver) Addrs(names []string) (map[string][]string, error) {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Names no longer asked for (a link was removed) are forgotten.
+	for name := range r.state {
+		if !seen[name] {
+			delete(r.state, name)
+		}
+	}
+	now := r.now()
 	out := make(map[string][]string, len(unique))
 	for _, name := range unique {
 		st := r.state[name]
 		if st == nil || !st.have {
 			return nil, fmt.Errorf("cannot resolve %s", name)
 		}
-		out[name] = unionSorted(st.addrs, st.prev)
+		served := append([]string(nil), st.addrs...)
+		for a, at := range st.seen {
+			if now.Sub(at) < r.retention {
+				served = append(served, a)
+			}
+		}
+		out[name] = unionSorted(served, nil)
 	}
 	return out, nil
 }
@@ -136,7 +171,7 @@ func (r *nameResolver) lookupOne(name string, done chan struct{}) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
 	defer cancel()
-	addrs, err := r.lookup(ctx, name)
+	addrs, err := r.safeLookup(ctx, name)
 	if err != nil {
 		return // a failure leaves the stored state untouched
 	}
@@ -151,13 +186,36 @@ func (r *nameResolver) lookupOne(name string, done chan struct{}) {
 		st = &resolvedName{}
 		r.state[name] = st
 	}
-	st.prev = st.addrs
+	now := r.now()
+	if st.seen == nil {
+		st.seen = map[string]time.Time{}
+	}
+	for _, a := range valid {
+		st.seen[a] = now
+	}
+	for a, at := range st.seen {
+		if now.Sub(at) >= r.retention {
+			delete(st.seen, a)
+		}
+	}
 	st.addrs = valid
 	st.have = true
 }
 
+// safeLookup runs the lookup; a panic in it is a failed lookup, never a crashed daemon.
+func (r *nameResolver) safeLookup(ctx context.Context, name string) (addrs []string, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			addrs, err = nil, fmt.Errorf("lookup panicked: %v", p)
+		}
+	}()
+	return r.lookup(ctx, name)
+}
+
 // validAddrs parses the lookup answer into canonical address strings; strings
-// that do not parse are ignored.
+// that do not parse are ignored, and so are unspecified addresses (a sinkholed
+// name answers 0.0.0.0, and a deny entry for it would reserve the port on every
+// address on the internet).
 func validAddrs(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, s := range in {
@@ -165,7 +223,11 @@ func validAddrs(in []string) []string {
 		if err != nil {
 			continue
 		}
-		out = append(out, a.Unmap().WithZone("").String()) // an IPv4-mapped answer is denied as the IPv4 address
+		a = a.Unmap().WithZone("") // an IPv4-mapped answer is denied as the IPv4 address
+		if a.IsUnspecified() {
+			continue
+		}
+		out = append(out, a.String())
 	}
 	return out
 }

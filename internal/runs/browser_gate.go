@@ -294,6 +294,9 @@ func (reg *Registry) BrowserGate(ctx context.Context, call BrowserCall) error {
 	epoch := st.epoch
 	st.mu.Unlock()
 
+	if ctx.Err() != nil { // the call ended (its socket closed) while it waited: no card for it
+		return refused("the call ended while it waited for an earlier question")
+	}
 	ws, _ := reg.st.GetWorkspace(task.WorkspaceID)
 	card := browsercard.Build(browsercard.Input{
 		Class: class, Tool: call.Tool, TaskTitle: task.Title, Workspace: ws.Title,

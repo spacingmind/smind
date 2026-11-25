@@ -336,6 +336,7 @@ func (h *browserHost) OpenBrowserSocket(runID string, taskID int64, rootPID int)
 	if h.socks == nil {
 		return "", errors.New("browser: no socket host")
 	}
+	h.dropRunGrants(runID) // a socket that replaces another for this run id inherits no grant
 	return h.socks.Open(runID, rootPID, func(ctx context.Context, req runsock.Request) (any, error) {
 		return h.callRun(ctx, runID, taskID, req.Tool, req.Args)
 	})
@@ -347,6 +348,7 @@ func (h *browserHost) OpenBrowserSocketPending(runID string, taskID int64) (stri
 	if h.socks == nil {
 		return "", nil, errors.New("browser: no socket host")
 	}
+	h.dropRunGrants(runID) // a socket that replaces another for this run id inherits no grant
 	return h.socks.OpenPending(runID, func(ctx context.Context, req runsock.Request) (any, error) {
 		return h.callRun(ctx, runID, taskID, req.Tool, req.Args)
 	})
@@ -359,6 +361,11 @@ func (h *browserHost) CloseBrowserSocket(runID string) {
 	}
 	// The run's grants end with its socket, not only with the run: a card answered
 	// after the close must not leave a grant for whatever connects next.
+	h.dropRunGrants(runID)
+}
+
+// dropRunGrants ends the run's grants (nil hook: none to drop).
+func (h *browserHost) dropRunGrants(runID string) {
 	if h.dropGrants != nil {
 		h.dropGrants(runID)
 	}

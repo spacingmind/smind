@@ -772,3 +772,23 @@ func TestGate_TheOpenCardSignalsWhatItHidesAndTheCloseCardIsItsOwn(t *testing.T)
 	answer(t, reg, runID, id2, "allow_once")
 	wantNil(t, ch2)
 }
+
+// A call whose context ended while it waited behind an earlier card raises no card.
+func TestGate_ACancelledCallRaisesNoCard(t *testing.T) {
+	reg, r, runID := gateRun(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan error, 1)
+	go func() { done <- reg.BrowserGate(ctx, BrowserCall{RunID: runID, Tool: "browser_tabs"}) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a cancelled call must not be admitted")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancelled call must not wait for a card")
+	}
+	if pendingCount(r) != 0 {
+		t.Fatal("a cancelled call must raise no card")
+	}
+}
