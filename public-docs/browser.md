@@ -64,7 +64,10 @@ the agent tool's.
   **Allow once**, or **Allow opening any page the browser policy allows (localhost
   and your added hosts) and closing tabs, for this run**: that second option lets
   the agent open any such page, with any query, for the rest of the run.
-  Closing a tab has its own card ("Close a browser tab?").
+  Closing a tab has its own card ("Close a browser tab?"); its run option is the
+  same grant, worded as what it covers: **Allow closing tabs, and opening any page
+  the browser policy allows (localhost and your added hosts), for this run**.
+  None of the options on these cards is drawn as the recommended one: you choose.
 - Nothing is saved across runs and there is no "always". Turning the workspace
   switch off ends the grants, and so does the run's browser connection closing
   while the run goes on.
@@ -73,6 +76,12 @@ the agent tool's.
 - Permission modes of the agent's own tool never answer these cards, including
   auto-accept. A rule in your permission policy for `mcp:smind-browser.<tool>`
   can allow or refuse a tool; with no rule sMind asks.
+- Claude Code's own prompt for these tools is switched off for a run that gets the
+  browser, so you answer one card per step, not two. Only the browser's tools are
+  pre-allowed that way; smind's check above is still what decides. Other tools of
+  the agent keep their own prompts.
+  Such a run loads only the MCP servers sMind hands it, not the ones in the
+  agent's own configuration files, so a project file cannot pose as the browser.
 
 ## Which agents can use it
 
