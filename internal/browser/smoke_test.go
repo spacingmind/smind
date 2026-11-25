@@ -170,6 +170,14 @@ console.log("loaded");
 	if kinds["blocked"] == 0 {
 		t.Error("the image on a non-allowlisted address must be blocked")
 	}
+	// The browser's own background requests (search pre-connect, Google sign-in cookie query)
+	// are refused by the proxy but are not the page's: the agent hears nothing about them.
+	for _, n := range notes {
+		if strings.Contains(n.Detail, "google.com") {
+			t.Errorf("a notice about the browser's own traffic reached the agent: %s: %s", n.Kind, n.Detail)
+		}
+	}
+	t.Logf("proxy refusals no page asked for (kept from the agent): %d", s.Unattributed())
 	if kinds["dialog"] < 2 {
 		t.Errorf("confirm and alert must be handled and reported, got %d", kinds["dialog"])
 	}

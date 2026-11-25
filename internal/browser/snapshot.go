@@ -213,6 +213,13 @@ func (s *Session) passwordBackendNodes(ctx context.Context, t *tabState) (map[in
 	return set, nil
 }
 
+// renderOnlyRoles are accessibility nodes that exist for how text is LAID OUT, not for what it
+// says: an InlineTextBox is one line fragment of the StaticText above it (whose text is already
+// printed) and a LineBreak is a break. They are never printed, named or not, and never counted:
+// the node and character budgets are spent on what remains (live-run finding: every text node
+// carried InlineTextBox lines that duplicated it and ate the 40,000 characters).
+var renderOnlyRoles = map[string]bool{"InlineTextBox": true, "LineBreak": true}
+
 // snapRender walks the AX tree depth-first and builds the text, counting
 // every rendered-candidate node even after a limit stopped the rendering.
 type snapRender struct {
@@ -239,7 +246,7 @@ func (r *snapRender) visit(n *axNode, depth, level int) {
 		return
 	}
 	role := cleanText(n.Role.str(), 200)
-	skip := n.Ignored || ((role == "none" || role == "generic" || role == "InlineTextBox" || role == "LineBreak") && cleanText(n.Name.str(), 200) == "")
+	skip := n.Ignored || renderOnlyRoles[role] || ((role == "none" || role == "generic") && cleanText(n.Name.str(), 200) == "")
 	if !skip {
 		r.total++
 		if !r.full {

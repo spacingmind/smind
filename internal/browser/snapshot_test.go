@@ -447,3 +447,56 @@ func TestSnapshotAsksForABoundedTreeAndAnOverCapReplyIsAPlainError(t *testing.T)
 	// And a snapshot of the same session still works afterwards.
 	asked = nil
 }
+
+// Render-only nodes (the InlineTextBox fragments under every StaticText, line breaks) are never
+// printed, named or not, and never counted: the budgets are spent on what remains.
+func TestSnapshotDropsRenderOnlyNodesAndCountsWhatRemains(t *testing.T) {
+	st := axm("st", "p", "StaticText", "Hello world", 3, nil, "itb1", "lb", "itb2")
+	itb1 := axm("itb1", "st", "InlineTextBox", "Hello world", 4, nil)
+	lb := axm("lb", "st", "LineBreak", "\n", 5, nil)
+	itb2 := axm("itb2", "st", "InlineTextBox", "", 6, nil)
+	p := axm("p", "r", "paragraph", "", 2, nil, "st")
+	root := axm("r", "", "WebArea", "Home", 1, nil, "p")
+	d := &domFake{tree: func() []any { return []any{root, p, st, itb1, lb, itb2} }}
+	s, _ := startHookedSession(t, d.hook)
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{`- WebArea "Home"`, `  - paragraph`, `    - text "Hello world"`}, "\n")
+	if snap.Text != want {
+		t.Fatalf("rendered tree:\n%s\nwant:\n%s", snap.Text, want)
+	}
+	if strings.Contains(snap.Text, "InlineTextBox") || strings.Contains(snap.Text, "LineBreak") {
+		t.Fatal("render-only roles must not be printed")
+	}
+	if snap.Nodes != 3 || snap.TotalNodes != 3 || snap.Truncated {
+		t.Fatalf("only what is printed is counted: %+v", snap)
+	}
+}
+
+// Half of this tree is InlineTextBox: counted, it would pass the 1,200-node cap; dropped, what
+// remains fits and nothing is truncated.
+func TestSnapshotBudgetIsNotSpentOnRenderOnlyNodes(t *testing.T) {
+	const texts = 700 // 700 StaticText + 700 InlineTextBox + the root = 1,401 raw nodes, 701 real ones
+	ids := make([]string, 0, texts)
+	nodes := make([]any, 0, 2*texts+1)
+	for i := 0; i < texts; i++ {
+		ids = append(ids, fmt.Sprintf("t%d", i))
+	}
+	nodes = append(nodes, axm("r", "", "WebArea", "P", 1, nil, ids...))
+	for i, id := range ids {
+		itb := fmt.Sprintf("i%d", i)
+		nodes = append(nodes, axm(id, "r", "StaticText", fmt.Sprintf("line %d", i), int64(1000+i), nil, itb))
+		nodes = append(nodes, axm(itb, id, "InlineTextBox", fmt.Sprintf("line %d", i), int64(5000+i), nil))
+	}
+	d := &domFake{tree: func() []any { return nodes }}
+	s, _ := startHookedSession(t, d.hook)
+	snap, err := s.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Truncated || snap.Nodes != texts+1 || snap.TotalNodes != texts+1 {
+		t.Fatalf("counts: %+v", snap)
+	}
+}

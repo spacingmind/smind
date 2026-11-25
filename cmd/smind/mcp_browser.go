@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -162,7 +163,9 @@ type browserCaller func(ctx context.Context, tool string, args any) (browserCall
 func browserForward(ctx context.Context, call browserCaller, tool string, args any) (*mcp.CallToolResult, error) {
 	res, err := call(ctx, tool, args)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", tool, err)
+		// "browser_open: the person said no", not "browser_open: browser: the person said no": the daemon's own
+		// "browser: " label is dropped, its reason is not.
+		return nil, fmt.Errorf("%s: %s", tool, strings.TrimPrefix(err.Error(), "browser: "))
 	}
 	return browserResultToMCP(res), nil
 }

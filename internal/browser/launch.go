@@ -98,9 +98,11 @@ func buildArgs(profileDir string, o LaunchOpts) ([]string, error) {
 		"--metrics-recording-only",
 		"--no-pings",
 		// Quiet the browser's own background traffic (time sync, optimization
-		// hints, account and update services): the proxy refuses it anyway, but
-		// the agent should not be told about requests the page never made.
-		"--disable-features=NetworkTimeServiceQuerying,OptimizationHints,OptimizationGuideModelDownloading,Translate,MediaRouter,AutofillServerCommunication,GCM,PrivacySandboxSettings4",
+		// hints, account and update services, the pre-connect to the default search
+		// engine: measured on Chrome 158, where it was the www.google.com request at
+		// start-up). The proxy refuses whatever remains and Session.refused keeps it
+		// from the agent unless a page asked for that target (pageinit.go).
+		"--disable-features=NetworkTimeServiceQuerying,OptimizationHints,OptimizationGuideModelDownloading,Translate,MediaRouter,AutofillServerCommunication,GCM,PrivacySandboxSettings4,PreconnectToSearch",
 		"--mute-audio",
 		"about:blank",
 	}, nil
