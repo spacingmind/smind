@@ -1,6 +1,8 @@
 package providers
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -144,5 +146,32 @@ func TestBrowserUnavailableMessageNamesTheProvider(t *testing.T) {
 	}
 	if why := BrowserReachOf(spec).Why; !strings.Contains(msg, why) {
 		t.Errorf("message %q does not contain the row's why %q", msg, why)
+	}
+}
+
+// TestBrowserDocsNameEveryNoProvider: public-docs/browser.md says which agents
+// cannot use the browser, so every built-in provider whose row is no is named
+// there by its label, and the fixed refusal phrase appears.
+func TestBrowserDocsNameEveryNoProvider(t *testing.T) {
+	t.Parallel()
+	doc, err := os.ReadFile(filepath.Join("..", "..", "public-docs", "browser.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(doc)
+	for _, id := range BuiltinIDs() {
+		s, ok := New().Get(id)
+		if !ok {
+			t.Fatalf("%s: built-in id missing from the registry", id)
+		}
+		if BrowserReachOf(s).Reach != ReachNo {
+			continue
+		}
+		if !strings.Contains(text, s.Label) {
+			t.Errorf("public-docs/browser.md does not name %s by its label %q", id, s.Label)
+		}
+	}
+	if !strings.Contains(text, "the browser is not available for this agent") {
+		t.Error(`public-docs/browser.md does not contain "the browser is not available for this agent"`)
 	}
 }
