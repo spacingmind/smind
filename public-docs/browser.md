@@ -77,6 +77,8 @@ the agent tool's.
   browser, so you answer one card per step, not two. Only the browser's tools are
   pre-allowed that way; smind's check above is still what decides. Other tools of
   the agent keep their own prompts.
+  Such a run loads only the MCP servers sMind hands it, not the ones in the
+  agent's own configuration files, so a project file cannot pose as the browser.
 
 ## Which agents can use it
 
