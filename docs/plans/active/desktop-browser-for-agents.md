@@ -79,7 +79,7 @@ The per-workspace switch is OFF by default and human-only, so nothing is reachab
   - card frames for the four states at 1280 and 390, light and dark (cards use the generic permission card; a richer renderer for `Kind: "browser"` is future UI work);
   - the Claude path against a real `claude` binary (only the real SDK client against a fake CLI is tested);
   - the desktop proxy origin on the deny list (the desktop host does not exist in this lane);
-  - Linux CI evidence of the peer credentials (`SO_PEERCRED` path; only macOS ran);
+  - ~~Linux CI evidence of the peer credentials~~ done 2026-11-25: ubuntu run 45555292074, 42 distinct passing tests including `TestSystemPeerReaderReportsThisProcess` and `TestSystemProcTreeChild`, 0 skipped, 0 failed (see `browser-for-agents-pr6.md`);
   - Windows: Job-Object membership check and pipe server-end authentication. Windows is NOT offered in the first release (the hub refuses there).
 - **Settings UI PR B3** (toggle, allowlist, indicator, web) and **persistent profiles**.
 - **Observed items from the reviews** not fixed: grants are not dropped when only the socket closes; a fleet peer addressed by DNS name is denied by name only.

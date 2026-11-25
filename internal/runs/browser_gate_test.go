@@ -374,6 +374,56 @@ func TestGate_GrantsDieWithTheRunTheSwitchAndTheKillSwitch(t *testing.T) {
 	}
 }
 
+// A socket that closes WITHOUT the run ending drops the run's grants and voids an
+// answer taken before the close.
+func TestDropBrowserRunGrantsEndsGrantsAndVoidsAnswers(t *testing.T) {
+	reg, r, runID := gateRun(t, "")
+	grant := func(tool, option string) {
+		ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: tool, URL: "http://localhost:3000/"})
+		answer(t, reg, runID, id, option)
+		wantNil(t, ch)
+	}
+	grant("browser_tabs", "allow_run")
+	grant("browser_open", "allow_run")
+	if !reg.BrowserGranted(runID, "browser_tabs") || !reg.BrowserGranted(runID, "browser_open") {
+		t.Fatal("both grants given")
+	}
+	reg.DropBrowserRunGrants(runID)
+	if reg.BrowserGranted(runID, "browser_tabs") || reg.BrowserGranted(runID, "browser_open") {
+		t.Fatal("closing the socket ends the read and open grants")
+	}
+	// The next call asks again.
+	ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+	if id == "" {
+		t.Fatal("after the drop the call must raise a card")
+	}
+	// A card open when the socket closes: its answer, taken after, leaves no grant.
+	reg.DropBrowserRunGrants(runID)
+	answer(t, reg, runID, id, "allow_run")
+	wantErr(t, ch, "connection closed")
+	if reg.BrowserGranted(runID, "browser_tabs") {
+		t.Fatal("an answer taken across the close must not leave a grant")
+	}
+	// An unknown run id is a no-op.
+	reg.DropBrowserRunGrants("no-such-run")
+}
+
+// The drop is not the run's end: the denial limiter and the run state stay, so a
+// socket re-created for the same run does not give the agent a fresh denial budget.
+func TestDropBrowserRunKeepsTheDenialLimiter(t *testing.T) {
+	reg, r, runID := gateRun(t, "")
+	for i := 0; i < 3; i++ {
+		ch, id := gateAsync(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+		answer(t, reg, runID, id, "deny")
+		wantErr(t, ch, "the person said no")
+	}
+	reg.DropBrowserRunGrants(runID)
+	err := noCard(t, reg, r, BrowserCall{RunID: runID, Tool: "browser_tabs"})
+	if err == nil || !strings.Contains(err.Error(), "do not ask again for now") {
+		t.Fatalf("the pause survives a socket close: %v", err)
+	}
+}
+
 func TestGate_ThreeDenialsStopCardsForFiveMinutes(t *testing.T) {
 	reg, r, runID := gateRun(t, "")
 	for i := 0; i < 3; i++ {
@@ -721,4 +771,24 @@ func TestGate_TheOpenCardSignalsWhatItHidesAndTheCloseCardIsItsOwn(t *testing.T)
 	}
 	answer(t, reg, runID, id2, "allow_once")
 	wantNil(t, ch2)
+}
+
+// A call whose context ended while it waited behind an earlier card raises no card.
+func TestGate_ACancelledCallRaisesNoCard(t *testing.T) {
+	reg, r, runID := gateRun(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan error, 1)
+	go func() { done <- reg.BrowserGate(ctx, BrowserCall{RunID: runID, Tool: "browser_tabs"}) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a cancelled call must not be admitted")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancelled call must not wait for a card")
+	}
+	if pendingCount(r) != 0 {
+		t.Fatal("a cancelled call must raise no card")
+	}
 }
