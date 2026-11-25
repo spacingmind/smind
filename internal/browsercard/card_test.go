@@ -388,7 +388,7 @@ func TestCloseCardHasItsOwnWording(t *testing.T) {
 	}
 	wantOpts := []Option{
 		{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
-		{ID: "allow_run", Name: "Allow opening any page the browser policy allows (localhost and your added hosts) and closing tabs, for this run", Kind: "allow_once"},
+		{ID: "allow_run", Name: "Allow closing tabs, and opening any page the browser policy allows (localhost and your added hosts), for this run", Kind: "allow_once"},
 		{ID: "deny", Name: "Deny", Kind: "reject_once"},
 	}
 	if len(card.Options) != len(wantOpts) {
