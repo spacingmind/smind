@@ -1,7 +1,7 @@
 ---
-title: sMind by Spacing Mind documentation
+title: sMind documentation
 description: What smind is and where to read next.
-summary: "sMind by Spacing Mind is a self-hosted platform for running coding agents, delivered as one Go binary with a web app, desktop app, command line and mobile access. This page is for developers who run coding agents every day and want them on their own machine under their own accounts."
+summary: "sMind is an AI Agent Orchestration Platform, delivered as one Go binary with a web app, desktop app, command line and mobile access. This page is for developers who run coding agents every day and want them on their own machine under their own accounts."
 order: 1
 ---
 
@@ -9,7 +9,7 @@ order: 1
 
 ## What smind is
 
-smind is a self-hosted platform for running coding agents. It is one Go binary
+sMind is an AI Agent Orchestration Platform. It is one Go binary
 that serves both the API and a web interface, and it spreads agent traffic
 across your own provider accounts instead of a single shared pool. Each task
 runs in its own isolated git worktree, so several agents can work on one

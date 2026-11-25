@@ -53,7 +53,7 @@ test('llms.txt lists every page', () => {
 
 test('llms.txt order and shape', () => {
   const lines = buildLlmsTxt(pages).split('\n')
-  assert.equal(lines[0], '# sMind by Spacing Mind')
+  assert.equal(lines[0], '# sMind')
   assert.ok(lines[2].startsWith('> '))
   const links = lines.filter((l) => l.startsWith('- ['))
   assert.deepEqual(links.map((l) => /\[(.*?)\]/.exec(l)[1]), pages.map((p) => p.fm.title))

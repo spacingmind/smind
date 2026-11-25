@@ -1,7 +1,7 @@
 ---
 title: The validator seat and review rows
 description: Have a fresh-context agent check a commit against a contract, and where its verdict reaches you.
-summary: "This page explains the validator seat in sMind by Spacing Mind: the contract a Lead writes before coding, what a verdict contains and when it goes stale, what merge-ready means, and the verdict rows that show up in the inbox. It is for people who run a Lead and want an independent check before they merge."
+summary: "This page explains the validator seat in sMind: the contract a Lead writes before coding, what a verdict contains and when it goes stale, what merge-ready means, and the verdict rows that show up in the inbox. It is for people who run a Lead and want an independent check before they merge."
 order: 21
 ---
 

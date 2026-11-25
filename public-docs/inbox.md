@@ -1,7 +1,7 @@
 ---
 title: Inbox
 description: One list of permissions, host pairings, validator verdicts and stalled work that need you, on the web and on a phone.
-summary: "This page explains the inbox in sMind by Spacing Mind: one list of permission requests, host pairing requests and host link problems, validator verdicts and stalled task trees that need a person, on the web and on a phone. It is for anyone who runs agents and wants one place to look instead of watching each task."
+summary: "This page explains the inbox in sMind: one list of permission requests, host pairing requests and host link problems, validator verdicts and stalled task trees that need a person, on the web and on a phone. It is for anyone who runs agents and wants one place to look instead of watching each task."
 order: 8
 ---
 
