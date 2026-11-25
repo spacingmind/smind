@@ -186,7 +186,8 @@ test('BS-03 the residual text matches the public page and the providers list com
   const reach = page.getByTestId('browser-reach')
   await expect(reach.getByTestId('browser-reach-no')).toContainText('Codex')
   await expect(reach.getByTestId('browser-reach-yes')).toContainText('Claude Code')
-  await expect(reach.getByTestId('browser-reach-no')).toContainText('Screenshots')
+  await expect(reach.getByTestId('browser-reach-yes')).toContainText('Screenshots')
+  await expect(reach.getByTestId('browser-reach-no')).not.toContainText('Screenshots') // moot for an agent without the browser
 })
 
 test('BS-04 the section does not overflow and the clear-data dialog asks first', async ({ app }) => {
@@ -239,9 +240,13 @@ test('BS-F3 frames: a live session, the kill switch and no browser installed', a
   await openSection(app)
   await expect(page.getByTestId('browser-live')).toContainText('In use now')
   await expect(page.getByTestId('browser-end-session')).toBeVisible()
+  const heightLive = (await page.getByTestId('browser-access').boundingBox())?.height ?? 0
   await frame(page, testInfo, '05-live')
   await page.getByTestId('browser-end-session').click()
   await expect(page.getByTestId('browser-live')).toHaveCount(0, { timeout: 10_000 }) // the next 3 s poll re-reads the view
+  await expect(page.getByTestId('browser-idle')).toHaveText('Not in use right now.')
+  // a run starting or ending must not move the page: the access card is exactly as tall either way
+  expect(Math.abs(((await page.getByTestId('browser-access').boundingBox())?.height ?? 0) - heightLive)).toBeLessThanOrEqual(1)
   stub.set({ killSwitch: true, enabled: true })
   await openSection(app)
   await expect(page.getByTestId('browser-kill-switch')).toContainText('switched off by the daemon')

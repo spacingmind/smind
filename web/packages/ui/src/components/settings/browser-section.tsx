@@ -138,16 +138,25 @@ function BrowserSection() {
           >
             <SettingsRow
               label="Let agents use a browser in this workspace"
-              description="Default off. Each use still asks you with a permission card."
+              description={
+                <>
+                  Default off. Each use still asks you with a permission card.
+                  {/* Always one line, so a run starting or ending never moves the page: the badge or the plain "not in use" text. */}
+                  <span className="mt-1.5 flex h-5 items-center" data-testid="browser-live-line">
+                    {live ? (
+                      <StatusBadge status="running" dot data-testid="browser-live">
+                        In use now
+                      </StatusBadge>
+                    ) : (
+                      <span data-testid="browser-idle">Not in use right now.</span>
+                    )}
+                  </span>
+                </>
+              }
               control={
                 <div className="flex items-center gap-2">
-                  {live && (
-                    <StatusBadge status="running" dot data-testid="browser-live">
-                      In use now
-                    </StatusBadge>
-                  )}
                   <span data-testid="browser-switch-state" className="text-ui-sm text-foreground-muted">
-                    {data.enabled ? "On" : "Off"}
+                    {data.killSwitch ? `${data.enabled ? "On" : "Off"}, not in effect` : data.enabled ? "On" : "Off"}
                   </span>
                   <Switch
                     aria-label="Let agents use a browser in this workspace"

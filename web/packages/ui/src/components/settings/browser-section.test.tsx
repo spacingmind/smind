@@ -69,6 +69,7 @@ describe("browser section", () => {
     expect(screen.getByTestId("browser-switch")).toHaveAttribute("aria-checked", "false");
     expect(screen.getByTestId("browser-switch-state")).toHaveTextContent("Off");
     expect(screen.queryByTestId("browser-live")).toBeNull();
+    expect(screen.getByTestId("browser-idle")).toHaveTextContent("Not in use right now.");
     expect(screen.getByTestId("browser-allow-empty")).toBeInTheDocument();
     expect(d.calls.filter((c) => c.method.startsWith("browser.")).map((c) => c.method)).toEqual(["browser.settings.get"]);
   });
@@ -127,6 +128,7 @@ describe("browser section", () => {
     await ready();
     expect(screen.getByTestId("browser-kill-switch")).toHaveTextContent("switched off by the daemon's configuration");
     expect(screen.getByTestId("browser-switch")).toBeDisabled();
+    expect(screen.getByTestId("browser-switch-state")).toHaveTextContent("On, not in effect");
     expect(screen.getByTestId("browser-allow-input")).not.toBeDisabled();
   });
 
