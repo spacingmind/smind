@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 
 	"github.com/spacingmind/smind/internal/securefile"
@@ -256,7 +257,9 @@ const browserMcpName = "smind-browser"
 func withoutName(rows []store.McpServer, name string) []store.McpServer {
 	out := make([]store.McpServer, 0, len(rows))
 	for _, row := range rows {
-		if row.Name != name {
+		// name+"__" too: the CLI names a tool mcp__<server>__<tool>, so a server called
+		// "smind-browser__x" would otherwise sit under the browser wildcard.
+		if row.Name != name && !strings.HasPrefix(row.Name, name+"__") {
 			out = append(out, row)
 		}
 	}
@@ -517,8 +520,38 @@ func claudeFailedMcpServers(raw json.RawMessage) []string {
 func useStrictMcp(c RunContract) bool { return c.Mcp != nil && !c.Mcp.BrowserOnly }
 
 // browserRowDelivered says whether the browser row can reach the agent of a
-// provider: a plugin provider never gets it.
-func browserRowDelivered(pluginProvider bool) bool { return !pluginProvider }
+// provider, by the provider reach table (providers.BrowserReachOf): a provider
+// the table says no to (a plugin provider, codex-native, an agent that takes no
+// MCP servers) and a provider the registry does not know get no row and no socket.
+func browserRowDelivered(spec providers.Spec, haveSpec bool) bool {
+	return haveSpec && providers.BrowserReachOf(spec).Offered()
+}
+
+// browserToolsAllowRule is the ONE permission rule the Claude CLI is pre-approved with: every tool of
+// the daemon's own browser server and nothing else (ADR-0061 amendment 11). The CLI's own prompt for
+// these tools added nothing the person decides: the daemon's card is the control (the gate holds
+// whatever the provider's mode says), so the live run showed two cards per call.
+const browserToolsAllowRule = "mcp__" + browserMcpName + "__*"
+
+// claudeBrowserPreallow is the allowed-tools list of a Claude run: exactly browserToolsAllowRule when
+// the run really receives the daemon's browser row (the row is in rows AND its socket is bound to the
+// CLI, bound true), nil otherwise. Never another server's tools, never a built-in tool, and a user
+// server named like the reserved one never gets here: its row is stripped before rows are built.
+func claudeBrowserPreallow(rows []store.McpServer, bound bool) []string {
+	if !bound {
+		return nil
+	}
+	for _, row := range rows {
+		if row.Name != browserMcpName || row.Transport != "stdio" {
+			continue
+		}
+		var args []string
+		if json.Unmarshal([]byte(row.Args), &args) == nil && len(args) == 2 && args[0] == "mcp" && args[1] == "browser" {
+			return []string{browserToolsAllowRule}
+		}
+	}
+	return nil
+}
 
 // revokeBrowserAll closes the run's browser socket (the provider took none
 // of the rows).

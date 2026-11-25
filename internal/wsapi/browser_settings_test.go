@@ -16,6 +16,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/permpolicy"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -779,5 +780,78 @@ func TestBrowserWiring_RegistryHookFollowsTheStoreAndTheKillSwitch(t *testing.T)
 	set(false)
 	if e.api.Runs.BrowserSwitchOn(ws) {
 		t.Fatal("flag off: off")
+	}
+}
+
+// The view names what each agent gets, straight from the reach table: codex-native
+// has no browser, a plugin-free registry lists every provider, and the entries are
+// the table's own.
+func TestBrowserSettingsListsProviders(t *testing.T) {
+	t.Parallel()
+	h, _, _ := settingsHost(t)
+	reg := providers.New()
+	h.reachList = reg.BrowserReachList
+	res, err := h.settingsGet(context.Background(), settingsHumanRC, json.RawMessage(`{"workspaceId":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := res.(browserSettingsView)
+	if len(v.Providers) != len(reg.List()) {
+		t.Fatalf("providers = %d entries, registry has %d", len(v.Providers), len(reg.List()))
+	}
+	byID := map[string]providers.BrowserReachEntry{}
+	for _, p := range v.Providers {
+		byID[p.ID] = p
+	}
+	if c := byID["codex-native"]; c.Reach != providers.ReachNo || c.Why == "" {
+		t.Errorf("codex-native entry = %+v: no browser, with the reason", c)
+	}
+	if c := byID["claude-native"]; c.Reach != providers.ReachYes || c.Images != "yes" {
+		t.Errorf("claude-native entry = %+v", c)
+	}
+	if c := byID["glm"]; c.Images != "no" {
+		t.Errorf("glm entry = %+v: text only", c)
+	}
+	for _, s := range reg.List() {
+		if got, want := byID[s.ID].Reach, providers.BrowserReachOf(s).Reach; got != want {
+			t.Errorf("%s: view says %q, table says %q", s.ID, got, want)
+		}
+	}
+	// No host wired (a bare test host): an empty list, never null.
+	h.reachList = nil
+	res, _ = h.settingsGet(context.Background(), settingsHumanRC, json.RawMessage(`{"workspaceId":1}`))
+	raw, _ := json.Marshal(res)
+	if !strings.Contains(string(raw), `"providers":[]`) {
+		t.Errorf("no provider source must serialise as [], got %s", raw)
+	}
+}
+
+// The view says whether the workspace has a running browser session (the Settings
+// indicator), and says false when no host source is wired.
+func TestBrowserSettingsViewReportsSessionLive(t *testing.T) {
+	t.Parallel()
+	h, _, _ := settingsHost(t)
+	get := func() browserSettingsView {
+		res, err := h.settingsGet(context.Background(), settingsHumanRC, json.RawMessage(`{"workspaceId":1}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.(browserSettingsView)
+	}
+	if get().SessionLive {
+		t.Fatal("no session source: not live")
+	}
+	live := map[int64]bool{1: true}
+	h.sessionLive = func(ws int64) bool { return live[ws] }
+	if !get().SessionLive {
+		t.Fatal("workspace 1 has a session")
+	}
+	live[1] = false
+	if get().SessionLive {
+		t.Fatal("the session ended")
+	}
+	raw, _ := json.Marshal(get())
+	if !strings.Contains(string(raw), `"sessionLive":false`) {
+		t.Fatalf("the field is always present: %s", raw)
 	}
 }

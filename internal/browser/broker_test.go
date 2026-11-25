@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image/color"
 	"regexp"
@@ -945,5 +946,25 @@ func TestALeavingRunRechecksWhoIsStillUsingTheSession(t *testing.T) {
 	defer rig.mu.Unlock()
 	if len(rig.closed) != 0 {
 		t.Fatalf("a run that joined meanwhile must not lose its session: closed %v", rig.closed)
+	}
+}
+
+// The agent reads "browser_open: ..." / "navigation refused: ..." and never the package's own "browser: " label
+// twice or inside a reason; the reason itself is unchanged (live-run finding: "browser_open: browser: address X is not allowed").
+func TestAgentSeesNoRepeatedBrowserLabelInARefusal(t *testing.T) {
+	rig := newBrokerRig(t, nil)
+	for _, u := range []string{"http://example.com/", "http://169.254.169.254/", "file:///etc/passwd", "http://100.117.11.67:4752/"} {
+		res := rig.call("browser_open", map[string]any{"url": u})
+		got := text(res)
+		if !res.IsError || strings.Contains(got, "browser: ") {
+			t.Errorf("%s: want a refusal without a \"browser: \" label, got %q", u, got)
+		}
+	}
+	res := rig.call("browser_open", map[string]any{"url": "http://100.117.11.67:4752/"})
+	if !strings.Contains(text(res), "is not allowed (only loopback and hosts the person added)") {
+		t.Errorf("the reason must stay exact: %q", text(res))
+	}
+	if AgentReason(errors.New("browser: address X is not allowed")) != "address X is not allowed" || AgentReason(errors.New("plain")) != "plain" {
+		t.Error("AgentReason strips exactly the leading label")
 	}
 }

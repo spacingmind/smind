@@ -1118,3 +1118,21 @@ func TestSessionUnansweredChallengeNoticeIsOnce(t *testing.T) {
 		t.Fatal("the session stays open")
 	}
 }
+
+func TestManagerLive(t *testing.T) {
+	l := &fakeLauncher{t: t, hook: defaultHook}
+	m := &Manager{}
+	if m.Live("a") {
+		t.Fatal("no session yet")
+	}
+	if _, err := m.Get(context.Background(), Config{Workspace: "a", Launcher: l, Resolver: sessionResolver, CallTimeout: 2 * time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Live("a") || m.Live("b") {
+		t.Fatalf("Live(a)=%v Live(b)=%v", m.Live("a"), m.Live("b"))
+	}
+	m.Close("a")
+	if m.Live("a") {
+		t.Fatal("a closed session is not live")
+	}
+}

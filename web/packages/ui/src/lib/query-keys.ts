@@ -123,6 +123,8 @@ export const queryKeys = {
   providerTestAll: () => ["provider.test"] as const,
   providerTest: (providerKey: string) => ["provider.test", providerKey] as const,
   /** The `useRunProviderTest` mutation for that provider: its pending entries are the row's "Testing…". */
+  /** One workspace's agent-browser settings view (`browser.settings.get`, human-only and local-only). */
+  browserSettings: (workspaceId: number) => ["browser.settings.get", { workspaceId }] as const,
   // Self-learning skills (ADR-0026): the RPC name plus the params that change its answer. The
   // `*All` forms are partial keys: `invalidateQueries` matches every entry that starts with them.
   learningStatus: () => ["learning.status"] as const,

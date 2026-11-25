@@ -75,11 +75,11 @@ The per-workspace switch is OFF by default and human-only, so nothing is reachab
 
 - **PR 5**: the provider gating table (which providers get `browser_*`, per the Provider reach table above, with the strip rule for plugin providers).
 - **Pre-flip checklist items NOT done** (the flip is safe only because the switch is off by default):
-  - a live run with a real model (Layer B; needs the Human's go);
-  - card frames for the four states at 1280 and 390, light and dark (cards use the generic permission card; a richer renderer for `Kind: "browser"` is future UI work);
-  - the Claude path against a real `claude` binary (only the real SDK client against a fake CLI is tested);
+  - ~~a live run with a real model~~ done 2026-11-25 (Haiku on the real `claude` binary, GLM on the ACP path; USD 0.04 reported of 2): see `browser-for-agents-live-run.md` (findings listed there);
+  - ~~card frames~~ done 2026-11-25 from the real web UI of a dogfood daemon (read, open, close cards and the refusal states, light and dark at 1280 and 390); one real defect found (the long run-grant option does not wrap), see the live-run plan;
+  - ~~the Claude path against a real `claude` binary~~ done 2026-11-25 (R1b/R2/R4: the unbound socket bound to the CLI pid, every tool worked);
   - the desktop proxy origin on the deny list (the desktop host does not exist in this lane);
-  - Linux CI evidence of the peer credentials (`SO_PEERCRED` path; only macOS ran);
+  - ~~Linux CI evidence of the peer credentials~~ done 2026-11-25: ubuntu run 45555292074, 42 distinct passing tests including `TestSystemPeerReaderReportsThisProcess` and `TestSystemProcTreeChild`, 0 skipped, 0 failed (see `browser-for-agents-pr6.md`);
   - Windows: Job-Object membership check and pipe server-end authentication. Windows is NOT offered in the first release (the hub refuses there).
 - **Settings UI PR B3** (toggle, allowlist, indicator, web) and **persistent profiles**.
 - **Observed items from the reviews** not fixed: grants are not dropped when only the socket closes; a fleet peer addressed by DNS name is denied by name only.

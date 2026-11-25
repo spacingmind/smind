@@ -595,7 +595,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 
 	// A plugin provider never gets smind's own rows, the browser's included: do
 	// not even build (and open a socket for) a row that is about to be dropped.
-	rows, err := r.mcpRowsForDelivery(ctx, workspaceID, browserRowDelivered(haveSpec && spec.Plugin != ""), client.PID())
+	rows, err := r.mcpRowsForDelivery(ctx, workspaceID, browserRowDelivered(spec, haveSpec), client.PID())
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
@@ -973,7 +973,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 		opts = append(opts, claudecode.WithCLIPath(cliPath))
 		env = append(env, launchEnv...)
 	}
-	spec, _ := r.providerRegistry().Get(string(provider))
+	spec, haveSpec := r.providerRegistry().Get(string(provider))
 	if spec.IsInstance() && len(spec.Command) > 0 {
 		// An instance's command override: a different claude executable
 		// (a wrapper, a pinned install). It wins over the daemon's own.
@@ -993,13 +993,25 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	// that cannot report the pid builds no browser row (never a weaker check).
 	var bindBrowser func(rootPID int) error
 	var rows []store.McpServer
-	if r.claudeReportsPID {
+	if r.claudeReportsPID && browserRowDelivered(spec, haveSpec) {
 		rows, bindBrowser, err = r.mcpRowsPending(ctx, workspaceID)
 	} else {
 		rows, err = r.mcpRowsFor(ctx, workspaceID)
 	}
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
+	}
+	// The CLI asks its own permission before every MCP tool; for the daemon's browser server the
+	// daemon's card is the control, so a run that really got the row (and only that) is pre-approved
+	// for it: one card per call instead of two (ADR-0061 amendment 11).
+	if allow := claudeBrowserPreallow(rows, bindBrowser != nil); len(allow) > 0 {
+		opts = append(opts, claudecode.WithAllowedTools(allow...))
+		// The wildcard is only as narrow as the set of servers the CLI loads: a project .mcp.json
+		// (agent-writable) or user-scope server must not be able to ride it. Strict mode loads only the
+		// daemon's --mcp-config, so nothing else can answer to the reserved name (evidence in
+		// browser-claude-preallow.md). Cost: this run does not see servers from the CLI's own files.
+		onlyDaemonMcp := claudecode.WithStrictMCPConfig()
+		opts = append(opts, onlyDaemonMcp)
 	}
 	if contract := RunContractFrom(ctx); useStrictMcp(contract) {
 		// A managed run sees only the daemon's registered servers (+ smind

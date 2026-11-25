@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/browser"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -48,17 +49,22 @@ type browserSettingsStore interface {
 
 // browserSettingsView is what get and set return.
 type browserSettingsView struct {
-	WorkspaceID     int64      `json:"workspaceId"`
-	Enabled         bool       `json:"enabled"`
-	AllowHosts      []string   `json:"allowHosts"`
-	ProfileMode     string     `json:"profileMode"`
-	KillSwitch      bool       `json:"killSwitch"`
-	Available       bool       `json:"available"` // browser.GateReady: the tools are offered to agents (still off per workspace by default)
-	ChromeInstalled bool       `json:"chromeInstalled"`
-	InstallStep     string     `json:"installStep,omitempty"`
-	Note            string     `json:"note"`
-	UpdatedAt       *time.Time `json:"updatedAt,omitempty"`
-	UpdatedBy       string     `json:"updatedBy,omitempty"`
+	WorkspaceID     int64    `json:"workspaceId"`
+	Enabled         bool     `json:"enabled"`
+	AllowHosts      []string `json:"allowHosts"`
+	ProfileMode     string   `json:"profileMode"`
+	KillSwitch      bool     `json:"killSwitch"`
+	Available       bool     `json:"available"` // browser.GateReady: the tools are offered to agents (still off per workspace by default)
+	ChromeInstalled bool     `json:"chromeInstalled"`
+	InstallStep     string   `json:"installStep,omitempty"`
+	Note            string   `json:"note"`
+	// Providers is what each agent gets: the browser reach table (a provider with
+	// reach "no" gets no browser tools and is told so).
+	Providers []providers.BrowserReachEntry `json:"providers"`
+	// SessionLive: this workspace has a running browser session (an agent is using it now).
+	SessionLive bool       `json:"sessionLive"`
+	UpdatedAt   *time.Time `json:"updatedAt,omitempty"`
+	UpdatedBy   string     `json:"updatedBy,omitempty"`
 }
 
 func (h *browserHost) view(bs store.BrowserSettings) browserSettingsView {
@@ -68,6 +74,13 @@ func (h *browserHost) view(bs store.BrowserSettings) browserSettingsView {
 	}
 	if v.AllowHosts == nil {
 		v.AllowHosts = []string{}
+	}
+	v.Providers = []providers.BrowserReachEntry{}
+	if h.sessionLive != nil {
+		v.SessionLive = h.sessionLive(bs.WorkspaceID)
+	}
+	if h.reachList != nil {
+		v.Providers = h.reachList()
 	}
 	if !bs.UpdatedAt.IsZero() {
 		t := bs.UpdatedAt

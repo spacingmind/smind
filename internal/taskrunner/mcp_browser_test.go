@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -151,8 +152,37 @@ func TestBrowserSocketIsOpenedOnlyWhereTheRowIsDelivered(t *testing.T) {
 	if err != nil || len(got) != 0 {
 		t.Fatalf("a failed socket means no row and no error: rows=%v err=%v", names(got), err)
 	}
-	if browserRowDelivered(true) || !browserRowDelivered(false) {
-		t.Fatal("a plugin provider never gets the browser row, an ordinary provider does")
+}
+
+func TestBrowserRowOnlyForOfferedProviders(t *testing.T) {
+	t.Parallel()
+	reg := providers.New()
+	get := func(id string) providers.Spec {
+		s, ok := reg.Get(id)
+		if !ok {
+			t.Fatalf("no provider %q", id)
+		}
+		return s
+	}
+	for _, c := range []struct {
+		name string
+		spec providers.Spec
+		have bool
+		want bool
+	}{
+		{"claude-native", get("claude-native"), true, true},
+		{"glm", get("glm"), true, true},
+		{"opencode", get("opencode"), true, true},
+		{"codex-native", get("codex-native"), true, false},
+		{"plugin provider", providers.Spec{ID: "p/a", Plugin: "p", Runner: providers.RunnerACP}, true, false},
+		{"an agent without MCP servers", providers.Spec{ID: "opencode", NoMCPServers: true}, true, false},
+		{"custom acp", providers.Spec{ID: "mine", Custom: true, Runner: providers.RunnerACP}, true, true},
+		{"unknown to the registry", providers.Spec{}, false, false},
+		{"unknown id", providers.Spec{ID: "nobody"}, true, false},
+	} {
+		if got := browserRowDelivered(c.spec, c.have); got != c.want {
+			t.Errorf("%s: browserRowDelivered = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

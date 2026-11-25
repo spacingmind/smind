@@ -324,3 +324,35 @@ func TestLauncherRequiresALoopbackProxy(t *testing.T) {
 		}
 	}
 }
+
+// The browser's own background networking is switched off as far as Chrome lets us: these flags
+// are the measured ones (a start-up pre-connect to the search engine and the update, sync and
+// metrics services); what remains is refused by the proxy and kept from the agent (pageinit.go).
+func TestBuildArgsSilencesBackgroundNetworking(t *testing.T) {
+	t.Parallel()
+	args, err := buildArgs(t.TempDir(), LaunchOpts{ProxyAddr: "127.0.0.1:9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	have := map[string]bool{}
+	var features string
+	for _, a := range args {
+		have[a] = true
+		if strings.HasPrefix(a, "--disable-features=") {
+			features = a
+		}
+	}
+	for _, want := range []string{"--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-default-apps", "--no-first-run", "--disable-client-side-phishing-detection", "--disable-domain-reliability", "--no-pings"} {
+		if !have[want] {
+			t.Errorf("missing flag %s", want)
+		}
+	}
+	for _, f := range []string{"PreconnectToSearch", "NetworkTimeServiceQuerying", "OptimizationHints", "AutofillServerCommunication"} {
+		if !strings.Contains(features, f) {
+			t.Errorf("--disable-features must name %s: %q", f, features)
+		}
+	}
+	if strings.Count(strings.Join(args, " "), "--disable-features=") != 1 {
+		t.Error("exactly one --disable-features flag (a second one replaces the first)")
+	}
+}
