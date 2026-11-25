@@ -38,15 +38,21 @@ CI run 45568952075 failed it: after the session closed, the test dialled the pro
 
 ### Audit
 
-(filled in with the list of every dial-after-close site found and what was done)
+Searched `internal/browser`, `internal/listeners`, `internal/wsapi` (test files) for `net.Dial`, `net.DialTimeout`, `DialContext`; `internal/browser/runsock` read separately.
+
+- TCP dial after close (the flake class), fixed: `TestProxyCloseEndsListenerAndTunnels`, the session-close test (`TestSessionStartsAProxyAndDeniesItToThePage`) and `TestSessionStartFailureStopsTheProxy` in `proxy_test.go`. They now ask the closed proxy's listener (`assertListenerClosed`: `Accept` must return `net.ErrClosed`), and the start-failure test holds a connection opened inside the launcher and requires the proxy to close it (read deadline under the proxy's own 2 s header timeout, so an idle cut cannot pass for a Close).
+- Dials to a LIVE proxy or server (`proxy_test.go` rig/hit servers, `proxy_auth_test.go`, `smoke_test.go`): not the class; nothing released first.
+- `runsock` unix-socket dials after close: path-based, no ephemeral port to be reused; not changed. `internal/listeners`, `internal/wsapi`: no dial-after-close sites.
 
 ## Progress
 
-- [ ] Spec and ADR amendment committed (this file)
-- [ ] Pre-allow and its tests
-- [ ] Flake fix and audit, 50 runs under -race
-- [ ] public-docs, reviews, mutations, live check or not-verified
+- [x] Spec and ADR amendment committed (this file)
+- [x] Pre-allow and its tests
+- [x] Flake fix and audit, 50 runs under -race
+- [x] public-docs, mutations; reviews and live check below
 
 ## Validation
 
-(filled in when the work is done)
+- Flake: the three tests pass `-race -count=50` while the rest of the package runs in a second process; with `Close` not stopping the server all three fail (committed file, restored, tree clean).
+- Pre-allow mutations (all restored, tree clean): rule widened to `mcp__*`, unbound check removed, name-only row match, wiring removed: each fails a named `TestClaudePreallow*`. Passing `true` instead of `bindBrowser != nil` is equivalent (rows only hold the browser row when bound), kept as defence in depth.
+- Live Haiku check: not verified (see the PR).

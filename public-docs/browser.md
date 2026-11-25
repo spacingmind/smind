@@ -73,6 +73,10 @@ the agent tool's.
 - Permission modes of the agent's own tool never answer these cards, including
   auto-accept. A rule in your permission policy for `mcp:smind-browser.<tool>`
   can allow or refuse a tool; with no rule smind asks.
+- Claude Code's own prompt for these tools is switched off for a run that gets the
+  browser, so you answer one card per step, not two. Only the browser's tools are
+  pre-allowed that way; smind's check above is still what decides. Other tools of
+  the agent keep their own prompts.
 
 ## Which agents can use it
 
