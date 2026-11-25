@@ -45,10 +45,11 @@ Acting tools: the catalogue today has only `browser_open` and `browser_close` as
 
 | Run | Estimate | Cap (`--budget`) | Actual (`smind task runs` / usage) |
 |---|---|---|---|
-| R1 Haiku main flow | 0.10 | 0.60 | |
-| R2 Haiku refusals | 0.05 | 0.40 | |
-| R3 GLM | plan quota, not billed per call | 0.40 | |
-| Total | 0.15 | 1.40 | |
+| R1 Haiku main flow | 0.10 | 0.60 | 0.01 (the first attempt was stopped by hand and recorded no cost; at most 0.02) |
+| R2 Haiku refusals (a denied card; the kill switch) | 0.05 | 0.40 each | 0.01 + 0.01 |
+| R3 GLM | plan quota, not billed per call | 0.40 | not reported (18k/123 tokens, "partial") |
+| R4 Haiku close card (added) | 0.02 | 0.40 | 0.01 |
+| Total | 0.17 | | 0.04 reported, at most 0.06 with the unmeasured attempt |
 
 ## Evidence paths (outside the repo)
 
@@ -56,15 +57,41 @@ Acting tools: the catalogue today has only `browser_open` and `browser_close` as
 
 ## Progress
 
-- [ ] Plan committed (this file)
-- [ ] Binary built from develop, dogfood daemon up on its own port
-- [ ] R1, R2, R3 run and logged
-- [ ] Card frames, contact sheet, README, every pair opened
-- [ ] Cleanup, Validation filled in
+- [x] Plan committed (this file)
+- [x] Binary built from develop, dogfood daemon up on its own port
+- [x] R1, R2, R3 (and the added R4) run and logged
+- [x] Card frames, contact sheet, README, pairs opened (the README lists which)
+- [x] Cleanup (daemon and test server stopped by PID, no Chrome profile or socket left), Validation filled in
 
 ## Validation
 
-(filled in after the runs: per run provider, model, cost, turns, what worked, what failed or was odd, evidence paths; bugs found as follow-ups)
+Evidence: `~/.smind/dogfood/browser-live/` (`run.log`, `r*.runlogs.json`, `r*.timeline.txt`, `frames/`, `contact-sheet.png`, `README.md`). Binary: develop at `8e39da2e5` (PR 1 to 6). Dogfood daemon :4741, `SMIND_HOME` under the dogfood root, `HOME` real (the CLIs' logins; stated in the setup).
+
+### Per run
+
+| Run | Provider, model | Cost | Turns/tokens | Result |
+|---|---|---|---|---|
+| R1a | claude-native, `claude-haiku-5-5` | unmeasured (stopped run), at most 0.02 | 7 cards | aborted by me after about 3 minutes: my driver skipped a repeated card (same text as an earlier one), so the run waited on an unanswered card. Driver bug, not a product bug. |
+| R1b | same, the REAL `claude` binary | 0.01 | 50 s, 1.4k in / 1.3k out | **worked end to end**: 10 cards for 8 tool calls (a provider-native prompt AND the daemon card per call, see below), open card, read-grant card, snapshot inside the untrusted-content envelope, a screenshot returned as a real JPEG image block (756x413, 17 KB), console line, `browser_wait` found the late element, the tunnel address refused with the policy's reason and no daemon card, the added LAN address passed the policy and the connection failed, `browser_close` covered by the open grant. The Claude path (unbound socket bound to the CLI pid, SDK v0.4.3) works against the real binary. |
+| R2a | same | 0.01 | 14 s | the open card was denied: the tool answered "browser: the person said no", the timeline noted "browser_open refused by the person", the model stopped as told. |
+| R2b | same | 0.01 | 39 s | the kill switch (`browser.disabled: true` in the config, flipped while the run was waiting on a provider prompt): the next call was refused "the browser is disabled by the daemon's configuration"; with it switched off again the same run's next `browser_open` raised the OPEN CARD AGAIN ("has used the browser 1 times"), so the open grant was dropped, and the tab id changed (the session was ended and a new one started). No Chrome left after the run. |
+| R3 | glm (ACP) | not reported | 10 s, 18k/123 tokens | the row reached the agent over `session/new`; open and read cards raised; the screenshot answered with the text note "This provider cannot read images, so the image is not returned: use browser_snapshot." No provider-native prompts (the agent did not ask). `browser_close` raised no card (open grant). |
+| R4 | claude-native, Haiku | 0.01 | 30 s | an open URL with a query and a fragment: the card says "(+query, 13 characters) (+fragment)" and shows no query text; with "Allow once" everywhere, `browser_close` raised its own card "Close a browser tab?". |
+
+Not exercised, stated: Codex (no row by the reach table; a live turn costs money for a result the unit tests pin), the three-denials limiter, the `(path cut)` marker, an ACTING tool beyond `browser_open`/`browser_close` (none exists). The LAN host could not be a real second origin: the macOS application firewall (enabled, not changed) blocks inbound connections to a non-loopback listener, so the added host was shown passing the policy while the connection failed ("could not connect"); an allowed non-loopback page actually loading is NOT verified.
+
+### Findings (follow-ups; nothing fixed in this item)
+
+1. **UI, card option overflow (real defect, both themes):** the long run-grant option "Allow opening any page the browser policy allows (localhost and your added hosts) and closing tabs, for this run" does not wrap: at 390 px it is cut off at the card's right edge, and at 1280 px it runs past the card's rounded border (`r4-02`, `r4-06`, `r1b-02`).
+2. **Copy:** the close card offers the same "Allow opening any page ... and closing tabs, for this run" label; on a close card it should say what it grants for a close ("Allow closing tabs, and opening pages, for this run").
+3. **Double prompt:** every Claude-native tool call raised TWO cards (the CLI's own `run mcp__smind-browser__<tool>` prompt, then the daemon's), 10 cards for 8 calls; the daemon's is the one that holds (D-B), so the first is noise. A way to pre-allow the `mcp__smind-browser__*` tools in the provider (or a clearer label on the provider prompt) would halve the cards. GLM raised none.
+4. **Page noise in the first tool result:** `[browser notices] blocked: www.google.com:443 ...` appears in the first `browser_open` result (Chrome's own background request, blocked by the proxy: the policy works) and the model repeated it in its summary. Disable Chrome's background networking (launch flags) so the notice means a page request.
+5. **Snapshot verbosity:** the snapshot carries `InlineTextBox` lines under every text node; it eats the 40,000-character budget for nothing.
+6. **Cost reporting:** a stopped run records no usage and no cost (`cost n/a`); a GLM run's cost shows "partial". The budget chip handled both without error.
+7. **Primary action styling:** "Allow once" is drawn as the recommended (green) action on a security card.
+8. **Timeline for GLM:** tool rows show the generic "other" kind for the browser tools (Claude's show the globe icon).
+9. **Message prefix:** a refusal reads "browser_open: browser: address 100.117.11.67 is not allowed ...": the repeated "browser" label (the same one the Settings UI now strips) is also what the agent sees.
+10. **Not verified here:** a non-loopback allowed host loading; Linux and Windows runs.
 
 ## Spend log
 
