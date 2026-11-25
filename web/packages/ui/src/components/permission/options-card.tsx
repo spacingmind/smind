@@ -51,7 +51,7 @@ export function OptionsCard({
   const options = pending.detail?.gitRule
     ? pending.options.filter((o) => !o.kind.endsWith("_always"))
     : pending.options;
-  const recommended = recommendedOptionId(options);
+  const recommended = recommendedOptionId(options, pending.detail?.kind);
   const hasReject = options.some((o) => o.kind.startsWith("reject"));
   // The daemon offers "always allow in this project" only for a plain, grantable request, and
   // never with a git rule; the control needs the single-allow option it would save.

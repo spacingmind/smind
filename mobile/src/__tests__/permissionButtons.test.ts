@@ -16,4 +16,19 @@ describe('permissionButtonVariants', () => {
     expect(permissionButtonVariants([{ kind: 'weird' }, { kind: '' }])).toEqual(['outlined', 'outlined']);
     expect(permissionButtonVariants([])).toEqual([]);
   });
+  it('a browser card has no filled primary: allows are outlined, rejects are text', () => {
+    expect(
+      permissionButtonVariants([{ kind: 'allow_once' }, { kind: 'allow_once' }, { kind: 'reject_once' }], 'browser'),
+    ).toEqual(['outlined', 'outlined', 'text']);
+  });
+  it('another detail kind keeps the first allow filled', () => {
+    expect(
+      permissionButtonVariants([{ kind: 'allow_once' }, { kind: 'allow_once' }, { kind: 'reject_once' }], 'execute'),
+    ).toEqual(['filled', 'outlined', 'text']);
+  });
+  it('no detail kind keeps the first allow filled', () => {
+    expect(
+      permissionButtonVariants([{ kind: 'allow_once' }, { kind: 'allow_once' }, { kind: 'reject_once' }]),
+    ).toEqual(['filled', 'outlined', 'text']);
+  });
 });

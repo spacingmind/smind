@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -553,5 +554,24 @@ func TestBrowserMCP_AHeldCallSurvivesTheDefaultDeadlineButNotAShorterOne(t *test
 	childCallDeadline = 200 * time.Millisecond
 	if _, err := call(context.Background(), "browser_tabs", struct{}{}); err == nil {
 		t.Fatal("a deadline shorter than the hold cuts the call")
+	}
+}
+
+// A daemon refusal comes back as "<tool>: <reason>": the daemon's own "browser: " label is dropped, the reason is not.
+func TestBrowserForwardDropsTheDaemonsBrowserLabel(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"browser: the person said no":                                    "browser_open: the person said no",
+		"browser: the browser is disabled by the daemon's configuration": "browser_open: the browser is disabled by the daemon's configuration",
+		"the run's browser socket is not reachable: dial":                "browser_open: the run's browser socket is not reachable: dial",
+		"browser: browser: twice":                                        "browser_open: browser: twice", // only the leading label, once
+	} {
+		caller := func(context.Context, string, any) (browserCallResult, error) {
+			return browserCallResult{}, errors.New(in)
+		}
+		_, err := browserForward(context.Background(), caller, "browser_open", map[string]any{})
+		if err == nil || err.Error() != want {
+			t.Errorf("%q: got %v, want %q", in, err, want)
+		}
 	}
 }

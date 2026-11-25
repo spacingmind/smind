@@ -64,12 +64,17 @@ func Build(in Input) Card {
 	facts := urlFactsOf(in.URL)
 	return Card{
 		Summary: summary(in, tool, taskTitle, workspace, allowlist, facts),
-		Options: optionsFor(in.Class),
+		Options: optionsFor(in.Class, tool),
 		Info:    info(in, tool, taskTitle, workspace, allowlist, facts),
 	}
 }
 
-func optionsFor(class Class) []Option {
+// closeGrantName is the run grant a CLOSE card offers. The grant is the run's open grant (it covers
+// opening and closing), so the label says exactly that: a close card that said "opening any page" read
+// as the wrong question, and one that said only "closing" would hide what is granted.
+const closeGrantName = "Allow closing tabs, and opening any page the browser policy allows (localhost and your added hosts), for this run"
+
+func optionsFor(class Class, tool string) []Option {
 	allowOnce := Option{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}
 	deny := Option{ID: "deny", Name: "Deny", Kind: "reject_once"}
 	switch class {
@@ -80,6 +85,9 @@ func optionsFor(class Class) []Option {
 			deny,
 		}
 	case ClassOpen:
+		if tool == "browser_close" {
+			return []Option{allowOnce, {ID: "allow_run", Name: closeGrantName, Kind: "allow_once"}, deny}
+		}
 		return []Option{
 			allowOnce,
 			{ID: "allow_run", Name: "Allow opening any page the browser policy allows (localhost and your added hosts) and closing tabs, for this run", Kind: "allow_once"},

@@ -64,7 +64,10 @@ the agent tool's.
   **Allow once**, or **Allow opening any page the browser policy allows (localhost
   and your added hosts) and closing tabs, for this run**: that second option lets
   the agent open any such page, with any query, for the rest of the run.
-  Closing a tab has its own card ("Close a browser tab?").
+  Closing a tab has its own card ("Close a browser tab?"); its run option is the
+  same grant, worded as what it covers: **Allow closing tabs, and opening any page
+  the browser policy allows (localhost and your added hosts), for this run**.
+  None of the options on these cards is drawn as the recommended one: you choose.
 - Nothing is saved across runs and there is no "always". Turning the workspace
   switch off ends the grants, and so does the run's browser connection closing
   while the run goes on.
