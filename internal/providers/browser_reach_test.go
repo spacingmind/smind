@@ -175,3 +175,20 @@ func TestBrowserDocsNameEveryNoProvider(t *testing.T) {
 		t.Error(`public-docs/browser.md does not contain "the browser is not available for this agent"`)
 	}
 }
+
+// TestReachTableNeverWidensTheOldRule pins AC7: before the table, every built-in
+// provider got the browser row except codex-native (and a plugin provider, and an
+// agent that takes no MCP servers). The table must not offer it to anything else.
+func TestReachTableNeverWidensTheOldRule(t *testing.T) {
+	t.Parallel()
+	reg := New()
+	for _, s := range reg.List() {
+		if !IsBuiltin(s.ID) {
+			continue
+		}
+		oldRule := s.ID != IDCodexNative && s.Plugin == "" && !s.NoMCPServers
+		if got := BrowserReachOf(s).Offered(); got && !oldRule {
+			t.Errorf("%s: the table offers the browser where the old rule did not", s.ID)
+		}
+	}
+}
