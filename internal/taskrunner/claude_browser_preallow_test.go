@@ -217,7 +217,7 @@ func TestClaudePreallowRule(t *testing.T) {
 
 // ACP and Codex runs have no allowed-tools mechanism: the claude path is the only caller of the helper, and a
 // provider whose row is not delivered never reaches it with a bound socket.
-func TestClaudePreallow_NotForANonClaudeProvider(t *testing.T) {
+func TestClaudePreallow_OnlyTheClaudeRunnerIsWired(t *testing.T) {
 	t.Parallel()
 	reg := providers.New()
 	for id, want := range map[string]bool{providers.IDClaudeNative: true, providers.IDCodexNative: false, providers.IDGLM: false, providers.IDOpenCode: false} {
