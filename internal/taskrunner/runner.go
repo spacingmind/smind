@@ -1001,6 +1001,12 @@ func (r *Runner) runClaudeNative(ctx context.Context, provider Provider, chatID,
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
 	}
+	// The CLI asks its own permission before every MCP tool; for the daemon's browser server the
+	// daemon's card is the control, so a run that really got the row (and only that) is pre-approved
+	// for it: one card per call instead of two (ADR-0061 amendment 11).
+	if allow := claudeBrowserPreallow(rows, bindBrowser != nil); len(allow) > 0 {
+		opts = append(opts, claudecode.WithAllowedTools(allow...))
+	}
 	if contract := RunContractFrom(ctx); useStrictMcp(contract) {
 		// A managed run sees only the daemon's registered servers (+ smind
 		// for orchestration seats): strict mode hides user-level servers
