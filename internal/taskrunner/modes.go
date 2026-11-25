@@ -301,6 +301,12 @@ func (r *Runner) DefaultModel(provider Provider) string {
 	return r.defaultModels[provider]
 }
 
+// BrowserReachList is every registered provider's browser reach, for the
+// browser settings view.
+func (r *Runner) BrowserReachList() []providers.BrowserReachEntry {
+	return r.providerRegistry().BrowserReachList()
+}
+
 // ProviderSpecFor returns the registry entry of provider (the browser's reach
 // table is decided from it), and false for an unknown one.
 func (r *Runner) ProviderSpecFor(provider Provider) (providers.Spec, bool) {

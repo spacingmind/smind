@@ -60,6 +60,7 @@ type browserHost struct {
 	live           func(runID string) bool
 	imagesRead     func(runID string) bool
 	providerSpec   func(runID string) (providers.Spec, error)
+	reachList      func() []providers.BrowserReachEntry
 	allow          func(workspaceID int64) []string
 	deny           func() ([]browser.Endpoint, error)
 	launcher       func() (browser.Launcher, error)
