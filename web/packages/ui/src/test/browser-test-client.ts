@@ -12,6 +12,9 @@ export function browserDaemon(handler: BrowserHandler): FakeUsageDaemon {
   const daemon = new FakeUsageDaemon([]);
   const base = daemon.client.call.bind(daemon.client);
   (daemon.client as { call: unknown }).call = async (method: string, params?: unknown): Promise<unknown> => {
+    // The workspace picker reads the shared workspace tree: two workspaces, no spaces, no tasks.
+    if (method === "workspace.list") return browserWorkspaces();
+    if (method === "space.list" || method === "task.list") return [];
     if (!method.startsWith("browser.")) return base(method, params);
     daemon.calls.push({ method, params });
     return handler(method, params);
@@ -38,4 +41,13 @@ export function browserView(partial: Partial<BrowserSettingsView> = {}): Browser
     sessionLive: false,
     ...partial,
   };
+}
+
+/** The two workspaces the fake daemon lists (ids 1 and 2; the first is the picker's default). */
+export function browserWorkspaces() {
+  const base = { Path: "/work", RoutingPolicy: "", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z" };
+  return [
+    { ...base, ID: 1, Title: "alpha" },
+    { ...base, ID: 2, Title: "beta" },
+  ];
 }
