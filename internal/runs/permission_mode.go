@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -146,4 +147,20 @@ func (reg *Registry) ProviderCatalogForRun(runID string) (taskrunner.ProviderInf
 		return taskrunner.ProviderInfo{}, fmt.Errorf("unknown provider %q", r.provider)
 	}
 	return catalog, nil
+}
+
+// ProviderSpecForRun returns the registry entry of runID's provider.
+func (reg *Registry) ProviderSpecForRun(runID string) (providers.Spec, error) {
+	r, err := reg.get(runID)
+	if err != nil {
+		return providers.Spec{}, err
+	}
+	if r.runner == nil {
+		return providers.Spec{}, fmt.Errorf("run %q has no live runner", runID)
+	}
+	spec, ok := r.runner.ProviderSpecFor(r.provider)
+	if !ok {
+		return providers.Spec{}, fmt.Errorf("unknown provider %q", r.provider)
+	}
+	return spec, nil
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 
 	"github.com/spacingmind/smind/internal/securefile"
@@ -517,8 +518,12 @@ func claudeFailedMcpServers(raw json.RawMessage) []string {
 func useStrictMcp(c RunContract) bool { return c.Mcp != nil && !c.Mcp.BrowserOnly }
 
 // browserRowDelivered says whether the browser row can reach the agent of a
-// provider: a plugin provider never gets it.
-func browserRowDelivered(pluginProvider bool) bool { return !pluginProvider }
+// provider, by the provider reach table (providers.BrowserReachOf): a provider
+// the table says no to (a plugin provider, codex-native, an agent that takes no
+// MCP servers) and a provider the registry does not know get no row and no socket.
+func browserRowDelivered(spec providers.Spec, haveSpec bool) bool {
+	return haveSpec && providers.BrowserReachOf(spec).Offered()
+}
 
 // revokeBrowserAll closes the run's browser socket (the provider took none
 // of the rows).

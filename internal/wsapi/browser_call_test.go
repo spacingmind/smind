@@ -16,6 +16,7 @@ import (
 	"github.com/spacingmind/smind/internal/browser"
 	"github.com/spacingmind/smind/internal/browser/runsock"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
@@ -221,6 +222,75 @@ func TestBrowserCall_ImagesAreReadOnlyWhereTheCatalogueSaysSo(t *testing.T) {
 	}
 	if e.api.browser.imagesRead("no-such-run") {
 		t.Fatal("an unknown run reads no images")
+	}
+}
+
+func TestCallRunRefusesProviderWithoutTheBrowser(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	h := e.api.browser
+	h.gate = func(int64) bool { return true }
+	var asked atomic.Int32
+	h.permit = func(context.Context, runs.BrowserCall) error { asked.Add(1); return nil }
+	h.launcher = func() (browser.Launcher, error) {
+		return nil, &browser.UnavailableError{InstallStep: "Install Chromium."}
+	}
+	for name, spec := range map[string]providers.Spec{
+		"codex-native":   {ID: "codex-native", Label: "Codex", Runner: providers.RunnerCodex},
+		"plugin":         {ID: "p/a", Label: "A plugin agent", Plugin: "p", Runner: providers.RunnerACP},
+		"no mcp servers": {ID: "opencode", Label: "OpenCode", Runner: providers.RunnerACP, NoMCPServers: true},
+		"unknown":        {ID: "nobody", Label: "Nobody"},
+	} {
+		h.providerSpec = func(string) (providers.Spec, error) { return spec, nil }
+		_, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`)
+		if err == nil || !strings.Contains(err.Error(), "the browser is not available for this agent ("+spec.Label+")") {
+			t.Errorf("%s: want the provider-naming refusal, got %v", name, err)
+		}
+	}
+	if asked.Load() != 0 {
+		t.Fatalf("no permission card may be raised for a provider without the browser: %d", asked.Load())
+	}
+	// An unreadable provider fails closed with a plain message.
+	h.providerSpec = func(string) (providers.Spec, error) { return providers.Spec{}, errors.New("gone") }
+	if _, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err == nil || !strings.Contains(err.Error(), "not available for this agent") {
+		t.Fatalf("an unreadable provider: %v", err)
+	}
+	// An offered provider goes on to the gate.
+	h.providerSpec = func(string) (providers.Spec, error) {
+		return providers.Spec{ID: "claude-native", Label: "Claude Code", Runner: providers.RunnerClaude}, nil
+	}
+	if out, err := callRunJSON(t, h, e.runID, e.seatTask.ID, "browser_tabs", `{}`); err != nil || !strings.Contains(out, "no browser installed") {
+		t.Fatalf("an offered provider reaches the broker: %s %v", out, err)
+	}
+	if asked.Load() != 1 {
+		t.Fatalf("the offered call asked the gate once: %d", asked.Load())
+	}
+}
+
+func TestImagesReadFollowsReachTable(t *testing.T) {
+	t.Parallel()
+	e := newIdentEnv(t, "hang")
+	h := e.api.browser
+	for name, c := range map[string]struct {
+		spec providers.Spec
+		want bool
+	}{
+		"claude-native yes":        {providers.Spec{ID: "claude-native", Runner: providers.RunnerClaude, Images: "yes"}, true},
+		"opencode yes":             {providers.Spec{ID: "opencode", Runner: providers.RunnerACP, Images: "yes"}, true},
+		"glm no":                   {providers.Spec{ID: "glm", Runner: providers.RunnerACP, Images: "no"}, false},
+		"kimi unknown":             {providers.Spec{ID: "kimi", Runner: providers.RunnerACP, Images: "unknown"}, false},
+		"instance inherits yes":    {providers.Spec{ID: "my-glm", Extends: "claude-native", Runner: providers.RunnerClaude, Images: "yes"}, false},
+		"recipe instance inherits": {providers.Spec{ID: "ds", Extends: "claude-native", Recipe: "deepseek", Runner: providers.RunnerClaude, Images: "yes"}, false},
+		"custom acp empty":         {providers.Spec{ID: "mine", Custom: true, Runner: providers.RunnerACP}, false},
+	} {
+		h.providerSpec = func(string) (providers.Spec, error) { return c.spec, nil }
+		if got := h.imagesRead(e.runID); got != c.want {
+			t.Errorf("%s: imagesRead = %v, want %v", name, got, c.want)
+		}
+	}
+	h.providerSpec = func(string) (providers.Spec, error) { return providers.Spec{}, errors.New("gone") }
+	if h.imagesRead(e.runID) {
+		t.Error("an unreadable provider reads no images")
 	}
 }
 

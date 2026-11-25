@@ -17,6 +17,7 @@ import (
 	"github.com/spacingmind/smind/internal/browser/runsock"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/crash"
+	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -58,6 +59,7 @@ type browserHost struct {
 	gate           func(workspaceID int64) bool
 	live           func(runID string) bool
 	imagesRead     func(runID string) bool
+	providerSpec   func(runID string) (providers.Spec, error)
 	allow          func(workspaceID int64) []string
 	deny           func() ([]browser.Endpoint, error)
 	launcher       func() (browser.Launcher, error)
@@ -93,9 +95,10 @@ func newBrowserHost(db *store.Store, reg *runs.Registry) *browserHost {
 	h.killSwitch = config.BrowserDisabled
 	h.gate = reg.BrowserAllowed
 	h.live = reg.RunIsRunning
+	h.providerSpec = reg.ProviderSpecForRun
 	h.imagesRead = func(runID string) bool {
-		info, err := reg.ProviderCatalogForRun(runID)
-		return err == nil && imagesReadFrom(info.Images)
+		spec, err := h.providerSpec(runID)
+		return err == nil && imagesReadFrom(providers.BrowserImages(spec))
 	}
 	h.allow = func(ws int64) []string {
 		s, err := h.settings.GetBrowserSettings(ws)
@@ -357,6 +360,19 @@ func (h *browserHost) CloseBrowserSocket(runID string) {
 	}
 }
 
+// providerOffered refuses a run whose provider the reach table does not offer
+// the browser (or whose provider cannot be read: fail closed).
+func (h *browserHost) providerOffered(runID string) error {
+	spec, err := h.providerSpec(runID)
+	if err != nil {
+		return errors.New("browser: the browser is not available for this agent: its provider is unknown")
+	}
+	if !providers.BrowserReachOf(spec).Offered() {
+		return errors.New("browser: " + providers.BrowserUnavailableMessage(spec))
+	}
+	return nil
+}
+
 // callRun authorises and runs one browser call of a run the socket's peer
 // check already proved. Every refusal is a plain error (the child shows it as a
 // tool error).
@@ -383,6 +399,12 @@ func (h *browserHost) callRun(ctx context.Context, runID string, taskID int64, t
 			h.revokeGrants(ws)
 		}
 		return browser.Result{}, errors.New("browser: the browser is not enabled for this workspace")
+	}
+	// The provider reach table (ADR-0061 section 9) is the first check after the
+	// switches: an agent whose provider is not offered the browser is told why
+	// here, before any card is raised.
+	if err := h.providerOffered(runID); err != nil {
+		return browser.Result{}, err
 	}
 	if err := h.permission(ctx, runID, ws, tool, args); err != nil {
 		return browser.Result{}, err
