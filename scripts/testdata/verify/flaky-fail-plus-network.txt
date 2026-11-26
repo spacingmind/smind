@@ -1,0 +1,5 @@
+--- FAIL: TestFlaky (0.50s)
+    flaky_test.go:10: intermittent (flaky)
+FAIL	github.com/spacingmind/smind/internal/foo	0.600s
+goroutine 1 [chan receive]:
+dial tcp 127.0.0.1:9: connect: connection refused

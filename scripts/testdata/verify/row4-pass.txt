@@ -1,0 +1,3 @@
+ok  	github.com/spacingmind/smind/internal/foo	0.512s
+?   	github.com/spacingmind/smind/cmd/x	[no test files]
+ Tests  120 passed (120)

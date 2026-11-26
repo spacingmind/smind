@@ -1,0 +1,2 @@
+something odd happened
+task: Failed to run task "lint": exit status 1

@@ -1,0 +1,2 @@
+error: Cannot find package 'react' from '/repo/web/packages/ui/src/a.tsx'
+1 | import React from "react";

@@ -1,0 +1,1 @@
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/repo/node_modules/vitest/dist/cli.js'
