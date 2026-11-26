@@ -140,7 +140,10 @@ func handleProfileRolePackApply(profReg *profiles.Registry) handlerFunc {
 			}
 			takes = append(takes, take)
 		}
-		existing, _ := profReg.List()
+		existing, err := profReg.List()
+		if err != nil {
+			return nil, fmt.Errorf("profile.rolePack.apply: %w", err)
+		}
 		items := profiles.PlanApply(rolePackCheck(existing), existing, takes)
 		backupDir := p.BackupDir
 		if backupDir == "" {
