@@ -56,7 +56,7 @@ mutations:
   - { id: M1, file: web/packages/ui/src/lib/ambient-quota.ts, change: "the threshold comparison is > instead of >= (90 hidden)", expectFail: [ambient_quota_fires_at_90_not_89] }
   - { id: M2, file: web/packages/ui/src/hooks/use-quota-notice.ts, change: "the dismissed set is ignored (the notice fires every render)", expectFail: [ambient_quota_dismissal_persists_across_remounts] }
   - { id: M3, file: web/packages/ui/src/lib/ambient-quota.ts, change: "the notice key leaves out resetsAt", expectFail: [ambient_quota_new_resets_at_is_a_new_window] }
-  - { id: M4, file: web/packages/ui/src/hooks/use-quota-notice.ts, change: "useUsageReports is called with touch true", expectFail: [ambient_quota_adds_no_touch_or_refresh_calls] }
+  - { id: M4, file: web/packages/ui/src/hooks/use-quota-notice.ts, change: "the cache-only read is replaced by useUsageReports({ touch: true })", expectFail: [ambient_quota_adds_no_touch_or_refresh_calls] }
 frames: []
 commands:
   - { id: C1, run: "cd web/packages/ui && bunx tsc -b", timeoutSec: 900 }

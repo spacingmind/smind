@@ -42,7 +42,7 @@ e2e (`web/e2e/specs/ambient-quota.spec.ts`, frames only with `QUOTA_FRAMES_DIR`)
 - Threshold off by one (`>` for `>=` so 90 hides; or 89 shows) -> `ambient_quota_fires_at_90_not_89`.
 - No once-per-window memory (the dismissal ignored) -> `ambient_quota_dismissal_persists_across_remounts`.
 - The key without `resetsAt` -> `ambient_quota_new_resets_at_is_a_new_window`.
-- A `touch: true` fetch added -> `ambient_quota_adds_no_touch_or_refresh_calls`.
+- The cache-only read replaced by `useUsageReports({ touch: true })` (or by the default `useUsageReports()`, which sends the `cached` read) -> `ambient_quota_adds_no_touch_or_refresh_calls` (and the app call budget test in `App.test.tsx`). Adding `touch: true` BESIDE `enabled: false` is an equivalent mutant: a disabled reader never touches.
 
 ## Progress
 
