@@ -1,6 +1,6 @@
 ---
 v: 1
-milestone: "ADR-0058 PR 2: profile.rolePack.check and .apply RPCs, the Settings -> Profiles banner and review dialog, the smind doctor role-pack line"
+milestone: "ADR-0058 PR 2: role-pack check/apply RPCs, Profiles banner and review dialog, doctor line"
 base: origin/develop
 planRef: docs/plans/active/role-pack-sync.md
 acs:
