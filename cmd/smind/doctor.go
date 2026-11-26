@@ -113,6 +113,13 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		if err := call(ctx, "doctor.sessions", map[string]any{}, &s); err == nil {
 			sessions = &s
 		}
+		var rp struct {
+			SeatsWithUpdates int `json:"seatsWithUpdates"`
+			PackVersion      int `json:"packVersion"`
+		}
+		if err := call(ctx, "profile.rolePack.check", map[string]any{}, &rp); err == nil {
+			findings = append(findings, rolePackFinding(rp.SeatsWithUpdates))
+		}
 		closeFn()
 	}
 
@@ -166,6 +173,22 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintln(stdout, `Run "smind doctor" again after changing the setting; sessions that are already deleted cannot be restored.`)
 	}
 	return 0
+}
+
+// rolePackFinding is the one doctor line about role-pack updates. It is
+// informational: a stale seat is never a warning.
+func rolePackFinding(n int) doctor.Finding {
+	f := doctor.Finding{ID: "rolepack.updates", Provider: "role pack", Level: doctor.LevelOK, Message: "every seat is current"}
+	switch {
+	case n == 1:
+		f.Level, f.Message = doctor.LevelInfo, "1 seat has updates"
+	case n > 1:
+		f.Level, f.Message = doctor.LevelInfo, fmt.Sprintf("%d seats have updates", n)
+	}
+	if n > 0 {
+		f.Fix = "smind profile seed roles --check, then --apply, or review in Settings -> Profiles"
+	}
+	return f
 }
 
 // printCrashes writes the crashes section, one line per summary. The daemon
